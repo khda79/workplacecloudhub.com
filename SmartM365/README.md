@@ -24,4 +24,6 @@ Use `-RemoveAppRegistration -Confirm` to remove the SmartM365 app registration a
 
 The same bootstrap creates or reuses the `SMART-M365` Teams team, resolves its SharePoint site, and updates `SmartM365.global.local.json` with the SharePoint upload target. Use `-DisableTeamsSetup` only when the Teams workspace is already handled separately.
 
+Current Microsoft Graph application permissions include the read scopes used by the inventory scripts (`Directory.Read.All`, `User.Read.All`, `Device.Read.All`, `GroupMember.Read.All`, Intune read permissions, and `AuditLog.Read.All` for user `signInActivity`), plus `Files.ReadWrite.All`, `Sites.ReadWrite.All`, and `Mail.Send` for SharePoint CSV upload and Graph mail. Exchange Online app-only automation also needs `Exchange.ManageAsApp` and separate Exchange RBAC assignment.
+
 See `SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.

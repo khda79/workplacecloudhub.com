@@ -38,7 +38,7 @@ Per-script CSV/data paths should use `{{DataAllRootPath}}` plus a functional pat
 
 `LatestCsvFolderPath` is global and should remain a single shared `DATA-LAST` folder unless a script has a documented exception.
 
-`LogAllRootPath` is reserved for a future split between data exports and centralized logs. Do not move log output there unless the script and module behavior are updated consistently.
+`LogAllRootPath` is the centralized log root. Scripts that use `InitializeScriptEnvironment` must write logs under `{{LogAllRootPath}}`, usually in a script-name subfolder, while CSV/data exports stay under `DataAllRootPath`.
 
 ## CSV Naming
 
@@ -71,6 +71,7 @@ Do not use misleading object prefixes such as `Mailboxes_` for non-mailbox data,
 - Intune detection/remediation scripts follow their own rules in `IntuneRemediation/RULES.md`; do not add JSON config dependencies to them.
 - Keep `RetentionMaxCSV` and `RetentionMaxLogs` centralized through config, with default fallback values of `30`.
 - Error email recipients must resolve from `ErrorMailTo`; per-script configs should use `__USE_GLOBAL__` unless a script-specific recipient is required.
+- Error and report emails should use Microsoft Graph when `SmtpServer` is empty; keep `From` configured as the sender mailbox and ensure the SmartM365 app has `Mail.Send`.
 - Keep the permissions recap in `README.md` current when scripts add or change Graph scopes, Intune permissions, Exchange RBAC needs, AD access needs, or SharePoint upload behavior.
 - Prefer shared preflight checks before main processing: required modules, output path write access, Graph permissions, Exchange Online RBAC, Exchange on-prem readiness, and AD read access.
 - Inventory/report/export scripts should upload generated CSV files through the shared SharePoint helper when `EnableSharePointUpload` is enabled.
@@ -82,4 +83,6 @@ Do not use misleading object prefixes such as `Mailboxes_` for non-mailbox data,
 
 - Keep `*.local.json` in `.gitignore`.
 - Do not stage generated logs, temporary files, archives, or local exports.
+- Do not push script changes to GitHub until the user has validated that the changed script works. This applies to every script.
+- When the user says that the changed script works, this is explicit approval to commit and push the validated script changes.
 - Do not keep archive folders in the repository; preserve history through Git instead.

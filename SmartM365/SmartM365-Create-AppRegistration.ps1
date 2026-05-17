@@ -147,7 +147,7 @@ function Initialize-SmartM365SetupLogging {
 
     $resolvedLogPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     if (-not (Test-Path -LiteralPath $resolvedLogPath)) {
-        New-Item -Path $resolvedLogPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        New-Item -Path $resolvedLogPath -ItemType Directory -Force -ErrorAction Stop -Confirm:$false | Out-Null
     }
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
@@ -155,20 +155,20 @@ function Initialize-SmartM365SetupLogging {
     $script:SmartM365SetupLogFile = Join-Path -Path $resolvedLogPath -ChildPath ("{0}-{1}.log" -f $baseName, $timestamp)
     $script:SmartM365SetupTranscriptFile = Join-Path -Path $resolvedLogPath -ChildPath ("{0}-{1}_Transcript.log" -f $baseName, $timestamp)
 
-    Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [INFO] Log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+    Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [INFO] Log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Confirm:$false
 
     try {
-        Start-Transcript -Path $script:SmartM365SetupTranscriptFile -Append -ErrorAction Stop | Out-Null
+        Start-Transcript -Path $script:SmartM365SetupTranscriptFile -Append -ErrorAction Stop -Confirm:$false | Out-Null
         $script:SmartM365SetupTranscriptStarted = $true
     }
     catch {
-        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [WARN] Transcript could not be started: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $_.Exception.Message)
+        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [WARN] Transcript could not be started: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $_.Exception.Message) -Confirm:$false
     }
 }
 
 function Close-SmartM365SetupLogging {
     if ($script:SmartM365SetupLogFile) {
-        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [INFO] Log finished." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [INFO] Log finished." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Confirm:$false
         Write-Information ("[INFO] Log file: {0}" -f $script:SmartM365SetupLogFile) -InformationAction Continue
         if ($script:SmartM365SetupTranscriptFile) {
             Write-Information ("[INFO] Transcript file: {0}" -f $script:SmartM365SetupTranscriptFile) -InformationAction Continue
@@ -189,7 +189,7 @@ function Write-SmartM365SetupStatus {
 
     if ($script:SmartM365SetupLogFile) {
         $logEntry = "[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
-        try { Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value $logEntry } catch { Write-Debug ("Log write failed: {0}" -f $_.Exception.Message) }
+        try { Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value $logEntry -Confirm:$false } catch { Write-Debug ("Log write failed: {0}" -f $_.Exception.Message) }
     }
 
     switch ($Level) {
@@ -267,6 +267,7 @@ function Get-SmartM365RequiredApiResource {
     )
 
     $graphPermissions = @(
+        'AuditLog.Read.All',
         'Directory.Read.All',
         'User.Read.All',
         'Device.Read.All',
@@ -488,15 +489,16 @@ function Get-SmartM365Certificate {
 function Get-KeyCredentialFromCertificate {
     param([Parameter(Mandatory)]$Certificate)
 
-    return @{
-        customKeyIdentifier = [System.Convert]::ToBase64String($Certificate.GetCertHash())
-        displayName         = $Certificate.Subject
-        endDateTime         = $Certificate.NotAfter
-        key                 = $Certificate.RawData
-        startDateTime       = $Certificate.NotBefore
-        type                = 'AsymmetricX509Cert'
-        usage               = 'Verify'
-    }
+    $keyCredential = [Microsoft.Graph.PowerShell.Models.MicrosoftGraphKeyCredential]::new()
+    $keyCredential.CustomKeyIdentifier = $Certificate.GetCertHash()
+    $keyCredential.DisplayName = $Certificate.Subject
+    $keyCredential.EndDateTime = $Certificate.NotAfter
+    $keyCredential.Key = $Certificate.RawData
+    $keyCredential.StartDateTime = $Certificate.NotBefore
+    $keyCredential.Type = 'AsymmetricX509Cert'
+    $keyCredential.Usage = 'Verify'
+
+    return $keyCredential
 }
 
 function Add-CertificateToApplication {
@@ -525,6 +527,28 @@ function Add-CertificateToApplication {
     }
 
     return @($existingKeys + (Get-KeyCredentialFromCertificate -Certificate $Certificate))
+}
+
+function Test-ApplicationHasCertificate {
+    param(
+        [Parameter(Mandatory)]$Application,
+        [Parameter(Mandatory)]$Certificate
+    )
+
+    $certificateKeyId = [System.Convert]::ToBase64String($Certificate.GetCertHash())
+    $matchingKey = @($Application.KeyCredentials) | Where-Object {
+        if ($null -eq $_.CustomKeyIdentifier) {
+            $false
+        }
+        elseif ($_.CustomKeyIdentifier -is [byte[]]) {
+            [System.Convert]::ToBase64String($_.CustomKeyIdentifier) -eq $certificateKeyId
+        }
+        else {
+            [string]$_.CustomKeyIdentifier -eq $certificateKeyId
+        }
+    } | Select-Object -First 1
+
+    return ($null -ne $matchingKey)
 }
 
 function Grant-SmartM365ApplicationPermission {
@@ -813,7 +837,7 @@ function Set-SmartM365SharePointLocalConfig {
     }
 
     if ($PSCmdlet.ShouldProcess($ConfigPath, 'Update SharePoint local configuration')) {
-        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Confirm:$false
     }
 }
 
@@ -850,7 +874,7 @@ function Set-SmartM365AuthLocalConfig {
     }
 
     if ($PSCmdlet.ShouldProcess($ConfigPath, 'Update SmartM365 app authentication local configuration')) {
-        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Confirm:$false
     }
 }
 
@@ -880,7 +904,7 @@ function Clear-SmartM365AuthLocalConfig {
     }
 
     if ($PSCmdlet.ShouldProcess($ConfigPath, ("Clear SmartM365 app authentication settings: {0}" -f ($removedProperties -join ', ')))) {
-        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Confirm:$false
         Write-SmartM365SetupStatus -Message ("Cleared app authentication settings in {0}: {1}." -f $ConfigPath, ($removedProperties -join ', ')) -Level OK
     }
 }
@@ -896,13 +920,13 @@ function Remove-SmartM365AppRegistration {
 
     foreach ($servicePrincipal in $servicePrincipals) {
         if ($PSCmdlet.ShouldProcess(("Service principal {0} ({1})" -f $servicePrincipal.DisplayName, $servicePrincipal.Id), 'Remove SmartM365 application service principal')) {
-            Remove-MgServicePrincipal -ServicePrincipalId $servicePrincipal.Id
+            Remove-MgServicePrincipal -ServicePrincipalId $servicePrincipal.Id -Confirm:$false
             Write-SmartM365SetupStatus -Message ("Removed application service principal '{0}' ({1})." -f $servicePrincipal.DisplayName, $servicePrincipal.Id) -Level OK
         }
     }
 
     if ($PSCmdlet.ShouldProcess(("App registration {0} ({1})" -f $Application.DisplayName, $Application.Id), 'Remove SmartM365 app registration')) {
-        Remove-MgApplication -ApplicationId $Application.Id
+        Remove-MgApplication -ApplicationId $Application.Id -Confirm:$false
         Write-SmartM365SetupStatus -Message ("Removed app registration '{0}' ({1})." -f $Application.DisplayName, $Application.Id) -Level OK
     }
 
@@ -1015,24 +1039,23 @@ if ($existingApps.Count -eq 1) {
     $mergedKeyCredentials = Add-CertificateToApplication -Application $application -Certificate $certificate
 
     if ($PSCmdlet.ShouldProcess($DisplayName, 'Update app registration permissions and certificate')) {
-        Update-MgApplication -ApplicationId $application.Id -BodyParameter @{
-            requiredResourceAccess = $mergedRequiredResourceAccess
-            keyCredentials         = $mergedKeyCredentials
-        }
+        Update-MgApplication `
+            -ApplicationId $application.Id `
+            -RequiredResourceAccess $mergedRequiredResourceAccess `
+            -KeyCredentials $mergedKeyCredentials `
+            -ErrorAction Stop
         $application = Get-MgApplication -ApplicationId $application.Id -Property 'id,appId,displayName,requiredResourceAccess,keyCredentials'
         Write-SmartM365SetupStatus -Message ("Updated app registration '{0}'." -f $DisplayName) -Level OK
     }
 }
 else {
-    $body = @{
-        displayName            = $DisplayName
-        signInAudience         = 'AzureADMyOrg'
-        requiredResourceAccess = $requiredResourceAccess
-        keyCredentials         = @(Get-KeyCredentialFromCertificate -Certificate $certificate)
-    }
-
     if ($PSCmdlet.ShouldProcess($DisplayName, 'Create app registration')) {
-        $application = New-MgApplication -BodyParameter $body
+        $application = New-MgApplication `
+            -DisplayName $DisplayName `
+            -SignInAudience 'AzureADMyOrg' `
+            -RequiredResourceAccess $requiredResourceAccess `
+            -KeyCredentials @(Get-KeyCredentialFromCertificate -Certificate $certificate) `
+            -ErrorAction Stop
         Write-SmartM365SetupStatus -Message ("Created app registration '{0}'." -f $DisplayName) -Level OK
     }
 }
@@ -1041,6 +1064,12 @@ if ($null -eq $application) {
     Write-SmartM365SetupStatus -Level WARN -Message 'No app registration changes were applied because WhatIf was used.'
     return
 }
+
+$application = Get-MgApplication -ApplicationId $application.Id -Property 'id,appId,displayName,requiredResourceAccess,keyCredentials'
+if (-not (Test-ApplicationHasCertificate -Application $application -Certificate $certificate)) {
+    throw ("Certificate public key was not found on app registration '{0}' after create/update. Refusing to write unusable app-only configuration." -f $DisplayName)
+}
+Write-SmartM365SetupStatus -Message 'Certificate public key verified on the app registration.' -Level OK
 
 Set-SmartM365AuthLocalConfig -Application $application -Certificate $certificate -TenantId $effectiveTenantId -ConfigPath $localConfigPath
 if (-not $WhatIfPreference) {
