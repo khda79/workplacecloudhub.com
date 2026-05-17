@@ -200,22 +200,131 @@ catch {
     exit 1
 }
 
+function Send-ActiveUsersErrorNotification {
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [string]$Operation,
+        [string]$TimestampedCsvPath,
+        [string]$CurrentCsvPath,
+        [string]$LatestCsvPath
+    )
+
+    try {
+        $exception = $ErrorRecord.Exception
+        $innerMessages = New-Object System.Collections.Generic.List[string]
+        $inner = $exception.InnerException
+        while ($null -ne $inner) {
+            if (-not [string]::IsNullOrWhiteSpace($inner.Message)) {
+                $innerMessages.Add($inner.Message) | Out-Null
+            }
+            $inner = $inner.InnerException
+        }
+
+        $scriptName = [System.IO.Path]::GetFileName($PSCommandPath)
+        $errorContext = @(
+            "Script: $scriptName"
+            "Tenant/Organization: $OrgDomain"
+            "Operation: $Operation"
+            "Error: $($exception.Message)"
+            "Log: $global:LogTextFile"
+            "Transcript: $global:logTranscriptFile"
+        ) -join "`n"
+
+        $helpUrl = "https://chat.openai.com/?q={0}" -f [System.Uri]::EscapeDataString("Help troubleshoot this SmartM365 Microsoft 365 active users inventory error:`n$errorContext")
+
+        $facts = @{
+            "Script name"         = $scriptName
+            "Tenant/Organization" = $OrgDomain
+            "Computer"            = $env:COMPUTERNAME
+            "Timestamp"           = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            "Failed operation"    = $Operation
+            "Exception message"   = $exception.Message
+            "Inner exception"     = ($innerMessages -join " | ")
+            "Log path"            = $global:LogTextFile
+            "Transcript path"     = $global:logTranscriptFile
+            "Output path"         = $OutputPath
+            "Timestamped CSV"     = $TimestampedCsvPath
+            "Current CSV"         = $CurrentCsvPath
+            "Latest CSV"          = $LatestCsvPath
+        }
+
+        Send-SmartM365TeamsNotification `
+            -Title "SmartM365 Active Users inventory failed" `
+            -Message "A terminal error occurred in Microsoft 365 active users inventory." `
+            -Level "ERROR" `
+            -Channel "Alerts" `
+            -Facts $facts `
+            -HelpUrl $helpUrl | Out-Null
+    }
+    catch {
+        WriteLog -Message ("Failed to send Teams error notification: {0}" -f $_.Exception.Message) "ERROR"
+    }
+}
+
+function Send-ActiveUsersSuccessNotification {
+    param(
+        [int]$UserCount,
+        [int]$LastSignInCount,
+        [int]$LastNonInteractiveSignInCount,
+        [string]$TimestampedCsvPath,
+        [string]$CurrentCsvPath,
+        [string]$LatestCsvPath
+    )
+
+    try {
+        $scriptName = [System.IO.Path]::GetFileName($PSCommandPath)
+        $summary = "Microsoft 365 active users inventory completed without error. Users exported: {0}. Last sign-in values: {1}. Last non-interactive sign-in values: {2}." -f $UserCount, $LastSignInCount, $LastNonInteractiveSignInCount
+        $facts = @{
+            "Script name"                  = $scriptName
+            "Tenant/Organization"          = $OrgDomain
+            "Computer"                     = $env:COMPUTERNAME
+            "Timestamp"                    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            "Users exported"               = $UserCount
+            "Last sign-in values"          = $LastSignInCount
+            "Last non-interactive values"  = $LastNonInteractiveSignInCount
+            "Output path"                  = $OutputPath
+            "Timestamped CSV"              = $TimestampedCsvPath
+            "Current CSV"                  = $CurrentCsvPath
+            "Latest CSV"                   = $LatestCsvPath
+            "Log path"                     = $global:LogTextFile
+            "Transcript path"              = $global:logTranscriptFile
+        }
+
+        Send-SmartM365TeamsNotification `
+            -Title "SmartM365 Active Users inventory completed" `
+            -Message $summary `
+            -Level "SUCCESS" `
+            -Channel "Infos" `
+            -Facts $facts | Out-Null
+    }
+    catch {
+        WriteLog -Message ("Failed to send Teams completion notification: {0}" -f $_.Exception.Message) "WARN"
+    }
+}
+
 # ======================================================================
 # GLOBAL TRY / CATCH / FINALLY WITH HTML ERROR EMAIL
 # ======================================================================
 
 $global:ScriptFailed      = $false
 $connectedGraphInThisRun  = $false
+$currentOperation         = "Initialize script environment"
+$csvPathTimestamped       = ""
+$csvPathCurrent           = ""
+$csvPathLatest            = ""
 
 try {
     #region Initialization
 
     $ScriptVersion = "1.0"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
+    $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
     # Initialize environment (paths, logs, global variables, etc.)
+    $currentOperation = "Initialize script environment"
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
 
+    $currentOperation = "Start transcript"
     Start-Transcript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script environment initialized at $InitializeOutputPath"
@@ -227,6 +336,8 @@ try {
     #endregion Initialization
 
     #region Connect to Microsoft Graph via SmartM365.Core / Connect-SmartM365CloudSession
+
+    $currentOperation = "Prepare Microsoft Graph connection"
 
     function Test-GraphConnection {
         try {
@@ -269,6 +380,7 @@ try {
     }
 
     if ($needConnect) {
+        $currentOperation = "Connect to Microsoft Graph"
         $connectParams = @{
             ExchangeOnline = $false
             Graph          = $true
@@ -295,6 +407,7 @@ try {
 
         $connectedGraphInThisRun = $connectResult.GraphConnected
         WriteLog -Message "Microsoft Graph connection established successfully." "INFO"
+        $currentOperation = "Run Microsoft Graph preflight"
         Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Users') -RequiredCommands @('Get-MgUser') -OutputPaths @($OutputPath) -GraphProbeUris @(
             'https://graph.microsoft.com/v1.0/users?$select=id,signInActivity&$top=1',
             'https://graph.microsoft.com/v1.0/organization'
@@ -306,6 +419,7 @@ try {
     #region Load License Dictionary (CSV)
 
     WriteLog -Message "Reading local CSV file containing license information..."
+    $currentOperation = "Load local license dictionary"
     $LocalCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'M365InventoryRootFolderPath' -DefaultValue ''
     $localCsvPath       = Join-Path $LocalCsvFolderPath "Product names and service plan identifiers for licensing.csv"
 
@@ -337,6 +451,7 @@ try {
     #region Retrieve Users from Graph
 
     WriteLog -Message "Retrieving users with extended properties from Microsoft Graph..."
+    $currentOperation = "Retrieve users from Microsoft Graph"
 
     $userSelectProperties = @(
         'DisplayName',
@@ -383,6 +498,7 @@ try {
     #region Transform and Clean Data
 
     WriteLog -Message "Transforming and cleaning user data..."
+    $currentOperation = "Transform user data"
 
     $cleanResults = $users | ForEach-Object {
         $licenseNames = ($_.AssignedLicenses | ForEach-Object {
@@ -448,6 +564,7 @@ try {
     #region Export CSV
 
     Write-Host "`n--- Export CSV ---"
+    $currentOperation = "Export CSV"
     $BaseFileName = "M365_Users_Active"
 
     ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
@@ -459,6 +576,20 @@ try {
                                 -Delimiter ","
 
     WriteLog -Message "CSV export completed for base file name '$BaseFileName'." "INFO"
+    $csvPathTimestamped = $global:csvFilePath1
+    $csvPathCurrent = $global:csvFilePath2
+    $csvPathLatest = $global:csvFilePath3
+
+    $lastSignInCount = @($cleanResults | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_."LastSignInDateTime") }).Count
+    $lastNonInteractiveSignInCount = @($cleanResults | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_."LastNonInteractiveSignInDateTime") }).Count
+    Send-ActiveUsersSuccessNotification `
+        -UserCount $cleanResults.Count `
+        -LastSignInCount $lastSignInCount `
+        -LastNonInteractiveSignInCount $lastNonInteractiveSignInCount `
+        -TimestampedCsvPath $csvPathTimestamped `
+        -CurrentCsvPath $csvPathCurrent `
+        -LatestCsvPath $csvPathLatest
+
     WriteLog -Message "Script main execution completed successfully." "INFO"
 
     #endregion Export CSV
@@ -469,6 +600,7 @@ catch {
 
     WriteLog -Message ("Global error in M365 users inventory: {0}" -f $globalError) "ERROR"
     Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
+    Send-ActiveUsersErrorNotification -ErrorRecord $globalError -Operation $currentOperation -TimestampedCsvPath $csvPathTimestamped -CurrentCsvPath $csvPathCurrent -LatestCsvPath $csvPathLatest
 
     # -------- Send error email (same pattern style as Devices Inventory) --------
     try {
