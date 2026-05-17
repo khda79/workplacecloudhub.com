@@ -54,6 +54,10 @@
 .PARAMETER DisableTeamsSetup
     Skips Teams team creation/reuse and SharePoint local configuration updates.
 
+.PARAMETER LogPath
+    Folder where the setup log and transcript are written. Defaults to
+    C:\Temp\WORKPLACE.
+
 .EXAMPLE
     .\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com
 
@@ -110,17 +114,71 @@ param(
     [string]$SharePointTargetFolderPath = 'SMART-M365/CSV',
 
     [Parameter()]
-    [switch]$DisableTeamsSetup
+    [switch]$DisableTeamsSetup,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$LogPath = 'C:\Temp\WORKPLACE'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$script:SmartM365SetupLogFile = $null
+$script:SmartM365SetupTranscriptFile = $null
+$script:SmartM365SetupTranscriptStarted = $false
+
+function Initialize-SmartM365SetupLogging {
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $resolvedLogPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    if (-not (Test-Path -LiteralPath $resolvedLogPath)) {
+        New-Item -Path $resolvedLogPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+
+    $timestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
+    $baseName = 'SmartM365-Create-AppRegistration'
+    $script:SmartM365SetupLogFile = Join-Path -Path $resolvedLogPath -ChildPath ("{0}-{1}.log" -f $baseName, $timestamp)
+    $script:SmartM365SetupTranscriptFile = Join-Path -Path $resolvedLogPath -ChildPath ("{0}-{1}_Transcript.log" -f $baseName, $timestamp)
+
+    Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [INFO] Log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+
+    try {
+        Start-Transcript -Path $script:SmartM365SetupTranscriptFile -Append -ErrorAction Stop | Out-Null
+        $script:SmartM365SetupTranscriptStarted = $true
+    }
+    catch {
+        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [WARN] Transcript could not be started: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $_.Exception.Message)
+    }
+}
+
+function Close-SmartM365SetupLogging {
+    if ($script:SmartM365SetupLogFile) {
+        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [INFO] Log finished." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+        Write-Information ("[INFO] Log file: {0}" -f $script:SmartM365SetupLogFile) -InformationAction Continue
+        if ($script:SmartM365SetupTranscriptFile) {
+            Write-Information ("[INFO] Transcript file: {0}" -f $script:SmartM365SetupTranscriptFile) -InformationAction Continue
+        }
+    }
+
+    if ($script:SmartM365SetupTranscriptStarted) {
+        try { Stop-Transcript | Out-Null } catch { Write-Debug ("Stop-Transcript failed: {0}" -f $_.Exception.Message) }
+        $script:SmartM365SetupTranscriptStarted = $false
+    }
+}
 
 function Write-SmartM365SetupStatus {
     param(
         [Parameter(Mandatory)][string]$Message,
         [Parameter()][string]$Level = 'INFO'
     )
+
+    if ($script:SmartM365SetupLogFile) {
+        $logEntry = "[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
+        try { Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value $logEntry } catch { Write-Debug ("Log write failed: {0}" -f $_.Exception.Message) }
+    }
 
     switch ($Level) {
         'WARN' { Write-Warning $Message }
@@ -784,6 +842,9 @@ function Set-SmartM365AuthLocalConfig {
     }
 }
 
+Initialize-SmartM365SetupLogging -Path $LogPath
+
+try {
 Import-RequiredGraphModule
 $graphContext = Connect-SmartM365GraphSetupSession -RequestedTenantId $TenantId -UseDeviceCode:$UseDeviceCode
 $effectiveTenantId = $graphContext.TenantId
@@ -927,3 +988,7 @@ if ($teamsWorkspace) {
 }
 Write-Output ''
 Write-SmartM365SetupStatus -Level WARN -Message 'Exchange Online still needs RBAC for the application service principal, for example the relevant read-only Exchange role group or RBAC for Applications assignment.'
+}
+finally {
+    Close-SmartM365SetupLogging
+}
