@@ -8,7 +8,7 @@
     CSV to LatestCsvFolderPath.
 
 .PARAMETER Connect
-    Forces disconnect/reconnect to Microsoft Graph.
+    Kept for compatibility. The script always disconnects any existing Microsoft Graph session before connecting.
 
 .PARAMETER OutputPath
     Optional override output folder. If omitted, local configuration OutputPath is used.
@@ -234,16 +234,136 @@ function Ensure-GraphModules {
 
 function Disconnect-GraphSafe {
     try {
+        $context = Get-MgContext -ErrorAction SilentlyContinue
+        if ($null -eq $context) {
+            WriteLog -Message "No active Microsoft Graph session to disconnect." "INFO"
+            return
+        }
+
         Disconnect-MgGraph -ErrorAction Stop | Out-Null
+        WriteLog -Message "Disconnected from Microsoft Graph." "SUCCESS"
     } catch {
-        WriteLog -Message ("Disconnect-MgGraph failed (non-fatal): {0}" -f $_.Exception.Message) "WARN"
+        WriteLog -Message ("Disconnect-MgGraph failed (non-fatal): {0}" -f $_.Exception.Message) "WARNING"
     }
+}
+
+function New-SmartM365AiHelpUrl {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ScriptName,
+        [Parameter(Mandatory)][string]$Operation,
+        [Parameter(Mandatory)][string]$ErrorMessage,
+        [string]$InnerException = ''
+    )
+
+    $prompt = @"
+Help troubleshoot this SmartM365 script failure.
+
+Script: $ScriptName
+Operation: $Operation
+Error: $ErrorMessage
+Inner exception: $InnerException
+Computer: $env:COMPUTERNAME
+Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+"@
+
+    return 'https://chatgpt.com/?q=' + [uri]::EscapeDataString($prompt)
+}
+
+function Get-SmartM365GlobalValue {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+
+    $variable = Get-Variable -Name $Name -Scope Global -ErrorAction SilentlyContinue
+    if ($null -eq $variable -or $null -eq $variable.Value) {
+        return ''
+    }
+
+    return [string]$variable.Value
+}
+
+function Send-VerifiedDomainsTeamsInfo {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ScriptName,
+        [Parameter(Mandatory)][string]$Organization,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][string]$TimestampedCsvPath,
+        [Parameter(Mandatory)][string]$LatestCsvPath,
+        [int]$TotalDomains,
+        [int]$VerifiedDomains
+    )
+
+    $facts = @{
+        Script               = $ScriptName
+        TenantOrOrganization = $Organization
+        OutputPath           = $OutputPath
+        TimestampedCsvPath   = $TimestampedCsvPath
+        LatestCsvPath        = $LatestCsvPath
+        LogFile              = Get-SmartM365GlobalValue -Name 'LogTextFile'
+        TranscriptFile       = Get-SmartM365GlobalValue -Name 'logTranscriptFile'
+        TotalDomains         = $TotalDomains
+        VerifiedDomains      = $VerifiedDomains
+    }
+
+    Send-SmartM365TeamsNotification `
+        -Title 'Azure AD verified domains inventory - SUCCESS' `
+        -Message ("Verified domains inventory completed successfully. Total domains: {0}; verified domains: {1}." -f $TotalDomains, $VerifiedDomains) `
+        -Level SUCCESS `
+        -Channel Infos `
+        -Facts $facts | Out-Null
+}
+
+function Send-VerifiedDomainsTeamsAlert {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ScriptName,
+        [Parameter(Mandatory)][string]$Organization,
+        [Parameter(Mandatory)][string]$Operation,
+        [Parameter(Mandatory)][System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [string]$OutputPath = '',
+        [string]$TimestampedCsvPath = '',
+        [string]$LatestCsvPath = ''
+    )
+
+    $innerException = if ($ErrorRecord.Exception.InnerException) { $ErrorRecord.Exception.InnerException.Message } else { '' }
+    $helpUrl = New-SmartM365AiHelpUrl `
+        -ScriptName $ScriptName `
+        -Operation $Operation `
+        -ErrorMessage $ErrorRecord.Exception.Message `
+        -InnerException $innerException
+
+    $facts = @{
+        Script               = $ScriptName
+        TenantOrOrganization = $Organization
+        Operation            = $Operation
+        ExceptionMessage     = $ErrorRecord.Exception.Message
+        InnerException       = $innerException
+        OutputPath           = $OutputPath
+        TimestampedCsvPath   = $TimestampedCsvPath
+        LatestCsvPath        = $LatestCsvPath
+        LogFile              = Get-SmartM365GlobalValue -Name 'LogTextFile'
+        TranscriptFile       = Get-SmartM365GlobalValue -Name 'logTranscriptFile'
+    }
+
+    Send-SmartM365TeamsNotification `
+        -Title 'Azure AD verified domains inventory - ERROR' `
+        -Message ("Terminal error during {0}: {1}" -f $Operation, $ErrorRecord.Exception.Message) `
+        -Level ERROR `
+        -Channel Alerts `
+        -Facts $facts `
+        -HelpUrl $helpUrl | Out-Null
 }
 
 #region Init
 $ScriptVersion = "1.0"
 $TaskNameCore  = "Azure AD verified domains inventory"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
+$currentOperation = 'InitializeScriptEnvironment'
+$csvPathTimestamped = ''
+$csvPathLast = ''
+$countAll = 0
+$countVerified = 0
 
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -254,6 +374,16 @@ try {
     WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
+    try {
+        Send-VerifiedDomainsTeamsAlert `
+            -ScriptName $TaskName `
+            -Organization $OrgDomain `
+            -Operation $currentOperation `
+            -ErrorRecord $_ `
+            -OutputPath $OutputPath
+    } catch {
+        WriteLog -Message ("Failed to send Teams alert notification: {0}" -f $_.Exception.Message) "ERROR"
+    }
     exit 1
 }
 #endregion
@@ -264,13 +394,14 @@ try {
     # ==========================================================
     # Connection management (Graph only - app-only certificate)
     # ==========================================================
+    $currentOperation = 'EnsureGraphModules'
     Ensure-GraphModules
 
-    if ($Connect) {
-        Write-Host "Connect switch specified: existing Microsoft Graph session (if any) will be disconnected and reconnected..." -ForegroundColor Cyan
-        Disconnect-GraphSafe
-    }
+    $currentOperation = 'DisconnectExistingGraphSession'
+    Write-Host "Existing Microsoft Graph session (if any) will be disconnected before app-only connection..." -ForegroundColor Cyan
+    Disconnect-GraphSafe
 
+    $currentOperation = 'ConnectGraph'
     WriteLog -Message "Connecting to Microsoft Graph with app-only certificate authentication." "INFO"
 
     Connect-MgGraph `
@@ -281,11 +412,19 @@ try {
         -ErrorAction Stop | Out-Null
 
     WriteLog -Message "Connected to Microsoft Graph."
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @('https://graph.microsoft.com/v1.0/domains?$top=1') | Out-Null
+
+    $currentOperation = 'Preflight'
+    Invoke-SmartM365Preflight `
+        -ScriptName $TaskName `
+        -RequiredModules @('Microsoft.Graph.Authentication','Microsoft.Graph.Identity.DirectoryManagement') `
+        -RequiredCommands @('Get-MgDomain') `
+        -OutputPaths @($OutputPath) `
+        -GraphProbeUris @('https://graph.microsoft.com/v1.0/domains?$top=1') | Out-Null
 
     # ==========================================================
     # Retrieve verified domains
     # ==========================================================
+    $currentOperation = 'RetrieveDomains'
     WriteLog -Message "Retrieving Azure AD domains via Get-MgDomain..."
     $allDomains = Get-MgDomain -All
 
@@ -310,7 +449,8 @@ try {
     # ==========================================================
     # Export CSV (timestamped) + write "LAST" to share (no timestamp)
     # ==========================================================
-    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $currentOperation = 'ExportCsv'
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $baseName  = [IO.Path]::GetFileNameWithoutExtension($OutputFileName)
     $ext       = [IO.Path]::GetExtension($OutputFileName)
     if ([string]::IsNullOrWhiteSpace($ext)) { $ext = ".csv" }
@@ -337,15 +477,31 @@ try {
     Write-Host "Log file                 : $global:LogTextFile"
     Write-Host "-------------------------`n"
 
+    $currentOperation = 'SendTeamsInfo'
+    try {
+        Send-VerifiedDomainsTeamsInfo `
+            -ScriptName $MyInvocation.MyCommand.Name `
+            -Organization $OrgDomain `
+            -OutputPath $OutputPath `
+            -TimestampedCsvPath $csvPathTimestamped `
+            -LatestCsvPath $csvPathLast `
+            -TotalDomains $countAll `
+            -VerifiedDomains $countVerified
+    } catch {
+        WriteLog -Message ("Failed to send Teams info notification: {0}" -f $_.Exception.Message) "WARNING"
+    }
+
     # ==========================================================
     # Disconnect + Cleanup
     # ==========================================================
+    $currentOperation = 'DisconnectGraph'
     Write-Host "`n--- Disconnect Microsoft Graph ---"
     Disconnect-GraphSafe
     WriteLog -Message "$TaskName completed."
 
     try { Stop-Transcript | Out-Null } catch {}
 
+    $currentOperation = 'Cleanup'
     RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile
     RemoveOldFiles -Path $logPath    -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile
 }
@@ -353,6 +509,19 @@ catch {
     $globalError = $_
     WriteLog -Message ("Global error in Azure AD verified domains inventory: {0}" -f $globalError) "ERROR"
     Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
+
+    try {
+        Send-VerifiedDomainsTeamsAlert `
+            -ScriptName $MyInvocation.MyCommand.Name `
+            -Organization $OrgDomain `
+            -Operation $currentOperation `
+            -ErrorRecord $globalError `
+            -OutputPath $OutputPath `
+            -TimestampedCsvPath $csvPathTimestamped `
+            -LatestCsvPath $csvPathLast
+    } catch {
+        WriteLog -Message ("Failed to send Teams alert notification: {0}" -f $_.Exception.Message) "ERROR"
+    }
 
     # -------- Global error email via SmartM365.Core (SendEmailHtmlReport) --------
     try {
