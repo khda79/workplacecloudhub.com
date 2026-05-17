@@ -945,8 +945,8 @@ $BaseFileName = "M365_Licenses_Groups"
   }
 
   $currentOperation = "Apply retention cleanup"
-  RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount 70 -LogFile $global:logTextFile
-  RemoveOldFiles -Path $logPath    -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
+  RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+  RemoveOldFiles -Path $global:LogPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 
   $currentOperation = "Send Teams completion notification"
   Send-LicensesInventorySuccessNotification `
