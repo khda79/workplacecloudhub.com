@@ -473,6 +473,7 @@ function Send-LicensesInventorySuccessNotification {
 
   try {
     $scriptName = [System.IO.Path]::GetFileName($PSCommandPath)
+    $resultSummary = "Microsoft 365 licenses inventory completed without error. Users processed: {0}; user license rows: {1}; service plan rows: {2}; tenant SKUs: {3}; groups: {4}." -f $UsersProcessed, $UserLicenseRows, $ServicePlanRows, $TenantSkuRows, $GroupRows
     $facts = @{
       "Script name"         = $scriptName
       "Tenant/Organization" = $OrgDomain
@@ -489,9 +490,10 @@ function Send-LicensesInventorySuccessNotification {
 
     Send-SmartM365TeamsNotification `
       -Title "SmartM365 M365 licenses inventory completed" `
-      -Message ("Microsoft 365 licenses inventory completed without error. Users processed: {0}; user license rows: {1}; service plan rows: {2}; tenant SKUs: {3}; groups: {4}." -f $UsersProcessed, $UserLicenseRows, $ServicePlanRows, $TenantSkuRows, $GroupRows) `
+      -Message $resultSummary `
       -Level "SUCCESS" `
       -Channel "Infos" `
+      -ResultSummary $resultSummary `
       -Facts $facts | Out-Null
   }
   catch {

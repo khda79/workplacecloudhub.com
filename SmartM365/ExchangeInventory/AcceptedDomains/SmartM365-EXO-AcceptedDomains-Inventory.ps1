@@ -410,11 +410,14 @@ function Send-AcceptedDomainsSuccessNotification {
             "Transcript path"   = $global:logTranscriptFile
         }
 
+        $resultSummary = "Exchange Online accepted domains inventory completed without error. Accepted domains exported: {0}." -f $AcceptedDomainCount
+
         Send-SmartM365TeamsNotification `
             -Title "SmartM365 Accepted Domains inventory completed" `
-            -Message ("Exchange Online accepted domains inventory completed without error. Accepted domains exported: {0}." -f $AcceptedDomainCount) `
+            -Message $resultSummary `
             -Level "SUCCESS" `
             -Channel "Infos" `
+            -ResultSummary $resultSummary `
             -Facts $facts | Out-Null
     }
     catch {
