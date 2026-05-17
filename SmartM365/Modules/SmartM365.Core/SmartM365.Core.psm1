@@ -403,14 +403,14 @@ function Send-SmartM365GraphMail {
             contentType = 'HTML'
             content     = $BodyHtml
         }
-        toRecipients = ConvertTo-SmartM365GraphRecipient -Recipients $toArray
+        toRecipients = @(ConvertTo-SmartM365GraphRecipient -Recipients $toArray)
     }
 
     if ($ccArray.Count -gt 0) {
-        $message['ccRecipients'] = ConvertTo-SmartM365GraphRecipient -Recipients $ccArray
+        $message['ccRecipients'] = @(ConvertTo-SmartM365GraphRecipient -Recipients $ccArray)
     }
 
-    $graphAttachments = ConvertTo-SmartM365GraphFileAttachment -Attachments $Attachments
+    $graphAttachments = @(ConvertTo-SmartM365GraphFileAttachment -Attachments $Attachments)
     if ($graphAttachments.Count -gt 0) {
         $message['attachments'] = $graphAttachments
     }
