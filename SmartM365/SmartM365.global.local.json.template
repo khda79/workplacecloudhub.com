@@ -1,0 +1,23 @@
+{
+  "WorkspaceRootPath": "\\\\server\\share\\WORKPLACE",
+  "DataAllRootPath": "{{WorkspaceRootPath}}\\SMART-M365\\DATA-ALL",
+  "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\SMART-M365\\DATA-LAST",
+  "LogAllRootPath": "{{WorkspaceRootPath}}\\SMART-M365\\LOG-ALL",
+  "AppId": "00000000-0000-0000-0000-000000000000",
+  "TenantId": "00000000-0000-0000-0000-000000000000",
+  "OrgDomain": "contoso.onmicrosoft.com",
+  "Thumb": "0000000000000000000000000000000000000000",
+  "Thumbprint": "0000000000000000000000000000000000000000",
+  "RetentionMaxCSV": 30,
+  "RetentionMaxLogs": 30,
+  "ErrorMailTo": "admin@example.com",
+  "SmtpServer": "",
+  "From": "smartm365@example.com",
+  "Cc": "",
+  "Subject": "SmartM365",
+  "EnableSharePointUpload": true,
+  "SharePointSiteHostname": "contoso.sharepoint.com",
+  "SharePointSitePath": "/sites/smartm365",
+  "SharePointLibraryDisplayName": "Documents",
+  "SharePointTargetFolderPath": "SmartM365/CSV"
+}

@@ -11,6 +11,12 @@ SmartM365/**
 # Local documentation / agent notes
 *.md
 !/README.md
+!/SmartM365/AGENTS.md
+!/SmartM365/RULES.md
+!/SmartM365/README.md
+!/SmartM365/SmartM365-AppRegistration-Permissions.md
+!/SmartM365/SmartM365-Create-AppRegistration.ps1
+!/SmartM365/SmartM365.global.local.json.template
 
 # Local configuration
 *.local.json
