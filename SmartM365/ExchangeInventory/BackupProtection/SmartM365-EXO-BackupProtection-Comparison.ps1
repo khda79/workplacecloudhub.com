@@ -8,11 +8,15 @@
     and EXO mailboxes from a CSV export (EXO-Mailboxes-Inventory) or live via
     Connect-ExchangeOnline if no CSV is provided or found.
 
-    Produces two output CSV files:
+    Produces three output CSV files:
       - UnprotectedMailboxes : EXO mailboxes absent from the backup group
+      - ProtectedMailboxes   : EXO mailboxes present in the backup group
       - MembersWithoutMailbox: Group members with no matching EXO mailbox
 
     Join key: ExternalDirectoryObjectId (EXO) <-> Id (Microsoft Graph)
+
+.PARAMETER Tenant
+    Tenant profile key to load from Config/Tenants. Defaults to test.
 
 .PARAMETER TenantId
     Azure AD tenant ID (GUID) used for app-only authentication with Microsoft Graph.
@@ -60,7 +64,7 @@
 [CmdletBinding()]
 param (
     [string]$Tenant = 'test',
-[string]$TenantId              = "00000000-0000-0000-0000-000000000000",
+    [string]$TenantId              = "00000000-0000-0000-0000-000000000000",
     [string]$OrgDomain             = "contoso.onmicrosoft.com",
     [string]$AppId                 = "00000000-0000-0000-0000-000000000000",
     [string]$CertificateThumbprint = "0000000000000000000000000000000000000000",
@@ -238,6 +242,30 @@ if (-not $PSBoundParameters.ContainsKey('CertificateThumbprint') -and ($Certific
 }
 $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
 $ErrorActionPreference = "Stop"
+$script:CurrentOperation = "Initialize"
+
+function Assert-RequiredConfigValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()][string]$Value,
+        [string[]]$InvalidValues = @()
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value) -or $InvalidValues -contains $Value) {
+        throw "Required configuration value '$Name' is missing or still set to a placeholder."
+    }
+}
+
+Assert-RequiredConfigValue -Name 'TenantId' -Value $TenantId -InvalidValues @('00000000-0000-0000-0000-000000000000')
+Assert-RequiredConfigValue -Name 'OrgDomain' -Value $OrgDomain -InvalidValues @('contoso.onmicrosoft.com')
+Assert-RequiredConfigValue -Name 'AppId' -Value $AppId -InvalidValues @('00000000-0000-0000-0000-000000000000')
+Assert-RequiredConfigValue -Name 'CertificateThumbprint' -Value $CertificateThumbprint -InvalidValues @('0000000000000000000000000000000000000000')
+Assert-RequiredConfigValue -Name 'GroupDisplayName' -Value $GroupDisplayName
+Assert-RequiredConfigValue -Name 'ScriptCsvLogFolderPath' -Value $ScriptCsvLogFolderPath
+Assert-RequiredConfigValue -Name 'LatestCsvFolderPath' -Value $LatestCsvFolderPath
+Assert-RequiredConfigValue -Name 'ErrorMailTo' -Value $ErrorMailTo
+Assert-RequiredConfigValue -Name 'From' -Value $From
 
 function Import-SmartM365CorePreflight {
     if (Get-Command Invoke-CoreSmartM365Preflight -ErrorAction SilentlyContinue) { return }
@@ -307,15 +335,27 @@ function Send-ErrorEmail {
     } catch {
         Write-Log "Failed to send error email: $_" -Level "WARN"
     }
+
+    Send-BackupProtectionErrorNotification -ErrorMessage $ErrorMessage -Operation $script:CurrentOperation
 }
 
 function Export-CsvAtomic {
     param (
         [System.Collections.Generic.List[PSCustomObject]]$Data,
-        [string]$Path
+        [string]$Path,
+        [string[]]$Columns = @()
     )
     $tempPath = $Path + ".tmp"
-    $Data | Export-Csv -Path $tempPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    if ($Data.Count -eq 0 -and $Columns.Count -gt 0) {
+        $header = ($Columns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ';'
+        Set-Content -Path $tempPath -Value $header -Encoding UTF8
+    }
+    elseif ($Columns.Count -gt 0) {
+        $Data | Select-Object -Property $Columns | Export-Csv -Path $tempPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    }
+    else {
+        $Data | Export-Csv -Path $tempPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    }
     Move-Item -Path $tempPath -Destination $Path -Force
 }
 
@@ -345,7 +385,7 @@ function Resolve-BackupProtectionGroupObjectId {
             $groupById = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/groups/$configuredObjectId?`$select=id,displayName,mailNickname" -OutputType PSObject -ErrorAction Stop
         }
         catch {
-            throw "Configured GroupObjectId '$configuredObjectId' was not found. Clear GroupObjectId to allow creation by GroupDisplayName, or update it with the expected group ObjectId."
+            throw "Configured GroupObjectId '$configuredObjectId' was not found. Clear GroupObjectId to resolve by GroupDisplayName, or update it with the expected group ObjectId."
         }
 
         if ($groupById.displayName -ne $groupName) {
@@ -381,6 +421,113 @@ function Resolve-BackupProtectionGroupObjectId {
     throw "No Azure AD group found with display name '$groupName'. Create or rename the group manually, or configure GroupObjectId with a group that has this exact display name."
 }
 
+function New-BackupProtectionAiHelpUrl {
+    [CmdletBinding()]
+    param(
+        [string]$Operation,
+        [string]$ErrorMessage
+    )
+
+    $prompt = @"
+Help troubleshoot this SmartM365 Exchange Online BackupProtection comparison error.
+Script: $ScriptName
+Tenant: $Tenant
+Organization: $OrgDomain
+Operation: $Operation
+GroupDisplayName: $GroupDisplayName
+GroupObjectId: $GroupObjectId
+Error: $ErrorMessage
+"@
+
+    return "https://chat.openai.com/?q={0}" -f [System.Uri]::EscapeDataString($prompt)
+}
+
+function Send-BackupProtectionErrorNotification {
+    [CmdletBinding()]
+    param(
+        [string]$ErrorMessage,
+        [string]$Operation
+    )
+
+    try {
+        Import-SmartM365CorePreflight
+        $logPathValue = Get-Variable -Name LogPath -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $helpUrl = New-BackupProtectionAiHelpUrl -Operation $Operation -ErrorMessage $ErrorMessage
+        $facts = @{
+            "Script name"         = [System.IO.Path]::GetFileName($PSCommandPath)
+            "Tenant"              = $Tenant
+            "Tenant/Organization" = $OrgDomain
+            "Failed operation"    = $Operation
+            "Exception message"   = $ErrorMessage
+            "Group DisplayName"   = $GroupDisplayName
+            "Group ObjectId"      = $GroupObjectId
+            "Log path"            = $logPathValue
+            "Output path"         = $ScriptCsvLogFolderPath
+            "Latest CSV path"     = $LatestCsvFolderPath
+        }
+
+        Send-CoreSmartM365TeamsNotification `
+            -Title "SmartM365 BackupProtection comparison failed" `
+            -Message "A terminal error occurred in the Exchange Online BackupProtection comparison." `
+            -Level "ERROR" `
+            -Channel "Alerts" `
+            -Facts $facts `
+            -HelpUrl $helpUrl | Out-Null
+    }
+    catch {
+        Write-Log "Failed to send Teams error notification: $_" -Level "WARN"
+    }
+}
+
+function Send-BackupProtectionSuccessNotification {
+    [CmdletBinding()]
+    param(
+        [int]$TotalMailboxes,
+        [int]$TotalGroupMembers,
+        [int]$ProtectedCount,
+        [int]$UnprotectedCount,
+        [int]$MembersWithoutMailboxCount,
+        [string]$ProtectedCsvPath,
+        [string]$UnprotectedCsvPath,
+        [string]$MembersWithoutMailboxCsvPath
+    )
+
+    try {
+        Import-SmartM365CorePreflight
+        $logPathValue = Get-Variable -Name LogPath -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $resultSummary = "BackupProtection comparison completed without error. EXO mailboxes: {0}; group members: {1}; protected: {2}; unprotected: {3}; members without mailbox: {4}." -f $TotalMailboxes, $TotalGroupMembers, $ProtectedCount, $UnprotectedCount, $MembersWithoutMailboxCount
+        $facts = @{
+            "Script name"              = [System.IO.Path]::GetFileName($PSCommandPath)
+            "Tenant"                   = $Tenant
+            "Tenant/Organization"      = $OrgDomain
+            "Group DisplayName"        = $GroupDisplayName
+            "Group ObjectId"           = $GroupObjectId
+            "Total EXO mailboxes"      = $TotalMailboxes
+            "Total group members"      = $TotalGroupMembers
+            "Protected mailboxes"      = $ProtectedCount
+            "Unprotected mailboxes"    = $UnprotectedCount
+            "Members without mailbox"  = $MembersWithoutMailboxCount
+            "Protected CSV"            = $ProtectedCsvPath
+            "Unprotected CSV"          = $UnprotectedCsvPath
+            "Members without mailbox CSV" = $MembersWithoutMailboxCsvPath
+            "Log path"                 = $logPathValue
+            "Output path"              = $ScriptCsvLogFolderPath
+            "Latest CSV path"          = $LatestCsvFolderPath
+        }
+
+        Send-CoreSmartM365TeamsNotification `
+            -Title "SmartM365 BackupProtection comparison success" `
+            -Message $resultSummary `
+            -Level "SUCCESS" `
+            -Channel "Infos" `
+            -ResultSummary $resultSummary `
+            -Facts $facts | Out-Null
+    }
+    catch {
+        Write-Log "Failed to send Teams completion notification: $_" -Level "WARN"
+    }
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # REGION: Initialization
 # ─────────────────────────────────────────────────────────────────────────────
@@ -401,6 +548,7 @@ $CsvMembersNoMailbox = Join-Path $ScriptCsvLogFolderPath     "$CsvPrefix`_Member
 $CsvProtected        = Join-Path $ScriptCsvLogFolderPath     "$CsvPrefix`_ProtectedMailboxes_$Timestamp.csv"
 
 try {
+    $script:CurrentOperation = "Create output directories"
     if (-not (Test-Path $ScriptCsvLogFolderPath))     { New-Item -ItemType Directory -Path $ScriptCsvLogFolderPath     -Force | Out-Null }
     if (-not (Test-Path $LogDir))        { New-Item -ItemType Directory -Path $LogDir        -Force | Out-Null }
     if (-not (Test-Path $LatestCsvFolderPath)) { New-Item -ItemType Directory -Path $LatestCsvFolderPath -Force | Out-Null }
@@ -428,6 +576,7 @@ Write-Log "========================================"
 
 $requiredModules = @("Microsoft.Graph.Groups", "Microsoft.Graph.Users")
 $useLiveEXO = (-not $EXOMailboxesCsvPath) -or (-not (Test-Path $EXOMailboxesCsvPath))
+$script:CurrentOperation = "Check required modules"
 
 if ($useLiveEXO) {
     $requiredModules += "ExchangeOnlineManagement"
@@ -450,6 +599,7 @@ foreach ($mod in $requiredModules) {
 # ─────────────────────────────────────────────────────────────────────────────
 
 try {
+    $script:CurrentOperation = "Connect to Microsoft Graph and validate backup protection group"
     Write-Log "Connecting to Microsoft Graph (app-only)..."
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $CertificateThumbprint -NoWelcome
@@ -471,6 +621,7 @@ try {
 $groupMembersMap = @{}
 
 try {
+    $script:CurrentOperation = "Retrieve backup protection group members"
     Write-Log "Retrieving members for group '$GroupDisplayName' ($GroupObjectId)..."
     $rawMembers = @(Get-MgGroupMember -GroupId $GroupObjectId -All)
     Write-Log "Raw members retrieved: $($rawMembers.Count)"
@@ -534,6 +685,7 @@ $exoMailboxes = $null
 
 if (-not $useLiveEXO) {
     try {
+        $script:CurrentOperation = "Load EXO mailboxes from CSV"
         Write-Log "Loading EXO mailboxes from CSV: $EXOMailboxesCsvPath"
         $exoMailboxes = Import-Csv -Path $EXOMailboxesCsvPath -Delimiter ";" -Encoding UTF8
 
@@ -555,6 +707,7 @@ if (-not $useLiveEXO) {
     }
 } else {
     try {
+        $script:CurrentOperation = "Retrieve EXO mailboxes live"
         Write-Log "Connecting to Exchange Online (app-only, live)..."
         try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
         Connect-ExchangeOnline -AppId $AppId -Organization $OrgDomain -CertificateThumbprint $CertificateThumbprint -ShowBanner:$false
@@ -578,6 +731,7 @@ if (-not $useLiveEXO) {
 # REGION: Comparison
 # ─────────────────────────────────────────────────────────────────────────────
 
+$script:CurrentOperation = "Compare backup protection membership"
 Write-Log "Starting comparison..."
 
 # Build EXO lookup map: ExternalDirectoryObjectId (lowercased) -> mailbox object
@@ -642,8 +796,12 @@ Write-Log "  Members without mailbox: $($membersNoMailbox.Count)"
 # REGION: CSV export (atomic)
 # ─────────────────────────────────────────────────────────────────────────────
 
+$mailboxColumns = @('ExternalDirectoryObjectId', 'UserPrincipalName', 'PrimarySmtpAddress', 'RecipientTypeDetails')
+$memberColumns = @('Id', 'UserPrincipalName', 'Mail', 'ObjectType')
+
 try {
-    Export-CsvAtomic -Data $unprotected -Path $CsvUnprotected
+    $script:CurrentOperation = "Export UnprotectedMailboxes CSV"
+    Export-CsvAtomic -Data $unprotected -Path $CsvUnprotected -Columns $mailboxColumns
     Write-Log "Exported: $CsvUnprotected ($($unprotected.Count) rows)"
 } catch {
     $err = "Failed to write UnprotectedMailboxes CSV: $_"
@@ -653,7 +811,8 @@ try {
 }
 
 try {
-    Export-CsvAtomic -Data $protected -Path $CsvProtected
+    $script:CurrentOperation = "Export ProtectedMailboxes CSV"
+    Export-CsvAtomic -Data $protected -Path $CsvProtected -Columns $mailboxColumns
     Write-Log "Exported: $CsvProtected ($($protected.Count) rows)"
 } catch {
     $err = "Failed to write ProtectedMailboxes CSV: $_"
@@ -663,7 +822,8 @@ try {
 }
 
 try {
-    Export-CsvAtomic -Data $membersNoMailbox -Path $CsvMembersNoMailbox
+    $script:CurrentOperation = "Export MembersWithoutMailbox CSV"
+    Export-CsvAtomic -Data $membersNoMailbox -Path $CsvMembersNoMailbox -Columns $memberColumns
     Write-Log "Exported: $CsvMembersNoMailbox ($($membersNoMailbox.Count) rows)"
 } catch {
     $err = "Failed to write MembersWithoutMailbox CSV: $_"
@@ -681,6 +841,7 @@ $lastProtected        = Join-Path $LatestCsvFolderPath "$CsvPrefix`_ProtectedMai
 $lastMembersNoMailbox = Join-Path $LatestCsvFolderPath "$CsvPrefix`_MembersWithoutMailbox.csv"
 
 try {
+    $script:CurrentOperation = "Copy latest CSV files and upload to SharePoint"
     Copy-Item -Path $CsvUnprotected      -Destination $lastUnprotected      -Force
     Copy-Item -Path $CsvProtected        -Destination $lastProtected        -Force
     Copy-Item -Path $CsvMembersNoMailbox -Destination $lastMembersNoMailbox -Force
@@ -700,10 +861,22 @@ try {
 
 if ($useLiveEXO) {
     try {
+        $script:CurrentOperation = "Disconnect from Exchange Online"
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
         Write-Log "Disconnected from Exchange Online"
     } catch {}
 }
+
+$script:CurrentOperation = "Send completion notification"
+Send-BackupProtectionSuccessNotification `
+    -TotalMailboxes $exoMap.Count `
+    -TotalGroupMembers $groupMemberObjects.Count `
+    -ProtectedCount $protected.Count `
+    -UnprotectedCount $unprotected.Count `
+    -MembersWithoutMailboxCount $membersNoMailbox.Count `
+    -ProtectedCsvPath $lastProtected `
+    -UnprotectedCsvPath $lastUnprotected `
+    -MembersWithoutMailboxCsvPath $lastMembersNoMailbox
 
 Write-Log "========================================"
 Write-Log "$ScriptName v$ScriptVersion completed"
