@@ -46,7 +46,7 @@ Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" t
 .NOTES
 Version: 1.0
     Author: https://github.com/khda79/M365
-Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
+Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
 Scopes: Directory.Read.All
 #>
 
@@ -224,6 +224,14 @@ try {
     exit 1
 }
 
+try {
+    Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
+} catch {
+    Write-Host "Failed to import Microsoft.Graph.Identity.DirectoryManagement. Install the module before running this script." -ForegroundColor Red
+    Write-Host $_ -ForegroundColor Yellow
+    exit 1
+}
+
 # ==========================================================
 # Helpers
 # ==========================================================
@@ -366,52 +374,6 @@ function ConvertTo-DateTimeOrNull {
     }
 }
 
-function Get-EntraDeviceFromGraph {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Property
-    )
-
-    $select = ($Property | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ','
-    $uri = "https://graph.microsoft.com/v1.0/devices?`$select=$select&`$top=999"
-    $items = New-Object System.Collections.ArrayList
-
-    while (-not [string]::IsNullOrWhiteSpace($uri)) {
-        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
-
-        if ($response -is [System.Collections.IDictionary]) {
-            $pageDevices = $response['value']
-            $nextLink = $response['@odata.nextLink']
-        }
-        else {
-            $pageDevices = $response.value
-            $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
-            $nextLink = if ($nextLinkProperty) { $nextLinkProperty.Value } else { $null }
-        }
-
-        if ($pageDevices -is [System.Array]) {
-            foreach ($device in $pageDevices) {
-                if ($null -ne $device) {
-                    $items.Add($device) | Out-Null
-                }
-            }
-        }
-        elseif ($null -ne $pageDevices) {
-            $items.Add($pageDevices) | Out-Null
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace([string]$nextLink)) {
-            $uri = [string]$nextLink
-        }
-        else {
-            $uri = $null
-        }
-    }
-
-    return $items.ToArray()
-}
-
 # Returns the fixed inventory schema (column names) in the exact order
 function Get-EntraDeviceColumns {
     [string[]]@(
@@ -548,7 +510,12 @@ try {
     }
 
     # ------------------------
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @(
+    Invoke-SmartM365Preflight `
+        -ScriptName $TaskName `
+        -RequiredModules @('Microsoft.Graph.Identity.DirectoryManagement') `
+        -RequiredCommands @('Get-MgDevice') `
+        -OutputPaths @($OutputPath) `
+        -GraphProbeUris @(
         'https://graph.microsoft.com/v1.0/devices?$top=1',
         'https://graph.microsoft.com/v1.0/organization'
     ) | Out-Null
@@ -587,7 +554,7 @@ try {
         "extensionAttributes"
     )
 
-    $devices = @(Get-EntraDeviceFromGraph -Property $deviceProperties)
+    $devices = @(Get-MgDevice -All -Property ($deviceProperties -join ','))
 
     WriteLog -Message "Azure Entra devices retrieved: $($devices.Count)"
 
