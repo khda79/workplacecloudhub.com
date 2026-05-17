@@ -489,7 +489,7 @@ function Send-LicensesInventorySuccessNotification {
     }
 
     Send-SmartM365TeamsNotification `
-      -Title "SmartM365 M365 licenses inventory completed" `
+      -Title "SmartM365 M365 licenses inventory success" `
       -Message $resultSummary `
       -Level "SUCCESS" `
       -Channel "Infos" `
