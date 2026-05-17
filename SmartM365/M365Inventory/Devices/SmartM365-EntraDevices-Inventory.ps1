@@ -26,6 +26,9 @@ Generates additional focused reports:
 
 Uses SmartM365.Core for initialization, logging, CSV export, cleanup and global error notification.
 
+.PARAMETER Tenant
+Tenant profile key to load from Config/Tenants. Defaults to test.
+
 .PARAMETER OutputPath
 Specifies the output directory for the generated CSV and log files.
 
@@ -52,7 +55,7 @@ Scopes: Directory.Read.All
 
 param(
     [string]$Tenant = 'test',
-[string]$OutputPath,
+    [string]$OutputPath,
     [switch]$Connect,
     [switch]$InteractiveAuth,
     [string]$OperatingSystemFilter = "Windows",
@@ -434,10 +437,102 @@ function Get-EntraDeviceColumns {
     )
 }
 
+function New-SmartM365AiHelpUrl {
+    [CmdletBinding()]
+    param(
+        [string]$ScriptName,
+        [string]$Phase,
+        [string]$ErrorMessage
+    )
+
+    $query = "SmartM365 {0} {1} {2}" -f $ScriptName, $Phase, $ErrorMessage
+    return "https://www.bing.com/search?q={0}" -f [uri]::EscapeDataString($query)
+}
+
+function Send-EntraDevicesTeamsInfo {
+    [CmdletBinding()]
+    param(
+        [int]$TotalDevices,
+        [int]$ExportedDevices,
+        [int]$RegisteredPendingCount,
+        [int]$HardwareConflictCount,
+        [int]$RemovalCandidateCount,
+        [string]$MainCsvPath
+    )
+
+    $resultSummary = "Entra devices inventory completed successfully. Total devices: {0}; exported devices: {1}; registered pending: {2}; hardware conflicts: {3}; removal candidates: {4}." -f $TotalDevices, $ExportedDevices, $RegisteredPendingCount, $HardwareConflictCount, $RemovalCandidateCount
+
+    $facts = [ordered]@{
+        'Script'             = $script:SmartM365ScriptName
+        'Tenant'             = $Tenant
+        'Organization'       = $OrgDomain
+        'Computer'           = $env:COMPUTERNAME
+        'Timestamp'          = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        'CSV path'           = $MainCsvPath
+        'Result summary'     = $resultSummary
+        'Total devices'      = $TotalDevices
+        'Exported devices'   = $ExportedDevices
+        'Registered pending' = $RegisteredPendingCount
+        'Hardware conflicts' = $HardwareConflictCount
+        'Removal candidates' = $RemovalCandidateCount
+    }
+
+    Send-SmartM365TeamsNotification `
+        -Title 'Azure Entra devices inventory - SUCCESS' `
+        -Message $resultSummary `
+        -Level SUCCESS `
+        -Channel Infos `
+        -ResultSummary $resultSummary `
+        -Facts $facts | Out-Null
+}
+
+function Send-EntraDevicesTeamsAlert {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [string]$Phase = 'Unknown',
+        [string]$CsvPath = ''
+    )
+
+    $innerMessages = New-Object System.Collections.Generic.List[string]
+    $inner = $ErrorRecord.Exception.InnerException
+    while ($inner) {
+        $innerMessages.Add($inner.Message) | Out-Null
+        $inner = $inner.InnerException
+    }
+
+    $message = $ErrorRecord.Exception.Message
+    $helpUrl = New-SmartM365AiHelpUrl -ScriptName $script:SmartM365ScriptName -Phase $Phase -ErrorMessage $message
+    $facts = [ordered]@{
+        'Script'             = $script:SmartM365ScriptName
+        'Tenant'             = $Tenant
+        'Organization'       = $OrgDomain
+        'Computer'           = $env:COMPUTERNAME
+        'Timestamp'          = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        'Failed phase'       = $Phase
+        'Exception message'  = $message
+        'Inner exception'    = if ($innerMessages.Count -gt 0) { $innerMessages -join ' | ' } else { '' }
+        'Log path'           = $global:LogTextFile
+        'Transcript path'    = $global:logTranscriptFile
+        'Output path'        = $OutputPath
+        'CSV path'           = $CsvPath
+        'AI help URL'        = $helpUrl
+    }
+
+    Send-SmartM365TeamsNotification `
+        -Title 'Azure Entra devices inventory - ERROR' `
+        -Message $message `
+        -Level ERROR `
+        -Channel Alerts `
+        -HelpUrl $helpUrl `
+        -Facts $facts | Out-Null
+}
+
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
 $ScriptVersion = "1.0"
+$script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -450,6 +545,11 @@ try {
     WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
+    try {
+        Send-EntraDevicesTeamsAlert -ErrorRecord $_ -Phase 'Initialization' -CsvPath ''
+    } catch {
+        Write-Host "Failed to send Teams alert for initialization failure: $_" -ForegroundColor Yellow
+    }
     exit 1
 }
 
@@ -457,6 +557,13 @@ try {
 # MAIN TRY / CATCH / FINALLY
 # ==========================================================
 $connectedGraphInThisRun = $false
+$script:ExitCode = 0
+$currentOperation = 'Starting main processing'
+$totalDeviceCount = 0
+$registeredPendingCount = 0
+$hardwareConflictCount = 0
+$removalCandidateCount = 0
+$mainLatestCsvPath = ''
 $results = @()
 
 try {
@@ -464,69 +571,40 @@ try {
     # ------------------------
     # Connect to Microsoft Graph via SmartM365.Core / Connect-SmartM365CloudSession
     # ------------------------
-    function Test-GraphConnection {
-        try {
-            $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization" -ErrorAction Stop
-            return $true
-        } catch {
-            return $false
-        }
+    $currentOperation = 'Disconnecting existing Microsoft Graph session'
+    Write-Host "Existing Graph session (if any) will be disconnected before connection..." -ForegroundColor Cyan
+    Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true -VerboseDisconnect:$true
+
+    $currentOperation = 'Connecting to Microsoft Graph'
+    $connectParams = @{
+        ExchangeOnline = $false
+        Graph          = $true
+        GraphScopes    = @("Directory.Read.All")
     }
 
-    # Detect existing Graph session
-    $graphContext = $null
-    if (Get-Command Get-MgContext -ErrorAction SilentlyContinue) {
-        try {
-            $graphContext = Get-MgContext -ErrorAction SilentlyContinue
-        } catch { }
-    }
-
-    $needConnect = $false
-
-    if ($Connect) {
-        Write-Host "Connect switch specified: existing Graph session (if any) will be disconnected and reconnected..." -ForegroundColor Cyan
-        Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true -VerboseDisconnect:$true
-        $needConnect = $true
+    if (-not $InteractiveAuth) {
+        $connectParams.AppId        = $AppId
+        $connectParams.Thumbprint   = $Thumb
+        $connectParams.TenantId     = $TenantId
+        $connectParams.Organization = $OrgDomain
+        WriteLog -Message "Connecting to Microsoft Graph with app-only certificate authentication." "INFO"
     } else {
-        if ($graphContext -and (Test-GraphConnection)) {
-            Write-Host "Existing Microsoft Graph session detected. Reusing current connection." -ForegroundColor Cyan
-            $needConnect = $false
-        } else {
-            Write-Host "No existing Graph session detected. Will establish a new connection..." -ForegroundColor Cyan
-            $needConnect = $true
-        }
+        WriteLog -Message "Connecting to Microsoft Graph with interactive authentication." "INFO"
     }
 
-    if ($needConnect) {
-        $connectParams = @{
-            ExchangeOnline = $false
-            Graph          = $true
-            GraphScopes    = @("Directory.Read.All")
-        }
+    $connectResult = Connect-SmartM365CloudSession @connectParams
 
-        if (-not $InteractiveAuth) {
-            $connectParams.AppId        = $AppId
-            $connectParams.Thumbprint   = $Thumb
-            $connectParams.TenantId     = $TenantId
-            $connectParams.Organization = $OrgDomain
-            WriteLog -Message "Connecting to Microsoft Graph with app-only certificate authentication." "INFO"
-        } else {
-            WriteLog -Message "Connecting to Microsoft Graph with interactive authentication." "INFO"
-        }
-
-        $connectResult = Connect-SmartM365CloudSession @connectParams
-
-        if (-not $connectResult.GraphConnected) {
-            throw "Failed to connect to Microsoft Graph."
-        }
-
-        $connectedGraphInThisRun = $connectResult.GraphConnected
+    if (-not $connectResult.GraphConnected) {
+        throw "Failed to connect to Microsoft Graph."
     }
+
+    $connectedGraphInThisRun = $connectResult.GraphConnected
 
     # ------------------------
+    $currentOperation = 'Running preflight checks'
     Invoke-SmartM365Preflight `
         -ScriptName $TaskName `
-        -RequiredModules @('Microsoft.Graph.Identity.DirectoryManagement') `
+        -RequiredModules @('Microsoft.Graph.Authentication','Microsoft.Graph.Identity.DirectoryManagement') `
         -RequiredCommands @('Get-MgDevice') `
         -OutputPaths @($OutputPath) `
         -GraphProbeUris @(
@@ -536,6 +614,7 @@ try {
 
     # Retrieve Azure Entra (Azure AD) devices
     # ------------------------
+    $currentOperation = 'Retrieving Azure Entra devices'
     WriteLog -Message "Retrieving Azure Entra (Azure AD) devices..."
 
     $deviceProperties = @(
@@ -569,11 +648,13 @@ try {
     )
 
     $devices = @(Get-MgDevice -All -Property ($deviceProperties -join ','))
+    $totalDeviceCount = $devices.Count
 
     WriteLog -Message "Azure Entra devices retrieved: $($devices.Count)"
 
     if (-not $devices -or $devices.Count -eq 0) {
         WriteLog -Message "No Azure Entra devices found. Exiting." "WARNING"
+        Send-EntraDevicesTeamsInfo -TotalDevices $totalDeviceCount -ExportedDevices 0 -RegisteredPendingCount 0 -HardwareConflictCount 0 -RemovalCandidateCount 0 -MainCsvPath ''
         return
     }
 
@@ -590,6 +671,7 @@ try {
 
     if (-not $devices -or $devices.Count -eq 0) {
         WriteLog -Message "No Azure Entra devices match the current OS filter. Exiting." "WARNING"
+        Send-EntraDevicesTeamsInfo -TotalDevices $totalDeviceCount -ExportedDevices 0 -RegisteredPendingCount 0 -HardwareConflictCount 0 -RemovalCandidateCount 0 -MainCsvPath ''
         return
     }
 
@@ -605,6 +687,7 @@ try {
 
         if (-not $devices -or $devices.Count -eq 0) {
             WriteLog -Message "No Azure Entra devices with TrustType = '$TrustTypeFilter' after filters. Exiting." "WARNING"
+            Send-EntraDevicesTeamsInfo -TotalDevices $totalDeviceCount -ExportedDevices 0 -RegisteredPendingCount 0 -HardwareConflictCount 0 -RemovalCandidateCount 0 -MainCsvPath ''
             return
         }
     }
@@ -615,6 +698,7 @@ try {
     # ------------------------
     # Build result objects (Entra-only view, with parsed labels)
     # ------------------------
+    $currentOperation = 'Building inventory results'
     $results = $devices | ForEach-Object {
         $objId        = Get-SafeProperty $_ 'Id'
         $systemLabels = Join-OrNull (Get-SafeProperty $_ 'SystemLabels')
@@ -712,8 +796,9 @@ try {
     # ------------------------
     # Export CSV - main Entra inventory
     # ------------------------
+    $currentOperation = 'Exporting main Entra devices CSV'
     Write-Host "`n--- Export CSV (main Entra devices inventory) ---"
-$BaseFileName = "M365_Entra_Devices"
+    $BaseFileName = "M365_Entra_Devices"
 
     ExportAndCopyCsv -BaseFileName $BaseFileName `
        -OutputPath $OutputPath `
@@ -724,6 +809,7 @@ $BaseFileName = "M365_Entra_Devices"
 
     WriteLog -Message "Export completed: $global:csvFilePath1"
     WriteLog -Message "Number of exported Entra devices: $($results.Count)"
+    $mainLatestCsvPath = $global:csvFilePath3
 
     # ------------------------
     # Global report: Registered pending (no ApproximateLastSignInDateTime)
@@ -733,11 +819,12 @@ $BaseFileName = "M365_Entra_Devices"
     $registeredPending = $results | Where-Object {
         -not $_.ApproximateLastSignInDateTime
     }
+    $registeredPendingCount = @($registeredPending).Count
 
     if ($registeredPending -and $registeredPending.Count -gt 0) {
         WriteLog -Message ("Registered pending devices found: {0}" -f $registeredPending.Count)
 
-$BaseFileNamePending = "M365_Entra_Devices_RegisteredPending"
+        $BaseFileNamePending = "M365_Entra_Devices_RegisteredPending"
 
         ExportAndCopyCsv -BaseFileName $BaseFileNamePending `
             -OutputPath $OutputPath `
@@ -796,9 +883,10 @@ $BaseFileNamePending = "M365_Entra_Devices_RegisteredPending"
         }
 
     if ($hwConflicts -and $hwConflicts.Count -gt 0) {
+        $hardwareConflictCount = @($hwConflicts).Count
         WriteLog -Message "HardwareId conflict entries found: $($hwConflicts.Count)"
 
-$BaseFileNameHwConflicts = "M365_Entra_Devices_HardwareIdConflicts"
+        $BaseFileNameHwConflicts = "M365_Entra_Devices_HardwareIdConflicts"
 
         ExportAndCopyCsv -BaseFileName $BaseFileNameHwConflicts `
             -OutputPath $OutputPath `
@@ -848,7 +936,7 @@ $BaseFileNameHwConflicts = "M365_Entra_Devices_HardwareIdConflicts"
         if ($hwPending.Count -gt 0) {
             WriteLog -Message "Registered pending-like entries in HardwareId conflicts: $($hwPending.Count)"
 
-$BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPending"
+            $BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPending"
 
             ExportAndCopyCsv -BaseFileName $BaseFileNameHwPending `
                 -OutputPath $OutputPath `
@@ -957,9 +1045,10 @@ $BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPendi
     if ($remediationRows.Count -eq 0) {
         WriteLog -Message "No removal candidates identified based on HardwareId duplicates." "INFO"
     } else {
+        $removalCandidateCount = $remediationRows.Count
         WriteLog -Message ("Removal candidates identified: {0}" -f $remediationRows.Count) "INFO"
 
-        $BaseFileNameRem = "M365_EntraDevices_RemovalCandidates"
+        $BaseFileNameRem = "M365_Entra_Devices_RemovalCandidates"
 
         ExportAndCopyCsv -BaseFileName $BaseFileNameRem `
             -OutputPath $OutputPath `
@@ -971,7 +1060,7 @@ $BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPendi
         WriteLog -Message "Remediation candidates CSV exported."
 
         $timestamp             = Get-Date -Format "yyyyMMdd_HHmmss"
-        $commandScriptFileName = "M365_EntraDevices_RemoveCandidates_$timestamp.ps1"
+        $commandScriptFileName = "SmartM365-EntraDevices-RemoveCandidates_$timestamp.ps1"
         $commandScriptPath     = Join-Path $OutputPath $commandScriptFileName
 
         $lines = @()
@@ -1095,11 +1184,27 @@ $BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPendi
         WriteLog -Message ("Remove-MgDevice command script generated: {0}" -f $commandScriptPath)
     }
 
+    Send-EntraDevicesTeamsInfo `
+        -TotalDevices $totalDeviceCount `
+        -ExportedDevices (@($results).Count) `
+        -RegisteredPendingCount $registeredPendingCount `
+        -HardwareConflictCount $hardwareConflictCount `
+        -RemovalCandidateCount $removalCandidateCount `
+        -MainCsvPath $mainLatestCsvPath
+
 }
 catch {
     $globalError = $_
+    $script:ExitCode = 1
     WriteLog -Message ("Global error in Azure Entra devices inventory: {0}" -f $globalError) "ERROR"
     Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
+
+    try {
+        Send-EntraDevicesTeamsAlert -ErrorRecord $globalError -Phase $currentOperation -CsvPath $mainLatestCsvPath
+    }
+    catch {
+        WriteLog -Message ("Failed to send Teams alert notification: {0}" -f $_) "ERROR"
+    }
 
     try {
         $title = "Azure Entra devices inventory - ERROR"
@@ -1137,7 +1242,7 @@ finally {
     }
 
     try {
-        RemoveOldFiles -Path $OutputPath     -Filter "*.csv" -KeepCount 150 -LogFile $global:LogTextFile
+        RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile
         RemoveOldFiles -Path $global:LogPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile
     } catch {
         WriteLog -Message ("Error during cleanup in finally: {0}" -f $_) "WARNING"
@@ -1148,6 +1253,10 @@ finally {
     try {
         Stop-Transcript | Out-Null
     } catch {
+    }
+
+    if ($script:ExitCode -ne 0) {
+        exit $script:ExitCode
     }
 }
 

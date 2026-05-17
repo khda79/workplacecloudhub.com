@@ -7,6 +7,9 @@
     exports a timestamped CSV to OutputPath, and writes a non-timestamped "LAST"
     CSV to LatestCsvFolderPath.
 
+.PARAMETER Tenant
+    Tenant profile key to load from Config/Tenants. Defaults to test.
+
 .PARAMETER Connect
     Kept for compatibility. The script always disconnects any existing Microsoft Graph session before connecting.
 
@@ -19,7 +22,7 @@
 
 param(
     [string]$Tenant = 'test',
-[switch]$Connect,
+    [switch]$Connect,
     [string]$OutputPath,
     [string]$OutputFileName = "M365_Entra_VerifiedDomains.csv"
 )
