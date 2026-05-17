@@ -1,0 +1,50 @@
+IntuneRemediationsInProduction/
+IntuneInventory/IntuneRemediationsInProduction/
+SmartM365/IntuneRemediationsInProduction/
+SmartM365/IntuneInventory/IntuneRemediationsInProduction/
+SmartM365/
+.delete-empty/
+
+# Local documentation / agent notes
+*.md
+!/README.md
+
+# Local configuration
+*.local.json
+
+# Secrets / Certificates
+*.pfx
+*.cer
+*.pem
+*.key
+
+# Credentials
+*.cred
+*.secret
+
+# Logs
+Logs/
+*.log
+
+# Reports / exports
+Exports/
+Reports/
+CSV/
+Output/
+
+# Temporary
+Temp/
+tmp/
+*.tmp
+*.bak
+*.zip
+
+# VSCode
+.vscode/
+
+# PowerShell
+*.ps1xml
+
+# Windows
+Thumbs.db
+desktop.ini
