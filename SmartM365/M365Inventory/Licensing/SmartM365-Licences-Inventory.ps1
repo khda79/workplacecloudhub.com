@@ -4,11 +4,14 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .NOTES
-    Author: https://github.com/khda79/M365
+  Author: https://github.com/khda79/M365
   Version: 1.0
   PowerShell: PowerShell 7+
-  Scopes: Directory.Read.All
-  Requires: Microsoft.Graph PowerShell SDK
+  Scopes: Directory.Read.All, User.Read.All
+  Requires: Microsoft.Graph.Authentication
+            Microsoft.Graph.Identity.DirectoryManagement
+            Microsoft.Graph.Users
+            Microsoft.Graph.Groups
             SmartM365.Core.psd1
 #>
 
@@ -372,6 +375,116 @@ function Ensure-GraphModules {
   }
 }
 
+function Get-InnerExceptionSummary {
+  param([System.Exception]$Exception)
+
+  $innerMessages = New-Object System.Collections.Generic.List[string]
+  $inner = if ($Exception) { $Exception.InnerException } else { $null }
+  while ($null -ne $inner) {
+    if (-not [string]::IsNullOrWhiteSpace($inner.Message)) {
+      $innerMessages.Add($inner.Message) | Out-Null
+    }
+    $inner = $inner.InnerException
+  }
+
+  return ($innerMessages -join " | ")
+}
+
+function Get-GeneratedCsvSummary {
+  $paths = @()
+  if ($global:csvGeneratedPaths) {
+    $paths = @($global:csvGeneratedPaths | Sort-Object -Unique)
+  }
+
+  if ($paths.Count -eq 0) {
+    return ""
+  }
+
+  return ($paths | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join "; "
+}
+
+function Send-LicensesInventoryErrorNotification {
+  param(
+    [Parameter(Mandatory)]$ErrorRecord,
+    [string]$Operation,
+    [string]$OutputPath
+  )
+
+  try {
+    $exception = $ErrorRecord.Exception
+    $scriptName = [System.IO.Path]::GetFileName($PSCommandPath)
+    $errorContext = @(
+      "Script: $scriptName"
+      "Tenant/Organization: $OrgDomain"
+      "Operation: $Operation"
+      "Error: $($exception.Message)"
+      "Output path: $OutputPath"
+    ) -join "`n"
+
+    $helpUrl = "https://chat.openai.com/?q={0}" -f [System.Uri]::EscapeDataString("Help troubleshoot this SmartM365 M365 licenses inventory error:`n$errorContext")
+    $facts = @{
+      "Script name"         = $scriptName
+      "Tenant/Organization" = $OrgDomain
+      "Failed operation"    = $Operation
+      "Exception message"   = $exception.Message
+      "Inner exception"     = Get-InnerExceptionSummary -Exception $exception
+      "Log path"            = $global:LogTextFile
+      "Transcript path"     = $global:logTranscriptFile
+      "Output path"         = $OutputPath
+      "Generated CSV files" = Get-GeneratedCsvSummary
+    }
+
+    Send-SmartM365TeamsNotification `
+      -Title "SmartM365 M365 licenses inventory failed" `
+      -Message "A terminal error occurred in Microsoft 365 licenses inventory." `
+      -Level "ERROR" `
+      -Channel "Alerts" `
+      -Facts $facts `
+      -HelpUrl $helpUrl | Out-Null
+  }
+  catch {
+    WriteLog -Message ("Failed to send Teams error notification: {0}" -f $_.Exception.Message) "ERROR"
+  }
+}
+
+function Send-LicensesInventorySuccessNotification {
+  param(
+    [int]$UsersProcessed,
+    [int]$UserLicenseRows,
+    [int]$ServicePlanRows,
+    [int]$TenantSkuRows,
+    [int]$GroupRows,
+    [string]$OutputPath
+  )
+
+  try {
+    $scriptName = [System.IO.Path]::GetFileName($PSCommandPath)
+    $facts = @{
+      "Script name"         = $scriptName
+      "Tenant/Organization" = $OrgDomain
+      "Users processed"     = $UsersProcessed
+      "User license rows"   = $UserLicenseRows
+      "Service plan rows"   = $ServicePlanRows
+      "Tenant SKU rows"     = $TenantSkuRows
+      "Group rows"          = $GroupRows
+      "Output path"         = $OutputPath
+      "Generated CSV files" = Get-GeneratedCsvSummary
+      "Log path"            = $global:LogTextFile
+      "Transcript path"     = $global:logTranscriptFile
+    }
+
+    Send-SmartM365TeamsNotification `
+      -Title "SmartM365 M365 licenses inventory completed" `
+      -Message ("Microsoft 365 licenses inventory completed without error. Users processed: {0}; user license rows: {1}; service plan rows: {2}; tenant SKUs: {3}; groups: {4}." -f $UsersProcessed, $UserLicenseRows, $ServicePlanRows, $TenantSkuRows, $GroupRows) `
+      -Level "SUCCESS" `
+      -Channel "Infos" `
+      -Facts $facts | Out-Null
+  }
+  catch {
+    WriteLog -Message ("Failed to send Teams completion notification: {0}" -f $_.Exception.Message) "WARN"
+  }
+}
+
 function To-GuidOrNull {
   param($Value)
   try {
@@ -417,6 +530,12 @@ $ScriptVersion = "1.0"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $connectedGraphInThisRun = $false
+$currentOperation = "Initialize script environment"
+$usersProcessedCount = 0
+$userLicenseRowCount = 0
+$servicePlanRowCount = 0
+$tenantSkuRowCount = 0
+$groupRowCount = 0
 
 try {
   # ------------------------
@@ -428,72 +547,48 @@ try {
   $OutputPath = $InitializeOutputPath
   WriteLog -Message "Starting $TaskName..."
   WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
+  $currentOperation = "Load Microsoft Graph modules"
   Ensure-GraphModules
 
   # ------------------------
   # Connect to Microsoft Graph via SmartM365.Core / Connect-SmartM365CloudSession
   # ------------------------
-  function Test-GraphConnection {
-    try {
-      # Works in delegated or app-only (avoid /me)
-      $null = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization" -ErrorAction Stop
-      return $true
-    } catch {
-      return $false
-    }
-  }
-
-  # Detect existing Graph session
-  $graphContext = $null
-  if (Get-Command Get-MgContext -ErrorAction SilentlyContinue) {
-    try {
-      $graphContext = Get-MgContext -ErrorAction SilentlyContinue
-    } catch { }
-  }
-
-  $needConnect = $false
-
   if ($Connect) {
     Write-Host "Connect switch specified: existing Graph session (if any) will be disconnected and reconnected..." -ForegroundColor Cyan
-    Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true -VerboseDisconnect:$true
-    $needConnect = $true
   } else {
-    if ($graphContext -and (Test-GraphConnection)) {
-      Write-Host "Existing Microsoft Graph session detected. Reusing current connection." -ForegroundColor Cyan
-      $needConnect = $false
-    } else {
-      Write-Host "No existing Graph session detected. Will establish a new connection..." -ForegroundColor Cyan
-      $needConnect = $true
-    }
+    Write-Host "Disconnecting any existing Microsoft Graph session before connecting..." -ForegroundColor Cyan
   }
 
-  if ($needConnect) {
-    $connectParams = @{
-      ExchangeOnline = $false
-      Graph          = $true
-      GraphScopes    = @("Directory.Read.All")
-    }
+  $currentOperation = "Disconnect existing Microsoft Graph session"
+  Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true -VerboseDisconnect:$true
 
-    if (-not $InteractiveAuth) {
-      # Default: app-only certificate authentication
-      $connectParams.AppId        = $AppId
-      $connectParams.Thumbprint   = $Thumb
-      $connectParams.TenantId     = $TenantId
-      $connectParams.Organization = $OrgDomain
-      WriteLog -Message "Connecting to Microsoft Graph with app-only certificate authentication." "INFO"
-    } else {
-      WriteLog -Message "Connecting to Microsoft Graph with interactive authentication." "INFO"
-    }
-
-    $connectResult = Connect-SmartM365CloudSession @connectParams
-
-    if (-not $connectResult.GraphConnected) {
-      throw "Failed to connect to Microsoft Graph."
-    }
-
-    $connectedGraphInThisRun = $connectResult.GraphConnected
+  $currentOperation = "Connect to Microsoft Graph"
+  $connectParams = @{
+    ExchangeOnline = $false
+    Graph          = $true
+    GraphScopes    = @("Directory.Read.All", "User.Read.All")
   }
 
+  if (-not $InteractiveAuth) {
+    # Default: app-only certificate authentication
+    $connectParams.AppId        = $AppId
+    $connectParams.Thumbprint   = $Thumb
+    $connectParams.TenantId     = $TenantId
+    $connectParams.Organization = $OrgDomain
+    WriteLog -Message "Connecting to Microsoft Graph with app-only certificate authentication." "INFO"
+  } else {
+    WriteLog -Message "Connecting to Microsoft Graph with interactive authentication." "INFO"
+  }
+
+  $connectResult = Connect-SmartM365CloudSession @connectParams
+
+  if (-not $connectResult.GraphConnected) {
+    throw "Failed to connect to Microsoft Graph."
+  }
+
+  $connectedGraphInThisRun = $connectResult.GraphConnected
+
+  $currentOperation = "Run preflight checks"
   Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @(
     'https://graph.microsoft.com/v1.0/subscribedSkus',
     'https://graph.microsoft.com/v1.0/users?$top=1',
@@ -503,8 +598,14 @@ try {
     'Microsoft.Graph.Identity.DirectoryManagement',
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Groups'
+  ) -RequiredCommands @(
+    'Get-MgSubscribedSku',
+    'Get-MgUser',
+    'Get-MgUserLicenseDetail',
+    'Get-MgGroup'
   ) | Out-Null
   # ---------------- Tenant SKUs ----------------
+  $currentOperation = "Read tenant subscribed SKUs"
   WriteLog -Message "Reading tenant SubscribedSkus..."
   $subscribedSkus = Invoke-GraphWithRetry { Get-MgSubscribedSku -All }
   $tenantSkuMap = @{}
@@ -517,6 +618,7 @@ try {
   }
 
   # ---------------- CSV mapping + enforcement ----------------
+  $currentOperation = "Load SKU and service plan mapping CSV"
   $SkuMapByPart,$SkuMapById,$SvcMapByName,$SvcMapById = Load-SkuNameMap -Path $SkuNameCsvPath
   if ($RequireSkuNameCsv) {
     $csvExists = Test-Path -LiteralPath $SkuNameCsvPath
@@ -537,6 +639,7 @@ try {
   }
 
   # ---------------- Users (with LicenseAssignmentStates) ----------------
+  $currentOperation = "Retrieve users from Microsoft Graph"
   WriteLog -Message "Retrieving users..."
   $usersAll = Invoke-GraphWithRetry {
     Get-MgUser -All -Property "DisplayName","UserPrincipalName","Id","AssignedLicenses","Mail","ProxyAddresses","LicenseAssignmentStates"
@@ -575,6 +678,7 @@ try {
   }
 
   # ---------------- Build rows ----------------
+  $currentOperation = "Resolve user licenses and service plans"
   WriteLog -Message "Resolving licenses and building rows..."
   $resultsUsers      = New-Object System.Collections.Generic.List[object]
   $rowsPlansDetailed = New-Object System.Collections.Generic.List[object]
@@ -706,6 +810,7 @@ try {
   Write-Progress -Activity "Processing users" -Completed -Status "Done"
 
   # ---------------- Export Users ----------------
+  $currentOperation = "Export user license CSV"
   if (-not $resultsUsers -or $resultsUsers.Count -eq 0) {
     Write-Warning "No user license rows produced."
     WriteLog -Message "No Users rows to export."
@@ -720,6 +825,7 @@ $BaseFileName = "M365_Licenses_Users"
   }
 
   # ---------------- Export ServicePlans (single detailed CSV) ----------------
+  $currentOperation = "Export service plan CSV"
   if ($ServicePlans) {
     if ($rowsPlansDetailed.Count -gt 0) {
       Write-Host ""
@@ -752,6 +858,7 @@ $BaseFileName = "M365_Licenses_ServicePlans"
   }
 
   # ---------------- Export Tenant ----------------
+  $currentOperation = "Export tenant license CSV"
   $tenantRows = New-Object System.Collections.Generic.List[object]
   foreach ($kvp in $tenantSkuMap.GetEnumerator()) {
     $tenantRows.Add([PSCustomObject]@{
@@ -773,6 +880,7 @@ $BaseFileName = "M365_Licenses_Tenant"
   }
 
   # ---------------- Export Groups ----------------
+  $currentOperation = "Export group license CSV"
   $groupRows = New-Object System.Collections.Generic.List[object]
   foreach ($kvp in $groupAgg.GetEnumerator()) {
     $gid = $kvp.Key; $g = $kvp.Value
@@ -807,14 +915,31 @@ $BaseFileName = "M365_Licenses_Groups"
   }
 
   # ---------------- Disconnect / Cleanup ----------------
+  $usersProcessedCount = @($users).Count
+  $userLicenseRowCount = $resultsUsers.Count
+  $servicePlanRowCount = $rowsPlansDetailed.Count
+  $tenantSkuRowCount = $tenantRows.Count
+  $groupRowCount = $groupRows.Count
+
   if ($connectedGraphInThisRun) {
+    $currentOperation = "Disconnect Microsoft Graph"
     Write-Host ""
     Write-Host "--- Disconnect Cloud Services ---"
     Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true
   }
 
+  $currentOperation = "Apply retention cleanup"
   RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount 70 -LogFile $global:logTextFile
   RemoveOldFiles -Path $logPath    -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
+
+  $currentOperation = "Send Teams completion notification"
+  Send-LicensesInventorySuccessNotification `
+    -UsersProcessed $usersProcessedCount `
+    -UserLicenseRows $userLicenseRowCount `
+    -ServicePlanRows $servicePlanRowCount `
+    -TenantSkuRows $tenantSkuRowCount `
+    -GroupRows $groupRowCount `
+    -OutputPath $OutputPath
 
   WriteLog -Message "$TaskName completed."
   try { Stop-Transcript | Out-Null } catch {}
@@ -823,6 +948,7 @@ catch {
   $globalError = $_
   WriteLog -Message ("Global error in M365 licenses inventory: {0}" -f $globalError) "ERROR"
   Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
+  Send-LicensesInventoryErrorNotification -ErrorRecord $globalError -Operation $currentOperation -OutputPath $OutputPath
 
   # -------- Global error email notification --------
   try {
@@ -844,9 +970,17 @@ $($global:logTextFile)
       $attachments = @($global:logTextFile)
     }
 
-    Send-SmartM365Mail -Subject $title -Body $bodyHtml -Attachments $attachments -BodyAsHtml -HighPriority
+    Send-SmartM365Mail -Subject $title -BodyHtml $bodyHtml -Attachments $attachments -HighPriority
   } catch {
     WriteLog -Message ("Failed to send global error notification email: {0}" -f $_) "ERROR"
+  }
+
+  try {
+    if ($connectedGraphInThisRun) {
+      Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true
+    }
+  } catch {
+    WriteLog -Message ("Failed to disconnect Microsoft Graph after error: {0}" -f $_.Exception.Message) "WARNING"
   }
 
   try { Stop-Transcript | Out-Null } catch {}
