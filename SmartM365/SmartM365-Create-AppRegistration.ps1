@@ -842,6 +842,56 @@ function Set-SmartM365AuthLocalConfig {
     }
 }
 
+function Get-SmartM365LocalConfigCertificateThumbprint {
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath
+    )
+
+    if (-not (Test-Path -LiteralPath $ConfigPath)) {
+        return $null
+    }
+
+    try {
+        $config = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-SmartM365SetupStatus -Level WARN -Message ("Could not read local config for certificate reuse: {0}" -f $_.Exception.Message)
+        return $null
+    }
+
+    foreach ($propertyName in @('Thumbprint', 'Thumb')) {
+        if ($null -eq $config.PSObject.Properties[$propertyName]) {
+            continue
+        }
+
+        $configuredThumbprint = [string]$config.$propertyName
+        if ([string]::IsNullOrWhiteSpace($configuredThumbprint)) {
+            continue
+        }
+
+        $normalizedThumbprint = $configuredThumbprint.Replace(' ', '').ToUpperInvariant()
+        $certificate = @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My') |
+            ForEach-Object { Get-ChildItem -Path $_ -ErrorAction SilentlyContinue } |
+            Where-Object { $_.Thumbprint -eq $normalizedThumbprint } |
+            Select-Object -First 1
+
+        if ($null -eq $certificate) {
+            Write-SmartM365SetupStatus -Level WARN -Message ("Local config certificate thumbprint '{0}' was not found in CurrentUser\My or LocalMachine\My; falling back to app key lookup." -f $normalizedThumbprint)
+            return $null
+        }
+
+        if (-not $certificate.HasPrivateKey) {
+            Write-SmartM365SetupStatus -Level WARN -Message ("Local config certificate thumbprint '{0}' exists but has no private key; falling back to app key lookup." -f $normalizedThumbprint)
+            return $null
+        }
+
+        Write-SmartM365SetupStatus -Message ("Reusing certificate thumbprint from SmartM365.global.local.json: {0}" -f $normalizedThumbprint) -Level OK
+        return $normalizedThumbprint
+    }
+
+    return $null
+}
+
 Initialize-SmartM365SetupLogging -Path $LogPath
 
 try {
@@ -869,7 +919,13 @@ if ($existingApps.Count -gt 1) {
 }
 
 $existingApplicationForCertificate = if ($existingApps.Count -eq 1) { $existingApps[0] } else { $null }
-$certificate = Get-SmartM365Certificate -Thumbprint $CertificateThumbprint -AppDisplayName $DisplayName -ValidityYears $CertificateYears -Application $existingApplicationForCertificate
+$effectiveCertificateThumbprint = if (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+    $CertificateThumbprint
+}
+else {
+    Get-SmartM365LocalConfigCertificateThumbprint -ConfigPath $localConfigPath
+}
+$certificate = Get-SmartM365Certificate -Thumbprint $effectiveCertificateThumbprint -AppDisplayName $DisplayName -ValidityYears $CertificateYears -Application $existingApplicationForCertificate
 
 if ($existingApps.Count -eq 1) {
     if (-not $UpdateExisting) {
