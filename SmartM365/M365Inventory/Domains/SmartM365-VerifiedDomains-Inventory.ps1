@@ -3,9 +3,9 @@
     Azure AD (Entra ID) verified domains inventory.
 
 .DESCRIPTION
-    Retrieves verified Azure AD domains from Microsoft Graph /domains,
+    Retrieves verified Azure AD domains from Microsoft Graph (Get-MgDomain),
     exports a timestamped CSV to OutputPath, and writes a non-timestamped "LAST"
-    CSV to <local-share-path>
+    CSV to LatestCsvFolderPath.
 
 .PARAMETER Connect
     Forces disconnect/reconnect to Microsoft Graph.
@@ -15,8 +15,6 @@
 
 .PARAMETER OutputFileName
     Base CSV file name (default: M365_Entra_VerifiedDomains.csv)
-.NOTES
-    Author: https://github.com/khda79/M365
 #>
 
 param(
@@ -151,8 +149,6 @@ function Get-ScriptLocalConfigValue {
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
 
-
-
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
 
@@ -161,89 +157,10 @@ $global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocal
 $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
+
 # ==========================================================
 # App-only authentication parameters (same app as other scripts)
 # ==========================================================
-function Get-ScriptLocalConfig {
-    [CmdletBinding()]
-    param()
-
-    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
-    if (-not (Test-Path -LiteralPath $configPath)) {
-        return [pscustomobject]@{}
-    }
-
-    try {
-        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-    }
-    catch {
-        throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
-    }
-}
-
-function Get-ScriptLocalConfigValue {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)][string]$Name,
-        $DefaultValue
-    )
-
-    $property = $Config.PSObject.Properties[$Name]
-    if ($null -ne $property -and $null -ne $property.Value) {
-        if ($property.Value -is [string]) {
-            $localValue = $property.Value.Trim()
-            if ($localValue -and $localValue -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) {
-                return Resolve-SmartM365ConfigValue -Value $property.Value
-            }
-        }
-        else {
-            return Resolve-SmartM365ConfigValue -Value $property.Value
-        }
-    }
-
-
-    if ($null -eq $script:SmartM365GlobalConfig) {
-        $script:SmartM365GlobalConfig = [pscustomobject]@{}
-        $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
-        while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
-            if (Test-Path -LiteralPath $globalConfigPath) {
-                try {
-                    $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                }
-                catch {
-                    throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
-                }
-                break
-            }
-            $parent = Split-Path -Path $searchRoot -Parent
-            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
-            $searchRoot = $parent
-        }
-    }
-
-    $globalProperty = $script:SmartM365GlobalConfig.PSObject.Properties[$Name]
-    if ($null -ne $globalProperty -and $null -ne $globalProperty.Value) {
-        if ($globalProperty.Value -is [string] -and [string]::IsNullOrWhiteSpace($globalProperty.Value)) {
-            return $DefaultValue
-        }
-        return Resolve-SmartM365ConfigValue -Value $globalProperty.Value
-    }
-    return $DefaultValue
-}
-
-$ScriptLocalConfig = Get-ScriptLocalConfig
-
-
-$global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
-$global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
-
-$global:EnableSharePointUpload = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableSharePointUpload' -DefaultValue $false)
-$global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSiteHostname' -DefaultValue ''
-$global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
-$global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
-$global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
@@ -302,7 +219,8 @@ function Write-CsvAtomically {
 function Ensure-GraphModules {
     # Avoid importing Microsoft.Graph meta-module (slow).
     $required = @(
-        "Microsoft.Graph.Authentication"
+        "Microsoft.Graph.Authentication",
+        "Microsoft.Graph.Identity.DirectoryManagement"
     )
 
     foreach ($name in $required) {
@@ -368,31 +286,8 @@ try {
     # ==========================================================
     # Retrieve verified domains
     # ==========================================================
-    WriteLog -Message "Retrieving Azure AD domains via Microsoft Graph /domains..."
-    $allDomains = @()
-    $domainUri = 'https://graph.microsoft.com/v1.0/domains?$select=id,isVerified,isDefault,isInitial,authenticationType,supportedServices,availabilityStatus'
-    do {
-        $domainResponse = Invoke-MgGraphRequest -Method GET -Uri $domainUri -ErrorAction Stop
-        $domainValues = $null
-        if ($domainResponse -is [System.Collections.IDictionary]) {
-            if ($domainResponse.Contains('value')) {
-                $domainValues = $domainResponse['value']
-            }
-            $domainUri = if ($domainResponse.Contains('@odata.nextLink')) { [string]$domainResponse['@odata.nextLink'] } else { $null }
-        }
-        else {
-            $valueProperty = $domainResponse.PSObject.Properties['value']
-            if ($null -ne $valueProperty) {
-                $domainValues = $valueProperty.Value
-            }
-            $nextLinkProperty = $domainResponse.PSObject.Properties['@odata.nextLink']
-            $domainUri = if ($null -ne $nextLinkProperty) { [string]$nextLinkProperty.Value } else { $null }
-        }
-
-        if ($domainValues) {
-            $allDomains += @($domainValues)
-        }
-    } while (-not [string]::IsNullOrWhiteSpace($domainUri))
+    WriteLog -Message "Retrieving Azure AD domains via Get-MgDomain..."
+    $allDomains = Get-MgDomain -All
 
     $verifiedDomains = $allDomains | Where-Object { $_.IsVerified -eq $true } | ForEach-Object {
         [pscustomobject]@{
