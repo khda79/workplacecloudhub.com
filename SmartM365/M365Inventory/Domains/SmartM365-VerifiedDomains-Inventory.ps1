@@ -1,0 +1,492 @@
+<#
+.SYNOPSIS
+    Azure AD (Entra ID) verified domains inventory.
+
+.DESCRIPTION
+    Retrieves verified Azure AD domains from Microsoft Graph /domains,
+    exports a timestamped CSV to OutputPath, and writes a non-timestamped "LAST"
+    CSV to <local-share-path>
+
+.PARAMETER Connect
+    Forces disconnect/reconnect to Microsoft Graph.
+
+.PARAMETER OutputPath
+    Optional override output folder. If omitted, local configuration OutputPath is used.
+
+.PARAMETER OutputFileName
+    Base CSV file name (default: M365_Entra_VerifiedDomains.csv)
+.NOTES
+    Author: https://github.com/khda79/M365
+#>
+
+param(
+    [switch]$Connect,
+    [string]$OutputPath,
+    [string]$OutputFileName = "M365_Entra_VerifiedDomains.csv"
+)
+
+function Get-ScriptLocalConfig {
+    [CmdletBinding()]
+    param()
+
+    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        return [pscustomobject]@{}
+    }
+
+    try {
+        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
+    }
+}
+
+function Resolve-SmartM365ConfigValue {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value)) {
+        return $Value
+    }
+
+    if ($Value -notmatch '\{\{[^}]+\}\}') {
+        return $Value
+    }
+
+    if ($null -eq $script:SmartM365GlobalConfig) {
+        $script:SmartM365GlobalConfig = [pscustomobject]@{}
+        $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($ScriptRoot) { $ScriptRoot } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
+        while ($searchRoot) {
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+            if (Test-Path -LiteralPath $globalConfigPath) {
+                try {
+                    $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                }
+                catch {
+                    throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
+                }
+                break
+            }
+            $parent = Split-Path -Path $searchRoot -Parent
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
+            $searchRoot = $parent
+        }
+    }
+
+    $resolved = $Value
+    for ($i = 0; $i -lt 10; $i++) {
+        $matches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
+        if ($matches.Count -eq 0) { break }
+
+        $changed = $false
+        foreach ($match in $matches) {
+            $tokenName = $match.Groups['Name'].Value
+            $tokenProperty = $script:SmartM365GlobalConfig.PSObject.Properties[$tokenName]
+            if ($null -eq $tokenProperty -or $null -eq $tokenProperty.Value) { continue }
+
+            $tokenValue = Resolve-SmartM365ConfigValue -Value $tokenProperty.Value
+            if ($null -eq $tokenValue) { continue }
+
+            $resolved = $resolved.Replace($match.Value, [string]$tokenValue)
+            $changed = $true
+        }
+
+        if (-not $changed) { break }
+    }
+
+    return $resolved
+}
+function Get-ScriptLocalConfigValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $DefaultValue
+    )
+
+    $property = $Config.PSObject.Properties[$Name]
+    if ($null -ne $property -and $null -ne $property.Value) {
+        if ($property.Value -is [string]) {
+            $localValue = $property.Value.Trim()
+            if ($localValue -and $localValue -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+                return Resolve-SmartM365ConfigValue -Value $property.Value
+            }
+        }
+        else {
+            return Resolve-SmartM365ConfigValue -Value $property.Value
+        }
+    }
+
+
+    if ($null -eq $script:SmartM365GlobalConfig) {
+        $script:SmartM365GlobalConfig = [pscustomobject]@{}
+        $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
+        while ($searchRoot) {
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+            if (Test-Path -LiteralPath $globalConfigPath) {
+                try {
+                    $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                }
+                catch {
+                    throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
+                }
+                break
+            }
+            $parent = Split-Path -Path $searchRoot -Parent
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
+            $searchRoot = $parent
+        }
+    }
+
+    $globalProperty = $script:SmartM365GlobalConfig.PSObject.Properties[$Name]
+    if ($null -ne $globalProperty -and $null -ne $globalProperty.Value) {
+        if ($globalProperty.Value -is [string] -and [string]::IsNullOrWhiteSpace($globalProperty.Value)) {
+            return $DefaultValue
+        }
+        return Resolve-SmartM365ConfigValue -Value $globalProperty.Value
+    }
+    return $DefaultValue
+}
+
+$ScriptLocalConfig = Get-ScriptLocalConfig
+
+
+
+$global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
+$global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
+
+$global:EnableSharePointUpload = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableSharePointUpload' -DefaultValue $false)
+$global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSiteHostname' -DefaultValue ''
+$global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
+$global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
+$global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
+# ==========================================================
+# App-only authentication parameters (same app as other scripts)
+# ==========================================================
+function Get-ScriptLocalConfig {
+    [CmdletBinding()]
+    param()
+
+    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        return [pscustomobject]@{}
+    }
+
+    try {
+        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
+    }
+}
+
+function Get-ScriptLocalConfigValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $DefaultValue
+    )
+
+    $property = $Config.PSObject.Properties[$Name]
+    if ($null -ne $property -and $null -ne $property.Value) {
+        if ($property.Value -is [string]) {
+            $localValue = $property.Value.Trim()
+            if ($localValue -and $localValue -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+                return Resolve-SmartM365ConfigValue -Value $property.Value
+            }
+        }
+        else {
+            return Resolve-SmartM365ConfigValue -Value $property.Value
+        }
+    }
+
+
+    if ($null -eq $script:SmartM365GlobalConfig) {
+        $script:SmartM365GlobalConfig = [pscustomobject]@{}
+        $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
+        while ($searchRoot) {
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+            if (Test-Path -LiteralPath $globalConfigPath) {
+                try {
+                    $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                }
+                catch {
+                    throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
+                }
+                break
+            }
+            $parent = Split-Path -Path $searchRoot -Parent
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
+            $searchRoot = $parent
+        }
+    }
+
+    $globalProperty = $script:SmartM365GlobalConfig.PSObject.Properties[$Name]
+    if ($null -ne $globalProperty -and $null -ne $globalProperty.Value) {
+        if ($globalProperty.Value -is [string] -and [string]::IsNullOrWhiteSpace($globalProperty.Value)) {
+            return $DefaultValue
+        }
+        return Resolve-SmartM365ConfigValue -Value $globalProperty.Value
+    }
+    return $DefaultValue
+}
+
+$ScriptLocalConfig = Get-ScriptLocalConfig
+
+
+$global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
+$global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
+
+$global:EnableSharePointUpload = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableSharePointUpload' -DefaultValue $false)
+$global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSiteHostname' -DefaultValue ''
+$global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
+$global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
+$global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
+$AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue '00000000-0000-0000-0000-000000000000'
+$TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue '00000000-0000-0000-0000-000000000000'
+$Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
+$OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDomain' -DefaultValue 'contoso.onmicrosoft.com' # Not used by Graph, kept for consistency
+
+# ==========================================================
+# "LAST" share path (non-timestamped)
+# ==========================================================
+$OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'VerifiedDomainsCsvLogFolderPath' -DefaultValue $OutputPath
+$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ""
+
+# ==========================================================
+# PowerShell 7 minimum
+# ==========================================================
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host "This script requires PowerShell 7 or later." -ForegroundColor Red
+    Write-Host "Current PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
+    exit 1
+}
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+$MaximumFunctionCount = 32768
+
+# ==========================================================
+# Import SmartM365.Core module (psd1)
+# ==========================================================
+$modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
+try {
+    Import-Module $modulePath -ErrorAction Stop
+} catch {
+    Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
+    exit 1
+}
+
+function Write-CsvAtomically {
+    param(
+        [Parameter(Mandatory)][object[]]$InputObject,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $dir = Split-Path -Path $Path -Parent
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    $tmp = Join-Path $dir ("{0}.{1}.tmp" -f ([IO.Path]::GetFileNameWithoutExtension($Path)), ([guid]::NewGuid().ToString("N")))
+    try {
+        $InputObject | Export-Csv -Path $tmp -NoTypeInformation -Encoding UTF8
+        Move-Item -Path $tmp -Destination $Path -Force
+    } finally {
+        if (Test-Path $tmp) { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Ensure-GraphModules {
+    # Avoid importing Microsoft.Graph meta-module (slow).
+    $required = @(
+        "Microsoft.Graph.Authentication"
+    )
+
+    foreach ($name in $required) {
+        $m = Get-Module -ListAvailable -Name $name | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $m) {
+            throw "Required module '$name' is not installed. Install it with: Install-Module $name"
+        }
+        Import-Module $name -ErrorAction Stop | Out-Null
+    }
+}
+
+function Disconnect-GraphSafe {
+    try {
+        Disconnect-MgGraph -ErrorAction Stop | Out-Null
+    } catch {
+        WriteLog -Message ("Disconnect-MgGraph failed (non-fatal): {0}" -f $_.Exception.Message) "WARN"
+    }
+}
+
+#region Init
+$ScriptVersion = "1.0"
+$TaskNameCore  = "Azure AD verified domains inventory"
+$TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
+
+try {
+    $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    Start-Transcript -Path $global:logTranscriptFile -Append
+    WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
+    $OutputPath = $InitializeOutputPath
+    WriteLog -Message "Starting $TaskName..."
+    WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
+} catch {
+    Write-Host "Initialization failed: $_" -ForegroundColor Red
+    exit 1
+}
+#endregion
+
+try {
+    $logPath = Split-Path -Path $global:LogTextFile -Parent
+
+    # ==========================================================
+    # Connection management (Graph only - app-only certificate)
+    # ==========================================================
+    Ensure-GraphModules
+
+    if ($Connect) {
+        Write-Host "Connect switch specified: existing Microsoft Graph session (if any) will be disconnected and reconnected..." -ForegroundColor Cyan
+        Disconnect-GraphSafe
+    }
+
+    WriteLog -Message "Connecting to Microsoft Graph with app-only certificate authentication." "INFO"
+
+    Connect-MgGraph `
+        -ClientId $AppId `
+        -TenantId $TenantId `
+        -CertificateThumbprint $Thumb `
+        -NoWelcome `
+        -ErrorAction Stop | Out-Null
+
+    WriteLog -Message "Connected to Microsoft Graph."
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @('https://graph.microsoft.com/v1.0/domains?$top=1') | Out-Null
+
+    # ==========================================================
+    # Retrieve verified domains
+    # ==========================================================
+    WriteLog -Message "Retrieving Azure AD domains via Microsoft Graph /domains..."
+    $allDomains = @()
+    $domainUri = 'https://graph.microsoft.com/v1.0/domains?$select=id,isVerified,isDefault,isInitial,authenticationType,supportedServices,availabilityStatus'
+    do {
+        $domainResponse = Invoke-MgGraphRequest -Method GET -Uri $domainUri -ErrorAction Stop
+        $domainValues = $null
+        if ($domainResponse -is [System.Collections.IDictionary]) {
+            if ($domainResponse.Contains('value')) {
+                $domainValues = $domainResponse['value']
+            }
+            $domainUri = if ($domainResponse.Contains('@odata.nextLink')) { [string]$domainResponse['@odata.nextLink'] } else { $null }
+        }
+        else {
+            $valueProperty = $domainResponse.PSObject.Properties['value']
+            if ($null -ne $valueProperty) {
+                $domainValues = $valueProperty.Value
+            }
+            $nextLinkProperty = $domainResponse.PSObject.Properties['@odata.nextLink']
+            $domainUri = if ($null -ne $nextLinkProperty) { [string]$nextLinkProperty.Value } else { $null }
+        }
+
+        if ($domainValues) {
+            $allDomains += @($domainValues)
+        }
+    } while (-not [string]::IsNullOrWhiteSpace($domainUri))
+
+    $verifiedDomains = $allDomains | Where-Object { $_.IsVerified -eq $true } | ForEach-Object {
+        [pscustomobject]@{
+            Id                 = $_.Id
+            IsVerified         = $_.IsVerified
+            IsDefault          = $_.IsDefault
+            IsInitial          = $_.IsInitial
+            AuthenticationType = $_.AuthenticationType
+            SupportedServices  = ($_.SupportedServices -join ";")
+            AvailabilityStatus = $_.AvailabilityStatus
+        }
+    }
+
+    $countAll      = if ($allDomains) { ($allDomains | Measure-Object).Count } else { 0 }
+    $countVerified = if ($verifiedDomains) { ($verifiedDomains | Measure-Object).Count } else { 0 }
+
+    WriteLog -Message ("Domains retrieved (total): {0}" -f $countAll)
+    WriteLog -Message ("Domains retrieved (verified): {0}" -f $countVerified)
+
+    # ==========================================================
+    # Export CSV (timestamped) + write "LAST" to share (no timestamp)
+    # ==========================================================
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $baseName  = [IO.Path]::GetFileNameWithoutExtension($OutputFileName)
+    $ext       = [IO.Path]::GetExtension($OutputFileName)
+    if ([string]::IsNullOrWhiteSpace($ext)) { $ext = ".csv" }
+
+    $timestampedFileName = "{0}_{1}{2}" -f $baseName, $timestamp, $ext
+    $csvPathTimestamped  = Join-Path $OutputPath $timestampedFileName
+
+    WriteLog -Message ("Exporting timestamped CSV (atomic) to: {0}" -f $csvPathTimestamped)
+    Write-CsvAtomically -InputObject @($verifiedDomains) -Path $csvPathTimestamped
+
+    $csvPathLast = Join-Path $LatestCsvFolderPath $OutputFileName
+    WriteLog -Message ("Writing LAST CSV to share (atomic): {0}" -f $csvPathLast)
+    Write-CsvAtomically -InputObject @($verifiedDomains) -Path $csvPathLast
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvPathLast
+
+    # ==========================================================
+    # Summary
+    # ==========================================================
+    Write-Host "`n--- Execution Summary ---"
+    Write-Host "Domains (total)          : $countAll"
+    Write-Host "Domains (verified)       : $countVerified"
+    Write-Host "CSV (timestamped)        : $csvPathTimestamped"
+    Write-Host "CSV (LAST on share)      : $csvPathLast"
+    Write-Host "Log file                 : $global:LogTextFile"
+    Write-Host "-------------------------`n"
+
+    # ==========================================================
+    # Disconnect + Cleanup
+    # ==========================================================
+    Write-Host "`n--- Disconnect Microsoft Graph ---"
+    Disconnect-GraphSafe
+    WriteLog -Message "$TaskName completed."
+
+    try { Stop-Transcript | Out-Null } catch {}
+
+    RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile
+    RemoveOldFiles -Path $logPath    -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile
+}
+catch {
+    $globalError = $_
+    WriteLog -Message ("Global error in Azure AD verified domains inventory: {0}" -f $globalError) "ERROR"
+    Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
+
+    # -------- Global error email via SmartM365.Core (SendEmailHtmlReport) --------
+    try {
+        $title = "Azure AD verified domains inventory - ERROR"
+        $msg   = @"
+An error occurred in script $($MyInvocation.MyCommand.Name) on $(Get-Date -Format "yyyy-MM-dd HH:mm:ss").
+
+Error message:
+$($globalError.Exception.Message)
+
+Log file:
+$($global:LogTextFile)
+"@
+
+        $bodyHtml = NewSimpleEmailBody -Title $title -Message $msg
+
+        $attachments = @()
+        if ($global:LogTextFile -and (Test-Path $global:LogTextFile)) {
+            $attachments = @($global:LogTextFile)
+        }
+
+        SendEmailHtmlReport -Subject $title -BodyHtml $bodyHtml -Attachments $attachments
+    } catch {
+        WriteLog -Message ("Failed to send global error email: {0}" -f $_.Exception.Message) "ERROR"
+    }
+
+    try { Disconnect-GraphSafe } catch {}
+    try { Stop-Transcript | Out-Null } catch {}
+    exit 1
+}
+
+
