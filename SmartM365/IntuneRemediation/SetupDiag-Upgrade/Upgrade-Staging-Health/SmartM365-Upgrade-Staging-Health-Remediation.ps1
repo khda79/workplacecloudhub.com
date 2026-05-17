@@ -1,4 +1,4 @@
-# Name: SmartM365-Upgrade-Staging-Health-Remediation.ps1
+﻿# Name: SmartM365-Upgrade-Staging-Health-Remediation.ps1
 # Version: 1.0
 # Description: Removes stale Windows upgrade staging folders only when no recent setup activity is detected.
 
@@ -16,7 +16,7 @@ $SetupIndicators = @(
     'C:\$WINDOWS.~BT\Sources\Panther\setuperr.log'
 )
 
-function Write-Log {
+function Write-SmartM365Log {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
@@ -27,7 +27,7 @@ function Write-Log {
     Add-Content -LiteralPath $LogFile -Value $line -Encoding utf8
 }
 
-function Stop-ServiceSafe {
+function Invoke-ServiceStopSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -35,11 +35,11 @@ function Stop-ServiceSafe {
 
     if (Get-Service -Name $Name -ErrorAction SilentlyContinue) {
         Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
-        Write-Log "ServiceStopRequested=$Name"
+        Write-SmartM365Log "ServiceStopRequested=$Name"
     }
 }
 
-function Start-ServiceSafe {
+function Invoke-ServiceStartSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -47,11 +47,11 @@ function Start-ServiceSafe {
 
     if (Get-Service -Name $Name -ErrorAction SilentlyContinue) {
         Start-Service -Name $Name -ErrorAction SilentlyContinue
-        Write-Log "ServiceStartRequested=$Name"
+        Write-SmartM365Log "ServiceStartRequested=$Name"
     }
 }
 
-function Start-UsoClient {
+function Invoke-UsoClient {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Action
@@ -61,13 +61,13 @@ function Start-UsoClient {
 
     if (Test-Path -LiteralPath $uso) {
         Start-Process -FilePath $uso -ArgumentList $Action -WindowStyle Hidden -ErrorAction SilentlyContinue
-        Write-Log "UsoClient=$Action Status=Triggered"
+        Write-SmartM365Log "UsoClient=$Action Status=Triggered"
     }
 }
 
 try {
     New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null
-    Write-Log "RemediationStarted"
+    Write-SmartM365Log "RemediationStarted"
 
     $recentSetupActivity = $false
 
@@ -82,36 +82,36 @@ try {
     }
 
     if ($recentSetupActivity) {
-        Write-Log "RecentSetupActivityDetected=True CleanupSkipped=True"
+        Write-SmartM365Log "RecentSetupActivityDetected=True CleanupSkipped=True"
         exit 0
     }
 
     foreach ($service in @("bits", "wuauserv", "dosvc")) {
-        Stop-ServiceSafe -Name $service
+        Invoke-ServiceStopSafe -Name $service
     }
 
     foreach ($path in $UpgradePaths) {
         if (Test-Path -LiteralPath $path) {
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Log "UpgradeFolderRemoved=$path"
+            Write-SmartM365Log "UpgradeFolderRemoved=$path"
         }
         else {
-            Write-Log "UpgradeFolderNotFound=$path"
+            Write-SmartM365Log "UpgradeFolderNotFound=$path"
         }
     }
 
     foreach ($service in @("dosvc", "wuauserv", "bits")) {
-        Start-ServiceSafe -Name $service
+        Invoke-ServiceStartSafe -Name $service
     }
 
-    Start-UsoClient -Action "RefreshSettings"
-    Start-UsoClient -Action "StartScan"
-    Start-UsoClient -Action "StartDownload"
+    Invoke-UsoClient -Action "RefreshSettings"
+    Invoke-UsoClient -Action "StartScan"
+    Invoke-UsoClient -Action "StartDownload"
 
-    Write-Log "RemediationCompleted"
+    Write-SmartM365Log "RemediationCompleted"
     exit 0
 }
 catch {
-    Write-Log "RemediationFailed Message=$($_.Exception.Message)"
+    Write-SmartM365Log "RemediationFailed Message=$($_.Exception.Message)"
     exit 1
 }

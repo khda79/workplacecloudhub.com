@@ -1,4 +1,4 @@
-<#
+﻿<#
     Name: SmartM365-DeliveryOptimization-ContentEngine-Health-Remediation.ps1
     Version: 1.0
     Description: Remediates common Delivery Optimization, Dynamic Download, BITS, and Windows Update content engine issues.
@@ -25,7 +25,7 @@ if (-not (Test-Path -Path $LogRoot)) {
 $LogPath = Join-Path -Path $LogRoot -ChildPath "$RemediationName.log"
 $ErrorFound = $false
 
-function Write-Log {
+function Write-SmartM365Log {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
@@ -36,17 +36,17 @@ function Write-Log {
     Write-Output $Message
 }
 
-function Set-RemediationError {
+function Add-RemediationError {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
     )
 
-    Write-Log "ERROR: $Message"
+    Write-SmartM365Log "ERROR: $Message"
     $script:ErrorFound = $true
 }
 
-function Stop-ServiceSafe {
+function Invoke-ServiceStopSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -56,24 +56,24 @@ function Stop-ServiceSafe {
         $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
 
         if ($null -eq $service) {
-            Write-Log "ServiceNotFound=${Name}"
+            Write-SmartM365Log "ServiceNotFound=${Name}"
             return
         }
 
         if ($service.Status -ne "Stopped") {
             Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
-            Write-Log "ServiceStopRequested=${Name}"
+            Write-SmartM365Log "ServiceStopRequested=${Name}"
         }
         else {
-            Write-Log "ServiceAlreadyStopped=${Name}"
+            Write-SmartM365Log "ServiceAlreadyStopped=${Name}"
         }
     }
     catch {
-        Set-RemediationError "Failed to stop service ${Name}: $($_.Exception.Message)"
+        Add-RemediationError "Failed to stop service ${Name}: $($_.Exception.Message)"
     }
 }
 
-function Start-ServiceSafe {
+function Invoke-ServiceStartSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -83,7 +83,7 @@ function Start-ServiceSafe {
         $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
 
         if ($null -eq $service) {
-            Write-Log "ServiceNotFound=${Name}"
+            Write-SmartM365Log "ServiceNotFound=${Name}"
             return
         }
 
@@ -91,19 +91,19 @@ function Start-ServiceSafe {
 
         if ($null -ne $serviceCim -and $serviceCim.StartMode -eq "Disabled") {
             Set-Service -Name $Name -StartupType Manual -ErrorAction SilentlyContinue
-            Write-Log "ServiceStartupTypeChanged=${Name} StartupType=Manual"
+            Write-SmartM365Log "ServiceStartupTypeChanged=${Name} StartupType=Manual"
         }
 
         if ($service.Status -ne "Running") {
             Start-Service -Name $Name -ErrorAction SilentlyContinue
-            Write-Log "ServiceStartRequested=${Name}"
+            Write-SmartM365Log "ServiceStartRequested=${Name}"
         }
         else {
-            Write-Log "ServiceAlreadyRunning=${Name}"
+            Write-SmartM365Log "ServiceAlreadyRunning=${Name}"
         }
     }
     catch {
-        Set-RemediationError "Failed to start service ${Name}: $($_.Exception.Message)"
+        Add-RemediationError "Failed to start service ${Name}: $($_.Exception.Message)"
     }
 }
 
@@ -115,56 +115,60 @@ function Clear-FolderContentSafe {
 
     try {
         if (-not (Test-Path -LiteralPath $Path)) {
-            Write-Log "Cleanup=NotFound Path=${Path}"
+            Write-SmartM365Log "Cleanup=NotFound Path=${Path}"
             return
         }
 
-        Write-Log "Cleanup=Start Path=${Path}"
+        Write-SmartM365Log "Cleanup=Start Path=${Path}"
 
         Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | ForEach-Object {
             try {
                 Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
             }
             catch {
-                Write-Log "Cleanup=ItemSkipped Path=$($_.FullName) Message=$($_.Exception.Message)"
+                Write-SmartM365Log "Cleanup=ItemSkipped Path=$($_.FullName) Message=$($_.Exception.Message)"
             }
         }
 
-        Write-Log "Cleanup=Completed Path=${Path}"
+        Write-SmartM365Log "Cleanup=Completed Path=${Path}"
     }
     catch {
-        Set-RemediationError "Failed to clean folder ${Path}: $($_.Exception.Message)"
+        Add-RemediationError "Failed to clean folder ${Path}: $($_.Exception.Message)"
     }
 }
 
-function Reset-BitsTransfersSafe {
+function Invoke-BitsTransferResetSafe {
+    param([bool]$ResetBitsJobs)
+
     try {
         if (-not $ResetBitsJobs) {
-            Write-Log "BITSReset=Skipped"
+            Write-SmartM365Log "BITSReset=Skipped"
             return
         }
 
-        Write-Log "BITSReset=Start"
+        Write-SmartM365Log "BITSReset=Start"
 
         $bitsAdminPath = Join-Path -Path $env:WINDIR -ChildPath "System32\bitsadmin.exe"
 
         if (Test-Path -LiteralPath $bitsAdminPath -PathType Leaf) {
             $process = Start-Process -FilePath $bitsAdminPath -ArgumentList "/reset", "/allusers" -Wait -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
-            Write-Log "BITSReset=Completed ExitCode=$($process.ExitCode)"
+            Write-SmartM365Log "BITSReset=Completed ExitCode=$($process.ExitCode)"
         }
         else {
-            Write-Log "BITSReset=BitsadminNotFound"
+            Write-SmartM365Log "BITSReset=BitsadminNotFound"
         }
     }
     catch {
-        Set-RemediationError "Failed to reset BITS transfers: $($_.Exception.Message)"
+        Add-RemediationError "Failed to reset BITS transfers: $($_.Exception.Message)"
     }
 }
 
-function Trigger-WindowsUpdateScanSafe {
+function Invoke-WindowsUpdateScanSafe {
+    param([bool]$TriggerWindowsUpdateScan)
+
     try {
         if (-not $TriggerWindowsUpdateScan) {
-            Write-Log "WindowsUpdateScan=Skipped"
+            Write-SmartM365Log "WindowsUpdateScan=Skipped"
             return
         }
 
@@ -172,19 +176,19 @@ function Trigger-WindowsUpdateScanSafe {
 
         if (Test-Path -LiteralPath $usoClientPath -PathType Leaf) {
             Start-Process -FilePath $usoClientPath -ArgumentList "StartScan" -WindowStyle Hidden -ErrorAction SilentlyContinue
-            Write-Log "WindowsUpdateScan=Triggered"
+            Write-SmartM365Log "WindowsUpdateScan=Triggered"
         }
         else {
-            Write-Log "WindowsUpdateScan=UsoClientNotFound"
+            Write-SmartM365Log "WindowsUpdateScan=UsoClientNotFound"
         }
     }
     catch {
-        Set-RemediationError "Failed to trigger Windows Update scan: $($_.Exception.Message)"
+        Add-RemediationError "Failed to trigger Windows Update scan: $($_.Exception.Message)"
     }
 }
 
 try {
-    Write-Log "===== Delivery Optimization remediation started ====="
+    Write-SmartM365Log "===== Delivery Optimization remediation started ====="
 
     $deliveryOptimizationCachePaths = @(
         "C:\ProgramData\Microsoft\Windows\DeliveryOptimization\Cache",
@@ -194,7 +198,7 @@ try {
     $windowsUpdateDownloadCache = Join-Path -Path $env:WINDIR -ChildPath "SoftwareDistribution\Download"
 
     foreach ($serviceName in @("DoSvc", "BITS", "wuauserv", "UsoSvc")) {
-        Stop-ServiceSafe -Name $serviceName
+        Invoke-ServiceStopSafe -Name $serviceName
     }
 
     Start-Sleep -Seconds 3
@@ -205,24 +209,24 @@ try {
 
     Clear-FolderContentSafe -Path $windowsUpdateDownloadCache
 
-    Reset-BitsTransfersSafe
+    Invoke-BitsTransferResetSafe -ResetBitsJobs $ResetBitsJobs
 
     foreach ($serviceName in @("BITS", "DoSvc", "wuauserv", "UsoSvc")) {
-        Start-ServiceSafe -Name $serviceName
+        Invoke-ServiceStartSafe -Name $serviceName
     }
 
     Start-Sleep -Seconds 5
 
-    Trigger-WindowsUpdateScanSafe
+    Invoke-WindowsUpdateScanSafe -TriggerWindowsUpdateScan $TriggerWindowsUpdateScan
 
-    Write-Log "===== Delivery Optimization remediation finished ====="
+    Write-SmartM365Log "===== Delivery Optimization remediation finished ====="
 
     if ($ErrorFound) {
-        Write-Log "Status=CompletedWithErrors"
+        Write-SmartM365Log "Status=CompletedWithErrors"
         exit 1
     }
 
-    Write-Log "Status=Completed"
+    Write-SmartM365Log "Status=Completed"
     exit 0
 }
 catch {
@@ -230,9 +234,12 @@ catch {
     Write-Output "Message=$($_.Exception.Message)"
 
     try {
-        Set-RemediationError $_.Exception.Message
+        Add-RemediationError $_.Exception.Message
     }
-    catch { }
+    catch {
+        Write-Output "Status=ErrorDuringErrorHandling"
+        Write-Output "Message=$($_.Exception.Message)"
+    }
 
     exit 1
 }

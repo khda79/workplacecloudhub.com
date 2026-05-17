@@ -1,4 +1,4 @@
-<#
+﻿<#
     Name: SmartM365-WUfB-Identity-Binding-Remediation.ps1
     Version: 1.0
     Description: Repairs Windows Update for Business identity binding by resetting computed PolicyState and refreshing MDM/WU policy state safely.
@@ -51,7 +51,7 @@ $UsoClientPath = Join-Path -Path $env:SystemRoot -ChildPath "System32\UsoClient.
 
 $ErrorFound = $false
 
-function Write-Log {
+function Write-SmartM365Log {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
@@ -62,17 +62,17 @@ function Write-Log {
     Write-Output $Message
 }
 
-function Set-RemediationError {
+function Add-RemediationError {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
     )
 
-    Write-Log "ERROR: $Message"
+    Write-SmartM365Log "ERROR: $Message"
     $script:ErrorFound = $true
 }
 
-function Restart-ServiceSafe {
+function Invoke-ServiceRestartSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -82,16 +82,16 @@ function Restart-ServiceSafe {
         $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
 
         if ($null -eq $service) {
-            Write-Log "ServiceNotFound=${Name}"
+            Write-SmartM365Log "ServiceNotFound=${Name}"
             return
         }
 
         if ($service.Status -ne "Stopped") {
-            Write-Log "ServiceStopRequested=${Name}"
+            Write-SmartM365Log "ServiceStopRequested=${Name}"
             Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
         }
         else {
-            Write-Log "ServiceAlreadyStopped=${Name}"
+            Write-SmartM365Log "ServiceAlreadyStopped=${Name}"
         }
 
         Start-Sleep -Seconds 2
@@ -100,18 +100,18 @@ function Restart-ServiceSafe {
 
         if ($null -ne $serviceCim -and $serviceCim.StartMode -eq "Disabled") {
             Set-Service -Name $Name -StartupType Manual -ErrorAction SilentlyContinue
-            Write-Log "ServiceStartupTypeChanged=${Name} StartupType=Manual"
+            Write-SmartM365Log "ServiceStartupTypeChanged=${Name} StartupType=Manual"
         }
 
-        Write-Log "ServiceStartRequested=${Name}"
+        Write-SmartM365Log "ServiceStartRequested=${Name}"
         Start-Service -Name $Name -ErrorAction SilentlyContinue
     }
     catch {
-        Set-RemediationError "Failed to restart service ${Name}: $($_.Exception.Message)"
+        Add-RemediationError "Failed to restart service ${Name}: $($_.Exception.Message)"
     }
 }
 
-function Trigger-EnterpriseMgmtPush {
+function Invoke-EnterpriseMgmtPush {
     try {
         $enterpriseMgmtTasks = @(
             Get-ScheduledTask -TaskPath "\Microsoft\Windows\EnterpriseMgmt\" -ErrorAction SilentlyContinue |
@@ -119,22 +119,22 @@ function Trigger-EnterpriseMgmtPush {
         )
 
         if ($null -eq $enterpriseMgmtTasks -or $enterpriseMgmtTasks.Count -eq 0) {
-            Write-Log "EnterpriseMgmtPushLaunch=NotFound"
+            Write-SmartM365Log "EnterpriseMgmtPushLaunch=NotFound"
             return
         }
 
         foreach ($task in $enterpriseMgmtTasks) {
             try {
                 Start-ScheduledTask -InputObject $task -ErrorAction Stop
-                Write-Log "EnterpriseMgmtPushLaunch=Triggered TaskPath=$($task.TaskPath) TaskName=$($task.TaskName)"
+                Write-SmartM365Log "EnterpriseMgmtPushLaunch=Triggered TaskPath=$($task.TaskPath) TaskName=$($task.TaskName)"
             }
             catch {
-                Write-Log "EnterpriseMgmtPushLaunch=Failed TaskName=$($task.TaskName) Message=$($_.Exception.Message)"
+                Write-SmartM365Log "EnterpriseMgmtPushLaunch=Failed TaskName=$($task.TaskName) Message=$($_.Exception.Message)"
             }
         }
     }
     catch {
-        Set-RemediationError "Failed to enumerate EnterpriseMgmt tasks: $($_.Exception.Message)"
+        Add-RemediationError "Failed to enumerate EnterpriseMgmt tasks: $($_.Exception.Message)"
     }
 }
 
@@ -182,7 +182,7 @@ function Get-IsWUfBConfigured {
 function Export-PolicyState {
     try {
         if (-not (Test-Path -Path $PolicyStatePath)) {
-            Write-Log "PolicyStateExport=Skipped Reason=PolicyStateNotFound"
+            Write-SmartM365Log "PolicyStateExport=Skipped Reason=PolicyStateNotFound"
             return
         }
 
@@ -193,14 +193,14 @@ function Export-PolicyState {
         & $regExe export "HKLM\SOFTWARE\Microsoft\WindowsUpdate\UpdatePolicy\PolicyState" "$exportPath" /y | Out-Null
 
         if (Test-Path -LiteralPath $exportPath -PathType Leaf) {
-            Write-Log "PolicyStateExport=Completed Path=$exportPath"
+            Write-SmartM365Log "PolicyStateExport=Completed Path=$exportPath"
         }
         else {
-            Write-Log "PolicyStateExport=Failed Path=$exportPath"
+            Write-SmartM365Log "PolicyStateExport=Failed Path=$exportPath"
         }
     }
     catch {
-        Write-Log "PolicyStateExport=Failed Message=$($_.Exception.Message)"
+        Write-SmartM365Log "PolicyStateExport=Failed Message=$($_.Exception.Message)"
     }
 }
 
@@ -212,30 +212,30 @@ function Invoke-UsoClientSafe {
 
     try {
         if (-not (Test-Path -LiteralPath $UsoClientPath -PathType Leaf)) {
-            Write-Log "UsoClient=${Action} Status=UsoClientNotFound"
+            Write-SmartM365Log "UsoClient=${Action} Status=UsoClientNotFound"
             return
         }
 
         Start-Process -FilePath $UsoClientPath -ArgumentList $Action -WindowStyle Hidden -ErrorAction SilentlyContinue
-        Write-Log "UsoClient=${Action} Status=Triggered"
+        Write-SmartM365Log "UsoClient=${Action} Status=Triggered"
     }
     catch {
-        Write-Log "UsoClient=${Action} Status=Failed Message=$($_.Exception.Message)"
+        Write-SmartM365Log "UsoClient=${Action} Status=Failed Message=$($_.Exception.Message)"
     }
 }
 
 try {
-    Write-Log "===== WUfB identity binding remediation started ====="
+    Write-SmartM365Log "===== WUfB identity binding remediation started ====="
 
     $mdmPresentBefore = Test-Path -Path $MdmUpdatePolicyPath
     $wuConfiguredBefore = Get-IsWUfBConfigured
 
-    Write-Log "Before_MDMWUfBPolicyPresent=$mdmPresentBefore"
-    Write-Log "Before_IsWUfBConfigured=$wuConfiguredBefore"
+    Write-SmartM365Log "Before_MDMWUfBPolicyPresent=$mdmPresentBefore"
+    Write-SmartM365Log "Before_IsWUfBConfigured=$wuConfiguredBefore"
 
     # Stop/restart Windows Update services around PolicyState reset
     foreach ($serviceName in @("UsoSvc", "wuauserv")) {
-        Restart-ServiceSafe -Name $serviceName
+        Invoke-ServiceRestartSafe -Name $serviceName
     }
 
     if ($ExportPolicyStateReg) {
@@ -244,25 +244,25 @@ try {
 
     if (Test-Path -Path $PolicyStatePath) {
         try {
-            Write-Log "PolicyStateReset=Start Path=$PolicyStatePath"
+            Write-SmartM365Log "PolicyStateReset=Start Path=$PolicyStatePath"
             Remove-Item -Path $PolicyStatePath -Recurse -Force -ErrorAction Stop
-            Write-Log "PolicyStateReset=Completed"
+            Write-SmartM365Log "PolicyStateReset=Completed"
         }
         catch {
-            Set-RemediationError "Failed to remove PolicyState: $($_.Exception.Message)"
+            Add-RemediationError "Failed to remove PolicyState: $($_.Exception.Message)"
         }
     }
     else {
-        Write-Log "PolicyStateReset=Skipped Reason=PolicyStateNotFound"
+        Write-SmartM365Log "PolicyStateReset=Skipped Reason=PolicyStateNotFound"
     }
 
     # Restart related services again after reset
     foreach ($serviceName in @("wuauserv", "UsoSvc")) {
-        Restart-ServiceSafe -Name $serviceName
+        Invoke-ServiceRestartSafe -Name $serviceName
     }
 
     # Trigger MDM and Windows Update policy refresh
-    Trigger-EnterpriseMgmtPush
+    Invoke-EnterpriseMgmtPush
 
     Start-Sleep -Seconds 20
 
@@ -274,39 +274,42 @@ try {
     $mdmPresentAfter = Test-Path -Path $MdmUpdatePolicyPath
     $wuConfiguredAfter = Get-IsWUfBConfigured
 
-    Write-Log "After_MDMWUfBPolicyPresent=$mdmPresentAfter"
-    Write-Log "After_IsWUfBConfigured=$wuConfiguredAfter"
+    Write-SmartM365Log "After_MDMWUfBPolicyPresent=$mdmPresentAfter"
+    Write-SmartM365Log "After_IsWUfBConfigured=$wuConfiguredAfter"
 
     if ($mdmPresentAfter -and $wuConfiguredAfter -eq 0) {
-        Write-Log "Status=CompletedButDriftStillPresent"
-        Write-Log "Result=MDM WUfB policy is present but IsWUfBConfigured is still 0"
-        exit 0
+        Write-SmartM365Log "Status=CompletedButDriftStillPresent"
+        Write-SmartM365Log "Result=MDM WUfB policy is present but IsWUfBConfigured is still 0"
+        exit 1
     }
 
     if ($mdmPresentAfter -and $wuConfiguredAfter -eq 1) {
-        Write-Log "Status=CompletedHealthy"
-        Write-Log "Result=WUfB identity binding is healthy after remediation"
+        Write-SmartM365Log "Status=CompletedHealthy"
+        Write-SmartM365Log "Result=WUfB identity binding is healthy after remediation"
         exit 0
     }
 
     if (-not $mdmPresentAfter) {
-        Write-Log "Status=CompletedNotApplicable"
-        Write-Log "Result=No MDM WUfB policy detected after remediation"
+        Write-SmartM365Log "Status=CompletedNotApplicable"
+        Write-SmartM365Log "Result=No MDM WUfB policy detected after remediation"
         exit 0
     }
 
-    Write-Log "Status=CompletedInconclusive"
-    Write-Log "Result=Sanity check inconclusive"
-    exit 0
+    Write-SmartM365Log "Status=CompletedInconclusive"
+    Write-SmartM365Log "Result=Sanity check inconclusive"
+    exit 1
 }
 catch {
     Write-Output "Status=Error"
     Write-Output "Message=$($_.Exception.Message)"
 
     try {
-        Set-RemediationError $_.Exception.Message
+        Add-RemediationError $_.Exception.Message
     }
-    catch { }
+    catch {
+        Write-Output "Status=ErrorDuringErrorHandling"
+        Write-Output "Message=$($_.Exception.Message)"
+    }
 
     exit 1
 }

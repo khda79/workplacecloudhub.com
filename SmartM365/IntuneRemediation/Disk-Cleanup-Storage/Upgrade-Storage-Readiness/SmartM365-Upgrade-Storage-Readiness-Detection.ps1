@@ -1,4 +1,4 @@
-# Name: SmartM365-Upgrade-Storage-Readiness-Detection.ps1
+﻿# Name: SmartM365-Upgrade-Storage-Readiness-Detection.ps1
 # Version: 1.0
 # Description: Detects whether the system drive has enough free space for Windows upgrade readiness and identifies cleanup candidates.
 
@@ -53,7 +53,7 @@ function Get-SystemDriveFreeSpaceGB {
     }
 }
 
-function Get-FolderSizeBytes {
+function Get-FolderByteSize {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path
@@ -106,7 +106,7 @@ try {
     }
 
     foreach ($folder in $FoldersToCheck) {
-        $sizeBytes = Get-FolderSizeBytes -Path $folder.Path
+        $sizeBytes = Get-FolderByteSize -Path $folder.Path
 
         if ($null -eq $sizeBytes) {
             continue

@@ -4,16 +4,14 @@ Ce repertoire regroupe les scripts PowerShell Intune par domaine fonctionnel et 
 
 ## Organisation
 
-- `WindowsUpdate/` : scripts lies a Windows Update, scan, cache, services, politiques et journaux.
+- `WindowsUpdate/` : scripts lies a Windows Update, scan, cache, services, politiques et proxy.
 - `DeliveryOptimization/` : scripts lies a Delivery Optimization et au Content Engine.
 - `WUfB/` : identite Windows Update for Business et correction du binding PolicyState.
 - `SetupDiag-Upgrade/` : diagnostics SetupDiag, upgrade Windows 10/11 et prerequis de mise a niveau.
 - `Intune-MDM/` : etat Intune, MDM, Hybrid Join, IME et Data Boundary.
 - `Disk-Cleanup-Storage/` : espace disque, nettoyage et dossiers candidats de cleanup.
 - `UWP-Store-AppRepository/` : sante AppRepository / Store / Windows Update.
-- `Endpoint-Repair/` : reparations endpoint plus larges, notamment WinRM et UWP Store.
-- `TimeZone-Recovery/` : scripts de timezone et recovery check.
-- `Standalone/` : scripts utilitaires ou sans paire detection/remediation claire.
+- `Standalone/` : scripts utilitaires, actions ponctuelles ou diagnostics manuels qui ne doivent pas tourner en remediation recurrente.
 
 ## Convention
 
@@ -28,11 +26,15 @@ Quand un scenario contient une paire Intune, le dossier contient generalement :
 
 - `WindowsUpdate/WindowsUpdate-Reset/` remplace les anciens scenarios Autopatch `0x80244007` et reset force Windows Update.
 - `WindowsUpdate/Policy-Blockers/` regroupe les anciens scenarios WSUS/GPO, WSUS remnants, NoAutoUpdate, Policy-Blocking-Access et WUfB configuration blockers.
-- `WindowsUpdate/Service-Refresh/` remplace les anciens scenarios Connectivity et Scan-Health.
+- `WindowsUpdate/Service-And-Scan-Health/` remplace `Service-Health`, `Service-Refresh` et `ForceWUScan`.
+- `WindowsUpdate/Cache-Health/` remplace `Download-Failure`.
 - `Intune-MDM/MDM-Enrollment-Repair/` regroupe Device-Stale-Join, Enrollment-State, Hybrid-Join et MDM-Tasks-Missing. La detection cible l'etat local stale/casse; le fait que le script s'execute via Intune prouve deja une joignabilite IME minimale.
 - `SetupDiag-Upgrade/Upgrade-Staging-Health/` remplace Upgrade-Files-Missing et Upgrade-Residues.
 - `Disk-Cleanup-Storage/Upgrade-Storage-Readiness/` regroupe les anciens scenarios free space, cleanup candidates et force disk cleanup.
-- `SetupDiag-Upgrade/Upgrade-Diagnostics/` documente la chaine de diagnostic entre WindowsUpdateLog, SetupDiag-Required et Upgrade-Blocking-Issues; ces scripts restent separes car ils sont complementaires.
+- `DeliveryOptimization/ContentEngine-Health/` remplace `DeliveryOptimization/DO-Issues`.
+- `UWP-Store-AppRepository/WU-Health/` remplace l'ancien scenario large `Endpoint-Repair/WinRM-UWP-Store`.
+- `SetupDiag-Upgrade/Upgrade-Diagnostics/` regroupe `SetupDiag-Required` et `Upgrade-Blocking-Issues`.
+- `Standalone/WindowsUpdateLog/`, `Standalone/Repair-DISM/`, `Standalone/Upgrade-Actions/`, `Standalone/Network-Diagnostics/`, `Standalone/WindowsPolicy/` et `Standalone/Device-Recovery/` conservent les actions ponctuelles ou diagnostics manuels deplaces hors des remediations recurrentes.
 
 ## Verification
 
