@@ -1,0 +1,19 @@
+{
+  "TenantKey": "tenant-key",
+  "Environment": "Test",
+  "AppId": "00000000-0000-0000-0000-000000000000",
+  "TenantId": "00000000-0000-0000-0000-000000000000",
+  "OrgDomain": "contoso.onmicrosoft.com",
+  "Thumb": "0000000000000000000000000000000000000000",
+  "Thumbprint": "0000000000000000000000000000000000000000",
+  "From": "smartm365-reports@contoso.onmicrosoft.com",
+  "MailSendAccessPolicyGroup": "smartm365-mailsend-allowed@contoso.onmicrosoft.com",
+  "EnableSharePointUpload": true,
+  "SharePointSiteHostname": "contoso.sharepoint.com",
+  "SharePointSitePath": "/sites/SMARTM365",
+  "SharePointLibraryDisplayName": "Documents",
+  "SharePointTargetFolderPath": "SMART-M365/CSV",
+  "TeamsWebhookUrl": "",
+  "TeamsAlertsWebhookUrl": "",
+  "TeamsInfosWebhookUrl": ""
+}

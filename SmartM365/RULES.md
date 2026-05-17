@@ -10,8 +10,12 @@ These rules apply to scripts, modules, JSON configuration files, and documentati
 
 - Do not commit customer-specific or environment-specific values.
 - `*.local.json` files are ignored by Git and are the only place for local operational values.
-- `SmartM365.global.local.json` contains shared local values for the workstation or tenant.
+- `SmartM365.global.local.json` contains shared local workstation values and non-tenant defaults.
+- Multi-tenant values must live in `Config/Tenants/<TenantKey>.local.json`.
+- Every non-remediation SmartM365 script must expose `-Tenant` with default value `test` and must load the effective tenant profile through `SmartM365-TenantContext.ps1`.
 - Keep a safe, committed `SmartM365.global.local.json.template` file at the repository root so users know which local values must be created.
+- Keep a safe, committed `Config/Tenants/tenant.local.json.template` file so users know which per-tenant values must be created.
+- Never require a prior tenant-switch command before running an inventory/report script; tenant selection must be explicit per execution.
 - Scripts must fail with an explicit configuration error when required local/global values are missing and no safe default exists.
 - Per-script `*.local.json` files must keep the same global keys for readability, but the value must be `__USE_GLOBAL__` when the script should inherit from `SmartM365.global.local.json`.
 - A real value in a per-script `*.local.json` is an explicit script-level override.
@@ -23,9 +27,11 @@ These rules apply to scripts, modules, JSON configuration files, and documentati
 Global path roots are defined in `SmartM365.global.local.json`:
 
 - `WorkspaceRootPath`
-- `DataAllRootPath`: `{{WorkspaceRootPath}}\SMART-M365\DATA-ALL`
-- `LatestCsvFolderPath`: `{{WorkspaceRootPath}}\SMART-M365\DATA-LAST`
-- `LogAllRootPath`: `{{WorkspaceRootPath}}\SMART-M365\LOG-ALL`
+- `DataAllRootPath`: `{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\DATA-ALL`
+- `LatestCsvFolderPath`: `{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\DATA-LAST`
+- `LogAllRootPath`: `{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\LOG-ALL`
+
+Tenant outputs must stay isolated by `TenantKey` so test and production runs never overwrite the same CSV, latest export, or log folder.
 
 Per-script CSV/data paths should use `{{DataAllRootPath}}` plus a functional path, for example:
 

@@ -59,7 +59,8 @@
 
 [CmdletBinding()]
 param (
-    [string]$TenantId              = "00000000-0000-0000-0000-000000000000",
+    [string]$Tenant = 'test',
+[string]$TenantId              = "00000000-0000-0000-0000-000000000000",
     [string]$OrgDomain             = "contoso.onmicrosoft.com",
     [string]$AppId                 = "00000000-0000-0000-0000-000000000000",
     [string]$CertificateThumbprint = "0000000000000000000000000000000000000000",
@@ -71,6 +72,19 @@ param (
     [string]$ErrorMailTo        = "",
     [string]$From      = ""
 )
+$tenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $p) { return $p }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $tenantContextPath
+Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
@@ -698,5 +712,6 @@ Write-Log "  Unprotected mailboxes  : $($unprotected.Count) -> $CsvUnprotected"
 Write-Log "  Members without mailbox: $($membersNoMailbox.Count) -> $CsvMembersNoMailbox"
 Write-Log "  DATA-LAST (latest)     : $LatestCsvFolderPath"
 Write-Log "========================================"
+
 
 

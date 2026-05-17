@@ -18,10 +18,24 @@
 #>
 
 param(
-    [switch]$Connect,
+    [string]$Tenant = 'test',
+[switch]$Connect,
     [string]$OutputPath,
     [string]$OutputFileName = "M365_Entra_VerifiedDomains.csv"
 )
+$tenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $p) { return $p }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $tenantContextPath
+Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
@@ -552,5 +566,6 @@ $($global:LogTextFile)
     try { Stop-Transcript | Out-Null } catch {}
     exit 1
 }
+
 
 

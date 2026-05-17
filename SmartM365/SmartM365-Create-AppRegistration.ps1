@@ -18,7 +18,7 @@
     granting tenant-wide consent immediately.
 
     The script also creates or reuses a Teams team for SmartM365 shared exports,
-    resolves its backing SharePoint site, and updates SmartM365.global.local.json
+    resolves its backing SharePoint site, and updates the selected tenant local profile
     with the SharePoint upload target.
 
     The script also creates or reuses a dedicated Exchange Online shared mailbox
@@ -46,7 +46,7 @@
 .PARAMETER RemoveAppRegistration
     Removes the app registration with the requested display name, removes
     matching application service principals, and clears app-only authentication
-    fields from SmartM365.global.local.json. This does not remove the Teams
+    fields from the selected tenant local profile. This does not remove the Teams
     workspace or local certificates. Use with -Confirm.
 
 .PARAMETER DisableGrantAdminConsent
@@ -102,7 +102,8 @@
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [Parameter()]
+    [string]$Tenant = 'test',
+[Parameter()]
     [ValidateNotNullOrEmpty()]
     [string]$DisplayName = 'SmartM365 Automation',
 
@@ -173,6 +174,19 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$LogPath = 'C:\Temp\WORKPLACE'
 )
+$tenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $p) { return $p }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $tenantContextPath
+Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -1852,7 +1866,7 @@ function Get-SmartM365LocalConfigCertificateThumbprint {
             return $null
         }
 
-        Write-SmartM365SetupStatus -Message ("Reusing certificate thumbprint from SmartM365.global.local.json: {0}" -f $normalizedThumbprint) -Level OK
+        Write-SmartM365SetupStatus -Message ("Reusing certificate thumbprint from local tenant config: {0}" -f $normalizedThumbprint) -Level OK
         return $normalizedThumbprint
     }
 
@@ -1868,7 +1882,7 @@ Disconnect-SmartM365ExistingExchangeOnlineSession
 Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $ExchangeAdminUserPrincipalName
 $graphContext = Connect-SmartM365GraphSetupSession -RequestedTenantId $TenantId -UseDeviceCode:$UseDeviceCode
 $effectiveTenantId = $graphContext.TenantId
-$localConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.global.local.json'
+$localConfigPath = Join-Path -Path $PSScriptRoot -ChildPath ("Config\Tenants\{0}.local.json" -f $Tenant)
 
 $escapedDisplayName = ConvertTo-ODataStringLiteral -Value $DisplayName
 $existingApps = @(Get-MgApplication -Filter "displayName eq '$escapedDisplayName'" -Property 'id,appId,displayName,requiredResourceAccess,keyCredentials' -All)
@@ -2065,7 +2079,8 @@ if ($exchangeOnlineDirectoryRole) {
     Write-Output ("EXO Role    : {0}" -f $exchangeOnlineDirectoryRole)
 }
 Write-Output ''
-Write-Output 'Add these values to SmartM365.global.local.json:'
+Write-Output ("Tenant local configuration updated: {0}" -f $localConfigPath)
+Write-Output 'Core app values:'
 Write-Output (@"
 {
   "AppId": "$($application.AppId)",
@@ -2076,7 +2091,7 @@ Write-Output (@"
 "@)
 if ($teamsWorkspace) {
     Write-Output ''
-    Write-Output 'SharePoint settings written to SmartM365.global.local.json:'
+    Write-Output 'SharePoint settings written to tenant local configuration:'
     Write-Output (@"
 {
   "SharePointSiteHostname": "$($teamsWorkspace.SharePointSiteHostname)",
@@ -2088,7 +2103,7 @@ if ($teamsWorkspace) {
 }
 Write-Output ''
 if ($mailSendSetup) {
-    Write-Output 'Mail settings written to SmartM365.global.local.json:'
+    Write-Output 'Mail settings written to tenant local configuration:'
     Write-Output (@"
 {
   "From": "$($mailSendSetup.SenderAddress)",
@@ -2106,3 +2121,4 @@ finally {
     Close-SmartM365ExchangeOnlineSetupSession
     Close-SmartM365SetupLogging
 }
+

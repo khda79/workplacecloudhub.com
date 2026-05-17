@@ -19,6 +19,45 @@ function Get-ModuleLocalConfig {
     }
 }
 
+function Get-SmartM365EffectiveModuleGlobalConfig {
+    [CmdletBinding()]
+    param()
+
+    if ($null -ne $script:SmartM365GlobalConfig) {
+        return $script:SmartM365GlobalConfig
+    }
+
+    $script:SmartM365GlobalConfig = [pscustomobject]@{}
+    $modulePath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $searchRoot = Split-Path -Path $modulePath -Parent
+    while ($searchRoot) {
+        $tenantContextPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $tenantContextPath) {
+            . $tenantContextPath
+            $tenantKey = if ([string]::IsNullOrWhiteSpace([string]$global:SmartM365Tenant)) { 'test' } else { [string]$global:SmartM365Tenant }
+            $script:SmartM365GlobalConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $searchRoot -TenantKey $tenantKey
+            break
+        }
+
+        $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+        if (Test-Path -LiteralPath $globalConfigPath) {
+            try {
+                $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            }
+            catch {
+                throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
+            }
+            break
+        }
+
+        $parent = Split-Path -Path $searchRoot -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
+        $searchRoot = $parent
+    }
+
+    return $script:SmartM365GlobalConfig
+}
+
 function Resolve-SmartM365ConfigValue {
     [CmdletBinding()]
     param([AllowNull()]$Value)
@@ -31,25 +70,7 @@ function Resolve-SmartM365ConfigValue {
         return $Value
     }
 
-    if ($null -eq $script:SmartM365GlobalConfig) {
-        $script:SmartM365GlobalConfig = [pscustomobject]@{}
-        $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($ScriptRoot) { $ScriptRoot } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
-        while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
-            if (Test-Path -LiteralPath $globalConfigPath) {
-                try {
-                    $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                }
-                catch {
-                    throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
-                }
-                break
-            }
-            $parent = Split-Path -Path $searchRoot -Parent
-            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
-            $searchRoot = $parent
-        }
-    }
+    $script:SmartM365GlobalConfig = Get-SmartM365EffectiveModuleGlobalConfig
 
     $resolved = $Value
     for ($i = 0; $i -lt 10; $i++) {
@@ -96,26 +117,7 @@ function Get-ModuleLocalConfigValue {
     }
 
 
-    if ($null -eq $script:SmartM365GlobalConfig) {
-        $script:SmartM365GlobalConfig = [pscustomobject]@{}
-        $modulePath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
-        $searchRoot = Split-Path -Path $modulePath -Parent
-        while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
-            if (Test-Path -LiteralPath $globalConfigPath) {
-                try {
-                    $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                }
-                catch {
-                    throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
-                }
-                break
-            }
-            $parent = Split-Path -Path $searchRoot -Parent
-            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
-            $searchRoot = $parent
-        }
-    }
+    $script:SmartM365GlobalConfig = Get-SmartM365EffectiveModuleGlobalConfig
 
     $globalProperty = $script:SmartM365GlobalConfig.PSObject.Properties[$Name]
     if ($null -ne $globalProperty -and $null -ne $globalProperty.Value) {
@@ -160,6 +162,67 @@ function WriteLog {
 
     if ($global:LogTextFile) {
         Add-Content -Path $global:LogTextFile -Value $logEntry
+    }
+
+    Invoke-SmartM365TeamsNotificationFromLog -Message $Message -Level $Level
+}
+
+function Invoke-SmartM365TeamsNotificationFromLog {
+    [CmdletBinding()]
+    param(
+        [string]$Message,
+        [string]$Level = 'INFO'
+    )
+
+    if ($script:SmartM365TeamsNotificationInProgress) { return }
+
+    $normalizedLevel = if ([string]::IsNullOrWhiteSpace($Level)) { 'INFO' } else { $Level.ToUpperInvariant() }
+    $isError = $normalizedLevel -eq 'ERROR'
+    $isTerminalSuccess = $normalizedLevel -eq 'SUCCESS' -and $Message -match '(?i)\b(completed|finished|termin[eé]|complete)\b'
+    if (-not $isError -and -not $isTerminalSuccess) { return }
+
+    $dedupeKey = '{0}|{1}' -f $normalizedLevel, $Message
+    if ($null -eq $script:SmartM365TeamsNotificationLogKeys) {
+        $script:SmartM365TeamsNotificationLogKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    if (-not $script:SmartM365TeamsNotificationLogKeys.Add($dedupeKey)) { return }
+
+    $scriptName = if ($global:SmartM365ScriptName) {
+        $global:SmartM365ScriptName
+    }
+    elseif ($global:LogTextFile) {
+        [System.IO.Path]::GetFileNameWithoutExtension($global:LogTextFile)
+    }
+    elseif ($PSCommandPath) {
+        [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+    }
+    else {
+        'SmartM365'
+    }
+
+    $facts = @{
+        Script     = $scriptName
+        Computer   = $env:COMPUTERNAME
+        LogFile    = $global:LogTextFile
+        Transcript = $global:logTranscriptFile
+    }
+
+    $title = if ($isError) { "SmartM365 error - $scriptName" } else { "SmartM365 completed - $scriptName" }
+    $helpUrl = ''
+    if ($isError) {
+        $prompt = "Help troubleshoot this SmartM365 PowerShell script error. Script: $scriptName. Computer: $env:COMPUTERNAME. Error: $Message. Log: $global:LogTextFile"
+        $helpUrl = 'https://chat.openai.com/?q=' + [System.Uri]::EscapeDataString($prompt)
+    }
+
+    try {
+        $script:SmartM365TeamsNotificationInProgress = $true
+        Send-SmartM365TeamsNotification -Title $title -Message $Message -Level $(if ($isError) { 'ERROR' } else { 'SUCCESS' }) -Facts $facts -HelpUrl $helpUrl | Out-Null
+    }
+    catch {
+        # Notifications must not break inventory/report execution.
+    }
+    finally {
+        $script:SmartM365TeamsNotificationInProgress = $false
     }
 }
 
@@ -994,6 +1057,7 @@ function InitializeScriptEnvironment {
     }
 
     $global:BasePath = $OutputPathInit
+    $global:SmartM365ScriptName = $LogFileName
     $global:LogPath  = Join-Path -Path $logAllRootPath -ChildPath $LogFileName
 
     try {
@@ -1073,11 +1137,6 @@ function Connect-SmartM365GraphAppOnly {
             Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
         }
 
-        $context = Get-MgContext -ErrorAction SilentlyContinue
-        if ($null -ne $context) {
-            return $true
-        }
-
         $moduleLocalConfig = Get-ModuleLocalConfig
         if (-not (Test-SmartM365ConfiguredValue -Value $AppId)) {
             $AppId = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'AppId' -DefaultValue ''
@@ -1100,6 +1159,7 @@ function Connect-SmartM365GraphAppOnly {
         }
 
         WriteLog -Message ("Connecting to Microsoft Graph for {0}." -f $Purpose) -Level "INFO"
+        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
         Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -NoWelcome -ErrorAction Stop | Out-Null
 
         $context = Get-MgContext -ErrorAction SilentlyContinue
@@ -1777,6 +1837,7 @@ function Connect-SmartM365CloudSession {
     if ($Graph) {
         try {
             WriteLog "Connecting to Microsoft Graph..." "INFO"
+            try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
 
             if ($useCertAuth) {
                 Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -NoWelcome -ErrorAction Stop
@@ -1799,6 +1860,7 @@ function Connect-SmartM365CloudSession {
     if ($ExchangeOnline) {
         try {
             WriteLog "Connecting to Exchange Online..." "INFO"
+            try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
 
             if ($useCertAuth) {
                 if (-not $Organization) {

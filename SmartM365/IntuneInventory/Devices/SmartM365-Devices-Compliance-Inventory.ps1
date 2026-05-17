@@ -1,0 +1,934 @@
+<#
+.SYNOPSIS
+M365 Devices Compliance Inventory (Graph-only, Windows-only).
+
+.DESCRIPTION
+    - All Windows devices by default (if no filter is supplied)
+    - No RAM/Storage/DHA collection
+    - Per-policy compliance with fixed category columns (always present, even empty)
+    - AD_Domain / AD_OU / DirectorySource from Entra ID (Graph) only:
+        * AD_OU from onPremisesDistinguishedName (Hybrid only)
+        * AD_Domain from onPremisesDomainName or fallback to UPN suffix
+
+.PARAMETER ManagedDeviceId
+Optional: limit scope to a specific Intune managed device.
+
+.PARAMETER DeviceName
+Optional: limit scope to a specific Windows device name (exact or startswith).
+
+.PARAMETER IncludeComplianceSettings
+Fetch and process per-setting noncompliant details to compute category rollup (default: $true).
+
+.PARAMETER AllDevices
+If present (or if no device filter is supplied), process all Windows managed devices.
+
+.PARAMETER Connect
+Forces a (re)connection to Microsoft Graph (disconnects any existing session first).
+
+.PARAMETER InteractiveAuth
+Uses interactive authentication instead of app-only certificate authentication.
+
+.NOTES
+    Author: https://github.com/khda79/M365
+Version     : 1.0
+Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
+Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
+#>
+
+[CmdletBinding()]
+param(
+    [string]$Tenant = 'test',
+[Parameter(Mandatory = $false)]
+    [string]$ManagedDeviceId,
+
+    [Parameter(Mandatory = $false)]
+    [string]$DeviceName,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$IncludeComplianceSettings = $true,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$AllDevices,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Connect,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$InteractiveAuth
+)
+$tenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $p) { return $p }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $tenantContextPath
+Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
+
+# ==========================================================
+# PowerShell 7 minimum
+# ==========================================================
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host "This script requires PowerShell 7 or later." -ForegroundColor Red
+    Write-Host "Current PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
+    exit 1
+}
+
+# Avoid PS function-capacity issues
+$MaximumFunctionCount = 32768
+
+# ==========================================================
+# App-only authentication parameters (same app as inventory script)
+# ==========================================================
+function Get-ScriptLocalConfig {
+    [CmdletBinding()]
+    param()
+
+    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        return [pscustomobject]@{}
+    }
+
+    try {
+        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
+    }
+}
+
+function Resolve-SmartM365ConfigValue {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value)) {
+        return $Value
+    }
+
+    if ($Value -notmatch '\{\{[^}]+\}\}') {
+        return $Value
+    }
+
+    if ($null -eq $script:SmartM365GlobalConfig) {
+        $script:SmartM365GlobalConfig = [pscustomobject]@{}
+        $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($ScriptRoot) { $ScriptRoot } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
+        while ($searchRoot) {
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+            if (Test-Path -LiteralPath $globalConfigPath) {
+                try {
+                    $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                }
+                catch {
+                    throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
+                }
+                break
+            }
+            $parent = Split-Path -Path $searchRoot -Parent
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
+            $searchRoot = $parent
+        }
+    }
+
+    $resolved = $Value
+    for ($i = 0; $i -lt 10; $i++) {
+        $matches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
+        if ($matches.Count -eq 0) { break }
+
+        $changed = $false
+        foreach ($match in $matches) {
+            $tokenName = $match.Groups['Name'].Value
+            $tokenProperty = $script:SmartM365GlobalConfig.PSObject.Properties[$tokenName]
+            if ($null -eq $tokenProperty -or $null -eq $tokenProperty.Value) { continue }
+
+            $tokenValue = Resolve-SmartM365ConfigValue -Value $tokenProperty.Value
+            if ($null -eq $tokenValue) { continue }
+
+            $resolved = $resolved.Replace($match.Value, [string]$tokenValue)
+            $changed = $true
+        }
+
+        if (-not $changed) { break }
+    }
+
+    return $resolved
+}
+function Get-ScriptLocalConfigValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $DefaultValue
+    )
+
+    $property = $Config.PSObject.Properties[$Name]
+    if ($null -ne $property -and $null -ne $property.Value) {
+        if ($property.Value -is [string]) {
+            $localValue = $property.Value.Trim()
+            if ($localValue -and $localValue -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+                return Resolve-SmartM365ConfigValue -Value $property.Value
+            }
+        }
+        else {
+            return Resolve-SmartM365ConfigValue -Value $property.Value
+        }
+    }
+
+
+    if ($null -eq $script:SmartM365GlobalConfig) {
+        $script:SmartM365GlobalConfig = [pscustomobject]@{}
+        $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
+        while ($searchRoot) {
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+            if (Test-Path -LiteralPath $globalConfigPath) {
+                try {
+                    $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                }
+                catch {
+                    throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message)
+                }
+                break
+            }
+            $parent = Split-Path -Path $searchRoot -Parent
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
+            $searchRoot = $parent
+        }
+    }
+
+    $globalProperty = $script:SmartM365GlobalConfig.PSObject.Properties[$Name]
+    if ($null -ne $globalProperty -and $null -ne $globalProperty.Value) {
+        if ($globalProperty.Value -is [string] -and [string]::IsNullOrWhiteSpace($globalProperty.Value)) {
+            return $DefaultValue
+        }
+        return Resolve-SmartM365ConfigValue -Value $globalProperty.Value
+    }
+    return $DefaultValue
+}
+
+$ScriptLocalConfig = Get-ScriptLocalConfig
+
+
+$global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
+$global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
+
+$global:EnableSharePointUpload = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableSharePointUpload' -DefaultValue $false)
+$global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSiteHostname' -DefaultValue ''
+$global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
+$global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
+$global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
+$AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue '00000000-0000-0000-0000-000000000000'
+$TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue '00000000-0000-0000-0000-000000000000'
+$Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
+$OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDomain' -DefaultValue 'contoso.onmicrosoft.com'
+$LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
+
+# ==========================================================
+# Import SmartM365.Core module (psd1)
+# ==========================================================
+$modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
+try {
+    Import-Module $modulePath -ErrorAction Stop
+} catch {
+    Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
+    exit 1
+}
+
+# ==========================================================
+# Fixed output paths and transcript
+# ==========================================================
+$ts       = Get-Date -Format 'yyyyMMdd_HHmmss'
+$ScriptCsvLogFolderPath  = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ScriptCsvLogFolderPath' -DefaultValue ""
+$LatestCsvFolderPath  = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ""
+$logDir   = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
+    Join-Path $ScriptCsvLogFolderPath "Log"
+} else {
+    Join-Path $LogAllRootPath "Devices-Compliance-Inventory"
+}
+
+$mainCsv  = Join-Path $ScriptCsvLogFolderPath  "Intune_Devices_Compliance.csv"
+$tsCsv    = Join-Path $ScriptCsvLogFolderPath  ("Intune_Devices_Compliance_{0}.csv" -f $ts)
+$lastCsv  = Join-Path $LatestCsvFolderPath  "Intune_Devices_Compliance.csv"
+
+foreach ($dir in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logDir)) {
+    try { New-Item -ItemType Directory -Force -Path $dir | Out-Null } catch { }
+}
+
+try {
+    $transcriptPath = Join-Path $logDir ("Transcript_{0}.log" -f $ts)
+    Start-Transcript -Path $transcriptPath -Force | Out-Null
+} catch {
+    Write-Warning "Failed to start transcript. $_"
+}
+
+# ==========================================================
+# Helpers
+# ==========================================================
+function Get-SafeProperty {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Object,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $Object) { return $null }
+
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($prop) { return $prop.Value }
+
+    $ap = $Object.PSObject.Properties['AdditionalProperties']
+    if ($ap -and $ap.Value -is [System.Collections.IDictionary] -and $ap.Value.ContainsKey($Name)) {
+        return $ap.Value[$Name]
+    }
+
+    $propCI = $Object.PSObject.Properties | Where-Object { $_.Name -ieq $Name }
+    if ($propCI) { return $propCI.Value }
+
+    return $null
+}
+
+function Invoke-WithRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Script,
+
+        [Parameter(Mandatory = $false)]
+        [int]$MaxAttempts = 3
+    )
+
+    $attempt = 0
+
+    while ($true) {
+        try {
+            $attempt++
+            return & $Script
+        } catch {
+            $msg = $_.Exception.Message
+
+            if ($attempt -ge $MaxAttempts -or ($msg -notmatch '429' -and $msg -notmatch 'throttl')) {
+                throw
+            }
+
+            $delay = [int][math]::Min(60, 2 * $attempt)
+            Write-Verbose "Throttled (attempt $attempt), sleeping for $delay second(s)..."
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
+function Get-ADPartsFromDN {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$DN
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DN)) {
+        return [pscustomobject]@{
+            OU     = $null
+            Domain = $null
+        }
+    }
+
+    $parts   = $DN -split ',' | ForEach-Object { $_.Trim() }
+    $ouParts = @()
+    $dcParts = @()
+
+    foreach ($p in $parts) {
+        if ($p -like 'OU=*') {
+            $ouParts += ($p.Substring(3))
+        } elseif ($p -like 'DC=*') {
+            $dcParts += ($p.Substring(3))
+        }
+    }
+
+    $ou     = if ($ouParts.Count -gt 0) { $ouParts -join '/' } else { $null }
+    $domain = if ($dcParts.Count -gt 0) { $dcParts -join '.' } else { $null }
+
+    return [pscustomobject]@{
+        OU     = $ou
+        Domain = $domain
+    }
+}
+
+# Resolve directory info (OU and Domain) from Azure AD / Entra ID only (no on-prem AD calls)
+function Resolve-DirInfoFromGraph {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$AzureAdDeviceId,
+
+        [Parameter(Mandatory = $false)]
+        [string]$FallbackUpn
+    )
+
+    $out = [pscustomobject]@{
+        AD_OU           = $null
+        AD_Domain       = $null
+        EntraObjectId   = $null
+        DirectorySource = 'Unknown'
+    }
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($AzureAdDeviceId)) {
+            if ($FallbackUpn) {
+                $out.AD_Domain = ($FallbackUpn -split '@', 2)[1]
+            }
+
+            $out.DirectorySource = if ($out.AD_Domain) { 'AADOnly' } else { 'Unknown' }
+            return $out
+        }
+
+        $uri  = "https://graph.microsoft.com/v1.0/devices?`$filter=deviceId eq '$AzureAdDeviceId'&`$select=id,deviceId,trustType,onPremisesDomainName,onPremisesDistinguishedName"
+        $resp = Invoke-WithRetry -Script { Invoke-MgGraphRequest -Method GET -Uri $uri }
+
+        $dev = $null
+        if ($resp -and $resp.value) {
+            if ($resp.value -is [System.Collections.IDictionary]) {
+                $dev = $resp.value
+            } elseif ($resp.value -is [System.Collections.IEnumerable]) {
+                $dev = ($resp.value | Select-Object -First 1)
+            } elseif ($resp.value -is [object[]]) {
+                $dev = $resp.value[0]
+            }
+        }
+
+        if ($dev) {
+            $dn        = $dev.onPremisesDistinguishedName
+            $domain    = $dev.onPremisesDomainName
+            $trustType = $dev.trustType
+
+            if ($dn) {
+                $parts         = Get-ADPartsFromDN -DN $dn
+                $out.AD_OU     = $parts.OU
+                if (-not $domain -and $parts.Domain) {
+                    $domain = $parts.Domain
+                }
+            }
+
+            if (-not $domain -and $FallbackUpn) {
+                $domain = ($FallbackUpn -split '@', 2)[1]
+            }
+
+            $out.AD_Domain       = $domain
+            $out.EntraObjectId   = $dev.id
+            $out.DirectorySource = if ($trustType -eq 'ServerAd' -or $dn -or $dev.onPremisesDomainName) {
+                'Hybrid'
+            } elseif ($trustType -eq 'Workplace') {
+                'Registered'
+            } elseif ($trustType -eq 'AzureAd' -or $domain) {
+                'AADOnly'
+            } else {
+                'Unknown'
+            }
+        } elseif ($FallbackUpn) {
+            $out.AD_Domain       = ($FallbackUpn -split '@', 2)[1]
+            $out.DirectorySource = 'AADOnly'
+        }
+    } catch {
+        Write-Verbose "Failed to resolve directory info from Graph: $_"
+    }
+
+    return $out
+}
+
+# ==========================================================
+# Category mapping (for per-policy rollup)
+# ==========================================================
+$SettingRuleMap = @(
+    @{ Pattern='secureboot(enabled)?';                          Category='SecureBoot' },
+    @{ Pattern='bitlocker|encrypt';                             Category='BitLocker' },
+    @{ Pattern='tpm|requiredtrustedplatformmodule';             Category='TPM' },
+    @{ Pattern='defender|antivirus|antispyware|deviceThreat';   Category='Antivirus' },
+    @{ Pattern='firewall';                                      Category='Firewall' },
+    @{ Pattern='codeintegrity';                                 Category='CodeIntegrity' },
+    @{ Pattern='os(version|minimum)|minosversion';              Category='OSVersion' },
+    @{ Pattern='uefi(required)?';                               Category='UEFI' }
+)
+
+# Policy property name → category (for Get-PolicyConfiguredCategories)
+$PolicyPropertyCategoryMap = @(
+    @{ Properties=@('secureBootEnabled');                                    Category='SecureBoot'     },
+    @{ Properties=@('bitLockerEnabled','storageRequireEncryption');           Category='BitLocker'      },
+    @{ Properties=@('tpmRequired');                                          Category='TPM'            },
+    @{ Properties=@('antivirusRequired','antiSpywareRequired','defenderEnabled','rtpEnabled','signatureOutOfDate','deviceThreatProtectionEnabled'); Category='Antivirus' },
+    @{ Properties=@('firewallEnabled','firewallBlockAllIncoming','firewallEnableStealthMode'); Category='Firewall' },
+    @{ Properties=@('codeIntegrityEnabled');                                 Category='CodeIntegrity'  },
+    @{ Properties=@('osMinimumVersion','osMaximumVersion','mobileOsMinimumVersion','mobileOsMaximumVersion','validOperatingSystemBuildRanges'); Category='OSVersion' },
+    @{ Properties=@('uefiRequired');                                         Category='UEFI'           }
+)
+
+# Cache: policyId -> Set of configured category names
+$policyDefCache = @{}
+
+function Get-PolicyConfiguredCategories {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PolicyId
+    )
+
+    if ($script:policyDefCache.ContainsKey($PolicyId)) {
+        return $script:policyDefCache[$PolicyId]
+    }
+
+    $configured = [System.Collections.Generic.HashSet[string]]::new()
+
+    try {
+        $uri = "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies/$PolicyId"
+        $policy = Invoke-WithRetry -Script { Invoke-MgGraphRequest -Method GET -Uri $uri }
+
+        if ($policy) {
+            foreach ($entry in $script:PolicyPropertyCategoryMap) {
+                foreach ($prop in $entry.Properties) {
+                    $val = $null
+                    if ($policy.ContainsKey($prop)) {
+                        $val = $policy[$prop]
+                    } elseif ($policy.PSObject.Properties[$prop]) {
+                        $val = $policy.PSObject.Properties[$prop].Value
+                    }
+                    # A property is "configured" if it is true, or a non-empty/non-null string
+                    $active = ($val -is [bool] -and $val -eq $true) -or
+                              ($val -is [string] -and -not [string]::IsNullOrWhiteSpace($val)) -or
+                              ($val -is [System.Collections.IEnumerable] -and ($val | Measure-Object).Count -gt 0)
+                    if ($active) {
+                        $null = $configured.Add($entry.Category)
+                        Write-Verbose ("Get-PolicyConfiguredCategories: '{0}' property '{1}'='{2}' -> category '{3}' configured" -f $PolicyId, $prop, $val, $entry.Category)
+                        break
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Warning ("Failed to retrieve policy definition for '{0}': {1}" -f $PolicyId, $_.Exception.Message)
+    }
+
+    $script:policyDefCache[$PolicyId] = $configured
+    return $configured
+}
+
+function Map-SettingCategory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$SettingName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SettingName)) {
+        return 'Other'
+    }
+
+    $n = $SettingName.ToLowerInvariant()
+    foreach ($rule in $SettingRuleMap) {
+        if ($n -match $rule.Pattern) {
+            Write-Verbose ("Map-SettingCategory: '{0}' -> '{1}'" -f $SettingName, $rule.Category)
+            return $rule.Category
+        }
+    }
+    Write-Verbose ("Map-SettingCategory: '{0}' -> 'Other' (no pattern matched)" -f $SettingName)
+    return 'Other'
+}
+
+# ==========================================================
+# Graph connection via SmartM365.Core / Connect-SmartM365CloudSession
+# ==========================================================
+function Test-GraphConnection {
+    try {
+        # Works with delegated or app-only
+        $null = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization" -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+$connectedGraphInThisRun = $false
+
+try {
+    $graphContext = $null
+    if (Get-Command Get-MgContext -ErrorAction SilentlyContinue) {
+        try { $graphContext = Get-MgContext -ErrorAction SilentlyContinue } catch { }
+    }
+
+    $needConnect = $false
+
+    if ($Connect) {
+        Write-Host "Connect switch specified: existing Graph session (if any) will be disconnected and reconnected..." -ForegroundColor Cyan
+        Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true -VerboseDisconnect:$true
+        $needConnect = $true
+    } else {
+        if ($graphContext -and (Test-GraphConnection)) {
+            Write-Host "Existing Microsoft Graph session detected. Reusing current connection." -ForegroundColor Cyan
+            $needConnect = $false
+        } else {
+            Write-Host "No existing Graph session detected. Will establish a new connection..." -ForegroundColor Cyan
+            $needConnect = $true
+        }
+    }
+
+    if ($needConnect) {
+        $connectParams = @{
+            ExchangeOnline = $false
+            Graph          = $true
+            GraphScopes    = @("DeviceManagementManagedDevices.Read.All","Directory.Read.All")
+        }
+
+        if (-not $InteractiveAuth) {
+            # App-only certificate authentication
+            $connectParams.AppId        = $AppId
+            $connectParams.Thumbprint   = $Thumb
+            $connectParams.TenantId     = $TenantId
+            $connectParams.Organization = $OrgDomain
+            Write-Host "Connecting to Microsoft Graph with app-only certificate authentication..." -ForegroundColor Cyan
+        } else {
+            Write-Host "Connecting to Microsoft Graph with interactive authentication..." -ForegroundColor Cyan
+        }
+
+        $connectResult = Connect-SmartM365CloudSession @connectParams
+
+        if (-not $connectResult.GraphConnected) {
+            throw "Failed to connect to Microsoft Graph."
+        }
+
+        $connectedGraphInThisRun = $connectResult.GraphConnected
+    }
+
+    # ==========================================================
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @(
+        'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=1',
+        'https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies?$top=1'
+    ) | Out-Null
+
+    # MAIN LOGIC
+    # ==========================================================
+
+    # 1) Resolve device set
+    $devices = @()
+
+    try {
+        $processAll = $AllDevices.IsPresent -or `
+                      ([string]::IsNullOrWhiteSpace($ManagedDeviceId) -and [string]::IsNullOrWhiteSpace($DeviceName))
+
+        if ($processAll) {
+            # All Windows devices
+            Write-Host "Retrieving all Intune managed Windows devices..." -ForegroundColor Cyan
+            $devices = Invoke-WithRetry -Script {
+                Get-MgDeviceManagementManagedDevice `
+                    -Filter "operatingSystem eq 'Windows'" `
+                    -All `
+                    -Property "id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName"
+            }
+            if (-not $devices -or $devices.Count -eq 0) {
+                Write-Error "No Windows managed devices found."
+                throw "No Windows managed devices found."
+            }
+        } elseif (-not [string]::IsNullOrWhiteSpace($ManagedDeviceId)) {
+            Write-Host "Resolving device by ManagedDeviceId '$ManagedDeviceId'..." -ForegroundColor Cyan
+            $light = Invoke-WithRetry -Script {
+                Get-MgDeviceManagementManagedDevice `
+                    -ManagedDeviceId $ManagedDeviceId `
+                    -Property "id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName"
+            }
+            if (-not $light) {
+                throw ("No device found with ManagedDeviceId='{0}'." -f $ManagedDeviceId)
+            }
+            $devices = @($light)
+        } else {
+            Write-Host "Resolving device by DeviceName '$DeviceName'..." -ForegroundColor Cyan
+            $escaped = $DeviceName.Replace("'", "''")
+
+            $light = Invoke-WithRetry -Script {
+                Get-MgDeviceManagementManagedDevice `
+                    -Filter "operatingSystem eq 'Windows' and deviceName eq '$escaped'" `
+                    -Top 1 `
+                    -Property "id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName"
+            }
+
+            if (-not $light) {
+                $light = Invoke-WithRetry -Script {
+                    Get-MgDeviceManagementManagedDevice `
+                        -Filter "operatingSystem eq 'Windows' and startswith(deviceName,'$escaped')" `
+                        -Top 1 `
+                        -Property "id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName"
+                }
+            }
+
+            if (-not $light) {
+                throw ("No Windows device found for DeviceName='{0}'." -f $DeviceName)
+            }
+
+            $devices = @($light)
+        }
+    } catch {
+        Write-Error "Failed to resolve target devices. $_"
+        throw
+    }
+
+    # 2) Collect per-device summary rows and per-policy rows
+    $aadCache = @{}
+    $rows     = New-Object System.Collections.Generic.List[object]
+    $polAll   = New-Object System.Collections.Generic.List[object]
+
+    $total = ($devices | Measure-Object).Count
+    $i     = 0
+
+    foreach ($dev in $devices) {
+        $i++
+        Write-Progress -Id 1 -Activity "Processing devices" `
+            -Status ("{0}/{1} - {2}" -f $i, $total, $dev.DeviceName) `
+            -PercentComplete ([int](100 * $i / $total))
+
+        $lastSync   = Get-SafeProperty -Object $dev -Name 'lastSyncDateTime'
+        $azureId    = Get-SafeProperty -Object $dev -Name 'azureADDeviceId'
+        $primaryUpn = Get-SafeProperty -Object $dev -Name 'userPrincipalName'
+
+        # Directory info (Graph-only)
+        $adOU         = $null
+        $adDomain     = $null
+        $dirSource    = $null
+        $entraObjId   = $null
+
+        if ($azureId) {
+            if ($aadCache.ContainsKey($azureId)) {
+                $adOU       = $aadCache[$azureId].AD_OU
+                $adDomain   = $aadCache[$azureId].AD_Domain
+                $dirSource  = $aadCache[$azureId].DirectorySource
+                $entraObjId = $aadCache[$azureId].EntraObjectId
+            } else {
+                $info       = Resolve-DirInfoFromGraph -AzureAdDeviceId $azureId -FallbackUpn $primaryUpn
+                $adOU       = $info.AD_OU
+                $adDomain   = $info.AD_Domain
+                $dirSource  = $info.DirectorySource
+                $entraObjId = $info.EntraObjectId
+                $aadCache[$azureId] = $info
+            }
+        } elseif ($primaryUpn) {
+            $adDomain  = ($primaryUpn -split '@', 2)[1]
+            $dirSource = 'AADOnly'
+        }
+
+        # main row
+        $rows.Add([pscustomobject]@{
+            DeviceName                              = $dev.DeviceName
+            AzureADDeviceId                         = $azureId
+            EntraObjectId                           = $entraObjId
+            Manufacturer                            = $dev.Manufacturer
+            Model                                   = $dev.Model
+            OperatingSystem                         = $dev.OperatingSystem
+            LastSyncDateTime                        = $lastSync
+            ComplianceState                         = $dev.ComplianceState
+            ComplianceGracePeriodExpirationDateTime = $dev.ComplianceGracePeriodExpirationDateTime
+            AD_Domain                               = $adDomain
+            AD_OU                                   = $adOU
+            DirectorySource                         = $dirSource
+        })
+
+        # Per-policy states
+        $policyStates = $null
+        try {
+            $cmd = Get-Command -Name Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ErrorAction SilentlyContinue
+            if ($cmd) {
+                $policyStates = Invoke-WithRetry -Script {
+                    Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ManagedDeviceId $dev.Id -All
+                }
+            } else {
+                $uri  = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$($dev.Id)/deviceCompliancePolicyStates`?$top=200"
+                $vals = @()
+                while ($uri) {
+                    $resp = Invoke-WithRetry -Script { Invoke-MgGraphRequest -Method GET -Uri $uri }
+                    if ($resp -and $resp.value) { $vals += $resp.value }
+                    $uri = if ($resp.'@odata.nextLink') { $resp.'@odata.nextLink' } else { $null }
+                }
+                if ($vals.Count -gt 0) { $policyStates = $vals }
+            }
+        } catch {
+            Write-Warning ("Failed to retrieve policy states for device {0}: {1}" -f $dev.DeviceName, $_.Exception.Message)
+        }
+
+        if ($policyStates) {
+            $policyStates = $policyStates |
+                Where-Object { $_.platformType -eq 'windows10AndLater' } |
+                Sort-Object displayName, version -Unique
+
+            # Build category rollup per policy
+            $policyCategoryRollup = @{}
+
+            if ($IncludeComplianceSettings) {
+                $targets = $policyStates | Where-Object {
+                    $_.nonCompliantSettingCount -gt 0 -or $_.state -eq 'nonCompliant'
+                }
+
+                $pIdx = 0
+                $pTot = ($targets | Measure-Object).Count
+
+                foreach ($p in $targets) {
+                    $pIdx++
+                    if ($pTot -gt 0) {
+                        Write-Progress -Id 2 -ParentId 1 `
+                            -Activity ("Policies for {0}" -f $dev.DeviceName) `
+                            -Status ("{0}/{1} - {2}" -f $pIdx, $pTot, $p.displayName) `
+                            -PercentComplete ([int](100 * $pIdx / $pTot))
+                    }
+
+                    try {
+                        $u = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$($dev.Id)/deviceCompliancePolicyStates/$([uri]::EscapeDataString($p.id))/settingStates`?$select=setting,state&`$top=200"
+                        $s = @()
+                        while ($u) {
+                            $page = Invoke-WithRetry -Script { Invoke-MgGraphRequest -Method GET -Uri $u }
+                            if ($page -and $page.value) { $s += $page.value }
+                            $u = if ($page.'@odata.nextLink') { $page.'@odata.nextLink' } else { $null }
+                        }
+
+                        foreach ($v in ($s | Where-Object { $_.state -eq 'nonCompliant' })) {
+                            $cat = Map-SettingCategory -SettingName $v.setting
+                            if (-not $policyCategoryRollup.ContainsKey($p.displayName)) {
+                                $policyCategoryRollup[$p.displayName] = @{}
+                            }
+                            $policyCategoryRollup[$p.displayName][$cat] = 'Fail'
+                        }
+                    } catch {
+                        Write-Warning ("Failed to retrieve setting states for '{0}' on device '{1}': {2}" -f $p.displayName, $dev.DeviceName, $_.Exception.Message)
+                    }
+                }
+
+                Write-Progress -Id 2 -ParentId 1 -Activity ("Policies for {0}" -f $dev.DeviceName) -Completed
+            }
+
+            # Emit per-policy rows (ensure all columns even if empty)
+            foreach ($p in $policyStates) {
+                # Resolve configured categories for this policy (cached)
+                $policyId = Get-SafeProperty -Object $p -Name 'id'
+                $configuredCats = if ($policyId) {
+                    Get-PolicyConfiguredCategories -PolicyId $policyId
+                } else {
+                    [System.Collections.Generic.HashSet[string]]::new()
+                }
+                # Defensive null-guard: function may return $null in edge cases
+                if ($null -eq $configuredCats) {
+                    $configuredCats = [System.Collections.Generic.HashSet[string]]::new()
+                }
+
+                # Helper: resolve column value
+                # - '' if category not configured in policy
+                # - '' if state is error/unknown/notApplicable (indeterminate)
+                # - 'Fail' if category is in nonCompliant rollup
+                # - 'Pass' if category is configured and state is compliant/nonCompliant but not failed
+                $determinable = $p.state -in @('compliant','nonCompliant')
+                $resolveCol = {
+                    param([string]$Cat)
+                    if ($null -eq $configuredCats -or -not $configuredCats.Contains($Cat)) { return '' }
+                    if (-not $determinable) { return '' }
+                    $pName = $p.displayName
+                    if ([string]::IsNullOrEmpty($pName)) { return '' }
+                    if ($policyCategoryRollup.ContainsKey($pName) -and $policyCategoryRollup[$pName].ContainsKey($Cat)) {
+                        return 'Fail'
+                    }
+                    return 'Pass'
+                }
+                $polAll.Add([pscustomobject]@{
+                    DeviceName               = $dev.DeviceName
+                    AzureADDeviceId          = $azureId
+                    EntraObjectId            = $entraObjId
+                    displayName              = $p.displayName
+                    state                    = $p.state
+                    version                  = $p.version
+                    platformType             = $p.platformType
+                    settingCount             = $p.settingCount
+                    nonCompliantSettingCount = if ($p.nonCompliantSettingCount -ne $null) { $p.nonCompliantSettingCount } else { 0 }
+                    lastReportedDateTime     = & {
+                        $raw = Get-SafeProperty -Object $p -Name 'lastReportedDateTime'
+                        if ([string]::IsNullOrWhiteSpace($raw)) { return '' }
+                        $parsed = [datetime]::MinValue
+                        if ([datetime]::TryParse($raw, [ref]$parsed) -and $parsed.Year -gt 1) {
+                            $parsed.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                        } else {
+                            ''
+                        }
+                    }
+                    SecureBoot               = & $resolveCol 'SecureBoot'
+                    'BitLocker/Encryption'   = & $resolveCol 'BitLocker'
+                    TPM                      = & $resolveCol 'TPM'
+                    'Defender/Antivirus'     = & $resolveCol 'Antivirus'
+                    Firewall                 = & $resolveCol 'Firewall'
+                    CodeIntegrity            = & $resolveCol 'CodeIntegrity'
+                    OSVersion                = & $resolveCol 'OSVersion'
+                    UEFI                     = & $resolveCol 'UEFI'
+                    AD_Domain                = $adDomain
+                    AD_OU                    = $adOU
+                    DirectorySource          = $dirSource
+                })
+            }
+        }
+    }
+
+    Write-Progress -Id 1 -Activity "Processing devices" -Completed
+
+    # 3) Output
+    if ($rows.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Devices summary:" -ForegroundColor Cyan
+        $rows | Select-Object `
+            DeviceName, Manufacturer, Model, OperatingSystem, LastSyncDateTime, `
+            ComplianceState, ComplianceGracePeriodExpirationDateTime, `
+            AD_Domain, AD_OU, DirectorySource |
+        Format-Table -AutoSize
+    } else {
+        Write-Host ""
+        Write-Host "No devices to display." -ForegroundColor Yellow
+    }
+
+    if ($polAll.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Compliance details (per policy):" -ForegroundColor Cyan
+
+        $polOut = $polAll |
+            Sort-Object DeviceName, displayName, version |
+            Select-Object `
+                DeviceName, AzureADDeviceId, EntraObjectId, displayName, state, version, platformType, `
+                settingCount, nonCompliantSettingCount, lastReportedDateTime, `
+                SecureBoot, 'BitLocker/Encryption', TPM, 'Defender/Antivirus', `
+                Firewall, CodeIntegrity, OSVersion, UEFI, `
+                AD_Domain, AD_OU, DirectorySource
+
+        $polOut | Format-Table -AutoSize -Wrap
+
+        try {
+            $polOut | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $mainCsv
+            Copy-Item -Path $mainCsv -Destination $tsCsv   -Force
+            Copy-Item -Path $mainCsv -Destination $lastCsv -Force
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $lastCsv
+
+            Write-Host "Compliance CSV saved: $mainCsv"
+            Write-Host "Compliance CSV timestamped: $tsCsv"
+            Write-Host "Compliance CSV (last): $lastCsv"
+        } catch {
+            Write-Warning "Failed to export compliance CSVs: $_"
+        }
+    } else {
+        Write-Host ""
+        Write-Host "Compliance details: no policy states available or calls failed." -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "A global error occurred in M365-Devices-Compliance.ps1 : $($_.Exception.Message)" -ForegroundColor Red
+}
+finally {
+    # Disconnect Graph only if we connected it in this run
+    if ($connectedGraphInThisRun) {
+        Write-Host "`n--- Disconnect Cloud Services ---"
+        try {
+            Disconnect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -VerboseDisconnect:$true
+        } catch {
+            Write-Host ("Error during Graph disconnect in finally: {0}" -f $_) -ForegroundColor Yellow
+        }
+    }
+
+    try { Stop-Transcript | Out-Null } catch { }
+}
+
+
+
