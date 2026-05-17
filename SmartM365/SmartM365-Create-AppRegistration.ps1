@@ -269,6 +269,65 @@ function Import-RequiredExchangeOnlineModule {
     Import-Module $moduleName -ErrorAction Stop
 }
 
+function Disconnect-SmartM365ExistingGraphSession {
+    try {
+        $existingContext = Get-MgContext -ErrorAction SilentlyContinue
+        if ($null -ne $existingContext -and -not [string]::IsNullOrWhiteSpace($existingContext.Account)) {
+            Write-SmartM365SetupStatus -Message ("Disconnecting existing Microsoft Graph session for {0}." -f $existingContext.Account)
+        }
+        else {
+            Write-SmartM365SetupStatus -Message 'Clearing any existing Microsoft Graph session.'
+        }
+
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    }
+    catch {
+        Write-SmartM365SetupStatus -Level WARN -Message ("Could not disconnect existing Microsoft Graph session: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Disconnect-SmartM365ExistingExchangeOnlineSession {
+    Import-RequiredExchangeOnlineModule
+
+    try {
+        $existingConnections = @()
+        if (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue) {
+            $existingConnections = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+        }
+
+        if ($existingConnections.Count -gt 0) {
+            $connectionNames = @(
+                $existingConnections |
+                    ForEach-Object {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$_.UserPrincipalName)) {
+                            [string]$_.UserPrincipalName
+                        }
+                        elseif (-not [string]::IsNullOrWhiteSpace([string]$_.Name)) {
+                            [string]$_.Name
+                        }
+                    } |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                    Select-Object -Unique
+            )
+
+            if ($connectionNames.Count -gt 0) {
+                Write-SmartM365SetupStatus -Message ("Disconnecting existing Exchange Online session(s): {0}." -f ($connectionNames -join ', '))
+            }
+            else {
+                Write-SmartM365SetupStatus -Message 'Disconnecting existing Exchange Online session(s).'
+            }
+        }
+        else {
+            Write-SmartM365SetupStatus -Message 'Clearing any existing Exchange Online session.'
+        }
+
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+    }
+    catch {
+        Write-SmartM365SetupStatus -Level WARN -Message ("Could not disconnect existing Exchange Online session: {0}" -f $_.Exception.Message)
+    }
+}
+
 function Connect-SmartM365GraphSetupSession {
     param(
         [string]$RequestedTenantId,
@@ -280,7 +339,7 @@ function Connect-SmartM365GraphSetupSession {
         'AppRoleAssignment.ReadWrite.All',
         'Directory.Read.All',
         'Group.ReadWrite.All',
-        'Sites.Read.All'
+        'Sites.FullControl.All'
     )
 
     $connectParams = @{
@@ -399,9 +458,8 @@ function Get-SmartM365RequiredApiResource {
         'DeviceManagementManagedDevices.Read.All',
         'DeviceManagementScripts.Read.All',
         'DeviceManagementServiceConfig.Read.All',
-        'Files.ReadWrite.All',
         'Mail.Send',
-        'Sites.ReadWrite.All'
+        'Sites.Selected'
     )
 
     if (-not $SkipBroadReadWrite) {
@@ -532,6 +590,89 @@ function Merge-RequiredResourceAccess {
             }
         }
     )
+}
+
+function Get-SmartM365RequiredResourceAccessWithoutPermission {
+    param(
+        [Parameter(Mandatory)][array]$RequiredAccess,
+        [Parameter(Mandatory)][string]$ResourceName,
+        [Parameter(Mandatory)][string]$ResourceAppId,
+        [Parameter(Mandatory)][string[]]$PermissionValues
+    )
+
+    $resourceSp = Get-OrCreate-ServicePrincipalByAppId -ResourceName $ResourceName -ResourceAppId $ResourceAppId
+    $roleIdsToRemove = @(
+        foreach ($permissionValue in $PermissionValues) {
+            (Resolve-ApplicationPermission -ResourceServicePrincipal $resourceSp -PermissionValue $permissionValue).Id
+        }
+    )
+
+    $filtered = foreach ($block in @($RequiredAccess)) {
+        $blockResourceAppId = if ($null -ne $block.resourceAppId) { $block.resourceAppId } else { $block.ResourceAppId }
+        $blockResourceAccess = if ($null -ne $block.resourceAccess) { $block.resourceAccess } else { $block.ResourceAccess }
+
+        $resourceAccess = @($blockResourceAccess | Where-Object {
+            -not ($blockResourceAppId -eq $ResourceAppId -and $roleIdsToRemove -contains $_.id)
+        })
+
+        if ($resourceAccess.Count -gt 0) {
+            @{
+                resourceAppId  = $blockResourceAppId
+                resourceAccess = $resourceAccess
+            }
+        }
+    }
+
+    return @($filtered)
+}
+
+function ConvertTo-SmartM365RequiredResourceAccessPayload {
+    param(
+        [AllowNull()]$RequiredAccess
+    )
+
+    $payload = foreach ($block in @($RequiredAccess)) {
+        if ($null -eq $block) {
+            continue
+        }
+
+        $resourceAppId = if ($null -ne $block.resourceAppId) { $block.resourceAppId } else { $block.ResourceAppId }
+        if ([string]::IsNullOrWhiteSpace([string]$resourceAppId)) {
+            continue
+        }
+
+        $rawResourceAccess = if ($null -ne $block.resourceAccess) { $block.resourceAccess } else { $block.ResourceAccess }
+        $resourceAccess = @(
+            foreach ($access in @($rawResourceAccess)) {
+                if ($null -eq $access) {
+                    continue
+                }
+
+                $id = if ($null -ne $access.id) { $access.id } else { $access.Id }
+                $type = if ($null -ne $access.type) { $access.type } else { $access.Type }
+
+                if ($null -eq $id -or [string]::IsNullOrWhiteSpace([string]$type)) {
+                    continue
+                }
+
+                @{
+                    id   = $id
+                    type = [string]$type
+                }
+            }
+        )
+
+        if ($resourceAccess.Count -eq 0) {
+            continue
+        }
+
+        @{
+            resourceAppId  = [string]$resourceAppId
+            resourceAccess = $resourceAccess
+        }
+    }
+
+    return @($payload)
 }
 
 function Get-SmartM365Certificate {
@@ -701,6 +842,39 @@ function Grant-SmartM365ApplicationPermission {
                     appRoleId   = $role.Id
                 } | Out-Null
                 Write-SmartM365SetupStatus -Message ("Granted admin consent: {0} / {1}" -f $resource.Name, $permission) -Level OK
+            }
+        }
+    }
+}
+
+function Revoke-SmartM365ApplicationPermission {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]$ApplicationServicePrincipal,
+        [Parameter(Mandatory)][string]$ResourceName,
+        [Parameter(Mandatory)][string]$ResourceAppId,
+        [Parameter(Mandatory)][string[]]$PermissionValues
+    )
+
+    $resourceSp = Get-OrCreate-ServicePrincipalByAppId -ResourceName $ResourceName -ResourceAppId $ResourceAppId
+    $existingAssignments = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $ApplicationServicePrincipal.Id -All)
+
+    foreach ($permission in $PermissionValues) {
+        $role = Resolve-ApplicationPermission -ResourceServicePrincipal $resourceSp -PermissionValue $permission
+        $assignmentsToRemove = @($existingAssignments | Where-Object { $_.ResourceId -eq $resourceSp.Id -and $_.AppRoleId -eq $role.Id })
+
+        if ($assignmentsToRemove.Count -eq 0) {
+            Write-SmartM365SetupStatus -Message ("Broad admin consent not present: {0} / {1}" -f $ResourceName, $permission) -Level OK
+            continue
+        }
+
+        foreach ($assignment in $assignmentsToRemove) {
+            if ($PSCmdlet.ShouldProcess(("{0} / {1}" -f $ResourceName, $permission), 'Revoke broad admin consent')) {
+                Remove-MgServicePrincipalAppRoleAssignment `
+                    -ServicePrincipalId $ApplicationServicePrincipal.Id `
+                    -AppRoleAssignmentId $assignment.Id `
+                    -ErrorAction Stop
+                Write-SmartM365SetupStatus -Message ("Revoked broad admin consent: {0} / {1}" -f $ResourceName, $permission) -Level OK
             }
         }
     }
@@ -928,10 +1102,99 @@ function Get-OrCreate-SmartM365TeamsWorkspace {
     return [pscustomobject]@{
         TeamId                       = $group.id
         TeamDisplayName              = $GroupDisplayName
+        SharePointSiteId             = $site.id
         SharePointSiteHostname       = $siteUri.Host
         SharePointSitePath           = $siteUri.AbsolutePath
         SharePointLibraryDisplayName = $libraryDisplayName
         SharePointTargetFolderPath   = $TargetFolderPath
+    }
+}
+
+function Get-SmartM365ApplicationIdFromSitePermission {
+    param([Parameter(Mandatory)]$Permission)
+
+    $applicationIds = @()
+
+    $grantedToIdentitiesV2 = if ($null -ne $Permission.PSObject.Properties['grantedToIdentitiesV2']) { $Permission.grantedToIdentitiesV2 } else { @() }
+    $grantedToIdentities = if ($null -ne $Permission.PSObject.Properties['grantedToIdentities']) { $Permission.grantedToIdentities } else { @() }
+    $grantedToV2 = if ($null -ne $Permission.PSObject.Properties['grantedToV2']) { $Permission.grantedToV2 } else { $null }
+    $grantedTo = if ($null -ne $Permission.PSObject.Properties['grantedTo']) { $Permission.grantedTo } else { $null }
+
+    foreach ($identity in @($grantedToIdentitiesV2)) {
+        if ($identity.application -and -not [string]::IsNullOrWhiteSpace([string]$identity.application.id)) {
+            $applicationIds += [string]$identity.application.id
+        }
+    }
+
+    foreach ($identity in @($grantedToIdentities)) {
+        if ($identity.application -and -not [string]::IsNullOrWhiteSpace([string]$identity.application.id)) {
+            $applicationIds += [string]$identity.application.id
+        }
+    }
+
+    if ($grantedToV2 -and $grantedToV2.application -and -not [string]::IsNullOrWhiteSpace([string]$grantedToV2.application.id)) {
+        $applicationIds += [string]$grantedToV2.application.id
+    }
+
+    if ($grantedTo -and $grantedTo.application -and -not [string]::IsNullOrWhiteSpace([string]$grantedTo.application.id)) {
+        $applicationIds += [string]$grantedTo.application.id
+    }
+
+    return @($applicationIds | Sort-Object -Unique)
+}
+
+function Grant-SmartM365SelectedSitePermission {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$SiteId,
+        [Parameter(Mandatory)][string]$ApplicationAppId,
+        [Parameter(Mandatory)][string]$ApplicationDisplayName,
+        [Parameter()][ValidateSet('read', 'write', 'manage', 'fullcontrol')][string]$Role = 'write'
+    )
+
+    $encodedSiteId = [System.Uri]::EscapeDataString($SiteId)
+    $permissionsResponse = Invoke-MgGraphRequest `
+        -Method GET `
+        -Uri "https://graph.microsoft.com/v1.0/sites/$encodedSiteId/permissions" `
+        -OutputType PSObject `
+        -ErrorAction Stop
+
+    $existingPermission = @($permissionsResponse.value) | Where-Object {
+        @(Get-SmartM365ApplicationIdFromSitePermission -Permission $_) -contains $ApplicationAppId
+    } | Select-Object -First 1
+
+    if ($existingPermission) {
+        $roles = @($existingPermission.roles)
+        if ($roles -contains $Role -or $roles -contains 'fullcontrol' -or ($Role -eq 'write' -and $roles -contains 'manage')) {
+            Write-SmartM365SetupStatus -Message ("Sites.Selected permission already grants '{0}' or higher to app '{1}' on site '{2}'." -f $Role, $ApplicationDisplayName, $SiteId) -Level OK
+            return
+        }
+
+        Write-SmartM365SetupStatus -Level WARN -Message ("App '{0}' already has selected-site permission on '{1}', but roles are '{2}'. Create/update manually if a higher role is required." -f $ApplicationDisplayName, $SiteId, ($roles -join ', '))
+        return
+    }
+
+    $body = @{
+        roles               = @($Role)
+        grantedToIdentities = @(
+            @{
+                application = @{
+                    id          = $ApplicationAppId
+                    displayName = $ApplicationDisplayName
+                }
+            }
+        )
+    }
+
+    if ($PSCmdlet.ShouldProcess($SiteId, ("Grant Sites.Selected '{0}' permission to app '{1}'" -f $Role, $ApplicationDisplayName))) {
+        $null = Invoke-MgGraphRequest `
+            -Method POST `
+            -Uri "https://graph.microsoft.com/v1.0/sites/$encodedSiteId/permissions" `
+            -Body ($body | ConvertTo-Json -Depth 8) `
+            -ContentType 'application/json' `
+            -OutputType PSObject `
+            -ErrorAction Stop
+        Write-SmartM365SetupStatus -Message ("Granted Sites.Selected '{0}' permission to app '{1}' on site '{2}'." -f $Role, $ApplicationDisplayName, $SiteId) -Level OK
     }
 }
 
@@ -1061,18 +1324,31 @@ function Set-SmartM365MailSendApplicationAccessPolicy {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$AppId,
+        [Parameter(Mandatory)]$Group,
         [Parameter(Mandatory)][string]$GroupAddress
     )
 
+    $scopeIdentifiers = @(
+        $GroupAddress,
+        [string]$Group.Identity,
+        [string]$Group.Name,
+        [string]$Group.DisplayName,
+        [string]$Group.Alias,
+        [string]$Group.PrimarySmtpAddress,
+        [string]$Group.ExternalDirectoryObjectId,
+        [string]$Group.Guid
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+
     $policies = @(Get-SmartM365ApplicationAccessPolicy)
     $matchingPolicy = $policies | Where-Object {
+        $policy = $_
         @($_.AppId) -contains $AppId -and
         $_.AccessRight -eq 'RestrictAccess' -and
-        ([string]$_.ScopeName).Equals($GroupAddress, [System.StringComparison]::OrdinalIgnoreCase)
+        ($scopeIdentifiers | Where-Object { $_.Equals([string]$policy.ScopeName, [System.StringComparison]::OrdinalIgnoreCase) })
     } | Select-Object -First 1
 
     if ($null -ne $matchingPolicy) {
-        Write-SmartM365SetupStatus -Message ("Application Access Policy already scopes Mail.Send for app {0} to '{1}'." -f $AppId, $GroupAddress) -Level OK
+        Write-SmartM365SetupStatus -Message ("Application Access Policy already scopes Mail.Send for app {0} to '{1}'." -f $AppId, $matchingPolicy.ScopeName) -Level OK
         return $matchingPolicy
     }
 
@@ -1215,7 +1491,7 @@ function Set-SmartM365ExchangeMailSendSetup {
     }
     else {
         Add-SmartM365SenderMailboxToScopeGroup -Group $group -SenderAddress $effectiveSenderAddress
-        Set-SmartM365MailSendApplicationAccessPolicy -AppId $Application.AppId -GroupAddress $scopeGroupAddress | Out-Null
+        Set-SmartM365MailSendApplicationAccessPolicy -AppId $Application.AppId -Group $group -GroupAddress $scopeGroupAddress | Out-Null
         Test-SmartM365MailSendApplicationAccessPolicy -AppId $Application.AppId -SenderAddress $effectiveSenderAddress
     }
 
@@ -1402,8 +1678,10 @@ function Get-SmartM365LocalConfigCertificateThumbprint {
 Initialize-SmartM365SetupLogging -Path $LogPath
 
 try {
-Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $ExchangeAdminUserPrincipalName
 Import-RequiredGraphModule
+Disconnect-SmartM365ExistingGraphSession
+Disconnect-SmartM365ExistingExchangeOnlineSession
+Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $ExchangeAdminUserPrincipalName
 $graphContext = Connect-SmartM365GraphSetupSession -RequestedTenantId $TenantId -UseDeviceCode:$UseDeviceCode
 $effectiveTenantId = $graphContext.TenantId
 $localConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.global.local.json'
@@ -1438,6 +1716,8 @@ $requiredApiResources = Get-SmartM365RequiredApiResource `
     -SkipExchange:$SkipExchangeOnlinePermission `
     -SkipBroadReadWrite:$SkipBroadIntuneReadWritePermissions
 
+$obsoleteBroadSharePointPermissions = @('Files.ReadWrite.All', 'Sites.ReadWrite.All')
+
 if (-not $SkipBroadIntuneReadWritePermissions) {
     Write-SmartM365SetupStatus -Level WARN -Message 'Including broad Intune ReadWrite application permissions because one current Autopatch report script requests them. Use -SkipBroadIntuneReadWritePermissions after hardening those scripts.'
 }
@@ -1460,6 +1740,12 @@ if ($existingApps.Count -eq 1) {
 
     $application = $existingApps[0]
     $mergedRequiredResourceAccess = Merge-RequiredResourceAccess -ExistingAccess $application.RequiredResourceAccess -RequiredAccess $requiredResourceAccess
+    $mergedRequiredResourceAccess = Get-SmartM365RequiredResourceAccessWithoutPermission `
+        -RequiredAccess $mergedRequiredResourceAccess `
+        -ResourceName 'Microsoft Graph' `
+        -ResourceAppId '00000003-0000-0000-c000-000000000000' `
+        -PermissionValues $obsoleteBroadSharePointPermissions
+    $mergedRequiredResourceAccess = ConvertTo-SmartM365RequiredResourceAccessPayload -RequiredAccess $mergedRequiredResourceAccess
     $mergedKeyCredentials = Add-CertificateToApplication -Application $application -Certificate $certificate
 
     if ($PSCmdlet.ShouldProcess($DisplayName, 'Update app registration permissions and certificate')) {
@@ -1510,6 +1796,11 @@ if ($null -eq $appServicePrincipal) {
 
 if (-not $DisableGrantAdminConsent -and $null -ne $appServicePrincipal) {
     Grant-SmartM365ApplicationPermission -ApplicationServicePrincipal $appServicePrincipal -RequiredApiResource $requiredApiResources
+    Revoke-SmartM365ApplicationPermission `
+        -ApplicationServicePrincipal $appServicePrincipal `
+        -ResourceName 'Microsoft Graph' `
+        -ResourceAppId '00000003-0000-0000-c000-000000000000' `
+        -PermissionValues $obsoleteBroadSharePointPermissions
 }
 elseif ($DisableGrantAdminConsent) {
     Write-SmartM365SetupStatus -Level WARN -Message 'Admin consent was not granted because -DisableGrantAdminConsent was used. Use the admin consent URL printed below if needed.'
@@ -1537,6 +1828,12 @@ if (-not $DisableTeamsSetup) {
     if (-not $WhatIfPreference) {
         Write-SmartM365SetupStatus -Message ("Updated SharePoint settings in {0}." -f $localConfigPath) -Level OK
     }
+
+    Grant-SmartM365SelectedSitePermission `
+        -SiteId $teamsWorkspace.SharePointSiteId `
+        -ApplicationAppId $application.AppId `
+        -ApplicationDisplayName $DisplayName `
+        -Role 'write'
 }
 else {
     Write-SmartM365SetupStatus -Level WARN -Message 'Teams workspace creation and SharePoint local configuration update were skipped because -DisableTeamsSetup was used.'

@@ -73,6 +73,10 @@ Do not use misleading object prefixes such as `Mailboxes_` for non-mailbox data,
 - Error email recipients must resolve from `ErrorMailTo`; per-script configs should use `__USE_GLOBAL__` unless a script-specific recipient is required.
 - Error and report emails should use Microsoft Graph when `SmtpServer` is empty; keep `From` configured as the sender mailbox and ensure the SmartM365 app has `Mail.Send`.
 - Graph `Mail.Send` must be scoped in Exchange Online to `MailSendAccessPolicyGroup`; do not leave SmartM365 mail sending unrestricted tenant-wide.
+- SharePoint upload permissions must use `Sites.Selected` with a site-level `write` grant for the SmartM365 site; do not use tenant-wide `Files.ReadWrite.All` or `Sites.ReadWrite.All` for SmartM365 uploads.
+- Scripts that connect to Microsoft Graph must disconnect any existing Graph session before signing in or connecting again. This avoids silently reusing a cached WAM or previous PowerShell Graph account and helps ensure the intended tenant/account context is used.
+- Scripts that connect to Exchange Online must disconnect any existing Exchange Online session before signing in or connecting again. This avoids silently reusing a previous EXO session and helps ensure the intended administrator account/context is used.
+- Scripts that need both Exchange Online and Microsoft Graph interactive connections must connect to Exchange Online first, then Microsoft Graph. This avoids WAM/MSAL broker issues seen when Graph is connected before EXO.
 - Keep the permissions recap in `README.md` current when scripts add or change Graph scopes, Intune permissions, Exchange RBAC needs, AD access needs, or SharePoint upload behavior.
 - Prefer shared preflight checks before main processing: required modules, output path write access, Graph permissions, Exchange Online RBAC, Exchange on-prem readiness, and AD read access.
 - When a script needs Microsoft Graph SDK cmdlets to retrieve data, install/import the required Graph submodules and keep the cmdlet-based implementation; do not replace cmdlets with simplified REST calls only to avoid module installation.
