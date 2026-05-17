@@ -20,6 +20,8 @@ The setup run writes a text log and PowerShell transcript to `C:\Temp\WORKPLACE`
 
 When `SmartM365.global.local.json` already contains `Thumbprint` or `Thumb`, the setup reuses that local certificate on later `-UpdateExisting` runs instead of creating a new certificate.
 
+Use `-RemoveAppRegistration -Confirm` to remove the SmartM365 app registration and its application service principals, then clear the app-only authentication values from `SmartM365.global.local.json`. This cleanup does not remove the `SMART-M365` Teams workspace, SharePoint files, or local certificates.
+
 The same bootstrap creates or reuses the `SMART-M365` Teams team, resolves its SharePoint site, and updates `SmartM365.global.local.json` with the SharePoint upload target. Use `-DisableTeamsSetup` only when the Teams workspace is already handled separately.
 
 See `SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.

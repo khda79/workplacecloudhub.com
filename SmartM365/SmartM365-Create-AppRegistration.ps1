@@ -38,6 +38,12 @@
     Update the existing app registration with the same display name instead of
     failing when it already exists.
 
+.PARAMETER RemoveAppRegistration
+    Removes the app registration with the requested display name, removes
+    matching application service principals, and clears app-only authentication
+    fields from SmartM365.global.local.json. This does not remove the Teams
+    workspace or local certificates. Use with -Confirm.
+
 .PARAMETER DisableGrantAdminConsent
     Adds the requested API permissions without granting tenant-wide admin
     consent.
@@ -66,6 +72,9 @@
 
 .EXAMPLE
     .\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UseDeviceCode -WhatIf
+
+.EXAMPLE
+    .\SmartM365-Create-AppRegistration.ps1 -RemoveAppRegistration -Confirm
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -88,6 +97,9 @@ param(
 
     [Parameter()]
     [switch]$UpdateExisting,
+
+    [Parameter()]
+    [switch]$RemoveAppRegistration,
 
     [Parameter()]
     [switch]$DisableGrantAdminConsent,
@@ -842,6 +854,62 @@ function Set-SmartM365AuthLocalConfig {
     }
 }
 
+function Clear-SmartM365AuthLocalConfig {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath
+    )
+
+    if (-not (Test-Path -LiteralPath $ConfigPath)) {
+        return
+    }
+
+    $config = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $removedProperties = @()
+
+    foreach ($propertyName in @('AppId', 'TenantId', 'Thumb', 'Thumbprint')) {
+        if ($null -ne $config.PSObject.Properties[$propertyName]) {
+            $config.PSObject.Properties.Remove($propertyName)
+            $removedProperties += $propertyName
+        }
+    }
+
+    if ($removedProperties.Count -eq 0) {
+        Write-SmartM365SetupStatus -Message ("No app authentication settings to clear in {0}." -f $ConfigPath) -Level OK
+        return
+    }
+
+    if ($PSCmdlet.ShouldProcess($ConfigPath, ("Clear SmartM365 app authentication settings: {0}" -f ($removedProperties -join ', ')))) {
+        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+        Write-SmartM365SetupStatus -Message ("Cleared app authentication settings in {0}: {1}." -f $ConfigPath, ($removedProperties -join ', ')) -Level OK
+    }
+}
+
+function Remove-SmartM365AppRegistration {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]$Application,
+        [Parameter(Mandatory)][string]$ConfigPath
+    )
+
+    $servicePrincipals = @(Get-MgServicePrincipal -Filter "appId eq '$($Application.AppId)'" -All)
+
+    foreach ($servicePrincipal in $servicePrincipals) {
+        if ($PSCmdlet.ShouldProcess(("Service principal {0} ({1})" -f $servicePrincipal.DisplayName, $servicePrincipal.Id), 'Remove SmartM365 application service principal')) {
+            Remove-MgServicePrincipal -ServicePrincipalId $servicePrincipal.Id
+            Write-SmartM365SetupStatus -Message ("Removed application service principal '{0}' ({1})." -f $servicePrincipal.DisplayName, $servicePrincipal.Id) -Level OK
+        }
+    }
+
+    if ($PSCmdlet.ShouldProcess(("App registration {0} ({1})" -f $Application.DisplayName, $Application.Id), 'Remove SmartM365 app registration')) {
+        Remove-MgApplication -ApplicationId $Application.Id
+        Write-SmartM365SetupStatus -Message ("Removed app registration '{0}' ({1})." -f $Application.DisplayName, $Application.Id) -Level OK
+    }
+
+    Clear-SmartM365AuthLocalConfig -ConfigPath $ConfigPath
+    Write-SmartM365SetupStatus -Level WARN -Message 'Teams workspace, SharePoint files, and local certificates were not removed.'
+}
+
 function Get-SmartM365LocalConfigCertificateThumbprint {
     param(
         [Parameter(Mandatory)][string]$ConfigPath
@@ -900,6 +968,24 @@ $graphContext = Connect-SmartM365GraphSetupSession -RequestedTenantId $TenantId 
 $effectiveTenantId = $graphContext.TenantId
 $localConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.global.local.json'
 
+$escapedDisplayName = ConvertTo-ODataStringLiteral -Value $DisplayName
+$existingApps = @(Get-MgApplication -Filter "displayName eq '$escapedDisplayName'" -Property 'id,appId,displayName,requiredResourceAccess,keyCredentials' -All)
+$application = $null
+
+if ($existingApps.Count -gt 1) {
+    throw "Multiple app registrations named '$DisplayName' were found. Rename duplicates or use a unique -DisplayName."
+}
+
+if ($RemoveAppRegistration) {
+    if ($existingApps.Count -eq 0) {
+        Write-SmartM365SetupStatus -Level WARN -Message ("No app registration named '{0}' was found. Nothing to remove." -f $DisplayName)
+        return
+    }
+
+    Remove-SmartM365AppRegistration -Application $existingApps[0] -ConfigPath $localConfigPath
+    return
+}
+
 $requiredApiResources = Get-SmartM365RequiredApiResource `
     -SkipExchange:$SkipExchangeOnlinePermission `
     -SkipBroadReadWrite:$SkipBroadIntuneReadWritePermissions
@@ -909,14 +995,6 @@ if (-not $SkipBroadIntuneReadWritePermissions) {
 }
 
 $requiredResourceAccess = Get-RequiredResourceAccessBlock -RequiredApiResource $requiredApiResources
-
-$escapedDisplayName = ConvertTo-ODataStringLiteral -Value $DisplayName
-$existingApps = @(Get-MgApplication -Filter "displayName eq '$escapedDisplayName'" -Property 'id,appId,displayName,requiredResourceAccess,keyCredentials' -All)
-$application = $null
-
-if ($existingApps.Count -gt 1) {
-    throw "Multiple app registrations named '$DisplayName' were found. Rename duplicates or use a unique -DisplayName."
-}
 
 $existingApplicationForCertificate = if ($existingApps.Count -eq 1) { $existingApps[0] } else { $null }
 $effectiveCertificateThumbprint = if (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
