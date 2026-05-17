@@ -823,6 +823,130 @@ function SendFileListEmailReport {
     SendEmailHtmlReport -BodyHtml $body
 }
 
+function Send-SmartM365TeamsNotification {
+    <#
+    .SYNOPSIS
+        Sends a SmartM365 notification to a Teams workflow or incoming webhook URL.
+
+    .DESCRIPTION
+        Posts a MessageCard-compatible JSON payload to TeamsAlertsWebhookUrl or TeamsInfosWebhookUrl
+        from local/global configuration, or to the explicit WebhookUrl parameter. If no URL is configured,
+        the function logs and returns $false without throwing.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [string]$WebhookUrl = "",
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][string]$Message,
+        [ValidateSet('INFO','SUCCESS','WARNING','ERROR')]
+        [string]$Level = 'INFO',
+        [ValidateSet('Auto','Alerts','Infos')]
+        [string]$Channel = 'Auto',
+        [hashtable]$Facts,
+        [string]$HelpUrl = "",
+        [switch]$ThrowOnError
+    )
+
+    try {
+        if (-not $PSBoundParameters.ContainsKey('WebhookUrl')) {
+            $moduleLocalConfig = Get-ModuleLocalConfig
+            $effectiveChannel = if ($Channel -ne 'Auto') {
+                $Channel
+            }
+            elseif ($Level -eq 'ERROR') {
+                'Alerts'
+            }
+            else {
+                'Infos'
+            }
+
+            $webhookConfigName = if ($effectiveChannel -eq 'Alerts') { 'TeamsAlertsWebhookUrl' } else { 'TeamsInfosWebhookUrl' }
+            $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $webhookConfigName -DefaultValue ''
+            if ([string]::IsNullOrWhiteSpace($WebhookUrl)) {
+                $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'TeamsWebhookUrl' -DefaultValue $WebhookUrl
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($WebhookUrl)) {
+            WriteLog -Message 'Teams notification skipped: TeamsAlertsWebhookUrl/TeamsInfosWebhookUrl is not configured.' -Level 'INFO'
+            return $false
+        }
+
+        $themeColors = @{
+            INFO    = '0078D4'
+            SUCCESS = '107C10'
+            WARNING = 'FFB900'
+            ERROR   = 'D13438'
+        }
+
+        $factList = New-Object System.Collections.Generic.List[hashtable]
+        $factList.Add(@{ name = 'Level'; value = $Level }) | Out-Null
+        $factList.Add(@{ name = 'Timestamp'; value = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }) | Out-Null
+        $factList.Add(@{ name = 'Computer'; value = $env:COMPUTERNAME }) | Out-Null
+
+        if ($null -ne $Facts) {
+            foreach ($key in @($Facts.Keys | Sort-Object)) {
+                $value = $Facts[$key]
+                if ($null -eq $value) { continue }
+                $factList.Add(@{
+                    name  = [string]$key
+                    value = [string]$value
+                }) | Out-Null
+            }
+        }
+
+        $actions = @()
+        if (-not [string]::IsNullOrWhiteSpace($HelpUrl)) {
+            $actions += @{
+                '@type' = 'OpenUri'
+                name    = 'Get AI help'
+                targets = @(
+                    @{
+                        os  = 'default'
+                        uri = $HelpUrl
+                    }
+                )
+            }
+        }
+
+        $payload = @{
+            '@type'    = 'MessageCard'
+            '@context' = 'https://schema.org/extensions'
+            summary    = $Title
+            themeColor = $themeColors[$Level]
+            title      = $Title
+            text       = $Message
+            sections   = @(
+                @{
+                    markdown = $true
+                    facts    = @($factList)
+                }
+            )
+        }
+        if ($actions.Count -gt 0) {
+            $payload['potentialAction'] = $actions
+        }
+
+        Invoke-RestMethod `
+            -Method POST `
+            -Uri $WebhookUrl `
+            -ContentType 'application/json; charset=utf-8' `
+            -Body ($payload | ConvertTo-Json -Depth 8) `
+            -ErrorAction Stop | Out-Null
+
+        WriteLog -Message ("Teams notification sent: {0}" -f $Title) -Level 'SUCCESS'
+        return $true
+    }
+    catch {
+        WriteLog -Message ("Teams notification failed: {0}" -f $_.Exception.Message) -Level 'ERROR'
+        if ($ThrowOnError) {
+            throw
+        }
+        return $false
+    }
+}
+
 #endregion
 
 #region Initialization and CSV helpers
@@ -1740,7 +1864,7 @@ function Disconnect-SmartM365CloudSession {
 Export-ModuleMember -Function `
     WriteLog, Write-Log, Test-FileLocked, RemoveOldFiles, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     ConvertToRecipientArray, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
-    NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, `
+    NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
     TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, Invoke-SmartM365SharePointCsvUpload, `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, `
     NewRemoteScheduledTaskAndWait, `

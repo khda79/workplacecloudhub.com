@@ -337,8 +337,11 @@ function Connect-SmartM365GraphSetupSession {
     $scopes = @(
         'Application.ReadWrite.All',
         'AppRoleAssignment.ReadWrite.All',
+        'Channel.Create',
+        'Channel.ReadBasic.All',
         'Directory.Read.All',
         'Group.ReadWrite.All',
+        'RoleManagement.ReadWrite.Directory',
         'Sites.FullControl.All'
     )
 
@@ -880,6 +883,111 @@ function Revoke-SmartM365ApplicationPermission {
     }
 }
 
+function Grant-SmartM365ExchangeOnlineDirectoryRole {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]$ApplicationServicePrincipal,
+        [Parameter()][ValidateNotNullOrEmpty()][string]$RoleDisplayName = 'Global Reader'
+    )
+
+    $escapedRoleDisplayName = ConvertTo-ODataStringLiteral -Value $RoleDisplayName
+    $encodedFilter = [System.Uri]::EscapeDataString("displayName eq '$escapedRoleDisplayName'")
+    $roleDefinitionsResponse = Invoke-MgGraphRequest `
+        -Method GET `
+        -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$encodedFilter" `
+        -OutputType PSObject `
+        -ErrorAction Stop
+    $roleDefinition = @($roleDefinitionsResponse.value) | Select-Object -First 1
+
+    if ($null -eq $roleDefinition -or [string]::IsNullOrWhiteSpace([string]$roleDefinition.id)) {
+        throw ("Microsoft Entra directory role '{0}' was not found." -f $RoleDisplayName)
+    }
+
+    $encodedAssignmentFilter = [System.Uri]::EscapeDataString("principalId eq '$($ApplicationServicePrincipal.Id)' and roleDefinitionId eq '$($roleDefinition.id)'")
+    $existingAssignmentsResponse = Invoke-MgGraphRequest `
+        -Method GET `
+        -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$encodedAssignmentFilter" `
+        -OutputType PSObject `
+        -ErrorAction Stop
+    $existingAssignment = @($existingAssignmentsResponse.value) | Where-Object {
+        $_.directoryScopeId -eq '/' -or [string]::IsNullOrWhiteSpace([string]$_.directoryScopeId)
+    } | Select-Object -First 1
+
+    if ($existingAssignment) {
+        Write-SmartM365SetupStatus -Message ("Microsoft Entra role already assigned to app service principal: {0}." -f $RoleDisplayName) -Level OK
+        return $RoleDisplayName
+    }
+
+    $body = @{
+        principalId      = $ApplicationServicePrincipal.Id
+        roleDefinitionId = $roleDefinition.id
+        directoryScopeId = '/'
+    }
+
+    if ($PSCmdlet.ShouldProcess(("Service principal {0}" -f $ApplicationServicePrincipal.Id), ("Assign Microsoft Entra role '{0}'" -f $RoleDisplayName))) {
+        $null = Invoke-MgGraphRequest `
+            -Method POST `
+            -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments' `
+            -Body ($body | ConvertTo-Json -Depth 5) `
+            -ContentType 'application/json' `
+            -OutputType PSObject `
+            -ErrorAction Stop
+        Write-SmartM365SetupStatus -Message ("Assigned Microsoft Entra role '{0}' to app service principal." -f $RoleDisplayName) -Level OK
+    }
+
+    return $RoleDisplayName
+}
+
+function Revoke-SmartM365ExchangeOnlineDirectoryRole {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]$ApplicationServicePrincipal,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$RoleDisplayName
+    )
+
+    $escapedRoleDisplayName = ConvertTo-ODataStringLiteral -Value $RoleDisplayName
+    $encodedFilter = [System.Uri]::EscapeDataString("displayName eq '$escapedRoleDisplayName'")
+    $roleDefinitionsResponse = Invoke-MgGraphRequest `
+        -Method GET `
+        -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$encodedFilter" `
+        -OutputType PSObject `
+        -ErrorAction Stop
+    $roleDefinition = @($roleDefinitionsResponse.value) | Select-Object -First 1
+
+    if ($null -eq $roleDefinition -or [string]::IsNullOrWhiteSpace([string]$roleDefinition.id)) {
+        Write-SmartM365SetupStatus -Level WARN -Message ("Microsoft Entra directory role '{0}' was not found; nothing to revoke." -f $RoleDisplayName)
+        return
+    }
+
+    $encodedAssignmentFilter = [System.Uri]::EscapeDataString("principalId eq '$($ApplicationServicePrincipal.Id)' and roleDefinitionId eq '$($roleDefinition.id)'")
+    $existingAssignmentsResponse = Invoke-MgGraphRequest `
+        -Method GET `
+        -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$encodedAssignmentFilter" `
+        -OutputType PSObject `
+        -ErrorAction Stop
+    $existingAssignments = @(
+        @($existingAssignmentsResponse.value) | Where-Object {
+            $_.directoryScopeId -eq '/' -or [string]::IsNullOrWhiteSpace([string]$_.directoryScopeId)
+        }
+    )
+
+    if ($existingAssignments.Count -eq 0) {
+        Write-SmartM365SetupStatus -Message ("Microsoft Entra role not present on app service principal: {0}." -f $RoleDisplayName) -Level OK
+        return
+    }
+
+    foreach ($assignment in $existingAssignments) {
+        $encodedAssignmentId = [System.Uri]::EscapeDataString([string]$assignment.id)
+        if ($PSCmdlet.ShouldProcess(("Service principal {0}" -f $ApplicationServicePrincipal.Id), ("Remove Microsoft Entra role '{0}'" -f $RoleDisplayName))) {
+            Invoke-MgGraphRequest `
+                -Method DELETE `
+                -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments/$encodedAssignmentId" `
+                -ErrorAction Stop | Out-Null
+            Write-SmartM365SetupStatus -Message ("Removed Microsoft Entra role '{0}' from app service principal." -f $RoleDisplayName) -Level OK
+        }
+    }
+}
+
 function Test-SmartM365GraphNotFound {
     param([Parameter(Mandatory)]$ErrorRecord)
 
@@ -1008,6 +1116,69 @@ function Invoke-SmartM365TeamCreationFromGroup {
     }
 }
 
+function Get-SmartM365TeamChannelByDisplayName {
+    param(
+        [Parameter(Mandatory)][string]$TeamId,
+        [Parameter(Mandatory)][string]$ChannelDisplayName
+    )
+
+    $response = Invoke-MgGraphRequest `
+        -Method GET `
+        -Uri "https://graph.microsoft.com/v1.0/teams/$TeamId/channels" `
+        -OutputType PSObject `
+        -ErrorAction Stop
+
+    return @($response.value) |
+        Where-Object { $_.displayName -eq $ChannelDisplayName } |
+        Select-Object -First 1
+}
+
+function Get-OrCreate-SmartM365TeamChannel {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$TeamId,
+        [Parameter(Mandatory)][string]$ChannelDisplayName,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        try {
+            $existingChannel = Get-SmartM365TeamChannelByDisplayName -TeamId $TeamId -ChannelDisplayName $ChannelDisplayName
+            if ($existingChannel) {
+                Write-SmartM365SetupStatus -Message ("Teams channel already exists: {0}." -f $ChannelDisplayName) -Level OK
+                return $existingChannel
+            }
+
+            $body = @{
+                displayName    = $ChannelDisplayName
+                description    = $Description
+                membershipType = 'standard'
+            }
+
+            if ($PSCmdlet.ShouldProcess(("{0} / {1}" -f $TeamId, $ChannelDisplayName), 'Create Teams standard channel')) {
+                $channel = Invoke-MgGraphRequest `
+                    -Method POST `
+                    -Uri "https://graph.microsoft.com/v1.0/teams/$TeamId/channels" `
+                    -Body ($body | ConvertTo-Json -Depth 5) `
+                    -ContentType 'application/json' `
+                    -OutputType PSObject `
+                    -ErrorAction Stop
+                Write-SmartM365SetupStatus -Message ("Created Teams channel '{0}'." -f $ChannelDisplayName) -Level OK
+                return $channel
+            }
+
+            return $null
+        }
+        catch {
+            if ($attempt -ge 6) {
+                throw
+            }
+            Write-SmartM365SetupStatus -Level WARN -Message ("Teams channel '{0}' is not ready yet: {1}. Retrying in 10 seconds." -f $ChannelDisplayName, $_.Exception.Message)
+            Start-Sleep -Seconds 10
+        }
+    }
+}
+
 function Wait-SmartM365TeamSharePointSite {
     param([Parameter(Mandatory)][string]$GroupId)
 
@@ -1095,6 +1266,15 @@ function Get-OrCreate-SmartM365TeamsWorkspace {
         Invoke-SmartM365TeamCreationFromGroup -GroupId $group.id
     }
 
+    $alertsChannel = Get-OrCreate-SmartM365TeamChannel `
+        -TeamId $group.id `
+        -ChannelDisplayName 'Alerts' `
+        -Description 'SmartM365 script error and failure notifications.'
+    $infosChannel = Get-OrCreate-SmartM365TeamChannel `
+        -TeamId $group.id `
+        -ChannelDisplayName 'Infos' `
+        -Description 'SmartM365 successful completion and informational notifications.'
+
     $site = Wait-SmartM365TeamSharePointSite -GroupId $group.id
     $siteUri = [System.Uri]$site.webUrl
     $libraryDisplayName = Get-SmartM365GroupDriveName -GroupId $group.id -DefaultLibraryDisplayName $DefaultLibraryDisplayName
@@ -1102,6 +1282,10 @@ function Get-OrCreate-SmartM365TeamsWorkspace {
     return [pscustomobject]@{
         TeamId                       = $group.id
         TeamDisplayName              = $GroupDisplayName
+        AlertsChannelId              = if ($alertsChannel) { $alertsChannel.id } else { $null }
+        AlertsChannelDisplayName     = 'Alerts'
+        InfosChannelId               = if ($infosChannel) { $infosChannel.id } else { $null }
+        InfosChannelDisplayName      = 'Infos'
         SharePointSiteId             = $site.id
         SharePointSiteHostname       = $siteUri.Host
         SharePointSitePath           = $siteUri.AbsolutePath
@@ -1717,6 +1901,8 @@ $requiredApiResources = Get-SmartM365RequiredApiResource `
     -SkipBroadReadWrite:$SkipBroadIntuneReadWritePermissions
 
 $obsoleteBroadSharePointPermissions = @('Files.ReadWrite.All', 'Sites.ReadWrite.All')
+$exchangeOnlineDirectoryRoleName = 'Global Reader'
+$obsoleteExchangeOnlineDirectoryRoleNames = @('Exchange Administrator')
 
 if (-not $SkipBroadIntuneReadWritePermissions) {
     Write-SmartM365SetupStatus -Level WARN -Message 'Including broad Intune ReadWrite application permissions because one current Autopatch report script requests them. Use -SkipBroadIntuneReadWritePermissions after hardening those scripts.'
@@ -1806,6 +1992,18 @@ elseif ($DisableGrantAdminConsent) {
     Write-SmartM365SetupStatus -Level WARN -Message 'Admin consent was not granted because -DisableGrantAdminConsent was used. Use the admin consent URL printed below if needed.'
 }
 
+$exchangeOnlineDirectoryRole = $null
+if (-not $SkipExchangeOnlinePermission -and $null -ne $appServicePrincipal) {
+    $exchangeOnlineDirectoryRole = Grant-SmartM365ExchangeOnlineDirectoryRole `
+        -ApplicationServicePrincipal $appServicePrincipal `
+        -RoleDisplayName $exchangeOnlineDirectoryRoleName
+    foreach ($obsoleteRoleName in $obsoleteExchangeOnlineDirectoryRoleNames) {
+        Revoke-SmartM365ExchangeOnlineDirectoryRole `
+            -ApplicationServicePrincipal $appServicePrincipal `
+            -RoleDisplayName $obsoleteRoleName
+    }
+}
+
 $mailSendSetup = Set-SmartM365ExchangeMailSendSetup `
     -Application $application `
     -AdminUserPrincipalName $graphContext.Account `
@@ -1852,6 +2050,8 @@ Write-Output ("Thumbprint  : {0}" -f $certificate.Thumbprint)
 Write-Output ("Consent URL : {0}" -f $adminConsentUrl)
 if ($teamsWorkspace) {
     Write-Output ("Team        : {0} ({1})" -f $teamsWorkspace.TeamDisplayName, $teamsWorkspace.TeamId)
+    Write-Output ("Alerts Ch   : {0} ({1})" -f $teamsWorkspace.AlertsChannelDisplayName, $(if ($teamsWorkspace.AlertsChannelId) { $teamsWorkspace.AlertsChannelId } else { '<not created>' }))
+    Write-Output ("Infos Ch    : {0} ({1})" -f $teamsWorkspace.InfosChannelDisplayName, $(if ($teamsWorkspace.InfosChannelId) { $teamsWorkspace.InfosChannelId } else { '<not created>' }))
     Write-Output ("SP Host     : {0}" -f $teamsWorkspace.SharePointSiteHostname)
     Write-Output ("SP Path     : {0}" -f $teamsWorkspace.SharePointSitePath)
     Write-Output ("SP Library  : {0}" -f $teamsWorkspace.SharePointLibraryDisplayName)
@@ -1860,6 +2060,9 @@ if ($teamsWorkspace) {
 if ($mailSendSetup) {
     Write-Output ("Mail From   : {0}" -f $mailSendSetup.SenderAddress)
     Write-Output ("Mail Scope  : {0} ({1})" -f $mailSendSetup.ScopeGroupName, $mailSendSetup.ScopeGroupAddress)
+}
+if ($exchangeOnlineDirectoryRole) {
+    Write-Output ("EXO Role    : {0}" -f $exchangeOnlineDirectoryRole)
 }
 Write-Output ''
 Write-Output 'Add these values to SmartM365.global.local.json:'
@@ -1895,7 +2098,9 @@ if ($mailSendSetup) {
 "@)
     Write-Output ''
 }
-Write-SmartM365SetupStatus -Level WARN -Message 'Exchange Online inventory scripts still need RBAC for Exchange.ManageAsApp, for example the relevant read-only Exchange role group or RBAC for Applications assignment.'
+if ($SkipExchangeOnlinePermission) {
+    Write-SmartM365SetupStatus -Level WARN -Message 'Exchange Online app-only permission and directory role assignment were skipped because -SkipExchangeOnlinePermission was used.'
+}
 }
 finally {
     Close-SmartM365ExchangeOnlineSetupSession
