@@ -413,7 +413,7 @@ function Send-AcceptedDomainsSuccessNotification {
         $resultSummary = "Exchange Online accepted domains inventory completed without error. Accepted domains exported: {0}." -f $AcceptedDomainCount
 
         Send-SmartM365TeamsNotification `
-            -Title "SmartM365 Accepted Domains inventory completed" `
+            -Title "SmartM365 Accepted Domains inventory success" `
             -Message $resultSummary `
             -Level "SUCCESS" `
             -Channel "Infos" `
