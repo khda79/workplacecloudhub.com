@@ -178,7 +178,7 @@ function Invoke-SmartM365TeamsNotificationFromLog {
 
     $normalizedLevel = if ([string]::IsNullOrWhiteSpace($Level)) { 'INFO' } else { $Level.ToUpperInvariant() }
     $isError = $normalizedLevel -eq 'ERROR'
-    $isTerminalSuccess = $normalizedLevel -eq 'SUCCESS' -and $Message -match '(?i)\b(completed|finished|termin[eé]|complete)\b'
+    $isTerminalSuccess = $normalizedLevel -eq 'SUCCESS' -and $Message -match '(?i)\b(completed|finished|termin[eé]|complete)\b' -and $Message -notmatch '(?i)\bpreflight completed\b'
     if (-not $isError -and -not $isTerminalSuccess) { return }
 
     $dedupeKey = '{0}|{1}' -f $normalizedLevel, $Message
@@ -205,6 +205,18 @@ function Invoke-SmartM365TeamsNotificationFromLog {
         Computer   = $env:COMPUTERNAME
         LogFile    = $global:LogTextFile
         Transcript = $global:logTranscriptFile
+    }
+    if (-not $isError) {
+        $facts['Result summary'] = $Message
+        if ($global:csvGeneratedPaths) {
+            $facts['Generated CSV files'] = @($global:csvGeneratedPaths).Count
+        }
+        if ($global:csvFilePath1) {
+            $facts['Timestamped CSV'] = $global:csvFilePath1
+        }
+        if ($global:csvFilePath3) {
+            $facts['Latest CSV'] = $global:csvFilePath3
+        }
     }
 
     $title = if ($isError) { "SmartM365 error - $scriptName" } else { "SmartM365 completed - $scriptName" }
@@ -907,22 +919,24 @@ function Send-SmartM365TeamsNotification {
         [ValidateSet('Auto','Alerts','Infos')]
         [string]$Channel = 'Auto',
         [hashtable]$Facts,
+        [string]$ResultSummary = "",
         [string]$HelpUrl = "",
         [switch]$ThrowOnError
     )
 
     try {
+        $effectiveChannel = if ($Channel -ne 'Auto') {
+            $Channel
+        }
+        elseif ($Level -eq 'ERROR') {
+            'Alerts'
+        }
+        else {
+            'Infos'
+        }
+
         if (-not $PSBoundParameters.ContainsKey('WebhookUrl')) {
             $moduleLocalConfig = Get-ModuleLocalConfig
-            $effectiveChannel = if ($Channel -ne 'Auto') {
-                $Channel
-            }
-            elseif ($Level -eq 'ERROR') {
-                'Alerts'
-            }
-            else {
-                'Infos'
-            }
 
             $webhookConfigName = if ($effectiveChannel -eq 'Alerts') { 'TeamsAlertsWebhookUrl' } else { 'TeamsInfosWebhookUrl' }
             $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $webhookConfigName -DefaultValue ''
@@ -947,6 +961,34 @@ function Send-SmartM365TeamsNotification {
         $factList.Add(@{ name = 'Level'; value = $Level }) | Out-Null
         $factList.Add(@{ name = 'Timestamp'; value = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }) | Out-Null
         $factList.Add(@{ name = 'Computer'; value = $env:COMPUTERNAME }) | Out-Null
+
+        $summaryFactNames = @('Result summary', 'ResultSummary', 'Summary')
+        $hasSummaryFact = $false
+        $summaryFromFacts = ''
+        if ($null -ne $Facts) {
+            foreach ($summaryFactName in $summaryFactNames) {
+                if ($Facts.ContainsKey($summaryFactName)) {
+                    $summaryFromFacts = [string]$Facts[$summaryFactName]
+                    break
+                }
+            }
+            $hasSummaryFact = $Facts.ContainsKey('Result summary')
+        }
+        if ($effectiveChannel -eq 'Infos' -and -not $hasSummaryFact) {
+            $summaryText = if (-not [string]::IsNullOrWhiteSpace($ResultSummary)) {
+                $ResultSummary
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($summaryFromFacts)) {
+                $summaryFromFacts
+            }
+            else {
+                $Message
+            }
+            if ($summaryText.Length -gt 600) {
+                $summaryText = $summaryText.Substring(0, 597) + '...'
+            }
+            $factList.Add(@{ name = 'Result summary'; value = $summaryText }) | Out-Null
+        }
 
         if ($null -ne $Facts) {
             foreach ($key in @($Facts.Keys | Sort-Object)) {

@@ -320,11 +320,14 @@ function Send-VerifiedDomainsTeamsInfo {
         VerifiedDomains      = $VerifiedDomains
     }
 
+    $resultSummary = "Verified domains inventory completed successfully. Total domains: {0}; verified domains: {1}." -f $TotalDomains, $VerifiedDomains
+
     Send-SmartM365TeamsNotification `
         -Title 'Azure AD verified domains inventory - SUCCESS' `
-        -Message ("Verified domains inventory completed successfully. Total domains: {0}; verified domains: {1}." -f $TotalDomains, $VerifiedDomains) `
+        -Message $resultSummary `
         -Level SUCCESS `
         -Channel Infos `
+        -ResultSummary $resultSummary `
         -Facts $facts | Out-Null
 }
 

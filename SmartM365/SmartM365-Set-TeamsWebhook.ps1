@@ -202,6 +202,7 @@ if (-not $SkipTest) {
         -Message $Message `
         -Level $testLevel `
         -Channel $notificationChannel `
+        -ResultSummary ("Webhook test sent for channel {0} on host {1}." -f $Channel, $uri.Host) `
         -Facts @{
             Script = 'SmartM365-Set-TeamsWebhook.ps1'
             Mode   = $(if ($TestOnly) { 'TestOnly' } else { 'RegisterAndTest' })

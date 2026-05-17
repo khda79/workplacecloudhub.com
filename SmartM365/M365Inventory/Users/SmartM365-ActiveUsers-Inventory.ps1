@@ -309,6 +309,7 @@ function Send-ActiveUsersSuccessNotification {
             -Message $summary `
             -Level "SUCCESS" `
             -Channel "Infos" `
+            -ResultSummary $summary `
             -Facts $facts | Out-Null
     }
     catch {
