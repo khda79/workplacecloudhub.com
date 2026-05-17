@@ -16,7 +16,8 @@
 #>
 
 param(
-  [string]$OutputPath,
+    [string]$Tenant = 'test',
+[string]$OutputPath,
   [switch]$Connect,
   [int]$TopUsers = 0,
   [switch]$FastSample,
@@ -25,6 +26,19 @@ param(
   [switch]$RequireSkuNameCsv,
   [switch]$InteractiveAuth
 )
+$tenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $p) { return $p }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $tenantContextPath
+Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 # Defaults: enable RequireSkuNameCsv and ServicePlans unless explicitly set
 if (-not $PSBoundParameters.ContainsKey('RequireSkuNameCsv')) { $RequireSkuNameCsv = $true }
@@ -986,5 +1000,6 @@ $($global:logTextFile)
   try { Stop-Transcript | Out-Null } catch {}
   exit 1
 }
+
 
 

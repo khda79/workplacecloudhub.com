@@ -28,10 +28,24 @@
 #>
 
 param(
-    [string]$OutputPath,
+    [string]$Tenant = 'test',
+[string]$OutputPath,
     [switch]$Connect,
     [switch]$InteractiveAuth
 )
+$tenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $p) { return $p }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $tenantContextPath
+Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 # ==========================================================
 # PowerShell 7 minimum
@@ -718,5 +732,6 @@ finally {
 
     #endregion Stop Transcript + final status
 }
+
 
 

@@ -1,8 +1,10 @@
 {
+  "DefaultTenant": "test",
+  "Environment": "Test",
   "WorkspaceRootPath": "\\\\server\\share\\WORKPLACE",
-  "DataAllRootPath": "{{WorkspaceRootPath}}\\SMART-M365\\DATA-ALL",
-  "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\SMART-M365\\DATA-LAST",
-  "LogAllRootPath": "{{WorkspaceRootPath}}\\SMART-M365\\LOG-ALL",
+  "DataAllRootPath": "{{WorkspaceRootPath}}\\SMART-M365\\Tenants\\{{TenantKey}}\\DATA-ALL",
+  "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\SMART-M365\\Tenants\\{{TenantKey}}\\DATA-LAST",
+  "LogAllRootPath": "{{WorkspaceRootPath}}\\SMART-M365\\Tenants\\{{TenantKey}}\\LOG-ALL",
   "AppId": "00000000-0000-0000-0000-000000000000",
   "TenantId": "00000000-0000-0000-0000-000000000000",
   "OrgDomain": "contoso.onmicrosoft.com",

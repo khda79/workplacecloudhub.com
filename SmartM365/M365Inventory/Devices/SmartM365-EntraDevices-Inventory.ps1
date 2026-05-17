@@ -51,12 +51,26 @@ Scopes: Directory.Read.All
 #>
 
 param(
-    [string]$OutputPath,
+    [string]$Tenant = 'test',
+[string]$OutputPath,
     [switch]$Connect,
     [switch]$InteractiveAuth,
     [string]$OperatingSystemFilter = "Windows",
     [string]$TrustTypeFilter = ""
 )
+$tenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $p) { return $p }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $tenantContextPath
+Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 # ==========================================================
 # PowerShell 7 minimum
@@ -979,6 +993,7 @@ $BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPendi
         $lines += '    $ctx = Get-MgContext'
         $lines += '    if (-not $ctx -or -not $ctx.Account) {'
         $lines += '        if (-not $InteractiveAuth) { throw "Not connected to Microsoft Graph. Re-run with -InteractiveAuth or connect manually." }'
+        $lines += '        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }'
         $lines += '        Connect-MgGraph -Scopes $Scopes -NoWelcome'
         $lines += '    }'
         $lines += '} catch {'
@@ -1135,5 +1150,6 @@ finally {
     } catch {
     }
 }
+
 
 

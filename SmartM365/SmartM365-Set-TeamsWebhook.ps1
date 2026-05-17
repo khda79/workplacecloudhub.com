@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Validates that the provided URL is an HTTPS Teams Workflows / Power Automate webhook URL,
-    writes it to SmartM365.global.local.json as TeamsWebhookUrl, then sends a test notification
+    writes it to the selected tenant local profile as TeamsWebhookUrl, then sends a test notification
     through Send-SmartM365TeamsNotification.
 
     This script intentionally rejects legacy Office 365 Connector incoming webhook URLs.
@@ -19,11 +19,14 @@
     SmartM365 notification channel to configure. Alerts writes TeamsAlertsWebhookUrl,
     Infos writes TeamsInfosWebhookUrl, and Default writes the legacy fallback TeamsWebhookUrl.
 
+.PARAMETER Tenant
+    Tenant profile key. Defaults to test.
+
 .PARAMETER ConfigPath
-    Path to SmartM365.global.local.json. Defaults to the file next to this script.
+    Optional explicit JSON config path. Defaults to Config\Tenants\<Tenant>.local.json.
 
 .PARAMETER TestOnly
-    Sends the test notification without writing TeamsWebhookUrl to SmartM365.global.local.json.
+    Sends the test notification without writing the selected tenant profile.
 
 .PARAMETER SkipTest
     Writes TeamsWebhookUrl without sending a test notification.
@@ -37,6 +40,8 @@
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
+    [string]$Tenant = 'test',
+
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
     [string]$WebhookUrl,
@@ -46,8 +51,7 @@ param(
     [string]$Channel = 'Default',
 
     [Parameter()]
-    [ValidateNotNullOrEmpty()]
-    [string]$ConfigPath = (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.global.local.json'),
+    [string]$ConfigPath = '',
 
     [Parameter()]
     [string]$Title = 'SmartM365 Teams webhook test',
@@ -61,6 +65,19 @@ param(
     [Parameter()]
     [switch]$SkipTest
 )
+$tenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
+        if (Test-Path -LiteralPath $p) { return $p }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $tenantContextPath
+Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -111,7 +128,12 @@ function Read-SmartM365JsonConfig {
     param([Parameter(Mandatory)][string]$Path)
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        $templatePath = Join-Path -Path (Split-Path -Parent $Path) -ChildPath 'SmartM365.global.local.json.template'
+        $templatePath = Join-Path -Path (Split-Path -Parent $Path) -ChildPath 'tenant.local.json.template'
+        if (Test-Path -LiteralPath $templatePath) {
+            return Get-Content -LiteralPath $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        }
+
+        $templatePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.global.local.json.template'
         if (Test-Path -LiteralPath $templatePath) {
             return Get-Content -LiteralPath $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         }
@@ -128,6 +150,9 @@ function Read-SmartM365JsonConfig {
 }
 
 $uri = Test-SmartM365TeamsWorkflowWebhookUrl -Url $WebhookUrl
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath = Join-Path -Path $PSScriptRoot -ChildPath ("Config\Tenants\{0}.local.json" -f $Tenant)
+}
 $resolvedConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigPath)
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
 $configPropertyName = switch ($Channel) {
@@ -167,7 +192,7 @@ if (-not $TestOnly) {
     }
 }
 else {
-    Write-Information '[INFO] TestOnly was used; SmartM365.global.local.json was not modified.' -InformationAction Continue
+    Write-Information '[INFO] TestOnly was used; tenant local configuration was not modified.' -InformationAction Continue
 }
 
 if (-not $SkipTest) {
@@ -192,3 +217,4 @@ if (-not $SkipTest) {
 else {
     Write-Information '[INFO] Teams webhook test skipped because -SkipTest was used.' -InformationAction Continue
 }
+
