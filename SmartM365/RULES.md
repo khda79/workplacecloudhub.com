@@ -74,6 +74,7 @@ Do not use misleading object prefixes such as `Mailboxes_` for non-mailbox data,
 - Error and report emails should use Microsoft Graph when `SmtpServer` is empty; keep `From` configured as the sender mailbox and ensure the SmartM365 app has `Mail.Send`.
 - Keep the permissions recap in `README.md` current when scripts add or change Graph scopes, Intune permissions, Exchange RBAC needs, AD access needs, or SharePoint upload behavior.
 - Prefer shared preflight checks before main processing: required modules, output path write access, Graph permissions, Exchange Online RBAC, Exchange on-prem readiness, and AD read access.
+- When a script needs Microsoft Graph SDK cmdlets to retrieve data, install/import the required Graph submodules and keep the cmdlet-based implementation; do not replace cmdlets with simplified REST calls only to avoid module installation.
 - Inventory/report/export scripts should upload generated CSV files through the shared SharePoint helper when `EnableSharePointUpload` is enabled.
 - Keep all PowerShell script filenames prefixed with `SmartM365-`, including Intune detection/remediation package scripts.
 - Do not include version numbers in active script filenames. Keep the active version in the synopsis/header and rely on Git history for changes.
