@@ -1364,6 +1364,14 @@ function Connect-SmartM365CloudSession {
 
     if ($Graph) {
         try {
+            if (-not (Get-Module -Name Microsoft.Graph.Authentication)) {
+                if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
+                    throw "Required module 'Microsoft.Graph.Authentication' is not installed."
+                }
+                WriteLog "Loading Graph Authentication module: Microsoft.Graph.Authentication..." "INFO"
+                Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+            }
+
             $scopeToModuleMap = @{
                 "User.Read.All"         = "Microsoft.Graph.Users"
                 "Device.Read.All"       = "Microsoft.Graph.Devices"
@@ -1379,9 +1387,13 @@ function Connect-SmartM365CloudSession {
                 }
             } | Select-Object -Unique
             foreach ($module in $modulesToImport) {
-                if (-not (Get-Module -ListAvailable -Name $module)) {
+                if (-not (Get-Module -Name $module)) {
+                    $availableModule = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
+                    if (-not $availableModule) {
+                        throw "Required Graph submodule '$module' is not installed."
+                    }
                     WriteLog "Loading Graph submodule: $module..." "INFO"
-                    Import-Module $module -ErrorAction Stop
+                    Import-Module $availableModule.Path -ErrorAction Stop
                 }
             }
         } catch {

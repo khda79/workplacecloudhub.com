@@ -9,8 +9,7 @@
     HTML email notification and log attachment) are handled via SmartM365.Core.
 
 .PARAMETER OutputPath
-    Specifies the output directory where the CSV file and logs will be saved. If not provided, the script will initialize
-    a default path using SmartM365.Core.
+    Specifies the output directory where CSV files will be saved. Logs are written under LogAllRootPath by SmartM365.Core.
 
 .PARAMETER Connect
     Forces a (re)connection to Microsoft Graph (disconnects any existing Graph session first).
@@ -296,8 +295,8 @@ try {
 
         $connectedGraphInThisRun = $connectResult.GraphConnected
         WriteLog -Message "Microsoft Graph connection established successfully." "INFO"
-        Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @(
-            'https://graph.microsoft.com/v1.0/users?$top=1',
+        Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Users') -RequiredCommands @('Get-MgUser') -OutputPaths @($OutputPath) -GraphProbeUris @(
+            'https://graph.microsoft.com/v1.0/users?$select=id,signInActivity&$top=1',
             'https://graph.microsoft.com/v1.0/organization'
         ) | Out-Null
     }
@@ -339,74 +338,43 @@ try {
 
     WriteLog -Message "Retrieving users with extended properties from Microsoft Graph..."
 
-    function Invoke-GraphPagedRequest {
-        [CmdletBinding()]
-        param([Parameter(Mandatory)][string]$Uri)
-
-        $items = @()
-        $nextUri = $Uri
-        while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
-            $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -ErrorAction Stop
-            $items += @($response.value)
-            $nextUri = $response.'@odata.nextLink'
-        }
-
-        return @($items)
-    }
-
     $userSelectProperties = @(
-        'displayName',
-        'onPremisesSyncEnabled',
-        'onPremisesImmutableId',
-        'onPremisesSecurityIdentifier',
-        'userType',
-        'userPrincipalName',
-        'id',
-        'givenName',
-        'surname',
-        'createdDateTime',
-        'deletedDateTime',
-        'jobTitle',
-        'department',
-        'preferredDataLocation',
-        'city',
-        'country',
-        'officeLocation',
-        'state',
-        'usageLocation',
-        'onPremisesLastSyncDateTime',
-        'accountEnabled',
-        'assignedLicenses',
-        'passwordPolicies',
-        'passwordLastModifiedDateTime',
-        'mobilePhone',
-        'businessPhones',
-        'postalCode',
-        'preferredLanguage',
-        'streetAddress',
-        'faxNumber',
-        'proxyAddresses',
-        'lastPasswordChangeDateTime',
-        'signInActivity'
+        'DisplayName',
+        'OnPremisesSyncEnabled',
+        'OnPremisesImmutableId',
+        'OnPremisesSecurityIdentifier',
+        'UserType',
+        'UserPrincipalName',
+        'Id',
+        'GivenName',
+        'Surname',
+        'CreatedDateTime',
+        'DeletedDateTime',
+        'JobTitle',
+        'Department',
+        'PreferredDataLocation',
+        'City',
+        'Country',
+        'OfficeLocation',
+        'State',
+        'UsageLocation',
+        'OnPremisesLastSyncDateTime',
+        'AccountEnabled',
+        'AssignedLicenses',
+        'PasswordPolicies',
+        'PasswordLastModifiedDateTime',
+        'MobilePhone',
+        'BusinessPhones',
+        'PostalCode',
+        'PreferredLanguage',
+        'StreetAddress',
+        'FaxNumber',
+        'ProxyAddresses',
+        'LastPasswordChangeDateTime',
+        'SignInActivity'
     )
 
-    $userSelect = $userSelectProperties -join ','
-    $usersUri = "https://graph.microsoft.com/v1.0/users?`$select=$userSelect&`$top=999"
-
-    try {
-        $users = Invoke-GraphPagedRequest -Uri $usersUri
-    }
-    catch {
-        if ($_.Exception.Message -match 'signInActivity|AuditLog|Authorization_RequestDenied|Forbidden|Insufficient privileges') {
-            WriteLog -Message "Could not retrieve signInActivity. Retrying users inventory without sign-in activity columns. Add AuditLog.Read.All if those values are required." "WARNING"
-            $userSelect = ($userSelectProperties | Where-Object { $_ -ne 'signInActivity' }) -join ','
-            $usersUri = "https://graph.microsoft.com/v1.0/users?`$select=$userSelect&`$top=999"
-            $users = Invoke-GraphPagedRequest -Uri $usersUri
-        }
-        else {
-            throw
-        }
-    }
+    $users = Get-MgUser -All -Property $userSelectProperties -ErrorAction Stop
 
     WriteLog -Message ("Number of users retrieved: {0}" -f $users.Count) "INFO"
 
@@ -480,7 +448,7 @@ try {
     #region Export CSV
 
     Write-Host "`n--- Export CSV ---"
-$BaseFileName = "M365_Users_Active"
+    $BaseFileName = "M365_Users_Active"
 
     ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
                                 -OutputPath $OutputPath `
@@ -564,11 +532,11 @@ finally {
 
     try {
         if ((Get-Command RemoveOldFiles -ErrorAction SilentlyContinue) -and $OutputPath) {
-            RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount 150 -LogFile $global:logTextFile
+            RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
         }
 
-        if ((Get-Command RemoveOldFiles -ErrorAction SilentlyContinue) -and $logPath) {
-            RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
+        if ((Get-Command RemoveOldFiles -ErrorAction SilentlyContinue) -and $global:LogPath) {
+            RemoveOldFiles -Path $global:LogPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
         }
 
         if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
