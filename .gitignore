@@ -2,7 +2,10 @@ IntuneRemediationsInProduction/
 IntuneInventory/IntuneRemediationsInProduction/
 SmartM365/IntuneRemediationsInProduction/
 SmartM365/IntuneInventory/IntuneRemediationsInProduction/
-SmartM365/
+SmartM365/**
+!SmartM365/
+!SmartM365/**/
+!SmartM365/**/.gitkeep
 .delete-empty/
 
 # Local documentation / agent notes
