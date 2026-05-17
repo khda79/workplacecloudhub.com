@@ -72,6 +72,7 @@ Do not use misleading object prefixes such as `Mailboxes_` for non-mailbox data,
 - Keep `RetentionMaxCSV` and `RetentionMaxLogs` centralized through config, with default fallback values of `30`.
 - Error email recipients must resolve from `ErrorMailTo`; per-script configs should use `__USE_GLOBAL__` unless a script-specific recipient is required.
 - Error and report emails should use Microsoft Graph when `SmtpServer` is empty; keep `From` configured as the sender mailbox and ensure the SmartM365 app has `Mail.Send`.
+- Graph `Mail.Send` must be scoped in Exchange Online to `MailSendAccessPolicyGroup`; do not leave SmartM365 mail sending unrestricted tenant-wide.
 - Keep the permissions recap in `README.md` current when scripts add or change Graph scopes, Intune permissions, Exchange RBAC needs, AD access needs, or SharePoint upload behavior.
 - Prefer shared preflight checks before main processing: required modules, output path write access, Graph permissions, Exchange Online RBAC, Exchange on-prem readiness, and AD read access.
 - When a script needs Microsoft Graph SDK cmdlets to retrieve data, install/import the required Graph submodules and keep the cmdlet-based implementation; do not replace cmdlets with simplified REST calls only to avoid module installation.
@@ -82,6 +83,7 @@ Do not use misleading object prefixes such as `Mailboxes_` for non-mailbox data,
 
 ## Git Hygiene
 
+- Work on `main` by default. Do not create feature branches unless the user explicitly asks for one.
 - Keep `*.local.json` in `.gitignore`.
 - Do not stage generated logs, temporary files, archives, or local exports.
 - Do not push script changes to GitHub until the user has validated that the changed script works. This applies to every script.

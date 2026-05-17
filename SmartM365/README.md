@@ -20,10 +20,12 @@ The setup run writes a text log and PowerShell transcript to `C:\Temp\WORKPLACE`
 
 When `SmartM365.global.local.json` already contains `Thumbprint` or `Thumb`, the setup reuses that local certificate on later `-UpdateExisting` runs instead of creating a new certificate.
 
-Use `-RemoveAppRegistration -Confirm` to remove the SmartM365 app registration and its application service principals, then clear the app-only authentication values from `SmartM365.global.local.json`. This cleanup does not remove the `SMART-M365` Teams workspace, SharePoint files, or local certificates.
+The bootstrap also configures Graph mail sending: it connects to Exchange Online before Microsoft Graph, creates or reuses a dedicated SmartM365 sender shared mailbox, creates or reuses the `SMART-M365-MailSend-Allowed` mail-enabled security group, adds the sender mailbox to that group, creates an Exchange Online Application Access Policy that restricts `Mail.Send` to that group, and writes `From`, `SmtpServer`, and `MailSendAccessPolicyGroup` to `SmartM365.global.local.json`. Use `-ExchangeAdminUserPrincipalName` if Exchange Online should sign in with a specific admin account.
+
+Use `-RemoveAppRegistration -Confirm` to remove the SmartM365 app registration and its application service principals, remove related Exchange Online Application Access Policies, then clear the app-only authentication values from `SmartM365.global.local.json`. This cleanup does not remove the `SMART-M365` Teams workspace, SharePoint files, sender mailbox, Mail.Send scope group, or local certificates.
 
 The same bootstrap creates or reuses the `SMART-M365` Teams team, resolves its SharePoint site, and updates `SmartM365.global.local.json` with the SharePoint upload target. Use `-DisableTeamsSetup` only when the Teams workspace is already handled separately.
 
-Current Microsoft Graph application permissions include the read scopes used by the inventory scripts (`Directory.Read.All`, `User.Read.All`, `Device.Read.All`, `GroupMember.Read.All`, Intune read permissions, and `AuditLog.Read.All` for user `signInActivity`), plus `Files.ReadWrite.All`, `Sites.ReadWrite.All`, and `Mail.Send` for SharePoint CSV upload and Graph mail. Exchange Online app-only automation also needs `Exchange.ManageAsApp` and separate Exchange RBAC assignment.
+Current Microsoft Graph application permissions include the read scopes used by the inventory scripts (`Directory.Read.All`, `User.Read.All`, `Device.Read.All`, `GroupMember.Read.All`, Intune read permissions, and `AuditLog.Read.All` for user `signInActivity`), plus `Files.ReadWrite.All`, `Sites.ReadWrite.All`, and `Mail.Send` for SharePoint CSV upload and Graph mail. Exchange Online app-only inventory automation also needs `Exchange.ManageAsApp` and separate Exchange RBAC assignment.
 
 See `SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.

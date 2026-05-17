@@ -21,6 +21,11 @@
     resolves its backing SharePoint site, and updates SmartM365.global.local.json
     with the SharePoint upload target.
 
+    The script also creates or reuses a dedicated Exchange Online shared mailbox
+    for SmartM365 report/error emails, creates a mail-enabled security group,
+    adds the sender mailbox to that group, and scopes Microsoft Graph Mail.Send
+    with an Exchange Online Application Access Policy.
+
 .PARAMETER DisplayName
     Display name for the Entra ID application. Defaults to SmartM365 Automation.
 
@@ -53,9 +58,27 @@
     sign-in. Useful when browser/WAM authentication is not available in the
     current terminal.
 
+.PARAMETER ExchangeAdminUserPrincipalName
+    Optional Exchange Online administrator account used for the interactive
+    Exchange Online setup connection. If omitted, Exchange Online prompts for
+    the account before Microsoft Graph connects.
+
 .PARAMETER TeamDisplayName
     Display name of the Teams team used for SmartM365 shared exports. Defaults
     to SMART-M365.
+
+.PARAMETER MailSenderAddress
+    Primary SMTP address for the SmartM365 sender mailbox. If omitted, the
+    script uses smartm365-reports@<default accepted domain>.
+
+.PARAMETER MailSenderDisplayName
+    Display name for the SmartM365 sender shared mailbox.
+
+.PARAMETER MailSendSecurityGroupName
+    Display name for the mail-enabled security group that scopes Mail.Send.
+
+.PARAMETER MailSendSecurityGroupAlias
+    Alias for the mail-enabled security group that scopes Mail.Send.
 
 .PARAMETER DisableTeamsSetup
     Skips Teams team creation/reuse and SharePoint local configuration updates.
@@ -114,6 +137,9 @@ param(
     [switch]$SkipBroadIntuneReadWritePermissions,
 
     [Parameter()]
+    [string]$ExchangeAdminUserPrincipalName,
+
+    [Parameter()]
     [ValidateNotNullOrEmpty()]
     [string]$TeamDisplayName = 'SMART-M365',
 
@@ -124,6 +150,21 @@ param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
     [string]$SharePointTargetFolderPath = 'SMART-M365/CSV',
+
+    [Parameter()]
+    [string]$MailSenderAddress,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$MailSenderDisplayName = 'SmartM365 Reports',
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$MailSendSecurityGroupName = 'SMART-M365-MailSend-Allowed',
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$MailSendSecurityGroupAlias = 'smartm365-mailsend-allowed',
 
     [Parameter()]
     [switch]$DisableTeamsSetup,
@@ -139,6 +180,7 @@ $ErrorActionPreference = 'Stop'
 $script:SmartM365SetupLogFile = $null
 $script:SmartM365SetupTranscriptFile = $null
 $script:SmartM365SetupTranscriptStarted = $false
+$script:SmartM365ExchangeOnlineConnected = $false
 
 function Initialize-SmartM365SetupLogging {
     param(
@@ -218,6 +260,15 @@ function Import-RequiredGraphModule {
     }
 }
 
+function Import-RequiredExchangeOnlineModule {
+    $moduleName = 'ExchangeOnlineManagement'
+    if (-not (Get-Module -ListAvailable -Name $moduleName)) {
+        throw "Required module '$moduleName' is not installed. Install it with: Install-Module $moduleName -Scope CurrentUser"
+    }
+
+    Import-Module $moduleName -ErrorAction Stop
+}
+
 function Connect-SmartM365GraphSetupSession {
     param(
         [string]$RequestedTenantId,
@@ -258,6 +309,77 @@ function Connect-SmartM365GraphSetupSession {
     Write-SmartM365SetupStatus -Message ("Connected as {0} in tenant {1}." -f $context.Account, $context.TenantId) -Level OK
 
     return $context
+}
+
+function Connect-SmartM365ExchangeOnlineSetupSession {
+    param(
+        [string]$UserPrincipalName
+    )
+
+    if ($script:SmartM365ExchangeOnlineConnected) {
+        return
+    }
+
+    Import-RequiredExchangeOnlineModule
+    if ([string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+        Write-SmartM365SetupStatus -Message 'Connecting interactively to Exchange Online before Microsoft Graph.'
+    }
+    else {
+        Write-SmartM365SetupStatus -Message ("Connecting interactively to Exchange Online as {0} before Microsoft Graph." -f $UserPrincipalName)
+    }
+
+    $connectParams = @{
+        ShowBanner   = $false
+        ShowProgress = $false
+        ErrorAction  = 'Stop'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+        $connectParams.UserPrincipalName = $UserPrincipalName
+    }
+    if ((Get-Command Connect-ExchangeOnline).Parameters.ContainsKey('DisableWAM')) {
+        $connectParams.DisableWAM = $true
+    }
+
+    try {
+        Connect-ExchangeOnline @connectParams
+    }
+    catch {
+        $message = [string]$_.Exception.Message
+        if ($message -notmatch 'RuntimeBroker|Object reference not set|MSALTokenProvider|WAM') {
+            throw
+        }
+
+        Write-SmartM365SetupStatus -Level WARN -Message 'Exchange Online WAM/broker authentication failed. Retrying with device code authentication.'
+        $deviceParams = @{
+            Device       = $true
+            ShowBanner   = $false
+            ShowProgress = $false
+            ErrorAction  = 'Stop'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+            $deviceParams.UserPrincipalName = $UserPrincipalName
+        }
+        Connect-ExchangeOnline @deviceParams
+    }
+    $script:SmartM365ExchangeOnlineConnected = $true
+    Write-SmartM365SetupStatus -Message 'Connected to Exchange Online.' -Level OK
+}
+
+function Close-SmartM365ExchangeOnlineSetupSession {
+    if (-not $script:SmartM365ExchangeOnlineConnected) {
+        return
+    }
+
+    try {
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop
+        Write-SmartM365SetupStatus -Message 'Disconnected from Exchange Online.' -Level OK
+    }
+    catch {
+        Write-SmartM365SetupStatus -Level WARN -Message ("Exchange Online disconnect failed: {0}" -f $_.Exception.Message)
+    }
+    finally {
+        $script:SmartM365ExchangeOnlineConnected = $false
+    }
 }
 
 function Get-SmartM365RequiredApiResource {
@@ -813,6 +935,299 @@ function Get-OrCreate-SmartM365TeamsWorkspace {
     }
 }
 
+function Get-SmartM365ExchangeDefaultAcceptedDomain {
+    $defaultDomain = @(Get-AcceptedDomain -ErrorAction Stop | Where-Object { $_.Default -eq $true }) | Select-Object -First 1
+    if ($null -eq $defaultDomain) {
+        $defaultDomain = @(Get-AcceptedDomain -ErrorAction Stop | Select-Object -First 1)
+    }
+
+    if ($null -eq $defaultDomain -or [string]::IsNullOrWhiteSpace([string]$defaultDomain.DomainName)) {
+        throw 'Could not resolve an Exchange Online accepted domain for SmartM365 mail setup.'
+    }
+
+    return [string]$defaultDomain.DomainName
+}
+
+function Resolve-SmartM365MailAddress {
+    param(
+        [string]$ConfiguredAddress,
+        [Parameter(Mandatory)][string]$DefaultAlias
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ConfiguredAddress)) {
+        return $ConfiguredAddress.Trim()
+    }
+
+    $domain = Get-SmartM365ExchangeDefaultAcceptedDomain
+    return ('{0}@{1}' -f $DefaultAlias, $domain)
+}
+
+function Get-OrCreate-SmartM365SenderMailbox {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$SenderAddress,
+        [Parameter(Mandatory)][string]$SenderDisplayName
+    )
+
+    $mailbox = Get-Mailbox -Identity $SenderAddress -ErrorAction SilentlyContinue
+    if ($null -ne $mailbox) {
+        if ($mailbox.RecipientTypeDetails -ne 'SharedMailbox') {
+            Write-SmartM365SetupStatus -Level WARN -Message ("Reusing existing sender mailbox '{0}', but it is '{1}' rather than a SharedMailbox." -f $SenderAddress, $mailbox.RecipientTypeDetails)
+        }
+        else {
+            Write-SmartM365SetupStatus -Message ("Reusing existing SmartM365 sender shared mailbox '{0}'." -f $SenderAddress) -Level OK
+        }
+        return $mailbox
+    }
+
+    $alias = ($SenderAddress -split '@', 2)[0]
+    if ($PSCmdlet.ShouldProcess($SenderAddress, 'Create SmartM365 sender shared mailbox')) {
+        $mailbox = New-Mailbox `
+            -Shared `
+            -Name $SenderDisplayName `
+            -DisplayName $SenderDisplayName `
+            -Alias $alias `
+            -PrimarySmtpAddress $SenderAddress `
+            -ErrorAction Stop `
+            -Confirm:$false
+        Write-SmartM365SetupStatus -Message ("Created SmartM365 sender shared mailbox '{0}'." -f $SenderAddress) -Level OK
+    }
+
+    return $mailbox
+}
+
+function Get-OrCreate-SmartM365MailSendSecurityGroup {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$GroupName,
+        [Parameter(Mandatory)][string]$GroupAlias,
+        [Parameter(Mandatory)][string]$GroupAddress
+    )
+
+    $group = Get-DistributionGroup -Identity $GroupAddress -ErrorAction SilentlyContinue
+    if ($null -eq $group) {
+        $group = @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop | Where-Object { $_.Alias -eq $GroupAlias -or $_.DisplayName -eq $GroupName }) | Select-Object -First 1
+    }
+
+    if ($null -ne $group) {
+        Write-SmartM365SetupStatus -Message ("Reusing existing Mail.Send scope group '{0}' ({1})." -f $group.DisplayName, $group.PrimarySmtpAddress) -Level OK
+        return $group
+    }
+
+    if ($PSCmdlet.ShouldProcess($GroupAddress, 'Create SmartM365 Mail.Send mail-enabled security group')) {
+        $group = New-DistributionGroup `
+            -Name $GroupName `
+            -Alias $GroupAlias `
+            -PrimarySmtpAddress $GroupAddress `
+            -Type Security `
+            -ErrorAction Stop `
+            -Confirm:$false
+        Write-SmartM365SetupStatus -Message ("Created Mail.Send scope group '{0}' ({1})." -f $GroupName, $GroupAddress) -Level OK
+    }
+
+    return $group
+}
+
+function Add-SmartM365SenderMailboxToScopeGroup {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]$Group,
+        [Parameter(Mandatory)][string]$SenderAddress
+    )
+
+    $members = @(Get-DistributionGroupMember -Identity $Group.Identity -ResultSize Unlimited -ErrorAction Stop)
+    $existingMember = $members | Where-Object {
+        ([string]$_.PrimarySmtpAddress).Equals($SenderAddress, [System.StringComparison]::OrdinalIgnoreCase) -or
+        ([string]$_.WindowsEmailAddress).Equals($SenderAddress, [System.StringComparison]::OrdinalIgnoreCase)
+    } | Select-Object -First 1
+
+    if ($null -ne $existingMember) {
+        Write-SmartM365SetupStatus -Message ("Sender mailbox '{0}' is already a member of '{1}'." -f $SenderAddress, $Group.DisplayName) -Level OK
+        return
+    }
+
+    if ($PSCmdlet.ShouldProcess(("{0} -> {1}" -f $SenderAddress, $Group.DisplayName), 'Add SmartM365 sender mailbox to Mail.Send scope group')) {
+        Add-DistributionGroupMember `
+            -Identity $Group.Identity `
+            -Member $SenderAddress `
+            -BypassSecurityGroupManagerCheck `
+            -ErrorAction Stop `
+            -Confirm:$false
+        Write-SmartM365SetupStatus -Message ("Added sender mailbox '{0}' to Mail.Send scope group '{1}'." -f $SenderAddress, $Group.DisplayName) -Level OK
+    }
+}
+
+function Set-SmartM365MailSendApplicationAccessPolicy {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$AppId,
+        [Parameter(Mandatory)][string]$GroupAddress
+    )
+
+    $policies = @(Get-SmartM365ApplicationAccessPolicy)
+    $matchingPolicy = $policies | Where-Object {
+        @($_.AppId) -contains $AppId -and
+        $_.AccessRight -eq 'RestrictAccess' -and
+        ([string]$_.ScopeName).Equals($GroupAddress, [System.StringComparison]::OrdinalIgnoreCase)
+    } | Select-Object -First 1
+
+    if ($null -ne $matchingPolicy) {
+        Write-SmartM365SetupStatus -Message ("Application Access Policy already scopes Mail.Send for app {0} to '{1}'." -f $AppId, $GroupAddress) -Level OK
+        return $matchingPolicy
+    }
+
+    $otherRestrictPolicy = $policies | Where-Object {
+        @($_.AppId) -contains $AppId -and $_.AccessRight -eq 'RestrictAccess'
+    } | Select-Object -First 1
+    if ($null -ne $otherRestrictPolicy) {
+        Write-SmartM365SetupStatus -Level WARN -Message ("App {0} already has an Application Access Policy scoped to '{1}'. A second policy will be added for '{2}'." -f $AppId, $otherRestrictPolicy.ScopeName, $GroupAddress)
+    }
+
+    if ($PSCmdlet.ShouldProcess($AppId, ("Create Application Access Policy scoped to {0}" -f $GroupAddress))) {
+        $policy = New-ApplicationAccessPolicy `
+            -AccessRight RestrictAccess `
+            -AppId $AppId `
+            -PolicyScopeGroupId $GroupAddress `
+            -Description 'Restrict SmartM365 Graph Mail.Send to approved SmartM365 sender mailboxes.' `
+            -ErrorAction Stop `
+            -Confirm:$false
+        Write-SmartM365SetupStatus -Message ("Created Application Access Policy for app {0} scoped to '{1}'." -f $AppId, $GroupAddress) -Level OK
+        return $policy
+    }
+}
+
+function Get-SmartM365ApplicationAccessPolicy {
+    try {
+        return @(Get-ApplicationAccessPolicy -ErrorAction Stop)
+    }
+    catch {
+        $message = [string]$_.Exception.Message
+        if ($message -match 'introuvable|not found|not be found|ObjectNotFound|Cannot find|couldn''t be found') {
+            Write-SmartM365SetupStatus -Level WARN -Message 'No existing Exchange Online Application Access Policy was returned; continuing as if none exist.'
+            return @()
+        }
+
+        throw
+    }
+}
+
+function Remove-SmartM365MailSendApplicationAccessPolicy {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$AppId
+    )
+
+    $policies = @(Get-SmartM365ApplicationAccessPolicy | Where-Object { @($_.AppId) -contains $AppId })
+    if ($policies.Count -eq 0) {
+        Write-SmartM365SetupStatus -Message ("No Application Access Policy found for app {0}." -f $AppId) -Level OK
+        return
+    }
+
+    foreach ($policy in $policies) {
+        if ($PSCmdlet.ShouldProcess($policy.Identity, ("Remove Application Access Policy for app {0}" -f $AppId))) {
+            Remove-ApplicationAccessPolicy -Identity $policy.Identity -Confirm:$false -ErrorAction Stop
+            Write-SmartM365SetupStatus -Message ("Removed Application Access Policy '{0}' for app {1}." -f $policy.Identity, $AppId) -Level OK
+        }
+    }
+}
+
+function Test-SmartM365MailSendApplicationAccessPolicy {
+    param(
+        [Parameter(Mandatory)][string]$AppId,
+        [Parameter(Mandatory)][string]$SenderAddress
+    )
+
+    if (-not (Get-Command -Name Test-ApplicationAccessPolicy -ErrorAction SilentlyContinue)) {
+        Write-SmartM365SetupStatus -Level WARN -Message 'Test-ApplicationAccessPolicy is not available in this Exchange Online session; skipping Mail.Send scope test.'
+        return
+    }
+
+    try {
+        $testResult = Test-ApplicationAccessPolicy -Identity $SenderAddress -AppId $AppId -ErrorAction Stop
+        Write-SmartM365SetupStatus -Message ("Application Access Policy test for '{0}' returned: {1}." -f $SenderAddress, $testResult.AccessCheckResult) -Level OK
+    }
+    catch {
+        Write-SmartM365SetupStatus -Level WARN -Message ("Application Access Policy test failed for '{0}': {1}" -f $SenderAddress, $_.Exception.Message)
+    }
+}
+
+function Set-SmartM365MailLocalConfig {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath,
+        [Parameter(Mandatory)][string]$SenderAddress,
+        [Parameter(Mandatory)][string]$ScopeGroupAddress
+    )
+
+    if (Test-Path -LiteralPath $ConfigPath) {
+        $config = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    else {
+        $config = [pscustomobject]@{}
+    }
+
+    $values = @{
+        From                    = $SenderAddress
+        SmtpServer              = ''
+        MailSendAccessPolicyGroup = $ScopeGroupAddress
+    }
+
+    foreach ($propertyName in $values.Keys) {
+        if ($null -eq $config.PSObject.Properties[$propertyName]) {
+            $config | Add-Member -NotePropertyName $propertyName -NotePropertyValue $values[$propertyName]
+        }
+        else {
+            $config.$propertyName = $values[$propertyName]
+        }
+    }
+
+    if ($PSCmdlet.ShouldProcess($ConfigPath, 'Update SmartM365 mail local configuration')) {
+        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Confirm:$false
+        Write-SmartM365SetupStatus -Message ("Updated mail settings in {0}." -f $ConfigPath) -Level OK
+    }
+}
+
+function Set-SmartM365ExchangeMailSendSetup {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]$Application,
+        [Parameter(Mandatory)][string]$AdminUserPrincipalName,
+        [Parameter(Mandatory)][string]$ConfigPath,
+        [string]$SenderAddress,
+        [Parameter(Mandatory)][string]$SenderDisplayName,
+        [Parameter(Mandatory)][string]$ScopeGroupName,
+        [Parameter(Mandatory)][string]$ScopeGroupAlias
+    )
+
+    Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $AdminUserPrincipalName
+    $effectiveSenderAddress = Resolve-SmartM365MailAddress -ConfiguredAddress $SenderAddress -DefaultAlias 'smartm365-reports'
+    $domain = ($effectiveSenderAddress -split '@', 2)[1]
+    $scopeGroupAddress = ('{0}@{1}' -f $ScopeGroupAlias, $domain)
+
+    $mailbox = Get-OrCreate-SmartM365SenderMailbox -SenderAddress $effectiveSenderAddress -SenderDisplayName $SenderDisplayName
+    if ($null -eq $mailbox) {
+        Write-SmartM365SetupStatus -Level WARN -Message 'SmartM365 sender mailbox was not created because WhatIf was used.'
+    }
+
+    $group = Get-OrCreate-SmartM365MailSendSecurityGroup -GroupName $ScopeGroupName -GroupAlias $ScopeGroupAlias -GroupAddress $scopeGroupAddress
+    if ($null -eq $group) {
+        Write-SmartM365SetupStatus -Level WARN -Message 'SmartM365 Mail.Send scope group was not created because WhatIf was used.'
+    }
+    else {
+        Add-SmartM365SenderMailboxToScopeGroup -Group $group -SenderAddress $effectiveSenderAddress
+        Set-SmartM365MailSendApplicationAccessPolicy -AppId $Application.AppId -GroupAddress $scopeGroupAddress | Out-Null
+        Test-SmartM365MailSendApplicationAccessPolicy -AppId $Application.AppId -SenderAddress $effectiveSenderAddress
+    }
+
+    Set-SmartM365MailLocalConfig -ConfigPath $ConfigPath -SenderAddress $effectiveSenderAddress -ScopeGroupAddress $scopeGroupAddress
+
+    return [pscustomobject]@{
+        SenderAddress    = $effectiveSenderAddress
+        ScopeGroupName   = $ScopeGroupName
+        ScopeGroupAddress = $scopeGroupAddress
+    }
+}
+
 function Set-SmartM365SharePointLocalConfig {
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -987,6 +1402,7 @@ function Get-SmartM365LocalConfigCertificateThumbprint {
 Initialize-SmartM365SetupLogging -Path $LogPath
 
 try {
+Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $ExchangeAdminUserPrincipalName
 Import-RequiredGraphModule
 $graphContext = Connect-SmartM365GraphSetupSession -RequestedTenantId $TenantId -UseDeviceCode:$UseDeviceCode
 $effectiveTenantId = $graphContext.TenantId
@@ -1004,6 +1420,14 @@ if ($RemoveAppRegistration) {
     if ($existingApps.Count -eq 0) {
         Write-SmartM365SetupStatus -Level WARN -Message ("No app registration named '{0}' was found. Nothing to remove." -f $DisplayName)
         return
+    }
+
+    try {
+        Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $graphContext.Account
+        Remove-SmartM365MailSendApplicationAccessPolicy -AppId $existingApps[0].AppId
+    }
+    catch {
+        Write-SmartM365SetupStatus -Level WARN -Message ("Exchange Online Mail.Send policy cleanup failed and app removal will continue: {0}" -f $_.Exception.Message)
     }
 
     Remove-SmartM365AppRegistration -Application $existingApps[0] -ConfigPath $localConfigPath
@@ -1091,6 +1515,15 @@ elseif ($DisableGrantAdminConsent) {
     Write-SmartM365SetupStatus -Level WARN -Message 'Admin consent was not granted because -DisableGrantAdminConsent was used. Use the admin consent URL printed below if needed.'
 }
 
+$mailSendSetup = Set-SmartM365ExchangeMailSendSetup `
+    -Application $application `
+    -AdminUserPrincipalName $graphContext.Account `
+    -ConfigPath $localConfigPath `
+    -SenderAddress $MailSenderAddress `
+    -SenderDisplayName $MailSenderDisplayName `
+    -ScopeGroupName $MailSendSecurityGroupName `
+    -ScopeGroupAlias $MailSendSecurityGroupAlias
+
 $teamsWorkspace = $null
 if (-not $DisableTeamsSetup) {
     $teamsWorkspace = Get-OrCreate-SmartM365TeamsWorkspace `
@@ -1127,6 +1560,10 @@ if ($teamsWorkspace) {
     Write-Output ("SP Library  : {0}" -f $teamsWorkspace.SharePointLibraryDisplayName)
     Write-Output ("SP Folder   : {0}" -f $teamsWorkspace.SharePointTargetFolderPath)
 }
+if ($mailSendSetup) {
+    Write-Output ("Mail From   : {0}" -f $mailSendSetup.SenderAddress)
+    Write-Output ("Mail Scope  : {0} ({1})" -f $mailSendSetup.ScopeGroupName, $mailSendSetup.ScopeGroupAddress)
+}
 Write-Output ''
 Write-Output 'Add these values to SmartM365.global.local.json:'
 Write-Output (@"
@@ -1150,8 +1587,20 @@ if ($teamsWorkspace) {
 "@)
 }
 Write-Output ''
-Write-SmartM365SetupStatus -Level WARN -Message 'Exchange Online still needs RBAC for the application service principal, for example the relevant read-only Exchange role group or RBAC for Applications assignment.'
+if ($mailSendSetup) {
+    Write-Output 'Mail settings written to SmartM365.global.local.json:'
+    Write-Output (@"
+{
+  "From": "$($mailSendSetup.SenderAddress)",
+  "SmtpServer": "",
+  "MailSendAccessPolicyGroup": "$($mailSendSetup.ScopeGroupAddress)"
+}
+"@)
+    Write-Output ''
+}
+Write-SmartM365SetupStatus -Level WARN -Message 'Exchange Online inventory scripts still need RBAC for Exchange.ManageAsApp, for example the relevant read-only Exchange role group or RBAC for Applications assignment.'
 }
 finally {
+    Close-SmartM365ExchangeOnlineSetupSession
     Close-SmartM365SetupLogging
 }

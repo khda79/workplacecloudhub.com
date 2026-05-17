@@ -13,6 +13,7 @@
   "ErrorMailTo": "admin@example.com",
   "SmtpServer": "",
   "From": "smartm365@example.com",
+  "MailSendAccessPolicyGroup": "smartm365-mailsend-allowed@example.com",
   "Cc": "",
   "Subject": "SmartM365",
   "EnableSharePointUpload": true,

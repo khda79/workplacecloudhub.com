@@ -25,7 +25,7 @@ Ce document explique les permissions ajoutees par `SmartM365-Create-AppRegistrat
 | `DeviceManagementScripts.Read.All` | Lecture/export des remediation scripts Intune exposes comme `deviceHealthScripts`, incluant details et assignments. | `IntuneInventory/SmartM365-Export-IntuneRemediations.ps1`. |
 | `DeviceManagementServiceConfig.Read.All` | Lecture de la configuration du service Intune, en particulier les identites Windows Autopilot. | `IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1`. |
 | `Files.ReadWrite.All` | Upload et remplacement de fichiers CSV dans une bibliotheque SharePoint via Microsoft Graph. Necessaire avec l'implementation actuelle qui ecrit dans un drive/document library. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; `Modules/SmartM365.SharePoint/SmartM365.SharePoint.psm1`; tous les scripts d'inventaire/export qui appellent l'upload SharePoint quand `EnableSharePointUpload` est active. |
-| `Mail.Send` | Envoi des notifications d'erreur et rapports HTML via Microsoft Graph lorsque `SmtpServer` est vide. L'adresse d'expedition est resolue depuis `From` dans `SmartM365.global.local.json` ou le `*.local.json` du script. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; scripts qui appellent `SendEmailHtmlReport`, `Send-SmartM365Mail` ou `SendFileListEmailReport`. |
+| `Mail.Send` | Envoi des notifications d'erreur et rapports HTML via Microsoft Graph lorsque `SmtpServer` est vide. L'adresse d'expedition est resolue depuis `From` dans `SmartM365.global.local.json` ou le `*.local.json` du script. Le bootstrap cree aussi une Application Access Policy Exchange Online pour limiter ce droit au groupe `MailSendAccessPolicyGroup`. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; scripts qui appellent `SendEmailHtmlReport`, `Send-SmartM365Mail` ou `SendFileListEmailReport`. |
 | `Sites.ReadWrite.All` | Resolution du site SharePoint, lecture des drives/libraries et ecriture dans le site cible pour les exports CSV. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; `Modules/SmartM365.SharePoint/SmartM365.SharePoint.psm1`; tous les scripts d'inventaire/export qui appellent l'upload SharePoint quand `EnableSharePointUpload` est active. |
 
 ## Permissions Intune ReadWrite incluses par defaut
@@ -44,6 +44,14 @@ Ces permissions sont ajoutees par defaut car un script actuel les demande encore
 | --- | --- | --- |
 | `Exchange.ManageAsApp` sur l'API `Office 365 Exchange Online` | Autorise l'authentification app-only par certificat avec `Connect-ExchangeOnline`. Ce n'est pas une permission Microsoft Graph. Elle ne suffit pas seule: Exchange Online doit aussi recevoir le RBAC adapte pour le service principal. | Scripts Exchange Online sous `ExchangeInventory`, par exemple `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes` et `Migration`, lorsqu'ils utilisent l'authentification app-only. |
 
+## Configuration Exchange Online creee par le bootstrap
+
+| Objet | Pourquoi il est necessaire | Scripts / modules utilisateurs |
+| --- | --- | --- |
+| Shared mailbox `smartm365-reports@<domaine>` | Fournit une boite dediee comme expediteur des rapports et notifications SmartM365. Le bootstrap ecrit cette adresse dans `From`. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; scripts qui envoient des rapports ou erreurs par Graph. |
+| Mail-enabled security group `SMART-M365-MailSend-Allowed` | Liste les boites autorisees pour l'application SmartM365 avec `Mail.Send`. Le bootstrap ecrit son adresse dans `MailSendAccessPolicyGroup`. | Restriction Exchange Online appliquee a `Mail.Send`. |
+| Application Access Policy Exchange Online | Limite l'application SmartM365 aux boites membres de `MailSendAccessPolicyGroup` pour les permissions Outlook Graph comme `Mail.Send`. Sans cette restriction, `Mail.Send` application est tenant-wide. | Envois Graph faits par `Modules/SmartM365.Core/SmartM365.Core.psm1`. |
+
 ## Permissions utilisees uniquement pour executer le bootstrap
 
 Ces scopes sont demandes a l'administrateur qui lance `SmartM365-Create-AppRegistration.ps1`. Ils ne sont pas ajoutes a l'app SmartM365 comme permissions metier; ils servent a creer/modifier l'app registration et a accorder le consentement.
@@ -60,5 +68,5 @@ Ces scopes sont demandes a l'administrateur qui lance `SmartM365-Create-AppRegis
 
 - Remplacer les permissions Intune `ReadWrite` par des permissions `Read` lorsque `SmartM365-Get-IntuneAutopatchAlerts.ps1` est confirme en lecture seule.
 - Evaluer `Sites.Selected` pour SharePoint afin de limiter l'upload au site cible au lieu de `Sites.ReadWrite.All`, mais cela demande une implementation et une attribution supplementaires.
-- Les scripts Exchange Online ont besoin d'un RBAC Exchange explicite pour le service principal, meme avec `Exchange.ManageAsApp`.
+- Les scripts Exchange Online d'inventaire ont besoin d'un RBAC Exchange explicite pour le service principal, meme avec `Exchange.ManageAsApp`; cette attribution est distincte de l'Application Access Policy utilisee pour limiter `Mail.Send`.
 - Si le site SharePoint de l'equipe Teams n'est pas disponible immediatement, relancer le bootstrap plus tard: la provision SharePoint d'une equipe Teams est asynchrone cote Microsoft 365.
