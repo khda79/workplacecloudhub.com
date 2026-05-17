@@ -1,4 +1,4 @@
-# Name: SmartM365-WindowsUpdate-Policy-Blockers-Remediation.ps1
+﻿# Name: SmartM365-WindowsUpdate-Policy-Blockers-Remediation.ps1
 # Version: 1.0
 # Description: Removes WSUS, Windows Update, and WUfB policy values that block cloud-managed update flows.
 
@@ -10,7 +10,7 @@ $LogFile = Join-Path $LogRoot "$Scenario-Remediation.log"
 $WuPolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
 $WuAuPolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
 
-function Write-Log {
+function Write-SmartM365Log {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
@@ -21,7 +21,7 @@ function Write-Log {
     Add-Content -LiteralPath $LogFile -Value $line -Encoding utf8
 }
 
-function Remove-RegistryValueSafe {
+function Invoke-RegistryValueRemovalSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path,
@@ -38,11 +38,11 @@ function Remove-RegistryValueSafe {
 
     if ($item -and $item.PSObject.Properties.Name -contains $Name) {
         Remove-ItemProperty -Path $Path -Name $Name -Force -ErrorAction SilentlyContinue
-        Write-Log "RegistryValueRemoved=$Path\$Name"
+        Write-SmartM365Log "RegistryValueRemoved=$Path\$Name"
     }
 }
 
-function Restart-ServiceSafe {
+function Invoke-ServiceRestartSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -60,11 +60,11 @@ function Restart-ServiceSafe {
             Start-Service -Name $Name -ErrorAction SilentlyContinue
         }
 
-        Write-Log "ServiceRefreshed=$Name"
+        Write-SmartM365Log "ServiceRefreshed=$Name"
     }
 }
 
-function Start-UsoClient {
+function Invoke-UsoClient {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Action
@@ -74,33 +74,33 @@ function Start-UsoClient {
 
     if (Test-Path -LiteralPath $uso) {
         Start-Process -FilePath $uso -ArgumentList $Action -WindowStyle Hidden -ErrorAction SilentlyContinue
-        Write-Log "UsoClient=$Action Status=Triggered"
+        Write-SmartM365Log "UsoClient=$Action Status=Triggered"
     }
 }
 
 try {
     New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null
-    Write-Log "RemediationStarted"
+    Write-SmartM365Log "RemediationStarted"
 
     foreach ($name in @("WUServer", "WUStatusServer", "UpdateServiceUrlAlternate", "DoNotConnectToWindowsUpdateInternetLocations", "DisableWindowsUpdateAccess", "SetDisableUXWUAccess")) {
-        Remove-RegistryValueSafe -Path $WuPolicyPath -Name $name
+        Invoke-RegistryValueRemovalSafe -Path $WuPolicyPath -Name $name
     }
 
     foreach ($name in @("UseWUServer", "NoAutoUpdate", "AUOptions")) {
-        Remove-RegistryValueSafe -Path $WuAuPolicyPath -Name $name
+        Invoke-RegistryValueRemovalSafe -Path $WuAuPolicyPath -Name $name
     }
 
     foreach ($service in @("wuauserv", "bits", "dosvc")) {
-        Restart-ServiceSafe -Name $service
+        Invoke-ServiceRestartSafe -Name $service
     }
 
-    Start-UsoClient -Action "RefreshSettings"
-    Start-UsoClient -Action "StartScan"
+    Invoke-UsoClient -Action "RefreshSettings"
+    Invoke-UsoClient -Action "StartScan"
 
-    Write-Log "RemediationCompleted"
+    Write-SmartM365Log "RemediationCompleted"
     exit 0
 }
 catch {
-    Write-Log "RemediationFailed Message=$($_.Exception.Message)"
+    Write-SmartM365Log "RemediationFailed Message=$($_.Exception.Message)"
     exit 1
 }

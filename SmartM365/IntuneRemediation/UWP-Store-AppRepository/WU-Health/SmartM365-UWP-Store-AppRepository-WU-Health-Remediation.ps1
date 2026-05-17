@@ -1,4 +1,4 @@
-<# 
+﻿<#
     Name: SmartM365-UWP-Store-AppRepository-WU-Health-Remediation.ps1
     Version: 1.0
     Description: Safely remediates common Windows Update, Microsoft Store, UWP/AppX, AppRepository, and WinRM health issues that may block Windows upgrade scenarios.
@@ -21,7 +21,7 @@ $LogPath = Join-Path -Path $LogRoot -ChildPath 'Remediate-UWP-Store-AppRepositor
 if (-not (Test-Path -LiteralPath $LogRoot)) { New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null }
 $ErrorFound = $false
 
-function Write-Log {
+function Write-SmartM365Log {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
@@ -32,17 +32,17 @@ function Write-Log {
     Write-Output $line
 }
 
-function Set-RemediationError {
+function Add-RemediationError {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
     )
 
-    Write-Log "ERROR: $Message"
+    Write-SmartM365Log "ERROR: $Message"
     $script:ErrorFound = $true
 }
 
-function Start-ServiceIfAvailable {
+function Invoke-ServiceStartIfAvailable {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name,
@@ -55,7 +55,7 @@ function Start-ServiceIfAvailable {
         $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
 
         if ($null -eq $service) {
-            Set-RemediationError "Service is missing: $Name"
+            Add-RemediationError "Service is missing: $Name"
             return
         }
 
@@ -63,51 +63,51 @@ function Start-ServiceIfAvailable {
 
         if ($null -ne $serviceCim -and $serviceCim.StartMode -eq "Disabled") {
             Set-Service -Name $Name -StartupType $StartupType -ErrorAction SilentlyContinue
-            Write-Log "Service startup type updated: $Name -> $StartupType"
+            Write-SmartM365Log "Service startup type updated: $Name -> $StartupType"
         }
 
         if ($service.Status -ne "Running") {
             Start-Service -Name $Name -ErrorAction SilentlyContinue
-            Write-Log "Service start requested: $Name"
+            Write-SmartM365Log "Service start requested: $Name"
         }
     }
     catch {
-        Set-RemediationError "Failed to repair service ${Name}: $($_.Exception.Message)"
+        Add-RemediationError "Failed to repair service ${Name}: $($_.Exception.Message)"
     }
 }
 
-Write-Log "===== Remediation started ====="
+Write-SmartM365Log "===== Remediation started ====="
 
 # ---------------------------------------------------------
 # 1. WinRM
 # ---------------------------------------------------------
-Write-Log "Checking WinRM service"
+Write-SmartM365Log "Checking WinRM service"
 try {
     $winRmService = Get-Service -Name "WinRM" -ErrorAction SilentlyContinue
 
     if ($null -eq $winRmService) {
-        Set-RemediationError "WinRM service is missing"
+        Add-RemediationError "WinRM service is missing"
     }
     else {
         $winRmCim = Get-CimInstance -ClassName Win32_Service -Filter "Name='WinRM'" -ErrorAction SilentlyContinue
 
         if ($null -ne $winRmCim -and $winRmCim.StartMode -eq "Disabled") {
             Set-Service -Name "WinRM" -StartupType Manual -ErrorAction SilentlyContinue
-            Write-Log "WinRM startup type changed from Disabled to Manual"
+            Write-SmartM365Log "WinRM startup type changed from Disabled to Manual"
         }
 
         Start-Service -Name "WinRM" -ErrorAction SilentlyContinue
-        Write-Log "WinRM start requested"
+        Write-SmartM365Log "WinRM start requested"
     }
 }
 catch {
-    Set-RemediationError "WinRM remediation failed: $($_.Exception.Message)"
+    Add-RemediationError "WinRM remediation failed: $($_.Exception.Message)"
 }
 
 # ---------------------------------------------------------
 # 2. Windows Update cache remediation
 # ---------------------------------------------------------
-Write-Log "Cleaning Windows Update download cache"
+Write-SmartM365Log "Cleaning Windows Update download cache"
 try {
     $servicesToStop = @("wuauserv", "bits", "dosvc")
 
@@ -115,7 +115,7 @@ try {
         $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
         if ($null -ne $service -and $service.Status -ne "Stopped") {
             Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-            Write-Log "Service stop requested: $serviceName"
+            Write-SmartM365Log "Service stop requested: $serviceName"
         }
     }
 
@@ -123,111 +123,111 @@ try {
 
     if (Test-Path -Path $downloadCachePath) {
         Get-ChildItem -Path $downloadCachePath -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Log "Windows Update download cache cleaned"
+        Write-SmartM365Log "Windows Update download cache cleaned"
     }
     else {
-        Write-Log "Windows Update download cache folder not found; nothing to clean"
+        Write-SmartM365Log "Windows Update download cache folder not found; nothing to clean"
     }
 
     foreach ($serviceName in @("bits", "dosvc", "wuauserv")) {
-        Start-ServiceIfAvailable -Name $serviceName -StartupType Manual
+        Invoke-ServiceStartIfAvailable -Name $serviceName -StartupType Manual
     }
 }
 catch {
-    Set-RemediationError "Windows Update cache remediation failed: $($_.Exception.Message)"
+    Add-RemediationError "Windows Update cache remediation failed: $($_.Exception.Message)"
 }
 
 # ---------------------------------------------------------
 # 3. DISM and SFC
 # ---------------------------------------------------------
-Write-Log "Running DISM RestoreHealth"
+Write-SmartM365Log "Running DISM RestoreHealth"
 try {
     $dismProcess = Start-Process -FilePath "dism.exe" -ArgumentList "/Online", "/Cleanup-Image", "/RestoreHealth" -Wait -NoNewWindow -PassThru
-    Write-Log "DISM completed with exit code: $($dismProcess.ExitCode)"
+    Write-SmartM365Log "DISM completed with exit code: $($dismProcess.ExitCode)"
 
     if ($dismProcess.ExitCode -notin @(0, 3010)) {
-        Set-RemediationError "DISM returned unexpected exit code: $($dismProcess.ExitCode)"
+        Add-RemediationError "DISM returned unexpected exit code: $($dismProcess.ExitCode)"
     }
 }
 catch {
-    Set-RemediationError "DISM execution failed: $($_.Exception.Message)"
+    Add-RemediationError "DISM execution failed: $($_.Exception.Message)"
 }
 
-Write-Log "Running SFC scan"
+Write-SmartM365Log "Running SFC scan"
 try {
     $sfcProcess = Start-Process -FilePath "sfc.exe" -ArgumentList "/scannow" -Wait -NoNewWindow -PassThru
-    Write-Log "SFC completed with exit code: $($sfcProcess.ExitCode)"
+    Write-SmartM365Log "SFC completed with exit code: $($sfcProcess.ExitCode)"
 
     if ($sfcProcess.ExitCode -notin @(0, 1)) {
-        Set-RemediationError "SFC returned unexpected exit code: $($sfcProcess.ExitCode)"
+        Add-RemediationError "SFC returned unexpected exit code: $($sfcProcess.ExitCode)"
     }
 }
 catch {
-    Set-RemediationError "SFC execution failed: $($_.Exception.Message)"
+    Add-RemediationError "SFC execution failed: $($_.Exception.Message)"
 }
 
 # ---------------------------------------------------------
 # 4. UWP/AppX critical services
 # ---------------------------------------------------------
-Write-Log "Repairing UWP/AppX service configuration"
+Write-SmartM365Log "Repairing UWP/AppX service configuration"
 foreach ($serviceName in @("AppXSvc", "ClipSVC", "StateRepository")) {
-    Start-ServiceIfAvailable -Name $serviceName -StartupType Manual
+    Invoke-ServiceStartIfAvailable -Name $serviceName -StartupType Manual
 }
 
 # WpnService is not forced to Automatic because it may be intentionally managed by security baselines.
-Start-ServiceIfAvailable -Name "WpnService" -StartupType Manual
+Invoke-ServiceStartIfAvailable -Name "WpnService" -StartupType Manual
 
 # ---------------------------------------------------------
 # 5. AppRepository sanity check
 # ---------------------------------------------------------
-Write-Log "Checking AppRepository"
+Write-SmartM365Log "Checking AppRepository"
 try {
     $appRepositoryPath = "C:\ProgramData\Microsoft\Windows\AppRepository"
     $stateRepositoryFile = Join-Path -Path $appRepositoryPath -ChildPath "StateRepository-Machine.srd"
 
     if (-not (Test-Path -Path $appRepositoryPath)) {
-        Set-RemediationError "AppRepository folder is missing"
+        Add-RemediationError "AppRepository folder is missing"
     }
     elseif (-not (Test-Path -Path $stateRepositoryFile)) {
-        Set-RemediationError "StateRepository-Machine.srd is missing"
+        Add-RemediationError "StateRepository-Machine.srd is missing"
     }
     else {
-        Write-Log "AppRepository core database file is present"
+        Write-SmartM365Log "AppRepository core database file is present"
 
         # Do not run esentutl /p automatically.
         # Hard repair may cause data loss and should be performed only after backup and explicit approval.
     }
 }
 catch {
-    Set-RemediationError "AppRepository check failed: $($_.Exception.Message)"
+    Add-RemediationError "AppRepository check failed: $($_.Exception.Message)"
 }
 
 # ---------------------------------------------------------
 # 6. WindowsApps ACL sanity check
 # ---------------------------------------------------------
-Write-Log "Checking WindowsApps accessibility"
+Write-SmartM365Log "Checking WindowsApps accessibility"
 try {
     $windowsAppsPath = "C:\Program Files\WindowsApps"
 
     if (-not (Test-Path -Path $windowsAppsPath)) {
-        Set-RemediationError "WindowsApps folder is missing"
+        Add-RemediationError "WindowsApps folder is missing"
     }
     else {
         Get-ChildItem -Path $windowsAppsPath -Directory -ErrorAction Stop | Select-Object -First 1 | Out-Null
-        Write-Log "WindowsApps folder is readable"
+        Write-SmartM365Log "WindowsApps folder is readable"
 
         # Do not run icacls /reset /t on WindowsApps automatically.
         # Recursive ACL reset can break Microsoft Store/UWP servicing.
     }
 }
 catch {
-    Set-RemediationError "WindowsApps folder is unreadable or ACLs may be broken: $($_.Exception.Message)"
+    Add-RemediationError "WindowsApps folder is unreadable or ACLs may be broken: $($_.Exception.Message)"
 }
 
 # ---------------------------------------------------------
 # 7. Re-register UWP packages with valid manifests
 # ---------------------------------------------------------
-Write-Log "Re-registering UWP packages with valid manifests"
+Write-SmartM365Log "Re-registering UWP packages with valid manifests"
 try {
     $packages = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue
 
@@ -238,28 +238,28 @@ try {
 
                 if (Test-Path -Path $manifestPath) {
                     Add-AppxPackage -DisableDevelopmentMode -Register $manifestPath -ErrorAction SilentlyContinue
-                    Write-Log "Package re-registration requested: $($package.Name)"
+                    Write-SmartM365Log "Package re-registration requested: $($package.Name)"
                 }
             }
         }
         catch {
-            Set-RemediationError "Failed to re-register package $($package.Name): $($_.Exception.Message)"
+            Add-RemediationError "Failed to re-register package $($package.Name): $($_.Exception.Message)"
         }
     }
 }
 catch {
-    Set-RemediationError "Global UWP package re-registration failed: $($_.Exception.Message)"
+    Add-RemediationError "Global UWP package re-registration failed: $($_.Exception.Message)"
 }
 
 # ---------------------------------------------------------
 # 8. Microsoft Store remediation
 # ---------------------------------------------------------
-Write-Log "Repairing Microsoft Store registration"
+Write-SmartM365Log "Repairing Microsoft Store registration"
 try {
     $storePackages = Get-AppxPackage -AllUsers -Name "Microsoft.WindowsStore" -ErrorAction SilentlyContinue
 
     if ($null -eq $storePackages) {
-        Set-RemediationError "Microsoft Store package is missing; offline package or Microsoft Store source is required for reinstall"
+        Add-RemediationError "Microsoft Store package is missing; offline package or Microsoft Store source is required for reinstall"
     }
     else {
         foreach ($storePackage in $storePackages) {
@@ -268,26 +268,26 @@ try {
 
                 if (Test-Path -Path $storeManifest) {
                     Add-AppxPackage -DisableDevelopmentMode -Register $storeManifest -ErrorAction SilentlyContinue
-                    Write-Log "Microsoft Store re-registration requested"
+                    Write-SmartM365Log "Microsoft Store re-registration requested"
                 }
                 else {
-                    Set-RemediationError "Microsoft Store manifest is missing"
+                    Add-RemediationError "Microsoft Store manifest is missing"
                 }
             }
             else {
-                Set-RemediationError "Microsoft Store package has no InstallLocation"
+                Add-RemediationError "Microsoft Store package has no InstallLocation"
             }
         }
     }
 }
 catch {
-    Set-RemediationError "Microsoft Store remediation failed: $($_.Exception.Message)"
+    Add-RemediationError "Microsoft Store remediation failed: $($_.Exception.Message)"
 }
 
 # ---------------------------------------------------------
 # 9. UWP frameworks remediation
 # ---------------------------------------------------------
-Write-Log "Re-registering UWP frameworks"
+Write-SmartM365Log "Re-registering UWP frameworks"
 $frameworkPatterns = @(
     "Microsoft.NET.Native.Runtime*",
     "Microsoft.NET.Native.Framework*",
@@ -300,7 +300,7 @@ foreach ($frameworkPattern in $frameworkPatterns) {
         $frameworkPackages = Get-AppxPackage -AllUsers -Name $frameworkPattern -ErrorAction SilentlyContinue
 
         if ($null -eq $frameworkPackages) {
-            Set-RemediationError "Required UWP framework package was not found: $frameworkPattern"
+            Add-RemediationError "Required UWP framework package was not found: $frameworkPattern"
             continue
         }
 
@@ -310,31 +310,31 @@ foreach ($frameworkPattern in $frameworkPatterns) {
 
                 if (Test-Path -Path $frameworkManifest) {
                     Add-AppxPackage -DisableDevelopmentMode -Register $frameworkManifest -ErrorAction SilentlyContinue
-                    Write-Log "Framework re-registration requested: $($frameworkPackage.Name)"
+                    Write-SmartM365Log "Framework re-registration requested: $($frameworkPackage.Name)"
                 }
                 else {
-                    Set-RemediationError "Framework manifest is missing: $($frameworkPackage.Name)"
+                    Add-RemediationError "Framework manifest is missing: $($frameworkPackage.Name)"
                 }
             }
             else {
-                Set-RemediationError "Framework package has no InstallLocation: $($frameworkPackage.Name)"
+                Add-RemediationError "Framework package has no InstallLocation: $($frameworkPackage.Name)"
             }
         }
     }
     catch {
-        Set-RemediationError "Framework remediation failed for ${frameworkPattern}: $($_.Exception.Message)"
+        Add-RemediationError "Framework remediation failed for ${frameworkPattern}: $($_.Exception.Message)"
     }
 }
 
 # ---------------------------------------------------------
 # 10. Final result
 # ---------------------------------------------------------
-Write-Log "===== Remediation finished; no reboot was forced ====="
+Write-SmartM365Log "===== Remediation finished; no reboot was forced ====="
 
 if ($ErrorFound) {
-    Write-Log "Script exit code: 1"
+    Write-SmartM365Log "Script exit code: 1"
     exit 1
 }
 
-Write-Log "Script exit code: 0"
+Write-SmartM365Log "Script exit code: 0"
 exit 0

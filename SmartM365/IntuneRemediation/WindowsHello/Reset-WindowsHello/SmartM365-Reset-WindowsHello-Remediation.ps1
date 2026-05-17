@@ -1,4 +1,4 @@
-
+﻿
 <#
 .SYNOPSIS
     Version: 1.0
@@ -15,46 +15,58 @@
     Run as SYSTEM via Intune.
 #>
 
-$LogRoot = Join-Path -Path $env:ProgramData -ChildPath 'SmartM365\IntuneRemediation\Logs\Reset-WindowsHello'
-$LogPath = Join-Path -Path $LogRoot -ChildPath 'Reset-WindowsHello-Remediation.log'
-if (-not (Test-Path -LiteralPath $LogRoot)) { New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null }
-if (!(Test-Path (Split-Path $LogPath))) {
-    New-Item -ItemType Directory -Path (Split-Path $LogPath) -Force
-}
-Start-Transcript -Path $LogPath -Append
+$ErrorActionPreference = "Stop"
+$Scenario = "Reset-WindowsHello"
+$LogRoot = Join-Path -Path $env:ProgramData -ChildPath "SmartM365\IntuneRemediation\Logs\$Scenario"
+$LogPath = Join-Path -Path $LogRoot -ChildPath "$Scenario-Remediation.log"
 
-Write-Host "[INFO] Starting Windows Hello remediation..."
-
-# Stop NgcSvc service
-Write-Host "[INFO] Stopping NgcSvc service..."
-Stop-Service -Name NgcSvc -Force -ErrorAction SilentlyContinue
-
-# NGC folder path
-$ngcPath = "C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Local\\Microsoft\\NGC"
-
-# Take ownership and delete NGC folder
-if (Test-Path $ngcPath) {
-    Write-Host "[INFO] Taking ownership of NGC folder..."
-    takeown /F $ngcPath /A /R | Out-Null
-    icacls $ngcPath /grant administrators:F /T | Out-Null
-    Write-Host "[INFO] Deleting NGC folder..."
-    Remove-Item $ngcPath -Recurse -Force
-} else {
-    Write-Host "[INFO] NGC folder not found. Nothing to delete."
+function Write-SmartM365Log {
+    param([string]$Message)
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format "s"), $Scenario, $Message
+    Write-Output $line
+    Add-Content -LiteralPath $LogPath -Value $line -Encoding utf8
 }
 
-# Restart NgcSvc service
-Write-Host "[INFO] Restarting NgcSvc service..."
-Start-Service -Name NgcSvc -ErrorAction SilentlyContinue
+try {
+    New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null
+    Write-SmartM365Log "RemediationStarted"
 
-# Optional: Check Hybrid Join and re-join if needed
-$dsreg = dsregcmd /status | Out-String
-if ($dsreg -notmatch "AzureAdJoined.*YES" -or $dsreg -notmatch "DomainJoined.*YES") {
-    Write-Host "[WARN] Device not properly joined. Attempting dsregcmd /join..."
-    dsregcmd /join
+    $ngcPath = "C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Local\\Microsoft\\NGC"
+    $ngcService = Get-Service -Name NgcSvc -ErrorAction SilentlyContinue
+
+    if ($ngcService -and $ngcService.Status -ne "Stopped") {
+        Write-SmartM365Log "Stopping NgcSvc service."
+        Stop-Service -Name NgcSvc -Force -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path -LiteralPath $ngcPath) {
+        Write-SmartM365Log "Taking ownership of NGC folder."
+        takeown.exe /F $ngcPath /A /R | Out-Null
+        icacls.exe $ngcPath /grant administrators:F /T | Out-Null
+        Write-SmartM365Log "Deleting NGC folder."
+        Remove-Item -LiteralPath $ngcPath -Recurse -Force -ErrorAction Stop
+    }
+    else {
+        Write-SmartM365Log "NGC folder not found; nothing to delete."
+    }
+
+    if ($ngcService) {
+        Write-SmartM365Log "Starting NgcSvc service."
+        Start-Service -Name NgcSvc -ErrorAction SilentlyContinue
+    }
+
+    $dsreg = dsregcmd /status | Out-String
+    if ($dsreg -notmatch "AzureAdJoined.*YES" -or $dsreg -notmatch "DomainJoined.*YES") {
+        Write-SmartM365Log "Device join state is incomplete; requesting dsregcmd /join."
+        dsregcmd /join | Out-Null
+    }
+
+    Write-SmartM365Log "RemediationCompleted"
+    exit 0
 }
-
-Write-Host "[INFO] Windows Hello remediation completed successfully."
-Stop-Transcript
-
-exit 0
+catch {
+    Write-Output "Status=Error"
+    Write-Output "Message=$($_.Exception.Message)"
+    try { Write-SmartM365Log "RemediationFailed Message=$($_.Exception.Message)" } catch { Write-Output "LogWriteFailed=$($_.Exception.Message)" }
+    exit 1
+}

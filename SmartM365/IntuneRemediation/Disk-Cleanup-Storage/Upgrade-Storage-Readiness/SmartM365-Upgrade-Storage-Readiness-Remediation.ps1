@@ -1,4 +1,4 @@
-# Name: SmartM365-Upgrade-Storage-Readiness-Remediation.ps1
+﻿# Name: SmartM365-Upgrade-Storage-Readiness-Remediation.ps1
 # Version: 1.0
 # Description: Frees disk space to improve Windows upgrade readiness without forcing a reboot.
 
@@ -38,7 +38,7 @@ $FoldersToPurge = @(
     }
 )
 
-function Write-Log {
+function Write-SmartM365Log {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
@@ -68,36 +68,36 @@ function Get-SystemDriveFreeSpaceGB {
     }
 }
 
-function Stop-UpdateServices {
+function Invoke-UpdateServiceStop {
     foreach ($serviceName in @("wuauserv", "bits", "dosvc")) {
         try {
             $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 
             if ($null -ne $service -and $service.Status -ne "Stopped") {
                 Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-                Write-Log "ServiceStopRequested=$serviceName"
+                Write-SmartM365Log "ServiceStopRequested=$serviceName"
             }
         }
         catch {
-            Write-Log "ServiceStopFailed=$serviceName Message=$($_.Exception.Message)"
+            Write-SmartM365Log "ServiceStopFailed=$serviceName Message=$($_.Exception.Message)"
         }
     }
 
     Start-Sleep -Seconds 2
 }
 
-function Start-UpdateServices {
+function Invoke-UpdateServiceStart {
     foreach ($serviceName in @("bits", "dosvc", "wuauserv")) {
         try {
             $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 
             if ($null -ne $service) {
                 Start-Service -Name $serviceName -ErrorAction SilentlyContinue
-                Write-Log "ServiceStartRequested=$serviceName"
+                Write-SmartM365Log "ServiceStartRequested=$serviceName"
             }
         }
         catch {
-            Write-Log "ServiceStartFailed=$serviceName Message=$($_.Exception.Message)"
+            Write-SmartM365Log "ServiceStartFailed=$serviceName Message=$($_.Exception.Message)"
         }
     }
 
@@ -111,12 +111,12 @@ function Clear-FolderContent {
     )
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
-        Write-Log "CleanupSkipped=EmptyPath"
+        Write-SmartM365Log "CleanupSkipped=EmptyPath"
         return
     }
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        Write-Log "CleanupNotFound=$Path"
+        Write-SmartM365Log "CleanupNotFound=$Path"
         return
     }
 
@@ -127,18 +127,18 @@ function Clear-FolderContent {
                     Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 }
                 catch {
-                    Write-Log "CleanupItemSkipped=$($_.FullName) Message=$($_.Exception.Message)"
+                    Write-SmartM365Log "CleanupItemSkipped=$($_.FullName) Message=$($_.Exception.Message)"
                 }
             }
 
-        Write-Log "CleanupCompleted=$Path"
+        Write-SmartM365Log "CleanupCompleted=$Path"
     }
     catch {
-        Write-Log "CleanupPartial=$Path Message=$($_.Exception.Message)"
+        Write-SmartM365Log "CleanupPartial=$Path Message=$($_.Exception.Message)"
     }
 }
 
-function Clear-UserTemps {
+function Clear-UserTemp {
     try {
         Get-ChildItem -LiteralPath "$SystemDrive\Users" -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -notin @("Default", "Default User", "Public", "All Users") } |
@@ -151,27 +151,27 @@ function Clear-UserTemps {
             }
     }
     catch {
-        Write-Log "UserTempCleanupPartial Message=$($_.Exception.Message)"
+        Write-SmartM365Log "UserTempCleanupPartial Message=$($_.Exception.Message)"
     }
 }
 
 function Clear-RecycleBinSafe {
     try {
         Clear-RecycleBin -Force -ErrorAction SilentlyContinue | Out-Null
-        Write-Log "RecycleBinCleanupCompleted"
+        Write-SmartM365Log "RecycleBinCleanupCompleted"
     }
     catch {
-        Write-Log "RecycleBinCleanupSkipped Message=$($_.Exception.Message)"
+        Write-SmartM365Log "RecycleBinCleanupSkipped Message=$($_.Exception.Message)"
     }
 }
 
 function Invoke-DismComponentCleanup {
     try {
         $process = Start-Process -FilePath "dism.exe" -ArgumentList "/Online", "/Cleanup-Image", "/StartComponentCleanup" -Wait -PassThru -WindowStyle Hidden
-        Write-Log "DismComponentCleanupExitCode=$($process.ExitCode)"
+        Write-SmartM365Log "DismComponentCleanupExitCode=$($process.ExitCode)"
     }
     catch {
-        Write-Log "DismComponentCleanupFailed Message=$($_.Exception.Message)"
+        Write-SmartM365Log "DismComponentCleanupFailed Message=$($_.Exception.Message)"
     }
 }
 
@@ -185,12 +185,12 @@ try {
         exit 0
     }
 
-    Write-Log "RemediationStarted"
-    Write-Log "SystemDrive=$SystemDrive"
-    Write-Log "MinimumTargetFreeSpaceGB=$MinimumTargetFreeSpaceGB"
+    Write-SmartM365Log "RemediationStarted"
+    Write-SmartM365Log "SystemDrive=$SystemDrive"
+    Write-SmartM365Log "MinimumTargetFreeSpaceGB=$MinimumTargetFreeSpaceGB"
 
     $beforeFreeGB = Get-SystemDriveFreeSpaceGB
-    Write-Log "FreeSpaceGBBefore=$beforeFreeGB"
+    Write-SmartM365Log "FreeSpaceGBBefore=$beforeFreeGB"
 
     $requiresServiceStop = $false
 
@@ -201,12 +201,12 @@ try {
     }
 
     if ($requiresServiceStop) {
-        Stop-UpdateServices
+        Invoke-UpdateServiceStop
     }
 
     foreach ($folder in $FoldersToPurge) {
         if ($folder.ContainsKey("Sensitive") -and $folder.Sensitive -eq $true -and -not $IncludeInstallerPatchCache) {
-            Write-Log "CleanupSkipped=$($folder.Label) Reason=SensitiveTargetDisabled"
+            Write-SmartM365Log "CleanupSkipped=$($folder.Label) Reason=SensitiveTargetDisabled"
             continue
         }
 
@@ -214,27 +214,27 @@ try {
     }
 
     if ($requiresServiceStop) {
-        Start-UpdateServices
+        Invoke-UpdateServiceStart
     }
 
-    Clear-UserTemps
+    Clear-UserTemp
     Clear-RecycleBinSafe
     Invoke-DismComponentCleanup
 
     $afterFreeGB = Get-SystemDriveFreeSpaceGB
-    Write-Log "FreeSpaceGBAfter=$afterFreeGB"
+    Write-SmartM365Log "FreeSpaceGBAfter=$afterFreeGB"
 
     if ($null -eq $afterFreeGB) {
-        Write-Log "Status=CompletedButFreeSpaceUnknown"
+        Write-SmartM365Log "Status=CompletedButFreeSpaceUnknown"
         exit 1
     }
 
     if ($afterFreeGB -lt $MinimumTargetFreeSpaceGB) {
-        Write-Log "Status=CompletedButStillBelowThreshold"
+        Write-SmartM365Log "Status=CompletedButStillBelowThreshold"
         exit 1
     }
 
-    Write-Log "Status=Completed"
+    Write-SmartM365Log "Status=Completed"
     exit 0
 }
 catch {

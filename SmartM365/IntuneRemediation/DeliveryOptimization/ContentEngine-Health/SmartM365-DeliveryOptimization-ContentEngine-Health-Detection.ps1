@@ -1,4 +1,4 @@
-<#
+﻿<#
     Name: SmartM365-DeliveryOptimization-ContentEngine-Health-Detection.ps1
     Version: 1.0
     Description: Detects Delivery Optimization, Dynamic Download, BITS, and Windows Update content engine issues.
@@ -22,7 +22,8 @@
 param(
     [int]$MaxEvents = 200,
     [int]$LookbackDays = 7,
-    [int]$MaxIssuesToDisplay = 20,
+    [int]$MaxIssuesToDisplay = 5,
+    [int]$MaxIssueLength = 220,
     [int]$MinimumCacheSizeBytes = 1024
 )
 
@@ -50,7 +51,7 @@ function Test-EventMessageMatch {
     return $false
 }
 
-function Add-EventIssues {
+function Add-EventIssue {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Source,
@@ -66,7 +67,10 @@ function Add-EventIssues {
         [System.Collections.Generic.List[string]]$IssueList,
 
         [Parameter(Mandatory = $true)]
-        [int]$Limit
+        [int]$Limit,
+
+        [Parameter(Mandatory = $true)]
+        [int]$MaxIssueLength
     )
 
     if ($null -eq $IssueList) {
@@ -77,8 +81,8 @@ function Add-EventIssues {
         return
     }
 
-    foreach ($event in $Events) {
-        if ($null -eq $event) {
+    foreach ($eventRecord in $Events) {
+        if ($null -eq $eventRecord) {
             continue
         }
 
@@ -86,18 +90,18 @@ function Add-EventIssues {
             return
         }
 
-        if ([string]::IsNullOrWhiteSpace($event.Message)) {
+        if ([string]::IsNullOrWhiteSpace($eventRecord.Message)) {
             continue
         }
 
-        if (Test-EventMessageMatch -Event $event -Patterns $Patterns) {
-            $message = ($event.Message -replace "`r|`n", " ")
+        if (Test-EventMessageMatch -Event $eventRecord -Patterns $Patterns) {
+            $message = ($eventRecord.Message -replace "`r|`n", " ")
 
-            if ($message.Length -gt 300) {
-                $message = $message.Substring(0, 300) + "..."
+            if ($message.Length -gt $MaxIssueLength) {
+                $message = $message.Substring(0, $MaxIssueLength) + "..."
             }
 
-            $IssueList.Add("${Source} Time=$($event.TimeCreated) Id=$($event.Id) Message=$message")
+            $IssueList.Add("${Source} Time=$($eventRecord.TimeCreated) Id=$($eventRecord.Id) Message=$message")
         }
     }
 }
@@ -199,12 +203,13 @@ try {
 
     Write-Output "WUEventCount=$($windowsUpdateEvents.Count)"
 
-    Add-EventIssues `
+    Add-EventIssue `
         -Source "WU" `
         -Events $windowsUpdateEvents `
         -Patterns $windowsUpdatePatterns `
         -IssueList $issues `
-        -Limit $MaxIssuesToDisplay
+        -Limit $MaxIssuesToDisplay `
+        -MaxIssueLength $MaxIssueLength
 
     # =========================================================
     # Delivery Optimization events
@@ -227,12 +232,13 @@ try {
 
     Write-Output "DOEventCount=$($deliveryOptimizationEvents.Count)"
 
-    Add-EventIssues `
+    Add-EventIssue `
         -Source "DO" `
         -Events $deliveryOptimizationEvents `
         -Patterns $deliveryOptimizationPatterns `
         -IssueList $issues `
-        -Limit $MaxIssuesToDisplay
+        -Limit $MaxIssuesToDisplay `
+        -MaxIssueLength $MaxIssueLength
 
     # =========================================================
     # BITS events
@@ -254,12 +260,13 @@ try {
 
     Write-Output "BITSEventCount=$($bitsEvents.Count)"
 
-    Add-EventIssues `
+    Add-EventIssue `
         -Source "BITS" `
         -Events $bitsEvents `
         -Patterns $bitsPatterns `
         -IssueList $issues `
-        -Limit $MaxIssuesToDisplay
+        -Limit $MaxIssuesToDisplay `
+        -MaxIssueLength $MaxIssueLength
 
     # =========================================================
     # Correlation

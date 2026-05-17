@@ -1,4 +1,4 @@
-# Name: SmartM365-WindowsUpdate-Reset-Remediation.ps1
+﻿# Name: SmartM365-WindowsUpdate-Reset-Remediation.ps1
 # Version: 1.0
 # Description: Resets Windows Update components and removes legacy WSUS policies that block WUfB or Autopatch.
 
@@ -11,7 +11,7 @@ $LogPath = Join-Path -Path $LogRoot -ChildPath "$ScriptName.log"
 $WuPolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
 $WuAuPolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
 
-function Write-Log {
+function Write-SmartM365Log {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
@@ -22,7 +22,7 @@ function Write-Log {
     Add-Content -LiteralPath $LogPath -Value $line -Encoding utf8
 }
 
-function Stop-ServiceSafe {
+function Invoke-ServiceStopSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -32,11 +32,11 @@ function Stop-ServiceSafe {
 
     if ($service -and $service.Status -ne "Stopped") {
         Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
-        Write-Log "ServiceStopRequested=$Name"
+        Write-SmartM365Log "ServiceStopRequested=$Name"
     }
 }
 
-function Start-ServiceSafe {
+function Invoke-ServiceStartSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -50,19 +50,19 @@ function Start-ServiceSafe {
 
             if ($serviceCim -and $serviceCim.StartMode -eq "Disabled") {
                 Set-Service -Name $Name -StartupType Manual -ErrorAction SilentlyContinue
-                Write-Log "ServiceStartupTypeChanged=$Name StartupType=Manual"
+                Write-SmartM365Log "ServiceStartupTypeChanged=$Name StartupType=Manual"
             }
         }
         catch {
-            Write-Log "ServiceStartupTypeCheckFailed=$Name Message=$($_.Exception.Message)"
+            Write-SmartM365Log "ServiceStartupTypeCheckFailed=$Name Message=$($_.Exception.Message)"
         }
 
         Start-Service -Name $Name -ErrorAction SilentlyContinue
-        Write-Log "ServiceStartRequested=$Name"
+        Write-SmartM365Log "ServiceStartRequested=$Name"
     }
 }
 
-function Remove-RegistryValueSafe {
+function Invoke-RegistryValueRemovalSafe {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path,
@@ -79,7 +79,7 @@ function Remove-RegistryValueSafe {
 
     if ($item -and $item.PSObject.Properties.Name -contains $Name) {
         Remove-ItemProperty -Path $Path -Name $Name -Force -ErrorAction SilentlyContinue
-        Write-Log "RegistryValueRemoved=$Path\$Name"
+        Write-SmartM365Log "RegistryValueRemoved=$Path\$Name"
     }
 }
 
@@ -90,7 +90,7 @@ function Rename-FolderSafe {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        Write-Log "FolderNotFound=$Path"
+        Write-SmartM365Log "FolderNotFound=$Path"
         return
     }
 
@@ -99,10 +99,10 @@ function Rename-FolderSafe {
 
     try {
         Rename-Item -LiteralPath $Path -NewName (Split-Path -Leaf $destination) -Force -ErrorAction Stop
-        Write-Log "FolderRenamed=$Path Destination=$destination"
+        Write-SmartM365Log "FolderRenamed=$Path Destination=$destination"
     }
     catch {
-        Write-Log "FolderRenameFailed=$Path Message=$($_.Exception.Message)"
+        Write-SmartM365Log "FolderRenameFailed=$Path Message=$($_.Exception.Message)"
     }
 }
 
@@ -116,40 +116,40 @@ function Invoke-UsoClientSafe {
 
     if (Test-Path -LiteralPath $usoClient) {
         Start-Process -FilePath $usoClient -ArgumentList $Action -WindowStyle Hidden -ErrorAction SilentlyContinue
-        Write-Log "UsoClient=$Action Status=Triggered"
+        Write-SmartM365Log "UsoClient=$Action Status=Triggered"
     }
 }
 
 try {
     New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null
-    Write-Log "RemediationStarted"
+    Write-SmartM365Log "RemediationStarted"
 
     foreach ($name in @("WUServer", "WUStatusServer", "UpdateServiceUrlAlternate", "DoNotConnectToWindowsUpdateInternetLocations", "DisableWindowsUpdateAccess", "SetDisableUXWUAccess")) {
-        Remove-RegistryValueSafe -Path $WuPolicyPath -Name $name
+        Invoke-RegistryValueRemovalSafe -Path $WuPolicyPath -Name $name
     }
 
     foreach ($name in @("UseWUServer", "NoAutoUpdate", "AUOptions")) {
-        Remove-RegistryValueSafe -Path $WuAuPolicyPath -Name $name
+        Invoke-RegistryValueRemovalSafe -Path $WuAuPolicyPath -Name $name
     }
 
     foreach ($service in @("bits", "wuauserv", "dosvc", "cryptsvc")) {
-        Stop-ServiceSafe -Name $service
+        Invoke-ServiceStopSafe -Name $service
     }
 
     Rename-FolderSafe -Path (Join-Path -Path $env:windir -ChildPath "SoftwareDistribution")
     Rename-FolderSafe -Path (Join-Path -Path $env:windir -ChildPath "System32\catroot2")
 
     foreach ($service in @("cryptsvc", "dosvc", "wuauserv", "bits")) {
-        Start-ServiceSafe -Name $service
+        Invoke-ServiceStartSafe -Name $service
     }
 
     Invoke-UsoClientSafe -Action "RefreshSettings"
     Invoke-UsoClientSafe -Action "StartScan"
 
-    Write-Log "RemediationCompleted"
+    Write-SmartM365Log "RemediationCompleted"
     exit 0
 }
 catch {
-    Write-Log "RemediationFailed Message=$($_.Exception.Message)"
+    Write-SmartM365Log "RemediationFailed Message=$($_.Exception.Message)"
     exit 1
 }
