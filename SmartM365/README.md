@@ -12,6 +12,7 @@ This repository contains reusable scripts and helper modules.
 - Active Directory inventory and reporting scripts.
 - Intune detection and remediation packages organized by scenario.
 - Device restart notification app under `DeviceRebootManager/`, with a localized PowerShell 5.1 WPF GUI.
+- Interactive Intune remediation manager under `IntuneRemediationManager/`, with CLI and GUI subfolders.
 
 ## Azure App Registration
 
@@ -34,6 +35,8 @@ Use `-RemoveAppRegistration -Confirm` to remove the SmartM365 app registration a
 The same bootstrap creates or reuses the `SMART-M365` Teams team, resolves its SharePoint site, and updates the selected tenant profile with the SharePoint upload target. Use `-DisableTeamsSetup` only when the Teams workspace is already handled separately.
 
 Current Microsoft Graph application permissions include the read scopes used by the inventory scripts (`Directory.Read.All`, `User.Read.All`, `Device.Read.All`, `GroupMember.Read.All`, Intune read permissions, and `AuditLog.Read.All` for user `signInActivity`), plus `Sites.Selected` for SharePoint CSV upload and `Mail.Send` for Graph mail. The bootstrap grants the app `write` access only on the SmartM365 SharePoint site and removes older broad `Files.ReadWrite.All` / `Sites.ReadWrite.All` grants when found. Exchange Online app-only runtime inventory uses `Exchange.ManageAsApp` plus the supported Entra `Global Reader` role on the SmartM365 service principal; the bootstrap also removes the older `Exchange Administrator` service-principal role when found. `SmartM365-Create-AppRegistration.ps1` is separate because it is an interactive setup script and can require an Exchange Administrator account for mailbox, group, Application Access Policy, and service-principal role setup.
+
+`IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is also intentionally interactive only. It deploys Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`; it does not use SmartM365 app-only certificate authentication. `IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same delegated-only model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports through report export jobs.
 
 See `SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.
 
@@ -119,3 +122,6 @@ Scripts should call `Send-SmartM365TeamsNotification` from `Modules/SmartM365.Co
 - `-Channel Alerts` or `-Channel Infos` can be used when a script must force a destination.
 - `-ResultSummary` should be provided for every `Infos` notification when the script has meaningful counters or output details. If omitted, the module adds a `Result summary` fact from the message text as a fallback.
 - `-HelpUrl` should point to a prefilled AI troubleshooting prompt when reporting a detailed script error.
+
+
+
