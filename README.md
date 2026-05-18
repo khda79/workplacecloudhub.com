@@ -6,9 +6,20 @@ WorkplaceCloudHub is built around practical guidance, automation patterns, and t
 
 ## Content
 
-- `SmartM365/`: validated PowerShell automation scripts for Microsoft 365 and endpoint administration will be published here over time.
+- `SmartM365/`: validated PowerShell automation scripts and tools for Microsoft 365 and endpoint administration.
 
 Additional project directories will be added over time.
+
+## SmartM365 Tools
+
+### Smart Intune Remediation Manager
+
+`SmartM365/IntuneRemediationManager/` contains **Smart Intune Remediation Manager**, an interactive manager for Microsoft Intune remediation scripts.
+
+- `IntuneRemediationManager-GUI/`: WPF interface to browse local remediation packages, view Intune cloud remediations, edit scripts, run PSScriptAnalyzer, publish to Intune, duplicate/reset execution history, delete selected cloud remediations, export execution CSV reports, and archive local or cloud scripts.
+- `IntuneRemediationManager-CLI/`: delegated interactive CLI deployment script for Intune remediation packages.
+
+The manager uses delegated interactive Microsoft Graph authentication. It does not use stored credentials, client secrets, certificates, or SmartM365 app-only runtime authentication.
 
 ## Focus Areas
 
