@@ -12,9 +12,9 @@ Additional project directories will be added over time.
 
 ## SmartM365 Tools
 
-### Device Reboot Manager
+### Smart Device Reboot Manager
 
-`SmartM365/DeviceRebootManager/` contains **Device Reboot Manager**, a local WPF user notification app for SmartM365 device restart governance.
+`SmartM365/DeviceRebootManager/` contains **Smart Device Reboot Manager**, a local WPF user notification app for SmartM365 device restart governance.
 
 - Presents restart status and actions to end users with a localized GUI.
 - Supports recommended or required restart modes, preview/test launchers, configurable postpone choices, and safer state/log handling.
