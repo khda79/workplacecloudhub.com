@@ -11,6 +11,7 @@ SmartM365/**
 # Local documentation / agent notes
 *.md
 !/README.md
+!/BRANCHES.md
 !/SmartM365/AGENTS.md
 !/SmartM365/RULES.md
 !/SmartM365/README.md
