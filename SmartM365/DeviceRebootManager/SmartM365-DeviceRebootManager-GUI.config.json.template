@@ -1,0 +1,22 @@
+{
+  "RecommendedRestartAfterDays": 5,
+  "RequiredRestartAfterDays": 7,
+  "RestartCountdownMinutes": 15,
+  "DefaultPostponeMinutes": 10,
+  "PostponeOptionsMinutes": [10, 30, 60],
+  "MaxPostponeCount": 2,
+  "ReminderCooldownHours": 20,
+  "EnableDebugLogging": false,
+  "PreviewOnly": false,
+  "TestRequiredRestart": false,
+  "TestRecommendedRestart": false,
+  "NeverForceRestart": false,
+  "WindowTitle": "",
+  "CompanyName": "",
+  "DefaultLanguage": "auto",
+  "LanguageCatalogPath": "",
+  "WindowIconPath": "logo.ico",
+  "StartTopmost": true,
+  "RestoreTopmostAfterPostpone": true,
+  "RestoreTopmostAfterMinutes": 5
+}
