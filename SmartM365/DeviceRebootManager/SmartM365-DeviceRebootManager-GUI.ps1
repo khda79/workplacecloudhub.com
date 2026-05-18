@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    Opens the SmartM365 Device Reboot Manager user GUI.
+    Opens the Smart Device Reboot Manager user GUI.
 
 .DESCRIPTION
     Shows a local WPF restart notification when a device uptime threshold is
@@ -47,7 +47,7 @@ foreach ($key in $PSBoundParameters.Keys) {
     $script:CliBoundParameters[$key] = $true
 }
 
-$script:AppName = 'SmartM365 Device Reboot Manager'
+$script:AppName = 'Smart Device Reboot Manager'
 $script:AppFolderName = 'SmartM365\DeviceRebootManager'
 $script:StartTopmost = $true
 $script:RestoreTopmostAfterPostpone = $true
@@ -93,7 +93,7 @@ function Initialize-AppFolder {
         $script:StatePath = Join-Path -Path $script:UserDataRoot -ChildPath 'SmartM365-DeviceRebootManager.state.json'
         $script:PreferencesPath = Join-Path -Path $script:UserDataRoot -ChildPath 'SmartM365-DeviceRebootManager.preferences.json'
         if ($EnableDebugLogging) {
-            Write-Warning "Unable to use AppData for SmartM365 Device Reboot Manager ($primaryError). Falling back to '$script:UserDataRoot'."
+            Write-Warning "Unable to use AppData for Smart Device Reboot Manager ($primaryError). Falling back to '$script:UserDataRoot'."
         }
     }
 }
@@ -645,10 +645,10 @@ function Get-AppStrings {
         $english.DaysUnit = 'days'
     }
     if (-not $english.ContainsKey('ShowingGui')) {
-        $english.ShowingGui = 'Showing Device Reboot Manager GUI.'
+        $english.ShowingGui = 'Showing Smart Device Reboot Manager GUI.'
     }
     if (-not $english.ContainsKey('ClosedGui')) {
-        $english.ClosedGui = 'Device Reboot Manager GUI closed.'
+        $english.ClosedGui = 'Smart Device Reboot Manager GUI closed.'
     }
     if (-not $english.ContainsKey('LanguageLabel')) {
         $english.LanguageLabel = 'Language'
@@ -835,7 +835,7 @@ function New-RebootManagerWindow {
     [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SmartM365 Device Reboot Manager"
+        Title="Smart Device Reboot Manager"
         Width="800"
         Height="600"
         MinWidth="760"
@@ -1083,8 +1083,8 @@ if ($ValidateOnly) {
     $script:SecondsRemaining = $script:InitialSeconds
     $script:Window = New-RebootManagerWindow
     Apply-LocalizedUi
-    Write-AppLog -Message 'Device Reboot Manager GUI validation completed.'
-    Write-Output 'SmartM365 Device Reboot Manager GUI validation completed.'
+    Write-AppLog -Message 'Smart Device Reboot Manager GUI validation completed.'
+    Write-Output 'Smart Device Reboot Manager GUI validation completed.'
     [Environment]::Exit(0)
 }
 
