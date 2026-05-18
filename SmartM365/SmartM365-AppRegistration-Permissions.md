@@ -10,6 +10,7 @@ Ce document explique les permissions ajoutees par `SmartM365-Create-AppRegistrat
 - En mode multi-tenant, executer le bootstrap separement par tenant avec `-Tenant <TenantKey>`. Les valeurs d'app, certificat, SharePoint, mail et Teams restent dans `Config/Tenants/<TenantKey>.local.json`, jamais dans Git.
 - Les scripts app-only utilisent `https://graph.microsoft.com/.default` ou `Connect-MgGraph -ClientId ...`; les permissions effectives sont donc celles accordees a l'application dans Entra ID.
 - Les scripts avec `-InteractiveAuth` peuvent demander des scopes delegues equivalents, mais l'app registration doit surtout porter les permissions application pour les executions sans surveillance.
+- `IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` est volontairement hors app-only: il utilise uniquement une authentification interactive deleguee et demande `DeviceManagementScripts.ReadWrite.All` pour creer ou mettre a jour des remediations Intune. `IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1` suit le meme modele delegue interactif, utilise le tenant choisi pendant la connexion interactive, et demande aussi `DeviceManagementConfiguration.Read.All` pour exporter les rapports d'execution Intune et `Group.Read.All` pour enrichir les exports d'assignments avec les noms des groupes Entra.
 - Les uploads SharePoint sont centralises par `Modules/SmartM365.Core` et `Modules/SmartM365.SharePoint`; ils peuvent etre utilises par plusieurs scripts lorsque `EnableSharePointUpload` est active.
 - Les notifications Teams utilisent `TeamsAlertsWebhookUrl`, `TeamsInfosWebhookUrl` et `Send-SmartM365TeamsNotification` avec des URLs Teams Workflows / Power Automate, pas un ancien Office 365 Connector. Elles n'ajoutent pas de permission Graph Teams a l'app registration. Ne pas utiliser `Teamwork.Migrate.All` pour des notifications operationnelles normales. En cas d'erreur terminale, chaque script d'inventaire/rapport doit envoyer une notification Teams dans le canal `Alerts` avec le contexte de diagnostic et un lien d'aide IA construit depuis le message d'erreur. En fin d'execution sans erreur, chaque script doit envoyer une notification dans le canal `Infos` avec un champ `Result summary` qui resume le resultat du script.
 
@@ -64,6 +65,16 @@ Ces permissions sont ajoutees par defaut car un script actuel les demande encore
 | `DeviceManagementConfiguration.ReadWrite.All` | Permission large demandee par le script Autopatch actuel pour les profils Windows Update et export jobs. A remplacer par `DeviceManagementConfiguration.Read.All` si aucun POST/operation d'ecriture privilegiee n'est necessaire. | `IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
 | `DeviceManagementManagedDevices.ReadWrite.All` | Permission large demandee par le script Autopatch actuel pour les donnees managed devices/reporting. A remplacer par `DeviceManagementManagedDevices.Read.All` si aucun changement de device n'est effectue. | `IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
 
+## Scope delegue interactif pour le deploiement Intune
+
+Ce scope n'est pas une permission application SmartM365 runtime. Il est demande au compte administrateur qui lance le script de deploiement en mode interactif.
+
+| Scope delegue | Pourquoi il est necessaire | Script utilisateur |
+| --- | --- | --- |
+| `DeviceManagementScripts.ReadWrite.All` | Creer, mettre a jour et optionnellement assigner des packages Intune Remediations exposes par Microsoft Graph comme `deviceHealthScripts`; l'interface locale l'utilise aussi pour lister, dupliquer et supprimer les packages Intune. | `IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1`; `IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
+| `DeviceManagementConfiguration.Read.All` | Exporter le rapport d'execution CSV d'une remediation via les jobs d'export de rapports Intune. | `IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
+| `Group.Read.All` | Lire le nom des groupes Entra cibles afin d'ajouter `targetGroupName` dans `Assignments.json` lors de `Save all cloud`. | `IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
+
 ## Permission non-Graph ajoutee par le script
 
 | Permission | Pourquoi elle est necessaire | Scripts / modules utilisateurs |
@@ -108,3 +119,6 @@ Ces scopes sont demandes a l'administrateur qui lance `SmartM365-Create-AppRegis
 - Verifier que tous les uploads SharePoint restent compatibles avec `Sites.Selected`; ne reintroduire `Files.ReadWrite.All` ou `Sites.ReadWrite.All` qu'en dernier recours documente.
 - Revoir plus tard si le role Entra `Global Reader` peut etre remplace par une attribution Exchange RBAC encore plus fine lorsque les besoins exacts des scripts EXO sont stabilises.
 - Si le site SharePoint de l'equipe Teams n'est pas disponible immediatement, relancer le bootstrap plus tard: la provision SharePoint d'une equipe Teams est asynchrone cote Microsoft 365.
+
+
+
