@@ -14,6 +14,7 @@
   "WindowTitle": "",
   "CompanyName": "",
   "DefaultLanguage": "auto",
+  "ForceLanguage": false,
   "LanguageCatalogPath": "",
   "WindowIconPath": "logo.ico",
   "StartTopmost": true,
