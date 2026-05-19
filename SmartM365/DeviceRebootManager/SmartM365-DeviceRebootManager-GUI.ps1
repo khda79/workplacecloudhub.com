@@ -28,6 +28,7 @@ param(
     [string]$CompanyName = '',
     [ValidateSet('auto','en','fr','de','es','nl','it','pt','pl','ar','tr','sv','da','nb','fi','ro','hu','ja','ko','zh-Hans','zh','uk')]
     [string]$DefaultLanguage = 'auto',
+    [switch]$ForceLanguage,
     [string]$LanguageCatalogPath = '',
     [switch]$EnableDebugLogging,
     [switch]$PreviewOnly,
@@ -250,6 +251,7 @@ function Apply-AppConfig {
         WindowTitle = Get-ConfigValue -Config $Config -Name 'WindowTitle' -CurrentValue $WindowTitle -Type string
         CompanyName = Get-ConfigValue -Config $Config -Name 'CompanyName' -CurrentValue $CompanyName -Type string
         DefaultLanguage = Get-ConfigValue -Config $Config -Name 'DefaultLanguage' -CurrentValue $DefaultLanguage -Type string
+        ForceLanguage = Get-ConfigValue -Config $Config -Name 'ForceLanguage' -CurrentValue ([bool]$ForceLanguage) -Type bool
         LanguageCatalogPath = Get-ConfigValue -Config $Config -Name 'LanguageCatalogPath' -CurrentValue $LanguageCatalogPath -Type string
         EnableDebugLogging = Get-ConfigValue -Config $Config -Name 'EnableDebugLogging' -CurrentValue ([bool]$EnableDebugLogging) -Type bool
         PreviewOnly = Get-ConfigValue -Config $Config -Name 'PreviewOnly' -CurrentValue ([bool]$PreviewOnly) -Type bool
@@ -273,6 +275,7 @@ function Initialize-EffectiveSettings {
             WindowTitle = $WindowTitle
             CompanyName = $CompanyName
             DefaultLanguage = $DefaultLanguage
+            ForceLanguage = [bool]$ForceLanguage
             LanguageCatalogPath = $LanguageCatalogPath
             EnableDebugLogging = [bool]$EnableDebugLogging
             PreviewOnly = [bool]$PreviewOnly
@@ -356,6 +359,7 @@ function Save-UserLanguagePreference {
 }
 
 function Apply-UserLanguagePreference {
+    if ($script:Effective.ForceLanguage) { return }
     if ($script:CliBoundParameters.ContainsKey('DefaultLanguage')) { return }
 
     $preferences = Read-UserPreferences
@@ -516,6 +520,7 @@ function Invoke-RelaunchSta {
     if ($script:Effective.TestRequiredRestart) { $arguments.Add('-TestRequiredRestart') }
     if ($script:Effective.TestRecommendedRestart) { $arguments.Add('-TestRecommendedRestart') }
     if ($script:Effective.NeverForceRestart) { $arguments.Add('-NeverForceRestart') }
+    if ($script:Effective.ForceLanguage) { $arguments.Add('-ForceLanguage') }
     if ($ConfigPath) {
         $arguments.Add('-ConfigPath')
         $arguments.Add(('"{0}"' -f $ConfigPath))
@@ -767,6 +772,7 @@ function Update-LanguageSelector {
 
         $script:Ui.LanguageCombo.DisplayMemberPath = 'Display'
         $script:Ui.LanguageCombo.SelectedIndex = $selectedIndex
+        $script:Ui.LanguageCombo.IsEnabled = (-not [bool]$script:Effective.ForceLanguage)
     }
     finally {
         $script:IsUpdatingLanguageSelector = $false
@@ -1169,6 +1175,7 @@ Apply-LocalizedUi
 $script:Ui.LanguageCombo.Add_SelectionChanged({
     Invoke-Safely {
         if ($script:IsUpdatingLanguageSelector) { return }
+        if ($script:Effective.ForceLanguage) { return }
         $selected = $script:Ui.LanguageCombo.SelectedItem
         if ($null -eq $selected -or [string]::IsNullOrWhiteSpace([string]$selected.Code)) { return }
 
