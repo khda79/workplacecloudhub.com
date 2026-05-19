@@ -31,7 +31,7 @@ The committed template contains safe generic defaults only. Runtime `.json` file
 
 When `WindowTitle` is empty, the app tries to detect the company name from the device Entra join or AD domain and prefixes the localized title, for example `Company - Smart Device Reboot Manager`. Set `CompanyName` to force a specific company prefix, or leave it empty for automatic detection.
 
-Users can change the UI language from the language selector in the GUI. The choice is stored in `%APPDATA%\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager.preferences.json` and is reused on later launches unless `-DefaultLanguage` is passed on the command line.
+Users can change the UI language from the language selector in the GUI. The choice is stored in `%APPDATA%\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager.preferences.json` and is reused on later launches unless `-DefaultLanguage` is passed on the command line. Set `ForceLanguage` to `true` to ignore the saved user preference and lock the GUI to `DefaultLanguage`.
 
 `LanguageCatalogPath` can point to a custom PowerShell data file with the same structure as `SmartM365-DeviceRebootManager-GUI.strings.psd1`. Leave it empty to use the bundled catalog.
 
