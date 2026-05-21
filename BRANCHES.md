@@ -2,6 +2,16 @@
 
 This file tracks the current feature branch ownership for active SmartM365 work.
 
+## `feature/smart-endpoint-diagnostics-analyzer`
+
+Purpose: Smart Endpoint Diagnostics Analyzer PowerShell migration work only.
+
+Notes:
+
+- This branch ports the SmartLogAnalyzer behavior into SmartM365 as a PowerShell/WPF tool.
+- Do not import the previous app Git history, GitHub release/signing workflow, PyInstaller build files, or SignPath configuration.
+- Keep the app under `SmartM365/EndpointDiagnosticsAnalyzer/`.
+
 ## `feature/device-reboot-manager-gui`
 
 Purpose: Device Reboot Manager work only.
