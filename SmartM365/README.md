@@ -11,6 +11,7 @@ This repository contains reusable scripts and helper modules.
 - Exchange Online and Exchange on-premises inventory scripts.
 - Active Directory inventory and reporting scripts.
 - Intune detection and remediation packages organized by scenario.
+- Endpoint diagnostics analyzer under `EndpointDiagnosticsAnalyzer/`, with a PowerShell/WPF GUI for Intune Device Diagnostics ZIP files and local endpoint captures.
 - Device restart notification app under `DeviceRebootManager/`, with a localized PowerShell 5.1 WPF GUI.
 - Interactive Intune remediation manager under `IntuneRemediationManager/`, with CLI and GUI subfolders.
 

@@ -12,6 +12,14 @@ Additional project directories will be added over time.
 
 ## SmartM365 Tools
 
+### Smart Endpoint Diagnostics Analyzer
+
+`SmartM365/EndpointDiagnosticsAnalyzer/` contains **Smart Endpoint Diagnostics Analyzer**, a PowerShell/WPF endpoint diagnostics analyzer for Microsoft Intune and Windows endpoint troubleshooting.
+
+- Analyzes Intune Device Diagnostics ZIP files and local endpoint diagnostic captures.
+- Parses DSRegCmd, MDM enrollment, MDM Diagnostics CAB/HTML, IME logs, Windows Update ReportingEvents/ETL, EVTX event logs, hardware/security data, installed applications, drivers, WiFi profiles, proxy/device identity details, and Windows 11 upgrade indicators.
+- Exports standalone HTML reports and anonymized diagnostic ZIP files for support sharing, with optional Claude/OpenAI/Ollama analysis.
+
 ### Smart Device Reboot Manager
 
 `SmartM365/DeviceRebootManager/` contains **Smart Device Reboot Manager**, a local WPF user notification app for SmartM365 device restart governance.
