@@ -1,6 +1,6 @@
 ﻿<#
     Name: SmartM365-WUfB-Identity-Binding-Remediation.ps1
-    Version: 1.0
+    Version: 1.1
     Description: Repairs Windows Update for Business identity binding by resetting computed PolicyState and refreshing MDM/WU policy state safely.
 
     Intended use:
@@ -14,8 +14,8 @@
     - C:\ProgramData\SmartM365\IntuneRemediation\Logs\Remediate-WUfB-Identity-Binding\
 
     Exit codes:
-    0 = Remediation completed
-    1 = Remediation completed with errors
+    0 = Remediation script completed
+    1 = Technical script error
 #>
 
 [CmdletBinding()]
@@ -50,6 +50,44 @@ $MdmUpdatePolicyPath = "HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Up
 $UsoClientPath = Join-Path -Path $env:SystemRoot -ChildPath "System32\UsoClient.exe"
 
 $ErrorFound = $false
+$RemediationErrors = New-Object System.Collections.Generic.List[string]
+
+function Format-CompactText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Text,
+
+        [int]$MaxLength = 180
+    )
+
+    $compactText = ($Text -replace "\s+", " ").Trim()
+
+    if ($compactText.Length -gt $MaxLength) {
+        return ($compactText.Substring(0, $MaxLength) + "...")
+    }
+
+    return $compactText
+}
+
+function Write-IntuneResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Status,
+
+        [hashtable]$Data = @{}
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add("Status=$Status")
+
+    foreach ($key in ($Data.Keys | Sort-Object)) {
+        $value = Format-CompactText -Text ([string]$Data[$key]) -MaxLength 240
+        $parts.Add(("{0}={1}" -f $key, $value))
+    }
+
+    Write-Output ($parts -join "; ")
+}
 
 function Write-SmartM365Log {
     param(
@@ -57,9 +95,12 @@ function Write-SmartM365Log {
         [string]$Message
     )
 
+    if (-not (Test-Path -Path $LogRoot)) {
+        New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null
+    }
+
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
     $line | Out-File -FilePath $LogPath -Append -Encoding UTF8
-    Write-Output $Message
 }
 
 function Add-RemediationError {
@@ -70,6 +111,7 @@ function Add-RemediationError {
 
     Write-SmartM365Log "ERROR: $Message"
     $script:ErrorFound = $true
+    $script:RemediationErrors.Add($Message)
 }
 
 function Invoke-ServiceRestartSafe {
@@ -280,37 +322,67 @@ try {
     if ($mdmPresentAfter -and $wuConfiguredAfter -eq 0) {
         Write-SmartM365Log "Status=CompletedButDriftStillPresent"
         Write-SmartM365Log "Result=MDM WUfB policy is present but IsWUfBConfigured is still 0"
-        exit 1
+        Write-IntuneResult -Status "CompletedButDriftStillPresent" -Data @{
+            BeforeIsWUfBConfigured = $wuConfiguredBefore
+            AfterIsWUfBConfigured = $wuConfiguredAfter
+            MDMWUfBPolicyPresent = $mdmPresentAfter
+            LogPath = $LogPath
+        }
+        exit 0
     }
 
     if ($mdmPresentAfter -and $wuConfiguredAfter -eq 1) {
         Write-SmartM365Log "Status=CompletedHealthy"
         Write-SmartM365Log "Result=WUfB identity binding is healthy after remediation"
+        Write-IntuneResult -Status "CompletedHealthy" -Data @{
+            BeforeIsWUfBConfigured = $wuConfiguredBefore
+            AfterIsWUfBConfigured = $wuConfiguredAfter
+            MDMWUfBPolicyPresent = $mdmPresentAfter
+            LogPath = $LogPath
+        }
         exit 0
     }
 
     if (-not $mdmPresentAfter) {
         Write-SmartM365Log "Status=CompletedNotApplicable"
         Write-SmartM365Log "Result=No MDM WUfB policy detected after remediation"
+        Write-IntuneResult -Status "CompletedNotApplicable" -Data @{
+            BeforeIsWUfBConfigured = $wuConfiguredBefore
+            AfterIsWUfBConfigured = $wuConfiguredAfter
+            MDMWUfBPolicyPresent = $mdmPresentAfter
+            LogPath = $LogPath
+        }
         exit 0
     }
 
     Write-SmartM365Log "Status=CompletedInconclusive"
     Write-SmartM365Log "Result=Sanity check inconclusive"
-    exit 1
+    Write-IntuneResult -Status "CompletedInconclusive" -Data @{
+        BeforeIsWUfBConfigured = $wuConfiguredBefore
+        AfterIsWUfBConfigured = if ($null -eq $wuConfiguredAfter) { "Unknown" } else { $wuConfiguredAfter }
+        MDMWUfBPolicyPresent = $mdmPresentAfter
+        LogPath = $LogPath
+    }
+    exit 0
 }
 catch {
-    Write-Output "Status=Error"
-    Write-Output "Message=$($_.Exception.Message)"
-
     try {
         Add-RemediationError $_.Exception.Message
     }
     catch {
-        Write-Output "Status=ErrorDuringErrorHandling"
-        Write-Output "Message=$($_.Exception.Message)"
+        Write-IntuneResult -Status "ErrorDuringErrorHandling" -Data @{
+            Message = $_.Exception.Message
+        }
+        exit 1
     }
 
+    $sampleErrors = @($RemediationErrors | Select-Object -First 3)
+    Write-IntuneResult -Status "Error" -Data @{
+        ErrorCount = $RemediationErrors.Count
+        LogPath = $LogPath
+        Message = $_.Exception.Message
+        Samples = ($sampleErrors -join " | ")
+    }
     exit 1
 }
 

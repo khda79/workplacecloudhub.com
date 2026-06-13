@@ -1,6 +1,6 @@
 <# 
     Name: SmartM365-UWP-Store-AppRepository-WU-Health-Detection.ps1
-    Version: 1.0
+    Version: 1.1
     Description: Detects issues that may prevent Windows upgrade or UWP/AppX operations because Microsoft Store, AppRepository, WindowsApps, or Windows Update cache components are corrupted or unavailable.
 
     Intended use:
@@ -13,13 +13,49 @@ $ErrorActionPreference = "Stop"
 
 $issues = New-Object System.Collections.Generic.List[string]
 
+function Format-CompactText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Text,
+
+        [int]$MaxLength = 180
+    )
+
+    $compactText = ($Text -replace "\s+", " ").Trim()
+
+    if ($compactText.Length -gt $MaxLength) {
+        return ($compactText.Substring(0, $MaxLength) + "...")
+    }
+
+    return $compactText
+}
+
+function Write-IntuneResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Status,
+
+        [hashtable]$Data = @{}
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add("Status=$Status")
+
+    foreach ($key in ($Data.Keys | Sort-Object)) {
+        $value = Format-CompactText -Text ([string]$Data[$key]) -MaxLength 240
+        $parts.Add(("{0}={1}" -f $key, $value))
+    }
+
+    Write-Output ($parts -join "; ")
+}
+
 function Add-Issue {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message
     )
 
-    Write-Output ("Issue: " + $Message)
     $script:issues.Add($Message)
 }
 
@@ -146,7 +182,7 @@ try {
     # It is checked as informational only when present.
     $wpnService = Get-Service -Name "WpnService" -ErrorAction SilentlyContinue
     if ($null -ne $wpnService -and $wpnService.Status -in @("StopPending", "PausePending", "Paused")) {
-        Add-Issue "WpnService is in an unhealthy state: $($wpService.Status)"
+        Add-Issue "WpnService is in an unhealthy state: $($wpnService.Status)"
     }
 
     # ---------------------------------------------------------
@@ -192,6 +228,7 @@ try {
     # 6. Windows Update SoftwareDistribution cache sanity
     # ---------------------------------------------------------
     $softwareDistributionDownloadPath = "C:\Windows\SoftwareDistribution\Download"
+    $softwareDistributionIsEmpty = $false
 
     if (-not (Test-Path -Path $softwareDistributionDownloadPath)) {
         Add-Issue "Windows Update download cache folder is missing"
@@ -253,14 +290,22 @@ try {
     # Final result
     # ---------------------------------------------------------
     if ($issues.Count -gt 0) {
-        Write-Output ("Issues detected: " + ($issues -join " | "))
+        $sampleIssues = @($issues | Select-Object -First 5)
+        Write-IntuneResult -Status "IssuesDetected" -Data @{
+            IssueCount = $issues.Count
+            Samples = ($sampleIssues -join " | ")
+        }
         exit 1
     }
 
-    Write-Output "UWP, Microsoft Store, AppRepository, WindowsApps, WinRM, and Windows Update health checks passed"
+    Write-IntuneResult -Status "Healthy" -Data @{
+        Checks = "UWP,Store,AppRepository,WindowsApps,WinRM,WindowsUpdate"
+    }
     exit 0
 }
 catch {
-    Write-Output ("Technical script error: " + $_.Exception.Message)
+    Write-IntuneResult -Status "Error" -Data @{
+        Message = $_.Exception.Message
+    }
     exit 1
 }

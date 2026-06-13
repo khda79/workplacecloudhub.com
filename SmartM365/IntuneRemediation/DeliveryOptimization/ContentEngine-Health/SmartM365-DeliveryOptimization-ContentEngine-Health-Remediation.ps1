@@ -1,29 +1,77 @@
-﻿<#
+<#
     Name: SmartM365-DeliveryOptimization-ContentEngine-Health-Remediation.ps1
-    Version: 1.0
-    Description: Remediates common Delivery Optimization, Dynamic Download, BITS, and Windows Update content engine issues.
+    Version: 1.1
+    Description: Safely remediates Delivery Optimization and BITS content engine state with compact Intune output and detailed local logging.
+
+    Intended use:
+    - Microsoft Intune remediation script
+    - Windows 10 / Windows 11
+    - Run as 64-bit PowerShell when possible
+    - No forced reboot
 
     Logs:
-    - C:\ProgramData\SmartM365\IntuneRemediation\Logs\Remediate-DeliveryOptimization-ContentEngine-Health\
+    - C:\ProgramData\SmartM365\IntuneRemediation\Logs\DeliveryOptimization-ContentEngine-Health\Remediate-DeliveryOptimization-ContentEngine-Health.log
 #>
 
 [CmdletBinding()]
 param(
     [bool]$ResetBitsJobs = $true,
-    [bool]$TriggerWindowsUpdateScan = $true
+    [bool]$TriggerWindowsUpdateScan = $true,
+    [bool]$CleanWindowsUpdateDownloadCache = $true
 )
 
 $ErrorActionPreference = "Stop"
 
+$ScenarioName = "DeliveryOptimization-ContentEngine-Health"
 $RemediationName = "Remediate-DeliveryOptimization-ContentEngine-Health"
-$LogRoot = Join-Path -Path $env:ProgramData -ChildPath "SmartM365\IntuneRemediation\Logs\$RemediationName"
+$LogRoot = Join-Path -Path $env:ProgramData -ChildPath "SmartM365\IntuneRemediation\Logs\$ScenarioName"
+$LogPath = Join-Path -Path $LogRoot -ChildPath "$RemediationName.log"
 
-if (-not (Test-Path -Path $LogRoot)) {
+if (-not (Test-Path -LiteralPath $LogRoot)) {
     New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null
 }
 
-$LogPath = Join-Path -Path $LogRoot -ChildPath "$RemediationName.log"
 $ErrorFound = $false
+$Actions = New-Object System.Collections.Generic.List[string]
+$Skipped = New-Object System.Collections.Generic.List[string]
+$RemediationErrors = New-Object System.Collections.Generic.List[string]
+
+function Format-CompactText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Text,
+
+        [int]$MaxLength = 180
+    )
+
+    $compactText = ($Text -replace "\s+", " ").Trim()
+
+    if ($compactText.Length -gt $MaxLength) {
+        return ($compactText.Substring(0, $MaxLength) + "...")
+    }
+
+    return $compactText
+}
+
+function Write-IntuneResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Status,
+
+        [hashtable]$Data = @{}
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add("Status=$Status")
+
+    foreach ($key in ($Data.Keys | Sort-Object)) {
+        $value = Format-CompactText -Text ([string]$Data[$key]) -MaxLength 260
+        $parts.Add(("{0}={1}" -f $key, $value))
+    }
+
+    Write-Output ($parts -join "; ")
+}
 
 function Write-SmartM365Log {
     param(
@@ -33,7 +81,26 @@ function Write-SmartM365Log {
 
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
     $line | Out-File -FilePath $LogPath -Append -Encoding UTF8
-    Write-Output $Message
+}
+
+function Add-Action {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    Write-SmartM365Log $Message
+    $script:Actions.Add($Message)
+}
+
+function Add-SkippedAction {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    Write-SmartM365Log $Message
+    $script:Skipped.Add($Message)
 }
 
 function Add-RemediationError {
@@ -44,9 +111,10 @@ function Add-RemediationError {
 
     Write-SmartM365Log "ERROR: $Message"
     $script:ErrorFound = $true
+    $script:RemediationErrors.Add($Message)
 }
 
-function Invoke-ServiceStopSafe {
+function Invoke-ServiceStopIfRunning {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -56,16 +124,16 @@ function Invoke-ServiceStopSafe {
         $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
 
         if ($null -eq $service) {
-            Write-SmartM365Log "ServiceNotFound=${Name}"
+            Add-SkippedAction "ServiceNotFound=$Name"
             return
         }
 
         if ($service.Status -ne "Stopped") {
             Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
-            Write-SmartM365Log "ServiceStopRequested=${Name}"
+            Add-Action "ServiceStopRequested=$Name"
         }
         else {
-            Write-SmartM365Log "ServiceAlreadyStopped=${Name}"
+            Add-SkippedAction "ServiceAlreadyStopped=$Name"
         }
     }
     catch {
@@ -73,7 +141,7 @@ function Invoke-ServiceStopSafe {
     }
 }
 
-function Invoke-ServiceStartSafe {
+function Invoke-ServiceStartIfAvailable {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -83,7 +151,7 @@ function Invoke-ServiceStartSafe {
         $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
 
         if ($null -eq $service) {
-            Write-SmartM365Log "ServiceNotFound=${Name}"
+            Add-SkippedAction "ServiceNotFound=$Name"
             return
         }
 
@@ -91,15 +159,15 @@ function Invoke-ServiceStartSafe {
 
         if ($null -ne $serviceCim -and $serviceCim.StartMode -eq "Disabled") {
             Set-Service -Name $Name -StartupType Manual -ErrorAction SilentlyContinue
-            Write-SmartM365Log "ServiceStartupTypeChanged=${Name} StartupType=Manual"
+            Add-Action "ServiceStartupTypeChanged=$Name StartupType=Manual"
         }
 
         if ($service.Status -ne "Running") {
             Start-Service -Name $Name -ErrorAction SilentlyContinue
-            Write-SmartM365Log "ServiceStartRequested=${Name}"
+            Add-Action "ServiceStartRequested=$Name"
         }
         else {
-            Write-SmartM365Log "ServiceAlreadyRunning=${Name}"
+            Add-SkippedAction "ServiceAlreadyRunning=$Name"
         }
     }
     catch {
@@ -115,22 +183,28 @@ function Clear-FolderContentSafe {
 
     try {
         if (-not (Test-Path -LiteralPath $Path)) {
-            Write-SmartM365Log "Cleanup=NotFound Path=${Path}"
+            Add-SkippedAction "CleanupNotFound=$Path"
             return
         }
 
-        Write-SmartM365Log "Cleanup=Start Path=${Path}"
+        $removedCount = 0
+        $skippedCount = 0
+        Write-SmartM365Log "CleanupStart=$Path"
 
-        Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        $items = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)
+
+        foreach ($item in $items) {
             try {
-                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop
+                $removedCount++
             }
             catch {
-                Write-SmartM365Log "Cleanup=ItemSkipped Path=$($_.FullName) Message=$($_.Exception.Message)"
+                $skippedCount++
+                Write-SmartM365Log "CleanupItemSkipped=$($item.FullName) Message=$($_.Exception.Message)"
             }
         }
 
-        Write-SmartM365Log "Cleanup=Completed Path=${Path}"
+        Add-Action "CleanupCompleted=$Path Removed=$removedCount Skipped=$skippedCount"
     }
     catch {
         Add-RemediationError "Failed to clean folder ${Path}: $($_.Exception.Message)"
@@ -138,25 +212,26 @@ function Clear-FolderContentSafe {
 }
 
 function Invoke-BitsTransferResetSafe {
-    param([bool]$ResetBitsJobs)
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$ResetBitsJobs
+    )
 
     try {
         if (-not $ResetBitsJobs) {
-            Write-SmartM365Log "BITSReset=Skipped"
+            Add-SkippedAction "BITSReset=Skipped"
             return
         }
 
-        Write-SmartM365Log "BITSReset=Start"
-
         $bitsAdminPath = Join-Path -Path $env:WINDIR -ChildPath "System32\bitsadmin.exe"
 
-        if (Test-Path -LiteralPath $bitsAdminPath -PathType Leaf) {
-            $process = Start-Process -FilePath $bitsAdminPath -ArgumentList "/reset", "/allusers" -Wait -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
-            Write-SmartM365Log "BITSReset=Completed ExitCode=$($process.ExitCode)"
+        if (-not (Test-Path -LiteralPath $bitsAdminPath -PathType Leaf)) {
+            Add-SkippedAction "BITSReset=BitsadminNotFound"
+            return
         }
-        else {
-            Write-SmartM365Log "BITSReset=BitsadminNotFound"
-        }
+
+        $process = Start-Process -FilePath $bitsAdminPath -ArgumentList "/reset", "/allusers" -Wait -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+        Add-Action "BITSReset=Completed ExitCode=$($process.ExitCode)"
     }
     catch {
         Add-RemediationError "Failed to reset BITS transfers: $($_.Exception.Message)"
@@ -164,23 +239,26 @@ function Invoke-BitsTransferResetSafe {
 }
 
 function Invoke-WindowsUpdateScanSafe {
-    param([bool]$TriggerWindowsUpdateScan)
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$TriggerWindowsUpdateScan
+    )
 
     try {
         if (-not $TriggerWindowsUpdateScan) {
-            Write-SmartM365Log "WindowsUpdateScan=Skipped"
+            Add-SkippedAction "WindowsUpdateScan=Skipped"
             return
         }
 
         $usoClientPath = Join-Path -Path $env:WINDIR -ChildPath "System32\UsoClient.exe"
 
-        if (Test-Path -LiteralPath $usoClientPath -PathType Leaf) {
-            Start-Process -FilePath $usoClientPath -ArgumentList "StartScan" -WindowStyle Hidden -ErrorAction SilentlyContinue
-            Write-SmartM365Log "WindowsUpdateScan=Triggered"
+        if (-not (Test-Path -LiteralPath $usoClientPath -PathType Leaf)) {
+            Add-SkippedAction "WindowsUpdateScan=UsoClientNotFound"
+            return
         }
-        else {
-            Write-SmartM365Log "WindowsUpdateScan=UsoClientNotFound"
-        }
+
+        Start-Process -FilePath $usoClientPath -ArgumentList "StartScan" -WindowStyle Hidden -ErrorAction SilentlyContinue
+        Add-Action "WindowsUpdateScan=Triggered"
     }
     catch {
         Add-RemediationError "Failed to trigger Windows Update scan: $($_.Exception.Message)"
@@ -189,58 +267,87 @@ function Invoke-WindowsUpdateScanSafe {
 
 try {
     Write-SmartM365Log "===== Delivery Optimization remediation started ====="
+    Write-SmartM365Log "ResetBitsJobs=$ResetBitsJobs TriggerWindowsUpdateScan=$TriggerWindowsUpdateScan CleanWindowsUpdateDownloadCache=$CleanWindowsUpdateDownloadCache"
 
     $deliveryOptimizationCachePaths = @(
         "C:\ProgramData\Microsoft\Windows\DeliveryOptimization\Cache",
         "C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache"
     )
 
-    $windowsUpdateDownloadCache = Join-Path -Path $env:WINDIR -ChildPath "SoftwareDistribution\Download"
-
-    foreach ($serviceName in @("DoSvc", "BITS", "wuauserv", "UsoSvc")) {
-        Invoke-ServiceStopSafe -Name $serviceName
+    foreach ($serviceName in @("DoSvc", "BITS")) {
+        Invoke-ServiceStopIfRunning -Name $serviceName
     }
 
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 2
 
     foreach ($cachePath in $deliveryOptimizationCachePaths) {
         Clear-FolderContentSafe -Path $cachePath
     }
 
-    Clear-FolderContentSafe -Path $windowsUpdateDownloadCache
+    if ($CleanWindowsUpdateDownloadCache) {
+        foreach ($serviceName in @("wuauserv", "UsoSvc")) {
+            Invoke-ServiceStopIfRunning -Name $serviceName
+        }
+
+        $windowsUpdateDownloadCache = Join-Path -Path $env:WINDIR -ChildPath "SoftwareDistribution\Download"
+        Clear-FolderContentSafe -Path $windowsUpdateDownloadCache
+    }
+    else {
+        Add-SkippedAction "WindowsUpdateDownloadCacheCleanup=Skipped"
+    }
 
     Invoke-BitsTransferResetSafe -ResetBitsJobs $ResetBitsJobs
 
     foreach ($serviceName in @("BITS", "DoSvc", "wuauserv", "UsoSvc")) {
-        Invoke-ServiceStartSafe -Name $serviceName
+        Invoke-ServiceStartIfAvailable -Name $serviceName
     }
 
-    Start-Sleep -Seconds 5
+    Start-Sleep -Seconds 3
 
     Invoke-WindowsUpdateScanSafe -TriggerWindowsUpdateScan $TriggerWindowsUpdateScan
 
     Write-SmartM365Log "===== Delivery Optimization remediation finished ====="
 
+    $sampleErrors = ""
+    if ($RemediationErrors.Count -gt 0) {
+        $sampleErrors = (($RemediationErrors | Select-Object -First 3) -join " | ")
+    }
+
+    $sampleActions = (($Actions | Select-Object -First 5) -join " | ")
+
     if ($ErrorFound) {
-        Write-SmartM365Log "Status=CompletedWithErrors"
+        Write-IntuneResult -Status "CompletedWithErrors" -Data @{
+            ActionCount = $Actions.Count
+            SkippedCount = $Skipped.Count
+            ErrorCount = $RemediationErrors.Count
+            Errors = $sampleErrors
+            Log = $LogPath
+        }
+
         exit 1
     }
 
-    Write-SmartM365Log "Status=Completed"
+    Write-IntuneResult -Status "Completed" -Data @{
+        ActionCount = $Actions.Count
+        SkippedCount = $Skipped.Count
+        Actions = $sampleActions
+        Log = $LogPath
+    }
+
     exit 0
 }
 catch {
-    Write-Output "Status=Error"
-    Write-Output "Message=$($_.Exception.Message)"
-
     try {
         Add-RemediationError $_.Exception.Message
     }
     catch {
-        Write-Output "Status=ErrorDuringErrorHandling"
-        Write-Output "Message=$($_.Exception.Message)"
+        $null = $_
+    }
+
+    Write-IntuneResult -Status "TechnicalError" -Data @{
+        Message = $_.Exception.Message
+        Log = $LogPath
     }
 
     exit 1
 }
-
