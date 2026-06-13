@@ -31,11 +31,19 @@ function Get-SmartM365EffectiveModuleGlobalConfig {
     $modulePath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
     $searchRoot = Split-Path -Path $modulePath -Parent
     while ($searchRoot) {
-        $tenantContextPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365-TenantContext.ps1'
-        if (Test-Path -LiteralPath $tenantContextPath) {
-            . $tenantContextPath
-            $tenantKey = if ([string]::IsNullOrWhiteSpace([string]$global:SmartM365Tenant)) { 'test' } else { [string]$global:SmartM365Tenant }
-            $script:SmartM365GlobalConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $searchRoot -TenantKey $tenantKey
+        $tenantContextCandidates = @(
+            (Join-Path -Path $searchRoot -ChildPath 'SmartM365-TenantContext.ps1'),
+            (Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365-TenantContext.ps1')
+        )
+        foreach ($tenantContextPath in $tenantContextCandidates) {
+            if (Test-Path -LiteralPath $tenantContextPath) {
+                . $tenantContextPath
+                $tenantKey = if ([string]::IsNullOrWhiteSpace([string]$global:SmartM365Tenant)) { 'test' } else { [string]$global:SmartM365Tenant }
+                $script:SmartM365GlobalConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $searchRoot -TenantKey $tenantKey
+                break
+            }
+        }
+        if ($null -ne $script:SmartM365GlobalConfig -and $script:SmartM365GlobalConfig.PSObject.Properties.Count -gt 0) {
             break
         }
 

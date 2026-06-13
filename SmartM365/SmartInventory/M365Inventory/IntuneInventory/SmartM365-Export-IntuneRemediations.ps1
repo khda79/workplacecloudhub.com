@@ -23,7 +23,7 @@
     Interactive delegated permission for Microsoft Graph PowerShell:
     - DeviceManagementScripts.Read.All
 .NOTES
-    Author: https://github.com/khda79/M365
+    Author: https://github.com/khda79/workplacecloudhub.com
     Version: 1.0
 #>
 

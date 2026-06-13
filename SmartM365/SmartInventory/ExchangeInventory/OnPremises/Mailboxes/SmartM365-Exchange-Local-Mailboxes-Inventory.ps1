@@ -17,7 +17,7 @@
 
 .NOTES
     Version: 1.0
-    Author: https://github.com/khda79/M365
+    Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
 
@@ -42,8 +42,13 @@ param (
 $tenantContextPath = & {
     $d = $PSScriptRoot
     while ($d) {
-        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
-        if (Test-Path -LiteralPath $p) { return $p }
+        $candidates = @(
+            (Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'),
+            (Join-Path -Path $d -ChildPath 'Config\SmartM365-TenantContext.ps1')
+        )
+        foreach ($p in $candidates) {
+            if (Test-Path -LiteralPath $p) { return $p }
+        }
         $parent = Split-Path -Path $d -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
         $d = $parent

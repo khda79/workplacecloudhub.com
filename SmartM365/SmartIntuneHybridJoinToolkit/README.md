@@ -76,5 +76,3 @@ The GUI accepts a text list or a CSV. For CSV files, it uses `ComputerName`, `De
 - Collected remote evidence is written under `LOT-*\CentralLogs`.
 - Already enrolled computers are moved from `Computers.txt` to `ComputersAlreadyEnrolled.txt`.
 - Generated inventories, logs and reports are ignored by Git.
-
-See `IMPLEMENTATION-NOTES.md` for detailed neutral implementation decisions and operational behavior.

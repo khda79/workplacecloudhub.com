@@ -16,7 +16,7 @@ Optional output folder override.
 Maximum age, in hours, accepted for source inventory files.
 
 .NOTES
-Author    : https://github.com/khda79/M365
+Author    : https://github.com/khda79/workplacecloudhub.com
 Version   : 1.0
 Requires  : Windows PowerShell 5.1 and Exchange Management Tools
 #>
@@ -37,8 +37,13 @@ param(
 $tenantContextPath = & {
     $d = $PSScriptRoot
     while ($d) {
-        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
-        if (Test-Path -LiteralPath $p) { return $p }
+        $candidates = @(
+            (Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'),
+            (Join-Path -Path $d -ChildPath 'Config\SmartM365-TenantContext.ps1')
+        )
+        foreach ($p in $candidates) {
+            if (Test-Path -LiteralPath $p) { return $p }
+        }
         $parent = Split-Path -Path $d -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
         $d = $parent
