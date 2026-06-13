@@ -510,21 +510,19 @@ try {
         @{ Name = "OSCheckFailed";                  Expression = { $_.osCheckFailed } }
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$reportName = "Intune_Devices_UpgradeEligibility"
+    $reportName = "Intune_Devices_UpgradeEligibility"
     $csvFileName = "{0}_{1}.csv" -f $reportName, $timestamp
     $csvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath $csvFileName
     $latestCsvPath = if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $null } else { Join-Path -Path $LatestCsvFolderPath -ChildPath "$reportName.csv" }
 
     WriteLogSmartM365 -Message ("Exporting report to CSV: {0}" -f $csvPath) -Level "INFO"
 
-    $reportData | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
     if ($latestCsvPath) {
-        Copy-Item -Path $csvPath -Destination $latestCsvPath -Force
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestCsvPath
+        Export-SmartM365Csv -Data @($reportData) -TimestampedPath $csvPath -LatestPath $latestCsvPath | Out-Null
         WriteLogSmartM365 -Message ("Latest CSV updated: {0}" -f $latestCsvPath) -Level "SUCCESS"
     }
     else {
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvPath
+        Export-SmartM365Csv -Data @($reportData) -TimestampedPath $csvPath | Out-Null
     }
 
     WriteLogSmartM365 -Message ("Report generated successfully: {0}" -f $csvPath) -Level "SUCCESS"

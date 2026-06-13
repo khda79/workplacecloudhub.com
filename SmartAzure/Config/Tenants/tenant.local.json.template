@@ -1,0 +1,20 @@
+{
+  "TenantKey": "tenant-key",
+  "Environment": "Test",
+  "AppId": "00000000-0000-0000-0000-000000000000",
+  "TenantId": "00000000-0000-0000-0000-000000000000",
+  "AzureTenantId": "00000000-0000-0000-0000-000000000000",
+  "OrgDomain": "contoso.onmicrosoft.com",
+  "Thumb": "0000000000000000000000000000000000000000",
+  "Thumbprint": "0000000000000000000000000000000000000000",
+  "From": "smartazure-reports@contoso.onmicrosoft.com",
+  "MailSendAccessPolicyGroup": "smartazure-mailsend-allowed@contoso.onmicrosoft.com",
+  "EnableSharePointUpload": true,
+  "SharePointSiteHostname": "contoso.sharepoint.com",
+  "SharePointSitePath": "/sites/SMARTAZURE",
+  "SharePointLibraryDisplayName": "Documents",
+  "SharePointTargetFolderPath": "SMART-AZURE/CSV",
+  "TeamsWebhookUrl": "",
+  "TeamsAlertsWebhookUrl": "",
+  "TeamsInfosWebhookUrl": ""
+}

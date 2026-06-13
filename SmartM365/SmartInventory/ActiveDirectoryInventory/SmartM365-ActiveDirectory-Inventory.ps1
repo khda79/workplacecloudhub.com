@@ -194,7 +194,6 @@ $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $Scrip
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $DomainFriendlyNames = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DomainFriendlyNames' -DefaultValue ([pscustomobject]@{})
 $IntuneEnrollmentGroupPattern = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IntuneEnrollmentGroupPattern' -DefaultValue '*GG_INTUNE_ENROLLMENT*'
-$LocalDsRegCmdGroupName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalDsRegCmdGroupName' -DefaultValue 'GG_RUNLOCALDSREGCMD'
 $Windows11UpgradeGroupPattern = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Windows11UpgradeGroupPattern' -DefaultValue '*GG_INTUNE_UPGRADEW11*'
 
 # ==========================================================
@@ -725,7 +724,6 @@ try {
                     $computer = $_
                     $computerGroupNames = Get-ComputerGroupNames -Computer $computer -Server $currentDomainName -DomainSid $domainSid -ResolveNestedGroups:$ResolveNestedComputerGroups -GroupNameByDNCache $GroupNameByDNCache -GroupParentsByDNCache $GroupParentsByDNCache -GroupNameBySIDCache $GroupNameBySIDCache
                     $hasGroupAddIntune  = [bool]($computerGroupNames | Where-Object { $_ -like $IntuneEnrollmentGroupPattern })
-                    $hasGroupDSREGCMD   = Test-GroupMembershipByName -GroupNames $computerGroupNames -GroupNameToFind $LocalDsRegCmdGroupName
                     $hasGroupUpgradeW11 = [bool]($computerGroupNames | Where-Object { $_ -like $Windows11UpgradeGroupPattern })
 
                     [PSCustomObject][ordered]@{
@@ -803,7 +801,6 @@ try {
                         DomainAndSam            = Get-NormalizedDomainAndSam -DomainNameShort (Get-DomainNameShort -DomainName $currentDomainName) -SamAccountName $computer.SamAccountName
                         ImmutableId_AD          = Convert-GuidToImmutableId -ObjectGuid ([string]$computer.ObjectGUID)
                         Has_Group_AddIntune     = $hasGroupAddIntune
-                        Has_Group_DSREGCMD      = $hasGroupDSREGCMD
                         Has_Group_UpgradeW11    = $hasGroupUpgradeW11
                     }
                 } |

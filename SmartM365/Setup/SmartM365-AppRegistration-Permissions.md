@@ -1,124 +1,121 @@
 # SmartM365 App Registration Permissions
 
-Ce document explique les permissions ajoutees par `Setup/SmartM365-Create-AppRegistration.ps1`, pourquoi elles sont necessaires, et quels scripts les utilisent actuellement.
+This document explains the permissions added by `Setup/SmartM365-Create-AppRegistration.ps1`, why they are needed, and which scripts currently use them.
 
-## Notes importantes
+## Important Notes
 
-- Les permissions ci-dessous sont des permissions **Application** Microsoft Graph pour l'app registration SmartM365.
-- `Setup/SmartM365-Create-AppRegistration.ps1` s'execute uniquement en authentification interactive deleguee: un administrateur se connecte avec les droits necessaires pour creer ou mettre a jour l'app registration.
-- `Setup/SmartM365-Create-AppRegistration.ps1` est a part concernant les permissions: ses droits interactifs de setup ne sont pas la reference de privilege pour les scripts runtime/inventaire.
-- En mode multi-tenant, executer le bootstrap separement par tenant avec `-Tenant <TenantKey>`. Les valeurs d'app, certificat, SharePoint, mail et Teams restent dans `Config/Tenants/<TenantKey>.local.json`, jamais dans Git.
-- Les scripts app-only utilisent `https://graph.microsoft.com/.default` ou `Connect-MgGraph -ClientId ...`; les permissions effectives sont donc celles accordees a l'application dans Entra ID.
-- Les scripts avec `-InteractiveAuth` peuvent demander des scopes delegues equivalents, mais l'app registration doit surtout porter les permissions application pour les executions sans surveillance.
-- `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` est volontairement hors app-only: il utilise uniquement une authentification interactive deleguee et demande `DeviceManagementScripts.ReadWrite.All` pour creer ou mettre a jour des remediations Intune. `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1` suit le meme modele delegue interactif, utilise le tenant choisi pendant la connexion interactive, et demande aussi `DeviceManagementConfiguration.Read.All` pour exporter les rapports d'execution Intune et `Group.Read.All` pour enrichir les exports d'assignments avec les noms des groupes Entra.
-- Les uploads SharePoint sont centralises par `Modules/SmartM365.Core` et `Modules/SmartM365.SharePoint`; ils peuvent etre utilises par plusieurs scripts lorsque `EnableSharePointUpload` est active.
-- Les notifications Teams utilisent `TeamsAlertsWebhookUrl`, `TeamsInfosWebhookUrl` et `Send-SmartM365TeamsNotification` avec des URLs Teams Workflows / Power Automate, pas un ancien Office 365 Connector. Elles n'ajoutent pas de permission Graph Teams a l'app registration. Ne pas utiliser `Teamwork.Migrate.All` pour des notifications operationnelles normales. En cas d'erreur terminale, chaque script d'inventaire/rapport doit envoyer une notification Teams dans le canal `Alerts` avec le contexte de diagnostic et un lien d'aide IA construit depuis le message d'erreur. En fin d'execution sans erreur, chaque script doit envoyer une notification dans le canal `Infos` avec un champ `Result summary` qui resume le resultat du script.
+- The permissions below are Microsoft Graph **Application** permissions for the SmartM365 app registration.
+- `Setup/SmartM365-Create-AppRegistration.ps1` runs only with interactive delegated authentication: an administrator signs in with the rights needed to create or update the app registration.
+- `Setup/SmartM365-Create-AppRegistration.ps1` is a special setup script. Its interactive setup rights are not the runtime privilege baseline for inventory scripts.
+- In multi-tenant mode, run the bootstrap separately per tenant with `-Tenant <TenantKey>`. App, certificate, SharePoint, mail, and Teams values remain in `Config/Tenants/<TenantKey>.local.json`, never in Git.
+- App-only scripts use `https://graph.microsoft.com/.default` or `Connect-MgGraph -ClientId ...`; the effective permissions are therefore the permissions granted to the application in Entra ID.
+- Scripts with `-InteractiveAuth` may request equivalent delegated scopes, but the app registration should primarily carry application permissions for unattended runs.
+- `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is intentionally outside the app-only model: it uses only interactive delegated authentication and requests `DeviceManagementScripts.ReadWrite.All` to create or update Intune remediations. `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same interactive delegated model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports and `Group.Read.All` to enrich assignment exports with Entra group names.
+- SharePoint uploads are centralized through `Modules/SmartM365.Core` and `Modules/SmartM365.SharePoint`; they can be used by multiple scripts when `EnableSharePointUpload` is enabled.
+- Teams notifications use `TeamsAlertsWebhookUrl`, `TeamsInfosWebhookUrl`, and `Send-SmartM365TeamsNotification` with Teams Workflows / Power Automate URLs, not legacy Office 365 Connectors. They do not add Graph Teams permissions to the app registration. Do not use `Teamwork.Migrate.All` for normal operational notifications. On terminal errors, every inventory/report script should send a notification to the `Alerts` channel with diagnostic context and an AI help link built from the error message. On successful completion, each script should send a notification to the `Infos` channel with a `Result summary` field that summarizes the script result.
 
-## Configuration utilisateur des notifications Teams
+## User Configuration For Teams Notifications
 
-`Setup/SmartM365-Create-AppRegistration.ps1` cree ou reutilise l'equipe `SMART-M365` et les canaux `Alerts` / `Infos`, mais il ne cree pas les URLs Teams Workflows. Ces URLs appartiennent au contexte Teams / Power Automate de l'utilisateur et doivent etre creees manuellement dans Microsoft Teams.
+`Setup/SmartM365-Create-AppRegistration.ps1` creates or reuses the `SMART-M365` team and the `Alerts` / `Infos` channels, but it does not create Teams Workflows URLs. Those URLs belong to the user's Teams / Power Automate context and must be created manually in Microsoft Teams.
 
-Procedure attendue:
+Expected procedure:
 
-1. Ouvrir Microsoft Teams.
-2. Aller dans l'equipe `SMART-M365`, canal `Alerts`.
-3. Ouvrir `Workflows` depuis le menu du canal.
-4. Rechercher `webhook`.
-5. Creer un workflow de type `Send webhook alerts to a channel` ou base sur `When a Teams webhook request is received`.
-6. Selectionner l'equipe `SMART-M365` et le canal `Alerts`, puis copier l'URL HTTP POST generee.
-7. Refaire la meme operation dans le canal `Infos`.
-8. Enregistrer et tester les URLs avec:
+1. Open Microsoft Teams.
+2. Go to the `SMART-M365` team and the `Alerts` channel.
+3. Open `Workflows` from the channel menu.
+4. Search for `webhook`.
+5. Create a workflow such as `Send webhook alerts to a channel`, or one based on `When a Teams webhook request is received`.
+6. Select the `SMART-M365` team and the `Alerts` channel, then copy the generated HTTP POST URL.
+7. Repeat the same operation in the `Infos` channel.
+8. Save and test the URLs with:
 
 ```powershell
 .\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Alerts -WebhookUrl "<Alerts workflow URL>"
 .\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos  -WebhookUrl "<Infos workflow URL>"
 ```
 
-Les URLs sont stockees uniquement dans `Config/Tenants/<TenantKey>.local.json` avec les cles `TeamsAlertsWebhookUrl` et `TeamsInfosWebhookUrl`. Ce fichier est local et ignore par Git. Les URLs de webhook doivent etre traitees comme des secrets: ne pas les publier dans un commit, une issue, une documentation ou un canal public.
+The URLs are stored only in `Config/Tenants/<TenantKey>.local.json` with the keys `TeamsAlertsWebhookUrl` and `TeamsInfosWebhookUrl`. This file is local and ignored by Git. Webhook URLs must be treated as secrets: do not publish them in a commit, issue, document, or public channel.
 
-Cette approche evite d'ajouter des permissions Microsoft Graph Teams larges a l'app SmartM365. Les notifications operationnelles passent par Power Automate; les seules permissions Teams demandees par le bootstrap sont des scopes delegues de setup pour creer/verifier les canaux `Alerts` et `Infos`.
+This approach avoids adding broad Microsoft Graph Teams permissions to the SmartM365 app. Operational notifications go through Power Automate; the only Teams permissions requested by the bootstrap are delegated setup scopes used to create/check the `Alerts` and `Infos` channels.
 
-## Permissions Microsoft Graph
+## Microsoft Graph Permissions
 
-| Permission | Pourquoi elle est necessaire | Scripts / modules utilisateurs |
+| Permission | Why it is needed | Scripts / modules using it |
 | --- | --- | --- |
-| `Directory.Read.All` | Lecture large de l'annuaire Entra ID: organisation, utilisateurs, groupes, licences, domaines, devices, attributs de synchronisation et enrichissements directory. Plusieurs endpoints Graph repondent mieux ou uniquement avec ce droit dans les inventaires tenant. | `SmartInventory/M365Inventory/Users/SmartM365-ActiveUsers-Inventory.ps1`; `SmartInventory/M365Inventory/Licensing/SmartM365-Licences-Inventory.ps1`; `SmartInventory/M365Inventory/Domains/SmartM365-VerifiedDomains-Inventory.ps1`; `SmartInventory/M365Inventory/Devices/SmartM365-EntraDevices-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/RBAC/SmartM365-Intune-RBAC-GroupMembers.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1`; `SmartInventory/ExchangeInventory/Mailboxes/SmartM365-EXO-Mailboxes-Inventory.ps1`; `SmartInventory/ExchangeInventory/CalendarPermissions/SmartM365-EXO-Mailboxes-CalPerm_Inventory.ps1`. |
-| `User.Read.All` | Lecture des utilisateurs et de leurs proprietes pour les exports M365 et les enrichissements Exchange Online. | `SmartInventory/M365Inventory/Users/SmartM365-ActiveUsers-Inventory.ps1`; `SmartInventory/M365Inventory/Licensing/SmartM365-Licences-Inventory.ps1`; `SmartInventory/ExchangeInventory/Mailboxes/SmartM365-EXO-Mailboxes-Inventory.ps1`; `SmartInventory/ExchangeInventory/BackupProtection/SmartM365-EXO-BackupProtection-Comparison.ps1`. |
-| `AuditLog.Read.All` | Lecture des informations d'activite de connexion exposees par Graph, notamment `signInActivity` sur les utilisateurs pour remplir les colonnes de derniere connexion. | `SmartInventory/M365Inventory/Users/SmartM365-ActiveUsers-Inventory.ps1`. |
-| `Device.Read.All` | Lecture des objets devices Entra ID, notamment pour lier les donnees Intune/Autopilot aux objets Entra et recuperer des attributs comme deviceId, trustType ou sign-in approximatif. | `SmartInventory/M365Inventory/Devices/SmartM365-EntraDevices-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1`. |
-| `GroupMember.Read.All` | Lecture des membres de groupes Entra ID, utile pour les exports RBAC et les comparaisons basees sur des groupes. | `SmartInventory/M365Inventory/IntuneInventory/RBAC/SmartM365-Intune-RBAC-GroupMembers.ps1`; `SmartInventory/ExchangeInventory/BackupProtection/SmartM365-EXO-BackupProtection-Comparison.ps1`. |
-| `DeviceManagementApps.Read.All` | Lecture des applications detectees / applications Intune via `/deviceManagement/detectedApps` et relations associees. | `SmartInventory/M365Inventory/IntuneInventory/Applications/SmartM365-Intune-DiscoveredApps-Inventory.ps1`. |
-| `DeviceManagementConfiguration.Read.All` | Lecture des configurations, politiques et rapports Intune, notamment compliance policies, Windows Update for Business, Feature Update / Quality Update profiles et report export jobs. | `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Device-System-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/SmartM365-WinUpdate_Status_From_Intune.ps1`; `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
-| `DeviceManagementManagedDevices.Read.All` | Lecture des devices geres par Intune et de leurs proprietes: inventaires devices, BIOS, compliance, systeme, upgrade eligibility et Endpoint Analytics. | `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-BIOS-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Device-System-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-UpgradeEligibility.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Applications/SmartM365-Intune-DiscoveredApps-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/SmartM365-WinUpdate_Status_From_Intune.ps1`; `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
-| `DeviceManagementScripts.Read.All` | Lecture/export des remediation scripts Intune exposes comme `deviceHealthScripts`, incluant details et assignments. | `SmartInventory/M365Inventory/IntuneInventory/SmartM365-Export-IntuneRemediations.ps1`. |
-| `DeviceManagementServiceConfig.Read.All` | Lecture de la configuration du service Intune, en particulier les identites Windows Autopilot. | `SmartInventory/M365Inventory/IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1`. |
-| `Mail.Send` | Envoi des notifications d'erreur et rapports HTML via Microsoft Graph lorsque `SmtpServer` est vide. L'adresse d'expedition est resolue depuis `From` dans le profil tenant ou le `*.local.json` du script. Le bootstrap cree aussi une Application Access Policy Exchange Online pour limiter ce droit au groupe `MailSendAccessPolicyGroup`. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; scripts qui appellent `SendEmailHtmlReport`, `Send-SmartM365Mail` ou `SendFileListEmailReport`. |
-| `Sites.Selected` | Upload et remplacement de fichiers CSV uniquement sur le site SharePoint SmartM365. Le bootstrap attribue ensuite le role `write` a l'app sur le site cree/reutilise, puis retire les anciens grants larges `Files.ReadWrite.All` et `Sites.ReadWrite.All` lorsqu'ils existent. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; `Modules/SmartM365.SharePoint/SmartM365.SharePoint.psm1`; tous les scripts d'inventaire/export qui appellent l'upload SharePoint quand `EnableSharePointUpload` est active. |
+| `Directory.Read.All` | Broad Entra ID directory read access: organization, users, groups, licenses, domains, devices, sync attributes, and directory enrichment. Several Graph endpoints respond better, or only respond, with this permission in tenant inventories. | `SmartInventory/M365Inventory/Users/SmartM365-ActiveUsers-Inventory.ps1`; `SmartInventory/M365Inventory/Licensing/SmartM365-Licences-Inventory.ps1`; `SmartInventory/M365Inventory/Domains/SmartM365-VerifiedDomains-Inventory.ps1`; `SmartInventory/M365Inventory/Devices/SmartM365-EntraDevices-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/RBAC/SmartM365-Intune-RBAC-GroupMembers.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1`; `SmartInventory/ExchangeInventory/Mailboxes/SmartM365-EXO-Mailboxes-Inventory.ps1`; `SmartInventory/ExchangeInventory/CalendarPermissions/SmartM365-EXO-Mailboxes-CalPerm_Inventory.ps1`. |
+| `User.Read.All` | Reads users and their properties for M365 exports and Exchange Online enrichment. | `SmartInventory/M365Inventory/Users/SmartM365-ActiveUsers-Inventory.ps1`; `SmartInventory/M365Inventory/Licensing/SmartM365-Licences-Inventory.ps1`; `SmartInventory/ExchangeInventory/Mailboxes/SmartM365-EXO-Mailboxes-Inventory.ps1`; `SmartInventory/ExchangeInventory/BackupProtection/SmartM365-EXO-BackupProtection-Comparison.ps1`. |
+| `AuditLog.Read.All` | Reads sign-in activity exposed by Graph, especially `signInActivity` on users for last sign-in columns. | `SmartInventory/M365Inventory/Users/SmartM365-ActiveUsers-Inventory.ps1`. |
+| `Device.Read.All` | Reads Entra ID device objects, especially to link Intune/Autopilot data to Entra objects and retrieve attributes such as deviceId, trustType, or approximate sign-in data. | `SmartInventory/M365Inventory/Devices/SmartM365-EntraDevices-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1`. |
+| `GroupMember.Read.All` | Reads Entra ID group members, useful for RBAC exports and group-based comparisons. | `SmartInventory/M365Inventory/IntuneInventory/RBAC/SmartM365-Intune-RBAC-GroupMembers.ps1`; `SmartInventory/ExchangeInventory/BackupProtection/SmartM365-EXO-BackupProtection-Comparison.ps1`. |
+| `DeviceManagementApps.Read.All` | Reads detected apps / Intune apps through `/deviceManagement/detectedApps` and related relationships. | `SmartInventory/M365Inventory/IntuneInventory/Applications/SmartM365-Intune-DiscoveredApps-Inventory.ps1`. |
+| `DeviceManagementConfiguration.Read.All` | Reads Intune configurations, policies, and reports, including compliance policies, Windows Update for Business, Feature Update / Quality Update profiles, and report export jobs. | `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Device-System-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/SmartM365-WinUpdate_Status_From_Intune.ps1`; `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
+| `DeviceManagementManagedDevices.Read.All` | Reads Intune managed devices and their properties: device inventory, BIOS, compliance, system data, upgrade eligibility, and Endpoint Analytics. | `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-BIOS-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Device-System-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-UpgradeEligibility.ps1`; `SmartInventory/M365Inventory/IntuneInventory/Applications/SmartM365-Intune-DiscoveredApps-Inventory.ps1`; `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/SmartM365-WinUpdate_Status_From_Intune.ps1`; `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
+| `DeviceManagementScripts.Read.All` | Reads/exports Intune remediation scripts exposed as `deviceHealthScripts`, including details and assignments. | `SmartInventory/M365Inventory/IntuneInventory/SmartM365-Export-IntuneRemediations.ps1`. |
+| `DeviceManagementServiceConfig.Read.All` | Reads Intune service configuration, especially Windows Autopilot identities. | `SmartInventory/M365Inventory/IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1`. |
+| `Mail.Send` | Sends error notifications and HTML reports through Microsoft Graph when `SmtpServer` is empty. The sender address is resolved from `From` in the tenant profile or script `*.local.json`. The bootstrap also creates an Exchange Online Application Access Policy to restrict this right to `MailSendAccessPolicyGroup`. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; scripts that call `SendEmailHtmlReport`, `Send-SmartM365Mail`, or `SendFileListEmailReport`. |
+| `Sites.Selected` | Uploads and replaces CSV files only on the SmartM365 SharePoint site. The bootstrap then grants the app the `write` role on the created/reused site, and removes old broad grants `Files.ReadWrite.All` and `Sites.ReadWrite.All` when they exist. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; `Modules/SmartM365.SharePoint/SmartM365.SharePoint.psm1`; all inventory/export scripts that call SharePoint upload when `EnableSharePointUpload` is enabled. |
 
-## Permissions Intune ReadWrite incluses par defaut
+## Intune ReadWrite Permissions Included By Default
 
-Ces permissions sont ajoutees par defaut car un script actuel les demande encore en authentification interactive. Elles sont a considerer comme transitoires: lancer `Setup/SmartM365-Create-AppRegistration.ps1` avec `-SkipBroadIntuneReadWritePermissions` des que les scripts concernes sont durcis en lecture seule.
+These permissions are added by default because one current script still requests them during interactive authentication. Treat them as transitional: run `Setup/SmartM365-Create-AppRegistration.ps1` with `-SkipBroadIntuneReadWritePermissions` once the related scripts are hardened for read-only use.
 
-| Permission | Pourquoi elle est la aujourd'hui | Scripts / modules utilisateurs |
+| Permission | Why it is present today | Scripts / modules using it |
 | --- | --- | --- |
-| `DeviceManagementApps.ReadWrite.All` | Permission large demandee par le script Autopatch actuel pour acceder aux donnees Intune/reporting. A reduire si les appels restent en lecture seule. | `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
-| `DeviceManagementConfiguration.ReadWrite.All` | Permission large demandee par le script Autopatch actuel pour les profils Windows Update et export jobs. A remplacer par `DeviceManagementConfiguration.Read.All` si aucun POST/operation d'ecriture privilegiee n'est necessaire. | `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
-| `DeviceManagementManagedDevices.ReadWrite.All` | Permission large demandee par le script Autopatch actuel pour les donnees managed devices/reporting. A remplacer par `DeviceManagementManagedDevices.Read.All` si aucun changement de device n'est effectue. | `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
+| `DeviceManagementApps.ReadWrite.All` | Broad permission requested by the current Autopatch script to access Intune/reporting data. Reduce it if the calls remain read-only. | `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
+| `DeviceManagementConfiguration.ReadWrite.All` | Broad permission requested by the current Autopatch script for Windows Update profiles and export jobs. Replace it with `DeviceManagementConfiguration.Read.All` if no privileged write operation is needed. | `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
+| `DeviceManagementManagedDevices.ReadWrite.All` | Broad permission requested by the current Autopatch script for managed device/reporting data. Replace it with `DeviceManagementManagedDevices.Read.All` if no device change is performed. | `SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Get-IntuneAutopatchAlerts.ps1`. |
 
-## Scope delegue interactif pour le deploiement Intune
+## Interactive Delegated Scope For Intune Deployment
 
-Ce scope n'est pas une permission application SmartM365 runtime. Il est demande au compte administrateur qui lance le script de deploiement en mode interactif.
+This scope is not a SmartM365 runtime application permission. It is requested from the administrator account that runs the deployment script in interactive mode.
 
-| Scope delegue | Pourquoi il est necessaire | Script utilisateur |
+| Delegated scope | Why it is needed | User script |
 | --- | --- | --- |
-| `DeviceManagementScripts.ReadWrite.All` | Creer, mettre a jour et optionnellement assigner des packages Intune Remediations exposes par Microsoft Graph comme `deviceHealthScripts`; l'interface locale l'utilise aussi pour lister, dupliquer et supprimer les packages Intune. | `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1`; `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
-| `DeviceManagementConfiguration.Read.All` | Exporter le rapport d'execution CSV d'une remediation via les jobs d'export de rapports Intune. | `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
-| `Group.Read.All` | Lire le nom des groupes Entra cibles afin d'ajouter `targetGroupName` dans `Assignments.json` lors de `Save all cloud`. | `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
+| `DeviceManagementScripts.ReadWrite.All` | Creates, updates, and optionally assigns Intune Remediations packages exposed by Microsoft Graph as `deviceHealthScripts`; the local UI also uses it to list, duplicate, and delete Intune packages. | `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1`; `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
+| `DeviceManagementConfiguration.Read.All` | Exports the execution report CSV for a remediation through Intune report export jobs. | `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
+| `Group.Read.All` | Reads target Entra group names so `targetGroupName` can be added to `Assignments.json` during `Save all cloud`. | `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1`. |
 
-## Permission non-Graph ajoutee par le script
+## Non-Graph Permission Added By The Script
 
-| Permission | Pourquoi elle est necessaire | Scripts / modules utilisateurs |
+| Permission | Why it is needed | Scripts / modules using it |
 | --- | --- | --- |
-| `Exchange.ManageAsApp` sur l'API `Office 365 Exchange Online` | Autorise l'authentification app-only par certificat avec `Connect-ExchangeOnline`. Ce n'est pas une permission Microsoft Graph. Elle ne suffit pas seule: le token EXO app-only doit aussi contenir un role Entra supporte pour que le RBAC Exchange soit construit. | Scripts Exchange Online sous `SmartInventory/ExchangeInventory`, par exemple `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes` et `Migration`, lorsqu'ils utilisent l'authentification app-only. |
+| `Exchange.ManageAsApp` on the `Office 365 Exchange Online` API | Enables certificate-based app-only authentication with `Connect-ExchangeOnline`. This is not a Microsoft Graph permission. It is not sufficient alone: the EXO app-only token must also contain a supported Entra role for Exchange RBAC to be built. | Exchange Online scripts under `SmartInventory/ExchangeInventory`, for example `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes`, and `Migration`, when they use app-only authentication. |
 
-## Role Entra ID attribue au service principal SmartM365
+## Entra ID Role Assigned To The SmartM365 Service Principal
 
-| Role | Pourquoi il est necessaire | Scripts / modules utilisateurs |
+| Role | Why it is needed | Scripts / modules using it |
 | --- | --- | --- |
-| `Global Reader` | Baseline privilegiee pour les scripts runtime Exchange Online en lecture seule. Ce role Entra est supporte par Exchange Online PowerShell app-only et suffit normalement pour les inventaires et rapports qui n'appellent que des cmdlets `Get-*`. | Scripts Exchange Online sous `SmartInventory/ExchangeInventory`, par exemple `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes` et `Migration`, tant qu'ils restent en lecture seule. |
-| `Exchange Administrator` | Role de setup, pas baseline runtime. Il peut etre necessaire au compte administrateur interactif qui execute `Setup/SmartM365-Create-AppRegistration.ps1`, car le bootstrap cree/modifie une shared mailbox, un groupe mail-enabled, une Application Access Policy et l'attribution du role au service principal. | `Setup/SmartM365-Create-AppRegistration.ps1` uniquement, ou futur script Exchange Online qui ferait explicitement des modifications. |
+| `Global Reader` | Privileged baseline for read-only Exchange Online runtime scripts. This Entra role is supported by Exchange Online PowerShell app-only auth and is normally enough for inventories and reports that only call `Get-*` cmdlets. | Exchange Online scripts under `SmartInventory/ExchangeInventory`, for example `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes`, and `Migration`, as long as they remain read-only. |
+| `Exchange Administrator` | Setup role, not runtime baseline. It may be required for the interactive administrator account that runs `Setup/SmartM365-Create-AppRegistration.ps1`, because the bootstrap creates/modifies a shared mailbox, a mail-enabled group, an Application Access Policy, and the service principal role assignment. | `Setup/SmartM365-Create-AppRegistration.ps1` only, or a future Exchange Online script that explicitly performs changes. |
 
-## Configuration Exchange Online creee par le bootstrap
+## Exchange Online Configuration Created By The Bootstrap
 
-| Objet | Pourquoi il est necessaire | Scripts / modules utilisateurs |
+| Object | Why it is needed | Scripts / modules using it |
 | --- | --- | --- |
-| Shared mailbox `smartm365-reports@<domaine>` | Fournit une boite dediee comme expediteur des rapports et notifications SmartM365. Le bootstrap ecrit cette adresse dans `From`. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; scripts qui envoient des rapports ou erreurs par Graph. |
-| Mail-enabled security group `SMART-M365-MailSend-Allowed` | Liste les boites autorisees pour l'application SmartM365 avec `Mail.Send`. Le bootstrap ecrit son adresse dans `MailSendAccessPolicyGroup`. | Restriction Exchange Online appliquee a `Mail.Send`. |
-| Application Access Policy Exchange Online | Limite l'application SmartM365 aux boites membres de `MailSendAccessPolicyGroup` pour les permissions Outlook Graph comme `Mail.Send`. Sans cette restriction, `Mail.Send` application est tenant-wide. | Envois Graph faits par `Modules/SmartM365.Core/SmartM365.Core.psm1`. |
+| Shared mailbox `smartm365-reports@<domain>` | Provides a dedicated sender mailbox for SmartM365 reports and notifications. The bootstrap writes this address to `From`. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; scripts that send reports or errors through Graph. |
+| Mail-enabled security group `SMART-M365-MailSend-Allowed` | Lists mailboxes authorized for the SmartM365 application with `Mail.Send`. The bootstrap writes its address to `MailSendAccessPolicyGroup`. | Exchange Online restriction applied to `Mail.Send`. |
+| Exchange Online Application Access Policy | Restricts the SmartM365 application to mailboxes that are members of `MailSendAccessPolicyGroup` for Outlook Graph permissions such as `Mail.Send`. Without this restriction, application `Mail.Send` is tenant-wide. | Graph sends performed by `Modules/SmartM365.Core/SmartM365.Core.psm1`. |
 
-## Permissions utilisees uniquement pour executer le bootstrap
+## Permissions Used Only To Run The Bootstrap
 
-Ces scopes sont demandes a l'administrateur qui lance `Setup/SmartM365-Create-AppRegistration.ps1`. Ils ne sont pas ajoutes a l'app SmartM365 comme permissions metier; ils servent a creer/modifier l'app registration et a accorder le consentement.
+These scopes are requested from the administrator who runs `Setup/SmartM365-Create-AppRegistration.ps1`. They are not added to the SmartM365 app as business permissions; they are used to create/modify the app registration and grant consent.
 
-`Setup/SmartM365-Create-AppRegistration.ps1` est un script interactif de bootstrap: il est volontairement plus privilegie que les scripts d'inventaire runtime. Les roles requis par ce setup ne doivent pas etre recopies comme prerequis des scripts Exchange Online read-only.
+`Setup/SmartM365-Create-AppRegistration.ps1` is an interactive bootstrap script: it is intentionally more privileged than runtime inventory scripts. Roles required by this setup must not be copied as prerequisites for read-only Exchange Online scripts.
 
-| Scope de connexion | Pourquoi il est demande |
+| Connection scope | Why it is requested |
 | --- | --- |
-| `Application.ReadWrite.All` | Creer ou mettre a jour l'app registration, ses API permissions et ses certificats publics. |
-| `AppRoleAssignment.ReadWrite.All` | Accorder le consentement admin sous forme d'app role assignments. `Setup/SmartM365-Create-AppRegistration.ps1` le fait par defaut; utiliser `-DisableGrantAdminConsent` uniquement pour preparer l'app sans consentement immediat. |
-| `Channel.Create` | Creer les canaux Teams standard `Alerts` et `Infos` dans l'equipe `SMART-M365` lorsque le bootstrap les initialise. |
-| `Channel.ReadBasic.All` | Verifier si les canaux Teams standard `Alerts` et `Infos` existent deja avant de les creer. |
-| `Directory.Read.All` | Lire les service principals des APIs Microsoft Graph et Exchange Online, verifier le contexte tenant, et retrouver l'utilisateur administrateur connecte. |
-| `Group.ReadWrite.All` | Creer ou reutiliser le groupe Microsoft 365 qui porte l'equipe Teams `SMART-M365`, puis convertir ce groupe en team. |
-| `RoleManagement.ReadWrite.Directory` | Attribuer au service principal SmartM365 le role Entra `Global Reader` pour Exchange Online app-only, et retirer l'ancien role `Exchange Administrator` du service principal s'il avait ete ajoute par une version precedente du bootstrap. Ce scope est utilise uniquement par l'administrateur qui execute le bootstrap et n'est pas ajoute a l'app SmartM365. |
-| `Sites.FullControl.All` | Attribuer le role `write` au service principal SmartM365 sur le site SharePoint cible avec `Sites.Selected`. Ce scope est utilise uniquement par l'administrateur qui execute le bootstrap et n'est pas ajoute a l'app SmartM365. |
+| `Application.ReadWrite.All` | Creates or updates the app registration, its API permissions, and its public certificates. |
+| `AppRoleAssignment.ReadWrite.All` | Grants admin consent as app role assignments. `Setup/SmartM365-Create-AppRegistration.ps1` does this by default; use `-DisableGrantAdminConsent` only to prepare the app without immediate consent. |
+| `Channel.Create` | Creates the standard Teams channels `Alerts` and `Infos` in the `SMART-M365` team when the bootstrap initializes them. |
+| `Channel.ReadBasic.All` | Checks whether the standard Teams channels `Alerts` and `Infos` already exist before creating them. |
+| `Directory.Read.All` | Reads Microsoft Graph and Exchange Online API service principals, verifies tenant context, and finds the connected administrator user. |
+| `Group.ReadWrite.All` | Creates or reuses the Microsoft 365 group behind the `SMART-M365` Teams team, then converts this group into a team. |
+| `RoleManagement.ReadWrite.Directory` | Assigns the Entra `Global Reader` role to the SmartM365 service principal for Exchange Online app-only auth, and removes the old `Exchange Administrator` role from the service principal if a previous bootstrap version added it. This scope is used only by the administrator running the bootstrap and is not added to the SmartM365 app. |
+| `Sites.FullControl.All` | Assigns the `write` role to the SmartM365 service principal on the target SharePoint site with `Sites.Selected`. This scope is used only by the administrator running the bootstrap and is not added to the SmartM365 app. |
 
-## Points a revoir plus tard
+## Future Review Items
 
-- Remplacer les permissions Intune `ReadWrite` par des permissions `Read` lorsque `SmartM365-Get-IntuneAutopatchAlerts.ps1` est confirme en lecture seule.
-- Verifier que tous les uploads SharePoint restent compatibles avec `Sites.Selected`; ne reintroduire `Files.ReadWrite.All` ou `Sites.ReadWrite.All` qu'en dernier recours documente.
-- Revoir plus tard si le role Entra `Global Reader` peut etre remplace par une attribution Exchange RBAC encore plus fine lorsque les besoins exacts des scripts EXO sont stabilises.
-- Si le site SharePoint de l'equipe Teams n'est pas disponible immediatement, relancer le bootstrap plus tard: la provision SharePoint d'une equipe Teams est asynchrone cote Microsoft 365.
-
-
-
+- Replace Intune `ReadWrite` permissions with `Read` permissions once `SmartM365-Get-IntuneAutopatchAlerts.ps1` is confirmed read-only.
+- Verify that all SharePoint uploads remain compatible with `Sites.Selected`; reintroduce `Files.ReadWrite.All` or `Sites.ReadWrite.All` only as a documented last resort.
+- Review later whether the Entra `Global Reader` role can be replaced with a more granular Exchange RBAC assignment once the exact needs of EXO scripts are stable.
+- If the Teams SharePoint site is not immediately available, rerun the bootstrap later: Teams site provisioning is asynchronous on the Microsoft 365 side.

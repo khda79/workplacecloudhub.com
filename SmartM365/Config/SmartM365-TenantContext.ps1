@@ -51,6 +51,22 @@ function Find-SmartM365Root {
     throw "SmartM365 root not found from '$StartPath'."
 }
 
+function Test-SmartM365WritableDirectory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        New-Item -Path $Path -ItemType Directory -Force | Out-Null
+        $probePath = Join-Path -Path $Path -ChildPath ('.smartm365-write-test-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+        Set-Content -LiteralPath $probePath -Value 'test' -Encoding UTF8 -ErrorAction Stop
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
 function Get-SmartM365EffectiveGlobalConfig {
     [CmdletBinding()]
     param(
@@ -61,6 +77,8 @@ function Get-SmartM365EffectiveGlobalConfig {
     if ([string]::IsNullOrWhiteSpace($TenantKey)) { $TenantKey = 'test' }
 
     $rootPath = Find-SmartM365Root -StartPath $StartPath
+    $scriptStartPath = if ([string]::IsNullOrWhiteSpace($StartPath)) { $rootPath } else { $StartPath }
+    $scriptOutputRootPath = Join-Path -Path $scriptStartPath -ChildPath 'Output'
     $globalConfigPath = Join-Path -Path $rootPath -ChildPath 'SmartM365.global.local.json'
     $tenantConfigPath = Join-Path -Path $rootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $TenantKey)
 
@@ -78,15 +96,47 @@ function Get-SmartM365EffectiveGlobalConfig {
     }
 
     $globalConfig['TenantKey'] = $TenantKey
+    $globalConfig['SmartM365RootPath'] = $rootPath
+    $globalConfig['ScriptOutputRootPath'] = $scriptOutputRootPath
 
-    if (-not $globalConfig.Contains('DataAllRootPath')) {
-        $globalConfig['DataAllRootPath'] = '{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\DATA-ALL'
+    $defaultWorkspaceRootPath = $rootPath
+    $defaultDataAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL'
+    $defaultLatestCsvFolderPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST'
+    $defaultLogAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL'
+    $useScriptOutputFallback = $false
+
+    if (-not $globalConfig.Contains('WorkspaceRootPath') -or
+        [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or
+        [string]$globalConfig['WorkspaceRootPath'] -eq '{{SmartM365RootPath}}') {
+        $candidateDataRoot = Join-Path -Path $rootPath -ChildPath 'Data'
+        if (Test-SmartM365WritableDirectory -Path $candidateDataRoot) {
+            $defaultWorkspaceRootPath = $rootPath
+        }
+        else {
+            $defaultWorkspaceRootPath = $scriptOutputRootPath
+            $defaultDataAllRootPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\DATA-ALL'
+            $defaultLatestCsvFolderPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\DATA-LAST'
+            $defaultLogAllRootPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\LOG-ALL'
+            $useScriptOutputFallback = $true
+        }
     }
-    if (-not $globalConfig.Contains('LatestCsvFolderPath')) {
-        $globalConfig['LatestCsvFolderPath'] = '{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\DATA-LAST'
+
+    if (-not $globalConfig.Contains('DataAllRootPath') -or
+        ($useScriptOutputFallback -and [string]$globalConfig['DataAllRootPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL')) {
+        $globalConfig['DataAllRootPath'] = $defaultDataAllRootPath
     }
-    if (-not $globalConfig.Contains('LogAllRootPath')) {
-        $globalConfig['LogAllRootPath'] = '{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\LOG-ALL'
+    if (-not $globalConfig.Contains('LatestCsvFolderPath') -or
+        ($useScriptOutputFallback -and [string]$globalConfig['LatestCsvFolderPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST')) {
+        $globalConfig['LatestCsvFolderPath'] = $defaultLatestCsvFolderPath
+    }
+    if (-not $globalConfig.Contains('LogAllRootPath') -or
+        ($useScriptOutputFallback -and [string]$globalConfig['LogAllRootPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL')) {
+        $globalConfig['LogAllRootPath'] = $defaultLogAllRootPath
+    }
+    if (-not $globalConfig.Contains('WorkspaceRootPath') -or
+        [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or
+        [string]$globalConfig['WorkspaceRootPath'] -eq '{{SmartM365RootPath}}') {
+        $globalConfig['WorkspaceRootPath'] = $defaultWorkspaceRootPath
     }
 
     return [pscustomobject]$globalConfig

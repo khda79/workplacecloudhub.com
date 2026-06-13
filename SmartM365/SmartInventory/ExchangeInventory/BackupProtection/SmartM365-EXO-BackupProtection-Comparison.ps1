@@ -344,26 +344,6 @@ function Send-ErrorEmail {
     Send-BackupProtectionErrorNotification -ErrorMessage $ErrorMessage -Operation $script:CurrentOperation
 }
 
-function Export-CsvAtomic {
-    param (
-        [System.Collections.Generic.List[PSCustomObject]]$Data,
-        [string]$Path,
-        [string[]]$Columns = @()
-    )
-    $tempPath = $Path + ".tmp"
-    if ($Data.Count -eq 0 -and $Columns.Count -gt 0) {
-        $header = ($Columns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ';'
-        Set-Content -Path $tempPath -Value $header -Encoding UTF8
-    }
-    elseif ($Columns.Count -gt 0) {
-        $Data | Select-Object -Property $Columns | Export-Csv -Path $tempPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
-    }
-    else {
-        $Data | Export-Csv -Path $tempPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
-    }
-    Move-Item -Path $tempPath -Destination $Path -Force
-}
-
 function Resolve-BackupProtectionGroupObjectId {
     [CmdletBinding()]
     param (
@@ -804,60 +784,28 @@ Write-Log "  Members without mailbox: $($membersNoMailbox.Count)"
 $mailboxColumns = @('ExternalDirectoryObjectId', 'UserPrincipalName', 'PrimarySmtpAddress', 'RecipientTypeDetails')
 $memberColumns = @('Id', 'UserPrincipalName', 'Mail', 'ObjectType')
 
-try {
-    $script:CurrentOperation = "Export UnprotectedMailboxes CSV"
-    Export-CsvAtomic -Data $unprotected -Path $CsvUnprotected -Columns $mailboxColumns
-    Write-Log "Exported: $CsvUnprotected ($($unprotected.Count) rows)"
-} catch {
-    $err = "Failed to write UnprotectedMailboxes CSV: $_"
-    Write-Log $err -Level "ERROR"
-    Send-ErrorEmail -ErrorMessage $err -ScriptName $ScriptName -GroupDisplayName $GroupDisplayName -GroupObjectId $GroupObjectId
-    exit 1
-}
-
-try {
-    $script:CurrentOperation = "Export ProtectedMailboxes CSV"
-    Export-CsvAtomic -Data $protected -Path $CsvProtected -Columns $mailboxColumns
-    Write-Log "Exported: $CsvProtected ($($protected.Count) rows)"
-} catch {
-    $err = "Failed to write ProtectedMailboxes CSV: $_"
-    Write-Log $err -Level "ERROR"
-    Send-ErrorEmail -ErrorMessage $err -ScriptName $ScriptName -GroupDisplayName $GroupDisplayName -GroupObjectId $GroupObjectId
-    exit 1
-}
-
-try {
-    $script:CurrentOperation = "Export MembersWithoutMailbox CSV"
-    Export-CsvAtomic -Data $membersNoMailbox -Path $CsvMembersNoMailbox -Columns $memberColumns
-    Write-Log "Exported: $CsvMembersNoMailbox ($($membersNoMailbox.Count) rows)"
-} catch {
-    $err = "Failed to write MembersWithoutMailbox CSV: $_"
-    Write-Log $err -Level "ERROR"
-    Send-ErrorEmail -ErrorMessage $err -ScriptName $ScriptName -GroupDisplayName $GroupDisplayName -GroupObjectId $GroupObjectId
-    exit 1
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# REGION: Copy latest files to DATA-LAST (fixed names, overwritten each run)
-# ─────────────────────────────────────────────────────────────────────────────
-
 $lastUnprotected      = Join-Path $LatestCsvFolderPath "$CsvPrefix`_UnprotectedMailboxes.csv"
 $lastProtected        = Join-Path $LatestCsvFolderPath "$CsvPrefix`_ProtectedMailboxes.csv"
 $lastMembersNoMailbox = Join-Path $LatestCsvFolderPath "$CsvPrefix`_MembersWithoutMailbox.csv"
 
 try {
-    $script:CurrentOperation = "Copy latest CSV files and upload to SharePoint"
-    Copy-Item -Path $CsvUnprotected      -Destination $lastUnprotected      -Force
-    Copy-Item -Path $CsvProtected        -Destination $lastProtected        -Force
-    Copy-Item -Path $CsvMembersNoMailbox -Destination $lastMembersNoMailbox -Force
+    $script:CurrentOperation = "Publish BackupProtection CSV files"
+    Publish-CoreSmartM365Csv -Data $unprotected -TimestampedPath $CsvUnprotected -LatestPath $lastUnprotected -Columns $mailboxColumns -Delimiter ';' | Out-Null
+    Write-Log "Exported: $CsvUnprotected ($($unprotected.Count) rows)"
     Write-Log "DATA-LAST updated: $lastUnprotected"
+
+    Publish-CoreSmartM365Csv -Data $protected -TimestampedPath $CsvProtected -LatestPath $lastProtected -Columns $mailboxColumns -Delimiter ';' | Out-Null
+    Write-Log "Exported: $CsvProtected ($($protected.Count) rows)"
     Write-Log "DATA-LAST updated: $lastProtected"
+
+    Publish-CoreSmartM365Csv -Data $membersNoMailbox -TimestampedPath $CsvMembersNoMailbox -LatestPath $lastMembersNoMailbox -Columns $memberColumns -Delimiter ';' | Out-Null
+    Write-Log "Exported: $CsvMembersNoMailbox ($($membersNoMailbox.Count) rows)"
     Write-Log "DATA-LAST updated: $lastMembersNoMailbox"
-    Invoke-CoreSmartM365SharePointCsvUpload -LocalFilePath $lastUnprotected
-    Invoke-CoreSmartM365SharePointCsvUpload -LocalFilePath $lastProtected
-    Invoke-CoreSmartM365SharePointCsvUpload -LocalFilePath $lastMembersNoMailbox
 } catch {
-    Write-Log "Failed to copy files to DATA-LAST: $_" -Level "WARN"
+    $err = "Failed to publish BackupProtection CSV files: $_"
+    Write-Log $err -Level "ERROR"
+    Send-ErrorEmail -ErrorMessage $err -ScriptName $ScriptName -GroupDisplayName $GroupDisplayName -GroupObjectId $GroupObjectId
+    exit 1
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

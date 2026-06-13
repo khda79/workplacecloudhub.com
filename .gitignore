@@ -6,6 +6,10 @@ SmartM365/**
 !SmartM365/
 !SmartM365/**/
 !SmartM365/**/.gitkeep
+SmartAzure/**
+!SmartAzure/
+!SmartAzure/**/
+!SmartAzure/**/.gitkeep
 .delete-empty/
 
 # Local documentation / agent notes
@@ -28,6 +32,14 @@ SmartM365/**
 !/SmartM365/**/Product names and service plan identifiers for licensing.csv
 !/SmartM365/**/W11-Upgrade-Compatibility-Indicators-Intune-Description.txt
 !/SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/Computers.txt
+!/SmartAzure/README.md
+!/SmartAzure/**/*.ps1
+!/SmartAzure/**/*.psm1
+!/SmartAzure/**/*.psd1
+!/SmartAzure/**/*.cmd
+!/SmartAzure/**/*.md
+!/SmartAzure/**/*.json.template
+!/SmartAzure/SmartAzure.global.local.json.template
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md
@@ -73,6 +85,8 @@ Exports/
 Reports/
 CSV/
 Output/
+SmartM365/Data/**
+SmartAzure/Data/**
 
 # Temporary
 Temp/

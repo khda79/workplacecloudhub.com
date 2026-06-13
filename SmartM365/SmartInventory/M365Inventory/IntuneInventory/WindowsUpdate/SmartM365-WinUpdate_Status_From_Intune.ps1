@@ -15,7 +15,7 @@ and full remediation columns. Single CSV output for Power BI consumption.
     Intune_WindowsUpdate_Status.csv
 - All summaries, blocking splits, action plans are derived in Power BI from this single table
 - Token auto-refresh: Graph token refreshed automatically if age > 55 min
-- SharePoint upload: CSV copied to SharePoint Online via SmartM365.SharePoint module (same Graph token)
+- SharePoint upload: latest CSV copied to SharePoint Online via SmartM365.Core when enabled
 - Emails:
     - Fatal error HTML email (on failure)
     - Optional success/summary HTML email with KPI tables
@@ -24,7 +24,7 @@ REQUIREMENTS
 - PowerShell 7+
 - MSAL.PS module
 - App-only certificate authentication for Graph
-- SmartM365.SharePoint module (Modules\SmartM365.SharePoint\SmartM365.SharePoint.psd1)
+- SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
 - Graph app permission: Sites.Selected with site-level write grant (for SharePoint upload)
 
 PARAMETERS
@@ -900,13 +900,11 @@ try {
     Prune-Files -Folder $LogsPath -Filter "$ScriptName-*.log" -Keep $global:RetentionMaxLogs
 
     # ----------------------------------------------------------
-    # Load SmartM365.SharePoint module
+    # Load SmartM365.Core for optional SharePoint upload
     # ----------------------------------------------------------
     if ($EnableSharePointUpload) {
-        $spModulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.SharePoint\SmartM365.SharePoint.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.SharePoint module not found.' }
-        Write-Log "Loading SmartM365.SharePoint module: $spModulePath" "INFO" "SP"
-        Import-Module $spModulePath -ErrorAction Stop
-        Write-Log "SmartM365.SharePoint module loaded." "INFO" "SP"
+        Import-SmartM365CorePreflight
+        Write-Log "SmartM365.Core module loaded for SharePoint upload." "INFO" "SP"
     }
 
     if ($ConsolePretty) {
@@ -1137,37 +1135,35 @@ try {
         Write-Log "DryRun: skipping write of $CsvFinal." "INFO" "DRYRUN"
     }
     else {
-        if (Test-Path $CsvTemp) { Remove-Item -Path $CsvTemp -Force -ErrorAction SilentlyContinue }
-        $enrichedRows | Export-Csv -Path $CsvTemp -NoTypeInformation -Encoding UTF8
-        Move-Item -Path $CsvTemp -Destination $CsvFinal -Force
+        Publish-CoreSmartM365Csv -Data $enrichedRows -TimestampedPath $CsvFinal -LatestPath $CsvLastFinal -NoSharePointUpload | Out-Null
         Write-Log "CSV exported: $CsvFinal" "INFO" "DATA"
-
-        Copy-FileAtomic -SourcePath $CsvFinal -DestinationFinal $CsvLastFinal -DestinationTemp $CsvLastTemp
         Write-Log "DATA-LAST updated: $CsvLastFinal" "INFO" "DATA"
 
         $archiveBase = [System.IO.Path]::GetFileNameWithoutExtension($CsvName)
         Write-ArchiveCopyAndPrune -SourceCsv $CsvFinal -ArchiveFolder $ArchivePath -BaseNameWithoutExt $archiveBase -RunStamp $RunStamp -Keep $global:RetentionMaxCSV
 
         # ----------------------------------------------------------
-        # SharePoint upload (non-blocking — uses same Graph token)
+        # SharePoint upload (non-blocking, latest CSV)
         # ----------------------------------------------------------
         if ($EnableSharePointUpload) {
             try {
-                Refresh-GraphTokenIfNeeded -TenantId $TenantId -ClientId $AppId -Certificate $cert -Headers ([ref]$headers)
                 Write-Log "SharePoint upload starting: $SP_SiteHostname$SP_SitePath / $SP_LibraryDisplayName / $SP_TargetFolderPath" "INFO" "SP"
 
-                $spLogger  = { param($m, $l, $s) Write-Log $m $l $s }
-                $spDriveId = Resolve-SmartM365SpDriveId -Headers $headers -SiteHostname $SP_SiteHostname -SitePath $SP_SitePath -LibraryDisplayName $SP_LibraryDisplayName -Logger $spLogger
-                $spResult  = Invoke-SmartM365SpFileUpload -Headers $headers -LocalFilePath $CsvFinal -TargetFolderPath $SP_TargetFolderPath -DriveId $spDriveId -ChunkSize $SP_ChunkSize -Logger $spLogger
+                $thumbprint = if ($global:Thumbprint) { $global:Thumbprint } else { $Thumb }
+                Invoke-CoreSmartM365SharePointCsvUpload `
+                    -LocalFilePath $CsvLastFinal `
+                    -Enabled $EnableSharePointUpload `
+                    -SiteHostname $SP_SiteHostname `
+                    -SitePath $SP_SitePath `
+                    -LibraryDisplayName $SP_LibraryDisplayName `
+                    -TargetFolderPath $SP_TargetFolderPath `
+                    -AppId $AppId `
+                    -TenantId $TenantId `
+                    -Thumbprint $thumbprint
 
-                $spUploadStatus = $spResult.Status
-                $spDestPath     = $spResult.DestPath
-                Write-Log "SharePoint upload: $spUploadStatus ($($spResult.DurationMs) ms) → $spDestPath" "INFO" "SP"
-
-                if ($spResult.Status -eq "Error") {
-                    $spUploadError = $spResult.Error
-                    Write-Log "SharePoint upload error (non-blocking): $spUploadError" "WARN" "SP"
-                }
+                $spUploadStatus = "Requested"
+                $spDestPath     = (($SP_TargetFolderPath.TrimEnd('/','\')) + "/" + [System.IO.Path]::GetFileName($CsvLastFinal)).TrimStart('/','\')
+                Write-Log "SharePoint upload requested: $spDestPath" "INFO" "SP"
             }
             catch {
                 $spUploadStatus = "Error"
