@@ -29,19 +29,19 @@ The second scope is used for Intune report export jobs when downloading executio
 Deploy one package folder:
 
 ```powershell
-.\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\SmartIntuneRemediation\IntuneRemediationScripts\WindowsUpdate\Cache-Health
+.\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Devices\SmartIntuneRemediation\IntuneRemediationScripts\WindowsUpdate\Cache-Health
 ```
 
 Deploy all packages under a folder and update existing Intune remediations with the same display name:
 
 ```powershell
-.\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\SmartIntuneRemediation\IntuneRemediationScripts\WindowsUpdate -Recurse -UpdateExisting
+.\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Devices\SmartIntuneRemediation\IntuneRemediationScripts\WindowsUpdate -Recurse -UpdateExisting
 ```
 
 Deploy a package and replace its assignments with one Entra group:
 
 ```powershell
-.\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\SmartIntuneRemediation\IntuneRemediationScripts\WindowsUpdate\Cache-Health -AssignmentGroupId "00000000-0000-0000-0000-000000000000" -RunRemediationScript
+.\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Devices\SmartIntuneRemediation\IntuneRemediationScripts\WindowsUpdate\Cache-Health -AssignmentGroupId "00000000-0000-0000-0000-000000000000" -RunRemediationScript
 ```
 
 Omit `-AssignmentGroupId` to create or update the remediation package without changing Intune assignments.
@@ -49,13 +49,13 @@ Omit `-AssignmentGroupId` to create or update the remediation package without ch
 Open the GUI:
 
 ```powershell
-pwsh -STA -NoProfile -File .\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1
+pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1
 ```
 
 Or use the launcher, which hides the PowerShell console:
 
 ```cmd
-.\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\Start-SmartM365-IntuneRemediation-GUI.cmd
+.\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\Start-SmartM365-IntuneRemediation-GUI.cmd
 ```
 
 See `../IntuneRemediationManager-GUI/README.md` for GUI configuration, actions, and log behavior.

@@ -249,8 +249,8 @@ $colorDisabledText = [System.Drawing.ColorTranslator]::FromHtml("#7A8A99")
 
 function Resolve-LogoIconPath {
     $candidatePaths = @(
-        (Join-Path $toolkitRoot "SmartM365-logo.ico"),
-        (Join-Path (Split-Path -Parent $toolkitRoot) "SmartM365-logo.ico")
+        (Join-Path $PSScriptRoot "SmartM365-logo.ico"),
+        (Join-Path $toolkitRoot "SmartM365-logo.ico")
     )
 
     foreach ($candidatePath in $candidatePaths) {

@@ -126,9 +126,9 @@ The tool creates:
 CLI support outputs:
 
 ```powershell
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -JsonOutput
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -SupportBundle
-.\DeviceRegistrationTool\Start-SmartM365-DeviceRegistration-Tool-CLI-Export.cmd
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -JsonOutput
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -SupportBundle
+.\Devices\DeviceRegistrationTool\Start-SmartM365-DeviceRegistration-Tool-CLI-Export.cmd
 ```
 
 The support bundle includes the current run log, CSV summary, `dsregcmd` snapshot, support summary, and recent device registration / MDM event log exports when available.
@@ -178,25 +178,25 @@ If `SupportEmail` is configured, `Copy/email support summary` copies the summary
 Open the GUI:
 
 ```powershell
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1
 ```
 
 Explicit GUI launch:
 
 ```powershell
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Gui
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Gui
 ```
 
 Launch User mode with the CMD wrapper:
 
 ```cmd
-.\DeviceRegistrationTool\Start-SmartM365-DeviceRegistration-Tool-User.cmd
+.\Devices\DeviceRegistrationTool\Start-SmartM365-DeviceRegistration-Tool-User.cmd
 ```
 
 Launch Admin mode:
 
 ```cmd
-.\DeviceRegistrationTool\Start-SmartM365-DeviceRegistration-Tool-Admin.cmd
+.\Devices\DeviceRegistrationTool\Start-SmartM365-DeviceRegistration-Tool-Admin.cmd
 ```
 
 ## CLI mode
@@ -204,31 +204,31 @@ Launch Admin mode:
 Diagnostic-only run:
 
 ```powershell
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli
 ```
 
 Explicit user diagnostic run:
 
 ```powershell
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode User
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode User
 ```
 
 Trigger the Windows Automatic-Device-Join task without running `dsregcmd /leave`:
 
 ```powershell
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -TriggerJoin
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -TriggerJoin
 ```
 
 Allow guarded repair for a disabled or deleted Entra device object:
 
 ```powershell
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -RepairDisabledDeletedDevice
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -RepairDisabledDeletedDevice
 ```
 
 Add bounded post-action retries:
 
 ```powershell
-.\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -RepairDisabledDeletedDevice -RetryCount 2 -RetrySleepMinutes 10
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -RepairDisabledDeletedDevice -RetryCount 2 -RetrySleepMinutes 10
 ```
 
 Admin repair actions require an elevated PowerShell process.

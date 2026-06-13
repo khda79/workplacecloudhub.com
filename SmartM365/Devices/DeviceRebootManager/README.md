@@ -88,35 +88,35 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-Devic
 Preview the required mode without rebooting:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -TestRequiredRestart -PreviewOnly
+powershell.exe -STA -NoProfile -File .\Devices\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -TestRequiredRestart -PreviewOnly
 ```
 
 Preview the recommendation mode without rebooting:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -TestRecommendedRestart -PreviewOnly
+powershell.exe -STA -NoProfile -File .\Devices\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -TestRecommendedRestart -PreviewOnly
 ```
 
 Run in recommendation-only mode, with no mandatory restart state:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -NeverForceRestart
+powershell.exe -STA -NoProfile -File .\Devices\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -NeverForceRestart
 ```
 
 Use a specific config file:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -ConfigPath C:\ProgramData\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json
+powershell.exe -STA -NoProfile -File .\Devices\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1 -ConfigPath C:\ProgramData\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json
 ```
 
 Launch through the CMD wrapper:
 
 ```cmd
-.\DeviceRebootManager\Start-SmartM365-DeviceRebootManager-GUI.cmd -TestRequiredRestart -PreviewOnly
+.\Devices\DeviceRebootManager\Start-SmartM365-DeviceRebootManager-GUI.cmd -TestRequiredRestart -PreviewOnly
 ```
 
 Launch the safe test wrapper:
 
 ```cmd
-.\DeviceRebootManager\Start-SmartM365-DeviceRebootManager-GUI-Test.cmd
+.\Devices\DeviceRebootManager\Start-SmartM365-DeviceRebootManager-GUI-Test.cmd
 ```
