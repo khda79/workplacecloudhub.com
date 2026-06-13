@@ -222,23 +222,7 @@ function Export-CsvAtomic {
         [string]$Encoding = "UTF8"
     )
 
-    $parent = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
-        New-Item -Path $parent -ItemType Directory -Force | Out-Null
-    }
-
-    $leaf = Split-Path -Path $Path -Leaf
-    $tmp = Join-Path -Path $parent -ChildPath ("{0}.tmp.{1}" -f $leaf, ([guid]::NewGuid().ToString("N")))
-
-    try {
-        $InputObject | Export-Csv -Path $tmp -NoTypeInformation -Encoding $Encoding -ErrorAction Stop
-        Move-Item -LiteralPath $tmp -Destination $Path -Force -ErrorAction Stop
-    }
-    finally {
-        if (Test-Path -LiteralPath $tmp) {
-            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        }
-    }
+    Write-SmartM365CsvAtomically -Data @($InputObject) -Path $Path -Encoding $Encoding
 }
 
 [string]$inputFolderCSVfiles

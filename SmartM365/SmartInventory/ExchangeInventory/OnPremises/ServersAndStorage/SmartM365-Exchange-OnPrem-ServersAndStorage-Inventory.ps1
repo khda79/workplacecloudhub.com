@@ -158,6 +158,108 @@ function Ensure-Directory {
     }
 }
 
+function Get-SmartM365EffectiveConfigValue {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [AllowNull()]
+        [object]$DefaultValue = $null
+    )
+
+    if ($null -ne $script:SmartM365EffectiveConfig) {
+        $property = $script:SmartM365EffectiveConfig.PSObject.Properties[$Name]
+        if ($null -ne $property -and $null -ne $property.Value) {
+            if ($property.Value -is [string] -and [string]::IsNullOrWhiteSpace($property.Value)) {
+                return $DefaultValue
+            }
+
+            return Resolve-SmartM365ConfigTokenValue -Value $property.Value
+        }
+    }
+
+    return $DefaultValue
+}
+
+function Import-SmartM365CoreModule {
+    if (Get-Command Invoke-CoreSmartM365SharePointCsvUpload -ErrorAction SilentlyContinue) {
+        return
+    }
+
+    $d = $PSScriptRoot
+    while ($d) {
+        $moduleCandidates = if ($PSVersionTable.PSVersion.Major -lt 6) {
+            @(
+                (Join-Path -Path $d -ChildPath 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'),
+                (Join-Path -Path $d -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1')
+            )
+        }
+        else {
+            @(
+                (Join-Path -Path $d -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1')
+            )
+        }
+
+        foreach ($modulePath in $moduleCandidates) {
+            if (Test-Path -LiteralPath $modulePath) {
+                Import-Module $modulePath -Prefix Core -ErrorAction Stop
+                return
+            }
+        }
+
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+
+    throw 'SmartM365.Core module not found.'
+}
+
+function Invoke-ServersAndStorageSharePointUpload {
+    param(
+        [Parameter(Mandatory)]
+        [string]$LocalFilePath
+    )
+
+    $enabled = [bool](Get-SmartM365EffectiveConfigValue -Name 'EnableSharePointUpload' -DefaultValue $false)
+    if (-not $enabled) { return }
+
+    $thumbprint = Get-SmartM365EffectiveConfigValue -Name 'Thumbprint' -DefaultValue ''
+    if ([string]::IsNullOrWhiteSpace($thumbprint)) {
+        $thumbprint = Get-SmartM365EffectiveConfigValue -Name 'Thumb' -DefaultValue ''
+    }
+
+    try {
+        Import-SmartM365CoreModule
+        Invoke-CoreSmartM365SharePointCsvUpload `
+            -LocalFilePath $LocalFilePath `
+            -Enabled $true `
+            -SiteHostname (Get-SmartM365EffectiveConfigValue -Name 'SharePointSiteHostname' -DefaultValue '') `
+            -SitePath (Get-SmartM365EffectiveConfigValue -Name 'SharePointSitePath' -DefaultValue '') `
+            -LibraryDisplayName (Get-SmartM365EffectiveConfigValue -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents') `
+            -TargetFolderPath (Get-SmartM365EffectiveConfigValue -Name 'SharePointTargetFolderPath' -DefaultValue '') `
+            -AppId (Get-SmartM365EffectiveConfigValue -Name 'AppId' -DefaultValue '') `
+            -TenantId (Get-SmartM365EffectiveConfigValue -Name 'TenantId' -DefaultValue '') `
+            -Thumbprint $thumbprint
+        Write-Log "SharePoint upload requested: $LocalFilePath"
+    }
+    catch {
+        Write-Log "SharePoint upload failed (non-blocking): $($_.Exception.Message)" "WARN"
+    }
+}
+
+function Export-ServersAndStorageCsv {
+    param(
+        [AllowNull()][object[]]$Data,
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    Import-SmartM365CoreModule
+    Publish-CoreSmartM365Csv -Data @($Data) -TimestampedPath $Path -Delimiter ';' -NoSharePointUpload | Out-Null
+    Invoke-ServersAndStorageSharePointUpload -LocalFilePath $Path
+}
+
 function Test-ExchangeShell {
     if (-not (Get-Command Get-ExchangeServer -ErrorAction SilentlyContinue)) {
         throw "Exchange cmdlets are not available. Run this script from the Exchange Management Shell."
@@ -757,7 +859,7 @@ try {
     }
 
     $serverInventoryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Inventory.csv"
-    $serverInventory | Export-Csv -Path $serverInventoryPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    Export-ServersAndStorageCsv -Data @($serverInventory) -Path $serverInventoryPath
     Write-Log "Exchange server inventory exported to: $serverInventoryPath"
 
     Write-Log "Testing remote access with WMI/DCOM."
@@ -768,7 +870,7 @@ try {
     }
 
     $remoteAccessPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_RemoteAccess.csv"
-    $remoteAccessInventory | Export-Csv -Path $remoteAccessPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    Export-ServersAndStorageCsv -Data @($remoteAccessInventory) -Path $remoteAccessPath
     Write-Log "Remote access report exported to: $remoteAccessPath"
 
     Write-Log "Collecting CPU and RAM inventory."
@@ -779,7 +881,7 @@ try {
     }
 
     $computeInventoryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Compute.csv"
-    $computeInventory | Export-Csv -Path $computeInventoryPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    Export-ServersAndStorageCsv -Data @($computeInventory) -Path $computeInventoryPath
     Write-Log "Compute inventory exported to: $computeInventoryPath"
 
     Write-Log "Collecting logical disk inventory."
@@ -790,7 +892,7 @@ try {
     }
 
     $logicalDiskInventoryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_LogicalDisks.csv"
-    $logicalDiskInventory | Export-Csv -Path $logicalDiskInventoryPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    Export-ServersAndStorageCsv -Data @($logicalDiskInventory) -Path $logicalDiskInventoryPath
     Write-Log "Logical disk inventory exported to: $logicalDiskInventoryPath"
 
     Write-Log "Collecting disk drive inventory."
@@ -801,7 +903,7 @@ try {
     }
 
     $diskDriveInventoryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_DiskDrives.csv"
-    $diskDriveInventory | Export-Csv -Path $diskDriveInventoryPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    Export-ServersAndStorageCsv -Data @($diskDriveInventory) -Path $diskDriveInventoryPath
     Write-Log "Disk drive inventory exported to: $diskDriveInventoryPath"
 
     if ($IncludeServicesHealth) {
@@ -812,7 +914,7 @@ try {
         }
 
         $serviceHealthPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_ServiceHealth.csv"
-        $serviceHealth | Export-Csv -Path $serviceHealthPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+        Export-ServersAndStorageCsv -Data @($serviceHealth) -Path $serviceHealthPath
         Write-Log "Service health inventory exported to: $serviceHealthPath"
     }
 
@@ -820,7 +922,7 @@ try {
         Write-Log "Collecting mailbox database paths."
         $databasePaths = @(Get-MailboxDatabasePathInventory -ExchangeServerNames @($exchangeServers.Name))
         $databasePathsPath = Join-Path $OutputFolder "Exchange_OnPrem_MailboxDatabases_Paths.csv"
-        $databasePaths | Export-Csv -Path $databasePathsPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+        Export-ServersAndStorageCsv -Data @($databasePaths) -Path $databasePathsPath
         Write-Log "Mailbox database path inventory exported to: $databasePathsPath"
     }
 
@@ -870,7 +972,7 @@ try {
     }
 
     $perServerSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Decommissioning_PerServerSummary.csv"
-    $perServerSummary | Export-Csv -Path $perServerSummaryPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    Export-ServersAndStorageCsv -Data @($perServerSummary) -Path $perServerSummaryPath
     Write-Log "Per-server decommissioning summary exported to: $perServerSummaryPath"
 
     $totalMemoryGB = Get-SafeSum -InputObject $successfulComputeRows -Property "MemoryGB"
@@ -912,7 +1014,7 @@ try {
     }
 
     $summaryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Inventory_Summary.csv"
-    $summary | Export-Csv -Path $summaryPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    Export-ServersAndStorageCsv -Data @($summary) -Path $summaryPath
     Write-Log "Global summary exported to: $summaryPath"
 
     $htmlSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Decommissioning_ExecutiveSummary.html"

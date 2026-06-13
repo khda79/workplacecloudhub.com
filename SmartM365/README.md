@@ -23,7 +23,7 @@ This repository contains reusable scripts and helper modules.
 
 `Setup/` contains the interactive SmartM365 setup scripts. Use `Setup/SmartM365-Create-AppRegistration.ps1` to create or update the app registration used by SmartM365 app-only automation. The script grants admin consent by default; use `-DisableGrantAdminConsent` only when you want to add the permissions without granting consent immediately.
 
-The setup run writes a text log and PowerShell transcript to `C:\Temp\WORKPLACE` by default. Use `-LogPath <folder>` to store them elsewhere.
+The setup run writes a text log and PowerShell transcript under `Data\Tenants\<TenantKey>\LOG-ALL\Setup` by default. If the root `Data` folder is not writable, it falls back to `Setup\Output\Tenants\<TenantKey>\LOG-ALL\Setup`. Use `-LogPath <folder>` to store them elsewhere.
 
 At startup, the setup disconnects any existing Microsoft Graph and Exchange Online sessions before signing in again. This avoids silently reusing a cached account from WAM or a previous PowerShell session; use `-UseDeviceCode` when you want to explicitly choose the administrator account used for Graph consent and setup. This convention applies to every SmartM365 script that connects to Microsoft Graph or Exchange Online.
 
@@ -66,10 +66,12 @@ Pass the target tenant directly when running a script. If omitted, scripts use `
 Each script loads `SmartM365.global.local.json`, overlays `Config\Tenants\<Tenant>.local.json` in memory, and does not rewrite the global JSON. Output roots include `TenantKey` so test and production exports do not overwrite each other:
 
 ```text
-{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\DATA-ALL
-{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\DATA-LAST
-{{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\LOG-ALL
+{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL
+{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST
+{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL
 ```
+
+By default, `WorkspaceRootPath` is the SmartM365 project root. If `Data` at the project root cannot be written, scripts fall back to an `Output` folder next to the running script.
 
 Run `Setup/SmartM365-Create-AppRegistration.ps1` separately for each tenant that must be bootstrapped:
 
