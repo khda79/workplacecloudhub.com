@@ -1,0 +1,14 @@
+{
+  "RetryCount": 0,
+  "RetrySleepMinutes": 5,
+  "OutputRoot": "C:\\ProgramData\\SmartM365\\DeviceRegistrationTool",
+  "LogRetentionCount": 10,
+  "DeviceProfile": "Auto",
+  "RequireDomainConnectivity": false,
+  "SupportEmail": "",
+  "SupportEmailSendMode": "Draft",
+  "LogoPath": "workplacecloudhub-v2.png",
+  "DefaultLanguage": "auto",
+  "ForceLanguage": "",
+  "LanguageCatalogPath": ""
+}

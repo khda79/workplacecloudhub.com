@@ -12,6 +12,8 @@
         "RemoveOldFiles",
         "Remove-OldFiles",
         "EnsureExchangePSSnapinLoaded",
+        "Format-SmartM365LogLine",
+        "Update-SmartM365TimestampedTranscript",
         "WriteLog",
         "Send-SmartM365TeamsNotification",
         "SendFileListEmailReport",

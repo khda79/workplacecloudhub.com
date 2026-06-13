@@ -28,6 +28,28 @@ SmartM365/**
 !/SmartM365/**/*.md
 !/SmartM365/**/*.json.template
 !/SmartM365/**/*.config.template.json
+!/SmartM365/DeviceRegistrationTool/workplacecloudhub-v2.png
+!/SmartM365/**/*.ico
+!/SmartM365/**/Product names and service plan identifiers for licensing.csv
+!/SmartM365/**/W11-Upgrade-Compatibility-Indicators-Intune-Description.txt
+!/SmartM365/SmartIntuneHybridJoinToolkit/LOT-X/Computers.txt
+
+# Local memories stay private even when Markdown is re-included above.
+**/LOCAL_MEMORY.md
+
+# Smart Intune Hybrid Join Toolkit runtime data
+SmartM365/SmartIntuneHybridJoinToolkit/DevicesIntune.csv
+SmartM365/SmartIntuneHybridJoinToolkit/DevicesIntune.csv.tmp.*.csv
+SmartM365/SmartIntuneHybridJoinToolkit/DevicesEntra.csv
+SmartM365/SmartIntuneHybridJoinToolkit/DevicesEntra.csv.tmp.*.csv
+SmartM365/SmartIntuneHybridJoinToolkit/LOT-*/
+!SmartM365/SmartIntuneHybridJoinToolkit/LOT-X/
+!SmartM365/SmartIntuneHybridJoinToolkit/LOT-X/Computers.txt
+!SmartM365/SmartIntuneHybridJoinToolkit/LOT-X/*.cmd
+SmartM365/SmartIntuneHybridJoinToolkit/**/ComputersAlreadyEnrolled.txt
+SmartM365/SmartIntuneHybridJoinToolkit/**/PsExecLogs/
+SmartM365/SmartIntuneHybridJoinToolkit/**/CentralLogs/
+SmartM365/SmartIntuneHybridJoinToolkit/**/Reports/
 
 # Local configuration
 *.local.json
@@ -59,6 +81,8 @@ tmp/
 *.tmp
 *.bak
 *.zip
+setup.inf
+setup.rpt
 
 # VSCode
 .vscode/
