@@ -1,12 +1,12 @@
 # SmartM365 App Registration Permissions
 
-Ce document explique les permissions ajoutees par `SmartM365-Create-AppRegistration.ps1`, pourquoi elles sont necessaires, et quels scripts les utilisent actuellement.
+Ce document explique les permissions ajoutees par `Setup/SmartM365-Create-AppRegistration.ps1`, pourquoi elles sont necessaires, et quels scripts les utilisent actuellement.
 
 ## Notes importantes
 
 - Les permissions ci-dessous sont des permissions **Application** Microsoft Graph pour l'app registration SmartM365.
-- `SmartM365-Create-AppRegistration.ps1` s'execute uniquement en authentification interactive deleguee: un administrateur se connecte avec les droits necessaires pour creer ou mettre a jour l'app registration.
-- `SmartM365-Create-AppRegistration.ps1` est a part concernant les permissions: ses droits interactifs de setup ne sont pas la reference de privilege pour les scripts runtime/inventaire.
+- `Setup/SmartM365-Create-AppRegistration.ps1` s'execute uniquement en authentification interactive deleguee: un administrateur se connecte avec les droits necessaires pour creer ou mettre a jour l'app registration.
+- `Setup/SmartM365-Create-AppRegistration.ps1` est a part concernant les permissions: ses droits interactifs de setup ne sont pas la reference de privilege pour les scripts runtime/inventaire.
 - En mode multi-tenant, executer le bootstrap separement par tenant avec `-Tenant <TenantKey>`. Les valeurs d'app, certificat, SharePoint, mail et Teams restent dans `Config/Tenants/<TenantKey>.local.json`, jamais dans Git.
 - Les scripts app-only utilisent `https://graph.microsoft.com/.default` ou `Connect-MgGraph -ClientId ...`; les permissions effectives sont donc celles accordees a l'application dans Entra ID.
 - Les scripts avec `-InteractiveAuth` peuvent demander des scopes delegues equivalents, mais l'app registration doit surtout porter les permissions application pour les executions sans surveillance.
@@ -16,7 +16,7 @@ Ce document explique les permissions ajoutees par `SmartM365-Create-AppRegistrat
 
 ## Configuration utilisateur des notifications Teams
 
-`SmartM365-Create-AppRegistration.ps1` cree ou reutilise l'equipe `SMART-M365` et les canaux `Alerts` / `Infos`, mais il ne cree pas les URLs Teams Workflows. Ces URLs appartiennent au contexte Teams / Power Automate de l'utilisateur et doivent etre creees manuellement dans Microsoft Teams.
+`Setup/SmartM365-Create-AppRegistration.ps1` cree ou reutilise l'equipe `SMART-M365` et les canaux `Alerts` / `Infos`, mais il ne cree pas les URLs Teams Workflows. Ces URLs appartiennent au contexte Teams / Power Automate de l'utilisateur et doivent etre creees manuellement dans Microsoft Teams.
 
 Procedure attendue:
 
@@ -30,8 +30,8 @@ Procedure attendue:
 8. Enregistrer et tester les URLs avec:
 
 ```powershell
-.\SmartM365-Set-TeamsWebhook.ps1 -Channel Alerts -WebhookUrl "<Alerts workflow URL>"
-.\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos  -WebhookUrl "<Infos workflow URL>"
+.\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Alerts -WebhookUrl "<Alerts workflow URL>"
+.\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos  -WebhookUrl "<Infos workflow URL>"
 ```
 
 Les URLs sont stockees uniquement dans `Config/Tenants/<TenantKey>.local.json` avec les cles `TeamsAlertsWebhookUrl` et `TeamsInfosWebhookUrl`. Ce fichier est local et ignore par Git. Les URLs de webhook doivent etre traitees comme des secrets: ne pas les publier dans un commit, une issue, une documentation ou un canal public.
@@ -57,7 +57,7 @@ Cette approche evite d'ajouter des permissions Microsoft Graph Teams larges a l'
 
 ## Permissions Intune ReadWrite incluses par defaut
 
-Ces permissions sont ajoutees par defaut car un script actuel les demande encore en authentification interactive. Elles sont a considerer comme transitoires: lancer `SmartM365-Create-AppRegistration.ps1` avec `-SkipBroadIntuneReadWritePermissions` des que les scripts concernes sont durcis en lecture seule.
+Ces permissions sont ajoutees par defaut car un script actuel les demande encore en authentification interactive. Elles sont a considerer comme transitoires: lancer `Setup/SmartM365-Create-AppRegistration.ps1` avec `-SkipBroadIntuneReadWritePermissions` des que les scripts concernes sont durcis en lecture seule.
 
 | Permission | Pourquoi elle est la aujourd'hui | Scripts / modules utilisateurs |
 | --- | --- | --- |
@@ -86,7 +86,7 @@ Ce scope n'est pas une permission application SmartM365 runtime. Il est demande 
 | Role | Pourquoi il est necessaire | Scripts / modules utilisateurs |
 | --- | --- | --- |
 | `Global Reader` | Baseline privilegiee pour les scripts runtime Exchange Online en lecture seule. Ce role Entra est supporte par Exchange Online PowerShell app-only et suffit normalement pour les inventaires et rapports qui n'appellent que des cmdlets `Get-*`. | Scripts Exchange Online sous `SmartInventory/ExchangeInventory`, par exemple `AcceptedDomains`, `BackupProtection`, `CalendarPermissions`, `Mailboxes` et `Migration`, tant qu'ils restent en lecture seule. |
-| `Exchange Administrator` | Role de setup, pas baseline runtime. Il peut etre necessaire au compte administrateur interactif qui execute `SmartM365-Create-AppRegistration.ps1`, car le bootstrap cree/modifie une shared mailbox, un groupe mail-enabled, une Application Access Policy et l'attribution du role au service principal. | `SmartM365-Create-AppRegistration.ps1` uniquement, ou futur script Exchange Online qui ferait explicitement des modifications. |
+| `Exchange Administrator` | Role de setup, pas baseline runtime. Il peut etre necessaire au compte administrateur interactif qui execute `Setup/SmartM365-Create-AppRegistration.ps1`, car le bootstrap cree/modifie une shared mailbox, un groupe mail-enabled, une Application Access Policy et l'attribution du role au service principal. | `Setup/SmartM365-Create-AppRegistration.ps1` uniquement, ou futur script Exchange Online qui ferait explicitement des modifications. |
 
 ## Configuration Exchange Online creee par le bootstrap
 
@@ -98,14 +98,14 @@ Ce scope n'est pas une permission application SmartM365 runtime. Il est demande 
 
 ## Permissions utilisees uniquement pour executer le bootstrap
 
-Ces scopes sont demandes a l'administrateur qui lance `SmartM365-Create-AppRegistration.ps1`. Ils ne sont pas ajoutes a l'app SmartM365 comme permissions metier; ils servent a creer/modifier l'app registration et a accorder le consentement.
+Ces scopes sont demandes a l'administrateur qui lance `Setup/SmartM365-Create-AppRegistration.ps1`. Ils ne sont pas ajoutes a l'app SmartM365 comme permissions metier; ils servent a creer/modifier l'app registration et a accorder le consentement.
 
-`SmartM365-Create-AppRegistration.ps1` est un script interactif de bootstrap: il est volontairement plus privilegie que les scripts d'inventaire runtime. Les roles requis par ce setup ne doivent pas etre recopies comme prerequis des scripts Exchange Online read-only.
+`Setup/SmartM365-Create-AppRegistration.ps1` est un script interactif de bootstrap: il est volontairement plus privilegie que les scripts d'inventaire runtime. Les roles requis par ce setup ne doivent pas etre recopies comme prerequis des scripts Exchange Online read-only.
 
 | Scope de connexion | Pourquoi il est demande |
 | --- | --- |
 | `Application.ReadWrite.All` | Creer ou mettre a jour l'app registration, ses API permissions et ses certificats publics. |
-| `AppRoleAssignment.ReadWrite.All` | Accorder le consentement admin sous forme d'app role assignments. `SmartM365-Create-AppRegistration.ps1` le fait par defaut; utiliser `-DisableGrantAdminConsent` uniquement pour preparer l'app sans consentement immediat. |
+| `AppRoleAssignment.ReadWrite.All` | Accorder le consentement admin sous forme d'app role assignments. `Setup/SmartM365-Create-AppRegistration.ps1` le fait par defaut; utiliser `-DisableGrantAdminConsent` uniquement pour preparer l'app sans consentement immediat. |
 | `Channel.Create` | Creer les canaux Teams standard `Alerts` et `Infos` dans l'equipe `SMART-M365` lorsque le bootstrap les initialise. |
 | `Channel.ReadBasic.All` | Verifier si les canaux Teams standard `Alerts` et `Infos` existent deja avant de les creer. |
 | `Directory.Read.All` | Lire les service principals des APIs Microsoft Graph et Exchange Online, verifier le contexte tenant, et retrouver l'utilisateur administrateur connecte. |

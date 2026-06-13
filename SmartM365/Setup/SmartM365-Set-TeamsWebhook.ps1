@@ -32,10 +32,10 @@
     Writes TeamsWebhookUrl without sending a test notification.
 
 .EXAMPLE
-    .\SmartM365-Set-TeamsWebhook.ps1 -Channel Alerts -WebhookUrl "https://prod-00.westeurope.logic.azure.com/workflows/..."
+    .\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Alerts -WebhookUrl "https://prod-00.westeurope.logic.azure.com/workflows/..."
 
 .EXAMPLE
-    .\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos -WebhookUrl "https://prod-00.westeurope.logic.azure.com/workflows/..." -TestOnly
+    .\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos -WebhookUrl "https://prod-00.westeurope.logic.azure.com/workflows/..." -TestOnly
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -68,8 +68,13 @@ param(
 $tenantContextPath = & {
     $d = $PSScriptRoot
     while ($d) {
-        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
-        if (Test-Path -LiteralPath $p) { return $p }
+        $candidates = @(
+            (Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'),
+            (Join-Path -Path $d -ChildPath 'Config\SmartM365-TenantContext.ps1')
+        )
+        foreach ($p in $candidates) {
+            if (Test-Path -LiteralPath $p) { return $p }
+        }
         $parent = Split-Path -Path $d -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
         $d = $parent
@@ -77,6 +82,7 @@ $tenantContextPath = & {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 . $tenantContextPath
+$script:SmartM365RootPath = Find-SmartM365Root -StartPath $PSScriptRoot
 Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 Set-StrictMode -Version Latest
@@ -133,7 +139,7 @@ function Read-SmartM365JsonConfig {
             return Get-Content -LiteralPath $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         }
 
-        $templatePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.global.local.json.template'
+        $templatePath = Join-Path -Path $script:SmartM365RootPath -ChildPath 'SmartM365.global.local.json.template'
         if (Test-Path -LiteralPath $templatePath) {
             return Get-Content -LiteralPath $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         }
@@ -151,10 +157,10 @@ function Read-SmartM365JsonConfig {
 
 $uri = Test-SmartM365TeamsWorkflowWebhookUrl -Url $WebhookUrl
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $ConfigPath = Join-Path -Path $PSScriptRoot -ChildPath ("Config\Tenants\{0}.local.json" -f $Tenant)
+    $ConfigPath = Join-Path -Path $script:SmartM365RootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $Tenant)
 }
 $resolvedConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigPath)
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
+$modulePath = Join-Path -Path $script:SmartM365RootPath -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
 $configPropertyName = switch ($Channel) {
     'Alerts' { 'TeamsAlertsWebhookUrl' }
     'Infos' { 'TeamsInfosWebhookUrl' }

@@ -29,7 +29,7 @@
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
 .NOTES
-    Author: https://github.com/khda79/M365
+    Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
     Version : 1.0
     Requires: Microsoft.Graph.Authentication module
@@ -54,8 +54,13 @@ param(
 $tenantContextPath = & {
     $d = $PSScriptRoot
     while ($d) {
-        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
-        if (Test-Path -LiteralPath $p) { return $p }
+        $candidates = @(
+            (Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'),
+            (Join-Path -Path $d -ChildPath 'Config\SmartM365-TenantContext.ps1')
+        )
+        foreach ($p in $candidates) {
+            if (Test-Path -LiteralPath $p) { return $p }
+        }
         $parent = Split-Path -Path $d -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
         $d = $parent
