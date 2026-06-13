@@ -88,16 +88,16 @@
     C:\Temp\WORKPLACE.
 
 .EXAMPLE
-    .\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com
+    .\Setup\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com
 
 .EXAMPLE
-    .\SmartM365-Create-AppRegistration.ps1 -DisplayName SmartM365 -TenantId 00000000-0000-0000-0000-000000000000 -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UpdateExisting
+    .\Setup\SmartM365-Create-AppRegistration.ps1 -DisplayName SmartM365 -TenantId 00000000-0000-0000-0000-000000000000 -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UpdateExisting
 
 .EXAMPLE
-    .\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UseDeviceCode -WhatIf
+    .\Setup\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UseDeviceCode -WhatIf
 
 .EXAMPLE
-    .\SmartM365-Create-AppRegistration.ps1 -RemoveAppRegistration -Confirm
+    .\Setup\SmartM365-Create-AppRegistration.ps1 -RemoveAppRegistration -Confirm
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -177,8 +177,13 @@ param(
 $tenantContextPath = & {
     $d = $PSScriptRoot
     while ($d) {
-        $p = Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'
-        if (Test-Path -LiteralPath $p) { return $p }
+        $candidates = @(
+            (Join-Path -Path $d -ChildPath 'SmartM365-TenantContext.ps1'),
+            (Join-Path -Path $d -ChildPath 'Config\SmartM365-TenantContext.ps1')
+        )
+        foreach ($p in $candidates) {
+            if (Test-Path -LiteralPath $p) { return $p }
+        }
         $parent = Split-Path -Path $d -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
         $d = $parent
@@ -186,6 +191,7 @@ $tenantContextPath = & {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 . $tenantContextPath
+$script:SmartM365RootPath = Find-SmartM365Root -StartPath $PSScriptRoot
 Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 Set-StrictMode -Version Latest
@@ -1918,7 +1924,7 @@ Disconnect-SmartM365ExistingExchangeOnlineSession
 Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $ExchangeAdminUserPrincipalName
 $graphContext = Connect-SmartM365GraphSetupSession -RequestedTenantId $TenantId -UseDeviceCode:$UseDeviceCode
 $effectiveTenantId = $graphContext.TenantId
-$localConfigPath = Join-Path -Path $PSScriptRoot -ChildPath ("Config\Tenants\{0}.local.json" -f $Tenant)
+$localConfigPath = Join-Path -Path $script:SmartM365RootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $Tenant)
 
 $escapedDisplayName = ConvertTo-ODataStringLiteral -Value $DisplayName
 $existingApps = @(Get-MgApplication -Filter "displayName eq '$escapedDisplayName'" -Property 'id,appId,displayName,requiredResourceAccess,keyCredentials' -All)

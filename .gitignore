@@ -12,8 +12,6 @@ SmartM365/**
 *.md
 !/README.md
 !/BRANCHES.md
-!/SmartM365/AGENTS.md
-!/SmartM365/RULES.md
 !/SmartM365/README.md
 !/SmartM365/SmartM365-AppRegistration-Permissions.md
 !/SmartM365/SmartM365-Create-AppRegistration.ps1
@@ -34,7 +32,10 @@ SmartM365/**
 !/SmartM365/**/W11-Upgrade-Compatibility-Indicators-Intune-Description.txt
 !/SmartM365/SmartIntuneHybridJoinToolkit/LOT-X/Computers.txt
 
-# Local memories stay private even when Markdown is re-included above.
+# Local agent notes and memories stay private even when Markdown is re-included above.
+**/AGENTS.md
+**/RULES.md
+**/IMPLEMENTATION-NOTES.md
 **/LOCAL_MEMORY.md
 
 # Smart Intune Hybrid Join Toolkit runtime data

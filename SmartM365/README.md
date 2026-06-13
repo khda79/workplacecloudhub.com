@@ -13,9 +13,9 @@ This repository contains reusable scripts and helper modules.
 - Device registration diagnostics under `DeviceRegistrationTool/`, with a PowerShell/WPF GUI and CLI mode for Intune enrollment, Hybrid Join, and Entra device registration checks.
 - Device restart notification app under `DeviceRebootManager/`, with a localized PowerShell 5.1 WPF GUI.
 
-## Azure App Registration
+## Setup
 
-Use `SmartM365-Create-AppRegistration.ps1` to create or update the app registration used by SmartM365 app-only automation. The script grants admin consent by default; use `-DisableGrantAdminConsent` only when you want to add the permissions without granting consent immediately.
+`Setup/` contains the interactive SmartM365 setup scripts. Use `Setup/SmartM365-Create-AppRegistration.ps1` to create or update the app registration used by SmartM365 app-only automation. The script grants admin consent by default; use `-DisableGrantAdminConsent` only when you want to add the permissions without granting consent immediately.
 
 The setup run writes a text log and PowerShell transcript to `C:\Temp\WORKPLACE` by default. Use `-LogPath <folder>` to store them elsewhere.
 
@@ -25,7 +25,7 @@ When the selected tenant profile already contains `Thumbprint` or `Thumb`, the s
 
 The bootstrap also configures Graph mail sending: it connects to Exchange Online before Microsoft Graph, creates or reuses a dedicated SmartM365 sender shared mailbox, creates or reuses the `SMART-M365-MailSend-Allowed` mail-enabled security group, adds the sender mailbox to that group, creates an Exchange Online Application Access Policy that restricts `Mail.Send` to that group, and writes `From`, `SmtpServer`, and `MailSendAccessPolicyGroup` to the selected tenant profile. Use `-ExchangeAdminUserPrincipalName` if Exchange Online should sign in with a specific admin account.
 
-Teams notifications use Teams Workflows / Power Automate webhook URLs instead of Microsoft Graph chat permissions or legacy Office 365 Connectors. The bootstrap creates or reuses two standard channels in the `SMART-M365` team: `Alerts` for script errors and `Infos` for successful completion or informational notices. The webhook URLs are still created by the user in Teams / Workflows, then stored locally with `SmartM365-Set-TeamsWebhook.ps1`.
+Teams notifications use Teams Workflows / Power Automate webhook URLs instead of Microsoft Graph chat permissions or legacy Office 365 Connectors. The bootstrap creates or reuses two standard channels in the `SMART-M365` team: `Alerts` for script errors and `Infos` for successful completion or informational notices. The webhook URLs are still created by the user in Teams / Workflows, then stored locally with `Setup/SmartM365-Set-TeamsWebhook.ps1`.
 
 Every SmartM365 inventory/report script should send a Teams notification when it fails, in addition to the existing error email flow, and should send an `Infos` notification when it completes without error. `Infos` cards must include a `Result summary` fact with a short result recap, ideally with the main counters, generated files, skipped items, or actions performed by the script. Error notifications must include enough detail to act without opening the host first: script name, tenant or organization when known, computer name, timestamp, failed phase or operation, exception message, inner exception details when available, log file path, transcript path when available, and output path or CSV path when relevant. The Teams card should also include an AI help link built from the error context, for example a prefilled ChatGPT or Copilot prompt asking for troubleshooting help with the exact SmartM365 script, operation, and error text.
 
@@ -33,7 +33,7 @@ Use `-RemoveAppRegistration -Confirm` to remove the SmartM365 app registration a
 
 The same bootstrap creates or reuses the `SMART-M365` Teams team, resolves its SharePoint site, and updates the selected tenant profile with the SharePoint upload target. Use `-DisableTeamsSetup` only when the Teams workspace is already handled separately.
 
-Current Microsoft Graph application permissions include the read scopes used by the inventory scripts (`Directory.Read.All`, `User.Read.All`, `Device.Read.All`, `GroupMember.Read.All`, Intune read permissions, and `AuditLog.Read.All` for user `signInActivity`), plus `Sites.Selected` for SharePoint CSV upload and `Mail.Send` for Graph mail. The bootstrap grants the app `write` access only on the SmartM365 SharePoint site and removes older broad `Files.ReadWrite.All` / `Sites.ReadWrite.All` grants when found. Exchange Online app-only runtime inventory uses `Exchange.ManageAsApp` plus the supported Entra `Global Reader` role on the SmartM365 service principal; the bootstrap also removes the older `Exchange Administrator` service-principal role when found. `SmartM365-Create-AppRegistration.ps1` is separate because it is an interactive setup script and can require an Exchange Administrator account for mailbox, group, Application Access Policy, and service-principal role setup.
+Current Microsoft Graph application permissions include the read scopes used by the inventory scripts (`Directory.Read.All`, `User.Read.All`, `Device.Read.All`, `GroupMember.Read.All`, Intune read permissions, and `AuditLog.Read.All` for user `signInActivity`), plus `Sites.Selected` for SharePoint CSV upload and `Mail.Send` for Graph mail. The bootstrap grants the app `write` access only on the SmartM365 SharePoint site and removes older broad `Files.ReadWrite.All` / `Sites.ReadWrite.All` grants when found. Exchange Online app-only runtime inventory uses `Exchange.ManageAsApp` plus the supported Entra `Global Reader` role on the SmartM365 service principal; the bootstrap also removes the older `Exchange Administrator` service-principal role when found. `Setup/SmartM365-Create-AppRegistration.ps1` is separate because it is an interactive setup script and can require an Exchange Administrator account for mailbox, group, Application Access Policy, and service-principal role setup.
 
 `SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is also intentionally interactive only. It deploys Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`; it does not use SmartM365 app-only certificate authentication. `SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same delegated-only model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports through report export jobs.
 
@@ -65,10 +65,10 @@ Each script loads `SmartM365.global.local.json`, overlays `Config\Tenants\<Tenan
 {{WorkspaceRootPath}}\SMART-M365\Tenants\{{TenantKey}}\LOG-ALL
 ```
 
-Run `SmartM365-Create-AppRegistration.ps1` separately for each tenant that must be bootstrapped:
+Run `Setup/SmartM365-Create-AppRegistration.ps1` separately for each tenant that must be bootstrapped:
 
 ```powershell
-.\SmartM365-Create-AppRegistration.ps1 -Tenant prod
+.\Setup\SmartM365-Create-AppRegistration.ps1 -Tenant prod
 ```
 
 The bootstrap is interactive and should keep tenant-specific app, SharePoint, mail, and Teams values in `Config\Tenants\<Tenant>.local.json`.
@@ -80,7 +80,7 @@ SmartM365 uses two Teams channels:
 - `Alerts`: errors, failed runs, blocked scripts, and diagnostics that require action.
 - `Infos`: successful script completion and informational notices.
 
-Run `SmartM365-Create-AppRegistration.ps1` first. It creates or reuses the `SMART-M365` team and the `Alerts` / `Infos` channels. It does not create the Power Automate webhook URLs because Teams Workflows are created in the user's Microsoft 365 / Power Platform context.
+Run `Setup/SmartM365-Create-AppRegistration.ps1` first. It creates or reuses the `SMART-M365` team and the `Alerts` / `Infos` channels. It does not create the Power Automate webhook URLs because Teams Workflows are created in the user's Microsoft 365 / Power Platform context.
 
 Create the Teams Workflow URL for `Alerts`:
 
@@ -100,8 +100,8 @@ Store and test the URLs from PowerShell:
 ```powershell
 cd %SMARTM365_ROOT%
 
-.\SmartM365-Set-TeamsWebhook.ps1 -Channel Alerts -WebhookUrl "<Alerts workflow URL>"
-.\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos  -WebhookUrl "<Infos workflow URL>"
+.\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Alerts -WebhookUrl "<Alerts workflow URL>"
+.\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos  -WebhookUrl "<Infos workflow URL>"
 ```
 
 The script writes the URLs to the selected tenant profile as `TeamsAlertsWebhookUrl` and `TeamsInfosWebhookUrl`, then sends a test card to the selected channel. The local JSON file is ignored by Git and must never be committed.
