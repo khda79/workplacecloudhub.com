@@ -7,8 +7,20 @@ WorkplaceCloudHub is built around practical guidance, automation patterns, and t
 ## Content
 
 - `SmartM365/`: validated PowerShell automation scripts and tools for Microsoft 365 and endpoint administration.
+- `SmartAzure/`: Azure infrastructure inventory, governance, security posture, and cost optimization scripts.
 
 Additional project directories will be added over time.
+
+## SmartAzure Tools
+
+`SmartAzure/` contains PowerShell automation for Azure Resource Manager environments.
+
+- `SmartInventory/Governance/SmartAzure-AzureEstate-Inventory.ps1`: exports management groups, subscriptions, regions, resource groups, resources, locks, providers, and a per-subscription summary.
+- `SmartInventory/RBAC/SmartAzure-RBAC-Inventory.ps1`: exports role assignments, privileged assignments, custom roles, and RBAC summaries.
+- `SmartInventory/Cost/SmartAzure-CostOptimization-Inventory.ps1`: exports unattached disks, old snapshots, unused public IPs, stopped/deallocated VMs, and cost review summaries.
+- `SmartInventory/Network/SmartAzure-NetworkExposure-Inventory.ps1`: exports public IPs, Internet-sourced inbound NSG allow rules, load balancers, application gateways, private endpoints, and exposure summaries.
+- `SmartInventory/Governance/SmartAzure-PolicyCompliance-Inventory.ps1`: exports Azure Policy assignments, definitions, initiatives, exemptions, policy state details, and compliance summaries.
+- Planned inventory areas include Defender for Cloud, backup, storage security, and Key Vault security.
 
 ## SmartM365 Tools
 

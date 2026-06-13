@@ -902,10 +902,8 @@ try {
         $polOut | Format-Table -AutoSize -Wrap
 
         try {
-            $polOut | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $mainCsv
-            Copy-Item -Path $mainCsv -Destination $tsCsv   -Force
-            Copy-Item -Path $mainCsv -Destination $lastCsv -Force
-            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $lastCsv
+            Write-SmartM365CsvAtomically -Data @($polOut) -Path $mainCsv
+            Export-SmartM365Csv -Data @($polOut) -TimestampedPath $tsCsv -LatestPath $lastCsv | Out-Null
 
             Write-Host "Compliance CSV saved: $mainCsv"
             Write-Host "Compliance CSV timestamped: $tsCsv"

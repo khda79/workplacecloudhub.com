@@ -604,17 +604,9 @@ $inventoryColumns = @(
 )
 $sortedInventory = @($inventory | Sort-Object DisplayName)
 
-if ($sortedInventory.Count -gt 0) {
-    $sortedInventory |
-        Select-Object -Property $inventoryColumns |
-        Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
-}
-else {
-    Save-Utf8NoBom -Path $csvPath -Content ('"{0}"' -f ($inventoryColumns -join '","'))
-}
+Publish-CoreSmartM365Csv -Data $sortedInventory -TimestampedPath $csvPath -Columns $inventoryColumns | Out-Null
 
 Save-Utf8NoBom -Path $jsonPath -Content (ConvertTo-Json -InputObject $sortedInventory -Depth 20)
-Invoke-CoreSmartM365SharePointCsvUpload -LocalFilePath $csvPath
 
 $exportInfo = [ordered]@{
     Timestamp             = $timestamp

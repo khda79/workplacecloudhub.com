@@ -304,26 +304,6 @@ try {
     exit 1
 }
 
-function Write-CsvAtomically {
-    param(
-        [Parameter(Mandatory)][object[]]$InputObject,
-        [Parameter(Mandatory)][string]$Path
-    )
-
-    $dir = Split-Path -Path $Path -Parent
-    if (-not (Test-Path $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    }
-
-    $tmp = Join-Path $dir ("{0}.{1}.tmp" -f ([IO.Path]::GetFileNameWithoutExtension($Path)), ([guid]::NewGuid().ToString("N")))
-    try {
-        $InputObject | Export-Csv -Path $tmp -NoTypeInformation -Encoding UTF8
-        Move-Item -Path $tmp -Destination $Path -Force
-    } finally {
-        if (Test-Path $tmp) { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue }
-    }
-}
-
 function Ensure-ExchangeOnlineModule {
     $m = Get-Module -ListAvailable -Name "ExchangeOnlineManagement" | Sort-Object Version -Descending | Select-Object -First 1
     if (-not $m) {
@@ -518,14 +498,10 @@ try {
     $timestampedFileName = "{0}_{1}{2}" -f $baseName, $timestamp, $ext
     $csvPathTimestamped  = Join-Path $OutputPath $timestampedFileName
 
-    WriteLog -Message ("Exporting timestamped CSV (atomic) to: {0}" -f $csvPathTimestamped)
-    Write-CsvAtomically -InputObject @($domains) -Path $csvPathTimestamped
-
     $csvPathLast = Join-Path $LatestCsvFolderPath $OutputFileName
-    WriteLog -Message ("Writing LAST CSV to share (atomic): {0}" -f $csvPathLast)
-    Write-CsvAtomically -InputObject @($domains) -Path $csvPathLast
-    $currentOperation = "Upload accepted domains CSV to SharePoint"
-    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvPathLast
+    WriteLog -Message ("Publishing CSV. Timestamped: {0}; latest: {1}" -f $csvPathTimestamped, $csvPathLast)
+    $currentOperation = "Publish accepted domains CSV"
+    Export-SmartM365Csv -Data @($domains) -TimestampedPath $csvPathTimestamped -LatestPath $csvPathLast | Out-Null
 
     # ==========================================================
     # Summary

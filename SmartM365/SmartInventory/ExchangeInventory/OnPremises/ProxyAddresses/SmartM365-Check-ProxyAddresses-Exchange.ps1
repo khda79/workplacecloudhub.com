@@ -614,11 +614,9 @@ process {
 }
 
 end {
-    $results | Sort-Object Status, Identity | Export-Csv -Path $outDetail -NoTypeInformation -Encoding UTF8
-    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $outDetail
+    Publish-SmartM365Csv -Data @($results | Sort-Object Status, Identity) -TimestampedPath $outDetail | Out-Null
     if ($addedOperations.Count -gt 0) {
-        $addedOperations | Export-Csv -Path $outAdded -NoTypeInformation -Encoding UTF8
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $outAdded
+        Publish-SmartM365Csv -Data @($addedOperations) -TimestampedPath $outAdded | Out-Null
     }
 
     # Dedicated CSV for "missing but in allowlist" (exclude Added)
@@ -626,10 +624,7 @@ end {
         $_.AllowListMatch -and $_.Status -like 'Missing*' -and $_.Status -notlike '*NotInAllowList*' -and $_.Status -ne 'Added'
     }
     if ($allowMissing.Count -gt 0) {
-        $allowMissing |
-            Select-Object Identity, DisplayName, PrimaryAddress, ExpectedAddress, Status, EmailAddressPolicyEnabled, PolicyWarning |
-            Export-Csv -Path $outAllowMissing -NoTypeInformation -Encoding UTF8
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $outAllowMissing
+        Publish-SmartM365Csv -Data @($allowMissing | Select-Object Identity, DisplayName, PrimaryAddress, ExpectedAddress, Status, EmailAddressPolicyEnabled, PolicyWarning) -TimestampedPath $outAllowMissing | Out-Null
     }
 
     $summary = @(
@@ -645,8 +640,7 @@ end {
         [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount },
         [PSCustomObject]@{ Summary = "Allowlist entries loaded";              Count = $script:AllowListRowCount }
     )
-    $summary | Export-Csv -Path $outSummary -NoTypeInformation -Encoding UTF8
-    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $outSummary
+    Publish-SmartM365Csv -Data @($summary) -TimestampedPath $outSummary | Out-Null
 
     Write-Host "`n===== Summary ====="
     foreach ($item in $summary) {

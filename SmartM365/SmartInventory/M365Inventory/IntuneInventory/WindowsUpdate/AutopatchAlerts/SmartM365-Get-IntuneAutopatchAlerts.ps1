@@ -576,27 +576,6 @@ function Group-AlertSummary {
     return @($summary | Sort-Object -Property @{ Expression = 'Impact'; Descending = $true }, AlertName)
 }
 
-function Export-AtomicCsv {
-    param(
-        [AllowEmptyCollection()]
-        [Parameter(Mandatory)][object[]]$Data,
-        [Parameter(Mandatory)][string]$Path
-    )
-
-    $tempPath = '{0}.tmp' -f $Path
-    $parent = Split-Path -Path $Path -Parent
-    Ensure-Folder -Path $parent
-
-    if ($null -eq $Data -or $Data.Count -eq 0) {
-        Set-Content -Path $tempPath -Value '' -Encoding utf8
-    }
-    else {
-        $Data | Export-Csv -Path $tempPath -NoTypeInformation -Encoding utf8
-    }
-
-    Move-Item -Path $tempPath -Destination $Path -Force
-}
-
 try {
     Ensure-Folder -Path $OutputFolder
     Ensure-Folder -Path $LogFolder
@@ -650,18 +629,15 @@ try {
             $qualityErrorRows = Import-ExportedCsv -ReportName 'QualityUpdateDeviceErrorsByPolicy' -Select @('DeviceId','DeviceName','PolicyId','ExpediteQUReleaseDate','AlertMessage','Win32ErrorCode') -Filter $filter
             foreach ($item in (Convert-QualityErrorRowsToAlertDetails -Rows $qualityErrorRows -PolicyMap $qualityPolicyMap)) { $detailRows.Add($item) }
         }
-        Export-AtomicCsv -Data $qualityPolicyRows.ToArray() -Path $PolicyCsvPath
+        Publish-CoreSmartM365Csv -Data $qualityPolicyRows.ToArray() -TimestampedPath $PolicyCsvPath | Out-Null
         Write-Log -Message ("Policy summary CSV written to [{0}]" -f $PolicyCsvPath)
     }
 
     $detailOutput = @($detailRows.ToArray() | Sort-Object -Property @{ Expression = 'EventDateUtc'; Descending = $true }, DeviceName)
     $summaryOutput = Group-AlertSummary -Details $detailOutput
 
-    Export-AtomicCsv -Data $detailOutput -Path $DetailCsvPath
-    Export-AtomicCsv -Data $summaryOutput -Path $SummaryCsvPath
-    Invoke-CoreSmartM365SharePointCsvUpload -LocalFilePath $PolicyCsvPath
-    Invoke-CoreSmartM365SharePointCsvUpload -LocalFilePath $DetailCsvPath
-    Invoke-CoreSmartM365SharePointCsvUpload -LocalFilePath $SummaryCsvPath
+    Publish-CoreSmartM365Csv -Data $detailOutput -TimestampedPath $DetailCsvPath | Out-Null
+    Publish-CoreSmartM365Csv -Data $summaryOutput -TimestampedPath $SummaryCsvPath | Out-Null
 
     Write-Log -Message ("Detail CSV written to [{0}]" -f $DetailCsvPath)
     Write-Log -Message ("Summary CSV written to [{0}]" -f $SummaryCsvPath)

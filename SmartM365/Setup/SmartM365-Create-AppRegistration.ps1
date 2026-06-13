@@ -85,7 +85,8 @@
 
 .PARAMETER LogPath
     Folder where the setup log and transcript are written. Defaults to
-    C:\Temp\WORKPLACE.
+    Data\Tenants\<TenantKey>\LOG-ALL\Setup under the SmartM365 root, with
+    fallback to Setup\Output\Tenants\<TenantKey>\LOG-ALL\Setup.
 
 .EXAMPLE
     .\Setup\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com
@@ -171,8 +172,7 @@ param(
     [switch]$DisableTeamsSetup,
 
     [Parameter()]
-    [ValidateNotNullOrEmpty()]
-    [string]$LogPath = 'C:\Temp\WORKPLACE'
+    [string]$LogPath = ''
 )
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -193,6 +193,16 @@ $tenantContextPath = & {
 . $tenantContextPath
 $script:SmartM365RootPath = Find-SmartM365Root -StartPath $PSScriptRoot
 Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
+
+if ([string]::IsNullOrWhiteSpace($LogPath)) {
+    $defaultSetupLogPath = Join-Path -Path $script:SmartM365RootPath -ChildPath ("Data\Tenants\{0}\LOG-ALL\Setup" -f $Tenant)
+    if (Test-SmartM365WritableDirectory -Path $defaultSetupLogPath) {
+        $LogPath = $defaultSetupLogPath
+    }
+    else {
+        $LogPath = Join-Path -Path $PSScriptRoot -ChildPath ("Output\Tenants\{0}\LOG-ALL\Setup" -f $Tenant)
+    }
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

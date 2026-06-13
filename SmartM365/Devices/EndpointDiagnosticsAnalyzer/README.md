@@ -65,25 +65,25 @@ Or use the launcher:
 Analyze a ZIP from the command line:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath .\Output\DiagLogs.zip
 ```
 
 Analyze and export an HTML report:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip -ExportHtmlPath C:\Temp\DiagLogs-report.html
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath .\Output\DiagLogs.zip -ExportHtmlPath .\Output\DiagLogs-report.html
 ```
 
 Analyze with AI from the command line:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip -RunAI -AIProvider ollama
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath .\Output\DiagLogs.zip -RunAI -AIProvider ollama
 ```
 
 Collect local diagnostics and create a ZIP:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -CollectLocal -ZipPath C:\Temp\LocalDiag.zip
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -CollectLocal -ZipPath .\Output\LocalDiag.zip
 ```
 
 ## Privacy

@@ -1389,6 +1389,13 @@ function ExportAndCopyCsv {
         RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
     }
 
+    if (Test-Path -LiteralPath $csvFilePath3) {
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
+    }
+    else {
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath2
+    }
+
     # Final log
     WriteLog -Message "CSV export completed: $csvFilePath1"
 }
@@ -1473,6 +1480,13 @@ function ExportAndCopyCsvFromConvert {
 
         if ($global:RetentionMaxCSV -gt 0) {
             RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
+        }
+
+        if (Test-Path -LiteralPath $csvFilePath3) {
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
+        }
+        else {
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath2
         }
 
     } catch {
@@ -1905,5 +1919,150 @@ function Remove-OldFiles {
     }
 }
 
-#endregion
+function Set-SmartM365CoreContext {
+    [CmdletBinding()]
+    param(
+        [string]$RunId,
+        [string]$RunOutputRoot,
+        [string]$LatestOutputRoot,
+        [string]$LogPath,
+        [int]$RetentionMaxCsv = 30,
+        [int]$RetentionMaxLogs = 30
+    )
 
+    $script:SmartM365CoreRunId = $RunId
+    $script:SmartM365CoreRunOutputRoot = $RunOutputRoot
+    $script:SmartM365CoreLatestOutputRoot = $LatestOutputRoot
+    $script:SmartM365CoreLogPath = $LogPath
+    $script:SmartM365CoreRetentionMaxCsv = $RetentionMaxCsv
+    $script:SmartM365CoreRetentionMaxLogs = $RetentionMaxLogs
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $global:LogTextFile = $LogPath }
+}
+
+function Write-SmartM365CsvAtomically {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [Parameter(Mandatory)][string]$Path,
+        [string[]]$Columns = @(),
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+        [string]$Delimiter = ","
+    )
+
+    $parent = Split-Path -Path $Path -Parent
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
+        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    }
+
+    $leaf = Split-Path -Path $Path -Leaf
+    $tempPath = Join-Path -Path $parent -ChildPath ("{0}.tmp.{1}" -f $leaf, [guid]::NewGuid().ToString("N"))
+
+    try {
+        $rows = @($Data)
+        if ($rows.Count -eq 0 -and $Columns.Count -gt 0) {
+            $header = ($Columns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join $Delimiter
+            Set-Content -LiteralPath $tempPath -Value $header -Encoding $Encoding -ErrorAction Stop
+        }
+        elseif ($Columns.Count -gt 0) {
+            $rows | Select-Object -Property $Columns | Export-Csv -Path $tempPath -NoTypeInformation -Encoding $Encoding -Delimiter $Delimiter -ErrorAction Stop
+        }
+        else {
+            $rows | Export-Csv -Path $tempPath -NoTypeInformation -Encoding $Encoding -Delimiter $Delimiter -ErrorAction Stop
+        }
+
+        Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Publish-SmartM365Csv {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [Parameter(Mandatory)][string]$TimestampedPath,
+        [string]$LatestPath,
+        [string[]]$Columns = @(),
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+        [string]$Delimiter = ",",
+        [int]$RetentionMaxCsv = -1,
+        [switch]$NoSharePointUpload
+    )
+
+    Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
+    WriteLog -Message ("CSV exported to: {0}" -f $TimestampedPath)
+
+    if (-not $global:csvGeneratedPaths) {
+        $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    [void]$global:csvGeneratedPaths.Add($TimestampedPath)
+
+    $publishedPath = $TimestampedPath
+    if (-not [string]::IsNullOrWhiteSpace($LatestPath)) {
+        Write-SmartM365CsvAtomically -Data $Data -Path $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
+        WriteLog -Message ("CSV latest copy written to: {0}" -f $LatestPath)
+        [void]$global:csvGeneratedPaths.Add($LatestPath)
+        $publishedPath = $LatestPath
+    }
+
+    if ($RetentionMaxCsv -lt 0 -and $global:RetentionMaxCSV) {
+        $RetentionMaxCsv = [int]$global:RetentionMaxCSV
+    }
+    if ($RetentionMaxCsv -gt 0) {
+        $timestampedFolder = Split-Path -Path $TimestampedPath -Parent
+        $timestampedName = [System.IO.Path]::GetFileNameWithoutExtension($TimestampedPath)
+        $retentionPrefix = $timestampedName -replace '_\d{8}[-_]\d{6}$', ''
+        if (-not [string]::IsNullOrWhiteSpace($timestampedFolder) -and -not [string]::IsNullOrWhiteSpace($retentionPrefix)) {
+            RemoveOldFiles -Path $timestampedFolder -Filter "$retentionPrefix*.csv" -KeepCount $RetentionMaxCsv -LogFile $global:LogTextFile
+        }
+    }
+
+    if (-not $NoSharePointUpload) {
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $publishedPath
+    }
+
+    return New-Object psobject -Property @{
+        TimestampedPath = $TimestampedPath
+        LatestPath      = $LatestPath
+        PublishedPath   = $publishedPath
+    }
+}
+
+function Export-SmartM365Csv {
+    [CmdletBinding(DefaultParameterSetName = 'ByBaseName')]
+    param(
+        [Parameter(Mandatory, ParameterSetName = 'ByBaseName')]
+        [string]$BaseFileName,
+        [Parameter(Mandatory, ParameterSetName = 'ByBaseName')]
+        [string]$OutputPath,
+        [Parameter(Mandatory, ParameterSetName = 'ByBaseName')]
+        [string]$GlobalPath,
+        [Parameter(Mandatory, ParameterSetName = 'ByPath')]
+        [string]$TimestampedPath,
+        [Parameter(ParameterSetName = 'ByPath')]
+        [string]$LatestPath,
+        [Parameter(Mandatory)]
+        [AllowNull()][object[]]$Data,
+        [string[]]$Columns = @(),
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+        [string]$Delimiter = ",",
+        [switch]$NoSharePointUpload
+    )
+
+    if ($PSCmdlet.ParameterSetName -eq 'ByBaseName') {
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $TimestampedPath = Join-Path $OutputPath "$BaseFileName`_$timestamp.csv"
+        $LatestPath = Join-Path $GlobalPath "$BaseFileName.csv"
+    }
+
+    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload
+}
+
+#endregion
