@@ -1,0 +1,7 @@
+{
+  "TenantKey": "test",
+  "AzureTenantId": "contoso.onmicrosoft.com",
+  "TenantId": "",
+  "OrgDomain": "",
+  "RetentionMaxCSV": 30
+}
