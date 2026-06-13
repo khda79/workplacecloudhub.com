@@ -1,0 +1,39 @@
+@echo off
+setlocal EnableExtensions
+
+rem Root launcher.
+rem Uses Scripts\SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 and stores DevicesIntune.csv in the root folder.
+rem Always exports the full Intune managed devices inventory.
+
+set "ROOT_DIR=%~dp0"
+set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1"
+set "OUTPUT=%ROOT_DIR%DevicesIntune.csv"
+
+if not exist "%SCRIPT%" (
+    echo ERROR: Script not found:
+    echo "%SCRIPT%"
+    set "EXITCODE=1"
+    goto :END
+)
+
+net session >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Run this CMD from an elevated administrator command prompt.
+    echo The output file is written in this folder:
+    echo "%OUTPUT%"
+    set "EXITCODE=1"
+    goto :END
+)
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
+  -OutputPath "%OUTPUT%" ^
+  -PageSize 999 ^
+  %*
+
+set "EXITCODE=%ERRORLEVEL%"
+
+:END
+echo.
+echo Finished with exit code %EXITCODE%.
+pause
+exit /b %EXITCODE%

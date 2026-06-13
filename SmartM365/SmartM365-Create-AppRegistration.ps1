@@ -196,6 +196,41 @@ $script:SmartM365SetupTranscriptFile = $null
 $script:SmartM365SetupTranscriptStarted = $false
 $script:SmartM365ExchangeOnlineConnected = $false
 
+function Format-SmartM365TimestampedLine {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Message,
+        [string]$Level = 'INFO'
+    )
+
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    @([regex]::Split($Message, '\r?\n')) | ForEach-Object {
+        "{0} [{1}] {2}" -f $timestamp, $Level, $_
+    }
+}
+
+function Update-SmartM365TimestampedTranscriptFile {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return
+    }
+
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $updated = [System.IO.File]::ReadAllLines($Path) | ForEach-Object {
+        if ($_ -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b') {
+            $_
+        }
+        elseif ($_ -match '^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(.*)$') {
+            "{0} {1}" -f $Matches[1], $Matches[2]
+        }
+        else {
+            "{0} {1}" -f $timestamp, $_
+        }
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($Path, [string[]]$updated, $utf8NoBom)
+}
+
 function Initialize-SmartM365SetupLogging {
     param(
         [Parameter(Mandatory)][string]$Path
@@ -211,20 +246,20 @@ function Initialize-SmartM365SetupLogging {
     $script:SmartM365SetupLogFile = Join-Path -Path $resolvedLogPath -ChildPath ("{0}-{1}.log" -f $baseName, $timestamp)
     $script:SmartM365SetupTranscriptFile = Join-Path -Path $resolvedLogPath -ChildPath ("{0}-{1}_Transcript.log" -f $baseName, $timestamp)
 
-    Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [INFO] Log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Confirm:$false
+    Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value (Format-SmartM365TimestampedLine -Message 'Log started.' -Level 'INFO') -Confirm:$false
 
     try {
         Start-Transcript -Path $script:SmartM365SetupTranscriptFile -Append -ErrorAction Stop -Confirm:$false | Out-Null
         $script:SmartM365SetupTranscriptStarted = $true
     }
     catch {
-        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [WARN] Transcript could not be started: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $_.Exception.Message) -Confirm:$false
+        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value (Format-SmartM365TimestampedLine -Message ("Transcript could not be started: {0}" -f $_.Exception.Message) -Level 'WARN') -Confirm:$false
     }
 }
 
 function Close-SmartM365SetupLogging {
     if ($script:SmartM365SetupLogFile) {
-        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value ("[{0}] [INFO] Log finished." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Confirm:$false
+        Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value (Format-SmartM365TimestampedLine -Message 'Log finished.' -Level 'INFO') -Confirm:$false
         Write-Information ("[INFO] Log file: {0}" -f $script:SmartM365SetupLogFile) -InformationAction Continue
         if ($script:SmartM365SetupTranscriptFile) {
             Write-Information ("[INFO] Transcript file: {0}" -f $script:SmartM365SetupTranscriptFile) -InformationAction Continue
@@ -233,6 +268,7 @@ function Close-SmartM365SetupLogging {
 
     if ($script:SmartM365SetupTranscriptStarted) {
         try { Stop-Transcript | Out-Null } catch { Write-Debug ("Stop-Transcript failed: {0}" -f $_.Exception.Message) }
+        try { Update-SmartM365TimestampedTranscriptFile -Path $script:SmartM365SetupTranscriptFile } catch { Write-Debug ("Transcript timestamp normalization failed: {0}" -f $_.Exception.Message) }
         $script:SmartM365SetupTranscriptStarted = $false
     }
 }
@@ -244,7 +280,7 @@ function Write-SmartM365SetupStatus {
     )
 
     if ($script:SmartM365SetupLogFile) {
-        $logEntry = "[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
+        $logEntry = Format-SmartM365TimestampedLine -Message $Message -Level $Level
         try { Add-Content -LiteralPath $script:SmartM365SetupLogFile -Encoding UTF8 -Value $logEntry -Confirm:$false } catch { Write-Debug ("Log write failed: {0}" -f $_.Exception.Message) }
     }
 
