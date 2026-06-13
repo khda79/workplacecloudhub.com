@@ -34,6 +34,9 @@ param(
 
     [string]$RemediationRoot = '',
 
+    [ValidateSet('InteractiveBrowser', 'DeviceCode')]
+    [string]$GraphAuthMode = 'InteractiveBrowser',
+
     [switch]$ValidateOnly
 )
 
@@ -51,6 +54,7 @@ $script:BaseScopes = @(
 )
 $script:ReportExportScopes = @()
 $script:GraphBaseUri = "https://graph.microsoft.com/$GraphApiVersion"
+$script:GraphAuthMode = $GraphAuthMode
 $script:GraphContext = $null
 $script:IsGraphConnected = $false
 $script:CloudRemediations = @()
@@ -59,7 +63,10 @@ $script:SelectedLocalPackage = $null
 $script:SelectedCloudRemediation = $null
 $script:EditorDetectionPath = ''
 $script:EditorRemediationPath = ''
-$script:LogPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-IntuneRemediation-GUI.log'
+$script:IsImportExcelAvailable = $false
+$script:ImportExcelSupportChecked = $false
+$script:LogDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Logs'
+$script:LogPath = Join-Path -Path $script:LogDirectory -ChildPath 'SmartM365-IntuneRemediation-GUI.log'
 $script:MaxLogFileCount = 10
 $script:ConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-IntuneRemediation-GUI.config.json'
 $script:ConfiguredRemediationRoot = ''
@@ -77,9 +84,11 @@ function Initialize-GuiLogRotation {
 
     try {
         $logDirectory = Split-Path -Path $script:LogPath -Parent
-        if ([string]::IsNullOrWhiteSpace($logDirectory) -or -not (Test-Path -LiteralPath $logDirectory -PathType Container)) {
+        if ([string]::IsNullOrWhiteSpace($logDirectory)) {
             return
         }
+
+        [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
 
         if (Test-Path -LiteralPath $script:LogPath -PathType Leaf) {
             $currentLog = Get-Item -LiteralPath $script:LogPath -ErrorAction Stop
@@ -128,6 +137,11 @@ function Write-GuiLog {
     }
 
     try {
+        $logDirectory = Split-Path -Path $script:LogPath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($logDirectory)) {
+            [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
+        }
+
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [IO.File]::AppendAllText($script:LogPath, "$fileLine`r`n", $utf8NoBom)
     }
@@ -145,6 +159,29 @@ function Show-GuiError {
 
     [System.Windows.MessageBox]::Show($Message, $Title, 'OK', 'Error') | Out-Null
     Write-GuiLog "$Title - $Message"
+}
+
+function Get-GuiGraphConnectionFailureMessage {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    $message = $ErrorRecord.Exception.Message
+    if ([string]::IsNullOrWhiteSpace($message)) {
+        $message = 'Microsoft Graph sign-in did not complete.'
+    }
+
+    if ($message -match 'User canceled authentication|authentication.*canceled|timed out|timeout|browser') {
+        return @"
+$message
+
+The Microsoft Graph browser sign-in was canceled or did not complete. Click Connect Graph again, keep the browser tab open, finish sign-in and consent, then return to the manager.
+
+If the browser window does not open or the localhost redirect is blocked, launch the GUI from a visible PowerShell window with:
+pwsh -STA -NoProfile -File .\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
+"@
+    }
+
+    return $message
 }
 
 function Set-GuiButtonEnabled {
@@ -190,6 +227,7 @@ function Update-ActionButtonsState {
     Set-GuiButtonEnabled -Name 'SaveCloudScriptsButton' -Enabled ($hasCloudRemediation -and $script:IsGraphConnected)
     Set-GuiButtonEnabled -Name 'AnalyzeCloudButton' -Enabled ($hasCloudRemediation -and $script:IsGraphConnected)
     Set-GuiButtonEnabled -Name 'SaveAllCloudButton' -Enabled $script:IsGraphConnected
+    Set-GuiButtonEnabled -Name 'CompareLocalCloudButton' -Enabled ($hasLocalPackage -and $hasCloudRemediation -and $script:IsGraphConnected)
     Set-GuiButtonEnabled -Name 'ResetHistoryButton' -Enabled ($hasCloudRemediation -and $script:IsGraphConnected)
     Set-GuiButtonEnabled -Name 'DeleteCloudButton' -Enabled ($hasCloudRemediation -and $script:IsGraphConnected)
     Set-GuiButtonEnabled -Name 'ExportReportButton' -Enabled ($hasCloudRemediation -and $script:IsGraphConnected)
@@ -203,6 +241,7 @@ function Update-ActionButtonsState {
                 'SaveCloudScriptsButton',
                 'AnalyzeCloudButton',
                 'SaveAllCloudButton',
+                'CompareLocalCloudButton',
                 'ResetHistoryButton',
                 'DeleteCloudButton',
                 'ExportReportButton'
@@ -219,6 +258,7 @@ function Update-ActionButtonsState {
             'SaveCloudScriptsButton',
             'AnalyzeCloudButton',
             'SaveAllCloudButton',
+            'CompareLocalCloudButton',
             'ResetHistoryButton',
             'DeleteCloudButton',
             'ExportReportButton'
@@ -334,12 +374,17 @@ function Connect-GuiGraph {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
 
     $connectParams = @{
-        Scopes      = @($Scopes | Select-Object -Unique)
-        NoWelcome   = $true
-        ErrorAction = 'Stop'
+        Scopes       = @($Scopes | Select-Object -Unique)
+        ContextScope = 'Process'
+        NoWelcome    = $true
+        ErrorAction  = 'Stop'
     }
 
-    Write-GuiLog ("Connecting to Microsoft Graph with scopes: {0}" -f (($connectParams.Scopes) -join ', '))
+    if ($script:GraphAuthMode -eq 'DeviceCode') {
+        $connectParams.UseDeviceCode = $true
+    }
+
+    Write-GuiLog ("Connecting to Microsoft Graph using {0} with scopes: {1}" -f $script:GraphAuthMode, (($connectParams.Scopes) -join ', '))
     Connect-MgGraph @connectParams | Out-Null
     $script:GraphContext = Get-MgContext
     if ($null -eq $script:GraphContext) {
@@ -528,16 +573,19 @@ function Get-ExecutionReportSavePath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$DisplayName,
-        [Parameter(Mandatory = $true)][string]$Timestamp
+        [Parameter(Mandatory = $true)][string]$Timestamp,
+        [Parameter(Mandatory = $true)][ValidateSet('CSV', 'Excel')][string]$Format
     )
 
     $safeName = ConvertTo-SafeFileName -Value $DisplayName
+    $extension = if ($Format -eq 'Excel') { '.xlsx' } else { '.csv' }
+    $filter = if ($Format -eq 'Excel') { 'Excel workbooks (*.xlsx)|*.xlsx|All files (*.*)|*.*' } else { 'CSV files (*.csv)|*.csv|All files (*.*)|*.*' }
     $dialog = New-Object Microsoft.Win32.SaveFileDialog
     $dialog.Title = 'Save Intune remediation execution report'
-    $dialog.Filter = 'CSV files (*.csv)|*.csv|All files (*.*)|*.*'
-    $dialog.FileName = "$safeName-ExecutionReport-$Timestamp.csv"
+    $dialog.Filter = $filter
+    $dialog.FileName = "$safeName-ExecutionReport-$Timestamp$extension"
     $dialog.InitialDirectory = Get-UserDocumentsPath
-    $dialog.DefaultExt = '.csv'
+    $dialog.DefaultExt = $extension
     $dialog.AddExtension = $true
     $dialog.OverwritePrompt = $true
 
@@ -545,6 +593,94 @@ function Get-ExecutionReportSavePath {
     if ($result -ne $true) { return '' }
 
     return $dialog.FileName
+}
+
+function Show-ExecutionReportFormatDialog {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][bool]$ExcelAvailable)
+
+    $formatWindow = New-Object System.Windows.Window
+    $formatWindow.Title = 'Export execution report'
+    $formatWindow.Width = 360
+    $formatWindow.Height = 190
+    $formatWindow.WindowStartupLocation = 'CenterOwner'
+    $formatWindow.ResizeMode = 'NoResize'
+    $formatWindow.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(246, 250, 253))
+    if ($script:Ui.ContainsKey('Window') -and $null -ne $script:Ui.Window) {
+        $formatWindow.Owner = $script:Ui.Window
+    }
+
+    $grid = New-Object System.Windows.Controls.Grid
+    $grid.Margin = [System.Windows.Thickness]::new(18)
+    $grid.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition -Property @{ Height = [System.Windows.GridLength]::Auto }))
+    $grid.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition -Property @{ Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star) }))
+    $grid.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition -Property @{ Height = [System.Windows.GridLength]::Auto }))
+
+    $label = New-Object System.Windows.Controls.TextBlock
+    $label.Text = if ($ExcelAvailable) {
+        'Choose the export format for the execution report.'
+    }
+    else {
+        'Excel export is unavailable because ImportExcel could not be installed. CSV export is available.'
+    }
+    $label.TextWrapping = 'Wrap'
+    $label.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(15, 36, 55))
+    $label.FontSize = 14
+    $label.FontWeight = 'SemiBold'
+    $label.Margin = [System.Windows.Thickness]::new(0, 0, 0, 10)
+    [System.Windows.Controls.Grid]::SetRow($label, 0)
+    $grid.Children.Add($label) | Out-Null
+
+    $buttons = New-Object System.Windows.Controls.StackPanel
+    $buttons.Orientation = 'Horizontal'
+    $buttons.HorizontalAlignment = 'Right'
+    $buttons.VerticalAlignment = 'Bottom'
+    [System.Windows.Controls.Grid]::SetRow($buttons, 2)
+
+    $selectedFormat = ''
+    $buttonDefinitions = @()
+    if ($ExcelAvailable) {
+        $buttonDefinitions += @{ Label = 'Excel'; Value = 'Excel'; Width = 88 }
+    }
+    $buttonDefinitions += @{ Label = 'CSV'; Value = 'CSV'; Width = 88 }
+    $buttonDefinitions += @{ Label = 'Cancel'; Value = ''; Width = 88 }
+
+    foreach ($buttonDefinition in $buttonDefinitions) {
+        $button = New-Object System.Windows.Controls.Button
+        $button.Content = $buttonDefinition.Label
+        $button.Width = $buttonDefinition.Width
+        $button.Height = 34
+        $button.Margin = [System.Windows.Thickness]::new(8, 0, 0, 0)
+        $button.Tag = $buttonDefinition.Value
+        $button.FontSize = 12
+        $button.FontWeight = 'SemiBold'
+        $button.Cursor = [System.Windows.Input.Cursors]::Hand
+        $button.Padding = [System.Windows.Thickness]::new(12, 4, 12, 4)
+        if ([string]$buttonDefinition.Value -eq 'Excel') {
+            $button.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(0, 132, 184))
+            $button.Foreground = [System.Windows.Media.Brushes]::White
+            $button.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(0, 132, 184))
+        }
+        else {
+            $button.Background = [System.Windows.Media.Brushes]::White
+            $button.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(15, 36, 55))
+            $button.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(190, 207, 220))
+        }
+        $button.Add_Click({
+                $script:ExecutionReportFormatDialogResult = [string]$this.Tag
+                $formatWindow.DialogResult = $true
+                $formatWindow.Close()
+            })
+        $buttons.Children.Add($button) | Out-Null
+    }
+
+    $grid.Children.Add($buttons) | Out-Null
+    $formatWindow.Content = $grid
+    $script:ExecutionReportFormatDialogResult = ''
+    [void]$formatWindow.ShowDialog()
+    $selectedFormat = [string]$script:ExecutionReportFormatDialogResult
+    $script:ExecutionReportFormatDialogResult = ''
+    return $selectedFormat
 }
 
 function Get-SaveAllArchivePath {
@@ -812,6 +948,152 @@ function Set-ObjectNoteProperty {
     Add-Member -InputObject $InputObject -MemberType NoteProperty -Name $Name -Value $Value -Force
 }
 
+function Get-NormalizedScriptContent {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Content)
+
+    if ($null -eq $Content) {
+        return ''
+    }
+
+    return (@(ConvertTo-CompareLines -Content ([string]$Content)) -join "`n")
+}
+
+function Get-ContentSha256 {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Content)
+
+    $normalizedContent = Get-NormalizedScriptContent -Content $Content
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalizedContent)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [System.BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
+
+function Get-ScriptContentSignature {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$DetectionContent,
+        [AllowNull()][string]$RemediationContent
+    )
+
+    return '{0}|{1}' -f (Get-ContentSha256 -Content $DetectionContent), (Get-ContentSha256 -Content $RemediationContent)
+}
+
+function Test-ScriptContentEqual {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$LeftContent,
+        [AllowNull()][string]$RightContent
+    )
+
+    $leftLines = @(ConvertTo-CompareLines -Content $LeftContent)
+    $rightLines = @(ConvertTo-CompareLines -Content $RightContent)
+    if ($leftLines.Count -ne $rightLines.Count) {
+        return $false
+    }
+
+    for ($i = 0; $i -lt $leftLines.Count; $i++) {
+        if ($leftLines[$i] -ne $rightLines[$i]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Get-LocalPackageContentSignature {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Package)
+
+    $detectionContent = if (-not [string]::IsNullOrWhiteSpace([string]$Package.DetectionPath)) {
+        [IO.File]::ReadAllText([string]$Package.DetectionPath)
+    }
+    else {
+        ''
+    }
+
+    $remediationContent = if (-not [string]::IsNullOrWhiteSpace([string]$Package.RemediationPath)) {
+        [IO.File]::ReadAllText([string]$Package.RemediationPath)
+    }
+    else {
+        ''
+    }
+
+    return Get-ScriptContentSignature -DetectionContent $detectionContent -RemediationContent $remediationContent
+}
+
+function Get-LocalPackageScriptContent {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Package)
+
+    $detectionContent = if (-not [string]::IsNullOrWhiteSpace([string]$Package.DetectionPath)) {
+        [IO.File]::ReadAllText([string]$Package.DetectionPath)
+    }
+    else {
+        ''
+    }
+
+    $remediationContent = if (-not [string]::IsNullOrWhiteSpace([string]$Package.RemediationPath)) {
+        [IO.File]::ReadAllText([string]$Package.RemediationPath)
+    }
+    else {
+        ''
+    }
+
+    return [pscustomobject]@{
+        DetectionContent   = $detectionContent
+        RemediationContent = $remediationContent
+    }
+}
+
+function Set-CloudRemediationContentSignature {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$CloudRemediation,
+        [Parameter(Mandatory = $true)]$Detail
+    )
+
+    $detectionContent = ConvertFrom-GraphScriptContent -Content (Get-ObjectValue -InputObject $Detail -Name 'detectionScriptContent')
+    $remediationContent = ConvertFrom-GraphScriptContent -Content (Get-ObjectValue -InputObject $Detail -Name 'remediationScriptContent')
+
+    Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'DetectionContentHash' -Value (Get-ContentSha256 -Content $detectionContent)
+    Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'RemediationContentHash' -Value (Get-ContentSha256 -Content $remediationContent)
+    Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'ContentSignature' -Value (Get-ScriptContentSignature -DetectionContent $detectionContent -RemediationContent $remediationContent)
+    Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'DetectionNormalizedContent' -Value (Get-NormalizedScriptContent -Content $detectionContent)
+    Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'RemediationNormalizedContent' -Value (Get-NormalizedScriptContent -Content $remediationContent)
+    Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'ContentSignatureAvailable' -Value $true
+    Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'ContentSignatureDetails' -Value 'Cloud content signature loaded.'
+}
+
+function Ensure-CloudRemediationContentSignature {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$CloudRemediation)
+
+    if ($null -eq $CloudRemediation) { return $false }
+
+    $available = $false
+    try { $available = [bool]$CloudRemediation.ContentSignatureAvailable } catch {}
+    if ($available -and -not [string]::IsNullOrWhiteSpace([string]$CloudRemediation.ContentSignature)) {
+        return $true
+    }
+
+    try {
+        $detail = Get-CloudRemediationDetail -Id ([string]$CloudRemediation.Id)
+        Set-CloudRemediationContentSignature -CloudRemediation $CloudRemediation -Detail $detail
+        return $true
+    }
+    catch {
+        Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'ContentSignatureAvailable' -Value $false
+        Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'ContentSignatureDetails' -Value $_.Exception.Message
+        return $false
+    }
+}
+
 function Get-PSScriptAnalyzerStatusFromFindings {
     [CmdletBinding()]
     param([AllowNull()]$Findings)
@@ -837,7 +1119,40 @@ function Get-PSScriptAnalyzerStatusSummary {
     $warning = @($itemsList | Where-Object { $_.PSScriptAnalyzerStatus -eq 'Warning' }).Count
     $errorCount = @($itemsList | Where-Object { $_.PSScriptAnalyzerStatus -eq 'Error' }).Count
     $notTested = @($itemsList | Where-Object { $_.PSScriptAnalyzerStatus -eq 'Not tested' }).Count
-    return "OK=$ok, Warning=$warning, Error=$errorCount, Not tested=$notTested"
+    $cloudDetailUnavailable = @($itemsList | Where-Object { $_.PSScriptAnalyzerStatus -eq 'Cloud detail unavailable' }).Count
+    $summary = "OK=$ok, Warning=$warning, Error=$errorCount, Not tested=$notTested"
+    if ($cloudDetailUnavailable -gt 0) {
+        $summary = "$summary, Cloud detail unavailable=$cloudDetailUnavailable"
+    }
+
+    return $summary
+}
+
+function Test-GraphNotFoundException {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Exception)
+
+    $message = [string]$Exception.Message
+    if ($message -match '\b404\b' -or $message -match 'NotFound' -or $message -match 'Not Found') {
+        return $true
+    }
+
+    try {
+        $responseStatusCode = $Exception.ResponseStatusCode
+        if ($null -ne $responseStatusCode -and [string]$responseStatusCode -match 'NotFound|404') {
+            return $true
+        }
+    }
+    catch {}
+
+    try {
+        if ($null -ne $Exception.Response -and [int]$Exception.Response.StatusCode -eq 404) {
+            return $true
+        }
+    }
+    catch {}
+
+    return $false
 }
 
 function Set-PSScriptAnalyzerUnavailableStatus {
@@ -912,6 +1227,7 @@ function Update-CloudRemediationPSScriptAnalyzerStatus {
         $remediationScriptName = "$displayName-Cloud-Remediation.ps1"
         $detectionContent = ConvertFrom-GraphScriptContent -Content (Get-ObjectValue -InputObject $detail -Name 'detectionScriptContent')
         $remediationContent = ConvertFrom-GraphScriptContent -Content (Get-ObjectValue -InputObject $detail -Name 'remediationScriptContent')
+        Set-CloudRemediationContentSignature -CloudRemediation $CloudRemediation -Detail $detail
 
         $findings = @()
         $findings += Invoke-PSScriptAnalyzerForContent -ScriptName $detectionScriptName -Content $detectionContent
@@ -933,9 +1249,17 @@ function Update-CloudRemediationPSScriptAnalyzerStatus {
         }
     }
     catch {
-        Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'PSScriptAnalyzerStatus' -Value 'Error'
-        Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'PSScriptAnalyzerDetails' -Value $_.Exception.Message
-        Write-GuiLog ("Cloud PSScriptAnalyzer Error for remediation '{0}' - {1}" -f $displayName, $_.Exception.Message)
+        $message = $_.Exception.Message
+        if (Test-GraphNotFoundException -Exception $_.Exception) {
+            Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'PSScriptAnalyzerStatus' -Value 'Cloud detail unavailable'
+            Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'PSScriptAnalyzerDetails' -Value "Graph returned NotFound while loading the cloud script content. The remediation may be stale or broken in Intune. Id: $($CloudRemediation.Id). Detail: $message"
+            Write-GuiLog ("Cloud detail unavailable for remediation '{0}' ({1}) - {2}" -f $displayName, $CloudRemediation.Id, $message)
+        }
+        else {
+            Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'PSScriptAnalyzerStatus' -Value 'Error'
+            Set-ObjectNoteProperty -InputObject $CloudRemediation -Name 'PSScriptAnalyzerDetails' -Value $message
+            Write-GuiLog ("Cloud PSScriptAnalyzer Error for remediation '{0}' - {1}" -f $displayName, $message)
+        }
     }
 }
 
@@ -1251,16 +1575,26 @@ function New-LocalPackageFromDetection {
     }
 
     $relativeFolder = [System.IO.Path]::GetRelativePath((Get-DefaultRemediationRoot), (Split-Path -Path $DetectionScriptPath -Parent))
-    return [pscustomobject]@{
+    $localPackage = [pscustomobject]@{
         DisplayName     = ConvertTo-PackageDisplayName -DetectionScriptPath $DetectionScriptPath
         Description     = $description
         Folder          = $relativeFolder
         DetectionPath   = $DetectionScriptPath
         RemediationPath = $remediationPath
         DetectionOnly   = ($isDetectionOnly -or [string]::IsNullOrWhiteSpace($remediationPath))
+        PublishedDisplayName = ''
+        IntuneStatus    = 'Unknown'
+        IntuneDetails   = 'Connect Graph to check whether this script content already exists in Intune.'
+        CloudDisplayName = ''
+        CloudId         = ''
+        DetectionContentHash = ''
+        RemediationContentHash = ''
+        ContentSignature = ''
         PSScriptAnalyzerStatus  = 'Not tested'
         PSScriptAnalyzerDetails = ''
     }
+    Set-ObjectNoteProperty -InputObject $localPackage -Name 'ContentSignature' -Value (Get-LocalPackageContentSignature -Package $localPackage)
+    return $localPackage
 }
 
 function Get-LocalPackages {
@@ -1284,6 +1618,126 @@ function Get-LocalPackages {
     }
 
     return @($packages | Sort-Object Folder, DisplayName)
+}
+
+function Update-LocalPackagesIntuneStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Packages,
+        [AllowNull()]$CloudRemediations
+    )
+
+    $packageList = @($Packages)
+    if ($packageList.Count -eq 0) { return }
+
+    foreach ($package in $packageList) {
+        $publishedDisplayName = ConvertTo-PublishedDisplayName -DisplayName ([string]$package.DisplayName)
+        Set-ObjectNoteProperty -InputObject $package -Name 'PublishedDisplayName' -Value $publishedDisplayName
+        Set-ObjectNoteProperty -InputObject $package -Name 'CloudDisplayName' -Value ''
+        Set-ObjectNoteProperty -InputObject $package -Name 'CloudId' -Value ''
+    }
+
+    if (-not $script:IsGraphConnected) {
+        foreach ($package in $packageList) {
+            Set-ObjectNoteProperty -InputObject $package -Name 'IntuneStatus' -Value 'Unknown'
+            Set-ObjectNoteProperty -InputObject $package -Name 'IntuneDetails' -Value ("Connect Graph to compare local script content with Intune. Expected published name: {0}" -f $package.PublishedDisplayName)
+        }
+        return
+    }
+
+    $cloudByContentSignature = @{}
+    $cloudByDisplayName = @{}
+    foreach ($cloudRemediation in @($CloudRemediations)) {
+        if ($null -eq $cloudRemediation) { continue }
+
+        [void](Ensure-CloudRemediationContentSignature -CloudRemediation $cloudRemediation)
+
+        $contentSignature = [string]$cloudRemediation.ContentSignature
+        if (-not [string]::IsNullOrWhiteSpace($contentSignature)) {
+            if (-not $cloudByContentSignature.ContainsKey($contentSignature)) {
+                $cloudByContentSignature[$contentSignature] = @()
+            }
+
+            $cloudByContentSignature[$contentSignature] = @($cloudByContentSignature[$contentSignature]) + $cloudRemediation
+        }
+
+        $displayName = [string]$cloudRemediation.DisplayName
+        if ([string]::IsNullOrWhiteSpace($displayName)) { continue }
+
+        if (-not $cloudByDisplayName.ContainsKey($displayName)) {
+            $cloudByDisplayName[$displayName] = @()
+        }
+
+        $cloudByDisplayName[$displayName] = @($cloudByDisplayName[$displayName]) + $cloudRemediation
+    }
+
+    foreach ($package in $packageList) {
+        $publishedDisplayName = [string]$package.PublishedDisplayName
+        Set-ObjectNoteProperty -InputObject $package -Name 'ContentSignature' -Value (Get-LocalPackageContentSignature -Package $package)
+
+        $contentSignature = [string]$package.ContentSignature
+        if (-not [string]::IsNullOrWhiteSpace($contentSignature) -and $cloudByContentSignature.ContainsKey($contentSignature)) {
+            $matches = @($cloudByContentSignature[$contentSignature])
+            $ids = @($matches | ForEach-Object { [string]$_.Id }) -join ', '
+            $names = @($matches | ForEach-Object { [string]$_.DisplayName }) -join ', '
+
+            if ($matches.Count -eq 1) {
+                Set-ObjectNoteProperty -InputObject $package -Name 'IntuneStatus' -Value 'Content match'
+            }
+            else {
+                Set-ObjectNoteProperty -InputObject $package -Name 'IntuneStatus' -Value 'Content duplicate'
+            }
+
+            Set-ObjectNoteProperty -InputObject $package -Name 'CloudDisplayName' -Value $names
+            Set-ObjectNoteProperty -InputObject $package -Name 'CloudId' -Value $ids
+            Set-ObjectNoteProperty -InputObject $package -Name 'IntuneDetails' -Value ("Content already exists in Intune. Expected published name: '{0}'. Match name(s): {1}. Id(s): {2}" -f $publishedDisplayName, $names, $ids)
+        }
+        elseif ($cloudByDisplayName.ContainsKey($publishedDisplayName)) {
+            $nameMatches = @($cloudByDisplayName[$publishedDisplayName])
+            $localContent = Get-LocalPackageScriptContent -Package $package
+            $manualContentMatches = @(
+                foreach ($nameMatch in $nameMatches) {
+                    if (-not (Ensure-CloudRemediationContentSignature -CloudRemediation $nameMatch)) {
+                        continue
+                    }
+
+                    $cloudDetectionContent = [string](Get-ObjectValue -InputObject $nameMatch -Name 'DetectionNormalizedContent')
+                    $cloudRemediationContent = [string](Get-ObjectValue -InputObject $nameMatch -Name 'RemediationNormalizedContent')
+                    $detectionMatches = Test-ScriptContentEqual -LeftContent $localContent.DetectionContent -RightContent $cloudDetectionContent
+                    $remediationMatches = Test-ScriptContentEqual -LeftContent $localContent.RemediationContent -RightContent $cloudRemediationContent
+                    if ($detectionMatches -and $remediationMatches) {
+                        $nameMatch
+                    }
+                }
+            )
+
+            if ($manualContentMatches.Count -gt 0) {
+                $ids = @($manualContentMatches | ForEach-Object { [string]$_.Id }) -join ', '
+                $names = @($manualContentMatches | ForEach-Object { [string]$_.DisplayName }) -join ', '
+                if ($manualContentMatches.Count -eq 1) {
+                    Set-ObjectNoteProperty -InputObject $package -Name 'IntuneStatus' -Value 'Content match'
+                }
+                else {
+                    Set-ObjectNoteProperty -InputObject $package -Name 'IntuneStatus' -Value 'Content duplicate'
+                }
+
+                Set-ObjectNoteProperty -InputObject $package -Name 'CloudDisplayName' -Value $names
+                Set-ObjectNoteProperty -InputObject $package -Name 'CloudId' -Value $ids
+                Set-ObjectNoteProperty -InputObject $package -Name 'IntuneDetails' -Value ("Content match confirmed by line comparison. Expected published name: '{0}'. Match name(s): {1}. Id(s): {2}" -f $publishedDisplayName, $names, $ids)
+            }
+            else {
+                $ids = @($nameMatches | ForEach-Object { [string]$_.Id }) -join ', '
+                Set-ObjectNoteProperty -InputObject $package -Name 'IntuneStatus' -Value 'Name only'
+                Set-ObjectNoteProperty -InputObject $package -Name 'CloudDisplayName' -Value $publishedDisplayName
+                Set-ObjectNoteProperty -InputObject $package -Name 'CloudId' -Value $ids
+                Set-ObjectNoteProperty -InputObject $package -Name 'IntuneDetails' -Value ("A remediation exists with the expected name '{0}', but the Detection/Remediation content does not match the local package. Id(s): {1}" -f $publishedDisplayName, $ids)
+            }
+        }
+        else {
+            Set-ObjectNoteProperty -InputObject $package -Name 'IntuneStatus' -Value 'No content match'
+            Set-ObjectNoteProperty -InputObject $package -Name 'IntuneDetails' -Value ("No Intune remediation has the same Detection/Remediation content. Expected published name: {0}" -f $publishedDisplayName)
+        }
+    }
 }
 
 function Get-LocalRemediationRootWarnings {
@@ -1383,6 +1837,11 @@ function Get-CloudRemediations {
             IssueRemediatedDeviceCount = 0
             IssueReoccurredDeviceCount = 0
             IssueRemediatedCumulativeDeviceCount = 0
+            DetectionContentHash = ''
+            RemediationContentHash = ''
+            ContentSignature = ''
+            ContentSignatureAvailable = $false
+            ContentSignatureDetails = ''
             PSScriptAnalyzerStatus  = 'Not tested'
             PSScriptAnalyzerDetails = ''
             Raw                   = $item
@@ -1967,9 +2426,142 @@ function Remove-CloudRemediation {
     }
 }
 
+function Test-ImportExcelModuleAvailable {
+    [CmdletBinding()]
+    param()
+
+    return $null -ne (Get-Module -ListAvailable -Name ImportExcel | Select-Object -First 1)
+}
+
+function Ensure-ImportExcelModuleAvailable {
+    [CmdletBinding()]
+    param()
+
+    if (Test-ImportExcelModuleAvailable) {
+        $script:IsImportExcelAvailable = $true
+        return $true
+    }
+
+    try {
+        Write-GuiLog 'ImportExcel module not found. Attempting installation for current user...'
+        [void](Get-Command -Name Install-Module -ErrorAction Stop)
+        Install-Module -Name ImportExcel -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -AcceptLicense -ErrorAction Stop
+        Import-Module ImportExcel -ErrorAction Stop
+        $script:IsImportExcelAvailable = $true
+        Write-GuiLog 'ImportExcel module installed successfully.'
+        return $true
+    }
+    catch {
+        $script:IsImportExcelAvailable = $false
+        Write-GuiLog "ImportExcel module installation failed. Excel export will not be offered. $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Initialize-ImportExcelSupport {
+    [CmdletBinding()]
+    param()
+
+    if ($script:ImportExcelSupportChecked) {
+        return $script:IsImportExcelAvailable
+    }
+
+    $script:ImportExcelSupportChecked = $true
+    if (Test-ImportExcelModuleAvailable) {
+        $script:IsImportExcelAvailable = $true
+        Write-GuiLog 'ImportExcel module detected. Excel execution report export is available.'
+        return $true
+    }
+
+    $message = @"
+Excel export requires the PowerShell module ImportExcel.
+
+This module creates .xlsx workbooks without using Excel COM automation, which is safer and more reliable for this tool.
+
+Install ImportExcel for the current user from PowerShell Gallery now?
+
+If you choose No, the Excel option will be hidden and CSV export will remain available.
+"@
+
+    $answer = [System.Windows.MessageBox]::Show($message, 'Enable Excel export', 'YesNo', 'Question')
+    if ($answer -ne 'Yes') {
+        $script:IsImportExcelAvailable = $false
+        Write-GuiLog 'ImportExcel installation declined by user. Excel execution report export will not be offered.'
+        return $false
+    }
+
+    try {
+        Set-GuiBusy -IsBusy $true -Message 'Installing ImportExcel module for Excel export...'
+        return (Ensure-ImportExcelModuleAvailable)
+    }
+    finally {
+        Set-GuiBusy -IsBusy $false
+    }
+}
+
+function Export-ExecutionCsvToExcelWorkbook {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CsvPath,
+        [Parameter(Mandatory = $true)][string]$ExcelPath,
+        [Parameter(Mandatory = $true)]$CloudRemediation
+    )
+
+    Import-Module ImportExcel -ErrorAction Stop
+
+    $rows = @(Import-Csv -LiteralPath $CsvPath)
+    $uniqueDevices = @($rows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.DeviceId) } | Select-Object -ExpandProperty DeviceId -Unique)
+    $detectionStatusCount = @($rows | Group-Object -Property DetectionStatus | Sort-Object Name | ForEach-Object {
+            [pscustomobject]@{
+                Type   = 'DetectionStatus'
+                Status = if ([string]::IsNullOrWhiteSpace([string]$_.Name)) { '(blank)' } else { [string]$_.Name }
+                Count  = $_.Count
+            }
+        })
+    $remediationStatusCount = @($rows | Group-Object -Property RemediationStatus | Sort-Object Name | ForEach-Object {
+            [pscustomobject]@{
+                Type   = 'RemediationStatus'
+                Status = if ([string]::IsNullOrWhiteSpace([string]$_.Name)) { '(blank)' } else { [string]$_.Name }
+                Count  = $_.Count
+            }
+        })
+    $summary = @(
+        [pscustomobject]@{ Name = 'Remediation'; Value = [string]$CloudRemediation.DisplayName }
+        [pscustomobject]@{ Name = 'Id'; Value = [string]$CloudRemediation.Id }
+        [pscustomobject]@{ Name = 'Author'; Value = [string]$CloudRemediation.Publisher }
+        [pscustomobject]@{ Name = 'Status'; Value = [string]$CloudRemediation.PortalStatus }
+        [pscustomobject]@{ Name = 'ExportedAt'; Value = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') }
+        [pscustomobject]@{ Name = 'RowCount'; Value = $rows.Count }
+        [pscustomobject]@{ Name = 'UniqueDeviceCount'; Value = $uniqueDevices.Count }
+    )
+
+    $targetFolder = Split-Path -Path $ExcelPath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($targetFolder)) {
+        [IO.Directory]::CreateDirectory($targetFolder) | Out-Null
+    }
+
+    if (Test-Path -LiteralPath $ExcelPath -PathType Leaf) {
+        Remove-Item -LiteralPath $ExcelPath -Force -ErrorAction Stop
+    }
+
+    $summary | Export-Excel -Path $ExcelPath -WorksheetName 'Summary' -TableName 'Summary' -AutoSize -BoldTopRow
+    @($detectionStatusCount + $remediationStatusCount) |
+        Export-Excel -Path $ExcelPath -WorksheetName 'Status counts' -TableName 'StatusCounts' -AutoSize -BoldTopRow
+    if ($rows.Count -gt 0) {
+        $rows | Export-Excel -Path $ExcelPath -WorksheetName 'Raw data' -TableName 'RawData' -AutoSize -FreezeTopRow -BoldTopRow
+    }
+    else {
+        [pscustomobject]@{ Message = 'No execution rows were returned by Intune.' } |
+            Export-Excel -Path $ExcelPath -WorksheetName 'Raw data' -TableName 'RawData' -AutoSize -BoldTopRow
+    }
+}
+
 function Export-ExecutionReport {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)]$CloudRemediation)
+    param(
+        [Parameter(Mandatory = $true)]$CloudRemediation,
+        [Parameter(Mandatory = $true)][ValidateSet('CSV', 'Excel')][string]$Format
+    )
 
     Ensure-GuiGraphConnection -Scopes @($script:BaseScopes + $script:ReportExportScopes)
 
@@ -1977,22 +2569,26 @@ function Export-ExecutionReport {
     $displayName = [string]$CloudRemediation.DisplayName
     $safeName = ConvertTo-SafeFileName -Value $displayName
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $targetCsvPath = Get-ExecutionReportSavePath -DisplayName $displayName -Timestamp $timestamp
-    if ([string]::IsNullOrWhiteSpace($targetCsvPath)) {
-        Write-GuiLog 'Execution report export cancelled.'
-        return ''
+    if ($Format -eq 'Excel' -and -not (Test-ImportExcelModuleAvailable)) {
+        throw 'Excel export was selected, but ImportExcel is not available.'
     }
 
-    $targetCsvPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($targetCsvPath)
-    $targetFolder = Split-Path -Path $targetCsvPath -Parent
+    $targetPath = Get-ExecutionReportSavePath -DisplayName $displayName -Timestamp $timestamp -Format $Format
+    if ([string]::IsNullOrWhiteSpace($targetPath)) {
+        Write-GuiLog 'Execution report export cancelled.'
+        return $null
+    }
+
+    $targetPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($targetPath)
+    $targetFolder = Split-Path -Path $targetPath -Parent
     if ([string]::IsNullOrWhiteSpace($targetFolder)) {
-        throw 'The selected CSV path has no parent folder.'
+        throw 'The selected report path has no parent folder.'
     }
 
     $exportFolder = Join-Path -Path ([IO.Path]::GetTempPath()) -ChildPath ("SmartM365-IntuneRemediationReport-{0}-{1}" -f $timestamp, ([guid]::NewGuid().ToString('N')))
     [IO.Directory]::CreateDirectory($exportFolder) | Out-Null
 
-    Set-GuiBusy -IsBusy $true -Message "Starting execution CSV export for $displayName..."
+    Set-GuiBusy -IsBusy $true -Message "Starting execution report export for $displayName..."
     try {
         $select = @(
             'DeviceId',
@@ -2049,11 +2645,11 @@ function Export-ExecutionReport {
             throw 'Report export job did not complete before timeout.'
         }
 
-        Set-GuiBusy -IsBusy $true -Message 'Downloading execution CSV export...'
+        Set-GuiBusy -IsBusy $true -Message 'Downloading execution report export...'
         $zipPath = Join-Path -Path $exportFolder -ChildPath "$safeName-$timestamp.zip"
         Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
 
-        Set-GuiBusy -IsBusy $true -Message 'Extracting execution CSV export...'
+        Set-GuiBusy -IsBusy $true -Message 'Extracting execution report export...'
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $exportFolder, $true)
         $csv = Get-ChildItem -LiteralPath $exportFolder -Filter '*.csv' -File -Recurse | Select-Object -First 1
@@ -2062,9 +2658,20 @@ function Export-ExecutionReport {
         }
 
         [IO.Directory]::CreateDirectory($targetFolder) | Out-Null
-        Move-Item -LiteralPath $csv.FullName -Destination $targetCsvPath -Force
-        Write-GuiLog "Execution report CSV: $targetCsvPath"
-        return $targetCsvPath
+        if ($Format -eq 'Excel') {
+            Set-GuiBusy -IsBusy $true -Message 'Creating execution Excel workbook...'
+            Export-ExecutionCsvToExcelWorkbook -CsvPath $csv.FullName -ExcelPath $targetPath -CloudRemediation $CloudRemediation
+            Write-GuiLog "Execution report Excel workbook: $targetPath"
+        }
+        else {
+            Move-Item -LiteralPath $csv.FullName -Destination $targetPath -Force
+            Write-GuiLog "Execution report CSV: $targetPath"
+        }
+
+        return [pscustomobject]@{
+            Path   = $targetPath
+            Format = $Format
+        }
     }
     finally {
         if (Test-Path -LiteralPath $exportFolder) {
@@ -2272,6 +2879,7 @@ function Refresh-LocalGrid {
         if (-not $ValidateOnly) {
             Update-LocalPackagesPSScriptAnalyzerStatus -Packages $script:LocalPackages
         }
+        Update-LocalPackagesIntuneStatus -Packages $script:LocalPackages -CloudRemediations $script:CloudRemediations
         $script:Ui.LocalGrid.ItemsSource = $null
         $script:Ui.LocalGrid.ItemsSource = $script:LocalPackages
         if ($script:LocalPackages.Count -eq 0) {
@@ -2315,8 +2923,10 @@ function Refresh-CloudGrid {
             Update-CloudRemediationsPortalColumns -CloudRemediations $script:CloudRemediations
             Update-CloudRemediationsPSScriptAnalyzerStatus -CloudRemediations $script:CloudRemediations
         }
-        $script:Ui.CloudGrid.ItemsSource = $null
-        $script:Ui.CloudGrid.ItemsSource = $script:CloudRemediations
+        Update-CloudGridItemsSource
+        Update-LocalPackagesIntuneStatus -Packages $script:LocalPackages -CloudRemediations $script:CloudRemediations
+        $script:Ui.LocalGrid.ItemsSource = $null
+        $script:Ui.LocalGrid.ItemsSource = $script:LocalPackages
         Write-GuiLog "Cloud remediations loaded: $($script:CloudRemediations.Count)"
     }
     finally {
@@ -2355,6 +2965,9 @@ Folder: $($Package.Folder)
 Detection: $($Package.DetectionPath)
 Remediation: $($Package.RemediationPath)
 Detection only: $($Package.DetectionOnly)
+Expected Intune name: $($Package.PublishedDisplayName)
+In Intune: $($Package.IntuneStatus)
+Intune detail: $($Package.IntuneDetails)
 PSScriptAnalyzer: $($Package.PSScriptAnalyzerStatus)
 Description: $($Package.Description)
 "@
@@ -2367,17 +2980,17 @@ function Set-EditorFromCloudRemediation {
     $script:SelectedCloudRemediation = $CloudRemediation
     if ($null -eq $CloudRemediation) {
         $script:Ui.CloudDetails.Text = ''
-        $script:Ui.CloudDetectionEditor.Text = ''
-        $script:Ui.CloudRemediationEditor.Text = ''
+        Clear-CloudScriptViewer
         Update-ActionButtonsState
         return
     }
 
+    Clear-CloudScriptViewer
     $script:Ui.CloudDetails.Text = @"
 Cloud remediation
 Name: $($CloudRemediation.DisplayName)
 Id: $($CloudRemediation.Id)
-Publisher: $($CloudRemediation.Publisher)
+Author: $($CloudRemediation.Publisher)
 Status: $($CloudRemediation.PortalStatus)
 Version: $($CloudRemediation.Version)
 Run as: $($CloudRemediation.RunAsAccount)
@@ -2397,8 +3010,31 @@ Description: $($CloudRemediation.Description)
         Export-CloudScriptsToEditor
     }
     catch {
-        Write-GuiLog "Cloud script content load failed - $($_.Exception.Message)"
+        $message = $_.Exception.Message
+        if (Test-GraphNotFoundException -Exception $_.Exception) {
+            $unavailableMessage = "Cloud detail unavailable. Graph returned NotFound while loading this remediation's script content. This Intune object may be stale or broken. Id: $($CloudRemediation.Id)"
+            Set-CloudScriptViewerUnavailable -Message $unavailableMessage
+            $script:Ui.CloudDetails.Text = "$($script:Ui.CloudDetails.Text)`r`nCloud detail: unavailable (Graph NotFound)`r`n"
+            Write-GuiLog "Cloud detail unavailable for selected remediation '$($CloudRemediation.DisplayName)' ($($CloudRemediation.Id)) - $message"
+        }
+        else {
+            Set-CloudScriptViewerUnavailable -Message "Cloud script content load failed. $message"
+            Write-GuiLog "Cloud script content load failed - $message"
+        }
     }
+}
+
+function Update-CloudGridItemsSource {
+    [CmdletBinding()]
+    param()
+
+    $activeCloudRemediations = @($script:CloudRemediations | Where-Object { [string]$_.PortalStatus -eq 'Active' })
+    $otherCloudRemediations = @($script:CloudRemediations | Where-Object { [string]$_.PortalStatus -ne 'Active' })
+
+    $script:Ui.CloudActiveGrid.ItemsSource = $null
+    $script:Ui.CloudOtherGrid.ItemsSource = $null
+    $script:Ui.CloudActiveGrid.ItemsSource = $activeCloudRemediations
+    $script:Ui.CloudOtherGrid.ItemsSource = $otherCloudRemediations
 }
 
 function Save-EditorFiles {
@@ -2484,6 +3120,235 @@ function Save-DetectionEditorFile {
     }
 }
 
+function Clear-CloudScriptViewer {
+    [CmdletBinding()]
+    param()
+
+    $script:Ui.CloudDetectionEditor.Text = ''
+    $script:Ui.CloudRemediationEditor.Text = ''
+    $script:Ui.CloudDetectionEditor.IsReadOnly = $true
+    $script:Ui.CloudRemediationEditor.IsReadOnly = $true
+}
+
+function Set-CloudScriptViewerUnavailable {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    Clear-CloudScriptViewer
+    $script:Ui.CloudDetectionEditor.Text = $Message
+}
+
+function ConvertTo-CompareLines {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Content)
+
+    if ([string]::IsNullOrEmpty($Content)) {
+        return @()
+    }
+
+    $normalized = $Content -replace "`r`n", "`n" -replace "`r", "`n"
+    return @($normalized.Split("`n"))
+}
+
+function ConvertTo-CompactDiffLine {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Value)
+
+    if ($null -eq $Value) { return '<missing>' }
+
+    $text = $Value -replace "`t", '    '
+    if ($text.Length -gt 180) {
+        return $text.Substring(0, 180) + '...'
+    }
+
+    return $text
+}
+
+function Get-ScriptComparisonText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [AllowNull()][string]$LocalContent,
+        [AllowNull()][string]$CloudContent
+    )
+
+    $localLines = @(ConvertTo-CompareLines -Content $LocalContent)
+    $cloudLines = @(ConvertTo-CompareLines -Content $CloudContent)
+    $maxCount = [Math]::Max($localLines.Count, $cloudLines.Count)
+    $differentLines = New-Object System.Collections.Generic.List[int]
+
+    for ($i = 0; $i -lt $maxCount; $i++) {
+        $localLine = if ($i -lt $localLines.Count) { $localLines[$i] } else { $null }
+        $cloudLine = if ($i -lt $cloudLines.Count) { $cloudLines[$i] } else { $null }
+        if ($localLine -ne $cloudLine) {
+            $differentLines.Add($i + 1)
+        }
+    }
+
+    $result = New-Object System.Collections.Generic.List[string]
+    if ($differentLines.Count -eq 0) {
+        $result.Add("[$Label] Identical. Lines=$($localLines.Count)")
+        return ($result -join "`r`n")
+    }
+
+    $result.Add("[$Label] Different. LocalLines=$($localLines.Count); CloudLines=$($cloudLines.Count); DifferentLineCount=$($differentLines.Count)")
+    $result.Add('')
+    $result.Add("[$Label] First differences")
+
+    foreach ($lineNumber in @($differentLines | Select-Object -First 40)) {
+        $index = $lineNumber - 1
+        $localLine = if ($index -lt $localLines.Count) { $localLines[$index] } else { $null }
+        $cloudLine = if ($index -lt $cloudLines.Count) { $cloudLines[$index] } else { $null }
+        $result.Add(("Line {0}" -f $lineNumber))
+        $result.Add(("  LOCAL: {0}" -f (ConvertTo-CompactDiffLine -Value $localLine)))
+        $result.Add(("  CLOUD: {0}" -f (ConvertTo-CompactDiffLine -Value $cloudLine)))
+    }
+
+    if ($differentLines.Count -gt 40) {
+        $result.Add(("... {0} additional differing line(s) not shown." -f ($differentLines.Count - 40)))
+    }
+
+    return ($result -join "`r`n")
+}
+
+function Update-LocalPackageIntuneStatusFromComparison {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Package,
+        [Parameter(Mandatory = $true)]$CloudRemediation,
+        [Parameter(Mandatory = $true)][bool]$DetectionIdentical,
+        [Parameter(Mandatory = $true)][bool]$RemediationIdentical
+    )
+
+    if (-not ($DetectionIdentical -and $RemediationIdentical)) {
+        return
+    }
+
+    Set-ObjectNoteProperty -InputObject $Package -Name 'IntuneStatus' -Value 'Content match'
+    Set-ObjectNoteProperty -InputObject $Package -Name 'CloudDisplayName' -Value ([string]$CloudRemediation.DisplayName)
+    Set-ObjectNoteProperty -InputObject $Package -Name 'CloudId' -Value ([string]$CloudRemediation.Id)
+    Set-ObjectNoteProperty -InputObject $Package -Name 'IntuneDetails' -Value ("Content match confirmed by manual comparison with '{0}' ({1})." -f $CloudRemediation.DisplayName, $CloudRemediation.Id)
+
+    if ($script:Ui.ContainsKey('LocalGrid') -and $null -ne $script:Ui.LocalGrid -and $null -ne $script:Ui.LocalGrid.Items) {
+        $script:Ui.LocalGrid.Items.Refresh()
+    }
+}
+
+function Show-ComparisonWindow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string]$Text
+    )
+
+    $compareWindow = New-Object System.Windows.Window
+    $compareWindow.Title = $Title
+    $compareWindow.Width = 1050
+    $compareWindow.Height = 760
+    $compareWindow.WindowStartupLocation = 'CenterOwner'
+    $compareWindow.Owner = $window
+
+    $grid = New-Object System.Windows.Controls.Grid
+    $grid.Margin = [System.Windows.Thickness]::new(12)
+    $row1 = New-Object System.Windows.Controls.RowDefinition
+    $row1.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+    $row2 = New-Object System.Windows.Controls.RowDefinition
+    $row2.Height = [System.Windows.GridLength]::Auto
+    $grid.RowDefinitions.Add($row1)
+    $grid.RowDefinitions.Add($row2)
+
+    $textBox = New-Object System.Windows.Controls.TextBox
+    $textBox.Text = $Text
+    $textBox.IsReadOnly = $true
+    $textBox.AcceptsReturn = $true
+    $textBox.AcceptsTab = $true
+    $textBox.FontFamily = New-Object System.Windows.Media.FontFamily('Consolas')
+    $textBox.FontSize = 13
+    $textBox.HorizontalScrollBarVisibility = 'Auto'
+    $textBox.VerticalScrollBarVisibility = 'Auto'
+    [System.Windows.Controls.Grid]::SetRow($textBox, 0)
+    $grid.Children.Add($textBox) | Out-Null
+
+    $closeButton = New-Object System.Windows.Controls.Button
+    $closeButton.Content = 'Close'
+    $closeButton.Width = 90
+    $closeButton.Margin = [System.Windows.Thickness]::new(0, 10, 0, 0)
+    $closeButton.HorizontalAlignment = 'Right'
+    $closeButton.Add_Click({ $compareWindow.Close() })
+    [System.Windows.Controls.Grid]::SetRow($closeButton, 1)
+    $grid.Children.Add($closeButton) | Out-Null
+
+    $compareWindow.Content = $grid
+    $compareWindow.ShowDialog() | Out-Null
+}
+
+function Compare-SelectedLocalAndCloudScripts {
+    [CmdletBinding()]
+    param()
+
+    if ($null -eq $script:SelectedLocalPackage) {
+        throw 'Select a local package first.'
+    }
+
+    if ($null -eq $script:SelectedCloudRemediation) {
+        throw 'Select a cloud remediation first.'
+    }
+
+    Ensure-GuiGraphConnection
+
+    $localPackage = $script:SelectedLocalPackage
+    $cloudRemediation = $script:SelectedCloudRemediation
+    $detail = Get-CloudRemediationDetail -Id ([string]$cloudRemediation.Id)
+
+    $localDetectionContent = if ($script:EditorDetectionPath -eq [string]$localPackage.DetectionPath) {
+        [string]$script:Ui.LocalDetectionEditor.Text
+    }
+    else {
+        [IO.File]::ReadAllText([string]$localPackage.DetectionPath)
+    }
+
+    $localRemediationPath = [string]$localPackage.RemediationPath
+    $localRemediationContent = if ([string]::IsNullOrWhiteSpace($localRemediationPath)) {
+        ''
+    }
+    elseif ($script:EditorRemediationPath -eq $localRemediationPath) {
+        [string]$script:Ui.LocalRemediationEditor.Text
+    }
+    else {
+        [IO.File]::ReadAllText($localRemediationPath)
+    }
+
+    $cloudDetectionContent = ConvertFrom-GraphScriptContent -Content (Get-ObjectValue -InputObject $detail -Name 'detectionScriptContent')
+    $cloudRemediationContent = ConvertFrom-GraphScriptContent -Content (Get-ObjectValue -InputObject $detail -Name 'remediationScriptContent')
+
+    $detectionCompare = Get-ScriptComparisonText -Label 'Detection' -LocalContent $localDetectionContent -CloudContent $cloudDetectionContent
+    $remediationCompare = Get-ScriptComparisonText -Label 'Remediation' -LocalContent $localRemediationContent -CloudContent $cloudRemediationContent
+    $detectionIdentical = Test-ScriptContentEqual -LeftContent $localDetectionContent -RightContent $cloudDetectionContent
+    $remediationIdentical = Test-ScriptContentEqual -LeftContent $localRemediationContent -RightContent $cloudRemediationContent
+    $overallStatus = if ($detectionIdentical -and $remediationIdentical) { 'Content match' } else { 'Different' }
+
+    Update-LocalPackageIntuneStatusFromComparison `
+        -Package $localPackage `
+        -CloudRemediation $cloudRemediation `
+        -DetectionIdentical $detectionIdentical `
+        -RemediationIdentical $remediationIdentical
+
+    $report = @"
+Local package: $($localPackage.DisplayName)
+Local folder: $($localPackage.Folder)
+Cloud remediation: $($cloudRemediation.DisplayName)
+Cloud id: $($cloudRemediation.Id)
+Overall: $overallStatus
+
+$detectionCompare
+
+$remediationCompare
+"@
+
+    Write-GuiLog ("Compared local package '{0}' with cloud remediation '{1}'. Detection={2}; Remediation={3}; Overall={4}" -f $localPackage.DisplayName, $cloudRemediation.DisplayName, $(if ($detectionIdentical) { 'Identical' } else { 'Different' }), $(if ($remediationIdentical) { 'Identical' } else { 'Different' }), $overallStatus)
+    Show-ComparisonWindow -Title 'Compare local and cloud scripts' -Text $report
+}
+
 function Export-CloudScriptsToEditor {
     [CmdletBinding()]
     param()
@@ -2492,6 +3357,7 @@ function Export-CloudScriptsToEditor {
         throw 'Select a cloud remediation first.'
     }
 
+    Clear-CloudScriptViewer
     $detail = Get-CloudRemediationDetail -Id ([string]$script:SelectedCloudRemediation.Id)
     $script:Ui.CloudDetectionEditor.Text = ConvertFrom-GraphScriptContent -Content (Get-ObjectValue -InputObject $detail -Name 'detectionScriptContent')
     $script:Ui.CloudRemediationEditor.Text = ConvertFrom-GraphScriptContent -Content (Get-ObjectValue -InputObject $detail -Name 'remediationScriptContent')
@@ -2691,26 +3557,109 @@ Add-Type -AssemblyName System.Windows.Forms
         <Style TargetType="DataGrid">
             <Setter Property="AutoGenerateColumns" Value="False"/>
             <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#0F2437"/>
             <Setter Property="SelectionMode" Value="Single"/>
+            <Setter Property="SelectionUnit" Value="FullRow"/>
             <Setter Property="CanUserAddRows" Value="False"/>
             <Setter Property="CanUserDeleteRows" Value="False"/>
+            <Setter Property="CanUserResizeRows" Value="False"/>
             <Setter Property="HeadersVisibility" Value="Column"/>
-            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="GridLinesVisibility" Value="None"/>
             <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
             <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
-            <Setter Property="RowHeight" Value="30"/>
+            <Setter Property="RowHeight" Value="34"/>
+            <Setter Property="ColumnHeaderHeight" Value="36"/>
+            <Setter Property="RowHeaderWidth" Value="0"/>
             <Setter Property="Background" Value="#FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#C9D6E2"/>
-            <Setter Property="HorizontalGridLinesBrush" Value="#E2EAF1"/>
-            <Setter Property="AlternatingRowBackground" Value="#F6FAFD"/>
+            <Setter Property="BorderBrush" Value="#D7E3EC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#E6EEF5"/>
+            <Setter Property="AlternatingRowBackground" Value="#F7FAFD"/>
             <Setter Property="RowBackground" Value="#FFFFFF"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
         </Style>
         <Style TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#071D33"/>
-            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="Background" Value="#EAF3F9"/>
+            <Setter Property="Foreground" Value="#102B43"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="8,6"/>
-            <Setter Property="BorderBrush" Value="#183A5B"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="11,8"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="BorderBrush" Value="#D7E3EC"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+        <Style TargetType="DataGridRow">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="#EDF3F7"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#E9F6FE"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#CFE8F8"/>
+                    <Setter Property="Foreground" Value="#061E33"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="DataGridCell">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#0F2437"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="11,0"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Foreground" Value="#061E33"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="#17324D"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Margin" Value="0,0,6,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder"
+                                Background="#F4F8FB"
+                                BorderBrush="#D7E3EC"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#D7ECFA"/>
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#6FB9E2"/>
+                                <Setter Property="Foreground" Value="#061E33"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#E9F6FE"/>
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#9FD2EC"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.55"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="BorderBrush" Value="#C9D6E2"/>
@@ -2722,9 +3671,8 @@ Add-Type -AssemblyName System.Windows.Forms
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="12"/>
-            <RowDefinition Height="3*"/>
             <RowDefinition Height="2*"/>
-            <RowDefinition Height="130"/>
+            <RowDefinition Height="3*"/>
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
@@ -2800,9 +3748,17 @@ Add-Type -AssemblyName System.Windows.Forms
                     <DataGrid x:Name="LocalGrid" Grid.Row="2">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Name" Binding="{Binding DisplayName}" Width="2*"/>
-                            <DataGridTextColumn Header="Folder" Binding="{Binding Folder}" Width="2*"/>
+                            <DataGridTextColumn Header="Folder" Binding="{Binding Folder}" Width="1.5*"/>
+                            <DataGridTextColumn Header="In Intune" Binding="{Binding IntuneStatus}" Width="130">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                        <Setter Property="ToolTip" Value="{Binding IntuneDetails}"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
                             <DataGridCheckBoxColumn Header="Detection only" Binding="{Binding DetectionOnly}" Width="110"/>
-                            <DataGridTextColumn Header="PSScriptAnalyzer" Binding="{Binding PSScriptAnalyzerStatus}" Width="135">
+                            <DataGridTextColumn Header="PSSA" Binding="{Binding PSScriptAnalyzerStatus}" Width="62">
                                 <DataGridTextColumn.ElementStyle>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="FontWeight" Value="SemiBold"/>
@@ -2826,126 +3782,154 @@ Add-Type -AssemblyName System.Windows.Forms
                         <Button x:Name="AnalyzeCloudButton" Content="PSScriptAnalyzer"/>
                         <Button x:Name="SaveCloudScriptsButton" Content="Save scripts as"/>
                         <Button x:Name="SaveAllCloudButton" Content="Save all cloud"/>
+                        <Button x:Name="CompareLocalCloudButton" Content="Compare local/cloud"/>
                         <Button x:Name="ResetHistoryButton" Content="Reset history" Style="{StaticResource DangerButton}"/>
                         <Button x:Name="DeleteCloudButton" Content="Delete" Style="{StaticResource DangerButton}"/>
-                        <Button x:Name="ExportReportButton" Content="Export execution CSV"/>
+                        <Button x:Name="ExportReportButton" Content="Export execution"/>
                     </WrapPanel>
-                    <DataGrid x:Name="CloudGrid" Grid.Row="2">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Script package name" Binding="{Binding DisplayName}" Width="260"/>
-                            <DataGridTextColumn Header="Author" Binding="{Binding Publisher}" Width="135"/>
-                            <DataGridTextColumn Header="Status" Binding="{Binding PortalStatus}" Width="115"/>
-                            <DataGridTextColumn Header="Without issues" Binding="{Binding NoIssueDetectedDeviceCount}" Width="125"/>
-                            <DataGridTextColumn Header="With issues" Binding="{Binding IssueDetectedDeviceCount}" Width="110"/>
-                            <DataGridTextColumn Header="Issue fixed" Binding="{Binding IssueRemediatedDeviceCount}" Width="105"/>
-                            <DataGridTextColumn Header="Recurred" Binding="{Binding IssueReoccurredDeviceCount}" Width="95"/>
-                            <DataGridTextColumn Header="Total remediated" Binding="{Binding IssueRemediatedCumulativeDeviceCount}" Width="135"/>
-                            <DataGridTextColumn Header="PSScriptAnalyzer" Binding="{Binding PSScriptAnalyzerStatus}" Width="145">
-                                <DataGridTextColumn.ElementStyle>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="FontWeight" Value="SemiBold"/>
-                                        <Setter Property="ToolTip" Value="{Binding PSScriptAnalyzerDetails}"/>
-                                    </Style>
-                                </DataGridTextColumn.ElementStyle>
-                            </DataGridTextColumn>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Grid>
-            </GroupBox>
-        </Grid>
-
-        <Grid Grid.Row="3" Margin="0,12,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="12"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <GroupBox Grid.Column="0" Header="Local script editor" Padding="8">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="105"/>
-                        <RowDefinition Height="8"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <TextBox x:Name="PackageDetails"
-                             Grid.Row="0"
-                             IsReadOnly="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"/>
                     <TabControl Grid.Row="2">
-                        <TabItem Header="Detection">
-                            <TextBox x:Name="LocalDetectionEditor"
-                                     AcceptsReturn="True"
-                                     AcceptsTab="True"
-                                     FontFamily="Consolas"
-                                     FontSize="13"
-                                     HorizontalScrollBarVisibility="Auto"
-                                     VerticalScrollBarVisibility="Auto"/>
+                        <TabItem Header="Active">
+                            <DataGrid x:Name="CloudActiveGrid">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Script package name" Binding="{Binding DisplayName}" Width="300" MinWidth="260"/>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding PortalStatus}" Width="95" MinWidth="85"/>
+                                    <DataGridTextColumn Header="Without issues" Binding="{Binding NoIssueDetectedDeviceCount}" Width="110" MinWidth="105"/>
+                                    <DataGridTextColumn Header="With issues" Binding="{Binding IssueDetectedDeviceCount}" Width="95"/>
+                                    <DataGridTextColumn Header="Issue fixed" Binding="{Binding IssueRemediatedDeviceCount}" Width="90"/>
+                                    <DataGridTextColumn Header="Recurred" Binding="{Binding IssueReoccurredDeviceCount}" Width="85"/>
+                                    <DataGridTextColumn Header="Remediated" Binding="{Binding IssueRemediatedCumulativeDeviceCount}" Width="105"/>
+                                    <DataGridTextColumn Header="PSSA" Binding="{Binding PSScriptAnalyzerStatus}" Width="70" MinWidth="62">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                <Setter Property="ToolTip" Value="{Binding PSScriptAnalyzerDetails}"/>
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
                         </TabItem>
-                        <TabItem Header="Remediation">
-                            <TextBox x:Name="LocalRemediationEditor"
-                                     AcceptsReturn="True"
-                                     AcceptsTab="True"
-                                     FontFamily="Consolas"
-                                     FontSize="13"
-                                     HorizontalScrollBarVisibility="Auto"
-                                     VerticalScrollBarVisibility="Auto"/>
-                        </TabItem>
-                    </TabControl>
-                </Grid>
-            </GroupBox>
-
-            <GroupBox Grid.Column="2" Header="Cloud script viewer" Padding="8">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="105"/>
-                        <RowDefinition Height="8"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <TextBox x:Name="CloudDetails"
-                             Grid.Row="0"
-                             IsReadOnly="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"/>
-                    <TabControl Grid.Row="2">
-                        <TabItem Header="Detection">
-                            <TextBox x:Name="CloudDetectionEditor"
-                                     IsReadOnly="True"
-                                     AcceptsReturn="True"
-                                     AcceptsTab="True"
-                                     FontFamily="Consolas"
-                                     FontSize="13"
-                                     HorizontalScrollBarVisibility="Auto"
-                                     VerticalScrollBarVisibility="Auto"/>
-                        </TabItem>
-                        <TabItem Header="Remediation">
-                            <TextBox x:Name="CloudRemediationEditor"
-                                     IsReadOnly="True"
-                                     AcceptsReturn="True"
-                                     AcceptsTab="True"
-                                     FontFamily="Consolas"
-                                     FontSize="13"
-                                     HorizontalScrollBarVisibility="Auto"
-                                     VerticalScrollBarVisibility="Auto"/>
+                        <TabItem Header="Not deployed">
+                            <DataGrid x:Name="CloudOtherGrid">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Script package name" Binding="{Binding DisplayName}" Width="300" MinWidth="260"/>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding PortalStatus}" Width="95" MinWidth="85"/>
+                                    <DataGridTextColumn Header="Without issues" Binding="{Binding NoIssueDetectedDeviceCount}" Width="110" MinWidth="105"/>
+                                    <DataGridTextColumn Header="With issues" Binding="{Binding IssueDetectedDeviceCount}" Width="95"/>
+                                    <DataGridTextColumn Header="Issue fixed" Binding="{Binding IssueRemediatedDeviceCount}" Width="90"/>
+                                    <DataGridTextColumn Header="Recurred" Binding="{Binding IssueReoccurredDeviceCount}" Width="85"/>
+                                    <DataGridTextColumn Header="Remediated" Binding="{Binding IssueRemediatedCumulativeDeviceCount}" Width="105"/>
+                                    <DataGridTextColumn Header="PSSA" Binding="{Binding PSScriptAnalyzerStatus}" Width="70" MinWidth="62">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                <Setter Property="ToolTip" Value="{Binding PSScriptAnalyzerDetails}"/>
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
                         </TabItem>
                     </TabControl>
                 </Grid>
             </GroupBox>
         </Grid>
 
-        <GroupBox Grid.Row="4" Header="Activity" Padding="8">
-            <TextBox x:Name="LogTextBox"
-                     IsReadOnly="True"
-                     FontFamily="Consolas"
-                     FontSize="12"
-                     TextWrapping="NoWrap"
-                     HorizontalScrollBarVisibility="Auto"
-                     VerticalScrollBarVisibility="Auto"/>
-        </GroupBox>
+        <TabControl Grid.Row="3" Margin="0,12,0,0">
+            <TabItem Header="Scripts">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Column="0" Header="Local script editor" Padding="8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="105"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBox x:Name="PackageDetails"
+                                     Grid.Row="0"
+                                     IsReadOnly="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"/>
+                            <TabControl Grid.Row="2">
+                                <TabItem Header="Detection">
+                                    <TextBox x:Name="LocalDetectionEditor"
+                                             AcceptsReturn="True"
+                                             AcceptsTab="True"
+                                             FontFamily="Consolas"
+                                             FontSize="13"
+                                             HorizontalScrollBarVisibility="Auto"
+                                             VerticalScrollBarVisibility="Auto"/>
+                                </TabItem>
+                                <TabItem Header="Remediation">
+                                    <TextBox x:Name="LocalRemediationEditor"
+                                             AcceptsReturn="True"
+                                             AcceptsTab="True"
+                                             FontFamily="Consolas"
+                                             FontSize="13"
+                                             HorizontalScrollBarVisibility="Auto"
+                                             VerticalScrollBarVisibility="Auto"/>
+                                </TabItem>
+                            </TabControl>
+                        </Grid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Column="2" Header="Cloud script viewer" Padding="8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="105"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBox x:Name="CloudDetails"
+                                     Grid.Row="0"
+                                     IsReadOnly="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"/>
+                            <TabControl Grid.Row="2">
+                                <TabItem Header="Detection">
+                                    <TextBox x:Name="CloudDetectionEditor"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             AcceptsTab="True"
+                                             FontFamily="Consolas"
+                                             FontSize="13"
+                                             HorizontalScrollBarVisibility="Auto"
+                                             VerticalScrollBarVisibility="Auto"/>
+                                </TabItem>
+                                <TabItem Header="Remediation">
+                                    <TextBox x:Name="CloudRemediationEditor"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             AcceptsTab="True"
+                                             FontFamily="Consolas"
+                                             FontSize="13"
+                                             HorizontalScrollBarVisibility="Auto"
+                                             VerticalScrollBarVisibility="Auto"/>
+                                </TabItem>
+                            </TabControl>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Activity">
+                <TextBox x:Name="LogTextBox"
+                         IsReadOnly="True"
+                         FontFamily="Consolas"
+                         FontSize="12"
+                         TextWrapping="NoWrap"
+                         HorizontalScrollBarVisibility="Auto"
+                         VerticalScrollBarVisibility="Auto"/>
+            </TabItem>
+        </TabControl>
 
         <Border x:Name="BusyOverlay"
-                Grid.RowSpan="5"
+                Grid.RowSpan="4"
                 Panel.ZIndex="100"
                 Background="#99091F33"
                 Visibility="Collapsed"
@@ -2983,6 +3967,7 @@ Add-Type -AssemblyName System.Windows.Forms
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
+$script:Ui['Window'] = $window
 $smartM365RootPath = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
 $logoIconPath = Join-Path -Path $smartM365RootPath -ChildPath 'logo.ico'
 if (Test-Path -LiteralPath $logoIconPath) {
@@ -3004,12 +3989,14 @@ foreach ($name in @(
         'SaveCloudScriptsButton',
         'AnalyzeCloudButton',
         'SaveAllCloudButton',
+        'CompareLocalCloudButton',
         'ResetHistoryButton',
         'DeleteCloudButton',
         'ExportReportButton',
         'StatusText',
         'LocalGrid',
-        'CloudGrid',
+        'CloudActiveGrid',
+        'CloudOtherGrid',
         'PackageDetails',
         'CloudDetails',
         'LocalDetectionEditor',
@@ -3037,7 +4024,7 @@ Initialize-LocalRemediationRootConfiguration
 Update-ConnectionStatus
 Update-ActionButtonsState
 if (-not $ValidateOnly -and -not $script:IsGraphConnected) {
-    Write-GuiLog 'Graph is not connected. Click Connect Graph before using Intune cloud actions such as publish, reset history, save cloud, or export execution CSV.'
+    Write-GuiLog 'Graph is not connected. Click Connect Graph before using Intune cloud actions such as publish, reset history, save cloud, or export execution.'
 }
 
 $script:Ui.ConnectButton.Add_Click({
@@ -3048,7 +4035,7 @@ $script:Ui.ConnectButton.Add_Click({
         Refresh-CloudGrid
     }
     catch {
-        Show-GuiError -Title 'Graph connection failed' -Message $_.Exception.Message
+        Show-GuiError -Title 'Graph connection failed' -Message (Get-GuiGraphConnectionFailureMessage -ErrorRecord $_)
     }
     finally {
         Set-GuiBusy -IsBusy $false
@@ -3216,6 +4203,19 @@ $script:Ui.SaveAllCloudButton.Add_Click({
     }
 })
 
+$script:Ui.CompareLocalCloudButton.Add_Click({
+    try {
+        Set-GuiBusy -IsBusy $true -Message 'Comparing selected local and cloud scripts...'
+        Compare-SelectedLocalAndCloudScripts
+    }
+    catch {
+        Show-GuiError -Title 'Compare local/cloud failed' -Message $_.Exception.Message
+    }
+    finally {
+        Set-GuiBusy -IsBusy $false
+    }
+})
+
 $script:Ui.AnalyzeCloudButton.Add_Click({
     try {
         Test-CloudViewerScriptsWithPSScriptAnalyzer
@@ -3268,7 +4268,8 @@ Continue with deletion?
 
         Set-GuiBusy -IsBusy $true -Message "Deleting Intune remediation: $displayName"
         Remove-CloudRemediation -CloudRemediation $script:SelectedCloudRemediation
-        $script:Ui.CloudGrid.SelectedItem = $null
+        $script:Ui.CloudActiveGrid.SelectedItem = $null
+        $script:Ui.CloudOtherGrid.SelectedItem = $null
         Set-EditorFromCloudRemediation -CloudRemediation $null
         Refresh-CloudGrid
         [System.Windows.MessageBox]::Show("Cloud remediation deleted:`r`n$displayName`r`nId: $id", 'Delete completed', 'OK', 'Information') | Out-Null
@@ -3284,9 +4285,29 @@ Continue with deletion?
 $script:Ui.ExportReportButton.Add_Click({
     try {
         if ($null -eq $script:SelectedCloudRemediation) { throw 'Select a cloud remediation first.' }
-        $csvPath = Export-ExecutionReport -CloudRemediation $script:SelectedCloudRemediation
-        if ([string]::IsNullOrWhiteSpace($csvPath)) { return }
-        [System.Windows.MessageBox]::Show("CSV exported:`r`n$csvPath", 'Execution report exported', 'OK', 'Information') | Out-Null
+        $format = Show-ExecutionReportFormatDialog -ExcelAvailable $script:IsImportExcelAvailable
+        if ([string]::IsNullOrWhiteSpace($format)) {
+            Write-GuiLog 'Execution report export cancelled.'
+            return
+        }
+
+        $result = Export-ExecutionReport -CloudRemediation $script:SelectedCloudRemediation -Format $format
+        if ($null -eq $result -or [string]::IsNullOrWhiteSpace([string]$result.Path)) { return }
+
+        if ([string]$result.Format -eq 'Excel') {
+            $openResult = [System.Windows.MessageBox]::Show(
+                "Excel workbook exported:`r`n$($result.Path)`r`n`r`nOpen it now?",
+                'Execution report exported',
+                'YesNo',
+                'Information'
+            )
+            if ($openResult -eq 'Yes') {
+                Start-Process -FilePath ([string]$result.Path)
+            }
+        }
+        else {
+            [System.Windows.MessageBox]::Show("CSV exported:`r`n$($result.Path)", 'Execution report exported', 'OK', 'Information') | Out-Null
+        }
     }
     catch {
         Show-GuiError -Title 'Report export failed' -Message $_.Exception.Message
@@ -3302,9 +4323,24 @@ $script:Ui.LocalGrid.Add_SelectionChanged({
     }
 })
 
-$script:Ui.CloudGrid.Add_SelectionChanged({
+$script:Ui.CloudActiveGrid.Add_SelectionChanged({
     try {
-        Set-EditorFromCloudRemediation -CloudRemediation $script:Ui.CloudGrid.SelectedItem
+        if ($null -ne $script:Ui.CloudActiveGrid.SelectedItem) {
+            $script:Ui.CloudOtherGrid.SelectedItem = $null
+            Set-EditorFromCloudRemediation -CloudRemediation $script:Ui.CloudActiveGrid.SelectedItem
+        }
+    }
+    catch {
+        Show-GuiError -Title 'Cloud remediation selection failed' -Message $_.Exception.Message
+    }
+})
+
+$script:Ui.CloudOtherGrid.Add_SelectionChanged({
+    try {
+        if ($null -ne $script:Ui.CloudOtherGrid.SelectedItem) {
+            $script:Ui.CloudActiveGrid.SelectedItem = $null
+            Set-EditorFromCloudRemediation -CloudRemediation $script:Ui.CloudOtherGrid.SelectedItem
+        }
     }
     catch {
         Show-GuiError -Title 'Cloud remediation selection failed' -Message $_.Exception.Message
@@ -3328,6 +4364,7 @@ $window.Add_ContentRendered({
     if ($script:InitialLocalLoadCompleted) { return }
     $script:InitialLocalLoadCompleted = $true
     try {
+        Initialize-ImportExcelSupport | Out-Null
         Set-GuiBusy -IsBusy $true -Message 'Loading local packages and running PSScriptAnalyzer...'
         Refresh-LocalGrid
     }
