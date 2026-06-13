@@ -43,7 +43,7 @@ $requiredFiles = @(
     'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
 )
 
-$optionalFiles = @('logo.ico')
+$optionalFiles = @('SmartM365-logo.ico')
 
 New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
 

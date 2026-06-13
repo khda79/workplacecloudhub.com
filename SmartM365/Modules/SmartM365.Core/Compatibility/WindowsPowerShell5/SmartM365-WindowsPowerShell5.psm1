@@ -127,13 +127,60 @@ function Get-ModuleLocalConfigValue {
     return $DefaultValue
 }
 
+function Format-SmartM365LogLine {
+    param(
+        [AllowEmptyString()][string]$Message,
+        [string]$Level = "INFO",
+        [datetime]$Timestamp = (Get-Date)
+    )
+
+    $timestampText = $Timestamp.ToString("yyyy-MM-dd HH:mm:ss")
+    $normalizedLevel = if ([string]::IsNullOrWhiteSpace($Level)) { "INFO" } else { $Level.ToUpperInvariant() }
+    $messageLines = @([regex]::Split(([string]$Message), '\r?\n'))
+    foreach ($messageLine in $messageLines) {
+        "{0} [{1}] {2}" -f $timestampText, $normalizedLevel, $messageLine
+    }
+}
+
+function Update-SmartM365TimestampedTranscript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return
+    }
+
+    $timestampText = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $lines = [System.IO.File]::ReadAllLines($Path)
+    $timestampPattern = '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b'
+    $changed = $false
+    $updatedLines = foreach ($line in $lines) {
+        if ($line -match $timestampPattern) {
+            $line
+        }
+        elseif ($line -match '^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(.*)$') {
+            $changed = $true
+            "{0} {1}" -f $Matches[1], $Matches[2]
+        }
+        else {
+            $changed = $true
+            "{0} {1}" -f $timestampText, $line
+        }
+    }
+
+    if ($changed) {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllLines($Path, [string[]]$updatedLines, $utf8NoBom)
+    }
+}
+
 function WriteLog {
     param(
         [string]$Message,
         [string]$Level = ""
     )
-
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
     # Automatically detect error keywords if no level is provided
     if (-not $Level -or $Level -eq "") {
@@ -145,15 +192,15 @@ function WriteLog {
         }
     }
 
-    $logEntry = "[$Level] $timestamp - $Message"
+    $logEntry = @(Format-SmartM365LogLine -Message $Message -Level $Level)
 
     switch ($Level.ToUpper()) {
-        "ERROR"   { Write-Host $logEntry -ForegroundColor Red }
-        "WARNING" { Write-Host $logEntry -ForegroundColor Yellow }
-        "INFO"    { Write-Host $logEntry -ForegroundColor Cyan }
-        "DEBUG"   { Write-Host $logEntry -ForegroundColor Gray }
-        "SUCCESS" { Write-Host $logEntry -ForegroundColor Green }
-        default   { Write-Host $logEntry -ForegroundColor White }
+        "ERROR"   { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Red } }
+        "WARNING" { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Yellow } }
+        "INFO"    { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Cyan } }
+        "DEBUG"   { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Gray } }
+        "SUCCESS" { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Green } }
+        default   { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor White } }
     }
 
     if ($global:LogTextFile) {

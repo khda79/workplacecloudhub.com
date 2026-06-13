@@ -92,9 +92,9 @@ Start-SedaElevatedSelf -Parameters $PSBoundParameters
 $script:AppName = 'Smart Endpoint Diagnostics Analyzer'
 $script:AppVersion = '0.2.0'
 $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
-$script:LogoPath = Join-Path $script:BasePath 'logo.ico'
+$script:LogoPath = Join-Path $script:BasePath 'SmartM365-logo.ico'
 if (-not (Test-Path -LiteralPath $script:LogoPath -PathType Leaf)) {
-    $script:LogoPath = Join-Path (Split-Path -Parent $script:BasePath) 'logo.ico'
+    $script:LogoPath = Join-Path (Split-Path -Parent $script:BasePath) 'SmartM365-logo.ico'
 }
 $script:WorkplaceLogoPath = Join-Path $script:BasePath 'workplacecloudhub-header.png'
 if (-not (Test-Path -LiteralPath $script:WorkplaceLogoPath -PathType Leaf)) {
@@ -213,12 +213,13 @@ function Write-SedaLog {
     )
     if (-not $script:LogPath) { return }
     try {
-        $line = '[{0}] [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level, $Message
-        Add-Content -LiteralPath $script:LogPath -Value $line -Encoding UTF8
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
+        $lines = @([regex]::Split(([string]$Message), '\r?\n') | ForEach-Object { '{0} [{1}] {2}' -f $timestamp, $Level, $_ })
+        Add-Content -LiteralPath $script:LogPath -Value $lines -Encoding UTF8
         if ($Exception) {
-            Add-Content -LiteralPath $script:LogPath -Value ('    Exception: {0}' -f $Exception.Message) -Encoding UTF8
+            Add-Content -LiteralPath $script:LogPath -Value ('{0} [{1}] Exception: {2}' -f $timestamp, $Level, $Exception.Message) -Encoding UTF8
             if ($Exception.StackTrace) {
-                Add-Content -LiteralPath $script:LogPath -Value ('    StackTrace: {0}' -f ($Exception.StackTrace -replace "`r?`n", ' | ')) -Encoding UTF8
+                Add-Content -LiteralPath $script:LogPath -Value ('{0} [{1}] StackTrace: {2}' -f $timestamp, $Level, ($Exception.StackTrace -replace "`r?`n", ' | ')) -Encoding UTF8
             }
         }
     } catch {}

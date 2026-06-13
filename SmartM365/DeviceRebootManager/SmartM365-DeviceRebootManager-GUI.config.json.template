@@ -16,7 +16,7 @@
   "DefaultLanguage": "auto",
   "ForceLanguage": false,
   "LanguageCatalogPath": "",
-  "WindowIconPath": "logo.ico",
+  "WindowIconPath": "SmartM365-logo.ico",
   "StartTopmost": true,
   "RestoreTopmostAfterPostpone": true,
   "RestoreTopmostAfterMinutes": 5

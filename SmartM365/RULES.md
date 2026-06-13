@@ -48,7 +48,7 @@ Per-script CSV/data paths should use `{{DataAllRootPath}}` plus a functional pat
 
 ## CSV Naming
 
-Generated CSV file names outside `IntuneRemediation` must be readable from the shared `DATA-LAST` folder without relying on their source directory.
+Generated CSV file names outside `SmartIntuneRemediation/IntuneRemediationScripts` must be readable from the shared `DATA-LAST` folder without relying on their source directory.
 
 Use this pattern:
 
@@ -74,7 +74,7 @@ Do not use misleading object prefixes such as `Mailboxes_` for non-mailbox data,
 - Do not use the Windows registry to resolve script paths.
 - Runtime modules live under `Modules/SmartM365.Core` and `Modules/SmartM365.SharePoint`; do not reintroduce `Modules.PS5` or `Modules.PS7` root folders.
 - Windows PowerShell 5.1 compatibility helpers are grouped in `Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psd1`; do not split them back into separate compatibility modules.
-- Intune detection/remediation scripts follow their own rules in `IntuneRemediation/RULES.md`; do not add JSON config dependencies to them.
+- Intune detection/remediation scripts follow their own rules in `SmartIntuneRemediation/IntuneRemediationScripts/RULES.md`; do not add JSON config dependencies to them.
 - Keep `RetentionMaxCSV` and `RetentionMaxLogs` centralized through config, with default fallback values of `30`.
 - Error email recipients must resolve from `ErrorMailTo`; per-script configs should use `__USE_GLOBAL__` unless a script-specific recipient is required.
 - Error and report emails should use Microsoft Graph when `SmtpServer` is empty; keep `From` configured as the sender mailbox and ensure the SmartM365 app has `Mail.Send`.
@@ -95,6 +95,7 @@ Do not use misleading object prefixes such as `Mailboxes_` for non-mailbox data,
 - Keep all PowerShell script filenames prefixed with `SmartM365-`, including Intune detection/remediation package scripts.
 - Do not include version numbers in active script filenames. Keep the active version in the synopsis/header and rely on Git history for changes.
 - Keep script comments concise and useful. Remove stale customer-specific comments or dead notes.
+- Every line written to a log or transcript file must begin with date and time. Use `yyyy-MM-dd HH:mm:ss` by default, or `yyyy-MM-dd HH:mm:ss.fff` when millisecond precision is useful. Multi-line messages must be split so each physical line receives its own timestamp prefix.
 
 ## Git Hygiene
 

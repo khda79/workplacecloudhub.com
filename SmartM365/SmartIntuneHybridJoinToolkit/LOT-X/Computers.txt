@@ -1,0 +1,5 @@
+# One computer per line.
+# Use short names or FQDNs.
+# Example:
+# PC-001
+# PC-002.example.local

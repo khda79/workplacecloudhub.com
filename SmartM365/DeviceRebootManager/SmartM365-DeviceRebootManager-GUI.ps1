@@ -23,7 +23,7 @@ param(
     [int[]]$PostponeOptionsMinutes = @(),
     [int]$MaxPostponeCount = 2,
     [int]$ReminderCooldownHours = 20,
-    [string]$WindowIconPath = 'logo.ico',
+    [string]$WindowIconPath = 'SmartM365-logo.ico',
     [string]$WindowTitle = '',
     [string]$CompanyName = '',
     [ValidateSet('auto','en','fr','de','es','nl','it','pt','pl','ar','tr','sv','da','nb','fi','ro','hu','ja','ko','zh-Hans','zh','uk')]
@@ -134,10 +134,11 @@ function Write-AppLog {
 
     try {
         Initialize-AppFolder
-        $line = '[{0}] [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level, $Message
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [IO.File]::AppendAllText($script:LogPath, "$line`r`n", $utf8NoBom)
-        if ($EnableDebugLogging) { Write-Host $line }
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
+        $lines = @([regex]::Split(([string]$Message), '\r?\n') | ForEach-Object { '{0} [{1}] {2}' -f $timestamp, $Level, $_ })
+        [IO.File]::AppendAllText($script:LogPath, (($lines -join "`r`n") + "`r`n"), $utf8NoBom)
+        if ($EnableDebugLogging) { $lines | ForEach-Object { Write-Host $_ } }
         if ($script:Ui.ContainsKey('ActivityText') -and $null -ne $script:Ui.ActivityText) {
             $uiLine = '[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $Message
             $script:Ui.ActivityText.AppendText("$uiLine`r`n")
