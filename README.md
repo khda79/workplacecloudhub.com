@@ -9,6 +9,7 @@ WorkplaceCloudHub is built around practical guidance, automation patterns, and t
 - `SmartM365/`: validated PowerShell automation scripts and tools for Microsoft 365 and endpoint administration.
 - `SmartAzure/`: Azure infrastructure inventory, governance, security posture, and cost optimization scripts.
 - `SmartAzureVirtualDesktop/`: Azure Virtual Desktop inventory, health, diagnostics, autoscale, FSLogix storage, and cost optimization scripts.
+- `SmartCitrix/`: Citrix on-premises and Citrix Cloud inventory scripts, with separate implementation areas for each platform model.
 
 Additional project directories will be added over time.
 
@@ -22,6 +23,18 @@ Additional project directories will be added over time.
 - `SmartInventory/Scaling/SmartAzureVirtualDesktop-ScalingPlan-Inventory.ps1`: exports scaling plans, schedules, assignments, and host pool autoscale coverage.
 - `SmartInventory/FSLogix/SmartAzureVirtualDesktop-FSLogixStorage-Inventory.ps1`: exports candidate FSLogix storage accounts and Azure Files shares in AVD resource groups.
 - `SmartInventory/Cost/SmartAzureVirtualDesktop-CostOptimization-Inventory.ps1`: exports AVD cost review signals such as inactive session hosts, hosts without sessions, host pools without autoscale, and unattached disks in AVD resource groups.
+
+## SmartCitrix Tools
+
+`SmartCitrix/` contains PowerShell automation for Citrix estate inventory. The project separates on-premises Citrix Virtual Apps and Desktops scripts from future Citrix Cloud / Citrix DaaS API scripts.
+
+- `Citrix-OnPrem/SmartInventory/CVAD/SmartCitrix-OnPrem-CVADSite-Inventory.ps1`: exports CVAD site, controller, zone, admin, and service status data.
+- `Citrix-OnPrem/SmartInventory/CVAD/SmartCitrix-OnPrem-CVADDelivery-Inventory.ps1`: exports catalogs, delivery groups, published applications, access policies, tags, and reboot schedules.
+- `Citrix-OnPrem/SmartInventory/CVAD/SmartCitrix-OnPrem-CVADMachineSessionHealth-Inventory.ps1`: exports machine, session, desktop, and health summary data.
+- `Citrix-OnPrem/SmartInventory/CVAD/SmartCitrix-OnPrem-CVADPolicy-Inventory.ps1`: exports Citrix policy sets, policies, settings, and filters when available from the local SDK.
+- `Citrix-OnPrem/SmartInventory/CVAD/SmartCitrix-OnPrem-CVADHostingPower-Inventory.ps1`: exports hosting connections, power management settings, power actions, and reboot cycles.
+- `Citrix-OnPrem/SmartInventory/StoreFront/SmartCitrix-OnPrem-StoreFront-Inventory.ps1`: exports StoreFront deployment, store, authentication, receiver, farm, and gateway data from StoreFront PowerShell modules.
+- `Citrix-OnPrem/SmartInventory/Licensing/SmartCitrix-OnPrem-Licensing-Inventory.ps1`: exports CVAD licensing configuration and available licensing SDK data.
 
 ## SmartAzure Tools
 

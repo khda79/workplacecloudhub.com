@@ -1,0 +1,6 @@
+{
+  "TenantKey": "test",
+  "AdminAddress": "ctx-ddc-01.contoso.com",
+  "RetentionMaxCSV": 30,
+  "MaxRecordCount": 250000
+}
