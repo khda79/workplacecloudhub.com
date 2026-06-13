@@ -10,6 +10,10 @@ SmartAzure/**
 !SmartAzure/
 !SmartAzure/**/
 !SmartAzure/**/.gitkeep
+SmartAzureVirtualDesktop/**
+!SmartAzureVirtualDesktop/
+!SmartAzureVirtualDesktop/**/
+!SmartAzureVirtualDesktop/**/.gitkeep
 .delete-empty/
 
 # Local documentation / agent notes
@@ -40,6 +44,14 @@ SmartAzure/**
 !/SmartAzure/**/*.md
 !/SmartAzure/**/*.json.template
 !/SmartAzure/SmartAzure.global.local.json.template
+!/SmartAzureVirtualDesktop/README.md
+!/SmartAzureVirtualDesktop/**/*.ps1
+!/SmartAzureVirtualDesktop/**/*.psm1
+!/SmartAzureVirtualDesktop/**/*.psd1
+!/SmartAzureVirtualDesktop/**/*.cmd
+!/SmartAzureVirtualDesktop/**/*.md
+!/SmartAzureVirtualDesktop/**/*.json.template
+!/SmartAzureVirtualDesktop/SmartAzureVirtualDesktop.global.local.json.template
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md
@@ -87,6 +99,7 @@ CSV/
 Output/
 SmartM365/Data/**
 SmartAzure/Data/**
+SmartAzureVirtualDesktop/Data/**
 
 # Temporary
 Temp/

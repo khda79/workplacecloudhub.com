@@ -8,8 +8,20 @@ WorkplaceCloudHub is built around practical guidance, automation patterns, and t
 
 - `SmartM365/`: validated PowerShell automation scripts and tools for Microsoft 365 and endpoint administration.
 - `SmartAzure/`: Azure infrastructure inventory, governance, security posture, and cost optimization scripts.
+- `SmartAzureVirtualDesktop/`: Azure Virtual Desktop inventory, health, diagnostics, autoscale, FSLogix storage, and cost optimization scripts.
 
 Additional project directories will be added over time.
+
+## SmartAzureVirtualDesktop Tools
+
+`SmartAzureVirtualDesktop/` contains PowerShell automation for Azure Virtual Desktop environments.
+
+- `SmartInventory/Estate/SmartAzureVirtualDesktop-AVDEstate-Inventory.ps1`: exports host pools, workspaces, application groups, applications, desktops, session hosts, scaling plans, private endpoint connections, and estate summaries.
+- `SmartInventory/Health/SmartAzureVirtualDesktop-SessionHostHealth-Inventory.ps1`: exports session host health, user sessions, and host pool capacity summaries.
+- `SmartInventory/Diagnostics/SmartAzureVirtualDesktop-Diagnostics-Inventory.ps1`: exports Azure Monitor diagnostic settings for AVD resources and resources missing diagnostics.
+- `SmartInventory/Scaling/SmartAzureVirtualDesktop-ScalingPlan-Inventory.ps1`: exports scaling plans, schedules, assignments, and host pool autoscale coverage.
+- `SmartInventory/FSLogix/SmartAzureVirtualDesktop-FSLogixStorage-Inventory.ps1`: exports candidate FSLogix storage accounts and Azure Files shares in AVD resource groups.
+- `SmartInventory/Cost/SmartAzureVirtualDesktop-CostOptimization-Inventory.ps1`: exports AVD cost review signals such as inactive session hosts, hosts without sessions, host pools without autoscale, and unattached disks in AVD resource groups.
 
 ## SmartAzure Tools
 
