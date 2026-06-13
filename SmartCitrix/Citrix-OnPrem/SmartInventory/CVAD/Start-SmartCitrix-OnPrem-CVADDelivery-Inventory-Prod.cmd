@@ -1,0 +1,3 @@
+@echo off
+set "SCRIPT_DIR=%~dp0"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartCitrix-OnPrem-CVADDelivery-Inventory.ps1" -Tenant prod %*

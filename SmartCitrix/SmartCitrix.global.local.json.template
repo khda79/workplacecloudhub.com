@@ -1,0 +1,10 @@
+{
+  "TenantKey": "test",
+  "WorkspaceRootPath": "{{SmartCitrixRootPath}}",
+  "DataAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-ALL",
+  "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-LAST",
+  "LogAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\LOG-ALL",
+  "AdminAddress": "",
+  "RetentionMaxCSV": 30,
+  "MaxRecordCount": 250000
+}
