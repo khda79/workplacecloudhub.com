@@ -14,7 +14,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $SetupDiagResultPath = Join-Path $env:ProgramData "SmartM365\IntuneRemediation\Output\SetupDiag\SetupDiagResults.xml"
-$SetupDiagToolPath = Join-Path $env:ProgramData "SmartM365\IntuneRemediation\Tools\SetupDiag\SetupDiag.exe"
+$SetupDiagToolPaths = @(
+    (Join-Path $env:ProgramData "SmartM365\IntuneRemediation\Tools\SetupDiag\SetupDiag.exe"),
+    (Join-Path $env:ProgramData "SetupDiag\SetupDiag.exe")
+)
 $EnterpriseRegistryPath = "HKLM:\SOFTWARE\SmartM365\IntuneRemediation\SetupDiag"
 
 $BlockingCodes = @(
@@ -83,7 +86,13 @@ try {
     $issues = New-Object System.Collections.Generic.List[string]
     $cutoffDate = (Get-Date).AddDays(-1 * $LookbackDays)
     $hasSetupDiagResult = Test-Path -LiteralPath $SetupDiagResultPath -PathType Leaf
-    $hasSetupDiagTool = Test-Path -LiteralPath $SetupDiagToolPath -PathType Leaf
+    $hasSetupDiagTool = $false
+    foreach ($setupDiagToolPath in $SetupDiagToolPaths) {
+        if (Test-Path -LiteralPath $setupDiagToolPath -PathType Leaf) {
+            $hasSetupDiagTool = $true
+            break
+        }
+    }
     $hasSetupLogs = $false
     $hasRollbackLogs = $false
 

@@ -50,6 +50,7 @@ $setupDiagDownloadUrl = "https://go.microsoft.com/fwlink/?linkid=870142"
 
 # Use single-quoted child paths containing "$Windows.~BT" to prevent PowerShell variable expansion
 $setupDiagCandidates = @(
+    (Join-Path -Path $env:ProgramData -ChildPath 'SetupDiag\SetupDiag.exe'),
     (Join-Path -Path $env:SystemDrive -ChildPath '$Windows.~BT\Sources\SetupDiag.exe'),
     (Join-Path -Path $env:SystemDrive -ChildPath 'Windows.old\$Windows.~BT\Sources\SetupDiag.exe')
 )
