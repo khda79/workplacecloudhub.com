@@ -93,9 +93,6 @@ $script:AppName = 'Smart Endpoint Diagnostics Analyzer'
 $script:AppVersion = '0.2.0'
 $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogoPath = Join-Path $script:BasePath 'SmartM365-logo.ico'
-if (-not (Test-Path -LiteralPath $script:LogoPath -PathType Leaf)) {
-    $script:LogoPath = Join-Path (Split-Path -Parent $script:BasePath) 'SmartM365-logo.ico'
-}
 $script:WorkplaceLogoPath = Join-Path $script:BasePath 'workplacecloudhub-header.png'
 if (-not (Test-Path -LiteralPath $script:WorkplaceLogoPath -PathType Leaf)) {
     $script:WorkplaceLogoPath = Join-Path $script:BasePath 'workplacecloudhub.png'
