@@ -14,7 +14,7 @@ Additional project directories will be added over time.
 
 ### Smart Endpoint Diagnostics Analyzer
 
-`SmartM365/EndpointDiagnosticsAnalyzer/` contains **Smart Endpoint Diagnostics Analyzer**, a PowerShell/WPF endpoint diagnostics analyzer for Microsoft Intune and Windows endpoint troubleshooting.
+`SmartM365/Devices/EndpointDiagnosticsAnalyzer/` contains **Smart Endpoint Diagnostics Analyzer**, a PowerShell/WPF endpoint diagnostics analyzer for Microsoft Intune and Windows endpoint troubleshooting.
 
 - Analyzes Intune Device Diagnostics ZIP files and local endpoint diagnostic captures.
 - Parses DSRegCmd, MDM enrollment, MDM Diagnostics CAB/HTML, IME logs, Windows Update ReportingEvents/ETL, EVTX event logs, hardware/security data, installed applications, drivers, WiFi profiles, proxy/device identity details, and Windows 11 upgrade indicators.
@@ -22,7 +22,7 @@ Additional project directories will be added over time.
 
 ### Smart Device Reboot Manager
 
-`SmartM365/DeviceRebootManager/` contains **Smart Device Reboot Manager**, a local WPF user notification app for SmartM365 device restart governance.
+`SmartM365/Devices/DeviceRebootManager/` contains **Smart Device Reboot Manager**, a local WPF user notification app for SmartM365 device restart governance.
 
 - Presents restart status and actions to end users with a localized GUI.
 - Supports recommended or required restart modes, preview/test launchers, configurable postpone choices, and safer state/log handling.
@@ -30,7 +30,7 @@ Additional project directories will be added over time.
 
 ### Smart DeviceRegistration Tool
 
-`SmartM365/DeviceRegistrationTool/` contains **Smart DeviceRegistration Tool**, a local PowerShell/WPF tool for Intune device registration, Hybrid Join, and Entra device registration diagnostics.
+`SmartM365/Devices/DeviceRegistrationTool/` contains **Smart DeviceRegistration Tool**, a local PowerShell/WPF tool for Intune device registration, Hybrid Join, and Entra device registration diagnostics.
 
 - Provides user-mode diagnostics and guarded admin repair actions.
 - Collects local enrollment, MDM, `dsregcmd`, policy, and support-bundle evidence.
@@ -46,7 +46,7 @@ Additional project directories will be added over time.
 
 ### Smart Intune Remediation Manager
 
-`SmartM365/SmartIntuneRemediation/` contains the SmartM365 Intune remediation workspace.
+`SmartM365/Devices/SmartIntuneRemediation/` contains the SmartM365 Intune remediation workspace.
 
 - `IntuneRemediationScripts/`: Intune detection, remediation, diagnostic, and action scripts organized by scenario.
 - `IntuneRemediationManager/`: interactive manager for Microsoft Intune remediation scripts.
@@ -57,7 +57,7 @@ The manager uses delegated interactive Microsoft Graph authentication. It does n
 
 ### Smart Intune Hybrid Join Toolkit
 
-`SmartM365/SmartIntuneHybridJoinToolkit/` contains a PsExec/LOT toolkit for diagnosing and repairing Hybrid Entra Join plus Intune enrollment issues.
+`SmartM365/Devices/SmartIntuneHybridJoinToolkit/` contains a PsExec/LOT toolkit for diagnosing and repairing Hybrid Entra Join plus Intune enrollment issues.
 
 ## Focus Areas
 

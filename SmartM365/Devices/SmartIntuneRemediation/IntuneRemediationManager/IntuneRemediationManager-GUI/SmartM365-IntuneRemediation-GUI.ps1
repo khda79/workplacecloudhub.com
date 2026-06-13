@@ -178,7 +178,7 @@ $message
 The Microsoft Graph browser sign-in was canceled or did not complete. Click Connect Graph again, keep the browser tab open, finish sign-in and consent, then return to the manager.
 
 If the browser window does not open or the localhost redirect is blocked, launch the GUI from a visible PowerShell window with:
-pwsh -STA -NoProfile -File .\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
+pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
 "@
     }
 
@@ -3969,8 +3969,8 @@ Add-Type -AssemblyName System.Windows.Forms
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 $script:Ui['Window'] = $window
-$smartM365RootPath = Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent
-$logoIconPath = Join-Path -Path $smartM365RootPath -ChildPath 'SmartM365-logo.ico'
+$smartM365RootPath = Split-Path -Path (Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent
+$logoIconPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-logo.ico'
 if (Test-Path -LiteralPath $logoIconPath) {
     $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$logoIconPath)
 }

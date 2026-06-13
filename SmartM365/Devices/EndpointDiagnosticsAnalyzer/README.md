@@ -53,37 +53,37 @@ The GUI self-elevates at startup. If it is launched from a standard user context
 Open the GUI:
 
 ```powershell
-powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -File .\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1
+powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1
 ```
 
 Or use the launcher:
 
 ```cmd
-.\EndpointDiagnosticsAnalyzer\Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd
+.\Devices\EndpointDiagnosticsAnalyzer\Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd
 ```
 
 Analyze a ZIP from the command line:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip
 ```
 
 Analyze and export an HTML report:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip -ExportHtmlPath C:\Temp\DiagLogs-report.html
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip -ExportHtmlPath C:\Temp\DiagLogs-report.html
 ```
 
 Analyze with AI from the command line:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip -RunAI -AIProvider ollama
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -ZipPath C:\Temp\DiagLogs.zip -RunAI -AIProvider ollama
 ```
 
 Collect local diagnostics and create a ZIP:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -CollectLocal -ZipPath C:\Temp\LocalDiag.zip
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Devices\EndpointDiagnosticsAnalyzer\SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1 -Cli -CollectLocal -ZipPath C:\Temp\LocalDiag.zip
 ```
 
 ## Privacy

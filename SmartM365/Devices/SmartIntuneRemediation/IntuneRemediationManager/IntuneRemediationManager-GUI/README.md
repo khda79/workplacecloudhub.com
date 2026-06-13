@@ -7,13 +7,13 @@ WPF interface for browsing, exporting, editing, and publishing Microsoft Intune 
 From the `SmartM365` folder:
 
 ```powershell
-pwsh -STA -NoProfile -File .\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1
+pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1
 ```
 
 Or use the launcher, which hides the PowerShell console:
 
 ```cmd
-.\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\Start-SmartM365-IntuneRemediation-GUI.cmd
+.\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\Start-SmartM365-IntuneRemediation-GUI.cmd
 ```
 
 The GUI starts maximized. Click `Connect Graph` before using Intune cloud actions.
@@ -21,7 +21,7 @@ The GUI starts maximized. Click `Connect Graph` before using Intune cloud action
 If browser sign-in is canceled, blocked, or never returns to PowerShell, launch from a visible PowerShell window and use device code authentication:
 
 ```powershell
-pwsh -STA -NoProfile -File .\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
+pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
 ```
 
 Keep the PowerShell window visible because Microsoft Graph prints the device code there.
