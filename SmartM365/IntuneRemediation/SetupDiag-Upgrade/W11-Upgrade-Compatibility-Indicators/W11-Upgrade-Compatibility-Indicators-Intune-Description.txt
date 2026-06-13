@@ -1,0 +1,11 @@
+Name: W11-Upgrade-Compatibility-Indicators
+Scenario: SetupDiag-Upgrade\W11-Upgrade-Compatibility-Indicators
+
+Purpose:
+Detects actionable Windows 11 upgrade compatibility blockers from TargetVersionUpgradeExperienceIndicators while ignoring devices that are only hardware-ineligible.
+
+Scripts:
+- SmartM365-W11-Upgrade-Compatibility-Indicators-EligibleOnly-DetectionOnly.ps1: Detection-only package. Returns remediation required only when an actionable compatibility blocker is present.
+
+Notes:
+This package is intended for visibility and targeting. It does not remediate hardware eligibility issues and does not force a Windows upgrade.

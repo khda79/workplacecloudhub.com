@@ -1,6 +1,6 @@
 ﻿<#
     Name: SmartM365-UWP-Store-AppRepository-WU-Health-Remediation.ps1
-    Version: 1.0
+    Version: 1.1
     Description: Safely remediates common Windows Update, Microsoft Store, UWP/AppX, AppRepository, and WinRM health issues that may block Windows upgrade scenarios.
 
     Intended use:
@@ -20,6 +20,44 @@ $LogRoot = Join-Path -Path $env:ProgramData -ChildPath 'SmartM365\IntuneRemediat
 $LogPath = Join-Path -Path $LogRoot -ChildPath 'Remediate-UWP-Store-AppRepository-WU-Health.log'
 if (-not (Test-Path -LiteralPath $LogRoot)) { New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null }
 $ErrorFound = $false
+$RemediationErrors = New-Object System.Collections.Generic.List[string]
+
+function Format-CompactText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Text,
+
+        [int]$MaxLength = 180
+    )
+
+    $compactText = ($Text -replace "\s+", " ").Trim()
+
+    if ($compactText.Length -gt $MaxLength) {
+        return ($compactText.Substring(0, $MaxLength) + "...")
+    }
+
+    return $compactText
+}
+
+function Write-IntuneResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Status,
+
+        [hashtable]$Data = @{}
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add("Status=$Status")
+
+    foreach ($key in ($Data.Keys | Sort-Object)) {
+        $value = Format-CompactText -Text ([string]$Data[$key]) -MaxLength 240
+        $parts.Add(("{0}={1}" -f $key, $value))
+    }
+
+    Write-Output ($parts -join "; ")
+}
 
 function Write-SmartM365Log {
     param(
@@ -29,7 +67,6 @@ function Write-SmartM365Log {
 
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
     $line | Out-File -FilePath $LogPath -Append -Encoding UTF8
-    Write-Output $line
 }
 
 function Add-RemediationError {
@@ -40,6 +77,7 @@ function Add-RemediationError {
 
     Write-SmartM365Log "ERROR: $Message"
     $script:ErrorFound = $true
+    $script:RemediationErrors.Add($Message)
 }
 
 function Invoke-ServiceStartIfAvailable {
@@ -174,8 +212,24 @@ foreach ($serviceName in @("AppXSvc", "ClipSVC", "StateRepository")) {
     Invoke-ServiceStartIfAvailable -Name $serviceName -StartupType Manual
 }
 
-# WpnService is not forced to Automatic because it may be intentionally managed by security baselines.
-Invoke-ServiceStartIfAvailable -Name "WpnService" -StartupType Manual
+# WpnService may be intentionally disabled by hardening baselines. Do not change its startup type automatically.
+try {
+    $wpnService = Get-Service -Name "WpnService" -ErrorAction SilentlyContinue
+
+    if ($null -eq $wpnService) {
+        Write-SmartM365Log "WpnService not found; skipped"
+    }
+    elseif ($wpnService.Status -in @("StopPending", "PausePending", "Paused")) {
+        Start-Service -Name "WpnService" -ErrorAction SilentlyContinue
+        Write-SmartM365Log "WpnService start requested because it was in state: $($wpnService.Status)"
+    }
+    else {
+        Write-SmartM365Log "WpnService startup type was not changed"
+    }
+}
+catch {
+    Add-RemediationError "WpnService check failed: $($_.Exception.Message)"
+}
 
 # ---------------------------------------------------------
 # 5. AppRepository sanity check
@@ -333,8 +387,18 @@ Write-SmartM365Log "===== Remediation finished; no reboot was forced ====="
 
 if ($ErrorFound) {
     Write-SmartM365Log "Script exit code: 1"
+    $sampleErrors = @($RemediationErrors | Select-Object -First 3)
+    Write-IntuneResult -Status "CompletedWithErrors" -Data @{
+        ErrorCount = $RemediationErrors.Count
+        LogPath = $LogPath
+        Samples = ($sampleErrors -join " | ")
+    }
     exit 1
 }
 
 Write-SmartM365Log "Script exit code: 0"
+Write-IntuneResult -Status "Completed" -Data @{
+    LogPath = $LogPath
+    Reboot = "NotForced"
+}
 exit 0
