@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<title>Ativação da sua caixa de arquivo</title>
+</head>
+
+<body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
+
+<!-- ===== Bandeau ===== -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+        <tr>
+          <td style="padding:12px 16px; width:160px;">
+            {{LogoImgTag}}
+          </td>
+          <td style="padding:12px 16px;">
+            <div style="color:#ffffff; font-size:20px; font-weight:700;">ATIVAÇÃO DA SUA CAIXA DE ARQUIVO</div>
+            <div style="color:#d9ecff; font-size:13px;">Informações importantes</div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- ===== Contenu ===== -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#ffffff;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+        <tr>
+          <td style="padding:22px 16px;">
+
+            <p style="margin:0 0 12px 0;">Olá <b>{{UserName}}</b>,</p>
+
+            <p style="margin:0 0 12px 0;">
+              A partir de <b>{{Date}}</b>, será ativada uma caixa de arquivo na sua conta de e-mail.
+            </p>
+
+            <p style="margin:0 0 14px 0;">
+              <b>Por quê?</b><br>
+              Para preparar a migração para o <b>Exchange Online</b> e garantir uma transição tranquila.
+            </p>
+
+            <!-- ===== Ce que cela change ===== -->
+            <div style="background:#f6f8fb; border:1px solid #d6dde8; border-radius:6px; padding:14px; margin:16px 0;">
+              <div style="font-weight:700; color:#0055A4; margin-bottom:8px;">O que muda para você?</div>
+              <ul style="margin:0; padding-left:18px;">
+                <li style="margin:0 0 6px 0;"><b>Nada será apagado.</b></li>
+                <li style="margin:0 0 6px 0;">Uma seção <b>Arquivo - {{UserName}}</b> aparecerá no Outlook (painel esquerdo).</li>
+                <li style="margin:0 0 6px 0;">Os e-mails mais antigos poderão ser movidos automaticamente para lá para reduzir o tamanho da caixa principal.</li>
+                <li style="margin:0 0 6px 0;">Os e-mails arquivados permanecem acessíveis e pesquisáveis a qualquer momento.</li>
+              </ul>
+            </div>
+
+            <!-- ===== Action requise ===== -->
+            <div style="margin:0 0 14px 0;">
+              <div style="font-weight:700; color:#0055A4; margin:0 0 6px 0;">Ação necessária?</div>
+              <p style="margin:0;">Nenhuma ação obrigatória é necessária da sua parte.</p>
+            </div>
+
+            <!-- ===== Comment utiliser l’archive ===== -->
+            <div style="margin:0 0 14px 0;">
+              <div style="font-weight:700; color:#0055A4; margin:0 0 6px 0;">Como usar o arquivo?</div>
+              <ul style="margin:0; padding-left:18px;">
+                <li style="margin:0 0 6px 0;">Mova pastas grandes para o arquivo (clique com o botão direito &gt; <b>Mover</b>).</li>
+                <li style="margin:0 0 6px 0;">O arquivamento automático moverá gradualmente os e-mails mais antigos.</li>
+                <li style="margin:0 0 6px 0;">A pesquisa do Outlook inclui o arquivo.</li>
+                <li style="margin:0 0 6px 0;">Se necessário, use o escopo <b>“Todos os Itens do Outlook”</b> para pesquisar na caixa principal e no arquivo.</li>
+              </ul>
+            </div>
+
+            <!-- ===== Uso da caixa de correio (déplacé avant méthodes) ===== -->
+            <div style="background:#f6f8fb; border:1px solid #d6dde8; border-radius:6px; padding:14px; margin:16px 0;">
+              <div style="font-weight:700; color:#0055A4; margin-bottom:8px;">Uso da caixa de correio</div>
+              <p style="margin:0;">{{MailboxUsageText}}</p>
+              <div style="color:#666; font-size:12px; margin-top:8px;">
+                Esta informação é fornecida apenas como orientação para ajudar você a se preparar para a migração.
+              </div>
+            </div>
+
+            <!-- ===== Archiver vous-même ===== -->
+            <h2 style="color:#0055A4; font-size:16px; margin:18px 0 8px 0;">Arquive você mesmo para liberar espaço</h2>
+
+            <p style="margin:0 0 12px 0;">
+              Se você deseja reduzir rapidamente o tamanho da sua caixa principal, pode arquivar manualmente alguns e-mails ou pastas.
+            </p>
+
+            <h3 style="margin:14px 0 6px 0;">Método 1 – Mover uma pasta inteira (recomendado)</h3>
+            <p style="margin:0 0 6px 0;">A opção mais rápida se você tiver muitos e-mails.</p>
+            <ol style="margin:0 0 12px 18px;">
+              <li>Clique com o botão direito em uma pasta (ex.: “Projetos 2022”)</li>
+              <li>Clique em <b>Mover Pasta</b></li>
+              <li>Selecione <b>Arquivo - {{UserName}}</b></li>
+              <li>Confirmar</li>
+            </ol>
+            <p style="margin:0 0 12px 0;">Todos os e-mails da pasta são movidos em uma única operação.</p>
+
+            <h3 style="margin:14px 0 6px 0;">Método 2 – Arquivar vários e-mails</h3>
+            <ol style="margin:0 0 12px 18px;">
+              <li>Selecione vários e-mails</li>
+              <li>Clique com o botão direito</li>
+              <li>Clique em <b>Mover</b></li>
+              <li>Selecione uma pasta no arquivo</li>
+            </ol>
+            <p style="margin:0 0 12px 0; color:#666;">
+              Evite mover e-mails um a um se o volume for grande.
+            </p>
+
+            <h3 style="margin:14px 0 6px 0;">Método 3 – Liberar espaço rapidamente</h3>
+            <p style="margin:0 0 6px 0;">Para identificar e-mails grandes:</p>
+            <ul style="margin:0 0 12px 18px;">
+              <li>Clique em <b>Ordenar por</b></li>
+              <li>Selecione <b>Tamanho</b></li>
+              <li>Arquive ou exclua os e-mails maiores</li>
+            </ul>
+            <p style="margin:0 0 12px 0; color:#666;">
+              Considere salvar anexos importantes no OneDrive antes de excluir.
+            </p>
+
+            <p style="margin:0 0 12px 0;">
+              <b>Não se esqueça:</b> esvazie regularmente <b>Itens Eliminados</b> e <b>Correio não solicitado</b> — estas pastas contam para o tamanho total da caixa de correio.
+            </p>
+
+            <!-- ===== Support ===== -->
+            <div style="margin-top:18px; padding:12px; border-left:4px solid #0055A4; background:#f9fbff;">
+              <div style="font-weight:700; margin-bottom:6px;">Precisa de ajuda?</div>
+              <div>Entre em contato com o suporte: <b>{{Hotline}}</b></div>
+            </div>
+
+            <!-- ===== Footer ===== -->
+            <div style="margin-top:30px; text-align:center;">
+              <div style="width:100%; height:1px; background:#d0d0d0; margin:20px auto;"></div>
+              {{FooterLogoImgTag}}
+              <div style="margin-top:12px; font-size:14px; font-weight:bold;">
+                Agradecemos sua colaboração<br>
+                Equipe do Programa SmartM365
+              </div>
+            </div>
+
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>
+
