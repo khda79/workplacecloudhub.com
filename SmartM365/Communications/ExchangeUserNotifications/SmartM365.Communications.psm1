@@ -491,8 +491,16 @@ function Get-SmartM365CommunicationLinkedLogoTokens {
         [string]$LogoAltText = 'SmartM365'
     )
 
+    $logoImgTag = if (-not [string]::IsNullOrWhiteSpace($LogoPath) -and (Test-Path -LiteralPath $LogoPath)) {
+        "<img src=""cid:$LogoContentId"" alt=""$LogoAltText"" style=""height:40px; display:block;"" />"
+    }
+    else {
+        ''
+    }
+
     return @{
-        LogoImgTag = $(if (-not [string]::IsNullOrWhiteSpace($LogoPath) -and (Test-Path -LiteralPath $LogoPath)) { "<img src=""cid:$LogoContentId"" alt=""$LogoAltText"" style=""height:40px; display:block;"" />" } else { '' })
+        LogoImgTag = $logoImgTag
+        FooterLogoImgTag = $logoImgTag
     }
 }
 

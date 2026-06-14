@@ -316,7 +316,9 @@ try {
                     Hotline = Get-SmartM365CommunicationHotline -HotlineByLanguageOrCountry $hotlineMap -LanguageTag $language -DefaultHotline ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'DefaultHotline' -DefaultValue ''))
                     OldWebmailUrl = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'OldWebmailUrl' -DefaultValue '')
                     NewWebmailUrl = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'NewWebmailUrl' -DefaultValue 'https://outlook.office365.com')
+                    TermsPortalUrl = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'TermsPortalUrl' -DefaultValue '')
                     LogoImgTag = $logoTokens.LogoImgTag
+                    FooterLogoImgTag = $logoTokens.FooterLogoImgTag
                 }
                 $html = Expand-SmartM365CommunicationTemplate -TemplateContent $template.Content -Tokens $tokens
                 Assert-SmartM365CommunicationNoUnresolvedToken -Html $html
