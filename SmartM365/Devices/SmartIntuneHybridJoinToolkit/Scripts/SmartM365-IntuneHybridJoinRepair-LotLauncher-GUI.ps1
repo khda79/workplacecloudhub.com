@@ -211,10 +211,15 @@ function Start-ToolkitLot {
         throw "LOT wrapper not found: $wrapperPath"
     }
 
-    $psexecPath = Join-Path $toolkitRoot "Scripts\PsExec.exe"
+    $psexecToolkitPath = Join-Path $toolkitRoot "Scripts\PsExec.exe"
+    $psexecSystem32Path = Join-Path $env:WINDIR "System32\PsExec.exe"
     $psexecCommand = Get-Command -Name "PsExec.exe" -CommandType Application -ErrorAction SilentlyContinue
-    if (-not (Test-Path -LiteralPath $psexecPath -PathType Leaf) -and -not $psexecCommand) {
-        throw "PsExec.exe not found. Place PsExec.exe in the toolkit Scripts folder or add it to PATH before launching the LOT."
+    if (
+        -not (Test-Path -LiteralPath $psexecToolkitPath -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $psexecSystem32Path -PathType Leaf) -and
+        -not $psexecCommand
+    ) {
+        throw ("PsExec.exe not found. Place it in '{0}', in '{1}', or add PsExec.exe to PATH before launching the LOT." -f (Split-Path -Parent $psexecToolkitPath), (Split-Path -Parent $psexecSystem32Path))
     }
 
     Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$wrapperPath`"") -WorkingDirectory $LotPath -Verb RunAs
@@ -228,22 +233,23 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $font = New-Object System.Drawing.Font("Segoe UI", 9)
-$titleFont = New-Object System.Drawing.Font("Segoe UI Semibold", 18)
+$titleFont = New-Object System.Drawing.Font("Segoe UI Semibold", 20)
 $sectionFont = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
 $smallFont = New-Object System.Drawing.Font("Segoe UI", 8)
 $statusFont = New-Object System.Drawing.Font("Consolas", 9)
 
-$colorBackground = [System.Drawing.ColorTranslator]::FromHtml("#F3F6FA")
+$colorBackground = [System.Drawing.ColorTranslator]::FromHtml("#EEF3F8")
 $colorPanel = [System.Drawing.ColorTranslator]::FromHtml("#FFFFFF")
 $colorPanelSoft = [System.Drawing.ColorTranslator]::FromHtml("#F8FBFE")
-$colorHeader = [System.Drawing.ColorTranslator]::FromHtml("#061F36")
-$colorHeaderPanel = [System.Drawing.ColorTranslator]::FromHtml("#143657")
-$colorAccent = [System.Drawing.ColorTranslator]::FromHtml("#0F6CBD")
+$colorHeader = [System.Drawing.ColorTranslator]::FromHtml("#FFFFFF")
+$colorHeaderPanel = [System.Drawing.ColorTranslator]::FromHtml("#E8F3FF")
+$colorAccent = [System.Drawing.ColorTranslator]::FromHtml("#2563EB")
 $colorInk = [System.Drawing.ColorTranslator]::FromHtml("#102A43")
 $colorMuted = [System.Drawing.ColorTranslator]::FromHtml("#52677A")
 $colorBorder = [System.Drawing.ColorTranslator]::FromHtml("#D7E1EA")
 $colorTextBoxBorder = [System.Drawing.ColorTranslator]::FromHtml("#B9C8D7")
-$colorSuccess = [System.Drawing.ColorTranslator]::FromHtml("#107C10")
+$colorSuccess = [System.Drawing.ColorTranslator]::FromHtml("#0F766E")
+$colorWarning = [System.Drawing.ColorTranslator]::FromHtml("#B45309")
 $colorDisabled = [System.Drawing.ColorTranslator]::FromHtml("#E4EAF1")
 $colorDisabledText = [System.Drawing.ColorTranslator]::FromHtml("#7A8A99")
 
@@ -251,6 +257,23 @@ function Resolve-LogoIconPath {
     $candidatePaths = @(
         (Join-Path $PSScriptRoot "SmartM365-logo.ico"),
         (Join-Path $toolkitRoot "SmartM365-logo.ico")
+    )
+
+    foreach ($candidatePath in $candidatePaths) {
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return (Get-Item -LiteralPath $candidatePath -ErrorAction Stop).FullName
+        }
+    }
+
+    return $null
+}
+
+function Resolve-LogoImagePath {
+    $devicesRoot = Split-Path -Parent $toolkitRoot
+    $candidatePaths = @(
+        (Join-Path $toolkitRoot "workplacecloudhub-v2.png"),
+        (Join-Path $PSScriptRoot "workplacecloudhub-v2.png"),
+        (Join-Path $devicesRoot "DeviceRegistrationTool\workplacecloudhub-v2.png")
     )
 
     foreach ($candidatePath in $candidatePaths) {
@@ -271,17 +294,25 @@ $form.Font = $font
 $form.BackColor = $colorBackground
 
 $logoIconPath = Resolve-LogoIconPath
+$logoImagePath = Resolve-LogoImagePath
 $script:LogoIcon = $null
-$script:LogoBitmap = $null
+$script:LogoImage = $null
 if (-not [string]::IsNullOrWhiteSpace($logoIconPath)) {
     try {
         $script:LogoIcon = New-Object System.Drawing.Icon($logoIconPath, 48, 48)
-        $script:LogoBitmap = $script:LogoIcon.ToBitmap()
         $form.Icon = $script:LogoIcon
     }
     catch {
         $script:LogoIcon = $null
-        $script:LogoBitmap = $null
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($logoImagePath)) {
+    try {
+        $script:LogoImage = [System.Drawing.Image]::FromFile($logoImagePath)
+    }
+    catch {
+        $script:LogoImage = $null
     }
 }
 
@@ -326,6 +357,25 @@ function Add-SoftBorder {
             $BorderColor,
             [System.Windows.Forms.ButtonBorderStyle]::Solid
         )
+    }.GetNewClosure())
+}
+
+function Add-AccentBar {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Windows.Forms.Control]$Control
+    )
+
+    $Control.Add_Paint({
+        param($sender, $eventArgs)
+
+        $brush = New-Object System.Drawing.SolidBrush($colorAccent)
+        try {
+            $eventArgs.Graphics.FillRectangle($brush, 0, 0, 4, $sender.Height)
+        }
+        finally {
+            $brush.Dispose()
+        }
     }.GetNewClosure())
 }
 
@@ -421,6 +471,8 @@ $headerPanel = New-Object System.Windows.Forms.Panel
 $headerPanel.Dock = "Fill"
 $headerPanel.BackColor = $colorHeader
 $headerPanel.Padding = New-Object System.Windows.Forms.Padding(20, 16, 20, 16)
+Add-SoftBorder -Control $headerPanel
+Add-AccentBar -Control $headerPanel
 
 $headerLayout = New-Object System.Windows.Forms.TableLayoutPanel
 $headerLayout.Dock = "Fill"
@@ -432,104 +484,94 @@ $headerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([Sys
 $headerTextPanel = New-Object System.Windows.Forms.TableLayoutPanel
 $headerTextPanel.Dock = "Fill"
 $headerTextPanel.ColumnCount = 1
-$headerTextPanel.RowCount = 3
+$headerTextPanel.RowCount = 4
 $headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 26))) | Out-Null
 $headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 40))) | Out-Null
-$headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 30))) | Out-Null
+$headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 24))) | Out-Null
+$headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
 
 $badgeLabel = New-Object System.Windows.Forms.Label
 $badgeLabel.Text = "SMARTM365"
 $badgeLabel.AutoSize = $true
-$badgeLabel.BackColor = $colorAccent
-$badgeLabel.ForeColor = [System.Drawing.Color]::White
+$badgeLabel.BackColor = $colorHeaderPanel
+$badgeLabel.ForeColor = $colorAccent
 $badgeLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8)
 $badgeLabel.Padding = New-Object System.Windows.Forms.Padding(8, 3, 8, 3)
 
 $titleLabel = New-Object System.Windows.Forms.Label
 $titleLabel.Text = "Intune Hybrid Join LOT Launcher"
 $titleLabel.Dock = "Fill"
-$titleLabel.ForeColor = [System.Drawing.Color]::White
+$titleLabel.ForeColor = $colorInk
 $titleLabel.Font = $titleFont
 $titleLabel.TextAlign = "MiddleLeft"
 
 $subtitleLabel = New-Object System.Windows.Forms.Label
-$subtitleLabel.Text = "Operational LOT launcher"
+$subtitleLabel.Text = "Create a local LOT folder and launch PsExec repair runs."
 $subtitleLabel.Dock = "Fill"
-$subtitleLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#BFD8EC")
+$subtitleLabel.ForeColor = $colorMuted
 $subtitleLabel.TextAlign = "MiddleLeft"
+
+$psexecLabel = New-Object System.Windows.Forms.Label
+$psexecLabel.Dock = "Fill"
+$psexecLabel.ForeColor = $colorInk
+$psexecLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
+$psexecLabel.TextAlign = "MiddleLeft"
 
 $headerTextPanel.Controls.Add($badgeLabel, 0, 0)
 $headerTextPanel.Controls.Add($titleLabel, 0, 1)
 $headerTextPanel.Controls.Add($subtitleLabel, 0, 2)
+$headerTextPanel.Controls.Add($psexecLabel, 0, 3)
 
 $headerBrandLayout = New-Object System.Windows.Forms.TableLayoutPanel
 $headerBrandLayout.Dock = "Fill"
-$headerBrandLayout.ColumnCount = 2
+$headerBrandLayout.ColumnCount = 1
 $headerBrandLayout.RowCount = 1
-$headerBrandLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 58))) | Out-Null
 $headerBrandLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 
-$logoPanel = New-Object System.Windows.Forms.Panel
-$logoPanel.Width = 46
-$logoPanel.Height = 46
-$logoPanel.Margin = New-Object System.Windows.Forms.Padding(0, 7, 12, 0)
-$logoPanel.BackColor = $colorHeaderPanel
-$logoPanel.Padding = New-Object System.Windows.Forms.Padding(5)
-Add-SoftBorder -Control $logoPanel -BorderColor ([System.Drawing.ColorTranslator]::FromHtml("#24577F"))
+$headerBrandLayout.Controls.Add($headerTextPanel, 0, 0)
 
-if ($script:LogoBitmap) {
+$logoCard = New-Object System.Windows.Forms.Panel
+$logoCard.Dock = "Fill"
+$logoCard.BackColor = $colorPanel
+$logoCard.Padding = New-Object System.Windows.Forms.Padding(10)
+$logoCard.Margin = New-Object System.Windows.Forms.Padding(0, 2, 0, 2)
+Add-SoftBorder -Control $logoCard
+
+if ($script:LogoImage) {
     $logoPicture = New-Object System.Windows.Forms.PictureBox
     $logoPicture.Dock = "Fill"
     $logoPicture.SizeMode = "Zoom"
-    $logoPicture.Image = $script:LogoBitmap
-    $logoPicture.BackColor = $colorHeaderPanel
-    $logoPanel.Controls.Add($logoPicture)
+    $logoPicture.Image = $script:LogoImage
+    $logoPicture.BackColor = $colorPanel
+    $logoCard.Controls.Add($logoPicture)
 }
 else {
     $logoFallback = New-Object System.Windows.Forms.Label
     $logoFallback.Dock = "Fill"
-    $logoFallback.Text = "SM"
-    $logoFallback.ForeColor = [System.Drawing.Color]::White
-    $logoFallback.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 11)
+    $logoFallback.Text = "Workplace`r`nCloudHub"
+    $logoFallback.ForeColor = $colorAccent
+    $logoFallback.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
     $logoFallback.TextAlign = "MiddleCenter"
-    $logoPanel.Controls.Add($logoFallback)
+    $logoCard.Controls.Add($logoFallback)
 }
 
-$headerBrandLayout.Controls.Add($logoPanel, 0, 0)
-$headerBrandLayout.Controls.Add($headerTextPanel, 1, 0)
-
-$statusPanel = New-Object System.Windows.Forms.Panel
-$statusPanel.Dock = "Fill"
-$statusPanel.BackColor = $colorHeaderPanel
-$statusPanel.Padding = New-Object System.Windows.Forms.Padding(12)
-Add-SoftBorder -Control $statusPanel -BorderColor ([System.Drawing.ColorTranslator]::FromHtml("#24577F"))
-
-$psexecLabel = New-Object System.Windows.Forms.Label
-$psexecLabel.Dock = "Top"
-$psexecLabel.Height = 24
-$psexecLabel.ForeColor = [System.Drawing.Color]::White
-$psexecLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
-
-$rootHintLabel = New-Object System.Windows.Forms.Label
-$rootHintLabel.Dock = "Fill"
-$rootHintLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#BFD8EC")
-$rootHintLabel.Text = "Toolkit root detected."
-$rootHintLabel.TextAlign = "BottomLeft"
-
-$statusPanel.Controls.Add($rootHintLabel)
-$statusPanel.Controls.Add($psexecLabel)
-
-$psexecPath = Join-Path $toolkitRoot "Scripts\PsExec.exe"
-if ((Test-Path -LiteralPath $psexecPath -PathType Leaf) -or (Get-Command -Name "PsExec.exe" -CommandType Application -ErrorAction SilentlyContinue)) {
-    $psexecLabel.Text = "PsExec ready"
+$psexecToolkitPath = Join-Path $toolkitRoot "Scripts\PsExec.exe"
+$psexecSystem32Path = Join-Path $env:WINDIR "System32\PsExec.exe"
+if (Test-Path -LiteralPath $psexecToolkitPath -PathType Leaf) {
+    $psexecLabel.Text = "PsExec ready in Scripts"
+    $psexecLabel.ForeColor = $colorSuccess
+}
+elseif (Test-Path -LiteralPath $psexecSystem32Path -PathType Leaf) {
+    $psexecLabel.Text = "PsExec ready in System32"
+    $psexecLabel.ForeColor = $colorSuccess
 }
 else {
-    $psexecLabel.Text = "PsExec missing"
-    $psexecLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#FFD166")
+    $psexecLabel.Text = "PsExec not local"
+    $psexecLabel.ForeColor = $colorWarning
 }
 
 $headerLayout.Controls.Add($headerBrandLayout, 0, 0)
-$headerLayout.Controls.Add($statusPanel, 1, 0)
+$headerLayout.Controls.Add($logoCard, 1, 0)
 $headerPanel.Controls.Add($headerLayout)
 
 $contentLayout = New-Object System.Windows.Forms.TableLayoutPanel
@@ -758,9 +800,9 @@ $form.Add_Shown({
 })
 
 $form.Add_FormClosed({
-    if ($script:LogoBitmap) {
-        $script:LogoBitmap.Dispose()
-        $script:LogoBitmap = $null
+    if ($script:LogoImage) {
+        $script:LogoImage.Dispose()
+        $script:LogoImage = $null
     }
 
     if ($script:LogoIcon) {

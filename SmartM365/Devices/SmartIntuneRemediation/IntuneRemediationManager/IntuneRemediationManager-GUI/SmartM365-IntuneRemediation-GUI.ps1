@@ -3974,7 +3974,7 @@ $logoIconPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-logo.ico'
 if (Test-Path -LiteralPath $logoIconPath) {
     $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$logoIconPath)
 }
-$logoImagePath = Join-Path -Path $smartM365RootPath -ChildPath 'logo.png'
+$logoImagePath = Join-Path -Path $smartM365RootPath -ChildPath 'SmartM365-logo.ico'
 
 foreach ($name in @(
         'LogoImage',
@@ -4013,12 +4013,7 @@ foreach ($name in @(
 }
 
 if (Test-Path -LiteralPath $logoImagePath) {
-    $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
-    $bitmap.BeginInit()
-    $bitmap.UriSource = [Uri]$logoImagePath
-    $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
-    $bitmap.EndInit()
-    $script:Ui.LogoImage.Source = $bitmap
+    $script:Ui.LogoImage.Source = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$logoImagePath)
 }
 
 Initialize-LocalRemediationRootConfiguration
