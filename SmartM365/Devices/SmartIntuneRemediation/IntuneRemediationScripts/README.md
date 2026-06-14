@@ -1,41 +1,56 @@
 # Intune Remediation Scripts
 
-Ce repertoire regroupe les scripts PowerShell Intune par domaine fonctionnel et par scenario. Il fait partie de `SmartIntuneRemediation`, avec le manager CLI/GUI qui permet de publier et gerer ces packages.
+This folder groups SmartM365 Intune remediation, detection, diagnostic, and action scripts by functional area and scenario. It belongs to `SmartIntuneRemediation`, together with the CLI and GUI managers used to publish and manage these packages in Microsoft Intune.
 
-## Organisation
+## Organization
 
-- `WindowsUpdate/` : scripts lies a Windows Update, scan, cache, services, politiques et proxy.
-- `DeliveryOptimization/` : scripts lies a Delivery Optimization et au Content Engine.
-- `WUfB/` : identite Windows Update for Business et correction du binding PolicyState.
-- `SetupDiag-Upgrade/` : diagnostics SetupDiag, upgrade Windows 10/11 et prerequis de mise a niveau.
-- `Intune-MDM/` : etat Intune, MDM, Hybrid Join, IME et Data Boundary.
-- `Disk-Cleanup-Storage/` : espace disque, nettoyage et dossiers candidats de cleanup.
-- `UWP-Store-AppRepository/` : sante AppRepository / Store / Windows Update.
-- `Standalone/` : scripts utilitaires, actions ponctuelles ou diagnostics manuels qui ne doivent pas tourner en remediation recurrente.
+- `WindowsUpdate/`: Windows Update scan, cache, service, policy, and proxy scenarios.
+- `DeliveryOptimization/`: Delivery Optimization and Content Engine health scenarios.
+- `WUfB/`: Windows Update for Business identity and PolicyState binding scenarios.
+- `SetupDiag-Upgrade/`: SetupDiag, Windows 10/11 upgrade diagnostics, and upgrade readiness scenarios.
+- `Intune-MDM/`: Intune, MDM, Hybrid Join, Intune Management Extension, and Data Boundary scenarios.
+- `Disk-Cleanup-Storage/`: disk space, cleanup candidates, and upgrade storage readiness scenarios.
+- `UWP-Store-AppRepository/`: AppRepository, Microsoft Store, and Windows Update health scenarios.
+- `Standalone/`: operator actions, diagnostics, and one-off scripts that should not run as recurring Intune remediations.
 
-## Convention
+## Naming Convention
 
-Les scripts actifs sont places dans les dossiers de scenario. Les noms de fichiers ne contiennent pas de numero de version; la version courante est indiquee dans l'en-tete du script et repart a `1.0`.
+Active scripts live in scenario folders. File names do not include version numbers; the current script version belongs in the script header and Git history keeps the change history.
 
-Quand un scenario contient une paire Intune, le dossier contient generalement :
+When a scenario contains a standard Intune remediation pair, the folder usually contains:
 
-- un script `SmartM365-*-Detection.ps1` ;
-- un script `SmartM365-*-Remediation.ps1`.
+- `SmartM365-*-Detection.ps1`
+- `SmartM365-*-Remediation.ps1`
 
-## Scenarios consolides
+When a script is not designed to run repeatedly as a remediation, use an explicit action or diagnostic naming pattern such as:
 
-- `WindowsUpdate/WindowsUpdate-Reset/` remplace les anciens scenarios Autopatch `0x80244007` et reset force Windows Update.
-- `WindowsUpdate/Policy-Blockers/` regroupe les anciens scenarios WSUS/GPO, WSUS remnants, NoAutoUpdate, Policy-Blocking-Access et WUfB configuration blockers.
-- `WindowsUpdate/Service-And-Scan-Health/` remplace `Service-Health`, `Service-Refresh` et `ForceWUScan`.
-- `WindowsUpdate/Cache-Health/` remplace `Download-Failure`.
-- `Intune-MDM/MDM-Enrollment-Repair/` regroupe Device-Stale-Join, Enrollment-State, Hybrid-Join et MDM-Tasks-Missing. La detection cible l'etat local stale/casse; le fait que le script s'execute via Intune prouve deja une joignabilite IME minimale.
-- `SetupDiag-Upgrade/Upgrade-Staging-Health/` remplace Upgrade-Files-Missing et Upgrade-Residues.
-- `Disk-Cleanup-Storage/Upgrade-Storage-Readiness/` regroupe les anciens scenarios free space, cleanup candidates et force disk cleanup.
-- `DeliveryOptimization/ContentEngine-Health/` remplace `DeliveryOptimization/DO-Issues`.
-- `UWP-Store-AppRepository/WU-Health/` remplace l'ancien scenario large `Endpoint-Repair/WinRM-UWP-Store`.
-- `SetupDiag-Upgrade/Upgrade-Diagnostics/` regroupe `SetupDiag-Required` et `Upgrade-Blocking-Issues`.
-- `Standalone/WindowsUpdateLog/`, `Standalone/Repair-DISM/`, `Standalone/Upgrade-Actions/`, `Standalone/Network-Diagnostics/`, `Standalone/WindowsPolicy/` et `Standalone/Device-Recovery/` conservent les actions ponctuelles ou diagnostics manuels deplaces hors des remediations recurrentes.
+```text
+SmartM365-*-Action.ps1
+SmartM365-*-Diagnostic.ps1
+```
 
-## Verification
+## Consolidated Scenarios
 
-Apres reorganisation, les archives ont ete supprimees et les scripts actifs restent dans leurs dossiers de scenario.
+- `WindowsUpdate/WindowsUpdate-Reset/`: replaces older Autopatch `0x80244007` and forced Windows Update reset scenarios.
+- `WindowsUpdate/Policy-Blockers/`: consolidates WSUS/GPO, WSUS remnants, NoAutoUpdate, Policy-Blocking-Access, and WUfB configuration blockers.
+- `WindowsUpdate/Service-And-Scan-Health/`: replaces older service health, service refresh, and forced scan scenarios.
+- `WindowsUpdate/Cache-Health/`: replaces download failure scenarios.
+- `Intune-MDM/MDM-Enrollment-Repair/`: consolidates stale device join, enrollment state, Hybrid Join, and missing MDM task scenarios. The detection script targets stale or broken local state; if it runs through Intune, basic IME reachability is already proven.
+- `SetupDiag-Upgrade/Upgrade-Staging-Health/`: consolidates missing upgrade files and upgrade residue scenarios.
+- `Disk-Cleanup-Storage/Upgrade-Storage-Readiness/`: consolidates free space, cleanup candidates, and forced disk cleanup scenarios.
+- `DeliveryOptimization/ContentEngine-Health/`: replaces the older Delivery Optimization issue scenario.
+- `UWP-Store-AppRepository/WU-Health/`: replaces the older broad endpoint repair scenario.
+- `SetupDiag-Upgrade/Upgrade-Diagnostics/`: consolidates SetupDiag-required and upgrade-blocking issue scenarios.
+- `Standalone/WindowsUpdateLog/`, `Standalone/Repair-DISM/`, `Standalone/Upgrade-Actions/`, `Standalone/Network-Diagnostics/`, `Standalone/WindowsPolicy/`, and `Standalone/Device-Recovery/`: keep one-off actions and manual diagnostics outside recurring remediations.
+
+## Validation Before Publishing
+
+Before publishing a package to Intune:
+
+- review detection and remediation scripts together;
+- run PSScriptAnalyzer when possible;
+- confirm that remediation logic is idempotent;
+- avoid storing tenant-specific values, group IDs, hostnames, or customer data in scripts;
+- use the GUI or CLI manager to publish with delegated Graph authentication.
+
+Generated exports, downloaded cloud scripts, reports, logs, and local archives are runtime artifacts and should remain outside Git.

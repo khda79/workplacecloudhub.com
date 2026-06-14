@@ -4,6 +4,12 @@ Repository for [workplacecloudhub.com](https://workplacecloudhub.com/), a techni
 
 WorkplaceCloudHub is built around practical guidance, automation patterns, and technical notes for modern enterprise IT platforms. The site is organized around articles, scripts, tools, and field-oriented content for engineers working on secure and reliable workplace and cloud operations.
 
+## What This Repository Contains
+
+This repository is a field toolkit rather than a single application. It contains independent PowerShell projects for Microsoft 365, Azure, Azure Virtual Desktop, Citrix, and Windows endpoint operations. The common goal is to help administrators collect reliable evidence, standardize exports, troubleshoot devices, and run repeatable operational actions without embedding tenant-specific values in the public repository.
+
+Most tools are designed to run directly from their project folder. Local tenant configuration, generated CSV files, logs, support bundles, LOT folders, and runtime JSON files are intentionally ignored by Git.
+
 ## Content
 
 - `SmartM365/`: validated PowerShell automation scripts and tools for Microsoft 365 and endpoint administration.
@@ -12,6 +18,31 @@ WorkplaceCloudHub is built around practical guidance, automation patterns, and t
 - `SmartCitrix/`: Citrix on-premises and Citrix Cloud inventory scripts, with separate implementation areas for each platform model.
 
 Additional project directories will be added over time.
+
+## Getting Started
+
+Clone the repository, then open the project README that matches the platform you want to work with:
+
+```powershell
+git clone https://github.com/khda79/workplacecloudhub.com.git
+cd workplacecloudhub.com
+```
+
+Recommended entry points:
+
+- Microsoft 365 and Windows endpoint tools: `SmartM365/README.md`
+- Azure inventory and governance scripts: `SmartAzure/README.md`
+- Azure Virtual Desktop inventory scripts: `SmartAzureVirtualDesktop/README.md`
+- Citrix inventory scripts: `SmartCitrix/README.md`
+
+For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README.md` and `SmartM365/Setup/SmartM365-AppRegistration-Permissions.md`. Device tools under `SmartM365/Devices/` are mostly local endpoint tools and do not require the SmartM365 app-only setup unless their own README explicitly says so.
+
+## Repository Principles
+
+- Keep tenant values local: use `*.local.json` files and never commit secrets, tenant IDs, webhook URLs, certificates, exports, logs, or support bundles.
+- Keep generated data out of Git: CSV exports, diagnostics, LOT folders, transcripts, and logs are runtime artifacts.
+- Prefer read-only inventory by default: write-capable scripts and repair actions are documented in their own README and guarded by explicit parameters or GUI actions.
+- Keep public documentation generic: examples should use placeholders and safe paths only.
 
 ## SmartAzureVirtualDesktop Tools
 
