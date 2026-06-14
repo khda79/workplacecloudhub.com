@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>NOUVELLE MESSAGERIE</title>
+<title>NEUES POSTFACH</title>
 </head>
 
 <body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
 
-  <!-- ===== Bandeau bleu ===== -->
+  <!-- ===== Blauer Banner ===== -->
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
     <tr>
       <td align="center">
@@ -17,8 +17,8 @@
               {{LogoImgTag}}
             </td>
             <td style="padding:12px 16px;">
-              <div style="color:#ffffff; font-size:22px; font-weight:700;">NOUVELLE MESSAGERIE</div>
-              <div style="color:#dfe9f7; font-size:14px;">Ce qui change pour vous !</div>
+              <div style="color:#ffffff; font-size:22px; font-weight:700;">NEUES POSTFACH</div>
+              <div style="color:#dfe9f7; font-size:14px;">Was sich für Sie ändert!</div>
             </td>
           </tr>
         </table>
@@ -26,7 +26,7 @@
     </tr>
   </table>
 
-  <!-- ===== Corps ===== -->
+  <!-- ===== Textkörper ===== -->
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
     <tr>
       <td align="center">
@@ -34,26 +34,26 @@
           <tr>
             <td style="padding:18px 16px;">
 
-              <p>Bonjour <b>{{UserName}}</b>,</p>
+              <p>Guten Tag <b>{{UserName}}</b>,</p>
 
-              <p>À la date du <b>{{Date}}</b>, votre messagerie évolue vers <b>Exchange Online</b>.</p>
+              <p>Am <b>{{Date}}</b> wird Ihr Postfach auf <b>Exchange Online</b> umgestellt.</p>
 
-              <!-- ===== Action requise (tableau) ===== -->
+              <!-- ===== Aktion erforderlich (Tabelle) ===== -->
               <table role="presentation" cellspacing="0" cellpadding="0" border="0"
                      style="width:100%; border-collapse:collapse; margin-top:15px; margin-bottom:20px;">
                 <thead>
                   <tr>
                     <th align="left"
                         style="background:#fff3cd; color:#856404; border:1px solid #ffeeba; padding:10px; font-size:14px;">
-                      Action requise dès maintenant
+                      Aktion erforderlich – ab sofort
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
                     <td style="border:1px solid #ffeeba; padding:12px; background:#fff9e6;">
-                      <b>Si ce n’est pas déjà fait</b>, afin de continuer à accéder à l’ensemble des services,
-                      vous devez accepter les <b>conditions d’utilisation</b> en vous connectant au portail suivant :
+                      <b>Falls noch nicht geschehen</b>, müssen Sie die <b>Nutzungsbedingungen</b> akzeptieren,
+                      um weiterhin auf alle Services zugreifen zu können. Bitte melden Sie sich dazu am folgenden Portal an:
                       <br><br>
                       <a href="{{TermsPortalUrl}}"
                          target="_blank"
@@ -65,18 +65,18 @@
                 </tbody>
               </table>
 
-              <h2 style="color:#0055A4; font-size:16px; margin-top:20px;">Ce qui va changer pour vous :</h2>
+              <h2 style="color:#0055A4; font-size:16px; margin-top:20px;">Was sich für Sie ändern wird:</h2>
 
               <h3 style="color:#0055A4; font-size:15px;">
-                Le lien de connexion vers le Webmail va passer de :
+                Der Anmeldelink für das Webmail ändert sich von:
               </h3>
 
-              <!-- ===== Tableau Webmail ===== -->
+              <!-- ===== Webmail-Tabelle ===== -->
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse; width:100%;">
                 <thead>
                   <tr>
-                    <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Ancien lien de connexion</th>
-                    <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Nouveau lien de connexion</th>
+                    <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Alter Anmeldelink</th>
+                    <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Neuer Anmeldelink</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -89,61 +89,61 @@
 
               <!-- ===== Smartphones ===== -->
               <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">
-                Si vous utilisez un téléphone portable :
+                Wenn Sie ein Mobiltelefon verwenden:
               </h2>
 
-              <!-- ===== Tableau Comparatif : Smartphone personnel / pro ===== -->
+              <!-- ===== Vergleichstabelle: Privat / Dienstlich ===== -->
               <table role="presentation" cellspacing="0" cellpadding="0" border="0"
                      style="width:100%; border-collapse:collapse; margin-top:10px;">
                 <thead>
                   <tr>
                     <th style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:50%; text-align:left;">
-                      <b>Smartphone personnel</b>
+                      <b>Privates Smartphone</b>
                     </th>
                     <th style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:50%; text-align:left;">
-                      Smartphone professionnel
+                      Dienstliches Smartphone
                     </th>
                   </tr>
                 </thead>
 
                 <tbody>
                   <tr>
-                    <!-- Personnel -->
+                    <!-- Privat -->
                     <td style="border:1px solid #ccc; padding:10px; vertical-align:top;">
                       <ul style="margin:0; padding-left:16px;">
-                        <li>Utilisation obligatoire de l’application <b>Outlook</b>.</li>
-                        <li>L’application Mail native (Android/iPhone) ne fonctionnera plus.</li>
+                        <li>Sie müssen die <b>Outlook</b>-App verwenden.</li>
+                        <li>Die native Mail-App (Android/iPhone) wird nicht mehr funktionieren.</li>
                         <li>
-                          <b>Si vous avez déjà installé Outlook</b>, vous devrez la supprimer puis la réinstaller.<br>
-                          <b>Sinon</b>, il faut l’installer depuis l’App Store ou le Play Store (lien ci-dessous).
+                          <b>Wenn Outlook bereits installiert ist</b>, müssen Sie die App deinstallieren und erneut installieren.<br>
+                          <b>Andernfalls</b> müssen Sie sie aus dem App Store oder dem Play Store installieren (Link unten).
                         </li>
-                        <li>Vous devrez ouvrir Outlook et vous authentifier.</li>
+                        <li>Sie müssen Outlook öffnen und sich anmelden.</li>
                       </ul>
                     </td>
 
-                    <!-- Pro -->
+                    <!-- Dienstlich -->
                     <td style="border:1px solid #ccc; padding:10px; vertical-align:top;">
                       <ul style="margin:0; padding-left:16px;">
-                        <li>L’application <b>Outlook</b> sera installée automatiquement.</li>
-                        <li>La configuration sera effectuée automatiquement <b>après la migration</b>.</li>
-                        <li>Vous devrez ouvrir Outlook et vous authentifier.</li>
+                        <li>Die <b>Outlook</b>-App wird automatisch installiert.</li>
+                        <li>Ihr Konto wird automatisch <b>nach der Migration</b> eingerichtet.</li>
+                        <li>Sie müssen Outlook öffnen und sich anmelden.</li>
                       </ul>
                     </td>
                   </tr>
                 </tbody>
               </table>
 
-              <!-- ===== Tableau Liens Outlook ===== -->
+              <!-- ===== Outlook-Download ===== -->
               <h3 style="color:#0055A4; font-size:15px; margin-top:25px;">
-                Télécharger l’application Outlook :
+                Laden Sie die Outlook-App herunter:
               </h3>
 
               <table role="presentation" cellspacing="0" cellpadding="0" border="0"
                      style="width:100%; border-collapse:collapse;">
                 <thead>
                   <tr>
-                    <th align="left" style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:30%;">Plateforme</th>
-                    <th align="left" style="background:#f7f7f7; border:1px solid #ccc; padding:8px;">Lien</th>
+                    <th align="left" style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:30%;">Plattform</th>
+                    <th align="left" style="background:#f7f7f7; border:1px solid #ccc; padding:8px;">Link</th>
                   </tr>
                 </thead>
 
@@ -164,18 +164,18 @@
                 </tbody>
               </table>
 
-              <!-- ===== Hotline ===== -->
-              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">En cas de besoin :</h2>
-              <p>En cas de difficulté, vous pouvez contacter la hotline :</p>
+              <!-- ===== Support ===== -->
+              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">Bei Bedarf:</h2>
+              <p>Bei Problemen können Sie sich an die Hotline wenden:</p>
               <p><b>{{Hotline}}</b></p>
 
-              <!-- ===== Bénéfices ===== -->
-              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">Les bénéfices pour vous :</h2>
+              <!-- ===== Vorteile ===== -->
+              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">Ihre Vorteile:</h2>
               <ul>
-                <li>Accès plus rapide et plus fluide à vos mails.</li>
-                <li>Utilisation simplifiée sur tous vos appareils.</li>
-                <li>Moins d’interruptions liées aux maintenances.</li>
-                <li>Plus de sécurité et meilleure intégration avec les outils collaboratifs.</li>
+                <li>Schnellerer und flüssigerer Zugriff auf Ihre E-Mails.</li>
+                <li>Mehr Mobilität: Zugriff auf allen Geräten ohne komplexe Einrichtung.</li>
+                <li>Weniger Unterbrechungen durch Wartungsarbeiten.</li>
+                <li>Mehr Sicherheit und bessere Integration in Kollaborationstools.</li>
               </ul>
 
               <!-- ===== Footer ===== -->
@@ -185,8 +185,8 @@
                 {{FooterLogoImgTag}}
 
                 <div style="margin-top:12px; font-size:14px; font-weight:bold;">
-                  Nous vous remercions de votre collaboration<br>
-                  L’équipe Programme SmartM365
+                  Wir danken Ihnen für Ihre Zusammenarbeit<br>
+                  Das SmartM365-Programmteam
                 </div>
               </div>
 

@@ -355,6 +355,7 @@ try {
                     Hotline = Get-SmartM365CommunicationHotline -HotlineByLanguageOrCountry $hotlineMap -LanguageTag $language -DefaultHotline ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'DefaultHotline' -DefaultValue ''))
                     MailboxUsageText = $usageText
                     LogoImgTag = $logoTokens.LogoImgTag
+                    FooterLogoImgTag = $logoTokens.FooterLogoImgTag
                 }
                 $html = Expand-SmartM365CommunicationTemplate -TemplateContent $template.Content -Tokens $tokens
                 Assert-SmartM365CommunicationNoUnresolvedToken -Html $html

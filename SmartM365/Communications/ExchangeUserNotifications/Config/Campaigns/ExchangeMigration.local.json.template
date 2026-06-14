@@ -8,6 +8,7 @@
   "DefaultLanguageTag": "__USE_GLOBAL__",
   "OldWebmailUrl": "https://old-webmail.example.com",
   "NewWebmailUrl": "https://outlook.office365.com",
+  "TermsPortalUrl": "https://orpea.sharepoint.com/sites/Emeis",
   "DefaultEffectiveDate": "",
   "SkipWhenEffectiveDateIsPast": true,
   "DefaultSubject": "New email system - Important information",
