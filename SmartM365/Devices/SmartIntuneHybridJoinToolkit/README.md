@@ -44,7 +44,9 @@ Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd
 ```
 
 Before launching a LOT, the CMD and PowerShell launchers verify that `PsExec.exe` is available
-in `Scripts\PsExec.exe` or in `PATH`. Direct PowerShell runs can also pass `-PsExecPath`.
+in `Scripts\PsExec.exe`, `%WINDIR%\System32\PsExec.exe`, or in `PATH`. Direct PowerShell runs can also pass `-PsExecPath`.
+The LOT Launcher GUI only checks `Scripts\PsExec.exe` and `%WINDIR%\System32\PsExec.exe` during window startup to keep the UI responsive;
+if the local files are missing, `PATH` is checked when the operator launches the LOT.
 
 Force a rerun that bypasses the target run guard:
 
