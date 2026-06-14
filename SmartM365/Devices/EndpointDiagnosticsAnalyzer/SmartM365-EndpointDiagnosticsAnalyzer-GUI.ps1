@@ -93,10 +93,7 @@ $script:AppName = 'Smart Endpoint Diagnostics Analyzer'
 $script:AppVersion = '0.2.0'
 $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogoPath = Join-Path $script:BasePath 'SmartM365-logo.ico'
-$script:WorkplaceLogoPath = Join-Path $script:BasePath 'workplacecloudhub-header.png'
-if (-not (Test-Path -LiteralPath $script:WorkplaceLogoPath -PathType Leaf)) {
-    $script:WorkplaceLogoPath = Join-Path $script:BasePath 'workplacecloudhub.png'
-}
+$script:WorkplaceLogoPath = Join-Path $script:BasePath 'workplacecloudhub-v2.png'
 $script:AIConfigPath = Join-Path $HOME '.smartloganalyzer_ai.json'
 $script:LogDirectory = Join-Path $script:BasePath 'Logs'
 $script:LogRetention = 10
@@ -3532,7 +3529,7 @@ function Start-SedaGui {
             $bitmap.EndInit()
             $controls.HeaderLogo.Source = $bitmap
         } catch {
-            Write-SedaLog -Level WARN -Message 'Unable to load workplacecloudhub.png in GUI header.' -Exception $_.Exception
+            Write-SedaLog -Level WARN -Message 'Unable to load workplacecloudhub-v2.png in GUI header.' -Exception $_.Exception
         }
     }
     $script:CurrentAnalysis = $null
