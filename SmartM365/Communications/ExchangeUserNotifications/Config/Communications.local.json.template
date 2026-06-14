@@ -1,0 +1,30 @@
+{
+  "From": "__USE_GLOBAL__",
+  "SmtpServer": "__USE_GLOBAL__",
+  "RelayIp": "",
+  "SmtpResolveIPv4": true,
+  "SmtpPort": 25,
+  "SmtpUseIntegratedAuth": false,
+  "SmtpEnableSsl": false,
+  "SummaryTo": "__USE_GLOBAL__",
+  "SummaryBcc": "",
+  "BccAll": "",
+  "DefaultLanguageTag": "en",
+  "DefaultHotline": "Contact your local IT support.",
+  "HotlineByLanguageOrCountry": {
+    "default": "Contact your local IT support."
+  },
+  "DomainLanguageMap": {
+    "example.com": "en"
+  },
+  "SendSummaryEmail": true,
+  "EnableTeamsNotifications": true,
+  "PreventResendAcrossRuns": true,
+  "BatchSize": 50,
+  "BatchPauseSeconds": 3,
+  "IntraEmailDelayMilliseconds": 150,
+  "ExtendedPauseEvery": 0,
+  "ExtendedPauseSeconds": 30,
+  "SmtpRetryCount": 1,
+  "SmtpRetryDelaySeconds": 2
+}

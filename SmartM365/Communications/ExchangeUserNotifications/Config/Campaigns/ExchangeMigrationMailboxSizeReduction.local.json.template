@@ -1,0 +1,92 @@
+{
+  "CampaignName": "ExchangeMigrationMailboxSizeReduction",
+  "TemplateBaseName": "SmartM365-ExchangeMigrationMailboxSizeReduction-NotifyUsers-Template",
+  "RunOutputPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigrationMailboxSizeReduction",
+  "LogOutputPath": "{{LogAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigrationMailboxSizeReduction",
+  "SentRegistryPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigrationMailboxSizeReduction\\Data\\SentRegistry.csv",
+  "ListCsvPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigrationMailboxSizeReduction\\Recipients\\ExchangeMigrationMailboxSizeReduction-List.csv",
+  "LatestCsvFolderPath": "{{LatestCsvFolderPath}}",
+  "LicenseCsvName": "M365_Licenses_Users.csv",
+  "LicenseCsvFallbackNames": [
+    "M365_Inventory_Licenses_Users.csv"
+  ],
+  "ExoMailboxCsvName": "Exchange_EXO_Mailboxes_AllDomains_Stats.csv",
+  "ExoMailboxCsvFallbackNames": [
+    "Exchange_EXO_Mailboxes_AllDomains.csv",
+    "Mailboxes_EXO_AllDomains.csv"
+  ],
+  "OnPremMailboxCsvName": "Exchange_OnPrem_Mailboxes_AllDomains.csv",
+  "OnPremMailboxCsvFallbackNames": [
+    "Mailboxes_Local_AllDomains.csv"
+  ],
+  "AdUsersCsvName": "AD_Users_AllDomains.csv",
+  "RequireExchange2016SnapIn": true,
+  "EnableExchange2016SnapIn": true,
+  "ExchangeSnapInName": "Microsoft.Exchange.Management.PowerShell.SnapIn",
+  "ExchangeSnapInViewEntireForest": true,
+  "ExchangeSnapInAvailableMessage": "Exchange 2016 snap-in detected and available.",
+  "ExchangeSnapInUnavailableMessage": "Exchange 2016 snap-in NOT available. Aborting notification campaign.",
+  "ExchangeSnapInForestViewMessage": "Exchange ADServerSettings: ViewEntireForest = True",
+  "ExchangeSnapInForestViewWarningFormat": "WARNING: Failed to set ViewEntireForest=True: {0}",
+  "EnableExchangeMailboxStateCheck": true,
+  "EnableExchangeMailboxUsageCheck": true,
+  "SkipMailboxNotFoundWhenExchangeCheckAvailable": true,
+  "SkipRemoteMailboxWhenExchangeCheckAvailable": true,
+  "SkipMailboxUsageUnavailableWhenExchangeCheckAvailable": true,
+  "LicenseCsvMaxAgeHours": 12,
+  "EnableLiveLicenseLookupWhenCsvMissing": true,
+  "TargetSkuPartNumbers": [
+    "SPE_E3",
+    "ENTERPRISEPACK",
+    "SPE_F1",
+    "M365_F1",
+    "DESKLESSPACK"
+  ],
+  "MailboxQuotaBySkuPartNumber": {
+    "SPE_E3": {
+      "MaxGb": 100,
+      "QuotaLabel": "100 GB"
+    },
+    "ENTERPRISEPACK": {
+      "MaxGb": 100,
+      "QuotaLabel": "100 GB"
+    },
+    "SPE_F1": {
+      "MaxGb": 2,
+      "QuotaLabel": "2 GB"
+    },
+    "M365_F1": {
+      "MaxGb": 2,
+      "QuotaLabel": "2 GB"
+    },
+    "DESKLESSPACK": {
+      "MaxGb": 2,
+      "QuotaLabel": "2 GB"
+    }
+  },
+  "DefaultLanguageTag": "__USE_GLOBAL__",
+  "EnableAdLookupForLanguageAndName": true,
+  "ForestGcServer": "",
+  "BatchSize": 50,
+  "BatchPauseSeconds": 3,
+  "IntraEmailDelayMilliseconds": 150,
+  "ExtendedPauseEvery": 5,
+  "ExtendedPauseSeconds": 30,
+  "WebmailUrlByMailboxType": {
+    "UserMailbox": "https://old-webmail.example.com",
+    "RemoteUserMailbox": "https://outlook.office365.com"
+  },
+  "DefaultSubject": "ACTION REQUIRED - Reduce the size of your mailbox",
+  "SummaryTitle": "Exchange migration mailbox size reduction notification summary",
+  "SummarySubject": "SmartM365 Exchange migration mailbox size reduction notification summary",
+  "TeamsSuccessTitle": "SmartM365 Exchange migration mailbox size reduction notification completed",
+  "TeamsFailureTitle": "SmartM365 Exchange migration mailbox size reduction notification failed",
+  "LogoPath": "{{SmartM365RootPath}}\\SmartM365-logo.ico",
+  "LogoContentId": "smartm365logo",
+  "LogoMediaType": "image/x-icon",
+  "SubjectByLanguage": {
+    "default": "ACTION REQUIRED - Reduce the size of your mailbox",
+    "en": "ACTION REQUIRED - Reduce the size of your mailbox",
+    "fr": "ACTION REQUISE - Reduire la taille de votre boite aux lettres"
+  }
+}

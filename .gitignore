@@ -31,6 +31,7 @@ SmartCitrix/**
 !/SmartM365/**/*.psd1
 !/SmartM365/**/*.cmd
 !/SmartM365/**/*.md
+!/SmartM365/**/*.html
 !/SmartM365/**/*.json.template
 !/SmartM365/**/*.config.template.json
 !/SmartM365/Devices/DeviceRegistrationTool/workplacecloudhub-v2.png
