@@ -2,6 +2,10 @@
 
 PowerShell toolkit to help diagnose and repair Windows devices that should be Hybrid Entra joined and enrolled in Intune after MDM auto-enrollment policy is applied.
 
+The toolkit is optimized for batch operations. It keeps `Scripts\SmartM365-Invoke-IntuneHybridJoinRepair.ps1` autonomous so the same single PowerShell file can be copied to devices through PsExec/LOT folders, pushed with a GPO, or reused by an operator without requiring SmartM365 modules on the target computer.
+
+For single-device support with a richer GUI, support bundle, and CLI export experience, use `../DeviceRegistrationTool/`. Both tools intentionally share the same diagnostic and guarded repair concepts for Hybrid Join and Intune enrollment; when one side changes, the other should be reviewed for synchronization.
+
 ## Layout
 
 ```text
@@ -28,6 +32,22 @@ LOT-X\
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1`: full Entra device inventory export.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1`: refreshes small LOT CMD wrappers.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-LotLauncher-GUI.ps1`: GUI that creates a local LOT folder from a selected computer list file, writes `Computers.txt`, refreshes wrappers, and offers to launch the LOT.
+
+## When To Use This Toolkit
+
+Use this toolkit when:
+
+- you have a batch of computers to process from an operator workstation;
+- you need PsExec-based SYSTEM execution on remote devices;
+- you need a LOT folder with `Computers.txt`, live cycle reports, PsExec logs, and collected remote evidence;
+- you need the repair logic as one portable script file for GPO or another file-copy deployment method.
+
+Use Smart DeviceRegistration Tool instead when:
+
+- the operator is working on one device locally;
+- a GUI support experience is preferred;
+- the action should collect a support bundle or support summary;
+- a user-mode diagnostic-only workflow is required.
 
 ## Usage
 
@@ -68,6 +88,18 @@ Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd
 
 The GUI accepts a text list or a CSV. For CSV files, it uses `ComputerName`, `DeviceName`,
 `Name`, or `DisplayName` when present, otherwise the first CSV column.
+
+## Repair Guardrails
+
+The autonomous repair script is designed to avoid destructive actions unless diagnostic evidence supports them.
+
+- `dsregcmd /leave` requires a valid base device identity: `AzureAdJoined=YES`, a `DeviceId`, and a `TenantId`.
+- Broader leave behavior is controlled by explicit repair paths, such as failed device authentication or `KeySignTest=FAILED`.
+- Intune enrollment checks distinguish strong Intune enrollment evidence from stale or weak local traces.
+- MDM cleanup actions are opt-in and must be guarded by diagnostic state.
+- The script writes local evidence so a LOT run can reclassify ambiguous PsExec exit states from collected remote CSV output when possible.
+
+The repair script must remain self-contained. Do not add mandatory runtime dependencies on DeviceRegistrationTool or SmartM365 modules.
 
 ## Notes
 
