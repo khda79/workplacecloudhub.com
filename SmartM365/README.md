@@ -7,7 +7,14 @@ This repository contains reusable scripts and helper modules.
 ## Content
 
 - Smart Inventory scripts under `SmartInventory/` for Active Directory, Exchange, Microsoft 365, Entra, and Intune data collection. These exports can feed Power BI datasets and other reporting or operational consumers.
+- User-facing operational notification scripts under `Communications/`, including Exchange migration, archive mailbox, and mailbox reduction campaigns.
 - Device and endpoint tooling under `Devices/`, including reboot governance, device registration diagnostics, endpoint diagnostics, Intune remediation management, and Hybrid Join repair tooling.
+
+## Communications
+
+`Communications/` contains scripts that can send user-facing emails. Campaign-specific values are kept in local configuration files under `Communications/.../Config`, while shared tenant values such as Graph mail sender, Teams webhooks, and output roots continue to come from the standard SmartM365 tenant profiles.
+
+Use `-WhatIf` before live campaign runs. The provided launchers default to dry-run mode.
 
 ## Devices
 
