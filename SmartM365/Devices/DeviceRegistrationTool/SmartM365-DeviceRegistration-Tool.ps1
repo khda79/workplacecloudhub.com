@@ -33,6 +33,21 @@ Triggers the Windows Automatic-Device-Join scheduled task after diagnostics.
 .PARAMETER AllowIntuneEnrolledAction
 Allows repair actions even when a local Intune enrollment is detected.
 
+.PARAMETER AllowDsregLeave
+Allows the broader Hybrid Join repair dsregcmd /leave guard used by SmartM365-Invoke-IntuneHybridJoinRepair.ps1.
+
+.PARAMETER AllowRemoveStaleIntuneEnrollment
+Allows removal of stale local Intune enrollment traces after validation.
+
+.PARAMETER AllowRemoveNonIntuneMdmEnrollment
+Allows removal of non-Intune MDM enrollment traces after validation.
+
+.PARAMETER TriggerIntuneAutoEnrollment
+Triggers deviceenroller.exe /c /AutoEnrollMDM when Hybrid Join is healthy and MDM auto-enrollment policy is configured.
+
+.PARAMETER AuditOnly
+Runs diagnostics and reports what would be done without executing repair actions.
+
 .PARAMETER RetryCount
 Number of post-action status retries. Default is 0.
 
@@ -100,6 +115,11 @@ param(
     [switch]$RepairDisabledDeletedDevice,
     [switch]$TriggerJoin,
     [switch]$AllowIntuneEnrolledAction,
+    [switch]$AllowDsregLeave,
+    [switch]$AllowRemoveStaleIntuneEnrollment,
+    [switch]$AllowRemoveNonIntuneMdmEnrollment,
+    [switch]$TriggerIntuneAutoEnrollment,
+    [switch]$AuditOnly,
     [ValidateRange(0, 12)]
     [int]$RetryCount = 0,
     [ValidateRange(1, 120)]
@@ -132,6 +152,7 @@ $Script:ExecutionMode = $Mode
 $Script:PolicyState = $null
 $Script:UserAdminState = $null
 $Script:IntuneEnrollmentState = $null
+$Script:MdmEnrollmentState = $null
 function ConvertTo-DeviceRegistrationBoolean {
     param(
         [object]$Value,
@@ -377,6 +398,10 @@ function Get-DeviceRegistrationStrings {
             RefreshPrt = "Refresh Azure AD PRT"
             RefreshingPrt = "Refreshing Azure AD PRT..."
             RefreshPrtCompletedFormat = "Azure AD PRT refresh completed. ExitCode={0}; Output={1}"
+            TriggerIntuneAutoEnrollment = "Trigger Intune auto-enrollment"
+            RemoveStaleIntuneEnrollment = "Remove stale local Intune enrollment trace"
+            RemoveNonIntuneMdmEnrollment = "Remove non-Intune MDM enrollment"
+            AuditOnly = "Audit only"
             LanguageLabel = "Language"
             LanguageAuto = "Automatic"
         }
@@ -498,6 +523,11 @@ function Invoke-Relaunch64BitIfNeeded {
             if ($RepairDisabledDeletedDevice) { $arguments += "-RepairDisabledDeletedDevice" }
             if ($TriggerJoin) { $arguments += "-TriggerJoin" }
             if ($AllowIntuneEnrolledAction) { $arguments += "-AllowIntuneEnrolledAction" }
+            if ($AllowDsregLeave) { $arguments += "-AllowDsregLeave" }
+            if ($AllowRemoveStaleIntuneEnrollment) { $arguments += "-AllowRemoveStaleIntuneEnrollment" }
+            if ($AllowRemoveNonIntuneMdmEnrollment) { $arguments += "-AllowRemoveNonIntuneMdmEnrollment" }
+            if ($TriggerIntuneAutoEnrollment) { $arguments += "-TriggerIntuneAutoEnrollment" }
+            if ($AuditOnly) { $arguments += "-AuditOnly" }
             if ($NoTranscript) { $arguments += "-NoTranscript" }
             $arguments += @("-RetryCount", $RetryCount, "-RetrySleepMinutes", $RetrySleepMinutes)
             $arguments += @("-LogRetentionCount", $LogRetentionCount)
@@ -557,6 +587,11 @@ function Invoke-RelaunchStaIfNeeded {
         if ($RepairDisabledDeletedDevice) { $arguments += "-RepairDisabledDeletedDevice" }
         if ($TriggerJoin) { $arguments += "-TriggerJoin" }
         if ($AllowIntuneEnrolledAction) { $arguments += "-AllowIntuneEnrolledAction" }
+        if ($AllowDsregLeave) { $arguments += "-AllowDsregLeave" }
+        if ($AllowRemoveStaleIntuneEnrollment) { $arguments += "-AllowRemoveStaleIntuneEnrollment" }
+        if ($AllowRemoveNonIntuneMdmEnrollment) { $arguments += "-AllowRemoveNonIntuneMdmEnrollment" }
+        if ($TriggerIntuneAutoEnrollment) { $arguments += "-TriggerIntuneAutoEnrollment" }
+        if ($AuditOnly) { $arguments += "-AuditOnly" }
         if ($NoTranscript) { $arguments += "-NoTranscript" }
         $arguments += @("-RetryCount", $RetryCount, "-RetrySleepMinutes", $RetrySleepMinutes)
         $arguments += @("-LogRetentionCount", $LogRetentionCount)
@@ -617,6 +652,11 @@ function Invoke-RelaunchElevatedIfNeeded {
     if ($RepairDisabledDeletedDevice) { $arguments += "-RepairDisabledDeletedDevice" }
     if ($TriggerJoin) { $arguments += "-TriggerJoin" }
     if ($AllowIntuneEnrolledAction) { $arguments += "-AllowIntuneEnrolledAction" }
+    if ($AllowDsregLeave) { $arguments += "-AllowDsregLeave" }
+    if ($AllowRemoveStaleIntuneEnrollment) { $arguments += "-AllowRemoveStaleIntuneEnrollment" }
+    if ($AllowRemoveNonIntuneMdmEnrollment) { $arguments += "-AllowRemoveNonIntuneMdmEnrollment" }
+    if ($TriggerIntuneAutoEnrollment) { $arguments += "-TriggerIntuneAutoEnrollment" }
+    if ($AuditOnly) { $arguments += "-AuditOnly" }
     if ($NoTranscript) { $arguments += "-NoTranscript" }
     $arguments += @("-RetryCount", $RetryCount, "-RetrySleepMinutes", $RetrySleepMinutes)
     $arguments += @("-LogRetentionCount", $LogRetentionCount)
@@ -1146,7 +1186,11 @@ function Get-DsregValue {
         $line = $Lines | Where-Object { $_ -match $pattern } | Select-Object -First 1
 
         if ($line -and $line -match $pattern) {
-            return $matches[1].Trim()
+            $value = $matches[1].Trim()
+            while ($value.StartsWith(":")) {
+                $value = $value.TrimStart(":").Trim()
+            }
+            return $value
         }
     }
 
@@ -1172,8 +1216,29 @@ function ConvertFrom-DsregStatus {
         HttpsStatus         = Get-DsregValue -Lines $Lines -Names @("Https Status", "HttpsStatus")
         RequestId           = Get-DsregValue -Lines $Lines -Names @("Request Id", "RequestId")
         ErrorPhase          = Get-DsregValue -Lines $Lines -Names @("Error Phase", "ErrorPhase")
+        MdmUrl              = Get-DsregValue -Lines $Lines -Names @("MdmUrl", "MDMUrl")
+        MdmTouUrl           = Get-DsregValue -Lines $Lines -Names @("MdmTouUrl", "MDMTouUrl")
+        MdmComplianceUrl    = Get-DsregValue -Lines $Lines -Names @("MdmComplianceUrl", "MDMComplianceUrl")
+        KeySignTest         = Get-DsregValue -Lines $Lines -Names @("KeySignTest")
         AzureAdPrt          = Get-DsregValue -Lines $Lines -Names @("AzureAdPrt")
     }
+}
+
+function ConvertTo-CleanNativeOutput {
+    param([object[]]$Output)
+
+    $lines = @($Output | ForEach-Object { [string]$_ })
+    $clean = @()
+    foreach ($line in $lines) {
+        if ($line -match "^\s*At\s+.*:\d+\s+char:\d+") { continue }
+        if ($line -match "^\s*\+\s+") { continue }
+        if ($line -match "^\s*CategoryInfo\s*:") { continue }
+        if ($line -match "^\s*FullyQualifiedErrorId\s*:") { continue }
+        if ($line -match "^\s*NativeCommandError\s*$") { continue }
+        $clean += $line
+    }
+
+    return (($clean -join " ") -replace "\s+", " ").Trim()
 }
 
 function Get-DsregStatusSnapshot {
@@ -1333,6 +1398,271 @@ function Get-IntuneEnrollmentState {
 
 function Get-IntuneEnrollmentDetected {
     return [bool](Get-IntuneEnrollmentState).Enrolled
+}
+
+function Test-RegistrySubKeyExists {
+    param(
+        [Parameter(Mandatory = $true)]$BaseKey,
+        [Parameter(Mandatory = $true)][string]$SubKeyPath
+    )
+
+    try {
+        $key = $BaseKey.OpenSubKey($SubKeyPath, $false)
+        if ($key) {
+            $key.Close()
+            return $true
+        }
+    }
+    catch { }
+
+    return $false
+}
+
+function Test-EnterpriseMgmtTaskFolderExists {
+    param([Parameter(Mandatory = $true)][string]$EnrollmentId)
+
+    try {
+        $service = New-Object -ComObject Schedule.Service
+        $service.Connect()
+        [void]$service.GetFolder("\Microsoft\Windows\EnterpriseMgmt\$EnrollmentId")
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-MdmEnrollmentState {
+    try {
+        $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry64
+        )
+        $enrollKey = $base.OpenSubKey("SOFTWARE\Microsoft\Enrollments", $false)
+        if (-not $enrollKey) {
+            return [PSCustomObject]@{
+                AnyMdmEnrollmentDetected = $false
+                IntuneEnrollmentDetected = $false
+                NonIntuneMdmEnrollmentDetected = $false
+                EnrollmentCount = 0
+                IntuneEnrollmentIds = ""
+                NonIntuneEnrollmentIds = ""
+                UnconfirmedIntuneEnrollmentIds = ""
+                ProviderIds = ""
+                EnrollmentDetails = ""
+                IgnoredEnrollmentDetails = ""
+            }
+        }
+
+        $internalProviderIds = @("Deploy Authority", "Cloud Authority", "Local Authority")
+        $entries = @()
+        $ignoredEntries = @()
+        $unconfirmedIntuneEntries = @()
+
+        foreach ($subName in $enrollKey.GetSubKeyNames()) {
+            try {
+                $sub = $enrollKey.OpenSubKey($subName, $false)
+                if (-not $sub) { continue }
+
+                $providerId = [string]$sub.GetValue("ProviderID", "")
+                $discoveryServiceFullUrl = [string]$sub.GetValue("DiscoveryServiceFullURL", "")
+                $enrollmentType = [string]$sub.GetValue("EnrollmentType", "")
+                $upn = [string]$sub.GetValue("UPN", "")
+                $aadResourceId = [string]$sub.GetValue("AADResourceID", "")
+
+                $hasProviderId = -not [string]::IsNullOrWhiteSpace($providerId)
+                $hasDiscoveryUrl = -not [string]::IsNullOrWhiteSpace($discoveryServiceFullUrl)
+                $isInternalProvider = $hasProviderId -and ($internalProviderIds -contains $providerId)
+                $isIntuneProvider = ($providerId -eq "MS DM Server")
+                $isIntuneDiscovery = ($discoveryServiceFullUrl -match "(?i)enrollment\.manage\.microsoft\.com")
+                $isExternalProvider = $hasProviderId -and -not $isInternalProvider -and -not $isIntuneProvider
+                $isExternalDiscovery = $hasDiscoveryUrl -and -not $isIntuneDiscovery
+
+                $statusKeyPresent = Test-RegistrySubKeyExists -BaseKey $base -SubKeyPath ("SOFTWARE\Microsoft\Enrollments\Status\{0}" -f $subName)
+                $omadmAccountPresent = Test-RegistrySubKeyExists -BaseKey $base -SubKeyPath ("SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\{0}" -f $subName)
+                $policyProviderPresent = Test-RegistrySubKeyExists -BaseKey $base -SubKeyPath ("SOFTWARE\Microsoft\PolicyManager\Providers\{0}" -f $subName)
+                $enterpriseMgmtTaskPresent = Test-EnterpriseMgmtTaskFolderExists -EnrollmentId $subName
+
+                $evidence = @()
+                if ($statusKeyPresent) { $evidence += "StatusKey" }
+                if ($omadmAccountPresent) { $evidence += "OMADMAccount" }
+                if ($policyProviderPresent) { $evidence += "PolicyProvider" }
+                if ($enterpriseMgmtTaskPresent) { $evidence += "EnterpriseMgmtTasks" }
+                $evidenceText = ($evidence -join ",")
+
+                $isIntuneCandidate = $isIntuneProvider -or $isIntuneDiscovery
+                $isIntuneEnrollment = $isIntuneProvider
+                $isNonIntuneMdmEnrollment = $isExternalProvider -or ($isExternalDiscovery -and ($evidence.Count -ge 1))
+                $isMdm = $isIntuneEnrollment -or $isNonIntuneMdmEnrollment
+
+                $entry = [PSCustomObject]@{
+                    EnrollmentId = $subName
+                    ProviderID = $providerId
+                    DiscoveryServiceFullURL = $discoveryServiceFullUrl
+                    EnrollmentType = $enrollmentType
+                    UPN = $upn
+                    AADResourceID = $aadResourceId
+                    Evidence = $evidenceText
+                    IsIntune = $isIntuneEnrollment
+                }
+
+                if ($isMdm) {
+                    $entries += $entry
+                }
+                elseif ($isIntuneCandidate) {
+                    $unconfirmedIntuneEntries += $entry
+                    $ignoredEntries += $entry
+                }
+                elseif ($hasProviderId -or $hasDiscoveryUrl -or (-not [string]::IsNullOrWhiteSpace($enrollmentType))) {
+                    $ignoredEntries += $entry
+                }
+            }
+            catch {
+                Write-SmartM365DeviceRegistrationLog ("MDM enrollment subkey inspection failed. EnrollmentId={0}; Error={1}" -f $subName, $_.Exception.Message)
+            }
+        }
+
+        $intuneEntries = @($entries | Where-Object { $_.IsIntune })
+        $nonIntuneEntries = @($entries | Where-Object { -not $_.IsIntune })
+        $providerIds = @($entries | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_.ProviderID)) { "<empty>" } else { $_.ProviderID } } | Select-Object -Unique)
+        $details = @($entries | ForEach-Object {
+            "EnrollmentId={0},ProviderID={1},DiscoveryURL={2},EnrollmentType={3},UPN={4},Evidence={5}" -f $_.EnrollmentId, $_.ProviderID, $_.DiscoveryServiceFullURL, $_.EnrollmentType, $_.UPN, $_.Evidence
+        })
+        $ignoredDetails = @($ignoredEntries | ForEach-Object {
+            "EnrollmentId={0},ProviderID={1},DiscoveryURL={2},EnrollmentType={3},UPN={4},Evidence={5}" -f $_.EnrollmentId, $_.ProviderID, $_.DiscoveryServiceFullURL, $_.EnrollmentType, $_.UPN, $_.Evidence
+        })
+
+        return [PSCustomObject]@{
+            AnyMdmEnrollmentDetected = ($entries.Count -gt 0)
+            IntuneEnrollmentDetected = ($intuneEntries.Count -gt 0)
+            NonIntuneMdmEnrollmentDetected = ($nonIntuneEntries.Count -gt 0)
+            EnrollmentCount = $entries.Count
+            IntuneEnrollmentIds = (($intuneEntries | ForEach-Object { $_.EnrollmentId }) -join ";")
+            NonIntuneEnrollmentIds = (($nonIntuneEntries | ForEach-Object { $_.EnrollmentId }) -join ";")
+            UnconfirmedIntuneEnrollmentIds = (($unconfirmedIntuneEntries | ForEach-Object { $_.EnrollmentId }) -join ";")
+            ProviderIds = ($providerIds -join ";")
+            EnrollmentDetails = ($details -join " | ")
+            IgnoredEnrollmentDetails = ($ignoredDetails -join " | ")
+        }
+    }
+    catch {
+        Write-SmartM365DeviceRegistrationLog ("MDM enrollment inspection failed: {0}" -f $_.Exception.Message)
+        return [PSCustomObject]@{
+            AnyMdmEnrollmentDetected = $false
+            IntuneEnrollmentDetected = $false
+            NonIntuneMdmEnrollmentDetected = $false
+            EnrollmentCount = 0
+            IntuneEnrollmentIds = ""
+            NonIntuneEnrollmentIds = ""
+            UnconfirmedIntuneEnrollmentIds = ""
+            ProviderIds = ""
+            EnrollmentDetails = ""
+            IgnoredEnrollmentDetails = $_.Exception.Message
+        }
+    }
+}
+
+function Remove-DeviceRegistrationMdmEnrollment {
+    param(
+        [Parameter(Mandatory = $true)][string]$EnrollmentIds,
+        [Parameter(Mandatory = $true)][string]$OutputDirPath,
+        [Parameter(Mandatory = $true)][string]$RemovalLabel
+    )
+
+    $ids = @($EnrollmentIds -split ";" | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if ($ids.Count -eq 0) {
+        return [PSCustomObject]@{ Success = $false; EnrollmentIds = ""; BackupDir = ""; RemovedItems = ""; Detail = ("No enrollment id was provided for {0}." -f $RemovalLabel) }
+    }
+
+    $safeRemovalLabel = ($RemovalLabel.ToLowerInvariant() -replace '[^a-z0-9]+', '_').Trim('_')
+    if ([string]::IsNullOrWhiteSpace($safeRemovalLabel)) { $safeRemovalLabel = "mdm_enrollment" }
+    $backupDir = Join-Path $OutputDirPath ("{0}_{1}_backup_{2}" -f $Script:ComputerName, $safeRemovalLabel, $Script:RunId)
+    New-Item -ItemType Directory -Path $backupDir -Force -ErrorAction Stop | Out-Null
+
+    $removedItems = New-Object System.Collections.Generic.List[string]
+    $warnings = New-Object System.Collections.Generic.List[string]
+    $errors = New-Object System.Collections.Generic.List[string]
+
+    foreach ($id in $ids) {
+        $safeId = $id -replace '[\\/:*?"<>|{}]', '_'
+        $registryPaths = @(
+            "HKLM\SOFTWARE\Microsoft\Enrollments\$id",
+            "HKLM\SOFTWARE\Microsoft\Enrollments\Status\$id",
+            "HKLM\SOFTWARE\Microsoft\EnterpriseResourceManager\Tracked\$id",
+            "HKLM\SOFTWARE\Microsoft\PolicyManager\AdmxInstalled\$id",
+            "HKLM\SOFTWARE\Microsoft\PolicyManager\Providers\$id",
+            "HKLM\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\$id",
+            "HKLM\SOFTWARE\Microsoft\Provisioning\OMADM\Logger\$id",
+            "HKLM\SOFTWARE\Microsoft\Provisioning\OMADM\Sessions\$id",
+            "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MDM\Enrollments\$id"
+        )
+
+        foreach ($regPath in $registryPaths) {
+            $psPath = "Registry::$regPath"
+            if (-not (Test-Path -LiteralPath $psPath)) { continue }
+
+            $safeRegName = ($regPath -replace '[\\/:*?"<>|{} ]', '_')
+            $backupFile = Join-Path $backupDir ("{0}_{1}.reg" -f $safeId, $safeRegName)
+            try {
+                $exportOutput = & reg.exe export $regPath $backupFile /y 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    $warnings.Add(("Registry export failed before removal. Path={0}; ExitCode={1}; Output={2}" -f $regPath, $LASTEXITCODE, (ConvertTo-CleanNativeOutput -Output $exportOutput)))
+                }
+
+                Remove-Item -LiteralPath $psPath -Recurse -Force -ErrorAction Stop
+                $removedItems.Add($regPath)
+            }
+            catch {
+                $errors.Add(("Registry removal failed. Path={0}; Error={1}" -f $regPath, $_.Exception.Message))
+            }
+        }
+
+        $taskPath = "\Microsoft\Windows\EnterpriseMgmt\$id\"
+        try {
+            $tasks = @(Get-ScheduledTask -TaskPath $taskPath -ErrorAction SilentlyContinue)
+            foreach ($task in $tasks) {
+                try {
+                    Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -Confirm:$false -ErrorAction Stop
+                    $removedItems.Add(("ScheduledTask={0}{1}" -f $task.TaskPath, $task.TaskName))
+                }
+                catch {
+                    $errors.Add(("Scheduled task removal failed. Task={0}{1}; Error={2}" -f $task.TaskPath, $task.TaskName, $_.Exception.Message))
+                }
+            }
+        }
+        catch {
+            Write-SmartM365DeviceRegistrationLog ("Scheduled task enumeration skipped/failed. TaskPath={0}; Error={1}" -f $taskPath, $_.Exception.Message)
+        }
+
+        try {
+            $schedule = New-Object -ComObject Schedule.Service
+            $schedule.Connect()
+            $enterpriseMgmtFolder = $schedule.GetFolder("\Microsoft\Windows\EnterpriseMgmt")
+            $enterpriseMgmtFolder.DeleteFolder($id, 0)
+            $removedItems.Add(("ScheduledTaskFolder=\Microsoft\Windows\EnterpriseMgmt\{0}" -f $id))
+        }
+        catch {
+            Write-SmartM365DeviceRegistrationLog ("Scheduled task folder removal skipped/failed. Folder=\Microsoft\Windows\EnterpriseMgmt\{0}; Error={1}" -f $id, $_.Exception.Message)
+        }
+    }
+
+    $detail = if ($errors.Count -eq 0) {
+        ("{0} registry keys and EnterpriseMgmt tasks removed. Certificates were not removed." -f $RemovalLabel)
+    }
+    else {
+        ($errors -join " | ")
+    }
+    if ($warnings.Count -gt 0) {
+        $detail = "{0} Warnings: {1}" -f $detail, ($warnings -join " | ")
+    }
+
+    return [PSCustomObject]@{
+        Success = ($errors.Count -eq 0)
+        EnrollmentIds = ($ids -join ";")
+        BackupDir = $backupDir
+        RemovedItems = ($removedItems -join " | ")
+        Detail = $detail
+    }
 }
 
 function Get-RegistryPolicyValue {
@@ -1605,6 +1935,40 @@ function Start-AutomaticDeviceJoinTask {
     }
 }
 
+function Start-IntuneAutoEnrollment {
+    $deviceEnrollerPath = Join-Path $env:WINDIR "System32\deviceenroller.exe"
+    if (-not (Test-Path -LiteralPath $deviceEnrollerPath)) {
+        return [PSCustomObject]@{
+            Success = $false
+            ToolFound = $false
+            ExitCode = ""
+            Detail = "deviceenroller.exe not found."
+        }
+    }
+
+    try {
+        Write-SmartM365DeviceRegistrationLog "Running deviceenroller.exe /c /AutoEnrollMDM."
+        $enrollOutput = & $deviceEnrollerPath /c /AutoEnrollMDM 2>&1
+        $enrollExitCode = $LASTEXITCODE
+        $detail = ConvertTo-CleanNativeOutput -Output $enrollOutput
+
+        return [PSCustomObject]@{
+            Success = ($enrollExitCode -eq 0)
+            ToolFound = $true
+            ExitCode = $enrollExitCode
+            Detail = $detail
+        }
+    }
+    catch {
+        return [PSCustomObject]@{
+            Success = $false
+            ToolFound = $true
+            ExitCode = ""
+            Detail = $_.Exception.Message
+        }
+    }
+}
+
 function Test-DisabledOrDeletedDeviceState {
     param([Parameter(Mandatory = $true)][psobject]$Dsreg)
 
@@ -1615,6 +1979,83 @@ function Test-DisabledOrDeletedDeviceState {
         -not [string]::IsNullOrWhiteSpace($Dsreg.DeviceId) -and
         -not [string]::IsNullOrWhiteSpace($Dsreg.TenantId)
     )
+}
+
+function Test-DsregDeviceHealthy {
+    param(
+        [Parameter(Mandatory = $false)][string]$AzureAdJoined,
+        [Parameter(Mandatory = $false)][string]$DeviceAuthStatus,
+        [Parameter(Mandatory = $false)][string]$KeySignTest
+    )
+
+    if ($AzureAdJoined -ne "YES") { return $false }
+    if ($DeviceAuthStatus -like "*SUCCESS*") { return $true }
+    if ([string]::IsNullOrWhiteSpace($DeviceAuthStatus) -and $KeySignTest -eq "PASSED") { return $true }
+    return $false
+}
+
+function Test-DsregLeaveApplicable {
+    param(
+        [Parameter(Mandatory = $true)][psobject]$Dsreg,
+        [bool]$StrictDisabledDeletedOnly = $false
+    )
+
+    $baseGuardMatched = (
+        $Dsreg.AzureAdJoined -eq "YES" -and
+        -not [string]::IsNullOrWhiteSpace($Dsreg.DeviceId) -and
+        -not [string]::IsNullOrWhiteSpace($Dsreg.TenantId)
+    )
+
+    if (-not $baseGuardMatched) {
+        return [PSCustomObject]@{ Applicable = $false; Reason = ("Base dsregcmd /leave guard did not match. AzureAdJoined={0}; DeviceIdPresent={1}; TenantIdPresent={2}" -f $Dsreg.AzureAdJoined, (-not [string]::IsNullOrWhiteSpace($Dsreg.DeviceId)), (-not [string]::IsNullOrWhiteSpace($Dsreg.TenantId))) }
+    }
+
+    if ($StrictDisabledDeletedOnly -and (Test-DisabledOrDeletedDeviceState -Dsreg $Dsreg)) {
+        return [PSCustomObject]@{ Applicable = $true; Reason = "DeviceAuthStatus indicates disabled or deleted device." }
+    }
+
+    if (-not $StrictDisabledDeletedOnly) {
+        if ([string]$Dsreg.DeviceAuthStatus -like "FAILED*") {
+            return [PSCustomObject]@{ Applicable = $true; Reason = ("DeviceAuthStatus starts with FAILED. DeviceAuthStatus={0}" -f $Dsreg.DeviceAuthStatus) }
+        }
+
+        if ($Dsreg.AzureAdJoined -eq "YES" -and $Dsreg.KeySignTest -eq "FAILED") {
+            return [PSCustomObject]@{ Applicable = $true; Reason = ("KeySignTest is FAILED on an AzureAdJoined device. DeviceAuthStatus={0}" -f $Dsreg.DeviceAuthStatus) }
+        }
+    }
+
+    return [PSCustomObject]@{ Applicable = $false; Reason = ("No dsregcmd /leave guard matched. AzureAdJoined={0}; DeviceAuthStatus={1}; KeySignTest={2}" -f $Dsreg.AzureAdJoined, $Dsreg.DeviceAuthStatus, $Dsreg.KeySignTest) }
+}
+
+function Get-NextActionForDeviceRegistrationStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [bool]$IntuneEnrolled = $false
+    )
+
+    switch ($Status) {
+        "HEALTHY" { if ($IntuneEnrolled) { return "NO_ACTION_ALREADY_INTUNE_OR_HEALTHY" }; return "TRIGGER_OR_WAIT_INTUNE_AUTOENROLL" }
+        "HEALTHY_AFTER_ACTION" { return "RECHECK_INTUNE_ENROLLMENT" }
+        "INTUNE_AUTOENROLL_TRIGGERED" { return "WAIT_AND_RECHECK_INTUNE" }
+        "INTUNE_ENROLLED" { return "NO_ACTION_ALREADY_INTUNE" }
+        "STALE_INTUNE_ENROLLMENT_REMOVED" { return "RETRY_INTUNE_AUTOENROLL" }
+        "STALE_INTUNE_ENROLLMENT_LOCAL" { return "VALIDATE_STALE_INTUNE_TRACE_OR_ENABLE_CLEANUP" }
+        "NON_INTUNE_MDM_REMOVED" { return "RETRY_INTUNE_AUTOENROLL" }
+        "NON_INTUNE_MDM_ENROLLED" { return "VALIDATE_MDM_PROVIDER_OR_ENABLE_EXPLICIT_CLEANUP" }
+        "INTUNE_AUTOENROLL_POLICY_NOT_CONFIGURED" { return "CHECK_GPO_AUTOENROLL" }
+        "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" { return "CHECK_WINDOWS_DEVICEENROLLER" }
+        "DISABLED_OR_DELETED_DEVICE_DETECTED" { return "ALLOW_DSREG_LEAVE_OR_FIX_ENTRA_DEVICE" }
+        "MISSING_DEVICE_HINT_DETECTED" { return "WAIT_AAD_CONNECT_OR_TRIGGER_JOIN" }
+        "KEY_SIGN_TEST_FAILED" { return "ALLOW_DSREG_LEAVE_OR_REJOIN" }
+        "ACTION_COMPLETED_RECHECK_REQUIRED" { return "WAIT_SYNC_AND_RECHECK" }
+        "ACTION_SKIPPED_INTUNE_ENROLLED" { return "NO_ACTION_ALREADY_INTUNE" }
+        "ADMIN_ELEVATION_REQUIRED" { return "RUN_AS_ADMIN" }
+        "DOMAIN_USER_REQUIRED" { return "LOGON_WITH_DOMAIN_OR_AAD_USER" }
+        "NOT_DOMAIN_JOINED" { return "CHECK_DOMAIN_JOIN_OR_PROFILE" }
+        "DC_NOT_REACHABLE" { return "FIX_DOMAIN_CONNECTIVITY_OR_VPN" }
+        "ERROR" { return "CHECK_LOG" }
+        default { if ($IntuneEnrolled) { return "NO_ACTION_ALREADY_INTUNE" }; return "CHECK_DEVICE_REGISTRATION_LOGS" }
+    }
 }
 
 function Test-MissingDeviceHint {
@@ -1644,7 +2085,7 @@ function Invoke-PostActionRetry {
         Start-Sleep -Seconds ($SleepMinutes * 60)
 
         $last = Get-DsregStatusSnapshot -DsregcmdPath $DsregcmdPath -OutputDir $OutputDir -Phase ("{0}_retry{1}" -f $Context, $index)
-        if ($last.AzureAdJoined -eq "YES" -and $last.DeviceAuthStatus -like "*SUCCESS*") {
+        if (Test-DsregDeviceHealthy -AzureAdJoined $last.AzureAdJoined -DeviceAuthStatus $last.DeviceAuthStatus -KeySignTest $last.KeySignTest) {
             return [PSCustomObject]@{
                 Success = $true
                 Dsreg   = $last
@@ -1677,6 +2118,9 @@ function New-ResultObject {
         [string]$Action = "None",
         [psobject]$PolicyState,
         [psobject]$UserAdminState,
+        [psobject]$MdmEnrollmentState,
+        [psobject]$MdmCleanupResult,
+        [psobject]$IntuneAutoEnrollResult,
         [string]$LogPath = "",
         [string]$CsvPath = ""
     )
@@ -1689,6 +2133,10 @@ function New-ResultObject {
         $UserAdminState = $Script:UserAdminState
     }
 
+    if (-not $MdmEnrollmentState) {
+        $MdmEnrollmentState = $Script:MdmEnrollmentState
+    }
+
     if (-not $PSBoundParameters.ContainsKey("IntuneEnrolled") -and $Script:IntuneEnrollmentState) {
         $IntuneEnrolled = [bool]$Script:IntuneEnrollmentState.Enrolled
     }
@@ -1696,6 +2144,8 @@ function New-ResultObject {
     if ([string]::IsNullOrWhiteSpace($EnrollmentEvidence) -and $Script:IntuneEnrollmentState) {
         $EnrollmentEvidence = [string]$Script:IntuneEnrollmentState.Evidence
     }
+
+    $nextAction = Get-NextActionForDeviceRegistrationStatus -Status $Status -IntuneEnrolled $IntuneEnrolled
 
     $enrollmentStatusMessage = if ($IntuneEnrolled) {
         "Device enrolled in Intune."
@@ -1734,6 +2184,7 @@ function New-ResultObject {
         CurrentUserIsLocalAdmin = if ($UserAdminState) { $UserAdminState.IsLocalAdmin } else { $false }
         CurrentProcessElevated = if ($UserAdminState) { $UserAdminState.IsElevated } else { $false }
         Status                = $Status
+        NextAction            = $nextAction
         OverallHealth         = $overallHealth
         ExitCode              = $ExitCode
         Message               = $Message
@@ -1752,6 +2203,16 @@ function New-ResultObject {
         EnrollmentEvidence    = $EnrollmentEvidence
         EnrollmentStrongEvidence = if ($Script:IntuneEnrollmentState) { $Script:IntuneEnrollmentState.StrongEvidence } else { "" }
         EnrollmentWeakEvidence = if ($Script:IntuneEnrollmentState) { $Script:IntuneEnrollmentState.WeakEvidence } else { "" }
+        MdmAnyEnrollmentDetected = if ($MdmEnrollmentState) { $MdmEnrollmentState.AnyMdmEnrollmentDetected } else { $false }
+        MdmIntuneEnrollmentDetected = if ($MdmEnrollmentState) { $MdmEnrollmentState.IntuneEnrollmentDetected } else { $false }
+        MdmNonIntuneEnrollmentDetected = if ($MdmEnrollmentState) { $MdmEnrollmentState.NonIntuneMdmEnrollmentDetected } else { $false }
+        MdmEnrollmentCount    = if ($MdmEnrollmentState) { $MdmEnrollmentState.EnrollmentCount } else { 0 }
+        MdmIntuneEnrollmentIds = if ($MdmEnrollmentState) { $MdmEnrollmentState.IntuneEnrollmentIds } else { "" }
+        MdmNonIntuneEnrollmentIds = if ($MdmEnrollmentState) { $MdmEnrollmentState.NonIntuneEnrollmentIds } else { "" }
+        MdmUnconfirmedIntuneEnrollmentIds = if ($MdmEnrollmentState) { $MdmEnrollmentState.UnconfirmedIntuneEnrollmentIds } else { "" }
+        MdmProviderIds        = if ($MdmEnrollmentState) { $MdmEnrollmentState.ProviderIds } else { "" }
+        MdmEnrollmentDetails  = if ($MdmEnrollmentState) { $MdmEnrollmentState.EnrollmentDetails } else { "" }
+        MdmIgnoredEnrollmentDetails = if ($MdmEnrollmentState) { $MdmEnrollmentState.IgnoredEnrollmentDetails } else { "" }
         MdmPolicyCheckRequired = if ($PolicyState -and $PolicyState.PSObject.Properties.Name -contains "MdmPolicyCheckRequired") { $PolicyState.MdmPolicyCheckRequired } else { $true }
         MdmPolicyStatus       = if ($PolicyState -and $PolicyState.PSObject.Properties.Name -contains "MdmPolicyStatus") { $PolicyState.MdmPolicyStatus } else { "" }
         MdmPolicyStatusMessage = if ($PolicyState -and $PolicyState.PSObject.Properties.Name -contains "MdmPolicyStatusMessage") { $PolicyState.MdmPolicyStatusMessage } else { "" }
@@ -1782,8 +2243,22 @@ function New-ResultObject {
         HttpsStatus           = if ($Dsreg) { $Dsreg.HttpsStatus } else { "" }
         RequestId             = if ($Dsreg) { $Dsreg.RequestId } else { "" }
         ErrorPhase            = if ($Dsreg) { $Dsreg.ErrorPhase } else { "" }
+        KeySignTest           = if ($Dsreg) { $Dsreg.KeySignTest } else { "" }
+        MdmUrl                = if ($Dsreg) { $Dsreg.MdmUrl } else { "" }
+        MdmTouUrl             = if ($Dsreg) { $Dsreg.MdmTouUrl } else { "" }
+        MdmComplianceUrl      = if ($Dsreg) { $Dsreg.MdmComplianceUrl } else { "" }
         DsregExitCode         = if ($Dsreg -and $Dsreg.PSObject.Properties.Name -contains "ExitCode") { $Dsreg.ExitCode } else { "" }
         DsregSnapshotPath     = if ($Dsreg -and $Dsreg.PSObject.Properties.Name -contains "SnapshotPath") { $Dsreg.SnapshotPath } else { "" }
+        MdmCleanupAttempted   = [bool]$MdmCleanupResult
+        MdmCleanupSuccess     = if ($MdmCleanupResult) { $MdmCleanupResult.Success } else { $false }
+        MdmCleanupEnrollmentIds = if ($MdmCleanupResult) { $MdmCleanupResult.EnrollmentIds } else { "" }
+        MdmCleanupBackupDir   = if ($MdmCleanupResult) { $MdmCleanupResult.BackupDir } else { "" }
+        MdmCleanupRemovedItems = if ($MdmCleanupResult) { $MdmCleanupResult.RemovedItems } else { "" }
+        MdmCleanupDetail      = if ($MdmCleanupResult) { $MdmCleanupResult.Detail } else { "" }
+        IntuneAutoEnrollAttempted = [bool]$IntuneAutoEnrollResult
+        IntuneAutoEnrollSuccess = if ($IntuneAutoEnrollResult) { $IntuneAutoEnrollResult.Success } else { $false }
+        IntuneAutoEnrollExitCode = if ($IntuneAutoEnrollResult) { $IntuneAutoEnrollResult.ExitCode } else { "" }
+        IntuneAutoEnrollDetail = if ($IntuneAutoEnrollResult) { $IntuneAutoEnrollResult.Detail } else { "" }
         SupportBundlePath     = ""
         SupportEmail          = [string]$Script:SupportEmail
         SupportEmailSendMode  = [string]$Script:SupportEmailSendMode
@@ -1806,6 +2281,7 @@ function Write-ResultSummary {
     Write-Host ("{0} v{1}" -f $Result.ToolName, $Result.Version) -ForegroundColor Cyan
     Write-Host ("Mode         : {0}" -f $Result.Mode)
     Write-Host ("Status       : {0}" -f $Result.Status)
+    Write-Host ("Next action  : {0}" -f $Result.NextAction)
     Write-Host ("Message      : {0}" -f $Result.Message)
     Write-Host ("Computer     : {0}" -f $Result.ComputerName)
     Write-Host ("User         : {0}; DomainUser={1}; LocalAdmin={2}; Elevated={3}" -f $Result.CurrentUser, $Result.CurrentUserIsDomainUser, $Result.CurrentUserIsLocalAdmin, $Result.CurrentProcessElevated)
@@ -1816,11 +2292,12 @@ function Write-ResultSummary {
         Write-Host ("Evidence    : {0}" -f $Result.EnrollmentEvidence)
     }
     Write-Host ("MDM policy   : {0}" -f $Result.MdmPolicyStatusMessage)
+    Write-Host ("MDM state    : Intune={0}; NonIntune={1}; UnconfirmedIntuneIds={2}" -f $Result.MdmIntuneEnrollmentDetected, $Result.MdmNonIntuneEnrollmentDetected, $Result.MdmUnconfirmedIntuneEnrollmentIds)
     Write-Host ("Policy       : MDM={0}; Credential={1}; WorkplaceJoin={2}; AutoJoinTask={3}/{4}" -f $Result.MdmAutoEnrollMDM, $Result.MdmCredentialType, $Result.WorkplaceJoinAutoWorkplaceJoin, $Result.AutomaticDeviceJoinTaskPresent, $Result.AutomaticDeviceJoinTaskState)
     if (-not [string]::IsNullOrWhiteSpace($Result.PolicyIssues)) {
         Write-Host ("Policy issues: {0}" -f $Result.PolicyIssues)
     }
-    Write-Host ("Dsreg        : AzureAdJoined={0}; DeviceAuthStatus={1}; ExitCode={2}" -f $Result.AzureAdJoined, $Result.DeviceAuthStatus, $Result.DsregExitCode)
+    Write-Host ("Dsreg        : AzureAdJoined={0}; DeviceAuthStatus={1}; KeySignTest={2}; ExitCode={3}" -f $Result.AzureAdJoined, $Result.DeviceAuthStatus, $Result.KeySignTest, $Result.DsregExitCode)
     Write-Host ("Errors       : Client={0}; ServerSubCode={1}; Phase={2}" -f $Result.ClientErrorCode, $Result.ServerErrorSubCode, $Result.ErrorPhase)
     Write-Host ("Action       : {0}; LeaveAttempted={1}; LeaveExitCode={2}" -f $Result.Action, $Result.LeaveAttempted, $Result.LeaveExitCode)
     Write-Host ("Run log      : {0}" -f $Result.LogPath)
@@ -1835,6 +2312,11 @@ function Invoke-SmartM365DeviceRegistrationTool {
         [switch]$RepairDisabledDeletedDevice,
         [switch]$TriggerJoin,
         [switch]$AllowIntuneEnrolledAction,
+        [switch]$AllowDsregLeave,
+        [switch]$AllowRemoveStaleIntuneEnrollment,
+        [switch]$AllowRemoveNonIntuneMdmEnrollment,
+        [switch]$TriggerIntuneAutoEnrollment,
+        [switch]$AuditOnly,
         [ValidateRange(0, 12)]
         [int]$RetryCount = 0,
         [ValidateRange(1, 120)]
@@ -1852,6 +2334,11 @@ function Invoke-SmartM365DeviceRegistrationTool {
         $RepairDisabledDeletedDevice = $false
         $TriggerJoin = $false
         $AllowIntuneEnrolledAction = $false
+        $AllowDsregLeave = $false
+        $AllowRemoveStaleIntuneEnrollment = $false
+        $AllowRemoveNonIntuneMdmEnrollment = $false
+        $TriggerIntuneAutoEnrollment = $false
+        $AuditOnly = $false
         $RetryCount = 0
     }
 
@@ -1861,11 +2348,14 @@ function Invoke-SmartM365DeviceRegistrationTool {
     $dsreg = $null
     $result = $null
     $intuneState = $null
+    $mdmEnrollmentState = $null
+    $mdmCleanupResult = $null
+    $intuneAutoEnrollResult = $null
     $intuneDetected = $false
     $eventLogPaths = @()
 
     try {
-        Write-SmartM365DeviceRegistrationLog ("Start. RunId={0}; Mode={1}; RepairDisabledDeletedDevice={2}; TriggerJoin={3}; AllowIntuneEnrolledAction={4}; RetryCount={5}; RetrySleepMinutes={6}" -f $Script:RunId, $Mode, [bool]$RepairDisabledDeletedDevice, [bool]$TriggerJoin, [bool]$AllowIntuneEnrolledAction, $RetryCount, $RetrySleepMinutes)
+        Write-SmartM365DeviceRegistrationLog ("Start. RunId={0}; Mode={1}; RepairDisabledDeletedDevice={2}; AllowDsregLeave={3}; TriggerJoin={4}; TriggerIntuneAutoEnrollment={5}; AllowRemoveStaleIntuneEnrollment={6}; AllowRemoveNonIntuneMdmEnrollment={7}; AllowIntuneEnrolledAction={8}; AuditOnly={9}; RetryCount={10}; RetrySleepMinutes={11}" -f $Script:RunId, $Mode, [bool]$RepairDisabledDeletedDevice, [bool]$AllowDsregLeave, [bool]$TriggerJoin, [bool]$TriggerIntuneAutoEnrollment, [bool]$AllowRemoveStaleIntuneEnrollment, [bool]$AllowRemoveNonIntuneMdmEnrollment, [bool]$AllowIntuneEnrolledAction, [bool]$AuditOnly, $RetryCount, $RetrySleepMinutes)
         Write-SmartM365DeviceRegistrationLog ("Retention. LogRetentionCount={0}" -f $LogRetentionCount)
 
         if (-not $NoTranscript) {
@@ -1888,6 +2378,13 @@ function Invoke-SmartM365DeviceRegistrationTool {
         $Script:IntuneEnrollmentState = $intuneState
         $intuneDetected = [bool]$intuneState.Enrolled
         Write-SmartM365DeviceRegistrationLog ("Intune enrollment detected: {0}; Evidence={1}" -f $intuneDetected, $intuneState.Evidence)
+
+        $mdmEnrollmentState = Get-MdmEnrollmentState
+        $Script:MdmEnrollmentState = $mdmEnrollmentState
+        if ($mdmEnrollmentState.IntuneEnrollmentDetected) {
+            $intuneDetected = $true
+        }
+        Write-SmartM365DeviceRegistrationLog ("MDM enrollment state: Intune={0}; NonIntune={1}; UnconfirmedIntuneIds={2}; ProviderIds={3}" -f $mdmEnrollmentState.IntuneEnrollmentDetected, $mdmEnrollmentState.NonIntuneMdmEnrollmentDetected, $mdmEnrollmentState.UnconfirmedIntuneEnrollmentIds, $mdmEnrollmentState.ProviderIds)
 
         $Script:PolicyState = Get-DeviceRegistrationPolicyState -InformationalOnly:$intuneDetected -InformationalReason "Device is already enrolled in Intune, so missing auto-enrollment policy is informational only."
         if ($intuneDetected) {
@@ -1931,8 +2428,88 @@ function Invoke-SmartM365DeviceRegistrationTool {
 
         $dsreg = Get-DsregStatusSnapshot -DsregcmdPath $dsregcmdPath -OutputDir $paths.Output -Phase "initial"
 
-        if ($dsreg.AzureAdJoined -eq "YES" -and $dsreg.DeviceAuthStatus -like "*SUCCESS*") {
-            $result = New-ResultObject -Status "HEALTHY" -ExitCode 0 -Message "Device is AzureAdJoined and DeviceAuthStatus indicates success." -Dsreg $dsreg -IntuneEnrolled $intuneDetected -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+        $deviceJoinHealthy = Test-DsregDeviceHealthy -AzureAdJoined $dsreg.AzureAdJoined -DeviceAuthStatus $dsreg.DeviceAuthStatus -KeySignTest $dsreg.KeySignTest
+        $repairActionRequested = [bool]($RepairDisabledDeletedDevice -or $AllowDsregLeave -or $TriggerJoin -or $TriggerIntuneAutoEnrollment -or $AllowRemoveStaleIntuneEnrollment -or $AllowRemoveNonIntuneMdmEnrollment)
+
+        if ($intuneDetected -and -not $AllowIntuneEnrolledAction -and $repairActionRequested) {
+            $result = New-ResultObject -Status "ACTION_SKIPPED_INTUNE_ENROLLED" -ExitCode 3 -Message "Local Intune enrollment was detected. Repair action skipped unless -AllowIntuneEnrolledAction is used." -Dsreg $dsreg -IntuneEnrolled $true -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action "DiagnosticOnly" -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+            return $result
+        }
+
+        if ($Mode -eq "Admin" -and $repairActionRequested -and -not (Test-ProcessElevated)) {
+            $result = New-ResultObject -Status "ADMIN_ELEVATION_REQUIRED" -ExitCode 3 -Message "Admin mode repair actions require an elevated PowerShell process." -Dsreg $dsreg -IntuneEnrolled $intuneDetected -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action "SkippedNotElevated" -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+            return $result
+        }
+
+        if ($AuditOnly) {
+            $auditStatus = if ($intuneDetected) {
+                "AUDIT_SUCCESS_ALREADY_INTUNE"
+            }
+            elseif ($deviceJoinHealthy -and -not [string]::IsNullOrWhiteSpace($mdmEnrollmentState.UnconfirmedIntuneEnrollmentIds)) {
+                "AUDIT_STALE_INTUNE_ENROLLMENT_LOCAL"
+            }
+            elseif ($deviceJoinHealthy) {
+                "AUDIT_INTUNE_MISSING"
+            }
+            else {
+                "AUDIT_HYBRID_JOIN_UNHEALTHY"
+            }
+            $result = New-ResultObject -Status $auditStatus -ExitCode 3 -Message "Audit only. No repair action was executed." -Dsreg $dsreg -IntuneEnrolled $intuneDetected -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action "AuditOnly" -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+            return $result
+        }
+
+        if ($deviceJoinHealthy) {
+            if ($intuneDetected) {
+                $result = New-ResultObject -Status "HEALTHY" -ExitCode 0 -Message "Device registration is healthy and local Intune enrollment is detected." -Dsreg $dsreg -IntuneEnrolled $true -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+                return $result
+            }
+
+            if ($mdmEnrollmentState.NonIntuneMdmEnrollmentDetected) {
+                if ($Mode -eq "Admin" -and $AllowRemoveNonIntuneMdmEnrollment) {
+                    if ($PSCmdlet.ShouldProcess("Non-Intune MDM enrollment on $Script:ComputerName", "Remove local non-Intune MDM traces")) {
+                        $mdmCleanupResult = Remove-DeviceRegistrationMdmEnrollment -EnrollmentIds $mdmEnrollmentState.NonIntuneEnrollmentIds -OutputDirPath $paths.Output -RemovalLabel "Non-Intune MDM enrollment"
+                    }
+
+                    $cleanupStatus = if ($mdmCleanupResult -and $mdmCleanupResult.Success) { "NON_INTUNE_MDM_REMOVED" } else { "NON_INTUNE_MDM_REMOVE_FAILED" }
+                    $result = New-ResultObject -Status $cleanupStatus -ExitCode 3 -Message "Hybrid Join is healthy, but non-Intune MDM traces were handled." -Dsreg $dsreg -IntuneEnrolled $false -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action "RemoveNonIntuneMdmEnrollment" -MdmCleanupResult $mdmCleanupResult -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+                    return $result
+                }
+
+                $result = New-ResultObject -Status "NON_INTUNE_MDM_ENROLLED" -ExitCode 3 -Message "Hybrid Join is healthy, but a non-Intune MDM enrollment is present. Cleanup is explicit opt-in." -Dsreg $dsreg -IntuneEnrolled $false -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+                return $result
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($mdmEnrollmentState.UnconfirmedIntuneEnrollmentIds)) {
+                if ($Mode -eq "Admin" -and $AllowRemoveStaleIntuneEnrollment) {
+                    if ($PSCmdlet.ShouldProcess("Stale local Intune enrollment trace on $Script:ComputerName", "Remove stale local Intune traces")) {
+                        $mdmCleanupResult = Remove-DeviceRegistrationMdmEnrollment -EnrollmentIds $mdmEnrollmentState.UnconfirmedIntuneEnrollmentIds -OutputDirPath $paths.Output -RemovalLabel "Stale local Intune enrollment trace"
+                    }
+
+                    $cleanupStatus = if ($mdmCleanupResult -and $mdmCleanupResult.Success) { "STALE_INTUNE_ENROLLMENT_REMOVED" } else { "STALE_INTUNE_ENROLLMENT_REMOVE_FAILED" }
+                    $result = New-ResultObject -Status $cleanupStatus -ExitCode 3 -Message "Hybrid Join is healthy, but stale local Intune enrollment traces were handled." -Dsreg $dsreg -IntuneEnrolled $false -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action "RemoveStaleIntuneEnrollment" -MdmCleanupResult $mdmCleanupResult -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+                    return $result
+                }
+
+                $result = New-ResultObject -Status "STALE_INTUNE_ENROLLMENT_LOCAL" -ExitCode 3 -Message "Hybrid Join is healthy, but a stale local Intune enrollment trace is suspected. Cleanup is explicit opt-in." -Dsreg $dsreg -IntuneEnrolled $false -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+                return $result
+            }
+
+            if ($Mode -eq "Admin" -and $TriggerIntuneAutoEnrollment) {
+                if ($Script:PolicyState.MdmPolicyStatus -ne "Enabled") {
+                    $result = New-ResultObject -Status "INTUNE_AUTOENROLL_POLICY_NOT_CONFIGURED" -ExitCode 3 -Message "Hybrid Join is healthy, but MDM auto-enrollment policy is not configured." -Dsreg $dsreg -IntuneEnrolled $false -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action "SkippedPolicyMissing" -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+                    return $result
+                }
+
+                if ($PSCmdlet.ShouldProcess("Intune auto-enrollment on $Script:ComputerName", "Run deviceenroller.exe /c /AutoEnrollMDM")) {
+                    $intuneAutoEnrollResult = Start-IntuneAutoEnrollment
+                }
+
+                $autoEnrollStatus = if ($intuneAutoEnrollResult -and -not $intuneAutoEnrollResult.ToolFound) { "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" } elseif ($intuneAutoEnrollResult -and $intuneAutoEnrollResult.Success) { "INTUNE_AUTOENROLL_TRIGGERED" } else { "INTUNE_AUTOENROLL_FAILED" }
+                $result = New-ResultObject -Status $autoEnrollStatus -ExitCode 3 -Message "Hybrid Join is healthy and Intune auto-enrollment trigger was requested." -Dsreg $dsreg -IntuneEnrolled $false -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action "TriggerIntuneAutoEnrollment" -IntuneAutoEnrollResult $intuneAutoEnrollResult -LogPath $paths.RunLog -CsvPath $paths.CsvPath
+                return $result
+            }
+
+            $result = New-ResultObject -Status "HEALTHY" -ExitCode 0 -Message "Device registration is healthy. Intune enrollment is not detected locally." -Dsreg $dsreg -IntuneEnrolled $false -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -LogPath $paths.RunLog -CsvPath $paths.CsvPath
             return $result
         }
 
@@ -1941,7 +2518,9 @@ function Invoke-SmartM365DeviceRegistrationTool {
         $leaveExitCode = ""
         $action = "DiagnosticOnly"
 
-        if ($intuneDetected -and -not $AllowIntuneEnrolledAction -and ($RepairDisabledDeletedDevice -or $TriggerJoin)) {
+        $repairActionRequested = [bool]($RepairDisabledDeletedDevice -or $AllowDsregLeave -or $TriggerJoin -or $TriggerIntuneAutoEnrollment -or $AllowRemoveStaleIntuneEnrollment -or $AllowRemoveNonIntuneMdmEnrollment)
+
+        if ($intuneDetected -and -not $AllowIntuneEnrolledAction -and $repairActionRequested) {
             $result = New-ResultObject -Status "ACTION_SKIPPED_INTUNE_ENROLLED" -ExitCode 3 -Message "Local Intune enrollment was detected. Repair action skipped unless -AllowIntuneEnrolledAction is used." -Dsreg $dsreg -IntuneEnrolled $true -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action $action -LogPath $paths.RunLog -CsvPath $paths.CsvPath
             return $result
         }
@@ -1949,18 +2528,19 @@ function Invoke-SmartM365DeviceRegistrationTool {
         $disabledOrDeleted = Test-DisabledOrDeletedDeviceState -Dsreg $dsreg
         $missingDevice = Test-MissingDeviceHint -Dsreg $dsreg
 
-        if ($Mode -eq "Admin" -and ($RepairDisabledDeletedDevice -or $TriggerJoin) -and -not (Test-ProcessElevated)) {
+        if ($Mode -eq "Admin" -and $repairActionRequested -and -not (Test-ProcessElevated)) {
             $result = New-ResultObject -Status "ADMIN_ELEVATION_REQUIRED" -ExitCode 3 -Message "Admin mode repair actions require an elevated PowerShell process." -Dsreg $dsreg -IntuneEnrolled $intuneDetected -DomainJoined $isDomainJoined -DomainName $domainName -DcReachable $dcReachable -DcCheck $dcCheck -Action "SkippedNotElevated" -LogPath $paths.RunLog -CsvPath $paths.CsvPath
             return $result
         }
 
-        if ($RepairDisabledDeletedDevice) {
-            if ($disabledOrDeleted) {
+        if ($RepairDisabledDeletedDevice -or $AllowDsregLeave) {
+            $leaveApplicable = Test-DsregLeaveApplicable -Dsreg $dsreg -StrictDisabledDeletedOnly:($RepairDisabledDeletedDevice -and -not $AllowDsregLeave)
+            if ($leaveApplicable.Applicable) {
                 $target = "dsregcmd /leave on $Script:ComputerName"
-                if ($PSCmdlet.ShouldProcess($target, "Repair disabled or deleted Entra device registration")) {
+                if ($PSCmdlet.ShouldProcess($target, "Repair Hybrid Join device registration")) {
                     $leaveAttempted = $true
                     $action = "DsregLeave"
-                    Write-SmartM365DeviceRegistrationLog "Running dsregcmd /leave because disabled/deleted criteria matched."
+                    Write-SmartM365DeviceRegistrationLog ("Running dsregcmd /leave because guard matched: {0}" -f $leaveApplicable.Reason)
 
                     $leaveOutput = & $dsregcmdPath /leave 2>&1
                     $leaveExitCode = [string]$LASTEXITCODE
@@ -1979,7 +2559,7 @@ function Invoke-SmartM365DeviceRegistrationTool {
                 }
             }
             else {
-                $actionMessages.Add("Repair switch was provided, but disabled/deleted safety criteria did not match.")
+                $actionMessages.Add($leaveApplicable.Reason)
             }
         }
 
@@ -1991,7 +2571,7 @@ function Invoke-SmartM365DeviceRegistrationTool {
             }
         }
 
-        if (($RepairDisabledDeletedDevice -or $TriggerJoin) -and $RetryCount -gt 0) {
+        if (($RepairDisabledDeletedDevice -or $AllowDsregLeave -or $TriggerJoin) -and $RetryCount -gt 0) {
             $retry = Invoke-PostActionRetry -DsregcmdPath $dsregcmdPath -OutputDir $paths.Output -Count $RetryCount -SleepMinutes $RetrySleepMinutes -Context "post_action"
 
             if ($retry.Dsreg) {
@@ -2005,8 +2585,12 @@ function Invoke-SmartM365DeviceRegistrationTool {
         }
 
         if ($disabledOrDeleted) {
-            $status = if ($RepairDisabledDeletedDevice -and $leaveAttempted) { "ACTION_COMPLETED_RECHECK_REQUIRED" } else { "DISABLED_OR_DELETED_DEVICE_DETECTED" }
-            $message = if ($RepairDisabledDeletedDevice -and $leaveAttempted) { "Repair action completed. Re-run diagnostics after sync/join completes." } else { "Device appears disabled or deleted in Entra ID. Use -RepairDisabledDeletedDevice to allow guarded dsregcmd /leave." }
+            $status = if (($RepairDisabledDeletedDevice -or $AllowDsregLeave) -and $leaveAttempted) { "ACTION_COMPLETED_RECHECK_REQUIRED" } else { "DISABLED_OR_DELETED_DEVICE_DETECTED" }
+            $message = if (($RepairDisabledDeletedDevice -or $AllowDsregLeave) -and $leaveAttempted) { "Repair action completed. Re-run diagnostics after sync/join completes." } else { "Device appears disabled or deleted in Entra ID. Use -RepairDisabledDeletedDevice or -AllowDsregLeave to allow guarded dsregcmd /leave." }
+        }
+        elseif ($dsreg.AzureAdJoined -eq "YES" -and $dsreg.KeySignTest -eq "FAILED") {
+            $status = "KEY_SIGN_TEST_FAILED"
+            $message = "KeySignTest is FAILED. Use -AllowDsregLeave in Admin mode when this rejoin repair is intended."
         }
         elseif ($missingDevice) {
             $status = "MISSING_DEVICE_HINT_DETECTED"
@@ -2082,6 +2666,7 @@ function Format-DeviceRegistrationResultText {
 
     @(
         ("Status              : {0}" -f $Result.Status),
+        ("NextAction          : {0}" -f $Result.NextAction),
         ("OverallHealth       : {0}" -f $Result.OverallHealth),
         ("Mode                : {0}" -f $Result.Mode),
         ("ExitCode            : {0}" -f $Result.ExitCode),
@@ -2107,6 +2692,16 @@ function Format-DeviceRegistrationResultText {
         ("EnrollmentEvidence  : {0}" -f $Result.EnrollmentEvidence),
         ("EnrollmentStrongEvidence : {0}" -f $Result.EnrollmentStrongEvidence),
         ("EnrollmentWeakEvidence   : {0}" -f $Result.EnrollmentWeakEvidence),
+        ("MdmAnyEnrollmentDetected : {0}" -f $Result.MdmAnyEnrollmentDetected),
+        ("MdmIntuneEnrollmentDetected : {0}" -f $Result.MdmIntuneEnrollmentDetected),
+        ("MdmNonIntuneEnrollmentDetected : {0}" -f $Result.MdmNonIntuneEnrollmentDetected),
+        ("MdmEnrollmentCount  : {0}" -f $Result.MdmEnrollmentCount),
+        ("MdmIntuneEnrollmentIds : {0}" -f $Result.MdmIntuneEnrollmentIds),
+        ("MdmNonIntuneEnrollmentIds : {0}" -f $Result.MdmNonIntuneEnrollmentIds),
+        ("MdmUnconfirmedIntuneEnrollmentIds : {0}" -f $Result.MdmUnconfirmedIntuneEnrollmentIds),
+        ("MdmProviderIds      : {0}" -f $Result.MdmProviderIds),
+        ("MdmEnrollmentDetails : {0}" -f $Result.MdmEnrollmentDetails),
+        ("MdmIgnoredEnrollmentDetails : {0}" -f $Result.MdmIgnoredEnrollmentDetails),
         ("MdmPolicyCheckRequired : {0}" -f $Result.MdmPolicyCheckRequired),
         ("MdmPolicyStatus     : {0}" -f $Result.MdmPolicyStatus),
         ("MdmPolicyMessage    : {0}" -f $Result.MdmPolicyStatusMessage),
@@ -2120,6 +2715,10 @@ function Format-DeviceRegistrationResultText {
         ("AzureAdJoined       : {0}" -f $Result.AzureAdJoined),
         ("AzureAdPrt          : {0}" -f $Result.AzureAdPrt),
         ("DeviceAuthStatus    : {0}" -f $Result.DeviceAuthStatus),
+        ("KeySignTest         : {0}" -f $Result.KeySignTest),
+        ("MdmUrl              : {0}" -f $Result.MdmUrl),
+        ("MdmTouUrl           : {0}" -f $Result.MdmTouUrl),
+        ("MdmComplianceUrl    : {0}" -f $Result.MdmComplianceUrl),
         ("DeviceId            : {0}" -f $Result.DeviceId),
         ("TenantName          : {0}" -f $Result.TenantName),
         ("TenantId            : {0}" -f $Result.TenantId),
@@ -2131,6 +2730,15 @@ function Format-DeviceRegistrationResultText {
         ("Action              : {0}" -f $Result.Action),
         ("LeaveAttempted      : {0}" -f $Result.LeaveAttempted),
         ("LeaveExitCode       : {0}" -f $Result.LeaveExitCode),
+        ("MdmCleanupAttempted : {0}" -f $Result.MdmCleanupAttempted),
+        ("MdmCleanupSuccess   : {0}" -f $Result.MdmCleanupSuccess),
+        ("MdmCleanupEnrollmentIds : {0}" -f $Result.MdmCleanupEnrollmentIds),
+        ("MdmCleanupBackupDir : {0}" -f $Result.MdmCleanupBackupDir),
+        ("MdmCleanupDetail    : {0}" -f $Result.MdmCleanupDetail),
+        ("IntuneAutoEnrollAttempted : {0}" -f $Result.IntuneAutoEnrollAttempted),
+        ("IntuneAutoEnrollSuccess : {0}" -f $Result.IntuneAutoEnrollSuccess),
+        ("IntuneAutoEnrollExitCode : {0}" -f $Result.IntuneAutoEnrollExitCode),
+        ("IntuneAutoEnrollDetail : {0}" -f $Result.IntuneAutoEnrollDetail),
         ("DsregSnapshotPath   : {0}" -f $Result.DsregSnapshotPath),
         ("SupportBundlePath   : {0}" -f $Result.SupportBundlePath),
         ("SupportEmail        : {0}" -f $Result.SupportEmail),
@@ -2190,6 +2798,39 @@ function Get-DeviceRegistrationFindingLines {
         "ATTENTION_REQUIRED" {
             $findings.Add(("[WARNING] {0}" -f $Result.Message))
         }
+        "KEY_SIGN_TEST_FAILED" {
+            $findings.Add(("[WARNING] KeySignTest is FAILED. {0}" -f $Result.Message))
+        }
+        "STALE_INTUNE_ENROLLMENT_LOCAL" {
+            $findings.Add(("[WARNING] Stale local Intune enrollment trace suspected. {0}" -f $Result.Message))
+        }
+        "STALE_INTUNE_ENROLLMENT_REMOVED" {
+            $findings.Add(("[INFO] Stale local Intune enrollment trace was removed. {0}" -f $Result.MdmCleanupDetail))
+        }
+        "STALE_INTUNE_ENROLLMENT_REMOVE_FAILED" {
+            $findings.Add(("[ERROR] Stale local Intune enrollment cleanup failed. {0}" -f $Result.MdmCleanupDetail))
+        }
+        "NON_INTUNE_MDM_ENROLLED" {
+            $findings.Add(("[WARNING] Non-Intune MDM enrollment detected. {0}" -f $Result.Message))
+        }
+        "NON_INTUNE_MDM_REMOVED" {
+            $findings.Add(("[INFO] Non-Intune MDM enrollment was removed. {0}" -f $Result.MdmCleanupDetail))
+        }
+        "NON_INTUNE_MDM_REMOVE_FAILED" {
+            $findings.Add(("[ERROR] Non-Intune MDM cleanup failed. {0}" -f $Result.MdmCleanupDetail))
+        }
+        "INTUNE_AUTOENROLL_TRIGGERED" {
+            $findings.Add(("[INFO] Intune auto-enrollment was triggered. {0}" -f $Result.IntuneAutoEnrollDetail))
+        }
+        "INTUNE_AUTOENROLL_FAILED" {
+            $findings.Add(("[WARNING] Intune auto-enrollment trigger failed. {0}" -f $Result.IntuneAutoEnrollDetail))
+        }
+        "INTUNE_AUTOENROLL_POLICY_NOT_CONFIGURED" {
+            $findings.Add(("[WARNING] MDM auto-enrollment policy is not configured. {0}" -f $Result.Message))
+        }
+        "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" {
+            $findings.Add(("[ERROR] deviceenroller.exe was not found."))
+        }
         default {
             if ($Result.ExitCode -ne 0 -and -not [string]::IsNullOrWhiteSpace($Result.Message)) {
                 $findings.Add(("[WARNING] {0}" -f $Result.Message))
@@ -2247,6 +2888,33 @@ function Get-DeviceRegistrationFindingLines {
 
     if (-not [string]::IsNullOrWhiteSpace($Result.DeviceAuthStatus) -and $Result.DeviceAuthStatus -notlike "*SUCCESS*") {
         $findings.Add(("[WARNING] DeviceAuthStatus is {0}." -f $Result.DeviceAuthStatus))
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Result.KeySignTest)) {
+        if ($Result.KeySignTest -eq "FAILED") {
+            $findings.Add("[WARNING] KeySignTest is FAILED.")
+        }
+        else {
+            $findings.Add(("[INFO] KeySignTest is {0}." -f $Result.KeySignTest))
+        }
+    }
+
+    if ($Result.MdmNonIntuneEnrollmentDetected) {
+        $findings.Add(("[WARNING] Non-Intune MDM enrollment detected. EnrollmentIds={0}" -f $Result.MdmNonIntuneEnrollmentIds))
+    }
+
+    if (-not $Result.IntuneEnrolled -and -not [string]::IsNullOrWhiteSpace($Result.MdmUnconfirmedIntuneEnrollmentIds)) {
+        $findings.Add(("[WARNING] Unconfirmed Intune enrollment trace detected. EnrollmentIds={0}" -f $Result.MdmUnconfirmedIntuneEnrollmentIds))
+    }
+
+    if ($Result.IntuneAutoEnrollAttempted) {
+        $prefix = if ($Result.IntuneAutoEnrollSuccess) { "[INFO]" } else { "[WARNING]" }
+        $findings.Add(("{0} Intune auto-enrollment trigger: Success={1}; ExitCode={2}; Detail={3}" -f $prefix, $Result.IntuneAutoEnrollSuccess, $Result.IntuneAutoEnrollExitCode, $Result.IntuneAutoEnrollDetail))
+    }
+
+    if ($Result.MdmCleanupAttempted) {
+        $prefix = if ($Result.MdmCleanupSuccess) { "[INFO]" } else { "[ERROR]" }
+        $findings.Add(("{0} MDM cleanup: Success={1}; EnrollmentIds={2}; Backup={3}; Detail={4}" -f $prefix, $Result.MdmCleanupSuccess, $Result.MdmCleanupEnrollmentIds, $Result.MdmCleanupBackupDir, $Result.MdmCleanupDetail))
     }
 
     if (-not [string]::IsNullOrWhiteSpace($Result.ClientErrorCode)) {
@@ -2593,7 +3261,11 @@ function Show-SmartM365DeviceRegistrationGui {
                                     <StackPanel>
                                         <CheckBox x:Name="RepairCheck" Content="Allow guarded dsregcmd /leave"/>
                                         <CheckBox x:Name="TriggerJoinCheck" Content="Trigger Automatic-Device-Join"/>
-                                        <CheckBox x:Name="AllowIntuneCheck" Content="Allow actions if Intune enrolled" Margin="0"/>
+                                        <CheckBox x:Name="TriggerIntuneAutoEnrollCheck" Content="Trigger Intune auto-enrollment"/>
+                                        <CheckBox x:Name="RemoveStaleIntuneCheck" Content="Remove stale local Intune enrollment trace"/>
+                                        <CheckBox x:Name="RemoveNonIntuneMdmCheck" Content="Remove non-Intune MDM enrollment"/>
+                                        <CheckBox x:Name="AllowIntuneCheck" Content="Allow actions if Intune enrolled"/>
+                                        <CheckBox x:Name="AuditOnlyCheck" Content="Audit only" Margin="0"/>
                                     </StackPanel>
                                 </Border>
 
@@ -2624,7 +3296,11 @@ function Show-SmartM365DeviceRegistrationGui {
     $modeCombo = $window.FindName("ModeCombo")
     $repairCheck = $window.FindName("RepairCheck")
     $triggerJoinCheck = $window.FindName("TriggerJoinCheck")
+    $triggerIntuneAutoEnrollCheck = $window.FindName("TriggerIntuneAutoEnrollCheck")
+    $removeStaleIntuneCheck = $window.FindName("RemoveStaleIntuneCheck")
+    $removeNonIntuneMdmCheck = $window.FindName("RemoveNonIntuneMdmCheck")
     $allowIntuneCheck = $window.FindName("AllowIntuneCheck")
+    $auditOnlyCheck = $window.FindName("AuditOnlyCheck")
     $runButton = $window.FindName("RunButton")
     $refreshPrtButton = $window.FindName("RefreshPrtButton")
     $repairButton = $window.FindName("RepairButton")
@@ -2678,9 +3354,13 @@ function Show-SmartM365DeviceRegistrationGui {
     }
 
     $modeCombo.SelectedIndex = if ($Mode -eq "Admin") { 1 } else { 0 }
-    $repairCheck.IsChecked = [bool]$RepairDisabledDeletedDevice
+    $repairCheck.IsChecked = [bool]($RepairDisabledDeletedDevice -or $AllowDsregLeave)
     $triggerJoinCheck.IsChecked = [bool]$TriggerJoin
+    $triggerIntuneAutoEnrollCheck.IsChecked = [bool]$TriggerIntuneAutoEnrollment
+    $removeStaleIntuneCheck.IsChecked = [bool]$AllowRemoveStaleIntuneEnrollment
+    $removeNonIntuneMdmCheck.IsChecked = [bool]$AllowRemoveNonIntuneMdmEnrollment
     $allowIntuneCheck.IsChecked = [bool]$AllowIntuneEnrolledAction
+    $auditOnlyCheck.IsChecked = [bool]$AuditOnly
     $footerText.Text = "RunId: $Script:RunId"
     $deviceNameText.Text = "PC: $Script:ComputerName"
     $configPathText = if ($script:ToolConfig -and $script:ToolConfig.PSObject.Properties.Name -contains "ConfigPath") { $script:ToolConfig.ConfigPath } else { $script:Strings.DefaultParameters }
@@ -2750,7 +3430,11 @@ function Show-SmartM365DeviceRegistrationGui {
         $modeLabelText.Text = $script:Strings.Mode
         $repairCheck.Content = $script:Strings.AllowDsregLeave
         $triggerJoinCheck.Content = $script:Strings.TriggerAutomaticDeviceJoin
+        $triggerIntuneAutoEnrollCheck.Content = $script:Strings.TriggerIntuneAutoEnrollment
+        $removeStaleIntuneCheck.Content = $script:Strings.RemoveStaleIntuneEnrollment
+        $removeNonIntuneMdmCheck.Content = $script:Strings.RemoveNonIntuneMdmEnrollment
         $allowIntuneCheck.Content = $script:Strings.AllowIntuneActions
+        $auditOnlyCheck.Content = $script:Strings.AuditOnly
         $runtimeSettingsText.Text = $script:Strings.RuntimeSettingsFromJson
         $configurationTitleText.Text = $script:Strings.Configuration
 
@@ -2776,7 +3460,7 @@ function Show-SmartM365DeviceRegistrationGui {
             $isAdminMode = $true
         }
 
-        $hasRepairAction = ([bool]$repairCheck.IsChecked -or [bool]$triggerJoinCheck.IsChecked)
+        $hasRepairAction = ([bool]$repairCheck.IsChecked -or [bool]$triggerJoinCheck.IsChecked -or [bool]$triggerIntuneAutoEnrollCheck.IsChecked -or [bool]$removeStaleIntuneCheck.IsChecked -or [bool]$removeNonIntuneMdmCheck.IsChecked -or [bool]$auditOnlyCheck.IsChecked)
         $repairButton.Visibility = if ($isAdminMode) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
         $repairButton.IsEnabled = ($isAdminMode -and $hasRepairAction)
         $refreshPrtButton.Visibility = [System.Windows.Visibility]::Visible
@@ -2794,14 +3478,18 @@ function Show-SmartM365DeviceRegistrationGui {
             $isAdminMode = $true
         }
 
-        foreach ($control in @($repairCheck, $triggerJoinCheck, $allowIntuneCheck)) {
+        foreach ($control in @($repairCheck, $triggerJoinCheck, $triggerIntuneAutoEnrollCheck, $removeStaleIntuneCheck, $removeNonIntuneMdmCheck, $allowIntuneCheck, $auditOnlyCheck)) {
             $control.IsEnabled = $isAdminMode
         }
 
         if (-not $isAdminMode) {
             $repairCheck.IsChecked = $false
             $triggerJoinCheck.IsChecked = $false
+            $triggerIntuneAutoEnrollCheck.IsChecked = $false
+            $removeStaleIntuneCheck.IsChecked = $false
+            $removeNonIntuneMdmCheck.IsChecked = $false
             $allowIntuneCheck.IsChecked = $false
+            $auditOnlyCheck.IsChecked = $false
         }
 
         if ($optionsTab) {
@@ -2824,7 +3512,11 @@ function Show-SmartM365DeviceRegistrationGui {
     $modeCombo.Add_SelectionChanged({ & $setModeState })
     $repairCheck.Add_Click({ & $updateRepairButtonState })
     $triggerJoinCheck.Add_Click({ & $updateRepairButtonState })
+    $triggerIntuneAutoEnrollCheck.Add_Click({ & $updateRepairButtonState })
+    $removeStaleIntuneCheck.Add_Click({ & $updateRepairButtonState })
+    $removeNonIntuneMdmCheck.Add_Click({ & $updateRepairButtonState })
     $allowIntuneCheck.Add_Click({ & $updateRepairButtonState })
+    $auditOnlyCheck.Add_Click({ & $updateRepairButtonState })
     & $setModeState
 
     $runDiagnostic = {
@@ -2857,9 +3549,14 @@ function Show-SmartM365DeviceRegistrationGui {
 
             $result = Invoke-SmartM365DeviceRegistrationTool `
                 -Mode $selectedMode `
-                -RepairDisabledDeletedDevice:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$repairCheck.IsChecked) `
+                -RepairDisabledDeletedDevice:$false `
+                -AllowDsregLeave:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$repairCheck.IsChecked) `
                 -TriggerJoin:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$triggerJoinCheck.IsChecked) `
+                -TriggerIntuneAutoEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$triggerIntuneAutoEnrollCheck.IsChecked) `
+                -AllowRemoveStaleIntuneEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$removeStaleIntuneCheck.IsChecked) `
+                -AllowRemoveNonIntuneMdmEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$removeNonIntuneMdmCheck.IsChecked) `
                 -AllowIntuneEnrolledAction:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$allowIntuneCheck.IsChecked) `
+                -AuditOnly:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$auditOnlyCheck.IsChecked) `
                 -RetryCount $effectiveRetryCount `
                 -RetrySleepMinutes $RetrySleepMinutes `
                 -LogRetentionCount $LogRetentionCount `
@@ -3084,8 +3781,13 @@ if (-not $Cli) {
 $cliResult = Invoke-SmartM365DeviceRegistrationTool `
     -Mode $Mode `
     -RepairDisabledDeletedDevice:$RepairDisabledDeletedDevice `
+    -AllowDsregLeave:$AllowDsregLeave `
     -TriggerJoin:$TriggerJoin `
+    -TriggerIntuneAutoEnrollment:$TriggerIntuneAutoEnrollment `
+    -AllowRemoveStaleIntuneEnrollment:$AllowRemoveStaleIntuneEnrollment `
+    -AllowRemoveNonIntuneMdmEnrollment:$AllowRemoveNonIntuneMdmEnrollment `
     -AllowIntuneEnrolledAction:$AllowIntuneEnrolledAction `
+    -AuditOnly:$AuditOnly `
     -RetryCount $RetryCount `
     -RetrySleepMinutes $RetrySleepMinutes `
     -LogRetentionCount $LogRetentionCount `
