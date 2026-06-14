@@ -219,10 +219,35 @@ Trigger the Windows Automatic-Device-Join task without running `dsregcmd /leave`
 .\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -TriggerJoin
 ```
 
+Trigger Intune MDM auto-enrollment when Hybrid Join is healthy and the local auto-enrollment policy is configured:
+
+```powershell
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -TriggerIntuneAutoEnrollment
+```
+
 Allow guarded repair for a disabled or deleted Entra device object:
 
 ```powershell
 .\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -RepairDisabledDeletedDevice
+```
+
+Allow the broader Hybrid Join repair guard used by `SmartM365-Invoke-IntuneHybridJoinRepair.ps1`:
+
+```powershell
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -AllowDsregLeave
+```
+
+Remove stale local MDM enrollment traces after diagnostics confirm they are not a live Intune enrollment:
+
+```powershell
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -AllowRemoveStaleIntuneEnrollment
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -AllowRemoveNonIntuneMdmEnrollment
+```
+
+Preview the recommended action without running repair commands:
+
+```powershell
+.\Devices\DeviceRegistrationTool\SmartM365-DeviceRegistration-Tool.ps1 -Cli -Mode Admin -AuditOnly
 ```
 
 Add bounded post-action retries:
@@ -236,13 +261,21 @@ When `-Mode Admin` is used from a non-elevated process, the tool automatically a
 
 ## Repair guardrails
 
-`dsregcmd /leave` is only allowed when all of these are true:
+`SmartM365-Invoke-IntuneHybridJoinRepair.ps1` remains autonomous so a single file can still be pushed by LOT, PsExec, Intune, or GPO.
+DeviceRegistrationTool carries the same local diagnostic and guarded repair logic where it fits the GUI/CLI support workflow.
+When shared Hybrid Join or Intune enrollment behavior changes in either tool, synchronize the other tool in the same change.
 
-- `-RepairDisabledDeletedDevice` is provided.
-- `AzureAdJoined` is `YES`.
-- `DeviceAuthStatus` contains `FAILED`.
-- `DeviceAuthStatus` indicates the device is disabled or deleted.
-- `DeviceId` and `TenantId` are present.
+`dsregcmd /leave` is only allowed when the device has `AzureAdJoined=YES`, `DeviceId`, and `TenantId`, and one of these guarded paths is selected:
+
+- `-RepairDisabledDeletedDevice`: strict path for a failed `DeviceAuthStatus` that indicates the Entra device object is disabled or deleted.
+- `-AllowDsregLeave`: broader Hybrid Join repair path for failed device authentication or `KeySignTest=FAILED`.
+
+MDM cleanup is opt-in and scoped:
+
+- `-AllowRemoveStaleIntuneEnrollment`: removes stale local Intune enrollment traces only when diagnostics did not confirm a live Intune enrollment.
+- `-AllowRemoveNonIntuneMdmEnrollment`: removes non-Intune MDM enrollment traces.
+- `-TriggerIntuneAutoEnrollment`: runs `deviceenroller.exe /c /AutoEnrollMDM` only after Hybrid Join is healthy and the local MDM auto-enrollment policy is enabled.
+- `-AuditOnly`: reports the next action without executing repair commands.
 
 When local Intune enrollment is detected, repair actions are skipped by default. Use `-AllowIntuneEnrolledAction` only when the operator intentionally wants to override that guardrail.
 
