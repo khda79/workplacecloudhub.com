@@ -1,14 +1,58 @@
 # SmartM365
 
-PowerShell automation scripts for Microsoft 365 and endpoint administration.
+PowerShell automation scripts, endpoint tools, inventory exports, and operational helpers for Microsoft 365 administration.
 
-This repository contains reusable scripts and helper modules.
+SmartM365 is organized as a set of independent but consistent projects. Some scripts run against Microsoft Graph, Exchange Online, Exchange on-premises, Active Directory, or Intune. Other tools run locally on Windows endpoints to diagnose, notify, or repair device state.
+
+## Start Here
+
+- Use `Setup/` when you need the SmartM365 app registration, Graph application permissions, SharePoint upload target, Teams notification channels, or tenant profile templates.
+- Use `SmartInventory/` when you need repeatable CSV exports for reporting, Power BI, audit, or operational review.
+- Use `Devices/` when you need local endpoint tools such as reboot governance, Intune enrollment diagnostics, endpoint diagnostic analysis, Intune remediation management, or Hybrid Join repair orchestration.
+- Use `Communications/` when you need user-facing notification campaigns driven by Microsoft 365 data.
+
+Local tenant configuration files are not committed. Use the committed templates to create local profiles before running tenant-based inventory or setup scripts.
 
 ## Content
 
 - Smart Inventory scripts under `SmartInventory/` for Active Directory, Exchange, Microsoft 365, Entra, and Intune data collection. These exports can feed Power BI datasets and other reporting or operational consumers.
 - User-facing operational notification scripts under `Communications/`, including Exchange migration, archive mailbox, and mailbox reduction campaigns.
 - Device and endpoint tooling under `Devices/`, including reboot governance, device registration diagnostics, endpoint diagnostics, Intune remediation management, and Hybrid Join repair tooling.
+
+## Requirements At A Glance
+
+- Windows PowerShell 5.1 is kept where endpoint GUI compatibility requires it.
+- PowerShell 7 is preferred for newer administration and setup workflows when scripts declare it.
+- Microsoft Graph PowerShell modules are used by Microsoft 365, Intune, and setup scripts.
+- Exchange Online PowerShell is used by Exchange Online inventory and setup workflows.
+- The Active Directory module or RSAT tools may be required by Active Directory and on-premises Exchange inventory scripts.
+- Endpoint GUI tools usually run locally and document their own requirements in `Devices/<ToolName>/README.md`.
+
+## Safe Local Configuration
+
+SmartM365 uses local JSON profiles for tenant and workstation-specific values:
+
+```text
+SmartM365.global.local.json
+Config\Tenants\<TenantKey>.local.json
+```
+
+These files are ignored by Git. Start from:
+
+```text
+SmartM365.global.local.json.template
+Config\Tenants\tenant.local.json.template
+```
+
+Generated data is written under tenant-isolated output roots by default:
+
+```text
+Data\Tenants\<TenantKey>\DATA-ALL
+Data\Tenants\<TenantKey>\DATA-LAST
+Data\Tenants\<TenantKey>\LOG-ALL
+```
+
+If the project-level `Data` folder is not writable, scripts fall back to a local `Output` folder next to the running script.
 
 ## Communications
 
