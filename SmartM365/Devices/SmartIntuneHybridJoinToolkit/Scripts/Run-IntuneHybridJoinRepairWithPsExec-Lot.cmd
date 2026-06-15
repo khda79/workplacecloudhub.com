@@ -1,11 +1,19 @@
 @echo off
 setlocal EnableExtensions
 
+pushd "%~dp0" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to switch to the launcher directory.
+    pause
+    exit /b 1
+)
+
+
 rem Shared LOT launcher. Keep LOT folders with tiny wrappers only.
 rem The LOT wrapper sets EHJIR_LOT_DIR and optional execution switches.
 
 set "LOT_DIR=%EHJIR_LOT_DIR%"
-if "%LOT_DIR%"=="" set "LOT_DIR=%~dp0.."
+if "%LOT_DIR%"=="" set "LOT_DIR=%CD%\.."
 
 set "IGNORE_RUN_GUARD_ARG="
 if /I "%EHJIR_IGNORE_RUN_GUARD%"=="1" (
@@ -116,4 +124,5 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 echo Finished with exit code %EXITCODE%.
 pause
+popd
 exit /b %EXITCODE%
