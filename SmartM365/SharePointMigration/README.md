@@ -92,6 +92,20 @@ Tools\Python
 For double-click usage on Windows, run
 `Tools\SmartM365-SharePointMigration-InstallPortablePython.cmd`.
 
+If the workstation cannot reach `python.org`, download the embeddable package
+from another machine, copy it locally, then run:
+
+```powershell
+.\Scripts\SmartM365-SharePointMigration-InstallPortablePython.ps1 -PackagePath .\Tools\python-3.13.13-embed-amd64.zip -Force
+```
+
+The `.cmd` launcher also forwards arguments, so the same offline package can be
+used from a command prompt:
+
+```cmd
+Tools\SmartM365-SharePointMigration-InstallPortablePython.cmd -PackagePath .\python-3.13.13-embed-amd64.zip -Force
+```
+
 ## Safety Model
 
 Cleanup scripts are review-first. They are generated from comparison outputs,

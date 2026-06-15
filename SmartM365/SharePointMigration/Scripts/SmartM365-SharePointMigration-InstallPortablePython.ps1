@@ -13,6 +13,9 @@
 
 .EXAMPLE
     .\Scripts\SmartM365-SharePointMigration-InstallPortablePython.ps1 -Force
+
+.EXAMPLE
+    .\Scripts\SmartM365-SharePointMigration-InstallPortablePython.ps1 -PackagePath .\Tools\python-3.13.13-embed-amd64.zip -Force
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -27,6 +30,9 @@ param(
     [string]$DestinationPath = (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Tools\Python'),
 
     [string]$ExpectedSha256 = '8766A8775746235E23CF5AEE5027AB1060BB981D93110577ADCF3508AA0CBD55',
+
+    [ValidateNotNullOrEmpty()]
+    [string]$PackagePath,
 
     [switch]$Force,
 
@@ -57,8 +63,15 @@ New-Item -ItemType Directory -Path $downloadDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path -Parent $DestinationPath) -Force | Out-Null
 
 try {
-    Write-Step "Download: $downloadUrl"
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
+    if (-not [string]::IsNullOrWhiteSpace($PackagePath)) {
+        $resolvedPackagePath = (Resolve-Path -LiteralPath $PackagePath).ProviderPath
+        $archivePath = $resolvedPackagePath
+        Write-Step "Using local package: $archivePath"
+    }
+    else {
+        Write-Step "Download: $downloadUrl"
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
         $actualSha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
@@ -119,7 +132,7 @@ finally {
         Remove-Item -LiteralPath $stagingPath -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    if (-not $KeepArchive -and (Test-Path -LiteralPath $archivePath)) {
+    if ([string]::IsNullOrWhiteSpace($PackagePath) -and -not $KeepArchive -and (Test-Path -LiteralPath $archivePath)) {
         Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     }
 }
