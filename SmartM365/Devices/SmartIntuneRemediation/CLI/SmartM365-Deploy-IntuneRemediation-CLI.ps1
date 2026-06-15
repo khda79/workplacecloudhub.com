@@ -44,13 +44,13 @@
     assignments.
 
 .EXAMPLE
-    .\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path ..\..\IntuneRemediationScripts\WindowsUpdate\Cache-Health
+    .\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path ..\Packages\WindowsUpdate\Cache-Health
 
 .EXAMPLE
-    .\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path ..\..\IntuneRemediationScripts\WindowsUpdate -Recurse -UpdateExisting
+    .\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path ..\Packages\WindowsUpdate -Recurse -UpdateExisting
 
 .EXAMPLE
-    .\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path ..\..\IntuneRemediationScripts\WindowsUpdate\Cache-Health -AssignmentGroupId "00000000-0000-0000-0000-000000000000" -RunRemediationScript
+    .\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path ..\Packages\WindowsUpdate\Cache-Health -AssignmentGroupId "00000000-0000-0000-0000-000000000000" -RunRemediationScript
 
 .REQUIREMENTS
     PowerShell module:

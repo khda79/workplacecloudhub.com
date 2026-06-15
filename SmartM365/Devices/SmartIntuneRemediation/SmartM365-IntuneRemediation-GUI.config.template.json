@@ -1,5 +1,5 @@
 {
-  "LocalRemediationRoot": "",
+  "LocalRemediationRoot": "Packages",
   "PublishSourceNamePrefix": "SmartM365-",
   "PublishTargetNamePrefix": "SmartM365-"
 }

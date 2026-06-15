@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    Opens Smart Intune Remediation Manager.
+    Opens Smart Intune Remediation GUI.
 
 .DESCRIPTION
     Lists local SmartM365 remediation packages and Intune deviceHealthScripts,
@@ -65,11 +65,13 @@ $script:EditorDetectionPath = ''
 $script:EditorRemediationPath = ''
 $script:IsImportExcelAvailable = $false
 $script:ImportExcelSupportChecked = $false
+$script:WorkspaceRoot = Split-Path -Path $PSScriptRoot -Parent
+$script:DefaultRemediationRoot = Join-Path -Path $script:WorkspaceRoot -ChildPath 'Packages'
 $script:LogDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Logs'
 $script:LogPath = Join-Path -Path $script:LogDirectory -ChildPath 'SmartM365-IntuneRemediation-GUI.log'
 $script:MaxLogFileCount = 10
-$script:ConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-IntuneRemediation-GUI.config.json'
-$script:ConfiguredRemediationRoot = ''
+$script:ConfigPath = Join-Path -Path $script:WorkspaceRoot -ChildPath 'SmartM365-IntuneRemediation-GUI.config.json'
+$script:ConfiguredRemediationRoot = $script:DefaultRemediationRoot
 $script:PublishSourceNamePrefix = 'SmartM365-'
 $script:PublishTargetNamePrefix = 'SmartM365-'
 $script:GroupDisplayNameCache = @{}
@@ -178,7 +180,7 @@ $message
 The Microsoft Graph browser sign-in was canceled or did not complete. Click Connect Graph again, keep the browser tab open, finish sign-in and consent, then return to the manager.
 
 If the browser window does not open or the localhost redirect is blocked, launch the GUI from a visible PowerShell window with:
-pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
+pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
 "@
     }
 
@@ -771,7 +773,13 @@ function Read-GuiConfiguration {
             return
         }
 
-        $resolvedRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($root)
+        $configRoot = if ([System.IO.Path]::IsPathRooted($root)) {
+            $root
+        }
+        else {
+            Join-Path -Path $script:WorkspaceRoot -ChildPath $root
+        }
+        $resolvedRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($configRoot)
         if (Test-Path -LiteralPath $resolvedRoot -PathType Container) {
             $script:ConfiguredRemediationRoot = $resolvedRoot
             Write-GuiLog "Configured local script folder loaded: $resolvedRoot"
@@ -789,8 +797,15 @@ function Save-GuiConfiguration {
     [CmdletBinding()]
     param()
 
+    $localRootValue = if ($script:ConfiguredRemediationRoot -eq $script:DefaultRemediationRoot) {
+        'Packages'
+    }
+    else {
+        $script:ConfiguredRemediationRoot
+    }
+
     $config = [ordered]@{
-        LocalRemediationRoot     = $script:ConfiguredRemediationRoot
+        LocalRemediationRoot     = $localRootValue
         PublishSourceNamePrefix  = $script:PublishSourceNamePrefix
         PublishTargetNamePrefix  = $script:PublishTargetNamePrefix
     }
@@ -2705,7 +2720,7 @@ function Export-LocalRemediationsArchive {
         $localExportRoot = Join-Path -Path $tempRoot -ChildPath 'Local'
         [IO.Directory]::CreateDirectory($localExportRoot) | Out-Null
 
-        Copy-Item -LiteralPath $localRoot -Destination (Join-Path -Path $localExportRoot -ChildPath 'IntuneRemediationScripts') -Recurse -Force
+        Copy-Item -LiteralPath $localRoot -Destination (Join-Path -Path $localExportRoot -ChildPath 'Packages') -Recurse -Force
         $localPackages | Export-Csv -LiteralPath (Join-Path -Path $localExportRoot -ChildPath 'LocalPackages.csv') -NoTypeInformation -Encoding UTF8
 
         $manifest = [ordered]@{
@@ -3422,7 +3437,7 @@ Add-Type -AssemblyName System.Windows.Forms
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Intune Remediation Manager"
+        Title="Smart Intune Remediation GUI"
         Width="1320"
         Height="860"
         MinWidth="1100"
@@ -3696,7 +3711,7 @@ Add-Type -AssemblyName System.Windows.Forms
                     <Image x:Name="LogoImage" Stretch="Uniform" VerticalAlignment="Center"/>
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="Smart Intune Remediation Manager"
+                    <TextBlock Text="Smart Intune Remediation GUI"
                                Foreground="#FFFFFF"
                                FontSize="22"
                                FontWeight="SemiBold"
@@ -3969,7 +3984,7 @@ Add-Type -AssemblyName System.Windows.Forms
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 $script:Ui['Window'] = $window
-$smartM365RootPath = Split-Path -Path (Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent
+$smartM365RootPath = Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent
 $logoIconPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-logo.ico'
 if (Test-Path -LiteralPath $logoIconPath) {
     $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$logoIconPath)
@@ -4351,7 +4366,7 @@ if ($ValidateOnly) {
         Write-GuiLog $_.Exception.Message
     }
 
-    Write-Output 'Smart Intune Remediation Manager validation completed.'
+    Write-Output 'Smart Intune Remediation GUI validation completed.'
     return
 }
 

@@ -71,7 +71,7 @@ Use `-WhatIf` before live campaign runs. The provided launchers default to dry-r
 - `Devices/DeviceRegistrationTool/`: PowerShell/WPF GUI and CLI mode for Intune enrollment, Hybrid Join, and Entra device registration checks.
 - `Devices/EndpointDiagnosticsAnalyzer/`: PowerShell/WPF GUI for Intune Device Diagnostics ZIP files and local endpoint captures.
 - `Devices/SmartIntuneHybridJoinToolkit/`: PsExec/LOT orchestration for Hybrid Entra Join and Intune enrollment repair.
-- `Devices/SmartIntuneRemediation/`: Intune remediation scripts and the remediation manager grouped together.
+- `Devices/SmartIntuneRemediation/`: Intune remediation packages with GUI and CLI publishing tools.
 
 ## Setup
 
@@ -95,7 +95,7 @@ The same bootstrap creates or reuses the `SMART-M365` Teams team, resolves its S
 
 Current Microsoft Graph application permissions include the read scopes used by the inventory scripts (`Directory.Read.All`, `User.Read.All`, `Device.Read.All`, `GroupMember.Read.All`, Intune read permissions, and `AuditLog.Read.All` for user `signInActivity`), plus `Sites.Selected` for SharePoint CSV upload and `Mail.Send` for Graph mail. The bootstrap grants the app `write` access only on the SmartM365 SharePoint site and removes older broad `Files.ReadWrite.All` / `Sites.ReadWrite.All` grants when found. Exchange Online app-only runtime inventory uses `Exchange.ManageAsApp` plus the supported Entra `Global Reader` role on the SmartM365 service principal; the bootstrap also removes the older `Exchange Administrator` service-principal role when found. `Setup/SmartM365-Create-AppRegistration.ps1` is separate because it is an interactive setup script and can require an Exchange Administrator account for mailbox, group, Application Access Policy, and service-principal role setup.
 
-`Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is also intentionally interactive only. It deploys Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`; it does not use SmartM365 app-only certificate authentication. `Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same delegated-only model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports through report export jobs.
+`Devices/SmartIntuneRemediation/CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is also intentionally interactive only. It deploys Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`; it does not use SmartM365 app-only certificate authentication. `Devices/SmartIntuneRemediation/GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same delegated-only model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports through report export jobs.
 
 See `Setup/SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.
 
