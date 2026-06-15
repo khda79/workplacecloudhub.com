@@ -48,41 +48,77 @@ $wrappers = @{
 @echo off
 setlocal EnableExtensions
 
-set "EHJIR_LOT_DIR=%~dp0"
+pushd "%~dp0" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to switch to the launcher directory.
+    pause
+    exit /b 1
+)
+
+set "EHJIR_LOT_DIR=%CD%\"
 set "EHJIR_IGNORE_RUN_GUARD=0"
 set "EHJIR_RUN_ONCE=0"
-call "%~dp0..\Scripts\Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd" %*
-exit /b %ERRORLEVEL%
+call "%CD%\..\Scripts\Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd" %*
+set "EXIT_CODE=%ERRORLEVEL%"
+popd
+exit /b %EXIT_CODE%
 '@
     "Run-IntuneHybridJoinRepairWithPsExec-Once.cmd" = @'
 @echo off
 setlocal EnableExtensions
 
-set "EHJIR_LOT_DIR=%~dp0"
+pushd "%~dp0" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to switch to the launcher directory.
+    pause
+    exit /b 1
+)
+
+set "EHJIR_LOT_DIR=%CD%\"
 set "EHJIR_IGNORE_RUN_GUARD=0"
 set "EHJIR_RUN_ONCE=1"
-call "%~dp0..\Scripts\Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd" %*
-exit /b %ERRORLEVEL%
+call "%CD%\..\Scripts\Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd" %*
+set "EXIT_CODE=%ERRORLEVEL%"
+popd
+exit /b %EXIT_CODE%
 '@
     "Run-IntuneHybridJoinRepairWithPsExec-Once-IgnoreRunGuard.cmd" = @'
 @echo off
 setlocal EnableExtensions
 
-set "EHJIR_LOT_DIR=%~dp0"
+pushd "%~dp0" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to switch to the launcher directory.
+    pause
+    exit /b 1
+)
+
+set "EHJIR_LOT_DIR=%CD%\"
 set "EHJIR_IGNORE_RUN_GUARD=1"
 set "EHJIR_RUN_ONCE=1"
-call "%~dp0..\Scripts\Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd" %*
-exit /b %ERRORLEVEL%
+call "%CD%\..\Scripts\Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd" %*
+set "EXIT_CODE=%ERRORLEVEL%"
+popd
+exit /b %EXIT_CODE%
 '@
     "Run-IntuneHybridJoinRepairWithPsExec-Loop-IgnoreRunGuard.cmd" = @'
 @echo off
 setlocal EnableExtensions
 
-set "EHJIR_LOT_DIR=%~dp0"
+pushd "%~dp0" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to switch to the launcher directory.
+    pause
+    exit /b 1
+)
+
+set "EHJIR_LOT_DIR=%CD%\"
 set "EHJIR_IGNORE_RUN_GUARD=1"
 set "EHJIR_RUN_ONCE=0"
-call "%~dp0..\Scripts\Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd" %*
-exit /b %ERRORLEVEL%
+call "%CD%\..\Scripts\Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd" %*
+set "EXIT_CODE=%ERRORLEVEL%"
+popd
+exit /b %EXIT_CODE%
 '@
 }
 

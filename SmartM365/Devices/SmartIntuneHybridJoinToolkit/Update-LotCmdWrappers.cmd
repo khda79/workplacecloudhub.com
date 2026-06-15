@@ -1,10 +1,17 @@
 @echo off
 setlocal EnableExtensions
 
+pushd "%~dp0" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to switch to the launcher directory.
+    pause
+    exit /b 1
+)
+
+
 rem Root launcher.
 rem Refreshes the tiny CMD wrappers in all LOT-* folders.
-
-set "ROOT_DIR=%~dp0"
+set "ROOT_DIR=%CD%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
 
 if not exist "%SCRIPT%" (
@@ -33,4 +40,5 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 echo Finished with exit code %EXITCODE%.
 pause
+popd
 exit /b %EXITCODE%

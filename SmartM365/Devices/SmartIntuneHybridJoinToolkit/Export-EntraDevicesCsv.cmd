@@ -1,11 +1,18 @@
 @echo off
 setlocal EnableExtensions
 
+pushd "%~dp0" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to switch to the launcher directory.
+    pause
+    exit /b 1
+)
+
+
 rem Root launcher.
 rem Uses Scripts\SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1 and stores DevicesEntra.csv in the root folder.
 rem Always exports the full Microsoft Entra devices inventory.
-
-set "ROOT_DIR=%~dp0"
+set "ROOT_DIR=%CD%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1"
 set "OUTPUT=%ROOT_DIR%DevicesEntra.csv"
 
@@ -36,4 +43,5 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 echo Finished with exit code %EXITCODE%.
 pause
+popd
 exit /b %EXITCODE%
