@@ -1,7 +1,14 @@
 @echo off
 setlocal EnableExtensions
 
-set "ROOT_DIR=%~dp0"
+pushd "%~dp0" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to switch to the launcher directory.
+    pause
+    exit /b 1
+)
+
+set "ROOT_DIR=%CD%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-LotLauncher-GUI.ps1"
 
 if not exist "%SCRIPT%" (
@@ -11,4 +18,6 @@ if not exist "%SCRIPT%" (
 )
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "%SCRIPT%" %*
-exit /b %ERRORLEVEL%
+set "EXIT_CODE=%ERRORLEVEL%"
+popd
+exit /b %EXIT_CODE%
