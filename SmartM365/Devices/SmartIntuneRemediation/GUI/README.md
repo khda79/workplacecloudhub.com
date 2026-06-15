@@ -1,4 +1,4 @@
-# Smart Intune Remediation Manager
+# Smart Intune Remediation GUI
 
 WPF interface for browsing, exporting, editing, and publishing Microsoft Intune remediation scripts with delegated interactive Microsoft Graph authentication.
 
@@ -7,13 +7,13 @@ WPF interface for browsing, exporting, editing, and publishing Microsoft Intune 
 From the `SmartM365` folder:
 
 ```powershell
-pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1
+pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\GUI\SmartM365-IntuneRemediation-GUI.ps1
 ```
 
 Or use the launcher, which hides the PowerShell console:
 
 ```cmd
-.\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\Start-SmartM365-IntuneRemediation-GUI.cmd
+.\Devices\SmartIntuneRemediation\Start-SmartM365-IntuneRemediation-GUI.cmd
 ```
 
 The GUI starts maximized. Click `Connect Graph` before using Intune cloud actions.
@@ -21,7 +21,7 @@ The GUI starts maximized. Click `Connect Graph` before using Intune cloud action
 If browser sign-in is canceled, blocked, or never returns to PowerShell, launch from a visible PowerShell window and use device code authentication:
 
 ```powershell
-pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\IntuneRemediationManager\IntuneRemediationManager-GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
+pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
 ```
 
 Keep the PowerShell window visible because Microsoft Graph prints the device code there.
@@ -38,19 +38,19 @@ Requested delegated Graph scopes:
 
 ## Configuration
 
-The local configuration file is `SmartM365-IntuneRemediation-GUI.config.json` next to the GUI script. It is local-only and ignored by Git.
+The local configuration file is `../SmartM365-IntuneRemediation-GUI.config.json` next to the root launcher. It is local-only and ignored by Git.
 
-Use `SmartM365-IntuneRemediation-GUI.config.template.json` as the committed template:
+Use `../SmartM365-IntuneRemediation-GUI.config.template.json` as the committed template:
 
 ```json
 {
-  "LocalRemediationRoot": "",
+  "LocalRemediationRoot": "Packages",
   "PublishSourceNamePrefix": "SmartM365-",
   "PublishTargetNamePrefix": "SmartM365-"
 }
 ```
 
-`LocalRemediationRoot` is requested on first launch when it is empty. `PublishSourceNamePrefix` and `PublishTargetNamePrefix` control the Intune display name used during publish. For example, `SmartM365-Example` can be published as `EMERIT-Example` without renaming local files.
+`LocalRemediationRoot` defaults to `Packages`. Relative paths are resolved from the `SmartIntuneRemediation` root folder. `PublishSourceNamePrefix` and `PublishTargetNamePrefix` control the Intune display name used during publish. For example, `SmartM365-Example` can be published as `EMERIT-Example` without renaming local files.
 
 ## Main Actions
 

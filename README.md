@@ -122,16 +122,15 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 - Generates guarded destination cleanup scripts from reviewed comparison results.
 - Provides a migration template, local launchers, and a portable Python bootstrap script for comparison/export helpers.
 
-### Smart Intune Remediation Manager
+### Smart Intune Remediation
 
 `SmartM365/Devices/SmartIntuneRemediation/` contains the SmartM365 Intune remediation workspace.
 
-- `IntuneRemediationScripts/`: Intune detection, remediation, diagnostic, and action scripts organized by scenario.
-- `IntuneRemediationManager/`: interactive manager for Microsoft Intune remediation scripts.
-- `IntuneRemediationManager/IntuneRemediationManager-GUI/`: WPF interface to browse local remediation packages, view Intune cloud remediations, edit scripts, run PSScriptAnalyzer, publish to Intune, duplicate/reset execution history, delete selected cloud remediations, export execution CSV reports, and archive local or cloud scripts.
-- `IntuneRemediationManager/IntuneRemediationManager-CLI/`: delegated interactive CLI deployment script for Intune remediation packages.
+- `Packages/`: Intune detection, remediation, diagnostic, and action scripts organized by scenario.
+- `GUI/`: WPF interface to browse local remediation packages, view Intune cloud remediations, edit scripts, run PSScriptAnalyzer, publish to Intune, duplicate/reset execution history, delete selected cloud remediations, export execution CSV reports, and archive local or cloud scripts.
+- `CLI/`: delegated interactive CLI deployment script for Intune remediation packages.
 
-The manager uses delegated interactive Microsoft Graph authentication. It does not use stored credentials, client secrets, certificates, or SmartM365 app-only runtime authentication.
+The GUI and CLI use delegated interactive Microsoft Graph authentication. They do not use stored credentials, client secrets, certificates, or SmartM365 app-only runtime authentication.
 
 ### Smart Intune Hybrid Join Toolkit
 

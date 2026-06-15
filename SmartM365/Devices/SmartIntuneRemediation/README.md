@@ -6,15 +6,15 @@ This area contains both the remediation packages themselves and the local operat
 
 ## Organization
 
-- `IntuneRemediationScripts/`: detection, remediation, diagnostic, and action scripts organized by Intune scenario.
-- `IntuneRemediationManager/IntuneRemediationManager-GUI/`: WPF operator interface for local package review, Intune cloud comparison, PSScriptAnalyzer checks, publish/update actions, export, reset history, and cloud deletion.
-- `IntuneRemediationManager/IntuneRemediationManager-CLI/`: delegated interactive deployment utility for creating or updating Intune remediation packages from PowerShell.
+- `Packages/`: detection, remediation, diagnostic, and action scripts organized by Intune scenario.
+- `GUI/`: WPF operator interface for local package review, Intune cloud comparison, PSScriptAnalyzer checks, publish/update actions, export, reset history, and cloud deletion.
+- `CLI/`: delegated interactive deployment utility for creating or updating Intune remediation packages from PowerShell.
 
 ## Authentication Model
 
-The manager tools use delegated interactive Microsoft Graph authentication. They do not use stored credentials, client secrets, certificates, or SmartM365 app-only authentication.
+The GUI and CLI tools use delegated interactive Microsoft Graph authentication. They do not use stored credentials, client secrets, certificates, or SmartM365 app-only authentication.
 
-Typical delegated scopes are documented in each manager README:
+Typical delegated scopes are documented in each tool README:
 
 - `DeviceManagementScripts.ReadWrite.All`
 - `DeviceManagementConfiguration.Read.All`
@@ -22,7 +22,7 @@ Typical delegated scopes are documented in each manager README:
 
 ## Typical Workflow
 
-1. Edit or review a package under `IntuneRemediationScripts/`.
+1. Edit or review a package under `Packages/`.
 2. Run PSScriptAnalyzer locally or from the GUI.
 3. Use the GUI to compare local package content with Intune cloud content.
 4. Publish one package, publish detection-only, or publish all packages after reviewing the create/update summary.
@@ -45,6 +45,6 @@ Runtime configuration, logs, local archives, downloaded cloud exports, and execu
 
 ## More Documentation
 
-- `IntuneRemediationScripts/README.md`: package organization and scenario map.
-- `IntuneRemediationManager/IntuneRemediationManager-GUI/README.md`: GUI launch, actions, authentication, configuration, and logs.
-- `IntuneRemediationManager/IntuneRemediationManager-CLI/README.md`: CLI deployment examples and options.
+- `Packages/README.md`: package organization and scenario map.
+- `GUI/README.md`: GUI launch, actions, authentication, configuration, and logs.
+- `CLI/README.md`: CLI deployment examples and options.

@@ -44,7 +44,7 @@ SmartCitrix/**
 !/SmartM365/Devices/SmartIntuneHybridJoinToolkit/SmartM365-logo.ico
 !/SmartM365/Devices/SmartIntuneHybridJoinToolkit/Scripts/SmartM365-logo.ico
 !/SmartM365/Devices/SmartIntuneHybridJoinToolkit/workplacecloudhub-v2.png
-!/SmartM365/Devices/SmartIntuneRemediation/IntuneRemediationManager/IntuneRemediationManager-GUI/SmartM365-logo.ico
+!/SmartM365/Devices/SmartIntuneRemediation/GUI/SmartM365-logo.ico
 !/SmartM365/**/Product names and service plan identifiers for licensing.csv
 !/SmartM365/**/W11-Upgrade-Compatibility-Indicators-Intune-Description.txt
 !/SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/Computers.txt
