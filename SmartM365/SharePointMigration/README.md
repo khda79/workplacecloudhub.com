@@ -77,7 +77,7 @@ The launcher first checks for `Tools\Python\python.exe` and then falls back to
 To create or refresh the local portable runtime:
 
 ```powershell
-.\Tools\SmartM365-SharePointMigration-InstallPortablePython.ps1
+.\Scripts\SmartM365-SharePointMigration-InstallPortablePython.ps1
 ```
 
 Use `-Force` to replace an existing local runtime. The script downloads the
@@ -89,6 +89,8 @@ Tools\Python
 ```
 
 `Tools\Python` is ignored by Git because it is generated local runtime content.
+For double-click usage on Windows, run
+`Tools\SmartM365-SharePointMigration-InstallPortablePython.cmd`.
 
 ## Safety Model
 
