@@ -31,6 +31,7 @@ cd workplacecloudhub.com
 Recommended entry points:
 
 - Microsoft 365 and Windows endpoint tools: `SmartM365/README.md`
+- SharePoint migration validation toolkit: `SmartM365/SharePointMigration/README.md`
 - Azure inventory and governance scripts: `SmartAzure/README.md`
 - Azure Virtual Desktop inventory scripts: `SmartAzureVirtualDesktop/README.md`
 - Citrix inventory scripts: `SmartCitrix/README.md`
@@ -111,6 +112,15 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 - `ActiveDirectoryInventory/`: Active Directory inventory and reporting.
 - `ExchangeInventory/`: Exchange Online and Exchange on-premises inventory.
 - `M365Inventory/`: Microsoft 365, Entra, licensing, domain, and Intune inventory. Intune inventory now lives under `M365Inventory/IntuneInventory/`.
+
+### Smart SharePoint Migration Toolkit
+
+`SmartM365/SharePointMigration/` contains **Smart SharePoint Migration Toolkit**, a source-to-destination SharePoint migration validation toolkit.
+
+- Inventories SharePoint source and destination content and permissions.
+- Compares files, permissions, and source scan history with CSV and Excel outputs.
+- Generates guarded destination cleanup scripts from reviewed comparison results.
+- Provides a migration template, local launchers, and a portable Python bootstrap script for comparison/export helpers.
 
 ### Smart Intune Remediation Manager
 
