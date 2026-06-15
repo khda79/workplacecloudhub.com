@@ -34,6 +34,7 @@ SmartCitrix/**
 !/SmartM365/**/*.html
 !/SmartM365/**/*.json.template
 !/SmartM365/**/*.config.template.json
+!/SmartM365/SharePointMigration/**/*.py
 !/SmartM365/SmartM365-logo.ico
 !/SmartM365/Devices/DeviceRebootManager/SmartM365-logo.ico
 !/SmartM365/Devices/DeviceRegistrationTool/SmartM365-logo.ico
@@ -47,6 +48,14 @@ SmartCitrix/**
 !/SmartM365/**/Product names and service plan identifiers for licensing.csv
 !/SmartM365/**/W11-Upgrade-Compatibility-Indicators-Intune-Description.txt
 !/SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/Computers.txt
+SmartM365/SharePointMigration/Migrations/*
+!SmartM365/SharePointMigration/Migrations/_Template/
+!SmartM365/SharePointMigration/Migrations/_Template/**
+!SmartM365/SharePointMigration/Migrations/Update-MigrationsFromTemplate.cmd
+SmartM365/SharePointMigration/Config/*.local.psd1
+SmartM365/SharePointMigration/**/__pycache__/
+SmartM365/SharePointMigration/**/*.pyc
+SmartM365/SharePointMigration/Tools/Python/**
 !/SmartAzure/README.md
 !/SmartAzure/**/*.ps1
 !/SmartAzure/**/*.psm1
@@ -110,6 +119,8 @@ SmartM365/**/SmartM365-IntuneRemediation-GUI.config.json
 # Logs
 Logs/
 *.log
+!SmartM365/SharePointMigration/Migrations/_Template/logs/
+!SmartM365/SharePointMigration/Migrations/_Template/logs/.gitkeep
 
 # Reports / exports
 Exports/

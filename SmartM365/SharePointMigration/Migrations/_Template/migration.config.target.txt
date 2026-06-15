@@ -1,0 +1,4 @@
+# One SPO web URL per line.
+# Example:
+# https://yourtenant.sharepoint.com/sites/NewMigration
+# https://yourtenant.sharepoint.com/sites/NewMigration/Subsite
