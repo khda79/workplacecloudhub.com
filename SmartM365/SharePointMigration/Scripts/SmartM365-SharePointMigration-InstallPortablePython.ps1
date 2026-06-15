@@ -9,10 +9,10 @@
     PATH, registry keys, file associations, or machine-wide settings.
 
 .EXAMPLE
-    .\Tools\SmartM365-SharePointMigration-InstallPortablePython.ps1
+    .\Scripts\SmartM365-SharePointMigration-InstallPortablePython.ps1
 
 .EXAMPLE
-    .\Tools\SmartM365-SharePointMigration-InstallPortablePython.ps1 -Force
+    .\Scripts\SmartM365-SharePointMigration-InstallPortablePython.ps1 -Force
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -24,7 +24,7 @@ param(
     [string]$Architecture = 'amd64',
 
     [ValidateNotNullOrEmpty()]
-    [string]$DestinationPath = (Join-Path -Path $PSScriptRoot -ChildPath 'Python'),
+    [string]$DestinationPath = (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Tools\Python'),
 
     [string]$ExpectedSha256 = '8766A8775746235E23CF5AEE5027AB1060BB981D93110577ADCF3508AA0CBD55',
 
