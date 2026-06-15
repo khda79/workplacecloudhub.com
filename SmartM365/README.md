@@ -8,6 +8,7 @@ SmartM365 is organized as a set of independent but consistent projects. Some scr
 
 - Use `Setup/` when you need the SmartM365 app registration, Graph application permissions, SharePoint upload target, Teams notification channels, or tenant profile templates.
 - Use `SmartInventory/` when you need repeatable CSV exports for reporting, Power BI, audit, or operational review.
+- Use `SharePointMigration/` when you need to validate SharePoint source-to-destination migrations with inventories, comparisons, Excel exports, and guarded cleanup helpers.
 - Use `Devices/` when you need local endpoint tools such as reboot governance, Intune enrollment diagnostics, endpoint diagnostic analysis, Intune remediation management, or Hybrid Join repair orchestration.
 - Use `Communications/` when you need user-facing notification campaigns driven by Microsoft 365 data.
 
@@ -16,6 +17,7 @@ Local tenant configuration files are not committed. Use the committed templates 
 ## Content
 
 - Smart Inventory scripts under `SmartInventory/` for Active Directory, Exchange, Microsoft 365, Entra, and Intune data collection. These exports can feed Power BI datasets and other reporting or operational consumers.
+- Smart SharePoint Migration Toolkit under `SharePointMigration/` for SharePoint source-to-destination migration validation, reconciliation exports, and guarded post-migration cleanup operations.
 - User-facing operational notification scripts under `Communications/`, including Exchange migration, archive mailbox, and mailbox reduction campaigns.
 - Device and endpoint tooling under `Devices/`, including reboot governance, device registration diagnostics, endpoint diagnostics, Intune remediation management, and Hybrid Join repair tooling.
 
@@ -25,6 +27,7 @@ Local tenant configuration files are not committed. Use the committed templates 
 - PowerShell 7 is preferred for newer administration and setup workflows when scripts declare it.
 - Microsoft Graph PowerShell modules are used by Microsoft 365, Intune, and setup scripts.
 - Exchange Online PowerShell is used by Exchange Online inventory and setup workflows.
+- PnP.PowerShell and the SharePoint Online Management Shell are used by SharePoint migration validation and destination administration workflows.
 - The Active Directory module or RSAT tools may be required by Active Directory and on-premises Exchange inventory scripts.
 - Endpoint GUI tools usually run locally and document their own requirements in `Devices/<ToolName>/README.md`.
 
