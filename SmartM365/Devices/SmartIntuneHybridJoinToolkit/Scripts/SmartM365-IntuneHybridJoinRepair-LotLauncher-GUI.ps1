@@ -3,9 +3,8 @@
 Creates and launches Smart Intune Hybrid Join Toolkit LOT folders from a GUI.
 
 .DESCRIPTION
-This operator GUI asks for a computer list file, creates a local LOT-* folder,
-writes a normalized Computers.txt, refreshes the LOT CMD wrappers, and offers
-to launch the selected LOT wrapper.
+This operator GUI lists existing LOT-* folders for launch, shows their key
+parameters, and offers a simplified new-LOT creation flow.
 
 Operational LOT-* folders can contain real computer names and are ignored by Git.
 #>
@@ -31,19 +30,11 @@ function Get-ToolkitRoot {
 }
 
 function Get-SafeLotName {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ComputerFilePath
-    )
+    param([Parameter(Mandatory = $true)][string]$LotName)
 
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($ComputerFilePath)
-    if ([string]::IsNullOrWhiteSpace($baseName)) {
-        $baseName = "Manual"
-    }
-
-    $safeName = [regex]::Replace($baseName.Trim(), "[^A-Za-z0-9._-]+", "-").Trim("-._")
+    $safeName = [regex]::Replace($LotName.Trim(), "[^A-Za-z0-9._-]+", "-").Trim("-._")
     if ([string]::IsNullOrWhiteSpace($safeName)) {
-        $safeName = "Manual"
+        throw "Enter a LOT name."
     }
 
     if ($safeName -notmatch "^(?i)LOT-") {
@@ -53,149 +44,189 @@ function Get-SafeLotName {
     return $safeName
 }
 
-function Get-UniqueLotPath {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$RootPath,
+function Get-ComputerNamesFromFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
 
-        [Parameter(Mandatory = $true)]
-        [string]$LotName
-    )
-
-    $safeLotName = [regex]::Replace($LotName.Trim(), "[^A-Za-z0-9._-]+", "-").Trim("-._")
-    if ([string]::IsNullOrWhiteSpace($safeLotName)) {
-        $safeLotName = "LOT-Manual"
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return @()
     }
 
-    if ($safeLotName -notmatch "^(?i)LOT-") {
-        $safeLotName = "LOT-$safeLotName"
-    }
-
-    $lotPath = Join-Path $RootPath $safeLotName
-    if (-not (Test-Path -LiteralPath $lotPath)) {
-        return $lotPath
-    }
-
-    $suffix = Get-Date -Format "yyyyMMdd-HHmmss"
-    return (Join-Path $RootPath ("{0}-{1}" -f $safeLotName,$suffix))
-}
-
-function Get-NormalizedComputerList {
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowEmptyCollection()]
-        [string[]]$Values
-    )
-
-    $result = New-Object System.Collections.Generic.List[string]
     $seen = @{}
-
-    foreach ($value in $Values) {
-        $name = ([string]$value).Trim().Trim([char]34)
+    $computers = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction Stop)) {
+        $name = ([string]$line).Trim().Trim([char]34)
         if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith("#")) {
             continue
         }
 
-        if ($seen.ContainsKey($name.ToUpperInvariant())) {
+        $key = $name.ToUpperInvariant()
+        if ($seen.ContainsKey($key)) {
             continue
         }
 
-        $seen[$name.ToUpperInvariant()] = $true
-        $result.Add($name)
+        $seen[$key] = $true
+        $computers.Add($name)
     }
 
-    return @($result)
+    return @($computers)
 }
 
-function Convert-ComputerListFile {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$SourcePath,
+function Get-LotFolders {
+    param([Parameter(Mandatory = $true)][string]$RootPath)
 
-        [Parameter(Mandatory = $true)]
-        [string]$DestinationPath
+    return @(
+        Get-ChildItem -LiteralPath $RootPath -Directory -Filter "LOT-*" -ErrorAction Stop |
+            Where-Object { $_.Name -ine "LOT-X" } |
+            Sort-Object Name
+    )
+}
+
+function Test-LotWrapperSet {
+    param([Parameter(Mandatory = $true)][string]$LotPath)
+
+    $wrapperNames = @(
+        "Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd",
+        "Run-IntuneHybridJoinRepairWithPsExec-Once.cmd",
+        "Run-IntuneHybridJoinRepairWithPsExec-Loop-IgnoreRunGuard.cmd",
+        "Run-IntuneHybridJoinRepairWithPsExec-Once-IgnoreRunGuard.cmd"
     )
 
-    $sourceItem = Get-Item -LiteralPath $SourcePath -ErrorAction Stop
-    $extension = [System.IO.Path]::GetExtension($sourceItem.FullName)
-    $rawValues = @()
-
-    if ($extension -and $extension.Equals(".csv", [System.StringComparison]::OrdinalIgnoreCase)) {
-        $rows = @(Import-Csv -LiteralPath $sourceItem.FullName -ErrorAction Stop)
-        if ($rows.Count -gt 0) {
-            $preferredColumns = @("ComputerName", "DeviceName", "Name", "DisplayName")
-            $properties = @($rows[0].PSObject.Properties.Name)
-            $selectedColumn = $preferredColumns | Where-Object { $properties -contains $_ } | Select-Object -First 1
-            if ([string]::IsNullOrWhiteSpace($selectedColumn) -and $properties.Count -gt 0) {
-                $selectedColumn = $properties[0]
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($selectedColumn)) {
-                $rawValues = @($rows | ForEach-Object { $_.$selectedColumn })
+    $missing = @(
+        foreach ($wrapperName in $wrapperNames) {
+            $path = Join-Path $LotPath $wrapperName
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                $wrapperName
             }
         }
+    )
+
+    return [pscustomobject]@{
+        Ready = ($missing.Count -eq 0)
+        Missing = $missing
+    }
+}
+
+function Get-AdDomainText {
+    param([Parameter(Mandatory = $true)][string]$LotPath)
+
+    $adDomainPath = Join-Path $LotPath "AdDomain.txt"
+    if (-not (Test-Path -LiteralPath $adDomainPath -PathType Leaf)) {
+        return ""
+    }
+
+    foreach ($line in @(Get-Content -LiteralPath $adDomainPath -ErrorAction Stop)) {
+        $value = ([string]$line).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+
+    return ""
+}
+
+function Get-FileFreshnessText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$FreshMinutes = 60
+    )
+
+    $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+    if (-not $item) {
+        return "Missing"
+    }
+
+    $age = (Get-Date) - $item.LastWriteTime
+    $state = if ($age.TotalMinutes -le $FreshMinutes) { "Recent" } else { "Stale" }
+    return ("{0}; {1:N1} min; {2}" -f $state,$age.TotalMinutes,$item.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"))
+}
+
+function Get-LotSummary {
+    param(
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][string]$LotPath
+    )
+
+    $computersPath = Join-Path $LotPath "Computers.txt"
+    $adDomainPath = Join-Path $LotPath "AdDomain.txt"
+    $lotAdCsvPath = Join-Path $LotPath "DevicesAD.csv"
+    $rootAdCsvPath = Join-Path $RootPath "DevicesAD.csv"
+    $rootIntuneCsvPath = Join-Path $RootPath "DevicesIntune.csv"
+    $rootEntraCsvPath = Join-Path $RootPath "DevicesEntra.csv"
+    $computers = @(Get-ComputerNamesFromFile -Path $computersPath)
+    $adDomain = Get-AdDomainText -LotPath $LotPath
+    $wrappers = Test-LotWrapperSet -LotPath $LotPath
+
+    $adScope = if ([string]::IsNullOrWhiteSpace($adDomain)) {
+        "Forest export from root DevicesAD.csv"
     }
     else {
-        $rawValues = @(Get-Content -LiteralPath $sourceItem.FullName -ErrorAction Stop)
+        "Domain export: $adDomain"
     }
 
-    $computers = @(Get-NormalizedComputerList -Values $rawValues)
-    if ($computers.Count -eq 0) {
-        throw "No computer names found in the selected file."
+    $selectedAdCsv = if ([string]::IsNullOrWhiteSpace($adDomain)) { $rootAdCsvPath } else { $lotAdCsvPath }
+
+    return [pscustomobject]@{
+        Name = Split-Path -Leaf $LotPath
+        Path = $LotPath
+        ComputersPath = $computersPath
+        ComputerCount = $computers.Count
+        AdDomainPath = $adDomainPath
+        AdDomain = $adDomain
+        AdScope = $adScope
+        SelectedAdCsv = $selectedAdCsv
+        RootAdCsvStatus = Get-FileFreshnessText -Path $rootAdCsvPath -FreshMinutes 60
+        SelectedAdCsvStatus = Get-FileFreshnessText -Path $selectedAdCsv -FreshMinutes 60
+        IntuneCsvStatus = Get-FileFreshnessText -Path $rootIntuneCsvPath -FreshMinutes 60
+        EntraCsvStatus = Get-FileFreshnessText -Path $rootEntraCsvPath -FreshMinutes 60
+        WrappersReady = $wrappers.Ready
+        MissingWrappers = $wrappers.Missing
+    }
+}
+
+function Invoke-LotWrapperRefresh {
+    param([Parameter(Mandatory = $true)][string]$RootPath)
+
+    $updateScript = Join-Path $RootPath "Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
+    if (-not (Test-Path -LiteralPath $updateScript -PathType Leaf)) {
+        throw "LOT wrapper update script not found: $updateScript"
     }
 
-    Set-Content -LiteralPath $DestinationPath -Value $computers -Encoding ASCII -Force
-    return $computers.Count
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updateScript -RootPath $RootPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "LOT wrapper refresh failed with exit code $LASTEXITCODE."
+    }
 }
 
 function New-ToolkitLotFolder {
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$RootPath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$ComputerFilePath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$LotName
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][string]$LotName
     )
 
-    $computerFile = Get-Item -LiteralPath $ComputerFilePath -ErrorAction Stop
-    if (-not $computerFile -or $computerFile.PSIsContainer) {
-        throw "Select a readable computer list file."
-    }
-
     $rootItem = Get-Item -LiteralPath $RootPath -ErrorAction Stop
-    $lotPath = Get-UniqueLotPath -RootPath $rootItem.FullName -LotName $LotName
+    $safeLotName = Get-SafeLotName -LotName $LotName
+    $lotPath = Join-Path $rootItem.FullName $safeLotName
+    if (Test-Path -LiteralPath $lotPath) {
+        throw "LOT folder already exists: $lotPath"
+    }
+
     New-Item -ItemType Directory -Path $lotPath -Force -ErrorAction Stop | Out-Null
+    New-Item -ItemType File -Path (Join-Path $lotPath "Computers.txt") -Force -ErrorAction Stop | Out-Null
+    New-Item -ItemType File -Path (Join-Path $lotPath "AdDomain.txt") -Force -ErrorAction Stop | Out-Null
 
-    $targetComputers = Join-Path $lotPath "Computers.txt"
-    $computerCount = Convert-ComputerListFile -SourcePath $computerFile.FullName -DestinationPath $targetComputers
+    Invoke-LotWrapperRefresh -RootPath $rootItem.FullName
 
-    $updateScript = Join-Path $rootItem.FullName "Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
-    if (-not (Test-Path -LiteralPath $updateScript)) {
-        throw "LOT wrapper update script not found: $updateScript"
-    }
-
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updateScript -RootPath $rootItem.FullName
-    if ($LASTEXITCODE -ne 0) {
-        throw "LOT wrapper refresh failed with exit code $LASTEXITCODE."
-    }
-
-    [pscustomobject]@{
-        LotPath       = $lotPath
-        ComputersPath = $targetComputers
-        ComputerCount = $computerCount
+    return [pscustomobject]@{
+        LotPath = $lotPath
+        ComputersPath = Join-Path $lotPath "Computers.txt"
+        AdDomainPath = Join-Path $lotPath "AdDomain.txt"
     }
 }
 
 function Start-ToolkitLot {
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$LotPath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Mode
+        [Parameter(Mandatory = $true)][string]$LotPath,
+        [Parameter(Mandatory = $true)][string]$Mode
     )
 
     $wrapperName = switch ($Mode) {
@@ -207,7 +238,7 @@ function Start-ToolkitLot {
     }
 
     $wrapperPath = Join-Path $LotPath $wrapperName
-    if (-not (Test-Path -LiteralPath $wrapperPath)) {
+    if (-not (Test-Path -LiteralPath $wrapperPath -PathType Leaf)) {
         throw "LOT wrapper not found: $wrapperPath"
     }
 
@@ -225,6 +256,26 @@ function Start-ToolkitLot {
     Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$wrapperPath`"") -WorkingDirectory $LotPath -Verb RunAs
 }
 
+function Open-TextFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        New-Item -ItemType File -Path $Path -Force -ErrorAction Stop | Out-Null
+    }
+
+    Start-Process -FilePath "notepad.exe" -ArgumentList @("`"$Path`"")
+}
+
+function Open-FolderPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "Folder not found: $Path"
+    }
+
+    Start-Process -FilePath "explorer.exe" -ArgumentList @("`"$Path`"")
+}
+
 $toolkitRoot = Get-ToolkitRoot
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -233,7 +284,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $font = New-Object System.Drawing.Font("Segoe UI", 9)
-$titleFont = New-Object System.Drawing.Font("Segoe UI Semibold", 20)
+$titleFont = New-Object System.Drawing.Font("Segoe UI Semibold", 19)
 $sectionFont = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
 $smallFont = New-Object System.Drawing.Font("Segoe UI", 8)
 $statusFont = New-Object System.Drawing.Font("Consolas", 9)
@@ -241,7 +292,6 @@ $statusFont = New-Object System.Drawing.Font("Consolas", 9)
 $colorBackground = [System.Drawing.ColorTranslator]::FromHtml("#EEF3F8")
 $colorPanel = [System.Drawing.ColorTranslator]::FromHtml("#FFFFFF")
 $colorPanelSoft = [System.Drawing.ColorTranslator]::FromHtml("#F8FBFE")
-$colorHeader = [System.Drawing.ColorTranslator]::FromHtml("#FFFFFF")
 $colorHeaderPanel = [System.Drawing.ColorTranslator]::FromHtml("#E8F3FF")
 $colorAccent = [System.Drawing.ColorTranslator]::FromHtml("#2563EB")
 $colorInk = [System.Drawing.ColorTranslator]::FromHtml("#102A43")
@@ -285,11 +335,151 @@ function Resolve-LogoImagePath {
     return $null
 }
 
+function Set-FlatButtonStyle {
+    param(
+        [Parameter(Mandatory = $true)][System.Windows.Forms.Button]$Button,
+        [Parameter(Mandatory = $true)][System.Drawing.Color]$BackColor,
+        [Parameter(Mandatory = $true)][System.Drawing.Color]$ForeColor,
+        [System.Drawing.Color]$BorderColor = $colorBorder
+    )
+
+    $Button.FlatStyle = "Flat"
+    $Button.BackColor = $BackColor
+    $Button.ForeColor = $ForeColor
+    $Button.FlatAppearance.BorderColor = $BorderColor
+    $Button.FlatAppearance.BorderSize = 1
+    $Button.Height = 32
+    $Button.Margin = New-Object System.Windows.Forms.Padding(6, 6, 0, 6)
+    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
+}
+
+function Add-SoftBorder {
+    param(
+        [Parameter(Mandatory = $true)][System.Windows.Forms.Control]$Control,
+        [System.Drawing.Color]$BorderColor = $colorBorder
+    )
+
+    $Control.Add_Paint({
+        param($sender, $eventArgs)
+
+        [System.Windows.Forms.ControlPaint]::DrawBorder(
+            $eventArgs.Graphics,
+            $sender.ClientRectangle,
+            $BorderColor,
+            [System.Windows.Forms.ButtonBorderStyle]::Solid
+        )
+    }.GetNewClosure())
+}
+
+function Add-AccentBar {
+    param([Parameter(Mandatory = $true)][System.Windows.Forms.Control]$Control)
+
+    $Control.Add_Paint({
+        param($sender, $eventArgs)
+
+        $brush = New-Object System.Drawing.SolidBrush($colorAccent)
+        try {
+            $eventArgs.Graphics.FillRectangle($brush, 0, 0, 4, $sender.Height)
+        }
+        finally {
+            $brush.Dispose()
+        }
+    }.GetNewClosure())
+}
+
+function New-Label {
+    param([string]$Text)
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $Text
+    $label.Dock = "Fill"
+    $label.TextAlign = "MiddleLeft"
+    $label.ForeColor = $colorMuted
+    return $label
+}
+
+function New-ValueBox {
+    $box = New-Object System.Windows.Forms.TextBox
+    $box.Dock = "Fill"
+    $box.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
+    $box.ReadOnly = $true
+    $box.BorderStyle = "FixedSingle"
+    $box.BackColor = $colorPanelSoft
+    $box.ForeColor = $colorInk
+    return $box
+}
+
+function New-EntryBox {
+    $box = New-Object System.Windows.Forms.TextBox
+    $box.Dock = "Fill"
+    $box.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
+    $box.BorderStyle = "FixedSingle"
+    $box.BackColor = $colorPanel
+    $box.ForeColor = $colorInk
+    return $box
+}
+
+function New-SectionPanel {
+    param([Parameter(Mandatory = $true)][string]$Title)
+
+    $outer = New-Object System.Windows.Forms.Panel
+    $outer.Dock = "Fill"
+    $outer.BackColor = $colorPanel
+    $outer.Padding = New-Object System.Windows.Forms.Padding(14)
+    Add-SoftBorder -Control $outer
+
+    $layout = New-Object System.Windows.Forms.TableLayoutPanel
+    $layout.Dock = "Fill"
+    $layout.ColumnCount = 1
+    $layout.RowCount = 2
+    $layout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+    $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
+    $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+
+    $titleLabel = New-Object System.Windows.Forms.Label
+    $titleLabel.Text = $Title
+    $titleLabel.Dock = "Fill"
+    $titleLabel.Font = $sectionFont
+    $titleLabel.ForeColor = $colorInk
+    $titleLabel.TextAlign = "MiddleLeft"
+
+    $content = New-Object System.Windows.Forms.Panel
+    $content.Dock = "Fill"
+    $content.BackColor = $colorPanel
+
+    $layout.Controls.Add($titleLabel, 0, 0)
+    $layout.Controls.Add($content, 0, 1)
+    $outer.Controls.Add($layout)
+
+    return [pscustomobject]@{
+        Panel = $outer
+        Content = $content
+    }
+}
+
+function Set-ButtonEnabledStyle {
+    param(
+        [Parameter(Mandatory = $true)][System.Windows.Forms.Button]$Button,
+        [bool]$Enabled,
+        [System.Drawing.Color]$EnabledBackColor = $colorAccent,
+        [System.Drawing.Color]$EnabledForeColor = ([System.Drawing.Color]::White)
+    )
+
+    if ($Enabled) {
+        $Button.Enabled = $true
+        Set-FlatButtonStyle -Button $Button -BackColor $EnabledBackColor -ForeColor $EnabledForeColor -BorderColor $EnabledBackColor
+    }
+    else {
+        $Button.Enabled = $false
+        Set-FlatButtonStyle -Button $Button -BackColor $colorDisabled -ForeColor $colorDisabledText -BorderColor $colorBorder
+        $Button.Cursor = [System.Windows.Forms.Cursors]::Default
+    }
+}
+
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Smart Intune Hybrid Join Toolkit - LOT Launcher"
 $form.StartPosition = "CenterScreen"
-$form.Size = New-Object System.Drawing.Size(940, 640)
-$form.MinimumSize = New-Object System.Drawing.Size(860, 560)
+$form.Size = New-Object System.Drawing.Size(980, 700)
+$form.MinimumSize = New-Object System.Drawing.Size(900, 620)
 $form.Font = $font
 $form.BackColor = $colorBackground
 
@@ -316,146 +506,6 @@ if (-not [string]::IsNullOrWhiteSpace($logoImagePath)) {
     }
 }
 
-function Set-FlatButtonStyle {
-    param(
-        [Parameter(Mandatory = $true)]
-        [System.Windows.Forms.Button]$Button,
-
-        [Parameter(Mandatory = $true)]
-        [System.Drawing.Color]$BackColor,
-
-        [Parameter(Mandatory = $true)]
-        [System.Drawing.Color]$ForeColor,
-
-        [System.Drawing.Color]$BorderColor = $colorBorder
-    )
-
-    $Button.FlatStyle = "Flat"
-    $Button.BackColor = $BackColor
-    $Button.ForeColor = $ForeColor
-    $Button.FlatAppearance.BorderColor = $BorderColor
-    $Button.FlatAppearance.BorderSize = 1
-    $Button.Height = 32
-    $Button.Margin = New-Object System.Windows.Forms.Padding(6, 6, 0, 6)
-    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
-}
-
-function Add-SoftBorder {
-    param(
-        [Parameter(Mandatory = $true)]
-        [System.Windows.Forms.Control]$Control,
-
-        [System.Drawing.Color]$BorderColor = $colorBorder
-    )
-
-    $Control.Add_Paint({
-        param($sender, $eventArgs)
-
-        [System.Windows.Forms.ControlPaint]::DrawBorder(
-            $eventArgs.Graphics,
-            $sender.ClientRectangle,
-            $BorderColor,
-            [System.Windows.Forms.ButtonBorderStyle]::Solid
-        )
-    }.GetNewClosure())
-}
-
-function Add-AccentBar {
-    param(
-        [Parameter(Mandatory = $true)]
-        [System.Windows.Forms.Control]$Control
-    )
-
-    $Control.Add_Paint({
-        param($sender, $eventArgs)
-
-        $brush = New-Object System.Drawing.SolidBrush($colorAccent)
-        try {
-            $eventArgs.Graphics.FillRectangle($brush, 0, 0, 4, $sender.Height)
-        }
-        finally {
-            $brush.Dispose()
-        }
-    }.GetNewClosure())
-}
-
-function Set-LaunchButtonState {
-    param([bool]$CanLaunch)
-
-    if ($CanLaunch) {
-        $launchButton.Enabled = $true
-        Set-FlatButtonStyle -Button $launchButton -BackColor $colorSuccess -ForeColor ([System.Drawing.Color]::White) -BorderColor $colorSuccess
-    }
-    else {
-        $launchButton.Enabled = $false
-        Set-FlatButtonStyle -Button $launchButton -BackColor $colorDisabled -ForeColor $colorDisabledText -BorderColor $colorBorder
-        $launchButton.Cursor = [System.Windows.Forms.Cursors]::Default
-    }
-}
-
-function New-Label {
-    param([string]$Text)
-    $label = New-Object System.Windows.Forms.Label
-    $label.Text = $Text
-    $label.Dock = "Fill"
-    $label.TextAlign = "MiddleLeft"
-    $label.ForeColor = $colorMuted
-    return $label
-}
-
-function New-TextBox {
-    param([switch]$ReadOnly)
-    $box = New-Object System.Windows.Forms.TextBox
-    $box.Dock = "Fill"
-    $box.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
-    $box.ReadOnly = [bool]$ReadOnly
-    $box.BorderStyle = "FixedSingle"
-    $box.BackColor = if ($ReadOnly) { $colorPanelSoft } else { $colorPanel }
-    $box.ForeColor = $colorInk
-    return $box
-}
-
-function New-SectionPanel {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Title
-    )
-
-    $outer = New-Object System.Windows.Forms.Panel
-    $outer.Dock = "Fill"
-    $outer.BackColor = $colorPanel
-    $outer.Padding = New-Object System.Windows.Forms.Padding(14)
-    Add-SoftBorder -Control $outer
-
-    $layout = New-Object System.Windows.Forms.TableLayoutPanel
-    $layout.Dock = "Fill"
-    $layout.ColumnCount = 1
-    $layout.RowCount = 2
-    $layout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-    $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 30))) | Out-Null
-    $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-
-    $titleLabel = New-Object System.Windows.Forms.Label
-    $titleLabel.Text = $Title
-    $titleLabel.Dock = "Fill"
-    $titleLabel.Font = $sectionFont
-    $titleLabel.ForeColor = $colorInk
-    $titleLabel.TextAlign = "MiddleLeft"
-
-    $content = New-Object System.Windows.Forms.Panel
-    $content.Dock = "Fill"
-    $content.BackColor = $colorPanel
-
-    $layout.Controls.Add($titleLabel, 0, 0)
-    $layout.Controls.Add($content, 0, 1)
-    $outer.Controls.Add($layout)
-
-    return [pscustomobject]@{
-        Panel   = $outer
-        Content = $content
-    }
-}
-
 $rootLayout = New-Object System.Windows.Forms.TableLayoutPanel
 $rootLayout.Dock = "Fill"
 $rootLayout.ColumnCount = 1
@@ -463,13 +513,13 @@ $rootLayout.RowCount = 3
 $rootLayout.Padding = New-Object System.Windows.Forms.Padding(14)
 $rootLayout.BackColor = $colorBackground
 $rootLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 136))) | Out-Null
+$rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 132))) | Out-Null
 $rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 54))) | Out-Null
+$rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 46))) | Out-Null
 
 $headerPanel = New-Object System.Windows.Forms.Panel
 $headerPanel.Dock = "Fill"
-$headerPanel.BackColor = $colorHeader
+$headerPanel.BackColor = $colorPanel
 $headerPanel.Padding = New-Object System.Windows.Forms.Padding(20, 16, 20, 16)
 Add-SoftBorder -Control $headerPanel
 Add-AccentBar -Control $headerPanel
@@ -485,7 +535,7 @@ $headerTextPanel = New-Object System.Windows.Forms.TableLayoutPanel
 $headerTextPanel.Dock = "Fill"
 $headerTextPanel.ColumnCount = 1
 $headerTextPanel.RowCount = 4
-$headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 26))) | Out-Null
+$headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 24))) | Out-Null
 $headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 40))) | Out-Null
 $headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 24))) | Out-Null
 $headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
@@ -506,7 +556,7 @@ $titleLabel.Font = $titleFont
 $titleLabel.TextAlign = "MiddleLeft"
 
 $subtitleLabel = New-Object System.Windows.Forms.Label
-$subtitleLabel.Text = "Create a local LOT folder and launch PsExec repair runs."
+$subtitleLabel.Text = "Run an existing LOT or create an empty LOT ready for Computers.txt."
 $subtitleLabel.Dock = "Fill"
 $subtitleLabel.ForeColor = $colorMuted
 $subtitleLabel.TextAlign = "MiddleLeft"
@@ -521,14 +571,6 @@ $headerTextPanel.Controls.Add($badgeLabel, 0, 0)
 $headerTextPanel.Controls.Add($titleLabel, 0, 1)
 $headerTextPanel.Controls.Add($subtitleLabel, 0, 2)
 $headerTextPanel.Controls.Add($psexecLabel, 0, 3)
-
-$headerBrandLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$headerBrandLayout.Dock = "Fill"
-$headerBrandLayout.ColumnCount = 1
-$headerBrandLayout.RowCount = 1
-$headerBrandLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-
-$headerBrandLayout.Controls.Add($headerTextPanel, 0, 0)
 
 $logoCard = New-Object System.Windows.Forms.Panel
 $logoCard.Dock = "Fill"
@@ -570,56 +612,146 @@ else {
     $psexecLabel.ForeColor = $colorWarning
 }
 
-$headerLayout.Controls.Add($headerBrandLayout, 0, 0)
+$headerLayout.Controls.Add($headerTextPanel, 0, 0)
 $headerLayout.Controls.Add($logoCard, 1, 0)
 $headerPanel.Controls.Add($headerLayout)
 
-$contentLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$contentLayout.Dock = "Fill"
-$contentLayout.ColumnCount = 1
-$contentLayout.RowCount = 2
-$contentLayout.Margin = New-Object System.Windows.Forms.Padding(0, 12, 0, 10)
-$contentLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$contentLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 228))) | Out-Null
-$contentLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$tabControl = New-Object System.Windows.Forms.TabControl
+$tabControl.Dock = "Fill"
+$tabControl.Margin = New-Object System.Windows.Forms.Padding(0, 12, 0, 10)
+$tabControl.Font = $font
 
-$configSection = New-SectionPanel -Title "LOT configuration"
+$existingTab = New-Object System.Windows.Forms.TabPage
+$existingTab.Text = "Existing LOT"
+$existingTab.BackColor = $colorBackground
+
+$newTab = New-Object System.Windows.Forms.TabPage
+$newTab.Text = "New LOT"
+$newTab.BackColor = $colorBackground
+
+$tabControl.TabPages.Add($existingTab) | Out-Null
+$tabControl.TabPages.Add($newTab) | Out-Null
+
+$existingLayout = New-Object System.Windows.Forms.TableLayoutPanel
+$existingLayout.Dock = "Fill"
+$existingLayout.ColumnCount = 1
+$existingLayout.RowCount = 2
+$existingLayout.Padding = New-Object System.Windows.Forms.Padding(10)
+$existingLayout.BackColor = $colorBackground
+$existingLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$existingLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 340))) | Out-Null
+$existingLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+
+$existingSection = New-SectionPanel -Title "Available lots"
 $activitySection = New-SectionPanel -Title "Activity"
 
-$table = New-Object System.Windows.Forms.TableLayoutPanel
-$table.Dock = "Fill"
-$table.ColumnCount = 3
-$table.RowCount = 5
-$table.BackColor = $colorPanel
-$table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 140))) | Out-Null
-$table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 126))) | Out-Null
-for ($i = 0; $i -lt 5; $i++) {
-    $table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38))) | Out-Null
+$existingTable = New-Object System.Windows.Forms.TableLayoutPanel
+$existingTable.Dock = "Fill"
+$existingTable.ColumnCount = 4
+$existingTable.RowCount = 9
+$existingTable.BackColor = $colorPanel
+$existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 138))) | Out-Null
+$existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 118))) | Out-Null
+$existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 118))) | Out-Null
+for ($i = 0; $i -lt 9; $i++) {
+    $existingTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 34))) | Out-Null
 }
 
-$rootBox = New-TextBox -ReadOnly
-$rootBox.Text = $toolkitRoot
+$lotCombo = New-Object System.Windows.Forms.ComboBox
+$lotCombo.Dock = "Fill"
+$lotCombo.DropDownStyle = "DropDownList"
+$lotCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
+$lotCombo.FlatStyle = "Flat"
 
-$computerFileBox = New-TextBox
-$browseButton = New-Object System.Windows.Forms.Button
-$browseButton.Text = "Browse..."
-$browseButton.Dock = "Fill"
-Set-FlatButtonStyle -Button $browseButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+$refreshLotsButton = New-Object System.Windows.Forms.Button
+$refreshLotsButton.Text = "Refresh"
+$refreshLotsButton.Dock = "Fill"
+Set-FlatButtonStyle -Button $refreshLotsButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
-$lotNameBox = New-TextBox
+$openLotFolderButton = New-Object System.Windows.Forms.Button
+$openLotFolderButton.Text = "Folder"
+$openLotFolderButton.Dock = "Fill"
+Set-FlatButtonStyle -Button $openLotFolderButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
-$modeCombo = New-Object System.Windows.Forms.ComboBox
-$modeCombo.Dock = "Fill"
-$modeCombo.DropDownStyle = "DropDownList"
-$modeCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
-$modeCombo.FlatStyle = "Flat"
-$modeCombo.BackColor = $colorPanel
-$modeCombo.ForeColor = $colorInk
-$modeCombo.Items.AddRange([object[]]@("Loop", "Once", "LoopIgnoreRunGuard", "OnceIgnoreRunGuard"))
-$modeCombo.SelectedIndex = 0
+$selectedLotPathBox = New-ValueBox
+$deviceCountBox = New-ValueBox
+$adScopeBox = New-ValueBox
+$selectedAdCsvBox = New-ValueBox
+$rootAdCsvBox = New-ValueBox
+$intuneCsvBox = New-ValueBox
+$entraCsvBox = New-ValueBox
+$wrapperStatusBox = New-ValueBox
 
-$createdLotBox = New-TextBox -ReadOnly
+$existingModeCombo = New-Object System.Windows.Forms.ComboBox
+$existingModeCombo.Dock = "Fill"
+$existingModeCombo.DropDownStyle = "DropDownList"
+$existingModeCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
+$existingModeCombo.FlatStyle = "Flat"
+$existingModeCombo.Items.AddRange([object[]]@("Loop", "Once", "LoopIgnoreRunGuard", "OnceIgnoreRunGuard"))
+$existingModeCombo.SelectedIndex = 0
+
+$openComputersButton = New-Object System.Windows.Forms.Button
+$openComputersButton.Text = "Computers"
+$openComputersButton.Dock = "Fill"
+Set-FlatButtonStyle -Button $openComputersButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+
+$openAdDomainButton = New-Object System.Windows.Forms.Button
+$openAdDomainButton.Text = "AD domain"
+$openAdDomainButton.Dock = "Fill"
+Set-FlatButtonStyle -Button $openAdDomainButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+
+$launchExistingButton = New-Object System.Windows.Forms.Button
+$launchExistingButton.Text = "Launch"
+$launchExistingButton.Dock = "Fill"
+Set-ButtonEnabledStyle -Button $launchExistingButton -Enabled $false -EnabledBackColor $colorSuccess
+
+$refreshWrappersButton = New-Object System.Windows.Forms.Button
+$refreshWrappersButton.Text = "Wrappers"
+$refreshWrappersButton.Dock = "Fill"
+Set-FlatButtonStyle -Button $refreshWrappersButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+
+$existingTable.Controls.Add((New-Label "LOT"), 0, 0)
+$existingTable.Controls.Add($lotCombo, 1, 0)
+$existingTable.Controls.Add($refreshLotsButton, 2, 0)
+$existingTable.Controls.Add($openLotFolderButton, 3, 0)
+
+$existingTable.Controls.Add((New-Label "Path"), 0, 1)
+$existingTable.Controls.Add($selectedLotPathBox, 1, 1)
+$existingTable.SetColumnSpan($selectedLotPathBox, 3)
+
+$existingTable.Controls.Add((New-Label "Devices"), 0, 2)
+$existingTable.Controls.Add($deviceCountBox, 1, 2)
+$existingTable.Controls.Add($openComputersButton, 2, 2)
+$existingTable.Controls.Add($openAdDomainButton, 3, 2)
+
+$existingTable.Controls.Add((New-Label "AD scope"), 0, 3)
+$existingTable.Controls.Add($adScopeBox, 1, 3)
+$existingTable.SetColumnSpan($adScopeBox, 3)
+
+$existingTable.Controls.Add((New-Label "Selected AD CSV"), 0, 4)
+$existingTable.Controls.Add($selectedAdCsvBox, 1, 4)
+$existingTable.SetColumnSpan($selectedAdCsvBox, 3)
+
+$existingTable.Controls.Add((New-Label "Root AD CSV"), 0, 5)
+$existingTable.Controls.Add($rootAdCsvBox, 1, 5)
+$existingTable.SetColumnSpan($rootAdCsvBox, 3)
+
+$existingTable.Controls.Add((New-Label "Inventories"), 0, 6)
+$existingTable.Controls.Add($intuneCsvBox, 1, 6)
+$existingTable.Controls.Add($entraCsvBox, 2, 6)
+$existingTable.SetColumnSpan($entraCsvBox, 2)
+
+$existingTable.Controls.Add((New-Label "Wrappers"), 0, 7)
+$existingTable.Controls.Add($wrapperStatusBox, 1, 7)
+$existingTable.SetColumnSpan($wrapperStatusBox, 3)
+
+$existingTable.Controls.Add((New-Label "Launch"), 0, 8)
+$existingTable.Controls.Add($existingModeCombo, 1, 8)
+$existingTable.Controls.Add($refreshWrappersButton, 2, 8)
+$existingTable.Controls.Add($launchExistingButton, 3, 8)
+
+$existingSection.Content.Controls.Add($existingTable)
 
 $statusBox = New-Object System.Windows.Forms.TextBox
 $statusBox.Dock = "Fill"
@@ -630,16 +762,83 @@ $statusBox.Font = $statusFont
 $statusBox.BackColor = $colorPanelSoft
 $statusBox.ForeColor = $colorInk
 $statusBox.BorderStyle = "FixedSingle"
+$activitySection.Content.Controls.Add($statusBox)
 
-$createButton = New-Object System.Windows.Forms.Button
-$createButton.Text = "Create LOT"
-$createButton.Width = 116
-Set-FlatButtonStyle -Button $createButton -BackColor $colorAccent -ForeColor ([System.Drawing.Color]::White) -BorderColor $colorAccent
+$existingLayout.Controls.Add($existingSection.Panel, 0, 0)
+$existingLayout.Controls.Add($activitySection.Panel, 0, 1)
+$existingTab.Controls.Add($existingLayout)
 
-$launchButton = New-Object System.Windows.Forms.Button
-$launchButton.Text = "Launch LOT"
-$launchButton.Width = 116
-Set-LaunchButtonState -CanLaunch $false
+$newLayout = New-Object System.Windows.Forms.TableLayoutPanel
+$newLayout.Dock = "Fill"
+$newLayout.ColumnCount = 1
+$newLayout.RowCount = 2
+$newLayout.Padding = New-Object System.Windows.Forms.Padding(10)
+$newLayout.BackColor = $colorBackground
+$newLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$newLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 160))) | Out-Null
+$newLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+
+$newSection = New-SectionPanel -Title "Create an empty LOT"
+$newTable = New-Object System.Windows.Forms.TableLayoutPanel
+$newTable.Dock = "Fill"
+$newTable.ColumnCount = 3
+$newTable.RowCount = 3
+$newTable.BackColor = $colorPanel
+$newTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 138))) | Out-Null
+$newTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$newTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 150))) | Out-Null
+for ($i = 0; $i -lt 3; $i++) {
+    $newTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
+}
+
+$newLotNameBox = New-EntryBox
+$newLotPathBox = New-ValueBox
+$newComputersPathBox = New-ValueBox
+
+$createLotButton = New-Object System.Windows.Forms.Button
+$createLotButton.Text = "Create"
+$createLotButton.Dock = "Fill"
+Set-FlatButtonStyle -Button $createLotButton -BackColor $colorAccent -ForeColor ([System.Drawing.Color]::White) -BorderColor $colorAccent
+
+$openNewComputersButton = New-Object System.Windows.Forms.Button
+$openNewComputersButton.Text = "Open Computers"
+$openNewComputersButton.Dock = "Fill"
+Set-ButtonEnabledStyle -Button $openNewComputersButton -Enabled $false
+
+$newTable.Controls.Add((New-Label "LOT name"), 0, 0)
+$newTable.Controls.Add($newLotNameBox, 1, 0)
+$newTable.Controls.Add($createLotButton, 2, 0)
+
+$newTable.Controls.Add((New-Label "Created path"), 0, 1)
+$newTable.Controls.Add($newLotPathBox, 1, 1)
+$newTable.SetColumnSpan($newLotPathBox, 2)
+
+$newTable.Controls.Add((New-Label "Computers.txt"), 0, 2)
+$newTable.Controls.Add($newComputersPathBox, 1, 2)
+$newTable.Controls.Add($openNewComputersButton, 2, 2)
+
+$newSection.Content.Controls.Add($newTable)
+$newLayout.Controls.Add($newSection.Panel, 0, 0)
+$newTab.Controls.Add($newLayout)
+
+$footerPanel = New-Object System.Windows.Forms.Panel
+$footerPanel.Dock = "Fill"
+$footerPanel.BackColor = $colorBackground
+
+$footerLayout = New-Object System.Windows.Forms.TableLayoutPanel
+$footerLayout.Dock = "Fill"
+$footerLayout.ColumnCount = 2
+$footerLayout.RowCount = 1
+$footerLayout.BackColor = $colorBackground
+$footerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$footerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 120))) | Out-Null
+
+$footerStatus = New-Object System.Windows.Forms.Label
+$footerStatus.Dock = "Fill"
+$footerStatus.Text = "Ready"
+$footerStatus.TextAlign = "MiddleLeft"
+$footerStatus.ForeColor = $colorMuted
+$footerStatus.Font = $smallFont
 
 $closeButton = New-Object System.Windows.Forms.Button
 $closeButton.Text = "Close"
@@ -652,68 +851,23 @@ $buttonPanel.FlowDirection = "RightToLeft"
 $buttonPanel.BackColor = $colorBackground
 $buttonPanel.Padding = New-Object System.Windows.Forms.Padding(0, 4, 0, 0)
 $buttonPanel.Controls.Add($closeButton)
-$buttonPanel.Controls.Add($launchButton)
-$buttonPanel.Controls.Add($createButton)
-
-$table.Controls.Add((New-Label "Toolkit root"), 0, 0)
-$table.Controls.Add($rootBox, 1, 0)
-$table.SetColumnSpan($rootBox, 2)
-
-$table.Controls.Add((New-Label "Computer file"), 0, 1)
-$table.Controls.Add($computerFileBox, 1, 1)
-$table.Controls.Add($browseButton, 2, 1)
-
-$table.Controls.Add((New-Label "LOT folder"), 0, 2)
-$table.Controls.Add($lotNameBox, 1, 2)
-$table.SetColumnSpan($lotNameBox, 2)
-
-$table.Controls.Add((New-Label "Launch mode"), 0, 3)
-$table.Controls.Add($modeCombo, 1, 3)
-$table.SetColumnSpan($modeCombo, 2)
-
-$table.Controls.Add((New-Label "Created LOT"), 0, 4)
-$table.Controls.Add($createdLotBox, 1, 4)
-$table.SetColumnSpan($createdLotBox, 2)
-
-$configSection.Content.Controls.Add($table)
-$activitySection.Content.Controls.Add($statusBox)
-
-$contentLayout.Controls.Add($configSection.Panel, 0, 0)
-$contentLayout.Controls.Add($activitySection.Panel, 0, 1)
-
-$footerPanel = New-Object System.Windows.Forms.Panel
-$footerPanel.Dock = "Fill"
-$footerPanel.BackColor = $colorBackground
-
-$footerLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$footerLayout.Dock = "Fill"
-$footerLayout.ColumnCount = 2
-$footerLayout.RowCount = 1
-$footerLayout.BackColor = $colorBackground
-$footerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$footerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 360))) | Out-Null
-
-$footerStatus = New-Object System.Windows.Forms.Label
-$footerStatus.Dock = "Fill"
-$footerStatus.Text = "Ready"
-$footerStatus.TextAlign = "MiddleLeft"
-$footerStatus.ForeColor = $colorMuted
-$footerStatus.Font = $smallFont
 
 $footerLayout.Controls.Add($footerStatus, 0, 0)
 $footerLayout.Controls.Add($buttonPanel, 1, 0)
 $footerPanel.Controls.Add($footerLayout)
 
 $rootLayout.Controls.Add($headerPanel, 0, 0)
-$rootLayout.Controls.Add($contentLayout, 0, 1)
+$rootLayout.Controls.Add($tabControl, 0, 1)
 $rootLayout.Controls.Add($footerPanel, 0, 2)
-
 $form.Controls.Add($rootLayout)
 
-$script:CurrentLotPath = $null
+$script:LotList = @()
+$script:SelectedLotSummary = $null
+$script:CreatedComputersPath = $null
 
 function Add-Status {
     param([string]$Message)
+
     $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
     $footerStatus.Text = $Message
     if ([string]::IsNullOrWhiteSpace($statusBox.Text)) {
@@ -724,50 +878,186 @@ function Add-Status {
     }
 }
 
-$browseButton.Add_Click({
-    $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Title = "Select computer list file"
-    $dialog.Filter = "Computer list files (*.txt;*.csv)|*.txt;*.csv|Text files (*.txt)|*.txt|CSV files (*.csv)|*.csv|All files (*.*)|*.*"
-    $dialog.CheckFileExists = $true
-    $dialog.Multiselect = $false
+function Clear-LotDetails {
+    $script:SelectedLotSummary = $null
+    $selectedLotPathBox.Text = ""
+    $deviceCountBox.Text = ""
+    $adScopeBox.Text = ""
+    $selectedAdCsvBox.Text = ""
+    $rootAdCsvBox.Text = ""
+    $intuneCsvBox.Text = ""
+    $entraCsvBox.Text = ""
+    $wrapperStatusBox.Text = ""
+    Set-ButtonEnabledStyle -Button $launchExistingButton -Enabled $false -EnabledBackColor $colorSuccess
+}
 
-    if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
-        $computerFileBox.Text = $dialog.FileName
-        $lotNameBox.Text = Get-SafeLotName -ComputerFilePath $dialog.FileName
-        Add-Status ("Selected computer file: {0}" -f $dialog.FileName)
+function Update-LotDetails {
+    if ($lotCombo.SelectedIndex -lt 0 -or $lotCombo.SelectedIndex -ge $script:LotList.Count) {
+        Clear-LotDetails
+        return
+    }
+
+    $lot = $script:LotList[$lotCombo.SelectedIndex]
+    $summary = Get-LotSummary -RootPath $toolkitRoot -LotPath $lot.FullName
+    $script:SelectedLotSummary = $summary
+
+    $selectedLotPathBox.Text = $summary.Path
+    $deviceCountBox.Text = [string]$summary.ComputerCount
+    $adScopeBox.Text = $summary.AdScope
+    $selectedAdCsvBox.Text = ("{0} | {1}" -f $summary.SelectedAdCsv,$summary.SelectedAdCsvStatus)
+    $rootAdCsvBox.Text = $summary.RootAdCsvStatus
+    $intuneCsvBox.Text = ("Intune: {0}" -f $summary.IntuneCsvStatus)
+    $entraCsvBox.Text = ("Entra: {0}" -f $summary.EntraCsvStatus)
+
+    if ($summary.WrappersReady) {
+        $wrapperStatusBox.Text = "Wrappers ready"
+    }
+    else {
+        $wrapperStatusBox.Text = ("Missing: {0}" -f ($summary.MissingWrappers -join ", "))
+    }
+
+    $canLaunch = ($summary.ComputerCount -gt 0 -and $summary.WrappersReady)
+    Set-ButtonEnabledStyle -Button $launchExistingButton -Enabled $canLaunch -EnabledBackColor $colorSuccess
+}
+
+function Refresh-LotList {
+    param([string]$PreferredName)
+
+    $selectedName = if (-not [string]::IsNullOrWhiteSpace($PreferredName)) {
+        $PreferredName
+    }
+    elseif ($lotCombo.SelectedItem) {
+        [string]$lotCombo.SelectedItem
+    }
+    else {
+        ""
+    }
+    $script:LotList = @(Get-LotFolders -RootPath $toolkitRoot)
+
+    $lotCombo.Items.Clear()
+    foreach ($lot in $script:LotList) {
+        $lotCombo.Items.Add($lot.Name) | Out-Null
+    }
+
+    if ($lotCombo.Items.Count -eq 0) {
+        Clear-LotDetails
+        Add-Status "No operational LOT-* folder found."
+        return
+    }
+
+    $selectedIndex = 0
+    if (-not [string]::IsNullOrWhiteSpace($selectedName)) {
+        for ($i = 0; $i -lt $lotCombo.Items.Count; $i++) {
+            if ([string]$lotCombo.Items[$i] -eq $selectedName) {
+                $selectedIndex = $i
+                break
+            }
+        }
+    }
+
+    $lotCombo.SelectedIndex = $selectedIndex
+    Update-LotDetails
+    Add-Status ("Loaded {0} LOT folder(s)." -f $lotCombo.Items.Count)
+}
+
+$refreshLotsButton.Add_Click({
+    try {
+        Refresh-LotList
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Refresh failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
-$createButton.Add_Click({
+$lotCombo.Add_SelectedIndexChanged({
     try {
-        if ([string]::IsNullOrWhiteSpace($computerFileBox.Text)) {
-            throw "Select a computer list file first."
-        }
+        Update-LotDetails
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+    }
+})
 
-        if ([string]::IsNullOrWhiteSpace($lotNameBox.Text)) {
-            $lotNameBox.Text = Get-SafeLotName -ComputerFilePath $computerFileBox.Text
-        }
+$openLotFolderButton.Add_Click({
+    try {
+        if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
+        Open-FolderPath -Path $script:SelectedLotSummary.Path
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Open folder failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    }
+})
 
-        Add-Status ("Creating LOT folder from: {0}" -f $computerFileBox.Text)
-        $result = New-ToolkitLotFolder -RootPath $toolkitRoot -ComputerFilePath $computerFileBox.Text -LotName $lotNameBox.Text
-        $script:CurrentLotPath = $result.LotPath
-        $createdLotBox.Text = $script:CurrentLotPath
-        Set-LaunchButtonState -CanLaunch $true
+$openComputersButton.Add_Click({
+    try {
+        if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
+        Open-TextFile -Path $script:SelectedLotSummary.ComputersPath
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+    }
+})
 
-        Add-Status ("Created {0} with {1} computer(s)." -f $result.LotPath,$result.ComputerCount)
+$openAdDomainButton.Add_Click({
+    try {
+        if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
+        Open-TextFile -Path $script:SelectedLotSummary.AdDomainPath
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+    }
+})
+
+$refreshWrappersButton.Add_Click({
+    try {
+        Invoke-LotWrapperRefresh -RootPath $toolkitRoot
         Add-Status "LOT wrappers refreshed."
+        Refresh-LotList
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Wrapper refresh failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    }
+})
+
+$launchExistingButton.Add_Click({
+    try {
+        if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
+        if ($script:SelectedLotSummary.ComputerCount -le 0) { throw "Computers.txt is empty." }
+
+        Add-Status ("Launching {0} in {1} mode." -f $script:SelectedLotSummary.Name,$existingModeCombo.SelectedItem)
+        Start-ToolkitLot -LotPath $script:SelectedLotSummary.Path -Mode ([string]$existingModeCombo.SelectedItem)
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "LOT launch failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    }
+})
+
+$createLotButton.Add_Click({
+    try {
+        $result = New-ToolkitLotFolder -RootPath $toolkitRoot -LotName $newLotNameBox.Text
+        $newLotPathBox.Text = $result.LotPath
+        $newComputersPathBox.Text = $result.ComputersPath
+        $script:CreatedComputersPath = $result.ComputersPath
+        Set-ButtonEnabledStyle -Button $openNewComputersButton -Enabled $true
+
+        Add-Status ("Created empty LOT: {0}" -f $result.LotPath)
+        Refresh-LotList -PreferredName (Split-Path -Leaf $result.LotPath)
+        $tabControl.SelectedTab = $newTab
 
         $answer = [System.Windows.Forms.MessageBox]::Show(
             $form,
-            ("LOT created:`r`n{0}`r`n`r`nLaunch it now?" -f $result.LotPath),
-            "Launch LOT",
+            ("LOT created:`r`n{0}`r`n`r`nOpen Computers.txt now?" -f $result.LotPath),
+            "Fill Computers.txt",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question
         )
 
         if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
-            Add-Status ("Launching LOT in {0} mode." -f $modeCombo.SelectedItem)
-            Start-ToolkitLot -LotPath $script:CurrentLotPath -Mode ([string]$modeCombo.SelectedItem)
+            Open-TextFile -Path $result.ComputersPath
         }
     }
     catch {
@@ -776,18 +1066,16 @@ $createButton.Add_Click({
     }
 })
 
-$launchButton.Add_Click({
+$openNewComputersButton.Add_Click({
     try {
-        if ([string]::IsNullOrWhiteSpace($script:CurrentLotPath)) {
-            throw "Create a LOT folder first."
+        if ([string]::IsNullOrWhiteSpace($script:CreatedComputersPath)) {
+            throw "Create a LOT first."
         }
 
-        Add-Status ("Launching LOT in {0} mode." -f $modeCombo.SelectedItem)
-        Start-ToolkitLot -LotPath $script:CurrentLotPath -Mode ([string]$modeCombo.SelectedItem)
+        Open-TextFile -Path $script:CreatedComputersPath
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "LOT launch failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
@@ -796,7 +1084,13 @@ $closeButton.Add_Click({
 })
 
 $form.Add_Shown({
-    $createButton.Focus() | Out-Null
+    try {
+        Refresh-LotList
+        $lotCombo.Focus() | Out-Null
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+    }
 })
 
 $form.Add_FormClosed({
@@ -812,9 +1106,10 @@ $form.Add_FormClosed({
 })
 
 if ($ValidateOnly) {
-    Write-Host "Smart Intune Hybrid Join Toolkit LOT Launcher GUI validation completed."
+    $folders = @(Get-LotFolders -RootPath $toolkitRoot)
+    Write-Host ("Smart Intune Hybrid Join Toolkit LOT Launcher GUI validation completed. Lots={0}" -f $folders.Count)
     return
 }
 
-Add-Status "Ready. Select a computer list file to create a local LOT-* folder."
+Add-Status "Ready. Select an existing LOT or create a new empty LOT."
 [void]$form.ShowDialog()

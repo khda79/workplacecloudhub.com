@@ -29,7 +29,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.0.0"
+$ScriptVersion = "1.0.1"
 
 $BaseDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $DefaultOutputDir = $BaseDir
@@ -130,18 +130,7 @@ $commonProperties = @(
     "OperatingSystem",
     "OperatingSystemVersion",
     "LastLogonTimestamp",
-    "PasswordLastSet",
-    "whenCreated",
-    "whenChanged",
-    "DistinguishedName",
-    "CanonicalName",
-    "ObjectGUID",
-    "SID",
-    "IPv4Address",
-    "Description",
-    "ManagedBy",
-    "ServicePrincipalName",
-    "UserAccountControl"
+    "DistinguishedName"
 )
 
 Write-Host "Export-ADDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
@@ -165,20 +154,9 @@ $export = foreach ($domainTarget in $domainTargets) {
             Enabled               = $computer.Enabled
             DNSHostName           = $computer.DNSHostName
             DistinguishedName     = $computer.DistinguishedName
-            CanonicalName         = $computer.CanonicalName
             OperatingSystem       = $computer.OperatingSystem
             OperatingSystemVersion = $computer.OperatingSystemVersion
             LastLogonTimestampUtc = Convert-FileTimeUtc -Value $computer.LastLogonTimestamp
-            PasswordLastSet       = $computer.PasswordLastSet
-            WhenCreated           = $computer.whenCreated
-            WhenChanged           = $computer.whenChanged
-            ObjectGuid            = $computer.ObjectGUID
-            ObjectSid             = $computer.SID
-            IPv4Address           = $computer.IPv4Address
-            Description           = $computer.Description
-            ManagedBy             = $computer.ManagedBy
-            UserAccountControl    = $computer.UserAccountControl
-            ServicePrincipalNameCount = @($computer.ServicePrincipalName).Count
         }
     }
 }
