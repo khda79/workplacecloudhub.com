@@ -98,6 +98,7 @@ SmartM365/Devices/SmartIntuneHybridJoinToolkit/DevicesAD.csv.tmp.*.csv
 SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-*/
 !SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/
 !SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/Computers.txt
+!SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/AdDomain.txt
 !SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/*.cmd
 SmartM365/Devices/SmartIntuneHybridJoinToolkit/**/ComputersAlreadyEnrolled.txt
 SmartM365/Devices/SmartIntuneHybridJoinToolkit/**/PsExecLogs/

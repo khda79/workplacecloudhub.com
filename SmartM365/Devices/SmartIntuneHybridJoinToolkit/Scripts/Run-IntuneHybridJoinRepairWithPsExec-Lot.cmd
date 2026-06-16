@@ -112,9 +112,7 @@ if exist "%PARENT_AD_CSV%" (
 )
 if not "%EHJIR_AD_DOMAIN%"=="" (
     set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%LOT_AD_CSV%"" -AdDomain ""%EHJIR_AD_DOMAIN%"""
-) else if exist "%LOT_AD_CSV%" (
-    set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%LOT_AD_CSV%"""
-) else if exist "%PARENT_AD_CSV%" (
+) else (
     set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%PARENT_AD_CSV%"""
 )
 
