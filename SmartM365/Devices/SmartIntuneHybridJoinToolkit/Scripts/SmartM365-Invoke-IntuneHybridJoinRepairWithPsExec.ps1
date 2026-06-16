@@ -55,7 +55,7 @@ Optional local CSV export of Active Directory computers. Defaults to DevicesAD.c
 Optional root forest-wide AD CSV. LOT wrappers pass the toolkit-root DevicesAD.csv here so the launcher can prefer it when it exists and is less than 60 minutes old.
 
 .PARAMETER AdDomain
-Optional AD domain/controller used when refreshing DevicesAD.csv. For LOT runs, set EHJIR_AD_DOMAIN or create AdDomain.txt in the LOT folder.
+Optional AD domain/controller used when refreshing DevicesAD.csv. When omitted, the AD export targets all domains in the current AD forest. For LOT runs, set EHJIR_AD_DOMAIN or create AdDomain.txt in the LOT folder only when a domain-specific export is required.
 
 .PARAMETER LogRoot
 Local folder where PsExec per-computer logs are written. Defaults to PsExecLogs next to this script.
@@ -177,7 +177,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.44"
+$LauncherVersion = "2.10.45"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
@@ -289,7 +289,7 @@ if (-not $AdInventoryCsvWasProvided) {
         }
     }
 
-    if ([string]::IsNullOrWhiteSpace($AdInventoryCsv) -and $candidateAdCsvPaths.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($AdDomain)) {
+    if ([string]::IsNullOrWhiteSpace($AdInventoryCsv) -and $candidateAdCsvPaths.Count -gt 0) {
         $AdInventoryCsv = $candidateAdCsvPaths[0]
     }
 }
@@ -1545,12 +1545,10 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
         elseif ($refreshInitialAdInventory -and $DryRun) {
             Write-Host ("DryRun: AD inventory CSV is {0}; skipping automatic AD computer export." -f $initialAdInventoryReason) -ForegroundColor Yellow
         }
-        elseif ($refreshInitialAdInventory -and [string]::IsNullOrWhiteSpace($AdDomain)) {
-            Write-Host ("WARNING: AD inventory CSV is {0}, but no AD domain was provided. Set -AdDomain, EHJIR_AD_DOMAIN, or LOT AdDomain.txt to refresh it." -f $initialAdInventoryReason) -ForegroundColor Yellow
-        }
         elseif ($refreshInitialAdInventory) {
             $initialAdInventoryLogPath = Join-Path $ReportRoot ("DevicesAD_InitialRefresh_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
-            Write-Host ("AD inventory CSV is {0}. Running AD computer export before starting the lot..." -f $initialAdInventoryReason) -ForegroundColor Yellow
+            $initialAdScope = if ([string]::IsNullOrWhiteSpace($AdDomain)) { "forest" } else { "domain '$AdDomain'" }
+            Write-Host ("AD inventory CSV is {0}. Running AD computer export before starting the lot. Scope={1}..." -f $initialAdInventoryReason,$initialAdScope) -ForegroundColor Yellow
             $initialAdInventory = Invoke-FullAdInventoryExport `
                 -ExportScriptPath $ExportAdScriptPath `
                 -OutputPath $AdInventoryCsv `
@@ -1612,7 +1610,7 @@ Write-Host "PsExec wait : $(if ($PsExecTimeoutMinutes -eq 0) { 'No timeout' } el
 Write-Host "Lost PsExec : poll every $CommunicationLostEvidencePollMinutes minute(s), max $CommunicationLostEvidenceWaitMinutes minute(s), before delayed evidence collection"
 Write-Host "Post Intune : Enabled=$(-not [bool]$SkipPostCycleIntuneInventory); Mode=Full Graph inventory; PageSize=$PostCycleIntuneInventoryPageSize; Export=$ExportIntuneScriptPath"
 Write-Host "Post Entra  : Enabled=$(-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)); Mode=Full Graph device inventory; PageSize=$PostCycleIntuneInventoryPageSize; Export=$ExportEntraScriptPath"
-Write-Host "Post AD     : Enabled=$(-not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and -not [string]::IsNullOrWhiteSpace($AdDomain)); Mode=Full AD computer inventory; Export=$ExportAdScriptPath"
+Write-Host "Post AD     : Enabled=$(-not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv)); Mode=Full AD computer inventory; Export=$ExportAdScriptPath"
 Write-Host ""
 
 function Invoke-IntuneHybridJoinRepairCycle {
@@ -2840,8 +2838,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
     }
 
-    if (-not $DryRun -and -not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and -not [string]::IsNullOrWhiteSpace($AdDomain)) {
-        Write-Host ("Cycle {0}: refreshing full post-cycle AD computer inventory..." -f $CycleNumber) -ForegroundColor Cyan
+    if (-not $DryRun -and -not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
+        $postAdScope = if ([string]::IsNullOrWhiteSpace($AdDomain)) { "forest" } else { "domain '$AdDomain'" }
+        Write-Host ("Cycle {0}: refreshing full post-cycle AD computer inventory. Scope={1}..." -f $CycleNumber,$postAdScope) -ForegroundColor Cyan
         $postAdInventoryLogPath = Join-Path $ReportRoot ("DevicesAD_PostCycle_cycle{0}_{1}.log" -f $CycleNumber,(Get-Date -Format "yyyyMMdd_HHmmss"))
         $postAdInventory = Invoke-FullAdInventoryExport `
             -ExportScriptPath $ExportAdScriptPath `
