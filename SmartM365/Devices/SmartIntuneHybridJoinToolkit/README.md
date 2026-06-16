@@ -10,6 +10,8 @@ For single-device support with a richer GUI, support bundle, and CLI export expe
 
 ```text
 Export-IntuneDevicesCsv.cmd
+Export-EntraDevicesCsv.cmd
+Export-ADDevicesCsv.cmd
 Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd
 Update-LotCmdWrappers.cmd
 Scripts\
@@ -18,6 +20,7 @@ LOT-X\
 
 - `Export-IntuneDevicesCsv.cmd` exports the global Intune inventory to `DevicesIntune.csv`.
 - `Export-EntraDevicesCsv.cmd` exports the global Entra device inventory to `DevicesEntra.csv`.
+- `Export-ADDevicesCsv.cmd` exports AD computer objects to `DevicesAD.csv`. From the toolkit root, it exports all domains in the current AD forest by default; pass `-Domain <domain>` or set `EHJIR_AD_DOMAIN` to limit the export to one domain.
 - `Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd` opens a GUI to create a local `LOT-*` folder from a computer list file and optionally launch it.
 - `Update-LotCmdWrappers.cmd` refreshes the small CMD wrappers in every `LOT-*` folder.
 - `Scripts\` contains the shared PowerShell scripts and shared LOT launchers.
@@ -30,6 +33,7 @@ LOT-X\
 - `Scripts\SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec.ps1`: local PsExec orchestrator for LOT folders.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1`: full Intune managed-device inventory export.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1`: full Entra device inventory export.
+- `Scripts\SmartM365-IntuneHybridJoinRepair-Export-ADDevicesCsv.ps1`: AD computer inventory export for LOT report enrichment.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1`: refreshes small LOT CMD wrappers.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-LotLauncher-GUI.ps1`: GUI that creates a local LOT folder from a selected computer list file, writes `Computers.txt`, refreshes wrappers, and offers to launch the LOT.
 
@@ -79,6 +83,14 @@ Refresh LOT wrappers after creating or importing LOT folders:
 ```cmd
 Update-LotCmdWrappers.cmd
 ```
+
+Use `Export-ADDevicesCsv.cmd` from the toolkit root to create a forest-wide `DevicesAD.csv`.
+LOT runs pass this root CSV separately and use it in priority when it exists and is less than
+60 minutes old. If the root AD inventory is missing or older than 60 minutes, a LOT can still
+use a per-LOT AD domain by setting `EHJIR_AD_DOMAIN` before launching the LOT, or by creating
+an `AdDomain.txt` file in that LOT folder with the domain name on the first line. In that fallback
+mode, the repair launcher writes and refreshes `LOT-*\DevicesAD.csv` so different LOT folders can
+target different AD domains without overwriting each other's AD inventory.
 
 Create a LOT folder from a computer list with the GUI:
 
