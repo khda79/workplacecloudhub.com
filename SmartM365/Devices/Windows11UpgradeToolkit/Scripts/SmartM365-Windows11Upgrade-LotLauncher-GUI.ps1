@@ -1138,6 +1138,38 @@ function Get-EnvSwitch {
     return $Default
 }
 
+$script:SetupSourcePlaceholder = '\\server\share\Windows11'
+
+function Test-IsSetupSourcePlaceholder {
+    param([AllowNull()][string]$Value)
+    return ([string]$Value -eq $script:SetupSourcePlaceholder)
+}
+
+function Set-SetupSourcePlaceholder {
+    if ([string]::IsNullOrWhiteSpace($optionSetupSourceBox.Text)) {
+        $optionSetupSourceBox.Text = $script:SetupSourcePlaceholder
+        $optionSetupSourceBox.ForeColor = $colorMuted
+    }
+}
+
+function Get-SetupSourceText {
+    $value = $optionSetupSourceBox.Text.Trim()
+    if (Test-IsSetupSourcePlaceholder -Value $value) { return '' }
+    return $value
+}
+
+function Test-IsUncPath {
+    param([AllowNull()][string]$Path)
+    return ([string]$Path -match '^\\\\[^\\]+\\[^\\]+')
+}
+
+function Test-IsLocalOrRelativePath {
+    param([AllowNull()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if (Test-IsUncPath -Path $Path) { return $false }
+    return $true
+}
+
 function Set-OptionNumberFromEnv {
     param(
         [Parameter(Mandatory = $true)][System.Windows.Forms.NumericUpDown]$Control,
@@ -1167,7 +1199,17 @@ $optionDryRunCheck = New-OptionCheck -Text 'Dry run'
 
 $optionSetupSourceBox = New-EntryBox
 $optionSetupSourceBox.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
-$optionSetupSourceBox.Text = Join-Path $toolkitRoot 'SetupSource'
+$optionSetupSourceBox.Text = ''
+$optionSetupSourceBox.Add_Enter({
+    if (Test-IsSetupSourcePlaceholder -Value $optionSetupSourceBox.Text) {
+        $optionSetupSourceBox.Text = ''
+        $optionSetupSourceBox.ForeColor = $colorInk
+    }
+})
+$optionSetupSourceBox.Add_Leave({
+    Set-SetupSourcePlaceholder
+})
+Set-SetupSourcePlaceholder
 
 $optionSetupModeCombo = New-Object System.Windows.Forms.ComboBox
 $optionSetupModeCombo.Dock = 'Fill'
@@ -1208,6 +1250,7 @@ $optionSkipSetupPreCopyCheck.Checked = Get-EnvSwitch -Name 'W11UT_SKIP_SETUP_MED
 $setupSourceDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_SOURCE', 'Process')
 if (-not [string]::IsNullOrWhiteSpace($setupSourceDefault)) {
     $optionSetupSourceBox.Text = $setupSourceDefault
+    $optionSetupSourceBox.ForeColor = $colorInk
 }
 
 $setupModeDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_EXECUTION_MODE', 'Process')
@@ -1274,7 +1317,7 @@ $optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 2, 8)
 $optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 3, 8)
 
 $optionsNote = New-Object System.Windows.Forms.Label
-$optionsNote.Text = 'Setup upgrade requires valid media with setup.exe, sources\install.wim or install.esd, and a matching setup language. Use Any only when language matching is intentionally bypassed.'
+$optionsNote.Text = 'For LOT/PsExec, Setup source must be a UNC path reachable by target computers. Local paths are for local tests only and require confirmation.'
 $optionsNote.Dock = 'Fill'
 $optionsNote.ForeColor = $colorMuted
 $optionsNote.TextAlign = 'MiddleLeft'
@@ -1395,8 +1438,9 @@ function Get-ToolkitOptionEnvironment {
         $environment["W11UT_SETUP_MEDIA_ID"] = $optionSetupMediaIdBox.Text.Trim()
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($optionSetupSourceBox.Text)) {
-        $environment["W11UT_SETUP_SOURCE"] = $optionSetupSourceBox.Text.Trim()
+    $setupSource = Get-SetupSourceText
+    if (-not [string]::IsNullOrWhiteSpace($setupSource)) {
+        $environment["W11UT_SETUP_SOURCE"] = $setupSource
     }
 
     $environment["W11UT_AUDIT_ONLY"] = if ($optionAuditOnlyCheck.Checked) { "1" } else { "0" }
@@ -1409,6 +1453,38 @@ function Get-ToolkitOptionEnvironment {
     $environment["W11UT_SKIP_SETUP_MEDIA_PRECOPY"] = if ($optionSkipSetupPreCopyCheck.Checked) { "1" } else { "0" }
 
     return $environment
+}
+
+function Test-SetupSourceBeforeLaunch {
+    $setupSource = Get-SetupSourceText
+    $mode = [string]$optionSetupModeCombo.SelectedItem
+
+    if (-not $optionAllowSetupUpgradeCheck.Checked) { return $true }
+    if ($optionSkipSetupPreCopyCheck.Checked -and $mode -ne 'Share') { return $true }
+
+    if ([string]::IsNullOrWhiteSpace($setupSource)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            $form,
+            "Setup source is required for setup upgrade when target media copy is enabled.`r`n`r`nUse a UNC path reachable by the target computers, for example:`r`n$script:SetupSourcePlaceholder`r`n`r`nOr enable Use existing media only if the target cache is already valid.",
+            'Setup source required',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        $optionSetupSourceBox.Focus()
+        return $false
+    }
+
+    if (Test-IsUncPath -Path $setupSource) { return $true }
+
+    $answer = [System.Windows.Forms.MessageBox]::Show(
+        $form,
+        ("Setup source is not a UNC path:`r`n{0}`r`n`r`nIn LOT/PsExec mode, the target computer runs as SYSTEM and must read this path itself. A local or relative path usually exists only on the technician workstation.`r`n`r`nContinue anyway for a local/direct test or an explicitly shared identical path?" -f $setupSource),
+        'Confirm local setup source',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
+
+    return ($answer -eq [System.Windows.Forms.DialogResult]::Yes)
 }
 
 function Clear-LotDetails {
@@ -1594,6 +1670,7 @@ $launchExistingButton.Add_Click({
     try {
         if (-not $script:SelectedLotSummary) { throw 'Select a LOT first.' }
         if ($script:SelectedLotSummary.ComputerCount -le 0) { throw 'Computers.txt is empty.' }
+        if (-not (Test-SetupSourceBeforeLaunch)) { return }
 
         $optionArguments = @(Get-ToolkitOptionArguments)
         $optionEnvironment = Get-ToolkitOptionEnvironment
@@ -1612,6 +1689,7 @@ $launchAllLotsButton.Add_Click({
         if ($launchableLots.Count -eq 0) {
             throw 'No launchable LOT found. Check Computers.txt and wrapper files.'
         }
+        if (-not (Test-SetupSourceBeforeLaunch)) { return }
 
         $mode = [string]$existingModeCombo.SelectedItem
         $limit = [int]$globalConcurrencyLimitBox.Value
