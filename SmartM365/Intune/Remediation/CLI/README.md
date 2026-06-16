@@ -29,19 +29,19 @@ The second scope is used for Intune report export jobs when downloading executio
 Deploy one package folder:
 
 ```powershell
-.\Devices\IntuneRemediation\CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Devices\IntuneRemediation\Packages\WindowsUpdate\Cache-Health
+.\Intune\Remediation\CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Intune\Remediation\Packages\WindowsUpdate\Cache-Health
 ```
 
 Deploy all packages under a folder and update existing Intune remediations with the same display name:
 
 ```powershell
-.\Devices\IntuneRemediation\CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Devices\IntuneRemediation\Packages\WindowsUpdate -Recurse -UpdateExisting
+.\Intune\Remediation\CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Intune\Remediation\Packages\WindowsUpdate -Recurse -UpdateExisting
 ```
 
 Deploy a package and replace its assignments with one Entra group:
 
 ```powershell
-.\Devices\IntuneRemediation\CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Devices\IntuneRemediation\Packages\WindowsUpdate\Cache-Health -AssignmentGroupId "00000000-0000-0000-0000-000000000000" -RunRemediationScript
+.\Intune\Remediation\CLI\SmartM365-Deploy-IntuneRemediation-CLI.ps1 -Path .\Intune\Remediation\Packages\WindowsUpdate\Cache-Health -AssignmentGroupId "00000000-0000-0000-0000-000000000000" -RunRemediationScript
 ```
 
 Omit `-AssignmentGroupId` to create or update the remediation package without changing Intune assignments.
@@ -49,13 +49,13 @@ Omit `-AssignmentGroupId` to create or update the remediation package without ch
 Open the GUI:
 
 ```powershell
-pwsh -STA -NoProfile -File .\Devices\IntuneRemediation\GUI\SmartM365-IntuneRemediation-GUI.ps1
+pwsh -STA -NoProfile -File .\Intune\Remediation\GUI\SmartM365-IntuneRemediation-GUI.ps1
 ```
 
 Or use the launcher, which hides the PowerShell console:
 
 ```cmd
-.\Devices\IntuneRemediation\Start-SmartM365-IntuneRemediation-GUI.cmd
+.\Intune\Remediation\Start-SmartM365-IntuneRemediation-GUI.cmd
 ```
 
 See `../GUI/README.md` for GUI configuration, actions, and log behavior.

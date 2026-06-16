@@ -124,7 +124,7 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 
 ### Smart Intune Remediation
 
-`SmartM365/Devices/IntuneRemediation/` contains the SmartM365 Intune remediation workspace.
+`SmartM365/Intune/Remediation/` contains the SmartM365 Intune remediation workspace.
 
 - `Packages/`: Intune detection, remediation, diagnostic, and action scripts organized by scenario.
 - `GUI/`: WPF interface to browse local remediation packages, view Intune cloud remediations, edit scripts, run PSScriptAnalyzer, publish to Intune, duplicate/reset execution history, delete selected cloud remediations, export execution CSV reports, and archive local or cloud scripts.
