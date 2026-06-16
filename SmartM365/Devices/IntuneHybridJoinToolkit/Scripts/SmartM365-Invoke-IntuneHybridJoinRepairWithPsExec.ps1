@@ -2082,15 +2082,12 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 }
             }
 
-            $isVirtual = (-not [string]::IsNullOrWhiteSpace($matchedPattern)) -or $hypervisorPresent
+            $isVirtual = -not [string]::IsNullOrWhiteSpace($matchedPattern)
             $evidence = if ($matchedPattern) {
                 "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
             }
-            elseif ($hypervisorPresent) {
-                "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=True"
-            }
             else {
-                "Manufacturer=$manufacturer; Model=$model"
+                "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=$hypervisorPresent"
             }
 
             [PSCustomObject]@{
