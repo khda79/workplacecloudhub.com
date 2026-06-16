@@ -2960,7 +2960,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     }
                 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
                 if ($brokenRunspace) {
-                    Write-Host ("  [RUNSPACE_BROKEN] {0}: job runspace entered Broken state — possible PowerShell 5.1 instability. Consider -DelayBetweenComputersSeconds 1." -f ($job.Name -replace "^EHJIR_C\d+_","")) -ForegroundColor Magenta
+                    Write-Host ("  [RUNSPACE_BROKEN] {0}: job runspace entered Broken state - possible PowerShell 5.1 instability. Consider -DelayBetweenComputersSeconds 1." -f ($job.Name -replace "^EHJIR_C\d+_","")) -ForegroundColor Magenta
                 }
             }
             catch {
