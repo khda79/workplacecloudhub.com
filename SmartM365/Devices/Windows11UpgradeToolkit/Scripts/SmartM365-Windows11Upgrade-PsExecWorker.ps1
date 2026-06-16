@@ -253,37 +253,12 @@ function Copy-SetupMediaToRemoteCache {
     )
 
     if (-not $AllowSetupUpgrade) { return 'NotRequested' }
-    if ($SkipSetupMediaPreCopy) { return 'Skipped' }
+    if ($SkipSetupMediaPreCopy) { return 'ExistingMediaOnly' }
     if ($SetupExecutionMode -eq 'Share') { return 'ShareMode' }
-    if ([string]::IsNullOrWhiteSpace($SetupSourcePath)) { return 'NoSource' }
-    if (-not (Test-Path -LiteralPath $SetupSourcePath -PathType Container)) {
-        throw "SetupSourcePath not reachable from operator workstation: $SetupSourcePath"
-    }
+    if ([string]::IsNullOrWhiteSpace($SetupSourcePath)) { return 'TargetCacheNoSource' }
 
-    $expectedLanguage = Resolve-ExpectedSetupLanguage -ComputerName $ComputerName
-    $resolvedSetupSourcePath = Resolve-SetupSourceMediaPath -SourcePath $SetupSourcePath -ExpectedLanguage $expectedLanguage
-    Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup source resolved: {1}; ExpectedLanguage={2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$resolvedSetupSourcePath,$expectedLanguage) -Encoding UTF8
-
-    $setupExe = Join-Path $resolvedSetupSourcePath 'setup.exe'
-    $installWim = Join-Path $resolvedSetupSourcePath 'sources\install.wim'
-    $installEsd = Join-Path $resolvedSetupSourcePath 'sources\install.esd'
-    if (-not (Test-Path -LiteralPath $setupExe -PathType Leaf)) { throw "setup.exe not found in SetupSourcePath: $resolvedSetupSourcePath" }
-    if (-not (Test-Path -LiteralPath $installWim -PathType Leaf) -and -not (Test-Path -LiteralPath $installEsd -PathType Leaf)) {
-        throw "Setup media missing sources\install.wim or sources\install.esd: $resolvedSetupSourcePath"
-    }
-    Test-SetupSourceLanguage -SourcePath $resolvedSetupSourcePath -ComputerName $ComputerName
-
-    $remoteCache = Join-Path $RemoteSetupCacheRoot $SetupMediaId
-    $remoteCacheShare = Convert-ToAdminSharePath -ComputerName $ComputerName -LocalPath $remoteCache
-    $remoteSetupShare = Join-Path $remoteCacheShare 'setup.exe'
-    if (Test-Path -LiteralPath $remoteSetupShare -PathType Leaf) {
-        Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup cache already has setup.exe: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$remoteCache) -Encoding UTF8
-        return 'AlreadyCached'
-    }
-
-    Add-Content -LiteralPath $LogPath -Value ("[{0}] Copying setup media to remote cache: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$remoteCache) -Encoding UTF8
-    Copy-DirectoryContent -SourcePath $resolvedSetupSourcePath -DestinationPath $remoteCacheShare
-    return 'Copied'
+    Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup media copy is target-side. SourcePath will be validated from the target SYSTEM context: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$SetupSourcePath) -Encoding UTF8
+    return 'TargetSideCache'
 }
 
 function Get-RemoteVirtualMachineSummary {
@@ -443,12 +418,15 @@ try {
             $lastRun = Get-Content -LiteralPath $lastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
             $result.RemoteStatus = [string]$lastRun.Status
             $result.RemoteNextAction = [string]$lastRun.NextAction
-            if ($result.RemoteStatus) {
-                $result.LauncherStatus = $result.RemoteStatus
-                $result.ExitCode = [string]$lastRun.ExitCode
+                if ($result.RemoteStatus) {
+                    $result.LauncherStatus = $result.RemoteStatus
+                    $result.ExitCode = [string]$lastRun.ExitCode
+                }
+                if ($lastRun.PSObject.Properties['SetupCacheAction']) {
+                    $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
+                }
             }
         }
-    }
 }
 catch {
     $result.LauncherStatus = 'ERROR'

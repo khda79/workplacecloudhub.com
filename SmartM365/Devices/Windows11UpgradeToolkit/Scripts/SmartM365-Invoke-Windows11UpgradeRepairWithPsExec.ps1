@@ -4,9 +4,9 @@
 
 .DESCRIPTION
     LOT/PsExec orchestrator for Windows 10 to Windows 11 upgrade diagnostics and guarded repair.
-    It copies the autonomous endpoint script to each target, optionally pre-caches Windows 11
-    setup media locally on the target, starts the script as SYSTEM, collects evidence, and writes
-    cycle CSV reports.
+    It copies the autonomous endpoint script to each target, lets the target validate/cache
+    Windows 11 setup media when setup upgrade is enabled, starts the script as SYSTEM,
+    collects evidence, and writes cycle CSV reports.
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -47,7 +47,7 @@ param(
 
     [ValidateRange(1, 200)][int]$ThrottleLimit = 10,
     [ValidateRange(0, 200)][int]$GlobalConcurrencyLimit = 15,
-    [string]$GlobalConcurrencySemaphoreName = 'Local\SmartM365_IntuneWindows11UpgradeToolkit_ComputerWorkers',
+    [string]$GlobalConcurrencySemaphoreName = 'Local\SmartM365_Windows11UpgradeToolkit_ComputerWorkers',
     [ValidateRange(0, 1440)][int]$GlobalConcurrencyLeaseTimeoutMinutes = 0,
     [ValidateRange(0, 3600)][int]$DelayBetweenComputersSeconds = 0,
     [ValidateRange(1, 60)][int]$JobPollSeconds = 2,
@@ -77,7 +77,7 @@ if ([string]::IsNullOrWhiteSpace($LogRoot)) { $LogRoot = Join-Path (Split-Path -
 if ([string]::IsNullOrWhiteSpace($ReportRoot)) { $ReportRoot = Join-Path (Split-Path -Parent $ComputerListPath) 'Reports' }
 if ([string]::IsNullOrWhiteSpace($CentralLogRoot)) { $CentralLogRoot = Join-Path (Split-Path -Parent $ComputerListPath) 'CentralLogs' }
 
-$script:RemoteBaseDir = 'C:\ProgramData\SmartM365\IntuneWindows11UpgradeToolkit'
+$script:RemoteBaseDir = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
 $script:RemoteScriptPath = Join-Path $script:RemoteBaseDir 'SmartM365-Invoke-Windows11UpgradeRepair.ps1'
 $script:RemoteSetupCacheRoot = Join-Path $script:RemoteBaseDir 'SetupMedia'
 if ($GlobalConcurrencyLeaseTimeoutMinutes -lt 1) {
@@ -187,32 +187,12 @@ function Copy-SetupMediaToRemoteCache {
     )
 
     if (-not $AllowSetupUpgrade) { return 'NotRequested' }
-    if ($SkipSetupMediaPreCopy) { return 'Skipped' }
+    if ($SkipSetupMediaPreCopy) { return 'ExistingMediaOnly' }
     if ($SetupExecutionMode -eq 'Share') { return 'ShareMode' }
-    if ([string]::IsNullOrWhiteSpace($SetupSourcePath)) { return 'NoSource' }
-    if (-not (Test-Path -LiteralPath $SetupSourcePath -PathType Container)) {
-        throw "SetupSourcePath not reachable from operator workstation: $SetupSourcePath"
-    }
+    if ([string]::IsNullOrWhiteSpace($SetupSourcePath)) { return 'TargetCacheNoSource' }
 
-    $setupExe = Join-Path $SetupSourcePath 'setup.exe'
-    $installWim = Join-Path $SetupSourcePath 'sources\install.wim'
-    $installEsd = Join-Path $SetupSourcePath 'sources\install.esd'
-    if (-not (Test-Path -LiteralPath $setupExe -PathType Leaf)) { throw "setup.exe not found in SetupSourcePath: $SetupSourcePath" }
-    if (-not (Test-Path -LiteralPath $installWim -PathType Leaf) -and -not (Test-Path -LiteralPath $installEsd -PathType Leaf)) {
-        throw "Setup media missing sources\install.wim or sources\install.esd: $SetupSourcePath"
-    }
-
-    $remoteCache = Join-Path $script:RemoteSetupCacheRoot $SetupMediaId
-    $remoteCacheShare = Convert-ToAdminSharePath -Computer $Computer -LocalPath $remoteCache
-    $remoteSetupShare = Join-Path $remoteCacheShare 'setup.exe'
-    if (Test-Path -LiteralPath $remoteSetupShare -PathType Leaf) {
-        Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup cache already has setup.exe: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$remoteCache) -Encoding UTF8
-        return 'AlreadyCached'
-    }
-
-    Add-Content -LiteralPath $LogPath -Value ("[{0}] Copying setup media to remote cache: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$remoteCache) -Encoding UTF8
-    Copy-DirectoryContent -SourcePath $SetupSourcePath -DestinationPath $remoteCacheShare
-    return 'Copied'
+    Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup media copy is target-side. SourcePath will be validated from the target SYSTEM context: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$SetupSourcePath) -Encoding UTF8
+    return 'TargetSideCache'
 }
 
 function Collect-RemoteEvidence {
@@ -330,6 +310,9 @@ function Invoke-RemoteComputer {
                     $result.LauncherStatus = $result.RemoteStatus
                     $result.ExitCode = [string]$lastRun.ExitCode
                 }
+                if ($lastRun.PSObject.Properties['SetupCacheAction']) {
+                    $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
+                }
             }
         }
     }
@@ -364,6 +347,7 @@ if ($AllowForceUpgrade) { [void]$remoteArgs.Add('-AllowForceUpgrade') }
 if ($AllowSetupUpgrade) { [void]$remoteArgs.Add('-AllowSetupUpgrade') }
 if ($AllowReboot) { [void]$remoteArgs.Add('-AllowReboot') }
 if ($SkipVirtualMachines) { [void]$remoteArgs.Add('-SkipVirtualMachines') }
+if ($SkipSetupMediaPreCopy) { [void]$remoteArgs.Add('-SkipSetupMediaPreCopy') }
 [void]$remoteArgs.Add('-SetupExecutionMode'); [void]$remoteArgs.Add($SetupExecutionMode)
 [void]$remoteArgs.Add('-SetupMediaId'); [void]$remoteArgs.Add($SetupMediaId)
 [void]$remoteArgs.Add('-SetupLanguage'); [void]$remoteArgs.Add($SetupLanguage)
