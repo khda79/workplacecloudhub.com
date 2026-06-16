@@ -52,7 +52,7 @@ Optional local CSV export of Microsoft Entra devices. Defaults to DevicesEntra.c
 Optional local CSV export of Active Directory computers. Defaults to DevicesAD.csv in the parent folder, then DevicesAD.csv next to this script. LOT wrappers pass a LOT-local DevicesAD.csv for domain-specific fallback refreshes.
 
 .PARAMETER AdRootInventoryCsv
-Optional root forest-wide AD CSV. LOT wrappers pass the toolkit-root DevicesAD.csv here so the launcher can prefer it when it exists and is less than 60 minutes old.
+Optional root forest-wide AD CSV. LOT wrappers pass the toolkit-root DevicesAD.csv here so the launcher can prefer it when it exists and is less than 120 minutes old.
 
 .PARAMETER AdDomain
 Optional AD domain/controller used when refreshing DevicesAD.csv. When omitted, the AD export targets all domains in the current AD forest. For LOT runs, set EHJIR_AD_DOMAIN or create AdDomain.txt in the LOT folder only when a domain-specific export is required.
@@ -188,7 +188,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.47"
+$LauncherVersion = "2.10.48"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
@@ -279,7 +279,7 @@ if ($AdRootInventoryCsvWasProvided) {
     $adRootInventoryItem = Get-Item -LiteralPath $AdRootInventoryCsv -ErrorAction SilentlyContinue
     if ($adRootInventoryItem) {
         $adRootInventoryAge = (Get-Date) - $adRootInventoryItem.LastWriteTime
-        if ($adRootInventoryAge.TotalMinutes -le 60) {
+        if ($adRootInventoryAge.TotalMinutes -le 120) {
             $AdInventoryCsv = $adRootInventoryItem.FullName
             $AdInventoryUsesRecentRootCsv = $true
             $AdInventoryCsvWasProvided = $true
@@ -1437,9 +1437,9 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) {
     }
     else {
         $intuneInventoryAge = (Get-Date) - $intuneInventoryItem.LastWriteTime
-        if ($intuneInventoryAge.TotalMinutes -gt 60) {
+        if ($intuneInventoryAge.TotalMinutes -gt 120) {
             $refreshInitialInventory = $true
-            $initialInventoryReason = ("older than 60 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $intuneInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $intuneInventoryAge.TotalMinutes)
+            $initialInventoryReason = ("older than 120 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $intuneInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $intuneInventoryAge.TotalMinutes)
         }
     }
 
@@ -1485,9 +1485,9 @@ if (-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)) {
         }
         else {
             $entraInventoryAge = (Get-Date) - $entraInventoryItem.LastWriteTime
-            if ($entraInventoryAge.TotalMinutes -gt 60) {
+            if ($entraInventoryAge.TotalMinutes -gt 120) {
                 $refreshInitialEntraInventory = $true
-                $initialEntraInventoryReason = ("older than 60 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $entraInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $entraInventoryAge.TotalMinutes)
+                $initialEntraInventoryReason = ("older than 120 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $entraInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $entraInventoryAge.TotalMinutes)
             }
         }
 
@@ -1538,9 +1538,9 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
         }
         else {
             $adInventoryAge = (Get-Date) - $adInventoryItem.LastWriteTime
-            if ($adInventoryAge.TotalMinutes -gt 60) {
+            if ($adInventoryAge.TotalMinutes -gt 120) {
                 $refreshInitialAdInventory = $true
-                $initialAdInventoryReason = ("older than 60 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $adInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $adInventoryAge.TotalMinutes)
+                $initialAdInventoryReason = ("older than 120 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $adInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $adInventoryAge.TotalMinutes)
             }
         }
 
