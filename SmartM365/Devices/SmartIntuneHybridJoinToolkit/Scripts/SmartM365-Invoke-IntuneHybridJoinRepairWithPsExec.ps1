@@ -122,7 +122,7 @@ Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv
 
 #requires -Version 5.1
 
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding=$false)]
 param(
     [string]$ComputerListPath,
     [string]$PsExecPath,
@@ -158,11 +158,17 @@ param(
     [int]$CommunicationLostEvidenceWaitMinutes = 65,
     [int]$CommunicationLostEvidencePollMinutes = 10,
     [switch]$SkipPostCycleIntuneInventory,
-    [int]$PostCycleIntuneInventoryPageSize = 999
+    [int]$PostCycleIntuneInventoryPageSize = 999,
+    [Parameter(ValueFromRemainingArguments=$true)]
+    [string[]]$UnexpectedArguments
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.41"
+$LauncherVersion = "2.10.42"
+
+if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
+    throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
+}
 
 if ($ThrottleLimit -lt 1) { $ThrottleLimit = 1 }
 if ($JobPollSeconds -lt 1) { $JobPollSeconds = 1 }
@@ -274,6 +280,10 @@ function Resolve-PsExecPath {
 
     if (-not [string]::IsNullOrWhiteSpace($candidatePath) -and (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
         return (Get-Item -LiteralPath $candidatePath -ErrorAction Stop).FullName
+    }
+
+    if ($candidatePath -match '(?i)\.exe["'']?\s+\S') {
+        throw ("Invalid PsExecPath value: {0}. Provide exactly one executable path, for example -PsExecPath ""C:\Sysinternals\PsExec.exe""." -f $Path)
     }
 
     if (-not [string]::IsNullOrWhiteSpace($candidatePath)) {

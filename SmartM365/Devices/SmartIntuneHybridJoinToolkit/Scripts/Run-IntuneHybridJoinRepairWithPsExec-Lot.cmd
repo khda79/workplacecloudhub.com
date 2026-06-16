@@ -68,8 +68,9 @@ if not "%DRY_RUN_REQUESTED%"=="1" (
     if exist "%PSEXEC_EXE%" (
         set "PSEXEC_ARG=-PsExecPath ""%PSEXEC_EXE%"""
     ) else (
-        where PsExec.exe >nul 2>&1
-        if errorlevel 1 (
+        set "PSEXEC_FOUND="
+        for /f "delims=" %%P in ('where PsExec.exe 2^>nul') do if not defined PSEXEC_FOUND set "PSEXEC_FOUND=%%P"
+        if not defined PSEXEC_FOUND (
             echo ERROR: PsExec.exe not found.
             echo Place PsExec.exe here:
             echo   %PSEXEC_EXE%
@@ -77,7 +78,7 @@ if not "%DRY_RUN_REQUESTED%"=="1" (
             set "EXITCODE=1"
             goto :END
         )
-        set "PSEXEC_ARG="
+        set "PSEXEC_ARG=-PsExecPath ""%PSEXEC_FOUND%"""
     )
 )
 
