@@ -76,6 +76,7 @@ LOT runs use two concurrency controls:
 
 - `EHJIR_THROTTLE` / `-ThrottleLimit` limits parallel computers inside one LOT.
 - `EHJIR_GLOBAL_CONCURRENCY_LIMIT` / `-GlobalConcurrencyLimit` limits active computer workers shared by all LOT windows on the same operator session. The default is 15, so launching multiple LOTs does not multiply PsExec/PowerShell load indefinitely.
+- The LOT Launcher GUI starts `Launch all` LOT windows 5 seconds apart to avoid a local startup spike.
 
 Force a rerun that bypasses the target run guard:
 
