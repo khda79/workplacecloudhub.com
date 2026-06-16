@@ -76,7 +76,24 @@ LOT runs use two concurrency controls:
 
 - `EHJIR_THROTTLE` / `-ThrottleLimit` limits parallel computers inside one LOT.
 - `EHJIR_GLOBAL_CONCURRENCY_LIMIT` / `-GlobalConcurrencyLimit` limits active computer workers shared by all LOT windows on the same operator session. The default is 15, so launching multiple LOTs does not multiply PsExec/PowerShell load indefinitely.
+- `EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES` / `-GlobalConcurrencyLeaseTimeoutMinutes` controls when an abandoned shared worker lease is considered stale and cleaned. The default `0` sizes this automatically from the PsExec and delayed-evidence timeouts. Leases record the launcher PID, job id, worker PowerShell PID, computer, and cycle; stale slots are repaired instead of bypassed.
 - The LOT Launcher GUI starts `Launch all` LOT windows 5 seconds apart to avoid a local startup spike.
+
+LOT wrappers skip detected virtual machines by default before remote copy or repair. To include VMs in a direct LOT launch:
+
+```cmd
+set EHJIR_SKIP_VIRTUAL_MACHINES=0
+Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd
+```
+
+LOT wrappers also enable the guarded repair defaults used by the GUI:
+
+- `EHJIR_ALLOW_DSREG_LEAVE=1`
+- `EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT=1`
+- `EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER=1`
+- `EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE=1`
+
+Set any of these values to `0` before launching a LOT to disable that action.
 
 Force a rerun that bypasses the target run guard:
 
@@ -125,6 +142,7 @@ The autonomous repair script is designed to avoid destructive actions unless dia
 - Intune enrollment checks distinguish strong Intune enrollment evidence from stale or weak local traces.
 - MDM cleanup actions are opt-in and must be guarded by diagnostic state.
 - The script writes local evidence so a LOT run can reclassify ambiguous PsExec exit states from collected remote CSV output when possible.
+- `-SkipVirtualMachines` records `SKIPPED_VIRTUAL_MACHINE` and performs no DNS/domain/gpupdate/repair action on detected VMs.
 
 The repair script must remain self-contained. Do not add mandatory runtime dependencies on DeviceRegistrationTool or SmartM365 modules.
 

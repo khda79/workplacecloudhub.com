@@ -124,7 +124,7 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 
 ### Smart Intune Remediation
 
-`SmartM365/Devices/SmartIntuneRemediation/` contains the SmartM365 Intune remediation workspace.
+`SmartM365/Devices/IntuneRemediation/` contains the SmartM365 Intune remediation workspace.
 
 - `Packages/`: Intune detection, remediation, diagnostic, and action scripts organized by scenario.
 - `GUI/`: WPF interface to browse local remediation packages, view Intune cloud remediations, edit scripts, run PSScriptAnalyzer, publish to Intune, duplicate/reset execution history, delete selected cloud remediations, export execution CSV reports, and archive local or cloud scripts.
@@ -134,7 +134,7 @@ The GUI and CLI use delegated interactive Microsoft Graph authentication. They d
 
 ### Smart Intune Hybrid Join Toolkit
 
-`SmartM365/Devices/SmartIntuneHybridJoinToolkit/` contains a PsExec/LOT toolkit for diagnosing and repairing Hybrid Entra Join plus Intune enrollment issues.
+`SmartM365/Devices/IntuneHybridJoinToolkit/` contains a PsExec/LOT toolkit for diagnosing and repairing Hybrid Entra Join plus Intune enrollment issues.
 
 ## Focus Areas
 

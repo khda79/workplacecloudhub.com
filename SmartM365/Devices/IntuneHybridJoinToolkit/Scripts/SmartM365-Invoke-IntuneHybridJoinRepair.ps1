@@ -41,6 +41,9 @@ Allows removal of existing non-Intune MDM enrollment registry keys and Enterpris
 .PARAMETER AllowRemoveStaleIntuneEnrollment
 Allows removal of stale local Intune enrollment traces when Windows reports an Intune discovery URL but no confirmed Intune ProviderID.
 
+.PARAMETER SkipVirtualMachines
+Skips detected virtual machines before DNS, domain, gpupdate, or repair actions.
+
 .PARAMETER AuditOnly
 Runs diagnostics and writes logs/CSV without leave, removal, auto-enrollment triggers, reboot, or retry actions.
 
@@ -77,6 +80,7 @@ param(
     [switch]$AllowRebootAfterDsregLeave,
     [switch]$AllowRemoveNonIntuneMdmEnrollment,
     [switch]$AllowRemoveStaleIntuneEnrollment,
+    [switch]$SkipVirtualMachines,
     [switch]$AuditOnly,
     [switch]$EntraHybridPending,
     [int]$StaleCleanupDelaySeconds = 60,
@@ -115,6 +119,7 @@ try {
             if ($AllowRebootAfterDsregLeave) { $argList += "-AllowRebootAfterDsregLeave" }
             if ($AllowRemoveNonIntuneMdmEnrollment) { $argList += "-AllowRemoveNonIntuneMdmEnrollment" }
             if ($AllowRemoveStaleIntuneEnrollment) { $argList += "-AllowRemoveStaleIntuneEnrollment" }
+            if ($SkipVirtualMachines) { $argList += "-SkipVirtualMachines" }
             if ($AuditOnly) { $argList += "-AuditOnly" }
             if ($EntraHybridPending) { $argList += "-EntraHybridPending" }
             $argList += "-StaleCleanupDelaySeconds"
@@ -338,7 +343,7 @@ function Invoke-OldEvidenceCleanup {
 }
 
 Write-Host "IntuneHybridJoinToolkit version $ScriptVersion"
-Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard)."
+Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard)."
 Invoke-OldEvidenceCleanup -Paths @($LogsDir, $OutputDir, $TranscriptDir) -RetentionDays $CleanupRetentionDays
 
 # ============================
@@ -2129,6 +2134,7 @@ function Get-NextActionForStatus {
         "KEY_SIGN_TEST_FAILED" { return "REPAIR_HYBRID_JOIN_KEY_OR_ALLOW_LEAVE" }
         "LEAVE_NOT_APPLICABLE" { return "FIX_HYBRID_JOIN" }
         "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
+        "SKIPPED_VIRTUAL_MACHINE" { return "NO_ACTION_VIRTUAL_MACHINE" }
         "DOMAIN_CONTROLLER_UNREACHABLE" { return "FIX_DOMAIN_CONNECTIVITY_OR_VPN" }
         default {
             if ($Status -like "REBOOT_TRIGGERED*") { return "WAIT_REBOOT_AND_RECHECK" }
@@ -2251,6 +2257,68 @@ function Get-LocalOsBootInfo {
             UptimeHours    = ""
             UptimeDays     = ""
             Detail         = $_.Exception.Message
+        }
+    }
+}
+
+function Get-ComputerSystemSummary {
+    try {
+        $system = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        $manufacturer = [string]$system.Manufacturer
+        $model = [string]$system.Model
+        $hypervisorPresent = $false
+        try { $hypervisorPresent = [bool]$system.HypervisorPresent } catch { $hypervisorPresent = $false }
+
+        $signature = ("{0} {1}" -f $manufacturer,$model)
+        $virtualPatterns = @(
+            'Virtual Machine',
+            'VMware',
+            'VirtualBox',
+            'KVM',
+            'QEMU',
+            'Xen',
+            'HVM domU',
+            'Parallels',
+            'BHYVE',
+            'OpenStack',
+            'Google Compute Engine',
+            'Amazon EC2'
+        )
+
+        $matchedPattern = ''
+        foreach ($pattern in $virtualPatterns) {
+            if ($signature -match [regex]::Escape($pattern)) {
+                $matchedPattern = $pattern
+                break
+            }
+        }
+
+        $isVirtual = (-not [string]::IsNullOrWhiteSpace($matchedPattern)) -or $hypervisorPresent
+        $evidence = if ($matchedPattern) {
+            "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
+        }
+        elseif ($hypervisorPresent) {
+            "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=True"
+        }
+        else {
+            "Manufacturer=$manufacturer; Model=$model"
+        }
+
+        return [PSCustomObject]@{
+            Success = $true
+            ComputerSystem = $system
+            IsVirtualMachine = $isVirtual
+            VirtualMachineEvidence = $evidence
+            Detail = ""
+        }
+    }
+    catch {
+        return [PSCustomObject]@{
+            Success = $false
+            ComputerSystem = $null
+            IsVirtualMachine = ""
+            VirtualMachineEvidence = ""
+            Detail = $_.Exception.Message
         }
     }
 }
@@ -2468,6 +2536,8 @@ $finalGpUpdateExitCode = ""
 $finalGpUpdateOutputFile = ""
 $domainPreflightComplete = $false
 $cs = $null
+$isVirtualMachine = ""
+$virtualMachineEvidence = ""
 $domainName = ""
 $dcTest = $null
 $adComputerLocationChecked = $false
@@ -2497,6 +2567,41 @@ try {
         Write-RunLog ("OS boot info failed: {0}" -f $bootInfoDetail)
     }
 
+    $computerSystemSummary = Get-ComputerSystemSummary
+    if ($computerSystemSummary.Success) {
+        $cs = $computerSystemSummary.ComputerSystem
+        $isVirtualMachine = $computerSystemSummary.IsVirtualMachine
+        $virtualMachineEvidence = $computerSystemSummary.VirtualMachineEvidence
+        Write-RunLog ("Computer system: IsVirtualMachine={0}; Evidence={1}" -f $isVirtualMachine,$virtualMachineEvidence)
+        if ($SkipVirtualMachines -and $isVirtualMachine) {
+            $status = "SKIPPED_VIRTUAL_MACHINE"
+            $errorMessage = "Virtual machine skipped by -SkipVirtualMachines. $virtualMachineEvidence"
+            Write-Host $errorMessage -ForegroundColor Yellow
+            Write-RunLog $errorMessage
+
+            $logEntry = [PSCustomObject]@{
+                RunId=$RunId; Timestamp=$Timestamp; ComputerName=$ComputerName; AllowDsregLeave=[bool]$AllowDsregLeave
+                AllowRemoveNonIntuneMdmEnrollment=[bool]$AllowRemoveNonIntuneMdmEnrollment
+                AllowRemoveStaleIntuneEnrollment=[bool]$AllowRemoveStaleIntuneEnrollment
+                SkipVirtualMachines=[bool]$SkipVirtualMachines
+                ScriptVersion=$ScriptVersion
+                IsVirtualMachine=$isVirtualMachine
+                VirtualMachineEvidence=$virtualMachineEvidence
+                LeaveAttempted=$false; LeaveExitCode=""; Status=$status; ErrorMessage=$errorMessage
+                Dsreg_AzureAdJoined=""; Dsreg_DeviceId=""; Dsreg_TenantName=""; Dsreg_TenantId=""
+                DeviceAuthStatus=""; DsregStatusErrorMessage=""; IntuneEnrolled=$null
+                ClientErrorCode=""; ServerErrorCode=""; ServerErrorSubCode=""; ServerOperation=""
+                ServerMessage=""; HttpsStatus=""; RequestId=""; ErrorPhase=""
+            }
+            Write-AtomicCsvAppend -Path $logPath -RowObject $logEntry -RunIdValue $RunId
+            Write-FinalStatusLine -Status $status -ExitCode 0 -Detail $errorMessage -NextAction (Get-NextActionForStatus -Status $status)
+            exit 0
+        }
+    }
+    else {
+        Write-RunLog ("Computer system summary failed: {0}" -f $computerSystemSummary.Detail)
+    }
+
     # Flush DNS before domain/DC checks so stale name resolution does not poison DC/MDM checks.
     $flushDnsAttempted = $true
     $flushDnsOutputFile = Join-Path $OutputDir ("{0}_flushdns_{1}.txt" -f $ComputerName, $RunId)
@@ -2517,7 +2622,9 @@ try {
     Write-Host "Checking Active Directory domain join status..." -ForegroundColor Cyan
     Write-RunLog "Checking domain join status."
 
-    $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+    if ($null -eq $cs) {
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+    }
     if (-not $cs.PartOfDomain) {
         $status = "NOT_DOMAIN_JOINED"
         $errorMessage = "Device is not joined to an Active Directory domain. Script stopped before gpupdate/repair."
@@ -3585,6 +3692,7 @@ try {
         AllowDsregLeave                = [bool]$AllowDsregLeave
         AllowRemoveNonIntuneMdmEnrollment = [bool]$AllowRemoveNonIntuneMdmEnrollment
         AllowRemoveStaleIntuneEnrollment = [bool]$AllowRemoveStaleIntuneEnrollment
+        SkipVirtualMachines     = [bool]$SkipVirtualMachines
         AuditOnly               = [bool]$AuditOnly
         EntraHybridPending      = [bool]$EntraHybridPending
         NextAction              = $nextAction
@@ -3597,6 +3705,8 @@ try {
         UptimeHours             = $uptimeHours
         UptimeDays              = $uptimeDays
         BootInfoDetail          = $bootInfoDetail
+        IsVirtualMachine        = $isVirtualMachine
+        VirtualMachineEvidence  = $virtualMachineEvidence
         AdComputerLocationChecked = $adComputerLocationChecked
         AdComputerDistinguishedName = $adComputerDistinguishedName
         AdComputerDefaultNamingContext = $adComputerDefaultNamingContext
@@ -3773,6 +3883,7 @@ catch {
             AllowDsregLeave                = [bool]$AllowDsregLeave
             AllowRemoveNonIntuneMdmEnrollment = [bool]$AllowRemoveNonIntuneMdmEnrollment
             AllowRemoveStaleIntuneEnrollment = [bool]$AllowRemoveStaleIntuneEnrollment
+            SkipVirtualMachines     = [bool]$SkipVirtualMachines
             AuditOnly               = [bool]$AuditOnly
             EntraHybridPending      = [bool]$EntraHybridPending
             NextAction              = $nextAction
@@ -3785,6 +3896,8 @@ catch {
             UptimeHours             = $uptimeHours
             UptimeDays              = $uptimeDays
             BootInfoDetail          = $bootInfoDetail
+            IsVirtualMachine        = $isVirtualMachine
+            VirtualMachineEvidence  = $virtualMachineEvidence
             AdComputerLocationChecked = $adComputerLocationChecked
             AdComputerDistinguishedName = $adComputerDistinguishedName
             AdComputerDefaultNamingContext = $adComputerDefaultNamingContext
