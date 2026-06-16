@@ -343,6 +343,12 @@ $result = [ordered]@{
     ExitCode = ''
     Detail = ''
     SetupCacheAction = ''
+    DiskCleanupAction = ''
+    DiskCleanupFreedGB = ''
+    AdvancedDiskCleanupAction = ''
+    AdvancedDiskCleanupFreedGB = ''
+    DismCleanupAction = ''
+    DismCleanupFreedGB = ''
     RemoteLogsPath = ''
     PsExecLogPath = $logPath
 }
@@ -424,6 +430,11 @@ try {
                 }
                 if ($lastRun.PSObject.Properties['SetupCacheAction']) {
                     $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
+                }
+                foreach ($propertyName in @('DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB')) {
+                    if ($lastRun.PSObject.Properties[$propertyName]) {
+                        $result[$propertyName] = [string]$lastRun.$propertyName
+                    }
                 }
             }
         }
