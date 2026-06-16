@@ -226,7 +226,8 @@ function New-ToolkitLotFolder {
 function Start-ToolkitLot {
     param(
         [Parameter(Mandatory = $true)][string]$LotPath,
-        [Parameter(Mandatory = $true)][string]$Mode
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [int]$GlobalConcurrencyLimit = 15
     )
 
     $wrapperName = switch ($Mode) {
@@ -253,7 +254,8 @@ function Start-ToolkitLot {
         throw ("PsExec.exe not found. Place it in '{0}', in '{1}', or add PsExec.exe to PATH before launching the LOT." -f (Split-Path -Parent $psexecToolkitPath), (Split-Path -Parent $psexecSystem32Path))
     }
 
-    Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$wrapperPath`"") -WorkingDirectory $LotPath -Verb RunAs
+    if ($GlobalConcurrencyLimit -lt 1) { $GlobalConcurrencyLimit = 1 }
+    Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$wrapperPath`"", "-GlobalConcurrencyLimit", [string]$GlobalConcurrencyLimit) -WorkingDirectory $LotPath -Verb RunAs
 }
 
 function Open-TextFile {
@@ -639,7 +641,7 @@ $existingLayout.RowCount = 2
 $existingLayout.Padding = New-Object System.Windows.Forms.Padding(10)
 $existingLayout.BackColor = $colorBackground
 $existingLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$existingLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 340))) | Out-Null
+$existingLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 232))) | Out-Null
 $existingLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 
 $existingSection = New-SectionPanel -Title "Available lots"
@@ -647,14 +649,15 @@ $activitySection = New-SectionPanel -Title "Activity"
 
 $existingTable = New-Object System.Windows.Forms.TableLayoutPanel
 $existingTable.Dock = "Fill"
-$existingTable.ColumnCount = 4
-$existingTable.RowCount = 9
+$existingTable.ColumnCount = 5
+$existingTable.RowCount = 5
 $existingTable.BackColor = $colorPanel
 $existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 138))) | Out-Null
 $existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 $existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 118))) | Out-Null
 $existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 118))) | Out-Null
-for ($i = 0; $i -lt 9; $i++) {
+$existingTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 118))) | Out-Null
+for ($i = 0; $i -lt 5; $i++) {
     $existingTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 34))) | Out-Null
 }
 
@@ -674,14 +677,8 @@ $openLotFolderButton.Text = "Folder"
 $openLotFolderButton.Dock = "Fill"
 Set-FlatButtonStyle -Button $openLotFolderButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
-$selectedLotPathBox = New-ValueBox
 $deviceCountBox = New-ValueBox
 $adScopeBox = New-ValueBox
-$selectedAdCsvBox = New-ValueBox
-$rootAdCsvBox = New-ValueBox
-$intuneCsvBox = New-ValueBox
-$entraCsvBox = New-ValueBox
-$wrapperStatusBox = New-ValueBox
 
 $existingModeCombo = New-Object System.Windows.Forms.ComboBox
 $existingModeCombo.Dock = "Fill"
@@ -690,6 +687,13 @@ $existingModeCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
 $existingModeCombo.FlatStyle = "Flat"
 $existingModeCombo.Items.AddRange([object[]]@("Loop", "Once", "LoopIgnoreRunGuard", "OnceIgnoreRunGuard"))
 $existingModeCombo.SelectedIndex = 0
+
+$globalConcurrencyLimitBox = New-Object System.Windows.Forms.NumericUpDown
+$globalConcurrencyLimitBox.Dock = "Fill"
+$globalConcurrencyLimitBox.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
+$globalConcurrencyLimitBox.Minimum = 1
+$globalConcurrencyLimitBox.Maximum = 50
+$globalConcurrencyLimitBox.Value = 15
 
 $openComputersButton = New-Object System.Windows.Forms.Button
 $openComputersButton.Text = "Computers"
@@ -706,6 +710,11 @@ $launchExistingButton.Text = "Launch"
 $launchExistingButton.Dock = "Fill"
 Set-ButtonEnabledStyle -Button $launchExistingButton -Enabled $false -EnabledBackColor $colorSuccess
 
+$launchAllLotsButton = New-Object System.Windows.Forms.Button
+$launchAllLotsButton.Text = "Launch all"
+$launchAllLotsButton.Dock = "Fill"
+Set-ButtonEnabledStyle -Button $launchAllLotsButton -Enabled $false -EnabledBackColor $colorSuccess
+
 $refreshWrappersButton = New-Object System.Windows.Forms.Button
 $refreshWrappersButton.Text = "Wrappers"
 $refreshWrappersButton.Dock = "Fill"
@@ -713,43 +722,29 @@ Set-FlatButtonStyle -Button $refreshWrappersButton -BackColor $colorPanelSoft -F
 
 $existingTable.Controls.Add((New-Label "LOT"), 0, 0)
 $existingTable.Controls.Add($lotCombo, 1, 0)
-$existingTable.Controls.Add($refreshLotsButton, 2, 0)
-$existingTable.Controls.Add($openLotFolderButton, 3, 0)
+$existingTable.SetColumnSpan($lotCombo, 2)
+$existingTable.Controls.Add($refreshLotsButton, 3, 0)
+$existingTable.Controls.Add($openLotFolderButton, 4, 0)
 
-$existingTable.Controls.Add((New-Label "Path"), 0, 1)
-$existingTable.Controls.Add($selectedLotPathBox, 1, 1)
-$existingTable.SetColumnSpan($selectedLotPathBox, 3)
+$existingTable.Controls.Add((New-Label "Devices"), 0, 1)
+$existingTable.Controls.Add($deviceCountBox, 1, 1)
+$existingTable.SetColumnSpan($deviceCountBox, 2)
+$existingTable.Controls.Add($openComputersButton, 3, 1)
+$existingTable.Controls.Add($openAdDomainButton, 4, 1)
 
-$existingTable.Controls.Add((New-Label "Devices"), 0, 2)
-$existingTable.Controls.Add($deviceCountBox, 1, 2)
-$existingTable.Controls.Add($openComputersButton, 2, 2)
-$existingTable.Controls.Add($openAdDomainButton, 3, 2)
+$existingTable.Controls.Add((New-Label "AD scope"), 0, 2)
+$existingTable.Controls.Add($adScopeBox, 1, 2)
+$existingTable.SetColumnSpan($adScopeBox, 4)
 
-$existingTable.Controls.Add((New-Label "AD scope"), 0, 3)
-$existingTable.Controls.Add($adScopeBox, 1, 3)
-$existingTable.SetColumnSpan($adScopeBox, 3)
+$existingTable.Controls.Add((New-Label "Limit"), 0, 3)
+$existingTable.Controls.Add($globalConcurrencyLimitBox, 1, 3)
+$existingTable.SetColumnSpan($globalConcurrencyLimitBox, 4)
 
-$existingTable.Controls.Add((New-Label "Selected AD CSV"), 0, 4)
-$existingTable.Controls.Add($selectedAdCsvBox, 1, 4)
-$existingTable.SetColumnSpan($selectedAdCsvBox, 3)
-
-$existingTable.Controls.Add((New-Label "Root AD CSV"), 0, 5)
-$existingTable.Controls.Add($rootAdCsvBox, 1, 5)
-$existingTable.SetColumnSpan($rootAdCsvBox, 3)
-
-$existingTable.Controls.Add((New-Label "Inventories"), 0, 6)
-$existingTable.Controls.Add($intuneCsvBox, 1, 6)
-$existingTable.Controls.Add($entraCsvBox, 2, 6)
-$existingTable.SetColumnSpan($entraCsvBox, 2)
-
-$existingTable.Controls.Add((New-Label "Wrappers"), 0, 7)
-$existingTable.Controls.Add($wrapperStatusBox, 1, 7)
-$existingTable.SetColumnSpan($wrapperStatusBox, 3)
-
-$existingTable.Controls.Add((New-Label "Launch"), 0, 8)
-$existingTable.Controls.Add($existingModeCombo, 1, 8)
-$existingTable.Controls.Add($refreshWrappersButton, 2, 8)
-$existingTable.Controls.Add($launchExistingButton, 3, 8)
+$existingTable.Controls.Add((New-Label "Launch"), 0, 4)
+$existingTable.Controls.Add($existingModeCombo, 1, 4)
+$existingTable.Controls.Add($refreshWrappersButton, 2, 4)
+$existingTable.Controls.Add($launchExistingButton, 3, 4)
+$existingTable.Controls.Add($launchAllLotsButton, 4, 4)
 
 $existingSection.Content.Controls.Add($existingTable)
 
@@ -775,24 +770,23 @@ $newLayout.RowCount = 2
 $newLayout.Padding = New-Object System.Windows.Forms.Padding(10)
 $newLayout.BackColor = $colorBackground
 $newLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$newLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 160))) | Out-Null
+$newLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 174))) | Out-Null
 $newLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 
 $newSection = New-SectionPanel -Title "Create an empty LOT"
 $newTable = New-Object System.Windows.Forms.TableLayoutPanel
 $newTable.Dock = "Fill"
 $newTable.ColumnCount = 3
-$newTable.RowCount = 3
+$newTable.RowCount = 2
 $newTable.BackColor = $colorPanel
 $newTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 138))) | Out-Null
 $newTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 $newTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 150))) | Out-Null
-for ($i = 0; $i -lt 3; $i++) {
+for ($i = 0; $i -lt 2; $i++) {
     $newTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
 }
 
 $newLotNameBox = New-EntryBox
-$newLotPathBox = New-ValueBox
 $newComputersPathBox = New-ValueBox
 
 $createLotButton = New-Object System.Windows.Forms.Button
@@ -809,13 +803,9 @@ $newTable.Controls.Add((New-Label "LOT name"), 0, 0)
 $newTable.Controls.Add($newLotNameBox, 1, 0)
 $newTable.Controls.Add($createLotButton, 2, 0)
 
-$newTable.Controls.Add((New-Label "Created path"), 0, 1)
-$newTable.Controls.Add($newLotPathBox, 1, 1)
-$newTable.SetColumnSpan($newLotPathBox, 2)
-
-$newTable.Controls.Add((New-Label "Computers.txt"), 0, 2)
-$newTable.Controls.Add($newComputersPathBox, 1, 2)
-$newTable.Controls.Add($openNewComputersButton, 2, 2)
+$newTable.Controls.Add((New-Label "Computers.txt"), 0, 1)
+$newTable.Controls.Add($newComputersPathBox, 1, 1)
+$newTable.Controls.Add($openNewComputersButton, 2, 1)
 
 $newSection.Content.Controls.Add($newTable)
 $newLayout.Controls.Add($newSection.Panel, 0, 0)
@@ -880,15 +870,38 @@ function Add-Status {
 
 function Clear-LotDetails {
     $script:SelectedLotSummary = $null
-    $selectedLotPathBox.Text = ""
     $deviceCountBox.Text = ""
     $adScopeBox.Text = ""
-    $selectedAdCsvBox.Text = ""
-    $rootAdCsvBox.Text = ""
-    $intuneCsvBox.Text = ""
-    $entraCsvBox.Text = ""
-    $wrapperStatusBox.Text = ""
     Set-ButtonEnabledStyle -Button $launchExistingButton -Enabled $false -EnabledBackColor $colorSuccess
+}
+
+function Get-LaunchableLotSummaries {
+    $summaries = New-Object System.Collections.Generic.List[object]
+    foreach ($lot in @($script:LotList)) {
+        try {
+            $summary = Get-LotSummary -RootPath $toolkitRoot -LotPath $lot.FullName
+            if ($summary.ComputerCount -gt 0 -and $summary.WrappersReady) {
+                $summaries.Add($summary)
+            }
+        }
+        catch {
+            Add-Status ("Skipping {0}: {1}" -f $lot.Name,$_.Exception.Message)
+        }
+    }
+
+    return @($summaries)
+}
+
+function Update-ExistingLotControlState {
+    param([bool]$HasLots)
+
+    $lotCombo.Enabled = $HasLots
+    $existingModeCombo.Enabled = $HasLots
+    $globalConcurrencyLimitBox.Enabled = $HasLots
+    $openLotFolderButton.Enabled = $HasLots
+    $openComputersButton.Enabled = $HasLots
+    $openAdDomainButton.Enabled = $HasLots
+    Set-ButtonEnabledStyle -Button $launchAllLotsButton -Enabled ($HasLots -and (Get-LaunchableLotSummaries).Count -gt 0) -EnabledBackColor $colorSuccess
 }
 
 function Update-LotDetails {
@@ -901,23 +914,16 @@ function Update-LotDetails {
     $summary = Get-LotSummary -RootPath $toolkitRoot -LotPath $lot.FullName
     $script:SelectedLotSummary = $summary
 
-    $selectedLotPathBox.Text = $summary.Path
     $deviceCountBox.Text = [string]$summary.ComputerCount
     $adScopeBox.Text = $summary.AdScope
-    $selectedAdCsvBox.Text = ("{0} | {1}" -f $summary.SelectedAdCsv,$summary.SelectedAdCsvStatus)
-    $rootAdCsvBox.Text = $summary.RootAdCsvStatus
-    $intuneCsvBox.Text = ("Intune: {0}" -f $summary.IntuneCsvStatus)
-    $entraCsvBox.Text = ("Entra: {0}" -f $summary.EntraCsvStatus)
 
-    if ($summary.WrappersReady) {
-        $wrapperStatusBox.Text = "Wrappers ready"
-    }
-    else {
-        $wrapperStatusBox.Text = ("Missing: {0}" -f ($summary.MissingWrappers -join ", "))
+    if (-not $summary.WrappersReady) {
+        Add-Status ("Missing LOT wrappers: {0}" -f ($summary.MissingWrappers -join ", "))
     }
 
     $canLaunch = ($summary.ComputerCount -gt 0 -and $summary.WrappersReady)
     Set-ButtonEnabledStyle -Button $launchExistingButton -Enabled $canLaunch -EnabledBackColor $colorSuccess
+    Update-ExistingLotControlState -HasLots ($script:LotList.Count -gt 0)
 }
 
 function Refresh-LotList {
@@ -941,9 +947,12 @@ function Refresh-LotList {
 
     if ($lotCombo.Items.Count -eq 0) {
         Clear-LotDetails
+        Update-ExistingLotControlState -HasLots $false
         Add-Status "No operational LOT-* folder found."
         return
     }
+
+    Update-ExistingLotControlState -HasLots $true
 
     $selectedIndex = 0
     if (-not [string]::IsNullOrWhiteSpace($selectedName)) {
@@ -1027,8 +1036,8 @@ $launchExistingButton.Add_Click({
         if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
         if ($script:SelectedLotSummary.ComputerCount -le 0) { throw "Computers.txt is empty." }
 
-        Add-Status ("Launching {0} in {1} mode." -f $script:SelectedLotSummary.Name,$existingModeCombo.SelectedItem)
-        Start-ToolkitLot -LotPath $script:SelectedLotSummary.Path -Mode ([string]$existingModeCombo.SelectedItem)
+        Add-Status ("Launching {0} in {1} mode. Global limit={2}." -f $script:SelectedLotSummary.Name,$existingModeCombo.SelectedItem,[int]$globalConcurrencyLimitBox.Value)
+        Start-ToolkitLot -LotPath $script:SelectedLotSummary.Path -Mode ([string]$existingModeCombo.SelectedItem) -GlobalConcurrencyLimit ([int]$globalConcurrencyLimitBox.Value)
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
@@ -1036,10 +1045,36 @@ $launchExistingButton.Add_Click({
     }
 })
 
+$launchAllLotsButton.Add_Click({
+    try {
+        $launchableLots = @(Get-LaunchableLotSummaries)
+        if ($launchableLots.Count -eq 0) {
+            throw "No launchable LOT found. Check Computers.txt and wrapper files."
+        }
+
+        $mode = [string]$existingModeCombo.SelectedItem
+        $limit = [int]$globalConcurrencyLimitBox.Value
+        Add-Status ("Launching {0}/{1} LOT folder(s) in {2} mode. Global limit={3}." -f $launchableLots.Count,$script:LotList.Count,$mode,$limit)
+
+        foreach ($lotSummary in $launchableLots) {
+            Add-Status ("Launching {0}." -f $lotSummary.Name)
+            Start-ToolkitLot -LotPath $lotSummary.Path -Mode $mode -GlobalConcurrencyLimit $limit
+        }
+
+        $skippedCount = $script:LotList.Count - $launchableLots.Count
+        if ($skippedCount -gt 0) {
+            Add-Status ("Skipped {0} LOT folder(s) without devices or complete wrappers." -f $skippedCount)
+        }
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Launch all failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    }
+})
+
 $createLotButton.Add_Click({
     try {
         $result = New-ToolkitLotFolder -RootPath $toolkitRoot -LotName $newLotNameBox.Text
-        $newLotPathBox.Text = $result.LotPath
         $newComputersPathBox.Text = $result.ComputersPath
         $script:CreatedComputersPath = $result.ComputersPath
         Set-ButtonEnabledStyle -Button $openNewComputersButton -Enabled $true

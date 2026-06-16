@@ -72,6 +72,15 @@ Seconds to wait between two job starts. Defaults to 0 for large fleet throughput
 .PARAMETER ThrottleLimit
 Maximum number of computers processed in parallel. Defaults to 25.
 
+.PARAMETER GlobalConcurrencyLimit
+Maximum number of active computer workers shared by all LOT launchers in the same Windows
+session. This limits local PowerShell worker jobs and their PsExec executions across multiple
+LOT windows. Defaults to 15. Use 0 to disable the cross-LOT limiter.
+
+.PARAMETER GlobalConcurrencySemaphoreName
+Named Windows semaphore used by GlobalConcurrencyLimit. Use the same name across LOTs that
+must share one limit.
+
 .PARAMETER JobPollSeconds
 Seconds to wait between checks for completed parallel jobs. Defaults to 2.
 
@@ -137,6 +146,8 @@ param(
     [string]$PsExecPath,
     [int]$DelayBetweenComputersSeconds = 0,
     [int]$ThrottleLimit = 25,
+    [int]$GlobalConcurrencyLimit = 15,
+    [string]$GlobalConcurrencySemaphoreName = "Local\SmartM365_IntuneHybridJoinToolkit_ComputerWorkers",
     [int]$JobPollSeconds = 2,
     [int]$DelayBetweenCyclesMinutes = 1,
     [int]$MaxCycles = 0,
@@ -177,13 +188,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.46"
+$LauncherVersion = "2.10.47"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
 }
 
 if ($ThrottleLimit -lt 1) { $ThrottleLimit = 1 }
+if ($GlobalConcurrencyLimit -lt 0) { $GlobalConcurrencyLimit = 0 }
+if ([string]::IsNullOrWhiteSpace($GlobalConcurrencySemaphoreName)) { $GlobalConcurrencySemaphoreName = "Local\SmartM365_IntuneHybridJoinToolkit_ComputerWorkers" }
 if ($JobPollSeconds -lt 1) { $JobPollSeconds = 1 }
 if ($DelayBetweenComputersSeconds -lt 0) { $DelayBetweenComputersSeconds = 0 }
 if ($DelayBetweenCyclesMinutes -lt 0) { $DelayBetweenCyclesMinutes = 0 }
@@ -1590,7 +1603,10 @@ Write-Host "AD CSV      : $AdInventoryCsv"
 Write-Host "AD domain   : $AdDomain"
 Write-Host "AD root CSV : $AdRootInventoryCsv"
 Write-Host "Ignore guard: $([bool]$IgnoreRunGuard); Every cycle: $([bool]$IgnoreRunGuardEveryCycle)"
-Write-Host "Parallelism : ThrottleLimit=$ThrottleLimit; JobPollSeconds=$JobPollSeconds"
+Write-Host "Parallelism : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; JobPollSeconds=$JobPollSeconds"
+if ($GlobalConcurrencyLimit -gt 0) {
+    Write-Host "Global gate : $GlobalConcurrencySemaphoreName"
+}
 Write-Host "Start delay : $DelayBetweenComputersSeconds seconds between job starts"
 Write-Host "Loop        : $(-not [bool]$RunOnce); Delay between cycles: $DelayBetweenCyclesMinutes minute(s); Max cycles: $MaxCycles"
 Write-Host "Logs        : $LogRoot"
@@ -1605,6 +1621,25 @@ Write-Host "Post Intune : Enabled=$(-not [bool]$SkipPostCycleIntuneInventory); M
 Write-Host "Post Entra  : Enabled=$(-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)); Mode=Full Graph device inventory; PageSize=$PostCycleIntuneInventoryPageSize; Export=$ExportEntraScriptPath"
 Write-Host "Post AD     : Enabled=$(-not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv)); Mode=Full AD computer inventory; Export=$ExportAdScriptPath"
 Write-Host ""
+
+$globalConcurrencySemaphore = $null
+$globalConcurrencySemaphoreCreatedNew = $false
+if ($GlobalConcurrencyLimit -gt 0) {
+    try {
+        $globalConcurrencySemaphore = New-Object System.Threading.Semaphore($GlobalConcurrencyLimit, $GlobalConcurrencyLimit, $GlobalConcurrencySemaphoreName, [ref]$globalConcurrencySemaphoreCreatedNew)
+        if ($globalConcurrencySemaphoreCreatedNew) {
+            Write-Host ("Global concurrency limiter created. Limit={0}; Semaphore={1}" -f $GlobalConcurrencyLimit,$GlobalConcurrencySemaphoreName) -ForegroundColor Green
+        }
+        else {
+            Write-Host ("Global concurrency limiter joined. RequestedLimit={0}; Semaphore={1}; effective limit is controlled by the first active launcher using this semaphore." -f $GlobalConcurrencyLimit,$GlobalConcurrencySemaphoreName) -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host ("WARNING: Global concurrency limiter disabled. Could not open semaphore '{0}': {1}" -f $GlobalConcurrencySemaphoreName,$_.Exception.Message) -ForegroundColor Yellow
+        $globalConcurrencySemaphore = $null
+        $GlobalConcurrencyLimit = 0
+    }
+}
 
 function Invoke-IntuneHybridJoinRepairCycle {
     param(
@@ -2496,6 +2531,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
     }
 
     $runningJobs = @()
+    $globalSlotByJobId = @{}
     $nextIndex = 0
     $completed = 0
 
@@ -2504,29 +2540,50 @@ function Invoke-IntuneHybridJoinRepairCycle {
             $computer = $computers[$nextIndex]
             $nextIndex++
 
-            $job = Start-Job -Name ("EHJIR_C{0}_{1}" -f $CycleNumber,$computer) -ScriptBlock $worker -ArgumentList @(
-                $computer,
-                $CycleNumber,
-                $LocalScriptPath,
-                $ScriptName,
-                $RemoteRelativeDir,
-                $RemoteScriptPath,
-                $RemoteDataRelativeDir,
-                $PsExecPath,
-                $LogRoot,
-                $LauncherVersion,
-                [bool]$DryRun,
-                $CollectRemoteLogs,
-                $CentralLogRoot,
-                [bool]$KeepCentralLogHistory,
-                $IntuneInventorySet,
-                $EntraInventoryMap,
-                $AdInventoryMap,
-                $CycleScriptArgs,
-                $PsExecTimeoutMinutes,
-                $CommunicationLostEvidenceWaitMinutes,
-                $CommunicationLostEvidencePollMinutes
-            )
+            $globalSlotAcquired = $false
+            if ($null -ne $globalConcurrencySemaphore) {
+                if (-not $globalConcurrencySemaphore.WaitOne(0)) {
+                    Write-Host ("Waiting for global worker slot before queuing {0}. Limit={1}; Semaphore={2}" -f $computer,$GlobalConcurrencyLimit,$GlobalConcurrencySemaphoreName) -ForegroundColor DarkYellow
+                    [void]$globalConcurrencySemaphore.WaitOne()
+                }
+                $globalSlotAcquired = $true
+            }
+
+            try {
+                $job = Start-Job -Name ("EHJIR_C{0}_{1}" -f $CycleNumber,$computer) -ScriptBlock $worker -ArgumentList @(
+                    $computer,
+                    $CycleNumber,
+                    $LocalScriptPath,
+                    $ScriptName,
+                    $RemoteRelativeDir,
+                    $RemoteScriptPath,
+                    $RemoteDataRelativeDir,
+                    $PsExecPath,
+                    $LogRoot,
+                    $LauncherVersion,
+                    [bool]$DryRun,
+                    $CollectRemoteLogs,
+                    $CentralLogRoot,
+                    [bool]$KeepCentralLogHistory,
+                    $IntuneInventorySet,
+                    $EntraInventoryMap,
+                    $AdInventoryMap,
+                    $CycleScriptArgs,
+                    $PsExecTimeoutMinutes,
+                    $CommunicationLostEvidenceWaitMinutes,
+                    $CommunicationLostEvidencePollMinutes
+                )
+            }
+            catch {
+                if ($globalSlotAcquired -and $null -ne $globalConcurrencySemaphore) {
+                    try { [void]$globalConcurrencySemaphore.Release() } catch { }
+                }
+                throw
+            }
+
+            if ($globalSlotAcquired) {
+                $globalSlotByJobId[[string]$job.Id] = $true
+            }
             $runningJobs += $job
             Write-Host ("Queued {0} ({1}/{2}); running={3}" -f $computer,$nextIndex,$computers.Count,$runningJobs.Count) -ForegroundColor DarkCyan
 
@@ -2694,6 +2751,13 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
 
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+            $jobIdKey = [string]$job.Id
+            if ($globalSlotByJobId.ContainsKey($jobIdKey)) {
+                if ($globalSlotByJobId[$jobIdKey] -and $null -ne $globalConcurrencySemaphore) {
+                    try { [void]$globalConcurrencySemaphore.Release() } catch { }
+                }
+                $globalSlotByJobId.Remove($jobIdKey)
+            }
         }
 
         $finishedIds = @($finishedJobs | Select-Object -ExpandProperty Id)
