@@ -31,6 +31,9 @@ param(
     [switch]$AllowSetupUpgrade,
     [switch]$AllowReboot,
     [switch]$SkipVirtualMachines,
+    [switch]$AllowDiskCleanup,
+    [switch]$AllowAdvancedDiskCleanup,
+    [switch]$AllowDismComponentCleanup,
 
     [string]$SetupSourcePath,
     [ValidateSet('LocalCache','Share','Auto')]
@@ -250,6 +253,12 @@ function Invoke-RemoteComputer {
         ExitCode = ''
         Detail = ''
         SetupCacheAction = ''
+        DiskCleanupAction = ''
+        DiskCleanupFreedGB = ''
+        AdvancedDiskCleanupAction = ''
+        AdvancedDiskCleanupFreedGB = ''
+        DismCleanupAction = ''
+        DismCleanupFreedGB = ''
         RemoteLogsPath = ''
         PsExecLogPath = $logPath
     }
@@ -313,6 +322,11 @@ function Invoke-RemoteComputer {
                 if ($lastRun.PSObject.Properties['SetupCacheAction']) {
                     $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
                 }
+                foreach ($propertyName in @('DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB')) {
+                    if ($lastRun.PSObject.Properties[$propertyName]) {
+                        $result[$propertyName] = [string]$lastRun.$propertyName
+                    }
+                }
             }
         }
     }
@@ -347,6 +361,8 @@ if ($AllowForceUpgrade) { [void]$remoteArgs.Add('-AllowForceUpgrade') }
 if ($AllowSetupUpgrade) { [void]$remoteArgs.Add('-AllowSetupUpgrade') }
 if ($AllowReboot) { [void]$remoteArgs.Add('-AllowReboot') }
 if ($SkipVirtualMachines) { [void]$remoteArgs.Add('-SkipVirtualMachines') }
+if ($AllowDiskCleanup) { [void]$remoteArgs.Add('-AllowDiskCleanup') }
+if ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) { [void]$remoteArgs.Add('-AllowAdvancedDiskCleanup') }
 if ($SkipSetupMediaPreCopy) { [void]$remoteArgs.Add('-SkipSetupMediaPreCopy') }
 [void]$remoteArgs.Add('-SetupExecutionMode'); [void]$remoteArgs.Add($SetupExecutionMode)
 [void]$remoteArgs.Add('-SetupMediaId'); [void]$remoteArgs.Add($SetupMediaId)
@@ -361,7 +377,7 @@ Write-Host "Computer list : $ComputerListPath"
 Write-Host "PsExec        : $resolvedPsExec"
 Write-Host "Repair script : $LocalScriptPath"
 Write-Host "Worker script : $LocalWorkerPath"
-Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines"
+Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup)"
 Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s)"
 Write-Host "Reports       : $ReportRoot"

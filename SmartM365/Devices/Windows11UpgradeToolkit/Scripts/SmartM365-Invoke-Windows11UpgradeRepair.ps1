@@ -28,6 +28,9 @@ param(
     [switch]$AllowSetupUpgrade,
     [switch]$AllowReboot,
     [switch]$SkipVirtualMachines,
+    [switch]$AllowDiskCleanup,
+    [switch]$AllowAdvancedDiskCleanup,
+    [switch]$AllowDismComponentCleanup,
 
     [string]$SetupSourcePath,
     [ValidateSet('LocalCache','Share','Auto')]
@@ -37,6 +40,9 @@ param(
     [switch]$SkipSetupMediaPreCopy,
     [string]$SetupCacheRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia',
     [ValidateRange(10, 200)][int]$MinimumFreeDiskGB = 32,
+    [ValidateRange(0, 365)][int]$DiskCleanupTempFileMinAgeDays = 1,
+    [ValidateRange(0, 365)][int]$DiskCleanupLogRetentionDays = 14,
+    [ValidateRange(0, 365)][int]$DiskCleanupUpgradeFolderMinAgeDays = 14,
     [ValidateRange(0, 86400)][int]$RebootDelaySeconds = 180,
 
     [string]$DataRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
@@ -687,6 +693,229 @@ function Copy-SetupMediaToLocalCache {
     return $setupExe
 }
 
+function Get-PathSizeBytes {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return 0L }
+    $total = 0L
+    try {
+        foreach ($file in @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+            try { $total += [int64]$file.Length } catch { }
+        }
+    }
+    catch { }
+    return $total
+}
+
+function Convert-BytesToGbText {
+    param([int64]$Bytes)
+    return ([math]::Round(([double]$Bytes / 1GB), 2)).ToString('0.##')
+}
+
+function Remove-PathChildrenForCleanup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [datetime]$OlderThan,
+        [string[]]$ExcludeLiteralPaths = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return 0 }
+
+    $exclude = @{}
+    foreach ($item in @($ExcludeLiteralPaths)) {
+        if (-not [string]::IsNullOrWhiteSpace($item)) {
+            try { $exclude[[System.IO.Path]::GetFullPath($item).TrimEnd('\').ToUpperInvariant()] = $true } catch { }
+        }
+    }
+
+    $removed = 0
+    foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)) {
+        $childFull = ''
+        try { $childFull = [System.IO.Path]::GetFullPath($child.FullName).TrimEnd('\').ToUpperInvariant() } catch { $childFull = '' }
+        if ($childFull -and $exclude.ContainsKey($childFull)) { continue }
+        if ($PSBoundParameters.ContainsKey('OlderThan') -and $child.LastWriteTime -gt $OlderThan) { continue }
+        try {
+            Remove-Item -LiteralPath $child.FullName -Recurse -Force -ErrorAction Stop
+            $removed++
+        }
+        catch {
+            Write-SmartLog ("Cleanup skipped locked item '{0}': {1}" -f $child.FullName,$_.Exception.Message) 'WARN'
+        }
+    }
+    return $removed
+}
+
+function Invoke-CleanupArea {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [datetime]$OlderThan,
+        [string[]]$ExcludeLiteralPaths = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        Write-SmartLog ("Disk cleanup area skipped, path missing: {0} ({1})" -f $Name,$Path)
+        return [pscustomobject]@{ Name = $Name; Path = $Path; BeforeBytes = 0L; AfterBytes = 0L; RemovedBytes = 0L; RemovedItems = 0 }
+    }
+
+    $before = Get-PathSizeBytes -Path $Path
+    $cleanupParams = @{
+        Path = $Path
+        ExcludeLiteralPaths = $ExcludeLiteralPaths
+    }
+    if ($PSBoundParameters.ContainsKey('OlderThan')) {
+        $cleanupParams['OlderThan'] = $OlderThan
+    }
+    $removedItems = Remove-PathChildrenForCleanup @cleanupParams
+    $after = Get-PathSizeBytes -Path $Path
+    $removedBytes = [math]::Max(0L, $before - $after)
+    Write-SmartLog ("Disk cleanup area {0}: RemovedItems={1}; FreedGB={2}; Path={3}" -f $Name,$removedItems,(Convert-BytesToGbText -Bytes $removedBytes),$Path)
+    return [pscustomobject]@{ Name = $Name; Path = $Path; BeforeBytes = $before; AfterBytes = $after; RemovedBytes = $removedBytes; RemovedItems = $removedItems }
+}
+
+function Get-CurrentSetupCachePathForCleanup {
+    try {
+        $expectedLanguage = Resolve-SetupLanguageRequirement -RequestedLanguage $SetupLanguage
+        return Resolve-SetupCachePath -ExpectedLanguage $expectedLanguage
+    }
+    catch {
+        Write-SmartLog ("Could not resolve current setup cache path for cleanup exclusion: {0}" -f $_.Exception.Message) 'WARN'
+        return ''
+    }
+}
+
+function Test-WindowsUpdateBusy {
+    $busyProcesses = @('setup','setuphost','setupprep','TiWorker','TrustedInstaller','MoUsoCoreWorker','UsoClient')
+    foreach ($name in $busyProcesses) {
+        if (Get-Process -Name $name -ErrorAction SilentlyContinue) { return $true }
+    }
+    return $false
+}
+
+function Test-WindowsSetupOrUpgradeBusy {
+    if (Test-WindowsUpdateBusy) { return $true }
+
+    try {
+        $setup = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\Setup' -ErrorAction Stop
+        foreach ($name in @('SystemSetupInProgress','UpgradeInProgress','OOBEInProgress')) {
+            if ($setup.PSObject.Properties[$name] -and [int]$setup.$name -ne 0) { return $true }
+        }
+    }
+    catch { }
+
+    return $false
+}
+
+function Invoke-SafeDiskCleanup {
+    $beforeFree = Get-SystemDriveFreeGb
+    Write-SmartLog ("Starting safe disk cleanup. FreeDiskGB before={0}." -f $beforeFree)
+
+    $results = New-Object System.Collections.ArrayList
+    $tempCutoff = (Get-Date).AddDays(-1 * $DiskCleanupTempFileMinAgeDays)
+    $logCutoff = (Get-Date).AddDays(-1 * $DiskCleanupLogRetentionDays)
+
+    $tempPaths = New-Object System.Collections.ArrayList
+    foreach ($path in @($env:TEMP,$env:TMP,(Join-Path $env:SystemRoot 'Temp'))) {
+        if (-not [string]::IsNullOrWhiteSpace($path) -and -not @($tempPaths.ToArray()).Contains($path)) {
+            [void]$tempPaths.Add($path)
+        }
+    }
+    foreach ($path in @($tempPaths.ToArray())) {
+        [void]$results.Add((Invoke-CleanupArea -Name 'Temp' -Path $path -OlderThan $tempCutoff))
+    }
+
+    $deliveryOptimizationCache = Join-Path $env:SystemRoot 'ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache'
+    [void]$results.Add((Invoke-CleanupArea -Name 'DeliveryOptimizationCache' -Path $deliveryOptimizationCache -OlderThan $tempCutoff))
+
+    $wuDownload = Join-Path $env:SystemRoot 'SoftwareDistribution\Download'
+    if (Test-WindowsUpdateBusy) {
+        Write-SmartLog ("Disk cleanup skipped Windows Update download cache because update/setup activity appears active: {0}" -f $wuDownload) 'WARN'
+    }
+    else {
+        [void]$results.Add((Invoke-CleanupArea -Name 'WindowsUpdateDownloadCache' -Path $wuDownload -OlderThan $tempCutoff))
+    }
+
+    $currentCache = Get-CurrentSetupCachePathForCleanup
+    [void]$results.Add((Invoke-CleanupArea -Name 'OldSmartM365SetupMedia' -Path $SetupCacheRoot -ExcludeLiteralPaths @($currentCache)))
+    [void]$results.Add((Invoke-CleanupArea -Name 'OldSmartM365Logs' -Path $script:LogDir -OlderThan $logCutoff -ExcludeLiteralPaths @($script:LogPath)))
+
+    $afterFree = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($afterFree - $beforeFree), 2))
+    $script:DiskCleanupAction = ("SafeCleanup; BeforeGB={0}; AfterGB={1}; FreedGB={2}" -f $beforeFree,$afterFree,$freed)
+    $script:DiskCleanupFreedGB = $freed
+    Write-SmartLog ("Safe disk cleanup completed. FreeDiskGB after={0}; FreedGB={1}." -f $afterFree,$freed)
+    return $afterFree
+}
+
+function Invoke-OldUpgradeFolderCleanup {
+    $beforeFree = Get-SystemDriveFreeGb
+    if (Test-WindowsSetupOrUpgradeBusy) {
+        $script:AdvancedDiskCleanupAction = 'OldUpgradeFoldersSkipped; Reason=SetupOrUpdateBusy'
+        Write-SmartLog 'Advanced cleanup skipped old Windows upgrade folders because setup/update activity appears active.' 'WARN'
+        return $beforeFree
+    }
+
+    $systemDrive = ([System.IO.Path]::GetPathRoot($env:SystemRoot)).TrimEnd('\')
+    $cutoff = (Get-Date).AddDays(-1 * $DiskCleanupUpgradeFolderMinAgeDays)
+    $targets = @(
+        (Join-Path $systemDrive '$WINDOWS.~BT'),
+        (Join-Path $systemDrive '$WINDOWS.~WS'),
+        (Join-Path $systemDrive 'Windows.old')
+    )
+
+    $removed = New-Object System.Collections.ArrayList
+    foreach ($target in $targets) {
+        if (-not (Test-Path -LiteralPath $target -PathType Container)) { continue }
+        $item = Get-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item) { continue }
+        if ($item.LastWriteTime -gt $cutoff) {
+            Write-SmartLog ("Advanced cleanup skipped recent upgrade folder: {0}; LastWrite={1}" -f $target,$item.LastWriteTime) 'WARN'
+            continue
+        }
+
+        $beforeBytes = Get-PathSizeBytes -Path $target
+        try {
+            Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+            [void]$removed.Add(("{0}:{1}GB" -f $target,(Convert-BytesToGbText -Bytes $beforeBytes)))
+            Write-SmartLog ("Advanced cleanup removed old upgrade folder: {0}; FreedGBApprox={1}" -f $target,(Convert-BytesToGbText -Bytes $beforeBytes))
+        }
+        catch {
+            Write-SmartLog ("Advanced cleanup could not remove old upgrade folder '{0}': {1}" -f $target,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    $afterFree = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($afterFree - $beforeFree), 2))
+    $details = if ($removed.Count -gt 0) { (@($removed.ToArray()) -join '; ') } else { 'NoOldUpgradeFoldersRemoved' }
+    $script:AdvancedDiskCleanupAction = ("OldUpgradeFolders; BeforeGB={0}; AfterGB={1}; FreedGB={2}; Detail={3}" -f $beforeFree,$afterFree,$freed,$details)
+    $script:AdvancedDiskCleanupFreedGB = $freed
+    Write-SmartLog ("Advanced old upgrade folder cleanup completed. FreeDiskGB after={0}; FreedGB={1}." -f $afterFree,$freed)
+    return $afterFree
+}
+
+function Invoke-DismComponentCleanup {
+    $beforeFree = Get-SystemDriveFreeGb
+    New-SmartDirectory -Path $script:SetupLogDir
+    $stdout = Join-Path $script:SetupLogDir ("DISM_StartComponentCleanup_{0}.stdout.txt" -f $script:RunId)
+    $stderr = Join-Path $script:SetupLogDir ("DISM_StartComponentCleanup_{0}.stderr.txt" -f $script:RunId)
+    $dism = Join-Path $env:SystemRoot 'System32\dism.exe'
+    if (-not (Test-Path -LiteralPath $dism -PathType Leaf)) {
+        throw "dism.exe not found: $dism"
+    }
+
+    Write-SmartLog 'Starting DISM StartComponentCleanup.'
+    $process = Start-Process -FilePath $dism -ArgumentList @('/Online','/Cleanup-Image','/StartComponentCleanup') -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr -ErrorAction Stop
+    $afterFree = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($afterFree - $beforeFree), 2))
+    $script:DismCleanupAction = ("StartComponentCleanup; ExitCode={0}; BeforeGB={1}; AfterGB={2}; FreedGB={3}; Stdout={4}; Stderr={5}" -f $process.ExitCode,$beforeFree,$afterFree,$freed,$stdout,$stderr)
+    $script:DismCleanupFreedGB = $freed
+    Write-SmartLog ("DISM StartComponentCleanup completed. ExitCode={0}; FreeDiskGB after={1}; FreedGB={2}." -f $process.ExitCode,$afterFree,$freed)
+    if ($process.ExitCode -ne 0) {
+        throw "DISM StartComponentCleanup failed with exit code $($process.ExitCode). Stdout=$stdout; Stderr=$stderr"
+    }
+    return $afterFree
+}
+
 function Resolve-SetupUpgradeExecutable {
     if (-not $AllowSetupUpgrade) { return '' }
 
@@ -794,6 +1023,12 @@ $script:ResolvedSetupLanguage = ''
 $script:ResolvedSetupMediaLanguages = ''
 $script:ResolvedSetupCachePath = ''
 $script:SetupCacheAction = ''
+$script:DiskCleanupAction = ''
+$script:DiskCleanupFreedGB = ''
+$script:AdvancedDiskCleanupAction = ''
+$script:AdvancedDiskCleanupFreedGB = ''
+$script:DismCleanupAction = ''
+$script:DismCleanupFreedGB = ''
 $computerSystem = $null
 
 try {
@@ -827,6 +1062,40 @@ try {
     $policy = Get-WindowsUpdatePolicySummary
     $indicators = Get-Windows11IndicatorSummary
 
+    $diskCleanupEligible = ($os.MajorFamily -eq 'Windows10' -and $intune.IsIntuneEnrolled -and -not $indicators.ActionableBlocking)
+    if ($diskCleanupEligible -and $freeGb -lt $MinimumFreeDiskGB -and $AllowDiskCleanup -and -not $AuditOnly) {
+        try {
+            $freeGb = Invoke-SafeDiskCleanup
+        }
+        catch {
+            $script:DiskCleanupAction = ("SafeCleanupFailed; Error={0}" -f $_.Exception.Message)
+            Write-SmartLog ("Safe disk cleanup failed: {0}" -f $_.Exception.Message) 'WARN'
+            $freeGb = Get-SystemDriveFreeGb
+        }
+
+        if ($freeGb -lt $MinimumFreeDiskGB -and ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup)) {
+            try {
+                $freeGb = Invoke-OldUpgradeFolderCleanup
+            }
+            catch {
+                $script:AdvancedDiskCleanupAction = ("OldUpgradeFoldersFailed; Error={0}" -f $_.Exception.Message)
+                Write-SmartLog ("Advanced old upgrade folder cleanup failed: {0}" -f $_.Exception.Message) 'WARN'
+                $freeGb = Get-SystemDriveFreeGb
+            }
+        }
+
+        if ($freeGb -lt $MinimumFreeDiskGB -and ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup)) {
+            try {
+                $freeGb = Invoke-DismComponentCleanup
+            }
+            catch {
+                $script:DismCleanupAction = ("StartComponentCleanupFailed; Error={0}" -f $_.Exception.Message)
+                Write-SmartLog ("DISM component cleanup failed: {0}" -f $_.Exception.Message) 'WARN'
+                $freeGb = Get-SystemDriveFreeGb
+            }
+        }
+    }
+
     if ($os.MajorFamily -eq 'Windows11') {
         $status = 'ALREADY_WINDOWS11'
         $nextAction = 'NO_ACTION_ALREADY_WINDOWS11'
@@ -851,9 +1120,9 @@ try {
         $exitCode = 3
     }
     elseif ($freeGb -lt $MinimumFreeDiskGB) {
-        $status = 'INSUFFICIENT_DISK'
+        $status = if ($script:DiskCleanupAction -or $script:AdvancedDiskCleanupAction -or $script:DismCleanupAction) { 'INSUFFICIENT_DISK_AFTER_CLEANUP' } else { 'INSUFFICIENT_DISK' }
         $nextAction = 'FREE_DISK_SPACE'
-        $detail = ("FreeDiskGB={0}; RequiredGB={1}" -f $freeGb,$MinimumFreeDiskGB)
+        $detail = ("FreeDiskGB={0}; RequiredGB={1}; DiskCleanup={2}; AdvancedCleanup={3}; DismCleanup={4}" -f $freeGb,$MinimumFreeDiskGB,$script:DiskCleanupAction,$script:AdvancedDiskCleanupAction,$script:DismCleanupAction)
         $exitCode = 3
     }
     elseif ($pendingReboot) {
@@ -984,6 +1253,12 @@ finally {
         SetupMediaLanguages = $script:ResolvedSetupMediaLanguages
         SetupCachePath = $script:ResolvedSetupCachePath
         SetupCacheAction = $script:SetupCacheAction
+        DiskCleanupAction = $script:DiskCleanupAction
+        DiskCleanupFreedGB = $script:DiskCleanupFreedGB
+        AdvancedDiskCleanupAction = $script:AdvancedDiskCleanupAction
+        AdvancedDiskCleanupFreedGB = $script:AdvancedDiskCleanupFreedGB
+        DismCleanupAction = $script:DismCleanupAction
+        DismCleanupFreedGB = $script:DismCleanupFreedGB
         SetupExePath = $setupExe
         LogPath = $script:LogPath
         CsvPath = $script:CsvPath
