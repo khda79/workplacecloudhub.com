@@ -33,6 +33,9 @@ set "SCRIPT=%ROOT_DIR%\Scripts\SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec
 set "COMPUTERS=%LOT_DIR%Computers.txt"
 set "PARENT_INTUNE_CSV=%ROOT_DIR%\DevicesIntune.csv"
 set "LOT_INTUNE_CSV=%LOT_DIR%DevicesIntune.csv"
+set "PARENT_AD_CSV=%ROOT_DIR%\DevicesAD.csv"
+set "LOT_AD_CSV=%LOT_DIR%DevicesAD.csv"
+set "AD_DOMAIN_FILE=%LOT_DIR%AdDomain.txt"
 set "PSEXEC_LOGS=%LOT_DIR%PsExecLogs"
 set "REPORTS=%LOT_DIR%Reports"
 set "CENTRAL_LOGS=%LOT_DIR%CentralLogs"
@@ -90,6 +93,12 @@ if not defined EHJIR_STALE_CLEANUP_DELAY_SECONDS set "EHJIR_STALE_CLEANUP_DELAY_
 if not defined EHJIR_REBOOT_DELAY_SECONDS set "EHJIR_REBOOT_DELAY_SECONDS=180"
 if not defined EHJIR_PSEXEC_TIMEOUT_MINUTES set "EHJIR_PSEXEC_TIMEOUT_MINUTES=120"
 
+if "%EHJIR_AD_DOMAIN%"=="" (
+    if exist "%AD_DOMAIN_FILE%" (
+        for /f "usebackq tokens=* delims=" %%D in ("%AD_DOMAIN_FILE%") do if not defined EHJIR_AD_DOMAIN set "EHJIR_AD_DOMAIN=%%D"
+    )
+)
+
 set "INTUNE_ARGS="
 if exist "%PARENT_INTUNE_CSV%" (
     set "INTUNE_ARGS=-IntuneInventoryCsv ""%PARENT_INTUNE_CSV%"""
@@ -97,9 +106,22 @@ if exist "%PARENT_INTUNE_CSV%" (
     set "INTUNE_ARGS=-IntuneInventoryCsv ""%LOT_INTUNE_CSV%"""
 )
 
+set "AD_ARGS="
+if exist "%PARENT_AD_CSV%" (
+    set "AD_ARGS=-AdRootInventoryCsv ""%PARENT_AD_CSV%"""
+)
+if not "%EHJIR_AD_DOMAIN%"=="" (
+    set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%LOT_AD_CSV%"" -AdDomain ""%EHJIR_AD_DOMAIN%"""
+) else if exist "%LOT_AD_CSV%" (
+    set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%LOT_AD_CSV%"""
+) else if exist "%PARENT_AD_CSV%" (
+    set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%PARENT_AD_CSV%"""
+)
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
   -ComputerListPath "%COMPUTERS%" ^
   %INTUNE_ARGS% ^
+  %AD_ARGS% ^
   -LogRoot "%PSEXEC_LOGS%" ^
   -ReportRoot "%REPORTS%" ^
   -CentralLogRoot "%CENTRAL_LOGS%" ^

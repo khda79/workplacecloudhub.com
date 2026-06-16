@@ -93,6 +93,8 @@ SmartM365/Devices/SmartIntuneHybridJoinToolkit/DevicesIntune.csv
 SmartM365/Devices/SmartIntuneHybridJoinToolkit/DevicesIntune.csv.tmp.*.csv
 SmartM365/Devices/SmartIntuneHybridJoinToolkit/DevicesEntra.csv
 SmartM365/Devices/SmartIntuneHybridJoinToolkit/DevicesEntra.csv.tmp.*.csv
+SmartM365/Devices/SmartIntuneHybridJoinToolkit/DevicesAD.csv
+SmartM365/Devices/SmartIntuneHybridJoinToolkit/DevicesAD.csv.tmp.*.csv
 SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-*/
 !SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/
 !SmartM365/Devices/SmartIntuneHybridJoinToolkit/LOT-X/Computers.txt

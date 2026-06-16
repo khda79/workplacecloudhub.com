@@ -48,6 +48,15 @@ Optional local CSV export of Intune/Graph devices. Defaults to DevicesIntune.csv
 .PARAMETER EntraInventoryCsv
 Optional local CSV export of Microsoft Entra devices. Defaults to DevicesEntra.csv in the parent folder, then DevicesEntra.csv next to this script. The launcher adds Entra registration columns by matching computer names.
 
+.PARAMETER AdInventoryCsv
+Optional local CSV export of Active Directory computers. Defaults to DevicesAD.csv in the parent folder, then DevicesAD.csv next to this script. LOT wrappers pass a LOT-local DevicesAD.csv for domain-specific fallback refreshes.
+
+.PARAMETER AdRootInventoryCsv
+Optional root forest-wide AD CSV. LOT wrappers pass the toolkit-root DevicesAD.csv here so the launcher can prefer it when it exists and is less than 60 minutes old.
+
+.PARAMETER AdDomain
+Optional AD domain/controller used when refreshing DevicesAD.csv. For LOT runs, set EHJIR_AD_DOMAIN or create AdDomain.txt in the LOT folder.
+
 .PARAMETER LogRoot
 Local folder where PsExec per-computer logs are written. Defaults to PsExecLogs next to this script.
 
@@ -145,6 +154,10 @@ param(
     [string]$IntuneInventoryNameColumn,
     [string]$EntraInventoryCsv,
     [string]$EntraInventoryNameColumn,
+    [string]$AdInventoryCsv,
+    [string]$AdRootInventoryCsv,
+    [string]$AdInventoryNameColumn,
+    [string]$AdDomain,
     [string]$LogRoot,
     [string]$ReportRoot,
     [string]$CentralLogRoot,
@@ -164,7 +177,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.43"
+$LauncherVersion = "2.10.44"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
@@ -196,6 +209,7 @@ $ScriptName = "SmartM365-Invoke-IntuneHybridJoinRepair.ps1"
 $LocalScriptPath = Join-Path $BaseDir $ScriptName
 $ExportIntuneScriptPath = Join-Path $BaseDir "SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1"
 $ExportEntraScriptPath = Join-Path $BaseDir "SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1"
+$ExportAdScriptPath = Join-Path $BaseDir "SmartM365-IntuneHybridJoinRepair-Export-ADDevicesCsv.ps1"
 
 if ([string]::IsNullOrWhiteSpace($ComputerListPath)) {
     $ComputerListPath = Join-Path $BaseDir "Computers.txt"
@@ -245,6 +259,41 @@ if (-not $EntraInventoryCsvWasProvided) {
     }
 }
 
+$AdInventoryCsvWasProvided = -not [string]::IsNullOrWhiteSpace($AdInventoryCsv)
+$AdRootInventoryCsvWasProvided = -not [string]::IsNullOrWhiteSpace($AdRootInventoryCsv)
+$AdInventoryUsesRecentRootCsv = $false
+if ($AdRootInventoryCsvWasProvided) {
+    $adRootInventoryItem = Get-Item -LiteralPath $AdRootInventoryCsv -ErrorAction SilentlyContinue
+    if ($adRootInventoryItem) {
+        $adRootInventoryAge = (Get-Date) - $adRootInventoryItem.LastWriteTime
+        if ($adRootInventoryAge.TotalMinutes -le 60) {
+            $AdInventoryCsv = $adRootInventoryItem.FullName
+            $AdInventoryUsesRecentRootCsv = $true
+            $AdInventoryCsvWasProvided = $true
+        }
+    }
+}
+if (-not $AdInventoryCsvWasProvided) {
+    $candidateAdCsvPaths = @()
+
+    $parentDir = Split-Path -Parent $BaseDir
+    if (-not [string]::IsNullOrWhiteSpace($parentDir)) {
+        $candidateAdCsvPaths += (Join-Path $parentDir "DevicesAD.csv")
+    }
+    $candidateAdCsvPaths += (Join-Path $BaseDir "DevicesAD.csv")
+
+    foreach ($candidateAdCsvPath in $candidateAdCsvPaths) {
+        if (Test-Path -LiteralPath $candidateAdCsvPath) {
+            $AdInventoryCsv = $candidateAdCsvPath
+            break
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($AdInventoryCsv) -and $candidateAdCsvPaths.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($AdDomain)) {
+        $AdInventoryCsv = $candidateAdCsvPaths[0]
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($PsExecPath)) {
     $PsExecPath = Join-Path $BaseDir "PsExec.exe"
 }
@@ -259,6 +308,16 @@ $CollectRemoteLogs = -not [bool]$NoCentralLogCollection
 if ([string]::IsNullOrWhiteSpace($CentralLogRoot)) {
     $CentralLogRoot = Join-Path $BaseDir "CentralLogs"
 }
+
+$ComputerListPath = [System.IO.Path]::GetFullPath($ComputerListPath)
+$LocalScriptPath = [System.IO.Path]::GetFullPath($LocalScriptPath)
+if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) { $IntuneInventoryCsv = [System.IO.Path]::GetFullPath($IntuneInventoryCsv) }
+if (-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)) { $EntraInventoryCsv = [System.IO.Path]::GetFullPath($EntraInventoryCsv) }
+if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) { $AdInventoryCsv = [System.IO.Path]::GetFullPath($AdInventoryCsv) }
+$LogRoot = [System.IO.Path]::GetFullPath($LogRoot)
+$ReportRoot = [System.IO.Path]::GetFullPath($ReportRoot)
+$CentralLogRoot = [System.IO.Path]::GetFullPath($CentralLogRoot)
+
 $RemoteRelativeDir = "ProgramData\SmartM365\IntuneHybridJoinToolkit"
 $RemoteScriptPath = "C:\ProgramData\SmartM365\IntuneHybridJoinToolkit\$ScriptName"
 $RemoteDataRelativeDir = "ProgramData\SmartM365\IntuneHybridJoinToolkit"
@@ -432,6 +491,55 @@ function Get-EntraInventoryMap {
     return $map
 }
 
+function Get-AdInventoryMap {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$false)][string]$NameColumn
+    )
+
+    $map = @{}
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $map }
+    if (-not (Test-Path -LiteralPath $Path)) { return $map }
+
+    $rows = @(Import-Csv -LiteralPath $Path)
+    if ($rows.Count -eq 0) { return $map }
+
+    if ([string]::IsNullOrWhiteSpace($NameColumn)) {
+        $candidateColumns = @("ComputerName","computerName","DNSHostName","dnsHostName","Name","name")
+        $first = $rows | Select-Object -First 1
+        foreach ($candidate in $candidateColumns) {
+            if ($first.PSObject.Properties.Name -contains $candidate) {
+                $NameColumn = $candidate
+                break
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($NameColumn)) {
+        throw "Unable to infer the AD inventory device name column. Use -AdInventoryNameColumn."
+    }
+
+    foreach ($row in $rows) {
+        $value = [string]$row.$NameColumn
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+
+        $short = ($value.Trim().Split(".")[0]).ToUpperInvariant()
+        if ([string]::IsNullOrWhiteSpace($short)) { continue }
+
+        $present = $true
+        if ($row.PSObject.Properties.Name -contains "ADInventoryPresent") {
+            $present = Test-BooleanLikeTrue -Value $row.ADInventoryPresent
+        }
+        if (-not $present) { continue }
+
+        if (-not $map.ContainsKey($short)) {
+            $map[$short] = $row
+        }
+    }
+
+    return $map
+}
+
 function Test-BooleanLikeTrue {
     param([AllowNull()][object]$Value)
 
@@ -528,6 +636,63 @@ function Invoke-FullEntraInventoryExport {
         }
 
         $map = Get-EntraInventoryMap -Path $OutputPath -NameColumn "ComputerName"
+
+        return [PSCustomObject]@{
+            Success = $true
+            CsvPath = $OutputPath
+            LogPath = $LogPath
+            InventoryMap = $map
+            Error = ""
+        }
+    }
+    catch {
+        return [PSCustomObject]@{
+            Success = $false
+            CsvPath = $OutputPath
+            LogPath = $LogPath
+            InventoryMap = @{}
+            Error = $_.Exception.Message
+        }
+    }
+}
+
+function Invoke-FullAdInventoryExport {
+    param(
+        [Parameter(Mandatory=$true)][string]$ExportScriptPath,
+        [Parameter(Mandatory=$true)][string]$OutputPath,
+        [Parameter(Mandatory=$true)][string]$LogPath,
+        [Parameter(Mandatory=$false)][string]$Domain
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $ExportScriptPath)) {
+            throw "SmartM365-IntuneHybridJoinRepair-Export-ADDevicesCsv.ps1 not found: $ExportScriptPath"
+        }
+
+        $args = @(
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $ExportScriptPath,
+            "-OutputPath", $OutputPath,
+            "-ForceRefresh"
+        )
+        if (-not [string]::IsNullOrWhiteSpace($Domain)) {
+            $args += "-Domain"
+            $args += $Domain
+        }
+
+        $output = & powershell.exe @args 2>&1
+        $exitCode = $LASTEXITCODE
+        $output | Out-File -LiteralPath $LogPath -Encoding UTF8 -Force
+
+        if ($exitCode -ne 0) {
+            throw "SmartM365-IntuneHybridJoinRepair-Export-ADDevicesCsv.ps1 exited with code $exitCode. Log=$LogPath"
+        }
+        if (-not (Test-Path -LiteralPath $OutputPath)) {
+            throw "AD CSV was not created: $OutputPath"
+        }
+
+        $map = Get-AdInventoryMap -Path $OutputPath -NameColumn "ComputerName"
 
         return [PSCustomObject]@{
             Success = $true
@@ -791,6 +956,13 @@ function Get-LauncherReportColumns {
         "EntraTrustType",
         "EntraDeviceId",
         "EntraObjectId",
+        "ADInventoryPresent",
+        "ADDomain",
+        "ADEnabled",
+        "ADDNSHostName",
+        "ADDistinguishedName",
+        "ADOperatingSystem",
+        "ADLastLogonTimestampUtc",
         "AdminShareFailureType",
         "PostCycleIntuneInventoryChecked",
         "PostCycleIntuneInventoryPresent",
@@ -804,6 +976,10 @@ function Get-LauncherReportColumns {
         "PostCycleEntraPendingResolved",
         "PostCycleEntraInventoryCsv",
         "PostCycleEntraInventoryError",
+        "PostCycleADInventoryChecked",
+        "PostCycleADInventoryPresent",
+        "PostCycleADInventoryCsv",
+        "PostCycleADInventoryError",
         "RemoteLogsCollected",
         "RemoteLogsPath",
         "RemoteCurrentRunLogsPath",
@@ -1190,6 +1366,13 @@ tr:nth-child(even) { background: #f6f8fa; }
         "EntraTrustType",
         "EntraDeviceId",
         "EntraObjectId",
+        "ADInventoryPresent",
+        "ADDomain",
+        "ADEnabled",
+        "ADDNSHostName",
+        "ADDistinguishedName",
+        "ADOperatingSystem",
+        "ADLastLogonTimestampUtc",
         "PostCycleIntuneInventoryChecked",
         "PostCycleIntuneInventoryPresent",
         "PostCycleIntuneEnrollmentDetected",
@@ -1202,6 +1385,10 @@ tr:nth-child(even) { background: #f6f8fa; }
         "PostCycleEntraPendingResolved",
         "PostCycleEntraInventoryCsv",
         "PostCycleEntraInventoryError",
+        "PostCycleADInventoryChecked",
+        "PostCycleADInventoryPresent",
+        "PostCycleADInventoryCsv",
+        "PostCycleADInventoryError",
         "AdminShareReachable",
         "AdminShareFailureType",
         "PingReachable",
@@ -1244,9 +1431,9 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) {
     }
     else {
         $intuneInventoryAge = (Get-Date) - $intuneInventoryItem.LastWriteTime
-        if ($intuneInventoryAge.TotalMinutes -gt 30) {
+        if ($intuneInventoryAge.TotalMinutes -gt 60) {
             $refreshInitialInventory = $true
-            $initialInventoryReason = ("older than 30 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $intuneInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $intuneInventoryAge.TotalMinutes)
+            $initialInventoryReason = ("older than 60 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $intuneInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $intuneInventoryAge.TotalMinutes)
         }
     }
 
@@ -1292,9 +1479,9 @@ if (-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)) {
         }
         else {
             $entraInventoryAge = (Get-Date) - $entraInventoryItem.LastWriteTime
-            if ($entraInventoryAge.TotalMinutes -gt 30) {
+            if ($entraInventoryAge.TotalMinutes -gt 60) {
                 $refreshInitialEntraInventory = $true
-                $initialEntraInventoryReason = ("older than 30 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $entraInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $entraInventoryAge.TotalMinutes)
+                $initialEntraInventoryReason = ("older than 60 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $entraInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $entraInventoryAge.TotalMinutes)
             }
         }
 
@@ -1332,6 +1519,66 @@ if (-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)) {
     }
 }
 
+$AdInventoryMap = @{}
+if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
+    try {
+        $refreshInitialAdInventory = $false
+        $initialAdInventoryReason = ""
+        $adInventoryItem = Get-Item -LiteralPath $AdInventoryCsv -ErrorAction SilentlyContinue
+
+        if ($null -eq $adInventoryItem) {
+            $refreshInitialAdInventory = $true
+            $initialAdInventoryReason = "missing"
+        }
+        else {
+            $adInventoryAge = (Get-Date) - $adInventoryItem.LastWriteTime
+            if ($adInventoryAge.TotalMinutes -gt 60) {
+                $refreshInitialAdInventory = $true
+                $initialAdInventoryReason = ("older than 60 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $adInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $adInventoryAge.TotalMinutes)
+            }
+        }
+
+        if ($AdInventoryUsesRecentRootCsv) {
+            Write-Host ("AD forest inventory CSV is recent. Using root CSV in priority: {0}" -f $AdInventoryCsv) -ForegroundColor Green
+            $AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+        }
+        elseif ($refreshInitialAdInventory -and $DryRun) {
+            Write-Host ("DryRun: AD inventory CSV is {0}; skipping automatic AD computer export." -f $initialAdInventoryReason) -ForegroundColor Yellow
+        }
+        elseif ($refreshInitialAdInventory -and [string]::IsNullOrWhiteSpace($AdDomain)) {
+            Write-Host ("WARNING: AD inventory CSV is {0}, but no AD domain was provided. Set -AdDomain, EHJIR_AD_DOMAIN, or LOT AdDomain.txt to refresh it." -f $initialAdInventoryReason) -ForegroundColor Yellow
+        }
+        elseif ($refreshInitialAdInventory) {
+            $initialAdInventoryLogPath = Join-Path $ReportRoot ("DevicesAD_InitialRefresh_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
+            Write-Host ("AD inventory CSV is {0}. Running AD computer export before starting the lot..." -f $initialAdInventoryReason) -ForegroundColor Yellow
+            $initialAdInventory = Invoke-FullAdInventoryExport `
+                -ExportScriptPath $ExportAdScriptPath `
+                -OutputPath $AdInventoryCsv `
+                -LogPath $initialAdInventoryLogPath `
+                -Domain $AdDomain
+
+            if ($initialAdInventory.Success) {
+                $AdInventoryMap = $initialAdInventory.InventoryMap
+                Write-Host ("Initial AD inventory refreshed. Devices={0}; CSV={1}" -f $AdInventoryMap.Count,$initialAdInventory.CsvPath) -ForegroundColor Green
+            }
+            else {
+                Write-Host ("WARNING: Initial AD inventory refresh failed: {0}" -f $initialAdInventory.Error) -ForegroundColor Yellow
+                if (Test-Path -LiteralPath $AdInventoryCsv) {
+                    Write-Host "Continuing with existing AD CSV despite refresh failure." -ForegroundColor Yellow
+                    $AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+                }
+            }
+        }
+        elseif (Test-Path -LiteralPath $AdInventoryCsv) {
+            $AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+        }
+    }
+    catch {
+        Write-Host ("WARN: Could not load AD inventory CSV '{0}': {1}" -f $AdInventoryCsv,$_.Exception.Message) -ForegroundColor Yellow
+        $AdInventoryMap = @{}
+    }
+}
+
 $localScriptVersionForDisplay = Get-ScriptVersionFromFile -Path $LocalScriptPath
 $localScriptHashForDisplay = Get-FileSha256 -Path $LocalScriptPath
 
@@ -1348,6 +1595,9 @@ Write-Host "Dry run     : $([bool]$DryRun)"
 Write-Host "Audit only  : $([bool]$AuditOnly)"
 Write-Host "Intune CSV  : $IntuneInventoryCsv"
 Write-Host "Entra CSV   : $EntraInventoryCsv"
+Write-Host "AD CSV      : $AdInventoryCsv"
+Write-Host "AD domain   : $AdDomain"
+Write-Host "AD root CSV : $AdRootInventoryCsv"
 Write-Host "Ignore guard: $([bool]$IgnoreRunGuard); Every cycle: $([bool]$IgnoreRunGuardEveryCycle)"
 Write-Host "Parallelism : ThrottleLimit=$ThrottleLimit; JobPollSeconds=$JobPollSeconds"
 Write-Host "Start delay : $DelayBetweenComputersSeconds seconds between job starts"
@@ -1362,6 +1612,7 @@ Write-Host "PsExec wait : $(if ($PsExecTimeoutMinutes -eq 0) { 'No timeout' } el
 Write-Host "Lost PsExec : poll every $CommunicationLostEvidencePollMinutes minute(s), max $CommunicationLostEvidenceWaitMinutes minute(s), before delayed evidence collection"
 Write-Host "Post Intune : Enabled=$(-not [bool]$SkipPostCycleIntuneInventory); Mode=Full Graph inventory; PageSize=$PostCycleIntuneInventoryPageSize; Export=$ExportIntuneScriptPath"
 Write-Host "Post Entra  : Enabled=$(-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)); Mode=Full Graph device inventory; PageSize=$PostCycleIntuneInventoryPageSize; Export=$ExportEntraScriptPath"
+Write-Host "Post AD     : Enabled=$(-not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and -not [string]::IsNullOrWhiteSpace($AdDomain)); Mode=Full AD computer inventory; Export=$ExportAdScriptPath"
 Write-Host ""
 
 function Invoke-IntuneHybridJoinRepairCycle {
@@ -1439,6 +1690,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             [bool]$KeepCentralLogHistory,
             [hashtable]$IntuneInventorySet,
             [hashtable]$EntraInventoryMap,
+            [hashtable]$AdInventoryMap,
             [string[]]$CycleScriptArgs,
             [int]$PsExecTimeoutMinutes,
             [int]$CommunicationLostEvidenceWaitMinutes,
@@ -1818,6 +2070,13 @@ function Invoke-IntuneHybridJoinRepairCycle {
             EntraTrustType = ""
             EntraDeviceId = ""
             EntraObjectId = ""
+            ADInventoryPresent = ""
+            ADDomain = ""
+            ADEnabled = ""
+            ADDNSHostName = ""
+            ADDistinguishedName = ""
+            ADOperatingSystem = ""
+            ADLastLogonTimestampUtc = ""
             AdminShareFailureType = ""
             PostCycleIntuneInventoryChecked = ""
             PostCycleIntuneInventoryPresent = ""
@@ -1831,6 +2090,10 @@ function Invoke-IntuneHybridJoinRepairCycle {
             PostCycleEntraPendingResolved = ""
             PostCycleEntraInventoryCsv = ""
             PostCycleEntraInventoryError = ""
+            PostCycleADInventoryChecked = ""
+            PostCycleADInventoryPresent = ""
+            PostCycleADInventoryCsv = ""
+            PostCycleADInventoryError = ""
             RemoteLogsCollected = $false
             RemoteLogsPath = ""
             RemoteCurrentRunLogsPath = ""
@@ -1859,6 +2122,19 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
             elseif ($EntraInventoryMap -and $EntraInventoryMap.Count -gt 0) {
                 $result.EntraInventoryPresent = $false
+            }
+            if ($AdInventoryMap -and $AdInventoryMap.Count -gt 0 -and $AdInventoryMap.ContainsKey($inventoryKey)) {
+                $adRow = $AdInventoryMap[$inventoryKey]
+                $result.ADInventoryPresent = $true
+                if ($adRow.PSObject.Properties["ADDomain"]) { $result.ADDomain = [string]$adRow.ADDomain }
+                if ($adRow.PSObject.Properties["Enabled"]) { $result.ADEnabled = [string]$adRow.Enabled }
+                if ($adRow.PSObject.Properties["DNSHostName"]) { $result.ADDNSHostName = [string]$adRow.DNSHostName }
+                if ($adRow.PSObject.Properties["DistinguishedName"]) { $result.ADDistinguishedName = [string]$adRow.DistinguishedName }
+                if ($adRow.PSObject.Properties["OperatingSystem"]) { $result.ADOperatingSystem = [string]$adRow.OperatingSystem }
+                if ($adRow.PSObject.Properties["LastLogonTimestampUtc"]) { $result.ADLastLogonTimestampUtc = [string]$adRow.LastLogonTimestampUtc }
+            }
+            elseif ($AdInventoryMap -and $AdInventoryMap.Count -gt 0) {
+                $result.ADInventoryPresent = $false
             }
 
             try {
@@ -2254,6 +2530,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 [bool]$KeepCentralLogHistory,
                 $IntuneInventorySet,
                 $EntraInventoryMap,
+                $AdInventoryMap,
                 $CycleScriptArgs,
                 $PsExecTimeoutMinutes,
                 $CommunicationLostEvidenceWaitMinutes,
@@ -2278,8 +2555,15 @@ function Invoke-IntuneHybridJoinRepairCycle {
             $jobErrors = @()
 
             try {
-                $received = Receive-Job -Job $job -ErrorAction SilentlyContinue
-                $jobErrors = @($job.ChildJobs | ForEach-Object { $_.Error } | ForEach-Object { $_.ToString() })
+                $receiveErrors = @()
+                $received = Receive-Job -Job $job -ErrorAction SilentlyContinue -ErrorVariable receiveErrors
+                $jobErrors = @(
+                    $receiveErrors | ForEach-Object { $_.ToString() }
+                    $job.ChildJobs | ForEach-Object { $_.Error } | ForEach-Object { $_.ToString() }
+                    if ($job.ChildJobs.Count -gt 0 -and $job.ChildJobs[0].JobStateInfo.Reason) {
+                        $job.ChildJobs[0].JobStateInfo.Reason.Message
+                    }
+                ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
             }
             catch {
                 $jobErrors += $_.Exception.Message
@@ -2324,6 +2608,13 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     EntraTrustType = ""
                     EntraDeviceId = ""
                     EntraObjectId = ""
+                    ADInventoryPresent = ""
+                    ADDomain = ""
+                    ADEnabled = ""
+                    ADDNSHostName = ""
+                    ADDistinguishedName = ""
+                    ADOperatingSystem = ""
+                    ADLastLogonTimestampUtc = ""
                     AdminShareFailureType = ""
                     PostCycleIntuneInventoryChecked = ""
                     PostCycleIntuneInventoryPresent = ""
@@ -2337,6 +2628,10 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     PostCycleEntraPendingResolved = ""
                     PostCycleEntraInventoryCsv = ""
                     PostCycleEntraInventoryError = ""
+                    PostCycleADInventoryChecked = ""
+                    PostCycleADInventoryPresent = ""
+                    PostCycleADInventoryCsv = ""
+                    PostCycleADInventoryError = ""
                     RemoteLogsCollected = $false
                     RemoteLogsPath = ""
                     RemoteCurrentRunLogsPath = ""
@@ -2545,6 +2840,50 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
     }
 
+    if (-not $DryRun -and -not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and -not [string]::IsNullOrWhiteSpace($AdDomain)) {
+        Write-Host ("Cycle {0}: refreshing full post-cycle AD computer inventory..." -f $CycleNumber) -ForegroundColor Cyan
+        $postAdInventoryLogPath = Join-Path $ReportRoot ("DevicesAD_PostCycle_cycle{0}_{1}.log" -f $CycleNumber,(Get-Date -Format "yyyyMMdd_HHmmss"))
+        $postAdInventory = Invoke-FullAdInventoryExport `
+            -ExportScriptPath $ExportAdScriptPath `
+            -OutputPath $AdInventoryCsv `
+            -LogPath $postAdInventoryLogPath `
+            -Domain $AdDomain
+
+        if ($postAdInventory.Success) {
+            $postAdMap = $postAdInventory.InventoryMap
+            $script:AdInventoryMap = $postAdMap
+
+            foreach ($row in $summaryRowsForPostCycle) {
+                $key = Get-ComputerListKey -ComputerName $row.Computer
+                $postAdPresent = [bool]($postAdMap -and $postAdMap.ContainsKey($key))
+
+                $row | Add-Member -NotePropertyName PostCycleADInventoryChecked -NotePropertyValue $true -Force
+                $row | Add-Member -NotePropertyName PostCycleADInventoryPresent -NotePropertyValue $postAdPresent -Force
+                $row | Add-Member -NotePropertyName PostCycleADInventoryCsv -NotePropertyValue $postAdInventory.CsvPath -Force
+                $row | Add-Member -NotePropertyName PostCycleADInventoryError -NotePropertyValue "" -Force
+            }
+
+            $postAdPresentCount = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleADInventoryPresent -eq $true }).Count
+            Write-Host ("Cycle {0}: post-cycle AD inventory found {1}/{2}; CSV={3}" -f $CycleNumber,$postAdPresentCount,$summaryRowsForPostCycle.Count,$postAdInventory.CsvPath) -ForegroundColor Green
+        }
+        else {
+            foreach ($row in $summaryRowsForPostCycle) {
+                $row | Add-Member -NotePropertyName PostCycleADInventoryChecked -NotePropertyValue $true -Force
+                $row | Add-Member -NotePropertyName PostCycleADInventoryPresent -NotePropertyValue "" -Force
+                $row | Add-Member -NotePropertyName PostCycleADInventoryCsv -NotePropertyValue $postAdInventory.CsvPath -Force
+                $row | Add-Member -NotePropertyName PostCycleADInventoryError -NotePropertyValue $postAdInventory.Error -Force
+            }
+            Write-Host ("Cycle {0}: post-cycle AD inventory failed: {1}" -f $CycleNumber,$postAdInventory.Error) -ForegroundColor Yellow
+        }
+
+        try {
+            $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $liveSummaryPath -NoTypeInformation -Encoding UTF8
+        }
+        catch {
+            Write-Host ("Cycle {0}: failed to rewrite live CSV with post-cycle AD columns: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
+        }
+    }
+
     try {
         New-CycleHtmlReport -Summary $summaryRowsForPostCycle -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
     }
@@ -2587,11 +2926,23 @@ function Invoke-IntuneHybridJoinRepairCycle {
         Write-Host ("Cycle {0} Intune inventory match: Present={1}; Absent={2}" -f $CycleNumber,$present,$absent) -ForegroundColor Cyan
     }
 
+    if ($AdInventoryMap -and $AdInventoryMap.Count -gt 0) {
+        $present = @($summary | Where-Object { $_.ADInventoryPresent -eq $true }).Count
+        $absent = @($summary | Where-Object { $_.ADInventoryPresent -eq $false }).Count
+        Write-Host ("Cycle {0} AD inventory match: Present={1}; Absent={2}" -f $CycleNumber,$present,$absent) -ForegroundColor Cyan
+    }
+
     if (@($summaryRowsForPostCycle | Where-Object { $_.PSObject.Properties["PostCycleIntuneInventoryChecked"] -and $_.PostCycleIntuneInventoryChecked -eq $true }).Count -gt 0) {
         $postPresent = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleIntuneInventoryPresent -eq $true }).Count
         $postAbsent = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleIntuneInventoryPresent -eq $false }).Count
         $postNew = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleIntuneEnrollmentDetected -eq $true }).Count
         Write-Host ("Cycle {0} post-cycle Intune inventory: Present={1}; Absent={2}; NewlyDetected={3}" -f $CycleNumber,$postPresent,$postAbsent,$postNew) -ForegroundColor Cyan
+    }
+
+    if (@($summaryRowsForPostCycle | Where-Object { $_.PSObject.Properties["PostCycleADInventoryChecked"] -and $_.PostCycleADInventoryChecked -eq $true }).Count -gt 0) {
+        $postPresent = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleADInventoryPresent -eq $true }).Count
+        $postAbsent = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleADInventoryPresent -eq $false }).Count
+        Write-Host ("Cycle {0} post-cycle AD inventory: Present={1}; Absent={2}" -f $CycleNumber,$postPresent,$postAbsent) -ForegroundColor Cyan
     }
 
     $htmlPath = [System.IO.Path]::ChangeExtension($summaryPath, ".html")
