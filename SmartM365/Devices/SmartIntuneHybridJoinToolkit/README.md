@@ -72,6 +72,11 @@ in `Scripts\PsExec.exe`, `%WINDIR%\System32\PsExec.exe`, or in `PATH`. Direct Po
 The LOT Launcher GUI only checks `Scripts\PsExec.exe` and `%WINDIR%\System32\PsExec.exe` during window startup to keep the UI responsive;
 if the local files are missing, `PATH` is checked when the operator launches the LOT.
 
+LOT runs use two concurrency controls:
+
+- `EHJIR_THROTTLE` / `-ThrottleLimit` limits parallel computers inside one LOT.
+- `EHJIR_GLOBAL_CONCURRENCY_LIMIT` / `-GlobalConcurrencyLimit` limits active computer workers shared by all LOT windows on the same operator session. The default is 15, so launching multiple LOTs does not multiply PsExec/PowerShell load indefinitely.
+
 Force a rerun that bypasses the target run guard:
 
 ```cmd
@@ -103,8 +108,10 @@ Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd
 ```
 
 The GUI has an existing-LOT tab with a drop-down list of available operational `LOT-*` folders.
-After a LOT is selected, it shows the device count, AD scope, selected AD CSV, root inventory
-freshness, wrapper status, and launch mode. A second tab creates a new empty LOT folder from a
+After a LOT is selected, it shows only the device count, AD scope, global worker limit, and launch mode.
+It can launch the selected LOT or all launchable LOT folders; empty LOT folders or folders with
+missing wrappers are skipped. When no operational LOT exists, the LOT selector and launch buttons
+stay disabled. Detailed paths and CSV freshness stay in logs and CLI output. A second tab creates a new empty LOT folder from a
 LOT name, refreshes wrappers, creates `Computers.txt` and `AdDomain.txt`, and offers to open
 `Computers.txt` so the operator can paste one computer per line.
 

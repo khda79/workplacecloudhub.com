@@ -17,7 +17,6 @@ if not exist "%SCRIPT%" (
     exit /b 1
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "%SCRIPT%" %*
-set "EXIT_CODE=%ERRORLEVEL%"
+start "SmartM365 LOT Launcher" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File "%SCRIPT%" %*
 popd
-exit /b %EXIT_CODE%
+exit /b 0
