@@ -9,6 +9,8 @@ or to convert older LOT folders to the shared-wrapper model.
 
 The Intune inventory export is global and must be launched from the repository root,
 so this script removes obsolete Export-IntuneDevicesCsv.cmd wrappers from LOT folders.
+It also creates a blank AdDomain.txt file when missing so each LOT has a visible
+place for optional per-domain AD inventory configuration.
 #>
 
 #requires -Version 5.1
@@ -129,6 +131,17 @@ $obsoleteWrappers = @(
 )
 
 foreach ($lotFolder in $lotFolders) {
+    $adDomainPath = Join-Path $lotFolder.FullName "AdDomain.txt"
+    if (-not (Test-Path -LiteralPath $adDomainPath)) {
+        if ($WhatIf) {
+            Write-Host ("Would create AD domain config: {0}" -f $adDomainPath)
+        }
+        else {
+            New-Item -ItemType File -Path $adDomainPath -Force -ErrorAction Stop | Out-Null
+            Write-Host ("Created AD domain config: {0}" -f $adDomainPath) -ForegroundColor Green
+        }
+    }
+
     foreach ($obsoleteWrapper in $obsoleteWrappers) {
         $obsoletePath = Join-Path $lotFolder.FullName $obsoleteWrapper
         if (-not (Test-Path -LiteralPath $obsoletePath)) {
