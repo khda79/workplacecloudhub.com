@@ -1192,6 +1192,8 @@ $optionAllowForceUpgradeCheck = New-OptionCheck -Text 'Allow force upgrade'
 $optionAllowSetupUpgradeCheck = New-OptionCheck -Text 'Allow setup upgrade'
 $optionAllowRebootCheck = New-OptionCheck -Text 'Allow reboot'
 $optionSkipVirtualMachinesCheck = New-OptionCheck -Text 'Skip virtual machines'
+$optionAllowDiskCleanupCheck = New-OptionCheck -Text 'Allow disk cleanup'
+$optionAllowAdvancedCleanupCheck = New-OptionCheck -Text 'Allow advanced cleanup'
 $optionSkipSetupPreCopyCheck = New-OptionCheck -Text 'Use existing media only'
 $optionKeepCentralHistoryCheck = New-OptionCheck -Text 'Keep central log history'
 $optionNoCentralCollectionCheck = New-OptionCheck -Text 'No central log collection'
@@ -1245,6 +1247,8 @@ $optionAllowForceUpgradeCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_FORCE_U
 $optionAllowSetupUpgradeCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_SETUP_UPGRADE' -Default $true
 $optionAllowRebootCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_REBOOT' -Default $true
 $optionSkipVirtualMachinesCheck.Checked = Get-EnvSwitch -Name 'W11UT_SKIP_VIRTUAL_MACHINES' -Default $true
+$optionAllowDiskCleanupCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_DISK_CLEANUP' -Default $true
+$optionAllowAdvancedCleanupCheck.Checked = ((Get-EnvSwitch -Name 'W11UT_ALLOW_ADVANCED_DISK_CLEANUP') -or (Get-EnvSwitch -Name 'W11UT_ALLOW_DISM_COMPONENT_CLEANUP'))
 $optionSkipSetupPreCopyCheck.Checked = Get-EnvSwitch -Name 'W11UT_SKIP_SETUP_MEDIA_PRECOPY'
 
 $setupSourceDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_SOURCE', 'Process')
@@ -1298,8 +1302,9 @@ $optionsTable.Controls.Add($optionSetupLanguageCombo, 1, 4)
 $optionsTable.SetColumnSpan($optionSetupLanguageCombo, 3)
 
 $optionsTable.Controls.Add($optionSkipSetupPreCopyCheck, 0, 5)
-$optionsTable.Controls.Add($optionKeepCentralHistoryCheck, 1, 5)
-$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 2, 5)
+$optionsTable.Controls.Add($optionAllowDiskCleanupCheck, 1, 5)
+$optionsTable.Controls.Add($optionAllowAdvancedCleanupCheck, 2, 5)
+$optionsTable.Controls.Add($optionKeepCentralHistoryCheck, 3, 5)
 
 $optionsTable.Controls.Add((New-Label 'Throttle per LOT'), 0, 6)
 $optionsTable.Controls.Add($optionThrottleBox, 1, 6)
@@ -1316,12 +1321,14 @@ $optionsTable.Controls.Add($optionGlobalConcurrencyLimitBox, 1, 8)
 $optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 2, 8)
 $optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 3, 8)
 
+$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 0, 9)
+
 $optionsNote = New-Object System.Windows.Forms.Label
 $optionsNote.Text = 'For LOT/PsExec, Setup source must be a UNC path reachable by target computers. Local paths are for local tests only and require confirmation.'
 $optionsNote.Dock = 'Fill'
 $optionsNote.ForeColor = $colorMuted
 $optionsNote.TextAlign = 'MiddleLeft'
-$optionsTable.Controls.Add($optionsNote, 0, 9)
+$optionsTable.Controls.Add($optionsNote, 0, 10)
 $optionsTable.SetColumnSpan($optionsNote, 4)
 
 $optionsScrollPanel.Controls.Add($optionsTable)
@@ -1450,6 +1457,8 @@ function Get-ToolkitOptionEnvironment {
     $environment["W11UT_ALLOW_SETUP_UPGRADE"] = if ($optionAllowSetupUpgradeCheck.Checked) { "1" } else { "0" }
     $environment["W11UT_ALLOW_REBOOT"] = if ($optionAllowRebootCheck.Checked) { "1" } else { "0" }
     $environment["W11UT_SKIP_VIRTUAL_MACHINES"] = if ($optionSkipVirtualMachinesCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_ALLOW_DISK_CLEANUP"] = if ($optionAllowDiskCleanupCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_ALLOW_ADVANCED_DISK_CLEANUP"] = if ($optionAllowAdvancedCleanupCheck.Checked) { "1" } else { "0" }
     $environment["W11UT_SKIP_SETUP_MEDIA_PRECOPY"] = if ($optionSkipSetupPreCopyCheck.Checked) { "1" } else { "0" }
 
     return $environment

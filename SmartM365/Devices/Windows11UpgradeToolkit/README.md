@@ -61,7 +61,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\SmartM365-Invo
 ## Default LOT Behavior
 
 LOT CMD wrappers are action-ready by default, including policy repair, Windows Update reset,
-force upgrade, setup upgrade, controlled reboot, and virtual machine skipping. They also
+force upgrade, setup upgrade, controlled reboot, safe disk cleanup, and virtual machine
+skipping. Advanced disk cleanup is available but disabled by default. The wrappers also
 require an explicit setup source when setup media must be copied to a target. For LOT/PsExec,
 use a UNC path reachable by the target computers:
 
@@ -85,6 +86,8 @@ running the wrapper:
 set W11UT_ALLOW_SETUP_UPGRADE=0
 set W11UT_ALLOW_REBOOT=0
 set W11UT_SKIP_VIRTUAL_MACHINES=0
+set W11UT_ALLOW_DISK_CLEANUP=0
+set W11UT_ALLOW_ADVANCED_DISK_CLEANUP=1
 LOT-X\Run-Windows11UpgradeRepairWithPsExec-Once.cmd
 ```
 
@@ -167,9 +170,25 @@ provide the guarded action switches by default; direct PowerShell calls do not.
 - `-AllowSetupUpgrade`: starts Windows setup upgrade only after setup media and readiness checks pass.
 - `-AllowReboot`: permits a controlled reboot when a pending reboot blocks progress.
 - `-SkipVirtualMachines`: skips detected virtual machines before repair, setup copy, or upgrade actions.
+- `-AllowDiskCleanup`: when free disk is below `-MinimumFreeDiskGB`, removes only rebuildable caches and old SmartM365 logs before failing the device for disk space.
+- `-AllowAdvancedDiskCleanup`: optional heavier cleanup. Removes old guarded Windows upgrade folders when no setup/update activity appears active, then runs `DISM /Online /Cleanup-Image /StartComponentCleanup` only after safe cleanup still leaves insufficient free disk.
 - `-AuditOnly`: reports what would be done without running repair or upgrade actions.
 
 The script blocks setup upgrade when the device is already Windows 11, is not Windows 10, lacks confirmed Intune enrollment, has actionable Windows 11 compatibility blockers, has insufficient disk space, or has a pending reboot that has not been handled.
+
+Safe disk cleanup covers temporary folders, Delivery Optimization cache, Windows Update
+download cache only when no update/setup activity appears active, old SmartM365 setup media
+except the current media cache, and old SmartM365 logs. It does not delete user profile
+content, applications, or `WinSxS` manually. Advanced cleanup is intentionally opt-in
+because it can take time and removes older upgrade rollback folders only when they are old
+enough and no setup/update activity appears active. DISM cleanup uses the supported
+Windows component cleanup command:
+
+```cmd
+DISM /Online /Cleanup-Image /StartComponentCleanup
+```
+
+The toolkit does not use `/ResetBase`.
 
 ## Reports And Logs
 
