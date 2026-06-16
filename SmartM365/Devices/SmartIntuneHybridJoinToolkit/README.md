@@ -22,7 +22,7 @@ LOT-X\
 - `Export-EntraDevicesCsv.cmd` exports the global Entra device inventory to `DevicesEntra.csv`.
 - `Export-ADDevicesCsv.cmd` exports AD computer objects to `DevicesAD.csv`. From the toolkit root, it exports all domains in the current AD forest by default; pass `-Domain <domain>` or set `EHJIR_AD_DOMAIN` to limit the export to one domain.
 - `Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd` opens a GUI to create a local `LOT-*` folder from a computer list file and optionally launch it.
-- `Update-LotCmdWrappers.cmd` refreshes the small CMD wrappers in every `LOT-*` folder.
+- `Update-LotCmdWrappers.cmd` refreshes the small CMD wrappers in operational `LOT-*` folders.
 - `Scripts\` contains the shared PowerShell scripts and shared LOT launchers.
 - `LOT-X\` is the neutral template for LOT folders.
 - Operational `LOT-*` folders are ignored by Git because they can contain real computer lists.
@@ -78,13 +78,14 @@ Force a rerun that bypasses the target run guard:
 Run-IntuneHybridJoinRepairWithPsExec-Loop-IgnoreRunGuard.cmd
 ```
 
-Refresh LOT wrappers after creating or importing LOT folders:
+Refresh LOT wrappers after creating or importing operational LOT folders:
 
 ```cmd
 Update-LotCmdWrappers.cmd
 ```
 
-This also creates a blank `AdDomain.txt` in any `LOT-*` folder where it is missing.
+This skips the versioned `LOT-X` template and creates a blank `AdDomain.txt` in any operational
+`LOT-*` folder where it is missing.
 
 Use `Export-ADDevicesCsv.cmd` from the toolkit root to create a forest-wide `DevicesAD.csv`.
 LOT runs pass this root CSV separately and use it in priority when it exists and is less than
