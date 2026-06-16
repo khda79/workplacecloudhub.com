@@ -197,7 +197,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.48"
+$LauncherVersion = "2.10.49"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
@@ -1651,13 +1651,20 @@ if ($GlobalConcurrencyLimit -gt 0) {
     Write-Host ("Global lease gate: Limit={0}; Path={1}; LeaseTimeout={2} minute(s)" -f $GlobalConcurrencyLimit,$globalConcurrencyGatePath,$GlobalConcurrencyLeaseTimeoutMinutes) -ForegroundColor Green
 }
 
+$script:globalConcurrencyMutex = $null
+if ($GlobalConcurrencyLimit -gt 0) {
+    $script:globalConcurrencyMutex = New-Object System.Threading.Mutex($false, $globalConcurrencyMutexName)
+}
+
 function Invoke-WithGlobalGateMutex {
     param(
         [Parameter(Mandatory=$true)][string]$MutexName,
         [Parameter(Mandatory=$true)][scriptblock]$ScriptBlock
     )
 
-    $mutex = New-Object System.Threading.Mutex($false, $MutexName)
+    $sharedMutex = $script:globalConcurrencyMutex
+    $mutex = if ($sharedMutex -ne $null) { $sharedMutex } else { New-Object System.Threading.Mutex($false, $MutexName) }
+    $ownMutex = ($sharedMutex -eq $null)
     $acquired = $false
     try {
         try {
@@ -1677,7 +1684,9 @@ function Invoke-WithGlobalGateMutex {
         if ($acquired) {
             try { $mutex.ReleaseMutex() } catch { }
         }
-        $mutex.Dispose()
+        if ($ownMutex) {
+            $mutex.Dispose()
+        }
     }
 }
 
@@ -1712,7 +1721,7 @@ function Remove-StaleGlobalWorkerLeases {
             $computerName = [string]$data.Computer
             $launcherPid = if ($data.PSObject.Properties["LauncherProcessId"]) { [int]$data.LauncherProcessId } else { [int]$data.ProcessId }
             $workerPid = if ($data.PSObject.Properties["WorkerProcessId"]) { [int]$data.WorkerProcessId } else { 0 }
-            $createdUtc = [datetime]$data.CreatedUtc
+            $createdUtc = [datetime]::Parse($data.CreatedUtc, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
             $ageMinutes = [math]::Round(($nowUtc - $createdUtc).TotalMinutes, 1)
             if (-not (Test-GlobalGateProcessAlive -ProcessId $launcherPid)) {
                 $remove = $true
@@ -1807,6 +1816,33 @@ function Release-GlobalWorkerLease {
     }
 }
 
+function Test-SampleDnsResolution {
+    param(
+        [Parameter(Mandatory=$true)][string[]]$ComputerNames,
+        [int]$SampleSize = 5
+    )
+
+    $sample = if ($ComputerNames.Count -le $SampleSize) { $ComputerNames } else { $ComputerNames | Get-Random -Count $SampleSize }
+    $resolved = 0
+    $failed = 0
+    foreach ($name in $sample) {
+        try {
+            $null = [System.Net.Dns]::GetHostAddresses($name.Trim())
+            $resolved++
+        }
+        catch {
+            $failed++
+        }
+    }
+
+    return [PSCustomObject]@{
+        Tested   = $sample.Count
+        Resolved = $resolved
+        Failed   = $failed
+        AllFailed = ($failed -eq $sample.Count -and $sample.Count -gt 0)
+    }
+}
+
 function Invoke-IntuneHybridJoinRepairCycle {
     param(
         [Parameter(Mandatory=$true)][int]$CycleNumber,
@@ -1860,6 +1896,14 @@ function Invoke-IntuneHybridJoinRepairCycle {
     $liveHtmlPath = [System.IO.Path]::ChangeExtension($liveSummaryPath, ".html")
     Initialize-LiveCycleReport -Path $liveSummaryPath -Columns $reportColumns
     New-CycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
+
+    $dnsCheck = Test-SampleDnsResolution -ComputerNames $computers
+    if ($dnsCheck.AllFailed) {
+        Write-Host ""
+        Write-Host ("*** DNS WARNING: resolution failed on all {0} sampled computers. Check VPN connectivity and DNS configuration on this machine before continuing. ***" -f $dnsCheck.Tested) -ForegroundColor Red
+        Write-Host ""
+    }
+
     Write-Host ("Cycle {0} started. Computers={1}; Throttle={2}; Args={3}" -f $CycleNumber,$computers.Count,$ThrottleLimit,($CycleScriptArgs -join ' ')) -ForegroundColor Cyan
     Write-Host ("Cycle {0} live report: {1}" -f $CycleNumber,$liveSummaryPath) -ForegroundColor Green
     Write-Host ("Cycle {0} live HTML  : {1}" -f $CycleNumber,$liveHtmlPath) -ForegroundColor Green
@@ -2900,13 +2944,24 @@ function Invoke-IntuneHybridJoinRepairCycle {
             try {
                 $receiveErrors = @()
                 $received = Receive-Job -Job $job -ErrorAction SilentlyContinue -ErrorVariable receiveErrors
+                $brokenRunspace = (
+                    $job.ChildJobs.Count -gt 0 -and
+                    $job.ChildJobs[0].JobStateInfo.Reason -ne $null -and
+                    [string]$job.ChildJobs[0].JobStateInfo.Reason.Message -match '\bBroken\b'
+                )
                 $jobErrors = @(
                     $receiveErrors | ForEach-Object { $_.ToString() }
                     $job.ChildJobs | ForEach-Object { $_.Error } | ForEach-Object { $_.ToString() }
                     if ($job.ChildJobs.Count -gt 0 -and $job.ChildJobs[0].JobStateInfo.Reason) {
                         $job.ChildJobs[0].JobStateInfo.Reason.Message
                     }
+                    if ($brokenRunspace) {
+                        "RUNSPACE_BROKEN: PowerShell job runspace entered a Broken state. This typically indicates PowerShell 5.1 instability under parallel load. Consider adding -DelayBetweenComputersSeconds 1 to reduce job cycling speed."
+                    }
                 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+                if ($brokenRunspace) {
+                    Write-Host ("  [RUNSPACE_BROKEN] {0}: job runspace entered Broken state — possible PowerShell 5.1 instability. Consider -DelayBetweenComputersSeconds 1." -f ($job.Name -replace "^EHJIR_C\d+_","")) -ForegroundColor Magenta
+                }
             }
             catch {
                 $jobErrors += $_.Exception.Message
@@ -3330,3 +3385,8 @@ do {
 
 Write-Host ""
 Write-Host "Launcher stopped after $cycle cycle(s)." -ForegroundColor Green
+
+if ($script:globalConcurrencyMutex -ne $null) {
+    try { $script:globalConcurrencyMutex.Dispose() } catch { }
+    $script:globalConcurrencyMutex = $null
+}
