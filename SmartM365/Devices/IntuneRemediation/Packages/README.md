@@ -1,6 +1,6 @@
 # Intune Remediation Scripts
 
-This folder groups SmartM365 Intune remediation, detection, diagnostic, and action scripts by functional area and scenario. It belongs to `SmartIntuneRemediation`, together with the CLI and GUI managers used to publish and manage these packages in Microsoft Intune.
+This folder groups SmartM365 Intune remediation, detection, diagnostic, and action scripts by functional area and scenario. It belongs to `IntuneRemediation`, together with the CLI and GUI managers used to publish and manage these packages in Microsoft Intune.
 
 ## Organization
 

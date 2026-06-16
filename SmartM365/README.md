@@ -9,7 +9,7 @@ SmartM365 is organized as a set of independent but consistent projects. Some scr
 - Use `Setup/` when you need the SmartM365 app registration, Graph application permissions, SharePoint upload target, Teams notification channels, or tenant profile templates.
 - Use `SmartInventory/` when you need repeatable CSV exports for reporting, Power BI, audit, or operational review.
 - Use `SharePointMigration/` when you need to validate SharePoint source-to-destination migrations with inventories, comparisons, Excel exports, and guarded cleanup helpers.
-- Use `Devices/` when you need local endpoint tools such as reboot governance, Intune enrollment diagnostics, endpoint diagnostic analysis, Intune remediation management, or Hybrid Join repair orchestration.
+- Use `Devices/` when you need local endpoint tools such as reboot governance, Intune enrollment diagnostics, endpoint diagnostic analysis, Intune remediation management, Hybrid Join repair orchestration, or Windows 11 upgrade orchestration.
 - Use `Communications/` when you need user-facing notification campaigns driven by Microsoft 365 data.
 
 Local tenant configuration files are not committed. Use the committed templates to create local profiles before running tenant-based inventory or setup scripts.
@@ -19,7 +19,7 @@ Local tenant configuration files are not committed. Use the committed templates 
 - Smart Inventory scripts under `SmartInventory/` for Active Directory, Exchange, Microsoft 365, Entra, and Intune data collection. These exports can feed Power BI datasets and other reporting or operational consumers.
 - Smart SharePoint Migration Toolkit under `SharePointMigration/` for SharePoint source-to-destination migration validation, reconciliation exports, and guarded post-migration cleanup operations.
 - User-facing operational notification scripts under `Communications/`, including Exchange migration, archive mailbox, and mailbox reduction campaigns.
-- Device and endpoint tooling under `Devices/`, including reboot governance, device registration diagnostics, endpoint diagnostics, Intune remediation management, and Hybrid Join repair tooling.
+- Device and endpoint tooling under `Devices/`, including reboot governance, device registration diagnostics, endpoint diagnostics, Intune remediation management, Hybrid Join repair tooling, and Windows 11 upgrade tooling.
 
 ## Requirements At A Glance
 
@@ -70,8 +70,9 @@ Use `-WhatIf` before live campaign runs. The provided launchers default to dry-r
 - `Devices/DeviceRebootManager/`: localized PowerShell 5.1 WPF restart notification app.
 - `Devices/DeviceRegistrationTool/`: PowerShell/WPF GUI and CLI mode for Intune enrollment, Hybrid Join, and Entra device registration checks.
 - `Devices/EndpointDiagnosticsAnalyzer/`: PowerShell/WPF GUI for Intune Device Diagnostics ZIP files and local endpoint captures.
-- `Devices/SmartIntuneHybridJoinToolkit/`: PsExec/LOT orchestration for Hybrid Entra Join and Intune enrollment repair.
-- `Devices/SmartIntuneRemediation/`: Intune remediation packages with GUI and CLI publishing tools.
+- `Devices/IntuneHybridJoinToolkit/`: PsExec/LOT orchestration for Hybrid Entra Join and Intune enrollment repair.
+- `Devices/IntuneWindows11UpgradeToolkit/`: PsExec/LOT orchestration for Windows 10 to Windows 11 upgrade diagnostics and guarded upgrade actions.
+- `Devices/IntuneRemediation/`: Intune remediation packages with GUI and CLI publishing tools.
 
 ## Setup
 
@@ -95,7 +96,7 @@ The same bootstrap creates or reuses the `SMART-M365` Teams team, resolves its S
 
 Current Microsoft Graph application permissions include the read scopes used by the inventory scripts (`Directory.Read.All`, `User.Read.All`, `Device.Read.All`, `GroupMember.Read.All`, Intune read permissions, and `AuditLog.Read.All` for user `signInActivity`), plus `Sites.Selected` for SharePoint CSV upload and `Mail.Send` for Graph mail. The bootstrap grants the app `write` access only on the SmartM365 SharePoint site and removes older broad `Files.ReadWrite.All` / `Sites.ReadWrite.All` grants when found. Exchange Online app-only runtime inventory uses `Exchange.ManageAsApp` plus the supported Entra `Global Reader` role on the SmartM365 service principal; the bootstrap also removes the older `Exchange Administrator` service-principal role when found. `Setup/SmartM365-Create-AppRegistration.ps1` is separate because it is an interactive setup script and can require an Exchange Administrator account for mailbox, group, Application Access Policy, and service-principal role setup.
 
-`Devices/SmartIntuneRemediation/CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is also intentionally interactive only. It deploys Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`; it does not use SmartM365 app-only certificate authentication. `Devices/SmartIntuneRemediation/GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same delegated-only model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports through report export jobs.
+`Devices/IntuneRemediation/CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is also intentionally interactive only. It deploys Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`; it does not use SmartM365 app-only certificate authentication. `Devices/IntuneRemediation/GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same delegated-only model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports through report export jobs.
 
 See `Setup/SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.
 

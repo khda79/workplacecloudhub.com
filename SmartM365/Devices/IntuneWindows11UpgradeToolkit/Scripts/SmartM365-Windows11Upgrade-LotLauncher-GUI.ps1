@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Creates and launches Smart Intune Hybrid Join Toolkit LOT folders from a GUI.
+Creates and launches Smart Intune Windows 11 Upgrade Toolkit LOT folders from a GUI.
 
 .DESCRIPTION
 This operator GUI lists existing LOT-* folders for launch, shows their key
@@ -16,7 +16,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
 function Get-ToolkitRoot {
     $scriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
@@ -32,12 +32,12 @@ function Get-ToolkitRoot {
 function Get-SafeLotName {
     param([Parameter(Mandatory = $true)][string]$LotName)
 
-    $safeName = [regex]::Replace($LotName.Trim(), "[^A-Za-z0-9._-]+", "-").Trim("-._")
+    $safeName = [regex]::Replace($LotName.Trim(), '[^A-Za-z0-9._-]+', '-').Trim('-._')
     if ([string]::IsNullOrWhiteSpace($safeName)) {
-        throw "Enter a LOT name."
+        throw 'Enter a LOT name.'
     }
 
-    if ($safeName -notmatch "^(?i)LOT-") {
+    if ($safeName -notmatch '^(?i)LOT-') {
         $safeName = "LOT-$safeName"
     }
 
@@ -55,7 +55,7 @@ function Get-ComputerNamesFromFile {
     $computers = New-Object System.Collections.ArrayList
     foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction Stop)) {
         $name = ([string]$line).Trim().Trim([char]34)
-        if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith("#")) {
+        if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith('#')) {
             continue
         }
 
@@ -75,8 +75,8 @@ function Get-LotFolders {
     param([Parameter(Mandatory = $true)][string]$RootPath)
 
     return @(
-        Get-ChildItem -LiteralPath $RootPath -Directory -Filter "LOT-*" -ErrorAction Stop |
-            Where-Object { $_.Name -ine "LOT-X" } |
+        Get-ChildItem -LiteralPath $RootPath -Directory -Filter 'LOT-*' -ErrorAction Stop |
+            Where-Object { $_.Name -ine 'LOT-X' } |
             Sort-Object Name
     )
 }
@@ -85,10 +85,10 @@ function Test-LotWrapperSet {
     param([Parameter(Mandatory = $true)][string]$LotPath)
 
     $wrapperNames = @(
-        "Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd",
-        "Run-IntuneHybridJoinRepairWithPsExec-Once.cmd",
-        "Run-IntuneHybridJoinRepairWithPsExec-Loop-IgnoreRunGuard.cmd",
-        "Run-IntuneHybridJoinRepairWithPsExec-Once-IgnoreRunGuard.cmd"
+        'Run-Windows11UpgradeRepairWithPsExec-Loop.cmd',
+        'Run-Windows11UpgradeRepairWithPsExec-Once.cmd',
+        'Run-Windows11UpgradeRepairWithPsExec-Loop-IgnoreRunGuard.cmd',
+        'Run-Windows11UpgradeRepairWithPsExec-Once-IgnoreRunGuard.cmd'
     )
 
     $missing = @(
@@ -106,78 +106,21 @@ function Test-LotWrapperSet {
     }
 }
 
-function Get-AdDomainText {
+function Get-LotSummary {
     param([Parameter(Mandatory = $true)][string]$LotPath)
 
-    $adDomainPath = Join-Path $LotPath "AdDomain.txt"
-    if (-not (Test-Path -LiteralPath $adDomainPath -PathType Leaf)) {
-        return ""
-    }
-
-    foreach ($line in @(Get-Content -LiteralPath $adDomainPath -ErrorAction Stop)) {
-        $value = ([string]$line).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($value)) {
-            return $value
-        }
-    }
-
-    return ""
-}
-
-function Get-FileFreshnessText {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [int]$FreshMinutes = 120
-    )
-
-    $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
-    if (-not $item) {
-        return "Missing"
-    }
-
-    $age = (Get-Date) - $item.LastWriteTime
-    $state = if ($age.TotalMinutes -le $FreshMinutes) { "Recent" } else { "Stale" }
-    return ("{0}; {1:N1} min; {2}" -f $state,$age.TotalMinutes,$item.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"))
-}
-
-function Get-LotSummary {
-    param(
-        [Parameter(Mandatory = $true)][string]$RootPath,
-        [Parameter(Mandatory = $true)][string]$LotPath
-    )
-
-    $computersPath = Join-Path $LotPath "Computers.txt"
-    $adDomainPath = Join-Path $LotPath "AdDomain.txt"
-    $lotAdCsvPath = Join-Path $LotPath "DevicesAD.csv"
-    $rootAdCsvPath = Join-Path $RootPath "DevicesAD.csv"
-    $rootIntuneCsvPath = Join-Path $RootPath "DevicesIntune.csv"
-    $rootEntraCsvPath = Join-Path $RootPath "DevicesEntra.csv"
+    $computersPath = Join-Path $LotPath 'Computers.txt'
+    $reportsPath = Join-Path $LotPath 'Reports'
     $computers = @(Get-ComputerNamesFromFile -Path $computersPath)
-    $adDomain = Get-AdDomainText -LotPath $LotPath
     $wrappers = Test-LotWrapperSet -LotPath $LotPath
-
-    $adScope = if ([string]::IsNullOrWhiteSpace($adDomain)) {
-        "Forest export from root DevicesAD.csv"
-    }
-    else {
-        "Domain export: $adDomain"
-    }
-
-    $selectedAdCsv = if ([string]::IsNullOrWhiteSpace($adDomain)) { $rootAdCsvPath } else { $lotAdCsvPath }
 
     return [pscustomobject]@{
         Name = Split-Path -Leaf $LotPath
         Path = $LotPath
         ComputersPath = $computersPath
+        ReportsPath = $reportsPath
         ComputerCount = $computers.Count
-        AdDomainPath = $adDomainPath
-        AdDomain = $adDomain
-        AdScope = $adScope
-        SelectedAdCsv = $selectedAdCsv
-        RootAdCsvStatus = Get-FileFreshnessText -Path $rootAdCsvPath -FreshMinutes 120
-        SelectedAdCsvStatus = Get-FileFreshnessText -Path $selectedAdCsv -FreshMinutes 120
-        IntuneCsvStatus = Get-FileFreshnessText -Path $rootIntuneCsvPath -FreshMinutes 120
-        EntraCsvStatus = Get-FileFreshnessText -Path $rootEntraCsvPath -FreshMinutes 120
+        UpgradeScope = 'Windows 10 readiness, policy repair, guarded Windows 11 upgrade'
         WrappersReady = $wrappers.Ready
         MissingWrappers = $wrappers.Missing
     }
@@ -186,12 +129,12 @@ function Get-LotSummary {
 function Invoke-LotWrapperRefresh {
     param([Parameter(Mandatory = $true)][string]$RootPath)
 
-    $updateScript = Join-Path $RootPath "Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
-    if (-not (Test-Path -LiteralPath $updateScript -PathType Leaf)) {
-        throw "LOT wrapper update script not found: $updateScript"
+    $script = Join-Path $RootPath 'Scripts\SmartM365-Windows11Upgrade-Update-LotCmdWrappers.ps1'
+    if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
+        throw "Wrapper refresh script not found: $script"
     }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updateScript -RootPath $RootPath
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -ToolkitRoot $RootPath
     if ($LASTEXITCODE -ne 0) {
         throw "LOT wrapper refresh failed with exit code $LASTEXITCODE."
     }
@@ -211,15 +154,13 @@ function New-ToolkitLotFolder {
     }
 
     New-Item -ItemType Directory -Path $lotPath -Force -ErrorAction Stop | Out-Null
-    New-Item -ItemType File -Path (Join-Path $lotPath "Computers.txt") -Force -ErrorAction Stop | Out-Null
-    New-Item -ItemType File -Path (Join-Path $lotPath "AdDomain.txt") -Force -ErrorAction Stop | Out-Null
+    New-Item -ItemType File -Path (Join-Path $lotPath 'Computers.txt') -Force -ErrorAction Stop | Out-Null
 
     Invoke-LotWrapperRefresh -RootPath $rootItem.FullName
 
     return [pscustomobject]@{
         LotPath = $lotPath
-        ComputersPath = Join-Path $lotPath "Computers.txt"
-        AdDomainPath = Join-Path $lotPath "AdDomain.txt"
+        ComputersPath = Join-Path $lotPath 'Computers.txt'
     }
 }
 
@@ -261,11 +202,11 @@ function Start-ToolkitLot {
     )
 
     $wrapperName = switch ($Mode) {
-        "Loop" { "Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd"; break }
-        "Once" { "Run-IntuneHybridJoinRepairWithPsExec-Once.cmd"; break }
-        "LoopIgnoreRunGuard" { "Run-IntuneHybridJoinRepairWithPsExec-Loop-IgnoreRunGuard.cmd"; break }
-        "OnceIgnoreRunGuard" { "Run-IntuneHybridJoinRepairWithPsExec-Once-IgnoreRunGuard.cmd"; break }
-        default { "Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd" }
+        'Loop' { 'Run-Windows11UpgradeRepairWithPsExec-Loop.cmd'; break }
+        'Once' { 'Run-Windows11UpgradeRepairWithPsExec-Once.cmd'; break }
+        'LoopIgnoreRunGuard' { 'Run-Windows11UpgradeRepairWithPsExec-Loop-IgnoreRunGuard.cmd'; break }
+        'OnceIgnoreRunGuard' { 'Run-Windows11UpgradeRepairWithPsExec-Once-IgnoreRunGuard.cmd'; break }
+        default { 'Run-Windows11UpgradeRepairWithPsExec-Once.cmd' }
     }
 
     $wrapperPath = Join-Path $LotPath $wrapperName
@@ -273,9 +214,9 @@ function Start-ToolkitLot {
         throw "LOT wrapper not found: $wrapperPath"
     }
 
-    $psexecToolkitPath = Join-Path $toolkitRoot "Scripts\PsExec.exe"
-    $psexecSystem32Path = Join-Path $env:WINDIR "System32\PsExec.exe"
-    $psexecCommand = Get-Command -Name "PsExec.exe" -CommandType Application -ErrorAction SilentlyContinue
+    $psexecToolkitPath = Join-Path $toolkitRoot 'Scripts\PsExec.exe'
+    $psexecSystem32Path = Join-Path $env:WINDIR 'System32\PsExec.exe'
+    $psexecCommand = Get-Command -Name 'PsExec.exe' -CommandType Application -ErrorAction SilentlyContinue
     if (
         -not (Test-Path -LiteralPath $psexecToolkitPath -PathType Leaf) -and
         -not (Test-Path -LiteralPath $psexecSystem32Path -PathType Leaf) -and
@@ -287,9 +228,9 @@ function Start-ToolkitLot {
     if ($GlobalConcurrencyLimit -lt 1) { $GlobalConcurrencyLimit = 1 }
     $commandParts = @(
         (ConvertTo-CmdArgument -Value $wrapperPath),
-        "-GlobalConcurrencyLimit",
+        '-GlobalConcurrencyLimit',
         [string]$GlobalConcurrencyLimit,
-        "-GlobalConcurrencyLeaseTimeoutMinutes",
+        '-GlobalConcurrencyLeaseTimeoutMinutes',
         [string]$GlobalConcurrencyLeaseTimeoutMinutes
     )
     foreach ($argument in @($AdditionalArguments)) {
@@ -306,8 +247,8 @@ function Start-ToolkitLot {
         }
     }
 
-    $commandLine = (($setCommands + @($commandParts -join " ")) -join " & ")
-    Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", $commandLine) -WorkingDirectory $LotPath -Verb RunAs
+    $commandLine = (($setCommands + @($commandParts -join ' ')) -join ' & ')
+    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', $commandLine) -WorkingDirectory $LotPath -Verb RunAs
 }
 
 function Wait-UiDelay {
@@ -331,7 +272,7 @@ function Open-TextFile {
         New-Item -ItemType File -Path $Path -Force -ErrorAction Stop | Out-Null
     }
 
-    Start-Process -FilePath "notepad.exe" -ArgumentList @("`"$Path`"")
+    Start-Process -FilePath 'notepad.exe' -ArgumentList @("`"$Path`"")
 }
 
 function Open-FolderPath {
@@ -341,7 +282,17 @@ function Open-FolderPath {
         throw "Folder not found: $Path"
     }
 
-    Start-Process -FilePath "explorer.exe" -ArgumentList @("`"$Path`"")
+    Start-Process -FilePath 'explorer.exe' -ArgumentList @("`"$Path`"")
+}
+
+function Open-OrCreateFolderPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        New-Item -ItemType Directory -Path $Path -Force -ErrorAction Stop | Out-Null
+    }
+
+    Start-Process -FilePath 'explorer.exe' -ArgumentList @("`"$Path`"")
 }
 
 $toolkitRoot = Get-ToolkitRoot
@@ -352,31 +303,31 @@ Add-Type -AssemblyName System.Drawing
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-$font = New-Object System.Drawing.Font("Segoe UI", 9)
-$titleFont = New-Object System.Drawing.Font("Segoe UI Semibold", 19)
-$sectionFont = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
-$smallFont = New-Object System.Drawing.Font("Segoe UI", 8)
-$statusFont = New-Object System.Drawing.Font("Consolas", 9)
+$font = New-Object System.Drawing.Font('Segoe UI', 9)
+$titleFont = New-Object System.Drawing.Font('Segoe UI Semibold', 19)
+$sectionFont = New-Object System.Drawing.Font('Segoe UI Semibold', 10)
+$smallFont = New-Object System.Drawing.Font('Segoe UI', 8)
+$statusFont = New-Object System.Drawing.Font('Consolas', 9)
 
-$colorBackground = [System.Drawing.ColorTranslator]::FromHtml("#F5F8FB")
-$colorPanel = [System.Drawing.ColorTranslator]::FromHtml("#FFFFFF")
-$colorPanelSoft = [System.Drawing.ColorTranslator]::FromHtml("#FAFCFE")
-$colorHeaderPanel = [System.Drawing.ColorTranslator]::FromHtml("#E6F4FF")
-$colorAccent = [System.Drawing.ColorTranslator]::FromHtml("#0078D4")
-$colorAccentDark = [System.Drawing.ColorTranslator]::FromHtml("#005A9E")
-$colorInk = [System.Drawing.ColorTranslator]::FromHtml("#1F2937")
-$colorMuted = [System.Drawing.ColorTranslator]::FromHtml("#5F6B7A")
-$colorBorder = [System.Drawing.ColorTranslator]::FromHtml("#DDE7F0")
-$colorTextBoxBorder = [System.Drawing.ColorTranslator]::FromHtml("#B9C8D7")
-$colorSuccess = [System.Drawing.ColorTranslator]::FromHtml("#027A48")
-$colorWarning = [System.Drawing.ColorTranslator]::FromHtml("#B54708")
-$colorDisabled = [System.Drawing.ColorTranslator]::FromHtml("#E4EAF1")
-$colorDisabledText = [System.Drawing.ColorTranslator]::FromHtml("#7A8A99")
+$colorBackground = [System.Drawing.ColorTranslator]::FromHtml('#F5F8FB')
+$colorPanel = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
+$colorPanelSoft = [System.Drawing.ColorTranslator]::FromHtml('#FAFCFE')
+$colorHeaderPanel = [System.Drawing.ColorTranslator]::FromHtml('#E6F4FF')
+$colorAccent = [System.Drawing.ColorTranslator]::FromHtml('#0078D4')
+$colorAccentDark = [System.Drawing.ColorTranslator]::FromHtml('#005A9E')
+$colorInk = [System.Drawing.ColorTranslator]::FromHtml('#1F2937')
+$colorMuted = [System.Drawing.ColorTranslator]::FromHtml('#5F6B7A')
+$colorBorder = [System.Drawing.ColorTranslator]::FromHtml('#DDE7F0')
+$colorTextBoxBorder = [System.Drawing.ColorTranslator]::FromHtml('#B9C8D7')
+$colorSuccess = [System.Drawing.ColorTranslator]::FromHtml('#027A48')
+$colorDisabled = [System.Drawing.ColorTranslator]::FromHtml('#E4EAF1')
+$colorDisabledText = [System.Drawing.ColorTranslator]::FromHtml('#7A8A99')
 
 function Resolve-LogoIconPath {
     $candidatePaths = @(
-        (Join-Path $PSScriptRoot "SmartM365-logo.ico"),
-        (Join-Path $toolkitRoot "SmartM365-logo.ico")
+        (Join-Path $PSScriptRoot 'SmartM365-logo.ico'),
+        (Join-Path $toolkitRoot 'SmartM365-logo.ico'),
+        (Join-Path $toolkitRoot 'Scripts\SmartM365-logo.ico')
     )
 
     foreach ($candidatePath in $candidatePaths) {
@@ -391,9 +342,9 @@ function Resolve-LogoIconPath {
 function Resolve-LogoImagePath {
     $devicesRoot = Split-Path -Parent $toolkitRoot
     $candidatePaths = @(
-        (Join-Path $toolkitRoot "workplacecloudhub-v2.png"),
-        (Join-Path $PSScriptRoot "workplacecloudhub-v2.png"),
-        (Join-Path $devicesRoot "DeviceRegistrationTool\workplacecloudhub-v2.png")
+        (Join-Path $toolkitRoot 'workplacecloudhub-v2.png'),
+        (Join-Path $PSScriptRoot 'workplacecloudhub-v2.png'),
+        (Join-Path $devicesRoot 'DeviceRegistrationTool\workplacecloudhub-v2.png')
     )
 
     foreach ($candidatePath in $candidatePaths) {
@@ -413,7 +364,7 @@ function Set-FlatButtonStyle {
         [System.Drawing.Color]$BorderColor = $colorBorder
     )
 
-    $Button.FlatStyle = "Flat"
+    $Button.FlatStyle = 'Flat'
     $Button.BackColor = $BackColor
     $Button.ForeColor = $ForeColor
     $Button.FlatAppearance.BorderColor = $BorderColor
@@ -493,7 +444,7 @@ function New-DeviceRegistrationTabHeader {
     $header.Height = 34
     $header.Margin = New-Object System.Windows.Forms.Padding(0, 0, 6, 0)
     $header.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $header.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
+    $header.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 9)
     $header.Tag = [pscustomobject]@{
         Text = $Text
         Page = $Page
@@ -511,13 +462,13 @@ function New-DeviceRegistrationTabHeader {
             $colorHeaderPanel
         }
         elseif ($state.Hover) {
-            [System.Drawing.ColorTranslator]::FromHtml("#F8FBFE")
+            [System.Drawing.ColorTranslator]::FromHtml('#F8FBFE')
         }
         else {
             $colorPanel
         }
         $borderColor = if ($state.Selected -or $state.Hover) {
-            [System.Drawing.ColorTranslator]::FromHtml("#B9DDF7")
+            [System.Drawing.ColorTranslator]::FromHtml('#B9DDF7')
         }
         else {
             $colorBorder
@@ -577,18 +528,18 @@ function New-Label {
     param([string]$Text)
     $label = New-Object System.Windows.Forms.Label
     $label.Text = $Text
-    $label.Dock = "Fill"
-    $label.TextAlign = "MiddleLeft"
+    $label.Dock = 'Fill'
+    $label.TextAlign = 'MiddleLeft'
     $label.ForeColor = $colorMuted
     return $label
 }
 
 function New-ValueBox {
     $box = New-Object System.Windows.Forms.TextBox
-    $box.Dock = "Fill"
+    $box.Dock = 'Fill'
     $box.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
     $box.ReadOnly = $true
-    $box.BorderStyle = "FixedSingle"
+    $box.BorderStyle = 'FixedSingle'
     $box.BackColor = $colorPanelSoft
     $box.ForeColor = $colorInk
     return $box
@@ -596,9 +547,9 @@ function New-ValueBox {
 
 function New-EntryBox {
     $box = New-Object System.Windows.Forms.TextBox
-    $box.Dock = "Fill"
+    $box.Dock = 'Fill'
     $box.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
-    $box.BorderStyle = "FixedSingle"
+    $box.BorderStyle = 'FixedSingle'
     $box.BackColor = $colorPanel
     $box.ForeColor = $colorInk
     return $box
@@ -608,14 +559,14 @@ function New-OptionsTextBox {
     param([Parameter(Mandatory = $true)][string]$Text)
 
     $box = New-Object System.Windows.Forms.TextBox
-    $box.Dock = "Fill"
+    $box.Dock = 'Fill'
     $box.Multiline = $true
-    $box.ScrollBars = "Vertical"
+    $box.ScrollBars = 'Vertical'
     $box.ReadOnly = $true
     $box.Font = $statusFont
     $box.BackColor = $colorPanelSoft
     $box.ForeColor = $colorInk
-    $box.BorderStyle = "FixedSingle"
+    $box.BorderStyle = 'FixedSingle'
     $box.Text = $Text.Trim()
     return $box
 }
@@ -624,13 +575,13 @@ function New-SectionPanel {
     param([Parameter(Mandatory = $true)][string]$Title)
 
     $outer = New-Object System.Windows.Forms.Panel
-    $outer.Dock = "Fill"
+    $outer.Dock = 'Fill'
     $outer.BackColor = $colorPanel
     $outer.Padding = New-Object System.Windows.Forms.Padding(14)
     Add-SoftBorder -Control $outer
 
     $layout = New-Object System.Windows.Forms.TableLayoutPanel
-    $layout.Dock = "Fill"
+    $layout.Dock = 'Fill'
     $layout.ColumnCount = 1
     $layout.RowCount = 2
     $layout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
@@ -639,13 +590,13 @@ function New-SectionPanel {
 
     $titleLabel = New-Object System.Windows.Forms.Label
     $titleLabel.Text = $Title
-    $titleLabel.Dock = "Fill"
+    $titleLabel.Dock = 'Fill'
     $titleLabel.Font = $sectionFont
     $titleLabel.ForeColor = $colorInk
-    $titleLabel.TextAlign = "MiddleLeft"
+    $titleLabel.TextAlign = 'MiddleLeft'
 
     $content = New-Object System.Windows.Forms.Panel
-    $content.Dock = "Fill"
+    $content.Dock = 'Fill'
     $content.BackColor = $colorPanel
 
     $layout.Controls.Add($titleLabel, 0, 0)
@@ -678,8 +629,8 @@ function Set-ButtonEnabledStyle {
 }
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Smart Intune Hybrid Join Toolkit - LOT Launcher"
-$form.StartPosition = "CenterScreen"
+$form.Text = 'Smart Intune Windows 11 Upgrade Toolkit - LOT Launcher'
+$form.StartPosition = 'CenterScreen'
 $form.Size = New-Object System.Drawing.Size(1240, 860)
 $form.MinimumSize = New-Object System.Drawing.Size(1040, 760)
 $form.Font = $font
@@ -709,7 +660,7 @@ if (-not [string]::IsNullOrWhiteSpace($logoImagePath)) {
 }
 
 $rootLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$rootLayout.Dock = "Fill"
+$rootLayout.Dock = 'Fill'
 $rootLayout.ColumnCount = 1
 $rootLayout.RowCount = 4
 $rootLayout.Padding = New-Object System.Windows.Forms.Padding(18)
@@ -721,20 +672,20 @@ $rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Wind
 $rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 54))) | Out-Null
 
 $headerPanel = New-Object System.Windows.Forms.Panel
-$headerPanel.Dock = "Fill"
+$headerPanel.Dock = 'Fill'
 $headerPanel.BackColor = $colorPanel
 $headerPanel.Padding = New-Object System.Windows.Forms.Padding(18)
 Add-SoftBorder -Control $headerPanel
 
 $headerLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$headerLayout.Dock = "Fill"
+$headerLayout.Dock = 'Fill'
 $headerLayout.ColumnCount = 2
 $headerLayout.RowCount = 1
 $headerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 $headerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 142))) | Out-Null
 
 $headerTextPanel = New-Object System.Windows.Forms.TableLayoutPanel
-$headerTextPanel.Dock = "Fill"
+$headerTextPanel.Dock = 'Fill'
 $headerTextPanel.ColumnCount = 1
 $headerTextPanel.RowCount = 4
 $headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 24))) | Out-Null
@@ -743,31 +694,32 @@ $headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System
 $headerTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
 
 $badgeLabel = New-Object System.Windows.Forms.Label
-$badgeLabel.Text = "SMARTM365"
+$badgeLabel.Text = 'SMARTM365'
 $badgeLabel.AutoSize = $true
 $badgeLabel.BackColor = $colorHeaderPanel
 $badgeLabel.ForeColor = $colorAccentDark
-$badgeLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8)
+$badgeLabel.Font = $smallFont
 $badgeLabel.Padding = New-Object System.Windows.Forms.Padding(8, 3, 8, 3)
 
 $titleLabel = New-Object System.Windows.Forms.Label
-$titleLabel.Text = "Intune Hybrid Join LOT Launcher"
-$titleLabel.Dock = "Fill"
-$titleLabel.ForeColor = $colorInk
+$titleLabel.Text = 'Windows 11 Upgrade LOT Launcher'
+$titleLabel.Dock = 'Fill'
 $titleLabel.Font = $titleFont
-$titleLabel.TextAlign = "MiddleLeft"
+$titleLabel.ForeColor = $colorInk
+$titleLabel.TextAlign = 'MiddleLeft'
 
 $subtitleLabel = New-Object System.Windows.Forms.Label
-$subtitleLabel.Text = "Run an existing LOT or create an empty LOT ready for Computers.txt."
-$subtitleLabel.Dock = "Fill"
+$subtitleLabel.Text = 'Run an existing LOT or create a new empty LOT ready for Computers.txt.'
+$subtitleLabel.Dock = 'Fill'
 $subtitleLabel.ForeColor = $colorMuted
-$subtitleLabel.TextAlign = "MiddleLeft"
+$subtitleLabel.TextAlign = 'MiddleLeft'
 
 $psexecLabel = New-Object System.Windows.Forms.Label
-$psexecLabel.Dock = "Fill"
-$psexecLabel.ForeColor = $colorInk
-$psexecLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
-$psexecLabel.TextAlign = "MiddleLeft"
+$psexecLabel.Text = 'Diagnose Windows 10 blockers, repair update policy, and run guarded Windows 11 upgrades.'
+$psexecLabel.Dock = 'Fill'
+$psexecLabel.ForeColor = $colorMuted
+$psexecLabel.Font = $smallFont
+$psexecLabel.TextAlign = 'MiddleLeft'
 
 $headerTextPanel.Controls.Add($badgeLabel, 0, 0)
 $headerTextPanel.Controls.Add($titleLabel, 0, 1)
@@ -775,43 +727,27 @@ $headerTextPanel.Controls.Add($subtitleLabel, 0, 2)
 $headerTextPanel.Controls.Add($psexecLabel, 0, 3)
 
 $logoCard = New-Object System.Windows.Forms.Panel
-$logoCard.Dock = "Fill"
-$logoCard.BackColor = $colorPanel
+$logoCard.Dock = 'Fill'
+$logoCard.BackColor = $colorPanelSoft
 $logoCard.Padding = New-Object System.Windows.Forms.Padding(10)
 $logoCard.Margin = New-Object System.Windows.Forms.Padding(0, 2, 0, 2)
 Add-SoftBorder -Control $logoCard
 
 if ($script:LogoImage) {
     $logoPicture = New-Object System.Windows.Forms.PictureBox
-    $logoPicture.Dock = "Fill"
-    $logoPicture.SizeMode = "Zoom"
+    $logoPicture.Dock = 'Fill'
+    $logoPicture.SizeMode = 'Zoom'
     $logoPicture.Image = $script:LogoImage
-    $logoPicture.BackColor = $colorPanel
     $logoCard.Controls.Add($logoPicture)
 }
 else {
     $logoFallback = New-Object System.Windows.Forms.Label
-    $logoFallback.Dock = "Fill"
-    $logoFallback.Text = "Workplace`r`nCloudHub"
+    $logoFallback.Text = 'WorkplaceCloudHub'
+    $logoFallback.Dock = 'Fill'
+    $logoFallback.TextAlign = 'MiddleCenter'
     $logoFallback.ForeColor = $colorAccent
-    $logoFallback.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
-    $logoFallback.TextAlign = "MiddleCenter"
+    $logoFallback.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 10)
     $logoCard.Controls.Add($logoFallback)
-}
-
-$psexecToolkitPath = Join-Path $toolkitRoot "Scripts\PsExec.exe"
-$psexecSystem32Path = Join-Path $env:WINDIR "System32\PsExec.exe"
-if (Test-Path -LiteralPath $psexecToolkitPath -PathType Leaf) {
-    $psexecLabel.Text = "PsExec ready in Scripts"
-    $psexecLabel.ForeColor = $colorSuccess
-}
-elseif (Test-Path -LiteralPath $psexecSystem32Path -PathType Leaf) {
-    $psexecLabel.Text = "PsExec ready in System32"
-    $psexecLabel.ForeColor = $colorSuccess
-}
-else {
-    $psexecLabel.Text = "PsExec not local"
-    $psexecLabel.ForeColor = $colorWarning
 }
 
 $headerLayout.Controls.Add($headerTextPanel, 0, 0)
@@ -819,14 +755,14 @@ $headerLayout.Controls.Add($logoCard, 1, 0)
 $headerPanel.Controls.Add($headerLayout)
 
 $actionPanel = New-Object System.Windows.Forms.Panel
-$actionPanel.Dock = "Fill"
+$actionPanel.Dock = 'Fill'
 $actionPanel.Margin = New-Object System.Windows.Forms.Padding(0, 12, 0, 0)
 $actionPanel.BackColor = $colorPanel
 $actionPanel.Padding = New-Object System.Windows.Forms.Padding(12)
 Add-SoftBorder -Control $actionPanel
 
 $actionLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$actionLayout.Dock = "Fill"
+$actionLayout.Dock = 'Fill'
 $actionLayout.ColumnCount = 3
 $actionLayout.RowCount = 1
 $actionLayout.BackColor = $colorPanel
@@ -842,7 +778,7 @@ $actionDot.BackColor = $colorAccent
 Add-SoftBorder -Control $actionDot -BorderColor $colorAccent -Radius 5
 
 $actionTextPanel = New-Object System.Windows.Forms.TableLayoutPanel
-$actionTextPanel.Dock = "Fill"
+$actionTextPanel.Dock = 'Fill'
 $actionTextPanel.ColumnCount = 1
 $actionTextPanel.RowCount = 3
 $actionTextPanel.BackColor = $colorPanel
@@ -851,44 +787,44 @@ $actionTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System
 $actionTextPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 
 $actionTitleLabel = New-Object System.Windows.Forms.Label
-$actionTitleLabel.Dock = "Fill"
-$actionTitleLabel.Text = "LOT: none selected"
+$actionTitleLabel.Dock = 'Fill'
+$actionTitleLabel.Text = 'LOT: none selected'
 $actionTitleLabel.ForeColor = $colorInk
-$actionTitleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 12)
-$actionTitleLabel.TextAlign = "MiddleLeft"
+$actionTitleLabel.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 12)
+$actionTitleLabel.TextAlign = 'MiddleLeft'
 
 $actionSubtitleLabel = New-Object System.Windows.Forms.Label
-$actionSubtitleLabel.Dock = "Fill"
-$actionSubtitleLabel.Text = "Select or create a LOT."
+$actionSubtitleLabel.Dock = 'Fill'
+$actionSubtitleLabel.Text = 'Select or create a LOT.'
 $actionSubtitleLabel.ForeColor = $colorAccent
-$actionSubtitleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8)
-$actionSubtitleLabel.TextAlign = "MiddleLeft"
+$actionSubtitleLabel.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 8)
+$actionSubtitleLabel.TextAlign = 'MiddleLeft'
 
 $actionStatusLabel = New-Object System.Windows.Forms.Label
-$actionStatusLabel.Dock = "Fill"
-$actionStatusLabel.Text = "Ready"
+$actionStatusLabel.Dock = 'Fill'
+$actionStatusLabel.Text = 'Ready'
 $actionStatusLabel.ForeColor = $colorMuted
 $actionStatusLabel.Font = $smallFont
-$actionStatusLabel.TextAlign = "MiddleLeft"
+$actionStatusLabel.TextAlign = 'MiddleLeft'
 
 $actionTextPanel.Controls.Add($actionTitleLabel, 0, 0)
 $actionTextPanel.Controls.Add($actionSubtitleLabel, 0, 1)
 $actionTextPanel.Controls.Add($actionStatusLabel, 0, 2)
 
 $actionButtonsPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$actionButtonsPanel.Dock = "Fill"
-$actionButtonsPanel.FlowDirection = "RightToLeft"
+$actionButtonsPanel.Dock = 'Fill'
+$actionButtonsPanel.FlowDirection = 'RightToLeft'
 $actionButtonsPanel.WrapContents = $false
 $actionButtonsPanel.BackColor = $colorPanel
 $actionButtonsPanel.Padding = New-Object System.Windows.Forms.Padding(0, 18, 0, 0)
 
 $actionLaunchAllButton = New-Object System.Windows.Forms.Button
-$actionLaunchAllButton.Text = "Launch all"
+$actionLaunchAllButton.Text = 'Launch all'
 $actionLaunchAllButton.Width = 130
 Set-ButtonEnabledStyle -Button $actionLaunchAllButton -Enabled $false -EnabledBackColor $colorAccent
 
 $actionRefreshButton = New-Object System.Windows.Forms.Button
-$actionRefreshButton.Text = "Refresh"
+$actionRefreshButton.Text = 'Refresh'
 $actionRefreshButton.Width = 118
 Set-FlatButtonStyle -Button $actionRefreshButton -BackColor $colorPanel -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
@@ -901,7 +837,7 @@ $actionLayout.Controls.Add($actionButtonsPanel, 2, 0)
 $actionPanel.Controls.Add($actionLayout)
 
 $tabShell = New-Object System.Windows.Forms.TableLayoutPanel
-$tabShell.Dock = "Fill"
+$tabShell.Dock = 'Fill'
 $tabShell.Margin = New-Object System.Windows.Forms.Padding(0, 12, 0, 12)
 $tabShell.BackColor = $colorBackground
 $tabShell.ColumnCount = 1
@@ -911,15 +847,15 @@ $tabShell.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Window
 $tabShell.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 
 $tabStrip = New-Object System.Windows.Forms.FlowLayoutPanel
-$tabStrip.Dock = "Fill"
-$tabStrip.FlowDirection = "LeftToRight"
+$tabStrip.Dock = 'Fill'
+$tabStrip.FlowDirection = 'LeftToRight'
 $tabStrip.WrapContents = $false
 $tabStrip.BackColor = $colorBackground
 $tabStrip.Padding = New-Object System.Windows.Forms.Padding(0)
 $tabStrip.Margin = New-Object System.Windows.Forms.Padding(0)
 
 $tabContentPanel = New-Object System.Windows.Forms.Panel
-$tabContentPanel.Dock = "Fill"
+$tabContentPanel.Dock = 'Fill'
 $tabContentPanel.BackColor = $colorBackground
 $tabContentPanel.Padding = New-Object System.Windows.Forms.Padding(0, 10, 0, 0)
 
@@ -929,24 +865,24 @@ $tabShell.Controls.Add($tabContentPanel, 0, 1)
 $script:DeviceRegistrationTabHeaders = New-Object System.Collections.ArrayList
 
 $existingTab = New-Object System.Windows.Forms.Panel
-$existingTab.Dock = "Fill"
+$existingTab.Dock = 'Fill'
 $existingTab.BackColor = $colorBackground
 
 $newTab = New-Object System.Windows.Forms.Panel
-$newTab.Dock = "Fill"
+$newTab.Dock = 'Fill'
 $newTab.BackColor = $colorBackground
 
 $optionsTab = New-Object System.Windows.Forms.Panel
-$optionsTab.Dock = "Fill"
+$optionsTab.Dock = 'Fill'
 $optionsTab.BackColor = $colorBackground
 
 $tabContentPanel.Controls.Add($existingTab)
 $tabContentPanel.Controls.Add($newTab)
 $tabContentPanel.Controls.Add($optionsTab)
 
-$existingTabHeader = New-DeviceRegistrationTabHeader -Text "Existing LOT" -Page $existingTab
-$newTabHeader = New-DeviceRegistrationTabHeader -Text "New LOT" -Page $newTab
-$optionsTabHeader = New-DeviceRegistrationTabHeader -Text "Options" -Page $optionsTab
+$existingTabHeader = New-DeviceRegistrationTabHeader -Text 'Existing LOT' -Page $existingTab
+$newTabHeader = New-DeviceRegistrationTabHeader -Text 'New LOT' -Page $newTab
+$optionsTabHeader = New-DeviceRegistrationTabHeader -Text 'Options' -Page $optionsTab
 $script:DeviceRegistrationTabHeaders.Add($existingTabHeader) | Out-Null
 $script:DeviceRegistrationTabHeaders.Add($newTabHeader) | Out-Null
 $script:DeviceRegistrationTabHeaders.Add($optionsTabHeader) | Out-Null
@@ -956,7 +892,7 @@ $tabStrip.Controls.Add($optionsTabHeader)
 Show-DeviceRegistrationTabPage -Header $existingTabHeader
 
 $existingLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$existingLayout.Dock = "Fill"
+$existingLayout.Dock = 'Fill'
 $existingLayout.ColumnCount = 1
 $existingLayout.RowCount = 2
 $existingLayout.Padding = New-Object System.Windows.Forms.Padding(10)
@@ -965,11 +901,11 @@ $existingLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([S
 $existingLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 232))) | Out-Null
 $existingLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 
-$existingSection = New-SectionPanel -Title "Available lots"
-$activitySection = New-SectionPanel -Title "Activity"
+$existingSection = New-SectionPanel -Title 'Available lots'
+$activitySection = New-SectionPanel -Title 'Activity'
 
 $existingTable = New-Object System.Windows.Forms.TableLayoutPanel
-$existingTable.Dock = "Fill"
+$existingTable.Dock = 'Fill'
 $existingTable.ColumnCount = 5
 $existingTable.RowCount = 5
 $existingTable.BackColor = $colorPanel
@@ -983,85 +919,85 @@ for ($i = 0; $i -lt 5; $i++) {
 }
 
 $lotCombo = New-Object System.Windows.Forms.ComboBox
-$lotCombo.Dock = "Fill"
-$lotCombo.DropDownStyle = "DropDownList"
+$lotCombo.Dock = 'Fill'
+$lotCombo.DropDownStyle = 'DropDownList'
 $lotCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
-$lotCombo.FlatStyle = "Flat"
+$lotCombo.FlatStyle = 'Flat'
 
 $refreshLotsButton = New-Object System.Windows.Forms.Button
-$refreshLotsButton.Text = "Refresh"
-$refreshLotsButton.Dock = "Fill"
+$refreshLotsButton.Text = 'Refresh'
+$refreshLotsButton.Dock = 'Fill'
 Set-FlatButtonStyle -Button $refreshLotsButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
 $openLotFolderButton = New-Object System.Windows.Forms.Button
-$openLotFolderButton.Text = "Folder"
-$openLotFolderButton.Dock = "Fill"
+$openLotFolderButton.Text = 'Folder'
+$openLotFolderButton.Dock = 'Fill'
 Set-FlatButtonStyle -Button $openLotFolderButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
 $deviceCountBox = New-ValueBox
-$adScopeBox = New-ValueBox
+$upgradeScopeBox = New-ValueBox
 
 $existingModeCombo = New-Object System.Windows.Forms.ComboBox
-$existingModeCombo.Dock = "Fill"
-$existingModeCombo.DropDownStyle = "DropDownList"
+$existingModeCombo.Dock = 'Fill'
+$existingModeCombo.DropDownStyle = 'DropDownList'
 $existingModeCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
-$existingModeCombo.FlatStyle = "Flat"
-$existingModeCombo.Items.AddRange([object[]]@("Loop", "Once", "LoopIgnoreRunGuard", "OnceIgnoreRunGuard"))
+$existingModeCombo.FlatStyle = 'Flat'
+$existingModeCombo.Items.AddRange([object[]]@('Once', 'Loop', 'OnceIgnoreRunGuard', 'LoopIgnoreRunGuard'))
 $existingModeCombo.SelectedIndex = 0
 
 $globalConcurrencyLimitBox = New-Object System.Windows.Forms.NumericUpDown
-$globalConcurrencyLimitBox.Dock = "Fill"
+$globalConcurrencyLimitBox.Dock = 'Fill'
 $globalConcurrencyLimitBox.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 3)
 $globalConcurrencyLimitBox.Minimum = 1
-$globalConcurrencyLimitBox.Maximum = 50
+$globalConcurrencyLimitBox.Maximum = 200
 $globalConcurrencyLimitBox.Value = 15
 
 $openComputersButton = New-Object System.Windows.Forms.Button
-$openComputersButton.Text = "Computers"
-$openComputersButton.Dock = "Fill"
+$openComputersButton.Text = 'Computers'
+$openComputersButton.Dock = 'Fill'
 Set-FlatButtonStyle -Button $openComputersButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
-$openAdDomainButton = New-Object System.Windows.Forms.Button
-$openAdDomainButton.Text = "AD domain"
-$openAdDomainButton.Dock = "Fill"
-Set-FlatButtonStyle -Button $openAdDomainButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+$openReportsButton = New-Object System.Windows.Forms.Button
+$openReportsButton.Text = 'Reports'
+$openReportsButton.Dock = 'Fill'
+Set-FlatButtonStyle -Button $openReportsButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
 $launchExistingButton = New-Object System.Windows.Forms.Button
-$launchExistingButton.Text = "Launch"
-$launchExistingButton.Dock = "Fill"
+$launchExistingButton.Text = 'Launch'
+$launchExistingButton.Dock = 'Fill'
 Set-ButtonEnabledStyle -Button $launchExistingButton -Enabled $false -EnabledBackColor $colorAccent
 
 $launchAllLotsButton = New-Object System.Windows.Forms.Button
-$launchAllLotsButton.Text = "Launch all"
-$launchAllLotsButton.Dock = "Fill"
+$launchAllLotsButton.Text = 'Launch all'
+$launchAllLotsButton.Dock = 'Fill'
 Set-ButtonEnabledStyle -Button $launchAllLotsButton -Enabled $false -EnabledBackColor $colorAccent
 
 $refreshWrappersButton = New-Object System.Windows.Forms.Button
-$refreshWrappersButton.Text = "Wrappers"
-$refreshWrappersButton.Dock = "Fill"
+$refreshWrappersButton.Text = 'Wrappers'
+$refreshWrappersButton.Dock = 'Fill'
 Set-FlatButtonStyle -Button $refreshWrappersButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
-$existingTable.Controls.Add((New-Label "LOT"), 0, 0)
+$existingTable.Controls.Add((New-Label 'LOT'), 0, 0)
 $existingTable.Controls.Add($lotCombo, 1, 0)
 $existingTable.SetColumnSpan($lotCombo, 2)
 $existingTable.Controls.Add($refreshLotsButton, 3, 0)
 $existingTable.Controls.Add($openLotFolderButton, 4, 0)
 
-$existingTable.Controls.Add((New-Label "Devices"), 0, 1)
+$existingTable.Controls.Add((New-Label 'Devices'), 0, 1)
 $existingTable.Controls.Add($deviceCountBox, 1, 1)
 $existingTable.SetColumnSpan($deviceCountBox, 2)
 $existingTable.Controls.Add($openComputersButton, 3, 1)
-$existingTable.Controls.Add($openAdDomainButton, 4, 1)
+$existingTable.Controls.Add($openReportsButton, 4, 1)
 
-$existingTable.Controls.Add((New-Label "AD scope"), 0, 2)
-$existingTable.Controls.Add($adScopeBox, 1, 2)
-$existingTable.SetColumnSpan($adScopeBox, 4)
+$existingTable.Controls.Add((New-Label 'Scope'), 0, 2)
+$existingTable.Controls.Add($upgradeScopeBox, 1, 2)
+$existingTable.SetColumnSpan($upgradeScopeBox, 4)
 
-$existingTable.Controls.Add((New-Label "Limit"), 0, 3)
+$existingTable.Controls.Add((New-Label 'Limit'), 0, 3)
 $existingTable.Controls.Add($globalConcurrencyLimitBox, 1, 3)
 $existingTable.SetColumnSpan($globalConcurrencyLimitBox, 4)
 
-$existingTable.Controls.Add((New-Label "Launch"), 0, 4)
+$existingTable.Controls.Add((New-Label 'Launch'), 0, 4)
 $existingTable.Controls.Add($existingModeCombo, 1, 4)
 $existingTable.Controls.Add($refreshWrappersButton, 2, 4)
 $existingTable.Controls.Add($launchExistingButton, 3, 4)
@@ -1070,14 +1006,14 @@ $existingTable.SetColumnSpan($launchExistingButton, 2)
 $existingSection.Content.Controls.Add($existingTable)
 
 $statusBox = New-Object System.Windows.Forms.TextBox
-$statusBox.Dock = "Fill"
+$statusBox.Dock = 'Fill'
 $statusBox.Multiline = $true
-$statusBox.ScrollBars = "Vertical"
+$statusBox.ScrollBars = 'Vertical'
 $statusBox.ReadOnly = $true
 $statusBox.Font = $statusFont
 $statusBox.BackColor = $colorPanelSoft
 $statusBox.ForeColor = $colorInk
-$statusBox.BorderStyle = "FixedSingle"
+$statusBox.BorderStyle = 'FixedSingle'
 $activitySection.Content.Controls.Add($statusBox)
 
 $existingLayout.Controls.Add($existingSection.Panel, 0, 0)
@@ -1085,7 +1021,7 @@ $existingLayout.Controls.Add($activitySection.Panel, 0, 1)
 $existingTab.Controls.Add($existingLayout)
 
 $newLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$newLayout.Dock = "Fill"
+$newLayout.Dock = 'Fill'
 $newLayout.ColumnCount = 1
 $newLayout.RowCount = 2
 $newLayout.Padding = New-Object System.Windows.Forms.Padding(10)
@@ -1094,9 +1030,9 @@ $newLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System
 $newLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 174))) | Out-Null
 $newLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 
-$newSection = New-SectionPanel -Title "Create an empty LOT"
+$newSection = New-SectionPanel -Title 'Create an empty LOT'
 $newTable = New-Object System.Windows.Forms.TableLayoutPanel
-$newTable.Dock = "Top"
+$newTable.Dock = 'Top'
 $newTable.Height = 72
 $newTable.ColumnCount = 3
 $newTable.RowCount = 2
@@ -1112,20 +1048,20 @@ $newLotNameBox = New-EntryBox
 $newComputersPathBox = New-ValueBox
 
 $createLotButton = New-Object System.Windows.Forms.Button
-$createLotButton.Text = "Create"
-$createLotButton.Dock = "Fill"
+$createLotButton.Text = 'Create'
+$createLotButton.Dock = 'Fill'
 Set-FlatButtonStyle -Button $createLotButton -BackColor $colorAccent -ForeColor ([System.Drawing.Color]::White) -BorderColor $colorAccent
 
 $openNewComputersButton = New-Object System.Windows.Forms.Button
-$openNewComputersButton.Text = "Open Computers"
-$openNewComputersButton.Dock = "Fill"
+$openNewComputersButton.Text = 'Open Computers'
+$openNewComputersButton.Dock = 'Fill'
 Set-ButtonEnabledStyle -Button $openNewComputersButton -Enabled $false
 
-$newTable.Controls.Add((New-Label "LOT name"), 0, 0)
+$newTable.Controls.Add((New-Label 'LOT name'), 0, 0)
 $newTable.Controls.Add($newLotNameBox, 1, 0)
 $newTable.Controls.Add($createLotButton, 2, 0)
 
-$newTable.Controls.Add((New-Label "Computers.txt"), 0, 1)
+$newTable.Controls.Add((New-Label 'Computers.txt'), 0, 1)
 $newTable.Controls.Add($newComputersPathBox, 1, 1)
 $newTable.Controls.Add($openNewComputersButton, 2, 1)
 
@@ -1134,7 +1070,7 @@ $newLayout.Controls.Add($newSection.Panel, 0, 0)
 $newTab.Controls.Add($newLayout)
 
 $optionsLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$optionsLayout.Dock = "Fill"
+$optionsLayout.Dock = 'Fill'
 $optionsLayout.ColumnCount = 1
 $optionsLayout.RowCount = 1
 $optionsLayout.Padding = New-Object System.Windows.Forms.Padding(10)
@@ -1142,24 +1078,24 @@ $optionsLayout.BackColor = $colorBackground
 $optionsLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 $optionsLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 
-$optionsSection = New-SectionPanel -Title "Toolkit options"
+$optionsSection = New-SectionPanel -Title 'Toolkit options'
 $optionsScrollPanel = New-Object System.Windows.Forms.Panel
-$optionsScrollPanel.Dock = "Fill"
+$optionsScrollPanel.Dock = 'Fill'
 $optionsScrollPanel.AutoScroll = $true
 $optionsScrollPanel.BackColor = $colorPanel
 
 $optionsTable = New-Object System.Windows.Forms.TableLayoutPanel
-$optionsTable.Dock = "Top"
+$optionsTable.Dock = 'Top'
 $optionsTable.AutoSize = $true
 $optionsTable.ColumnCount = 4
-$optionsTable.RowCount = 10
+$optionsTable.RowCount = 11
 $optionsTable.BackColor = $colorPanel
 $optionsTable.Padding = New-Object System.Windows.Forms.Padding(0, 2, 12, 2)
 $optionsTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 190))) | Out-Null
-$optionsTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 170))) | Out-Null
+$optionsTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 190))) | Out-Null
 $optionsTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 190))) | Out-Null
 $optionsTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-for ($i = 0; $i -lt 10; $i++) {
+for ($i = 0; $i -lt 11; $i++) {
     $optionsTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
 }
 
@@ -1167,7 +1103,7 @@ function New-OptionNumber {
     param([int]$Minimum, [int]$Maximum, [int]$Value)
 
     $number = New-Object System.Windows.Forms.NumericUpDown
-    $number.Dock = "Fill"
+    $number.Dock = 'Fill'
     $number.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
     $number.Minimum = $Minimum
     $number.Maximum = $Maximum
@@ -1180,10 +1116,26 @@ function New-OptionCheck {
 
     $check = New-Object System.Windows.Forms.CheckBox
     $check.Text = $Text
-    $check.Dock = "Fill"
+    $check.Dock = 'Fill'
     $check.Checked = $Checked
     $check.ForeColor = $colorInk
     return $check
+}
+
+function Get-EnvSwitch {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [bool]$Default = $false
+    )
+
+    $value = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $Default
+    }
+
+    if ($value -match '^(?i:1|true|yes|on)$') { return $true }
+    if ($value -match '^(?i:0|false|no|off)$') { return $false }
+    return $Default
 }
 
 function Set-OptionNumberFromEnv {
@@ -1201,113 +1153,131 @@ function Set-OptionNumberFromEnv {
     }
 }
 
-function Get-EnvSwitch {
-    param(
-        [Parameter(Mandatory = $true)][string]$Name,
-        [bool]$Default = $false
-    )
+$optionAuditOnlyCheck = New-OptionCheck -Text 'Audit only'
+$optionAllowPolicyRepairCheck = New-OptionCheck -Text 'Allow policy repair'
+$optionAllowWUResetCheck = New-OptionCheck -Text 'Allow WU reset'
+$optionAllowForceUpgradeCheck = New-OptionCheck -Text 'Allow force upgrade'
+$optionAllowSetupUpgradeCheck = New-OptionCheck -Text 'Allow setup upgrade'
+$optionAllowRebootCheck = New-OptionCheck -Text 'Allow reboot'
+$optionSkipVirtualMachinesCheck = New-OptionCheck -Text 'Skip virtual machines'
+$optionSkipSetupPreCopyCheck = New-OptionCheck -Text 'Use existing media only'
+$optionKeepCentralHistoryCheck = New-OptionCheck -Text 'Keep central log history'
+$optionNoCentralCollectionCheck = New-OptionCheck -Text 'No central log collection'
+$optionDryRunCheck = New-OptionCheck -Text 'Dry run'
 
-    $value = [Environment]::GetEnvironmentVariable($Name, 'Process')
-    if ([string]::IsNullOrWhiteSpace($value)) { return $Default }
-    return @('1','true','yes','on') -contains $value.Trim().ToLowerInvariant()
-}
+$optionSetupSourceBox = New-EntryBox
+$optionSetupSourceBox.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+$optionSetupSourceBox.Text = Join-Path $toolkitRoot 'SetupSource'
+
+$optionSetupModeCombo = New-Object System.Windows.Forms.ComboBox
+$optionSetupModeCombo.Dock = 'Fill'
+$optionSetupModeCombo.DropDownStyle = 'DropDownList'
+$optionSetupModeCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+$optionSetupModeCombo.FlatStyle = 'Flat'
+$optionSetupModeCombo.Items.AddRange([object[]]@('LocalCache', 'Share', 'Auto'))
+$optionSetupModeCombo.SelectedIndex = 0
+
+$optionSetupMediaIdBox = New-EntryBox
+$optionSetupMediaIdBox.Text = 'Win11'
+$optionSetupMediaIdBox.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+
+$optionSetupLanguageCombo = New-Object System.Windows.Forms.ComboBox
+$optionSetupLanguageCombo.Dock = 'Fill'
+$optionSetupLanguageCombo.DropDownStyle = 'DropDown'
+$optionSetupLanguageCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+$optionSetupLanguageCombo.FlatStyle = 'Flat'
+$optionSetupLanguageCombo.Items.AddRange([object[]]@('MatchSystem','Any','fr-FR','en-GB','en-US','de-DE','es-ES','it-IT','nl-NL','pt-PT','pl-PL'))
+$optionSetupLanguageCombo.Text = 'MatchSystem'
 
 $optionThrottleBox = New-OptionNumber -Minimum 1 -Maximum 200 -Value 10
 $optionGlobalConcurrencyLimitBox = New-OptionNumber -Minimum 1 -Maximum 200 -Value 15
 $optionGlobalConcurrencyLeaseTimeoutBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 0
 $optionDelayBetweenCyclesBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 5
 $optionMaxCyclesBox = New-OptionNumber -Minimum 0 -Maximum 1000 -Value 0
-$optionPsExecTimeoutBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 120
-$optionIntuneRetrySleepBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 5
-$optionIntuneRetryMaxBox = New-OptionNumber -Minimum 0 -Maximum 100 -Value 5
-$optionStaleCleanupDelayBox = New-OptionNumber -Minimum 0 -Maximum 86400 -Value 60
-$optionRebootDelayBox = New-OptionNumber -Minimum 0 -Maximum 86400 -Value 180
+$optionPsExecTimeoutBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 180
 
-$optionAdDomainBox = New-EntryBox
-$optionAdDomainBox.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+$optionAuditOnlyCheck.Checked = Get-EnvSwitch -Name 'W11UT_AUDIT_ONLY'
+$optionAllowPolicyRepairCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_POLICY_REPAIR' -Default $true
+$optionAllowWUResetCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_WU_RESET' -Default $true
+$optionAllowForceUpgradeCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_FORCE_UPGRADE' -Default $true
+$optionAllowSetupUpgradeCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_SETUP_UPGRADE' -Default $true
+$optionAllowRebootCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_REBOOT' -Default $true
+$optionSkipVirtualMachinesCheck.Checked = Get-EnvSwitch -Name 'W11UT_SKIP_VIRTUAL_MACHINES' -Default $true
+$optionSkipSetupPreCopyCheck.Checked = Get-EnvSwitch -Name 'W11UT_SKIP_SETUP_MEDIA_PRECOPY'
 
-$adDomainDefault = [Environment]::GetEnvironmentVariable('EHJIR_AD_DOMAIN', 'Process')
-if (-not [string]::IsNullOrWhiteSpace($adDomainDefault)) {
-    $optionAdDomainBox.Text = $adDomainDefault
+$setupSourceDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_SOURCE', 'Process')
+if (-not [string]::IsNullOrWhiteSpace($setupSourceDefault)) {
+    $optionSetupSourceBox.Text = $setupSourceDefault
 }
 
-Set-OptionNumberFromEnv -Control $optionThrottleBox -Name 'EHJIR_THROTTLE'
-Set-OptionNumberFromEnv -Control $optionGlobalConcurrencyLimitBox -Name 'EHJIR_GLOBAL_CONCURRENCY_LIMIT'
-Set-OptionNumberFromEnv -Control $optionGlobalConcurrencyLeaseTimeoutBox -Name 'EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES'
-Set-OptionNumberFromEnv -Control $optionDelayBetweenCyclesBox -Name 'EHJIR_DELAY_BETWEEN_CYCLES_MINUTES'
-Set-OptionNumberFromEnv -Control $optionIntuneRetrySleepBox -Name 'EHJIR_INTUNE_RETRY_SLEEP_MINUTES'
-Set-OptionNumberFromEnv -Control $optionIntuneRetryMaxBox -Name 'EHJIR_INTUNE_RETRY_MAX_RETRIES'
-Set-OptionNumberFromEnv -Control $optionStaleCleanupDelayBox -Name 'EHJIR_STALE_CLEANUP_DELAY_SECONDS'
-Set-OptionNumberFromEnv -Control $optionRebootDelayBox -Name 'EHJIR_REBOOT_DELAY_SECONDS'
-Set-OptionNumberFromEnv -Control $optionPsExecTimeoutBox -Name 'EHJIR_PSEXEC_TIMEOUT_MINUTES'
+$setupModeDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_EXECUTION_MODE', 'Process')
+if ($setupModeDefault -in @('LocalCache','Share','Auto')) {
+    $optionSetupModeCombo.SelectedItem = $setupModeDefault
+}
 
-$optionDryRunCheck = New-OptionCheck -Text "Dry run"
-$optionAuditOnlyCheck = New-OptionCheck -Text "Audit only"
-$optionAllowDsregLeaveCheck = New-OptionCheck -Text "Allow dsreg leave"
-$optionAllowStaleIntuneCleanupCheck = New-OptionCheck -Text "Allow stale Intune cleanup"
-$optionAllowRebootWhenNoUserCheck = New-OptionCheck -Text "Allow reboot no user"
-$optionAllowRebootAfterLeaveCheck = New-OptionCheck -Text "Allow reboot after leave"
-$optionIgnoreRunGuardEveryCycleCheck = New-OptionCheck -Text "Ignore run guard every cycle"
-$optionRemoveNonIntuneMdmCheck = New-OptionCheck -Text "Remove non-Intune MDM"
-$optionKeepCentralHistoryCheck = New-OptionCheck -Text "Keep central log history"
-$optionNoCentralCollectionCheck = New-OptionCheck -Text "No central log collection"
-$optionSkipPostCycleInventoryCheck = New-OptionCheck -Text "Skip post-cycle Intune inventory"
-$optionSkipVirtualMachinesCheck = New-OptionCheck -Text "Skip virtual machines"
-$optionAllowDsregLeaveCheck.Checked = Get-EnvSwitch -Name 'EHJIR_ALLOW_DSREG_LEAVE' -Default $true
-$optionAllowStaleIntuneCleanupCheck.Checked = Get-EnvSwitch -Name 'EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT' -Default $true
-$optionAllowRebootWhenNoUserCheck.Checked = Get-EnvSwitch -Name 'EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER' -Default $true
-$optionAllowRebootAfterLeaveCheck.Checked = Get-EnvSwitch -Name 'EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE' -Default $true
-$optionSkipVirtualMachinesCheck.Checked = Get-EnvSwitch -Name 'EHJIR_SKIP_VIRTUAL_MACHINES' -Default $true
+$setupMediaDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_MEDIA_ID', 'Process')
+if (-not [string]::IsNullOrWhiteSpace($setupMediaDefault)) {
+    $optionSetupMediaIdBox.Text = $setupMediaDefault
+}
 
-$optionsTable.Controls.Add((New-Label "Throttle per LOT"), 0, 0)
-$optionsTable.Controls.Add($optionThrottleBox, 1, 0)
-$optionsTable.Controls.Add((New-Label "Delay between cycles"), 2, 0)
-$optionsTable.Controls.Add($optionDelayBetweenCyclesBox, 3, 0)
+$setupLanguageDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_LANGUAGE', 'Process')
+if (-not [string]::IsNullOrWhiteSpace($setupLanguageDefault)) {
+    $optionSetupLanguageCombo.Text = $setupLanguageDefault
+}
 
-$optionsTable.Controls.Add((New-Label "Max cycles"), 0, 1)
-$optionsTable.Controls.Add($optionMaxCyclesBox, 1, 1)
-$optionsTable.Controls.Add((New-Label "PsExec timeout min"), 2, 1)
-$optionsTable.Controls.Add($optionPsExecTimeoutBox, 3, 1)
+Set-OptionNumberFromEnv -Control $optionDelayBetweenCyclesBox -Name 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES'
+Set-OptionNumberFromEnv -Control $optionPsExecTimeoutBox -Name 'W11UT_PSEXEC_TIMEOUT_MINUTES'
+Set-OptionNumberFromEnv -Control $optionThrottleBox -Name 'W11UT_THROTTLE'
+Set-OptionNumberFromEnv -Control $optionGlobalConcurrencyLimitBox -Name 'W11UT_GLOBAL_CONCURRENCY_LIMIT'
+Set-OptionNumberFromEnv -Control $optionGlobalConcurrencyLeaseTimeoutBox -Name 'W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES'
 
-$optionsTable.Controls.Add((New-Label "Intune retry sleep min"), 0, 2)
-$optionsTable.Controls.Add($optionIntuneRetrySleepBox, 1, 2)
-$optionsTable.Controls.Add((New-Label "Intune retry max"), 2, 2)
-$optionsTable.Controls.Add($optionIntuneRetryMaxBox, 3, 2)
+$optionsTable.Controls.Add($optionAuditOnlyCheck, 0, 0)
+$optionsTable.Controls.Add($optionAllowPolicyRepairCheck, 1, 0)
+$optionsTable.Controls.Add($optionAllowWUResetCheck, 2, 0)
+$optionsTable.Controls.Add($optionAllowForceUpgradeCheck, 3, 0)
 
-$optionsTable.Controls.Add((New-Label "Stale cleanup seconds"), 0, 3)
-$optionsTable.Controls.Add($optionStaleCleanupDelayBox, 1, 3)
-$optionsTable.Controls.Add((New-Label "Reboot delay seconds"), 2, 3)
-$optionsTable.Controls.Add($optionRebootDelayBox, 3, 3)
+$optionsTable.Controls.Add($optionAllowSetupUpgradeCheck, 0, 1)
+$optionsTable.Controls.Add($optionAllowRebootCheck, 1, 1)
+$optionsTable.Controls.Add($optionDryRunCheck, 2, 1)
+$optionsTable.Controls.Add($optionSkipVirtualMachinesCheck, 3, 1)
 
-$optionsTable.Controls.Add((New-Label "AD domain override"), 0, 4)
-$optionsTable.Controls.Add($optionAdDomainBox, 1, 4)
-$optionsTable.SetColumnSpan($optionAdDomainBox, 3)
+$optionsTable.Controls.Add((New-Label 'Setup source'), 0, 2)
+$optionsTable.Controls.Add($optionSetupSourceBox, 1, 2)
+$optionsTable.SetColumnSpan($optionSetupSourceBox, 3)
 
-$optionsTable.Controls.Add($optionAllowDsregLeaveCheck, 0, 5)
-$optionsTable.Controls.Add($optionAllowStaleIntuneCleanupCheck, 1, 5)
-$optionsTable.Controls.Add($optionAllowRebootWhenNoUserCheck, 2, 5)
-$optionsTable.Controls.Add($optionAllowRebootAfterLeaveCheck, 3, 5)
+$optionsTable.Controls.Add((New-Label 'Setup mode'), 0, 3)
+$optionsTable.Controls.Add($optionSetupModeCombo, 1, 3)
+$optionsTable.Controls.Add((New-Label 'Setup media id'), 2, 3)
+$optionsTable.Controls.Add($optionSetupMediaIdBox, 3, 3)
 
-$optionsTable.Controls.Add($optionDryRunCheck, 0, 6)
-$optionsTable.Controls.Add($optionAuditOnlyCheck, 1, 6)
-$optionsTable.Controls.Add($optionIgnoreRunGuardEveryCycleCheck, 2, 6)
-$optionsTable.Controls.Add($optionRemoveNonIntuneMdmCheck, 3, 6)
+$optionsTable.Controls.Add((New-Label 'Setup language'), 0, 4)
+$optionsTable.Controls.Add($optionSetupLanguageCombo, 1, 4)
+$optionsTable.SetColumnSpan($optionSetupLanguageCombo, 3)
 
-$optionsTable.Controls.Add($optionKeepCentralHistoryCheck, 0, 7)
-$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 1, 7)
-$optionsTable.Controls.Add($optionSkipPostCycleInventoryCheck, 2, 7)
-$optionsTable.Controls.Add($optionSkipVirtualMachinesCheck, 3, 7)
+$optionsTable.Controls.Add($optionSkipSetupPreCopyCheck, 0, 5)
+$optionsTable.Controls.Add($optionKeepCentralHistoryCheck, 1, 5)
+$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 2, 5)
 
-$optionsTable.Controls.Add((New-Label "Global worker limit"), 0, 8)
+$optionsTable.Controls.Add((New-Label 'Throttle per LOT'), 0, 6)
+$optionsTable.Controls.Add($optionThrottleBox, 1, 6)
+$optionsTable.Controls.Add((New-Label 'Delay between cycles'), 2, 6)
+$optionsTable.Controls.Add($optionDelayBetweenCyclesBox, 3, 6)
+
+$optionsTable.Controls.Add((New-Label 'Max cycles'), 0, 7)
+$optionsTable.Controls.Add($optionMaxCyclesBox, 1, 7)
+$optionsTable.Controls.Add((New-Label 'PsExec timeout min'), 2, 7)
+$optionsTable.Controls.Add($optionPsExecTimeoutBox, 3, 7)
+
+$optionsTable.Controls.Add((New-Label 'Global worker limit'), 0, 8)
 $optionsTable.Controls.Add($optionGlobalConcurrencyLimitBox, 1, 8)
-$optionsTable.Controls.Add((New-Label "Global lease timeout min"), 2, 8)
+$optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 2, 8)
 $optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 3, 8)
 
 $optionsNote = New-Object System.Windows.Forms.Label
-$optionsNote.Text = "Default LOT wrappers already enable guarded dsreg leave, stale Intune cleanup, and controlled reboot paths. These controls add or override launch arguments."
-$optionsNote.Dock = "Fill"
+$optionsNote.Text = 'Setup upgrade requires valid media with setup.exe, sources\install.wim or install.esd, and a matching setup language. Use Any only when language matching is intentionally bypassed.'
+$optionsNote.Dock = 'Fill'
 $optionsNote.ForeColor = $colorMuted
-$optionsNote.TextAlign = "MiddleLeft"
+$optionsNote.TextAlign = 'MiddleLeft'
 $optionsTable.Controls.Add($optionsNote, 0, 9)
 $optionsTable.SetColumnSpan($optionsNote, 4)
 
@@ -1332,13 +1302,13 @@ $optionGlobalConcurrencyLimitBox.Add_ValueChanged({
 })
 
 $footerPanel = New-Object System.Windows.Forms.Panel
-$footerPanel.Dock = "Fill"
+$footerPanel.Dock = 'Fill'
 $footerPanel.BackColor = $colorPanel
 $footerPanel.Padding = New-Object System.Windows.Forms.Padding(12)
 Add-SoftBorder -Control $footerPanel
 
 $footerLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$footerLayout.Dock = "Fill"
+$footerLayout.Dock = 'Fill'
 $footerLayout.ColumnCount = 2
 $footerLayout.RowCount = 1
 $footerLayout.BackColor = $colorPanel
@@ -1346,20 +1316,20 @@ $footerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([Sys
 $footerLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 120))) | Out-Null
 
 $footerStatus = New-Object System.Windows.Forms.Label
-$footerStatus.Dock = "Fill"
-$footerStatus.Text = "Ready"
-$footerStatus.TextAlign = "MiddleLeft"
+$footerStatus.Dock = 'Fill'
+$footerStatus.Text = 'Ready'
+$footerStatus.TextAlign = 'MiddleLeft'
 $footerStatus.ForeColor = $colorMuted
 $footerStatus.Font = $smallFont
 
 $closeButton = New-Object System.Windows.Forms.Button
-$closeButton.Text = "Close"
+$closeButton.Text = 'Close'
 $closeButton.Width = 94
 Set-FlatButtonStyle -Button $closeButton -BackColor $colorPanel -ForeColor $colorInk -BorderColor $colorTextBoxBorder
 
 $buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$buttonPanel.Dock = "Fill"
-$buttonPanel.FlowDirection = "RightToLeft"
+$buttonPanel.Dock = 'Fill'
+$buttonPanel.FlowDirection = 'RightToLeft'
 $buttonPanel.BackColor = $colorPanel
 $buttonPanel.Padding = New-Object System.Windows.Forms.Padding(0)
 $buttonPanel.Controls.Add($closeButton)
@@ -1381,7 +1351,7 @@ $script:CreatedComputersPath = $null
 function Add-Status {
     param([string]$Message)
 
-    $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
+    $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
     $footerStatus.Text = $Message
     $actionStatusLabel.Text = $Message
     if ([string]::IsNullOrWhiteSpace($statusBox.Text)) {
@@ -1395,54 +1365,59 @@ function Add-Status {
 function Get-ToolkitOptionArguments {
     $arguments = New-Object System.Collections.ArrayList
 
+    [void]$arguments.Add('-ThrottleLimit')
+    [void]$arguments.Add([string][int]$optionThrottleBox.Value)
+
     if ([int]$optionMaxCyclesBox.Value -gt 0) {
-        [void]$arguments.Add("-MaxCycles")
+        [void]$arguments.Add('-MaxCycles')
         [void]$arguments.Add([string][int]$optionMaxCyclesBox.Value)
     }
 
-    if ($optionDryRunCheck.Checked) { [void]$arguments.Add("-DryRun") }
-    if ($optionAuditOnlyCheck.Checked) { [void]$arguments.Add("-AuditOnly") }
-    if ($optionIgnoreRunGuardEveryCycleCheck.Checked) { [void]$arguments.Add("-IgnoreRunGuardEveryCycle") }
-    if ($optionRemoveNonIntuneMdmCheck.Checked) { [void]$arguments.Add("-AllowRemoveNonIntuneMdmEnrollment") }
-    if ($optionKeepCentralHistoryCheck.Checked) { [void]$arguments.Add("-KeepCentralLogHistory") }
-    if ($optionNoCentralCollectionCheck.Checked) { [void]$arguments.Add("-NoCentralLogCollection") }
-    if ($optionSkipPostCycleInventoryCheck.Checked) { [void]$arguments.Add("-SkipPostCycleIntuneInventory") }
+    if ($optionDryRunCheck.Checked) { [void]$arguments.Add('-DryRun') }
+    if ($optionKeepCentralHistoryCheck.Checked) { [void]$arguments.Add('-KeepCentralLogHistory') }
+    if ($optionNoCentralCollectionCheck.Checked) { [void]$arguments.Add('-NoCentralLogCollection') }
 
     return @($arguments.ToArray())
 }
 
 function Get-ToolkitOptionEnvironment {
     $environment = @{
-        EHJIR_THROTTLE = [string][int]$optionThrottleBox.Value
-        EHJIR_GLOBAL_CONCURRENCY_LIMIT = [string][int]$optionGlobalConcurrencyLimitBox.Value
-        EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = [string][int]$optionGlobalConcurrencyLeaseTimeoutBox.Value
-        EHJIR_DELAY_BETWEEN_CYCLES_MINUTES = [string][int]$optionDelayBetweenCyclesBox.Value
-        EHJIR_INTUNE_RETRY_SLEEP_MINUTES = [string][int]$optionIntuneRetrySleepBox.Value
-        EHJIR_INTUNE_RETRY_MAX_RETRIES = [string][int]$optionIntuneRetryMaxBox.Value
-        EHJIR_STALE_CLEANUP_DELAY_SECONDS = [string][int]$optionStaleCleanupDelayBox.Value
-        EHJIR_REBOOT_DELAY_SECONDS = [string][int]$optionRebootDelayBox.Value
-        EHJIR_PSEXEC_TIMEOUT_MINUTES = [string][int]$optionPsExecTimeoutBox.Value
-        EHJIR_ALLOW_DSREG_LEAVE = if ($optionAllowDsregLeaveCheck.Checked) { "1" } else { "0" }
-        EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT = if ($optionAllowStaleIntuneCleanupCheck.Checked) { "1" } else { "0" }
-        EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER = if ($optionAllowRebootWhenNoUserCheck.Checked) { "1" } else { "0" }
-        EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE = if ($optionAllowRebootAfterLeaveCheck.Checked) { "1" } else { "0" }
-        EHJIR_SKIP_VIRTUAL_MACHINES = if ($optionSkipVirtualMachinesCheck.Checked) { "1" } else { "0" }
+        W11UT_GLOBAL_CONCURRENCY_LIMIT = [string][int]$optionGlobalConcurrencyLimitBox.Value
+        W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = [string][int]$optionGlobalConcurrencyLeaseTimeoutBox.Value
+        W11UT_THROTTLE = [string][int]$optionThrottleBox.Value
+        W11UT_DELAY_BETWEEN_CYCLES_MINUTES = [string][int]$optionDelayBetweenCyclesBox.Value
+        W11UT_PSEXEC_TIMEOUT_MINUTES = [string][int]$optionPsExecTimeoutBox.Value
+        W11UT_SETUP_EXECUTION_MODE = [string]$optionSetupModeCombo.SelectedItem
+        W11UT_SETUP_LANGUAGE = $optionSetupLanguageCombo.Text.Trim()
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($optionAdDomainBox.Text)) {
-        $environment["EHJIR_AD_DOMAIN"] = $optionAdDomainBox.Text.Trim()
+    if (-not [string]::IsNullOrWhiteSpace($optionSetupMediaIdBox.Text)) {
+        $environment["W11UT_SETUP_MEDIA_ID"] = $optionSetupMediaIdBox.Text.Trim()
     }
+
+    if (-not [string]::IsNullOrWhiteSpace($optionSetupSourceBox.Text)) {
+        $environment["W11UT_SETUP_SOURCE"] = $optionSetupSourceBox.Text.Trim()
+    }
+
+    $environment["W11UT_AUDIT_ONLY"] = if ($optionAuditOnlyCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_ALLOW_POLICY_REPAIR"] = if ($optionAllowPolicyRepairCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_ALLOW_WU_RESET"] = if ($optionAllowWUResetCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_ALLOW_FORCE_UPGRADE"] = if ($optionAllowForceUpgradeCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_ALLOW_SETUP_UPGRADE"] = if ($optionAllowSetupUpgradeCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_ALLOW_REBOOT"] = if ($optionAllowRebootCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_SKIP_VIRTUAL_MACHINES"] = if ($optionSkipVirtualMachinesCheck.Checked) { "1" } else { "0" }
+    $environment["W11UT_SKIP_SETUP_MEDIA_PRECOPY"] = if ($optionSkipSetupPreCopyCheck.Checked) { "1" } else { "0" }
 
     return $environment
 }
 
 function Clear-LotDetails {
     $script:SelectedLotSummary = $null
-    $deviceCountBox.Text = ""
-    $adScopeBox.Text = ""
-    $actionTitleLabel.Text = "LOT: none selected"
-    $actionSubtitleLabel.Text = "Select or create a LOT."
-    $actionStatusLabel.Text = "Ready"
+    $deviceCountBox.Text = ''
+    $upgradeScopeBox.Text = ''
+    $actionTitleLabel.Text = 'LOT: none selected'
+    $actionSubtitleLabel.Text = 'Select or create a LOT.'
+    $actionStatusLabel.Text = 'Ready'
     Set-ButtonEnabledStyle -Button $launchExistingButton -Enabled $false -EnabledBackColor $colorAccent
 }
 
@@ -1450,13 +1425,13 @@ function Get-LaunchableLotSummaries {
     $summaries = New-Object System.Collections.ArrayList
     foreach ($lot in @($script:LotList)) {
         try {
-            $summary = Get-LotSummary -RootPath $toolkitRoot -LotPath $lot.FullName
+            $summary = Get-LotSummary -LotPath $lot.FullName
             if ($summary.ComputerCount -gt 0 -and $summary.WrappersReady) {
                 [void]$summaries.Add($summary)
             }
         }
         catch {
-            Add-Status ("Skipping {0}: {1}" -f $lot.Name,$_.Exception.Message)
+            Add-Status ("Skipping {0}: {1}" -f $lot.Name, $_.Exception.Message)
         }
     }
 
@@ -1471,7 +1446,7 @@ function Update-ExistingLotControlState {
     $globalConcurrencyLimitBox.Enabled = $HasLots
     $openLotFolderButton.Enabled = $HasLots
     $openComputersButton.Enabled = $HasLots
-    $openAdDomainButton.Enabled = $HasLots
+    $openReportsButton.Enabled = $HasLots
     $hasLaunchableLots = ($HasLots -and (Get-LaunchableLotSummaries).Count -gt 0)
     Set-ButtonEnabledStyle -Button $launchAllLotsButton -Enabled $hasLaunchableLots -EnabledBackColor $colorAccent
     Set-ButtonEnabledStyle -Button $actionLaunchAllButton -Enabled $hasLaunchableLots -EnabledBackColor $colorAccent
@@ -1484,16 +1459,16 @@ function Update-LotDetails {
     }
 
     $lot = $script:LotList[$lotCombo.SelectedIndex]
-    $summary = Get-LotSummary -RootPath $toolkitRoot -LotPath $lot.FullName
+    $summary = Get-LotSummary -LotPath $lot.FullName
     $script:SelectedLotSummary = $summary
 
     $deviceCountBox.Text = [string]$summary.ComputerCount
-    $adScopeBox.Text = $summary.AdScope
-    $actionTitleLabel.Text = "LOT: {0}" -f $summary.Name
-    $actionSubtitleLabel.Text = "{0} device(s) - {1}" -f $summary.ComputerCount, $summary.AdScope
+    $upgradeScopeBox.Text = $summary.UpgradeScope
+    $actionTitleLabel.Text = 'LOT: {0}' -f $summary.Name
+    $actionSubtitleLabel.Text = '{0} device(s) - Windows 11 upgrade readiness' -f $summary.ComputerCount
 
     if (-not $summary.WrappersReady) {
-        Add-Status ("Missing LOT wrappers: {0}" -f ($summary.MissingWrappers -join ", "))
+        Add-Status ("Missing LOT wrappers: {0}" -f ($summary.MissingWrappers -join ', '))
     }
 
     $canLaunch = ($summary.ComputerCount -gt 0 -and $summary.WrappersReady)
@@ -1511,7 +1486,7 @@ function Refresh-LotList {
         [string]$lotCombo.SelectedItem
     }
     else {
-        ""
+        ''
     }
     $script:LotList = @(Get-LotFolders -RootPath $toolkitRoot)
 
@@ -1523,7 +1498,7 @@ function Refresh-LotList {
     if ($lotCombo.Items.Count -eq 0) {
         Clear-LotDetails
         Update-ExistingLotControlState -HasLots $false
-        Add-Status "No operational LOT-* folder found."
+        Add-Status 'No operational LOT-* folder found.'
         return
     }
 
@@ -1550,7 +1525,7 @@ $refreshLotsButton.Add_Click({
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Refresh failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Refresh failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
@@ -1573,18 +1548,18 @@ $actionLaunchAllButton.Add_Click({
 
 $openLotFolderButton.Add_Click({
     try {
-        if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
+        if (-not $script:SelectedLotSummary) { throw 'Select a LOT first.' }
         Open-FolderPath -Path $script:SelectedLotSummary.Path
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Open folder failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Open folder failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
 $openComputersButton.Add_Click({
     try {
-        if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
+        if (-not $script:SelectedLotSummary) { throw 'Select a LOT first.' }
         Open-TextFile -Path $script:SelectedLotSummary.ComputersPath
     }
     catch {
@@ -1592,41 +1567,42 @@ $openComputersButton.Add_Click({
     }
 })
 
-$openAdDomainButton.Add_Click({
+$openReportsButton.Add_Click({
     try {
-        if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
-        Open-TextFile -Path $script:SelectedLotSummary.AdDomainPath
+        if (-not $script:SelectedLotSummary) { throw 'Select a LOT first.' }
+        Open-OrCreateFolderPath -Path $script:SelectedLotSummary.ReportsPath
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Open reports failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
 $refreshWrappersButton.Add_Click({
     try {
         Invoke-LotWrapperRefresh -RootPath $toolkitRoot
-        Add-Status "LOT wrappers refreshed."
+        Add-Status 'LOT wrappers refreshed.'
         Refresh-LotList
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Wrapper refresh failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Wrapper refresh failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
 $launchExistingButton.Add_Click({
     try {
-        if (-not $script:SelectedLotSummary) { throw "Select a LOT first." }
-        if ($script:SelectedLotSummary.ComputerCount -le 0) { throw "Computers.txt is empty." }
+        if (-not $script:SelectedLotSummary) { throw 'Select a LOT first.' }
+        if ($script:SelectedLotSummary.ComputerCount -le 0) { throw 'Computers.txt is empty.' }
 
         $optionArguments = @(Get-ToolkitOptionArguments)
         $optionEnvironment = Get-ToolkitOptionEnvironment
-        Add-Status ("Launching {0} in {1} mode. Global limit={2}. Args={3}; env={4}." -f $script:SelectedLotSummary.Name,$existingModeCombo.SelectedItem,[int]$globalConcurrencyLimitBox.Value,$optionArguments.Count,$optionEnvironment.Count)
+        Add-Status ("Launching {0} in {1} mode. Global limit={2}. Args={3}; env={4}." -f $script:SelectedLotSummary.Name, $existingModeCombo.SelectedItem, [int]$globalConcurrencyLimitBox.Value, $optionArguments.Count, $optionEnvironment.Count)
         Start-ToolkitLot -LotPath $script:SelectedLotSummary.Path -Mode ([string]$existingModeCombo.SelectedItem) -GlobalConcurrencyLimit ([int]$globalConcurrencyLimitBox.Value) -GlobalConcurrencyLeaseTimeoutMinutes ([int]$optionGlobalConcurrencyLeaseTimeoutBox.Value) -AdditionalArguments $optionArguments -EnvironmentVariables $optionEnvironment
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "LOT launch failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'LOT launch failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
@@ -1634,19 +1610,19 @@ $launchAllLotsButton.Add_Click({
     try {
         $launchableLots = @(Get-LaunchableLotSummaries)
         if ($launchableLots.Count -eq 0) {
-            throw "No launchable LOT found. Check Computers.txt and wrapper files."
+            throw 'No launchable LOT found. Check Computers.txt and wrapper files.'
         }
 
         $mode = [string]$existingModeCombo.SelectedItem
         $limit = [int]$globalConcurrencyLimitBox.Value
         $optionArguments = @(Get-ToolkitOptionArguments)
         $optionEnvironment = Get-ToolkitOptionEnvironment
-        Add-Status ("Launching {0}/{1} LOT folder(s) in {2} mode. Global limit={3}. Delay={4}s. Args={5}; env={6}." -f $launchableLots.Count,$script:LotList.Count,$mode,$limit,$launchAllLotStartDelaySeconds,$optionArguments.Count,$optionEnvironment.Count)
+        Add-Status ("Launching {0}/{1} LOT folder(s) in {2} mode. Global limit={3}. Delay={4}s. Args={5}; env={6}." -f $launchableLots.Count, $script:LotList.Count, $mode, $limit, $launchAllLotStartDelaySeconds, $optionArguments.Count, $optionEnvironment.Count)
 
         for ($lotIndex = 0; $lotIndex -lt $launchableLots.Count; $lotIndex++) {
             $lotSummary = $launchableLots[$lotIndex]
             if ($lotIndex -gt 0 -and $launchAllLotStartDelaySeconds -gt 0) {
-                Add-Status ("Waiting {0}s before launching {1}." -f $launchAllLotStartDelaySeconds,$lotSummary.Name)
+                Add-Status ("Waiting {0}s before launching {1}." -f $launchAllLotStartDelaySeconds, $lotSummary.Name)
                 Wait-UiDelay -Seconds $launchAllLotStartDelaySeconds
             }
 
@@ -1661,14 +1637,14 @@ $launchAllLotsButton.Add_Click({
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Launch all failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Launch all failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
 $createLotButton.Add_Click({
     try {
         if ([string]::IsNullOrWhiteSpace($newLotNameBox.Text)) {
-            [System.Windows.Forms.MessageBox]::Show($form, "Enter a LOT name.", "LOT name required", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+            [System.Windows.Forms.MessageBox]::Show($form, 'Enter a LOT name.', 'LOT name required', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
             $newLotNameBox.Focus()
             return
         }
@@ -1685,7 +1661,7 @@ $createLotButton.Add_Click({
         $answer = [System.Windows.Forms.MessageBox]::Show(
             $form,
             ("LOT created:`r`n{0}`r`n`r`nOpen Computers.txt now?" -f $result.LotPath),
-            "Fill Computers.txt",
+            'Fill Computers.txt',
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question
         )
@@ -1696,14 +1672,14 @@ $createLotButton.Add_Click({
     }
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "LOT creation failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'LOT creation failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 
 $openNewComputersButton.Add_Click({
     try {
         if ([string]::IsNullOrWhiteSpace($script:CreatedComputersPath)) {
-            throw "Create a LOT first."
+            throw 'Create a LOT first.'
         }
 
         Open-TextFile -Path $script:CreatedComputersPath
@@ -1741,9 +1717,9 @@ $form.Add_FormClosed({
 
 if ($ValidateOnly) {
     $folders = @(Get-LotFolders -RootPath $toolkitRoot)
-    Write-Host ("Smart Intune Hybrid Join Toolkit LOT Launcher GUI validation completed. Lots={0}" -f $folders.Count)
+    Write-Host ("Smart Intune Windows 11 Upgrade Toolkit LOT Launcher GUI validation completed. Lots={0}" -f $folders.Count)
     return
 }
 
-Add-Status "Ready. Select an existing LOT or create a new empty LOT."
+Add-Status 'Ready. Select an existing LOT or create a new empty LOT.'
 [void]$form.ShowDialog()
