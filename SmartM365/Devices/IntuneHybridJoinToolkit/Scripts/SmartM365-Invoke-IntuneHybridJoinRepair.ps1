@@ -89,7 +89,7 @@ param(
     [int]$IntuneRetryMaxRetries = 5
 )
 
-$ScriptVersion = "2.10.30"
+$ScriptVersion = "2.10.31"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
@@ -2293,15 +2293,12 @@ function Get-ComputerSystemSummary {
             }
         }
 
-        $isVirtual = (-not [string]::IsNullOrWhiteSpace($matchedPattern)) -or $hypervisorPresent
+        $isVirtual = -not [string]::IsNullOrWhiteSpace($matchedPattern)
         $evidence = if ($matchedPattern) {
             "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
         }
-        elseif ($hypervisorPresent) {
-            "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=True"
-        }
         else {
-            "Manufacturer=$manufacturer; Model=$model"
+            "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=$hypervisorPresent"
         }
 
         return [PSCustomObject]@{
