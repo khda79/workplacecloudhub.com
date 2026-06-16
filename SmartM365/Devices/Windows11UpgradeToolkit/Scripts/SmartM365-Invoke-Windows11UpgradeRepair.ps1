@@ -34,11 +34,12 @@ param(
     [string]$SetupExecutionMode = 'LocalCache',
     [string]$SetupMediaId = 'Win11',
     [string]$SetupLanguage = 'MatchSystem',
-    [string]$SetupCacheRoot = 'C:\ProgramData\SmartM365\IntuneWindows11UpgradeToolkit\SetupMedia',
+    [switch]$SkipSetupMediaPreCopy,
+    [string]$SetupCacheRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia',
     [ValidateRange(10, 200)][int]$MinimumFreeDiskGB = 32,
     [ValidateRange(0, 86400)][int]$RebootDelaySeconds = 180,
 
-    [string]$DataRoot = 'C:\ProgramData\SmartM365\IntuneWindows11UpgradeToolkit'
+    [string]$DataRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
 )
 
 Set-StrictMode -Version 2.0
@@ -530,22 +531,202 @@ function Test-SetupMedia {
     return $setupItem.FullName
 }
 
+function Convert-ToSafePathSegment {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $safe = ($Value.Trim() -replace '[^A-Za-z0-9_.-]', '_')
+    if ([string]::IsNullOrWhiteSpace($safe)) { return 'Default' }
+    return $safe
+}
+
+function Resolve-SetupCachePath {
+    param([string]$ExpectedLanguage)
+
+    $mediaSegment = Convert-ToSafePathSegment -Value $SetupMediaId
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedLanguage)) {
+        $mediaSegment = "{0}-{1}" -f $mediaSegment,(Convert-ToSafePathSegment -Value $ExpectedLanguage)
+    }
+    return Join-Path $SetupCacheRoot $mediaSegment
+}
+
+function Get-SetupInstallImageItem {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    foreach ($name in @('sources\install.wim','sources\install.esd')) {
+        $path = Join-Path $MediaRoot $name
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            return Get-Item -LiteralPath $path -ErrorAction Stop
+        }
+    }
+    return $null
+}
+
+function Get-SetupMediaFingerprint {
+    param(
+        [Parameter(Mandatory = $true)][string]$MediaRoot,
+        [string]$ExpectedLanguage
+    )
+
+    $setupExe = Join-Path $MediaRoot 'setup.exe'
+    $setupItem = Get-Item -LiteralPath $setupExe -ErrorAction Stop
+    $installItem = Get-SetupInstallImageItem -MediaRoot $MediaRoot
+    if ($null -eq $installItem) {
+        throw "Windows setup media is incomplete. Missing sources\install.wim or sources\install.esd under: $MediaRoot"
+    }
+
+    $langIni = Join-Path $MediaRoot 'sources\lang.ini'
+    $langHash = ''
+    if (Test-Path -LiteralPath $langIni -PathType Leaf) {
+        $langHash = (Get-FileHash -LiteralPath $langIni -Algorithm SHA256 -ErrorAction Stop).Hash
+    }
+
+    [pscustomobject]@{
+        MediaId = $SetupMediaId
+        ExpectedLanguage = [string]$ExpectedLanguage
+        MediaLanguages = (@(Get-SetupMediaLanguages -MediaRoot $MediaRoot) -join ',')
+        SetupExeLength = [int64]$setupItem.Length
+        SetupExeHash = (Get-FileHash -LiteralPath $setupItem.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+        InstallImageName = $installItem.Name
+        InstallImageLength = [int64]$installItem.Length
+        InstallImageLastWriteUtc = $installItem.LastWriteTimeUtc.ToString('o')
+        LangIniHash = $langHash
+    }
+}
+
+function Test-SetupCacheManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)]$Fingerprint
+    )
+
+    $manifestPath = Join-Path $CachePath 'SmartM365-SetupMedia.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
+
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        foreach ($property in @('MediaId','ExpectedLanguage','SetupExeLength','SetupExeHash','InstallImageName','InstallImageLength','LangIniHash')) {
+            if ([string]$manifest.$property -ne [string]$Fingerprint.$property) { return $false }
+        }
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-SetupFingerprintMatch {
+    param(
+        [Parameter(Mandatory = $true)]$Left,
+        [Parameter(Mandatory = $true)]$Right
+    )
+
+    foreach ($property in @('MediaId','ExpectedLanguage','SetupExeLength','SetupExeHash','InstallImageName','InstallImageLength','LangIniHash')) {
+        if ([string]$Left.$property -ne [string]$Right.$property) { return $false }
+    }
+    return $true
+}
+
+function Save-SetupCacheManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)]$Fingerprint,
+        [string]$SourcePath
+    )
+
+    $manifestPath = Join-Path $CachePath 'SmartM365-SetupMedia.json'
+    $Fingerprint | Add-Member -NotePropertyName SourcePath -NotePropertyValue ([string]$SourcePath) -Force
+    $Fingerprint | Add-Member -NotePropertyName WrittenUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
+    $Fingerprint | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8 -Force
+}
+
+function Test-SetupCacheReady {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [string]$ExpectedLanguage
+    )
+
+    $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage
+    $fingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $setupExe) -ExpectedLanguage $ExpectedLanguage
+    if (-not (Test-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint)) {
+        Save-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint -SourcePath 'ExistingCache'
+        Write-SmartLog ("Setup cache was valid but manifest was missing or stale. Manifest refreshed: {0}" -f $CachePath)
+    }
+    return $setupExe
+}
+
+function Copy-SetupMediaToLocalCache {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [string]$ExpectedLanguage
+    )
+
+    New-SmartDirectory -Path $CachePath
+    $robocopyLog = Join-Path $script:SetupLogDir ("Robocopy_SetupMedia_{0}.log" -f $script:RunId)
+    New-SmartDirectory -Path $script:SetupLogDir
+
+    Write-SmartLog ("Copying setup media on target from '{0}' to local cache '{1}'." -f $SourcePath,$CachePath)
+    $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
+    if (Test-Path -LiteralPath $robocopy -PathType Leaf) {
+        & $robocopy $SourcePath $CachePath /MIR /Z /R:2 /W:5 /NP /NFL /NDL "/LOG+:$robocopyLog" | Out-Null
+        $copyExit = [int]$LASTEXITCODE
+        if ($copyExit -gt 7) {
+            throw "Robocopy setup media copy failed with exit code $copyExit. Log=$robocopyLog"
+        }
+        Write-SmartLog ("Robocopy setup media copy completed with exit code {0}. Log={1}" -f $copyExit,$robocopyLog)
+    }
+    else {
+        Copy-Item -Path (Join-Path $SourcePath '*') -Destination $CachePath -Recurse -Force -ErrorAction Stop
+        Write-SmartLog 'Setup media copied with Copy-Item because robocopy.exe was not found.'
+    }
+
+    $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage
+    $fingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $setupExe) -ExpectedLanguage $ExpectedLanguage
+    Save-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint -SourcePath $SourcePath
+    $script:SetupCacheAction = 'CopiedByTarget'
+    return $setupExe
+}
+
 function Resolve-SetupUpgradeExecutable {
     if (-not $AllowSetupUpgrade) { return '' }
 
     $expectedLanguage = Resolve-SetupLanguageRequirement -RequestedLanguage $SetupLanguage
     $script:ResolvedSetupLanguage = $expectedLanguage
 
-    $cachePath = Join-Path $SetupCacheRoot $SetupMediaId
+    $cachePath = Resolve-SetupCachePath -ExpectedLanguage $expectedLanguage
+    $script:ResolvedSetupCachePath = $cachePath
     if ($SetupExecutionMode -in @('LocalCache','Auto')) {
         try {
-            return Test-SetupMedia -MediaPath $cachePath -ExpectedLanguage $expectedLanguage
+            $script:SetupCacheAction = 'AlreadyCached'
+            $cachedSetupExe = Test-SetupCacheReady -CachePath $cachePath -ExpectedLanguage $expectedLanguage
+            if (-not $SkipSetupMediaPreCopy -and -not [string]::IsNullOrWhiteSpace($SetupSourcePath)) {
+                try {
+                    $candidateSource = [Environment]::ExpandEnvironmentVariables($SetupSourcePath.Trim('"'))
+                    if (Test-Path -LiteralPath $candidateSource -PathType Container) {
+                        $candidateSource = Resolve-SetupSourceMediaPath -SourcePath $candidateSource -ExpectedLanguage $expectedLanguage
+                        $sourceFingerprint = Get-SetupMediaFingerprint -MediaRoot $candidateSource -ExpectedLanguage $expectedLanguage
+                        $cacheFingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $cachedSetupExe) -ExpectedLanguage $expectedLanguage
+                        if (-not (Test-SetupFingerprintMatch -Left $sourceFingerprint -Right $cacheFingerprint)) {
+                            Write-SmartLog ("Setup source differs from local cache. Updating cache from '{0}'." -f $candidateSource) 'WARN'
+                            return Copy-SetupMediaToLocalCache -SourcePath $candidateSource -CachePath $cachePath -ExpectedLanguage $expectedLanguage
+                        }
+                    }
+                }
+                catch {
+                    Write-SmartLog ("Could not compare setup source with local cache. Using valid local cache. Detail={0}" -f $_.Exception.Message) 'WARN'
+                }
+            }
+            return $cachedSetupExe
         }
         catch {
+            $script:SetupCacheAction = 'CacheInvalid'
+            if ($SkipSetupMediaPreCopy) {
+                throw ("Local setup cache is not ready and existing-media-only mode is enabled. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
+            }
+            Write-SmartLog ("Local setup cache not ready: {0}" -f $_.Exception.Message) 'WARN'
             if ($SetupExecutionMode -eq 'LocalCache' -and [string]::IsNullOrWhiteSpace($SetupSourcePath)) {
                 throw ("Local setup cache is not ready and no SetupSourcePath was provided. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
             }
-            Write-SmartLog ("Local setup cache not ready: {0}" -f $_.Exception.Message) 'WARN'
         }
     }
 
@@ -568,10 +749,7 @@ function Resolve-SetupUpgradeExecutable {
     }
 
     if ($SetupExecutionMode -in @('LocalCache','Auto')) {
-        New-SmartDirectory -Path $cachePath
-        Write-SmartLog ("Copying setup media from '{0}' to local cache '{1}'." -f $expandedSource,$cachePath)
-        Copy-Item -Path (Join-Path $expandedSource '*') -Destination $cachePath -Recurse -Force -ErrorAction Stop
-        return Test-SetupMedia -MediaPath $cachePath -ExpectedLanguage $expectedLanguage
+        return Copy-SetupMediaToLocalCache -SourcePath $expandedSource -CachePath $cachePath -ExpectedLanguage $expectedLanguage
     }
 
     throw 'Unable to resolve a valid setup.exe path.'
@@ -614,6 +792,8 @@ $actionResult = ''
 $setupExe = ''
 $script:ResolvedSetupLanguage = ''
 $script:ResolvedSetupMediaLanguages = ''
+$script:ResolvedSetupCachePath = ''
+$script:SetupCacheAction = ''
 $computerSystem = $null
 
 try {
@@ -802,6 +982,8 @@ finally {
         SetupLanguage = $SetupLanguage
         ResolvedSetupLanguage = $script:ResolvedSetupLanguage
         SetupMediaLanguages = $script:ResolvedSetupMediaLanguages
+        SetupCachePath = $script:ResolvedSetupCachePath
+        SetupCacheAction = $script:SetupCacheAction
         SetupExePath = $setupExe
         LogPath = $script:LogPath
         CsvPath = $script:CsvPath
