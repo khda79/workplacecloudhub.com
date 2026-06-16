@@ -62,14 +62,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\SmartM365-Invo
 
 LOT CMD wrappers are action-ready by default, including policy repair, Windows Update reset,
 force upgrade, setup upgrade, controlled reboot, and virtual machine skipping. They also
-default `SetupSourcePath` to:
+require an explicit setup source when setup media must be copied to a target. For LOT/PsExec,
+use a UNC path reachable by the target computers:
 
 ```text
-SetupSource
+\\server\share\Windows11
 ```
 
-Populate that folder with Windows 11 setup media before launching setup-based upgrade. See
-`SetupSource\README.md`.
+The repository `SetupSource` folder is for local/direct tests or for preparing media before
+publishing it to a network share. See `SetupSource\README.md`.
 By default, setup language validation is enabled with `W11UT_SETUP_LANGUAGE=MatchSystem`.
 The target compares its installed Windows language with `sources\lang.ini` from the setup
 media before starting setup.
@@ -86,6 +87,16 @@ set W11UT_ALLOW_REBOOT=0
 set W11UT_SKIP_VIRTUAL_MACHINES=0
 LOT-X\Run-Windows11UpgradeRepairWithPsExec-Once.cmd
 ```
+
+For setup-based LOT runs without the GUI, set a target-reachable setup source first:
+
+```cmd
+set W11UT_SETUP_SOURCE=\\server\share\Windows11
+LOT-X\Run-Windows11UpgradeRepairWithPsExec-Once.cmd
+```
+
+If you intentionally run a local/direct test with a local path, set
+`W11UT_CONFIRM_LOCAL_SETUP_SOURCE=1` explicitly.
 
 The PowerShell endpoint script remains guarded: it only performs actions when the
 orchestrator passes the corresponding `-Allow*` switch.
@@ -113,9 +124,10 @@ using the technician workstation as the large media copy engine and lets remote 
 a site-local share.
 
 Important: `SetupSourcePath` must be reachable from the target computer context. For LOT
-runs, prefer a UNC path such as `\\site-server\share\Windows11\en-GB` or a parent folder
+runs, use a UNC path such as `\\site-server\share\Windows11\en-GB` or a parent folder
 containing language subfolders. A local repo path on the operator workstation is only
-usable for local/direct runs unless the target can also access that same path.
+usable for local/direct runs unless the target can also access that same path; the GUI
+warns before allowing that case.
 
 Supported execution modes:
 

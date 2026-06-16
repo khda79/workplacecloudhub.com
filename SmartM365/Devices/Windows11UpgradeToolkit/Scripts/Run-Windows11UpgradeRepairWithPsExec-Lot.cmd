@@ -33,10 +33,28 @@ if not defined W11UT_ALLOW_FORCE_UPGRADE set "W11UT_ALLOW_FORCE_UPGRADE=1"
 if not defined W11UT_ALLOW_SETUP_UPGRADE set "W11UT_ALLOW_SETUP_UPGRADE=1"
 if not defined W11UT_ALLOW_REBOOT set "W11UT_ALLOW_REBOOT=1"
 if not defined W11UT_SKIP_VIRTUAL_MACHINES set "W11UT_SKIP_VIRTUAL_MACHINES=1"
-if not defined W11UT_SETUP_SOURCE set "W11UT_SETUP_SOURCE=%ROOT_DIR%\SetupSource"
 if not defined W11UT_SETUP_EXECUTION_MODE set "W11UT_SETUP_EXECUTION_MODE=LocalCache"
 if not defined W11UT_SETUP_MEDIA_ID set "W11UT_SETUP_MEDIA_ID=Win11"
 if not defined W11UT_SETUP_LANGUAGE set "W11UT_SETUP_LANGUAGE=MatchSystem"
+
+if /I "%W11UT_ALLOW_SETUP_UPGRADE%"=="1" if /I not "%W11UT_SKIP_SETUP_MEDIA_PRECOPY%"=="1" (
+    if "%W11UT_SETUP_SOURCE%"=="" (
+        echo ERROR: W11UT_SETUP_SOURCE is required when setup upgrade is enabled.
+        echo Use a UNC path reachable by target computers, for example:
+        echo   set W11UT_SETUP_SOURCE=\\server\share\Windows11
+        echo Or set W11UT_SKIP_SETUP_MEDIA_PRECOPY=1 when the target cache is already valid.
+        set "EXITCODE=1"
+        goto :END
+    )
+    if not "%W11UT_SETUP_SOURCE:~0,2%"=="\\" if /I not "%W11UT_CONFIRM_LOCAL_SETUP_SOURCE%"=="1" (
+        echo ERROR: W11UT_SETUP_SOURCE is not a UNC path:
+        echo   %W11UT_SETUP_SOURCE%
+        echo In LOT/PsExec mode, target computers run as SYSTEM and must read the source themselves.
+        echo Use a UNC path or set W11UT_CONFIRM_LOCAL_SETUP_SOURCE=1 for a local/direct test.
+        set "EXITCODE=1"
+        goto :END
+    )
+)
 
 if not exist "%SCRIPT%" (
     echo ERROR: Script not found:

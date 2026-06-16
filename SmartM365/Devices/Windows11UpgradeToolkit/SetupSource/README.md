@@ -1,10 +1,17 @@
 # Windows 11 setup source
 
-This folder is the default `Setup source` used by the Windows 11 Upgrade LOT
-Launcher.
+This folder is a local setup media staging area for local/direct tests or for
+preparing media before publishing it to a network share.
+
+For LOT/PsExec runs, configure `Setup source` / `W11UT_SETUP_SOURCE` as a UNC
+path reachable by target computers, for example:
+
+```text
+\\server\share\Windows11
+```
 
 Copy the full contents of a Windows 11 ISO or extracted installation media into
-this folder before enabling `Allow setup upgrade`.
+this folder only when you are testing locally or preparing the share content.
 
 You can either copy one ISO directly into this folder, or create one subfolder
 per language, for example:
@@ -42,6 +49,8 @@ LOT/PsExec copy handling:
   `C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia`.
 - For remote LOT runs, set `W11UT_SETUP_SOURCE` to a path reachable by the
   target SYSTEM context, preferably a site-local UNC share.
+- The GUI shows `\\server\share\Windows11` as a placeholder and does not send
+  that placeholder unless you replace it with a real path.
 - A local repository path works for local/direct testing, but remote targets
   cannot use the technician workstation path unless it is explicitly shared and
   accessible to them.
