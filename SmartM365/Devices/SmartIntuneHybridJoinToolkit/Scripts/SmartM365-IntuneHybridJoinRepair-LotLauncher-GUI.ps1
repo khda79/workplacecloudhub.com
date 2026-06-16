@@ -622,51 +622,10 @@ $tabControl = New-Object System.Windows.Forms.TabControl
 $tabControl.Dock = "Fill"
 $tabControl.Margin = New-Object System.Windows.Forms.Padding(0, 12, 0, 10)
 $tabControl.Font = $font
-$tabControl.DrawMode = "OwnerDrawFixed"
+$tabControl.Appearance = "FlatButtons"
 $tabControl.SizeMode = "Fixed"
 $tabControl.ItemSize = New-Object System.Drawing.Size(132, 34)
 $tabControl.Padding = New-Object System.Drawing.Point(12, 4)
-$tabControl.Add_DrawItem({
-    param($sender, $eventArgs)
-
-    $tabPage = $sender.TabPages[$eventArgs.Index]
-    $bounds = $eventArgs.Bounds
-    $isSelected = ($eventArgs.Index -eq $sender.SelectedIndex)
-    $backColor = if ($isSelected) { $colorPanel } else { $colorBackground }
-    $foreColor = if ($isSelected) { $colorAccent } else { $colorMuted }
-    $borderColor = if ($isSelected) { $colorBorder } else { $colorBackground }
-
-    $eventArgs.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $fillRect = New-Object System.Drawing.Rectangle($bounds.X + 2, $bounds.Y + 4, $bounds.Width - 4, $bounds.Height - 5)
-    $brush = New-Object System.Drawing.SolidBrush($backColor)
-    $pen = New-Object System.Drawing.Pen($borderColor)
-    $textBrush = New-Object System.Drawing.SolidBrush($foreColor)
-    try {
-        $eventArgs.Graphics.FillRectangle($brush, $fillRect)
-        $eventArgs.Graphics.DrawRectangle($pen, $fillRect)
-
-        if ($isSelected) {
-            $accentBrush = New-Object System.Drawing.SolidBrush($colorAccent)
-            try {
-                $eventArgs.Graphics.FillRectangle($accentBrush, $fillRect.X, $fillRect.Y, $fillRect.Width, 3)
-            }
-            finally {
-                $accentBrush.Dispose()
-            }
-        }
-
-        $textFormat = New-Object System.Drawing.StringFormat
-        $textFormat.Alignment = [System.Drawing.StringAlignment]::Center
-        $textFormat.LineAlignment = [System.Drawing.StringAlignment]::Center
-        $eventArgs.Graphics.DrawString($tabPage.Text, $sender.Font, $textBrush, $fillRect, $textFormat)
-        $textFormat.Dispose()
-    }
-    finally {
-        $brush.Dispose()
-        $pen.Dispose()
-        $textBrush.Dispose()
-    }
-}.GetNewClosure())
 
 $existingTab = New-Object System.Windows.Forms.TabPage
 $existingTab.Text = "Existing LOT"
