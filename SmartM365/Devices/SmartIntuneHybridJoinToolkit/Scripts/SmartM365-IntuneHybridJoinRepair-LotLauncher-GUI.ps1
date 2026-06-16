@@ -52,7 +52,7 @@ function Get-ComputerNamesFromFile {
     }
 
     $seen = @{}
-    $computers = @()
+    $computers = New-Object System.Collections.ArrayList
     foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction Stop)) {
         $name = ([string]$line).Trim().Trim([char]34)
         if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith("#")) {
@@ -65,10 +65,10 @@ function Get-ComputerNamesFromFile {
         }
 
         $seen[$key] = $true
-        $computers += $name
+        [void]$computers.Add($name)
     }
 
-    return $computers
+    return @($computers.ToArray())
 }
 
 function Get-LotFolders {
@@ -921,12 +921,12 @@ function Clear-LotDetails {
 }
 
 function Get-LaunchableLotSummaries {
-    $summaries = @()
+    $summaries = New-Object System.Collections.ArrayList
     foreach ($lot in @($script:LotList)) {
         try {
             $summary = Get-LotSummary -RootPath $toolkitRoot -LotPath $lot.FullName
             if ($summary.ComputerCount -gt 0 -and $summary.WrappersReady) {
-                $summaries += $summary
+                [void]$summaries.Add($summary)
             }
         }
         catch {
@@ -934,7 +934,7 @@ function Get-LaunchableLotSummaries {
         }
     }
 
-    return $summaries
+    return @($summaries.ToArray())
 }
 
 function Update-ExistingLotControlState {
