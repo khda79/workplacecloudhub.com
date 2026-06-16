@@ -127,7 +127,7 @@ function Get-AdDomainText {
 function Get-FileFreshnessText {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [int]$FreshMinutes = 60
+        [int]$FreshMinutes = 120
     )
 
     $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
@@ -174,10 +174,10 @@ function Get-LotSummary {
         AdDomain = $adDomain
         AdScope = $adScope
         SelectedAdCsv = $selectedAdCsv
-        RootAdCsvStatus = Get-FileFreshnessText -Path $rootAdCsvPath -FreshMinutes 60
-        SelectedAdCsvStatus = Get-FileFreshnessText -Path $selectedAdCsv -FreshMinutes 60
-        IntuneCsvStatus = Get-FileFreshnessText -Path $rootIntuneCsvPath -FreshMinutes 60
-        EntraCsvStatus = Get-FileFreshnessText -Path $rootEntraCsvPath -FreshMinutes 60
+        RootAdCsvStatus = Get-FileFreshnessText -Path $rootAdCsvPath -FreshMinutes 120
+        SelectedAdCsvStatus = Get-FileFreshnessText -Path $selectedAdCsv -FreshMinutes 120
+        IntuneCsvStatus = Get-FileFreshnessText -Path $rootIntuneCsvPath -FreshMinutes 120
+        EntraCsvStatus = Get-FileFreshnessText -Path $rootEntraCsvPath -FreshMinutes 120
         WrappersReady = $wrappers.Ready
         MissingWrappers = $wrappers.Missing
     }
