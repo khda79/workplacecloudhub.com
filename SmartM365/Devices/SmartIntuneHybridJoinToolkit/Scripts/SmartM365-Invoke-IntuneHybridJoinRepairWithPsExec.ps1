@@ -164,7 +164,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.42"
+$LauncherVersion = "2.10.43"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
@@ -277,6 +277,27 @@ function Resolve-PsExecPath {
     )
 
     $candidatePath = $Path.Trim().Trim([char]34)
+    $embeddedPsExecPaths = @(
+        [regex]::Matches($candidatePath, '(?i)[A-Z]:\\[^\r\n"]*?PsExec(?:64)?\.exe') |
+            ForEach-Object { $_.Value.Trim().Trim([char]34) } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+
+    if ($embeddedPsExecPaths.Count -gt 1) {
+        foreach ($embeddedPath in $embeddedPsExecPaths) {
+            if (Test-Path -LiteralPath $embeddedPath -PathType Leaf) {
+                Write-Warning ("PsExecPath contained multiple executable paths. Using '{0}' from: {1}" -f $embeddedPath, ($embeddedPsExecPaths -join " | "))
+                return (Get-Item -LiteralPath $embeddedPath -ErrorAction Stop).FullName
+            }
+        }
+
+        throw ("Invalid PsExecPath value: {0}. Multiple PsExec paths were provided, but none exists as a file. Provide exactly one executable path, for example -PsExecPath ""C:\Sysinternals\PsExec.exe""." -f $Path)
+    }
+
+    if ($embeddedPsExecPaths.Count -eq 1 -and $candidatePath -ne $embeddedPsExecPaths[0]) {
+        $candidatePath = $embeddedPsExecPaths[0]
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($candidatePath) -and (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
         return (Get-Item -LiteralPath $candidatePath -ErrorAction Stop).FullName
