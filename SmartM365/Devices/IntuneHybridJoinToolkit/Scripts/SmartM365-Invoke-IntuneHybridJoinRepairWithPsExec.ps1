@@ -39,6 +39,9 @@ Passes -AllowRemoveNonIntuneMdmEnrollment to the repair script. Use only when a 
 .PARAMETER AllowRemoveStaleIntuneEnrollment
 Passes -AllowRemoveStaleIntuneEnrollment to the repair script. Use only to clean stale local Intune enrollment traces.
 
+.PARAMETER SkipVirtualMachines
+Skips detected virtual machines before copy or repair.
+
 .PARAMETER AuditOnly
 Passes -AuditOnly to the repair script to collect diagnostics without repair actions.
 
@@ -78,8 +81,12 @@ session. This limits local PowerShell worker jobs and their PsExec executions ac
 LOT windows. Defaults to 15. Use 0 to disable the cross-LOT limiter.
 
 .PARAMETER GlobalConcurrencySemaphoreName
-Named Windows semaphore used by GlobalConcurrencyLimit. Use the same name across LOTs that
-must share one limit.
+Shared global gate name used by GlobalConcurrencyLimit. Use the same name across LOTs that
+must share one limit. The launcher stores recoverable worker leases under the temp folder.
+
+.PARAMETER GlobalConcurrencyLeaseTimeoutMinutes
+Maximum age of a shared global worker lease before it is considered stale and cleaned.
+Use 0 for automatic sizing based on PsExec and delayed evidence timeouts.
 
 .PARAMETER JobPollSeconds
 Seconds to wait between checks for completed parallel jobs. Defaults to 2.
@@ -148,6 +155,7 @@ param(
     [int]$ThrottleLimit = 25,
     [int]$GlobalConcurrencyLimit = 15,
     [string]$GlobalConcurrencySemaphoreName = "Local\SmartM365_IntuneHybridJoinToolkit_ComputerWorkers",
+    [int]$GlobalConcurrencyLeaseTimeoutMinutes = 0,
     [int]$JobPollSeconds = 2,
     [int]$DelayBetweenCyclesMinutes = 1,
     [int]$MaxCycles = 0,
@@ -160,6 +168,7 @@ param(
     [switch]$AllowRebootAfterDsregLeave,
     [switch]$AllowRemoveNonIntuneMdmEnrollment,
     [switch]$AllowRemoveStaleIntuneEnrollment,
+    [switch]$SkipVirtualMachines,
     [switch]$AuditOnly,
     [string]$IntuneInventoryCsv,
     [string]$IntuneInventoryNameColumn,
@@ -197,6 +206,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
 if ($ThrottleLimit -lt 1) { $ThrottleLimit = 1 }
 if ($GlobalConcurrencyLimit -lt 0) { $GlobalConcurrencyLimit = 0 }
 if ([string]::IsNullOrWhiteSpace($GlobalConcurrencySemaphoreName)) { $GlobalConcurrencySemaphoreName = "Local\SmartM365_IntuneHybridJoinToolkit_ComputerWorkers" }
+if ($GlobalConcurrencyLeaseTimeoutMinutes -lt 0) { $GlobalConcurrencyLeaseTimeoutMinutes = 0 }
 if ($JobPollSeconds -lt 1) { $JobPollSeconds = 1 }
 if ($DelayBetweenComputersSeconds -lt 0) { $DelayBetweenComputersSeconds = 0 }
 if ($DelayBetweenCyclesMinutes -lt 0) { $DelayBetweenCyclesMinutes = 0 }
@@ -209,6 +219,10 @@ if ($CommunicationLostEvidenceWaitMinutes -lt 0) { $CommunicationLostEvidenceWai
 if ($CommunicationLostEvidencePollMinutes -lt 1) { $CommunicationLostEvidencePollMinutes = 1 }
 if ($PostCycleIntuneInventoryPageSize -lt 1) { $PostCycleIntuneInventoryPageSize = 1 }
 if ($PostCycleIntuneInventoryPageSize -gt 999) { $PostCycleIntuneInventoryPageSize = 999 }
+if ($GlobalConcurrencyLeaseTimeoutMinutes -lt 1) {
+    $timeoutBase = if ($PsExecTimeoutMinutes -gt 0) { $PsExecTimeoutMinutes } else { 240 }
+    $GlobalConcurrencyLeaseTimeoutMinutes = [Math]::Max(30, $timeoutBase + $CommunicationLostEvidenceWaitMinutes + 30)
+}
 if ($DryRun -and -not $RunOnce -and $MaxCycles -eq 0) { $MaxCycles = 1 }
 
 $BaseDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
@@ -930,6 +944,8 @@ function Get-LauncherReportColumns {
         "DnsAddressList",
         "AdminShareReachable",
         "PingReachable",
+        "IsVirtualMachine",
+        "VirtualMachineEvidence",
         "RemoteDirectoryCreated",
         "ScriptCopied",
         "LocalScriptVersion",
@@ -1415,6 +1431,7 @@ if ($AllowRebootWhenNoInteractiveUser) { $scriptArgsBase += "-AllowRebootWhenNoI
 if ($AllowRebootAfterDsregLeave) { $scriptArgsBase += "-AllowRebootAfterDsregLeave" }
 if ($AllowRemoveNonIntuneMdmEnrollment) { $scriptArgsBase += "-AllowRemoveNonIntuneMdmEnrollment" }
 if ($AllowRemoveStaleIntuneEnrollment) { $scriptArgsBase += "-AllowRemoveStaleIntuneEnrollment" }
+if ($SkipVirtualMachines) { $scriptArgsBase += "-SkipVirtualMachines" }
 if ($AuditOnly) { $scriptArgsBase += "-AuditOnly" }
 $scriptArgsBase += "-StaleCleanupDelaySeconds"
 $scriptArgsBase += $StaleCleanupDelaySeconds
@@ -1596,6 +1613,7 @@ Write-Host "Computers   : $ComputerListPath"
 Write-Host "PsExec      : $PsExecPath"
 Write-Host "Script args : $($scriptArgsBase -join ' ')"
 Write-Host "Dry run     : $([bool]$DryRun)"
+Write-Host "Skip VMs    : $([bool]$SkipVirtualMachines)"
 Write-Host "Audit only  : $([bool]$AuditOnly)"
 Write-Host "Intune CSV  : $IntuneInventoryCsv"
 Write-Host "Entra CSV   : $EntraInventoryCsv"
@@ -1603,7 +1621,7 @@ Write-Host "AD CSV      : $AdInventoryCsv"
 Write-Host "AD domain   : $AdDomain"
 Write-Host "AD root CSV : $AdRootInventoryCsv"
 Write-Host "Ignore guard: $([bool]$IgnoreRunGuard); Every cycle: $([bool]$IgnoreRunGuardEveryCycle)"
-Write-Host "Parallelism : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; JobPollSeconds=$JobPollSeconds"
+Write-Host "Parallelism : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s); JobPollSeconds=$JobPollSeconds"
 if ($GlobalConcurrencyLimit -gt 0) {
     Write-Host "Global gate : $GlobalConcurrencySemaphoreName"
 }
@@ -1622,22 +1640,170 @@ Write-Host "Post Entra  : Enabled=$(-not [string]::IsNullOrWhiteSpace($EntraInve
 Write-Host "Post AD     : Enabled=$(-not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv)); Mode=Full AD computer inventory; Export=$ExportAdScriptPath"
 Write-Host ""
 
-$globalConcurrencySemaphore = $null
-$globalConcurrencySemaphoreCreatedNew = $false
+$globalConcurrencyGateRoot = Join-Path ([System.IO.Path]::GetTempPath()) "SmartM365\GlobalWorkerGates"
+$globalConcurrencyGateName = ($GlobalConcurrencySemaphoreName -replace '[^A-Za-z0-9_.-]', '_')
+if ($globalConcurrencyGateName.Length -gt 120) { $globalConcurrencyGateName = $globalConcurrencyGateName.Substring(0, 120) }
+$globalConcurrencyGatePath = Join-Path $globalConcurrencyGateRoot $globalConcurrencyGateName
+$globalConcurrencyMutexName = "Local\SmartM365_GlobalWorkerGate_$globalConcurrencyGateName"
+$launcherInstanceId = [guid]::NewGuid().ToString("N")
 if ($GlobalConcurrencyLimit -gt 0) {
+    New-Item -ItemType Directory -Path $globalConcurrencyGatePath -Force -ErrorAction Stop | Out-Null
+    Write-Host ("Global lease gate: Limit={0}; Path={1}; LeaseTimeout={2} minute(s)" -f $GlobalConcurrencyLimit,$globalConcurrencyGatePath,$GlobalConcurrencyLeaseTimeoutMinutes) -ForegroundColor Green
+}
+
+function Invoke-WithGlobalGateMutex {
+    param(
+        [Parameter(Mandatory=$true)][string]$MutexName,
+        [Parameter(Mandatory=$true)][scriptblock]$ScriptBlock
+    )
+
+    $mutex = New-Object System.Threading.Mutex($false, $MutexName)
+    $acquired = $false
     try {
-        $globalConcurrencySemaphore = New-Object System.Threading.Semaphore($GlobalConcurrencyLimit, $GlobalConcurrencyLimit, $GlobalConcurrencySemaphoreName, [ref]$globalConcurrencySemaphoreCreatedNew)
-        if ($globalConcurrencySemaphoreCreatedNew) {
-            Write-Host ("Global concurrency limiter created. Limit={0}; Semaphore={1}" -f $GlobalConcurrencyLimit,$GlobalConcurrencySemaphoreName) -ForegroundColor Green
+        try {
+            $acquired = $mutex.WaitOne(30000)
         }
-        else {
-            Write-Host ("Global concurrency limiter joined. RequestedLimit={0}; Semaphore={1}; effective limit is controlled by the first active launcher using this semaphore." -f $GlobalConcurrencyLimit,$GlobalConcurrencySemaphoreName) -ForegroundColor Yellow
+        catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
         }
+
+        if (-not $acquired) {
+            throw "Could not acquire global gate mutex within 30 seconds: $MutexName"
+        }
+
+        & $ScriptBlock
+    }
+    finally {
+        if ($acquired) {
+            try { $mutex.ReleaseMutex() } catch { }
+        }
+        $mutex.Dispose()
+    }
+}
+
+function Test-GlobalGateProcessAlive {
+    param([Parameter(Mandatory=$true)][int]$ProcessId)
+
+    try {
+        $null = Get-Process -Id $ProcessId -ErrorAction Stop
+        return $true
     }
     catch {
-        Write-Host ("WARNING: Global concurrency limiter disabled. Could not open semaphore '{0}': {1}" -f $GlobalConcurrencySemaphoreName,$_.Exception.Message) -ForegroundColor Yellow
-        $globalConcurrencySemaphore = $null
-        $GlobalConcurrencyLimit = 0
+        return $false
+    }
+}
+
+function Remove-StaleGlobalWorkerLeases {
+    param(
+        [Parameter(Mandatory=$true)][string]$GatePath,
+        [Parameter(Mandatory=$true)][int]$LeaseTimeoutMinutes
+    )
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+    foreach ($lease in @(Get-ChildItem -LiteralPath $GatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        $remove = $false
+        $reason = ""
+        $computerName = ""
+        $launcherPid = 0
+        $workerPid = 0
+        $ageMinutes = 0
+        try {
+            $data = Get-Content -LiteralPath $lease.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $computerName = [string]$data.Computer
+            $launcherPid = if ($data.PSObject.Properties["LauncherProcessId"]) { [int]$data.LauncherProcessId } else { [int]$data.ProcessId }
+            $workerPid = if ($data.PSObject.Properties["WorkerProcessId"]) { [int]$data.WorkerProcessId } else { 0 }
+            $createdUtc = [datetime]$data.CreatedUtc
+            $ageMinutes = [math]::Round(($nowUtc - $createdUtc).TotalMinutes, 1)
+            if (-not (Test-GlobalGateProcessAlive -ProcessId $launcherPid)) {
+                $remove = $true
+                $reason = "LauncherProcessExited"
+            }
+            elseif ($workerPid -gt 0 -and -not (Test-GlobalGateProcessAlive -ProcessId $workerPid)) {
+                $remove = $true
+                $reason = "WorkerProcessExited"
+            }
+            elseif (($nowUtc - $createdUtc).TotalMinutes -gt $LeaseTimeoutMinutes) {
+                $remove = $true
+                $reason = "LeaseExpired"
+            }
+        }
+        catch {
+            $remove = $true
+            $reason = "InvalidLease"
+        }
+
+        if ($remove) {
+            Write-Host ("Removed stale global worker lease: Reason={0}; Computer={1}; LauncherPid={2}; WorkerPid={3}; AgeMinutes={4}; Path={5}" -f $reason,$computerName,$launcherPid,$workerPid,$ageMinutes,$lease.FullName) -ForegroundColor DarkYellow
+            Remove-Item -LiteralPath $lease.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Update-GlobalWorkerLease {
+    param(
+        [AllowNull()][string]$LeasePath,
+        [hashtable]$Properties = @{}
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LeasePath) -or -not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
+
+    Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock {
+        if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
+        $data = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        foreach ($key in @($Properties.Keys)) {
+            $data | Add-Member -NotePropertyName $key -NotePropertyValue $Properties[$key] -Force
+        }
+        $data | Add-Member -NotePropertyName LastUpdatedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
+        $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeasePath -Encoding UTF8 -Force
+    }
+}
+
+function Acquire-GlobalWorkerLease {
+    param(
+        [Parameter(Mandatory=$true)][string]$Computer,
+        [Parameter(Mandatory=$true)][int]$CycleNumber
+    )
+
+    if ($GlobalConcurrencyLimit -lt 1) { return "" }
+
+    while ($true) {
+        $leasePath = Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock {
+            Remove-StaleGlobalWorkerLeases -GatePath $globalConcurrencyGatePath -LeaseTimeoutMinutes $GlobalConcurrencyLeaseTimeoutMinutes
+            $leases = @(Get-ChildItem -LiteralPath $globalConcurrencyGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)
+            if ($leases.Count -lt $GlobalConcurrencyLimit) {
+                $path = Join-Path $globalConcurrencyGatePath ("lease_{0}_{1}.json" -f $PID,([guid]::NewGuid().ToString("N")))
+                [PSCustomObject]@{
+                    LauncherInstanceId = $launcherInstanceId
+                    ProcessId = $PID
+                    LauncherProcessId = $PID
+                    Computer = $Computer
+                    Cycle = $CycleNumber
+                    JobId = ""
+                    JobName = ""
+                    WorkerProcessId = 0
+                    WorkerProcessName = ""
+                    WorkerStartedUtc = ""
+                    CreatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+                    LastUpdatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+                    Host = $env:COMPUTERNAME
+                } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $path -Encoding UTF8 -Force
+                return $path
+            }
+            return ""
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($leasePath)) { return $leasePath }
+
+        Write-Host ("Waiting for global worker lease before queuing {0}. Active={1}; Limit={2}; Gate={3}" -f $Computer,(@(Get-ChildItem -LiteralPath $globalConcurrencyGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count),$GlobalConcurrencyLimit,$globalConcurrencyGatePath) -ForegroundColor DarkYellow
+        Start-Sleep -Seconds $JobPollSeconds
+    }
+}
+
+function Release-GlobalWorkerLease {
+    param([AllowNull()][string]$LeasePath)
+
+    if (-not [string]::IsNullOrWhiteSpace($LeasePath)) {
+        Remove-Item -LiteralPath $LeasePath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -1712,6 +1878,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             [string]$LauncherVersion,
             [bool]$DryRun,
             [bool]$CollectRemoteLogs,
+            [bool]$SkipVirtualMachines,
             [string]$CentralLogRoot,
             [bool]$KeepCentralLogHistory,
             [hashtable]$IntuneInventorySet,
@@ -1720,10 +1887,62 @@ function Invoke-IntuneHybridJoinRepairCycle {
             [string[]]$CycleScriptArgs,
             [int]$PsExecTimeoutMinutes,
             [int]$CommunicationLostEvidenceWaitMinutes,
-            [int]$CommunicationLostEvidencePollMinutes
+            [int]$CommunicationLostEvidencePollMinutes,
+            [string]$GlobalWorkerLeasePath,
+            [string]$GlobalWorkerLeaseMutexName
         )
 
         $ErrorActionPreference = "Stop"
+
+        function Invoke-WithWorkerLeaseMutex {
+            param(
+                [AllowNull()][string]$MutexName,
+                [Parameter(Mandatory=$true)][scriptblock]$ScriptBlock
+            )
+
+            if ([string]::IsNullOrWhiteSpace($MutexName)) {
+                & $ScriptBlock
+                return
+            }
+
+            $mutex = New-Object System.Threading.Mutex($false, $MutexName)
+            $acquired = $false
+            try {
+                try { $acquired = $mutex.WaitOne(30000) }
+                catch [System.Threading.AbandonedMutexException] { $acquired = $true }
+                if ($acquired) { & $ScriptBlock }
+            }
+            finally {
+                if ($acquired) { try { $mutex.ReleaseMutex() } catch { } }
+                $mutex.Dispose()
+            }
+        }
+
+        function Update-WorkerLease {
+            param(
+                [AllowNull()][string]$LeasePath,
+                [AllowNull()][string]$MutexName
+            )
+
+            if ([string]::IsNullOrWhiteSpace($LeasePath) -or -not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
+
+            try {
+                Invoke-WithWorkerLeaseMutex -MutexName $MutexName -ScriptBlock {
+                    if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
+                    $data = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    $processName = ""
+                    try { $processName = (Get-Process -Id $PID -ErrorAction Stop).ProcessName } catch { }
+                    $data | Add-Member -NotePropertyName WorkerProcessId -NotePropertyValue $PID -Force
+                    $data | Add-Member -NotePropertyName WorkerProcessName -NotePropertyValue $processName -Force
+                    $data | Add-Member -NotePropertyName WorkerStartedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
+                    $data | Add-Member -NotePropertyName LastUpdatedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
+                    $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeasePath -Encoding UTF8 -Force
+                }
+            }
+            catch { }
+        }
+
+        Update-WorkerLease -LeasePath $GlobalWorkerLeasePath -MutexName $GlobalWorkerLeaseMutexName
 
         function Update-TimestampedLogFile {
             param([Parameter(Mandatory=$true)][string]$Path)
@@ -1786,6 +2005,56 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
         }
 
+        function Get-RemoteVirtualMachineSummary {
+            param([Parameter(Mandatory=$true)][string]$ComputerName)
+
+            $system = Get-CimInstance -ClassName Win32_ComputerSystem -ComputerName $ComputerName -ErrorAction Stop
+            $manufacturer = [string]$system.Manufacturer
+            $model = [string]$system.Model
+            $hypervisorPresent = $false
+            try { $hypervisorPresent = [bool]$system.HypervisorPresent } catch { $hypervisorPresent = $false }
+
+            $signature = ("{0} {1}" -f $manufacturer,$model)
+            $virtualPatterns = @(
+                'Virtual Machine',
+                'VMware',
+                'VirtualBox',
+                'KVM',
+                'QEMU',
+                'Xen',
+                'HVM domU',
+                'Parallels',
+                'BHYVE',
+                'OpenStack',
+                'Google Compute Engine',
+                'Amazon EC2'
+            )
+
+            $matchedPattern = ''
+            foreach ($pattern in $virtualPatterns) {
+                if ($signature -match [regex]::Escape($pattern)) {
+                    $matchedPattern = $pattern
+                    break
+                }
+            }
+
+            $isVirtual = (-not [string]::IsNullOrWhiteSpace($matchedPattern)) -or $hypervisorPresent
+            $evidence = if ($matchedPattern) {
+                "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
+            }
+            elseif ($hypervisorPresent) {
+                "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=True"
+            }
+            else {
+                "Manufacturer=$manufacturer; Model=$model"
+            }
+
+            [PSCustomObject]@{
+                IsVirtualMachine = $isVirtual
+                Evidence = $evidence
+            }
+        }
+
         function Get-NextActionFromLauncherStatus {
             param([Parameter(Mandatory=$true)][string]$Status)
 
@@ -1797,6 +2066,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
                 "ADMIN_SHARE_UNREACHABLE" { return "FIX_ADMIN_SHARE_OR_NETWORK" }
                 "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
+                "SKIPPED_VIRTUAL_MACHINE" { return "NO_ACTION_VIRTUAL_MACHINE" }
                 "REBOOT_TRIGGERED_WAITING_FOR_USER_LOGON" { return "WAIT_USER_LOGON" }
                 "WAITING_FOR_INTERACTIVE_USER_LOGON" { return "WAIT_USER_LOGON" }
                 "INTUNE_USER_AUTOENROLL_LOCAL_INTERACTIVE_USER" { return "LOGON_WITH_DOMAIN_OR_AAD_USER" }
@@ -2064,6 +2334,8 @@ function Invoke-IntuneHybridJoinRepairCycle {
             DnsAddressList = ""
             AdminShareReachable = $false
             PingReachable = $false
+            IsVirtualMachine = ""
+            VirtualMachineEvidence = ""
             RemoteDirectoryCreated = $false
             ScriptCopied = $false
             LocalScriptVersion = ""
@@ -2176,6 +2448,31 @@ function Invoke-IntuneHybridJoinRepairCycle {
             $result.PingReachable = Test-Connection -ComputerName $Computer -Count 1 -Quiet -ErrorAction SilentlyContinue
             if (-not $result.PingReachable) {
                 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: Ping failed. Trying administrative shares anyway." | Add-Content -LiteralPath $logPath -Encoding UTF8
+            }
+
+            if ($SkipVirtualMachines) {
+                try {
+                    $vm = Get-RemoteVirtualMachineSummary -ComputerName $Computer
+                    $result.IsVirtualMachine = $vm.IsVirtualMachine
+                    $result.VirtualMachineEvidence = $vm.Evidence
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] VM check: IsVirtualMachine=$($result.IsVirtualMachine); Evidence=$($result.VirtualMachineEvidence)" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    if ($vm.IsVirtualMachine) {
+                        $result.Status = "SKIPPED_VIRTUAL_MACHINE"
+                        $result.EffectiveStatus = "SKIPPED_VIRTUAL_MACHINE"
+                        $result.NextAction = "NO_ACTION_VIRTUAL_MACHINE"
+                        $result.EffectiveNextAction = "NO_ACTION_VIRTUAL_MACHINE"
+                        $result.RemoteStatus = "SKIPPED_VIRTUAL_MACHINE"
+                        $result.RemoteExitCode = "0"
+                        $result.RemoteNextAction = "NO_ACTION_VIRTUAL_MACHINE"
+                        $result.RemoteDetail = "Virtual machine skipped by -SkipVirtualMachines. $($vm.Evidence)"
+                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Skipping repair: $($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                        return (Complete-WorkerResult -Result $result -Path $logPath)
+                    }
+                }
+                catch {
+                    $result.VirtualMachineEvidence = ("VM check failed: {0}" -f $_.Exception.Message)
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $($result.VirtualMachineEvidence). Continuing; endpoint guard will also check if reachable." | Add-Content -LiteralPath $logPath -Encoding UTF8
+                }
             }
 
             $adminShare = "\\$Computer\ADMIN$"
@@ -2531,7 +2828,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
     }
 
     $runningJobs = @()
-    $globalSlotByJobId = @{}
+    $globalLeaseByJobId = @{}
     $nextIndex = 0
     $completed = 0
 
@@ -2540,14 +2837,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             $computer = $computers[$nextIndex]
             $nextIndex++
 
-            $globalSlotAcquired = $false
-            if ($null -ne $globalConcurrencySemaphore) {
-                if (-not $globalConcurrencySemaphore.WaitOne(0)) {
-                    Write-Host ("Waiting for global worker slot before queuing {0}. Limit={1}; Semaphore={2}" -f $computer,$GlobalConcurrencyLimit,$GlobalConcurrencySemaphoreName) -ForegroundColor DarkYellow
-                    [void]$globalConcurrencySemaphore.WaitOne()
-                }
-                $globalSlotAcquired = $true
-            }
+            $globalLeasePath = Acquire-GlobalWorkerLease -Computer $computer -CycleNumber $CycleNumber
 
             try {
                 $job = Start-Job -Name ("EHJIR_C{0}_{1}" -f $CycleNumber,$computer) -ScriptBlock $worker -ArgumentList @(
@@ -2563,6 +2853,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     $LauncherVersion,
                     [bool]$DryRun,
                     $CollectRemoteLogs,
+                    [bool]$SkipVirtualMachines,
                     $CentralLogRoot,
                     [bool]$KeepCentralLogHistory,
                     $IntuneInventorySet,
@@ -2571,18 +2862,22 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     $CycleScriptArgs,
                     $PsExecTimeoutMinutes,
                     $CommunicationLostEvidenceWaitMinutes,
-                    $CommunicationLostEvidencePollMinutes
+                    $CommunicationLostEvidencePollMinutes,
+                    $globalLeasePath,
+                    $globalConcurrencyMutexName
                 )
             }
             catch {
-                if ($globalSlotAcquired -and $null -ne $globalConcurrencySemaphore) {
-                    try { [void]$globalConcurrencySemaphore.Release() } catch { }
-                }
+                Release-GlobalWorkerLease -LeasePath $globalLeasePath
                 throw
             }
 
-            if ($globalSlotAcquired) {
-                $globalSlotByJobId[[string]$job.Id] = $true
+            if (-not [string]::IsNullOrWhiteSpace($globalLeasePath)) {
+                Update-GlobalWorkerLease -LeasePath $globalLeasePath -Properties @{
+                    JobId = [string]$job.Id
+                    JobName = [string]$job.Name
+                }
+                $globalLeaseByJobId[[string]$job.Id] = $globalLeasePath
             }
             $runningJobs += $job
             Write-Host ("Queued {0} ({1}/{2}); running={3}" -f $computer,$nextIndex,$computers.Count,$runningJobs.Count) -ForegroundColor DarkCyan
@@ -2752,11 +3047,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
             $jobIdKey = [string]$job.Id
-            if ($globalSlotByJobId.ContainsKey($jobIdKey)) {
-                if ($globalSlotByJobId[$jobIdKey] -and $null -ne $globalConcurrencySemaphore) {
-                    try { [void]$globalConcurrencySemaphore.Release() } catch { }
-                }
-                $globalSlotByJobId.Remove($jobIdKey)
+            if ($globalLeaseByJobId.ContainsKey($jobIdKey)) {
+                Release-GlobalWorkerLease -LeasePath $globalLeaseByJobId[$jobIdKey]
+                $globalLeaseByJobId.Remove($jobIdKey)
             }
         }
 

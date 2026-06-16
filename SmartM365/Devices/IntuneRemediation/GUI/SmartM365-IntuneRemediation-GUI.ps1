@@ -180,7 +180,7 @@ $message
 The Microsoft Graph browser sign-in was canceled or did not complete. Click Connect Graph again, keep the browser tab open, finish sign-in and consent, then return to the manager.
 
 If the browser window does not open or the localhost redirect is blocked, launch the GUI from a visible PowerShell window with:
-pwsh -STA -NoProfile -File .\Devices\SmartIntuneRemediation\GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
+pwsh -STA -NoProfile -File .\Devices\IntuneRemediation\GUI\SmartM365-IntuneRemediation-GUI.ps1 -GraphAuthMode DeviceCode
 "@
     }
 
