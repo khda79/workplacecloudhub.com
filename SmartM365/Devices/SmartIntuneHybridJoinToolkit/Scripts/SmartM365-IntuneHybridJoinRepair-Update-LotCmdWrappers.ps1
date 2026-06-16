@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-Refreshes tiny CMD wrappers in all LOT-* folders.
+Refreshes tiny CMD wrappers in operational LOT-* folders.
 
 .DESCRIPTION
-The real launcher logic lives in Scripts\*.cmd. LOT folders only need tiny repair
-wrappers that delegate to the shared launcher. Run this after creating a new LOT folder
-or to convert older LOT folders to the shared-wrapper model.
+The real launcher logic lives in Scripts\*.cmd. Operational LOT folders only need tiny
+repair wrappers that delegate to the shared launcher. Run this after creating a new LOT
+folder or to convert older LOT folders to the shared-wrapper model. The versioned LOT-X
+template is intentionally skipped so Git does not see template wrapper churn.
 
 The Intune inventory export is global and must be launched from the repository root,
 so this script removes obsolete Export-IntuneDevicesCsv.cmd wrappers from LOT folders.
@@ -38,17 +39,20 @@ else {
 }
 
 $rootItem = Get-Item -LiteralPath $RootPath -ErrorAction Stop
-$lotFolders = @(Get-ChildItem -LiteralPath $rootItem.FullName -Directory -Filter "LOT-*" -ErrorAction Stop)
+$lotFolders = @(
+    Get-ChildItem -LiteralPath $rootItem.FullName -Directory -Filter "LOT-*" -ErrorAction Stop |
+        Where-Object { $_.Name -ine "LOT-X" }
+)
 
 if ($lotFolders.Count -eq 0) {
-    Write-Host ("No LOT-* folders found under: {0}" -f $rootItem.FullName) -ForegroundColor Yellow
+    Write-Host ("No operational LOT-* folders found under: {0}" -f $rootItem.FullName) -ForegroundColor Yellow
     return
 }
 
 $wrappers = @{
     "Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd" = @'
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 (
@@ -67,7 +71,7 @@ exit /b %EXIT_CODE%
 '@
     "Run-IntuneHybridJoinRepairWithPsExec-Once.cmd" = @'
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 (
@@ -86,7 +90,7 @@ exit /b %EXIT_CODE%
 '@
     "Run-IntuneHybridJoinRepairWithPsExec-Once-IgnoreRunGuard.cmd" = @'
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 (
@@ -105,7 +109,7 @@ exit /b %EXIT_CODE%
 '@
     "Run-IntuneHybridJoinRepairWithPsExec-Loop-IgnoreRunGuard.cmd" = @'
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 (
