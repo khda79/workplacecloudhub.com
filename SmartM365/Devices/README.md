@@ -10,8 +10,7 @@ These tools are intentionally separated from tenant-wide inventory scripts. They
 - `DeviceRegistrationTool/`: local GUI and CLI diagnostics for Intune enrollment, Hybrid Join, Entra device registration, PRT refresh, support bundles, and guarded admin repair actions.
 - `EndpointDiagnosticsAnalyzer/`: analyzer for Intune Device Diagnostics ZIP files and local endpoint captures, with HTML report export and optional AI-assisted review.
 - `IntuneHybridJoinToolkit/`: PsExec/LOT toolkit for running the autonomous Hybrid Join and Intune enrollment repair script across batches of devices.
-- `IntuneWindows11UpgradeToolkit/`: PsExec/LOT toolkit for diagnosing Windows 10 devices that should move to Windows 11 through Intune/Autopatch/WUfB and running guarded upgrade actions.
-- `IntuneRemediation/`: Intune remediation script workspace plus delegated Graph CLI/GUI manager for publishing, comparing, exporting, and reporting remediation packages.
+- `Windows11UpgradeToolkit/`: PsExec/LOT toolkit for diagnosing Windows 10 devices that should move to Windows 11 through Intune/Autopatch/WUfB and running guarded upgrade actions.
 
 ## Choosing The Right Tool
 
@@ -19,13 +18,11 @@ Use `DeviceRegistrationTool/` when you are working on one device locally or thro
 
 Use `IntuneHybridJoinToolkit/` when you need to push one autonomous repair script to several computers through LOT folders and PsExec, or when a single-file script must be deployed through a mechanism such as GPO.
 
-Use `IntuneWindows11UpgradeToolkit/` when a batch of Windows 10 devices should migrate to Windows 11 through Intune, Windows Autopatch, or Windows Update for Business, and you need local evidence plus explicit guarded actions such as Windows Update force triggers or setup-based upgrade.
+Use `Windows11UpgradeToolkit/` when a batch of Windows 10 devices should migrate to Windows 11 through Intune, Windows Autopatch, or Windows Update for Business, and you need local evidence plus explicit guarded actions such as Windows Update force triggers or setup-based upgrade.
 
 Use `EndpointDiagnosticsAnalyzer/` when you already have an Intune Device Diagnostics ZIP or need to collect and analyze a local endpoint diagnostic bundle.
 
 Use `DeviceRebootManager/` when the goal is user-facing restart governance.
-
-Use `IntuneRemediation/` when the target deployment mechanism is Microsoft Intune remediations.
 
 ## Operational Safety
 

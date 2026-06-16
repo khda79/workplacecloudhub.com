@@ -92,23 +92,39 @@ orchestrator passes the corresponding `-Allow*` switch.
 
 ## Setup Upgrade Mode
 
-By default, setup media is copied/cached locally on each target before setup is executed:
+By default, setup media is copied/cached locally by each target before setup is executed:
 
 ```text
-C:\ProgramData\SmartM365\IntuneWindows11UpgradeToolkit\SetupMedia\<SetupMediaId>
+C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia\<SetupMediaId>-<Language>
 ```
 
 The media validation checks:
 
 - `setup.exe` exists;
 - `sources\install.wim` or `sources\install.esd` exists;
-- `setup.exe` is not unexpectedly small.
+- `setup.exe` is not unexpectedly small;
+- `sources\lang.ini` contains the expected language when language matching is enabled;
+- `SmartM365-SetupMedia.json` is present or refreshed after a valid cache/copy.
+
+In LOT/PsExec mode, the operator workstation copies only the small endpoint script. The
+target computer, running as SYSTEM through PsExec, validates `SetupSourcePath` and copies
+the setup media into its own local cache with an incremental `robocopy` pass. This avoids
+using the technician workstation as the large media copy engine and lets remote sites use
+a site-local share.
+
+Important: `SetupSourcePath` must be reachable from the target computer context. For LOT
+runs, prefer a UNC path such as `\\site-server\share\Windows11\en-GB` or a parent folder
+containing language subfolders. A local repo path on the operator workstation is only
+usable for local/direct runs unless the target can also access that same path.
 
 Supported execution modes:
 
-- `LocalCache`: default. Use the target local cache and pre-copy from the operator workstation when possible.
+- `LocalCache`: default. Use the target local cache and copy from `SetupSourcePath` on the target when the cache is not valid.
 - `Share`: run directly from `SetupSourcePath`; the target SYSTEM context must be able to read the share.
-- `Auto`: prefer local cache, then share, then local cache copy.
+- `Auto`: prefer local cache, then share, then target-side local cache copy.
+
+`Use existing media only` / `-SkipSetupMediaPreCopy` means the target will not copy setup
+media. In `LocalCache` mode, the cache must already be valid before the run starts.
 
 Example LOT environment variables for an alternate setup source:
 
@@ -148,7 +164,7 @@ The script blocks setup upgrade when the device is already Windows 11, is not Wi
 Remote runtime data is written under:
 
 ```text
-C:\ProgramData\SmartM365\IntuneWindows11UpgradeToolkit
+C:\ProgramData\SmartM365\Windows11UpgradeToolkit
 ```
 
 LOT-side output:
@@ -166,7 +182,7 @@ The orchestrator copies remote `Logs`, `Output`, and `LastRun.json` back into `C
 The PsExec orchestrator runs computer workers in parallel. `-ThrottleLimit` controls parallelism inside one LOT window, while `W11UT_GLOBAL_CONCURRENCY_LIMIT` and `-GlobalConcurrencyLimit` default to `15` and share this recoverable worker gate across LOT windows:
 
 ```text
-Local\SmartM365_IntuneWindows11UpgradeToolkit_ComputerWorkers
+Local\SmartM365_Windows11UpgradeToolkit_ComputerWorkers
 ```
 
 `W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES` / `-GlobalConcurrencyLeaseTimeoutMinutes`

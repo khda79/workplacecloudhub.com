@@ -44,14 +44,14 @@ SmartCitrix/**
 !/SmartM365/Devices/IntuneHybridJoinToolkit/SmartM365-logo.ico
 !/SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/SmartM365-logo.ico
 !/SmartM365/Devices/IntuneHybridJoinToolkit/workplacecloudhub-v2.png
-!/SmartM365/Devices/IntuneWindows11UpgradeToolkit/SmartM365-logo.ico
-!/SmartM365/Devices/IntuneWindows11UpgradeToolkit/Scripts/SmartM365-logo.ico
-!/SmartM365/Devices/IntuneWindows11UpgradeToolkit/workplacecloudhub-v2.png
-!/SmartM365/Devices/IntuneRemediation/GUI/SmartM365-logo.ico
+!/SmartM365/Devices/Windows11UpgradeToolkit/SmartM365-logo.ico
+!/SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-logo.ico
+!/SmartM365/Devices/Windows11UpgradeToolkit/workplacecloudhub-v2.png
+!/SmartM365/Intune/Remediation/GUI/SmartM365-logo.ico
 !/SmartM365/**/Product names and service plan identifiers for licensing.csv
 !/SmartM365/**/W11-Upgrade-Compatibility-Indicators-Intune-Description.txt
 !/SmartM365/Devices/IntuneHybridJoinToolkit/LOT-X/Computers.txt
-!/SmartM365/Devices/IntuneWindows11UpgradeToolkit/LOT-X/Computers.txt
+!/SmartM365/Devices/Windows11UpgradeToolkit/LOT-X/Computers.txt
 SmartM365/SharePointMigration/Migrations/*
 !SmartM365/SharePointMigration/Migrations/_Template/
 !SmartM365/SharePointMigration/Migrations/_Template/**
@@ -110,23 +110,23 @@ SmartM365/Devices/IntuneHybridJoinToolkit/**/CentralLogs/
 SmartM365/Devices/IntuneHybridJoinToolkit/**/Reports/
 
 # Smart Intune Windows 11 Upgrade Toolkit runtime data
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/DevicesIntune.csv
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/DevicesIntune.csv.tmp.*.csv
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/DevicesWindowsUpdate.csv
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/DevicesWindowsUpdate.csv.tmp.*.csv
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/DevicesW11Readiness.csv
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/DevicesW11Readiness.csv.tmp.*.csv
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/DevicesAutopatchAlerts.csv
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/DevicesAutopatchAlerts.csv.tmp.*.csv
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/LOT-*/
-!SmartM365/Devices/IntuneWindows11UpgradeToolkit/LOT-X/
-!SmartM365/Devices/IntuneWindows11UpgradeToolkit/LOT-X/Computers.txt
-!SmartM365/Devices/IntuneWindows11UpgradeToolkit/LOT-X/*.cmd
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/**/ComputersAlreadyProcessed.txt
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/**/PsExecLogs/
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/**/CentralLogs/
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/**/Reports/
-SmartM365/Devices/IntuneWindows11UpgradeToolkit/**/SetupMedia/
+SmartM365/Devices/Windows11UpgradeToolkit/DevicesIntune.csv
+SmartM365/Devices/Windows11UpgradeToolkit/DevicesIntune.csv.tmp.*.csv
+SmartM365/Devices/Windows11UpgradeToolkit/DevicesWindowsUpdate.csv
+SmartM365/Devices/Windows11UpgradeToolkit/DevicesWindowsUpdate.csv.tmp.*.csv
+SmartM365/Devices/Windows11UpgradeToolkit/DevicesW11Readiness.csv
+SmartM365/Devices/Windows11UpgradeToolkit/DevicesW11Readiness.csv.tmp.*.csv
+SmartM365/Devices/Windows11UpgradeToolkit/DevicesAutopatchAlerts.csv
+SmartM365/Devices/Windows11UpgradeToolkit/DevicesAutopatchAlerts.csv.tmp.*.csv
+SmartM365/Devices/Windows11UpgradeToolkit/LOT-*/
+!SmartM365/Devices/Windows11UpgradeToolkit/LOT-X/
+!SmartM365/Devices/Windows11UpgradeToolkit/LOT-X/Computers.txt
+!SmartM365/Devices/Windows11UpgradeToolkit/LOT-X/*.cmd
+SmartM365/Devices/Windows11UpgradeToolkit/**/ComputersAlreadyProcessed.txt
+SmartM365/Devices/Windows11UpgradeToolkit/**/PsExecLogs/
+SmartM365/Devices/Windows11UpgradeToolkit/**/CentralLogs/
+SmartM365/Devices/Windows11UpgradeToolkit/**/Reports/
+SmartM365/Devices/Windows11UpgradeToolkit/**/SetupMedia/
 
 # Local configuration
 *.local.json

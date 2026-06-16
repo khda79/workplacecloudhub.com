@@ -36,6 +36,16 @@ Language handling:
 - `W11UT_SETUP_LANGUAGE=Any` disables language matching and should only be used
   intentionally.
 
+LOT/PsExec copy handling:
+
+- The target computer copies the Windows 11 media itself into
+  `C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia`.
+- For remote LOT runs, set `W11UT_SETUP_SOURCE` to a path reachable by the
+  target SYSTEM context, preferably a site-local UNC share.
+- A local repository path works for local/direct testing, but remote targets
+  cannot use the technician workstation path unless it is explicitly shared and
+  accessible to them.
+
 Recommended preparation:
 
 1. Download the Windows 11 ISO from the official Microsoft download page or from
