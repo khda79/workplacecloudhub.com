@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 (

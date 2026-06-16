@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 (
@@ -81,7 +81,7 @@ if not "%DRY_RUN_REQUESTED%"=="1" (
             set "EXITCODE=1"
             goto :END
         )
-        set "PSEXEC_ARG=-PsExecPath ""%PSEXEC_FOUND%"""
+        set "PSEXEC_ARG=-PsExecPath ""!PSEXEC_FOUND!"""
     )
 )
 
