@@ -94,7 +94,7 @@ This skips the versioned `LOT-X` template and creates a blank `AdDomain.txt` in 
 
 Use `Export-ADDevicesCsv.cmd` from the toolkit root to create a forest-wide `DevicesAD.csv`.
 LOT runs pass this root CSV separately and use it in priority when it exists and is less than
-60 minutes old. If `AdDomain.txt` is missing or blank, the LOT refreshes the root `DevicesAD.csv`
+120 minutes old. If `AdDomain.txt` is missing or blank, the LOT refreshes the root `DevicesAD.csv`
 as a forest-wide AD export. A LOT can still use a per-LOT AD domain by setting `EHJIR_AD_DOMAIN`
 before launching the LOT, or by creating an `AdDomain.txt` file in that LOT folder with the domain
 name on the first line. In that domain-specific fallback mode, the repair launcher writes and
