@@ -35,7 +35,7 @@ LOT-X\
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1`: full Entra device inventory export.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Export-ADDevicesCsv.ps1`: AD computer inventory export for LOT report enrichment.
 - `Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1`: refreshes small LOT CMD wrappers.
-- `Scripts\SmartM365-IntuneHybridJoinRepair-LotLauncher-GUI.ps1`: GUI that creates a local LOT folder from a selected computer list file, writes `Computers.txt`, refreshes wrappers, and offers to launch the LOT.
+- `Scripts\SmartM365-IntuneHybridJoinRepair-LotLauncher-GUI.ps1`: GUI that launches existing LOT folders and creates new empty LOT folders ready for `Computers.txt`.
 
 ## When To Use This Toolkit
 
@@ -95,14 +95,17 @@ name on the first line. In that domain-specific fallback mode, the repair launch
 refreshes `LOT-*\DevicesAD.csv` so different LOT folders can target different AD domains without
 overwriting each other's AD inventory.
 
-Create a LOT folder from a computer list with the GUI:
+Open the LOT launcher GUI:
 
 ```cmd
 Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd
 ```
 
-The GUI accepts a text list or a CSV. For CSV files, it uses `ComputerName`, `DeviceName`,
-`Name`, or `DisplayName` when present, otherwise the first CSV column.
+The GUI has an existing-LOT tab with a drop-down list of available operational `LOT-*` folders.
+After a LOT is selected, it shows the device count, AD scope, selected AD CSV, root inventory
+freshness, wrapper status, and launch mode. A second tab creates a new empty LOT folder from a
+LOT name, refreshes wrappers, creates `Computers.txt` and `AdDomain.txt`, and offers to open
+`Computers.txt` so the operator can paste one computer per line.
 
 ## Repair Guardrails
 
