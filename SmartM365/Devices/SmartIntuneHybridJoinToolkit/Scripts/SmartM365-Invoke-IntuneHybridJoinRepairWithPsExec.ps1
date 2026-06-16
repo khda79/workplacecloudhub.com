@@ -1244,9 +1244,9 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) {
     }
     else {
         $intuneInventoryAge = (Get-Date) - $intuneInventoryItem.LastWriteTime
-        if ($intuneInventoryAge.TotalMinutes -gt 15) {
+        if ($intuneInventoryAge.TotalMinutes -gt 30) {
             $refreshInitialInventory = $true
-            $initialInventoryReason = ("older than 15 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $intuneInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $intuneInventoryAge.TotalMinutes)
+            $initialInventoryReason = ("older than 30 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $intuneInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $intuneInventoryAge.TotalMinutes)
         }
     }
 
@@ -1292,9 +1292,9 @@ if (-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)) {
         }
         else {
             $entraInventoryAge = (Get-Date) - $entraInventoryItem.LastWriteTime
-            if ($entraInventoryAge.TotalMinutes -gt 15) {
+            if ($entraInventoryAge.TotalMinutes -gt 30) {
                 $refreshInitialEntraInventory = $true
-                $initialEntraInventoryReason = ("older than 15 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $entraInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $entraInventoryAge.TotalMinutes)
+                $initialEntraInventoryReason = ("older than 30 minutes; LastWriteTime={0}; Age={1:N1} minute(s)" -f $entraInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $entraInventoryAge.TotalMinutes)
             }
         }
 
