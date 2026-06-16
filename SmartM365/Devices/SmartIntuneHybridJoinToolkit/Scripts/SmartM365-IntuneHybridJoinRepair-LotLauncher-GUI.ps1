@@ -258,6 +258,20 @@ function Start-ToolkitLot {
     Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$wrapperPath`"", "-GlobalConcurrencyLimit", [string]$GlobalConcurrencyLimit) -WorkingDirectory $LotPath -Verb RunAs
 }
 
+function Wait-UiDelay {
+    param([int]$Seconds)
+
+    if ($Seconds -le 0) {
+        return
+    }
+
+    $end = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $end) {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 100
+    }
+}
+
 function Open-TextFile {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -279,6 +293,7 @@ function Open-FolderPath {
 }
 
 $toolkitRoot = Get-ToolkitRoot
+$launchAllLotStartDelaySeconds = 5
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1058,9 +1073,15 @@ $launchAllLotsButton.Add_Click({
 
         $mode = [string]$existingModeCombo.SelectedItem
         $limit = [int]$globalConcurrencyLimitBox.Value
-        Add-Status ("Launching {0}/{1} LOT folder(s) in {2} mode. Global limit={3}." -f $launchableLots.Count,$script:LotList.Count,$mode,$limit)
+        Add-Status ("Launching {0}/{1} LOT folder(s) in {2} mode. Global limit={3}. Delay={4}s." -f $launchableLots.Count,$script:LotList.Count,$mode,$limit,$launchAllLotStartDelaySeconds)
 
-        foreach ($lotSummary in $launchableLots) {
+        for ($lotIndex = 0; $lotIndex -lt $launchableLots.Count; $lotIndex++) {
+            $lotSummary = $launchableLots[$lotIndex]
+            if ($lotIndex -gt 0 -and $launchAllLotStartDelaySeconds -gt 0) {
+                Add-Status ("Waiting {0}s before launching {1}." -f $launchAllLotStartDelaySeconds,$lotSummary.Name)
+                Wait-UiDelay -Seconds $launchAllLotStartDelaySeconds
+            }
+
             Add-Status ("Launching {0}." -f $lotSummary.Name)
             Start-ToolkitLot -LotPath $lotSummary.Path -Mode $mode -GlobalConcurrencyLimit $limit
         }
