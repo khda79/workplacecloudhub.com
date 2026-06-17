@@ -1691,6 +1691,42 @@ Set-OptionNumberFromEnv -Control $optionSetupSourceCandidateLimitBox -Name 'W11U
 Set-OptionNumberFromEnv -Control $optionSetupCopyIpGapBox -Name 'W11UT_SETUP_COPY_IPG_MS'
 Set-OptionNumberFromEnv -Control $optionSetupCopyJitterBox -Name 'W11UT_SETUP_COPY_JITTER_SECONDS'
 
+function Set-OptionCheckAvailability {
+    param(
+        [Parameter(Mandatory = $true)][System.Windows.Forms.CheckBox]$CheckBox,
+        [Parameter(Mandatory = $true)][bool]$Enabled
+    )
+
+    $CheckBox.Enabled = $Enabled
+    $CheckBox.ForeColor = if ($Enabled) { $colorInk } else { $colorMuted }
+}
+
+function Set-AuditOnlyOptionState {
+    $auditOnly = [bool]$optionAuditOnlyCheck.Checked
+    foreach ($check in @(
+            $optionAllowPolicyRepairCheck,
+            $optionAllowWUResetCheck,
+            $optionAllowForceUpgradeCheck,
+            $optionAllowSetupUpgradeCheck,
+            $optionAllowRebootCheck,
+            $optionSkipVirtualMachinesCheck,
+            $optionAllowDiskCleanupCheck,
+            $optionAllowAdvancedCleanupCheck,
+            $optionSkipSetupPreCopyCheck,
+            $optionKeepCentralHistoryCheck,
+            $optionNoCentralCollectionCheck,
+            $optionDryRunCheck
+        )) {
+        if ($auditOnly) {
+            $check.Checked = $false
+        }
+        Set-OptionCheckAvailability -CheckBox $check -Enabled (-not $auditOnly)
+    }
+}
+
+$optionAuditOnlyCheck.Add_CheckedChanged({ Set-AuditOnlyOptionState })
+Set-AuditOnlyOptionState
+
 $optionsTable.Controls.Add($optionAuditOnlyCheck, 0, 0)
 $optionsTable.Controls.Add($optionAllowPolicyRepairCheck, 1, 0)
 $optionsTable.Controls.Add($optionAllowWUResetCheck, 2, 0)

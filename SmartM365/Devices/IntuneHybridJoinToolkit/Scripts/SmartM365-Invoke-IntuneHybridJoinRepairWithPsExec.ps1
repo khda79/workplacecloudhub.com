@@ -1847,7 +1847,8 @@ function Test-SampleDnsResolution {
         [int]$SampleSize = 5
     )
 
-    $sample = if ($ComputerNames.Count -le $SampleSize) { $ComputerNames } else { $ComputerNames | Get-Random -Count $SampleSize }
+    $allNames = @($ComputerNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $sample = if ($allNames.Count -le $SampleSize) { @($allNames) } else { @($allNames | Get-Random -Count $SampleSize) }
     $resolved = 0
     $failed = 0
     foreach ($name in $sample) {
@@ -2965,22 +2966,25 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
             try {
                 $receiveErrors = @()
-                $received = Receive-Job -Job $job -ErrorAction SilentlyContinue -ErrorVariable receiveErrors
+                $received = @(Receive-Job -Job $job -ErrorAction SilentlyContinue -ErrorVariable receiveErrors)
+                $childJobs = @($job.ChildJobs)
                 $brokenRunspace = (
-                    $job.ChildJobs.Count -gt 0 -and
-                    $job.ChildJobs[0].JobStateInfo.Reason -ne $null -and
-                    [string]$job.ChildJobs[0].JobStateInfo.Reason.Message -match '\bBroken\b'
+                    $childJobs.Count -gt 0 -and
+                    $childJobs[0].JobStateInfo.Reason -ne $null -and
+                    [string]$childJobs[0].JobStateInfo.Reason.Message -match '\bBroken\b'
                 )
                 $jobErrors = @(
-                    $receiveErrors | ForEach-Object { $_.ToString() }
-                    $job.ChildJobs | ForEach-Object { $_.Error } | ForEach-Object { $_.ToString() }
-                    if ($job.ChildJobs.Count -gt 0 -and $job.ChildJobs[0].JobStateInfo.Reason) {
-                        $job.ChildJobs[0].JobStateInfo.Reason.Message
-                    }
-                    if ($brokenRunspace) {
-                        "RUNSPACE_BROKEN: PowerShell job runspace entered a Broken state. This typically indicates PowerShell 5.1 instability under parallel load. Consider adding -DelayBetweenComputersSeconds 1 to reduce job cycling speed."
-                    }
-                ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+                    @(
+                        $receiveErrors | ForEach-Object { $_.ToString() }
+                        $childJobs | ForEach-Object { $_.Error } | ForEach-Object { $_.ToString() }
+                        if ($childJobs.Count -gt 0 -and $childJobs[0].JobStateInfo.Reason) {
+                            $childJobs[0].JobStateInfo.Reason.Message
+                        }
+                        if ($brokenRunspace) {
+                            "RUNSPACE_BROKEN: PowerShell job runspace entered a Broken state. This typically indicates PowerShell 5.1 instability under parallel load. Consider adding -DelayBetweenComputersSeconds 1 to reduce job cycling speed."
+                        }
+                    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+                )
                 if ($brokenRunspace) {
                     Write-Host ("  [RUNSPACE_BROKEN] {0}: job runspace entered Broken state - possible PowerShell 5.1 instability. Consider -DelayBetweenComputersSeconds 1." -f ($job.Name -replace "^EHJIR_C\d+_","")) -ForegroundColor Magenta
                 }
