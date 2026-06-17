@@ -181,41 +181,6 @@ function Convert-ToPsExecRemoteArgument {
     return ('"{0}"' -f ($text -replace '"', '\"'))
 }
 
-function Get-RemoteVirtualMachineSummary {
-    param([Parameter(Mandatory = $true)][string]$ComputerName)
-
-    $system = Get-CimInstance -ClassName Win32_ComputerSystem -ComputerName $ComputerName -ErrorAction Stop
-    $manufacturer = [string]$system.Manufacturer
-    $model = [string]$system.Model
-    $hypervisorPresent = $false
-    try { $hypervisorPresent = [bool]$system.HypervisorPresent } catch { $hypervisorPresent = $false }
-    $signature = ("{0} {1}" -f $manufacturer,$model)
-    $patterns = @('Virtual Machine','VMware','VirtualBox','KVM','QEMU','Xen','HVM domU','Parallels','BHYVE','OpenStack','Google Compute Engine','Amazon EC2')
-    $matchedPattern = ''
-    foreach ($pattern in $patterns) {
-        if ($signature -match [regex]::Escape($pattern)) {
-            $matchedPattern = $pattern
-            break
-        }
-    }
-
-    $isVirtual = (-not [string]::IsNullOrWhiteSpace($matchedPattern)) -or $hypervisorPresent
-    $evidence = if ($matchedPattern) {
-        "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
-    }
-    elseif ($hypervisorPresent) {
-        "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=True"
-    }
-    else {
-        "Manufacturer=$manufacturer; Model=$model"
-    }
-
-    [pscustomobject]@{
-        IsVirtualMachine = $isVirtual
-        Evidence = $evidence
-    }
-}
-
 function Collect-RemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
@@ -287,22 +252,7 @@ try {
     }
 
     if ($SkipVirtualMachines) {
-        try {
-            $vm = Get-RemoteVirtualMachineSummary -ComputerName $Computer
-            if ($vm.IsVirtualMachine) {
-                $result.LauncherStatus = 'SKIPPED_VIRTUAL_MACHINE'
-                $result.RemoteStatus = 'SKIPPED_VIRTUAL_MACHINE'
-                $result.RemoteNextAction = 'NO_ACTION_VIRTUAL_MACHINE'
-                $result.ExitCode = '0'
-                $result.Detail = $vm.Evidence
-                $result.SetupCacheAction = 'SkippedVirtualMachine'
-                Add-Content -LiteralPath $logPath -Value ("[{0}] Skipped virtual machine before payload/setup copy. {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$vm.Evidence) -Encoding UTF8
-                return [pscustomobject]$result
-            }
-        }
-        catch {
-            Add-Content -LiteralPath $logPath -Value ("[{0}] WARNING Unable to pre-detect VM status, endpoint guard will still check: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$_.Exception.Message) -Encoding UTF8
-        }
+        Add-Content -LiteralPath $logPath -Value ("[{0}] Launcher-side VM pre-check skipped to avoid WinRM. Endpoint guard will check locally under PsExec/SYSTEM." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
     }
 
     Copy-RemotePayload -ComputerName $Computer -LogPath $logPath
