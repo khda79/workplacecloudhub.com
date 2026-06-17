@@ -458,6 +458,9 @@ function Get-IntuneInventorySet {
             if (-not $set.ContainsKey($short)) { $set[$short] = $true }
         }
     }
+    if ($set.Count -eq 0 -and $rows.Count -gt 0) {
+        $set["__SMARTM365_INVENTORY_CHECKED__"] = $true
+    }
 
     return $set
 }
@@ -507,6 +510,9 @@ function Get-EntraInventoryMap {
             $map[$short] = $row
         }
     }
+    if ($map.Count -eq 0 -and $rows.Count -gt 0) {
+        $map["__SMARTM365_INVENTORY_CHECKED__"] = [pscustomobject]@{}
+    }
 
     return $map
 }
@@ -555,6 +561,9 @@ function Get-AdInventoryMap {
         if (-not $map.ContainsKey($short)) {
             $map[$short] = $row
         }
+    }
+    if ($map.Count -eq 0 -and $rows.Count -gt 0) {
+        $map["__SMARTM365_INVENTORY_CHECKED__"] = [pscustomobject]@{}
     }
 
     return $map
@@ -1775,6 +1784,10 @@ function Acquire-GlobalWorkerLease {
 
     if ($GlobalConcurrencyLimit -lt 1) { return "" }
 
+    $waitStarted = Get-Date
+    $lastWaitLog = $null
+    $waitLogIntervalSeconds = 60
+
     while ($true) {
         $leasePath = Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock {
             Remove-StaleGlobalWorkerLeases -GatePath $globalConcurrencyGatePath -LeaseTimeoutMinutes $GlobalConcurrencyLeaseTimeoutMinutes
@@ -1801,9 +1814,21 @@ function Acquire-GlobalWorkerLease {
             return ""
         }
 
-        if (-not [string]::IsNullOrWhiteSpace($leasePath)) { return $leasePath }
+        if (-not [string]::IsNullOrWhiteSpace($leasePath)) {
+            if ($lastWaitLog -ne $null) {
+                $waitMinutes = [math]::Round(((Get-Date) - $waitStarted).TotalMinutes, 1)
+                Write-Host ("Global worker lease acquired for {0} after {1} minute(s)." -f $Computer,$waitMinutes) -ForegroundColor DarkCyan
+            }
+            return $leasePath
+        }
 
-        Write-Host ("Waiting for global worker lease before queuing {0}. Active={1}; Limit={2}; Gate={3}" -f $Computer,(@(Get-ChildItem -LiteralPath $globalConcurrencyGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count),$GlobalConcurrencyLimit,$globalConcurrencyGatePath) -ForegroundColor DarkYellow
+        $now = Get-Date
+        if ($lastWaitLog -eq $null -or (($now - $lastWaitLog).TotalSeconds -ge $waitLogIntervalSeconds)) {
+            $activeLeases = @(Get-ChildItem -LiteralPath $globalConcurrencyGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count
+            $waitMinutes = [math]::Round(($now - $waitStarted).TotalMinutes, 1)
+            Write-Host ("Waiting for global worker lease before queuing {0}. Active={1}; Limit={2}; Wait={3} minute(s); Gate={4}" -f $Computer,$activeLeases,$GlobalConcurrencyLimit,$waitMinutes,$globalConcurrencyGatePath) -ForegroundColor DarkYellow
+            $lastWaitLog = $now
+        }
         Start-Sleep -Seconds $JobPollSeconds
     }
 }
