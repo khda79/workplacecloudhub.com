@@ -34,6 +34,8 @@ SmartCitrix/**
 !/SmartM365/**/*.html
 !/SmartM365/**/*.json.template
 !/SmartM365/**/*.config.template.json
+!/SmartM365/Devices/Windows11UpgradeToolkit/Windows11UpgradeToolkit.config.template
+!/SmartM365/Devices/Windows11UpgradeToolkit/SetupSourceMap.csv.template
 !/SmartM365/SharePointMigration/**/*.py
 !/SmartM365/SmartM365-logo.ico
 !/SmartM365/Devices/DeviceRebootManager/SmartM365-logo.ico
@@ -52,6 +54,8 @@ SmartCitrix/**
 !/SmartM365/**/W11-Upgrade-Compatibility-Indicators-Intune-Description.txt
 !/SmartM365/Devices/IntuneHybridJoinToolkit/LOT-X/Computers.txt
 !/SmartM365/Devices/Windows11UpgradeToolkit/LOT-X/Computers.txt
+!/SmartM365/Devices/Windows11UpgradeToolkit/LOT-X/Windows11UpgradeToolkit.config.template
+!/SmartM365/Devices/Windows11UpgradeToolkit/LOT-X/SetupSourceMap.csv.template
 SmartM365/SharePointMigration/Migrations/*
 !SmartM365/SharePointMigration/Migrations/_Template/
 !SmartM365/SharePointMigration/Migrations/_Template/**

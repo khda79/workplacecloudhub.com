@@ -42,6 +42,8 @@ $wrapperNames = @(
     'Run-Windows11UpgradeRepairWithPsExec-Once-IgnoreRunGuard.cmd'
 )
 
+$configTemplate = Join-Path $root 'Windows11UpgradeToolkit.config.template'
+
 $lots = @(
     Get-ChildItem -LiteralPath $root -Directory -Filter 'LOT-*' -ErrorAction Stop |
         Where-Object { $_.Name -ine 'LOT-X' } |
@@ -71,6 +73,22 @@ foreach ($lot in $lots) {
     if (-not (Test-Path -LiteralPath $computersPath -PathType Leaf)) {
         if ($PSCmdlet.ShouldProcess($computersPath, 'Create Computers.txt')) {
             New-Item -ItemType File -Path $computersPath -Force -ErrorAction Stop | Out-Null
+        }
+    }
+
+    $lotConfigPath = Join-Path $lot.FullName 'Windows11UpgradeToolkit.config'
+    if (-not (Test-Path -LiteralPath $lotConfigPath -PathType Leaf)) {
+        if ($PSCmdlet.ShouldProcess($lotConfigPath, 'Create LOT config')) {
+            if (Test-Path -LiteralPath $configTemplate -PathType Leaf) {
+                Copy-Item -LiteralPath $configTemplate -Destination $lotConfigPath -Force -ErrorAction Stop
+            }
+            else {
+                Set-Content -LiteralPath $lotConfigPath -Value @(
+                    '# SmartM365 Windows 11 Upgrade Toolkit LOT defaults.'
+                    '# W11UT_SETUP_SOURCE should be a UNC path reachable from target computers.'
+                    'W11UT_SETUP_SOURCE='
+                ) -Encoding ASCII -Force
+            }
         }
     }
 }

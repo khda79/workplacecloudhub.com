@@ -237,6 +237,12 @@ function Get-GraphProperty {
     return $null
 }
 
+function ConvertTo-ODataStringLiteral {
+    param([Parameter(Mandatory=$true)][string]$Value)
+
+    return ("'{0}'" -f ($Value -replace "'", "''"))
+}
+
 function New-ManagedDeviceExportRow {
     param(
         $Device,
@@ -393,8 +399,25 @@ $select = @(
     "isSupervised"
 ) -join ","
 
-$uri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$select=$select&`$top=$PageSize"
-$devices = Invoke-GraphPagedRequest -Uri $uri
+$devices = @()
+if ($requestedComputers.Count -gt 0) {
+    foreach ($computer in $requestedComputers) {
+        $candidateNames = @($computer.RequestedComputerName,$computer.ComputerName) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            Select-Object -Unique
+
+        foreach ($candidateName in $candidateNames) {
+            $filter = "deviceName eq {0}" -f (ConvertTo-ODataStringLiteral -Value ([string]$candidateName))
+            $encodedFilter = [System.Uri]::EscapeDataString($filter)
+            $uri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$select=$select&`$filter=$encodedFilter&`$top=$PageSize"
+            $devices += @(Invoke-GraphPagedRequest -Uri $uri)
+        }
+    }
+}
+else {
+    $uri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$select=$select&`$top=$PageSize"
+    $devices = Invoke-GraphPagedRequest -Uri $uri
+}
 
 if ($requestedComputers.Count -gt 0) {
     $deviceByComputer = @{}

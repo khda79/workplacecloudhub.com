@@ -36,11 +36,18 @@ param(
     [switch]$AllowDismComponentCleanup,
 
     [string]$SetupSourcePath,
+    [string]$SetupSourceMapPath,
     [ValidateSet('LocalCache','Share','Auto')]
     [string]$SetupExecutionMode = 'LocalCache',
     [string]$SetupMediaId = 'Win11',
     [string]$SetupLanguage = 'MatchSystem',
     [switch]$SkipSetupMediaPreCopy,
+    [ValidateRange(0, 100)][int]$SetupSourceCandidateLimit = 5,
+    [ValidateRange(0, 10000)][int]$SetupMediaCopyIpGapMilliseconds = 0,
+    [ValidateRange(0, 86400)][int]$SetupMediaCopyJitterSeconds = 0,
+    [ValidateRange(0, 500)][int]$SetupSourceConcurrencyLimit = 0,
+    [ValidateRange(1, 1440)][int]$SetupSourceConcurrencyLeaseMinutes = 240,
+    [string]$SetupSourceConcurrencyGateRoot,
 
     [string]$LogRoot,
     [string]$ReportRoot,
@@ -114,6 +121,52 @@ function Get-ComputerList {
     return @($result.ToArray())
 }
 
+function Test-SetupSourceMapSyntax {
+    param([AllowNull()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+
+    $expanded = [Environment]::ExpandEnvironmentVariables($Path.Trim('"'))
+    if (-not (Test-Path -LiteralPath $expanded -PathType Leaf)) {
+        Write-Host ("Setup source map preflight skipped because the operator cannot read it: {0}" -f $expanded) -ForegroundColor DarkYellow
+        return
+    }
+
+    $rows = @(Import-Csv -LiteralPath $expanded -ErrorAction Stop)
+    if ($rows.Count -eq 0) {
+        throw "Setup source map is empty: $expanded"
+    }
+
+    $validRows = 0
+    $rowNumber = 1
+    foreach ($row in $rows) {
+        $rowNumber++
+        $scopeType = if ($row.PSObject.Properties['ScopeType']) { [string]$row.ScopeType } elseif ($row.PSObject.Properties['Type']) { [string]$row.Type } else { '' }
+        $scopeValue = if ($row.PSObject.Properties['ScopeValue']) { [string]$row.ScopeValue } elseif ($row.PSObject.Properties['Value']) { [string]$row.Value } else { '' }
+        $sourcePath = if ($row.PSObject.Properties['SetupSourcePath']) { [string]$row.SetupSourcePath } elseif ($row.PSObject.Properties['SourcePath']) { [string]$row.SourcePath } else { '' }
+
+        if ([string]::IsNullOrWhiteSpace($scopeType) -or [string]::IsNullOrWhiteSpace($sourcePath)) {
+            throw "Invalid setup source map row $rowNumber. ScopeType and SetupSourcePath are required."
+        }
+
+        if ($scopeType -notmatch '^(?i:Default|Fallback|Subnet|CIDR|IPPrefix|Prefix|ComputerName|Hostname|ComputerPrefix|HostnamePrefix)$') {
+            throw "Invalid setup source map row $rowNumber. Unsupported ScopeType '$scopeType'."
+        }
+
+        if ($scopeType -match '^(?i:Subnet|CIDR)$' -and $scopeValue -notmatch '^\d{1,3}(\.\d{1,3}){3}/([0-9]|[12][0-9]|3[0-2])$') {
+            throw "Invalid setup source map row $rowNumber. ScopeValue must be CIDR for ScopeType '$scopeType'."
+        }
+
+        if ($sourcePath -notmatch '^\\\\[^\\]+\\[^\\]+') {
+            throw "Invalid setup source map row $rowNumber. SetupSourcePath must be UNC: $sourcePath"
+        }
+
+        $validRows++
+    }
+
+    Write-Host ("Setup source map preflight OK: {0}; Rows={1}" -f $expanded,$validRows) -ForegroundColor Green
+}
+
 function Resolve-PsExecPath {
     param([string]$Path)
 
@@ -149,6 +202,8 @@ New-Directory -Path $LogRoot
 New-Directory -Path $ReportRoot
 New-Directory -Path $CentralLogRoot
 
+Test-SetupSourceMapSyntax -Path $SetupSourceMapPath
+
 $resolvedPsExec = if ($DryRun) { '' } else { Resolve-PsExecPath -Path $PsExecPath }
 
 $remoteArgs = New-Object System.Collections.ArrayList
@@ -167,8 +222,21 @@ if ($SkipSetupMediaPreCopy) { [void]$remoteArgs.Add('-SkipSetupMediaPreCopy') }
 [void]$remoteArgs.Add('-SetupMediaId'); [void]$remoteArgs.Add($SetupMediaId)
 [void]$remoteArgs.Add('-SetupLanguage'); [void]$remoteArgs.Add($SetupLanguage)
 [void]$remoteArgs.Add('-SetupCacheRoot'); [void]$remoteArgs.Add($script:RemoteSetupCacheRoot)
+[void]$remoteArgs.Add('-SetupSourceCandidateLimit'); [void]$remoteArgs.Add([string]$SetupSourceCandidateLimit)
+[void]$remoteArgs.Add('-SetupMediaCopyIpGapMilliseconds'); [void]$remoteArgs.Add([string]$SetupMediaCopyIpGapMilliseconds)
+[void]$remoteArgs.Add('-SetupMediaCopyJitterSeconds'); [void]$remoteArgs.Add([string]$SetupMediaCopyJitterSeconds)
+if ($SetupSourceConcurrencyLimit -gt 0) {
+    [void]$remoteArgs.Add('-SetupSourceConcurrencyLimit'); [void]$remoteArgs.Add([string]$SetupSourceConcurrencyLimit)
+    [void]$remoteArgs.Add('-SetupSourceConcurrencyLeaseMinutes'); [void]$remoteArgs.Add([string]$SetupSourceConcurrencyLeaseMinutes)
+}
+if (-not [string]::IsNullOrWhiteSpace($SetupSourceConcurrencyGateRoot)) {
+    [void]$remoteArgs.Add('-SetupSourceConcurrencyGateRoot'); [void]$remoteArgs.Add($SetupSourceConcurrencyGateRoot)
+}
 if (-not [string]::IsNullOrWhiteSpace($SetupSourcePath)) {
     [void]$remoteArgs.Add('-SetupSourcePath'); [void]$remoteArgs.Add($SetupSourcePath)
+}
+if (-not [string]::IsNullOrWhiteSpace($SetupSourceMapPath)) {
+    [void]$remoteArgs.Add('-SetupSourceMapPath'); [void]$remoteArgs.Add($SetupSourceMapPath)
 }
 
 Write-Host "Smart Intune Windows 11 Upgrade Toolkit launcher v$script:LauncherVersion"
@@ -193,6 +261,8 @@ $reportColumns = @(
     'Detail',
     'JobErrorMessage',
     'SetupCacheAction',
+    'SelectedSetupSourcePath',
+    'SetupSourceSelectionDetail',
     'DiskCleanupAction',
     'DiskCleanupFreedGB',
     'AdvancedDiskCleanupAction',
@@ -426,6 +496,7 @@ do {
                     $LogRoot,
                     $CentralLogRoot,
                     $SetupSourcePath,
+                    $SetupSourceMapPath,
                     $SetupExecutionMode,
                     $SetupMediaId,
                     $SetupLanguage,
@@ -549,6 +620,27 @@ do {
     }
     @($normalizedResults) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
+
+    $sourceDistribution = @(
+        $normalizedResults |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.SelectedSetupSourcePath) } |
+            Group-Object -Property SelectedSetupSourcePath |
+            Sort-Object Count -Descending |
+            ForEach-Object {
+                [pscustomobject]@{
+                    SelectedSetupSourcePath = [string]$_.Name
+                    ComputerCount = [int]$_.Count
+                }
+            }
+    )
+    if ($sourceDistribution.Count -gt 0) {
+        $distributionPath = Join-Path $ReportRoot ("SetupSource_Distribution_cycle{0}_{1}.csv" -f $cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
+        $sourceDistribution | Export-Csv -LiteralPath $distributionPath -NoTypeInformation -Encoding UTF8
+        Write-Host ("Setup source distribution: {0}" -f $distributionPath) -ForegroundColor Green
+        foreach ($sourceGroup in $sourceDistribution) {
+            Write-Host ("  {0}: {1}" -f $sourceGroup.SelectedSetupSourcePath,$sourceGroup.ComputerCount) -ForegroundColor DarkGreen
+        }
+    }
 
     if ($RunOnce) { break }
     if ($MaxCycles -gt 0 -and $cycle -ge $MaxCycles) { break }
