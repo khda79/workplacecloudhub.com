@@ -272,21 +272,69 @@ try {
 
     Add-Content -LiteralPath $logPath -Value ("[{0}] PsExec command: {1} {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$ResolvedPsExecPath,($psexecArgs -join ' ')) -Encoding UTF8
     $process = Start-Process -FilePath $ResolvedPsExecPath -ArgumentList $psexecArgs -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-
+    $psExecTimedOut = $false
+    $waitStarted = Get-Date
+    $lastWaitLog = $waitStarted
+    Add-Content -LiteralPath $logPath -Value ("[{0}] PsExec started. Waiting for remote script completion; heartbeat every 60 seconds." -f $waitStarted.ToString('yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
     if ($PsExecTimeoutMinutes -gt 0) {
-        if (-not $process.WaitForExit($PsExecTimeoutMinutes * 60 * 1000)) {
-            try { $process.Kill() } catch { }
-            $result.LauncherStatus = 'PSEXEC_TIMEOUT'
-            $result.Detail = "Timed out after $PsExecTimeoutMinutes minute(s)."
+        $timeoutAt = $waitStarted.AddMinutes($PsExecTimeoutMinutes)
+        while (-not $process.WaitForExit(1000)) {
+            $now = Get-Date
+            if ($now -ge $timeoutAt) {
+                $psExecTimedOut = $true
+                Add-Content -LiteralPath $logPath -Value ("[{0}] ERROR PsExec timed out after {1} minute(s). Killing local PsExec process." -f $now.ToString('yyyy-MM-dd HH:mm:ss'),$PsExecTimeoutMinutes) -Encoding UTF8
+                try { $process.Kill() } catch { }
+                try { [void]$process.WaitForExit(5000) } catch { }
+                $result.LauncherStatus = 'PSEXEC_TIMEOUT'
+                $result.Detail = "Timed out after $PsExecTimeoutMinutes minute(s)."
+                break
+            }
+            if (($now - $lastWaitLog).TotalSeconds -ge 60) {
+                $elapsedMinutes = [math]::Round(($now - $waitStarted).TotalMinutes, 1)
+                Add-Content -LiteralPath $logPath -Value ("[{0}] PsExec still running for {1} minute(s). Remote script may be copying setup media or running Windows setup." -f $now.ToString('yyyy-MM-dd HH:mm:ss'),$elapsedMinutes) -Encoding UTF8
+                $lastWaitLog = $now
+            }
         }
     }
     else {
-        $process.WaitForExit()
+        while (-not $process.WaitForExit(1000)) {
+            $now = Get-Date
+            if (($now - $lastWaitLog).TotalSeconds -ge 60) {
+                $elapsedMinutes = [math]::Round(($now - $waitStarted).TotalMinutes, 1)
+                Add-Content -LiteralPath $logPath -Value ("[{0}] PsExec still running for {1} minute(s). Remote script may be copying setup media or running Windows setup." -f $now.ToString('yyyy-MM-dd HH:mm:ss'),$elapsedMinutes) -Encoding UTF8
+                $lastWaitLog = $now
+            }
+        }
     }
 
+    try { $process.Refresh() } catch { }
     if ($result.LauncherStatus -eq 'UNKNOWN') {
-        $result.ExitCode = $process.ExitCode
-        $result.LauncherStatus = if ($process.ExitCode -eq 0) { 'SUCCESS' } else { "PSEXEC_EXIT_$($process.ExitCode)" }
+        if (-not $psExecTimedOut -and $process.HasExited) {
+            $result.ExitCode = [string]$process.ExitCode
+            $result.LauncherStatus = if ($process.ExitCode -eq 0) { 'SUCCESS' } else { "PSEXEC_EXIT_$($process.ExitCode)" }
+        }
+    }
+
+    $stdoutContent = @()
+    if (Test-Path -LiteralPath $stdoutPath) {
+        Add-Content -LiteralPath $logPath -Value '----- PsExec STDOUT -----' -Encoding UTF8
+        $stdoutContent = @(Get-Content -LiteralPath $stdoutPath -ErrorAction SilentlyContinue)
+        $stdoutContent | Add-Content -LiteralPath $logPath -Encoding UTF8
+        Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
+    }
+    $stderrContent = @()
+    if (Test-Path -LiteralPath $stderrPath) {
+        Add-Content -LiteralPath $logPath -Value '----- PsExec STDERR -----' -Encoding UTF8
+        $stderrContent = @(Get-Content -LiteralPath $stderrPath -ErrorAction SilentlyContinue)
+        $stderrContent | Add-Content -LiteralPath $logPath -Encoding UTF8
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+    if ([string]::IsNullOrWhiteSpace($result.ExitCode)) {
+        $nativeExitLine = ($stderrContent | Where-Object { $_ -match 'with error code\s+-?\d+' } | Select-Object -Last 1)
+        if ($nativeExitLine -and $nativeExitLine -match 'with error code\s+(?<Code>-?\d+)') {
+            $result.ExitCode = $Matches.Code
+            Add-Content -LiteralPath $logPath -Value ("[{0}] PsExec exit code recovered from native STDERR: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$result.ExitCode) -Encoding UTF8
+        }
     }
 
     Start-Sleep -Seconds 3

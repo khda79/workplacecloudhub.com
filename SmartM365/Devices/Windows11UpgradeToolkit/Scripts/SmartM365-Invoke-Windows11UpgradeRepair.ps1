@@ -26,6 +26,7 @@ param(
     [switch]$AllowWUReset,
     [switch]$AllowForceUpgrade,
     [switch]$AllowSetupUpgrade,
+    [switch]$DirectSetupUpgrade,
     [switch]$AllowReboot,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
@@ -284,10 +285,10 @@ function Get-Windows11IndicatorSummary {
         }
 
         $props = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
-        $upEx = [string]$props.UpEx
-        $gated = [string]$props.GatedBlockId
-        $red = [string]$props.RedReason
-        $sysReq = [string]$props.SysReqIssue
+        $upEx = if ($props.PSObject.Properties['UpEx']) { [string]$props.UpEx } else { '' }
+        $gated = if ($props.PSObject.Properties['GatedBlockId']) { [string]$props.GatedBlockId } else { '' }
+        $red = if ($props.PSObject.Properties['RedReason']) { [string]$props.RedReason } else { '' }
+        $sysReq = if ($props.PSObject.Properties['SysReqIssue']) { [string]$props.SysReqIssue } else { '' }
         $hasBlock = ($upEx -match '(Red|Blocked|Hold)' -or -not [string]::IsNullOrWhiteSpace($gated) -or -not [string]::IsNullOrWhiteSpace($red) -or -not [string]::IsNullOrWhiteSpace($sysReq))
         if (-not $hasBlock) { continue }
 
@@ -1400,7 +1401,7 @@ function Invoke-DismComponentCleanup {
 }
 
 function Resolve-SetupUpgradeExecutable {
-    if (-not $AllowSetupUpgrade) { return '' }
+    if (-not ($AllowSetupUpgrade -or $DirectSetupUpgrade)) { return '' }
 
     $expectedLanguage = Resolve-SetupLanguageRequirement -RequestedLanguage $SetupLanguage
     $script:ResolvedSetupLanguage = $expectedLanguage
@@ -1547,7 +1548,7 @@ try {
     $policy = Get-WindowsUpdatePolicySummary
     $indicators = Get-Windows11IndicatorSummary
 
-    $diskCleanupEligible = ($os.MajorFamily -eq 'Windows10' -and $intune.IsIntuneEnrolled -and -not $indicators.ActionableBlocking)
+    $diskCleanupEligible = ($os.MajorFamily -eq 'Windows10' -and -not $DirectSetupUpgrade -and $intune.IsIntuneEnrolled -and -not $indicators.ActionableBlocking)
     if ($diskCleanupEligible -and $freeGb -lt $MinimumFreeDiskGB -and $AllowDiskCleanup -and -not $AuditOnly) {
         try {
             $freeGb = Invoke-SafeDiskCleanup
@@ -1591,6 +1592,35 @@ try {
         $nextAction = 'CHECK_DEVICE_SCOPE'
         $detail = "OS family is $($os.MajorFamily)."
         $exitCode = 3
+    }
+    elseif ($DirectSetupUpgrade) {
+        Write-SmartLog 'Direct setup upgrade requested. Skipping Intune enrollment, compatibility-indicator, pending-reboot, and policy-blocker gates; Windows Setup will perform final validation.' 'WARN'
+        $setupExe = Resolve-SetupUpgradeExecutable
+        if ($AuditOnly) {
+            $status = 'DIRECT_SETUP_UPGRADE_READY'
+            $nextAction = 'RUN_WITHOUT_AUDIT_ONLY'
+            $actionResult = 'DirectSetupValidatedAuditOnly'
+            $exitCode = 0
+        }
+        else {
+            $setupExitCode = Invoke-SetupUpgrade -SetupExePath $setupExe
+            $actionResult = "DirectSetupExitCode=$setupExitCode"
+            if ($setupExitCode -eq 0) {
+                $status = 'DIRECT_SETUP_UPGRADE_STARTED'
+                $nextAction = 'MONITOR_SETUP_AND_REBOOT'
+                $exitCode = 0
+            }
+            elseif ($setupExitCode -eq 3010) {
+                $status = 'DIRECT_SETUP_UPGRADE_REBOOT_REQUIRED'
+                $nextAction = 'REBOOT_DEVICE'
+                $exitCode = 0
+            }
+            else {
+                $status = 'DIRECT_SETUP_UPGRADE_FAILED'
+                $nextAction = 'CHECK_SETUP_LOGS'
+                $exitCode = 1
+            }
+        }
     }
     elseif (-not $intune.IsIntuneEnrolled) {
         $status = 'NOT_INTUNE_ENROLLED'
