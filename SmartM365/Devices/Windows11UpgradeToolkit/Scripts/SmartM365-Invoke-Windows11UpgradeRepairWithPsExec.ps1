@@ -29,6 +29,7 @@ param(
     [switch]$AllowWUReset,
     [switch]$AllowForceUpgrade,
     [switch]$AllowSetupUpgrade,
+    [switch]$DirectSetupUpgrade,
     [switch]$AllowReboot,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
@@ -213,6 +214,7 @@ if ($AllowPolicyRepair) { [void]$remoteArgs.Add('-AllowPolicyRepair') }
 if ($AllowWUReset) { [void]$remoteArgs.Add('-AllowWUReset') }
 if ($AllowForceUpgrade) { [void]$remoteArgs.Add('-AllowForceUpgrade') }
 if ($AllowSetupUpgrade) { [void]$remoteArgs.Add('-AllowSetupUpgrade') }
+if ($DirectSetupUpgrade) { [void]$remoteArgs.Add('-DirectSetupUpgrade') }
 if ($AllowReboot) { [void]$remoteArgs.Add('-AllowReboot') }
 if ($SkipVirtualMachines) { [void]$remoteArgs.Add('-SkipVirtualMachines') }
 if ($AllowDiskCleanup) { [void]$remoteArgs.Add('-AllowDiskCleanup') }
@@ -244,7 +246,7 @@ Write-Host "Computer list : $ComputerListPath"
 Write-Host "PsExec        : $resolvedPsExec"
 Write-Host "Repair script : $LocalScriptPath"
 Write-Host "Worker script : $LocalWorkerPath"
-Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup)"
+Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade"
 Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s)"
 Write-Host "Reports       : $ReportRoot"
