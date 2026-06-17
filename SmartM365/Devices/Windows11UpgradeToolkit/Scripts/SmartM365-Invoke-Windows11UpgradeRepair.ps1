@@ -293,7 +293,7 @@ function Get-Windows11IndicatorSummary {
         if (-not $hasBlock) { continue }
 
         $reason = ("Target={0}; UpEx={1}; GatedBlockId={2}; RedReason={3}; SysReqIssue={4}" -f $target,$upEx,$gated,$red,$sysReq)
-        $tokens = @($red,$sysReq -split '[,; ]+') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ }
+        $tokens = @(@($red,$sysReq -split '[,; ]+') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
         $actionable = $false
         if ($gated) { $actionable = $true }
         elseif ($tokens.Count -eq 0 -and $upEx -match '(Red|Blocked|Hold)') { $actionable = $true }
@@ -792,10 +792,12 @@ function Resolve-PreferredSetupSourcePath {
     )
 
     $candidates = @(
-        foreach ($sourcePath in @($SourcePaths)) {
-            Split-SetupSourcePathList -Value $sourcePath
-        }
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+        @(
+            foreach ($sourcePath in @($SourcePaths)) {
+                Split-SetupSourcePathList -Value $sourcePath
+            }
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+    )
     if ($candidates.Count -eq 0) {
         throw 'SetupSourcePath is empty.'
     }
