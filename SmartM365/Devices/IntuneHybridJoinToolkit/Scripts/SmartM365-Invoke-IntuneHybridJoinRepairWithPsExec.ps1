@@ -1954,7 +1954,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             [hashtable]$IntuneInventorySet,
             [hashtable]$EntraInventoryMap,
             [hashtable]$AdInventoryMap,
-            [string[]]$CycleScriptArgs,
+            [string]$CycleScriptArgsJson,
             [int]$PsExecTimeoutMinutes,
             [int]$CommunicationLostEvidenceWaitMinutes,
             [int]$CommunicationLostEvidencePollMinutes,
@@ -1963,6 +1963,18 @@ function Invoke-IntuneHybridJoinRepairCycle {
         )
 
         $ErrorActionPreference = "Stop"
+        $CycleScriptArgs = @()
+        if (-not [string]::IsNullOrWhiteSpace($CycleScriptArgsJson)) {
+            try {
+                $decodedCycleScriptArgs = $CycleScriptArgsJson | ConvertFrom-Json -ErrorAction Stop
+                if ($decodedCycleScriptArgs -and $decodedCycleScriptArgs.PSObject.Properties["Args"]) {
+                    $CycleScriptArgs = @($decodedCycleScriptArgs.Args | ForEach-Object { [string]$_ })
+                }
+            }
+            catch {
+                throw ("Invalid cycle script argument payload: {0}" -f $_.Exception.Message)
+            }
+        }
 
         function Invoke-WithWorkerLeaseMutex {
             param(
@@ -2907,6 +2919,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             $globalLeasePath = Acquire-GlobalWorkerLease -Computer $computer -CycleNumber $CycleNumber
 
             try {
+                $cycleScriptArgsJson = ([pscustomobject]@{ Args = @($CycleScriptArgs) } | ConvertTo-Json -Compress)
                 $job = Start-Job -Name ("EHJIR_C{0}_{1}" -f $CycleNumber,$computer) -ScriptBlock $worker -ArgumentList @(
                     $computer,
                     $CycleNumber,
@@ -2926,7 +2939,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     $IntuneInventorySet,
                     $EntraInventoryMap,
                     $AdInventoryMap,
-                    $CycleScriptArgs,
+                    $cycleScriptArgsJson,
                     $PsExecTimeoutMinutes,
                     $CommunicationLostEvidenceWaitMinutes,
                     $CommunicationLostEvidencePollMinutes,

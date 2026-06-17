@@ -13,7 +13,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Computer,
     [Parameter(Mandatory = $true)][int]$CycleNumber,
-    [Parameter(Mandatory = $true)][string[]]$RemoteScriptArgs,
+    [Parameter(Mandatory = $true)][string]$RemoteScriptArgsJson,
     [string]$ResolvedPsExecPath,
     [Parameter(Mandatory = $true)][string]$LocalScriptPath,
     [Parameter(Mandatory = $true)][string]$RemoteBaseDir,
@@ -40,6 +40,19 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+$RemoteScriptArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($RemoteScriptArgsJson)) {
+    try {
+        $decodedRemoteScriptArgs = $RemoteScriptArgsJson | ConvertFrom-Json -ErrorAction Stop
+        if ($decodedRemoteScriptArgs -and $decodedRemoteScriptArgs.PSObject.Properties['Args']) {
+            $RemoteScriptArgs = @($decodedRemoteScriptArgs.Args | ForEach-Object { [string]$_ })
+        }
+    }
+    catch {
+        throw ("Invalid remote script argument payload: {0}" -f $_.Exception.Message)
+    }
+}
 
 function Invoke-WithWorkerLeaseMutex {
     param(
