@@ -2087,53 +2087,6 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
         }
 
-        function Get-RemoteVirtualMachineSummary {
-            param([Parameter(Mandatory=$true)][string]$ComputerName)
-
-            $system = Get-CimInstance -ClassName Win32_ComputerSystem -ComputerName $ComputerName -ErrorAction Stop
-            $manufacturer = [string]$system.Manufacturer
-            $model = [string]$system.Model
-            $hypervisorPresent = $false
-            try { $hypervisorPresent = [bool]$system.HypervisorPresent } catch { $hypervisorPresent = $false }
-
-            $signature = ("{0} {1}" -f $manufacturer,$model)
-            $virtualPatterns = @(
-                'Virtual Machine',
-                'VMware',
-                'VirtualBox',
-                'KVM',
-                'QEMU',
-                'Xen',
-                'HVM domU',
-                'Parallels',
-                'BHYVE',
-                'OpenStack',
-                'Google Compute Engine',
-                'Amazon EC2'
-            )
-
-            $matchedPattern = ''
-            foreach ($pattern in $virtualPatterns) {
-                if ($signature -match [regex]::Escape($pattern)) {
-                    $matchedPattern = $pattern
-                    break
-                }
-            }
-
-            $isVirtual = -not [string]::IsNullOrWhiteSpace($matchedPattern)
-            $evidence = if ($matchedPattern) {
-                "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
-            }
-            else {
-                "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=$hypervisorPresent"
-            }
-
-            [PSCustomObject]@{
-                IsVirtualMachine = $isVirtual
-                Evidence = $evidence
-            }
-        }
-
         function Get-NextActionFromLauncherStatus {
             param([Parameter(Mandatory=$true)][string]$Status)
 
@@ -2530,28 +2483,8 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
 
             if ($SkipVirtualMachines) {
-                try {
-                    $vm = Get-RemoteVirtualMachineSummary -ComputerName $Computer
-                    $result.IsVirtualMachine = $vm.IsVirtualMachine
-                    $result.VirtualMachineEvidence = $vm.Evidence
-                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] VM check: IsVirtualMachine=$($result.IsVirtualMachine); Evidence=$($result.VirtualMachineEvidence)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                    if ($vm.IsVirtualMachine) {
-                        $result.Status = "SKIPPED_VIRTUAL_MACHINE"
-                        $result.EffectiveStatus = "SKIPPED_VIRTUAL_MACHINE"
-                        $result.NextAction = "NO_ACTION_VIRTUAL_MACHINE"
-                        $result.EffectiveNextAction = "NO_ACTION_VIRTUAL_MACHINE"
-                        $result.RemoteStatus = "SKIPPED_VIRTUAL_MACHINE"
-                        $result.RemoteExitCode = "0"
-                        $result.RemoteNextAction = "NO_ACTION_VIRTUAL_MACHINE"
-                        $result.RemoteDetail = "Virtual machine skipped by -SkipVirtualMachines. $($vm.Evidence)"
-                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Skipping repair: $($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                        return (Complete-WorkerResult -Result $result -Path $logPath)
-                    }
-                }
-                catch {
-                    $result.VirtualMachineEvidence = ("VM check failed: {0}" -f $_.Exception.Message)
-                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $($result.VirtualMachineEvidence). Continuing; endpoint guard will also check if reachable." | Add-Content -LiteralPath $logPath -Encoding UTF8
-                }
+                $result.VirtualMachineEvidence = "Launcher-side VM pre-check skipped to avoid WinRM. Endpoint guard will check locally under PsExec/SYSTEM."
+                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($result.VirtualMachineEvidence)" | Add-Content -LiteralPath $logPath -Encoding UTF8
             }
 
             $adminShare = "\\$Computer\ADMIN$"
