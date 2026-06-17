@@ -138,207 +138,6 @@ function Resolve-PsExecPath {
     throw ("PsExec.exe not found. Place it in {0} or add PsExec.exe to PATH." -f $script:BaseDir)
 }
 
-function Convert-ToAdminSharePath {
-    param(
-        [Parameter(Mandatory = $true)][string]$Computer,
-        [Parameter(Mandatory = $true)][string]$LocalPath
-    )
-
-    $full = [System.IO.Path]::GetFullPath($LocalPath)
-    if ($full -notmatch '^[A-Za-z]:\\') {
-        throw "Only local drive paths can be converted to admin share paths: $LocalPath"
-    }
-    $drive = $full.Substring(0,1)
-    $rest = $full.Substring(3)
-    return "\\$Computer\$drive`$\$rest"
-}
-
-function Copy-DirectoryContent {
-    param(
-        [Parameter(Mandatory = $true)][string]$SourcePath,
-        [Parameter(Mandatory = $true)][string]$DestinationPath
-    )
-
-    New-Directory -Path $DestinationPath
-    Copy-Item -Path (Join-Path $SourcePath '*') -Destination $DestinationPath -Recurse -Force -ErrorAction Stop
-}
-
-function Copy-RemotePayload {
-    param(
-        [Parameter(Mandatory = $true)][string]$Computer,
-        [Parameter(Mandatory = $true)][string]$LogPath
-    )
-
-    $remoteBaseShare = Convert-ToAdminSharePath -Computer $Computer -LocalPath $script:RemoteBaseDir
-    New-Directory -Path $remoteBaseShare
-    $remoteScriptShare = Join-Path $remoteBaseShare (Split-Path -Leaf $script:RemoteScriptPath)
-    Copy-Item -LiteralPath $LocalScriptPath -Destination $remoteScriptShare -Force -ErrorAction Stop
-
-    $localHash = (Get-FileHash -LiteralPath $LocalScriptPath -Algorithm SHA256).Hash
-    $remoteHash = (Get-FileHash -LiteralPath $remoteScriptShare -Algorithm SHA256).Hash
-    if ($localHash -ne $remoteHash) {
-        throw "Remote script copy hash mismatch."
-    }
-
-    Add-Content -LiteralPath $LogPath -Value ("[{0}] Remote script copied and verified." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
-}
-
-function Copy-SetupMediaToRemoteCache {
-    param(
-        [Parameter(Mandatory = $true)][string]$Computer,
-        [Parameter(Mandatory = $true)][string]$LogPath
-    )
-
-    if (-not $AllowSetupUpgrade) { return 'NotRequested' }
-    if ($SkipSetupMediaPreCopy) { return 'ExistingMediaOnly' }
-    if ($SetupExecutionMode -eq 'Share') { return 'ShareMode' }
-    if ([string]::IsNullOrWhiteSpace($SetupSourcePath)) { return 'TargetCacheNoSource' }
-
-    Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup media copy is target-side. SourcePath will be validated from the target SYSTEM context: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$SetupSourcePath) -Encoding UTF8
-    return 'TargetSideCache'
-}
-
-function Collect-RemoteEvidence {
-    param(
-        [Parameter(Mandatory = $true)][string]$Computer,
-        [Parameter(Mandatory = $true)][int]$CycleNumber
-    )
-
-    if ($NoCentralLogCollection) { return '' }
-
-    $remoteBaseShare = Convert-ToAdminSharePath -Computer $Computer -LocalPath $script:RemoteBaseDir
-    if (-not (Test-Path -LiteralPath $remoteBaseShare -PathType Container)) { return '' }
-
-    $target = if ($KeepCentralLogHistory) {
-        Join-Path (Join-Path $CentralLogRoot $Computer) ("Cycle{0}_{1}" -f $CycleNumber,(Get-Date -Format 'yyyyMMdd-HHmmss'))
-    }
-    else {
-        Join-Path (Join-Path $CentralLogRoot $Computer) 'Latest'
-    }
-
-    if (Test-Path -LiteralPath $target) {
-        Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    New-Directory -Path $target
-
-    foreach ($child in @('Logs','Output','LastRun.json')) {
-        $source = Join-Path $remoteBaseShare $child
-        if (Test-Path -LiteralPath $source) {
-            Copy-Item -LiteralPath $source -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-    return $target
-}
-
-function Invoke-RemoteComputer {
-    param(
-        [Parameter(Mandatory = $true)][string]$Computer,
-        [Parameter(Mandatory = $true)][int]$CycleNumber,
-        [Parameter(Mandatory = $true)][string[]]$RemoteScriptArgs,
-        [Parameter(Mandatory = $true)][string]$ResolvedPsExecPath
-    )
-
-    New-Directory -Path $LogRoot
-    $logPath = Join-Path $LogRoot ("{0}_cycle{1}_{2}.log" -f $Computer,$CycleNumber,(Get-Date -Format 'yyyyMMdd-HHmmss'))
-    $stdoutPath = "$logPath.stdout.txt"
-    $stderrPath = "$logPath.stderr.txt"
-
-    $result = [ordered]@{
-        Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-        ComputerName = $Computer
-        CycleNumber = $CycleNumber
-        LauncherStatus = 'UNKNOWN'
-        RemoteStatus = ''
-        RemoteNextAction = ''
-        ExitCode = ''
-        Detail = ''
-        SetupCacheAction = ''
-        DiskCleanupAction = ''
-        DiskCleanupFreedGB = ''
-        AdvancedDiskCleanupAction = ''
-        AdvancedDiskCleanupFreedGB = ''
-        DismCleanupAction = ''
-        DismCleanupFreedGB = ''
-        RemoteLogsPath = ''
-        PsExecLogPath = $logPath
-    }
-
-    try {
-        Add-Content -LiteralPath $logPath -Value ("[{0}] Starting {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Computer) -Encoding UTF8
-
-        if ($DryRun) {
-            $reachable = Test-Connection -ComputerName $Computer -Count 1 -Quiet -ErrorAction SilentlyContinue
-            $adminShare = Test-Path -LiteralPath ("\\{0}\C$" -f $Computer)
-            $result.LauncherStatus = if ($reachable -and $adminShare) { 'DRYRUN_READY' } else { 'DRYRUN_UNREACHABLE' }
-            $result.Detail = "Ping=$reachable; AdminShare=$adminShare"
-            return [pscustomobject]$result
-        }
-
-        Copy-RemotePayload -Computer $Computer -LogPath $logPath
-        $result.SetupCacheAction = Copy-SetupMediaToRemoteCache -Computer $Computer -LogPath $logPath
-
-        $psexecArgs = @(
-            "\\$Computer",
-            '-accepteula',
-            '-nobanner',
-            '-s',
-            'powershell.exe',
-            '-NoProfile',
-            '-ExecutionPolicy','Bypass',
-            '-File',"`"$script:RemoteScriptPath`""
-        ) + $RemoteScriptArgs
-
-        Add-Content -LiteralPath $logPath -Value ("[{0}] PsExec command: {1} {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$ResolvedPsExecPath,($psexecArgs -join ' ')) -Encoding UTF8
-        $process = Start-Process -FilePath $ResolvedPsExecPath -ArgumentList $psexecArgs -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-
-        if ($PsExecTimeoutMinutes -gt 0) {
-            if (-not $process.WaitForExit($PsExecTimeoutMinutes * 60 * 1000)) {
-                try { $process.Kill() } catch { }
-                $result.LauncherStatus = 'PSEXEC_TIMEOUT'
-                $result.Detail = "Timed out after $PsExecTimeoutMinutes minute(s)."
-            }
-        }
-        else {
-            $process.WaitForExit()
-        }
-
-        if ($result.LauncherStatus -eq 'UNKNOWN') {
-            $result.ExitCode = $process.ExitCode
-            $result.LauncherStatus = if ($process.ExitCode -eq 0) { 'SUCCESS' } else { "PSEXEC_EXIT_$($process.ExitCode)" }
-        }
-
-        Start-Sleep -Seconds 3
-        $result.RemoteLogsPath = Collect-RemoteEvidence -Computer $Computer -CycleNumber $CycleNumber
-        if ($result.RemoteLogsPath) {
-            $lastRunPath = Join-Path $result.RemoteLogsPath 'LastRun.json'
-            if (Test-Path -LiteralPath $lastRunPath -PathType Leaf) {
-                $lastRun = Get-Content -LiteralPath $lastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                $result.RemoteStatus = [string]$lastRun.Status
-                $result.RemoteNextAction = [string]$lastRun.NextAction
-                if ($result.RemoteStatus) {
-                    $result.LauncherStatus = $result.RemoteStatus
-                    $result.ExitCode = [string]$lastRun.ExitCode
-                }
-                if ($lastRun.PSObject.Properties['SetupCacheAction']) {
-                    $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
-                }
-                foreach ($propertyName in @('DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB')) {
-                    if ($lastRun.PSObject.Properties[$propertyName]) {
-                        $result[$propertyName] = [string]$lastRun.$propertyName
-                    }
-                }
-            }
-        }
-    }
-    catch {
-        $result.LauncherStatus = 'ERROR'
-        $result.Detail = $_.Exception.Message
-        Add-Content -LiteralPath $logPath -Value ("[{0}] ERROR {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$_.Exception.Message) -Encoding UTF8
-    }
-
-    return [pscustomobject]$result
-}
-
 if (-not (Test-Path -LiteralPath $LocalScriptPath -PathType Leaf)) {
     throw "Local repair script not found: $LocalScriptPath"
 }
@@ -383,6 +182,27 @@ Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit
 Write-Host "Reports       : $ReportRoot"
 Write-Host ""
 
+$reportColumns = @(
+    'Timestamp',
+    'ComputerName',
+    'CycleNumber',
+    'LauncherStatus',
+    'RemoteStatus',
+    'RemoteNextAction',
+    'ExitCode',
+    'Detail',
+    'JobErrorMessage',
+    'SetupCacheAction',
+    'DiskCleanupAction',
+    'DiskCleanupFreedGB',
+    'AdvancedDiskCleanupAction',
+    'AdvancedDiskCleanupFreedGB',
+    'DismCleanupAction',
+    'DismCleanupFreedGB',
+    'RemoteLogsPath',
+    'PsExecLogPath'
+)
+
 $globalGateRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'SmartM365\GlobalWorkerGates'
 $globalGateName = ($GlobalConcurrencySemaphoreName -replace '[^A-Za-z0-9_.-]', '_')
 if ($globalGateName.Length -gt 120) { $globalGateName = $globalGateName.Substring(0, 120) }
@@ -393,10 +213,16 @@ if ($GlobalConcurrencyLimit -gt 0) {
     New-Directory -Path $globalGatePath
     Write-Host ("Global lease gate: Limit={0}; Path={1}; LeaseTimeout={2} minute(s)" -f $GlobalConcurrencyLimit,$globalGatePath,$GlobalConcurrencyLeaseTimeoutMinutes) -ForegroundColor Green
 }
+$script:globalGateMutex = $null
+if ($GlobalConcurrencyLimit -gt 0) {
+    $script:globalGateMutex = New-Object System.Threading.Mutex($false, $globalGateMutexName)
+}
 
 function Invoke-WithGlobalGateMutex {
     param([Parameter(Mandatory = $true)][scriptblock]$ScriptBlock)
-    $mutex = New-Object System.Threading.Mutex($false, $globalGateMutexName)
+    $sharedMutex = $script:globalGateMutex
+    $mutex = if ($null -ne $sharedMutex) { $sharedMutex } else { New-Object System.Threading.Mutex($false, $globalGateMutexName) }
+    $ownMutex = ($null -eq $sharedMutex)
     $acquired = $false
     try {
         try { $acquired = $mutex.WaitOne(30000) }
@@ -406,7 +232,7 @@ function Invoke-WithGlobalGateMutex {
     }
     finally {
         if ($acquired) { try { $mutex.ReleaseMutex() } catch { } }
-        $mutex.Dispose()
+        if ($ownMutex) { $mutex.Dispose() }
     }
 }
 
@@ -429,7 +255,7 @@ function Remove-StaleGlobalLeases {
             $computerName = [string]$data.Computer
             $launcherPid = if ($data.PSObject.Properties['LauncherProcessId']) { [int]$data.LauncherProcessId } else { [int]$data.ProcessId }
             $workerPid = if ($data.PSObject.Properties['WorkerProcessId']) { [int]$data.WorkerProcessId } else { 0 }
-            $createdUtc = [datetime]$data.CreatedUtc
+            $createdUtc = [datetime]::Parse([string]$data.CreatedUtc, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
             $ageMinutes = [math]::Round(($nowUtc - $createdUtc).TotalMinutes, 1)
             if (-not (Test-GateProcessAlive -ProcessId $launcherPid)) {
                 $remove = $true
@@ -478,6 +304,9 @@ function Acquire-GlobalLease {
         [Parameter(Mandatory = $true)][int]$CycleNumber
     )
     if ($GlobalConcurrencyLimit -lt 1) { return '' }
+    $waitStarted = Get-Date
+    $lastWaitLog = $null
+    $waitLogIntervalSeconds = 60
     while ($true) {
         $leasePath = Invoke-WithGlobalGateMutex -ScriptBlock {
             Remove-StaleGlobalLeases
@@ -503,9 +332,48 @@ function Acquire-GlobalLease {
             }
             return ''
         }
-        if (-not [string]::IsNullOrWhiteSpace($leasePath)) { return $leasePath }
-        Write-Host ("Waiting for global worker lease before queuing {0}. Active={1}; Limit={2}; Gate={3}" -f $Computer,(@(Get-ChildItem -LiteralPath $globalGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count),$GlobalConcurrencyLimit,$globalGatePath) -ForegroundColor DarkYellow
+        if (-not [string]::IsNullOrWhiteSpace($leasePath)) {
+            if ($null -ne $lastWaitLog) {
+                $waitMinutes = [math]::Round(((Get-Date) - $waitStarted).TotalMinutes, 1)
+                Write-Host ("Global worker lease acquired for {0} after {1} minute(s)." -f $Computer,$waitMinutes) -ForegroundColor DarkCyan
+            }
+            return $leasePath
+        }
+        $now = Get-Date
+        if ($null -eq $lastWaitLog -or (($now - $lastWaitLog).TotalSeconds -ge $waitLogIntervalSeconds)) {
+            $activeLeases = @(Get-ChildItem -LiteralPath $globalGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count
+            $waitMinutes = [math]::Round(($now - $waitStarted).TotalMinutes, 1)
+            Write-Host ("Waiting for global worker lease before queuing {0}. Active={1}; Limit={2}; Wait={3} minute(s); Gate={4}" -f $Computer,$activeLeases,$GlobalConcurrencyLimit,$waitMinutes,$globalGatePath) -ForegroundColor DarkYellow
+            $lastWaitLog = $now
+        }
         Start-Sleep -Seconds $JobPollSeconds
+    }
+}
+
+function Test-SampleDnsResolution {
+    param(
+        [string[]]$ComputerNames,
+        [int]$SampleSize = 5
+    )
+
+    $sample = @($ComputerNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First $SampleSize)
+    $tested = 0
+    $failed = 0
+    foreach ($computer in $sample) {
+        $tested++
+        try {
+            $addresses = [System.Net.Dns]::GetHostAddresses($computer)
+            if ($null -eq $addresses -or $addresses.Count -lt 1) { $failed++ }
+        }
+        catch {
+            $failed++
+        }
+    }
+
+    [pscustomobject]@{
+        Tested = $tested
+        Failed = $failed
+        AllFailed = ($tested -gt 0 -and $failed -eq $tested)
     }
 }
 
@@ -523,6 +391,13 @@ do {
     if ($computers.Count -eq 0) {
         Write-Host "No computers found in $ComputerListPath." -ForegroundColor Yellow
         break
+    }
+
+    $dnsCheck = Test-SampleDnsResolution -ComputerNames $computers
+    if ($dnsCheck.AllFailed) {
+        Write-Host ""
+        Write-Host ("*** DNS WARNING: resolution failed on all {0} sampled computers. Check VPN connectivity and DNS configuration on this machine before continuing. ***" -f $dnsCheck.Tested) -ForegroundColor Red
+        Write-Host ""
     }
 
     Write-Host ("Cycle {0}: {1} computer(s)." -f $cycle,$computers.Count) -ForegroundColor Cyan
@@ -594,9 +469,65 @@ do {
         }
 
         foreach ($job in $finishedJobs) {
-            $jobResults = @(Receive-Job -Job $job -ErrorAction SilentlyContinue)
-            foreach ($item in $jobResults) {
-                [void]$results.Add($item)
+            $received = $null
+            $jobErrors = @()
+
+            try {
+                $receiveErrors = @()
+                $received = @(Receive-Job -Job $job -ErrorAction SilentlyContinue -ErrorVariable receiveErrors)
+                $brokenRunspace = (
+                    $job.ChildJobs.Count -gt 0 -and
+                    $null -ne $job.ChildJobs[0].JobStateInfo.Reason -and
+                    [string]$job.ChildJobs[0].JobStateInfo.Reason.Message -match '\bBroken\b'
+                )
+                $jobErrors = @(
+                    $receiveErrors | ForEach-Object { $_.ToString() }
+                    $job.ChildJobs | ForEach-Object { $_.Error } | ForEach-Object { $_.ToString() }
+                    if ($job.ChildJobs.Count -gt 0 -and $job.ChildJobs[0].JobStateInfo.Reason) {
+                        $job.ChildJobs[0].JobStateInfo.Reason.Message
+                    }
+                    if ($brokenRunspace) {
+                        'RUNSPACE_BROKEN: PowerShell job runspace entered a Broken state. This typically indicates PowerShell 5.1 instability under parallel load. Consider adding -DelayBetweenComputersSeconds 1 to reduce job cycling speed.'
+                    }
+                ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+                if ($brokenRunspace) {
+                    Write-Host ("  [RUNSPACE_BROKEN] {0}: job runspace entered Broken state - possible PowerShell 5.1 instability. Consider -DelayBetweenComputersSeconds 1." -f ($job.Name -replace '^W11UT_C\d+_','')) -ForegroundColor Magenta
+                }
+            }
+            catch {
+                $jobErrors += $_.Exception.Message
+            }
+
+            if (-not $received -or $received.Count -eq 0) {
+                $received = @([pscustomobject]@{
+                    Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+                    ComputerName = ($job.Name -replace '^W11UT_C\d+_','')
+                    CycleNumber = $cycle
+                    LauncherStatus = if (@($jobErrors | Where-Object { $_ -match 'RUNSPACE_BROKEN' }).Count -gt 0) { 'RUNSPACE_BROKEN' } else { 'JOB_ERROR' }
+                    RemoteStatus = ''
+                    RemoteNextAction = ''
+                    ExitCode = ''
+                    Detail = ($jobErrors -join ' | ')
+                    SetupCacheAction = ''
+                    DiskCleanupAction = ''
+                    DiskCleanupFreedGB = ''
+                    AdvancedDiskCleanupAction = ''
+                    AdvancedDiskCleanupFreedGB = ''
+                    DismCleanupAction = ''
+                    DismCleanupFreedGB = ''
+                    RemoteLogsPath = ''
+                    PsExecLogPath = ''
+                    JobErrorMessage = ($jobErrors -join ' | ')
+                })
+            }
+
+            foreach ($item in @($received)) {
+                if ($null -ne $item) {
+                    if ($jobErrors.Count -gt 0 -and -not $item.PSObject.Properties['JobErrorMessage']) {
+                        $item | Add-Member -NotePropertyName JobErrorMessage -NotePropertyValue ($jobErrors -join ' | ') -Force
+                    }
+                    [void]$results.Add($item)
+                }
             }
             if ($globalLeaseByJobId.ContainsKey([string]$job.Id)) {
                 Release-GlobalLease -LeasePath $globalLeaseByJobId[[string]$job.Id]
@@ -609,7 +540,14 @@ do {
     }
 
     $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.csv" -f $cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
-    @($results.ToArray()) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
+    $normalizedResults = foreach ($item in @($results.ToArray())) {
+        $row = [ordered]@{}
+        foreach ($column in $reportColumns) {
+            $row[$column] = if ($null -ne $item -and $item.PSObject.Properties[$column]) { [string]$item.$column } else { '' }
+        }
+        [pscustomobject]$row
+    }
+    @($normalizedResults) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
 
     if ($RunOnce) { break }
@@ -620,3 +558,8 @@ do {
     }
 }
 while ($true)
+
+if ($null -ne $script:globalGateMutex) {
+    try { $script:globalGateMutex.Dispose() } catch { }
+    $script:globalGateMutex = $null
+}

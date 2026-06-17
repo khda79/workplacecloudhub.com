@@ -1234,6 +1234,7 @@ $optionSetupLanguageCombo.Items.AddRange([object[]]@('MatchSystem','Any','fr-FR'
 $optionSetupLanguageCombo.Text = 'MatchSystem'
 
 $optionThrottleBox = New-OptionNumber -Minimum 1 -Maximum 200 -Value 10
+$optionDelayBetweenComputersBox = New-OptionNumber -Minimum 0 -Maximum 3600 -Value 0
 $optionGlobalConcurrencyLimitBox = New-OptionNumber -Minimum 1 -Maximum 200 -Value 15
 $optionGlobalConcurrencyLeaseTimeoutBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 0
 $optionDelayBetweenCyclesBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 5
@@ -1273,6 +1274,7 @@ if (-not [string]::IsNullOrWhiteSpace($setupLanguageDefault)) {
 }
 
 Set-OptionNumberFromEnv -Control $optionDelayBetweenCyclesBox -Name 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES'
+Set-OptionNumberFromEnv -Control $optionDelayBetweenComputersBox -Name 'W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS'
 Set-OptionNumberFromEnv -Control $optionPsExecTimeoutBox -Name 'W11UT_PSEXEC_TIMEOUT_MINUTES'
 Set-OptionNumberFromEnv -Control $optionThrottleBox -Name 'W11UT_THROTTLE'
 Set-OptionNumberFromEnv -Control $optionGlobalConcurrencyLimitBox -Name 'W11UT_GLOBAL_CONCURRENCY_LIMIT'
@@ -1308,20 +1310,22 @@ $optionsTable.Controls.Add($optionKeepCentralHistoryCheck, 3, 5)
 
 $optionsTable.Controls.Add((New-Label 'Throttle per LOT'), 0, 6)
 $optionsTable.Controls.Add($optionThrottleBox, 1, 6)
-$optionsTable.Controls.Add((New-Label 'Delay between cycles'), 2, 6)
-$optionsTable.Controls.Add($optionDelayBetweenCyclesBox, 3, 6)
+$optionsTable.Controls.Add((New-Label 'Computer delay sec'), 2, 6)
+$optionsTable.Controls.Add($optionDelayBetweenComputersBox, 3, 6)
 
-$optionsTable.Controls.Add((New-Label 'Max cycles'), 0, 7)
-$optionsTable.Controls.Add($optionMaxCyclesBox, 1, 7)
-$optionsTable.Controls.Add((New-Label 'PsExec timeout min'), 2, 7)
-$optionsTable.Controls.Add($optionPsExecTimeoutBox, 3, 7)
+$optionsTable.Controls.Add((New-Label 'Delay between cycles'), 0, 7)
+$optionsTable.Controls.Add($optionDelayBetweenCyclesBox, 1, 7)
+$optionsTable.Controls.Add((New-Label 'Max cycles'), 2, 7)
+$optionsTable.Controls.Add($optionMaxCyclesBox, 3, 7)
 
-$optionsTable.Controls.Add((New-Label 'Global worker limit'), 0, 8)
-$optionsTable.Controls.Add($optionGlobalConcurrencyLimitBox, 1, 8)
-$optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 2, 8)
-$optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 3, 8)
+$optionsTable.Controls.Add((New-Label 'PsExec timeout min'), 0, 8)
+$optionsTable.Controls.Add($optionPsExecTimeoutBox, 1, 8)
+$optionsTable.Controls.Add((New-Label 'Global worker limit'), 2, 8)
+$optionsTable.Controls.Add($optionGlobalConcurrencyLimitBox, 3, 8)
 
-$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 0, 9)
+$optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 0, 9)
+$optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 1, 9)
+$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 2, 9)
 
 $optionsNote = New-Object System.Windows.Forms.Label
 $optionsNote.Text = 'For LOT/PsExec, Setup source must be a UNC path reachable by target computers. Local paths are for local tests only and require confirmation.'
@@ -1435,6 +1439,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_GLOBAL_CONCURRENCY_LIMIT = [string][int]$optionGlobalConcurrencyLimitBox.Value
         W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = [string][int]$optionGlobalConcurrencyLeaseTimeoutBox.Value
         W11UT_THROTTLE = [string][int]$optionThrottleBox.Value
+        W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS = [string][int]$optionDelayBetweenComputersBox.Value
         W11UT_DELAY_BETWEEN_CYCLES_MINUTES = [string][int]$optionDelayBetweenCyclesBox.Value
         W11UT_PSEXEC_TIMEOUT_MINUTES = [string][int]$optionPsExecTimeoutBox.Value
         W11UT_SETUP_EXECUTION_MODE = [string]$optionSetupModeCombo.SelectedItem

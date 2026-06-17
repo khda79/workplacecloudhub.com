@@ -66,6 +66,10 @@ skipping. Advanced disk cleanup is available but disabled by default. The wrappe
 require an explicit setup source when setup media must be copied to a target. For LOT/PsExec,
 use a UNC path reachable by the target computers:
 
+When setup upgrade is enabled, the endpoint attempts setup upgrade after readiness blockers
+are cleared. Windows Update reset and assigned update force trigger remain fallback actions
+for runs where setup upgrade is disabled.
+
 ```text
 \\server\share\Windows11
 ```
