@@ -11,6 +11,9 @@ When this script is stored in a Scripts folder, the default output is DevicesAD.
 .PARAMETER OutputPath
 Destination CSV path. Defaults to DevicesAD.csv in the parent folder when running from Scripts.
 
+.PARAMETER ComputerListPath
+Computers.txt path. When provided, only those AD computers are queried.
+
 .PARAMETER Domain
 Optional AD domain/controller passed to Get-ADComputer -Server. Use this for per-LOT domain selection.
 When omitted, all domains in the current AD forest are exported.
@@ -24,6 +27,7 @@ Regenerates the CSV even when a recent DevicesAD.csv exists in the parent folder
 [CmdletBinding()]
 param(
     [string]$OutputPath,
+    [string]$ComputerListPath,
     [string]$Domain,
     [switch]$ForceRefresh
 )
@@ -41,6 +45,14 @@ if ((Split-Path -Leaf $BaseDir) -ieq "Scripts") {
 $OutputPathWasProvided = -not [string]::IsNullOrWhiteSpace($OutputPath)
 if (-not $OutputPathWasProvided) {
     $OutputPath = Join-Path $DefaultOutputDir "DevicesAD.csv"
+}
+
+$ComputerListPathWasProvided = -not [string]::IsNullOrWhiteSpace($ComputerListPath)
+if ([string]::IsNullOrWhiteSpace($ComputerListPath)) {
+    $ComputerListPath = Join-Path $BaseDir "Computers.txt"
+    if (-not (Test-Path -LiteralPath $ComputerListPath)) {
+        $ComputerListPath = ""
+    }
 }
 
 if (-not $OutputPathWasProvided -and -not $ForceRefresh) {
@@ -81,6 +93,32 @@ function Convert-ToComputerName {
     param([string]$Name)
     if ([string]::IsNullOrWhiteSpace($Name)) { return "" }
     return ($Name.Split(".")[0]).Trim().ToUpperInvariant()
+}
+
+function Get-ComputerList {
+    param([Parameter(Mandatory=$true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Computer list not found: $Path"
+    }
+
+    @(Get-Content -LiteralPath $Path |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not $_.StartsWith("#") } |
+        ForEach-Object {
+            [PSCustomObject]@{
+                RequestedComputerName = $_
+                ComputerName = Convert-ToComputerName -Name $_
+            }
+        } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.ComputerName) } |
+        Sort-Object ComputerName -Unique)
+}
+
+function ConvertTo-AdFilterStringLiteral {
+    param([Parameter(Mandatory=$true)][string]$Value)
+
+    return ("'{0}'" -f ($Value -replace "'", "''"))
 }
 
 try {
@@ -137,26 +175,95 @@ Write-Host "Export-ADDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
 Write-Host ("Domains     : {0}" -f (($domainTargets | Select-Object -ExpandProperty DNSRoot) -join "; "))
 Write-Host "Output      : $OutputPath"
 
-$export = foreach ($domainTarget in $domainTargets) {
-    Write-Host ("Reading AD computers from domain: {0}" -f $domainTarget.DNSRoot) -ForegroundColor DarkCyan
-    $queryParams = @{
-        Filter = "*"
-        Server = $domainTarget.Server
-        Properties = $commonProperties
+$requestedComputers = @()
+if (-not [string]::IsNullOrWhiteSpace($ComputerListPath)) {
+    $requestedComputers = @(Get-ComputerList -Path $ComputerListPath)
+    Write-Host "Computers   : $ComputerListPath"
+    Write-Host ("Requested   : {0}" -f $requestedComputers.Count)
+}
+elseif (-not $ComputerListPathWasProvided) {
+    Write-Host "Computers   : no Computers.txt found next to this script; exporting all AD computers." -ForegroundColor Yellow
+}
+
+function New-AdExportRow {
+    param(
+        [Parameter(Mandatory=$true)]$Computer,
+        [Parameter(Mandatory=$true)]$DomainTarget
+    )
+
+    [PSCustomObject]@{
+        ComputerName          = Convert-ToComputerName -Name $Computer.Name
+        Name                  = $Computer.Name
+        ADInventoryPresent    = $true
+        ADDomain              = $DomainTarget.DNSRoot
+        Enabled               = $Computer.Enabled
+        DNSHostName           = $Computer.DNSHostName
+        DistinguishedName     = $Computer.DistinguishedName
+        OperatingSystem       = $Computer.OperatingSystem
+        OperatingSystemVersion = $Computer.OperatingSystemVersion
+        LastLogonTimestampUtc = Convert-FileTimeUtc -Value $Computer.LastLogonTimestamp
+    }
+}
+
+function New-MissingAdExportRow {
+    param([Parameter(Mandatory=$true)]$RequestedComputer)
+
+    [PSCustomObject]@{
+        ComputerName          = $RequestedComputer.ComputerName
+        Name                  = $RequestedComputer.RequestedComputerName
+        ADInventoryPresent    = $false
+        ADDomain              = ""
+        Enabled               = ""
+        DNSHostName           = ""
+        DistinguishedName     = ""
+        OperatingSystem       = ""
+        OperatingSystemVersion = ""
+        LastLogonTimestampUtc = ""
+    }
+}
+
+$export = if ($requestedComputers.Count -gt 0) {
+    $foundByComputer = @{}
+    foreach ($domainTarget in $domainTargets) {
+        Write-Host ("Reading selected AD computers from domain: {0}" -f $domainTarget.DNSRoot) -ForegroundColor DarkCyan
+        foreach ($requestedComputer in $requestedComputers) {
+            $nameLiteral = ConvertTo-AdFilterStringLiteral -Value $requestedComputer.ComputerName
+            $requestedLiteral = ConvertTo-AdFilterStringLiteral -Value $requestedComputer.RequestedComputerName
+            $queryParams = @{
+                Filter = ("Name -eq {0} -or DNSHostName -eq {1}" -f $nameLiteral,$requestedLiteral)
+                Server = $domainTarget.Server
+                Properties = $commonProperties
+            }
+
+            foreach ($computer in @(Get-ADComputer @queryParams)) {
+                $key = Convert-ToComputerName -Name $computer.Name
+                if (-not [string]::IsNullOrWhiteSpace($key) -and -not $foundByComputer.ContainsKey($key)) {
+                    $foundByComputer[$key] = (New-AdExportRow -Computer $computer -DomainTarget $domainTarget)
+                }
+            }
+        }
     }
 
-    foreach ($computer in @(Get-ADComputer @queryParams)) {
-        [PSCustomObject]@{
-            ComputerName          = Convert-ToComputerName -Name $computer.Name
-            Name                  = $computer.Name
-            ADInventoryPresent    = $true
-            ADDomain              = $domainTarget.DNSRoot
-            Enabled               = $computer.Enabled
-            DNSHostName           = $computer.DNSHostName
-            DistinguishedName     = $computer.DistinguishedName
-            OperatingSystem       = $computer.OperatingSystem
-            OperatingSystemVersion = $computer.OperatingSystemVersion
-            LastLogonTimestampUtc = Convert-FileTimeUtc -Value $computer.LastLogonTimestamp
+    foreach ($requestedComputer in $requestedComputers) {
+        if ($foundByComputer.ContainsKey($requestedComputer.ComputerName)) {
+            $foundByComputer[$requestedComputer.ComputerName]
+        }
+        else {
+            New-MissingAdExportRow -RequestedComputer $requestedComputer
+        }
+    }
+}
+else {
+    foreach ($domainTarget in $domainTargets) {
+        Write-Host ("Reading AD computers from domain: {0}" -f $domainTarget.DNSRoot) -ForegroundColor DarkCyan
+        $queryParams = @{
+            Filter = "*"
+            Server = $domainTarget.Server
+            Properties = $commonProperties
+        }
+
+        foreach ($computer in @(Get-ADComputer @queryParams)) {
+            New-AdExportRow -Computer $computer -DomainTarget $domainTarget
         }
     }
 }
@@ -193,4 +300,10 @@ Write-Host ""
 Write-Host ("Exported AD computers: {0}" -f @($export).Count) -ForegroundColor Green
 Write-Host ("Enabled computers    : {0}" -f $enabledCount) -ForegroundColor Green
 Write-Host ("Domains exported     : {0}" -f $domainTargets.Count) -ForegroundColor Green
+if ($requestedComputers.Count -gt 0) {
+    $presentCount = @($export | Where-Object { $_.ADInventoryPresent -eq $true }).Count
+    Write-Host ("Requested computers  : {0}" -f $requestedComputers.Count) -ForegroundColor Green
+    Write-Host ("Present in AD        : {0}" -f $presentCount) -ForegroundColor Green
+    Write-Host ("Missing from AD      : {0}" -f ($requestedComputers.Count - $presentCount)) -ForegroundColor Green
+}
 Write-Host ("CSV                  : {0}" -f $OutputPath) -ForegroundColor Green

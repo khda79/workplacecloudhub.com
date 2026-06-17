@@ -33,12 +33,19 @@ param(
     [switch]$AllowDismComponentCleanup,
 
     [string]$SetupSourcePath,
+    [string]$SetupSourceMapPath,
     [ValidateSet('LocalCache','Share','Auto')]
     [string]$SetupExecutionMode = 'LocalCache',
     [string]$SetupMediaId = 'Win11',
     [string]$SetupLanguage = 'MatchSystem',
     [switch]$SkipSetupMediaPreCopy,
     [string]$SetupCacheRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia',
+    [ValidateRange(0, 100)][int]$SetupSourceCandidateLimit = 5,
+    [ValidateRange(0, 10000)][int]$SetupMediaCopyIpGapMilliseconds = 0,
+    [ValidateRange(0, 86400)][int]$SetupMediaCopyJitterSeconds = 0,
+    [ValidateRange(0, 500)][int]$SetupSourceConcurrencyLimit = 0,
+    [ValidateRange(1, 1440)][int]$SetupSourceConcurrencyLeaseMinutes = 240,
+    [string]$SetupSourceConcurrencyGateRoot,
     [ValidateRange(10, 200)][int]$MinimumFreeDiskGB = 32,
     [ValidateRange(0, 365)][int]$DiskCleanupTempFileMinAgeDays = 1,
     [ValidateRange(0, 365)][int]$DiskCleanupLogRetentionDays = 14,
@@ -58,6 +65,7 @@ $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
 $script:OutputDir = Join-Path $DataRoot 'Output'
 $script:SetupLogDir = Join-Path $script:LogDir 'SetupUpgrade'
+$script:InputDir = Join-Path $DataRoot 'Input'
 $script:LogPath = Join-Path $script:LogDir ("{0}_{1}_{2}.log" -f $script:ScriptName,$script:ComputerName,$script:RunId)
 $script:CsvPath = Join-Path $script:OutputDir ("SmartM365_Windows11Upgrade_{0}_{1}.csv" -f $script:ComputerName,$script:RunId)
 $script:LastRunPath = Join-Path $DataRoot 'LastRun.json'
@@ -491,6 +499,370 @@ function Resolve-SetupSourceMediaPath {
     throw ("No setup source subfolder under '{0}' contains language {1} in sources\lang.ini." -f $SourcePath,$ExpectedLanguage)
 }
 
+function Split-SetupSourcePathList {
+    param([AllowNull()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return @() }
+
+    $result = New-Object System.Collections.ArrayList
+    foreach ($item in @($Value -split ';')) {
+        $path = ([string]$item).Trim().Trim([char]34)
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        [void]$result.Add($path)
+    }
+
+    return @($result.ToArray())
+}
+
+function Convert-IPv4ToUInt32 {
+    param([Parameter(Mandatory = $true)][string]$Address)
+
+    $parsed = [System.Net.IPAddress]::Parse($Address)
+    if ($parsed.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "Not an IPv4 address: $Address"
+    }
+
+    $bytes = $parsed.GetAddressBytes()
+    return (
+        ([uint32]$bytes[0] -shl 24) -bor
+        ([uint32]$bytes[1] -shl 16) -bor
+        ([uint32]$bytes[2] -shl 8) -bor
+        [uint32]$bytes[3]
+    )
+}
+
+function Test-IPv4InCidr {
+    param(
+        [Parameter(Mandatory = $true)][string]$Address,
+        [Parameter(Mandatory = $true)][string]$Cidr
+    )
+
+    $parts = $Cidr.Trim() -split '/', 2
+    if ($parts.Count -ne 2) { return $false }
+
+    $prefixLength = 0
+    if (-not [int]::TryParse($parts[1], [ref]$prefixLength)) { return $false }
+    if ($prefixLength -lt 0 -or $prefixLength -gt 32) { return $false }
+
+    $addressInt = Convert-IPv4ToUInt32 -Address $Address
+    $networkInt = Convert-IPv4ToUInt32 -Address $parts[0]
+    $mask = if ($prefixLength -eq 0) { [uint32]0 } else { [uint32]([uint32]::MaxValue -shl (32 - $prefixLength)) }
+    return (($addressInt -band $mask) -eq ($networkInt -band $mask))
+}
+
+function Get-LocalIPv4Addresses {
+    $addresses = New-Object System.Collections.ArrayList
+
+    try {
+        foreach ($adapter in @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop)) {
+            foreach ($ip in @($adapter.IPAddress)) {
+                $parsed = $null
+                if ([System.Net.IPAddress]::TryParse([string]$ip, [ref]$parsed) -and $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and -not [System.Net.IPAddress]::IsLoopback($parsed)) {
+                    [void]$addresses.Add($parsed.ToString())
+                }
+            }
+        }
+    }
+    catch {
+        foreach ($ip in @([System.Net.Dns]::GetHostAddresses($env:COMPUTERNAME))) {
+            if ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and -not [System.Net.IPAddress]::IsLoopback($ip)) {
+                [void]$addresses.Add($ip.ToString())
+            }
+        }
+    }
+
+    return @($addresses.ToArray() | Select-Object -Unique)
+}
+
+function Test-SetupSourceMapRowMatch {
+    param(
+        [Parameter(Mandatory = $true)]$Row,
+        [string[]]$LocalIPv4Addresses = @()
+    )
+
+    $scopeType = ''
+    if ($Row.PSObject.Properties['ScopeType']) {
+        $scopeType = ([string]$Row.ScopeType).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($scopeType) -and $Row.PSObject.Properties['Type']) {
+        $scopeType = ([string]$Row.Type).Trim()
+    }
+
+    $scopeValue = ''
+    if ($Row.PSObject.Properties['ScopeValue']) {
+        $scopeValue = ([string]$Row.ScopeValue).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($scopeValue) -and $Row.PSObject.Properties['Value']) {
+        $scopeValue = ([string]$Row.Value).Trim()
+    }
+
+    switch -Regex ($scopeType) {
+        '^(?i:Default|Fallback)$' { return $true }
+        '^(?i:Subnet|CIDR)$' {
+            foreach ($ip in @($LocalIPv4Addresses)) {
+                try {
+                    if (Test-IPv4InCidr -Address $ip -Cidr $scopeValue) { return $true }
+                }
+                catch { }
+            }
+            return $false
+        }
+        '^(?i:IPPrefix|Prefix)$' {
+            foreach ($ip in @($LocalIPv4Addresses)) {
+                if ($ip.StartsWith($scopeValue, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+            }
+            return $false
+        }
+        '^(?i:ComputerName|Hostname)$' { return ($env:COMPUTERNAME -ieq $scopeValue) }
+        '^(?i:ComputerPrefix|HostnamePrefix)$' { return ($env:COMPUTERNAME.StartsWith($scopeValue, [System.StringComparison]::OrdinalIgnoreCase)) }
+        default { return $false }
+    }
+}
+
+function Get-SetupSourceCandidatesFromMap {
+    param([AllowNull()][string]$MapPath)
+
+    if ([string]::IsNullOrWhiteSpace($MapPath)) { return @() }
+
+    $expandedMapPath = [Environment]::ExpandEnvironmentVariables($MapPath.Trim('"'))
+    if (-not (Test-Path -LiteralPath $expandedMapPath -PathType Leaf)) {
+        throw "Setup source map not found from target context: $expandedMapPath"
+    }
+
+    $mapPathToRead = $expandedMapPath
+    try {
+        New-SmartDirectory -Path $script:InputDir
+        $cachedMapPath = Join-Path $script:InputDir 'SetupSourceMap.csv'
+        Copy-Item -LiteralPath $expandedMapPath -Destination $cachedMapPath -Force -ErrorAction Stop
+        $mapPathToRead = $cachedMapPath
+        Write-SmartLog ("Setup source map cached locally: {0}" -f $cachedMapPath)
+    }
+    catch {
+        Write-SmartLog ("Could not cache setup source map locally; reading original path. Detail={0}" -f $_.Exception.Message) 'WARN'
+    }
+
+    $rows = @(Import-Csv -LiteralPath $mapPathToRead -ErrorAction Stop)
+    $localIps = @(Get-LocalIPv4Addresses)
+    Write-SmartLog ("Setup source map loaded: Path={0}; Rows={1}; LocalIPv4={2}" -f $mapPathToRead,$rows.Count,($localIps -join ','))
+
+    $matches = New-Object System.Collections.ArrayList
+    foreach ($row in $rows) {
+        $sourcePath = ''
+        if ($row.PSObject.Properties['SetupSourcePath']) {
+            $sourcePath = ([string]$row.SetupSourcePath).Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($sourcePath) -and $row.PSObject.Properties['SourcePath']) {
+            $sourcePath = ([string]$row.SourcePath).Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($sourcePath)) { continue }
+
+        if (Test-SetupSourceMapRowMatch -Row $row -LocalIPv4Addresses $localIps) {
+            $priority = 100
+            if ($row.PSObject.Properties['Priority']) {
+                [void][int]::TryParse([string]$row.Priority, [ref]$priority)
+            }
+            [void]$matches.Add([pscustomobject]@{ Priority = $priority; SourcePath = $sourcePath })
+        }
+    }
+
+    $matchedSources = @($matches.ToArray() | Sort-Object Priority, SourcePath | ForEach-Object { $_.SourcePath } | Select-Object -Unique)
+    if ($SetupSourceCandidateLimit -gt 0 -and $matchedSources.Count -gt $SetupSourceCandidateLimit) {
+        Write-SmartLog ("Setup source map matched {0} source(s); limiting benchmark shortlist to {1} by priority." -f $matchedSources.Count,$SetupSourceCandidateLimit)
+        $matchedSources = @($matchedSources | Select-Object -First $SetupSourceCandidateLimit)
+    }
+    return $matchedSources
+}
+
+function Get-EffectiveSetupSourceCandidates {
+    $candidates = New-Object System.Collections.ArrayList
+    try {
+        foreach ($source in @(Get-SetupSourceCandidatesFromMap -MapPath $SetupSourceMapPath)) {
+            [void]$candidates.Add($source)
+        }
+    }
+    catch {
+        Write-SmartLog ("Setup source map could not be used: {0}" -f $_.Exception.Message) 'WARN'
+    }
+    foreach ($source in @(Split-SetupSourcePathList -Value $SetupSourcePath)) {
+        [void]$candidates.Add($source)
+    }
+
+    return @($candidates.ToArray() | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+}
+
+function Get-UncServerName {
+    param([AllowNull()][string]$Path)
+
+    $match = [regex]::Match([string]$Path, '^\\\\(?<server>[^\\]+)\\')
+    if ($match.Success) { return $match.Groups['server'].Value }
+    return ''
+}
+
+function Measure-TcpConnectionMilliseconds {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServerName,
+        [int]$Port = 445,
+        [int]$TimeoutMilliseconds = 1200
+    )
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $async = $client.BeginConnect($ServerName, $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne($TimeoutMilliseconds, $false)) {
+            throw "TCP $ServerName`:$Port timed out after $TimeoutMilliseconds ms"
+        }
+
+        $client.EndConnect($async)
+        return [int][math]::Max(1, $watch.ElapsedMilliseconds)
+    }
+    finally {
+        $watch.Stop()
+        try { $client.Close() } catch { }
+    }
+}
+
+function Measure-FileReadSampleMilliseconds {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int64]$MaxBytes = 8388608,
+        [int]$BufferBytes = 1048576
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "File not found for read sample: $Path"
+    }
+
+    $buffer = New-Object byte[] $BufferBytes
+    $bytesRead = 0L
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        while ($bytesRead -lt $MaxBytes) {
+            $remaining = [int][math]::Min($buffer.Length, ($MaxBytes - $bytesRead))
+            if ($remaining -le 0) { break }
+            $read = $stream.Read($buffer, 0, $remaining)
+            if ($read -le 0) { break }
+            $bytesRead += [int64]$read
+        }
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $watch.Stop()
+    }
+
+    return [pscustomobject]@{
+        Path = $Path
+        BytesRead = $bytesRead
+        Milliseconds = [int][math]::Max(1, $watch.ElapsedMilliseconds)
+    }
+}
+
+function Measure-SetupSourceReadSample {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $samples = New-Object System.Collections.ArrayList
+    $langIni = Join-Path $MediaRoot 'sources\lang.ini'
+    if (Test-Path -LiteralPath $langIni -PathType Leaf) {
+        [void]$samples.Add((Measure-FileReadSampleMilliseconds -Path $langIni -MaxBytes 262144 -BufferBytes 65536))
+    }
+
+    $setupExe = Join-Path $MediaRoot 'setup.exe'
+    [void]$samples.Add((Measure-FileReadSampleMilliseconds -Path $setupExe -MaxBytes 8388608 -BufferBytes 1048576))
+
+    $totalBytes = 0L
+    $totalMs = 0
+    foreach ($sample in @($samples.ToArray())) {
+        $totalBytes += [int64]$sample.BytesRead
+        $totalMs += [int]$sample.Milliseconds
+    }
+
+    return [pscustomobject]@{
+        BytesRead = $totalBytes
+        Milliseconds = [int][math]::Max(1, $totalMs)
+    }
+}
+
+function Resolve-PreferredSetupSourcePath {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$SourcePaths,
+        [string]$ExpectedLanguage
+    )
+
+    $candidates = @(
+        foreach ($sourcePath in @($SourcePaths)) {
+            Split-SetupSourcePathList -Value $sourcePath
+        }
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+    if ($candidates.Count -eq 0) {
+        throw 'SetupSourcePath is empty.'
+    }
+
+    if ($candidates.Count -eq 1) {
+        $singleSource = [Environment]::ExpandEnvironmentVariables($candidates[0])
+        if (Test-Path -LiteralPath $singleSource -PathType Container) {
+            $singleSource = Resolve-SetupSourceMediaPath -SourcePath $singleSource -ExpectedLanguage $ExpectedLanguage
+        }
+        $script:SelectedSetupSourcePath = [string]$singleSource
+        $script:SetupSourceSelectionDetail = 'SingleSource'
+        return $singleSource
+    }
+
+    Write-SmartLog ("Selecting nearest setup source from {0} candidate(s): {1}" -f $candidates.Count,($candidates -join ' | '))
+
+    $validSources = New-Object System.Collections.ArrayList
+    $errors = New-Object System.Collections.ArrayList
+    foreach ($candidate in $candidates) {
+        $expanded = [Environment]::ExpandEnvironmentVariables($candidate)
+        $server = Get-UncServerName -Path $expanded
+        $tcpMs = 0
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($server)) {
+                $tcpMs = Measure-TcpConnectionMilliseconds -ServerName $server
+            }
+
+            if (-not (Test-Path -LiteralPath $expanded -PathType Container)) {
+                throw "Path is not reachable as a container from target context: $expanded"
+            }
+
+            $resolved = Resolve-SetupSourceMediaPath -SourcePath $expanded -ExpectedLanguage $ExpectedLanguage
+            $null = Test-SetupMedia -MediaPath $resolved -ExpectedLanguage $ExpectedLanguage
+            $readSample = Measure-SetupSourceReadSample -MediaRoot $resolved
+            $watch.Stop()
+            $scoreMs = [int][math]::Max(1, ([int]$readSample.Milliseconds + [int]$tcpMs))
+            [void]$validSources.Add([pscustomobject]@{
+                Candidate = $candidate
+                ResolvedPath = $resolved
+                Server = $server
+                TcpMilliseconds = $tcpMs
+                ReadMilliseconds = [int]$readSample.Milliseconds
+                ReadBytes = [int64]$readSample.BytesRead
+                ScoreMilliseconds = $scoreMs
+            })
+            Write-SmartLog ("Setup source candidate OK: Path={0}; Resolved={1}; TcpMs={2}; ReadMs={3}; ReadBytes={4}; ScoreMs={5}" -f $candidate,$resolved,$tcpMs,$readSample.Milliseconds,$readSample.BytesRead,$scoreMs)
+        }
+        catch {
+            $watch.Stop()
+            $message = "Path=$candidate; Error=$($_.Exception.Message)"
+            [void]$errors.Add($message)
+            Write-SmartLog ("Setup source candidate skipped: {0}" -f $message) 'WARN'
+        }
+    }
+
+    if ($validSources.Count -eq 0) {
+        throw ("No setup source candidate is reachable and valid from this target. Errors: {0}" -f (@($errors.ToArray()) -join ' | '))
+    }
+
+    $selected = @($validSources.ToArray() | Sort-Object ScoreMilliseconds, ReadMilliseconds, TcpMilliseconds, ResolvedPath | Select-Object -First 1)[0]
+    $null = Test-SetupMedia -MediaPath $selected.ResolvedPath -ExpectedLanguage $ExpectedLanguage
+    Write-SmartLog ("Selected nearest setup source: {0}; TcpMs={1}; ReadMs={2}; ReadBytes={3}; ScoreMs={4}" -f $selected.ResolvedPath,$selected.TcpMilliseconds,$selected.ReadMilliseconds,$selected.ReadBytes,$selected.ScoreMilliseconds)
+    $script:SelectedSetupSourcePath = [string]$selected.ResolvedPath
+    $script:SetupSourceSelectionDetail = ("Candidates={0}; Selected={1}; TcpMs={2}; ReadMs={3}; ReadBytes={4}; ScoreMs={5}" -f $candidates.Count,$selected.ResolvedPath,$selected.TcpMilliseconds,$selected.ReadMilliseconds,$selected.ReadBytes,$selected.ScoreMilliseconds)
+    return [string]$selected.ResolvedPath
+}
+
 function Test-SetupMedia {
     param(
         [Parameter(Mandatory = $true)][string]$MediaPath,
@@ -645,6 +1017,85 @@ function Save-SetupCacheManifest {
     $Fingerprint | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8 -Force
 }
 
+function Get-SetupSourceGateKey {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($SourcePath.ToUpperInvariant())
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 32)
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Remove-StaleSetupSourceCopyLeases {
+    param([Parameter(Mandatory = $true)][string]$GatePath)
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+    foreach ($lease in @(Get-ChildItem -LiteralPath $GatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        $remove = $false
+        try {
+            $data = Get-Content -LiteralPath $lease.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $createdUtc = [datetime]::Parse([string]$data.CreatedUtc, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            if (($nowUtc - $createdUtc).TotalMinutes -gt $SetupSourceConcurrencyLeaseMinutes) {
+                $remove = $true
+            }
+        }
+        catch {
+            $remove = $true
+        }
+
+        if ($remove) {
+            Remove-Item -LiteralPath $lease.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Acquire-SetupSourceCopyLease {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $gateRoot = [Environment]::ExpandEnvironmentVariables($SetupSourceConcurrencyGateRoot.Trim('"'))
+    $sourceKey = Get-SetupSourceGateKey -SourcePath $SourcePath
+    $gatePath = Join-Path $gateRoot $sourceKey
+    New-SmartDirectory -Path $gatePath
+
+    $leaseId = [guid]::NewGuid().ToString('N')
+    $leasePath = Join-Path $gatePath ("{0}_{1}.json" -f $env:COMPUTERNAME,$leaseId)
+    $waitSeconds = [math]::Max(60, $SetupSourceConcurrencyLeaseMinutes * 60)
+    $started = Get-Date
+    do {
+        Remove-StaleSetupSourceCopyLeases -GatePath $gatePath
+        $activeCount = @(Get-ChildItem -LiteralPath $gatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count
+        if ($activeCount -lt $SetupSourceConcurrencyLimit) {
+            [pscustomobject]@{
+                ComputerName = $env:COMPUTERNAME
+                ProcessId = $PID
+                SourcePath = $SourcePath
+                CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $leasePath -Encoding UTF8 -Force
+            Write-SmartLog ("Acquired setup source copy lease: Source={0}; ActiveBefore={1}; Limit={2}; Lease={3}" -f $SourcePath,$activeCount,$SetupSourceConcurrencyLimit,$leasePath)
+            return $leasePath
+        }
+
+        Write-SmartLog ("Waiting for setup source copy lease: Source={0}; Active={1}; Limit={2}" -f $SourcePath,$activeCount,$SetupSourceConcurrencyLimit)
+        Start-Sleep -Seconds (Get-Random -Minimum 10 -Maximum 31)
+    }
+    while (((Get-Date) - $started).TotalSeconds -lt $waitSeconds)
+
+    throw ("Timed out waiting for setup source copy lease. Source={0}; Gate={1}; Limit={2}" -f $SourcePath,$gatePath,$SetupSourceConcurrencyLimit)
+}
+
+function Release-SetupSourceCopyLease {
+    param([AllowNull()][string]$LeasePath)
+
+    if (-not [string]::IsNullOrWhiteSpace($LeasePath)) {
+        Remove-Item -LiteralPath $LeasePath -Force -ErrorAction SilentlyContinue
+        Write-SmartLog ("Released setup source copy lease: {0}" -f $LeasePath)
+    }
+}
+
 function Test-SetupCacheReady {
     param(
         [Parameter(Mandatory = $true)][string]$CachePath,
@@ -671,19 +1122,51 @@ function Copy-SetupMediaToLocalCache {
     $robocopyLog = Join-Path $script:SetupLogDir ("Robocopy_SetupMedia_{0}.log" -f $script:RunId)
     New-SmartDirectory -Path $script:SetupLogDir
 
+    if ($SetupMediaCopyJitterSeconds -gt 0) {
+        $jitter = Get-Random -Minimum 0 -Maximum ($SetupMediaCopyJitterSeconds + 1)
+        if ($jitter -gt 0) {
+            Write-SmartLog ("Waiting {0} second(s) before setup media copy jitter." -f $jitter)
+            Start-Sleep -Seconds $jitter
+        }
+    }
+
+    $sourceLeasePath = ''
+    if ($SetupSourceConcurrencyLimit -gt 0 -and -not [string]::IsNullOrWhiteSpace($SetupSourceConcurrencyGateRoot)) {
+        $sourceLeasePath = Acquire-SetupSourceCopyLease -SourcePath $SourcePath
+    }
+
     Write-SmartLog ("Copying setup media on target from '{0}' to local cache '{1}'." -f $SourcePath,$CachePath)
     $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
-    if (Test-Path -LiteralPath $robocopy -PathType Leaf) {
-        & $robocopy $SourcePath $CachePath /MIR /Z /R:2 /W:5 /NP /NFL /NDL "/LOG+:$robocopyLog" | Out-Null
-        $copyExit = [int]$LASTEXITCODE
-        if ($copyExit -gt 7) {
-            throw "Robocopy setup media copy failed with exit code $copyExit. Log=$robocopyLog"
+    try {
+        if (Test-Path -LiteralPath $robocopy -PathType Leaf) {
+            $robocopyArgs = @($SourcePath, $CachePath, '/MIR', '/Z', '/R:2', '/W:5', '/NP', '/NFL', '/NDL', "/LOG+:$robocopyLog")
+            if ($SetupMediaCopyIpGapMilliseconds -gt 0) {
+                $robocopyHelp = ''
+                try { $robocopyHelp = (& $robocopy /? 2>$null | Out-String) } catch { }
+                if ($robocopyHelp -match '(?i)/IPG') {
+                    $robocopyArgs += ("/IPG:{0}" -f $SetupMediaCopyIpGapMilliseconds)
+                }
+                else {
+                    Write-SmartLog ("Robocopy does not advertise /IPG support. Continuing without per-PC copy bandwidth delay. Robocopy={0}" -f $robocopy) 'WARN'
+                }
+            }
+
+            & $robocopy @robocopyArgs | Out-Null
+            $copyExit = [int]$LASTEXITCODE
+            if ($copyExit -gt 7) {
+                throw "Robocopy setup media copy failed with exit code $copyExit. Log=$robocopyLog"
+            }
+            Write-SmartLog ("Robocopy setup media copy completed with exit code {0}. IPG={1}ms; Log={2}" -f $copyExit,$SetupMediaCopyIpGapMilliseconds,$robocopyLog)
         }
-        Write-SmartLog ("Robocopy setup media copy completed with exit code {0}. Log={1}" -f $copyExit,$robocopyLog)
+        else {
+            Copy-Item -Path (Join-Path $SourcePath '*') -Destination $CachePath -Recurse -Force -ErrorAction Stop
+            Write-SmartLog 'Setup media copied with Copy-Item because robocopy.exe was not found. Bandwidth limiting is unavailable with this fallback.'
+        }
     }
-    else {
-        Copy-Item -Path (Join-Path $SourcePath '*') -Destination $CachePath -Recurse -Force -ErrorAction Stop
-        Write-SmartLog 'Setup media copied with Copy-Item because robocopy.exe was not found.'
+    finally {
+        if (-not [string]::IsNullOrWhiteSpace($sourceLeasePath)) {
+            Release-SetupSourceCopyLease -LeasePath $sourceLeasePath
+        }
     }
 
     $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage
@@ -928,11 +1411,11 @@ function Resolve-SetupUpgradeExecutable {
         try {
             $script:SetupCacheAction = 'AlreadyCached'
             $cachedSetupExe = Test-SetupCacheReady -CachePath $cachePath -ExpectedLanguage $expectedLanguage
-            if (-not $SkipSetupMediaPreCopy -and -not [string]::IsNullOrWhiteSpace($SetupSourcePath)) {
+            if (-not $SkipSetupMediaPreCopy) {
                 try {
-                    $candidateSource = [Environment]::ExpandEnvironmentVariables($SetupSourcePath.Trim('"'))
-                    if (Test-Path -LiteralPath $candidateSource -PathType Container) {
-                        $candidateSource = Resolve-SetupSourceMediaPath -SourcePath $candidateSource -ExpectedLanguage $expectedLanguage
+                    $setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)
+                    if ($setupSourceCandidates.Count -gt 0) {
+                        $candidateSource = Resolve-PreferredSetupSourcePath -SourcePaths $setupSourceCandidates -ExpectedLanguage $expectedLanguage
                         $sourceFingerprint = Get-SetupMediaFingerprint -MediaRoot $candidateSource -ExpectedLanguage $expectedLanguage
                         $cacheFingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $cachedSetupExe) -ExpectedLanguage $expectedLanguage
                         if (-not (Test-SetupFingerprintMatch -Left $sourceFingerprint -Right $cacheFingerprint)) {
@@ -953,20 +1436,19 @@ function Resolve-SetupUpgradeExecutable {
                 throw ("Local setup cache is not ready and existing-media-only mode is enabled. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
             }
             Write-SmartLog ("Local setup cache not ready: {0}" -f $_.Exception.Message) 'WARN'
-            if ($SetupExecutionMode -eq 'LocalCache' -and [string]::IsNullOrWhiteSpace($SetupSourcePath)) {
+            $setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)
+            if ($SetupExecutionMode -eq 'LocalCache' -and $setupSourceCandidates.Count -eq 0) {
                 throw ("Local setup cache is not ready and no SetupSourcePath was provided. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
             }
         }
     }
 
-    if ([string]::IsNullOrWhiteSpace($SetupSourcePath)) {
+    $setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)
+    if ($setupSourceCandidates.Count -eq 0) {
         throw 'SetupSourcePath is required when -AllowSetupUpgrade is used and no valid local cache exists.'
     }
 
-    $expandedSource = [Environment]::ExpandEnvironmentVariables($SetupSourcePath.Trim('"'))
-    if (Test-Path -LiteralPath $expandedSource -PathType Container) {
-        $expandedSource = Resolve-SetupSourceMediaPath -SourcePath $expandedSource -ExpectedLanguage $expectedLanguage
-    }
+    $expandedSource = Resolve-PreferredSetupSourcePath -SourcePaths $setupSourceCandidates -ExpectedLanguage $expectedLanguage
     if ($SetupExecutionMode -in @('Share','Auto')) {
         try {
             return Test-SetupMedia -MediaPath $expandedSource -ExpectedLanguage $expectedLanguage
@@ -1022,6 +1504,8 @@ $setupExe = ''
 $script:ResolvedSetupLanguage = ''
 $script:ResolvedSetupMediaLanguages = ''
 $script:ResolvedSetupCachePath = ''
+$script:SelectedSetupSourcePath = ''
+$script:SetupSourceSelectionDetail = ''
 $script:SetupCacheAction = ''
 $script:DiskCleanupAction = ''
 $script:DiskCleanupFreedGB = ''
@@ -1253,6 +1737,8 @@ finally {
         ResolvedSetupLanguage = $script:ResolvedSetupLanguage
         SetupMediaLanguages = $script:ResolvedSetupMediaLanguages
         SetupCachePath = $script:ResolvedSetupCachePath
+        SelectedSetupSourcePath = $script:SelectedSetupSourcePath
+        SetupSourceSelectionDetail = $script:SetupSourceSelectionDetail
         SetupCacheAction = $script:SetupCacheAction
         DiskCleanupAction = $script:DiskCleanupAction
         DiskCleanupFreedGB = $script:DiskCleanupFreedGB

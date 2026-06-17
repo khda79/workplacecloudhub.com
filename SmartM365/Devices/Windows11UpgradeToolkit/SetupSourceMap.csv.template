@@ -1,0 +1,5 @@
+ScopeType,ScopeValue,SetupSourcePath,Priority
+Subnet,10.10.0.0/16,\\srv-paris\share\Windows11-24H2,10
+IPPrefix,10.20.,\\srv-lyon\share\Windows11-24H2,20
+ComputerPrefix,PC-MRS-,\\srv-marseille\share\Windows11-24H2,30
+Default,*,\\srv-central\share\Windows11-24H2,100
