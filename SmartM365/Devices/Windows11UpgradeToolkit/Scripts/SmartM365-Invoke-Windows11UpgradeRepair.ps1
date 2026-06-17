@@ -804,8 +804,17 @@ function Resolve-PreferredSetupSourcePath {
 
     if ($candidates.Count -eq 1) {
         $singleSource = [Environment]::ExpandEnvironmentVariables($candidates[0])
-        if (Test-Path -LiteralPath $singleSource -PathType Container) {
+        try {
+            if (-not (Test-Path -LiteralPath $singleSource -PathType Container -ErrorAction Stop)) {
+                throw "Path is not reachable as a container from target context: $singleSource"
+            }
             $singleSource = Resolve-SetupSourceMediaPath -SourcePath $singleSource -ExpectedLanguage $ExpectedLanguage
+            $null = Test-SetupMedia -MediaPath $singleSource -ExpectedLanguage $ExpectedLanguage
+            Write-SmartLog ("Setup source candidate OK: Path={0}; Resolved={1}; Selection=SingleSource" -f $candidates[0],$singleSource)
+        }
+        catch {
+            $accessHint = "Setup source is validated from the target SYSTEM context. For UNC sources, grant Share and NTFS Read to the target computer account '$script:ComputerName`$' or to a group such as Domain Computers."
+            throw ("Setup source is not reachable or valid from this target. Path={0}; Error={1}; {2}" -f $singleSource,$_.Exception.Message,$accessHint)
         }
         $script:SelectedSetupSourcePath = [string]$singleSource
         $script:SetupSourceSelectionDetail = 'SingleSource'
