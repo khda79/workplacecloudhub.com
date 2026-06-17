@@ -95,12 +95,69 @@ set W11UT_ALLOW_ADVANCED_DISK_CLEANUP=1
 LOT-X\Run-Windows11UpgradeRepairWithPsExec-Once.cmd
 ```
 
-For setup-based LOT runs without the GUI, set a target-reachable setup source first:
+For setup-based LOT runs without the GUI, copy
+`Windows11UpgradeToolkit.config.template` to `Windows11UpgradeToolkit.config` at the
+toolkit root, then set a target-reachable setup source:
+
+```text
+W11UT_SETUP_SOURCE=\\server\share\Windows11
+```
+
+You can still override the config for one CMD session by setting the environment variable
+before launching a LOT wrapper:
 
 ```cmd
 set W11UT_SETUP_SOURCE=\\server\share\Windows11
 LOT-X\Run-Windows11UpgradeRepairWithPsExec-Once.cmd
 ```
+
+The launcher GUI reads the same config file to prefill its Options tab, then passes the
+selected values to the LOT window it starts.
+
+Each LOT can also have its own `Windows11UpgradeToolkit.config` file in the LOT folder.
+This is useful when LOTs use different site-local setup sources. The wrapper loads values
+in this order: environment variables already defined before launch, LOT config, then
+toolkit root config. `Update-LotCmdWrappers.cmd` creates a missing LOT config from the
+template but does not overwrite an existing one.
+
+`W11UT_SETUP_SOURCE` can contain multiple UNC candidates separated by semicolons. In that
+case, each target computer tests the candidates from its own SYSTEM context, validates the
+setup media and language, reads a small sample from the media, and selects the nearest
+valid source before running or copying setup media:
+
+```text
+W11UT_SETUP_SOURCE=\\srv-paris\share\Windows11-24H2;\\srv-lyon\share\Windows11-24H2;\\srv-marseille\share\Windows11-24H2
+```
+
+For large estates, prefer `W11UT_SETUP_SOURCE_MAP` instead of listing every share in
+`W11UT_SETUP_SOURCE`. The map is a CSV reachable from the target computer context:
+
+```text
+W11UT_SETUP_SOURCE_MAP=\\srv-central\share\SetupSourceMap.csv
+```
+
+Supported map columns are `ScopeType`, `ScopeValue`, `SetupSourcePath`, and `Priority`.
+Supported scope types avoid AD sites: `Subnet`/`CIDR`, `IPPrefix`, `ComputerName`,
+`ComputerPrefix`, and `Default`.
+
+```csv
+ScopeType,ScopeValue,SetupSourcePath,Priority
+Subnet,10.10.0.0/16,\\srv-paris\share\Windows11-24H2,10
+IPPrefix,10.20.,\\srv-lyon\share\Windows11-24H2,20
+ComputerPrefix,PC-MRS-,\\srv-marseille\share\Windows11-24H2,30
+Default,*,\\srv-central\share\Windows11-24H2,100
+```
+
+Each target first filters the CSV using its own IPv4 addresses and computer name, then
+benchmarks only the matching sources.
+
+To reduce per-device media-copy bandwidth, set `W11UT_SETUP_COPY_IPG_MS` to a non-zero
+robocopy inter-packet gap. Larger values slow each PC copy more aggressively. Use
+`W11UT_SETUP_COPY_JITTER_SECONDS` to spread copy starts randomly, and
+`W11UT_SETUP_SOURCE_CANDIDATE_LIMIT` to cap the number of matched sources benchmarked by a
+target. Optional source-level copy concurrency is available with
+`W11UT_SETUP_SOURCE_CONCURRENCY_LIMIT` and a writable UNC lease folder in
+`W11UT_SETUP_SOURCE_CONCURRENCY_GATE_ROOT`.
 
 If you intentionally run a local/direct test with a local path, set
 `W11UT_CONFIRM_LOCAL_SETUP_SOURCE=1` explicitly.

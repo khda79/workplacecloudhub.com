@@ -29,6 +29,123 @@ function Get-ToolkitRoot {
     return (Get-Item -LiteralPath (Split-Path -Parent $scriptDir) -ErrorAction Stop).FullName
 }
 
+function Read-ToolkitConfig {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $config = @{}
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $config
+    }
+
+    foreach ($rawLine in @(Get-Content -LiteralPath $Path -ErrorAction Stop)) {
+        $line = ([string]$rawLine).Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#') -or $line.StartsWith(';')) {
+            continue
+        }
+
+        $match = [regex]::Match($line, '^(?<name>[A-Za-z_][A-Za-z0-9_]*)=(?<value>.*)$')
+        if (-not $match.Success) {
+            continue
+        }
+
+        $name = $match.Groups['name'].Value.Trim()
+        if ($name -notmatch '^W11UT_') {
+            continue
+        }
+
+        $value = $match.Groups['value'].Value.Trim()
+        if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+
+        $config[$name] = $value
+    }
+
+    return $config
+}
+
+function Get-ToolkitConfigValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()][string]$Default = $null
+    )
+
+    $value = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        return $value
+    }
+
+    if ($script:ToolkitConfig -and $script:ToolkitConfig.ContainsKey($Name)) {
+        return [string]$script:ToolkitConfig[$Name]
+    }
+
+    return $Default
+}
+
+function Get-LotConfigPath {
+    param([Parameter(Mandatory = $true)][string]$LotPath)
+
+    return (Join-Path $LotPath 'Windows11UpgradeToolkit.config')
+}
+
+function Test-LotConfigCanOverrideEnvironmentValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [hashtable]$EnvironmentVariables = @{}
+    )
+
+    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $false
+    }
+
+    if (-not $EnvironmentVariables.ContainsKey($Name)) {
+        return $true
+    }
+
+    $currentValue = [string]$EnvironmentVariables[$Name]
+    if ([string]::IsNullOrWhiteSpace($currentValue)) {
+        return $true
+    }
+
+    if ($script:ToolkitConfig -and $script:ToolkitConfig.ContainsKey($Name) -and $currentValue -eq [string]$script:ToolkitConfig[$Name]) {
+        return $true
+    }
+
+    if ($script:ToolkitDefaultEnvironment -and $script:ToolkitDefaultEnvironment.ContainsKey($Name) -and $currentValue -eq [string]$script:ToolkitDefaultEnvironment[$Name]) {
+        return $true
+    }
+
+    return $false
+}
+
+function Get-EffectiveLotEnvironment {
+    param(
+        [Parameter(Mandatory = $true)][string]$LotPath,
+        [hashtable]$EnvironmentVariables = @{}
+    )
+
+    $effective = @{}
+    foreach ($key in @($EnvironmentVariables.Keys)) {
+        $effective[$key] = [string]$EnvironmentVariables[$key]
+    }
+
+    $lotConfigPath = Get-LotConfigPath -LotPath $LotPath
+    $lotConfig = Read-ToolkitConfig -Path $lotConfigPath
+    foreach ($key in @($lotConfig.Keys)) {
+        $lotValue = [string]$lotConfig[$key]
+        if ([string]::IsNullOrWhiteSpace($lotValue)) {
+            continue
+        }
+
+        if (Test-LotConfigCanOverrideEnvironmentValue -Name $key -EnvironmentVariables $effective) {
+            $effective[$key] = $lotValue
+        }
+    }
+
+    return $effective
+}
+
 function Get-SafeLotName {
     param([Parameter(Mandatory = $true)][string]$LotName)
 
@@ -155,6 +272,20 @@ function New-ToolkitLotFolder {
 
     New-Item -ItemType Directory -Path $lotPath -Force -ErrorAction Stop | Out-Null
     New-Item -ItemType File -Path (Join-Path $lotPath 'Computers.txt') -Force -ErrorAction Stop | Out-Null
+    $lotConfigPath = Get-LotConfigPath -LotPath $lotPath
+    if (-not (Test-Path -LiteralPath $lotConfigPath -PathType Leaf)) {
+        $templateConfigPath = Join-Path $rootItem.FullName 'Windows11UpgradeToolkit.config.template'
+        if (Test-Path -LiteralPath $templateConfigPath -PathType Leaf) {
+            Copy-Item -LiteralPath $templateConfigPath -Destination $lotConfigPath -Force -ErrorAction Stop
+        }
+        else {
+            Set-Content -LiteralPath $lotConfigPath -Value @(
+                '# SmartM365 Windows 11 Upgrade Toolkit LOT defaults.'
+                '# W11UT_SETUP_SOURCE should be a UNC path reachable from target computers.'
+                'W11UT_SETUP_SOURCE='
+            ) -Encoding ASCII -Force
+        }
+    }
 
     Invoke-LotWrapperRefresh -RootPath $rootItem.FullName
 
@@ -189,6 +320,47 @@ function ConvertTo-CmdSetCommand {
     }
 
     return ('set "{0}={1}"' -f $Name, (($Value -replace '"', '\"')))
+}
+
+function New-SingleComputerRunContext {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$ToolkitKey
+    )
+
+    $trimmed = $ComputerName.Trim().Trim([char]34)
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        throw 'Enter a computer name.'
+    }
+
+    $safeComputer = [regex]::Replace($trimmed, '[^A-Za-z0-9._-]+', '-').Trim('-._')
+    if ([string]::IsNullOrWhiteSpace($safeComputer)) { $safeComputer = 'Computer' }
+
+    $runRoot = Get-SingleComputerRunRoot -ToolkitKey $ToolkitKey
+    $runPath = Join-Path $runRoot ("{0}_{1}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'),$safeComputer)
+    New-Item -ItemType Directory -Path $runPath -Force -ErrorAction Stop | Out-Null
+
+    $computersPath = Join-Path $runPath 'Computers.txt'
+    Set-Content -LiteralPath $computersPath -Value $trimmed -Encoding UTF8 -Force
+
+    foreach ($folder in @('PsExecLogs','Reports','CentralLogs')) {
+        New-Item -ItemType Directory -Path (Join-Path $runPath $folder) -Force -ErrorAction Stop | Out-Null
+    }
+
+    [pscustomobject]@{
+        ComputerName = $trimmed
+        RunPath = $runPath
+        ComputersPath = $computersPath
+        LogRoot = Join-Path $runPath 'PsExecLogs'
+        ReportRoot = Join-Path $runPath 'Reports'
+        CentralLogRoot = Join-Path $runPath 'CentralLogs'
+    }
+}
+
+function Get-SingleComputerRunRoot {
+    param([Parameter(Mandatory = $true)][string]$ToolkitKey)
+
+    return (Join-Path $toolkitRoot 'SingleComputerRuns')
 }
 
 function Start-ToolkitLot {
@@ -239,9 +411,10 @@ function Start-ToolkitLot {
         }
     }
 
+    $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $LotPath -EnvironmentVariables $EnvironmentVariables
     $setCommands = @()
-    foreach ($name in @($EnvironmentVariables.Keys | Sort-Object)) {
-        $value = [string]$EnvironmentVariables[$name]
+    foreach ($name in @($effectiveEnvironment.Keys | Sort-Object)) {
+        $value = [string]$effectiveEnvironment[$name]
         if (-not [string]::IsNullOrWhiteSpace($value)) {
             $setCommands += (ConvertTo-CmdSetCommand -Name $name -Value $value)
         }
@@ -249,6 +422,111 @@ function Start-ToolkitLot {
 
     $commandLine = (($setCommands + @($commandParts -join ' ')) -join ' & ')
     Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', $commandLine) -WorkingDirectory $LotPath -Verb RunAs
+}
+
+function Start-ToolkitSingleComputer {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [int]$GlobalConcurrencyLimit = 15,
+        [int]$GlobalConcurrencyLeaseTimeoutMinutes = 0,
+        [string[]]$AdditionalArguments = @(),
+        [hashtable]$EnvironmentVariables = @{}
+    )
+
+    $scriptPath = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1'
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        throw "Windows 11 upgrade PsExec launcher not found: $scriptPath"
+    }
+
+    $isDryRun = @($AdditionalArguments) -contains '-DryRun'
+    if (-not $isDryRun) {
+        $psexecToolkitPath = Join-Path $toolkitRoot 'Scripts\PsExec.exe'
+        $psexecSystem32Path = Join-Path $env:WINDIR 'System32\PsExec.exe'
+        $psexecCommand = Get-Command -Name 'PsExec.exe' -CommandType Application -ErrorAction SilentlyContinue
+        if (
+            -not (Test-Path -LiteralPath $psexecToolkitPath -PathType Leaf) -and
+            -not (Test-Path -LiteralPath $psexecSystem32Path -PathType Leaf) -and
+            -not $psexecCommand
+        ) {
+            throw ("PsExec.exe not found. Place it in '{0}', in '{1}', or add PsExec.exe to PATH before launching the computer." -f (Split-Path -Parent $psexecToolkitPath), (Split-Path -Parent $psexecSystem32Path))
+        }
+    }
+
+    $run = New-SingleComputerRunContext -ComputerName $ComputerName -ToolkitKey 'Windows11UpgradeToolkit'
+    if ($GlobalConcurrencyLimit -lt 1) { $GlobalConcurrencyLimit = 1 }
+
+    $commandParts = @(
+        'powershell.exe',
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        (ConvertTo-CmdArgument -Value $scriptPath),
+        '-ComputerListPath',
+        (ConvertTo-CmdArgument -Value $run.ComputersPath),
+        '-LogRoot',
+        (ConvertTo-CmdArgument -Value $run.LogRoot),
+        '-ReportRoot',
+        (ConvertTo-CmdArgument -Value $run.ReportRoot),
+        '-CentralLogRoot',
+        (ConvertTo-CmdArgument -Value $run.CentralLogRoot),
+        '-GlobalConcurrencyLimit',
+        [string]$GlobalConcurrencyLimit,
+        '-GlobalConcurrencyLeaseTimeoutMinutes',
+        [string]$GlobalConcurrencyLeaseTimeoutMinutes
+    )
+
+    if ($Mode -in @('Once','OnceIgnoreRunGuard')) { $commandParts += '-RunOnce' }
+    if ($Mode -in @('LoopIgnoreRunGuard','OnceIgnoreRunGuard')) { $commandParts += '-IgnoreRunGuard' }
+
+    foreach ($pair in @(
+        @{ Name = 'W11UT_AUDIT_ONLY'; Argument = '-AuditOnly' },
+        @{ Name = 'W11UT_ALLOW_POLICY_REPAIR'; Argument = '-AllowPolicyRepair' },
+        @{ Name = 'W11UT_ALLOW_WU_RESET'; Argument = '-AllowWUReset' },
+        @{ Name = 'W11UT_ALLOW_FORCE_UPGRADE'; Argument = '-AllowForceUpgrade' },
+        @{ Name = 'W11UT_ALLOW_SETUP_UPGRADE'; Argument = '-AllowSetupUpgrade' },
+        @{ Name = 'W11UT_ALLOW_REBOOT'; Argument = '-AllowReboot' },
+        @{ Name = 'W11UT_SKIP_VIRTUAL_MACHINES'; Argument = '-SkipVirtualMachines' },
+        @{ Name = 'W11UT_ALLOW_DISK_CLEANUP'; Argument = '-AllowDiskCleanup' },
+        @{ Name = 'W11UT_ALLOW_ADVANCED_DISK_CLEANUP'; Argument = '-AllowAdvancedDiskCleanup' },
+        @{ Name = 'W11UT_SKIP_SETUP_MEDIA_PRECOPY'; Argument = '-SkipSetupMediaPreCopy' }
+    )) {
+        if ([string]$EnvironmentVariables[$pair.Name] -eq '1') { $commandParts += $pair.Argument }
+    }
+
+    foreach ($pair in @(
+        @{ Name = 'W11UT_SETUP_SOURCE'; Argument = '-SetupSourcePath' },
+        @{ Name = 'W11UT_SETUP_SOURCE_MAP'; Argument = '-SetupSourceMapPath' },
+        @{ Name = 'W11UT_SETUP_EXECUTION_MODE'; Argument = '-SetupExecutionMode' },
+        @{ Name = 'W11UT_SETUP_MEDIA_ID'; Argument = '-SetupMediaId' },
+        @{ Name = 'W11UT_SETUP_LANGUAGE'; Argument = '-SetupLanguage' },
+        @{ Name = 'W11UT_SETUP_SOURCE_CANDIDATE_LIMIT'; Argument = '-SetupSourceCandidateLimit' },
+        @{ Name = 'W11UT_SETUP_COPY_IPG_MS'; Argument = '-SetupMediaCopyIpGapMilliseconds' },
+        @{ Name = 'W11UT_SETUP_COPY_JITTER_SECONDS'; Argument = '-SetupMediaCopyJitterSeconds' },
+        @{ Name = 'W11UT_SETUP_SOURCE_CONCURRENCY_LIMIT'; Argument = '-SetupSourceConcurrencyLimit' },
+        @{ Name = 'W11UT_SETUP_SOURCE_CONCURRENCY_LEASE_MINUTES'; Argument = '-SetupSourceConcurrencyLeaseMinutes' },
+        @{ Name = 'W11UT_SETUP_SOURCE_CONCURRENCY_GATE_ROOT'; Argument = '-SetupSourceConcurrencyGateRoot' },
+        @{ Name = 'W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS'; Argument = '-DelayBetweenComputersSeconds' },
+        @{ Name = 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES'; Argument = '-DelayBetweenCyclesMinutes' },
+        @{ Name = 'W11UT_PSEXEC_TIMEOUT_MINUTES'; Argument = '-PsExecTimeoutMinutes' }
+    )) {
+        $value = [string]$EnvironmentVariables[$pair.Name]
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            $commandParts += $pair.Argument
+            $commandParts += (ConvertTo-CmdArgument -Value $value)
+        }
+    }
+
+    foreach ($argument in @($AdditionalArguments)) {
+        if (-not [string]::IsNullOrWhiteSpace($argument)) {
+            $commandParts += (ConvertTo-CmdArgument -Value $argument)
+        }
+    }
+
+    $commandLine = $commandParts -join ' '
+    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', $commandLine) -WorkingDirectory $run.RunPath -Verb RunAs
+    return $run
 }
 
 function Wait-UiDelay {
@@ -296,6 +574,36 @@ function Open-OrCreateFolderPath {
 }
 
 $toolkitRoot = Get-ToolkitRoot
+$script:ToolkitConfigPath = Join-Path $toolkitRoot 'Windows11UpgradeToolkit.config'
+$script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
+$script:ToolkitDefaultEnvironment = @{
+    W11UT_AUDIT_ONLY = '0'
+    W11UT_ALLOW_POLICY_REPAIR = '1'
+    W11UT_ALLOW_WU_RESET = '1'
+    W11UT_ALLOW_FORCE_UPGRADE = '1'
+    W11UT_ALLOW_SETUP_UPGRADE = '1'
+    W11UT_ALLOW_REBOOT = '1'
+    W11UT_SKIP_VIRTUAL_MACHINES = '1'
+    W11UT_ALLOW_DISK_CLEANUP = '1'
+    W11UT_ALLOW_ADVANCED_DISK_CLEANUP = '0'
+    W11UT_SKIP_SETUP_MEDIA_PRECOPY = '0'
+    W11UT_SETUP_SOURCE_MAP = ''
+    W11UT_SETUP_SOURCE_CANDIDATE_LIMIT = '5'
+    W11UT_SETUP_COPY_IPG_MS = '0'
+    W11UT_SETUP_COPY_JITTER_SECONDS = '0'
+    W11UT_SETUP_SOURCE_CONCURRENCY_LIMIT = '0'
+    W11UT_SETUP_SOURCE_CONCURRENCY_LEASE_MINUTES = '240'
+    W11UT_SETUP_SOURCE_CONCURRENCY_GATE_ROOT = ''
+    W11UT_SETUP_EXECUTION_MODE = 'LocalCache'
+    W11UT_SETUP_MEDIA_ID = 'Win11'
+    W11UT_SETUP_LANGUAGE = 'MatchSystem'
+    W11UT_THROTTLE = '10'
+    W11UT_GLOBAL_CONCURRENCY_LIMIT = '15'
+    W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = '0'
+    W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS = '0'
+    W11UT_DELAY_BETWEEN_CYCLES_MINUTES = '5'
+    W11UT_PSEXEC_TIMEOUT_MINUTES = '180'
+}
 $launchAllLotStartDelaySeconds = 5
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -868,6 +1176,10 @@ $existingTab = New-Object System.Windows.Forms.Panel
 $existingTab.Dock = 'Fill'
 $existingTab.BackColor = $colorBackground
 
+$singleTab = New-Object System.Windows.Forms.Panel
+$singleTab.Dock = 'Fill'
+$singleTab.BackColor = $colorBackground
+
 $newTab = New-Object System.Windows.Forms.Panel
 $newTab.Dock = 'Fill'
 $newTab.BackColor = $colorBackground
@@ -877,16 +1189,20 @@ $optionsTab.Dock = 'Fill'
 $optionsTab.BackColor = $colorBackground
 
 $tabContentPanel.Controls.Add($existingTab)
+$tabContentPanel.Controls.Add($singleTab)
 $tabContentPanel.Controls.Add($newTab)
 $tabContentPanel.Controls.Add($optionsTab)
 
 $existingTabHeader = New-DeviceRegistrationTabHeader -Text 'Existing LOT' -Page $existingTab
+$singleTabHeader = New-DeviceRegistrationTabHeader -Text 'Single PC' -Page $singleTab
 $newTabHeader = New-DeviceRegistrationTabHeader -Text 'New LOT' -Page $newTab
 $optionsTabHeader = New-DeviceRegistrationTabHeader -Text 'Options' -Page $optionsTab
 $script:DeviceRegistrationTabHeaders.Add($existingTabHeader) | Out-Null
+$script:DeviceRegistrationTabHeaders.Add($singleTabHeader) | Out-Null
 $script:DeviceRegistrationTabHeaders.Add($newTabHeader) | Out-Null
 $script:DeviceRegistrationTabHeaders.Add($optionsTabHeader) | Out-Null
 $tabStrip.Controls.Add($existingTabHeader)
+$tabStrip.Controls.Add($singleTabHeader)
 $tabStrip.Controls.Add($newTabHeader)
 $tabStrip.Controls.Add($optionsTabHeader)
 Show-DeviceRegistrationTabPage -Header $existingTabHeader
@@ -1020,6 +1336,73 @@ $existingLayout.Controls.Add($existingSection.Panel, 0, 0)
 $existingLayout.Controls.Add($activitySection.Panel, 0, 1)
 $existingTab.Controls.Add($existingLayout)
 
+$singleLayout = New-Object System.Windows.Forms.TableLayoutPanel
+$singleLayout.Dock = 'Fill'
+$singleLayout.ColumnCount = 1
+$singleLayout.RowCount = 2
+$singleLayout.Padding = New-Object System.Windows.Forms.Padding(10)
+$singleLayout.BackColor = $colorBackground
+$singleLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$singleLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 174))) | Out-Null
+$singleLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+
+$singleSection = New-SectionPanel -Title 'Run one computer'
+$singleTable = New-Object System.Windows.Forms.TableLayoutPanel
+$singleTable.Dock = 'Top'
+$singleTable.Height = 108
+$singleTable.ColumnCount = 4
+$singleTable.RowCount = 3
+$singleTable.BackColor = $colorPanel
+$singleTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 138))) | Out-Null
+$singleTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$singleTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 150))) | Out-Null
+$singleTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 150))) | Out-Null
+for ($i = 0; $i -lt 3; $i++) {
+    $singleTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
+}
+
+$singleComputerBox = New-EntryBox
+
+$singleModeCombo = New-Object System.Windows.Forms.ComboBox
+$singleModeCombo.Dock = 'Fill'
+$singleModeCombo.DropDownStyle = 'DropDownList'
+$singleModeCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+$singleModeCombo.FlatStyle = 'Flat'
+$singleModeCombo.Items.AddRange([object[]]@('Once','OnceIgnoreRunGuard','Loop','LoopIgnoreRunGuard'))
+$singleModeCombo.SelectedIndex = 0
+
+$singleRunPathBox = New-ValueBox
+$script:SingleComputerRunRoot = Get-SingleComputerRunRoot -ToolkitKey 'Windows11UpgradeToolkit'
+$singleRunPathBox.Text = $script:SingleComputerRunRoot
+
+$openSingleRunFolderButton = New-Object System.Windows.Forms.Button
+$openSingleRunFolderButton.Text = 'Open run folder'
+$openSingleRunFolderButton.Dock = 'Fill'
+Set-FlatButtonStyle -Button $openSingleRunFolderButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+
+$launchSingleComputerButton = New-Object System.Windows.Forms.Button
+$launchSingleComputerButton.Text = 'Launch'
+$launchSingleComputerButton.Dock = 'Fill'
+Set-ButtonEnabledStyle -Button $launchSingleComputerButton -Enabled $true -EnabledBackColor $colorAccent
+
+$singleTable.Controls.Add((New-Label 'Computer'), 0, 0)
+$singleTable.Controls.Add($singleComputerBox, 1, 0)
+$singleTable.Controls.Add((New-Label 'Mode'), 2, 0)
+$singleTable.Controls.Add($singleModeCombo, 3, 0)
+
+$singleTable.Controls.Add((New-Label 'Run folder'), 0, 1)
+$singleTable.Controls.Add($singleRunPathBox, 1, 1)
+$singleTable.SetColumnSpan($singleRunPathBox, 2)
+$singleTable.Controls.Add($openSingleRunFolderButton, 3, 1)
+
+$singleTable.Controls.Add((New-Label 'Launch'), 0, 2)
+$singleTable.Controls.Add($launchSingleComputerButton, 1, 2)
+$singleTable.SetColumnSpan($launchSingleComputerButton, 3)
+
+$singleSection.Content.Controls.Add($singleTable)
+$singleLayout.Controls.Add($singleSection.Panel, 0, 0)
+$singleTab.Controls.Add($singleLayout)
+
 $newLayout = New-Object System.Windows.Forms.TableLayoutPanel
 $newLayout.Dock = 'Fill'
 $newLayout.ColumnCount = 1
@@ -1088,7 +1471,7 @@ $optionsTable = New-Object System.Windows.Forms.TableLayoutPanel
 $optionsTable.Dock = 'Top'
 $optionsTable.AutoSize = $true
 $optionsTable.ColumnCount = 4
-$optionsTable.RowCount = 11
+$optionsTable.RowCount = 13
 $optionsTable.BackColor = $colorPanel
 $optionsTable.Padding = New-Object System.Windows.Forms.Padding(0, 2, 12, 2)
 $optionsTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 190))) | Out-Null
@@ -1128,7 +1511,7 @@ function Get-EnvSwitch {
         [bool]$Default = $false
     )
 
-    $value = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    $value = Get-ToolkitConfigValue -Name $Name
     if ([string]::IsNullOrWhiteSpace($value)) {
         return $Default
     }
@@ -1170,13 +1553,27 @@ function Test-IsLocalOrRelativePath {
     return $true
 }
 
+function Split-SetupSourceText {
+    param([AllowNull()][string]$Value)
+
+    $sources = New-Object System.Collections.ArrayList
+    foreach ($item in @([string]$Value -split ';')) {
+        $source = ([string]$item).Trim().Trim([char]34)
+        if (-not [string]::IsNullOrWhiteSpace($source)) {
+            [void]$sources.Add($source)
+        }
+    }
+
+    return @($sources.ToArray())
+}
+
 function Set-OptionNumberFromEnv {
     param(
         [Parameter(Mandatory = $true)][System.Windows.Forms.NumericUpDown]$Control,
         [Parameter(Mandatory = $true)][string]$Name
     )
 
-    $value = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    $value = Get-ToolkitConfigValue -Name $Name
     $parsed = 0
     if ([int]::TryParse($value, [ref]$parsed)) {
         if ($parsed -ge [int]$Control.Minimum -and $parsed -le [int]$Control.Maximum) {
@@ -1213,6 +1610,9 @@ $optionSetupSourceBox.Add_Leave({
 })
 Set-SetupSourcePlaceholder
 
+$optionSetupSourceMapBox = New-EntryBox
+$optionSetupSourceMapBox.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+
 $optionSetupModeCombo = New-Object System.Windows.Forms.ComboBox
 $optionSetupModeCombo.Dock = 'Fill'
 $optionSetupModeCombo.DropDownStyle = 'DropDownList'
@@ -1240,6 +1640,9 @@ $optionGlobalConcurrencyLeaseTimeoutBox = New-OptionNumber -Minimum 0 -Maximum 1
 $optionDelayBetweenCyclesBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 5
 $optionMaxCyclesBox = New-OptionNumber -Minimum 0 -Maximum 1000 -Value 0
 $optionPsExecTimeoutBox = New-OptionNumber -Minimum 0 -Maximum 1440 -Value 180
+$optionSetupSourceCandidateLimitBox = New-OptionNumber -Minimum 0 -Maximum 100 -Value 5
+$optionSetupCopyIpGapBox = New-OptionNumber -Minimum 0 -Maximum 10000 -Value 0
+$optionSetupCopyJitterBox = New-OptionNumber -Minimum 0 -Maximum 86400 -Value 0
 
 $optionAuditOnlyCheck.Checked = Get-EnvSwitch -Name 'W11UT_AUDIT_ONLY'
 $optionAllowPolicyRepairCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_POLICY_REPAIR' -Default $true
@@ -1252,23 +1655,28 @@ $optionAllowDiskCleanupCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_DISK_CLE
 $optionAllowAdvancedCleanupCheck.Checked = ((Get-EnvSwitch -Name 'W11UT_ALLOW_ADVANCED_DISK_CLEANUP') -or (Get-EnvSwitch -Name 'W11UT_ALLOW_DISM_COMPONENT_CLEANUP'))
 $optionSkipSetupPreCopyCheck.Checked = Get-EnvSwitch -Name 'W11UT_SKIP_SETUP_MEDIA_PRECOPY'
 
-$setupSourceDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_SOURCE', 'Process')
+$setupSourceDefault = Get-ToolkitConfigValue -Name 'W11UT_SETUP_SOURCE'
 if (-not [string]::IsNullOrWhiteSpace($setupSourceDefault)) {
     $optionSetupSourceBox.Text = $setupSourceDefault
     $optionSetupSourceBox.ForeColor = $colorInk
 }
 
-$setupModeDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_EXECUTION_MODE', 'Process')
+$setupSourceMapDefault = Get-ToolkitConfigValue -Name 'W11UT_SETUP_SOURCE_MAP'
+if (-not [string]::IsNullOrWhiteSpace($setupSourceMapDefault)) {
+    $optionSetupSourceMapBox.Text = $setupSourceMapDefault
+}
+
+$setupModeDefault = Get-ToolkitConfigValue -Name 'W11UT_SETUP_EXECUTION_MODE'
 if ($setupModeDefault -in @('LocalCache','Share','Auto')) {
     $optionSetupModeCombo.SelectedItem = $setupModeDefault
 }
 
-$setupMediaDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_MEDIA_ID', 'Process')
+$setupMediaDefault = Get-ToolkitConfigValue -Name 'W11UT_SETUP_MEDIA_ID'
 if (-not [string]::IsNullOrWhiteSpace($setupMediaDefault)) {
     $optionSetupMediaIdBox.Text = $setupMediaDefault
 }
 
-$setupLanguageDefault = [Environment]::GetEnvironmentVariable('W11UT_SETUP_LANGUAGE', 'Process')
+$setupLanguageDefault = Get-ToolkitConfigValue -Name 'W11UT_SETUP_LANGUAGE'
 if (-not [string]::IsNullOrWhiteSpace($setupLanguageDefault)) {
     $optionSetupLanguageCombo.Text = $setupLanguageDefault
 }
@@ -1279,6 +1687,9 @@ Set-OptionNumberFromEnv -Control $optionPsExecTimeoutBox -Name 'W11UT_PSEXEC_TIM
 Set-OptionNumberFromEnv -Control $optionThrottleBox -Name 'W11UT_THROTTLE'
 Set-OptionNumberFromEnv -Control $optionGlobalConcurrencyLimitBox -Name 'W11UT_GLOBAL_CONCURRENCY_LIMIT'
 Set-OptionNumberFromEnv -Control $optionGlobalConcurrencyLeaseTimeoutBox -Name 'W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES'
+Set-OptionNumberFromEnv -Control $optionSetupSourceCandidateLimitBox -Name 'W11UT_SETUP_SOURCE_CANDIDATE_LIMIT'
+Set-OptionNumberFromEnv -Control $optionSetupCopyIpGapBox -Name 'W11UT_SETUP_COPY_IPG_MS'
+Set-OptionNumberFromEnv -Control $optionSetupCopyJitterBox -Name 'W11UT_SETUP_COPY_JITTER_SECONDS'
 
 $optionsTable.Controls.Add($optionAuditOnlyCheck, 0, 0)
 $optionsTable.Controls.Add($optionAllowPolicyRepairCheck, 1, 0)
@@ -1294,46 +1705,58 @@ $optionsTable.Controls.Add((New-Label 'Setup source'), 0, 2)
 $optionsTable.Controls.Add($optionSetupSourceBox, 1, 2)
 $optionsTable.SetColumnSpan($optionSetupSourceBox, 3)
 
-$optionsTable.Controls.Add((New-Label 'Setup mode'), 0, 3)
-$optionsTable.Controls.Add($optionSetupModeCombo, 1, 3)
-$optionsTable.Controls.Add((New-Label 'Setup media id'), 2, 3)
-$optionsTable.Controls.Add($optionSetupMediaIdBox, 3, 3)
+$optionsTable.Controls.Add((New-Label 'Setup source map'), 0, 3)
+$optionsTable.Controls.Add($optionSetupSourceMapBox, 1, 3)
+$optionsTable.SetColumnSpan($optionSetupSourceMapBox, 3)
 
-$optionsTable.Controls.Add((New-Label 'Setup language'), 0, 4)
-$optionsTable.Controls.Add($optionSetupLanguageCombo, 1, 4)
+$optionsTable.Controls.Add((New-Label 'Setup mode'), 0, 4)
+$optionsTable.Controls.Add($optionSetupModeCombo, 1, 4)
+$optionsTable.Controls.Add((New-Label 'Setup media id'), 2, 4)
+$optionsTable.Controls.Add($optionSetupMediaIdBox, 3, 4)
+
+$optionsTable.Controls.Add((New-Label 'Setup language'), 0, 5)
+$optionsTable.Controls.Add($optionSetupLanguageCombo, 1, 5)
 $optionsTable.SetColumnSpan($optionSetupLanguageCombo, 3)
 
-$optionsTable.Controls.Add($optionSkipSetupPreCopyCheck, 0, 5)
-$optionsTable.Controls.Add($optionAllowDiskCleanupCheck, 1, 5)
-$optionsTable.Controls.Add($optionAllowAdvancedCleanupCheck, 2, 5)
-$optionsTable.Controls.Add($optionKeepCentralHistoryCheck, 3, 5)
+$optionsTable.Controls.Add($optionSkipSetupPreCopyCheck, 0, 6)
+$optionsTable.Controls.Add($optionAllowDiskCleanupCheck, 1, 6)
+$optionsTable.Controls.Add($optionAllowAdvancedCleanupCheck, 2, 6)
+$optionsTable.Controls.Add($optionKeepCentralHistoryCheck, 3, 6)
 
-$optionsTable.Controls.Add((New-Label 'Throttle per LOT'), 0, 6)
-$optionsTable.Controls.Add($optionThrottleBox, 1, 6)
-$optionsTable.Controls.Add((New-Label 'Computer delay sec'), 2, 6)
-$optionsTable.Controls.Add($optionDelayBetweenComputersBox, 3, 6)
+$optionsTable.Controls.Add((New-Label 'Throttle per LOT'), 0, 7)
+$optionsTable.Controls.Add($optionThrottleBox, 1, 7)
+$optionsTable.Controls.Add((New-Label 'Computer delay sec'), 2, 7)
+$optionsTable.Controls.Add($optionDelayBetweenComputersBox, 3, 7)
 
-$optionsTable.Controls.Add((New-Label 'Delay between cycles'), 0, 7)
-$optionsTable.Controls.Add($optionDelayBetweenCyclesBox, 1, 7)
-$optionsTable.Controls.Add((New-Label 'Max cycles'), 2, 7)
-$optionsTable.Controls.Add($optionMaxCyclesBox, 3, 7)
+$optionsTable.Controls.Add((New-Label 'Delay between cycles'), 0, 8)
+$optionsTable.Controls.Add($optionDelayBetweenCyclesBox, 1, 8)
+$optionsTable.Controls.Add((New-Label 'Max cycles'), 2, 8)
+$optionsTable.Controls.Add($optionMaxCyclesBox, 3, 8)
 
-$optionsTable.Controls.Add((New-Label 'PsExec timeout min'), 0, 8)
-$optionsTable.Controls.Add($optionPsExecTimeoutBox, 1, 8)
-$optionsTable.Controls.Add((New-Label 'Global worker limit'), 2, 8)
-$optionsTable.Controls.Add($optionGlobalConcurrencyLimitBox, 3, 8)
+$optionsTable.Controls.Add((New-Label 'PsExec timeout min'), 0, 9)
+$optionsTable.Controls.Add($optionPsExecTimeoutBox, 1, 9)
+$optionsTable.Controls.Add((New-Label 'Global worker limit'), 2, 9)
+$optionsTable.Controls.Add($optionGlobalConcurrencyLimitBox, 3, 9)
 
-$optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 0, 9)
-$optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 1, 9)
-$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 2, 9)
+$optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 0, 10)
+$optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 1, 10)
+$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 2, 10)
+
+$optionsTable.Controls.Add((New-Label 'Copy IPG ms'), 0, 11)
+$optionsTable.Controls.Add($optionSetupCopyIpGapBox, 1, 11)
+$optionsTable.Controls.Add((New-Label 'Copy jitter sec'), 2, 11)
+$optionsTable.Controls.Add($optionSetupCopyJitterBox, 3, 11)
+
+$optionsTable.Controls.Add((New-Label 'Candidate limit'), 0, 12)
+$optionsTable.Controls.Add($optionSetupSourceCandidateLimitBox, 1, 12)
 
 $optionsNote = New-Object System.Windows.Forms.Label
-$optionsNote.Text = 'For LOT/PsExec, Setup source must be a UNC path reachable by target computers. Local paths are for local tests only and require confirmation.'
+$optionsNote.Text = 'For LOT/PsExec, Setup source must be a UNC path reachable by target computers. Use semicolons to list site shares; each target selects the nearest valid source.'
 $optionsNote.Dock = 'Fill'
 $optionsNote.ForeColor = $colorMuted
 $optionsNote.TextAlign = 'MiddleLeft'
-$optionsTable.Controls.Add($optionsNote, 0, 10)
-$optionsTable.SetColumnSpan($optionsNote, 4)
+$optionsTable.Controls.Add($optionsNote, 2, 12)
+$optionsTable.SetColumnSpan($optionsNote, 2)
 
 $optionsScrollPanel.Controls.Add($optionsTable)
 $optionsSection.Content.Controls.Add($optionsScrollPanel)
@@ -1401,6 +1824,7 @@ $form.Controls.Add($rootLayout)
 $script:LotList = @()
 $script:SelectedLotSummary = $null
 $script:CreatedComputersPath = $null
+$script:LastSingleRunPath = $null
 
 function Add-Status {
     param([string]$Message)
@@ -1444,6 +1868,9 @@ function Get-ToolkitOptionEnvironment {
         W11UT_PSEXEC_TIMEOUT_MINUTES = [string][int]$optionPsExecTimeoutBox.Value
         W11UT_SETUP_EXECUTION_MODE = [string]$optionSetupModeCombo.SelectedItem
         W11UT_SETUP_LANGUAGE = $optionSetupLanguageCombo.Text.Trim()
+        W11UT_SETUP_SOURCE_CANDIDATE_LIMIT = [string][int]$optionSetupSourceCandidateLimitBox.Value
+        W11UT_SETUP_COPY_IPG_MS = [string][int]$optionSetupCopyIpGapBox.Value
+        W11UT_SETUP_COPY_JITTER_SECONDS = [string][int]$optionSetupCopyJitterBox.Value
     }
 
     if (-not [string]::IsNullOrWhiteSpace($optionSetupMediaIdBox.Text)) {
@@ -1453,6 +1880,10 @@ function Get-ToolkitOptionEnvironment {
     $setupSource = Get-SetupSourceText
     if (-not [string]::IsNullOrWhiteSpace($setupSource)) {
         $environment["W11UT_SETUP_SOURCE"] = $setupSource
+    }
+    $setupSourceMap = $optionSetupSourceMapBox.Text.Trim()
+    if (-not [string]::IsNullOrWhiteSpace($setupSourceMap)) {
+        $environment["W11UT_SETUP_SOURCE_MAP"] = $setupSourceMap
     }
 
     $environment["W11UT_AUDIT_ONLY"] = if ($optionAuditOnlyCheck.Checked) { "1" } else { "0" }
@@ -1470,29 +1901,53 @@ function Get-ToolkitOptionEnvironment {
 }
 
 function Test-SetupSourceBeforeLaunch {
-    $setupSource = Get-SetupSourceText
-    $mode = [string]$optionSetupModeCombo.SelectedItem
+    param(
+        [hashtable]$EnvironmentVariables = $null,
+        [string]$ScopeName = 'current options'
+    )
 
-    if (-not $optionAllowSetupUpgradeCheck.Checked) { return $true }
-    if ($optionSkipSetupPreCopyCheck.Checked -and $mode -ne 'Share') { return $true }
+    if ($EnvironmentVariables) {
+        $setupSource = [string]$EnvironmentVariables['W11UT_SETUP_SOURCE']
+        $setupSourceMap = [string]$EnvironmentVariables['W11UT_SETUP_SOURCE_MAP']
+        $mode = [string]$EnvironmentVariables['W11UT_SETUP_EXECUTION_MODE']
+        $allowSetupUpgrade = ([string]$EnvironmentVariables['W11UT_ALLOW_SETUP_UPGRADE'] -eq '1')
+        $skipSetupPreCopy = ([string]$EnvironmentVariables['W11UT_SKIP_SETUP_MEDIA_PRECOPY'] -eq '1')
+    }
+    else {
+        $setupSource = Get-SetupSourceText
+        $setupSourceMap = $optionSetupSourceMapBox.Text.Trim()
+        $mode = [string]$optionSetupModeCombo.SelectedItem
+        $allowSetupUpgrade = $optionAllowSetupUpgradeCheck.Checked
+        $skipSetupPreCopy = $optionSkipSetupPreCopyCheck.Checked
+    }
 
-    if ([string]::IsNullOrWhiteSpace($setupSource)) {
+    if (-not $allowSetupUpgrade) { return $true }
+    if ($skipSetupPreCopy -and $mode -ne 'Share') { return $true }
+
+    if ([string]::IsNullOrWhiteSpace($setupSource) -and [string]::IsNullOrWhiteSpace($setupSourceMap)) {
         [System.Windows.Forms.MessageBox]::Show(
             $form,
-            "Setup source is required for setup upgrade when target media copy is enabled.`r`n`r`nUse a UNC path reachable by the target computers, for example:`r`n$script:SetupSourcePlaceholder`r`n`r`nOr enable Use existing media only if the target cache is already valid.",
+            ("Setup source or setup source map is required for setup upgrade when target media copy is enabled.`r`n`r`nScope: {0}`r`n`r`nUse a UNC path reachable by the target computers, for example:`r`n{1}`r`n`r`nOr set W11UT_SETUP_SOURCE_MAP to a CSV map path, or enable Use existing media only if the target cache is already valid." -f $ScopeName,$script:SetupSourcePlaceholder),
             'Setup source required',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Warning
         ) | Out-Null
-        $optionSetupSourceBox.Focus()
+        if (-not $EnvironmentVariables) {
+            $optionSetupSourceBox.Focus()
+        }
         return $false
     }
 
-    if (Test-IsUncPath -Path $setupSource) { return $true }
+    $setupSources = @(
+        Split-SetupSourceText -Value $setupSource
+        if (-not [string]::IsNullOrWhiteSpace($setupSourceMap)) { $setupSourceMap }
+    )
+    $localSources = @($setupSources | Where-Object { -not (Test-IsUncPath -Path $_) })
+    if ($setupSources.Count -gt 0 -and $localSources.Count -eq 0) { return $true }
 
     $answer = [System.Windows.Forms.MessageBox]::Show(
         $form,
-        ("Setup source is not a UNC path:`r`n{0}`r`n`r`nIn LOT/PsExec mode, the target computer runs as SYSTEM and must read this path itself. A local or relative path usually exists only on the technician workstation.`r`n`r`nContinue anyway for a local/direct test or an explicitly shared identical path?" -f $setupSource),
+        ("One or more setup sources are not UNC paths:`r`n{0}`r`n`r`nIn LOT/PsExec mode, the target computer runs as SYSTEM and must read these paths itself. A local or relative path usually exists only on the technician workstation.`r`n`r`nContinue anyway for a local/direct test or an explicitly shared identical path?" -f ($localSources -join "`r`n")),
         'Confirm local setup source',
         [System.Windows.Forms.MessageBoxButtons]::YesNo,
         [System.Windows.Forms.MessageBoxIcon]::Warning
@@ -1684,11 +2139,13 @@ $launchExistingButton.Add_Click({
     try {
         if (-not $script:SelectedLotSummary) { throw 'Select a LOT first.' }
         if ($script:SelectedLotSummary.ComputerCount -le 0) { throw 'Computers.txt is empty.' }
-        if (-not (Test-SetupSourceBeforeLaunch)) { return }
 
         $optionArguments = @(Get-ToolkitOptionArguments)
         $optionEnvironment = Get-ToolkitOptionEnvironment
-        Add-Status ("Launching {0} in {1} mode. Global limit={2}. Args={3}; env={4}." -f $script:SelectedLotSummary.Name, $existingModeCombo.SelectedItem, [int]$globalConcurrencyLimitBox.Value, $optionArguments.Count, $optionEnvironment.Count)
+        $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $script:SelectedLotSummary.Path -EnvironmentVariables $optionEnvironment
+        if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $script:SelectedLotSummary.Name)) { return }
+
+        Add-Status ("Launching {0} in {1} mode. Global limit={2}. Args={3}; env={4}." -f $script:SelectedLotSummary.Name, $existingModeCombo.SelectedItem, [int]$globalConcurrencyLimitBox.Value, $optionArguments.Count, $effectiveEnvironment.Count)
         Start-ToolkitLot -LotPath $script:SelectedLotSummary.Path -Mode ([string]$existingModeCombo.SelectedItem) -GlobalConcurrencyLimit ([int]$globalConcurrencyLimitBox.Value) -GlobalConcurrencyLeaseTimeoutMinutes ([int]$optionGlobalConcurrencyLeaseTimeoutBox.Value) -AdditionalArguments $optionArguments -EnvironmentVariables $optionEnvironment
     }
     catch {
@@ -1703,12 +2160,16 @@ $launchAllLotsButton.Add_Click({
         if ($launchableLots.Count -eq 0) {
             throw 'No launchable LOT found. Check Computers.txt and wrapper files.'
         }
-        if (-not (Test-SetupSourceBeforeLaunch)) { return }
-
         $mode = [string]$existingModeCombo.SelectedItem
         $limit = [int]$globalConcurrencyLimitBox.Value
         $optionArguments = @(Get-ToolkitOptionArguments)
         $optionEnvironment = Get-ToolkitOptionEnvironment
+
+        foreach ($lotSummary in $launchableLots) {
+            $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $lotSummary.Path -EnvironmentVariables $optionEnvironment
+            if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $lotSummary.Name)) { return }
+        }
+
         Add-Status ("Launching {0}/{1} LOT folder(s) in {2} mode. Global limit={3}. Delay={4}s. Args={5}; env={6}." -f $launchableLots.Count, $script:LotList.Count, $mode, $limit, $launchAllLotStartDelaySeconds, $optionArguments.Count, $optionEnvironment.Count)
 
         for ($lotIndex = 0; $lotIndex -lt $launchableLots.Count; $lotIndex++) {
@@ -1730,6 +2191,45 @@ $launchAllLotsButton.Add_Click({
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
         [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Launch all failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    }
+})
+
+$launchSingleComputerButton.Add_Click({
+    try {
+        if (-not (Test-SetupSourceBeforeLaunch)) { return }
+
+        $computerName = $singleComputerBox.Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($computerName)) { throw 'Enter a computer name.' }
+
+        $optionArguments = @(Get-ToolkitOptionArguments)
+        $optionEnvironment = Get-ToolkitOptionEnvironment
+        Add-Status ("Launching single computer {0} in {1} mode. Global limit={2}. Args={3}; env={4}." -f $computerName, $singleModeCombo.SelectedItem, [int]$globalConcurrencyLimitBox.Value, $optionArguments.Count, $optionEnvironment.Count)
+        $run = Start-ToolkitSingleComputer -ComputerName $computerName -Mode ([string]$singleModeCombo.SelectedItem) -GlobalConcurrencyLimit ([int]$globalConcurrencyLimitBox.Value) -GlobalConcurrencyLeaseTimeoutMinutes ([int]$optionGlobalConcurrencyLeaseTimeoutBox.Value) -AdditionalArguments $optionArguments -EnvironmentVariables $optionEnvironment
+        $script:LastSingleRunPath = $run.RunPath
+        $singleRunPathBox.Text = $run.RunPath
+        Set-FlatButtonStyle -Button $openSingleRunFolderButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+        Add-Status ("Single computer run folder: {0}" -f $run.RunPath)
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Single computer launch failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    }
+})
+
+$openSingleRunFolderButton.Add_Click({
+    try {
+        $pathToOpen = $script:LastSingleRunPath
+        if ([string]::IsNullOrWhiteSpace($pathToOpen)) {
+            $pathToOpen = $script:SingleComputerRunRoot
+        }
+        if ([string]::IsNullOrWhiteSpace($pathToOpen)) {
+            throw 'No single computer run folder configured.'
+        }
+        Open-OrCreateFolderPath -Path $pathToOpen
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Open run folder failed', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 

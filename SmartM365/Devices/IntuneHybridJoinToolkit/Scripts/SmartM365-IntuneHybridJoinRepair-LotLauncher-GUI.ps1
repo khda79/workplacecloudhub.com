@@ -250,6 +250,87 @@ function ConvertTo-CmdSetCommand {
     return ('set "{0}={1}"' -f $Name, (($Value -replace '"', '\"')))
 }
 
+function New-SingleComputerRunContext {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$ToolkitKey
+    )
+
+    $trimmed = $ComputerName.Trim().Trim([char]34)
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        throw "Enter a computer name."
+    }
+
+    $safeComputer = [regex]::Replace($trimmed, "[^A-Za-z0-9._-]+", "-").Trim("-._")
+    if ([string]::IsNullOrWhiteSpace($safeComputer)) { $safeComputer = "Computer" }
+
+    $runRoot = Get-SingleComputerRunRoot -ToolkitKey $ToolkitKey
+    $runPath = Join-Path $runRoot ("{0}_{1}" -f (Get-Date -Format "yyyyMMdd-HHmmss"),$safeComputer)
+    New-Item -ItemType Directory -Path $runPath -Force -ErrorAction Stop | Out-Null
+
+    $computersPath = Join-Path $runPath "Computers.txt"
+    Set-Content -LiteralPath $computersPath -Value $trimmed -Encoding UTF8 -Force
+
+    foreach ($folder in @("PsExecLogs","Reports","CentralLogs")) {
+        New-Item -ItemType Directory -Path (Join-Path $runPath $folder) -Force -ErrorAction Stop | Out-Null
+    }
+
+    [pscustomobject]@{
+        ComputerName = $trimmed
+        RunPath = $runPath
+        ComputersPath = $computersPath
+        LogRoot = Join-Path $runPath "PsExecLogs"
+        ReportRoot = Join-Path $runPath "Reports"
+        CentralLogRoot = Join-Path $runPath "CentralLogs"
+    }
+}
+
+function Get-SingleComputerRunRoot {
+    param([Parameter(Mandatory = $true)][string]$ToolkitKey)
+
+    return (Join-Path $toolkitRoot "SingleComputerRuns")
+}
+
+function Test-RecentFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$FreshMinutes = 120
+    )
+
+    $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+    if (-not $item) { return $false }
+    return (((Get-Date) - $item.LastWriteTime).TotalMinutes -le $FreshMinutes)
+}
+
+function New-SingleComputerInventoryExportCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [Parameter(Mandatory = $true)][string]$OutputPath,
+        [Parameter(Mandatory = $true)][string]$ComputerListPath,
+        [string]$Domain
+    )
+
+    $parts = @(
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        (ConvertTo-CmdArgument -Value $ScriptPath),
+        "-OutputPath",
+        (ConvertTo-CmdArgument -Value $OutputPath),
+        "-ComputerListPath",
+        (ConvertTo-CmdArgument -Value $ComputerListPath),
+        "-ForceRefresh"
+    )
+    if (-not [string]::IsNullOrWhiteSpace($Domain)) {
+        $parts += "-Domain"
+        $parts += (ConvertTo-CmdArgument -Value $Domain)
+    }
+
+    return ($parts -join " ")
+}
+
 function Start-ToolkitLot {
     param(
         [Parameter(Mandatory = $true)][string]$LotPath,
@@ -308,6 +389,153 @@ function Start-ToolkitLot {
 
     $commandLine = (($setCommands + @($commandParts -join " ")) -join " & ")
     Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", $commandLine) -WorkingDirectory $LotPath -Verb RunAs
+}
+
+function Start-ToolkitSingleComputer {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [int]$GlobalConcurrencyLimit = 15,
+        [int]$GlobalConcurrencyLeaseTimeoutMinutes = 0,
+        [string[]]$AdditionalArguments = @(),
+        [hashtable]$EnvironmentVariables = @{}
+    )
+
+    $scriptPath = Join-Path $toolkitRoot "Scripts\SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec.ps1"
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        throw "Intune Hybrid Join PsExec launcher not found: $scriptPath"
+    }
+
+    $isDryRun = @($AdditionalArguments) -contains "-DryRun"
+    if (-not $isDryRun) {
+        $psexecToolkitPath = Join-Path $toolkitRoot "Scripts\PsExec.exe"
+        $psexecSystem32Path = Join-Path $env:WINDIR "System32\PsExec.exe"
+        $psexecCommand = Get-Command -Name "PsExec.exe" -CommandType Application -ErrorAction SilentlyContinue
+        if (
+            -not (Test-Path -LiteralPath $psexecToolkitPath -PathType Leaf) -and
+            -not (Test-Path -LiteralPath $psexecSystem32Path -PathType Leaf) -and
+            -not $psexecCommand
+        ) {
+            throw ("PsExec.exe not found. Place it in '{0}', in '{1}', or add PsExec.exe to PATH before launching the computer." -f (Split-Path -Parent $psexecToolkitPath), (Split-Path -Parent $psexecSystem32Path))
+        }
+    }
+
+    $run = New-SingleComputerRunContext -ComputerName $ComputerName -ToolkitKey "IntuneHybridJoinToolkit"
+    if ($GlobalConcurrencyLimit -lt 1) { $GlobalConcurrencyLimit = 1 }
+
+    $commandParts = @(
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        (ConvertTo-CmdArgument -Value $scriptPath),
+        "-ComputerListPath",
+        (ConvertTo-CmdArgument -Value $run.ComputersPath),
+        "-LogRoot",
+        (ConvertTo-CmdArgument -Value $run.LogRoot),
+        "-ReportRoot",
+        (ConvertTo-CmdArgument -Value $run.ReportRoot),
+        "-CentralLogRoot",
+        (ConvertTo-CmdArgument -Value $run.CentralLogRoot),
+        "-GlobalConcurrencyLimit",
+        [string]$GlobalConcurrencyLimit,
+        "-GlobalConcurrencyLeaseTimeoutMinutes",
+        [string]$GlobalConcurrencyLeaseTimeoutMinutes
+    )
+
+    $inventoryCommands = @()
+    $intuneInventoryCsv = Join-Path $toolkitRoot "DevicesIntune.csv"
+    $entraInventoryCsv = Join-Path $toolkitRoot "DevicesEntra.csv"
+    $adRootInventoryCsv = Join-Path $toolkitRoot "DevicesAD.csv"
+    $adDomain = [string]$EnvironmentVariables["EHJIR_AD_DOMAIN"]
+
+    $rootInventoriesAreRecent = (
+        (Test-RecentFile -Path $intuneInventoryCsv) -and
+        (Test-RecentFile -Path $entraInventoryCsv) -and
+        (Test-RecentFile -Path $adRootInventoryCsv)
+    )
+
+    if ($rootInventoriesAreRecent) {
+        $commandParts += "-IntuneInventoryCsv"
+        $commandParts += (ConvertTo-CmdArgument -Value $intuneInventoryCsv)
+        $commandParts += "-EntraInventoryCsv"
+        $commandParts += (ConvertTo-CmdArgument -Value $entraInventoryCsv)
+        $commandParts += "-AdRootInventoryCsv"
+        $commandParts += (ConvertTo-CmdArgument -Value $adRootInventoryCsv)
+        $commandParts += "-AdInventoryCsv"
+        $commandParts += (ConvertTo-CmdArgument -Value $adRootInventoryCsv)
+    }
+    else {
+        $intuneInventoryCsv = Join-Path $run.RunPath "DevicesIntune.csv"
+        $entraInventoryCsv = Join-Path $run.RunPath "DevicesEntra.csv"
+        $adRootInventoryCsv = Join-Path $run.RunPath "DevicesAD.csv"
+
+        $inventoryCommands += (New-SingleComputerInventoryExportCommand -ScriptPath (Join-Path $toolkitRoot "Scripts\SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1") -OutputPath $intuneInventoryCsv -ComputerListPath $run.ComputersPath)
+        $inventoryCommands += (New-SingleComputerInventoryExportCommand -ScriptPath (Join-Path $toolkitRoot "Scripts\SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1") -OutputPath $entraInventoryCsv -ComputerListPath $run.ComputersPath)
+        $inventoryCommands += (New-SingleComputerInventoryExportCommand -ScriptPath (Join-Path $toolkitRoot "Scripts\SmartM365-IntuneHybridJoinRepair-Export-ADDevicesCsv.ps1") -OutputPath $adRootInventoryCsv -ComputerListPath $run.ComputersPath -Domain $adDomain)
+
+        $commandParts += "-IntuneInventoryCsv"
+        $commandParts += (ConvertTo-CmdArgument -Value $intuneInventoryCsv)
+        $commandParts += "-EntraInventoryCsv"
+        $commandParts += (ConvertTo-CmdArgument -Value $entraInventoryCsv)
+        $commandParts += "-AdInventoryCsv"
+        $commandParts += (ConvertTo-CmdArgument -Value $adRootInventoryCsv)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($adDomain)) {
+        $commandParts += "-AdDomain"
+        $commandParts += (ConvertTo-CmdArgument -Value $adDomain)
+    }
+
+    if ($Mode -in @("Once","OnceIgnoreRunGuard")) { $commandParts += "-RunOnce" }
+    if ($Mode -in @("LoopIgnoreRunGuard","OnceIgnoreRunGuard")) { $commandParts += "-IgnoreRunGuard" }
+
+    if ([string]$EnvironmentVariables["EHJIR_ALLOW_DSREG_LEAVE"] -eq "1") {
+        $commandParts += "-AllowDsregLeave"
+    }
+    else {
+        $commandParts += "-AllowDsregLeave:`$false"
+    }
+    foreach ($pair in @(
+        @{ Name = "EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT"; Argument = "-AllowRemoveStaleIntuneEnrollment" },
+        @{ Name = "EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER"; Argument = "-AllowRebootWhenNoInteractiveUser" },
+        @{ Name = "EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE"; Argument = "-AllowRebootAfterDsregLeave" },
+        @{ Name = "EHJIR_SKIP_VIRTUAL_MACHINES"; Argument = "-SkipVirtualMachines" }
+    )) {
+        if ([string]$EnvironmentVariables[$pair.Name] -eq "1") { $commandParts += $pair.Argument }
+    }
+
+    foreach ($pair in @(
+        @{ Name = "EHJIR_THROTTLE"; Argument = "-ThrottleLimit" },
+        @{ Name = "EHJIR_DELAY_BETWEEN_CYCLES_MINUTES"; Argument = "-DelayBetweenCyclesMinutes" },
+        @{ Name = "EHJIR_INTUNE_RETRY_SLEEP_MINUTES"; Argument = "-IntuneRetrySleepMinutes" },
+        @{ Name = "EHJIR_INTUNE_RETRY_MAX_RETRIES"; Argument = "-IntuneRetryMaxRetries" },
+        @{ Name = "EHJIR_STALE_CLEANUP_DELAY_SECONDS"; Argument = "-StaleCleanupDelaySeconds" },
+        @{ Name = "EHJIR_REBOOT_DELAY_SECONDS"; Argument = "-RebootDelaySeconds" },
+        @{ Name = "EHJIR_PSEXEC_TIMEOUT_MINUTES"; Argument = "-PsExecTimeoutMinutes" }
+    )) {
+        $value = [string]$EnvironmentVariables[$pair.Name]
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            $commandParts += $pair.Argument
+            $commandParts += (ConvertTo-CmdArgument -Value $value)
+        }
+    }
+
+    foreach ($argument in @($AdditionalArguments)) {
+        if (-not [string]::IsNullOrWhiteSpace($argument)) {
+            $commandParts += (ConvertTo-CmdArgument -Value $argument)
+        }
+    }
+
+    $commandLine = if ($inventoryCommands.Count -gt 0) {
+        (($inventoryCommands + @($commandParts -join " ")) -join " && ")
+    }
+    else {
+        $commandParts -join " "
+    }
+    Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", $commandLine) -WorkingDirectory $run.RunPath -Verb RunAs
+    return $run
 }
 
 function Wait-UiDelay {
@@ -932,6 +1160,10 @@ $existingTab = New-Object System.Windows.Forms.Panel
 $existingTab.Dock = "Fill"
 $existingTab.BackColor = $colorBackground
 
+$singleTab = New-Object System.Windows.Forms.Panel
+$singleTab.Dock = "Fill"
+$singleTab.BackColor = $colorBackground
+
 $newTab = New-Object System.Windows.Forms.Panel
 $newTab.Dock = "Fill"
 $newTab.BackColor = $colorBackground
@@ -941,16 +1173,20 @@ $optionsTab.Dock = "Fill"
 $optionsTab.BackColor = $colorBackground
 
 $tabContentPanel.Controls.Add($existingTab)
+$tabContentPanel.Controls.Add($singleTab)
 $tabContentPanel.Controls.Add($newTab)
 $tabContentPanel.Controls.Add($optionsTab)
 
 $existingTabHeader = New-DeviceRegistrationTabHeader -Text "Existing LOT" -Page $existingTab
+$singleTabHeader = New-DeviceRegistrationTabHeader -Text "Single PC" -Page $singleTab
 $newTabHeader = New-DeviceRegistrationTabHeader -Text "New LOT" -Page $newTab
 $optionsTabHeader = New-DeviceRegistrationTabHeader -Text "Options" -Page $optionsTab
 $script:DeviceRegistrationTabHeaders.Add($existingTabHeader) | Out-Null
+$script:DeviceRegistrationTabHeaders.Add($singleTabHeader) | Out-Null
 $script:DeviceRegistrationTabHeaders.Add($newTabHeader) | Out-Null
 $script:DeviceRegistrationTabHeaders.Add($optionsTabHeader) | Out-Null
 $tabStrip.Controls.Add($existingTabHeader)
+$tabStrip.Controls.Add($singleTabHeader)
 $tabStrip.Controls.Add($newTabHeader)
 $tabStrip.Controls.Add($optionsTabHeader)
 Show-DeviceRegistrationTabPage -Header $existingTabHeader
@@ -1083,6 +1319,73 @@ $activitySection.Content.Controls.Add($statusBox)
 $existingLayout.Controls.Add($existingSection.Panel, 0, 0)
 $existingLayout.Controls.Add($activitySection.Panel, 0, 1)
 $existingTab.Controls.Add($existingLayout)
+
+$singleLayout = New-Object System.Windows.Forms.TableLayoutPanel
+$singleLayout.Dock = "Fill"
+$singleLayout.ColumnCount = 1
+$singleLayout.RowCount = 2
+$singleLayout.Padding = New-Object System.Windows.Forms.Padding(10)
+$singleLayout.BackColor = $colorBackground
+$singleLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$singleLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 174))) | Out-Null
+$singleLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+
+$singleSection = New-SectionPanel -Title "Run one computer"
+$singleTable = New-Object System.Windows.Forms.TableLayoutPanel
+$singleTable.Dock = "Top"
+$singleTable.Height = 108
+$singleTable.ColumnCount = 4
+$singleTable.RowCount = 3
+$singleTable.BackColor = $colorPanel
+$singleTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 138))) | Out-Null
+$singleTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$singleTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 150))) | Out-Null
+$singleTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 150))) | Out-Null
+for ($i = 0; $i -lt 3; $i++) {
+    $singleTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
+}
+
+$singleComputerBox = New-EntryBox
+
+$singleModeCombo = New-Object System.Windows.Forms.ComboBox
+$singleModeCombo.Dock = "Fill"
+$singleModeCombo.DropDownStyle = "DropDownList"
+$singleModeCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+$singleModeCombo.FlatStyle = "Flat"
+$singleModeCombo.Items.AddRange([object[]]@("Once","OnceIgnoreRunGuard","Loop","LoopIgnoreRunGuard"))
+$singleModeCombo.SelectedIndex = 0
+
+$singleRunPathBox = New-ValueBox
+$script:SingleComputerRunRoot = Get-SingleComputerRunRoot -ToolkitKey "IntuneHybridJoinToolkit"
+$singleRunPathBox.Text = $script:SingleComputerRunRoot
+
+$openSingleRunFolderButton = New-Object System.Windows.Forms.Button
+$openSingleRunFolderButton.Text = "Open run folder"
+$openSingleRunFolderButton.Dock = "Fill"
+Set-FlatButtonStyle -Button $openSingleRunFolderButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+
+$launchSingleComputerButton = New-Object System.Windows.Forms.Button
+$launchSingleComputerButton.Text = "Launch"
+$launchSingleComputerButton.Dock = "Fill"
+Set-ButtonEnabledStyle -Button $launchSingleComputerButton -Enabled $true -EnabledBackColor $colorAccent
+
+$singleTable.Controls.Add((New-Label "Computer"), 0, 0)
+$singleTable.Controls.Add($singleComputerBox, 1, 0)
+$singleTable.Controls.Add((New-Label "Mode"), 2, 0)
+$singleTable.Controls.Add($singleModeCombo, 3, 0)
+
+$singleTable.Controls.Add((New-Label "Run folder"), 0, 1)
+$singleTable.Controls.Add($singleRunPathBox, 1, 1)
+$singleTable.SetColumnSpan($singleRunPathBox, 2)
+$singleTable.Controls.Add($openSingleRunFolderButton, 3, 1)
+
+$singleTable.Controls.Add((New-Label "Launch"), 0, 2)
+$singleTable.Controls.Add($launchSingleComputerButton, 1, 2)
+$singleTable.SetColumnSpan($launchSingleComputerButton, 3)
+
+$singleSection.Content.Controls.Add($singleTable)
+$singleLayout.Controls.Add($singleSection.Panel, 0, 0)
+$singleTab.Controls.Add($singleLayout)
 
 $newLayout = New-Object System.Windows.Forms.TableLayoutPanel
 $newLayout.Dock = "Fill"
@@ -1377,6 +1680,7 @@ $form.Controls.Add($rootLayout)
 $script:LotList = @()
 $script:SelectedLotSummary = $null
 $script:CreatedComputersPath = $null
+$script:LastSingleRunPath = $null
 
 function Add-Status {
     param([string]$Message)
@@ -1662,6 +1966,46 @@ $launchAllLotsButton.Add_Click({
     catch {
         Add-Status ("ERROR: {0}" -f $_.Exception.Message)
         [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Launch all failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    }
+})
+
+$launchSingleComputerButton.Add_Click({
+    try {
+        $computerName = $singleComputerBox.Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($computerName)) { throw "Enter a computer name." }
+
+        $optionArguments = @(Get-ToolkitOptionArguments)
+        $optionEnvironment = Get-ToolkitOptionEnvironment
+        Add-Status ("Launching single computer {0} in {1} mode. Global limit={2}. Args={3}; env={4}." -f $computerName,$singleModeCombo.SelectedItem,[int]$globalConcurrencyLimitBox.Value,$optionArguments.Count,$optionEnvironment.Count)
+        $run = Start-ToolkitSingleComputer -ComputerName $computerName -Mode ([string]$singleModeCombo.SelectedItem) -GlobalConcurrencyLimit ([int]$globalConcurrencyLimitBox.Value) -GlobalConcurrencyLeaseTimeoutMinutes ([int]$optionGlobalConcurrencyLeaseTimeoutBox.Value) -AdditionalArguments $optionArguments -EnvironmentVariables $optionEnvironment
+        $script:LastSingleRunPath = $run.RunPath
+        $singleRunPathBox.Text = $run.RunPath
+        Set-FlatButtonStyle -Button $openSingleRunFolderButton -BackColor $colorPanelSoft -ForeColor $colorInk -BorderColor $colorTextBoxBorder
+        Add-Status ("Single computer run folder: {0}" -f $run.RunPath)
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Single computer launch failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    }
+})
+
+$openSingleRunFolderButton.Add_Click({
+    try {
+        $pathToOpen = $script:LastSingleRunPath
+        if ([string]::IsNullOrWhiteSpace($pathToOpen)) {
+            $pathToOpen = $script:SingleComputerRunRoot
+        }
+        if ([string]::IsNullOrWhiteSpace($pathToOpen)) {
+            throw "No single computer run folder configured."
+        }
+        if (-not (Test-Path -LiteralPath $pathToOpen -PathType Container)) {
+            New-Item -ItemType Directory -Path $pathToOpen -Force -ErrorAction Stop | Out-Null
+        }
+        Open-FolderPath -Path $pathToOpen
+    }
+    catch {
+        Add-Status ("ERROR: {0}" -f $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Open run folder failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
     }
 })
 

@@ -22,6 +22,7 @@ param(
     [Parameter(Mandatory = $true)][string]$LogRoot,
     [Parameter(Mandatory = $true)][string]$CentralLogRoot,
     [string]$SetupSourcePath,
+    [string]$SetupSourceMapPath,
     [ValidateSet('LocalCache','Share','Auto')]
     [string]$SetupExecutionMode = 'LocalCache',
     [string]$SetupMediaId = 'Win11',
@@ -151,9 +152,9 @@ function Copy-SetupMediaToRemoteCache {
     if (-not $AllowSetupUpgrade) { return 'NotRequested' }
     if ($SkipSetupMediaPreCopy) { return 'ExistingMediaOnly' }
     if ($SetupExecutionMode -eq 'Share') { return 'ShareMode' }
-    if ([string]::IsNullOrWhiteSpace($SetupSourcePath)) { return 'TargetCacheNoSource' }
+    if ([string]::IsNullOrWhiteSpace($SetupSourcePath) -and [string]::IsNullOrWhiteSpace($SetupSourceMapPath)) { return 'TargetCacheNoSource' }
 
-    Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup media copy is target-side. SourcePath will be validated from the target SYSTEM context: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$SetupSourcePath) -Encoding UTF8
+    Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup media copy is target-side. SourcePath/Map will be validated from the target SYSTEM context: Source={1}; Map={2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$SetupSourcePath,$SetupSourceMapPath) -Encoding UTF8
     return 'TargetSideCache'
 }
 
@@ -249,6 +250,8 @@ $result = [ordered]@{
     ExitCode = ''
     Detail = ''
     SetupCacheAction = ''
+    SelectedSetupSourcePath = ''
+    SetupSourceSelectionDetail = ''
     DiskCleanupAction = ''
     DiskCleanupFreedGB = ''
     AdvancedDiskCleanupAction = ''
@@ -338,7 +341,7 @@ try {
                 if ($lastRun.PSObject.Properties['SetupCacheAction']) {
                     $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
                 }
-                foreach ($propertyName in @('DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB')) {
+                foreach ($propertyName in @('SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB')) {
                     if ($lastRun.PSObject.Properties[$propertyName]) {
                         $result[$propertyName] = [string]$lastRun.$propertyName
                     }

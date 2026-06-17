@@ -9,6 +9,9 @@ When this script is stored in a Scripts folder, the default output is DevicesEnt
 .PARAMETER OutputPath
 Destination CSV path. Defaults to DevicesEntra.csv in the parent folder when running from Scripts.
 
+.PARAMETER ComputerListPath
+Computers.txt path. When provided, only those Entra devices are queried.
+
 .PARAMETER PageSize
 Graph page size. Defaults to 999.
 
@@ -30,6 +33,7 @@ Regenerates the CSV even when a recent DevicesEntra.csv exists in the parent fol
 [CmdletBinding()]
 param(
     [string]$OutputPath,
+    [string]$ComputerListPath,
     [int]$PageSize = 999,
     [string]$TenantId,
     [switch]$NoConnect,
@@ -50,6 +54,14 @@ if ((Split-Path -Leaf $BaseDir) -ieq "Scripts") {
 $OutputPathWasProvided = -not [string]::IsNullOrWhiteSpace($OutputPath)
 if (-not $OutputPathWasProvided) {
     $OutputPath = Join-Path $DefaultOutputDir "DevicesEntra.csv"
+}
+
+$ComputerListPathWasProvided = -not [string]::IsNullOrWhiteSpace($ComputerListPath)
+if ([string]::IsNullOrWhiteSpace($ComputerListPath)) {
+    $ComputerListPath = Join-Path $BaseDir "Computers.txt"
+    if (-not (Test-Path -LiteralPath $ComputerListPath)) {
+        $ComputerListPath = ""
+    }
 }
 
 if ($PageSize -lt 1) { $PageSize = 1 }
@@ -149,6 +161,32 @@ function ConvertTo-ComputerName {
     return ($DeviceName.Split(".")[0]).Trim().ToUpperInvariant()
 }
 
+function ConvertTo-ODataStringLiteral {
+    param([Parameter(Mandatory=$true)][string]$Value)
+
+    return ("'{0}'" -f ($Value -replace "'", "''"))
+}
+
+function Get-ComputerList {
+    param([Parameter(Mandatory=$true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Computer list not found: $Path"
+    }
+
+    @(Get-Content -LiteralPath $Path |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not $_.StartsWith("#") } |
+        ForEach-Object {
+            [PSCustomObject]@{
+                RequestedComputerName = $_
+                ComputerName = ConvertTo-ComputerName -DeviceName $_
+            }
+        } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.ComputerName) } |
+        Sort-Object ComputerName -Unique)
+}
+
 function Get-CollectionCount {
     param([AllowNull()][object]$Value)
 
@@ -220,6 +258,34 @@ function New-EntraDeviceExportRow {
     }
 }
 
+function New-MissingEntraDeviceExportRow {
+    param(
+        [string]$RequestedComputerName,
+        [string]$ComputerName
+    )
+
+    [PSCustomObject]@{
+        ComputerName                = $ComputerName
+        DisplayName                 = $RequestedComputerName
+        EntraInventoryPresent       = $false
+        EntraRegisteredState        = ""
+        EntraPendingReason          = ""
+        RegistrationDateTime        = ""
+        EntraObjectId               = ""
+        DeviceId                    = ""
+        TrustType                   = ""
+        AlternativeSecurityIdCount  = ""
+        AccountEnabled             = ""
+        OperatingSystem            = ""
+        OperatingSystemVersion     = ""
+        IsManaged                  = ""
+        IsCompliant                = ""
+        ManagementType             = ""
+        ProfileType                = ""
+        ApproximateLastSignInDateTime = ""
+    }
+}
+
 Import-GraphAuthenticationModule
 
 if (-not $NoConnect) {
@@ -242,6 +308,16 @@ Write-Host "Account     : $($context.Account)"
 Write-Host "Output      : $OutputPath"
 Write-Host "Page size   : $PageSize"
 
+$requestedComputers = @()
+if (-not [string]::IsNullOrWhiteSpace($ComputerListPath)) {
+    $requestedComputers = @(Get-ComputerList -Path $ComputerListPath)
+    Write-Host "Computers   : $ComputerListPath"
+    Write-Host ("Requested   : {0}" -f $requestedComputers.Count)
+}
+elseif (-not $ComputerListPathWasProvided) {
+    Write-Host "Computers   : no Computers.txt found next to this script; exporting all Entra devices." -ForegroundColor Yellow
+}
+
 $select = @(
     "id",
     "displayName",
@@ -259,9 +335,43 @@ $select = @(
     "approximateLastSignInDateTime"
 ) -join ","
 
-$uri = "https://graph.microsoft.com/v1.0/devices?`$select=$select&`$top=$PageSize"
-$devices = Invoke-GraphPagedRequest -Uri $uri
-$export = foreach ($device in $devices) { New-EntraDeviceExportRow -Device $device }
+$devices = @()
+if ($requestedComputers.Count -gt 0) {
+    foreach ($computer in $requestedComputers) {
+        $candidateNames = @($computer.RequestedComputerName,$computer.ComputerName) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            Select-Object -Unique
+
+        foreach ($candidateName in $candidateNames) {
+            $filter = "displayName eq {0}" -f (ConvertTo-ODataStringLiteral -Value ([string]$candidateName))
+            $encodedFilter = [System.Uri]::EscapeDataString($filter)
+            $uri = "https://graph.microsoft.com/v1.0/devices?`$select=$select&`$filter=$encodedFilter&`$top=$PageSize"
+            $devices += @(Invoke-GraphPagedRequest -Uri $uri)
+        }
+    }
+
+    $deviceByComputer = @{}
+    foreach ($device in $devices) {
+        $displayName = [string](Get-GraphProperty -InputObject $device -Name "displayName")
+        $computerName = ConvertTo-ComputerName -DeviceName $displayName
+        if ([string]::IsNullOrWhiteSpace($computerName)) { continue }
+        if (-not $deviceByComputer.ContainsKey($computerName)) { $deviceByComputer[$computerName] = $device }
+    }
+
+    $export = foreach ($computer in $requestedComputers) {
+        if ($deviceByComputer.ContainsKey($computer.ComputerName)) {
+            New-EntraDeviceExportRow -Device $deviceByComputer[$computer.ComputerName]
+        }
+        else {
+            New-MissingEntraDeviceExportRow -RequestedComputerName $computer.RequestedComputerName -ComputerName $computer.ComputerName
+        }
+    }
+}
+else {
+    $uri = "https://graph.microsoft.com/v1.0/devices?`$select=$select&`$top=$PageSize"
+    $devices = Invoke-GraphPagedRequest -Uri $uri
+    $export = foreach ($device in $devices) { New-EntraDeviceExportRow -Device $device }
+}
 
 try {
     $outputDir = Split-Path -Parent $OutputPath
@@ -297,4 +407,10 @@ Write-Host ""
 Write-Host ("Exported Entra devices: {0}" -f @($export).Count) -ForegroundColor Green
 Write-Host ("Unique computer names : {0}" -f $uniqueComputers.Count) -ForegroundColor Green
 Write-Host ("Pending registrations : {0}" -f $pendingCount) -ForegroundColor Green
+if ($requestedComputers.Count -gt 0) {
+    $presentCount = @($export | Where-Object { $_.EntraInventoryPresent -eq $true }).Count
+    Write-Host ("Requested computers   : {0}" -f $requestedComputers.Count) -ForegroundColor Green
+    Write-Host ("Present in Entra     : {0}" -f $presentCount) -ForegroundColor Green
+    Write-Host ("Missing from Entra    : {0}" -f ($requestedComputers.Count - $presentCount)) -ForegroundColor Green
+}
 Write-Host ("CSV                   : {0}" -f $OutputPath) -ForegroundColor Green
