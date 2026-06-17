@@ -1035,7 +1035,8 @@ try {
     if (-not $IgnoreRunGuard -and $RunGuardHours -gt 0 -and (Test-Path -LiteralPath $script:LastRunPath -PathType Leaf)) {
         $last = Get-Content -LiteralPath $script:LastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ($last.EndTimeUtc) {
-            $age = (Get-Date).ToUniversalTime() - ([datetime]$last.EndTimeUtc)
+            $lastEndUtc = [datetime]::Parse([string]$last.EndTimeUtc, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            $age = (Get-Date).ToUniversalTime() - $lastEndUtc
             if ($age.TotalHours -lt $RunGuardHours) {
                 $status = 'RUN_GUARD_ACTIVE'
                 $nextAction = 'WAIT_OR_USE_IGNORE_RUN_GUARD'
@@ -1150,13 +1151,6 @@ try {
             $exitCode = 3
         }
     }
-    elseif ($AllowWUReset -and -not $AuditOnly) {
-        Reset-WindowsUpdateComponents
-        $status = 'WU_RESET_COMPLETED'
-        $nextAction = 'RETRY_WINDOWS_UPDATE'
-        $actionResult = 'WUResetCompleted'
-        $exitCode = 0
-    }
     elseif ($AllowSetupUpgrade) {
         $setupExe = Resolve-SetupUpgradeExecutable
         if ($AuditOnly) {
@@ -1184,6 +1178,13 @@ try {
                 $exitCode = 1
             }
         }
+    }
+    elseif ($AllowWUReset -and -not $AuditOnly) {
+        Reset-WindowsUpdateComponents
+        $status = 'WU_RESET_COMPLETED'
+        $nextAction = 'RETRY_WINDOWS_UPDATE'
+        $actionResult = 'WUResetCompleted'
+        $exitCode = 0
     }
     elseif ($AllowForceUpgrade -and -not $AuditOnly) {
         $actionResult = Invoke-AssignedUpdateInstall

@@ -122,110 +122,6 @@ function Copy-DirectoryContent {
     Copy-Item -Path (Join-Path $SourcePath '*') -Destination $DestinationPath -Recurse -Force -ErrorAction Stop
 }
 
-function Get-SetupMediaLanguages {
-    param([Parameter(Mandatory = $true)][string]$MediaRoot)
-
-    $langIni = Join-Path $MediaRoot 'sources\lang.ini'
-    if (-not (Test-Path -LiteralPath $langIni -PathType Leaf)) { return @() }
-
-    $languages = New-Object System.Collections.ArrayList
-    $inAvailableSection = $false
-    foreach ($rawLine in @(Get-Content -LiteralPath $langIni -ErrorAction Stop)) {
-        $line = ([string]$rawLine).Trim()
-        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith(';')) { continue }
-        if ($line -match '^\[(.+)\]$') {
-            $inAvailableSection = ($Matches[1] -ieq 'Available UI Languages')
-            continue
-        }
-        if ($inAvailableSection -and $line -match '^([^=]+)=') {
-            $language = $Matches[1].Trim()
-            if (-not [string]::IsNullOrWhiteSpace($language) -and -not $languages.Contains($language)) {
-                [void]$languages.Add($language)
-            }
-        }
-    }
-
-    return @($languages.ToArray())
-}
-
-function Get-RemoteSystemLanguage {
-    param([Parameter(Mandatory = $true)][string]$ComputerName)
-
-    try {
-        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $ComputerName -ErrorAction Stop
-        if ($null -ne $os.OSLanguage) {
-            return ([System.Globalization.CultureInfo]::GetCultureInfo([int]$os.OSLanguage)).Name
-        }
-    }
-    catch { }
-
-    return ''
-}
-
-function Resolve-ExpectedSetupLanguage {
-    param([Parameter(Mandatory = $true)][string]$ComputerName)
-
-    if ([string]::IsNullOrWhiteSpace($SetupLanguage)) { return '' }
-    $expectedLanguage = $SetupLanguage.Trim()
-    if ($expectedLanguage -in @('Any','None','Disabled')) { return '' }
-    if ($expectedLanguage -in @('Auto','MatchSystem','System')) {
-        $expectedLanguage = Get-RemoteSystemLanguage -ComputerName $ComputerName
-        if ([string]::IsNullOrWhiteSpace($expectedLanguage)) {
-            throw "Unable to detect remote system language for $ComputerName."
-        }
-        return $expectedLanguage
-    }
-
-    try {
-        return ([System.Globalization.CultureInfo]::GetCultureInfo($expectedLanguage)).Name
-    }
-    catch {
-        throw "Invalid SetupLanguage value '$SetupLanguage'. Use MatchSystem, Any, or a culture tag such as fr-FR or en-US."
-    }
-}
-
-function Resolve-SetupSourceMediaPath {
-    param(
-        [Parameter(Mandatory = $true)][string]$SourcePath,
-        [string]$ExpectedLanguage
-    )
-
-    if (Test-Path -LiteralPath (Join-Path $SourcePath 'setup.exe') -PathType Leaf) {
-        return $SourcePath
-    }
-
-    if ([string]::IsNullOrWhiteSpace($ExpectedLanguage)) {
-        throw "SetupSourcePath does not contain setup.exe and language matching is disabled, so no language subfolder can be selected: $SourcePath"
-    }
-
-    foreach ($child in @(Get-ChildItem -LiteralPath $SourcePath -Directory -ErrorAction SilentlyContinue)) {
-        $languages = @(Get-SetupMediaLanguages -MediaRoot $child.FullName)
-        if (@($languages | Where-Object { $_ -ieq $ExpectedLanguage } | Select-Object -First 1).Count -gt 0) {
-            return $child.FullName
-        }
-    }
-
-    throw ("No setup source subfolder under '{0}' contains language {1} in sources\lang.ini." -f $SourcePath,$ExpectedLanguage)
-}
-
-function Test-SetupSourceLanguage {
-    param(
-        [Parameter(Mandatory = $true)][string]$SourcePath,
-        [Parameter(Mandatory = $true)][string]$ComputerName
-    )
-
-    $expectedLanguage = Resolve-ExpectedSetupLanguage -ComputerName $ComputerName
-    if ([string]::IsNullOrWhiteSpace($expectedLanguage)) { return }
-
-    $languages = @(Get-SetupMediaLanguages -MediaRoot $SourcePath)
-    if ($languages.Count -eq 0) {
-        throw "Setup media language could not be detected from sources\lang.ini. Expected=$expectedLanguage; Source=$SourcePath"
-    }
-    if (-not @($languages | Where-Object { $_ -ieq $expectedLanguage } | Select-Object -First 1)) {
-        throw ("Setup media language mismatch. Expected={0}; Available={1}; Source={2}" -f $expectedLanguage,($languages -join ','),$SourcePath)
-    }
-}
-
 function Copy-RemotePayload {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
@@ -259,6 +155,16 @@ function Copy-SetupMediaToRemoteCache {
 
     Add-Content -LiteralPath $LogPath -Value ("[{0}] Setup media copy is target-side. SourcePath will be validated from the target SYSTEM context: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$SetupSourcePath) -Encoding UTF8
     return 'TargetSideCache'
+}
+
+function Convert-ToPsExecRemoteArgument {
+    param([AllowNull()][string]$Value)
+
+    if ($null -eq $Value) { return '""' }
+    $text = [string]$Value
+    if ($text.Length -eq 0) { return '""' }
+    if ($text -match '^[A-Za-z0-9_:\\./@=-]+$') { return $text }
+    return ('"{0}"' -f ($text -replace '"', '\"'))
 }
 
 function Get-RemoteVirtualMachineSummary {
@@ -386,6 +292,7 @@ try {
     Copy-RemotePayload -ComputerName $Computer -LogPath $logPath
     $result.SetupCacheAction = Copy-SetupMediaToRemoteCache -ComputerName $Computer -LogPath $logPath
 
+    $remotePowerShellArgs = @($RemoteScriptArgs | ForEach-Object { Convert-ToPsExecRemoteArgument -Value $_ })
     $psexecArgs = @(
         "\\$Computer",
         '-accepteula',
@@ -394,8 +301,8 @@ try {
         'powershell.exe',
         '-NoProfile',
         '-ExecutionPolicy','Bypass',
-        '-File',"`"$RemoteScriptPath`""
-    ) + $RemoteScriptArgs
+        '-File',(Convert-ToPsExecRemoteArgument -Value $RemoteScriptPath)
+    ) + $remotePowerShellArgs
 
     Add-Content -LiteralPath $logPath -Value ("[{0}] PsExec command: {1} {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$ResolvedPsExecPath,($psexecArgs -join ' ')) -Encoding UTF8
     $process = Start-Process -FilePath $ResolvedPsExecPath -ArgumentList $psexecArgs -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
