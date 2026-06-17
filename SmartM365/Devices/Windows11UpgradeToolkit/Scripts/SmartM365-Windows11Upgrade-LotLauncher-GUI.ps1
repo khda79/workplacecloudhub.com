@@ -363,6 +363,18 @@ function Get-SingleComputerRunRoot {
     return (Join-Path $toolkitRoot 'SingleComputerRuns')
 }
 
+function Resolve-GuiPsExecPath {
+    param([Parameter(Mandatory = $true)][string]$Scope)
+
+    $psexecToolkitPath = Join-Path $toolkitRoot 'Scripts\PsExec.exe'
+    $psexecSystem32Path = Join-Path $env:WINDIR 'System32\PsExec.exe'
+    $psexecCommand = Get-Command -Name 'PsExec.exe' -CommandType Application -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $psexecToolkitPath -PathType Leaf) { return (Get-Item -LiteralPath $psexecToolkitPath).FullName }
+    if (Test-Path -LiteralPath $psexecSystem32Path -PathType Leaf) { return (Get-Item -LiteralPath $psexecSystem32Path).FullName }
+    if ($psexecCommand) { return $psexecCommand.Source }
+    throw ("PsExec.exe not found. Place it in '{0}', in '{1}', or add PsExec.exe to PATH before launching the {2}." -f (Split-Path -Parent $psexecToolkitPath), (Split-Path -Parent $psexecSystem32Path), $Scope)
+}
+
 function Start-ToolkitLot {
     param(
         [Parameter(Mandatory = $true)][string]$LotPath,
@@ -440,18 +452,8 @@ function Start-ToolkitSingleComputer {
     }
 
     $isDryRun = @($AdditionalArguments) -contains '-DryRun'
-    if (-not $isDryRun) {
-        $psexecToolkitPath = Join-Path $toolkitRoot 'Scripts\PsExec.exe'
-        $psexecSystem32Path = Join-Path $env:WINDIR 'System32\PsExec.exe'
-        $psexecCommand = Get-Command -Name 'PsExec.exe' -CommandType Application -ErrorAction SilentlyContinue
-        if (
-            -not (Test-Path -LiteralPath $psexecToolkitPath -PathType Leaf) -and
-            -not (Test-Path -LiteralPath $psexecSystem32Path -PathType Leaf) -and
-            -not $psexecCommand
-        ) {
-            throw ("PsExec.exe not found. Place it in '{0}', in '{1}', or add PsExec.exe to PATH before launching the computer." -f (Split-Path -Parent $psexecToolkitPath), (Split-Path -Parent $psexecSystem32Path))
-        }
-    }
+    $psexecPath = ''
+    if (-not $isDryRun) { $psexecPath = Resolve-GuiPsExecPath -Scope 'computer' }
 
     $run = New-SingleComputerRunContext -ComputerName $ComputerName -ToolkitKey 'Windows11UpgradeToolkit'
     if ($GlobalConcurrencyLimit -lt 1) { $GlobalConcurrencyLimit = 1 }
@@ -476,6 +478,10 @@ function Start-ToolkitSingleComputer {
         '-GlobalConcurrencyLeaseTimeoutMinutes',
         [string]$GlobalConcurrencyLeaseTimeoutMinutes
     )
+    if (-not [string]::IsNullOrWhiteSpace($psexecPath)) {
+        $commandParts += '-PsExecPath'
+        $commandParts += (ConvertTo-CmdArgument -Value $psexecPath)
+    }
 
     if ($Mode -in @('Once','OnceIgnoreRunGuard')) { $commandParts += '-RunOnce' }
     if ($Mode -in @('LoopIgnoreRunGuard','OnceIgnoreRunGuard')) { $commandParts += '-IgnoreRunGuard' }

@@ -484,10 +484,11 @@ do {
             $globalLeasePath = Acquire-GlobalLease -Computer $computer -CycleNumber $cycle
 
             try {
+                $remoteArgsJson = ([pscustomobject]@{ Args = @($remoteArgs.ToArray()) } | ConvertTo-Json -Compress)
                 $workerArgs = @(
                     $computer,
                     $cycle,
-                    (,([string[]]@($remoteArgs.ToArray()))),
+                    $remoteArgsJson,
                     $resolvedPsExec,
                     $LocalScriptPath,
                     $script:RemoteBaseDir,
