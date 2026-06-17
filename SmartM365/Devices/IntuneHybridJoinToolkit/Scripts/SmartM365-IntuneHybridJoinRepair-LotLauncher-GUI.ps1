@@ -1562,6 +1562,41 @@ $optionAllowRebootWhenNoUserCheck.Checked = Get-EnvSwitch -Name 'EHJIR_ALLOW_REB
 $optionAllowRebootAfterLeaveCheck.Checked = Get-EnvSwitch -Name 'EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE' -Default $true
 $optionSkipVirtualMachinesCheck.Checked = Get-EnvSwitch -Name 'EHJIR_SKIP_VIRTUAL_MACHINES' -Default $true
 
+function Set-OptionCheckAvailability {
+    param(
+        [Parameter(Mandatory = $true)][System.Windows.Forms.CheckBox]$CheckBox,
+        [Parameter(Mandatory = $true)][bool]$Enabled
+    )
+
+    $CheckBox.Enabled = $Enabled
+    $CheckBox.ForeColor = if ($Enabled) { $colorInk } else { $colorMuted }
+}
+
+function Set-AuditOnlyOptionState {
+    $auditOnly = [bool]$optionAuditOnlyCheck.Checked
+    foreach ($check in @(
+            $optionDryRunCheck,
+            $optionAllowDsregLeaveCheck,
+            $optionAllowStaleIntuneCleanupCheck,
+            $optionAllowRebootWhenNoUserCheck,
+            $optionAllowRebootAfterLeaveCheck,
+            $optionIgnoreRunGuardEveryCycleCheck,
+            $optionRemoveNonIntuneMdmCheck,
+            $optionKeepCentralHistoryCheck,
+            $optionNoCentralCollectionCheck,
+            $optionSkipPostCycleInventoryCheck,
+            $optionSkipVirtualMachinesCheck
+        )) {
+        if ($auditOnly) {
+            $check.Checked = $false
+        }
+        Set-OptionCheckAvailability -CheckBox $check -Enabled (-not $auditOnly)
+    }
+}
+
+$optionAuditOnlyCheck.Add_CheckedChanged({ Set-AuditOnlyOptionState })
+Set-AuditOnlyOptionState
+
 $optionsTable.Controls.Add((New-Label "Throttle per LOT"), 0, 0)
 $optionsTable.Controls.Add($optionThrottleBox, 1, 0)
 $optionsTable.Controls.Add((New-Label "Delay between cycles"), 2, 0)
