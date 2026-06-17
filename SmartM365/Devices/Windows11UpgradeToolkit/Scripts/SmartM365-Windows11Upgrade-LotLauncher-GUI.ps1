@@ -492,6 +492,7 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_ALLOW_WU_RESET'; Argument = '-AllowWUReset' },
         @{ Name = 'W11UT_ALLOW_FORCE_UPGRADE'; Argument = '-AllowForceUpgrade' },
         @{ Name = 'W11UT_ALLOW_SETUP_UPGRADE'; Argument = '-AllowSetupUpgrade' },
+        @{ Name = 'W11UT_DIRECT_SETUP_UPGRADE'; Argument = '-DirectSetupUpgrade' },
         @{ Name = 'W11UT_ALLOW_REBOOT'; Argument = '-AllowReboot' },
         @{ Name = 'W11UT_SKIP_VIRTUAL_MACHINES'; Argument = '-SkipVirtualMachines' },
         @{ Name = 'W11UT_ALLOW_DISK_CLEANUP'; Argument = '-AllowDiskCleanup' },
@@ -588,6 +589,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_ALLOW_WU_RESET = '1'
     W11UT_ALLOW_FORCE_UPGRADE = '1'
     W11UT_ALLOW_SETUP_UPGRADE = '1'
+    W11UT_DIRECT_SETUP_UPGRADE = '0'
     W11UT_ALLOW_REBOOT = '1'
     W11UT_SKIP_VIRTUAL_MACHINES = '1'
     W11UT_ALLOW_DISK_CLEANUP = '1'
@@ -1477,7 +1479,7 @@ $optionsTable = New-Object System.Windows.Forms.TableLayoutPanel
 $optionsTable.Dock = 'Top'
 $optionsTable.AutoSize = $true
 $optionsTable.ColumnCount = 4
-$optionsTable.RowCount = 13
+$optionsTable.RowCount = 14
 $optionsTable.BackColor = $colorPanel
 $optionsTable.Padding = New-Object System.Windows.Forms.Padding(0, 2, 12, 2)
 $optionsTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 190))) | Out-Null
@@ -1593,6 +1595,7 @@ $optionAllowPolicyRepairCheck = New-OptionCheck -Text 'Allow policy repair'
 $optionAllowWUResetCheck = New-OptionCheck -Text 'Allow WU reset'
 $optionAllowForceUpgradeCheck = New-OptionCheck -Text 'Allow force upgrade'
 $optionAllowSetupUpgradeCheck = New-OptionCheck -Text 'Allow setup upgrade'
+$optionDirectSetupUpgradeCheck = New-OptionCheck -Text 'Direct setup upgrade'
 $optionAllowRebootCheck = New-OptionCheck -Text 'Allow reboot'
 $optionSkipVirtualMachinesCheck = New-OptionCheck -Text 'Skip virtual machines'
 $optionAllowDiskCleanupCheck = New-OptionCheck -Text 'Allow disk cleanup'
@@ -1655,6 +1658,7 @@ $optionAllowPolicyRepairCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_POLICY_
 $optionAllowWUResetCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_WU_RESET' -Default $true
 $optionAllowForceUpgradeCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_FORCE_UPGRADE' -Default $true
 $optionAllowSetupUpgradeCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_SETUP_UPGRADE' -Default $true
+$optionDirectSetupUpgradeCheck.Checked = Get-EnvSwitch -Name 'W11UT_DIRECT_SETUP_UPGRADE'
 $optionAllowRebootCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_REBOOT' -Default $true
 $optionSkipVirtualMachinesCheck.Checked = Get-EnvSwitch -Name 'W11UT_SKIP_VIRTUAL_MACHINES' -Default $true
 $optionAllowDiskCleanupCheck.Checked = Get-EnvSwitch -Name 'W11UT_ALLOW_DISK_CLEANUP' -Default $true
@@ -1714,6 +1718,7 @@ function Set-AuditOnlyOptionState {
             $optionAllowWUResetCheck,
             $optionAllowForceUpgradeCheck,
             $optionAllowSetupUpgradeCheck,
+            $optionDirectSetupUpgradeCheck,
             $optionAllowRebootCheck,
             $optionSkipVirtualMachinesCheck,
             $optionAllowDiskCleanupCheck,
@@ -1740,7 +1745,7 @@ $optionsTable.Controls.Add($optionAllowForceUpgradeCheck, 3, 0)
 
 $optionsTable.Controls.Add($optionAllowSetupUpgradeCheck, 0, 1)
 $optionsTable.Controls.Add($optionAllowRebootCheck, 1, 1)
-$optionsTable.Controls.Add($optionDryRunCheck, 2, 1)
+$optionsTable.Controls.Add($optionDirectSetupUpgradeCheck, 2, 1)
 $optionsTable.Controls.Add($optionSkipVirtualMachinesCheck, 3, 1)
 
 $optionsTable.Controls.Add((New-Label 'Setup source'), 0, 2)
@@ -1765,24 +1770,24 @@ $optionsTable.Controls.Add($optionAllowDiskCleanupCheck, 1, 6)
 $optionsTable.Controls.Add($optionAllowAdvancedCleanupCheck, 2, 6)
 $optionsTable.Controls.Add($optionKeepCentralHistoryCheck, 3, 6)
 
-$optionsTable.Controls.Add((New-Label 'Throttle per LOT'), 0, 7)
-$optionsTable.Controls.Add($optionThrottleBox, 1, 7)
-$optionsTable.Controls.Add((New-Label 'Computer delay sec'), 2, 7)
-$optionsTable.Controls.Add($optionDelayBetweenComputersBox, 3, 7)
+$optionsTable.Controls.Add($optionDryRunCheck, 0, 7)
+$optionsTable.Controls.Add((New-Label 'Throttle per LOT'), 1, 7)
+$optionsTable.Controls.Add($optionThrottleBox, 2, 7)
 
-$optionsTable.Controls.Add((New-Label 'Delay between cycles'), 0, 8)
-$optionsTable.Controls.Add($optionDelayBetweenCyclesBox, 1, 8)
-$optionsTable.Controls.Add((New-Label 'Max cycles'), 2, 8)
-$optionsTable.Controls.Add($optionMaxCyclesBox, 3, 8)
+$optionsTable.Controls.Add((New-Label 'Computer delay sec'), 0, 8)
+$optionsTable.Controls.Add($optionDelayBetweenComputersBox, 1, 8)
+$optionsTable.Controls.Add((New-Label 'Delay between cycles'), 2, 8)
+$optionsTable.Controls.Add($optionDelayBetweenCyclesBox, 3, 8)
 
-$optionsTable.Controls.Add((New-Label 'PsExec timeout min'), 0, 9)
-$optionsTable.Controls.Add($optionPsExecTimeoutBox, 1, 9)
-$optionsTable.Controls.Add((New-Label 'Global worker limit'), 2, 9)
-$optionsTable.Controls.Add($optionGlobalConcurrencyLimitBox, 3, 9)
+$optionsTable.Controls.Add((New-Label 'Max cycles'), 0, 9)
+$optionsTable.Controls.Add($optionMaxCyclesBox, 1, 9)
+$optionsTable.Controls.Add((New-Label 'PsExec timeout min'), 2, 9)
+$optionsTable.Controls.Add($optionPsExecTimeoutBox, 3, 9)
 
-$optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 0, 10)
-$optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 1, 10)
-$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 2, 10)
+$optionsTable.Controls.Add((New-Label 'Global worker limit'), 0, 10)
+$optionsTable.Controls.Add($optionGlobalConcurrencyLimitBox, 1, 10)
+$optionsTable.Controls.Add((New-Label 'Global lease timeout min'), 2, 10)
+$optionsTable.Controls.Add($optionGlobalConcurrencyLeaseTimeoutBox, 3, 10)
 
 $optionsTable.Controls.Add((New-Label 'Copy IPG ms'), 0, 11)
 $optionsTable.Controls.Add($optionSetupCopyIpGapBox, 1, 11)
@@ -1791,14 +1796,15 @@ $optionsTable.Controls.Add($optionSetupCopyJitterBox, 3, 11)
 
 $optionsTable.Controls.Add((New-Label 'Candidate limit'), 0, 12)
 $optionsTable.Controls.Add($optionSetupSourceCandidateLimitBox, 1, 12)
+$optionsTable.Controls.Add($optionNoCentralCollectionCheck, 2, 12)
 
 $optionsNote = New-Object System.Windows.Forms.Label
 $optionsNote.Text = 'For LOT/PsExec, Setup source must be a UNC path reachable by target computers. Use semicolons to list site shares; each target selects the nearest valid source.'
 $optionsNote.Dock = 'Fill'
 $optionsNote.ForeColor = $colorMuted
 $optionsNote.TextAlign = 'MiddleLeft'
-$optionsTable.Controls.Add($optionsNote, 2, 12)
-$optionsTable.SetColumnSpan($optionsNote, 2)
+$optionsTable.Controls.Add($optionsNote, 0, 13)
+$optionsTable.SetColumnSpan($optionsNote, 4)
 
 $optionsScrollPanel.Controls.Add($optionsTable)
 $optionsSection.Content.Controls.Add($optionsScrollPanel)
@@ -1931,9 +1937,10 @@ function Get-ToolkitOptionEnvironment {
     $environment["W11UT_AUDIT_ONLY"] = if ($optionAuditOnlyCheck.Checked) { "1" } else { "0" }
     $environment["W11UT_ALLOW_POLICY_REPAIR"] = if ($optionAllowPolicyRepairCheck.Checked) { "1" } else { "0" }
     $environment["W11UT_ALLOW_WU_RESET"] = if ($optionAllowWUResetCheck.Checked) { "1" } else { "0" }
-    $environment["W11UT_ALLOW_FORCE_UPGRADE"] = if ($optionAllowForceUpgradeCheck.Checked) { "1" } else { "0" }
-    $environment["W11UT_ALLOW_SETUP_UPGRADE"] = if ($optionAllowSetupUpgradeCheck.Checked) { "1" } else { "0" }
-    $environment["W11UT_ALLOW_REBOOT"] = if ($optionAllowRebootCheck.Checked) { "1" } else { "0" }
+$environment["W11UT_ALLOW_FORCE_UPGRADE"] = if ($optionAllowForceUpgradeCheck.Checked) { "1" } else { "0" }
+$environment["W11UT_ALLOW_SETUP_UPGRADE"] = if ($optionAllowSetupUpgradeCheck.Checked) { "1" } else { "0" }
+$environment["W11UT_DIRECT_SETUP_UPGRADE"] = if ($optionDirectSetupUpgradeCheck.Checked) { "1" } else { "0" }
+$environment["W11UT_ALLOW_REBOOT"] = if ($optionAllowRebootCheck.Checked) { "1" } else { "0" }
     $environment["W11UT_SKIP_VIRTUAL_MACHINES"] = if ($optionSkipVirtualMachinesCheck.Checked) { "1" } else { "0" }
     $environment["W11UT_ALLOW_DISK_CLEANUP"] = if ($optionAllowDiskCleanupCheck.Checked) { "1" } else { "0" }
     $environment["W11UT_ALLOW_ADVANCED_DISK_CLEANUP"] = if ($optionAllowAdvancedCleanupCheck.Checked) { "1" } else { "0" }
@@ -1952,14 +1959,14 @@ function Test-SetupSourceBeforeLaunch {
         $setupSource = [string]$EnvironmentVariables['W11UT_SETUP_SOURCE']
         $setupSourceMap = [string]$EnvironmentVariables['W11UT_SETUP_SOURCE_MAP']
         $mode = [string]$EnvironmentVariables['W11UT_SETUP_EXECUTION_MODE']
-        $allowSetupUpgrade = ([string]$EnvironmentVariables['W11UT_ALLOW_SETUP_UPGRADE'] -eq '1')
+        $allowSetupUpgrade = ([string]$EnvironmentVariables['W11UT_ALLOW_SETUP_UPGRADE'] -eq '1' -or [string]$EnvironmentVariables['W11UT_DIRECT_SETUP_UPGRADE'] -eq '1')
         $skipSetupPreCopy = ([string]$EnvironmentVariables['W11UT_SKIP_SETUP_MEDIA_PRECOPY'] -eq '1')
     }
     else {
         $setupSource = Get-SetupSourceText
         $setupSourceMap = $optionSetupSourceMapBox.Text.Trim()
         $mode = [string]$optionSetupModeCombo.SelectedItem
-        $allowSetupUpgrade = $optionAllowSetupUpgradeCheck.Checked
+        $allowSetupUpgrade = ($optionAllowSetupUpgradeCheck.Checked -or $optionDirectSetupUpgradeCheck.Checked)
         $skipSetupPreCopy = $optionSkipSetupPreCopyCheck.Checked
     }
 
