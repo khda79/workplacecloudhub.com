@@ -91,6 +91,60 @@ function Write-SmartLog {
     }
 }
 
+function Convert-SignedExitCodeToHex {
+    param([Parameter(Mandatory = $true)][int]$ExitCode)
+
+    $bytes = [BitConverter]::GetBytes($ExitCode)
+    $unsigned = [BitConverter]::ToUInt32($bytes, 0)
+    return ('0x{0:X8}' -f $unsigned)
+}
+
+function Get-SetupExitCodeInfo {
+    param([Parameter(Mandatory = $true)][int]$ExitCode)
+
+    $hex = Convert-SignedExitCodeToHex -ExitCode $ExitCode
+    $knownMeanings = @{
+        '0x00000000' = 'Success.'
+        '0x00000BC2' = 'Success; reboot required.'
+        '0xC1900101' = 'Windows Setup rollback, often driver or firmware related. Confirm with setup logs or SetupDiag.'
+        '0xC190010E' = 'Windows Setup requires EULA acceptance. Use /EULA accept for quiet or non-interactive Windows 11 Setup.'
+        '0xC1900200' = 'Compatibility failure: device does not meet Windows Setup minimum requirements.'
+        '0xC1900202' = 'Compatibility failure: device does not meet Windows Setup minimum requirements for this upgrade.'
+        '0xC1900204' = 'Migration choice not available or invalid.'
+        '0xC1900208' = 'Compatibility blocker, usually an incompatible app or driver.'
+        '0xC190020E' = 'Insufficient free disk space for Windows Setup.'
+    }
+
+    if ($knownMeanings.ContainsKey($hex)) {
+        $meaning = $knownMeanings[$hex]
+    }
+    elseif ($hex -like '0xC190010*') {
+        $meaning = 'Windows Setup C190010x failure. Exact cause must be confirmed from setupact.log, setuperr.log, or SetupDiag.'
+    }
+    elseif ($hex -like '0xC19002*') {
+        $meaning = 'Windows Setup compatibility or prerequisite failure. Exact cause must be confirmed from setup logs or SetupDiag.'
+    }
+    else {
+        $meaning = 'Windows Setup returned an unmapped exit code. Check setup logs or SetupDiag.'
+    }
+
+    [pscustomobject]@{
+        Decimal = $ExitCode
+        Hex = $hex
+        Meaning = $meaning
+        CopyLogsPath = $script:SetupLogDir
+        PantherLog = 'C:\$WINDOWS.~BT\Sources\Panther\setupact.log'
+        PantherErrorLog = 'C:\$WINDOWS.~BT\Sources\Panther\setuperr.log'
+        RollbackLogFolder = 'C:\$WINDOWS.~BT\Sources\Rollback'
+    }
+}
+
+function Format-SetupExitCodeInfo {
+    param([Parameter(Mandatory = $true)]$Info)
+
+    return ("ExitCode={0}; Hex={1}; Meaning={2}; CopyLogs={3}; Panther={4}; PantherErrors={5}; RollbackLogs={6}" -f $Info.Decimal,$Info.Hex,$Info.Meaning,$Info.CopyLogsPath,$Info.PantherLog,$Info.PantherErrorLog,$Info.RollbackLogFolder)
+}
+
 function Get-RegistryValue {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -1485,13 +1539,15 @@ function Invoke-SetupUpgrade {
     $args = @(
         '/auto','upgrade',
         '/quiet',
+        '/eula','accept',
         '/dynamicupdate','enable',
         '/copylogs',"`"$script:SetupLogDir`""
     )
 
     Write-SmartLog ("Starting setup upgrade: {0} {1}" -f $SetupExePath,($args -join ' '))
     $process = Start-Process -FilePath $SetupExePath -ArgumentList $args -Wait -PassThru -ErrorAction Stop
-    Write-SmartLog ("setup.exe exited with code {0}" -f $process.ExitCode)
+    $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $process.ExitCode
+    Write-SmartLog ("setup.exe exited. {0}" -f (Format-SetupExitCodeInfo -Info $setupExitInfo))
     return $process.ExitCode
 }
 
@@ -1615,7 +1671,9 @@ try {
         }
         else {
             $setupExitCode = Invoke-SetupUpgrade -SetupExePath $setupExe
-            $actionResult = "DirectSetupExitCode=$setupExitCode"
+            $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $setupExitCode
+            $setupExitDetail = Format-SetupExitCodeInfo -Info $setupExitInfo
+            $actionResult = "DirectSetup$setupExitDetail"
             if ($setupExitCode -eq 0) {
                 $status = 'DIRECT_SETUP_UPGRADE_STARTED'
                 $nextAction = 'MONITOR_SETUP_AND_REBOOT'
@@ -1629,6 +1687,7 @@ try {
             else {
                 $status = 'DIRECT_SETUP_UPGRADE_FAILED'
                 $nextAction = 'CHECK_SETUP_LOGS'
+                $detail = $setupExitDetail
                 $exitCode = 1
             }
         }
@@ -1686,7 +1745,9 @@ try {
         }
         else {
             $setupExitCode = Invoke-SetupUpgrade -SetupExePath $setupExe
-            $actionResult = "SetupExitCode=$setupExitCode"
+            $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $setupExitCode
+            $setupExitDetail = Format-SetupExitCodeInfo -Info $setupExitInfo
+            $actionResult = "Setup$setupExitDetail"
             if ($setupExitCode -eq 0) {
                 $status = 'SETUP_UPGRADE_STARTED'
                 $nextAction = 'MONITOR_SETUP_AND_REBOOT'
@@ -1700,6 +1761,7 @@ try {
             else {
                 $status = 'SETUP_UPGRADE_FAILED'
                 $nextAction = 'CHECK_SETUP_LOGS'
+                $detail = $setupExitDetail
                 $exitCode = 1
             }
         }
