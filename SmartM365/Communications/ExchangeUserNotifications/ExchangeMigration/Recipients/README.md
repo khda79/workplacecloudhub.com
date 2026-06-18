@@ -1,0 +1,16 @@
+# Exchange Migration Recipients
+
+Place campaign recipient CSV files in this folder.
+
+Start from `ExchangeMigration-Recipients.csv.template`, copy it to a new `.csv` file, then replace the example rows with the real recipients for the run.
+
+Expected columns:
+
+- `PrimarySmtpAddress`: recipient mailbox address.
+- `UserName`: display name used in the email template.
+- `LanguageTag`: optional language tag such as `en`, `fr`, or `fr-FR`.
+- `EffectiveDate`: optional migration date used by the template and skip logic. It can stay empty when `Force effective date` is selected in the GUI run options. When filled in CSV, use `yyyy-MM-dd` only, for example `2026-07-01`; avoid regional formats such as `01/07/2026`.
+
+When `Force effective date` is set in the GUI, it overrides CSV `EffectiveDate`, `Date`, and `MigrationDate` values for every recipient.
+
+Real recipient CSV files are local operational data and must not be committed.
