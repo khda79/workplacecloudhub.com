@@ -181,7 +181,10 @@ param(
     [string]$LogRoot,
     [string]$ReportRoot,
     [string]$CentralLogRoot,
+    [string]$ArchiveRoot,
     [switch]$KeepCentralLogHistory,
+    [switch]$SkipPreRunArchive,
+    [switch]$ContinueOnDnsPreflightFailure,
     [switch]$NoCentralLogCollection,
     [int]$StaleCleanupDelaySeconds = 60,
     [int]$RebootDelaySeconds = 180,
@@ -197,7 +200,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.49"
+$LauncherVersion = "2.10.50"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
@@ -344,6 +347,14 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) { $AdInventoryCsv = [Sys
 $LogRoot = [System.IO.Path]::GetFullPath($LogRoot)
 $ReportRoot = [System.IO.Path]::GetFullPath($ReportRoot)
 $CentralLogRoot = [System.IO.Path]::GetFullPath($CentralLogRoot)
+$LotRoot = Split-Path -Parent $ComputerListPath
+if ([string]::IsNullOrWhiteSpace($ArchiveRoot)) {
+    $ArchiveRoot = Join-Path $LotRoot "Archives"
+}
+else {
+    $ArchiveRoot = [System.IO.Path]::GetFullPath($ArchiveRoot)
+}
+$script:ReportPathBase = $LotRoot
 
 $RemoteRelativeDir = "ProgramData\SmartM365\IntuneHybridJoinToolkit"
 $RemoteScriptPath = "C:\ProgramData\SmartM365\IntuneHybridJoinToolkit\$ScriptName"
@@ -355,6 +366,60 @@ if (-not (Test-Path -LiteralPath $LocalScriptPath)) {
 
 if (-not (Test-Path -LiteralPath $ComputerListPath)) {
     throw "Computer list not found: $ComputerListPath"
+}
+
+function Invoke-PreRunLotArchive {
+    param(
+        [Parameter(Mandatory=$true)][string[]]$Paths,
+        [Parameter(Mandatory=$true)][string]$DestinationRoot,
+        [Parameter(Mandatory=$true)][string]$Prefix
+    )
+
+    $existingPaths = @(
+        foreach ($path in $Paths) {
+            if ([string]::IsNullOrWhiteSpace($path)) { continue }
+            if (-not (Test-Path -LiteralPath $path)) { continue }
+            $children = @(Get-ChildItem -LiteralPath $path -Force -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if ($children.Count -gt 0) { $path }
+        }
+    )
+
+    if ($existingPaths.Count -eq 0) {
+        Write-Host "Pre-run archive: no existing LOT output folders to archive." -ForegroundColor DarkGray
+        return $null
+    }
+
+    if (-not (Test-Path -LiteralPath $DestinationRoot)) {
+        New-Item -ItemType Directory -Path $DestinationRoot -Force | Out-Null
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $zipPath = Join-Path $DestinationRoot ("{0}_{1}.zip" -f $Prefix,$timestamp)
+    Write-Host ("Pre-run archive: compressing previous LOT outputs to {0}" -f $zipPath) -ForegroundColor Cyan
+    Compress-Archive -LiteralPath $existingPaths -DestinationPath $zipPath -CompressionLevel Optimal -Force -ErrorAction Stop
+
+    foreach ($path in $existingPaths) {
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    }
+
+    Write-Host ("Pre-run archive: archived and cleaned {0} folder(s)." -f $existingPaths.Count) -ForegroundColor Green
+    return $zipPath
+}
+
+if (-not $SkipPreRunArchive) {
+    $archivePaths = @($CentralLogRoot, $LogRoot, $ReportRoot)
+    try {
+        $archivePath = Invoke-PreRunLotArchive -Paths $archivePaths -DestinationRoot $ArchiveRoot -Prefix "IntuneHybridJoinToolkit_PreRun"
+        if (-not [string]::IsNullOrWhiteSpace($archivePath)) {
+            Write-Host ("Previous LOT outputs archived to: {0}" -f $archivePath) -ForegroundColor Green
+        }
+    }
+    catch {
+        throw ("Pre-run archive failed; existing LOT outputs were not cleaned. Error={0}" -f $_.Exception.Message)
+    }
+}
+else {
+    Write-Host "Pre-run archive skipped by -SkipPreRunArchive." -ForegroundColor Yellow
 }
 
 function Resolve-PsExecPath {
@@ -569,6 +634,69 @@ function Get-AdInventoryMap {
     return $map
 }
 
+function ConvertTo-PortableLotPath {
+    param([Parameter(Mandatory=$false)]$Value)
+
+    if ($null -eq $Value) { return $Value }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
+    if ([string]::IsNullOrWhiteSpace($script:ReportPathBase)) { return $text }
+
+    try {
+        $base = [System.IO.Path]::GetFullPath($script:ReportPathBase).TrimEnd('\')
+        $candidate = if ([System.IO.Path]::IsPathRooted($text)) {
+            [System.IO.Path]::GetFullPath($text).TrimEnd('\')
+        }
+        else {
+            [System.IO.Path]::GetFullPath((Join-Path $base $text)).TrimEnd('\')
+        }
+
+        if ($candidate.Equals($base, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return "."
+        }
+
+        $prefix = $base + "\"
+        if ($candidate.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return ".\" + $candidate.Substring($prefix.Length)
+        }
+    }
+    catch {
+        return $text
+    }
+
+    return $text
+}
+
+function ConvertTo-PortableReportRow {
+    param([Parameter(Mandatory=$true)]$Row)
+
+    $pathColumns = @(
+        "LogPath",
+        "RemoteLogsPath",
+        "RemoteCurrentRunLogsPath",
+        "PostCycleIntuneInventoryCsv",
+        "PostCycleEntraInventoryCsv",
+        "PostCycleADInventoryCsv"
+    )
+
+    $copy = [ordered]@{}
+    foreach ($property in $Row.PSObject.Properties) {
+        $value = $property.Value
+        if ($pathColumns -contains $property.Name) {
+            $value = ConvertTo-PortableLotPath -Value $value
+        }
+        $copy[$property.Name] = $value
+    }
+
+    return [PSCustomObject]$copy
+}
+
+function Get-PortableReportRows {
+    param([Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Rows)
+
+    return @($Rows | ForEach-Object { ConvertTo-PortableReportRow -Row $_ })
+}
+
 function Test-BooleanLikeTrue {
     param([AllowNull()][object]$Value)
 
@@ -752,6 +880,7 @@ function Get-NextActionFromLauncherStatus {
         "AUDIT_STALE_INTUNE_ENROLLMENT_LOCAL" { return "CLEAN_STALE_INTUNE_OPTIN" }
         "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
         "ADMIN_SHARE_UNREACHABLE" { return "FIX_ADMIN_SHARE_OR_NETWORK" }
+        "DNS_PREFLIGHT_ALL_SAMPLES_FAILED" { return "CHECK_VPN_DNS_BEFORE_LOT" }
         "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
         "REBOOT_TRIGGERED_WAITING_FOR_USER_LOGON" { return "WAIT_USER_LOGON" }
         "WAITING_FOR_INTERACTIVE_USER_LOGON" { return "WAIT_USER_LOGON" }
@@ -885,7 +1014,28 @@ function Get-RemoteEvidenceFinalStatus {
         $rowRunId = ""
         if ($row.PSObject.Properties["RunId"]) { $rowRunId = ([string]$row.RunId).Trim() }
         if ($RequireCompletedRun) {
-            if ([string]::IsNullOrWhiteSpace($rowRunId) -or $rowRunId -ne $completedRunId) { return $null }
+            if ([string]::IsNullOrWhiteSpace($rowRunId) -or $rowRunId -ne $completedRunId) {
+                return [PSCustomObject]@{
+                    RunId = $completedRunId
+                    Status = $completedRunStatus
+                    ExitCode = $completedRunExitCode
+                    NextAction = $completedRunNextAction
+                    Detail = $completedRunDetail
+                    CsvPath = ""
+                    LastRunPath = $lastRunPath
+                    LastRunStatus = $completedRunStatus
+                    LastRunExitCode = $completedRunExitCode
+                    InteractiveUserName = ""
+                    InteractiveUserDomain = ""
+                    InteractiveUserAccountName = ""
+                    InteractiveUserAccountType = ""
+                    InteractiveSessionName = ""
+                    InteractiveSessionState = ""
+                    UserIsUserAzureAD = ""
+                    UserAzureAdPrt = ""
+                    UserSessionIsNotRemote = ""
+                }
+            }
         }
 
         $exitCode = ""
@@ -1039,7 +1189,7 @@ function Add-LiveCycleReportRow {
         [Parameter(Mandatory=$true)][psobject]$Row
     )
 
-    $Row | Select-Object $Columns | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8 -Append
+    ConvertTo-PortableReportRow -Row $Row | Select-Object $Columns | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8 -Append
 }
 
 function Get-ComputerList {
@@ -1264,23 +1414,25 @@ function Copy-RemoteEvidenceFolder {
             [Parameter(Mandatory=$true)][string]$TargetFolder
         )
 
+    try {
         if (-not (Test-Path -LiteralPath $TargetFolder)) {
-            New-Item -ItemType Directory -Path $TargetFolder -Force | Out-Null
+            [System.IO.Directory]::CreateDirectory($TargetFolder) | Out-Null
         }
-
-        try {
-            Copy-Item -LiteralPath $SourceFile -Destination $TargetFolder -Force -ErrorAction Stop
-            return $true
-        }
+        Copy-Item -LiteralPath $SourceFile -Destination $TargetFolder -Force -ErrorAction Stop
+        return $true
+    }
         catch [System.Management.Automation.ItemNotFoundException] {
             return $false
         }
         catch [System.IO.FileNotFoundException] {
             return $false
         }
-        catch [System.IO.DirectoryNotFoundException] {
-            return $false
-        }
+    catch [System.IO.DirectoryNotFoundException] {
+        return $false
+    }
+    catch {
+        return $false
+    }
     }
 
     foreach ($folderName in @("Logs","Output","Transcripts")) {
@@ -1337,7 +1489,7 @@ function New-CycleHtmlReport {
         [Parameter(Mandatory=$true)][datetime]$GeneratedAt
     )
 
-    $rows = @($Summary | ForEach-Object { $_ })
+    $rows = @(Get-PortableReportRows -Rows @($Summary | ForEach-Object { $_ }))
 
     $statusCounts = @($rows | Group-Object -Property Status | Sort-Object Count -Descending | ForEach-Object {
         [PSCustomObject]@{ Status=$_.Name; Count=$_.Count }
@@ -1928,6 +2080,42 @@ function Invoke-IntuneHybridJoinRepairCycle {
         Write-Host ""
         Write-Host ("*** DNS WARNING: resolution failed on all {0} sampled computers. Check VPN connectivity and DNS configuration on this machine before continuing. ***" -f $dnsCheck.Tested) -ForegroundColor Red
         Write-Host ""
+
+        if (-not $ContinueOnDnsPreflightFailure) {
+            $status = "DNS_PREFLIGHT_ALL_SAMPLES_FAILED"
+            $nextAction = Get-NextActionFromLauncherStatus -Status $status
+            $detail = ("DNS resolution failed for all {0} sampled computer(s). Cycle stopped before queuing PsExec jobs. Use -ContinueOnDnsPreflightFailure only after confirming the network path is intentional." -f $dnsCheck.Tested)
+
+            foreach ($computer in $computers) {
+                $row = [ordered]@{}
+                foreach ($column in $reportColumns) { $row[$column] = "" }
+                $row["LauncherVersion"] = $LauncherVersion
+                $row["Cycle"] = $CycleNumber
+                $row["Computer"] = $computer
+                $row["Timestamp"] = Get-Date
+                $row["DryRun"] = [bool]$DryRun
+                $row["DnsResolved"] = $false
+                $row["AdminShareReachable"] = $false
+                $row["PingReachable"] = $false
+                $row["Status"] = $status
+                $row["EffectiveStatus"] = $status
+                $row["NextAction"] = $nextAction
+                $row["EffectiveNextAction"] = $nextAction
+                $row["ErrorMessage"] = $detail
+                $item = [PSCustomObject]$row
+                $summary.Add($item)
+                Add-LiveCycleReportRow -Path $liveSummaryPath -Columns $reportColumns -Row $item
+            }
+
+            $summaryRows = @($summary | ForEach-Object { $_ })
+            $summaryPath = Join-Path $ReportRoot ("PsExec_IntuneHybridJoinRepair_Summary_cycle{0}_{1}.csv" -f $CycleNumber,(Get-Date -Format "yyyyMMdd_HHmmss"))
+            Get-PortableReportRows -Rows $summaryRows | Select-Object $reportColumns | Export-Csv -LiteralPath $summaryPath -NoTypeInformation -Encoding UTF8
+            New-CycleHtmlReport -Summary $summaryRows -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
+            $htmlPath = [System.IO.Path]::ChangeExtension($summaryPath, ".html")
+            New-CycleHtmlReport -Summary $summaryRows -Path $htmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
+            Write-Host ("Cycle {0} stopped by DNS preflight. Summary: {1}" -f $CycleNumber,$summaryPath) -ForegroundColor Red
+            return $summaryPath
+        }
     }
 
     Write-Host ("Cycle {0} started. Computers={1}; Throttle={2}; Args={3}" -f $CycleNumber,$computers.Count,$ThrottleLimit,($CycleScriptArgs -join ' ')) -ForegroundColor Cyan
@@ -2097,6 +2285,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 "AUDIT_STALE_INTUNE_ENROLLMENT_LOCAL" { return "CLEAN_STALE_INTUNE_OPTIN" }
                 "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
                 "ADMIN_SHARE_UNREACHABLE" { return "FIX_ADMIN_SHARE_OR_NETWORK" }
+                "DNS_PREFLIGHT_ALL_SAMPLES_FAILED" { return "CHECK_VPN_DNS_BEFORE_LOT" }
                 "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
                 "SKIPPED_VIRTUAL_MACHINE" { return "NO_ACTION_VIRTUAL_MACHINE" }
                 "REBOOT_TRIGGERED_WAITING_FOR_USER_LOGON" { return "WAIT_USER_LOGON" }
@@ -2145,24 +2334,26 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     [Parameter(Mandatory=$true)][string]$TargetFolder
                 )
 
+            try {
                 if (-not (Test-Path -LiteralPath $TargetFolder)) {
-                    New-Item -ItemType Directory -Path $TargetFolder -Force | Out-Null
+                    [System.IO.Directory]::CreateDirectory($TargetFolder) | Out-Null
                 }
-
-                try {
-                    Copy-Item -LiteralPath $SourceFile -Destination $TargetFolder -Force -ErrorAction Stop
-                    return $true
-                }
+                Copy-Item -LiteralPath $SourceFile -Destination $TargetFolder -Force -ErrorAction Stop
+                return $true
+            }
                 catch [System.Management.Automation.ItemNotFoundException] {
                     return $false
                 }
                 catch [System.IO.FileNotFoundException] {
                     return $false
                 }
-                catch [System.IO.DirectoryNotFoundException] {
-                    return $false
-                }
+            catch [System.IO.DirectoryNotFoundException] {
+                return $false
             }
+            catch {
+                return $false
+            }
+        }
 
             foreach ($folderName in @("Logs","Output","Transcripts")) {
                 $sourceFolder = Join-Path $RemoteDataPath $folderName
@@ -2284,7 +2475,28 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $rowRunId = ""
                 if ($row.PSObject.Properties["RunId"]) { $rowRunId = ([string]$row.RunId).Trim() }
                 if ($RequireCompletedRun) {
-                    if ([string]::IsNullOrWhiteSpace($rowRunId) -or $rowRunId -ne $completedRunId) { return $null }
+                    if ([string]::IsNullOrWhiteSpace($rowRunId) -or $rowRunId -ne $completedRunId) {
+                        return [PSCustomObject]@{
+                            RunId = $completedRunId
+                            Status = $completedRunStatus
+                            ExitCode = $completedRunExitCode
+                            NextAction = $completedRunNextAction
+                            Detail = $completedRunDetail
+                            CsvPath = ""
+                            LastRunPath = $lastRunPath
+                            LastRunStatus = $completedRunStatus
+                            LastRunExitCode = $completedRunExitCode
+                            InteractiveUserName = ""
+                            InteractiveUserDomain = ""
+                            InteractiveUserAccountName = ""
+                            InteractiveUserAccountType = ""
+                            InteractiveSessionName = ""
+                            InteractiveSessionState = ""
+                            UserIsUserAzureAD = ""
+                            UserAzureAdPrt = ""
+                            UserSessionIsNotRemote = ""
+                        }
+                    }
                 }
 
                 $exitCode = ""
@@ -2726,6 +2938,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
             if ($CollectRemoteLogs) {
                 try {
+                    $polledRemoteFinalStatus = $null
                     if ($result.Status -eq "PSEXEC_COMMUNICATION_LOST" -and $CommunicationLostEvidenceWaitMinutes -gt 0) {
                         $elapsedWaitMinutes = 0
                         $pollMinutes = [Math]::Min($CommunicationLostEvidencePollMinutes, $CommunicationLostEvidenceWaitMinutes)
@@ -2736,6 +2949,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                                 $remoteFinalStatus = Get-RemoteEvidenceFinalStatus -EvidencePath $remoteDataAdminDir -Since ([datetime]$result.Timestamp) -RequireCompletedRun
                             }
                             if ($null -ne $remoteFinalStatus -and -not [string]::IsNullOrWhiteSpace($remoteFinalStatus.Status)) {
+                                $polledRemoteFinalStatus = $remoteFinalStatus
                                 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Completed current-run evidence detected on remote computer after $elapsedWaitMinutes minute(s). RunId=$($remoteFinalStatus.RunId); Status=$($remoteFinalStatus.Status); Csv=$($remoteFinalStatus.CsvPath); LastRun=$($remoteFinalStatus.LastRunPath). Collecting evidence now." | Add-Content -LiteralPath $logPath -Encoding UTF8
                                 break
                             }
@@ -2746,6 +2960,24 @@ function Invoke-IntuneHybridJoinRepairCycle {
                             "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Current-run final CSV not found yet. Sleeping $sleepMinutes minute(s) before next check." | Add-Content -LiteralPath $logPath -Encoding UTF8
                             Start-Sleep -Seconds ([int]($sleepMinutes * 60))
                             $elapsedWaitMinutes += $sleepMinutes
+                        }
+
+                        if ($null -ne $polledRemoteFinalStatus -and -not [string]::IsNullOrWhiteSpace($polledRemoteFinalStatus.Status)) {
+                            $result.RemoteStatus = $polledRemoteFinalStatus.Status
+                            $result.RemoteExitCode = $polledRemoteFinalStatus.ExitCode
+                            $result.RemoteNextAction = $polledRemoteFinalStatus.NextAction
+                            $result.RemoteDetail = $polledRemoteFinalStatus.Detail
+                            $result.Status = $polledRemoteFinalStatus.Status
+                            if (-not [string]::IsNullOrWhiteSpace($polledRemoteFinalStatus.NextAction)) {
+                                $result.NextAction = $polledRemoteFinalStatus.NextAction
+                            }
+                            else {
+                                $result.NextAction = Get-NextActionFromLauncherStatus -Status $result.Status
+                            }
+                            if (-not [string]::IsNullOrWhiteSpace($polledRemoteFinalStatus.Detail)) {
+                                $result.ErrorMessage = $polledRemoteFinalStatus.Detail
+                            }
+                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] PsExec communication-lost result reclassified before evidence copy. RunId=$($polledRemoteFinalStatus.RunId); Status=$($result.Status); NextAction=$($result.NextAction)." | Add-Content -LiteralPath $logPath -Encoding UTF8
                         }
                     }
                     elseif ($result.Status -eq "PSEXEC_EXIT_UNKNOWN") {
@@ -2768,20 +3000,53 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
                     $currentRunDir = Join-Path $centralComputerDir "LatestCurrentRun"
                     Remove-Item -LiteralPath $currentRunDir -Recurse -Force -ErrorAction SilentlyContinue
-                    $currentRunFiles = @(Get-ChildItem -LiteralPath $centralRunDir -Recurse -File -Force -ErrorAction SilentlyContinue |
-                        Where-Object { $_.LastWriteTime -ge ([datetime]$result.Timestamp).AddSeconds(-5) })
+                    $currentRunId = ""
+                    if ($null -ne $polledRemoteFinalStatus -and -not [string]::IsNullOrWhiteSpace([string]$polledRemoteFinalStatus.RunId)) {
+                        $currentRunId = ([string]$polledRemoteFinalStatus.RunId).Trim()
+                    }
+
+                    $allCollectedFiles = @(Get-ChildItem -LiteralPath $centralRunDir -Recurse -File -Force -ErrorAction SilentlyContinue)
+                    if (-not [string]::IsNullOrWhiteSpace($currentRunId)) {
+                        $currentRunFiles = @(
+                            $allCollectedFiles |
+                                Where-Object {
+                                    $_.Name -eq "LastRun.json" -or
+                                    $_.Name -like "*$currentRunId*" -or
+                                    ($_.Name -like "IntuneHybridJoinToolkit_*.csv" -and $_.LastWriteTime -ge ([datetime]$result.Timestamp).AddSeconds(-5))
+                                }
+                        )
+                    }
+                    else {
+                        $currentRunFiles = @(
+                            $allCollectedFiles |
+                                Where-Object { $_.LastWriteTime -ge ([datetime]$result.Timestamp).AddSeconds(-5) }
+                        )
+                    }
+
+                    $currentRunCopied = 0
+                    $currentRunCopyFailures = 0
                     foreach ($file in $currentRunFiles) {
                         $relativePath = $file.FullName.Substring($centralRunDir.Length).TrimStart("\")
                         $targetPath = Join-Path $currentRunDir $relativePath
                         $targetFolder = Split-Path -Parent $targetPath
-                        if (-not (Test-Path -LiteralPath $targetFolder)) {
-                            New-Item -ItemType Directory -Path $targetFolder -Force | Out-Null
+                        try {
+                            if (-not (Test-Path -LiteralPath $targetFolder)) {
+                                [System.IO.Directory]::CreateDirectory($targetFolder) | Out-Null
+                            }
+                            Copy-Item -LiteralPath $file.FullName -Destination $targetPath -Force -ErrorAction Stop
+                            $currentRunCopied++
                         }
-                        Copy-Item -LiteralPath $file.FullName -Destination $targetPath -Force -ErrorAction SilentlyContinue
+                        catch {
+                            $currentRunCopyFailures++
+                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: LatestCurrentRun copy skipped for '$($file.FullName)': $($_.Exception.Message)" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                        }
                     }
-                    if ($currentRunFiles.Count -gt 0) {
+                    if ($currentRunCopied -gt 0) {
                         $result.RemoteCurrentRunLogsPath = $currentRunDir
-                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Current-run remote evidence isolated to: $currentRunDir. Files=$($currentRunFiles.Count)" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Current-run remote evidence isolated to: $currentRunDir. Files=$currentRunCopied; Skipped=$currentRunCopyFailures; RunId=$currentRunId" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    }
+                    elseif ($currentRunFiles.Count -gt 0) {
+                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: Current-run evidence was identified but no files could be copied to LatestCurrentRun. Skipped=$currentRunCopyFailures; RunId=$currentRunId" | Add-Content -LiteralPath $logPath -Encoding UTF8
                     }
 
                     $completedEvidenceStatus = Get-RemoteEvidenceFinalStatus -EvidencePath $centralRunDir -Since ([datetime]$result.Timestamp) -RequireCompletedRun
@@ -3110,7 +3375,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $row | Add-Member -NotePropertyName PostCycleIntuneInventoryChecked -NotePropertyValue $true -Force
                 $row | Add-Member -NotePropertyName PostCycleIntuneInventoryPresent -NotePropertyValue $postPresent -Force
                 $row | Add-Member -NotePropertyName PostCycleIntuneEnrollmentDetected -NotePropertyValue $postDetected -Force
-                $row | Add-Member -NotePropertyName PostCycleIntuneInventoryCsv -NotePropertyValue $postInventory.CsvPath -Force
+                $row | Add-Member -NotePropertyName PostCycleIntuneInventoryCsv -NotePropertyValue (ConvertTo-PortableLotPath -Value $postInventory.CsvPath) -Force
                 $row | Add-Member -NotePropertyName PostCycleIntuneInventoryError -NotePropertyValue "" -Force
                 if ($postPresent) {
                     $row | Add-Member -NotePropertyName EffectiveStatus -NotePropertyValue "ENROLLED_DETECTED_POST_CYCLE" -Force
@@ -3130,7 +3395,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $row | Add-Member -NotePropertyName PostCycleIntuneInventoryChecked -NotePropertyValue $true -Force
                 $row | Add-Member -NotePropertyName PostCycleIntuneInventoryPresent -NotePropertyValue "" -Force
                 $row | Add-Member -NotePropertyName PostCycleIntuneEnrollmentDetected -NotePropertyValue "" -Force
-                $row | Add-Member -NotePropertyName PostCycleIntuneInventoryCsv -NotePropertyValue $postInventory.CsvPath -Force
+                $row | Add-Member -NotePropertyName PostCycleIntuneInventoryCsv -NotePropertyValue (ConvertTo-PortableLotPath -Value $postInventory.CsvPath) -Force
                 $row | Add-Member -NotePropertyName PostCycleIntuneInventoryError -NotePropertyValue $postInventory.Error -Force
                 $row | Add-Member -NotePropertyName EffectiveStatus -NotePropertyValue ([string]$row.Status) -Force
                 $row | Add-Member -NotePropertyName EffectiveNextAction -NotePropertyValue ([string]$row.NextAction) -Force
@@ -3139,7 +3404,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
 
         try {
-            $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $liveSummaryPath -NoTypeInformation -Encoding UTF8
+            Get-PortableReportRows -Rows $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $liveSummaryPath -NoTypeInformation -Encoding UTF8
         }
         catch {
             Write-Host ("Cycle {0}: failed to rewrite live CSV with post-cycle Intune columns: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
@@ -3182,7 +3447,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $row | Add-Member -NotePropertyName PostCycleEntraRegisteredState -NotePropertyValue $postEntraState -Force
                 $row | Add-Member -NotePropertyName PostCycleEntraAlternativeSecurityIdCount -NotePropertyValue $postAltSecIdCount -Force
                 $row | Add-Member -NotePropertyName PostCycleEntraPendingResolved -NotePropertyValue $resolvedThisCycle -Force
-                $row | Add-Member -NotePropertyName PostCycleEntraInventoryCsv -NotePropertyValue $postEntraInventory.CsvPath -Force
+                $row | Add-Member -NotePropertyName PostCycleEntraInventoryCsv -NotePropertyValue (ConvertTo-PortableLotPath -Value $postEntraInventory.CsvPath) -Force
                 $row | Add-Member -NotePropertyName PostCycleEntraInventoryError -NotePropertyValue "" -Force
 
                 if ($resolvedThisCycle -and [string]$row.EffectiveStatus -ne "ENROLLED_DETECTED_POST_CYCLE") {
@@ -3201,14 +3466,14 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $row | Add-Member -NotePropertyName PostCycleEntraRegisteredState -NotePropertyValue "" -Force
                 $row | Add-Member -NotePropertyName PostCycleEntraAlternativeSecurityIdCount -NotePropertyValue "" -Force
                 $row | Add-Member -NotePropertyName PostCycleEntraPendingResolved -NotePropertyValue "" -Force
-                $row | Add-Member -NotePropertyName PostCycleEntraInventoryCsv -NotePropertyValue $postEntraInventory.CsvPath -Force
+                $row | Add-Member -NotePropertyName PostCycleEntraInventoryCsv -NotePropertyValue (ConvertTo-PortableLotPath -Value $postEntraInventory.CsvPath) -Force
                 $row | Add-Member -NotePropertyName PostCycleEntraInventoryError -NotePropertyValue $postEntraInventory.Error -Force
             }
             Write-Host ("Cycle {0}: post-cycle Entra inventory failed: {1}" -f $CycleNumber,$postEntraInventory.Error) -ForegroundColor Yellow
         }
 
         try {
-            $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $liveSummaryPath -NoTypeInformation -Encoding UTF8
+            Get-PortableReportRows -Rows $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $liveSummaryPath -NoTypeInformation -Encoding UTF8
         }
         catch {
             Write-Host ("Cycle {0}: failed to rewrite live CSV with post-cycle Entra columns: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
@@ -3235,7 +3500,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
                 $row | Add-Member -NotePropertyName PostCycleADInventoryChecked -NotePropertyValue $true -Force
                 $row | Add-Member -NotePropertyName PostCycleADInventoryPresent -NotePropertyValue $postAdPresent -Force
-                $row | Add-Member -NotePropertyName PostCycleADInventoryCsv -NotePropertyValue $postAdInventory.CsvPath -Force
+                $row | Add-Member -NotePropertyName PostCycleADInventoryCsv -NotePropertyValue (ConvertTo-PortableLotPath -Value $postAdInventory.CsvPath) -Force
                 $row | Add-Member -NotePropertyName PostCycleADInventoryError -NotePropertyValue "" -Force
             }
 
@@ -3246,14 +3511,14 @@ function Invoke-IntuneHybridJoinRepairCycle {
             foreach ($row in $summaryRowsForPostCycle) {
                 $row | Add-Member -NotePropertyName PostCycleADInventoryChecked -NotePropertyValue $true -Force
                 $row | Add-Member -NotePropertyName PostCycleADInventoryPresent -NotePropertyValue "" -Force
-                $row | Add-Member -NotePropertyName PostCycleADInventoryCsv -NotePropertyValue $postAdInventory.CsvPath -Force
+                $row | Add-Member -NotePropertyName PostCycleADInventoryCsv -NotePropertyValue (ConvertTo-PortableLotPath -Value $postAdInventory.CsvPath) -Force
                 $row | Add-Member -NotePropertyName PostCycleADInventoryError -NotePropertyValue $postAdInventory.Error -Force
             }
             Write-Host ("Cycle {0}: post-cycle AD inventory failed: {1}" -f $CycleNumber,$postAdInventory.Error) -ForegroundColor Yellow
         }
 
         try {
-            $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $liveSummaryPath -NoTypeInformation -Encoding UTF8
+            Get-PortableReportRows -Rows $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $liveSummaryPath -NoTypeInformation -Encoding UTF8
         }
         catch {
             Write-Host ("Cycle {0}: failed to rewrite live CSV with post-cycle AD columns: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
@@ -3283,7 +3548,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
     }
 
     $summaryPath = Join-Path $ReportRoot ("PsExec_IntuneHybridJoinRepair_Summary_cycle{0}_{1}.csv" -f $CycleNumber,(Get-Date -Format "yyyyMMdd_HHmmss"))
-    $summaryRowsForPostCycle | Export-Csv -LiteralPath $summaryPath -NoTypeInformation -Encoding UTF8
+    Get-PortableReportRows -Rows $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $summaryPath -NoTypeInformation -Encoding UTF8
 
     Write-Host ""
     Write-Host ("Cycle {0} status counts:" -f $CycleNumber) -ForegroundColor Cyan
