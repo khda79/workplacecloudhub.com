@@ -166,6 +166,14 @@ target. Optional source-level copy concurrency is available with
 `W11UT_SETUP_SOURCE_CONCURRENCY_LIMIT` and a writable UNC lease folder in
 `W11UT_SETUP_SOURCE_CONCURRENCY_GATE_ROOT`.
 
+Before copying setup media to the local cache, the endpoint checks that the cache drive can
+hold the media while still preserving the configured `-MinimumFreeDiskGB` on the system
+drive. In default `LocalCache` mode, this effectively requires:
+
+```text
+Free space + existing cache size >= setup media size + MinimumFreeDiskGB
+```
+
 If you intentionally run a local/direct test with a local path, set
 `W11UT_CONFIRM_LOCAL_SETUP_SOURCE=1` explicitly.
 
@@ -236,6 +244,7 @@ provide the guarded action switches by default; direct PowerShell calls do not.
 - `-AllowWUReset`: resets Windows Update cache and services.
 - `-AllowForceUpgrade`: triggers assigned Windows Update scan/download/install through Windows Update APIs and `UsoClient`.
 - `-AllowSetupUpgrade`: starts Windows setup upgrade only after setup media and readiness checks pass.
+- `-DirectSetupUpgrade`: starts Windows setup directly after setup media validation/cache preparation; the script still blocks when the system drive is below `-MinimumFreeDiskGB`.
 - `-AllowReboot`: permits a controlled reboot when a pending reboot blocks progress.
 - `-SkipVirtualMachines`: skips detected virtual machines before repair, setup copy, or upgrade actions.
 - `-AllowDiskCleanup`: when free disk is below `-MinimumFreeDiskGB`, removes only rebuildable caches and old SmartM365 logs before failing the device for disk space.

@@ -4,150 +4,103 @@
 <meta charset="UTF-8">
 <title>Inschakelen van uw archiefpostvak</title>
 </head>
-
-<body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
-
-<!-- ===== Bandeau ===== -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
-  <tr>
-    <td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr>
-          <td style="padding:12px 16px; width:160px;">
-            {{LogoImgTag}}
-          </td>
-          <td style="padding:12px 16px;">
-            <div style="color:#ffffff; font-size:20px; font-weight:700;">INSCHAKELEN VAN UW ARCHIEFPOSTVAK</div>
-            <div style="color:#d9ecff; font-size:13px;">Belangrijke informatie</div>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-
-<!-- ===== Contenu ===== -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#ffffff;">
-  <tr>
-    <td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr>
-          <td style="padding:22px 16px;">
-
-            <p style="margin:0 0 12px 0;">Hallo <b>{{UserName}}</b>,</p>
-
-            <p style="margin:0 0 12px 0;">
-              Vanaf <b>{{Date}}</b> wordt een archiefpostvak ingeschakeld voor uw e-mailaccount.
-            </p>
-
-            <p style="margin:0 0 14px 0;">
-              <b>Waarom?</b><br>
-              Ter voorbereiding op de migratie naar <b>Exchange Online</b> en om een soepele overgang te garanderen.
-            </p>
-
-            <!-- ===== Ce que cela change ===== -->
-            <div style="background:#f6f8fb; border:1px solid #d6dde8; border-radius:6px; padding:14px; margin:16px 0;">
-              <div style="font-weight:700; color:#0055A4; margin-bottom:8px;">Wat verandert er voor u?</div>
-              <ul style="margin:0; padding-left:18px;">
-                <li style="margin:0 0 6px 0;"><b>Er verdwijnt niets.</b></li>
-                <li style="margin:0 0 6px 0;">In Outlook verschijnt een sectie <b>Archief - {{UserName}}</b> (linkerpaneel).</li>
-                <li style="margin:0 0 6px 0;">Uw oudste e-mails kunnen daar automatisch naartoe worden verplaatst om uw primaire postvak te ontlasten.</li>
-                <li style="margin:0 0 6px 0;">Gearchiveerde e-mails blijven altijd toegankelijk en doorzoekbaar.</li>
-              </ul>
-            </div>
-
-            <!-- ===== Action requise ===== -->
-            <div style="margin:0 0 14px 0;">
-              <div style="font-weight:700; color:#0055A4; margin:0 0 6px 0;">Actie vereist?</div>
-              <p style="margin:0;">Er is geen verplichte actie van uw kant vereist.</p>
-            </div>
-
-            <!-- ===== Comment utiliser l’archive ===== -->
-            <div style="margin:0 0 14px 0;">
-              <div style="font-weight:700; color:#0055A4; margin:0 0 6px 0;">Hoe gebruikt u het archief?</div>
-              <ul style="margin:0; padding-left:18px;">
-                <li style="margin:0 0 6px 0;">Verplaats grote mappen naar het archief (rechtermuisknop &gt; <b>Verplaatsen</b>).</li>
-                <li style="margin:0 0 6px 0;">Automatisch archiveren verplaatst oudere e-mails geleidelijk.</li>
-                <li style="margin:0 0 6px 0;">Outlook-zoekopdracht omvat ook het archief.</li>
-                <li style="margin:0 0 6px 0;">Gebruik indien nodig het bereik <b>“Alle Outlook-items”</b> om zowel in het primaire postvak als in het archief te zoeken.</li>
-              </ul>
-            </div>
-
-            <!-- ===== Postvakgebruik (déplacé avant méthodes) ===== -->
-            <div style="background:#f6f8fb; border:1px solid #d6dde8; border-radius:6px; padding:14px; margin:16px 0;">
-              <div style="font-weight:700; color:#0055A4; margin-bottom:8px;">Postvakgebruik</div>
-              <p style="margin:0;">{{MailboxUsageText}}</p>
-              <div style="color:#666; font-size:12px; margin-top:8px;">
-                Deze informatie is indicatief en helpt u zich voor te bereiden op uw migratie.
-              </div>
-            </div>
-
-            <!-- ===== Archiver vous-même ===== -->
-            <h2 style="color:#0055A4; font-size:16px; margin:18px 0 8px 0;">Zelf archiveren om ruimte vrij te maken</h2>
-
-            <p style="margin:0 0 12px 0;">
-              Als u de grootte van uw primaire postvak snel wilt verkleinen, kunt u bepaalde e-mails of mappen handmatig archiveren.
-            </p>
-
-            <h3 style="margin:14px 0 6px 0;">Methode 1 – Een hele map verplaatsen (aanbevolen)</h3>
-            <p style="margin:0 0 6px 0;">De snelste manier als u veel e-mails heeft.</p>
-            <ol style="margin:0 0 12px 18px;">
-              <li>Klik met rechts op een map (bijv. “Projecten 2022”)</li>
-              <li>Klik op <b>Map verplaatsen</b></li>
-              <li>Kies <b>Archief - {{UserName}}</b></li>
-              <li>Bevestigen</li>
-            </ol>
-            <p style="margin:0 0 12px 0;">Alle e-mails in de map worden in één handeling verplaatst.</p>
-
-            <h3 style="margin:14px 0 6px 0;">Methode 2 – Meerdere e-mails archiveren</h3>
-            <ol style="margin:0 0 12px 18px;">
-              <li>Selecteer meerdere e-mails</li>
-              <li>Klik met rechts</li>
-              <li>Klik op <b>Verplaatsen</b></li>
-              <li>Kies een map in het archief</li>
-            </ol>
-            <p style="margin:0 0 12px 0; color:#666;">
-              Vermijd het één voor één verplaatsen van e-mails als het volume groot is.
-            </p>
-
-            <h3 style="margin:14px 0 6px 0;">Methode 3 – Snel ruimte vrijmaken</h3>
-            <p style="margin:0 0 6px 0;">Om grote e-mails te vinden:</p>
-            <ul style="margin:0 0 12px 18px;">
-              <li>Klik op <b>Sorteren op</b></li>
-              <li>Kies <b>Grootte</b></li>
-              <li>Archiveer of verwijder de grootste e-mails</li>
-            </ul>
-            <p style="margin:0 0 12px 0; color:#666;">
-              Sla belangrijke bijlagen op in OneDrive voordat u verwijdert.
-            </p>
-
-            <p style="margin:0 0 12px 0;">
-              <b>Niet vergeten:</b> maak <b>Verwijderde items</b> en <b>Ongewenste e-mail</b> regelmatig leeg — deze mappen tellen mee voor de totale postvakgrootte.
-            </p>
-
-            <!-- ===== Support ===== -->
-            <div style="margin-top:18px; padding:12px; border-left:4px solid #0055A4; background:#f9fbff;">
-              <div style="font-weight:700; margin-bottom:6px;">Hulp nodig?</div>
-              <div>Neem contact op met support: <b>{{Hotline}}</b></div>
-            </div>
-
-            <!-- ===== Footer ===== -->
-            <div style="margin-top:30px; text-align:center;">
-              <div style="width:100%; height:1px; background:#d0d0d0; margin:20px auto;"></div>
+<body style="margin:0; padding:0; background:#F5F8FB; font-family:'Segoe UI', Arial, sans-serif; color:#1F2937; font-size:13px; line-height:1.5;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#F5F8FB;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+                <tr>
+                  <td style="vertical-align:middle; padding-right:16px;">
+                    <div style="display:inline-block; background:#E6F4FF; color:#005A9E; border:1px solid #B9DDF7; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700;">MAILBOXARCHIEF</div>
+                    <div style="margin-top:10px; font-size:24px; line-height:1.2; font-weight:700; color:#1F2937;">Inschakelen van uw archiefpostvak</div>
+                    <div style="margin-top:6px; font-size:14px; color:#5F6B7A;">Belangrijke informatie voor de migratie</div>
+                  </td>
+                  <td align="right" style="vertical-align:middle; width:170px;">
+                    <div style="display:inline-block; border:1px solid #DDE7F0; border-radius:8px; padding:10px 12px; background:#F8FBFE;">{{LogoImgTag}}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <p style="margin:0 0 14px 0;">Goedendag <b>{{UserName}}</b>,</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="background:#F8FBFE; border:1px solid #DDE7F0; border-radius:8px; padding:14px 16px;">
+                  <div style="font-weight:700; color:#005A9E; margin-bottom:8px;">Wat verandert er voor u?</div>
+                  <div>Vanaf <b>{{Date}}</b> wordt een archiefpostvak voor uw mailbox ingeschakeld.</div>
+                  <div style="margin-top:8px; color:#5F6B7A;">Dit bereidt de migratie naar <b>Exchange Online</b> voor en zorgt voor een vlotte overgang.</div>
+                </td></tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#ffffff; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Mailboxgebruik</div>
+                  <div style="font-size:18px; font-weight:700; color:#1F2937;">{{MailboxUsageText}}</div>
+                  <div style="margin-top:8px; color:#5F6B7A; font-size:12px;">Deze informatie helpt u om uw migratie voor te bereiden.</div>
+                </td></tr>
+              </table>
+              <div style="font-size:16px; font-weight:700; color:#005A9E; margin:2px 0 12px 0;">Hoe gebruikt u uw archief</div>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; margin-bottom:18px;"><tbody>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">1</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Niets verdwijnt</div>
+                          <div style="color:#5F6B7A;">In Outlook verschijnt een sectie <b>Archive - {{UserName}}</b>.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">2</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Verplaats grote mappen</div>
+                          <div style="color:#5F6B7A;">Verplaats oude of grote mappen naar het archief om uw hoofdmailbox kleiner te maken.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">3</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Zoeken blijft beschikbaar</div>
+                          <div style="color:#5F6B7A;">Gearchiveerde e-mails blijven toegankelijk en doorzoekbaar in Outlook.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">4</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Maak snel ruimte vrij</div>
+                          <div style="color:#5F6B7A;">Sorteer op grootte, sla belangrijke bijlagen op in OneDrive of SharePoint en archiveer of verwijder grote e-mails.</div>
+                        </td>
+                      </tr>
+              </tbody></table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Hulp nodig</div>
+                  <div style="color:#5F6B7A;">Bij problemen kunt u contact opnemen met de helpdesk:</div>
+                  <div style="margin-top:8px; color:#1F2937; font-weight:700;">{{Hotline}}</div>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:18px; text-align:center;">
               {{FooterLogoImgTag}}
-              <div style="margin-top:12px; font-size:14px; font-weight:bold;">
-                Bedankt voor uw medewerking<br>
-                Het SmartM365-programmateam
-              </div>
-            </div>
-
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-
+              <div style="margin-top:12px; font-size:14px; font-weight:700; color:#1F2937;">Wij danken u voor uw medewerking<br>Uw IT-dienst</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
-

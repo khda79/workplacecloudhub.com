@@ -1189,6 +1189,7 @@ function Copy-SetupMediaToLocalCache {
     New-SmartDirectory -Path $CachePath
     $robocopyLog = Join-Path $script:SetupLogDir ("Robocopy_SetupMedia_{0}.log" -f $script:RunId)
     New-SmartDirectory -Path $script:SetupLogDir
+    Test-SetupMediaCopyDiskSpace -SourcePath $SourcePath -CachePath $CachePath
 
     if ($SetupMediaCopyJitterSeconds -gt 0) {
         $jitter = Get-Random -Minimum 0 -Maximum ($SetupMediaCopyJitterSeconds + 1)
@@ -1242,6 +1243,53 @@ function Copy-SetupMediaToLocalCache {
     Save-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint -SourcePath $SourcePath
     $script:SetupCacheAction = 'CopiedByTarget'
     return $setupExe
+}
+
+function Get-PathDriveAvailableBytes {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($fullPath)
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        throw "Unable to resolve drive root for path: $Path"
+    }
+
+    $drive = New-Object System.IO.DriveInfo($root)
+    return [int64]$drive.AvailableFreeSpace
+}
+
+function Test-SetupMediaCopyDiskSpace {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$CachePath
+    )
+
+    $sourceBytes = Get-PathSizeBytes -Path $SourcePath
+    $cacheBytes = Get-PathSizeBytes -Path $CachePath
+    $cacheDriveFreeBytes = Get-PathDriveAvailableBytes -Path $CachePath
+    $minimumSystemFreeBytes = [int64]$MinimumFreeDiskGB * 1GB
+    $additionalCopyBytes = [int64][math]::Max(0, ([double]$sourceBytes - [double]$cacheBytes))
+    $systemDriveRoot = [System.IO.Path]::GetPathRoot((Join-Path $env:SystemDrive '\'))
+    $cacheDriveRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($CachePath))
+    $systemFreeBytes = [int64]((Get-SystemDriveFreeGb) * 1GB)
+
+    if ($cacheDriveRoot -ieq $systemDriveRoot) {
+        $requiredCacheDriveFreeBytes = $additionalCopyBytes + $minimumSystemFreeBytes
+    }
+    else {
+        $requiredCacheDriveFreeBytes = $additionalCopyBytes
+        if ($systemFreeBytes -lt $minimumSystemFreeBytes) {
+            $script:SetupCacheAction = 'CopyBlockedInsufficientDisk'
+            throw ("Insufficient system disk space before setup media copy. SystemFreeGB={0}; RequiredSystemFreeGB={1}; CachePath={2}; SourcePath={3}" -f (Convert-BytesToGbText -Bytes $systemFreeBytes),$MinimumFreeDiskGB,$CachePath,$SourcePath)
+        }
+    }
+
+    Write-SmartLog ("Setup media copy disk preflight: SourceGB={0}; ExistingCacheGB={1}; CacheDriveFreeGB={2}; RequiredCacheDriveFreeGB={3}; SystemFreeGB={4}; RequiredSystemFreeGB={5}; CachePath={6}" -f (Convert-BytesToGbText -Bytes $sourceBytes),(Convert-BytesToGbText -Bytes $cacheBytes),(Convert-BytesToGbText -Bytes $cacheDriveFreeBytes),(Convert-BytesToGbText -Bytes $requiredCacheDriveFreeBytes),(Convert-BytesToGbText -Bytes $systemFreeBytes),$MinimumFreeDiskGB,$CachePath)
+
+    if ($cacheDriveFreeBytes -lt $requiredCacheDriveFreeBytes) {
+        $script:SetupCacheAction = 'CopyBlockedInsufficientDisk'
+        throw ("Insufficient disk space before setup media copy. CacheDriveFreeGB={0}; RequiredCacheDriveFreeGB={1}; SourceGB={2}; ExistingCacheGB={3}; RequiredSystemFreeGB={4}; CachePath={5}; SourcePath={6}" -f (Convert-BytesToGbText -Bytes $cacheDriveFreeBytes),(Convert-BytesToGbText -Bytes $requiredCacheDriveFreeBytes),(Convert-BytesToGbText -Bytes $sourceBytes),(Convert-BytesToGbText -Bytes $cacheBytes),$MinimumFreeDiskGB,$CachePath,$SourcePath)
+    }
 }
 
 function Get-PathSizeBytes {
@@ -1664,33 +1712,41 @@ try {
     }
     elseif ($DirectSetupUpgrade) {
         Write-SmartLog 'Direct setup upgrade requested. Skipping Intune enrollment, compatibility-indicator, pending-reboot, and policy-blocker gates; Windows Setup will perform final validation.' 'WARN'
-        $setupExe = Resolve-SetupUpgradeExecutable
-        if ($AuditOnly) {
-            $status = 'DIRECT_SETUP_UPGRADE_READY'
-            $nextAction = 'RUN_WITHOUT_AUDIT_ONLY'
-            $actionResult = 'DirectSetupValidatedAuditOnly'
-            $exitCode = 0
+        if ($freeGb -lt $MinimumFreeDiskGB) {
+            $status = 'INSUFFICIENT_DISK'
+            $nextAction = 'FREE_DISK_SPACE'
+            $detail = ("FreeDiskGB={0}; RequiredGB={1}; DirectSetup=True; Setup media copy was not attempted." -f $freeGb,$MinimumFreeDiskGB)
+            $exitCode = 3
         }
         else {
-            $setupExitCode = Invoke-SetupUpgrade -SetupExePath $setupExe
-            $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $setupExitCode
-            $setupExitDetail = Format-SetupExitCodeInfo -Info $setupExitInfo
-            $actionResult = "DirectSetup$setupExitDetail"
-            if ($setupExitCode -eq 0) {
-                $status = 'DIRECT_SETUP_UPGRADE_STARTED'
-                $nextAction = 'MONITOR_SETUP_AND_REBOOT'
-                $exitCode = 0
-            }
-            elseif ($setupExitCode -eq 3010) {
-                $status = 'DIRECT_SETUP_UPGRADE_REBOOT_REQUIRED'
-                $nextAction = 'REBOOT_DEVICE'
+            $setupExe = Resolve-SetupUpgradeExecutable
+            if ($AuditOnly) {
+                $status = 'DIRECT_SETUP_UPGRADE_READY'
+                $nextAction = 'RUN_WITHOUT_AUDIT_ONLY'
+                $actionResult = 'DirectSetupValidatedAuditOnly'
                 $exitCode = 0
             }
             else {
-                $status = 'DIRECT_SETUP_UPGRADE_FAILED'
-                $nextAction = 'CHECK_SETUP_LOGS'
-                $detail = $setupExitDetail
-                $exitCode = 1
+                $setupExitCode = Invoke-SetupUpgrade -SetupExePath $setupExe
+                $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $setupExitCode
+                $setupExitDetail = Format-SetupExitCodeInfo -Info $setupExitInfo
+                $actionResult = "DirectSetup$setupExitDetail"
+                if ($setupExitCode -eq 0) {
+                    $status = 'DIRECT_SETUP_UPGRADE_STARTED'
+                    $nextAction = 'MONITOR_SETUP_AND_REBOOT'
+                    $exitCode = 0
+                }
+                elseif ($setupExitCode -eq 3010) {
+                    $status = 'DIRECT_SETUP_UPGRADE_REBOOT_REQUIRED'
+                    $nextAction = 'REBOOT_DEVICE'
+                    $exitCode = 0
+                }
+                else {
+                    $status = 'DIRECT_SETUP_UPGRADE_FAILED'
+                    $nextAction = 'CHECK_SETUP_LOGS'
+                    $detail = $setupExitDetail
+                    $exitCode = 1
+                }
             }
         }
     }

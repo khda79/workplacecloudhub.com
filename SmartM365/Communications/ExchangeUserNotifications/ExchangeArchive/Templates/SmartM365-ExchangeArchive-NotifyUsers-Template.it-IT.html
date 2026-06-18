@@ -4,150 +4,103 @@
 <meta charset="UTF-8">
 <title>Attivazione della casella di archivio</title>
 </head>
-
-<body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
-
-<!-- ===== Bandeau ===== -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
-  <tr>
-    <td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr>
-          <td style="padding:12px 16px; width:160px;">
-            {{LogoImgTag}}
-          </td>
-          <td style="padding:12px 16px;">
-            <div style="color:#ffffff; font-size:20px; font-weight:700;">ATTIVAZIONE DELLA CASELLA DI ARCHIVIO</div>
-            <div style="color:#d9ecff; font-size:13px;">Informazioni importanti</div>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-
-<!-- ===== Contenu ===== -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#ffffff;">
-  <tr>
-    <td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr>
-          <td style="padding:22px 16px;">
-
-            <p style="margin:0 0 12px 0;">Buongiorno <b>{{UserName}}</b>,</p>
-
-            <p style="margin:0 0 12px 0;">
-              A partire dal <b>{{Date}}</b>, verrà attivata una casella di archivio sulla tua posta elettronica.
-            </p>
-
-            <p style="margin:0 0 14px 0;">
-              <b>Perché?</b><br>
-              Per preparare la migrazione a <b>Exchange Online</b> e garantire una transizione fluida.
-            </p>
-
-            <!-- ===== Ce que cela change ===== -->
-            <div style="background:#f6f8fb; border:1px solid #d6dde8; border-radius:6px; padding:14px; margin:16px 0;">
-              <div style="font-weight:700; color:#0055A4; margin-bottom:8px;">Cosa cambia per te?</div>
-              <ul style="margin:0; padding-left:18px;">
-                <li style="margin:0 0 6px 0;"><b>Nulla andrà perso.</b></li>
-                <li style="margin:0 0 6px 0;">In Outlook comparirà una sezione <b>Archivio - {{UserName}}</b> (pannello sinistro).</li>
-                <li style="margin:0 0 6px 0;">Le email più vecchie potranno essere spostate automaticamente lì per alleggerire la casella principale.</li>
-                <li style="margin:0 0 6px 0;">Le email archiviate restano sempre accessibili e ricercabili.</li>
-              </ul>
-            </div>
-
-            <!-- ===== Action requise ===== -->
-            <div style="margin:0 0 14px 0;">
-              <div style="font-weight:700; color:#0055A4; margin:0 0 6px 0;">Azione richiesta?</div>
-              <p style="margin:0;">Non è richiesta alcuna azione obbligatoria da parte tua.</p>
-            </div>
-
-            <!-- ===== Comment utiliser l’archive ===== -->
-            <div style="margin:0 0 14px 0;">
-              <div style="font-weight:700; color:#0055A4; margin:0 0 6px 0;">Come usare l’archivio?</div>
-              <ul style="margin:0; padding-left:18px;">
-                <li style="margin:0 0 6px 0;">Sposta le cartelle più grandi nell’archivio (clic destro &gt; <b>Sposta</b>).</li>
-                <li style="margin:0 0 6px 0;">L’archiviazione automatica sposterà progressivamente le email più vecchie.</li>
-                <li style="margin:0 0 6px 0;">La ricerca di Outlook include anche l’archivio.</li>
-                <li style="margin:0 0 6px 0;">Se necessario, usa l’ambito <b>“Tutti gli elementi di Outlook”</b> per cercare nella casella principale e nell’archivio.</li>
-              </ul>
-            </div>
-
-            <!-- ===== Utilizzo della casella (déplacé avant méthodes) ===== -->
-            <div style="background:#f6f8fb; border:1px solid #d6dde8; border-radius:6px; padding:14px; margin:16px 0;">
-              <div style="font-weight:700; color:#0055A4; margin-bottom:8px;">Utilizzo della casella</div>
-              <p style="margin:0;">{{MailboxUsageText}}</p>
-              <div style="color:#666; font-size:12px; margin-top:8px;">
-                Informazione fornita a titolo indicativo per aiutarti a preparare la migrazione.
-              </div>
-            </div>
-
-            <!-- ===== Archiver vous-même ===== -->
-            <h2 style="color:#0055A4; font-size:16px; margin:18px 0 8px 0;">Archiviare manualmente per liberare spazio</h2>
-
-            <p style="margin:0 0 12px 0;">
-              Se desideri ridurre rapidamente la dimensione della casella principale, puoi archiviare manualmente alcune email o cartelle.
-            </p>
-
-            <h3 style="margin:14px 0 6px 0;">Metodo 1 – Spostare un’intera cartella (consigliato)</h3>
-            <p style="margin:0 0 6px 0;">L’opzione più rapida se hai molte email.</p>
-            <ol style="margin:0 0 12px 18px;">
-              <li>Clic destro su una cartella (es. “Progetti 2022”)</li>
-              <li>Clicca su <b>Sposta cartella</b></li>
-              <li>Seleziona <b>Archivio - {{UserName}}</b></li>
-              <li>Conferma</li>
-            </ol>
-            <p style="margin:0 0 12px 0;">Tutte le email della cartella vengono spostate in un’unica operazione.</p>
-
-            <h3 style="margin:14px 0 6px 0;">Metodo 2 – Archiviare più email</h3>
-            <ol style="margin:0 0 12px 18px;">
-              <li>Seleziona più email</li>
-              <li>Clic destro</li>
-              <li>Clicca su <b>Sposta</b></li>
-              <li>Seleziona una cartella nell’archivio</li>
-            </ol>
-            <p style="margin:0 0 12px 0; color:#666;">
-              Evita di spostare le email una per una se il volume è elevato.
-            </p>
-
-            <h3 style="margin:14px 0 6px 0;">Metodo 3 – Liberare spazio rapidamente</h3>
-            <p style="margin:0 0 6px 0;">Per individuare le email più grandi:</p>
-            <ul style="margin:0 0 12px 18px;">
-              <li>Clicca su <b>Ordina per</b></li>
-              <li>Seleziona <b>Dimensione</b></li>
-              <li>Archivia o elimina le email più grandi</li>
-            </ul>
-            <p style="margin:0 0 12px 0; color:#666;">
-              Salva gli allegati importanti su OneDrive prima di eliminare.
-            </p>
-
-            <p style="margin:0 0 12px 0;">
-              <b>Da non dimenticare:</b> svuotare regolarmente <b>Posta eliminata</b> e <b>Posta indesiderata</b> — queste cartelle contano nella dimensione totale della casella.
-            </p>
-
-            <!-- ===== Support ===== -->
-            <div style="margin-top:18px; padding:12px; border-left:4px solid #0055A4; background:#f9fbff;">
-              <div style="font-weight:700; margin-bottom:6px;">Hai bisogno di aiuto?</div>
-              <div>Contatta il supporto: <b>{{Hotline}}</b></div>
-            </div>
-
-            <!-- ===== Footer ===== -->
-            <div style="margin-top:30px; text-align:center;">
-              <div style="width:100%; height:1px; background:#d0d0d0; margin:20px auto;"></div>
+<body style="margin:0; padding:0; background:#F5F8FB; font-family:'Segoe UI', Arial, sans-serif; color:#1F2937; font-size:13px; line-height:1.5;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#F5F8FB;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+                <tr>
+                  <td style="vertical-align:middle; padding-right:16px;">
+                    <div style="display:inline-block; background:#E6F4FF; color:#005A9E; border:1px solid #B9DDF7; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700;">ARCHIVIO POSTA</div>
+                    <div style="margin-top:10px; font-size:24px; line-height:1.2; font-weight:700; color:#1F2937;">Attivazione della casella di archivio</div>
+                    <div style="margin-top:6px; font-size:14px; color:#5F6B7A;">Informazioni importanti prima della migrazione</div>
+                  </td>
+                  <td align="right" style="vertical-align:middle; width:170px;">
+                    <div style="display:inline-block; border:1px solid #DDE7F0; border-radius:8px; padding:10px 12px; background:#F8FBFE;">{{LogoImgTag}}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <p style="margin:0 0 14px 0;">Gentile <b>{{UserName}}</b>,</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="background:#F8FBFE; border:1px solid #DDE7F0; border-radius:8px; padding:14px 16px;">
+                  <div style="font-weight:700; color:#005A9E; margin-bottom:8px;">Cosa cambia per lei?</div>
+                  <div>A partire dal <b>{{Date}}</b>, verra attivata una casella di archivio per la sua posta.</div>
+                  <div style="margin-top:8px; color:#5F6B7A;">Questo prepara la migrazione a <b>Exchange Online</b> e garantisce una transizione fluida.</div>
+                </td></tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#ffffff; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Utilizzo della casella di posta</div>
+                  <div style="font-size:18px; font-weight:700; color:#1F2937;">{{MailboxUsageText}}</div>
+                  <div style="margin-top:8px; color:#5F6B7A; font-size:12px;">Questa informazione serve ad aiutarla ad anticipare la migrazione.</div>
+                </td></tr>
+              </table>
+              <div style="font-size:16px; font-weight:700; color:#005A9E; margin:2px 0 12px 0;">Come usare l&rsquo;archivio</div>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; margin-bottom:18px;"><tbody>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">1</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Nulla scompare</div>
+                          <div style="color:#5F6B7A;">In Outlook apparira una sezione <b>Archive - {{UserName}}</b>.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">2</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Sposti le cartelle grandi</div>
+                          <div style="color:#5F6B7A;">Sposti cartelle vecchie o grandi nell&rsquo;archivio per alleggerire la casella principale.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">3</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">La ricerca resta disponibile</div>
+                          <div style="color:#5F6B7A;">Le email archiviate restano accessibili e ricercabili da Outlook.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">4</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Liberi spazio rapidamente</div>
+                          <div style="color:#5F6B7A;">Ordini per dimensione, salvi gli allegati importanti in OneDrive o SharePoint, quindi archivi o elimini le email grandi.</div>
+                        </td>
+                      </tr>
+              </tbody></table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">In caso di necessita</div>
+                  <div style="color:#5F6B7A;">In caso di difficolta, contatti l'helpdesk:</div>
+                  <div style="margin-top:8px; color:#1F2937; font-weight:700;">{{Hotline}}</div>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:18px; text-align:center;">
               {{FooterLogoImgTag}}
-              <div style="margin-top:12px; font-size:14px; font-weight:bold;">
-                Grazie per la collaborazione<br>
-                Il team del programma SmartM365
-              </div>
-            </div>
-
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-
+              <div style="margin-top:12px; font-size:14px; font-weight:700; color:#1F2937;">La ringraziamo per la collaborazione<br>Il suo servizio informatico</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
-

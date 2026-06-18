@@ -4,99 +4,131 @@
 <meta charset="UTF-8">
 <title>Reduccion del tamano del buzon de correo</title>
 </head>
-<body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
-
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
-    <tr><td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr>
-          <td style="padding:12px 16px; width:160px;">{{LogoImgTag}}</td>
-          <td style="padding:12px 16px;">
-            <div style="color:#ffffff; font-size:22px; font-weight:700;">ACCION REQUERIDA</div>
-            <div style="color:#dfe9f7; font-size:14px;">Reduccion del tamano del buzon de correo</div>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
+<body style="margin:0; padding:0; background:#F5F8FB; font-family:'Segoe UI', Arial, sans-serif; color:#1F2937; font-size:13px; line-height:1.5;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#F5F8FB;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+                <tr>
+                  <td style="vertical-align:middle; padding-right:16px;">
+                    <div style="display:inline-block; background:#E6F4FF; color:#005A9E; border:1px solid #B9DDF7; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700;">ACCION REQUERIDA</div>
+                    <div style="margin-top:10px; font-size:24px; line-height:1.2; font-weight:700; color:#1F2937;">Reduccion del tamano del buzon de correo</div>
+                    <div style="margin-top:6px; font-size:14px; color:#5F6B7A;">Limpieza del buzon requerida antes de la migracion</div>
+                  </td>
+                  <td align="right" style="vertical-align:middle; width:170px;">
+                    <div style="display:inline-block; border:1px solid #DDE7F0; border-radius:8px; padding:10px 12px; background:#F8FBFE;">{{LogoImgTag}}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <p style="margin:0 0 14px 0; color:#1F2937;">Estimado/a <b>{{UserName}}</b>,</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr>
+                  <td style="background:#FEF3F2; border:1px solid #FECDCA; border-radius:8px; padding:14px 16px; color:#1F2937;">
+                    <div style="font-weight:700; color:#B42318; font-size:14px; margin-bottom:8px;">Su buzon de correo es actualmente demasiado grande</div>
+                    <div>El tamano actual de su buzon es <b>{{MailboxSizeGB}}</b>, lo que supera la cuota permitida de <b>{{MailboxQuotaGB}}</b>.<br><br><b>Debe reducir el tamano de su buzon lo antes posible</b> para mantener el acceso completo a su correo y evitar bloqueos de envio y recepcion.</div>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr>
+                  <td style="width:50%; padding-right:6px;">
+                    <div style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:12px;">
+                      <div style="font-size:12px; color:#5F6B7A; font-weight:700;">Tamano actual</div>
+                      <div style="margin-top:4px; color:#B42318; font-size:20px; font-weight:700;">{{MailboxSizeGB}}</div>
+                    </div>
+                  </td>
+                  <td style="width:50%; padding-left:6px;">
+                    <div style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:12px;">
+                      <div style="font-size:12px; color:#5F6B7A; font-weight:700;">Cuota permitida</div>
+                      <div style="margin-top:4px; color:#1F2937; font-size:20px; font-weight:700;">{{MailboxQuotaGB}}</div>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:18px; {{FreeTextBlockStyle}}">
+                <tr>
+                  <td style="border:1px solid #B9DDF7; border-radius:8px; background:#F8FBFE; padding:14px 16px; color:#1F2937; font-size:13px; line-height:1.5;">{{FreeTextBlockTextHtml}}</td>
+                </tr>
+              </table>
+              <div style="font-size:16px; font-weight:700; color:#005A9E; margin:2px 0 12px 0;">Como reducir el tamano de su buzon:</div>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; margin-bottom:18px;">
+                <tbody>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">1</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top; color:#1F2937; font-size:13px; line-height:1.5;">
+                          <div style="font-weight:700; color:#1F2937;">Elimine los correos innecesarios</div>
+                          <div style="color:#5F6B7A;">Identifique y elimine mensajes antiguos, adjuntos grandes y correos que ya no necesita.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">2</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top; color:#1F2937; font-size:13px; line-height:1.5;">
+                          <div style="font-weight:700; color:#1F2937;">Vacie la carpeta "Correo no deseado"</div>
+                          <div style="color:#5F6B7A;">El spam conservado aumenta el uso de la cuota. Vacie esta carpeta regularmente.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">3</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top; color:#1F2937; font-size:13px; line-height:1.5;">
+                          <div style="font-weight:700; color:#1F2937;">Guarde los adjuntos importantes</div>
+                          <div style="color:#5F6B7A;">Guarde los adjuntos que necesite en su unidad de red, OneDrive o SharePoint Online y luego elimine los correos correspondientes.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">4</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top; color:#1F2937; font-size:13px; line-height:1.5;">
+                          <div style="font-weight:700; color:#1F2937;">Vacie la carpeta "Elementos eliminados"</div>
+                          <div style="color:#5F6B7A;">Los mensajes eliminados permanecen almacenados hasta que se vacia la carpeta. Haga clic con el boton derecho y seleccione <i>"Vaciar carpeta"</i>.</div>
+                        </td>
+                      </tr>
+                </tbody>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr>
+                  <td style="border:1px solid #DDE7F0; border-radius:8px; background:#ffffff; padding:14px 16px;">
+                    <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Acceso a su buzon</div>
+                    <div style="color:#5F6B7A; margin-bottom:10px;">Inicie sesion en Webmail mediante el siguiente enlace para gestionar su buzon directamente desde el navegador:</div>
+                    <a href="{{WebmailUrl}}" target="_blank" style="display:inline-block; color:#ffffff; background:#0078D4; border:1px solid #0078D4; border-radius:6px; padding:8px 12px; text-decoration:none; font-weight:700;">{{WebmailUrl}}</a>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0;">
+                <tr>
+                  <td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                    <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">En caso de necesidad</div>
+                    <div style="color:#5F6B7A;">Si tiene alguna dificultad, puede contactar con el servicio de asistencia:</div>
+                    <div style="margin-top:8px; color:#1F2937; font-weight:700;">{{Hotline}}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:18px; text-align:center;">
+              {{FooterLogoImgTag}}
+              <div style="margin-top:12px; font-size:14px; font-weight:700; color:#1F2937;">Le agradecemos su colaboracion<br>Su servicio informatico</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
-
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
-    <tr><td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr><td style="padding:18px 16px;">
-
-          <p>Buenos dias <b>{{UserName}}</b>,</p>
-
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                 style="width:100%; border-collapse:collapse; margin-top:15px; margin-bottom:20px;">
-            <thead><tr>
-              <th align="left" style="background:#f8d7da; color:#721c24; border:1px solid #f5c6cb; padding:10px; font-size:14px;">
-                Su buzon de correo es actualmente demasiado grande
-              </th>
-            </tr></thead>
-            <tbody><tr>
-              <td style="border:1px solid #f5c6cb; padding:12px; background:#fff5f5;">
-                El tamano actual de su buzon de correo es <b>{{MailboxSizeGB}}</b>, lo que supera la cuota permitida de <b>{{MailboxQuotaGB}}</b>.<br><br><b>Debe reducir el tamano de su buzon de correo a la mayor brevedad posible para mantener el acceso completo a su correo electronico y evitar el bloqueo del envio y de la recepcion.</b>
-              </td>
-            </tr></tbody>
-          </table>
-
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                 style="border-collapse:collapse; width:100%; margin-bottom:20px;">
-            <thead><tr>
-              <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Tamano actual</th>
-              <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Cuota permitida</th>
-            </tr></thead>
-            <tbody><tr>
-              <td style="border:1px solid #ccc; padding:8px; color:#c0392b; font-weight:bold;">{{MailboxSizeGB}}</td>
-              <td style="border:1px solid #ccc; padding:8px;">{{MailboxQuotaGB}}</td>
-            </tr></tbody>
-          </table>
-
-          <h2 style="color:#0055A4; font-size:16px; margin-top:20px;">Como reducir el tamano de su buzon:</h2>
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                 style="width:100%; border-collapse:collapse; margin-bottom:20px;">
-            <tbody>
-                  <tr>
-                    <td style="background:#eaf3fb; border:1px solid #b8d8f0; padding:10px; vertical-align:top; width:28px; font-size:18px; text-align:center; font-weight:bold; color:#0055A4;">1</td>
-                    <td style="border:1px solid #b8d8f0; padding:10px; vertical-align:top;"><b>Eliminar correos electronicos innecesarios</b><br>Identifique y elimine mensajes antiguos, archivos adjuntos de gran tamano y correos que ya no necesite.</td>
-                  </tr>
-                  <tr>
-                    <td style="background:#eaf3fb; border:1px solid #b8d8f0; padding:10px; vertical-align:top; width:28px; font-size:18px; text-align:center; font-weight:bold; color:#0055A4;">2</td>
-                    <td style="border:1px solid #b8d8f0; padding:10px; vertical-align:top;"><b>Vaciar la carpeta "Elementos eliminados"</b><br>Los mensajes eliminados permanecen almacenados en esta carpeta hasta que se vacia. Haga clic con el boton derecho en la carpeta y seleccione <i>"Vaciar carpeta"</i>.</td>
-                  </tr>
-                  <tr>
-                    <td style="background:#eaf3fb; border:1px solid #b8d8f0; padding:10px; vertical-align:top; width:28px; font-size:18px; text-align:center; font-weight:bold; color:#0055A4;">3</td>
-                    <td style="border:1px solid #b8d8f0; padding:10px; vertical-align:top;"><b>Vaciar la carpeta "Correo no deseado"</b><br>El spam conservado aumenta el uso de la cuota. Vacie esta carpeta regularmente.</td>
-                  </tr>
-                  <tr>
-                    <td style="background:#eaf3fb; border:1px solid #b8d8f0; padding:10px; vertical-align:top; width:28px; font-size:18px; text-align:center; font-weight:bold; color:#0055A4;">4</td>
-                    <td style="border:1px solid #b8d8f0; padding:10px; vertical-align:top;"><b>Guardar los archivos adjuntos importantes</b><br>Guarde los archivos adjuntos que necesite en su unidad de red, OneDrive o SharePoint Online y, a continuacion, elimine los correos correspondientes.</td>
-                  </tr>
-            </tbody>
-          </table>
-
-          <h2 style="color:#0055A4; font-size:16px; margin-top:20px;">Acceso a su buzon:</h2>
-          <p>Inicie sesion en el Webmail a traves del siguiente enlace para gestionar su buzon directamente desde su navegador:<br><br>
-            <a href="{{WebmailUrl}}" target="_blank" style="color:#0055A4; text-decoration:underline;">{{WebmailUrl}}</a>
-          </p>
-
-          <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">En caso de necesidad:</h2>
-          <p>Si tiene alguna dificultad, puede ponerse en contacto con el servicio de asistencia:</p>
-          <p><b>{{Hotline}}</b></p>
-
-          <div style="margin-top:30px; margin-bottom:20px; text-align:center;">
-            <div style="width:100%; height:1px; background:#d0d0d0; margin:20px auto;"></div>
-            {{FooterLogoImgTag}}
-            <div style="margin-top:12px; font-size:14px; font-weight:bold;">
-              Le agradecemos su colaboracion<br>El equipo del Programa SmartM365
-            </div>
-          </div>
-
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-
 </body>
 </html>

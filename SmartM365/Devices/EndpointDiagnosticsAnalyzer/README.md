@@ -12,7 +12,7 @@ Smart Endpoint Diagnostics Analyzer reads Intune Device Diagnostics ZIP files an
 
 - `SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1`: PowerShell/WPF GUI and CLI-capable analyzer.
 - `Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd`: console-hidden launcher for normal GUI use.
-- `SmartM365-logo.ico`, `workplacecloudhub-v2.png`: GUI icon and header branding assets.
+- `WorkplaceCloudHub.ico`, `WorkplaceCloudHub-lockup-WPF.png`: GUI icon and header branding assets.
 
 ## Current Capabilities
 

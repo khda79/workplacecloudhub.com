@@ -39,11 +39,12 @@ $requiredFiles = @(
     'SmartM365-DeviceRebootManager-GUI.ps1'
     'SmartM365-DeviceRebootManager-GUI.strings.psd1'
     'SmartM365-DeviceRebootManager-GUI.config.json.template'
+    'SmartM365.GuiSplash.ps1'
+    'WorkplaceCloudHub.ico'
+    'WorkplaceCloudHub-lockup-WPF.png'
     'Start-SmartM365-DeviceRebootManager-GUI.cmd'
     'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
 )
-
-$optionalFiles = @('SmartM365-logo.ico')
 
 New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
 
@@ -54,13 +55,6 @@ foreach ($fileName in $requiredFiles) {
     }
 
     Copy-Item -LiteralPath $sourcePath -Destination (Join-Path -Path $InstallPath -ChildPath $fileName) -Force
-}
-
-foreach ($fileName in $optionalFiles) {
-    $sourcePath = Join-Path -Path $sourceRoot -ChildPath $fileName
-    if (Test-Path -LiteralPath $sourcePath) {
-        Copy-Item -LiteralPath $sourcePath -Destination (Join-Path -Path $InstallPath -ChildPath $fileName) -Force
-    }
 }
 
 $runtimeConfigPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'

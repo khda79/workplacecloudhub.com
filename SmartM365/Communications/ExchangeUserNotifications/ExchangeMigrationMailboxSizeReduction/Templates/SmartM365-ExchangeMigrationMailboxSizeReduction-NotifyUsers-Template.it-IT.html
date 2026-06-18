@@ -4,99 +4,131 @@
 <meta charset="UTF-8">
 <title>Riduzione della dimensione della casella di posta</title>
 </head>
-<body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
-
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
-    <tr><td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr>
-          <td style="padding:12px 16px; width:160px;">{{LogoImgTag}}</td>
-          <td style="padding:12px 16px;">
-            <div style="color:#ffffff; font-size:22px; font-weight:700;">AZIONE RICHIESTA</div>
-            <div style="color:#dfe9f7; font-size:14px;">Riduzione della dimensione della casella di posta</div>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
+<body style="margin:0; padding:0; background:#F5F8FB; font-family:'Segoe UI', Arial, sans-serif; color:#1F2937; font-size:13px; line-height:1.5;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#F5F8FB;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+                <tr>
+                  <td style="vertical-align:middle; padding-right:16px;">
+                    <div style="display:inline-block; background:#E6F4FF; color:#005A9E; border:1px solid #B9DDF7; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700;">AZIONE RICHIESTA</div>
+                    <div style="margin-top:10px; font-size:24px; line-height:1.2; font-weight:700; color:#1F2937;">Riduzione della dimensione della casella di posta</div>
+                    <div style="margin-top:6px; font-size:14px; color:#5F6B7A;">Pulizia della casella richiesta prima della migrazione</div>
+                  </td>
+                  <td align="right" style="vertical-align:middle; width:170px;">
+                    <div style="display:inline-block; border:1px solid #DDE7F0; border-radius:8px; padding:10px 12px; background:#F8FBFE;">{{LogoImgTag}}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <p style="margin:0 0 14px 0; color:#1F2937;">Gentile <b>{{UserName}}</b>,</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr>
+                  <td style="background:#FEF3F2; border:1px solid #FECDCA; border-radius:8px; padding:14px 16px; color:#1F2937;">
+                    <div style="font-weight:700; color:#B42318; font-size:14px; margin-bottom:8px;">La casella di posta e attualmente troppo grande</div>
+                    <div>La dimensione attuale della casella di posta e <b>{{MailboxSizeGB}}</b>, superiore alla quota consentita di <b>{{MailboxQuotaGB}}</b>.<br><br><b>Deve ridurre la dimensione della casella di posta il prima possibile</b> per mantenere l'accesso completo alla posta ed evitare blocchi di invio e ricezione.</div>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr>
+                  <td style="width:50%; padding-right:6px;">
+                    <div style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:12px;">
+                      <div style="font-size:12px; color:#5F6B7A; font-weight:700;">Dimensione attuale</div>
+                      <div style="margin-top:4px; color:#B42318; font-size:20px; font-weight:700;">{{MailboxSizeGB}}</div>
+                    </div>
+                  </td>
+                  <td style="width:50%; padding-left:6px;">
+                    <div style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:12px;">
+                      <div style="font-size:12px; color:#5F6B7A; font-weight:700;">Quota consentita</div>
+                      <div style="margin-top:4px; color:#1F2937; font-size:20px; font-weight:700;">{{MailboxQuotaGB}}</div>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:18px; {{FreeTextBlockStyle}}">
+                <tr>
+                  <td style="border:1px solid #B9DDF7; border-radius:8px; background:#F8FBFE; padding:14px 16px; color:#1F2937; font-size:13px; line-height:1.5;">{{FreeTextBlockTextHtml}}</td>
+                </tr>
+              </table>
+              <div style="font-size:16px; font-weight:700; color:#005A9E; margin:2px 0 12px 0;">Come ridurre la dimensione della casella di posta:</div>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; margin-bottom:18px;">
+                <tbody>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">1</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top; color:#1F2937; font-size:13px; line-height:1.5;">
+                          <div style="font-weight:700; color:#1F2937;">Elimini le e-mail non necessarie</div>
+                          <div style="color:#5F6B7A;">Identifichi ed elimini i messaggi vecchi, gli allegati voluminosi e le e-mail non piu necessarie.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">2</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top; color:#1F2937; font-size:13px; line-height:1.5;">
+                          <div style="font-weight:700; color:#1F2937;">Svuoti la cartella "Posta indesiderata"</div>
+                          <div style="color:#5F6B7A;">Lo spam conservato aumenta l'utilizzo della quota. Svuoti questa cartella regolarmente.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">3</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top; color:#1F2937; font-size:13px; line-height:1.5;">
+                          <div style="font-weight:700; color:#1F2937;">Salvi gli allegati importanti</div>
+                          <div style="color:#5F6B7A;">Salvi gli allegati necessari sull'unita di rete, OneDrive o SharePoint Online, quindi elimini le e-mail corrispondenti.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">4</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top; color:#1F2937; font-size:13px; line-height:1.5;">
+                          <div style="font-weight:700; color:#1F2937;">Svuoti la cartella "Posta eliminata"</div>
+                          <div style="color:#5F6B7A;">I messaggi eliminati restano archiviati finche la cartella non viene svuotata. Fare clic con il pulsante destro sulla cartella e scegliere <i>"Svuota cartella"</i>.</div>
+                        </td>
+                      </tr>
+                </tbody>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr>
+                  <td style="border:1px solid #DDE7F0; border-radius:8px; background:#ffffff; padding:14px 16px;">
+                    <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Accesso alla casella di posta</div>
+                    <div style="color:#5F6B7A; margin-bottom:10px;">Acceda a Webmail tramite il link seguente per gestire la casella direttamente dal browser:</div>
+                    <a href="{{WebmailUrl}}" target="_blank" style="display:inline-block; color:#ffffff; background:#0078D4; border:1px solid #0078D4; border-radius:6px; padding:8px 12px; text-decoration:none; font-weight:700;">{{WebmailUrl}}</a>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0;">
+                <tr>
+                  <td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                    <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">In caso di necessita</div>
+                    <div style="color:#5F6B7A;">In caso di difficolta, contatti l'helpdesk:</div>
+                    <div style="margin-top:8px; color:#1F2937; font-weight:700;">{{Hotline}}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:18px; text-align:center;">
+              {{FooterLogoImgTag}}
+              <div style="margin-top:12px; font-size:14px; font-weight:700; color:#1F2937;">La ringraziamo per la collaborazione<br>Il suo servizio informatico</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
-
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
-    <tr><td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr><td style="padding:18px 16px;">
-
-          <p>Buongiorno <b>{{UserName}}</b>,</p>
-
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                 style="width:100%; border-collapse:collapse; margin-top:15px; margin-bottom:20px;">
-            <thead><tr>
-              <th align="left" style="background:#f8d7da; color:#721c24; border:1px solid #f5c6cb; padding:10px; font-size:14px;">
-                La sua casella di posta e attualmente troppo grande
-              </th>
-            </tr></thead>
-            <tbody><tr>
-              <td style="border:1px solid #f5c6cb; padding:12px; background:#fff5f5;">
-                La dimensione attuale della sua casella di posta e <b>{{MailboxSizeGB}}</b>, che supera la quota consentita di <b>{{MailboxQuotaGB}}</b>.<br><br><b>E necessario ridurre la dimensione della casella di posta quanto prima per mantenere l'accesso completo alla posta elettronica ed evitare il blocco dell'invio e della ricezione.</b>
-              </td>
-            </tr></tbody>
-          </table>
-
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                 style="border-collapse:collapse; width:100%; margin-bottom:20px;">
-            <thead><tr>
-              <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Dimensione attuale</th>
-              <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Quota consentita</th>
-            </tr></thead>
-            <tbody><tr>
-              <td style="border:1px solid #ccc; padding:8px; color:#c0392b; font-weight:bold;">{{MailboxSizeGB}}</td>
-              <td style="border:1px solid #ccc; padding:8px;">{{MailboxQuotaGB}}</td>
-            </tr></tbody>
-          </table>
-
-          <h2 style="color:#0055A4; font-size:16px; margin-top:20px;">Come ridurre la dimensione della casella di posta:</h2>
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                 style="width:100%; border-collapse:collapse; margin-bottom:20px;">
-            <tbody>
-                  <tr>
-                    <td style="background:#eaf3fb; border:1px solid #b8d8f0; padding:10px; vertical-align:top; width:28px; font-size:18px; text-align:center; font-weight:bold; color:#0055A4;">1</td>
-                    <td style="border:1px solid #b8d8f0; padding:10px; vertical-align:top;"><b>Eliminare le e-mail non necessarie</b><br>Identificare ed eliminare i messaggi vecchi, gli allegati di grandi dimensioni e le e-mail di cui non si ha piu bisogno.</td>
-                  </tr>
-                  <tr>
-                    <td style="background:#eaf3fb; border:1px solid #b8d8f0; padding:10px; vertical-align:top; width:28px; font-size:18px; text-align:center; font-weight:bold; color:#0055A4;">2</td>
-                    <td style="border:1px solid #b8d8f0; padding:10px; vertical-align:top;"><b>Svuotare la cartella "Posta eliminata"</b><br>I messaggi eliminati rimangono memorizzati in questa cartella finche non viene svuotata. Fare clic con il pulsante destro del mouse sulla cartella e selezionare <i>"Svuota cartella"</i>.</td>
-                  </tr>
-                  <tr>
-                    <td style="background:#eaf3fb; border:1px solid #b8d8f0; padding:10px; vertical-align:top; width:28px; font-size:18px; text-align:center; font-weight:bold; color:#0055A4;">3</td>
-                    <td style="border:1px solid #b8d8f0; padding:10px; vertical-align:top;"><b>Svuotare la cartella "Posta indesiderata"</b><br>Lo spam conservato aumenta l'utilizzo della quota. Svuotare questa cartella regolarmente.</td>
-                  </tr>
-                  <tr>
-                    <td style="background:#eaf3fb; border:1px solid #b8d8f0; padding:10px; vertical-align:top; width:28px; font-size:18px; text-align:center; font-weight:bold; color:#0055A4;">4</td>
-                    <td style="border:1px solid #b8d8f0; padding:10px; vertical-align:top;"><b>Salvare gli allegati importanti</b><br>Salvare gli allegati necessari sull'unita di rete, OneDrive o SharePoint Online, quindi eliminare le e-mail corrispondenti.</td>
-                  </tr>
-            </tbody>
-          </table>
-
-          <h2 style="color:#0055A4; font-size:16px; margin-top:20px;">Accesso alla casella di posta:</h2>
-          <p>Accedere alla Webmail tramite il seguente collegamento per gestire la casella di posta direttamente dal browser:<br><br>
-            <a href="{{WebmailUrl}}" target="_blank" style="color:#0055A4; text-decoration:underline;">{{WebmailUrl}}</a>
-          </p>
-
-          <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">In caso di necessita:</h2>
-          <p>In caso di difficolta, e possibile contattare l'helpdesk:</p>
-          <p><b>{{Hotline}}</b></p>
-
-          <div style="margin-top:30px; margin-bottom:20px; text-align:center;">
-            <div style="width:100%; height:1px; background:#d0d0d0; margin:20px auto;"></div>
-            {{FooterLogoImgTag}}
-            <div style="margin-top:12px; font-size:14px; font-weight:bold;">
-              La ringraziamo per la collaborazione<br>Il team del programma SmartM365
-            </div>
-          </div>
-
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-
 </body>
 </html>
