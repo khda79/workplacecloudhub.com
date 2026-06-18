@@ -1156,7 +1156,7 @@ $controls.LaunchLotButton.Add_Click({
 })
 $controls.LaunchAllButton.Add_Click({
     try {
-        $lots = Get-LaunchableLotSummaries
+        $lots = @(Get-LaunchableLotSummaries)
         if ($lots.Count -eq 0) { throw 'No ready LOT with devices was found.' }
         foreach ($lot in $lots) {
             Start-ToolkitLot -Lot $lot -Mode ([string]$controls.LotModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
