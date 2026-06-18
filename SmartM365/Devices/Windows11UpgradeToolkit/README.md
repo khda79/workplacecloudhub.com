@@ -82,6 +82,10 @@ media before starting setup.
 `SetupSourcePath` can point either to a single media root or to a parent folder containing
 one media subfolder per language; in `MatchSystem` mode the toolkit selects the subfolder
 whose `sources\lang.ini` matches the target language.
+By default, Windows Setup Dynamic Update is disabled with
+`W11UT_SETUP_DYNAMIC_UPDATE=Disable` so large LOT runs stay controlled and do not trigger
+per-device online setup downloads. Supported values are `Enable`, `Disable`, `NoDrivers`,
+`NoLCU`, and `NoDriversNoLCU`.
 
 To disable an action for a direct LOT launch, set its environment variable to `0` before
 running the wrapper:
@@ -101,6 +105,7 @@ toolkit root, then set a target-reachable setup source:
 
 ```text
 W11UT_SETUP_SOURCE=\\server\share\Windows11
+W11UT_SETUP_DYNAMIC_UPDATE=Disable
 ```
 
 You can still override the config for one CMD session by setting the environment variable
@@ -108,6 +113,7 @@ before launching a LOT wrapper:
 
 ```cmd
 set W11UT_SETUP_SOURCE=\\server\share\Windows11
+set W11UT_SETUP_DYNAMIC_UPDATE=Enable
 LOT-X\Run-Windows11UpgradeRepairWithPsExec-Once.cmd
 ```
 
