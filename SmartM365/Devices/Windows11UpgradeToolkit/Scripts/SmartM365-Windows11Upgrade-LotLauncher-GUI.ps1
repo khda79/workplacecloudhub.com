@@ -508,6 +508,7 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_SETUP_EXECUTION_MODE'; Argument = '-SetupExecutionMode' },
         @{ Name = 'W11UT_SETUP_MEDIA_ID'; Argument = '-SetupMediaId' },
         @{ Name = 'W11UT_SETUP_LANGUAGE'; Argument = '-SetupLanguage' },
+        @{ Name = 'W11UT_SETUP_DYNAMIC_UPDATE'; Argument = '-SetupDynamicUpdate' },
         @{ Name = 'W11UT_SETUP_SOURCE_CANDIDATE_LIMIT'; Argument = '-SetupSourceCandidateLimit' },
         @{ Name = 'W11UT_SETUP_COPY_IPG_MS'; Argument = '-SetupMediaCopyIpGapMilliseconds' },
         @{ Name = 'W11UT_SETUP_COPY_JITTER_SECONDS'; Argument = '-SetupMediaCopyJitterSeconds' },
@@ -605,6 +606,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_SETUP_EXECUTION_MODE = 'LocalCache'
     W11UT_SETUP_MEDIA_ID = 'Win11'
     W11UT_SETUP_LANGUAGE = 'MatchSystem'
+    W11UT_SETUP_DYNAMIC_UPDATE = 'Disable'
     W11UT_THROTTLE = '10'
     W11UT_GLOBAL_CONCURRENCY_LIMIT = '15'
     W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = '0'
@@ -1642,6 +1644,14 @@ $optionSetupLanguageCombo.FlatStyle = 'Flat'
 $optionSetupLanguageCombo.Items.AddRange([object[]]@('MatchSystem','Any','fr-FR','en-GB','en-US','de-DE','es-ES','it-IT','nl-NL','pt-PT','pl-PL'))
 $optionSetupLanguageCombo.Text = 'MatchSystem'
 
+$optionSetupDynamicUpdateCombo = New-Object System.Windows.Forms.ComboBox
+$optionSetupDynamicUpdateCombo.Dock = 'Fill'
+$optionSetupDynamicUpdateCombo.DropDownStyle = 'DropDownList'
+$optionSetupDynamicUpdateCombo.Margin = New-Object System.Windows.Forms.Padding(3, 6, 16, 3)
+$optionSetupDynamicUpdateCombo.FlatStyle = 'Flat'
+$optionSetupDynamicUpdateCombo.Items.AddRange([object[]]@('Disable','Enable','NoDrivers','NoLCU','NoDriversNoLCU'))
+$optionSetupDynamicUpdateCombo.SelectedIndex = 0
+
 $optionThrottleBox = New-OptionNumber -Minimum 1 -Maximum 200 -Value 10
 $optionDelayBetweenComputersBox = New-OptionNumber -Minimum 0 -Maximum 3600 -Value 0
 $optionGlobalConcurrencyLimitBox = New-OptionNumber -Minimum 1 -Maximum 200 -Value 15
@@ -1689,6 +1699,11 @@ if (-not [string]::IsNullOrWhiteSpace($setupMediaDefault)) {
 $setupLanguageDefault = Get-ToolkitConfigValue -Name 'W11UT_SETUP_LANGUAGE'
 if (-not [string]::IsNullOrWhiteSpace($setupLanguageDefault)) {
     $optionSetupLanguageCombo.Text = $setupLanguageDefault
+}
+
+$setupDynamicUpdateDefault = Get-ToolkitConfigValue -Name 'W11UT_SETUP_DYNAMIC_UPDATE'
+if ($setupDynamicUpdateDefault -in @('Enable','Disable','NoDrivers','NoLCU','NoDriversNoLCU')) {
+    $optionSetupDynamicUpdateCombo.SelectedItem = $setupDynamicUpdateDefault
 }
 
 Set-OptionNumberFromEnv -Control $optionDelayBetweenCyclesBox -Name 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES'
@@ -1785,7 +1800,8 @@ $optionsTable.Controls.Add($optionSetupMediaIdBox, 3, 4)
 
 $optionsTable.Controls.Add((New-Label 'Setup language'), 0, 5)
 $optionsTable.Controls.Add($optionSetupLanguageCombo, 1, 5)
-$optionsTable.SetColumnSpan($optionSetupLanguageCombo, 3)
+$optionsTable.Controls.Add((New-Label 'Dynamic update'), 2, 5)
+$optionsTable.Controls.Add($optionSetupDynamicUpdateCombo, 3, 5)
 
 $optionsTable.Controls.Add($optionSkipSetupPreCopyCheck, 0, 6)
 $optionsTable.Controls.Add($optionAllowDiskCleanupCheck, 1, 6)
@@ -1938,6 +1954,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_PSEXEC_TIMEOUT_MINUTES = [string][int]$optionPsExecTimeoutBox.Value
         W11UT_SETUP_EXECUTION_MODE = [string]$optionSetupModeCombo.SelectedItem
         W11UT_SETUP_LANGUAGE = $optionSetupLanguageCombo.Text.Trim()
+        W11UT_SETUP_DYNAMIC_UPDATE = [string]$optionSetupDynamicUpdateCombo.SelectedItem
         W11UT_SETUP_SOURCE_CANDIDATE_LIMIT = [string][int]$optionSetupSourceCandidateLimitBox.Value
         W11UT_SETUP_COPY_IPG_MS = [string][int]$optionSetupCopyIpGapBox.Value
         W11UT_SETUP_COPY_JITTER_SECONDS = [string][int]$optionSetupCopyJitterBox.Value

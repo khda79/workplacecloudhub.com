@@ -228,6 +228,7 @@ $result = [ordered]@{
     ExitCode = ''
     Detail = ''
     SetupCacheAction = ''
+    SetupDynamicUpdate = ''
     SelectedSetupSourcePath = ''
     SetupSourceSelectionDetail = ''
     DiskCleanupAction = ''
@@ -352,7 +353,7 @@ try {
                 if ($lastRun.PSObject.Properties['SetupCacheAction']) {
                     $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
                 }
-                foreach ($propertyName in @('SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB')) {
+                foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB')) {
                     if ($lastRun.PSObject.Properties[$propertyName]) {
                         $result[$propertyName] = [string]$lastRun.$propertyName
                     }

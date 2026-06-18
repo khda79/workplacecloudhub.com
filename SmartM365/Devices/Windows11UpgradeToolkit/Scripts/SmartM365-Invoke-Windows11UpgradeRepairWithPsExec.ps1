@@ -42,6 +42,8 @@ param(
     [string]$SetupExecutionMode = 'LocalCache',
     [string]$SetupMediaId = 'Win11',
     [string]$SetupLanguage = 'MatchSystem',
+    [ValidateSet('Enable','Disable','NoDrivers','NoLCU','NoDriversNoLCU')]
+    [string]$SetupDynamicUpdate = 'Disable',
     [switch]$SkipSetupMediaPreCopy,
     [ValidateRange(0, 100)][int]$SetupSourceCandidateLimit = 5,
     [ValidateRange(0, 10000)][int]$SetupMediaCopyIpGapMilliseconds = 0,
@@ -223,6 +225,7 @@ if ($SkipSetupMediaPreCopy) { [void]$remoteArgs.Add('-SkipSetupMediaPreCopy') }
 [void]$remoteArgs.Add('-SetupExecutionMode'); [void]$remoteArgs.Add($SetupExecutionMode)
 [void]$remoteArgs.Add('-SetupMediaId'); [void]$remoteArgs.Add($SetupMediaId)
 [void]$remoteArgs.Add('-SetupLanguage'); [void]$remoteArgs.Add($SetupLanguage)
+[void]$remoteArgs.Add('-SetupDynamicUpdate'); [void]$remoteArgs.Add($SetupDynamicUpdate)
 [void]$remoteArgs.Add('-SetupCacheRoot'); [void]$remoteArgs.Add($script:RemoteSetupCacheRoot)
 [void]$remoteArgs.Add('-SetupSourceCandidateLimit'); [void]$remoteArgs.Add([string]$SetupSourceCandidateLimit)
 [void]$remoteArgs.Add('-SetupMediaCopyIpGapMilliseconds'); [void]$remoteArgs.Add([string]$SetupMediaCopyIpGapMilliseconds)
@@ -247,7 +250,7 @@ Write-Host "PsExec        : $resolvedPsExec"
 Write-Host "Repair script : $LocalScriptPath"
 Write-Host "Worker script : $LocalWorkerPath"
 Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade"
-Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; PreCopy=$(-not $SkipSetupMediaPreCopy)"
+Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s)"
 Write-Host "Reports       : $ReportRoot"
 Write-Host ""
@@ -263,6 +266,7 @@ $reportColumns = @(
     'Detail',
     'JobErrorMessage',
     'SetupCacheAction',
+    'SetupDynamicUpdate',
     'SelectedSetupSourcePath',
     'SetupSourceSelectionDetail',
     'DiskCleanupAction',
