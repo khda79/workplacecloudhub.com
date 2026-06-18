@@ -39,6 +39,8 @@ param(
     [string]$SetupExecutionMode = 'LocalCache',
     [string]$SetupMediaId = 'Win11',
     [string]$SetupLanguage = 'MatchSystem',
+    [ValidateSet('Enable','Disable','NoDrivers','NoLCU','NoDriversNoLCU')]
+    [string]$SetupDynamicUpdate = 'Disable',
     [switch]$SkipSetupMediaPreCopy,
     [string]$SetupCacheRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia',
     [ValidateRange(0, 100)][int]$SetupSourceCandidateLimit = 5,
@@ -1540,7 +1542,7 @@ function Invoke-SetupUpgrade {
         '/auto','upgrade',
         '/quiet',
         '/eula','accept',
-        '/dynamicupdate','enable',
+        '/dynamicupdate',$SetupDynamicUpdate.ToLowerInvariant(),
         '/copylogs',"`"$script:SetupLogDir`""
     )
 
@@ -1837,6 +1839,7 @@ finally {
         SetupExecutionMode = $SetupExecutionMode
         SetupMediaId = $SetupMediaId
         SetupLanguage = $SetupLanguage
+        SetupDynamicUpdate = $SetupDynamicUpdate
         ResolvedSetupLanguage = $script:ResolvedSetupLanguage
         SetupMediaLanguages = $script:ResolvedSetupMediaLanguages
         SetupCachePath = $script:ResolvedSetupCachePath
