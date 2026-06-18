@@ -23,13 +23,19 @@ param(
     [int[]]$PostponeOptionsMinutes = @(),
     [int]$MaxPostponeCount = 2,
     [int]$ReminderCooldownHours = 20,
-    [string]$WindowIconPath = 'SmartM365-logo.ico',
+    [string]$WindowIconPath = 'WorkplaceCloudHub.ico',
     [string]$WindowTitle = '',
     [string]$CompanyName = '',
     [ValidateSet('auto','en','fr','de','es','nl','it','pt','pl','ar','tr','sv','da','nb','fi','ro','hu','ja','ko','zh-Hans','zh','uk')]
     [string]$DefaultLanguage = 'auto',
     [switch]$ForceLanguage,
     [string]$LanguageCatalogPath = '',
+    [bool]$SplashEnabled = $true,
+    [int]$SplashMinimumDurationMs = 6000,
+    [string]$SplashProductName = '',
+    [string]$SplashBadgeText = 'WORKPLACECLOUDHUB.COM',
+    [string]$SplashSubtitle = 'Powered by WorkplaceCloudHub',
+    [string]$SplashLogoPath = 'WorkplaceCloudHub-lockup-WPF.png',
     [switch]$EnableDebugLogging,
     [switch]$PreviewOnly,
     [switch]$TestRequiredRestart,
@@ -254,6 +260,12 @@ function Apply-AppConfig {
         DefaultLanguage = Get-ConfigValue -Config $Config -Name 'DefaultLanguage' -CurrentValue $DefaultLanguage -Type string
         ForceLanguage = Get-ConfigValue -Config $Config -Name 'ForceLanguage' -CurrentValue ([bool]$ForceLanguage) -Type bool
         LanguageCatalogPath = Get-ConfigValue -Config $Config -Name 'LanguageCatalogPath' -CurrentValue $LanguageCatalogPath -Type string
+        SplashEnabled = Get-ConfigValue -Config $Config -Name 'SplashEnabled' -CurrentValue $SplashEnabled -Type bool
+        SplashMinimumDurationMs = Get-ConfigValue -Config $Config -Name 'SplashMinimumDurationMs' -CurrentValue $SplashMinimumDurationMs -Type int
+        SplashProductName = Get-ConfigValue -Config $Config -Name 'SplashProductName' -CurrentValue $SplashProductName -Type string
+        SplashBadgeText = Get-ConfigValue -Config $Config -Name 'SplashBadgeText' -CurrentValue $SplashBadgeText -Type string
+        SplashSubtitle = Get-ConfigValue -Config $Config -Name 'SplashSubtitle' -CurrentValue $SplashSubtitle -Type string
+        SplashLogoPath = Get-ConfigValue -Config $Config -Name 'SplashLogoPath' -CurrentValue $SplashLogoPath -Type string
         EnableDebugLogging = Get-ConfigValue -Config $Config -Name 'EnableDebugLogging' -CurrentValue ([bool]$EnableDebugLogging) -Type bool
         PreviewOnly = Get-ConfigValue -Config $Config -Name 'PreviewOnly' -CurrentValue ([bool]$PreviewOnly) -Type bool
         TestRequiredRestart = Get-ConfigValue -Config $Config -Name 'TestRequiredRestart' -CurrentValue ([bool]$TestRequiredRestart) -Type bool
@@ -278,6 +290,12 @@ function Initialize-EffectiveSettings {
             DefaultLanguage = $DefaultLanguage
             ForceLanguage = [bool]$ForceLanguage
             LanguageCatalogPath = $LanguageCatalogPath
+            SplashEnabled = $SplashEnabled
+            SplashMinimumDurationMs = $SplashMinimumDurationMs
+            SplashProductName = $SplashProductName
+            SplashBadgeText = $SplashBadgeText
+            SplashSubtitle = $SplashSubtitle
+            SplashLogoPath = $SplashLogoPath
             EnableDebugLogging = [bool]$EnableDebugLogging
             PreviewOnly = [bool]$PreviewOnly
             TestRequiredRestart = [bool]$TestRequiredRestart
@@ -295,6 +313,7 @@ function Initialize-EffectiveSettings {
     $script:Effective.RestartCountdownMinutes = [Math]::Max(1, [int]$script:Effective.RestartCountdownMinutes)
     $script:Effective.MaxPostponeCount = [Math]::Max(0, [int]$script:Effective.MaxPostponeCount)
     $script:Effective.ReminderCooldownHours = [Math]::Max(1, [int]$script:Effective.ReminderCooldownHours)
+    $script:Effective.SplashMinimumDurationMs = [Math]::Max(0, [int]$script:Effective.SplashMinimumDurationMs)
     $script:PreviewOnly = [bool]$script:Effective.PreviewOnly
 }
 
@@ -671,6 +690,32 @@ function Add-WpfAssemblies {
     Add-Type -AssemblyName PresentationFramework
     Add-Type -AssemblyName PresentationCore
     Add-Type -AssemblyName WindowsBase
+}
+
+function Import-SmartM365GuiSplash {
+    $current = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $PSScriptRoot
+    }
+    else {
+        Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
+
+    while ($current) {
+        $splashPath = Join-Path -Path $current -ChildPath 'SmartM365.GuiSplash.ps1'
+        if (Test-Path -LiteralPath $splashPath) {
+            return $splashPath
+        }
+
+        if ((Split-Path -Path $current -Leaf) -eq 'SmartM365') {
+            return $null
+        }
+
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+
+    return $null
 }
 
 function Set-UiValue {
@@ -1135,6 +1180,21 @@ if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.Apartme
     Invoke-RelaunchSta
 }
 
+$script:GuiSplash = $null
+$splashHelperPath = if ([bool]$script:Effective.SplashEnabled) { Import-SmartM365GuiSplash } else { $null }
+if ($splashHelperPath) {
+    . $splashHelperPath
+    $splashProductName = if ([string]::IsNullOrWhiteSpace([string]$script:Effective.SplashProductName)) { 'Device Reboot Manager' } else { [string]$script:Effective.SplashProductName }
+    $script:GuiSplash = Start-SmartM365GuiSplash `
+        -Framework Wpf `
+        -ProductName $splashProductName `
+        -MinimumDurationMs ([int]$script:Effective.SplashMinimumDurationMs) `
+        -BadgeText ([string]$script:Effective.SplashBadgeText) `
+        -Subtitle ([string]$script:Effective.SplashSubtitle) `
+        -LogoPath ([string]$script:Effective.SplashLogoPath) `
+        -WindowIconPath ([string]$script:Effective.WindowIconPath)
+}
+
 $script:DaysSinceReboot = $daysSinceReboot
 $script:LastBoot = $lastBoot
 $script:PrimaryIPv4Address = Get-PrimaryIPv4Address
@@ -1278,7 +1338,16 @@ if ($script:ForceMode) {
     $script:Timer.Start()
 }
 
+$script:Window.Add_ContentRendered({
+    if ($script:GuiSplash) {
+        Hide-SmartM365GuiSplash -Splash $script:GuiSplash
+    }
+})
+
 Write-AppLog -Message $script:Strings.ShowingGui
 [void]$script:Window.ShowDialog()
+if ($script:GuiSplash) {
+    Close-SmartM365GuiSplash -Splash $script:GuiSplash
+}
 Write-AppLog -Message $script:Strings.ClosedGui
 [Environment]::Exit(0)

@@ -47,6 +47,41 @@ if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.Apartme
     throw "WPF requires an STA runspace. Start the GUI with: pwsh -STA -NoProfile -File `"$PSCommandPath`""
 }
 
+function Import-SmartM365GuiSplash {
+    $current = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $PSScriptRoot
+    }
+    else {
+        Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
+
+    while ($current) {
+        $splashPath = Join-Path -Path $current -ChildPath 'SmartM365.GuiSplash.ps1'
+        if (Test-Path -LiteralPath $splashPath) {
+            return $splashPath
+        }
+
+        if ((Split-Path -Path $current -Leaf) -eq 'SmartM365') {
+            return $null
+        }
+
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+
+    return $null
+}
+
+$script:GuiSplash = $null
+if (-not $ValidateOnly) {
+    $splashHelperPath = Import-SmartM365GuiSplash
+}
+if (-not $ValidateOnly -and $splashHelperPath) {
+    . $splashHelperPath
+    $script:GuiSplash = Start-SmartM365GuiSplash -Framework Wpf -ProductName 'Intune Remediation'
+}
+
 $script:BaseScopes = @(
     'DeviceManagementScripts.ReadWrite.All',
     'DeviceManagementConfiguration.Read.All',
@@ -3703,11 +3738,14 @@ Add-Type -AssemblyName System.Windows.Forms
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <Border Grid.Column="0"
+                <Border x:Name="LogoLink"
+                        Grid.Column="0"
                         Width="190"
                         Height="92"
                         Margin="0,0,26,0"
-                        VerticalAlignment="Center">
+                        VerticalAlignment="Center"
+                        Cursor="Hand"
+                        ToolTip="Open WorkplaceCloudHub.com">
                     <Image x:Name="LogoImage" Stretch="Uniform" VerticalAlignment="Center"/>
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
@@ -3985,14 +4023,15 @@ $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 $script:Ui['Window'] = $window
 $smartM365RootPath = Split-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -Parent
-$logoIconPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-logo.ico'
+$logoIconPath = Join-Path -Path $PSScriptRoot -ChildPath 'WorkplaceCloudHub.ico'
 if (Test-Path -LiteralPath $logoIconPath) {
     $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$logoIconPath)
 }
-$logoImagePath = Join-Path -Path $smartM365RootPath -ChildPath 'SmartM365-logo.ico'
+$logoImagePath = Join-Path -Path $smartM365RootPath -ChildPath 'WorkplaceCloudHub.ico'
 
 foreach ($name in @(
         'LogoImage',
+        'LogoLink',
         'ConnectButton',
         'RefreshButton',
         'AnalyzeLocalButton',
@@ -4029,6 +4068,23 @@ foreach ($name in @(
 
 if (Test-Path -LiteralPath $logoImagePath) {
     $script:Ui.LogoImage.Source = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$logoImagePath)
+}
+
+function Open-ExternalUrl {
+    param([Parameter(Mandatory)][string]$Url)
+
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new($Url)
+        $psi.UseShellExecute = $true
+        [System.Diagnostics.Process]::Start($psi) | Out-Null
+    }
+    catch {
+        Show-GuiError -Title 'Open link failed' -Message "Unable to open:`r`n$Url`r`n`r`n$($_.Exception.Message)"
+    }
+}
+
+if ($script:Ui.LogoLink) {
+    $script:Ui.LogoLink.Add_MouseLeftButtonUp({ Open-ExternalUrl -Url 'https://workplacecloudhub.com' })
 }
 
 Initialize-LocalRemediationRootConfiguration
@@ -4372,6 +4428,10 @@ if ($ValidateOnly) {
 
 $script:InitialLocalLoadCompleted = $false
 $window.Add_ContentRendered({
+    if ($script:GuiSplash) {
+        Hide-SmartM365GuiSplash -Splash $script:GuiSplash
+    }
+
     if ($script:InitialLocalLoadCompleted) { return }
     $script:InitialLocalLoadCompleted = $true
     try {
@@ -4388,6 +4448,9 @@ $window.Add_ContentRendered({
 })
 
 [void]$window.ShowDialog()
+if ($script:GuiSplash) {
+    Close-SmartM365GuiSplash -Splash $script:GuiSplash
+}
 
 try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
 $script:IsGraphConnected = $false

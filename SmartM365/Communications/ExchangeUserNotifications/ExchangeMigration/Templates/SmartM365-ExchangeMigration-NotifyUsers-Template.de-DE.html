@@ -1,202 +1,78 @@
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>NEUES POSTFACH</title>
+<title>Neues Postfach</title>
 </head>
-
-<body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
-
-  <!-- ===== Blauer Banner ===== -->
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
+<body style="margin:0; padding:0; background:#F5F8FB; font-family:'Segoe UI', Arial, sans-serif; color:#1F2937; font-size:13px; line-height:1.5;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#F5F8FB;">
     <tr>
-      <td align="center">
+      <td align="center" style="padding:24px 12px;">
         <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
           <tr>
-            <td style="padding:12px 16px; width:160px;">
-              {{LogoImgTag}}
-            </td>
-            <td style="padding:12px 16px;">
-              <div style="color:#ffffff; font-size:22px; font-weight:700;">NEUES POSTFACH</div>
-              <div style="color:#dfe9f7; font-size:14px;">Was sich für Sie ändert!</div>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+                <tr>
+                  <td style="vertical-align:middle; padding-right:16px;">
+                    <div style="display:inline-block; background:#E6F4FF; color:#005A9E; border:1px solid #B9DDF7; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700;">POSTFACHMIGRATION</div>
+                    <div style="margin-top:10px; font-size:24px; line-height:1.2; font-weight:700; color:#1F2937;">Neues Postfach</div>
+                    <div style="margin-top:6px; font-size:14px; color:#5F6B7A;">Was sich fuer Sie aendert</div>
+                  </td>
+                  <td align="right" style="vertical-align:middle; width:170px;">
+                    <div style="display:inline-block; border:1px solid #DDE7F0; border-radius:8px; padding:10px 12px; background:#F8FBFE;">{{LogoImgTag}}</div>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-
-  <!-- ===== Textkörper ===== -->
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
-    <tr>
-      <td align="center">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
           <tr>
-            <td style="padding:18px 16px;">
-
-              <p>Guten Tag <b>{{UserName}}</b>,</p>
-
-              <p>Am <b>{{Date}}</b> wird Ihr Postfach auf <b>Exchange Online</b> umgestellt.</p>
-
-              <!-- ===== Aktion erforderlich (Tabelle) ===== -->
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                     style="width:100%; border-collapse:collapse; margin-top:15px; margin-bottom:20px;">
-                <thead>
-                  <tr>
-                    <th align="left"
-                        style="background:#fff3cd; color:#856404; border:1px solid #ffeeba; padding:10px; font-size:14px;">
-                      Aktion erforderlich – ab sofort
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="border:1px solid #ffeeba; padding:12px; background:#fff9e6;">
-                      <b>Falls noch nicht geschehen</b>, müssen Sie die <b>Nutzungsbedingungen</b> akzeptieren,
-                      um weiterhin auf alle Services zugreifen zu können. Bitte melden Sie sich dazu am folgenden Portal an:
-                      <br><br>
-                      <a href="{{TermsPortalUrl}}"
-                         target="_blank"
-                         style="color:#0055A4; text-decoration:underline;">
-                        {{TermsPortalUrl}}
-                      </a>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <h2 style="color:#0055A4; font-size:16px; margin-top:20px;">Was sich für Sie ändern wird:</h2>
-
-              <h3 style="color:#0055A4; font-size:15px;">
-                Der Anmeldelink für das Webmail ändert sich von:
-              </h3>
-
-              <!-- ===== Webmail-Tabelle ===== -->
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse; width:100%;">
-                <thead>
-                  <tr>
-                    <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Alter Anmeldelink</th>
-                    <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Neuer Anmeldelink</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-all;">{{OldWebmailUrl}}</td>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-all;">{{NewWebmailUrl}}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <!-- ===== Smartphones ===== -->
-              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">
-                Wenn Sie ein Mobiltelefon verwenden:
-              </h2>
-
-              <!-- ===== Vergleichstabelle: Privat / Dienstlich ===== -->
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                     style="width:100%; border-collapse:collapse; margin-top:10px;">
-                <thead>
-                  <tr>
-                    <th style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:50%; text-align:left;">
-                      <b>Privates Smartphone</b>
-                    </th>
-                    <th style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:50%; text-align:left;">
-                      Dienstliches Smartphone
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  <tr>
-                    <!-- Privat -->
-                    <td style="border:1px solid #ccc; padding:10px; vertical-align:top;">
-                      <ul style="margin:0; padding-left:16px;">
-                        <li>Sie müssen die <b>Outlook</b>-App verwenden.</li>
-                        <li>Die native Mail-App (Android/iPhone) wird nicht mehr funktionieren.</li>
-                        <li>
-                          <b>Wenn Outlook bereits installiert ist</b>, müssen Sie die App deinstallieren und erneut installieren.<br>
-                          <b>Andernfalls</b> müssen Sie sie aus dem App Store oder dem Play Store installieren (Link unten).
-                        </li>
-                        <li>Sie müssen Outlook öffnen und sich anmelden.</li>
-                      </ul>
-                    </td>
-
-                    <!-- Dienstlich -->
-                    <td style="border:1px solid #ccc; padding:10px; vertical-align:top;">
-                      <ul style="margin:0; padding-left:16px;">
-                        <li>Die <b>Outlook</b>-App wird automatisch installiert.</li>
-                        <li>Ihr Konto wird automatisch <b>nach der Migration</b> eingerichtet.</li>
-                        <li>Sie müssen Outlook öffnen und sich anmelden.</li>
-                      </ul>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <!-- ===== Outlook-Download ===== -->
-              <h3 style="color:#0055A4; font-size:15px; margin-top:25px;">
-                Laden Sie die Outlook-App herunter:
-              </h3>
-
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                     style="width:100%; border-collapse:collapse;">
-                <thead>
-                  <tr>
-                    <th align="left" style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:30%;">Plattform</th>
-                    <th align="left" style="background:#f7f7f7; border:1px solid #ccc; padding:8px;">Link</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  <tr>
-                    <td style="border:1px solid #ccc; padding:8px;">Android (Google Play)</td>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-all;">
-                      https://play.google.com/store/apps/details?id=com.microsoft.office.outlook
-                    </td>
-                  </tr>
-
-                  <tr>
-                    <td style="border:1px solid #ccc; padding:8px;">iPhone (App Store)</td>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-all;">
-                      https://apps.apple.com/app/microsoft-outlook/id951937596
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <!-- ===== Support ===== -->
-              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">Bei Bedarf:</h2>
-              <p>Bei Problemen können Sie sich an die Hotline wenden:</p>
-              <p><b>{{Hotline}}</b></p>
-
-              <!-- ===== Vorteile ===== -->
-              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">Ihre Vorteile:</h2>
-              <ul>
-                <li>Schnellerer und flüssigerer Zugriff auf Ihre E-Mails.</li>
-                <li>Mehr Mobilität: Zugriff auf allen Geräten ohne komplexe Einrichtung.</li>
-                <li>Weniger Unterbrechungen durch Wartungsarbeiten.</li>
-                <li>Mehr Sicherheit und bessere Integration in Kollaborationstools.</li>
-              </ul>
-
-              <!-- ===== Footer ===== -->
-              <div style="margin-top:30px; margin-bottom:20px; text-align:center;">
-                <div style="width:100%; height:1px; background:#d0d0d0; margin:20px auto;"></div>
-
-                {{FooterLogoImgTag}}
-
-                <div style="margin-top:12px; font-size:14px; font-weight:bold;">
-                  Wir danken Ihnen für Ihre Zusammenarbeit<br>
-                  Das SmartM365-Programmteam
-                </div>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <p style="margin:0 0 14px 0;">Guten Tag <b>{{UserName}}</b>,</p>
+              <div style="background:#F8FBFE; border:1px solid #DDE7F0; border-radius:8px; padding:14px 16px; margin-bottom:14px;">Am <b>{{Date}}</b> wird Ihr Postfach zu <b>Exchange Online</b> migriert.</div>
+              <div style="background:#FFFAEB; border:1px solid #FEDF89; border-radius:8px; padding:14px 16px; margin-bottom:14px; {{TermsPortalBlockStyle}}">
+                <div style="font-weight:700; color:#B54708; margin-bottom:8px;">Jetzt erforderliche Aktion</div>
+                <div>Falls noch nicht geschehen, akzeptieren Sie bitte die Nutzungsbedingungen im folgenden Portal, um weiterhin Zugriff auf alle Dienste zu behalten:</div>
+                <div style="margin-top:10px;"><a href="{{TermsPortalUrl}}" target="_blank" style="color:#0078D4; font-weight:700;">{{TermsPortalUrl}}</a></div>
               </div>
-
+              <div style="font-size:16px; font-weight:700; color:#005A9E; margin:2px 0 12px 0;">Was sich fuer Sie aendert</div>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr>
+                  <td style="width:50%; padding-right:6px;"><div style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:12px;"><div style="font-size:12px; color:#5F6B7A; font-weight:700;">Bisheriger Webmail-Link</div><div style="margin-top:6px; word-break:break-all;">{{OldWebmailUrl}}</div></div></td>
+                  <td style="width:50%; padding-left:6px;"><div style="border:1px solid #B9DDF7; border-radius:8px; background:#E6F4FF; padding:12px;"><div style="font-size:12px; color:#005A9E; font-weight:700;">Neuer Webmail-Link</div><div style="margin-top:6px; word-break:break-all; font-weight:700;">{{NewWebmailUrl}}</div></div></td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#ffffff; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Wenn Sie ein Mobiltelefon verwenden</div>
+                  <div style="color:#5F6B7A;">Verwenden Sie die mobile <b>Outlook</b>-App. Native Mail-Apps auf Android oder iPhone funktionieren nach der Migration moeglicherweise nicht mehr.</div>
+                </td></tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Ihre Vorteile</div>
+                  <ul style="margin:0; padding-left:18px; color:#5F6B7A;"><li>Schnellerer Zugriff auf Ihre E-Mails.</li><li>Einfachere Nutzung auf allen Geraeten.</li><li>Mehr Sicherheit und bessere Integration mit Kollaborationstools.</li></ul>
+                </td></tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Bei Fragen</div>
+                  <div style="color:#5F6B7A;">Wenn Sie Schwierigkeiten haben, wenden Sie sich bitte an den Helpdesk:</div>
+                  <div style="margin-top:8px; color:#1F2937; font-weight:700;">{{Hotline}}</div>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:18px; text-align:center;">
+              {{FooterLogoImgTag}}
+              <div style="margin-top:12px; font-size:14px; font-weight:700; color:#1F2937;">Wir danken Ihnen fuer Ihre Mitarbeit<br>Ihr IT-Service</div>
             </td>
           </tr>
         </table>
       </td>
     </tr>
   </table>
-
 </body>
 </html>
-

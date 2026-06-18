@@ -12,10 +12,9 @@ set "SCRIPT_DIR=%CD%\"
 set "POWERSHELL5=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 if exist "%POWERSHELL5%" (
-"%POWERSHELL5%" -STA -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-DeviceRebootManager-GUI.ps1" %*
+start "SmartM365 Device Reboot Manager" "%POWERSHELL5%" -STA -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-DeviceRebootManager-GUI.ps1" %*
 ) else (
-powershell.exe -STA -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-DeviceRebootManager-GUI.ps1" %*
+start "SmartM365 Device Reboot Manager" powershell.exe -STA -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-DeviceRebootManager-GUI.ps1" %*
 )
-set "EXIT_CODE=%ERRORLEVEL%"
 popd
-exit /b %EXIT_CODE%
+exit /b 0

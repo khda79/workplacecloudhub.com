@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-Notifies selected Exchange 2016 mailbox users that they must reduce mailbox size before migration.
+Notifies selected Exchange mailbox users that they must reduce mailbox size before migration.
 
 .DESCRIPTION
 Loads SmartM365 tenant context, the shared Communications configuration, and the
 ExchangeMigrationMailboxSizeReduction campaign configuration, then sends localized HTML notification
-emails to users whose Exchange 2016 mailbox size is above the quota associated with their target
+emails to users whose Exchange mailbox size is above the quota associated with their target
 migration license.
 
 In Inventory mode, the script reads the SmartM365 license CSV export to select users matching the
@@ -13,13 +13,13 @@ configured target SKUs. It maps each user's SKU to MailboxQuotaBySkuPartNumber, 
 100 GB and F1/F3 at 2 GB. If the license CSV is missing or older than LicenseCsvMaxAgeHours and
 EnableLiveLicenseLookupWhenCsvMissing is enabled, it resolves the license live from Microsoft Graph:
 for FromList recipients only in FromList mode, or by enumerating Microsoft Graph users in Inventory
-mode. Mailbox inventory CSVs are used only as optional enrichment. The Exchange 2016 snap-in is
-mandatory, and the effective mailbox state and mailbox size threshold are verified live on Exchange
-2016 before a notification is sent.
+mode. Mailbox inventory CSVs are used only as optional enrichment. Exchange management uses Exchange
+Online first by default, with Exchange 2016 snap-in fallback when enabled, and the effective mailbox
+state and mailbox size threshold are verified live before a notification is sent.
 
 The script resolves language from the email domain or ForceLanguage, injects mailbox size, quota,
 hotline, and the correct webmail URL for UserMailbox or RemoteUserMailbox, prevents duplicate sends
-through the sent registry, excludes mailboxes that do not exist on-premises or are RemoteMailbox
+through the sent registry, excludes mailboxes that do not exist in Exchange management or are RemoteMailbox
 objects by default, writes a per-recipient log, prompts before live sends unless SkipConfirmation is
 used, and can send a summary email and Teams notification after a live run.
 
@@ -83,6 +83,14 @@ param(
     [Parameter(ParameterSetName = 'Inventory')]
     [Parameter(ParameterSetName = 'FromList')]
     [string]$ForceLanguage = '',
+
+    [Parameter(ParameterSetName = 'Inventory')]
+    [Parameter(ParameterSetName = 'FromList')]
+    [string]$MailSendMode = '',
+
+    [Parameter(ParameterSetName = 'Inventory')]
+    [Parameter(ParameterSetName = 'FromList')]
+    [string]$ExchangeManagementMode = '',
 
     [Parameter(ParameterSetName = 'Inventory')]
     [Parameter(ParameterSetName = 'FromList')]
@@ -153,6 +161,49 @@ function ConvertTo-StringArray {
         if ($text) { [void]$items.Add($text) }
     }
     return @($items)
+}
+
+function Get-LocalizedTextValue {
+    param(
+        [hashtable]$TextByLanguage,
+        [string]$LanguageTag,
+        [string]$DefaultLanguageTag = 'en'
+    )
+
+    if (-not $TextByLanguage -or $TextByLanguage.Count -eq 0) { return '' }
+
+    $candidates = New-Object System.Collections.ArrayList
+    foreach ($candidate in @($LanguageTag, $DefaultLanguageTag, 'default')) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) { [void]$candidates.Add(([string]$candidate).Trim()) }
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and ([string]$candidate).Contains('-')) {
+            [void]$candidates.Add((([string]$candidate).Split('-')[0]).Trim())
+        }
+    }
+
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if ($TextByLanguage.ContainsKey($candidate)) { return [string]$TextByLanguage[$candidate] }
+    }
+
+    return ''
+}
+
+function ConvertTo-FreeTextBlock {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return [pscustomobject]@{
+            Style = 'display:none;'
+            TextHtml = ''
+        }
+    }
+
+    $encoded = [System.Net.WebUtility]::HtmlEncode($Text.Trim())
+    $encoded = $encoded -replace "(`r`n|`n|`r)", '<br>'
+
+    return [pscustomobject]@{
+        Style = ''
+        TextHtml = $encoded
+    }
 }
 
 function ConvertTo-MailboxQuotaMap {
@@ -387,7 +438,7 @@ function Build-Candidates {
         if (-not $seen.Add($smtp) -and -not $ForceSend) { $pre.DuplicateInRun++; continue }
         if (-not $MailboxIndex.ContainsKey($smtp)) {
             if ($RequireMailboxInventory) { $pre.NotFoundInIndex++; continue }
-            $mailbox = [pscustomobject]@{ Email = $smtp; SizeMB = -1; MailboxType = ''; Source = 'PendingExchange2016' }
+            $mailbox = [pscustomobject]@{ Email = $smtp; SizeMB = -1; MailboxType = ''; Source = 'PendingExchange' }
         }
         else {
             $mailbox = $MailboxIndex[$smtp]
@@ -448,6 +499,7 @@ $global:Thumbprint = [string](Get-SmartM365CommunicationConfigValue -Config $ten
 
 $pathTokens = @{
     TenantKey = $Tenant
+    CampaignRootPath = $PSScriptRoot
     SmartM365RootPath = [string](Get-SmartM365CommunicationConfigValue -Config $tenantConfig -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $tenantContextPath -Parent))
     WorkspaceRootPath = [string](Get-SmartM365CommunicationConfigValue -Config $tenantConfig -Name 'WorkspaceRootPath' -DefaultValue '')
     DataAllRootPath = [string](Get-SmartM365CommunicationConfigValue -Config $tenantConfig -Name 'DataAllRootPath' -DefaultValue '')
@@ -486,13 +538,17 @@ $latestFolder = Resolve-CommPath ([string](Get-SmartM365CommunicationConfigValue
 if ([string]::IsNullOrWhiteSpace($ListCsvPath)) {
     $ListCsvPath = Resolve-CommPath ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ListCsvPath' -DefaultValue ''))
 }
-$templateRoot = Join-Path -Path $PSScriptRoot -ChildPath 'Templates'
+$defaultTemplateRoot = Join-Path -Path $PSScriptRoot -ChildPath 'Templates'
+$configuredTemplateRoot = Resolve-CommPath ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'TemplateRootPath' -DefaultValue $defaultTemplateRoot))
+$templateRoot = @($configuredTemplateRoot, $defaultTemplateRoot) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique
 $templateBaseName = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'TemplateBaseName' -DefaultValue 'SmartM365-ExchangeMigrationMailboxSizeReduction-NotifyUsers-Template')
-$logoPath = Resolve-CommPath ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'LogoPath' -DefaultValue (Join-Path $pathTokens.SmartM365RootPath 'SmartM365-logo.ico')))
+$logoPath = Resolve-CommPath ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'LogoPath' -DefaultValue (Join-Path $pathTokens.SmartM365RootPath 'WorkplaceCloudHub.ico')))
 $logoContentId = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'LogoContentId' -DefaultValue 'smartm365logo')
 $logoMediaType = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'LogoMediaType' -DefaultValue 'image/x-icon')
 $defaultLanguage = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'DefaultLanguageTag' -DefaultValue 'en' -FallbackConfig $baseConfig)
 $from = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'From' -DefaultValue '' -FallbackConfig $tenantConfig)
+$configuredMailSendMode = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'MailSendMode' -DefaultValue 'Auto' -FallbackConfig $baseConfig)
+if ([string]::IsNullOrWhiteSpace($MailSendMode)) { $mailSendMode = $configuredMailSendMode } else { $mailSendMode = $MailSendMode }
 $smtpServer = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'SmtpServer' -DefaultValue '' -FallbackConfig $tenantConfig)
 $relayIp = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'RelayIp' -DefaultValue '' -FallbackConfig $tenantConfig)
 $smtpResolveIPv4 = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'SmtpResolveIPv4' -DefaultValue $true -FallbackConfig $baseConfig)
@@ -517,6 +573,7 @@ foreach ($sku in $targetSkuList) {
 }
 if ($targetSkuSet.Count -eq 0) { throw 'TargetSkuPartNumbers is empty and no SKU could be inferred from MailboxQuotaBySkuPartNumber.' }
 $subjectByLanguage = Convert-ToHash (Get-SmartM365CommunicationConfigValue -Config $config -Name 'SubjectByLanguage' -DefaultValue @{})
+$freeTextByLanguage = Convert-ToHash (Get-SmartM365CommunicationConfigValue -Config $config -Name 'FreeTextByLanguage' -DefaultValue @{})
 $defaultSubject = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'DefaultSubject' -DefaultValue (Get-SmartM365CommunicationConfigValue -Config $subjectByLanguage -Name 'default' -DefaultValue $campaignName))
 $summaryTitle = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'SummaryTitle' -DefaultValue $campaignName)
 $summarySubject = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'SummarySubject' -DefaultValue $campaignName)
@@ -541,33 +598,35 @@ $extendedPauseEvery = [int](Get-SmartM365CommunicationConfigValue -Config $confi
 $extendedPauseSeconds = [int](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExtendedPauseSeconds' -DefaultValue 30 -FallbackConfig $baseConfig)
 if ($batchSize -lt 1) { $batchSize = 50 }
 
-$requireExchange2016SnapIn = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'RequireExchange2016SnapIn' -DefaultValue $true)
-$enableExchange2016SnapIn = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableExchange2016SnapIn' -DefaultValue $true)
-if ($requireExchange2016SnapIn) { $enableExchange2016SnapIn = $true }
-$exchangeSnapInState = Initialize-SmartM365CommunicationExchangeSnapIn `
-    -Enabled $enableExchange2016SnapIn `
+$configuredExchangeManagementMode = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExchangeManagementMode' -DefaultValue 'Auto')
+if ([string]::IsNullOrWhiteSpace($ExchangeManagementMode)) { $exchangeManagementMode = $configuredExchangeManagementMode } else { $exchangeManagementMode = $ExchangeManagementMode }
+$requireExchangeManagement = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'RequireExchangeManagement' -DefaultValue ([bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'RequireExchange2016SnapIn' -DefaultValue $true)))
+$enableExchange2016Fallback = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableExchange2016Fallback' -DefaultValue ([bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableExchange2016SnapIn' -DefaultValue $true)))
+$exchangeManagementState = Initialize-SmartM365CommunicationExchangeManagement `
+    -Mode $exchangeManagementMode `
+    -Required $requireExchangeManagement `
+    -EnableExchange2016Fallback $enableExchange2016Fallback `
+    -AppId $global:AppId `
+    -TenantId $global:TenantId `
+    -Thumbprint $global:Thumbprint `
+    -Organization ([string](Get-SmartM365CommunicationConfigValue -Config $tenantConfig -Name 'OrgDomain' -DefaultValue '')) `
     -SnapInName ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExchangeSnapInName' -DefaultValue 'Microsoft.Exchange.Management.PowerShell.SnapIn')) `
-    -ViewEntireForest ([bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExchangeSnapInViewEntireForest' -DefaultValue $true))
-if ($exchangeSnapInState.Enabled) {
-    if ($exchangeSnapInState.Available) {
-        $message = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExchangeSnapInAvailableMessage' -DefaultValue '')
-        if (-not [string]::IsNullOrWhiteSpace($message)) { Write-Host $message -ForegroundColor DarkCyan }
-        if ($exchangeSnapInState.ViewEntireForestApplied) {
-            $message = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExchangeSnapInForestViewMessage' -DefaultValue '')
-            if (-not [string]::IsNullOrWhiteSpace($message)) { Write-Host $message -ForegroundColor DarkCyan }
-        }
-        elseif (-not [string]::IsNullOrWhiteSpace($exchangeSnapInState.ForestErrorMessage)) {
-            $format = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExchangeSnapInForestViewWarningFormat' -DefaultValue '')
-            if (-not [string]::IsNullOrWhiteSpace($format)) { Write-Host ($format -f $exchangeSnapInState.ForestErrorMessage) -ForegroundColor Yellow }
-        }
+    -ViewEntireForest ([bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'Exchange2016ViewEntireForest' -DefaultValue ([bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExchangeSnapInViewEntireForest' -DefaultValue $true))))
+$exchangeSnapInState = $exchangeManagementState
+$exchangeScope = if ($exchangeManagementState.Source -eq 'ExchangeOnline') { 'ExchangeOnline' } else { 'OnPremExchange' }
+$exchangeMailboxSource = if ($exchangeManagementState.Source -eq 'ExchangeOnline') { 'ExchangeOnline' } else { 'Exchange2016' }
+if ($exchangeManagementState.Enabled) {
+    if ($exchangeManagementState.Available) {
+        Write-Host ("Exchange management available via {0}." -f $exchangeManagementState.Source) -ForegroundColor DarkCyan
+        if ($exchangeManagementState.ViewEntireForestApplied) { Write-Host 'Exchange ADServerSettings: ViewEntireForest = True' -ForegroundColor DarkCyan }
+        elseif (-not [string]::IsNullOrWhiteSpace($exchangeManagementState.ForestErrorMessage)) { Write-Host ("WARNING: Failed to set ViewEntireForest=True: {0}" -f $exchangeManagementState.ForestErrorMessage) -ForegroundColor Yellow }
     }
     else {
-        $message = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExchangeSnapInUnavailableMessage' -DefaultValue '')
-        if (-not [string]::IsNullOrWhiteSpace($message)) { Write-Host $message -ForegroundColor DarkYellow }
+        Write-Host ("Exchange management unavailable. Status={0}; Error={1}" -f $exchangeManagementState.Status, $exchangeManagementState.ErrorMessage) -ForegroundColor DarkYellow
     }
 }
-if ($requireExchange2016SnapIn -and -not $exchangeSnapInState.Available) {
-    throw ("Exchange 2016 snap-in is mandatory for this campaign and is not available. Status={0}; Error={1}" -f $exchangeSnapInState.Status, $exchangeSnapInState.ErrorMessage)
+if ($requireExchangeManagement -and $exchangeManagementState.Enabled -and -not $exchangeManagementState.Available) {
+    throw ("Exchange management is mandatory for this campaign and is not available. Status={0}; Error={1}" -f $exchangeManagementState.Status, $exchangeManagementState.ErrorMessage)
 }
 
 $columns = @('Timestamp','RunId','Campaign','Email','UserName','NameSource','LanguageTag','MailboxSizeGB','MailboxType','MailboxSource','TargetSkuPartNumber','Subject','Status','SkipReason','ErrorMessage','RecipientTypeDetails','ExchangeSource')
@@ -715,16 +774,16 @@ try {
             if (-not $exchangeState.Exists -and $skipMailboxNotFound -and -not $ForceSend) {
                 $counters.Skipped++
                 $counters.MailboxNotFound++
-                [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Skipped:MailboxNotFound(OnPrem)' })
-                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; Email = $email; UserName = $candidate.UserName; NameSource = $candidate.NameSource; LanguageTag = $language; MailboxSizeGB = ''; MailboxType = $candidate.MailboxType; MailboxSource = $candidate.MailboxSource; TargetSkuPartNumber = $candidateTargetSku; Subject = $subject; Status = 'Skipped'; SkipReason = 'MailboxNotFound(OnPrem)'; ErrorMessage = $exchangeState.ErrorMessage; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
+                [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Skipped:MailboxNotFound(Exchange)' })
+                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; Email = $email; UserName = $candidate.UserName; NameSource = $candidate.NameSource; LanguageTag = $language; MailboxSizeGB = ''; MailboxType = $candidate.MailboxType; MailboxSource = $candidate.MailboxSource; TargetSkuPartNumber = $candidateTargetSku; Subject = $subject; Status = 'Skipped'; SkipReason = 'MailboxNotFound(Exchange)'; ErrorMessage = $exchangeState.ErrorMessage; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
                 continue
             }
 
             if ($exchangeState.IsRemoteMailbox -and $skipRemoteMailbox -and -not $ForceSend) {
                 $counters.Skipped++
                 $counters.RemoteMailbox++
-                [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Skipped:IsRemoteMailbox(OnPrem)' })
-                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; Email = $email; UserName = $candidate.UserName; NameSource = $candidate.NameSource; LanguageTag = $language; MailboxSizeGB = ''; MailboxType = 'RemoteUserMailbox'; MailboxSource = 'Exchange2016'; TargetSkuPartNumber = $candidateTargetSku; Subject = $subject; Status = 'Skipped'; SkipReason = 'IsRemoteMailbox(OnPrem)'; ErrorMessage = ''; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
+                [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Skipped:IsRemoteMailbox(Exchange)' })
+                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; Email = $email; UserName = $candidate.UserName; NameSource = $candidate.NameSource; LanguageTag = $language; MailboxSizeGB = ''; MailboxType = 'RemoteUserMailbox'; MailboxSource = $exchangeMailboxSource; TargetSkuPartNumber = $candidateTargetSku; Subject = $subject; Status = 'Skipped'; SkipReason = 'IsRemoteMailbox(Exchange)'; ErrorMessage = ''; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
                 continue
             }
 
@@ -735,7 +794,7 @@ try {
             if (-not [string]::IsNullOrWhiteSpace($recipientTypeDetails)) {
                 if ($recipientTypeDetails -like '*Remote*') { $candidate.MailboxType = 'RemoteUserMailbox' }
                 else { $candidate.MailboxType = 'UserMailbox' }
-                $candidate.MailboxSource = 'Exchange2016'
+                $candidate.MailboxSource = $exchangeMailboxSource
             }
         }
 
@@ -743,7 +802,7 @@ try {
             $usageInfo = Get-SmartM365CommunicationMailboxUsageInfo -SmtpAddress $email -MailboxMaxGb $candidateMaxGb
             if ($usageInfo.Available) {
                 $candidate.MailboxSizeMB = [math]::Round(([double]$usageInfo.TotalBytes / 1MB), 2)
-                $candidate.MailboxSource = 'Exchange2016'
+                $candidate.MailboxSource = $exchangeMailboxSource
             }
             elseif ($skipMailboxUsageUnavailable -and -not $ForceSend) {
                 $counters.Skipped++
@@ -770,10 +829,13 @@ try {
         try {
             $template = Get-SmartM365CommunicationTemplateContent -TemplateRoot $templateRoot -TemplateBaseName $templateBaseName -LanguageTag $language -DefaultLanguageTag $defaultLanguage
             $logoTokens = Get-SmartM365CommunicationLinkedLogoTokens -LogoPath $logoPath -LogoContentId $logoContentId
+            $freeTextBlock = ConvertTo-FreeTextBlock -Text (Get-LocalizedTextValue -TextByLanguage $freeTextByLanguage -LanguageTag $language -DefaultLanguageTag $defaultLanguage)
             $tokens = @{
                 UserName = [string]$candidate.UserName
                 MailboxSizeGB = $sizeLabel
                 MailboxQuotaGB = $candidateQuotaLabel
+                FreeTextBlockStyle = [string]$freeTextBlock.Style
+                FreeTextBlockTextHtml = [string]$freeTextBlock.TextHtml
                 WebmailUrl = $webmailUrl
                 Hotline = Get-SmartM365CommunicationHotline -HotlineByLanguageOrCountry $hotlineMap -LanguageTag $language -DefaultHotline ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'DefaultHotline' -DefaultValue ''))
                 LogoImgTag = $logoTokens.LogoImgTag
@@ -782,10 +844,12 @@ try {
             $html = Expand-SmartM365CommunicationTemplate -TemplateContent $template.Content -Tokens $tokens
             Assert-SmartM365CommunicationNoUnresolvedToken -Html $html
 
-            $result = Send-SmartM365CommunicationMail -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $email -Bcc $bccAll -Subject $subject -BodyHtml $html -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $global:Thumbprint -SmtpUseIntegratedAuth $smtpUseIntegratedAuth -SmtpEnableSsl $smtpEnableSsl -LogoPath $logoPath -LogoContentId $logoContentId -LogoMediaType $logoMediaType -RetryCount $smtpRetryCount -RetryDelaySeconds $smtpRetryDelaySeconds -WhatIf:$WhatIf
+            $result = Send-SmartM365CommunicationMail -MailSendMode $mailSendMode -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $email -Bcc $bccAll -Subject $subject -BodyHtml $html -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $global:Thumbprint -SmtpUseIntegratedAuth $smtpUseIntegratedAuth -SmtpEnableSsl $smtpEnableSsl -LogoPath $logoPath -LogoContentId $logoContentId -LogoMediaType $logoMediaType -RetryCount $smtpRetryCount -RetryDelaySeconds $smtpRetryDelaySeconds -WhatIf:$WhatIf
             if (-not $WhatIf -and $intraEmailDelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $intraEmailDelayMilliseconds }
-            if ($WhatIf) { $counters.DryRun++ } else { $counters.Sent++; if ($preventResend) { Register-SmartM365CommunicationSentItem -Registry $registry -Email $email } }
-            $status = if ($WhatIf) { 'DryRun' } else { 'Success' }
+            if ($WhatIf) { $counters.DryRun++ }
+            elseif ($result.Sent) { $counters.Sent++; if ($preventResend) { Register-SmartM365CommunicationSentItem -Registry $registry -Email $email } }
+            else { $counters.Skipped++ }
+            $status = if ($WhatIf) { 'DryRun' } elseif ($result.Sent) { 'Success' } else { $result.Mode }
             [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = $status })
             Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; Email = $email; UserName = $candidate.UserName; NameSource = $candidate.NameSource; LanguageTag = $language; MailboxSizeGB = $sizeLabel; MailboxType = $candidate.MailboxType; MailboxSource = $candidate.MailboxSource; TargetSkuPartNumber = $candidateTargetSku; Subject = $subject; Status = $status; SkipReason = ''; ErrorMessage = $result.Mode; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
         }
@@ -813,13 +877,13 @@ try {
     $summary = "Candidates=$($counters.Candidates); Sent=$($counters.Sent); DryRun=$($counters.DryRun); Failed=$($counters.Failed); Skipped=$($counters.Skipped); MailboxNotFound=$($counters.MailboxNotFound); RemoteMailbox=$($counters.RemoteMailbox); MailboxUsageUnavailable=$($counters.MailboxUsageUnavailable); MailboxUsageBelowThreshold=$($counters.MailboxUsageBelowThreshold)."
     if (-not $WhatIf -and -not $NoSummaryEmail -and -not [string]::IsNullOrWhiteSpace($summaryTo)) {
         $summaryHtml = New-SmartM365CommunicationSummaryHtml -Title $summaryTitle -Facts @{
-            RunId = $runId; Tenant = $Tenant; Mode = $(if ($WhatIf) { 'DryRun' } else { $(if ($FromList) { 'FromList' } else { 'Inventory' }) }); Summary = $summary; LogPath = $logPath; SentRegistryPath = $sentRegistryPath; ExchangeSnapIn = $exchangeSnapInState.Status
+            RunId = $runId; Tenant = $Tenant; Mode = $(if ($WhatIf) { 'DryRun' } else { $(if ($FromList) { 'FromList' } else { 'Inventory' }) }); Summary = $summary; LogPath = $logPath; SentRegistryPath = $sentRegistryPath; ExchangeManagement = ("{0}:{1}" -f $exchangeManagementState.Source, $exchangeManagementState.Status)
         } -Items @($processedItems)
-        Send-SmartM365CommunicationMail -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $summaryTo -Bcc $summaryBcc -Subject $summarySubject -BodyHtml $summaryHtml -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $global:Thumbprint -SmtpUseIntegratedAuth $smtpUseIntegratedAuth -SmtpEnableSsl $smtpEnableSsl -RetryCount $smtpRetryCount -RetryDelaySeconds $smtpRetryDelaySeconds | Out-Null
+        Send-SmartM365CommunicationMail -MailSendMode $mailSendMode -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $summaryTo -Bcc $summaryBcc -Subject $summarySubject -BodyHtml $summaryHtml -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $global:Thumbprint -SmtpUseIntegratedAuth $smtpUseIntegratedAuth -SmtpEnableSsl $smtpEnableSsl -RetryCount $smtpRetryCount -RetryDelaySeconds $smtpRetryDelaySeconds | Out-Null
     }
 
     if (-not $WhatIf) {
-        Send-SmartM365TeamsNotification -Level SUCCESS -Title $teamsSuccessTitle -Message $summary -ResultSummary $summary -Facts @{ Tenant = $Tenant; RunId = $runId; LogPath = $logPath; ExchangeSnapIn = $exchangeSnapInState.Status } | Out-Null
+        Send-SmartM365TeamsNotification -Level SUCCESS -Title $teamsSuccessTitle -Message $summary -ResultSummary $summary -Facts @{ Tenant = $Tenant; RunId = $runId; LogPath = $logPath; ExchangeManagement = ("{0}:{1}" -f $exchangeManagementState.Source, $exchangeManagementState.Status) } | Out-Null
     }
     Write-Host $summary
 }

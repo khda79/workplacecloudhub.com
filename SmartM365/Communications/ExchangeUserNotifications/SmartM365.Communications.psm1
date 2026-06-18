@@ -159,6 +159,190 @@ function Initialize-SmartM365CommunicationExchangeSnapIn {
     }
 }
 
+function Initialize-SmartM365CommunicationExchangeOnline {
+    [CmdletBinding()]
+    param(
+        [bool]$Enabled = $true,
+        [string]$AppId = '',
+        [string]$TenantId = '',
+        [string]$Thumbprint = '',
+        [string]$Organization = ''
+    )
+
+    if (-not $Enabled) {
+        return [pscustomobject]@{
+            Enabled = $false
+            Available = $false
+            Source = 'ExchangeOnline'
+            Status = 'Disabled'
+            ErrorMessage = ''
+            ViewEntireForestRequested = $false
+            ViewEntireForestApplied = $false
+            ForestErrorMessage = ''
+        }
+    }
+
+    if (-not (Get-Command -Name Connect-SmartM365CloudSession -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]@{
+            Enabled = $true
+            Available = $false
+            Source = 'ExchangeOnline'
+            Status = 'CloudSessionFunctionUnavailable'
+            ErrorMessage = 'Connect-SmartM365CloudSession is not available. Import SmartM365.Core first.'
+            ViewEntireForestRequested = $false
+            ViewEntireForestApplied = $false
+            ForestErrorMessage = ''
+        }
+    }
+
+    try {
+        $connectResult = Connect-SmartM365CloudSession `
+            -AppId $AppId `
+            -TenantId $TenantId `
+            -Thumbprint $Thumbprint `
+            -Organization $Organization `
+            -ExchangeOnline $true `
+            -Graph $false
+
+        if (-not [bool]$connectResult.ExchangeOnlineConnected) {
+            return [pscustomobject]@{
+                Enabled = $true
+                Available = $false
+                Source = 'ExchangeOnline'
+                Status = 'Unavailable'
+                ErrorMessage = 'Exchange Online connection failed.'
+                ViewEntireForestRequested = $false
+                ViewEntireForestApplied = $false
+                ForestErrorMessage = ''
+            }
+        }
+
+        if (-not (Get-Command -Name Get-Mailbox -ErrorAction SilentlyContinue) -and
+            -not (Get-Command -Name Get-EXOMailbox -ErrorAction SilentlyContinue)) {
+            return [pscustomobject]@{
+                Enabled = $true
+                Available = $false
+                Source = 'ExchangeOnline'
+                Status = 'ExchangeCommandsUnavailable'
+                ErrorMessage = 'Exchange Online connected, but mailbox commands are not available.'
+                ViewEntireForestRequested = $false
+                ViewEntireForestApplied = $false
+                ForestErrorMessage = ''
+            }
+        }
+
+        return [pscustomobject]@{
+            Enabled = $true
+            Available = $true
+            Source = 'ExchangeOnline'
+            Status = 'Available'
+            ErrorMessage = ''
+            ViewEntireForestRequested = $false
+            ViewEntireForestApplied = $false
+            ForestErrorMessage = ''
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Enabled = $true
+            Available = $false
+            Source = 'ExchangeOnline'
+            Status = 'Unavailable'
+            ErrorMessage = $_.Exception.Message
+            ViewEntireForestRequested = $false
+            ViewEntireForestApplied = $false
+            ForestErrorMessage = ''
+        }
+    }
+}
+
+function Initialize-SmartM365CommunicationExchangeManagement {
+    [CmdletBinding()]
+    param(
+        [string]$Mode = 'Auto',
+        [bool]$Required = $true,
+        [bool]$EnableExchange2016Fallback = $true,
+        [string]$AppId = '',
+        [string]$TenantId = '',
+        [string]$Thumbprint = '',
+        [string]$Organization = '',
+        [string]$SnapInName = 'Microsoft.Exchange.Management.PowerShell.SnapIn',
+        [bool]$ViewEntireForest = $true
+    )
+
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { 'Auto' } else { $Mode.Trim() }
+    $attempts = New-Object System.Collections.Generic.List[object]
+
+    switch -Regex ($normalizedMode.ToLowerInvariant()) {
+        '^(disabled|none|off)$' {
+            return [pscustomobject]@{
+                Enabled = $false
+                Available = $false
+                Source = 'Disabled'
+                Status = 'Disabled'
+                ErrorMessage = ''
+                Attempts = @()
+                ViewEntireForestRequested = $ViewEntireForest
+                ViewEntireForestApplied = $false
+                ForestErrorMessage = ''
+            }
+        }
+        '^(exo|exchangeonline|online)$' {
+            $attempts.Add('ExchangeOnline') | Out-Null
+        }
+        '^(exchange2016|snapin|onprem|onpremises)$' {
+            $attempts.Add('Exchange2016') | Out-Null
+        }
+        '^(auto|preferexo|exchangeonlinewithfallback)$' {
+            $attempts.Add('ExchangeOnline') | Out-Null
+            if ($EnableExchange2016Fallback) { $attempts.Add('Exchange2016') | Out-Null }
+        }
+        default {
+            throw "Unsupported ExchangeManagementMode '$Mode'. Use Auto, ExchangeOnline, Exchange2016, or Disabled."
+        }
+    }
+
+    $errors = New-Object System.Collections.Generic.List[string]
+    foreach ($attempt in $attempts) {
+        if ($attempt -eq 'ExchangeOnline') {
+            $state = Initialize-SmartM365CommunicationExchangeOnline `
+                -Enabled $true `
+                -AppId $AppId `
+                -TenantId $TenantId `
+                -Thumbprint $Thumbprint `
+                -Organization $Organization
+        }
+        else {
+            $state = Initialize-SmartM365CommunicationExchangeSnapIn `
+                -Enabled $true `
+                -SnapInName $SnapInName `
+                -ViewEntireForest $ViewEntireForest
+            if ($state) { $state | Add-Member -NotePropertyName Source -NotePropertyValue 'Exchange2016' -Force }
+        }
+
+        if ($state -and $state.Available) {
+            $state | Add-Member -NotePropertyName Attempts -NotePropertyValue @($attempts) -Force
+            return $state
+        }
+
+        if ($state) {
+            $errors.Add(("{0}: {1} ({2})" -f $attempt, $state.Status, $state.ErrorMessage)) | Out-Null
+        }
+    }
+
+    return [pscustomobject]@{
+        Enabled = $true
+        Available = $false
+        Source = $normalizedMode
+        Status = $(if ($Required) { 'UnavailableRequired' } else { 'Unavailable' })
+        ErrorMessage = ($errors -join ' | ')
+        Attempts = @($attempts)
+        ViewEntireForestRequested = $ViewEntireForest
+        ViewEntireForestApplied = $false
+        ForestErrorMessage = ''
+    }
+}
+
 function ConvertTo-SmartM365CommunicationLdapFilterSafe {
     [CmdletBinding()]
     param([AllowNull()][string]$InputString)
@@ -292,20 +476,30 @@ function Test-SmartM365CommunicationExchangeMailboxState {
     foreach ($attempt in @(
         @{ Command = 'Get-Recipient'; Mode = 'Identity'; Remote = $null },
         @{ Command = 'Get-Recipient'; Mode = 'Filter'; Remote = $null },
+        @{ Command = 'Get-EXORecipient'; Mode = 'Identity'; Remote = $null },
+        @{ Command = 'Get-EXORecipient'; Mode = 'Filter'; Remote = $null },
         @{ Command = 'Get-RemoteMailbox'; Mode = 'Identity'; Remote = $true },
         @{ Command = 'Get-RemoteMailbox'; Mode = 'Filter'; Remote = $true },
-        @{ Command = 'Get-Mailbox'; Mode = 'Identity'; Remote = $false }
+        @{ Command = 'Get-Mailbox'; Mode = 'Identity'; Remote = $false },
+        @{ Command = 'Get-EXOMailbox'; Mode = 'Identity'; Remote = $false }
     )) {
-        if (-not (Get-Command -Name $attempt.Command -ErrorAction SilentlyContinue)) { continue }
+        $commandInfo = Get-Command -Name $attempt.Command -ErrorAction SilentlyContinue
+        if (-not $commandInfo) { continue }
 
         try {
             $recipient = $null
             if ($attempt.Mode -eq 'Identity') {
-                $recipient = & $attempt.Command -Identity $SmtpAddress -ResultSize 1 -ReadFromDomainController:$true -ErrorAction Stop
+                $parameters = @{ Identity = $SmtpAddress; ErrorAction = 'Stop' }
+                if ($commandInfo.Parameters.ContainsKey('ResultSize')) { $parameters['ResultSize'] = 1 }
+                if ($commandInfo.Parameters.ContainsKey('ReadFromDomainController')) { $parameters['ReadFromDomainController'] = $true }
+                $recipient = & $attempt.Command @parameters
             }
             else {
                 $filter = "EmailAddresses -eq 'SMTP:$SmtpAddress' -or EmailAddresses -eq 'smtp:$SmtpAddress' -or PrimarySmtpAddress -eq '$SmtpAddress'"
-                $recipient = & $attempt.Command -Filter $filter -ResultSize 1 -ReadFromDomainController:$true -ErrorAction Stop
+                $parameters = @{ Filter = $filter; ErrorAction = 'Stop' }
+                if ($commandInfo.Parameters.ContainsKey('ResultSize')) { $parameters['ResultSize'] = 1 }
+                if ($commandInfo.Parameters.ContainsKey('ReadFromDomainController')) { $parameters['ReadFromDomainController'] = $true }
+                $recipient = & $attempt.Command @parameters
             }
 
             if ($recipient) {
@@ -362,13 +556,15 @@ function Get-SmartM365CommunicationMailboxUsageInfo {
         ErrorMessage = ''
     }
 
-    if (-not (Get-Command -Name Get-MailboxStatistics -ErrorAction SilentlyContinue)) {
-        $result.ErrorMessage = 'Get-MailboxStatistics is not available.'
+    $statisticsCommand = Get-Command -Name Get-MailboxStatistics -ErrorAction SilentlyContinue
+    if (-not $statisticsCommand) { $statisticsCommand = Get-Command -Name Get-EXOMailboxStatistics -ErrorAction SilentlyContinue }
+    if (-not $statisticsCommand) {
+        $result.ErrorMessage = 'Get-MailboxStatistics/Get-EXOMailboxStatistics is not available.'
         return $result
     }
 
     try {
-        $stats = Get-MailboxStatistics -Identity $SmtpAddress -ErrorAction Stop
+        $stats = & $statisticsCommand.Name -Identity $SmtpAddress -ErrorAction Stop
         $totalBytes = ConvertTo-SmartM365CommunicationBytes -Value $stats.TotalItemSize
         if ($null -eq $totalBytes) {
             $result.ErrorMessage = 'TotalItemSize could not be converted to bytes.'
@@ -581,7 +777,7 @@ function Get-SmartM365CommunicationSmtpAddress {
 function Get-SmartM365CommunicationTemplateContent {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$TemplateRoot,
+        [Parameter(Mandatory)][string[]]$TemplateRoot,
         [Parameter(Mandatory)][string]$TemplateBaseName,
         [Parameter(Mandatory)][string]$LanguageTag,
         [string]$DefaultLanguageTag = 'en'
@@ -590,14 +786,21 @@ function Get-SmartM365CommunicationTemplateContent {
     $tag = if ([string]::IsNullOrWhiteSpace($LanguageTag)) { $DefaultLanguageTag } else { $LanguageTag }
     $neutral = ($tag -split '[-_]')[0].ToLowerInvariant()
     $defaultNeutral = ($DefaultLanguageTag -split '[-_]')[0].ToLowerInvariant()
+    $templateRoots = @($TemplateRoot | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
 
-    $candidates = @(
-        (Join-Path -Path $TemplateRoot -ChildPath ("{0}.{1}.html" -f $TemplateBaseName, $tag)),
-        (Join-Path -Path $TemplateRoot -ChildPath ("{0}.{1}.html" -f $TemplateBaseName, $neutral)),
-        (Join-Path -Path $TemplateRoot -ChildPath ("{0}.{1}.html" -f $TemplateBaseName, $DefaultLanguageTag)),
-        (Join-Path -Path $TemplateRoot -ChildPath ("{0}.{1}.html" -f $TemplateBaseName, $defaultNeutral)),
-        (Join-Path -Path $TemplateRoot -ChildPath ("{0}.html" -f $TemplateBaseName))
+    $candidateNames = @(
+        ("{0}.{1}.html" -f $TemplateBaseName, $tag),
+        ("{0}.{1}.html" -f $TemplateBaseName, $neutral),
+        ("{0}.{1}.html" -f $TemplateBaseName, $DefaultLanguageTag),
+        ("{0}.{1}.html" -f $TemplateBaseName, $defaultNeutral),
+        ("{0}.html" -f $TemplateBaseName)
     ) | Select-Object -Unique
+
+    $candidates = foreach ($candidateName in $candidateNames) {
+        foreach ($root in $templateRoots) {
+            Join-Path -Path $root -ChildPath $candidateName
+        }
+    }
 
     foreach ($candidate in $candidates) {
         if (Test-Path -LiteralPath $candidate) {
@@ -803,9 +1006,28 @@ function ConvertTo-SmartM365GraphEmailRecipients {
     return $items
 }
 
+function Get-SmartM365CommunicationMailMode {
+    [CmdletBinding()]
+    param(
+        [string]$MailSendMode = 'Auto',
+        [string]$SmtpServer = ''
+    )
+
+    $mode = if ([string]::IsNullOrWhiteSpace($MailSendMode) -or $MailSendMode -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { 'Auto' } else { $MailSendMode.Trim() }
+    switch ($mode.ToLowerInvariant()) {
+        'auto' { if ([string]::IsNullOrWhiteSpace($SmtpServer)) { return 'Graph' }; return 'SmtpRelay' }
+        'graph' { return 'Graph' }
+        'smtprelay' { return 'SmtpRelay' }
+        'smtp' { return 'SmtpRelay' }
+        'disabled' { return 'Disabled' }
+        default { throw "Unsupported MailSendMode '$MailSendMode'. Use Auto, Graph, SmtpRelay, or Disabled." }
+    }
+}
+
 function Send-SmartM365CommunicationMail {
     [CmdletBinding()]
     param(
+        [string]$MailSendMode = 'Auto',
         [string]$SmtpServer = '',
         [int]$SmtpPort = 25,
         [string]$From,
@@ -830,7 +1052,10 @@ function Send-SmartM365CommunicationMail {
     if ($WhatIf) { return [pscustomobject]@{ Sent = $false; Mode = 'DryRun' } }
     if ([string]::IsNullOrWhiteSpace($From)) { throw 'Mail sender (From) is required.' }
 
-    if ([string]::IsNullOrWhiteSpace($SmtpServer)) {
+    $effectiveMailMode = Get-SmartM365CommunicationMailMode -MailSendMode $MailSendMode -SmtpServer $SmtpServer
+    if ($effectiveMailMode -eq 'Disabled') { return [pscustomobject]@{ Sent = $false; Mode = 'Disabled' } }
+
+    if ($effectiveMailMode -eq 'Graph') {
         if (-not (Get-Command -Name Connect-SmartM365GraphAppOnly -ErrorAction SilentlyContinue)) {
             throw 'Connect-SmartM365GraphAppOnly is not available. Import SmartM365.Core first.'
         }
@@ -851,10 +1076,39 @@ function Send-SmartM365CommunicationMail {
         if ($ccRecipients.Count -gt 0) { $message['ccRecipients'] = $ccRecipients }
         if ($bccRecipients.Count -gt 0) { $message['bccRecipients'] = $bccRecipients }
 
+        $hasLogo = -not [string]::IsNullOrWhiteSpace($LogoPath) -and (Test-Path -LiteralPath $LogoPath)
+        if ($hasLogo) {
+            $message['attachments'] = @(
+                @{
+                    '@odata.type' = '#microsoft.graph.fileAttachment'
+                    name = [System.IO.Path]::GetFileName($LogoPath)
+                    contentType = $LogoMediaType
+                    contentBytes = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($LogoPath))
+                    isInline = $true
+                    contentId = $LogoContentId
+                }
+            )
+        }
+
         $body = @{ message = $message; saveToSentItems = $false } | ConvertTo-Json -Depth 10
         $encodedFrom = [System.Uri]::EscapeDataString($From)
-        Invoke-MgGraphRequest -Method POST -Uri ("https://graph.microsoft.com/v1.0/users/{0}/sendMail" -f $encodedFrom) -Body $body -ContentType 'application/json' | Out-Null
+        $attempt = 0
+        while ($true) {
+            try {
+                $attempt++
+                Invoke-MgGraphRequest -Method POST -Uri ("https://graph.microsoft.com/v1.0/users/{0}/sendMail" -f $encodedFrom) -Body $body -ContentType 'application/json' | Out-Null
+                break
+            }
+            catch {
+                if ($attempt -gt $RetryCount) { throw }
+                if ($RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
+            }
+        }
         return [pscustomobject]@{ Sent = $true; Mode = 'Graph' }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($SmtpServer)) {
+        throw 'SmtpServer is required when MailSendMode is SmtpRelay.'
     }
 
     $mail = New-Object System.Net.Mail.MailMessage
@@ -958,8 +1212,8 @@ Export-ModuleMember -Function `
     Get-SmartM365CommunicationSmtpAddress, Get-SmartM365CommunicationTemplateContent, Expand-SmartM365CommunicationTemplate, `
     Assert-SmartM365CommunicationNoUnresolvedToken, Load-SmartM365CommunicationSentRegistry, Save-SmartM365CommunicationSentRegistry, `
     Register-SmartM365CommunicationSentItem, Resolve-SmartM365CommunicationLanguageTag, Get-SmartM365CommunicationSubject, `
-    Get-SmartM365CommunicationHotline, Add-SmartM365CommunicationLogRow, Send-SmartM365CommunicationMail, `
-    Initialize-SmartM365CommunicationExchangeSnapIn, ConvertTo-SmartM365CommunicationLdapFilterSafe, `
+    Get-SmartM365CommunicationHotline, Add-SmartM365CommunicationLogRow, Get-SmartM365CommunicationMailMode, Send-SmartM365CommunicationMail, `
+    Initialize-SmartM365CommunicationExchangeSnapIn, Initialize-SmartM365CommunicationExchangeOnline, Initialize-SmartM365CommunicationExchangeManagement, ConvertTo-SmartM365CommunicationLdapFilterSafe, `
     Resolve-SmartM365CommunicationAdUserInfo, Test-SmartM365CommunicationExchangeMailboxState, `
     ConvertTo-SmartM365CommunicationBytes, Get-SmartM365CommunicationMailboxUsageInfo, Resolve-SmartM365CommunicationExchangeLanguageTag, `
     Get-SmartM365CommunicationLinkedLogoTokens, New-SmartM365CommunicationSummaryHtml

@@ -35,6 +35,8 @@ Users can change the UI language from the language selector in the GUI. The choi
 
 `LanguageCatalogPath` can point to a custom PowerShell data file with the same structure as `SmartM365-DeviceRebootManager-GUI.strings.psd1`. Leave it empty to use the bundled catalog.
 
+`SplashEnabled` controls the startup WorkplaceCloudHub splash. Set it to `false` to disable the splash. Keep it enabled and customize `SplashMinimumDurationMs`, `SplashProductName`, `SplashBadgeText`, `SplashSubtitle`, and `SplashLogoPath` to adapt the splash for a deployment. The splash URL remains `https://workplacecloudhub.com`.
+
 At each launch, the current `SmartM365-DeviceRebootManager.log` is archived to a timestamped log file and a fresh log is created. Only the 10 most recent archived logs are retained.
 
 ## Intune Win32 Deployment

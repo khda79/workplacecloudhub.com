@@ -2,152 +2,105 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<title>Włączenie skrzynki archiwum</title>
+<title>Wlaczenie skrzynki archiwum</title>
 </head>
-
-<body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
-
-<!-- ===== Bandeau ===== -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
-  <tr>
-    <td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr>
-          <td style="padding:12px 16px; width:160px;">
-            {{LogoImgTag}}
-          </td>
-          <td style="padding:12px 16px;">
-            <div style="color:#ffffff; font-size:20px; font-weight:700;">WŁĄCZENIE SKRZYNKI ARCHIWUM</div>
-            <div style="color:#d9ecff; font-size:13px;">Ważne informacje</div>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-
-<!-- ===== Contenu ===== -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#ffffff;">
-  <tr>
-    <td align="center">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
-        <tr>
-          <td style="padding:22px 16px;">
-
-            <p style="margin:0 0 12px 0;">Dzień dobry <b>{{UserName}}</b>,</p>
-
-            <p style="margin:0 0 12px 0;">
-              Od <b>{{Date}}</b> na Twojej poczcie zostanie włączona skrzynka archiwum.
-            </p>
-
-            <p style="margin:0 0 14px 0;">
-              <b>Dlaczego?</b><br>
-              Aby przygotować migrację do <b>Exchange Online</b> i zapewnić płynne przejście.
-            </p>
-
-            <!-- ===== Ce que cela change ===== -->
-            <div style="background:#f6f8fb; border:1px solid #d6dde8; border-radius:6px; padding:14px; margin:16px 0;">
-              <div style="font-weight:700; color:#0055A4; margin-bottom:8px;">Co to zmienia dla Ciebie?</div>
-              <ul style="margin:0; padding-left:18px;">
-                <li style="margin:0 0 6px 0;"><b>Nic nie zniknie.</b></li>
-                <li style="margin:0 0 6px 0;">W Outlooku pojawi się sekcja <b>Archiwum - {{UserName}}</b> (lewy panel).</li>
-                <li style="margin:0 0 6px 0;">Najstarsze wiadomości mogą być automatycznie przenoszone do archiwum, aby odciążyć skrzynkę główną.</li>
-                <li style="margin:0 0 6px 0;">Zarchiwizowane wiadomości pozostają zawsze dostępne i możliwe do wyszukania.</li>
-              </ul>
-            </div>
-
-            <!-- ===== Action requise ===== -->
-            <div style="margin:0 0 14px 0;">
-              <div style="font-weight:700; color:#0055A4; margin:0 0 6px 0;">Czy wymagana jest akcja?</div>
-              <p style="margin:0;">Nie są wymagane żadne obowiązkowe działania z Twojej strony.</p>
-            </div>
-
-            <!-- ===== Comment utiliser l’archive ===== -->
-            <div style="margin:0 0 14px 0;">
-              <div style="font-weight:700; color:#0055A4; margin:0 0 6px 0;">Jak korzystać z archiwum?</div>
-              <ul style="margin:0; padding-left:18px;">
-                <li style="margin:0 0 6px 0;">Przenoś duże foldery do archiwum (prawy przycisk &gt; <b>Przenieś</b>).</li>
-                <li style="margin:0 0 6px 0;">Automatyczne archiwizowanie będzie stopniowo przenosić starsze wiadomości.</li>
-                <li style="margin:0 0 6px 0;">Wyszukiwanie w Outlooku obejmuje także archiwum.</li>
-                <li style="margin:0 0 6px 0;">W razie potrzeby użyj zakresu <b>„Wszystkie elementy programu Outlook”</b>, aby przeszukać skrzynkę główną i archiwum.</li>
-              </ul>
-            </div>
-
-            <!-- ===== Wykorzystanie skrzynki (déplacé avant méthodes) ===== -->
-            <div style="background:#f6f8fb; border:1px solid #d6dde8; border-radius:6px; padding:14px; margin:16px 0;">
-              <div style="font-weight:700; color:#0055A4; margin-bottom:8px;">Wykorzystanie skrzynki</div>
-              <p style="margin:0;">{{MailboxUsageText}}</p>
-              <div style="color:#666; font-size:12px; margin-top:8px;">
-                Informacja orientacyjna, która pomoże przygotować się do migracji.
-              </div>
-            </div>
-
-            <!-- ===== Archiver vous-même ===== -->
-            <h2 style="color:#0055A4; font-size:16px; margin:18px 0 8px 0;">Archiwizuj samodzielnie, aby zwolnić miejsce</h2>
-
-            <p style="margin:0 0 12px 0;">
-              Jeśli chcesz szybko zmniejszyć rozmiar skrzynki głównej, możesz ręcznie archiwizować wybrane wiadomości lub foldery.
-            </p>
-
-            <h3 style="margin:14px 0 6px 0;">Metoda 1 – Przeniesienie całego folderu (zalecane)</h3>
-            <p style="margin:0 0 6px 0;">Najszybsza metoda, jeśli masz dużo wiadomości.</p>
-            <ol style="margin:0 0 12px 18px;">
-              <li>Kliknij prawym przyciskiem folder (np. „Projekty 2022”)</li>
-              <li>Kliknij <b>Przenieś folder</b></li>
-              <li>Wybierz <b>Archiwum - {{UserName}}</b></li>
-              <li>Zatwierdź</li>
-            </ol>
-            <p style="margin:0 0 12px 0;">Wszystkie wiadomości w folderze zostaną przeniesione jedną operacją.</p>
-
-            <h3 style="margin:14px 0 6px 0;">Metoda 2 – Archiwizowanie wielu wiadomości</h3>
-            <ol style="margin:0 0 12px 18px;">
-              <li>Zaznacz kilka wiadomości</li>
-              <li>Kliknij prawym przyciskiem</li>
-              <li>Kliknij <b>Przenieś</b></li>
-              <li>Wybierz folder w archiwum</li>
-            </ol>
-            <p style="margin:0 0 12px 0; color:#666;">
-              Unikaj przenoszenia wiadomości pojedynczo, jeśli jest ich dużo.
-            </p>
-
-            <h3 style="margin:14px 0 6px 0;">Metoda 3 – Szybkie zwolnienie miejsca</h3>
-            <p style="margin:0 0 6px 0;">Aby znaleźć duże wiadomości:</p>
-            <ul style="margin:0 0 12px 18px;">
-              <li>Kliknij <b>Sortuj według</b></li>
-              <li>Wybierz <b>Rozmiar</b></li>
-              <li>Zarchiwizuj lub usuń największe wiadomości</li>
-            </ul>
-            <p style="margin:0 0 12px 0; color:#666;">
-              Zapisz ważne załączniki na OneDrive przed usunięciem.
-            </p>
-
-            <p style="margin:0 0 12px 0;">
-              <b>Nie zapomnij:</b> regularnie opróżniaj <b>Elementy usunięte</b> i <b>Poczta-śmieci</b> — te foldery wliczają się do całkowitego rozmiaru skrzynki.
-            </p>
-
-            <!-- ===== Support ===== -->
-            <div style="margin-top:18px; padding:12px; border-left:4px solid #0055A4; background:#f9fbff;">
-              <div style="font-weight:700; margin-bottom:6px;">Potrzebujesz pomocy?</div>
-              <div>Skontaktuj się z pomocą: <b>{{Hotline}}</b></div>
-            </div>
-
-            <!-- ===== Footer ===== -->
-            <div style="margin-top:30px; text-align:center;">
-              <div style="width:100%; height:1px; background:#d0d0d0; margin:20px auto;"></div>
+<body style="margin:0; padding:0; background:#F5F8FB; font-family:'Segoe UI', Arial, sans-serif; color:#1F2937; font-size:13px; line-height:1.5;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#F5F8FB;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+                <tr>
+                  <td style="vertical-align:middle; padding-right:16px;">
+                    <div style="display:inline-block; background:#E6F4FF; color:#005A9E; border:1px solid #B9DDF7; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700;">ARCHIWUM POCZTY</div>
+                    <div style="margin-top:10px; font-size:24px; line-height:1.2; font-weight:700; color:#1F2937;">Wlaczenie skrzynki archiwum</div>
+                    <div style="margin-top:6px; font-size:14px; color:#5F6B7A;">Wazne informacje przed migracja</div>
+                  </td>
+                  <td align="right" style="vertical-align:middle; width:170px;">
+                    <div style="display:inline-block; border:1px solid #DDE7F0; border-radius:8px; padding:10px 12px; background:#F8FBFE;">{{LogoImgTag}}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <p style="margin:0 0 14px 0;">Dzien dobry <b>{{UserName}}</b>,</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="background:#F8FBFE; border:1px solid #DDE7F0; border-radius:8px; padding:14px 16px;">
+                  <div style="font-weight:700; color:#005A9E; margin-bottom:8px;">Co sie zmieni?</div>
+                  <div>Od <b>{{Date}}</b> dla Twojej poczty zostanie wlaczona skrzynka archiwum.</div>
+                  <div style="margin-top:8px; color:#5F6B7A;">Pomaga to przygotowac migracje do <b>Exchange Online</b> i zapewnic plynne przejscie.</div>
+                </td></tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#ffffff; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Wykorzystanie skrzynki pocztowej</div>
+                  <div style="font-size:18px; font-weight:700; color:#1F2937;">{{MailboxUsageText}}</div>
+                  <div style="margin-top:8px; color:#5F6B7A; font-size:12px;">Ta informacja pomaga przygotowac sie do migracji.</div>
+                </td></tr>
+              </table>
+              <div style="font-size:16px; font-weight:700; color:#005A9E; margin:2px 0 12px 0;">Jak korzystac z archiwum</div>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; margin-bottom:18px;"><tbody>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">1</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Nic nie znika</div>
+                          <div style="color:#5F6B7A;">W Outlooku pojawi sie sekcja <b>Archive - {{UserName}}</b>.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">2</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Przenies duze foldery</div>
+                          <div style="color:#5F6B7A;">Przenies stare lub duze foldery do archiwum, aby zmniejszyc rozmiar glownej skrzynki.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">3</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Wyszukiwanie pozostaje dostepne</div>
+                          <div style="color:#5F6B7A;">Zarchiwizowane wiadomosci pozostaja dostepne i mozliwe do wyszukania w Outlooku.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 0 10px 0; width:38px; vertical-align:top;">
+                          <div style="width:28px; height:28px; line-height:28px; border-radius:14px; background:#E6F4FF; color:#005A9E; font-weight:700; text-align:center; font-size:13px;">4</div>
+                        </td>
+                        <td style="padding:0 0 10px 0; vertical-align:top;">
+                          <div style="font-weight:700; color:#1F2937;">Szybko zwolnij miejsce</div>
+                          <div style="color:#5F6B7A;">Sortuj wedlug rozmiaru, zapisz wazne zalaczniki w OneDrive lub SharePoint, a nastepnie archiwizuj lub usun duze wiadomosci.</div>
+                        </td>
+                      </tr>
+              </tbody></table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">W razie potrzeby</div>
+                  <div style="color:#5F6B7A;">W przypadku trudnosci skontaktuj sie z helpdeskiem:</div>
+                  <div style="margin-top:8px; color:#1F2937; font-weight:700;">{{Hotline}}</div>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:18px; text-align:center;">
               {{FooterLogoImgTag}}
-              <div style="margin-top:12px; font-size:14px; font-weight:bold;">
-                Dziękujemy za współpracę<br>
-                Zespół programu SmartM365
-              </div>
-            </div>
-
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-
+              <div style="margin-top:12px; font-size:14px; font-weight:700; color:#1F2937;">Dziekujemy za wspolprace<br>Twoj dzial informatyczny</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
-

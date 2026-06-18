@@ -18,6 +18,9 @@ $requiredFiles = @(
     'SmartM365-DeviceRebootManager-GUI.ps1'
     'SmartM365-DeviceRebootManager-GUI.strings.psd1'
     'SmartM365-DeviceRebootManager-GUI.config.json'
+    'SmartM365.GuiSplash.ps1'
+    'WorkplaceCloudHub.ico'
+    'WorkplaceCloudHub-lockup-WPF.png'
 )
 
 $missing = New-Object System.Collections.Generic.List[string]

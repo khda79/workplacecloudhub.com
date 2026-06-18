@@ -12,11 +12,10 @@ set "SCRIPT_DIR=%CD%\"
 set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
 
 if exist "%PWSH%" (
-    "%PWSH%" -STA -NoProfile -WindowStyle Hidden -File "%SCRIPT_DIR%GUI\SmartM365-IntuneRemediation-GUI.ps1" %*
+    start "SmartM365 Intune Remediation" "%PWSH%" -STA -NoProfile -WindowStyle Hidden -File "%SCRIPT_DIR%GUI\SmartM365-IntuneRemediation-GUI.ps1" %*
 ) else (
-    powershell.exe -STA -NoProfile -WindowStyle Hidden -File "%SCRIPT_DIR%GUI\SmartM365-IntuneRemediation-GUI.ps1" %*
+    start "SmartM365 Intune Remediation" powershell.exe -STA -NoProfile -WindowStyle Hidden -File "%SCRIPT_DIR%GUI\SmartM365-IntuneRemediation-GUI.ps1" %*
 )
 
-set "EXIT_CODE=%ERRORLEVEL%"
 popd
-exit /b %EXIT_CODE%
+exit /b 0

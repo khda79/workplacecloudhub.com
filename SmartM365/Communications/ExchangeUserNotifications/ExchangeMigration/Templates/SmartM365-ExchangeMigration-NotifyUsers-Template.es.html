@@ -1,202 +1,78 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>NUEVO BUZÓN DE CORREO</title>
+<title>Nuevo buzon de correo</title>
 </head>
-
-<body style="font-family:'Segoe UI', Arial, sans-serif; color:#333; font-size:13px; line-height:1.5; margin:0; padding:0;">
-
-  <!-- ===== Banda azul ===== -->
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#0055A4;">
+<body style="margin:0; padding:0; background:#F5F8FB; font-family:'Segoe UI', Arial, sans-serif; color:#1F2937; font-size:13px; line-height:1.5;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#F5F8FB;">
     <tr>
-      <td align="center">
+      <td align="center" style="padding:24px 12px;">
         <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
           <tr>
-            <td style="padding:12px 16px; width:160px;">
-              {{LogoImgTag}}
-            </td>
-            <td style="padding:12px 16px;">
-              <div style="color:#ffffff; font-size:22px; font-weight:700;">NUEVO BUZÓN DE CORREO</div>
-              <div style="color:#dfe9f7; font-size:14px;">¡Lo que cambia para usted!</div>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+                <tr>
+                  <td style="vertical-align:middle; padding-right:16px;">
+                    <div style="display:inline-block; background:#E6F4FF; color:#005A9E; border:1px solid #B9DDF7; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700;">MIGRACION DE CORREO</div>
+                    <div style="margin-top:10px; font-size:24px; line-height:1.2; font-weight:700; color:#1F2937;">Nuevo buzon de correo</div>
+                    <div style="margin-top:6px; font-size:14px; color:#5F6B7A;">Lo que cambia para usted</div>
+                  </td>
+                  <td align="right" style="vertical-align:middle; width:170px;">
+                    <div style="display:inline-block; border:1px solid #DDE7F0; border-radius:8px; padding:10px 12px; background:#F8FBFE;">{{LogoImgTag}}</div>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-
-  <!-- ===== Cuerpo ===== -->
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
-    <tr>
-      <td align="center">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width:760px; width:100%;">
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
           <tr>
-            <td style="padding:18px 16px;">
-
-              <p>Hola <b>{{UserName}}</b>,</p>
-
-              <p>En la fecha <b>{{Date}}</b>, su buzón será migrado a <b>Exchange Online</b>.</p>
-
-              <!-- ===== Acción requerida (tabla) ===== -->
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                     style="width:100%; border-collapse:collapse; margin-top:15px; margin-bottom:20px;">
-                <thead>
-                  <tr>
-                    <th align="left"
-                        style="background:#fff3cd; color:#856404; border:1px solid #ffeeba; padding:10px; font-size:14px;">
-                      Acción requerida – a partir de ahora
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="border:1px solid #ffeeba; padding:12px; background:#fff9e6;">
-                      <b>Si aún no lo ha hecho</b>, para seguir accediendo a todos los servicios,
-                      debe aceptar las <b>condiciones de uso</b> conectándose al siguiente portal:
-                      <br><br>
-                      <a href="{{TermsPortalUrl}}"
-                         target="_blank"
-                         style="color:#0055A4; text-decoration:underline;">
-                        {{TermsPortalUrl}}
-                      </a>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <h2 style="color:#0055A4; font-size:16px; margin-top:20px;">Lo que cambiará para usted:</h2>
-
-              <h3 style="color:#0055A4; font-size:15px;">
-                El enlace de acceso al Webmail cambiará de:
-              </h3>
-
-              <!-- ===== Tabla Webmail ===== -->
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse; width:100%;">
-                <thead>
-                  <tr>
-                    <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Enlace antiguo</th>
-                    <th align="left" style="background:#f0f0f0; border:1px solid #ccc; padding:8px;">Nuevo enlace</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-all;">{{OldWebmailUrl}}</td>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-all;">{{NewWebmailUrl}}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <!-- ===== Sección Smartphones ===== -->
-              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">
-                Si utiliza un teléfono móvil:
-              </h2>
-
-              <!-- ===== Tabla comparativa: personal / corporativo ===== -->
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                     style="width:100%; border-collapse:collapse; margin-top:10px;">
-                <thead>
-                  <tr>
-                    <th style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:50%; text-align:left;">
-                      <b>Teléfono personal</b>
-                    </th>
-                    <th style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:50%; text-align:left;">
-                      Teléfono corporativo
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  <tr>
-                    <!-- Personal -->
-                    <td style="border:1px solid #ccc; padding:10px; vertical-align:top;">
-                      <ul style="margin:0; padding-left:16px;">
-                        <li>Deberá utilizar la aplicación <b>Outlook</b>.</li>
-                        <li>La aplicación de correo nativa (Android/iPhone) ya no funcionará.</li>
-                        <li>
-                          <b>Si ya tiene Outlook instalado</b>, deberá desinstalarlo y volver a instalarlo.<br>
-                          <b>En caso contrario</b>, deberá instalarlo desde el App Store o el Play Store (enlace abajo).
-                        </li>
-                        <li>Deberá abrir Outlook e iniciar sesión.</li>
-                      </ul>
-                    </td>
-
-                    <!-- Corporativo -->
-                    <td style="border:1px solid #ccc; padding:10px; vertical-align:top;">
-                      <ul style="margin:0; padding-left:16px;">
-                        <li>La aplicación <b>Outlook</b> se instalará automáticamente.</li>
-                        <li>Su cuenta se configurará automáticamente <b>después de la migración</b>.</li>
-                        <li>Deberá abrir Outlook e iniciar sesión.</li>
-                      </ul>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <!-- ===== Tabla para descargar Outlook ===== -->
-              <h3 style="color:#0055A4; font-size:15px; margin-top:25px;">
-                Descargar la aplicación Outlook:
-              </h3>
-
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0"
-                     style="width:100%; border-collapse:collapse;">
-                <thead>
-                  <tr>
-                    <th align="left" style="background:#f7f7f7; border:1px solid #ccc; padding:8px; width:30%;">Plataforma</th>
-                    <th align="left" style="background:#f7f7f7; border:1px solid #ccc; padding:8px;">Enlace</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  <tr>
-                    <td style="border:1px solid #ccc; padding:8px;">Android (Google Play)</td>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-all;">
-                      https://play.google.com/store/apps/details?id=com.microsoft.office.outlook
-                    </td>
-                  </tr>
-
-                  <tr>
-                    <td style="border:1px solid #ccc; padding:8px;">iPhone (App Store)</td>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-all;">
-                      https://apps.apple.com/app/microsoft-outlook/id951937596
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <!-- ===== Línea de ayuda ===== -->
-              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">En caso de necesitar ayuda:</h2>
-              <p>Si tiene alguna dificultad, puede ponerse en contacto con la línea de soporte:</p>
-              <p><b>{{Hotline}}</b></p>
-
-              <!-- ===== Beneficios ===== -->
-              <h2 style="color:#0055A4; font-size:16px; margin-top:25px;">Los beneficios para usted:</h2>
-              <ul>
-                <li>Acceso más rápido y fluido a sus correos electrónicos.</li>
-                <li>Mayor movilidad: acceso desde todos sus dispositivos sin configuraciones complejas.</li>
-                <li>Menos interrupciones debidas a tareas de mantenimiento.</li>
-                <li>Una solución más segura e integrada con herramientas colaborativas.</li>
-              </ul>
-
-              <!-- ===== Pie ===== -->
-              <div style="margin-top:30px; margin-bottom:20px; text-align:center;">
-                <div style="width:100%; height:1px; background:#d0d0d0; margin:20px auto;"></div>
-
-                {{FooterLogoImgTag}}
-
-                <div style="margin-top:12px; font-size:14px; font-weight:bold;">
-                  Le agradecemos su colaboración<br>
-                  Equipo del Programa SmartM365
-                </div>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:20px;">
+              <p style="margin:0 0 14px 0;">Estimado/a <b>{{UserName}}</b>,</p>
+              <div style="background:#F8FBFE; border:1px solid #DDE7F0; border-radius:8px; padding:14px 16px; margin-bottom:14px;">El <b>{{Date}}</b>, su buzon migrara a <b>Exchange Online</b>.</div>
+              <div style="background:#FFFAEB; border:1px solid #FEDF89; border-radius:8px; padding:14px 16px; margin-bottom:14px; {{TermsPortalBlockStyle}}">
+                <div style="font-weight:700; color:#B54708; margin-bottom:8px;">Accion requerida ahora</div>
+                <div>Si aun no lo ha hecho, acepte las condiciones de uso en el portal siguiente para mantener el acceso a todos los servicios:</div>
+                <div style="margin-top:10px;"><a href="{{TermsPortalUrl}}" target="_blank" style="color:#0078D4; font-weight:700;">{{TermsPortalUrl}}</a></div>
               </div>
-
+              <div style="font-size:16px; font-weight:700; color:#005A9E; margin:2px 0 12px 0;">Lo que cambia para usted</div>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr>
+                  <td style="width:50%; padding-right:6px;"><div style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:12px;"><div style="font-size:12px; color:#5F6B7A; font-weight:700;">Enlace anterior</div><div style="margin-top:6px; word-break:break-all;">{{OldWebmailUrl}}</div></div></td>
+                  <td style="width:50%; padding-left:6px;"><div style="border:1px solid #B9DDF7; border-radius:8px; background:#E6F4FF; padding:12px;"><div style="font-size:12px; color:#005A9E; font-weight:700;">Nuevo enlace</div><div style="margin-top:6px; word-break:break-all; font-weight:700;">{{NewWebmailUrl}}</div></div></td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#ffffff; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Si utiliza un telefono movil</div>
+                  <div style="color:#5F6B7A;">Utilice la aplicacion movil <b>Outlook</b>. Las aplicaciones nativas de correo en Android o iPhone pueden dejar de funcionar despues de la migracion.</div>
+                </td></tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:14px;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">Beneficios para usted</div>
+                  <ul style="margin:0; padding-left:18px; color:#5F6B7A;"><li>Acceso mas rapido a sus correos.</li><li>Uso simplificado en todos sus dispositivos.</li><li>Mas seguridad e integracion con herramientas colaborativas.</li></ul>
+                </td></tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-collapse:separate; border-spacing:0;">
+                <tr><td style="border:1px solid #DDE7F0; border-radius:8px; background:#F8FBFE; padding:14px 16px;">
+                  <div style="font-size:16px; font-weight:700; color:#005A9E; margin-bottom:8px;">En caso de necesidad</div>
+                  <div style="color:#5F6B7A;">Si tiene alguna dificultad, puede contactar con el servicio de asistencia:</div>
+                  <div style="margin-top:8px; color:#1F2937; font-weight:700;">{{Hotline}}</div>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="background:#ffffff; border:1px solid #DDE7F0; border-radius:8px; padding:18px; text-align:center;">
+              {{FooterLogoImgTag}}
+              <div style="margin-top:12px; font-size:14px; font-weight:700; color:#1F2937;">Le agradecemos su colaboracion<br>Su servicio informatico</div>
             </td>
           </tr>
         </table>
       </td>
     </tr>
   </table>
-
 </body>
 </html>
-
