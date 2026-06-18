@@ -1,5 +1,6 @@
 {
   "From": "__USE_GLOBAL__",
+  "MailSendMode": "Auto",
   "SmtpServer": "__USE_GLOBAL__",
   "RelayIp": "",
   "SmtpResolveIPv4": true,

@@ -1,0 +1,3 @@
+PrimarySmtpAddress,UserName,LanguageTag,EffectiveDate
+user1@example.com,First User,en,
+user2@example.com,Second User,fr,

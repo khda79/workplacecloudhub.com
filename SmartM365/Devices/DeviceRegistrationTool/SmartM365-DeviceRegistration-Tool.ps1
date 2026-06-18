@@ -81,7 +81,7 @@ Support mailbox used when emailing support summaries and support bundles.
 Email behavior for support summaries and bundles. Draft displays the Outlook draft. Send sends directly.
 
 .PARAMETER LogoPath
-Optional logo path used as the window icon and header logo. Defaults to workplacecloudhub-v2.png next to the script.
+Optional logo path used as the window icon and header logo. Defaults to WorkplaceCloudHub-lockup-WPF.png next to the script.
 
 .PARAMETER DefaultLanguage
 GUI language. Use auto, en, fr, or a language available in the language catalog.
@@ -246,7 +246,7 @@ function Get-EffectiveLogoPath {
         return $candidate
     }
 
-    $defaultLogo = Join-Path $PSScriptRoot "workplacecloudhub-v2.png"
+    $defaultLogo = Join-Path $PSScriptRoot "WorkplaceCloudHub-lockup-WPF.png"
     if (Test-Path -LiteralPath $defaultLogo) {
         return $defaultLogo
     }
@@ -2976,8 +2976,40 @@ function Format-DeviceRegistrationInfoText {
     return $lines -join [Environment]::NewLine
 }
 
+function Import-SmartM365GuiSplash {
+    $current = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $PSScriptRoot
+    }
+    else {
+        Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
+
+    while ($current) {
+        $splashPath = Join-Path -Path $current -ChildPath 'SmartM365.GuiSplash.ps1'
+        if (Test-Path -LiteralPath $splashPath) {
+            return $splashPath
+        }
+
+        if ((Split-Path -Path $current -Leaf) -eq 'SmartM365') {
+            return $null
+        }
+
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+
+    return $null
+}
+
 function Show-SmartM365DeviceRegistrationGui {
     Add-Type -AssemblyName PresentationCore, PresentationFramework, WindowsBase
+    $splash = $null
+    $splashHelperPath = Import-SmartM365GuiSplash
+    if ($splashHelperPath) {
+        . $splashHelperPath
+        $splash = Start-SmartM365GuiSplash -Framework Wpf -ProductName 'Device Registration Tool'
+    }
     $script:Strings = Get-DeviceRegistrationStrings
 
     $xaml = @"
@@ -3139,7 +3171,7 @@ function Show-SmartM365DeviceRegistrationGui {
                     <TextBlock x:Name="TitleText" Text="Smart DeviceRegistration Tool" Margin="0,12,0,0" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
                     <TextBlock x:Name="SubtitleText" Text="Hybrid Join, Entra device registration, policy checks, and support-ready diagnostics." Margin="0,8,0,0" FontSize="14" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
-                <Border Grid.Column="1" Width="124" Height="88" CornerRadius="8" Background="#FFFFFF" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" Padding="4" Margin="18,0,0,0">
+                <Border x:Name="HeaderLogoLink" Grid.Column="1" Width="124" Height="88" CornerRadius="8" Background="#FFFFFF" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" Padding="4" Margin="18,0,0,0" Cursor="Hand" ToolTip="Open WorkplaceCloudHub.com">
                     <Grid>
                         <Image x:Name="HeaderLogoImage" Stretch="Uniform" MaxWidth="116" MaxHeight="80" RenderOptions.BitmapScalingMode="HighQuality" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                         <StackPanel x:Name="HeaderLogoFallback" VerticalAlignment="Center">
@@ -3337,7 +3369,25 @@ function Show-SmartM365DeviceRegistrationGui {
     $mdmPolicyBannerText = $window.FindName("MdmPolicyBannerText")
     $headerLogoImage = $window.FindName("HeaderLogoImage")
     $headerLogoFallback = $window.FindName("HeaderLogoFallback")
+    $headerLogoLink = $window.FindName("HeaderLogoLink")
     $brushConverter = New-Object System.Windows.Media.BrushConverter
+
+    function Open-ExternalUrl {
+        param([Parameter(Mandatory)][string]$Url)
+
+        try {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new($Url)
+            $psi.UseShellExecute = $true
+            [System.Diagnostics.Process]::Start($psi) | Out-Null
+        }
+        catch {
+            [System.Windows.MessageBox]::Show($window, "Unable to open:`r`n$Url`r`n`r`n$($_.Exception.Message)", 'SmartM365', 'OK', 'Warning') | Out-Null
+        }
+    }
+
+    if ($headerLogoLink) {
+        $headerLogoLink.Add_MouseLeftButtonUp({ Open-ExternalUrl -Url 'https://workplacecloudhub.com' })
+    }
 
     $effectiveLogoPath = Get-EffectiveLogoPath
     if (-not [string]::IsNullOrWhiteSpace($effectiveLogoPath)) {
@@ -3758,12 +3808,19 @@ function Show-SmartM365DeviceRegistrationGui {
     })
 
     $window.Add_ContentRendered({
+        if ($splash) {
+            Hide-SmartM365GuiSplash -Splash $splash
+        }
+
         $window.Dispatcher.BeginInvoke([Action]{
             & $runDiagnostic $true
         }, [System.Windows.Threading.DispatcherPriority]::ApplicationIdle) | Out-Null
     })
 
     [void]$window.ShowDialog()
+    if ($splash) {
+        Close-SmartM365GuiSplash -Splash $splash
+    }
 }
 
 $script:ToolConfig = Get-DeviceRegistrationToolConfig -Path $ConfigPath

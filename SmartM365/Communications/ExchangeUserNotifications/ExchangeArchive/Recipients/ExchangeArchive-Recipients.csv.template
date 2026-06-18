@@ -1,0 +1,3 @@
+PrimarySmtpAddress,UserName,LanguageTag,EffectiveDate,MailboxTotalGb,MailboxUsagePercent
+user1@example.com,First User,en,,85,85
+user2@example.com,Second User,fr,,78,78

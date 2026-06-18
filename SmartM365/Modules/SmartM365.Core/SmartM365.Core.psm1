@@ -2136,7 +2136,10 @@ function Connect-SmartM365CloudSession {
 	
     if ($ExchangeOnline) {
         try {
-            if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+            if (-not (Get-Module -Name ExchangeOnlineManagement)) {
+                if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+                    throw "Required module 'ExchangeOnlineManagement' is not installed."
+                }
                 WriteLog "Loading ExchangeOnlineManagement module..." "INFO"
                 Import-Module ExchangeOnlineManagement -ErrorAction Stop
             }

@@ -10,7 +10,6 @@ if errorlevel 1 (
 
 set "SCRIPT_DIR=%CD%\"
 set "SCRIPT=%SCRIPT_DIR%SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1"
-powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT%" %*
-set "EXIT_CODE=0"
+start "SmartM365 Endpoint Diagnostics Analyzer" powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT%" %*
 popd
-exit /b %EXIT_CODE%
+exit /b 0

@@ -37,19 +37,27 @@ SmartCitrix/**
 !/SmartM365/Devices/Windows11UpgradeToolkit/Windows11UpgradeToolkit.config.template
 !/SmartM365/Devices/Windows11UpgradeToolkit/SetupSourceMap.csv.template
 !/SmartM365/SharePointMigration/**/*.py
-!/SmartM365/SmartM365-logo.ico
-!/SmartM365/Devices/DeviceRebootManager/SmartM365-logo.ico
-!/SmartM365/Devices/DeviceRegistrationTool/SmartM365-logo.ico
-!/SmartM365/Devices/DeviceRegistrationTool/workplacecloudhub-v2.png
-!/SmartM365/Devices/EndpointDiagnosticsAnalyzer/SmartM365-logo.ico
-!/SmartM365/Devices/EndpointDiagnosticsAnalyzer/workplacecloudhub-v2.png
-!/SmartM365/Devices/IntuneHybridJoinToolkit/SmartM365-logo.ico
-!/SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/SmartM365-logo.ico
-!/SmartM365/Devices/IntuneHybridJoinToolkit/workplacecloudhub-v2.png
-!/SmartM365/Devices/Windows11UpgradeToolkit/SmartM365-logo.ico
-!/SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-logo.ico
-!/SmartM365/Devices/Windows11UpgradeToolkit/workplacecloudhub-v2.png
-!/SmartM365/Intune/Remediation/GUI/SmartM365-logo.ico
+!/SmartM365/WorkplaceCloudHub.ico
+!/SmartM365/Devices/DeviceRebootManager/WorkplaceCloudHub.ico
+!/SmartM365/Devices/DeviceRebootManager/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Devices/DeviceRegistrationTool/WorkplaceCloudHub.ico
+!/SmartM365/Devices/DeviceRegistrationTool/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Devices/EndpointDiagnosticsAnalyzer/WorkplaceCloudHub.ico
+!/SmartM365/Devices/EndpointDiagnosticsAnalyzer/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Devices/IntuneHybridJoinToolkit/WorkplaceCloudHub.ico
+!/SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/WorkplaceCloudHub.ico
+!/SmartM365/Devices/IntuneHybridJoinToolkit/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Devices/Windows11UpgradeToolkit/WorkplaceCloudHub.ico
+!/SmartM365/Devices/Windows11UpgradeToolkit/Scripts/WorkplaceCloudHub.ico
+!/SmartM365/Devices/Windows11UpgradeToolkit/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Intune/Remediation/GUI/WorkplaceCloudHub.ico
+!/SmartM365/Intune/Remediation/GUI/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Communications/ExchangeUserNotifications/WorkplaceCloudHub.ico
+!/SmartM365/Communications/ExchangeUserNotifications/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Communications/ExchangeUserNotifications/**/Recipients/
+!/SmartM365/Communications/ExchangeUserNotifications/**/Recipients/*.csv.template
+!/SmartM365/Modules/SmartM365.UI/WorkplaceCloudHub.ico
+!/SmartM365/Modules/SmartM365.UI/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/**/Product names and service plan identifiers for licensing.csv
 !/SmartM365/**/W11-Upgrade-Compatibility-Indicators-Intune-Description.txt
 !/SmartM365/Devices/IntuneHybridJoinToolkit/LOT-X/Computers.txt
@@ -134,6 +142,7 @@ SmartM365/Devices/Windows11UpgradeToolkit/**/SetupMedia/
 
 # Local configuration
 *.local.json
+SmartM365/Communications/ExchangeUserNotifications/**/Templates.local/**
 SmartM365/**/SmartM365-IntuneRemediation-GUI.config.json
 
 # Secrets / Certificates

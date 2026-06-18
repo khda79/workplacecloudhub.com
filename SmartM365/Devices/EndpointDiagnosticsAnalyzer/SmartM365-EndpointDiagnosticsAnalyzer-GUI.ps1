@@ -92,8 +92,8 @@ Start-SedaElevatedSelf -Parameters $PSBoundParameters
 $script:AppName = 'Smart Endpoint Diagnostics Analyzer'
 $script:AppVersion = '0.2.0'
 $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
-$script:LogoPath = Join-Path $script:BasePath 'SmartM365-logo.ico'
-$script:WorkplaceLogoPath = Join-Path $script:BasePath 'workplacecloudhub-v2.png'
+$script:LogoPath = Join-Path $script:BasePath 'WorkplaceCloudHub.ico'
+$script:WorkplaceLogoPath = Join-Path $script:BasePath 'WorkplaceCloudHub-lockup-WPF.png'
 $script:AIConfigPath = Join-Path $HOME '.smartloganalyzer_ai.json'
 $script:LogDirectory = Join-Path $script:BasePath 'Logs'
 $script:LogRetention = 10
@@ -2875,10 +2875,43 @@ function Invoke-SedaLocalCollection {
     }
 }
 
+function Import-SmartM365GuiSplash {
+    $current = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $PSScriptRoot
+    }
+    else {
+        Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
+
+    while ($current) {
+        $splashPath = Join-Path -Path $current -ChildPath 'SmartM365.GuiSplash.ps1'
+        if (Test-Path -LiteralPath $splashPath) {
+            return $splashPath
+        }
+
+        if ((Split-Path -Path $current -Leaf) -eq 'SmartM365') {
+            return $null
+        }
+
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+
+    return $null
+}
+
 function Start-SedaGui {
     Add-Type -AssemblyName PresentationFramework
     Add-Type -AssemblyName WindowsBase
     Add-Type -AssemblyName System.Windows.Forms
+
+    $splash = $null
+    $splashHelperPath = Import-SmartM365GuiSplash
+    if ($splashHelperPath) {
+        . $splashHelperPath
+        $splash = Start-SmartM365GuiSplash -Framework Wpf -ProductName 'Endpoint Diagnostics Analyzer'
+    }
 
     [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -3135,8 +3168,8 @@ function Start-SedaGui {
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
-          <Border Width="56" Height="56" CornerRadius="0" BorderBrush="#24577F" BorderThickness="1" Background="#143657" Margin="0,0,16,0" VerticalAlignment="Top">
-            <Image x:Name="HeaderLogo" Stretch="Uniform" Margin="8"/>
+          <Border x:Name="HeaderLogoLink" Width="56" Height="56" CornerRadius="0" BorderBrush="#24577F" BorderThickness="1" Background="#143657" Margin="0,0,16,0" VerticalAlignment="Top" Cursor="Hand" ToolTip="Open WorkplaceCloudHub.com">
+            <Image x:Name="HeaderLogo" Stretch="Uniform" Margin="8" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality"/>
           </Border>
           <StackPanel Grid.Column="1">
           <Border HorizontalAlignment="Left" CornerRadius="12" Padding="10,4" Background="{StaticResource SoftAccentBrush}">
@@ -3424,7 +3457,7 @@ function Start-SedaGui {
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="150"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="170"/>
                 <ColumnDefinition Width="Auto"/>
@@ -3447,7 +3480,16 @@ function Start-SedaGui {
               <TextBlock Grid.Column="4" Text="API Key / Ollama URL" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
               <TextBox x:Name="AiCredential" Grid.Column="5" Height="30" Margin="0,0,10,0"/>
               <TextBlock Grid.Column="6" Text="Tokens" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-              <TextBox x:Name="AiTokens" Grid.Column="7" Height="30" Margin="0,0,10,0"/>
+              <Grid Grid.Column="7" Height="30" Margin="0,0,10,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="28"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="28"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="AiTokensDownButton" Grid.Column="0" Content="-" Width="28" Height="30" Padding="0" Margin="0"/>
+                <TextBox x:Name="AiTokens" Grid.Column="1" Height="30" Margin="0" TextAlignment="Center"/>
+                <Button x:Name="AiTokensUpButton" Grid.Column="2" Content="+" Width="28" Height="30" Padding="0" Margin="0"/>
+              </Grid>
               <CheckBox x:Name="AiRemember" Grid.Column="8" Content="Remember API key" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"/>
               <Button x:Name="BtnRunAi" Grid.Column="9" Content="Analyze" Width="96" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0"/>
               <Button x:Name="BtnCopyAi" Grid.Column="10" Content="Copy" Width="76" Margin="8,0,0,0"/>
@@ -3499,7 +3541,7 @@ function Start-SedaGui {
 
     $controls = @{}
     foreach ($name in @(
-        'HeaderLogo','BannerComputer','BannerUser','BannerAccount','BannerOS','BannerPowerShell','ScanOverlay','OverlayTitle','OverlayStep',
+        'HeaderLogoLink','HeaderLogo','BannerComputer','BannerUser','BannerAccount','BannerOS','BannerPowerShell','ScanOverlay','OverlayTitle','OverlayStep',
         'BtnAnalyzeZip','BtnAnalyzeLocal','BtnExportHtml','BtnExportAnon','BtnReset','BtnCopySelected','BtnExportGridCsv','BtnOpenExtractDir','BtnOpenWuLog','BtnOpenAppLog','TxtFile','StatusText','Progress',
         'TabSummary','TabMdm','TabWu','TabEvent','TabIme','TabApps','TabHardware','TabInsights','TabHealth','TabDevice','TabCompliance','TabEnrollments','TabZip','TabSearch','TabAi','TabWin11',
         'SummaryText','SummaryComputer','SummaryIP','SummaryOS','SummaryErrors','SummaryWarnings','SummaryFiles','SummaryDeviceGrid','SummaryConnectionGrid',
@@ -3509,7 +3551,7 @@ function Start-SedaGui {
         'ImeText','ImeGrid','ImeThemeFilter','ImeLevelFilter','ImeSearch','ImeCount',
         'AppsText','AppsSearch','AppsCount','AppsGrid','AutopatchGrid','CollectionErrorsGrid','WingetGrid','DriversGrid','WifiGrid',
         'HardwareText','BatteryHealthText','BatteryGrid','FirewallGrid','CertGrid','SearchText','SearchFilter','SearchCount','SearchGrid','SearchDetailText','ZipCategoryFilter','ZipSearch','ZipCount','ZipFilesGrid','ZipDetailText',
-        'AiProvider','AiModel','AiCredential','AiTokens','AiRemember','BtnRunAi','BtnCopyAi','BtnSaveAi','AiText','Win11Text','Win11StatusText','Win11Grid'
+        'AiProvider','AiModel','AiCredential','AiTokensDownButton','AiTokens','AiTokensUpButton','AiRemember','BtnRunAi','BtnCopyAi','BtnSaveAi','AiText','Win11Text','Win11StatusText','Win11Grid'
     )) {
         $controls[$name] = $window.FindName($name)
     }
@@ -3527,10 +3569,28 @@ function Start-SedaGui {
             $bitmap.UriSource = [Uri]$script:WorkplaceLogoPath
             $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
             $bitmap.EndInit()
+            $bitmap.Freeze()
             $controls.HeaderLogo.Source = $bitmap
         } catch {
-            Write-SedaLog -Level WARN -Message 'Unable to load workplacecloudhub-v2.png in GUI header.' -Exception $_.Exception
+            Write-SedaLog -Level WARN -Message 'Unable to load WorkplaceCloudHub-lockup-WPF.png in GUI header.' -Exception $_.Exception
         }
+    }
+
+    function Open-ExternalUrl {
+        param([Parameter(Mandatory)][string]$Url)
+
+        try {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new($Url)
+            $psi.UseShellExecute = $true
+            [System.Diagnostics.Process]::Start($psi) | Out-Null
+        }
+        catch {
+            [System.Windows.MessageBox]::Show($window, "Unable to open:`r`n$Url`r`n`r`n$($_.Exception.Message)", 'SmartM365', 'OK', 'Warning') | Out-Null
+        }
+    }
+
+    if ($controls.HeaderLogoLink) {
+        $controls.HeaderLogoLink.Add_MouseLeftButtonUp({ Open-ExternalUrl -Url 'https://workplacecloudhub.com' })
     }
     $script:CurrentAnalysis = $null
     $script:CurrentAiConfig = Get-SedaAIConfig
@@ -3573,6 +3633,21 @@ function Start-SedaGui {
             return [string]$controls.AiProvider.SelectedItem.Content
         }
         return 'claude'
+    }
+
+    function set-ai-token-value([int]$Delta) {
+        $tokens = 2048
+        if (-not [int]::TryParse($controls.AiTokens.Text, [ref]$tokens)) {
+            $tokens = 2048
+        }
+
+        $tokens += $Delta
+        if ($tokens -lt 1) {
+            $tokens = 1
+        }
+
+        $controls.AiTokens.Text = [string]$tokens
+        $controls.AiTokens.CaretIndex = $controls.AiTokens.Text.Length
     }
 
     function set-ai-defaults([string]$provider, [bool]$forceModel = $false) {
@@ -3985,6 +4060,14 @@ function Start-SedaGui {
     $controls.AiModel.Text = [string]$script:CurrentAiConfig.Model
     $controls.AiCredential.Text = if ($script:CurrentAiConfig.Provider -eq 'ollama') { [string]$script:CurrentAiConfig.OllamaUrl } elseif ($script:CurrentAiConfig.RememberApiKey) { [string]$script:CurrentAiConfig.ApiKey } else { '' }
     $controls.AiTokens.Text = [string]$script:CurrentAiConfig.MaxTokens
+    $controls.AiTokensDownButton.Add_Click({ set-ai-token-value -256 })
+    $controls.AiTokensUpButton.Add_Click({ set-ai-token-value 256 })
+    $controls.AiTokens.Add_PreviewTextInput({
+        param($sender, $eventArgs)
+        if ($eventArgs.Text -notmatch '^[0-9]+$') {
+            $eventArgs.Handled = $true
+        }
+    })
     $controls.AiRemember.IsChecked = [bool]$script:CurrentAiConfig.RememberApiKey
     set-ai-defaults (get-ai-provider) $false
     $controls.AiText.Text = 'Load diagnostics, then run AI analysis with Claude, OpenAI, or Ollama.'
@@ -4279,7 +4362,15 @@ function Start-SedaGui {
 
     $controls.SummaryText.Text = "Open an Intune Device Diagnostics ZIP and click Analyze.`r`n`r`nThis PowerShell edition reads DSRegCmd, MDM enrollments, results.xml, IME logs, Windows Update, apps, drivers, WiFi and Windows 11 upgrade indicators."
     $controls.AiText.Text = 'Load diagnostics, then run AI analysis with Claude, OpenAI, or Ollama.'
+    $window.Add_ContentRendered({
+        if ($splash) {
+            Hide-SmartM365GuiSplash -Splash $splash
+        }
+    })
     [void]$window.ShowDialog()
+    if ($splash) {
+        Close-SmartM365GuiSplash -Splash $splash
+    }
 }
 
 if ($ValidateOnly) {

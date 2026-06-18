@@ -44,7 +44,7 @@ Use `SmartM365-DeviceRegistration-Tool.config.template.json` as the committed mo
   "RequireDomainConnectivity": false,
   "SupportEmail": "",
   "SupportEmailSendMode": "Draft",
-  "LogoPath": "workplacecloudhub-v2.png",
+  "LogoPath": "WorkplaceCloudHub-lockup-WPF.png",
   "DefaultLanguage": "auto",
   "ForceLanguage": "",
   "LanguageCatalogPath": ""
@@ -87,7 +87,7 @@ If Outlook is not available, the tool creates an `.eml` draft file next to the b
 
 - use an absolute path for a shared/company logo;
 - use a relative path to resolve it from the JSON configuration folder;
-- leave the default `workplacecloudhub-v2.png` to use the WorkplaceCloudHub logo next to the script.
+- leave the default `WorkplaceCloudHub-lockup-WPF.png` to use the WorkplaceCloudHub logo next to the script.
 
 If the default PNG is missing, the GUI keeps the built-in text logo placeholder.
 
