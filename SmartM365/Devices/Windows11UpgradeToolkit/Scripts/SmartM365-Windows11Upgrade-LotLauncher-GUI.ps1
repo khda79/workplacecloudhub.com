@@ -1711,32 +1711,54 @@ function Set-OptionCheckAvailability {
     $CheckBox.ForeColor = if ($Enabled) { $colorInk } else { $colorMuted }
 }
 
-function Set-AuditOnlyOptionState {
+function Set-LauncherOptionState {
     $auditOnly = [bool]$optionAuditOnlyCheck.Checked
-    foreach ($check in @(
-            $optionAllowPolicyRepairCheck,
-            $optionAllowWUResetCheck,
-            $optionAllowForceUpgradeCheck,
-            $optionAllowSetupUpgradeCheck,
-            $optionDirectSetupUpgradeCheck,
-            $optionAllowRebootCheck,
-            $optionSkipVirtualMachinesCheck,
-            $optionAllowDiskCleanupCheck,
-            $optionAllowAdvancedCleanupCheck,
-            $optionSkipSetupPreCopyCheck,
-            $optionKeepCentralHistoryCheck,
-            $optionNoCentralCollectionCheck,
-            $optionDryRunCheck
-        )) {
+    $directSetup = [bool]$optionDirectSetupUpgradeCheck.Checked
+    $auditControlledChecks = @(
+        $optionAllowPolicyRepairCheck,
+        $optionAllowWUResetCheck,
+        $optionAllowForceUpgradeCheck,
+        $optionAllowSetupUpgradeCheck,
+        $optionDirectSetupUpgradeCheck,
+        $optionAllowRebootCheck,
+        $optionSkipVirtualMachinesCheck,
+        $optionAllowDiskCleanupCheck,
+        $optionAllowAdvancedCleanupCheck,
+        $optionSkipSetupPreCopyCheck,
+        $optionKeepCentralHistoryCheck,
+        $optionNoCentralCollectionCheck,
+        $optionDryRunCheck
+    )
+    $directSetupIgnoredChecks = @(
+        $optionAllowPolicyRepairCheck,
+        $optionAllowWUResetCheck,
+        $optionAllowForceUpgradeCheck,
+        $optionAllowSetupUpgradeCheck,
+        $optionAllowRebootCheck,
+        $optionAllowDiskCleanupCheck,
+        $optionAllowAdvancedCleanupCheck
+    )
+
+    foreach ($check in $auditControlledChecks) {
         if ($auditOnly) {
             $check.Checked = $false
         }
         Set-OptionCheckAvailability -CheckBox $check -Enabled (-not $auditOnly)
     }
+
+    if ($auditOnly) { return }
+
+    foreach ($check in $directSetupIgnoredChecks) {
+        if ($directSetup) {
+            $check.Checked = $false
+        }
+        Set-OptionCheckAvailability -CheckBox $check -Enabled (-not $directSetup)
+    }
 }
 
-$optionAuditOnlyCheck.Add_CheckedChanged({ Set-AuditOnlyOptionState })
-Set-AuditOnlyOptionState
+$optionAuditOnlyCheck.Add_CheckedChanged({ Set-LauncherOptionState })
+$optionDirectSetupUpgradeCheck.Add_CheckedChanged({ Set-LauncherOptionState })
+Set-LauncherOptionState
 
 $optionsTable.Controls.Add($optionAuditOnlyCheck, 0, 0)
 $optionsTable.Controls.Add($optionAllowPolicyRepairCheck, 1, 0)
