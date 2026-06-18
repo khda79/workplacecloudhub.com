@@ -81,6 +81,11 @@ If DNS resolution fails on every sampled computer during preflight, the LOT stop
 jobs and writes `DNS_PREFLIGHT_ALL_SAMPLES_FAILED` rows. Set `EHJIR_CONTINUE_ON_DNS_PREFLIGHT_FAILURE=1`
 or pass `-ContinueOnDnsPreflightFailure` only after confirming that the network path is intentional.
 
+By default, the launcher does not start a new cycle during the local night window from 20:00 to 07:00.
+This pause is checked before the first cycle and before every later cycle; it does not interrupt a cycle
+already running. Set `EHJIR_DISABLE_NIGHT_PAUSE=1` or pass `-DisableNightPause` to allow cycles at night.
+The window can be adjusted with `EHJIR_NIGHT_PAUSE_START_HOUR` and `EHJIR_NIGHT_PAUSE_END_HOUR`.
+
 LOT runs use two concurrency controls:
 
 - `EHJIR_THROTTLE` / `-ThrottleLimit` limits parallel computers inside one LOT.
