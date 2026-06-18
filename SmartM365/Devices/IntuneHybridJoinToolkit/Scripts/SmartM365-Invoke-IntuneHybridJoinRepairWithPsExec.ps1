@@ -94,6 +94,15 @@ Seconds to wait between checks for completed parallel jobs. Defaults to 2.
 .PARAMETER DelayBetweenCyclesMinutes
 Minutes to wait after one full pass over the computer list before starting the next pass. Defaults to 1.
 
+.PARAMETER DisableNightPause
+Disables the default night pause that prevents a new cycle from starting between 20:00 and 07:00 local time.
+
+.PARAMETER NightPauseStartHour
+Local hour when the night pause starts. Defaults to 20.
+
+.PARAMETER NightPauseEndHour
+Local hour when the night pause ends. Defaults to 7.
+
 .PARAMETER MaxCycles
 Maximum number of cycles to run. 0 means infinite. Defaults to 0.
 
@@ -158,6 +167,9 @@ param(
     [int]$GlobalConcurrencyLeaseTimeoutMinutes = 0,
     [int]$JobPollSeconds = 2,
     [int]$DelayBetweenCyclesMinutes = 1,
+    [switch]$DisableNightPause,
+    [int]$NightPauseStartHour = 20,
+    [int]$NightPauseEndHour = 7,
     [int]$MaxCycles = 0,
     [switch]$AllowDsregLeave = $true,
     [switch]$IgnoreRunGuard,
@@ -200,7 +212,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.50"
+$LauncherVersion = "2.10.51"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
@@ -213,6 +225,10 @@ if ($GlobalConcurrencyLeaseTimeoutMinutes -lt 0) { $GlobalConcurrencyLeaseTimeou
 if ($JobPollSeconds -lt 1) { $JobPollSeconds = 1 }
 if ($DelayBetweenComputersSeconds -lt 0) { $DelayBetweenComputersSeconds = 0 }
 if ($DelayBetweenCyclesMinutes -lt 0) { $DelayBetweenCyclesMinutes = 0 }
+if ($NightPauseStartHour -lt 0) { $NightPauseStartHour = 0 }
+if ($NightPauseStartHour -gt 23) { $NightPauseStartHour = 23 }
+if ($NightPauseEndHour -lt 0) { $NightPauseEndHour = 0 }
+if ($NightPauseEndHour -gt 23) { $NightPauseEndHour = 23 }
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
@@ -703,6 +719,59 @@ function Test-BooleanLikeTrue {
     if ($Value -eq $true) { return $true }
     $text = ([string]$Value).Trim()
     return ($text -in @("True","true","1","YES","Yes","yes","OUI","Oui","oui"))
+}
+
+function Get-NightPauseResumeTime {
+    param(
+        [Parameter(Mandatory=$true)][datetime]$Now,
+        [Parameter(Mandatory=$true)][int]$StartHour,
+        [Parameter(Mandatory=$true)][int]$EndHour
+    )
+
+    if ($StartHour -eq $EndHour) { return $null }
+
+    $start = New-TimeSpan -Hours $StartHour
+    $end = New-TimeSpan -Hours $EndHour
+    $current = $Now.TimeOfDay
+
+    if ($StartHour -lt $EndHour) {
+        if ($current -ge $start -and $current -lt $end) {
+            return $Now.Date.Add($end)
+        }
+        return $null
+    }
+
+    if ($current -ge $start) {
+        return $Now.Date.AddDays(1).Add($end)
+    }
+
+    if ($current -lt $end) {
+        return $Now.Date.Add($end)
+    }
+
+    return $null
+}
+
+function Wait-OutsideNightPauseWindow {
+    param([Parameter(Mandatory=$true)][int]$NextCycleNumber)
+
+    if ($DisableNightPause) { return }
+
+    while ($true) {
+        $now = Get-Date
+        $resumeAt = Get-NightPauseResumeTime -Now $now -StartHour $NightPauseStartHour -EndHour $NightPauseEndHour
+        if ($null -eq $resumeAt) { return }
+
+        $secondsRemaining = [int][Math]::Ceiling(($resumeAt - $now).TotalSeconds)
+        if ($secondsRemaining -lt 1) { return }
+
+        Write-Host ("Night cycle pause active. Next cycle {0} will start after {1}. Press Ctrl+C to stop." -f $NextCycleNumber,$resumeAt.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor Yellow
+        while ($secondsRemaining -gt 0) {
+            $sleepSeconds = [Math]::Min($secondsRemaining, 300)
+            Start-Sleep -Seconds $sleepSeconds
+            $secondsRemaining -= $sleepSeconds
+        }
+    }
 }
 
 function Invoke-FullIntuneInventoryExport {
@@ -1788,6 +1857,7 @@ if ($GlobalConcurrencyLimit -gt 0) {
 }
 Write-Host "Start delay : $DelayBetweenComputersSeconds seconds between job starts"
 Write-Host "Loop        : $(-not [bool]$RunOnce); Delay between cycles: $DelayBetweenCyclesMinutes minute(s); Max cycles: $MaxCycles"
+Write-Host "Night pause : Enabled=$(-not [bool]$DisableNightPause); Window=$($NightPauseStartHour):00-$($NightPauseEndHour):00 local time"
 Write-Host "Logs        : $LogRoot"
 Write-Host "Reports     : $ReportRoot"
 Write-Host "Central logs: Enabled=$CollectRemoteLogs; Path=$CentralLogRoot; History=$([bool]$KeepCentralLogHistory)"
@@ -3603,6 +3673,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
 $cycle = 0
 do {
+    Wait-OutsideNightPauseWindow -NextCycleNumber ($cycle + 1)
     $cycle++
     $cycleArgs = @($scriptArgsBase)
     if ($IgnoreRunGuard -and ($cycle -eq 1 -or $IgnoreRunGuardEveryCycle)) {
