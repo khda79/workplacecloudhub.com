@@ -157,9 +157,10 @@ Default,*,\\srv-central\share\Windows11-24H2,100
 Each target first filters the CSV using its own IPv4 addresses and computer name, then
 benchmarks only the matching sources.
 
-To reduce per-device media-copy bandwidth, set `W11UT_SETUP_COPY_IPG_MS` to a non-zero
-robocopy inter-packet gap. Larger values slow each PC copy more aggressively. Use
-`W11UT_SETUP_COPY_JITTER_SECONDS` to spread copy starts randomly, and
+To reduce per-device media-copy bandwidth, the default `W11UT_SETUP_COPY_IPG_MS=20`
+applies a moderate robocopy inter-packet gap. Larger values slow each PC copy more
+aggressively; set it to `0` only when no per-device copy throttling is wanted. The default
+`W11UT_SETUP_COPY_JITTER_SECONDS=300` spreads copy starts randomly over five minutes, and
 `W11UT_SETUP_SOURCE_CANDIDATE_LIMIT` to cap the number of matched sources benchmarked by a
 target. Optional source-level copy concurrency is available with
 `W11UT_SETUP_SOURCE_CONCURRENCY_LIMIT` and a writable UNC lease folder in
