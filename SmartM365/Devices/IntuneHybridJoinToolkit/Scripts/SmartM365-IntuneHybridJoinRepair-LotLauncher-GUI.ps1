@@ -238,14 +238,21 @@ function Start-ToolkitLot {
         throw "Wrapper not found: $wrapperPath"
     }
 
+    $effectiveExtraArguments = New-Object System.Collections.Generic.List[string]
+    foreach ($argument in @($ExtraArguments)) {
+        if ($null -ne $argument) {
+            [void]$effectiveExtraArguments.Add([string]$argument)
+        }
+    }
+
     $commands = New-Object System.Collections.Generic.List[string]
     foreach ($key in ($Environment.Keys | Sort-Object)) {
         $commands.Add((ConvertTo-CmdSetCommand -Name $key -Value ([string]$Environment[$key])))
     }
 
     $extra = ''
-    if ($ExtraArguments.Count -gt 0) {
-        $extra = ' ' + (($ExtraArguments | ForEach-Object { ConvertTo-CmdArgument -Value $_ }) -join ' ')
+    if ($effectiveExtraArguments.Count -gt 0) {
+        $extra = ' ' + (($effectiveExtraArguments | ForEach-Object { ConvertTo-CmdArgument -Value $_ }) -join ' ')
     }
 
     $commands.Add(('call {0}{1}' -f (ConvertTo-CmdArgument -Value $wrapperPath), $extra))
@@ -315,7 +322,12 @@ function Start-ToolkitSingleComputer {
         $arguments += '-IgnoreRunGuard'
     }
 
-    $arguments += $ExtraArguments
+    foreach ($argument in @($ExtraArguments)) {
+        if ($null -ne $argument) {
+            $arguments += [string]$argument
+        }
+    }
+
     $commands.Add(('pwsh.exe {0}' -f (($arguments | ForEach-Object { ConvertTo-CmdArgument -Value $_ }) -join ' ')))
     $cmdLine = '/k ' + ($commands -join ' && ')
     Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdLine -WorkingDirectory $context.Root -Verb RunAs | Out-Null
