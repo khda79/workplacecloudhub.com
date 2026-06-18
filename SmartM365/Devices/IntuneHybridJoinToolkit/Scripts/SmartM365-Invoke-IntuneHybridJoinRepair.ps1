@@ -89,7 +89,7 @@ param(
     [int]$IntuneRetryMaxRetries = 5
 )
 
-$ScriptVersion = "2.10.31"
+$ScriptVersion = "2.10.32"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
@@ -2135,6 +2135,7 @@ function Get-NextActionForStatus {
         "LEAVE_NOT_APPLICABLE" { return "FIX_HYBRID_JOIN" }
         "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
         "SKIPPED_VIRTUAL_MACHINE" { return "NO_ACTION_VIRTUAL_MACHINE" }
+        "COMPUTER_SYSTEM_QUERY_FAILED" { return "FIX_WMI_CIM_OR_RETRY" }
         "DOMAIN_CONTROLLER_UNREACHABLE" { return "FIX_DOMAIN_CONNECTIVITY_OR_VPN" }
         default {
             if ($Status -like "REBOOT_TRIGGERED*") { return "WAIT_REBOOT_AND_RECHECK" }
@@ -2318,6 +2319,34 @@ function Get-ComputerSystemSummary {
             Detail = $_.Exception.Message
         }
     }
+}
+
+function Stop-ComputerSystemQueryFailed {
+    param([Parameter(Mandatory=$true)][string]$Detail)
+
+    $status = "COMPUTER_SYSTEM_QUERY_FAILED"
+    $errorMessage = "Unable to query Win32_ComputerSystem. Script stopped before domain, gpupdate, dsreg, cleanup, or reboot actions. Detail=$Detail"
+    Write-Host $errorMessage -ForegroundColor Yellow
+    Write-RunLog $errorMessage
+
+    $logEntry = [PSCustomObject]@{
+        RunId=$RunId; Timestamp=$Timestamp; ComputerName=$ComputerName; AllowDsregLeave=[bool]$AllowDsregLeave
+        AllowRemoveNonIntuneMdmEnrollment=[bool]$AllowRemoveNonIntuneMdmEnrollment
+        AllowRemoveStaleIntuneEnrollment=[bool]$AllowRemoveStaleIntuneEnrollment
+        SkipVirtualMachines=[bool]$SkipVirtualMachines
+        ScriptVersion=$ScriptVersion
+        IsVirtualMachine=""
+        VirtualMachineEvidence=""
+        LeaveAttempted=$false; LeaveExitCode=""; Status=$status; ErrorMessage=$errorMessage
+        Dsreg_AzureAdJoined=""; Dsreg_DeviceId=""; Dsreg_TenantName=""; Dsreg_TenantId=""
+        DeviceAuthStatus=""; DsregStatusErrorMessage=$Detail; IntuneEnrolled=$null
+        ClientErrorCode=""; ServerErrorCode=""; ServerErrorSubCode=""; ServerOperation=""
+        ServerMessage=""; HttpsStatus=""; RequestId=""; ErrorPhase="ComputerSystemQuery"
+    }
+
+    Write-AtomicCsvAppend -Path $logPath -RowObject $logEntry -RunIdValue $RunId
+    Write-FinalStatusLine -Status $status -ExitCode 2 -Detail $errorMessage -NextAction (Get-NextActionForStatus -Status $status)
+    exit 2
 }
 
 function Invoke-BoundedRetryUntilIntuneEnrollment {
@@ -2620,7 +2649,7 @@ try {
     Write-RunLog "Checking domain join status."
 
     if ($null -eq $cs) {
-        $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        Stop-ComputerSystemQueryFailed -Detail $computerSystemSummary.Detail
     }
     if (-not $cs.PartOfDomain) {
         $status = "NOT_DOMAIN_JOINED"
@@ -2806,7 +2835,11 @@ try {
     Write-Host "Checking Active Directory domain join status..." -ForegroundColor Cyan
     Write-RunLog "Checking domain join status."
 
-    $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+    $computerSystemSummary = Get-ComputerSystemSummary
+    if (-not $computerSystemSummary.Success) {
+        Stop-ComputerSystemQueryFailed -Detail $computerSystemSummary.Detail
+    }
+    $cs = $computerSystemSummary.ComputerSystem
     if (-not $cs.PartOfDomain) {
         $status = "NOT_DOMAIN_JOINED"
         $errorMessage = "Device is not joined to an Active Directory domain. Script stopped at start."

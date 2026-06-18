@@ -72,6 +72,15 @@ in `Scripts\PsExec.exe`, `%WINDIR%\System32\PsExec.exe`, or in `PATH`. Direct Po
 The LOT Launcher GUI only checks `Scripts\PsExec.exe` and `%WINDIR%\System32\PsExec.exe` during window startup to keep the UI responsive;
 if the local files are missing, `PATH` is checked when the operator launches the LOT.
 
+At the beginning of a LOT run, the launcher archives previous `CentralLogs`, `PsExecLogs`, and `Reports`
+folders into `Archives\IntuneHybridJoinToolkit_PreRun_<timestamp>.zip`, then removes those folders before
+the new cycle starts. Set `EHJIR_SKIP_PRE_RUN_ARCHIVE=1` or pass `-SkipPreRunArchive` only when previous
+outputs must stay in place.
+
+If DNS resolution fails on every sampled computer during preflight, the LOT stops before queuing PsExec
+jobs and writes `DNS_PREFLIGHT_ALL_SAMPLES_FAILED` rows. Set `EHJIR_CONTINUE_ON_DNS_PREFLIGHT_FAILURE=1`
+or pass `-ContinueOnDnsPreflightFailure` only after confirming that the network path is intentional.
+
 LOT runs use two concurrency controls:
 
 - `EHJIR_THROTTLE` / `-ThrottleLimit` limits parallel computers inside one LOT.
@@ -153,5 +162,6 @@ The repair script must remain self-contained. Do not add mandatory runtime depen
 - A live cycle CSV is written under `LOT-*\Reports` as computers complete.
 - Per-computer PsExec logs are written under `LOT-*\PsExecLogs`.
 - Collected remote evidence is written under `LOT-*\CentralLogs`.
+- Previous `CentralLogs`, `PsExecLogs`, and `Reports` folders are archived under `LOT-*\Archives` at the start of a LOT run by default.
 - Already enrolled computers are moved from `Computers.txt` to `ComputersAlreadyEnrolled.txt`.
 - Generated inventories, logs and reports are ignored by Git.
