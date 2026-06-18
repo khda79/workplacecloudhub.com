@@ -34,10 +34,20 @@ function Import-SmartM365GuiSplash {
     return $false
 }
 
+function Get-TrimmedText {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) {
+        return ''
+    }
+
+    return ([string]$Value).Trim()
+}
+
 function Get-SafeLotName {
     param([string]$Name)
 
-    $safe = [regex]::Replace($Name.Trim(), '[^A-Za-z0-9._-]+', '-').Trim('-._')
+    $safe = [regex]::Replace((Get-TrimmedText -Value $Name), '[^A-Za-z0-9._-]+', '-').Trim('-._')
     if ([string]::IsNullOrWhiteSpace($safe)) {
         throw 'Enter a LOT name.'
     }
@@ -57,7 +67,7 @@ function Get-ComputerNamesFromFile {
     }
 
     Get-Content -LiteralPath $Path |
-        ForEach-Object { $_.Trim() } |
+        ForEach-Object { Get-TrimmedText -Value $_ } |
         Where-Object { $_ -and -not $_.StartsWith('#') } |
         Select-Object -Unique
 }
@@ -100,7 +110,7 @@ function Get-AdDomainText {
 
     $candidate = Join-Path $LotPath 'AdDomain.txt'
     if (Test-Path -LiteralPath $candidate) {
-        $value = (Get-Content -LiteralPath $candidate -Raw).Trim()
+        $value = Get-TrimmedText -Value (Get-Content -LiteralPath $candidate -Raw)
         if ($value) {
             return $value
         }
@@ -369,8 +379,9 @@ $toolkitRoot = Get-ToolkitRoot
 $launchAllLotStartDelaySeconds = 5
 
 if ($ValidateOnly) {
-    $count = @(Get-LotFolders -Root $toolkitRoot).Count
-    Write-Output "Smart Intune Hybrid Join Toolkit LOT Launcher GUI validation completed. Lots=$count"
+    $lots = @(Get-LotFolders -Root $toolkitRoot | ForEach-Object { Get-LotSummary -Folder $_ })
+    $ready = @($lots | Where-Object { $_.DeviceCount -gt 0 -and $_.WrappersReady }).Count
+    Write-Output "Smart Intune Hybrid Join Toolkit LOT Launcher GUI validation completed. Lots=$($lots.Count); Ready=$ready"
     return
 }
 
