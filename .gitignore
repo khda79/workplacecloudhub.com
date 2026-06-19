@@ -18,6 +18,10 @@ SmartCitrix/**
 !SmartCitrix/
 !SmartCitrix/**/
 !SmartCitrix/**/.gitkeep
+SmartThinClient/**
+!SmartThinClient/
+!SmartThinClient/**/
+!SmartThinClient/**/.gitkeep
 .delete-empty/
 
 # Local documentation / agent notes
@@ -96,6 +100,14 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartCitrix/**/*.md
 !/SmartCitrix/**/*.json.template
 !/SmartCitrix/SmartCitrix.global.local.json.template
+!/SmartThinClient/README.md
+!/SmartThinClient/**/*.ps1
+!/SmartThinClient/**/*.cmd
+!/SmartThinClient/**/*.md
+!/SmartThinClient/**/*.json.template
+!/SmartThinClient/**/*.config.template.json
+!/SmartThinClient/Assets/WorkplaceCloudHub.ico
+!/SmartThinClient/Assets/WorkplaceCloudHub-lockup-WPF.png
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md
