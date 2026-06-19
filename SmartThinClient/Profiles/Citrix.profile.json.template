@@ -1,0 +1,17 @@
+{
+  "ProfileName": "Citrix",
+  "Provider": "Citrix",
+  "LaunchMode": "WorkspaceApp",
+  "WorkspaceUrl": "",
+  "StoreUrl": "",
+  "FallbackWebUrl": "",
+  "BrowserKioskMode": false,
+  "ExpectedExecutableNames": [
+    "SelfService.exe",
+    "CDViewer.exe",
+    "wfica32.exe"
+  ],
+  "RequiredClient": "Citrix Workspace app for Windows",
+  "SupportsHybridSelection": true,
+  "Notes": "Keep real StoreFront, Gateway, and Workspace URLs in local runtime JSON only."
+}

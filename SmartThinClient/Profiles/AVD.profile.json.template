@@ -1,0 +1,18 @@
+{
+  "ProfileName": "AVD",
+  "Provider": "Microsoft",
+  "LaunchMode": "WindowsApp",
+  "FeedUrl": "",
+  "WorkspaceUrl": "",
+  "FallbackWebUrl": "",
+  "WindowsAppLaunchUri": "",
+  "BrowserKioskMode": false,
+  "ExpectedExecutableNames": [
+    "msrdcw.exe",
+    "msrdc.exe",
+    "WindowsApp.exe"
+  ],
+  "RequiredClient": "Windows App or Azure Virtual Desktop client",
+  "SupportsHybridSelection": true,
+  "Notes": "Keep real feed URLs and tenant-specific values in local runtime JSON only."
+}
