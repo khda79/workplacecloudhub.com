@@ -90,6 +90,11 @@
   "SummarySubject": "SmartM365 Exchange migration mailbox size reduction notification summary",
   "TeamsSuccessTitle": "SmartM365 Exchange migration mailbox size reduction notification completed",
   "TeamsFailureTitle": "SmartM365 Exchange migration mailbox size reduction notification failed",
+  "TeamsUserMessageByLanguage": {
+    "default": "Hello {{UserName}}, an important message about reducing your mailbox size has been sent to your email. Current size: {{MailboxSizeGB}}. Target quota: {{MailboxQuotaGB}}.",
+    "en": "Hello {{UserName}}, an important message about reducing your mailbox size has been sent to your email. Current size: {{MailboxSizeGB}}. Target quota: {{MailboxQuotaGB}}.",
+    "fr": "Bonjour {{UserName}}, un message important concernant la reduction de votre boite aux lettres vous a ete envoye par email. Taille actuelle : {{MailboxSizeGB}}. Quota cible : {{MailboxQuotaGB}}."
+  },
   "LogoPath": "{{SmartM365RootPath}}\\WorkplaceCloudHub.ico",
   "LogoContentId": "smartm365logo",
   "LogoMediaType": "image/x-icon",
