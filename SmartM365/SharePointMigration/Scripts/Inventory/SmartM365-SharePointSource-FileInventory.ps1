@@ -384,8 +384,11 @@ function Export-WebInventory {
             }
         }
         catch {
+            if ($script:InventoryStopRequested) {
+                throw
+            }
             Write-Warning ("Failed to inventory library '{0}' in web '{1}': {2}" -f $library.Title, $Web.Url, $_.Exception.Message)
-            Write-InventoryError -Scope 'Library' -Url $Web.Url -Name $library.Title -Message $_.Exception.Message
+            Stop-InventoryAfterError -Scope 'Library' -Url $Web.Url -Name $library.Title -Message $_.Exception.Message
         }
     }
 }
@@ -418,8 +421,11 @@ function Export-SiteInventory {
                     -BatchSize $BatchSize
             }
             catch {
+                if ($script:InventoryStopRequested) {
+                    throw
+                }
                 Write-Warning ("Failed to inventory web '{0}': {1}" -f $web.Url, $_.Exception.Message)
-                Write-InventoryError -Scope 'Web' -Url $web.Url -Name $web.Title -Message $_.Exception.Message
+                Stop-InventoryAfterError -Scope 'Web' -Url $web.Url -Name $web.Title -Message $_.Exception.Message
             }
             finally {
                 $web.Dispose()
@@ -427,8 +433,11 @@ function Export-SiteInventory {
         }
     }
     catch {
+        if ($script:InventoryStopRequested) {
+            throw
+        }
         Write-Warning ("Failed to enumerate webs for site collection '{0}': {1}" -f $Site.Url, $_.Exception.Message)
-        Write-InventoryError -Scope 'SiteCollection' -Url $Site.Url -Name $Site.Url -Message $_.Exception.Message
+        Stop-InventoryAfterError -Scope 'SiteCollection' -Url $Site.Url -Name $Site.Url -Message $_.Exception.Message
     }
 }
 
@@ -711,6 +720,19 @@ function Write-InventoryError {
     }
 }
 
+function Stop-InventoryAfterError {
+    param(
+        [string]$Scope,
+        [string]$Url,
+        [string]$Name,
+        [string]$Message
+    )
+
+    Write-InventoryError -Scope $Scope -Url $Url -Name $Name -Message $Message
+    $script:InventoryStopRequested = $true
+    throw ("Inventory stopped after {0} error at '{1}'. Final CSV was not published. Details: {2}" -f $Scope, $Url, $Message)
+}
+
 function Get-PermissionInventoryOutputPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -865,6 +887,7 @@ $script:ErrorPath = $ErrorPath
 $script:CsvCreated = $false
 $script:ErrorCsvCreated = $false
 $script:TranscriptStarted = $false
+$script:InventoryStopRequested = $false
 $script:InventoryExitCode = 0
 $script:InventoryStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -894,8 +917,11 @@ try {
                         -BatchSize $RowLimit
                 }
                 catch {
+                    if ($script:InventoryStopRequested) {
+                        throw
+                    }
                     Write-Warning ("Failed to inventory site collection '{0}': {1}" -f $site.Url, $_.Exception.Message)
-                    Write-InventoryError -Scope 'SiteCollection' -Url $site.Url -Name $site.Url -Message $_.Exception.Message
+                    Stop-InventoryAfterError -Scope 'SiteCollection' -Url $site.Url -Name $site.Url -Message $_.Exception.Message
                 }
                 finally {
                     $site.Dispose()
@@ -914,8 +940,11 @@ try {
                     -BatchSize $RowLimit
             }
             catch {
+                if ($script:InventoryStopRequested) {
+                    throw
+                }
                 Write-Warning ("Failed to inventory site collection '{0}': {1}" -f $site.Url, $_.Exception.Message)
-                Write-InventoryError -Scope 'SiteCollection' -Url $site.Url -Name $site.Url -Message $_.Exception.Message
+                Stop-InventoryAfterError -Scope 'SiteCollection' -Url $site.Url -Name $site.Url -Message $_.Exception.Message
             }
             finally {
                 $site.Dispose()
@@ -941,8 +970,11 @@ try {
                     }
                 }
                 catch {
+                    if ($script:InventoryStopRequested) {
+                        throw
+                    }
                     Write-Warning ("Failed to inventory web '{0}': {1}" -f $web.Url, $_.Exception.Message)
-                    Write-InventoryError -Scope 'Web' -Url $web.Url -Name $web.Title -Message $_.Exception.Message
+                    Stop-InventoryAfterError -Scope 'Web' -Url $web.Url -Name $web.Title -Message $_.Exception.Message
                 }
                 finally {
                     $web.Dispose()
@@ -957,6 +989,10 @@ try {
     if (-not $script:CsvCreated) {
         Write-InventoryHeaderOnlyCsv -Path $TempOutputPath
         Write-Warning "No file rows were exported. The final inventory CSV contains headers only."
+    }
+
+    if ($script:ErrorCsvCreated) {
+        throw ("Inventory errors were recorded. Final CSV was not published. Error details: {0}" -f $ErrorPath)
     }
 
     Move-Item -LiteralPath $TempOutputPath -Destination $OutputPath -Force
@@ -977,6 +1013,10 @@ catch {
     }
     if (Test-Path -LiteralPath $TempOutputPath) {
         Write-Warning ("Inventory failed before final CSV publication. Partial temporary CSV kept: {0}" -f $TempOutputPath)
+    }
+    if (Test-Path -LiteralPath $OutputPath) {
+        Remove-Item -LiteralPath $OutputPath -Force
+        Write-Warning ("Removed incomplete final CSV: {0}" -f $OutputPath)
     }
     $script:InventoryExitCode = 1
 }
