@@ -528,8 +528,7 @@ function Export-ItemPermissionInventory {
         catch {
             $listUrl = ConvertTo-AbsoluteSharePointUrl -Web $Web -ServerRelativeUrl $List.RootFolder.ServerRelativeUrl
             Write-Warning ("Failed to enumerate items for list '{0}' in web '{1}': {2}" -f $List.Title, $Web.Url, $_.Exception.Message)
-            Write-InventoryError -Scope 'ListItems' -Url $listUrl -Name $List.Title -Message $_.Exception.Message
-            break
+            Stop-InventoryAfterError -Scope 'ListItems' -Url $listUrl -Name $List.Title -Message $_.Exception.Message
         }
 
         foreach ($item in $items) {
@@ -590,7 +589,7 @@ function Export-ItemPermissionInventory {
                 }
 
                 Write-Warning ("Failed to inventory item permissions in list '{0}' in web '{1}': {2}" -f $List.Title, $Web.Url, $_.Exception.Message)
-                Write-InventoryError -Scope 'Item' -Url $itemUrl -Name $itemName -Message $_.Exception.Message
+                Stop-InventoryAfterError -Scope 'Item' -Url $itemUrl -Name $itemName -Message $_.Exception.Message
             }
         }
     }
@@ -643,7 +642,7 @@ function Export-WebPermissionInventory {
     }
     catch {
         Write-Warning ("Failed to inventory web permissions '{0}': {1}" -f $Web.Url, $_.Exception.Message)
-        Write-InventoryError -Scope 'Web' -Url $Web.Url -Name $Web.Title -Message $_.Exception.Message
+        Stop-InventoryAfterError -Scope 'Web' -Url $Web.Url -Name $Web.Title -Message $_.Exception.Message
     }
 
     try {
@@ -651,8 +650,7 @@ function Export-WebPermissionInventory {
     }
     catch {
         Write-Warning ("Failed to enumerate lists for web '{0}': {1}" -f $Web.Url, $_.Exception.Message)
-        Write-InventoryError -Scope 'WebLists' -Url $Web.Url -Name $Web.Title -Message $_.Exception.Message
-        return
+        Stop-InventoryAfterError -Scope 'WebLists' -Url $Web.Url -Name $Web.Title -Message $_.Exception.Message
     }
 
     foreach ($list in $lists) {
@@ -703,7 +701,7 @@ function Export-WebPermissionInventory {
         }
         catch {
             Write-Warning ("Failed to inventory list permissions '{0}' in web '{1}': {2}" -f $listTitle, $Web.Url, $_.Exception.Message)
-            Write-InventoryError -Scope 'List' -Url $listUrl -Name $listTitle -Message $_.Exception.Message
+            Stop-InventoryAfterError -Scope 'List' -Url $listUrl -Name $listTitle -Message $_.Exception.Message
         }
     }
 }
@@ -849,6 +847,18 @@ function Write-InventoryError {
     }
 }
 
+function Stop-InventoryAfterError {
+    param(
+        [string]$Scope,
+        [string]$Url,
+        [string]$Name,
+        [string]$Message
+    )
+
+    Write-InventoryError -Scope $Scope -Url $Url -Name $Name -Message $Message
+    throw ("Permission inventory stopped after {0} error at '{1}'. Final CSV was not published. Details: {2}" -f $Scope, $Url, $Message)
+}
+
 Add-SharePointSnapIn
 
 $script:UseSiteUrlFilter = $UseSiteUrlFilter -or (-not [string]::IsNullOrWhiteSpace($SiteUrlsFile))
@@ -952,7 +962,7 @@ try {
                 }
                 catch {
                     Write-Warning ("Failed to inventory site collection permissions '{0}': {1}" -f $site.Url, $_.Exception.Message)
-                    Write-InventoryError -Scope 'SiteCollection' -Url $site.Url -Name $site.Url -Message $_.Exception.Message
+                    Stop-InventoryAfterError -Scope 'SiteCollection' -Url $site.Url -Name $site.Url -Message $_.Exception.Message
                 }
                 finally {
                     $site.Dispose()
@@ -1011,6 +1021,10 @@ try {
         Write-Warning "No permission rows were exported. The final permission CSV contains headers only."
     }
 
+    if ($script:ErrorCsvCreated) {
+        throw ("Permission inventory errors were recorded. Final CSV was not published. Error details: {0}" -f $ErrorPath)
+    }
+
     Move-Item -LiteralPath $TempOutputPath -Destination $OutputPath -Force
     $script:InventoryStopwatch.Stop()
     Write-Host ("Permission inventory completed: {0}" -f $OutputPath)
@@ -1029,6 +1043,10 @@ catch {
     }
     if (Test-Path -LiteralPath $TempOutputPath) {
         Write-Warning ("Permission inventory failed before final CSV publication. Partial temporary CSV kept: {0}" -f $TempOutputPath)
+    }
+    if (Test-Path -LiteralPath $OutputPath) {
+        Remove-Item -LiteralPath $OutputPath -Force
+        Write-Warning ("Removed incomplete final permission CSV: {0}" -f $OutputPath)
     }
     exit 1
 }

@@ -155,6 +155,22 @@ function Stop-LauncherTranscript {
     Add-TimestampToLogFile -Path $Path
 }
 
+function Open-DirectoryInExplorer {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    try {
+        $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+        Write-Info ("Opening comparison directory: {0}" -f $resolvedPath) Cyan
+        Start-Process -FilePath explorer.exe -ArgumentList ('"{0}"' -f $resolvedPath) | Out-Null
+    }
+    catch {
+        Write-Warning ("Could not open comparison directory '{0}': {1}" -f $Path, $_.Exception.Message)
+    }
+}
+
 function Get-SPOAuthConfig {
     $configPath = Join-Path -Path $ProjectRoot -ChildPath 'Config\SPOAuth.local.psd1'
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
@@ -457,6 +473,7 @@ function Invoke-FileComparison {
         )
 
         Write-Info ("File comparison completed: {0}" -f $outputDirectory) Green
+        Open-DirectoryInExplorer -Path $outputDirectory
     }
     finally {
         Stop-LauncherTranscript -Path $logPath
@@ -491,6 +508,7 @@ function Invoke-PermissionComparison {
         )
 
         Write-Info ("Permission comparison completed: {0}" -f $outputDirectory) Green
+        Open-DirectoryInExplorer -Path $outputDirectory
     }
     finally {
         Stop-LauncherTranscript -Path $logPath
@@ -519,6 +537,7 @@ function Invoke-SourceHistoryComparison {
 
     Write-Info ("Starting source history comparison for migration '{0}'" -f $Config.Name) Cyan
     & $scriptPath @parameters
+    Open-DirectoryInExplorer -Path $outputDirectory
 }
 
 switch ($Action) {
