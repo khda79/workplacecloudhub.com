@@ -938,6 +938,7 @@ if (Test-Path -LiteralPath $headerLogoPath -PathType Leaf) {
 $script:Lots = @()
 $script:SelectedLot = $null
 $script:LastSingleRunFolder = $null
+$script:LaunchedLotPaths = @{}
 
 function Add-Status {
     param(
@@ -1091,8 +1092,23 @@ function Get-LauncherOptionEnvironment {
     return $environment
 }
 
+function Test-LotAlreadyLaunched {
+    param([AllowNull()][object]$Lot)
+
+    return ($null -ne $Lot -and -not [string]::IsNullOrWhiteSpace($Lot.Path) -and $script:LaunchedLotPaths.ContainsKey($Lot.Path))
+}
+
+function Register-LotLaunch {
+    param([Parameter(Mandatory=$true)][object]$Lot)
+
+    $script:LaunchedLotPaths[$Lot.Path] = [pscustomobject]@{
+        Name      = $Lot.Name
+        StartedAt = Get-Date
+    }
+}
+
 function Get-LaunchableLotSummaries {
-    @($script:Lots | Where-Object { $_.DeviceCount -gt 0 -and $_.WrappersReady })
+    @($script:Lots | Where-Object { $_.DeviceCount -gt 0 -and $_.WrappersReady -and -not (Test-LotAlreadyLaunched -Lot $_) })
 }
 
 function Set-LotUiAvailability {
@@ -1115,8 +1131,10 @@ function Update-SelectedLotView {
 
     $controls.LotDeviceCountText.Text = [string]$script:SelectedLot.DeviceCount
     $controls.LotAdDomainText.Text = $script:SelectedLot.AdDomain
-    $controls.LotWrappersText.Text = if ($script:SelectedLot.WrappersReady) { 'Ready' } else { 'Missing' }
+    $alreadyLaunched = Test-LotAlreadyLaunched -Lot $script:SelectedLot
+    $controls.LotWrappersText.Text = if ($alreadyLaunched) { 'Launched' } elseif ($script:SelectedLot.WrappersReady) { 'Ready' } else { 'Missing' }
     Set-LotUiAvailability -Enabled $true
+    $controls.LaunchLotButton.IsEnabled = (-not $alreadyLaunched -and $script:SelectedLot.DeviceCount -gt 0 -and $script:SelectedLot.WrappersReady)
     Add-Status -Title 'Selected' -Message ("{0}: {1} device(s)." -f $script:SelectedLot.Name, $script:SelectedLot.DeviceCount)
 }
 
@@ -1160,7 +1178,14 @@ $controls.LaunchLotButton.Add_Click({
         if (-not $script:SelectedLot) { return }
         if ($script:SelectedLot.DeviceCount -le 0) { throw 'Selected LOT has no device in Computers.txt.' }
         if (-not $script:SelectedLot.WrappersReady) { throw 'Selected LOT wrappers are missing. Refresh wrappers first.' }
+        if (Test-LotAlreadyLaunched -Lot $script:SelectedLot) {
+            Add-Status -Title 'Skipped' -Message ("LOT {0} was already launched in this GUI session." -f $script:SelectedLot.Name)
+            Update-SelectedLotView
+            return
+        }
         Start-ToolkitLot -Lot $script:SelectedLot -Mode ([string]$controls.LotModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
+        Register-LotLaunch -Lot $script:SelectedLot
+        Update-SelectedLotView
         Add-Status -Title 'Launched' -Message ("Launched LOT {0}." -f $script:SelectedLot.Name)
     } catch {
         Show-GuiError $_.Exception.Message
@@ -1172,9 +1197,11 @@ $controls.LaunchAllButton.Add_Click({
         if ($lots.Count -eq 0) { throw 'No ready LOT with devices was found.' }
         foreach ($lot in $lots) {
             Start-ToolkitLot -Lot $lot -Mode ([string]$controls.LotModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
+            Register-LotLaunch -Lot $lot
             Add-Status -Title 'Launch all' -Message ("Launched {0}. Next LOT starts in {1}s." -f $lot.Name, $launchAllLotStartDelaySeconds)
             Wait-UiDelay -Seconds $launchAllLotStartDelaySeconds
         }
+        Refresh-LotList
         Add-Status -Title 'Launch all' -Message ("Launched {0} LOT(s)." -f $lots.Count)
     } catch {
         Show-GuiError $_.Exception.Message
