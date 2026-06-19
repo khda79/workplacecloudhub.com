@@ -14,7 +14,7 @@ param(
     [switch]$Gui,
     [switch]$Cli,
 
-    [ValidateSet('Audit', 'Preview', 'Apply', 'Restore')]
+    [ValidateSet('Audit', 'Preview', 'Launch', 'Apply', 'Restore')]
     [string]$Action = 'Audit',
 
     [ValidateSet('Auto', 'Citrix', 'AVD', 'WebOnly', 'Hybrid')]
@@ -62,7 +62,10 @@ function Write-SmartThinClientLog {
             Add-Content -LiteralPath $script:LogPath -Value $entry -Encoding UTF8
         }
         if ($script:CliMode -or $Level -eq 'ERROR') {
-            Write-Host $entry
+            $color = [ConsoleColor]::DarkGray
+            if ($Level -eq 'WARN') { $color = [ConsoleColor]::Yellow }
+            if ($Level -eq 'ERROR') { $color = [ConsoleColor]::Red }
+            Write-Host $entry -ForegroundColor $color
         }
     }
 }
@@ -94,6 +97,92 @@ function Read-JsonFile {
     $raw = Get-Content -Raw -LiteralPath $Path
     if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
     return $raw | ConvertFrom-Json
+}
+
+function Get-RuntimeJsonPathFromTemplate {
+    param([Parameter(Mandatory = $true)][string]$TemplatePath)
+
+    if ($TemplatePath -match '\.template\.json$') {
+        return ($TemplatePath -replace '\.template\.json$', '.json')
+    }
+    if ($TemplatePath -match '\.json\.template$') {
+        return ($TemplatePath -replace '\.template$', '')
+    }
+    return $null
+}
+
+function Ensure-JsonFromTemplate {
+    param(
+        [Parameter(Mandatory = $true)][string]$TemplatePath,
+        [string]$RuntimePath
+    )
+
+    if (-not (Test-Path -LiteralPath $TemplatePath)) { return $null }
+    if ([string]::IsNullOrWhiteSpace($RuntimePath)) {
+        $RuntimePath = Get-RuntimeJsonPathFromTemplate -TemplatePath $TemplatePath
+    }
+    if ([string]::IsNullOrWhiteSpace($RuntimePath)) { return $null }
+    if (Test-Path -LiteralPath $RuntimePath) { return $RuntimePath }
+
+    $runtimeDirectory = Split-Path -Parent $RuntimePath
+    if (-not [string]::IsNullOrWhiteSpace($runtimeDirectory)) {
+        New-Item -Path $runtimeDirectory -ItemType Directory -Force | Out-Null
+    }
+    Copy-Item -LiteralPath $TemplatePath -Destination $RuntimePath -Force:$false
+    Write-SmartThinClientLog -Message ("Created local JSON from template: {0}" -f $RuntimePath)
+    return $RuntimePath
+}
+
+function Merge-MissingJsonTemplateKeys {
+    param(
+        [Parameter(Mandatory = $true)][string]$TemplatePath,
+        [Parameter(Mandatory = $true)][string]$RuntimePath
+    )
+
+    if (-not (Test-Path -LiteralPath $TemplatePath)) { return }
+    if (-not (Test-Path -LiteralPath $RuntimePath)) { return }
+
+    $template = Read-JsonFile -Path $TemplatePath
+    $runtime = Read-JsonFile -Path $RuntimePath
+    if ($null -eq $template -or $null -eq $runtime) { return }
+
+    $runtimeTable = [ordered]@{}
+    foreach ($property in $runtime.PSObject.Properties) {
+        $runtimeTable[$property.Name] = $property.Value
+    }
+
+    $changed = $false
+    foreach ($property in $template.PSObject.Properties) {
+        if (-not $runtimeTable.Contains($property.Name)) {
+            $runtimeTable[$property.Name] = $property.Value
+            $changed = $true
+        }
+    }
+
+    if ($changed) {
+        ([pscustomobject]$runtimeTable) | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $RuntimePath -Encoding UTF8
+        Write-SmartThinClientLog -Message ("Added missing JSON keys from template: {0}" -f $RuntimePath)
+    }
+}
+
+function Initialize-LocalJsonFiles {
+    param([string]$DefaultConfigPath)
+
+    $templatePath = Join-Path $script:ScriptRoot 'SmartThinClient-Shell.config.template.json'
+    [void](Ensure-JsonFromTemplate -TemplatePath $templatePath -RuntimePath $DefaultConfigPath)
+    Merge-MissingJsonTemplateKeys -TemplatePath $templatePath -RuntimePath $DefaultConfigPath
+
+    $profileRoot = Join-Path $script:ScriptRoot 'Profiles'
+    if (Test-Path -LiteralPath $profileRoot) {
+        foreach ($profileTemplate in Get-ChildItem -LiteralPath $profileRoot -Filter '*.json.template' -File -ErrorAction SilentlyContinue) {
+            $runtimePath = Ensure-JsonFromTemplate -TemplatePath $profileTemplate.FullName
+            if ($runtimePath) { Merge-MissingJsonTemplateKeys -TemplatePath $profileTemplate.FullName -RuntimePath $runtimePath }
+        }
+        foreach ($profileTemplate in Get-ChildItem -LiteralPath $profileRoot -Filter '*.template.json' -File -ErrorAction SilentlyContinue) {
+            $runtimePath = Ensure-JsonFromTemplate -TemplatePath $profileTemplate.FullName
+            if ($runtimePath) { Merge-MissingJsonTemplateKeys -TemplatePath $profileTemplate.FullName -RuntimePath $runtimePath }
+        }
+    }
 }
 
 function Convert-ObjectToHashtable {
@@ -180,6 +269,18 @@ function Resolve-Config {
         AvdClientPath = ''
         WindowsAppPackageName = 'MicrosoftCorporationII.Windows365'
         WindowsAppLaunchUri = ''
+        PreferredAccessMode = 'Web'
+        UseWebShell = $true
+        CitrixWebUrl = ''
+        AvdWebUrl = ''
+        WebShellPreferredProvider = 'Citrix'
+        WebShellTitle = 'Smart ThinClient'
+        WebShellHomeUrl = ''
+        WebShellShowProviderButtons = $true
+        WebShellAllowExternalBrowser = $true
+        WebShellAllowPowerControls = $true
+        WebShellAllowLimitedSettings = $true
+        WebShellAllowedSettingsPages = @('ms-settings:network-status', 'ms-settings:display', 'ms-settings:sound', 'ms-settings:dateandtime')
         WebOnlyUrl = ''
         PreferredWorkspaceUrl = ''
         FallbackWebUrl = ''
@@ -205,6 +306,7 @@ function Resolve-Config {
     $defaultConfigPath = Join-Path $script:ScriptRoot 'SmartThinClient-Shell.config.json'
     $effectivePath = $ConfigPath
     if ([string]::IsNullOrWhiteSpace($effectivePath)) { $effectivePath = $defaultConfigPath }
+    Initialize-LocalJsonFiles -DefaultConfigPath $defaultConfigPath
 
     $config = [ordered]@{}
     foreach ($key in $defaults.Keys) { $config[$key] = $defaults[$key] }
@@ -224,20 +326,37 @@ function Resolve-Config {
     return $config
 }
 
+function Resolve-WritableOutputRoot {
+    param([Parameter(Mandatory = $true)][string[]]$CandidateRoots)
+
+    $seen = @{}
+    foreach ($candidateRoot in $CandidateRoots) {
+        if ([string]::IsNullOrWhiteSpace($candidateRoot)) { continue }
+        if ($seen.ContainsKey($candidateRoot)) { continue }
+        $seen[$candidateRoot] = $true
+
+        try {
+            New-Item -Path $candidateRoot -ItemType Directory -Force | Out-Null
+            $probe = Join-Path $candidateRoot ('.write-test-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+            Set-Content -LiteralPath $probe -Value 'test' -Encoding ASCII
+            Remove-Item -LiteralPath $probe -Force
+            return $candidateRoot
+        }
+        catch {
+            Write-SmartThinClientLog -Level 'WARN' -Message ("Output root unavailable: {0}. {1}" -f $candidateRoot, $_.Exception.Message)
+        }
+    }
+
+    throw 'No writable output root was found for logs and evidence.'
+}
+
 function Initialize-Output {
     param([Parameter(Mandatory = $true)]$Config)
 
     $root = [string](Get-ConfigValue -Config $Config -Name 'OutputRoot' -Default 'C:\ProgramData\SmartThinClient\Shell')
-    try {
-        New-Item -Path $root -ItemType Directory -Force | Out-Null
-        $probe = Join-Path $root ('.write-test-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
-        Set-Content -LiteralPath $probe -Value 'test' -Encoding ASCII
-        Remove-Item -LiteralPath $probe -Force
-    }
-    catch {
-        $root = Join-Path $env:LOCALAPPDATA 'SmartThinClient\Shell'
-        New-Item -Path $root -ItemType Directory -Force | Out-Null
-    }
+    $localAppDataRoot = Join-Path $env:LOCALAPPDATA 'SmartThinClient\Shell'
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) 'SmartThinClient\Shell'
+    $root = Resolve-WritableOutputRoot -CandidateRoots @($root, $localAppDataRoot, $tempRoot)
 
     $logRoot = Join-Path $root 'Logs'
     $outputRoot = Join-Path $root 'Output'
@@ -529,6 +648,10 @@ function Invoke-ThinClientAudit {
         AvdClassicClientPath = $avd.ClassicClientPath
         WindowsAppPackage = $avd.WindowsAppPackage
         WindowsAppVersion = $avd.WindowsAppVersion
+        PreferredAccessMode = [string](Get-ConfigValue -Config $Config -Name 'PreferredAccessMode' -Default 'Web')
+        UseWebShell = [bool](Get-ConfigValue -Config $Config -Name 'UseWebShell' -Default $true)
+        CitrixWebUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'CitrixWebUrl' -Default ''))
+        AvdWebUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'AvdWebUrl' -Default ''))
         BrowserInstalled = $browser.Installed
         BrowserPath = $browser.Path
         WebOnlyUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'WebOnlyUrl' -Default ''))
@@ -567,6 +690,7 @@ function Convert-AuditToText {
         'EditionId', 'RequestedProfile', 'EffectiveProfile', 'ShellMode', 'TargetUserMode',
         'TargetUserName', 'TargetUserExists', 'CitrixWorkspaceInstalled', 'CitrixWorkspacePath',
         'AvdClientInstalled', 'AvdClassicClientPath', 'WindowsAppPackage', 'BrowserInstalled',
+        'PreferredAccessMode', 'UseWebShell', 'CitrixWebUrlConfigured', 'AvdWebUrlConfigured',
         'BrowserPath', 'AssignedAccessCmdletAvailable', 'ShellLauncherClassAvailable',
         'AllowApply', 'AllowRestore', 'LogPath', 'EvidenceJsonPath', 'EvidenceCsvPath'
     )) {
@@ -578,9 +702,261 @@ function Convert-AuditToText {
     return ($lines -join [Environment]::NewLine)
 }
 
+function Get-ResultValue {
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Default = $null
+    )
+
+    $property = $Result.PSObject.Properties[$Name]
+    if ($property -and $null -ne $property.Value) { return $property.Value }
+    return $Default
+}
+
+function ConvertTo-ResultBoolean {
+    param($Value)
+
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [bool]) { return $Value }
+    return ([string]$Value).Trim().ToLowerInvariant() -in @('true', '1', 'yes')
+}
+
+function Test-ResultHasText {
+    param($Value)
+    return -not [string]::IsNullOrWhiteSpace([string]$Value)
+}
+
+function New-CliStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$State,
+        [Parameter(Mandatory = $true)][string]$Detail,
+        [Parameter(Mandatory = $true)][ConsoleColor]$Color
+    )
+
+    return [pscustomobject]([ordered]@{
+        Name = $Name
+        State = $State
+        Detail = $Detail
+        Color = $Color
+    })
+}
+
+function Write-CliText {
+    param(
+        [string]$Text = '',
+        [ConsoleColor]$Color = [ConsoleColor]::Gray
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        Write-Host ''
+    }
+    else {
+        Write-Host $Text -ForegroundColor $Color
+    }
+}
+
+function Write-CliSection {
+    param([Parameter(Mandatory = $true)][string]$Title)
+
+    Write-CliText ''
+    Write-CliText $Title -Color Cyan
+    Write-CliText ('-' * $Title.Length) -Color DarkCyan
+}
+
+function Get-ThinClientCliStatuses {
+    param([Parameter(Mandatory = $true)]$Result)
+
+    $statuses = New-Object System.Collections.Generic.List[object]
+
+    $preferredAccessMode = [string](Get-ResultValue -Result $Result -Name 'PreferredAccessMode' -Default 'Web')
+    $useWebShell = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'UseWebShell' -Default $true)
+    $browserInstalled = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'BrowserInstalled' -Default $false)
+
+    $citrixInstalled = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'CitrixWorkspaceInstalled' -Default $false)
+    $citrixWebConfigured = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'CitrixWebUrlConfigured' -Default $false)
+    $citrixPath = [string](Get-ResultValue -Result $Result -Name 'CitrixWorkspacePath' -Default '')
+    if ($preferredAccessMode -eq 'Web' -and $useWebShell -and $browserInstalled -and $citrixWebConfigured) {
+        $statuses.Add((New-CliStatus -Name 'Citrix Web' -State 'READY' -Detail 'Citrix web portal is configured for the integrated thin-client shell.' -Color Green))
+    }
+    elseif ($preferredAccessMode -eq 'Web' -and $useWebShell -and $citrixWebConfigured) {
+        $statuses.Add((New-CliStatus -Name 'Citrix Web' -State 'PARTIAL' -Detail 'Citrix web portal is configured, but no supported browser was detected.' -Color Yellow))
+    }
+    elseif ($citrixInstalled) {
+        $statuses.Add((New-CliStatus -Name 'Citrix' -State 'READY' -Detail ("Workspace found: {0}" -f $citrixPath) -Color Green))
+    }
+    else {
+        $statuses.Add((New-CliStatus -Name 'Citrix' -State 'NOT READY' -Detail 'Citrix web URL and Citrix Workspace were not found.' -Color Red))
+    }
+
+    $avdInstalled = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'AvdClientInstalled' -Default $false)
+    $avdWebConfigured = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'AvdWebUrlConfigured' -Default $false)
+    $avdPath = [string](Get-ResultValue -Result $Result -Name 'AvdClassicClientPath' -Default '')
+    $windowsAppPackage = Get-ResultValue -Result $Result -Name 'WindowsAppPackage' -Default ''
+    if ($preferredAccessMode -eq 'Web' -and $useWebShell -and $browserInstalled -and $avdWebConfigured) {
+        $statuses.Add((New-CliStatus -Name 'AVD Web' -State 'READY' -Detail 'AVD web portal is configured for the integrated thin-client shell.' -Color Green))
+    }
+    elseif ($preferredAccessMode -eq 'Web' -and $useWebShell -and $avdWebConfigured) {
+        $statuses.Add((New-CliStatus -Name 'AVD Web' -State 'PARTIAL' -Detail 'AVD web portal is configured, but no supported browser was detected.' -Color Yellow))
+    }
+    elseif ($avdInstalled) {
+        $avdDetail = 'AVD client is installed.'
+        if (Test-ResultHasText $avdPath) { $avdDetail = "AVD client found: $avdPath" }
+        $statuses.Add((New-CliStatus -Name 'AVD' -State 'READY' -Detail $avdDetail -Color Green))
+    }
+    elseif (Test-ResultHasText $windowsAppPackage) {
+        $statuses.Add((New-CliStatus -Name 'AVD' -State 'READY' -Detail 'Windows App package was found.' -Color Green))
+    }
+    else {
+        $statuses.Add((New-CliStatus -Name 'AVD' -State 'NOT READY' -Detail 'AVD web URL, AVD client, or Windows App was not found.' -Color Red))
+    }
+
+    $browserPath = [string](Get-ResultValue -Result $Result -Name 'BrowserPath' -Default '')
+    $webUrlConfigured = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'WebOnlyUrlConfigured' -Default $false)
+    if ($browserInstalled -and $webUrlConfigured) {
+        $statuses.Add((New-CliStatus -Name 'WebOnly' -State 'READY' -Detail ("Browser and WebOnlyUrl are configured: {0}" -f $browserPath) -Color Green))
+    }
+    elseif ($browserInstalled) {
+        $statuses.Add((New-CliStatus -Name 'WebOnly' -State 'PARTIAL' -Detail 'Browser found, but WebOnlyUrl is not configured.' -Color Yellow))
+    }
+    else {
+        $statuses.Add((New-CliStatus -Name 'WebOnly' -State 'NOT READY' -Detail 'No supported browser was found.' -Color Red))
+    }
+
+    $assignedAccess = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'AssignedAccessCmdletAvailable' -Default $false)
+    $shellLauncher = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'ShellLauncherClassAvailable' -Default $false)
+    if ($assignedAccess -and $shellLauncher) {
+        $statuses.Add((New-CliStatus -Name 'Kiosk / Lockdown' -State 'READY' -Detail 'Assigned Access and Shell Launcher are available.' -Color Green))
+    }
+    elseif ($assignedAccess -or $shellLauncher) {
+        $detail = 'Partial kiosk capability.'
+        if ($assignedAccess) { $detail = 'Assigned Access is available; Shell Launcher is not available.' }
+        if ($shellLauncher) { $detail = 'Shell Launcher is available; Assigned Access cmdlet is not available.' }
+        $statuses.Add((New-CliStatus -Name 'Kiosk / Lockdown' -State 'PARTIAL' -Detail $detail -Color Yellow))
+    }
+    else {
+        $statuses.Add((New-CliStatus -Name 'Kiosk / Lockdown' -State 'LIMITED' -Detail 'Assigned Access and Shell Launcher were not detected.' -Color Yellow))
+    }
+
+    $isAdmin = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'IsAdministrator' -Default $false)
+    $allowApply = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'AllowApply' -Default $false)
+    if (-not $allowApply) {
+        $statuses.Add((New-CliStatus -Name 'Apply' -State 'BLOCKED' -Detail 'AllowApply is false in the configuration.' -Color Yellow))
+    }
+    elseif (-not $isAdmin) {
+        $statuses.Add((New-CliStatus -Name 'Apply' -State 'NEEDS ADMIN' -Detail 'Run PowerShell as administrator to apply thin-client mode.' -Color Yellow))
+    }
+    else {
+        $statuses.Add((New-CliStatus -Name 'Apply' -State 'AVAILABLE' -Detail 'Requires the confirmation phrase before changing the PC.' -Color Green))
+    }
+
+    $allowRestore = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'AllowRestore' -Default $false)
+    if (-not $allowRestore) {
+        $statuses.Add((New-CliStatus -Name 'Restore' -State 'BLOCKED' -Detail 'AllowRestore is false in the configuration.' -Color Yellow))
+    }
+    elseif (-not $isAdmin) {
+        $statuses.Add((New-CliStatus -Name 'Restore' -State 'NEEDS ADMIN' -Detail 'Run PowerShell as administrator to restore Windows shell settings.' -Color Yellow))
+    }
+    else {
+        $statuses.Add((New-CliStatus -Name 'Restore' -State 'AVAILABLE' -Detail 'Uses the latest rollback file unless -RollbackPath is provided.' -Color Green))
+    }
+
+    return $statuses
+}
+
+function Get-ThinClientFinalMessage {
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [Parameter(Mandatory = $true)]$Statuses
+    )
+
+    $status = [string](Get-ResultValue -Result $Result -Name 'Status' -Default '')
+    if ($status -eq 'Applied') {
+        return (New-CliStatus -Name 'FINAL RESULT' -State 'APPLIED' -Detail 'Thin-client launcher and configured endpoint restrictions were applied.' -Color Green)
+    }
+    if ($status -eq 'Restored') {
+        return (New-CliStatus -Name 'FINAL RESULT' -State 'RESTORED' -Detail 'Windows shell settings were restored from rollback evidence.' -Color Green)
+    }
+    if ($status -eq 'Launched') {
+        return (New-CliStatus -Name 'FINAL RESULT' -State 'LAUNCHED' -Detail 'Temporary thin-client launcher was opened without installing or locking down Windows.' -Color Green)
+    }
+
+    $profile = [string](Get-ResultValue -Result $Result -Name 'EffectiveProfile' -Default 'Auto')
+    $workspaceNames = @('Citrix Web', 'AVD Web', 'Citrix', 'AVD', 'WebOnly')
+    $readyNames = @($Statuses | Where-Object { $_.Name -in $workspaceNames -and $_.State -eq 'READY' } | ForEach-Object { $_.Name })
+    $partialNames = @($Statuses | Where-Object { $_.Name -in $workspaceNames -and $_.State -eq 'PARTIAL' } | ForEach-Object { $_.Name })
+
+    if ($readyNames.Count -gt 0) {
+        $detail = ('Ready workspace path: {0}. Effective profile: {1}.' -f ($readyNames -join ', '), $profile)
+        if ($partialNames.Count -gt 0) { $detail += (' Partial: {0}.' -f ($partialNames -join ', ')) }
+        return (New-CliStatus -Name 'FINAL RESULT' -State 'PREVIEW OK' -Detail $detail -Color Green)
+    }
+
+    if ($partialNames.Count -gt 0) {
+        return (New-CliStatus -Name 'FINAL RESULT' -State 'PARTIAL' -Detail ('Only partial workspace readiness was detected: {0}.' -f ($partialNames -join ', ')) -Color Yellow)
+    }
+
+    return (New-CliStatus -Name 'FINAL RESULT' -State 'NOT READY' -Detail 'Install/configure Citrix Workspace, AVD/Windows App, or a WebOnlyUrl before applying thin-client mode.' -Color Red)
+}
+
+function Write-ThinClientCliSummary {
+    param([Parameter(Mandatory = $true)]$Result)
+
+    $requestedAction = [string](Get-ResultValue -Result $Result -Name 'RequestedAction' -Default $Action)
+    $requestedProfile = [string](Get-ResultValue -Result $Result -Name 'RequestedProfile' -Default $Profile)
+    $resultStatus = [string](Get-ResultValue -Result $Result -Name 'Status' -Default '')
+    $effectiveProfile = [string](Get-ResultValue -Result $Result -Name 'EffectiveProfile' -Default '')
+    if ([string]::IsNullOrWhiteSpace($effectiveProfile)) { $effectiveProfile = 'n/a' }
+
+    Write-CliText ''
+    Write-CliText 'Smart ThinClient Shell' -Color Cyan
+    Write-CliText '======================' -Color DarkCyan
+    Write-CliText ('Action: {0}    Status: {1}' -f $requestedAction, $resultStatus)
+    Write-CliText ('Computer: {0}    User: {1}    Admin: {2}' -f (Get-ResultValue -Result $Result -Name 'ComputerName' -Default $env:COMPUTERNAME), (Get-ResultValue -Result $Result -Name 'UserName' -Default [Environment]::UserName), (Get-ResultValue -Result $Result -Name 'IsAdministrator' -Default 'n/a'))
+    Write-CliText ('Profile: requested={0}    effective={1}' -f $requestedProfile, $effectiveProfile)
+
+    $statuses = @()
+    if ($resultStatus -in @('Applied', 'Restored', 'Launched')) {
+        Write-CliSection -Title 'Operation'
+        foreach ($name in @('LauncherPath', 'LauncherCommand', 'RollbackPath')) {
+            $value = Get-ResultValue -Result $Result -Name $name -Default ''
+            if (Test-ResultHasText $value) {
+                Write-CliText ('{0}: {1}' -f $name, $value)
+            }
+        }
+    }
+    else {
+        $statuses = @(Get-ThinClientCliStatuses -Result $Result)
+        Write-CliSection -Title 'Readiness'
+        foreach ($item in $statuses) {
+            Write-Host ('{0,-17} ' -f $item.Name) -NoNewline -ForegroundColor White
+            Write-Host ('{0,-11} ' -f $item.State) -NoNewline -ForegroundColor $item.Color
+            Write-Host $item.Detail -ForegroundColor Gray
+        }
+    }
+
+    $final = Get-ThinClientFinalMessage -Result $Result -Statuses $statuses
+    Write-CliSection -Title 'Final message'
+    Write-Host ('{0}: ' -f $final.Name) -NoNewline -ForegroundColor White
+    Write-Host ('{0} - ' -f $final.State) -NoNewline -ForegroundColor $final.Color
+    Write-Host $final.Detail -ForegroundColor Gray
+
+    Write-CliSection -Title 'Evidence'
+    Write-CliText ('JSON: {0}' -f (Get-ResultValue -Result $Result -Name 'EvidenceJsonPath' -Default 'n/a')) -Color DarkGray
+    Write-CliText ('CSV : {0}' -f (Get-ResultValue -Result $Result -Name 'EvidenceCsvPath' -Default 'n/a')) -Color DarkGray
+    Write-CliText ('Log : {0}' -f (Get-ResultValue -Result $Result -Name 'LogPath' -Default 'n/a')) -Color DarkGray
+}
+
 function Get-LauncherCommandLine {
     $launcherPath = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
     return ('powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $launcherPath)
+}
+
+function ConvertTo-QuotedPowerShellString {
+    param([string]$Value)
+    if ($null -eq $Value) { $Value = '' }
+    return "'{0}'" -f ($Value -replace "'", "''")
 }
 
 function New-LauncherScript {
@@ -597,16 +973,64 @@ function New-LauncherScript {
     $citrixPath = [string]$Audit.CitrixWorkspacePath
     $avdPath = [string]$Audit.AvdClassicClientPath
     $browserPath = [string]$Audit.BrowserPath
+    $citrixWebUrl = [string](Get-ConfigValue -Config $Config -Name 'CitrixWebUrl' -Default '')
+    if ([string]::IsNullOrWhiteSpace($citrixWebUrl)) { $citrixWebUrl = [string](Get-ConfigValue -Config $Config -Name 'WorkspaceUrl' -Default '') }
+    if ([string]::IsNullOrWhiteSpace($citrixWebUrl)) { $citrixWebUrl = [string](Get-ConfigValue -Config $Config -Name 'StoreUrl' -Default '') }
+    $avdWebUrl = [string](Get-ConfigValue -Config $Config -Name 'AvdWebUrl' -Default '')
+    if ([string]::IsNullOrWhiteSpace($avdWebUrl)) { $avdWebUrl = [string](Get-ConfigValue -Config $Config -Name 'FeedUrl' -Default '') }
     $webUrl = [string](Get-ConfigValue -Config $Config -Name 'WebOnlyUrl' -Default '')
+    if ([string]::IsNullOrWhiteSpace($webUrl)) { $webUrl = [string](Get-ConfigValue -Config $Config -Name 'WebShellHomeUrl' -Default '') }
     if ([string]::IsNullOrWhiteSpace($webUrl)) { $webUrl = [string](Get-ConfigValue -Config $Config -Name 'FallbackWebUrl' -Default '') }
     $windowsAppUri = [string](Get-ConfigValue -Config $Config -Name 'WindowsAppLaunchUri' -Default '')
     $browserKiosk = [bool](Get-ConfigValue -Config $Config -Name 'BrowserKioskMode' -Default $false)
+    $useWebShell = [bool](Get-ConfigValue -Config $Config -Name 'UseWebShell' -Default $true)
+    $preferredAccessMode = [string](Get-ConfigValue -Config $Config -Name 'PreferredAccessMode' -Default 'Web')
+    $webShellTitle = [string](Get-ConfigValue -Config $Config -Name 'WebShellTitle' -Default 'Smart ThinClient')
+    $showProviderButtons = [bool](Get-ConfigValue -Config $Config -Name 'WebShellShowProviderButtons' -Default $true)
+    $allowExternalBrowser = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowExternalBrowser' -Default $true)
+    $allowPowerControls = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowPowerControls' -Default $true)
+    $allowLimitedSettings = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowLimitedSettings' -Default $true)
     $hybridDefault = [string](Get-ConfigValue -Config $Config -Name 'HybridDefaultProvider' -Default 'Citrix')
+    $webShellPreferredProvider = [string](Get-ConfigValue -Config $Config -Name 'WebShellPreferredProvider' -Default '')
+    if ($webShellPreferredProvider -in @('Citrix', 'AVD', 'WebOnly')) { $hybridDefault = $webShellPreferredProvider }
     $hybridSelection = [bool](Get-ConfigValue -Config $Config -Name 'HybridSelectionAtStartup' -Default $true)
+    $settingsPages = @(Get-ConfigValue -Config $Config -Name 'WebShellAllowedSettingsPages' -Default @('ms-settings:network-status', 'ms-settings:display', 'ms-settings:sound', 'ms-settings:dateandtime')) |
+        ForEach-Object { [string]$_ } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    $citrixPathLiteral = ConvertTo-QuotedPowerShellString -Value $citrixPath
+    $avdPathLiteral = ConvertTo-QuotedPowerShellString -Value $avdPath
+    $browserPathLiteral = ConvertTo-QuotedPowerShellString -Value $browserPath
+    $citrixWebUrlLiteral = ConvertTo-QuotedPowerShellString -Value $citrixWebUrl
+    $avdWebUrlLiteral = ConvertTo-QuotedPowerShellString -Value $avdWebUrl
+    $webUrlLiteral = ConvertTo-QuotedPowerShellString -Value $webUrl
+    $windowsAppUriLiteral = ConvertTo-QuotedPowerShellString -Value $windowsAppUri
+    $webShellTitleLiteral = ConvertTo-QuotedPowerShellString -Value $webShellTitle
+    $hybridDefaultLiteral = ConvertTo-QuotedPowerShellString -Value $hybridDefault
+    $settingsPagesLiteral = '@({0})' -f (($settingsPages | ForEach-Object { ConvertTo-QuotedPowerShellString -Value $_ }) -join ', ')
 
     $content = @"
 param([ValidateSet('Citrix','AVD','WebOnly','Hybrid')][string]`$Profile = '$EffectiveProfile')
 `$ErrorActionPreference = 'SilentlyContinue'
+
+`$CitrixPath = $citrixPathLiteral
+`$AvdPath = $avdPathLiteral
+`$BrowserPath = $browserPathLiteral
+`$CitrixWebUrl = $citrixWebUrlLiteral
+`$AvdWebUrl = $avdWebUrlLiteral
+`$WebOnlyUrl = $webUrlLiteral
+`$WindowsAppUri = $windowsAppUriLiteral
+`$WebShellTitle = $webShellTitleLiteral
+`$SettingsPages = $settingsPagesLiteral
+`$BrowserKioskMode = [bool]::Parse('$browserKiosk')
+`$UseWebShell = [bool]::Parse('$useWebShell')
+`$PreferredAccessMode = '$preferredAccessMode'
+`$ShowProviderButtons = [bool]::Parse('$showProviderButtons')
+`$AllowExternalBrowser = [bool]::Parse('$allowExternalBrowser')
+`$AllowPowerControls = [bool]::Parse('$allowPowerControls')
+`$AllowLimitedSettings = [bool]::Parse('$allowLimitedSettings')
+`$HybridSelectionAtStartup = [bool]::Parse('$hybridSelection')
+`$HybridDefaultProvider = $hybridDefaultLiteral
 
 function Start-WorkspaceProcess {
     param([string]`$FilePath, [string]`$Arguments)
@@ -616,16 +1040,40 @@ function Start-WorkspaceProcess {
     return `$true
 }
 
+function Show-LauncherNotice {
+    param([string]`$Message)
+    Add-Type -AssemblyName PresentationFramework
+    [System.Windows.MessageBox]::Show(`$Message, 'Smart ThinClient Shell', 'OK', 'Information') | Out-Null
+}
+
+function Get-ProviderUrl {
+    param([string]`$Provider)
+    switch (`$Provider) {
+        'Citrix' {
+            if (-not [string]::IsNullOrWhiteSpace(`$CitrixWebUrl)) { return `$CitrixWebUrl }
+            return `$WebOnlyUrl
+        }
+        'AVD' {
+            if (-not [string]::IsNullOrWhiteSpace(`$AvdWebUrl)) { return `$AvdWebUrl }
+            return `$WebOnlyUrl
+        }
+        default { return `$WebOnlyUrl }
+    }
+}
+
 function Start-WebWorkspace {
-    `$browser = '$browserPath'
-    `$url = '$webUrl'
-    if ([string]::IsNullOrWhiteSpace(`$url)) { return }
-    if (-not [string]::IsNullOrWhiteSpace(`$browser) -and (Test-Path -LiteralPath `$browser)) {
-        if ('$browserKiosk' -eq 'True') {
-            Start-Process -FilePath `$browser -ArgumentList @('--kiosk', `$url, '--edge-kiosk-type=fullscreen')
+    param([string]`$Provider = 'WebOnly')
+    `$url = Get-ProviderUrl -Provider `$Provider
+    if ([string]::IsNullOrWhiteSpace(`$url)) {
+        Show-LauncherNotice "No web URL is configured for `$Provider. Nothing was installed or changed."
+        return
+    }
+    if (-not [string]::IsNullOrWhiteSpace(`$BrowserPath) -and (Test-Path -LiteralPath `$BrowserPath)) {
+        if (`$BrowserKioskMode) {
+            Start-Process -FilePath `$BrowserPath -ArgumentList @('--kiosk', `$url, '--edge-kiosk-type=fullscreen')
         }
         else {
-            Start-Process -FilePath `$browser -ArgumentList `$url
+            Start-Process -FilePath `$BrowserPath -ArgumentList `$url
         }
     }
     else {
@@ -634,31 +1082,202 @@ function Start-WebWorkspace {
 }
 
 function Start-CitrixWorkspace {
-    if (Start-WorkspaceProcess -FilePath '$citrixPath' -Arguments '') { return }
-    Start-WebWorkspace
+    if (`$PreferredAccessMode -eq 'Native' -and (Start-WorkspaceProcess -FilePath `$CitrixPath -Arguments '')) { return }
+    Start-WebWorkspace -Provider 'Citrix'
 }
 
 function Start-AvdWorkspace {
-    if (Start-WorkspaceProcess -FilePath '$avdPath' -Arguments '') { return }
-    if (-not [string]::IsNullOrWhiteSpace('$windowsAppUri')) { Start-Process '$windowsAppUri'; return }
-    Start-WebWorkspace
+    if (`$PreferredAccessMode -eq 'Native' -and (Start-WorkspaceProcess -FilePath `$AvdPath -Arguments '')) { return }
+    if (`$PreferredAccessMode -eq 'Native' -and -not [string]::IsNullOrWhiteSpace(`$WindowsAppUri)) { Start-Process `$WindowsAppUri; return }
+    Start-WebWorkspace -Provider 'AVD'
+}
+
+function Open-ExternalBrowser {
+    param([string]`$Url)
+    if ([string]::IsNullOrWhiteSpace(`$Url)) {
+        Show-LauncherNotice 'No web URL is configured.'
+        return
+    }
+    if (-not [string]::IsNullOrWhiteSpace(`$BrowserPath) -and (Test-Path -LiteralPath `$BrowserPath)) {
+        Start-Process -FilePath `$BrowserPath -ArgumentList `$Url
+    }
+    else {
+        Start-Process `$Url
+    }
 }
 
 function Select-HybridProvider {
-    if ('$hybridSelection' -ne 'True') { return '$hybridDefault' }
+    if (-not `$HybridSelectionAtStartup) { return `$HybridDefaultProvider }
+    return 'Hybrid'
+}
+
+function Show-LimitedSettings {
     Add-Type -AssemblyName PresentationFramework
-    `$result = [System.Windows.MessageBox]::Show('Open Citrix? Choose No for Azure Virtual Desktop, Cancel for Web only.','Smart ThinClient Shell','YesNoCancel','Question')
-    if (`$result -eq 'Yes') { return 'Citrix' }
-    if (`$result -eq 'No') { return 'AVD' }
-    return 'WebOnly'
+    `$menu = New-Object System.Windows.Window
+    `$menu.Title = 'Smart ThinClient Settings'
+    `$menu.Width = 420
+    `$menu.Height = 300
+    `$menu.WindowStartupLocation = 'CenterScreen'
+    `$menu.ResizeMode = 'NoResize'
+    `$panel = New-Object System.Windows.Controls.StackPanel
+    `$panel.Margin = '18'
+    `$title = New-Object System.Windows.Controls.TextBlock
+    `$title.Text = 'Limited settings'
+    `$title.FontSize = 22
+    `$title.FontWeight = 'SemiBold'
+    `$title.Margin = '0,0,0,12'
+    `$panel.Children.Add(`$title) | Out-Null
+    `$labels = @{
+        'ms-settings:network-status' = 'Network'
+        'ms-settings:display' = 'Display'
+        'ms-settings:sound' = 'Sound'
+        'ms-settings:dateandtime' = 'Date and time'
+        'ms-settings:printers' = 'Printers'
+        'ms-settings:bluetooth' = 'Bluetooth'
+    }
+    foreach (`$page in `$SettingsPages) {
+        `$button = New-Object System.Windows.Controls.Button
+        `$button.Height = 36
+        `$button.Margin = '0,0,0,8'
+        `$button.HorizontalContentAlignment = 'Left'
+        `$button.Padding = '12,0'
+        `$button.Content = if (`$labels.ContainsKey(`$page)) { `$labels[`$page] } else { `$page }
+        `$button.Tag = `$page
+        `$button.Add_Click({ Start-Process ([string]`$this.Tag) })
+        `$panel.Children.Add(`$button) | Out-Null
+    }
+    `$close = New-Object System.Windows.Controls.Button
+    `$close.Height = 34
+    `$close.Margin = '0,8,0,0'
+    `$close.Content = 'Close'
+    `$close.Add_Click({ `$menu.Close() })
+    `$panel.Children.Add(`$close) | Out-Null
+    `$menu.Content = `$panel
+    `$menu.ShowDialog() | Out-Null
+}
+
+function Show-WebShell {
+    param([string]`$InitialProvider)
+
+    Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+    [xml]`$xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Smart ThinClient Shell" WindowStartupLocation="CenterScreen"
+        WindowState="Maximized" Background="#F5F8FB">
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="58"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="40"/>
+    </Grid.RowDefinitions>
+    <Border Grid.Row="0" Background="#1F2937" Padding="12,8">
+      <DockPanel LastChildFill="True">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button Name="BackButton" Content="Back" Width="78" Height="34" Margin="0,0,8,0"/>
+          <Button Name="RefreshButton" Content="Refresh" Width="82" Height="34" Margin="0,0,8,0"/>
+          <Button Name="ExternalButton" Content="Open browser" Width="112" Height="34" Margin="0,0,8,0"/>
+          <Button Name="SettingsButton" Content="Settings" Width="86" Height="34" Margin="0,0,8,0"/>
+          <Button Name="SignOutButton" Content="Sign out" Width="86" Height="34" Margin="0,0,8,0"/>
+          <Button Name="RestartButton" Content="Restart" Width="82" Height="34" Margin="0,0,8,0"/>
+          <Button Name="ShutdownButton" Content="Shutdown" Width="92" Height="34"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Name="TitleText" Text="Smart ThinClient" Foreground="White" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
+          <Button Name="CitrixButton" Content="Citrix Web" Width="98" Height="34" Margin="0,0,8,0"/>
+          <Button Name="AvdButton" Content="AVD Web" Width="90" Height="34" Margin="0,0,8,0"/>
+          <Button Name="WebOnlyButton" Content="Web" Width="72" Height="34"/>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+    <Border Grid.Row="1" Background="White" BorderBrush="#DDE7F0" BorderThickness="1,0,1,0">
+      <WebBrowser Name="WorkspaceBrowser"/>
+    </Border>
+    <Border Grid.Row="2" Background="#F8FBFE" BorderBrush="#DDE7F0" BorderThickness="1,1,1,0" Padding="10,0">
+      <TextBlock Name="StatusText" Text="Ready" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+    </Border>
+  </Grid>
+</Window>
+'@
+
+    `$reader = New-Object System.Xml.XmlNodeReader `$xaml
+    `$window = [Windows.Markup.XamlReader]::Load(`$reader)
+    `$browser = `$window.FindName('WorkspaceBrowser')
+    `$titleText = `$window.FindName('TitleText')
+    `$statusText = `$window.FindName('StatusText')
+    `$citrixButton = `$window.FindName('CitrixButton')
+    `$avdButton = `$window.FindName('AvdButton')
+    `$webOnlyButton = `$window.FindName('WebOnlyButton')
+    `$backButton = `$window.FindName('BackButton')
+    `$refreshButton = `$window.FindName('RefreshButton')
+    `$externalButton = `$window.FindName('ExternalButton')
+    `$settingsButton = `$window.FindName('SettingsButton')
+    `$signOutButton = `$window.FindName('SignOutButton')
+    `$restartButton = `$window.FindName('RestartButton')
+    `$shutdownButton = `$window.FindName('ShutdownButton')
+    `$script:CurrentUrl = ''
+
+    `$titleText.Text = `$WebShellTitle
+    if (-not `$ShowProviderButtons) {
+        `$citrixButton.Visibility = 'Collapsed'
+        `$avdButton.Visibility = 'Collapsed'
+        `$webOnlyButton.Visibility = 'Collapsed'
+    }
+    if (-not `$AllowExternalBrowser) { `$externalButton.Visibility = 'Collapsed' }
+    if (-not `$AllowLimitedSettings) { `$settingsButton.Visibility = 'Collapsed' }
+    if (-not `$AllowPowerControls) {
+        `$signOutButton.Visibility = 'Collapsed'
+        `$restartButton.Visibility = 'Collapsed'
+        `$shutdownButton.Visibility = 'Collapsed'
+    }
+
+    `$navigate = {
+        param([string]`$Provider)
+        `$script:CurrentProvider = `$Provider
+        `$url = Get-ProviderUrl -Provider `$Provider
+        if ([string]::IsNullOrWhiteSpace(`$url)) {
+            `$statusText.Text = "No web URL configured for `$Provider."
+            Show-LauncherNotice "No web URL is configured for `$Provider. Edit the local JSON configuration."
+            return
+        }
+        `$script:CurrentUrl = `$url
+        `$statusText.Text = "Opening `$Provider - `$url"
+        `$browser.Navigate(`$url)
+    }
+
+    `$citrixButton.Add_Click({ & `$navigate 'Citrix' })
+    `$avdButton.Add_Click({ & `$navigate 'AVD' })
+    `$webOnlyButton.Add_Click({ & `$navigate 'WebOnly' })
+    `$backButton.Add_Click({ if (`$browser.CanGoBack) { `$browser.GoBack() } })
+    `$refreshButton.Add_Click({ `$browser.Refresh() })
+    `$externalButton.Add_Click({ Open-ExternalBrowser -Url `$script:CurrentUrl })
+    `$settingsButton.Add_Click({ Show-LimitedSettings })
+    `$signOutButton.Add_Click({ shutdown.exe /l })
+    `$restartButton.Add_Click({
+        `$answer = [System.Windows.MessageBox]::Show('Restart this computer?', 'Smart ThinClient Shell', 'YesNo', 'Question')
+        if (`$answer -eq 'Yes') { shutdown.exe /r /t 0 }
+    })
+    `$shutdownButton.Add_Click({
+        `$answer = [System.Windows.MessageBox]::Show('Shut down this computer?', 'Smart ThinClient Shell', 'YesNo', 'Question')
+        if (`$answer -eq 'Yes') { shutdown.exe /s /t 0 }
+    })
+
+    if (`$InitialProvider -eq 'Hybrid') { `$InitialProvider = `$HybridDefaultProvider }
+    `$window.Add_ContentRendered({ & `$navigate `$InitialProvider })
+    `$window.ShowDialog() | Out-Null
 }
 
 if (`$Profile -eq 'Hybrid') { `$Profile = Select-HybridProvider }
-switch (`$Profile) {
-    'Citrix' { Start-CitrixWorkspace }
-    'AVD' { Start-AvdWorkspace }
-    'WebOnly' { Start-WebWorkspace }
-    default { Start-WebWorkspace }
+if (`$UseWebShell -and `$PreferredAccessMode -eq 'Web') {
+    Show-WebShell -InitialProvider `$Profile
+}
+else {
+    switch (`$Profile) {
+        'Citrix' { Start-CitrixWorkspace }
+        'AVD' { Start-AvdWorkspace }
+        'WebOnly' { Start-WebWorkspace -Provider 'WebOnly' }
+        default { Start-WebWorkspace -Provider 'WebOnly' }
+    }
 }
 "@
 
@@ -837,6 +1456,39 @@ function Invoke-ThinClientApply {
         EvidenceCsvPath = $script:EvidenceCsvPath
     })
     Export-Evidence -Evidence $result
+    return $result
+}
+
+function Invoke-ThinClientLaunchOnly {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $audit = Invoke-ThinClientAudit -Config $Config -RequestedProfile $Profile -RequestedAction 'Preview'
+    $effectiveProfile = [string]$audit.EffectiveProfile
+    $Config = Merge-ProfileConfig -Config $Config -EffectiveProfile $effectiveProfile
+    $launcherPath = New-LauncherScript -Config $Config -EffectiveProfile $effectiveProfile -Audit $audit
+    $launcherCommand = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Profile "{1}"' -f $launcherPath, $effectiveProfile)
+
+    Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -Profile "{1}"' -f $launcherPath, $effectiveProfile) | Out-Null
+
+    $result = [pscustomobject]([ordered]@{
+        AppName = $script:AppName
+        RunId = $script:RunId
+        ComputerName = $env:COMPUTERNAME
+        UserName = [Environment]::UserName
+        IsAdministrator = Test-IsAdministrator
+        RequestedAction = 'Launch'
+        RequestedProfile = $Profile
+        EffectiveProfile = $effectiveProfile
+        Status = 'Launched'
+        LauncherPath = $launcherPath
+        LauncherCommand = $launcherCommand
+        OutputRoot = $script:OutputRoot
+        LogPath = $script:LogPath
+        EvidenceJsonPath = $script:EvidenceJsonPath
+        EvidenceCsvPath = $script:EvidenceCsvPath
+    })
+    Export-Evidence -Evidence $result
+    Write-SmartThinClientLog -Message "Launch-only thin client opened. Launcher=$launcherPath"
     return $result
 }
 
@@ -1041,7 +1693,7 @@ try {
         'Audit' {
             if ($Cli) {
                 $audit = Invoke-ThinClientAudit -Config $config -RequestedProfile $Profile -RequestedAction 'Audit'
-                Write-Host (Convert-AuditToText -Audit $audit)
+                Write-ThinClientCliSummary -Result $audit
             }
             else {
                 Show-ThinClientGui -Config $config
@@ -1049,21 +1701,32 @@ try {
         }
         'Preview' {
             $audit = Invoke-ThinClientAudit -Config $config -RequestedProfile $Profile -RequestedAction 'Preview'
-            Write-Host (Convert-AuditToText -Audit $audit)
+            Write-ThinClientCliSummary -Result $audit
+        }
+        'Launch' {
+            $result = Invoke-ThinClientLaunchOnly -Config $config
+            Write-ThinClientCliSummary -Result $result
         }
         'Apply' {
             $result = Invoke-ThinClientApply -Config $config
-            Write-Host (Convert-AuditToText -Audit $result)
+            Write-ThinClientCliSummary -Result $result
         }
         'Restore' {
             $result = Invoke-ThinClientRestore -Config $config
-            Write-Host (Convert-AuditToText -Audit $result)
+            Write-ThinClientCliSummary -Result $result
         }
     }
     exit 0
 }
 catch {
     Write-SmartThinClientLog -Level 'ERROR' -Message $_.Exception.Message
+    if ($Cli) {
+        Write-CliSection -Title 'Final message'
+        Write-Host 'FINAL RESULT: ' -NoNewline -ForegroundColor White
+        Write-Host 'FAILED - ' -NoNewline -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Gray
+        if ($script:LogPath) { Write-CliText ("Log: {0}" -f $script:LogPath) -Color DarkGray }
+    }
     Write-Error $_.Exception.Message
     exit 1
 }
