@@ -1,7 +1,9 @@
 {
   "ProfileName": "WebOnly",
   "Provider": "Browser",
-  "LaunchMode": "Browser",
+  "LaunchMode": "WebShell",
+  "PreferredAccessMode": "Web",
+  "UseWebShell": true,
   "WebOnlyUrl": "",
   "BrowserPath": "",
   "BrowserKioskMode": true,

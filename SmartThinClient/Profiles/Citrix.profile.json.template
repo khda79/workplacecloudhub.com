@@ -1,7 +1,10 @@
 {
   "ProfileName": "Citrix",
   "Provider": "Citrix",
-  "LaunchMode": "WorkspaceApp",
+  "LaunchMode": "WebShell",
+  "PreferredAccessMode": "Web",
+  "UseWebShell": true,
+  "CitrixWebUrl": "",
   "WorkspaceUrl": "",
   "StoreUrl": "",
   "FallbackWebUrl": "",
