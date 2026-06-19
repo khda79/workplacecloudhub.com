@@ -20,8 +20,7 @@ the copied folder is `Migrations\Spain`, they run with `-MigrationName Spain`.
 Use `launchers\interactive\files` for file inventory/comparison,
 `launchers\interactive\permissions` for permission inventory/comparison, and
 the matching `launchers\scheduled-tasks\files` or
-`launchers\scheduled-tasks\permissions` folders for Windows Task Scheduler. The
-root `.cmd` files remain compatibility wrappers for existing shortcuts.
+`launchers\scheduled-tasks\permissions` folders for Windows Task Scheduler.
 If the repository copy is on a network share, configure scheduled tasks with
 `cmd.exe /d /c "\\server\share\...\launchers\scheduled-tasks\files\<launcher>.cmd"`
 and use UNC paths instead of mapped drives. The task account needs read/write
