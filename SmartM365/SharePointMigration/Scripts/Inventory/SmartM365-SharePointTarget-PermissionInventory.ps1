@@ -120,7 +120,7 @@ function Stop-TimestampedTranscript {
         [string]$Path
     )
 
-    Stop-Transcript -WhatIf:$false | Out-Null
+    Stop-Transcript | Out-Null
     $script:TranscriptStarted = $false
     Add-TimestampToLogFile -Path $Path
 }
