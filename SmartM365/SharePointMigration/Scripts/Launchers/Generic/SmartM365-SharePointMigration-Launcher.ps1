@@ -162,7 +162,8 @@ function Open-DirectoryInExplorer {
     )
 
     try {
-        $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+        $resolvedPath = [string](Resolve-Path -LiteralPath $Path).ProviderPath
+        $resolvedPath = $resolvedPath.Replace([char]0, '').Trim()
         $explorerPath = $resolvedPath
         $root = [System.IO.Path]::GetPathRoot($resolvedPath)
 
@@ -189,6 +190,7 @@ function Open-DirectoryInExplorer {
             }
 
             if ($uncRoot) {
+                $uncRoot = ([string]$uncRoot).Replace([char]0, '').Trim()
                 $relativePath = $resolvedPath.Substring($root.Length).TrimStart('\')
                 $candidatePaths = New-Object 'System.Collections.Generic.List[string]'
                 $candidatePaths.Add((Join-Path -Path $uncRoot -ChildPath $relativePath))
@@ -199,14 +201,16 @@ function Open-DirectoryInExplorer {
                 }
 
                 foreach ($candidatePath in $candidatePaths) {
-                    if (Test-Path -LiteralPath $candidatePath -PathType Container) {
-                        $explorerPath = $candidatePath
+                    $cleanCandidatePath = ([string]$candidatePath).Replace([char]0, '').Trim()
+                    if (Test-Path -LiteralPath $cleanCandidatePath -PathType Container) {
+                        $explorerPath = $cleanCandidatePath
                         break
                     }
                 }
             }
         }
 
+        $explorerPath = ([string]$explorerPath).Replace([char]0, '').Trim()
         if (-not (Test-Path -LiteralPath $explorerPath -PathType Container)) {
             Write-Warning ("Comparison directory cannot be opened because it does not exist: {0}" -f $explorerPath)
             return
@@ -214,10 +218,12 @@ function Open-DirectoryInExplorer {
 
         Write-Info ("Opening comparison directory: {0}" -f $explorerPath) Cyan
 
-        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $startInfo.FileName = $explorerPath
-        $startInfo.UseShellExecute = $true
-        [System.Diagnostics.Process]::Start($startInfo) | Out-Null
+        try {
+            Invoke-Item -LiteralPath $explorerPath -ErrorAction Stop
+        }
+        catch {
+            Start-Process -FilePath explorer.exe -ArgumentList ('"{0}"' -f $explorerPath) | Out-Null
+        }
     }
     catch {
         Write-Warning ("Could not open comparison directory '{0}': {1}" -f $Path, $_.Exception.Message)
