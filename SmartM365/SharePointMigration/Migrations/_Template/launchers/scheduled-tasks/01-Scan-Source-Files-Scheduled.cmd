@@ -2,19 +2,12 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%..\..") do set "MIGRATION_NAME=%%~nxI"
+set "TARGET_CMD=%SCRIPT_DIR%files\01-Scan-Source-Files-Scheduled.cmd"
 
-pushd "%SCRIPT_DIR%..\..\..\.." || exit /b 1
-
-set "PS_SCRIPT=%CD%\Scripts\Launchers\Generic\SmartM365-SharePointMigration-Launcher.ps1"
-set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
-
-if exist "%PWSH%" (
-    "%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -MigrationName "%MIGRATION_NAME%" -Action ScanSourceFiles %*
-) else (
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -MigrationName "%MIGRATION_NAME%" -Action ScanSourceFiles %*
+if not exist "%TARGET_CMD%" (
+    echo Missing launcher: %TARGET_CMD%
+    exit /b 1
 )
 
-set "EXIT_CODE=%ERRORLEVEL%"
-popd
-exit /b %EXIT_CODE%
+call "%TARGET_CMD%" %*
+exit /b %ERRORLEVEL%
