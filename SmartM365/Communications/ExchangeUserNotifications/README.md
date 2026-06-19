@@ -59,7 +59,7 @@ User-facing Teams chat messages are optional and disabled by default:
 - `TeamsUserMessageMode = Disabled` sends email only.
 - `TeamsUserMessageMode = GraphDelegated` sends a one-on-one Teams chat message in addition to the email.
 
-Teams user messages are separate from the operational Teams summary notifications. They use Microsoft Graph delegated permissions (`Chat.Create` and `ChatMessage.Send`) because standard Teams chat posting is delegated-only for normal messages. The GUI exposes this as `Send Teams message`; dry runs preview the Teams path without posting.
+Teams user messages are separate from the operational Teams summary notifications. They use Microsoft Graph delegated permissions (`Chat.Create` and `ChatMessage.Send`) because standard Teams chat posting is delegated-only for normal messages. The GUI exposes this as `Send Teams message`; the checkbox stays disabled until `TeamsUserMessageMode = GraphDelegated` is explicitly configured in local communications or campaign config and the campaign has `TeamsUserMessageByLanguage` content. Dry runs preview the Teams path without posting.
 
 The Teams sender name shown to users is the delegated Microsoft 365 account connected to Graph for the campaign run. Use a dedicated communications account if messages should appear from a generic sender rather than the operator.
 
