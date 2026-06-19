@@ -163,7 +163,7 @@ function Open-DirectoryInExplorer {
 
     try {
         $resolvedPath = [string](Resolve-Path -LiteralPath $Path).ProviderPath
-        $resolvedPath = $resolvedPath.Replace([char]0, '').Trim()
+        $resolvedPath = ($resolvedPath -replace ([string][char]0), '').Trim()
         $explorerPath = $resolvedPath
         $root = [System.IO.Path]::GetPathRoot($resolvedPath)
 
@@ -190,7 +190,7 @@ function Open-DirectoryInExplorer {
             }
 
             if ($uncRoot) {
-                $uncRoot = ([string]$uncRoot).Replace([char]0, '').Trim()
+                $uncRoot = (([string]$uncRoot) -replace ([string][char]0), '').Trim()
                 $relativePath = $resolvedPath.Substring($root.Length).TrimStart('\')
                 $candidatePaths = New-Object 'System.Collections.Generic.List[string]'
                 $candidatePaths.Add((Join-Path -Path $uncRoot -ChildPath $relativePath))
@@ -201,7 +201,7 @@ function Open-DirectoryInExplorer {
                 }
 
                 foreach ($candidatePath in $candidatePaths) {
-                    $cleanCandidatePath = ([string]$candidatePath).Replace([char]0, '').Trim()
+                    $cleanCandidatePath = (([string]$candidatePath) -replace ([string][char]0), '').Trim()
                     if (Test-Path -LiteralPath $cleanCandidatePath -PathType Container) {
                         $explorerPath = $cleanCandidatePath
                         break
@@ -210,7 +210,7 @@ function Open-DirectoryInExplorer {
             }
         }
 
-        $explorerPath = ([string]$explorerPath).Replace([char]0, '').Trim()
+        $explorerPath = (([string]$explorerPath) -replace ([string][char]0), '').Trim()
         if (-not (Test-Path -LiteralPath $explorerPath -PathType Container)) {
             Write-Warning ("Comparison directory cannot be opened because it does not exist: {0}" -f $explorerPath)
             return
