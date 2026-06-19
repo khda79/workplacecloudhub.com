@@ -2,7 +2,7 @@ import argparse
 import builtins
 import csv
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -31,6 +31,8 @@ INVENTORY_COLUMNS = [
     "SizeBytes",
     "Modified",
     "ModifiedBy",
+    "Version",
+    "VersionsCount",
 ]
 
 DUPLICATE_KEY_COLUMNS = ["Side"] + INVENTORY_COLUMNS
@@ -48,13 +50,56 @@ DIFFERENT_SIZE_COLUMNS = [
     "TargetServerRelativeUrl",
     "SourceModified",
     "TargetModified",
+    "SourceVersion",
+    "TargetVersion",
 ]
 
 CHANGED_MODIFIED_DATE_COLUMNS = [
     "Key",
     "SourceModified",
     "TargetModified",
+    "SourceModifiedNormalizedUtc",
+    "TargetModifiedNormalizedUtc",
     "DeltaModifiedMinutes",
+    "ModifiedDirection",
+    "SourceSizeBytes",
+    "TargetSizeBytes",
+    "SourceVersion",
+    "TargetVersion",
+    "SourceWebUrl",
+    "TargetWebUrl",
+    "SourceLibraryTitle",
+    "TargetLibraryTitle",
+    "SourceServerRelativeUrl",
+    "TargetServerRelativeUrl",
+]
+
+TARGET_OLDER_THAN_SOURCE_COLUMNS = [
+    "Key",
+    "SourceModified",
+    "TargetModified",
+    "SourceModifiedNormalizedUtc",
+    "TargetModifiedNormalizedUtc",
+    "TargetOlderByMinutes",
+    "SourceSizeBytes",
+    "TargetSizeBytes",
+    "SourceVersion",
+    "TargetVersion",
+    "SourceWebUrl",
+    "TargetWebUrl",
+    "SourceLibraryTitle",
+    "TargetLibraryTitle",
+    "SourceServerRelativeUrl",
+    "TargetServerRelativeUrl",
+]
+
+CHANGED_VERSION_COLUMNS = [
+    "Key",
+    "SourceVersion",
+    "TargetVersion",
+    "VersionComparison",
+    "SourceModified",
+    "TargetModified",
     "SourceSizeBytes",
     "TargetSizeBytes",
     "SourceWebUrl",
@@ -106,6 +151,10 @@ LIBRARY_SUMMARY_COLUMNS = [
     "DifferentSizePercent",
     "ChangedModifiedDate",
     "ChangedModifiedDatePercent",
+    "TargetOlderThanSource",
+    "TargetOlderThanSourcePercent",
+    "ChangedVersion",
+    "ChangedVersionPercent",
     "SourceBytes",
     "TargetBytes",
     "DifferentSizeSourceBytes",
@@ -131,6 +180,13 @@ MODIFIED_DATE_FORMATS = (
     "%Y-%m-%dT%H:%M:%S",
     "%Y-%m-%d",
 )
+MODIFIED_TIME_ZONE_MODES = {
+    "": "Raw",
+    "none": "Raw",
+    "raw": "Raw",
+    "local": "Local",
+    "utc": "UTC",
+}
 
 
 def detect_csv_dialect(handle):
@@ -279,20 +335,139 @@ def parse_modified_datetime(value):
     return None
 
 
-def modified_date_delta_minutes(source_value, target_value):
+def normalize_modified_time_zone_mode(value):
+    key = str(value or "").strip().lower()
+    if key in MODIFIED_TIME_ZONE_MODES:
+        return MODIFIED_TIME_ZONE_MODES[key]
+    valid_values = ", ".join(sorted(set(MODIFIED_TIME_ZONE_MODES.values())))
+    raise ValueError(f"Unsupported modified date time zone mode '{value}'. Use one of: {valid_values}.")
+
+
+def normalize_modified_datetime(value, time_zone_mode):
+    parsed = parse_modified_datetime(value)
+    if parsed is None:
+        return None
+
+    mode = normalize_modified_time_zone_mode(time_zone_mode)
+    if mode == "UTC":
+        return parsed.replace(tzinfo=timezone.utc)
+    if mode == "Local":
+        return parsed.astimezone().astimezone(timezone.utc)
+    return parsed
+
+
+def comparable_modified_datetimes(source_datetime, target_datetime):
+    if source_datetime is None or target_datetime is None:
+        return source_datetime, target_datetime
+
+    source_aware = source_datetime.tzinfo is not None and source_datetime.utcoffset() is not None
+    target_aware = target_datetime.tzinfo is not None and target_datetime.utcoffset() is not None
+    if source_aware == target_aware:
+        return source_datetime, target_datetime
+
+    if source_aware:
+        source_datetime = source_datetime.astimezone(timezone.utc).replace(tzinfo=None)
+    if target_aware:
+        target_datetime = target_datetime.astimezone(timezone.utc).replace(tzinfo=None)
+    return source_datetime, target_datetime
+
+
+def format_normalized_utc(value, time_zone_mode):
+    parsed = normalize_modified_datetime(value, time_zone_mode)
+    if parsed is None:
+        return ""
+
+    is_aware = parsed.tzinfo is not None and parsed.utcoffset() is not None
+    if is_aware:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def modified_date_delta_minutes(source_value, target_value, source_time_zone="Raw", target_time_zone="Raw"):
     source_text = str(source_value or "").strip()
     target_text = str(target_value or "").strip()
     if not source_text and not target_text:
         return None
 
-    source_datetime = parse_modified_datetime(source_text)
-    target_datetime = parse_modified_datetime(target_text)
+    source_datetime = normalize_modified_datetime(source_text, source_time_zone)
+    target_datetime = normalize_modified_datetime(target_text, target_time_zone)
     if source_datetime is None or target_datetime is None:
         if source_text == target_text:
             return None
         return ""
 
+    source_datetime, target_datetime = comparable_modified_datetimes(source_datetime, target_datetime)
     return abs((target_datetime - source_datetime).total_seconds()) / 60
+
+
+def signed_modified_date_delta_minutes(source_value, target_value, source_time_zone="Raw", target_time_zone="Raw"):
+    source_datetime = normalize_modified_datetime(source_value, source_time_zone)
+    target_datetime = normalize_modified_datetime(target_value, target_time_zone)
+    if source_datetime is None or target_datetime is None:
+        return None
+
+    source_datetime, target_datetime = comparable_modified_datetimes(source_datetime, target_datetime)
+    return (target_datetime - source_datetime).total_seconds() / 60
+
+
+def modified_direction(delta_minutes):
+    if delta_minutes is None:
+        return ""
+    if delta_minutes < 0:
+        return "TargetOlderThanSource"
+    if delta_minutes > 0:
+        return "TargetNewerThanSource"
+    return "Same"
+
+
+def normalize_version(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    parts = [part.strip() for part in text.split(".")]
+    normalized_parts = []
+    for part in parts:
+        if re.fullmatch(r"\d+", part):
+            normalized_parts.append(str(int(part)))
+        else:
+            normalized_parts.append(part.lower())
+    return ".".join(normalized_parts)
+
+
+def parse_version_tuple(value):
+    text = normalize_version(value)
+    if not text:
+        return None
+
+    parts = text.split(".")
+    if not all(re.fullmatch(r"\d+", part) for part in parts):
+        return None
+
+    return tuple(int(part) for part in parts)
+
+
+def compare_versions(source_value, target_value):
+    source_text = normalize_version(source_value)
+    target_text = normalize_version(target_value)
+    if not source_text and not target_text:
+        return "Same"
+    if source_text == target_text:
+        return "Same"
+
+    source_tuple = parse_version_tuple(source_value)
+    target_tuple = parse_version_tuple(target_value)
+    if source_tuple is None or target_tuple is None:
+        return "Different"
+
+    width = max(len(source_tuple), len(target_tuple))
+    source_tuple = source_tuple + (0,) * (width - len(source_tuple))
+    target_tuple = target_tuple + (0,) * (width - len(target_tuple))
+    if target_tuple < source_tuple:
+        return "TargetOlderVersion"
+    if target_tuple > source_tuple:
+        return "TargetNewerVersion"
+    return "Same"
 
 
 def split_normalized_path(value):
@@ -481,6 +656,10 @@ def ensure_library_summary(stats, key, web_path, library_path=""):
             "DifferentSizePercent": 0,
             "ChangedModifiedDate": 0,
             "ChangedModifiedDatePercent": 0,
+            "TargetOlderThanSource": 0,
+            "TargetOlderThanSourcePercent": 0,
+            "ChangedVersion": 0,
+            "ChangedVersionPercent": 0,
             "SourceBytes": 0,
             "TargetBytes": 0,
             "DifferentSizeSourceBytes": 0,
@@ -502,8 +681,10 @@ def library_status(entry):
     extra = int(entry.get("ExtraInTarget") or 0)
     different_size = int(entry.get("DifferentSize") or 0)
     changed_modified = int(entry.get("ChangedModifiedDate") or 0)
+    target_older = int(entry.get("TargetOlderThanSource") or 0)
+    changed_version = int(entry.get("ChangedVersion") or 0)
 
-    if missing == 0 and extra == 0 and different_size == 0 and changed_modified == 0:
+    if missing == 0 and extra == 0 and different_size == 0 and changed_modified == 0 and target_older == 0 and changed_version == 0:
         return "OK - no difference"
 
     issues = []
@@ -515,6 +696,10 @@ def library_status(entry):
         issues.append("size differences")
     if changed_modified:
         issues.append("modified date differences")
+    if target_older:
+        issues.append("target older than source")
+    if changed_version:
+        issues.append("version differences")
 
     if len(issues) == 1:
         labels = {
@@ -522,6 +707,8 @@ def library_status(entry):
             "extra in SPO": "Extra in SPO",
             "size differences": "Size differences",
             "modified date differences": "Modified date differences",
+            "target older than source": "Target older than source",
+            "version differences": "Version differences",
         }
         return labels[issues[0]]
 
@@ -650,6 +837,8 @@ def inventory_record(row, key):
         "SizeBytes": row.get("SizeBytes", ""),
         "Modified": row.get("Modified", ""),
         "ModifiedBy": row.get("ModifiedBy", ""),
+        "Version": row.get("Version", ""),
+        "VersionsCount": row.get("VersionsCount", ""),
     }
 
 
@@ -676,10 +865,22 @@ def main():
         default=-1,
         help="Compare Modified dates when set to 0 or more. Negative value disables this comparison.",
     )
+    parser.add_argument(
+        "--source-modified-time-zone",
+        default="Raw",
+        help="How source Modified values are interpreted for comparison: Raw, Local, or UTC.",
+    )
+    parser.add_argument(
+        "--target-modified-time-zone",
+        default="Raw",
+        help="How target Modified values are interpreted for comparison: Raw, Local, or UTC.",
+    )
     parser.add_argument("--sharegate-replacement-character", default="_")
     args = parser.parse_args()
     if len(args.sharegate_replacement_character) != 1:
         raise ValueError("--sharegate-replacement-character must contain exactly one character.")
+    args.source_modified_time_zone = normalize_modified_time_zone_mode(args.source_modified_time_zone)
+    args.target_modified_time_zone = normalize_modified_time_zone_mode(args.target_modified_time_zone)
 
     global SHAREGATE_REPLACEMENT_CHARACTER
     SHAREGATE_REPLACEMENT_CHARACTER = args.sharegate_replacement_character
@@ -695,6 +896,8 @@ def main():
     extra_folders_path = output_directory / "ExtraFoldersInTarget.csv"
     different_size_path = output_directory / "DifferentSize.csv"
     changed_modified_date_path = output_directory / "ChangedModifiedDate.csv"
+    target_older_than_source_path = output_directory / "TargetOlderThanSource.csv"
+    changed_version_path = output_directory / "ChangedVersion.csv"
     duplicate_keys_path = output_directory / "DuplicateKeys.csv"
     summary_path = output_directory / "Summary.csv"
 
@@ -712,6 +915,12 @@ def main():
     print(f"Source CSV: {source_csv}")
     print(f"Target CSV: {target_csv}")
     print(f"Output directory: {output_directory}")
+    if compare_modified_dates:
+        print(
+            "Modified date comparison: "
+            f"source={args.source_modified_time_zone}; target={args.target_modified_time_zone}; "
+            f"tolerance={args.modified_date_tolerance_minutes} minute(s)"
+        )
     print("Indexing source inventory...")
 
     with duplicate_keys_path.open("w", encoding="utf-8", newline="") as duplicate_handle:
@@ -768,12 +977,18 @@ def main():
         extra = 0
         different_size = 0
         changed_modified_date = 0
+        target_older_than_source = 0
+        changed_version = 0
 
         with extra_path.open("w", encoding="utf-8", newline="") as extra_handle, different_size_path.open(
             "w", encoding="utf-8", newline=""
         ) as diff_handle, changed_modified_date_path.open(
             "w", encoding="utf-8", newline=""
-        ) as changed_modified_handle, target_csv.open("r", encoding="utf-8-sig", newline="") as target_handle:
+        ) as changed_modified_handle, target_older_than_source_path.open(
+            "w", encoding="utf-8", newline=""
+        ) as target_older_handle, changed_version_path.open(
+            "w", encoding="utf-8", newline=""
+        ) as changed_version_handle, target_csv.open("r", encoding="utf-8-sig", newline="") as target_handle:
             extra_writer = csv.DictWriter(extra_handle, fieldnames=INVENTORY_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
             diff_writer = csv.DictWriter(diff_handle, fieldnames=DIFFERENT_SIZE_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
             changed_modified_writer = csv.DictWriter(
@@ -781,9 +996,21 @@ def main():
                 fieldnames=CHANGED_MODIFIED_DATE_COLUMNS,
                 delimiter=CSV_OUTPUT_DELIMITER,
             )
+            target_older_writer = csv.DictWriter(
+                target_older_handle,
+                fieldnames=TARGET_OLDER_THAN_SOURCE_COLUMNS,
+                delimiter=CSV_OUTPUT_DELIMITER,
+            )
+            changed_version_writer = csv.DictWriter(
+                changed_version_handle,
+                fieldnames=CHANGED_VERSION_COLUMNS,
+                delimiter=CSV_OUTPUT_DELIMITER,
+            )
             extra_writer.writeheader()
             diff_writer.writeheader()
             changed_modified_writer.writeheader()
+            target_older_writer.writeheader()
+            changed_version_writer.writeheader()
 
             for row in csv.DictReader(target_handle, dialect=detect_csv_dialect(target_handle)):
                 target_total_rows += 1
@@ -860,13 +1087,34 @@ def main():
                             "TargetServerRelativeUrl": target_record["ServerRelativeUrl"],
                             "SourceModified": source_record["Modified"],
                             "TargetModified": target_record["Modified"],
+                            "SourceVersion": source_record["Version"],
+                            "TargetVersion": target_record["Version"],
                         }
                     )
 
-                modified_delta_minutes = (
-                    modified_date_delta_minutes(source_record["Modified"], target_record["Modified"])
+                signed_modified_delta_minutes = (
+                    signed_modified_date_delta_minutes(
+                        source_record["Modified"],
+                        target_record["Modified"],
+                        args.source_modified_time_zone,
+                        args.target_modified_time_zone,
+                    )
                     if compare_modified_dates
                     else None
+                )
+                modified_delta_minutes = (
+                    abs(signed_modified_delta_minutes)
+                    if isinstance(signed_modified_delta_minutes, (int, float))
+                    else (
+                        modified_date_delta_minutes(
+                            source_record["Modified"],
+                            target_record["Modified"],
+                            args.source_modified_time_zone,
+                            args.target_modified_time_zone,
+                        )
+                        if compare_modified_dates
+                        else None
+                    )
                 )
                 if compare_modified_dates and (
                     modified_delta_minutes == "" or (
@@ -881,9 +1129,71 @@ def main():
                             "Key": key,
                             "SourceModified": source_record["Modified"],
                             "TargetModified": target_record["Modified"],
+                            "SourceModifiedNormalizedUtc": format_normalized_utc(
+                                source_record["Modified"], args.source_modified_time_zone
+                            ),
+                            "TargetModifiedNormalizedUtc": format_normalized_utc(
+                                target_record["Modified"], args.target_modified_time_zone
+                            ),
                             "DeltaModifiedMinutes": (
                                 f"{modified_delta_minutes:.2f}" if isinstance(modified_delta_minutes, (int, float)) else ""
                             ),
+                            "ModifiedDirection": modified_direction(signed_modified_delta_minutes),
+                            "SourceSizeBytes": source_size if source_size is not None else "",
+                            "TargetSizeBytes": target_size if target_size is not None else "",
+                            "SourceVersion": source_record["Version"],
+                            "TargetVersion": target_record["Version"],
+                            "SourceWebUrl": source_record["WebUrl"],
+                            "TargetWebUrl": target_record["WebUrl"],
+                            "SourceLibraryTitle": source_record["LibraryTitle"],
+                            "TargetLibraryTitle": target_record["LibraryTitle"],
+                            "SourceServerRelativeUrl": source_record["ServerRelativeUrl"],
+                            "TargetServerRelativeUrl": target_record["ServerRelativeUrl"],
+                        }
+                    )
+                    if (
+                        isinstance(signed_modified_delta_minutes, (int, float))
+                        and signed_modified_delta_minutes < -args.modified_date_tolerance_minutes
+                    ):
+                        target_older_than_source += 1
+                        source_library_entry["TargetOlderThanSource"] += 1
+                        target_older_writer.writerow(
+                            {
+                                "Key": key,
+                                "SourceModified": source_record["Modified"],
+                                "TargetModified": target_record["Modified"],
+                                "SourceModifiedNormalizedUtc": format_normalized_utc(
+                                    source_record["Modified"], args.source_modified_time_zone
+                                ),
+                                "TargetModifiedNormalizedUtc": format_normalized_utc(
+                                    target_record["Modified"], args.target_modified_time_zone
+                                ),
+                                "TargetOlderByMinutes": f"{abs(signed_modified_delta_minutes):.2f}",
+                                "SourceSizeBytes": source_size if source_size is not None else "",
+                                "TargetSizeBytes": target_size if target_size is not None else "",
+                                "SourceVersion": source_record["Version"],
+                                "TargetVersion": target_record["Version"],
+                                "SourceWebUrl": source_record["WebUrl"],
+                                "TargetWebUrl": target_record["WebUrl"],
+                                "SourceLibraryTitle": source_record["LibraryTitle"],
+                                "TargetLibraryTitle": target_record["LibraryTitle"],
+                                "SourceServerRelativeUrl": source_record["ServerRelativeUrl"],
+                                "TargetServerRelativeUrl": target_record["ServerRelativeUrl"],
+                            }
+                        )
+
+                version_comparison = compare_versions(source_record["Version"], target_record["Version"])
+                if version_comparison != "Same":
+                    changed_version += 1
+                    source_library_entry["ChangedVersion"] += 1
+                    changed_version_writer.writerow(
+                        {
+                            "Key": key,
+                            "SourceVersion": source_record["Version"],
+                            "TargetVersion": target_record["Version"],
+                            "VersionComparison": version_comparison,
+                            "SourceModified": source_record["Modified"],
+                            "TargetModified": target_record["Modified"],
                             "SourceSizeBytes": source_size if source_size is not None else "",
                             "TargetSizeBytes": target_size if target_size is not None else "",
                             "SourceWebUrl": source_record["WebUrl"],
@@ -898,6 +1208,10 @@ def main():
     if not compare_modified_dates:
         try:
             changed_modified_date_path.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            target_older_than_source_path.unlink()
         except FileNotFoundError:
             pass
 
@@ -935,13 +1249,19 @@ def main():
         "ExtraFoldersInTarget": len(extra_folder_candidates),
         "DifferentSize": different_size,
         "ChangedModifiedDate": changed_modified_date,
+        "TargetOlderThanSource": target_older_than_source,
+        "ChangedVersion": changed_version,
         "SizeToleranceBytes": args.size_tolerance_bytes,
         "ModifiedDateComparisonEnabled": compare_modified_dates,
         "ModifiedDateToleranceMinutes": args.modified_date_tolerance_minutes if compare_modified_dates else "",
+        "SourceModifiedTimeZone": args.source_modified_time_zone if compare_modified_dates else "",
+        "TargetModifiedTimeZone": args.target_modified_time_zone if compare_modified_dates else "",
         "ShareGateReplacementCharacter": SHAREGATE_REPLACEMENT_CHARACTER,
         "DuplicateKeysCsv": str(duplicate_keys_path),
         "ExtraFoldersInTargetCsv": str(extra_folders_path),
         "ChangedModifiedDateCsv": str(changed_modified_date_path) if compare_modified_dates else "",
+        "TargetOlderThanSourceCsv": str(target_older_than_source_path) if compare_modified_dates else "",
+        "ChangedVersionCsv": str(changed_version_path),
         "OutputDirectory": str(output_directory),
     }
 
@@ -970,7 +1290,7 @@ def main():
         for entry in sorted(
             library_stats.values(),
             key=lambda value: (
-                -int(value["MissingInTarget"]) - int(value["ExtraInTarget"]) - int(value["DifferentSize"]) - int(value["ChangedModifiedDate"]),
+                -int(value["MissingInTarget"]) - int(value["ExtraInTarget"]) - int(value["DifferentSize"]) - int(value["ChangedModifiedDate"]) - int(value["TargetOlderThanSource"]) - int(value["ChangedVersion"]),
                 str(value["WebPath"]).lower(),
                 str(value["SourceLibraryTitle"] or value["TargetLibraryTitle"]).lower(),
             ),
@@ -980,6 +1300,8 @@ def main():
             entry["ExtraInTargetPercent"] = percent(entry["ExtraInTarget"], entry["TargetFiles"])
             entry["DifferentSizePercent"] = percent(entry["DifferentSize"], entry["MatchedFiles"])
             entry["ChangedModifiedDatePercent"] = percent(entry["ChangedModifiedDate"], entry["MatchedFiles"])
+            entry["TargetOlderThanSourcePercent"] = percent(entry["TargetOlderThanSource"], entry["MatchedFiles"])
+            entry["ChangedVersionPercent"] = percent(entry["ChangedVersion"], entry["MatchedFiles"])
             entry["Status"] = library_status(entry)
             writer.writerow({column: entry.get(column, "") for column in LIBRARY_SUMMARY_COLUMNS})
 
@@ -987,12 +1309,15 @@ def main():
     print(
         f"Matched: {matched}; Missing in target: {missing}; "
         f"Extra in target: {extra}; Extra folders in target: {len(extra_folder_candidates)}; "
-        f"Different size: {different_size}; Changed modified date: {changed_modified_date}"
+        f"Different size: {different_size}; Changed modified date: {changed_modified_date}; "
+        f"Target older than source: {target_older_than_source}; Changed version: {changed_version}"
     )
     print(f"Summary: {summary_path}")
     print(f"Library summary: {library_summary_path}")
     print(f"Extra folders in target: {extra_folders_path}")
     print(f"Changed modified date: {changed_modified_date_path}")
+    print(f"Target older than source: {target_older_than_source_path}")
+    print(f"Changed version: {changed_version_path}")
     print(f"Duplicate keys: {duplicate_keys_path}")
 
 
