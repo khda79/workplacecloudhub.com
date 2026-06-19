@@ -163,8 +163,38 @@ function Open-DirectoryInExplorer {
 
     try {
         $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
-        Write-Info ("Opening comparison directory: {0}" -f $resolvedPath) Cyan
-        Start-Process -FilePath explorer.exe -ArgumentList ('"{0}"' -f $resolvedPath) | Out-Null
+        $explorerPath = $resolvedPath
+        $root = [System.IO.Path]::GetPathRoot($resolvedPath)
+
+        if ($root -match '^[A-Za-z]:\\$') {
+            $driveName = $root.Substring(0, 1)
+            $drive = Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue
+            $uncRoot = $null
+            if ($drive -and $drive.DisplayRoot -and $drive.DisplayRoot.StartsWith('\\')) {
+                $uncRoot = $drive.DisplayRoot
+            }
+            else {
+                try {
+                    $logicalDisk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter ("DeviceID='{0}:'" -f $driveName) -ErrorAction Stop
+                    if ($logicalDisk.ProviderName -and $logicalDisk.ProviderName.StartsWith('\\')) {
+                        $uncRoot = $logicalDisk.ProviderName
+                    }
+                }
+                catch {
+                    $logicalDisk = Get-WmiObject -Class Win32_LogicalDisk -Filter ("DeviceID='{0}:'" -f $driveName) -ErrorAction SilentlyContinue
+                    if ($logicalDisk -and $logicalDisk.ProviderName -and $logicalDisk.ProviderName.StartsWith('\\')) {
+                        $uncRoot = $logicalDisk.ProviderName
+                    }
+                }
+            }
+
+            if ($uncRoot) {
+                $explorerPath = Join-Path -Path $uncRoot -ChildPath $resolvedPath.Substring($root.Length)
+            }
+        }
+
+        Write-Info ("Opening comparison directory: {0}" -f $explorerPath) Cyan
+        Start-Process -FilePath explorer.exe -ArgumentList ('"{0}"' -f $explorerPath) | Out-Null
     }
     catch {
         Write-Warning ("Could not open comparison directory '{0}': {1}" -f $Path, $_.Exception.Message)
