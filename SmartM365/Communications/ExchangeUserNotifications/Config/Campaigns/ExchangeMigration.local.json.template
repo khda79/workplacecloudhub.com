@@ -18,6 +18,11 @@
   "SummarySubject": "SmartM365 Exchange migration notification summary",
   "TeamsSuccessTitle": "SmartM365 Exchange migration notification completed",
   "TeamsFailureTitle": "SmartM365 Exchange migration notification failed",
+  "TeamsUserMessageByLanguage": {
+    "default": "Hello {{UserName}}, an important message about your mailbox migration has been sent to your email. Please read it before {{Date}}.",
+    "en": "Hello {{UserName}}, an important message about your mailbox migration has been sent to your email. Please read it before {{Date}}.",
+    "fr": "Bonjour {{UserName}}, un message important concernant la migration de votre boite aux lettres vous a ete envoye par email. Merci de le lire avant le {{Date}}."
+  },
   "LogoPath": "{{SmartM365RootPath}}\\WorkplaceCloudHub.ico",
   "LogoContentId": "smartm365logo",
   "LogoMediaType": "image/x-icon",

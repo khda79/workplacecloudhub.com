@@ -13,6 +13,7 @@ This document explains the permissions added by `Setup/SmartM365-Create-AppRegis
 - `Intune/Remediation/CLI/SmartM365-Deploy-IntuneRemediation-CLI.ps1` is intentionally outside the app-only model: it uses only interactive delegated authentication and requests `DeviceManagementScripts.ReadWrite.All` to create or update Intune remediations. `Intune/Remediation/GUI/SmartM365-IntuneRemediation-GUI.ps1` follows the same interactive delegated model, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` to export Intune execution reports and `Group.Read.All` to enrich assignment exports with Entra group names.
 - SharePoint uploads are centralized through `Modules/SmartM365.Core` and `Modules/SmartM365.SharePoint`; they can be used by multiple scripts when `EnableSharePointUpload` is enabled.
 - Teams notifications use `TeamsAlertsWebhookUrl`, `TeamsInfosWebhookUrl`, and `Send-SmartM365TeamsNotification` with Teams Workflows / Power Automate URLs, not legacy Office 365 Connectors. They do not add Graph Teams permissions to the app registration. Do not use `Teamwork.Migrate.All` for normal operational notifications. On terminal errors, every inventory/report script should send a notification to the `Alerts` channel with diagnostic context and an AI help link built from the error message. On successful completion, each script should send a notification to the `Infos` channel with a `Result summary` field that summarizes the script result.
+- Exchange user notification campaigns can optionally send a one-on-one Teams chat message to each recipient with `TeamsUserMessageMode = GraphDelegated`. This is different from operational Teams channel notifications. It uses Microsoft Graph **delegated** permissions `User.Read`, `Chat.Create`, and `ChatMessage.Send`; the visible Teams sender is the delegated account used during the campaign run. These delegated chat permissions are not app-only runtime permissions and are not covered by the standard SmartM365 application permission set.
 
 ## User Configuration For Teams Notifications
 
@@ -54,6 +55,8 @@ This approach avoids adding broad Microsoft Graph Teams permissions to the Smart
 | `DeviceManagementServiceConfig.Read.All` | Reads Intune service configuration, especially Windows Autopilot identities. | `SmartInventory/M365Inventory/IntuneInventory/Autopilot/SmartM365-WindowsAutopilot-Inventory.ps1`. |
 | `Mail.Send` | Sends error notifications and HTML reports through Microsoft Graph when `SmtpServer` is empty. The sender address is resolved from `From` in the tenant profile or script `*.local.json`. The bootstrap also creates an Exchange Online Application Access Policy to restrict this right to `MailSendAccessPolicyGroup`. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; scripts that call `SendEmailHtmlReport`, `Send-SmartM365Mail`, or `SendFileListEmailReport`. |
 | `Sites.Selected` | Uploads and replaces CSV files only on the SmartM365 SharePoint site. The bootstrap then grants the app the `write` role on the created/reused site, and removes old broad grants `Files.ReadWrite.All` and `Sites.ReadWrite.All` when they exist. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; `Modules/SmartM365.SharePoint/SmartM365.SharePoint.psm1`; all inventory/export scripts that call SharePoint upload when `EnableSharePointUpload` is enabled. |
+
+Exchange user notification campaigns under `Communications/ExchangeUserNotifications` also use `Mail.Send` when `MailSendMode = Graph` or when `MailSendMode = Auto` resolves to Graph because no SMTP relay is configured. If `MailSendMode = SmtpRelay`, mail delivery uses the configured relay instead of Microsoft Graph.
 
 ## Intune ReadWrite Permissions Included By Default
 
@@ -112,6 +115,18 @@ These scopes are requested from the administrator who runs `Setup/SmartM365-Crea
 | `Group.ReadWrite.All` | Creates or reuses the Microsoft 365 group behind the `SMART-M365` Teams team, then converts this group into a team. |
 | `RoleManagement.ReadWrite.Directory` | Assigns the Entra `Global Reader` role to the SmartM365 service principal for Exchange Online app-only auth, and removes the old `Exchange Administrator` role from the service principal if a previous bootstrap version added it. This scope is used only by the administrator running the bootstrap and is not added to the SmartM365 app. |
 | `Sites.FullControl.All` | Assigns the `write` role to the SmartM365 service principal on the target SharePoint site with `Sites.Selected`. This scope is used only by the administrator running the bootstrap and is not added to the SmartM365 app. |
+
+## Delegated Permissions For User-Facing Teams Campaign Messages
+
+These scopes are requested only when an operator enables per-user Teams chat messages for Exchange notification campaigns. They are delegated scopes for the signed-in sender account, not application permissions for unattended SmartM365 automation.
+
+| Permission | Why it is needed |
+| --- | --- |
+| `User.Read` | Resolves the signed-in delegated sender with `/me`. |
+| `Chat.Create` | Creates or reuses the one-on-one chat between the sender account and the recipient. |
+| `ChatMessage.Send` | Posts the Teams message into that one-on-one chat. |
+
+Do not add `Teamwork.Migrate.All` for normal campaign messages. That permission is for Teams migration/import scenarios, not user-facing operational communication.
 
 ## Future Review Items
 

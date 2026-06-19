@@ -50,7 +50,18 @@ Real files must use `.local.json` and remain ignored by Git.
 - `MailSendMode = Auto` keeps compatibility: Graph is used when `SmtpServer` is empty, otherwise SMTP relay is used.
 - `MailSendMode = Disabled` skips mail sends while keeping campaign processing/logging behavior.
 
-For Graph sending, the app needs `Mail.Send` and the sending mailbox in `From`. Keep Graph mail sending scoped to the allowed mailbox/group in Exchange Online; do not leave `Mail.Send` unrestricted tenant-wide.
+For Graph sending, the app needs the Microsoft Graph **application** permission `Mail.Send`. The sending mailbox is resolved from `From` in the tenant profile or communications config. Keep Graph mail sending scoped with the Exchange Online Application Access Policy created by the SmartM365 setup so the app can send only as mailboxes in `MailSendAccessPolicyGroup`; do not leave `Mail.Send` unrestricted tenant-wide.
+
+SMTP relay mode does not use Microsoft Graph mail permissions. It requires `SmtpServer` or `RelayIp`, `SmtpPort`, and any relay allow-listing needed by the local mail infrastructure.
+
+User-facing Teams chat messages are optional and disabled by default:
+
+- `TeamsUserMessageMode = Disabled` sends email only.
+- `TeamsUserMessageMode = GraphDelegated` sends a one-on-one Teams chat message in addition to the email.
+
+Teams user messages are separate from the operational Teams summary notifications. They use Microsoft Graph delegated permissions (`Chat.Create` and `ChatMessage.Send`) because standard Teams chat posting is delegated-only for normal messages. The GUI exposes this as `Send Teams message`; dry runs preview the Teams path without posting.
+
+The Teams sender name shown to users is the delegated Microsoft 365 account connected to Graph for the campaign run. Use a dedicated communications account if messages should appear from a generic sender rather than the operator.
 
 Campaign JSON controls Exchange lookup/connectivity:
 
