@@ -1,3 +1,3 @@
-PrimarySmtpAddress,UserName,LanguageTag,TargetSkuPartNumber,MailboxSizeMB,MailboxType
-user1@example.com,First User,en,SPE_E3,112640,UserMailbox
-user2@example.com,Second User,fr,SPE_F1,4096,UserMailbox
+PrimarySmtpAddress,LanguageTag,TargetSkuPartNumber,MailboxSizeMB,MailboxType
+user1@example.com,en,SPE_E3,112640,UserMailbox
+user2@example.com,fr,SPE_F1,4096,UserMailbox

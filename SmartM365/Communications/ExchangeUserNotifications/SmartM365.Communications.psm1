@@ -363,7 +363,6 @@ function Resolve-SmartM365CommunicationAdUserInfo {
         [Parameter(Mandatory)][string]$SmtpAddress,
         [string]$GcServer = '',
         [string]$DefaultLanguageTag = '',
-        [switch]$ResolveDisplayName,
         [switch]$ResolveLanguage
     )
 
@@ -434,15 +433,6 @@ function Resolve-SmartM365CommunicationAdUserInfo {
 
     if ($ResolveLanguage -and [string]::IsNullOrWhiteSpace($result.PreferredLanguage)) {
         $result.PreferredLanguage = $DefaultLanguageTag
-    }
-
-    if ($ResolveDisplayName -and [string]::IsNullOrWhiteSpace($result.DisplayName)) {
-        if (-not [string]::IsNullOrWhiteSpace(($result.GivenName + $result.Surname).Trim())) {
-            $result.DisplayName = "$($result.GivenName) $($result.Surname)".Trim()
-        }
-        else {
-            $result.DisplayName = ($SmtpAddress -split '@')[0]
-        }
     }
 
     return $result
