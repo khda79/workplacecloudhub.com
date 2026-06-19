@@ -197,6 +197,62 @@ function Get-LatestCsv {
     $latest.FullName
 }
 
+function Get-ComparisonConfigValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        $DefaultValue
+    )
+
+    if ($Config.ContainsKey('Comparison') -and $Config.Comparison.ContainsKey($Name)) {
+        $value = $Config.Comparison[$Name]
+        if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+            return $value
+        }
+    }
+
+    return $DefaultValue
+}
+
+function Assert-CsvScanAgeDifference {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceCsvPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$TargetCsvPath,
+
+        [Parameter(Mandatory = $true)]
+        [double]$MaxAgeDifferenceHours,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Label
+    )
+
+    if ($MaxAgeDifferenceHours -lt 0) {
+        Write-Info ("Scan age check disabled for {0}." -f $Label) DarkYellow
+        return
+    }
+
+    $sourceItem = Get-Item -LiteralPath $SourceCsvPath
+    $targetItem = Get-Item -LiteralPath $TargetCsvPath
+    $ageDifference = ($targetItem.LastWriteTime - $sourceItem.LastWriteTime).Duration()
+    $message = "{0} scan age difference is {1:n2}h. Maximum allowed: {2:n2}h. Source: {3}; Target: {4}" -f $Label, $ageDifference.TotalHours, $MaxAgeDifferenceHours, $sourceItem.LastWriteTime, $targetItem.LastWriteTime
+
+    if ($ageDifference.TotalHours -gt $MaxAgeDifferenceHours) {
+        if ($Force) {
+            Write-Info ("WARNING: {0} Continuing because -Force was used." -f $message) Yellow
+            return
+        }
+
+        throw ("{0} Rerun source/target scans closer together, or use -Force only after reviewing the risk." -f $message)
+    }
+
+    Write-Info $message DarkCyan
+}
+
 function Invoke-PythonScript {
     param(
         [string]$Script,
@@ -357,6 +413,16 @@ function Invoke-FileComparison {
             $TargetCsv = Get-LatestCsv -Directory $targetDirectory -Filter ("SPO-FileInventory-{0}-*.csv" -f $Config.Name)
         }
 
+        $maxScanAgeDifferenceHours = [double](Get-ComparisonConfigValue -Name 'MaxScanAgeDifferenceHours' -DefaultValue 12)
+        $modifiedDateToleranceMinutes = [double](Get-ComparisonConfigValue -Name 'ModifiedDateToleranceMinutes' -DefaultValue 0)
+        $sourceModifiedTimeZone = [string](Get-ComparisonConfigValue -Name 'SourceModifiedTimeZone' -DefaultValue 'Local')
+        $targetModifiedTimeZone = [string](Get-ComparisonConfigValue -Name 'TargetModifiedTimeZone' -DefaultValue 'UTC')
+        Assert-CsvScanAgeDifference `
+            -SourceCsvPath $SourceCsv `
+            -TargetCsvPath $TargetCsv `
+            -MaxAgeDifferenceHours $maxScanAgeDifferenceHours `
+            -Label 'File inventory'
+
         $compareScript = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Compare\compare_sp_source_target_file_inventories.py'
         Invoke-PythonScript -Script $compareScript -Arguments @(
             '--source-csv', $SourceCsv,
@@ -367,6 +433,9 @@ function Invoke-FileComparison {
             '--target-prefix', $Config.Target.PrefixToRemove,
             '--comparison-name', ("{0}-SP2019-vs-SPO" -f $Config.Name),
             '--size-tolerance-bytes', ([string]$Config.Comparison.SizeToleranceBytes),
+            '--modified-date-tolerance-minutes', ([string]$modifiedDateToleranceMinutes),
+            '--source-modified-time-zone', $sourceModifiedTimeZone,
+            '--target-modified-time-zone', $targetModifiedTimeZone,
             '--sharegate-replacement-character', ([string]$Config.Comparison.ShareGateReplacementCharacter)
         )
 
@@ -441,6 +510,7 @@ function Invoke-SourceHistoryComparison {
         LogPath = (New-MigrationLogPath -Action 'CompareSourceHistory' -Timestamp $timestamp)
         ComparisonName = ("{0}-SP2019-vs-SP2019" -f $Config.Name)
         SizeToleranceBytes = [long]$Config.Comparison.SizeToleranceBytes
+        ModifiedDateToleranceMinutes = [double](Get-ComparisonConfigValue -Name 'ModifiedDateToleranceMinutes' -DefaultValue 0)
     }
 
     if ($Force) {

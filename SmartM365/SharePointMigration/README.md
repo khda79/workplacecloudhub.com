@@ -5,6 +5,11 @@ a source and a destination. It inventories source and destination content,
 compares files and permissions, exports review workbooks, and generates guarded
 cleanup scripts for destination-side differences.
 
+File comparisons include the current SharePoint document version exported from
+both inventories. They also flag matched files where the destination modified
+date is older than the source, so a copied file that is not at the latest source
+version is visible in the comparison workbook.
+
 ## Layout
 
 - `Scripts/Inventory/`: source and destination file and permission inventories.
@@ -112,3 +117,11 @@ Cleanup scripts are review-first. They are generated from comparison outputs,
 default to dry-run behavior, and require explicit execution flags before making
 changes. Keep the operational order: remove extra files first, then extra empty
 folders, and review extra libraries separately.
+
+For final copy validation, run fresh source and destination file scans close
+together before `CompareFiles`. The launcher enforces
+`Comparison.MaxScanAgeDifferenceHours` and uses
+`Comparison.ModifiedDateToleranceMinutes` to produce `ChangedModifiedDate` and
+`TargetOlderThanSource` review outputs. For SP2019 to SPO checks, the template
+normalizes source `Modified` dates as local time and target `Modified` dates as
+UTC before comparing them, while keeping the raw values in the diagnostic CSVs.

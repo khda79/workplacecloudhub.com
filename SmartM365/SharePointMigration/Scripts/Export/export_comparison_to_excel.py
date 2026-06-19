@@ -26,7 +26,9 @@ SHEETS = [
     ("ExtraInTarget", "ExtraInTarget.csv"),
     ("ExtraFoldersInTarget", "ExtraFoldersInTarget.csv"),
     ("DifferentSize", "DifferentSize.csv"),
+    ("TargetOlderThanSource", "TargetOlderThanSource.csv"),
     ("ChangedModifiedDate", "ChangedModifiedDate.csv"),
+    ("ChangedVersion", "ChangedVersion.csv"),
     ("DuplicateKeys", "DuplicateKeys.csv"),
 ]
 
@@ -36,7 +38,9 @@ SP2019_CHANGES_SHEETS = [
     ("RemovedFromNewScan", "MissingInTarget.csv"),
     ("AddedInNewScan", "ExtraInTarget.csv"),
     ("ChangedSize", "DifferentSize.csv"),
+    ("TargetOlderThanSource", "TargetOlderThanSource.csv"),
     ("ChangedModifiedDate", "ChangedModifiedDate.csv"),
+    ("ChangedVersion", "ChangedVersion.csv"),
     ("DuplicateKeys", "DuplicateKeys.csv"),
 ]
 CSV_DELIMITERS = ",;\t"
@@ -65,6 +69,8 @@ NUMERIC_COLUMNS = {
     "Depth",
     "DifferentSize",
     "ChangedModifiedDate",
+    "TargetOlderThanSource",
+    "ChangedVersion",
     "SizeToleranceBytes",
     "ModifiedDateToleranceMinutes",
     "SourceFiles",
@@ -80,6 +86,8 @@ NUMERIC_COLUMNS = {
     "SourceSizeBytes",
     "TargetSizeBytes",
     "DeltaBytes",
+    "TargetOlderByMinutes",
+    "VersionsCount",
 }
 PERCENT_COLUMNS = {
     "MatchedFilesPercent",
@@ -87,12 +95,16 @@ PERCENT_COLUMNS = {
     "ExtraInTargetPercent",
     "DifferentSizePercent",
     "ChangedModifiedDatePercent",
+    "TargetOlderThanSourcePercent",
+    "ChangedVersionPercent",
 }
 DATE_COLUMNS = {
     "Created",
     "Modified",
     "SourceModified",
     "TargetModified",
+    "SourceModifiedNormalizedUtc",
+    "TargetModifiedNormalizedUtc",
 }
 DATE_FORMATS = (
     "%d/%m/%Y %H:%M:%S",
@@ -128,6 +140,10 @@ COLUMN_WIDTHS = {
     "DifferentSizePercent": 20,
     "ChangedModifiedDate": 22,
     "ChangedModifiedDatePercent": 26,
+    "TargetOlderThanSource": 24,
+    "TargetOlderThanSourcePercent": 30,
+    "ChangedVersion": 18,
+    "ChangedVersionPercent": 22,
     "ServerRelativeUrl": 76,
     "TargetServerRelativeUrl": 76,
     "SourceServerRelativeUrl": 76,
@@ -142,12 +158,20 @@ COLUMN_WIDTHS = {
     "Modified": 20,
     "SourceModified": 20,
     "TargetModified": 20,
+    "SourceModifiedNormalizedUtc": 29,
+    "TargetModifiedNormalizedUtc": 29,
     "CreatedBy": 24,
     "ModifiedBy": 24,
     "SizeBytes": 16,
     "SourceSizeBytes": 18,
     "TargetSizeBytes": 18,
     "DeltaBytes": 16,
+    "TargetOlderByMinutes": 22,
+    "SourceVersion": 16,
+    "TargetVersion": 16,
+    "Version": 14,
+    "VersionsCount": 16,
+    "VersionComparison": 22,
     "SourceBytes": 18,
     "TargetBytes": 18,
     "DifferentSizeSourceBytes": 24,
