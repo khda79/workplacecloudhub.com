@@ -20,6 +20,9 @@
         MaxScanAgeDifferenceHours = 12
         PermissionMaxScanAgeDifferenceHours = 24
         SizeToleranceBytes = 10240
+        ModifiedDateToleranceMinutes = 0
+        SourceModifiedTimeZone = 'Local'
+        TargetModifiedTimeZone = 'UTC'
         ShareGateReplacementCharacter = '_'
         AllowDuplicateKeysForDeleteScript = $true
     }
