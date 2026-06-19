@@ -194,7 +194,7 @@ function Get-CampaignDefinition {
             SupportsFromList = $false
             SupportsInventory = $false
             SupportsSkipConfirmation = $false
-            ExpectedTokens = @('Date','FooterLogoImgTag','Hotline','LogoImgTag','NewWebmailUrl','OldWebmailUrl','TermsPortalBlockStyle','TermsPortalUrl','UserName')
+            ExpectedTokens = @('Date','FooterLogoImgTag','Hotline','LogoImgTag','NewWebmailUrl','OldWebmailUrl','TermsPortalBlockStyle','TermsPortalUrl')
         },
         [pscustomobject]@{
             Id = 'ExchangeArchive'
@@ -211,7 +211,7 @@ function Get-CampaignDefinition {
             SupportsFromList = $false
             SupportsInventory = $false
             SupportsSkipConfirmation = $false
-            ExpectedTokens = @('Date','FooterLogoImgTag','Hotline','LogoImgTag','MailboxUsageText','UserName')
+            ExpectedTokens = @('Date','FooterLogoImgTag','Hotline','LogoImgTag','MailboxUsageText')
         },
         [pscustomobject]@{
             Id = 'ExchangeMigrationMailboxSizeReduction'
@@ -228,7 +228,7 @@ function Get-CampaignDefinition {
             SupportsFromList = $true
             SupportsInventory = $false
             SupportsSkipConfirmation = $true
-            ExpectedTokens = @('FooterLogoImgTag','FreeTextBlockStyle','FreeTextBlockTextHtml','Hotline','LogoImgTag','MailboxQuotaGB','MailboxSizeGB','UserName','WebmailUrl')
+            ExpectedTokens = @('FooterLogoImgTag','FreeTextBlockStyle','FreeTextBlockTextHtml','Hotline','LogoImgTag','MailboxQuotaGB','MailboxSizeGB','WebmailUrl')
         }
     )
 }

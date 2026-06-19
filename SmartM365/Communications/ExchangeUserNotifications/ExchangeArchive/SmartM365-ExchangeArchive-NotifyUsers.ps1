@@ -13,9 +13,8 @@ archive date and localized mailbox usage text, prevents duplicate sends through 
 writes a per-recipient log, and can send a summary email and Teams notification after a live run.
 
 Expected recipient columns include an email column such as PrimarySmtpAddress, EmailAddress, Mail,
-UserPrincipalName, or Recipient, plus optional UserName, DisplayName, Name, LanguageTag,
-PreferredLanguage, EffectiveDate, Date, MailboxTotalGb, TotalGb, TotalItemSizeGB,
-MailboxSizeGB, MailboxUsagePercent, UsagePercent, or Percent.
+UserPrincipalName, or Recipient, plus optional LanguageTag, PreferredLanguage, EffectiveDate, Date,
+MailboxTotalGb, TotalGb, TotalItemSizeGB, MailboxSizeGB, MailboxUsagePercent, UsagePercent, or Percent.
 
 .PARAMETER Tenant
 SmartM365 tenant context key used to resolve root paths, mail credentials, Teams settings, and defaults.
@@ -253,7 +252,7 @@ $teamsUserRetryCount = [int](Get-SmartM365CommunicationConfigValue -Config $conf
 $teamsUserRetryDelaySeconds = [int](Get-SmartM365CommunicationConfigValue -Config $config -Name 'TeamsUserRetryDelaySeconds' -DefaultValue 2 -FallbackConfig $baseConfig)
 $hotlineMap = Convert-ToHash (Get-SmartM365CommunicationConfigValue -Config $config -Name 'HotlineByLanguageOrCountry' -DefaultValue @{} -FallbackConfig $baseConfig)
 $domainLanguageMap = Convert-ToHash (Get-SmartM365CommunicationConfigValue -Config $config -Name 'DomainLanguageMap' -DefaultValue @{} -FallbackConfig $baseConfig)
-$enableAdLookup = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableAdLookupForLanguageAndName' -DefaultValue $true)
+$enableAdLookup = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableAdLookupForLanguage' -DefaultValue $true)
 $forestGcServer = [string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ForestGcServer' -DefaultValue '')
 $enableExchangeMailboxStateCheck = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableExchangeMailboxStateCheck' -DefaultValue $true)
 $enableExchangeMailboxUsageCheck = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableExchangeMailboxUsageCheck' -DefaultValue $true)
@@ -290,7 +289,7 @@ if ($requireExchangeManagement -and $exchangeManagementState.Enabled -and -not $
     throw ("Exchange management is mandatory for this campaign and is not available. Status={0}; Error={1}" -f $exchangeManagementState.Status, $exchangeManagementState.ErrorMessage)
 }
 
-$columns = @('Timestamp','RunId','Campaign','BatchFile','Email','UserName','NameSource','LanguageTag','Scope','MailboxTotalGb','MailboxUsagePercent','Subject','Status','TeamsStatus','TeamsError','SkipReason','ErrorMessage','RecipientTypeDetails','ExchangeSource')
+$columns = @('Timestamp','RunId','Campaign','BatchFile','Email','LanguageTag','Scope','MailboxTotalGb','MailboxUsagePercent','Subject','Status','TeamsStatus','TeamsError','SkipReason','ErrorMessage','RecipientTypeDetails','ExchangeSource')
 $counters = @{ Files = 0; Rows = 0; Sent = 0; DryRun = 0; Failed = 0; Skipped = 0; AlreadySent = 0; MailboxNotFound = 0; RemoteMailbox = 0; MailboxUsageUnavailable = 0; MailboxUsageBelowThreshold = 0; TeamsSent = 0; TeamsFailed = 0; TeamsDryRun = 0 }
 $processedItems = New-Object System.Collections.ArrayList
 $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
@@ -326,8 +325,6 @@ try {
                 $skipReason = 'EffectiveDateInPast'
             }
 
-            $userName = [string](Get-SmartM365CommunicationProperty -InputObject $row -Names @('UserName','DisplayName','Name') -DefaultValue (($email -split '@')[0]))
-            $nameSource = 'CSV'
             $language = Resolve-SmartM365CommunicationLanguageTag -Row $row -ForceLanguage $ForceLanguage -DefaultLanguageTag $defaultLanguage -DomainLanguageMap $domainLanguageMap
             $exchangeLanguageSource = ''
             if ([string]::IsNullOrWhiteSpace($ForceLanguage) -and $exchangeSnapInState.Available) {
@@ -336,9 +333,8 @@ try {
                 if ($exchangeLanguage.Source -ne 'Default') { $exchangeLanguageSource = [string]$exchangeLanguage.Source }
             }
             if ($enableAdLookup) {
-                $adInfo = Resolve-SmartM365CommunicationAdUserInfo -SmtpAddress $email -GcServer $forestGcServer -DefaultLanguageTag $defaultLanguage -ResolveDisplayName -ResolveLanguage
+                $adInfo = Resolve-SmartM365CommunicationAdUserInfo -SmtpAddress $email -GcServer $forestGcServer -DefaultLanguageTag $defaultLanguage -ResolveLanguage
                 if ($adInfo.Found) {
-                    if (-not [string]::IsNullOrWhiteSpace($adInfo.DisplayName)) { $userName = $adInfo.DisplayName; $nameSource = $adInfo.Source }
                     if ([string]::IsNullOrWhiteSpace($ForceLanguage) -and [string]::IsNullOrWhiteSpace($exchangeLanguageSource) -and -not [string]::IsNullOrWhiteSpace($adInfo.PreferredLanguage)) { $language = $adInfo.PreferredLanguage }
                 }
             }
@@ -347,7 +343,7 @@ try {
             if (-not [string]::IsNullOrWhiteSpace($skipReason)) {
                 if ($skipReason -eq 'AlreadySent') { $counters.AlreadySent++ } else { $counters.Skipped++ }
                 [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = "Skipped:$skipReason" })
-                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; UserName = $userName; NameSource = $nameSource; LanguageTag = $language; Scope = 'Preflight'; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = $skipReason; ErrorMessage = $preflightErrorMessage; RecipientTypeDetails = ''; ExchangeSource = '' })
+                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = 'Preflight'; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = $skipReason; ErrorMessage = $preflightErrorMessage; RecipientTypeDetails = ''; ExchangeSource = '' })
                 continue
             }
 
@@ -361,19 +357,15 @@ try {
                 if (-not $exchangeState.Exists -and $skipMailboxNotFound -and -not $ForceSend) {
                     $counters.MailboxNotFound++
                     [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Skipped:MailboxNotFound(Exchange)' })
-                    Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; UserName = $userName; NameSource = $nameSource; LanguageTag = $language; Scope = $exchangeScope; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = 'MailboxNotFound(Exchange)'; ErrorMessage = $exchangeState.ErrorMessage; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
+                    Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = $exchangeScope; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = 'MailboxNotFound(Exchange)'; ErrorMessage = $exchangeState.ErrorMessage; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
                     continue
                 }
 
                 if ($exchangeState.IsRemoteMailbox -and $skipRemoteMailbox -and -not $ForceSend) {
                     $counters.RemoteMailbox++
                     [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Skipped:IsRemoteMailbox(Exchange)' })
-                    Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; UserName = $userName; NameSource = $nameSource; LanguageTag = $language; Scope = $exchangeScope; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = 'IsRemoteMailbox(Exchange)'; ErrorMessage = ''; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
+                    Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = $exchangeScope; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = 'IsRemoteMailbox(Exchange)'; ErrorMessage = ''; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
                     continue
-                }
-
-                if ([string]::IsNullOrWhiteSpace($userName) -or $nameSource -eq 'CSV') {
-                    if (-not [string]::IsNullOrWhiteSpace($exchangeState.DisplayName)) { $userName = $exchangeState.DisplayName; $nameSource = 'ExchangeRecipient' }
                 }
             }
 
@@ -386,7 +378,7 @@ try {
                 elseif ($skipMailboxUsageUnavailable -and -not $ForceSend) {
                     $counters.MailboxUsageUnavailable++
                     [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Skipped:MailboxUsageUnavailable' })
-                    Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; UserName = $userName; NameSource = $nameSource; LanguageTag = $language; Scope = $exchangeScope; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = 'MailboxUsageUnavailable'; ErrorMessage = $usageInfo.ErrorMessage; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
+                    Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = $exchangeScope; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = 'MailboxUsageUnavailable'; ErrorMessage = $usageInfo.ErrorMessage; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
                     continue
                 }
             }
@@ -394,7 +386,7 @@ try {
             if ($totalGb -ge 0 -and $totalGb -lt $mailboxMinGbToNotify -and -not $ForceSend) {
                 $counters.MailboxUsageBelowThreshold++
                 [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Skipped:MailboxUsageBelowThreshold' })
-                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; UserName = $userName; NameSource = $nameSource; LanguageTag = $language; Scope = $exchangeScope; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = ("MailboxUsageBelowThreshold({0}GB<{1}GB)" -f $totalGb, $mailboxMinGbToNotify); ErrorMessage = ''; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
+                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = $exchangeScope; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Skipped'; SkipReason = ("MailboxUsageBelowThreshold({0}GB<{1}GB)" -f $totalGb, $mailboxMinGbToNotify); ErrorMessage = ''; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
                 continue
             }
 
@@ -404,7 +396,6 @@ try {
                 $usageText = (Expand-SmartM365CommunicationTemplate -TemplateContent $usageTemplate -Tokens @{ MailboxUsagePercent = $(if ($usagePercent -ge 0) { $usagePercent } else { $unknownUsageLabel }); MailboxMaxGb = $mailboxMaxGb })
                 $logoTokens = Get-SmartM365CommunicationLinkedLogoTokens -LogoPath $logoPath -LogoContentId $logoContentId
                 $tokens = @{
-                    UserName = $userName
                     Date = $(if ($effectiveDateText) { $effectiveDateText } else { (Get-Date).ToString('yyyy-MM-dd') })
                     Hotline = Get-SmartM365CommunicationHotline -HotlineByLanguageOrCountry $hotlineMap -LanguageTag $language -DefaultHotline ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'DefaultHotline' -DefaultValue ''))
                     MailboxUsageText = $usageText
@@ -438,12 +429,12 @@ try {
                 else { $counters.Skipped++ }
                 $status = if ($WhatIf) { 'DryRun' } elseif ($result.Sent) { 'Success' } else { $result.Mode }
                 [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = $status })
-                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; UserName = $userName; NameSource = $nameSource; LanguageTag = $language; Scope = 'Domain'; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = $status; TeamsStatus = $teamsStatus; TeamsError = $teamsError; SkipReason = ''; ErrorMessage = $result.Mode; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
+                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = 'Domain'; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = $status; TeamsStatus = $teamsStatus; TeamsError = $teamsError; SkipReason = ''; ErrorMessage = $result.Mode; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
             }
             catch {
                 $counters.Failed++
                 [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Failed' })
-                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; UserName = $userName; NameSource = $nameSource; LanguageTag = $language; Scope = 'Domain'; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Failed'; SkipReason = ''; ErrorMessage = $_.Exception.Message; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
+                Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = 'Domain'; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Failed'; SkipReason = ''; ErrorMessage = $_.Exception.Message; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
             }
         }
     }
