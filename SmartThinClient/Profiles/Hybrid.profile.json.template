@@ -1,7 +1,9 @@
 {
   "ProfileName": "Hybrid",
   "Provider": "Hybrid",
-  "LaunchMode": "SelectionAtStartup",
+  "LaunchMode": "WebShell",
+  "PreferredAccessMode": "Web",
+  "UseWebShell": true,
   "HybridSelectionAtStartup": true,
   "HybridDefaultProvider": "Citrix",
   "AllowedProviders": [

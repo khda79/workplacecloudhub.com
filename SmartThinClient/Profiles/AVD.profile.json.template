@@ -1,7 +1,10 @@
 {
   "ProfileName": "AVD",
   "Provider": "Microsoft",
-  "LaunchMode": "WindowsApp",
+  "LaunchMode": "WebShell",
+  "PreferredAccessMode": "Web",
+  "UseWebShell": true,
+  "AvdWebUrl": "",
   "FeedUrl": "",
   "WorkspaceUrl": "",
   "FallbackWebUrl": "",
