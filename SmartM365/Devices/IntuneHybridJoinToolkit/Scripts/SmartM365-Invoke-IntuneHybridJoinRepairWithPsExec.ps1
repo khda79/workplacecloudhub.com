@@ -94,6 +94,9 @@ Seconds to wait between checks for completed parallel jobs. Defaults to 2.
 .PARAMETER DelayBetweenCyclesMinutes
 Minutes to wait after one full pass over the computer list before starting the next pass. Defaults to 1.
 
+.PARAMETER DisableLotRunMutex
+Disables the per-LOT run mutex that prevents the same LOT from being launched multiple times concurrently.
+
 .PARAMETER DisableNightPause
 Disables the default night pause that prevents a new cycle from starting between 20:00 and 07:00 local time.
 
@@ -167,6 +170,7 @@ param(
     [int]$GlobalConcurrencyLeaseTimeoutMinutes = 0,
     [int]$JobPollSeconds = 2,
     [int]$DelayBetweenCyclesMinutes = 1,
+    [switch]$DisableLotRunMutex,
     [switch]$DisableNightPause,
     [int]$NightPauseStartHour = 20,
     [int]$NightPauseEndHour = 7,
@@ -212,7 +216,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.51"
+$LauncherVersion = "2.10.52"
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join " "))
@@ -382,6 +386,49 @@ if (-not (Test-Path -LiteralPath $LocalScriptPath)) {
 
 if (-not (Test-Path -LiteralPath $ComputerListPath)) {
     throw "Computer list not found: $ComputerListPath"
+}
+
+function New-LotRunMutexName {
+    param([Parameter(Mandatory=$true)][string]$LotPath)
+
+    $normalizedPath = ([System.IO.Path]::GetFullPath($LotPath)).TrimEnd('\').ToUpperInvariant()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalizedPath)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = ([System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '')
+    }
+    finally {
+        $sha.Dispose()
+    }
+
+    return "Local\SmartM365_IntuneHybridJoinToolkit_LotRun_$($hash.Substring(0, 32))"
+}
+
+function Acquire-LotRunMutex {
+    param(
+        [Parameter(Mandatory=$true)][string]$MutexName,
+        [Parameter(Mandatory=$true)][string]$LotPath
+    )
+
+    $createdNew = $false
+    $mutex = New-Object System.Threading.Mutex($true, $MutexName, [ref]$createdNew)
+    if (-not $createdNew) {
+        $mutex.Dispose()
+        throw ("This LOT is already running in another launcher process. LOT={0}; Mutex={1}" -f $LotPath,$MutexName)
+    }
+
+    return $mutex
+}
+
+$script:LotRunMutex = $null
+$script:LotRunMutexName = $null
+if (-not $DisableLotRunMutex) {
+    $script:LotRunMutexName = New-LotRunMutexName -LotPath $LotRoot
+    $script:LotRunMutex = Acquire-LotRunMutex -MutexName $script:LotRunMutexName -LotPath $LotRoot
+    Write-Host ("LOT run lock: acquired {0}" -f $script:LotRunMutexName) -ForegroundColor DarkGray
+}
+else {
+    Write-Host "LOT run lock: disabled by -DisableLotRunMutex." -ForegroundColor Yellow
 }
 
 function Invoke-PreRunLotArchive {
@@ -3697,4 +3744,10 @@ Write-Host "Launcher stopped after $cycle cycle(s)." -ForegroundColor Green
 if ($script:globalConcurrencyMutex -ne $null) {
     try { $script:globalConcurrencyMutex.Dispose() } catch { }
     $script:globalConcurrencyMutex = $null
+}
+
+if ($script:LotRunMutex -ne $null) {
+    try { $script:LotRunMutex.ReleaseMutex() } catch { }
+    try { $script:LotRunMutex.Dispose() } catch { }
+    $script:LotRunMutex = $null
 }
