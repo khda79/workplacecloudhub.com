@@ -135,13 +135,31 @@ function Add-TimestampToLogFile {
     Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -WhatIf:$false
 }
 
+function Get-ObjectCount {
+    param(
+        [AllowNull()]
+        $Value
+    )
+
+    if ($null -eq $Value) {
+        return 0
+    }
+
+    $countProperty = $Value.GetType().GetProperty('Count')
+    if ($countProperty) {
+        return [int]$countProperty.GetValue($Value, $null)
+    }
+
+    return @($Value).Count
+}
+
 function Stop-TimestampedTranscript {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path
     )
 
-    Stop-Transcript -WhatIf:$false | Out-Null
+    Stop-Transcript | Out-Null
     $script:TranscriptStarted = $false
     Add-TimestampToLogFile -Path $Path
 }
@@ -331,7 +349,7 @@ function Get-FileInventoryFromLibrary {
                 ModifiedBy        = Convert-SPFieldUserValueToString -Value $item['Editor'] -Web $Web
                 ContentType       = $item.ContentType.Name
                 Version           = $file.UIVersionLabel
-                VersionsCount     = $file.Versions.Count
+                VersionsCount     = Get-ObjectCount -Value $file.Versions
                 CheckedOutBy      = $checkedOutBy
             }
         }

@@ -113,7 +113,7 @@ function Stop-TimestampedTranscript {
     param([string]$Path)
 
     try {
-        Stop-Transcript -WhatIf:$false | Out-Null
+        Stop-Transcript | Out-Null
     }
     catch {
         return
