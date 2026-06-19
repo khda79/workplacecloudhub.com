@@ -7,7 +7,6 @@ Start from `ExchangeMigrationMailboxSizeReduction-List.csv.template`, copy it to
 Expected columns:
 
 - `PrimarySmtpAddress`: recipient mailbox address.
-- `UserName`: display name used in the email template.
 - `LanguageTag`: optional language tag such as `en`, `fr`, or `fr-FR`.
 - `TargetSkuPartNumber`: license SKU used to resolve the configured mailbox quota, such as `SPE_E3` or `SPE_F1`.
 - `MailboxSizeMB`: optional mailbox size in MB when live Exchange usage checks are not used.

@@ -7,7 +7,6 @@ Start from `ExchangeArchive-Recipients.csv.template`, copy it to a new `.csv` fi
 Expected columns:
 
 - `PrimarySmtpAddress`: recipient mailbox address.
-- `UserName`: display name used in the email template.
 - `LanguageTag`: optional language tag such as `en`, `fr`, or `fr-FR`.
 - `EffectiveDate`: optional archive activation date used by the template and skip logic. It can stay empty when `Force effective date` is selected in the GUI run options. When filled in CSV, use `yyyy-MM-dd` only, for example `2026-07-01`; avoid regional formats such as `01/07/2026`.
 - `MailboxTotalGb`: optional mailbox size in GB when live Exchange usage checks are not used.

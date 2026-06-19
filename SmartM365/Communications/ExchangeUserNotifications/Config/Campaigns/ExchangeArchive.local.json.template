@@ -19,9 +19,9 @@
   "TeamsSuccessTitle": "SmartM365 Exchange archive notification completed",
   "TeamsFailureTitle": "SmartM365 Exchange archive notification failed",
   "TeamsUserMessageByLanguage": {
-    "default": "Hello {{UserName}}, an important message about your online archive has been sent to your email. Please read it before {{Date}}.",
-    "en": "Hello {{UserName}}, an important message about your online archive has been sent to your email. Please read it before {{Date}}.",
-    "fr": "Bonjour {{UserName}}, un message important concernant votre archive en ligne vous a ete envoye par email. Merci de le lire avant le {{Date}}."
+    "default": "An important message about your online archive has been sent to your email. Please read it before {{Date}}.",
+    "en": "An important message about your online archive has been sent to your email. Please read it before {{Date}}.",
+    "fr": "Un message important concernant votre archive en ligne vous a ete envoye par email. Merci de le lire avant le {{Date}}."
   },
   "LogoPath": "{{SmartM365RootPath}}\\WorkplaceCloudHub.ico",
   "LogoContentId": "smartm365logo",
@@ -35,7 +35,7 @@
   "SkipMailboxNotFoundWhenExchangeCheckAvailable": true,
   "SkipRemoteMailboxWhenExchangeCheckAvailable": true,
   "SkipMailboxUsageUnavailableWhenExchangeCheckAvailable": true,
-  "EnableAdLookupForLanguageAndName": true,
+  "EnableAdLookupForLanguage": true,
   "ForestGcServer": "",
   "SubjectByLanguage": {
     "default": "Your online archive will be enabled",
