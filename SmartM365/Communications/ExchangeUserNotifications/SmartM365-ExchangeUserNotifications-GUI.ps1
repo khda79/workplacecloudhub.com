@@ -307,6 +307,104 @@ function Get-SharedConfigValue {
     return $value
 }
 
+function Get-LocalSharedConfigValue {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string]$DefaultValue = ''
+    )
+
+    $root = Get-ExchangeUserNotificationsRoot
+    $localPath = Join-Path -Path $root -ChildPath 'Config\Communications.local.json'
+    if (-not (Test-Path -LiteralPath $localPath)) { return $DefaultValue }
+    try {
+        $config = Read-JsonFile -Path $localPath
+        return Get-ConfigPropertyValue -Config $config -Name $Name -DefaultValue $DefaultValue
+    }
+    catch {
+        Write-Verbose ("Unable to read shared local config '{0}': {1}" -f $localPath, $_.Exception.Message)
+        return $DefaultValue
+    }
+}
+
+function Get-LocalCampaignConfigValue {
+    param(
+        [Parameter(Mandatory)]$Campaign,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$DefaultValue = ''
+    )
+
+    if (-not (Test-Path -LiteralPath $Campaign.LocalConfigPath)) { return $DefaultValue }
+    try {
+        $config = Read-JsonFile -Path $Campaign.LocalConfigPath
+        return Get-ConfigPropertyValue -Config $config -Name $Name -DefaultValue $DefaultValue
+    }
+    catch {
+        Write-Verbose ("Unable to read local campaign config '{0}': {1}" -f $Campaign.LocalConfigPath, $_.Exception.Message)
+        return $DefaultValue
+    }
+}
+
+function Get-CampaignConfigObjectValue {
+    param(
+        [Parameter(Mandatory)]$Campaign,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    foreach ($path in @($Campaign.TemplateConfigPath, $Campaign.LocalConfigPath)) {
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            $config = Read-JsonFile -Path $path
+            $property = $config.PSObject.Properties[$Name]
+            if ($null -ne $property -and $null -ne $property.Value) { return $property.Value }
+        }
+        catch {
+            Write-Verbose ("Unable to read campaign config '{0}': {1}" -f $path, $_.Exception.Message)
+        }
+    }
+    return $null
+}
+
+function Test-TeamsUserMessageTemplateConfigured {
+    param([Parameter(Mandatory)]$Campaign)
+
+    $messageByLanguage = Get-CampaignConfigObjectValue -Campaign $Campaign -Name 'TeamsUserMessageByLanguage'
+    if ($null -eq $messageByLanguage) { return $false }
+
+    foreach ($property in @($messageByLanguage.PSObject.Properties)) {
+        if ($null -ne $property.Value -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Get-TeamsUserMessageGuiState {
+    param([Parameter(Mandatory)]$Campaign)
+
+    $sharedMode = Get-LocalSharedConfigValue -Name 'TeamsUserMessageMode' -DefaultValue ''
+    $campaignMode = Get-LocalCampaignConfigValue -Campaign $Campaign -Name 'TeamsUserMessageMode' -DefaultValue ''
+    $mode = if (-not [string]::IsNullOrWhiteSpace($campaignMode) -and $campaignMode -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) { $campaignMode } else { $sharedMode }
+    $modeEnabled = $mode -in @('Graph', 'GraphDelegated', 'Delegated')
+    $templateConfigured = Test-TeamsUserMessageTemplateConfigured -Campaign $Campaign
+    $available = ($modeEnabled -and $templateConfigured)
+
+    $reason = if (-not $modeEnabled) {
+        'Configure TeamsUserMessageMode = GraphDelegated in the local communications or campaign config to enable this option.'
+    }
+    elseif (-not $templateConfigured) {
+        'TeamsUserMessageByLanguage is missing or empty in the campaign configuration.'
+    }
+    else {
+        'Optional. Uses Microsoft Graph delegated User.Read, Chat.Create and ChatMessage.Send permissions to send a one-on-one Teams message.'
+    }
+
+    [pscustomobject]@{
+        Available = $available
+        Checked = $available
+        ToolTip = $reason
+    }
+}
+
 function ConvertTo-ConfigDisplayText {
     param([AllowNull()]$Value)
 
@@ -871,7 +969,7 @@ function Show-RunState {
     $script:MailSendModeCombo.IsEnabled = -not $Running
     $script:ExchangeManagementModeCombo.IsEnabled = -not $Running
     $script:EffectiveDatePicker.IsEnabled = -not $Running
-    $script:TeamsUserMessageCheck.IsEnabled = -not $Running
+    $script:TeamsUserMessageCheck.IsEnabled = ((-not $Running) -and $script:TeamsUserMessageAvailable)
     $script:DryRunRadio.IsEnabled = -not $Running
     $script:LiveRadio.IsEnabled = -not $Running
     $script:Window.Cursor = if ($Running) { [System.Windows.Input.Cursors]::Wait } else { [System.Windows.Input.Cursors]::Arrow }
@@ -1121,10 +1219,11 @@ function Show-CampaignView {
     $exchangeManagementMode = Get-CampaignConfigValue -Campaign $campaign -Name 'ExchangeManagementMode' -DefaultValue 'Auto'
     Select-ComboBoxValue -ComboBox $script:ExchangeManagementModeCombo -Value $exchangeManagementMode
     $script:ExchangeManagementModeCombo.ToolTip = 'Auto tries Exchange Online first, then Exchange 2016 fallback when enabled. ExchangeOnline and Exchange2016 force a specific mode.'
-    $sharedTeamsUserMode = Get-SharedConfigValue -Name 'TeamsUserMessageMode' -DefaultValue 'Disabled'
-    $teamsUserMode = Get-CampaignConfigValue -Campaign $campaign -Name 'TeamsUserMessageMode' -DefaultValue $sharedTeamsUserMode
-    $script:TeamsUserMessageCheck.IsChecked = ($teamsUserMode -in @('Graph', 'GraphDelegated', 'Delegated'))
-    $script:TeamsUserMessageCheck.ToolTip = 'Optional. Uses Microsoft Graph delegated Chat.Create and ChatMessage.Send permissions to send a one-on-one Teams message.'
+    $teamsUserMessageState = Get-TeamsUserMessageGuiState -Campaign $campaign
+    $script:TeamsUserMessageAvailable = [bool]$teamsUserMessageState.Available
+    $script:TeamsUserMessageCheck.IsChecked = [bool]$teamsUserMessageState.Checked
+    $script:TeamsUserMessageCheck.IsEnabled = [bool]$teamsUserMessageState.Available
+    $script:TeamsUserMessageCheck.ToolTip = [string]$teamsUserMessageState.ToolTip
     $script:SkipConfirmationCheck.Visibility = if ($campaign.SupportsSkipConfirmation) { 'Visible' } else { 'Collapsed' }
     $script:SourceModePanel.Visibility = 'Collapsed'
     $script:EffectiveDatePanel.Visibility = if ($campaign.SupportsEffectiveDate) { 'Visible' } else { 'Collapsed' }
