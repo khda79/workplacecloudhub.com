@@ -1,0 +1,13 @@
+{
+  "ProfileName": "Hybrid",
+  "Provider": "Hybrid",
+  "LaunchMode": "SelectionAtStartup",
+  "HybridSelectionAtStartup": true,
+  "HybridDefaultProvider": "Citrix",
+  "AllowedProviders": [
+    "Citrix",
+    "AVD",
+    "WebOnly"
+  ],
+  "Notes": "Hybrid starts a small provider choice window at logon unless disabled in local configuration."
+}
