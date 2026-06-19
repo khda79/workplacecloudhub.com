@@ -871,6 +871,7 @@ function Show-RunState {
     $script:MailSendModeCombo.IsEnabled = -not $Running
     $script:ExchangeManagementModeCombo.IsEnabled = -not $Running
     $script:EffectiveDatePicker.IsEnabled = -not $Running
+    $script:TeamsUserMessageCheck.IsEnabled = -not $Running
     $script:DryRunRadio.IsEnabled = -not $Running
     $script:LiveRadio.IsEnabled = -not $Running
     $script:Window.Cursor = if ($Running) { [System.Windows.Input.Cursors]::Wait } else { [System.Windows.Input.Cursors]::Arrow }
@@ -937,6 +938,8 @@ function Get-CommandArgument {
 
     if ($script:ForceSendCheck.IsChecked) { $commandArgs.Add('-ForceSend') }
     if ($script:NoSummaryCheck.IsChecked) { $commandArgs.Add('-NoSummaryEmail') }
+    $commandArgs.Add('-TeamsUserMessageMode')
+    if ($script:TeamsUserMessageCheck.IsChecked) { $commandArgs.Add('GraphDelegated') } else { $commandArgs.Add('Disabled') }
     if ($campaign.SupportsSkipConfirmation -and $script:SkipConfirmationCheck.IsChecked) { $commandArgs.Add('-SkipConfirmation') }
     if ((Get-RunMode) -eq 'DryRun') { $commandArgs.Add('-WhatIf') }
 
@@ -1118,6 +1121,10 @@ function Show-CampaignView {
     $exchangeManagementMode = Get-CampaignConfigValue -Campaign $campaign -Name 'ExchangeManagementMode' -DefaultValue 'Auto'
     Select-ComboBoxValue -ComboBox $script:ExchangeManagementModeCombo -Value $exchangeManagementMode
     $script:ExchangeManagementModeCombo.ToolTip = 'Auto tries Exchange Online first, then Exchange 2016 fallback when enabled. ExchangeOnline and Exchange2016 force a specific mode.'
+    $sharedTeamsUserMode = Get-SharedConfigValue -Name 'TeamsUserMessageMode' -DefaultValue 'Disabled'
+    $teamsUserMode = Get-CampaignConfigValue -Campaign $campaign -Name 'TeamsUserMessageMode' -DefaultValue $sharedTeamsUserMode
+    $script:TeamsUserMessageCheck.IsChecked = ($teamsUserMode -in @('Graph', 'GraphDelegated', 'Delegated'))
+    $script:TeamsUserMessageCheck.ToolTip = 'Optional. Uses Microsoft Graph delegated Chat.Create and ChatMessage.Send permissions to send a one-on-one Teams message.'
     $script:SkipConfirmationCheck.Visibility = if ($campaign.SupportsSkipConfirmation) { 'Visible' } else { 'Collapsed' }
     $script:SourceModePanel.Visibility = 'Collapsed'
     $script:EffectiveDatePanel.Visibility = if ($campaign.SupportsEffectiveDate) { 'Visible' } else { 'Collapsed' }
@@ -1612,6 +1619,7 @@ $xaml = @'
                                 <TextBlock Text="Overrides CSV EffectiveDate for every recipient." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,4,0,0"/>
                             </StackPanel>
                             <CheckBox x:Name="ForceSendCheck" Content="Force send" Margin="0,0,0,8"/>
+                            <CheckBox x:Name="TeamsUserMessageCheck" Content="Send Teams message" Margin="0,0,0,8"/>
                             <CheckBox x:Name="NoSummaryCheck" Content="No summary email" Margin="0,0,0,8"/>
                             <CheckBox x:Name="SkipConfirmationCheck" Content="Skip campaign confirmation" IsChecked="True" Margin="0,0,0,0"/>
                         </StackPanel>
@@ -1762,7 +1770,7 @@ $controlNames = @(
     'ExchangeMigrationCampaignTab','ExchangeArchiveCampaignTab','ExchangeSizeReductionCampaignTab','RunCampaignContent',
     'TenantProfileCombo','CampaignBadgeText','CampaignTitleText','CampaignDescriptionText','DryRunRadio','LiveRadio',
     'SourceModePanel','InventoryRadio','FromListRadio','RecipientPathLabel','RecipientPathBox','RecipientPathHelpText','RecipientPathStatusText','RecipientCountText','BrowsePathButton','BrowseFolderButton',
-    'MailSendModeCombo','ExchangeManagementModeCombo','ForceLanguageCombo','EffectiveDatePanel','EffectiveDatePicker','ForceSendCheck','NoSummaryCheck','SkipConfirmationCheck','CommandPreviewBox','ScriptPathText',
+    'MailSendModeCombo','ExchangeManagementModeCombo','ForceLanguageCombo','EffectiveDatePanel','EffectiveDatePicker','ForceSendCheck','TeamsUserMessageCheck','NoSummaryCheck','SkipConfirmationCheck','CommandPreviewBox','ScriptPathText',
     'LocalConfigPathText','TemplateConfigPathText','OpenLocalConfigButton','ConfigParameterList',
     'TemplateCampaignCombo','TemplateFolderPathText','TemplateSummaryText','TemplateList','TemplatePreviewBrowser','OpenTemplateFolderButton','OutputBox','ClearOutputButton'
 )
@@ -1851,7 +1859,7 @@ $script:FromListRadio.Add_Checked({
         Show-RecipientEstimate
     }
 })
-foreach ($checkBox in @($script:ForceSendCheck, $script:NoSummaryCheck, $script:SkipConfirmationCheck)) {
+foreach ($checkBox in @($script:ForceSendCheck, $script:TeamsUserMessageCheck, $script:NoSummaryCheck, $script:SkipConfirmationCheck)) {
     $checkBox.Add_Checked({ Show-CommandPreview })
     $checkBox.Add_Unchecked({ Show-CommandPreview })
 }

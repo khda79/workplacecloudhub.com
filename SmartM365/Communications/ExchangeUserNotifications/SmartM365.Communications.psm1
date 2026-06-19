@@ -1170,6 +1170,170 @@ function Send-SmartM365CommunicationMail {
     }
 }
 
+function Get-SmartM365CommunicationTeamsUserMode {
+    [CmdletBinding()]
+    param([string]$TeamsUserMessageMode = 'Disabled')
+
+    $mode = if ([string]::IsNullOrWhiteSpace($TeamsUserMessageMode) -or $TeamsUserMessageMode -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { 'Disabled' } else { $TeamsUserMessageMode.Trim() }
+    switch ($mode.ToLowerInvariant()) {
+        'disabled' { return 'Disabled' }
+        'off' { return 'Disabled' }
+        'none' { return 'Disabled' }
+        'graph' { return 'GraphDelegated' }
+        'graphdelegated' { return 'GraphDelegated' }
+        'delegated' { return 'GraphDelegated' }
+        default { throw "Unsupported TeamsUserMessageMode '$TeamsUserMessageMode'. Use Disabled or GraphDelegated." }
+    }
+}
+
+function ConvertTo-SmartM365GraphODataStringLiteral {
+    [CmdletBinding()]
+    param([string]$Value)
+
+    return ([string]$Value).Replace("'", "''")
+}
+
+function Connect-SmartM365CommunicationTeamsUserGraph {
+    [CmdletBinding()]
+    param(
+        [string]$TenantId = '',
+        [string[]]$Scopes = @('User.Read', 'Chat.Create', 'ChatMessage.Send')
+    )
+
+    if (-not (Get-Command -Name Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
+        Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    }
+
+    $context = Get-MgContext -ErrorAction SilentlyContinue
+    if ($context -and $context.AuthType -eq 'Delegated') {
+        $scopeMap = @{}
+        foreach ($scope in @($context.Scopes)) { $scopeMap[[string]$scope] = $true }
+        $missingScope = $false
+        foreach ($scope in $Scopes) {
+            if (-not $scopeMap.ContainsKey($scope)) { $missingScope = $true; break }
+        }
+        if (-not $missingScope) { return $true }
+    }
+
+    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { Write-Verbose ("Microsoft Graph disconnect before Teams delegated connection failed: {0}" -f $_.Exception.Message) }
+    if ([string]::IsNullOrWhiteSpace($TenantId) -or $TenantId -in @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+        Connect-MgGraph -Scopes $Scopes -NoWelcome -ErrorAction Stop | Out-Null
+    }
+    else {
+        Connect-MgGraph -TenantId $TenantId -Scopes $Scopes -NoWelcome -ErrorAction Stop | Out-Null
+    }
+
+    return $true
+}
+
+function Resolve-SmartM365CommunicationGraphUserId {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$User)
+
+    $trimmed = $User.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) { return '' }
+
+    $escapedPath = [System.Uri]::EscapeDataString($trimmed)
+    try {
+        $direct = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id" -f $escapedPath) -ErrorAction Stop
+        if ($direct -and $direct.id) { return [string]$direct.id }
+    }
+    catch {
+        Write-Verbose ("Direct Microsoft Graph user lookup failed for Teams target '{0}': {1}" -f $trimmed, $_.Exception.Message)
+    }
+
+    $literal = ConvertTo-SmartM365GraphODataStringLiteral -Value $trimmed
+    foreach ($filter in @(
+        "mail eq '$literal' or userPrincipalName eq '$literal'",
+        "proxyAddresses/any(p:p eq 'SMTP:$literal') or proxyAddresses/any(p:p eq 'smtp:$literal')"
+    )) {
+        try {
+            $encodedFilter = [System.Uri]::EscapeDataString($filter)
+            $result = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/users?`$select=id&`$top=1&`$filter={0}" -f $encodedFilter) -ErrorAction Stop
+            if ($result -and $result.value -and $result.value.Count -gt 0 -and $result.value[0].id) {
+                return [string]$result.value[0].id
+            }
+        }
+        catch {
+            Write-Verbose ("Filtered Microsoft Graph user lookup failed for Teams target '{0}': {1}" -f $trimmed, $_.Exception.Message)
+        }
+    }
+
+    throw "Microsoft Graph user not found for Teams message target '$User'."
+}
+
+function Send-SmartM365CommunicationTeamsUserMessage {
+    [CmdletBinding()]
+    param(
+        [string]$TeamsUserMessageMode = 'Disabled',
+        [Parameter(Mandatory)][string]$To,
+        [Parameter(Mandatory)][string]$MessageText,
+        [string]$TenantId = '',
+        [string]$SenderUserId = '',
+        [int]$RetryCount = 1,
+        [int]$RetryDelaySeconds = 2,
+        [switch]$WhatIf
+    )
+
+    $effectiveMode = Get-SmartM365CommunicationTeamsUserMode -TeamsUserMessageMode $TeamsUserMessageMode
+    if ($WhatIf) { return [pscustomobject]@{ Sent = $false; Mode = 'DryRun'; Error = '' } }
+    if ($effectiveMode -eq 'Disabled') { return [pscustomobject]@{ Sent = $false; Mode = 'Disabled'; Error = '' } }
+    if ([string]::IsNullOrWhiteSpace($To)) { throw 'Teams message recipient is required.' }
+    if ([string]::IsNullOrWhiteSpace($MessageText)) { throw 'Teams message text is required.' }
+
+    Connect-SmartM365CommunicationTeamsUserGraph -TenantId $TenantId | Out-Null
+
+    if ([string]::IsNullOrWhiteSpace($SenderUserId)) {
+        $me = Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/me?$select=id' -ErrorAction Stop
+        $SenderUserId = [string]$me.id
+    }
+    if ([string]::IsNullOrWhiteSpace($SenderUserId)) { throw 'Unable to resolve the delegated Teams sender user id.' }
+
+    $targetUserId = Resolve-SmartM365CommunicationGraphUserId -User $To
+    $senderBind = "https://graph.microsoft.com/v1.0/users('$SenderUserId')"
+    $targetBind = "https://graph.microsoft.com/v1.0/users('$targetUserId')"
+    $chatBody = @{
+        chatType = 'oneOnOne'
+        members = @(
+            @{
+                '@odata.type' = '#microsoft.graph.aadUserConversationMember'
+                roles = @('owner')
+                'user@odata.bind' = $senderBind
+            },
+            @{
+                '@odata.type' = '#microsoft.graph.aadUserConversationMember'
+                roles = @('owner')
+                'user@odata.bind' = $targetBind
+            }
+        )
+    } | ConvertTo-Json -Depth 8
+
+    $attempt = 0
+    while ($true) {
+        try {
+            $attempt++
+            $chat = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/chats' -Body $chatBody -ContentType 'application/json' -ErrorAction Stop
+            if (-not $chat -or [string]::IsNullOrWhiteSpace([string]$chat.id)) { throw 'Microsoft Graph did not return a chat id.' }
+
+            $messageBody = @{
+                body = @{
+                    contentType = 'text'
+                    content = $MessageText
+                }
+            } | ConvertTo-Json -Depth 6
+            $chatId = [System.Uri]::EscapeDataString([string]$chat.id)
+            Invoke-MgGraphRequest -Method POST -Uri ("https://graph.microsoft.com/v1.0/chats/{0}/messages" -f $chatId) -Body $messageBody -ContentType 'application/json' -ErrorAction Stop | Out-Null
+            return [pscustomobject]@{ Sent = $true; Mode = 'GraphDelegated'; Error = '' }
+        }
+        catch {
+            if ($attempt -gt $RetryCount) {
+                return [pscustomobject]@{ Sent = $false; Mode = 'GraphDelegated'; Error = $_.Exception.Message }
+            }
+            if ($RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
+        }
+    }
+}
+
 function New-SmartM365CommunicationSummaryHtml {
     [CmdletBinding()]
     param(
@@ -1213,6 +1377,7 @@ Export-ModuleMember -Function `
     Assert-SmartM365CommunicationNoUnresolvedToken, Load-SmartM365CommunicationSentRegistry, Save-SmartM365CommunicationSentRegistry, `
     Register-SmartM365CommunicationSentItem, Resolve-SmartM365CommunicationLanguageTag, Get-SmartM365CommunicationSubject, `
     Get-SmartM365CommunicationHotline, Add-SmartM365CommunicationLogRow, Get-SmartM365CommunicationMailMode, Send-SmartM365CommunicationMail, `
+    Get-SmartM365CommunicationTeamsUserMode, Send-SmartM365CommunicationTeamsUserMessage, `
     Initialize-SmartM365CommunicationExchangeSnapIn, Initialize-SmartM365CommunicationExchangeOnline, Initialize-SmartM365CommunicationExchangeManagement, ConvertTo-SmartM365CommunicationLdapFilterSafe, `
     Resolve-SmartM365CommunicationAdUserInfo, Test-SmartM365CommunicationExchangeMailboxState, `
     ConvertTo-SmartM365CommunicationBytes, Get-SmartM365CommunicationMailboxUsageInfo, Resolve-SmartM365CommunicationExchangeLanguageTag, `
