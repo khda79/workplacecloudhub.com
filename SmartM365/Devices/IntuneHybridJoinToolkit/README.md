@@ -86,6 +86,11 @@ This pause is checked before the first cycle and before every later cycle; it do
 already running. Set `EHJIR_DISABLE_NIGHT_PAUSE=1` or pass `-DisableNightPause` to allow cycles at night.
 The window can be adjusted with `EHJIR_NIGHT_PAUSE_START_HOUR` and `EHJIR_NIGHT_PAUSE_END_HOUR`.
 
+The PsExec launcher also prevents the same LOT folder from running twice at the same time on the same
+operator session. This protects `CentralLogs`, `PsExecLogs`, `Reports`, and `Computers.txt` from
+overlapping launches whether the LOT is started from the GUI, a wrapper CMD, or PowerShell. The emergency
+override is `EHJIR_DISABLE_LOT_RUN_MUTEX=1` or `-DisableLotRunMutex`.
+
 LOT runs use two concurrency controls:
 
 - `EHJIR_THROTTLE` / `-ThrottleLimit` limits parallel computers inside one LOT.
