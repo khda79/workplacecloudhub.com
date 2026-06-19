@@ -14,12 +14,16 @@ Then update:
 - `migration.config.source.txt`
 - `migration.config.target.txt`
 
-The `.cmd` files in `launchers` automatically detect the migration folder name.
-If the copied folder is `Migrations\Spain`, they run with `-MigrationName Spain`.
-Use the `.cmd` files in `launchers\scheduled-tasks` for Windows Task Scheduler:
-they run the same actions without pausing and return the PowerShell exit code.
+The grouped `.cmd` files under `launchers\interactive` and
+`launchers\scheduled-tasks` automatically detect the migration folder name. If
+the copied folder is `Migrations\Spain`, they run with `-MigrationName Spain`.
+Use `launchers\interactive\files` for file inventory/comparison,
+`launchers\interactive\permissions` for permission inventory/comparison, and
+the matching `launchers\scheduled-tasks\files` or
+`launchers\scheduled-tasks\permissions` folders for Windows Task Scheduler. The
+root `.cmd` files remain compatibility wrappers for existing shortcuts.
 If the repository copy is on a network share, configure scheduled tasks with
-`cmd.exe /d /c "\\server\share\...\launchers\scheduled-tasks\<launcher>.cmd"`
+`cmd.exe /d /c "\\server\share\...\launchers\scheduled-tasks\files\<launcher>.cmd"`
 and use UNC paths instead of mapped drives. The task account needs read/write
 access to the share because outputs are written under the migration folder.
 
