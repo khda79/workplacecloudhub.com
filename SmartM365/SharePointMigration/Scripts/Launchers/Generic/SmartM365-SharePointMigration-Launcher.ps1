@@ -189,12 +189,35 @@ function Open-DirectoryInExplorer {
             }
 
             if ($uncRoot) {
-                $explorerPath = Join-Path -Path $uncRoot -ChildPath $resolvedPath.Substring($root.Length)
+                $relativePath = $resolvedPath.Substring($root.Length).TrimStart('\')
+                $candidatePaths = New-Object 'System.Collections.Generic.List[string]'
+                $candidatePaths.Add((Join-Path -Path $uncRoot -ChildPath $relativePath))
+
+                $uncLeaf = Split-Path -Path $uncRoot.TrimEnd('\') -Leaf
+                if (-not [string]::IsNullOrWhiteSpace($uncLeaf) -and $relativePath.StartsWith(("{0}\" -f $uncLeaf), [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $candidatePaths.Add((Join-Path -Path $uncRoot -ChildPath $relativePath.Substring($uncLeaf.Length + 1)))
+                }
+
+                foreach ($candidatePath in $candidatePaths) {
+                    if (Test-Path -LiteralPath $candidatePath -PathType Container) {
+                        $explorerPath = $candidatePath
+                        break
+                    }
+                }
             }
         }
 
+        if (-not (Test-Path -LiteralPath $explorerPath -PathType Container)) {
+            Write-Warning ("Comparison directory cannot be opened because it does not exist: {0}" -f $explorerPath)
+            return
+        }
+
         Write-Info ("Opening comparison directory: {0}" -f $explorerPath) Cyan
-        Start-Process -FilePath explorer.exe -ArgumentList ('"{0}"' -f $explorerPath) | Out-Null
+
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $explorerPath
+        $startInfo.UseShellExecute = $true
+        [System.Diagnostics.Process]::Start($startInfo) | Out-Null
     }
     catch {
         Write-Warning ("Could not open comparison directory '{0}': {1}" -f $Path, $_.Exception.Message)
