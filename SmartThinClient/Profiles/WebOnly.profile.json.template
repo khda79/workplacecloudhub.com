@@ -1,0 +1,15 @@
+{
+  "ProfileName": "WebOnly",
+  "Provider": "Browser",
+  "LaunchMode": "Browser",
+  "WebOnlyUrl": "",
+  "BrowserPath": "",
+  "BrowserKioskMode": true,
+  "ExpectedExecutableNames": [
+    "msedge.exe",
+    "chrome.exe"
+  ],
+  "RequiredClient": "Microsoft Edge or another managed browser",
+  "SupportsHybridSelection": true,
+  "Notes": "Keep real workspace URLs in local runtime JSON only."
+}

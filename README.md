@@ -16,6 +16,7 @@ Most tools are designed to run directly from their project folder. Local tenant 
 - `SmartAzure/`: Azure infrastructure inventory, governance, security posture, and cost optimization scripts.
 - `SmartAzureVirtualDesktop/`: Azure Virtual Desktop inventory, health, diagnostics, autoscale, FSLogix storage, and cost optimization scripts.
 - `SmartCitrix/`: Citrix on-premises and Citrix Cloud inventory scripts, with separate implementation areas for each platform model.
+- `SmartThinClient/`: Windows endpoint thin-client shell tooling for controlled Citrix, Azure Virtual Desktop, or web workspace access.
 
 Additional project directories will be added over time.
 
@@ -35,6 +36,7 @@ Recommended entry points:
 - Azure inventory and governance scripts: `SmartAzure/README.md`
 - Azure Virtual Desktop inventory scripts: `SmartAzureVirtualDesktop/README.md`
 - Citrix inventory scripts: `SmartCitrix/README.md`
+- Windows thin-client endpoint tooling: `SmartThinClient/README.md`
 
 For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README.md` and `SmartM365/Setup/SmartM365-AppRegistration-Permissions.md`. Device tools under `SmartM365/Devices/` are mostly local endpoint tools and do not require the SmartM365 app-only setup unless their own README explicitly says so.
 
@@ -67,6 +69,12 @@ For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README
 - `Citrix-OnPrem/SmartInventory/CVAD/SmartCitrix-OnPrem-CVADHostingPower-Inventory.ps1`: exports hosting connections, power management settings, power actions, and reboot cycles.
 - `Citrix-OnPrem/SmartInventory/StoreFront/SmartCitrix-OnPrem-StoreFront-Inventory.ps1`: exports StoreFront deployment, store, authentication, receiver, farm, and gateway data from StoreFront PowerShell modules.
 - `Citrix-OnPrem/SmartInventory/Licensing/SmartCitrix-OnPrem-Licensing-Inventory.ps1`: exports CVAD licensing configuration and available licensing SDK data.
+
+## SmartThinClient Tools
+
+`SmartThinClient/` contains Windows endpoint tooling for controlled thin-client workspace scenarios.
+
+- `SmartThinClient-Shell.ps1`: audits local readiness for Citrix Workspace app and Microsoft Windows App / Azure Virtual Desktop access, then can apply or restore a guarded thin-client shell configuration with confirmation phrases, rollback files, logs, and JSON/CSV evidence.
 
 ## SmartAzure Tools
 
