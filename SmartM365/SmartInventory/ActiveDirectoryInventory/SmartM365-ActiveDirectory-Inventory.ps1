@@ -1074,10 +1074,14 @@ try {
     # ------------------------------------------------------
     try {
         if ($destinationRootPath) {
+            if (-not (Test-Path -LiteralPath $destinationRootPath)) {
+                New-Item -Path $destinationRootPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                WriteLog -Message ("Created missing LatestCsvFolderPath directory: {0}" -f $destinationRootPath)
+            }
             foreach ($combinedCsv in @($combinedUsersCsv, $combinedComputersCsv, $combinedGroupsCsv, $combinedOusCsv, $combinedContactsCsv)) {
                 if (Test-Path -Path $combinedCsv) {
                     $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($combinedCsv))
-                    Copy-Item -Path $combinedCsv -Destination $destinationFile -Force
+                    Copy-Item -LiteralPath $combinedCsv -Destination $destinationFile -Force -ErrorAction Stop
                     WriteLog -Message ("Copied combined CSV '{0}' to '{1}'" -f $combinedCsv, $destinationFile)
                     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
                 }
@@ -1138,7 +1142,7 @@ try {
 
             if ($destinationRootPath -and (Test-Path -Path $duplicateUpnCsv)) {
                 $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($duplicateUpnCsv))
-                Copy-Item -Path $duplicateUpnCsv -Destination $destinationFile -Force
+                Copy-Item -LiteralPath $duplicateUpnCsv -Destination $destinationFile -Force -ErrorAction Stop
                 WriteLog -Message ("Copied '{0}' to '{1}'" -f $duplicateUpnCsv, $destinationFile)
                 Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
             }
@@ -1218,7 +1222,7 @@ try {
 
             if ($destinationRootPath -and (Test-Path -Path $duplicateSmtpCsv)) {
                 $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($duplicateSmtpCsv))
-                Copy-Item -Path $duplicateSmtpCsv -Destination $destinationFile -Force
+                Copy-Item -LiteralPath $duplicateSmtpCsv -Destination $destinationFile -Force -ErrorAction Stop
                 WriteLog -Message ("Copied '{0}' to '{1}'" -f $duplicateSmtpCsv, $destinationFile)
                 Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
             }
