@@ -780,9 +780,35 @@ function Save-Utf8NoBom {
     [IO.File]::WriteAllText($fullPath, $Content, $utf8NoBom)
 }
 
+function Initialize-GuiConfigurationFromTemplate {
+    [CmdletBinding()]
+    param()
+
+    if (Test-Path -LiteralPath $script:ConfigPath) { return $false }
+
+    $templatePath = Join-Path -Path $script:WorkspaceRoot -ChildPath 'SmartM365-IntuneRemediation-GUI.config.template.json'
+    if (-not (Test-Path -LiteralPath $templatePath)) { return $false }
+
+    Copy-Item -LiteralPath $templatePath -Destination $script:ConfigPath -ErrorAction Stop
+    Write-GuiLog "Created GUI local configuration from template: $script:ConfigPath"
+    Write-Host ((@(
+        'Created Intune Remediation GUI local JSON from template.',
+        "Local JSON: $script:ConfigPath",
+        "Template: $templatePath",
+        'Edit the local JSON now if needed. When ready, press Enter to continue.',
+        'If you press Enter without editing, the GUI continues with the default template values.'
+    )) -join [Environment]::NewLine) -ForegroundColor Yellow
+    Read-Host 'Press Enter to continue' | Out-Null
+    return $true
+}
+
 function Read-GuiConfiguration {
     [CmdletBinding()]
     param()
+
+    if (-not (Test-Path -LiteralPath $script:ConfigPath)) {
+        Initialize-GuiConfigurationFromTemplate | Out-Null
+    }
 
     if (-not (Test-Path -LiteralPath $script:ConfigPath)) {
         return
@@ -818,16 +844,15 @@ function Read-GuiConfiguration {
         if (Test-Path -LiteralPath $resolvedRoot -PathType Container) {
             $script:ConfiguredRemediationRoot = $resolvedRoot
             Write-GuiLog "Configured local script folder loaded: $resolvedRoot"
-            return
         }
-
-        Write-GuiLog "Configured local script folder no longer exists: $resolvedRoot"
+        else {
+            Write-GuiLog "Configured LocalRemediationRoot not found: $resolvedRoot"
+        }
     }
     catch {
-        Write-GuiLog "GUI configuration load failed - $($_.Exception.Message)"
+        Write-GuiLog "Failed to load GUI configuration: $($_.Exception.Message)" -Level WARN
     }
 }
-
 function Save-GuiConfiguration {
     [CmdletBinding()]
     param()
