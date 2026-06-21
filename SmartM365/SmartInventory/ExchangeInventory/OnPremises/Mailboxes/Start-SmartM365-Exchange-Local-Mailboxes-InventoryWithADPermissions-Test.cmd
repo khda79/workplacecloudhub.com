@@ -21,6 +21,12 @@ if not exist "%POWERSHELL5%" (
     popd
     exit /b 1
 )
+
+set "SMARTM365_ROOT=%SCRIPT_DIR%..\..\..\..\"
+for %%I in ("%SMARTM365_ROOT%") do set "SMARTM365_ROOT=%%~fI\"
+echo Preparing trusted SmartM365 PowerShell files...
+"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%SCRIPT_DIR%','%SMARTM365_ROOT%Config','%SMARTM365_ROOT%Modules\SmartM365.Core' -Include *.ps1,*.psm1,*.psd1 -File -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
+
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-Exchange-Local-Mailboxes-Inventory.ps1" -Tenant test -IncludeADPermission
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
