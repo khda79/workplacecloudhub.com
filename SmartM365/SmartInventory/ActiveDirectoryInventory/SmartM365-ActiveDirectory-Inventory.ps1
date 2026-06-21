@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.0
+1.1
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -31,11 +31,27 @@
 [CmdletBinding()]
 param(
     [string]$Tenant = 'test',
-[Parameter(Mandatory = $false)]
+
+    [Parameter(Mandatory = $false)]
     [string[]]$TargetDomains,
 
     [Parameter(Mandatory = $false)]
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    [Parameter(Mandatory = $false)]
+    [int]$DomainParallelThrottleLimit = 0,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$DomainWorker,
+
+    [Parameter(Mandatory = $false)]
+    [string]$DomainWorkerTempFolder,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ReportOnly,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipDailyReport
 )
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -213,6 +229,26 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $DomainFriendlyNames = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DomainFriendlyNames' -DefaultValue ([pscustomobject]@{})
 $IntuneEnrollmentGroupPattern = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IntuneEnrollmentGroupPattern' -DefaultValue '*GG_INTUNE_ENROLLMENT*'
 $Windows11UpgradeGroupPattern = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Windows11UpgradeGroupPattern' -DefaultValue '*GG_INTUNE_UPGRADEW11*'
+$EnableOuInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableOuInventory' -DefaultValue $true)
+$EnableComputerInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableComputerInventory' -DefaultValue $true)
+$EnableUserInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableUserInventory' -DefaultValue $true)
+$EnableGroupInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableGroupInventory' -DefaultValue $true)
+$EnableContactInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableContactInventory' -DefaultValue $true)
+$EnableDuplicateAnalysis = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDuplicateAnalysis' -DefaultValue $true)
+$DeleteTemporaryPerDomainCsv = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeleteTemporaryPerDomainCsv' -DefaultValue $true)
+$EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
+$WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
+$WeeklyHistoryRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
+$EnableDailyReport = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDailyReport' -DefaultValue $true)
+$DailyReportAllowedOS = @(Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DailyReportAllowedOS' -DefaultValue @('Windows 7*','Windows 8*','Windows 10*','Windows 11*'))
+$DailyReportInactiveDays = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DailyReportInactiveDays' -DefaultValue 90)
+$EnableDailyReportLock = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDailyReportLock' -DefaultValue $true)
+$DailyReportLockRoot = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DailyReportLockRoot' -DefaultValue 'C:\ProgramData\SmartM365\Locks'
+$DailyReportLockName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DailyReportLockName' -DefaultValue 'SmartM365-ActiveDirectory-Inventory-DailyReport'
+$ConfiguredDomainParallelThrottleLimit = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DomainParallelThrottleLimit' -DefaultValue 1)
+$EffectiveDomainParallelThrottleLimit = if ($DomainParallelThrottleLimit -gt 0) { $DomainParallelThrottleLimit } else { $ConfiguredDomainParallelThrottleLimit }
+if ($EffectiveDomainParallelThrottleLimit -lt 1) { $EffectiveDomainParallelThrottleLimit = 1 }
+if ($DomainWorker) { $EffectiveDomainParallelThrottleLimit = 1 }
 
 # ==========================================================
 # PowerShell 7 minimum
@@ -237,7 +273,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -246,6 +282,9 @@ try {
 
     WriteLog -Message ("Script environment initialized at {0}" -f $InitializeOutputPath)
     $OutputPath = $InitializeOutputPath
+    if ([string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath)) {
+        $WeeklyHistoryFolderPath = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory'
+    }
     WriteLog -Message ("Starting {0}" -f $TaskName)
     WriteLog -Message ("PowerShell Version: {0}" -f $PSVersionTable.PSVersion)
 }
@@ -258,9 +297,15 @@ catch {
 # MAIN TRY / CATCH / FINALLY
 # ==========================================================
 try {
-    Import-Module ActiveDirectory -ErrorAction Stop
-    WriteLog -Message "ActiveDirectory module imported successfully."
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ActiveDirectory') -RequireActiveDirectoryRead | Out-Null
+    if (-not $ReportOnly) {
+        Import-Module ActiveDirectory -ErrorAction Stop
+        WriteLog -Message "ActiveDirectory module imported successfully."
+        Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ActiveDirectory') -RequireActiveDirectoryRead | Out-Null
+    }
+    else {
+        Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) | Out-Null
+        WriteLog -Message "ReportOnly mode enabled. Live Active Directory inventory collection will be skipped."
+    }
 
     # ----------------------------------------------------------
     # RETRY CONFIGURATION
@@ -290,10 +335,15 @@ try {
 
     $utcDate     = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     $baseFolder  = Join-Path $OutputPath "Not-CSV-Combined"
-    $tempFolder  = Join-Path $baseFolder $utcDate
+    if ($DomainWorker -and -not [string]::IsNullOrWhiteSpace($DomainWorkerTempFolder)) {
+        $tempFolder = $DomainWorkerTempFolder
+    }
+    else {
+        $tempFolder = Join-Path $baseFolder $utcDate
+    }
     $null = New-Item -ItemType Directory -Path $tempFolder -Force
 
-    WriteLog -Message ("Temporary per-domain export folder created: {0}" -f $tempFolder)
+    WriteLog -Message ("Temporary per-domain export folder ready: {0}" -f $tempFolder)
 
     function Get-DomainNameShort {
         param(
@@ -410,18 +460,416 @@ try {
 
         $files = Get-ChildItem -Path $SourceFolder -Filter $Filter -File | Sort-Object Name
         if (-not $files) {
+            if (Test-Path -LiteralPath $DestinationFile) {
+                Remove-Item -LiteralPath $DestinationFile -Force -ErrorAction Stop
+                WriteLog -Message ("Removed stale combined CSV because no source files were found for filter '{0}': {1}" -f $Filter, $DestinationFile)
+            }
             WriteLog -Message ("No CSV files found for filter '{0}' in '{1}'" -f $Filter, $SourceFolder)
             return
         }
 
-        $combined = foreach ($file in $files) {
-            Import-Csv -Path $file.FullName
+        $isFirstFile = $true
+        [int64]$combinedRowCount = 0
+
+        foreach ($file in $files) {
+            $rows = @(Import-Csv -Path $file.FullName -ErrorAction Stop)
+            if ($rows.Count -eq 0) { continue }
+
+            if ($isFirstFile) {
+                $rows | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8
+                $isFirstFile = $false
+            }
+            else {
+                $rows | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8 -Append
+            }
+
+            $combinedRowCount += $rows.Count
         }
 
-        $combined | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8
-        WriteLog -Message ("Combined {0} file(s) into '{1}'" -f $files.Count, $DestinationFile)
+        if ($isFirstFile) {
+            if (Test-Path -LiteralPath $DestinationFile) {
+                Remove-Item -LiteralPath $DestinationFile -Force -ErrorAction Stop
+                WriteLog -Message ("Removed stale combined CSV because no data rows were found for filter '{0}': {1}" -f $Filter, $DestinationFile)
+            }
+            WriteLog -Message ("No data rows found while combining filter '{0}' in '{1}'" -f $Filter, $SourceFolder)
+            return
+        }
+
+        WriteLog -Message ("Combined {0} file(s), {1} row(s), into '{2}'" -f $files.Count, $combinedRowCount, $DestinationFile)
     }
 
+    function Save-WeeklyInventoryHistory {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string[]]$SourceFiles,
+
+            [Parameter(Mandatory = $true)]
+            [string]$HistoryRootPath,
+
+            [Parameter(Mandatory = $false)]
+            [int]$RetentionWeeks = 52
+        )
+
+        if ([string]::IsNullOrWhiteSpace($HistoryRootPath)) {
+            WriteLog -Message "Weekly AD inventory history skipped: WeeklyHistoryFolderPath is empty."
+            return
+        }
+
+        $existingSourceFiles = @($SourceFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) })
+        if ($existingSourceFiles.Count -eq 0) {
+            WriteLog -Message "Weekly AD inventory history skipped: no source CSV file found."
+            return
+        }
+
+        $now = Get-Date
+        $isoYear = [System.Globalization.ISOWeek]::GetYear($now)
+        $isoWeek = [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+        $weekName = "{0}-W{1:00}" -f $isoYear, $isoWeek
+        $weekFolder = Join-Path -Path $HistoryRootPath -ChildPath $weekName
+
+        if (Test-Path -LiteralPath $weekFolder) {
+            $existingCsv = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue)
+            if ($existingCsv.Count -gt 0) {
+                WriteLog -Message ("Weekly AD inventory history already exists for {0}. Snapshot skipped: {1}" -f $weekName, $weekFolder)
+                return
+            }
+        }
+
+        New-Item -Path $weekFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        $copiedFiles = New-Object System.Collections.Generic.List[string]
+
+        foreach ($sourceFile in $existingSourceFiles) {
+            $destinationFile = Join-Path -Path $weekFolder -ChildPath ([System.IO.Path]::GetFileName($sourceFile))
+            Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force -ErrorAction Stop
+            [void]$copiedFiles.Add($destinationFile)
+        }
+
+        $manifest = [PSCustomObject][ordered]@{
+            CreatedAt       = (Get-Date).ToString('o')
+            Week            = $weekName
+            SourceOutputPath = $OutputPath
+            Files           = @($copiedFiles | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+        }
+        $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
+        $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+        WriteLog -Message ("Weekly AD inventory history saved for {0}: {1} file(s) in {2}" -f $weekName, $copiedFiles.Count, $weekFolder)
+
+        if ($RetentionWeeks -gt 0) {
+            $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^\d{4}-W\d{2}$' } |
+                Sort-Object Name -Descending |
+                Select-Object -Skip $RetentionWeeks)
+
+            foreach ($oldWeekFolder in $oldWeekFolders) {
+                try {
+                    Remove-Item -LiteralPath $oldWeekFolder.FullName -Recurse -Force -ErrorAction Stop
+                    WriteLog -Message ("Deleted old weekly AD inventory history folder: {0}" -f $oldWeekFolder.FullName)
+                }
+                catch {
+                    WriteLog -Message ("Failed to delete old weekly AD inventory history folder '{0}': {1}" -f $oldWeekFolder.FullName, $_) -Level "WARNING"
+                }
+            }
+        }
+    }
+
+    function Remove-TemporaryInventoryFolder {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$TempFolder,
+
+            [Parameter(Mandatory = $true)]
+            [string]$BaseFolder
+        )
+
+        if (-not $DeleteTemporaryPerDomainCsv) {
+            WriteLog -Message ("Temporary per-domain CSV folder kept because DeleteTemporaryPerDomainCsv is disabled: {0}" -f $TempFolder)
+            return
+        }
+
+        if ([string]::IsNullOrWhiteSpace($TempFolder) -or -not (Test-Path -LiteralPath $TempFolder)) {
+            return
+        }
+
+        try {
+            $resolvedTemp = (Resolve-Path -LiteralPath $TempFolder -ErrorAction Stop).Path.TrimEnd('\')
+            $resolvedBase = (Resolve-Path -LiteralPath $BaseFolder -ErrorAction Stop).Path.TrimEnd('\')
+            $basePrefix = $resolvedBase + '\'
+
+            if ($resolvedTemp -eq $resolvedBase -or -not $resolvedTemp.StartsWith($basePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                WriteLog -Message ("Temporary per-domain CSV cleanup skipped because the path is outside the expected base folder. Temp: {0}. Base: {1}" -f $resolvedTemp, $resolvedBase) -Level "WARNING"
+                return
+            }
+
+            Remove-Item -LiteralPath $resolvedTemp -Recurse -Force -ErrorAction Stop
+            WriteLog -Message ("Deleted temporary per-domain CSV folder: {0}" -f $resolvedTemp)
+        }
+        catch {
+            WriteLog -Message ("Failed to delete temporary per-domain CSV folder '{0}': {1}" -f $TempFolder, $_) -Level "WARNING"
+        }
+    }
+
+    function ConvertTo-DailyReportBoolean {
+        [CmdletBinding()]
+        param([AllowNull()]$Value)
+
+        if ($Value -is [bool]) { return $Value }
+        if ($null -eq $Value) { return $false }
+        return ([string]$Value).Trim() -eq 'True'
+    }
+
+    function ConvertTo-DailyReportDate {
+        [CmdletBinding()]
+        param([AllowNull()]$Value)
+
+        if ($Value -is [datetime]) { return $Value }
+        if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
+
+        $parsedDate = [datetime]::MinValue
+        if ([datetime]::TryParse([string]$Value, [ref]$parsedDate)) { return $parsedDate }
+        return $null
+    }
+
+    function Get-DailyReportSimpleOS {
+        [CmdletBinding()]
+        param([AllowNull()][string]$OperatingSystem)
+
+        switch -Wildcard ($OperatingSystem) {
+            '*Windows 11*' { return 'Windows 11' }
+            '*Windows 10*' { return 'Windows 10' }
+            '*Windows 8*'  { return 'Windows 8' }
+            '*Windows 7*'  { return 'Windows 7' }
+            default        { return 'Unknown' }
+        }
+    }
+
+    function Test-DailyReportWildcardMatch {
+        [CmdletBinding()]
+        param(
+            [AllowNull()][string]$Value,
+            [string[]]$Patterns
+        )
+
+        foreach ($pattern in @($Patterns)) {
+            if ($Value -like $pattern) { return $true }
+        }
+        return $false
+    }
+
+    function Get-InventoryDailyReportSource {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)][string]$SourceFolder,
+            [Parameter(Mandatory = $true)][string[]]$AllowedOS,
+            [string[]]$TargetDomains
+        )
+
+        if ([string]::IsNullOrWhiteSpace($SourceFolder)) {
+            WriteLog -Message 'Daily report source skipped: source folder is empty.' -Level 'WARNING'
+            return $null
+        }
+
+        $computersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Computers_AllDomains.csv'
+        $usersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_AllDomains.csv'
+
+        foreach ($sourceCsv in @($computersCsv, $usersCsv)) {
+            if (-not (Test-Path -LiteralPath $sourceCsv)) {
+                WriteLog -Message ("Daily report source unavailable. Missing file: {0}" -f $sourceCsv) -Level 'WARNING'
+                return $null
+            }
+        }
+
+        $targetDomainSet = @{}
+        foreach ($domain in @($TargetDomains | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+            $targetDomainSet[$domain.ToLowerInvariant()] = $true
+        }
+        $hasTargetDomainFilter = $targetDomainSet.Count -gt 0
+
+        $computers = @(Import-Csv -LiteralPath $computersCsv -Encoding UTF8 | Where-Object {
+            $domainName = [string]$_.DomainName
+            ((-not $hasTargetDomainFilter) -or $targetDomainSet.ContainsKey($domainName.ToLowerInvariant())) -and
+            (Test-DailyReportWildcardMatch -Value ([string]$_.OperatingSystem) -Patterns $AllowedOS)
+        } | ForEach-Object {
+            [PSCustomObject]@{
+                Enabled                = ConvertTo-DailyReportBoolean $_.Enabled
+                SimpleOS               = Get-DailyReportSimpleOS -OperatingSystem ([string]$_.OperatingSystem)
+                ADDomain               = [string]$_.DomainName
+                OperatingSystem        = [string]$_.OperatingSystem
+                OperatingSystemVersion = [string]$_.OperatingSystemVersion
+                LastLogonDate          = ConvertTo-DailyReportDate $_.LastLogonDate
+            }
+        })
+
+        $users = @(Import-Csv -LiteralPath $usersCsv -Encoding UTF8 | Where-Object {
+            $domainName = [string]$_.DomainName
+            ((-not $hasTargetDomainFilter) -or $targetDomainSet.ContainsKey($domainName.ToLowerInvariant())) -and
+            (-not [string]::IsNullOrWhiteSpace([string]$_.UserPrincipalName))
+        } | ForEach-Object {
+            [PSCustomObject]@{
+                ADDomain          = [string]$_.DomainName
+                Enabled           = ConvertTo-DailyReportBoolean $_.Enabled
+                LastLogonDate     = ConvertTo-DailyReportDate $_.LastLogonDate
+                UserPrincipalName = [string]$_.UserPrincipalName
+            }
+        })
+
+        if ($computers.Count -eq 0 -and $users.Count -eq 0) {
+            WriteLog -Message 'Daily report source produced no reportable rows.' -Level 'WARNING'
+            return $null
+        }
+
+        $domains = @(@($computers | Select-Object -ExpandProperty ADDomain) + @($users | Select-Object -ExpandProperty ADDomain) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique)
+
+        WriteLog -Message ("Daily report source loaded. Computers: {0}; Users: {1}; Domains: {2}" -f $computers.Count, $users.Count, ($domains -join ', '))
+        return [PSCustomObject]@{
+            Domains   = $domains
+            Computers = $computers
+            Users     = $users
+        }
+    }
+
+    function Write-DailyReportCsv {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]$Rows,
+            [Parameter(Mandatory = $true)][string]$OutputFilePath,
+            [string]$LatestFolderPath
+        )
+
+        $rowsArray = @($Rows)
+        if ($rowsArray.Count -eq 0) {
+            WriteLog -Message ("Daily report CSV skipped because there are no rows: {0}" -f $OutputFilePath) -Level 'WARNING'
+            return
+        }
+
+        if (Test-Path -LiteralPath $OutputFilePath) {
+            $rowsArray | ConvertTo-Csv -NoTypeInformation -Delimiter ';' | Select-Object -Skip 1 | Add-Content -Path $OutputFilePath -Encoding UTF8
+            WriteLog -Message ("Daily report rows appended to CSV: {0}" -f $OutputFilePath)
+        }
+        else {
+            $rowsArray | Export-Csv -Path $OutputFilePath -NoTypeInformation -Delimiter ';' -Encoding UTF8
+            WriteLog -Message ("Daily report CSV created: {0}" -f $OutputFilePath)
+        }
+
+        if (-not $global:csvGeneratedPaths) { $global:csvGeneratedPaths = @() }
+        $global:csvGeneratedPaths += $OutputFilePath
+
+        if (-not [string]::IsNullOrWhiteSpace($LatestFolderPath)) {
+            if (-not (Test-Path -LiteralPath $LatestFolderPath)) {
+                New-Item -Path $LatestFolderPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                WriteLog -Message ("Created missing LatestCsvFolderPath directory: {0}" -f $LatestFolderPath)
+            }
+
+            $latestFilePath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($OutputFilePath))
+            Copy-Item -LiteralPath $OutputFilePath -Destination $latestFilePath -Force -ErrorAction Stop
+            WriteLog -Message ("Daily report CSV copied to LatestCsvFolderPath: {0}" -f $latestFilePath)
+        }
+
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $OutputFilePath
+    }
+
+    function Invoke-ActiveDirectoryDailyReport {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)][string]$SourceFolder,
+            [Parameter(Mandatory = $true)][string]$ReportOutputPath,
+            [string]$LatestFolderPath,
+            [string[]]$AllowedOS = @('Windows 7*','Windows 8*','Windows 10*','Windows 11*'),
+            [string[]]$TargetDomains,
+            [int]$InactiveDays = 90,
+            [bool]$UseDailyLock = $true,
+            [string]$LockRoot,
+            [string]$LockName
+        )
+
+        if ($SkipDailyReport) {
+            WriteLog -Message 'Active Directory daily report skipped because -SkipDailyReport was specified.'
+            return $false
+        }
+
+        if (-not $EnableDailyReport) {
+            WriteLog -Message 'Active Directory daily report skipped because EnableDailyReport is disabled.'
+            return $false
+        }
+
+        $today = Get-Date -Format 'yyyy-MM-dd'
+        $dailyLockFile = $null
+        if ($UseDailyLock) {
+            if ([string]::IsNullOrWhiteSpace($LockRoot)) { $LockRoot = 'C:\ProgramData\SmartM365\Locks' }
+            if ([string]::IsNullOrWhiteSpace($LockName)) { $LockName = 'SmartM365-ActiveDirectory-Inventory-DailyReport' }
+            if (-not (Test-Path -LiteralPath $LockRoot)) { New-Item -Path $LockRoot -ItemType Directory -Force | Out-Null }
+            $dailyLockFile = Join-Path -Path $LockRoot -ChildPath ("{0}-SUCCESS-{1}.lock" -f $LockName, $today)
+            if (Test-Path -LiteralPath $dailyLockFile) {
+                WriteLog -Message ("[{0}] Daily report already succeeded on {1}. Skipping." -f $LockName, $today)
+                return $false
+            }
+        }
+
+        $reportSource = Get-InventoryDailyReportSource -SourceFolder $SourceFolder -AllowedOS $AllowedOS -TargetDomains $TargetDomains
+        if ($null -eq $reportSource) { return $false }
+
+        $nowText = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        $osReportColumns = @('Windows 7', 'Windows 8', 'Windows 10', 'Windows 11')
+
+        $computerRows = @($reportSource.Computers | Group-Object -Property ADDomain | ForEach-Object {
+            $domainName = $_.Name
+            $computersInGroup = $_.Group
+            $enabledComputersInGroup = @($computersInGroup | Where-Object { $_.Enabled -eq $true })
+            $disabledComputersInGroup = @($computersInGroup | Where-Object { $_.Enabled -eq $false })
+            $countsByEnabledOS = @($enabledComputersInGroup | Group-Object -Property SimpleOS -NoElement)
+            $countsByDisabledOS = @($disabledComputersInGroup | Group-Object -Property SimpleOS -NoElement)
+
+            $outputRow = [ordered]@{
+                Date             = $nowText
+                DomainName       = $domainName
+                TotalComputers   = $computersInGroup.Count
+                EnabledAccounts  = $enabledComputersInGroup.Count
+                DisabledAccounts = $disabledComputersInGroup.Count
+            }
+
+            foreach ($os in $osReportColumns) {
+                $enabledOsGroup = @($countsByEnabledOS | Where-Object { $_.Name -eq $os } | Select-Object -First 1)
+                $disabledOsGroup = @($countsByDisabledOS | Where-Object { $_.Name -eq $os } | Select-Object -First 1)
+                $outputRow["$os Enabled"] = if ($enabledOsGroup.Count -gt 0) { $enabledOsGroup[0].Count } else { 0 }
+                $outputRow["$os Disabled"] = if ($disabledOsGroup.Count -gt 0) { $disabledOsGroup[0].Count } else { 0 }
+            }
+
+            [PSCustomObject]$outputRow
+        })
+
+        $inactiveThreshold = (Get-Date).AddDays(-1 * $InactiveDays)
+        $userRows = @($reportSource.Users | Where-Object { -not [string]::IsNullOrEmpty($_.ADDomain) } | Group-Object -Property ADDomain | ForEach-Object {
+            $domainName = $_.Name
+            $usersInGroup = $_.Group
+            $enabledUsers = @($usersInGroup | Where-Object { $_.Enabled -eq $true })
+            $disabledUsers = @($usersInGroup | Where-Object { $_.Enabled -eq $false })
+            $inactiveUsers = @($usersInGroup | Where-Object { $null -eq $_.LastLogonDate -or $_.LastLogonDate -lt $inactiveThreshold })
+
+            [PSCustomObject]([ordered]@{
+                Date = $nowText
+                DomainName = $domainName
+                TotalUsers = $usersInGroup.Count
+                EnabledUsers = $enabledUsers.Count
+                DisabledUsers = $disabledUsers.Count
+                Inactive90DaysUsers = $inactiveUsers.Count
+            })
+        })
+
+        $computerReportPath = Join-Path -Path $ReportOutputPath -ChildPath 'AD_Computers_DailyStats.csv'
+        $userReportPath = Join-Path -Path $ReportOutputPath -ChildPath 'AD_Users_DailyStats.csv'
+        Write-DailyReportCsv -Rows $computerRows -OutputFilePath $computerReportPath -LatestFolderPath $LatestFolderPath
+        Write-DailyReportCsv -Rows $userRows -OutputFilePath $userReportPath -LatestFolderPath $LatestFolderPath
+
+        if ($UseDailyLock -and -not [string]::IsNullOrWhiteSpace($dailyLockFile)) {
+            New-Item -Path $dailyLockFile -ItemType File -Force | Out-Null
+            WriteLog -Message ("[{0}] Daily report success lock created for {1}." -f $LockName, $today)
+        }
+
+        WriteLog -Message 'Active Directory daily reports generated successfully.'
+        return $true
+    }
     function Get-ADStringValue {
         param([object]$Value)
         if ($null -eq $Value) { return $null }
@@ -649,6 +1097,28 @@ try {
         $destinationRootPath = $null
     }
 
+    if ($ReportOnly) {
+        $reportSourceFolder = $destinationRootPath
+        if ([string]::IsNullOrWhiteSpace($reportSourceFolder)) {
+            $reportSourceFolder = $OutputPath
+        }
+
+        Invoke-ActiveDirectoryDailyReport -SourceFolder $reportSourceFolder `
+            -ReportOutputPath $OutputPath `
+            -LatestFolderPath $destinationRootPath `
+            -AllowedOS $DailyReportAllowedOS `
+            -TargetDomains $TargetDomains `
+            -InactiveDays $DailyReportInactiveDays `
+            -UseDailyLock $EnableDailyReportLock `
+            -LockRoot $DailyReportLockRoot `
+            -LockName $DailyReportLockName | Out-Null
+
+        Remove-OldFiles -Path $OutputPath -Filter "*.csv" -OlderThanDays 30
+        Remove-OldFiles -Path $OutputPath -Filter "*.log" -OlderThanDays 30
+        WriteLog -Message ("{0} completed successfully in ReportOnly mode." -f $TaskName)
+        return
+    }
+
     if ($TargetDomains -and $TargetDomains.Count -gt 0) {
         $DomainsToProcess = $TargetDomains
         WriteLog -Message ("Using explicitly provided target domains: {0}" -f ($DomainsToProcess -join ', '))
@@ -664,6 +1134,70 @@ try {
         }
     }
 
+    $skipDomainLoop = $false
+    $DomainsToProcess = @($DomainsToProcess)
+
+    if (-not $DomainWorker -and $EffectiveDomainParallelThrottleLimit -gt 1 -and $DomainsToProcess.Count -gt 1) {
+        WriteLog -Message ("Starting parallel domain inventory with throttle limit {0}. Domains: {1}" -f $EffectiveDomainParallelThrottleLimit, ($DomainsToProcess -join ', '))
+
+        $pwshPath = (Get-Process -Id $PID).Path
+        $scriptPath = $PSCommandPath
+        $workerJobs = @()
+        $jobFailures = New-Object System.Collections.Generic.List[string]
+
+        $receiveDomainJob = {
+            param([System.Management.Automation.Job]$Job)
+
+            $jobOutput = Receive-Job -Job $Job -ErrorAction SilentlyContinue 2>&1
+            if ($jobOutput) {
+                foreach ($line in $jobOutput) {
+                    WriteLog -Message ("[{0}] {1}" -f $Job.Name, $line)
+                }
+            }
+
+            if ($Job.State -ne 'Completed') {
+                $reason = if ($Job.ChildJobs.Count -gt 0 -and $Job.ChildJobs[0].JobStateInfo.Reason) { $Job.ChildJobs[0].JobStateInfo.Reason.Message } else { $Job.State }
+                [void]$jobFailures.Add(("{0}: {1}" -f $Job.Name, $reason))
+            }
+
+            Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue
+        }
+
+        foreach ($domainName in $DomainsToProcess) {
+            while (@($workerJobs | Where-Object { $_.State -eq 'Running' }).Count -ge $EffectiveDomainParallelThrottleLimit) {
+                $completedJob = Wait-Job -Job $workerJobs -Any -Timeout 5
+                if ($completedJob) {
+                    & $receiveDomainJob $completedJob
+                    $workerJobs = @($workerJobs | Where-Object { $_.Id -ne $completedJob.Id })
+                }
+            }
+
+            $safeJobName = $domainName -replace '[^a-zA-Z0-9.-]', '_'
+            $workerJobs += Start-Job -Name ("ADInventory-{0}" -f $safeJobName) -ScriptBlock {
+                param($PwshPath, $ScriptPath, $TenantName, $DomainName, $OutputPathValue, $TempFolderPath)
+
+                & $PwshPath -NoProfile -ExecutionPolicy Bypass -File $ScriptPath -Tenant $TenantName -TargetDomains $DomainName -OutputPath $OutputPathValue -DomainWorker -DomainWorkerTempFolder $TempFolderPath
+                if ($LASTEXITCODE -ne 0) {
+                    throw ("Domain worker failed for {0} with exit code {1}." -f $DomainName, $LASTEXITCODE)
+                }
+            } -ArgumentList $pwshPath, $scriptPath, $Tenant, $domainName, $OutputPath, $tempFolder
+        }
+
+        while ($workerJobs.Count -gt 0) {
+            $completedJob = Wait-Job -Job $workerJobs -Any
+            & $receiveDomainJob $completedJob
+            $workerJobs = @($workerJobs | Where-Object { $_.Id -ne $completedJob.Id })
+        }
+
+        if ($jobFailures.Count -gt 0) {
+            throw ("Parallel domain inventory failed: {0}" -f ($jobFailures -join ' | '))
+        }
+
+        WriteLog -Message "Parallel domain inventory workers completed successfully."
+        $skipDomainLoop = $true
+    }
+
+    if (-not $skipDomainLoop) {
     foreach ($currentDomainName in $DomainsToProcess) {
         WriteLog -Message ("Starting inventory for domain '{0}'" -f $currentDomainName)
 
@@ -684,11 +1218,14 @@ try {
         # ------------------------------------------------------
         # OU INVENTORY
         # ------------------------------------------------------
+        if ($EnableOuInventory) {
         try {
             $CurrentObjectType = "OUs"
             $outputCsvFilePath = Join-Path $tempFolder ("AD_OUs_{0}.csv" -f $safeDomainFileName)
+            [int64]$ouCount = 0
 
             Get-ADOrganizationalUnit -Filter * -Server $currentDomainName -Properties Name, DistinguishedName, description, managedBy |
+                ForEach-Object { [void]($ouCount++); $_ } |
                 Select-Object `
                     @{Name = 'DomainName';   Expression = { $currentDomainName }},
                     @{Name = 'ObjectType';   Expression = { $CurrentObjectType }},
@@ -698,16 +1235,21 @@ try {
                     managedBy |
                 Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
-            WriteLog -Message ("Exported OUs for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, (Import-Csv $outputCsvFilePath).Count)
+            WriteLog -Message ("Exported OUs for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $ouCount)
         }
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("OU inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
         }
+        }
+        else {
+            WriteLog -Message ("OU inventory skipped for domain '{0}' because EnableOuInventory is disabled." -f $currentDomainName)
+        }
 
         # ------------------------------------------------------
         # COMPUTER INVENTORY
         # ------------------------------------------------------
+        if ($EnableComputerInventory) {
         try {
             $CurrentObjectType = "Computers"
             $outputCsvFilePath = Join-Path $tempFolder ("AD_Computers_{0}.csv" -f $safeDomainFileName)
@@ -735,10 +1277,12 @@ try {
             }
 
             $ResolveNestedComputerGroups = $false
+            [int64]$computerCount = 0
 
             Get-ADComputer -Filter $computerFilter -Server $currentDomainName -Properties SamAccountName, Name, DistinguishedName, Enabled, DNSHostName, OperatingSystem, operatingSystemHotfix, operatingSystemServicePack, operatingSystemVersion, LastLogonDate, LastLogonTimestamp, Description, IPv4Address, WhenCreated, WhenChanged, pwdLastSet, CanonicalName, MemberOf, primaryGroupID, ObjectGUID, ObjectSID, SIDHistory, extensionAttribute1, extensionAttribute2, extensionAttribute3, extensionAttribute4, extensionAttribute5, extensionAttribute6, extensionAttribute7, extensionAttribute8, extensionAttribute9, extensionAttribute10, extensionAttribute11, extensionAttribute12, extensionAttribute13, extensionAttribute14, extensionAttribute15 |
                 Where-Object { -not [string]::IsNullOrWhiteSpace($_.DNSHostName) } |
                 ForEach-Object {
+                    [void]($computerCount++)
                     $computer = $_
                     $computerGroupNames = Get-ComputerGroupNames -Computer $computer -Server $currentDomainName -DomainSid $domainSid -ResolveNestedGroups:$ResolveNestedComputerGroups -GroupNameByDNCache $GroupNameByDNCache -GroupParentsByDNCache $GroupParentsByDNCache -GroupNameBySIDCache $GroupNameBySIDCache
                     $hasGroupAddIntune  = [bool]($computerGroupNames | Where-Object { $_ -like $IntuneEnrollmentGroupPattern })
@@ -824,19 +1368,25 @@ try {
                 } |
                 Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
-            WriteLog -Message ("Exported Computers for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, (Import-Csv $outputCsvFilePath).Count)
+            WriteLog -Message ("Exported Computers for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $computerCount)
         }
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("Computer inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
         }
+        }
+        else {
+            WriteLog -Message ("Computer inventory skipped for domain '{0}' because EnableComputerInventory is disabled." -f $currentDomainName)
+        }
 
         # ------------------------------------------------------
         # USER INVENTORY
         # ------------------------------------------------------
+        if ($EnableUserInventory) {
         try {
             $CurrentObjectType = "Users"
             $outputCsvFilePath = Join-Path $tempFolder ("AD_Users_{0}.csv" -f $safeDomainFileName)
+            [int64]$userCount = 0
 
             [int]$DomainExcludedUsersNoUpn = 0
             try {
@@ -950,18 +1500,24 @@ try {
                     @{Name = 'DomainNameShort';         Expression = { Get-DomainNameShort -DomainName $currentDomainName }},
                     @{Name = 'DomainAndSam';            Expression = { Get-NormalizedDomainAndSam -DomainNameShort (Get-DomainNameShort -DomainName $currentDomainName) -SamAccountName $_.SamAccountName }},
                     @{Name = 'ImmutableId_AD';          Expression = { Convert-GuidToImmutableId -ObjectGuid ([string]$_.ObjectGUID) }} |
+                ForEach-Object { [void]($userCount++); $_ } |
                 Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
-            WriteLog -Message ("Exported Users for domain '{0}' to '{1}'. Count: {2}. Excluded without UPN: {3}" -f $currentDomainName, $outputCsvFilePath, (Import-Csv $outputCsvFilePath).Count, $DomainExcludedUsersNoUpn)
+            WriteLog -Message ("Exported Users for domain '{0}' to '{1}'. Count: {2}. Excluded without UPN: {3}" -f $currentDomainName, $outputCsvFilePath, $userCount, $DomainExcludedUsersNoUpn)
         }
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("User inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
         }
+        }
+        else {
+            WriteLog -Message ("User inventory skipped for domain '{0}' because EnableUserInventory is disabled." -f $currentDomainName)
+        }
 
         # ------------------------------------------------------
         # GROUP INVENTORY
         # ------------------------------------------------------
+        if ($EnableGroupInventory) {
         try {
             $outputCsvFilePath = Join-Path $tempFolder ("AD_Groups_{0}.csv" -f $safeDomainFileName)
             $GroupData = @(Get-ADGroup -Filter * -Server $currentDomainName -Properties CanonicalName, CN, Created, createTimeStamp, Deleted, Description, DisplayName, DistinguishedName, GroupCategory, GroupScope, GroupType, HomePage, LastKnownParent, mail, ManagedBy, MemberOf, Members, Modified, modifyTimeStamp, Name, ObjectCategory, ObjectClass, ObjectGUID, objectSid, ProtectedFromAccidentalDeletion, SamAccountName, SIDHistory, whenChanged, whenCreated |
@@ -1004,15 +1560,22 @@ try {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("Group inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
         }
+        }
+        else {
+            WriteLog -Message ("Group inventory skipped for domain '{0}' because EnableGroupInventory is disabled." -f $currentDomainName)
+        }
 
         # ------------------------------------------------------
         # CONTACT INVENTORY
         # ------------------------------------------------------
+        if ($EnableContactInventory) {
         try {
             $CurrentObjectType = "Contacts"
             $outputCsvFilePath = Join-Path $tempFolder ("AD_Contacts_{0}.csv" -f $safeDomainFileName)
+            [int64]$contactCount = 0
 
             Get-ADObject -Filter { ObjectClass -eq "contact" } -Server $currentDomainName -Properties DisplayName, ProxyAddresses, Mail |
+                ForEach-Object { [void]($contactCount++); $_ } |
                 Select-Object `
                     @{Name = 'DomainName';      Expression = { $currentDomainName }},
                     @{Name = 'ObjectType';      Expression = { $CurrentObjectType }},
@@ -1021,11 +1584,15 @@ try {
                     Mail |
                 Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
-            WriteLog -Message ("Exported Contacts for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, (Import-Csv $outputCsvFilePath).Count)
+            WriteLog -Message ("Exported Contacts for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $contactCount)
         }
         catch {
             if (Test-IsTransientADError -ErrorRecord $_) { throw }
             WriteLog -Message ("Contact inventory failed for domain '{0}': {1}" -f $currentDomainName, $_)
+        }
+        }
+        else {
+            WriteLog -Message ("Contact inventory skipped for domain '{0}' because EnableContactInventory is disabled." -f $currentDomainName)
         }
 
         $domainSuccess = $true
@@ -1052,6 +1619,12 @@ try {
         if (-not $domainSuccess) {
             WriteLog -Message ("WARNING: Domain '{0}' could not be fully inventoried after {1} attempt(s). Skipping." -f $currentDomainName, $domainAttempt)
         }
+    }
+    }
+
+    if ($DomainWorker) {
+        WriteLog -Message "Domain worker completed; combined CSV generation is handled by the parent process."
+        return
     }
 
     # ------------------------------------------------------
@@ -1099,138 +1672,169 @@ try {
     }
 
     # ------------------------------------------------------
-    # DUPLICATE UPN ANALYSIS
+    # DUPLICATE USER IDENTITY ANALYSIS
     # ------------------------------------------------------
-    try {
-        WriteLog -Message "Starting duplicate UserPrincipalName analysis..."
+    if ($EnableDuplicateAnalysis) {
+        try {
+            WriteLog -Message "Starting duplicate UPN and SMTP proxy address analysis..."
 
-        $duplicateUpnCsv = Join-Path $OutputPath "AD_Users_DuplicateUPN.csv"
+            $duplicateUpnCsv = Join-Path $OutputPath "AD_Users_DuplicateUPN.csv"
+            $duplicateSmtpCsv = Join-Path $OutputPath "AD_Users_DuplicateSMTP.csv"
 
-        if (-not (Test-Path -Path $combinedUsersCsv)) {
-            WriteLog -Message ("WARNING: Combined users CSV not found, skipping duplicate UPN analysis: {0}" -f $combinedUsersCsv)
-        }
-        else {
-            $allUsers = Import-Csv -Path $combinedUsersCsv -Encoding UTF8
-            WriteLog -Message ("Loaded {0} users from combined CSV for duplicate UPN analysis." -f $allUsers.Count)
+            if (-not (Test-Path -Path $combinedUsersCsv)) {
+                WriteLog -Message ("WARNING: Combined users CSV not found, skipping duplicate analysis: {0}" -f $combinedUsersCsv)
+            }
+            else {
+                $allUsers = @(Import-Csv -Path $combinedUsersCsv -Encoding UTF8)
+                WriteLog -Message ("Loaded {0} users from combined CSV for duplicate analysis." -f $allUsers.Count)
 
-            $upnGroups = $allUsers |
-                Group-Object { $_.UserPrincipalName.ToLowerInvariant() } |
-                Where-Object { $_.Count -gt 1 }
+                $upnMap = @{}
+                $smtpMap = @{}
 
-            $duplicateUpnRows = foreach ($grp in $upnGroups) {
-                foreach ($u in $grp.Group) {
-                    [PSCustomObject][ordered]@{
-                        UserPrincipalName   = $u.UserPrincipalName
-                        UPN_OccurrenceCount = $grp.Count
-                        DomainName          = $u.DomainName
-                        DomainNameShort     = $u.DomainNameShort
-                        SamAccountName      = $u.SamAccountName
-                        DisplayName         = $u.DisplayName
-                        Enabled             = $u.Enabled
-                        DistinguishedName   = $u.DistinguishedName
+                foreach ($u in $allUsers) {
+                    $upnKey = ([string]$u.UserPrincipalName).Trim().ToLowerInvariant()
+                    if (-not [string]::IsNullOrWhiteSpace($upnKey)) {
+                        if (-not $upnMap.ContainsKey($upnKey)) {
+                            $upnMap[$upnKey] = [System.Collections.Generic.List[object]]::new()
+                        }
+                        [void]$upnMap[$upnKey].Add($u)
+                    }
+
+                    if ([string]::IsNullOrWhiteSpace($u.ProxyAddresses)) { continue }
+                    foreach ($entry in ([string]$u.ProxyAddresses -split ';')) {
+                        $entry = $entry.Trim()
+                        if ($entry -notmatch '^smtp:(.+)$') { continue }
+
+                        $smtpAddress = $Matches[1].Trim()
+                        if ([string]::IsNullOrWhiteSpace($smtpAddress)) { continue }
+
+                        $smtpKey = $smtpAddress.ToLowerInvariant()
+                        if (-not $smtpMap.ContainsKey($smtpKey)) {
+                            $smtpMap[$smtpKey] = [System.Collections.Generic.List[object]]::new()
+                        }
+
+                        [void]$smtpMap[$smtpKey].Add([PSCustomObject]@{
+                            SmtpAddress       = $smtpAddress
+                            IsUppercaseSMTP   = $entry.StartsWith('SMTP:', [System.StringComparison]::Ordinal)
+                            UserPrincipalName = $u.UserPrincipalName
+                            DomainName        = $u.DomainName
+                            DomainNameShort   = $u.DomainNameShort
+                            SamAccountName    = $u.SamAccountName
+                            DisplayName       = $u.DisplayName
+                            Enabled           = $u.Enabled
+                            DistinguishedName = $u.DistinguishedName
+                        })
+                    }
+                }
+
+                $duplicateUpnRows = @(
+                    foreach ($upnKey in @($upnMap.Keys | Sort-Object)) {
+                        $users = $upnMap[$upnKey]
+                        if ($users.Count -le 1) { continue }
+
+                        foreach ($u in @($users | Sort-Object DomainName, SamAccountName)) {
+                            [PSCustomObject][ordered]@{
+                                UserPrincipalName   = $u.UserPrincipalName
+                                UPN_OccurrenceCount = $users.Count
+                                DomainName          = $u.DomainName
+                                DomainNameShort     = $u.DomainNameShort
+                                SamAccountName      = $u.SamAccountName
+                                DisplayName         = $u.DisplayName
+                                Enabled             = $u.Enabled
+                                DistinguishedName   = $u.DistinguishedName
+                            }
+                        }
+                    }
+                )
+
+                $duplicateUpnRows | Export-Csv -Path $duplicateUpnCsv -NoTypeInformation -Encoding UTF8
+                $upnDuplicateCount = @($upnMap.Keys | Where-Object { $upnMap[$_].Count -gt 1 }).Count
+                WriteLog -Message ("Duplicate UPN analysis complete. Distinct duplicate UPNs: {0}. Affected accounts: {1}. Output: {2}" -f $upnDuplicateCount, $duplicateUpnRows.Count, $duplicateUpnCsv)
+
+                $duplicateSmtpRows = @(
+                    foreach ($smtpKey in @($smtpMap.Keys | Sort-Object)) {
+                        $entries = $smtpMap[$smtpKey]
+                        if ($entries.Count -le 1) { continue }
+
+                        foreach ($e in @($entries | Sort-Object DomainName, UserPrincipalName, SmtpAddress)) {
+                            [PSCustomObject][ordered]@{
+                                SmtpAddress          = $e.SmtpAddress
+                                SMTP_OccurrenceCount = $entries.Count
+                                IsUppercaseSMTP      = $e.IsUppercaseSMTP
+                                UserPrincipalName    = $e.UserPrincipalName
+                                DomainName           = $e.DomainName
+                                DomainNameShort      = $e.DomainNameShort
+                                SamAccountName       = $e.SamAccountName
+                                DisplayName          = $e.DisplayName
+                                Enabled              = $e.Enabled
+                                DistinguishedName    = $e.DistinguishedName
+                            }
+                        }
+                    }
+                )
+
+                $duplicateSmtpRows | Export-Csv -Path $duplicateSmtpCsv -NoTypeInformation -Encoding UTF8
+                $smtpDuplicateCount = @($smtpMap.Keys | Where-Object { $smtpMap[$_].Count -gt 1 }).Count
+                WriteLog -Message ("Duplicate SMTP analysis complete. Distinct duplicate addresses: {0}. Affected entries: {1}. Output: {2}" -f $smtpDuplicateCount, $duplicateSmtpRows.Count, $duplicateSmtpCsv)
+
+                foreach ($duplicateCsv in @($duplicateUpnCsv, $duplicateSmtpCsv)) {
+                    if ($destinationRootPath -and (Test-Path -Path $duplicateCsv)) {
+                        $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($duplicateCsv))
+                        Copy-Item -LiteralPath $duplicateCsv -Destination $destinationFile -Force -ErrorAction Stop
+                        WriteLog -Message ("Copied '{0}' to '{1}'" -f $duplicateCsv, $destinationFile)
+                        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
                     }
                 }
             }
-
-            $duplicateUpnRows |
-                Sort-Object UserPrincipalName, DomainName |
-                Export-Csv -Path $duplicateUpnCsv -NoTypeInformation -Encoding UTF8
-
-            $upnDuplicateCount   = ($upnGroups   | Measure-Object).Count
-            $upnAffectedAccounts = ($duplicateUpnRows | Measure-Object).Count
-            WriteLog -Message ("Duplicate UPN analysis complete. Distinct duplicate UPNs: {0}. Affected accounts: {1}. Output: {2}" -f $upnDuplicateCount, $upnAffectedAccounts, $duplicateUpnCsv)
-
-            if ($destinationRootPath -and (Test-Path -Path $duplicateUpnCsv)) {
-                $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($duplicateUpnCsv))
-                Copy-Item -LiteralPath $duplicateUpnCsv -Destination $destinationFile -Force -ErrorAction Stop
-                WriteLog -Message ("Copied '{0}' to '{1}'" -f $duplicateUpnCsv, $destinationFile)
-                Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
-            }
+        }
+        catch {
+            WriteLog -Message ("Duplicate user identity analysis failed: {0}" -f $_)
         }
     }
-    catch {
-        WriteLog -Message ("Duplicate UPN analysis failed: {0}" -f $_)
+    else {
+        WriteLog -Message "Duplicate UPN and SMTP proxy address analysis skipped because EnableDuplicateAnalysis is disabled."
     }
 
     # ------------------------------------------------------
-    # DUPLICATE SMTP PROXY ADDRESS ANALYSIS
+    # DAILY ACTIVE DIRECTORY REPORTS
     # ------------------------------------------------------
-    try {
-        WriteLog -Message "Starting duplicate SMTP proxy address analysis..."
+    Invoke-ActiveDirectoryDailyReport -SourceFolder $OutputPath `
+        -ReportOutputPath $OutputPath `
+        -LatestFolderPath $destinationRootPath `
+        -AllowedOS $DailyReportAllowedOS `
+        -TargetDomains $TargetDomains `
+        -InactiveDays $DailyReportInactiveDays `
+        -UseDailyLock $EnableDailyReportLock `
+        -LockRoot $DailyReportLockRoot `
+        -LockName $DailyReportLockName | Out-Null
 
-        $duplicateSmtpCsv = Join-Path $OutputPath "AD_Users_DuplicateSMTP.csv"
-
-        if (-not (Test-Path -Path $combinedUsersCsv)) {
-            WriteLog -Message ("WARNING: Combined users CSV not found, skipping duplicate SMTP analysis: {0}" -f $combinedUsersCsv)
+    # ------------------------------------------------------
+    # WEEKLY INVENTORY HISTORY
+    # ------------------------------------------------------
+    if ($EnableWeeklyHistory) {
+        try {
+            Save-WeeklyInventoryHistory -SourceFiles @(
+                $combinedUsersCsv,
+                $combinedComputersCsv,
+                $combinedGroupsCsv,
+                $combinedOusCsv,
+                $combinedContactsCsv,
+                $duplicateUpnCsv,
+                $duplicateSmtpCsv
+            ) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks
         }
-        else {
-            # $allUsers may already be loaded from UPN analysis above; reload defensively
-            if ($null -eq $allUsers) {
-                $allUsers = Import-Csv -Path $combinedUsersCsv -Encoding UTF8
-                WriteLog -Message ("Loaded {0} users from combined CSV for duplicate SMTP analysis." -f $allUsers.Count)
-            }
-
-            # Expand ProxyAddresses: one row per smtp: entry per user
-            $smtpExpanded = foreach ($u in $allUsers) {
-                if ([string]::IsNullOrWhiteSpace($u.ProxyAddresses)) { continue }
-                foreach ($entry in ($u.ProxyAddresses -split ';')) {
-                    $entry = $entry.Trim()
-                    if ($entry -notmatch '^smtp:(.+)$') { continue }
-                    [PSCustomObject]@{
-                        SmtpAddress_Lower = $Matches[1].ToLowerInvariant()
-                        IsUppercaseSMTP   = $entry.StartsWith('SMTP:')
-                        SmtpAddress       = $Matches[1]
-                        UserPrincipalName = $u.UserPrincipalName
-                        DomainName        = $u.DomainName
-                        DomainNameShort   = $u.DomainNameShort
-                        SamAccountName    = $u.SamAccountName
-                        DisplayName       = $u.DisplayName
-                        Enabled           = $u.Enabled
-                        DistinguishedName = $u.DistinguishedName
-                    }
-                }
-            }
-
-            $smtpGroups = $smtpExpanded |
-                Group-Object SmtpAddress_Lower |
-                Where-Object { $_.Count -gt 1 }
-
-            $duplicateSmtpRows = foreach ($grp in $smtpGroups) {
-                foreach ($e in $grp.Group) {
-                    [PSCustomObject][ordered]@{
-                        SmtpAddress          = $e.SmtpAddress
-                        SMTP_OccurrenceCount = $grp.Count
-                        IsUppercaseSMTP      = $e.IsUppercaseSMTP
-                        UserPrincipalName    = $e.UserPrincipalName
-                        DomainName           = $e.DomainName
-                        DomainNameShort      = $e.DomainNameShort
-                        SamAccountName       = $e.SamAccountName
-                        DisplayName          = $e.DisplayName
-                        Enabled              = $e.Enabled
-                        DistinguishedName    = $e.DistinguishedName
-                    }
-                }
-            }
-
-            $duplicateSmtpRows |
-                Sort-Object SmtpAddress, DomainName |
-                Export-Csv -Path $duplicateSmtpCsv -NoTypeInformation -Encoding UTF8
-
-            $smtpDuplicateCount   = ($smtpGroups        | Measure-Object).Count
-            $smtpAffectedEntries  = ($duplicateSmtpRows  | Measure-Object).Count
-            WriteLog -Message ("Duplicate SMTP analysis complete. Distinct duplicate addresses: {0}. Affected entries: {1}. Output: {2}" -f $smtpDuplicateCount, $smtpAffectedEntries, $duplicateSmtpCsv)
-
-            if ($destinationRootPath -and (Test-Path -Path $duplicateSmtpCsv)) {
-                $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($duplicateSmtpCsv))
-                Copy-Item -LiteralPath $duplicateSmtpCsv -Destination $destinationFile -Force -ErrorAction Stop
-                WriteLog -Message ("Copied '{0}' to '{1}'" -f $duplicateSmtpCsv, $destinationFile)
-                Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
-            }
+        catch {
+            WriteLog -Message ("Weekly AD inventory history failed: {0}" -f $_) -Level "WARNING"
         }
     }
-    catch {
-        WriteLog -Message ("Duplicate SMTP analysis failed: {0}" -f $_)
+    else {
+        WriteLog -Message "Weekly AD inventory history skipped because EnableWeeklyHistory is disabled."
     }
+
+    # ------------------------------------------------------
+    # CLEANUP TEMPORARY PER-DOMAIN CSV FILES
+    # ------------------------------------------------------
+    Remove-TemporaryInventoryFolder -TempFolder $tempFolder -BaseFolder $baseFolder
 
     # ------------------------------------------------------
     # CLEANUP OLD FILES
