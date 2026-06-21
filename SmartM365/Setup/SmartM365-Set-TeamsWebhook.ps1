@@ -135,16 +135,11 @@ function Read-SmartM365JsonConfig {
 
     if (-not (Test-Path -LiteralPath $Path)) {
         $templatePath = Join-Path -Path (Split-Path -Parent $Path) -ChildPath 'tenant.local.json.template'
-        if (Test-Path -LiteralPath $templatePath) {
-            return Get-Content -LiteralPath $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $templatePath)) {
+            $templatePath = Join-Path -Path $script:SmartM365RootPath -ChildPath 'Config\SmartM365.global.local.json.template'
         }
 
-        $templatePath = Join-Path -Path $script:SmartM365RootPath -ChildPath 'Config\SmartM365.global.local.json.template'
-        if (Test-Path -LiteralPath $templatePath) {
-            return Get-Content -LiteralPath $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        }
-
-        return [pscustomobject]@{}
+        Initialize-SmartM365LocalJsonFromTemplate -Path $Path -TemplatePath $templatePath -ConfigDescription 'Teams webhook local configuration' | Out-Null
     }
 
     $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop

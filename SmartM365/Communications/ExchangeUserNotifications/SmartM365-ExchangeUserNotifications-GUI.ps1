@@ -239,6 +239,52 @@ function Read-JsonFile {
     Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
 }
 
+function Initialize-GuiLocalJsonFilesFromTemplates {
+    param([array]$Campaigns)
+
+    $root = Get-ExchangeUserNotificationsRoot
+    $pairs = New-Object System.Collections.ArrayList
+    [void]$pairs.Add([pscustomobject]@{
+        LocalPath = (Join-Path -Path $root -ChildPath 'Config\Communications.local.json')
+        TemplatePath = (Join-Path -Path $root -ChildPath 'Config\Communications.local.json.template')
+        Description = 'shared communication local configuration'
+    })
+
+    foreach ($campaign in $Campaigns) {
+        [void]$pairs.Add([pscustomobject]@{
+            LocalPath = $campaign.LocalConfigPath
+            TemplatePath = $campaign.TemplateConfigPath
+            Description = ("{0} campaign local configuration" -f $campaign.Name)
+        })
+    }
+
+    $created = New-Object System.Collections.ArrayList
+    foreach ($pair in $pairs) {
+        if ([string]::IsNullOrWhiteSpace([string]$pair.LocalPath)) { continue }
+        if (Test-Path -LiteralPath $pair.LocalPath) { continue }
+        if (-not (Test-Path -LiteralPath $pair.TemplatePath)) {
+            Write-Warning ("Local JSON not found and template is missing. Local JSON: {0}; Template: {1}" -f $pair.LocalPath, $pair.TemplatePath)
+            continue
+        }
+
+        $folder = Split-Path -Path $pair.LocalPath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
+            New-Item -Path $folder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+        Copy-Item -LiteralPath $pair.TemplatePath -Destination $pair.LocalPath -Force -ErrorAction Stop
+        [void]$created.Add($pair)
+    }
+
+    if ($created.Count -eq 0) { return }
+
+    Write-Host 'Created missing Exchange notification local JSON file(s) from template:' -ForegroundColor Yellow
+    foreach ($pair in $created) {
+        Write-Host ("- {0}: {1}" -f $pair.Description, $pair.LocalPath) -ForegroundColor Yellow
+    }
+    Write-Host 'Edit the local JSON now if needed. Press Enter to continue with the current file values.' -ForegroundColor Yellow
+    try { Read-Host 'Press Enter to continue' | Out-Null }
+    catch { Write-Host 'Unable to pause for input. Continuing with the generated local JSON.' -ForegroundColor Yellow }
+}
 function Get-ConfigPropertyValue {
     param(
         [AllowNull()]$Config,
@@ -1476,6 +1522,7 @@ else {
 
 $root = Get-ExchangeUserNotificationsRoot
 $script:Campaigns = @(Get-CampaignDefinition -RootPath $root)
+Initialize-GuiLocalJsonFilesFromTemplates -Campaigns $script:Campaigns
 $script:BrushConverter = New-Object System.Windows.Media.BrushConverter
 
 $xaml = @'

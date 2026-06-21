@@ -62,7 +62,25 @@ function Get-ScriptLocalConfig {
 
     $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
     if (-not (Test-Path -LiteralPath $configPath)) {
-        return [pscustomobject]@{}
+        $templatePath = '{0}.template' -f $configPath
+        if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) {
+            Initialize-SmartM365LocalJsonFromTemplate -Path $configPath -TemplatePath $templatePath -ConfigDescription 'script local configuration' | Out-Null
+        }
+        else {
+            if (-not (Test-Path -LiteralPath $templatePath)) {
+                $message = @(
+                    "Local configuration file not found: $configPath",
+                    "Template to copy is also missing: $templatePath",
+                    'Create the .local.json file from a safe template, then run the script again.'
+                ) -join [Environment]::NewLine
+                throw $message
+            }
+
+            Copy-Item -LiteralPath $templatePath -Destination $configPath -ErrorAction Stop
+            Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
+            Write-Host 'Edit the local JSON now if needed. Press Enter to continue with the current file values.' -ForegroundColor Yellow
+            Read-Host 'Press Enter to continue'
+        }
     }
 
     try {
