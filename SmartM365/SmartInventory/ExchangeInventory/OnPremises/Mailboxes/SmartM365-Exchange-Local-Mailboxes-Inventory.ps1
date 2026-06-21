@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.2
+1.3
 
 .NOTES
-    Version: 1.2
+    Version: 1.3
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.2"
+$ScriptVersion = "1.3"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -274,6 +274,27 @@ function Export-CsvAtomic {
 
 
 [string]$SendFileListEmailReportFileName
+function Send-SmartM365OptionalEmailHtmlReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BodyHtml,
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$Attachments
+    )
+
+    try {
+        $mailParams = @{ BodyHtml = $BodyHtml }
+        if ($Attachments -and $Attachments.Count -gt 0) { $mailParams['Attachments'] = $Attachments }
+        SendEmailHtmlReport @mailParams
+    }
+    catch {
+        $message = "Email notification skipped or failed: $($_.Exception.Message)"
+        if (Get-Command WriteLog -ErrorAction SilentlyContinue) { WriteLog -Message $message 'WARN' }
+        else { Write-Warning $message }
+    }
+}
 
 function Join-ModulePath {
 param([Parameter(Mandatory)][string]$FileName)
@@ -527,7 +548,7 @@ if (-not (EnsureExchangePSSnapinLoaded)) {
     $errorMessage = "Exchange environment not ready. Exiting script."
     Write-Error $errorMessage
 	$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-	SendEmailHtmlReport -BodyHtml $body
+	Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
     throw $errorMessage
 }
 $preflightOutputPaths = @($OutputPath)
@@ -545,7 +566,7 @@ if ($OnlyADPermission -or $IncludeADPermission) {
         $errorMessage = "The share '$OutputPathOnlyADPermission' is not available. Stopping the script."
         Write-Host $errorMessage -ForegroundColor Red
         $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-        SendEmailHtmlReport -BodyHtml $body
+        Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
         throw $errorMessage
     }
 
@@ -608,7 +629,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
         $errorMessage = "CRITICAL ERROR: Failed to apply 'Set-ADServerSettings -ViewEntireForest $true'. Ensure RSAT AD tools are installed and you have necessary permissions. Message: $($_.Exception.Message)"
         WriteLog -message  $errorMessage
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
+		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
         throw $errorMessage
     }
 
@@ -1596,7 +1617,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
                 $errorMessage = "CRITICAL ERROR: The Active Directory module is not installed. Please install it before running this script. The script will stop."
                 WriteLog -message $errorMessage
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-				SendEmailHtmlReport -BodyHtml $body
+				Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
                 throw $errorMessage
             }
             WriteLog -Message "Importing Active Directory module..."
@@ -1611,7 +1632,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
                 $errorMessage = "CRITICAL ERROR: Failed to contact Active Directory forest. Check connectivity and permissions. Message: $($_.Exception.Message). The script will stop."
                 WriteLog -message $errorMessage
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-				SendEmailHtmlReport -BodyHtml $body
+				Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
                 throw $errorMessage
             }
 
@@ -1619,7 +1640,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
                 $errorMessage = "CRITICAL ERROR: Failed to retrieve current Active Directory forest information (forest object is null). The script will stop."
                 WriteLog -message $errorMessage
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-				SendEmailHtmlReport -BodyHtml $body
+				Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
                 throw $errorMessage
             }
             WriteLog -Message "Current forest: $($forest.Name)"
@@ -1628,7 +1649,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
                 $errorMessage = "CRITICAL ERROR: Failed to determine the root domain of the Active Directory forest '$($forest.Name)'. The script will stop."
                 WriteLog -message $errorMessage
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-				SendEmailHtmlReport -BodyHtml $body
+				Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
                 throw $errorMessage
             }
             WriteLog -Message "Detected forest root domain: $($forest.RootDomain.Name)"
@@ -1675,7 +1696,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
 						WriteLog -message $errorMessage
 						Write-Host -ForegroundColor Red $errorMessage
 						$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-						SendEmailHtmlReport -BodyHtml $body
+						Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 throw $errorMessage
 					}
 				} else {
@@ -1687,7 +1708,7 @@ throw $errorMessage
             if (-not $domainsToProcess -or $domainsToProcess.Count -eq 0) {
                 $errorMessage = "CRITICAL ERROR: No domains were found in the forest '$($forest.Name)'. Check Active Directory configuration. The script will stop."
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-				SendEmailHtmlReport -BodyHtml $body
+				Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
                 WriteLog -message $errorMessage
                 throw $errorMessage
             }
@@ -1733,13 +1754,13 @@ throw $errorMessage
                     WriteLog -Message "ERROR: $errorMessage"
                     Write-Error $errorMessage
 					$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Failed to export combined data to '$globalCombinedCsvFile': $($_.Exception.Message)"
-					SendEmailHtmlReport -BodyHtml $body
+					Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
                 }
             } else {
                 WriteLog -Message "No data accumulated in \$Global:ScriptOverallMailboxData. Combined 'AllDomains' CSV will not be created or will be empty if it was pre-deleted."
                 Write-Host -ForegroundColor Yellow "No mailbox data was collected or loaded. The combined file '$globalCombinedCsvFile' will not be created or will be empty."
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : No mailbox data was collected or loaded. The combined file '$globalCombinedCsvFile' will not be created or will be empty."
-				SendEmailHtmlReport -BodyHtml $body
+				Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
             }
 
         }
@@ -1775,7 +1796,7 @@ throw $errorMessage
                         WriteLog -message $errorMessage
                         Write-Host -ForegroundColor Red $errorMessage
 						$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-						SendEmailHtmlReport -BodyHtml $body
+						Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 throw $errorMessage
                     } else {
                         WriteLog -Message "INFO: Combined CSV file '$combinedCsvFileForNonDetectAll' exists and -ForceOverwriteCSV is `$true. It will be deleted."
@@ -1878,7 +1899,7 @@ if ($scriptdatamailbox -eq $true) {
             } catch {
                 WriteLog -Message "Failed to remove temporary file: $_" "ERROR"
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : No Duplicates Primary SMTP found - Failed to remove temporary file: $_"
-				SendEmailHtmlReport -BodyHtml $body
+				Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 throw $errorMessage
             }
         }
@@ -1890,7 +1911,7 @@ throw $errorMessage
         } catch {
             WriteLog -Message "Failed to export cleaned CSV: $_" "ERROR"
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Duplicates Primary SMTP detected - Failed to export cleaned CSV: $_"
-			SendEmailHtmlReport -BodyHtml $body
+			Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 throw $errorMessage
         }
 
@@ -1904,11 +1925,11 @@ throw $errorMessage
         try {
             $logEntries | Out-File -FilePath $LogFileDuplicate -Encoding UTF8
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Duplicates Primary SMTP detected."
-			SendEmailHtmlReport -BodyHtml $body -Attachments $LogFileDuplicate
+			Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body -Attachments $LogFileDuplicate
         } catch {
             WriteLog -Message "Failed to write log file: $_" "ERROR"
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Duplicates Primary SMTP detected - Failed to write log file: $_"
-			SendEmailHtmlReport -BodyHtml $body
+			Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 throw $errorMessage
         }
 
@@ -1927,7 +1948,7 @@ throw $errorMessage
                 } else {
                     WriteLog -Message "File already exists: $renamedPath. Rename aborted." "ERROR"
 					$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Duplicates Primary SMTP detected - File already exists: $renamedPath. Rename aborted."
-					SendEmailHtmlReport -BodyHtml $body
+					Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 throw $errorMessage
                 }
             }
@@ -1935,7 +1956,7 @@ throw $errorMessage
             WriteLog -Message "Original file renamed to: $renamedPath"
         } catch {
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Failed to rename original file: $_"
-			SendEmailHtmlReport -BodyHtml $body
+			Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
             WriteLog -Message "Failed to rename original file: $_" "ERROR"
 throw $errorMessage
         }
@@ -1949,7 +1970,7 @@ throw $errorMessage
                 } else {
                     WriteLog -Message "File already exists: $InputCsvForDuplicateScan. Move aborted." "ERROR"
 					$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : File already exists: $InputCsvForDuplicateScan. Move aborted."
-					SendEmailHtmlReport -BodyHtml $body
+					Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 throw $errorMessage
                 }
             }
@@ -1958,7 +1979,7 @@ throw $errorMessage
         } catch {
             WriteLog -Message "Failed to move cleaned file: $_" "ERROR"
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Failed to move cleaned file: $_"
-			SendEmailHtmlReport -BodyHtml $body
+			Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 throw $errorMessage
         }
 
@@ -1982,7 +2003,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 		$errorMessage = "Error retrieving local configuration path LastOutput $_"
 		WriteLog -Message $errorMessage "ERROR"
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
+		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 		throw
 	}
 
@@ -1990,7 +2011,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 		$errorMessage = "The share '$SourceDirectory' is not available. Stopping the script."
 		WriteLog -Message $errorMessage "ERROR"
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
+		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 		throw
 	}
 
@@ -2000,7 +2021,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 		$errorMessage = "Error retrieving local configuration path DestinationDirectory $_"
 		WriteLog -Message $errorMessage "ERROR"
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
+		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 		throw
 	}
 
@@ -2008,7 +2029,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 		$errorMessage = "The share '$DestinationDirectory' is not available. Stopping the script."
 		WriteLog -Message $errorMessage "ERROR"
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
+		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 		throw
 	}
 
@@ -2018,7 +2039,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 		$errorMessage = "Error retrieving local configuration path ScriptCsvLogFolderPathectory $_"
 		WriteLog -Message $errorMessage "ERROR"
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
+		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 		throw
 	}
 
@@ -2026,7 +2047,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 		$errorMessage = "The share '$ScriptCsvLogFolderPathectory' is not available. Stopping the script."
 		WriteLog -Message $errorMessage "ERROR"
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
+		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 		throw
 	}
 
@@ -2041,7 +2062,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 		WriteLog -Message "No '*_OnlyADPermission.csv' files found in the source directory. Nothing to process." "WARNING"
 		$errorMessage = "Error, No '*_OnlyADPermission.csv' files found in the source directory. Nothing to process."
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
+		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 		throw
 	}
 
@@ -2096,7 +2117,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 			Write-Error "An unexpected error occurred while processing the consolidated file '$($allDomainsFile.Name)'. Details: $_"
 			$errorMessage = "ERROR retrieving local configuration path: $_"
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-			SendEmailHtmlReport -BodyHtml $body
+			Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 			throw
 		}
 
@@ -2154,7 +2175,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 				$summary.Errors++
 				$errorMessage = "ERROR retrieving local configuration path: $_"
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-				SendEmailHtmlReport -BodyHtml $body
+				Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
 				throw
 			}
 		}
