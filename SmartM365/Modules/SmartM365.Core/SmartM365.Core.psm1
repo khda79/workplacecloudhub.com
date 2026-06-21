@@ -1566,7 +1566,17 @@ function Connect-SmartM365GraphForSharePointUpload {
         [string]$Thumbprint
     )
 
-    Connect-SmartM365GraphAppOnly -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint -Purpose 'SharePoint upload'
+    $connectionKey = '{0}|{1}|{2}' -f $AppId, $TenantId, $Thumbprint
+    $currentContext = Get-MgContext -ErrorAction SilentlyContinue
+    if ($script:SmartM365SharePointUploadConnectionKey -eq $connectionKey -and $null -ne $currentContext) {
+        return $true
+    }
+
+    $connected = Connect-SmartM365GraphAppOnly -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint -Purpose 'SharePoint upload'
+    if ($connected) {
+        $script:SmartM365SharePointUploadConnectionKey = $connectionKey
+    }
+    return $connected
 }
 
 function Invoke-SmartM365SharePointCsvUpload {
@@ -1597,25 +1607,38 @@ function Invoke-SmartM365SharePointCsvUpload {
     }
 
     try {
-        $site = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath)
-        $drives = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id)
-        $driveList = @($drives.value)
-        $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
-        $drive = @($driveList | Where-Object { $_.name -ieq $LibraryDisplayName } | Select-Object -First 1)[0]
-        if (-not $drive) {
-            $targetNorm = & $normalize $LibraryDisplayName
-            $drive = @($driveList | Where-Object { (& $normalize $_.name) -ieq $targetNorm } | Select-Object -First 1)[0]
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) {
+            $script:SmartM365SharePointDriveIdCache = @{}
         }
-        if (-not $drive) {
-            $available = ($driveList | ForEach-Object { $_.name }) -join ' | '
-            WriteLog -Message "SharePoint upload skipped: document library '$LibraryDisplayName' not found. Available drives: $available" -Level "WARNING"
-            return
+
+        $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
+        if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
+            $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
+        }
+        else {
+            $site = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath)
+            $drives = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id)
+            $driveList = @($drives.value)
+            $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
+            $drive = @($driveList | Where-Object { $_.name -ieq $LibraryDisplayName } | Select-Object -First 1)[0]
+            if (-not $drive) {
+                $targetNorm = & $normalize $LibraryDisplayName
+                $drive = @($driveList | Where-Object { (& $normalize $_.name) -ieq $targetNorm } | Select-Object -First 1)[0]
+            }
+            if (-not $drive) {
+                $available = ($driveList | ForEach-Object { $_.name }) -join ' | '
+                WriteLog -Message "SharePoint upload skipped: document library '$LibraryDisplayName' not found. Available drives: $available" -Level "WARNING"
+                return
+            }
+
+            $driveId = $drive.id
+            $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
         }
 
         $fileName = [System.IO.Path]::GetFileName($LocalFilePath)
         $targetPath = ConvertTo-GraphDrivePath (Join-Path -Path $TargetFolderPath -ChildPath $fileName)
         $bytes = [System.IO.File]::ReadAllBytes($LocalFilePath)
-        $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $drive.id, $targetPath
+        $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
         Invoke-MgGraphRequest -Method PUT -Uri $uri -Body $bytes -ContentType 'application/octet-stream' | Out-Null
         WriteLog -Message "SharePoint CSV uploaded: $TargetFolderPath/$fileName"
     }
