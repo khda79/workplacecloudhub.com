@@ -23,5 +23,27 @@
   "DomainFriendlyNames": {},
   "ActiveDirectoryInventoryCsvLogFolderPath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory",
   "Windows11UpgradeGroupPattern": "*GG_SMARTM365_INTUNE_UPGRADEW11*",
-  "IntuneEnrollmentGroupPattern": "*GG_SMARTM365_INTUNE*"
+  "IntuneEnrollmentGroupPattern": "*GG_SMARTM365_INTUNE*",
+  "EnableOuInventory": true,
+  "EnableComputerInventory": true,
+  "EnableUserInventory": true,
+  "EnableGroupInventory": true,
+  "EnableContactInventory": true,
+  "EnableDuplicateAnalysis": true,
+  "DomainParallelThrottleLimit": 1,
+  "DeleteTemporaryPerDomainCsv": true,
+  "EnableWeeklyHistory": true,
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory\\WeeklyHistory",
+  "WeeklyHistoryRetentionWeeks": 52,
+  "EnableDailyReport": true,
+  "DailyReportAllowedOS": [
+    "Windows 7*",
+    "Windows 8*",
+    "Windows 10*",
+    "Windows 11*"
+  ],
+  "DailyReportInactiveDays": 90,
+  "EnableDailyReportLock": true,
+  "DailyReportLockRoot": "C:\\ProgramData\\SmartM365\\Locks",
+  "DailyReportLockName": "SmartM365-ActiveDirectory-Inventory-DailyReport"
 }
