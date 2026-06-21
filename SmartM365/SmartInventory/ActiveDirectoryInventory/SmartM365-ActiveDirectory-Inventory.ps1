@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.1
+1.3
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -273,7 +273,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.3"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -286,7 +286,6 @@ try {
         $WeeklyHistoryFolderPath = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory'
     }
     WriteLog -Message ("Starting {0}" -f $TaskName)
-    WriteLog -Message ("PowerShell Version: {0}" -f $PSVersionTable.PSVersion)
 }
 catch {
     Write-Host ("Initialization failed: {0}" -f $_) -ForegroundColor Red
@@ -752,10 +751,16 @@ try {
             $rowsArray | Export-Csv -Path $OutputFilePath -NoTypeInformation -Delimiter ';' -Encoding UTF8
             WriteLog -Message ("Daily report CSV created: {0}" -f $OutputFilePath)
         }
-
-        if (-not $global:csvGeneratedPaths) { $global:csvGeneratedPaths = @() }
-        $global:csvGeneratedPaths += $OutputFilePath
-
+        if (-not $global:csvGeneratedPaths -or -not ($global:csvGeneratedPaths -is [System.Collections.Generic.HashSet[string]])) {
+            $existingCsvGeneratedPaths = @($global:csvGeneratedPaths)
+            $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($existingCsvGeneratedPath in $existingCsvGeneratedPaths) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$existingCsvGeneratedPath)) {
+                    [void]$global:csvGeneratedPaths.Add([string]$existingCsvGeneratedPath)
+                }
+            }
+        }
+        [void]$global:csvGeneratedPaths.Add($OutputFilePath)
         if (-not [string]::IsNullOrWhiteSpace($LatestFolderPath)) {
             if (-not (Test-Path -LiteralPath $LatestFolderPath)) {
                 New-Item -Path $LatestFolderPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
@@ -1873,9 +1878,34 @@ catch {
 finally {
     try {
         WriteLog -Message ("Stopping transcript for script '{0}'" -f $MyInvocation.MyCommand.Name)
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Stop-Transcript | Out-Null
+        try {
+            $smartM365TranscriptPath = $null
+            $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+            if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) {
+                $smartM365TranscriptPath = $smartM365TranscriptVariable.Value
+            }
+            else {
+                $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+                if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) {
+                    $smartM365TranscriptPath = $smartM365TranscriptVariable.Value
+                }
+            }
+            if ($smartM365TranscriptPath) {
+                Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath
+            }
+        }
+        catch {
+        }
     }
     catch {
         Write-Host ("Failed to stop transcript: {0}" -f $_) -ForegroundColor Yellow
+    }
+
+    try {
+        Complete-SmartM365ExecutionContext -Status Auto -ErrorRecord $globalError
+    }
+    catch {
+        Write-Host ("Failed to write execution summary: {0}" -f $_) -ForegroundColor Yellow
     }
 }
