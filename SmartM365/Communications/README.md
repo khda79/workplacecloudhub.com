@@ -13,7 +13,7 @@ This area is separate from `SmartInventory` because these scripts can send user-
 Shared tenant values such as Graph app-only authentication, `From`, Teams webhooks, and output roots still come from the standard SmartM365 tenant configuration:
 
 ```text
-SmartM365.global.local.json
+Config\SmartM365.global.local.json
 Config/Tenants/<TenantKey>.local.json
 ```
 
