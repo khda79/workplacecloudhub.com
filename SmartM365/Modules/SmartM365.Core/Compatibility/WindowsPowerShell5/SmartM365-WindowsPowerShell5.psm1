@@ -17,6 +17,29 @@ function Get-ModuleLocalConfig {
     }
 }
 
+function Initialize-SmartM365ModuleGlobalConfigFromTemplate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$TemplatePath
+    )
+
+    if (Test-Path -LiteralPath $Path) { return $true }
+    if (-not (Test-Path -LiteralPath $TemplatePath)) { return $false }
+
+    $targetFolder = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($targetFolder) -and -not (Test-Path -LiteralPath $targetFolder)) {
+        New-Item -Path $targetFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+
+    Copy-Item -LiteralPath $TemplatePath -Destination $Path -Force -ErrorAction Stop
+    Write-Host "Created missing global local configuration from template." -ForegroundColor Yellow
+    Write-Host ("Local JSON : {0}" -f $Path) -ForegroundColor Yellow
+    Write-Host ("Template   : {0}" -f $TemplatePath) -ForegroundColor Yellow
+    Write-Host 'Edit the local JSON now if needed. Press Enter to continue with the current file values.' -ForegroundColor Yellow
+    Read-Host 'Press Enter to continue' | Out-Null
+    return $true
+}
 function Get-SmartM365EffectiveModuleGlobalConfig {
     [CmdletBinding()]
     param()
@@ -46,6 +69,15 @@ function Get-SmartM365EffectiveModuleGlobalConfig {
         }
 
         $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
+
+        $globalTemplatePath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json.template'
+
+        if (-not (Test-Path -LiteralPath $globalConfigPath)) {
+
+            Initialize-SmartM365ModuleGlobalConfigFromTemplate -Path $globalConfigPath -TemplatePath $globalTemplatePath | Out-Null
+
+        }
+
         if (Test-Path -LiteralPath $globalConfigPath) {
             try {
                 $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop

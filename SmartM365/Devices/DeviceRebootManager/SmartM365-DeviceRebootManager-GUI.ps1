@@ -201,10 +201,46 @@ function Resolve-AppRelativePath {
     return Join-Path -Path $PSScriptRoot -ChildPath $Path
 }
 
+function Initialize-AppConfigFromTemplate {
+    param(
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$TemplatePath
+    )
+
+    if (Test-Path -LiteralPath $ConfigPath) { return $false }
+    if (-not (Test-Path -LiteralPath $TemplatePath)) { return $false }
+
+    $parent = Split-Path -Path $ConfigPath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    }
+
+    Copy-Item -LiteralPath $TemplatePath -Destination $ConfigPath -ErrorAction Stop
+    Write-AppLog -Level WARN -Message ("Created local configuration from template: {0}" -f $ConfigPath)
+    Write-Host ((@(
+        'Created Device Reboot Manager local JSON from template.',
+        "Local JSON: $ConfigPath",
+        "Template: $TemplatePath",
+        'Edit the local JSON now if needed. When ready, press Enter to continue.',
+        'If you press Enter without editing, the app continues with the default template values.'
+    )) -join [Environment]::NewLine) -ForegroundColor Yellow
+    Read-Host 'Press Enter to continue' | Out-Null
+    return $true
+}
+
 function Read-AppConfig {
     $scriptConfig = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
+    $scriptTemplateConfig = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json.template'
     $programConfig = Join-Path -Path $script:ProgramDataRoot -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
     $userConfig = Join-Path -Path $script:UserDataRoot -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
+
+    if (-not [string]::IsNullOrWhiteSpace($ConfigPath) -and -not (Test-Path -LiteralPath $ConfigPath)) {
+        Initialize-AppConfigFromTemplate -ConfigPath $ConfigPath -TemplatePath $scriptTemplateConfig | Out-Null
+    }
+    elseif (-not (Test-Path -LiteralPath $scriptConfig) -and -not (Test-Path -LiteralPath $programConfig) -and -not (Test-Path -LiteralPath $userConfig)) {
+        Initialize-AppConfigFromTemplate -ConfigPath $scriptConfig -TemplatePath $scriptTemplateConfig | Out-Null
+    }
+
     $effectivePath = Get-FirstExistingPath -Paths @($ConfigPath, $scriptConfig, $programConfig, $userConfig)
     if ([string]::IsNullOrWhiteSpace($effectivePath)) {
         Write-AppLog -Level WARN -Message 'No configuration file found. CLI and built-in defaults will be used.'
@@ -214,7 +250,6 @@ function Read-AppConfig {
     Write-AppLog -Message ("Loading configuration: {0}" -f $effectivePath)
     return Get-Content -LiteralPath $effectivePath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
-
 function Get-ConfigValue {
     param(
         [object]$Config,

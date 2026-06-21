@@ -13,6 +13,46 @@ function ConvertTo-SmartM365CommunicationHashtable {
     return $hash
 }
 
+function Initialize-SmartM365CommunicationLocalJsonFromTemplate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$TemplatePath,
+        [string]$ConfigDescription = 'communication local configuration'
+    )
+
+    if (Test-Path -LiteralPath $Path) { return $false }
+    if ([string]::IsNullOrWhiteSpace($TemplatePath)) { $TemplatePath = '{0}.template' -f $Path }
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath) -or -not (Test-Path -LiteralPath $TemplatePath)) {
+        throw ((@(
+            "Local JSON not found: $Path",
+            "Template to copy is missing: $TemplatePath",
+            'Create the missing local JSON from the matching template, then run the script again.'
+        )) -join [Environment]::NewLine)
+    }
+
+    try {
+        Copy-Item -LiteralPath $TemplatePath -Destination $Path -ErrorAction Stop
+    }
+    catch {
+        throw ("Failed to create {0} '{1}' from template '{2}': {3}" -f $ConfigDescription, $Path, $TemplatePath, $_.Exception.Message)
+    }
+
+    Write-Host ((@(
+        "Created $ConfigDescription from template.",
+        "Local JSON: $Path",
+        "Template: $TemplatePath",
+        'Edit the local JSON now if needed. When ready, press Enter to continue.',
+        'If you press Enter without editing, the script continues with the default template values.'
+    )) -join [Environment]::NewLine) -ForegroundColor Yellow
+
+    try { Read-Host 'Press Enter to continue' | Out-Null }
+    catch { Write-Host 'Unable to pause for input. Continuing with the generated local JSON.' -ForegroundColor Yellow }
+
+    return $true
+}
+
 function Read-SmartM365CommunicationJson {
     [CmdletBinding()]
     param(
@@ -21,8 +61,15 @@ function Read-SmartM365CommunicationJson {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        if ($Required) { throw "Configuration file not found: $Path" }
-        return @{}
+        if ($Path -like '*.local.json') {
+            Initialize-SmartM365CommunicationLocalJsonFromTemplate -Path $Path -TemplatePath ('{0}.template' -f $Path) | Out-Null
+        }
+        elseif ($Required) {
+            throw "Configuration file not found: $Path"
+        }
+        else {
+            return @{}
+        }
     }
 
     try {
