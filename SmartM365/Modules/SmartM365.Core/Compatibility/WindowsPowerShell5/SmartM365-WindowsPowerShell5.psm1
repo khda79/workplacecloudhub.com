@@ -231,10 +231,17 @@ function WriteLog {
             $Level = "INFO"
         }
     }
+    $normalizedLevel = $Level.ToUpperInvariant()
+    if ($normalizedLevel -eq 'WARNING') {
+        $global:SmartM365WarningCount = [int]$global:SmartM365WarningCount + 1
+    }
+    elseif ($normalizedLevel -eq 'ERROR') {
+        $global:SmartM365ErrorCount = [int]$global:SmartM365ErrorCount + 1
+    }
 
     $logEntry = @(Format-SmartM365LogLine -Message $Message -Level $Level)
 
-    switch ($Level.ToUpper()) {
+    switch ($normalizedLevel) {
         "ERROR"   { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Red } }
         "WARNING" { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Yellow } }
         "INFO"    { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Cyan } }
@@ -248,6 +255,168 @@ function WriteLog {
     }
 
     Invoke-SmartM365TeamsNotificationFromLog -Message $Message -Level $Level
+}
+
+function Get-SmartM365ScriptVersionFromFile {
+    [CmdletBinding()]
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return '' }
+
+    try {
+        $content = [System.IO.File]::ReadAllText($Path)
+        $match = [regex]::Match($content, '(?im)^[ \t]*\.VERSION[ \t]*\r?\n[ \t]*(?<Version>[^\r\n]+)')
+        if ($match.Success) {
+            return $match.Groups['Version'].Value.Trim()
+        }
+    }
+    catch {
+    }
+
+    return ''
+}
+
+function Write-SmartM365ExecutionContext {
+    [CmdletBinding()]
+    param(
+        [string]$ScriptName = $global:SmartM365ScriptName,
+        [string]$ScriptVersion = '',
+        [string]$TenantKey = $global:SmartM365Tenant,
+        [string]$OutputPath = $global:BasePath,
+        [string]$ScriptPath = ''
+    )
+
+    $now = Get-Date
+    $context = [ordered]@{}
+
+    if (-not [string]::IsNullOrWhiteSpace($ScriptName)) { $context['ScriptName'] = $ScriptName }
+    if (-not [string]::IsNullOrWhiteSpace($ScriptVersion)) { $context['ScriptVersion'] = $ScriptVersion }
+    if (-not [string]::IsNullOrWhiteSpace($TenantKey)) { $context['TenantKey'] = $TenantKey }
+
+    $context['StartTimeLocal'] = $now.ToString('yyyy-MM-dd HH:mm:ss zzz')
+    $context['StartTimeUtc'] = $now.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ssZ')
+
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($identity -and -not [string]::IsNullOrWhiteSpace($identity.Name)) {
+            $context['User'] = $identity.Name
+        }
+
+        $principal = New-Object -TypeName System.Security.Principal.WindowsPrincipal -ArgumentList $identity
+        $context['RunAsAdmin'] = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch {
+        if (-not [string]::IsNullOrWhiteSpace($env:USERNAME)) {
+            $context['User'] = ('{0}\{1}' -f $env:USERDOMAIN, $env:USERNAME).Trim('\')
+        }
+        $context['RunAsAdmin'] = 'Unknown'
+    }
+
+    $context['MachineName'] = [Environment]::MachineName
+    $context['PowerShellVersion'] = $PSVersionTable.PSVersion.ToString()
+    $context['PowerShellEdition'] = $PSVersionTable.PSEdition
+    $context['ProcessId'] = $PID
+    $context['Process64Bit'] = [Environment]::Is64BitProcess
+    $context['OS64Bit'] = [Environment]::Is64BitOperatingSystem
+
+    try {
+        $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $context['OperatingSystem'] = ('{0} {1}' -f $operatingSystem.Caption, $operatingSystem.Version).Trim()
+    }
+    catch {
+        $context['OperatingSystem'] = [Environment]::OSVersion.VersionString
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ScriptPath)) { $context['ScriptPath'] = $ScriptPath }
+    try { $context['WorkingDirectory'] = (Get-Location).Path } catch {}
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $context['OutputPath'] = $OutputPath }
+    if (-not [string]::IsNullOrWhiteSpace($global:LogPath)) { $context['LogPath'] = $global:LogPath }
+    if (-not [string]::IsNullOrWhiteSpace($global:LogTextFile)) { $context['LogTextFile'] = $global:LogTextFile }
+    if (-not [string]::IsNullOrWhiteSpace($global:logTranscriptFile)) { $context['TranscriptFile'] = $global:logTranscriptFile }
+
+    WriteLog -Message 'Execution context:' -Level 'INFO'
+    foreach ($key in $context.Keys) {
+        $value = $context[$key]
+        if ($null -eq $value) { continue }
+        if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { continue }
+        WriteLog -Message ('  {0}: {1}' -f $key, $value) -Level 'INFO'
+    }
+}
+
+function Complete-SmartM365ExecutionContext {
+    [CmdletBinding()]
+    param(
+        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings')]
+        [string]$Status = 'Auto',
+        [AllowNull()]$ErrorRecord = $null,
+        [string]$FailureStage = ''
+    )
+
+    if ($global:SmartM365ExecutionSummaryWritten) { return }
+    $global:SmartM365ExecutionSummaryWritten = $true
+
+    $ended = Get-Date
+    $started = if ($global:SmartM365ExecutionStartTime) { [datetime]$global:SmartM365ExecutionStartTime } else { $ended }
+    $duration = $ended - $started
+    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
+
+    $warningCount = if ($null -ne $global:SmartM365WarningCount) { [int]$global:SmartM365WarningCount } else { 0 }
+    $errorCount = if ($null -ne $global:SmartM365ErrorCount) { [int]$global:SmartM365ErrorCount } else { 0 }
+
+    $hasFailure = $null -ne $ErrorRecord -or $errorCount -gt 0
+    if ($Status -eq 'Auto') {
+        if ($hasFailure) {
+            $Status = 'Failed'
+        }
+        elseif ($warningCount -gt 0) {
+            $Status = 'CompletedWithWarnings'
+        }
+        else {
+            $Status = 'Success'
+        }
+    }
+
+    $summary = [ordered]@{
+        Status            = $Status
+        Duration          = $durationText
+        Started           = $started.ToString('yyyy-MM-dd HH:mm:ss zzz')
+        Ended             = $ended.ToString('yyyy-MM-dd HH:mm:ss zzz')
+        ScriptName        = $global:SmartM365ScriptName
+        TenantKey         = $global:SmartM365Tenant
+        OutputPath        = $global:BasePath
+        LogTextFile       = $global:LogTextFile
+        TranscriptFile    = $global:logTranscriptFile
+        GeneratedCsvFiles = if ($global:csvGeneratedPaths) { @($global:csvGeneratedPaths).Count } else { 0 }
+        Warnings          = $warningCount
+        Errors            = $errorCount
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($FailureStage)) {
+        $summary['FailureStage'] = $FailureStage
+    }
+
+    if ($null -ne $ErrorRecord) {
+        $failureMessage = if ($ErrorRecord -is [System.Management.Automation.ErrorRecord] -and $ErrorRecord.Exception) {
+            $ErrorRecord.Exception.Message
+        }
+        elseif ($ErrorRecord.Exception) {
+            $ErrorRecord.Exception.Message
+        }
+        else {
+            [string]$ErrorRecord
+        }
+        if (-not [string]::IsNullOrWhiteSpace($failureMessage)) {
+            $summary['FailureMessage'] = $failureMessage
+        }
+    }
+
+    WriteLog -Message 'Execution summary:' -Level 'INFO'
+    foreach ($key in $summary.Keys) {
+        $value = $summary[$key]
+        if ($null -eq $value) { continue }
+        if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { continue }
+        WriteLog -Message ('  {0}: {1}' -f $key, $value) -Level 'INFO'
+    }
 }
 
 function Invoke-SmartM365TeamsNotificationFromLog {
@@ -1286,6 +1455,20 @@ function InitializeScriptEnvironment {
 		[string]$LogFileName
     )
 
+    $callerScriptPath = ''
+    try {
+        foreach ($frame in (Get-PSCallStack)) {
+            if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
+            if ($frame.ScriptName -eq $PSCommandPath) { continue }
+            if ($frame.ScriptName -notlike '*.ps1') { continue }
+            $callerScriptPath = [string]$frame.ScriptName
+            break
+        }
+    }
+    catch {
+        $callerScriptPath = ''
+    }
+
     if ([string]::IsNullOrWhiteSpace($OutputPathInit) -and -not [string]::IsNullOrWhiteSpace($OutputPath)) {
         $OutputPathInit = $OutputPath
     }
@@ -1312,8 +1495,13 @@ function InitializeScriptEnvironment {
         WriteLog -Message "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json." -Level "ERROR"
         throw "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json."
     }
-
-	$global:BasePath = $OutputPathInit
+    $global:SmartM365ExecutionStartTime = Get-Date
+    $global:SmartM365ExecutionSummaryWritten = $false
+    $global:SmartM365WarningCount = 0
+    $global:SmartM365ErrorCount = 0
+    $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $global:BasePath = $OutputPathInit
+	$global:SmartM365ScriptName = $LogFileName
 	$global:LogPath = Join-Path -Path $logAllRootPath -ChildPath $LogFileName
 
 	try {
@@ -1330,6 +1518,8 @@ function InitializeScriptEnvironment {
     if ($global:RetentionMaxLogs -gt 0) {
         RemoveOldFiles -FolderPath $global:LogPath -FilePattern "$LogFileName*.log" -MaxFiles $global:RetentionMaxLogs
     }
+    $scriptVersion = Get-SmartM365ScriptVersionFromFile -Path $callerScriptPath
+    Write-SmartM365ExecutionContext -ScriptName $LogFileName -ScriptVersion $scriptVersion -OutputPath $OutputPathInit -ScriptPath $callerScriptPath
     Write-host  "Environment initialized successfully."
 
     return $OutputPathInit
