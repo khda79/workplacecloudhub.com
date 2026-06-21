@@ -20,8 +20,9 @@
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
-  "ExchangeMigrationBatchFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MigrationBatch",
   "LocalMailboxOnlyAdPermissionCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxPermissions\\OnlyADPermission",
   "LocalMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\Mailboxes",
+  "RemoteMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\Mailboxes",
+  "LocalMailboxReportCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxReports",
   "LocalMailboxCombinedPermissionCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxPermissions\\CombinedWithADPermission"
 }
