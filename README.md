@@ -17,6 +17,7 @@ Most tools are designed to run directly from their project folder. Local tenant 
 - `SmartAzureVirtualDesktop/`: Azure Virtual Desktop inventory, health, diagnostics, autoscale, FSLogix storage, and cost optimization scripts.
 - `SmartCitrix/`: Citrix on-premises and Citrix Cloud inventory scripts, with separate implementation areas for each platform model.
 - `SmartThinClient/`: Windows endpoint thin-client shell tooling for controlled Citrix, Azure Virtual Desktop, or web workspace access.
+- `SmartFinOps/`: read-only FinOps reporting that consumes SmartInventory exports and produces CSV plus HTML reports.
 
 Additional project directories will be added over time.
 
@@ -37,6 +38,7 @@ Recommended entry points:
 - Azure Virtual Desktop inventory scripts: `SmartAzureVirtualDesktop/README.md`
 - Citrix inventory scripts: `SmartCitrix/README.md`
 - Windows thin-client endpoint tooling: `SmartThinClient/README.md`
+- Workplace FinOps reporting: `SmartFinOps/README.md`
 
 For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README.md` and `SmartM365/Setup/SmartM365-AppRegistration-Permissions.md`. Device tools under `SmartM365/Devices/` are mostly local endpoint tools and do not require the SmartM365 app-only setup unless their own README explicitly says so.
 
@@ -150,6 +152,10 @@ The GUI and CLI use delegated interactive Microsoft Graph authentication. They d
 - Cloud Engineering: readiness, governance, monitoring, and platform operations.
 - Automation: PowerShell scripts, remediation flows, reporting helpers, and repeatable operational patterns.
 - AI for IT: troubleshooting assistance, documentation, script review, log analysis, and faster technical decisions.
+
+## SmartFinOps Tools
+
+`SmartFinOps/` contains read-only FinOps reporting tools. The first scope, **SmartFinOps Workplace**, consumes SmartM365 SmartInventory `DATA-LAST` CSV exports and produces optimization CSV files plus a standalone HTML report for Microsoft 365, Intune, Entra, Active Directory, and Exchange signals.
 
 ## Contact
 

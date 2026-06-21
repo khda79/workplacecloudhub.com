@@ -1,0 +1,19 @@
+{
+  "TenantKey": "test",
+  "WorkspaceRootPath": "{{SmartFinOpsRootPath}}",
+  "RepositoryRootPath": "{{RepositoryRootPath}}",
+  "DataAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-ALL",
+  "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-LAST",
+  "LogAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\LOG-ALL",
+  "SmartM365LatestCsvFolderPath": "{{RepositoryRootPath}}\\SmartM365\\Data\\Tenants\\{{TenantKey}}\\DATA-LAST",
+  "RetentionMaxCSV": 30,
+  "RetentionMaxLogs": 30,
+  "StaleUserDays": 90,
+  "StaleDeviceDays": 60,
+  "ReportTitle": "SmartFinOps Workplace Report",
+  "PriceModel": {
+    "Currency": "EUR",
+    "MonthlyUnitPriceBySkuPartNumber": {
+    }
+  }
+}
