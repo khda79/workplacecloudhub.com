@@ -9,8 +9,21 @@ if errorlevel 1 (
 )
 
 set "SCRIPT_DIR=%CD%\"
-set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
-if not exist "%PWSH%" set "PWSH=pwsh"
+set "PWSH="
+if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
+if not defined PWSH if not "%ProgramFiles(x86)%"=="" if exist "%ProgramFiles(x86)%\PowerShell\7\pwsh.exe" set "PWSH=%ProgramFiles(x86)%\PowerShell\7\pwsh.exe"
+if not defined PWSH for /f "delims=" %%I in ('where pwsh.exe 2^>nul') do if not defined PWSH set "PWSH=%%I"
+if not defined PWSH (
+    echo PowerShell 7 ^(pwsh.exe^) was not found.
+    echo Install PowerShell 7 or add pwsh.exe to PATH.
+    echo Checked:
+    echo   %ProgramFiles%\PowerShell\7\pwsh.exe
+    if not "%ProgramFiles(x86)%"=="" echo   %ProgramFiles(x86)%\PowerShell\7\pwsh.exe
+    echo   PATH
+    pause
+    popd
+    exit /b 1
+)
 "%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-Intune-DiscoveredApps-Inventory.ps1" -Tenant prod -Connect
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
