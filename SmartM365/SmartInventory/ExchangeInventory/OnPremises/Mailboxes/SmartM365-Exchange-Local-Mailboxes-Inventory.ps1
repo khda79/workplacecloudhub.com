@@ -11,12 +11,16 @@
       - Mobile device associations
 
     Supports both full-forest and targeted OU scans. Results are exported to CSV files.
+    Can also generate the mailbox daily statistics report that used to live in the Report script.
     Includes robust logging, error handling, and backup of previous exports.
     Designed for Exchange 2016 servers with management tools and AD modules installed.
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
+.VERSION
+1.2
+
 .NOTES
-    Version: 1.0
+    Version: 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -29,15 +33,26 @@ param (
 	[Parameter(Mandatory = $false)]
     [string]$OutputPathOnlyADPermission,
     [Parameter(Mandatory = $false)]
-    [string[]]$IncludedOrganizationalUnit = @(), 
+    [string[]]$IncludedOrganizationalUnit = @(),
     [Parameter(Mandatory = $false)]
-    [bool]$DetectAllDomains = $true, 
+    [bool]$DetectAllDomains = $true,
     [Parameter(Mandatory = $false)]
     [bool]$IncludeADPermission = $false,
     [Parameter(Mandatory = $false)]
     [bool]$OnlyADPermission = $false,
     [Parameter(Mandatory = $false)]
-    [bool]$ForceOverwriteCSV = $true
+    [bool]$ForceOverwriteCSV = $true,
+    [Parameter(Mandatory = $false)]
+    [bool]$GenerateReport = $true,
+    [Parameter(Mandatory = $false)]
+    [bool]$ReportOnly = $false,
+    [Parameter(Mandatory = $false)]
+    [bool]$DryRun = $false,
+    [Parameter(Mandatory = $false)]
+    [string[]]$TargetDomains = @(),
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1,168)]
+    [int]$FileFreshnessHours = 4
 )
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -213,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.2"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -222,7 +237,6 @@ if ($LimitResultSize) {
 }
 $scriptdatamailbox = $false
 $scriptdatamegewithperm = $true
-$scriptdatamegewithbatch = $true
 
 
 # Atomic CSV export helper
@@ -237,31 +251,27 @@ function Export-CsvAtomic {
 
         [Parameter(Mandatory = $false)]
         [ValidateSet("UTF8","UTF8BOM","Unicode","ASCII","Default")]
-        [string]$Encoding = "UTF8"
+        [string]$Encoding = "UTF8",
+
+        [Parameter(Mandatory = $false)]
+        [string]$Delimiter = ","
     )
 
-    Write-SmartM365CsvAtomically -Data @($InputObject) -Path $Path -Encoding $Encoding
+    Write-SmartM365CsvAtomically -Data @($InputObject) -Path $Path -Encoding $Encoding -Delimiter $Delimiter
 }
 
 [string]$inputFolderCSVfiles
 [string]$excludeMailboxesFile
-[string]$outputConsolidatedCsvPath
-[string]$outputConsolidatedCsvPath2
-[string]$outputFileNamePrefix = "MigrationBatch"
 
 [bool]$ExcludeAllDisabledAccounts = $false
 [bool]$ExcludeDisabledAccountsExceptForSharedMailboxes = $false
 [bool]$ExcludeDisabledMailboxes = $false
 [bool]$IncludeSpecificLastLogonCriteria = $false
-[bool]$SimpleBatchCsv = $true
-[bool]$EnabledBatchFileCreation = $false
 [string[]]$ExcludeSamAccountNamePatterns
 [string[]]$excludeFullAccessSamAccounts
 [string[]]$excludeSendAsSamAccounts
 [string[]]$excludeSendOnBehalfToSamAccounts
 
-[double]$maxBatchSizeMB = 500000.0
-[int]$MaxMailboxesPerBatchFile = 500
 
 [string]$SendFileListEmailReportFileName
 
@@ -310,49 +320,240 @@ function EnsureExchangePSSnapinLoaded {
     return $true
 }
 
+function Stop-SmartM365TranscriptSafely {
+    [CmdletBinding()]
+    param()
+    try { Stop-Transcript | Out-Null } catch {}
+    try {
+        $p = $null
+        $v = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+        if ($v -and $v.Value) { $p = $v.Value }
+        else {
+            $v = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+            if ($v -and $v.Value) { $p = $v.Value }
+        }
+        if ($p) { Update-SmartM365TimestampedTranscript -Path $p }
+    } catch {}
+}
+
+function Get-SmartM365MailboxReportValue {
+    param($Row, [string[]]$Names)
+    foreach ($name in $Names) {
+        $property = $Row.PSObject.Properties[$name]
+        if ($property -and $null -ne $property.Value -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) { return $property.Value }
+    }
+    return $null
+}
+
+function Get-SmartM365MailboxReportDomain {
+    param([string]$DistinguishedName)
+    if ([string]::IsNullOrWhiteSpace($DistinguishedName)) { return $null }
+    $matches = [regex]::Matches($DistinguishedName, '(?i)(?:^|,)DC=([^,]+)')
+    if ($matches.Count -eq 0) { return $null }
+    $parts = @()
+    foreach ($match in $matches) { $parts += $match.Groups[1].Value }
+    return ($parts -join '.')
+}
+
+function ConvertTo-SmartM365MailboxReportRecord {
+    param($Row, [switch]$Remote)
+    $dn = Get-SmartM365MailboxReportValue -Row $Row -Names @('DistinguishedName', 'DN')
+    $domain = Get-SmartM365MailboxReportValue -Row $Row -Names @('ADDomain', 'DomainName', 'Domain')
+    if (-not $domain) { $domain = Get-SmartM365MailboxReportDomain -DistinguishedName $dn }
+    $type = Get-SmartM365MailboxReportValue -Row $Row -Names @('RecipientTypeDetails', 'RecipientType', 'MailboxType')
+    if (-not $type -and $Remote) { $type = 'RemoteUserMailbox' }
+    $sizeRaw = Get-SmartM365MailboxReportValue -Row $Row -Names @('TotalItemSizeToMB', 'TotalItemSize-In-MB', 'TotalItemSizeMB', 'TotalSizeMB')
+    $sizeMb = 0.0
+    if ($sizeRaw) { [void][double]::TryParse(([string]$sizeRaw).Replace(',', '.'), [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$sizeMb) }
+    $disabledRaw = Get-SmartM365MailboxReportValue -Row $Row -Names @('AccountDisabled', 'Disabled')
+    [pscustomobject]@{
+        DistinguishedName    = $dn
+        AccountDisabled      = ([string]$disabledRaw -match '^(?i:true|1|yes|oui)$')
+        RecipientTypeDetails = [string]$type
+        ADDomain             = [string]$domain
+        TotalItemSizeToMB    = [math]::Round($sizeMb, 2)
+    }
+}
+
+function Import-SmartM365MailboxReportCsv {
+    param([string]$Path)
+    $header = Get-Content -LiteralPath $Path -First 1 -ErrorAction Stop
+    if ($header -match ';') { return Import-Csv -LiteralPath $Path -Delimiter ';' }
+    return Import-Csv -LiteralPath $Path
+}
+
+function Test-SmartM365MailboxReportCsvSchema {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { throw "Mailbox report CSV not found: $Path" }
+    $headerLine = Get-Content -LiteralPath $Path -First 1 -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($headerLine)) { throw "Mailbox report CSV is empty or has no header: $Path" }
+    $delimiter = if ($headerLine -match ';') { ';' } else { ',' }
+    $headers = @($headerLine -split [regex]::Escape($delimiter) | ForEach-Object { $_.Trim().Trim('"') })
+
+    $missingGroups = New-Object 'System.Collections.Generic.List[string]'
+    if (-not ($headers -contains 'DistinguishedName' -or $headers -contains 'DN')) { $missingGroups.Add('DistinguishedName or DN') }
+    if (-not ($headers -contains 'RecipientTypeDetails' -or $headers -contains 'RecipientType' -or $headers -contains 'MailboxType')) { $missingGroups.Add('RecipientTypeDetails, RecipientType or MailboxType') }
+    if ($missingGroups.Count -gt 0) {
+        throw ("Mailbox report CSV schema is invalid for '{0}'. Missing column group(s): {1}" -f $Path, ($missingGroups -join '; '))
+    }
+
+    return $true
+}
+function Invoke-SmartM365ExchangeLocalMailboxReport {
+    [CmdletBinding()]
+    param([bool]$UseCurrentInventoryData = $false)
+    $reportOutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxReportCsvLogFolderPath' -DefaultValue (Join-Path -Path $OutputPath -ChildPath 'Reports')
+    if (-not (Test-Path -LiteralPath $reportOutputPath)) { New-Item -ItemType Directory -Path $reportOutputPath -Force | Out-Null }
+    $localMailboxFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
+    $remoteMailboxFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RemoteMailboxCsvLogFolderPath' -DefaultValue ''
+    $latestCsvFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+    $localCsv = Join-Path -Path $localMailboxFolder -ChildPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
+    $remoteCsv = if ($remoteMailboxFolder) { Join-Path -Path $remoteMailboxFolder -ChildPath 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' } else { $null }
+    $dailyCsv = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats.csv'
+    $summaryCsv = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats_Summary.csv'
+    $latestDailyCsv = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats.csv' } else { $null }
+    $allowedTypes = @('UserMailbox', 'SharedMailbox', 'RoomMailbox', 'EquipmentMailbox', 'RemoteUserMailbox', 'RemoteSharedMailbox')
+    $remoteTypes = @('RemoteUserMailbox', 'RemoteSharedMailbox')
+    $records = @()
+    if ($UseCurrentInventoryData -and $Global:ScriptOverallMailboxData -and $Global:ScriptOverallMailboxData.Count -gt 0) { $records += $Global:ScriptOverallMailboxData | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ } }
+    elseif (Test-Path -LiteralPath $localCsv) { [void](Test-SmartM365MailboxReportCsvSchema -Path $localCsv); $records += Import-SmartM365MailboxReportCsv -Path $localCsv | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ } }
+    else { throw ('Local mailbox CSV not found for report generation: {0}' -f $localCsv) }
+    if ($remoteCsv -and (Test-Path -LiteralPath $remoteCsv)) { [void](Test-SmartM365MailboxReportCsvSchema -Path $remoteCsv); $records += Import-SmartM365MailboxReportCsv -Path $remoteCsv | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ -Remote } }
+    $records = @($records | Where-Object { $_.RecipientTypeDetails -and ($allowedTypes -contains $_.RecipientTypeDetails) })
+    if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.ADDomain -in $TargetDomains }) }
+    if ($records.Count -eq 0) { WriteLog -Message 'No mailbox data available for report generation.' 'WARN'; return $null }
+    $mailboxTypes = $allowedTypes | Sort-Object
+    $report = @($records | Group-Object -Property ADDomain | ForEach-Object {
+        $domain = $_.Name
+        $items = @($_.Group)
+        $totalMb = ($items | Measure-Object -Property TotalItemSizeToMB -Sum).Sum
+        if ($null -eq $totalMb) { $totalMb = 0 }
+        $row = [ordered]@{ Date = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); DomainName = $domain; TotalMailboxCount = $items.Count; TotalLocalMailboxCount = @($items | Where-Object { $_.RecipientTypeDetails -notin $remoteTypes }).Count; TotalRemoteMailboxCount = @($items | Where-Object { $_.RecipientTypeDetails -in $remoteTypes }).Count; EnabledAccounts = @($items | Where-Object { $_.AccountDisabled -eq $false }).Count; DisabledAccounts = @($items | Where-Object { $_.AccountDisabled -eq $true }).Count; TotalLocalMailboxSizeGB = [math]::Round(([double]$totalMb / 1024), 2) }
+        $counts = @($items | Group-Object -Property RecipientTypeDetails -NoElement)
+        foreach ($type in $mailboxTypes) { $row[$type] = @($counts | Where-Object { $_.Name -eq $type }).Count }
+        [pscustomobject]$row
+    })
+    $dailyRows = @()
+    if (Test-Path -LiteralPath $dailyCsv) { $dailyRows += Import-Csv -LiteralPath $dailyCsv -Delimiter ';' }
+    $dailyRows += $report
+    Export-CsvAtomic -InputObject $dailyRows -Path $dailyCsv -Encoding UTF8 -Delimiter ';'
+    $summaryColumns = @('DomainName', 'TotalMailboxCount', 'TotalLocalMailboxCount', 'TotalRemoteMailboxCount', 'EnabledAccounts', 'DisabledAccounts', 'TotalLocalMailboxSizeGB')
+    $summary = @($report | Select-Object $summaryColumns)
+    $totalRow = [ordered]@{ DomainName = 'TOTAL' }
+    foreach ($column in $summaryColumns) { if ($column -ne 'DomainName') { $sum = ($summary | Measure-Object -Property $column -Sum).Sum; if ($column -eq 'TotalLocalMailboxSizeGB') { $sum = [math]::Round([double]$sum, 2) }; $totalRow[$column] = $sum } }
+    Export-CsvAtomic -InputObject @($summary + ([pscustomobject]$totalRow)) -Path $summaryCsv -Encoding UTF8 -Delimiter ';'
+    if ($latestDailyCsv) { $latestDir = Split-Path -Path $latestDailyCsv -Parent; if (-not (Test-Path -LiteralPath $latestDir)) { New-Item -ItemType Directory -Path $latestDir -Force | Out-Null }; Copy-Item -LiteralPath $dailyCsv -Destination $latestDailyCsv -Force; Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestDailyCsv }
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsv
+    RemoveOldFiles -Path $reportOutputPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+    try { SendFileListEmailReport -Files @($dailyCsv, $summaryCsv) -Title ($TaskName + ' - Mailbox report') -Message ('Domains: {0}<br/>Output: {1}<br/>Summary: {2}' -f $report.Count, $dailyCsv, $summaryCsv) } catch { WriteLog -Message ('Failed to send mailbox report email: {0}' -f $_.Exception.Message) 'WARN' }
+    return [pscustomobject]@{ DailyStatsCsv = $dailyCsv; SummaryCsv = $summaryCsv; RowCount = $report.Count }
+}
 try {
     Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-    Import-Module (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -ErrorAction Stop	
+    Import-Module (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -ErrorAction Stop
 	$InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
 	Start-Transcript -Path $global:logTranscriptFile -Append
 	WriteLog -Message $MyInvocation.MyCommand.Name
 	WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
 	$OutputPath = $InitializeOutputPath
 	WriteLog -Message "Starting $TaskName..."
-	WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
-	exit 1
+    throw
 }
 #endregion
 
-if (-not (EnsureExchangePSSnapinLoaded)) {
-    Write-Error "Exchange environment not ready. Exiting script."
-	$errorMessage = "Exchange environment not ready. Exiting script."
-	$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-	SendEmailHtmlReport -BodyHtml $body
-    exit 1
-}
 $StartTime = Get-Date
 
-try {
-	$OutputPathOnlyADPermission = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxOnlyAdPermissionCsvLogFolderPath' -DefaultValue ''
-} catch {
-	Write-Error "Error retrieving local configuration path LastOutput $_"
-	WriteLog -Message "ERROR retrieving local configuration path: $_" "ERROR"
-	return
+if ($DryRun) {
+    $dryRunError = $null
+    try {
+        WriteLog -Message 'DryRun mode enabled. Inventory collection will be skipped.'
+        Write-Host 'DryRun mode enabled. Inventory collection will be skipped.' -ForegroundColor Cyan
+        Write-Host "OutputPath: $OutputPath"
+
+        $reportPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxReportCsvLogFolderPath' -DefaultValue (Join-Path -Path $OutputPath -ChildPath 'Reports')
+        Write-Host "ReportPath: $reportPath"
+
+        if ($ReportOnly -or $GenerateReport) {
+            $localMailboxFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
+            $localCsv = Join-Path -Path $localMailboxFolder -ChildPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
+            if (Test-Path -LiteralPath $localCsv) { [void](Test-SmartM365MailboxReportCsvSchema -Path $localCsv); Write-Host "Report local CSV schema OK: $localCsv" -ForegroundColor Green }
+            elseif ($ReportOnly) { throw "ReportOnly requires the local mailbox CSV or Exchange live collection: $localCsv" }
+        }
+
+        if (-not $ReportOnly) {
+            $exchangeCmdletAvailable = [bool](Get-Command Get-Mailbox -ErrorAction SilentlyContinue)
+            $exchangeSnapinRegistered = [bool](Get-PSSnapin -Registered Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue)
+            Write-Host "Exchange Get-Mailbox available: $exchangeCmdletAvailable"
+            Write-Host "Exchange snap-in registered: $exchangeSnapinRegistered"
+            if (-not $exchangeCmdletAvailable -and -not $exchangeSnapinRegistered) { throw 'Exchange Management Tools were not detected.' }
+        }
+    }
+    catch {
+        $dryRunError = $_
+        WriteLog -Message ("DryRun failed: {0}" -f $_.Exception.Message) "ERROR"
+        throw
+    }
+    finally {
+        if ($dryRunError) { try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $dryRunError -FailureStage 'DryRun' } catch {} }
+        else { try { Complete-SmartM365ExecutionContext -Status Auto } catch {} }
+        Stop-SmartM365TranscriptSafely
+    }
+    return
+}
+if ($ReportOnly) {
+    $reportOnlyError = $null
+    try {
+        WriteLog -Message 'ReportOnly mode enabled. Inventory collection will be skipped.'
+        Invoke-SmartM365ExchangeLocalMailboxReport -UseCurrentInventoryData:$false | Out-Null
+    }
+    catch {
+        $reportOnlyError = $_
+        WriteLog -Message ("ReportOnly execution failed: {0}" -f $_.Exception.Message) "ERROR"
+        throw
+    }
+    finally {
+        if ($reportOnlyError) { try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $reportOnlyError -FailureStage 'ReportOnly' } catch {} }
+        else { try { Complete-SmartM365ExecutionContext -Status Auto } catch {} }
+        Stop-SmartM365TranscriptSafely
+    }
+    return
 }
 
-if (-not (Test-Path $OutputPathOnlyADPermission)) {
-	Write-Host "The share '$OutputPathOnlyADPermission' is not available. Stopping the script." -ForegroundColor Red
-	$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : The share '$OutputPathOnlyADPermission' is not available. Stopping the script."
+if (-not (EnsureExchangePSSnapinLoaded)) {
+    $errorMessage = "Exchange environment not ready. Exiting script."
+    Write-Error $errorMessage
+	$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
 	SendEmailHtmlReport -BodyHtml $body
-	exit
-} else {
-	Write-Host "The network share '$OutputPathOnlyADPermission' is available. Continuing the script..." -ForegroundColor Green
-Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath, $OutputPathOnlyADPermission) -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
-
+    throw $errorMessage
 }
+$preflightOutputPaths = @($OutputPath)
+if ($OnlyADPermission -or $IncludeADPermission) {
+    try {
+        if ([string]::IsNullOrWhiteSpace($OutputPathOnlyADPermission)) {
+            $OutputPathOnlyADPermission = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxOnlyAdPermissionCsvLogFolderPath' -DefaultValue ''
+        }
+    } catch {
+        WriteLog -Message "ERROR retrieving LocalMailboxOnlyAdPermissionCsvLogFolderPath: $_" "ERROR"
+        throw
+    }
+
+    if ([string]::IsNullOrWhiteSpace($OutputPathOnlyADPermission) -or -not (Test-Path $OutputPathOnlyADPermission)) {
+        $errorMessage = "The share '$OutputPathOnlyADPermission' is not available. Stopping the script."
+        Write-Host $errorMessage -ForegroundColor Red
+        $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
+        SendEmailHtmlReport -BodyHtml $body
+        throw $errorMessage
+    }
+
+    Write-Host "The network share '$OutputPathOnlyADPermission' is available. Continuing the script..." -ForegroundColor Green
+    $preflightOutputPaths += $OutputPathOnlyADPermission
+}
+
+Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths $preflightOutputPaths -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
 
 # Refined parameter logic for permissions
 if ($OnlyADPermission) {
@@ -364,13 +565,12 @@ if ($OnlyADPermission) {
 
     # In OnlyADPermission mode, do not merge with permissions inventory nor batch naming.
     $scriptdatamegewithperm = $false
-    $scriptdatamegewithbatch = $false
 }
 if ($IncludedOrganizationalUnit.Count -ne 0) {
     $DetectAllDomains = $false
 }
 $TimeStampForLogOnly = Get-Date -Format "yyyyMMdd_HHmmss" # Timestamp for log files to ensure uniqueness per run
-				
+
 # Initialize global caches
 if (-not $Global:DomainInfoCache) {
     $Global:DomainInfoCache = @{} # For NetBIOSName to DNSRoot (FQDN) mapping
@@ -390,15 +590,13 @@ $Script:MailboxesProcessingLogFile = $null # Initialize script-scoped variable f
 # Variable to track successful script completion
 $InventoryCompletedSuccessfully = $false
 
-		
+
 try { # Main try block for script execution and interruption handling
     WriteLog -Message "Starting script '$PSCommandPath' - Version $ScriptVersion"
     Write-Host "Starting script '$($MyInvocation.MyCommand.Name)' - Version $ScriptVersion ... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
     Write-Host "Output Path for this run: $OutputPath"
     WriteLog -Message "Output Path for this run: $OutputPath"
-    Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
-    WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
-    WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, ForceOverwriteCSV = $ForceOverwriteCSV"
+WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, ForceOverwriteCSV = $ForceOverwriteCSV"
     Write-Host "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, ForceOverwriteCSV = $ForceOverwriteCSV"
     Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1))
 
@@ -472,7 +670,7 @@ try { # Main try block for script execution and interruption handling
                 Write-Host -ForegroundColor Red $mainLogErrorMessage
             }
         }
-       
+
         # --- START CSV File Overwrite Check (Combined CSV) ---
         # This check is now primarily handled in the main script logic before calling Process-SpecificDomain or MailboxesProcessing
         # However, for the case where !DetectAllDomains and a single OU is provided, the per-domain/path CSV check is relevant here.
@@ -489,7 +687,7 @@ try { # Main try block for script execution and interruption handling
                 $singlePathDomainName = $singlePath -replace '^(OU=|CN=)','' -replace '[^a-zA-Z0-9.-]','_'
                 if ($singlePathDomainName.Length -gt 30) {$singlePathDomainName = $singlePathDomainName.Substring(0,30)}
             }
-           
+
             $perDomainCsvFileName = "Exchange_OnPrem_Mailboxes_$($singlePathDomainName)$(if($OnlyADPermission){'_OnlyADPermission'}else{''}).csv"
 			$perDomainCsvFileFullPath = Join-Path -Path $OutputPath -ChildPath $perDomainCsvFileName
 
@@ -557,7 +755,7 @@ try { # Main try block for script execution and interruption handling
         $i = 0
         $totalMailBox = 0
         $MailboxScanStartTime = $null
-       
+
         Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1))
         Write-LogMailboxesProcessing "MailboxesProcessing2: Starting data collection and export. Log Identifier: $logPathIdentifier"
         if ($IncludedLDAPPaths -and $IncludedLDAPPaths.Count -gt 0) {
@@ -620,13 +818,13 @@ try { # Main try block for script execution and interruption handling
         {
             Write-Host -ForegroundColor:Cyan "Retrieving ALL mailboxes (no specific paths provided). Please wait, this may take some time… $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
             Write-LogMailboxesProcessing "Retrieving ALL mailboxes (no specific paths provided)..."
-            try {                
+            try {
 				if ($LimitResultSize) {
 					$AllMailbox = Get-Mailbox -ResultSize $LimitResultSize -ErrorAction Stop
 				} else {
 					$AllMailbox = Get-Mailbox -ResultSize Unlimited -ErrorAction Stop
 				}
-				
+
             } catch {
                 $errorMessage = "Error while retrieving all mailboxes: $($_.Exception.Message)."
                 Write-Error $errorMessage
@@ -652,7 +850,7 @@ try { # Main try block for script execution and interruption handling
             }
             Write-LogMailboxesProcessing "Starting detailed processing of $totalMailBox mailboxes for current scope."
             $MailboxScanStartTime = Get-Date
-           
+
             $LocalAllOutput = @() # Collection for data from this specific MailboxesProcessing2 call
 
             Foreach ($Mbx in $AllMailbox) {
@@ -671,21 +869,20 @@ try { # Main try block for script execution and interruption handling
 
                 Write-LogMailboxesProcessing "Processing mailbox ($i of $totalMailBox): $($Mbx.Name) - ($Domain)"
                 $MbxStartTime = Get-Date
-               
+
                 if ($Domains -notcontains $Domain) {
                     $Domains += $Domain
                     $MailboxesByDomain[$Domain] = @()
-                }       
-               
+                }
+
                 $userObj = New-Object PSObject
                 $userObj | Add-Member NoteProperty -Name "DomainName" -Value $Domain
-                $userObj | Add-Member NoteProperty -Name "BatchName" -Value ""
                 $userObj | Add-Member NoteProperty -Name "Name" -Value $Mbx.Name
                 $userObj | Add-Member NoteProperty -Name "DisplayName" -Value $Mbx.DisplayName
                 $userObj | Add-Member NoteProperty -Name "Alias" -Value $Mbx.Alias
-                $userObj | Add-Member NoteProperty -Name "UserPrincipalName" -Value $Mbx.UserPrincipalName   
+                $userObj | Add-Member NoteProperty -Name "UserPrincipalName" -Value $Mbx.UserPrincipalName
                 $userObj | Add-Member NoteProperty -Name "SamAccountName" -Value $Mbx.SamAccountName
-               
+
                 if ($OnlyADPermission -eq $false)
                 {
                     $userObj | Add-Member NoteProperty -Name "IsMailboxEnabled" -Value $Mbx.IsMailboxEnabled
@@ -694,32 +891,32 @@ try { # Main try block for script execution and interruption handling
                     $userObj | Add-Member NoteProperty -Name "IsLinked" -Value $Mbx.IsLinked
                     $userObj | Add-Member NoteProperty -Name "IsResource" -Value $Mbx.IsResource
                     $userObj | Add-Member NoteProperty -Name "AccountDisabled" -Value $Mbx.AccountDisabled
-                    $userObj | Add-Member NoteProperty -Name "DistinguishedName" -Value $Mbx.DistinguishedName   
+                    $userObj | Add-Member NoteProperty -Name "DistinguishedName" -Value $Mbx.DistinguishedName
                     $userObj | Add-Member NoteProperty -Name "RecipientType" -Value $(if($null -ne $Mbx.RecipientTypeDetails){$Mbx.RecipientTypeDetails.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "RecipientOU" -Value $Mbx.OrganizationalUnit
                     $userObj | Add-Member NoteProperty -Name "PrimarySMTPaddress" -Value $(if($null -ne $Mbx.PrimarySmtpAddress){$Mbx.PrimarySmtpAddress.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "EmailAddresses" -Value (($Mbx.EmailAddresses | Where-Object {$_.PrefixString -eq 'smtp'} | ForEach-Object {$_.SmtpAddress}) -join ";")
                     $userObj | Add-Member NoteProperty -Name "Database" -Value $(if($null -ne $Mbx.Database){$Mbx.Database.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "ServerName" -Value $Mbx.ServerName
-                    $userObj | Add-Member NoteProperty -Name "UseDatabaseQuotaDefaults" -Value $Mbx.UseDatabaseQuotaDefaults   
+                    $userObj | Add-Member NoteProperty -Name "UseDatabaseQuotaDefaults" -Value $Mbx.UseDatabaseQuotaDefaults
                     $userObj | Add-Member NoteProperty -Name "ArchiveName" -Value ($Mbx.ArchiveName -join ";")
                     $userObj | Add-Member NoteProperty -Name "ArchiveStatus" -Value $(if($null -ne $Mbx.ArchiveStatus){$Mbx.ArchiveStatus.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "ArchiveState" -Value $(if($null -ne $Mbx.ArchiveState){$Mbx.ArchiveState.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "ArchiveQuota" -Value $(if($null -ne $Mbx.ArchiveQuota){$Mbx.ArchiveQuota.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "ForwardingAddress" -Value $(if($null -ne $Mbx.ForwardingAddress){$Mbx.ForwardingAddress.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "ForwardingSmtpAddress" -Value $(if($null -ne $Mbx.ForwardingSmtpAddress){$Mbx.ForwardingSmtpAddress.ToString()}else{""})
-                    $userObj | Add-Member NoteProperty -Name "DeliverToMailboxAndForward" -Value $Mbx.DeliverToMailboxAndForward 
+                    $userObj | Add-Member NoteProperty -Name "DeliverToMailboxAndForward" -Value $Mbx.DeliverToMailboxAndForward
                     $userObj | Add-Member NoteProperty -Name "Department" -Value $Mbx.Department
                     $userObj | Add-Member NoteProperty -Name "Office" -Value $Mbx.Office
                     $userObj | Add-Member NoteProperty -Name "Manager" -Value $(if($null -ne $Mbx.Manager){$Mbx.Manager.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "WhenMailboxCreated" -Value $Mbx.WhenMailboxCreated
                     $userObj | Add-Member NoteProperty -Name "WhenChanged" -Value $Mbx.WhenChanged
-                    $userObj | Add-Member NoteProperty -Name "WhenCreated" -Value $Mbx.WhenCreated   
+                    $userObj | Add-Member NoteProperty -Name "WhenCreated" -Value $Mbx.WhenCreated
                     $userObj | Add-Member NoteProperty -Name "MailboxLocations" -Value ($Mbx.MailboxLocations -join ";")
                     $userObj | Add-Member NoteProperty -Name "Identity" -Value $(if($null -ne $Mbx.Identity){$Mbx.Identity.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "ObjectCategory" -Value $(if($null -ne $Mbx.ObjectCategory){$Mbx.ObjectCategory.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "GrantSendOnBehalfTo" -Value (($Mbx.GrantSendOnBehalfTo | ForEach-Object {if($null -ne $_){$_.ToString()}else{""}}) -join ";")
-                   
+
                     $ProhibitSendReceiveQuota = "N/A"
                     try {
                         if (($Mbx.UseDatabaseQuotaDefaults -eq $true)) {
@@ -738,7 +935,7 @@ try { # Main try block for script execution and interruption handling
                         $ProhibitSendReceiveQuota = "Error"
                     }
                     $userObj | Add-Member NoteProperty -Name "ProhibitSendReceiveQuota-In-MB" -Value $ProhibitSendReceiveQuota
-                   
+
                     # Initialize Mailbox Statistics properties
                     $userObj | Add-Member NoteProperty -Name "LastLogonTime" -Value "N/A"
                     $userObj | Add-Member NoteProperty -Name "TotalItemSize-In-MB" -Value "N/A"
@@ -747,14 +944,14 @@ try { # Main try block for script execution and interruption handling
                     $userObj | Add-Member NoteProperty -Name "TotalDeletedItemSize-In-MB" -Value "N/A"
 
                     $MbxStatsLogStartTime = Get-Date
-                    try {           
+                    try {
                         $Stats = Get-MailboxStatistics -Identity $Mbx.DistinguishedName -WarningAction SilentlyContinue -ErrorAction Stop
                         if ($Stats) {
                             $userObj."LastLogonTime" = $Stats.LastLogonTime
 							$userObj."TotalItemSize-In-MB" = $(if($null -ne $Stats.TotalItemSize -and $Stats.TotalItemSize.IsUnlimited -eq $false) {$Stats.TotalItemSize.Value.ToMB()} elseif($null -ne $Stats.TotalItemSize -and $Stats.TotalItemSize.IsUnlimited -eq $true) {$Stats.TotalItemSize.Value.ToMB()} else {"N/A"})
                             $userObj."ItemCount" = $Stats.ItemCount
                             $userObj."DeletedItemCount" = $Stats.DeletedItemCount
-                            $userObj."TotalDeletedItemSize-In-MB" = $(if($null -ne $Stats.TotalDeletedItemSize -and $Stats.TotalDeletedItemSize.IsUnlimited -eq $false) {$Stats.TotalDeletedItemSize.Value.ToMB()} elseif($null -ne $Stats.TotalDeletedItemSize -and $Stats.TotalDeletedItemSize.IsUnlimited -eq $true) {$Stats.TotalDeletedItemSize.Value.ToMB()} else {"N/A"})           
+                            $userObj."TotalDeletedItemSize-In-MB" = $(if($null -ne $Stats.TotalDeletedItemSize -and $Stats.TotalDeletedItemSize.IsUnlimited -eq $false) {$Stats.TotalDeletedItemSize.Value.ToMB()} elseif($null -ne $Stats.TotalDeletedItemSize -and $Stats.TotalDeletedItemSize.IsUnlimited -eq $true) {$Stats.TotalDeletedItemSize.Value.ToMB()} else {"N/A"})
                         }
                     }
                     catch {
@@ -767,11 +964,11 @@ try { # Main try block for script execution and interruption handling
                         $userObj."DeletedItemCount" = "Error"
                         $userObj."TotalDeletedItemSize-In-MB" = "Error"
                     }
-                   
+
                     $ArchiveTotalItemSizeMB = "N/A"
                     $ArchiveTotalItemCount = "N/A"
                     if ($Mbx.ArchiveGuid -ne [System.Guid]::Empty) {
-                        try {           
+                        try {
                             $MbxArchiveStats = Get-MailboxStatistics -Identity $Mbx.DistinguishedName -Archive -WarningAction SilentlyContinue -ErrorAction Stop
                             if ($MbxArchiveStats) {
                                 $ArchiveTotalItemSizeMB = $(if($null -ne $MbxArchiveStats.TotalItemSize -and $MbxArchiveStats.TotalItemSize.IsUnlimited -eq $false) {$MbxArchiveStats.TotalItemSize.Value.ToMB()} elseif ($null -ne $MbxArchiveStats.TotalItemSize -and $MbxArchiveStats.TotalItemSize.IsUnlimited -eq $true) {"Unlimited"} else {"N/A"})
@@ -784,18 +981,18 @@ try { # Main try block for script execution and interruption handling
                             Write-LogMailboxesProcessing "WARNING: $warningMessage Error: $($_.Exception.Message)"
                             $ArchiveTotalItemSizeMB = "Error"
                             $ArchiveTotalItemCount = "Error"
-                        }           
+                        }
                     }
                     $userObj | Add-Member NoteProperty -Name "ArchiveTotalItemSize-In-MB" -Value $ArchiveTotalItemSizeMB
-                    $userObj | Add-Member NoteProperty -Name "ArchiveItemCount" -Value $ArchiveTotalItemCount   
-                   
+                    $userObj | Add-Member NoteProperty -Name "ArchiveItemCount" -Value $ArchiveTotalItemCount
+
                     $LargeItemCount = "N/A" # Logic for this is not implemented
                     $LargeItemThresholdMBValue = 35 # Example threshold
                     $userObj | Add-Member NoteProperty -Name "LargeItemCount-Over-$($LargeItemThresholdMBValue)MB" -Value $LargeItemCount
-                   
+
                     $MbxStatsLogEndTime = Get-Date
-                    Write-LogMailboxesProcessing " -------- Processing time for MailboxStatistics for $($Mbx.Name): $($MbxStatsLogEndTime - $MbxStatsLogStartTime)"         
-                   
+                    Write-LogMailboxesProcessing " -------- Processing time for MailboxStatistics for $($Mbx.Name): $($MbxStatsLogEndTime - $MbxStatsLogStartTime)"
+
                     $UserExceptions = @()
                     $AdditionalUserFilters = ""
                     if (-not $ShowAll) {
@@ -816,7 +1013,7 @@ try { # Main try block for script execution and interruption handling
                         $ExceptionsRegex = '^(' + ($ExceptionMatches -join '|') + ')$'
                         $ExceptionsRegex = $ExceptionsRegex -replace '\\\*','.*' # Convert wildcard * to regex .*
                     }
-                   
+
                     $MbxPermsLogStartTime = Get-Date
                     $FullAccessUsersList = @()
                     $FullAccessUserCount = 0
@@ -860,7 +1057,7 @@ try { # Main try block for script execution and interruption handling
                                                         }
                                                     } catch { Write-LogMailboxesProcessing "          Error retrieving domain info for NetBIOS '$NetBIOSDomainName': $($_.Exception.Message)" }
                                                 }
-                                               
+
                                                 if ($TargetDomainDNSRoot) {
                                                     try {
                                                         $adObject = Get-ADObject -Filter "SamAccountName -eq '$sAMAccountNameToFind'" -Server $TargetDomainDNSRoot -Properties ObjectClass, SamAccountName, DistinguishedName -ErrorAction Stop
@@ -885,7 +1082,7 @@ try { # Main try block for script execution and interruption handling
                                                     } catch { Write-LogMailboxesProcessing "          GC lookup for SID $UserSID failed or object not found. Error: $($_.Exception.Message)" }
                                                 } else { Write-LogMailboxesProcessing "          Skipping GC lookup for SID $UserSID as no GC server was found/available."}
                                             }
-                                           
+
                                             # Attempt 3: Resolve by SID via default domain (if still not resolved)
                                             if (-not $adObject) {
                                                 Write-LogMailboxesProcessing "        Attempting default domain search for SID $UserSID for '$UserIDString'."
@@ -960,7 +1157,7 @@ try { # Main try block for script execution and interruption handling
                                                         $Global:GroupMemberCache[$adObject.DistinguishedName] = $statusMsg # Cache error status
                                                     }
                                                 }
-                                               
+
                                                 if ($groupMembersSam.Count -gt 0) {
                                                     foreach($sam in $groupMembersSam){
                                                         $memberNetBIOSDomain = $objectNetBIOSDomain # Assume members are in the same domain as the group for formatting
@@ -987,7 +1184,7 @@ try { # Main try block for script execution and interruption handling
                             $FullAccessUsersList = $FullAccessUsersList | Select-Object -Unique
                             $FullAccessUserCount = $FullAccessUsersList.Count
                         }
-                        $userObj | Add-Member NoteProperty -Name "FullAccessCount" -Value $FullAccessUserCount   
+                        $userObj | Add-Member NoteProperty -Name "FullAccessCount" -Value $FullAccessUserCount
                         $userObj | Add-Member NoteProperty -Name "FullAccess" -Value ($FullAccessUsersList -join ";")
                     } catch {
                         $userObj | Add-Member NoteProperty -Name "FullAccessCount" -Value "Error"
@@ -998,13 +1195,13 @@ try { # Main try block for script execution and interruption handling
                         Write-LogMailboxesProcessing "        Outer catch for MailboxPermission processing for '$UserIDString' on $($Mbx.Name): $($_.Exception.Message)"
                     }
                     $MbxPermsLogEndTime = Get-Date
-                    Write-LogMailboxesProcessing " -------- Processing time for MailboxPermission for $($Mbx.Name): $($MbxPermsLogEndTime - $MbxPermsLogStartTime)"   
+                    Write-LogMailboxesProcessing " -------- Processing time for MailboxPermission for $($Mbx.Name): $($MbxPermsLogEndTime - $MbxPermsLogStartTime)"
                 } # End if ($OnlyADPermission -eq $false)
 				else
 				{
 					$userObj | Add-Member NoteProperty -Name "PrimarySMTPaddress" -Value $(if($null -ne $Mbx.PrimarySmtpAddress){$Mbx.PrimarySmtpAddress.ToString()}else{""})
 				}
-				
+
                 If ($IncludeADPermission)
                 {
 					try {
@@ -1042,17 +1239,17 @@ try { # Main try block for script execution and interruption handling
 						Write-LogMailboxesProcessing "WARNING: $warningMessage"
 					}
                     $MbxADPermsLogEndTime = Get-Date
-                    Write-LogMailboxesProcessing " -------- Processing time for ADPermission (SendAs) for $($Mbx.Name): $($MbxADPermsLogEndTime - $MbxADPermsLogStartTime)"               
+                    Write-LogMailboxesProcessing " -------- Processing time for ADPermission (SendAs) for $($Mbx.Name): $($MbxADPermsLogEndTime - $MbxADPermsLogStartTime)"
                 }
                 else
                 {
                     $userObj | Add-Member NoteProperty -Name "SendAsCount" -Value "NotChecked"
                     $userObj | Add-Member NoteProperty -Name "SendAs" -Value "NotChecked"
-                }       
+                }
 
                 if ($OnlyADPermission -eq $false)
-                {                   
-                    $MbxMobileLogStartTime = Get-Date     
+                {
+                    $MbxMobileLogStartTime = Get-Date
                     $MobileDevicePresent = $false
                     $ClientTypes = @()
                     $FriendlyNames = @()
@@ -1094,22 +1291,22 @@ try { # Main try block for script execution and interruption handling
                     $userObj | Add-Member NoteProperty -Name "MobileFriendlyNames" -Value ($FriendlyNames -join ";")
                     $userObj | Add-Member NoteProperty -Name "MobileDeviceTypes" -Value ($DeviceTypes -join ";")
                     $userObj | Add-Member NoteProperty -Name "MobileLastSyncTimes" -Value ($LastSyncTimes -join ";")
-					
+
 					$userObj | Add-Member NoteProperty -Name "RemoteRoutingAddress" -Value $Mbx.RemoteRoutingAddress
-                   
+
                     $MbxMobileLogEndTime = Get-Date
-                    Write-LogMailboxesProcessing " -------- Processing time for MobileDevice for $($Mbx.Name): $($MbxMobileLogEndTime - $MbxMobileLogStartTime)"    
+                    Write-LogMailboxesProcessing " -------- Processing time for MobileDevice for $($Mbx.Name): $($MbxMobileLogEndTime - $MbxMobileLogStartTime)"
                 }
-               
+
                 # ObjectGUID from AD (via Exchange Mailbox object property - no extra AD query needed)
                 $userObj | Add-Member NoteProperty -Name "ObjectGUID" -Value $(if ($null -ne $Mbx.Guid) { $Mbx.Guid.ToString() } else { "" })
 
                 # Add to the local collection for this function's scope
                 $output += $userObj
-               
+
                 # Add to domain-specific collection (for per-domain CSVs if !DetectAllDomains and multiple paths)
                 $MailboxesByDomain[$Domain] += $userObj
-               
+
                 $MbxEndTime = Get-Date
                 $MbxTotalTimeTaken = $MbxEndTime - $MbxStartTime
                 Write-LogMailboxesProcessing " ------ Total processing time for mailbox $($Mbx.Name): $($MbxTotalTimeTaken.ToString())"
@@ -1126,7 +1323,7 @@ try { # Main try block for script execution and interruption handling
             }
             Write-Progress -Activity "Mailbox Processing" -Status "Completed." -Completed
             Write-LogMailboxesProcessing "END - Detailed processing of mailboxes."
-            Write-Host "`nEND - Detailed processing of mailboxes ... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"    
+            Write-Host "`nEND - Detailed processing of mailboxes ... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
             Write-LogMailboxesProcessing "DEBUG: Entering per-path/domain CSV export logic."
             Write-LogMailboxesProcessing "DEBUG: IncludedLDAPPaths = $($IncludedLDAPPaths)"
             Write-LogMailboxesProcessing "DEBUG: IncludedLDAPPaths.Count = $($IncludedLDAPPaths.Count)"
@@ -1136,7 +1333,7 @@ try { # Main try block for script execution and interruption handling
                 Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1))
                 Write-LogMailboxesProcessing "Starting export of per-path/per-OU data to CSVs (as -DetectAllDomains is false)."
                 Write-Host "Exporting per-path/per-OU data to CSVs ... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
-               
+
                 if ($IncludedLDAPPaths.Count -eq 1) { # Single OU/Path
                     $singlePathForCsv = $IncludedLDAPPaths[0]
                     $csvIdentifierForSinglePath = $logPathIdentifier # Use the already generated logPathIdentifier
@@ -1158,16 +1355,16 @@ try { # Main try block for script execution and interruption handling
                         Write-LogMailboxesProcessing "No data to export for path '$singlePathForCsv'."
                     }
                 } elseif ($IncludedLDAPPaths.Count -gt 1) { # Multiple OUs/Paths
-                    foreach ($DomainToExportInOUContext in $Domains) { 
+                    foreach ($DomainToExportInOUContext in $Domains) {
                         $OutputDataForDomainInOU = $MailboxesByDomain[$DomainToExportInOUContext]
                         if ($OutputDataForDomainInOU -and $OutputDataForDomainInOU.Count -gt 0) {
                             $FileNameSuffix = if ($OnlyADPermission) { "_OnlyADPermission.csv" } else { ".csv" }
                 $csvBaseNameForOUContext = "Exchange_OnPrem_Mailboxes_TargetedScope_Domain_$($DomainToExportInOUContext)"
                             $PerDomainCsvFileInOUContext = Join-Path -Path $OutputPath -ChildPath "${csvBaseNameForOUContext}${FileNameSuffix}"
-                            
+
                             if ($ForceOverwriteCSV -and (Test-Path $PerDomainCsvFileInOUContext)) {
                                 Write-LogMailboxesProcessing "INFO: Per-scope/domain CSV file '$PerDomainCsvFileInOUContext' exists and ForceOverwriteCSV is enabled. Deleting file."
-                                try { Remove-Item -Path $PerDomainCsvFileInOUContext -Force -ErrorAction Stop } 
+                                try { Remove-Item -Path $PerDomainCsvFileInOUContext -Force -ErrorAction Stop }
                                 catch { Write-LogMailboxesProcessing "ERROR: Could not delete existing per-scope/domain CSV file '$PerDomainCsvFileInOUContext'. Message: $($_.Exception.Message)" }
                             } elseif ((Test-Path $PerDomainCsvFileInOUContext) -and (-not $ForceOverwriteCSV)) {
                                 Write-LogMailboxesProcessing "WARNING: CSV file '$PerDomainCsvFileInOUContext' exists and -ForceOverwriteCSV is false. Skipping export for this specific domain context within targeted OUs."
@@ -1242,7 +1439,7 @@ try { # Main try block for script execution and interruption handling
 
             # MailboxesProcessing2 will return its collected data
             $processedData = MailboxesProcessing2 -IncludedLDAPPaths $IncludedLDAPPaths
-           
+
             WriteLog -Message "  [MailboxesProcessing] Finished call to MailboxesProcessing2."
             return $processedData # Pass the data up
         }
@@ -1257,7 +1454,7 @@ try { # Main try block for script execution and interruption handling
         process {
             $domainName = $CurrentDomain.Name
             $distinguishedName = ($domainName.Split('.') | ForEach-Object { "DC=$_" }) -join ','
-           
+
             WriteLog -Message "Starting global processing for domain: '$domainName' (DN: '$distinguishedName')"
 
             $isForestRootDomain = $false
@@ -1271,10 +1468,10 @@ try { # Main try block for script execution and interruption handling
                      WriteLog -Message "  -> Domain '$domainName' IS NOT the AD forest root (Could not confirm the current forest root via this specific domain object)."
                 }
             }
-           
+
             Write-Host -ForegroundColor:Cyan "Processing domain '$domainName' $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
             Write-Host "  LDAP DN: $distinguishedName"
-           
+
             # --- START Per-Domain CSV Overwrite/Skip/Load Check for DetectAllDomains mode ---
     $perDomainCsvBaseName = "Exchange_OnPrem_Mailboxes_$($domainName)"
             $perDomainCsvSuffix = if ($OnlyADPermission) { "_OnlyADPermission.csv" } else { ".csv" }
@@ -1333,10 +1530,10 @@ try { # Main try block for script execution and interruption handling
             if ($isForestRootDomain) {
                 Write-Host "  Domain Status: AD Forest Root." -ForegroundColor Yellow
                 WriteLog -Message "  Domain '$domainName' is the forest root. Attempting to retrieve first-level OUs."
-               
+
                 try {
                     $firstLevelOUs = Get-ADOrganizationalUnit -Filter * -SearchBase $distinguishedName -SearchScope OneLevel -Server $domainName -ErrorAction Stop | Select-Object -ExpandProperty DistinguishedName
-                   
+
                     if ($firstLevelOUs -and $firstLevelOUs.Count -gt 0) {
                         $pathsForMailboxProcessing = $firstLevelOUs
                         Write-Host "    -> $($firstLevelOUs.Count) first-level OUs found under '$distinguishedName'. They will be passed to MailboxesProcessing."
@@ -1364,7 +1561,7 @@ try { # Main try block for script execution and interruption handling
                 $domainDataFromProcessing = MailboxesProcessing -IncludedLDAPPaths $pathsForMailboxProcessing
                 if ($null -ne $domainDataFromProcessing) { $Global:ScriptOverallMailboxData += $domainDataFromProcessing }
             }
-           
+
             # Export data for THIS specific domain if it was processed live (not loaded from existing CSV)
             # This is the per-domain CSV that might be loaded in future runs.
             if ($domainDataFromProcessing -and $domainDataFromProcessing.Count -gt 0) {
@@ -1397,7 +1594,7 @@ try { # Main try block for script execution and interruption handling
             WriteLog -Message "DetectAllDomains mode enabled. Checking for Active Directory module..."
             if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
                 $errorMessage = "CRITICAL ERROR: The Active Directory module is not installed. Please install it before running this script. The script will stop."
-                WriteLog -message $errorMessage				
+                WriteLog -message $errorMessage
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
 				SendEmailHtmlReport -BodyHtml $body
                 throw $errorMessage
@@ -1405,7 +1602,7 @@ try { # Main try block for script execution and interruption handling
             WriteLog -Message "Importing Active Directory module..."
             Write-Host "Importing Active Directory module... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
             Import-Module ActiveDirectory -ErrorAction Stop
-           
+
             WriteLog -Message "Retrieving forest information..."
             $forest = $null
             try {
@@ -1435,7 +1632,7 @@ try { # Main try block for script execution and interruption handling
                 throw $errorMessage
             }
             WriteLog -Message "Detected forest root domain: $($forest.RootDomain.Name)"
-			
+
 			# --- START Check for existing COMBINED CSV file if DetectAllDomains is $true ---
 			$combinedCsvFileSuffixGlobal = if ($OnlyADPermission) { "_OnlyADPermission.csv" } else { ".csv" }
     $globalCombinedCsvFile = Join-Path -Path $OutputPath -ChildPath "Exchange_OnPrem_Mailboxes_AllDomains${combinedCsvFileSuffixGlobal}"
@@ -1479,7 +1676,7 @@ try { # Main try block for script execution and interruption handling
 						Write-Host -ForegroundColor Red $errorMessage
 						$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
 						SendEmailHtmlReport -BodyHtml $body
-						exit 1 # Stop script if processing fails
+throw $errorMessage
 					}
 				} else {
 					WriteLog -Message "INFO: Combined CSV file '$globalCombinedCsvFile' exists and -ForceOverwriteCSV is `$true. It will be deleted before new combined export at the end of processing."
@@ -1529,11 +1726,11 @@ try { # Main try block for script execution and interruption handling
                     WriteLog -Message "Successfully exported combined data to '$globalCombinedCsvFile'."
                     Write-Host -ForegroundColor Green "All processed mailbox data exported to: $globalCombinedCsvFile"
 					$InputCsvForDuplicateScan = $globalCombinedCsvFile
-					$scriptdatamailbox = $true						
+					$scriptdatamailbox = $true
 					$SendFileListEmailReportFileName = $globalCombinedCsvFile
                 } catch {
                     $errorMessage = "Failed to export combined data to '$globalCombinedCsvFile': $($_.Exception.Message)"
-                    WriteLog -Message "ERROR: $errorMessage"					
+                    WriteLog -Message "ERROR: $errorMessage"
                     Write-Error $errorMessage
 					$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Failed to export combined data to '$globalCombinedCsvFile': $($_.Exception.Message)"
 					SendEmailHtmlReport -BodyHtml $body
@@ -1550,7 +1747,7 @@ try { # Main try block for script execution and interruption handling
         {
             WriteLog -Message "DetectAllDomains mode is $false."
             Write-Host "DetectAllDomains mode is $false." -ForegroundColor Green
-           
+
             $combinedCsvFileForNonDetectAll = $null
             $createCombinedCsvForNonDetectAll = $true # Assume we create a combined CSV unless it's a single OU
             $combinedCsvFileSuffixLocal = if ($OnlyADPermission) { "_OnlyADPermission.csv" } else { ".csv" }
@@ -1579,7 +1776,7 @@ try { # Main try block for script execution and interruption handling
                         Write-Host -ForegroundColor Red $errorMessage
 						$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
 						SendEmailHtmlReport -BodyHtml $body
-                        exit 1
+throw $errorMessage
                     } else {
                         WriteLog -Message "INFO: Combined CSV file '$combinedCsvFileForNonDetectAll' exists and -ForceOverwriteCSV is `$true. It will be deleted."
                         try { Remove-Item -Path $combinedCsvFileForNonDetectAll -Force -ErrorAction Stop }
@@ -1596,7 +1793,7 @@ try { # Main try block for script execution and interruption handling
                 WriteLog -Message "No Organizational Units specified via -IncludedOrganizationalUnit parameter. MailboxesProcessing2 will attempt to retrieve all mailboxes in the current Exchange scope."
                 Write-Host "Warning: No Organizational Units specified via -IncludedOrganizationalUnit parameter. MailboxesProcessing2 will attempt to retrieve all mailboxes in the current Exchange scope." -ForegroundColor Yellow
             }
-           
+
             $ouData = MailboxesProcessing -IncludedLDAPPaths $IncludedOrganizationalUnit # This will call MailboxesProcessing2
             if ($null -ne $ouData) {
                  $Global:ScriptOverallMailboxData += $ouData
@@ -1609,9 +1806,9 @@ try { # Main try block for script execution and interruption handling
                     Export-CsvAtomic -InputObject $Global:ScriptOverallMailboxData -Path $combinedCsvFileForNonDetectAll -Encoding UTF8
                     WriteLog -Message "Successfully exported combined data to '$combinedCsvFileForNonDetectAll'."
                     Write-Host -ForegroundColor Green "All processed mailbox data for specified scope exported to: $combinedCsvFileForNonDetectAll"
-					$InputCsvForDuplicateScan = $combinedCsvFileForNonDetectAll					
+					$InputCsvForDuplicateScan = $combinedCsvFileForNonDetectAll
 					$scriptdatamailbox = $true
-					$SendFileListEmailReportFileName = $combinedCsvFileForNonDetectAll	
+					$SendFileListEmailReportFileName = $combinedCsvFileForNonDetectAll
                 } catch {
                     $errorMessage = "Failed to export combined data to '$combinedCsvFileForNonDetectAll': $($_.Exception.Message)"
                     WriteLog -Message "ERROR: $errorMessage"
@@ -1644,7 +1841,7 @@ if ($scriptdatamailbox -eq $true) {
 	Write-Host "-----------------------------------------------------------------------------------------"
 	Write-Host "Remove Duplicate in Export Exchange 2016 mailboxes inventory ..."
 	WriteLog -Message "Remove Duplicate in Export Exchange 2016 mailboxes inventory ..."
-	
+
     # Define paths
 	$TempOutputCsv = [System.IO.Path]::ChangeExtension($InputCsvForDuplicateScan, $null) + "_WithoutDuplicateSMTP.csv"
     $LogFileDuplicate = $global:LogTextFile -replace '\.log$', '_duplicate.log'
@@ -1682,11 +1879,11 @@ if ($scriptdatamailbox -eq $true) {
                 WriteLog -Message "Failed to remove temporary file: $_" "ERROR"
 				$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : No Duplicates Primary SMTP found - Failed to remove temporary file: $_"
 				SendEmailHtmlReport -BodyHtml $body
-				exit 1
+throw $errorMessage
             }
         }
     } else {
-        WriteLog -Message "Duplicates Primary SMTP detected. Processing cleanup..."		
+        WriteLog -Message "Duplicates Primary SMTP detected. Processing cleanup..."
         # Export cleaned CSV to temporary file
         try {
             Export-CsvAtomic -InputObject $uniqueRows -Path $TempOutputCsv -Encoding UTF8
@@ -1694,7 +1891,7 @@ if ($scriptdatamailbox -eq $true) {
             WriteLog -Message "Failed to export cleaned CSV: $_" "ERROR"
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Duplicates Primary SMTP detected - Failed to export cleaned CSV: $_"
 			SendEmailHtmlReport -BodyHtml $body
-            exit 1
+throw $errorMessage
         }
 
         # Log duplicates with timestamp
@@ -1708,11 +1905,11 @@ if ($scriptdatamailbox -eq $true) {
             $logEntries | Out-File -FilePath $LogFileDuplicate -Encoding UTF8
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Duplicates Primary SMTP detected."
 			SendEmailHtmlReport -BodyHtml $body -Attachments $LogFileDuplicate
-        } catch {			
+        } catch {
             WriteLog -Message "Failed to write log file: $_" "ERROR"
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Duplicates Primary SMTP detected - Failed to write log file: $_"
 			SendEmailHtmlReport -BodyHtml $body
-            exit 1
+throw $errorMessage
         }
 
         # Rename original file by appending '-versionoriginal'
@@ -1731,7 +1928,7 @@ if ($scriptdatamailbox -eq $true) {
                     WriteLog -Message "File already exists: $renamedPath. Rename aborted." "ERROR"
 					$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Duplicates Primary SMTP detected - File already exists: $renamedPath. Rename aborted."
 					SendEmailHtmlReport -BodyHtml $body
-                    exit 1
+throw $errorMessage
                 }
             }
             Rename-Item -Path $InputCsvForDuplicateScan -NewName $renamedPath
@@ -1740,7 +1937,7 @@ if ($scriptdatamailbox -eq $true) {
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Failed to rename original file: $_"
 			SendEmailHtmlReport -BodyHtml $body
             WriteLog -Message "Failed to rename original file: $_" "ERROR"
-            exit 1
+throw $errorMessage
         }
 
         # Move cleaned file back to original name
@@ -1753,7 +1950,7 @@ if ($scriptdatamailbox -eq $true) {
                     WriteLog -Message "File already exists: $InputCsvForDuplicateScan. Move aborted." "ERROR"
 					$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : File already exists: $InputCsvForDuplicateScan. Move aborted."
 					SendEmailHtmlReport -BodyHtml $body
-                    exit 1
+throw $errorMessage
                 }
             }
             Move-Item -Path $TempOutputCsv -Destination $InputCsvForDuplicateScan
@@ -1762,7 +1959,7 @@ if ($scriptdatamailbox -eq $true) {
             WriteLog -Message "Failed to move cleaned file: $_" "ERROR"
 			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : Failed to move cleaned file: $_"
 			SendEmailHtmlReport -BodyHtml $body
-            exit 1
+throw $errorMessage
         }
 
         # Summary log
@@ -1807,17 +2004,17 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 		throw
 	}
 
-	if (-not (Test-Path $DestinationDirectory)) {		
+	if (-not (Test-Path $DestinationDirectory)) {
 		$errorMessage = "The share '$DestinationDirectory' is not available. Stopping the script."
 		WriteLog -Message $errorMessage "ERROR"
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
 		SendEmailHtmlReport -BodyHtml $body
 		throw
 	}
-	
+
 	try {
 		$ScriptCsvLogFolderPathectory = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCombinedPermissionCsvLogFolderPath' -DefaultValue ''
-	} catch {		
+	} catch {
 		$errorMessage = "Error retrieving local configuration path ScriptCsvLogFolderPathectory $_"
 		WriteLog -Message $errorMessage "ERROR"
 		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
@@ -1837,7 +2034,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 
 	$allDomainsFile = Get-ChildItem -Path $DestinationDirectory -Filter "*_AllDomains.csv" -File | Select-Object -First 1
 	WriteLog -Message "$allDomainsFile found in the Destination directory."
-	
+
 	$sourceFiles = Get-ChildItem -Path $SourceDirectory -Filter "*_OnlyADPermission.csv" -File
 
 	if ($sourceFiles.Count -eq 0) {
@@ -1868,7 +2065,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 
 			Write-Verbose "Importing data from '$($allDomainsFile.Name)'..."
 			$destinationData = Import-Csv -Path $allDomainsFile.FullName
-			
+
 			$updatedCount = 0
 			$notFoundCount = 0
 
@@ -1882,14 +2079,14 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 					$notFoundCount++
 				}
 			}
-			
+
 			$outputFilePath = Join-Path -Path $ScriptCsvLogFolderPathectory -ChildPath $allDomainsFile.Name
 			$SendFileListEmailReportFileName = $outputFilePath
 			WriteLog -Message "Exporting updated data to '$outputFilePath'..."
 			if ($PSCmdlet.ShouldProcess($outputFilePath, "Export Updated Consolidated CSV")) {
 				Export-CsvAtomic -InputObject $destinationData -Path $outputFilePath -Encoding UTF8
 			}
-			
+
 			WriteLog -Message "--------------------------------------------------"
 			WriteLog -Message "Consolidation complete."
 			WriteLog -Message "File updated: $outputFilePath"
@@ -1906,7 +2103,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 	} else {
 		# --- Standard Mode: One-to-one file matching ---
 		WriteLog -Message "No '*_AllDomains.csv' file found. Proceeding with standard one-to-one matching."
-		
+
 		$summary = @{ Processed = 0; Skipped = 0; Errors = 0; SkippedFiles = [System.Collections.Generic.List[string]]::new() }
 
 		foreach ($sourceFile in $sourceFiles) {
@@ -1942,13 +2139,13 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 						$notFoundCount++
 					}
 				}
-				
+
 				$outputFilePath = Join-Path -Path $ScriptCsvLogFolderPathectory -ChildPath $destinationFile.Name
 				$SendFileListEmailReportFileName = $outputFilePath
 				if ($PSCmdlet.ShouldProcess($outputFilePath, "Export Updated CSV")) {
 					Export-CsvAtomic -InputObject $destinationData -Path $outputFilePath -Encoding UTF8
 				}
-				
+
 				$summary.Processed++
 				WriteLog -Message "Update for '$($destinationFile.Name)' finished. Users updated: $updatedCount. Not found: $notFoundCount."
 
@@ -1973,1114 +2170,35 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 			WriteLog -Message "List of skipped files:" "WARNING"
 			$summary.SkippedFiles | ForEach-Object { Write-Warning "- $_" }
 		}
-	}	
+	}
 }
 
-if ($scriptdatamailbox -eq $true -and $scriptdatamegewithbatch -eq $true -and (-not $OnlyADPermission)) {
-	Write-Host "-----------------------------------------------------------------------------------------"
-	Write-Host "Combine Export Exchange 2016 mailboxes inventory with batch name ..."
-	$StartTime = Get-Date
-	$TimeStamp = Get-Date -Format "yyyyMMdd_HHmmss" # Timestamp for unique filenames
-		try {
-		$OutputPathBatch = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExchangeMigrationBatchFolderPath' -DefaultValue ''
-	} catch {		
-		$errorMessage = "Error retrieving local configuration path OutputPathBatch $_"
-		WriteLog -Message $errorMessage "ERROR"
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
-		throw
-	}
+if ($InventoryCompletedSuccessfully -eq $false) {
+    $EndTimeFinalRedundant = Get-Date
 
-	if (-not (Test-Path $OutputPathBatch)) {
-		WriteLog -Message "The share '$OutputPathBatch' is not available. Stopping the script." "ERROR"
-		$errorMessage = "The share '$OutputPathBatch' is not available. Stopping the script."
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
-		throw
-	}
-	
-	$outputFolderForBatchCsv = Join-Path -Path $OutputPathBatch -ChildPath "Output-Batches"      # For individual batch CSV files
-	$outputFolderForConsolidatedCsv = Join-Path -Path $OutputPathBatch -ChildPath "Output-ConsolidatedCsv" # For consolidated summary CSVs
-	$outputFolderForBatchCsvBackup = Join-Path -Path $OutputPathBatch -ChildPath "Output-Batches-Backup" # For consolidated summary CSVs
-	# Create output folders if they don't exist
+$interruptionMessageRedundant = "Script (outer finally) interrupted or terminated due to an error. Total duration: $($EndTimeFinalRedundant - $StartTime)."
 
-	if (-not (Test-Path $outputFolderForBatchCsv)) {
-		try {
-			New-Item -ItemType Directory -Path $outputFolderForBatchCsv -Force -ErrorAction Stop | Out-Null
-		} catch {
-			$errorMessage = "Unable to create output folder for batches: '$outputFolderForBatchCsv'. Error: $($_.Exception.Message)"
-			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-			SendEmailHtmlReport -BodyHtml $body
-			throw
-		}
-	}
-	if (-not (Test-Path $outputFolderForConsolidatedCsv)) {
-		try {
-			New-Item -ItemType Directory -Path $outputFolderForConsolidatedCsv -Force -ErrorAction Stop | Out-Null
-		} catch {
-			$errorMessage = "Unable to create output folder for consolidated CSVs: '$outputFolderForConsolidatedCsv'. Error: $($_.Exception.Message)"
-			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-			SendEmailHtmlReport -BodyHtml $body
-			throw
-		}
-	}
-	if (-not (Test-Path $outputFolderForBatchCsvBackup)) {
-		try {
-			New-Item -ItemType Directory -Path $outputFolderForBatchCsvBackup -Force -ErrorAction Stop | Out-Null
-		} catch {
-			$errorMessage = "Unable to create output folder for consolidated CSVs: '$outputFolderForBatchCsvBackup'. Error: $($_.Exception.Message)"
-			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-			SendEmailHtmlReport -BodyHtml $body
-			throw
-		}
-	}
-
-	try {
-		$inputFolderCSVfiles = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCombinedPermissionCsvLogFolderPath' -DefaultValue ''
-	} catch {
-		$errorMessage = "Error retrieving local configuration path inputFolderCSVfiles $_"
-		WriteLog -Message $errorMessage "ERROR"
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
-		throw
-	}
-
-	if (-not (Test-Path $inputFolderCSVfiles)) {
-		$errorMessage = "The share '$inputFolderCSVfiles' is not available. Stopping the script."
-		WriteLog -Message $errorMessage "ERROR"
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
-	} else {
-		Write-Host "The network share '$inputFolderCSVfiles' is available. Continuing the script..." -ForegroundColor Green
-	}
-
-	$timestampCsvBackup = Get-Date -Format "yyyyMMdd_HHmmss"
-	$archiveFolder = Join-Path -Path $outputFolderForBatchCsvBackup -ChildPath "archive_$timestampCsvBackup"
-
-	if ((Get-ChildItem -Path $outputFolderForBatchCsv -File).Count -gt 0) {
-		Write-Host -ForegroundColor Yellow "Warning: The processing folder '$outputFolderForBatchCsv' is not empty. Moving existing files to an archive subfolder."
-		WriteLog -Message "Warning: The processing folder '$outputFolderForBatchCsv' is not empty. Moving existing files to archive subfolder '$archiveFolder'."
-
-		try {
-			# Ensure the backup folder exists
-			if (-not (Test-Path -Path $outputFolderForBatchCsvBackup -PathType Container)) {
-				Write-Host -ForegroundColor Cyan "The backup folder '$outputFolderForBatchCsvBackup' does not exist. Creating it..."
-				WriteLog -Message "The backup folder '$outputFolderForBatchCsvBackup' does not exist. Creating it..."
-				New-Item -Path $outputFolderForBatchCsvBackup -ItemType Directory -ErrorAction Stop
-			}
-
-			# Create the timestamped archive subfolder
-			New-Item -Path $archiveFolder -ItemType Directory -ErrorAction Stop
-			WriteLog -Message "Archive folder created: '$archiveFolder'."
-
-			# Move files from the processing folder to the archive folder
-			Get-ChildItem -Path $outputFolderForBatchCsv -File | Move-Item -Destination $archiveFolder -Force -ErrorAction Stop
-			WriteLog -Message "Successfully moved existing files to '$archiveFolder'."
-			Write-Host -ForegroundColor Green "Existing files successfully moved to '$archiveFolder'. Proceeding with script execution."
-		} catch {
-			Write-Host -ForegroundColor Red "Error: Failed to move existing files to the archive folder. Script aborted."
-			WriteLog -Message "Error: Failed to move existing files to the archive folder. Error: $($_.Exception.Message). Script aborted."
-			exit 1
-		}
-	} else {
-		WriteLog -Message "The processing folder '$outputFolderForBatchCsv' is empty. Proceeding with script execution."
-		Write-Host -ForegroundColor Green "The processing folder '$outputFolderForBatchCsv' is empty. Proceeding with script execution."
-	}
-
-	if (-not $PSBoundParameters.ContainsKey('outputConsolidatedCsvPath')) {
-		# Clarified filename to reflect its content: All source data, BatchName column updated by this script's run
-		$outputConsolidatedCsvPath = Join-Path -Path $outputFolderForConsolidatedCsv -ChildPath "${outputFileNamePrefix}_AllSourceData_BatchNameUpdated_$TimeStamp.csv"
-		WriteLog -Message "Parameter 'outputConsolidatedCsvPath' (all source mailboxes, BatchName updated by script) not specified, defaulting to: '$outputConsolidatedCsvPath'"
-	}
-
-	if (-not $PSBoundParameters.ContainsKey('outputConsolidatedCsvPath2')) {
-		# Clarified filename to reflect its content: All source data, BatchName column updated by this script's run
-        $outputConsolidatedCsvPath2 = Join-Path -Path $outputFolderForConsolidatedCsv -ChildPath "Exchange_OnPrem_Mailboxes_AllDomains.csv"
-		WriteLog -Message "Parameter 'outputConsolidatedCsvPath2' (all source mailboxes, BatchName updated by script) not specified, defaulting to: '$outputConsolidatedCsvPath2'"
-	}
-
-	WriteLog -Message "--- Script Parameters Used ---"
-	WriteLog -Message "InputFolderCSVfiles: '$inputFolderCSVfiles'"
-	WriteLog -Message "ExcludeMailboxesFile: '$excludeMailboxesFile'"
-	WriteLog -Message "OutputFolder: '$outputFolder'"
-	WriteLog -Message "OutputConsolidatedCsvPath (All Source Data, BatchName updated): '$outputConsolidatedCsvPath'"
-	WriteLog -Message "OutputConsolidatedCsvPath2 (All Source Data, BatchName updated): '$outputConsolidatedCsvPath2'"
-	WriteLog -Message "OutputFileNamePrefix: '$outputFileNamePrefix'"
-	WriteLog -Message "IncludeSpecificLastLogonCriteria: $IncludeSpecificLastLogonCriteria (If True, overrides other disabled account filters)"
-	if (-not $IncludeSpecificLastLogonCriteria) {
-		WriteLog -Message "ExcludeAllDisabledAccounts: $ExcludeAllDisabledAccounts (Default=False, Excludes ALL disabled if True)"
-		WriteLog -Message "ExcludeDisabledAccountsExceptForSharedMailboxes: $ExcludeDisabledAccountsExceptForSharedMailboxes (Default=True, Excludes disabled non-shared if True and ExcludeAllDisabledAccounts=False)"
-		WriteLog -Message "ExcludeDisabledMailboxes: $ExcludeDisabledMailboxes (Default=True, Excludes if True)"
-	} else {
-		WriteLog -Message "ExcludeAllDisabledAccounts, ExcludeDisabledAccountsExceptForSharedMailboxes, ExcludeDisabledMailboxes are IGNORED because IncludeSpecificLastLogonCriteria is True."
-	}
-	if ($PSBoundParameters.ContainsKey('ExcludeSamAccountNamePatterns') -and $ExcludeSamAccountNamePatterns) { WriteLog -Message "ExcludeSamAccountNamePatterns: $($ExcludeSamAccountNamePatterns -join ', ')" } else { WriteLog -Message "ExcludeSamAccountNamePatterns: Not specified." }
-	WriteLog -Message "SimpleBatchCsv (Minimal columns in individual batch CSVs): $SimpleBatchCsv"
-	WriteLog -Message "MaxBatchSizeMB (Max total size per batch in MB): $maxBatchSizeMB"
-	WriteLog -Message "MaxMailboxesPerBatchFile (Max items per batch file): $MaxMailboxesPerBatchFile"
-	if ($excludeFullAccessSamAccounts) { WriteLog -Message "ExcludeFullAccessSamAccounts: $($excludeFullAccessSamAccounts -join ', ')" } else { WriteLog -Message "ExcludeFullAccessSamAccounts: Not specified." }
-	if ($excludeSendAsSamAccounts) { WriteLog -Message "ExcludeSendAsSamAccounts: $($excludeSendAsSamAccounts -join ', ')" } else { WriteLog -Message "ExcludeSendAsSamAccounts: Not specified." }
-	if ($excludeSendOnBehalfToSamAccounts) { WriteLog -Message "ExcludeSendOnBehalfToSamAccounts: $($excludeSendOnBehalfToSamAccounts -join ', ')" } else { WriteLog -Message "ExcludeSendOnBehalfToSamAccounts: Not specified." }
-	WriteLog -Message "--- End of Script Parameters ---"
-
-	try {
-		Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1))
-	} catch {
-		Write-Warning "Could not determine console width. Skipping console separator line."
-	}
-
-	# RECIPIENT TYPE CONSTANTS
-	$sharedMailboxRecipientTypeName = "SharedMailbox"
-	$discoveryMailboxRecipientTypeName = "DiscoveryMailbox"
-	$roomMailboxRecipientTypeName = "RoomMailbox"
-	# Add other types if needed for filtering
-
-	# CSV Column name constants from input files
-	$ouColumnNameInCsv = "RecipientOU"
-	$primarySmtpAddressColumnNameInCsv = "PrimarySmtpAddress"
-	$recipientTypeColumnNameInCsv = "RecipientType" # Used for SharedMailbox exception
-	$accountDisabledColumnNameInCsv = "AccountDisabled" # Used for disable filtering
-	$isMailboxEnabledColumnNameInCsv = "IsMailboxEnabled"
-	$lastLogonTimeColumnNameInCsv = "LastLogonTime" # NEW - For new filtering criteria
-	$fullAccessColumnNameInCsv = "FullAccess"
-	$sendAsColumnNameInCsv = "SendAs"
-	$sendOnBehalfToColumnNameInCsv = "GrantSendOnBehalfTo"
-	$displayNameColumnNameInCsv = "DisplayName"
-	$aliasColumnNameInCsv = "Alias"
-	$samAccountNameColumnNameInCsv = "SamAccountName" # Ensure it's here
-	$identityColumnNameInCsv = "Identity"
-	$domainNameColumnNameInCsv = "DomainName"
-	$totalItemSizeColumnNameInCsv = "TotalItemSize-In-MB" # Crucial for the size limit
-	# This is the name of the batch name column expected in source CSVs AND the column this script will update/use.
-	$batchNameColumn = "BatchName"
-
-	# Column name added by this script to track source file (if not already present)
-	$originalSourceFileColumnAddedByScript = "OriginalSourceFile"
-
-	# Date threshold for new criteria
-	$lastLogonDateThreshold = Get-Date "2024-05-01"
-
-	Write-Host -ForegroundColor White "Checking input folder for CSV files... $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-	WriteLog -Message "Checking input folder: '$inputFolderCSVfiles' for CSV files."
-
-	if (-not (Test-Path $inputFolderCSVfiles -PathType Container)) {
-		$errorMessage = "The input folder '$inputFolderCSVfiles' does not exist or is not a directory. Script cannot continue."
-		WriteLog -Message $errorMessage "ERROR"
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
-	}
-
-	$allCsvFilesInSourceFolder = Get-ChildItem -Path $inputFolderCSVfiles -Filter "*.csv" -File
-	$prioritizedFileSuffixToProcess = "AllDomains.csv"
-	$foundPrioritizedFiles = $allCsvFilesInSourceFolder | Where-Object { $_.Name -like "*$prioritizedFileSuffixToProcess" }
-
-	$csvFilesToProcessForImport = $null
-
-	if ($foundPrioritizedFiles.Count -gt 0) {
-		$csvFilesToProcessForImport = @($foundPrioritizedFiles)
-		$infoMessageText = ("Found $($foundPrioritizedFiles.Count) CSV file(s) ending with '$prioritizedFileSuffixToProcess': " +
-							"$($foundPrioritizedFiles.Name -join ', '). " +
-							"Only these files will be processed.")
-		Write-Host -ForegroundColor Green $infoMessageText
-		WriteLog -Message $infoMessageText
-	} else {
-		$csvFilesToProcessForImport = $allCsvFilesInSourceFolder
-		if ($csvFilesToProcessForImport.Count -gt 0) {
-			$infoMessageText = ("No CSV files ending with '$prioritizedFileSuffixToProcess' were found. " +
-								"Processing all $($csvFilesToProcessForImport.Count) CSV files found in '$inputFolderCSVfiles': " +
-								"$($csvFilesToProcessForImport.Name -join ', ').")
-			Write-Host $infoMessageText
-			WriteLog -Message $infoMessageText
-		}
-	}
-
-	if ($null -eq $csvFilesToProcessForImport -or $csvFilesToProcessForImport.Count -eq 0) {
-		$errorMessage = "No CSV files found in the input folder '$inputFolderCSVfiles' matching the criteria for processing. Ensure the folder contains valid CSV files. Script cannot continue."
-		WriteLog -Message $errorMessage "ERROR"
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
-	}
-
-	if (-not $PSBoundParameters.ContainsKey('excludeMailboxesFile')) {
-		$scriptDirectory = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
-		$excludeMailboxesFile = Join-Path -Path $scriptDirectory -ChildPath "Exchange-MigrationBatch-Mailboxes-Excluded.csv"
-		WriteLog -Message "Parameter -ExcludeMailboxesFile not specified, defaulting to: '$excludeMailboxesFile'"
-	}
-
-	$excludedMailboxPrimarySmtpAddresses = @()
-
-	if (-not (Test-Path $excludeMailboxesFile)) {
-		Write-Warning "The exclusion file '$excludeMailboxesFile' does not exist. Mailbox exclusion based on this file will be skipped."
-		WriteLog -Message "The exclusion file '$excludeMailboxesFile' does not exist. Mailbox exclusion based on this file will be skipped."
-	} else {
-		try {
-			# Ensure PrimarySmtpAddress exists before expanding
-			$csvData = Import-Csv $excludeMailboxesFile -ErrorAction Stop
-			if ($csvData -and $csvData[0].PSObject.Properties.Name -contains $primarySmtpAddressColumnNameInCsv) {
-				$excludedMailboxPrimarySmtpAddresses = $csvData | Select-Object -ExpandProperty $primarySmtpAddressColumnNameInCsv
-				Write-Host "Importing $($excludedMailboxPrimarySmtpAddresses.Count) users to exclude from file '$excludeMailboxesFile'."
-				WriteLog -Message "Importing $($excludedMailboxPrimarySmtpAddresses.Count) users to exclude from file '$excludeMailboxesFile'."
-			} else {
-				 Write-Warning "Exclusion file '$excludeMailboxesFile' found but does not contain the required column '$primarySmtpAddressColumnNameInCsv' or is empty. Skipping exclusion based on this file."
-				 WriteLog -Message "Exclusion file '$excludeMailboxesFile' found but does not contain the required column '$primarySmtpAddressColumnNameInCsv' or is empty. Skipping exclusion based on this file."
-			}
-		} catch {
-			$errorMessage = "Error importing the exclusion file '$excludeMailboxesFile': $($_.Exception.Message). Mailbox exclusion based on this file will be skipped."
-			Write-Error $errorMessage
-			WriteLog -Message $errorMessage "ERROR"
-		}
-	}
-
-	WriteLog -Message "Individual batch CSV files will be saved to: '$outputFolderForBatchCsv'"
-	WriteLog -Message "Consolidated summary CSV files will be saved to: '$outputFolderForConsolidatedCsv'"
-
-	$allMailboxesOriginalData = [System.Collections.Generic.List[PSObject]]::new() # Use Generic List for better performance
-	$isFirstFileProcessed = $false
-	$inputFileImportStatistics = [System.Collections.Generic.List[PSObject]]::new() # Use Generic List
-
-	$totalFilesToProcessInQueue = $csvFilesToProcessForImport.Count
-	$filesProcessedCounter = 0
-
-	Write-Host "Starting import and validation of input CSV files..."
-	foreach ($csvFileItem in $csvFilesToProcessForImport) {
-		$filesProcessedCounter++
-		$statusMessageForFileImport = "File {0} of {1}: {2}" -f $filesProcessedCounter, $totalFilesToProcessInQueue, $csvFileItem.Name
-		Write-Progress -Activity "Processing input CSV files" -Status $statusMessageForFileImport -PercentComplete (($filesProcessedCounter / $totalFilesToProcessInQueue) * 100)
-
-		WriteLog -Message "Processing input CSV file: $($csvFileItem.FullName)"
-		$mailboxesInCurrentFileBeforeFilter = 0
-		$disabledAccountsInCurrentFile = 0
-		$disabledMailboxesInCurrentFile = 0
-		$currentFileProcessingStatusMessage = "Error during processing"
-		$fileStatObject = [PSCustomObject]@{
-			FileName = $csvFileItem.Name
-			MailboxesBeforeFiltering = 0
-			DisabledAccountsInFile = 0
-			DisabledMailboxesInFile = 0
-			MailboxesAfterFiltering = 0
-			Status = $currentFileProcessingStatusMessage
-		}
-
-		try {
-			$mailboxesFromCurrentCsv = Import-Csv -Path $csvFileItem.FullName -ErrorAction Stop
-
-			if ($null -eq $mailboxesFromCurrentCsv -or $mailboxesFromCurrentCsv.Count -eq 0) {
-				Write-Warning "CSV file '$($csvFileItem.FullName)' is empty or could not be imported properly. Skipping this file."
-				WriteLog -Message "CSV file '$($csvFileItem.FullName)' is empty or could not be imported properly. Skipping this file."
-				$fileStatObject.Status = "Skipped (File Empty or Import Error)"
-				$inputFileImportStatistics.Add($fileStatObject)
-				continue
-			}
-
-			$mailboxesInCurrentFileBeforeFilter = $mailboxesFromCurrentCsv.Count
-			$firstObjectProperties = $mailboxesFromCurrentCsv[0].PSObject.Properties.Name
-
-			# Check for column existence before attempting to count
-			$hasAccountDisabledCol = $firstObjectProperties -contains $accountDisabledColumnNameInCsv
-			$hasMbxEnabledCol = $firstObjectProperties -contains $isMailboxEnabledColumnNameInCsv
-			$hasRecipientTypeCol = $firstObjectProperties -contains $recipientTypeColumnNameInCsv # Needed for stats
-			$hasLastLogonTimeCol = $firstObjectProperties -contains $lastLogonTimeColumnNameInCsv # Needed for new criteria stats (optional here, checked strongly later)
-
-
-			if ($hasAccountDisabledCol) {
-				$disabledAccountsInCurrentFile = ($mailboxesFromCurrentCsv | Where-Object { $_.$accountDisabledColumnNameInCsv -eq 'True' }).Count
-			} else { WriteLog -Message "Warning: Column '$accountDisabledColumnNameInCsv' not found in '$($csvFileItem.FullName)'. Cannot count disabled accounts in this file." }
-
-			if ($hasMbxEnabledCol) {
-				$disabledMailboxesInCurrentFile = ($mailboxesFromCurrentCsv | Where-Object { $_.$isMailboxEnabledColumnNameInCsv -eq 'False' }).Count
-			} else { WriteLog -Message "Warning: Column '$isMailboxEnabledColumnNameInCsv' not found in '$($csvFileItem.FullName)'. Cannot count disabled mailboxes in this file." }
-
-			# Add required columns if they don't exist and add to the main list
-			$mailboxesFromCurrentCsv | ForEach-Object {
-				$currentObject = $_
-				# Ensure OriginalSourceFile column exists and is set
-				if (-not ($currentObject.PSObject.Properties.Name -contains $originalSourceFileColumnAddedByScript)) {
-					$currentObject | Add-Member -MemberType NoteProperty -Name $originalSourceFileColumnAddedByScript -Value $csvFileItem.Name
-				} else {
-					$currentObject.$originalSourceFileColumnAddedByScript = $csvFileItem.Name
-				}
-				# Ensure BatchName column exists and is initialized (important for later update)
-				if (-not ($currentObject.PSObject.Properties.Name -contains $batchNameColumn)) {
-					 $currentObject | Add-Member -MemberType NoteProperty -Name $batchNameColumn -Value ""
-				}
-				# Add the processed object to the list
-				$allMailboxesOriginalData.Add($currentObject)
-			}
-
-			# Column validation happens only on the first successfully processed file
-			if (-not $isFirstFileProcessed) {
-				 # Check against the first object loaded into the main list from this file
-				 $firstLoadedObjectProperties = $allMailboxesOriginalData[0].PSObject.Properties.Name
-				 # Define required columns (ensure all necessary ones are listed)
-				 $requiredInputColumnsList = @(
-					 $ouColumnNameInCsv, $primarySmtpAddressColumnNameInCsv,
-					 $recipientTypeColumnNameInCsv, # Needed for SharedMailbox exception
-					 $accountDisabledColumnNameInCsv, # Needed for disable filtering
-					 $isMailboxEnabledColumnNameInCsv, $fullAccessColumnNameInCsv,
-					 $sendAsColumnNameInCsv, $sendOnBehalfToColumnNameInCsv, $samAccountNameColumnNameInCsv, # Ensure SamAccountName is required
-					 $identityColumnNameInCsv, $domainNameColumnNameInCsv, $totalItemSizeColumnNameInCsv # Ensure size column is required
-				 )
-				 # Conditionally add LastLogonTime to required list if new feature is enabled
-				 if ($IncludeSpecificLastLogonCriteria) {
-					 if (-not ($firstLoadedObjectProperties -contains $lastLogonTimeColumnNameInCsv)) {
-						$errorMessage = ("The parameter -IncludeSpecificLastLogonCriteria is True, but the required column '$lastLogonTimeColumnNameInCsv' is missing in the first processed input CSV file '$($csvFileItem.FullName)'. " +
-										 "Aborting script.")
-						Write-Progress -Activity "Processing input CSV files" -Completed
-						WriteLog -Message $errorMessage "ERROR"
-						$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-						SendEmailHtmlReport -BodyHtml $body
-					 }
-					 # Add to list for general check if it was already there, or just note it's needed
-					 if ($requiredInputColumnsList -notcontains $lastLogonTimeColumnNameInCsv) {
-						 # $requiredInputColumnsList += $lastLogonTimeColumnNameInCsv # Not strictly needed here as we checked above
-					 }
-				 }
-
-
-				$missingInputColumnsList = @()
-				foreach ($columnNameToVerify in $requiredInputColumnsList) {
-					if (-not ($firstLoadedObjectProperties -contains $columnNameToVerify)) {
-						$missingInputColumnsList += $columnNameToVerify
-					}
-				}
-
-				if ($missingInputColumnsList.Count -gt 0) {
-					# Improve error message readability
-					$errorMessage = ("The first processed input CSV file '$($csvFileItem.FullName)' is missing one or more required columns for script operation. " +
-									 "Missing columns: $($missingInputColumnsList -join ', '). Please ensure all required columns are present. Aborting script.")
-					Write-Progress -Activity "Processing input CSV files" -Completed
-					WriteLog -Message $errorMessage "ERROR"
-					$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-					SendEmailHtmlReport -BodyHtml $body
-				}
-				$isFirstFileProcessed = $true
-				WriteLog -Message "Column structure successfully validated against first processed file '$($csvFileItem.FullName)' for essential columns (including '$recipientTypeColumnNameInCsv', '$accountDisabledColumnNameInCsv', '$isMailboxEnabledColumnNameInCsv', '$totalItemSizeColumnNameInCsv', '$samAccountNameColumnNameInCsv')."
-				if ($IncludeSpecificLastLogonCriteria) {
-					WriteLog -Message "Additionally, column '$lastLogonTimeColumnNameInCsv' was confirmed as present for -IncludeSpecificLastLogonCriteria."
-				}
-			}
-
-			WriteLog -Message ("Successfully imported $mailboxesInCurrentFileBeforeFilter mailboxes from '$($csvFileItem.FullName)'. " +
-						 "Raw Disabled Accounts in file: $disabledAccountsInCurrentFile, Raw Disabled Mailboxes in file: $disabledMailboxesInCurrentFile. " +
-						 "Total mailboxes loaded so far: $($allMailboxesOriginalData.Count).")
-			$currentFileProcessingStatusMessage = "Processed"
-
-			$fileStatObject.MailboxesBeforeFiltering = $mailboxesInCurrentFileBeforeFilter
-			$fileStatObject.DisabledAccountsInFile = $disabledAccountsInCurrentFile
-			$fileStatObject.DisabledMailboxesInFile = $disabledMailboxesInCurrentFile
-			$fileStatObject.Status = $currentFileProcessingStatusMessage
-			$inputFileImportStatistics.Add($fileStatObject)
-
-		} catch {
-			$errorMessage = "Error processing CSV file '$($csvFileItem.FullName)': $($_.Exception.Message). This file will be skipped."
-			Write-Error $errorMessage
-			WriteLog -Message $errorMessage "ERROR"
-			$fileStatObject.Status = "$($currentFileProcessingStatusMessage): $($_.Exception.Message)"
-			$inputFileImportStatistics.Add($fileStatObject) # Add stats even if error occurred after initial count
-		}
-	}
-
-	Write-Progress -Activity "Processing input CSV files" -Completed
-
-	if ($allMailboxesOriginalData.Count -eq 0) {
-		$errorMessage = "No mailboxes were loaded from any of the input CSV files. Aborting script."
-		WriteLog -Message $errorMessage "ERROR"
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		SendEmailHtmlReport -BodyHtml $body
-	}
-
-	$countBeforeGlobalFiltering = $allMailboxesOriginalData.Count
-	WriteLog -Message "Starting global filtering for batch processing. Total mailboxes before any filtering: $countBeforeGlobalFiltering."
-
-	# Use List<T>.FindAll() or iterate for filtering
-	$filteredMailboxesForBatchesList = [System.Collections.Generic.List[PSObject]]::new()
-	$excludedByRecipientTypeCount = 0
-	$excludedByExclusionFileCount = 0
-	$excludedByAllDisabledCount = 0 # For original logic
-	$excludedByDisabledNonSharedCount = 0 # For original logic
-	$excludedByMbxDisabledCount = 0 # For original logic
-	$excludedBySamAccountNamePatternCount = 0 
-	$excludedByNewLastLogonCriteriaCount = 0 # NEW - Counter for new criteria
-	$includedByNewLastLogonCriteria_AcctDisabledTrue = 0 # NEW
-	$includedByNewLastLogonCriteria_AcctDisabledFalseLastLogonOK = 0 # NEW
-	$excludedByMissingColumnsForNewCriteriaCount = 0 # NEW
-
-	$allMailboxesOriginalData | ForEach-Object {
-		$mailbox = $_
-		$includeMailbox = $true # Assume inclusion unless a filter excludes it
-		$exclusionReason = "" # Track why it was excluded for logging
-
-		# Check required properties exist before filtering (general ones)
-		$hasRecipientType = $mailbox.PSObject.Properties.Name -contains $recipientTypeColumnNameInCsv
-		$hasPrimarySmtp = $mailbox.PSObject.Properties.Name -contains $primarySmtpAddressColumnNameInCsv
-		$hasSamAccountName = $mailbox.PSObject.Properties.Name -contains $samAccountNameColumnNameInCsv
-		
-		# --- Primary Inclusion/Exclusion based on New LastLogonTime Criteria (if active) ---
-		if ($IncludeSpecificLastLogonCriteria) {
-			$currentMailboxPrimarySmtp = if ($hasPrimarySmtp) { $mailbox.$primarySmtpAddressColumnNameInCsv } else { "UnknownPrimarySmtp" }
-			$hasAccountDisabledForNewLogic = $mailbox.PSObject.Properties.Name -contains $accountDisabledColumnNameInCsv
-			$hasLastLogonTimeForNewLogic = $mailbox.PSObject.Properties.Name -contains $lastLogonTimeColumnNameInCsv
-
-			if (-not $hasAccountDisabledForNewLogic -or -not $hasLastLogonTimeForNewLogic) {
-				WriteLog -Message "Warning: Mailbox '$currentMailboxPrimarySmtp' is missing '$accountDisabledColumnNameInCsv' or '$lastLogonTimeColumnNameInCsv'. Cannot apply new logon criteria. Excluding from batch consideration."
-				$includeMailbox = $false
-				$exclusionReason = "Missing columns for LastLogon criteria ($accountDisabledColumnNameInCsv or $lastLogonTimeColumnNameInCsv)"
-				$excludedByMissingColumnsForNewCriteriaCount++
-			} else {
-				$isAccountDisabledFlagForNewLogic = ($mailbox.$accountDisabledColumnNameInCsv -eq 'True')
-
-				if ($isAccountDisabledFlagForNewLogic) {
-					# Include if AccountDisabled is True
-					Write-Verbose "Including '$currentMailboxPrimarySmtp' because AccountDisabled is True (New LastLogon Criteria Active)."
-					$includedByNewLastLogonCriteria_AcctDisabledTrue++
-					# $includeMailbox remains true
-				} else {
-					# AccountDisabled is False, check LastLogonTime
-					$lastLogonTimeStringValue = $mailbox.$lastLogonTimeColumnNameInCsv
-					$lastLogonTimeDateValue = $null
-					
-					if ([string]::IsNullOrWhiteSpace($lastLogonTimeStringValue)) {
-						WriteLog -Message "Warning: LastLogonTime is empty or whitespace for '$currentMailboxPrimarySmtp' (AccountDisabled=False). Excluding from new criteria."
-						$includeMailbox = $false
-						$exclusionReason = "Empty LastLogonTime (AccountDisabled False, New LastLogon Criteria Active)"
-						$excludedByNewLastLogonCriteriaCount++
-					} else {
-						try {
-							$lastLogonTimeDateValue = Get-Date $lastLogonTimeStringValue
-							if ($lastLogonTimeDateValue -gt $lastLogonDateThreshold) {
-								# Include if LastLogonTime > threshold
-								Write-Verbose "Including '$currentMailboxPrimarySmtp' because AccountDisabled is False and LastLogonTime ($lastLogonTimeDateValue) > $lastLogonDateThreshold (New LastLogon Criteria Active)."
-								$includedByNewLastLogonCriteria_AcctDisabledFalseLastLogonOK++
-								# $includeMailbox remains true
-							} else {
-								$includeMailbox = $false
-								$exclusionReason = "AccountDisabled False, LastLogonTime ($lastLogonTimeDateValue) not after $lastLogonDateThreshold (New LastLogon Criteria Active)"
-								$excludedByNewLastLogonCriteriaCount++
-								Write-Verbose "Excluding '$currentMailboxPrimarySmtp' due to: $exclusionReason"
-							}
-						} catch {
-							WriteLog -Message "Warning: Could not parse LastLogonTime '$lastLogonTimeStringValue' for mailbox '$currentMailboxPrimarySmtp' (AccountDisabled=False). Excluding from new criteria. Error: $($_.Exception.Message)"
-							$includeMailbox = $false
-							$exclusionReason = "Unparseable LastLogonTime (AccountDisabled False, New LastLogon Criteria Active)"
-							$excludedByNewLastLogonCriteriaCount++
-						}
-					}
-				}
-			}
-		} # End of $IncludeSpecificLastLogonCriteria block
-
-		# --- Standard Filters (Applied if mailbox is still a candidate) ---
-		# Filter 1: Recipient Type (must have column)
-		if ($includeMailbox -and $hasRecipientType) {
-			if ($mailbox.$recipientTypeColumnNameInCsv -eq $discoveryMailboxRecipientTypeName -or $mailbox.$recipientTypeColumnNameInCsv -eq $roomMailboxRecipientTypeName) {
-				$includeMailbox = $false
-				$exclusionReason = "RecipientType ($($mailbox.$recipientTypeColumnNameInCsv))"
-				$excludedByRecipientTypeCount++
-				Write-Verbose "Excluding $($mailbox.$primarySmtpAddressColumnNameInCsv) due to RecipientType: $($mailbox.$recipientTypeColumnNameInCsv)"
-			}
-		}
-
-		# Filter 2: Exclusion File (must have column, only if still included)
-		if ($includeMailbox -and $hasPrimarySmtp -and $excludedMailboxPrimarySmtpAddresses.Count -gt 0) {
-			if ($excludedMailboxPrimarySmtpAddresses -contains $mailbox.$primarySmtpAddressColumnNameInCsv) {
-				$includeMailbox = $false
-				$exclusionReason = "Exclusion File ($excludeMailboxesFile)"
-				$excludedByExclusionFileCount++
-				Write-Verbose "Excluding $($mailbox.$primarySmtpAddressColumnNameInCsv) due to exclusion file: $excludeMailboxesFile"
-			}
-		}
-		
-		# Filter 3 (was 5): SamAccountName Patterns
-		if ($includeMailbox -and $hasSamAccountName -and $PSBoundParameters.ContainsKey('ExcludeSamAccountNamePatterns') -and $ExcludeSamAccountNamePatterns.Count -gt 0) {
-			$currentSamAccountName = $mailbox.$samAccountNameColumnNameInCsv
-			if (-not [string]::IsNullOrEmpty($currentSamAccountName)) {
-				foreach ($pattern in $ExcludeSamAccountNamePatterns) {
-					if ($currentSamAccountName -ilike $pattern) {
-						$includeMailbox = $false
-						$exclusionReason = "SamAccountName ('$currentSamAccountName') matches pattern '$pattern' (case-insensitive, using -ilike)"
-						$excludedBySamAccountNamePatternCount++
-						Write-Verbose "Excluding $($mailbox.$primarySmtpAddressColumnNameInCsv) due to SamAccountName '$currentSamAccountName' matching pattern '$pattern'."
-						break 
-					}
-				}
-			}
-		}
-
-		# --- Original Disabled Account/Mailbox Filters (ONLY if New LastLogonTime Criteria is NOT active) ---
-		if ($includeMailbox -and -not $IncludeSpecificLastLogonCriteria) {
-			$hasAccountDisabledForOrigLogic = $mailbox.PSObject.Properties.Name -contains $accountDisabledColumnNameInCsv
-			$hasMbxEnabledForOrigLogic = $mailbox.PSObject.Properties.Name -contains $isMailboxEnabledColumnNameInCsv
-			# Note: $hasRecipientType already checked
-
-			# Original Filter for Disabled Accounts 
-			if ($includeMailbox -and $hasAccountDisabledForOrigLogic -and $hasRecipientType) {
-				$isAccountDisabledFlag = ($mailbox.$accountDisabledColumnNameInCsv -eq "True")
-				$isSharedMailboxFlag = ($mailbox.$recipientTypeColumnNameInCsv -eq $sharedMailboxRecipientTypeName)
-
-				if ($isAccountDisabledFlag) {
-					if ($ExcludeAllDisabledAccounts) {
-						$includeMailbox = $false
-						$exclusionReason = "Account Disabled (ExcludeAllDisabledAccounts=True)"
-						$excludedByAllDisabledCount++
-						Write-Verbose "Excluding $($mailbox.$primarySmtpAddressColumnNameInCsv) because account is disabled and ExcludeAllDisabledAccounts is True."
-					} elseif ($ExcludeDisabledAccountsExceptForSharedMailboxes) {
-						if (-not $isSharedMailboxFlag) {
-							$includeMailbox = $false
-							$exclusionReason = "Account Disabled (Exclude...ExceptShared=True, Not Shared)"
-							$excludedByDisabledNonSharedCount++
-							Write-Verbose "Excluding $($mailbox.$primarySmtpAddressColumnNameInCsv) because account is disabled, ExcludeDisabledAccountsExceptForSharedMailboxes is True, and it is NOT a Shared Mailbox."
-						} else {
-							Write-Verbose "Including disabled Shared Mailbox $($mailbox.$primarySmtpAddressColumnNameInCsv) because ExcludeDisabledAccountsExceptForSharedMailboxes is True."
-							# $includeMailbox remains true
-						}
-					}
-					# Else (both parameters False): Disabled account is included by default by this specific filter.
-				}
-			}
-
-			# Original Filter for Disabled Mailboxes 
-			 if ($includeMailbox -and $ExcludeDisabledMailboxes -and $hasMbxEnabledForOrigLogic) {
-				if ($mailbox.$isMailboxEnabledColumnNameInCsv -eq "False") {
-					$includeMailbox = $false
-					$exclusionReason = "Mailbox Disabled (IsMailboxEnabled=False, ExcludeDisabledMailboxes=True)"
-					$excludedByMbxDisabledCount++
-					Write-Verbose "Excluding $($mailbox.$primarySmtpAddressColumnNameInCsv) because mailbox is disabled and ExcludeDisabledMailboxes is True."
-				}
-			}
-		} # End of original disabled filters block
-
-		# If mailbox passed all applicable filters, add it to the list
-		if ($includeMailbox) {
-			$filteredMailboxesForBatchesList.Add($mailbox)
-		} else {
-			# Optional: Log excluded mailboxes and reason (can be verbose)
-			# WriteLog -Message "Excluded Mailbox: $($mailbox.$primarySmtpAddressColumnNameInCsv) - Reason: $exclusionReason"
-		}
-	} # End ForEach-Object over $allMailboxesOriginalData
-
-	$filteredMailboxesForBatches = @($filteredMailboxesForBatchesList)
-	$countAfterGlobalFiltering = $filteredMailboxesForBatches.Count
-
-	WriteLog -Message "Filtering complete. Mailboxes remaining for batching: $countAfterGlobalFiltering."
-	WriteLog -Message "Filter Breakdown:"
-	WriteLog -Message "  - Excluded by Recipient Type ('$discoveryMailboxRecipientTypeName', '$roomMailboxRecipientTypeName'): $excludedByRecipientTypeCount"
-	if ($excludedMailboxPrimarySmtpAddresses.Count -gt 0) {
-		WriteLog -Message "  - Excluded by Exclusion File '$excludeMailboxesFile': $excludedByExclusionFileCount"
-	}
-	if ($PSBoundParameters.ContainsKey('ExcludeSamAccountNamePatterns') -and $ExcludeSamAccountNamePatterns.Count -gt 0) {
-		WriteLog -Message "  - Excluded by SamAccountName pattern (Patterns: '$($ExcludeSamAccountNamePatterns -join ", ")'): $excludedBySamAccountNamePatternCount"
-	}
-
-	if ($IncludeSpecificLastLogonCriteria) {
-		WriteLog -Message "  --- Using New LastLogonTime Criteria ---"
-		WriteLog -Message "    - Included because AccountDisabled=True: $includedByNewLastLogonCriteria_AcctDisabledTrue"
-		WriteLog -Message "    - Included because AccountDisabled=False AND LastLogonTime > $($lastLogonDateThreshold.ToString('yyyy-MM-dd')): $includedByNewLastLogonCriteria_AcctDisabledFalseLastLogonOK"
-		WriteLog -Message "    - Excluded by New LastLogonTime Criteria (e.g., AccountDisabled=False and LastLogonTime not meeting threshold, or unparseable date): $excludedByNewLastLogonCriteriaCount"
-		WriteLog -Message "    - Excluded due to missing '$accountDisabledColumnNameInCsv' or '$lastLogonTimeColumnNameInCsv' columns for New Criteria: $excludedByMissingColumnsForNewCriteriaCount"
-	} else {
-		WriteLog -Message "  --- Using Original Disabled Account/Mailbox Filters ---"
-		if ($ExcludeAllDisabledAccounts) {
-			WriteLog -Message "  - Excluded because Account Disabled (ExcludeAllDisabledAccounts=True): $excludedByAllDisabledCount"
-		} elseif ($ExcludeDisabledAccountsExceptForSharedMailboxes) {
-			WriteLog -Message "  - Excluded because Account Disabled and Not Shared Mailbox (ExcludeDisabledAccountsExceptForSharedMailboxes=True): $excludedByDisabledNonSharedCount"
-		} else {
-			WriteLog -Message "  - No accounts excluded based on disabled status (both Exclude*DisabledAccount* flags are False, or overridden by IncludeSpecificLastLogonCriteria)."
-		}
-		if ($ExcludeDisabledMailboxes) {
-			WriteLog -Message "  - Excluded because Mailbox Disabled (IsMailboxEnabled=False, ExcludeDisabledMailboxes=True): $excludedByMbxDisabledCount"
-		} else {
-			WriteLog -Message "  - No mailboxes excluded based on IsMailboxEnabled=False (ExcludeDisabledMailboxes=False, or overridden by IncludeSpecificLastLogonCriteria)."
-		}
-	}
-
-
-	# Sanity check:
-	$totalExcludedDirectlyCount = $excludedByRecipientTypeCount + $excludedByExclusionFileCount + $excludedBySamAccountNamePatternCount
-	if ($IncludeSpecificLastLogonCriteria) {
-		$totalExcludedDirectlyCount += $excludedByNewLastLogonCriteriaCount + $excludedByMissingColumnsForNewCriteriaCount
-	} else {
-		$totalExcludedDirectlyCount += $excludedByAllDisabledCount + $excludedByDisabledNonSharedCount + $excludedByMbxDisabledCount
-	}
-	# This calculation is complex because filters are sequential. The sum of individual exclusion counts might be > (Total - Included) if a mailbox matches multiple criteria.
-	# A more accurate way to get total excluded is $countBeforeGlobalFiltering - $countAfterGlobalFiltering
-	$totalMailboxesExcludedOverall = $countBeforeGlobalFiltering - $countAfterGlobalFiltering
-	WriteLog -Message "Total mailboxes excluded by all active filters (overall): $totalMailboxesExcludedOverall"
-
-
-	# Update statistics based on the final filtered list
-	foreach ($statEntryObject in $inputFileImportStatistics) {
-		if ($statEntryObject.Status -eq "Processed") {
-			# Count mailboxes from this specific file that are present in the final filtered list
-			$countAfterFilteringForFile = ($filteredMailboxesForBatches | Where-Object { $_.$originalSourceFileColumnAddedByScript -eq $statEntryObject.FileName }).Count
-			$statEntryObject.MailboxesAfterFiltering = $countAfterFilteringForFile
-		}
-	}
-
-	# --- Display Summary Report ---
-	Write-Host
-	Write-Host -ForegroundColor Magenta "Input CSV Files & Global Filters Summary Report:"
-	WriteLog -Message "Input CSV Files & Global Filters Summary Report:"
-	Write-Host -ForegroundColor Cyan "Global Filters Applied (for mailboxes included in batch generation):"
-	WriteLog -Message "Global Filters Applied (for mailboxes included in batch generation):"
-	Write-Host "  - Recipient types '$discoveryMailboxRecipientTypeName' and '$roomMailboxRecipientTypeName': Always Excluded"
-	WriteLog -Message "  - Recipient types '$discoveryMailboxRecipientTypeName' and '$roomMailboxRecipientTypeName': Always Excluded"
-
-	# Exclusion File Summary
-	if ($excludedMailboxPrimarySmtpAddresses.Count -gt 0) {
-		Write-Host "  - SMTP addresses from exclusion file '$excludeMailboxesFile': Excluded ($excludedByExclusionFileCount matched out of $($excludedMailboxPrimarySmtpAddresses.Count) listed)"
-		WriteLog -Message "  - SMTP addresses from exclusion file '$excludeMailboxesFile': Excluded ($excludedByExclusionFileCount matched out of $($excludedMailboxPrimarySmtpAddresses.Count) listed)"
-	} else {
-		if (Test-Path $excludeMailboxesFile) {
-			Write-Host "  - Exclusion file '$excludeMailboxesFile': File was found but was empty, missing column, or no mailboxes matched for exclusion."
-			WriteLog -Message "  - Exclusion file '$excludeMailboxesFile': File was found but was empty, missing column, or no mailboxes matched for exclusion."
-		} else {
-			Write-Host "  - Exclusion file '$excludeMailboxesFile': File not found or not specified, so file-based exclusion was not applied."
-			WriteLog -Message "  - Exclusion file '$excludeMailboxesFile': File not found or not specified, so file-based exclusion was not applied."
-		}
-	}
-
-	# SamAccountName Pattern Exclusion Summary
-	if ($PSBoundParameters.ContainsKey('ExcludeSamAccountNamePatterns') -and $ExcludeSamAccountNamePatterns.Count -gt 0) {
-		Write-Host "  - SamAccountNames matching patterns ('$($ExcludeSamAccountNamePatterns -join "', '")'): Excluded ($excludedBySamAccountNamePatternCount matched)"
-		WriteLog -Message "  - SamAccountNames matching patterns ('$($ExcludeSamAccountNamePatterns -join "', '")'): Excluded ($excludedBySamAccountNamePatternCount matched)"
-	} else {
-		Write-Host "  - SamAccountName pattern exclusion: Not specified or no patterns provided."
-		WriteLog -Message "  - SamAccountName pattern exclusion: Not specified or no patterns provided."
-	}
-
-	# New LastLogonTime Criteria Summary
-	if ($IncludeSpecificLastLogonCriteria) {
-		Write-Host -ForegroundColor Cyan "  --- Specific LastLogonTime Criteria Active ---"
-		WriteLog -Message "  --- Specific LastLogonTime Criteria Active ---"
-		Write-Host "    - Mailboxes with '$accountDisabledColumnNameInCsv = True': Included"
-		WriteLog -Message "    - Mailboxes with '$accountDisabledColumnNameInCsv = True': Included (Actual included: $includedByNewLastLogonCriteria_AcctDisabledTrue)"
-		Write-Host "    - Mailboxes with '$accountDisabledColumnNameInCsv = False' AND '$lastLogonTimeColumnNameInCsv > $($lastLogonDateThreshold.ToString('yyyy-MM-dd'))': Included"
-		WriteLog -Message "    - Mailboxes with '$accountDisabledColumnNameInCsv = False' AND '$lastLogonTimeColumnNameInCsv > $($lastLogonDateThreshold.ToString('yyyy-MM-dd'))': Included (Actual included: $includedByNewLastLogonCriteria_AcctDisabledFalseLastLogonOK)"
-		Write-Host "    - Other mailboxes (AccountDisabled=False, LastLogonTime not meeting criteria, or missing/unparseable data): Excluded ($($excludedByNewLastLogonCriteriaCount + $excludedByMissingColumnsForNewCriteriaCount) total)"
-		WriteLog -Message "    - Other mailboxes (AccountDisabled=False, LastLogonTime not meeting criteria, or missing/unparseable data): Excluded (Details: $excludedByNewLastLogonCriteriaCount by date, $excludedByMissingColumnsForNewCriteriaCount by missing columns)"
-		Write-Host "    (Original disabled account/mailbox filters ExcludeAllDisabledAccounts, ExcludeDisabledAccountsExceptForSharedMailboxes, ExcludeDisabledMailboxes were IGNORED)"
-		WriteLog -Message "    (Original disabled account/mailbox filters ExcludeAllDisabledAccounts, ExcludeDisabledAccountsExceptForSharedMailboxes, ExcludeDisabledMailboxes were IGNORED)"
-	} else {
-		# Original Disabled Account Summary
-		Write-Host -ForegroundColor Cyan "  --- Original Disabled Account/Mailbox Filters Active ---"
-		WriteLog -Message "  --- Original Disabled Account/Mailbox Filters Active ---"
-		if ($ExcludeAllDisabledAccounts) {
-			Write-Host "  - Disabled accounts ($accountDisabledColumnNameInCsv = True): All Excluded (Parameter ExcludeAllDisabledAccounts = `$true)"
-			WriteLog -Message "  - Disabled accounts ($accountDisabledColumnNameInCsv = True): All Excluded (Parameter ExcludeAllDisabledAccounts = `$true)"
-		} elseif ($ExcludeDisabledAccountsExceptForSharedMailboxes) {
-			Write-Host "  - Disabled accounts ($accountDisabledColumnNameInCsv = True): Excluded, EXCEPT for SharedMailboxes (Parameter ExcludeDisabledAccountsExceptForSharedMailboxes = `$true)"
-			WriteLog -Message "  - Disabled accounts ($accountDisabledColumnNameInCsv = True): Excluded, EXCEPT for SharedMailboxes (Parameter ExcludeDisabledAccountsExceptForSharedMailboxes = `$true)"
-		} else {
-			Write-Host "  - Disabled accounts ($accountDisabledColumnNameInCsv = True): Included (Both Exclude*DisabledAccount* parameters are `$false)"
-			WriteLog -Message "  - Disabled accounts ($accountDisabledColumnNameInCsv = True): Included (Both Exclude*DisabledAccount* parameters are `$false)"
-		}
-
-		# Original Disabled Mailbox Summary
-		if ($ExcludeDisabledMailboxes) {
-			Write-Host "  - Disabled mailboxes ($isMailboxEnabledColumnNameInCsv = False): Excluded (Parameter ExcludeDisabledMailboxes = `$true)"
-			WriteLog -Message "  - Disabled mailboxes ($isMailboxEnabledColumnNameInCsv = False): Excluded (Parameter ExcludeDisabledMailboxes = `$true)"
-		} else {
-			Write-Host "  - Disabled mailboxes ($isMailboxEnabledColumnNameInCsv = False): Included (Parameter ExcludeDisabledMailboxes = `$false)"
-			WriteLog -Message "  - Disabled mailboxes ($isMailboxEnabledColumnNameInCsv = False): Included (Parameter ExcludeDisabledMailboxes = `$false)"
-		}
-	}
-	Write-Host
-
-	Write-Host -ForegroundColor Yellow ("-" * ($host.UI.RawUI.WindowSize.Width -1))
-	Write-Host -ForegroundColor Yellow "Input CSV Files Statistics (MailboxesAfterFiltering shows items eligible for batching from that source file):"
-	WriteLog -Message "Input CSV Files Statistics (MailboxesAfterFiltering shows items eligible for batching from that source file):"
-
-	$inputCsvSummaryTableFormat = @(
-		@{Label="File Name"; Expression={$_.FileName}; Align="Left"; Width=35},
-		@{Label="Total In CSV"; Expression={$_.MailboxesBeforeFiltering}; Align="Right"},
-		@{Label="Disabled Acc."; Expression={$_.DisabledAccountsInFile}; Align="Right"}, # Raw count from file
-		@{Label="Mbx Disabled"; Expression={$_.DisabledMailboxesInFile}; Align="Right"}, # Raw count from file
-		@{Label="Post-Filter"; Expression={$_.MailboxesAfterFiltering}; Align="Right"}, # Count AFTER all filters
-		@{Label="Status"; Expression={$_.Status}; Align="Left"; Width=30}
-	)
-
-	$summaryDataForDisplayTable = [System.Collections.Generic.List[PSObject]]::new() # Use Generic List
-
-	if ($inputFileImportStatistics.Count -gt 0) {
-		$inputFileImportStatistics.ForEach({ $summaryDataForDisplayTable.Add($_) })
-
-		# Ensure properties exist and are numeric before summing
-		$totalMailboxesBeforeFilteringInStats = ($inputFileImportStatistics | Where-Object {$_.MailboxesBeforeFiltering -is [int] -or $_.MailboxesBeforeFiltering -is [double]} | Measure-Object -Property MailboxesBeforeFiltering -Sum).Sum
-		$totalDisabledAccountsInStats = ($inputFileImportStatistics | Where-Object {$_.DisabledAccountsInFile -is [int] -or $_.DisabledAccountsInFile -is [double]} | Measure-Object -Property DisabledAccountsInFile -Sum).Sum
-		$totalDisabledMailboxesInStats = ($inputFileImportStatistics | Where-Object {$_.DisabledMailboxesInFile -is [int] -or $_.DisabledMailboxesInFile -is [double]} | Measure-Object -Property DisabledMailboxesInFile -Sum).Sum
-		$totalMailboxesAfterFilteringInStats = ($inputFileImportStatistics | Where-Object {$_.MailboxesAfterFiltering -is [int] -or $_.MailboxesAfterFiltering -is [double]} | Measure-Object -Property MailboxesAfterFiltering -Sum).Sum
-
-		$totalRowForFileStatsSummary = [PSCustomObject]@{
-			FileName                 = "TOTALS"
-			MailboxesBeforeFiltering = $totalMailboxesBeforeFilteringInStats
-			DisabledAccountsInFile   = $totalDisabledAccountsInStats
-			DisabledMailboxesInFile  = $totalDisabledMailboxesInStats
-			MailboxesAfterFiltering  = $totalMailboxesAfterFilteringInStats
-			Status                   = "---"
-		}
-		$summaryDataForDisplayTable.Add($totalRowForFileStatsSummary)
-	} else {
-		Write-Host "No CSV file statistics to display as no files were processed or statistics collected."
-		WriteLog -Message "No CSV file statistics to display as no files were processed or statistics collected."
-	}
-
-	if ($summaryDataForDisplayTable.Count -gt 0) {
-		$summaryTableOutputString = $summaryDataForDisplayTable | Format-Table $inputCsvSummaryTableFormat -AutoSize | Out-String
-		Write-Host $summaryTableOutputString
-		Write-Host -ForegroundColor Yellow ("-" * ($host.UI.RawUI.WindowSize.Width -1))
-
-		$summaryTableOutputString.Split([Environment]::NewLine) | ForEach-Object {
-			if (-not [string]::IsNullOrWhiteSpace($_)) {
-				WriteLog -Message  $_
-			}
-		}
-	}
-
-	$unfilteredOutputCsvFileName = Join-Path -Path $outputFolderForConsolidatedCsv -ChildPath "${outputFileNamePrefix}_AllInputMailboxes_UnfilteredOriginal_$TimeStamp.csv"
-	Write-Host -ForegroundColor Magenta "Generating consolidated CSV of all originally loaded mailboxes (unfiltered, original columns)..."
-	WriteLog -Message "Generating consolidated CSV of all originally loaded mailboxes (unfiltered, original columns) to '$unfilteredOutputCsvFileName'..."
-	if ($allMailboxesOriginalData.Count -gt 0) {
-		try {
-			# Export directly from the List
-			Export-CsvAtomic -InputObject $allMailboxesOriginalData -Path $unfilteredOutputCsvFileName -Encoding UTF8
-			Write-Host -ForegroundColor Green "Successfully exported $($allMailboxesOriginalData.Count) mailboxes to unfiltered consolidated CSV (original data): $unfilteredOutputCsvFileName"
-			WriteLog -Message "Successfully exported $($allMailboxesOriginalData.Count) mailboxes to unfiltered consolidated CSV (original data): $unfilteredOutputCsvFileName"
-		} catch {
-			$errorMessage = "Error exporting unfiltered consolidated CSV (original data) to '$unfilteredOutputCsvFileName': $($_.Exception.Message)"
-			Write-Error $errorMessage
-			WriteLog -Message $errorMessage "ERROR"
-		}
-	} else {
-		Write-Warning "No mailboxes were loaded from input files, so the unfiltered consolidated CSV (original data) was not generated."
-		WriteLog -Message "No mailboxes were loaded from input files, so the unfiltered consolidated CSV (original data) was not generated."
-	}
-
-	Write-Host -ForegroundColor Magenta "Preparing to generate migration batch CSV files..."
-	WriteLog -Message "Preparing to generate migration batch CSV files (Max items per batch: $MaxMailboxesPerBatchFile, Max size per batch: $maxBatchSizeMB MB)..."
-
-	$mailboxToAssignedBatchNameMap = @{} # Map to store PrimarySmtpAddress -> BatchName assigned by THIS script run
-	$globalBatchesGeneratedSoFarCount = 0 # Global counter for progress
-
-	if ($filteredMailboxesForBatches.Count -eq 0) {
-		Write-Warning "No mailboxes are eligible for batching after all filters were applied. No migration batch CSV files will be generated."
-		WriteLog -Message "No mailboxes are eligible for batching after all filters were applied. No migration batch CSV files will be generated."
-	} else {
-		WriteLog -Message "Total mailboxes eligible for batching (after all filters): $($filteredMailboxesForBatches.Count)"
-
-		# Group mailboxes by domain
-		$mailboxesGroupedByDomain = $filteredMailboxesForBatches | Group-Object -Property $domainNameColumnNameInCsv
-		$domainBatchGenerationSummaryData = @{} # Store summary data [DomainName] -> [PSCustomObject]@{MailboxCount=X; BatchCount=Y}
-
-		# Estimate total batches for progress (less accurate now due to size limit, but provides a starting point)
-		$estimatedTotalBatchesToGenerateCount = 0
-		foreach ($domainGroupToCount in $mailboxesGroupedByDomain) {
-			$mailboxesInThisDomainForCount = $domainGroupToCount.Group.Count
-			if ($mailboxesInThisDomainForCount -gt 0) {
-				 # Initial estimate based on count, size limit might increase this
-				 $batchesNeededForThisDomain = [math]::Ceiling($mailboxesInThisDomainForCount / $MaxMailboxesPerBatchFile)
-				 $estimatedTotalBatchesToGenerateCount += $batchesNeededForThisDomain
-			}
-		}
-		WriteLog -Message "Estimated total migration batches based on count limit: $estimatedTotalBatchesToGenerateCount (Actual number may be higher due to size limit of $maxBatchSizeMB MB per batch)."
-		if ($estimatedTotalBatchesToGenerateCount -gt 0) {
-			Write-Host "Preparing to generate migration batch file(s)... (Estimate: $estimatedTotalBatchesToGenerateCount)"
-		}
-
-		# Process each domain
-		foreach ($domainItemGroup in $mailboxesGroupedByDomain) {
-			$currentProcessingDomainName = $domainItemGroup.Name
-			# Get mailboxes for the current domain as a modifiable list
-			$mailboxesInCurrentDomainList = [System.Collections.Generic.List[PSObject]]::new($domainItemGroup.Group)
-			$totalMailboxesInCurrentDomainForBatching = $mailboxesInCurrentDomainList.Count
-			$mailboxesProcessedInDomain = 0 # Track mailboxes actually placed in batches for this domain
-
-			if ($totalMailboxesInCurrentDomainForBatching -eq 0) {
-				WriteLog -Message "Skipping domain '$currentProcessingDomainName' as it has no mailboxes remaining after filtering." # Message clarification
-				$domainBatchGenerationSummaryData[$currentProcessingDomainName] = [PSCustomObject]@{ MailboxCount = 0; BatchCount = 0 }
-				continue
-			}
-			WriteLog -Message "Processing domain '$currentProcessingDomainName' with $totalMailboxesInCurrentDomainForBatching eligible mailboxes for batching."
-
-			$batchCounterForThisDomain = 1 # This will be used for the actual batch number in filename
-			$batchesGeneratedForThisDomain = 0 # Track batches actually created for this domain
-			$currentBatchMailboxes = [System.Collections.Generic.List[PSObject]]::new()
-			$currentBatchTotalSizeMB = 0.0
-			
-
-			# Use a while loop to consume mailboxes from the list
-			while ($mailboxesInCurrentDomainList.Count -gt 0) {
-				$mailboxToAdd = $mailboxesInCurrentDomainList[0] # Peek at the next mailbox
-				$mailboxSizeMB = 0.0
-				$sizeParseSuccess = $false
-				$sizeValueString = $mailboxToAdd.$totalItemSizeColumnNameInCsv
-
-				# Try parsing the mailbox size robustly
-				if (-not [string]::IsNullOrWhiteSpace($sizeValueString)) {
-					# Remove potential suffixes and trim whitespace before parsing
-					$sizeValueString = $sizeValueString -replace 'MB$','' -replace 'GB$','' -replace ',','.' # Handle potential suffixes and commas
-					try {
-						$sizeValueString = $sizeValueString.Trim()
-						# Attempt to parse as double using InvariantCulture first
-						if ([double]::TryParse($sizeValueString, [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$mailboxSizeMB)) {
-							$sizeParseSuccess = $true
-						} else {
-							# Fallback try with current culture if invariant fails
-							if ([double]::TryParse($sizeValueString, [ref]$mailboxSizeMB)) {
-								$sizeParseSuccess = $true
-							} else {
-								WriteLog -Message "Warning: Could not parse '$($mailboxToAdd.$totalItemSizeColumnNameInCsv)' as a number for mailbox '$($mailboxToAdd.$primarySmtpAddressColumnNameInCsv)'. Assuming size 0 MB for batch calculation."
-								$mailboxSizeMB = 0.0 # Explicitly set to 0 if parse fails
-							}
-						}
-					} catch {
-						WriteLog -Message "Warning: Error parsing size '$($mailboxToAdd.$totalItemSizeColumnNameInCsv)' for mailbox '$($mailboxToAdd.$primarySmtpAddressColumnNameInCsv)'. Assuming size 0 MB. Error: $($_.Exception.Message)"
-						$mailboxSizeMB = 0.0 # Explicitly set to 0 on error
-					}
-				} else {
-					 WriteLog -Message "Warning: Missing or empty size value ('$totalItemSizeColumnNameInCsv') for mailbox '$($mailboxToAdd.$primarySmtpAddressColumnNameInCsv)'. Assuming size 0 MB for batch calculation."
-					 $mailboxSizeMB = 0.0 # Explicitly set to 0 if missing/empty
-				}
-
-				# Decision logic: Can this mailbox be added?
-				$canAddMailboxToCurrentBatch = $false
-				$mustFinalizeCurrentBatchFirst = $false
-
-				if ($currentBatchMailboxes.Count -eq 0) {
-					# If batch is empty, always try to add the mailbox.
-					# Handle edge case: Single mailbox exceeds the limit
-					if ($mailboxSizeMB -gt $maxBatchSizeMB) {
-						WriteLog -Message "Warning: Mailbox '$($mailboxToAdd.$primarySmtpAddressColumnNameInCsv)' (Size: $([math]::Round($mailboxSizeMB, 2)) MB) exceeds the maximum batch size ($maxBatchSizeMB MB) and will be placed in its own batch."
-						$canAddMailboxToCurrentBatch = $true
-						# This will be added, and then the batch will be finalized immediately after.
-					} else {
-						# It fits in an empty batch (or is 0 size)
-						$canAddMailboxToCurrentBatch = $true
-					}
-				} else {
-					# Batch is not empty, check limits
-					if (($currentBatchMailboxes.Count -lt $MaxMailboxesPerBatchFile) -and (($currentBatchTotalSizeMB + $mailboxSizeMB) -le $maxBatchSizeMB)) {
-						# Fits based on count and size
-						$canAddMailboxToCurrentBatch = $true
-					} else {
-						# Doesn't fit, finalize the current batch first, then this mailbox will start a new batch.
-						$mustFinalizeCurrentBatchFirst = $true
-					}
-				}
-
-				# Action: Finalize Batch (if needed because it's full or a single large item is next)
-				if ($mustFinalizeCurrentBatchFirst -and $currentBatchMailboxes.Count -gt 0) {
-					$batchesGeneratedForThisDomain++ 
-					$globalBatchesGeneratedSoFarCount++
-					$batchNameGeneratedByScript = "$outputFileNamePrefix-$($currentProcessingDomainName.Replace('.', '-'))-$TimeStamp-Batch$batchesGeneratedForThisDomain"
-					$outputBatchFilePath = Join-Path -Path $outputFolderForBatchCsv -ChildPath "$batchNameGeneratedByScript.csv"
-
-					if ($estimatedTotalBatchesToGenerateCount -gt 0) {
-						$progressCompletionPercent = ($globalBatchesGeneratedSoFarCount / $estimatedTotalBatchesToGenerateCount) * 100
-						if ($progressCompletionPercent -gt 100) { $progressCompletionPercent = 100 } 
-						$statusMessageForProgress = "Batch {0} (Est. Total: {1}): {2}" -f $globalBatchesGeneratedSoFarCount, $estimatedTotalBatchesToGenerateCount, (Split-Path $outputBatchFilePath -Leaf)
-						Write-Progress -Activity "Generating Migration Batches" -Status $statusMessageForProgress -PercentComplete $progressCompletionPercent -CurrentOperation "Domain: $currentProcessingDomainName (Batch $batchesGeneratedForThisDomain)"
-					}
-
-					$currentBatchMailboxes | ForEach-Object {
-						$mbxInBatch = $_
-						$mbxInBatch.$batchNameColumn = $batchNameGeneratedByScript 
-						if (-not $mailboxToAssignedBatchNameMap.ContainsKey($mbxInBatch.$primarySmtpAddressColumnNameInCsv)) {
-							$mailboxToAssignedBatchNameMap[$mbxInBatch.$primarySmtpAddressColumnNameInCsv] = $batchNameGeneratedByScript
-						} else { WriteLog -Message "Warning: Mailbox '$($mbxInBatch.$primarySmtpAddressColumnNameInCsv)' re-assigned to batch '$batchNameGeneratedByScript'." }
-					}
-
-					$columnsToSelectForBatchCsv = if ($SimpleBatchCsv) { @($primarySmtpAddressColumnNameInCsv) }
-												   else { @($primarySmtpAddressColumnNameInCsv, $displayNameColumnNameInCsv, $aliasColumnNameInCsv, $samAccountNameColumnNameInCsv, $ouColumnNameInCsv, $identityColumnNameInCsv, $recipientTypeColumnNameInCsv, $fullAccessColumnNameInCsv, $sendAsColumnNameInCsv, $sendOnBehalfToColumnNameInCsv, $totalItemSizeColumnNameInCsv, $batchNameColumn, $originalSourceFileColumnAddedByScript) }
-					try {
-						if ($EnabledBatchFileCreation) { Export-CsvAtomic -InputObject ($currentBatchMailboxes | Select-Object $columnsToSelectForBatchCsv) -Path $outputBatchFilePath -Encoding UTF8 }
-						WriteLog -Message ("Generated batch file: $outputBatchFilePath with $($currentBatchMailboxes.Count) mailboxes (Total Size: $([math]::Round($currentBatchTotalSizeMB, 2)) MB). Batch Name assigned: $batchNameGeneratedByScript.")
-					} catch { Write-Error "Error generating batch file '$outputBatchFilePath': $($_.Exception.Message)"; WriteLog -Message "Error generating batch file '$outputBatchFilePath': $($_.Exception.Message)" }
-
-					$currentBatchMailboxes.Clear()
-					$currentBatchTotalSizeMB = 0.0
-					# The mailbox $mailboxToAdd that triggered this finalization has NOT been added yet. It will be added to the new, now empty, batch.
-				}
-
-				# Action: Add Mailbox to current (possibly new) batch
-				if ($canAddMailboxToCurrentBatch) {
-					$currentBatchMailboxes.Add($mailboxToAdd)
-					$currentBatchTotalSizeMB += $mailboxSizeMB 
-					$mailboxesProcessedInDomain++ 
-					$mailboxesInCurrentDomainList.RemoveAt(0) # Consume the mailbox from the domain list
-
-					# If this mailbox is a single large item that filled an empty batch, or if it's the last item for the domain and fills the batch limits
-					$isSingleLargeItemBatch = ($currentBatchMailboxes.Count -eq 1 -and $mailboxSizeMB -gt $maxBatchSizeMB)
-					$isBatchFullByCount = ($currentBatchMailboxes.Count -eq $MaxMailboxesPerBatchFile)
-					$isBatchFullBySize = ($currentBatchTotalSizeMB -ge $maxBatchSizeMB) # Using -ge in case of exact match
-
-					if ($isSingleLargeItemBatch -or $isBatchFullByCount -or $isBatchFullBySize) {
-						# Finalize this batch immediately
-						$batchesGeneratedForThisDomain++
-						$globalBatchesGeneratedSoFarCount++
-						$batchNameGeneratedByScript = "$outputFileNamePrefix-$($currentProcessingDomainName.Replace('.', '-'))-$TimeStamp-Batch$batchesGeneratedForThisDomain"
-						$outputBatchFilePath = Join-Path -Path $outputFolderForBatchCsv -ChildPath "$batchNameGeneratedByScript.csv"
-
-						if ($estimatedTotalBatchesToGenerateCount -gt 0) { $progressCompletionPercent = ($globalBatchesGeneratedSoFarCount / $estimatedTotalBatchesToGenerateCount) * 100; if ($progressCompletionPercent -gt 100) { $progressCompletionPercent = 100 }; $statusMessageForProgress = "Batch {0} (Est. Total: {1}): {2}" -f $globalBatchesGeneratedSoFarCount, $estimatedTotalBatchesToGenerateCount, (Split-Path $outputBatchFilePath -Leaf); Write-Progress -Activity "Generating Migration Batches" -Status $statusMessageForProgress -PercentComplete $progressCompletionPercent -CurrentOperation "Domain: $currentProcessingDomainName (Batch $batchesGeneratedForThisDomain)"}
-						
-						$currentBatchMailboxes | ForEach-Object { $mbxInBatch = $_; $mbxInBatch.$batchNameColumn = $batchNameGeneratedByScript; if (-not $mailboxToAssignedBatchNameMap.ContainsKey($mbxInBatch.$primarySmtpAddressColumnNameInCsv)) { $mailboxToAssignedBatchNameMap[$mbxInBatch.$primarySmtpAddressColumnNameInCsv] = $batchNameGeneratedByScript } else { WriteLog -Message "Warning: Mailbox '$($mbxInBatch.$primarySmtpAddressColumnNameInCsv)' re-assigned to batch '$batchNameGeneratedByScript'." } }
-						
-						$columnsToSelectForBatchCsv = if ($SimpleBatchCsv) { @($primarySmtpAddressColumnNameInCsv) } else { @($primarySmtpAddressColumnNameInCsv, $displayNameColumnNameInCsv, $aliasColumnNameInCsv, $samAccountNameColumnNameInCsv, $ouColumnNameInCsv, $identityColumnNameInCsv, $recipientTypeColumnNameInCsv, $fullAccessColumnNameInCsv, $sendAsColumnNameInCsv, $sendOnBehalfToColumnNameInCsv, $totalItemSizeColumnNameInCsv, $batchNameColumn, $originalSourceFileColumnAddedByScript) }
-						
-						try {
-							if ($EnabledBatchFileCreation) { Export-CsvAtomic -InputObject ($currentBatchMailboxes | Select-Object $columnsToSelectForBatchCsv) -Path $outputBatchFilePath -Encoding UTF8; WriteLog -Message ("Generated batch file (due to limit/large item): $outputBatchFilePath with $($currentBatchMailboxes.Count) mailbox(es) (Total Size: $([math]::Round($currentBatchTotalSizeMB, 2)) MB). Batch Name assigned: $batchNameGeneratedByScript.") }
-							}
-						catch {
-							Write-Error "Error generating batch file (due to limit/large item) '$outputBatchFilePath': $($_.Exception.Message)"; WriteLog -Message "Error generating batch file (due to limit/large item) '$outputBatchFilePath': $($_.Exception.Message)"
-							}
-						$currentBatchMailboxes.Clear()
-						$currentBatchTotalSizeMB = 0.0
-					}
-				} elseif (-not $mustFinalizeCurrentBatchFirst) {
-					# This case should ideally not be hit if logic is correct.
-					# It means mailbox couldn't be added, but batch wasn't marked for finalization.
-					# This could happen if $canAddMailboxToCurrentBatch was false from the start (e.g. failed a check not related to size/count in an empty batch - not current logic)
-					WriteLog -Message "Internal Logic Warning: Mailbox '$($mailboxToAdd.$primarySmtpAddressColumnNameInCsv)' was not added and batch finalization was not triggered. Check logic. Skipping mailbox to prevent loop."
-					$mailboxesInCurrentDomainList.RemoveAt(0) # Consume (skip) the mailbox
-				}
-				# If $mustFinalizeCurrentBatchFirst was true, $mailboxToAdd was not added in this iteration,
-				# but the previous batch was finalized. $mailboxToAdd will be re-evaluated for the new empty batch in the next iteration.
-			} # End while loop processing mailboxes in domain
-
-			# Finalize the very last batch for the domain if it contains mailboxes
-			 if ($currentBatchMailboxes.Count -gt 0) {
-				$batchesGeneratedForThisDomain++ 
-				$globalBatchesGeneratedSoFarCount++
-				$batchNameGeneratedByScript = "$outputFileNamePrefix-$($currentProcessingDomainName.Replace('.', '-'))-$TimeStamp-Batch$batchesGeneratedForThisDomain"
-				$outputBatchFilePath = Join-Path -Path $outputFolderForBatchCsv -ChildPath "$batchNameGeneratedByScript.csv"
-
-				if ($estimatedTotalBatchesToGenerateCount -gt 0) { $progressCompletionPercent = ($globalBatchesGeneratedSoFarCount / $estimatedTotalBatchesToGenerateCount) * 100; if ($progressCompletionPercent -gt 100) { $progressCompletionPercent = 100 }; $statusMessageForProgress = "Batch {0} (Est. Total: {1}): {2}" -f $globalBatchesGeneratedSoFarCount, $estimatedTotalBatchesToGenerateCount, (Split-Path $outputBatchFilePath -Leaf); Write-Progress -Activity "Generating Migration Batches" -Status $statusMessageForProgress -PercentComplete $progressCompletionPercent -CurrentOperation "Domain: $currentProcessingDomainName (Batch $batchesGeneratedForThisDomain)"}
-
-				$currentBatchMailboxes | ForEach-Object { $mbxInBatch = $_; $mbxInBatch.$batchNameColumn = $batchNameGeneratedByScript; if (-not $mailboxToAssignedBatchNameMap.ContainsKey($mbxInBatch.$primarySmtpAddressColumnNameInCsv)) { $mailboxToAssignedBatchNameMap[$mbxInBatch.$primarySmtpAddressColumnNameInCsv] = $batchNameGeneratedByScript } else { WriteLog -Message "Warning: Mailbox '$($mbxInBatch.$primarySmtpAddressColumnNameInCsv)' re-assigned to batch '$batchNameGeneratedByScript'." } }
-
-				$columnsToSelectForBatchCsv = if ($SimpleBatchCsv) { @($primarySmtpAddressColumnNameInCsv) } else { @($primarySmtpAddressColumnNameInCsv, $displayNameColumnNameInCsv, $aliasColumnNameInCsv, $samAccountNameColumnNameInCsv, $ouColumnNameInCsv, $identityColumnNameInCsv, $recipientTypeColumnNameInCsv, $fullAccessColumnNameInCsv, $sendAsColumnNameInCsv, $sendOnBehalfToColumnNameInCsv, $totalItemSizeColumnNameInCsv, $batchNameColumn, $originalSourceFileColumnAddedByScript) }
-				
-				try {
-					if ($EnabledBatchFileCreation) { Export-CsvAtomic -InputObject ($currentBatchMailboxes | Select-Object $columnsToSelectForBatchCsv) -Path $outputBatchFilePath -Encoding UTF8; WriteLog -Message  ("Generated FINAL batch file for domain '$currentProcessingDomainName': $outputBatchFilePath with $($currentBatchMailboxes.Count) mailboxes (Total Size: $([math]::Round($currentBatchTotalSizeMB, 2)) MB). Batch Name assigned: $batchNameGeneratedByScript.") }
-					}
-				catch { Write-Error "Error generating FINAL batch file '$outputBatchFilePath': $($_.Exception.Message)"; WriteLog -Message "Error generating FINAL batch file '$outputBatchFilePath': $($_.Exception.Message)" }
-			}
-
-			# Record summary for the domain using the actual counts
-			$domainBatchGenerationSummaryData[$currentProcessingDomainName] = [PSCustomObject]@{
-				MailboxCount = $mailboxesProcessedInDomain # Mailboxes successfully placed in batches
-				BatchCount   = $batchesGeneratedForThisDomain # Batches actually created
-			}
-			WriteLog -Message "Domain '$currentProcessingDomainName': Processed $mailboxesProcessedInDomain mailboxes into $batchesGeneratedForThisDomain batch(es)."
-
-		} # End foreach domain group
-
-		# Complete the progress bar
-		Write-Progress -Activity "Generating Migration Batches" -Completed
-
-		# --- Update and Export Consolidated CSV with Batch Names ---
-		WriteLog -Message "Preparing data for consolidated CSV (all source mailboxes, BatchName column updated by script) to '$outputConsolidatedCsvPath'..."
-		if ($allMailboxesOriginalData.Count -gt 0) {
-			# Iterate through the original list and update BatchName using the map
-			$allMailboxesOriginalData | ForEach-Object {
-				$currentMailboxObject = $_
-				# Ensure BatchName column exists (should have been added during import)
-				if (-not ($currentMailboxObject.PSObject.Properties.Name -contains $batchNameColumn)) {
-					$currentMailboxObject | Add-Member -MemberType NoteProperty -Name $batchNameColumn -Value ""
-				}
-
-				# Update BatchName if it was assigned during this run
-				if ($mailboxToAssignedBatchNameMap.ContainsKey($currentMailboxObject.$primarySmtpAddressColumnNameInCsv)) {
-					$currentMailboxObject.$batchNameColumn = $mailboxToAssignedBatchNameMap[$currentMailboxObject.$primarySmtpAddressColumnNameInCsv]
-				}
-				# Else: leave the BatchName as it was (empty or potentially a value from the source CSV if not overwritten)
-			}
-
-			try {            
-				Export-CsvAtomic -InputObject $allMailboxesOriginalData -Path $outputConsolidatedCsvPath -Encoding UTF8
-								
-				Write-Host -ForegroundColor Green "Successfully exported $($allMailboxesOriginalData.Count) total mailboxes to consolidated CSV (all source columns, BatchName updated by script): $outputConsolidatedCsvPath"
-				WriteLog -Message "Successfully exported $($allMailboxesOriginalData.Count) total mailboxes to consolidated CSV (all source columns, BatchName updated by script): $outputConsolidatedCsvPath"
-
-				# Copy the generated CSV to the second path
-				Copy-Item -Path $outputConsolidatedCsvPath -Destination $outputConsolidatedCsvPath2 -Force -ErrorAction Stop
-				$outputFolderForConsolidatedCsv3 = (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
-            $outputConsolidatedCsvPath3 = Join-Path -Path $outputFolderForConsolidatedCsv3 -ChildPath "Exchange_OnPrem_Mailboxes_AllDomains.csv"
-				Copy-Item -Path $outputConsolidatedCsvPath -Destination $outputConsolidatedCsvPath3 -Force -ErrorAction Stop
-				Invoke-SmartM365SharePointCsvUpload -LocalFilePath $outputConsolidatedCsvPath3
-				$SendFileListEmailReportFileName = $outputConsolidatedCsvPath3
-
-				Write-Host -ForegroundColor Green "Successfully copied consolidated CSV to: $outputConsolidatedCsvPath2"
-				WriteLog -Message "Successfully copied consolidated CSV to: $outputConsolidatedCsvPath2"
-
-			} catch {
-				$errorMessage = "Error exporting consolidated CSV (all source mailboxes, BatchName updated by script) to '$outputConsolidatedCsvPath': $($_.Exception.Message)"
-				Write-Error $errorMessage
-				WriteLog -Message $errorMessage "ERROR"
-			}
-		} else {
-			Write-Warning "No mailboxes were originally loaded, so the consolidated CSV (all source mailboxes, BatchName updated by script) was not generated."
-			WriteLog -Message "No mailboxes were originally loaded, so the consolidated CSV (all source mailboxes, BatchName updated by script) was not generated."
-		}
-	} # End else (mailboxes were eligible for batching)
-
-	Write-Host
-	Write-Host -ForegroundColor Magenta "Batch Generation Summary by Domain:"
-	WriteLog -Message "Batch Generation Summary by Domain:"
-
-	if ($domainBatchGenerationSummaryData -and $domainBatchGenerationSummaryData.Count -gt 0) {
-		$summaryObjectsForDomainTable = [System.Collections.Generic.List[PSObject]]::new() # Use Generic List
-
-		# Sort domains by name for consistent output
-		$domainBatchGenerationSummaryData.GetEnumerator() | Sort-Object Name | ForEach-Object {
-			$summaryObjectsForDomainTable.Add([PSCustomObject]@{
-				Domain              = $_.Name
-				'Batched Mailboxes' = $_.Value.MailboxCount # Renamed for clarity
-				'Batches Generated' = $_.Value.BatchCount
-			})
-		}
-
-		if ($summaryObjectsForDomainTable.Count -gt 0) {
-			# Calculate totals from the generated summary objects
-			$totalBatchedMailboxesInSummary = ($summaryObjectsForDomainTable | Measure-Object -Property 'Batched Mailboxes' -Sum).Sum
-			$totalBatchesGeneratedInSummary = ($summaryObjectsForDomainTable | Measure-Object -Property 'Batches Generated' -Sum).Sum
-
-			$totalSummaryRowObject = [PSCustomObject]@{
-				Domain              = "TOTAL"
-				'Batched Mailboxes' = $totalBatchedMailboxesInSummary
-				'Batches Generated' = $totalBatchesGeneratedInSummary
-			}
-			$summaryObjectsForDomainTable.Add($totalSummaryRowObject) # Add total row at the end
-		}
-
-		$summaryTableOutputString = $summaryObjectsForDomainTable | Format-Table -AutoSize | Out-String
-		Write-Host $summaryTableOutputString
-
-		# Log the summary table
-		$summaryTableOutputString.Split([Environment]::NewLine) | ForEach-Object {
-			if (-not [string]::IsNullOrWhiteSpace($_)) {
-				WriteLog -Message  $_
-			}
-		}
-	} else {
-		$noSummaryMessageText = "No batches were generated, so no domain summary table is available."
-		Write-Host $noSummaryMessageText
-		WriteLog -Message  $noSummaryMessageText
-	}
-	try { Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1)) } catch {}
-
-	$EndTime = Get-Date
-	Write-Host -ForegroundColor White "Script finished. Total execution time: $($EndTime - $StartTime)."
-	WriteLog -Message "Script finished. Total execution time: $($EndTime - $StartTime)."
-	
-}
-if ($InventoryCompletedSuccessfully -eq $false) { 
-	$interruptionMessageRedundant = "Script (outer finally) interrupted or terminated due to an error. Total duration: $($EndTimeFinalRedundant - $StartTime)."
-	Write-Host -ForegroundColor Yellow $interruptionMessageRedundant
+Write-Host -ForegroundColor Yellow $interruptionMessageRedundant
+    try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'Inventory' } catch {}
+    Stop-SmartM365TranscriptSafely
 }
 Else
 {
+	    if ($GenerateReport -and -not $OnlyADPermission) {
+        try {
+            $reportResult = Invoke-SmartM365ExchangeLocalMailboxReport -UseCurrentInventoryData:$true
+            if ($reportResult) { WriteLog -Message ("Mailbox report generated. DailyStatsCsv: {0}; SummaryCsv: {1}; Rows: {2}" -f $reportResult.DailyStatsCsv, $reportResult.SummaryCsv, $reportResult.RowCount) }
+        }
+        catch {
+            WriteLog -Message ("Mailbox report generation failed: {0}" -f $_.Exception.Message) "ERROR"
+            throw
+        }
+    }
+    elseif ($OnlyADPermission) { WriteLog -Message 'Mailbox report generation skipped because OnlyADPermission mode is enabled.' }
+    else { WriteLog -Message 'Mailbox report generation skipped because GenerateReport is disabled.' }
+
 	#SendFileListEmailReport -Files @($SendFileListEmailReportFileName) -Title "$TaskName" -Message "$TaskName : All processed mailbox data exported to $SendFileListEmailReportFileName."
-					
+
 	    #region Run Summary
     try {
         $EndTimeSummary = Get-Date
@@ -3118,8 +2236,6 @@ Else
         WriteLog -Message ("  StartTime          : {0}" -f $StartTime.ToString('o'))
         WriteLog -Message ("  EndTime            : {0}" -f $EndTimeSummary.ToString('o'))
         WriteLog -Message ("  Duration           : {0}" -f $durationSummary)
-        WriteLog -Message ("  Host               : {0}" -f $env:COMPUTERNAME)
-        WriteLog -Message ("  User               : {0}" -f $env:USERNAME)
         WriteLog -Message ("  OnlyADPermission   : {0}" -f $OnlyADPermission)
         WriteLog -Message ("  IncludeADPermission: {0}" -f $IncludeADPermission)
         WriteLog -Message ("  DetectAllDomains   : {0}" -f $DetectAllDomains)
@@ -3137,7 +2253,8 @@ Else
 	RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 	WriteLog -Message "$TaskName completed."
-	Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+    try { Complete-SmartM365ExecutionContext -Status Auto } catch {}
+	Stop-SmartM365TranscriptSafely
 	#endregion
 }
 }
