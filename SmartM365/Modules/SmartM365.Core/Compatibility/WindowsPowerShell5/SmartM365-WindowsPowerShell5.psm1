@@ -45,7 +45,7 @@ function Get-SmartM365EffectiveModuleGlobalConfig {
             break
         }
 
-        $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+        $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
         if (Test-Path -LiteralPath $globalConfigPath) {
             try {
                 $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -318,6 +318,11 @@ function Send-SmartM365TeamsNotification {
 
         if (-not $PSBoundParameters.ContainsKey('WebhookUrl')) {
             $moduleLocalConfig = Get-ModuleLocalConfig
+            $teamsEnabled = [bool](Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'EnableTeamsNotifications' -DefaultValue $false)
+            if (-not $teamsEnabled) {
+                WriteLog -Message 'Teams notification skipped: EnableTeamsNotifications is not enabled.' -Level 'INFO'
+                return $false
+            }
 
             $webhookConfigName = if ($effectiveChannel -eq 'Alerts') { 'TeamsAlertsWebhookUrl' } else { 'TeamsInfosWebhookUrl' }
             $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $webhookConfigName -DefaultValue ''
@@ -1272,8 +1277,8 @@ function InitializeScriptEnvironment {
     $moduleLocalConfig = Get-ModuleLocalConfig
     $logAllRootPath = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
     if ([string]::IsNullOrWhiteSpace($logAllRootPath)) {
-        WriteLog -Message "InitializeScriptEnvironment requires LogAllRootPath from SmartM365.global.local.json." -Level "ERROR"
-        throw "InitializeScriptEnvironment requires LogAllRootPath from SmartM365.global.local.json."
+        WriteLog -Message "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json." -Level "ERROR"
+        throw "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json."
     }
 
 	$global:BasePath = $OutputPathInit

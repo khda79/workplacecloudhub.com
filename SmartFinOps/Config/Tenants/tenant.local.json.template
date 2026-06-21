@@ -1,0 +1,12 @@
+{
+  "TenantKey": "test",
+  "SmartM365LatestCsvFolderPath": "__USE_GLOBAL__",
+  "StaleUserDays": "__USE_GLOBAL__",
+  "StaleDeviceDays": "__USE_GLOBAL__",
+  "ReportTitle": "__USE_GLOBAL__",
+  "PriceModel": {
+    "Currency": "EUR",
+    "MonthlyUnitPriceBySkuPartNumber": {
+    }
+  }
+}
