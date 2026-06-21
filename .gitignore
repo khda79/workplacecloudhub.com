@@ -22,13 +22,17 @@ SmartThinClient/**
 !SmartThinClient/
 !SmartThinClient/**/
 !SmartThinClient/**/.gitkeep
+SmartFinOps/**
+!SmartFinOps/
+!SmartFinOps/**/
+!SmartFinOps/**/.gitkeep
 .delete-empty/
 
 # Local documentation / agent notes
 *.md
 !/README.md
 !/SmartM365/README.md
-!/SmartM365/SmartM365.global.local.json.template
+!/SmartM365/Config/SmartM365.global.local.json.template
 !/SmartM365/Config/Tenants/tenant.local.json.template
 !/SmartM365/**/*.ps1
 !/SmartM365/**/*.psm1
@@ -108,6 +112,13 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartThinClient/**/*.config.template.json
 !/SmartThinClient/Assets/WorkplaceCloudHub.ico
 !/SmartThinClient/Assets/WorkplaceCloudHub-lockup-WPF.png
+!/SmartFinOps/README.md
+!/SmartFinOps/**/*.ps1
+!/SmartFinOps/**/*.cmd
+!/SmartFinOps/**/*.md
+!/SmartFinOps/**/*.html
+!/SmartFinOps/**/*.json.template
+!/SmartFinOps/SmartFinOps.global.local.json.template
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md
@@ -182,6 +193,7 @@ SmartM365/Data/**
 SmartAzure/Data/**
 SmartAzureVirtualDesktop/Data/**
 SmartCitrix/Data/**
+SmartFinOps/Data/**
 
 # Temporary
 Temp/

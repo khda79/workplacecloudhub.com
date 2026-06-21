@@ -139,7 +139,7 @@ function Read-SmartM365JsonConfig {
             return Get-Content -LiteralPath $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         }
 
-        $templatePath = Join-Path -Path $script:SmartM365RootPath -ChildPath 'SmartM365.global.local.json.template'
+        $templatePath = Join-Path -Path $script:SmartM365RootPath -ChildPath 'Config\SmartM365.global.local.json.template'
         if (Test-Path -LiteralPath $templatePath) {
             return Get-Content -LiteralPath $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         }
@@ -183,6 +183,13 @@ if (-not $TestOnly) {
     }
     else {
         $config.$configPropertyName = $uri.AbsoluteUri
+    }
+
+    if ($null -eq $config.PSObject.Properties['EnableTeamsNotifications']) {
+        $config | Add-Member -NotePropertyName 'EnableTeamsNotifications' -NotePropertyValue $true
+    }
+    else {
+        $config.EnableTeamsNotifications = $true
     }
 
     $configFolder = Split-Path -Parent $resolvedConfigPath

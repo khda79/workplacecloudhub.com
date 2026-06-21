@@ -1,0 +1,10 @@
+{
+  "DefaultTenant": "test",
+  "SmartM365RootPath": ".",
+  "WorkspaceRootPath": "{{SmartM365RootPath}}",
+  "DataAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-ALL",
+  "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-LAST",
+  "LogAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\LOG-ALL",
+  "RetentionMaxCSV": 30,
+  "RetentionMaxLogs": 30
+}

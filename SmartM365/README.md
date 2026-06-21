@@ -36,14 +36,14 @@ Local tenant configuration files are not committed. Use the committed templates 
 SmartM365 uses local JSON profiles for tenant and workstation-specific values:
 
 ```text
-SmartM365.global.local.json
+Config\SmartM365.global.local.json
 Config\Tenants\<TenantKey>.local.json
 ```
 
 These files are ignored by Git. Start from:
 
 ```text
-SmartM365.global.local.json.template
+Config\SmartM365.global.local.json.template
 Config\Tenants\tenant.local.json.template
 ```
 
@@ -86,7 +86,7 @@ When the selected tenant profile already contains `Thumbprint` or `Thumb`, the s
 
 The bootstrap also configures Graph mail sending: it connects to Exchange Online before Microsoft Graph, creates or reuses a dedicated SmartM365 sender shared mailbox, creates or reuses the `SMART-M365-MailSend-Allowed` mail-enabled security group, adds the sender mailbox to that group, creates an Exchange Online Application Access Policy that restricts `Mail.Send` to that group, and writes `From`, `SmtpServer`, and `MailSendAccessPolicyGroup` to the selected tenant profile. Use `-ExchangeAdminUserPrincipalName` if Exchange Online should sign in with a specific admin account.
 
-Teams notifications use Teams Workflows / Power Automate webhook URLs instead of Microsoft Graph chat permissions or legacy Office 365 Connectors. The bootstrap creates or reuses two standard channels in the `SMART-M365` team: `Alerts` for script errors and `Infos` for successful completion or informational notices. The webhook URLs are still created by the user in Teams / Workflows, then stored locally with `Setup/SmartM365-Set-TeamsWebhook.ps1`.
+Teams notifications use Teams Workflows / Power Automate webhook URLs instead of Microsoft Graph chat permissions or legacy Office 365 Connectors. They are controlled per tenant by `EnableTeamsNotifications`; the tenant template defaults it to `false`. The bootstrap creates or reuses two standard channels in the `SMART-M365` team: `Alerts` for script errors and `Infos` for successful completion or informational notices. The webhook URLs are still created by the user in Teams / Workflows, then stored locally with `Setup/SmartM365-Set-TeamsWebhook.ps1`.
 
 Every SmartM365 inventory/report script should send a Teams notification when it fails, in addition to the existing error email flow, and should send an `Infos` notification when it completes without error. `Infos` cards must include a `Result summary` fact with a short result recap, ideally with the main counters, generated files, skipped items, or actions performed by the script. Error notifications must include enough detail to act without opening the host first: script name, tenant or organization when known, computer name, timestamp, failed phase or operation, exception message, inner exception details when available, log file path, transcript path when available, and output path or CSV path when relevant. The Teams card should also include an AI help link built from the error context, for example a prefilled ChatGPT or Copilot prompt asking for troubleshooting help with the exact SmartM365 script, operation, and error text.
 
@@ -118,7 +118,7 @@ Pass the target tenant directly when running a script. If omitted, scripts use `
 .\SmartInventory\M365Inventory\Users\SmartM365-ActiveUsers-Inventory.ps1 -Tenant prod
 ```
 
-Each script loads `SmartM365.global.local.json`, overlays `Config\Tenants\<Tenant>.local.json` in memory, and does not rewrite the global JSON. Output roots include `TenantKey` so test and production exports do not overwrite each other:
+Each script loads `Config\SmartM365.global.local.json`, overlays `Config\Tenants\<Tenant>.local.json` in memory, and does not rewrite the global JSON. Output roots include `TenantKey` so test and production exports do not overwrite each other:
 
 ```text
 {{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL
@@ -167,7 +167,7 @@ cd %SMARTM365_ROOT%
 .\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos  -WebhookUrl "<Infos workflow URL>"
 ```
 
-The script writes the URLs to the selected tenant profile as `TeamsAlertsWebhookUrl` and `TeamsInfosWebhookUrl`, then sends a test card to the selected channel. The local JSON file is ignored by Git and must never be committed.
+The script writes the URLs to the selected tenant profile as `TeamsAlertsWebhookUrl` and `TeamsInfosWebhookUrl`, sets `EnableTeamsNotifications` to `true`, then sends a test card to the selected channel. The local JSON file is ignored by Git and must never be committed.
 
 Useful options:
 
@@ -184,6 +184,4 @@ Scripts should call `Send-SmartM365TeamsNotification` from `Modules/SmartM365.Co
 - `-Channel Alerts` or `-Channel Infos` can be used when a script must force a destination.
 - `-ResultSummary` should be provided for every `Infos` notification when the script has meaningful counters or output details. If omitted, the module adds a `Result summary` fact from the message text as a fallback.
 - `-HelpUrl` should point to a prefilled AI troubleshooting prompt when reporting a detailed script error.
-
-
 

@@ -38,8 +38,8 @@ function Find-SmartM365Root {
 
     $searchRoot = if ([string]::IsNullOrWhiteSpace($StartPath)) { (Get-Location).Path } else { $StartPath }
     while ($searchRoot) {
-        if ((Test-Path -LiteralPath (Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json')) -or
-            (Test-Path -LiteralPath (Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json.template'))) {
+        if ((Test-Path -LiteralPath (Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json')) -or
+            (Test-Path -LiteralPath (Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json.template'))) {
             return $searchRoot
         }
 
@@ -79,7 +79,7 @@ function Get-SmartM365EffectiveGlobalConfig {
     $rootPath = Find-SmartM365Root -StartPath $StartPath
     $scriptStartPath = if ([string]::IsNullOrWhiteSpace($StartPath)) { $rootPath } else { $StartPath }
     $scriptOutputRootPath = Join-Path -Path $scriptStartPath -ChildPath 'Output'
-    $globalConfigPath = Join-Path -Path $rootPath -ChildPath 'SmartM365.global.local.json'
+    $globalConfigPath = Join-Path -Path $rootPath -ChildPath 'Config\SmartM365.global.local.json'
     $tenantConfigPath = Join-Path -Path $rootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $TenantKey)
 
     $globalConfig = Read-SmartM365JsonConfig -Path $globalConfigPath -Required

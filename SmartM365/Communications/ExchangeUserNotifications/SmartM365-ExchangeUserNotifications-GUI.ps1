@@ -483,7 +483,7 @@ function Get-CampaignDefaultRecipientPath {
 
 function Get-DefaultTenantProfile {
     $defaultTenant = 'test'
-    foreach ($relativePath in @('SmartM365.global.local.json.template', 'SmartM365.global.local.json')) {
+    foreach ($relativePath in @('Config\SmartM365.global.local.json.template', 'Config\SmartM365.global.local.json')) {
         $path = Find-UpwardPath -RelativePath $relativePath
         if ([string]::IsNullOrWhiteSpace($path)) { continue }
         try {
@@ -613,8 +613,8 @@ function Resolve-GuiTokenizedPath {
     if ($Value -notmatch '\{\{') { return $Value }
 
     try {
-        $globalTemplatePath = Find-UpwardPath -RelativePath 'SmartM365.global.local.json.template'
-        $globalLocalPath = Find-UpwardPath -RelativePath 'SmartM365.global.local.json'
+        $globalTemplatePath = Find-UpwardPath -RelativePath 'Config\SmartM365.global.local.json.template'
+        $globalLocalPath = Find-UpwardPath -RelativePath 'Config\SmartM365.global.local.json'
         $smartM365Root = if (-not [string]::IsNullOrWhiteSpace($globalLocalPath)) {
             Split-Path -Path $globalLocalPath -Parent
         }

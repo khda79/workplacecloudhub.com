@@ -91,7 +91,7 @@ function Resolve-SmartM365ConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($ScriptRoot) { $ScriptRoot } elseif ($PSCommandPath) { Split-Path -Path $PSCommandPath -Parent } else { (Get-Location).Path }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -156,7 +156,7 @@ function Get-ScriptLocalConfigValue {
         $script:SmartM365GlobalConfig = [pscustomobject]@{}
         $searchRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Path $PSCommandPath -Parent }
         while ($searchRoot) {
-            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+            $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
             if (Test-Path -LiteralPath $globalConfigPath) {
                 try {
                     $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -475,7 +475,7 @@ try { # Main try block for script execution and interruption handling
             $perDomainCsvFileName = "Exchange_OnPrem_Mailboxes_$($singlePathDomainName)$(if($OnlyADPermission){'_OnlyADPermission'}else{''}).csv"
 			$perDomainCsvFileFullPath = Join-Path -Path $OutputPath -ChildPath $perDomainCsvFileName
 
-			# Define the base backup directory (e.g., C:\Users\A_khadaw8899\Documents\ExchangeMailboxesInventory\Backup)
+			# Define the base backup directory (for example, a local ExchangeMailboxesInventory\Backup folder).
 			$baseExchangeMailboxesInventoryPath = (Get-Item $OutputPath).Parent.FullName # Adjusted to get ExchangeMailboxesInventory base
 			$backupBaseDir = Join-Path -Path $baseExchangeMailboxesInventoryPath -ChildPath "Backup"
 
@@ -3124,6 +3124,4 @@ Else
 }
 }
 #End of script
-
-
 

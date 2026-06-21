@@ -47,7 +47,7 @@ function Get-SmartM365EffectiveModuleGlobalConfig {
             break
         }
 
-        $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'SmartM365.global.local.json'
+        $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'
         if (Test-Path -LiteralPath $globalConfigPath) {
             try {
                 $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -1200,6 +1200,11 @@ function Send-SmartM365TeamsNotification {
 
         if (-not $PSBoundParameters.ContainsKey('WebhookUrl')) {
             $moduleLocalConfig = Get-ModuleLocalConfig
+            $teamsEnabled = [bool](Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'EnableTeamsNotifications' -DefaultValue $false)
+            if (-not $teamsEnabled) {
+                WriteLog -Message 'Teams notification skipped: EnableTeamsNotifications is not enabled.' -Level 'INFO'
+                return $false
+            }
 
             $webhookConfigName = if ($effectiveChannel -eq 'Alerts') { 'TeamsAlertsWebhookUrl' } else { 'TeamsInfosWebhookUrl' }
             $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $webhookConfigName -DefaultValue ''
@@ -1334,13 +1339,51 @@ function InitializeScriptEnvironment {
         [string]$LogFileName
     )
 
+    $callerScriptPath = ''
+    try {
+        foreach ($frame in (Get-PSCallStack)) {
+            if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
+            if ($frame.ScriptName -eq $PSCommandPath) { continue }
+            if ($frame.ScriptName -notlike '*.ps1') { continue }
+            $callerScriptPath = [string]$frame.ScriptName
+            break
+        }
+    }
+    catch {
+        $callerScriptPath = ''
+    }
+
+    $expectedLocalConfigPath = ''
+    $expectedTemplatePath = ''
+    if (-not [string]::IsNullOrWhiteSpace($callerScriptPath)) {
+        $callerScriptName = [System.IO.Path]::GetFileNameWithoutExtension($callerScriptPath)
+        $callerScriptDirectory = Split-Path -Path $callerScriptPath -Parent
+        $expectedLocalConfigPath = Join-Path -Path $callerScriptDirectory -ChildPath ("{0}.local.json" -f $callerScriptName)
+        $expectedTemplatePath = "{0}.template" -f $expectedLocalConfigPath
+    }
+
     if ([string]::IsNullOrWhiteSpace($OutputPathInit) -and -not [string]::IsNullOrWhiteSpace($OutputPath)) {
         $OutputPathInit = $OutputPath
     }
 
     if ([string]::IsNullOrWhiteSpace($OutputPathInit)) {
-        WriteLog -Message "InitializeScriptEnvironment requires OutputPathInit/OutputPath from the script local.json." -Level "ERROR"
-        throw "InitializeScriptEnvironment requires OutputPathInit/OutputPath from the script local.json."
+        $messageParts = @(
+            "InitializeScriptEnvironment could not resolve an output folder.",
+            "Create or update the script local JSON and set the script-specific output path key, for example '<ScriptName>CsvLogFolderPath'."
+        )
+        if (-not [string]::IsNullOrWhiteSpace($callerScriptPath)) {
+            $messageParts += "Script: $callerScriptPath"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($expectedLocalConfigPath)) {
+            $messageParts += "Expected local JSON: $expectedLocalConfigPath"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($expectedTemplatePath)) {
+            $messageParts += "Template to copy: $expectedTemplatePath"
+        }
+        $messageParts += "You can also pass -OutputPath explicitly when the script supports it."
+        $message = $messageParts -join ' '
+        WriteLog -Message $message -Level "ERROR"
+        throw $message
     }
 
     try {
@@ -1357,8 +1400,9 @@ function InitializeScriptEnvironment {
     $moduleLocalConfig = Get-ModuleLocalConfig
     $logAllRootPath = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
     if ([string]::IsNullOrWhiteSpace($logAllRootPath)) {
-        WriteLog -Message "InitializeScriptEnvironment requires LogAllRootPath from SmartM365.global.local.json." -Level "ERROR"
-        throw "InitializeScriptEnvironment requires LogAllRootPath from SmartM365.global.local.json."
+        $message = "InitializeScriptEnvironment could not resolve LogAllRootPath. Create Config\SmartM365.global.local.json from Config\SmartM365.global.local.json.template at the SmartM365 root, then set LogAllRootPath or keep the default tokenized value."
+        WriteLog -Message $message -Level "ERROR"
+        throw $message
     }
 
     $global:BasePath = $OutputPathInit
@@ -2250,5 +2294,4 @@ Export-ModuleMember -Function `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession
-
 
