@@ -655,7 +655,11 @@ $csvCopyPath      = if (-not [string]::IsNullOrEmpty($localCopyPath)) { Join-Pat
 
         try {
             if (-not [string]::IsNullOrEmpty($localCopyPath)) {
-                Copy-Item -Path $csvOutputPath -Destination $csvCopyPath -Force
+                if (-not (Test-Path -LiteralPath $localCopyPath)) {
+                    New-Item -Path $localCopyPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                    Write-Output "Created missing LatestCsvFolderPath directory: $localCopyPath"
+                }
+                Copy-Item -LiteralPath $csvOutputPath -Destination $csvCopyPath -Force -ErrorAction Stop
                 Write-Output "Successfully copied CSV to: $csvCopyPath"
             }
             else {
@@ -711,8 +715,22 @@ $usersCsvCopyPath = if (-not [string]::IsNullOrEmpty($localCopyPath)) { Join-Pat
 
         Write-Output "Successfully finished writing Users CSV file: $usersCsvOutputPath"
 
-        try { if (-not [string]::IsNullOrEmpty($localCopyPath)) { Copy-Item -Path $usersCsvOutputPath -Destination $usersCsvCopyPath -Force; Write-Output "Successfully copied Users CSV to: $usersCsvCopyPath" } else { Write-Warning "Local configuration copy path (LatestCsvFolderPath) is null or empty. Users CSV copy will be skipped." } }
-        catch { Write-Warning ("Failed to copy Users CSV to '{0}'. Error: {1}" -f $usersCsvCopyPath, $_.Exception.Message) }
+        try {
+            if (-not [string]::IsNullOrEmpty($localCopyPath)) {
+                if (-not (Test-Path -LiteralPath $localCopyPath)) {
+                    New-Item -Path $localCopyPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                    Write-Output "Created missing LatestCsvFolderPath directory: $localCopyPath"
+                }
+                Copy-Item -LiteralPath $usersCsvOutputPath -Destination $usersCsvCopyPath -Force -ErrorAction Stop
+                Write-Output "Successfully copied Users CSV to: $usersCsvCopyPath"
+            }
+            else {
+                Write-Warning "Local configuration copy path (LatestCsvFolderPath) is null or empty. Users CSV copy will be skipped."
+            }
+        }
+        catch {
+            Write-Warning ("Failed to copy Users CSV to '{0}'. Error: {1}" -f $usersCsvCopyPath, $_.Exception.Message)
+        }
 
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $usersCsvOutputPath
     }
