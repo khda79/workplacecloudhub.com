@@ -408,12 +408,46 @@ function Get-DeviceRegistrationStrings {
     }
 }
 
+function Initialize-DeviceRegistrationConfigFromTemplate {
+    param(
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$TemplatePath
+    )
+
+    if (Test-Path -LiteralPath $ConfigPath) { return $false }
+    if (-not (Test-Path -LiteralPath $TemplatePath)) { return $false }
+
+    $parent = Split-Path -Path $ConfigPath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    }
+
+    Copy-Item -LiteralPath $TemplatePath -Destination $ConfigPath -ErrorAction Stop
+    Write-Host ((@(
+        'Created Device Registration Tool local JSON from template.',
+        "Local JSON: $ConfigPath",
+        "Template: $TemplatePath",
+        'Edit the local JSON now if needed. When ready, press Enter to continue.',
+        'If you press Enter without editing, the tool continues with the default template values.'
+    )) -join [Environment]::NewLine) -ForegroundColor Yellow
+    Read-Host 'Press Enter to continue' | Out-Null
+    return $true
+}
+
 function Get-DeviceRegistrationToolConfig {
     param([string]$Path)
 
     $programConfig = Join-Path (Join-Path $env:ProgramData "SmartM365\DeviceRegistrationTool") "SmartM365-DeviceRegistration-Tool.config.json"
     $scriptConfig = Join-Path $PSScriptRoot "SmartM365-DeviceRegistration-Tool.config.json"
     $templateConfig = Join-Path $PSScriptRoot "SmartM365-DeviceRegistration-Tool.config.template.json"
+
+    if (-not [string]::IsNullOrWhiteSpace($Path) -and -not (Test-Path -LiteralPath $Path)) {
+        Initialize-DeviceRegistrationConfigFromTemplate -ConfigPath $Path -TemplatePath $templateConfig | Out-Null
+    }
+    elseif (-not (Test-Path -LiteralPath $scriptConfig) -and -not (Test-Path -LiteralPath $programConfig) -and (Test-Path -LiteralPath $templateConfig)) {
+        Initialize-DeviceRegistrationConfigFromTemplate -ConfigPath $scriptConfig -TemplatePath $templateConfig | Out-Null
+    }
+
     $effectivePath = Get-FirstExistingPath -Paths @($Path, $scriptConfig, $programConfig, $templateConfig)
 
     if ([string]::IsNullOrWhiteSpace($effectivePath)) {
@@ -430,7 +464,6 @@ function Get-DeviceRegistrationToolConfig {
         return $null
     }
 }
-
 function Get-ConfigValue {
     param(
         [object]$Config,

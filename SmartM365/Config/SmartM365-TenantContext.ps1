@@ -12,6 +12,63 @@ function ConvertTo-SmartM365Hashtable {
     return $hash
 }
 
+function Initialize-SmartM365LocalJsonFromTemplate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$TemplatePath,
+        [string]$ConfigDescription = 'local configuration'
+    )
+
+    if (Test-Path -LiteralPath $Path) { return $false }
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath)) {
+        $TemplatePath = if ($Path -like '*Config\Tenants\*.local.json') {
+            Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template'
+        }
+        elseif ($Path -like '*.local.json') {
+            '{0}.template' -f $Path
+        }
+        else {
+            ''
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath) -or -not (Test-Path -LiteralPath $TemplatePath)) {
+        $message = @(
+            "Local JSON not found: $Path",
+            "Template to copy is missing: $TemplatePath",
+            'Create the missing local JSON from the matching template, then run the script again.'
+        ) -join [Environment]::NewLine
+        throw $message
+    }
+
+    try {
+        Copy-Item -LiteralPath $TemplatePath -Destination $Path -ErrorAction Stop
+    }
+    catch {
+        throw ("Failed to create {0} '{1}' from template '{2}': {3}" -f $ConfigDescription, $Path, $TemplatePath, $_.Exception.Message)
+    }
+
+    $message = @(
+        "Created $ConfigDescription from template.",
+        "Local JSON: $Path",
+        "Template: $TemplatePath",
+        'Edit the local JSON now if needed. When ready, press Enter to continue.',
+        'If you press Enter without editing, the script continues with the default template values.'
+    ) -join [Environment]::NewLine
+
+    Write-Host $message -ForegroundColor Yellow
+    try {
+        Read-Host 'Press Enter to continue'
+    }
+    catch {
+        Write-Host 'Unable to pause for input. Continuing with the generated local JSON.' -ForegroundColor Yellow
+    }
+
+    return $true
+}
+
 function Read-SmartM365JsonConfig {
     [CmdletBinding()]
     param(
@@ -20,15 +77,26 @@ function Read-SmartM365JsonConfig {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        if ($Required) { throw "Configuration file not found: $Path" }
-        return [ordered]@{}
+        if ($Required) {
+            $templatePath = if ($Path -like '*Config\Tenants\*.local.json') { Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template' } elseif ($Path -like '*.local.json') { '{0}.template' -f $Path } else { '' }
+            Initialize-SmartM365LocalJsonFromTemplate -Path $Path -TemplatePath $templatePath -ConfigDescription 'required local configuration' | Out-Null
+        }
+        else {
+            return [ordered]@{}
+        }
     }
 
     try {
         return ConvertTo-SmartM365Hashtable -InputObject (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
     }
     catch {
-        throw ("Failed to read configuration file '{0}': {1}" -f $Path, $_.Exception.Message)
+        $message = @(
+            ("Failed to read configuration file '{0}': {1}" -f $Path, $_.Exception.Message),
+            'The file is not valid JSON. Check quotes, commas, and Windows paths.',
+            'Windows paths in JSON must escape backslashes, for example "Z:\\GIT\\SmartM365", or use forward slashes, for example "Z:/GIT/SmartM365".',
+            'Do not write paths with single backslashes such as "Z:\GIT\SmartM365" because JSON treats sequences like \e as invalid escapes.'
+        )
+        throw ($message -join [Environment]::NewLine)
     }
 }
 
