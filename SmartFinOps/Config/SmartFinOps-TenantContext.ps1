@@ -57,6 +57,56 @@ function Test-SmartFinOpsWritableDirectory {
     }
     catch { return $false }
 }
+function Resolve-SmartFinOpsExternalTokenValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Value,
+        [AllowNull()]$Config
+    )
+
+    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    if ($null -eq $Config) { return $Value }
+
+    $resolved = $Value
+    for ($i = 0; $i -lt 10; $i++) {
+        $tokenMatches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
+        if ($tokenMatches.Count -eq 0) { break }
+        $changed = $false
+        foreach ($match in $tokenMatches) {
+            $tokenName = $match.Groups['Name'].Value
+            $tokenProperty = $Config.PSObject.Properties[$tokenName]
+            if ($null -eq $tokenProperty -or $null -eq $tokenProperty.Value) { continue }
+            $tokenValue = Resolve-SmartFinOpsExternalTokenValue -Value $tokenProperty.Value -Config $Config
+            if ($null -eq $tokenValue) { continue }
+            $resolved = $resolved.Replace($match.Value, [string]$tokenValue)
+            $changed = $true
+        }
+        if (-not $changed) { break }
+    }
+    return $resolved
+}
+
+function Get-SmartFinOpsSmartM365LatestCsvFolderPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRootPath,
+        [Parameter(Mandatory)][string]$TenantKey
+    )
+
+    $smartM365RootPath = Join-Path -Path $RepositoryRootPath -ChildPath 'SmartM365'
+    $smartM365TenantContextPath = Join-Path -Path $smartM365RootPath -ChildPath 'Config\SmartM365-TenantContext.ps1'
+    if (-not (Test-Path -LiteralPath $smartM365TenantContextPath)) { return '' }
+
+    try {
+        . $smartM365TenantContextPath
+        $smartM365Config = Get-SmartM365EffectiveGlobalConfig -StartPath $smartM365RootPath -TenantKey $TenantKey
+        return [string](Resolve-SmartFinOpsExternalTokenValue -Value $smartM365Config.LatestCsvFolderPath -Config $smartM365Config)
+    }
+    catch {
+        return ''
+    }
+}
+
 
 function Get-SmartFinOpsEffectiveGlobalConfig {
     [CmdletBinding()]
@@ -110,7 +160,13 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
     if (-not $globalConfig.Contains('DataAllRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['DataAllRootPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL')) { $globalConfig['DataAllRootPath'] = $defaultDataAllRootPath }
     if (-not $globalConfig.Contains('LatestCsvFolderPath') -or ($useScriptOutputFallback -and [string]$globalConfig['LatestCsvFolderPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST')) { $globalConfig['LatestCsvFolderPath'] = $defaultLatestCsvFolderPath }
     if (-not $globalConfig.Contains('LogAllRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['LogAllRootPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL')) { $globalConfig['LogAllRootPath'] = $defaultLogAllRootPath }
-    if (-not $globalConfig.Contains('SmartM365LatestCsvFolderPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['SmartM365LatestCsvFolderPath'])) { $globalConfig['SmartM365LatestCsvFolderPath'] = '{{RepositoryRootPath}}\SmartM365\Data\Tenants\{{TenantKey}}\DATA-LAST' }
+    $smartM365LatestCsvDefault = Get-SmartFinOpsSmartM365LatestCsvFolderPath -RepositoryRootPath $repositoryRootPath -TenantKey $TenantKey
+    if ([string]::IsNullOrWhiteSpace($smartM365LatestCsvDefault)) { $smartM365LatestCsvDefault = '{{RepositoryRootPath}}\SmartM365\Data\Tenants\{{TenantKey}}\DATA-LAST' }
+    if (-not $globalConfig.Contains('SmartM365LatestCsvFolderPath') -or
+        [string]::IsNullOrWhiteSpace([string]$globalConfig['SmartM365LatestCsvFolderPath']) -or
+        [string]$globalConfig['SmartM365LatestCsvFolderPath'] -in @('__USE_SMARTM365__', 'USE_SMARTM365')) {
+        $globalConfig['SmartM365LatestCsvFolderPath'] = $smartM365LatestCsvDefault
+    }
     if (-not $globalConfig.Contains('RetentionMaxCSV')) { $globalConfig['RetentionMaxCSV'] = 30 }
     if (-not $globalConfig.Contains('RetentionMaxLogs')) { $globalConfig['RetentionMaxLogs'] = 30 }
     if (-not $globalConfig.Contains('StaleUserDays')) { $globalConfig['StaleUserDays'] = 90 }
