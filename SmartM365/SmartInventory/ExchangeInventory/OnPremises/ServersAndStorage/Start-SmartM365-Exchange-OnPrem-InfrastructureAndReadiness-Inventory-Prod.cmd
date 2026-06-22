@@ -28,17 +28,17 @@ set "SMARTM365_ROOT=%SCRIPT_DIR%\..\..\..\.."
 for %%I in ("%SMARTM365_ROOT%") do set "SMARTM365_ROOT=%%~fI"
 
 set "CACHE_BASE="
-call :TryCacheBase "%ProgramData%\SmartM365\LauncherCache\ExchangeServersAndStorage"
-if not defined CACHE_BASE call :TryCacheBase "%SystemRoot%\Temp\SmartM365LauncherCache\ExchangeServersAndStorage"
-if not defined CACHE_BASE call :TryCacheBase "C:\Temp\SmartM365LauncherCache\ExchangeServersAndStorage"
-if not defined CACHE_BASE call :TryCacheBase "%TEMP%\SmartM365LauncherCache\ExchangeServersAndStorage"
+call :TryCacheBase "%ProgramData%\SmartM365\LauncherCache\ExchangeInfrastructureAndReadiness"
+if not defined CACHE_BASE call :TryCacheBase "%SystemRoot%\Temp\SmartM365LauncherCache\ExchangeInfrastructureAndReadiness"
+if not defined CACHE_BASE call :TryCacheBase "C:\Temp\SmartM365LauncherCache\ExchangeInfrastructureAndReadiness"
+if not defined CACHE_BASE call :TryCacheBase "%TEMP%\SmartM365LauncherCache\ExchangeInfrastructureAndReadiness"
 if not defined CACHE_BASE (
     echo Failed to create a writable local cache base folder.
     echo Tried:
-    echo   %ProgramData%\SmartM365\LauncherCache\ExchangeServersAndStorage
-    echo   %SystemRoot%\Temp\SmartM365LauncherCache\ExchangeServersAndStorage
-    echo   C:\Temp\SmartM365LauncherCache\ExchangeServersAndStorage
-    echo   %TEMP%\SmartM365LauncherCache\ExchangeServersAndStorage
+    echo   %ProgramData%\SmartM365\LauncherCache\ExchangeInfrastructureAndReadiness
+    echo   %SystemRoot%\Temp\SmartM365LauncherCache\ExchangeInfrastructureAndReadiness
+    echo   C:\Temp\SmartM365LauncherCache\ExchangeInfrastructureAndReadiness
+    echo   %TEMP%\SmartM365LauncherCache\ExchangeInfrastructureAndReadiness
     pause
     popd
     exit /b 1
@@ -112,7 +112,7 @@ if %ROBOCOPY_EXIT% GEQ 8 (
 )
 
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%LOCAL_SCRIPT_DIR%','%LOCAL_SMARTM365_ROOT%\Config','%LOCAL_SMARTM365_ROOT%\Modules\SmartM365.Core' -Include *.ps1,*.psm1,*.psd1 -File -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
-"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; if (-not (Get-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue)) { Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction Stop }; & '%LOCAL_SCRIPT_DIR%\SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory.ps1' -Tenant test"
+"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; if (-not (Get-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue)) { Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction Stop }; & '%LOCAL_SCRIPT_DIR%\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1' -Tenant prod"
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 exit /b %EXIT_CODE%
