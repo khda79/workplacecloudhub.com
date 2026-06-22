@@ -297,6 +297,13 @@ try {
     $deviceOptimizationRows = New-Object System.Collections.Generic.List[object]
 
     $m365Users = Import-SmartFinOpsSourceCsv -SourceName 'M365 active users' -FileNames @('M365_Users_Active.csv') -DataQualityRows $dataQualityRows
+    $m365UserActivity = Import-SmartFinOpsSourceCsv -SourceName 'M365 user activity' -FileNames @('M365_Users_Activity.csv') -DataQualityRows $dataQualityRows
+    $m365MailboxUsage = Import-SmartFinOpsSourceCsv -SourceName 'M365 mailbox usage' -FileNames @('M365_Mailbox_Usage.csv') -DataQualityRows $dataQualityRows
+    $m365OneDriveUsage = Import-SmartFinOpsSourceCsv -SourceName 'M365 OneDrive usage' -FileNames @('M365_OneDrive_Usage.csv') -DataQualityRows $dataQualityRows
+    $m365SharePointSiteUsage = Import-SmartFinOpsSourceCsv -SourceName 'M365 SharePoint site usage' -FileNames @('M365_SharePoint_SiteUsage.csv') -DataQualityRows $dataQualityRows
+    $m365AppsActivations = Import-SmartFinOpsSourceCsv -SourceName 'M365 Apps activations' -FileNames @('M365_Apps_Activations.csv') -DataQualityRows $dataQualityRows
+    $m365TeamsUserActivity = Import-SmartFinOpsSourceCsv -SourceName 'M365 Teams user activity' -FileNames @('M365_Teams_UserActivity.csv') -DataQualityRows $dataQualityRows
+    $m365EmailActivity = Import-SmartFinOpsSourceCsv -SourceName 'M365 email activity' -FileNames @('M365_Email_Activity.csv') -DataQualityRows $dataQualityRows
     $m365LicenseUsers = Import-SmartFinOpsSourceCsv -SourceName 'M365 license user assignments' -FileNames @('M365_Licenses_Users.csv') -DataQualityRows $dataQualityRows
     $m365LicenseTenant = Import-SmartFinOpsSourceCsv -SourceName 'M365 tenant licenses' -FileNames @('M365_Licenses_Tenant.csv') -DataQualityRows $dataQualityRows
     $intuneDevices = Import-SmartFinOpsSourceCsv -SourceName 'Intune devices' -FileNames @('Intune_Devices_Inventory.csv') -DataQualityRows $dataQualityRows
@@ -318,6 +325,13 @@ try {
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Loaded source files' -Value @($dataQualityRows | Where-Object { $_.Status -eq 'Loaded' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Missing source files' -Value @($dataQualityRows | Where-Object { $_.Status -eq 'Missing' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Users' -Metric 'M365 active users rows' -Value $m365Users.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Users' -Metric 'M365 user activity rows' -Value $m365UserActivity.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Mailbox usage rows' -Value $m365MailboxUsage.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'OneDrive usage rows' -Value $m365OneDriveUsage.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'SharePoint site usage rows' -Value $m365SharePointSiteUsage.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'M365 Apps activation rows' -Value $m365AppsActivations.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Teams user activity rows' -Value $m365TeamsUserActivity.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Email activity rows' -Value $m365EmailActivity.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Users' -Metric 'AD users rows' -Value $adUsers.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Intune devices rows' -Value $intuneDevices.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Entra devices rows' -Value $entraDevices.Count)) | Out-Null
@@ -331,6 +345,11 @@ try {
     foreach ($user in $m365Users) {
         $upn = [string](Get-RowPropertyValue -Row $user -Names @('User principal name', 'UserPrincipalName'))
         if (-not [string]::IsNullOrWhiteSpace($upn)) { $m365UserByUpn[$upn.ToLowerInvariant()] = $user }
+    }
+    $m365ActivityByUpn = @{}
+    foreach ($activityRow in $m365UserActivity) {
+        $upn = [string](Get-RowPropertyValue -Row $activityRow -Names @('UserPrincipalName', 'User Principal Name'))
+        if (-not [string]::IsNullOrWhiteSpace($upn)) { $m365ActivityByUpn[$upn.ToLowerInvariant()] = $activityRow }
     }
     $adUserByUpn = @{}
     foreach ($user in $adUsers) {
@@ -348,7 +367,10 @@ try {
 
         $userKey = $upn.ToLowerInvariant()
         $m365User = if ($m365UserByUpn.ContainsKey($userKey)) { $m365UserByUpn[$userKey] } else { $null }
+        $m365Activity = if ($m365ActivityByUpn.ContainsKey($userKey)) { $m365ActivityByUpn[$userKey] } else { $null }
         $adUser = if ($adUserByUpn.ContainsKey($userKey)) { $adUserByUpn[$userKey] } else { $null }
+        $lastM365Activity = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $m365Activity -Names @('LastActivityDate'))
+        $lastM365ActivityWorkload = [string](Get-RowPropertyValue -Row $m365Activity -Names @('LastActivityWorkload'))
         $lastSignIn = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $m365User -Names @('LastSignInDateTime', 'Last sign-in time'))
         $lastAdLogon = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $adUser -Names @('LastLogonDate', 'Last logon date'))
         $accountEnabled = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $m365User -Names @('AccountEnabled'))
@@ -361,6 +383,7 @@ try {
         $reason = ''
         if ($null -ne $accountEnabled -and -not $accountEnabled) { $reason = 'Licensed M365 user is disabled or blocked.' }
         elseif ($null -ne $adEnabled -and -not $adEnabled) { $reason = 'Licensed user is disabled in Active Directory.' }
+        elseif ($lastM365Activity -and $lastM365Activity -lt $staleUserCutoff) { $reason = "Licensed user has no recent M365 workload activity within $StaleUserDays days." }
         elseif ($lastSignIn -and $lastSignIn -lt $staleUserCutoff) { $reason = "Licensed user has no recent M365 sign-in within $StaleUserDays days." }
         elseif ($lastAdLogon -and $lastAdLogon -lt $staleUserCutoff) { $reason = "Licensed user has no recent AD logon within $StaleUserDays days." }
         elseif (-not $m365User -and -not $adUser) { $reason = 'Licensed user was not found in M365 active users or AD user exports.' }
@@ -374,6 +397,8 @@ try {
                 SkuName = $skuName
                 Source = [string](Get-RowPropertyValue -Row $licenseRow -Names @('Source'))
                 Reason = $reason
+                LastM365Activity = if ($lastM365Activity) { $lastM365Activity.ToString('yyyy-MM-dd') } else { '' }
+                LastM365ActivityWorkload = $lastM365ActivityWorkload
                 LastM365SignIn = if ($lastSignIn) { $lastSignIn.ToString('yyyy-MM-dd') } else { '' }
                 LastADLogon = if ($lastAdLogon) { $lastAdLogon.ToString('yyyy-MM-dd') } else { '' }
                 AccountEnabled = $accountEnabled
