@@ -21,11 +21,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.3.2
+    1.3.3
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory.ps1
-    Version     : 1.3.2
+    Version     : 1.3.3
     Requirements:
       - Run from Exchange Management Shell on Exchange 2016
       - Exchange read permissions
@@ -33,6 +33,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.3.3
+      - Restyled the HTML executive summary with Smart365 branding.
+
     1.3.2
       - Sends the HTML executive summary by email after report generation.
 
@@ -91,7 +94,7 @@ $tenantContextPath = & {
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $ScriptName = "SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory"
-$ScriptVersion = "1.3.2"
+$ScriptVersion = "1.3.3"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 function Resolve-SmartM365ConfigTokenValue {
@@ -815,61 +818,83 @@ function New-HtmlExecutiveSummary {
 <meta charset="utf-8">
 <title>Exchange On-Premises Decommissioning Summary</title>
 <style>
-body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; color: #1f2937; background: #ffffff; }
-h1 { font-size: 28px; margin: 0 0 8px 0; color: #111827; }
-.subtitle { font-size: 14px; color: #4b5563; margin-bottom: 24px; }
-.cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 22px; }
-.card { border: 1px solid #d1d5db; border-radius: 12px; padding: 16px; background: #f9fafb; }
-.card .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
-.card .value { font-size: 30px; font-weight: 700; margin-top: 6px; color: #111827; }
-.card .unit { font-size: 13px; color: #6b7280; margin-top: 2px; }
-.section { margin-top: 18px; }
-.summary { border-left: 4px solid #374151; padding: 10px 14px; background: #f3f4f6; font-size: 15px; line-height: 1.45; }
-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
-th { text-align: left; background: #111827; color: white; padding: 8px; }
-td { border-bottom: 1px solid #e5e7eb; padding: 7px 8px; }
+body { margin: 0; padding: 0; background: #f6f8fb; color: #0f172a; font-family: Segoe UI, Arial, sans-serif; }
+.shell { max-width: 1180px; margin: 0 auto; padding: 24px; }
+.panel { background: #ffffff; border: 1px solid #dbe3ef; border-radius: 10px; overflow: hidden; }
+.hero { background: linear-gradient(135deg, #0f766e, #2563eb); color: #ffffff; padding: 24px 28px; }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; opacity: .9; font-weight: 700; }
+h1 { font-size: 26px; line-height: 1.25; margin: 6px 0 0 0; color: #ffffff; }
+.subtitle { margin-top: 10px; font-size: 13px; opacity: .95; }
+.content { padding: 24px 28px; }
+.cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+.card { border: 1px solid #dbe3ef; border-radius: 8px; padding: 14px; background: #f8fafc; }
+.card.green { border-color: #bbf7d0; background: #f0fdf4; }
+.card.blue { border-color: #bfdbfe; background: #eff6ff; }
+.card.amber { border-color: #fed7aa; background: #fff7ed; }
+.card.purple { border-color: #e9d5ff; background: #faf5ff; }
+.card .label { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 800; }
+.card .value { font-size: 28px; font-weight: 800; margin-top: 4px; color: #0f172a; }
+.card.green .value { color: #166534; }
+.card.blue .value { color: #1d4ed8; }
+.card.amber .value { color: #9a3412; }
+.card.purple .value { color: #7e22ce; }
+.card .unit { font-size: 12px; color: #64748b; margin-top: 2px; }
+.summary { border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; padding: 16px; font-size: 14px; line-height: 1.55; color: #334155; margin-bottom: 22px; }
+h2 { font-size: 17px; margin: 0 0 10px 0; color: #0f172a; }
+table { width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; font-size: 12px; }
+th { text-align: left; background: #f8fafc; color: #475569; padding: 10px 12px; text-transform: uppercase; font-size: 11px; }
+td { border-bottom: 1px solid #e5e7eb; padding: 9px 12px; color: #334155; }
 td.num, th.num { text-align: right; }
-.status { font-weight: 600; }
-.footer { margin-top: 18px; font-size: 11px; color: #6b7280; }
+.status { font-weight: 700; color: #047857; }
+.footer { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #64748b; line-height: 1.5; }
+@media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .shell { padding: 12px; } }
 </style>
 </head>
 <body>
-<h1>Exchange On-Premises Infrastructure Decommissioning</h1>
-<div class="subtitle">Executive summary generated on $(Format-HtmlValue $Summary.ExecutionDate) — RunId $(Format-HtmlValue $Summary.RunId)</div>
+<div class="shell">
+  <div class="panel">
+    <div class="hero">
+      <div class="eyebrow">Smart365 Exchange OnPrem</div>
+      <h1>Exchange On-Premises Infrastructure Decommissioning</h1>
+      <div class="subtitle">Executive summary generated on $(Format-HtmlValue $Summary.ExecutionDate) - RunId $(Format-HtmlValue $Summary.RunId)</div>
+    </div>
 
-<div class="cards">
-  <div class="card"><div class="label">Exchange VMs</div><div class="value">$(Format-HtmlValue $Summary.ExchangeServersCount)</div><div class="unit">servers identified</div></div>
-  <div class="card"><div class="label">vCPU</div><div class="value">$(Format-HtmlValue $Summary.TotalLogicalProcessorCount)</div><div class="unit">logical processors</div></div>
-  <div class="card"><div class="label">RAM</div><div class="value">$(Format-HtmlValue $Summary.TotalMemoryGB)</div><div class="unit">GB</div></div>
-  <div class="card"><div class="label">Disks</div><div class="value">$(Format-HtmlValue $Summary.TotalDiskDriveCount)</div><div class="unit">WMI disk drives</div></div>
-  <div class="card"><div class="label">Provisioned Storage</div><div class="value">$(Format-HtmlValue $Summary.TotalDiskDriveSizeTB)</div><div class="unit">TB</div></div>
-</div>
+    <div class="content">
+      <div class="cards">
+        <div class="card"><div class="label">Exchange VMs</div><div class="value">$(Format-HtmlValue $Summary.ExchangeServersCount)</div><div class="unit">servers identified</div></div>
+        <div class="card blue"><div class="label">vCPU</div><div class="value">$(Format-HtmlValue $Summary.TotalLogicalProcessorCount)</div><div class="unit">logical processors</div></div>
+        <div class="card green"><div class="label">RAM</div><div class="value">$(Format-HtmlValue $Summary.TotalMemoryGB)</div><div class="unit">GB</div></div>
+        <div class="card amber"><div class="label">Disks</div><div class="value">$(Format-HtmlValue $Summary.TotalDiskDriveCount)</div><div class="unit">WMI disk drives</div></div>
+        <div class="card purple"><div class="label">Provisioned Storage</div><div class="value">$(Format-HtmlValue $Summary.TotalDiskDriveSizeTB)</div><div class="unit">TB</div></div>
+      </div>
 
-<div class="section summary">
-The current legacy Exchange 2016 on-premises footprint represents <strong>$(Format-HtmlValue $Summary.ExchangeServersCount) virtual machines</strong>, <strong>$(Format-HtmlValue $Summary.TotalLogicalProcessorCount) vCPU</strong>, <strong>$(Format-HtmlValue $Summary.TotalMemoryGB) GB RAM</strong>, and <strong>$(Format-HtmlValue $Summary.TotalDiskDriveCount) disks</strong>. These assets are candidates for decommissioning after Exchange SE migration validation and dependency sign-off.
-</div>
+      <div class="summary">
+        The current legacy Exchange 2016 on-premises footprint represents <strong>$(Format-HtmlValue $Summary.ExchangeServersCount) virtual machines</strong>, <strong>$(Format-HtmlValue $Summary.TotalLogicalProcessorCount) vCPU</strong>, <strong>$(Format-HtmlValue $Summary.TotalMemoryGB) GB RAM</strong>, and <strong>$(Format-HtmlValue $Summary.TotalDiskDriveCount) disks</strong>. These assets are candidates for decommissioning after Exchange SE migration validation and dependency sign-off.
+      </div>
 
-<div class="section">
-<table>
-<thead>
-<tr>
-<th>Server</th>
-<th>Role</th>
-<th class="num">vCPU</th>
-<th class="num">RAM GB</th>
-<th class="num">Disks</th>
-<th class="num">Disk Size GB</th>
-<th>Status</th>
-</tr>
-</thead>
-<tbody>
-$($rowsHtml -join "`r`n")
-</tbody>
-</table>
-</div>
+      <h2>Per-server infrastructure summary</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Server</th>
+            <th>Role</th>
+            <th class="num">vCPU</th>
+            <th class="num">RAM GB</th>
+            <th class="num">Disks</th>
+            <th class="num">Disk Size GB</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          $($rowsHtml -join "`r`n")
+        </tbody>
+      </table>
 
-<div class="footer">
-Note: CPU, RAM and disk data are collected from the guest OS using WMI/DCOM only. Validate with Infrastructure if hypervisor-level figures are required for final capacity reclamation.
+      <div class="footer">
+        CPU, RAM and disk data are collected from the guest OS using WMI/DCOM only. Validate with Infrastructure if hypervisor-level figures are required for final capacity reclamation.
+      </div>
+    </div>
+  </div>
 </div>
 </body>
 </html>
