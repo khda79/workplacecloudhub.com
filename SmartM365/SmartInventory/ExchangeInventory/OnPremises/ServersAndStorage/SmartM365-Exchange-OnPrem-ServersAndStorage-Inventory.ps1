@@ -20,9 +20,12 @@
     - Invoke-Command
     - WinRM / PowerShell Remoting
 
+.VERSION
+    1.3.2
+
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory.ps1
-    Version     : 1.3.1
+    Version     : 1.3.2
     Requirements:
       - Run from Exchange Management Shell on Exchange 2016
       - Exchange read permissions
@@ -30,6 +33,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.3.2
+      - Sends the HTML executive summary by email after report generation.
+
     1.3.1
       - WMI/DCOM only.
       - Fixed StrictMode-safe numeric aggregation.
@@ -85,7 +91,7 @@ $tenantContextPath = & {
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $ScriptName = "SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory"
-$ScriptVersion = "1.3.1"
+$ScriptVersion = "1.3.2"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 function Resolve-SmartM365ConfigTokenValue {
@@ -248,6 +254,47 @@ function Invoke-ServersAndStorageSharePointUpload {
     }
 }
 
+function Send-ServersAndStorageHtmlReport {
+    param(
+        [Parameter(Mandatory)]
+        [string]$HtmlReportPath,
+
+        [Parameter(Mandatory)]
+        [string]$Subject,
+
+        [Parameter(Mandatory)]
+        [string[]]$Attachments
+    )
+
+    if (-not (Test-Path -LiteralPath $HtmlReportPath -PathType Leaf)) {
+        throw "HTML report not found: $HtmlReportPath"
+    }
+
+    Import-SmartM365CoreModule
+
+    $from = [string](Get-SmartM365EffectiveConfigValue -Name 'From' -DefaultValue '')
+    $to = [string](Get-SmartM365EffectiveConfigValue -Name 'To' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($to)) {
+        $to = [string](Get-SmartM365EffectiveConfigValue -Name 'ErrorMailTo' -DefaultValue '')
+    }
+
+    $smtpServer = [string](Get-SmartM365EffectiveConfigValue -Name 'SmtpServer' -DefaultValue '')
+    $cc = [string](Get-SmartM365EffectiveConfigValue -Name 'Cc' -DefaultValue '')
+    $bodyHtml = Get-Content -LiteralPath $HtmlReportPath -Raw -ErrorAction Stop
+    $existingAttachments = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+
+    $mailParams = @{
+        From        = $from
+        To          = $to
+        Subject     = $Subject
+        BodyHtml    = $bodyHtml
+        Attachments = $existingAttachments
+    }
+    if (-not [string]::IsNullOrWhiteSpace($smtpServer)) { $mailParams['SmtpServer'] = $smtpServer }
+    if (-not [string]::IsNullOrWhiteSpace($cc)) { $mailParams['Cc'] = $cc }
+
+    Send-CoreEmailHtmlReport @mailParams
+}
 function Export-ServersAndStorageCsv {
     param(
         [AllowNull()][object[]]$Data,
@@ -1020,6 +1067,13 @@ try {
     $htmlSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Decommissioning_ExecutiveSummary.html"
     New-HtmlExecutiveSummary -Summary $summary -PerServerSummary $perServerSummary -Path $htmlSummaryPath
     Write-Log "HTML executive summary exported to: $htmlSummaryPath"
+
+    $mailSubject = "SmartM365 Exchange OnPrem Servers and Storage inventory - $RunId"
+    Send-ServersAndStorageHtmlReport `
+        -HtmlReportPath $htmlSummaryPath `
+        -Subject $mailSubject `
+        -Attachments @($htmlSummaryPath, $summaryPath, $perServerSummaryPath)
+    Write-Log "HTML executive summary email sent."
 
     Write-Log "Completed successfully."
 }
