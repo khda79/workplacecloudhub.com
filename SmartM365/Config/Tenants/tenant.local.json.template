@@ -8,6 +8,7 @@
   "Thumbprint": "0000000000000000000000000000000000000000",
   "ErrorMailTo": "admin@example.com",
   "SmtpServer": "",
+  "SendMailMode": "Graph",
   "From": "smartm365@example.com",
   "MailSendAccessPolicyGroup": "smartm365-mailsend-allowed@example.com",
   "EnableTeamsNotifications": false,

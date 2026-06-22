@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.13
+1.14
 
 .NOTES
-    Version: 1.13
+    Version: 1.14
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -276,6 +276,7 @@ function Export-CsvAtomic {
 [string]$SendFileListEmailReportFileName
 $script:MailSmtpServer = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SmtpServer' -DefaultValue ''
 $script:MailSmtpPort = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SmtpPort' -DefaultValue 25)
+$script:MailSendMailMode = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SendMailMode' -DefaultValue ''
 $script:MailFrom = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue ''
 $script:MailTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue ''
 $script:MailCc = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Cc' -DefaultValue ''
@@ -294,6 +295,7 @@ function Send-SmartM365OptionalEmailHtmlReport {
         $mailParams = @{ BodyHtml = $BodyHtml }
         if (-not [string]::IsNullOrWhiteSpace($script:MailSmtpServer)) { $mailParams['SmtpServer'] = $script:MailSmtpServer }
         if ($script:MailSmtpPort -gt 0) { $mailParams['SmtpPort'] = $script:MailSmtpPort }
+        if (-not [string]::IsNullOrWhiteSpace($script:MailSendMailMode)) { $mailParams['SendMailMode'] = $script:MailSendMailMode }
         if (-not [string]::IsNullOrWhiteSpace($script:MailFrom)) { $mailParams['From'] = $script:MailFrom }
         if (-not [string]::IsNullOrWhiteSpace($script:MailTo)) { $mailParams['To'] = $script:MailTo }
         if (-not [string]::IsNullOrWhiteSpace($script:MailCc)) { $mailParams['Cc'] = $script:MailCc }
@@ -519,7 +521,7 @@ if (-not (EnsureExchangePSSnapinLoaded -RequiredCommands @("Get-Mailbox", "Set-A
     Write-Error "Exchange environment not ready. Exiting script."
     $errorMessage = "Exchange environment not ready. Exiting script."
     $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-    SendEmailHtmlReport -BodyHtml $body
+    Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
     exit 1
 }
 $scriptScopeExchangeCommands = @(

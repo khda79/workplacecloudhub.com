@@ -1349,6 +1349,8 @@ function SendEmailHtmlReport {
     param(
         [string]$SmtpServer = "",
         [int]$SmtpPort = 25,
+        [ValidateSet("Graph","SMTP","Both")]
+        [string]$SendMailMode = "",
         [string]$From = "",
         [string]$To = "",
         [string]$Cc = "",
@@ -1361,7 +1363,7 @@ function SendEmailHtmlReport {
     try {
         $moduleLocalConfig = Get-ModuleLocalConfig
         $callerLocalConfig = Get-SmartM365CallerLocalConfig
-        foreach ($configName in @('SmtpServer','From','To','Cc','Subject')) {
+        foreach ($configName in @('SendMailMode','SmtpServer','From','To','Cc','Subject')) {
             if (-not $PSBoundParameters.ContainsKey($configName)) {
                 $defaultValue = Get-Variable -Name $configName -ValueOnly
                 if ($configName -eq 'To') {
@@ -1399,12 +1401,13 @@ function SendEmailHtmlReport {
             if (Test-Path $a) { $atts += $a }
         }
 
-        if ([string]::IsNullOrWhiteSpace($SmtpServer)) {
-            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts
-            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
-                WriteLog -Message "Email sent to $($toArray -join ';') via Microsoft Graph" -Level "SUCCESS"
-            }
-            return
+        $effectiveSendMailMode = $SendMailMode
+        if ([string]::IsNullOrWhiteSpace($effectiveSendMailMode)) {
+            $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' }
+        }
+        $effectiveSendMailMode = $effectiveSendMailMode.Trim()
+        if ($effectiveSendMailMode -notin @('Graph','SMTP','Both')) {
+            throw "SendEmailHtmlReport: unsupported SendMailMode '$effectiveSendMailMode'. Use Graph, SMTP, or Both."
         }
 
         $mailParams = @{
@@ -1420,10 +1423,38 @@ function SendEmailHtmlReport {
         if ($ccArray.Count -gt 0) { $mailParams['Cc'] = $ccArray }
         if ($atts.Count   -gt 0) { $mailParams['Attachments'] = $atts }
 
-        Send-MailMessage @mailParams
+        if ($effectiveSendMailMode -eq 'Graph') {
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts
+            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                WriteLog -Message "Email sent to $($toArray -join ';') via Microsoft Graph" -Level "SUCCESS"
+            }
+            return
+        }
 
-        if ($PSBoundParameters.ContainsKey('VerboseLog')) {
-            WriteLog -Message "Email sent to $($toArray -join ';') via $($SmtpServer):$SmtpPort" -Level "SUCCESS"
+        if ($effectiveSendMailMode -eq 'SMTP') {
+            if ([string]::IsNullOrWhiteSpace($SmtpServer)) { throw 'SendEmailHtmlReport: SmtpServer is required when SendMailMode is SMTP.' }
+            Send-MailMessage @mailParams
+            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                WriteLog -Message "Email sent to $($toArray -join ';') via $($SmtpServer):$SmtpPort" -Level "SUCCESS"
+            }
+            return
+        }
+
+        try {
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts
+            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                WriteLog -Message "Email sent to $($toArray -join ';') via Microsoft Graph" -Level "SUCCESS"
+            }
+            return
+        }
+        catch {
+            WriteLog -Message ("Graph mail failed; falling back to SMTP: {0}" -f $_.Exception.Message) -Level "WARNING"
+            if ([string]::IsNullOrWhiteSpace($SmtpServer)) { throw 'SendEmailHtmlReport: Graph mail failed and SMTP fallback is unavailable because SmtpServer is empty.' }
+            Send-MailMessage @mailParams
+            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                WriteLog -Message "Email sent to $($toArray -join ';') via $($SmtpServer):$SmtpPort after Graph fallback" -Level "SUCCESS"
+            }
+            return
         }
     }
     catch {
@@ -1437,6 +1468,8 @@ function Send-SmartM365Mail {
     param(
         [string]$SmtpServer = "",
         [int]$SmtpPort = 25,
+        [ValidateSet("Graph","SMTP","Both")]
+        [string]$SendMailMode = "",
         [string]$From = "",
         [string]$To = "",
         [string]$Cc = "",
@@ -1449,13 +1482,16 @@ function Send-SmartM365Mail {
     )
 
     $moduleLocalConfig = Get-ModuleLocalConfig
-    foreach ($configName in @('SmtpServer','From','To','Cc','Subject')) {
+    $callerLocalConfig = Get-SmartM365CallerLocalConfig
+    foreach ($configName in @('SendMailMode','SmtpServer','From','To','Cc','Subject')) {
         if (-not $PSBoundParameters.ContainsKey($configName)) {
             $defaultValue = Get-Variable -Name $configName -ValueOnly
             if ($configName -eq 'To') {
                 $defaultValue = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'ErrorMailTo' -DefaultValue $defaultValue
             }
-            Set-Variable -Name $configName -Value (Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $configName -DefaultValue $defaultValue) -Scope Local
+            $configValue = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $configName -DefaultValue $defaultValue
+            $configValue = Get-ModuleLocalConfigValue -Config $callerLocalConfig -Name $configName -DefaultValue $configValue
+            Set-Variable -Name $configName -Value $configValue -Scope Local
         }
     }
 
@@ -1464,6 +1500,7 @@ function Send-SmartM365Mail {
     SendEmailHtmlReport `
         -SmtpServer $SmtpServer `
         -SmtpPort $SmtpPort `
+        -SendMailMode $SendMailMode `
         -From $From `
         -To $To `
         -Cc $Cc `
