@@ -276,6 +276,28 @@ function Get-SmartM365ScriptVersionFromFile {
     return ''
 }
 
+function Write-SmartM365BrandBanner {
+    [CmdletBinding()]
+    param()
+
+    $bannerLines = @(
+        '================================================================================',
+        ' SmartM365 by WorkplaceCloudHub',
+        ' Website : https://workplacecloudhub.com',
+        ' GitHub  : https://github.com/khda79/workplacecloudhub.com',
+        '================================================================================'
+    )
+
+    Write-Host $bannerLines[0] -ForegroundColor DarkCyan
+    Write-Host $bannerLines[1] -ForegroundColor Cyan
+    Write-Host $bannerLines[2] -ForegroundColor Yellow
+    Write-Host $bannerLines[3] -ForegroundColor Yellow
+    Write-Host $bannerLines[4] -ForegroundColor DarkCyan
+
+    if ($global:LogTextFile) {
+        Add-Content -Path $global:LogTextFile -Value $bannerLines
+    }
+}
 function Write-SmartM365ExecutionContext {
     [CmdletBinding()]
     param(
@@ -334,6 +356,7 @@ function Write-SmartM365ExecutionContext {
     if (-not [string]::IsNullOrWhiteSpace($global:LogTextFile)) { $context['LogTextFile'] = $global:LogTextFile }
     if (-not [string]::IsNullOrWhiteSpace($global:logTranscriptFile)) { $context['TranscriptFile'] = $global:logTranscriptFile }
 
+    Write-SmartM365BrandBanner
     WriteLog -Message 'Execution context:' -Level 'INFO'
     foreach ($key in $context.Keys) {
         $value = $context[$key]
