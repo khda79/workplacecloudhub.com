@@ -21,11 +21,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.3.4
+    1.3.5
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory.ps1
-    Version     : 1.3.4
+    Version     : 1.3.5
     Requirements:
       - Run from Exchange Management Shell on Exchange 2016
       - Exchange read permissions
@@ -33,7 +33,7 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
-    1.3.4
+    1.3.5
       - Keeps SharePoint upload available but disabled by default in local configuration.
 
     1.3.3
@@ -97,7 +97,7 @@ $tenantContextPath = & {
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $ScriptName = "SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory"
-$ScriptVersion = "1.3.4"
+$ScriptVersion = "1.3.5"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 function Resolve-SmartM365ConfigTokenValue {
@@ -285,6 +285,7 @@ function Send-ServersAndStorageHtmlReport {
     }
 
     $smtpServer = [string](Get-SmartM365EffectiveConfigValue -Name 'SmtpServer' -DefaultValue '')
+    $sendMailMode = [string](Get-SmartM365EffectiveConfigValue -Name 'SendMailMode' -DefaultValue '')
     $cc = [string](Get-SmartM365EffectiveConfigValue -Name 'Cc' -DefaultValue '')
     $bodyHtml = Get-Content -LiteralPath $HtmlReportPath -Raw -ErrorAction Stop
     $existingAttachments = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
@@ -297,6 +298,7 @@ function Send-ServersAndStorageHtmlReport {
         Attachments = $existingAttachments
     }
     if (-not [string]::IsNullOrWhiteSpace($smtpServer)) { $mailParams['SmtpServer'] = $smtpServer }
+    if (-not [string]::IsNullOrWhiteSpace($sendMailMode)) { $mailParams['SendMailMode'] = $sendMailMode }
     if (-not [string]::IsNullOrWhiteSpace($cc)) { $mailParams['Cc'] = $cc }
 
     Send-CoreEmailHtmlReport @mailParams

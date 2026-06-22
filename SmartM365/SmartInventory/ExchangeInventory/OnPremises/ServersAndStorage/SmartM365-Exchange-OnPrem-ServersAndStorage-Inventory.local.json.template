@@ -14,6 +14,7 @@
   "To": "",
   "EnableTeamsNotifications": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
+  "SendMailMode": "SMTP",
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
   "EnableSharePointUpload": false,
