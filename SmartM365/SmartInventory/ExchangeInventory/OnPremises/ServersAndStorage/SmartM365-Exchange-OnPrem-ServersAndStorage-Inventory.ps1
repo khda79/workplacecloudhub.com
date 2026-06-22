@@ -21,11 +21,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.3.3
+    1.3.4
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory.ps1
-    Version     : 1.3.3
+    Version     : 1.3.4
     Requirements:
       - Run from Exchange Management Shell on Exchange 2016
       - Exchange read permissions
@@ -33,6 +33,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.3.4
+      - Keeps SharePoint upload available but disabled by default in local configuration.
+
     1.3.3
       - Restyled the HTML executive summary with Smart365 branding.
 
@@ -94,7 +97,7 @@ $tenantContextPath = & {
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $ScriptName = "SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory"
-$ScriptVersion = "1.3.3"
+$ScriptVersion = "1.3.4"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 function Resolve-SmartM365ConfigTokenValue {
@@ -191,7 +194,7 @@ function Get-SmartM365EffectiveConfigValue {
 }
 
 function Import-SmartM365CoreModule {
-    if (Get-Command Invoke-CoreSmartM365SharePointCsvUpload -ErrorAction SilentlyContinue) {
+    if ((Get-Command Publish-CoreSmartM365Csv -ErrorAction SilentlyContinue) -and (Get-Command Send-CoreEmailHtmlReport -ErrorAction SilentlyContinue)) {
         return
     }
 
