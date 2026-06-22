@@ -15,6 +15,7 @@ rem Pass -Domain contoso.local, or set EHJIR_AD_DOMAIN before launching, to limi
 set "ROOT_DIR=%CD%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-Export-ADDevicesCsv.ps1"
 set "OUTPUT=%ROOT_DIR%DevicesAD.csv"
+call :PrintStartupInfo
 
 if not exist "%SCRIPT%" (
     echo ERROR: Script not found:
@@ -41,3 +42,14 @@ echo Finished with exit code %EXITCODE%.
 pause
 popd
 exit /b %EXITCODE%
+
+:PrintStartupInfo
+echo.
+echo SmartM365 Intune Hybrid Join Toolkit - AD export launcher
+echo Started : %DATE% %TIME%
+echo Root    : %ROOT_DIR%
+echo Script  : %SCRIPT%
+echo Output  : %OUTPUT%
+if not "%EHJIR_AD_DOMAIN%"=="" echo Domain  : %EHJIR_AD_DOMAIN%
+echo.
+exit /b 0

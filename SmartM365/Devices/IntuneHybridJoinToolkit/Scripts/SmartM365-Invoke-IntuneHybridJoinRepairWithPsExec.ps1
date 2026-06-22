@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.54
+2.10.56
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.54"
+$LauncherVersion = "2.10.56"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -424,6 +424,62 @@ function Acquire-LotRunMutex {
     return $mutex
 }
 
+$LauncherStartupLogPath = Join-Path $LotRoot "LauncherStartup.log"
+
+function Write-LauncherStartupLine {
+    param([string]$Message)
+
+    $line = "{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date),$Message
+    Write-Host $Message
+    try {
+        Add-Content -LiteralPath $LauncherStartupLogPath -Value $line -Encoding UTF8
+    }
+    catch {}
+}
+
+function Get-ScriptHeaderVersionQuick {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return "missing"
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+        $match = [regex]::Match($content, '(?m)^\.VERSION\s*\r?\n\s*([^\r\n]+)')
+        if ($match.Success) { return $match.Groups[1].Value.Trim() }
+
+        $scriptVersionMatch = [regex]::Match($content, '(?m)^\s*\$ScriptVersion\s*=\s*"([^"\r\n]+)"')
+        if ($scriptVersionMatch.Success) { return $scriptVersionMatch.Groups[1].Value.Trim() }
+    }
+    catch {}
+
+    return "unknown"
+}
+
+function Write-LauncherStartupInfo {
+    $repairScriptVersion = Get-ScriptHeaderVersionQuick -Path $LocalScriptPath
+    Write-Host ""
+    Write-Host "Remote repair launcher startup" -ForegroundColor Cyan
+    Write-LauncherStartupLine ("Launcher ver : {0}" -f $LauncherVersion)
+    Write-LauncherStartupLine ("Started      : {0:yyyy-MM-dd HH:mm:ss}; Host={1}; User={2}; PID={3}" -f (Get-Date),$env:COMPUTERNAME,$env:USERNAME,$PID)
+    Write-LauncherStartupLine ("LOT root     : {0}" -f $LotRoot)
+    Write-LauncherStartupLine ("Script       : {0}" -f $LocalScriptPath)
+    Write-LauncherStartupLine ("Script ver   : {0}" -f $repairScriptVersion)
+    Write-LauncherStartupLine ("Computers    : {0}" -f $ComputerListPath)
+    Write-LauncherStartupLine ("PsExec       : {0}" -f $PsExecPath)
+    Write-LauncherStartupLine ("Dry run      : {0}" -f ([bool]$DryRun))
+    Write-LauncherStartupLine ("Loop         : {0}; Delay={1} minute(s); MaxCycles={2}" -f (-not [bool]$RunOnce),$DelayBetweenCyclesMinutes,$MaxCycles)
+    Write-LauncherStartupLine ("Night pause  : Enabled={0}; Window={1}:00-{2}:00 local time" -f (-not [bool]$DisableNightPause),$NightPauseStartHour,$NightPauseEndHour)
+    Write-LauncherStartupLine ("Parallelism  : ThrottleLimit={0}; GlobalConcurrencyLimit={1}; GlobalLeaseTimeout={2} minute(s)" -f $ThrottleLimit,$GlobalConcurrencyLimit,$GlobalConcurrencyLeaseTimeoutMinutes)
+    Write-LauncherStartupLine ("Archive      : Enabled={0}; Root={1}" -f (-not [bool]$SkipPreRunArchive),$ArchiveRoot)
+    Write-LauncherStartupLine ("Logs         : PsExec={0}; Reports={1}; Central={2}" -f $LogRoot,$ReportRoot,$CentralLogRoot)
+    Write-LauncherStartupLine ("Inventory    : Intune={0}; Entra={1}; AD={2}; ADRoot={3}; ADDomain={4}" -f $IntuneInventoryCsv,$EntraInventoryCsv,$AdInventoryCsv,$AdRootInventoryCsv,$AdDomain)
+    Write-LauncherStartupLine ("Startup log  : {0}" -f $LauncherStartupLogPath)
+    Write-Host ""
+}
+
+Write-LauncherStartupInfo
 $script:LotRunMutex = $null
 $script:LotRunMutexName = $null
 if (-not $DisableLotRunMutex) {
@@ -460,6 +516,7 @@ function Invoke-PreRunLotArchive {
         New-Item -ItemType Directory -Path $DestinationRoot -Force | Out-Null
     }
 
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
