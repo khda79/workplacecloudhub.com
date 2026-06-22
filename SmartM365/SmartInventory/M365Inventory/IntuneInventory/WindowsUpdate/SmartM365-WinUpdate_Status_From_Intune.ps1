@@ -38,6 +38,9 @@ PARAMETERS
 
 VERSION
   1.4.0
+.VERSION
+1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -74,7 +77,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1143,7 +1146,7 @@ try {
     Write-Log "Total consolidated rows (enriched + computed): $count" "INFO" "DATA"
 
     # ----------------------------------------------------------
-    # CSV export — DATA-ALL (atomic), DATA-LAST (atomic), Archive
+    # CSV export - DATA-ALL (atomic), DATA-LAST (atomic), Archive
     # ----------------------------------------------------------
     $spUploadStatus = "Disabled"
     $spUploadError  = ""

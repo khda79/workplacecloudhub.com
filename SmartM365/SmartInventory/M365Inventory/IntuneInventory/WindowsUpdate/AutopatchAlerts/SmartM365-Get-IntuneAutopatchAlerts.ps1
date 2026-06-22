@@ -43,10 +43,13 @@ Uses device code authentication.
 
 .EXAMPLE
 pwsh -File .\SmartM365-Get-IntuneAutopatchAlerts.ps1
+.VERSION
+1.1
+
 
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-Version   : 1.0
+    Version : 1.1
 #>
 
 [CmdletBinding()]
@@ -279,9 +282,7 @@ $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'L
 if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
     $OutputFolder = $ScriptRoot
 }
-
-
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 $ScriptName = 'Get-IntuneAutopatchAlerts'
 $StartTime = Get-Date
 $RunId = [guid]::NewGuid().Guid

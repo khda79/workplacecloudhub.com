@@ -15,9 +15,12 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
+.VERSION
+1.1
+
 
 .NOTES
-Version: 1.0
+    Version : 1.1
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementManagedDevices.Read.All
@@ -289,7 +292,7 @@ function Get-ManagedDeviceRamBytes {
             if ($val -gt 0) { return $val }
         }
     } catch {
-        WriteLog -Message "RAM lookup failed for device $ManagedDeviceId — $($_.Exception.Message)" "WARNING"
+        WriteLog -Message "RAM lookup failed for device $ManagedDeviceId - $($_.Exception.Message)" "WARNING"
     }
     return $null
 }
@@ -326,7 +329,7 @@ function Get-EntraDeviceMap {
         WriteLog -Message ("Entra devices retrieved: {0}" -f $map.Count) "INFO"
     }
     catch {
-        WriteLog -Message "Failed to retrieve Entra ID devices — $($_.Exception.Message)" "ERROR"
+        WriteLog -Message "Failed to retrieve Entra ID devices - $($_.Exception.Message)" "ERROR"
         throw
     }
 
@@ -390,7 +393,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -400,7 +403,6 @@ try {
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
     $OutputPath = $InitializeOutputPath
     WriteLog -Message "Starting $TaskName..."
-    WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
     exit 1
@@ -644,10 +646,10 @@ See attached log file for details:
 $($global:LogTextFile)
 "@
 
-        # Génère un HTML simple via SmartM365.Core
+        # Genere un HTML simple via SmartM365.Core
         $bodyHtml = NewSimpleEmailBody -Title $title -Message $msg
 
-        # Envoi du mail avec le log en pièce jointe
+        # Envoi du mail avec le log en piece jointe
         $attachments = @()
         if ($global:LogTextFile -and (Test-Path $global:LogTextFile)) {
             $attachments = @($global:LogTextFile)
@@ -681,7 +683,7 @@ finally {
     WriteLog -Message "$TaskName completed (finally block)."
 
     try {
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Complete-SmartM365ExecutionContext -Status Auto`r`n        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
     } catch {
         # ignore
     }

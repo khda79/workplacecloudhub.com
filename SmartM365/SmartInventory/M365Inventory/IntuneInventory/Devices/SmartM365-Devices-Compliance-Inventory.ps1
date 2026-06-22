@@ -27,13 +27,14 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
+    Version : 1.2
 
 .VERSION
-1.1
+1.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-Version     : 1.1
+    Version : 1.2
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
 #>
@@ -266,7 +267,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.2"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -536,7 +537,7 @@ $SettingRuleMap = @(
     @{ Pattern='uefi(required)?';                               Category='UEFI' }
 )
 
-# Policy property name → category (for Get-PolicyConfiguredCategories)
+# Policy property name -> category (for Get-PolicyConfiguredCategories)
 $PolicyPropertyCategoryMap = @(
     @{ Properties=@('secureBootEnabled');                                    Category='SecureBoot'     },
     @{ Properties=@('bitLockerEnabled','storageRequireEncryption');           Category='BitLocker'      },

@@ -16,12 +16,13 @@
 
 .PARAMETER InteractiveAuth
     Uses interactive authentication instead of app-only certificate authentication.
+    Version : 1.2
 
 .VERSION
-1.1
+1.2
 
 .NOTES
-    Version: 1.1
+    Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
     Scopes: User.Read.All, Directory.Read.All, AuditLog.Read.All
@@ -356,8 +357,7 @@ $csvPathLatest            = ""
 
 try {
     #region Initialization
-
-    $ScriptVersion = "1.1"
+$ScriptVersion = "1.2"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
@@ -372,7 +372,6 @@ try {
     $OutputPath = $InitializeOutputPath
 
     WriteLog -Message "Starting $TaskName..."
-    WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
 
     #endregion Initialization
 
