@@ -59,7 +59,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.5
+1.6
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -306,7 +306,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.5"
+    $ScriptVersion = "1.6"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -345,26 +345,26 @@ $latestSummary      = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
 $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Added.csv' } else { $null }
 $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_MissingInAllowList.csv' } else { $null }
 
-    Write-Host "=== D�marrage $(Get-Date) ==="
+    Write-Host "=== Start $(Get-Date) ==="
     if ($AllOrganizationalUnit) {
-        Write-Host "OU cible(s)  : ALL (no OU filtering, entire forest)"
+        Write-Host "Scope       : ALL (no OU filtering, entire forest)"
         WriteLog -Message "Target OU(s): ALL (entire forest)"
     } else {
         $OuListString = ($OrganizationalUnit -join "; ")
-        Write-Host "OU cible(s)  : $OuListString"
+        Write-Host "Scope       : $OuListString"
         WriteLog -Message "Target OU(s): $OuListString"
     }
-    Write-Host "Suffixe exp. : $ExpectedSuffix"
+    Write-Host "Expected suffix: $ExpectedSuffix"
     Write-Host "AddMissing   : $AddMissingAddress"
     Write-Host "SkipAllowLst : $SkipAllowListCsv"
     if ($PSBoundParameters.ContainsKey('AllowListCsv')) {
         Write-Host "AllowListCsv : $AllowListCsv"
         Write-Host "CsvEmailCol  : $CsvEmailColumn"
     }
-    Write-Host "outDetail    : $outDetail"
-    Write-Host "outSummary   : $outSummary"
-    Write-Host "outAdded     : $outAdded"
-    Write-Host "outAllowMiss.: $outAllowMissing"
+    Write-Host "Detail CSV  : $outDetail"
+    Write-Host "Summary CSV : $outSummary"
+    Write-Host "Added CSV   : $outAdded"
+    Write-Host "Allowlist missing CSV: $outAllowMissing"
 
     # -------------------------------
     # Exchange PSSnapin availability
@@ -416,12 +416,12 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         if (-not $currentSettings.ViewEntireForest) {
             Set-ADServerSettings -ViewEntireForest $true
             $script:ChangedViewEntireForest = $true
-            Write-Host "ViewEntireForest activ� pour cette session."
+            Write-Host "ViewEntireForest enabled for this session."
         } else {
-            Write-Host "ViewEntireForest d�j� activ�."
+            Write-Host "ViewEntireForest already enabled."
         }
     } catch {
-        Write-Warning "Impossible de lire/d�finir ViewEntireForest : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+        Write-Warning "Unable to read/set ViewEntireForest : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
     }
 
     # --- Allowlist CSV ---
@@ -439,14 +439,14 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
 
     if (-not $SkipAllowListCsv -and -not [string]::IsNullOrWhiteSpace($AllowListCsv)) {
         if (-not (Test-Path -LiteralPath $AllowListCsv)) {
-            Write-Error "Fichier CSV introuvable: $AllowListCsv"
+            Write-Error "CSV file not found: $AllowListCsv"
             Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
             exit 1
         }
         try {
             $rows = Import-Csv -LiteralPath $AllowListCsv
             if (-not $rows) {
-                Write-Warning "Le CSV est vide: $AllowListCsv � l�allowlist ne sera pas appliqu�e."
+                Write-Warning "The CSV is empty: $AllowListCsv - allowlist will not be applied."
             } else {
                 foreach ($row in $rows) {
                     if ($null -ne $row.$CsvEmailColumn -and ($row.$CsvEmailColumn).ToString().Trim() -ne "") {
@@ -455,10 +455,10 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
                     }
                 }
                 $script:AllowListLoaded = $true
-                Write-Host "Allowlist charg�e: $script:AllowListRowCount entr�es (colonne '$CsvEmailColumn')."
+                Write-Host "Allowlist loaded: $script:AllowListRowCount entries (column '$CsvEmailColumn')."
             }
         } catch {
-            Write-Error "�chec de chargement du CSV: $AllowListCsv � $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+            Write-Error "Failed to load CSV: $AllowListCsv - $($_.Exception.Message)`n$($_.ScriptStackTrace)"
             Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
             exit 1
         }
@@ -527,11 +527,11 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
 
     $total   = $recipients.Count
     $counter = 0
-    Write-Host "User/Shared mailboxes r�cup�r�es : $total"
+    Write-Host "User/Shared mailboxes retrieved: $total"
 
     foreach ($rec in $recipients) {
         $counter++
-        Write-Progress -Activity "V�rification des EmailAddresses..." -Status "$counter / $total" -PercentComplete (($counter / $total) * 100)
+        Write-Progress -Activity "Checking EmailAddresses..." -Status "$counter / $total" -PercentComplete (($counter / $total) * 100)
 
         $primary = $null
         try { $primary = $rec.PrimarySmtpAddress } catch { $primary = $null }
@@ -684,10 +684,10 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         }
     }
 
-    Write-Host "D�tail : $outDetail"
-    if (Test-Path $outAdded)        { Write-Host "Ajouts : $outAdded" }
+    Write-Host "Detail: $outDetail"
+    if (Test-Path $outAdded)        { Write-Host "Added: $outAdded" }
     if (Test-Path $outAllowMissing) { Write-Host "Missing (in allowlist) : $outAllowMissing" }
-    Write-Host "R�sum� : $outSummary"
+    Write-Host "Summary: $outSummary"
 
 # ===========================
 # === Email notification ====
@@ -712,7 +712,7 @@ try {
     if (Test-Path $outAllowMissing)  { $attachments += $outAllowMissing }
 
     if ([string]::IsNullOrWhiteSpace($MailFrom) -or -not $MailTo) {
-        Write-Host "Envoi mail ignoré: paramètres email incomplets (From/To)."
+        Write-Host "Email skipped: incomplete email parameters (From/To)."
     }
     else {
         $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -833,20 +833,20 @@ try {
 "@
 
         SendEmailHtmlReport -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments
-        Write-Host "Mail envoyé à '$($MailTo -join ';')' via $transportLabel."
+        Write-Host "Email sent to '$($MailTo -join ';')' via $transportLabel."
     }
 } catch {
-    Write-Warning "Échec de l'envoi du mail : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+    Write-Warning "Email send failed: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
 }
 # === End Email notification ===
 
     try {
         if ($script:ChangedViewEntireForest -and $script:PrevViewEntireForest -ne $null) {
             Set-ADServerSettings -ViewEntireForest $script:PrevViewEntireForest
-            Write-Host "ViewEntireForest restaur� � l'�tat initial ($script:PrevViewEntireForest)."
+            Write-Host "ViewEntireForest restored to initial state ($script:PrevViewEntireForest)."
         }
     } catch {
-        Write-Warning "Impossible de restaurer ViewEntireForest : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+        Write-Warning "Unable to restore ViewEntireForest : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
     }
 
     #region Cleanup
