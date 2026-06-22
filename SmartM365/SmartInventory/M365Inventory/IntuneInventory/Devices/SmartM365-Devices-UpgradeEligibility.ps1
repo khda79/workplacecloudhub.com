@@ -41,11 +41,11 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.1
+1.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.1
+    Version : 1.2
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -89,7 +89,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.2"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -317,6 +317,7 @@ if (-not $global:LogTextFile) {
         New-Item -Path $logRoot -ItemType Directory -Force | Out-Null
     }
     $global:LogTextFile = Join-Path -Path $logRoot -ChildPath $logFileName
+    Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $global:LogTextFile
 }
 
 function WriteLogSmartM365 {
