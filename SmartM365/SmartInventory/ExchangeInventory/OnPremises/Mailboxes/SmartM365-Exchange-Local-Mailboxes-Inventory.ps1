@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.9
+1.10
 
 .NOTES
-    Version: 1.9
+    Version: 1.10
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -511,6 +511,34 @@ if (-not (EnsureExchangePSSnapinLoaded -RequiredCommands @("Get-Mailbox", "Set-A
     SendEmailHtmlReport -BodyHtml $body
     exit 1
 }
+$scriptScopeExchangeCommands = @(
+    "Get-Mailbox",
+    "Get-MailboxDatabase",
+    "Get-MailboxPermission",
+    "Get-MailboxStatistics",
+    "Get-MobileDevice",
+    "Get-ADPermission"
+)
+if (-not (Get-Command -Name Get-Mailbox -ErrorAction SilentlyContinue)) {
+    WriteLog -Message "Exchange cmdlets are loaded in module scope; loading Exchange snap-in in script scope for mailbox processing."
+    try {
+        Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue
+    }
+    catch {
+        WriteLog -Message ("Failed to load Exchange snap-in in script scope: {0}" -f $_.Exception.Message) "ERROR"
+    }
+}
+
+$missingScriptScopeExchangeCommands = @($scriptScopeExchangeCommands | Where-Object { -not (Get-Command -Name $_ -ErrorAction SilentlyContinue) })
+if ($missingScriptScopeExchangeCommands.Count -gt 0) {
+    $errorMessage = "Exchange cmdlet(s) not available in script scope after snap-in load: $($missingScriptScopeExchangeCommands -join ', ')"
+    Write-Error $errorMessage
+    WriteLog -Message $errorMessage "ERROR"
+    $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
+    Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
+    throw $errorMessage
+}
+
 $preflightOutputPaths = @($OutputPath)
 if ($OnlyADPermission -or $IncludeADPermission) {
     try {
