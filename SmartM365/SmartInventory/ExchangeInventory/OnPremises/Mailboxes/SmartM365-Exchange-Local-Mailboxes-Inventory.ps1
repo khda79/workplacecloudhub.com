@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.10
+1.11
 
 .NOTES
-    Version: 1.10
+    Version: 1.11
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -766,7 +766,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
 
         $AllMailbox = @()
         if ($IncludedLDAPPaths -and $IncludedLDAPPaths.Count -gt 0) {
-            Write-Host -ForegroundColor:Cyan "Retrieving mailboxes from specified paths. Please wait, this may take some time… $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
+            Write-Host -ForegroundColor:Cyan "Retrieving mailboxes from specified paths. Please wait, this may take some time... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
             $totalOUs = $IncludedLDAPPaths.Count
             $ouCounter = 0
             foreach ($ou in $IncludedLDAPPaths) {
@@ -816,7 +816,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
         }
         else
         {
-            Write-Host -ForegroundColor:Cyan "Retrieving ALL mailboxes (no specific paths provided). Please wait, this may take some time… $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
+            Write-Host -ForegroundColor:Cyan "Retrieving ALL mailboxes (no specific paths provided). Please wait, this may take some time... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
             Write-LogMailboxesProcessing "Retrieving ALL mailboxes (no specific paths provided)..."
             try {
 				if ($LimitResultSize) {
@@ -843,7 +843,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
         }
         else
         {
-            Write-Host -ForegroundColor:Cyan "Processing mailboxes. Please wait, this will likely take some time… $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
+            Write-Host -ForegroundColor:Cyan "Processing mailboxes. Please wait, this will likely take some time... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
             if ($OnlyADPermission) {
                 Write-Host -ForegroundColor:Cyan "OnlyADPermission mode is active!"
                 Write-LogMailboxesProcessing "OnlyADPermission mode is active. Standard mailbox details will be skipped."
