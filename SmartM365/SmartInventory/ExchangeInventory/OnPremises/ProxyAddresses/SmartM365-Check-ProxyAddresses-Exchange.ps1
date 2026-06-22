@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.7
+1.8
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -313,7 +313,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.7"
+    $ScriptVersion = "1.8"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -497,6 +497,7 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
     $noPrimaryCount         = 0
     $addedCount             = 0
     $addFailedCount         = 0
+    $policyEnabledCount    = 0
 
     # Pre/post remediation counters
     $preMissing             = 0
@@ -549,10 +550,10 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         $allowListed     = $false
         $policyWarning   = $false
 
-        # Warn if Email Address Policy might override manual additions
+        # Track Email Address Policy status without flooding the console.
         if ($rec.EmailAddressPolicyEnabled -eq $true) {
             $policyWarning = $true
-            Write-Warning "[$($rec.Identity)] EmailAddressPolicyEnabled is TRUE; manual additions may be overridden by policy."
+            $policyEnabledCount++
         }
 
         if ($primary -and $primary.ToString() -match '.+@.+') {
@@ -652,6 +653,10 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         })
     }
 
+    if ($policyEnabledCount -gt 0) {
+        Write-Host "Email address policy enabled recipients: $policyEnabledCount. Details are available in the detail CSV."
+    }
+
     Publish-SmartM365Csv -Data @($results | Sort-Object Status, Identity) -TimestampedPath $outDetail -LatestPath $latestDetail | Out-Null
     if ($addedOperations.Count -gt 0) {
         Publish-SmartM365Csv -Data @($addedOperations) -TimestampedPath $outAdded -LatestPath $latestAdded | Out-Null
@@ -674,6 +679,7 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         [PSCustomObject]@{ Summary = "With missing but in allowlist";         Count = $missingInAllowCount },
         [PSCustomObject]@{ Summary = "With missing but NOT in allowlist";     Count = $missingNotInAllowCount },
         [PSCustomObject]@{ Summary = "With no primary address";               Count = $noPrimaryCount },
+        [PSCustomObject]@{ Summary = "With email address policy enabled";     Count = $policyEnabledCount },
         [PSCustomObject]@{ Summary = "Addresses successfully added";          Count = $addedCount },
         [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount },
         [PSCustomObject]@{ Summary = "Allowlist entries loaded";              Count = $script:AllowListRowCount }
@@ -723,13 +729,12 @@ try {
     }
     else {
         $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        $totalCount = 0
-        foreach ($item in @($summary)) { $totalCount += [int]$item.Count }
+        $totalCount = [int](($summary | Where-Object { $_.Summary -eq 'Total recipients processed' } | Select-Object -First 1).Count)
         $presentCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address present' } | Select-Object -First 1).Count)
         $missingCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address missing' } | Select-Object -First 1).Count)
         $allowMissingCount = [int](($summary | Where-Object { $_.Summary -eq 'With missing but in allowlist' } | Select-Object -First 1).Count)
         $notAllowMissingCount = [int](($summary | Where-Object { $_.Summary -eq 'With missing but NOT in allowlist' } | Select-Object -First 1).Count)
-        $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Added' } | Select-Object -First 1).Count)
+        $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
         $modeLabel = if ($AddMissingAddress) { 'Write mode' } else { 'Read-only mode' }
         $modeColor = if ($AddMissingAddress) { '#b45309' } else { '#047857' }
         $allowListMode = if ($SkipAllowListCsv) { 'Allowlist skipped' } else { 'Allowlist enforced' }
