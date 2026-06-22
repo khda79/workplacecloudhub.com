@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.3
+1.4
 
 .NOTES
-    Version: 1.3
+    Version: 1.4
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -623,6 +623,11 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
 
     # Set AD server settings to view the entire forest
     try {
+        if (-not (Get-Command -Name Set-ADServerSettings -ErrorAction SilentlyContinue)) {
+            if (-not (EnsureExchangePSSnapinLoaded)) {
+                throw "Exchange on-premises PowerShell snap-in is not ready."
+            }
+        }
         Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
         WriteLog -Message "Set-ADServerSettings -ViewEntireForest $true applied successfully."
     } catch {
