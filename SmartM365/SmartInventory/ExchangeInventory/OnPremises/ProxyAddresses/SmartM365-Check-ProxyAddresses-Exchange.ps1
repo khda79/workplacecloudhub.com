@@ -59,7 +59,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.4
+1.5
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -130,7 +130,6 @@ $tenantContextPath = & {
 . $tenantContextPath
 Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
-begin {
 
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
@@ -307,7 +306,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.4"
+    $ScriptVersion = "1.5"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -495,9 +494,7 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
     # Pre/post remediation counters
     $preMissing             = 0
     $postMissing            = 0
-}
 
-process {
     # Recipient retrieval: either all OUs (no filter) or each OU provided
     if ($AllOrganizationalUnit) {
         try {
@@ -647,9 +644,7 @@ process {
             PolicyWarning             = $policyWarning
         })
     }
-}
 
-end {
     Publish-SmartM365Csv -Data @($results | Sort-Object Status, Identity) -TimestampedPath $outDetail -LatestPath $latestDetail | Out-Null
     if ($addedOperations.Count -gt 0) {
         Publish-SmartM365Csv -Data @($addedOperations) -TimestampedPath $outAdded -LatestPath $latestAdded | Out-Null
@@ -863,4 +858,3 @@ try {
     Complete-SmartM365ExecutionContext -Status Success
     Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
     #endregion
-}
