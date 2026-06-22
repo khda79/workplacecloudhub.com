@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.4
+1.5
 
 .NOTES
-    Version: 1.4
+    Version: 1.5
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -545,11 +545,11 @@ if ($ReportOnly) {
 }
 
 if (-not (EnsureExchangePSSnapinLoaded)) {
+    Write-Error "Exchange environment not ready. Exiting script."
     $errorMessage = "Exchange environment not ready. Exiting script."
-    Write-Error $errorMessage
-	$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-	Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
-    throw $errorMessage
+    $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
+    SendEmailHtmlReport -BodyHtml $body
+    exit 1
 }
 $preflightOutputPaths = @($OutputPath)
 if ($OnlyADPermission -or $IncludeADPermission) {
@@ -623,18 +623,13 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
 
     # Set AD server settings to view the entire forest
     try {
-        if (-not (Get-Command -Name Set-ADServerSettings -ErrorAction SilentlyContinue)) {
-            if (-not (EnsureExchangePSSnapinLoaded)) {
-                throw "Exchange on-premises PowerShell snap-in is not ready."
-            }
-        }
         Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
         WriteLog -Message "Set-ADServerSettings -ViewEntireForest $true applied successfully."
     } catch {
         $errorMessage = "CRITICAL ERROR: Failed to apply 'Set-ADServerSettings -ViewEntireForest $true'. Ensure RSAT AD tools are installed and you have necessary permissions. Message: $($_.Exception.Message)"
         WriteLog -message  $errorMessage
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
+        $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
+        SendEmailHtmlReport -BodyHtml $body
         throw $errorMessage
     }
 
