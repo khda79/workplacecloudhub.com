@@ -13,6 +13,7 @@
   "ErrorMailTo": "__USE_GLOBAL__",
   "EnableTeamsNotifications": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
+  "SendMailMode": "SMTP",
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
   "Subject": "Check ProxyAddresses Report",
