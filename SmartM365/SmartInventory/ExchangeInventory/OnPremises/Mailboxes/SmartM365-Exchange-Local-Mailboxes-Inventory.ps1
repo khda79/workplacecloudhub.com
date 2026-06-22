@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.5
+1.6
 
 .NOTES
-    Version: 1.5
+    Version: 1.6
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -304,43 +304,64 @@ return (Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'Modules') 'SmartM3
 function EnsureExchangePSSnapinLoaded {
     [CmdletBinding()]
     param (
-        [string]$SnapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn"
+        [string[]]$SnapinNames = @(
+            "Microsoft.Exchange.Management.PowerShell.SnapIn",
+            "Microsoft.Exchange.Management.PowerShell.E2010",
+            "Microsoft.Exchange.Management.PowerShell.Admin"
+        )
     )
 
-    # Check if the PSSnapin is registered on the server
-    if (-not (Get-PSSnapin $SnapinName -Registered -ErrorAction SilentlyContinue)) {
-        Write-Error "The Exchange Management PSSnapin '$SnapinName' is not registered on this server."
+    $primarySnapinName = $SnapinNames[0]
+
+    # Check if the primary PSSnapin is registered on the server.
+    if (-not (Get-PSSnapin $primarySnapinName -Registered -ErrorAction SilentlyContinue)) {
+        Write-Error "The Exchange Management PSSnapin '$primarySnapinName' is not registered on this server."
         Write-Error "This script must be run on an Exchange 2016 server where the Management Tools are installed."
         return $false
     }
 
-    # Check if the PSSnapin is already loaded in the current session
-    if (-not (Get-PSSnapin $SnapinName -ErrorAction SilentlyContinue)) {
-        Write-Verbose "The Exchange PSSnapin '$SnapinName' is not loaded in the current session. Attempting to load it..."
-        try {
-            Add-PSSnapin $SnapinName -ErrorAction Stop
-            Write-Verbose "The Exchange PSSnapin was loaded successfully."
+    foreach ($snapinName in @($SnapinNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if (-not (Get-PSSnapin $snapinName -Registered -ErrorAction SilentlyContinue)) {
+            Write-Verbose "The Exchange PSSnapin '$snapinName' is not registered; skipping it."
+            continue
         }
-        catch {
-            Write-Error "Failed to load the Exchange PSSnapin '$SnapinName'. Error: $($_.Exception.Message)"
-            Write-Error "Ensure you are running this script on an Exchange 2016 server and have the necessary permissions."
-            Write-Error "Alternatively, try running this script from the Exchange Management Shell or use a script that connects via PowerShell Remoting to localhost."
-            return $false
+
+        if (-not (Get-PSSnapin $snapinName -ErrorAction SilentlyContinue)) {
+            Write-Verbose "The Exchange PSSnapin '$snapinName' is not loaded in the current session. Attempting to load it..."
+            try {
+                Add-PSSnapin $snapinName -ErrorAction Stop
+                Write-Verbose "The Exchange PSSnapin '$snapinName' was loaded successfully."
+            }
+            catch {
+                Write-Verbose "Failed to load the Exchange PSSnapin '$snapinName'. Error: $($_.Exception.Message)"
+            }
+        } else {
+            Write-Verbose "The Exchange PSSnapin '$snapinName' is already loaded."
         }
-    } else {
-        Write-Verbose "The Exchange PSSnapin '$SnapinName' is already loaded."
+
+        if ((Get-Command Get-Mailbox -ErrorAction SilentlyContinue) -and
+            (Get-Command Set-ADServerSettings -ErrorAction SilentlyContinue)) {
+            return $true
+        }
     }
 
-    # Verify that the Get-Mailbox command is now available
     if (-not (Get-Command Get-Mailbox -ErrorAction SilentlyContinue)) {
-        Write-Error "The Get-Mailbox cmdlet is still not available after attempting to load the snap-in."
+        Write-Error "The Get-Mailbox cmdlet is still not available after attempting to load the Exchange snap-in(s)."
         Write-Error "This could indicate an issue with the Exchange Management Tools installation."
+        return $false
+    }
+
+    if (-not (Get-Command Set-ADServerSettings -ErrorAction SilentlyContinue)) {
+        $registeredExchangeSnapins = @(Get-PSSnapin -Registered -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Microsoft.Exchange.Management.PowerShell*" } | Select-Object -ExpandProperty Name)
+        $loadedExchangeSnapins = @(Get-PSSnapin -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Microsoft.Exchange.Management.PowerShell*" } | Select-Object -ExpandProperty Name)
+        Write-Error "The Set-ADServerSettings cmdlet is still not available after attempting to load the Exchange snap-in(s)."
+        Write-Error ("Registered Exchange snap-ins: {0}" -f ($(if ($registeredExchangeSnapins.Count -gt 0) { $registeredExchangeSnapins -join ', ' } else { 'none' })))
+        Write-Error ("Loaded Exchange snap-ins: {0}" -f ($(if ($loadedExchangeSnapins.Count -gt 0) { $loadedExchangeSnapins -join ', ' } else { 'none' })))
         return $false
     }
 
     return $true
 }
-
 function Stop-SmartM365TranscriptSafely {
     [CmdletBinding()]
     param()
