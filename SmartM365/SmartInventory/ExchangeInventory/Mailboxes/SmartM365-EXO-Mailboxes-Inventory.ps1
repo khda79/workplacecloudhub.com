@@ -13,7 +13,7 @@
       - Primary stats via EXO (optional extra call only if -IncludeLastUserActionTime) to fetch LastUserActionTime; legacy fallbacks used for LastLogonTime/ItemCount/Size
       - Size computed via TotalItemSize.Value.ToBytes() (priority), then fallbacks (incl. FR parsing)
       - Permissions live only with -IncludePerm; otherwise via snapshot CSV by UPN (NoPermInDefault)
-      - Robust DisplayName (EXO → Get-User → Graph → Get-Recipient → UPN)
+      - Robust DisplayName (EXO -> Get-User -> Graph -> Get-Recipient -> UPN)
       - Robust RecipientTypeDetails/MailboxType via fallback Get-Recipient/Get-EXOMailbox/Get-Mailbox if null
       - -Top100 for quick tests
       - -ResolveManager enables Graph manager resolution (DISABLED by default; column kept, may be empty)
@@ -25,6 +25,9 @@
         requires ALSO passing -IncludeLastUserActionTime (triggers an extra Get-EXOMailboxStatistics call per mailbox,
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
+.VERSION
+1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -303,7 +306,7 @@ function Send-FatalErrorEmail {
 }
 
 #region Init
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 $CsvSuffix = if ($Top100) { "_top100" } else { "" }
 if ($PermissionsOnly -and (-not $IncludePerm)) {
     # PermissionsOnly is meaningful only when permissions are being collected live
@@ -325,7 +328,6 @@ try {
     $OutputPath = $InitializeOutputPath
     $GlobalExportPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
     WriteLog -Message "Starting $TaskName..."
-    WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
     if ($PermissionsOnly) { WriteLog -Message "PermissionsOnly enabled: non-permission fields will be exported as empty strings." "INFO" }
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
@@ -365,7 +367,7 @@ try {
 
         if ([string]::IsNullOrWhiteSpace($code)) { $code = "Unknown" }
 
-        # Downgrade “manager not found” to INFO (expected)
+        # Downgrade "manager not found" to INFO (expected)
         $isManagerMissing = ($detail -match 'Request_ResourceNotFound' -or $detail -match "Resource 'manager' does not exist")
         if ($isManagerMissing) {
             WriteLog ("Graph manager missing in {0} | Detail={1}" -f $Context,$detail) "INFO"
@@ -435,7 +437,7 @@ function Invoke-GraphSafe {
             if ($i -ge $MaxRetries) { return $null }
             $isThrottle = ($msg -match '429|TooManyRequests|throttl|ResponseEnded|prematurely')
             $delay = if ($isThrottle) { [Math]::Min(120, (60 * ($i + 1))) } else { [Math]::Min(60, ($BaseDelaySeconds * [Math]::Pow(2, $i))) }
-            if ($isThrottle) { WriteLog ("Graph throttle detected in {0} — back-off {1}s" -f $Context,$delay) "WARNING" }
+            if ($isThrottle) { WriteLog ("Graph throttle detected in {0} - back-off {1}s" -f $Context,$delay) "WARNING" }
             Start-Sleep -Seconds $delay
         }
     }
@@ -464,11 +466,11 @@ function Invoke-ExoSafe {
             WriteLog ("EXO error in {0} (attempt {1}/{2}) | Detail={3}" -f $Context,($i+1),($MaxRetries+1),$msg) "WARNING"
             Add-ErrorBucket ("EXO:{0}" -f $Context)
             if ($i -ge $MaxRetries) { return $null }
-            # --- Auth failure: token expired — attempt proactive reconnection then retry once ---
+            # --- Auth failure: token expired - attempt proactive reconnection then retry once ---
             # Only for app-only cert auth; interactive auth cannot reconnect silently (MFA required).
             $isAuthFailure = ($msg -match 'Auth failed|oAuthEventOperationId|authentication.*failed.*inner error')
             if ($isAuthFailure) {
-                WriteLog ("EXO auth failure detected in {0} — attempting EXO reconnection before retry." -f $Context) "WARNING"
+                WriteLog ("EXO auth failure detected in {0} - attempting EXO reconnection before retry." -f $Context) "WARNING"
                 Add-ErrorBucket "EXO:AuthFailure"
                 if (-not $InteractiveAuth) {
                     try { Invoke-EXOProactiveReconnect } catch { WriteLog ("Reconnect attempt failed: {0}" -f $_.Exception.Message) "WARNING" }
@@ -477,10 +479,10 @@ function Invoke-ExoSafe {
                 }
                 return $null
             }
-            # --- Non-retryable: permanent server-side errors — skip immediately ---
+            # --- Non-retryable: permanent server-side errors - skip immediately ---
             $isNonRetryable = ($msg -match 'CmdletProxyException|Object reference not set|NullReferenceException|MdbAdminTaskException|critical property.*missing|Database.*missing in the ADUser|ManagementObjectNotFoundException|couldn.t be found on|Identity is a mandatory value|HttpStatusCode=401')
             if ($isNonRetryable) {
-                WriteLog ("EXO non-retryable error in {0} — skipping retries." -f $Context) "WARNING"
+                WriteLog ("EXO non-retryable error in {0} - skipping retries." -f $Context) "WARNING"
                 Add-ErrorBucket ("EXO:NonRetryable:{0}" -f $Context)
                 return $null
             }
@@ -494,8 +496,8 @@ function Invoke-ExoSafe {
             } else {
                 [Math]::Min(60, ($BaseDelaySeconds * [Math]::Pow(2, $i)))
             }
-            if ($isThrottle)  { WriteLog ("EXO throttle detected in {0} — back-off {1}s" -f $Context,$delay) "WARNING" }
-            if ($isTransient) { WriteLog ("EXO transient server error in {0} — short retry {1}s" -f $Context,$delay) "WARNING" }
+            if ($isThrottle)  { WriteLog ("EXO throttle detected in {0} - back-off {1}s" -f $Context,$delay) "WARNING" }
+            if ($isTransient) { WriteLog ("EXO transient server error in {0} - short retry {1}s" -f $Context,$delay) "WARNING" }
             Start-Sleep -Seconds $delay
         }
     }
@@ -1406,7 +1408,7 @@ return @{
     # Each thread opens its own EXO session (app-only cert) to avoid throttling.
     # -----------------------------------------------------------------------
     if ($PermissionsOnly -and $ParallelThrottle -gt 1 -and (-not $InteractiveAuth)) {
-        WriteLog ("Starting parallel permission collection — ThrottleLimit={0}." -f $ParallelThrottle) "INFO"
+        WriteLog ("Starting parallel permission collection - ThrottleLimit={0}." -f $ParallelThrottle) "INFO"
 
         # Filter system mailboxes before dispatching to threads (avoids wasted connections)
         $systemTypesFinalP = @("DiscoveryMailbox","ArbitrationMailbox","AuditLogMailbox","MailboxPlan","PublicFolderMailbox","SchedulingMailbox")
@@ -1444,7 +1446,7 @@ return @{
                     -Organization $org -ShowBanner:$false -ErrorAction Stop
                 $connected = $true
             } catch {
-                # Thread cannot connect — skip this mailbox silently
+                # Thread cannot connect - skip this mailbox silently
                 return
             }
 
@@ -1511,13 +1513,13 @@ return @{
 
         # MaxRunMinutes guard: stop cleanly and export whatever has been collected so far.
         if ($MaxRunMinutes -gt 0 -and $swRunTotal.Elapsed.TotalMinutes -ge $MaxRunMinutes) {
-            WriteLog ("[TIMEOUT] MaxRunMinutes limit reached ({0} min). Stopping after {1}/{2} mailboxes — exporting partial results." -f $MaxRunMinutes, $counter, $total) "WARNING"
+            WriteLog ("[TIMEOUT] MaxRunMinutes limit reached ({0} min). Stopping after {1}/{2} mailboxes - exporting partial results." -f $MaxRunMinutes, $counter, $total) "WARNING"
             $MaxRunExceeded = $true
             break
         }
 
         # Proactive reconnect: refresh EXO session if the reconnect interval has elapsed.
-        # Only applies to app-only cert auth — interactive auth requires MFA and cannot reconnect silently.
+        # Only applies to app-only cert auth - interactive auth requires MFA and cannot reconnect silently.
         if (-not $InteractiveAuth -and ((Get-Date) - $script:LastEXOReconnect).TotalMinutes -ge $ReconnectIntervalMinutes) {
             try { Invoke-EXOProactiveReconnect } catch { WriteLog ("Periodic EXO reconnect failed: {0}" -f $_.Exception.Message) "WARNING" }
         }
@@ -2175,10 +2177,10 @@ return @{
         }
     } } catch [System.Management.Automation.PipelineStoppedException] {
         $ManualStop = $true
-        WriteLog ("[STOP] Script interrupted manually after {0}/{1} mailboxes — exporting partial results." -f $counter, $total) "WARNING"
+        WriteLog ("[STOP] Script interrupted manually after {0}/{1} mailboxes - exporting partial results." -f $counter, $total) "WARNING"
     } catch {
         $ManualStop = $true
-        WriteLog ("[STOP] Unexpected termination after {0}/{1} mailboxes: {2} — exporting partial results." -f $counter, $total, $_.Exception.Message) "ERROR"
+        WriteLog ("[STOP] Unexpected termination after {0}/{1} mailboxes: {2} - exporting partial results." -f $counter, $total, $_.Exception.Message) "ERROR"
     }
     } # end else (sequential loop)
 
@@ -2340,7 +2342,7 @@ ExportAndCopyCsv -BaseFileName "Exchange_EXO_Mailboxes_AllDomains_Stats$CsvSuffi
     Write-Host "`n--- Disconnect Cloud Services ---"
     Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $true
     WriteLog -Message "$TaskName completed."
-    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+    Complete-SmartM365ExecutionContext -Status Auto`r`n    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
     RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
     RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
     $swStageCleanup.Stop(); Add-PerfSeconds -Key "Stage_DisconnectCleanup_Seconds" -Seconds $swStageCleanup.Elapsed.TotalSeconds
@@ -2380,6 +2382,6 @@ $($global:LogTextFile)
         Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $true
     } catch {}
 
-    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+    Complete-SmartM365ExecutionContext -Status Auto`r`n    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
     exit 1
 }

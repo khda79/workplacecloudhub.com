@@ -40,9 +40,12 @@
 
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
+.VERSION
+1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version: 1.0
+    Version : 1.1
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -86,6 +89,8 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
+$ScriptVersion = "1.1"
+$TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     Write-Host "This script requires PowerShell 7 or later." -ForegroundColor Red

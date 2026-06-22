@@ -53,10 +53,13 @@
 
 .PARAMETER From
     Sender address for error notification emails.
+.VERSION
+1.1
+
 
 .NOTES
     Name      : EXO-BackupProtection-Comparison
-    Version   : 1.0
+    Version : 1.1
     Author    : https://github.com/khda79/workplacecloudhub.com
     Requires  : Microsoft.Graph.Groups, Microsoft.Graph.Users, ExchangeOnlineManagement
 #>
@@ -311,9 +314,9 @@ function Import-SmartM365CorePreflight {
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 function Write-Log {
     param (
@@ -531,12 +534,12 @@ function Send-BackupProtectionSuccessNotification {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: Initialization
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 $ScriptName    = "EXO-BackupProtection-Comparison"
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 $Timestamp     = Get-Date -Format "yyyy-MM-dd_HHmmss"
 $LogDir        = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path $ScriptCsvLogFolderPath "Logs"
@@ -573,9 +576,9 @@ Write-Log "ScriptCsvLogFolderPath            : $ScriptCsvLogFolderPath"
 Write-Log "LatestCsvFolderPath        : $LatestCsvFolderPath"
 Write-Log "========================================"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: Module check
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 $requiredModules = @("Microsoft.Graph.Groups", "Microsoft.Graph.Users")
 $useLiveEXO = (-not $EXOMailboxesCsvPath) -or (-not (Test-Path $EXOMailboxesCsvPath))
@@ -597,9 +600,9 @@ foreach ($mod in $requiredModules) {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: Connect to Microsoft Graph
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 try {
     $script:CurrentOperation = "Connect to Microsoft Graph and validate backup protection group"
@@ -617,9 +620,9 @@ try {
     exit 1
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: Retrieve group members from Microsoft Graph
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 $groupMembersMap = @{}
 
@@ -673,16 +676,16 @@ foreach ($member in $rawMembers) {
     })
 }
 
-Write-Log "Group members resolved — Users: $countGroupUsers | Other: $countGroupOther | Errors: $countGroupErrors"
+Write-Log "Group members resolved - Users: $countGroupUsers | Other: $countGroupOther | Errors: $countGroupErrors"
 
 try {
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     Write-Log "Disconnected from Microsoft Graph"
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: Load EXO mailboxes (CSV or live)
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 $exoMailboxes = $null
 
@@ -730,9 +733,9 @@ if (-not $useLiveEXO) {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: Comparison
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 $script:CurrentOperation = "Compare backup protection membership"
 Write-Log "Starting comparison..."
@@ -795,9 +798,9 @@ Write-Log "  Protected mailboxes    : $($protected.Count)"
 Write-Log "  Unprotected mailboxes  : $($unprotected.Count)"
 Write-Log "  Members without mailbox: $($membersNoMailbox.Count)"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: CSV export (atomic)
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 $mailboxColumns = @('ExternalDirectoryObjectId', 'UserPrincipalName', 'PrimarySmtpAddress', 'RecipientTypeDetails')
 $memberColumns = @('Id', 'UserPrincipalName', 'Mail', 'ObjectType')
@@ -826,9 +829,9 @@ try {
     exit 1
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REGION: Cleanup
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 if ($useLiveEXO) {
     try {

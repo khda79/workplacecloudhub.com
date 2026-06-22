@@ -42,9 +42,12 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 .PARAMETER DebugDeviceCount
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
+.VERSION
+1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-Version: 1.0
+    Version : 1.1
 #>
 
 param(
@@ -460,7 +463,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -470,7 +473,6 @@ try {
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath" "INFO"
     $OutputPath = $InitializeOutputPath
     WriteLog -Message "Starting $TaskName..." "INFO"
-    WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)" "INFO"
 
     if ($DebugHardwareInfo) {
         WriteLog -Message "DebugHardwareInfo mode enabled. Will dump hardwareInformation properties for the first $DebugDeviceCount device(s) where hardwareInformation is retrieved." "INFO"
@@ -735,5 +737,5 @@ finally {
 
     WriteLog -Message "$TaskName completed (finally block)." "INFO"
 
-    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch { }
+    Complete-SmartM365ExecutionContext -Status Auto`r`n    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch { }
 }
