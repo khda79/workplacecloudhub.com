@@ -59,7 +59,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.2
+1.3
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -78,7 +78,7 @@ param(
     [string]$ExpectedSuffix = "tenant.mail.onmicrosoft.com",
 
     [Parameter(Mandatory=$false)]
-    [switch]$AddMissingAddress = $True,
+    [switch]$AddMissingAddress = $false,
 
     # Skip allowlist usage; active with or without -AddMissingAddress
     [Parameter(Mandatory=$false)]
@@ -307,9 +307,10 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.2"
+    $ScriptVersion = "1.3"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
+    $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
     function Join-ModulePath {
         param([Parameter(Mandatory)][string]$FileName)
         $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..')).Path
@@ -341,6 +342,10 @@ $outDetail       = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_Prox
 $outSummary      = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Summary_{0}.csv" -f $timestamp)
 $outAdded        = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Added_{0}.csv" -f $timestamp)
 $outAllowMissing = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_MissingInAllowList_{0}.csv" -f $timestamp)
+$latestDetail       = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Check.csv' } else { $null }
+$latestSummary      = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Summary.csv' } else { $null }
+$latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Added.csv' } else { $null }
+$latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_MissingInAllowList.csv' } else { $null }
 
     Write-Host "=== D�marrage $(Get-Date) ==="
     if ($AllOrganizationalUnit) {
@@ -390,7 +395,7 @@ $outAllowMissing = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_Prox
         Write-Host "The Exchange PSSnapin '$snapinName' is already loaded."
     }
 
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequireExchangeOnPrem | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
 
     if (-not (Get-Command Get-Mailbox -ErrorAction SilentlyContinue)) {
         Write-Error "The Get-Mailbox cmdlet is still not available after attempting to load the snap-in.`nThis could indicate an issue with the Exchange Management Tools installation."
@@ -646,9 +651,9 @@ process {
 }
 
 end {
-    Publish-SmartM365Csv -Data @($results | Sort-Object Status, Identity) -TimestampedPath $outDetail | Out-Null
+    Publish-SmartM365Csv -Data @($results | Sort-Object Status, Identity) -TimestampedPath $outDetail -LatestPath $latestDetail | Out-Null
     if ($addedOperations.Count -gt 0) {
-        Publish-SmartM365Csv -Data @($addedOperations) -TimestampedPath $outAdded | Out-Null
+        Publish-SmartM365Csv -Data @($addedOperations) -TimestampedPath $outAdded -LatestPath $latestAdded | Out-Null
     }
 
     # Dedicated CSV for "missing but in allowlist" (exclude Added)
@@ -656,7 +661,7 @@ end {
         $_.AllowListMatch -and $_.Status -like 'Missing*' -and $_.Status -notlike '*NotInAllowList*' -and $_.Status -ne 'Added'
     }
     if ($allowMissing.Count -gt 0) {
-        Publish-SmartM365Csv -Data @($allowMissing | Select-Object Identity, DisplayName, PrimaryAddress, ExpectedAddress, Status, EmailAddressPolicyEnabled, PolicyWarning) -TimestampedPath $outAllowMissing | Out-Null
+        Publish-SmartM365Csv -Data @($allowMissing | Select-Object Identity, DisplayName, PrimaryAddress, ExpectedAddress, Status, EmailAddressPolicyEnabled, PolicyWarning) -TimestampedPath $outAllowMissing -LatestPath $latestAllowMissing | Out-Null
     }
 
     $summary = @(
@@ -672,7 +677,7 @@ end {
         [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount },
         [PSCustomObject]@{ Summary = "Allowlist entries loaded";              Count = $script:AllowListRowCount }
     )
-    Publish-SmartM365Csv -Data @($summary) -TimestampedPath $outSummary | Out-Null
+    Publish-SmartM365Csv -Data @($summary) -TimestampedPath $outSummary -LatestPath $latestSummary | Out-Null
 
     Write-Host "`n===== Summary ====="
     foreach ($item in $summary) {
