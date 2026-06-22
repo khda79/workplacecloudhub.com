@@ -21,11 +21,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.3.5
+    1.3.6
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory.ps1
-    Version     : 1.3.5
+    Version     : 1.3.6
     Requirements:
       - Run from Exchange Management Shell on Exchange 2016
       - Exchange read permissions
@@ -33,7 +33,13 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.3.6
+      - Fixes HTML email sending after prefixed SmartM365.Core import.
+
     1.3.5
+      - Adds SendMailMode support for Graph, SMTP, or Graph with SMTP fallback.
+
+    1.3.4
       - Keeps SharePoint upload available but disabled by default in local configuration.
 
     1.3.3
@@ -97,7 +103,7 @@ $tenantContextPath = & {
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $ScriptName = "SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory"
-$ScriptVersion = "1.3.5"
+$ScriptVersion = "1.3.6"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 function Resolve-SmartM365ConfigTokenValue {
@@ -194,7 +200,7 @@ function Get-SmartM365EffectiveConfigValue {
 }
 
 function Import-SmartM365CoreModule {
-    if ((Get-Command Publish-CoreSmartM365Csv -ErrorAction SilentlyContinue) -and (Get-Command Send-CoreEmailHtmlReport -ErrorAction SilentlyContinue)) {
+    if ((Get-Command Publish-CoreSmartM365Csv -ErrorAction SilentlyContinue) -and (Get-Command SendEmailHtmlReport -ErrorAction SilentlyContinue)) {
         return
     }
 
@@ -301,7 +307,7 @@ function Send-ServersAndStorageHtmlReport {
     if (-not [string]::IsNullOrWhiteSpace($sendMailMode)) { $mailParams['SendMailMode'] = $sendMailMode }
     if (-not [string]::IsNullOrWhiteSpace($cc)) { $mailParams['Cc'] = $cc }
 
-    Send-CoreEmailHtmlReport @mailParams
+    SendEmailHtmlReport @mailParams
 }
 function Export-ServersAndStorageCsv {
     param(
