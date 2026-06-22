@@ -9,9 +9,11 @@
     By default the script is diagnostic-only. Corrective actions require explicit switches.
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
+.VERSION
+    0.1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version: 0.1.0
 #>
 
 #requires -Version 5.1
@@ -62,7 +64,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.0'
+$script:ScriptVersion = '0.1.1'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -207,15 +209,12 @@ function Get-ComputerSystemSummary {
         }
     }
 
-    $isVirtual = (-not [string]::IsNullOrWhiteSpace($matchedPattern)) -or $hypervisorPresent
+    $isVirtual = -not [string]::IsNullOrWhiteSpace($matchedPattern)
     $evidence = if ($matchedPattern) {
         "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
     }
-    elseif ($hypervisorPresent) {
-        "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=True"
-    }
     else {
-        "Manufacturer=$manufacturer; Model=$model"
+        "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=$hypervisorPresent"
     }
 
     [pscustomobject]@{
