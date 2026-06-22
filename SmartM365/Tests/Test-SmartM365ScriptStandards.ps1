@@ -7,7 +7,7 @@
     Use -Scope All for a wider migration scan.
 
 .VERSION
-1.1
+1.2
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -209,10 +209,13 @@ foreach ($scriptFile in $scriptFiles) {
     }
 
     $usesInitializeScriptEnvironment = $content -match '\bInitializeScriptEnvironment\b'
+    $usesCoreInitializeScriptEnvironment = $content -match '\bCoreInitializeScriptEnvironment\b'
+    $usesCoreContextInitialization = $content -match '\bSet-SmartM365CoreContext\b'
+    $usesSharedScriptInitialization = $usesInitializeScriptEnvironment -or $usesCoreInitializeScriptEnvironment -or $usesCoreContextInitialization
     $usesExecutionSummary = $content -match '\bComplete-SmartM365ExecutionContext\b'
     $usesSmartM365Logging = $content -match '\bWriteLog\b|\bWriteLogSmartM365\b|\bStart-Transcript\b|\$global:LogTextFile'
-    if ($usesSmartM365Logging -and -not $usesInitializeScriptEnvironment) {
-        Add-StandardResult -Results $results -Severity 'WARNING' -Rule 'LoggingWithoutSharedInitialization' -Path $relativePath -Message 'Script uses SmartM365-style logging but does not call InitializeScriptEnvironment.'
+    if ($usesSmartM365Logging -and -not $usesSharedScriptInitialization) {
+        Add-StandardResult -Results $results -Severity 'WARNING' -Rule 'LoggingWithoutSharedInitialization' -Path $relativePath -Message 'Script uses SmartM365-style logging but does not call a shared SmartM365 script initialization helper.'
     }
     if ($usesInitializeScriptEnvironment -and -not $usesExecutionSummary) {
         $severity = if ($Scope -eq 'Changed' -and $isChanged) { 'ERROR' } else { 'WARNING' }
