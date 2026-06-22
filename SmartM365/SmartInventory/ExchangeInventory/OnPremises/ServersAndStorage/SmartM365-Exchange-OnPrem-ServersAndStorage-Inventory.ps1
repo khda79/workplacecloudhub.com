@@ -21,11 +21,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.3.6
+    1.3.7
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory.ps1
-    Version     : 1.3.6
+    Version     : 1.3.7
     Requirements:
       - Run from Exchange Management Shell on Exchange 2016
       - Exchange read permissions
@@ -33,6 +33,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.3.7
+      - Applies the script local JSON overrides before reading mail and SharePoint settings.
+
     1.3.6
       - Fixes HTML email sending after prefixed SmartM365.Core import.
 
@@ -100,11 +103,33 @@ $tenantContextPath = & {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 . $tenantContextPath
-$script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $ScriptName = "SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory"
-$ScriptVersion = "1.3.6"
+$ScriptVersion = "1.3.7"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
+
+$script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
+
+function Merge-SmartM365ScriptLocalConfig {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ConfigPath
+    )
+
+    $localConfig = Read-SmartM365JsonConfig -Path $ConfigPath -Required
+    if ($null -eq $localConfig -or $localConfig.Count -eq 0) { return }
+
+    $effectiveConfig = ConvertTo-SmartM365Hashtable -InputObject $script:SmartM365EffectiveConfig
+    foreach ($key in $localConfig.Keys) {
+        $value = $localConfig[$key]
+        if ($value -is [string] -and $value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { continue }
+        $effectiveConfig[$key] = $value
+    }
+
+    $script:SmartM365EffectiveConfig = [pscustomobject]$effectiveConfig
+}
+
+Merge-SmartM365ScriptLocalConfig -ConfigPath (Join-Path -Path $PSScriptRoot -ChildPath "$ScriptName.local.json")
 
 function Resolve-SmartM365ConfigTokenValue {
     param(
