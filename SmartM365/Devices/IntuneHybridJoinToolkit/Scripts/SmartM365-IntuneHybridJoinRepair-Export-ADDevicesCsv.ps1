@@ -20,6 +20,9 @@ When omitted, all domains in the current AD forest are exported.
 
 .PARAMETER ForceRefresh
 Regenerates the CSV even when a recent DevicesAD.csv exists in the parent folder.
+
+.VERSION
+1.0.2
 #>
 
 #requires -Version 5.1
@@ -33,7 +36,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.0.1"
+$ScriptVersion = "1.0.2"
+$AdInventoryFreshnessHours = 12
 
 $BaseDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $DefaultOutputDir = $BaseDir
@@ -47,6 +51,17 @@ if (-not $OutputPathWasProvided) {
     $OutputPath = Join-Path $DefaultOutputDir "DevicesAD.csv"
 }
 
+if (-not $ForceRefresh -and (Test-Path -LiteralPath $OutputPath -PathType Leaf)) {
+    $outputInventoryItem = Get-Item -LiteralPath $OutputPath -ErrorAction Stop
+    $outputInventoryAge = (Get-Date) - $outputInventoryItem.LastWriteTime
+    if ($outputInventoryAge.TotalHours -le $AdInventoryFreshnessHours) {
+        Write-Host "Export-ADDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
+        Write-Host ("Recent DevicesAD.csv found: {0}" -f $OutputPath) -ForegroundColor Green
+        Write-Host ("Last write time: {0}; Age: {1:N1} hour(s)" -f $outputInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $outputInventoryAge.TotalHours) -ForegroundColor Green
+        Write-Host ("No new AD export generated because the AD CSV is less than {0} hour(s) old. Use -ForceRefresh to regenerate anyway." -f $AdInventoryFreshnessHours) -ForegroundColor Yellow
+        return
+    }
+}
 $ComputerListPathWasProvided = -not [string]::IsNullOrWhiteSpace($ComputerListPath)
 if ([string]::IsNullOrWhiteSpace($ComputerListPath)) {
     $ComputerListPath = Join-Path $BaseDir "Computers.txt"
@@ -64,11 +79,11 @@ if (-not $OutputPathWasProvided -and -not $ForceRefresh) {
         if ($parentInventoryFullPath -ne $defaultOutputFullPath -and (Test-Path -LiteralPath $parentInventoryPath)) {
             $parentInventoryItem = Get-Item -LiteralPath $parentInventoryPath -ErrorAction Stop
             $parentInventoryAge = (Get-Date) - $parentInventoryItem.LastWriteTime
-            if ($parentInventoryAge.TotalHours -le 2) {
+            if ($parentInventoryAge.TotalHours -le $AdInventoryFreshnessHours) {
                 Write-Host "Export-ADDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
                 Write-Host ("Recent parent DevicesAD.csv found: {0}" -f $parentInventoryPath) -ForegroundColor Green
                 Write-Host ("Last write time: {0}; Age: {1:N1} hour(s)" -f $parentInventoryItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"), $parentInventoryAge.TotalHours) -ForegroundColor Green
-                Write-Host "No new AD export generated. Use -ForceRefresh to regenerate anyway." -ForegroundColor Yellow
+                Write-Host ("No new AD export generated because the AD CSV is less than {0} hour(s) old. Use -ForceRefresh to regenerate anyway." -f $AdInventoryFreshnessHours) -ForegroundColor Yellow
                 return
             }
         }
