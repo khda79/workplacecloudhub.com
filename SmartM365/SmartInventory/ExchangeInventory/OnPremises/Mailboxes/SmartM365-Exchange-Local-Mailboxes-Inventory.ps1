@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.14
+1.17
 
 .NOTES
-    Version: 1.14
+    Version: 1.17
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.17"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -238,6 +238,20 @@ if ($LimitResultSize) {
 $scriptdatamailbox = $false
 $scriptdatamegewithperm = $true
 
+
+function Register-SmartM365GeneratedCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    if (-not $global:csvGeneratedPaths) {
+        $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    [void]$global:csvGeneratedPaths.Add($Path)
+}
 
 # Atomic CSV export helper
 function Export-CsvAtomic {
@@ -258,6 +272,7 @@ function Export-CsvAtomic {
     )
 
     Write-SmartM365CsvAtomically -Data @($InputObject) -Path $Path -Encoding $Encoding -Delimiter $Delimiter
+    Register-SmartM365GeneratedCsv -Path $Path
 }
 
 [string]$inputFolderCSVfiles
@@ -395,6 +410,197 @@ function Test-SmartM365MailboxReportCsvSchema {
 
     return $true
 }
+function ConvertTo-SmartM365MailboxReportHtml {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return 'N/A' }
+    if ([string]::IsNullOrWhiteSpace([string]$Value)) { return 'N/A' }
+    return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+function Get-SmartM365MailboxReportCsvRowCount {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return 0 }
+    try {
+        $lineCount = @(Get-Content -LiteralPath $Path -ErrorAction Stop | Measure-Object -Line).Lines
+        if ($lineCount -le 1) { return 0 }
+        return ($lineCount - 1)
+    }
+    catch { return 0 }
+}
+
+function New-SmartM365ExchangeLocalMailboxReportEmailBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$ReportRows,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DailyStatsCsv,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SummaryCsv,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Title
+    )
+
+    $rows = @($ReportRows)
+    $domainCount = $rows.Count
+    $totalMailboxes = ($rows | Measure-Object -Property TotalMailboxCount -Sum).Sum
+    $totalLocalMailboxes = ($rows | Measure-Object -Property TotalLocalMailboxCount -Sum).Sum
+    $totalRemoteMailboxes = ($rows | Measure-Object -Property TotalRemoteMailboxCount -Sum).Sum
+    $totalEnabledAccounts = ($rows | Measure-Object -Property EnabledAccounts -Sum).Sum
+    $totalDisabledAccounts = ($rows | Measure-Object -Property DisabledAccounts -Sum).Sum
+    $totalSizeGb = ($rows | Measure-Object -Property TotalLocalMailboxSizeGB -Sum).Sum
+    if ($null -eq $totalMailboxes) { $totalMailboxes = 0 }
+    if ($null -eq $totalLocalMailboxes) { $totalLocalMailboxes = 0 }
+    if ($null -eq $totalRemoteMailboxes) { $totalRemoteMailboxes = 0 }
+    if ($null -eq $totalEnabledAccounts) { $totalEnabledAccounts = 0 }
+    if ($null -eq $totalDisabledAccounts) { $totalDisabledAccounts = 0 }
+    if ($null -eq $totalSizeGb) { $totalSizeGb = 0 }
+    $totalSizeGb = [math]::Round([double]$totalSizeGb, 2)
+
+    $domainRowsHtml = foreach ($row in ($rows | Sort-Object DomainName)) {
+        @"
+          <tr>
+            <td>$(ConvertTo-SmartM365MailboxReportHtml $row.DomainName)</td>
+            <td class="num">$(ConvertTo-SmartM365MailboxReportHtml $row.TotalMailboxCount)</td>
+            <td class="num">$(ConvertTo-SmartM365MailboxReportHtml $row.TotalLocalMailboxCount)</td>
+            <td class="num">$(ConvertTo-SmartM365MailboxReportHtml $row.TotalRemoteMailboxCount)</td>
+            <td class="num">$(ConvertTo-SmartM365MailboxReportHtml $row.EnabledAccounts)</td>
+            <td class="num">$(ConvertTo-SmartM365MailboxReportHtml $row.DisabledAccounts)</td>
+            <td class="num">$(ConvertTo-SmartM365MailboxReportHtml $row.TotalLocalMailboxSizeGB)</td>
+          </tr>
+"@
+    }
+
+    $fileSummary = GetFileList -Files @($DailyStatsCsv, $SummaryCsv)
+    $fileRowsHtml = foreach ($file in @($fileSummary.Files)) {
+        $rowCount = Get-SmartM365MailboxReportCsvRowCount -Path $file.FullName
+        @"
+          <tr>
+            <td>$(ConvertTo-SmartM365MailboxReportHtml $file.FileName)</td>
+            <td>$(ConvertTo-SmartM365MailboxReportHtml $file.SizeString)</td>
+            <td class="num">$(ConvertTo-SmartM365MailboxReportHtml $rowCount)</td>
+            <td>$(ConvertTo-SmartM365MailboxReportHtml $file.LastWriteTime)</td>
+          </tr>
+"@
+    }
+
+    $generatedAt = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $dailyCsvHtml = ConvertTo-SmartM365MailboxReportHtml $DailyStatsCsv
+    $summaryCsvHtml = ConvertTo-SmartM365MailboxReportHtml $SummaryCsv
+    $titleHtml = ConvertTo-SmartM365MailboxReportHtml $Title
+
+@"
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>$titleHtml</title>
+<style>
+body { margin: 0; padding: 0; background: #f6f8fb; color: #0f172a; font-family: Segoe UI, Arial, sans-serif; }
+.shell { max-width: 1120px; margin: 0 auto; padding: 22px; }
+.panel { background: #ffffff; border: 1px solid #dbe3ef; border-radius: 10px; overflow: hidden; }
+.hero { background: linear-gradient(135deg, #0f766e, #2563eb); color: #ffffff; padding: 24px 28px; }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; opacity: .9; font-weight: 700; }
+h1 { font-size: 24px; line-height: 1.25; margin: 6px 0 0 0; color: #ffffff; }
+.subtitle { margin-top: 10px; font-size: 13px; opacity: .95; }
+.content { padding: 24px 28px; }
+.cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+.card { border: 1px solid #dbe3ef; border-radius: 8px; padding: 14px; background: #f8fafc; }
+.card.green { border-color: #bbf7d0; background: #f0fdf4; }
+.card.blue { border-color: #bfdbfe; background: #eff6ff; }
+.card.amber { border-color: #fed7aa; background: #fff7ed; }
+.card.purple { border-color: #e9d5ff; background: #faf5ff; }
+.card .label { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 800; }
+.card .value { font-size: 24px; font-weight: 800; margin-top: 4px; color: #0f172a; }
+.card.green .value { color: #166534; }
+.card.blue .value { color: #1d4ed8; }
+.card.amber .value { color: #9a3412; }
+.card.purple .value { color: #7e22ce; }
+.card .unit { font-size: 12px; color: #64748b; margin-top: 2px; }
+.summary { border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; padding: 16px; font-size: 13px; line-height: 1.55; color: #334155; margin-bottom: 22px; }
+h2 { font-size: 17px; margin: 0 0 10px 0; color: #0f172a; }
+table { width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; font-size: 12px; margin-bottom: 20px; }
+th { text-align: left; background: #f8fafc; color: #475569; padding: 10px 12px; text-transform: uppercase; font-size: 11px; }
+td { border-bottom: 1px solid #e5e7eb; padding: 9px 12px; color: #334155; vertical-align: top; overflow-wrap: anywhere; }
+td.num, th.num { text-align: right; }
+.path { font-family: Consolas, Courier New, monospace; font-size: 11px; color: #475569; }
+.footer { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #64748b; line-height: 1.5; }
+@media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .shell { padding: 12px; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="panel">
+    <div class="hero">
+      <div class="eyebrow">Smart365 Exchange OnPrem</div>
+      <h1>Mailbox Inventory Report</h1>
+      <div class="subtitle">Generated on $(ConvertTo-SmartM365MailboxReportHtml $generatedAt)</div>
+    </div>
+    <div class="content">
+      <div class="cards">
+        <div class="card"><div class="label">Domains</div><div class="value">$(ConvertTo-SmartM365MailboxReportHtml $domainCount)</div><div class="unit">reported</div></div>
+        <div class="card blue"><div class="label">Mailboxes</div><div class="value">$(ConvertTo-SmartM365MailboxReportHtml $totalMailboxes)</div><div class="unit">total</div></div>
+        <div class="card green"><div class="label">Local</div><div class="value">$(ConvertTo-SmartM365MailboxReportHtml $totalLocalMailboxes)</div><div class="unit">on-premises</div></div>
+        <div class="card purple"><div class="label">Remote</div><div class="value">$(ConvertTo-SmartM365MailboxReportHtml $totalRemoteMailboxes)</div><div class="unit">EXO linked</div></div>
+        <div class="card amber"><div class="label">Disabled</div><div class="value">$(ConvertTo-SmartM365MailboxReportHtml $totalDisabledAccounts)</div><div class="unit">accounts</div></div>
+        <div class="card"><div class="label">Size</div><div class="value">$(ConvertTo-SmartM365MailboxReportHtml $totalSizeGb)</div><div class="unit">GB local</div></div>
+      </div>
+
+      <div class="summary">
+        <strong>Output:</strong> <span class="path">$dailyCsvHtml</span><br>
+        <strong>Summary:</strong> <span class="path">$summaryCsvHtml</span><br>
+        Enabled accounts: <strong>$(ConvertTo-SmartM365MailboxReportHtml $totalEnabledAccounts)</strong>. Disabled accounts: <strong>$(ConvertTo-SmartM365MailboxReportHtml $totalDisabledAccounts)</strong>.
+      </div>
+
+      <h2>Domain summary</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Domain</th>
+            <th class="num">Total</th>
+            <th class="num">Local</th>
+            <th class="num">Remote</th>
+            <th class="num">Enabled</th>
+            <th class="num">Disabled</th>
+            <th class="num">Local size GB</th>
+          </tr>
+        </thead>
+        <tbody>
+          $($domainRowsHtml -join "`r`n")
+        </tbody>
+      </table>
+
+      <h2>Generated files</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>File name</th>
+            <th>Size</th>
+            <th class="num">Rows</th>
+            <th>Last write time</th>
+          </tr>
+        </thead>
+        <tbody>
+          $($fileRowsHtml -join "`r`n")
+        </tbody>
+      </table>
+
+      <div class="footer">
+        This report is generated by SmartM365 from Exchange on-premises mailbox inventory CSV data. CSV paths are shown above; files are not attached to keep the email lightweight.
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
+"@
+}
+
 function Invoke-SmartM365ExchangeLocalMailboxReport {
     [CmdletBinding()]
     param([bool]$UseCurrentInventoryData = $false)
@@ -441,7 +647,13 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     if ($latestDailyCsv) { $latestDir = Split-Path -Path $latestDailyCsv -Parent; if (-not (Test-Path -LiteralPath $latestDir)) { New-Item -ItemType Directory -Path $latestDir -Force | Out-Null }; Copy-Item -LiteralPath $dailyCsv -Destination $latestDailyCsv -Force; Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestDailyCsv }
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsv
     RemoveOldFiles -Path $reportOutputPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
-    try { SendFileListEmailReport -Files @($dailyCsv, $summaryCsv) -Title ($TaskName + ' - Mailbox report') -Message ('Domains: {0}<br/>Output: {1}<br/>Summary: {2}' -f $report.Count, $dailyCsv, $summaryCsv) } catch { WriteLog -Message ('Failed to send mailbox report email: {0}' -f $_.Exception.Message) 'WARN' }
+    try {
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -SummaryCsv $summaryCsv -Title ($TaskName + ' - Mailbox report')
+        Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
+    }
+    catch {
+        WriteLog -Message ('Failed to send mailbox report email: {0}' -f $_.Exception.Message) 'WARN'
+    }
     return [pscustomobject]@{ DailyStatsCsv = $dailyCsv; SummaryCsv = $summaryCsv; RowCount = $report.Count }
 }
 try {
@@ -1986,7 +2198,7 @@ throw $errorMessage
     }
 }
 
-if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-not $OnlyADPermission)) {
+if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and $IncludeADPermission -and (-not $OnlyADPermission)) {
 	Write-Host "-----------------------------------------------------------------------------------------"
 	Write-Host "Combine Export Exchange 2016 mailboxes inventory with last permission inventory ..."
 	try {
