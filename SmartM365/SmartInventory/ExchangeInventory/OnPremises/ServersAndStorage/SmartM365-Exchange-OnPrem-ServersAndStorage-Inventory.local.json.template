@@ -21,6 +21,7 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "EnableWeeklyHistory": true,
-  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\UpgradeEligibility\\WeeklyHistory",
-  "WeeklyHistoryRetentionWeeks": 52
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage\\WeeklyHistory",
+  "WeeklyHistoryRetentionWeeks": 52,
+  "OutputRoot": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage"
 }

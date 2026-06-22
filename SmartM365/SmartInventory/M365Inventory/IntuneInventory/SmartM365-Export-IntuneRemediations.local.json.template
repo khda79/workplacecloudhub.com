@@ -11,10 +11,10 @@
   "RetentionMaxCSV": "__USE_GLOBAL__",
   "RetentionMaxLogs": "__USE_GLOBAL__",
   "ErrorMailTo": "__USE_GLOBAL__",
+  "EnableTeamsNotifications": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
-  "Subject": "__USE_GLOBAL__",
   "EnableSharePointUpload": "__USE_GLOBAL__",
   "SharePointSiteHostname": "__USE_GLOBAL__",
   "SharePointSitePath": "__USE_GLOBAL__",
@@ -22,5 +22,8 @@
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "OutputRoot": "{{DataAllRootPath}}\\Intune\\Remediations\\Exports",
   "GraphApiVersion": "beta",
-  "InteractiveScopes": "DeviceManagementScripts.Read.All"
+  "InteractiveScopes": "DeviceManagementScripts.Read.All",
+  "EnableWeeklyHistory": true,
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Remediations\\Exports\\WeeklyHistory",
+  "WeeklyHistoryRetentionWeeks": 52
 }

@@ -20,7 +20,11 @@
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
+  "LocalMailboxReportCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxReports",
+  "LockRoot": "C:\\ProgramData\\SmartM365\\Locks",
+  "LocalMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\Mailboxes",
+  "RemoteMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\Mailboxes",
   "EnableWeeklyHistory": true,
-  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\UpgradeEligibility\\WeeklyHistory",
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxReports\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
 }
