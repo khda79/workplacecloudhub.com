@@ -947,15 +947,18 @@ function Export-SmartM365CsvFromConvert {
 function EnsureExchangePSSnapinLoaded {
     [CmdletBinding()]
     param (
-        [string]$SnapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn"
+        [string]$SnapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn",
+        [string[]]$RequiredCommands = @("Get-Mailbox")
     )
 
+    # Check if the PSSnapin is registered on the server
     if (-not (Get-PSSnapin $SnapinName -Registered -ErrorAction SilentlyContinue)) {
         Write-Error "The Exchange Management PSSnapin '$SnapinName' is not registered on this server."
         Write-Error "This script must be run on an Exchange 2016 server where the Management Tools are installed."
         return $false
     }
 
+    # Check if the PSSnapin is already loaded in the current session
     if (-not (Get-PSSnapin $SnapinName -ErrorAction SilentlyContinue)) {
         Write-Verbose "The Exchange PSSnapin '$SnapinName' is not loaded in the current session. Attempting to load it..."
         try {
@@ -965,20 +968,28 @@ function EnsureExchangePSSnapinLoaded {
         catch {
             Write-Error "Failed to load the Exchange PSSnapin '$SnapinName'. Error: $($_.Exception.Message)"
             Write-Error "Ensure you are running this script on an Exchange 2016 server and have the necessary permissions."
+            Write-Error "Alternatively, try running this script from the Exchange Management Shell or use a script that connects via PowerShell Remoting to localhost."
             return $false
         }
     } else {
         Write-Verbose "The Exchange PSSnapin '$SnapinName' is already loaded."
     }
 
-    if (-not (Get-Command Get-Mailbox -ErrorAction SilentlyContinue)) {
-        Write-Error "The Get-Mailbox cmdlet is still not available after attempting to load the snap-in."
+    $missingCommands = @()
+    foreach ($commandName in @($RequiredCommands | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
+            $missingCommands += $commandName
+        }
+    }
+
+    if ($missingCommands.Count -gt 0) {
+        Write-Error ("The following Exchange cmdlet(s) are still not available after attempting to load the snap-in: {0}" -f ($missingCommands -join ', '))
+        Write-Error "This could indicate an issue with the Exchange Management Tools installation or the selected Exchange snap-in."
         return $false
     }
 
     return $true
 }
-
 #endregion
 
 #region Mail helpers and file inventory
