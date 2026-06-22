@@ -1,3 +1,10 @@
+<#
+.SYNOPSIS
+Starts the Intune Hybrid Join repair LOT launcher GUI.
+
+.VERSION
+1.0
+#>
 param(
     [switch]$ValidateOnly
 )
@@ -225,6 +232,9 @@ function Start-ToolkitLot {
         [string[]]$ExtraArguments,
         [hashtable]$Environment
     )
+
+    $lotToolkitRoot = Split-Path -Parent $Lot.Path
+    Invoke-LotWrapperRefresh -ToolkitRoot $lotToolkitRoot -LotPath $Lot.Path
 
     $wrapperMap = @{
         Loop                = 'Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd'
@@ -1139,6 +1149,7 @@ function Update-SelectedLotView {
 }
 
 function Refresh-LotList {
+    Invoke-LotWrapperRefresh -ToolkitRoot $toolkitRoot -LotPath $null
     $script:Lots = @(Get-LotFolders -Root $toolkitRoot | ForEach-Object { Get-LotSummary -Folder $_ })
     $previous = if ($script:SelectedLot) { $script:SelectedLot.Name } else { $null }
 
