@@ -550,7 +550,7 @@ function Invoke-SmartM365TeamsNotificationFromLog {
 
     $normalizedLevel = if ([string]::IsNullOrWhiteSpace($Level)) { 'INFO' } else { $Level.ToUpperInvariant() }
     $isError = $normalizedLevel -eq 'ERROR'
-    $isTerminalSuccess = $normalizedLevel -eq 'SUCCESS' -and $Message -match '(?i)\b(completed|finished|termin[eé]|complete)\b' -and $Message -notmatch '(?i)\bpreflight completed\b'
+    $isTerminalSuccess = $normalizedLevel -eq 'SUCCESS' -and $Message -match '(?i)\b(completed|finished|complete|terminated|termine)\b' -and $Message -notmatch '(?i)\bpreflight completed\b'
     if (-not $isError -and -not $isTerminalSuccess) { return }
 
     $dedupeKey = '{0}|{1}' -f $normalizedLevel, $Message
@@ -758,7 +758,7 @@ function RemoveOldFiles {
 
     if (-not (Test-Path -LiteralPath $Path)) { return }
 
-    # Normaliser la liste d'exclusions en chemins complets, insensibles à la casse
+    # Normalize the exclusion list as full paths, case-insensitive
     $excludeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($ex in $ExcludeFiles) {
@@ -770,7 +770,7 @@ function RemoveOldFiles {
         }
     }
 
-    # Ajouter les fichiers CSV générés globalement
+    # Add globally generated CSV files
     if ($global:csvGeneratedPaths) {
         foreach ($csvPath in $global:csvGeneratedPaths) {
             [void]$excludeSet.Add($csvPath)
@@ -1042,8 +1042,8 @@ function Send-SmartM365GraphMail {
 
 function NewSimpleEmailBody {
     param(
-        [string]$Title,        # Sujet ou titre affiché dans le mail
-        [string]$Message = "See attached report(s) for details."  # Texte par défaut
+        [string]$Title,        # Subject or title displayed in the email
+        [string]$Message = "See attached report(s) for details."  # Default text
     )
 
     $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -1298,13 +1298,16 @@ function SendEmailHtmlReport {
 
     try {
         $moduleLocalConfig = Get-ModuleLocalConfig
+        $callerLocalConfig = Get-SmartM365CallerLocalConfig
         foreach ($configName in @('SmtpServer','From','To','Cc','Subject')) {
             if (-not $PSBoundParameters.ContainsKey($configName)) {
                 $defaultValue = Get-Variable -Name $configName -ValueOnly
                 if ($configName -eq 'To') {
                     $defaultValue = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'ErrorMailTo' -DefaultValue $defaultValue
                 }
-                Set-Variable -Name $configName -Value (Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $configName -DefaultValue $defaultValue) -Scope Local
+                $configValue = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $configName -DefaultValue $defaultValue
+                $configValue = Get-ModuleLocalConfigValue -Config $callerLocalConfig -Name $configName -DefaultValue $configValue
+                Set-Variable -Name $configName -Value $configValue -Scope Local
             }
         }
 
