@@ -1,9 +1,11 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 (
     echo Failed to switch to the launcher directory.
+    echo Launcher path:
+    echo   %~dp0
     pause
     exit /b 1
 )
@@ -24,34 +26,73 @@ if not exist "%POWERSHELL5%" (
 
 set "SMARTM365_ROOT=%SCRIPT_DIR%..\..\..\..\"
 for %%I in ("%SMARTM365_ROOT%") do set "SMARTM365_ROOT=%%~fI\"
-set "LOCAL_SMARTM365_ROOT=%TEMP%\SmartM365LauncherCache\ExchangeLocalMailboxes\SmartM365\"
+
+set "CACHE_BASE=%ProgramData%\SmartM365\LauncherCache\ExchangeLocalMailboxes"
+mkdir "%CACHE_BASE%" >nul 2>&1
+if errorlevel 1 set "CACHE_BASE=%TEMP%\SmartM365LauncherCache\ExchangeLocalMailboxes"
+mkdir "%CACHE_BASE%" >nul 2>&1
+if errorlevel 1 (
+    echo Failed to create local cache base folder:
+    echo   %CACHE_BASE%
+    pause
+    popd
+    exit /b 1
+)
+
+set "LOCAL_SMARTM365_ROOT=%CACHE_BASE%\SmartM365\"
 set "LOCAL_SCRIPT_DIR=%LOCAL_SMARTM365_ROOT%SmartInventory\ExchangeInventory\OnPremises\Mailboxes\"
+set "CACHE_LOG=%CACHE_BASE%\PrepareCache.log"
+
+if exist "%LOCAL_SMARTM365_ROOT%" rmdir /s /q "%LOCAL_SMARTM365_ROOT%" >nul 2>&1
+mkdir "%LOCAL_SCRIPT_DIR%" >nul 2>&1
+mkdir "%LOCAL_SMARTM365_ROOT%Config" >nul 2>&1
+mkdir "%LOCAL_SMARTM365_ROOT%Modules\SmartM365.Core" >nul 2>&1
 
 echo Preparing local SmartM365 PowerShell runtime cache...
-robocopy "%SCRIPT_DIR%" "%LOCAL_SCRIPT_DIR%" /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
-if errorlevel 8 (
+echo Source script folder:
+echo   %SCRIPT_DIR%
+echo Local cache folder:
+echo   %LOCAL_SMARTM365_ROOT%
+
+robocopy "%SCRIPT_DIR%" "%LOCAL_SCRIPT_DIR%" /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /LOG:"%CACHE_LOG%"
+set "ROBOCOPY_EXIT=%ERRORLEVEL%"
+if %ROBOCOPY_EXIT% GEQ 8 (
     echo Failed to prepare local script cache from:
     echo   %SCRIPT_DIR%
+    echo Robocopy exit code: %ROBOCOPY_EXIT%
+    echo Robocopy log:
+    echo   %CACHE_LOG%
     pause
     popd
     exit /b 1
 )
-robocopy "%SMARTM365_ROOT%Config" "%LOCAL_SMARTM365_ROOT%Config" /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
-if errorlevel 8 (
+
+robocopy "%SMARTM365_ROOT%Config" "%LOCAL_SMARTM365_ROOT%Config" /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /LOG+:"%CACHE_LOG%"
+set "ROBOCOPY_EXIT=%ERRORLEVEL%"
+if %ROBOCOPY_EXIT% GEQ 8 (
     echo Failed to prepare local Config cache from:
     echo   %SMARTM365_ROOT%Config
+    echo Robocopy exit code: %ROBOCOPY_EXIT%
+    echo Robocopy log:
+    echo   %CACHE_LOG%
     pause
     popd
     exit /b 1
 )
-robocopy "%SMARTM365_ROOT%Modules\SmartM365.Core" "%LOCAL_SMARTM365_ROOT%Modules\SmartM365.Core" /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
-if errorlevel 8 (
+
+robocopy "%SMARTM365_ROOT%Modules\SmartM365.Core" "%LOCAL_SMARTM365_ROOT%Modules\SmartM365.Core" /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /LOG+:"%CACHE_LOG%"
+set "ROBOCOPY_EXIT=%ERRORLEVEL%"
+if %ROBOCOPY_EXIT% GEQ 8 (
     echo Failed to prepare local SmartM365.Core cache from:
     echo   %SMARTM365_ROOT%Modules\SmartM365.Core
+    echo Robocopy exit code: %ROBOCOPY_EXIT%
+    echo Robocopy log:
+    echo   %CACHE_LOG%
     pause
     popd
     exit /b 1
 )
+
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%LOCAL_SCRIPT_DIR%','%LOCAL_SMARTM365_ROOT%Config','%LOCAL_SMARTM365_ROOT%Modules\SmartM365.Core' -Include *.ps1,*.psm1,*.psd1 -File -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -File "%LOCAL_SCRIPT_DIR%SmartM365-Exchange-Local-Mailboxes-Inventory.ps1" -Tenant test -OnlyADPermission
 set "EXIT_CODE=%ERRORLEVEL%"
