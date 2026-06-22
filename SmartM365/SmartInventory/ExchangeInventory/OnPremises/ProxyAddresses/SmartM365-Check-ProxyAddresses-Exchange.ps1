@@ -59,7 +59,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.0
+1.2
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -286,14 +286,28 @@ $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $Scrip
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $ErrorActionPreference = 'Stop'
     if (-not $PSBoundParameters.ContainsKey('OrganizationalUnit')) { $OrganizationalUnit = @(Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrganizationalUnit' -DefaultValue $OrganizationalUnit) }
-    foreach ($configName in @('ExpectedSuffix','SmtpServer','From','To','Subject')) {
+    foreach ($configName in @('ExpectedSuffix','SmtpServer','From','To')) {
         if (-not $PSBoundParameters.ContainsKey($configName)) {
             Set-Variable -Name $configName -Value (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name $configName -DefaultValue (Get-Variable -Name $configName -ValueOnly)) -Scope Local
         }
     }
+    if (-not $PSBoundParameters.ContainsKey('Subject')) {
+        $subjectProperty = $ScriptLocalConfig.PSObject.Properties['Subject']
+        if ($null -ne $subjectProperty -and $null -ne $subjectProperty.Value) {
+            if ($subjectProperty.Value -is [string]) {
+                $localSubject = $subjectProperty.Value.Trim()
+                if ($localSubject -and $localSubject -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+                    $Subject = Resolve-SmartM365ConfigValue -Value $subjectProperty.Value
+                }
+            }
+            else {
+                $Subject = Resolve-SmartM365ConfigValue -Value $subjectProperty.Value
+            }
+        }
+    }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.0"
+    $ScriptVersion = "1.2"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     function Join-ModulePath {
@@ -815,6 +829,7 @@ try {
 	RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
     WriteLog -Message "$TaskName completed."
+    Complete-SmartM365ExecutionContext -Status Success
     Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
     #endregion
 }

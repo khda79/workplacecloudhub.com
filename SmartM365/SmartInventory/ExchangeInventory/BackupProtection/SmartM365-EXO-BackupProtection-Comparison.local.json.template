@@ -11,17 +11,21 @@
   "RetentionMaxCSV": "__USE_GLOBAL__",
   "RetentionMaxLogs": "__USE_GLOBAL__",
   "ErrorMailTo": "__USE_GLOBAL__",
+  "EnableTeamsNotifications": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
-  "Subject": "__USE_GLOBAL__",
   "EnableSharePointUpload": "__USE_GLOBAL__",
   "SharePointSiteHostname": "__USE_GLOBAL__",
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\BackupProtection",
+  "EXOMailboxesCsvPath": "",
   "GroupDisplayName": "",
   "GroupObjectId": "",
-  "CertificateThumbprint": ""
+  "CertificateThumbprint": "",
+  "EnableWeeklyHistory": true,
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\BackupProtection\\WeeklyHistory",
+  "WeeklyHistoryRetentionWeeks": 52
 }

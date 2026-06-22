@@ -1,6 +1,6 @@
 @{
     RootModule = "SmartM365-WindowsPowerShell5.psm1"
-    ModuleVersion = "1.0.0"
+    ModuleVersion = "1.0.1"
     GUID = "dde15961-7933-412f-8d09-e1dd8a889b65"
     Author = "Internal automation team"
     CompanyName = "Internal"
@@ -14,11 +14,13 @@
         "EnsureExchangePSSnapinLoaded",
         "Format-SmartM365LogLine",
         "Update-SmartM365TimestampedTranscript",
+        "Complete-SmartM365ExecutionContext",
         "WriteLog",
         "Set-SmartM365CoreContext",
         "Write-SmartM365CsvAtomically",
         "Publish-SmartM365Csv",
         "Export-SmartM365Csv",
+        "Save-SmartM365WeeklyInventoryHistory",
         "Send-SmartM365TeamsNotification",
         "SendFileListEmailReport",
         "NewTableFilesEmailBody",

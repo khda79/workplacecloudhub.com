@@ -169,6 +169,102 @@ function Get-ModuleLocalConfigValue {
     return $DefaultValue
 }
 
+function Get-SmartM365CallerLocalConfig {
+    [CmdletBinding()]
+    param()
+
+    foreach ($frame in Get-PSCallStack) {
+        $scriptPath = $frame.ScriptName
+        if ([string]::IsNullOrWhiteSpace($scriptPath) -or $scriptPath -notmatch '\.ps1$') { continue }
+        $configPath = Join-Path -Path (Split-Path -Path $scriptPath -Parent) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($scriptPath))
+        if (-not (Test-Path -LiteralPath $configPath)) { continue }
+        try { return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+        catch {
+            WriteLog -Message ("Failed to read caller local configuration '{0}': {1}" -f $configPath, $_.Exception.Message) -Level 'WARNING'
+            return [pscustomobject]@{}
+        }
+    }
+    return [pscustomobject]@{}
+}
+
+function Get-SmartM365WeeklyHistoryConfigValue {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name, [AllowNull()]$DefaultValue = $null)
+    $callerConfig = Get-SmartM365CallerLocalConfig
+    return Get-ModuleLocalConfigValue -Config $callerConfig -Name $Name -DefaultValue $DefaultValue
+}
+
+function Get-SmartM365IsoWeekName {
+    [CmdletBinding()]
+    param([datetime]$Date = (Get-Date))
+    $calendar = [System.Globalization.CultureInfo]::InvariantCulture.Calendar
+    $dayOfWeek = $calendar.GetDayOfWeek($Date)
+    if ($dayOfWeek -ge [System.DayOfWeek]::Monday -and $dayOfWeek -le [System.DayOfWeek]::Wednesday) { $Date = $Date.AddDays(3) }
+    $week = $calendar.GetWeekOfYear($Date, [System.Globalization.CalendarWeekRule]::FirstFourDayWeek, [System.DayOfWeek]::Monday)
+    return '{0}-W{1:00}' -f $Date.Year, $week
+}
+
+function Get-SmartM365WeeklyHistoryFileName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $fileName = [System.IO.Path]::GetFileName($Path)
+    return ($fileName -replace '_\d{8}[-_]\d{4,6}(?=\.csv$)', '')
+}
+
+function Save-SmartM365WeeklyInventoryHistory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$SourceFiles,
+        [Parameter(Mandatory)][string]$HistoryRootPath,
+        [int]$RetentionWeeks = 52,
+        [string]$HistoryLabel = 'SmartM365 inventory'
+    )
+    if ([string]::IsNullOrWhiteSpace($HistoryRootPath)) { WriteLog -Message ("Weekly {0} history skipped: HistoryRootPath is empty." -f $HistoryLabel); return }
+    $existingSourceFiles = @($SourceFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($existingSourceFiles.Count -eq 0) { WriteLog -Message ("Weekly {0} history skipped: no source CSV file found." -f $HistoryLabel); return }
+    $weekName = Get-SmartM365IsoWeekName
+    $weekFolder = Join-Path -Path $HistoryRootPath -ChildPath $weekName
+    New-Item -Path $weekFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    $copiedFiles = New-Object System.Collections.Generic.List[string]
+    foreach ($sourceFile in $existingSourceFiles) {
+        $destinationFileName = Get-SmartM365WeeklyHistoryFileName -Path $sourceFile
+        $destinationFile = Join-Path -Path $weekFolder -ChildPath $destinationFileName
+        if (Test-Path -LiteralPath $destinationFile -PathType Leaf) { continue }
+        Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force -ErrorAction Stop
+        [void]$copiedFiles.Add($destinationFile)
+    }
+    $manifest = [pscustomobject][ordered]@{
+        UpdatedAt       = (Get-Date).ToString('o')
+        Week            = $weekName
+        HistoryLabel    = $HistoryLabel
+        HistoryRootPath = $HistoryRootPath
+        Files           = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
+    }
+    $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path -Path $weekFolder -ChildPath 'manifest.json') -Encoding UTF8
+    if ($copiedFiles.Count -gt 0) { WriteLog -Message ("Weekly {0} history saved for {1}: {2} new file(s) in {3}" -f $HistoryLabel, $weekName, $copiedFiles.Count, $weekFolder) }
+    else { WriteLog -Message ("Weekly {0} history already exists for {1}. Snapshot skipped: {2}" -f $HistoryLabel, $weekName, $weekFolder) }
+    if ($RetentionWeeks -gt 0) {
+        $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{4}-W\d{2}$' } | Sort-Object Name -Descending | Select-Object -Skip $RetentionWeeks)
+        foreach ($oldWeekFolder in $oldWeekFolders) {
+            try { Remove-Item -LiteralPath $oldWeekFolder.FullName -Recurse -Force -ErrorAction Stop; WriteLog -Message ("Deleted old weekly {0} history folder: {1}" -f $HistoryLabel, $oldWeekFolder.FullName) }
+            catch { WriteLog -Message ("Failed to delete old weekly {0} history folder '{1}': {2}" -f $HistoryLabel, $oldWeekFolder.FullName, $_.Exception.Message) -Level 'WARNING' }
+        }
+    }
+}
+
+function Invoke-SmartM365WeeklyInventoryHistoryForCsv {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string[]]$SourceFiles, [string]$TimestampedPath)
+    $enabled = [bool](Get-SmartM365WeeklyHistoryConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $false)
+    if (-not $enabled) { return }
+    $historyRootPath = Get-SmartM365WeeklyHistoryConfigValue -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
+    if ([string]::IsNullOrWhiteSpace($historyRootPath) -and -not [string]::IsNullOrWhiteSpace($TimestampedPath)) {
+        $sourceFolder = Split-Path -Path $TimestampedPath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($sourceFolder)) { $historyRootPath = Join-Path -Path $sourceFolder -ChildPath 'WeeklyHistory' }
+    }
+    $retentionWeeks = [int](Get-SmartM365WeeklyHistoryConfigValue -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
+    Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceFiles -HistoryRootPath $historyRootPath -RetentionWeeks $retentionWeeks
+}
 #region Logging and file helpers
 
 function Format-SmartM365LogLine {
@@ -784,6 +880,8 @@ function Publish-SmartM365Csv {
     if (-not $NoSharePointUpload) {
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $publishedPath
     }
+
+    Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($publishedPath) -TimestampedPath $TimestampedPath
 
     return [pscustomobject]@{
         TimestampedPath = $TimestampedPath
@@ -1952,6 +2050,9 @@ function ExportAndCopyCsv {
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath2
     }
 
+    $historySourcePath = if ($globalCopyDone) { $csvFilePath3 } else { $csvFilePath2 }
+    Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+
     WriteLog -Message "CSV export completed: $csvFilePath1"
 }
 
@@ -2056,6 +2157,9 @@ function ExportAndCopyCsvFromConvert {
         else {
             Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath2
         }
+
+        $historySourcePath = if ($globalCopyDone) { $csvFilePath3 } else { $csvFilePath2 }
+        Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
 
     } catch {
         WriteLog -Message "Unexpected error during CSV export process: $_" -Level Error
@@ -2544,6 +2648,6 @@ Export-ModuleMember -Function `
     ConvertToRecipientArray, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
     TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, Invoke-SmartM365SharePointCsvUpload, `
-    ExportAndCopyCsv, ExportAndCopyCsvFromConvert, `
+    ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession

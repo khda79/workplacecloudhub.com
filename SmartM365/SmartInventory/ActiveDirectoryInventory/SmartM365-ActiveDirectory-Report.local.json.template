@@ -20,7 +20,10 @@
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
+  "LockRoot": "C:\\ProgramData\\SmartM365\\Locks",
+  "ActiveDirectoryReportCsvLogFolderPath": "{{DataAllRootPath}}\\ActiveDirectory\\Report",
+  "DailyLockName": "SmartM365-ActiveDirectory-Report",
   "EnableWeeklyHistory": true,
-  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\UpgradeEligibility\\WeeklyHistory",
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\ActiveDirectory\\Report\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
 }
