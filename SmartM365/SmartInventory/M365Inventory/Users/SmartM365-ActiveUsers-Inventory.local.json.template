@@ -22,6 +22,7 @@
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "ActiveUsersCsvLogFolderPath": "{{DataAllRootPath}}\\M365\\Users\\ActiveUsers",
   "M365InventoryRootFolderPath": "{{DataAllRootPath}}\\M365",
+  "SkuNameCsvPath": "{{SmartM365RootPath}}\\SmartInventory\\M365Inventory\\Licensing\\Product names and service plan identifiers for licensing.csv",
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\M365\\Users\\ActiveUsers\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52

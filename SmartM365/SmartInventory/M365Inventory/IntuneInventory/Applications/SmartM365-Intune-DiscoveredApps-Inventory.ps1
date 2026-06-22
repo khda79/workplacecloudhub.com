@@ -28,10 +28,13 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
+.VERSION
+1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.0
+    Version : 1.1
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -256,9 +259,15 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
+if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
+    $DelayMs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRequestDelayMs' -DefaultValue 1000)
+}
+$script:GraphMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphMaxRetryAttempts' -DefaultValue 8)
+$script:GraphRetryDefaultSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryDefaultSeconds' -DefaultValue 30)
+$script:GraphRetryMaxSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryMaxSeconds' -DefaultValue 300)
 # Statistics
 $script:Stat_AppsTotal        = 0
 $script:Stat_AppsWindows      = 0
@@ -303,25 +312,61 @@ function Test-GraphConnection {
     }
 }
 
-# Paginated Graph request with throttle (429) retry
-function Invoke-GraphPagedRequest {
+# Paginated Graph request with transient retry
+function Get-ShortGraphErrorMessage {
+    [CmdletBinding()]
+    param([AllowNull()]$ErrorRecord)
+
+    $message = if ($ErrorRecord -and $ErrorRecord.Exception) { [string]$ErrorRecord.Exception.Message } else { [string]$ErrorRecord }
+    $message = ($message -replace '\s+', ' ').Trim()
+    if ($message.Length -gt 500) { return ($message.Substring(0, 500) + '...') }
+    return $message
+}
+
+function Get-GraphRetryDelaySeconds {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]  [string]$InitialUri,
-        [Parameter(Mandatory = $false)] [int]$MaxRetries = 6,
-        [Parameter(Mandatory = $false)] [int]$DefaultRetrySeconds = 30
+        [AllowNull()]$ErrorRecord,
+        [int]$Attempt,
+        [int]$DefaultSeconds = 30,
+        [int]$MaximumSeconds = 300
     )
 
-    $allItems   = [System.Collections.Generic.List[psobject]]::new()
+    $retryAfter = $null
+    try {
+        if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.Headers) {
+            $retryAfter = @($ErrorRecord.Exception.Response.Headers.GetValues('Retry-After') | Select-Object -First 1)[0]
+        }
+    } catch {}
+    if (-not $retryAfter) { try { $retryAfter = $ErrorRecord.Exception.Data['Retry-After'] } catch {} }
+
+    $seconds = 0
+    if ($retryAfter -and [int]::TryParse([string]$retryAfter, [ref]$seconds) -and $seconds -gt 0) {
+        return [math]::Min($seconds, $MaximumSeconds)
+    }
+
+    $backoff = [math]::Min($MaximumSeconds, $DefaultSeconds * [math]::Pow(2, [math]::Max(0, $Attempt - 1)))
+    return [int]($backoff + (Get-Random -Minimum 0 -Maximum 5))
+}
+
+function Invoke-GraphPagedRequest {
+    param(
+        [Parameter(Mandatory = $true)] [string]$InitialUri,
+        [Parameter(Mandatory = $false)] [int]$MaxRetries = $script:GraphMaxRetryAttempts,
+        [Parameter(Mandatory = $false)] [int]$DefaultRetrySeconds = $script:GraphRetryDefaultSeconds
+    )
+
+    if ($MaxRetries -lt 1) { $MaxRetries = 1 }
+    $allItems = [System.Collections.Generic.List[psobject]]::new()
     $currentUri = $InitialUri
 
     while ($null -ne $currentUri) {
-        $attempt = 0
         $success = $false
 
-        while (-not $success -and $attempt -le $MaxRetries) {
+        for ($attempt = 1; -not $success -and $attempt -le $MaxRetries; $attempt++) {
             try {
                 $script:Stat_GraphCalls++
-                $response = Invoke-MgGraphRequest -Method GET -Uri $currentUri -OutputType PSObject
+                $response = Invoke-MgGraphRequest -Method GET -Uri $currentUri -OutputType PSObject -ErrorAction Stop
 
                 if ($null -ne $response.value) {
                     foreach ($item in $response.value) { $allItems.Add($item) }
@@ -334,36 +379,21 @@ function Invoke-GraphPagedRequest {
                 $success = $true
             } catch {
                 $statusCode = $null
-                try {
-                    if ($_.Exception.PSObject.Properties.Name -contains 'Response' -and $null -ne $_.Exception.Response) {
-                        $statusCode = [int]$_.Exception.Response.StatusCode
-                    }
-                } catch {}
+                try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+                $message = Get-ShortGraphErrorMessage -ErrorRecord $_
+                $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
 
-                $isTooManyRequests = $statusCode -eq 429 -or $_.Exception.Message -like '*TooManyRequests*'
-
-                if ($isTooManyRequests) {
-                    $retryAfter = $DefaultRetrySeconds
-                    try {
-                        $headerValue = $_.Exception.Response.Headers.GetValues('Retry-After') | Select-Object -First 1
-                        if ($null -ne $headerValue -and [int]$headerValue -gt 0) { $retryAfter = [int]$headerValue }
-                    } catch {}
-
-                    $attempt++
-                    $script:Stat_ThrottleRetries++
-                    WriteLog -Message "Throttled (TooManyRequests) on [$currentUri]. Attempt $attempt/$MaxRetries. Waiting $retryAfter s." "WARNING"
-                    Start-Sleep -Seconds $retryAfter
-                } else {
-                    WriteLog -Message "Graph request failed on [$currentUri]: $_" "ERROR"
-                    throw
+                if (-not $isTransient -or $attempt -ge $MaxRetries) {
+                    $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                    throw ("Graph request failed. Status={0}; Attempts={1}; Uri={2}; Message={3}" -f $statusText, $attempt, $currentUri, $message)
                 }
-            }
-        }
 
-        if (-not $success) {
-            $errorMsg = "Max retries ($MaxRetries) exceeded for URI: $currentUri"
-            WriteLog -Message $errorMsg "ERROR"
-            throw $errorMsg
+                $retryAfter = Get-GraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt -DefaultSeconds $DefaultRetrySeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+                $script:Stat_ThrottleRetries++
+                $statusRetryText = if ($statusCode) { $statusCode } else { 'unknown' }
+                WriteLog -Message ("Graph transient failure on [$currentUri]. Status={0}; attempt {1}/{2}; waiting {3}s." -f $statusRetryText, $attempt, $MaxRetries, $retryAfter) "WARNING"
+                Start-Sleep -Seconds $retryAfter
+            }
         }
     }
 
@@ -375,6 +405,7 @@ function Invoke-GraphPagedRequest {
 # ==========================================================
 $connectedGraphInThisRun = $false
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$script:RunError = $null
 
 try {
 
@@ -626,5 +657,11 @@ $($global:LogTextFile)
     WriteLog -Message "  Elapsed time                         : $elapsedStr"
     WriteLog -Message "$TaskName completed."
 
+    try {
+        $summaryStatus = if ($script:RunError) { 'Failed' } else { 'Auto' }
+        Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $script:RunError
+    } catch {
+        WriteLog -Message ("Failed to write execution summary: {0}" -f $_) "WARNING"
+    }
     try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
 }

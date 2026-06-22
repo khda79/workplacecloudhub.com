@@ -1875,6 +1875,147 @@ function Connect-SmartM365GraphForSharePointUpload {
     return $connected
 }
 
+function Get-SmartM365GraphRetryAfterSeconds {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [int]$DefaultSeconds = 15,
+        [int]$MaximumSeconds = 300
+    )
+
+    $retryAfter = $null
+    try {
+        if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.Headers) {
+            $headerValues = $ErrorRecord.Exception.Response.Headers.GetValues('Retry-After')
+            $retryAfter = @($headerValues | Select-Object -First 1)[0]
+        }
+    }
+    catch {}
+
+    if ([string]::IsNullOrWhiteSpace([string]$retryAfter)) {
+        try { $retryAfter = $ErrorRecord.Exception.Data['Retry-After'] } catch {}
+    }
+
+    $seconds = 0
+    if ($retryAfter -and [int]::TryParse([string]$retryAfter, [ref]$seconds) -and $seconds -gt 0) {
+        return [math]::Min($seconds, $MaximumSeconds)
+    }
+
+    return [math]::Min([math]::Max(1, $DefaultSeconds), $MaximumSeconds)
+}
+
+function Invoke-SmartM365GraphRestWithRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('GET','POST','PUT','PATCH','DELETE')][string]$Method,
+        [Parameter(Mandatory)][string]$Uri,
+        [AllowNull()]$Body = $null,
+        [string]$ContentType = 'application/json',
+        [int]$MaxAttempts = 4,
+        [int]$DefaultRetrySeconds = 15,
+        [int]$MaximumRetrySeconds = 300,
+        [string]$Operation = 'Graph request'
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $params = @{
+                Method      = $Method
+                Uri         = $Uri
+                ErrorAction = 'Stop'
+            }
+            if ($null -ne $Body) { $params.Body = $Body }
+            if (-not [string]::IsNullOrWhiteSpace($ContentType)) { $params.ContentType = $ContentType }
+            return Invoke-MgGraphRequest @params
+        }
+        catch {
+            $statusCode = $null
+            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+            $message = [string]$_.Exception.Message
+            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable'
+            if (-not $isTransient -or $attempt -ge $MaxAttempts) { throw }
+
+            $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
+            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+            WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusText, $attempt, $MaxAttempts, $delay) -Level "WARNING"
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
+function Invoke-SmartM365SharePointLargeFileUpload {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LocalFilePath,
+        [Parameter(Mandatory)][string]$DriveId,
+        [Parameter(Mandatory)][string]$TargetPath,
+        [int]$ChunkSizeBytes = 10485760
+    )
+
+    $fileInfo = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
+    $sessionBody = @{
+        item = @{
+            '@microsoft.graph.conflictBehavior' = 'replace'
+            name = $fileInfo.Name
+        }
+    } | ConvertTo-Json -Depth 5
+    $sessionUri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/createUploadSession" -f $DriveId, $TargetPath
+    $session = Invoke-SmartM365GraphRestWithRetry -Method POST -Uri $sessionUri -Body $sessionBody -ContentType 'application/json' -Operation 'Create SharePoint upload session'
+    if ($null -eq $session -or [string]::IsNullOrWhiteSpace([string]$session.uploadUrl)) {
+        throw "SharePoint upload session did not return an uploadUrl."
+    }
+
+    $uploadUrl = [string]$session.uploadUrl
+    $stream = [System.IO.File]::OpenRead($LocalFilePath)
+    try {
+        $buffer = New-Object byte[] $ChunkSizeBytes
+        $offset = [int64]0
+        while ($offset -lt $stream.Length) {
+            $remaining = $stream.Length - $offset
+            $readSize = [int][math]::Min($ChunkSizeBytes, $remaining)
+            $bytesRead = $stream.Read($buffer, 0, $readSize)
+            if ($bytesRead -le 0) { break }
+
+            $chunk = if ($bytesRead -eq $buffer.Length) {
+                $buffer
+            }
+            else {
+                $tmp = New-Object byte[] $bytesRead
+                [System.Array]::Copy($buffer, 0, $tmp, 0, $bytesRead)
+                $tmp
+            }
+
+            $rangeEnd = $offset + $bytesRead - 1
+            $headers = @{
+                'Content-Length' = [string]$bytesRead
+                'Content-Range'  = ('bytes {0}-{1}/{2}' -f $offset, $rangeEnd, $stream.Length)
+            }
+
+            $uploaded = $false
+            for ($attempt = 1; -not $uploaded -and $attempt -le 4; $attempt++) {
+                try {
+                    Invoke-RestMethod -Method Put -Uri $uploadUrl -Headers $headers -Body $chunk -ErrorAction Stop | Out-Null
+                    $uploaded = $true
+                }
+                catch {
+                    $statusCode = $null
+                    try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+                    $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $_.Exception.Message -match 'timeout|temporarily unavailable|throttl'
+                    if (-not $isTransient -or $attempt -ge 4) { throw }
+                    $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (10 * $attempt) -MaximumSeconds 300
+                    $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                    WriteLog -Message ("SharePoint chunk upload transient failure. Status={0}; attempt {1}/4; retrying in {2}s." -f $statusText, $attempt, $delay) -Level "WARNING"
+                    Start-Sleep -Seconds $delay
+                }
+            }
+
+            $offset += $bytesRead
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
 function Invoke-SmartM365SharePointCsvUpload {
     [CmdletBinding()]
     param(
@@ -1903,17 +2044,15 @@ function Invoke-SmartM365SharePointCsvUpload {
     }
 
     try {
-        if ($null -eq $script:SmartM365SharePointDriveIdCache) {
-            $script:SmartM365SharePointDriveIdCache = @{}
-        }
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) { $script:SmartM365SharePointDriveIdCache = @{} }
 
         $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
         if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
             $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
         }
         else {
-            $site = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath)
-            $drives = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id)
+            $site = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath) -Operation 'Resolve SharePoint site'
+            $drives = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id) -Operation 'Resolve SharePoint document libraries'
             $driveList = @($drives.value)
             $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
             $drive = @($driveList | Where-Object { $_.name -ieq $LibraryDisplayName } | Select-Object -First 1)[0]
@@ -1926,16 +2065,24 @@ function Invoke-SmartM365SharePointCsvUpload {
                 WriteLog -Message "SharePoint upload skipped: document library '$LibraryDisplayName' not found. Available drives: $available" -Level "WARNING"
                 return
             }
-
             $driveId = $drive.id
             $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
         }
 
-        $fileName = [System.IO.Path]::GetFileName($LocalFilePath)
+        $fileInfo = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
+        $fileName = $fileInfo.Name
         $targetPath = ConvertTo-GraphDrivePath (Join-Path -Path $TargetFolderPath -ChildPath $fileName)
+        $largeUploadThresholdBytes = 250MB
+        if ($fileInfo.Length -gt $largeUploadThresholdBytes) {
+            WriteLog -Message ("SharePoint CSV large upload started: {0}/{1} ({2:N1} MB)" -f $TargetFolderPath, $fileName, ($fileInfo.Length / 1MB))
+            Invoke-SmartM365SharePointLargeFileUpload -LocalFilePath $LocalFilePath -DriveId $driveId -TargetPath $targetPath
+            WriteLog -Message "SharePoint CSV uploaded: $TargetFolderPath/$fileName"
+            return
+        }
+
         $bytes = [System.IO.File]::ReadAllBytes($LocalFilePath)
         $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
-        Invoke-MgGraphRequest -Method PUT -Uri $uri -Body $bytes -ContentType 'application/octet-stream' | Out-Null
+        Invoke-SmartM365GraphRestWithRetry -Method PUT -Uri $uri -Body $bytes -ContentType 'application/octet-stream' -Operation 'Upload SharePoint CSV' | Out-Null
         WriteLog -Message "SharePoint CSV uploaded: $TargetFolderPath/$fileName"
     }
     catch {
