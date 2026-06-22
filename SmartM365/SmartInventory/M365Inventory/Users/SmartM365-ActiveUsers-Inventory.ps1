@@ -17,8 +17,11 @@
 .PARAMETER InteractiveAuth
     Uses interactive authentication instead of app-only certificate authentication.
 
+.VERSION
+1.1
+
 .NOTES
-    Version: 1.0
+    Version: 1.1
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
     Scopes: User.Read.All, Directory.Read.All, AuditLog.Read.All
@@ -354,7 +357,7 @@ $csvPathLatest            = ""
 try {
     #region Initialization
 
-    $ScriptVersion = "1.0"
+    $ScriptVersion = "1.1"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
@@ -459,13 +462,23 @@ try {
     WriteLog -Message "Reading local CSV file containing license information..."
     $currentOperation = "Load local license dictionary"
     $LocalCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'M365InventoryRootFolderPath' -DefaultValue ''
-    $localCsvPath       = Join-Path $LocalCsvFolderPath "Product names and service plan identifiers for licensing.csv"
+    $licenseDictionaryFileName = "Product names and service plan identifiers for licensing.csv"
+    $candidateLicenseDictionaryPaths = New-Object System.Collections.Generic.List[string]
+    $configuredLicenseDictionaryPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SkuNameCsvPath' -DefaultValue ''
+    if (-not [string]::IsNullOrWhiteSpace($configuredLicenseDictionaryPath)) { $candidateLicenseDictionaryPaths.Add($configuredLicenseDictionaryPath) | Out-Null }
+    if (-not [string]::IsNullOrWhiteSpace($LocalCsvFolderPath)) { $candidateLicenseDictionaryPaths.Add((Join-Path $LocalCsvFolderPath $licenseDictionaryFileName)) | Out-Null }
+    $candidateLicenseDictionaryPaths.Add((Join-Path $PSScriptRoot $licenseDictionaryFileName)) | Out-Null
+    $candidateLicenseDictionaryPaths.Add((Join-Path (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'Licensing') $licenseDictionaryFileName)) | Out-Null
+    $localCsvPath = @($candidateLicenseDictionaryPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1)[0]
+    if ([string]::IsNullOrWhiteSpace($localCsvPath)) {
+        $localCsvPath = @($candidateLicenseDictionaryPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)[0]
+    }
 
     $skuMap = @{}
 
     try {
-        if (Test-Path $localCsvPath) {
-            $csvData = Import-Csv -Path $localCsvPath
+        if ($localCsvPath -and (Test-Path -LiteralPath $localCsvPath)) {
+            $csvData = Import-Csv -LiteralPath $localCsvPath
             foreach ($row in $csvData) {
                 $guid = $row.GUID.ToLower()
                 $name = $row.'Product_Display_Name'
@@ -473,7 +486,7 @@ try {
                     $skuMap[$guid] = $name
                 }
             }
-            WriteLog -Message "License dictionary loaded from local file."
+            WriteLog -Message ("License dictionary loaded from local file: {0}" -f $localCsvPath)
         }
         else {
             WriteLog -Message "Local CSV file not found: $localCsvPath" "WARNING"
@@ -726,6 +739,13 @@ finally {
 
     #region Stop Transcript + final status
 
+    try {
+        $summaryStatus = if ($global:ScriptFailed) { 'Failed' } else { 'Auto' }
+        $summaryError = if ($global:ScriptFailed) { $globalError } else { $null }
+        Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $summaryError -FailureStage $currentOperation
+    } catch {
+        WriteLog -Message ("Failed to write execution summary: {0}" -f $_) "WARNING"
+    }
     try {
         Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
     }
