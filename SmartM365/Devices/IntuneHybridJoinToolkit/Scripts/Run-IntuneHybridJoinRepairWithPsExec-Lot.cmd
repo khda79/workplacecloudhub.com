@@ -42,6 +42,8 @@ set "CENTRAL_LOGS=%LOT_DIR%CentralLogs"
 set "PSEXEC_EXE=%ROOT_DIR%\Scripts\PsExec.exe"
 set "WRAPPER_REFRESH_SCRIPT=%ROOT_DIR%\Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
 
+call :PrintStartupInfo
+
 if not exist "%SCRIPT%" (
     echo ERROR: Script not found:
     echo "%SCRIPT%"
@@ -214,6 +216,35 @@ echo Finished with exit code %EXITCODE%.
 pause
 popd
 exit /b %EXITCODE%
+
+:PrintStartupInfo
+if not defined EHJIR_THROTTLE set "EHJIR_THROTTLE=10"
+if not defined EHJIR_GLOBAL_CONCURRENCY_LIMIT set "EHJIR_GLOBAL_CONCURRENCY_LIMIT=15"
+if not defined EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES set "EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES=0"
+if not defined EHJIR_DELAY_BETWEEN_CYCLES_MINUTES set "EHJIR_DELAY_BETWEEN_CYCLES_MINUTES=5"
+if not defined EHJIR_NIGHT_PAUSE_START_HOUR set "EHJIR_NIGHT_PAUSE_START_HOUR=20"
+if not defined EHJIR_NIGHT_PAUSE_END_HOUR set "EHJIR_NIGHT_PAUSE_END_HOUR=7"
+if not defined EHJIR_DISABLE_NIGHT_PAUSE set "EHJIR_DISABLE_NIGHT_PAUSE=0"
+if not defined EHJIR_SKIP_PRE_RUN_ARCHIVE set "EHJIR_SKIP_PRE_RUN_ARCHIVE=0"
+echo.
+echo SmartM365 Intune Hybrid Join Toolkit - LOT PsExec launcher
+echo Started       : %DATE% %TIME%
+echo LOT           : %LOT_DIR%
+echo Root          : %ROOT_DIR%
+echo Script        : %SCRIPT%
+echo Computers     : %COMPUTERS%
+echo PsExec logs   : %PSEXEC_LOGS%
+echo Reports       : %REPORTS%
+echo Central logs  : %CENTRAL_LOGS%
+if /I "%EHJIR_RUN_ONCE%"=="1" (echo Mode          : Once) else (echo Mode          : Loop)
+if /I "%EHJIR_IGNORE_RUN_GUARD%"=="1" (echo Run guard     : Ignored) else (echo Run guard     : Enabled)
+echo Worker limit  : Local=%EHJIR_THROTTLE%; Global=%EHJIR_GLOBAL_CONCURRENCY_LIMIT%; LeaseTimeout=%EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES% minute(s)
+echo Cycle delay   : %EHJIR_DELAY_BETWEEN_CYCLES_MINUTES% minute(s)
+if /I "%EHJIR_DISABLE_NIGHT_PAUSE%"=="1" (echo Night pause   : Disabled) else (echo Night pause   : Enabled %EHJIR_NIGHT_PAUSE_START_HOUR%:00-%EHJIR_NIGHT_PAUSE_END_HOUR%:00)
+if /I "%EHJIR_SKIP_PRE_RUN_ARCHIVE%"=="1" (echo Pre-run archive: Disabled) else (echo Pre-run archive: Enabled)
+if not "%EHJIR_AD_DOMAIN%"=="" echo AD domain     : %EHJIR_AD_DOMAIN%
+echo.
+exit /b 0
 
 :NormalizeInt
 set "_EHJIR_VAR_NAME=%~1"

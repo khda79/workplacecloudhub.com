@@ -15,6 +15,7 @@ rem Always exports the full Microsoft Entra devices inventory.
 set "ROOT_DIR=%CD%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1"
 set "OUTPUT=%ROOT_DIR%DevicesEntra.csv"
+call :PrintStartupInfo
 
 if not exist "%SCRIPT%" (
     echo ERROR: Script not found:
@@ -45,3 +46,13 @@ echo Finished with exit code %EXITCODE%.
 pause
 popd
 exit /b %EXITCODE%
+:PrintStartupInfo
+echo.
+echo SmartM365 Intune Hybrid Join Toolkit - Entra export launcher
+echo Started : %DATE% %TIME%
+echo Root    : %ROOT_DIR%
+echo Script  : %SCRIPT%
+echo Output  : %OUTPUT%
+echo Page    : 999
+echo.
+exit /b 0

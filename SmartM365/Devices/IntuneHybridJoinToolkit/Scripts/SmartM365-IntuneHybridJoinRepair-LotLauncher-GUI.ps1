@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.0
+1.1
 #>
 param(
     [switch]$ValidateOnly
@@ -11,6 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$GuiVersion = '1.1'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -22,6 +23,39 @@ function Get-ToolkitRoot {
     return Split-Path -Parent $scriptsRoot
 }
 
+function Get-ScriptHeaderVersion {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return 'missing'
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+        $match = [regex]::Match($content, '(?m)^\.VERSION\s*\r?\n\s*([^\r\n]+)')
+        if ($match.Success) {
+            return $match.Groups[1].Value.Trim()
+        }
+
+        $scriptVersionMatch = [regex]::Match($content, '(?m)^\s*\$ScriptVersion\s*=\s*"([^"\r\n]+)"')
+        if ($scriptVersionMatch.Success) {
+            return $scriptVersionMatch.Groups[1].Value.Trim()
+        }
+    }
+    catch {}
+
+    return 'unknown'
+}
+
+function Write-GuiStartupLog {
+    param([string]$Message)
+
+    try {
+        $line = '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $Message
+        Add-Content -LiteralPath $script:GuiStartupLogPath -Value $line -Encoding UTF8
+    }
+    catch {}
+}
 function Import-SmartM365GuiSplash {
     $current = Get-ToolkitRoot
     while ($current) {
@@ -398,12 +432,16 @@ function Get-IntText {
 }
 
 $toolkitRoot = Get-ToolkitRoot
+$script:GuiStartupLogPath = Join-Path $toolkitRoot 'GuiLauncherStartup.log'
+$script:PsExecLauncherPath = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec.ps1'
+$script:PsExecLauncherVersion = Get-ScriptHeaderVersion -Path $script:PsExecLauncherPath
+Write-GuiStartupLog -Message ('GUI launcher startup; GuiVersion={0}; PsExecLauncherVersion={1}; Root={2}; Script={3}; PID={4}; User={5}' -f $GuiVersion,$script:PsExecLauncherVersion,$toolkitRoot,$PSCommandPath,$PID,[Environment]::UserName)
 $launchAllLotStartDelaySeconds = 5
 
 if ($ValidateOnly) {
     $lots = @(Get-LotFolders -Root $toolkitRoot | ForEach-Object { Get-LotSummary -Folder $_ })
     $ready = @($lots | Where-Object { $_.DeviceCount -gt 0 -and $_.WrappersReady }).Count
-    Write-Output "Smart Intune Hybrid Join Toolkit LOT Launcher GUI validation completed. Lots=$($lots.Count); Ready=$ready"
+    Write-Output "Smart Intune Hybrid Join Toolkit LOT Launcher GUI validation completed. GuiVersion=$GuiVersion; PsExecLauncherVersion=$script:PsExecLauncherVersion; Lots=$($lots.Count); Ready=$ready"
     return
 }
 
@@ -1276,6 +1314,7 @@ if (Get-Command -Name Set-SmartM365WpfWindowVisible -ErrorAction SilentlyContinu
 
 try {
     Refresh-LotList
+    Add-Status -Title 'Ready' -Message ('GUI {0}; PsExec launcher {1}; {2} LOT(s), {3} ready. Startup log: {4}' -f $GuiVersion,$script:PsExecLauncherVersion,$script:Lots.Count,@(Get-LaunchableLotSummaries).Count,$script:GuiStartupLogPath)
     if ($splash) {
         Close-SmartM365GuiSplash -Splash $splash
     }
