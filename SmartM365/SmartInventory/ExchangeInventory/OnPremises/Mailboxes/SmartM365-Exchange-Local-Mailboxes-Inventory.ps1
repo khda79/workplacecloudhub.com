@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.11
+1.12
 
 .NOTES
-    Version: 1.11
+    Version: 1.12
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -1222,7 +1222,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
 							Write-Host "`nMailbox: $($Mbx.DisplayName)"
 							foreach ($perm in $sendAsPermissions) {
 								$SendAsUsersList += $perm.User
-								Write-Host "  SendAs accordé à : $($perm.User)"
+								Write-Host "  SendAs granted to: $($perm.User)"
 							}
 							$SendAsUsersList = $SendAsUsersList | Select-Object -Unique
 							$SendAsUserCount = $SendAsUsersList.Count
@@ -1480,7 +1480,7 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
             if (Test-Path $perDomainCsvFullPath) {
                 if (-not $ForceOverwriteCSV) {
                     # MODIFICATION START: Load data from existing CSV instead of just skipping
-                    $loadMessage = "Le fichier CSV par domaine '$perDomainCsvFullPath' pour le domaine '$domainName' existe déjà et -ForceOverwriteCSV est `$false. Tentative de chargement des données depuis ce fichier."
+                    $loadMessage = "Per-domain CSV file '$perDomainCsvFullPath' for domain '$domainName' already exists and -ForceOverwriteCSV is `$false. Loading data from this file."
                     WriteLog -Message "INFO: $loadMessage"
                     Write-Host -ForegroundColor Cyan $loadMessage
 
@@ -1488,20 +1488,20 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
                         $existingData = Import-Csv -Path $perDomainCsvFullPath -Encoding UTF8 -ErrorAction Stop
                         if ($existingData -and $existingData.Count -gt 0) {
                             $Global:ScriptOverallMailboxData += $existingData
-                            $successMessage = "Chargement réussi de $($existingData.Count) enregistrements depuis '$perDomainCsvFullPath' et ajoutés aux données globales. Le traitement en direct pour le domaine '$domainName' sera ignoré."
+                            $successMessage = "Successfully loaded $($existingData.Count) records from '$perDomainCsvFullPath' and added them to global data. Live processing for domain '$domainName' will be skipped."
                             WriteLog -Message "INFO: $successMessage"
                             Write-Host -ForegroundColor Green $successMessage
                         } elseif ($existingData) { # File exists but is empty
-                             $emptyFileMessage = "Le fichier CSV '$perDomainCsvFullPath' existe mais est vide. Aucun enregistrement n'a été chargé. Le traitement en direct pour le domaine '$domainName' sera ignoré."
+                             $emptyFileMessage = "CSV file '$perDomainCsvFullPath' exists but is empty. No records were loaded. Live processing for domain '$domainName' will be skipped."
                              WriteLog -Message "INFO: $emptyFileMessage" # Changed from WARNING to INFO as it's an expected scenario
                              Write-Host -ForegroundColor Cyan $emptyFileMessage
                         } else { # Should not happen if Import-Csv did not error but returned $null for $existingData
-                            $nullDataMessage = "L'importation depuis '$perDomainCsvFullPath' n'a retourné aucune donnée (possiblement un fichier vide ou mal formé non détecté comme erreur). Le traitement en direct pour le domaine '$domainName' sera ignoré."
+                            $nullDataMessage = "Import from '$perDomainCsvFullPath' returned no data (possibly an empty or malformed file not detected as an error). Live processing for domain '$domainName' will be skipped."
                             WriteLog -Message "WARNING: $nullDataMessage"
                             Write-Host -ForegroundColor Yellow $nullDataMessage
                         }
                     } catch {
-                        $importErrorMessage = "ERREUR: Échec de l'importation des données depuis le CSV existant '$perDomainCsvFullPath' pour le domaine '$domainName'. Message: $($_.Exception.Message). Le traitement en direct pour ce domaine sera ignoré."
+                        $importErrorMessage = "ERROR: Failed to import data from existing CSV '$perDomainCsvFullPath' for domain '$domainName'. Message: $($_.Exception.Message). Live processing for this domain will be skipped."
                         WriteLog -message $importErrorMessage
                         Write-Error $importErrorMessage # Keep as Write-Error for visibility
                     }
@@ -2259,4 +2259,3 @@ Else
 }
 }
 #End of script
-
