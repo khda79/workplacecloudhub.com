@@ -59,7 +59,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.3
+1.4
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -307,7 +307,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.3"
+    $ScriptVersion = "1.4"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -325,7 +325,6 @@ $ErrorActionPreference = 'Stop'
         WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
         $OutputPath = $InitializeOutputPath
         WriteLog -Message "Starting $TaskName..."
-        WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
     } catch {
         Write-Host "Initialization failed: $($_.Exception.Message)`n$($_.ScriptStackTrace)" -ForegroundColor Red
         exit
@@ -722,13 +721,21 @@ try {
     }
     else {
         $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $totalCount = 0
+        foreach ($item in @($summary)) { $totalCount += [int]$item.Count }
+        $presentCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address present' } | Select-Object -First 1).Count)
+        $missingCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address missing' } | Select-Object -First 1).Count)
+        $allowMissingCount = [int](($summary | Where-Object { $_.Summary -eq 'With missing but in allowlist' } | Select-Object -First 1).Count)
+        $notAllowMissingCount = [int](($summary | Where-Object { $_.Summary -eq 'With missing but NOT in allowlist' } | Select-Object -First 1).Count)
+        $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Added' } | Select-Object -First 1).Count)
+        $modeLabel = if ($AddMissingAddress) { 'Write mode' } else { 'Read-only mode' }
+        $modeColor = if ($AddMissingAddress) { '#b45309' } else { '#047857' }
+        $allowListMode = if ($SkipAllowListCsv) { 'Allowlist skipped' } else { 'Allowlist enforced' }
+        $transportLabel = if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Microsoft Graph' } else { "SMTP $SmtpServer`:$SmtpPort" }
 
         # Build summary table rows
         $rowsSummary = foreach ($row in $summary) {
-            "<tr>
-                <td style='padding:6px;border:1px solid #ddd;'>$(Encode $row.Summary)</td>
-                <td style='padding:6px;border:1px solid #ddd;text-align:right;'>$([string]$row.Count)</td>
-             </tr>"
+            "<tr><td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#334155;'>$(Encode $row.Summary)</td><td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700;color:#0f172a;'>$([string]$row.Count)</td></tr>"
         }
 
         # Build HTML section listing "missing but in allowlist"
@@ -739,80 +746,99 @@ try {
         }
 
         $rowsAllow = foreach ($row in ($allowMissing | Sort-Object DisplayName)) {
-            "<tr>
-                <td style='padding:6px;border:1px solid #ddd;'>$(Encode $row.DisplayName)</td>
-                <td style='padding:6px;border:1px solid #ddd;'>$(Encode $row.PrimaryAddress)</td>
-                <td style='padding:6px;border:1px solid #ddd;'>$(Encode $row.ExpectedAddress)</td>
-                <td style='padding:6px;border:1px solid #ddd;'>$(Encode $row.Status)</td>
-             </tr>"
+            "<tr><td style='padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#0f172a;'>$(Encode $row.DisplayName)</td><td style='padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#475569;'>$(Encode $row.PrimaryAddress)</td><td style='padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#475569;'>$(Encode $row.ExpectedAddress)</td><td style='padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#b45309;font-weight:600;'>$(Encode $row.Status)</td></tr>"
         }
 
-        $allowSection = if ($allowMissing.Count -gt 0) {
+        $allowSection = if (@($allowMissing).Count -gt 0) {
 @"
-<h3 style="margin:16px 0 8px 0;">Mailboxes missing expected address (in allowlist)</h3>
-<table style="border-collapse:collapse;border:1px solid #ddd; margin-top:4px;">
-  <thead>
-    <tr style="background:#f5f5f5;">
-      <th style="padding:6px;border:1px solid #ddd;text-align:left;">DisplayName</th>
-      <th style="padding:6px;border:1px solid #ddd;text-align:left;">Primary SMTP</th>
-      <th style="padding:6px;border:1px solid #ddd;text-align:left;">Expected Proxy</th>
-      <th style="padding:6px;border:1px solid #ddd;text-align:left;">Status</th>
-    </tr>
-  </thead>
-  <tbody>
-    $($rowsAllow -join "`n")
-  </tbody>
-</table>
+<div style="margin-top:22px;">
+  <h3 style="margin:0 0 10px 0;font-size:16px;color:#0f172a;">Allowlisted missing addresses</h3>
+  <table role="presentation" style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+    <thead>
+      <tr style="background:#f8fafc;">
+        <th style="padding:10px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Display name</th>
+        <th style="padding:10px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Primary SMTP</th>
+        <th style="padding:10px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Expected proxy</th>
+        <th style="padding:10px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      $($rowsAllow -join "`n")
+    </tbody>
+  </table>
+</div>
 "@
         } else {
-            '<p style="margin-top:8px;">No allowlisted mailboxes are missing the expected address.</p>'
+            '<div style="margin-top:22px;padding:14px 16px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;color:#166534;font-weight:600;">No allowlisted mailbox is missing the expected address.</div>'
         }
 
         # OU section text
         $ouHtml = if ($AllOrganizationalUnit) { "ALL (entire forest)" } else { ($OrganizationalUnit | ForEach-Object { Encode $_ }) -join "<br/>" }
+        $attachmentNames = @($attachments | ForEach-Object { "<code style='background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:2px 5px;color:#334155;'>$(Encode (Split-Path -Leaf $_))</code>" }) -join ' '
 
-        # HTML body � summary + allowlist section + attachments info
         $body = @"
 <html>
-  <body style="font-family:Segoe UI,Arial,sans-serif; font-size:13px; color:#222;">
-    <h2 style="margin:0 0 10px 0;">$(Encode $MailSubject)</h2>
-    <p style="margin:0 0 12px 0;">
-      Date: $now<br/>
-      OU(s): $ouHtml<br/>
-      Expected suffix: $(Encode $ExpectedSuffix)<br/>
-      AddMissingAddress: $AddMissingAddress<br/>
-      SkipAllowListCsv: $SkipAllowListCsv
-    </p>
+  <body style="margin:0;padding:0;background:#f6f8fb;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+    <div style="max-width:980px;margin:0 auto;padding:24px;">
+      <div style="background:#ffffff;border:1px solid #dbe3ef;border-radius:10px;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#0f766e,#2563eb);padding:22px 26px;color:#ffffff;">
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.9;">Smart365 Exchange OnPrem</div>
+          <h1 style="margin:6px 0 0 0;font-size:24px;line-height:1.25;">$(Encode $MailSubject)</h1>
+          <div style="margin-top:10px;font-size:13px;opacity:.95;">Generated $now - Transport: $(Encode $transportLabel)</div>
+        </div>
 
-    <h3 style="margin:16px 0 8px 0;">Summary</h3>
-    <table style="border-collapse:collapse;border:1px solid #ddd;">
-      <thead>
-        <tr style="background:#f5f5f5;">
-          <th style="padding:6px;border:1px solid #ddd;text-align:left;">Metric</th>
-          <th style="padding:6px;border:1px solid #ddd;text-align:right;">Count</th>
-        </tr>
-      </thead>
-      <tbody>
-        $($rowsSummary -join "`n")
-      </tbody>
-    </table>
+        <div style="padding:22px 26px;">
+          <div style="margin-bottom:18px;">
+            <span style="display:inline-block;background:$modeColor;color:#ffffff;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;">$modeLabel</span>
+            <span style="display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;margin-left:6px;">$allowListMode</span>
+          </div>
 
-    $allowSection
+          <table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:20px;">
+            <tr>
+              <td style="width:20%;padding:0 8px 8px 0;"><div style="border:1px solid #dbe3ef;border-radius:8px;padding:14px;background:#f8fafc;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:700;">Total checked</div><div style="font-size:26px;font-weight:800;color:#0f172a;margin-top:4px;">$totalCount</div></div></td>
+              <td style="width:20%;padding:0 8px 8px 0;"><div style="border:1px solid #bbf7d0;border-radius:8px;padding:14px;background:#f0fdf4;"><div style="font-size:11px;text-transform:uppercase;color:#166534;font-weight:700;">Present</div><div style="font-size:26px;font-weight:800;color:#166534;margin-top:4px;">$presentCount</div></div></td>
+              <td style="width:20%;padding:0 8px 8px 0;"><div style="border:1px solid #fed7aa;border-radius:8px;padding:14px;background:#fff7ed;"><div style="font-size:11px;text-transform:uppercase;color:#9a3412;font-weight:700;">Missing</div><div style="font-size:26px;font-weight:800;color:#9a3412;margin-top:4px;">$missingCount</div></div></td>
+              <td style="width:20%;padding:0 8px 8px 0;"><div style="border:1px solid #bfdbfe;border-radius:8px;padding:14px;background:#eff6ff;"><div style="font-size:11px;text-transform:uppercase;color:#1d4ed8;font-weight:700;">Allowlisted</div><div style="font-size:26px;font-weight:800;color:#1d4ed8;margin-top:4px;">$allowMissingCount</div></div></td>
+              <td style="width:20%;padding:0 0 8px 0;"><div style="border:1px solid #e9d5ff;border-radius:8px;padding:14px;background:#faf5ff;"><div style="font-size:11px;text-transform:uppercase;color:#7e22ce;font-weight:700;">Added</div><div style="font-size:26px;font-weight:800;color:#7e22ce;margin-top:4px;">$addedCount</div></div></td>
+            </tr>
+          </table>
 
-    <p style="margin-top:14px;">
-      Detailed results are attached as CSV files.
-    </p>
+          <div style="border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;padding:14px 16px;margin-bottom:20px;">
+            <div style="font-size:13px;color:#334155;line-height:1.55;">
+              <strong>Scope:</strong> $ouHtml<br/>
+              <strong>Expected suffix:</strong> $(Encode $ExpectedSuffix)<br/>
+              <strong>Not in allowlist:</strong> $notAllowMissingCount
+            </div>
+          </div>
 
-    <p style="margin-top:8px;color:#666;">CSV attached:
-       <code>$(Encode (Split-Path -Leaf $outSummary))</code>,
-       <code>$(Encode (Split-Path -Leaf $outDetail))</code>$(if (-not [string]::IsNullOrWhiteSpace($outAdded) -and (Test-Path $outAdded)) { ", <code>$(Encode (Split-Path -Leaf $outAdded))</code>" } else { "" })$(if (Test-Path $outAllowMissing) { ", <code>$(Encode (Split-Path -Leaf $outAllowMissing))</code>" } else { "" })
-    </p>
+          <h3 style="margin:0 0 10px 0;font-size:16px;color:#0f172a;">Summary</h3>
+          <table role="presentation" style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+            <thead>
+              <tr style="background:#f8fafc;">
+                <th style="padding:10px 12px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Metric</th>
+                <th style="padding:10px 12px;text-align:right;color:#475569;font-size:12px;text-transform:uppercase;">Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              $($rowsSummary -join "`n")
+            </tbody>
+          </table>
+
+          $allowSection
+
+          <div style="margin-top:22px;padding-top:14px;border-top:1px solid #e5e7eb;color:#64748b;font-size:12px;line-height:1.6;">
+            Detailed CSV reports are attached.<br/>
+            $attachmentNames
+          </div>
+        </div>
+      </div>
+    </div>
   </body>
 </html>
 "@
 
         SendEmailHtmlReport -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments
-        Write-Host "Mail envoyé à '$($MailTo -join ';')' via Microsoft Graph."
+        Write-Host "Mail envoyé à '$($MailTo -join ';')' via $transportLabel."
     }
 } catch {
     Write-Warning "Échec de l'envoi du mail : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
