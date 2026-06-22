@@ -12,6 +12,9 @@ The Intune inventory export is global and must be launched from the repository r
 so this script removes obsolete Export-IntuneDevicesCsv.cmd wrappers from LOT folders.
 It also creates a blank AdDomain.txt file when missing so each LOT has a visible
 place for optional per-domain AD inventory configuration.
+
+.VERSION
+1.0
 #>
 
 #requires -Version 5.1
@@ -19,10 +22,25 @@ place for optional per-domain AD inventory configuration.
 [CmdletBinding()]
 param(
     [string]$RootPath,
-    [switch]$WhatIf
+    [switch]$WhatIf,
+    [switch]$CheckOnly
 )
 
 $ErrorActionPreference = "Stop"
+$script:LotWrapperChangesRequired = $false
+$script:LotWrapperChangesApplied = $false
+
+function ConvertTo-CrLfText {
+    param([AllowNull()][string]$Text)
+
+    if ($null -eq $Text) {
+        return $null
+    }
+
+    $normalized = $Text -replace "`r`n|`r|`n", "`n"
+    $normalized = $normalized.TrimEnd("`n") + "`n"
+    return $normalized -replace "`n", "`r`n"
+}
 
 $ScriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     $PSScriptRoot
@@ -137,11 +155,13 @@ $obsoleteWrappers = @(
 foreach ($lotFolder in $lotFolders) {
     $adDomainPath = Join-Path $lotFolder.FullName "AdDomain.txt"
     if (-not (Test-Path -LiteralPath $adDomainPath)) {
-        if ($WhatIf) {
+        $script:LotWrapperChangesRequired = $true
+        if ($WhatIf -or $CheckOnly) {
             Write-Host ("Would create AD domain config: {0}" -f $adDomainPath)
         }
         else {
             New-Item -ItemType File -Path $adDomainPath -Force -ErrorAction Stop | Out-Null
+            $script:LotWrapperChangesApplied = $true
             Write-Host ("Created AD domain config: {0}" -f $adDomainPath) -ForegroundColor Green
         }
     }
@@ -152,23 +172,42 @@ foreach ($lotFolder in $lotFolders) {
             continue
         }
 
-        if ($WhatIf) {
+        $script:LotWrapperChangesRequired = $true
+        if ($WhatIf -or $CheckOnly) {
             Write-Host ("Would remove obsolete wrapper: {0}" -f $obsoletePath)
             continue
         }
 
         Remove-Item -LiteralPath $obsoletePath -Force -ErrorAction Stop
+        $script:LotWrapperChangesApplied = $true
         Write-Host ("Removed obsolete wrapper: {0}" -f $obsoletePath) -ForegroundColor Yellow
     }
 
     foreach ($wrapperName in $wrappers.Keys) {
         $targetPath = Join-Path $lotFolder.FullName $wrapperName
-        if ($WhatIf) {
+        $expectedContent = ConvertTo-CrLfText -Text $wrappers[$wrapperName]
+        $currentContent = $null
+        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+            $currentContent = ConvertTo-CrLfText -Text ([System.IO.File]::ReadAllText($targetPath))
+        }
+
+        if ($null -ne $currentContent -and $currentContent -ceq $expectedContent) {
+            Write-Host ("Up to date: {0}" -f $targetPath) -ForegroundColor DarkGray
+            continue
+        }
+
+        $script:LotWrapperChangesRequired = $true
+        if ($WhatIf -or $CheckOnly) {
             Write-Host ("Would update: {0}" -f $targetPath)
             continue
         }
 
-        Set-Content -LiteralPath $targetPath -Value $wrappers[$wrapperName] -Encoding ASCII -Force
+        [System.IO.File]::WriteAllText($targetPath, $expectedContent, [System.Text.Encoding]::ASCII)
+        $script:LotWrapperChangesApplied = $true
         Write-Host ("Updated: {0}" -f $targetPath) -ForegroundColor Green
     }
+}
+
+if ($CheckOnly -and $script:LotWrapperChangesRequired) {
+    exit 2
 }
