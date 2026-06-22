@@ -13,6 +13,7 @@ rem Root launcher.
 rem Refreshes the tiny CMD wrappers in all LOT-* folders.
 set "ROOT_DIR=%CD%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
+call :PrintStartupInfo
 
 if not exist "%SCRIPT%" (
     echo ERROR: Script not found:
@@ -42,3 +43,12 @@ echo Finished with exit code %EXITCODE%.
 pause
 popd
 exit /b %EXITCODE%
+:PrintStartupInfo
+echo.
+echo SmartM365 Intune Hybrid Join Toolkit - LOT wrapper refresh launcher
+echo Started : %DATE% %TIME%
+echo Root    : %ROOT_DIR%
+echo Script  : %SCRIPT%
+echo Target  : LOT-* folders under %ROOT_DIR%
+echo.
+exit /b 0
