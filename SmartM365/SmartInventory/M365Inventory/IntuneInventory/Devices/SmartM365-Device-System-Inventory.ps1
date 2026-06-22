@@ -28,9 +28,12 @@
 .PARAMETER PlatformScriptId
     The GUID of the Intune Platform Script (Detect-DeviceSystemInfo) deployed to devices.
     Required to retrieve SecureBoot/BIOS/FirmwareType results from deviceRunStates.
+.VERSION
+1.1
+
 
 .NOTES
-    Version: 1.0
+    Version : 1.1
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -357,7 +360,7 @@ $BaseDelaySeconds  = 2
 $BatchSize         = 50
 $BatchPauseSeconds = 2
 
-# Graph API settings — hardwareInformation fields that are actually populated
+# Graph API settings - hardwareInformation fields that are actually populated
 $BulkEndpoint = '/beta/deviceManagement/managedDevices?$select=id,deviceName,azureADDeviceId,userPrincipalName,managementState,complianceState,lastSyncDateTime,hardwareInformation&$top=999'
 
 # ==========================================================
@@ -397,7 +400,7 @@ function Invoke-GraphSafe {
             if (($statusCode -in @(429, 502, 503, 504) -or $isSdkWrapped429) -and $attempt -le $MaxRetries) {
                 $retryAfter = $BaseDelaySeconds * [math]::Pow(2, $attempt - 1)
 
-                # SDK-wrapped throttle: use a fixed 60s floor — the SDK already burned its own retries
+                # SDK-wrapped throttle: use a fixed 60s floor - the SDK already burned its own retries
                 if ($isSdkWrapped429) {
                     $retryAfter = [math]::Max($retryAfter, 60)
                 }
@@ -507,7 +510,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.0"
+$ScriptVersion = "1.1"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -517,7 +520,6 @@ try {
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
     $OutputPath = $InitializeOutputPath
     WriteLog -Message "Starting $TaskName..."
-    WriteLog -Message "PowerShell Version: $($PSVersionTable.PSVersion)"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
     exit 1
@@ -752,7 +754,7 @@ finally {
     WriteLog -Message "$TaskName completed (finally block)."
 
     try {
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Complete-SmartM365ExecutionContext -Status Auto`r`n        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
     } catch {
         # ignore
     }
