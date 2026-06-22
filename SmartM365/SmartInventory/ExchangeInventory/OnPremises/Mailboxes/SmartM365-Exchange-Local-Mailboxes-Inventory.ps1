@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.12
+1.13
 
 .NOTES
-    Version: 1.12
+    Version: 1.13
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -274,6 +274,12 @@ function Export-CsvAtomic {
 
 
 [string]$SendFileListEmailReportFileName
+$script:MailSmtpServer = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SmtpServer' -DefaultValue ''
+$script:MailSmtpPort = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SmtpPort' -DefaultValue 25)
+$script:MailFrom = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue ''
+$script:MailTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue ''
+$script:MailCc = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Cc' -DefaultValue ''
+
 function Send-SmartM365OptionalEmailHtmlReport {
     [CmdletBinding()]
     param(
@@ -286,6 +292,11 @@ function Send-SmartM365OptionalEmailHtmlReport {
 
     try {
         $mailParams = @{ BodyHtml = $BodyHtml }
+        if (-not [string]::IsNullOrWhiteSpace($script:MailSmtpServer)) { $mailParams['SmtpServer'] = $script:MailSmtpServer }
+        if ($script:MailSmtpPort -gt 0) { $mailParams['SmtpPort'] = $script:MailSmtpPort }
+        if (-not [string]::IsNullOrWhiteSpace($script:MailFrom)) { $mailParams['From'] = $script:MailFrom }
+        if (-not [string]::IsNullOrWhiteSpace($script:MailTo)) { $mailParams['To'] = $script:MailTo }
+        if (-not [string]::IsNullOrWhiteSpace($script:MailCc)) { $mailParams['Cc'] = $script:MailCc }
         if ($Attachments -and $Attachments.Count -gt 0) { $mailParams['Attachments'] = $Attachments }
         SendEmailHtmlReport @mailParams
     }
@@ -1987,13 +1998,13 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 	}
 
 	if (-not (Test-Path $SourceDirectory)) {
-		$errorMessage = "The share '$SourceDirectory' is not available. Stopping the script."
-		WriteLog -Message $errorMessage "ERROR"
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
-		throw
+		$warningMessage = "Permission merge skipped because the source directory '$SourceDirectory' is not available."
+		WriteLog -Message $warningMessage "WARNING"
+		Write-Warning $warningMessage
+		$scriptdatamegewithperm = $false
 	}
 
+	if ($scriptdatamegewithperm -eq $true) {
 	try {
 		$DestinationDirectory = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue ''
 	} catch {
@@ -2038,13 +2049,12 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 	$sourceFiles = Get-ChildItem -Path $SourceDirectory -Filter "*_OnlyADPermission.csv" -File
 
 	if ($sourceFiles.Count -eq 0) {
-		WriteLog -Message "No '*_OnlyADPermission.csv' files found in the source directory. Nothing to process." "WARNING"
-		$errorMessage = "Error, No '*_OnlyADPermission.csv' files found in the source directory. Nothing to process."
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
-		throw
+		WriteLog -Message "No '*_OnlyADPermission.csv' files found in the source directory. Permission merge skipped." "WARNING"
+		Write-Warning "No '*_OnlyADPermission.csv' files found in the source directory. Permission merge skipped."
+		$scriptdatamegewithperm = $false
 	}
 
+	if ($scriptdatamegewithperm -eq $true) {
 	if ($allDomainsFile) {
 		# --- Consolidation Mode: Merge all sources into one destination ---
 		WriteLog -Message "Found '$($allDomainsFile.Name)'. Activating consolidation mode."
@@ -2170,6 +2180,8 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and (-n
 			WriteLog -Message "List of skipped files:" "WARNING"
 			$summary.SkippedFiles | ForEach-Object { Write-Warning "- $_" }
 		}
+	}
+	}
 	}
 }
 

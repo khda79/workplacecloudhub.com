@@ -552,7 +552,7 @@ function Invoke-SmartM365TeamsNotificationFromLog {
 
     $normalizedLevel = if ([string]::IsNullOrWhiteSpace($Level)) { 'INFO' } else { $Level.ToUpperInvariant() }
     $isError = $normalizedLevel -eq 'ERROR'
-    $isTerminalSuccess = $normalizedLevel -eq 'SUCCESS' -and $Message -match '(?i)\b(completed|finished|termin[eé]|complete)\b' -and $Message -notmatch '(?i)\bpreflight completed\b'
+    $isTerminalSuccess = $normalizedLevel -eq 'SUCCESS' -and $Message -match '(?i)\b(completed|finished|complete|terminated|termine)\b' -and $Message -notmatch '(?i)\bpreflight completed\b'
     if (-not $isError -and -not $isTerminalSuccess) { return }
 
     $dedupeKey = '{0}|{1}' -f $normalizedLevel, $Message
@@ -1360,13 +1360,16 @@ function SendEmailHtmlReport {
 
     try {
         $moduleLocalConfig = Get-ModuleLocalConfig
+        $callerLocalConfig = Get-SmartM365CallerLocalConfig
         foreach ($configName in @('SmtpServer','From','To','Cc','Subject')) {
             if (-not $PSBoundParameters.ContainsKey($configName)) {
                 $defaultValue = Get-Variable -Name $configName -ValueOnly
                 if ($configName -eq 'To') {
                     $defaultValue = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'ErrorMailTo' -DefaultValue $defaultValue
                 }
-                Set-Variable -Name $configName -Value (Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $configName -DefaultValue $defaultValue) -Scope Local
+                $configValue = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $configName -DefaultValue $defaultValue
+                $configValue = Get-ModuleLocalConfigValue -Config $callerLocalConfig -Name $configName -DefaultValue $configValue
+                Set-Variable -Name $configName -Value $configValue -Scope Local
             }
         }
 
@@ -2203,7 +2206,7 @@ function ExportAndCopyCsv {
             $globalCopyDone = $true
         } catch {
             if ($attempt -lt $maxRetries) {
-                WriteLog -Message "Copy to global path failed (attempt $attempt/$maxRetries), retrying in $retryDelaySec s... — $_" -Level Warning
+                WriteLog -Message "Copy to global path failed (attempt $attempt/$maxRetries), retrying in $retryDelaySec s... - $_" -Level Warning
                 Start-Sleep -Seconds $retryDelaySec
             } else {
                 WriteLog -Message "Failed to copy to global path after $maxRetries attempts: $csvFilePath3 - $_" -Level Error
@@ -2311,7 +2314,7 @@ function ExportAndCopyCsvFromConvert {
                 $globalCopyDone = $true
             } catch {
                 if ($attempt -lt $maxRetries) {
-                    WriteLog -Message "Copy to global path failed (attempt $attempt/$maxRetries), retrying in $retryDelaySec s... — $_" -Level Warning
+                    WriteLog -Message "Copy to global path failed (attempt $attempt/$maxRetries), retrying in $retryDelaySec s... - $_" -Level Warning
                     Start-Sleep -Seconds $retryDelaySec
                 } else {
                     WriteLog -Message "Failed to copy to global path after $maxRetries attempts: $csvFilePath3 - $_" -Level Error
