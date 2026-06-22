@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.53
+2.10.54
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.53"
+$LauncherVersion = "2.10.54"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -460,19 +460,86 @@ function Invoke-PreRunLotArchive {
         New-Item -ItemType Directory -Path $DestinationRoot -Force | Out-Null
     }
 
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $zipPath = Join-Path $DestinationRoot ("{0}_{1}.zip" -f $Prefix,$timestamp)
-    Write-Host ("Pre-run archive: compressing previous LOT outputs to {0}" -f $zipPath) -ForegroundColor Cyan
-    Compress-Archive -LiteralPath $existingPaths -DestinationPath $zipPath -CompressionLevel Optimal -Force -ErrorAction Stop
+    $skippedFiles = New-Object 'System.Collections.Generic.List[string]'
+    $archivedFileCount = 0
 
-    foreach ($path in $existingPaths) {
-        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    Write-Host ("Pre-run archive: compressing previous LOT outputs to {0}" -f $zipPath) -ForegroundColor Cyan
+
+    $zipStream = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    try {
+        $zipArchive = [System.IO.Compression.ZipArchive]::new($zipStream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+        try {
+            foreach ($path in $existingPaths) {
+                $rootItem = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+                if (-not $rootItem) { continue }
+
+                $rootFullName = $rootItem.FullName.TrimEnd('\', '/')
+                $entryRoot = Split-Path -Leaf $rootFullName
+                $files = @(Get-ChildItem -LiteralPath $rootFullName -Recurse -Force -File -ErrorAction SilentlyContinue)
+                foreach ($file in $files) {
+                    $relativeName = $file.FullName.Substring($rootFullName.Length).TrimStart('\', '/') -replace '\\', '/'
+                    if ([string]::IsNullOrWhiteSpace($relativeName)) { continue }
+
+                    $entryName = ('{0}/{1}' -f $entryRoot,$relativeName)
+                    try {
+                        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                            $zipArchive,
+                            $file.FullName,
+                            $entryName,
+                            [System.IO.Compression.CompressionLevel]::Optimal
+                        ) | Out-Null
+                        $archivedFileCount++
+                    }
+                    catch [System.IO.FileNotFoundException] {
+                        if ($skippedFiles.Count -lt 10) { [void]$skippedFiles.Add($file.FullName) }
+                    }
+                    catch [System.IO.DirectoryNotFoundException] {
+                        if ($skippedFiles.Count -lt 10) { [void]$skippedFiles.Add($file.FullName) }
+                    }
+                    catch [System.IO.PathTooLongException] {
+                        if ($skippedFiles.Count -lt 10) { [void]$skippedFiles.Add(("{0} ({1})" -f $file.FullName,$_.Exception.Message)) }
+                    }
+                    catch [System.IO.IOException] {
+                        if ($skippedFiles.Count -lt 10) { [void]$skippedFiles.Add(("{0} ({1})" -f $file.FullName,$_.Exception.Message)) }
+                    }
+                    catch [System.UnauthorizedAccessException] {
+                        if ($skippedFiles.Count -lt 10) { [void]$skippedFiles.Add(("{0} ({1})" -f $file.FullName,$_.Exception.Message)) }
+                    }
+                }
+            }
+        }
+        finally {
+            $zipArchive.Dispose()
+        }
+    }
+    finally {
+        $zipStream.Dispose()
     }
 
-    Write-Host ("Pre-run archive: archived and cleaned {0} folder(s)." -f $existingPaths.Count) -ForegroundColor Green
+    foreach ($path in $existingPaths) {
+        try {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+        }
+        catch {
+            Write-Host ("Pre-run archive warning: cleanup could not fully remove {0}: {1}" -f $path,$_.Exception.Message) -ForegroundColor Yellow
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($skippedFiles.Count -gt 0) {
+        Write-Host ("Pre-run archive warning: skipped {0} volatile or unreadable file(s) while creating the archive." -f $skippedFiles.Count) -ForegroundColor Yellow
+        foreach ($skippedFile in $skippedFiles) {
+            Write-Host ("  skipped: {0}" -f $skippedFile) -ForegroundColor DarkYellow
+        }
+    }
+
+    Write-Host ("Pre-run archive: archived {0} file(s) and cleaned {1} folder(s)." -f $archivedFileCount,$existingPaths.Count) -ForegroundColor Green
     return $zipPath
 }
-
 if (-not $SkipPreRunArchive) {
     $archivePaths = @($CentralLogRoot, $LogRoot, $ReportRoot)
     try {
