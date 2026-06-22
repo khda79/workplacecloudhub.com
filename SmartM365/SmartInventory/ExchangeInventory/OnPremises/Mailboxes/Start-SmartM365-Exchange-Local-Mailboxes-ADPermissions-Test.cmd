@@ -27,17 +27,35 @@ if not exist "%POWERSHELL5%" (
 set "SMARTM365_ROOT=%SCRIPT_DIR%\..\..\..\.."
 for %%I in ("%SMARTM365_ROOT%") do set "SMARTM365_ROOT=%%~fI"
 
-set "CACHE_BASE=%ProgramData%\SmartM365\LauncherCache\ExchangeLocalMailboxes"
-mkdir "%CACHE_BASE%" >nul 2>&1
-if errorlevel 1 set "CACHE_BASE=%TEMP%\SmartM365LauncherCache\ExchangeLocalMailboxes"
-mkdir "%CACHE_BASE%" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to create local cache base folder:
-    echo   %CACHE_BASE%
+set "CACHE_BASE="
+call :TryCacheBase "%ProgramData%\SmartM365\LauncherCache\ExchangeLocalMailboxes"
+if not defined CACHE_BASE call :TryCacheBase "%SystemRoot%\Temp\SmartM365LauncherCache\ExchangeLocalMailboxes"
+if not defined CACHE_BASE call :TryCacheBase "C:\Temp\SmartM365LauncherCache\ExchangeLocalMailboxes"
+if not defined CACHE_BASE call :TryCacheBase "%TEMP%\SmartM365LauncherCache\ExchangeLocalMailboxes"
+if not defined CACHE_BASE (
+    echo Failed to create a writable local cache base folder.
+    echo Tried:
+    echo   %ProgramData%\SmartM365\LauncherCache\ExchangeLocalMailboxes
+    echo   %SystemRoot%\Temp\SmartM365LauncherCache\ExchangeLocalMailboxes
+    echo   C:\Temp\SmartM365LauncherCache\ExchangeLocalMailboxes
+    echo   %TEMP%\SmartM365LauncherCache\ExchangeLocalMailboxes
     pause
     popd
     exit /b 1
 )
+goto :CacheBaseReady
+
+:TryCacheBase
+if defined CACHE_BASE exit /b 0
+mkdir "%~1" >nul 2>&1
+if not exist "%~1\" exit /b 0
+type nul > "%~1\.smartm365-cache-write-test" 2>nul
+if errorlevel 1 exit /b 0
+del "%~1\.smartm365-cache-write-test" >nul 2>&1
+set "CACHE_BASE=%~1"
+exit /b 0
+
+:CacheBaseReady
 
 set "LOCAL_SMARTM365_ROOT=%CACHE_BASE%\SmartM365"
 set "LOCAL_SCRIPT_DIR=%LOCAL_SMARTM365_ROOT%\SmartInventory\ExchangeInventory\OnPremises\Mailboxes"
