@@ -21,6 +21,11 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\Compliance",
+  "GraphMaxRetryAttempts": 6,
+  "GraphRetryMaxSeconds": 180,
+  "MaxConsecutivePolicyStateFailures": 25,
+  "GraphRequestDelayMs": 250,
+  "MaxPolicyStateFailures": 100,
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\Compliance\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
