@@ -5,7 +5,7 @@
   "DataAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-ALL",
   "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-LAST",
   "LogAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\LOG-ALL",
-  "SmartM365LatestCsvFolderPath": "{{RepositoryRootPath}}\\SmartM365\\Data\\Tenants\\{{TenantKey}}\\DATA-LAST",
+  "SmartM365LatestCsvFolderPath": "__USE_SMARTM365__",
   "RetentionMaxCSV": 30,
   "RetentionMaxLogs": 30,
   "StaleUserDays": 90,
