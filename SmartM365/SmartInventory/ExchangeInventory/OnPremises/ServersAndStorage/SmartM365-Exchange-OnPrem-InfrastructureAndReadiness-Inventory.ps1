@@ -22,11 +22,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.4.2
+    1.4.3
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.4.2
+    Version     : 1.4.3
     Requirements:
       - Run from Exchange Management Shell on Exchange 2016
       - Exchange read permissions
@@ -34,6 +34,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.4.3
+      - Allows readiness collectors to start with an empty row list.
+
     1.4.2
       - Renames the script to Exchange OnPrem Infrastructure and Readiness inventory.
 
@@ -115,7 +118,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.4.2"
+$ScriptVersion = "1.4.3"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -814,7 +817,7 @@ function Get-ObjectPropertyValue {
 
 function Add-ExchangeReadinessRow {
     param(
-        [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Rows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Rows,
         [Parameter(Mandatory)][string]$Category,
         [Parameter(Mandatory)][string]$ObjectName,
         [Parameter(Mandatory)][string]$Setting,
@@ -839,7 +842,7 @@ function Add-ExchangeReadinessRow {
 
 function Add-ExchangeReadinessProperties {
     param(
-        [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Rows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Rows,
         [Parameter(Mandatory)][string]$Category,
         [Parameter(Mandatory)][object]$InputObject,
         [Parameter(Mandatory)][string]$ObjectName,
@@ -855,7 +858,7 @@ function Add-ExchangeReadinessProperties {
 
 function Invoke-ExchangeReadinessCollector {
     param(
-        [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Rows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Rows,
         [Parameter(Mandatory)][string]$CollectorName,
         [Parameter(Mandatory)][scriptblock]$ScriptBlock
     )
