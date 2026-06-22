@@ -10,6 +10,7 @@
     - Disk drives from Win32_DiskDrive
     - Optional Exchange mailbox database paths
     - Optional Exchange service health
+    - Exchange schema and migration readiness configuration
     - Per-server decommissioning summary
     - Global CSV summary
     - HTML executive summary for slide integration
@@ -21,11 +22,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.3.7
+    1.4.2
 
 .NOTES
-    Script Name : SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory.ps1
-    Version     : 1.3.7
+    Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
+    Version     : 1.4.2
     Requirements:
       - Run from Exchange Management Shell on Exchange 2016
       - Exchange read permissions
@@ -33,6 +34,15 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.4.2
+      - Renames the script to Exchange OnPrem Infrastructure and Readiness inventory.
+
+    1.4.1
+      - Renders the full Exchange migration readiness inventory in the HTML report.
+
+    1.4.0
+      - Adds AD Exchange schema and Exchange migration readiness configuration inventory.
+
     1.3.7
       - Applies the script local JSON overrides before reading mail and SharePoint settings.
 
@@ -104,8 +114,8 @@ $tenantContextPath = & {
 }
 . $tenantContextPath
 
-$ScriptName = "SmartM365-Exchange-OnPrem-ServersAndStorage-Inventory"
-$ScriptVersion = "1.3.7"
+$ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
+$ScriptVersion = "1.4.2"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -779,6 +789,231 @@ function Get-ExchangeServiceHealthSummary {
     }
 }
 
+function ConvertTo-ReadinessText {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [System.Array]) {
+        return ((@($Value) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }) -join "; ")
+    }
+
+    return [string]$Value
+}
+
+function Get-ObjectPropertyValue {
+    param(
+        [AllowNull()][object]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Add-ExchangeReadinessRow {
+    param(
+        [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Rows,
+        [Parameter(Mandatory)][string]$Category,
+        [Parameter(Mandatory)][string]$ObjectName,
+        [Parameter(Mandatory)][string]$Setting,
+        [AllowNull()][object]$Value,
+        [Parameter(Mandatory)][string]$MigrationFocus,
+        [ValidateSet("Info", "Review", "Warning", "Error")][string]$Importance = "Info",
+        [ValidateSet("OK", "WARNING", "ERROR")][string]$CollectionStatus = "OK",
+        [AllowNull()][string]$ErrorMessage = $null
+    )
+
+    $Rows.Add([pscustomobject]@{
+        Category         = $Category
+        ObjectName       = $ObjectName
+        Setting          = $Setting
+        Value            = ConvertTo-ReadinessText -Value $Value
+        MigrationFocus   = $MigrationFocus
+        Importance       = $Importance
+        CollectionStatus = $CollectionStatus
+        ErrorMessage     = $ErrorMessage
+    }) | Out-Null
+}
+
+function Add-ExchangeReadinessProperties {
+    param(
+        [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Rows,
+        [Parameter(Mandatory)][string]$Category,
+        [Parameter(Mandatory)][object]$InputObject,
+        [Parameter(Mandatory)][string]$ObjectName,
+        [Parameter(Mandatory)][string[]]$Properties,
+        [Parameter(Mandatory)][string]$MigrationFocus,
+        [ValidateSet("Info", "Review", "Warning", "Error")][string]$Importance = "Info"
+    )
+
+    foreach ($propertyName in $Properties) {
+        Add-ExchangeReadinessRow -Rows $Rows -Category $Category -ObjectName $ObjectName -Setting $propertyName -Value (Get-ObjectPropertyValue -InputObject $InputObject -Name $propertyName) -MigrationFocus $MigrationFocus -Importance $Importance
+    }
+}
+
+function Invoke-ExchangeReadinessCollector {
+    param(
+        [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Rows,
+        [Parameter(Mandatory)][string]$CollectorName,
+        [Parameter(Mandatory)][scriptblock]$ScriptBlock
+    )
+
+    try {
+        & $ScriptBlock
+    }
+    catch {
+        Add-ExchangeReadinessRow -Rows $Rows -Category "CollectorError" -ObjectName $CollectorName -Setting "Collection" -Value "Failed" -MigrationFocus "Review this collection failure before migration readiness sign-off." -Importance "Warning" -CollectionStatus "ERROR" -ErrorMessage $_.Exception.Message
+    }
+}
+
+function Get-ExchangeReadinessInventory {
+    param(
+        [string[]]$ExchangeServerNames = @()
+    )
+
+    $rows = New-Object System.Collections.Generic.List[object]
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "Active Directory Exchange schema" -ScriptBlock {
+        $rootDse = [ADSI]"LDAP://RootDSE"
+        $schemaNamingContext = [string]$rootDse.schemaNamingContext
+        $configurationNamingContext = [string]$rootDse.configurationNamingContext
+        Add-ExchangeReadinessRow -Rows $rows -Category "ADSchema" -ObjectName "RootDSE" -Setting "SchemaNamingContext" -Value $schemaNamingContext -MigrationFocus "Confirms the schema partition used to validate Exchange schema level before Exchange SE preparation."
+        Add-ExchangeReadinessRow -Rows $rows -Category "ADSchema" -ObjectName "RootDSE" -Setting "ConfigurationNamingContext" -Value $configurationNamingContext -MigrationFocus "Confirms the configuration partition containing the Exchange organization."
+        $schemaVersionObject = [ADSI]("LDAP://CN=ms-Exch-Schema-Version-Pt,{0}" -f $schemaNamingContext)
+        Add-ExchangeReadinessRow -Rows $rows -Category "ADSchema" -ObjectName "ms-Exch-Schema-Version-Pt" -Setting "rangeUpper" -Value $schemaVersionObject.rangeUpper -MigrationFocus "Compare this value with the required Exchange SE setup /PrepareSchema level before migration." -Importance "Review"
+        $exchangeServiceContainer = [ADSI]("LDAP://CN=Microsoft Exchange,CN=Services,{0}" -f $configurationNamingContext)
+        Add-ExchangeReadinessRow -Rows $rows -Category "ADSchema" -ObjectName "Microsoft Exchange configuration container" -Setting "objectVersion" -Value $exchangeServiceContainer.objectVersion -MigrationFocus "Compare this value with the required Exchange SE /PrepareAD organization object version." -Importance "Review"
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "OrganizationConfig" -ScriptBlock {
+        $item = Get-OrganizationConfig -ErrorAction Stop
+        Add-ExchangeReadinessProperties -Rows $rows -Category "OrganizationConfig" -InputObject $item -ObjectName $item.Name -Properties @("AdminDisplayName", "OAuth2ClientProfileEnabled", "MapiHttpEnabled", "PublicFoldersEnabled", "ActivityBasedAuthenticationTimeoutEnabled", "DefaultAuthenticationPolicy", "RootPublicFolderMailbox", "DistributionGroupDefaultOU") -MigrationFocus "Core organization settings affecting client auth, coexistence, public folders, and migration behavior." -Importance "Review"
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "AuthConfig" -ScriptBlock {
+        if (-not (Get-Command Get-AuthConfig -ErrorAction SilentlyContinue)) { return }
+        $item = Get-AuthConfig -ErrorAction Stop
+        Add-ExchangeReadinessProperties -Rows $rows -Category "AuthConfig" -InputObject $item -ObjectName "AuthConfig" -Properties @("CurrentCertificateThumbprint", "PreviousCertificateThumbprint", "NextCertificateThumbprint", "ServiceName") -MigrationFocus "Hybrid modern auth and OAuth trust readiness for Exchange Online coexistence." -Importance "Review"
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "TransportConfig" -ScriptBlock {
+        $item = Get-TransportConfig -ErrorAction Stop
+        Add-ExchangeReadinessProperties -Rows $rows -Category "TransportConfig" -InputObject $item -ObjectName "TransportConfig" -Properties @("MaxSendSize", "MaxReceiveSize", "ExternalPostmasterAddress", "InternalSMTPServers", "TLSReceiveDomainSecureList", "TLSSendDomainSecureList", "JournalingReportNdrTo") -MigrationFocus "Transport limits, TLS posture, journaling NDR behavior, and relay dependencies to review before EXO migration." -Importance "Review"
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "AcceptedDomain" -ScriptBlock {
+        foreach ($item in @(Get-AcceptedDomain -ErrorAction Stop | Sort-Object Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "AcceptedDomain" -InputObject $item -ObjectName $item.Name -Properties @("DomainName", "DomainType", "Default", "MatchSubDomains", "AddressBookEnabled") -MigrationFocus "Accepted domain and authoritative/internal relay model must align with Exchange Online accepted domains and mail flow." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "EmailAddressPolicy" -ScriptBlock {
+        foreach ($item in @(Get-EmailAddressPolicy -ErrorAction Stop | Sort-Object Priority, Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "EmailAddressPolicy" -InputObject $item -ObjectName $item.Name -Properties @("Priority", "EnabledEmailAddressTemplates", "RecipientFilter", "IncludedRecipients", "ConditionalCompany", "ConditionalDepartment", "ConditionalCustomAttribute1") -MigrationFocus "Proxy address generation and policy ownership must be understood before hybrid and EXO address management changes." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "SendConnector" -ScriptBlock {
+        foreach ($item in @(Get-SendConnector -ErrorAction Stop | Sort-Object Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "SendConnector" -InputObject $item -ObjectName $item.Name -Properties @("AddressSpaces", "SmartHosts", "DNSRoutingEnabled", "RequireTLS", "TlsAuthLevel", "SourceTransportServers", "Enabled", "MaxMessageSize") -MigrationFocus "Outbound mail flow, smart hosts, TLS requirements, and source servers to map for coexistence and cutover." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "ReceiveConnector" -ScriptBlock {
+        foreach ($item in @(Get-ReceiveConnector -ErrorAction Stop | Sort-Object Identity)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "ReceiveConnector" -InputObject $item -ObjectName $item.Identity -Properties @("Server", "TransportRole", "Bindings", "RemoteIPRanges", "AuthMechanism", "PermissionGroups", "RequireTLS", "Enabled", "MaxMessageSize") -MigrationFocus "Inbound SMTP, application relay, scanner/device relay, and anonymous/authenticated connector dependencies." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "RemoteDomain" -ScriptBlock {
+        foreach ($item in @(Get-RemoteDomain -ErrorAction Stop | Sort-Object Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "RemoteDomain" -InputObject $item -ObjectName $item.Name -Properties @("DomainName", "AllowedOOFType", "AutoReplyEnabled", "AutoForwardEnabled", "TNEFEnabled", "TrustedMailOutboundEnabled") -MigrationFocus "Remote domain behavior can affect coexistence, forwarding, OOF, and external recipient experience after migration." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "MailboxDatabase" -ScriptBlock {
+        foreach ($item in @(Get-MailboxDatabase -Status -ErrorAction Stop | Sort-Object Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "MailboxDatabase" -InputObject $item -ObjectName $item.Name -Properties @("Server", "Mounted", "DatabaseSize", "AvailableNewMailboxSpace", "EdbFilePath", "LogFolderPath", "CircularLoggingEnabled", "Recovery", "ReplicationType", "IsExcludedFromProvisioning", "IsSuspendedFromProvisioning") -MigrationFocus "Mailbox placement, storage, replication, and provisioning controls to plan moves and decommissioning." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "DatabaseAvailabilityGroup" -ScriptBlock {
+        if (-not (Get-Command Get-DatabaseAvailabilityGroup -ErrorAction SilentlyContinue)) { return }
+        foreach ($item in @(Get-DatabaseAvailabilityGroup -Status -ErrorAction Stop | Sort-Object Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "DatabaseAvailabilityGroup" -InputObject $item -ObjectName $item.Name -Properties @("Servers", "WitnessServer", "WitnessDirectory", "DatacenterActivationMode", "DatabaseAvailabilityGroupIpAddresses", "ThirdPartyReplication", "OperationalServers") -MigrationFocus "DAG layout and witness settings are required for SE transition planning and decommission order." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "OfflineAddressBook" -ScriptBlock {
+        foreach ($item in @(Get-OfflineAddressBook -ErrorAction Stop | Sort-Object Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "OfflineAddressBook" -InputObject $item -ObjectName $item.Name -Properties @("IsDefault", "GlobalWebDistributionEnabled", "VirtualDirectories", "AddressLists", "GeneratingMailbox") -MigrationFocus "OAB generation and distribution must be validated for Outlook during coexistence and mailbox moves." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "VirtualDirectories" -ScriptBlock {
+        $virtualDirectoryCmdlets = @(
+            @{ Name = "OWA"; Cmdlet = "Get-OwaVirtualDirectory" },
+            @{ Name = "ECP"; Cmdlet = "Get-EcpVirtualDirectory" },
+            @{ Name = "EWS"; Cmdlet = "Get-WebServicesVirtualDirectory" },
+            @{ Name = "MAPI"; Cmdlet = "Get-MapiVirtualDirectory" },
+            @{ Name = "OAB"; Cmdlet = "Get-OabVirtualDirectory" },
+            @{ Name = "ActiveSync"; Cmdlet = "Get-ActiveSyncVirtualDirectory" },
+            @{ Name = "PowerShell"; Cmdlet = "Get-PowerShellVirtualDirectory" },
+            @{ Name = "Autodiscover"; Cmdlet = "Get-AutodiscoverVirtualDirectory" }
+        )
+        foreach ($definition in $virtualDirectoryCmdlets) {
+            if (-not (Get-Command $definition.Cmdlet -ErrorAction SilentlyContinue)) { continue }
+            foreach ($item in @(& $definition.Cmdlet -ErrorAction Stop | Sort-Object Identity)) {
+                Add-ExchangeReadinessProperties -Rows $rows -Category ("VirtualDirectory:{0}" -f $definition.Name) -InputObject $item -ObjectName $item.Identity -Properties @("Server", "InternalUrl", "ExternalUrl", "InternalAuthenticationMethods", "ExternalAuthenticationMethods", "BasicAuthentication", "WindowsAuthentication", "OAuthAuthentication", "ClientCertAuth") -MigrationFocus "Namespace, URL and authentication inventory for Exchange SE coexistence, load balancer, certificate, and client access planning." -Importance "Review"
+            }
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "ExchangeCertificate" -ScriptBlock {
+        $certificateServers = @($ExchangeServerNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+        if ($certificateServers.Count -eq 0) {
+            $certificateServers = @($env:COMPUTERNAME)
+        }
+
+        foreach ($serverName in $certificateServers) {
+            try {
+                foreach ($item in @(Get-ExchangeCertificate -Server $serverName -ErrorAction Stop | Sort-Object NotAfter)) {
+                    $objectName = "{0}:{1}" -f $serverName, $item.Thumbprint
+                    Add-ExchangeReadinessRow -Rows $rows -Category "ExchangeCertificate" -ObjectName $objectName -Setting "Server" -Value $serverName -MigrationFocus "Certificate coverage and expiration are critical for HTTPS, SMTP TLS, hybrid, and Exchange SE namespace readiness." -Importance "Review"
+                    Add-ExchangeReadinessProperties -Rows $rows -Category "ExchangeCertificate" -InputObject $item -ObjectName $objectName -Properties @("Subject", "CertificateDomains", "Services", "NotBefore", "NotAfter", "IsSelfSigned", "Status") -MigrationFocus "Certificate coverage and expiration are critical for HTTPS, SMTP TLS, hybrid, and Exchange SE namespace readiness." -Importance "Review"
+                }
+            }
+            catch {
+                Add-ExchangeReadinessRow -Rows $rows -Category "ExchangeCertificate" -ObjectName $serverName -Setting "Collection" -Value "Failed" -MigrationFocus "Review certificate collection failure for this server before namespace, TLS, hybrid, or SE readiness sign-off." -Importance "Warning" -CollectionStatus "ERROR" -ErrorMessage $_.Exception.Message
+            }
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "HybridConfiguration" -ScriptBlock {
+        if (-not (Get-Command Get-HybridConfiguration -ErrorAction SilentlyContinue)) { return }
+        foreach ($item in @(Get-HybridConfiguration -ErrorAction Stop)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "HybridConfiguration" -InputObject $item -ObjectName $item.Name -Properties @("ClientAccessServers", "ReceivingTransportServers", "SendingTransportServers", "Domains", "Features", "TlsCertificateName", "OnPremisesSmartHost", "ExternalIPAddresses") -MigrationFocus "Hybrid configuration drives Exchange Online coexistence, secure mail flow, free/busy, and migration endpoint planning." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "OrganizationRelationship" -ScriptBlock {
+        if (-not (Get-Command Get-OrganizationRelationship -ErrorAction SilentlyContinue)) { return }
+        foreach ($item in @(Get-OrganizationRelationship -ErrorAction Stop | Sort-Object Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "OrganizationRelationship" -InputObject $item -ObjectName $item.Name -Properties @("DomainNames", "FreeBusyAccessEnabled", "FreeBusyAccessLevel", "TargetAutodiscoverEpr", "TargetSharingEpr", "Enabled") -MigrationFocus "Free/busy and organization sharing dependencies for Exchange Online coexistence." -Importance "Review"
+        }
+    }
+
+    Invoke-ExchangeReadinessCollector -Rows $rows -CollectorName "IntraOrganizationConnector" -ScriptBlock {
+        if (-not (Get-Command Get-IntraOrganizationConnector -ErrorAction SilentlyContinue)) { return }
+        foreach ($item in @(Get-IntraOrganizationConnector -ErrorAction Stop | Sort-Object Name)) {
+            Add-ExchangeReadinessProperties -Rows $rows -Category "IntraOrganizationConnector" -InputObject $item -ObjectName $item.Name -Properties @("DiscoveryEndpoint", "TargetAddressDomains", "Enabled") -MigrationFocus "Hybrid intra-organization connectivity for Exchange Online coexistence." -Importance "Review"
+        }
+    }
+
+    return $rows.ToArray()
+}
 function Get-MailboxDatabasePathInventory {
     param(
         [Parameter(Mandatory)]
@@ -839,6 +1074,9 @@ function New-HtmlExecutiveSummary {
         [Parameter(Mandatory)]
         [object[]]$PerServerSummary,
 
+        [AllowNull()]
+        [object[]]$ReadinessInventory = @(),
+
         [Parameter(Mandatory)]
         [string]$Path
     )
@@ -847,12 +1085,64 @@ function New-HtmlExecutiveSummary {
         "<tr><td>$(Format-HtmlValue $row.ExchangeServerName)</td><td>$(Format-HtmlValue $row.ServerRole)</td><td class='num'>$(Format-HtmlValue $row.LogicalProcessorCount)</td><td class='num'>$(Format-HtmlValue $row.MemoryGB)</td><td class='num'>$(Format-HtmlValue $row.DiskDriveCount)</td><td class='num'>$(Format-HtmlValue $row.DiskDriveTotalSizeGB)</td><td class='status'>$(Format-HtmlValue $row.ComputeCollectionStatus)</td></tr>"
     }
 
+    $readinessRows = @($ReadinessInventory)
+    $readinessErrorCount = @($readinessRows | Where-Object { $_.CollectionStatus -eq "ERROR" -or $_.Importance -eq "Error" }).Count
+    $readinessWarningCount = @($readinessRows | Where-Object { $_.CollectionStatus -eq "WARNING" -or $_.Importance -eq "Warning" }).Count
+    $readinessSortedRows = @($readinessRows | Sort-Object @{ Expression = { if ($_.CollectionStatus -eq "ERROR" -or $_.Importance -eq "Error") { 0 } elseif ($_.CollectionStatus -eq "WARNING" -or $_.Importance -eq "Warning") { 1 } elseif ($_.Importance -eq "Review") { 2 } else { 3 } } }, Category, ObjectName, Setting)
+    $readinessCategoryBlocks = foreach ($categoryGroup in ($readinessSortedRows | Group-Object Category | Sort-Object Name)) {
+        $categoryRowsHtml = foreach ($row in $categoryGroup.Group) {
+            $statusClass = switch ([string]$row.CollectionStatus) {
+                "ERROR" { "status-error"; break }
+                "WARNING" { "status-warning"; break }
+                default { "status-ok" }
+            }
+            $importanceClass = switch ([string]$row.Importance) {
+                "Error" { "status-error"; break }
+                "Warning" { "status-warning"; break }
+                "Review" { "status-review"; break }
+                default { "status-ok" }
+            }
+            "<tr><td>$(Format-HtmlValue $row.ObjectName)</td><td>$(Format-HtmlValue $row.Setting)</td><td class='cell-value'>$(Format-HtmlValue $row.Value)</td><td><span class='badge $importanceClass'>$(Format-HtmlValue $row.Importance)</span></td><td><span class='badge $statusClass'>$(Format-HtmlValue $row.CollectionStatus)</span></td><td>$(Format-HtmlValue $row.MigrationFocus)</td><td>$(Format-HtmlValue $row.ErrorMessage)</td></tr>"
+        }
+
+@"
+      <h3>$(Format-HtmlValue $categoryGroup.Name) <span>$(Format-HtmlValue $categoryGroup.Count) records</span></h3>
+      <table class="readiness-table">
+        <thead>
+          <tr>
+            <th>Object</th>
+            <th>Setting</th>
+            <th>Value</th>
+            <th>Importance</th>
+            <th>Status</th>
+            <th>Migration focus</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          $($categoryRowsHtml -join "`r`n")
+        </tbody>
+      </table>
+"@
+    }
+
+    $readinessSection = if ($readinessRows.Count -gt 0) {
+@"
+      <h2>Exchange migration readiness configuration</h2>
+      <div class="summary">
+        Collected <strong>$(Format-HtmlValue $readinessRows.Count)</strong> Exchange configuration readiness records for Exchange SE and Exchange Online planning. AD schema rangeUpper: <strong>$(Format-HtmlValue $Summary.ExchangeSchemaRangeUpper)</strong>. Exchange organization objectVersion: <strong>$(Format-HtmlValue $Summary.ExchangeOrgObjectVersion)</strong>. Review warnings: <strong>$(Format-HtmlValue $readinessWarningCount)</strong>. Collection errors: <strong>$(Format-HtmlValue $readinessErrorCount)</strong>. Every collected readiness record is rendered below and also attached as CSV.
+      </div>
+      $($readinessCategoryBlocks -join "`r`n")
+"@
+    } else {
+        ""
+    }
     $html = @"
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Exchange On-Premises Decommissioning Summary</title>
+<title>Exchange On-Premises Infrastructure and Migration Readiness</title>
 <style>
 body { margin: 0; padding: 0; background: #f6f8fb; color: #0f172a; font-family: Segoe UI, Arial, sans-serif; }
 .shell { max-width: 1180px; margin: 0 auto; padding: 24px; }
@@ -877,10 +1167,27 @@ h1 { font-size: 26px; line-height: 1.25; margin: 6px 0 0 0; color: #ffffff; }
 .card .unit { font-size: 12px; color: #64748b; margin-top: 2px; }
 .summary { border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; padding: 16px; font-size: 14px; line-height: 1.55; color: #334155; margin-bottom: 22px; }
 h2 { font-size: 17px; margin: 0 0 10px 0; color: #0f172a; }
+h3 { font-size: 14px; margin: 22px 0 8px 0; color: #0f172a; }
+h3 span { color: #64748b; font-size: 12px; font-weight: 600; margin-left: 6px; }
 table { width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; font-size: 12px; }
 th { text-align: left; background: #f8fafc; color: #475569; padding: 10px 12px; text-transform: uppercase; font-size: 11px; }
 td { border-bottom: 1px solid #e5e7eb; padding: 9px 12px; color: #334155; }
 td.num, th.num { text-align: right; }
+.readiness-table { margin-bottom: 18px; table-layout: fixed; }
+.readiness-table th:nth-child(1) { width: 16%; }
+.readiness-table th:nth-child(2) { width: 14%; }
+.readiness-table th:nth-child(3) { width: 22%; }
+.readiness-table th:nth-child(4) { width: 8%; }
+.readiness-table th:nth-child(5) { width: 8%; }
+.readiness-table th:nth-child(6) { width: 22%; }
+.readiness-table th:nth-child(7) { width: 10%; }
+.readiness-table td { vertical-align: top; overflow-wrap: anywhere; }
+.cell-value { font-family: Consolas, Courier New, monospace; font-size: 11px; }
+.badge { display: inline-block; border-radius: 999px; padding: 2px 7px; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.status-ok { color: #166534; background: #dcfce7; }
+.status-review { color: #1d4ed8; background: #dbeafe; }
+.status-warning { color: #9a3412; background: #ffedd5; }
+.status-error { color: #991b1b; background: #fee2e2; }
 .status { font-weight: 700; color: #047857; }
 .footer { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #64748b; line-height: 1.5; }
 @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .shell { padding: 12px; } }
@@ -891,7 +1198,7 @@ td.num, th.num { text-align: right; }
   <div class="panel">
     <div class="hero">
       <div class="eyebrow">Smart365 Exchange OnPrem</div>
-      <h1>Exchange On-Premises Infrastructure Decommissioning</h1>
+      <h1>Exchange On-Premises Infrastructure and Migration Readiness</h1>
       <div class="subtitle">Executive summary generated on $(Format-HtmlValue $Summary.ExecutionDate) - RunId $(Format-HtmlValue $Summary.RunId)</div>
     </div>
 
@@ -905,7 +1212,7 @@ td.num, th.num { text-align: right; }
       </div>
 
       <div class="summary">
-        The current legacy Exchange 2016 on-premises footprint represents <strong>$(Format-HtmlValue $Summary.ExchangeServersCount) virtual machines</strong>, <strong>$(Format-HtmlValue $Summary.TotalLogicalProcessorCount) vCPU</strong>, <strong>$(Format-HtmlValue $Summary.TotalMemoryGB) GB RAM</strong>, and <strong>$(Format-HtmlValue $Summary.TotalDiskDriveCount) disks</strong>. These assets are candidates for decommissioning after Exchange SE migration validation and dependency sign-off.
+        The current Exchange on-premises footprint represents <strong>$(Format-HtmlValue $Summary.ExchangeServersCount) virtual machines</strong>, <strong>$(Format-HtmlValue $Summary.TotalLogicalProcessorCount) vCPU</strong>, <strong>$(Format-HtmlValue $Summary.TotalMemoryGB) GB RAM</strong>, and <strong>$(Format-HtmlValue $Summary.TotalDiskDriveCount) disks</strong>. The full readiness section below supports Exchange SE preparation, Exchange Online coexistence, dependency review, and decommissioning sign-off.
       </div>
 
       <h2>Per-server infrastructure summary</h2>
@@ -925,6 +1232,8 @@ td.num, th.num { text-align: right; }
           $($rowsHtml -join "`r`n")
         </tbody>
       </table>
+
+      $readinessSection
 
       <div class="footer">
         CPU, RAM and disk data are collected from the guest OS using WMI/DCOM only. Validate with Infrastructure if hypervisor-level figures are required for final capacity reclamation.
@@ -1034,6 +1343,12 @@ try {
         Write-Log "Mailbox database path inventory exported to: $databasePathsPath"
     }
 
+    Write-Log "Collecting Exchange schema and migration readiness configuration."
+    $exchangeReadinessInventory = @(Get-ExchangeReadinessInventory -ExchangeServerNames @($exchangeServers.Name))
+    $exchangeReadinessPath = Join-Path $OutputFolder "Exchange_OnPrem_MigrationReadiness_Config.csv"
+    Export-ServersAndStorageCsv -Data @($exchangeReadinessInventory) -Path $exchangeReadinessPath
+    Write-Log "Exchange schema and migration readiness configuration exported to: $exchangeReadinessPath"
+
     $logicalDiskRows = @($logicalDiskInventory)
     $successfulLogicalDiskRows = @($logicalDiskRows | Where-Object { $_.CollectionStatus -eq "OK" })
     $failedLogicalDiskRows = @($logicalDiskRows | Where-Object { $_.CollectionStatus -eq "ERROR" })
@@ -1079,7 +1394,7 @@ try {
         }
     }
 
-    $perServerSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Decommissioning_PerServerSummary.csv"
+    $perServerSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_Infrastructure_PerServerSummary.csv"
     Export-ServersAndStorageCsv -Data @($perServerSummary) -Path $perServerSummaryPath
     Write-Log "Per-server decommissioning summary exported to: $perServerSummaryPath"
 
@@ -1088,6 +1403,14 @@ try {
     $totalLogicalDiskSizeGB = Get-SafeSum -InputObject $successfulLogicalDiskRows -Property "SizeGB"
     $totalLogicalDiskUsedGB = Get-SafeSum -InputObject $successfulLogicalDiskRows -Property "UsedGB"
     $totalLogicalDiskFreeGB = Get-SafeSum -InputObject $successfulLogicalDiskRows -Property "FreeGB"
+
+    $exchangeReadinessRows = @($exchangeReadinessInventory)
+    $exchangeReadinessErrorRows = @($exchangeReadinessRows | Where-Object { $_.CollectionStatus -eq "ERROR" -or $_.Importance -eq "Error" })
+    $exchangeReadinessWarningRows = @($exchangeReadinessRows | Where-Object { $_.CollectionStatus -eq "WARNING" -or $_.Importance -eq "Warning" })
+    $exchangeSchemaRangeUpperRow = $exchangeReadinessRows | Where-Object { $_.Category -eq "ADSchema" -and $_.Setting -eq "rangeUpper" } | Select-Object -First 1
+    $exchangeOrgObjectVersionRow = $exchangeReadinessRows | Where-Object { $_.Category -eq "ADSchema" -and $_.Setting -eq "objectVersion" } | Select-Object -First 1
+    $exchangeSchemaRangeUpper = if ($null -ne $exchangeSchemaRangeUpperRow) { $exchangeSchemaRangeUpperRow.Value } else { $null }
+    $exchangeOrgObjectVersion = if ($null -ne $exchangeOrgObjectVersionRow) { $exchangeOrgObjectVersionRow.Value } else { $null }
 
     $summary = [pscustomobject]@{
         ScriptName                       = $ScriptName
@@ -1119,21 +1442,26 @@ try {
         TotalLogicalDiskUsedTB           = ConvertTo-TBFromGB -GB $totalLogicalDiskUsedGB
         TotalLogicalDiskFreeGB           = $totalLogicalDiskFreeGB
         TotalLogicalDiskFreeTB           = ConvertTo-TBFromGB -GB $totalLogicalDiskFreeGB
+        ExchangeSchemaRangeUpper         = $exchangeSchemaRangeUpper
+        ExchangeOrgObjectVersion         = $exchangeOrgObjectVersion
+        ExchangeReadinessRowsCount       = $exchangeReadinessRows.Count
+        ExchangeReadinessWarnings        = $exchangeReadinessWarningRows.Count
+        ExchangeReadinessErrors          = $exchangeReadinessErrorRows.Count
     }
 
     $summaryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Inventory_Summary.csv"
     Export-ServersAndStorageCsv -Data @($summary) -Path $summaryPath
     Write-Log "Global summary exported to: $summaryPath"
 
-    $htmlSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_Servers_Decommissioning_ExecutiveSummary.html"
-    New-HtmlExecutiveSummary -Summary $summary -PerServerSummary $perServerSummary -Path $htmlSummaryPath
+    $htmlSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_InfrastructureAndReadiness_Report.html"
+    New-HtmlExecutiveSummary -Summary $summary -PerServerSummary $perServerSummary -ReadinessInventory $exchangeReadinessInventory -Path $htmlSummaryPath
     Write-Log "HTML executive summary exported to: $htmlSummaryPath"
 
     $mailSubject = "SmartM365 Exchange OnPrem Servers and Storage inventory - $RunId"
     Send-ServersAndStorageHtmlReport `
         -HtmlReportPath $htmlSummaryPath `
         -Subject $mailSubject `
-        -Attachments @($htmlSummaryPath, $summaryPath, $perServerSummaryPath)
+        -Attachments @($htmlSummaryPath, $summaryPath, $perServerSummaryPath, $exchangeReadinessPath)
     Write-Log "HTML executive summary email sent."
 
     Write-Log "Completed successfully."
