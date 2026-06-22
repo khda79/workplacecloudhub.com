@@ -11,10 +11,10 @@
   "RetentionMaxCSV": "__USE_GLOBAL__",
   "RetentionMaxLogs": "__USE_GLOBAL__",
   "ErrorMailTo": "__USE_GLOBAL__",
+  "EnableTeamsNotifications": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
-  "Subject": "__USE_GLOBAL__",
   "EnableSharePointUpload": "__USE_GLOBAL__",
   "SharePointSiteHostname": "__USE_GLOBAL__",
   "SharePointSitePath": "__USE_GLOBAL__",
@@ -24,5 +24,8 @@
   "LocalMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\Mailboxes",
   "RemoteMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\Mailboxes",
   "LocalMailboxReportCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxReports",
-  "LocalMailboxCombinedPermissionCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxPermissions\\CombinedWithADPermission"
+  "LocalMailboxCombinedPermissionCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxPermissions\\CombinedWithADPermission",
+  "EnableWeeklyHistory": true,
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\Mailboxes\\WeeklyHistory",
+  "WeeklyHistoryRetentionWeeks": 52
 }
