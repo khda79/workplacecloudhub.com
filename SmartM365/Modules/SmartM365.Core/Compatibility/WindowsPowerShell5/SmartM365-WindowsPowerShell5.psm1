@@ -824,7 +824,8 @@ function EnsureExchangePSSnapinLoaded {
     [CmdletBinding()]
     param (
         [string]$SnapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn",
-        [string[]]$RequiredCommands = @("Get-Mailbox")
+        [string[]]$RequiredCommands = @("Get-Mailbox"),
+        [switch]$ViewEntireForest
     )
 
     # Check if the PSSnapin is registered on the server
@@ -862,6 +863,19 @@ function EnsureExchangePSSnapinLoaded {
         Write-Error ("The following Exchange cmdlet(s) are still not available after attempting to load the snap-in: {0}" -f ($missingCommands -join ', '))
         Write-Error "This could indicate an issue with the Exchange Management Tools installation or the selected Exchange snap-in."
         return $false
+    }
+
+    if ($ViewEntireForest) {
+        try {
+            Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
+            if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
+                WriteLog -Message "Set-ADServerSettings -ViewEntireForest $true applied successfully."
+            }
+        }
+        catch {
+            Write-Error "Failed to apply 'Set-ADServerSettings -ViewEntireForest $true'. Message: $($_.Exception.Message)"
+            return $false
+        }
     }
 
     return $true

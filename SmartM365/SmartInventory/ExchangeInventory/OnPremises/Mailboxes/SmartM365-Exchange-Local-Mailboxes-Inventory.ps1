@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.8
+1.9
 
 .NOTES
-    Version: 1.8
+    Version: 1.9
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
@@ -504,7 +504,7 @@ if ($ReportOnly) {
     return
 }
 
-if (-not (EnsureExchangePSSnapinLoaded -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings"))) {
+if (-not (EnsureExchangePSSnapinLoaded -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings") -ViewEntireForest)) {
     Write-Error "Exchange environment not ready. Exiting script."
     $errorMessage = "Exchange environment not ready. Exiting script."
     $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
@@ -581,17 +581,8 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
     Write-Host "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, ForceOverwriteCSV = $ForceOverwriteCSV"
     Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1))
 
-    # Set AD server settings to view the entire forest
-    try {
-        Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
-        WriteLog -Message "Set-ADServerSettings -ViewEntireForest $true applied successfully."
-    } catch {
-        $errorMessage = "CRITICAL ERROR: Failed to apply 'Set-ADServerSettings -ViewEntireForest $true'. Ensure RSAT AD tools are installed and you have necessary permissions. Message: $($_.Exception.Message)"
-        WriteLog -message  $errorMessage
-        $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-        SendEmailHtmlReport -BodyHtml $body
-        throw $errorMessage
-    }
+    # ViewEntireForest is applied during Exchange readiness validation.
+    WriteLog -Message "Set-ADServerSettings -ViewEntireForest $true was applied during Exchange readiness validation."
 
     #region Function Definitions
 
