@@ -28,9 +28,12 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 
+.VERSION
+1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-Version     : 1.0
+Version     : 1.1
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
 #>
@@ -263,25 +266,42 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ts       = Get-Date -Format 'yyyyMMdd_HHmmss'
-$ScriptCsvLogFolderPath  = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ScriptCsvLogFolderPath' -DefaultValue ""
-$LatestCsvFolderPath  = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ""
-$logDir   = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
+$ScriptVersion = "1.1"
+$ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+$TaskName = "$ScriptName v$ScriptVersion"
+$ts = Get-Date -Format 'yyyyMMdd_HHmmss'
+$ScriptCsvLogFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ScriptCsvLogFolderPath' -DefaultValue ""
+$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ""
+$OutputPath = $ScriptCsvLogFolderPath
+$script:GraphRequestDelayMs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRequestDelayMs' -DefaultValue 250)
+$script:GraphMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphMaxRetryAttempts' -DefaultValue 6)
+$script:GraphRetryMaxSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryMaxSeconds' -DefaultValue 180)
+$script:MaxPolicyStateFailures = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxPolicyStateFailures' -DefaultValue 100)
+$script:MaxConsecutivePolicyStateFailures = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxConsecutivePolicyStateFailures' -DefaultValue 25)
+$script:PolicyStateFailureCount = 0
+$script:ConsecutivePolicyStateFailures = 0
+$script:PolicyStateCollectionDisabled = $false
+
+$logDir = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path $ScriptCsvLogFolderPath "Log"
 } else {
-    Join-Path $LogAllRootPath "Devices-Compliance-Inventory"
+    Join-Path $LogAllRootPath $ScriptName
 }
 
-$mainCsv  = Join-Path $ScriptCsvLogFolderPath  "Intune_Devices_Compliance.csv"
-$tsCsv    = Join-Path $ScriptCsvLogFolderPath  ("Intune_Devices_Compliance_{0}.csv" -f $ts)
-$lastCsv  = Join-Path $LatestCsvFolderPath  "Intune_Devices_Compliance.csv"
+$mainCsv = Join-Path $ScriptCsvLogFolderPath "Intune_Devices_Compliance.csv"
+$tsCsv = Join-Path $ScriptCsvLogFolderPath ("Intune_Devices_Compliance_{0}.csv" -f $ts)
+$lastCsv = Join-Path $LatestCsvFolderPath "Intune_Devices_Compliance.csv"
 
 foreach ($dir in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logDir)) {
     try { New-Item -ItemType Directory -Force -Path $dir | Out-Null } catch { }
 }
 
+$global:LogPath = $logDir
+$global:LogTextFile = Join-Path $logDir ("{0}-{1}.log" -f $ScriptName, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'))
+$global:logTranscriptFile = Join-Path $logDir ("{0}-{1}_Transcript.log" -f $ScriptName, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'))
+
 try {
-    $transcriptPath = Join-Path $logDir ("Transcript_{0}.log" -f $ts)
+    $transcriptPath = $global:logTranscriptFile
     Start-Transcript -Path $transcriptPath -Force | Out-Null
 } catch {
     Write-Warning "Failed to start transcript. $_"
@@ -313,6 +333,41 @@ function Get-SafeProperty {
     return $null
 }
 
+function Get-ShortGraphErrorMessage {
+    [CmdletBinding()]
+    param([AllowNull()]$ErrorRecord)
+
+    $message = if ($ErrorRecord -and $ErrorRecord.Exception) { [string]$ErrorRecord.Exception.Message } else { [string]$ErrorRecord }
+    $message = ($message -replace '\s+', ' ').Trim()
+    if ($message.Length -gt 500) { return ($message.Substring(0, 500) + '...') }
+    return $message
+}
+
+function Get-GraphRetryDelaySeconds {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$ErrorRecord,
+        [int]$Attempt,
+        [int]$MaximumSeconds = 180
+    )
+
+    $retryAfter = $null
+    try {
+        if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.Headers) {
+            $retryAfter = @($ErrorRecord.Exception.Response.Headers.GetValues('Retry-After') | Select-Object -First 1)[0]
+        }
+    } catch {}
+    if (-not $retryAfter) { try { $retryAfter = $ErrorRecord.Exception.Data['Retry-After'] } catch {} }
+
+    $seconds = 0
+    if ($retryAfter -and [int]::TryParse([string]$retryAfter, [ref]$seconds) -and $seconds -gt 0) {
+        return [math]::Min($seconds, $MaximumSeconds)
+    }
+
+    $backoff = [math]::Min($MaximumSeconds, [math]::Pow(2, [math]::Min($Attempt, 8)) * 5)
+    return [int]($backoff + (Get-Random -Minimum 0 -Maximum 5))
+}
+
 function Invoke-WithRetry {
     [CmdletBinding()]
     param(
@@ -320,24 +375,32 @@ function Invoke-WithRetry {
         [scriptblock]$Script,
 
         [Parameter(Mandatory = $false)]
-        [int]$MaxAttempts = 3
+        [int]$MaxAttempts = $script:GraphMaxRetryAttempts,
+
+        [Parameter(Mandatory = $false)]
+        [string]$Operation = 'Graph request'
     )
 
-    $attempt = 0
+    if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
 
-    while ($true) {
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
-            $attempt++
+            if ($script:GraphRequestDelayMs -gt 0) { Start-Sleep -Milliseconds $script:GraphRequestDelayMs }
             return & $Script
         } catch {
-            $msg = $_.Exception.Message
+            $statusCode = $null
+            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+            $message = Get-ShortGraphErrorMessage -ErrorRecord $_
+            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
 
-            if ($attempt -ge $MaxAttempts -or ($msg -notmatch '429' -and $msg -notmatch 'throttl')) {
-                throw
+            if (-not $isTransient -or $attempt -ge $MaxAttempts) {
+                $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                throw ("{0} failed. Status={1}; Attempts={2}; Message={3}" -f $Operation, $statusText, $attempt, $message)
             }
 
-            $delay = [int][math]::Min(60, 2 * $attempt)
-            Write-Verbose "Throttled (attempt $attempt), sleeping for $delay second(s)..."
+            $delay = Get-GraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt -MaximumSeconds $script:GraphRetryMaxSeconds
+            $statusRetryText = if ($statusCode) { $statusCode } else { 'unknown' }
+            Write-Warning ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusRetryText, $attempt, $MaxAttempts, $delay)
             Start-Sleep -Seconds $delay
         }
     }
@@ -407,7 +470,7 @@ function Resolve-DirInfoFromGraph {
         }
 
         $uri  = "https://graph.microsoft.com/v1.0/devices?`$filter=deviceId eq '$AzureAdDeviceId'&`$select=id,deviceId,trustType,onPremisesDomainName,onPremisesDistinguishedName"
-        $resp = Invoke-WithRetry -Script { Invoke-MgGraphRequest -Method GET -Uri $uri }
+        $resp = Invoke-WithRetry -Operation "Get Intune Graph page" -Script { Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop }
 
         $dev = $null
         if ($resp -and $resp.value) {
@@ -503,7 +566,7 @@ function Get-PolicyConfiguredCategories {
 
     try {
         $uri = "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies/$PolicyId"
-        $policy = Invoke-WithRetry -Script { Invoke-MgGraphRequest -Method GET -Uri $uri }
+        $policy = Invoke-WithRetry -Operation "Get Intune Graph page" -Script { Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop }
 
         if ($policy) {
             foreach ($entry in $script:PolicyPropertyCategoryMap) {
@@ -749,29 +812,40 @@ try {
             AD_OU                                   = $adOU
             DirectorySource                         = $dirSource
         })
-
         # Per-policy states
+        if ($script:PolicyStateCollectionDisabled) {
+            continue
+        }
+
         $policyStates = $null
         try {
             $cmd = Get-Command -Name Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ErrorAction SilentlyContinue
             if ($cmd) {
                 $policyStates = Invoke-WithRetry -Script {
-                    Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ManagedDeviceId $dev.Id -All
+                    Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ManagedDeviceId $dev.Id -All -ErrorAction Stop
                 }
             } else {
                 $uri  = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$($dev.Id)/deviceCompliancePolicyStates`?$top=200"
                 $vals = @()
                 while ($uri) {
-                    $resp = Invoke-WithRetry -Script { Invoke-MgGraphRequest -Method GET -Uri $uri }
+                    $resp = Invoke-WithRetry -Operation "Get Intune Graph page" -Script { Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop }
                     if ($resp -and $resp.value) { $vals += $resp.value }
                     $uri = if ($resp.'@odata.nextLink') { $resp.'@odata.nextLink' } else { $null }
                 }
                 if ($vals.Count -gt 0) { $policyStates = $vals }
             }
+            $script:ConsecutivePolicyStateFailures = 0
         } catch {
-            Write-Warning ("Failed to retrieve policy states for device {0}: {1}" -f $dev.DeviceName, $_.Exception.Message)
+            $script:PolicyStateFailureCount++
+            $script:ConsecutivePolicyStateFailures++
+            $shortPolicyStateError = Get-ShortGraphErrorMessage -ErrorRecord $_
+            Write-Warning ("Failed to retrieve policy states for device {0}: {1}" -f $dev.DeviceName, $shortPolicyStateError)
+            if (($script:MaxPolicyStateFailures -gt 0 -and $script:PolicyStateFailureCount -ge $script:MaxPolicyStateFailures) -or
+                ($script:MaxConsecutivePolicyStateFailures -gt 0 -and $script:ConsecutivePolicyStateFailures -ge $script:MaxConsecutivePolicyStateFailures)) {
+                $script:PolicyStateCollectionDisabled = $true
+                Write-Warning ("Policy state collection disabled for this run after {0} total failure(s), {1} consecutive. Device summary processing will continue." -f $script:PolicyStateFailureCount, $script:ConsecutivePolicyStateFailures)
+            }
         }
-
         if ($policyStates) {
             $policyStates = $policyStates |
                 Where-Object { $_.platformType -eq 'windows10AndLater' } |
@@ -801,7 +875,7 @@ try {
                         $u = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$($dev.Id)/deviceCompliancePolicyStates/$([uri]::EscapeDataString($p.id))/settingStates`?$select=setting,state&`$top=200"
                         $s = @()
                         while ($u) {
-                            $page = Invoke-WithRetry -Script { Invoke-MgGraphRequest -Method GET -Uri $u }
+                            $page = Invoke-WithRetry -Operation "Get Intune compliance setting states" -Script { Invoke-MgGraphRequest -Method GET -Uri $u -ErrorAction Stop }
                             if ($page -and $page.value) { $s += $page.value }
                             $u = if ($page.'@odata.nextLink') { $page.'@odata.nextLink' } else { $null }
                         }

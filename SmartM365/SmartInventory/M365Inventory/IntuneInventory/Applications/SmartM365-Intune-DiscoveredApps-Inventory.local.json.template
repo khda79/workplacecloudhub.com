@@ -21,6 +21,10 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "DiscoveredAppsCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\Applications\\DiscoveredApps",
+  "GraphMaxRetryAttempts": 8,
+  "GraphRetryDefaultSeconds": 30,
+  "GraphRequestDelayMs": 1000,
+  "GraphRetryMaxSeconds": 300,
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Applications\\DiscoveredApps\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
