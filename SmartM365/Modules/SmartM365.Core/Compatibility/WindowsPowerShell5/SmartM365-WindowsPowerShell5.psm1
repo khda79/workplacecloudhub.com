@@ -823,7 +823,8 @@ function RemoveOldFiles {
 function EnsureExchangePSSnapinLoaded {
     [CmdletBinding()]
     param (
-        [string]$SnapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn"
+        [string]$SnapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn",
+        [string[]]$RequiredCommands = @("Get-Mailbox")
     )
 
     # Check if the PSSnapin is registered on the server
@@ -850,16 +851,21 @@ function EnsureExchangePSSnapinLoaded {
         Write-Verbose "The Exchange PSSnapin '$SnapinName' is already loaded."
     }
 
-    # Verify that the Get-Mailbox command is now available
-    if (-not (Get-Command Get-Mailbox -ErrorAction SilentlyContinue)) {
-        Write-Error "The Get-Mailbox cmdlet is still not available after attempting to load the snap-in."
-        Write-Error "This could indicate an issue with the Exchange Management Tools installation."
+    $missingCommands = @()
+    foreach ($commandName in @($RequiredCommands | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
+            $missingCommands += $commandName
+        }
+    }
+
+    if ($missingCommands.Count -gt 0) {
+        Write-Error ("The following Exchange cmdlet(s) are still not available after attempting to load the snap-in: {0}" -f ($missingCommands -join ', '))
+        Write-Error "This could indicate an issue with the Exchange Management Tools installation or the selected Exchange snap-in."
         return $false
     }
 
     return $true
 }
-
 function ConvertToRecipientArray {
     [CmdletBinding()]
     param(
