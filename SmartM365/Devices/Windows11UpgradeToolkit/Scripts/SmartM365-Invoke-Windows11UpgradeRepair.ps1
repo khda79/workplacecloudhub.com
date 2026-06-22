@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.1
+    0.1.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -64,7 +64,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.1'
+$script:ScriptVersion = '0.1.2'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1267,7 +1267,7 @@ function Test-SetupMediaCopyDiskSpace {
     $cacheBytes = Get-PathSizeBytes -Path $CachePath
     $cacheDriveFreeBytes = Get-PathDriveAvailableBytes -Path $CachePath
     $minimumSystemFreeBytes = [int64]$MinimumFreeDiskGB * 1GB
-    $additionalCopyBytes = [int64][math]::Max(0, ([double]$sourceBytes - [double]$cacheBytes))
+    $additionalCopyBytes = [int64]([math]::Max([double]0, ([double]$sourceBytes - [double]$cacheBytes)))
     $systemDriveRoot = [System.IO.Path]::GetPathRoot((Join-Path $env:SystemDrive '\'))
     $cacheDriveRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($CachePath))
     $systemFreeBytes = [int64]((Get-SystemDriveFreeGb) * 1GB)
