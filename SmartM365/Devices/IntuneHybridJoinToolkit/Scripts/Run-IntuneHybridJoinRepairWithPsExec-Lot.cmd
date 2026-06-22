@@ -40,6 +40,7 @@ set "PSEXEC_LOGS=%LOT_DIR%PsExecLogs"
 set "REPORTS=%LOT_DIR%Reports"
 set "CENTRAL_LOGS=%LOT_DIR%CentralLogs"
 set "PSEXEC_EXE=%ROOT_DIR%\Scripts\PsExec.exe"
+set "WRAPPER_REFRESH_SCRIPT=%ROOT_DIR%\Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
 
 if not exist "%SCRIPT%" (
     echo ERROR: Script not found:
@@ -60,6 +61,19 @@ if errorlevel 1 (
     echo ERROR: Run this CMD from an elevated administrator command prompt.
     set "EXITCODE=1"
     goto :END
+)
+
+if /I not "%EHJIR_SKIP_LOT_WRAPPER_REFRESH%"=="1" (
+    if exist "%WRAPPER_REFRESH_SCRIPT%" (
+        echo Refreshing LOT CMD wrappers...
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%WRAPPER_REFRESH_SCRIPT%" -RootPath "%ROOT_DIR%" >nul
+        if errorlevel 1 (
+            echo ERROR: LOT CMD wrapper refresh failed.
+            echo "%WRAPPER_REFRESH_SCRIPT%"
+            set "EXITCODE=1"
+            goto :END
+        )
+    )
 )
 
 set "DRY_RUN_REQUESTED=0"
