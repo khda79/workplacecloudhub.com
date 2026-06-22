@@ -1,6 +1,6 @@
 @{
     RootModule = "SmartM365-WindowsPowerShell5.psm1"
-    ModuleVersion = "1.0.2"
+    ModuleVersion = "1.0.3"
     GUID = "dde15961-7933-412f-8d09-e1dd8a889b65"
     Author = "Internal automation team"
     CompanyName = "Internal"
@@ -20,6 +20,7 @@
         "Write-SmartM365CsvAtomically",
         "Publish-SmartM365Csv",
         "Export-SmartM365Csv",
+        "Invoke-SmartM365Preflight",
         "Save-SmartM365WeeklyInventoryHistory",
         "Send-SmartM365TeamsNotification",
         "SendFileListEmailReport",
