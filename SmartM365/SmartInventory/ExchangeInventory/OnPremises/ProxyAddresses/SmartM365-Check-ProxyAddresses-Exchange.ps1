@@ -41,6 +41,9 @@
 .PARAMETER SmtpPort
     Port for SMTP relay (default: 25).
 
+.PARAMETER SendMailMode
+    Mail transport mode: Graph, SMTP, or Both. Both uses Graph first and falls back to SMTP.
+
 .PARAMETER From
     From address for notification email.
 
@@ -59,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.6
+1.7
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -98,6 +101,10 @@ param(
 
     [Parameter(Mandatory=$false)]
     [int]$SmtpPort = 25,
+
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("Graph","SMTP","Both")]
+    [string]$SendMailMode = "",
 
     [Parameter(Mandatory=$false)]
     [string]$From = "",
@@ -285,7 +292,7 @@ $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $Scrip
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $ErrorActionPreference = 'Stop'
     if (-not $PSBoundParameters.ContainsKey('OrganizationalUnit')) { $OrganizationalUnit = @(Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrganizationalUnit' -DefaultValue $OrganizationalUnit) }
-    foreach ($configName in @('ExpectedSuffix','SmtpServer','From','To')) {
+    foreach ($configName in @('ExpectedSuffix','SendMailMode','SmtpServer','From','To')) {
         if (-not $PSBoundParameters.ContainsKey($configName)) {
             Set-Variable -Name $configName -Value (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name $configName -DefaultValue (Get-Variable -Name $configName -ValueOnly)) -Scope Local
         }
@@ -306,7 +313,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.6"
+    $ScriptVersion = "1.7"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -726,7 +733,8 @@ try {
         $modeLabel = if ($AddMissingAddress) { 'Write mode' } else { 'Read-only mode' }
         $modeColor = if ($AddMissingAddress) { '#b45309' } else { '#047857' }
         $allowListMode = if ($SkipAllowListCsv) { 'Allowlist skipped' } else { 'Allowlist enforced' }
-        $transportLabel = if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Microsoft Graph' } else { "SMTP $SmtpServer`:$SmtpPort" }
+        $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SendMailMode)) { if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' } } else { $SendMailMode.Trim() }
+        $transportLabel = switch ($effectiveSendMailMode) { 'Graph' { 'Microsoft Graph' } 'SMTP' { "SMTP $SmtpServer`:$SmtpPort" } 'Both' { "Microsoft Graph with SMTP fallback $SmtpServer`:$SmtpPort" } default { $effectiveSendMailMode } }
 
         # Build summary table rows
         $rowsSummary = foreach ($row in $summary) {
@@ -832,7 +840,7 @@ try {
 </html>
 "@
 
-        SendEmailHtmlReport -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments
+        SendEmailHtmlReport -SendMailMode $effectiveSendMailMode -SmtpServer $SmtpServer -SmtpPort $SmtpPort -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments
         Write-Host "Email sent to '$($MailTo -join ';')' via $transportLabel."
     }
 } catch {
