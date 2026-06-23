@@ -3,14 +3,14 @@
     Diagnoses and optionally repairs Windows 10 devices that should move to Windows 11.
 
 .DESCRIPTION
-    Autonomous endpoint-side script for the Smart Intune Windows 11 Upgrade Toolkit.
+    Autonomous endpoint-side script for the SmartM365 Windows 11 Upgrade Toolkit.
     It is designed to run locally or as SYSTEM through PsExec/LOT orchestration.
 
     By default the script is diagnostic-only. Corrective actions require explicit switches.
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.2
+    0.1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -64,7 +64,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.2'
+$script:ScriptVersion = '0.1.4'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1658,6 +1658,7 @@ try {
     }
 
     $os = Get-OsSummary
+    Write-SmartLog ("Startup OS before upgrade: Caption={0}; Version={1}; Build={2}; Architecture={3}; Family={4}" -f $os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
     $freeGb = Get-SystemDriveFreeGb
     $pendingReboot = Test-PendingReboot
     $intune = Get-IntuneEnrollmentSummary
