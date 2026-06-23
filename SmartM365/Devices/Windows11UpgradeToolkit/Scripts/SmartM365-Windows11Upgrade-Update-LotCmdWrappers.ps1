@@ -1,14 +1,16 @@
 <#
 .SYNOPSIS
-    Refreshes Smart Intune Windows 11 Upgrade Toolkit LOT CMD wrappers.
+    Refreshes SmartM365 Windows 11 Upgrade Toolkit LOT CMD wrappers.
 
 .DESCRIPTION
     Copies the standard tiny CMD wrappers from LOT-X to operational LOT-* folders.
     LOT-X is the versioned template and is not modified by this script.
 
+.VERSION
+    0.1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version: 0.1.0
 #>
 
 #requires -Version 5.1

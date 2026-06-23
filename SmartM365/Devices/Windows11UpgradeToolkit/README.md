@@ -1,4 +1,4 @@
-# Smart Intune Windows 11 Upgrade Toolkit
+# SmartM365 Windows 11 Upgrade Toolkit
 
 PowerShell LOT/PsExec toolkit to diagnose Windows 10 devices that should migrate to Windows 11 through Intune, Windows Autopatch, or Windows Update for Business, then run guarded repair or upgrade actions from LOT folders.
 
