@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.4
+    0.1.7
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -64,7 +64,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.4'
+$script:ScriptVersion = '0.1.7'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -317,6 +317,22 @@ function Get-WindowsUpdatePolicySummary {
     }
 }
 
+function ConvertTo-Windows11IndicatorSignal {
+    param([object]$Value)
+
+    if ($null -eq $Value) { return '' }
+
+    $values = if ($Value -is [System.Array]) { @($Value) } else { @($Value) }
+    $signals = @(
+        $values |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '(?i)^(none|n/a|na|null)$' }
+    )
+
+    if ($signals.Count -eq 0) { return '' }
+    return (@($signals) -join '; ')
+}
+
 function Get-Windows11IndicatorSummary {
     $path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\TargetVersionUpgradeExperienceIndicators'
     $ignoredHardware = @('Cpu','CpuFms','CpuVendor','CpuFamily','CpuModel','CpuSpeed','CpuCores','Tpm','TpmVersion','SecureBoot','UefiSecureBoot','Uefi','Ram','Memory','Storage','Disk','SystemDriveSize')
@@ -340,10 +356,10 @@ function Get-Windows11IndicatorSummary {
         }
 
         $props = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
-        $upEx = if ($props.PSObject.Properties['UpEx']) { [string]$props.UpEx } else { '' }
-        $gated = if ($props.PSObject.Properties['GatedBlockId']) { [string]$props.GatedBlockId } else { '' }
-        $red = if ($props.PSObject.Properties['RedReason']) { [string]$props.RedReason } else { '' }
-        $sysReq = if ($props.PSObject.Properties['SysReqIssue']) { [string]$props.SysReqIssue } else { '' }
+        $upEx = if ($props.PSObject.Properties['UpEx']) { ConvertTo-Windows11IndicatorSignal -Value $props.UpEx } else { '' }
+        $gated = if ($props.PSObject.Properties['GatedBlockId']) { ConvertTo-Windows11IndicatorSignal -Value $props.GatedBlockId } else { '' }
+        $red = if ($props.PSObject.Properties['RedReason']) { ConvertTo-Windows11IndicatorSignal -Value $props.RedReason } else { '' }
+        $sysReq = if ($props.PSObject.Properties['SysReqIssue']) { ConvertTo-Windows11IndicatorSignal -Value $props.SysReqIssue } else { '' }
         $hasBlock = ($upEx -match '(Red|Blocked|Hold)' -or -not [string]::IsNullOrWhiteSpace($gated) -or -not [string]::IsNullOrWhiteSpace($red) -or -not [string]::IsNullOrWhiteSpace($sysReq))
         if (-not $hasBlock) { continue }
 
@@ -1915,6 +1931,12 @@ finally {
 
     Save-RunResult -Result $result
     Write-SmartLog ("Final Status={0}; NextAction={1}; ExitCode={2}" -f $status,$nextAction,$exitCode)
+    if (-not [string]::IsNullOrWhiteSpace($detail)) {
+        Write-SmartLog ("Final Detail={0}" -f $detail)
+    }
+    if ($status -eq 'WINDOWS11_COMPAT_BLOCKER' -and -not [string]::IsNullOrWhiteSpace($finalW11BlockingReasons) -and $finalW11BlockingReasons -ne $detail) {
+        Write-SmartLog ("Final Windows11CompatibilityReasons={0}" -f $finalW11BlockingReasons)
+    }
     Write-Output ("Status={0}; NextAction={1}; ExitCode={2}; Log={3}" -f $status,$nextAction,$exitCode,$script:LogPath)
 }
 
