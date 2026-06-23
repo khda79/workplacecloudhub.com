@@ -8,9 +8,11 @@
     Windows 11 setup media when setup upgrade is enabled, starts the script as SYSTEM,
     collects evidence, and writes cycle CSV reports.
 
+.VERSION
+    0.1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version: 0.1.0
 #>
 
 #requires -Version 5.1
@@ -79,7 +81,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.0'
+$script:LauncherVersion = '0.1.1'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -244,7 +246,7 @@ if (-not [string]::IsNullOrWhiteSpace($SetupSourceMapPath)) {
     [void]$remoteArgs.Add('-SetupSourceMapPath'); [void]$remoteArgs.Add($SetupSourceMapPath)
 }
 
-Write-Host "Smart Intune Windows 11 Upgrade Toolkit launcher v$script:LauncherVersion"
+Write-Host "SmartM365 Windows 11 Upgrade Toolkit launcher v$script:LauncherVersion"
 Write-Host "Computer list : $ComputerListPath"
 Write-Host "PsExec        : $resolvedPsExec"
 Write-Host "Repair script : $LocalScriptPath"
