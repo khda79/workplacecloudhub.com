@@ -634,7 +634,7 @@ $launchAllLotStartDelaySeconds = 5
 
 if ($ValidateOnly) {
     $count = @(Get-LotFolders -RootPath $toolkitRoot).Count
-    Write-Output "Smart Intune Windows 11 Upgrade Toolkit LOT Launcher GUI validation completed. Lots=$count"
+    Write-Output "SmartM365 Windows 11 Upgrade Toolkit LOT Launcher GUI validation completed. Lots=$count"
     return
 }
 
