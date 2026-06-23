@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.3
+1.4
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.3'
+$GuiVersion = '1.4'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -73,6 +73,88 @@ function Import-SmartM365GuiSplash {
     }
 
     return $false
+}
+
+
+function Read-ToolkitConfig {
+    param([string]$Path)
+
+    $config = @{}
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $config
+    }
+
+    foreach ($rawLine in @(Get-Content -LiteralPath $Path)) {
+        $line = ([string]$rawLine).Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#') -or $line.StartsWith(';')) {
+            continue
+        }
+
+        $match = [regex]::Match($line, '^(?<name>[A-Za-z_][A-Za-z0-9_]*)=(?<value>.*)$')
+        if (-not $match.Success) {
+            continue
+        }
+
+        $name = $match.Groups['name'].Value.Trim()
+        if ($name -notmatch '^EHJIR_') {
+            continue
+        }
+
+        $value = $match.Groups['value'].Value.Trim()
+        if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+
+        $config[$name] = $value
+    }
+
+    return $config
+}
+
+function Write-ToolkitConfig {
+    param(
+        [string]$Path,
+        [hashtable]$Values
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('# SmartM365 Intune Hybrid Join Toolkit GUI options.')
+    $lines.Add('# This file is local and is updated by the LOT launcher GUI.')
+    $lines.Add('')
+    foreach ($name in @($Values.Keys | Sort-Object)) {
+        if ($name -notmatch '^EHJIR_') { continue }
+        $value = [string]$Values[$name]
+        $lines.Add(('{0}={1}' -f $name,$value))
+    }
+
+    Set-Content -LiteralPath $Path -Encoding ASCII -Value @($lines)
+}
+
+function Get-ToolkitConfigValue {
+    param(
+        [string]$Name,
+        [AllowNull()][string]$Default = $null
+    )
+
+    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $processValue
+    }
+
+    if ($script:ToolkitConfig -and $script:ToolkitConfig.ContainsKey($Name)) {
+        return [string]$script:ToolkitConfig[$Name]
+    }
+
+    if ($script:ToolkitDefaultEnvironment -and $script:ToolkitDefaultEnvironment.ContainsKey($Name)) {
+        return [string]$script:ToolkitDefaultEnvironment[$Name]
+    }
+
+    return $Default
+}
+
+function Get-ConfiguredValue {
+    param([string]$Name)
+    return Get-ToolkitConfigValue -Name $Name -Default ([string]$script:ToolkitDefaultEnvironment[$Name])
 }
 
 function Get-TrimmedText {
@@ -435,6 +517,36 @@ $toolkitRoot = Get-ToolkitRoot
 $script:GuiStartupLogPath = Join-Path $toolkitRoot 'GuiLauncherStartup.log'
 $script:PsExecLauncherPath = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec.ps1'
 $script:PsExecLauncherVersion = Get-ScriptHeaderVersion -Path $script:PsExecLauncherPath
+$script:ToolkitConfigPath = Join-Path $toolkitRoot 'IntuneHybridJoinToolkit.config'
+$script:ToolkitDefaultEnvironment = @{
+    EHJIR_THROTTLE = '10'
+    EHJIR_GLOBAL_CONCURRENCY_LIMIT = '15'
+    EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = '0'
+    EHJIR_DELAY_BETWEEN_CYCLES_MINUTES = '5'
+    EHJIR_DISABLE_NIGHT_PAUSE = '0'
+    EHJIR_NIGHT_PAUSE_START_HOUR = '20'
+    EHJIR_NIGHT_PAUSE_END_HOUR = '7'
+    EHJIR_INTUNE_RETRY_SLEEP_MINUTES = '3'
+    EHJIR_INTUNE_RETRY_MAX_RETRIES = '5'
+    EHJIR_STALE_CLEANUP_DELAY_SECONDS = '30'
+    EHJIR_REBOOT_DELAY_SECONDS = '300'
+    EHJIR_PSEXEC_TIMEOUT_MINUTES = '60'
+    EHJIR_ALLOW_DSREG_LEAVE = '1'
+    EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT = '1'
+    EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER = '1'
+    EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE = '0'
+    EHJIR_SKIP_VIRTUAL_MACHINES = '1'
+    EHJIR_AD_DOMAIN = ''
+    EHJIR_GUI_DRY_RUN = '0'
+    EHJIR_GUI_AUDIT_ONLY = '0'
+    EHJIR_GUI_IGNORE_RUN_GUARD_EVERY_CYCLE = '0'
+    EHJIR_GUI_REMOVE_NON_INTUNE_MDM = '0'
+    EHJIR_GUI_KEEP_CENTRAL_LOG_HISTORY = '0'
+    EHJIR_GUI_NO_CENTRAL_LOG_COLLECTION = '0'
+    EHJIR_GUI_SKIP_POST_CYCLE_INTUNE_INVENTORY = '0'
+    EHJIR_GUI_MAX_CYCLES = '0'
+}
+$script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
 Write-GuiStartupLog -Message ('GUI launcher startup; GuiVersion={0}; PsExecLauncherVersion={1}; Root={2}; Script={3}; PID={4}; User={5}' -f $GuiVersion,$script:PsExecLauncherVersion,$toolkitRoot,$PSCommandPath,$PID,[Environment]::UserName)
 $launchAllLotStartDelaySeconds = 5
 
@@ -838,6 +950,7 @@ $xaml = @'
                                         <TextBox x:Name="GlobalLimitOptionText" Grid.Column="1" Text="15" Style="{StaticResource NumericTextBoxStyle}"/>
                                         <Button x:Name="GlobalLimitOptionUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
                                     </Grid>
+                                    <Button x:Name="ResetDefaultsButton" Content="Reset defaults" HorizontalAlignment="Left" MinWidth="140" Margin="0,2,0,14"/>
                                     <TextBlock Text="Global lease timeout (minutes)"/>
                                     <Grid Margin="0,4,0,10">
                                         <Grid.ColumnDefinitions>
@@ -944,7 +1057,7 @@ $controls = @{}
     'NightPauseEndText','NightPauseEndDownButton','NightPauseEndUpButton',
     'MaxCyclesText','MaxCyclesDownButton',
     'MaxCyclesUpButton','PsExecTimeoutText','PsExecTimeoutDownButton','PsExecTimeoutUpButton',
-    'GlobalLimitOptionText','GlobalLimitOptionDownButton','GlobalLimitOptionUpButton',
+    'GlobalLimitOptionText','GlobalLimitOptionDownButton','GlobalLimitOptionUpButton','ResetDefaultsButton',
     'GlobalLeaseText','GlobalLeaseDownButton','GlobalLeaseUpButton',
     'IntuneRetrySleepText','IntuneRetrySleepDownButton','IntuneRetrySleepUpButton',
     'IntuneRetryMaxText','IntuneRetryMaxDownButton','IntuneRetryMaxUpButton',
@@ -1112,12 +1225,74 @@ Register-NumericSteppers
 Initialize-Combo -Combo $controls.LotModeCombo -Values @('Loop','Once','LoopIgnoreRunGuard','OnceIgnoreRunGuard') -Selected 'Loop'
 Initialize-Combo -Combo $controls.SingleModeCombo -Values @('Once','OnceIgnoreRunGuard','Loop','LoopIgnoreRunGuard') -Selected 'Once'
 
-$controls.AllowDsregLeaveCheck.IsChecked = $true
-$controls.AllowStaleCleanupCheck.IsChecked = $true
-$controls.AllowRebootNoUserCheck.IsChecked = $true
-$controls.AllowRebootAfterLeaveCheck.IsChecked = $false
-$controls.SkipVirtualMachinesCheck.IsChecked = $true
-$controls.NightPauseCheck.IsChecked = $true
+function Initialize-Options {
+    $controls.AllowDsregLeaveCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_ALLOW_DSREG_LEAVE') -eq '1')
+    $controls.AllowStaleCleanupCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT') -eq '1')
+    $controls.AllowRebootNoUserCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER') -eq '1')
+    $controls.AllowRebootAfterLeaveCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE') -eq '1')
+    $controls.SkipVirtualMachinesCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_SKIP_VIRTUAL_MACHINES') -eq '1')
+    $controls.NightPauseCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_DISABLE_NIGHT_PAUSE') -ne '1')
+    $controls.ThrottleText.Text = Get-ConfiguredValue 'EHJIR_THROTTLE'
+    $controls.CycleDelayText.Text = Get-ConfiguredValue 'EHJIR_DELAY_BETWEEN_CYCLES_MINUTES'
+    $controls.NightPauseStartText.Text = Get-ConfiguredValue 'EHJIR_NIGHT_PAUSE_START_HOUR'
+    $controls.NightPauseEndText.Text = Get-ConfiguredValue 'EHJIR_NIGHT_PAUSE_END_HOUR'
+    $controls.PsExecTimeoutText.Text = Get-ConfiguredValue 'EHJIR_PSEXEC_TIMEOUT_MINUTES'
+    $controls.GlobalLimitText.Text = Get-ConfiguredValue 'EHJIR_GLOBAL_CONCURRENCY_LIMIT'
+    $controls.GlobalLimitOptionText.Text = Get-ConfiguredValue 'EHJIR_GLOBAL_CONCURRENCY_LIMIT'
+    $controls.GlobalLeaseText.Text = Get-ConfiguredValue 'EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES'
+    $controls.IntuneRetrySleepText.Text = Get-ConfiguredValue 'EHJIR_INTUNE_RETRY_SLEEP_MINUTES'
+    $controls.IntuneRetryMaxText.Text = Get-ConfiguredValue 'EHJIR_INTUNE_RETRY_MAX_RETRIES'
+    $controls.StaleCleanupDelayText.Text = Get-ConfiguredValue 'EHJIR_STALE_CLEANUP_DELAY_SECONDS'
+    $controls.RebootDelayText.Text = Get-ConfiguredValue 'EHJIR_REBOOT_DELAY_SECONDS'
+    $controls.AdDomainOverrideText.Text = Get-ConfiguredValue 'EHJIR_AD_DOMAIN'
+    $controls.DryRunCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_GUI_DRY_RUN') -eq '1')
+    $controls.AuditOnlyCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_GUI_AUDIT_ONLY') -eq '1')
+    $controls.IgnoreRunGuardCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_GUI_IGNORE_RUN_GUARD_EVERY_CYCLE') -eq '1')
+    $controls.RemoveNonIntuneMdmCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_GUI_REMOVE_NON_INTUNE_MDM') -eq '1')
+    $controls.KeepCentralHistoryCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_GUI_KEEP_CENTRAL_LOG_HISTORY') -eq '1')
+    $controls.NoCentralCollectionCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_GUI_NO_CENTRAL_LOG_COLLECTION') -eq '1')
+    $controls.SkipPostCycleInventoryCheck.IsChecked = ((Get-ConfiguredValue 'EHJIR_GUI_SKIP_POST_CYCLE_INTUNE_INVENTORY') -eq '1')
+    $controls.MaxCyclesText.Text = Get-ConfiguredValue 'EHJIR_GUI_MAX_CYCLES'
+}
+
+function Get-ToolkitDefaultConfig {
+    $defaults = @{}
+    foreach ($key in @($script:ToolkitDefaultEnvironment.Keys)) {
+        $defaults[$key] = [string]$script:ToolkitDefaultEnvironment[$key]
+    }
+    return $defaults
+}
+
+function Save-GuiOptions {
+    param([switch]$Quiet)
+
+    try {
+        $environment = Get-LauncherOptionEnvironment
+        Write-ToolkitConfig -Path $script:ToolkitConfigPath -Values $environment
+        $script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
+        if (-not $Quiet) {
+            Add-Status -Title 'Options saved' -Message ("Saved GUI options to {0}." -f $script:ToolkitConfigPath)
+        }
+    }
+    catch {
+        if ($Quiet) { return }
+        Show-GuiError ("Unable to save GUI options: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Reset-GuiOptionsToDefaults {
+    try {
+        Write-ToolkitConfig -Path $script:ToolkitConfigPath -Values (Get-ToolkitDefaultConfig)
+        $script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
+        Initialize-Options
+        Add-Status -Title 'Defaults restored' -Message ("Reset GUI options to defaults in {0}." -f $script:ToolkitConfigPath)
+    }
+    catch {
+        Show-GuiError ("Unable to reset GUI options: {0}" -f $_.Exception.Message)
+    }
+}
+
+Initialize-Options
 
 function Get-LauncherOptionArguments {
     $arguments = New-Object System.Collections.Generic.List[string]
@@ -1158,6 +1333,14 @@ function Get-LauncherOptionEnvironment {
         EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER    = Get-BooleanText -CheckBox $controls.AllowRebootNoUserCheck
         EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE           = Get-BooleanText -CheckBox $controls.AllowRebootAfterLeaveCheck
         EHJIR_SKIP_VIRTUAL_MACHINES                    = Get-BooleanText -CheckBox $controls.SkipVirtualMachinesCheck
+        EHJIR_GUI_DRY_RUN                              = Get-BooleanText -CheckBox $controls.DryRunCheck
+        EHJIR_GUI_AUDIT_ONLY                           = Get-BooleanText -CheckBox $controls.AuditOnlyCheck
+        EHJIR_GUI_IGNORE_RUN_GUARD_EVERY_CYCLE         = Get-BooleanText -CheckBox $controls.IgnoreRunGuardCheck
+        EHJIR_GUI_REMOVE_NON_INTUNE_MDM                = Get-BooleanText -CheckBox $controls.RemoveNonIntuneMdmCheck
+        EHJIR_GUI_KEEP_CENTRAL_LOG_HISTORY             = Get-BooleanText -CheckBox $controls.KeepCentralHistoryCheck
+        EHJIR_GUI_NO_CENTRAL_LOG_COLLECTION            = Get-BooleanText -CheckBox $controls.NoCentralCollectionCheck
+        EHJIR_GUI_SKIP_POST_CYCLE_INTUNE_INVENTORY     = Get-BooleanText -CheckBox $controls.SkipPostCycleInventoryCheck
+        EHJIR_GUI_MAX_CYCLES                           = Get-IntText -TextBox $controls.MaxCyclesText -Default 0 -Minimum 0
     }
 
     if (-not [string]::IsNullOrWhiteSpace($controls.AdDomainOverrideText.Text)) {
@@ -1259,6 +1442,7 @@ $controls.LaunchLotButton.Add_Click({
             Update-SelectedLotView
             return
         }
+        Save-GuiOptions -Quiet
         Start-ToolkitLot -Lot $script:SelectedLot -Mode ([string]$controls.LotModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
         Register-LotLaunch -Lot $script:SelectedLot
         Update-SelectedLotView
@@ -1272,6 +1456,7 @@ $controls.LaunchAllButton.Add_Click({
         $lots = @(Get-LaunchableLotSummaries)
         if ($lots.Count -eq 0) { throw 'No ready LOT with devices was found.' }
         foreach ($lot in $lots) {
+            Save-GuiOptions -Quiet
             Start-ToolkitLot -Lot $lot -Mode ([string]$controls.LotModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
             Register-LotLaunch -Lot $lot
             Add-Status -Title 'Launch all' -Message ("Launched {0}. Next LOT starts in {1}s." -f $lot.Name, $launchAllLotStartDelaySeconds)
@@ -1287,6 +1472,7 @@ $controls.LaunchSingleButton.Add_Click({
     try {
         $computer = $controls.SingleComputerText.Text.Trim()
         if (-not $computer) { throw 'Enter a computer name.' }
+        Save-GuiOptions -Quiet
         $context = Start-ToolkitSingleComputer -ToolkitRoot $toolkitRoot -ComputerName $computer -Mode ([string]$controls.SingleModeCombo.SelectedItem) -ExtraArguments (Get-LauncherOptionArguments) -Environment (Get-LauncherOptionEnvironment)
         $script:LastSingleRunFolder = $context.Root
         $controls.SingleRunFolderText.Text = $context.Root
@@ -1344,6 +1530,9 @@ function Sync-GlobalLimitText {
 
 $controls.GlobalLimitOptionText.Add_TextChanged({ try { Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitOptionText -TargetTextBox $controls.GlobalLimitText } catch { Show-GuiError ("Unable to synchronize worker limit fields: {0}" -f $_.Exception.Message) } }.GetNewClosure())
 $controls.GlobalLimitText.Add_TextChanged({ try { Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitText -TargetTextBox $controls.GlobalLimitOptionText } catch { Show-GuiError ("Unable to synchronize worker limit fields: {0}" -f $_.Exception.Message) } }.GetNewClosure())
+$controls.ResetDefaultsButton.Add_Click({ Reset-GuiOptionsToDefaults })
+
+$window.Add_Closing({ Save-GuiOptions -Quiet })
 $window.Add_Closed({
     if ($splash) {
         Close-SmartM365GuiSplash -Splash $splash
