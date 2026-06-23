@@ -5,6 +5,9 @@
 .DESCRIPTION
     Runs one remote computer operation in a background job. This file is operator-side only;
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
+
+.VERSION
+0.1.1
 #>
 
 #requires -Version 5.1
@@ -109,6 +112,109 @@ function New-Directory {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         New-Item -ItemType Directory -Path $Path -Force -ErrorAction Stop | Out-Null
     }
+}
+
+function Test-TcpPort {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [int]$TimeoutMilliseconds = 3000
+    )
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $async = $client.BeginConnect($ComputerName, $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne($TimeoutMilliseconds, $false)) {
+            return $false
+        }
+        $client.EndConnect($async)
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        try { $client.Close() } catch { }
+    }
+}
+
+function Test-RemoteAdminAccess {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
+
+    $state = [ordered]@{
+        DnsResolved = $false
+        DnsAddressList = ''
+        PingReachable = $false
+        SmbPort445Reachable = $false
+        AdminShareReachable = $false
+        AdminSharePath = "\\$ComputerName\ADMIN$"
+        RootSharePath = "\\$ComputerName\C$"
+        FailureType = ''
+        Detail = ''
+    }
+
+    try {
+        $dns = [System.Net.Dns]::GetHostEntry($ComputerName)
+        $state.DnsResolved = $true
+        $state.DnsAddressList = (($dns.AddressList | ForEach-Object { $_.IPAddressToString }) -join ';')
+        Add-Content -LiteralPath $LogPath -Value ("[{0}] DNS resolved: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$state.DnsAddressList) -Encoding UTF8
+    }
+    catch {
+        Add-Content -LiteralPath $LogPath -Value ("[{0}] WARN DNS resolution failed: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$_.Exception.Message) -Encoding UTF8
+    }
+
+    $state.PingReachable = Test-Connection -ComputerName $ComputerName -Count 1 -Quiet -ErrorAction SilentlyContinue
+    if (-not $state.PingReachable) {
+        Add-Content -LiteralPath $LogPath -Value ("[{0}] WARN Ping failed. SMB checks will still run." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
+    }
+
+    $state.SmbPort445Reachable = Test-TcpPort -ComputerName $ComputerName -Port 445
+    if ($state.SmbPort445Reachable) {
+        Add-Content -LiteralPath $LogPath -Value ("[{0}] SMB TCP 445 reachable." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
+    }
+    else {
+        Add-Content -LiteralPath $LogPath -Value ("[{0}] WARN SMB TCP 445 is not reachable." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
+    }
+
+    $adminShareReachable = Test-Path -LiteralPath ([string]$state.AdminSharePath) -ErrorAction SilentlyContinue
+    $rootShareReachable = Test-Path -LiteralPath ([string]$state.RootSharePath) -ErrorAction SilentlyContinue
+    $state.AdminShareReachable = ($adminShareReachable -and $rootShareReachable)
+    Add-Content -LiteralPath $LogPath -Value ("[{0}] Administrative shares: ADMIN$={1}; C$={2}; ADMINPath={3}; RootPath={4}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$adminShareReachable,$rootShareReachable,$state.AdminSharePath,$state.RootSharePath) -Encoding UTF8
+
+    if (-not $state.AdminShareReachable) {
+        if (-not $state.DnsResolved) {
+            $state.FailureType = 'DNS_FAILED'
+        }
+        elseif (-not $state.SmbPort445Reachable) {
+            $state.FailureType = 'SMB_PORT_445_UNREACHABLE'
+        }
+        elseif (-not $state.PingReachable) {
+            $state.FailureType = 'PING_FAILED_ADMIN_SHARE_FAILED'
+        }
+        else {
+            $state.FailureType = 'PING_OK_ADMIN_SHARE_FAILED'
+        }
+    }
+
+    $state.Detail = ("DNS={0}; Addresses={1}; Ping={2}; Tcp445={3}; AdminShare={4}; FailureType={5}" -f $state.DnsResolved,$state.DnsAddressList,$state.PingReachable,$state.SmbPort445Reachable,$state.AdminShareReachable,$state.FailureType)
+    return [pscustomobject]$state
+}
+
+function Set-ResultRemoteAccessState {
+    param(
+        [Parameter(Mandatory = $true)][object]$Result,
+        [Parameter(Mandatory = $true)][object]$State
+    )
+
+    $Result.DnsResolved = [string]$State.DnsResolved
+    $Result.DnsAddressList = [string]$State.DnsAddressList
+    $Result.PingReachable = [string]$State.PingReachable
+    $Result.SmbPort445Reachable = [string]$State.SmbPort445Reachable
+    $Result.AdminShareReachable = [string]$State.AdminShareReachable
+    $Result.AdminShareFailureType = [string]$State.FailureType
 }
 
 function Convert-ToAdminSharePath {
@@ -227,6 +333,13 @@ $result = [ordered]@{
     RemoteNextAction = ''
     ExitCode = ''
     Detail = ''
+    DnsResolved = ''
+    DnsAddressList = ''
+    PingReachable = ''
+    SmbPort445Reachable = ''
+    AdminShareReachable = ''
+    AdminShareFailureType = ''
+    RemotePayloadCopyAttempts = ''
     SetupCacheAction = ''
     SetupDynamicUpdate = ''
     SelectedSetupSourcePath = ''
@@ -244,11 +357,12 @@ $result = [ordered]@{
 try {
     Add-Content -LiteralPath $logPath -Value ("[{0}] Starting {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Computer) -Encoding UTF8
 
+    $remoteAccess = Test-RemoteAdminAccess -ComputerName $Computer -LogPath $logPath
+    Set-ResultRemoteAccessState -Result $result -State $remoteAccess
+
     if ($DryRun) {
-        $reachable = Test-Connection -ComputerName $Computer -Count 1 -Quiet -ErrorAction SilentlyContinue
-        $adminShare = Test-Path -LiteralPath ("\\{0}\C$" -f $Computer)
-        $result.LauncherStatus = if ($reachable -and $adminShare) { 'DRYRUN_READY' } else { 'DRYRUN_UNREACHABLE' }
-        $result.Detail = "Ping=$reachable; AdminShare=$adminShare"
+        $result.LauncherStatus = if ($remoteAccess.AdminShareReachable) { 'DRYRUN_READY' } else { 'DRYRUN_ADMIN_SHARE_UNREACHABLE' }
+        $result.Detail = $remoteAccess.Detail
         return [pscustomobject]$result
     }
 
@@ -256,7 +370,49 @@ try {
         Add-Content -LiteralPath $logPath -Value ("[{0}] Launcher-side VM pre-check skipped to avoid WinRM. Endpoint guard will check locally under PsExec/SYSTEM." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
     }
 
-    Copy-RemotePayload -ComputerName $Computer -LogPath $logPath
+    $payloadCopied = $false
+    $payloadCopyError = ''
+    $maxPayloadCopyAttempts = 3
+    for ($payloadCopyAttempt = 1; $payloadCopyAttempt -le $maxPayloadCopyAttempts; $payloadCopyAttempt++) {
+        $result.RemotePayloadCopyAttempts = [string]$payloadCopyAttempt
+        if ($payloadCopyAttempt -gt 1) {
+            $delaySeconds = [math]::Min(30, 10 * ($payloadCopyAttempt - 1))
+            Add-Content -LiteralPath $logPath -Value ("[{0}] Retrying SMB/admin-share preflight and payload copy. Attempt={1}/{2}; DelaySeconds={3}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$payloadCopyAttempt,$maxPayloadCopyAttempts,$delaySeconds) -Encoding UTF8
+            Start-Sleep -Seconds $delaySeconds
+            $remoteAccess = Test-RemoteAdminAccess -ComputerName $Computer -LogPath $logPath
+            Set-ResultRemoteAccessState -Result $result -State $remoteAccess
+        }
+
+        if (-not $remoteAccess.AdminShareReachable) {
+            $payloadCopyError = ("{0}: Required administrative shares are not reachable. {1}" -f $remoteAccess.FailureType,$remoteAccess.Detail)
+            Add-Content -LiteralPath $logPath -Value ("[{0}] WARN Payload copy preflight failed. Attempt={1}/{2}; Detail={3}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$payloadCopyAttempt,$maxPayloadCopyAttempts,$payloadCopyError) -Encoding UTF8
+            continue
+        }
+
+        try {
+            Copy-RemotePayload -ComputerName $Computer -LogPath $logPath
+            $payloadCopied = $true
+            break
+        }
+        catch {
+            $payloadCopyError = ("Remote payload copy failed after successful SMB preflight. {0}; Error={1}" -f $remoteAccess.Detail,$_.Exception.Message)
+            Add-Content -LiteralPath $logPath -Value ("[{0}] WARN Payload copy failed. Attempt={1}/{2}; Detail={3}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$payloadCopyAttempt,$maxPayloadCopyAttempts,$payloadCopyError) -Encoding UTF8
+        }
+    }
+
+    if (-not $payloadCopied) {
+        if (-not $remoteAccess.AdminShareReachable) {
+            $result.LauncherStatus = 'ADMIN_SHARE_UNREACHABLE'
+            $result.Detail = $payloadCopyError
+            Add-Content -LiteralPath $logPath -Value ("[{0}] Skipping PsExec after retries: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$result.Detail) -Encoding UTF8
+            return [pscustomobject]$result
+        }
+
+        $result.LauncherStatus = 'REMOTE_PAYLOAD_COPY_FAILED'
+        $result.Detail = $payloadCopyError
+        Add-Content -LiteralPath $logPath -Value ("[{0}] ERROR Payload copy failed after {1} attempt(s): {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$maxPayloadCopyAttempts,$result.Detail) -Encoding UTF8
+        return [pscustomobject]$result
+    }
     $result.SetupCacheAction = Copy-SetupMediaToRemoteCache -ComputerName $Computer -LogPath $logPath
 
     $remotePowerShellArgs = @($RemoteScriptArgs | ForEach-Object { Convert-ToPsExecRemoteArgument -Value $_ })
