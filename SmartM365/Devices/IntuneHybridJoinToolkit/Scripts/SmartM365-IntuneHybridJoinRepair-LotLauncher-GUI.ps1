@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.4
+1.5
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.4'
+$GuiVersion = '1.5'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -950,7 +950,6 @@ $xaml = @'
                                         <TextBox x:Name="GlobalLimitOptionText" Grid.Column="1" Text="15" Style="{StaticResource NumericTextBoxStyle}"/>
                                         <Button x:Name="GlobalLimitOptionUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
                                     </Grid>
-                                    <Button x:Name="ResetDefaultsButton" Content="Reset defaults" HorizontalAlignment="Left" MinWidth="140" Margin="0,2,0,14"/>
                                     <TextBlock Text="Global lease timeout (minutes)"/>
                                     <Grid Margin="0,4,0,10">
                                         <Grid.ColumnDefinitions>
@@ -1006,6 +1005,7 @@ $xaml = @'
                                         <TextBox x:Name="RebootDelayText" Grid.Column="1" Text="300" Style="{StaticResource NumericTextBoxStyle}"/>
                                         <Button x:Name="RebootDelayUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
                                     </Grid>
+                                    <Button x:Name="ResetDefaultsButton" Content="Reset defaults" HorizontalAlignment="Right" MinWidth="140" Margin="0,8,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </Grid>

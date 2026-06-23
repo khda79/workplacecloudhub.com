@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.2
+0.1.3
 #>
 param(
     [switch]$ValidateOnly
@@ -1084,7 +1084,6 @@ $xaml = @'
                                         <TextBox x:Name="GlobalLimitOptionText" Grid.Column="1" Style="{StaticResource NumericTextBoxStyle}"/>
                                         <Button x:Name="GlobalLimitOptionUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
                                     </Grid>
-                                    <Button x:Name="ResetDefaultsButton" Content="Reset defaults" HorizontalAlignment="Left" MinWidth="140" Margin="0,2,0,14"/>
                                     <TextBlock Text="Global lease timeout (minutes)"/>
                                     <Grid Margin="0,4,0,10">
                                         <Grid.ColumnDefinitions>
@@ -1096,6 +1095,7 @@ $xaml = @'
                                         <TextBox x:Name="GlobalLeaseText" Grid.Column="1" Style="{StaticResource NumericTextBoxStyle}"/>
                                         <Button x:Name="GlobalLeaseUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
                                     </Grid>
+                                    <Button x:Name="ResetDefaultsButton" Content="Reset defaults" HorizontalAlignment="Right" MinWidth="140" Margin="0,8,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </Grid>
