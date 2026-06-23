@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.1
+0.1.2
 #>
 param(
     [switch]$ValidateOnly
@@ -74,6 +74,25 @@ function Read-ToolkitConfig {
     }
 
     return $config
+}
+
+function Write-ToolkitConfig {
+    param(
+        [string]$Path,
+        [hashtable]$Values
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('# SmartM365 Windows 11 Upgrade Toolkit GUI options.')
+    $lines.Add('# This file is local and is updated by the LOT launcher GUI.')
+    $lines.Add('')
+    foreach ($name in @($Values.Keys | Sort-Object)) {
+        if ($name -notmatch '^W11UT_') { continue }
+        $value = [string]$Values[$name]
+        $lines.Add(('{0}={1}' -f $name,$value))
+    }
+
+    Set-Content -LiteralPath $Path -Encoding ASCII -Value @($lines)
 }
 
 function Get-ToolkitConfigValue {
@@ -629,6 +648,10 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS = '0'
     W11UT_DELAY_BETWEEN_CYCLES_MINUTES = '5'
     W11UT_PSEXEC_TIMEOUT_MINUTES = '180'
+    W11UT_GUI_DRY_RUN = '0'
+    W11UT_GUI_KEEP_CENTRAL_LOG_HISTORY = '0'
+    W11UT_GUI_NO_CENTRAL_LOG_COLLECTION = '0'
+    W11UT_GUI_MAX_CYCLES = '0'
 }
 $launchAllLotStartDelaySeconds = 5
 
@@ -1061,6 +1084,7 @@ $xaml = @'
                                         <TextBox x:Name="GlobalLimitOptionText" Grid.Column="1" Style="{StaticResource NumericTextBoxStyle}"/>
                                         <Button x:Name="GlobalLimitOptionUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
                                     </Grid>
+                                    <Button x:Name="ResetDefaultsButton" Content="Reset defaults" HorizontalAlignment="Left" MinWidth="140" Margin="0,2,0,14"/>
                                     <TextBlock Text="Global lease timeout (minutes)"/>
                                     <Grid Margin="0,4,0,10">
                                         <Grid.ColumnDefinitions>
@@ -1125,7 +1149,7 @@ $controls = @{}
     'ThrottleUpButton','ComputerDelayText','ComputerDelayDownButton','ComputerDelayUpButton',
     'CycleDelayText','CycleDelayDownButton','CycleDelayUpButton','MaxCyclesText','MaxCyclesDownButton',
     'MaxCyclesUpButton','PsExecTimeoutText','PsExecTimeoutDownButton','PsExecTimeoutUpButton',
-    'GlobalLimitOptionText','GlobalLimitOptionDownButton','GlobalLimitOptionUpButton',
+    'GlobalLimitOptionText','GlobalLimitOptionDownButton','GlobalLimitOptionUpButton','ResetDefaultsButton',
     'GlobalLeaseText','GlobalLeaseDownButton','GlobalLeaseUpButton'
 ) | ForEach-Object { $controls[$_] = Find-Control -Name $_ }
 
@@ -1345,6 +1369,44 @@ function Get-SetupSourceText {
     return $value
 }
 
+
+function Get-ToolkitDefaultConfig {
+    $defaults = @{}
+    foreach ($key in @($script:ToolkitDefaultEnvironment.Keys)) {
+        $defaults[$key] = [string]$script:ToolkitDefaultEnvironment[$key]
+    }
+    return $defaults
+}
+
+function Save-GuiOptions {
+    param([switch]$Quiet)
+
+    try {
+        $environment = Get-ToolkitOptionEnvironment
+        Write-ToolkitConfig -Path $script:ToolkitConfigPath -Values $environment
+        $script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
+        if (-not $Quiet) {
+            Add-Status -Title 'Options saved' -Message ("Saved GUI options to {0}." -f $script:ToolkitConfigPath)
+        }
+    }
+    catch {
+        if ($Quiet) { return }
+        Show-GuiError ("Unable to save GUI options: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Reset-GuiOptionsToDefaults {
+    try {
+        Write-ToolkitConfig -Path $script:ToolkitConfigPath -Values (Get-ToolkitDefaultConfig)
+        $script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
+        Initialize-Options
+        Add-Status -Title 'Defaults restored' -Message ("Reset GUI options to defaults in {0}." -f $script:ToolkitConfigPath)
+    }
+    catch {
+        Show-GuiError ("Unable to reset GUI options: {0}" -f $_.Exception.Message)
+    }
+}
+
 function Initialize-Options {
     Initialize-Combo -Combo $controls.LotModeCombo -Values @('Once','Loop','OnceIgnoreRunGuard','LoopIgnoreRunGuard') -Selected 'Once'
     Initialize-Combo -Combo $controls.SingleModeCombo -Values @('Once','OnceIgnoreRunGuard','Loop','LoopIgnoreRunGuard') -Selected 'Once'
@@ -1380,6 +1442,10 @@ function Initialize-Options {
     $controls.GlobalLimitText.Text = Get-ConfiguredValue 'W11UT_GLOBAL_CONCURRENCY_LIMIT'
     $controls.GlobalLimitOptionText.Text = Get-ConfiguredValue 'W11UT_GLOBAL_CONCURRENCY_LIMIT'
     $controls.GlobalLeaseText.Text = Get-ConfiguredValue 'W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES'
+    $controls.DryRunCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_GUI_DRY_RUN') -eq '1')
+    $controls.KeepCentralHistoryCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_GUI_KEEP_CENTRAL_LOG_HISTORY') -eq '1')
+    $controls.NoCentralCollectionCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_GUI_NO_CENTRAL_LOG_COLLECTION') -eq '1')
+    $controls.MaxCyclesText.Text = Get-ConfiguredValue 'W11UT_GUI_MAX_CYCLES'
     Invoke-LauncherOptionStateUpdate
 }
 
@@ -1487,6 +1553,10 @@ function Get-ToolkitOptionEnvironment {
         W11UT_ALLOW_DISK_CLEANUP                       = Get-BooleanText -CheckBox $controls.AllowDiskCleanupCheck
         W11UT_ALLOW_ADVANCED_DISK_CLEANUP              = Get-BooleanText -CheckBox $controls.AllowAdvancedCleanupCheck
         W11UT_SKIP_SETUP_MEDIA_PRECOPY                 = Get-BooleanText -CheckBox $controls.SkipSetupPreCopyCheck
+        W11UT_GUI_DRY_RUN                              = Get-BooleanText -CheckBox $controls.DryRunCheck
+        W11UT_GUI_KEEP_CENTRAL_LOG_HISTORY             = Get-BooleanText -CheckBox $controls.KeepCentralHistoryCheck
+        W11UT_GUI_NO_CENTRAL_LOG_COLLECTION            = Get-BooleanText -CheckBox $controls.NoCentralCollectionCheck
+        W11UT_GUI_MAX_CYCLES                           = Get-IntText -TextBox $controls.MaxCyclesText -Default 0 -Minimum 0
     }
 
     foreach ($pair in @(
@@ -1617,6 +1687,7 @@ $controls.LaunchLotButton.Add_Click({
         if (-not $script:SelectedLot) { return }
         if ($script:SelectedLot.ComputerCount -le 0) { throw 'Selected LOT has no device in Computers.txt.' }
         if (-not $script:SelectedLot.WrappersReady) { throw 'Selected LOT wrappers are missing. Refresh wrappers first.' }
+        Save-GuiOptions -Quiet
         $environment = Get-ToolkitOptionEnvironment
         $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $script:SelectedLot.Path -EnvironmentVariables $environment
         if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $script:SelectedLot.Name)) { return }
@@ -1631,6 +1702,7 @@ $controls.LaunchAllButton.Add_Click({
         $lots = Get-LaunchableLotSummaries
         if ($lots.Count -eq 0) { throw 'No ready LOT with devices was found.' }
         foreach ($lot in $lots) {
+            Save-GuiOptions -Quiet
             $environment = Get-ToolkitOptionEnvironment
             $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $lot.Path -EnvironmentVariables $environment
             if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $lot.Name)) { return }
@@ -1647,6 +1719,7 @@ $controls.LaunchSingleButton.Add_Click({
     try {
         $computer = $controls.SingleComputerText.Text.Trim()
         if (-not $computer) { throw 'Enter a computer name.' }
+        Save-GuiOptions -Quiet
         $environment = Get-ToolkitOptionEnvironment
         if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $environment -ScopeName $computer)) { return }
         $context = Start-ToolkitSingleComputer -ToolkitRoot $toolkitRoot -ComputerName $computer -Mode ([string]$controls.SingleModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
@@ -1705,7 +1778,9 @@ function Sync-GlobalLimitText {
 
 $controls.GlobalLimitOptionText.Add_TextChanged({ try { Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitOptionText -TargetTextBox $controls.GlobalLimitText } catch { Show-GuiError ("Unable to synchronize worker limit fields: {0}" -f $_.Exception.Message) } }.GetNewClosure())
 $controls.GlobalLimitText.Add_TextChanged({ try { Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitText -TargetTextBox $controls.GlobalLimitOptionText } catch { Show-GuiError ("Unable to synchronize worker limit fields: {0}" -f $_.Exception.Message) } }.GetNewClosure())
+$controls.ResetDefaultsButton.Add_Click({ Reset-GuiOptionsToDefaults })
 
+$window.Add_Closing({ Save-GuiOptions -Quiet })
 $window.Add_Closed({
     if ($splash) {
         Close-SmartM365GuiSplash -Splash $splash
