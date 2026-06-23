@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.56
+2.10.57
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.56"
+$LauncherVersion = "2.10.57"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -1346,6 +1346,7 @@ function Get-LauncherReportColumns {
         "DnsResolved",
         "DnsAddressList",
         "AdminShareReachable",
+        "RemotePayloadCopyAttempts",
         "PingReachable",
         "IsVirtualMachine",
         "VirtualMachineEvidence",
@@ -2822,6 +2823,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             DnsResolved = $false
             DnsAddressList = ""
             AdminShareReachable = $false
+            RemotePayloadCopyAttempts = ""
             PingReachable = $false
             IsVirtualMachine = ""
             VirtualMachineEvidence = ""
@@ -2944,115 +2946,153 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $($result.VirtualMachineEvidence)" | Add-Content -LiteralPath $logPath -Encoding UTF8
             }
 
-            $adminShare = "\\$Computer\ADMIN$"
-            $rootShare = "\\$Computer\C$"
-            $adminShareReachable = Test-Path -LiteralPath $adminShare -ErrorAction SilentlyContinue
-            $rootShareReachable = Test-Path -LiteralPath $rootShare -ErrorAction SilentlyContinue
-            $result.AdminShareReachable = ($adminShareReachable -and $rootShareReachable)
-            if ($result.AdminShareReachable) {
-                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Administrative shares reachable. ADMIN$=$adminShareReachable; C$=$rootShareReachable" | Add-Content -LiteralPath $logPath -Encoding UTF8
-            }
-            else {
-                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: Required administrative share is not reachable. ADMIN$=$adminShareReachable; C$=$rootShareReachable; ADMINPath=$adminShare; RootPath=$rootShare" | Add-Content -LiteralPath $logPath -Encoding UTF8
-            }
-            if (-not $result.AdminShareReachable) {
-                if (-not $result.DnsResolved) {
-                    $result.AdminShareFailureType = "DNS_FAILED"
+            $maxPayloadCopyAttempts = 3
+            $payloadReady = $false
+            $payloadFailureStatus = ""
+            $payloadFailureDetail = ""
+            for ($payloadCopyAttempt = 1; $payloadCopyAttempt -le $maxPayloadCopyAttempts; $payloadCopyAttempt++) {
+                $result.RemotePayloadCopyAttempts = [string]$payloadCopyAttempt
+                if ($payloadCopyAttempt -gt 1) {
+                    $delaySeconds = [math]::Min(30, 10 * ($payloadCopyAttempt - 1))
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Retrying administrative-share preflight and remote script copy. Attempt=$payloadCopyAttempt/$maxPayloadCopyAttempts; DelaySeconds=$delaySeconds" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    Start-Sleep -Seconds $delaySeconds
                 }
-                elseif (-not $result.PingReachable) {
-                    $result.AdminShareFailureType = "PING_FAILED_ADMIN_SHARE_FAILED"
-                }
-                else {
-                    $result.AdminShareFailureType = "PING_OK_ADMIN_SHARE_FAILED"
-                }
-            }
 
-            if ($DryRun) {
+                $adminShare = "\\$Computer\ADMIN$"
+                $rootShare = "\\$Computer\C$"
+                $adminShareReachable = Test-Path -LiteralPath $adminShare -ErrorAction SilentlyContinue
+                $rootShareReachable = Test-Path -LiteralPath $rootShare -ErrorAction SilentlyContinue
+                $result.AdminShareReachable = ($adminShareReachable -and $rootShareReachable)
                 if ($result.AdminShareReachable) {
-                    $result.Status = "DRYRUN_READY"
-                    $result.NextAction = "READY_FOR_REPAIR"
-                    $result.RemoteDetail = "DNS/Ping/administrative-share pre-check completed. No script copied or executed."
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Administrative shares reachable. ADMIN$=$adminShareReachable; C$=$rootShareReachable" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    $result.AdminShareFailureType = ""
                 }
                 else {
-                    $result.Status = "DRYRUN_ADMIN_SHARE_UNREACHABLE"
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: Required administrative share is not reachable. Attempt=$payloadCopyAttempt/$maxPayloadCopyAttempts; ADMIN$=$adminShareReachable; C$=$rootShareReachable; ADMINPath=$adminShare; RootPath=$rootShare" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    if (-not $result.DnsResolved) {
+                        $result.AdminShareFailureType = "DNS_FAILED"
+                    }
+                    elseif (-not $result.PingReachable) {
+                        $result.AdminShareFailureType = "PING_FAILED_ADMIN_SHARE_FAILED"
+                    }
+                    else {
+                        $result.AdminShareFailureType = "PING_OK_ADMIN_SHARE_FAILED"
+                    }
+                }
+
+                if ($DryRun) {
+                    if ($result.AdminShareReachable) {
+                        $result.Status = "DRYRUN_READY"
+                        $result.NextAction = "READY_FOR_REPAIR"
+                        $result.RemoteDetail = "DNS/Ping/administrative-share pre-check completed. No script copied or executed."
+                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] DryRun status: $($result.Status); Detail=$($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                        return (Complete-WorkerResult -Result $result -Path $logPath)
+                    }
+
+                    $payloadFailureStatus = "DRYRUN_ADMIN_SHARE_UNREACHABLE"
+                    $payloadFailureDetail = "Required administrative share is not reachable. PsExec/copy would probably fail."
+                    if ($payloadCopyAttempt -lt $maxPayloadCopyAttempts) { continue }
+                    $result.Status = $payloadFailureStatus
                     $result.NextAction = "FIX_ADMIN_SHARE_OR_NETWORK"
-                    $result.RemoteDetail = "Required administrative share is not reachable. PsExec/copy would probably fail."
+                    $result.RemoteDetail = $payloadFailureDetail
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] DryRun status: $($result.Status); Detail=$($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    return (Complete-WorkerResult -Result $result -Path $logPath)
                 }
-                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] DryRun status: $($result.Status); Detail=$($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                return (Complete-WorkerResult -Result $result -Path $logPath)
+
+                if (-not $result.AdminShareReachable) {
+                    $payloadFailureStatus = "ADMIN_SHARE_UNREACHABLE"
+                    $payloadFailureDetail = ("{0}: Required administrative share is not reachable. Script copy and PsExec execution were skipped." -f $result.AdminShareFailureType)
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    continue
+                }
+
+                try {
+                    if (-not (Test-Path -LiteralPath $remoteAdminDir)) {
+                        New-Item -ItemType Directory -Path $remoteAdminDir -Force -ErrorAction Stop | Out-Null
+                    }
+                    $result.RemoteDirectoryCreated = Test-Path -LiteralPath $remoteAdminDir
+                }
+                catch {
+                    $result.RemoteDirectoryCreated = $false
+                    $payloadFailureStatus = "REMOTE_DIRECTORY_CREATE_FAILED"
+                    $payloadFailureDetail = "Remote repair folder could not be created or verified: $remoteAdminDir; Error=$($_.Exception.Message)"
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    continue
+                }
+
+                if (-not $result.RemoteDirectoryCreated) {
+                    $payloadFailureStatus = "REMOTE_DIRECTORY_CREATE_FAILED"
+                    $payloadFailureDetail = "Remote repair folder could not be created or verified: $remoteAdminDir"
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    continue
+                }
+                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote repair folder ready: $remoteAdminDir" | Add-Content -LiteralPath $logPath -Encoding UTF8
+
+                $result.LocalScriptVersion = Get-ScriptVersionFromFile -Path $LocalScriptPath
+                $result.LocalScriptHash = Get-FileSha256 -Path $LocalScriptPath
+                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Local script before copy: Version=$($result.LocalScriptVersion); SHA256=$($result.LocalScriptHash); Path=$LocalScriptPath" | Add-Content -LiteralPath $logPath -Encoding UTF8
+
+                try {
+                    Copy-Item -LiteralPath $LocalScriptPath -Destination $remoteAdminScript -Force -ErrorAction Stop
+                    $result.ScriptCopied = Test-Path -LiteralPath $remoteAdminScript
+                    if ($result.ScriptCopied) {
+                        $localScriptItem = Get-Item -LiteralPath $LocalScriptPath -ErrorAction Stop
+                        $remoteScriptItem = Get-Item -LiteralPath $remoteAdminScript -ErrorAction Stop
+                        $result.RemoteScriptVersion = Get-ScriptVersionFromFile -Path $remoteAdminScript
+                        $result.RemoteScriptHash = Get-FileSha256 -Path $remoteAdminScript
+                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote script after copy: Version=$($result.RemoteScriptVersion); SHA256=$($result.RemoteScriptHash); Bytes=$($remoteScriptItem.Length); Path=$remoteAdminScript" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                        if ($remoteScriptItem.Length -ne $localScriptItem.Length) {
+                            $result.ScriptCopied = $false
+                            $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
+                            $payloadFailureDetail = "Remote script copy size mismatch. LocalBytes=$($localScriptItem.Length); RemoteBytes=$($remoteScriptItem.Length); RemotePath=$remoteAdminScript"
+                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                            continue
+                        }
+                        if ([string]::IsNullOrWhiteSpace($result.LocalScriptHash) -or [string]::IsNullOrWhiteSpace($result.RemoteScriptHash) -or $result.RemoteScriptHash -ne $result.LocalScriptHash) {
+                            $result.ScriptCopied = $false
+                            $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
+                            $payloadFailureDetail = "Remote script copy hash mismatch. LocalVersion=$($result.LocalScriptVersion); RemoteVersion=$($result.RemoteScriptVersion); LocalSHA256=$($result.LocalScriptHash); RemoteSHA256=$($result.RemoteScriptHash); RemotePath=$remoteAdminScript"
+                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                            continue
+                        }
+                        if ((-not [string]::IsNullOrWhiteSpace($result.LocalScriptVersion)) -and $result.RemoteScriptVersion -ne $result.LocalScriptVersion) {
+                            $result.ScriptCopied = $false
+                            $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
+                            $payloadFailureDetail = "Remote script copy version mismatch. LocalVersion=$($result.LocalScriptVersion); RemoteVersion=$($result.RemoteScriptVersion); RemotePath=$remoteAdminScript"
+                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                            continue
+                        }
+                    }
+                    else {
+                        $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
+                        $payloadFailureDetail = "Remote script copy could not be verified: $remoteAdminScript"
+                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                        continue
+                    }
+                }
+                catch {
+                    $result.ScriptCopied = $false
+                    $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED"
+                    $payloadFailureDetail = "Remote script copy failed: $remoteAdminScript; Error=$($_.Exception.Message)"
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: $payloadFailureDetail" | Add-Content -LiteralPath $logPath -Encoding UTF8
+                    continue
+                }
+
+                $payloadReady = $true
+                break
             }
 
-            if (-not $result.AdminShareReachable) {
-                $result.Status = "ADMIN_SHARE_UNREACHABLE"
-                $result.NextAction = "FIX_ADMIN_SHARE_OR_NETWORK"
-                $result.RemoteDetail = ("{0}: Required administrative share is not reachable. Script copy and PsExec execution were skipped." -f $result.AdminShareFailureType)
-                $result.ErrorMessage = $result.RemoteDetail
-                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Skipping repair: $($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                return (Complete-WorkerResult -Result $result -Path $logPath)
-            }
-
-            if (-not (Test-Path -LiteralPath $remoteAdminDir)) {
-                New-Item -ItemType Directory -Path $remoteAdminDir -Force -ErrorAction Stop | Out-Null
-            }
-            $result.RemoteDirectoryCreated = Test-Path -LiteralPath $remoteAdminDir
-            if (-not $result.RemoteDirectoryCreated) {
-                $result.Status = "REMOTE_DIRECTORY_CREATE_FAILED"
+            if (-not $payloadReady) {
+                if ([string]::IsNullOrWhiteSpace($payloadFailureStatus)) { $payloadFailureStatus = "REMOTE_SCRIPT_COPY_FAILED" }
+                if ([string]::IsNullOrWhiteSpace($payloadFailureDetail)) { $payloadFailureDetail = "Remote script copy failed after $maxPayloadCopyAttempts attempt(s)." }
+                $result.Status = $payloadFailureStatus
                 $result.NextAction = Get-NextActionFromLauncherStatus -Status $result.Status
-                $result.RemoteDetail = "Remote repair folder could not be created or verified: $remoteAdminDir"
+                $result.RemoteDetail = $payloadFailureDetail
                 $result.ErrorMessage = $result.RemoteDetail
                 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] ERROR: $($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
                 return (Complete-WorkerResult -Result $result -Path $logPath)
             }
-            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote repair folder ready: $remoteAdminDir" | Add-Content -LiteralPath $logPath -Encoding UTF8
 
-            $result.LocalScriptVersion = Get-ScriptVersionFromFile -Path $LocalScriptPath
-            $result.LocalScriptHash = Get-FileSha256 -Path $LocalScriptPath
-            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Local script before copy: Version=$($result.LocalScriptVersion); SHA256=$($result.LocalScriptHash); Path=$LocalScriptPath" | Add-Content -LiteralPath $logPath -Encoding UTF8
-
-            Copy-Item -LiteralPath $LocalScriptPath -Destination $remoteAdminScript -Force -ErrorAction Stop
-            $result.ScriptCopied = Test-Path -LiteralPath $remoteAdminScript
-            if ($result.ScriptCopied) {
-                $localScriptItem = Get-Item -LiteralPath $LocalScriptPath -ErrorAction Stop
-                $remoteScriptItem = Get-Item -LiteralPath $remoteAdminScript -ErrorAction Stop
-                $result.RemoteScriptVersion = Get-ScriptVersionFromFile -Path $remoteAdminScript
-                $result.RemoteScriptHash = Get-FileSha256 -Path $remoteAdminScript
-                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote script after copy: Version=$($result.RemoteScriptVersion); SHA256=$($result.RemoteScriptHash); Bytes=$($remoteScriptItem.Length); Path=$remoteAdminScript" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                if ($remoteScriptItem.Length -ne $localScriptItem.Length) {
-                    $result.ScriptCopied = $false
-                    $result.Status = "REMOTE_SCRIPT_COPY_FAILED"
-                    $result.NextAction = Get-NextActionFromLauncherStatus -Status $result.Status
-                    $result.RemoteDetail = "Remote script copy size mismatch. LocalBytes=$($localScriptItem.Length); RemoteBytes=$($remoteScriptItem.Length); RemotePath=$remoteAdminScript"
-                    $result.ErrorMessage = $result.RemoteDetail
-                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] ERROR: $($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                    return (Complete-WorkerResult -Result $result -Path $logPath)
-                }
-                if ([string]::IsNullOrWhiteSpace($result.LocalScriptHash) -or [string]::IsNullOrWhiteSpace($result.RemoteScriptHash) -or $result.RemoteScriptHash -ne $result.LocalScriptHash) {
-                    $result.ScriptCopied = $false
-                    $result.Status = "REMOTE_SCRIPT_COPY_FAILED"
-                    $result.NextAction = Get-NextActionFromLauncherStatus -Status $result.Status
-                    $result.RemoteDetail = "Remote script copy hash mismatch. LocalVersion=$($result.LocalScriptVersion); RemoteVersion=$($result.RemoteScriptVersion); LocalSHA256=$($result.LocalScriptHash); RemoteSHA256=$($result.RemoteScriptHash); RemotePath=$remoteAdminScript"
-                    $result.ErrorMessage = $result.RemoteDetail
-                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] ERROR: $($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                    return (Complete-WorkerResult -Result $result -Path $logPath)
-                }
-                if ((-not [string]::IsNullOrWhiteSpace($result.LocalScriptVersion)) -and $result.RemoteScriptVersion -ne $result.LocalScriptVersion) {
-                    $result.ScriptCopied = $false
-                    $result.Status = "REMOTE_SCRIPT_COPY_FAILED"
-                    $result.NextAction = Get-NextActionFromLauncherStatus -Status $result.Status
-                    $result.RemoteDetail = "Remote script copy version mismatch. LocalVersion=$($result.LocalScriptVersion); RemoteVersion=$($result.RemoteScriptVersion); RemotePath=$remoteAdminScript"
-                    $result.ErrorMessage = $result.RemoteDetail
-                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] ERROR: $($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                    return (Complete-WorkerResult -Result $result -Path $logPath)
-                }
-            }
-            else {
-                $result.Status = "REMOTE_SCRIPT_COPY_FAILED"
-                $result.NextAction = Get-NextActionFromLauncherStatus -Status $result.Status
-                $result.RemoteDetail = "Remote script copy could not be verified: $remoteAdminScript"
-                $result.ErrorMessage = $result.RemoteDetail
-                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] ERROR: $($result.RemoteDetail)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                return (Complete-WorkerResult -Result $result -Path $logPath)
-            }
             "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote script copied and verified: Version=$($result.RemoteScriptVersion); SHA256=$($result.RemoteScriptHash); Path=$remoteAdminScript" | Add-Content -LiteralPath $logPath -Encoding UTF8
 
             $remoteScriptArgs = @($CycleScriptArgs)
@@ -3459,6 +3499,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     DnsResolved = $false
                     DnsAddressList = ""
                     AdminShareReachable = $false
+                    RemotePayloadCopyAttempts = ""
                     PingReachable = $false
                     RemoteDirectoryCreated = $false
                     ScriptCopied = $false
