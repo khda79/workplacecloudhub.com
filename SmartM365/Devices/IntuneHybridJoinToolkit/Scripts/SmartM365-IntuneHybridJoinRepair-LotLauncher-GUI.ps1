@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.2
+1.3
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.2'
+$GuiVersion = '1.3'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -1019,6 +1019,44 @@ function Initialize-Combo {
     $Combo.SelectedItem = $Selected
 }
 
+function Invoke-NumericStepperClick {
+    param(
+        [object]$Sender,
+        [object]$EventArgs
+    )
+
+    $fieldName = 'numeric field'
+    try {
+        $settings = $Sender.Tag
+        if (-not $settings) { return }
+
+        $fieldName = [string]$settings.TextBoxName
+        $textBox = $controls[$fieldName]
+        if (-not $textBox) { return }
+
+        $current = 0
+        if (-not [int]::TryParse($textBox.Text, [ref]$current)) {
+            $current = [int]$settings.Default
+        }
+
+        $next = $current + ([int]$settings.Direction * [int]$settings.Step)
+        if ($next -lt [int]$settings.Minimum) {
+            $next = [int]$settings.Minimum
+        }
+
+        if ($null -ne $settings.Maximum -and $next -gt [int]$settings.Maximum) {
+            $next = [int]$settings.Maximum
+        }
+
+        $textBox.Text = [string]$next
+        $textBox.CaretIndex = $textBox.Text.Length
+        if ($EventArgs) { $EventArgs.Handled = $true }
+    }
+    catch {
+        Show-GuiError ("Unable to update numeric value for {0}: {1}" -f $fieldName,$_.Exception.Message)
+    }
+}
+
 function Register-NumericStepper {
     param(
         [string]$TextBoxName,
@@ -1035,33 +1073,10 @@ function Register-NumericStepper {
     $upButton = $controls[$UpButtonName]
     if (-not $textBox -or -not $downButton -or -not $upButton) { return }
 
-    $setValue = {
-        param([int]$Delta)
-
-        try {
-            $current = 0
-            if (-not [int]::TryParse($textBox.Text, [ref]$current)) {
-                $current = $Default
-            }
-
-            $next = $current + $Delta
-            if ($next -lt $Minimum) {
-                $next = $Minimum
-            }
-            if ($Maximum.HasValue -and $next -gt $Maximum.Value) {
-                $next = $Maximum.Value
-            }
-
-            $textBox.Text = [string]$next
-            $textBox.CaretIndex = $textBox.Text.Length
-        }
-        catch {
-            Show-GuiError ("Unable to update numeric value for {0}: {1}" -f $TextBoxName,$_.Exception.Message)
-        }
-    }
-
-    $downButton.Add_Click({ param($sender, $eventArgs) & $setValue (-1 * $Step) }.GetNewClosure())
-    $upButton.Add_Click({ param($sender, $eventArgs) & $setValue $Step }.GetNewClosure())
+    $downButton.Tag = [pscustomobject]@{ TextBoxName = $TextBoxName; Default = $Default; Minimum = $Minimum; Maximum = $Maximum; Step = $Step; Direction = -1 }
+    $upButton.Tag = [pscustomobject]@{ TextBoxName = $TextBoxName; Default = $Default; Minimum = $Minimum; Maximum = $Maximum; Step = $Step; Direction = 1 }
+    $downButton.Add_Click({ param($sender, $eventArgs) Invoke-NumericStepperClick -Sender $sender -EventArgs $eventArgs })
+    $upButton.Add_Click({ param($sender, $eventArgs) Invoke-NumericStepperClick -Sender $sender -EventArgs $eventArgs })
     $textBox.Add_PreviewTextInput({
         param($sender, $eventArgs)
         try {
@@ -1070,9 +1085,11 @@ function Register-NumericStepper {
             }
         }
         catch {
-            Show-GuiError ("Unable to validate numeric input for {0}: {1}" -f $TextBoxName,$_.Exception.Message)
+            $fieldName = 'numeric field'
+            if ($sender -and $sender.Name) { $fieldName = [string]$sender.Name }
+            Show-GuiError ("Unable to validate numeric input for {0}: {1}" -f $fieldName,$_.Exception.Message)
         }
-    }.GetNewClosure())
+    })
 }
 
 function Register-NumericSteppers {
@@ -1325,8 +1342,8 @@ function Sync-GlobalLimitText {
     }
 }
 
-$controls.GlobalLimitOptionText.Add_TextChanged({ Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitOptionText -TargetTextBox $controls.GlobalLimitText }.GetNewClosure())
-$controls.GlobalLimitText.Add_TextChanged({ Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitText -TargetTextBox $controls.GlobalLimitOptionText }.GetNewClosure())
+$controls.GlobalLimitOptionText.Add_TextChanged({ try { Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitOptionText -TargetTextBox $controls.GlobalLimitText } catch { Show-GuiError ("Unable to synchronize worker limit fields: {0}" -f $_.Exception.Message) } }.GetNewClosure())
+$controls.GlobalLimitText.Add_TextChanged({ try { Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitText -TargetTextBox $controls.GlobalLimitOptionText } catch { Show-GuiError ("Unable to synchronize worker limit fields: {0}" -f $_.Exception.Message) } }.GetNewClosure())
 $window.Add_Closed({
     if ($splash) {
         Close-SmartM365GuiSplash -Splash $splash
