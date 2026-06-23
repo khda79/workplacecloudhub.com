@@ -1,3 +1,10 @@
+<#
+.SYNOPSIS
+Starts the Windows 11 Upgrade LOT launcher GUI.
+
+.VERSION
+0.1.0
+#>
 param(
     [switch]$ValidateOnly
 )
@@ -1222,28 +1229,38 @@ function Register-NumericStepper {
     $setValue = {
         param([int]$Delta)
 
-        $current = 0
-        if (-not [int]::TryParse($textBox.Text, [ref]$current)) {
-            $current = $Default
-        }
+        try {
+            $current = 0
+            if (-not [int]::TryParse($textBox.Text, [ref]$current)) {
+                $current = $Default
+            }
 
-        $next = $current + $Delta
-        if ($next -lt $Minimum) {
-            $next = $Minimum
-        }
+            $next = $current + $Delta
+            if ($next -lt $Minimum) {
+                $next = $Minimum
+            }
 
-        $textBox.Text = [string]$next
-        $textBox.CaretIndex = $textBox.Text.Length
+            $textBox.Text = [string]$next
+            $textBox.CaretIndex = $textBox.Text.Length
+        }
+        catch {
+            Show-GuiError ("Unable to update numeric value for {0}: {1}" -f $TextBoxName,$_.Exception.Message)
+        }
     }
 
-    $downButton.Add_Click({ & $setValue (-1 * $Step) }.GetNewClosure())
-    $upButton.Add_Click({ & $setValue $Step }.GetNewClosure())
+    $downButton.Add_Click({ param($sender, $eventArgs) & $setValue (-1 * $Step) }.GetNewClosure())
+    $upButton.Add_Click({ param($sender, $eventArgs) & $setValue $Step }.GetNewClosure())
     $textBox.Add_PreviewTextInput({
         param($sender, $eventArgs)
-        if ($eventArgs.Text -notmatch '^[0-9]+$') {
-            $eventArgs.Handled = $true
+        try {
+            if ($eventArgs.Text -notmatch '^[0-9]+$') {
+                $eventArgs.Handled = $true
+            }
         }
-    })
+        catch {
+            Show-GuiError ("Unable to validate numeric input for {0}: {1}" -f $TextBoxName,$_.Exception.Message)
+        }
+    }.GetNewClosure())
 }
 
 function Register-NumericSteppers {
@@ -1639,16 +1656,34 @@ $controls.OpenNewLotComputersButton.Add_Click({
         Open-TextFile -Path $controls.NewLotComputersPathText.Text
     }
 })
-$controls.GlobalLimitOptionText.Add_TextChanged({
-    if ($controls.GlobalLimitOptionText.Text -and $controls.GlobalLimitText.Text -ne $controls.GlobalLimitOptionText.Text) {
-        $controls.GlobalLimitText.Text = $controls.GlobalLimitOptionText.Text
+$script:SyncingGlobalLimitText = $false
+function Sync-GlobalLimitText {
+    param(
+        [object]$SourceTextBox,
+        [object]$TargetTextBox
+    )
+
+    if ($script:SyncingGlobalLimitText) { return }
+
+    try {
+        if (-not $SourceTextBox -or -not $TargetTextBox) { return }
+        $value = [string]$SourceTextBox.Text
+        if ([string]::IsNullOrWhiteSpace($value)) { return }
+        if ([string]$TargetTextBox.Text -eq $value) { return }
+
+        $script:SyncingGlobalLimitText = $true
+        $TargetTextBox.Text = $value
     }
-})
-$controls.GlobalLimitText.Add_TextChanged({
-    if ($controls.GlobalLimitText.Text -and $controls.GlobalLimitOptionText.Text -ne $controls.GlobalLimitText.Text) {
-        $controls.GlobalLimitOptionText.Text = $controls.GlobalLimitText.Text
+    catch {
+        Show-GuiError ("Unable to synchronize worker limit fields: {0}" -f $_.Exception.Message)
     }
-})
+    finally {
+        $script:SyncingGlobalLimitText = $false
+    }
+}
+
+$controls.GlobalLimitOptionText.Add_TextChanged({ Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitOptionText -TargetTextBox $controls.GlobalLimitText }.GetNewClosure())
+$controls.GlobalLimitText.Add_TextChanged({ Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitText -TargetTextBox $controls.GlobalLimitOptionText }.GetNewClosure())
 
 $window.Add_Closed({
     if ($splash) {
