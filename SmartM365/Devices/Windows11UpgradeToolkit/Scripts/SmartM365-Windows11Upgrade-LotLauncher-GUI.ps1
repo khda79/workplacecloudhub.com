@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.6
+0.1.7
 #>
 param(
     [switch]$ValidateOnly
@@ -1429,8 +1429,8 @@ function Initialize-Options {
     $controls.AllowWUResetCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_WU_RESET') -eq '1')
     $controls.AllowForceUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_FORCE_UPGRADE') -eq '1')
     $controls.AllowSetupUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_SETUP_UPGRADE') -eq '1')
-    $controls.AllowRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_REBOOT') -eq '1')
-    $controls.SetupCompletionRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SETUP_REBOOT_WHEN_NO_USER') -eq '1')
+    $controls.AllowRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_REBOOT') -ne '0')
+    $controls.SetupCompletionRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SETUP_REBOOT_WHEN_NO_USER') -ne '0')
     $controls.DirectSetupUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_DIRECT_SETUP_UPGRADE') -eq '1')
     $controls.SkipVirtualMachinesCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SKIP_VIRTUAL_MACHINES') -eq '1')
     $controls.SkipSetupPreCopyCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SKIP_SETUP_MEDIA_PRECOPY') -eq '1')
