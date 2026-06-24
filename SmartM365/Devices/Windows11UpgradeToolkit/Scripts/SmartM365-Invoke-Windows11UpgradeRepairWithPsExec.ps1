@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.3
+    0.1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -82,7 +82,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.3'
+$script:LauncherVersion = '0.1.4'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -406,7 +406,9 @@ function Acquire-GlobalLease {
     if ($GlobalConcurrencyLimit -lt 1) { return '' }
     $waitStarted = Get-Date
     $lastWaitLog = $null
-    $waitLogIntervalSeconds = 60
+    $waitLogDelaySeconds = 300
+    $waitLogIntervalSeconds = 300
+    $waitWasLogged = $false
     while ($true) {
         $leasePath = Invoke-WithGlobalGateMutex -ScriptBlock {
             Remove-StaleGlobalLeases
@@ -433,18 +435,20 @@ function Acquire-GlobalLease {
             return ''
         }
         if (-not [string]::IsNullOrWhiteSpace($leasePath)) {
-            if ($null -ne $lastWaitLog) {
+            if ($waitWasLogged) {
                 $waitMinutes = [math]::Round(((Get-Date) - $waitStarted).TotalMinutes, 1)
                 Write-Host ("Global worker lease acquired for {0} after {1} minute(s)." -f $Computer,$waitMinutes) -ForegroundColor DarkCyan
             }
             return $leasePath
         }
         $now = Get-Date
-        if ($null -eq $lastWaitLog -or (($now - $lastWaitLog).TotalSeconds -ge $waitLogIntervalSeconds)) {
+        $waitSeconds = ($now - $waitStarted).TotalSeconds
+        if ($waitSeconds -ge $waitLogDelaySeconds -and ($null -eq $lastWaitLog -or (($now - $lastWaitLog).TotalSeconds -ge $waitLogIntervalSeconds))) {
             $activeLeases = @(Get-ChildItem -LiteralPath $globalGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count
             $waitMinutes = [math]::Round(($now - $waitStarted).TotalMinutes, 1)
-            Write-Host ("Waiting for global worker lease before queuing {0}. Active={1}; Limit={2}; Wait={3} minute(s); Gate={4}" -f $Computer,$activeLeases,$GlobalConcurrencyLimit,$waitMinutes,$globalGatePath) -ForegroundColor DarkYellow
+            Write-Host ("Waiting for global worker lease: Computer={0}; Active={1}; Limit={2}; Wait={3} minute(s)." -f $Computer,$activeLeases,$GlobalConcurrencyLimit,$waitMinutes) -ForegroundColor DarkYellow
             $lastWaitLog = $now
+            $waitWasLogged = $true
         }
         Start-Sleep -Seconds $JobPollSeconds
     }
