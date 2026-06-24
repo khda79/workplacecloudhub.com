@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.8
+    0.1.9
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -82,7 +82,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.8'
+$script:LauncherVersion = '0.1.9'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -486,6 +486,7 @@ function Get-Windows11ReportRows {
     return @($normalized)
 }
 
+$script:BrandLogoDataUri = $null
 function Get-Windows11BrandLogoDataUri {
     if ($null -ne $script:BrandLogoDataUri) { return $script:BrandLogoDataUri }
     $script:BrandLogoDataUri = ''
