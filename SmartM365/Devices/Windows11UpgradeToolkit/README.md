@@ -246,6 +246,7 @@ provide the guarded action switches by default; direct PowerShell calls do not.
 - `-AllowSetupUpgrade`: starts Windows setup upgrade only after setup media and readiness checks pass.
 - `-DirectSetupUpgrade`: starts Windows setup directly after setup media validation/cache preparation; the script still blocks when the system drive is below `-MinimumFreeDiskGB`.
 - `-AllowReboot`: permits a controlled reboot when a pending reboot blocks progress.
+- `-AllowSetupCompletionRebootWhenNoUser`: after setup upgrade exits successfully or requests a reboot, schedules a reboot only when no interactive user is connected. If user detection fails, no automatic reboot is scheduled. LOT/config value: `W11UT_SETUP_REBOOT_WHEN_NO_USER=1`.
 - `-SkipVirtualMachines`: skips detected virtual machines before repair, setup copy, or upgrade actions.
 - `-AllowDiskCleanup`: when free disk is below `-MinimumFreeDiskGB`, removes only rebuildable caches and old SmartM365 logs before failing the device for disk space.
 - `-AllowAdvancedDiskCleanup`: optional heavier cleanup. Removes old guarded Windows upgrade folders when no setup/update activity appears active, then runs `DISM /Online /Cleanup-Image /StartComponentCleanup` only after safe cleanup still leaves insufficient free disk.

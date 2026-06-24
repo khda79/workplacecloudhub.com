@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.1
+    0.1.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -33,6 +33,7 @@ param(
     [switch]$AllowSetupUpgrade,
     [switch]$DirectSetupUpgrade,
     [switch]$AllowReboot,
+    [switch]$AllowSetupCompletionRebootWhenNoUser,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
     [switch]$AllowAdvancedDiskCleanup,
@@ -220,6 +221,7 @@ if ($AllowForceUpgrade) { [void]$remoteArgs.Add('-AllowForceUpgrade') }
 if ($AllowSetupUpgrade) { [void]$remoteArgs.Add('-AllowSetupUpgrade') }
 if ($DirectSetupUpgrade) { [void]$remoteArgs.Add('-DirectSetupUpgrade') }
 if ($AllowReboot) { [void]$remoteArgs.Add('-AllowReboot') }
+if ($AllowSetupCompletionRebootWhenNoUser) { [void]$remoteArgs.Add('-AllowSetupCompletionRebootWhenNoUser') }
 if ($SkipVirtualMachines) { [void]$remoteArgs.Add('-SkipVirtualMachines') }
 if ($AllowDiskCleanup) { [void]$remoteArgs.Add('-AllowDiskCleanup') }
 if ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) { [void]$remoteArgs.Add('-AllowAdvancedDiskCleanup') }
@@ -251,7 +253,7 @@ Write-Host "Computer list : $ComputerListPath"
 Write-Host "PsExec        : $resolvedPsExec"
 Write-Host "Repair script : $LocalScriptPath"
 Write-Host "Worker script : $LocalWorkerPath"
-Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade"
+Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser"
 Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s)"
 Write-Host "Reports       : $ReportRoot"
@@ -277,6 +279,10 @@ $reportColumns = @(
     'AdvancedDiskCleanupFreedGB',
     'DismCleanupAction',
     'DismCleanupFreedGB',
+    'SetupCompletionRebootAction',
+    'SetupCompletionRebootDetail',
+    'SetupCompletionRebootUserCount',
+    'SetupCompletionRebootUsers',
     'RemoteLogsPath',
     'PsExecLogPath'
 )
@@ -598,6 +604,10 @@ do {
                     AdvancedDiskCleanupFreedGB = ''
                     DismCleanupAction = ''
                     DismCleanupFreedGB = ''
+                    SetupCompletionRebootAction = ''
+                    SetupCompletionRebootDetail = ''
+                    SetupCompletionRebootUserCount = ''
+                    SetupCompletionRebootUsers = ''
                     RemoteLogsPath = ''
                     PsExecLogPath = ''
                     JobErrorMessage = ($jobErrors -join ' | ')
