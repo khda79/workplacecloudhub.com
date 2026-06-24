@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.6
+    0.1.7
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -82,7 +82,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.6'
+$script:LauncherVersion = '0.1.7'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -415,6 +415,153 @@ $reportColumns = @(
     'PsExecLogPath'
 )
 
+function ConvertTo-HtmlText {
+    param([object]$Value)
+    if ($null -eq $Value) { return "" }
+    return [System.Security.SecurityElement]::Escape([string]$Value)
+}
+
+function ConvertTo-SimpleHtmlTable {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows,
+        [string[]]$Columns
+    )
+
+    if (-not $Rows -or $Rows.Count -eq 0) { return "<p class='empty'>No rows.</p>" }
+
+    if (-not $Columns -or $Columns.Count -eq 0) {
+        $columnSet = New-Object System.Collections.Generic.List[string]
+        foreach ($row in $Rows) {
+            foreach ($property in $row.PSObject.Properties) {
+                if (-not $columnSet.Contains($property.Name)) { [void]$columnSet.Add($property.Name) }
+            }
+        }
+        $Columns = @($columnSet)
+    }
+
+    $html = New-Object System.Collections.Generic.List[string]
+    [void]$html.Add("<table>")
+    [void]$html.Add("<tr>")
+    foreach ($column in $Columns) { [void]$html.Add(("<th>{0}</th>" -f (ConvertTo-HtmlText $column))) }
+    [void]$html.Add("</tr>")
+    foreach ($row in $Rows) {
+        [void]$html.Add("<tr>")
+        foreach ($column in $Columns) {
+            $value = ""
+            $property = $row.PSObject.Properties[$column]
+            if ($property) { $value = $property.Value }
+            [void]$html.Add(("<td>{0}</td>" -f (ConvertTo-HtmlText $value)))
+        }
+        [void]$html.Add("</tr>")
+    }
+    [void]$html.Add("</table>")
+    return ($html -join "`r`n")
+}
+
+function Get-Windows11ReportRows {
+    param([AllowEmptyCollection()][object[]]$Items)
+    $normalized = foreach ($item in @($Items)) {
+        $row = [ordered]@{}
+        foreach ($column in $reportColumns) {
+            $row[$column] = if ($null -ne $item -and $item.PSObject.Properties[$column]) { [string]$item.$column } else { '' }
+        }
+        [pscustomobject]$row
+    }
+    return @($normalized)
+}
+
+function Get-Windows11BrandLogoDataUri {
+    if ($null -ne $script:BrandLogoDataUri) { return $script:BrandLogoDataUri }
+    $script:BrandLogoDataUri = ''
+    $candidates = @(
+        (Join-Path $PSScriptRoot 'WorkplaceCloudHub-lockup-WPF.png'),
+        (Join-Path (Split-Path -Parent $PSScriptRoot) 'WorkplaceCloudHub-lockup-WPF.png')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            try {
+                $bytes = [System.IO.File]::ReadAllBytes($candidate)
+                $script:BrandLogoDataUri = "data:image/png;base64," + [System.Convert]::ToBase64String($bytes)
+                break
+            }
+            catch { }
+        }
+    }
+    return $script:BrandLogoDataUri
+}
+
+function New-Windows11UpgradeCycleHtmlReport {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Summary,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][int]$CycleNumber,
+        [Parameter(Mandatory = $true)][datetime]$GeneratedAt,
+        [switch]$IsLive
+    )
+
+    $rows = @(Get-Windows11ReportRows -Items @($Summary | ForEach-Object { $_ }))
+
+    $effectiveRows = foreach ($row in $rows) {
+        $eff = if ([string]::IsNullOrWhiteSpace([string]$row.RemoteStatus)) { [string]$row.LauncherStatus } else { [string]$row.RemoteStatus }
+        [pscustomobject]@{ EffectiveStatus = $eff; NextAction = [string]$row.RemoteNextAction }
+    }
+    $statusCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.EffectiveStatus) } | Group-Object -Property EffectiveStatus | Sort-Object Count -Descending | ForEach-Object {
+        [pscustomobject]@{ Status = $_.Name; Count = $_.Count }
+    })
+    $nextActionCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.NextAction) } | Group-Object -Property NextAction | Sort-Object Count -Descending | ForEach-Object {
+        [pscustomobject]@{ NextAction = $_.Name; Count = $_.Count }
+    })
+
+    $logoUri = Get-Windows11BrandLogoDataUri
+    $logoHtml = if (-not [string]::IsNullOrWhiteSpace($logoUri)) { "<img class='logo' src='$logoUri' alt='WorkplaceCloudHub' />" } else { "" }
+    $mode = if ($IsLive) { 'LIVE' } else { 'FINAL' }
+
+    $style = @"
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 24px; background: #F5F8FB; color: #1F2937; }
+.header-card { display: flex; align-items: center; justify-content: space-between; background: #fff; border: 1px solid #DDE7F0; border-radius: 8px; padding: 18px 22px; margin-bottom: 18px; }
+.header-text .title { font-size: 22px; font-weight: 600; color: #1F2937; }
+.header-text .subtitle { font-size: 13px; color: #5F6B7A; margin-top: 2px; }
+.header-text .meta { font-size: 12px; color: #5F6B7A; margin-top: 10px; }
+.badge { display: inline-block; background: #E6F4FF; color: #005A9E; border: 1px solid #B9DDF7; border-radius: 10px; padding: 1px 10px; font-size: 11px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
+.logo { height: 46px; }
+.card { background: #fff; border: 1px solid #DDE7F0; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; }
+h2 { font-size: 15px; margin: 0 0 8px 0; color: #1F2937; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { background: #0078D4; color: #fff; text-align: left; font-weight: 600; }
+th, td { border: 1px solid #DDE7F0; padding: 6px 8px; vertical-align: top; }
+tr:nth-child(even) td { background: #F5F8FB; }
+.empty { color: #5F6B7A; font-style: italic; }
+.footer { font-size: 11px; color: #5F6B7A; margin-top: 8px; }
+.footer a { color: #0078D4; text-decoration: none; }
+</style>
+"@
+
+    $html = New-Object System.Collections.Generic.List[string]
+    [void]$html.Add("<html><head><meta charset='utf-8'><title>Windows 11 upgrade cycle $CycleNumber</title>$style</head><body>")
+    [void]$html.Add("<div class='header-card'>")
+    [void]$html.Add("<div class='header-text'>")
+    [void]$html.Add(("<div class='title'>Windows 11 upgrade - cycle {0}<span class='badge'>{1}</span></div>" -f $CycleNumber,$mode))
+    [void]$html.Add("<div class='subtitle'>Smart Intune Windows 11 Upgrade Toolkit</div>")
+    [void]$html.Add(("<div class='meta'>Generated: {0} | Computers: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
+    [void]$html.Add("</div>")
+    [void]$html.Add($logoHtml)
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Status summary</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @("Status", "Count")))
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Next action summary</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $nextActionCounts -Columns @("NextAction", "Count")))
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Computer details</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $rows -Columns @($reportColumns)))
+    [void]$html.Add("<div class='footer'>Smart Intune Windows 11 Upgrade Toolkit - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div>")
+    [void]$html.Add("</div>")
+    [void]$html.Add("</body></html>")
+
+    ($html -join "`r`n") | Out-File -LiteralPath $Path -Encoding UTF8 -Force
+}
+
 $globalGateRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'SmartM365\GlobalWorkerGates'
 $globalGateName = ($GlobalConcurrencySemaphoreName -replace '[^A-Za-z0-9_.-]', '_')
 if ($globalGateName.Length -gt 120) { $globalGateName = $globalGateName.Substring(0, 120) }
@@ -622,6 +769,11 @@ do {
     $globalLeaseByJobId = @{}
     $nextIndex = 0
 
+    $liveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_live.html" -f $cycle)
+    $lastLiveHtmlWrite = [datetime]::MinValue
+    try { New-Windows11UpgradeCycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive }
+    catch { Write-Host ("Cycle {0}: failed to initialize live HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
         while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit) {
             $computer = $computers[$nextIndex]
@@ -765,19 +917,30 @@ do {
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
 
+        if (((Get-Date) - $lastLiveHtmlWrite).TotalSeconds -ge 3) {
+            try {
+                New-Windows11UpgradeCycleHtmlReport -Summary @($results.ToArray()) -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive
+                $lastLiveHtmlWrite = Get-Date
+            }
+            catch { Write-Host ("Cycle {0}: failed to update live HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+        }
+
         $runningJobs = @($runningJobs | Where-Object { $_.State -eq 'Running' })
     }
 
-    $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.csv" -f $cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
-    $normalizedResults = foreach ($item in @($results.ToArray())) {
-        $row = [ordered]@{}
-        foreach ($column in $reportColumns) {
-            $row[$column] = if ($null -ne $item -and $item.PSObject.Properties[$column]) { [string]$item.$column } else { '' }
-        }
-        [pscustomobject]$row
-    }
+    $reportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.csv" -f $cycle,$reportTimestamp)
+    $normalizedResults = Get-Windows11ReportRows -Items @($results.ToArray())
     @($normalizedResults) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
+
+    $htmlReportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.html" -f $cycle,$reportTimestamp)
+    try {
+        New-Windows11UpgradeCycleHtmlReport -Summary @($normalizedResults) -Path $htmlReportPath -CycleNumber $cycle -GeneratedAt (Get-Date)
+        New-Windows11UpgradeCycleHtmlReport -Summary @($normalizedResults) -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive
+        Write-Host ("Cycle {0} HTML report: {1}" -f $cycle,$htmlReportPath) -ForegroundColor Green
+    }
+    catch { Write-Host ("Cycle {0}: failed to write HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
 
     try {
         $moveAlreadyW11Result = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary @($normalizedResults)
