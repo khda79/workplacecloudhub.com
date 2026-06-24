@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.62
+2.10.63
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.62"
+$LauncherVersion = "2.10.63"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -2197,42 +2197,42 @@ function Remove-StaleGlobalWorkerLeases {
     )
 
     $nowUtc = (Get-Date).ToUniversalTime()
+    $removed = New-Object System.Collections.Generic.List[pscustomobject]
     foreach ($lease in @(Get-ChildItem -LiteralPath $GatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
         $remove = $false
         $reason = ""
         $computerName = ""
         $launcherPid = 0
         $workerPid = 0
-        $ageMinutes = 0
         try {
             $data = Get-Content -LiteralPath $lease.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
             $computerName = [string]$data.Computer
             $launcherPid = if ($data.PSObject.Properties["LauncherProcessId"]) { [int]$data.LauncherProcessId } else { [int]$data.ProcessId }
             $workerPid = if ($data.PSObject.Properties["WorkerProcessId"]) { [int]$data.WorkerProcessId } else { 0 }
             $createdUtc = [datetime]::Parse($data.CreatedUtc, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
-            $ageMinutes = [math]::Round(($nowUtc - $createdUtc).TotalMinutes, 1)
             if (-not (Test-GlobalGateProcessAlive -ProcessId $launcherPid)) {
-                $remove = $true
-                $reason = "LauncherProcessExited"
+                $remove = $true; $reason = "LauncherProcessExited"
+            } elseif ($workerPid -gt 0 -and -not (Test-GlobalGateProcessAlive -ProcessId $workerPid)) {
+                $remove = $true; $reason = "WorkerProcessExited"
+            } elseif (($nowUtc - $createdUtc).TotalMinutes -gt $LeaseTimeoutMinutes) {
+                $remove = $true; $reason = "LeaseExpired"
             }
-            elseif ($workerPid -gt 0 -and -not (Test-GlobalGateProcessAlive -ProcessId $workerPid)) {
-                $remove = $true
-                $reason = "WorkerProcessExited"
-            }
-            elseif (($nowUtc - $createdUtc).TotalMinutes -gt $LeaseTimeoutMinutes) {
-                $remove = $true
-                $reason = "LeaseExpired"
-            }
+        } catch {
+            $remove = $true; $reason = "InvalidLease"
         }
-        catch {
-            $remove = $true
-            $reason = "InvalidLease"
-        }
-
         if ($remove) {
-            Write-Host ("Removed stale global worker lease: Reason={0}; Computer={1}; LauncherPid={2}; WorkerPid={3}; AgeMinutes={4}; Path={5}" -f $reason,$computerName,$launcherPid,$workerPid,$ageMinutes,$lease.FullName) -ForegroundColor DarkYellow
+            $removed.Add([pscustomobject]@{ Reason = $reason; Computer = $computerName; LauncherPid = $launcherPid })
             Remove-Item -LiteralPath $lease.FullName -Force -ErrorAction SilentlyContinue
         }
+    }
+    if ($removed.Count -gt 0) {
+        $pidParts = @($removed | Group-Object LauncherPid | Sort-Object Name | ForEach-Object {
+            $reasons = @($_.Group | Group-Object Reason | ForEach-Object { if ($_.Count -gt 1) { "$($_.Name) x$($_.Count)" } else { $_.Name } }) -join '+'
+            "PID=$($_.Name)[$reasons]"
+        })
+        $shortNames = @($removed | ForEach-Object { ($_.Computer -split '\.')[0] } | Where-Object { $_ })
+        $computerPart = if ($shortNames.Count -le 4) { ": " + ($shortNames -join ", ") } else { "" }
+        Write-Host ("Removed {0} stale global worker lease(s) [{1}]{2}" -f $removed.Count,($pidParts -join "; "),$computerPart) -ForegroundColor DarkYellow
     }
 }
 
