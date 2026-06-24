@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.8
+    0.1.9
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -65,7 +65,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.8'
+$script:ScriptVersion = '0.1.9'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1659,6 +1659,40 @@ function Get-InteractiveUserSessionSummary {
     }
 }
 
+function Invoke-ControlledRebootWhenNoUser {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $summary = Get-InteractiveUserSessionSummary
+    $script:ControlledRebootUserCount = [string]$summary.InteractiveUserCount
+    $script:ControlledRebootUsers = [string]$summary.InteractiveUsers
+    $script:ControlledRebootDetail = [string]$summary.Detail
+
+    if (-not $summary.DetectionSucceeded) {
+        $script:ControlledRebootAction = 'SkippedUserDetectionFailed'
+        Write-SmartLog ("Controlled reboot skipped because user detection failed: {0}" -f $summary.Detail) 'WARN'
+        return 'UserDetectionFailed'
+    }
+
+    if ([int]$summary.InteractiveUserCount -gt 0) {
+        $script:ControlledRebootAction = 'SkippedUserConnected'
+        Write-SmartLog ("Controlled reboot skipped because interactive user(s) are connected: {0}" -f $summary.InteractiveUsers) 'WARN'
+        return 'UserConnected'
+    }
+
+    try {
+        shutdown.exe /r /t $RebootDelaySeconds /c $Reason | Out-Null
+        $script:ControlledRebootAction = 'ScheduledNoUser'
+        $script:ControlledRebootDetail = ("No interactive user connected. Reboot scheduled in {0} second(s). Reason={1}" -f $RebootDelaySeconds,$Reason)
+        Write-SmartLog $script:ControlledRebootDetail
+        return 'ScheduledNoUser'
+    }
+    catch {
+        $script:ControlledRebootAction = 'ScheduleFailed'
+        $script:ControlledRebootDetail = ("No interactive user connected, but reboot scheduling failed: {0}" -f $_.Exception.Message)
+        Write-SmartLog $script:ControlledRebootDetail 'ERROR'
+        return 'ScheduleFailed'
+    }
+}
 function Invoke-SetupCompletionRebootWhenNoUser {
     if (-not $AllowSetupCompletionRebootWhenNoUser) { return 'NotRequested' }
 
@@ -1762,6 +1796,10 @@ $script:SetupCompletionRebootAction = ''
 $script:SetupCompletionRebootDetail = ''
 $script:SetupCompletionRebootUserCount = ''
 $script:SetupCompletionRebootUsers = ''
+$script:ControlledRebootAction = ''
+$script:ControlledRebootDetail = ''
+$script:ControlledRebootUserCount = ''
+$script:ControlledRebootUsers = ''
 $computerSystem = $null
 
 try {
@@ -1901,9 +1939,34 @@ try {
         $status = 'PENDING_REBOOT'
         $nextAction = if ($AllowReboot) { 'REBOOT_SCHEDULED' } else { 'REBOOT_DEVICE' }
         if ($AllowReboot -and -not $AuditOnly) {
-            shutdown.exe /r /t $RebootDelaySeconds /c 'SmartM365 Windows 11 upgrade readiness reboot' | Out-Null
-            $actionResult = 'RebootScheduled'
-            $exitCode = 0
+            $rebootResult = Invoke-ControlledRebootWhenNoUser -Reason 'SmartM365 Windows 11 upgrade readiness reboot - no interactive user connected'
+            switch ($rebootResult) {
+                'ScheduledNoUser' {
+                    $actionResult = 'RebootScheduledNoUser'
+                    $exitCode = 0
+                }
+                'UserConnected' {
+                    $status = 'PENDING_REBOOT_USER_CONNECTED'
+                    $nextAction = 'WAIT_USER_LOGOFF_OR_REBOOT_DEVICE'
+                    $actionResult = 'RebootSkippedUserConnected'
+                    $exitCode = 0
+                }
+                'UserDetectionFailed' {
+                    $status = 'PENDING_REBOOT_USER_DETECTION_FAILED'
+                    $nextAction = 'CHECK_USER_SESSIONS_BEFORE_REBOOT'
+                    $actionResult = 'RebootSkippedUserDetectionFailed'
+                    $exitCode = 3
+                }
+                'ScheduleFailed' {
+                    $status = 'PENDING_REBOOT_SCHEDULE_FAILED'
+                    $nextAction = 'CHECK_REBOOT_SCHEDULE'
+                    $actionResult = 'RebootScheduleFailed'
+                    $exitCode = 1
+                }
+                default {
+                    $exitCode = 3
+                }
+            }
         }
         else {
             $exitCode = 3
@@ -2038,6 +2101,10 @@ finally {
         SetupCompletionRebootDetail = $script:SetupCompletionRebootDetail
         SetupCompletionRebootUserCount = $script:SetupCompletionRebootUserCount
         SetupCompletionRebootUsers = $script:SetupCompletionRebootUsers
+        ControlledRebootAction = $script:ControlledRebootAction
+        ControlledRebootDetail = $script:ControlledRebootDetail
+        ControlledRebootUserCount = $script:ControlledRebootUserCount
+        ControlledRebootUsers = $script:ControlledRebootUsers
         SetupExePath = $setupExe
         LogPath = $script:LogPath
         CsvPath = $script:CsvPath
