@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.61
+2.10.62
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.61"
+$LauncherVersion = "2.10.62"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -1767,6 +1767,7 @@ function Copy-RemoteEvidenceFolder {
     return $copyCount
 }
 
+$script:BrandLogoDataUri = $null
 function Get-IntuneHybridJoinBrandLogoDataUri {
     if ($null -ne $script:BrandLogoDataUri) { return $script:BrandLogoDataUri }
     $script:BrandLogoDataUri = ''
