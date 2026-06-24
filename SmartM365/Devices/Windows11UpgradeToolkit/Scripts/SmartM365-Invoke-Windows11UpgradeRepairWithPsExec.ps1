@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.7
+    0.1.8
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -82,7 +82,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.7'
+$script:LauncherVersion = '0.1.8'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -250,6 +250,22 @@ if ($script:IsSingleComputerLaunch) {
     $ThrottleLimit = 1
     $GlobalConcurrencyLimit = 0
 }
+
+function Write-Host {
+    param(
+        [Parameter(Position = 0)][object]$Object = '',
+        [switch]$NoNewline,
+        [System.ConsoleColor]$ForegroundColor,
+        [System.ConsoleColor]$BackgroundColor
+    )
+    $ts = if ($null -ne $Object -and '' -ne [string]$Object) { "[{0}] " -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') } else { '' }
+    $p = @{ Object = ($ts + [string]$Object) }
+    if ($PSBoundParameters.ContainsKey('ForegroundColor')) { $p['ForegroundColor'] = $ForegroundColor }
+    if ($PSBoundParameters.ContainsKey('BackgroundColor')) { $p['BackgroundColor'] = $BackgroundColor }
+    if ($PSBoundParameters.ContainsKey('NoNewline')) { $p['NoNewline'] = $NoNewline }
+    Microsoft.PowerShell.Utility\Write-Host @p
+}
+
 function Test-SetupSourceMapSyntax {
     param([AllowNull()][string]$Path)
 
@@ -771,6 +787,8 @@ do {
 
     $liveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_live.html" -f $cycle)
     $lastLiveHtmlWrite = [datetime]::MinValue
+    $cycleStart = Get-Date
+    $lastProgressLog = Get-Date
     try { New-Windows11UpgradeCycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive }
     catch { Write-Host ("Cycle {0}: failed to initialize live HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
 
@@ -834,6 +852,11 @@ do {
 
         $finishedJobs = @($runningJobs | Where-Object { $_.State -ne 'Running' })
         if ($finishedJobs.Count -eq 0) {
+            if (((Get-Date) - $lastProgressLog).TotalSeconds -ge 300) {
+                $waitingNames = @($runningJobs | ForEach-Object { $_.Name -replace '^W11UT_C\d+_','' })
+                Write-Host ("Waiting for {0} job(s); Elapsed={1} min; Running: {2}" -f $runningJobs.Count,[math]::Round(((Get-Date) - $cycleStart).TotalMinutes,1),($waitingNames -join ', '))
+                $lastProgressLog = Get-Date
+            }
             Start-Sleep -Seconds $JobPollSeconds
             continue
         }
