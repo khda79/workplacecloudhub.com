@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.5
+    0.1.6
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -82,7 +82,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.5'
+$script:LauncherVersion = '0.1.6'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -407,6 +407,10 @@ $reportColumns = @(
     'SetupCompletionRebootDetail',
     'SetupCompletionRebootUserCount',
     'SetupCompletionRebootUsers',
+    'ControlledRebootAction',
+    'ControlledRebootDetail',
+    'ControlledRebootUserCount',
+    'ControlledRebootUsers',
     'RemoteLogsPath',
     'PsExecLogPath'
 )
@@ -736,6 +740,10 @@ do {
                     SetupCompletionRebootDetail = ''
                     SetupCompletionRebootUserCount = ''
                     SetupCompletionRebootUsers = ''
+                    ControlledRebootAction = ''
+                    ControlledRebootDetail = ''
+                    ControlledRebootUserCount = ''
+                    ControlledRebootUsers = ''
                     RemoteLogsPath = ''
                     PsExecLogPath = ''
                     JobErrorMessage = ($jobErrors -join ' | ')
