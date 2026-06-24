@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.4
+    0.1.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -82,7 +82,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.4'
+$script:LauncherVersion = '0.1.5'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -125,6 +125,114 @@ function Get-ComputerList {
         [void]$result.Add($name)
     }
     return @($result.ToArray())
+}
+
+function Get-ComputerListKey {
+    param([Parameter(Mandatory = $true)][string]$ComputerName)
+
+    return ($ComputerName.Trim().Trim([char]34).Split('.')[0]).ToUpperInvariant()
+}
+
+function Test-AlreadyWindows11CycleResult {
+    param([Parameter(Mandatory = $true)][psobject]$Result)
+
+    $launcherStatus = if ($Result.PSObject.Properties['LauncherStatus']) { [string]$Result.LauncherStatus } else { '' }
+    $remoteStatus = if ($Result.PSObject.Properties['RemoteStatus']) { [string]$Result.RemoteStatus } else { '' }
+    return ($launcherStatus -eq 'ALREADY_WINDOWS11' -or $remoteStatus -eq 'ALREADY_WINDOWS11')
+}
+
+function Move-AlreadyWindows11ComputersFromList {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerListPath,
+        [Parameter(Mandatory = $true)][object[]]$CycleSummary
+    )
+
+    $alreadyWindows11 = @(
+        $CycleSummary |
+            Where-Object { $_ -and (Test-AlreadyWindows11CycleResult -Result $_) } |
+            ForEach-Object { if ($_.PSObject.Properties['ComputerName']) { [string]$_.ComputerName } } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+
+    if ($alreadyWindows11.Count -eq 0) {
+        return [pscustomobject]@{ Moved = 0; AlreadyWindows11Path = ''; Detail = 'No already-Windows11 computer detected in this cycle.' }
+    }
+
+    $moveKeys = @{}
+    foreach ($computer in $alreadyWindows11) {
+        $key = Get-ComputerListKey -ComputerName $computer
+        if (-not [string]::IsNullOrWhiteSpace($key) -and -not $moveKeys.ContainsKey($key)) { $moveKeys[$key] = $computer.Trim() }
+    }
+
+    $listLines = @(Get-Content -LiteralPath $ComputerListPath -ErrorAction Stop)
+    $remainingLines = New-Object System.Collections.Generic.List[string]
+    $movedFromList = New-Object System.Collections.Generic.List[string]
+
+    foreach ($line in $listLines) {
+        $trimmed = ([string]$line).Trim().Trim([char]34)
+        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) {
+            [void]$remainingLines.Add($line)
+            continue
+        }
+
+        $key = Get-ComputerListKey -ComputerName $trimmed
+        if ($moveKeys.ContainsKey($key)) {
+            [void]$movedFromList.Add($trimmed)
+            continue
+        }
+
+        [void]$remainingLines.Add($line)
+    }
+
+    if ($movedFromList.Count -eq 0) {
+        return [pscustomobject]@{ Moved = 0; AlreadyWindows11Path = ''; Detail = 'Already-Windows11 computers were detected, but none were still present in Computers.txt.' }
+    }
+
+    $computerListDir = Split-Path -Parent $ComputerListPath
+    if ([string]::IsNullOrWhiteSpace($computerListDir)) { $computerListDir = '.' }
+    $alreadyWindows11Path = Join-Path $computerListDir 'ComputersAlreadyW11.txt'
+
+    $existingKeys = @{}
+    if (Test-Path -LiteralPath $alreadyWindows11Path) {
+        foreach ($line in @(Get-Content -LiteralPath $alreadyWindows11Path -ErrorAction SilentlyContinue)) {
+            $trimmed = ([string]$line).Trim().Trim([char]34)
+            if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) { continue }
+            $key = Get-ComputerListKey -ComputerName $trimmed
+            if (-not $existingKeys.ContainsKey($key)) { $existingKeys[$key] = $true }
+        }
+    }
+
+    $appendLines = New-Object System.Collections.Generic.List[string]
+    foreach ($computer in $movedFromList) {
+        $key = Get-ComputerListKey -ComputerName $computer
+        if (-not $existingKeys.ContainsKey($key)) {
+            [void]$appendLines.Add($computer)
+            $existingKeys[$key] = $true
+        }
+    }
+
+    $tmpComputerListPath = '{0}.tmp.{1}.txt' -f $ComputerListPath,([guid]::NewGuid().ToString('N'))
+    try {
+        Set-Content -LiteralPath $tmpComputerListPath -Value $remainingLines -Encoding ASCII -Force
+        Move-Item -LiteralPath $tmpComputerListPath -Destination $ComputerListPath -Force
+    }
+    finally {
+        Remove-Item -LiteralPath $tmpComputerListPath -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($appendLines.Count -gt 0) {
+        Add-Content -LiteralPath $alreadyWindows11Path -Value $appendLines -Encoding ASCII
+    }
+    elseif (-not (Test-Path -LiteralPath $alreadyWindows11Path)) {
+        New-Item -ItemType File -Path $alreadyWindows11Path -Force | Out-Null
+    }
+
+    return [pscustomobject]@{
+        Moved = $movedFromList.Count
+        AlreadyWindows11Path = $alreadyWindows11Path
+        Detail = ('Moved {0} computer(s) from Computers.txt to ComputersAlreadyW11.txt.' -f $movedFromList.Count)
+    }
 }
 
 function Test-SingleComputerLaunch {
@@ -662,6 +770,16 @@ do {
     }
     @($normalizedResults) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
+
+    try {
+        $moveAlreadyW11Result = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary @($normalizedResults)
+        if ($moveAlreadyW11Result.Moved -gt 0) {
+            Write-Host ("Cycle {0}: moved {1} already-Windows11 computer(s) to {2}" -f $cycle,$moveAlreadyW11Result.Moved,$moveAlreadyW11Result.AlreadyWindows11Path) -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host ("Cycle {0}: failed to update ComputersAlreadyW11.txt: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow
+    }
 
     $sourceDistribution = @(
         $normalizedResults |
