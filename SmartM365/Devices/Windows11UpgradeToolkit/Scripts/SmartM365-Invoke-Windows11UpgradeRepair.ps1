@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.9
+    0.1.10
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -65,7 +65,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.9'
+$script:ScriptVersion = '0.1.10'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -235,16 +235,23 @@ function Get-SystemDriveFreeGb {
 }
 
 function Test-PendingReboot {
-    $paths = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired',
-        'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'
-    )
+    $sources = New-Object System.Collections.ArrayList
 
-    if (Test-Path -LiteralPath $paths[0]) { return $true }
-    if (Test-Path -LiteralPath $paths[1]) { return $true }
-    $pendingFileRename = Get-RegistryValue -Path $paths[2] -Name 'PendingFileRenameOperations'
-    return ($null -ne $pendingFileRename)
+    if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') {
+        [void]$sources.Add('CBS:Component Based Servicing\RebootPending')
+    }
+    if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
+        [void]$sources.Add('WindowsUpdate:Auto Update\RebootRequired')
+    }
+    $pendingFileRename = Get-RegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name 'PendingFileRenameOperations'
+    if ($null -ne $pendingFileRename) {
+        [void]$sources.Add('SessionManager:PendingFileRenameOperations')
+    }
+
+    [pscustomobject]@{
+        IsPending = ($sources.Count -gt 0)
+        Source = (@($sources.ToArray()) -join '; ')
+    }
 }
 
 function Get-IntuneEnrollmentSummary {
@@ -1675,7 +1682,7 @@ function Invoke-ControlledRebootWhenNoUser {
 
     if ([int]$summary.InteractiveUserCount -gt 0) {
         $script:ControlledRebootAction = 'SkippedUserConnected'
-        Write-SmartLog ("Controlled reboot skipped because interactive user(s) are connected: {0}" -f $summary.InteractiveUsers) 'WARN'
+        Write-SmartLog ("Controlled reboot skipped because interactive user(s) are connected: {0}. A pending reboot must be cleared before the Windows 11 upgrade can continue; it will retry on a later cycle once no user is connected." -f $summary.InteractiveUsers) 'WARN'
         return 'UserConnected'
     }
 
@@ -1830,7 +1837,11 @@ try {
     $os = Get-OsSummary
     Write-SmartLog ("Startup OS before upgrade: Caption={0}; Version={1}; Build={2}; Architecture={3}; Family={4}" -f $os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
     $freeGb = Get-SystemDriveFreeGb
-    $pendingReboot = Test-PendingReboot
+    $pendingRebootInfo = Test-PendingReboot
+    $pendingReboot = $pendingRebootInfo.IsPending
+    if ($pendingReboot) {
+        Write-SmartLog ("Pending reboot detected before upgrade. Source(s)={0}" -f $pendingRebootInfo.Source) 'WARN'
+    }
     $intune = Get-IntuneEnrollmentSummary
     $policy = Get-WindowsUpdatePolicySummary
     $indicators = Get-Windows11IndicatorSummary
@@ -1938,6 +1949,7 @@ try {
     elseif ($pendingReboot) {
         $status = 'PENDING_REBOOT'
         $nextAction = if ($AllowReboot) { 'REBOOT_SCHEDULED' } else { 'REBOOT_DEVICE' }
+        $detail = ("A reboot is pending and must be cleared before the Windows 11 upgrade can continue. Source(s)={0}" -f $pendingRebootInfo.Source)
         if ($AllowReboot -and -not $AuditOnly) {
             $rebootResult = Invoke-ControlledRebootWhenNoUser -Reason 'SmartM365 Windows 11 upgrade readiness reboot - no interactive user connected'
             switch ($rebootResult) {
@@ -2047,11 +2059,17 @@ finally {
     try { $osFinal = Get-OsSummary } catch { }
     $finalFreeDisk = ''
     $finalPendingReboot = ''
+    $finalPendingRebootSource = ''
     $finalIntuneEnrolled = ''
     $finalWuBlockers = ''
     $finalW11BlockingReasons = ''
     try { $finalFreeDisk = Get-SystemDriveFreeGb } catch { }
-    try { $finalPendingReboot = Test-PendingReboot } catch { }
+    try {
+        $finalPendingRebootInfo = Test-PendingReboot
+        $finalPendingReboot = $finalPendingRebootInfo.IsPending
+        $finalPendingRebootSource = $finalPendingRebootInfo.Source
+    }
+    catch { }
     try { $finalIntuneEnrolled = (Get-IntuneEnrollmentSummary).IsIntuneEnrolled } catch { }
     try { $finalWuBlockers = (Get-WindowsUpdatePolicySummary).Issues } catch { }
     try { $finalW11BlockingReasons = (Get-Windows11IndicatorSummary).BlockingReasons } catch { }
@@ -2076,6 +2094,7 @@ finally {
         OSBuild = if ($osFinal) { $osFinal.BuildNumber } else { '' }
         FreeDiskGB = $finalFreeDisk
         PendingReboot = $finalPendingReboot
+        PendingRebootSource = $finalPendingRebootSource
         IsVirtualMachine = if ($computerSystem) { $computerSystem.IsVirtualMachine } else { '' }
         VirtualMachineEvidence = if ($computerSystem) { $computerSystem.Evidence } else { '' }
         IntuneEnrolled = $finalIntuneEnrolled
@@ -2112,6 +2131,15 @@ finally {
 
     Save-RunResult -Result $result
     Write-SmartLog ("Final Status={0}; NextAction={1}; ExitCode={2}" -f $status,$nextAction,$exitCode)
+    if ($status -like 'PENDING_REBOOT*') {
+        $rebootExplanation = switch ($status) {
+            'PENDING_REBOOT_USER_CONNECTED' { 'Upgrade paused: a reboot is pending but was skipped because an interactive user is connected. The device will continue on a later cycle once it has rebooted or the user has logged off.' }
+            'PENDING_REBOOT_USER_DETECTION_FAILED' { 'Upgrade paused: a reboot is pending but interactive user detection failed, so the reboot was skipped. Verify user sessions before rebooting.' }
+            'PENDING_REBOOT_SCHEDULE_FAILED' { 'Upgrade paused: a reboot is pending and no user is connected, but scheduling the reboot failed. Check the reboot schedule.' }
+            default { 'Upgrade paused: a reboot is pending and must be cleared before the Windows 11 upgrade can continue.' }
+        }
+        Write-SmartLog ("Pending reboot summary: {0} Source(s)={1}" -f $rebootExplanation,$finalPendingRebootSource)
+    }
     if (-not [string]::IsNullOrWhiteSpace($detail)) {
         Write-SmartLog ("Final Detail={0}" -f $detail)
     }
