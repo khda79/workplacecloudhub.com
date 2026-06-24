@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.7
+    0.1.8
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -30,6 +30,7 @@ param(
     [switch]$AllowSetupUpgrade,
     [switch]$DirectSetupUpgrade,
     [switch]$AllowReboot,
+    [switch]$AllowSetupCompletionRebootWhenNoUser,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
     [switch]$AllowAdvancedDiskCleanup,
@@ -64,7 +65,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.7'
+$script:ScriptVersion = '0.1.8'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1616,6 +1617,117 @@ function Invoke-SetupUpgrade {
     return $process.ExitCode
 }
 
+function Get-InteractiveUserSessionSummary {
+    $excludedDomains = @('NT AUTHORITY','WINDOW MANAGER','FONT DRIVER HOST')
+    $excludedNames = @('SYSTEM','LOCAL SERVICE','NETWORK SERVICE')
+
+    try {
+        $sessions = @(Get-CimInstance -ClassName Win32_LogonSession -Filter 'LogonType = 2 OR LogonType = 10 OR LogonType = 11' -ErrorAction Stop)
+        $users = New-Object System.Collections.ArrayList
+
+        foreach ($session in $sessions) {
+            $accounts = @(Get-CimAssociatedInstance -InputObject $session -Association Win32_LoggedOnUser -ErrorAction SilentlyContinue)
+            foreach ($account in $accounts) {
+                $domain = ([string]$account.Domain).Trim()
+                $name = ([string]$account.Name).Trim()
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
+                if ($excludedDomains -contains $domain.ToUpperInvariant()) { continue }
+                if ($excludedNames -contains $name.ToUpperInvariant()) { continue }
+                if ($name -match '^(DWM|UMFD)-\d+$') { continue }
+                if ($name.EndsWith('$')) { continue }
+
+                $display = if ([string]::IsNullOrWhiteSpace($domain)) { $name } else { "{0}\{1}" -f $domain,$name }
+                if (-not $users.Contains($display)) { [void]$users.Add($display) }
+            }
+        }
+
+        $userList = (@($users.ToArray()) -join '; ')
+        return [pscustomobject]@{
+            DetectionSucceeded = $true
+            InteractiveUserCount = $users.Count
+            InteractiveUsers = $userList
+            Detail = ("InteractiveUserCount={0}; InteractiveUsers={1}" -f $users.Count,$userList)
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            DetectionSucceeded = $false
+            InteractiveUserCount = ''
+            InteractiveUsers = ''
+            Detail = ("Interactive user detection failed: {0}" -f $_.Exception.Message)
+        }
+    }
+}
+
+function Invoke-SetupCompletionRebootWhenNoUser {
+    if (-not $AllowSetupCompletionRebootWhenNoUser) { return 'NotRequested' }
+
+    $summary = Get-InteractiveUserSessionSummary
+    $script:SetupCompletionRebootUserCount = [string]$summary.InteractiveUserCount
+    $script:SetupCompletionRebootUsers = [string]$summary.InteractiveUsers
+    $script:SetupCompletionRebootDetail = [string]$summary.Detail
+
+    if (-not $summary.DetectionSucceeded) {
+        $script:SetupCompletionRebootAction = 'SkippedUserDetectionFailed'
+        Write-SmartLog ("Setup completion reboot skipped because user detection failed: {0}" -f $summary.Detail) 'WARN'
+        return 'UserDetectionFailed'
+    }
+
+    if ([int]$summary.InteractiveUserCount -gt 0) {
+        $script:SetupCompletionRebootAction = 'SkippedUserConnected'
+        Write-SmartLog ("Setup completion reboot skipped because interactive user(s) are connected: {0}" -f $summary.InteractiveUsers) 'WARN'
+        return 'UserConnected'
+    }
+
+    try {
+        shutdown.exe /r /t $RebootDelaySeconds /c 'SmartM365 Windows 11 setup completion reboot - no interactive user connected' | Out-Null
+        $script:SetupCompletionRebootAction = 'ScheduledNoUser'
+        $script:SetupCompletionRebootDetail = ("No interactive user connected. Reboot scheduled in {0} second(s)." -f $RebootDelaySeconds)
+        Write-SmartLog $script:SetupCompletionRebootDetail
+        return 'ScheduledNoUser'
+    }
+    catch {
+        $script:SetupCompletionRebootAction = 'ScheduleFailed'
+        $script:SetupCompletionRebootDetail = ("No interactive user connected, but reboot scheduling failed: {0}" -f $_.Exception.Message)
+        Write-SmartLog $script:SetupCompletionRebootDetail 'ERROR'
+        return 'ScheduleFailed'
+    }
+}
+
+function Resolve-SetupUpgradeSuccessOutcome {
+    param(
+        [Parameter(Mandatory = $true)][string]$Prefix,
+        [Parameter(Mandatory = $true)][int]$SetupExitCode
+    )
+
+    $baseStatus = if ($SetupExitCode -eq 3010) { "${Prefix}_REBOOT_REQUIRED" } else { "${Prefix}_STARTED" }
+    $baseNextAction = if ($SetupExitCode -eq 3010) { 'REBOOT_DEVICE' } else { 'MONITOR_SETUP_AND_REBOOT' }
+    $suffix = ''
+
+    if (-not $AllowSetupCompletionRebootWhenNoUser) {
+        return [pscustomobject]@{ Status = $baseStatus; NextAction = $baseNextAction; ExitCode = 0; ActionResultSuffix = $suffix }
+    }
+
+    $rebootResult = Invoke-SetupCompletionRebootWhenNoUser
+    switch ($rebootResult) {
+        'ScheduledNoUser' {
+            return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SCHEDULED_NO_USER"; NextAction = 'REBOOT_SCHEDULED'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootScheduledNoUser' }
+        }
+        'UserConnected' {
+            return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SKIPPED_USER_CONNECTED"; NextAction = 'WAIT_USER_LOGOFF_OR_REBOOT_DEVICE'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootSkippedUserConnected' }
+        }
+        'UserDetectionFailed' {
+            return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SKIPPED_USER_DETECTION_FAILED"; NextAction = 'CHECK_USER_SESSIONS_BEFORE_REBOOT'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootSkippedUserDetectionFailed' }
+        }
+        'ScheduleFailed' {
+            return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SCHEDULE_FAILED"; NextAction = 'CHECK_REBOOT_SCHEDULE'; ExitCode = 1; ActionResultSuffix = 'SetupCompletionRebootScheduleFailed' }
+        }
+        default {
+            return [pscustomobject]@{ Status = $baseStatus; NextAction = $baseNextAction; ExitCode = 0; ActionResultSuffix = $suffix }
+        }
+    }
+}
+
 function Save-RunResult {
     param([Parameter(Mandatory = $true)]$Result)
 
@@ -1646,6 +1758,10 @@ $script:AdvancedDiskCleanupAction = ''
 $script:AdvancedDiskCleanupFreedGB = ''
 $script:DismCleanupAction = ''
 $script:DismCleanupFreedGB = ''
+$script:SetupCompletionRebootAction = ''
+$script:SetupCompletionRebootDetail = ''
+$script:SetupCompletionRebootUserCount = ''
+$script:SetupCompletionRebootUsers = ''
 $computerSystem = $null
 
 try {
@@ -1747,15 +1863,12 @@ try {
                 $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $setupExitCode
                 $setupExitDetail = Format-SetupExitCodeInfo -Info $setupExitInfo
                 $actionResult = "DirectSetup$setupExitDetail"
-                if ($setupExitCode -eq 0) {
-                    $status = 'DIRECT_SETUP_UPGRADE_STARTED'
-                    $nextAction = 'MONITOR_SETUP_AND_REBOOT'
-                    $exitCode = 0
-                }
-                elseif ($setupExitCode -eq 3010) {
-                    $status = 'DIRECT_SETUP_UPGRADE_REBOOT_REQUIRED'
-                    $nextAction = 'REBOOT_DEVICE'
-                    $exitCode = 0
+                if ($setupExitCode -eq 0 -or $setupExitCode -eq 3010) {
+                    $outcome = Resolve-SetupUpgradeSuccessOutcome -Prefix 'DIRECT_SETUP_UPGRADE' -SetupExitCode $setupExitCode
+                    $status = $outcome.Status
+                    $nextAction = $outcome.NextAction
+                    $exitCode = $outcome.ExitCode
+                    if (-not [string]::IsNullOrWhiteSpace([string]$outcome.ActionResultSuffix)) { $actionResult = "$actionResult;$($outcome.ActionResultSuffix)" }
                 }
                 else {
                     $status = 'DIRECT_SETUP_UPGRADE_FAILED'
@@ -1822,15 +1935,12 @@ try {
             $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $setupExitCode
             $setupExitDetail = Format-SetupExitCodeInfo -Info $setupExitInfo
             $actionResult = "Setup$setupExitDetail"
-            if ($setupExitCode -eq 0) {
-                $status = 'SETUP_UPGRADE_STARTED'
-                $nextAction = 'MONITOR_SETUP_AND_REBOOT'
-                $exitCode = 0
-            }
-            elseif ($setupExitCode -eq 3010) {
-                $status = 'SETUP_UPGRADE_REBOOT_REQUIRED'
-                $nextAction = 'REBOOT_DEVICE'
-                $exitCode = 0
+            if ($setupExitCode -eq 0 -or $setupExitCode -eq 3010) {
+                $outcome = Resolve-SetupUpgradeSuccessOutcome -Prefix 'SETUP_UPGRADE' -SetupExitCode $setupExitCode
+                $status = $outcome.Status
+                $nextAction = $outcome.NextAction
+                $exitCode = $outcome.ExitCode
+                if (-not [string]::IsNullOrWhiteSpace([string]$outcome.ActionResultSuffix)) { $actionResult = "$actionResult;$($outcome.ActionResultSuffix)" }
             }
             else {
                 $status = 'SETUP_UPGRADE_FAILED'
@@ -1924,6 +2034,10 @@ finally {
         AdvancedDiskCleanupFreedGB = $script:AdvancedDiskCleanupFreedGB
         DismCleanupAction = $script:DismCleanupAction
         DismCleanupFreedGB = $script:DismCleanupFreedGB
+        SetupCompletionRebootAction = $script:SetupCompletionRebootAction
+        SetupCompletionRebootDetail = $script:SetupCompletionRebootDetail
+        SetupCompletionRebootUserCount = $script:SetupCompletionRebootUserCount
+        SetupCompletionRebootUsers = $script:SetupCompletionRebootUsers
         SetupExePath = $setupExe
         LogPath = $script:LogPath
         CsvPath = $script:CsvPath
