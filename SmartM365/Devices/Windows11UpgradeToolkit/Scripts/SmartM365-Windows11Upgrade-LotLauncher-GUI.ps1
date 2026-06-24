@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.5
+0.1.6
 #>
 param(
     [switch]$ValidateOnly
@@ -1700,11 +1700,11 @@ $controls.LaunchLotButton.Add_Click({
         if (-not $script:SelectedLot) { return }
         if ($script:SelectedLot.ComputerCount -le 0) { throw 'Selected LOT has no device in Computers.txt.' }
         if (-not $script:SelectedLot.WrappersReady) { throw 'Selected LOT wrappers are missing. Refresh wrappers first.' }
-        Save-GuiOptions -Quiet
         $environment = Get-ToolkitOptionEnvironment
         $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $script:SelectedLot.Path -EnvironmentVariables $environment
         if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $script:SelectedLot.Name)) { return }
         Start-ToolkitLot -Lot $script:SelectedLot -Mode ([string]$controls.LotModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
+        Save-GuiOptions -Quiet
         Add-Status -Title 'Launched' -Message ("Launched LOT {0}." -f $script:SelectedLot.Name)
     } catch {
         Show-GuiError $_.Exception.Message
@@ -1715,7 +1715,6 @@ $controls.LaunchAllButton.Add_Click({
         $lots = Get-LaunchableLotSummaries
         if ($lots.Count -eq 0) { throw 'No ready LOT with devices was found.' }
         foreach ($lot in $lots) {
-            Save-GuiOptions -Quiet
             $environment = Get-ToolkitOptionEnvironment
             $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $lot.Path -EnvironmentVariables $environment
             if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $lot.Name)) { return }
@@ -1723,6 +1722,7 @@ $controls.LaunchAllButton.Add_Click({
             Add-Status -Title 'Launch all' -Message ("Launched {0}. Next LOT starts in {1}s." -f $lot.Name, $launchAllLotStartDelaySeconds)
             Wait-UiDelay -Seconds $launchAllLotStartDelaySeconds
         }
+        Save-GuiOptions -Quiet
         Add-Status -Title 'Launch all' -Message ("Launched {0} LOT(s)." -f $lots.Count)
     } catch {
         Show-GuiError $_.Exception.Message
@@ -1732,10 +1732,10 @@ $controls.LaunchSingleButton.Add_Click({
     try {
         $computer = $controls.SingleComputerText.Text.Trim()
         if (-not $computer) { throw 'Enter a computer name.' }
-        Save-GuiOptions -Quiet
         $environment = Get-ToolkitOptionEnvironment
         if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $environment -ScopeName $computer)) { return }
         $context = Start-ToolkitSingleComputer -ToolkitRoot $toolkitRoot -ComputerName $computer -Mode ([string]$controls.SingleModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
+        Save-GuiOptions -Quiet
         $script:LastSingleRunFolder = $context.RunPath
         $controls.SingleRunFolderText.Text = $context.RunPath
         Add-Status -Title 'Launched' -Message ("Launched single computer run for {0}." -f $computer)
