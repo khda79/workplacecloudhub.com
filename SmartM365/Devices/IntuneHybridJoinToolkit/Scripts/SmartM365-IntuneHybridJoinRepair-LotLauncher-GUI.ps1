@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.5
+1.6
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.5'
+$GuiVersion = '1.6'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -441,7 +441,9 @@ function Start-ToolkitSingleComputer {
         '-PsExecPath', $psExecPath,
         '-Mode', $runMode,
         '-LotName', ('SingleComputer-' + $context.Name),
-        '-RunRoot', $context.Root
+        '-RunRoot', $context.Root,
+        '-ThrottleLimit', '1',
+        '-GlobalConcurrencyLimit', '0'
     )
 
     if ($ignoreGuard) {

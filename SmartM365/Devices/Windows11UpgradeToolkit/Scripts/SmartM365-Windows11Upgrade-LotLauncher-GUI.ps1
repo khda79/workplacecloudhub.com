@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.4
+0.1.5
 #>
 param(
     [switch]$ValidateOnly
@@ -487,7 +487,8 @@ function Start-ToolkitSingleComputer {
         '-LogRoot', $run.LogRoot,
         '-ReportRoot', $run.ReportRoot,
         '-CentralLogRoot', $run.CentralLogRoot,
-        '-GlobalConcurrencyLimit', [string]$EnvironmentVariables.W11UT_GLOBAL_CONCURRENCY_LIMIT,
+        '-ThrottleLimit', '1',
+        '-GlobalConcurrencyLimit', '0',
         '-GlobalConcurrencyLeaseTimeoutMinutes', [string]$EnvironmentVariables.W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES
     )) {
         $commandParts.Add((ConvertTo-CmdArgument -Value $item))
@@ -540,10 +541,15 @@ function Start-ToolkitSingleComputer {
         }
     }
 
-    foreach ($argument in @($AdditionalArguments)) {
-        if (-not [string]::IsNullOrWhiteSpace($argument)) {
-            $commandParts.Add((ConvertTo-CmdArgument -Value $argument))
+    for ($index = 0; $index -lt @($AdditionalArguments).Count; $index++) {
+        $argument = [string]$AdditionalArguments[$index]
+        if ([string]::IsNullOrWhiteSpace($argument)) { continue }
+        if ($argument -ieq '-ThrottleLimit') {
+            $index++
+            continue
         }
+
+        $commandParts.Add((ConvertTo-CmdArgument -Value $argument))
     }
 
     Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', ($commandParts -join ' ')) -WorkingDirectory $run.RunPath -Verb RunAs | Out-Null
