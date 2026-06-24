@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.1
+0.1.2
 #>
 
 #requires -Version 5.1
@@ -350,6 +350,10 @@ $result = [ordered]@{
     AdvancedDiskCleanupFreedGB = ''
     DismCleanupAction = ''
     DismCleanupFreedGB = ''
+    SetupCompletionRebootAction = ''
+    SetupCompletionRebootDetail = ''
+    SetupCompletionRebootUserCount = ''
+    SetupCompletionRebootUsers = ''
     RemoteLogsPath = ''
     PsExecLogPath = $logPath
 }
@@ -509,7 +513,7 @@ try {
                 if ($lastRun.PSObject.Properties['SetupCacheAction']) {
                     $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
                 }
-                foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB')) {
+                foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers')) {
                     if ($lastRun.PSObject.Properties[$propertyName]) {
                         $result[$propertyName] = [string]$lastRun.$propertyName
                     }
