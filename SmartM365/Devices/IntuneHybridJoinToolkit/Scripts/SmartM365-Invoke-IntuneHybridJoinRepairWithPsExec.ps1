@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.57
+2.10.58
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.57"
+$LauncherVersion = "2.10.58"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -392,6 +392,31 @@ if (-not (Test-Path -LiteralPath $ComputerListPath)) {
     throw "Computer list not found: $ComputerListPath"
 }
 
+function Test-SingleComputerLaunch {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$RootPath
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullRoot = [System.IO.Path]::GetFullPath($RootPath)
+    if ($fullPath -match '\\SingleComputer\\' -or $fullRoot -match '\\SingleComputer\\') { return $true }
+
+    $computers = @(
+        Get-Content -LiteralPath $fullPath -ErrorAction Stop |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not $_.StartsWith('#') } |
+            Select-Object -Unique
+    )
+    return ($computers.Count -eq 1)
+}
+
+$script:IsSingleComputerLaunch = Test-SingleComputerLaunch -Path $ComputerListPath -RootPath $LotRoot
+if ($script:IsSingleComputerLaunch) {
+    $ThrottleLimit = 1
+    $GlobalConcurrencyLimit = 0
+}
+
 function New-LotRunMutexName {
     param([Parameter(Mandatory=$true)][string]$LotPath)
 
@@ -472,6 +497,7 @@ function Write-LauncherStartupInfo {
     Write-LauncherStartupLine ("Loop         : {0}; Delay={1} minute(s); MaxCycles={2}" -f (-not [bool]$RunOnce),$DelayBetweenCyclesMinutes,$MaxCycles)
     Write-LauncherStartupLine ("Night pause  : Enabled={0}; Window={1}:00-{2}:00 local time" -f (-not [bool]$DisableNightPause),$NightPauseStartHour,$NightPauseEndHour)
     Write-LauncherStartupLine ("Parallelism  : ThrottleLimit={0}; GlobalConcurrencyLimit={1}; GlobalLeaseTimeout={2} minute(s)" -f $ThrottleLimit,$GlobalConcurrencyLimit,$GlobalConcurrencyLeaseTimeoutMinutes)
+    if ($script:IsSingleComputerLaunch) { Write-LauncherStartupLine "Single PC    : worker limits ignored for one-computer launch." }
     Write-LauncherStartupLine ("Archive      : Enabled={0}; Root={1}" -f (-not [bool]$SkipPreRunArchive),$ArchiveRoot)
     Write-LauncherStartupLine ("Logs         : PsExec={0}; Reports={1}; Central={2}" -f $LogRoot,$ReportRoot,$CentralLogRoot)
     Write-LauncherStartupLine ("Inventory    : Intune={0}; Entra={1}; AD={2}; ADRoot={3}; ADDomain={4}" -f $IntuneInventoryCsv,$EntraInventoryCsv,$AdInventoryCsv,$AdRootInventoryCsv,$AdDomain)
