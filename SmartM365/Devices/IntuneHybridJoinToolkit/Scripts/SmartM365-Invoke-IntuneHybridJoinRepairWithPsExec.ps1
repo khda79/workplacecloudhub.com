@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.59
+2.10.60
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.59"
+$LauncherVersion = "2.10.60"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -1752,6 +1752,26 @@ function Copy-RemoteEvidenceFolder {
     return $copyCount
 }
 
+function Get-IntuneHybridJoinBrandLogoDataUri {
+    if ($null -ne $script:BrandLogoDataUri) { return $script:BrandLogoDataUri }
+    $script:BrandLogoDataUri = ''
+    $candidates = @(
+        (Join-Path $PSScriptRoot 'WorkplaceCloudHub-lockup-WPF.png'),
+        (Join-Path (Split-Path -Parent $PSScriptRoot) 'WorkplaceCloudHub-lockup-WPF.png')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            try {
+                $bytes = [System.IO.File]::ReadAllBytes($candidate)
+                $script:BrandLogoDataUri = "data:image/png;base64," + [System.Convert]::ToBase64String($bytes)
+                break
+            }
+            catch { }
+        }
+    }
+    return $script:BrandLogoDataUri
+}
+
 function New-CycleHtmlReport {
     param(
         [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Summary,
@@ -1769,28 +1789,45 @@ function New-CycleHtmlReport {
         [PSCustomObject]@{ NextAction=$_.Name; Count=$_.Count }
     })
 
+    $logoUri = Get-IntuneHybridJoinBrandLogoDataUri
+    $logoHtml = if (-not [string]::IsNullOrWhiteSpace($logoUri)) { "<img class='logo' src='$logoUri' alt='WorkplaceCloudHub' />" } else { "" }
+    $mode = if ($Path -match '_Live_') { 'LIVE' } else { 'FINAL' }
+
     $style = @"
 <style>
-body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; color: #202020; }
-h1 { font-size: 22px; margin-bottom: 4px; }
-h2 { font-size: 16px; margin-top: 24px; }
-table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 12px; }
-th { background: #1f2937; color: #fff; text-align: left; }
-th, td { border: 1px solid #d0d7de; padding: 6px 8px; vertical-align: top; }
-tr:nth-child(even) { background: #f6f8fa; }
-.meta { color: #555; margin-bottom: 16px; }
+body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 24px; background: #F5F8FB; color: #1F2937; }
+.header-card { display: flex; align-items: center; justify-content: space-between; background: #fff; border: 1px solid #DDE7F0; border-radius: 8px; padding: 18px 22px; margin-bottom: 18px; }
+.header-text .title { font-size: 22px; font-weight: 600; color: #1F2937; }
+.header-text .subtitle { font-size: 13px; color: #5F6B7A; margin-top: 2px; }
+.header-text .meta { font-size: 12px; color: #5F6B7A; margin-top: 10px; }
+.badge { display: inline-block; background: #E6F4FF; color: #005A9E; border: 1px solid #B9DDF7; border-radius: 10px; padding: 1px 10px; font-size: 11px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
+.logo { height: 46px; }
+.card { background: #fff; border: 1px solid #DDE7F0; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; }
+h2 { font-size: 15px; margin: 0 0 8px 0; color: #1F2937; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { background: #0078D4; color: #fff; text-align: left; font-weight: 600; }
+th, td { border: 1px solid #DDE7F0; padding: 6px 8px; vertical-align: top; }
+tr:nth-child(even) td { background: #F5F8FB; }
+.empty { color: #5F6B7A; font-style: italic; }
+.footer { font-size: 11px; color: #5F6B7A; margin-top: 8px; }
+.footer a { color: #0078D4; text-decoration: none; }
 </style>
 "@
 
     $html = @()
     $html += "<html><head><meta charset='utf-8'>$style<title>Intune Hybrid Join repair cycle $CycleNumber</title></head><body>"
-    $html += "<h1>Remote Intune Hybrid Join repair cycle $CycleNumber</h1>"
-    $html += "<div class='meta'>Generated: $($GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')) | Computers: $($rows.Count) | Launcher: $LauncherVersion</div>"
-    $html += "<h2>Status summary</h2>"
+    $html += "<div class='header-card'><div class='header-text'>"
+    $html += "<div class='title'>Intune Hybrid Join repair - cycle $CycleNumber<span class='badge'>$mode</span></div>"
+    $html += "<div class='subtitle'>Smart Intune Hybrid Join Toolkit</div>"
+    $html += "<div class='meta'>Generated: $($GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')) | Computers: $($rows.Count) | Launcher: v$LauncherVersion</div>"
+    $html += "</div>$logoHtml</div>"
+    $html += "<div class='card'><h2>Status summary</h2>"
     $html += ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @("Status","Count")
-    $html += "<h2>Next action summary</h2>"
+    $html += "</div>"
+    $html += "<div class='card'><h2>Next action summary</h2>"
     $html += ConvertTo-SimpleHtmlTable -Rows $nextActionCounts -Columns @("NextAction","Count")
-    $html += "<h2>Computer details</h2>"
+    $html += "</div>"
+    $html += "<div class='card'><h2>Computer details</h2>"
     $detailColumns = @(
         "Cycle",
         "Timestamp",
@@ -1853,6 +1890,8 @@ tr:nth-child(even) { background: #f6f8fa; }
         "LogPath"
     )
     $html += ConvertTo-SimpleHtmlTable -Rows $rows -Columns $detailColumns
+    $html += "<div class='footer'>Smart Intune Hybrid Join Toolkit - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div>"
+    $html += "</div>"
     $html += "</body></html>"
     $html -join "`r`n" | Out-File -LiteralPath $Path -Encoding UTF8 -Force
 }
