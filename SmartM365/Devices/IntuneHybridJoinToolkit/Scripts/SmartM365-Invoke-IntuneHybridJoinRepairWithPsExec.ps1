@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.58
+2.10.59
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.58"
+$LauncherVersion = "2.10.59"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -2210,7 +2210,9 @@ function Acquire-GlobalWorkerLease {
 
     $waitStarted = Get-Date
     $lastWaitLog = $null
-    $waitLogIntervalSeconds = 60
+    $waitLogDelaySeconds = 300
+    $waitLogIntervalSeconds = 300
+    $waitWasLogged = $false
 
     while ($true) {
         $leasePath = Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock {
@@ -2239,7 +2241,7 @@ function Acquire-GlobalWorkerLease {
         }
 
         if (-not [string]::IsNullOrWhiteSpace($leasePath)) {
-            if ($lastWaitLog -ne $null) {
+            if ($waitWasLogged) {
                 $waitMinutes = [math]::Round(((Get-Date) - $waitStarted).TotalMinutes, 1)
                 Write-Host ("Global worker lease acquired for {0} after {1} minute(s)." -f $Computer,$waitMinutes) -ForegroundColor DarkCyan
             }
@@ -2247,11 +2249,13 @@ function Acquire-GlobalWorkerLease {
         }
 
         $now = Get-Date
-        if ($lastWaitLog -eq $null -or (($now - $lastWaitLog).TotalSeconds -ge $waitLogIntervalSeconds)) {
+        $waitSeconds = ($now - $waitStarted).TotalSeconds
+        if ($waitSeconds -ge $waitLogDelaySeconds -and ($null -eq $lastWaitLog -or (($now - $lastWaitLog).TotalSeconds -ge $waitLogIntervalSeconds))) {
             $activeLeases = @(Get-ChildItem -LiteralPath $globalConcurrencyGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count
             $waitMinutes = [math]::Round(($now - $waitStarted).TotalMinutes, 1)
-            Write-Host ("Waiting for global worker lease before queuing {0}. Active={1}; Limit={2}; Wait={3} minute(s); Gate={4}" -f $Computer,$activeLeases,$GlobalConcurrencyLimit,$waitMinutes,$globalConcurrencyGatePath) -ForegroundColor DarkYellow
+            Write-Host ("Waiting for global worker lease: Computer={0}; Active={1}; Limit={2}; Wait={3} minute(s)." -f $Computer,$activeLeases,$GlobalConcurrencyLimit,$waitMinutes) -ForegroundColor DarkYellow
             $lastWaitLog = $now
+            $waitWasLogged = $true
         }
         Start-Sleep -Seconds $JobPollSeconds
     }
