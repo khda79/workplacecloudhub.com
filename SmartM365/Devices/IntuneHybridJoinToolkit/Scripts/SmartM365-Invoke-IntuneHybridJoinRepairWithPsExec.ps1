@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.60
+2.10.61
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.60"
+$LauncherVersion = "2.10.61"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -460,6 +460,21 @@ function Write-LauncherStartupLine {
         Add-Content -LiteralPath $LauncherStartupLogPath -Value $line -Encoding UTF8
     }
     catch {}
+}
+
+function Write-Host {
+    param(
+        [Parameter(Position = 0)][object]$Object = '',
+        [switch]$NoNewline,
+        [System.ConsoleColor]$ForegroundColor,
+        [System.ConsoleColor]$BackgroundColor
+    )
+    $ts = if ($null -ne $Object -and '' -ne [string]$Object) { "[{0}] " -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') } else { '' }
+    $p = @{ Object = ($ts + [string]$Object) }
+    if ($PSBoundParameters.ContainsKey('ForegroundColor')) { $p['ForegroundColor'] = $ForegroundColor }
+    if ($PSBoundParameters.ContainsKey('BackgroundColor')) { $p['BackgroundColor'] = $BackgroundColor }
+    if ($PSBoundParameters.ContainsKey('NoNewline')) { $p['NoNewline'] = $NoNewline }
+    Microsoft.PowerShell.Utility\Write-Host @p
 }
 
 function Get-ScriptHeaderVersionQuick {
@@ -3462,6 +3477,8 @@ function Invoke-IntuneHybridJoinRepairCycle {
     $globalLeaseByJobId = @{}
     $nextIndex = 0
     $completed = 0
+    $cycleStart = Get-Date
+    $lastProgressLog = Get-Date
 
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
         while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit) {
@@ -3521,6 +3538,11 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
         $finishedJobs = @($runningJobs | Where-Object { $_.State -ne "Running" })
         if ($finishedJobs.Count -eq 0) {
+            if (((Get-Date) - $lastProgressLog).TotalSeconds -ge 300) {
+                $waitingNames = @($runningJobs | ForEach-Object { $_.Name -replace '^EHJIR_C\d+_','' })
+                Write-Host ("Waiting for {0} job(s); Elapsed={1} min; Running: {2}" -f $runningJobs.Count,[math]::Round(((Get-Date) - $cycleStart).TotalMinutes,1),($waitingNames -join ', '))
+                $lastProgressLog = Get-Date
+            }
             Start-Sleep -Seconds $JobPollSeconds
             continue
         }
