@@ -11,7 +11,7 @@
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.0
+    1.0.1
 #>
 
 #Requires -Version 5.1
@@ -22,7 +22,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.0'
+$script:AppVersion = '1.0.1'
 $script:ScriptRoot = $PSScriptRoot
 
 Add-Type -AssemblyName PresentationFramework
@@ -89,15 +89,13 @@ function Get-MigrationStatus {
     $root = $Migration.Root
     $name = $cfg.Name
 
-    function rp { param([string]$p) Join-Path $root $p }
-
-    $srcFileDir  = rp $cfg.Output.SourceFileScans
-    $tgtFileDir  = rp $cfg.Output.TargetFileScans
-    $fileCmpDir  = rp $cfg.Output.FileComparisons
-    $histDir     = rp $cfg.Output.SourceHistoryComparisons
-    $srcPermDir  = rp $cfg.Output.SourcePermissionScans
-    $tgtPermDir  = rp $cfg.Output.TargetPermissionScans
-    $permCmpDir  = rp $cfg.Output.PermissionComparisons
+    $srcFileDir  = Join-Path $root $cfg.Output.SourceFileScans
+    $tgtFileDir  = Join-Path $root $cfg.Output.TargetFileScans
+    $fileCmpDir  = Join-Path $root $cfg.Output.FileComparisons
+    $histDir     = Join-Path $root $cfg.Output.SourceHistoryComparisons
+    $srcPermDir  = Join-Path $root $cfg.Output.SourcePermissionScans
+    $tgtPermDir  = Join-Path $root $cfg.Output.TargetPermissionScans
+    $permCmpDir  = Join-Path $root $cfg.Output.PermissionComparisons
 
     [pscustomobject]@{
         SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  "SP2019-FileInventory-$name-*.csv"
