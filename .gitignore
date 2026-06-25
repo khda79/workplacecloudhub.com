@@ -62,6 +62,8 @@ SmartFinOps/**
 !/SmartM365/Intune/Remediation/GUI/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/Communications/ExchangeUserNotifications/WorkplaceCloudHub.ico
 !/SmartM365/Communications/ExchangeUserNotifications/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/SharePointMigration/WorkplaceCloudHub.ico
+!/SmartM365/SharePointMigration/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/Communications/ExchangeUserNotifications/**/Recipients/
 !/SmartM365/Communications/ExchangeUserNotifications/**/Recipients/*.csv.template
 !/SmartM365/Modules/SmartM365.UI/WorkplaceCloudHub.ico
