@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.10
+    0.1.11
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -427,6 +427,9 @@ $reportColumns = @(
     'ControlledRebootDetail',
     'ControlledRebootUserCount',
     'ControlledRebootUsers',
+    'UserRebootNotificationSent',
+    'UserRebootNotificationLang',
+    'UserRebootNotificationMessage',
     'RemoteLogsPath',
     'PsExecLogPath'
 )
@@ -921,6 +924,9 @@ do {
                     ControlledRebootDetail = ''
                     ControlledRebootUserCount = ''
                     ControlledRebootUsers = ''
+                    UserRebootNotificationSent = ''
+                    UserRebootNotificationLang = ''
+                    UserRebootNotificationMessage = ''
                     RemoteLogsPath = ''
                     PsExecLogPath = ''
                     JobErrorMessage = ($jobErrors -join ' | ')

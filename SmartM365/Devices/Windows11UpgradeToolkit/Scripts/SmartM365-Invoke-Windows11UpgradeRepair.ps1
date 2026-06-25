@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.11
+    0.1.12
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -1697,7 +1697,10 @@ function Send-UserRebootNotification {
     $message = if ($messages.ContainsKey($lang)) { $messages[$lang] } else { $defaultMessages[$Context] }
     try {
         & "$env:SystemRoot\System32\msg.exe" * /time:300 $message 2>$null | Out-Null
-        Write-SmartLog ("User reboot notification sent via msg.exe (lang={0}; context={1})" -f $lang,$Context)
+        $script:UserRebootNotificationSent = 'True'
+        $script:UserRebootNotificationLang = $lang
+        $script:UserRebootNotificationMessage = $message
+        Write-SmartLog ("User reboot notification sent via msg.exe (lang={0}; context={1}): {2}" -f $lang,$Context,$message)
     }
     catch {
         Write-SmartLog ("Failed to send user reboot notification: {0}" -f $_.Exception.Message) 'WARN'
@@ -1847,6 +1850,9 @@ $script:ControlledRebootAction = ''
 $script:ControlledRebootDetail = ''
 $script:ControlledRebootUserCount = ''
 $script:ControlledRebootUsers = ''
+$script:UserRebootNotificationSent = ''
+$script:UserRebootNotificationLang = ''
+$script:UserRebootNotificationMessage = ''
 $computerSystem = $null
 
 try {
@@ -2164,6 +2170,9 @@ finally {
         ControlledRebootDetail = $script:ControlledRebootDetail
         ControlledRebootUserCount = $script:ControlledRebootUserCount
         ControlledRebootUsers = $script:ControlledRebootUsers
+        UserRebootNotificationSent = $script:UserRebootNotificationSent
+        UserRebootNotificationLang = $script:UserRebootNotificationLang
+        UserRebootNotificationMessage = $script:UserRebootNotificationMessage
         SetupExePath = $setupExe
         LogPath = $script:LogPath
         CsvPath = $script:CsvPath
