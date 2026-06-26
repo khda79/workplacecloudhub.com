@@ -5,6 +5,9 @@
 .DESCRIPTION
     Reads Migrations\<MigrationName>\migration.config.psd1 and runs the
     requested inventory, comparison, or permission action.
+
+.VERSION
+    1.0.1
 #>
 
 [CmdletBinding()]
@@ -35,10 +38,13 @@ param(
 
     [switch]$UseCertificate,
 
-    [switch]$Force
+    [switch]$Force,
+
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = 'Stop'
+$script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
 
 $ProjectRoot = Get-LauncherProjectRoot -LauncherScriptRoot $PSScriptRoot
@@ -291,6 +297,23 @@ function Get-ComparisonConfigValue {
     return $DefaultValue
 }
 
+function Confirm-StaleScanComparison {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    if ($script:LauncherNonInteractive -or -not [Environment]::UserInteractive) {
+        return $false
+    }
+
+    Write-Info ("WARNING: {0}" -f $Message) Yellow
+    Write-Info "The comparison can continue, but results may miss source changes made between the two scans." Yellow
+    $answer = Microsoft.PowerShell.Utility\Read-Host ("{0} Type YES to continue anyway, or press Enter to stop" -f (Get-ConsoleTimestamp))
+
+    return ($answer -match '^(?i:y|yes|o|oui)$')
+}
+
 function Assert-CsvScanAgeDifference {
     param(
         [Parameter(Mandatory = $true)]
@@ -319,6 +342,11 @@ function Assert-CsvScanAgeDifference {
     if ($ageDifference.TotalHours -gt $MaxAgeDifferenceHours) {
         if ($Force) {
             Write-Info ("WARNING: {0} Continuing because -Force was used." -f $message) Yellow
+            return
+        }
+
+        if (Confirm-StaleScanComparison -Message $message) {
+            Write-Info ("WARNING: {0} Continuing after interactive confirmation." -f $message) Yellow
             return
         }
 

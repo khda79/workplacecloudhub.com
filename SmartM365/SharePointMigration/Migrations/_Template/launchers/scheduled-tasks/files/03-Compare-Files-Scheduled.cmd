@@ -13,9 +13,9 @@ set "PS_SCRIPT=%CD%\Scripts\Launchers\Generic\SmartM365-SharePointMigration-Laun
 set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
 
 if exist "%PWSH%" (
-    "%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -MigrationName "%MIGRATION_NAME%" -Action CompareFiles %*
+    "%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -MigrationName "%MIGRATION_NAME%" -Action CompareFiles -NonInteractive %*
 ) else (
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -MigrationName "%MIGRATION_NAME%" -Action CompareFiles %*
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -MigrationName "%MIGRATION_NAME%" -Action CompareFiles -NonInteractive %*
 )
 
 set "EXIT_CODE=%ERRORLEVEL%"
