@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.11
+    0.1.12
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -82,7 +82,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.10'
+$script:LauncherVersion = '0.1.12'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -387,6 +387,50 @@ if (-not [string]::IsNullOrWhiteSpace($SetupSourceMapPath)) {
     [void]$remoteArgs.Add('-SetupSourceMapPath'); [void]$remoteArgs.Add($SetupSourceMapPath)
 }
 
+$script:LauncherOptionRows = @(
+    [pscustomobject]@{ Category = 'Mode'; Option = 'DryRun'; Value = [string][bool]$DryRun }
+    [pscustomobject]@{ Category = 'Mode'; Option = 'AuditOnly'; Value = [string][bool]$AuditOnly }
+    [pscustomobject]@{ Category = 'Mode'; Option = 'RunOnce'; Value = [string][bool]$RunOnce }
+    [pscustomobject]@{ Category = 'Mode'; Option = 'IgnoreRunGuard'; Value = [string][bool]$IgnoreRunGuard }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowPolicyRepair'; Value = [string][bool]$AllowPolicyRepair }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowWUReset'; Value = [string][bool]$AllowWUReset }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowForceUpgrade'; Value = [string][bool]$AllowForceUpgrade }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowSetupUpgrade'; Value = [string][bool]$AllowSetupUpgrade }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'DirectSetupUpgrade'; Value = [string][bool]$DirectSetupUpgrade }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowReboot'; Value = [string][bool]$AllowReboot }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowSetupCompletionRebootWhenNoUser'; Value = [string][bool]$AllowSetupCompletionRebootWhenNoUser }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'SkipVirtualMachines'; Value = [string][bool]$SkipVirtualMachines }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowDiskCleanup'; Value = [string][bool]$AllowDiskCleanup }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowAdvancedDiskCleanup'; Value = [string][bool]($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourcePath'; Value = [string]$SetupSourcePath }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourceMapPath'; Value = [string]$SetupSourceMapPath }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupExecutionMode'; Value = [string]$SetupExecutionMode }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupMediaId'; Value = [string]$SetupMediaId }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupLanguage'; Value = [string]$SetupLanguage }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupDynamicUpdate'; Value = [string]$SetupDynamicUpdate }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SkipSetupMediaPreCopy'; Value = [string][bool]$SkipSetupMediaPreCopy }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'TargetSetupCacheRoot'; Value = [string]$script:RemoteSetupCacheRoot }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourceCandidateLimit'; Value = [string]$SetupSourceCandidateLimit }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupMediaCopyIpGapMilliseconds'; Value = [string]$SetupMediaCopyIpGapMilliseconds }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupMediaCopyJitterSeconds'; Value = [string]$SetupMediaCopyJitterSeconds }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourceConcurrencyLimit'; Value = [string]$SetupSourceConcurrencyLimit }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourceConcurrencyLeaseMinutes'; Value = [string]$SetupSourceConcurrencyLeaseMinutes }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourceConcurrencyGateRoot'; Value = [string]$SetupSourceConcurrencyGateRoot }
+    [pscustomobject]@{ Category = 'Parallelism'; Option = 'ThrottleLimit'; Value = [string]$ThrottleLimit }
+    [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLimit'; Value = [string]$GlobalConcurrencyLimit }
+    [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLeaseTimeoutMinutes'; Value = [string]$GlobalConcurrencyLeaseTimeoutMinutes }
+    [pscustomobject]@{ Category = 'Parallelism'; Option = 'DelayBetweenComputersSeconds'; Value = [string]$DelayBetweenComputersSeconds }
+    [pscustomobject]@{ Category = 'Parallelism'; Option = 'DelayBetweenCyclesMinutes'; Value = [string]$DelayBetweenCyclesMinutes }
+    [pscustomobject]@{ Category = 'Parallelism'; Option = 'MaxCycles'; Value = [string]$MaxCycles }
+    [pscustomobject]@{ Category = 'Parallelism'; Option = 'PsExecTimeoutMinutes'; Value = [string]$PsExecTimeoutMinutes }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'ComputerListPath'; Value = [string]$ComputerListPath }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'LogRoot'; Value = [string]$LogRoot }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'ReportRoot'; Value = [string]$ReportRoot }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'CentralLogRoot'; Value = [string]$CentralLogRoot }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'NoCentralLogCollection'; Value = [string][bool]$NoCentralLogCollection }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'KeepCentralLogHistory'; Value = [string][bool]$KeepCentralLogHistory }
+)
+
 Write-Host "SmartM365 Windows 11 Upgrade Toolkit launcher v$script:LauncherVersion"
 Write-Host "Computer list : $ComputerListPath"
 Write-Host "PsExec        : $resolvedPsExec"
@@ -395,6 +439,10 @@ Write-Host "Worker script : $LocalWorkerPath"
 Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser"
 Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s)"
+Write-Host "LOT/run options:"
+foreach ($optionRow in @($script:LauncherOptionRows)) {
+    Write-Host ("  [{0}] {1}={2}" -f $optionRow.Category,$optionRow.Option,$optionRow.Value)
+}
 if ($script:IsSingleComputerLaunch) { Write-Host "Single PC     : worker limits ignored for one-computer launch." }
 Write-Host "Reports       : $ReportRoot"
 Write-Host ""
@@ -566,6 +614,10 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add(("<div class='meta'>Generated: {0} | Computers: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
     [void]$html.Add("</div>")
     [void]$html.Add($logoHtml)
+    [void]$html.Add("</div>")
+    $optionRows = @($script:LauncherOptionRows | ForEach-Object { $_ })
+    [void]$html.Add("<div class='card'><h2>LOT/run options</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $optionRows -Columns @("Category", "Option", "Value")))
     [void]$html.Add("</div>")
     [void]$html.Add("<div class='card'><h2>Status summary</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @("Status", "Count")))
