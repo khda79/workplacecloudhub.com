@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.12
+    0.1.13
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -65,7 +65,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.10'
+$script:ScriptVersion = '0.1.13'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1666,27 +1666,36 @@ function Get-InteractiveUserSessionSummary {
     }
 }
 
+function ConvertFrom-SmartUnicodeEscape {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) { return '' }
+    return [regex]::Replace($Text, '\\u([0-9A-Fa-f]{4})', {
+        param($match)
+        [string][char]([Convert]::ToInt32($match.Groups[1].Value, 16))
+    })
+}
+
 function Send-UserRebootNotification {
     param([ValidateSet('UpgradeReady', 'PendingReboot')][string]$Context = 'UpgradeReady')
     $lang = try { ((Get-WinUserLanguageList)[0].LanguageTag -split '-')[0].ToLower() } catch { (Get-UICulture).TwoLetterISOLanguageName.ToLower() }
     $messagesByContext = @{
         'PendingReboot' = @{
-            'fr' = "Un redémarrage est requis avant de poursuivre la mise à niveau Windows 11. Veuillez enregistrer votre travail et redémarrer dès que possible."
-            'es' = "Se requiere un reinicio antes de continuar con la actualización de Windows 11. Guarde su trabajo y reinicie cuanto antes."
-            'de' = "Ein Neustart ist erforderlich, bevor das Windows 11-Upgrade fortgesetzt werden kann. Bitte speichern Sie Ihre Arbeit und starten Sie den Computer neu."
-            'it' = "È necessario riavviare prima di continuare con l'aggiornamento a Windows 11. Salvare il lavoro e riavviare il computer."
-            'nl' = "Er is een herstart vereist voordat het Windows 11-upgrade kan worden voortgezet. Sla uw werk op en start opnieuw op."
-            'pt' = "É necessário reiniciar antes de continuar com a atualização para o Windows 11. Guarde o seu trabalho e reinicie o computador."
-            'pl' = "Wymagane jest ponowne uruchomienie przed kontynuowaniem aktualizacji systemu Windows 11. Zapisz pracę i uruchom ponownie komputer."
+            'fr' = 'Un red\u00E9marrage est requis avant de poursuivre la mise \u00E0 niveau Windows 11. Veuillez enregistrer votre travail et red\u00E9marrer d\u00E8s que possible.'
+            'es' = 'Se requiere un reinicio antes de continuar con la actualizaci\u00F3n de Windows 11. Guarde su trabajo y reinicie cuanto antes.'
+            'de' = 'Ein Neustart ist erforderlich, bevor das Windows 11-Upgrade fortgesetzt werden kann. Bitte speichern Sie Ihre Arbeit und starten Sie den Computer neu.'
+            'it' = '\u00C8 necessario riavviare prima di continuare con l''aggiornamento a Windows 11. Salvare il lavoro e riavviare il computer.'
+            'nl' = 'Er is een herstart vereist voordat het Windows 11-upgrade kan worden voortgezet. Sla uw werk op en start opnieuw op.'
+            'pt' = '\u00C9 necess\u00E1rio reiniciar antes de continuar com a atualiza\u00E7\u00E3o para o Windows 11. Guarde o seu trabalho e reinicie o computador.'
+            'pl' = 'Wymagane jest ponowne uruchomienie przed kontynuowaniem aktualizacji systemu Windows 11. Zapisz prac\u0119 i uruchom ponownie komputer.'
         }
         'UpgradeReady' = @{
-            'fr' = "La mise à niveau Windows 11 est prête. Veuillez enregistrer votre travail et redémarrer dès que possible."
-            'es' = "La actualización a Windows 11 está lista. Guarde su trabajo y reinicie cuanto antes."
-            'de' = "Das Windows 11-Upgrade ist bereit. Bitte speichern Sie Ihre Arbeit und starten Sie den Computer neu."
-            'it' = "L'aggiornamento a Windows 11 è pronto. Salvare il lavoro e riavviare il computer."
-            'nl' = "De Windows 11-upgrade is gereed. Sla uw werk op en start opnieuw op."
-            'pt' = "A atualização para o Windows 11 está pronta. Guarde o seu trabalho e reinicie o computador."
-            'pl' = "Aktualizacja Windows 11 jest gotowa. Zapisz pracę i uruchom ponownie komputer."
+            'fr' = 'La mise \u00E0 niveau Windows 11 est pr\u00EAte. Veuillez enregistrer votre travail et red\u00E9marrer d\u00E8s que possible.'
+            'es' = 'La actualizaci\u00F3n a Windows 11 est\u00E1 lista. Guarde su trabajo y reinicie cuanto antes.'
+            'de' = 'Das Windows 11-Upgrade ist bereit. Bitte speichern Sie Ihre Arbeit und starten Sie den Computer neu.'
+            'it' = 'L''aggiornamento a Windows 11 \u00E8 pronto. Salvare il lavoro e riavviare il computer.'
+            'nl' = 'De Windows 11-upgrade is gereed. Sla uw werk op en start opnieuw op.'
+            'pt' = 'A atualiza\u00E7\u00E3o para o Windows 11 est\u00E1 pronta. Guarde o seu trabalho e reinicie o computador.'
+            'pl' = 'Aktualizacja Windows 11 jest gotowa. Zapisz prac\u0119 i uruchom ponownie komputer.'
         }
     }
     $defaultMessages = @{
@@ -1694,7 +1703,8 @@ function Send-UserRebootNotification {
         'UpgradeReady'  = "Windows 11 upgrade is ready. Please save your work and restart as soon as possible."
     }
     $messages = $messagesByContext[$Context]
-    $message = if ($messages.ContainsKey($lang)) { $messages[$lang] } else { $defaultMessages[$Context] }
+    $messageTemplate = if ($messages.ContainsKey($lang)) { $messages[$lang] } else { $defaultMessages[$Context] }
+    $message = ConvertFrom-SmartUnicodeEscape -Text $messageTemplate
     try {
         & "$env:SystemRoot\System32\msg.exe" * /time:300 $message 2>$null | Out-Null
         $script:UserRebootNotificationSent = 'True'
