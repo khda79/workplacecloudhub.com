@@ -5,13 +5,13 @@
 .DESCRIPTION
     WPF dashboard for SharePoint migration workflows. Discovers local migration
     folders, shows the last run status for each step, and launches inventory,
-    comparison, and operation actions in a new PowerShell console window.
+    comparison, and operation actions in a new PowerShell console window that stays open after completion.
 
 .PARAMETER ValidateOnly
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.1
+    1.0.2
 #>
 
 #Requires -Version 5.1
@@ -22,7 +22,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.1'
+$script:AppVersion = '1.0.2'
 $script:ScriptRoot = $PSScriptRoot
 
 Add-Type -AssemblyName PresentationFramework
@@ -843,7 +843,7 @@ function Invoke-MigrationAction {
     $exe      = if (Test-Path -LiteralPath $pwsh7 -PathType Leaf) { $pwsh7 } else { 'powershell.exe' }
 
     $migName = $script:CurrentMigration.Config.Name
-    $args    = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcher`"",
+    $args    = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcher`"",
                  '-MigrationName', "`"$migName`"", '-Action', $Action)
 
     switch (Get-AuthMode) {
