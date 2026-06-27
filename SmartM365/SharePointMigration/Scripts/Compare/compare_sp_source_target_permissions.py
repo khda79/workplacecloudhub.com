@@ -142,6 +142,43 @@ def normalize_path(value):
     return text.lower() or "/"
 
 
+def load_path_mappings(path):
+    if not path:
+        return []
+
+    mappings = []
+    with Path(path).open("r", encoding="utf-8-sig", errors="replace") as handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            parts = [part for part in re.split(r"[\t;, ]+", line) if part]
+            if len(parts) < 2:
+                raise ValueError(f"Invalid path mapping at {path}:{line_number}. Expected: <source-url-or-path> <target-url-or-path>.")
+
+            mappings.append((normalize_path(parts[0]), normalize_path(parts[1])))
+
+    mappings.sort(key=lambda item: len(item[0]), reverse=True)
+    return mappings
+
+
+def replace_path_mapping(path, mappings):
+    if not path or not mappings:
+        return path
+
+    path_compare = path.lower()
+    for source, target in mappings:
+        source_compare = source.lower()
+        if path_compare == source_compare:
+            return target
+        if path_compare.startswith((source.rstrip("/") + "/").lower()):
+            suffix = path[len(source.rstrip("/")):]
+            return (target.rstrip("/") + suffix) or "/"
+
+    return path
+
+
 def replace_path_prefix(path, source_prefix, target_prefix):
     source_prefix = normalize_path(source_prefix)
     target_prefix = normalize_path(target_prefix)
@@ -176,18 +213,20 @@ def normalize_permissions(value):
     return "|".join(sorted(set(permissions)))
 
 
-def row_path(row, source_prefix=None, target_prefix=None):
+def row_path(row, source_prefix=None, target_prefix=None, path_mappings=None):
     raw = row.get("ObjectServerRelativeUrl") or row.get("ObjectUrl") or ""
     path = normalize_path(raw)
-    if source_prefix and target_prefix:
+    if path_mappings:
+        path = replace_path_mapping(path, path_mappings)
+    elif source_prefix and target_prefix:
         path = replace_path_prefix(path, source_prefix, target_prefix)
     return path
 
 
-def make_key(row, source_prefix=None, target_prefix=None):
+def make_key(row, source_prefix=None, target_prefix=None, path_mappings=None):
     return (
         (row.get("ObjectScope") or "").strip().lower(),
-        row_path(row, source_prefix, target_prefix),
+        row_path(row, source_prefix, target_prefix, path_mappings=path_mappings),
         normalize_principal(row.get("PrincipalLoginName") or row.get("PrincipalName")),
         normalize_permissions(row.get("PermissionLevels")),
     )
@@ -217,6 +256,7 @@ def main():
     parser.add_argument("--output-directory", required=True)
     parser.add_argument("--source-root-path", default="/FR")
     parser.add_argument("--target-root-path", default="/")
+    parser.add_argument("--path-mapping-file")
     parser.add_argument("--comparison-name", default="SP2019-vs-SPO-Permissions")
     args = parser.parse_args()
 
@@ -228,13 +268,17 @@ def main():
     source_rows = list(read_rows(source_csv))
     target_rows = list(read_rows(target_csv))
 
+    path_mappings = load_path_mappings(args.path_mapping_file)
+    if path_mappings:
+        print(f"Path mappings loaded: {len(path_mappings)}")
+
     source_by_key = {}
     target_by_key = {}
     source_duplicates = []
     target_duplicates = []
 
     for row in source_rows:
-        key = make_key(row, args.source_root_path, args.target_root_path)
+        key = make_key(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings)
         keyed = attach_key(row, key)
         if key in source_by_key:
             source_duplicates.append(keyed)
