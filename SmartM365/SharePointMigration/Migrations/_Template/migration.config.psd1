@@ -21,6 +21,7 @@
         PermissionMaxScanAgeDifferenceHours = 24
         SizeToleranceBytes = 10240
         ModifiedDateToleranceMinutes = 0
+        PathMappingsFile = ''
         SourceModifiedTimeZone = 'Local'
         TargetModifiedTimeZone = 'UTC'
         ShareGateReplacementCharacter = '_'
