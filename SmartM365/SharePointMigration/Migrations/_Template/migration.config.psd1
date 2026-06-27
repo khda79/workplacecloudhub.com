@@ -2,16 +2,16 @@
     Name = 'NewMigration'
 
     Source = @{
+        # Supported values: SP2016, SP2019, SPO
         Type = 'SP2019'
         WebApplicationUrl = 'https://source-sharepoint.example.com'
-        UrlsFile = 'migration.config.source.txt'
         PermissionRootPath = '/SOURCE'
     }
 
     Target = @{
+        # Supported values: SP2016, SP2019, SPO
         Type = 'SPO'
         SiteUrl = 'https://yourtenant.sharepoint.com/sites/NewMigration'
-        UrlsFile = 'migration.config.target.txt'
         PrefixToRemove = '/sites/NewMigration'
         PermissionRootPath = '/sites/NewMigration'
     }
@@ -21,9 +21,9 @@
         PermissionMaxScanAgeDifferenceHours = 24
         SizeToleranceBytes = 10240
         ModifiedDateToleranceMinutes = 0
-        PathMappingsFile = ''
-        SourceModifiedTimeZone = 'Local'
-        TargetModifiedTimeZone = 'UTC'
+        PathMappingsFile = 'migration.mapping.txt'
+        SourceModifiedTimeZone = 'Auto'
+        TargetModifiedTimeZone = 'Auto'
         ShareGateReplacementCharacter = '_'
         AllowDuplicateKeysForDeleteScript = $true
     }
