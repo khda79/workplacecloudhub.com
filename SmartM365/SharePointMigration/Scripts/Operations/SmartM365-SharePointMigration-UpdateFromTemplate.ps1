@@ -6,13 +6,14 @@
     Synchronizes safe template-owned content into migration folders:
     - copies/updates launcher CMD files from _Template\launchers
     - creates missing folder structure from _Template
-    - creates missing URL placeholder files only if absent
+    - creates the missing mapping placeholder file only if absent
     - audits migration.config.psd1 without overwriting it
 
     Migration configuration files are intentionally not overwritten because they
     contain environment-specific source and target values.
+.VERSION
+    1.0.0
 #>
-
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string[]]$MigrationName,
@@ -280,7 +281,7 @@ function Ensure-TemplateConfigFiles {
     )
 
     $created = 0
-    foreach ($fileName in @('migration.config.source.txt', 'migration.config.target.txt')) {
+    foreach ($fileName in @('migration.mapping.txt')) {
         $sourcePath = Join-Path -Path $TemplateRoot -ChildPath $fileName
         $destinationPath = Join-Path -Path $MigrationRoot -ChildPath $fileName
         $result = Copy-TemplateFile -SourcePath $sourcePath -DestinationPath $destinationPath -OnlyIfMissing
@@ -418,7 +419,7 @@ foreach ($migrationDirectory in $migrationDirectories) {
 
     Write-Info ("  Directories created: {0}" -f $directoryCount)
     Write-Info ("  Launchers created/updated/removed: {0}/{1}/{2}" -f $launcherResult.Created, $launcherResult.Updated, $launcherResult.Removed)
-    Write-Info ("  Missing URL files created: {0}" -f $configFileCount)
+    Write-Info ("  Missing mapping files created: {0}" -f $configFileCount)
     Write-Info ("  Config status: {0}; missing keys: {1}; report: {2}" -f $configResult.Status, $configResult.MissingKeys.Count, $configResult.ReportPath)
 }
 
