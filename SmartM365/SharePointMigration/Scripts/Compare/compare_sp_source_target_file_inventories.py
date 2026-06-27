@@ -284,7 +284,53 @@ def normalize_sharegate_path_characters(path):
     return "/".join(segments)
 
 
-def normalize_path(value, prefixes, literal_percent_sequences=False):
+def normalize_mapping_path(value):
+    text = normalize_sharegate_path_characters(decode_sharegate_path(strip_query_from_path(value)))
+    if not text.startswith("/"):
+        text = "/" + text
+    return text.rstrip("/") or "/"
+
+
+def load_path_mappings(path):
+    if not path:
+        return []
+
+    mappings = []
+    with Path(path).open("r", encoding="utf-8-sig", errors="replace") as handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            parts = [part for part in re.split(r"[\t;, ]+", line) if part]
+            if len(parts) < 2:
+                raise ValueError(f"Invalid path mapping at {path}:{line_number}. Expected: <source-url-or-path> <target-url-or-path>.")
+
+            source = normalize_mapping_path(parts[0])
+            target = normalize_mapping_path(parts[1])
+            mappings.append((source, target))
+
+    mappings.sort(key=lambda item: len(item[0]), reverse=True)
+    return mappings
+
+
+def apply_path_mappings(path, mappings):
+    if not path or not mappings:
+        return path
+
+    path_compare = path.lower()
+    for source, target in mappings:
+        source_compare = source.lower()
+        if path_compare == source_compare:
+            return target
+        if path_compare.startswith((source.rstrip("/") + "/").lower()):
+            suffix = path[len(source.rstrip("/")):]
+            return (target.rstrip("/") + suffix) or "/"
+
+    return path
+
+
+def normalize_path(value, prefixes, literal_percent_sequences=False, mappings=None):
     if not value:
         return None
 
@@ -296,6 +342,7 @@ def normalize_path(value, prefixes, literal_percent_sequences=False):
         text = "/" + text
 
     text = text.rstrip("/") or "/"
+    text = apply_path_mappings(text, mappings)
 
     for prefix in prefixes:
         if not prefix:
@@ -559,29 +606,29 @@ def inventory_exclusion_reason(row):
     return "", ""
 
 
-def inventory_key(row, prefixes):
+def inventory_key(row, prefixes, mappings=None):
     path = row.get("ServerRelativeUrl") or row.get("FileUrl")
     literal_percent_sequences = inventory_file_name_has_literal_percent_sequence(row)
     if literal_percent_sequences:
         path = replace_last_path_segment_with_file_name(path, row.get("FileName"))
 
-    key = normalize_path(path, prefixes, literal_percent_sequences=literal_percent_sequences)
-    return normalize_default_document_library_key(row, key, prefixes)
+    key = normalize_path(path, prefixes, literal_percent_sequences=literal_percent_sequences, mappings=mappings)
+    return normalize_default_document_library_key(row, key, prefixes, mappings=mappings)
 
 
-def inventory_web_key(row, prefixes):
-    return normalize_path(row.get("WebUrl"), prefixes)
+def inventory_web_key(row, prefixes, mappings=None):
+    return normalize_path(row.get("WebUrl"), prefixes, mappings=mappings)
 
 
 def normalize_library_title(value):
     return " ".join(str(value or "").strip().lower().split())
 
 
-def normalize_default_document_library_key(row, key, prefixes):
+def normalize_default_document_library_key(row, key, prefixes, mappings=None):
     if not key:
         return key
 
-    web_key = inventory_web_key(row, prefixes) or ""
+    web_key = inventory_web_key(row, prefixes, mappings=mappings) or ""
     web_prefix = web_key.rstrip("/")
     relative_path = ""
     base_path = ""
@@ -610,8 +657,8 @@ def normalize_default_document_library_key(row, key, prefixes):
     return "/" + normalized_relative_path
 
 
-def library_key(row, prefixes):
-    web_key = inventory_web_key(row, prefixes) or ""
+def library_key(row, prefixes, mappings=None):
+    web_key = inventory_web_key(row, prefixes, mappings=mappings) or ""
     file_key = inventory_key(row, prefixes) or ""
     library_path = ""
 
@@ -801,7 +848,7 @@ def update_extra_folder_candidates(candidates, source_folder_keys, row, file_key
         candidate["ExtraFileMB"] = bytes_to_mb(candidate["ExtraFileBytes"])
 
 
-def load_web_url_filter(path, prefixes):
+def load_web_url_filter(path, prefixes, mappings=None):
     if not path:
         return None
 
@@ -815,7 +862,7 @@ def load_web_url_filter(path, prefixes):
             value = line.strip()
             if not value or value.startswith("#"):
                 continue
-            normalized = normalize_path(value, prefixes)
+            normalized = normalize_path(value, prefixes, mappings=mappings)
             if normalized:
                 allowed.add(normalized)
     return allowed
@@ -855,6 +902,7 @@ def main():
     parser.add_argument("--output-directory", required=True)
     parser.add_argument("--source-prefix", action="append", default=[])
     parser.add_argument("--target-prefix", action="append", default=[])
+    parser.add_argument("--path-mapping-file")
     parser.add_argument("--source-web-urls-file")
     parser.add_argument("--target-web-urls-file")
     parser.add_argument("--comparison-name", default="SharePointInventoryComparison")
@@ -905,7 +953,11 @@ def main():
     source_folder_keys = set()
     extra_folder_candidates = {}
     library_stats = {}
-    source_allowed_webs = load_web_url_filter(args.source_web_urls_file, args.source_prefix)
+    path_mappings = load_path_mappings(args.path_mapping_file)
+    if path_mappings:
+        print(f"Path mappings loaded: {len(path_mappings)}")
+
+    source_allowed_webs = load_web_url_filter(args.source_web_urls_file, args.source_prefix, mappings=path_mappings)
     target_allowed_webs = load_web_url_filter(args.target_web_urls_file, args.target_prefix)
     source_total_rows = 0
     source_filtered_rows = 0
@@ -934,18 +986,18 @@ def main():
         with source_csv.open("r", encoding="utf-8-sig", newline="") as handle:
             for row in csv.DictReader(handle, dialect=detect_csv_dialect(handle)):
                 source_total_rows += 1
-                if source_allowed_webs is not None and inventory_web_key(row, args.source_prefix) not in source_allowed_webs:
+                if source_allowed_webs is not None and inventory_web_key(row, args.source_prefix, mappings=path_mappings) not in source_allowed_webs:
                     source_filtered_rows += 1
                     continue
                 if is_excluded_inventory_file(row):
                     source_excluded_rows += 1
                     continue
 
-                key = inventory_key(row, args.source_prefix)
+                key = inventory_key(row, args.source_prefix, mappings=path_mappings)
                 if not key:
                     continue
 
-                lib_key, web_path, library_path = library_key(row, args.source_prefix)
+                lib_key, web_path, library_path = library_key(row, args.source_prefix, mappings=path_mappings)
                 row["LibraryKey"] = lib_key
                 row["WebPath"] = web_path
                 row["LibraryPath"] = library_path
