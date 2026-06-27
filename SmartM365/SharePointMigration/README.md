@@ -38,10 +38,10 @@ Then edit the copied files:
 
 ```text
 Migrations\MyMigration\migration.config.psd1
-Migrations\MyMigration\migration.config.source.txt
-Migrations\MyMigration\migration.config.target.txt
+Migrations\MyMigration\migration.mapping.txt
 ```
 
+`Source.Type` and `Target.Type` define which inventory engine is used for each side. Supported values are `SP2016`, `SP2019`, and `SPO`; for example, `SPO` to `SPO` migrations are supported by setting both sides to `SPO`. When `Source.UrlsFile` and `Target.UrlsFile` are omitted, the launcher derives both scan URL files from `migration.mapping.txt`.
 Runtime outputs stay inside the local migration folder:
 
 ```text

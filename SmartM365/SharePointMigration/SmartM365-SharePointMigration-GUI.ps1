@@ -11,7 +11,7 @@
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.2
+    1.0.3
 #>
 
 #Requires -Version 5.1
@@ -22,7 +22,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.2'
+$script:AppVersion = '1.0.3'
 $script:ScriptRoot = $PSScriptRoot
 
 Add-Type -AssemblyName PresentationFramework
@@ -82,6 +82,43 @@ function Get-LatestSubfolder {
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
 }
+function Get-MigrationEndpointType {
+    param($Config, [string]$Side)
+    $section = if ($Side -eq 'Source') { $Config.Source } else { $Config.Target }
+    $defaultType = if ($Side -eq 'Source') { 'SP2019' } else { 'SPO' }
+    if ($section -and $section.ContainsKey('Type') -and -not [string]::IsNullOrWhiteSpace([string]$section.Type)) {
+        $rawType = [string]$section.Type
+    }
+    else {
+        $rawType = $defaultType
+    }
+
+    switch -Regex ($rawType.Trim().ToUpperInvariant()) {
+        '^(SP2016|SHAREPOINT2016|2016)$' { return 'SP2016' }
+        '^(SP2019|SHAREPOINT2019|2019)$' { return 'SP2019' }
+        '^(SPO|SHAREPOINTONLINE|ONLINE)$' { return 'SPO' }
+    }
+
+    return $rawType
+}
+
+function Get-MigrationEndpointUrlText {
+    param($Config, [string]$Side)
+    $section = if ($Side -eq 'Source') { $Config.Source } else { $Config.Target }
+    $endpointType = Get-MigrationEndpointType $Config $Side
+    $keys = if ($endpointType -eq 'SPO') { @('SiteUrl', 'UrlsFile', 'WebApplicationUrl') } else { @('WebApplicationUrl', 'SiteUrl', 'UrlsFile') }
+    foreach ($key in $keys) {
+        if ($section -and $section.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace([string]$section[$key])) {
+            return [string]$section[$key]
+        }
+    }
+
+    if ($Config.ContainsKey('Comparison') -and $Config.Comparison.ContainsKey('PathMappingsFile') -and -not [string]::IsNullOrWhiteSpace([string]$Config.Comparison.PathMappingsFile)) {
+        return [string]$Config.Comparison.PathMappingsFile
+    }
+
+    return ''
+}
 
 function Get-MigrationStatus {
     param($Migration)
@@ -98,12 +135,12 @@ function Get-MigrationStatus {
     $permCmpDir  = Join-Path $root $cfg.Output.PermissionComparisons
 
     [pscustomobject]@{
-        SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  "SP2019-FileInventory-$name-*.csv"
-        TargetFileCsv         = Get-LatestCsvFile    $tgtFileDir  "SPO-FileInventory-$name-*.csv"
+        SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
+        TargetFileCsv         = Get-LatestCsvFile    $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         FileComparisonFolder  = Get-LatestSubfolder  $fileCmpDir  "$name-*"
-        HistoryFolder         = Get-LatestSubfolder  $histDir     "SP2019-Changes-*"
-        SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  "SP2019-PermissionInventory-$name-*.csv"
-        TargetPermCsv         = Get-LatestCsvFile    $tgtPermDir  "SPO-PermissionInventory-$name-*.csv"
+        HistoryFolder         = Get-LatestSubfolder  $histDir     ("{0}-Changes-*" -f (Get-MigrationEndpointType $cfg 'Source'))
+        SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
+        TargetPermCsv         = Get-LatestCsvFile    $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         PermComparisonFolder  = Get-LatestSubfolder  $permCmpDir  "$name-*"
     }
 }
@@ -881,10 +918,10 @@ function Update-UI {
     $cfg = $script:CurrentMigration.Config
     $st  = $script:CurrentStatus
 
-    $lblSourceType.Text = $cfg.Source.Type
-    $lblSourceUrl.Text  = $cfg.Source.WebApplicationUrl
-    $lblTargetType.Text = $cfg.Target.Type
-    $lblTargetUrl.Text  = $cfg.Target.SiteUrl
+    $lblSourceType.Text = Get-MigrationEndpointType $cfg 'Source'
+    $lblSourceUrl.Text  = Get-MigrationEndpointUrlText $cfg 'Source'
+    $lblTargetType.Text = Get-MigrationEndpointType $cfg 'Target'
+    $lblTargetUrl.Text  = Get-MigrationEndpointUrlText $cfg 'Target'
 
     # --- Files ---
     $r = Format-ItemAge $st.SourceFileCsv

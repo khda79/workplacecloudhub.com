@@ -1,4 +1,0 @@
-# One SP2019 web URL per line.
-# Example:
-# https://source-sharepoint.example.com/sites/NewMigration
-# https://source-sharepoint.example.com/sites/NewMigration/Subsite
