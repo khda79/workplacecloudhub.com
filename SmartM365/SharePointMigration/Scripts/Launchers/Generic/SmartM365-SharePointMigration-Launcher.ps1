@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.2
+    1.0.4
 #>
 
 [CmdletBinding()]
@@ -311,204 +311,312 @@ function Resolve-ComparisonPathMappingsFile {
     return $resolvedPath
 }
 
-function Confirm-StaleScanComparison {
+function Get-PathMappingRows {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Message
+        [string]$Path
     )
 
-    if ($script:LauncherNonInteractive -or -not [Environment]::UserInteractive) {
-        return $false
+    $rows = @()
+    $lineNumber = 0
+    foreach ($rawLine in [System.IO.File]::ReadLines($Path)) {
+        $lineNumber++
+        $line = $rawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {
+            continue
+        }
+
+        $parts = @($line -split '[\t;, ]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($parts.Count -lt 2) {
+            throw "Invalid path mapping at $Path`:$lineNumber. Expected: <source-url-or-path> <target-url-or-path>."
+        }
+
+        $rows += [pscustomobject]@{
+            Source = $parts[0]
+            Target = $parts[1]
+        }
     }
 
-    Write-Info ("WARNING: {0}" -f $Message) Yellow
-    Write-Info "The comparison can continue, but results may miss source changes made between the two scans." Yellow
-    $answer = Microsoft.PowerShell.Utility\Read-Host ("{0} Type YES to continue anyway, or press Enter to stop" -f (Get-ConsoleTimestamp))
+    if ($rows.Count -eq 0) {
+        throw "Path mapping file does not contain any active mapping rows: $Path"
+    }
 
-    return ($answer -match '^(?i:y|yes|o|oui)$')
+    $rows
 }
 
-function Assert-CsvScanAgeDifference {
+function New-UrlsFileFromPathMappings {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$SourceCsvPath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$TargetCsvPath,
-
-        [Parameter(Mandatory = $true)]
-        [double]$MaxAgeDifferenceHours,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Label
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
     )
 
-    if ($MaxAgeDifferenceHours -lt 0) {
-        Write-Info ("Scan age check disabled for {0}." -f $Label) DarkYellow
+    $mappingPath = Resolve-ComparisonPathMappingsFile
+    if (-not $mappingPath) {
+        throw "$Side URLs file is not configured. Set $Side.UrlsFile or Comparison.PathMappingsFile."
+    }
+
+    $mappingRows = @(Get-PathMappingRows -Path $mappingPath)
+    $propertyName = if ($Side -eq 'Source') { 'Source' } else { 'Target' }
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $urls = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($row in $mappingRows) {
+        $url = [string]$row.$propertyName
+        if (-not [string]::IsNullOrWhiteSpace($url) -and $seen.Add($url)) {
+            $urls.Add($url)
+        }
+    }
+
+    if ($urls.Count -eq 0) {
+        throw "No $Side URLs found in path mapping file: $mappingPath"
+    }
+
+    $generatedRoot = 'operations\generated'
+    if ($Config.ContainsKey('Output') -and $Config.Output.ContainsKey('GeneratedOperations') -and -not [string]::IsNullOrWhiteSpace([string]$Config.Output.GeneratedOperations)) {
+        $generatedRoot = [string]$Config.Output.GeneratedOperations
+    }
+
+    $generatedDirectory = Resolve-MigrationPath $generatedRoot
+    New-Item -ItemType Directory -Path $generatedDirectory -Force | Out-Null
+    $sideName = $Side.ToLowerInvariant()
+    $outputPath = Join-Path -Path $generatedDirectory -ChildPath ("{0}-{1}-urls-from-mapping.txt" -f $Config.Name, $sideName)
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllLines($outputPath, $urls.ToArray(), $utf8NoBom)
+
+    Write-Info ("Derived {0} URLs file from mapping: {1} ({2} URLs)" -f $Side.ToLowerInvariant(), $outputPath, $urls.Count) DarkCyan
+    return $outputPath
+}
+
+function Resolve-MigrationUrlsFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
+    $configSection = if ($Side -eq 'Source') { $Config.Source } else { $Config.Target }
+    $configuredPath = ''
+    if ($configSection.ContainsKey('UrlsFile')) {
+        $configuredPath = [string]$configSection.UrlsFile
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($configuredPath)) {
+        $resolvedPath = Resolve-MigrationPath $configuredPath
+        if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+            throw "$Side URLs file not found: $resolvedPath"
+        }
+
+        return $resolvedPath
+    }
+
+    New-UrlsFileFromPathMappings -Side $Side
+}
+function Get-MigrationEndpointConfig {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
+    if ($Side -eq 'Source') {
+        return $Config.Source
+    }
+
+    return $Config.Target
+}
+
+function Get-MigrationEndpointType {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
+    $endpointConfig = Get-MigrationEndpointConfig -Side $Side
+    $defaultType = if ($Side -eq 'Source') { 'SP2019' } else { 'SPO' }
+    $rawType = $defaultType
+    if ($endpointConfig.ContainsKey('Type') -and -not [string]::IsNullOrWhiteSpace([string]$endpointConfig.Type)) {
+        $rawType = [string]$endpointConfig.Type
+    }
+
+    $normalizedType = $rawType.Trim().ToUpperInvariant()
+    switch -Regex ($normalizedType) {
+        '^(SP2016|SHAREPOINT2016|2016)$' { return 'SP2016' }
+        '^(SP2019|SHAREPOINT2019|2019)$' { return 'SP2019' }
+        '^(SPO|SHAREPOINTONLINE|ONLINE)$' { return 'SPO' }
+    }
+
+    throw "$Side.Type '$rawType' is not supported. Allowed values: SP2016, SP2019, SPO."
+}
+
+function Test-MigrationEndpointIsSPO {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
+    (Get-MigrationEndpointType -Side $Side) -eq 'SPO'
+}
+
+function Get-MigrationEndpointPermissionLibraryOnly {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
+    if ($Side -eq 'Source') {
+        return [bool]$Config.Permissions.SourceDocumentLibrariesOnly
+    }
+
+    return [bool]$Config.Permissions.TargetDocumentLibrariesOnly
+}
+
+function Add-SPOInventoryAuthenticationParameters {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Parameters
+    )
+
+    $authConfig = Get-SPOAuthConfig
+    foreach ($key in @('ClientId', 'Tenant', 'TenantId', 'Thumbprint')) {
+        if ($authConfig.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace([string]$authConfig[$key])) {
+            $Parameters[$key] = $authConfig[$key]
+        }
+    }
+
+    if ($UseCertificate) {
+        if (-not $Parameters.ContainsKey('ClientId') -or -not $Parameters.ContainsKey('Thumbprint')) {
+            throw "Certificate authentication requires ClientId and Thumbprint in Config\SPOAuth.local.psd1."
+        }
+    }
+    elseif ($DeviceLogin) {
+        $Parameters.DeviceLogin = $true
+    }
+    else {
+        $Parameters.Interactive = $true
+    }
+
+    if ($ForceAuthentication) {
+        $Parameters.ForceAuthentication = $true
+    }
+}
+
+function Add-OnPremInventoryScopeParameters {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Parameters,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
+    $endpointConfig = Get-MigrationEndpointConfig -Side $Side
+    if ($endpointConfig.ContainsKey('WebApplicationUrl') -and -not [string]::IsNullOrWhiteSpace([string]$endpointConfig.WebApplicationUrl)) {
+        $Parameters.WebApplicationUrl = [string]$endpointConfig.WebApplicationUrl
+        $Parameters.UseSiteUrlFilter = $true
+        $Parameters.SiteUrlsFile = Resolve-MigrationUrlsFile -Side $Side
         return
     }
 
-    $sourceItem = Get-Item -LiteralPath $SourceCsvPath
-    $targetItem = Get-Item -LiteralPath $TargetCsvPath
-    $ageDifference = ($targetItem.LastWriteTime - $sourceItem.LastWriteTime).Duration()
-    $message = "{0} scan age difference is {1:n2}h. Maximum allowed: {2:n2}h. Source: {3}; Target: {4}" -f $Label, $ageDifference.TotalHours, $MaxAgeDifferenceHours, $sourceItem.LastWriteTime, $targetItem.LastWriteTime
-
-    if ($ageDifference.TotalHours -gt $MaxAgeDifferenceHours) {
-        if ($Force) {
-            Write-Info ("WARNING: {0} Continuing because -Force was used." -f $message) Yellow
-            return
-        }
-
-        if (Confirm-StaleScanComparison -Message $message) {
-            Write-Info ("WARNING: {0} Continuing after interactive confirmation." -f $message) Yellow
-            return
-        }
-
-        throw ("{0} Rerun source/target scans closer together, or use -Force only after reviewing the risk." -f $message)
+    if ($endpointConfig.ContainsKey('SiteUrl') -and -not [string]::IsNullOrWhiteSpace([string]$endpointConfig.SiteUrl)) {
+        $Parameters.SiteUrl = [string]$endpointConfig.SiteUrl
+        return
     }
 
-    Write-Info $message DarkCyan
+    throw "$Side.Type $(Get-MigrationEndpointType -Side $Side) requires $Side.WebApplicationUrl for mapped multi-site scans, or $Side.SiteUrl for a single site scan."
 }
 
-function Invoke-PythonScript {
+function New-MigrationInventoryOutputPath {
     param(
-        [string]$Script,
-        [string[]]$Arguments
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('File', 'Permission')]
+        [string]$InventoryKind,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputDirectory,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Timestamp
     )
 
-    $pythonCommand = Get-PythonCommand
-    Write-Info ("Using Python: {0} ({1})" -f $pythonCommand.Executable, $pythonCommand.Source) Cyan
-    & $pythonCommand.Executable @($pythonCommand.Arguments) $Script @Arguments 2>&1 | ForEach-Object {
-        Write-Info ([string]$_)
-    }
-
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) {
-        throw "Python script failed with exit code $exitCode`: $Script"
-    }
+    $endpointType = Get-MigrationEndpointType -Side $Side
+    Join-Path -Path $OutputDirectory -ChildPath ("{0}-{1}Inventory-{2}-{3}.csv" -f $endpointType, $InventoryKind, $Config.Name, $Timestamp)
 }
 
-function Invoke-SourceFileScan {
+function Invoke-FileInventoryScan {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Inventory\SmartM365-SharePointSource-FileInventory.ps1'
-    $outputDirectory = Resolve-MigrationPath $Config.Output.SourceFileScans
-    $urlsFile = Resolve-MigrationPath $Config.Source.UrlsFile
+    $endpointType = Get-MigrationEndpointType -Side $Side
+    $isSPO = Test-MigrationEndpointIsSPO -Side $Side
+    $scriptName = if ($isSPO) { 'SmartM365-SharePointTarget-FileInventory.ps1' } else { 'SmartM365-SharePointSource-FileInventory.ps1' }
+    $scriptPath = Join-Path -Path $ProjectRoot -ChildPath ("Scripts\Inventory\{0}" -f $scriptName)
+    $outputDirectory = if ($Side -eq 'Source') { Resolve-MigrationPath $Config.Output.SourceFileScans } else { Resolve-MigrationPath $Config.Output.TargetFileScans }
+    $actionName = if ($Side -eq 'Source') { 'ScanSourceFiles' } else { 'ScanTargetFiles' }
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
     $parameters = @{
-        WebApplicationUrl = $Config.Source.WebApplicationUrl
-        UseSiteUrlFilter = $true
-        SiteUrlsFile = $urlsFile
-        OutputPath = (Join-Path -Path $outputDirectory -ChildPath ("SP2019-FileInventory-{0}-{1}.csv" -f $Config.Name, $timestamp))
-        LogPath = (New-MigrationLogPath -Action 'ScanSourceFiles' -Timestamp $timestamp)
+        OutputPath = (New-MigrationInventoryOutputPath -Side $Side -InventoryKind 'File' -OutputDirectory $outputDirectory -Timestamp $timestamp)
+        LogPath = (New-MigrationLogPath -Action $actionName -Timestamp $timestamp)
     }
 
-    Write-Info ("Starting source file scan for migration '{0}'" -f $Config.Name) Cyan
-    & $scriptPath @parameters
-}
-
-function Invoke-TargetFileScan {
-    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Inventory\SmartM365-SharePointTarget-FileInventory.ps1'
-    $outputDirectory = Resolve-MigrationPath $Config.Output.TargetFileScans
-    $urlsFile = Resolve-MigrationPath $Config.Target.UrlsFile
-    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-
-    $parameters = @{
-        WebUrlsFile = $urlsFile
-        OutputPath = (Join-Path -Path $outputDirectory -ChildPath ("SPO-FileInventory-{0}-{1}.csv" -f $Config.Name, $timestamp))
-        LogPath = (New-MigrationLogPath -Action 'ScanTargetFiles' -Timestamp $timestamp)
-    }
-
-    $authConfig = Get-SPOAuthConfig
-    foreach ($key in @('ClientId', 'Tenant', 'TenantId', 'Thumbprint')) {
-        if ($authConfig.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace([string]$authConfig[$key])) {
-            $parameters[$key] = $authConfig[$key]
-        }
-    }
-
-    if ($UseCertificate) {
-        if (-not $parameters.ContainsKey('ClientId') -or -not $parameters.ContainsKey('Thumbprint')) {
-            throw "Certificate authentication requires ClientId and Thumbprint in Config\SPOAuth.local.psd1."
-        }
-    }
-    elseif ($DeviceLogin) {
-        $parameters.DeviceLogin = $true
+    if ($isSPO) {
+        $parameters.WebUrlsFile = Resolve-MigrationUrlsFile -Side $Side
+        Add-SPOInventoryAuthenticationParameters -Parameters $parameters
     }
     else {
-        $parameters.Interactive = $true
+        Add-OnPremInventoryScopeParameters -Parameters $parameters -Side $Side
     }
 
-    if ($ForceAuthentication) {
-        $parameters.ForceAuthentication = $true
-    }
-
-    Write-Info ("Starting target file scan for migration '{0}'" -f $Config.Name) Cyan
+    Write-Info ("Starting {0} file scan for migration '{1}' ({2})" -f $Side.ToLowerInvariant(), $Config.Name, $endpointType) Cyan
     & $scriptPath @parameters
 }
 
-function Invoke-SourcePermissionScan {
+function Invoke-PermissionInventoryScan {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Inventory\SmartM365-SharePointSource-PermissionInventory.ps1'
-    $outputDirectory = Resolve-MigrationPath $Config.Output.SourcePermissionScans
-    $urlsFile = Resolve-MigrationPath $Config.Source.UrlsFile
+    $endpointType = Get-MigrationEndpointType -Side $Side
+    $isSPO = Test-MigrationEndpointIsSPO -Side $Side
+    $scriptName = if ($isSPO) { 'SmartM365-SharePointTarget-PermissionInventory.ps1' } else { 'SmartM365-SharePointSource-PermissionInventory.ps1' }
+    $scriptPath = Join-Path -Path $ProjectRoot -ChildPath ("Scripts\Inventory\{0}" -f $scriptName)
+    $outputDirectory = if ($Side -eq 'Source') { Resolve-MigrationPath $Config.Output.SourcePermissionScans } else { Resolve-MigrationPath $Config.Output.TargetPermissionScans }
+    $actionName = if ($Side -eq 'Source') { 'ScanSourcePermissions' } else { 'ScanTargetPermissions' }
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
     $parameters = @{
-        WebApplicationUrl = $Config.Source.WebApplicationUrl
-        UseSiteUrlFilter = $true
-        SiteUrlsFile = $urlsFile
-        OutputPath = (Join-Path -Path $outputDirectory -ChildPath ("SP2019-PermissionInventory-{0}-{1}.csv" -f $Config.Name, $timestamp))
-        LogPath = (New-MigrationLogPath -Action 'ScanSourcePermissions' -Timestamp $timestamp)
-        DocumentLibrariesOnly = [bool]$Config.Permissions.SourceDocumentLibrariesOnly
+        OutputPath = (New-MigrationInventoryOutputPath -Side $Side -InventoryKind 'Permission' -OutputDirectory $outputDirectory -Timestamp $timestamp)
+        LogPath = (New-MigrationLogPath -Action $actionName -Timestamp $timestamp)
+        DocumentLibrariesOnly = (Get-MigrationEndpointPermissionLibraryOnly -Side $Side)
         IncludeItemPermissions = [bool]$Config.Permissions.IncludeItemPermissions
         ItemProgressInterval = [int]$Config.Permissions.ItemProgressInterval
     }
 
-    Write-Info ("Starting source permission scan for migration '{0}'" -f $Config.Name) Cyan
-    & $scriptPath @parameters
-}
-
-function Invoke-TargetPermissionScan {
-    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Inventory\SmartM365-SharePointTarget-PermissionInventory.ps1'
-    $outputDirectory = Resolve-MigrationPath $Config.Output.TargetPermissionScans
-    $urlsFile = Resolve-MigrationPath $Config.Target.UrlsFile
-    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-
-    $parameters = @{
-        WebUrlsFile = $urlsFile
-        OutputPath = (Join-Path -Path $outputDirectory -ChildPath ("SPO-PermissionInventory-{0}-{1}.csv" -f $Config.Name, $timestamp))
-        LogPath = (New-MigrationLogPath -Action 'ScanTargetPermissions' -Timestamp $timestamp)
-        DocumentLibrariesOnly = [bool]$Config.Permissions.TargetDocumentLibrariesOnly
-        IncludeItemPermissions = [bool]$Config.Permissions.IncludeItemPermissions
-        ItemProgressInterval = [int]$Config.Permissions.ItemProgressInterval
-    }
-
-    $authConfig = Get-SPOAuthConfig
-    foreach ($key in @('ClientId', 'Tenant', 'TenantId', 'Thumbprint')) {
-        if ($authConfig.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace([string]$authConfig[$key])) {
-            $parameters[$key] = $authConfig[$key]
-        }
-    }
-
-    if ($UseCertificate) {
-        if (-not $parameters.ContainsKey('ClientId') -or -not $parameters.ContainsKey('Thumbprint')) {
-            throw "Certificate authentication requires ClientId and Thumbprint in Config\SPOAuth.local.psd1."
-        }
-    }
-    elseif ($DeviceLogin) {
-        $parameters.DeviceLogin = $true
+    if ($isSPO) {
+        $parameters.WebUrlsFile = Resolve-MigrationUrlsFile -Side $Side
+        Add-SPOInventoryAuthenticationParameters -Parameters $parameters
     }
     else {
-        $parameters.Interactive = $true
+        Add-OnPremInventoryScopeParameters -Parameters $parameters -Side $Side
     }
 
-    if ($ForceAuthentication) {
-        $parameters.ForceAuthentication = $true
-    }
-
-    Write-Info ("Starting target permission scan for migration '{0}'" -f $Config.Name) Cyan
+    Write-Info ("Starting {0} permission scan for migration '{1}' ({2})" -f $Side.ToLowerInvariant(), $Config.Name, $endpointType) Cyan
     & $scriptPath @parameters
 }
 
@@ -524,16 +632,16 @@ function Invoke-FileComparison {
     try {
         Write-Info ("Run log: {0}" -f $logPath) Cyan
         if ([string]::IsNullOrWhiteSpace($SourceCsv)) {
-            $SourceCsv = Get-LatestCsv -Directory $sourceDirectory -Filter ("SP2019-FileInventory-{0}-*.csv" -f $Config.Name) -Recurse
+            $SourceCsv = Get-LatestCsv -Directory $sourceDirectory -Filter ("{0}-FileInventory-{1}-*.csv" -f (Get-MigrationEndpointType -Side 'Source'), $Config.Name) -Recurse
         }
         if ([string]::IsNullOrWhiteSpace($TargetCsv)) {
-            $TargetCsv = Get-LatestCsv -Directory $targetDirectory -Filter ("SPO-FileInventory-{0}-*.csv" -f $Config.Name)
+            $TargetCsv = Get-LatestCsv -Directory $targetDirectory -Filter ("{0}-FileInventory-{1}-*.csv" -f (Get-MigrationEndpointType -Side 'Target'), $Config.Name)
         }
 
         $maxScanAgeDifferenceHours = [double](Get-ComparisonConfigValue -Name 'MaxScanAgeDifferenceHours' -DefaultValue 12)
         $modifiedDateToleranceMinutes = [double](Get-ComparisonConfigValue -Name 'ModifiedDateToleranceMinutes' -DefaultValue 0)
-        $sourceModifiedTimeZone = [string](Get-ComparisonConfigValue -Name 'SourceModifiedTimeZone' -DefaultValue 'Local')
-        $targetModifiedTimeZone = [string](Get-ComparisonConfigValue -Name 'TargetModifiedTimeZone' -DefaultValue 'UTC')
+        $sourceModifiedTimeZone = Get-MigrationEndpointModifiedTimeZone -Side 'Source'
+        $targetModifiedTimeZone = Get-MigrationEndpointModifiedTimeZone -Side 'Target'
         Assert-CsvScanAgeDifference `
             -SourceCsvPath $SourceCsv `
             -TargetCsvPath $TargetCsv `
@@ -546,9 +654,9 @@ function Invoke-FileComparison {
             '--source-csv', $SourceCsv,
             '--target-csv', $TargetCsv,
             '--output-directory', $outputDirectory,
-            '--source-web-urls-file', (Resolve-MigrationPath $Config.Source.UrlsFile),
-            '--target-web-urls-file', (Resolve-MigrationPath $Config.Target.UrlsFile),
-            '--comparison-name', ("{0}-SP2019-vs-SPO" -f $Config.Name),
+            '--source-web-urls-file', (Resolve-MigrationUrlsFile -Side 'Source'),
+            '--target-web-urls-file', (Resolve-MigrationUrlsFile -Side 'Target'),
+            '--comparison-name', ("{0}-{1}-vs-{2}" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target')),
             '--size-tolerance-bytes', ([string]$Config.Comparison.SizeToleranceBytes),
             '--modified-date-tolerance-minutes', ([string]$modifiedDateToleranceMinutes),
             '--source-modified-time-zone', $sourceModifiedTimeZone,
@@ -567,7 +675,7 @@ function Invoke-FileComparison {
 
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Export\export_comparison_to_excel.py') -Arguments @(
             '--comparison-directory', $outputDirectory,
-            '--output-xlsx', (Join-Path $outputDirectory ("{0}-SP2019-vs-SPO-Comparison-{1}.xlsx" -f $Config.Name, $timestamp))
+            '--output-xlsx', (Join-Path $outputDirectory ("{0}-{1}-vs-{2}-Comparison-{3}.xlsx" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target'), $timestamp))
         )
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Export\export_duplicate_keys_to_excel.py') -Arguments @(
             '--comparison-directory', $outputDirectory,
@@ -602,10 +710,10 @@ function Invoke-PermissionComparison {
     try {
         Write-Info ("Run log: {0}" -f $logPath) Cyan
         if ([string]::IsNullOrWhiteSpace($SourceCsv)) {
-            $SourceCsv = Get-LatestCsv -Directory $sourceDirectory -Filter ("SP2019-PermissionInventory-{0}-*.csv" -f $Config.Name) -Recurse
+            $SourceCsv = Get-LatestCsv -Directory $sourceDirectory -Filter ("{0}-PermissionInventory-{1}-*.csv" -f (Get-MigrationEndpointType -Side 'Source'), $Config.Name) -Recurse
         }
         if ([string]::IsNullOrWhiteSpace($TargetCsv)) {
-            $TargetCsv = Get-LatestCsv -Directory $targetDirectory -Filter ("SPO-PermissionInventory-{0}-*.csv" -f $Config.Name)
+            $TargetCsv = Get-LatestCsv -Directory $targetDirectory -Filter ("{0}-PermissionInventory-{1}-*.csv" -f (Get-MigrationEndpointType -Side 'Target'), $Config.Name)
         }
 
         $pathMappingsFile = Resolve-ComparisonPathMappingsFile
@@ -615,7 +723,7 @@ function Invoke-PermissionComparison {
             '--output-directory', $outputDirectory,
             '--source-root-path', $Config.Source.PermissionRootPath,
             '--target-root-path', $Config.Target.PermissionRootPath,
-            '--comparison-name', ("{0}-SP2019-vs-SPO-Permissions" -f $Config.Name)
+            '--comparison-name', ("{0}-{1}-vs-{2}-Permissions" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target'))
         )
         if ($pathMappingsFile) {
             $permissionCompareArguments += @('--path-mapping-file', $pathMappingsFile)
@@ -633,15 +741,15 @@ function Invoke-PermissionComparison {
 function Invoke-SourceHistoryComparison {
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Compare\SmartM365-SharePointSource-FileInventoryHistoryCompare.ps1'
-    $outputDirectory = Join-Path -Path (Resolve-MigrationPath $Config.Output.SourceHistoryComparisons) -ChildPath ("SP2019-Changes-{0}" -f $timestamp)
+    $outputDirectory = Join-Path -Path (Resolve-MigrationPath $Config.Output.SourceHistoryComparisons) -ChildPath ("{0}-Changes-{1}" -f (Get-MigrationEndpointType -Side 'Source'), $timestamp)
 
     $parameters = @{
         ScanDirectory = Resolve-MigrationPath $Config.Output.SourceFileScans
         InventoryNameFilter = ("*{0}*" -f $Config.Name)
-        WebUrlsFile = Resolve-MigrationPath $Config.Source.UrlsFile
+        WebUrlsFile = (Resolve-MigrationUrlsFile -Side 'Source')
         OutputDirectory = $outputDirectory
         LogPath = (New-MigrationLogPath -Action 'CompareSourceHistory' -Timestamp $timestamp)
-        ComparisonName = ("{0}-SP2019-vs-SP2019" -f $Config.Name)
+        ComparisonName = ("{0}-{1}-vs-{1}" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'))
         SizeToleranceBytes = [long]$Config.Comparison.SizeToleranceBytes
         ModifiedDateToleranceMinutes = [double](Get-ComparisonConfigValue -Name 'ModifiedDateToleranceMinutes' -DefaultValue 0)
     }

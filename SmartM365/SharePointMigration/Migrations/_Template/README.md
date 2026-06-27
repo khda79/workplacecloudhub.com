@@ -11,9 +11,9 @@ Copy-Item -Recurse .\Migrations\_Template .\Migrations\Spain
 Then update:
 
 - `migration.config.psd1`
-- `migration.config.source.txt`
-- `migration.config.target.txt`
+- `migration.mapping.txt`
 
+Set `Source.Type` and `Target.Type` to `SP2016`, `SP2019`, or `SPO`; setting both to `SPO` enables SharePoint Online to SharePoint Online migrations.
 The grouped `.cmd` files under `launchers\interactive` and
 `launchers\scheduled-tasks` automatically detect the migration folder name. If
 the copied folder is `Migrations\Spain`, they run with `-MigrationName Spain`.
@@ -33,6 +33,8 @@ destination is older than the source. It also normalizes source `Modified`
 values as local time and target `Modified` values as UTC by default, which avoids
 false positives from the common SP2019 local-time versus SPO UTC offset.
 
-Runtime logs are written to the migration `logs` folder by default. Scan CSVs,
+Runtime logs are written to the migration `logs` folder by default. Source and
+target scan URL files are derived automatically from `migration.mapping.txt` unless
+explicit `Source.UrlsFile` and `Target.UrlsFile` values are configured. Scan CSVs,
 comparison CSVs, Excel files, and generated operation scripts stay in their
 dedicated output folders.
