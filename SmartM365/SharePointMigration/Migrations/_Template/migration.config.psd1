@@ -12,6 +12,7 @@
         # Supported values: SP2016, SP2019, SPO
         Type = 'SPO'
         SiteUrl = 'https://yourtenant.sharepoint.com/sites/NewMigration'
+        TenantAdminUrl = 'https://yourtenant-admin.sharepoint.com'
         PrefixToRemove = '/sites/NewMigration'
         PermissionRootPath = '/sites/NewMigration'
     }
