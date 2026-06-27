@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.1
+    1.0.2
 #>
 
 [CmdletBinding()]
@@ -297,6 +297,20 @@ function Get-ComparisonConfigValue {
     return $DefaultValue
 }
 
+function Resolve-ComparisonPathMappingsFile {
+    $mappingPath = [string](Get-ComparisonConfigValue -Name 'PathMappingsFile' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($mappingPath)) {
+        return $null
+    }
+
+    $resolvedPath = Resolve-MigrationPath $mappingPath
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        throw "Path mapping file not found: $resolvedPath"
+    }
+
+    return $resolvedPath
+}
+
 function Confirm-StaleScanComparison {
     param(
         [Parameter(Mandatory = $true)]
@@ -527,13 +541,13 @@ function Invoke-FileComparison {
             -Label 'File inventory'
 
         $compareScript = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Compare\compare_sp_source_target_file_inventories.py'
-        Invoke-PythonScript -Script $compareScript -Arguments @(
+        $pathMappingsFile = Resolve-ComparisonPathMappingsFile
+        $compareArguments = @(
             '--source-csv', $SourceCsv,
             '--target-csv', $TargetCsv,
             '--output-directory', $outputDirectory,
             '--source-web-urls-file', (Resolve-MigrationPath $Config.Source.UrlsFile),
             '--target-web-urls-file', (Resolve-MigrationPath $Config.Target.UrlsFile),
-            '--target-prefix', $Config.Target.PrefixToRemove,
             '--comparison-name', ("{0}-SP2019-vs-SPO" -f $Config.Name),
             '--size-tolerance-bytes', ([string]$Config.Comparison.SizeToleranceBytes),
             '--modified-date-tolerance-minutes', ([string]$modifiedDateToleranceMinutes),
@@ -541,6 +555,15 @@ function Invoke-FileComparison {
             '--target-modified-time-zone', $targetModifiedTimeZone,
             '--sharegate-replacement-character', ([string]$Config.Comparison.ShareGateReplacementCharacter)
         )
+        foreach ($targetPrefix in @($Config.Target.PrefixToRemove)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$targetPrefix)) {
+                $compareArguments += @('--target-prefix', [string]$targetPrefix)
+            }
+        }
+        if ($pathMappingsFile) {
+            $compareArguments += @('--path-mapping-file', $pathMappingsFile)
+        }
+        Invoke-PythonScript -Script $compareScript -Arguments $compareArguments
 
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Export\export_comparison_to_excel.py') -Arguments @(
             '--comparison-directory', $outputDirectory,
@@ -585,7 +608,8 @@ function Invoke-PermissionComparison {
             $TargetCsv = Get-LatestCsv -Directory $targetDirectory -Filter ("SPO-PermissionInventory-{0}-*.csv" -f $Config.Name)
         }
 
-        Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Compare\compare_sp_source_target_permissions.py') -Arguments @(
+        $pathMappingsFile = Resolve-ComparisonPathMappingsFile
+        $permissionCompareArguments = @(
             '--source-csv', $SourceCsv,
             '--target-csv', $TargetCsv,
             '--output-directory', $outputDirectory,
@@ -593,6 +617,10 @@ function Invoke-PermissionComparison {
             '--target-root-path', $Config.Target.PermissionRootPath,
             '--comparison-name', ("{0}-SP2019-vs-SPO-Permissions" -f $Config.Name)
         )
+        if ($pathMappingsFile) {
+            $permissionCompareArguments += @('--path-mapping-file', $pathMappingsFile)
+        }
+        Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Compare\compare_sp_source_target_permissions.py') -Arguments $permissionCompareArguments
 
         Write-Info ("Permission comparison completed: {0}" -f $outputDirectory) Green
         Open-DirectoryInExplorer -Path $outputDirectory
