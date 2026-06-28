@@ -8,7 +8,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.0.1
+    1.0.2
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -883,6 +883,10 @@ try {
     Write-ConsoleMessage -Message ("Temporary permission inventory output: {0}" -f $TempOutputPath)
     Write-ConsoleMessage -Message ("Error output: {0}" -f $ErrorPath)
     Write-ConsoleMessage -Message ("Run log: {0}" -f $LogPath)
+    $permissionScope = if ($DocumentLibrariesOnly) { 'DocumentLibrariesOnly' } else { 'AllListsAndLibraries' }
+    $authMode = if ($Interactive) { 'Interactive' } elseif ($DeviceLogin) { 'DeviceLogin' } elseif (-not [string]::IsNullOrWhiteSpace($Thumbprint)) { 'Certificate' } else { 'Interactive' }
+    $inputScope = if ($PSCmdlet.ParameterSetName -eq 'Site') { $SiteUrl } else { $WebUrlsFile }
+    Write-ConsoleMessage -Message ("Permission scan options: Scope={0}; IncludeItemPermissions={1}; IncludeHiddenLists={2}; IncludeSystemLists={3}; PageSize={4}; ItemProgressInterval={5}; AuthMode={6}; ForceAuthentication={7}; ParameterSet={8}; Input={9}" -f $permissionScope, [bool]$IncludeItemPermissions, [bool]$IncludeHiddenLists, [bool]$IncludeSystemLists, $PageSize, $ItemProgressInterval, $authMode, [bool]$ForceAuthentication, $PSCmdlet.ParameterSetName, $inputScope)
 }
 catch {
     Write-ConsoleWarning -Message ("Could not start transcript log '{0}': {1}" -f $LogPath, $_.Exception.Message)

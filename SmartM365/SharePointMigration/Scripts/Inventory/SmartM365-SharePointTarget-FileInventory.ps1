@@ -35,6 +35,9 @@
 
 .EXAMPLE
     .\SmartM365-SharePointTarget-FileInventory.ps1 -TenantAdminUrl "https://yourtenant-admin.sharepoint.com" -UseEnvironmentVariables
+
+.VERSION
+    1.0.0
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Tenant')]
@@ -1057,6 +1060,14 @@ try {
     Write-Info -Color Cyan -Message ("Temporary inventory output: {0}" -f $TempOutputPath)
     Write-Info -Color Cyan -Message ("Error output: {0}" -f $ErrorPath)
     Write-Info -Color Cyan -Message ("Run log: {0}" -f $LogPath)
+    $authMode = if ($ManagedIdentity) { 'ManagedIdentity' } elseif (-not [string]::IsNullOrWhiteSpace($CertificatePath)) { 'CertificatePath' } elseif (-not [string]::IsNullOrWhiteSpace($Thumbprint)) { 'Certificate' } elseif ($DeviceLogin) { 'DeviceLogin' } elseif ($Interactive) { 'Interactive' } elseif ($UseEnvironmentVariables) { 'EnvironmentVariables' } else { 'Interactive' }
+    $inputScope = switch ($PSCmdlet.ParameterSetName) {
+        'Tenant' { $TenantAdminUrl }
+        'Site' { $SiteUrl }
+        'Web' { $WebUrl }
+        'WebUrlsFile' { $WebUrlsFile }
+    }
+    Write-Info -Color Cyan -Message ("File inventory options: IncludeHiddenLibraries={0}; IncludeSystemLibraries={1}; IncludeOneDriveSites={2}; PageSize={3}; AuthMode={4}; ForceAuthentication={5}; PersistLogin={6}; ParameterSet={7}; Input={8}" -f [bool]$IncludeHiddenLibraries, [bool]$IncludeSystemLibraries, [bool]$IncludeOneDriveSites, $PageSize, $authMode, [bool]$ForceAuthentication, [bool]$PersistLogin, $PSCmdlet.ParameterSetName, $inputScope)
 }
 catch {
     Write-Warning ("Could not start transcript log '{0}': {1}" -f $LogPath, $_.Exception.Message)
