@@ -24,7 +24,7 @@
     .\SmartM365-SharePointSource-PermissionInventory.ps1 -WebUrl "https://intranet/sites/finance" -DocumentLibrariesOnly -IncludeItemPermissions
 
 .VERSION
-    1.0.0
+    1.0.1
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -962,6 +962,9 @@ try {
     Write-Host ("Temporary permission inventory output: {0}" -f $TempOutputPath)
     Write-Host ("Error output: {0}" -f $ErrorPath)
     Write-Host ("Run log: {0}" -f $LogPath)
+    $permissionScope = if ($DocumentLibrariesOnly) { 'DocumentLibrariesOnly' } else { 'AllListsAndLibraries' }
+    $siteUrlsFileLabel = if ([string]::IsNullOrWhiteSpace($SiteUrlsFile)) { '<none>' } else { $SiteUrlsFile }
+    Write-Host ("Permission scan options: Scope={0}; IncludeItemPermissions={1}; IncludeHiddenLists={2}; IncludeSystemLists={3}; RowLimit={4}; ItemProgressInterval={5}; ParameterSet={6}; UseSiteUrlFilter={7}; SiteUrlsFile={8}" -f $permissionScope, [bool]$IncludeItemPermissions, [bool]$IncludeHiddenLists, [bool]$IncludeSystemLists, $RowLimit, $ItemProgressInterval, $PSCmdlet.ParameterSetName, [bool]$script:UseSiteUrlFilter, $siteUrlsFileLabel)
 }
 catch {
     Write-Warning ("Could not start transcript log '{0}': {1}" -f $LogPath, $_.Exception.Message)
