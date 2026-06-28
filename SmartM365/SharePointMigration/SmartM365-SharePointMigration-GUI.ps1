@@ -11,7 +11,7 @@
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.5
+    1.0.6
 #>
 
 #Requires -Version 5.1
@@ -22,7 +22,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.5'
+$script:AppVersion = '1.0.6'
 $script:ScriptRoot = $PSScriptRoot
 
 Add-Type -AssemblyName PresentationFramework
@@ -411,6 +411,7 @@ function Open-InExplorer {
         <ToggleButton x:Name="tabPermissions" Content="Permissions" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabOperations"  Content="Operations"  Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabLogs"        Content="Logs"        Style="{StaticResource Tab}"/>
+        <ToggleButton x:Name="tabConfig"      Content="Config"      Style="{StaticResource Tab}"/>
       </StackPanel>
     </Border>
 
@@ -676,6 +677,45 @@ function Open-InExplorer {
           </ItemsControl>
         </StackPanel>
 
+        <!-- CONFIG -->
+        <Grid x:Name="panelConfig" Margin="18,14" Visibility="Collapsed" MinHeight="500">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <Border Grid.Row="0" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,8">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <TextBlock x:Name="lblConfigPath" Text="migration.config.psd1" FontSize="12" FontWeight="Medium" Foreground="#1F2937"/>
+                <TextBlock x:Name="lblConfigStatus" Text="" FontSize="11" Foreground="#5F6B7A" Margin="0,2,0,0"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="btnReloadConfig" Content="Reload" Style="{StaticResource BtnGhost}" Width="64" Margin="0,0,6,0"/>
+                <Button x:Name="btnSaveConfig" Content="Save" Style="{StaticResource Btn}" Width="58" Margin="0,0,6,0" IsEnabled="False"/>
+                <Button x:Name="btnOpenConfigFolder" Content="Open folder" Style="{StaticResource BtnGhost}" Width="92"/>
+              </StackPanel>
+            </Grid>
+          </Border>
+          <Border Grid.Row="1" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8">
+            <TextBox x:Name="txtConfigContent"
+                     FontFamily="Consolas,Courier New"
+                     FontSize="12"
+                     Foreground="#1F2937"
+                     Background="White"
+                     BorderThickness="0"
+                     Padding="10"
+                     AcceptsReturn="True"
+                     AcceptsTab="True"
+                     TextWrapping="NoWrap"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto"/>
+          </Border>
+        </Grid>
+
         <!-- LOGS -->
         <Grid x:Name="panelLogs" Margin="18,14" Visibility="Collapsed" MinHeight="400">
           <Grid.ColumnDefinitions>
@@ -767,12 +807,14 @@ $tabFiles       = ctrl 'tabFiles'
 $tabPermissions = ctrl 'tabPermissions'
 $tabOperations  = ctrl 'tabOperations'
 $tabLogs        = ctrl 'tabLogs'
+$tabConfig      = ctrl 'tabConfig'
 
 # Panels
 $panelFiles       = ctrl 'panelFiles'
 $panelPermissions = ctrl 'panelPermissions'
 $panelOperations  = ctrl 'panelOperations'
 $panelLogs        = ctrl 'panelLogs'
+$panelConfig      = ctrl 'panelConfig'
 
 # Files step
 $badgeScanSrc  = ctrl 'badgeScanSrc'
@@ -831,6 +873,14 @@ $txtLogContent = ctrl 'txtLogContent'
 $btnOpenLogDir = ctrl 'btnOpenLogDir'
 $btnRefreshLogs= ctrl 'btnRefreshLogs'
 
+# Config
+$lblConfigPath = ctrl 'lblConfigPath'
+$lblConfigStatus = ctrl 'lblConfigStatus'
+$txtConfigContent = ctrl 'txtConfigContent'
+$btnReloadConfig = ctrl 'btnReloadConfig'
+$btnSaveConfig = ctrl 'btnSaveConfig'
+$btnOpenConfigFolder = ctrl 'btnOpenConfigFolder'
+
 # ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
@@ -838,6 +888,8 @@ $btnRefreshLogs= ctrl 'btnRefreshLogs'
 $script:Migrations        = @()
 $script:CurrentMigration  = $null
 $script:CurrentStatus     = $null
+$script:ConfigEditorLoading = $false
+$script:ConfigEditorDirty   = $false
 
 # ---------------------------------------------------------------------------
 # Logo / icon
@@ -1044,11 +1096,13 @@ function Switch-Tab {
     $tabPermissions.IsChecked = ($Tab -eq 'Permissions')
     $tabOperations.IsChecked  = ($Tab -eq 'Operations')
     $tabLogs.IsChecked        = ($Tab -eq 'Logs')
+    $tabConfig.IsChecked      = ($Tab -eq 'Config')
 
     $panelFiles.Visibility       = if ($Tab -eq 'Files')       { 'Visible' } else { 'Collapsed' }
     $panelPermissions.Visibility = if ($Tab -eq 'Permissions') { 'Visible' } else { 'Collapsed' }
     $panelOperations.Visibility  = if ($Tab -eq 'Operations')  { 'Visible' } else { 'Collapsed' }
     $panelLogs.Visibility        = if ($Tab -eq 'Logs')        { 'Visible' } else { 'Collapsed' }
+    $panelConfig.Visibility      = if ($Tab -eq 'Config')      { 'Visible' } else { 'Collapsed' }
 }
 
 # ---------------------------------------------------------------------------
@@ -1114,6 +1168,104 @@ function Update-UI {
     Refresh-LogList
 }
 
+function Set-ConfigEditorStatus {
+    param(
+        [string]$Text,
+        [bool]$IsError = $false
+    )
+
+    $lblConfigStatus.Text = $Text
+    if ($IsError) {
+        $lblConfigStatus.Foreground = [System.Windows.Media.SolidColorBrush]::new(
+            [System.Windows.Media.Color]::FromRgb(176, 0, 32))
+    }
+    else {
+        $lblConfigStatus.Foreground = [System.Windows.Media.SolidColorBrush]::new(
+            [System.Windows.Media.Color]::FromRgb(95, 107, 122))
+    }
+}
+
+function Set-ConfigEditorDirty {
+    param([bool]$Dirty)
+
+    $script:ConfigEditorDirty = $Dirty
+    $btnSaveConfig.IsEnabled = $Dirty
+}
+
+function Test-ConfigEditorContent {
+    param([string]$Content)
+
+    $tempPath = [System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), '.psd1')
+    try {
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($tempPath, $Content, $utf8NoBom)
+        $data = Import-PowerShellDataFile -LiteralPath $tempPath
+        if ($null -eq $data -or -not ($data -is [hashtable])) {
+            throw 'The file must contain a PowerShell data hashtable.'
+        }
+        foreach ($requiredKey in @('Name', 'Source', 'Target', 'Comparison', 'Output')) {
+            if (-not $data.ContainsKey($requiredKey)) {
+                throw "Missing required key: $requiredKey"
+            }
+        }
+        return $data
+    }
+    finally {
+        Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Load-ConfigEditor {
+    if ($null -eq $script:CurrentMigration) { return }
+
+    $script:ConfigEditorLoading = $true
+    try {
+        $configPath = $script:CurrentMigration.ConfigPath
+        $lblConfigPath.Text = $configPath
+        if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+            $txtConfigContent.Text = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop
+            Set-ConfigEditorDirty $false
+            Set-ConfigEditorStatus ("Loaded {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+        }
+        else {
+            $txtConfigContent.Text = ''
+            Set-ConfigEditorDirty $false
+            Set-ConfigEditorStatus "Config file not found: $configPath" $true
+        }
+    }
+    catch {
+        Set-ConfigEditorStatus "Could not load config: $($_.Exception.Message)" $true
+    }
+    finally {
+        $script:ConfigEditorLoading = $false
+    }
+}
+
+function Save-ConfigEditor {
+    if ($null -eq $script:CurrentMigration) { return }
+
+    try {
+        $content = [string]$txtConfigContent.Text
+        $validatedConfig = Test-ConfigEditorContent -Content $content
+        $configPath = $script:CurrentMigration.ConfigPath
+        if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+            $backupPath = "{0}.bak-{1}" -f $configPath, (Get-Date -Format 'yyyyMMdd-HHmmss')
+            Copy-Item -LiteralPath $configPath -Destination $backupPath -Force
+        }
+
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($configPath, $content, $utf8NoBom)
+        $script:CurrentMigration.Config = $validatedConfig
+        $script:CurrentStatus = Get-MigrationStatus -Migration $script:CurrentMigration
+        Set-ConfigEditorDirty $false
+        Update-UI
+        Set-ConfigEditorStatus ("Saved {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+    }
+    catch {
+        Set-ConfigEditorStatus "Save failed: $($_.Exception.Message)" $true
+        [System.Windows.MessageBox]::Show("Config save failed:`n$($_.Exception.Message)", $script:AppName, 'OK', 'Error') | Out-Null
+    }
+}
 function Refresh-LogList {
     $listLogFiles.Items.Clear()
     if ($null -eq $script:CurrentMigration) { return }
@@ -1157,6 +1309,7 @@ $tabFiles.Add_Click({       Switch-Tab 'Files' })
 $tabPermissions.Add_Click({ Switch-Tab 'Permissions' })
 $tabOperations.Add_Click({  Switch-Tab 'Operations' })
 $tabLogs.Add_Click({        Switch-Tab 'Logs' })
+$tabConfig.Add_Click({      Switch-Tab 'Config' })
 
 $cmbMigration.Add_SelectionChanged({
     $idx = $cmbMigration.SelectedIndex
@@ -1177,8 +1330,27 @@ $btnNewMigration.Add_Click({
 })
 
 $btnOpenConfig.Add_Click({
+    Switch-Tab 'Config'
+})
+
+$btnReloadConfig.Add_Click({
+    Load-ConfigEditor
+})
+
+$btnSaveConfig.Add_Click({
+    Save-ConfigEditor
+})
+
+$btnOpenConfigFolder.Add_Click({
     if ($null -eq $script:CurrentMigration) { return }
-    try { Invoke-Item -LiteralPath $script:CurrentMigration.ConfigPath } catch {}
+    Open-InExplorer (Split-Path -Path $script:CurrentMigration.ConfigPath -Parent)
+})
+
+$txtConfigContent.Add_TextChanged({
+    if (-not $script:ConfigEditorLoading) {
+        Set-ConfigEditorDirty $true
+        Set-ConfigEditorStatus 'Modified'
+    }
 })
 
 # Files
@@ -1248,5 +1420,4 @@ $btnRefreshLogs.Add_Click({ Refresh-LogList })
 Load-Migrations
 Close-SmartM365GuiSplash -Splash $script:Splash
 [void]$script:Window.ShowDialog()
-
 
