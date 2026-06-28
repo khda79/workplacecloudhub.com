@@ -1,18 +1,18 @@
 <#
 .SYNOPSIS
-    Compares two SharePoint 2019 file inventory scans.
+    Compares two SharePoint file inventory scans for the same endpoint.
 
 .DESCRIPTION
-    By default, this script selects the latest SP2019 file inventory CSV, then
-    selects the previous SP2019 file inventory CSV with the same inventory name
-    prefix. The older scan is used as the source and the newer scan is used as
-    the target.
+    By default, this script selects the latest file inventory CSV for the selected endpoint, then
+    selects the previous file inventory CSV with the same inventory name prefix. The older scan
+    is used as the baseline and the newer scan is used as the current inventory.
 
-    RemovedFromNewScan means: present in the older SP2019 scan, missing from
-    the newer SP2019 scan.
+    RemovedFromNewScan means: present in the older scan, missing from the newer scan.
 
-    AddedInNewScan means: absent from the older SP2019 scan, present in the
-    newer SP2019 scan.
+    AddedInNewScan means: absent from the older scan, present in the newer scan.
+
+.VERSION
+    1.0.0
 
 .EXAMPLE
     .\SmartM365-SharePointSource-FileInventoryHistoryCompare.ps1
@@ -38,6 +38,12 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$InventoryNameFilter,
 
+    [ValidateSet('Source', 'Target')]
+    [string]$Side = 'Source',
+
+    [ValidateSet('SP2016', 'SP2019', 'SPO')]
+    [string]$EndpointType = 'SP2019',
+
     [ValidateNotNullOrEmpty()]
     [string]$WebUrlsFile,
 
@@ -48,7 +54,7 @@ param(
     [string]$LogPath,
 
     [ValidateNotNullOrEmpty()]
-    [string]$ComparisonName = 'SP2019-vs-SP2019',
+    [string]$ComparisonName = 'InventoryHistory',
 
     [long]$SizeToleranceBytes = 10240,
 
@@ -194,26 +200,29 @@ function Get-InventoryNamePrefix {
         [System.IO.FileInfo]$CsvItem
     )
 
-    if ($CsvItem.Name -match '^(SP2019-FileInventory-.+)-\d{8}-\d{6}\.csv$') {
+    if ($CsvItem.Name -match '^((?:SP2016|SP2019|SPO)-FileInventory-.+)-\d{8}-\d{6}\.csv$') {
         return $Matches[1]
     }
 
     return [System.IO.Path]::GetFileNameWithoutExtension($CsvItem.Name)
 }
 
-function Get-SP2019InventoryCsvs {
+function Get-InventoryCsvs {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Directory,
 
-        [string]$NameFilter
+        [string]$NameFilter,
+
+        [ValidateSet('SP2016', 'SP2019', 'SPO')]
+        [string]$EndpointType = 'SP2019'
     )
 
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
-        throw "SP2019 scan directory not found: $Directory"
+        throw "$EndpointType scan directory not found: $Directory"
     }
 
-    $items = Get-ChildItem -LiteralPath $Directory -Recurse -File -Filter 'SP2019-FileInventory*.csv' |
+    $items = Get-ChildItem -LiteralPath $Directory -Recurse -File -Filter ("{0}-FileInventory*.csv" -f $EndpointType) |
         Where-Object {
             $_.Name -notlike '*-Errors.csv' -and
             $_.Name -notlike '*.tmp' -and
@@ -232,12 +241,15 @@ function Resolve-DefaultCsvPair {
         [Parameter(Mandatory = $true)]
         [string]$Directory,
 
-        [string]$NameFilter
+        [string]$NameFilter,
+
+        [ValidateSet('SP2016', 'SP2019', 'SPO')]
+        [string]$EndpointType = 'SP2019'
     )
 
-    $csvs = @(Get-SP2019InventoryCsvs -Directory $Directory -NameFilter $NameFilter)
+    $csvs = @(Get-InventoryCsvs -Directory $Directory -NameFilter $NameFilter -EndpointType $EndpointType)
     if ($csvs.Count -lt 2) {
-        throw "At least two SP2019 file inventory CSV files are required in $Directory."
+        throw "At least two $EndpointType file inventory CSV files are required in $Directory."
     }
 
     $latest = $csvs[0]
@@ -247,7 +259,7 @@ function Resolve-DefaultCsvPair {
         } | Select-Object -First 1)
 
     if (-not $previous) {
-        throw "No previous SP2019 file inventory CSV found with the same prefix as '$($latest.Name)'. Use -OldCsv and -NewCsv explicitly, or use -InventoryNameFilter."
+        throw "No previous $EndpointType file inventory CSV found with the same prefix as '$($latest.Name)'. Use -OldCsv and -NewCsv explicitly, or use -InventoryNameFilter."
     }
 
     return [pscustomobject]@{
@@ -256,7 +268,7 @@ function Resolve-DefaultCsvPair {
     }
 }
 
-function Confirm-SP2019Comparison {
+function Confirm-InventoryHistoryComparison {
     param(
         [Parameter(Mandatory = $true)]
         [System.IO.FileInfo]$OldItem,
@@ -268,15 +280,15 @@ function Confirm-SP2019Comparison {
     )
 
     Write-Host ""
-    Write-Host "SP2019 comparison CSV selection" -ForegroundColor Cyan
-    Write-Host ("  Old SP2019 CSV    : {0}" -f $OldItem.FullName)
+    Write-Host ("{0} {1} scan history CSV selection" -f $Side, $EndpointType) -ForegroundColor Cyan
+    Write-Host ("  Previous CSV      : {0}" -f $OldItem.FullName)
     Write-Host ("  Old timestamp     : {0}" -f $OldItem.LastWriteTime)
-    Write-Host ("  New SP2019 CSV    : {0}" -f $NewItem.FullName)
+    Write-Host ("  Current CSV       : {0}" -f $NewItem.FullName)
     Write-Host ("  New timestamp     : {0}" -f $NewItem.LastWriteTime)
     Write-Host ("  Difference        : {0:n2}h" -f $AgeDifference.TotalHours)
     Write-Host ""
 
-    $confirmation = Read-Host "Type COMPARE to compare these SP2019 scans"
+    $confirmation = Read-Host ("Type COMPARE to compare these {0} {1} scans" -f $Side, $EndpointType)
     if ($confirmation -ne 'COMPARE') {
         throw "Comparison cancelled. Confirmation text did not match COMPARE."
     }
@@ -285,16 +297,16 @@ function Confirm-SP2019Comparison {
 $ProjectRoot = Get-ProjectRoot
 
 if ([string]::IsNullOrWhiteSpace($ScanDirectory)) {
-    $ScanDirectory = Join-Path -Path $ProjectRoot -ChildPath 'Scans\SP2019'
+    $ScanDirectory = Join-Path -Path $ProjectRoot -ChildPath ("Scans\{0}" -f $EndpointType)
 }
 
 if ([string]::IsNullOrWhiteSpace($OldCsv) -and [string]::IsNullOrWhiteSpace($NewCsv)) {
-    $pair = Resolve-DefaultCsvPair -Directory $ScanDirectory -NameFilter $InventoryNameFilter
+    $pair = Resolve-DefaultCsvPair -Directory $ScanDirectory -NameFilter $InventoryNameFilter -EndpointType $EndpointType
     $OldCsv = $pair.Old.FullName
     $NewCsv = $pair.New.FullName
 }
 elseif ([string]::IsNullOrWhiteSpace($OldCsv) -or [string]::IsNullOrWhiteSpace($NewCsv)) {
-    throw "Use both -OldCsv and -NewCsv, or omit both to compare the two latest matching SP2019 scans."
+    throw "Use both -OldCsv and -NewCsv, or omit both to compare the two latest matching endpoint scans."
 }
 
 if (-not (Test-Path -LiteralPath $OldCsv -PathType Leaf)) {
@@ -323,12 +335,12 @@ if ($oldItem.LastWriteTime -gt $newItem.LastWriteTime) {
 
 $ageDifference = ($newItem.LastWriteTime - $oldItem.LastWriteTime).Duration()
 if (-not $Force) {
-    Confirm-SP2019Comparison -OldItem $oldItem -NewItem $newItem -AgeDifference $ageDifference
+    Confirm-InventoryHistoryComparison -OldItem $oldItem -NewItem $newItem -AgeDifference $ageDifference
 }
 
 $comparisonTimestampText = Get-Date -Format 'yyyyMMdd-HHmmss'
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path -Path (Join-Path -Path $ProjectRoot -ChildPath 'ComparisonResults\SP2019-SourceHistory') -ChildPath ("SP2019-Changes-{0}" -f $comparisonTimestampText)
+    $OutputDirectory = Join-Path -Path (Join-Path -Path $ProjectRoot -ChildPath 'ComparisonResults\ScanHistory') -ChildPath ("{0}-{1}-Changes-{2}" -f $Side, $EndpointType, $comparisonTimestampText)
 }
 
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
@@ -368,8 +380,8 @@ $pythonArguments = @($pythonCommand.Arguments)
 
 Write-Host ("Scan age difference: {0:n2}h" -f $ageDifference.TotalHours)
 Write-Host ("Using Python: {0} ({1})" -f $pythonExecutable, $pythonCommand.Source) -ForegroundColor Cyan
-Write-Host ("Old SP2019 CSV: {0}" -f $OldCsv)
-Write-Host ("New SP2019 CSV: {0}" -f $NewCsv)
+Write-Host ("Previous CSV: {0}" -f $OldCsv)
+Write-Host ("Current CSV: {0}" -f $NewCsv)
 Write-Host ("Output directory: {0}" -f $OutputDirectory)
 Write-Host ("Modified date tolerance: {0:n2} minute(s)" -f $ModifiedDateToleranceMinutes)
 
@@ -408,7 +420,7 @@ if (-not [string]::IsNullOrWhiteSpace($WebUrlsFile)) {
 
 Invoke-LoggedPythonCommand -Arguments $compareArguments -FailureMessage 'Python comparison'
 
-$comparisonXlsx = Join-Path -Path $OutputDirectory -ChildPath ("SP2019-Changes-{0}.xlsx" -f $comparisonTimestampText)
+$comparisonXlsx = Join-Path -Path $OutputDirectory -ChildPath ("{0}-{1}-Changes-{2}.xlsx" -f $Side, $EndpointType, $comparisonTimestampText)
 $comparisonExcelArguments = @(
     $comparisonExcelScript,
     '--comparison-directory', $OutputDirectory,
@@ -417,7 +429,7 @@ $comparisonExcelArguments = @(
 )
 Invoke-LoggedPythonCommand -Arguments $comparisonExcelArguments -FailureMessage 'Excel export'
 
-$duplicateKeysXlsx = Join-Path -Path $OutputDirectory -ChildPath ("SP2019-DuplicateKeys-{0}.xlsx" -f $comparisonTimestampText)
+$duplicateKeysXlsx = Join-Path -Path $OutputDirectory -ChildPath ("{0}-{1}-DuplicateKeys-{2}.xlsx" -f $Side, $EndpointType, $comparisonTimestampText)
 $duplicateKeysExcelArguments = @(
     $duplicateKeysExcelScript,
     '--comparison-directory', $OutputDirectory,
@@ -425,9 +437,18 @@ $duplicateKeysExcelArguments = @(
 )
 Invoke-LoggedPythonCommand -Arguments $duplicateKeysExcelArguments -FailureMessage 'Duplicate keys Excel export'
 
-Write-Host ("SP2019 comparison completed: {0}" -f $comparisonXlsx) -ForegroundColor Green
+Write-Host ("Scan history comparison completed: {0}" -f $comparisonXlsx) -ForegroundColor Green
 
 if ($script:TranscriptStarted) {
     Stop-TimestampedTranscript -Path $LogPath
     $script:TranscriptStarted = $false
 }
+
+
+
+
+
+
+
+
+
