@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.4
+    1.0.5
 #>
 
 [CmdletBinding()]
@@ -620,6 +620,21 @@ function Invoke-PermissionInventoryScan {
     & $scriptPath @parameters
 }
 
+function Invoke-SourceFileScan {
+    Invoke-FileInventoryScan -Side 'Source'
+}
+
+function Invoke-TargetFileScan {
+    Invoke-FileInventoryScan -Side 'Target'
+}
+
+function Invoke-SourcePermissionScan {
+    Invoke-PermissionInventoryScan -Side 'Source'
+}
+
+function Invoke-TargetPermissionScan {
+    Invoke-PermissionInventoryScan -Side 'Target'
+}
 function Invoke-FileComparison {
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $logPath = New-MigrationLogPath -Action 'CompareFiles' -Timestamp $timestamp
