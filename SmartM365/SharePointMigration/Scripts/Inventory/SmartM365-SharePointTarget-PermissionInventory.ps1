@@ -8,7 +8,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.0.0
+    1.0.1
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -140,6 +140,9 @@ $PermissionColumns = @(
     'ParentObjectUrl',
     'ListTitle',
     'ListUrl',
+    'ListBaseTemplate',
+    'ListBaseType',
+    'IsDocumentLibrary',
     'ItemId',
     'ItemFileSystemObjectType',
     'HasUniqueRoleAssignments',
@@ -516,6 +519,9 @@ function Get-RoleAssignmentRows {
         [string]$ParentObjectUrl,
         [string]$ListTitle,
         [string]$ListUrl,
+        [object]$ListBaseTemplate,
+        [string]$ListBaseType,
+        [object]$IsDocumentLibrary,
         [object]$ItemId,
         [string]$ItemFileSystemObjectType,
         [bool]$HasUniqueRoleAssignments,
@@ -545,6 +551,9 @@ function Get-RoleAssignmentRows {
                 ParentObjectUrl          = $ParentObjectUrl
                 ListTitle                = $ListTitle
                 ListUrl                  = $ListUrl
+                ListBaseTemplate        = $ListBaseTemplate
+                ListBaseType            = $ListBaseType
+                IsDocumentLibrary       = $IsDocumentLibrary
                 ItemId                   = $ItemId
                 ItemFileSystemObjectType = $ItemFileSystemObjectType
                 HasUniqueRoleAssignments = $HasUniqueRoleAssignments
@@ -659,6 +668,9 @@ function Export-ItemPermissionInventory {
                     -ParentObjectUrl $listUrl `
                     -ListTitle $List.Title `
                     -ListUrl $listUrl `
+                    -ListBaseTemplate ([int]$List.BaseTemplate) `
+                    -ListBaseType $(if ([int]$List.BaseTemplate -eq 101) { 'DocumentLibrary' } else { '' }) `
+                    -IsDocumentLibrary ([int]$List.BaseTemplate -eq 101) `
                     -ItemId $item.Id `
                     -ItemFileSystemObjectType $fsObjType `
                     -HasUniqueRoleAssignments $true `
@@ -711,6 +723,9 @@ function Export-WebPermissionInventory {
                 -ParentObjectUrl '' `
                 -ListTitle '' `
                 -ListUrl '' `
+                -ListBaseTemplate '' `
+                -ListBaseType '' `
+                -IsDocumentLibrary '' `
                 -ItemId $null `
                 -ItemFileSystemObjectType '' `
                 -HasUniqueRoleAssignments $web.HasUniqueRoleAssignments `
@@ -753,6 +768,8 @@ function Export-WebPermissionInventory {
                 continue
             }
 
+            $isDocumentLibrary = ([int]$list.BaseTemplate -eq 101)
+            $listBaseType = if ($isDocumentLibrary) { 'DocumentLibrary' } else { '' }
             $roleAssignments = Get-PnPProperty -ClientObject $list -Property RoleAssignments
             $rows = @(Get-RoleAssignmentRows `
                     -SiteCollectionUrl $siteCollectionUrl `
@@ -766,6 +783,9 @@ function Export-WebPermissionInventory {
                     -ParentObjectUrl $web.Url `
                     -ListTitle $list.Title `
                     -ListUrl $listUrl `
+                    -ListBaseTemplate ([int]$list.BaseTemplate) `
+                    -ListBaseType $listBaseType `
+                    -IsDocumentLibrary $isDocumentLibrary `
                     -ItemId $null `
                     -ItemFileSystemObjectType '' `
                     -HasUniqueRoleAssignments $list.HasUniqueRoleAssignments `
