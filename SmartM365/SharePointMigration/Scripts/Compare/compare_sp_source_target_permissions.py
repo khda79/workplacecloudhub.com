@@ -8,7 +8,7 @@ import zipfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 def print(*args, **kwargs):
@@ -23,14 +23,17 @@ def print(*args, **kwargs):
 CSV_DELIMITERS = ",;\t"
 MAX_EXCEL_ROWS = 1_048_576
 INVALID_XML_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+SHAREGATE_REPLACED_CHARACTERS = {"&", "#", "%", '"', "*", ":", ";", "<", ">", "?", "\\", "|", "{", "}", "~"}
+SHAREGATE_REPLACEMENT_CHARACTER = "_"
+PERCENT_SEQUENCE_PATTERN = re.compile(r"%([0-9A-Fa-f]{2})")
+DEFAULT_DOCUMENT_LIBRARY_SEGMENTS = {
+    "documents",
+    "documents partages",
+    "shared documents",
+}
 
 PERMISSION_SUMMARY_COLUMNS = [
     "Status",
-    "ObjectScope",
-    "ComparisonObjectPath",
-    "ObjectTitle",
-    "ListTitle",
-    "WebTitle",
     "SourcePermissions",
     "TargetPermissions",
     "MatchedPermissions",
@@ -41,9 +44,36 @@ PERMISSION_SUMMARY_COLUMNS = [
     "ExtraInSPOPercent",
     "SourceWebUrl",
     "TargetWebUrl",
+    "ObjectScope",
+    "ComparisonObjectPath",
+    "ObjectTitle",
+    "ListTitle",
+    "WebTitle",
     "SourceObjectUrl",
     "TargetObjectUrl",
 ]
+
+NUMERIC_COLUMNS = {
+    "SourceRows",
+    "TargetRows",
+    "SourceUniqueKeys",
+    "TargetUniqueKeys",
+    "MatchedPermissions",
+    "MissingInSPO",
+    "ExtraInSPO",
+    "SourceDuplicateKeysIgnored",
+    "TargetDuplicateKeysIgnored",
+    "SourcePermissions",
+    "TargetPermissions",
+    "Count",
+}
+PERCENT_COLUMNS = {
+    "MatchedPermissionsPercent",
+    "MissingInSPOPercent",
+    "ExtraInSPOPercent",
+}
+INTEGER_RE = re.compile(r"^-?\d+$")
+DECIMAL_RE = re.compile(r"^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$")
 
 COLUMN_WIDTHS = {
     "Status": 28,
@@ -145,6 +175,20 @@ def column_width(header):
     return min(max(len(str(header or "")) + 3, 14), 80)
 
 
+def cell_xml(row_index, column_index, value, header=None, is_header=False):
+    ref = f"{xlsx_col_name(column_index)}{row_index}"
+    text = clean_cell(value).strip()
+    if is_header:
+        escaped = html.escape(text, quote=True)
+        return f'<c r="{ref}" t="inlineStr" s="1"><is><t>{escaped}</t></is></c>'
+    if header in PERCENT_COLUMNS and DECIMAL_RE.fullmatch(text):
+        return f'<c r="{ref}" s="2"><v>{text}</v></c>'
+    if header in NUMERIC_COLUMNS and INTEGER_RE.fullmatch(text):
+        return f'<c r="{ref}"><v>{text}</v></c>'
+    escaped = html.escape(text, quote=True)
+    return f'<c r="{ref}" t="inlineStr"><is><t>{escaped}</t></is></c>'
+
+
 def sheet_xml(rows):
     row_count = len(rows)
     column_count = max((len(row) for row in rows), default=0)
@@ -166,9 +210,8 @@ def sheet_xml(rows):
     for row_index, row in enumerate(rows, start=1):
         output.append(f'<row r="{row_index}">')
         for column_index, value in enumerate(row, start=1):
-            ref = f"{xlsx_col_name(column_index)}{row_index}"
-            text = html.escape(clean_cell(value), quote=True)
-            output.append(f'<c r="{ref}" t="inlineStr"><is><t>{text}</t></is></c>')
+            header = headers[column_index - 1] if column_index <= len(headers) else ""
+            output.append(cell_xml(row_index, column_index, value, header=header, is_header=(row_index == 1)))
         output.append("</row>")
     output.append("</sheetData>")
     if row_count > 1 and column_count:
@@ -189,6 +232,7 @@ def create_xlsx(path: Path, sheets):
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
         '<Default Extension="xml" ContentType="application/xml"/>',
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
     ]
 
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -200,26 +244,96 @@ def create_xlsx(path: Path, sheets):
             content_types.append(f'<Override PartName="/xl/worksheets/sheet{index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>')
             archive.writestr(f"xl/worksheets/sheet{index}.xml", sheet_xml(rows))
 
+        workbook_rels.append('<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>')
         content_types.append("</Types>")
         archive.writestr("[Content_Types].xml", "".join(content_types))
         archive.writestr("xl/workbook.xml", f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>{''.join(workbook_sheets)}</sheets></workbook>""")
         archive.writestr("xl/_rels/workbook.xml.rels", f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{''.join(workbook_rels)}</Relationships>""")
+        archive.writestr("xl/styles.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.00%"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/><color rgb="FFFFFFFF"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0078D4"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFDDE7F0"/></left><right style="thin"><color rgb="FFDDE7F0"/></right><top style="thin"><color rgb="FFDDE7F0"/></top><bottom style="thin"><color rgb="FFDDE7F0"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><dxfs count="0"/><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/></styleSheet>""")
+
+
+def strip_query_from_path(value):
+    text = str(value or "").strip()
+    if text.lower().startswith(("http://", "https://")):
+        return urlparse(text).path
+    return text.split("?", 1)[0]
+
+
+def replace_encoded_sharegate_character(match):
+    try:
+        character = bytes.fromhex(match.group(1)).decode("utf-8")
+    except UnicodeDecodeError:
+        return match.group(0)
+
+    if character in SHAREGATE_REPLACED_CHARACTERS or character in {"/", "\\"} or character == "\t" or not character.isprintable():
+        return SHAREGATE_REPLACEMENT_CHARACTER
+
+    return match.group(0)
+
+
+def decode_sharegate_path(path):
+    path = PERCENT_SEQUENCE_PATTERN.sub(replace_encoded_sharegate_character, path)
+    return unquote(path)
+
+
+def replace_edge_dots_and_spaces(value):
+    value = re.sub(r"^[ .]+", lambda match: SHAREGATE_REPLACEMENT_CHARACTER * len(match.group(0)), value)
+    return re.sub(r"[ .]+$", lambda match: SHAREGATE_REPLACEMENT_CHARACTER * len(match.group(0)), value)
+
+
+def replace_consecutive_dots(value):
+    return re.sub(
+        r"\.{2,}",
+        lambda match: SHAREGATE_REPLACEMENT_CHARACTER * (len(match.group(0)) - 1) + ".",
+        value,
+    )
+
+
+def replace_edge_dots_and_spaces_before_extension(segment):
+    match = re.match(r"^(?P<stem>.+?)(?P<extension>\.[A-Za-z0-9]{1,12})$", segment)
+    if not match:
+        return replace_edge_dots_and_spaces(segment)
+
+    stem = replace_edge_dots_and_spaces(match.group("stem"))
+    stem = re.sub(r"(?:[._]*_+[._]*)+$", SHAREGATE_REPLACEMENT_CHARACTER, stem)
+    return stem + match.group("extension")
+
+
+def normalize_sharegate_segment(segment):
+    if segment == "":
+        return segment
+
+    clean_segment = segment
+    clean_segment = re.sub("_vti_", SHAREGATE_REPLACEMENT_CHARACTER, clean_segment, flags=re.IGNORECASE)
+    clean_segment = "".join(
+        SHAREGATE_REPLACEMENT_CHARACTER
+        if character in SHAREGATE_REPLACED_CHARACTERS or character == "\t" or not character.isprintable()
+        else character
+        for character in clean_segment
+    )
+    clean_segment = replace_consecutive_dots(clean_segment)
+    clean_segment = replace_edge_dots_and_spaces_before_extension(clean_segment)
+    return clean_segment
+
+
+def normalize_sharegate_path_characters(path):
+    if not path:
+        return path
+    return "/".join(normalize_sharegate_segment(segment) for segment in path.split("/"))
 
 
 def normalize_path(value):
     if not value:
         return ""
-    text = str(value).strip()
-    if not text:
-        return ""
-    if re.match(r"^https?://", text, flags=re.I):
-        parsed = urlparse(text)
-        text = parsed.path
-    text = re.sub(r"[?#].*$", "", text).strip()
+    text = normalize_sharegate_path_characters(decode_sharegate_path(strip_query_from_path(value)))
     if not text.startswith("/"):
         text = "/" + text
-    text = re.sub(r"/+", "/", text).rstrip("/")
-    return text.lower() or "/"
+    text = re.sub(r"/+", "/", text).rstrip("/") or "/"
+    return text.lower()
+
+
+def normalize_mapping_path(value):
+    return normalize_path(value)
 
 
 def load_path_mappings(path):
@@ -237,13 +351,13 @@ def load_path_mappings(path):
             if len(parts) < 2:
                 raise ValueError(f"Invalid path mapping at {path}:{line_number}. Expected: <source-url-or-path> <target-url-or-path>.")
 
-            mappings.append((normalize_path(parts[0]), normalize_path(parts[1])))
+            mappings.append((normalize_mapping_path(parts[0]), normalize_mapping_path(parts[1])))
 
     mappings.sort(key=lambda item: len(item[0]), reverse=True)
     return mappings
 
 
-def replace_path_mapping(path, mappings):
+def apply_path_mappings(path, mappings):
     if not path or not mappings:
         return path
 
@@ -267,6 +381,46 @@ def replace_path_prefix(path, source_prefix, target_prefix):
     if path.startswith(source_prefix + "/"):
         return target_prefix + path[len(source_prefix):]
     return path
+
+
+def row_web_path(row, source_prefix=None, target_prefix=None, path_mappings=None):
+    web_path = normalize_path(row.get("WebUrl"))
+    if path_mappings:
+        web_path = apply_path_mappings(web_path, path_mappings)
+    elif source_prefix and target_prefix:
+        web_path = replace_path_prefix(web_path, source_prefix, target_prefix)
+    return web_path
+
+
+def normalize_default_document_library_key(row, key, source_prefix=None, target_prefix=None, path_mappings=None):
+    if not key:
+        return key
+
+    web_key = row_web_path(row, source_prefix, target_prefix, path_mappings=path_mappings) or ""
+    web_prefix = web_key.rstrip("/")
+    base_path = ""
+    if web_prefix and web_prefix != "/" and key.startswith(web_prefix + "/"):
+        relative_path = key[len(web_prefix) :].strip("/")
+        base_path = web_prefix
+    elif web_key == "/" and key.startswith("/"):
+        relative_path = key.strip("/")
+    else:
+        return key
+
+    if not relative_path:
+        return key
+
+    first_segment, separator, remaining_path = relative_path.partition("/")
+    if first_segment.lower() not in DEFAULT_DOCUMENT_LIBRARY_SEGMENTS:
+        return key
+
+    normalized_relative_path = "documents"
+    if separator:
+        normalized_relative_path += "/" + remaining_path
+
+    if base_path:
+        return f"{base_path}/{normalized_relative_path}".replace("//", "/")
+    return "/" + normalized_relative_path
 
 
 def normalize_principal(value):
@@ -297,10 +451,10 @@ def row_path(row, source_prefix=None, target_prefix=None, path_mappings=None):
     raw = row.get("ObjectServerRelativeUrl") or row.get("ObjectUrl") or ""
     path = normalize_path(raw)
     if path_mappings:
-        path = replace_path_mapping(path, path_mappings)
+        path = apply_path_mappings(path, path_mappings)
     elif source_prefix and target_prefix:
         path = replace_path_prefix(path, source_prefix, target_prefix)
-    return path
+    return normalize_default_document_library_key(row, path, source_prefix, target_prefix, path_mappings=path_mappings)
 
 
 def make_key(row, source_prefix=None, target_prefix=None, path_mappings=None):
@@ -435,8 +589,15 @@ def main():
     parser.add_argument("--source-root-path", default="/FR")
     parser.add_argument("--target-root-path", default="/")
     parser.add_argument("--path-mapping-file")
+    parser.add_argument("--sharegate-replacement-character", default="_")
     parser.add_argument("--comparison-name", default="SP2019-vs-SPO-Permissions")
     args = parser.parse_args()
+
+    if len(args.sharegate_replacement_character) != 1:
+        raise ValueError("--sharegate-replacement-character must contain exactly one character.")
+
+    global SHAREGATE_REPLACEMENT_CHARACTER
+    SHAREGATE_REPLACEMENT_CHARACTER = args.sharegate_replacement_character
 
     source_csv = Path(args.source_csv)
     target_csv = Path(args.target_csv)
