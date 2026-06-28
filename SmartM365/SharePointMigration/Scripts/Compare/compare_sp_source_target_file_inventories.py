@@ -606,7 +606,7 @@ def inventory_exclusion_reason(row):
     return "", ""
 
 
-def inventory_key(row, prefixes, mappings=None):
+def inventory_path_key(row, prefixes, mappings=None):
     path = row.get("ServerRelativeUrl") or row.get("FileUrl")
     literal_percent_sequences = inventory_file_name_has_literal_percent_sequence(row)
     if literal_percent_sequences:
@@ -614,6 +614,14 @@ def inventory_key(row, prefixes, mappings=None):
 
     key = normalize_path(path, prefixes, literal_percent_sequences=literal_percent_sequences, mappings=mappings)
     return normalize_default_document_library_key(row, key, prefixes, mappings=mappings)
+
+
+def inventory_key(row, prefixes, mappings=None):
+    path_key = inventory_path_key(row, prefixes, mappings=mappings)
+    if not path_key:
+        return path_key
+
+    return f"{path_key}|version={normalize_version(row.get('Version'))}"
 
 
 def inventory_web_key(row, prefixes, mappings=None):
@@ -659,7 +667,7 @@ def normalize_default_document_library_key(row, key, prefixes, mappings=None):
 
 def library_key(row, prefixes, mappings=None):
     web_key = inventory_web_key(row, prefixes, mappings=mappings) or ""
-    file_key = inventory_key(row, prefixes, mappings=mappings) or ""
+    file_key = inventory_path_key(row, prefixes, mappings=mappings) or ""
     library_path = ""
 
     if file_key and web_key and (file_key == web_key or file_key.startswith((web_key.rstrip("/") + "/"))):
@@ -963,6 +971,7 @@ def main():
     source_filtered_rows = 0
     source_excluded_rows = 0
     source_duplicate_keys = 0
+    source_path_index = {}
 
     print(f"Source CSV: {source_csv}")
     print(f"Target CSV: {target_csv}")
@@ -993,6 +1002,7 @@ def main():
                     source_excluded_rows += 1
                     continue
 
+                path_key = inventory_path_key(row, args.source_prefix, mappings=path_mappings)
                 key = inventory_key(row, args.source_prefix, mappings=path_mappings)
                 if not key:
                     continue
@@ -1007,11 +1017,13 @@ def main():
                     duplicate_writer.writerow({"Side": "Source", **inventory_record(row, key)})
                     continue
 
-                for folder_key in ancestor_paths(parent_path(key)):
+                for folder_key in ancestor_paths(parent_path(path_key)):
                     source_folder_keys.add(folder_key.lower())
 
                 update_source_library(library_stats, lib_key, web_path, library_path, row, as_int(row.get("SizeBytes")) or 0)
-                source_index[key] = inventory_record(row, key)
+                source_record = inventory_record(row, key)
+                source_index[key] = source_record
+                source_path_index.setdefault(path_key, []).append(source_record)
 
         print(
             f"Source rows: {source_total_rows}; unique keys: {len(source_index)}; "
@@ -1073,6 +1085,7 @@ def main():
                     target_excluded_rows += 1
                     continue
 
+                path_key = inventory_path_key(row, args.target_prefix)
                 key = inventory_key(row, args.target_prefix)
                 if not key:
                     continue
@@ -1097,7 +1110,44 @@ def main():
                     extra_library_entry = ensure_library_summary(library_stats, target_lib_key, target_web_path, target_library_path)
                     extra_library_entry["ExtraInTarget"] += 1
                     extra_library_entry["ExtraInTargetBytes"] += target_size
-                    update_extra_folder_candidates(extra_folder_candidates, source_folder_keys, row, key, target_size)
+                    source_path_records = source_path_index.get(path_key, [])
+                    source_version_record = next(
+                        (
+                            candidate
+                            for candidate in source_path_records
+                            if compare_versions(candidate["Version"], target_record["Version"]) != "Same"
+                        ),
+                        None,
+                    )
+                    if source_version_record is not None:
+                        version_comparison = compare_versions(source_version_record["Version"], target_record["Version"])
+                        changed_version += 1
+                        version_library_entry = ensure_library_summary(
+                            library_stats,
+                            source_version_record.get("LibraryKey") or target_lib_key,
+                            source_version_record.get("WebPath") or target_web_path,
+                            source_version_record.get("LibraryPath") or target_library_path,
+                        )
+                        version_library_entry["ChangedVersion"] += 1
+                        changed_version_writer.writerow(
+                            {
+                                "Key": key,
+                                "SourceVersion": source_version_record["Version"],
+                                "TargetVersion": target_record["Version"],
+                                "VersionComparison": version_comparison,
+                                "SourceModified": source_version_record["Modified"],
+                                "TargetModified": target_record["Modified"],
+                                "SourceSizeBytes": source_version_record["SizeBytes"],
+                                "TargetSizeBytes": target_size if target_size is not None else "",
+                                "SourceWebUrl": source_version_record["WebUrl"],
+                                "TargetWebUrl": target_record["WebUrl"],
+                                "SourceLibraryTitle": source_version_record["LibraryTitle"],
+                                "TargetLibraryTitle": target_record["LibraryTitle"],
+                                "SourceServerRelativeUrl": source_version_record["ServerRelativeUrl"],
+                                "TargetServerRelativeUrl": target_record["ServerRelativeUrl"],
+                            }
+                        )
+                    update_extra_folder_candidates(extra_folder_candidates, source_folder_keys, row, path_key, target_size)
                     extra_writer.writerow(target_record)
                     continue
 
@@ -1309,6 +1359,7 @@ def main():
         "SourceModifiedTimeZone": args.source_modified_time_zone if compare_modified_dates else "",
         "TargetModifiedTimeZone": args.target_modified_time_zone if compare_modified_dates else "",
         "ShareGateReplacementCharacter": SHAREGATE_REPLACEMENT_CHARACTER,
+        "ComparisonKeyIncludesVersion": True,
         "DuplicateKeysCsv": str(duplicate_keys_path),
         "ExtraFoldersInTargetCsv": str(extra_folders_path),
         "ChangedModifiedDateCsv": str(changed_modified_date_path) if compare_modified_dates else "",
@@ -1353,7 +1404,7 @@ def main():
             entry["DifferentSizePercent"] = percent(entry["DifferentSize"], entry["MatchedFiles"])
             entry["ChangedModifiedDatePercent"] = percent(entry["ChangedModifiedDate"], entry["MatchedFiles"])
             entry["TargetOlderThanSourcePercent"] = percent(entry["TargetOlderThanSource"], entry["MatchedFiles"])
-            entry["ChangedVersionPercent"] = percent(entry["ChangedVersion"], entry["MatchedFiles"])
+            entry["ChangedVersionPercent"] = percent(entry["ChangedVersion"], entry["SourceFiles"])
             entry["Status"] = library_status(entry)
             writer.writerow({column: entry.get(column, "") for column in LIBRARY_SUMMARY_COLUMNS})
 
