@@ -37,6 +37,13 @@ INVENTORY_COLUMNS = [
 
 DUPLICATE_KEY_COLUMNS = ["Side"] + INVENTORY_COLUMNS
 
+MISSING_IN_TARGET_COLUMNS = INVENTORY_COLUMNS + [
+    "MissingReason",
+    "TargetMatchingPathCount",
+    "TargetVersions",
+    "TargetVersionComparisons",
+]
+
 DIFFERENT_SIZE_COLUMNS = [
     "Key",
     "SourceSizeBytes",
@@ -168,6 +175,7 @@ DEFAULT_DOCUMENT_LIBRARY_SEGMENTS = {
 }
 SHAREGATE_REPLACED_CHARACTERS = {"&", "#", "%", '"', "*", ":", ";", "<", ">", "?", "\\", "|", "{", "}", "~"}
 SHAREGATE_REPLACEMENT_CHARACTER = "_"
+COMPARISON_VERSION_SEPARATOR = "|version="
 CSV_OUTPUT_DELIMITER = ";"
 EXCLUDED_EXACT_FILE_NAMES = {"desktop.ini", ".ds_store"}
 EXCLUDED_FILE_EXTENSIONS = {".db"}
@@ -621,7 +629,11 @@ def inventory_key(row, prefixes, mappings=None):
     if not path_key:
         return path_key
 
-    return f"{path_key}|version={normalize_version(row.get('Version'))}"
+    return f"{path_key}{COMPARISON_VERSION_SEPARATOR}{normalize_version(row.get('Version'))}"
+
+
+def comparison_path_key(key):
+    return str(key or "").split(COMPARISON_VERSION_SEPARATOR, 1)[0]
 
 
 def inventory_web_key(row, prefixes, mappings=None):
@@ -856,6 +868,30 @@ def update_extra_folder_candidates(candidates, source_folder_keys, row, file_key
         candidate["ExtraFileMB"] = bytes_to_mb(candidate["ExtraFileBytes"])
 
 
+def missing_reason_details(source_record, target_path_records):
+    if not target_path_records:
+        return {
+            "MissingReason": "FileAbsent",
+            "TargetMatchingPathCount": 0,
+            "TargetVersions": "",
+            "TargetVersionComparisons": "",
+        }
+
+    target_versions = sorted({normalize_version(record.get("Version")) for record in target_path_records})
+    version_comparisons = []
+    for version in target_versions:
+        comparison = compare_versions(source_record.get("Version"), version)
+        version_label = version if version else "<blank>"
+        version_comparisons.append(f"{version_label}={comparison}")
+
+    return {
+        "MissingReason": "VersionMismatch",
+        "TargetMatchingPathCount": len(target_path_records),
+        "TargetVersions": ", ".join(version if version else "<blank>" for version in target_versions),
+        "TargetVersionComparisons": ", ".join(version_comparisons),
+    }
+
+
 def load_web_url_filter(path, prefixes, mappings=None):
     if not path:
         return None
@@ -1033,6 +1069,7 @@ def main():
         print("Comparing target inventory...")
 
         target_seen = set()
+        target_path_index = {}
         target_total_rows = 0
         target_filtered_rows = 0
         target_excluded_rows = 0
@@ -1103,6 +1140,7 @@ def main():
                 target_seen.add(key)
                 update_target_library(library_stats, target_lib_key, target_web_path, row, as_int(row.get("SizeBytes")) or 0)
                 target_record = inventory_record(row, key)
+                target_path_index.setdefault(path_key, []).append(target_record)
                 source_record = source_index.get(key)
                 if source_record is None:
                     extra += 1
@@ -1320,7 +1358,7 @@ def main():
     print("Finding source files missing from target...")
     missing = 0
     with missing_path.open("w", encoding="utf-8", newline="") as missing_handle:
-        missing_writer = csv.DictWriter(missing_handle, fieldnames=INVENTORY_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
+        missing_writer = csv.DictWriter(missing_handle, fieldnames=MISSING_IN_TARGET_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
         missing_writer.writeheader()
         for key, record in source_index.items():
             if key not in target_seen:
@@ -1329,7 +1367,9 @@ def main():
                 web_path = record.get("WebPath") or ""
                 library_path = record.get("LibraryPath") or ""
                 ensure_library_summary(library_stats, lib_key, web_path, library_path)["MissingInTarget"] += 1
-                missing_writer.writerow(record)
+                missing_row = dict(record)
+                missing_row.update(missing_reason_details(record, target_path_index.get(comparison_path_key(key), [])))
+                missing_writer.writerow(missing_row)
 
     summary = {
         "ComparisonName": args.comparison_name,
