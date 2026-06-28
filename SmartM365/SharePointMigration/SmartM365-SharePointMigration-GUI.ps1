@@ -11,7 +11,7 @@
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.3
+    1.0.4
 #>
 
 #Requires -Version 5.1
@@ -22,7 +22,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.3'
+$script:AppVersion = '1.0.4'
 $script:ScriptRoot = $PSScriptRoot
 
 Add-Type -AssemblyName PresentationFramework
@@ -72,6 +72,21 @@ function Get-LatestCsvFile {
         Where-Object { $_.Name -notlike '*-Errors.csv' -and $_.Name -notlike '*-Run.log' } |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
+}
+function Get-CsvFileItems {
+    param([string]$Directory, [string]$Filter)
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return @() }
+    @(Get-ChildItem -LiteralPath $Directory -Filter $Filter -File -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notlike '*-Errors.csv' -and $_.Name -notlike '*-Run.log' } |
+        Sort-Object LastWriteTime -Descending |
+        ForEach-Object {
+            [pscustomobject]@{
+                Display  = ('{0}  {1}' -f $_.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), $_.Name)
+                File     = $_
+                FullName = $_.FullName
+                Name     = $_.Name
+            }
+        })
 }
 
 function Get-LatestSubfolder {
@@ -136,7 +151,9 @@ function Get-MigrationStatus {
 
     [pscustomobject]@{
         SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
+        SourceFileCsvItems    = Get-CsvFileItems     $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
         TargetFileCsv         = Get-LatestCsvFile    $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
+        TargetFileCsvItems    = Get-CsvFileItems     $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         FileComparisonFolder  = Get-LatestSubfolder  $fileCmpDir  "$name-*"
         HistoryFolder         = Get-LatestSubfolder  $histDir     ("{0}-Changes-*" -f (Get-MigrationEndpointType $cfg 'Source'))
         SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
@@ -163,12 +180,15 @@ function Get-MigrationOperations {
 function Format-ItemAge {
     param([System.IO.FileSystemInfo]$Item)
     if ($null -eq $Item) { return [pscustomobject]@{ Text = 'No run yet'; HasRun = $false } }
-    $age = (Get-Date) - $Item.LastWriteTime
-    $text = if ($age.TotalMinutes -lt 90) {
+
+    $now = Get-Date
+    $age = $now - $Item.LastWriteTime
+    $dayOffset = ($now.Date - $Item.LastWriteTime.Date).Days
+    $text = if ($dayOffset -eq 0 -and $age.TotalMinutes -lt 90) {
         '{0:HH:mm} today ({1:n0} min ago)' -f $Item.LastWriteTime, [int]$age.TotalMinutes
-    } elseif ($age.TotalDays -lt 1) {
+    } elseif ($dayOffset -eq 0) {
         '{0:HH:mm} today' -f $Item.LastWriteTime
-    } elseif ($age.TotalDays -lt 2) {
+    } elseif ($dayOffset -eq 1) {
         '{0:HH:mm} yesterday' -f $Item.LastWriteTime
     } else {
         '{0:yyyy-MM-dd HH:mm}' -f $Item.LastWriteTime
@@ -414,7 +434,7 @@ function Open-InExplorer {
                   <Border x:Name="badgeScanSrc" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblScanSrcAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <TextBlock x:Name="lblScanSrcFile" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="cmbScanSrcFile" Width="430" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -443,7 +463,7 @@ function Open-InExplorer {
                   <Border x:Name="badgeScanTgt" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#E6F4FF">
                     <TextBlock x:Name="lblScanTgtAge" Text="No run yet" FontSize="11" Foreground="#005A9E"/>
                   </Border>
-                  <TextBlock x:Name="lblScanTgtFile" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="cmbScanTgtFile" Width="430" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -743,13 +763,13 @@ $panelLogs        = ctrl 'panelLogs'
 # Files step
 $badgeScanSrc  = ctrl 'badgeScanSrc'
 $lblScanSrcAge = ctrl 'lblScanSrcAge'
-$lblScanSrcFile= ctrl 'lblScanSrcFile'
+$cmbScanSrcFile= ctrl 'cmbScanSrcFile'
 $btnOpenScanSrc= ctrl 'btnOpenScanSrc'
 $btnRunScanSrc = ctrl 'btnRunScanSrc'
 
 $badgeScanTgt  = ctrl 'badgeScanTgt'
 $lblScanTgtAge = ctrl 'lblScanTgtAge'
-$lblScanTgtFile= ctrl 'lblScanTgtFile'
+$cmbScanTgtFile= ctrl 'cmbScanTgtFile'
 $btnOpenScanTgt= ctrl 'btnOpenScanTgt'
 $btnRunScanTgt = ctrl 'btnRunScanTgt'
 
@@ -851,6 +871,53 @@ function Set-Badge {
             [System.Windows.Media.Color]::FromRgb(95, 107, 122))
     }
 }
+function Set-ScanComboItems {
+    param(
+        [System.Windows.Controls.ComboBox]$ComboBox,
+        [object[]]$Items,
+        [System.IO.FileInfo]$SelectedFile
+    )
+
+    $ComboBox.Items.Clear()
+    foreach ($item in @($Items)) { [void]$ComboBox.Items.Add($item) }
+    $ComboBox.IsEnabled = ($ComboBox.Items.Count -gt 0)
+    if ($ComboBox.Items.Count -eq 0) {
+        $ComboBox.SelectedIndex = -1
+        return
+    }
+
+    $selectedIndex = 0
+    if ($SelectedFile) {
+        for ($i = 0; $i -lt $ComboBox.Items.Count; $i++) {
+            if ([string]$ComboBox.Items[$i].FullName -eq [string]$SelectedFile.FullName) {
+                $selectedIndex = $i
+                break
+            }
+        }
+    }
+    $ComboBox.SelectedIndex = $selectedIndex
+}
+
+function Get-SelectedScanFile {
+    param([System.Windows.Controls.ComboBox]$ComboBox)
+    if ($null -eq $ComboBox -or $null -eq $ComboBox.SelectedItem) { return $null }
+    return $ComboBox.SelectedItem.File
+}
+
+function Update-ScanFileSelection {
+    param(
+        [System.Windows.Controls.ComboBox]$ComboBox,
+        [System.Windows.Controls.Border]$Badge,
+        [System.Windows.Controls.TextBlock]$Label,
+        [System.Windows.Controls.Button]$OpenButton
+    )
+
+    $selectedFile = Get-SelectedScanFile -ComboBox $ComboBox
+    $age = Format-ItemAge $selectedFile
+    Set-Badge $Badge $Label $age.Text $age.HasRun
+    $OpenButton.Visibility = if ($selectedFile) { 'Visible' } else { 'Collapsed' }
+    if ($selectedFile) { $OpenButton.Tag = (Split-Path $selectedFile.FullName -Parent) }
+}
 
 # ---------------------------------------------------------------------------
 # Auth mode
@@ -886,6 +953,13 @@ function Invoke-MigrationAction {
     switch (Get-AuthMode) {
         'DeviceLogin' { $args += '-DeviceLogin' }
         'Certificate' { $args += '-UseCertificate' }
+    }
+
+    if ($Action -eq 'CompareFiles') {
+        $sourceCsv = Get-SelectedScanFile -ComboBox $cmbScanSrcFile
+        $targetCsv = Get-SelectedScanFile -ComboBox $cmbScanTgtFile
+        if ($sourceCsv) { $args += @('-SourceCsv', "`"$($sourceCsv.FullName)`"") }
+        if ($targetCsv) { $args += @('-TargetCsv', "`"$($targetCsv.FullName)`"") }
     }
 
     Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $script:ScriptRoot
@@ -924,17 +998,11 @@ function Update-UI {
     $lblTargetUrl.Text  = Get-MigrationEndpointUrlText $cfg 'Target'
 
     # --- Files ---
-    $r = Format-ItemAge $st.SourceFileCsv
-    Set-Badge $badgeScanSrc $lblScanSrcAge $r.Text $r.HasRun
-    $lblScanSrcFile.Text    = if ($st.SourceFileCsv)  { $st.SourceFileCsv.Name } else { '' }
-    $btnOpenScanSrc.Visibility = if ($st.SourceFileCsv) { 'Visible' } else { 'Collapsed' }
-    if ($st.SourceFileCsv) { $btnOpenScanSrc.Tag = (Split-Path $st.SourceFileCsv.FullName -Parent) }
+    Set-ScanComboItems $cmbScanSrcFile @($st.SourceFileCsvItems) $st.SourceFileCsv
+    Update-ScanFileSelection $cmbScanSrcFile $badgeScanSrc $lblScanSrcAge $btnOpenScanSrc
 
-    $r = Format-ItemAge $st.TargetFileCsv
-    Set-Badge $badgeScanTgt $lblScanTgtAge $r.Text $r.HasRun
-    $lblScanTgtFile.Text    = if ($st.TargetFileCsv)  { $st.TargetFileCsv.Name } else { '' }
-    $btnOpenScanTgt.Visibility = if ($st.TargetFileCsv) { 'Visible' } else { 'Collapsed' }
-    if ($st.TargetFileCsv) { $btnOpenScanTgt.Tag = (Split-Path $st.TargetFileCsv.FullName -Parent) }
+    Set-ScanComboItems $cmbScanTgtFile @($st.TargetFileCsvItems) $st.TargetFileCsv
+    Update-ScanFileSelection $cmbScanTgtFile $badgeScanTgt $lblScanTgtAge $btnOpenScanTgt
 
     $r = Format-ItemAge $st.FileComparisonFolder
     Set-Badge $badgeCmpFiles $lblCmpFilesAge $r.Text $r.HasRun
@@ -1049,6 +1117,8 @@ $btnRunScanTgt.Add_Click({  Invoke-MigrationAction 'ScanTargetFiles' })
 $btnRunCmpFiles.Add_Click({ Invoke-MigrationAction 'CompareFiles' })
 $btnRunHistory.Add_Click({  Invoke-MigrationAction 'CompareSourceHistory' })
 
+$cmbScanSrcFile.Add_SelectionChanged({ Update-ScanFileSelection $cmbScanSrcFile $badgeScanSrc $lblScanSrcAge $btnOpenScanSrc })
+$cmbScanTgtFile.Add_SelectionChanged({ Update-ScanFileSelection $cmbScanTgtFile $badgeScanTgt $lblScanTgtAge $btnOpenScanTgt })
 $btnOpenScanSrc.Add_Click({  Open-InExplorer ([string]$btnOpenScanSrc.Tag) })
 $btnOpenScanTgt.Add_Click({  Open-InExplorer ([string]$btnOpenScanTgt.Tag) })
 $btnOpenCmpFiles.Add_Click({ Open-InExplorer ([string]$btnOpenCmpFiles.Tag) })
