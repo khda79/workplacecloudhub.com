@@ -40,6 +40,7 @@ DUPLICATE_KEY_COLUMNS = ["Side"] + INVENTORY_COLUMNS
 MISSING_IN_TARGET_COLUMNS = INVENTORY_COLUMNS + [
     "MissingReason",
     "TargetMatchingPathCount",
+    "TargetSizeBytes",
     "TargetVersions",
     "TargetVersionComparisons",
 ]
@@ -49,6 +50,7 @@ DIFFERENT_SIZE_COLUMNS = [
     "SourceSizeBytes",
     "TargetSizeBytes",
     "DeltaBytes",
+    "DeltaBytesPercent",
     "SourceWebUrl",
     "TargetWebUrl",
     "SourceLibraryTitle",
@@ -873,10 +875,17 @@ def missing_reason_details(source_record, target_path_records):
         return {
             "MissingReason": "FileAbsent",
             "TargetMatchingPathCount": 0,
+            "TargetSizeBytes": "",
             "TargetVersions": "",
             "TargetVersionComparisons": "",
         }
 
+    source_size = as_int(source_record.get("SizeBytes"))
+    same_key_records = [record for record in target_path_records if record.get("Key") == source_record.get("Key")]
+    zero_size_records = [record for record in same_key_records if (as_int(record.get("SizeBytes")) or 0) == 0]
+    missing_reason = "TargetZeroBytes" if source_size and zero_size_records else "VersionMismatch"
+    relevant_records = zero_size_records if zero_size_records else target_path_records
+    target_sizes = sorted({str(as_int(record.get("SizeBytes")) if as_int(record.get("SizeBytes")) is not None else "") for record in relevant_records})
     target_versions = sorted({normalize_version(record.get("Version")) for record in target_path_records})
     version_comparisons = []
     for version in target_versions:
@@ -885,8 +894,9 @@ def missing_reason_details(source_record, target_path_records):
         version_comparisons.append(f"{version_label}={comparison}")
 
     return {
-        "MissingReason": "VersionMismatch",
+        "MissingReason": missing_reason,
         "TargetMatchingPathCount": len(target_path_records),
+        "TargetSizeBytes": ", ".join(size for size in target_sizes if size),
         "TargetVersions": ", ".join(version if version else "<blank>" for version in target_versions),
         "TargetVersionComparisons": ", ".join(version_comparisons),
     }
@@ -1069,6 +1079,7 @@ def main():
         print("Comparing target inventory...")
 
         target_seen = set()
+        target_valid_seen = set()
         target_path_index = {}
         target_total_rows = 0
         target_filtered_rows = 0
@@ -1142,12 +1153,22 @@ def main():
                 target_record = inventory_record(row, key)
                 target_path_index.setdefault(path_key, []).append(target_record)
                 source_record = source_index.get(key)
-                if source_record is None:
+                source_size = as_int(source_record["SizeBytes"]) if source_record is not None else None
+                target_size = as_int(target_record["SizeBytes"])
+                target_effective_size = target_size or 0
+                if source_record is not None and source_size and target_effective_size == 0:
                     extra += 1
-                    target_size = as_int(target_record["SizeBytes"]) or 0
                     extra_library_entry = ensure_library_summary(library_stats, target_lib_key, target_web_path, target_library_path)
                     extra_library_entry["ExtraInTarget"] += 1
-                    extra_library_entry["ExtraInTargetBytes"] += target_size
+                    extra_library_entry["ExtraInTargetBytes"] += target_effective_size
+                    extra_writer.writerow(target_record)
+                    continue
+
+                if source_record is None:
+                    extra += 1
+                    extra_library_entry = ensure_library_summary(library_stats, target_lib_key, target_web_path, target_library_path)
+                    extra_library_entry["ExtraInTarget"] += 1
+                    extra_library_entry["ExtraInTargetBytes"] += target_effective_size
                     source_path_records = source_path_index.get(path_key, [])
                     source_version_record = next(
                         (
@@ -1176,7 +1197,7 @@ def main():
                                 "SourceModified": source_version_record["Modified"],
                                 "TargetModified": target_record["Modified"],
                                 "SourceSizeBytes": source_version_record["SizeBytes"],
-                                "TargetSizeBytes": target_size if target_size is not None else "",
+                                "TargetSizeBytes": target_effective_size if target_size is not None else "",
                                 "SourceWebUrl": source_version_record["WebUrl"],
                                 "TargetWebUrl": target_record["WebUrl"],
                                 "SourceLibraryTitle": source_version_record["LibraryTitle"],
@@ -1185,10 +1206,11 @@ def main():
                                 "TargetServerRelativeUrl": target_record["ServerRelativeUrl"],
                             }
                         )
-                    update_extra_folder_candidates(extra_folder_candidates, source_folder_keys, row, path_key, target_size)
+                    update_extra_folder_candidates(extra_folder_candidates, source_folder_keys, row, path_key, target_effective_size)
                     extra_writer.writerow(target_record)
                     continue
 
+                target_valid_seen.add(key)
                 matched += 1
                 source_lib_key = source_record.get("LibraryKey") or target_lib_key
                 source_web_path = source_record.get("WebPath") or target_web_path
@@ -1201,8 +1223,6 @@ def main():
                     source_library_entry["TargetWebTitle"] = target_record["WebTitle"]
                 if not source_library_entry["TargetLibraryTitle"]:
                     source_library_entry["TargetLibraryTitle"] = target_record["LibraryTitle"]
-                source_size = as_int(source_record["SizeBytes"])
-                target_size = as_int(target_record["SizeBytes"])
                 if (
                     source_size is not None
                     and target_size is not None
@@ -1219,6 +1239,7 @@ def main():
                             "SourceSizeBytes": source_size,
                             "TargetSizeBytes": target_size,
                             "DeltaBytes": target_size - source_size,
+                            "DeltaBytesPercent": f"{((target_size - source_size) / source_size):.6f}" if source_size else "",
                             "SourceWebUrl": source_record["WebUrl"],
                             "TargetWebUrl": target_record["WebUrl"],
                             "SourceLibraryTitle": source_record["LibraryTitle"],
@@ -1280,7 +1301,7 @@ def main():
                             ),
                             "ModifiedDirection": modified_direction(signed_modified_delta_minutes),
                             "SourceSizeBytes": source_size if source_size is not None else "",
-                            "TargetSizeBytes": target_size if target_size is not None else "",
+                            "TargetSizeBytes": target_effective_size if target_size is not None else "",
                             "SourceVersion": source_record["Version"],
                             "TargetVersion": target_record["Version"],
                             "SourceWebUrl": source_record["WebUrl"],
@@ -1310,7 +1331,7 @@ def main():
                                 ),
                                 "TargetOlderByMinutes": f"{abs(signed_modified_delta_minutes):.2f}",
                                 "SourceSizeBytes": source_size if source_size is not None else "",
-                                "TargetSizeBytes": target_size if target_size is not None else "",
+                                "TargetSizeBytes": target_effective_size if target_size is not None else "",
                                 "SourceVersion": source_record["Version"],
                                 "TargetVersion": target_record["Version"],
                                 "SourceWebUrl": source_record["WebUrl"],
@@ -1335,7 +1356,7 @@ def main():
                             "SourceModified": source_record["Modified"],
                             "TargetModified": target_record["Modified"],
                             "SourceSizeBytes": source_size if source_size is not None else "",
-                            "TargetSizeBytes": target_size if target_size is not None else "",
+                            "TargetSizeBytes": target_effective_size if target_size is not None else "",
                             "SourceWebUrl": source_record["WebUrl"],
                             "TargetWebUrl": target_record["WebUrl"],
                             "SourceLibraryTitle": source_record["LibraryTitle"],
@@ -1361,7 +1382,7 @@ def main():
         missing_writer = csv.DictWriter(missing_handle, fieldnames=MISSING_IN_TARGET_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
         missing_writer.writeheader()
         for key, record in source_index.items():
-            if key not in target_seen:
+            if key not in target_valid_seen:
                 missing += 1
                 lib_key = record.get("LibraryKey") or ""
                 web_path = record.get("WebPath") or ""

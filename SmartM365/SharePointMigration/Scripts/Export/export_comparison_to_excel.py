@@ -98,6 +98,7 @@ PERCENT_COLUMNS = {
     "ChangedModifiedDatePercent",
     "TargetOlderThanSourcePercent",
     "ChangedVersionPercent",
+    "DeltaBytesPercent",
 }
 DATE_COLUMNS = {
     "Created",
@@ -147,6 +148,7 @@ COLUMN_WIDTHS = {
     "ChangedVersionPercent": 22,
     "MissingReason": 18,
     "TargetMatchingPathCount": 24,
+    "TargetSizeBytes": 18,
     "TargetVersions": 24,
     "TargetVersionComparisons": 42,
     "ServerRelativeUrl": 76,
@@ -171,6 +173,7 @@ COLUMN_WIDTHS = {
     "SourceSizeBytes": 18,
     "TargetSizeBytes": 18,
     "DeltaBytes": 16,
+    "DeltaBytesPercent": 19,
     "TargetOlderByMinutes": 22,
     "SourceVersion": 16,
     "TargetVersion": 16,
