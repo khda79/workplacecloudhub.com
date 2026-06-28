@@ -31,7 +31,7 @@
 
     Permissions = @{
         SourceDocumentLibrariesOnly = $false
-        TargetDocumentLibrariesOnly = $true
+        TargetDocumentLibrariesOnly = $false
         IncludeItemPermissions = $true
         ItemProgressInterval = 500
     }
