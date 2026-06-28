@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.12
+    1.0.13
 #>
 
 [CmdletBinding()]
@@ -884,6 +884,12 @@ function Invoke-PermissionComparison {
             '--sharegate-replacement-character', ([string]$Config.Comparison.ShareGateReplacementCharacter),
             '--comparison-name', ("{0}-{1}-vs-{2}-Permissions" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target'))
         )
+        if (Get-MigrationEndpointPermissionLibraryOnly -Side 'Source') {
+            $permissionCompareArguments += '--source-scan-document-libraries-only'
+        }
+        if (Get-MigrationEndpointPermissionLibraryOnly -Side 'Target') {
+            $permissionCompareArguments += '--target-scan-document-libraries-only'
+        }
         if ($pathMappingsFile) {
             $permissionCompareArguments += @('--path-mapping-file', $pathMappingsFile)
         }

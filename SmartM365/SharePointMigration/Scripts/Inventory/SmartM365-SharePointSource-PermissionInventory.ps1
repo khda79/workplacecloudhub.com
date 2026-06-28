@@ -22,6 +22,9 @@
 
 .EXAMPLE
     .\SmartM365-SharePointSource-PermissionInventory.ps1 -WebUrl "https://intranet/sites/finance" -DocumentLibrariesOnly -IncludeItemPermissions
+
+.VERSION
+    1.0.0
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -150,6 +153,9 @@ $PermissionColumns = @(
     'ParentObjectUrl',
     'ListTitle',
     'ListUrl',
+    'ListBaseTemplate',
+    'ListBaseType',
+    'IsDocumentLibrary',
     'ItemId',
     'ItemFileSystemObjectType',
     'HasUniqueRoleAssignments',
@@ -421,6 +427,9 @@ function Get-RoleAssignmentRows {
         [string]$ParentObjectUrl,
         [string]$ListTitle,
         [string]$ListUrl,
+        [object]$ListBaseTemplate,
+        [string]$ListBaseType,
+        [object]$IsDocumentLibrary,
         [object]$ItemId,
         [string]$ItemFileSystemObjectType,
         [bool]$HasUniqueRoleAssignments,
@@ -447,6 +456,9 @@ function Get-RoleAssignmentRows {
             ParentObjectUrl         = $ParentObjectUrl
             ListTitle               = $ListTitle
             ListUrl                 = $ListUrl
+            ListBaseTemplate        = $ListBaseTemplate
+            ListBaseType            = $ListBaseType
+            IsDocumentLibrary       = $IsDocumentLibrary
             ItemId                  = $ItemId
             ItemFileSystemObjectType = $ItemFileSystemObjectType
             HasUniqueRoleAssignments = $HasUniqueRoleAssignments
@@ -567,6 +579,9 @@ function Export-ItemPermissionInventory {
                         -ParentObjectUrl $listUrl `
                         -ListTitle $List.Title `
                         -ListUrl $listUrl `
+                        -ListBaseTemplate ([int]$List.BaseTemplate) `
+                        -ListBaseType ([string]$List.BaseType) `
+                        -IsDocumentLibrary ($List.BaseType -eq [Microsoft.SharePoint.SPBaseType]::DocumentLibrary) `
                         -ItemId $item.ID `
                         -ItemFileSystemObjectType $fsObjType `
                         -HasUniqueRoleAssignments $true `
@@ -633,6 +648,9 @@ function Export-WebPermissionInventory {
                 -ParentObjectUrl '' `
                 -ListTitle '' `
                 -ListUrl '' `
+                -ListBaseTemplate '' `
+                -ListBaseType '' `
+                -IsDocumentLibrary '' `
                 -ItemId $null `
                 -ItemFileSystemObjectType '' `
                 -HasUniqueRoleAssignments $webHasUniqueRoleAssignments `
@@ -674,6 +692,7 @@ function Export-WebPermissionInventory {
             }
 
             $listHasUniqueRoleAssignments = $list.HasUniqueRoleAssignments
+            $isDocumentLibrary = ($list.BaseType -eq [Microsoft.SharePoint.SPBaseType]::DocumentLibrary)
             $inheritedFrom = if ($listHasUniqueRoleAssignments) { '' } else { 'Web' }
             $listRows = @(Get-RoleAssignmentRows `
                     -SiteCollectionUrl $Web.Site.Url `
@@ -687,6 +706,9 @@ function Export-WebPermissionInventory {
                     -ParentObjectUrl $Web.Url `
                     -ListTitle $list.Title `
                     -ListUrl $listUrl `
+                    -ListBaseTemplate ([int]$list.BaseTemplate) `
+                    -ListBaseType ([string]$list.BaseType) `
+                    -IsDocumentLibrary $isDocumentLibrary `
                     -ItemId $null `
                     -ItemFileSystemObjectType '' `
                     -HasUniqueRoleAssignments $listHasUniqueRoleAssignments `

@@ -63,6 +63,8 @@ NUMERIC_COLUMNS = {
     "ExtraInSPO",
     "SourceDuplicateKeysIgnored",
     "TargetDuplicateKeysIgnored",
+    "SourceRowsWithoutLibraryScopeMetadata",
+    "TargetRowsWithoutLibraryScopeMetadata",
     "SourcePermissions",
     "TargetPermissions",
     "Count",
@@ -581,6 +583,202 @@ def list_rows_for_excel(path: Path, max_rows=MAX_EXCEL_ROWS):
     return [header] + [[row.get(column, "") for column in header] for row in rows[: max_rows - 1]]
 
 
+
+def parse_bool(value):
+    text = str(value or "").strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n"}:
+        return False
+    return None
+
+
+def has_library_scope_metadata(row):
+    return parse_bool(row.get("IsDocumentLibrary")) is not None
+
+
+def is_document_library_permission(row):
+    object_scope = (row.get("ObjectScope") or "").strip().lower()
+    if object_scope not in {"list", "item"}:
+        return False
+    return parse_bool(row.get("IsDocumentLibrary")) is True
+
+
+def library_scope_metadata_missing_count(rows):
+    return sum(
+        1
+        for row in rows
+        if (row.get("ObjectScope") or "").strip().lower() in {"list", "item"}
+        and not has_library_scope_metadata(row)
+    )
+
+
+def build_scope_warning(report_scope, source_rows, target_rows, source_scan_document_libraries_only=False, target_scan_document_libraries_only=False):
+    warnings = []
+    source_missing = library_scope_metadata_missing_count(source_rows)
+    target_missing = library_scope_metadata_missing_count(target_rows)
+    if source_missing or target_missing:
+        warnings.append(
+            "Permission inventory rows are missing IsDocumentLibrary metadata. Rerun source and target permission scans with the updated inventory scripts for reliable split reports."
+        )
+    if report_scope == "DocumentLibraries" and not source_rows and not target_rows:
+        warnings.append(
+            "No document library permission rows were identified. If these scans were created before IsDocumentLibrary metadata existed, rerun source and target permission scans."
+        )
+    if report_scope == "OtherScopes" and (source_scan_document_libraries_only or target_scan_document_libraries_only):
+        limited_sides = []
+        if source_scan_document_libraries_only:
+            limited_sides.append("source")
+        if target_scan_document_libraries_only:
+            limited_sides.append("target")
+        warnings.append(
+            "OtherScopes is incomplete because the {0} permission scan was run with DocumentLibrariesOnly.".format(
+                " and ".join(limited_sides)
+            )
+        )
+    return " ".join(warnings)
+
+
+def write_permission_comparison_report(
+    source_rows,
+    target_rows,
+    output_dir,
+    comparison_name,
+    source_root_path,
+    target_root_path,
+    path_mappings=None,
+    report_scope="AllScopes",
+    source_scan_document_libraries_only=False,
+    target_scan_document_libraries_only=False,
+):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    source_by_key = {}
+    target_by_key = {}
+    source_duplicates = []
+    target_duplicates = []
+
+    for row in source_rows:
+        key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings)
+        keyed = attach_key(row, key)
+        if key in source_by_key:
+            source_duplicates.append(keyed)
+            continue
+        source_by_key[key] = keyed
+
+    for row in target_rows:
+        key = make_key(row)
+        keyed = attach_key(row, key)
+        if key in target_by_key:
+            target_duplicates.append(keyed)
+            continue
+        target_by_key[key] = keyed
+
+    source_keys = set(source_by_key)
+    target_keys = set(target_by_key)
+    matched_keys = sorted(source_keys & target_keys)
+    missing_keys = sorted(source_keys - target_keys)
+    extra_keys = sorted(target_keys - source_keys)
+
+    summary_rows = [
+        {
+            "ReportScope": report_scope,
+            "SourceRows": len(source_rows),
+            "TargetRows": len(target_rows),
+            "SourceUniqueKeys": len(source_by_key),
+            "TargetUniqueKeys": len(target_by_key),
+            "MatchedPermissions": len(matched_keys),
+            "MissingInSPO": len(missing_keys),
+            "ExtraInSPO": len(extra_keys),
+            "SourceDuplicateKeysIgnored": len(source_duplicates),
+            "TargetDuplicateKeysIgnored": len(target_duplicates),
+            "SourceRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(source_rows),
+            "TargetRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(target_rows),
+            "SourceScanDocumentLibrariesOnly": str(bool(source_scan_document_libraries_only)),
+            "TargetScanDocumentLibrariesOnly": str(bool(target_scan_document_libraries_only)),
+            "SourceRootPath": source_root_path,
+            "TargetRootPath": target_root_path,
+            "ScopeWarning": build_scope_warning(
+                report_scope,
+                source_rows,
+                target_rows,
+                source_scan_document_libraries_only=source_scan_document_libraries_only,
+                target_scan_document_libraries_only=target_scan_document_libraries_only,
+            ),
+        }
+    ]
+
+    def rows_from_keys(keys, lookup):
+        return [lookup[key] for key in keys]
+
+    matched_rows = rows_from_keys(matched_keys, source_by_key)
+    missing_rows = rows_from_keys(missing_keys, source_by_key)
+    extra_rows = rows_from_keys(extra_keys, target_by_key)
+
+    scope_counter = Counter()
+    for key in matched_keys:
+        scope_counter[(key[0], "Matched")] += 1
+    for key in missing_keys:
+        scope_counter[(key[0], "MissingInSPO")] += 1
+    for key in extra_keys:
+        scope_counter[(key[0], "ExtraInSPO")] += 1
+    scope_rows = [
+        {"ObjectScope": scope, "Status": status, "Count": count}
+        for (scope, status), count in sorted(scope_counter.items())
+    ]
+    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, missing_keys, extra_keys)
+
+    summary_csv = output_dir / "Summary.csv"
+    scope_csv = output_dir / "ScopeSummary.csv"
+    permission_summary_csv = output_dir / "PermissionSummary.csv"
+    missing_csv = output_dir / "MissingInSPO.csv"
+    extra_csv = output_dir / "ExtraInSPO.csv"
+    matched_csv = output_dir / "Matched.csv"
+    duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
+    duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
+
+    write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
+    write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
+    write_csv(permission_summary_csv, permission_summary_rows, PERMISSION_SUMMARY_COLUMNS)
+
+    output_fields = list(source_rows[0].keys()) if source_rows else (list(target_rows[0].keys()) if target_rows else [])
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels"]:
+        if extra_field not in output_fields:
+            output_fields.append(extra_field)
+    write_csv(missing_csv, missing_rows, output_fields)
+    write_csv(matched_csv, matched_rows, output_fields)
+
+    target_fields = list(target_rows[0].keys()) if target_rows else output_fields
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels"]:
+        if extra_field not in target_fields:
+            target_fields.append(extra_field)
+    write_csv(extra_csv, extra_rows, target_fields)
+    write_csv(duplicate_source_csv, source_duplicates, output_fields)
+    write_csv(duplicate_target_csv, target_duplicates, target_fields)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    xlsx_path = output_dir / f"{comparison_name}-{timestamp}.xlsx"
+    create_xlsx(
+        xlsx_path,
+        [
+            ("Summary", list_rows_for_excel(summary_csv)),
+            ("PermissionSummary", list_rows_for_excel(permission_summary_csv)),
+            ("ScopeSummary", list_rows_for_excel(scope_csv)),
+            ("MissingInSPO", list_rows_for_excel(missing_csv)),
+            ("ExtraInSPO", list_rows_for_excel(extra_csv)),
+            ("Matched", list_rows_for_excel(matched_csv)),
+            ("DuplicateSource", list_rows_for_excel(duplicate_source_csv)),
+            ("DuplicateTarget", list_rows_for_excel(duplicate_target_csv)),
+        ],
+    )
+
+    return {
+        "ReportScope": report_scope,
+        "MatchedPermissions": len(matched_keys),
+        "MissingInSPO": len(missing_keys),
+        "ExtraInSPO": len(extra_keys),
+        "Summary": summary_csv,
+        "Excel": xlsx_path,
+    }
 def main():
     parser = argparse.ArgumentParser(description="Compare SharePoint permission inventories.")
     parser.add_argument("--source-csv", required=True)
@@ -591,6 +789,8 @@ def main():
     parser.add_argument("--path-mapping-file")
     parser.add_argument("--sharegate-replacement-character", default="_")
     parser.add_argument("--comparison-name", default="SP2019-vs-SPO-Permissions")
+    parser.add_argument("--source-scan-document-libraries-only", action="store_true")
+    parser.add_argument("--target-scan-document-libraries-only", action="store_true")
     args = parser.parse_args()
 
     if len(args.sharegate_replacement_character) != 1:
@@ -720,12 +920,39 @@ def main():
         ],
     )
 
+
+    document_library_report = write_permission_comparison_report(
+        [row for row in source_rows if is_document_library_permission(row)],
+        [row for row in target_rows if is_document_library_permission(row)],
+        output_dir / "DocumentLibraries",
+        f"{args.comparison_name}-DocumentLibraries",
+        args.source_root_path,
+        args.target_root_path,
+        path_mappings=path_mappings,
+        report_scope="DocumentLibraries",
+        source_scan_document_libraries_only=args.source_scan_document_libraries_only,
+        target_scan_document_libraries_only=args.target_scan_document_libraries_only,
+    )
+    other_scope_report = write_permission_comparison_report(
+        [row for row in source_rows if not is_document_library_permission(row)],
+        [row for row in target_rows if not is_document_library_permission(row)],
+        output_dir / "OtherScopes",
+        f"{args.comparison_name}-OtherScopes",
+        args.source_root_path,
+        args.target_root_path,
+        path_mappings=path_mappings,
+        report_scope="OtherScopes",
+        source_scan_document_libraries_only=args.source_scan_document_libraries_only,
+        target_scan_document_libraries_only=args.target_scan_document_libraries_only,
+    )
     print(f"Comparison completed.")
     print(f"Matched permissions: {len(matched_keys)}")
     print(f"Missing in SPO: {len(missing_keys)}")
     print(f"Extra in SPO: {len(extra_keys)}")
     print(f"Summary: {summary_csv}")
     print(f"Excel: {xlsx_path}")
+    print(f"Document library permission report: {document_library_report['Excel']}")
+    print(f"Other SharePoint scope permission report: {other_scope_report['Excel']}")
 
 
 if __name__ == "__main__":
