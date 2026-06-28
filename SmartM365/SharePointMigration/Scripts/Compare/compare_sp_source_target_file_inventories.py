@@ -659,7 +659,7 @@ def normalize_default_document_library_key(row, key, prefixes, mappings=None):
 
 def library_key(row, prefixes, mappings=None):
     web_key = inventory_web_key(row, prefixes, mappings=mappings) or ""
-    file_key = inventory_key(row, prefixes) or ""
+    file_key = inventory_key(row, prefixes, mappings=mappings) or ""
     library_path = ""
 
     if file_key and web_key and (file_key == web_key or file_key.startswith((web_key.rstrip("/") + "/"))):
