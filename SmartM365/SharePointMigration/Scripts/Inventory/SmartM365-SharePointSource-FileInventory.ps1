@@ -33,6 +33,9 @@
 
 .EXAMPLE
     .\SmartM365-SharePointSource-FileInventory.ps1 -WebApplicationUrl "https://intranet" -IncludePermissionInventory
+
+.VERSION
+    1.0.0
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -898,6 +901,13 @@ try {
     Write-Host ("Temporary inventory output: {0}" -f $TempOutputPath)
     Write-Host ("Error output: {0}" -f $ErrorPath)
     Write-Host ("Run log: {0}" -f $LogPath)
+    $inputScope = switch ($PSCmdlet.ParameterSetName) {
+        'WebApplication' { $WebApplicationUrl }
+        'Site' { $SiteUrl }
+        'Web' { $WebUrl }
+    }
+    $siteUrlsFileLabel = if ([string]::IsNullOrWhiteSpace($SiteUrlsFile)) { '<none>' } else { $SiteUrlsFile }
+    Write-Host ("File inventory options: IncludeHiddenLibraries={0}; IncludeSystemLibraries={1}; IncludePermissionInventory={2}; IncludePermissionItemPermissions={3}; RowLimit={4}; ParameterSet={5}; Input={6}; UseSiteUrlFilter={7}; SiteUrlsFile={8}" -f [bool]$IncludeHiddenLibraries, [bool]$IncludeSystemLibraries, [bool]$IncludePermissionInventory, [bool]$IncludePermissionItemPermissions, $RowLimit, $PSCmdlet.ParameterSetName, $inputScope, [bool]$script:UseSiteUrlFilter, $siteUrlsFileLabel)
 }
 catch {
     Write-Warning ("Could not start transcript log '{0}': {1}" -f $LogPath, $_.Exception.Message)
