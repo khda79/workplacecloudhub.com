@@ -6,6 +6,9 @@
     Uses PnP.PowerShell with interactive, device login, or certificate authentication.
     The output columns intentionally match SmartM365-SharePointSource-PermissionInventory.ps1 as closely
     as possible so both inventories can be compared.
+
+.VERSION
+    1.0.0
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -305,17 +308,20 @@ function Connect-ToSPOWeb {
         $parameters.Tenant = $TenantId
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($Thumbprint)) {
-        $parameters.Thumbprint = $Thumbprint
+    if ($Interactive) {
+        $parameters.Interactive = $true
     }
     elseif ($DeviceLogin) {
         $parameters.DeviceLogin = $true
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($Thumbprint)) {
+        $parameters.Thumbprint = $Thumbprint
     }
     else {
         $parameters.Interactive = $true
     }
 
-    if ($ForceAuthentication -and -not $script:ForceAuthenticationUsed -and [string]::IsNullOrWhiteSpace($Thumbprint)) {
+    if ($ForceAuthentication -and -not $script:ForceAuthenticationUsed -and -not $parameters.ContainsKey('Thumbprint')) {
         try {
             Disconnect-PnPOnline -ClearPersistedLogin -ErrorAction SilentlyContinue
             Write-ConsoleMessage -Message "Cleared persisted PnP login before forced authentication."

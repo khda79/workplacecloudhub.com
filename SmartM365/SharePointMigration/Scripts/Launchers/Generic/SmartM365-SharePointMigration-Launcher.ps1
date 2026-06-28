@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.10
+    1.0.11
 #>
 
 [CmdletBinding()]
@@ -605,13 +605,17 @@ function Add-SPOInventoryAuthenticationParameters {
     )
 
     $authConfig = Get-SPOAuthConfig
-    foreach ($key in @('ClientId', 'Tenant', 'TenantId', 'Thumbprint')) {
+    foreach ($key in @('ClientId', 'Tenant', 'TenantId')) {
         if ($authConfig.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace([string]$authConfig[$key])) {
             $Parameters[$key] = $authConfig[$key]
         }
     }
 
     if ($UseCertificate) {
+        if ($authConfig.ContainsKey('Thumbprint') -and -not [string]::IsNullOrWhiteSpace([string]$authConfig.Thumbprint)) {
+            $Parameters.Thumbprint = $authConfig.Thumbprint
+        }
+
         if (-not $Parameters.ContainsKey('ClientId') -or -not $Parameters.ContainsKey('Thumbprint')) {
             throw "Certificate authentication requires ClientId and Thumbprint in Config\SPOAuth.local.psd1."
         }
