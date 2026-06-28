@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.6
+    1.0.9
 #>
 
 [CmdletBinding()]
@@ -105,6 +105,30 @@ function Get-PythonCommand {
     throw "Python 3 is required. Expected portable Python at: $portablePython"
 }
 
+function Invoke-PythonScript {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Script,
+
+        [string[]]$Arguments = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $Script -PathType Leaf)) {
+        throw "Python script not found: $Script"
+    }
+
+    $pythonCommand = Get-PythonCommand
+    Write-Info ("Running Python script: {0} ({1})" -f $Script, $pythonCommand.Source) Cyan
+
+    & $pythonCommand.Executable @($pythonCommand.Arguments) $Script @Arguments 2>&1 | ForEach-Object {
+        Microsoft.PowerShell.Utility\Write-Host ([string]$_)
+    }
+
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw ("Python script failed with exit code {0}: {1}" -f $exitCode, $Script)
+    }
+}
 function Resolve-MigrationPath {
     param([string]$Path)
     Resolve-LauncherMigrationPath -MigrationRoot $MigrationRoot -Path $Path
@@ -305,6 +329,50 @@ function Get-ComparisonConfigValue {
     return $DefaultValue
 }
 
+function Assert-CsvScanAgeDifference {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceCsvPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$TargetCsvPath,
+
+        [Parameter(Mandatory = $true)]
+        [double]$MaxAgeDifferenceHours,
+
+        [string]$Label = 'Inventory'
+    )
+
+    $sourceItem = Get-Item -LiteralPath $SourceCsvPath -ErrorAction Stop
+    $targetItem = Get-Item -LiteralPath $TargetCsvPath -ErrorAction Stop
+    $ageDifference = ($sourceItem.LastWriteTime - $targetItem.LastWriteTime).Duration()
+
+    if ($ageDifference.TotalHours -le $MaxAgeDifferenceHours) {
+        return
+    }
+
+    $message = ("{0} scan age difference is {1:n2}h. Maximum allowed: {2:n2}h. Source: {3}; Target: {4}" -f `
+        $Label,
+        $ageDifference.TotalHours,
+        $MaxAgeDifferenceHours,
+        $sourceItem.LastWriteTime,
+        $targetItem.LastWriteTime)
+
+    if ($Force) {
+        Write-Warning ("{0} Continuing because -Force was specified." -f $message)
+        return
+    }
+
+    if ($script:LauncherNonInteractive) {
+        throw ("{0} Rerun source/target scans closer together, or use -Force only after reviewing the risk." -f $message)
+    }
+
+    Write-Warning $message
+    $answer = Read-Host 'Continue anyway? Type YES to continue'
+    if ($answer -ne 'YES') {
+        throw 'Comparison cancelled because scan age difference was not accepted.'
+    }
+}
 function Resolve-ComparisonPathMappingsFile {
     $mappingPath = [string](Get-ComparisonConfigValue -Name 'PathMappingsFile' -DefaultValue '')
     if ([string]::IsNullOrWhiteSpace($mappingPath)) {
@@ -466,6 +534,33 @@ function Test-MigrationEndpointIsSPO {
     )
 
     (Get-MigrationEndpointType -Side $Side) -eq 'SPO'
+}
+
+function Get-MigrationEndpointModifiedTimeZone {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')]
+        [string]$Side
+    )
+
+    $configKey = if ($Side -eq 'Source') { 'SourceModifiedTimeZone' } else { 'TargetModifiedTimeZone' }
+    $rawMode = [string](Get-ComparisonConfigValue -Name $configKey -DefaultValue 'Auto')
+    if ([string]::IsNullOrWhiteSpace($rawMode)) {
+        $rawMode = 'Auto'
+    }
+
+    switch ($rawMode.Trim().ToUpperInvariant()) {
+        'AUTO' {
+            if (Test-MigrationEndpointIsSPO -Side $Side) { return 'UTC' }
+            return 'Local'
+        }
+        'NONE' { return 'Raw' }
+        'RAW' { return 'Raw' }
+        'LOCAL' { return 'Local' }
+        'UTC' { return 'UTC' }
+    }
+
+    throw "$configKey '$rawMode' is not supported. Allowed values: Auto, Raw, Local, UTC."
 }
 
 function Get-MigrationEndpointPermissionLibraryOnly {
