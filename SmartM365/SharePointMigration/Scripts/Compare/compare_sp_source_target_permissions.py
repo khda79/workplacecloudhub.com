@@ -155,13 +155,13 @@ def sheet_xml(rows):
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
         f'<dimension ref="{dimension}"/>',
     ]
+    output.append('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>')
     if column_count:
         output.append("<cols>")
         for column_index, header in enumerate(headers, start=1):
             width = column_width(header)
             output.append(f'<col min="{column_index}" max="{column_index}" width="{width}" customWidth="1"/>')
         output.append("</cols>")
-    output.append('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>')
     output.append("<sheetData>")
     for row_index, row in enumerate(rows, start=1):
         output.append(f'<row r="{row_index}">')
