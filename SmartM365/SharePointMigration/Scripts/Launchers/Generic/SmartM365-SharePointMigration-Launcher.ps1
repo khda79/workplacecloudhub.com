@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.5
+    1.0.6
 #>
 
 [CmdletBinding()]
@@ -24,13 +24,21 @@ param(
         'ScanSourcePermissions',
         'ScanTargetPermissions',
         'ComparePermissions',
-        'CompareSourceHistory'
+        'CompareSourceHistory',
+        'CompareScanHistory'
     )]
     [string]$Action,
 
     [string]$SourceCsv,
 
     [string]$TargetCsv,
+
+    [string]$OldCsv,
+
+    [string]$NewCsv,
+
+    [ValidateSet('Source', 'Target')]
+    [string]$HistorySide = 'Source',
 
     [switch]$ForceAuthentication = $true,
 
@@ -753,31 +761,59 @@ function Invoke-PermissionComparison {
     }
 }
 
-function Invoke-SourceHistoryComparison {
+function Get-FileHistoryComparisonRoot {
+    if ($Config.ContainsKey('Output') -and $Config.Output.ContainsKey('FileHistoryComparisons') -and -not [string]::IsNullOrWhiteSpace([string]$Config.Output.FileHistoryComparisons)) {
+        return (Resolve-MigrationPath $Config.Output.FileHistoryComparisons)
+    }
+
+    if ($Config.ContainsKey('Output') -and $Config.Output.ContainsKey('SourceHistoryComparisons') -and -not [string]::IsNullOrWhiteSpace([string]$Config.Output.SourceHistoryComparisons)) {
+        return (Resolve-MigrationPath $Config.Output.SourceHistoryComparisons)
+    }
+
+    return (Resolve-MigrationPath 'comparisons\scan-history')
+}
+
+function Invoke-FileHistoryComparison {
+    param(
+        [ValidateSet('Source', 'Target')]
+        [string]$Side = 'Source',
+
+        [string]$LogAction = 'CompareScanHistory'
+    )
+
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Compare\SmartM365-SharePointSource-FileInventoryHistoryCompare.ps1'
-    $outputDirectory = Join-Path -Path (Resolve-MigrationPath $Config.Output.SourceHistoryComparisons) -ChildPath ("{0}-Changes-{1}" -f (Get-MigrationEndpointType -Side 'Source'), $timestamp)
+    $endpointType = Get-MigrationEndpointType -Side $Side
+    $scanDirectory = if ($Side -eq 'Source') { Resolve-MigrationPath $Config.Output.SourceFileScans } else { Resolve-MigrationPath $Config.Output.TargetFileScans }
+    $outputDirectory = Join-Path -Path (Get-FileHistoryComparisonRoot) -ChildPath ("{0}-{1}-Changes-{2}" -f $Config.Name, $endpointType, $timestamp)
 
     $parameters = @{
-        ScanDirectory = Resolve-MigrationPath $Config.Output.SourceFileScans
+        ScanDirectory = $scanDirectory
         InventoryNameFilter = ("*{0}*" -f $Config.Name)
-        WebUrlsFile = (Resolve-MigrationUrlsFile -Side 'Source')
+        WebUrlsFile = (Resolve-MigrationUrlsFile -Side $Side)
         OutputDirectory = $outputDirectory
-        LogPath = (New-MigrationLogPath -Action 'CompareSourceHistory' -Timestamp $timestamp)
-        ComparisonName = ("{0}-{1}-vs-{1}" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'))
+        LogPath = (New-MigrationLogPath -Action $LogAction -Timestamp $timestamp)
+        ComparisonName = ("{0}-{1}-history" -f $Config.Name, $endpointType)
+        EndpointType = $endpointType
+        Side = $Side
         SizeToleranceBytes = [long]$Config.Comparison.SizeToleranceBytes
         ModifiedDateToleranceMinutes = [double](Get-ComparisonConfigValue -Name 'ModifiedDateToleranceMinutes' -DefaultValue 0)
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($OldCsv)) {
+        $parameters.OldCsv = $OldCsv
+    }
+    if (-not [string]::IsNullOrWhiteSpace($NewCsv)) {
+        $parameters.NewCsv = $NewCsv
+    }
     if ($Force) {
         $parameters.Force = $true
     }
 
-    Write-Info ("Starting source history comparison for migration '{0}'" -f $Config.Name) Cyan
+    Write-Info ("Starting {0} scan history comparison for migration '{1}'" -f $Side.ToLowerInvariant(), $Config.Name) Cyan
     & $scriptPath @parameters
     Open-DirectoryInExplorer -Path $outputDirectory
 }
-
 switch ($Action) {
     'ScanSourceFiles' { Invoke-SourceFileScan }
     'ScanTargetFiles' { Invoke-TargetFileScan }
@@ -785,5 +821,7 @@ switch ($Action) {
     'ScanSourcePermissions' { Invoke-SourcePermissionScan }
     'ScanTargetPermissions' { Invoke-TargetPermissionScan }
     'ComparePermissions' { Invoke-PermissionComparison }
-    'CompareSourceHistory' { Invoke-SourceHistoryComparison }
+    'CompareSourceHistory' { Invoke-FileHistoryComparison -Side 'Source' -LogAction 'CompareSourceHistory' }
+    'CompareScanHistory' { Invoke-FileHistoryComparison -Side $HistorySide -LogAction 'CompareScanHistory' }
 }
+

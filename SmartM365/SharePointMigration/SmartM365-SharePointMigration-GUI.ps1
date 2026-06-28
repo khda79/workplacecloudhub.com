@@ -11,7 +11,7 @@
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.4
+    1.0.5
 #>
 
 #Requires -Version 5.1
@@ -22,7 +22,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.4'
+$script:AppVersion = '1.0.5'
 $script:ScriptRoot = $PSScriptRoot
 
 Add-Type -AssemblyName PresentationFramework
@@ -144,7 +144,14 @@ function Get-MigrationStatus {
     $srcFileDir  = Join-Path $root $cfg.Output.SourceFileScans
     $tgtFileDir  = Join-Path $root $cfg.Output.TargetFileScans
     $fileCmpDir  = Join-Path $root $cfg.Output.FileComparisons
-    $histDir     = Join-Path $root $cfg.Output.SourceHistoryComparisons
+    $historyPath = if ($cfg.Output.ContainsKey('FileHistoryComparisons') -and -not [string]::IsNullOrWhiteSpace([string]$cfg.Output.FileHistoryComparisons)) {
+        [string]$cfg.Output.FileHistoryComparisons
+    } elseif ($cfg.Output.ContainsKey('SourceHistoryComparisons') -and -not [string]::IsNullOrWhiteSpace([string]$cfg.Output.SourceHistoryComparisons)) {
+        [string]$cfg.Output.SourceHistoryComparisons
+    } else {
+        'comparisons\scan-history'
+    }
+    $histDir     = Join-Path $root $historyPath
     $srcPermDir  = Join-Path $root $cfg.Output.SourcePermissionScans
     $tgtPermDir  = Join-Path $root $cfg.Output.TargetPermissionScans
     $permCmpDir  = Join-Path $root $cfg.Output.PermissionComparisons
@@ -155,7 +162,7 @@ function Get-MigrationStatus {
         TargetFileCsv         = Get-LatestCsvFile    $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         TargetFileCsvItems    = Get-CsvFileItems     $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         FileComparisonFolder  = Get-LatestSubfolder  $fileCmpDir  "$name-*"
-        HistoryFolder         = Get-LatestSubfolder  $histDir     ("{0}-Changes-*" -f (Get-MigrationEndpointType $cfg 'Source'))
+        HistoryFolder         = Get-LatestSubfolder  $histDir     '*-Changes-*'
         SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
         TargetPermCsv         = Get-LatestCsvFile    $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
         PermComparisonFolder  = Get-LatestSubfolder  $permCmpDir  "$name-*"
@@ -519,18 +526,25 @@ function Open-InExplorer {
                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
               </Border>
               <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="Compare source history" FontSize="13" FontWeight="Medium" Foreground="#1F2937"/>
+                <TextBlock Text="Compare scan history" FontSize="13" FontWeight="Medium" Foreground="#1F2937"/>
                 <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
                   <Border x:Name="badgeHistory" CornerRadius="10" Padding="6,2" Margin="0,0,8,0" Background="#F0F4F8">
                     <TextBlock x:Name="lblHistoryAge" Text="No run yet" FontSize="11" Foreground="#5F6B7A"/>
                   </Border>
-                  <TextBlock Text="Detects source changes between two scans" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="cmbHistorySide" Width="80" Height="24" FontSize="11" VerticalContentAlignment="Center" Margin="0,0,8,0">
+                    <ComboBoxItem Content="Source" IsSelected="True"/>
+                    <ComboBoxItem Content="Target"/>
+                  </ComboBox>
+                  <TextBlock Text="Previous" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="cmbHistoryOldFile" Width="270" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                  <TextBlock Text="Current" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="cmbHistoryNewFile" Width="270" Height="24" FontSize="11" DisplayMemberPath="Display" VerticalContentAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenHistory" Content="Open" Style="{StaticResource BtnGhost}"
                         Width="58" Margin="0,0,6,0" Visibility="Collapsed"/>
-                <Button x:Name="btnRunHistory"  Content="Run"  Style="{StaticResource Btn}" Width="55"/>
+                <Button x:Name="btnRunHistory"  Content="Compare"  Style="{StaticResource Btn}" Width="70"/>
               </StackPanel>
             </Grid>
           </Border>
@@ -783,6 +797,9 @@ $badgeHistory  = ctrl 'badgeHistory'
 $lblHistoryAge = ctrl 'lblHistoryAge'
 $btnOpenHistory= ctrl 'btnOpenHistory'
 $btnRunHistory = ctrl 'btnRunHistory'
+$cmbHistorySide = ctrl 'cmbHistorySide'
+$cmbHistoryOldFile = ctrl 'cmbHistoryOldFile'
+$cmbHistoryNewFile = ctrl 'cmbHistoryNewFile'
 
 # Permissions step
 $badgeScanSrcPerm  = ctrl 'badgeScanSrcPerm'
@@ -918,6 +935,51 @@ function Update-ScanFileSelection {
     $OpenButton.Visibility = if ($selectedFile) { 'Visible' } else { 'Collapsed' }
     if ($selectedFile) { $OpenButton.Tag = (Split-Path $selectedFile.FullName -Parent) }
 }
+function Get-HistorySide {
+    $sel = $cmbHistorySide.SelectedItem
+    if ($null -eq $sel) { return 'Source' }
+    $txt = if ($sel.PSObject.Properties.Name -contains 'Content') { [string]$sel.Content } else { [string]$sel }
+    if ($txt -eq 'Target') { return 'Target' }
+    return 'Source'
+}
+
+function Set-HistoryComboItems {
+    param(
+        [System.Windows.Controls.ComboBox]$ComboBox,
+        [object[]]$Items,
+        [int]$DefaultIndex
+    )
+
+    $ComboBox.Items.Clear()
+    foreach ($item in @($Items)) { [void]$ComboBox.Items.Add($item) }
+    $ComboBox.IsEnabled = ($ComboBox.Items.Count -gt 0)
+    if ($ComboBox.Items.Count -eq 0) {
+        $ComboBox.SelectedIndex = -1
+        return
+    }
+
+    if ($DefaultIndex -ge 0 -and $DefaultIndex -lt $ComboBox.Items.Count) {
+        $ComboBox.SelectedIndex = $DefaultIndex
+    }
+    else {
+        $ComboBox.SelectedIndex = 0
+    }
+}
+
+function Update-HistoryRunState {
+    $oldCsv = Get-SelectedScanFile -ComboBox $cmbHistoryOldFile
+    $newCsv = Get-SelectedScanFile -ComboBox $cmbHistoryNewFile
+    $btnRunHistory.IsEnabled = ($oldCsv -and $newCsv -and $oldCsv.FullName -ne $newCsv.FullName)
+}
+
+function Update-HistoryScanSelection {
+    if ($null -eq $script:CurrentStatus) { return }
+
+    $items = if ((Get-HistorySide) -eq 'Target') { @($script:CurrentStatus.TargetFileCsvItems) } else { @($script:CurrentStatus.SourceFileCsvItems) }
+    Set-HistoryComboItems $cmbHistoryNewFile $items 0
+    Set-HistoryComboItems $cmbHistoryOldFile $items 1
+    Update-HistoryRunState
+}
 
 # ---------------------------------------------------------------------------
 # Auth mode
@@ -960,6 +1022,13 @@ function Invoke-MigrationAction {
         $targetCsv = Get-SelectedScanFile -ComboBox $cmbScanTgtFile
         if ($sourceCsv) { $args += @('-SourceCsv', "`"$($sourceCsv.FullName)`"") }
         if ($targetCsv) { $args += @('-TargetCsv', "`"$($targetCsv.FullName)`"") }
+    }
+    elseif ($Action -eq 'CompareScanHistory') {
+        $oldCsv = Get-SelectedScanFile -ComboBox $cmbHistoryOldFile
+        $newCsv = Get-SelectedScanFile -ComboBox $cmbHistoryNewFile
+        $args += @('-HistorySide', (Get-HistorySide))
+        if ($oldCsv) { $args += @('-OldCsv', "`"$($oldCsv.FullName)`"") }
+        if ($newCsv) { $args += @('-NewCsv', "`"$($newCsv.FullName)`"") }
     }
 
     Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $script:ScriptRoot
@@ -1014,6 +1083,7 @@ function Update-UI {
     Set-Badge $badgeHistory $lblHistoryAge $r.Text $r.HasRun
     $btnOpenHistory.Visibility = if ($st.HistoryFolder) { 'Visible' } else { 'Collapsed' }
     if ($st.HistoryFolder) { $btnOpenHistory.Tag = $st.HistoryFolder.FullName }
+    Update-HistoryScanSelection
 
     # --- Permissions ---
     $r = Format-ItemAge $st.SourcePermCsv
@@ -1115,10 +1185,13 @@ $btnOpenConfig.Add_Click({
 $btnRunScanSrc.Add_Click({  Invoke-MigrationAction 'ScanSourceFiles' })
 $btnRunScanTgt.Add_Click({  Invoke-MigrationAction 'ScanTargetFiles' })
 $btnRunCmpFiles.Add_Click({ Invoke-MigrationAction 'CompareFiles' })
-$btnRunHistory.Add_Click({  Invoke-MigrationAction 'CompareSourceHistory' })
+$btnRunHistory.Add_Click({  Invoke-MigrationAction 'CompareScanHistory' })
 
 $cmbScanSrcFile.Add_SelectionChanged({ Update-ScanFileSelection $cmbScanSrcFile $badgeScanSrc $lblScanSrcAge $btnOpenScanSrc })
 $cmbScanTgtFile.Add_SelectionChanged({ Update-ScanFileSelection $cmbScanTgtFile $badgeScanTgt $lblScanTgtAge $btnOpenScanTgt })
+$cmbHistorySide.Add_SelectionChanged({ Update-HistoryScanSelection })
+$cmbHistoryOldFile.Add_SelectionChanged({ Update-HistoryRunState })
+$cmbHistoryNewFile.Add_SelectionChanged({ Update-HistoryRunState })
 $btnOpenScanSrc.Add_Click({  Open-InExplorer ([string]$btnOpenScanSrc.Tag) })
 $btnOpenScanTgt.Add_Click({  Open-InExplorer ([string]$btnOpenScanTgt.Tag) })
 $btnOpenCmpFiles.Add_Click({ Open-InExplorer ([string]$btnOpenCmpFiles.Tag) })
@@ -1175,3 +1248,5 @@ $btnRefreshLogs.Add_Click({ Refresh-LogList })
 Load-Migrations
 Close-SmartM365GuiSplash -Splash $script:Splash
 [void]$script:Window.ShowDialog()
+
+
