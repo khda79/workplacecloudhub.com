@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.9
+    1.0.10
 #>
 
 [CmdletBinding()]
@@ -327,6 +327,27 @@ function Get-ComparisonConfigValue {
     }
 
     return $DefaultValue
+}
+
+function Get-ComparisonConfigBool {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [bool]$DefaultValue = $false
+    )
+
+    $value = Get-ComparisonConfigValue -Name $Name -DefaultValue $DefaultValue
+    if ($value -is [bool]) {
+        return $value
+    }
+
+    try {
+        return [System.Convert]::ToBoolean([string]$value)
+    }
+    catch {
+        throw "Comparison.$Name must be a boolean value. Current value: $value"
+    }
 }
 
 function Assert-CsvScanAgeDifference {
@@ -808,6 +829,21 @@ function Invoke-FileComparison {
             '--output-xlsx', (Join-Path $outputDirectory ("Files-To-Delete-{0}.xlsx" -f $timestamp))
         )
 
+        $deleteScriptArguments = @('--comparison-directory', $outputDirectory)
+        if (Get-ComparisonConfigBool -Name 'AllowDuplicateKeysForDeleteScript' -DefaultValue $false) {
+            $deleteScriptArguments += '--allow-duplicate-keys'
+        }
+        Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Generate\generate_sp_target_delete_libraries_script.py') -Arguments ($deleteScriptArguments + @(
+            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-SharePointTarget-ExtraLibrariesRemove-{0}.ps1" -f $timestamp))
+        ))
+        Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Generate\generate_sp_target_delete_files_script.py') -Arguments ($deleteScriptArguments + @(
+            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-SharePointTarget-ExtraFilesRemove-{0}.ps1" -f $timestamp))
+        ))
+        Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Generate\generate_sp_target_delete_folders_script.py') -Arguments @(
+            '--comparison-directory', $outputDirectory,
+            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-SharePointTarget-ExtraFoldersRemove-{0}.ps1" -f $timestamp))
+        )
+
         Write-Info ("File comparison completed: {0}" -f $outputDirectory) Green
         Open-DirectoryInExplorer -Path $outputDirectory
     }
@@ -919,4 +955,3 @@ switch ($Action) {
     'CompareSourceHistory' { Invoke-FileHistoryComparison -Side 'Source' -LogAction 'CompareSourceHistory' }
     'CompareScanHistory' { Invoke-FileHistoryComparison -Side $HistorySide -LogAction 'CompareScanHistory' }
 }
-
