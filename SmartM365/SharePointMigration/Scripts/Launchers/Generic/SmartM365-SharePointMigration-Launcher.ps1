@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.11
+    1.0.12
 #>
 
 [CmdletBinding()]
@@ -881,6 +881,7 @@ function Invoke-PermissionComparison {
             '--output-directory', $outputDirectory,
             '--source-root-path', $Config.Source.PermissionRootPath,
             '--target-root-path', $Config.Target.PermissionRootPath,
+            '--sharegate-replacement-character', ([string]$Config.Comparison.ShareGateReplacementCharacter),
             '--comparison-name', ("{0}-{1}-vs-{2}-Permissions" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target'))
         )
         if ($pathMappingsFile) {
