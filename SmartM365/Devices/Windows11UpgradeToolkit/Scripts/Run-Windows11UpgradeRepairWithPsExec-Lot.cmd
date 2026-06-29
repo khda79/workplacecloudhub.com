@@ -20,6 +20,9 @@ for %%I in ("%ROOT_DIR%") do set "ROOT_DIR=%%~fI"
 
 set "SCRIPT=%ROOT_DIR%\Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1"
 set "COMPUTERS=%LOT_DIR%Computers.txt"
+set "PARENT_AD_CSV=%ROOT_DIR%\DevicesAD.csv"
+set "LOT_AD_CSV=%LOT_DIR%DevicesAD.csv"
+set "AD_DOMAIN_FILE=%LOT_DIR%AdDomain.txt"
 set "PSEXEC_LOGS=%LOT_DIR%PsExecLogs"
 set "REPORTS=%LOT_DIR%Reports"
 set "CENTRAL_LOGS=%LOT_DIR%CentralLogs"
@@ -195,6 +198,23 @@ if not "%GLOBAL_CONCURRENCY_PROVIDED%"=="1" (
     set "GLOBAL_CONCURRENCY_ARG=-GlobalConcurrencyLimit %W11UT_GLOBAL_CONCURRENCY_LIMIT% -GlobalConcurrencyLeaseTimeoutMinutes %W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES%"
 )
 
+if "%W11UT_AD_DOMAIN%"=="" (
+    if exist "%AD_DOMAIN_FILE%" (
+        for /f "usebackq tokens=* delims=" %%D in ("%AD_DOMAIN_FILE%") do if not defined W11UT_AD_DOMAIN set "W11UT_AD_DOMAIN=%%D"
+    )
+)
+
+set "AD_ARGS="
+if exist "%PARENT_AD_CSV%" set "AD_ARGS=-AdRootInventoryCsv ""%PARENT_AD_CSV%"""
+if not "%W11UT_AD_DOMAIN%"=="" (
+    set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%LOT_AD_CSV%"" -AdDomain ""%W11UT_AD_DOMAIN%"""
+) else (
+    if exist "%PARENT_AD_CSV%" (
+        set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%PARENT_AD_CSV%"""
+    ) else (
+        set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%LOT_AD_CSV%"""
+    )
+)
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
   -ComputerListPath "%COMPUTERS%" ^
   -LogRoot "%PSEXEC_LOGS%" ^
@@ -207,6 +227,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
   %PSEXEC_ARG% ^
   %THROTTLE_ARG% ^
   %GLOBAL_CONCURRENCY_ARG% ^
+  %AD_ARGS% ^
   -DelayBetweenComputersSeconds %W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS% ^
   -DelayBetweenCyclesMinutes %W11UT_DELAY_BETWEEN_CYCLES_MINUTES% ^
   -PsExecTimeoutMinutes %W11UT_PSEXEC_TIMEOUT_MINUTES% ^
@@ -255,6 +276,7 @@ for /f "usebackq eol=# tokens=1* delims==" %%A in ("%CONFIG_FILE%") do (
     if /I "%%~A"=="W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES" if not defined W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES set "W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES=%%~B"
     if /I "%%~A"=="W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT" if not defined W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT set "W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT=%%~B"
     if /I "%%~A"=="W11UT_CONFIRM_LOCAL_SETUP_SOURCE" if not defined W11UT_CONFIRM_LOCAL_SETUP_SOURCE set "W11UT_CONFIRM_LOCAL_SETUP_SOURCE=%%~B"
+    if /I "%%~A"=="W11UT_AD_DOMAIN" if not defined W11UT_AD_DOMAIN set "W11UT_AD_DOMAIN=%%~B"
     if /I "%%~A"=="W11UT_THROTTLE" if not defined W11UT_THROTTLE set "W11UT_THROTTLE=%%~B"
     if /I "%%~A"=="W11UT_GLOBAL_CONCURRENCY_LIMIT" if not defined W11UT_GLOBAL_CONCURRENCY_LIMIT set "W11UT_GLOBAL_CONCURRENCY_LIMIT=%%~B"
     if /I "%%~A"=="W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES" if not defined W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES set "W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES=%%~B"
