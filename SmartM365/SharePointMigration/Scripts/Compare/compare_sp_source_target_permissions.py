@@ -66,6 +66,7 @@ NUMERIC_COLUMNS = {
     "SourceLimitedAccessOnlyIgnored",
     "TargetLimitedAccessOnlyIgnored",
     "EntraUserAliasesLoaded",
+    "SourceUsersNotInEntraIgnored",
     "SourceRowsWithoutLibraryScopeMetadata",
     "TargetRowsWithoutLibraryScopeMetadata",
     "SourcePermissions",
@@ -595,6 +596,22 @@ def attach_key(row, key):
     new_row["ComparisonPermissionLevels"] = key[3]
     return new_row
 
+
+def source_user_not_found_in_entra(row, entra_user_aliases):
+    if not entra_user_aliases:
+        return False
+    if normalize_label(row.get("PrincipalType")) != "user":
+        return False
+    principal = row.get("PrincipalLoginName") or row.get("PrincipalName")
+    normalized = normalize_principal_text(principal)
+    return bool(normalized) and normalized not in entra_user_aliases
+
+
+def with_ignore_reason(row, reason):
+    updated = dict(row)
+    updated["ComparisonIgnoreReason"] = reason
+    return updated
+
 def key_has_comparable_permissions(key):
     return bool(key[3])
 
@@ -781,12 +798,16 @@ def write_permission_comparison_report(
     target_duplicates = []
     source_limited_access_only = []
     target_limited_access_only = []
+    source_users_not_in_entra = []
 
     for row in source_rows:
         key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases)
         keyed = attach_key(row, key)
         if not key_has_comparable_permissions(key):
             source_limited_access_only.append(keyed)
+            continue
+        if source_user_not_found_in_entra(row, entra_user_aliases):
+            source_users_not_in_entra.append(with_ignore_reason(keyed, "Source user principal not found in Entra cache"))
             continue
         if key in source_by_key:
             source_duplicates.append(keyed)
@@ -825,6 +846,7 @@ def write_permission_comparison_report(
             "SourceLimitedAccessOnlyIgnored": len(source_limited_access_only),
             "TargetLimitedAccessOnlyIgnored": len(target_limited_access_only),
             "EntraUserAliasesLoaded": len(entra_user_aliases or {}),
+            "SourceUsersNotInEntraIgnored": len(source_users_not_in_entra),
             "SourceRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(source_rows),
             "TargetRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(target_rows),
             "SourceScanDocumentLibrariesOnly": str(bool(source_scan_document_libraries_only)),
@@ -871,20 +893,21 @@ def write_permission_comparison_report(
     duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
     limited_access_source_csv = output_dir / "LimitedAccessOnly-Source.csv"
     limited_access_target_csv = output_dir / "LimitedAccessOnly-Target.csv"
+    source_users_not_in_entra_csv = output_dir / "SourceUsersNotInEntra.csv"
 
     write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
     write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
     write_csv(permission_summary_csv, permission_summary_rows, PERMISSION_SUMMARY_COLUMNS)
 
     output_fields = list(source_rows[0].keys()) if source_rows else (list(target_rows[0].keys()) if target_rows else [])
-    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels"]:
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "ComparisonIgnoreReason"]:
         if extra_field not in output_fields:
             output_fields.append(extra_field)
     write_csv(missing_csv, missing_rows, output_fields)
     write_csv(matched_csv, matched_rows, output_fields)
 
     target_fields = list(target_rows[0].keys()) if target_rows else output_fields
-    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels"]:
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "ComparisonIgnoreReason"]:
         if extra_field not in target_fields:
             target_fields.append(extra_field)
     write_csv(extra_csv, extra_rows, target_fields)
@@ -892,6 +915,7 @@ def write_permission_comparison_report(
     write_csv(duplicate_target_csv, target_duplicates, target_fields)
     write_csv(limited_access_source_csv, source_limited_access_only, output_fields)
     write_csv(limited_access_target_csv, target_limited_access_only, target_fields)
+    write_csv(source_users_not_in_entra_csv, source_users_not_in_entra, output_fields)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     xlsx_path = output_dir / f"{comparison_name}-{timestamp}.xlsx"
@@ -908,6 +932,7 @@ def write_permission_comparison_report(
             ("DuplicateTarget", list_rows_for_excel(duplicate_target_csv)),
             ("IgnoredSourceLA", list_rows_for_excel(limited_access_source_csv)),
             ("IgnoredTargetLA", list_rows_for_excel(limited_access_target_csv)),
+            ("IgnoredSourceNotEntra", list_rows_for_excel(source_users_not_in_entra_csv)),
         ],
     )
 
@@ -931,7 +956,7 @@ def main():
     parser.add_argument("--comparison-name", default="SP2019-vs-SPO-Permissions")
     parser.add_argument("--source-scan-document-libraries-only", action="store_true")
     parser.add_argument("--target-scan-document-libraries-only", action="store_true")
-    parser.add_argument("--entra-users-csv")
+    parser.add_argument("--entra-users-csv", required=True)
     args = parser.parse_args()
 
     if len(args.sharegate_replacement_character) != 1:
@@ -953,8 +978,7 @@ def main():
         print(f"Path mappings loaded: {len(path_mappings)}")
 
     entra_user_aliases = load_entra_user_aliases(args.entra_users_csv)
-    if args.entra_users_csv:
-        print(f"Entra user aliases loaded: {len(entra_user_aliases)} from {args.entra_users_csv}")
+    print(f"Entra user aliases loaded: {len(entra_user_aliases)} from {args.entra_users_csv}")
 
     source_by_key = {}
     target_by_key = {}
@@ -962,12 +986,16 @@ def main():
     target_duplicates = []
     source_limited_access_only = []
     target_limited_access_only = []
+    source_users_not_in_entra = []
 
     for row in source_rows:
         key = make_key(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases)
         keyed = attach_key(row, key)
         if not key_has_comparable_permissions(key):
             source_limited_access_only.append(keyed)
+            continue
+        if source_user_not_found_in_entra(row, entra_user_aliases):
+            source_users_not_in_entra.append(with_ignore_reason(keyed, "Source user principal not found in Entra cache"))
             continue
         if key in source_by_key:
             source_duplicates.append(keyed)
@@ -1007,6 +1035,7 @@ def main():
             "SourceLimitedAccessOnlyIgnored": len(source_limited_access_only),
             "TargetLimitedAccessOnlyIgnored": len(target_limited_access_only),
             "EntraUserAliasesLoaded": len(entra_user_aliases or {}),
+            "SourceUsersNotInEntraIgnored": len(source_users_not_in_entra),
             "SourceRootPath": args.source_root_path,
             "TargetRootPath": args.target_root_path,
         }
@@ -1042,20 +1071,21 @@ def main():
     duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
     limited_access_source_csv = output_dir / "LimitedAccessOnly-Source.csv"
     limited_access_target_csv = output_dir / "LimitedAccessOnly-Target.csv"
+    source_users_not_in_entra_csv = output_dir / "SourceUsersNotInEntra.csv"
 
     write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
     write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
     write_csv(permission_summary_csv, permission_summary_rows, PERMISSION_SUMMARY_COLUMNS)
 
     output_fields = list(source_rows[0].keys()) if source_rows else []
-    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels"]:
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "ComparisonIgnoreReason"]:
         if extra_field not in output_fields:
             output_fields.append(extra_field)
     write_csv(missing_csv, missing_rows, output_fields)
     write_csv(matched_csv, matched_rows, output_fields)
 
     target_fields = list(target_rows[0].keys()) if target_rows else output_fields
-    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels"]:
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "ComparisonIgnoreReason"]:
         if extra_field not in target_fields:
             target_fields.append(extra_field)
     write_csv(extra_csv, extra_rows, target_fields)
@@ -1063,6 +1093,7 @@ def main():
     write_csv(duplicate_target_csv, target_duplicates, target_fields)
     write_csv(limited_access_source_csv, source_limited_access_only, output_fields)
     write_csv(limited_access_target_csv, target_limited_access_only, target_fields)
+    write_csv(source_users_not_in_entra_csv, source_users_not_in_entra, output_fields)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     xlsx_path = output_dir / f"{args.comparison_name}-{timestamp}.xlsx"
@@ -1079,6 +1110,7 @@ def main():
             ("DuplicateTarget", list_rows_for_excel(duplicate_target_csv)),
             ("IgnoredSourceLA", list_rows_for_excel(limited_access_source_csv)),
             ("IgnoredTargetLA", list_rows_for_excel(limited_access_target_csv)),
+            ("IgnoredSourceNotEntra", list_rows_for_excel(source_users_not_in_entra_csv)),
         ],
     )
 
@@ -1121,3 +1153,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

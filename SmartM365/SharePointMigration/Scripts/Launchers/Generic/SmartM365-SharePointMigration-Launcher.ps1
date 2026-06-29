@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.15
+    1.0.17
 #>
 
 [CmdletBinding()]
@@ -903,13 +903,11 @@ function Get-AuthConfigValue {
 
 function Update-EntraUsersCacheForComparison {
     if (-not (Get-ComparisonConfigBool -Name 'EntraUsersCacheEnabled' -DefaultValue $true)) {
-        Write-Info 'Entra users cache disabled by Comparison.EntraUsersCacheEnabled.' DarkYellow
-        return $null
+        throw "Entra users cache is mandatory for permission comparisons. Set Comparison.EntraUsersCacheEnabled = `$true."
     }
 
     if ((Get-MigrationEndpointType -Side 'Source') -ne 'SPO' -and (Get-MigrationEndpointType -Side 'Target') -ne 'SPO') {
-        Write-Info 'Entra users cache skipped because neither endpoint is SPO.' DarkYellow
-        return $null
+        throw "Entra users cache is mandatory for permission comparisons. At least one endpoint must be SPO to resolve destination Entra users."
     }
 
     $cachePath = Resolve-EntraUsersCachePath
@@ -935,14 +933,18 @@ function Update-EntraUsersCacheForComparison {
     if ($ForceAuthentication) {
         $arguments += '-Connect'
     }
-    if ($DeviceLogin -or -not ($tenantId -and $clientId -and $thumbprint)) {
+    if ($UseCertificate) {
+        if (-not ($tenantId -and $clientId -and $thumbprint)) {
+            throw "Certificate authentication for Entra users cache requires TenantId, ClientId and Thumbprint in Config\SPOAuth.local.psd1."
+        }
+
+        $arguments += @('-TenantId', $tenantId, '-AppId', $clientId, '-CertificateThumbprint', $thumbprint)
+    }
+    else {
         $arguments += '-InteractiveAuth'
         if ($DeviceLogin) {
             $arguments += '-DeviceLogin'
         }
-    }
-    else {
-        $arguments += @('-TenantId', $tenantId, '-AppId', $clientId, '-CertificateThumbprint', $thumbprint)
     }
 
     Write-Info ("Ensuring Entra users cache: {0}" -f $cachePath) Cyan
@@ -974,6 +976,10 @@ function Invoke-PermissionComparison {
 
         $pathMappingsFile = Resolve-ComparisonPathMappingsFile
         $entraUsersCachePath = Update-EntraUsersCacheForComparison
+        if ([string]::IsNullOrWhiteSpace($entraUsersCachePath) -or -not (Test-Path -LiteralPath $entraUsersCachePath -PathType Leaf)) {
+            throw "Entra users cache is mandatory for permission comparisons, but no cache file was produced."
+        }
+
         $permissionCompareArguments = @(
             '--source-csv', $SourceCsv,
             '--target-csv', $TargetCsv,
@@ -992,9 +998,7 @@ function Invoke-PermissionComparison {
         if ($pathMappingsFile) {
             $permissionCompareArguments += @('--path-mapping-file', $pathMappingsFile)
         }
-        if ($entraUsersCachePath) {
-            $permissionCompareArguments += @('--entra-users-csv', $entraUsersCachePath)
-        }
+        $permissionCompareArguments += @('--entra-users-csv', $entraUsersCachePath)
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Compare\compare_sp_source_target_permissions.py') -Arguments $permissionCompareArguments
 
         Write-Info ("Permission comparison completed: {0}" -f $outputDirectory) Green
@@ -1068,3 +1072,4 @@ switch ($Action) {
     'CompareSourceHistory' { Invoke-FileHistoryComparison -Side 'Source' -LogAction 'CompareSourceHistory' }
     'CompareScanHistory' { Invoke-FileHistoryComparison -Side $HistorySide -LogAction 'CompareScanHistory' }
 }
+
