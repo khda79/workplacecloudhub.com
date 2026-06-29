@@ -65,6 +65,7 @@ NUMERIC_COLUMNS = {
     "TargetDuplicateKeysIgnored",
     "SourceLimitedAccessOnlyIgnored",
     "TargetLimitedAccessOnlyIgnored",
+    "EntraUserAliasesLoaded",
     "SourceRowsWithoutLibraryScopeMetadata",
     "TargetRowsWithoutLibraryScopeMetadata",
     "SourcePermissions",
@@ -126,6 +127,9 @@ PERMISSION_LEVEL_ALIASES = {
     "approuver": "approve",
     "gerer la hierarchie": "manage hierarchy",
     "gérer la hiérarchie": "manage hierarchy",
+    "gestion de la hierarchie": "manage hierarchy",
+    "gestion de la hiérarchie": "manage hierarchy",
+    "interfaces restreintes pour la traduction": "restricted interfaces for translation",
 }
 
 SHAREPOINT_ASSOCIATED_GROUP_SUFFIXES = {
@@ -157,6 +161,59 @@ def read_rows(path: Path):
     dialect = sniff_dialect(path)
     with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
         yield from csv.DictReader(handle, dialect=dialect)
+
+
+def split_identity_values(value):
+    if not value:
+        return []
+    values = []
+    for part in re.split(r"[;,]", str(value)):
+        text = part.strip()
+        if not text:
+            continue
+        if ":" in text and text.split(":", 1)[0].lower() in {"smtp", "sip"}:
+            text = text.split(":", 1)[1].strip()
+        if text:
+            values.append(text)
+    return values
+
+
+def add_entra_alias(alias_map, alias, canonical):
+    alias_key = normalize_principal_text(alias)
+    canonical_value = normalize_principal_text(canonical)
+    if not alias_key or not canonical_value:
+        return
+    alias_map.setdefault(alias_key, canonical_value)
+
+
+def load_entra_user_aliases(path):
+    if not path:
+        return {}
+
+    csv_path = Path(path)
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Entra users cache not found: {csv_path}")
+
+    alias_map = {}
+    for row in read_rows(csv_path):
+        canonical = row.get("UserPrincipalName") or row.get("User principal name") or row.get("Mail") or row.get("mail")
+        if not canonical:
+            continue
+
+        identity_values = [
+            canonical,
+            row.get("Mail"),
+            row.get("mail"),
+            row.get("OnPremisesUserPrincipalName"),
+            row.get("onPremisesUserPrincipalName"),
+        ]
+        for field in ("ProxyAddresses", "Proxy addresses", "OtherMails", "otherMails"):
+            identity_values.extend(split_identity_values(row.get(field)))
+
+        for value in identity_values:
+            add_entra_alias(alias_map, value, canonical)
+
+    return alias_map
 
 
 def write_csv(path: Path, rows, fieldnames):
@@ -478,7 +535,7 @@ def web_group_base_candidates(row, web_path):
     return {candidate for candidate in candidates if candidate}
 
 
-def normalize_principal(row, web_path=""):
+def normalize_principal(row, web_path="", entra_user_aliases=None):
     principal = row.get("PrincipalLoginName") or row.get("PrincipalName")
     normalized = normalize_principal_text(principal)
     principal_type = normalize_label(row.get("PrincipalType"))
@@ -486,6 +543,10 @@ def normalize_principal(row, web_path=""):
         group_base, suffix = parse_sharepoint_group_name(normalized)
         if suffix and canonical_group_base(group_base) in web_group_base_candidates(row, web_path):
             return f"sharepointgroup:{web_path}:{suffix}"
+    if principal_type == "domaingroup" and normalized == "true" and normalize_label(row.get("PrincipalName")) in {"everyone", "tout le monde"}:
+        return "everyone"
+    if principal_type == "user" and entra_user_aliases:
+        return entra_user_aliases.get(normalized, normalized)
     return normalized
 
 
@@ -516,12 +577,12 @@ def row_path(row, source_prefix=None, target_prefix=None, path_mappings=None):
     return normalize_default_document_library_key(row, path, source_prefix, target_prefix, path_mappings=path_mappings)
 
 
-def make_key(row, source_prefix=None, target_prefix=None, path_mappings=None):
+def make_key(row, source_prefix=None, target_prefix=None, path_mappings=None, entra_user_aliases=None):
     web_path = row_web_path(row, source_prefix, target_prefix, path_mappings=path_mappings)
     return (
         (row.get("ObjectScope") or "").strip().lower(),
         row_path(row, source_prefix, target_prefix, path_mappings=path_mappings),
-        normalize_principal(row, web_path=web_path),
+        normalize_principal(row, web_path=web_path, entra_user_aliases=entra_user_aliases),
         normalize_permissions(row.get("PermissionLevels")),
     )
 
@@ -711,6 +772,7 @@ def write_permission_comparison_report(
     report_scope="AllScopes",
     source_scan_document_libraries_only=False,
     target_scan_document_libraries_only=False,
+    entra_user_aliases=None,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
     source_by_key = {}
@@ -721,7 +783,7 @@ def write_permission_comparison_report(
     target_limited_access_only = []
 
     for row in source_rows:
-        key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings)
+        key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases)
         keyed = attach_key(row, key)
         if not key_has_comparable_permissions(key):
             source_limited_access_only.append(keyed)
@@ -732,7 +794,7 @@ def write_permission_comparison_report(
         source_by_key[key] = keyed
 
     for row in target_rows:
-        key = make_key(row)
+        key = make_key(row, entra_user_aliases=entra_user_aliases)
         keyed = attach_key(row, key)
         if not key_has_comparable_permissions(key):
             target_limited_access_only.append(keyed)
@@ -762,6 +824,7 @@ def write_permission_comparison_report(
             "TargetDuplicateKeysIgnored": len(target_duplicates),
             "SourceLimitedAccessOnlyIgnored": len(source_limited_access_only),
             "TargetLimitedAccessOnlyIgnored": len(target_limited_access_only),
+            "EntraUserAliasesLoaded": len(entra_user_aliases or {}),
             "SourceRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(source_rows),
             "TargetRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(target_rows),
             "SourceScanDocumentLibrariesOnly": str(bool(source_scan_document_libraries_only)),
@@ -868,6 +931,7 @@ def main():
     parser.add_argument("--comparison-name", default="SP2019-vs-SPO-Permissions")
     parser.add_argument("--source-scan-document-libraries-only", action="store_true")
     parser.add_argument("--target-scan-document-libraries-only", action="store_true")
+    parser.add_argument("--entra-users-csv")
     args = parser.parse_args()
 
     if len(args.sharegate_replacement_character) != 1:
@@ -888,6 +952,10 @@ def main():
     if path_mappings:
         print(f"Path mappings loaded: {len(path_mappings)}")
 
+    entra_user_aliases = load_entra_user_aliases(args.entra_users_csv)
+    if args.entra_users_csv:
+        print(f"Entra user aliases loaded: {len(entra_user_aliases)} from {args.entra_users_csv}")
+
     source_by_key = {}
     target_by_key = {}
     source_duplicates = []
@@ -896,7 +964,7 @@ def main():
     target_limited_access_only = []
 
     for row in source_rows:
-        key = make_key(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings)
+        key = make_key(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases)
         keyed = attach_key(row, key)
         if not key_has_comparable_permissions(key):
             source_limited_access_only.append(keyed)
@@ -907,7 +975,7 @@ def main():
         source_by_key[key] = keyed
 
     for row in target_rows:
-        key = make_key(row)
+        key = make_key(row, entra_user_aliases=entra_user_aliases)
         keyed = attach_key(row, key)
         if not key_has_comparable_permissions(key):
             target_limited_access_only.append(keyed)
@@ -938,6 +1006,7 @@ def main():
             "TargetDuplicateKeysIgnored": len(target_duplicates),
             "SourceLimitedAccessOnlyIgnored": len(source_limited_access_only),
             "TargetLimitedAccessOnlyIgnored": len(target_limited_access_only),
+            "EntraUserAliasesLoaded": len(entra_user_aliases or {}),
             "SourceRootPath": args.source_root_path,
             "TargetRootPath": args.target_root_path,
         }
@@ -1025,6 +1094,7 @@ def main():
         report_scope="DocumentLibraries",
         source_scan_document_libraries_only=args.source_scan_document_libraries_only,
         target_scan_document_libraries_only=args.target_scan_document_libraries_only,
+        entra_user_aliases=entra_user_aliases,
     )
     other_scope_report = write_permission_comparison_report(
         [row for row in source_rows if not is_document_library_permission(row)],
@@ -1037,6 +1107,7 @@ def main():
         report_scope="OtherScopes",
         source_scan_document_libraries_only=args.source_scan_document_libraries_only,
         target_scan_document_libraries_only=args.target_scan_document_libraries_only,
+        entra_user_aliases=entra_user_aliases,
     )
     print(f"Comparison completed.")
     print(f"Matched permissions: {len(matched_keys)}")
