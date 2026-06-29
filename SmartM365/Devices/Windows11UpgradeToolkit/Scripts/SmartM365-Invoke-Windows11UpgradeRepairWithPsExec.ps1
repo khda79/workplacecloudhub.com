@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.12
+    0.1.13
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -82,7 +82,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.12'
+$script:LauncherVersion = '0.1.13'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -991,6 +991,17 @@ do {
                         $item | Add-Member -NotePropertyName JobErrorMessage -NotePropertyValue ($jobErrors -join ' | ') -Force
                     }
                     [void]$results.Add($item)
+                    if (-not $DryRun -and (Test-AlreadyWindows11CycleResult -Result $item)) {
+                        try {
+                            $moveSingleResult = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary @($item)
+                            if ($moveSingleResult.Moved -gt 0) {
+                                Write-Host ("Moved already-Windows11 computer from Computers.txt to {0}: {1}" -f $moveSingleResult.AlreadyWindows11Path,$item.ComputerName) -ForegroundColor Green
+                            }
+                        }
+                        catch {
+                            Write-Host ("Failed to update ComputersAlreadyW11.txt for {0}: {1}" -f $item.ComputerName,$_.Exception.Message) -ForegroundColor Yellow
+                        }
+                    }
                 }
             }
             if ($globalLeaseByJobId.ContainsKey([string]$job.Id)) {
