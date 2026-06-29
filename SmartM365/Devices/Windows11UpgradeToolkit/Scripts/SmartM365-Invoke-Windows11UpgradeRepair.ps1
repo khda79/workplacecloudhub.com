@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.13
+    0.1.14
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -52,6 +52,10 @@ param(
     [ValidateRange(0, 500)][int]$SetupSourceConcurrencyLimit = 0,
     [ValidateRange(1, 1440)][int]$SetupSourceConcurrencyLeaseMinutes = 240,
     [string]$SetupSourceConcurrencyGateRoot,
+    [ValidateRange(0, 500)][int]$SetupSubnetConcurrencyLimit = 0,
+    [ValidateRange(1, 32)][int]$SetupSubnetPrefixLength = 24,
+    [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 60,
+    [string]$SetupSubnetConcurrencyGateRoot,
     [ValidateRange(10, 200)][int]$MinimumFreeDiskGB = 32,
     [ValidateRange(0, 365)][int]$DiskCleanupTempFileMinAgeDays = 1,
     [ValidateRange(0, 365)][int]$DiskCleanupLogRetentionDays = 14,
@@ -65,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.13'
+$script:ScriptVersion = '0.1.14'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1187,6 +1191,220 @@ function Release-SetupSourceCopyLease {
     }
 }
 
+function Get-SetupUncHostName {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $trimmed = [Environment]::ExpandEnvironmentVariables($SourcePath.Trim('"'))
+    if ($trimmed -notmatch '^\\\\([^\\]+)\\') { return '' }
+    return $matches[1]
+}
+
+function ConvertTo-IPv4Number {
+    param([Parameter(Mandatory = $true)][string]$Address)
+
+    $parts = @($Address.Split('.') | ForEach-Object { [uint32]$_ })
+    if ($parts.Count -ne 4) { throw "Invalid IPv4 address: $Address" }
+    return [uint32]((($parts[0] -shl 24) -bor ($parts[1] -shl 16) -bor ($parts[2] -shl 8) -bor $parts[3]) -band [uint32]::MaxValue)
+}
+
+function ConvertFrom-IPv4Number {
+    param([Parameter(Mandatory = $true)][uint32]$Value)
+
+    return ('{0}.{1}.{2}.{3}' -f (($Value -shr 24) -band 255), (($Value -shr 16) -band 255), (($Value -shr 8) -band 255), ($Value -band 255))
+}
+
+function Get-IPv4NetworkAddress {
+    param(
+        [Parameter(Mandatory = $true)][string]$Address,
+        [ValidateRange(1, 32)][int]$PrefixLength = 24
+    )
+
+    $ipNumber = ConvertTo-IPv4Number -Address $Address
+    $mask = if ($PrefixLength -eq 32) { [uint32]::MaxValue } else { [uint32](([uint64]::MaxValue -shl (32 - $PrefixLength)) -band [uint32]::MaxValue) }
+    return ConvertFrom-IPv4Number -Value ([uint32]($ipNumber -band $mask))
+}
+
+function Get-LocalIPv4ForSetupSource {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $hostName = Get-SetupUncHostName -SourcePath $SourcePath
+    if ([string]::IsNullOrWhiteSpace($hostName)) { return '' }
+
+    try {
+        $remoteAddresses = @([System.Net.Dns]::GetHostAddresses($hostName) | Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork })
+        foreach ($remoteAddress in $remoteAddresses) {
+            $socket = New-Object System.Net.Sockets.Socket([System.Net.Sockets.AddressFamily]::InterNetwork, [System.Net.Sockets.SocketType]::Dgram, [System.Net.Sockets.ProtocolType]::Udp)
+            try {
+                $socket.Connect($remoteAddress, 445)
+                if ($socket.LocalEndPoint -and $socket.LocalEndPoint.Address) {
+                    $localAddress = [string]$socket.LocalEndPoint.Address
+                    if ($localAddress -and $localAddress -ne '0.0.0.0' -and -not $localAddress.StartsWith('169.254.')) { return $localAddress }
+                }
+            }
+            catch { }
+            finally { $socket.Dispose() }
+        }
+    }
+    catch { }
+
+    try {
+        $ipConfig = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop)
+        foreach ($adapter in $ipConfig) {
+            foreach ($address in @($adapter.IPAddress)) {
+                if ($address -match '^\d+\.\d+\.\d+\.\d+$' -and -not $address.StartsWith('169.254.')) { return [string]$address }
+            }
+        }
+    }
+    catch { }
+
+    return ''
+}
+
+function Get-SetupSubnetCopyGateInfo {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $localIPv4 = Get-LocalIPv4ForSetupSource -SourcePath $SourcePath
+    $sourceHost = Get-SetupUncHostName -SourcePath $SourcePath
+    if ([string]::IsNullOrWhiteSpace($localIPv4)) {
+        Write-SmartLog ("Unable to resolve local IPv4 for setup subnet copy gate. Source={0}; using UNKNOWN subnet gate." -f $SourcePath) 'WARN'
+        $subnet = 'UNKNOWN'
+        $key = 'UNKNOWN_SUBNET'
+    }
+    else {
+        $subnet = Get-IPv4NetworkAddress -Address $localIPv4 -PrefixLength $SetupSubnetPrefixLength
+        $key = ("{0}_{1}" -f $subnet,$SetupSubnetPrefixLength).Replace('.', '-')
+    }
+
+    [pscustomobject]@{
+        SourceHost = $sourceHost
+        LocalIPv4 = $localIPv4
+        Subnet = $subnet
+        PrefixLength = $SetupSubnetPrefixLength
+        Key = $key
+        Display = if ($subnet -eq 'UNKNOWN') { 'UNKNOWN' } else { "{0}/{1}" -f $subnet,$SetupSubnetPrefixLength }
+    }
+}
+
+function Remove-StaleSetupSubnetCopyLeases {
+    param([Parameter(Mandatory = $true)][string]$GatePath)
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+    foreach ($slot in @(Get-ChildItem -LiteralPath $GatePath -Directory -Filter 'slot-*' -ErrorAction SilentlyContinue)) {
+        $remove = $false
+        $leaseFile = Join-Path $slot.FullName 'lease.json'
+        try {
+            $data = Get-Content -LiteralPath $leaseFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $seenText = if ($data.PSObject.Properties['LastSeenUtc']) { [string]$data.LastSeenUtc } else { [string]$data.CreatedUtc }
+            $lastSeenUtc = [datetime]::Parse($seenText, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            if (($nowUtc - $lastSeenUtc).TotalMinutes -gt $SetupSubnetConcurrencyLeaseMinutes) { $remove = $true }
+        }
+        catch { $remove = $true }
+
+        if ($remove) { Remove-Item -LiteralPath $slot.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Write-SetupSubnetCopyLease {
+    param(
+        [Parameter(Mandatory = $true)][string]$LeaseFilePath,
+        [Parameter(Mandatory = $true)]$GateInfo,
+        [Parameter(Mandatory = $true)][string]$SourcePath
+    )
+
+    $nowUtc = (Get-Date).ToUniversalTime().ToString('o')
+    [pscustomobject]@{
+        ComputerName = $env:COMPUTERNAME
+        ProcessId = $PID
+        RunId = $script:RunId
+        SourcePath = $SourcePath
+        SourceHost = [string]$GateInfo.SourceHost
+        LocalIPv4 = [string]$GateInfo.LocalIPv4
+        Subnet = [string]$GateInfo.Display
+        CreatedUtc = $nowUtc
+        LastSeenUtc = $nowUtc
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeaseFilePath -Encoding UTF8 -Force
+}
+
+function Update-SetupSubnetCopyLeaseHeartbeat {
+    param([Parameter(Mandatory = $true)][string]$LeaseFilePath)
+
+    try {
+        $data = Get-Content -LiteralPath $LeaseFilePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $data | Add-Member -NotePropertyName LastSeenUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
+        $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeaseFilePath -Encoding UTF8 -Force
+    }
+    catch { }
+}
+
+function Start-SetupSubnetCopyLeaseHeartbeat {
+    param([Parameter(Mandatory = $true)][string]$LeaseFilePath)
+
+    return Start-Job -ArgumentList $LeaseFilePath -ScriptBlock {
+        param([string]$Path)
+        while ($true) {
+            try {
+                $data = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                $data | Add-Member -NotePropertyName LastSeenUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
+                $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $Path -Encoding UTF8 -Force
+            }
+            catch { }
+            Start-Sleep -Seconds 60
+        }
+    }
+}
+
+function Stop-SetupSubnetCopyLeaseHeartbeat {
+    param([AllowNull()]$Job)
+
+    if ($null -ne $Job) {
+        Stop-Job -Job $Job -Force -ErrorAction SilentlyContinue
+        Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Acquire-SetupSubnetCopyLease {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $gateRoot = [Environment]::ExpandEnvironmentVariables($SetupSubnetConcurrencyGateRoot.Trim('"'))
+    $gateInfo = Get-SetupSubnetCopyGateInfo -SourcePath $SourcePath
+    $gatePath = Join-Path (Join-Path $gateRoot 'SetupSubnetCopy') $gateInfo.Key
+    New-SmartDirectory -Path $gatePath
+
+    $waitSeconds = [math]::Max(60, $SetupSubnetConcurrencyLeaseMinutes * 60)
+    $started = Get-Date
+    do {
+        Remove-StaleSetupSubnetCopyLeases -GatePath $gatePath
+        for ($slot = 1; $slot -le $SetupSubnetConcurrencyLimit; $slot++) {
+            $slotPath = Join-Path $gatePath ("slot-{0:000}" -f $slot)
+            try {
+                New-Item -ItemType Directory -Path $slotPath -ErrorAction Stop | Out-Null
+                $leaseFilePath = Join-Path $slotPath 'lease.json'
+                Write-SetupSubnetCopyLease -LeaseFilePath $leaseFilePath -GateInfo $gateInfo -SourcePath $SourcePath
+                Write-SmartLog ("Acquired setup subnet copy lease: Subnet={0}; LocalIPv4={1}; Source={2}; Limit={3}; Lease={4}" -f $gateInfo.Display,$gateInfo.LocalIPv4,$SourcePath,$SetupSubnetConcurrencyLimit,$slotPath)
+                return [pscustomobject]@{ LeasePath = $slotPath; LeaseFilePath = $leaseFilePath; GateInfo = $gateInfo }
+            }
+            catch {
+                if (-not (Test-Path -LiteralPath $slotPath -PathType Container)) { throw }
+            }
+        }
+
+        $activeCount = @(Get-ChildItem -LiteralPath $gatePath -Directory -Filter 'slot-*' -ErrorAction SilentlyContinue).Count
+        Write-SmartLog ("Waiting for setup subnet copy lease: Subnet={0}; Active={1}; Limit={2}; Gate={3}" -f $gateInfo.Display,$activeCount,$SetupSubnetConcurrencyLimit,$gatePath)
+        Start-Sleep -Seconds (Get-Random -Minimum 10 -Maximum 31)
+    }
+    while (((Get-Date) - $started).TotalSeconds -lt $waitSeconds)
+
+    throw ("Timed out waiting for setup subnet copy lease. Subnet={0}; Gate={1}; Limit={2}; LeaseMinutes={3}" -f $gateInfo.Display,$gatePath,$SetupSubnetConcurrencyLimit,$SetupSubnetConcurrencyLeaseMinutes)
+}
+
+function Release-SetupSubnetCopyLease {
+    param([AllowNull()]$Lease)
+
+    if ($null -ne $Lease -and -not [string]::IsNullOrWhiteSpace([string]$Lease.LeasePath)) {
+        Remove-Item -LiteralPath ([string]$Lease.LeasePath) -Recurse -Force -ErrorAction SilentlyContinue
+        Write-SmartLog ("Released setup subnet copy lease: Subnet={0}; Lease={1}" -f $Lease.GateInfo.Display,$Lease.LeasePath)
+    }
+}
 function Test-SetupCacheReady {
     param(
         [Parameter(Mandatory = $true)][string]$CachePath,
@@ -1242,9 +1460,25 @@ function Copy-SetupMediaToLocalCache {
                     Write-SmartLog ("Robocopy does not advertise /IPG support. Continuing without per-PC copy bandwidth delay. Robocopy={0}" -f $robocopy) 'WARN'
                 }
             }
+            $subnetLease = $null
+            $subnetHeartbeatJob = $null
+            if ($SetupSubnetConcurrencyLimit -gt 0 -and -not [string]::IsNullOrWhiteSpace($SetupSubnetConcurrencyGateRoot)) {
+                $subnetLease = Acquire-SetupSubnetCopyLease -SourcePath $SourcePath
+                $subnetHeartbeatJob = Start-SetupSubnetCopyLeaseHeartbeat -LeaseFilePath $subnetLease.LeaseFilePath
+            }
 
-            & $robocopy @robocopyArgs | Out-Null
-            $copyExit = [int]$LASTEXITCODE
+            try {
+                & $robocopy @robocopyArgs | Out-Null
+                $copyExit = [int]$LASTEXITCODE
+            }
+            finally {
+                Stop-SetupSubnetCopyLeaseHeartbeat -Job $subnetHeartbeatJob
+                if ($null -ne $subnetLease) {
+                    Update-SetupSubnetCopyLeaseHeartbeat -LeaseFilePath $subnetLease.LeaseFilePath
+                    Release-SetupSubnetCopyLease -Lease $subnetLease
+                }
+            }
+
             if ($copyExit -gt 7) {
                 throw "Robocopy setup media copy failed with exit code $copyExit. Log=$robocopyLog"
             }
