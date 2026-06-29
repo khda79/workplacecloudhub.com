@@ -24,7 +24,7 @@
     .\SmartM365-SharePointSource-PermissionInventory.ps1 -WebUrl "https://intranet/sites/finance" -DocumentLibrariesOnly -IncludeItemPermissions
 
 .VERSION
-    1.0.1
+    1.0.2
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -145,6 +145,9 @@ $PermissionColumns = @(
     'SiteCollectionUrl',
     'WebUrl',
     'WebTitle',
+    'AssociatedMemberGroup',
+    'AssociatedOwnerGroup',
+    'AssociatedVisitorGroup',
     'ObjectScope',
     'ObjectUrl',
     'ObjectServerRelativeUrl',
@@ -414,11 +417,51 @@ function Get-PrincipalInfo {
     }
 }
 
+function Get-AssociatedWebGroupNames {
+    param(
+        [Microsoft.SharePoint.SPWeb]$Web
+    )
+
+    $memberGroup = ''
+    $ownerGroup = ''
+    $visitorGroup = ''
+
+    try {
+        if ($null -ne $Web.AssociatedMemberGroup) {
+            $memberGroup = [string]$Web.AssociatedMemberGroup.Name
+        }
+    }
+    catch {}
+
+    try {
+        if ($null -ne $Web.AssociatedOwnerGroup) {
+            $ownerGroup = [string]$Web.AssociatedOwnerGroup.Name
+        }
+    }
+    catch {}
+
+    try {
+        if ($null -ne $Web.AssociatedVisitorGroup) {
+            $visitorGroup = [string]$Web.AssociatedVisitorGroup.Name
+        }
+    }
+    catch {}
+
+    [pscustomobject]@{
+        AssociatedMemberGroup  = $memberGroup
+        AssociatedOwnerGroup   = $ownerGroup
+        AssociatedVisitorGroup = $visitorGroup
+    }
+}
+
 function Get-RoleAssignmentRows {
     param(
         [string]$SiteCollectionUrl,
         [string]$WebUrl,
         [string]$WebTitle,
+        [string]$AssociatedMemberGroup,
+        [string]$AssociatedOwnerGroup,
+        [string]$AssociatedVisitorGroup,
         [string]$ObjectScope,
         [string]$ObjectUrl,
         [string]$ObjectServerRelativeUrl,
@@ -448,6 +491,9 @@ function Get-RoleAssignmentRows {
             SiteCollectionUrl       = $SiteCollectionUrl
             WebUrl                  = $WebUrl
             WebTitle                = $WebTitle
+            AssociatedMemberGroup   = $AssociatedMemberGroup
+            AssociatedOwnerGroup    = $AssociatedOwnerGroup
+            AssociatedVisitorGroup  = $AssociatedVisitorGroup
             ObjectScope             = $ObjectScope
             ObjectUrl               = $ObjectUrl
             ObjectServerRelativeUrl = $ObjectServerRelativeUrl
@@ -522,6 +568,7 @@ function Export-ItemPermissionInventory {
         [int]$ProgressInterval
     )
 
+    $associatedGroups = Get-AssociatedWebGroupNames -Web $Web
     $query = New-Object Microsoft.SharePoint.SPQuery
     $query.ViewAttributes = "Scope='RecursiveAll'"
     $query.RowLimit = [uint32]$BatchSize
@@ -571,6 +618,9 @@ function Export-ItemPermissionInventory {
                         -SiteCollectionUrl $Web.Site.Url `
                         -WebUrl $Web.Url `
                         -WebTitle $Web.Title `
+                        -AssociatedMemberGroup $associatedGroups.AssociatedMemberGroup `
+                        -AssociatedOwnerGroup $associatedGroups.AssociatedOwnerGroup `
+                        -AssociatedVisitorGroup $associatedGroups.AssociatedVisitorGroup `
                         -ObjectScope 'Item' `
                         -ObjectUrl $absoluteUrl `
                         -ObjectServerRelativeUrl $serverRelativeUrl `
@@ -633,6 +683,7 @@ function Export-WebPermissionInventory {
     )
 
     Write-Host ("Web: {0}" -f $Web.Url)
+    $associatedGroups = Get-AssociatedWebGroupNames -Web $Web
 
     try {
         $webHasUniqueRoleAssignments = $Web.HasUniqueRoleAssignments
@@ -640,6 +691,9 @@ function Export-WebPermissionInventory {
                 -SiteCollectionUrl $Web.Site.Url `
                 -WebUrl $Web.Url `
                 -WebTitle $Web.Title `
+                -AssociatedMemberGroup $associatedGroups.AssociatedMemberGroup `
+                -AssociatedOwnerGroup $associatedGroups.AssociatedOwnerGroup `
+                -AssociatedVisitorGroup $associatedGroups.AssociatedVisitorGroup `
                 -ObjectScope 'Web' `
                 -ObjectUrl $Web.Url `
                 -ObjectServerRelativeUrl $Web.ServerRelativeUrl `
@@ -698,6 +752,9 @@ function Export-WebPermissionInventory {
                     -SiteCollectionUrl $Web.Site.Url `
                     -WebUrl $Web.Url `
                     -WebTitle $Web.Title `
+                    -AssociatedMemberGroup $associatedGroups.AssociatedMemberGroup `
+                    -AssociatedOwnerGroup $associatedGroups.AssociatedOwnerGroup `
+                    -AssociatedVisitorGroup $associatedGroups.AssociatedVisitorGroup `
                     -ObjectScope 'List' `
                     -ObjectUrl $listUrl `
                     -ObjectServerRelativeUrl $list.RootFolder.ServerRelativeUrl `

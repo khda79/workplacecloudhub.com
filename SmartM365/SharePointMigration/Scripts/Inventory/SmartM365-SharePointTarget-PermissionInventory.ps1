@@ -8,7 +8,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.0.2
+    1.0.3
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -132,6 +132,9 @@ $PermissionColumns = @(
     'SiteCollectionUrl',
     'WebUrl',
     'WebTitle',
+    'AssociatedMemberGroup',
+    'AssociatedOwnerGroup',
+    'AssociatedVisitorGroup',
     'ObjectScope',
     'ObjectUrl',
     'ObjectServerRelativeUrl',
@@ -506,11 +509,62 @@ function Get-PrincipalInfo {
     }
 }
 
+function Get-PnPGroupTitle {
+    param(
+        $Group
+    )
+
+    if ($null -eq $Group) {
+        return ''
+    }
+
+    try {
+        $Group = Get-PnPProperty -ClientObject $Group -Property Title
+    }
+    catch {}
+
+    return [string]$Group.Title
+}
+
+function Get-AssociatedWebGroupNames {
+    param(
+        $Web
+    )
+
+    $memberGroup = ''
+    $ownerGroup = ''
+    $visitorGroup = ''
+
+    try {
+        $memberGroup = Get-PnPGroupTitle -Group (Get-PnPProperty -ClientObject $Web -Property AssociatedMemberGroup)
+    }
+    catch {}
+
+    try {
+        $ownerGroup = Get-PnPGroupTitle -Group (Get-PnPProperty -ClientObject $Web -Property AssociatedOwnerGroup)
+    }
+    catch {}
+
+    try {
+        $visitorGroup = Get-PnPGroupTitle -Group (Get-PnPProperty -ClientObject $Web -Property AssociatedVisitorGroup)
+    }
+    catch {}
+
+    [pscustomobject]@{
+        AssociatedMemberGroup  = $memberGroup
+        AssociatedOwnerGroup   = $ownerGroup
+        AssociatedVisitorGroup = $visitorGroup
+    }
+}
+
 function Get-RoleAssignmentRows {
     param(
         [string]$SiteCollectionUrl,
         [string]$WebUrl,
         [string]$WebTitle,
+        [string]$AssociatedMemberGroup,
+        [string]$AssociatedOwnerGroup,
+        [string]$AssociatedVisitorGroup,
         [string]$ObjectScope,
         [string]$ObjectUrl,
         [string]$ObjectServerRelativeUrl,
@@ -543,6 +597,9 @@ function Get-RoleAssignmentRows {
                 SiteCollectionUrl        = $SiteCollectionUrl
                 WebUrl                   = $WebUrl
                 WebTitle                 = $WebTitle
+                AssociatedMemberGroup    = $AssociatedMemberGroup
+                AssociatedOwnerGroup     = $AssociatedOwnerGroup
+                AssociatedVisitorGroup   = $AssociatedVisitorGroup
                 ObjectScope              = $ObjectScope
                 ObjectUrl                = $ObjectUrl
                 ObjectServerRelativeUrl  = $ObjectServerRelativeUrl
@@ -581,6 +638,7 @@ function Export-ItemPermissionInventory {
         [int]$ProgressInterval
     )
 
+    $associatedGroups = Get-AssociatedWebGroupNames -Web $Web
     $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder
     $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -660,6 +718,9 @@ function Export-ItemPermissionInventory {
                     -SiteCollectionUrl (Get-SiteCollectionUrlFromWebUrl -WebUrl $Web.Url) `
                     -WebUrl $Web.Url `
                     -WebTitle $Web.Title `
+                    -AssociatedMemberGroup $associatedGroups.AssociatedMemberGroup `
+                    -AssociatedOwnerGroup $associatedGroups.AssociatedOwnerGroup `
+                    -AssociatedVisitorGroup $associatedGroups.AssociatedVisitorGroup `
                     -ObjectScope 'Item' `
                     -ObjectUrl $absoluteUrl `
                     -ObjectServerRelativeUrl $serverRelativeUrl `
@@ -708,6 +769,7 @@ function Export-WebPermissionInventory {
     $siteCollectionUrl = Get-SiteCollectionUrlFromWebUrl -WebUrl $web.Url
 
     Write-ConsoleMessage -Message ("Web: {0}" -f $web.Url)
+    $associatedGroups = Get-AssociatedWebGroupNames -Web $web
 
     try {
         $webRoleAssignments = Get-PnPProperty -ClientObject $web -Property RoleAssignments
@@ -715,6 +777,9 @@ function Export-WebPermissionInventory {
                 -SiteCollectionUrl $siteCollectionUrl `
                 -WebUrl $web.Url `
                 -WebTitle $web.Title `
+                -AssociatedMemberGroup $associatedGroups.AssociatedMemberGroup `
+                -AssociatedOwnerGroup $associatedGroups.AssociatedOwnerGroup `
+                -AssociatedVisitorGroup $associatedGroups.AssociatedVisitorGroup `
                 -ObjectScope 'Web' `
                 -ObjectUrl $web.Url `
                 -ObjectServerRelativeUrl $web.ServerRelativeUrl `
@@ -775,6 +840,9 @@ function Export-WebPermissionInventory {
                     -SiteCollectionUrl $siteCollectionUrl `
                     -WebUrl $web.Url `
                     -WebTitle $web.Title `
+                    -AssociatedMemberGroup $associatedGroups.AssociatedMemberGroup `
+                    -AssociatedOwnerGroup $associatedGroups.AssociatedOwnerGroup `
+                    -AssociatedVisitorGroup $associatedGroups.AssociatedVisitorGroup `
                     -ObjectScope 'List' `
                     -ObjectUrl $listUrl `
                     -ObjectServerRelativeUrl $rootFolder.ServerRelativeUrl `
@@ -937,3 +1005,4 @@ finally {
         Stop-TimestampedTranscript -Path $LogPath
     }
 }
+
