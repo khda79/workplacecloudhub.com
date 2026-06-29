@@ -114,6 +114,7 @@ COLUMN_WIDTHS = {
     "ComparisonPermissionLevels": 34,
     "MappingSourceWebPath": 58,
     "MappingTargetWebPath": 58,
+    "MappingSourceObjectPath": 76,
     "MappingRole": 14,
     "MappingSourcePrincipalName": 34,
     "MappingTargetPrincipalName": 34,
@@ -152,6 +153,25 @@ SHAREPOINT_ASSOCIATED_GROUP_SUFFIXES = {
     "visiteurs": "visitors",
 }
 
+EXPLICIT_SHAREPOINT_GROUP_MAPPINGS = [
+    {
+        "source_web_path": "/sites/corp-newrealestate",
+        "target_web_path": "/sites/corp-newrealestate",
+        "role": "owners",
+        "source_group_name": "Real Estate Owners - do not delete",
+        "target_group_name": "CORP-newrealestate Owners",
+        "method": "ConfirmedManualMapping",
+    },
+    {
+        "source_web_path": "/sites/corp-finance",
+        "target_web_path": "/sites/corp-finance",
+        "role": "owners",
+        "source_group_name": "Finance CORP - Owners",
+        "target_group_name": "CORP-Finance Owners",
+        "source_object_path": "/sites/corp-finance/documents/financial controlling/ifrs 16 leasing/training presentation",
+        "method": "ConfirmedManualMapping",
+    },
+]
 
 
 def sniff_dialect(path: Path):
@@ -214,7 +234,7 @@ def load_entra_user_aliases(path):
             row.get("OnPremisesUserPrincipalName"),
             row.get("onPremisesUserPrincipalName"),
         ]
-        for field in ("ProxyAddresses", "Proxy addresses", "OtherMails", "otherMails"):
+        for field in ("OtherMails", "otherMails"):
             identity_values.extend(split_identity_values(row.get(field)))
 
         for value in identity_values:
@@ -619,15 +639,18 @@ def target_principal_for_group(target_web_row, target_web_path, target_group_nam
     return normalize_principal(fake_row, web_path=target_web_path)
 
 
-def add_sharepoint_group_mapping(mappings, rows, source_web_path, target_web_path, role, source_group_name, target_group_name, method, target_web_row):
+def add_sharepoint_group_mapping(mappings, rows, source_web_path, target_web_path, role, source_group_name, target_group_name, method, target_web_row, target_group_names_by_web=None, source_object_path=None):
     source_group_name = (source_group_name or "").strip()
     target_group_name = (target_group_name or "").strip()
     if not source_web_path or not target_web_path or not role or not source_group_name or not target_group_name:
         return
 
     source_principal = normalize_principal_text(source_group_name)
+    source_object_path = normalize_path(source_object_path) if source_object_path else ""
+    if method != "ConfirmedManualMapping" and source_principal in (target_group_names_by_web or {}).get(target_web_path, set()):
+        return
     target_principal = target_principal_for_group(target_web_row, target_web_path, target_group_name)
-    key = (source_web_path, source_principal)
+    key = (source_web_path, source_object_path, source_principal) if source_object_path else (source_web_path, source_principal)
     if key in mappings:
         return
 
@@ -636,6 +659,7 @@ def add_sharepoint_group_mapping(mappings, rows, source_web_path, target_web_pat
         {
             "MappingSourceWebPath": source_web_path,
             "MappingTargetWebPath": target_web_path,
+            "MappingSourceObjectPath": source_object_path,
             "MappingRole": role,
             "MappingSourcePrincipalName": source_group_name,
             "MappingTargetPrincipalName": target_group_name,
@@ -650,6 +674,7 @@ def build_sharepoint_group_mappings(source_rows, target_rows, source_prefix=None
     mapping_rows = []
     source_web_rows = {}
     target_web_rows = {}
+    target_group_names_by_web = defaultdict(set)
     source_associated = defaultdict(dict)
     target_associated = defaultdict(dict)
 
@@ -669,10 +694,26 @@ def build_sharepoint_group_mappings(source_rows, target_rows, source_prefix=None
             continue
         if normalize_label(row.get("ObjectScope")) == "web":
             target_web_rows.setdefault(target_web_path, row)
+        if normalize_label(row.get("PrincipalType")) == "sharepointgroup":
+            target_group_names_by_web[target_web_path].add(normalize_principal_text(row.get("PrincipalName") or row.get("PrincipalLoginName")))
         for role, group_name in associated_group_values(row).items():
             if group_name and role not in target_associated[target_web_path]:
                 target_associated[target_web_path][role] = group_name
 
+    for explicit_mapping in EXPLICIT_SHAREPOINT_GROUP_MAPPINGS:
+        add_sharepoint_group_mapping(
+            mappings,
+            mapping_rows,
+            explicit_mapping["source_web_path"],
+            explicit_mapping["target_web_path"],
+            explicit_mapping["role"],
+            explicit_mapping["source_group_name"],
+            explicit_mapping["target_group_name"],
+            explicit_mapping["method"],
+            target_web_rows.get(explicit_mapping["target_web_path"]),
+            target_group_names_by_web=target_group_names_by_web,
+            source_object_path=explicit_mapping.get("source_object_path"),
+        )
     for source_web_path, role_map in source_associated.items():
         target_web_path = source_web_path
         target_role_map = target_associated.get(target_web_path, {})
@@ -688,6 +729,7 @@ def build_sharepoint_group_mappings(source_rows, target_rows, source_prefix=None
                 target_role_map.get(role),
                 "AssociatedWebGroup",
                 target_web_row,
+                target_group_names_by_web=target_group_names_by_web,
             )
 
     source_web_role_groups = defaultdict(dict)
@@ -717,6 +759,7 @@ def build_sharepoint_group_mappings(source_rows, target_rows, source_prefix=None
                 target_candidate[1] if target_candidate else None,
                 "WebPermissionFallback",
                 target_web_row,
+                target_group_names_by_web=target_group_names_by_web,
             )
 
     return mappings, mapping_rows
@@ -736,13 +779,13 @@ def web_group_base_candidates(row, web_path):
     return {candidate for candidate in candidates if candidate}
 
 
-def normalize_principal(row, web_path="", entra_user_aliases=None, sharepoint_group_mappings=None):
+def normalize_principal(row, web_path="", object_path="", entra_user_aliases=None, sharepoint_group_mappings=None):
     principal = row.get("PrincipalLoginName") or row.get("PrincipalName")
     normalized = normalize_principal_text(principal)
     principal_type = normalize_label(row.get("PrincipalType"))
     if principal_type == "sharepointgroup":
         if sharepoint_group_mappings:
-            mapped_principal = sharepoint_group_mappings.get((web_path, normalized))
+            mapped_principal = sharepoint_group_mappings.get((web_path, object_path, normalized)) or sharepoint_group_mappings.get((web_path, normalized))
             if mapped_principal:
                 return mapped_principal
         group_base, suffix = parse_sharepoint_group_name(normalized)
@@ -786,13 +829,13 @@ def row_path(row, source_prefix=None, target_prefix=None, path_mappings=None):
 
 def make_key(row, source_prefix=None, target_prefix=None, path_mappings=None, entra_user_aliases=None, sharepoint_group_mappings=None):
     web_path = row_web_path(row, source_prefix, target_prefix, path_mappings=path_mappings)
+    object_path = row_path(row, source_prefix, target_prefix, path_mappings=path_mappings)
     return (
         (row.get("ObjectScope") or "").strip().lower(),
-        row_path(row, source_prefix, target_prefix, path_mappings=path_mappings),
-        normalize_principal(row, web_path=web_path, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings),
+        object_path,
+        normalize_principal(row, web_path=web_path, object_path=object_path, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings),
         normalize_permissions(row.get("PermissionLevels")),
     )
-
 
 def attach_key(row, key):
     new_row = dict(row)
@@ -1129,7 +1172,7 @@ def write_permission_comparison_report(
     write_csv(limited_access_source_csv, source_limited_access_only, output_fields)
     write_csv(limited_access_target_csv, target_limited_access_only, target_fields)
     write_csv(source_users_not_in_entra_csv, source_users_not_in_entra, output_fields)
-    write_csv(sharepoint_group_mappings_csv, sharepoint_group_mapping_rows, ["MappingSourceWebPath", "MappingTargetWebPath", "MappingRole", "MappingSourcePrincipalName", "MappingTargetPrincipalName", "MappingTargetComparisonPrincipal", "MappingMethod"])
+    write_csv(sharepoint_group_mappings_csv, sharepoint_group_mapping_rows, ["MappingSourceWebPath", "MappingTargetWebPath", "MappingSourceObjectPath", "MappingRole", "MappingSourcePrincipalName", "MappingTargetPrincipalName", "MappingTargetComparisonPrincipal", "MappingMethod"])
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     xlsx_path = output_dir / f"{comparison_name}-{timestamp}.xlsx"
@@ -1320,7 +1363,7 @@ def main():
     write_csv(limited_access_source_csv, source_limited_access_only, output_fields)
     write_csv(limited_access_target_csv, target_limited_access_only, target_fields)
     write_csv(source_users_not_in_entra_csv, source_users_not_in_entra, output_fields)
-    write_csv(sharepoint_group_mappings_csv, sharepoint_group_mapping_rows, ["MappingSourceWebPath", "MappingTargetWebPath", "MappingRole", "MappingSourcePrincipalName", "MappingTargetPrincipalName", "MappingTargetComparisonPrincipal", "MappingMethod"])
+    write_csv(sharepoint_group_mappings_csv, sharepoint_group_mapping_rows, ["MappingSourceWebPath", "MappingTargetWebPath", "MappingSourceObjectPath", "MappingRole", "MappingSourcePrincipalName", "MappingTargetPrincipalName", "MappingTargetComparisonPrincipal", "MappingMethod"])
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     xlsx_path = output_dir / f"{args.comparison_name}-{timestamp}.xlsx"
@@ -1385,11 +1428,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
 
