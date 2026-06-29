@@ -40,6 +40,8 @@ PERMISSION_SUMMARY_COLUMNS = [
     "MatchedPermissionsPercent",
     "MissingInSPO",
     "MissingInSPOPercent",
+    "DisabledEntraUsersNotInSPO",
+    "DisabledEntraUsersNotInSPOPercent",
     "ExtraInSPO",
     "ExtraInSPOPercent",
     "SourceWebUrl",
@@ -66,7 +68,9 @@ NUMERIC_COLUMNS = {
     "SourceLimitedAccessOnlyIgnored",
     "TargetLimitedAccessOnlyIgnored",
     "EntraUserAliasesLoaded",
+    "DisabledEntraUsersLoaded",
     "SourceUsersNotInEntraIgnored",
+    "DisabledEntraUsersNotInSPO",
     "SharePointGroupMappingsLoaded",
     "SourceRowsWithoutLibraryScopeMetadata",
     "TargetRowsWithoutLibraryScopeMetadata",
@@ -77,6 +81,7 @@ NUMERIC_COLUMNS = {
 PERCENT_COLUMNS = {
     "MatchedPermissionsPercent",
     "MissingInSPOPercent",
+    "DisabledEntraUsersNotInSPOPercent",
     "ExtraInSPOPercent",
 }
 INTEGER_RE = re.compile(r"^-?\d+$")
@@ -95,6 +100,8 @@ COLUMN_WIDTHS = {
     "MatchedPermissionsPercent": 27,
     "MissingInSPO": 16,
     "MissingInSPOPercent": 22,
+    "DisabledEntraUsersNotInSPO": 28,
+    "DisabledEntraUsersNotInSPOPercent": 34,
     "ExtraInSPO": 14,
     "ExtraInSPOPercent": 20,
     "SourceWebUrl": 58,
@@ -215,13 +222,14 @@ def add_entra_alias(alias_map, alias, canonical):
 
 def load_entra_user_aliases(path):
     if not path:
-        return {}
+        return {}, set()
 
     csv_path = Path(path)
     if not csv_path.exists():
         raise FileNotFoundError(f"Entra users cache not found: {csv_path}")
 
     alias_map = {}
+    disabled_canonical_users = set()
     for row in read_rows(csv_path):
         canonical = row.get("UserPrincipalName") or row.get("User principal name") or row.get("Mail") or row.get("mail")
         if not canonical:
@@ -240,7 +248,13 @@ def load_entra_user_aliases(path):
         for value in identity_values:
             add_entra_alias(alias_map, value, canonical)
 
-    return alias_map
+        account_enabled = row.get("AccountEnabled")
+        if account_enabled is None:
+            account_enabled = row.get("accountEnabled")
+        if parse_bool(account_enabled) is False:
+            disabled_canonical_users.add(normalize_principal_text(canonical))
+
+    return alias_map, disabled_canonical_users
 
 
 def write_csv(path: Path, rows, fieldnames):
@@ -856,6 +870,15 @@ def source_user_not_found_in_entra(row, entra_user_aliases):
     return bool(normalized) and normalized not in entra_user_aliases
 
 
+def source_key_is_disabled_entra_user(row, key, disabled_entra_users):
+    if not disabled_entra_users:
+        return False
+    if normalize_label(row.get("PrincipalType")) != "user":
+        return False
+    comparison_principal = key[2] if len(key) > 2 else ""
+    return bool(comparison_principal) and comparison_principal in disabled_entra_users
+
+
 def with_ignore_reason(row, reason):
     updated = dict(row)
     updated["ComparisonIgnoreReason"] = reason
@@ -873,15 +896,18 @@ def percent(numerator, denominator):
 
 
 def permission_summary_status(entry):
-    missing = int(entry.get("MissingInSPO") or 0)
-    extra = int(entry.get("ExtraInSPO") or 0)
-    if missing == 0 and extra == 0:
+    differences = []
+    if int(entry.get("MissingInSPO") or 0):
+        differences.append("missing in SPO")
+    if int(entry.get("DisabledEntraUsersNotInSPO") or 0):
+        differences.append("disabled Entra users not in SPO")
+    if int(entry.get("ExtraInSPO") or 0):
+        differences.append("extra in SPO")
+    if not differences:
         return "OK - no difference"
-    if missing and extra:
-        return "Mixed differences: missing in SPO, extra in SPO"
-    if missing:
-        return "Missing in SPO"
-    return "Extra in SPO"
+    if len(differences) == 1:
+        return differences[0][:1].upper() + differences[0][1:]
+    return "Mixed differences: " + ", ".join(differences)
 
 
 def ensure_permission_summary(stats, object_scope, object_path):
@@ -900,6 +926,8 @@ def ensure_permission_summary(stats, object_scope, object_path):
             "MatchedPermissionsPercent": "0.000000",
             "MissingInSPO": 0,
             "MissingInSPOPercent": "0.000000",
+            "DisabledEntraUsersNotInSPO": 0,
+            "DisabledEntraUsersNotInSPOPercent": "0.000000",
             "ExtraInSPO": 0,
             "ExtraInSPOPercent": "0.000000",
             "SourceWebUrl": "",
@@ -926,7 +954,7 @@ def update_permission_summary_metadata(entry, row, side):
             entry["TargetObjectUrl"] = row.get("ObjectUrl", "")
 
 
-def build_permission_summary(source_by_key, target_by_key, matched_keys, missing_keys, extra_keys):
+def build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys):
     stats = {}
     for row in source_by_key.values():
         entry = ensure_permission_summary(stats, row.get("ComparisonObjectScope"), row.get("ComparisonObjectPath"))
@@ -942,6 +970,9 @@ def build_permission_summary(source_by_key, target_by_key, matched_keys, missing
     for key in missing_keys:
         object_scope, object_path = key[0], key[1]
         ensure_permission_summary(stats, object_scope, object_path)["MissingInSPO"] += 1
+    for key in disabled_entra_missing_keys:
+        object_scope, object_path = key[0], key[1]
+        ensure_permission_summary(stats, object_scope, object_path)["DisabledEntraUsersNotInSPO"] += 1
     for key in extra_keys:
         object_scope, object_path = key[0], key[1]
         ensure_permission_summary(stats, object_scope, object_path)["ExtraInSPO"] += 1
@@ -950,13 +981,14 @@ def build_permission_summary(source_by_key, target_by_key, matched_keys, missing
     for entry in stats.values():
         entry["MatchedPermissionsPercent"] = percent(entry["MatchedPermissions"], entry["SourcePermissions"])
         entry["MissingInSPOPercent"] = percent(entry["MissingInSPO"], entry["SourcePermissions"])
+        entry["DisabledEntraUsersNotInSPOPercent"] = percent(entry["DisabledEntraUsersNotInSPO"], entry["SourcePermissions"])
         entry["ExtraInSPOPercent"] = percent(entry["ExtraInSPO"], entry["TargetPermissions"])
         entry["Status"] = permission_summary_status(entry)
         rows.append(entry)
     return sorted(
         rows,
         key=lambda item: (
-            -int(item.get("MissingInSPO") or 0) - int(item.get("ExtraInSPO") or 0),
+            -int(item.get("MissingInSPO") or 0) - int(item.get("DisabledEntraUsersNotInSPO") or 0) - int(item.get("ExtraInSPO") or 0),
             str(item.get("ObjectScope") or ""),
             str(item.get("ComparisonObjectPath") or ""),
         ),
@@ -1039,6 +1071,7 @@ def write_permission_comparison_report(
     source_scan_document_libraries_only=False,
     target_scan_document_libraries_only=False,
     entra_user_aliases=None,
+    disabled_entra_users=None,
     sharepoint_group_mappings=None,
     sharepoint_group_mapping_rows=None,
 ):
@@ -1053,6 +1086,7 @@ def write_permission_comparison_report(
     source_limited_access_only = []
     target_limited_access_only = []
     source_users_not_in_entra = []
+    disabled_entra_users = disabled_entra_users or set()
 
     for row in source_rows:
         key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings)
@@ -1082,7 +1116,13 @@ def write_permission_comparison_report(
     source_keys = set(source_by_key)
     target_keys = set(target_by_key)
     matched_keys = sorted(source_keys & target_keys)
-    missing_keys = sorted(source_keys - target_keys)
+    raw_missing_keys = sorted(source_keys - target_keys)
+    disabled_entra_missing_keys = [
+        key for key in raw_missing_keys
+        if source_key_is_disabled_entra_user(source_by_key[key], key, disabled_entra_users)
+    ]
+    disabled_entra_missing_key_set = set(disabled_entra_missing_keys)
+    missing_keys = [key for key in raw_missing_keys if key not in disabled_entra_missing_key_set]
     extra_keys = sorted(target_keys - source_keys)
 
     summary_rows = [
@@ -1094,12 +1134,14 @@ def write_permission_comparison_report(
             "TargetUniqueKeys": len(target_by_key),
             "MatchedPermissions": len(matched_keys),
             "MissingInSPO": len(missing_keys),
+            "DisabledEntraUsersNotInSPO": len(disabled_entra_missing_keys),
             "ExtraInSPO": len(extra_keys),
             "SourceDuplicateKeysIgnored": len(source_duplicates),
             "TargetDuplicateKeysIgnored": len(target_duplicates),
             "SourceLimitedAccessOnlyIgnored": len(source_limited_access_only),
             "TargetLimitedAccessOnlyIgnored": len(target_limited_access_only),
             "EntraUserAliasesLoaded": len(entra_user_aliases or {}),
+            "DisabledEntraUsersLoaded": len(disabled_entra_users),
             "SourceUsersNotInEntraIgnored": len(source_users_not_in_entra),
             "SharePointGroupMappingsLoaded": len(sharepoint_group_mappings),
             "SourceRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(source_rows),
@@ -1123,6 +1165,10 @@ def write_permission_comparison_report(
 
     matched_rows = rows_from_keys(matched_keys, source_by_key)
     missing_rows = rows_from_keys(missing_keys, source_by_key)
+    disabled_entra_missing_rows = [
+        with_ignore_reason(source_by_key[key], "Source user principal is disabled in Entra and missing in SPO")
+        for key in disabled_entra_missing_keys
+    ]
     extra_rows = rows_from_keys(extra_keys, target_by_key)
 
     scope_counter = Counter()
@@ -1130,18 +1176,21 @@ def write_permission_comparison_report(
         scope_counter[(key[0], "Matched")] += 1
     for key in missing_keys:
         scope_counter[(key[0], "MissingInSPO")] += 1
+    for key in disabled_entra_missing_keys:
+        scope_counter[(key[0], "DisabledEntraUsersNotInSPO")] += 1
     for key in extra_keys:
         scope_counter[(key[0], "ExtraInSPO")] += 1
     scope_rows = [
         {"ObjectScope": scope, "Status": status, "Count": count}
         for (scope, status), count in sorted(scope_counter.items())
     ]
-    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, missing_keys, extra_keys)
+    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys)
 
     summary_csv = output_dir / "Summary.csv"
     scope_csv = output_dir / "ScopeSummary.csv"
     permission_summary_csv = output_dir / "PermissionSummary.csv"
     missing_csv = output_dir / "MissingInSPO.csv"
+    disabled_entra_missing_csv = output_dir / "DisabledEntraUsersNotInSPO.csv"
     extra_csv = output_dir / "ExtraInSPO.csv"
     matched_csv = output_dir / "Matched.csv"
     duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
@@ -1160,6 +1209,7 @@ def write_permission_comparison_report(
         if extra_field not in output_fields:
             output_fields.append(extra_field)
     write_csv(missing_csv, missing_rows, output_fields)
+    write_csv(disabled_entra_missing_csv, disabled_entra_missing_rows, output_fields)
     write_csv(matched_csv, matched_rows, output_fields)
 
     target_fields = list(target_rows[0].keys()) if target_rows else output_fields
@@ -1183,6 +1233,7 @@ def write_permission_comparison_report(
             ("PermissionSummary", list_rows_for_excel(permission_summary_csv)),
             ("ScopeSummary", list_rows_for_excel(scope_csv)),
             ("MissingInSPO", list_rows_for_excel(missing_csv)),
+            ("DisabledUsers", list_rows_for_excel(disabled_entra_missing_csv)),
             ("ExtraInSPO", list_rows_for_excel(extra_csv)),
             ("Matched", list_rows_for_excel(matched_csv)),
             ("DuplicateSource", list_rows_for_excel(duplicate_source_csv)),
@@ -1198,6 +1249,7 @@ def write_permission_comparison_report(
         "ReportScope": report_scope,
         "MatchedPermissions": len(matched_keys),
         "MissingInSPO": len(missing_keys),
+        "DisabledEntraUsersNotInSPO": len(disabled_entra_missing_keys),
         "ExtraInSPO": len(extra_keys),
         "Summary": summary_csv,
         "Excel": xlsx_path,
@@ -1235,8 +1287,9 @@ def main():
     if path_mappings:
         print(f"Path mappings loaded: {len(path_mappings)}")
 
-    entra_user_aliases = load_entra_user_aliases(args.entra_users_csv)
+    entra_user_aliases, disabled_entra_users = load_entra_user_aliases(args.entra_users_csv)
     print(f"Entra user aliases loaded: {len(entra_user_aliases)} from {args.entra_users_csv}")
+    print(f"Disabled Entra users loaded: {len(disabled_entra_users)} from {args.entra_users_csv}")
 
     sharepoint_group_mappings, sharepoint_group_mapping_rows = build_sharepoint_group_mappings(
         source_rows,
@@ -1283,7 +1336,13 @@ def main():
     source_keys = set(source_by_key)
     target_keys = set(target_by_key)
     matched_keys = sorted(source_keys & target_keys)
-    missing_keys = sorted(source_keys - target_keys)
+    raw_missing_keys = sorted(source_keys - target_keys)
+    disabled_entra_missing_keys = [
+        key for key in raw_missing_keys
+        if source_key_is_disabled_entra_user(source_by_key[key], key, disabled_entra_users)
+    ]
+    disabled_entra_missing_key_set = set(disabled_entra_missing_keys)
+    missing_keys = [key for key in raw_missing_keys if key not in disabled_entra_missing_key_set]
     extra_keys = sorted(target_keys - source_keys)
 
     summary_rows = [
@@ -1296,12 +1355,14 @@ def main():
             "TargetUniqueKeys": len(target_by_key),
             "MatchedPermissions": len(matched_keys),
             "MissingInSPO": len(missing_keys),
+            "DisabledEntraUsersNotInSPO": len(disabled_entra_missing_keys),
             "ExtraInSPO": len(extra_keys),
             "SourceDuplicateKeysIgnored": len(source_duplicates),
             "TargetDuplicateKeysIgnored": len(target_duplicates),
             "SourceLimitedAccessOnlyIgnored": len(source_limited_access_only),
             "TargetLimitedAccessOnlyIgnored": len(target_limited_access_only),
             "EntraUserAliasesLoaded": len(entra_user_aliases or {}),
+            "DisabledEntraUsersLoaded": len(disabled_entra_users),
             "SourceUsersNotInEntraIgnored": len(source_users_not_in_entra),
             "SharePointGroupMappingsLoaded": len(sharepoint_group_mappings),
             "SourceRootPath": args.source_root_path,
@@ -1314,6 +1375,10 @@ def main():
 
     matched_rows = rows_from_keys(matched_keys, source_by_key)
     missing_rows = rows_from_keys(missing_keys, source_by_key)
+    disabled_entra_missing_rows = [
+        with_ignore_reason(source_by_key[key], "Source user principal is disabled in Entra and missing in SPO")
+        for key in disabled_entra_missing_keys
+    ]
     extra_rows = rows_from_keys(extra_keys, target_by_key)
 
     scope_counter = Counter()
@@ -1321,18 +1386,21 @@ def main():
         scope_counter[(key[0], "Matched")] += 1
     for key in missing_keys:
         scope_counter[(key[0], "MissingInSPO")] += 1
+    for key in disabled_entra_missing_keys:
+        scope_counter[(key[0], "DisabledEntraUsersNotInSPO")] += 1
     for key in extra_keys:
         scope_counter[(key[0], "ExtraInSPO")] += 1
     scope_rows = [
         {"ObjectScope": scope, "Status": status, "Count": count}
         for (scope, status), count in sorted(scope_counter.items())
     ]
-    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, missing_keys, extra_keys)
+    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys)
 
     summary_csv = output_dir / "Summary.csv"
     scope_csv = output_dir / "ScopeSummary.csv"
     permission_summary_csv = output_dir / "PermissionSummary.csv"
     missing_csv = output_dir / "MissingInSPO.csv"
+    disabled_entra_missing_csv = output_dir / "DisabledEntraUsersNotInSPO.csv"
     extra_csv = output_dir / "ExtraInSPO.csv"
     matched_csv = output_dir / "Matched.csv"
     duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
@@ -1351,6 +1419,7 @@ def main():
         if extra_field not in output_fields:
             output_fields.append(extra_field)
     write_csv(missing_csv, missing_rows, output_fields)
+    write_csv(disabled_entra_missing_csv, disabled_entra_missing_rows, output_fields)
     write_csv(matched_csv, matched_rows, output_fields)
 
     target_fields = list(target_rows[0].keys()) if target_rows else output_fields
@@ -1374,6 +1443,7 @@ def main():
             ("PermissionSummary", list_rows_for_excel(permission_summary_csv)),
             ("ScopeSummary", list_rows_for_excel(scope_csv)),
             ("MissingInSPO", list_rows_for_excel(missing_csv)),
+            ("DisabledUsers", list_rows_for_excel(disabled_entra_missing_csv)),
             ("ExtraInSPO", list_rows_for_excel(extra_csv)),
             ("Matched", list_rows_for_excel(matched_csv)),
             ("DuplicateSource", list_rows_for_excel(duplicate_source_csv)),
@@ -1398,6 +1468,7 @@ def main():
         source_scan_document_libraries_only=args.source_scan_document_libraries_only,
         target_scan_document_libraries_only=args.target_scan_document_libraries_only,
         entra_user_aliases=entra_user_aliases,
+        disabled_entra_users=disabled_entra_users,
         sharepoint_group_mappings=sharepoint_group_mappings,
         sharepoint_group_mapping_rows=sharepoint_group_mapping_rows,
     )
@@ -1413,12 +1484,14 @@ def main():
         source_scan_document_libraries_only=args.source_scan_document_libraries_only,
         target_scan_document_libraries_only=args.target_scan_document_libraries_only,
         entra_user_aliases=entra_user_aliases,
+        disabled_entra_users=disabled_entra_users,
         sharepoint_group_mappings=sharepoint_group_mappings,
         sharepoint_group_mapping_rows=sharepoint_group_mapping_rows,
     )
     print(f"Comparison completed.")
     print(f"Matched permissions: {len(matched_keys)}")
     print(f"Missing in SPO: {len(missing_keys)}")
+    print(f"Disabled Entra users not in SPO: {len(disabled_entra_missing_keys)}")
     print(f"Extra in SPO: {len(extra_keys)}")
     print(f"Summary: {summary_csv}")
     print(f"Excel: {xlsx_path}")
