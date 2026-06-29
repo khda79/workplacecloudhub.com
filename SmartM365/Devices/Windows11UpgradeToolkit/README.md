@@ -268,6 +268,13 @@ DISM /Online /Cleanup-Image /StartComponentCleanup
 
 The toolkit does not use `/ResetBase`.
 
+## AD Precheck For Already-Upgraded Devices
+
+Before each LOT run, the PsExec launcher can load or refresh `DevicesAD.csv` with `Scripts\SmartM365-Windows11Upgrade-Export-ADDevicesCsv.ps1`. If AD already reports a computer as Windows 11 through `OperatingSystem`, the launcher moves it from `Computers.txt` to `ComputersAlreadyW11.txt` before starting PsExec.
+
+- Use `Export-ADDevicesCsv.cmd` from the toolkit root to generate a forest-wide `DevicesAD.csv` cache.
+- Add `AdDomain.txt` in a LOT folder, or set `W11UT_AD_DOMAIN`, to restrict the automatic AD export to one domain.
+- Automatic LOT refreshes are limited to the current `Computers.txt`; root `DevicesAD.csv` is reused only when it already exists and is recent.
 ## Reports And Logs
 
 Remote runtime data is written under:
