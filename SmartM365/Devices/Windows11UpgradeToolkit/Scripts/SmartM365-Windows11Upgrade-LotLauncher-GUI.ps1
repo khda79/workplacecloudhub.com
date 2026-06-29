@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.7
+0.1.8
 #>
 param(
     [switch]$ValidateOnly
@@ -139,14 +139,6 @@ function Test-LotConfigCanOverrideEnvironmentValue {
 
     $currentValue = [string]$EnvironmentVariables[$Name]
     if ([string]::IsNullOrWhiteSpace($currentValue)) {
-        return $true
-    }
-
-    if ($script:ToolkitConfig -and $script:ToolkitConfig.ContainsKey($Name) -and $currentValue -eq [string]$script:ToolkitConfig[$Name]) {
-        return $true
-    }
-
-    if ($script:ToolkitDefaultEnvironment -and $script:ToolkitDefaultEnvironment.ContainsKey($Name) -and $currentValue -eq [string]$script:ToolkitDefaultEnvironment[$Name]) {
         return $true
     }
 
