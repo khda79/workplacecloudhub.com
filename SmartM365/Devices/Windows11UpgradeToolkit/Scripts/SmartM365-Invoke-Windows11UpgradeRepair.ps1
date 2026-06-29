@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.14
+    0.1.15
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -53,7 +53,7 @@ param(
     [ValidateRange(1, 1440)][int]$SetupSourceConcurrencyLeaseMinutes = 240,
     [string]$SetupSourceConcurrencyGateRoot,
     [ValidateRange(0, 500)][int]$SetupSubnetConcurrencyLimit = 0,
-    [ValidateRange(1, 32)][int]$SetupSubnetPrefixLength = 24,
+    [string]$SetupSubnetPrefixLength = 'Auto',
     [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 60,
     [string]$SetupSubnetConcurrencyGateRoot,
     [ValidateRange(10, 200)][int]$MinimumFreeDiskGB = 32,
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.14'
+$script:ScriptVersion = '0.1.15'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1228,8 +1228,9 @@ function Get-LocalIPv4ForSetupSource {
     param([Parameter(Mandatory = $true)][string]$SourcePath)
 
     $hostName = Get-SetupUncHostName -SourcePath $SourcePath
-    if ([string]::IsNullOrWhiteSpace($hostName)) { return '' }
+    if ([string]::IsNullOrWhiteSpace($hostName)) { return $null }
 
+    $selectedAddress = ''
     try {
         $remoteAddresses = @([System.Net.Dns]::GetHostAddresses($hostName) | Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork })
         foreach ($remoteAddress in $remoteAddresses) {
@@ -1237,8 +1238,11 @@ function Get-LocalIPv4ForSetupSource {
             try {
                 $socket.Connect($remoteAddress, 445)
                 if ($socket.LocalEndPoint -and $socket.LocalEndPoint.Address) {
-                    $localAddress = [string]$socket.LocalEndPoint.Address
-                    if ($localAddress -and $localAddress -ne '0.0.0.0' -and -not $localAddress.StartsWith('169.254.')) { return $localAddress }
+                    $candidateAddress = [string]$socket.LocalEndPoint.Address
+                    if ($candidateAddress -and $candidateAddress -ne '0.0.0.0' -and -not $candidateAddress.StartsWith('169.254.')) {
+                        $selectedAddress = $candidateAddress
+                        break
+                    }
                 }
             }
             catch { }
@@ -1250,38 +1254,96 @@ function Get-LocalIPv4ForSetupSource {
     try {
         $ipConfig = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop)
         foreach ($adapter in $ipConfig) {
-            foreach ($address in @($adapter.IPAddress)) {
-                if ($address -match '^\d+\.\d+\.\d+\.\d+$' -and -not $address.StartsWith('169.254.')) { return [string]$address }
+            $addresses = @($adapter.IPAddress)
+            $masks = @($adapter.IPSubnet)
+            for ($index = 0; $index -lt $addresses.Count; $index++) {
+                $address = [string]$addresses[$index]
+                if ($address -notmatch '^\d+\.\d+\.\d+\.\d+$' -or $address.StartsWith('169.254.')) { continue }
+
+                if ([string]::IsNullOrWhiteSpace($selectedAddress)) { $selectedAddress = $address }
+                if ($address -eq $selectedAddress) {
+                    $prefix = $null
+                    if ($index -lt $masks.Count -and [string]$masks[$index] -match '^\d+\.\d+\.\d+\.\d+$') {
+                        $prefix = Get-IPv4PrefixLengthFromMask -Mask ([string]$masks[$index])
+                    }
+
+                    return [pscustomobject]@{
+                        Address = $selectedAddress
+                        PrefixLength = $prefix
+                    }
+                }
             }
         }
     }
     catch { }
 
-    return ''
+    if ([string]::IsNullOrWhiteSpace($selectedAddress)) { return $null }
+    return [pscustomobject]@{
+        Address = $selectedAddress
+        PrefixLength = $null
+    }
+}
+
+function Get-IPv4PrefixLengthFromMask {
+    param([Parameter(Mandatory = $true)][string]$Mask)
+
+    $maskNumber = ConvertTo-IPv4Number -Address $Mask
+    $prefix = 0
+    for ($bit = 31; $bit -ge 0; $bit--) {
+        $bitValue = [uint32]([uint64]1 -shl $bit)
+        if (($maskNumber -band $bitValue) -ne 0) { $prefix++ } else { break }
+    }
+
+    return $prefix
+}
+
+function Resolve-SetupSubnetPrefixLength {
+    param([AllowNull()]$LocalAddressInfo)
+
+    $value = ([string]$SetupSubnetPrefixLength).Trim()
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -ieq 'Auto') {
+        if ($LocalAddressInfo -and $LocalAddressInfo.PSObject.Properties['PrefixLength'] -and $LocalAddressInfo.PrefixLength -ge 1 -and $LocalAddressInfo.PrefixLength -le 32) {
+            return [int]$LocalAddressInfo.PrefixLength
+        }
+
+        Write-SmartLog 'Unable to detect local subnet prefix length for setup subnet copy gate; falling back to /24. Set -SetupSubnetPrefixLength to force another value.' 'WARN'
+        return 24
+    }
+
+    $prefixLength = 0
+    if (-not [int]::TryParse($value, [ref]$prefixLength) -or $prefixLength -lt 1 -or $prefixLength -gt 32) {
+        throw "SetupSubnetPrefixLength must be Auto or an integer from 1 to 32. Value=$value"
+    }
+
+    return $prefixLength
 }
 
 function Get-SetupSubnetCopyGateInfo {
     param([Parameter(Mandatory = $true)][string]$SourcePath)
 
-    $localIPv4 = Get-LocalIPv4ForSetupSource -SourcePath $SourcePath
+    $localAddressInfo = Get-LocalIPv4ForSetupSource -SourcePath $SourcePath
     $sourceHost = Get-SetupUncHostName -SourcePath $SourcePath
-    if ([string]::IsNullOrWhiteSpace($localIPv4)) {
+    if (-not $localAddressInfo -or [string]::IsNullOrWhiteSpace([string]$localAddressInfo.Address)) {
         Write-SmartLog ("Unable to resolve local IPv4 for setup subnet copy gate. Source={0}; using UNKNOWN subnet gate." -f $SourcePath) 'WARN'
+        $prefixLength = Resolve-SetupSubnetPrefixLength -LocalAddressInfo $null
         $subnet = 'UNKNOWN'
         $key = 'UNKNOWN_SUBNET'
+        $localIPv4 = ''
     }
     else {
-        $subnet = Get-IPv4NetworkAddress -Address $localIPv4 -PrefixLength $SetupSubnetPrefixLength
-        $key = ("{0}_{1}" -f $subnet,$SetupSubnetPrefixLength).Replace('.', '-')
+        $localIPv4 = [string]$localAddressInfo.Address
+        $prefixLength = Resolve-SetupSubnetPrefixLength -LocalAddressInfo $localAddressInfo
+        $subnet = Get-IPv4NetworkAddress -Address $localIPv4 -PrefixLength $prefixLength
+        $key = ("{0}_{1}" -f $subnet,$prefixLength).Replace('.', '-')
     }
 
     [pscustomobject]@{
         SourceHost = $sourceHost
         LocalIPv4 = $localIPv4
         Subnet = $subnet
-        PrefixLength = $SetupSubnetPrefixLength
+        PrefixLength = $prefixLength
         Key = $key
-        Display = if ($subnet -eq 'UNKNOWN') { 'UNKNOWN' } else { "{0}/{1}" -f $subnet,$SetupSubnetPrefixLength }
+        Display = if ($subnet -eq 'UNKNOWN') { 'UNKNOWN' } else { "{0}/{1}" -f $subnet,$prefixLength }
     }
 }
 

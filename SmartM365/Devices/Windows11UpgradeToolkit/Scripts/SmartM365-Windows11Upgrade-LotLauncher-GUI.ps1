@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.9
+0.1.10
 #>
 param(
     [switch]$ValidateOnly
@@ -643,7 +643,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_SETUP_COPY_IPG_MS = '20'
     W11UT_SETUP_COPY_JITTER_SECONDS = '300'
     W11UT_SETUP_SUBNET_CONCURRENCY_LIMIT = '1'
-    W11UT_SETUP_SUBNET_PREFIX_LENGTH = '24'
+    W11UT_SETUP_SUBNET_PREFIX_LENGTH = 'Auto'
     W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES = '60'
     W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT = ''
     W11UT_SETUP_EXECUTION_MODE = 'LocalCache'
@@ -1036,16 +1036,7 @@ $xaml = @'
                                         <Button x:Name="SetupSubnetLimitUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
                                     </Grid>
                                     <TextBlock Text="Subnet prefix length"/>
-                                    <Grid Margin="0,4,0,10">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="32"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="32"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Button x:Name="SetupSubnetPrefixDownButton" Grid.Column="0" Content="-" Style="{StaticResource StepperButtonStyle}"/>
-                                        <TextBox x:Name="SetupSubnetPrefixText" Grid.Column="1" Style="{StaticResource NumericTextBoxStyle}"/>
-                                        <Button x:Name="SetupSubnetPrefixUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
-                                    </Grid>
+                                    <ComboBox x:Name="SetupSubnetPrefixCombo" IsEditable="True" Margin="0,4,0,10"/>
                                     <TextBlock Text="Subnet lease minutes"/>
                                     <Grid Margin="0,4,0,10">
                                         <Grid.ColumnDefinitions>
@@ -1191,8 +1182,8 @@ $controls = @{}
     'SetupCandidateLimitDownButton','SetupCandidateLimitUpButton','SetupCopyIpgText',
     'SetupCopyIpgDownButton','SetupCopyIpgUpButton','SetupCopyJitterText',
     'SetupCopyJitterDownButton','SetupCopyJitterUpButton','SetupSubnetLimitText',
-    'SetupSubnetLimitDownButton','SetupSubnetLimitUpButton','SetupSubnetPrefixText',
-    'SetupSubnetPrefixDownButton','SetupSubnetPrefixUpButton','SetupSubnetLeaseText',
+    'SetupSubnetLimitDownButton','SetupSubnetLimitUpButton','SetupSubnetPrefixCombo',
+    'SetupSubnetLeaseText',
     'SetupSubnetLeaseDownButton','SetupSubnetLeaseUpButton','SetupSubnetGateRootText','ThrottleText','ThrottleDownButton',
     'ThrottleUpButton','ComputerDelayText','ComputerDelayDownButton','ComputerDelayUpButton',
     'CycleDelayText','CycleDelayDownButton','CycleDelayUpButton','MaxCyclesText','MaxCyclesDownButton',
@@ -1362,7 +1353,6 @@ function Register-NumericSteppers {
     Register-NumericStepper -TextBoxName 'SetupCopyIpgText' -DownButtonName 'SetupCopyIpgDownButton' -UpButtonName 'SetupCopyIpgUpButton' -Default 20 -Minimum 0 -Step 5
     Register-NumericStepper -TextBoxName 'SetupCopyJitterText' -DownButtonName 'SetupCopyJitterDownButton' -UpButtonName 'SetupCopyJitterUpButton' -Default 300 -Minimum 0 -Step 30
     Register-NumericStepper -TextBoxName 'SetupSubnetLimitText' -DownButtonName 'SetupSubnetLimitDownButton' -UpButtonName 'SetupSubnetLimitUpButton' -Default 1 -Minimum 0
-    Register-NumericStepper -TextBoxName 'SetupSubnetPrefixText' -DownButtonName 'SetupSubnetPrefixDownButton' -UpButtonName 'SetupSubnetPrefixUpButton' -Default 24 -Minimum 1
     Register-NumericStepper -TextBoxName 'SetupSubnetLeaseText' -DownButtonName 'SetupSubnetLeaseDownButton' -UpButtonName 'SetupSubnetLeaseUpButton' -Default 60 -Minimum 1 -Step 5
     Register-NumericStepper -TextBoxName 'ThrottleText' -DownButtonName 'ThrottleDownButton' -UpButtonName 'ThrottleUpButton' -Default 10 -Minimum 1
     Register-NumericStepper -TextBoxName 'ComputerDelayText' -DownButtonName 'ComputerDelayDownButton' -UpButtonName 'ComputerDelayUpButton' -Default 0 -Minimum 0 -Step 5
@@ -1464,6 +1454,7 @@ function Initialize-Options {
     Initialize-Combo -Combo $controls.SetupModeCombo -Values @('LocalCache','Share','Auto') -Selected (Get-ConfiguredValue 'W11UT_SETUP_EXECUTION_MODE')
     Initialize-Combo -Combo $controls.SetupLanguageCombo -Values @('MatchSystem','Any','fr-FR','en-GB','en-US','de-DE','es-ES','it-IT','nl-NL','pt-PT','pl-PL') -Selected (Get-ConfiguredValue 'W11UT_SETUP_LANGUAGE')
     Initialize-Combo -Combo $controls.SetupDynamicUpdateCombo -Values @('Disable','Enable','NoDrivers','NoLCU','NoDriversNoLCU') -Selected (Get-ConfiguredValue 'W11UT_SETUP_DYNAMIC_UPDATE')
+    Initialize-Combo -Combo $controls.SetupSubnetPrefixCombo -Values @('Auto','20','21','22','23','24','25','26','27','28','29','30','31','32') -Selected (Get-ConfiguredValue 'W11UT_SETUP_SUBNET_PREFIX_LENGTH')
 
     $controls.AuditOnlyCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_AUDIT_ONLY') -eq '1')
     $controls.AllowPolicyRepairCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_POLICY_REPAIR') -eq '1')
@@ -1488,7 +1479,6 @@ function Initialize-Options {
     $controls.SetupCopyIpgText.Text = Get-ConfiguredValue 'W11UT_SETUP_COPY_IPG_MS'
     $controls.SetupCopyJitterText.Text = Get-ConfiguredValue 'W11UT_SETUP_COPY_JITTER_SECONDS'
     $controls.SetupSubnetLimitText.Text = Get-ConfiguredValue 'W11UT_SETUP_SUBNET_CONCURRENCY_LIMIT'
-    $controls.SetupSubnetPrefixText.Text = Get-ConfiguredValue 'W11UT_SETUP_SUBNET_PREFIX_LENGTH'
     $controls.SetupSubnetLeaseText.Text = Get-ConfiguredValue 'W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES'
     $controls.SetupSubnetGateRootText.Text = Get-ConfiguredValue 'W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT'
     $controls.ThrottleText.Text = Get-ConfiguredValue 'W11UT_THROTTLE'
@@ -1600,7 +1590,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_SETUP_COPY_IPG_MS                        = Get-IntText -TextBox $controls.SetupCopyIpgText -Default 20 -Minimum 0
         W11UT_SETUP_COPY_JITTER_SECONDS                = Get-IntText -TextBox $controls.SetupCopyJitterText -Default 300 -Minimum 0
         W11UT_SETUP_SUBNET_CONCURRENCY_LIMIT           = Get-IntText -TextBox $controls.SetupSubnetLimitText -Default 1 -Minimum 0
-        W11UT_SETUP_SUBNET_PREFIX_LENGTH               = Get-IntText -TextBox $controls.SetupSubnetPrefixText -Default 24 -Minimum 1
+        W11UT_SETUP_SUBNET_PREFIX_LENGTH               = [string]$controls.SetupSubnetPrefixCombo.Text
         W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES   = Get-IntText -TextBox $controls.SetupSubnetLeaseText -Default 60 -Minimum 1
         W11UT_AUDIT_ONLY                               = Get-BooleanText -CheckBox $controls.AuditOnlyCheck
         W11UT_ALLOW_POLICY_REPAIR                      = Get-BooleanText -CheckBox $controls.AllowPolicyRepairCheck
