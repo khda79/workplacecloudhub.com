@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.14
+    0.1.15
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -55,7 +55,7 @@ param(
     [ValidateRange(1, 1440)][int]$SetupSourceConcurrencyLeaseMinutes = 240,
     [string]$SetupSourceConcurrencyGateRoot,
     [ValidateRange(0, 500)][int]$SetupSubnetConcurrencyLimit = 0,
-    [ValidateRange(1, 32)][int]$SetupSubnetPrefixLength = 24,
+    [string]$SetupSubnetPrefixLength = 'Auto',
     [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 60,
     [string]$SetupSubnetConcurrencyGateRoot,
 
@@ -86,7 +86,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.14'
+$script:LauncherVersion = '0.1.15'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
