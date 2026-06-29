@@ -117,6 +117,7 @@ PERMISSION_LEVEL_ALIASES = {
     "contrôle total": "full control",
     "modification": "edit",
     "contribution": "contribute",
+    "collaboration": "contribute",
     "conception": "design",
     "lecture restreinte": "restricted view",
     "affichage seul": "view only",
@@ -124,6 +125,20 @@ PERMISSION_LEVEL_ALIASES = {
     "gerer la hierarchie": "manage hierarchy",
     "gérer la hiérarchie": "manage hierarchy",
 }
+
+SHAREPOINT_ASSOCIATED_GROUP_SUFFIXES = {
+    "owners": "owners",
+    "owner": "owners",
+    "proprietaires": "owners",
+    "propriétaires": "owners",
+    "members": "members",
+    "member": "members",
+    "membres": "members",
+    "visitors": "visitors",
+    "visitor": "visitors",
+    "visiteurs": "visitors",
+}
+
 
 
 def sniff_dialect(path: Path):
@@ -425,12 +440,51 @@ def normalize_default_document_library_key(row, key, source_prefix=None, target_
     return "/" + normalized_relative_path
 
 
-def normalize_principal(value):
+def normalize_principal_text(value):
     text = (value or "").strip().lower()
     if "|" in text:
         text = text.split("|")[-1]
     text = re.sub(r"^i:0[#.a-z0-9]*", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def parse_sharepoint_group_name(value):
+    text = normalize_label(value)
+    match = re.search(r"(?:\s+-\s+|\s+)([^\s-]+)$", text)
+    if not match:
+        return None, None
+    suffix = SHAREPOINT_ASSOCIATED_GROUP_SUFFIXES.get(match.group(1))
+    if not suffix:
+        return None, None
+    base = text[: match.start()].strip(" -")
+    return base, suffix
+
+
+def canonical_group_base(value):
+    text = normalize_label(value)
+    text = re.sub(r"^corp[\s-]+", "", text)
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def web_group_base_candidates(row, web_path):
+    candidates = {canonical_group_base(row.get("WebTitle"))}
+    web_segment = (web_path or "").rstrip("/").split("/")[-1]
+    if web_segment:
+        candidates.add(canonical_group_base(web_segment))
+        candidates.add(canonical_group_base(re.sub(r"^corp-", "", web_segment, flags=re.IGNORECASE)))
+    return {candidate for candidate in candidates if candidate}
+
+
+def normalize_principal(row, web_path=""):
+    principal = row.get("PrincipalLoginName") or row.get("PrincipalName")
+    normalized = normalize_principal_text(principal)
+    principal_type = normalize_label(row.get("PrincipalType"))
+    if principal_type == "sharepointgroup":
+        group_base, suffix = parse_sharepoint_group_name(normalized)
+        if suffix and canonical_group_base(group_base) in web_group_base_candidates(row, web_path):
+            return f"sharepointgroup:{web_path}:{suffix}"
+    return normalized
 
 
 def normalize_label(value):
@@ -460,10 +514,11 @@ def row_path(row, source_prefix=None, target_prefix=None, path_mappings=None):
 
 
 def make_key(row, source_prefix=None, target_prefix=None, path_mappings=None):
+    web_path = row_web_path(row, source_prefix, target_prefix, path_mappings=path_mappings)
     return (
         (row.get("ObjectScope") or "").strip().lower(),
         row_path(row, source_prefix, target_prefix, path_mappings=path_mappings),
-        normalize_principal(row.get("PrincipalLoginName") or row.get("PrincipalName")),
+        normalize_principal(row, web_path=web_path),
         normalize_permissions(row.get("PermissionLevels")),
     )
 
