@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.13
+    0.1.14
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -54,6 +54,10 @@ param(
     [ValidateRange(0, 500)][int]$SetupSourceConcurrencyLimit = 0,
     [ValidateRange(1, 1440)][int]$SetupSourceConcurrencyLeaseMinutes = 240,
     [string]$SetupSourceConcurrencyGateRoot,
+    [ValidateRange(0, 500)][int]$SetupSubnetConcurrencyLimit = 0,
+    [ValidateRange(1, 32)][int]$SetupSubnetPrefixLength = 24,
+    [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 60,
+    [string]$SetupSubnetConcurrencyGateRoot,
 
     [string]$LogRoot,
     [string]$ReportRoot,
@@ -82,7 +86,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.13'
+$script:LauncherVersion = '0.1.14'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -380,6 +384,14 @@ if ($SetupSourceConcurrencyLimit -gt 0) {
 if (-not [string]::IsNullOrWhiteSpace($SetupSourceConcurrencyGateRoot)) {
     [void]$remoteArgs.Add('-SetupSourceConcurrencyGateRoot'); [void]$remoteArgs.Add($SetupSourceConcurrencyGateRoot)
 }
+if ($SetupSubnetConcurrencyLimit -gt 0) {
+    [void]$remoteArgs.Add('-SetupSubnetConcurrencyLimit'); [void]$remoteArgs.Add([string]$SetupSubnetConcurrencyLimit)
+    [void]$remoteArgs.Add('-SetupSubnetPrefixLength'); [void]$remoteArgs.Add([string]$SetupSubnetPrefixLength)
+    [void]$remoteArgs.Add('-SetupSubnetConcurrencyLeaseMinutes'); [void]$remoteArgs.Add([string]$SetupSubnetConcurrencyLeaseMinutes)
+}
+if (-not [string]::IsNullOrWhiteSpace($SetupSubnetConcurrencyGateRoot)) {
+    [void]$remoteArgs.Add('-SetupSubnetConcurrencyGateRoot'); [void]$remoteArgs.Add($SetupSubnetConcurrencyGateRoot)
+}
 if (-not [string]::IsNullOrWhiteSpace($SetupSourcePath)) {
     [void]$remoteArgs.Add('-SetupSourcePath'); [void]$remoteArgs.Add($SetupSourcePath)
 }
@@ -416,6 +428,10 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourceConcurrencyLimit'; Value = [string]$SetupSourceConcurrencyLimit }
     [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourceConcurrencyLeaseMinutes'; Value = [string]$SetupSourceConcurrencyLeaseMinutes }
     [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSourceConcurrencyGateRoot'; Value = [string]$SetupSourceConcurrencyGateRoot }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSubnetConcurrencyLimit'; Value = [string]$SetupSubnetConcurrencyLimit }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSubnetPrefixLength'; Value = [string]$SetupSubnetPrefixLength }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSubnetConcurrencyLeaseMinutes'; Value = [string]$SetupSubnetConcurrencyLeaseMinutes }
+    [pscustomobject]@{ Category = 'Setup'; Option = 'SetupSubnetConcurrencyGateRoot'; Value = [string]$SetupSubnetConcurrencyGateRoot }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'ThrottleLimit'; Value = [string]$ThrottleLimit }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLimit'; Value = [string]$GlobalConcurrencyLimit }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLeaseTimeoutMinutes'; Value = [string]$GlobalConcurrencyLeaseTimeoutMinutes }
