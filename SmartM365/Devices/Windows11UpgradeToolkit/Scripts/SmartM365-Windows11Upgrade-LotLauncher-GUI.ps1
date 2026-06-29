@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.10
+0.1.11
 #>
 param(
     [switch]$ValidateOnly
@@ -526,6 +526,7 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_SETUP_SUBNET_PREFIX_LENGTH'; Argument = '-SetupSubnetPrefixLength' },
         @{ Name = 'W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES'; Argument = '-SetupSubnetConcurrencyLeaseMinutes' },
         @{ Name = 'W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT'; Argument = '-SetupSubnetConcurrencyGateRoot' },
+        @{ Name = 'W11UT_AD_DOMAIN'; Argument = '-AdDomain' },
         @{ Name = 'W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS'; Argument = '-DelayBetweenComputersSeconds' },
         @{ Name = 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES'; Argument = '-DelayBetweenCyclesMinutes' },
         @{ Name = 'W11UT_PSEXEC_TIMEOUT_MINUTES'; Argument = '-PsExecTimeoutMinutes' }
@@ -646,6 +647,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_SETUP_SUBNET_PREFIX_LENGTH = 'Auto'
     W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES = '60'
     W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT = ''
+    W11UT_AD_DOMAIN = ''
     W11UT_SETUP_EXECUTION_MODE = 'LocalCache'
     W11UT_SETUP_MEDIA_ID = 'Win11'
     W11UT_SETUP_LANGUAGE = 'MatchSystem'
@@ -1592,6 +1594,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_SETUP_SUBNET_CONCURRENCY_LIMIT           = Get-IntText -TextBox $controls.SetupSubnetLimitText -Default 1 -Minimum 0
         W11UT_SETUP_SUBNET_PREFIX_LENGTH               = [string]$controls.SetupSubnetPrefixCombo.Text
         W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES   = Get-IntText -TextBox $controls.SetupSubnetLeaseText -Default 60 -Minimum 1
+        W11UT_AD_DOMAIN                                = Get-ConfiguredValue 'W11UT_AD_DOMAIN'
         W11UT_AUDIT_ONLY                               = Get-BooleanText -CheckBox $controls.AuditOnlyCheck
         W11UT_ALLOW_POLICY_REPAIR                      = Get-BooleanText -CheckBox $controls.AllowPolicyRepairCheck
         W11UT_ALLOW_WU_RESET                           = Get-BooleanText -CheckBox $controls.AllowWUResetCheck
