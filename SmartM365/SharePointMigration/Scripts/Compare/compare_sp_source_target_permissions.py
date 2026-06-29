@@ -63,6 +63,8 @@ NUMERIC_COLUMNS = {
     "ExtraInSPO",
     "SourceDuplicateKeysIgnored",
     "TargetDuplicateKeysIgnored",
+    "SourceLimitedAccessOnlyIgnored",
+    "TargetLimitedAccessOnlyIgnored",
     "SourceRowsWithoutLibraryScopeMetadata",
     "TargetRowsWithoutLibraryScopeMetadata",
     "SourcePermissions",
@@ -500,6 +502,7 @@ def normalize_label(value):
 
 def normalize_permissions(value):
     permissions = [normalize_label(part) for part in (value or "").split("|") if part.strip()]
+    permissions = [permission for permission in permissions if permission != "limited access"]
     return "|".join(sorted(set(permissions)))
 
 
@@ -530,6 +533,9 @@ def attach_key(row, key):
     new_row["ComparisonPrincipal"] = key[2]
     new_row["ComparisonPermissionLevels"] = key[3]
     return new_row
+
+def key_has_comparable_permissions(key):
+    return bool(key[3])
 
 
 def percent(numerator, denominator):
@@ -711,10 +717,15 @@ def write_permission_comparison_report(
     target_by_key = {}
     source_duplicates = []
     target_duplicates = []
+    source_limited_access_only = []
+    target_limited_access_only = []
 
     for row in source_rows:
         key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings)
         keyed = attach_key(row, key)
+        if not key_has_comparable_permissions(key):
+            source_limited_access_only.append(keyed)
+            continue
         if key in source_by_key:
             source_duplicates.append(keyed)
             continue
@@ -723,6 +734,9 @@ def write_permission_comparison_report(
     for row in target_rows:
         key = make_key(row)
         keyed = attach_key(row, key)
+        if not key_has_comparable_permissions(key):
+            target_limited_access_only.append(keyed)
+            continue
         if key in target_by_key:
             target_duplicates.append(keyed)
             continue
@@ -746,6 +760,8 @@ def write_permission_comparison_report(
             "ExtraInSPO": len(extra_keys),
             "SourceDuplicateKeysIgnored": len(source_duplicates),
             "TargetDuplicateKeysIgnored": len(target_duplicates),
+            "SourceLimitedAccessOnlyIgnored": len(source_limited_access_only),
+            "TargetLimitedAccessOnlyIgnored": len(target_limited_access_only),
             "SourceRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(source_rows),
             "TargetRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(target_rows),
             "SourceScanDocumentLibrariesOnly": str(bool(source_scan_document_libraries_only)),
@@ -790,6 +806,8 @@ def write_permission_comparison_report(
     matched_csv = output_dir / "Matched.csv"
     duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
     duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
+    limited_access_source_csv = output_dir / "LimitedAccessOnly-Source.csv"
+    limited_access_target_csv = output_dir / "LimitedAccessOnly-Target.csv"
 
     write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
     write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
@@ -809,6 +827,8 @@ def write_permission_comparison_report(
     write_csv(extra_csv, extra_rows, target_fields)
     write_csv(duplicate_source_csv, source_duplicates, output_fields)
     write_csv(duplicate_target_csv, target_duplicates, target_fields)
+    write_csv(limited_access_source_csv, source_limited_access_only, output_fields)
+    write_csv(limited_access_target_csv, target_limited_access_only, target_fields)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     xlsx_path = output_dir / f"{comparison_name}-{timestamp}.xlsx"
@@ -823,6 +843,8 @@ def write_permission_comparison_report(
             ("Matched", list_rows_for_excel(matched_csv)),
             ("DuplicateSource", list_rows_for_excel(duplicate_source_csv)),
             ("DuplicateTarget", list_rows_for_excel(duplicate_target_csv)),
+            ("IgnoredSourceLA", list_rows_for_excel(limited_access_source_csv)),
+            ("IgnoredTargetLA", list_rows_for_excel(limited_access_target_csv)),
         ],
     )
 
@@ -870,10 +892,15 @@ def main():
     target_by_key = {}
     source_duplicates = []
     target_duplicates = []
+    source_limited_access_only = []
+    target_limited_access_only = []
 
     for row in source_rows:
         key = make_key(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings)
         keyed = attach_key(row, key)
+        if not key_has_comparable_permissions(key):
+            source_limited_access_only.append(keyed)
+            continue
         if key in source_by_key:
             source_duplicates.append(keyed)
             continue
@@ -882,6 +909,9 @@ def main():
     for row in target_rows:
         key = make_key(row)
         keyed = attach_key(row, key)
+        if not key_has_comparable_permissions(key):
+            target_limited_access_only.append(keyed)
+            continue
         if key in target_by_key:
             target_duplicates.append(keyed)
             continue
@@ -906,6 +936,8 @@ def main():
             "ExtraInSPO": len(extra_keys),
             "SourceDuplicateKeysIgnored": len(source_duplicates),
             "TargetDuplicateKeysIgnored": len(target_duplicates),
+            "SourceLimitedAccessOnlyIgnored": len(source_limited_access_only),
+            "TargetLimitedAccessOnlyIgnored": len(target_limited_access_only),
             "SourceRootPath": args.source_root_path,
             "TargetRootPath": args.target_root_path,
         }
@@ -939,6 +971,8 @@ def main():
     matched_csv = output_dir / "Matched.csv"
     duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
     duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
+    limited_access_source_csv = output_dir / "LimitedAccessOnly-Source.csv"
+    limited_access_target_csv = output_dir / "LimitedAccessOnly-Target.csv"
 
     write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
     write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
@@ -958,6 +992,8 @@ def main():
     write_csv(extra_csv, extra_rows, target_fields)
     write_csv(duplicate_source_csv, source_duplicates, output_fields)
     write_csv(duplicate_target_csv, target_duplicates, target_fields)
+    write_csv(limited_access_source_csv, source_limited_access_only, output_fields)
+    write_csv(limited_access_target_csv, target_limited_access_only, target_fields)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     xlsx_path = output_dir / f"{args.comparison_name}-{timestamp}.xlsx"
@@ -972,6 +1008,8 @@ def main():
             ("Matched", list_rows_for_excel(matched_csv)),
             ("DuplicateSource", list_rows_for_excel(duplicate_source_csv)),
             ("DuplicateTarget", list_rows_for_excel(duplicate_target_csv)),
+            ("IgnoredSourceLA", list_rows_for_excel(limited_access_source_csv)),
+            ("IgnoredTargetLA", list_rows_for_excel(limited_access_target_csv)),
         ],
     )
 
