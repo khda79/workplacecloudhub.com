@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.14
+    1.0.15
 #>
 
 [CmdletBinding()]
@@ -866,6 +866,94 @@ function Invoke-FileComparison {
     }
 }
 
+function Get-GeneratedOperationsDirectory {
+    $generatedRoot = 'operations\generated'
+    if ($Config.ContainsKey('Output') -and $Config.Output.ContainsKey('GeneratedOperations') -and -not [string]::IsNullOrWhiteSpace([string]$Config.Output.GeneratedOperations)) {
+        $generatedRoot = [string]$Config.Output.GeneratedOperations
+    }
+
+    $generatedDirectory = Resolve-MigrationPath $generatedRoot
+    New-Item -ItemType Directory -Path $generatedDirectory -Force | Out-Null
+    return $generatedDirectory
+}
+
+function Resolve-EntraUsersCachePath {
+    $configuredPath = [string](Get-ComparisonConfigValue -Name 'EntraUsersCachePath' -DefaultValue '')
+    if (-not [string]::IsNullOrWhiteSpace($configuredPath)) {
+        return (Resolve-MigrationPath $configuredPath)
+    }
+
+    return (Join-Path -Path (Get-GeneratedOperationsDirectory) -ChildPath ("{0}-entra-users-cache.csv" -f $Config.Name))
+}
+
+function Get-AuthConfigValue {
+    param(
+        [hashtable]$AuthConfig,
+        [string[]]$Names
+    )
+
+    foreach ($name in $Names) {
+        if ($AuthConfig.ContainsKey($name) -and -not [string]::IsNullOrWhiteSpace([string]$AuthConfig[$name])) {
+            return [string]$AuthConfig[$name]
+        }
+    }
+
+    return ''
+}
+
+function Update-EntraUsersCacheForComparison {
+    if (-not (Get-ComparisonConfigBool -Name 'EntraUsersCacheEnabled' -DefaultValue $true)) {
+        Write-Info 'Entra users cache disabled by Comparison.EntraUsersCacheEnabled.' DarkYellow
+        return $null
+    }
+
+    if ((Get-MigrationEndpointType -Side 'Source') -ne 'SPO' -and (Get-MigrationEndpointType -Side 'Target') -ne 'SPO') {
+        Write-Info 'Entra users cache skipped because neither endpoint is SPO.' DarkYellow
+        return $null
+    }
+
+    $cachePath = Resolve-EntraUsersCachePath
+    $maxAgeHours = [double](Get-ComparisonConfigValue -Name 'EntraUsersCacheMaxAgeHours' -DefaultValue 24)
+    $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Inventory\SmartM365-EntraUsers-CacheExport.ps1'
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        throw "Entra users cache export script not found: $scriptPath"
+    }
+
+    $authConfig = Get-SPOAuthConfig
+    $tenantId = Get-AuthConfigValue -AuthConfig $authConfig -Names @('TenantId', 'Tenant')
+    $clientId = Get-AuthConfigValue -AuthConfig $authConfig -Names @('ClientId', 'AppId')
+    $thumbprint = Get-AuthConfigValue -AuthConfig $authConfig -Names @('Thumbprint', 'Thumb')
+
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $scriptPath,
+        '-OutputPath', $cachePath,
+        '-MaxCacheAgeHours', ([string]$maxAgeHours)
+    )
+
+    if ($ForceAuthentication) {
+        $arguments += '-Connect'
+    }
+    if ($DeviceLogin -or -not ($tenantId -and $clientId -and $thumbprint)) {
+        $arguments += '-InteractiveAuth'
+        if ($DeviceLogin) {
+            $arguments += '-DeviceLogin'
+        }
+    }
+    else {
+        $arguments += @('-TenantId', $tenantId, '-AppId', $clientId, '-CertificateThumbprint', $thumbprint)
+    }
+
+    Write-Info ("Ensuring Entra users cache: {0}" -f $cachePath) Cyan
+    & pwsh @arguments 2>&1 | ForEach-Object { Microsoft.PowerShell.Utility\Write-Host ([string]$_) }
+    if ($LASTEXITCODE -ne 0) {
+        throw ("Entra users cache export failed with exit code {0}: {1}" -f $LASTEXITCODE, $scriptPath)
+    }
+
+    return $cachePath
+}
+
 function Invoke-PermissionComparison {
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $logPath = New-MigrationLogPath -Action 'ComparePermissions' -Timestamp $timestamp
@@ -885,6 +973,7 @@ function Invoke-PermissionComparison {
         }
 
         $pathMappingsFile = Resolve-ComparisonPathMappingsFile
+        $entraUsersCachePath = Update-EntraUsersCacheForComparison
         $permissionCompareArguments = @(
             '--source-csv', $SourceCsv,
             '--target-csv', $TargetCsv,
@@ -902,6 +991,9 @@ function Invoke-PermissionComparison {
         }
         if ($pathMappingsFile) {
             $permissionCompareArguments += @('--path-mapping-file', $pathMappingsFile)
+        }
+        if ($entraUsersCachePath) {
+            $permissionCompareArguments += @('--entra-users-csv', $entraUsersCachePath)
         }
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Compare\compare_sp_source_target_permissions.py') -Arguments $permissionCompareArguments
 

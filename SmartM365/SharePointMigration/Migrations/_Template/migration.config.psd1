@@ -27,6 +27,9 @@
         TargetModifiedTimeZone = 'Auto'
         ShareGateReplacementCharacter = '_'
         AllowDuplicateKeysForDeleteScript = $true
+        EntraUsersCacheEnabled = $true
+        EntraUsersCacheMaxAgeHours = 24
+        EntraUsersCachePath = ''
     }
 
     Permissions = @{
