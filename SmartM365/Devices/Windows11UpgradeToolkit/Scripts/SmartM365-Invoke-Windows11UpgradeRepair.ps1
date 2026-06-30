@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.15
+    0.1.16
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.15'
+$script:ScriptVersion = '0.1.16'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1419,8 +1419,18 @@ function Stop-SetupSubnetCopyLeaseHeartbeat {
     param([AllowNull()]$Job)
 
     if ($null -ne $Job) {
-        Stop-Job -Job $Job -Force -ErrorAction SilentlyContinue
-        Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue
+        try {
+            Stop-Job -Job $Job -ErrorAction SilentlyContinue
+            Wait-Job -Job $Job -Timeout 5 -ErrorAction SilentlyContinue | Out-Null
+        }
+        catch { }
+
+        try {
+            Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Remove-Job -Job $Job -ErrorAction SilentlyContinue
+        }
     }
 }
 
