@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.16
+    0.1.18
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.16'
+$script:ScriptVersion = '0.1.18'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -976,11 +976,7 @@ function Test-SetupMedia {
     }
 
     $mediaRoot = Split-Path -Parent $setupExe
-    $installWim = Join-Path $mediaRoot 'sources\install.wim'
-    $installEsd = Join-Path $mediaRoot 'sources\install.esd'
-    if (-not (Test-Path -LiteralPath $installWim -PathType Leaf) -and -not (Test-Path -LiteralPath $installEsd -PathType Leaf)) {
-        throw "Windows setup media is incomplete. Missing sources\install.wim or sources\install.esd under: $mediaRoot"
-    }
+    $null = Test-SetupInstallImageReadable -MediaRoot $mediaRoot
 
     $setupItem = Get-Item -LiteralPath $setupExe -ErrorAction Stop
     if ($setupItem.Length -lt 64KB) {
@@ -1032,6 +1028,65 @@ function Get-SetupInstallImageItem {
         }
     }
     return $null
+}
+
+function Test-SetupInstallImageReadable {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $installItem = Get-SetupInstallImageItem -MediaRoot $MediaRoot
+    if ($null -eq $installItem) {
+        throw "Windows setup media is incomplete. Missing sources\install.wim or sources\install.esd under: $MediaRoot"
+    }
+
+    if ($installItem.Length -lt 512MB) {
+        throw ("Windows setup media install image is unexpectedly small. Path={0}; SizeBytes={1}" -f $installItem.FullName,$installItem.Length)
+    }
+
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($installItem.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $header = New-Object byte[] 8
+        $read = $stream.Read($header, 0, $header.Length)
+        if ($read -lt 8) {
+            throw ("Windows setup media install image header is truncated. Path={0}; BytesRead={1}" -f $installItem.FullName,$read)
+        }
+
+        $signature = [System.Text.Encoding]::ASCII.GetString($header, 0, 5)
+        if ($signature -ne 'MSWIM') {
+            $hex = (($header | ForEach-Object { $_.ToString('X2') }) -join ' ')
+            throw ("Windows setup media install image header is invalid. Expected MSWIM signature. Path={0}; Header={1}" -f $installItem.FullName,$hex)
+        }
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+
+    Test-SetupInstallImageDismReadable -ImagePath $installItem.FullName
+    return $installItem
+}
+
+function Test-SetupInstallImageDismReadable {
+    param([Parameter(Mandatory = $true)][string]$ImagePath)
+
+    $dismPath = Join-Path $env:SystemRoot 'System32\dism.exe'
+    if (-not (Test-Path -LiteralPath $dismPath -PathType Leaf)) {
+        $dismCommand = Get-Command -Name 'dism.exe' -CommandType Application -ErrorAction SilentlyContinue
+        if ($dismCommand) { $dismPath = $dismCommand.Source }
+    }
+
+    if (-not (Test-Path -LiteralPath $dismPath -PathType Leaf)) {
+        throw 'dism.exe not found; cannot validate Windows setup install image readability.'
+    }
+
+    $dismOutput = @(& $dismPath /English /Get-WimInfo ("/WimFile:{0}" -f $ImagePath) 2>&1)
+    $dismExitCode = [int]$LASTEXITCODE
+    if ($dismExitCode -ne 0) {
+        $detail = (($dismOutput | ForEach-Object { [string]$_ }) -join ' | ')
+        if ($detail.Length -gt 1200) { $detail = $detail.Substring(0, 1200) + '...' }
+        throw ("DISM cannot read Windows setup install image. ExitCode={0}; Path={1}; Detail={2}" -f $dismExitCode,$ImagePath,$detail)
+    }
+
+    Write-SmartLog ("DISM validated setup install image readability: {0}" -f $ImagePath)
 }
 
 function Get-SetupMediaFingerprint {
