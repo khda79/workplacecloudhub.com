@@ -120,6 +120,37 @@ LOT-X\Run-Windows11UpgradeRepairWithPsExec-Once.cmd
 The launcher GUI reads the same config file to prefill its Options tab, then passes the
 selected values to the LOT window it starts.
 
+### Optional setup media SHA256 manifest
+
+For stronger corruption detection, generate one manifest per Windows setup media folder
+before publishing the media to a share. The manifest file must live at the root of the
+same media folder as `setup.exe`:
+
+```text
+SmartM365-SetupMediaManifest.sha256.csv
+```
+
+Generate a manifest for one media root:
+
+```powershell
+.\Scripts\New-SmartM365SetupMediaManifest.ps1 -MediaRoot .\SetupSource\FR-fr -Force
+```
+
+Generate manifests for every direct media folder under `SetupSource`:
+
+```powershell
+.\Scripts\New-SmartM365SetupMediaManifest.ps1 -SetupSourceRoot .\SetupSource -Force
+```
+
+The root `New-SetupMediaManifest.cmd` wrapper runs the second command against the local
+`SetupSource` folder when launched without arguments. If multiple language folders exist,
+for example `FR-fr`, `PL-pl`, and `EN-us`, each folder gets its own manifest.
+
+Targets do not create this manifest. They only read it. In `LocalCache` mode, the endpoint
+uses the manifest hash to detect source/cache drift and validates the complete local cache
+after Robocopy. In `Share` mode, the endpoint validates the manifest directly on the share
+before launching Setup.
+
 Each LOT can also have its own `Windows11UpgradeToolkit.config` file in the LOT folder.
 This is useful when LOTs use different site-local setup sources. The wrapper loads values
 in this order: environment variables already defined before launch, LOT config, then
@@ -190,12 +221,13 @@ C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia\<SetupMediaId>-<Lang
 
 The media validation checks:
 
-- `setup.exe` exists;
+- `setup.exe` exists and is not unexpectedly small;
+- `setup.exe` has a valid Microsoft Authenticode signature;
 - `sources\install.wim` or `sources\install.esd` exists;
-- `setup.exe` is not unexpectedly small;
+- the install image has a valid WIM/ESD header and is readable by DISM `/Get-WimInfo`;
 - `sources\lang.ini` contains the expected language when language matching is enabled;
+- if `SmartM365-SetupMediaManifest.sha256.csv` is present in the media root, every listed media file matches its expected size and SHA256 hash;
 - `SmartM365-SetupMedia.json` is present or refreshed after a valid cache/copy.
-
 In LOT/PsExec mode, the operator workstation copies only the small endpoint script. The
 target computer, running as SYSTEM through PsExec, validates `SetupSourcePath` and copies
 the setup media into its own local cache with an incremental `robocopy` pass. This avoids

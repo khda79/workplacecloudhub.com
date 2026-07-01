@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.20
+    0.1.21
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.20'
+$script:ScriptVersion = '0.1.21'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -79,6 +79,7 @@ $script:InputDir = Join-Path $DataRoot 'Input'
 $script:LogPath = Join-Path $script:LogDir ("{0}_{1}_{2}.log" -f $script:ScriptName,$script:ComputerName,$script:RunId)
 $script:CsvPath = Join-Path $script:OutputDir ("SmartM365_Windows11Upgrade_{0}_{1}.csv" -f $script:ComputerName,$script:RunId)
 $script:LastRunPath = Join-Path $DataRoot 'LastRun.json'
+$script:SetupMediaManifestFileName = 'SmartM365-SetupMediaManifest.sha256.csv'
 
 function New-SmartDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -987,10 +988,91 @@ function Test-SetupExecutableSignature {
     Write-SmartLog ("Authenticode validated setup executable: Path={0}; Signer={1}; Thumbprint={2}" -f $SetupExe,$signerSubject,$signature.SignerCertificate.Thumbprint)
 }
 
+function Get-SetupMediaIntegrityManifestPath {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    return Join-Path $MediaRoot $script:SetupMediaManifestFileName
+}
+
+function Get-SetupMediaIntegrityManifestHash {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $MediaRoot
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return '' }
+    return (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
+}
+
+function Test-SetupMediaIntegrityManifest {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $MediaRoot
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
+
+    $rootFull = [System.IO.Path]::GetFullPath($MediaRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $rows = @(Import-Csv -LiteralPath $manifestPath -ErrorAction Stop)
+    if ($rows.Count -eq 0) {
+        throw "Setup media integrity manifest is empty: $manifestPath"
+    }
+
+    foreach ($column in @('RelativePath','Length','SHA256')) {
+        if (-not $rows[0].PSObject.Properties[$column]) {
+            throw "Setup media integrity manifest is missing required column '$column': $manifestPath"
+        }
+    }
+
+    $checkedFiles = 0
+    $checkedBytes = 0L
+    foreach ($row in $rows) {
+        $relativePath = ([string]$row.RelativePath).Trim().TrimStart('\', '/')
+        if ([string]::IsNullOrWhiteSpace($relativePath)) {
+            throw "Setup media integrity manifest contains an empty RelativePath: $manifestPath"
+        }
+        if ([System.IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '(^|[\\/])\.\.([\\/]|$)') {
+            throw ("Setup media integrity manifest contains an unsafe RelativePath. Manifest={0}; RelativePath={1}" -f $manifestPath,$relativePath)
+        }
+
+        $filePath = Join-Path $MediaRoot $relativePath
+        $fileFull = [System.IO.Path]::GetFullPath($filePath)
+        if (-not $fileFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw ("Setup media integrity manifest path escapes media root. Manifest={0}; RelativePath={1}" -f $manifestPath,$relativePath)
+        }
+        if (-not (Test-Path -LiteralPath $fileFull -PathType Leaf)) {
+            throw ("Setup media integrity check failed. File missing. Manifest={0}; RelativePath={1}" -f $manifestPath,$relativePath)
+        }
+
+        $expectedLength = 0L
+        if (-not [int64]::TryParse([string]$row.Length, [ref]$expectedLength)) {
+            throw ("Setup media integrity manifest contains an invalid Length. Manifest={0}; RelativePath={1}; Length={2}" -f $manifestPath,$relativePath,$row.Length)
+        }
+
+        $item = Get-Item -LiteralPath $fileFull -ErrorAction Stop
+        if ([int64]$item.Length -ne $expectedLength) {
+            throw ("Setup media integrity check failed. Length mismatch. Manifest={0}; RelativePath={1}; ExpectedLength={2}; ActualLength={3}" -f $manifestPath,$relativePath,$expectedLength,$item.Length)
+        }
+
+        $expectedHash = ([string]$row.SHA256).Trim().ToUpperInvariant()
+        if ($expectedHash -notmatch '^[A-F0-9]{64}$') {
+            throw ("Setup media integrity manifest contains an invalid SHA256. Manifest={0}; RelativePath={1}; SHA256={2}" -f $manifestPath,$relativePath,$row.SHA256)
+        }
+
+        $actualHash = (Get-FileHash -LiteralPath $fileFull -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+        if ($actualHash -ne $expectedHash) {
+            throw ("Setup media integrity check failed. SHA256 mismatch. Manifest={0}; RelativePath={1}; ExpectedSHA256={2}; ActualSHA256={3}" -f $manifestPath,$relativePath,$expectedHash,$actualHash)
+        }
+
+        $checkedFiles++
+        $checkedBytes += [int64]$item.Length
+    }
+
+    Write-SmartLog ("Setup media integrity manifest validated: Manifest={0}; Files={1}; Bytes={2}" -f $manifestPath,$checkedFiles,$checkedBytes)
+    return $true
+}
+
 function Test-SetupMedia {
     param(
         [Parameter(Mandatory = $true)][string]$MediaPath,
-        [string]$ExpectedLanguage
+        [string]$ExpectedLanguage,
+        [switch]$ValidateManifest
     )
 
     $setupExe = if ([System.IO.Path]::GetFileName($MediaPath) -ieq 'setup.exe') {
@@ -1013,6 +1095,9 @@ function Test-SetupMedia {
 
     $mediaRoot = Split-Path -Parent $setupExe
     $null = Test-SetupInstallImageReadable -MediaRoot $mediaRoot
+    if ($ValidateManifest) {
+        $null = Test-SetupMediaIntegrityManifest -MediaRoot $mediaRoot
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($ExpectedLanguage)) {
         $mediaLanguages = @(Get-SetupMediaLanguages -MediaRoot $mediaRoot)
@@ -1148,6 +1233,7 @@ function Get-SetupMediaFingerprint {
         InstallImageLength = [int64]$installItem.Length
         InstallImageLastWriteUtc = $installItem.LastWriteTimeUtc.ToString('o')
         LangIniHash = $langHash
+        IntegrityManifestHash = Get-SetupMediaIntegrityManifestHash -MediaRoot $MediaRoot
     }
 }
 
@@ -1162,7 +1248,7 @@ function Test-SetupCacheManifest {
 
     try {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        foreach ($property in @('MediaId','ExpectedLanguage','SetupExeLength','SetupExeHash','InstallImageName','InstallImageLength','LangIniHash')) {
+        foreach ($property in @('MediaId','ExpectedLanguage','SetupExeLength','SetupExeHash','InstallImageName','InstallImageLength','LangIniHash','IntegrityManifestHash')) {
             if ([string]$manifest.$property -ne [string]$Fingerprint.$property) { return $false }
         }
         return $true
@@ -1178,7 +1264,7 @@ function Test-SetupFingerprintMatch {
         [Parameter(Mandatory = $true)]$Right
     )
 
-    foreach ($property in @('MediaId','ExpectedLanguage','SetupExeLength','SetupExeHash','InstallImageName','InstallImageLength','LangIniHash')) {
+    foreach ($property in @('MediaId','ExpectedLanguage','SetupExeLength','SetupExeHash','InstallImageName','InstallImageLength','LangIniHash','IntegrityManifestHash')) {
         if ([string]$Left.$property -ne [string]$Right.$property) { return $false }
     }
     return $true
@@ -1568,7 +1654,7 @@ function Test-SetupCacheReady {
         [string]$ExpectedLanguage
     )
 
-    $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage
+    $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage -ValidateManifest
     $fingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $setupExe) -ExpectedLanguage $ExpectedLanguage
     if (-not (Test-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint)) {
         Save-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint -SourcePath 'ExistingCache'
@@ -1664,7 +1750,7 @@ function Copy-SetupMediaToLocalCache {
         }
     }
 
-    $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage
+    $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage -ValidateManifest
     $fingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $setupExe) -ExpectedLanguage $ExpectedLanguage
     Save-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint -SourcePath $SourcePath
     $script:SetupCacheAction = 'CopiedByTarget'
@@ -1994,7 +2080,7 @@ function Resolve-SetupUpgradeExecutable {
     $expandedSource = Resolve-PreferredSetupSourcePath -SourcePaths $setupSourceCandidates -ExpectedLanguage $expectedLanguage
     if ($SetupExecutionMode -in @('Share','Auto')) {
         try {
-            return Test-SetupMedia -MediaPath $expandedSource -ExpectedLanguage $expectedLanguage
+            return Test-SetupMedia -MediaPath $expandedSource -ExpectedLanguage $expectedLanguage -ValidateManifest
         }
         catch {
             if ($SetupExecutionMode -eq 'Share') { throw }
