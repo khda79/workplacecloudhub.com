@@ -61,10 +61,24 @@ Recommended preparation:
    your enterprise software distribution source.
 2. Mount the ISO on the operator workstation.
 3. Copy all files and folders from the mounted ISO root into this `SetupSource`
-   folder.
-4. Confirm that `setup.exe` exists at the root of this folder.
+   folder or into a language subfolder such as `SetupSource\FR-fr`.
+4. Confirm that `setup.exe` exists at the media root.
 5. Confirm that `sources\install.wim` or `sources\install.esd` exists.
 6. Confirm that `sources\lang.ini` contains the expected language.
+7. Generate the optional SHA256 manifest from the toolkit root:
+
+   ```powershell
+   .\Scripts\New-SmartM365SetupMediaManifest.ps1 -MediaRoot .\SetupSource\FR-fr -Force
+   ```
+
+   Or generate manifests for every direct media folder under `SetupSource`:
+
+   ```powershell
+   .\Scripts\New-SmartM365SetupMediaManifest.ps1 -SetupSourceRoot .\SetupSource -Force
+   ```
+
+The manifest is per media folder. Mixed-language sources should have one
+`SmartM365-SetupMediaManifest.sha256.csv` inside each language folder.
 
 Do not commit Windows installation media to Git. The toolkit expects this folder
 to be populated locally by the operator.
