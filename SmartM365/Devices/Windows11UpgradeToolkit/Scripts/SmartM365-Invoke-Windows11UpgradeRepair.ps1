@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.19
+    0.1.20
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.19'
+$script:ScriptVersion = '0.1.20'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -959,6 +959,34 @@ function Resolve-PreferredSetupSourcePath {
     return [string]$selected.ResolvedPath
 }
 
+function Test-SetupExecutableSignature {
+    param([Parameter(Mandatory = $true)][string]$SetupExe)
+
+    try {
+        $signature = Get-AuthenticodeSignature -LiteralPath $SetupExe -ErrorAction Stop
+    }
+    catch {
+        throw ("setup.exe Authenticode signature could not be checked. Path={0}; Error={1}" -f $SetupExe,$_.Exception.Message)
+    }
+
+    $status = [string]$signature.Status
+    $statusMessage = [string]$signature.StatusMessage
+    if ($status -ne 'Valid') {
+        throw ("setup.exe Authenticode signature is not valid. Path={0}; Status={1}; StatusMessage={2}" -f $SetupExe,$status,$statusMessage)
+    }
+
+    if ($null -eq $signature.SignerCertificate) {
+        throw ("setup.exe Authenticode signature is valid but signer certificate is missing. Path={0}" -f $SetupExe)
+    }
+
+    $signerSubject = [string]$signature.SignerCertificate.Subject
+    if ($signerSubject -notmatch '(?i)(CN|O)=Microsoft Corporation') {
+        throw ("setup.exe Authenticode signer is not Microsoft Corporation. Path={0}; Signer={1}" -f $SetupExe,$signerSubject)
+    }
+
+    Write-SmartLog ("Authenticode validated setup executable: Path={0}; Signer={1}; Thumbprint={2}" -f $SetupExe,$signerSubject,$signature.SignerCertificate.Thumbprint)
+}
+
 function Test-SetupMedia {
     param(
         [Parameter(Mandatory = $true)][string]$MediaPath,
@@ -976,13 +1004,15 @@ function Test-SetupMedia {
         throw "setup.exe not found at: $setupExe"
     }
 
-    $mediaRoot = Split-Path -Parent $setupExe
-    $null = Test-SetupInstallImageReadable -MediaRoot $mediaRoot
-
     $setupItem = Get-Item -LiteralPath $setupExe -ErrorAction Stop
     if ($setupItem.Length -lt 64KB) {
         throw "setup.exe exists but size is unexpectedly small: $setupExe"
     }
+
+    Test-SetupExecutableSignature -SetupExe $setupItem.FullName
+
+    $mediaRoot = Split-Path -Parent $setupExe
+    $null = Test-SetupInstallImageReadable -MediaRoot $mediaRoot
 
     if (-not [string]::IsNullOrWhiteSpace($ExpectedLanguage)) {
         $mediaLanguages = @(Get-SetupMediaLanguages -MediaRoot $mediaRoot)
@@ -1000,7 +1030,6 @@ function Test-SetupMedia {
 
     return $setupItem.FullName
 }
-
 function Convert-ToSafePathSegment {
     param([Parameter(Mandatory = $true)][string]$Value)
 
