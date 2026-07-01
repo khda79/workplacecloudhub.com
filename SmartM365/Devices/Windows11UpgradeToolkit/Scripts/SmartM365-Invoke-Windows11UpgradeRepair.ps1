@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.18
+    0.1.19
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.18'
+$script:ScriptVersion = '0.1.19'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -115,6 +115,7 @@ function Get-SetupExitCodeInfo {
     $knownMeanings = @{
         '0x00000000' = 'Success.'
         '0x00000BC2' = 'Success; reboot required.'
+        '0x8007000B' = 'Bad image format. Windows Setup could not read a required image; validate or recopy setup media.'
         '0xC1900101' = 'Windows Setup rollback, often driver or firmware related. Confirm with setup logs or SetupDiag.'
         '0xC190010E' = 'Windows Setup requires EULA acceptance. Use /EULA accept for quiet or non-interactive Windows 11 Setup.'
         '0xC1900200' = 'Compatibility failure: device does not meet Windows Setup minimum requirements.'
@@ -1547,6 +1548,18 @@ function Test-SetupCacheReady {
     return $setupExe
 }
 
+function Clear-SetupCachePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][string]$Reason
+    )
+
+    if (-not (Test-Path -LiteralPath $CachePath)) { return }
+
+    Write-SmartLog ("Clearing invalid local setup cache before recopy. CachePath={0}; Reason={1}" -f $CachePath,$Reason) 'WARN'
+    Remove-Item -LiteralPath $CachePath -Recurse -Force -ErrorAction Stop
+}
+
 function Copy-SetupMediaToLocalCache {
     param(
         [Parameter(Mandatory = $true)][string]$SourcePath,
@@ -1936,6 +1949,7 @@ function Resolve-SetupUpgradeExecutable {
                 throw ("Local setup cache is not ready and existing-media-only mode is enabled. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
             }
             Write-SmartLog ("Local setup cache not ready: {0}" -f $_.Exception.Message) 'WARN'
+            Clear-SetupCachePath -CachePath $cachePath -Reason $_.Exception.Message
             $setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)
             if ($SetupExecutionMode -eq 'LocalCache' -and $setupSourceCandidates.Count -eq 0) {
                 throw ("Local setup cache is not ready and no SetupSourcePath was provided. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
