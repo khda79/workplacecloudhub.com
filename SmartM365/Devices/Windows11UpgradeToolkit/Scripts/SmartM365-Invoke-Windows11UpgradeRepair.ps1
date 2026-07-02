@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.25
+    0.1.26
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -61,6 +61,8 @@ param(
     [ValidateRange(0, 365)][int]$DiskCleanupLogRetentionDays = 14,
     [ValidateRange(0, 365)][int]$DiskCleanupUpgradeFolderMinAgeDays = 14,
     [ValidateRange(0, 86400)][int]$RebootDelaySeconds = 180,
+    [ValidateRange(30, 3600)][int]$SetupProcessHeartbeatSeconds = 300,
+    [ValidateRange(0, 1440)][int]$SetupProcessTimeoutMinutes = 0,
 
     [string]$DataRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
 )
@@ -69,7 +71,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.25'
+$script:ScriptVersion = '0.1.26'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -2143,6 +2145,28 @@ function Resolve-SetupUpgradeExecutable {
     throw 'Unable to resolve a valid setup.exe path.'
 }
 
+function Format-SetupProcessSnapshot {
+    param([AllowNull()]$Process)
+
+    if ($null -eq $Process) { return 'PID=<unknown>' }
+
+    try { $Process.Refresh() } catch { }
+
+    $startTime = ''
+    try { $startTime = $Process.StartTime.ToString('yyyy-MM-dd HH:mm:ss') } catch { $startTime = '<unavailable>' }
+
+    $cpuSeconds = ''
+    try { $cpuSeconds = [math]::Round([double]$Process.TotalProcessorTime.TotalSeconds, 1).ToString([System.Globalization.CultureInfo]::InvariantCulture) } catch { $cpuSeconds = '<unavailable>' }
+
+    $workingSetMb = ''
+    try { $workingSetMb = [math]::Round(($Process.WorkingSet64 / 1MB), 1).ToString([System.Globalization.CultureInfo]::InvariantCulture) } catch { $workingSetMb = '<unavailable>' }
+
+    $hasExited = ''
+    try { $hasExited = [string]$Process.HasExited } catch { $hasExited = '<unavailable>' }
+
+    return ("PID={0}; HasExited={1}; StartTime={2}; CPUSeconds={3}; WorkingSetMB={4}" -f $Process.Id,$hasExited,$startTime,$cpuSeconds,$workingSetMb)
+}
+
 function Invoke-SetupUpgrade {
     param([Parameter(Mandatory = $true)][string]$SetupExePath)
 
@@ -2156,9 +2180,36 @@ function Invoke-SetupUpgrade {
     )
 
     Write-SmartLog ("Starting setup upgrade: {0} {1}" -f $SetupExePath,($args -join ' '))
-    $process = Start-Process -FilePath $SetupExePath -ArgumentList $args -Wait -PassThru -ErrorAction Stop
+    $process = Start-Process -FilePath $SetupExePath -ArgumentList $args -PassThru -ErrorAction Stop
+    $startedAt = Get-Date
+    $lastHeartbeatAt = $startedAt
+    $heartbeatSeconds = [math]::Max(30, [int]$SetupProcessHeartbeatSeconds)
+    $timeoutAt = if ($SetupProcessTimeoutMinutes -gt 0) { $startedAt.AddMinutes($SetupProcessTimeoutMinutes) } else { $null }
+
+    Write-SmartLog ("setup.exe started. {0}; HeartbeatSeconds={1}; TimeoutMinutes={2}" -f (Format-SetupProcessSnapshot -Process $process),$heartbeatSeconds,$SetupProcessTimeoutMinutes)
+
+    while ($true) {
+        try { $process.Refresh() } catch { }
+
+        if ($process.HasExited) { break }
+
+        $now = Get-Date
+        if ($timeoutAt -and $now -ge $timeoutAt) {
+            Write-SmartLog ("setup.exe timeout reached after {0} minute(s). {1}" -f $SetupProcessTimeoutMinutes,(Format-SetupProcessSnapshot -Process $process)) 'ERROR'
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch { Write-SmartLog ("Failed to stop timed-out setup.exe PID={0}: {1}" -f $process.Id,$_.Exception.Message) 'WARN' }
+            throw ("setup.exe timed out after {0} minute(s)." -f $SetupProcessTimeoutMinutes)
+        }
+
+        if (($now - $lastHeartbeatAt).TotalSeconds -ge $heartbeatSeconds) {
+            Write-SmartLog ("setup.exe still running. ElapsedMinutes={0}; {1}" -f ([math]::Round(($now - $startedAt).TotalMinutes, 1)),(Format-SetupProcessSnapshot -Process $process))
+            $lastHeartbeatAt = $now
+        }
+
+        Start-Sleep -Seconds 5
+    }
+
     $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $process.ExitCode
-    Write-SmartLog ("setup.exe exited. {0}" -f (Format-SetupExitCodeInfo -Info $setupExitInfo))
+    Write-SmartLog ("setup.exe exited. ElapsedMinutes={0}; {1}; {2}" -f ([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),(Format-SetupProcessSnapshot -Process $process),(Format-SetupExitCodeInfo -Info $setupExitInfo))
     return $process.ExitCode
 }
 
