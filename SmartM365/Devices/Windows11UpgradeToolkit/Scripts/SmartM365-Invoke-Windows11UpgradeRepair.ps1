@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.29
+    0.1.30
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -74,7 +74,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.29'
+$script:ScriptVersion = '0.1.30'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -2795,11 +2795,19 @@ catch [System.OperationCanceledException] {
     Write-SmartLog $_.Exception.Message 'WARN'
 }
 catch {
-    if ($status -eq 'UNKNOWN') { $status = 'ERROR' }
-    if ($nextAction -eq 'CHECK_LOGS') { $nextAction = 'CHECK_SCRIPT_LOG' }
     $detail = $_.Exception.Message
+    if ($detail -like 'Insufficient disk space before setup media copy.*') {
+        $status = 'INSUFFICIENT_DISK'
+        $nextAction = 'FREE_DISK_SPACE'
+        $actionResult = 'SetupMediaCopyInsufficientDisk'
+        $exitCode = 3
+    }
+    else {
+        if ($status -eq 'UNKNOWN') { $status = 'ERROR' }
+        if ($nextAction -eq 'CHECK_LOGS') { $nextAction = 'CHECK_SCRIPT_LOG' }
+        $exitCode = if ($status -eq 'RUN_GUARD_ACTIVE') { 3 } else { 1 }
+    }
     Write-SmartLog $detail 'ERROR'
-    $exitCode = if ($status -eq 'RUN_GUARD_ACTIVE') { 3 } else { 1 }
 }
 finally {
     $osFinal = $null
