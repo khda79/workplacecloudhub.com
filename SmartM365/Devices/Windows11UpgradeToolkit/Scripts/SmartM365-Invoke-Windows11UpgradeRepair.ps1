@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.27
+    0.1.28
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -47,6 +47,8 @@ param(
     [switch]$SkipSetupMediaPreCopy,
     [string]$SetupCacheRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia',
     [ValidateRange(0, 100)][int]$SetupSourceCandidateLimit = 5,
+    [ValidateRange(1, 10)][int]$SetupSourceValidationRetries = 3,
+    [ValidateRange(0, 300)][int]$SetupSourceValidationRetryDelaySeconds = 10,
     [ValidateRange(0, 10000)][int]$SetupMediaCopyIpGapMilliseconds = 0,
     [ValidateRange(0, 86400)][int]$SetupMediaCopyJitterSeconds = 0,
     [ValidateRange(0, 500)][int]$SetupSourceConcurrencyLimit = 0,
@@ -71,7 +73,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.27'
+$script:ScriptVersion = '0.1.28'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -896,6 +898,40 @@ function Measure-SetupSourceReadSample {
     }
 }
 
+function Resolve-ValidatedSetupSourceMediaPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [string]$ExpectedLanguage,
+        [string]$DisplayPath = $SourcePath
+    )
+
+    $attempts = [math]::Max(1, [int]$SetupSourceValidationRetries)
+    $delaySeconds = [math]::Max(0, [int]$SetupSourceValidationRetryDelaySeconds)
+    $lastError = $null
+
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            if (-not (Test-Path -LiteralPath $SourcePath -PathType Container -ErrorAction Stop)) {
+                throw "Path is not reachable as a container from target context: $SourcePath"
+            }
+
+            $resolved = Resolve-SetupSourceMediaPath -SourcePath $SourcePath -ExpectedLanguage $ExpectedLanguage
+            $null = Test-SetupMedia -MediaPath $resolved -ExpectedLanguage $ExpectedLanguage
+            if ($attempt -gt 1) {
+                Write-SmartLog ("Setup source candidate validation succeeded after retry: Path={0}; Resolved={1}; Attempt={2}/{3}" -f $DisplayPath,$resolved,$attempt,$attempts)
+            }
+            return $resolved
+        }
+        catch {
+            $lastError = $_
+            if ($attempt -ge $attempts) { break }
+            Write-SmartLog ("Setup source candidate validation attempt {0}/{1} failed: Path={2}; Error={3}; Retrying in {4} second(s)." -f $attempt,$attempts,$DisplayPath,$_.Exception.Message,$delaySeconds) 'WARN'
+            if ($delaySeconds -gt 0) { Start-Sleep -Seconds $delaySeconds }
+        }
+    }
+
+    throw $lastError
+}
 function Resolve-PreferredSetupSourcePath {
     param(
         [Parameter(Mandatory = $true)][string[]]$SourcePaths,
@@ -916,11 +952,7 @@ function Resolve-PreferredSetupSourcePath {
     if ($candidates.Count -eq 1) {
         $singleSource = [Environment]::ExpandEnvironmentVariables($candidates[0])
         try {
-            if (-not (Test-Path -LiteralPath $singleSource -PathType Container -ErrorAction Stop)) {
-                throw "Path is not reachable as a container from target context: $singleSource"
-            }
-            $singleSource = Resolve-SetupSourceMediaPath -SourcePath $singleSource -ExpectedLanguage $ExpectedLanguage
-            $null = Test-SetupMedia -MediaPath $singleSource -ExpectedLanguage $ExpectedLanguage
+            $singleSource = Resolve-ValidatedSetupSourceMediaPath -SourcePath $singleSource -ExpectedLanguage $ExpectedLanguage -DisplayPath $candidates[0]
             Write-SmartLog ("Setup source candidate OK: Path={0}; Resolved={1}; Selection=SingleSource" -f $candidates[0],$singleSource)
         }
         catch {
@@ -946,12 +978,7 @@ function Resolve-PreferredSetupSourcePath {
                 $tcpMs = Measure-TcpConnectionMilliseconds -ServerName $server
             }
 
-            if (-not (Test-Path -LiteralPath $expanded -PathType Container)) {
-                throw "Path is not reachable as a container from target context: $expanded"
-            }
-
-            $resolved = Resolve-SetupSourceMediaPath -SourcePath $expanded -ExpectedLanguage $ExpectedLanguage
-            $null = Test-SetupMedia -MediaPath $resolved -ExpectedLanguage $ExpectedLanguage
+            $resolved = Resolve-ValidatedSetupSourceMediaPath -SourcePath $expanded -ExpectedLanguage $ExpectedLanguage -DisplayPath $candidate
             $readSample = Measure-SetupSourceReadSample -MediaRoot $resolved
             $watch.Stop()
             $scoreMs = [int][math]::Max(1, ([int]$readSample.Milliseconds + [int]$tcpMs))
