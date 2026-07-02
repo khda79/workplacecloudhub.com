@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.22
+    0.1.23
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.22'
+$script:ScriptVersion = '0.1.23'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1699,6 +1699,20 @@ function Clear-SetupCachePath {
     Remove-Item -LiteralPath $CachePath -Recurse -Force -ErrorAction Stop
 }
 
+function Get-RobocopyExitCodeMeaning {
+    param([Parameter(Mandatory = $true)][int]$ExitCode)
+
+    $flags = New-Object System.Collections.ArrayList
+    if (($ExitCode -band 1) -ne 0) { [void]$flags.Add('Copied') }
+    if (($ExitCode -band 2) -ne 0) { [void]$flags.Add('Extra') }
+    if (($ExitCode -band 4) -ne 0) { [void]$flags.Add('Mismatch') }
+    if (($ExitCode -band 8) -ne 0) { [void]$flags.Add('Failure') }
+    if (($ExitCode -band 16) -ne 0) { [void]$flags.Add('Fatal') }
+    if ($flags.Count -eq 0) { [void]$flags.Add('NoChange') }
+
+    return (@($flags.ToArray()) -join '+')
+}
+
 function Copy-SetupMediaToLocalCache {
     param(
         [Parameter(Mandatory = $true)][string]$SourcePath,
@@ -1759,7 +1773,17 @@ function Copy-SetupMediaToLocalCache {
             }
 
             if ($copyExit -gt 7) {
-                throw "Robocopy setup media copy failed with exit code $copyExit. Log=$robocopyLog"
+                $robocopyMeaning = Get-RobocopyExitCodeMeaning -ExitCode $copyExit
+                $failureDetail = "Robocopy setup media copy failed with exit code $copyExit ($robocopyMeaning). Log=$robocopyLog"
+                try {
+                    $script:SetupCacheAction = 'CopyFailedCacheCleared'
+                    Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail
+                }
+                catch {
+                    $script:SetupCacheAction = 'CopyFailedCacheClearFailed'
+                    Write-SmartLog ("Failed to clear local setup cache after Robocopy failure. CachePath={0}; Error={1}" -f $CachePath,$_.Exception.Message) 'WARN'
+                }
+                throw $failureDetail
             }
             Write-SmartLog ("Robocopy setup media copy completed with exit code {0}. IPG={1}ms; Log={2}" -f $copyExit,$SetupMediaCopyIpGapMilliseconds,$robocopyLog)
         }
