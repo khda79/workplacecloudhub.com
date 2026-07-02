@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.28
+    0.1.29
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -50,6 +50,7 @@ param(
     [ValidateRange(1, 10)][int]$SetupSourceValidationRetries = 3,
     [ValidateRange(0, 300)][int]$SetupSourceValidationRetryDelaySeconds = 10,
     [ValidateRange(0, 10000)][int]$SetupMediaCopyIpGapMilliseconds = 0,
+    [ValidateRange(0, 1440)][int]$SetupMediaCopyTimeoutMinutes = 180,
     [ValidateRange(0, 86400)][int]$SetupMediaCopyJitterSeconds = 0,
     [ValidateRange(0, 500)][int]$SetupSourceConcurrencyLimit = 0,
     [ValidateRange(1, 1440)][int]$SetupSourceConcurrencyLeaseMinutes = 240,
@@ -73,7 +74,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.28'
+$script:ScriptVersion = '0.1.29'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1742,6 +1743,53 @@ function Get-RobocopyExitCodeMeaning {
     return (@($flags.ToArray()) -join '+')
 }
 
+function Format-SmartProcessArgument {
+    param([AllowNull()][string]$Argument)
+
+    $value = [string]$Argument
+    if ($value -notmatch '[\s"]') { return $value }
+    return '"' + ($value -replace '"', '\"') + '"'
+}
+
+function Invoke-RobocopySetupMediaCopy {
+    param(
+        [Parameter(Mandatory = $true)][string]$RobocopyPath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
+
+    $argumentText = (@($Arguments) | ForEach-Object { Format-SmartProcessArgument -Argument $_ }) -join ' '
+    $process = Start-Process -FilePath $RobocopyPath -ArgumentList $Arguments -PassThru -NoNewWindow -ErrorAction Stop
+    $startedAt = Get-Date
+    $lastHeartbeatAt = $startedAt
+    $heartbeatSeconds = 300
+    $timeoutAt = if ($SetupMediaCopyTimeoutMinutes -gt 0) { $startedAt.AddMinutes($SetupMediaCopyTimeoutMinutes) } else { $null }
+
+    Write-SmartLog ("Robocopy setup media copy started. PID={0}; TimeoutMinutes={1}; Log={2}; Command={3} {4}" -f $process.Id,$SetupMediaCopyTimeoutMinutes,$LogPath,$RobocopyPath,$argumentText)
+
+    while ($true) {
+        try { $process.Refresh() } catch { }
+        if ($process.HasExited) { break }
+
+        $now = Get-Date
+        if ($timeoutAt -and $now -ge $timeoutAt) {
+            Write-SmartLog ("Robocopy setup media copy timeout reached after {0} minute(s). PID={1}; ElapsedMinutes={2}; Log={3}" -f $SetupMediaCopyTimeoutMinutes,$process.Id,([math]::Round(($now - $startedAt).TotalMinutes, 1)),$LogPath) 'ERROR'
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch { Write-SmartLog ("Failed to stop timed-out robocopy PID={0}: {1}" -f $process.Id,$_.Exception.Message) 'WARN' }
+            throw ("Robocopy setup media copy timed out after {0} minute(s). Log={1}" -f $SetupMediaCopyTimeoutMinutes,$LogPath)
+        }
+
+        if (($now - $lastHeartbeatAt).TotalSeconds -ge $heartbeatSeconds) {
+            Write-SmartLog ("Robocopy setup media copy still running. PID={0}; ElapsedMinutes={1}; TimeoutMinutes={2}; Log={3}" -f $process.Id,([math]::Round(($now - $startedAt).TotalMinutes, 1)),$SetupMediaCopyTimeoutMinutes,$LogPath)
+            $lastHeartbeatAt = $now
+        }
+
+        Start-Sleep -Seconds 5
+    }
+
+    Write-SmartLog ("Robocopy setup media copy process exited. PID={0}; ElapsedMinutes={1}; ExitCode={2}; Log={3}" -f $process.Id,([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),$process.ExitCode,$LogPath)
+    return [int]$process.ExitCode
+}
+
 function Copy-SetupMediaToLocalCache {
     param(
         [Parameter(Mandatory = $true)][string]$SourcePath,
@@ -1790,8 +1838,19 @@ function Copy-SetupMediaToLocalCache {
             }
 
             try {
-                & $robocopy @robocopyArgs | Out-Null
-                $copyExit = [int]$LASTEXITCODE
+                $copyExit = Invoke-RobocopySetupMediaCopy -RobocopyPath $robocopy -Arguments $robocopyArgs -LogPath $robocopyLog
+            }
+            catch {
+                $failureDetail = $_.Exception.Message
+                try {
+                    $script:SetupCacheAction = 'CopyFailedCacheCleared'
+                    Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail
+                }
+                catch {
+                    $script:SetupCacheAction = 'CopyFailedCacheClearFailed'
+                    Write-SmartLog ("Failed to clear local setup cache after Robocopy exception. CachePath={0}; Error={1}" -f $CachePath,$_.Exception.Message) 'WARN'
+                }
+                throw $failureDetail
             }
             finally {
                 Stop-SetupSubnetCopyLeaseHeartbeat -Job $subnetHeartbeatJob
