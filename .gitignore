@@ -146,6 +146,11 @@ SmartM365/Devices/IntuneHybridJoinToolkit/**/PsExecLogs/
 SmartM365/Devices/IntuneHybridJoinToolkit/**/CentralLogs/
 SmartM365/Devices/IntuneHybridJoinToolkit/**/Reports/
 
+# SmartM365 Windows 11 Upgrade Toolkit Intune Win32 package outputs
+SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Build/
+SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Output/
+SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Source/SetupMedia/
+*.intunewin
 # Smart Intune Windows 11 Upgrade Toolkit runtime data
 SmartM365/Devices/Windows11UpgradeToolkit/DevicesIntune.csv
 SmartM365/Devices/Windows11UpgradeToolkit/DevicesIntune.csv.tmp.*.csv
