@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.21
+    0.1.22
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.21'
+$script:ScriptVersion = '0.1.22'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -101,6 +101,30 @@ function Write-SmartLog {
     }
 }
 
+function ConvertTo-LongLiteralPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath.StartsWith('\\?\')) { return $fullPath }
+    if ($fullPath.StartsWith('\\')) { return '\\?\UNC\' + $fullPath.Substring(2) }
+    return '\\?\' + $fullPath
+}
+
+function Get-SmartFileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead((ConvertTo-LongLiteralPath -Path $Path))
+        $hashBytes = $sha.ComputeHash($stream)
+        return (($hashBytes | ForEach-Object { $_.ToString('X2') }) -join '')
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        if ($null -ne $sha) { $sha.Dispose() }
+    }
+}
 function Convert-SignedExitCodeToHex {
     param([Parameter(Mandatory = $true)][int]$ExitCode)
 
@@ -999,7 +1023,7 @@ function Get-SetupMediaIntegrityManifestHash {
 
     $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $MediaRoot
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return '' }
-    return (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    return (Get-SmartFileSha256 -Path $manifestPath)
 }
 
 function Test-SetupMediaIntegrityManifest {
@@ -1055,7 +1079,7 @@ function Test-SetupMediaIntegrityManifest {
             throw ("Setup media integrity manifest contains an invalid SHA256. Manifest={0}; RelativePath={1}; SHA256={2}" -f $manifestPath,$relativePath,$row.SHA256)
         }
 
-        $actualHash = (Get-FileHash -LiteralPath $fileFull -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+        $actualHash = (Get-SmartFileSha256 -Path $fileFull).ToUpperInvariant()
         if ($actualHash -ne $expectedHash) {
             throw ("Setup media integrity check failed. SHA256 mismatch. Manifest={0}; RelativePath={1}; ExpectedSHA256={2}; ActualSHA256={3}" -f $manifestPath,$relativePath,$expectedHash,$actualHash)
         }
@@ -1220,7 +1244,7 @@ function Get-SetupMediaFingerprint {
     $langIni = Join-Path $MediaRoot 'sources\lang.ini'
     $langHash = ''
     if (Test-Path -LiteralPath $langIni -PathType Leaf) {
-        $langHash = (Get-FileHash -LiteralPath $langIni -Algorithm SHA256 -ErrorAction Stop).Hash
+        $langHash = Get-SmartFileSha256 -Path $langIni
     }
 
     [pscustomobject]@{
@@ -1228,7 +1252,7 @@ function Get-SetupMediaFingerprint {
         ExpectedLanguage = [string]$ExpectedLanguage
         MediaLanguages = (@(Get-SetupMediaLanguages -MediaRoot $MediaRoot) -join ',')
         SetupExeLength = [int64]$setupItem.Length
-        SetupExeHash = (Get-FileHash -LiteralPath $setupItem.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+        SetupExeHash = Get-SmartFileSha256 -Path $setupItem.FullName
         InstallImageName = $installItem.Name
         InstallImageLength = [int64]$installItem.Length
         InstallImageLastWriteUtc = $installItem.LastWriteTimeUtc.ToString('o')
