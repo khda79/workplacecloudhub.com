@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.23
+    0.1.25
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -69,7 +69,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.23'
+$script:ScriptVersion = '0.1.25'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -2370,7 +2370,9 @@ function Save-RunResult {
 
 New-SmartDirectory -Path $script:LogDir
 New-SmartDirectory -Path $script:OutputDir
-Write-SmartLog ("===== {0} v{1} started. RunId={2} =====" -f $script:ScriptName,$script:ScriptVersion,$script:RunId)
+$script:LocalIPv4Addresses = ''
+try { $script:LocalIPv4Addresses = (@(Get-LocalIPv4Addresses) -join ',') } catch { $script:LocalIPv4Addresses = '' }
+Write-SmartLog ("===== {0} v{1} started. ComputerName={2}; LocalIPv4={3}; RunId={4} =====" -f $script:ScriptName,$script:ScriptVersion,$script:ComputerName,$script:LocalIPv4Addresses,$script:RunId)
 
 $exitCode = 3
 $status = 'UNKNOWN'
@@ -2429,7 +2431,7 @@ try {
     }
 
     $os = Get-OsSummary
-    Write-SmartLog ("Startup OS before upgrade: Caption={0}; Version={1}; Build={2}; Architecture={3}; Family={4}" -f $os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
+    Write-SmartLog ("Startup OS before upgrade: ComputerName={0}; LocalIPv4={1}; Caption={2}; Version={3}; Build={4}; Architecture={5}; Family={6}" -f $script:ComputerName,$script:LocalIPv4Addresses,$os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
     $freeGb = Get-SystemDriveFreeGb
     $pendingRebootInfo = Test-PendingReboot
     $pendingReboot = $pendingRebootInfo.IsPending
@@ -2727,7 +2729,7 @@ finally {
     }
 
     Save-RunResult -Result $result
-    Write-SmartLog ("Final Status={0}; NextAction={1}; ExitCode={2}" -f $status,$nextAction,$exitCode)
+    Write-SmartLog ("Final Status={0}; ComputerName={1}; LocalIPv4={2}; NextAction={3}; ExitCode={4}" -f $status,$script:ComputerName,$script:LocalIPv4Addresses,$nextAction,$exitCode)
     if ($status -like 'PENDING_REBOOT*') {
         $rebootExplanation = switch ($status) {
             'PENDING_REBOOT_USER_CONNECTED' { 'Upgrade paused: a reboot is pending but was skipped because an interactive user is connected. The device will continue on a later cycle once it has rebooted or the user has logged off.' }
