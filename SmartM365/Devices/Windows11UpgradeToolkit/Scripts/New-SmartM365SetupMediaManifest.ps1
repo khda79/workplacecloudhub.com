@@ -7,7 +7,7 @@
     or for each direct media subfolder under a setup source root.
 
 .VERSION
-    1.0.0
+    1.0.1
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -29,9 +29,33 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $CacheManifestFileName = 'SmartM365-SetupMedia.json'
 
+function ConvertTo-LongLiteralPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath.StartsWith('\\?\')) { return $fullPath }
+    if ($fullPath.StartsWith('\\')) { return '\\?\UNC\' + $fullPath.Substring(2) }
+    return '\\?\' + $fullPath
+}
+
+function Get-SmartFileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead((ConvertTo-LongLiteralPath -Path $Path))
+        $hashBytes = $sha.ComputeHash($stream)
+        return (($hashBytes | ForEach-Object { $_.ToString('X2') }) -join '')
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        if ($null -ne $sha) { $sha.Dispose() }
+    }
+}
 function Resolve-ExistingDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -129,12 +153,10 @@ function New-SetupMediaManifest {
         if ($index -eq 1 -or $index -eq $files.Count -or ($index % 25) -eq 0) {
             Write-Progress -Activity 'Hashing Windows setup media' -Status $file.FullName -PercentComplete ([int](($index / [math]::Max(1, $files.Count)) * 100))
         }
-
-        $hash = Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop
         [pscustomobject]@{
             RelativePath = Get-RelativePathFromRoot -Root $Root -Path $file.FullName
             Length = [int64]$file.Length
-            SHA256 = $hash.Hash
+            SHA256 = Get-SmartFileSha256 -Path $file.FullName
             LastWriteUtc = $file.LastWriteTimeUtc.ToString('o')
         }
     }
