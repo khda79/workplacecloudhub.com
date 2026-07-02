@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.26
+    0.1.27
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -71,7 +71,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.26'
+$script:ScriptVersion = '0.1.27'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -2179,8 +2179,22 @@ function Invoke-SetupUpgrade {
         '/copylogs',"`"$script:SetupLogDir`""
     )
 
-    Write-SmartLog ("Starting setup upgrade: {0} {1}" -f $SetupExePath,($args -join ' '))
-    $process = Start-Process -FilePath $SetupExePath -ArgumentList $args -PassThru -ErrorAction Stop
+    $argumentText = $args -join ' '
+    $workingDirectory = Split-Path -Parent $SetupExePath
+
+    Write-SmartLog ("Starting setup upgrade: {0} {1}" -f $SetupExePath,$argumentText)
+    Write-SmartLog ("Creating setup process with ProcessStartInfo: FileName={0}; WorkingDirectory={1}; UseShellExecute=False; CreateNoWindow=True; Arguments={2}" -f $SetupExePath,$workingDirectory,$argumentText)
+
+    $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $processStartInfo.FileName = $SetupExePath
+    $processStartInfo.Arguments = $argumentText
+    $processStartInfo.WorkingDirectory = $workingDirectory
+    $processStartInfo.UseShellExecute = $false
+    $processStartInfo.CreateNoWindow = $true
+
+    Write-SmartLog 'Calling Process.Start for setup.exe.'
+    $process = [System.Diagnostics.Process]::Start($processStartInfo)
+    if ($null -eq $process) { throw 'Process.Start returned null for setup.exe.' }
     $startedAt = Get-Date
     $lastHeartbeatAt = $startedAt
     $heartbeatSeconds = [math]::Max(30, [int]$SetupProcessHeartbeatSeconds)
