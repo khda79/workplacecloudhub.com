@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.20
+    0.1.21
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -94,7 +94,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.20'
+$script:LauncherVersion = '0.1.21'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -145,6 +145,35 @@ if ($GlobalConcurrencyLeaseTimeoutMinutes -lt 1) {
     $timeoutBase = if ($PsExecTimeoutMinutes -gt 0) { $PsExecTimeoutMinutes } else { 240 }
     $GlobalConcurrencyLeaseTimeoutMinutes = [Math]::Max(30, $timeoutBase + 30)
 }
+
+function Get-TechnicianIdentityInfo {
+    $identity = $null
+    try { $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent() } catch { }
+
+    $upn = ''
+    try {
+        $whoamiUpn = & whoami.exe /upn 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($whoamiUpn)) { $upn = ([string]$whoamiUpn).Trim() }
+    }
+    catch { }
+
+    $account = if ($identity -and -not [string]::IsNullOrWhiteSpace($identity.Name)) { [string]$identity.Name } else { [Environment]::UserName }
+    $sid = if ($identity -and $identity.User) { [string]$identity.User.Value } else { '' }
+    $authType = if ($identity) { [string]$identity.AuthenticationType } else { '' }
+
+    return [pscustomobject]@{
+        Account = $account
+        UserPrincipalName = $upn
+        Sid = $sid
+        AuthenticationType = $authType
+        UserDomain = [Environment]::UserDomainName
+        UserName = [Environment]::UserName
+        UserDnsDomain = [Environment]::GetEnvironmentVariable('USERDNSDOMAIN')
+        ComputerName = $env:COMPUTERNAME
+    }
+}
+
+$script:TechnicianIdentity = Get-TechnicianIdentityInfo
 
 function New-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -636,6 +665,11 @@ if (-not [string]::IsNullOrWhiteSpace($SetupSourceMapPath)) {
 }
 
 $script:LauncherOptionRows = @(
+    [pscustomobject]@{ Category = 'Operator'; Option = 'TechnicianAccount'; Value = [string]$script:TechnicianIdentity.Account }
+    [pscustomobject]@{ Category = 'Operator'; Option = 'TechnicianUPN'; Value = [string]$script:TechnicianIdentity.UserPrincipalName }
+    [pscustomobject]@{ Category = 'Operator'; Option = 'TechnicianSID'; Value = [string]$script:TechnicianIdentity.Sid }
+    [pscustomobject]@{ Category = 'Operator'; Option = 'TechnicianAuthType'; Value = [string]$script:TechnicianIdentity.AuthenticationType }
+    [pscustomobject]@{ Category = 'Operator'; Option = 'TechnicianComputer'; Value = [string]$script:TechnicianIdentity.ComputerName }
     [pscustomobject]@{ Category = 'Mode'; Option = 'DryRun'; Value = [string][bool]$DryRun }
     [pscustomobject]@{ Category = 'Mode'; Option = 'AuditOnly'; Value = [string][bool]$AuditOnly }
     [pscustomobject]@{ Category = 'Mode'; Option = 'RunOnce'; Value = [string][bool]$RunOnce }
@@ -693,6 +727,7 @@ Write-Host "Computer list : $ComputerListPath"
 Write-Host "PsExec        : $resolvedPsExec"
 Write-Host "Repair script : $LocalScriptPath"
 Write-Host "Worker script : $LocalWorkerPath"
+Write-Host ("Technician     : Account={0}; UPN={1}; SID={2}; Auth={3}; Computer={4}" -f $script:TechnicianIdentity.Account,$script:TechnicianIdentity.UserPrincipalName,$script:TechnicianIdentity.Sid,$script:TechnicianIdentity.AuthenticationType,$script:TechnicianIdentity.ComputerName)
 Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser"
 Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "AD inventory  : Csv=$AdInventoryCsv; RootCsv=$AdRootInventoryCsv; Domain=$AdDomain; Refresh=$(-not $SkipAdInventoryRefresh); RecentRoot=$AdInventoryUsesRecentRootCsv"
