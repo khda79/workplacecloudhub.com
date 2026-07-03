@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.5
+0.1.6
 #>
 
 #requires -Version 5.1
@@ -36,7 +36,6 @@ param(
     [bool]$DryRun = $false,
     [bool]$NoCentralLogCollection = $false,
     [bool]$KeepCentralLogHistory = $false,
-    [ValidateSet('Standard','Full')]
     [string]$CentralLogCollectionMode = 'Standard',
     [int]$PsExecTimeoutMinutes = 180,
     [string]$GlobalWorkerLeasePath,
@@ -46,6 +45,16 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+if ([string]::IsNullOrWhiteSpace($CentralLogCollectionMode)) {
+    $CentralLogCollectionMode = 'Standard'
+}
+elseif ($CentralLogCollectionMode -match '^\d+$') {
+    $PsExecTimeoutMinutes = [int]$CentralLogCollectionMode
+    $CentralLogCollectionMode = 'Standard'
+}
+elseif ($CentralLogCollectionMode -notin @('Standard','Full')) {
+    throw "Invalid CentralLogCollectionMode '$CentralLogCollectionMode'. Expected Standard or Full."
+}
 $RemoteScriptArgs = @()
 if (-not [string]::IsNullOrWhiteSpace($RemoteScriptArgsJson)) {
     try {
