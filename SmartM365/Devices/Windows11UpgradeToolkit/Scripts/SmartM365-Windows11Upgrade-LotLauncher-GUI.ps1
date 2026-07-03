@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.11
+0.1.12
 #>
 param(
     [switch]$ValidateOnly
@@ -505,7 +505,9 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_SKIP_VIRTUAL_MACHINES'; Argument = '-SkipVirtualMachines' },
         @{ Name = 'W11UT_ALLOW_DISK_CLEANUP'; Argument = '-AllowDiskCleanup' },
         @{ Name = 'W11UT_ALLOW_ADVANCED_DISK_CLEANUP'; Argument = '-AllowAdvancedDiskCleanup' },
-        @{ Name = 'W11UT_SKIP_SETUP_MEDIA_PRECOPY'; Argument = '-SkipSetupMediaPreCopy' }
+        @{ Name = 'W11UT_SKIP_SETUP_MEDIA_PRECOPY'; Argument = '-SkipSetupMediaPreCopy' },
+        @{ Name = 'W11UT_USE_TECHNICIAN_RUN_GUARD_HISTORY'; Argument = '-UseTechnicianRunGuardHistory' },
+        @{ Name = 'W11UT_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY'; Argument = '-IgnoreTechnicianRunGuardHistory' }
     )) {
         if ([string]$EnvironmentVariables[$pair.Name] -eq '1') {
             $commandParts.Add($pair.Argument)
@@ -529,7 +531,8 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_AD_DOMAIN'; Argument = '-AdDomain' },
         @{ Name = 'W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS'; Argument = '-DelayBetweenComputersSeconds' },
         @{ Name = 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES'; Argument = '-DelayBetweenCyclesMinutes' },
-        @{ Name = 'W11UT_PSEXEC_TIMEOUT_MINUTES'; Argument = '-PsExecTimeoutMinutes' }
+        @{ Name = 'W11UT_PSEXEC_TIMEOUT_MINUTES'; Argument = '-PsExecTimeoutMinutes' },
+        @{ Name = 'W11UT_RUN_GUARD_HOURS'; Argument = '-RunGuardHours' }
     )) {
         $value = [string]$EnvironmentVariables[$pair.Name]
         if (-not [string]::IsNullOrWhiteSpace($value)) {
@@ -662,6 +665,9 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_GUI_KEEP_CENTRAL_LOG_HISTORY = '0'
     W11UT_GUI_NO_CENTRAL_LOG_COLLECTION = '0'
     W11UT_GUI_MAX_CYCLES = '0'
+    W11UT_USE_TECHNICIAN_RUN_GUARD_HISTORY = '1'
+    W11UT_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY = '0'
+    W11UT_RUN_GUARD_HOURS = '12'
 }
 $launchAllLotStartDelaySeconds = 5
 
@@ -972,6 +978,8 @@ $xaml = @'
                                     <CheckBox x:Name="AllowAdvancedCleanupCheck" Content="Allow advanced cleanup"/>
                                     <CheckBox x:Name="KeepCentralHistoryCheck" Content="Keep central history"/>
                                     <CheckBox x:Name="NoCentralCollectionCheck" Content="No central collection"/>
+                                    <CheckBox x:Name="UseTechRunGuardHistoryCheck" Content="Use technician run guard history"/>
+                                    <CheckBox x:Name="IgnoreTechRunGuardHistoryCheck" Content="Ignore technician run guard history"/>
                                 </WrapPanel>
                                 <TextBlock Text="Setup source" Margin="0,18,0,0"/>
                                 <TextBox x:Name="SetupSourceText"/>
@@ -1179,7 +1187,7 @@ $controls = @{}
     'SetupCompletionRebootCheck',
     'DirectSetupUpgradeCheck','SkipVirtualMachinesCheck','SkipSetupPreCopyCheck',
     'AllowDiskCleanupCheck','AllowAdvancedCleanupCheck','KeepCentralHistoryCheck',
-    'NoCentralCollectionCheck','SetupSourceText','SetupSourceMapText','SetupModeCombo',
+    'NoCentralCollectionCheck','UseTechRunGuardHistoryCheck','IgnoreTechRunGuardHistoryCheck','SetupSourceText','SetupSourceMapText','SetupModeCombo',
     'SetupMediaIdText','SetupLanguageCombo','SetupDynamicUpdateCombo','SetupCandidateLimitText',
     'SetupCandidateLimitDownButton','SetupCandidateLimitUpButton','SetupCopyIpgText',
     'SetupCopyIpgDownButton','SetupCopyIpgUpButton','SetupCopyJitterText',
@@ -1203,7 +1211,10 @@ function Open-ExternalUrl {
         [System.Diagnostics.Process]::Start($psi) | Out-Null
     }
     catch {
-        [System.Windows.MessageBox]::Show($window, "Unable to open:`r`n$Url`r`n`r`n$($_.Exception.Message)", 'SmartM365', 'OK', 'Warning') | Out-Null
+        [System.Windows.MessageBox]::Show($window, "Unable to open:
+$Url
+
+$($_.Exception.Message)", 'SmartM365', 'OK', 'Warning') | Out-Null
     }
 }
 
@@ -1493,6 +1504,8 @@ function Initialize-Options {
     $controls.DryRunCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_GUI_DRY_RUN') -eq '1')
     $controls.KeepCentralHistoryCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_GUI_KEEP_CENTRAL_LOG_HISTORY') -eq '1')
     $controls.NoCentralCollectionCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_GUI_NO_CENTRAL_LOG_COLLECTION') -eq '1')
+    $controls.UseTechRunGuardHistoryCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_USE_TECHNICIAN_RUN_GUARD_HISTORY') -ne '0')
+    $controls.IgnoreTechRunGuardHistoryCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY') -eq '1')
     $controls.MaxCyclesText.Text = Get-ConfiguredValue 'W11UT_GUI_MAX_CYCLES'
     Invoke-LauncherOptionStateUpdate
 }
@@ -1571,6 +1584,8 @@ function Get-ToolkitOptionArguments {
     if ([bool]$controls.DryRunCheck.IsChecked) { $arguments.Add('-DryRun') }
     if ([bool]$controls.KeepCentralHistoryCheck.IsChecked) { $arguments.Add('-KeepCentralLogHistory') }
     if ([bool]$controls.NoCentralCollectionCheck.IsChecked) { $arguments.Add('-NoCentralLogCollection') }
+    if ([bool]$controls.UseTechRunGuardHistoryCheck.IsChecked) { $arguments.Add('-UseTechnicianRunGuardHistory') }
+    if ([bool]$controls.IgnoreTechRunGuardHistoryCheck.IsChecked) { $arguments.Add('-IgnoreTechnicianRunGuardHistory') }
     return @($arguments)
 }
 
@@ -1611,6 +1626,9 @@ function Get-ToolkitOptionEnvironment {
         W11UT_GUI_KEEP_CENTRAL_LOG_HISTORY             = Get-BooleanText -CheckBox $controls.KeepCentralHistoryCheck
         W11UT_GUI_NO_CENTRAL_LOG_COLLECTION            = Get-BooleanText -CheckBox $controls.NoCentralCollectionCheck
         W11UT_GUI_MAX_CYCLES                           = Get-IntText -TextBox $controls.MaxCyclesText -Default 0 -Minimum 0
+        W11UT_USE_TECHNICIAN_RUN_GUARD_HISTORY         = Get-BooleanText -CheckBox $controls.UseTechRunGuardHistoryCheck
+        W11UT_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY      = Get-BooleanText -CheckBox $controls.IgnoreTechRunGuardHistoryCheck
+        W11UT_RUN_GUARD_HOURS                          = Get-ConfiguredValue 'W11UT_RUN_GUARD_HOURS'
     }
 
     foreach ($pair in @(
