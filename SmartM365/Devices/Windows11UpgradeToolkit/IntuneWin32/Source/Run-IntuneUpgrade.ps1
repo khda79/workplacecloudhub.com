@@ -4,7 +4,7 @@
 .DESCRIPTION
     Executes the local endpoint script against the packaged setup media cache and removes the scheduled task once the device is already Windows 11.
 .VERSION
-    1.0.0
+    1.0.5
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -47,8 +47,23 @@ function Get-OsFamily {
     catch { return 'Unknown' }
 }
 
+trap {
+    try { Write-RunnerLog ("Runner failed: {0}" -f $_.Exception.Message) 'ERROR' } catch { }
+    exit 1
+}
+
+Write-RunnerLog ("Runner started. DataRoot={0}; TaskName={1}; RunGuardHours={2}; User={3}; Computer={4}; PID={5}" -f $DataRoot,$TaskName,$RunGuardHours,([Security.Principal.WindowsIdentity]::GetCurrent().Name),$env:COMPUTERNAME,$PID)
+
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Package manifest not found: $manifestPath" }
 if (-not (Test-Path -LiteralPath $endpointScript -PathType Leaf)) { throw "Endpoint script not found: $endpointScript" }
+$endpointParseErrors = $null
+[void][System.Management.Automation.PSParser]::Tokenize((Get-Content -LiteralPath $endpointScript -Raw), [ref]$endpointParseErrors)
+if ($endpointParseErrors) {
+    $parseSummary = (($endpointParseErrors | Select-Object -First 5 | ForEach-Object { "Line={0}; Column={1}; Message={2}" -f $_.Token.StartLine,$_.Token.StartColumn,$_.Message }) -join ' | ')
+    Write-RunnerLog ("Endpoint script parse validation failed: {0}" -f $parseSummary) 'ERROR'
+    exit 1
+}
+Write-RunnerLog ("Endpoint script parse validation succeeded: {0}" -f $endpointScript)
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 
 if ((Get-OsFamily) -eq 'Windows11') {
@@ -85,9 +100,19 @@ $args = @(
 )
 
 Write-RunnerLog ("Starting endpoint script for package {0}; Language={1}; Cache={2}" -f $manifest.PackageId,$manifest.Language,$cachePath)
-& $endpointScript @args
-$exit = [int]$LASTEXITCODE
-Write-RunnerLog ("Endpoint script exited with code {0}." -f $exit)
+$powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$endpointProcessArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $endpointScript) + $args
+$endpointStdOut = Join-Path $logRoot ("Endpoint_{0}_stdout.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$endpointStdErr = Join-Path $logRoot ("Endpoint_{0}_stderr.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$process = Start-Process -FilePath $powerShellExe -ArgumentList $endpointProcessArgs -Wait -PassThru -NoNewWindow -RedirectStandardOutput $endpointStdOut -RedirectStandardError $endpointStdErr
+$exit = [int]$process.ExitCode
+$latestEndpointLog = Get-ChildItem -LiteralPath (Join-Path $DataRoot 'Logs') -Filter 'SmartM365-Invoke-Windows11UpgradeRepair_*.log' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($latestEndpointLog) {
+    Write-RunnerLog ("Endpoint script exited with code {0}. LatestEndpointLog={1}; LastWriteTime={2}; StdOut={3}; StdErr={4}" -f $exit,$latestEndpointLog.FullName,$latestEndpointLog.LastWriteTime,$endpointStdOut,$endpointStdErr)
+}
+else {
+    Write-RunnerLog ("Endpoint script exited with code {0}. LatestEndpointLog=<not found>; StdOut={1}; StdErr={2}" -f $exit,$endpointStdOut,$endpointStdErr) 'WARN'
+}
 
 if ((Get-OsFamily) -eq 'Windows11') {
     Write-RunnerLog 'Device is Windows 11 after endpoint run. Removing scheduled task.'
