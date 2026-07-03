@@ -341,7 +341,7 @@ LOT-*\CentralLogs\ADMIN_SHARE_UNREACHABLE\<Computer>\Latest
 LOT-*\CentralLogs\Errors\<Computer>\Latest
 ```
 
-The orchestrator copies remote `Logs`, `Output`, and `LastRun.json` back into the matching `CentralLogs` bucket. Successful endpoint runs go to `Success`, administrative-share failures go to `ADMIN_SHARE_UNREACHABLE`, and all other failures go to `Errors`. When central log history is enabled, `Latest` is replaced by a timestamped `CycleN_yyyyMMdd-HHmmss` folder.
+By default, the orchestrator uses `W11UT_CENTRAL_LOG_COLLECTION_MODE=Standard` / `-CentralLogCollectionMode Standard`: it copies `LastRun.json`, launcher evidence, the main SmartM365 logs, small setup evidence, and `Output` files while skipping large files such as Panther/setup logs. Skipped files are listed in `CentralLogCollection.skipped.txt`; full target logs remain available through `\\<Computer>\C$\ProgramData\SmartM365\Windows11UpgradeToolkit\Logs`. Use `W11UT_CENTRAL_LOG_COLLECTION_MODE=Full` or `-CentralLogCollectionMode Full` to restore the previous full mirror of remote `Logs`, `Output`, and `LastRun.json`. Successful endpoint runs go to `Success`, administrative-share failures go to `ADMIN_SHARE_UNREACHABLE`, and all other failures go to `Errors`. When central log history is enabled, `Latest` is replaced by a timestamped `CycleN_yyyyMMdd-HHmmss` folder.
 
 ## Multi-LOT Concurrency
 
