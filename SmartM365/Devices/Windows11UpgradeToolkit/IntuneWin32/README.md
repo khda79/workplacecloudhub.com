@@ -117,6 +117,8 @@ The publishing helper creates the Win32 app and uploads the generated `.intunewi
 HKLM\SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages\<PackageId>\PackageVersion
 ```
 
+`Install.ps1` writes this state explicitly through the 64-bit registry view so detection remains valid even when Intune starts the installer from a 32-bit PowerShell host. The generated `Detect.ps1` reads the same 64-bit view.
+
 Prerequisite on the publishing workstation:
 
 ```powershell
