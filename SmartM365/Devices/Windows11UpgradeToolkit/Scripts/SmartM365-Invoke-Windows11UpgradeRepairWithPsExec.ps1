@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.17
+    0.1.19
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.17'
+$script:LauncherVersion = '0.1.19'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -422,6 +422,57 @@ function Get-AlreadyWindows11RowsFromAdInventory {
         }
     }
 }
+function Add-AdInventoryFieldsToResult {
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [AllowNull()][hashtable]$AdInventoryMap,
+        [AllowNull()][string]$AdInventoryCsv
+    )
+
+    if ($null -eq $Result) { return $Result }
+    if (-not $Result.PSObject.Properties['ComputerName']) { return $Result }
+
+    $computerKey = Get-ComputerListKey -ComputerName ([string]$Result.ComputerName)
+    $hasInventory = ($null -ne $AdInventoryMap -and $AdInventoryMap.Count -gt 0)
+    $hasAdRow = ($hasInventory -and -not [string]::IsNullOrWhiteSpace($computerKey) -and $AdInventoryMap.ContainsKey($computerKey))
+
+    if ($hasAdRow) {
+        $adRow = $AdInventoryMap[$computerKey]
+        $fields = [ordered]@{
+            ADInventoryPresent = $true
+            ADDomain = if ($adRow.PSObject.Properties['ADDomain']) { [string]$adRow.ADDomain } else { '' }
+            ADEnabled = if ($adRow.PSObject.Properties['Enabled']) { [string]$adRow.Enabled } else { '' }
+            ADDNSHostName = if ($adRow.PSObject.Properties['DNSHostName']) { [string]$adRow.DNSHostName } else { '' }
+            ADDistinguishedName = if ($adRow.PSObject.Properties['DistinguishedName']) { [string]$adRow.DistinguishedName } else { '' }
+            ADOperatingSystem = if ($adRow.PSObject.Properties['OperatingSystem']) { [string]$adRow.OperatingSystem } else { '' }
+            ADOperatingSystemVersion = if ($adRow.PSObject.Properties['OperatingSystemVersion']) { [string]$adRow.OperatingSystemVersion } else { '' }
+            ADLastLogonTimestampUtc = if ($adRow.PSObject.Properties['LastLogonTimestampUtc']) { [string]$adRow.LastLogonTimestampUtc } else { '' }
+            ADInventoryCsv = $AdInventoryCsv
+        }
+    }
+    elseif ($hasInventory) {
+        $fields = [ordered]@{
+            ADInventoryPresent = $false
+            ADDomain = ''
+            ADEnabled = ''
+            ADDNSHostName = ''
+            ADDistinguishedName = ''
+            ADOperatingSystem = ''
+            ADOperatingSystemVersion = ''
+            ADLastLogonTimestampUtc = ''
+            ADInventoryCsv = $AdInventoryCsv
+        }
+    }
+    else {
+        return $Result
+    }
+
+    foreach ($fieldName in $fields.Keys) {
+        $Result | Add-Member -NotePropertyName $fieldName -NotePropertyValue $fields[$fieldName] -Force
+    }
+
+    return $Result
+}
 function Test-SingleComputerLaunch {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -701,6 +752,46 @@ function ConvertTo-HtmlText {
     return [System.Security.SecurityElement]::Escape([string]$Value)
 }
 
+function ConvertTo-FileUri {
+    param([AllowNull()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+
+    $value = [string]$Path
+    try {
+        if ($value -match '^\\\\(?<Server>[^\\]+)\\(?<Share>[^\\]+)(?<Rest>.*)$') {
+            $server = $Matches.Server
+            $share = $Matches.Share
+            $rest = ($Matches.Rest -replace '\\','/')
+            return ('file://{0}/{1}{2}' -f $server,$share,$rest)
+        }
+        return ([System.Uri]::new([System.IO.Path]::GetFullPath($value))).AbsoluteUri
+    }
+    catch {
+        return ''
+    }
+}
+
+function New-HtmlLogLink {
+    param(
+        [AllowNull()][string]$Path,
+        [string]$Label = 'Open'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '-' }
+    $uri = ConvertTo-FileUri -Path $Path
+    if ([string]::IsNullOrWhiteSpace($uri)) { return (ConvertTo-HtmlText $Path) }
+    return ('<a href="{0}" title="{1}">{2}</a>' -f (ConvertTo-HtmlText $uri),(ConvertTo-HtmlText $Path),(ConvertTo-HtmlText $Label))
+}
+
+function Get-RemotePcLogsPath {
+    param([AllowNull()][string]$ComputerName)
+    if ([string]::IsNullOrWhiteSpace($ComputerName)) { return '' }
+
+    $computer = ([string]$ComputerName).Trim()
+    if ([string]::IsNullOrWhiteSpace($computer)) { return '' }
+    return ('\\{0}\C$\ProgramData\SmartM365\Windows11UpgradeToolkit\Logs' -f $computer)
+}
+
 function ConvertTo-SimpleHtmlTable {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows,
@@ -730,7 +821,12 @@ function ConvertTo-SimpleHtmlTable {
             $value = ""
             $property = $row.PSObject.Properties[$column]
             if ($property) { $value = $property.Value }
-            [void]$html.Add(("<td>{0}</td>" -f (ConvertTo-HtmlText $value)))
+            if ($column -eq 'Local log' -or $column -eq 'Collected logs' -or $column -eq 'Remote PC logs') {
+                [void]$html.Add(("<td>{0}</td>" -f $value))
+            }
+            else {
+                [void]$html.Add(("<td>{0}</td>" -f (ConvertTo-HtmlText $value)))
+            }
         }
         [void]$html.Add("</tr>")
     }
@@ -745,6 +841,9 @@ function Get-Windows11ReportRows {
         foreach ($column in $reportColumns) {
             $row[$column] = if ($null -ne $item -and $item.PSObject.Properties[$column]) { [string]$item.$column } else { '' }
         }
+        $row['Local log'] = New-HtmlLogLink -Path $row['PsExecLogPath']
+        $row['Collected logs'] = New-HtmlLogLink -Path $row['RemoteLogsPath']
+        $row['Remote PC logs'] = New-HtmlLogLink -Path (Get-RemotePcLogsPath -ComputerName $row['ComputerName'])
         [pscustomobject]$row
     }
     return @($normalized)
@@ -839,7 +938,16 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $nextActionCounts -Columns @("NextAction", "Count")))
     [void]$html.Add("</div>")
     [void]$html.Add("<div class='card'><h2>Computer details</h2>")
-    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $rows -Columns @($reportColumns)))
+    $htmlReportColumns = New-Object System.Collections.Generic.List[string]
+    foreach ($column in $reportColumns) {
+        [void]$htmlReportColumns.Add($column)
+        if ($column -eq 'Detail') {
+            [void]$htmlReportColumns.Add('Local log')
+            [void]$htmlReportColumns.Add('Collected logs')
+            [void]$htmlReportColumns.Add('Remote PC logs')
+        }
+    }
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $rows -Columns @($htmlReportColumns)))
     [void]$html.Add("<div class='footer'>Smart Intune Windows 11 Upgrade Toolkit - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div>")
     [void]$html.Add("</div>")
     [void]$html.Add("</body></html>")
@@ -1288,6 +1396,7 @@ do {
                     if ($jobErrors.Count -gt 0 -and -not $item.PSObject.Properties['JobErrorMessage']) {
                         $item | Add-Member -NotePropertyName JobErrorMessage -NotePropertyValue ($jobErrors -join ' | ') -Force
                     }
+                    $item = Add-AdInventoryFieldsToResult -Result $item -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
                     [void]$results.Add($item)
                     if (-not $DryRun -and (Test-AlreadyWindows11CycleResult -Result $item)) {
                         try {
@@ -1322,7 +1431,8 @@ do {
 
     $reportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.csv" -f $cycle,$reportTimestamp)
-    $normalizedResults = Get-Windows11ReportRows -Items @($results.ToArray())
+    $enrichedResults = @($results.ToArray() | ForEach-Object { Add-AdInventoryFieldsToResult -Result $_ -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv })
+    $normalizedResults = Get-Windows11ReportRows -Items @($enrichedResults)
     @($normalizedResults) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
 
