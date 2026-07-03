@@ -1,16 +1,34 @@
-<#
+﻿<#
 .SYNOPSIS
     Detects a generated SmartM365 Windows 11 Upgrade Toolkit Intune package.
 .DESCRIPTION
     Template used by the package builder to generate a language/package-specific Intune detection script.
 .VERSION
-    1.0.0
+    1.0.1
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
 $packageId = '__PACKAGE_ID__'
 $packageVersion = '__PACKAGE_VERSION__'
-$registryPath = "HKLM:\SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages\$packageId"
+$registrySubKey = "SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages\$packageId"
+
+function Get-Registry64PackageState {
+    param([string]$SubKey)
+
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $key = $baseKey.OpenSubKey($SubKey)
+        if (-not $key) { return $null }
+        try {
+            return [pscustomobject]@{
+                PackageId = [string]$key.GetValue('PackageId', '')
+                PackageVersion = [string]$key.GetValue('PackageVersion', '')
+            }
+        }
+        finally { $key.Dispose() }
+    }
+    finally { $baseKey.Dispose() }
+}
 
 try {
     $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
@@ -19,7 +37,8 @@ try {
 catch { }
 
 try {
-    $item = Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop
+    $item = Get-Registry64PackageState -SubKey $registrySubKey
+    if ($null -eq $item) { exit 1 }
     if ([string]$item.PackageId -ne $packageId) { exit 1 }
     if ([string]$item.PackageVersion -ne $packageVersion) { exit 1 }
     exit 0
