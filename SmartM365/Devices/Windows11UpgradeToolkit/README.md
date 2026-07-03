@@ -336,10 +336,12 @@ LOT-side output:
 ```text
 LOT-*\PsExecLogs
 LOT-*\Reports
-LOT-*\CentralLogs
+LOT-*\CentralLogs\Success\<Computer>\Latest
+LOT-*\CentralLogs\ADMIN_SHARE_UNREACHABLE\<Computer>\Latest
+LOT-*\CentralLogs\Errors\<Computer>\Latest
 ```
 
-The orchestrator copies remote `Logs`, `Output`, and `LastRun.json` back into `CentralLogs`.
+The orchestrator copies remote `Logs`, `Output`, and `LastRun.json` back into the matching `CentralLogs` bucket. Successful endpoint runs go to `Success`, administrative-share failures go to `ADMIN_SHARE_UNREACHABLE`, and all other failures go to `Errors`. When central log history is enabled, `Latest` is replaced by a timestamped `CycleN_yyyyMMdd-HHmmss` folder.
 
 ## Multi-LOT Concurrency
 
