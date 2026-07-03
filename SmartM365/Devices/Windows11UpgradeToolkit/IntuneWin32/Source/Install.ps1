@@ -2,9 +2,9 @@
 .SYNOPSIS
     Installs the SmartM365 Windows 11 Upgrade Toolkit Intune endpoint package.
 .DESCRIPTION
-    Copies the packaged setup media and endpoint scripts to ProgramData, registers package detection state, and starts a SYSTEM scheduled task for asynchronous upgrade execution.
+    Copies endpoint scripts to ProgramData, optionally copies packaged setup media or validates an existing cache, registers package detection state, and starts a SYSTEM scheduled task for asynchronous upgrade execution.
 .VERSION
-    1.0.3
+    1.0.4
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -68,6 +68,15 @@ function Write-InstallLog {
     $line = '{0} [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Level,$Message
     Add-Content -LiteralPath (Join-Path $logRoot 'Install.log') -Value $line -Encoding UTF8
 }
+function Test-SetupCacheReady {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $setupExe = Join-Path $Path 'setup.exe'
+    $installWim = Join-Path $Path 'sources\install.wim'
+    if (-not (Test-Path -LiteralPath $setupExe -PathType Leaf)) { throw "Local setup cache is missing setup.exe: $Path" }
+    if (-not (Test-Path -LiteralPath $installWim -PathType Leaf)) { throw "Local setup cache is missing sources\install.wim: $Path" }
+    return $true
+}
 
 if ($Uninstall) {
     Write-InstallLog "Uninstall requested for $($manifest.PackageId)."
@@ -88,22 +97,33 @@ Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $intuneRoot 'Packag
 
 $packageMediaRoot = Join-Path $packageRoot ("SetupMedia\{0}" -f $manifest.SetupCacheFolder)
 $targetMediaRoot = Join-Path $setupCacheRoot ([string]$manifest.SetupCacheFolder)
-if (-not (Test-Path -LiteralPath (Join-Path $packageMediaRoot 'setup.exe') -PathType Leaf)) { throw "Packaged setup.exe not found: $packageMediaRoot" }
+$packageMode = 'WithMedia'
+if ($manifest.PSObject.Properties['PackageMode'] -and -not [string]::IsNullOrWhiteSpace([string]$manifest.PackageMode)) { $packageMode = [string]$manifest.PackageMode }
+$requiresExistingSetupCache = $false
+if ($manifest.PSObject.Properties['RequiresExistingSetupCache']) { $requiresExistingSetupCache = [bool]$manifest.RequiresExistingSetupCache }
 
-Write-InstallLog "Copying packaged setup media to local cache: $packageMediaRoot -> $targetMediaRoot"
-New-Directory -Path $targetMediaRoot
-$robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
-$installRobocopyLog = Join-Path $logRoot 'Install-Robocopy.log'
-& $robocopy $packageMediaRoot $targetMediaRoot /MIR /R:2 /W:5 /NP /NFL /NDL "/LOG+:$installRobocopyLog" | Out-Null
-$copyExit = [int]$LASTEXITCODE
-if ($copyExit -gt 7) { throw "Robocopy install media copy failed with exit code $copyExit." }
+if ($requiresExistingSetupCache) {
+    Write-InstallLog "Cache-only package mode enabled. Validating existing setup cache: $targetMediaRoot"
+    [void](Test-SetupCacheReady -Path $targetMediaRoot)
+}
+else {
+    if (-not (Test-Path -LiteralPath (Join-Path $packageMediaRoot 'setup.exe') -PathType Leaf)) { throw "Packaged setup.exe not found: $packageMediaRoot" }
 
+    Write-InstallLog "Copying packaged setup media to local cache: $packageMediaRoot -> $targetMediaRoot"
+    New-Directory -Path $targetMediaRoot
+    $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
+    $installRobocopyLog = Join-Path $logRoot 'Install-Robocopy.log'
+    & $robocopy $packageMediaRoot $targetMediaRoot /MIR /R:2 /W:5 /NP /NFL /NDL "/LOG+:$installRobocopyLog" | Out-Null
+    $copyExit = [int]$LASTEXITCODE
+    if ($copyExit -gt 7) { throw "Robocopy install media copy failed with exit code $copyExit." }
+}
 Write-InstallLog "Writing Intune detection registry state to HKLM:\$registrySubKey (64-bit registry view)."
 Set-Registry64String -SubKey $registrySubKey -Name PackageId -Value ([string]$manifest.PackageId)
 Set-Registry64String -SubKey $registrySubKey -Name PackageVersion -Value ([string]$manifest.PackageVersion)
 Set-Registry64String -SubKey $registrySubKey -Name Language -Value ([string]$manifest.Language)
 Set-Registry64String -SubKey $registrySubKey -Name MediaId -Value ([string]$manifest.MediaId)
 Set-Registry64String -SubKey $registrySubKey -Name SetupCacheFolder -Value ([string]$manifest.SetupCacheFolder)
+Set-Registry64String -SubKey $registrySubKey -Name PackageMode -Value $packageMode
 Set-Registry64String -SubKey $registrySubKey -Name InstalledUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
 
 $runner = Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1'
