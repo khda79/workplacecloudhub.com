@@ -2,9 +2,9 @@
 .SYNOPSIS
     Builds one SmartM365 Windows 11 Upgrade Toolkit Intune Win32 package per setup language.
 .DESCRIPTION
-    Creates a staging source folder containing the endpoint script, Intune installer scripts, package manifest, and one language-specific Windows setup media cache, then optionally runs IntuneWinAppUtil.exe.
+    Creates a staging source folder containing the endpoint script, Intune installer scripts, package manifest, and optionally one language-specific Windows setup media cache, then optionally runs IntuneWinAppUtil.exe.
 .VERSION
-    1.0.0
+    1.0.1
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -17,6 +17,7 @@ param(
     [string]$PackageVersion,
     [string]$IntuneWinAppUtilPath,
     [string]$ContentPrepRoot = 'C:\tmp\SmartM365-W11UT-ContentPrep',
+    [switch]$WithCacheOnly,
     [switch]$SkipIntuneWinBuild,
     [switch]$Force
 )
@@ -49,13 +50,19 @@ if ([string]::IsNullOrWhiteSpace($MediaFolder)) { $MediaFolder = Get-DefaultMedi
 $endpointVersion = Get-EndpointVersion -Path $endpointScript
 if ([string]::IsNullOrWhiteSpace($PackageVersion)) { $PackageVersion = $endpointVersion }
 
-$mediaRoot = Join-Path $SetupSourceRoot $MediaFolder
-if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'setup.exe') -PathType Leaf)) { throw "setup.exe not found in media root: $mediaRoot" }
-if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'sources\install.wim') -PathType Leaf)) { throw "sources\install.wim not found in media root: $mediaRoot" }
-if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'SmartM365-SetupMediaManifest.sha256.csv') -PathType Leaf)) { throw "SmartM365-SetupMediaManifest.sha256.csv not found in media root: $mediaRoot" }
-
-$packageId = "SmartM365-Windows11UpgradeToolkit-$MediaId-$Language"
+$packageSuffix = if ($WithCacheOnly) { '-WithCacheOnly' } else { '' }
+$packageId = "SmartM365-Windows11UpgradeToolkit-$MediaId-$Language$packageSuffix"
+$displayName = "Windows11UpgradeToolkit-$Language$packageSuffix"
 $cacheFolder = "$MediaId-$Language"
+$packageMode = if ($WithCacheOnly) { 'WithCacheOnly' } else { 'WithMedia' }
+$mediaRoot = Join-Path $SetupSourceRoot $MediaFolder
+
+if (-not $WithCacheOnly) {
+    if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'setup.exe') -PathType Leaf)) { throw "setup.exe not found in media root: $mediaRoot" }
+    if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'sources\install.wim') -PathType Leaf)) { throw "sources\install.wim not found in media root: $mediaRoot" }
+    if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'SmartM365-SetupMediaManifest.sha256.csv') -PathType Leaf)) { throw "SmartM365-SetupMediaManifest.sha256.csv not found in media root: $mediaRoot" }
+}
+
 $buildRoot = Join-Path $scriptDir ("Build\$packageId")
 $packageSource = Join-Path $buildRoot 'Source'
 $outputRoot = Join-Path $scriptDir ("Output\$packageId")
@@ -63,7 +70,8 @@ $mediaDest = Join-Path $packageSource ("SetupMedia\$cacheFolder")
 
 if ((Test-Path -LiteralPath $buildRoot) -and -not $Force) { throw "Build folder already exists: $buildRoot. Use -Force to recreate it." }
 if (Test-Path -LiteralPath $buildRoot) { Remove-Item -LiteralPath $buildRoot -Recurse -Force }
-New-Item -ItemType Directory -Path $packageSource,$outputRoot,$mediaDest -Force | Out-Null
+New-Item -ItemType Directory -Path $packageSource,$outputRoot -Force | Out-Null
+if (-not $WithCacheOnly) { New-Item -ItemType Directory -Path $mediaDest -Force | Out-Null }
 
 Copy-Item -LiteralPath (Join-Path $sourceTemplateRoot 'Install.ps1') -Destination (Join-Path $packageSource 'Install.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $sourceTemplateRoot 'Run-IntuneUpgrade.ps1') -Destination (Join-Path $packageSource 'Run-IntuneUpgrade.ps1') -Force
@@ -72,20 +80,30 @@ Copy-Item -LiteralPath $endpointScript -Destination (Join-Path $packageSource 'S
 $manifest = [ordered]@{
     PackageId = $packageId
     PackageVersion = $PackageVersion
+    DisplayName = $displayName
     MediaId = $MediaId
     Language = $Language
     MediaFolder = $MediaFolder
     SetupCacheFolder = $cacheFolder
+    PackageMode = $packageMode
+    RequiresExistingSetupCache = [bool]$WithCacheOnly
     EndpointVersion = $endpointVersion
     CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
 }
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $packageSource 'PackageManifest.json') -Encoding ASCII
+$manifestPath = Join-Path $packageSource 'PackageManifest.json'
+$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding ASCII
+Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $outputRoot 'PackageManifest.json') -Force
 
-Write-Host "Copying setup media: $mediaRoot -> $mediaDest"
 $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
-& $robocopy $mediaRoot $mediaDest /MIR /R:2 /W:5 /NP /NFL /NDL | Out-Null
-$copyExit = [int]$LASTEXITCODE
-if ($copyExit -gt 7) { throw "Robocopy media copy failed with exit code $copyExit." }
+if (-not $WithCacheOnly) {
+    Write-Host "Copying setup media: $mediaRoot -> $mediaDest"
+    & $robocopy $mediaRoot $mediaDest /MIR /R:2 /W:5 /NP /NFL /NDL | Out-Null
+    $copyExit = [int]$LASTEXITCODE
+    if ($copyExit -gt 7) { throw "Robocopy media copy failed with exit code $copyExit." }
+}
+else {
+    Write-Host "Building cache-only package. Setup media is not embedded; endpoint will require local cache: $cacheFolder"
+}
 
 $detectTemplate = Get-Content -LiteralPath (Join-Path $sourceTemplateRoot 'Detect-Template.ps1') -Raw
 $detect = $detectTemplate.Replace('__PACKAGE_ID__', $packageId).Replace('__PACKAGE_VERSION__', $PackageVersion)
@@ -130,6 +148,8 @@ if (-not $SkipIntuneWinBuild) {
 
 [pscustomobject]@{
     PackageId = $packageId
+    DisplayName = $displayName
+    PackageMode = $packageMode
     Source = $packageSource
     Output = $outputRoot
     IntuneWin = $intuneWinPath

@@ -4,7 +4,7 @@
 .DESCRIPTION
     Executes the local endpoint script against the packaged setup media cache and removes the scheduled task once the device is already Windows 11.
 .VERSION
-    1.0.5
+    1.0.6
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -80,7 +80,8 @@ if ($setupProcesses.Count -gt 0) {
 
 $cacheFolder = [string]$manifest.SetupCacheFolder
 $cachePath = Join-Path $setupCacheRoot $cacheFolder
-if (-not (Test-Path -LiteralPath (Join-Path $cachePath 'setup.exe') -PathType Leaf)) { throw "Local packaged setup cache is missing setup.exe: $cachePath" }
+if (-not (Test-Path -LiteralPath (Join-Path $cachePath 'setup.exe') -PathType Leaf)) { throw "Local setup cache is missing setup.exe: $cachePath" }
+if (-not (Test-Path -LiteralPath (Join-Path $cachePath 'sources\install.wim') -PathType Leaf)) { throw "Local setup cache is missing sources\install.wim: $cachePath" }
 
 $args = @(
     '-RunGuardHours', [string]$RunGuardHours,
