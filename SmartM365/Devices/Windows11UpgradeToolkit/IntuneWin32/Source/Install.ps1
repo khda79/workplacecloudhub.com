@@ -4,7 +4,7 @@
 .DESCRIPTION
     Copies the packaged setup media and endpoint scripts to ProgramData, registers package detection state, and starts a SYSTEM scheduled task for asynchronous upgrade execution.
 .VERSION
-    1.0.1
+    1.0.3
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -107,13 +107,16 @@ Set-Registry64String -SubKey $registrySubKey -Name SetupCacheFolder -Value ([str
 Set-Registry64String -SubKey $registrySubKey -Name InstalledUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
 
 $runner = Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1'
+$runnerLog = Join-Path $logRoot 'Run-IntuneUpgrade.log'
 $taskArgument = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -DataRoot "{1}" -TaskName "{2}"' -f $runner,$DataRoot,$TaskName
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $taskArgument
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 30)
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(2) -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 30)
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Write-InstallLog "Scheduled task action: powershell.exe $taskArgument"
+Write-InstallLog "Runner log expected at: $runnerLog"
 Start-ScheduledTask -TaskName $TaskName
 
-Write-InstallLog "Install completed and scheduled task started: $TaskName"
+Write-InstallLog "Install completed and scheduled task started: $TaskName; next scheduled retry is every 2 hours."
 exit 0
