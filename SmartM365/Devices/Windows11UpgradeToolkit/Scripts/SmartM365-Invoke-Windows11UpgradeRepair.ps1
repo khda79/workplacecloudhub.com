@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.30
+    0.1.31
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -74,7 +74,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.30'
+$script:ScriptVersion = '0.1.31'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -146,6 +146,7 @@ function Get-SetupExitCodeInfo {
         '0x00000000' = 'Success.'
         '0x00000BC2' = 'Success; reboot required.'
         '0x8007000B' = 'Bad image format. Windows Setup could not read a required image; validate or recopy setup media.'
+        '0x8007001F' = 'Windows Setup failed during downlevel gather/migration. Common cause: duplicate or invalid user profile registry entries; check setupact.log/setuperr.log for Duplicate profile detected and inspect HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList.'
         '0xC1900101' = 'Windows Setup rollback, often driver or firmware related. Confirm with setup logs or SetupDiag.'
         '0xC190010E' = 'Windows Setup requires EULA acceptance. Use /EULA accept for quiet or non-interactive Windows 11 Setup.'
         '0xC1900200' = 'Compatibility failure: device does not meet Windows Setup minimum requirements.'

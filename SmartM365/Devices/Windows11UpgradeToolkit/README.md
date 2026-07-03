@@ -286,6 +286,20 @@ provide the guarded action switches by default; direct PowerShell calls do not.
 
 The script blocks setup upgrade when the device is already Windows 11, is not Windows 10, lacks confirmed Intune enrollment, has actionable Windows 11 compatibility blockers, has insufficient disk space, or has a pending reboot that has not been handled.
 
+### Setup failure 0x8007001F and duplicate profiles
+
+When Windows Setup exits with `0x8007001F` during `Gather data`, check Panther logs for profile migration errors such as `Duplicate profile detected for S-...` or invalid user profile messages. In that case the setup media is usually valid; Windows Setup is blocked by duplicate or inconsistent profile registry entries under:
+
+```text
+HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList
+```
+
+Useful remote check:
+
+```cmd
+psexec \\COMPUTER -s powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' | ForEach-Object { $p=Get-ItemProperty -LiteralPath $_.PSPath; [pscustomobject]@{ SID=$_.PSChildName; ProfileImagePath=$p.ProfileImagePath; State=$p.State; RefCount=$p.RefCount } } | Sort-Object ProfileImagePath,SID | Format-Table -AutoSize"
+```
+
 Safe disk cleanup covers temporary folders, Delivery Optimization cache, Windows Update
 download cache only when no update/setup activity appears active, old SmartM365 setup media
 except the current media cache, and old SmartM365 logs. It does not delete user profile
