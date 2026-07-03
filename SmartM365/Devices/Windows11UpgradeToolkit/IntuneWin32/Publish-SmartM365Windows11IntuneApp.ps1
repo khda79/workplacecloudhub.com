@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures registry detection for the generated language package.
 .VERSION
-    1.0.6
+    1.0.7
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -320,6 +320,25 @@ catch {
     }
 }
 
+function Get-GraphObjectDiagnosticText {
+    param([object]$Value)
+
+    if ($null -eq $Value) { return '<null>' }
+    $pairs = New-Object System.Collections.ArrayList
+    foreach ($property in @($Value.PSObject.Properties | Sort-Object Name)) {
+        if ($property.Name -match 'azureStorageUri|Uri|Sas|Secret|Token') { continue }
+        $propertyValue = $property.Value
+        if ($null -eq $propertyValue) { $propertyValue = '<null>' }
+        elseif ($propertyValue -is [string]) { $propertyValue = [string]$propertyValue }
+        elseif ($propertyValue -is [ValueType]) { $propertyValue = [string]$propertyValue }
+        else { $propertyValue = ($propertyValue | ConvertTo-Json -Depth 6 -Compress) }
+        [void]$pairs.Add(('{0}={1}' -f $property.Name,$propertyValue))
+    }
+
+    if ($pairs.Count -eq 0) { return '<no diagnostic properties>' }
+    return ($pairs.ToArray() -join '; ')
+}
+
 function Wait-GraphContentFileState {
     param(
         [string]$Uri,
@@ -331,16 +350,22 @@ function Wait-GraphContentFileState {
     )
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $lastFile = $null
     do {
         $file = Invoke-GraphJson -Method GET -Uri $Uri
+        $lastFile = $file
         $state = [string]$file.uploadState
-        if ($FailureStates -contains $state) { throw "Intune content file entered failure state: $state" }
+        if ($FailureStates -contains $state) {
+            $detail = Get-GraphObjectDiagnosticText -Value $file
+            throw "Intune content file entered failure state: $state; Detail=$detail"
+        }
         if (($SuccessStates -contains $state) -and (-not $RequireAzureStorageUri -or -not [string]::IsNullOrWhiteSpace([string]$file.azureStorageUri))) { return $file }
         Write-Step "Waiting for Intune content file state. Current=$state"
         Start-Sleep -Seconds $PollSeconds
     } while ((Get-Date) -lt $deadline)
 
-    throw "Timed out waiting for Intune content file state. Expected=$($SuccessStates -join ',')"
+    $lastDetail = Get-GraphObjectDiagnosticText -Value $lastFile
+    throw "Timed out waiting for Intune content file state. Expected=$($SuccessStates -join ','); LastDetail=$lastDetail"
 }
 
 function Join-SasQuery {
