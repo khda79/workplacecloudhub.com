@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.12
+0.1.13
 #>
 param(
     [switch]$ValidateOnly
@@ -1584,8 +1584,6 @@ function Get-ToolkitOptionArguments {
     if ([bool]$controls.DryRunCheck.IsChecked) { $arguments.Add('-DryRun') }
     if ([bool]$controls.KeepCentralHistoryCheck.IsChecked) { $arguments.Add('-KeepCentralLogHistory') }
     if ([bool]$controls.NoCentralCollectionCheck.IsChecked) { $arguments.Add('-NoCentralLogCollection') }
-    if ([bool]$controls.UseTechRunGuardHistoryCheck.IsChecked) { $arguments.Add('-UseTechnicianRunGuardHistory') }
-    if ([bool]$controls.IgnoreTechRunGuardHistoryCheck.IsChecked) { $arguments.Add('-IgnoreTechnicianRunGuardHistory') }
     return @($arguments)
 }
 
