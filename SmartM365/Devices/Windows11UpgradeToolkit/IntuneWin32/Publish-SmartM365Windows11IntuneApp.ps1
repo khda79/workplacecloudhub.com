@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures registry detection for the generated language package.
 .VERSION
-    1.0.4
+    1.0.5
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -70,6 +70,10 @@ function Read-CompanionPackageMetadata {
         PackageId = ''
         PackageVersion = ''
         Language = ''
+        DisplayName = ''
+        SetupCacheFolder = ''
+        PackageMode = ''
+        RequiresExistingSetupCache = $false
     }
     $packageDir = Split-Path -Parent $Path
     $manifestCandidates = @(
@@ -84,6 +88,10 @@ function Read-CompanionPackageMetadata {
                 if ($manifest.PackageId) { $result.PackageId = [string]$manifest.PackageId }
                 if ($manifest.PackageVersion) { $result.PackageVersion = [string]$manifest.PackageVersion }
                 if ($manifest.Language) { $result.Language = [string]$manifest.Language }
+                if ($manifest.DisplayName) { $result.DisplayName = [string]$manifest.DisplayName }
+                if ($manifest.SetupCacheFolder) { $result.SetupCacheFolder = [string]$manifest.SetupCacheFolder }
+                if ($manifest.PackageMode) { $result.PackageMode = [string]$manifest.PackageMode }
+                if ($manifest.PSObject.Properties['RequiresExistingSetupCache']) { $result.RequiresExistingSetupCache = [bool]$manifest.RequiresExistingSetupCache }
                 break
             }
             catch { }
@@ -238,14 +246,29 @@ function ConvertTo-Base64Utf8 {
     return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$Value))
 }
 
-function New-LanguageRequirementRule {
-    param([Parameter(Mandatory = $true)][string]$Language)
+function New-EndpointRequirementRule {
+    param(
+        [Parameter(Mandatory = $true)][string]$Language,
+        [string]$SetupCacheFolder,
+        [switch]$RequireSetupCache
+    )
+
+    $cacheCheck = ''
+    if ($RequireSetupCache) {
+        $escapedCacheFolder = $SetupCacheFolder.Replace("'", "''")
+        $cacheCheck = @"
+    `$cachePath = Join-Path 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia' '$escapedCacheFolder'
+    if (-not (Test-Path -LiteralPath (Join-Path `$cachePath 'setup.exe') -PathType Leaf)) { Write-Output 'MISSING_CACHE_SETUP_EXE'; exit 0 }
+    if (-not (Test-Path -LiteralPath (Join-Path `$cachePath 'sources\install.wim') -PathType Leaf)) { Write-Output 'MISSING_CACHE_INSTALL_WIM'; exit 0 }
+"@
+    }
 
     $script = @"
 try {
     `$locale = (Get-WinSystemLocale).Name
     if ([string]::IsNullOrWhiteSpace(`$locale)) { `$locale = 'UNKNOWN' }
-    Write-Output `$locale
+    if (`$locale -ne '$Language') { Write-Output `$locale; exit 0 }
+$cacheCheck    Write-Output 'OK'
     exit 0
 }
 catch {
@@ -254,16 +277,19 @@ catch {
 }
 "@
 
+    $label = "Windows setup language must match $Language"
+    if ($RequireSetupCache) { $label = "$label and local setup cache must exist" }
+
     return [ordered]@{
         '@odata.type' = '#microsoft.graph.win32LobAppPowerShellScriptRequirement'
-        displayName = "Windows setup language must match $Language"
+        displayName = $label
         enforceSignatureCheck = $false
         runAs32Bit = $false
         runAsAccount = 'system'
         scriptContent = ConvertTo-Base64Utf8 -Value $script
         detectionType = 'string'
         operator = 'equal'
-        detectionValue = $Language
+        detectionValue = 'OK'
     }
 }
 
@@ -425,10 +451,24 @@ $languageFromPackageId = Get-LanguageFromPackageId -Value $PackageId
 if ($Language -eq 'fr-FR' -and $languageFromPackageId) { $Language = $languageFromPackageId }
 if ([string]::IsNullOrWhiteSpace($PackageVersion)) { throw "PackageVersion is required for Intune registry detection. Provide -PackageVersion or place the generated Detect.ps1 next to the .intunewin package." }
 if ([string]::IsNullOrWhiteSpace($RequirementLanguage)) { $RequirementLanguage = $Language }
+$setupCacheFolder = [string]$companionMetadata.SetupCacheFolder
+if ([string]::IsNullOrWhiteSpace($setupCacheFolder)) { $setupCacheFolder = "Win11-$Language" }
+$packageMode = [string]$companionMetadata.PackageMode
+$requiresExistingSetupCache = [bool]$companionMetadata.RequiresExistingSetupCache
+if ([string]::IsNullOrWhiteSpace($packageMode) -and $PackageId -match '-WithCacheOnly$') {
+    $packageMode = 'WithCacheOnly'
+    $requiresExistingSetupCache = $true
+}
+if ([string]::IsNullOrWhiteSpace($packageMode)) { $packageMode = 'WithMedia' }
+if ([string]::IsNullOrWhiteSpace($DisplayName) -and $companionMetadata.DisplayName) { $DisplayName = [string]$companionMetadata.DisplayName }
+if ([string]::IsNullOrWhiteSpace($DisplayName) -and $PackageId -match '-WithCacheOnly$') { $DisplayName = "Windows11UpgradeToolkit-$Language-WithCacheOnly" }
 if ([string]::IsNullOrWhiteSpace($DisplayName)) {
     $DisplayName = "Windows11UpgradeToolkit-$Language"
 }
-if ([string]::IsNullOrWhiteSpace($Description)) { $Description = "SmartM365 Windows 11 Upgrade Toolkit package for Windows setup language $Language. Installs local media cache and starts the upgrade task asynchronously." }
+if ([string]::IsNullOrWhiteSpace($Description)) {
+    if ($requiresExistingSetupCache) { $Description = "SmartM365 Windows 11 Upgrade Toolkit cache-only package for Windows setup language $Language. Requires an existing local setup media cache and starts the upgrade task asynchronously." }
+    else { $Description = "SmartM365 Windows 11 Upgrade Toolkit package for Windows setup language $Language. Installs local media cache and starts the upgrade task asynchronously." }
+}
 
 Write-Step "Reading IntuneWin metadata: $resolvedIntuneWinPath"
 $metadata = Read-IntuneWinMetadata -Path $resolvedIntuneWinPath
@@ -443,7 +483,7 @@ $appBody = [ordered]@{
     publisher = $Publisher
     developer = $Developer
     owner = $Owner
-    notes = "PackageId=$PackageId; PackageVersion=$PackageVersion; Language=$Language; RequirementLanguage=$RequirementLanguage"
+    notes = "PackageId=$PackageId; PackageVersion=$PackageVersion; Language=$Language; RequirementLanguage=$RequirementLanguage; PackageMode=$packageMode; RequiresExistingSetupCache=$requiresExistingSetupCache"
     isFeatured = $false
     privacyInformationUrl = $null
     informationUrl = $null
@@ -462,7 +502,7 @@ $appBody = [ordered]@{
     }
     applicableArchitectures = 'x64'
     requirementRules = @(
-        if (-not $DisableLanguageRequirementRule) { New-LanguageRequirementRule -Language $RequirementLanguage }
+        if (-not $DisableLanguageRequirementRule) { New-EndpointRequirementRule -Language $RequirementLanguage -SetupCacheFolder $setupCacheFolder -RequireSetupCache:$requiresExistingSetupCache }
     )
     detectionRules = @(
         @{
@@ -529,6 +569,8 @@ if (-not $PSCmdlet.ShouldProcess($DisplayName, 'Create or update Intune Win32 ap
         Language = $Language
         RequirementLanguage = $RequirementLanguage
         LanguageRequirementRuleEnabled = (-not [bool]$DisableLanguageRequirementRule)
+        PackageMode = $packageMode
+        RequiresExistingSetupCache = $requiresExistingSetupCache
         IntuneWinPath = $resolvedIntuneWinPath
         FileName = $metadata.FileName
         SetupFile = $metadata.SetupFile
@@ -610,6 +652,7 @@ Write-Step 'Commit requested for uploaded package.'
 
 Wait-GraphContentFileState -Uri $fileUri -SuccessStates @('commitFileSuccess') -FailureStates @('commitFileFailed') -PollSeconds $PollSeconds -TimeoutMinutes $PollTimeoutMinutes | Out-Null
 $finalPatchBody = Copy-OrderedHashtable -InputObject $appBody
+if ($finalPatchBody.Contains('applicableArchitectures')) { $finalPatchBody.Remove('applicableArchitectures') }
 $finalPatchBody['committedContentVersion'] = $contentVersionId
 Invoke-GraphJson -Method PATCH -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId" -Body $finalPatchBody | Out-Null
 Write-Step 'App metadata and content version committed.'
@@ -622,6 +665,8 @@ Write-Step 'App metadata and content version committed.'
     Language = $Language
     RequirementLanguage = $RequirementLanguage
     LanguageRequirementRuleEnabled = (-not [bool]$DisableLanguageRequirementRule)
+    PackageMode = $packageMode
+    RequiresExistingSetupCache = $requiresExistingSetupCache
     ContentVersionId = $contentVersionId
     ContentFileId = $fileId
     DetectionRegistryKey = $registryKeyPath

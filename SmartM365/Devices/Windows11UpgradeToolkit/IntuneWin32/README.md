@@ -1,6 +1,6 @@
 # SmartM365 Windows 11 Upgrade Toolkit - Intune Win32 packages
 
-This folder builds one Intune Win32 app per Windows setup language. The Windows setup media is packaged inside the `.intunewin` so endpoints download it from Intune/Microsoft CDN instead of SMB or a custom HTTPS host.
+This folder builds Intune Win32 apps per Windows setup language. The default package embeds Windows setup media inside the `.intunewin` so endpoints download it from Intune/Microsoft CDN instead of SMB or a custom HTTPS host. A smaller `WithCacheOnly` variant can also be built for devices that already have the setup media cache locally.
 
 ## Package model
 
@@ -66,6 +66,26 @@ For German media:
 
 The default media folder is inferred from language (`fr-FR` -> `FR-fr`, `de-DE` -> `DE-de`). Override with `-MediaFolder` when needed.
 
+## Build a cache-only package
+
+Use `-WithCacheOnly` to create a lightweight package without Windows setup media. The generated app name is `Windows11UpgradeToolkit-fr-FR-WithCacheOnly` and the package id is `SmartM365-Windows11UpgradeToolkit-Win11-fr-FR-WithCacheOnly`.
+
+```powershell
+.\IntuneWin32\Build-SmartM365Windows11IntunePackage.ps1 `
+  -Language fr-FR `
+  -WithCacheOnly `
+  -IntuneWinAppUtilPath C:\Tools\IntuneWinAppUtil.exe
+```
+
+This package requires the cache to already exist on the endpoint:
+
+```text
+C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia\Win11-fr-FR\setup.exe
+C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia\Win11-fr-FR\sources\install.wim
+```
+
+The publisher adds an Intune requirement rule that returns applicable only when the Windows setup language matches and, for `WithCacheOnly`, the local cache exists.
+
 ## Intune app settings
 
 Program install command:
@@ -86,7 +106,7 @@ Recommended install timeout:
 180 minutes or more
 ```
 
-The package is large and the installer copies the packaged setup media from the Intune cache to `C:\ProgramData` before starting the scheduled task.
+The full package is large and the installer copies the packaged setup media from the Intune cache to `C:\ProgramData` before starting the scheduled task. The `WithCacheOnly` package is small and only validates an existing local setup cache.
 
 Detection rule:
 
@@ -103,7 +123,7 @@ Assign each language package only to devices with the matching Windows language,
 ## Operational notes
 
 - This mode does not use `SetupSource$` or `SetupSourceGates$`.
-- Intune downloads the `.intunewin`; the installer copies the packaged setup media to the toolkit local cache.
+- Intune downloads the `.intunewin`; the full-package installer copies the packaged setup media to the toolkit local cache. The `WithCacheOnly` installer does not copy media and fails before detection if the local cache is missing.
 - The scheduled task performs the upgrade asynchronously so Intune app installation can complete quickly.
 - Upgrade status remains in `LastRun.json`, endpoint CSV output, and logs under `C:\ProgramData\SmartM365\Windows11UpgradeToolkit`.
 - The package can be detected as installed even before Windows 11 is complete; use remediation/reporting to monitor final upgrade status.
