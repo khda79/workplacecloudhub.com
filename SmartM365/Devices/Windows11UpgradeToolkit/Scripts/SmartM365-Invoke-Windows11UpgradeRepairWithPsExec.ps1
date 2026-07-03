@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.21
+    0.1.22
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -27,6 +27,9 @@ param(
     [switch]$DryRun,
     [switch]$RunOnce,
     [switch]$IgnoreRunGuard,
+    [switch]$UseTechnicianRunGuardHistory,
+    [switch]$IgnoreTechnicianRunGuardHistory,
+    [ValidateRange(0, 168)][int]$RunGuardHours = 12,
     [switch]$AllowPolicyRepair,
     [switch]$AllowWUReset,
     [switch]$AllowForceUpgrade,
@@ -94,7 +97,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.21'
+$script:LauncherVersion = '0.1.22'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -179,6 +182,301 @@ function New-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         New-Item -ItemType Directory -Path $Path -Force -ErrorAction Stop | Out-Null
+    }
+}
+
+function Get-TechnicianRunGuardHistoryPath {
+    $stateRoot = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'SmartM365\Windows11UpgradeToolkit\LauncherState'
+    return (Join-Path $stateRoot 'RunGuardHistory.json')
+}
+
+function Invoke-TechnicianRunGuardHistoryLock {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+        [object[]]$ArgumentList = @()
+    )
+
+    $mutex = $null
+    $acquired = $false
+    try {
+        $mutex = New-Object System.Threading.Mutex($false, 'Local\SmartM365_Windows11UpgradeToolkit_TechnicianRunGuardHistory')
+        $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds(15))
+        if (-not $acquired) { throw 'Timed out waiting for technician run guard history lock.' }
+        & $ScriptBlock @ArgumentList
+    }
+    finally {
+        if ($acquired -and $mutex) { try { $mutex.ReleaseMutex() } catch { } }
+        if ($mutex) { $mutex.Dispose() }
+    }
+}
+
+function Get-TechnicianRunGuardFqdn {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [AllowNull()][hashtable]$AdInventoryMap
+    )
+
+    $name = ([string]$ComputerName).Trim().Trim([char]34).TrimEnd('.')
+    if ([string]::IsNullOrWhiteSpace($name)) { return '' }
+    if ($name.Contains('.')) { return $name.ToLowerInvariant() }
+
+    $shortKey = Get-ComputerListKey -ComputerName $name
+    if ($AdInventoryMap -and $AdInventoryMap.Count -gt 0 -and $AdInventoryMap.ContainsKey($shortKey)) {
+        $adRow = $AdInventoryMap[$shortKey]
+        if ($adRow.PSObject.Properties['DNSHostName'] -and -not [string]::IsNullOrWhiteSpace([string]$adRow.DNSHostName)) {
+            return ([string]$adRow.DNSHostName).Trim().TrimEnd('.').ToLowerInvariant()
+        }
+    }
+
+    return $name.ToLowerInvariant()
+}
+
+function ConvertTo-TechnicianRunGuardUtcDateTime {
+    param(
+        [AllowNull()]$Value,
+        [Parameter(Mandatory = $true)][ref]$Result
+    )
+
+    $Result.Value = [datetime]::MinValue
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [datetime]) {
+        $Result.Value = ([datetime]$Value).ToUniversalTime()
+        return $true
+    }
+
+    $parsed = [datetime]::MinValue
+    if ([datetime]::TryParse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) {
+        $Result.Value = $parsed.ToUniversalTime()
+        return $true
+    }
+    return $false
+}
+
+function Read-TechnicianRunGuardHistory {    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateRange(0, 168)][int]$RunGuardHours
+    )
+
+    $entries = @()
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        try {
+            $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+            if (-not [string]::IsNullOrWhiteSpace($raw)) {
+                $data = $raw | ConvertFrom-Json -ErrorAction Stop
+                if ($data.PSObject.Properties['Entries']) { $entries = @($data.Entries) }
+            }
+        }
+        catch {
+            $entries = @()
+        }
+    }
+
+    if ($RunGuardHours -gt 0) {
+        $nowUtc = (Get-Date).ToUniversalTime()
+        $fresh = New-Object System.Collections.ArrayList
+        foreach ($entry in @($entries)) {
+            $startedText = if ($entry.PSObject.Properties['LastStartedUtc']) { [string]$entry.LastStartedUtc } else { '' }
+            $startedUtc = [datetime]::MinValue
+            if (ConvertTo-TechnicianRunGuardUtcDateTime -Value $startedText -Result ([ref]$startedUtc)) {
+                if (($nowUtc - $startedUtc.ToUniversalTime()).TotalHours -lt $RunGuardHours) { [void]$fresh.Add($entry) }
+            }
+        }
+        $entries = @($fresh.ToArray())
+    }
+
+    return [pscustomobject]@{
+        Version = 1
+        UpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        Entries = @($entries)
+    }
+}
+
+function Save-TechnicianRunGuardHistory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$History
+    )
+
+    New-Directory -Path (Split-Path -Parent $Path)
+    $History.UpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+    $History | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function Get-ActiveTechnicianRunGuardEntry {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ComputerFqdn,
+        [ValidateRange(0, 168)][int]$RunGuardHours
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ComputerFqdn) -or $RunGuardHours -le 0) { return $null }
+
+    $found = @{}
+    Invoke-TechnicianRunGuardHistoryLock -ArgumentList @($Path, $RunGuardHours, $ComputerFqdn, $found) -ScriptBlock {
+        param($LockedPath, $LockedRunGuardHours, $LockedComputerFqdn, $FoundRef)
+        $history = Read-TechnicianRunGuardHistory -Path $LockedPath -RunGuardHours $LockedRunGuardHours
+        Save-TechnicianRunGuardHistory -Path $LockedPath -History $history
+        foreach ($entry in @($history.Entries)) {
+            if ([string]$entry.ComputerFqdn -eq $LockedComputerFqdn) { $FoundRef.Value = $entry; break }
+        }
+    }
+    if ($found.ContainsKey('Value')) { return $found.Value }
+    return $null
+}
+
+function Update-TechnicianRunGuardHistory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ComputerFqdn,
+        [Parameter(Mandatory = $true)][string]$InputComputerName,
+        [ValidateRange(0, 168)][int]$RunGuardHours,
+        [ValidateSet('Started','Result')][string]$State,
+        [AllowNull()]$Result,
+        [AllowNull()][string]$JobId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ComputerFqdn) -or $RunGuardHours -le 0) { return }
+
+    Invoke-TechnicianRunGuardHistoryLock -ArgumentList @(
+        $Path,
+        $ComputerFqdn,
+        $InputComputerName,
+        $RunGuardHours,
+        $State,
+        $Result,
+        $JobId,
+        $cycle,
+        $ComputerListPath,
+        $script:LotRoot,
+        [string]$script:TechnicianIdentity.Account,
+        [string]$script:TechnicianIdentity.ComputerName,
+        [string]$script:LauncherVersion
+    ) -ScriptBlock {
+        param(
+            $LockedPath,
+            $LockedComputerFqdn,
+            $LockedInputComputerName,
+            $LockedRunGuardHours,
+            $LockedState,
+            $LockedResult,
+            $LockedJobId,
+            $LockedCycle,
+            $LockedComputerListPath,
+            $LockedLotRoot,
+            $LockedTechnicianAccount,
+            $LockedTechnicianComputer,
+            $LockedLauncherVersion
+        )
+
+        $history = Read-TechnicianRunGuardHistory -Path $LockedPath -RunGuardHours $LockedRunGuardHours
+        $kept = New-Object System.Collections.ArrayList
+        $previousEntry = $null
+        foreach ($entry in @($history.Entries)) {
+            if ([string]$entry.ComputerFqdn -eq $LockedComputerFqdn) { $previousEntry = $entry }
+            else { [void]$kept.Add($entry) }
+        }
+
+        $nowUtc = (Get-Date).ToUniversalTime()
+        $startedUtc = $nowUtc
+        if ($LockedState -eq 'Result' -and $previousEntry -and $previousEntry.PSObject.Properties['LastStartedUtc']) {
+            $previousStartedUtc = [datetime]::MinValue
+            if (ConvertTo-TechnicianRunGuardUtcDateTime -Value $previousEntry.LastStartedUtc -Result ([ref]$previousStartedUtc)) { $startedUtc = $previousStartedUtc.ToUniversalTime() }
+        }
+
+        $launcherStatus = ''
+        $remoteStatus = ''
+        $remoteNextAction = ''
+        $exitCode = ''
+        $detail = ''
+        $psExecLogPath = ''
+        $remoteLogsPath = ''
+
+        if ($LockedResult) {
+            if ($LockedResult.PSObject.Properties['LauncherStatus']) { $launcherStatus = [string]$LockedResult.LauncherStatus }
+            if ($LockedResult.PSObject.Properties['RemoteStatus']) { $remoteStatus = [string]$LockedResult.RemoteStatus }
+            if ($LockedResult.PSObject.Properties['RemoteNextAction']) { $remoteNextAction = [string]$LockedResult.RemoteNextAction }
+            if ($LockedResult.PSObject.Properties['ExitCode']) { $exitCode = [string]$LockedResult.ExitCode }
+            if ($LockedResult.PSObject.Properties['Detail']) { $detail = [string]$LockedResult.Detail }
+            if ($LockedResult.PSObject.Properties['PsExecLogPath']) { $psExecLogPath = [string]$LockedResult.PsExecLogPath }
+            if ($LockedResult.PSObject.Properties['RemoteLogsPath']) { $remoteLogsPath = [string]$LockedResult.RemoteLogsPath }
+        }
+
+        [void]$kept.Add([pscustomobject]@{
+            ComputerFqdn = $LockedComputerFqdn
+            InputComputerName = $LockedInputComputerName
+            LastStartedUtc = $startedUtc.ToString('o')
+            LastUpdatedUtc = $nowUtc.ToString('o')
+            LastResultUtc = if ($LockedState -eq 'Result') { $nowUtc.ToString('o') } else { '' }
+            ExpiresUtc = $startedUtc.AddHours($LockedRunGuardHours).ToString('o')
+            State = $LockedState
+            LauncherStatus = $launcherStatus
+            RemoteStatus = $remoteStatus
+            RemoteNextAction = $remoteNextAction
+            ExitCode = $exitCode
+            Detail = if ($detail.Length -gt 800) { $detail.Substring(0, 800) } else { $detail }
+            PsExecLogPath = $psExecLogPath
+            RemoteLogsPath = $remoteLogsPath
+            JobId = [string]$LockedJobId
+            CycleNumber = $LockedCycle
+            ComputerListPath = $LockedComputerListPath
+            LotRoot = $LockedLotRoot
+            TechnicianAccount = $LockedTechnicianAccount
+            TechnicianComputer = $LockedTechnicianComputer
+            LauncherVersion = $LockedLauncherVersion
+            RunGuardHours = $LockedRunGuardHours
+        })
+
+        $history.Entries = @($kept.ToArray())
+        Save-TechnicianRunGuardHistory -Path $LockedPath -History $history
+    }
+}
+function New-TechnicianRunGuardSkippedResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][int]$CycleNumber,
+        [Parameter(Mandatory = $true)]$HistoryEntry,
+        [ValidateRange(0, 168)][int]$RunGuardHours
+    )
+
+    $startedUtc = [datetime]::MinValue
+    [void](ConvertTo-TechnicianRunGuardUtcDateTime -Value $HistoryEntry.LastStartedUtc -Result ([ref]$startedUtc))
+    $ageHours = if ($startedUtc -gt [datetime]::MinValue) { ((Get-Date).ToUniversalTime() - $startedUtc.ToUniversalTime()).TotalHours } else { 0 }
+    $startedText = if ($startedUtc -gt [datetime]::MinValue) { $startedUtc.ToUniversalTime().ToString('o') } else { [string]$HistoryEntry.LastStartedUtc }
+    $expiresUtc = [datetime]::MinValue
+    if ($HistoryEntry.PSObject.Properties['ExpiresUtc']) { [void](ConvertTo-TechnicianRunGuardUtcDateTime -Value $HistoryEntry.ExpiresUtc -Result ([ref]$expiresUtc)) }
+    $expiresText = if ($expiresUtc -gt [datetime]::MinValue) { $expiresUtc.ToUniversalTime().ToString('o') } else { [string]$HistoryEntry.ExpiresUtc }
+    $lastStatus = @([string]$HistoryEntry.RemoteStatus, [string]$HistoryEntry.LauncherStatus) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+
+    return [pscustomobject]@{
+        Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        ComputerName = $ComputerName
+        CycleNumber = $CycleNumber
+        LauncherStatus = 'SKIPPED_BY_TECH_RUN_GUARD'
+        RemoteStatus = ''
+        RemoteNextAction = 'WAIT_RUN_GUARD_EXPIRY'
+        ExitCode = 0
+        Detail = ("Technician run guard history skipped launch. FQDN={0}; LastStartedUtc={1}; AgeHours={2:N1}; GuardHours={3}; ExpiresUtc={4}; LastStatus={5}" -f $HistoryEntry.ComputerFqdn,$startedText,$ageHours,$RunGuardHours,$expiresText,$lastStatus)
+        SetupCacheAction = ''
+        DiskCleanupAction = ''
+        DiskCleanupFreedGB = ''
+        AdvancedDiskCleanupAction = ''
+        AdvancedDiskCleanupFreedGB = ''
+        DismCleanupAction = ''
+        DismCleanupFreedGB = ''
+        SetupCompletionRebootAction = ''
+        SetupCompletionRebootDetail = ''
+        SetupCompletionRebootUserCount = ''
+        SetupCompletionRebootUsers = ''
+        ControlledRebootAction = ''
+        ControlledRebootDetail = ''
+        ControlledRebootUserCount = ''
+        ControlledRebootUsers = ''
+        UserRebootNotificationSent = ''
+        UserRebootNotificationLang = ''
+        UserRebootNotificationMessage = ''
+        RemoteLogsPath = ''
+        PsExecLogPath = ''
+        JobErrorMessage = ''
     }
 }
 
@@ -616,6 +914,22 @@ New-Directory -Path $LogRoot
 New-Directory -Path $ReportRoot
 New-Directory -Path $CentralLogRoot
 
+$script:TechnicianRunGuardHistoryPath = Get-TechnicianRunGuardHistoryPath
+$script:UseEffectiveTechnicianRunGuardHistory = ($UseTechnicianRunGuardHistory -and -not $IgnoreTechnicianRunGuardHistory -and -not $IgnoreRunGuard -and -not $DryRun -and $RunGuardHours -gt 0)
+if ($script:UseEffectiveTechnicianRunGuardHistory) {
+    try {
+        New-Directory -Path (Split-Path -Parent $script:TechnicianRunGuardHistoryPath)
+        Invoke-TechnicianRunGuardHistoryLock -ArgumentList @($script:TechnicianRunGuardHistoryPath, $RunGuardHours) -ScriptBlock {
+            param($LockedPath, $LockedRunGuardHours)
+            $history = Read-TechnicianRunGuardHistory -Path $LockedPath -RunGuardHours $LockedRunGuardHours
+            Save-TechnicianRunGuardHistory -Path $LockedPath -History $history
+        }
+    }
+    catch {
+        Write-Host ("Technician run guard history disabled: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        $script:UseEffectiveTechnicianRunGuardHistory = $false
+    }
+}
 Test-SetupSourceMapSyntax -Path $SetupSourceMapPath
 
 $resolvedPsExec = if ($DryRun) { '' } else { Resolve-PsExecPath -Path $PsExecPath }
@@ -623,6 +937,7 @@ $resolvedPsExec = if ($DryRun) { '' } else { Resolve-PsExecPath -Path $PsExecPat
 $remoteArgs = New-Object System.Collections.ArrayList
 if ($AuditOnly) { [void]$remoteArgs.Add('-AuditOnly') }
 if ($IgnoreRunGuard) { [void]$remoteArgs.Add('-IgnoreRunGuard') }
+[void]$remoteArgs.Add('-RunGuardHours'); [void]$remoteArgs.Add([string]$RunGuardHours)
 if ($AllowPolicyRepair) { [void]$remoteArgs.Add('-AllowPolicyRepair') }
 if ($AllowWUReset) { [void]$remoteArgs.Add('-AllowWUReset') }
 if ($AllowForceUpgrade) { [void]$remoteArgs.Add('-AllowForceUpgrade') }
@@ -674,6 +989,11 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Mode'; Option = 'AuditOnly'; Value = [string][bool]$AuditOnly }
     [pscustomobject]@{ Category = 'Mode'; Option = 'RunOnce'; Value = [string][bool]$RunOnce }
     [pscustomobject]@{ Category = 'Mode'; Option = 'IgnoreRunGuard'; Value = [string][bool]$IgnoreRunGuard }
+    [pscustomobject]@{ Category = 'Mode'; Option = 'RunGuardHours'; Value = [string]$RunGuardHours }
+    [pscustomobject]@{ Category = 'Mode'; Option = 'UseTechnicianRunGuardHistory'; Value = [string][bool]$UseTechnicianRunGuardHistory }
+    [pscustomobject]@{ Category = 'Mode'; Option = 'IgnoreTechnicianRunGuardHistory'; Value = [string][bool]$IgnoreTechnicianRunGuardHistory }
+    [pscustomobject]@{ Category = 'Mode'; Option = 'EffectiveTechnicianRunGuardHistory'; Value = [string][bool]$script:UseEffectiveTechnicianRunGuardHistory }
+    [pscustomobject]@{ Category = 'Mode'; Option = 'TechnicianRunGuardHistoryPath'; Value = [string]$script:TechnicianRunGuardHistoryPath }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowPolicyRepair'; Value = [string][bool]$AllowPolicyRepair }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowWUReset'; Value = [string][bool]$AllowWUReset }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowForceUpgrade'; Value = [string][bool]$AllowForceUpgrade }
@@ -731,6 +1051,7 @@ Write-Host ("Technician     : Account={0}; UPN={1}; SID={2}; Auth={3}; Computer=
 Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser"
 Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "AD inventory  : Csv=$AdInventoryCsv; RootCsv=$AdRootInventoryCsv; Domain=$AdDomain; Refresh=$(-not $SkipAdInventoryRefresh); RecentRoot=$AdInventoryUsesRecentRootCsv"
+Write-Host "Tech run guard: Use=$script:UseEffectiveTechnicianRunGuardHistory; Requested=$UseTechnicianRunGuardHistory; Ignore=$IgnoreTechnicianRunGuardHistory; Hours=$RunGuardHours; Path=$script:TechnicianRunGuardHistoryPath"
 Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s)"
 Write-Host "LOT/run options:"
 foreach ($optionRow in @($script:LauncherOptionRows)) {
@@ -1018,7 +1339,7 @@ function Invoke-WithGlobalGateMutex {
         try { $acquired = $mutex.WaitOne(30000) }
         catch [System.Threading.AbandonedMutexException] { $acquired = $true }
         if (-not $acquired) { throw "Could not acquire global gate mutex within 30 seconds: $globalGateMutexName" }
-        & $ScriptBlock
+        & $ScriptBlock @ArgumentList
     }
     finally {
         if ($acquired) { try { $mutex.ReleaseMutex() } catch { } }
@@ -1284,6 +1605,7 @@ do {
     $results = New-Object System.Collections.ArrayList
     $runningJobs = @()
     $globalLeaseByJobId = @{}
+    $techRunGuardFqdnByJobId = @{}
     $nextIndex = 0
 
     $liveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_live.html" -f $cycle)
@@ -1297,6 +1619,18 @@ do {
         while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit) {
             $computer = $computers[$nextIndex]
             $nextIndex++
+
+            $techRunGuardFqdn = Get-TechnicianRunGuardFqdn -ComputerName $computer -AdInventoryMap $script:AdInventoryMap
+            if ($script:UseEffectiveTechnicianRunGuardHistory) {
+                $activeTechRunGuard = Get-ActiveTechnicianRunGuardEntry -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -RunGuardHours $RunGuardHours
+                if ($null -ne $activeTechRunGuard) {
+                    $skipResult = New-TechnicianRunGuardSkippedResult -ComputerName $computer -CycleNumber $cycle -HistoryEntry $activeTechRunGuard -RunGuardHours $RunGuardHours
+                    $skipResult = Add-AdInventoryFieldsToResult -Result $skipResult -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
+                    [void]$results.Add($skipResult)
+                    Write-Host ("  [SKIPPED_BY_TECH_RUN_GUARD] {0}: {1}" -f $computer,$skipResult.Detail) -ForegroundColor DarkYellow
+                    continue
+                }
+            }
 
             $globalLeasePath = Acquire-GlobalLease -Computer $computer -CycleNumber $cycle
 
@@ -1331,6 +1665,10 @@ do {
                 )
 
                 $job = Start-Job -Name ("W11UT_C{0}_{1}" -f $cycle,$computer) -FilePath $LocalWorkerPath -ArgumentList $workerArgs
+                if ($script:UseEffectiveTechnicianRunGuardHistory) {
+                    $techRunGuardFqdnByJobId[[string]$job.Id] = $techRunGuardFqdn
+                    Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -InputComputerName $computer -RunGuardHours $RunGuardHours -State Started -Result $null -JobId ([string]$job.Id)
+                }
             }
             catch {
                 Release-GlobalLease -LeasePath $globalLeasePath
@@ -1436,6 +1774,10 @@ do {
                         $item | Add-Member -NotePropertyName JobErrorMessage -NotePropertyValue ($jobErrors -join ' | ') -Force
                     }
                     $item = Add-AdInventoryFieldsToResult -Result $item -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
+                    if ($script:UseEffectiveTechnicianRunGuardHistory) {
+                        $resultFqdn = if ($techRunGuardFqdnByJobId.ContainsKey([string]$job.Id)) { [string]$techRunGuardFqdnByJobId[[string]$job.Id] } else { Get-TechnicianRunGuardFqdn -ComputerName ([string]$item.ComputerName) -AdInventoryMap $script:AdInventoryMap }
+                        Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $resultFqdn -InputComputerName ([string]$item.ComputerName) -RunGuardHours $RunGuardHours -State Result -Result $item -JobId ([string]$job.Id)
+                    }
                     [void]$results.Add($item)
                     if (-not $DryRun -and (Test-AlreadyWindows11CycleResult -Result $item)) {
                         try {
@@ -1453,6 +1795,9 @@ do {
             if ($globalLeaseByJobId.ContainsKey([string]$job.Id)) {
                 Release-GlobalLease -LeasePath $globalLeaseByJobId[[string]$job.Id]
                 $globalLeaseByJobId.Remove([string]$job.Id)
+            }
+            if ($techRunGuardFqdnByJobId.ContainsKey([string]$job.Id)) {
+                $techRunGuardFqdnByJobId.Remove([string]$job.Id)
             }
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
