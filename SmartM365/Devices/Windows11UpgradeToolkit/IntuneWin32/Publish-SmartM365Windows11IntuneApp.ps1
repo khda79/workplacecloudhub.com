@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures registry detection for the generated language package.
 .VERSION
-    1.0.2
+    1.0.4
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -14,6 +14,7 @@ param(
     [string]$PackageId,
     [string]$PackageVersion,
     [ValidatePattern('^[a-z]{2}-[A-Z]{2}$')][string]$Language = 'fr-FR',
+    [string]$RequirementLanguage,
     [string]$DisplayName,
     [string]$Description,
     [string]$Publisher = 'WorkplaceCloudHub',
@@ -28,6 +29,9 @@ param(
     [int]$AzureUploadMaxRetries = 5,
     [int]$PollSeconds = 10,
     [int]$PollTimeoutMinutes = 45,
+    [switch]$DisableLanguageRequirementRule,
+    [string]$ExistingAppId,
+    [switch]$ForceCreateNew,
     [string]$FinalizeExistingAppId,
     [string]$FinalizeContentVersionId = '1',
     [string]$GraphBaseUri = 'https://graph.microsoft.com/beta',
@@ -171,6 +175,96 @@ function Invoke-GraphJson {
     }
 
     Invoke-MgGraphRequest -Method $Method -Uri $Uri -OutputType PSObject -ErrorAction Stop
+}
+
+function ConvertTo-ODataStringLiteral {
+    param([AllowNull()][string]$Value)
+    return ([string]$Value -replace "'", "''")
+}
+
+function Get-GraphCollectionItems {
+    param([string]$Uri)
+
+    $items = New-Object System.Collections.ArrayList
+    $next = $Uri
+    while (-not [string]::IsNullOrWhiteSpace($next)) {
+        $page = Invoke-GraphJson -Method GET -Uri $next
+        foreach ($item in @($page.value)) { [void]$items.Add($item) }
+        $next = ''
+        if ($page.PSObject.Properties['@odata.nextLink']) { $next = [string]$page.'@odata.nextLink' }
+    }
+
+    return @($items.ToArray())
+}
+
+function Resolve-ExistingIntuneWin32App {
+    param(
+        [string]$GraphBaseUri,
+        [string]$AppId,
+        [string]$DisplayName,
+        [string]$PackageId
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($AppId)) {
+        $app = Invoke-GraphJson -Method GET -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$AppId"
+        return $app
+    }
+
+    if ([string]::IsNullOrWhiteSpace($DisplayName)) { return $null }
+
+    $displayNameLiteral = ConvertTo-ODataStringLiteral -Value $DisplayName
+    $filter = [uri]::EscapeDataString("displayName eq '$displayNameLiteral'")
+    $select = [uri]::EscapeDataString('id,displayName,notes')
+    $matches = @(Get-GraphCollectionItems -Uri "$GraphBaseUri/deviceAppManagement/mobileApps?`$filter=$filter&`$select=$select")
+    if ($matches.Count -eq 0) { return $null }
+
+    $packageMatches = @($matches | Where-Object { [string]$_.notes -match [regex]::Escape("PackageId=$PackageId") })
+    if ($packageMatches.Count -eq 1) { return $packageMatches[0] }
+    if ($matches.Count -eq 1) { return $matches[0] }
+
+    $ids = ($matches | ForEach-Object { "{0} ({1})" -f $_.displayName,$_.id }) -join '; '
+    throw "Multiple Intune apps match display name '$DisplayName'. Specify -ExistingAppId or use -ForceCreateNew. Matches: $ids"
+}
+
+function Copy-OrderedHashtable {
+    param([object]$InputObject)
+    $copy = [ordered]@{}
+    foreach ($key in $InputObject.Keys) { $copy[$key] = $InputObject[$key] }
+    return $copy
+}
+
+function ConvertTo-Base64Utf8 {
+    param([AllowNull()][string]$Value)
+    return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$Value))
+}
+
+function New-LanguageRequirementRule {
+    param([Parameter(Mandatory = $true)][string]$Language)
+
+    $script = @"
+try {
+    `$locale = (Get-WinSystemLocale).Name
+    if ([string]::IsNullOrWhiteSpace(`$locale)) { `$locale = 'UNKNOWN' }
+    Write-Output `$locale
+    exit 0
+}
+catch {
+    Write-Output 'UNKNOWN'
+    exit 0
+}
+"@
+
+    return [ordered]@{
+        '@odata.type' = '#microsoft.graph.win32LobAppPowerShellScriptRequirement'
+        displayName = "Windows setup language must match $Language"
+        enforceSignatureCheck = $false
+        runAs32Bit = $false
+        runAsAccount = 'system'
+        scriptContent = ConvertTo-Base64Utf8 -Value $script
+        detectionType = 'string'
+        operator = 'equal'
+        detectionValue = $Language
+    }
 }
 
 function Wait-GraphContentFileState {
@@ -330,6 +424,7 @@ if ($Language -eq 'fr-FR' -and $companionMetadata.Language) { $Language = [strin
 $languageFromPackageId = Get-LanguageFromPackageId -Value $PackageId
 if ($Language -eq 'fr-FR' -and $languageFromPackageId) { $Language = $languageFromPackageId }
 if ([string]::IsNullOrWhiteSpace($PackageVersion)) { throw "PackageVersion is required for Intune registry detection. Provide -PackageVersion or place the generated Detect.ps1 next to the .intunewin package." }
+if ([string]::IsNullOrWhiteSpace($RequirementLanguage)) { $RequirementLanguage = $Language }
 if ([string]::IsNullOrWhiteSpace($DisplayName)) {
     $DisplayName = "Windows11UpgradeToolkit-$Language"
 }
@@ -348,7 +443,7 @@ $appBody = [ordered]@{
     publisher = $Publisher
     developer = $Developer
     owner = $Owner
-    notes = "PackageId=$PackageId; PackageVersion=$PackageVersion; Language=$Language"
+    notes = "PackageId=$PackageId; PackageVersion=$PackageVersion; Language=$Language; RequirementLanguage=$RequirementLanguage"
     isFeatured = $false
     privacyInformationUrl = $null
     informationUrl = $null
@@ -366,6 +461,9 @@ $appBody = [ordered]@{
         v10_1607 = $true
     }
     applicableArchitectures = 'x64'
+    requirementRules = @(
+        if (-not $DisableLanguageRequirementRule) { New-LanguageRequirementRule -Language $RequirementLanguage }
+    )
     detectionRules = @(
         @{
             '@odata.type' = '#microsoft.graph.win32LobAppRegistryDetection'
@@ -423,12 +521,14 @@ if (-not [string]::IsNullOrWhiteSpace($FinalizeExistingAppId)) {
 }
 
 Write-Step "Publishing app: $DisplayName"
-if (-not $PSCmdlet.ShouldProcess($DisplayName, 'Create Intune Win32 app and upload package content')) {
+if (-not $PSCmdlet.ShouldProcess($DisplayName, 'Create or update Intune Win32 app and upload package content')) {
     [pscustomobject]@{
         DisplayName = $DisplayName
         PackageId = $PackageId
         PackageVersion = $PackageVersion
         Language = $Language
+        RequirementLanguage = $RequirementLanguage
+        LanguageRequirementRuleEnabled = (-not [bool]$DisableLanguageRequirementRule)
         IntuneWinPath = $resolvedIntuneWinPath
         FileName = $metadata.FileName
         SetupFile = $metadata.SetupFile
@@ -437,6 +537,8 @@ if (-not $PSCmdlet.ShouldProcess($DisplayName, 'Create Intune Win32 app and uplo
         DetectionRegistryKey = $registryKeyPath
         UploadBlockSizeMB = $UploadBlockSizeMB
         AzureUploadMaxRetries = $AzureUploadMaxRetries
+        ForceCreateNew = [bool]$ForceCreateNew
+        ExistingAppId = $ExistingAppId
     }
     return
 }
@@ -447,10 +549,25 @@ if (-not $NoConnect) {
     Connect-MgGraph -Scopes @('DeviceManagementApps.ReadWrite.All') -NoWelcome | Out-Null
 }
 
-$app = Invoke-GraphJson -Method POST -Uri "$GraphBaseUri/deviceAppManagement/mobileApps" -Body $appBody
-$appId = [string]$app.id
-if ([string]::IsNullOrWhiteSpace($appId)) { throw 'Graph did not return a mobile app id.' }
-Write-Step "Created Intune app: $appId"
+$app = $null
+$appId = ''
+$updatedExistingApp = $false
+if (-not $ForceCreateNew) {
+    $app = Resolve-ExistingIntuneWin32App -GraphBaseUri $GraphBaseUri -AppId $ExistingAppId -DisplayName $DisplayName -PackageId $PackageId
+}
+
+if ($app) {
+    $appId = [string]$app.id
+    if ([string]::IsNullOrWhiteSpace($appId)) { throw 'Existing Intune app lookup did not return a mobile app id.' }
+    $updatedExistingApp = $true
+    Write-Step "Using existing Intune app: $appId ($DisplayName)"
+}
+else {
+    $app = Invoke-GraphJson -Method POST -Uri "$GraphBaseUri/deviceAppManagement/mobileApps" -Body $appBody
+    $appId = [string]$app.id
+    if ([string]::IsNullOrWhiteSpace($appId)) { throw 'Graph did not return a mobile app id.' }
+    Write-Step "Created Intune app: $appId"
+}
 
 $contentVersion = Invoke-GraphJson -Method POST -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId/microsoft.graph.win32LobApp/contentVersions" -Body @{}
 $contentVersionId = [string]$contentVersion.id
@@ -492,12 +609,10 @@ Invoke-GraphJson -Method POST -Uri "$fileUri/commit" -Body $commitBody | Out-Nul
 Write-Step 'Commit requested for uploaded package.'
 
 Wait-GraphContentFileState -Uri $fileUri -SuccessStates @('commitFileSuccess') -FailureStates @('commitFileFailed') -PollSeconds $PollSeconds -TimeoutMinutes $PollTimeoutMinutes | Out-Null
-$finalPatchBody = [ordered]@{
-    '@odata.type' = '#microsoft.graph.win32LobApp'
-    committedContentVersion = $contentVersionId
-}
+$finalPatchBody = Copy-OrderedHashtable -InputObject $appBody
+$finalPatchBody['committedContentVersion'] = $contentVersionId
 Invoke-GraphJson -Method PATCH -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId" -Body $finalPatchBody | Out-Null
-Write-Step 'App content version committed.'
+Write-Step 'App metadata and content version committed.'
 
 [pscustomobject]@{
     AppId = $appId
@@ -505,7 +620,10 @@ Write-Step 'App content version committed.'
     PackageId = $PackageId
     PackageVersion = $PackageVersion
     Language = $Language
+    RequirementLanguage = $RequirementLanguage
+    LanguageRequirementRuleEnabled = (-not [bool]$DisableLanguageRequirementRule)
     ContentVersionId = $contentVersionId
     ContentFileId = $fileId
     DetectionRegistryKey = $registryKeyPath
+    UpdatedExistingApp = [bool]$updatedExistingApp
 }
