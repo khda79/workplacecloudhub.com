@@ -4,7 +4,7 @@
 .DESCRIPTION
     Copies the packaged setup media and endpoint scripts to ProgramData, registers package detection state, and starts a SYSTEM scheduled task for asynchronous upgrade execution.
 .VERSION
-    1.0.0
+    1.0.1
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -26,26 +26,40 @@ $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $intuneRoot = Join-Path $DataRoot 'Intune'
 $logRoot = Join-Path $DataRoot 'Logs\Intune'
 $setupCacheRoot = Join-Path $DataRoot 'SetupMedia'
-$registryRoot = 'HKLM:\SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
-$registryPath = Join-Path $registryRoot ([string]$manifest.PackageId)
+$registrySubKeyRoot = 'SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
+$registrySubKey = "$registrySubKeyRoot\$([string]$manifest.PackageId)"
 
 function New-Directory {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { New-Item -ItemType Directory -Path $Path -Force | Out-Null }
 }
 
-function New-RegistryKey {
-    param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force | Out-Null }
+function Open-Registry64LocalMachine {
+    return [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
 }
 
-function Set-RegistryString {
+function Set-Registry64String {
     param(
-        [string]$Path,
+        [string]$SubKey,
         [string]$Name,
         [string]$Value
     )
-    New-ItemProperty -LiteralPath $Path -Name $Name -Value $Value -PropertyType String -Force | Out-Null
+
+    $baseKey = Open-Registry64LocalMachine
+    try {
+        $key = $baseKey.CreateSubKey($SubKey)
+        try { $key.SetValue($Name, [string]$Value, [Microsoft.Win32.RegistryValueKind]::String) }
+        finally { if ($key) { $key.Dispose() } }
+    }
+    finally { $baseKey.Dispose() }
+}
+
+function Remove-Registry64SubKeyTree {
+    param([string]$SubKey)
+
+    $baseKey = Open-Registry64LocalMachine
+    try { $baseKey.DeleteSubKeyTree($SubKey, $false) }
+    finally { $baseKey.Dispose() }
 }
 
 function Write-InstallLog {
@@ -58,7 +72,7 @@ function Write-InstallLog {
 if ($Uninstall) {
     Write-InstallLog "Uninstall requested for $($manifest.PackageId)."
     try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
-    if (Test-Path -LiteralPath $registryPath) { Remove-Item -LiteralPath $registryPath -Recurse -Force -ErrorAction SilentlyContinue }
+    Remove-Registry64SubKeyTree -SubKey $registrySubKey
     exit 0
 }
 
@@ -84,14 +98,13 @@ $installRobocopyLog = Join-Path $logRoot 'Install-Robocopy.log'
 $copyExit = [int]$LASTEXITCODE
 if ($copyExit -gt 7) { throw "Robocopy install media copy failed with exit code $copyExit." }
 
-New-RegistryKey -Path $registryRoot
-New-RegistryKey -Path $registryPath
-Set-RegistryString -Path $registryPath -Name PackageId -Value ([string]$manifest.PackageId)
-Set-RegistryString -Path $registryPath -Name PackageVersion -Value ([string]$manifest.PackageVersion)
-Set-RegistryString -Path $registryPath -Name Language -Value ([string]$manifest.Language)
-Set-RegistryString -Path $registryPath -Name MediaId -Value ([string]$manifest.MediaId)
-Set-RegistryString -Path $registryPath -Name SetupCacheFolder -Value ([string]$manifest.SetupCacheFolder)
-Set-RegistryString -Path $registryPath -Name InstalledUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
+Write-InstallLog "Writing Intune detection registry state to HKLM:\$registrySubKey (64-bit registry view)."
+Set-Registry64String -SubKey $registrySubKey -Name PackageId -Value ([string]$manifest.PackageId)
+Set-Registry64String -SubKey $registrySubKey -Name PackageVersion -Value ([string]$manifest.PackageVersion)
+Set-Registry64String -SubKey $registrySubKey -Name Language -Value ([string]$manifest.Language)
+Set-Registry64String -SubKey $registrySubKey -Name MediaId -Value ([string]$manifest.MediaId)
+Set-Registry64String -SubKey $registrySubKey -Name SetupCacheFolder -Value ([string]$manifest.SetupCacheFolder)
+Set-Registry64String -SubKey $registrySubKey -Name InstalledUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
 
 $runner = Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1'
 $taskArgument = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -DataRoot "{1}" -TaskName "{2}"' -f $runner,$DataRoot,$TaskName
