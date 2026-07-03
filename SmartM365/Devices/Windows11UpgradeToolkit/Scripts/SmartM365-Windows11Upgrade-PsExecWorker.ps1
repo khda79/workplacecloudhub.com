@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.3
+0.1.4
 #>
 
 #requires -Version 5.1
@@ -287,10 +287,117 @@ function Convert-ToPsExecRemoteArgument {
     return ('"{0}"' -f ($text -replace '"', '\"'))
 }
 
+$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','Errors')
+
+function Get-ResultValue {
+    param(
+        [Parameter(Mandatory = $true)][object]$Result,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($Result -is [System.Collections.IDictionary] -and $Result.Contains($Name)) {
+        return [string]$Result[$Name]
+    }
+    if ($Result.PSObject.Properties[$Name]) {
+        return [string]$Result.$Name
+    }
+    return ''
+}
+
+function Get-CentralLogBucket {
+    param([Parameter(Mandatory = $true)][object]$Result)
+
+    $launcherStatus = Get-ResultValue -Result $Result -Name 'LauncherStatus'
+    if ($launcherStatus -eq 'ADMIN_SHARE_UNREACHABLE' -or $launcherStatus -eq 'DRYRUN_ADMIN_SHARE_UNREACHABLE') {
+        return 'ADMIN_SHARE_UNREACHABLE'
+    }
+
+    $exitCodeText = Get-ResultValue -Result $Result -Name 'ExitCode'
+    $exitCodeValue = 0
+    if ([int]::TryParse($exitCodeText, [ref]$exitCodeValue) -and $exitCodeValue -eq 0) {
+        return 'Success'
+    }
+
+    return 'Errors'
+}
+
+function New-CentralLogTarget {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][int]$Cycle,
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','Errors')][string]$Bucket
+    )
+
+    if ($KeepCentralLogHistory) {
+        return (Join-Path (Join-Path (Join-Path $CentralLogRoot $Bucket) $ComputerName) ("Cycle{0}_{1}" -f $Cycle,(Get-Date -Format 'yyyyMMdd-HHmmss')))
+    }
+
+    foreach ($otherBucket in $script:CentralLogBuckets) {
+        $otherLatest = Join-Path (Join-Path (Join-Path $CentralLogRoot $otherBucket) $ComputerName) 'Latest'
+        if (Test-Path -LiteralPath $otherLatest) {
+            Remove-Item -LiteralPath $otherLatest -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    return (Join-Path (Join-Path (Join-Path $CentralLogRoot $Bucket) $ComputerName) 'Latest')
+}
+
+function Publish-LauncherEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][int]$Cycle,
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','Errors')][string]$Bucket,
+        [Parameter(Mandatory = $true)][string]$WorkerLogPath,
+        [AllowNull()][string]$StdoutLogPath,
+        [AllowNull()][string]$StderrLogPath
+    )
+
+    if ($NoCentralLogCollection) { return '' }
+
+    $target = New-CentralLogTarget -ComputerName $ComputerName -Cycle $Cycle -Bucket $Bucket
+    if (Test-Path -LiteralPath $target) {
+        Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Directory -Path $target
+
+    if (Test-Path -LiteralPath $WorkerLogPath -PathType Leaf) {
+        Copy-Item -LiteralPath $WorkerLogPath -Destination (Join-Path $target (Split-Path -Leaf $WorkerLogPath)) -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($extraLog in @($StdoutLogPath,$StderrLogPath)) {
+        if (-not [string]::IsNullOrWhiteSpace($extraLog) -and (Test-Path -LiteralPath $extraLog -PathType Leaf)) {
+            Copy-Item -LiteralPath $extraLog -Destination (Join-Path $target (Split-Path -Leaf $extraLog)) -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return $target
+}
+
+function Update-ResultFromLastRun {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Result,
+        [Parameter(Mandatory = $true)][object]$LastRun
+    )
+
+    $Result.RemoteStatus = [string]$LastRun.Status
+    $Result.RemoteNextAction = [string]$LastRun.NextAction
+    if ($Result.RemoteStatus) {
+        $Result.LauncherStatus = $Result.RemoteStatus
+        $Result.ExitCode = [string]$LastRun.ExitCode
+    }
+    if ($LastRun.PSObject.Properties['SetupCacheAction']) {
+        $Result.SetupCacheAction = [string]$LastRun.SetupCacheAction
+    }
+    foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers','ControlledRebootAction','ControlledRebootDetail','ControlledRebootUserCount','ControlledRebootUsers')) {
+        if ($LastRun.PSObject.Properties[$propertyName]) {
+            $Result[$propertyName] = [string]$LastRun.$propertyName
+        }
+    }
+}
+
 function Collect-RemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
-        [Parameter(Mandatory = $true)][int]$Cycle
+        [Parameter(Mandatory = $true)][int]$Cycle,
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','Errors')][string]$Bucket
     )
 
     if ($NoCentralLogCollection) { return '' }
@@ -298,13 +405,7 @@ function Collect-RemoteEvidence {
     $remoteBaseShare = Convert-ToAdminSharePath -ComputerName $ComputerName -LocalPath $RemoteBaseDir
     if (-not (Test-Path -LiteralPath $remoteBaseShare -PathType Container)) { return '' }
 
-    $target = if ($KeepCentralLogHistory) {
-        Join-Path (Join-Path $CentralLogRoot $ComputerName) ("Cycle{0}_{1}" -f $Cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
-    }
-    else {
-        Join-Path (Join-Path $CentralLogRoot $ComputerName) 'Latest'
-    }
-
+    $target = New-CentralLogTarget -ComputerName $ComputerName -Cycle $Cycle -Bucket $Bucket
     if (Test-Path -LiteralPath $target) {
         Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -318,7 +419,6 @@ function Collect-RemoteEvidence {
     }
     return $target
 }
-
 New-Directory -Path $LogRoot
 $logPath = Join-Path $LogRoot ("{0}_cycle{1}_{2}.log" -f $Computer,$CycleNumber,(Get-Date -Format 'yyyyMMdd-HHmmss'))
 $stdoutPath = "$logPath.stdout.txt"
@@ -371,6 +471,9 @@ try {
     if ($DryRun) {
         $result.LauncherStatus = if ($remoteAccess.AdminShareReachable) { 'DRYRUN_READY' } else { 'DRYRUN_ADMIN_SHARE_UNREACHABLE' }
         $result.Detail = $remoteAccess.Detail
+        if (-not $remoteAccess.AdminShareReachable) {
+            $result.RemoteLogsPath = Publish-LauncherEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket 'ADMIN_SHARE_UNREACHABLE' -WorkerLogPath $logPath -StdoutLogPath $stdoutPath -StderrLogPath $stderrPath
+        }
         return [pscustomobject]$result
     }
 
@@ -413,12 +516,14 @@ try {
             $result.LauncherStatus = 'ADMIN_SHARE_UNREACHABLE'
             $result.Detail = $payloadCopyError
             Add-Content -LiteralPath $logPath -Value ("[{0}] Skipping PsExec after retries: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$result.Detail) -Encoding UTF8
+            $result.RemoteLogsPath = Publish-LauncherEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket 'ADMIN_SHARE_UNREACHABLE' -WorkerLogPath $logPath -StdoutLogPath $stdoutPath -StderrLogPath $stderrPath
             return [pscustomobject]$result
         }
 
         $result.LauncherStatus = 'REMOTE_PAYLOAD_COPY_FAILED'
         $result.Detail = $payloadCopyError
         Add-Content -LiteralPath $logPath -Value ("[{0}] ERROR Payload copy failed after {1} attempt(s): {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$maxPayloadCopyAttempts,$result.Detail) -Encoding UTF8
+        $result.RemoteLogsPath = Publish-LauncherEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket 'Errors' -WorkerLogPath $logPath -StdoutLogPath $stdoutPath -StderrLogPath $stderrPath
         return [pscustomobject]$result
     }
     $result.SetupCacheAction = Copy-SetupMediaToRemoteCache -ComputerName $Computer -LogPath $logPath
@@ -503,32 +608,23 @@ try {
     }
 
     Start-Sleep -Seconds 3
-    $result.RemoteLogsPath = Collect-RemoteEvidence -ComputerName $Computer -Cycle $CycleNumber
-    if ($result.RemoteLogsPath) {
-        $lastRunPath = Join-Path $result.RemoteLogsPath 'LastRun.json'
-        if (Test-Path -LiteralPath $lastRunPath -PathType Leaf) {
-            $lastRun = Get-Content -LiteralPath $lastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-            $result.RemoteStatus = [string]$lastRun.Status
-            $result.RemoteNextAction = [string]$lastRun.NextAction
-                if ($result.RemoteStatus) {
-                    $result.LauncherStatus = $result.RemoteStatus
-                    $result.ExitCode = [string]$lastRun.ExitCode
-                }
-                if ($lastRun.PSObject.Properties['SetupCacheAction']) {
-                    $result.SetupCacheAction = [string]$lastRun.SetupCacheAction
-                }
-                foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers','ControlledRebootAction','ControlledRebootDetail','ControlledRebootUserCount','ControlledRebootUsers')) {
-                    if ($lastRun.PSObject.Properties[$propertyName]) {
-                        $result[$propertyName] = [string]$lastRun.$propertyName
-                    }
-                }
-            }
-        }
+    $remoteBaseShare = Convert-ToAdminSharePath -ComputerName $Computer -LocalPath $RemoteBaseDir
+    $remoteLastRunPath = Join-Path $remoteBaseShare 'LastRun.json'
+    if (Test-Path -LiteralPath $remoteLastRunPath -PathType Leaf) {
+        $lastRun = Get-Content -LiteralPath $remoteLastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        Update-ResultFromLastRun -Result $result -LastRun $lastRun
+    }
+
+    $centralLogBucket = Get-CentralLogBucket -Result $result
+    $result.RemoteLogsPath = Collect-RemoteEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket $centralLogBucket
 }
 catch {
     $result.LauncherStatus = 'ERROR'
     $result.Detail = $_.Exception.Message
     Add-Content -LiteralPath $logPath -Value ("[{0}] ERROR {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$_.Exception.Message) -Encoding UTF8
+    if ([string]::IsNullOrWhiteSpace($result.RemoteLogsPath)) {
+        $result.RemoteLogsPath = Publish-LauncherEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket 'Errors' -WorkerLogPath $logPath -StdoutLogPath $stdoutPath -StderrLogPath $stderrPath
+    }
 }
 
 [pscustomobject]$result
