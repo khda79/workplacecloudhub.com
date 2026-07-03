@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.16
+    0.1.17
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.16'
+$script:LauncherVersion = '0.1.17'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -103,6 +103,7 @@ $script:ExportAdScriptPath = Join-Path $script:BaseDir 'SmartM365-Windows11Upgra
 $script:AdInventoryFreshnessHours = 12
 $ComputerListPath = [System.IO.Path]::GetFullPath($ComputerListPath)
 $script:LotRoot = Split-Path -Parent $ComputerListPath
+$script:LotAdInventoryCsv = Join-Path $script:LotRoot 'DevicesAD.csv'
 if ([string]::IsNullOrWhiteSpace($LogRoot)) { $LogRoot = Join-Path (Split-Path -Parent $ComputerListPath) 'PsExecLogs' }
 if ([string]::IsNullOrWhiteSpace($ReportRoot)) { $ReportRoot = Join-Path (Split-Path -Parent $ComputerListPath) 'Reports' }
 if ([string]::IsNullOrWhiteSpace($CentralLogRoot)) { $CentralLogRoot = Join-Path (Split-Path -Parent $ComputerListPath) 'CentralLogs' }
@@ -111,30 +112,26 @@ $ReportRoot = [System.IO.Path]::GetFullPath($ReportRoot)
 $CentralLogRoot = [System.IO.Path]::GetFullPath($CentralLogRoot)
 
 $AdInventoryUsesRecentRootCsv = $false
-if (-not [string]::IsNullOrWhiteSpace($AdRootInventoryCsv)) {
-    $adRootInventoryItem = Get-Item -LiteralPath $AdRootInventoryCsv -ErrorAction SilentlyContinue
+$effectiveRootAdInventoryCsv = $AdRootInventoryCsv
+if ([string]::IsNullOrWhiteSpace($effectiveRootAdInventoryCsv)) {
+    $defaultRootAdCsv = Join-Path $script:ToolkitRoot 'DevicesAD.csv'
+    if (Test-Path -LiteralPath $defaultRootAdCsv -PathType Leaf) {
+        $effectiveRootAdInventoryCsv = $defaultRootAdCsv
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($effectiveRootAdInventoryCsv)) {
+    $adRootInventoryItem = Get-Item -LiteralPath $effectiveRootAdInventoryCsv -ErrorAction SilentlyContinue
     if ($adRootInventoryItem) {
         $adRootInventoryAge = (Get-Date) - $adRootInventoryItem.LastWriteTime
         if ($adRootInventoryAge.TotalHours -le $script:AdInventoryFreshnessHours) {
             $AdInventoryCsv = $adRootInventoryItem.FullName
+            $AdRootInventoryCsv = $adRootInventoryItem.FullName
             $AdInventoryUsesRecentRootCsv = $true
         }
     }
 }
 if ([string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
-    if (-not [string]::IsNullOrWhiteSpace($AdDomain)) {
-        $AdInventoryCsv = Join-Path $script:LotRoot 'DevicesAD.csv'
-    }
-    elseif (-not [string]::IsNullOrWhiteSpace($AdRootInventoryCsv)) {
-        $AdInventoryCsv = $AdRootInventoryCsv
-    }
-    else {
-        $rootAdCsv = Join-Path $script:ToolkitRoot 'DevicesAD.csv'
-        $lotAdCsv = Join-Path $script:LotRoot 'DevicesAD.csv'
-        if (Test-Path -LiteralPath $rootAdCsv -PathType Leaf) { $AdInventoryCsv = $rootAdCsv }
-        elseif (Test-Path -LiteralPath $lotAdCsv -PathType Leaf) { $AdInventoryCsv = $lotAdCsv }
-        else { $AdInventoryCsv = $lotAdCsv }
-    }
+    $AdInventoryCsv = $script:LotAdInventoryCsv
 }
 if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) { $AdInventoryCsv = [System.IO.Path]::GetFullPath($AdInventoryCsv) }
 if (-not [string]::IsNullOrWhiteSpace($AdRootInventoryCsv)) { $AdRootInventoryCsv = [System.IO.Path]::GetFullPath($AdRootInventoryCsv) }

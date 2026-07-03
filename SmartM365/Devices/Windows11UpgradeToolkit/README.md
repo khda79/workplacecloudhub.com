@@ -320,7 +320,9 @@ Before each LOT run, the PsExec launcher can load or refresh `DevicesAD.csv` wit
 
 - Use `Export-ADDevicesCsv.cmd` from the toolkit root to generate a forest-wide `DevicesAD.csv` cache.
 - Add `AdDomain.txt` in a LOT folder, or set `W11UT_AD_DOMAIN`, to restrict the automatic AD export to one domain.
-- Automatic LOT refreshes are limited to the current `Computers.txt`; root `DevicesAD.csv` is reused only when it already exists and is recent.
+- Automatic LOT refreshes are limited to the current `Computers.txt` and write `DevicesAD.csv` inside the LOT folder.
+- The root `DevicesAD.csv` is read as a forest-wide cache only when it already exists and is recent; a stale or missing root cache is not overwritten by a LOT-scoped refresh.
+
 ## Reports And Logs
 
 Remote runtime data is written under:
