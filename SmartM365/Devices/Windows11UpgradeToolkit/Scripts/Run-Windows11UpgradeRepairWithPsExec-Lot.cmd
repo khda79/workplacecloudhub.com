@@ -204,17 +204,9 @@ if "%W11UT_AD_DOMAIN%"=="" (
     )
 )
 
-set "AD_ARGS="
-if exist "%PARENT_AD_CSV%" set "AD_ARGS=-AdRootInventoryCsv ""%PARENT_AD_CSV%"""
-if not "%W11UT_AD_DOMAIN%"=="" (
-    set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%LOT_AD_CSV%"" -AdDomain ""%W11UT_AD_DOMAIN%"""
-) else (
-    if exist "%PARENT_AD_CSV%" (
-        set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%PARENT_AD_CSV%"""
-    ) else (
-        set "AD_ARGS=%AD_ARGS% -AdInventoryCsv ""%LOT_AD_CSV%"""
-    )
-)
+set "AD_ARGS=-AdInventoryCsv ""%LOT_AD_CSV%"""
+if exist "%PARENT_AD_CSV%" set "AD_ARGS=%AD_ARGS% -AdRootInventoryCsv ""%PARENT_AD_CSV%"""
+if not "%W11UT_AD_DOMAIN%"=="" set "AD_ARGS=%AD_ARGS% -AdDomain ""%W11UT_AD_DOMAIN%"""
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
   -ComputerListPath "%COMPUTERS%" ^
   -LogRoot "%PSEXEC_LOGS%" ^
