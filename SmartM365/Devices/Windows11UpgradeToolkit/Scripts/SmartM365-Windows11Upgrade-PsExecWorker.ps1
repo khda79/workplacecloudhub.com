@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.4
+0.1.5
 #>
 
 #requires -Version 5.1
@@ -36,6 +36,8 @@ param(
     [bool]$DryRun = $false,
     [bool]$NoCentralLogCollection = $false,
     [bool]$KeepCentralLogHistory = $false,
+    [ValidateSet('Standard','Full')]
+    [string]$CentralLogCollectionMode = 'Standard',
     [int]$PsExecTimeoutMinutes = 180,
     [string]$GlobalWorkerLeasePath,
     [string]$GlobalWorkerLeaseMutexName
@@ -371,6 +373,96 @@ function Publish-LauncherEvidence {
     return $target
 }
 
+$script:CentralLogMaxStandardFileBytes = 5MB
+
+function Add-CentralLogCollectionNote {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetPath,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+
+    try {
+        New-Directory -Path $TargetPath
+        Add-Content -LiteralPath (Join-Path $TargetPath 'CentralLogCollection.skipped.txt') -Value $Message -Encoding UTF8
+    }
+    catch { }
+}
+
+function Copy-CentralEvidenceFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$TargetRoot,
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [long]$MaxBytes = $script:CentralLogMaxStandardFileBytes
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { return }
+
+    try {
+        $item = Get-Item -LiteralPath $SourcePath -ErrorAction Stop
+        if ($CentralLogCollectionMode -ne 'Full' -and $item.Length -gt $MaxBytes) {
+            Add-CentralLogCollectionNote -TargetPath $TargetRoot -Message ("Skipped large file: {0}; SizeMB={1:N2}; LimitMB={2:N2}; Source={3}" -f $RelativePath,($item.Length / 1MB),($MaxBytes / 1MB),$SourcePath)
+            return
+        }
+
+        $destination = Join-Path $TargetRoot $RelativePath
+        $destinationParent = Split-Path -Parent $destination
+        if (-not [string]::IsNullOrWhiteSpace($destinationParent)) { New-Directory -Path $destinationParent }
+        Copy-Item -LiteralPath $SourcePath -Destination $destination -Force -ErrorAction SilentlyContinue
+    }
+    catch {
+        Add-CentralLogCollectionNote -TargetPath $TargetRoot -Message ("Failed to copy file: {0}; Error={1}" -f $SourcePath,$_.Exception.Message)
+    }
+}
+
+function Copy-CentralEvidenceDirectorySmallFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRoot,
+        [Parameter(Mandatory = $true)][string]$TargetRoot,
+        [Parameter(Mandatory = $true)][string]$RelativeRoot,
+        [long]$MaxBytes = $script:CentralLogMaxStandardFileBytes
+    )
+
+    if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) { return }
+
+    $root = [System.IO.Path]::GetFullPath($SourceRoot).TrimEnd('\')
+    foreach ($file in @(Get-ChildItem -LiteralPath $SourceRoot -File -Recurse -ErrorAction SilentlyContinue)) {
+        $fileFullName = [System.IO.Path]::GetFullPath($file.FullName)
+        $relativeChild = $fileFullName.Substring($root.Length).TrimStart('\')
+        $relative = Join-Path $RelativeRoot $relativeChild
+        Copy-CentralEvidenceFile -SourcePath $file.FullName -TargetRoot $TargetRoot -RelativePath $relative -MaxBytes $MaxBytes
+    }
+}
+
+function Collect-StandardRemoteEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string]$RemoteBaseShare,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    Add-CentralLogCollectionNote -TargetPath $TargetPath -Message ("CentralLogCollectionMode=Standard; copied selected files only. Full logs remain on target under {0}." -f $RemoteBaseShare)
+
+    Copy-CentralEvidenceFile -SourcePath (Join-Path $RemoteBaseShare 'LastRun.json') -TargetRoot $TargetPath -RelativePath 'LastRun.json' -MaxBytes 1MB
+
+    $logsRoot = Join-Path $RemoteBaseShare 'Logs'
+    if (Test-Path -LiteralPath $logsRoot -PathType Container) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $logsRoot -File -ErrorAction SilentlyContinue)) {
+            Copy-CentralEvidenceFile -SourcePath $file.FullName -TargetRoot $TargetPath -RelativePath (Join-Path 'Logs' $file.Name) -MaxBytes 10MB
+        }
+
+        $setupLogRoot = Join-Path $logsRoot 'SetupUpgrade'
+        if (Test-Path -LiteralPath $setupLogRoot -PathType Container) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $setupLogRoot -File -ErrorAction SilentlyContinue)) {
+                $copy = ($file.Name -like 'Robocopy_*.log' -or $file.Name -like 'SetupDiag*.log' -or $file.Extension -in @('.json','.xml','.txt','.log'))
+                if ($copy) {
+                    Copy-CentralEvidenceFile -SourcePath $file.FullName -TargetRoot $TargetPath -RelativePath (Join-Path 'Logs\SetupUpgrade' $file.Name) -MaxBytes $script:CentralLogMaxStandardFileBytes
+                }
+            }
+        }
+    }
+
+    Copy-CentralEvidenceDirectorySmallFiles -SourceRoot (Join-Path $RemoteBaseShare 'Output') -TargetRoot $TargetPath -RelativeRoot 'Output' -MaxBytes 2MB
+}
 function Update-ResultFromLastRun {
     param(
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Result,
@@ -411,11 +503,16 @@ function Collect-RemoteEvidence {
     }
     New-Directory -Path $target
 
-    foreach ($child in @('Logs','Output','LastRun.json')) {
-        $source = Join-Path $remoteBaseShare $child
-        if (Test-Path -LiteralPath $source) {
-            Copy-Item -LiteralPath $source -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
+    if ($CentralLogCollectionMode -eq 'Full') {
+        foreach ($child in @('Logs','Output','LastRun.json')) {
+            $source = Join-Path $remoteBaseShare $child
+            if (Test-Path -LiteralPath $source) {
+                Copy-Item -LiteralPath $source -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
+    }
+    else {
+        Collect-StandardRemoteEvidence -RemoteBaseShare $remoteBaseShare -TargetPath $target
     }
     return $target
 }
