@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures registry detection for the generated language package.
 .VERSION
-    1.0.1
+    1.0.2
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -62,8 +62,11 @@ function Get-XmlValue {
 
 function Read-CompanionPackageMetadata {
     param([string]$Path)
-
-    $result = [ordered]@{}
+    $result = [ordered]@{
+        PackageId = ''
+        PackageVersion = ''
+        Language = ''
+    }
     $packageDir = Split-Path -Parent $Path
     $manifestCandidates = @(
         (Join-Path $packageDir 'PackageManifest.json'),
