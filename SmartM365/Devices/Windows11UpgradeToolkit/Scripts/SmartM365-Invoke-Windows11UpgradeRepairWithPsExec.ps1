@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.19
+    0.1.20
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -70,6 +70,8 @@ param(
     [string]$CentralLogRoot,
     [switch]$NoCentralLogCollection,
     [switch]$KeepCentralLogHistory,
+    [ValidateSet('Standard','Full')]
+    [string]$CentralLogCollectionMode = 'Standard',
 
     [ValidateRange(1, 200)][int]$ThrottleLimit = 10,
     [ValidateRange(0, 200)][int]$GlobalConcurrencyLimit = 15,
@@ -92,7 +94,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.19'
+$script:LauncherVersion = '0.1.20'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -683,6 +685,7 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Paths'; Option = 'CentralLogRoot'; Value = [string]$CentralLogRoot }
     [pscustomobject]@{ Category = 'Paths'; Option = 'NoCentralLogCollection'; Value = [string][bool]$NoCentralLogCollection }
     [pscustomobject]@{ Category = 'Paths'; Option = 'KeepCentralLogHistory'; Value = [string][bool]$KeepCentralLogHistory }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'CentralLogCollectionMode'; Value = [string]$CentralLogCollectionMode }
 )
 
 Write-Host "SmartM365 Windows 11 Upgrade Toolkit launcher v$script:LauncherVersion"
@@ -1286,6 +1289,7 @@ do {
                     [bool]$DryRun,
                     [bool]$NoCentralLogCollection,
                     [bool]$KeepCentralLogHistory,
+                    $CentralLogCollectionMode,
                     $PsExecTimeoutMinutes,
                     $globalLeasePath,
                     $globalGateMutexName
