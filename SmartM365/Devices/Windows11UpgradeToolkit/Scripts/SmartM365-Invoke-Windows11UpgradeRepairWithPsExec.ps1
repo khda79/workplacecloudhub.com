@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.22
+    0.1.23
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -97,7 +97,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.22'
+$script:LauncherVersion = '0.1.23'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -1330,7 +1330,10 @@ if ($GlobalConcurrencyLimit -gt 0) {
 }
 
 function Invoke-WithGlobalGateMutex {
-    param([Parameter(Mandatory = $true)][scriptblock]$ScriptBlock)
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+        [object[]]$ArgumentList = @()
+    )
     $sharedMutex = $script:globalGateMutex
     $mutex = if ($null -ne $sharedMutex) { $sharedMutex } else { New-Object System.Threading.Mutex($false, $globalGateMutexName) }
     $ownMutex = ($null -eq $sharedMutex)
