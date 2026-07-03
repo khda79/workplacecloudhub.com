@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures registry detection for the generated language package.
 .VERSION
-    1.0.5
+    1.0.6
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -205,6 +205,24 @@ function Get-GraphCollectionItems {
     return @($items.ToArray())
 }
 
+function Test-IntuneAppHasCommittedContent {
+    param([object]$App)
+
+    if ($null -eq $App) { return $false }
+    if (-not $App.PSObject.Properties['committedContentVersion']) { return $false }
+    $value = [string]$App.committedContentVersion
+    return -not [string]::IsNullOrWhiteSpace($value)
+}
+
+function Format-IntuneAppCandidate {
+    param([object]$App)
+
+    $committed = ''
+    if ($App.PSObject.Properties['committedContentVersion']) { $committed = [string]$App.committedContentVersion }
+    if ([string]::IsNullOrWhiteSpace($committed)) { $committed = '<none>' }
+    return "{0} ({1}; committedContentVersion={2})" -f $App.displayName,$App.id,$committed
+}
+
 function Resolve-ExistingIntuneWin32App {
     param(
         [string]$GraphBaseUri,
@@ -215,6 +233,9 @@ function Resolve-ExistingIntuneWin32App {
 
     if (-not [string]::IsNullOrWhiteSpace($AppId)) {
         $app = Invoke-GraphJson -Method GET -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$AppId"
+        if (-not (Test-IntuneAppHasCommittedContent -App $app)) {
+            throw "Existing Intune app '$AppId' has no committedContentVersion. Delete the incomplete app, finalize its first content version if it was uploaded, or use -ForceCreateNew to create a separate app."
+        }
         return $app
     }
 
@@ -222,16 +243,22 @@ function Resolve-ExistingIntuneWin32App {
 
     $displayNameLiteral = ConvertTo-ODataStringLiteral -Value $DisplayName
     $filter = [uri]::EscapeDataString("displayName eq '$displayNameLiteral'")
-    $select = [uri]::EscapeDataString('id,displayName,notes')
+    $select = [uri]::EscapeDataString('id,displayName,notes,committedContentVersion')
     $matches = @(Get-GraphCollectionItems -Uri "$GraphBaseUri/deviceAppManagement/mobileApps?`$filter=$filter&`$select=$select")
     if ($matches.Count -eq 0) { return $null }
 
     $packageMatches = @($matches | Where-Object { [string]$_.notes -match [regex]::Escape("PackageId=$PackageId") })
-    if ($packageMatches.Count -eq 1) { return $packageMatches[0] }
-    if ($matches.Count -eq 1) { return $matches[0] }
+    $candidatePool = if ($packageMatches.Count -gt 0) { $packageMatches } else { $matches }
+    $committedCandidates = @($candidatePool | Where-Object { Test-IntuneAppHasCommittedContent -App $_ })
 
-    $ids = ($matches | ForEach-Object { "{0} ({1})" -f $_.displayName,$_.id }) -join '; '
-    throw "Multiple Intune apps match display name '$DisplayName'. Specify -ExistingAppId or use -ForceCreateNew. Matches: $ids"
+    if ($committedCandidates.Count -eq 1) { return $committedCandidates[0] }
+    if ($committedCandidates.Count -gt 1) {
+        $ids = ($committedCandidates | ForEach-Object { Format-IntuneAppCandidate -App $_ }) -join '; '
+        throw "Multiple committed Intune apps match display name '$DisplayName'. Specify -ExistingAppId or use -ForceCreateNew. Matches: $ids"
+    }
+
+    $ids = ($candidatePool | ForEach-Object { Format-IntuneAppCandidate -App $_ }) -join '; '
+    throw "Intune app '$DisplayName' exists but no matching app has a committed first content version. Delete the incomplete app or use -ForceCreateNew. Matches: $ids"
 }
 
 function Copy-OrderedHashtable {
