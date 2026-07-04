@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.37
+    0.1.38
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -31,6 +31,7 @@ param(
     [switch]$DirectSetupUpgrade,
     [switch]$AllowReboot,
     [switch]$AllowSetupCompletionRebootWhenNoUser,
+    [switch]$AllowSetupProfileRepair,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
     [switch]$AllowAdvancedDiskCleanup,
@@ -74,7 +75,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.37'
+$script:ScriptVersion = '0.1.38'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -2556,6 +2557,229 @@ function Resolve-PendingRebootOutcome {
 
     return [pscustomobject]$outcome
 }
+function Get-SetupDuplicateProfileFailure {
+    $pantherPaths = @(
+        'C:\$WINDOWS.~BT\Sources\Panther\setupact.log',
+        'C:\$WINDOWS.~BT\Sources\Panther\setuperr.log'
+    )
+
+    $duplicateRecords = New-Object System.Collections.Generic.List[object]
+    $abandonSids = New-Object System.Collections.Generic.List[string]
+
+    foreach ($path in $pantherPaths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try {
+            $matches = @(Select-String -LiteralPath $path -Pattern 'Duplicate profile detected' -ErrorAction Stop)
+            foreach ($match in $matches) {
+                $line = [string]$match.Line
+                $pairMatch = [regex]::Match($line, 'Duplicate profile detected for(?: user)?\s+(?<BlockingSid>S-\d(?:-\d+)+)\((?<BlockingPath>[^\)]+)\)\s+vs\.\s+(?<OtherSid>S-\d(?:-\d+)+)\((?<OtherPath>[^\)]+)\)')
+                if ($pairMatch.Success) {
+                    [void]$duplicateRecords.Add([pscustomobject]@{
+                        BlockingSid = $pairMatch.Groups['BlockingSid'].Value
+                        BlockingProfilePath = $pairMatch.Groups['BlockingPath'].Value
+                        OtherSid = $pairMatch.Groups['OtherSid'].Value
+                        OtherProfilePath = $pairMatch.Groups['OtherPath'].Value
+                        SourcePath = $path
+                        LineNumber = $match.LineNumber
+                        Evidence = $line
+                    })
+                }
+
+                $abandonMatch = [regex]::Match($line, 'Duplicate profile detected for\s+(?<Sid>S-\d(?:-\d+)+)\.\s+Abandoning')
+                if ($abandonMatch.Success) {
+                    [void]$abandonSids.Add($abandonMatch.Groups['Sid'].Value)
+                }
+            }
+        }
+        catch {
+            Write-SmartLog ("Failed to inspect Panther profile migration evidence: Path={0}; Error={1}" -f $path,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    if ($duplicateRecords.Count -eq 0 -and $abandonSids.Count -eq 0) {
+        return [pscustomobject]@{ Found = $false }
+    }
+
+    $blockingSid = if ($abandonSids.Count -gt 0) { [string]$abandonSids[$abandonSids.Count - 1] } else { [string]$duplicateRecords[$duplicateRecords.Count - 1].BlockingSid }
+    $record = @($duplicateRecords | Where-Object { $_.BlockingSid -eq $blockingSid } | Select-Object -Last 1)
+    if (-not $record) { $record = @($duplicateRecords | Select-Object -Last 1) }
+    $record = $record | Select-Object -First 1
+
+    $profileListRoot = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    $profileKeyPath = Join-Path $profileListRoot $blockingSid
+    $profile = $null
+    try { $profile = Get-ItemProperty -LiteralPath $profileKeyPath -ErrorAction Stop } catch { }
+
+    $profileImagePath = ''
+    if ($profile -and $profile.PSObject.Properties['ProfileImagePath']) { $profileImagePath = [string]$profile.ProfileImagePath }
+    if ([string]::IsNullOrWhiteSpace($profileImagePath) -and $record) { $profileImagePath = [string]$record.BlockingProfilePath }
+
+    $duplicateSids = @()
+    if (-not [string]::IsNullOrWhiteSpace($profileImagePath)) {
+        try {
+            $duplicateSids = @(Get-ChildItem -LiteralPath $profileListRoot -ErrorAction Stop | ForEach-Object {
+                $p = Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue
+                if ($p -and [string]$p.ProfileImagePath -eq $profileImagePath) { [string]$_.PSChildName }
+            })
+        }
+        catch { }
+    }
+
+    $userAccount = $null
+    try {
+        $escapedSid = $blockingSid.Replace("'", "''")
+        $userAccount = Get-CimInstance -ClassName Win32_UserAccount -Filter "SID='$escapedSid'" -ErrorAction Stop | Select-Object -First 1
+    }
+    catch { }
+
+    $profileLeaf = ''
+    if (-not [string]::IsNullOrWhiteSpace($profileImagePath)) {
+        try { $profileLeaf = Split-Path -Leaf $profileImagePath } catch { $profileLeaf = '' }
+    }
+
+    return [pscustomobject]@{
+        Found = $true
+        BlockingSid = $blockingSid
+        ProfileKeyPath = $profileKeyPath
+        ProfileImagePath = $profileImagePath
+        ProfileLeaf = $profileLeaf
+        OtherSid = if ($record) { [string]$record.OtherSid } else { '' }
+        OtherProfilePath = if ($record) { [string]$record.OtherProfilePath } else { '' }
+        DuplicateSids = ($duplicateSids -join ',')
+        DuplicateSidCount = @($duplicateSids).Count
+        IsLocalAccount = if ($userAccount) { [bool]$userAccount.LocalAccount } else { $false }
+        AccountName = if ($userAccount) { [string]$userAccount.Name } else { '' }
+        AccountDomain = if ($userAccount) { [string]$userAccount.Domain } else { '' }
+        Evidence = if ($record) { [string]$record.Evidence } else { "Duplicate profile detected for $blockingSid" }
+    }
+}
+
+function Invoke-SetupProfileRepairRebootWhenNoUser {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $summary = Get-InteractiveUserSessionSummary
+    $script:ControlledRebootUserCount = [string]$summary.InteractiveUserCount
+    $script:ControlledRebootUsers = [string]$summary.InteractiveUsers
+    $script:ControlledRebootDetail = [string]$summary.Detail
+
+    if (-not $summary.DetectionSucceeded) {
+        $script:ControlledRebootAction = 'SetupProfileRepairSkippedUserDetectionFailed'
+        Write-SmartLog ("Setup profile repair reboot skipped because user detection failed: {0}" -f $summary.Detail) 'WARN'
+        return 'UserDetectionFailed'
+    }
+
+    if ([int]$summary.InteractiveUserCount -gt 0) {
+        $script:ControlledRebootAction = 'SetupProfileRepairSkippedUserConnected'
+        Write-SmartLog ("Setup profile repair reboot skipped because interactive user(s) are connected: {0}. Reboot is required before retrying Windows Setup." -f $summary.InteractiveUsers) 'WARN'
+        Send-UserRebootNotification -Context UpgradeReady
+        return 'UserConnected'
+    }
+
+    try {
+        shutdown.exe /r /t $RebootDelaySeconds /c $Reason | Out-Null
+        $script:ControlledRebootAction = 'SetupProfileRepairScheduledNoUser'
+        $script:ControlledRebootDetail = ("No interactive user connected. Reboot scheduled in {0} second(s). Reason={1}" -f $RebootDelaySeconds,$Reason)
+        Write-SmartLog $script:ControlledRebootDetail
+        return 'ScheduledNoUser'
+    }
+    catch {
+        $script:ControlledRebootAction = 'SetupProfileRepairScheduleFailed'
+        $script:ControlledRebootDetail = ("No interactive user connected, but setup profile repair reboot scheduling failed: {0}" -f $_.Exception.Message)
+        Write-SmartLog $script:ControlledRebootDetail 'ERROR'
+        return 'ScheduleFailed'
+    }
+}
+
+function Invoke-SetupDuplicateProfileRepair {
+    param([Parameter(Mandatory = $true)]$SetupExitInfo)
+
+    $empty = [pscustomobject]@{ Handled = $false; Status = ''; NextAction = ''; Detail = ''; ExitCode = 1; ActionResult = '' }
+    if ([string]$SetupExitInfo.Hex -ne '0x8007001F') { return $empty }
+
+    $failure = Get-SetupDuplicateProfileFailure
+    if (-not $failure.Found) { return $empty }
+
+    $script:SetupProfileRepairAction = 'Detected'
+    $script:SetupProfileRepairBlockingSid = [string]$failure.BlockingSid
+    $script:SetupProfileRepairKeptSid = [string]$failure.OtherSid
+    $script:SetupProfileRepairProfilePath = [string]$failure.ProfileImagePath
+    $script:SetupProfileRepairDetail = [string]$failure.Evidence
+
+    $detailPrefix = ("Duplicate setup migration profile detected. BlockingSid={0}; KeptSid={1}; ProfilePath={2}; Evidence={3}" -f $failure.BlockingSid,$failure.OtherSid,$failure.ProfileImagePath,$failure.Evidence)
+
+    if (-not $AllowSetupProfileRepair) {
+        $script:SetupProfileRepairAction = 'DetectedRepairDisabled'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'ENABLE_SETUP_PROFILE_REPAIR_OR_REPAIR_PROFILELIST'; Detail = ("{0}; Repair=Disabled" -f $detailPrefix); ExitCode = 3; ActionResult = 'SetupProfileDuplicateDetectedRepairDisabled' }
+    }
+
+    if ($failure.BlockingSid -in @('S-1-5-18','S-1-5-19','S-1-5-20')) {
+        $script:SetupProfileRepairAction = 'SkippedSystemSid'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'REPAIR_DUPLICATE_PROFILE_MANUALLY'; Detail = ("{0}; Repair=SkippedSystemSid" -f $detailPrefix); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedSystemSid' }
+    }
+
+    if (-not $failure.IsLocalAccount) {
+        $script:SetupProfileRepairAction = 'SkippedNotLocalAccount'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'REPAIR_DUPLICATE_PROFILE_MANUALLY'; Detail = ("{0}; Repair=SkippedNotLocalAccount; Account={1}\{2}" -f $detailPrefix,$failure.AccountDomain,$failure.AccountName); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedNotLocalAccount' }
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$failure.ProfileImagePath) -or [string]$failure.ProfileImagePath -notlike 'C:\Users\*') {
+        $script:SetupProfileRepairAction = 'SkippedUnsafeProfilePath'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'REPAIR_DUPLICATE_PROFILE_MANUALLY'; Detail = ("{0}; Repair=SkippedUnsafeProfilePath" -f $detailPrefix); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedUnsafeProfilePath' }
+    }
+
+    if ([int]$failure.DuplicateSidCount -lt 2) {
+        $script:SetupProfileRepairAction = 'SkippedDuplicateNotConfirmed'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'REPAIR_DUPLICATE_PROFILE_MANUALLY'; Detail = ("{0}; Repair=SkippedDuplicateNotConfirmed; DuplicateSids={1}" -f $detailPrefix,$failure.DuplicateSids); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedDuplicateNotConfirmed' }
+    }
+
+    $sessionSummary = Get-InteractiveUserSessionSummary
+    if ($sessionSummary.DetectionSucceeded -and -not [string]::IsNullOrWhiteSpace([string]$failure.ProfileLeaf)) {
+        $activeUsers = [string]$sessionSummary.InteractiveUsers
+        if ($activeUsers -match ('(?i)(^|[\\,;\s])' + [regex]::Escape([string]$failure.ProfileLeaf) + '($|[,;\s])')) {
+            $script:SetupProfileRepairAction = 'SkippedProfileUserConnected'
+            return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'WAIT_USER_LOGOFF_THEN_REPAIR_PROFILE'; Detail = ("{0}; Repair=SkippedProfileUserConnected; InteractiveUsers={1}" -f $detailPrefix,$activeUsers); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedProfileUserConnected' }
+        }
+    }
+
+    $backupRoot = Join-Path $DataRoot 'Backups\ProfileList'
+    New-SmartDirectory -Path $backupRoot
+    $backupPath = Join-Path $backupRoot ("{0}_{1}.reg" -f ($failure.BlockingSid -replace '[^A-Za-z0-9_.-]', '_'),(Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $nativeRegPath = "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($failure.BlockingSid)"
+
+    try {
+        & reg.exe export $nativeRegPath $backupPath /y | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $backupPath -PathType Leaf)) { throw "reg.exe export failed with exit code $LASTEXITCODE" }
+        & reg.exe delete $nativeRegPath /f | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "reg.exe delete failed with exit code $LASTEXITCODE" }
+    }
+    catch {
+        $script:SetupProfileRepairAction = 'RepairFailed'
+        $script:SetupProfileRepairBackupPath = $backupPath
+        $script:SetupProfileRepairDetail = ("{0}; RepairFailed={1}; Backup={2}" -f $detailPrefix,$_.Exception.Message,$backupPath)
+        Write-SmartLog $script:SetupProfileRepairDetail 'ERROR'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_REPAIR_FAILED'; NextAction = 'CHECK_PROFILE_REPAIR_BACKUP_AND_LOG'; Detail = $script:SetupProfileRepairDetail; ExitCode = 1; ActionResult = 'SetupProfileDuplicateRepairFailed' }
+    }
+
+    $script:SetupProfileRepairAction = 'RepairedLocalAccount'
+    $script:SetupProfileRepairBackupPath = $backupPath
+    $script:SetupProfileRepairDetail = ("{0}; Repair=RepairedLocalAccount; Backup={1}; DeletedSid={2}" -f $detailPrefix,$backupPath,$failure.BlockingSid)
+    Write-SmartLog $script:SetupProfileRepairDetail
+
+    if ($AllowReboot -and -not $AuditOnly) {
+        $rebootResult = Invoke-SetupProfileRepairRebootWhenNoUser -Reason 'SmartM365 Windows 11 setup profile repair reboot - retry setup after restart'
+        $script:SetupProfileRepairDetail = ("{0}; RebootResult={1}" -f $script:SetupProfileRepairDetail,$rebootResult)
+    }
+
+    return [pscustomobject]@{ Handled = $true; Status = 'SETUP_PROFILE_DUPLICATE_REPAIRED_REBOOT_REQUIRED'; NextAction = 'REBOOT_AND_RETRY_SETUP'; Detail = $script:SetupProfileRepairDetail; ExitCode = 0; ActionResult = 'SetupProfileDuplicateRepairedLocalAccount' }
+}
+
+function Resolve-SetupFailureOutcome {
+    param([Parameter(Mandatory = $true)]$SetupExitInfo)
+
+    $profileOutcome = Invoke-SetupDuplicateProfileRepair -SetupExitInfo $SetupExitInfo
+    if ($profileOutcome.Handled) { return $profileOutcome }
+    return [pscustomobject]@{ Handled = $false; Status = ''; NextAction = ''; Detail = ''; ExitCode = 1; ActionResult = '' }
+}
 function Save-RunResult {
     param([Parameter(Mandatory = $true)]$Result)
 
@@ -2599,6 +2823,12 @@ $script:ControlledRebootUsers = ''
 $script:UserRebootNotificationSent = ''
 $script:UserRebootNotificationLang = ''
 $script:UserRebootNotificationMessage = ''
+$script:SetupProfileRepairAction = ''
+$script:SetupProfileRepairDetail = ''
+$script:SetupProfileRepairBlockingSid = ''
+$script:SetupProfileRepairKeptSid = ''
+$script:SetupProfileRepairProfilePath = ''
+$script:SetupProfileRepairBackupPath = ''
 $computerSystem = $null
 
 try {
@@ -2720,10 +2950,20 @@ try {
                     if (-not [string]::IsNullOrWhiteSpace([string]$outcome.ActionResultSuffix)) { $actionResult = "$actionResult;$($outcome.ActionResultSuffix)" }
                 }
                 else {
-                    $status = 'DIRECT_SETUP_UPGRADE_FAILED'
-                    $nextAction = 'CHECK_SETUP_LOGS'
-                    $detail = $setupExitDetail
-                    $exitCode = 1
+                    $failureOutcome = Resolve-SetupFailureOutcome -SetupExitInfo $setupExitInfo
+                    if ($failureOutcome.Handled) {
+                        $status = $failureOutcome.Status
+                        $nextAction = $failureOutcome.NextAction
+                        $detail = $failureOutcome.Detail
+                        $exitCode = $failureOutcome.ExitCode
+                        $actionResult = "$actionResult;$($failureOutcome.ActionResult)"
+                    }
+                    else {
+                        $status = 'DIRECT_SETUP_UPGRADE_FAILED'
+                        $nextAction = 'CHECK_SETUP_LOGS'
+                        $detail = $setupExitDetail
+                        $exitCode = 1
+                    }
                 }
             }
         }
@@ -2788,10 +3028,20 @@ try {
                 if (-not [string]::IsNullOrWhiteSpace([string]$outcome.ActionResultSuffix)) { $actionResult = "$actionResult;$($outcome.ActionResultSuffix)" }
             }
             else {
-                $status = 'SETUP_UPGRADE_FAILED'
-                $nextAction = 'CHECK_SETUP_LOGS'
-                $detail = $setupExitDetail
-                $exitCode = 1
+                $failureOutcome = Resolve-SetupFailureOutcome -SetupExitInfo $setupExitInfo
+                if ($failureOutcome.Handled) {
+                    $status = $failureOutcome.Status
+                    $nextAction = $failureOutcome.NextAction
+                    $detail = $failureOutcome.Detail
+                    $exitCode = $failureOutcome.ExitCode
+                    $actionResult = "$actionResult;$($failureOutcome.ActionResult)"
+                }
+                else {
+                    $status = 'SETUP_UPGRADE_FAILED'
+                    $nextAction = 'CHECK_SETUP_LOGS'
+                    $detail = $setupExitDetail
+                    $exitCode = 1
+                }
             }
         }
     }
@@ -2929,6 +3179,12 @@ finally {
         UserRebootNotificationSent = $script:UserRebootNotificationSent
         UserRebootNotificationLang = $script:UserRebootNotificationLang
         UserRebootNotificationMessage = $script:UserRebootNotificationMessage
+        SetupProfileRepairAction = $script:SetupProfileRepairAction
+        SetupProfileRepairDetail = $script:SetupProfileRepairDetail
+        SetupProfileRepairBlockingSid = $script:SetupProfileRepairBlockingSid
+        SetupProfileRepairKeptSid = $script:SetupProfileRepairKeptSid
+        SetupProfileRepairProfilePath = $script:SetupProfileRepairProfilePath
+        SetupProfileRepairBackupPath = $script:SetupProfileRepairBackupPath
         SetupExePath = $setupExe
         LogPath = $script:LogPath
         CsvPath = $script:CsvPath

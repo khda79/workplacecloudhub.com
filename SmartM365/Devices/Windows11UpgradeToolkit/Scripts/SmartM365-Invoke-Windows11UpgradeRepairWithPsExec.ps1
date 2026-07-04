@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.27
+    0.1.28
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -37,6 +37,7 @@ param(
     [switch]$DirectSetupUpgrade,
     [switch]$AllowReboot,
     [switch]$AllowSetupCompletionRebootWhenNoUser,
+    [switch]$AllowSetupProfileRepair,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
     [switch]$AllowAdvancedDiskCleanup,
@@ -97,7 +98,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.27'
+$script:LauncherVersion = '0.1.28'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -467,6 +468,12 @@ function New-TechnicianRunGuardSkippedResult {
         SetupCompletionRebootDetail = ''
         SetupCompletionRebootUserCount = ''
         SetupCompletionRebootUsers = ''
+        SetupProfileRepairAction = ''
+        SetupProfileRepairDetail = ''
+        SetupProfileRepairBlockingSid = ''
+        SetupProfileRepairKeptSid = ''
+        SetupProfileRepairProfilePath = ''
+        SetupProfileRepairBackupPath = ''
         ControlledRebootAction = ''
         ControlledRebootDetail = ''
         ControlledRebootUserCount = ''
@@ -945,6 +952,7 @@ if ($AllowSetupUpgrade) { [void]$remoteArgs.Add('-AllowSetupUpgrade') }
 if ($DirectSetupUpgrade) { [void]$remoteArgs.Add('-DirectSetupUpgrade') }
 if ($AllowReboot) { [void]$remoteArgs.Add('-AllowReboot') }
 if ($AllowSetupCompletionRebootWhenNoUser) { [void]$remoteArgs.Add('-AllowSetupCompletionRebootWhenNoUser') }
+if ($AllowSetupProfileRepair) { [void]$remoteArgs.Add('-AllowSetupProfileRepair') }
 if ($SkipVirtualMachines) { [void]$remoteArgs.Add('-SkipVirtualMachines') }
 if ($AllowDiskCleanup) { [void]$remoteArgs.Add('-AllowDiskCleanup') }
 if ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) { [void]$remoteArgs.Add('-AllowAdvancedDiskCleanup') }
@@ -1001,6 +1009,7 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Actions'; Option = 'DirectSetupUpgrade'; Value = [string][bool]$DirectSetupUpgrade }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowReboot'; Value = [string][bool]$AllowReboot }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowSetupCompletionRebootWhenNoUser'; Value = [string][bool]$AllowSetupCompletionRebootWhenNoUser }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'AllowSetupProfileRepair'; Value = [string][bool]$AllowSetupProfileRepair }
     [pscustomobject]@{ Category = 'Actions'; Option = 'SkipVirtualMachines'; Value = [string][bool]$SkipVirtualMachines }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowDiskCleanup'; Value = [string][bool]$AllowDiskCleanup }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowAdvancedDiskCleanup'; Value = [string][bool]($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) }
@@ -1048,7 +1057,7 @@ Write-Host "PsExec        : $resolvedPsExec"
 Write-Host "Repair script : $LocalScriptPath"
 Write-Host "Worker script : $LocalWorkerPath"
 Write-Host ("Technician     : Account={0}; UPN={1}; SID={2}; Auth={3}; Computer={4}" -f $script:TechnicianIdentity.Account,$script:TechnicianIdentity.UserPrincipalName,$script:TechnicianIdentity.Sid,$script:TechnicianIdentity.AuthenticationType,$script:TechnicianIdentity.ComputerName)
-Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser"
+Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser; SetupProfileRepair=$AllowSetupProfileRepair"
 Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "AD inventory  : Csv=$AdInventoryCsv; RootCsv=$AdRootInventoryCsv; Domain=$AdDomain; Refresh=$(-not $SkipAdInventoryRefresh); RecentRoot=$AdInventoryUsesRecentRootCsv"
 Write-Host "Tech run guard: Use=$script:UseEffectiveTechnicianRunGuardHistory; Requested=$UseTechnicianRunGuardHistory; Ignore=$IgnoreTechnicianRunGuardHistory; Hours=$RunGuardHours; Path=$script:TechnicianRunGuardHistoryPath"
@@ -1094,6 +1103,12 @@ $reportColumns = @(
     'SetupCompletionRebootDetail',
     'SetupCompletionRebootUserCount',
     'SetupCompletionRebootUsers',
+    'SetupProfileRepairAction',
+    'SetupProfileRepairDetail',
+    'SetupProfileRepairBlockingSid',
+    'SetupProfileRepairKeptSid',
+    'SetupProfileRepairProfilePath',
+    'SetupProfileRepairBackupPath',
     'ControlledRebootAction',
     'ControlledRebootDetail',
     'ControlledRebootUserCount',
@@ -1791,6 +1806,12 @@ do {
                     SetupCompletionRebootDetail = ''
                     SetupCompletionRebootUserCount = ''
                     SetupCompletionRebootUsers = ''
+                    SetupProfileRepairAction = ''
+                    SetupProfileRepairDetail = ''
+                    SetupProfileRepairBlockingSid = ''
+                    SetupProfileRepairKeptSid = ''
+                    SetupProfileRepairProfilePath = ''
+                    SetupProfileRepairBackupPath = ''
                     ControlledRebootAction = ''
                     ControlledRebootDetail = ''
                     ControlledRebootUserCount = ''
