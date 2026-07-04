@@ -8,7 +8,7 @@ import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 
 def print(*args, **kwargs):
@@ -367,6 +367,194 @@ def create_xlsx(path: Path, sheets):
         archive.writestr("xl/workbook.xml", f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>{''.join(workbook_sheets)}</sheets></workbook>""")
         archive.writestr("xl/_rels/workbook.xml.rels", f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{''.join(workbook_rels)}</Relationships>""")
         archive.writestr("xl/styles.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.00%"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/><color rgb="FFFFFFFF"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0078D4"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFDDE7F0"/></left><right style="thin"><color rgb="FFDDE7F0"/></right><top style="thin"><color rgb="FFDDE7F0"/></top><bottom style="thin"><color rgb="FFDDE7F0"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><dxfs count="0"/><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/></styleSheet>""")
+
+
+def to_int(value):
+    try:
+        return int(str(value or "0").strip())
+    except ValueError:
+        return 0
+
+
+def html_escape(value):
+    return html.escape(str(value or ""), quote=True)
+
+
+def html_file_link(path):
+    path = Path(path)
+    return f'<a href="{html_escape(quote(path.name))}">{html_escape(path.name)}</a>'
+
+
+def format_integer(value):
+    return f"{to_int(value):,}".replace(",", " ")
+
+
+def top_permission_difference_rows(permission_summary_rows, limit=20):
+    rows = [
+        row for row in permission_summary_rows
+        if to_int(row.get("MissingInSPO")) or to_int(row.get("DisabledEntraUsersNotInSPO")) or to_int(row.get("ExtraInSPO"))
+    ]
+    rows.sort(
+        key=lambda row: (
+            -(to_int(row.get("MissingInSPO")) + to_int(row.get("DisabledEntraUsersNotInSPO")) + to_int(row.get("ExtraInSPO"))),
+            str(row.get("ComparisonObjectPath") or ""),
+        )
+    )
+    return rows[:limit]
+
+
+def create_permission_html_summary(path, title, summary_row, permission_summary_rows, scope_rows, report_links, source_csv=None, target_csv=None):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    matched = to_int(summary_row.get("MatchedPermissions"))
+    missing = to_int(summary_row.get("MissingInSPO"))
+    disabled_missing = to_int(summary_row.get("DisabledEntraUsersNotInSPO"))
+    extra = to_int(summary_row.get("ExtraInSPO"))
+    not_entra = to_int(summary_row.get("SourceUsersNotInEntraIgnored"))
+    source_la = to_int(summary_row.get("SourceLimitedAccessOnlyIgnored"))
+    target_la = to_int(summary_row.get("TargetLimitedAccessOnlyIgnored"))
+    real_difference_count = missing + extra
+    status_text = "Review needed" if real_difference_count or disabled_missing else "No relevant difference"
+    status_class = "warn" if real_difference_count else ("note" if disabled_missing else "ok")
+
+    cards = [
+        ("Matched", matched, "ok"),
+        ("Missing in SPO", missing, "bad" if missing else "ok"),
+        ("Disabled Entra users not in SPO", disabled_missing, "note" if disabled_missing else "ok"),
+        ("Extra in SPO", extra, "bad" if extra else "ok"),
+        ("Source users not in Entra", not_entra, "note" if not_entra else "ok"),
+        ("Limited Access ignored", source_la + target_la, "muted"),
+    ]
+    card_html = [
+        f'<div class="metric {css_class}"><div class="metric-label">{html_escape(label)}</div><div class="metric-value">{format_integer(value)}</div></div>'
+        for label, value, css_class in cards
+    ]
+
+    source_csv_html = html_escape(source_csv) if source_csv else html_escape(summary_row.get("SourceCsv"))
+    target_csv_html = html_escape(target_csv) if target_csv else html_escape(summary_row.get("TargetCsv"))
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    warning = summary_row.get("ScopeWarning") or ""
+    warning_html = f'<div class="callout warn"><strong>Warning</strong><br>{html_escape(warning)}</div>' if warning else ""
+
+    report_link_rows = []
+    for label, target_path, description in report_links:
+        report_link_rows.append(
+            "<tr>"
+            f"<td>{html_escape(label)}</td>"
+            f"<td>{html_file_link(target_path)}</td>"
+            f"<td>{html_escape(description)}</td>"
+            "</tr>"
+        )
+
+    top_rows_html = []
+    for row in top_permission_difference_rows(permission_summary_rows):
+        top_rows_html.append(
+            "<tr>"
+            f"<td>{html_escape(row.get('Status'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('MissingInSPO'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('DisabledEntraUsersNotInSPO'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('ExtraInSPO'))}</td>"
+            f"<td>{html_escape(row.get('ObjectScope'))}</td>"
+            f"<td>{html_escape(row.get('ComparisonObjectPath'))}</td>"
+            f"<td>{html_escape(row.get('ObjectTitle') or row.get('ListTitle') or row.get('WebTitle'))}</td>"
+            "</tr>"
+        )
+    if not top_rows_html:
+        top_rows_html.append('<tr><td colspan="7" class="empty">No object-level differences.</td></tr>')
+
+    scope_rows_html = []
+    for row in scope_rows:
+        scope_rows_html.append(
+            "<tr>"
+            f"<td>{html_escape(row.get('ObjectScope'))}</td>"
+            f"<td>{html_escape(row.get('Status'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('Count'))}</td>"
+            "</tr>"
+        )
+    if not scope_rows_html:
+        scope_rows_html.append('<tr><td colspan="3" class="empty">No scope summary rows.</td></tr>')
+
+    document = f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{html_escape(title)}</title>
+<style>
+:root {{ color-scheme: light; --bg:#F5F8FB; --card:#FFFFFF; --text:#1F2937; --muted:#5F6B7A; --line:#DDE7F0; --accent:#0078D4; --ok:#107C10; --bad:#C50F1F; --note:#8A6A00; }}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; background:var(--bg); color:var(--text); font-family:"Segoe UI", Arial, sans-serif; font-size:14px; line-height:1.45; }}
+main {{ max-width:1280px; margin:0 auto; padding:28px; }}
+.header {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:22px 24px; margin-bottom:18px; display:flex; justify-content:space-between; gap:18px; align-items:flex-start; }}
+h1 {{ margin:0 0 6px; font-size:25px; font-weight:650; letter-spacing:0; }}
+.subtitle {{ color:var(--muted); }}
+.badge {{ display:inline-block; border:1px solid var(--line); border-radius:999px; padding:5px 10px; font-weight:600; background:#fff; white-space:nowrap; }}
+.badge.ok {{ color:var(--ok); border-color:#B8DAB8; background:#F1FAF1; }}
+.badge.warn {{ color:var(--bad); border-color:#F1B7BC; background:#FFF4F5; }}
+.badge.note {{ color:var(--note); border-color:#E7D99B; background:#FFF9DF; }}
+.metrics {{ display:grid; grid-template-columns:repeat(6, minmax(140px, 1fr)); gap:12px; margin-bottom:18px; }}
+.metric {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:15px; min-height:92px; }}
+.metric-label {{ color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
+.metric-value {{ font-size:28px; font-weight:700; margin-top:8px; }}
+.metric.ok .metric-value {{ color:var(--ok); }} .metric.bad .metric-value {{ color:var(--bad); }} .metric.note .metric-value {{ color:var(--note); }} .metric.muted .metric-value {{ color:var(--muted); }}
+.section {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:18px; margin-bottom:18px; }}
+h2 {{ margin:0 0 12px; font-size:17px; }}
+.grid {{ display:grid; grid-template-columns:190px minmax(0, 1fr); gap:8px 14px; }}
+.key {{ color:var(--muted); }}
+a {{ color:var(--accent); text-decoration:none; }} a:hover {{ text-decoration:underline; }}
+table {{ width:100%; border-collapse:collapse; }}
+th, td {{ border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; vertical-align:top; }}
+th {{ background:#F8FBFE; color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
+.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+.empty {{ color:var(--muted); text-align:center; padding:18px; }}
+.callout {{ border-radius:8px; padding:12px 14px; margin-bottom:18px; }}
+.callout.warn {{ border:1px solid #E7D99B; background:#FFF9DF; color:#5F4B00; }}
+.footer {{ color:var(--muted); font-size:12px; margin-top:16px; }}
+@media (max-width:1000px) {{ .metrics {{ grid-template-columns:repeat(2, minmax(140px, 1fr)); }} .header {{ display:block; }} .badge {{ margin-top:12px; }} }}
+</style>
+</head>
+<body>
+<main>
+  <div class="header">
+    <div>
+      <h1>{html_escape(title)}</h1>
+      <div class="subtitle">Generated at {html_escape(generated_at)}</div>
+    </div>
+    <div class="badge {status_class}">{html_escape(status_text)}</div>
+  </div>
+  {warning_html}
+  <div class="metrics">{''.join(card_html)}</div>
+  <div class="section">
+    <h2>Run context</h2>
+    <div class="grid">
+      <div class="key">Source CSV</div><div>{source_csv_html}</div>
+      <div class="key">Target CSV</div><div>{target_csv_html}</div>
+      <div class="key">Source root path</div><div>{html_escape(summary_row.get('SourceRootPath'))}</div>
+      <div class="key">Target root path</div><div>{html_escape(summary_row.get('TargetRootPath'))}</div>
+      <div class="key">Source rows</div><div>{format_integer(summary_row.get('SourceRows'))}</div>
+      <div class="key">Target rows</div><div>{format_integer(summary_row.get('TargetRows'))}</div>
+    </div>
+  </div>
+  <div class="section">
+    <h2>Report files</h2>
+    <table><thead><tr><th>Report</th><th>File</th><th>Description</th></tr></thead><tbody>{''.join(report_link_rows)}</tbody></table>
+  </div>
+  <div class="section">
+    <h2>Top objects with differences</h2>
+    <table><thead><tr><th>Status</th><th>Missing</th><th>Disabled users</th><th>Extra</th><th>Scope</th><th>Object path</th><th>Title</th></tr></thead><tbody>{''.join(top_rows_html)}</tbody></table>
+  </div>
+  <div class="section">
+    <h2>Scope summary</h2>
+    <table><thead><tr><th>Object scope</th><th>Status</th><th>Count</th></tr></thead><tbody>{''.join(scope_rows_html)}</tbody></table>
+  </div>
+  <div class="footer">SmartM365 SharePoint migration permission comparison summary.</div>
+</main>
+</body>
+</html>
+'''
+    path.write_text(document, encoding="utf-8", newline="\n")
+    return path
 
 
 def strip_query_from_path(value):
@@ -1245,6 +1433,26 @@ def write_permission_comparison_report(
         ],
     )
 
+    html_path = output_dir / f"{comparison_name}-summary-{timestamp}.html"
+    create_permission_html_summary(
+        html_path,
+        f"{comparison_name} - {report_scope}",
+        summary_rows[0],
+        permission_summary_rows,
+        scope_rows,
+        [
+            ("Summary", summary_csv, "Run counters and comparison inputs."),
+            ("Permission summary", permission_summary_csv, "Object-level summary of permission differences."),
+            ("Scope summary", scope_csv, "Counts grouped by object scope and status."),
+            ("Missing in SPO", missing_csv, "Source permissions absent from SPO, excluding disabled Entra users."),
+            ("Disabled Entra users", disabled_entra_missing_csv, "Source disabled Entra user permissions absent from SPO."),
+            ("Extra in SPO", extra_csv, "Target permissions not found in source."),
+            ("Source users not in Entra", source_users_not_in_entra_csv, "Source users ignored because they are not in the Entra cache."),
+            ("SharePoint group mappings", sharepoint_group_mappings_csv, "Detected and confirmed SharePoint group mappings."),
+            ("Excel workbook", xlsx_path, "Full comparison workbook."),
+        ],
+    )
+
     return {
         "ReportScope": report_scope,
         "MatchedPermissions": len(matched_keys),
@@ -1253,6 +1461,7 @@ def write_permission_comparison_report(
         "ExtraInSPO": len(extra_keys),
         "Summary": summary_csv,
         "Excel": xlsx_path,
+        "Html": html_path,
     }
 def main():
     parser = argparse.ArgumentParser(description="Compare SharePoint permission inventories.")
@@ -1455,6 +1664,27 @@ def main():
         ],
     )
 
+    html_path = output_dir / f"{args.comparison_name}-summary-{timestamp}.html"
+    create_permission_html_summary(
+        html_path,
+        args.comparison_name,
+        summary_rows[0],
+        permission_summary_rows,
+        scope_rows,
+        [
+            ("Summary", summary_csv, "Run counters and comparison inputs."),
+            ("Permission summary", permission_summary_csv, "Object-level summary of permission differences."),
+            ("Scope summary", scope_csv, "Counts grouped by object scope and status."),
+            ("Missing in SPO", missing_csv, "Source permissions absent from SPO, excluding disabled Entra users."),
+            ("Disabled Entra users", disabled_entra_missing_csv, "Source disabled Entra user permissions absent from SPO."),
+            ("Extra in SPO", extra_csv, "Target permissions not found in source."),
+            ("Source users not in Entra", source_users_not_in_entra_csv, "Source users ignored because they are not in the Entra cache."),
+            ("SharePoint group mappings", sharepoint_group_mappings_csv, "Detected and confirmed SharePoint group mappings."),
+            ("Excel workbook", xlsx_path, "Full comparison workbook."),
+        ],
+        source_csv=source_csv,
+        target_csv=target_csv,
+    )
 
     document_library_report = write_permission_comparison_report(
         [row for row in source_rows if is_document_library_permission(row)],
@@ -1495,8 +1725,11 @@ def main():
     print(f"Extra in SPO: {len(extra_keys)}")
     print(f"Summary: {summary_csv}")
     print(f"Excel: {xlsx_path}")
+    print(f"HTML summary: {html_path}")
     print(f"Document library permission report: {document_library_report['Excel']}")
+    print(f"Document library HTML summary: {document_library_report['Html']}")
     print(f"Other SharePoint scope permission report: {other_scope_report['Excel']}")
+    print(f"Other SharePoint scope HTML summary: {other_scope_report['Html']}")
 
 
 if __name__ == "__main__":
