@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.15
+0.1.16
 #>
 param(
     [switch]$ValidateOnly
@@ -501,6 +501,7 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_ALLOW_SETUP_UPGRADE'; Argument = '-AllowSetupUpgrade' },
         @{ Name = 'W11UT_DIRECT_SETUP_UPGRADE'; Argument = '-DirectSetupUpgrade' },
         @{ Name = 'W11UT_ALLOW_REBOOT'; Argument = '-AllowReboot' },
+        @{ Name = 'W11UT_ALLOW_SETUP_PROFILE_REPAIR'; Argument = '-AllowSetupProfileRepair' },
         @{ Name = 'W11UT_SETUP_REBOOT_WHEN_NO_USER'; Argument = '-AllowSetupCompletionRebootWhenNoUser' },
         @{ Name = 'W11UT_SKIP_VIRTUAL_MACHINES'; Argument = '-SkipVirtualMachines' },
         @{ Name = 'W11UT_ALLOW_DISK_CLEANUP'; Argument = '-AllowDiskCleanup' },
@@ -637,6 +638,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_DIRECT_SETUP_UPGRADE = '0'
     W11UT_ALLOW_REBOOT = '1'
     W11UT_SETUP_REBOOT_WHEN_NO_USER = '0'
+    W11UT_ALLOW_SETUP_PROFILE_REPAIR = '1'
     W11UT_SKIP_VIRTUAL_MACHINES = '1'
     W11UT_ALLOW_DISK_CLEANUP = '1'
     W11UT_ALLOW_ADVANCED_DISK_CLEANUP = '0'
@@ -971,6 +973,7 @@ $xaml = @'
                                     <CheckBox x:Name="AllowSetupUpgradeCheck" Content="Allow setup upgrade"/>
                                     <CheckBox x:Name="AllowRebootCheck" Content="Allow reboot"/>
                                     <CheckBox x:Name="SetupCompletionRebootCheck" Content="Reboot after setup if no user"/>
+                                    <CheckBox x:Name="AllowSetupProfileRepairCheck" Content="Repair local duplicate setup profiles"/>
                                     <CheckBox x:Name="DirectSetupUpgradeCheck" Content="Direct setup upgrade"/>
                                     <CheckBox x:Name="SkipVirtualMachinesCheck" Content="Skip virtual machines"/>
                                     <CheckBox x:Name="SkipSetupPreCopyCheck" Content="Skip setup media pre-copy"/>
@@ -1184,7 +1187,7 @@ $controls = @{}
     'OpenSingleRunFolderButton','NewLotNameText','CreateLotButton','NewLotComputersPathText',
     'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowPolicyRepairCheck',
     'AllowWUResetCheck','AllowForceUpgradeCheck','AllowSetupUpgradeCheck','AllowRebootCheck',
-    'SetupCompletionRebootCheck',
+    'SetupCompletionRebootCheck','AllowSetupProfileRepairCheck',
     'DirectSetupUpgradeCheck','SkipVirtualMachinesCheck','SkipSetupPreCopyCheck',
     'AllowDiskCleanupCheck','AllowAdvancedCleanupCheck','KeepCentralHistoryCheck',
     'NoCentralCollectionCheck','UseTechRunGuardHistoryCheck','IgnoreTechRunGuardHistoryCheck','SetupSourceText','SetupSourceMapText','SetupModeCombo',
@@ -1476,6 +1479,7 @@ function Initialize-Options {
     $controls.AllowSetupUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_SETUP_UPGRADE') -eq '1')
     $controls.AllowRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_REBOOT') -ne '0')
     $controls.SetupCompletionRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SETUP_REBOOT_WHEN_NO_USER') -ne '0')
+    $controls.AllowSetupProfileRepairCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_SETUP_PROFILE_REPAIR') -ne '0')
     $controls.DirectSetupUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_DIRECT_SETUP_UPGRADE') -eq '1')
     $controls.SkipVirtualMachinesCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SKIP_VIRTUAL_MACHINES') -eq '1')
     $controls.SkipSetupPreCopyCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SKIP_SETUP_MEDIA_PRECOPY') -eq '1')
@@ -1532,6 +1536,7 @@ function Invoke-LauncherOptionStateUpdate {
         $controls.DirectSetupUpgradeCheck,
         $controls.AllowRebootCheck,
         $controls.SetupCompletionRebootCheck,
+        $controls.AllowSetupProfileRepairCheck,
         $controls.SkipVirtualMachinesCheck,
         $controls.AllowDiskCleanupCheck,
         $controls.AllowAdvancedCleanupCheck,
@@ -1546,7 +1551,6 @@ function Invoke-LauncherOptionStateUpdate {
         $controls.AllowWUResetCheck,
         $controls.AllowForceUpgradeCheck,
         $controls.AllowSetupUpgradeCheck,
-        $controls.AllowRebootCheck,
         $controls.AllowDiskCleanupCheck,
         $controls.AllowAdvancedCleanupCheck
     )
@@ -1616,6 +1620,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_DIRECT_SETUP_UPGRADE                     = Get-BooleanText -CheckBox $controls.DirectSetupUpgradeCheck
         W11UT_ALLOW_REBOOT                             = Get-BooleanText -CheckBox $controls.AllowRebootCheck
         W11UT_SETUP_REBOOT_WHEN_NO_USER                = Get-BooleanText -CheckBox $controls.SetupCompletionRebootCheck
+        W11UT_ALLOW_SETUP_PROFILE_REPAIR               = Get-BooleanText -CheckBox $controls.AllowSetupProfileRepairCheck
         W11UT_SKIP_VIRTUAL_MACHINES                    = Get-BooleanText -CheckBox $controls.SkipVirtualMachinesCheck
         W11UT_ALLOW_DISK_CLEANUP                       = Get-BooleanText -CheckBox $controls.AllowDiskCleanupCheck
         W11UT_ALLOW_ADVANCED_DISK_CLEANUP              = Get-BooleanText -CheckBox $controls.AllowAdvancedCleanupCheck
