@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.12
+0.1.13
 #>
 
 #requires -Version 5.1
@@ -298,7 +298,7 @@ function Convert-ToPsExecRemoteArgument {
     return ('"{0}"' -f ($text -replace '"', '\"'))
 }
 
-$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')
+$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')
 
 function Get-ResultValue {
     param(
@@ -340,6 +340,12 @@ function Get-CentralLogBucket {
         if ($statusValue -eq 'SETUP_SOURCE_LANGUAGE_UNAVAILABLE') {
             return 'SetupSourceLanguageUnavailable'
         }
+        if ($statusValue -eq 'SETUP_PROFILE_DUPLICATE_REPAIRED_REBOOT_REQUIRED') {
+            return 'SetupMigrationProfileRepaired'
+        }
+        if ($statusValue -in @('SETUP_MIGRATION_PROFILE_FAILURE','SETUP_MIGRATION_PROFILE_REPAIR_FAILED')) {
+            return 'SetupMigrationProfileFailure'
+        }
         if ($statusValue -in @('SETUP_SUBNET_COPY_LEASE_TIMEOUT','SETUP_SOURCE_COPY_LEASE_TIMEOUT')) {
             return 'SetupCopyLeaseTimeout'
         }
@@ -352,6 +358,9 @@ function Get-CentralLogBucket {
         }
         if ($detailValue -match 'No setup source subfolder under .+ contains language .+ in sources\\lang\\.ini') {
             return 'SetupSourceLanguageUnavailable'
+        }
+        if ($detailValue -match '0x8007001F|Duplicate profile detected|Duplicate setup migration profile|SetupProfileDuplicate') {
+            return 'SetupMigrationProfileFailure'
         }
         if ($detailValue -match 'setup\.exe timed out after') {
             return 'SetupProcessTimeout'
@@ -374,7 +383,7 @@ function New-CentralLogTarget {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket
     )
 
     if ($KeepCentralLogHistory) {
@@ -395,7 +404,7 @@ function Publish-LauncherEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket,
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket,
         [Parameter(Mandatory = $true)][string]$WorkerLogPath,
         [AllowNull()][string]$StdoutLogPath,
         [AllowNull()][string]$StderrLogPath
@@ -525,7 +534,7 @@ function Update-ResultFromLastRun {
     if ($LastRun.PSObject.Properties['SetupCacheAction']) {
         $Result.SetupCacheAction = [string]$LastRun.SetupCacheAction
     }
-    foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers','ControlledRebootAction','ControlledRebootDetail','ControlledRebootUserCount','ControlledRebootUsers')) {
+    foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers','SetupProfileRepairAction','SetupProfileRepairDetail','SetupProfileRepairBlockingSid','SetupProfileRepairKeptSid','SetupProfileRepairProfilePath','SetupProfileRepairBackupPath','ControlledRebootAction','ControlledRebootDetail','ControlledRebootUserCount','ControlledRebootUsers')) {
         if ($LastRun.PSObject.Properties[$propertyName]) {
             $Result[$propertyName] = [string]$LastRun.$propertyName
         }
@@ -536,7 +545,7 @@ function Collect-RemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket
     )
 
     if ($NoCentralLogCollection) { return '' }
@@ -598,6 +607,12 @@ $result = [ordered]@{
     SetupCompletionRebootDetail = ''
     SetupCompletionRebootUserCount = ''
     SetupCompletionRebootUsers = ''
+    SetupProfileRepairAction = ''
+    SetupProfileRepairDetail = ''
+    SetupProfileRepairBlockingSid = ''
+    SetupProfileRepairKeptSid = ''
+    SetupProfileRepairProfilePath = ''
+    SetupProfileRepairBackupPath = ''
     ControlledRebootAction = ''
     ControlledRebootDetail = ''
     ControlledRebootUserCount = ''
