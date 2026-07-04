@@ -4,11 +4,13 @@
 
 .DESCRIPTION
     Uses PnP.PowerShell with interactive, device login, or certificate authentication.
+    SiteUrl and WebUrlsFile inputs are treated as roots: descendant subsites
+    are included by default for permission inventory.
     The output columns intentionally match SmartM365-SharePointSource-PermissionInventory.ps1 as closely
     as possible so both inventories can be compared.
 
 .VERSION
-    1.0.3
+    1.0.5
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -901,6 +903,53 @@ function Get-WebUrlsFromFile {
         Sort-Object -Unique
 }
 
+
+function Get-WebUrlsFromSite {
+    param(
+        [string]$Url
+    )
+
+    $webUrls = New-Object System.Collections.Generic.List[string]
+    $pendingWebUrls = New-Object System.Collections.Generic.Queue[string]
+    $seenWebUrls = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    $pendingWebUrls.Enqueue($Url)
+
+    while ($pendingWebUrls.Count -gt 0) {
+        $currentWebUrl = $pendingWebUrls.Dequeue()
+        if (-not $seenWebUrls.Add($currentWebUrl)) {
+            continue
+        }
+
+        try {
+            Connect-ToSPOWeb -Url $currentWebUrl
+            $web = Get-PnPWeb -Includes Title,Url,ServerRelativeUrl -ErrorAction Stop
+            $webUrls.Add($web.Url)
+
+            try {
+                $subWebs = @(Get-PnPSubWeb -Includes Title,Url,ServerRelativeUrl -ErrorAction Stop)
+                Write-ConsoleMessage -Message ("  Subsites found under {0}: {1}" -f $web.Url, $subWebs.Count)
+
+                foreach ($subWeb in $subWebs) {
+                    if ($subWeb.Url -and -not $seenWebUrls.Contains($subWeb.Url)) {
+                        $pendingWebUrls.Enqueue($subWeb.Url)
+                    }
+                }
+            }
+            catch {
+                Write-ConsoleWarning -Message ("Failed to enumerate immediate subsites for web '{0}': {1}" -f $web.Url, $_.Exception.Message)
+                Write-InventoryError -Scope 'SubsiteEnumeration' -Url $web.Url -Name $web.Title -Message $_.Exception.Message
+            }
+        }
+        catch {
+            Write-ConsoleWarning -Message ("Failed to connect to or read web '{0}': {1}" -f $currentWebUrl, $_.Exception.Message)
+            Write-InventoryError -Scope 'Web' -Url $currentWebUrl -Name $currentWebUrl -Message $_.Exception.Message
+        }
+    }
+
+    $webUrls
+}
+
 Import-RequiredModule
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -961,8 +1010,23 @@ catch {
 }
 
 try {
-    $webUrls = if ($PSCmdlet.ParameterSetName -eq 'Site') { @($SiteUrl) } else { @(Get-WebUrlsFromFile -Path $WebUrlsFile) }
-    Write-ConsoleMessage -Message ("Web URLs loaded: {0}" -f $webUrls.Count)
+    $rootWebUrls = if ($PSCmdlet.ParameterSetName -eq 'Site') { @($SiteUrl) } else { @(Get-WebUrlsFromFile -Path $WebUrlsFile) }
+    Write-ConsoleMessage -Message ("Root web URLs loaded: {0}; descendant subsites are included." -f $rootWebUrls.Count)
+
+    $expandedWebUrls = New-Object System.Collections.Generic.List[string]
+    $seenExpandedWebUrls = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($rootWebUrl in $rootWebUrls) {
+        $rootExpandedWebUrls = @(Get-WebUrlsFromSite -Url $rootWebUrl)
+        Write-ConsoleMessage -Message ("Web URLs expanded from root '{0}': {1}" -f $rootWebUrl, $rootExpandedWebUrls.Count)
+        foreach ($expandedWebUrl in $rootExpandedWebUrls) {
+            if ($seenExpandedWebUrls.Add($expandedWebUrl)) {
+                $expandedWebUrls.Add($expandedWebUrl)
+            }
+        }
+    }
+
+    $webUrls = @($expandedWebUrls)
+    Write-ConsoleMessage -Message ("Web URLs to inventory after expansion: {0}" -f $webUrls.Count)
 
     foreach ($webUrl in $webUrls) {
         try {
