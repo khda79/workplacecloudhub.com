@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.25
+    0.1.27
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -97,7 +97,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.23'
+$script:LauncherVersion = '0.1.27'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -1208,6 +1208,21 @@ function Get-Windows11ReportRows {
     return @($normalized)
 }
 
+
+function Get-Windows11HtmlEffectiveStatus {
+    param([AllowNull()][object]$Row)
+
+    if ($null -eq $Row) { return '' }
+
+    $remoteStatus = ''
+    $launcherStatus = ''
+    if ($Row.PSObject.Properties['RemoteStatus']) { $remoteStatus = [string]$Row.RemoteStatus }
+    if ($Row.PSObject.Properties['LauncherStatus']) { $launcherStatus = [string]$Row.LauncherStatus }
+
+    if (-not [string]::IsNullOrWhiteSpace($remoteStatus)) { return $remoteStatus }
+    return $launcherStatus
+}
+
 $script:BrandLogoDataUri = $null
 function Get-Windows11BrandLogoDataUri {
     if ($null -ne $script:BrandLogoDataUri) { return $script:BrandLogoDataUri }
@@ -1240,8 +1255,12 @@ function New-Windows11UpgradeCycleHtmlReport {
 
     $rows = @(Get-Windows11ReportRows -Items @($Summary | ForEach-Object { $_ }))
 
+    $separatedDetailStatuses = @('ADMIN_SHARE_UNREACHABLE', 'RUN_GUARD_ACTIVE')
+    $mainRows = @($rows | Where-Object { $separatedDetailStatuses -notcontains (Get-Windows11HtmlEffectiveStatus -Row $_) })
+    $separatedDetailRows = @($rows | Where-Object { $separatedDetailStatuses -contains (Get-Windows11HtmlEffectiveStatus -Row $_) })
+
     $effectiveRows = foreach ($row in $rows) {
-        $eff = if ([string]::IsNullOrWhiteSpace([string]$row.RemoteStatus)) { [string]$row.LauncherStatus } else { [string]$row.RemoteStatus }
+        $eff = Get-Windows11HtmlEffectiveStatus -Row $row
         [pscustomobject]@{ EffectiveStatus = $eff; NextAction = [string]$row.RemoteNextAction }
     }
     $statusCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.EffectiveStatus) } | Group-Object -Property EffectiveStatus | Sort-Object Count -Descending | ForEach-Object {
@@ -1254,6 +1273,14 @@ function New-Windows11UpgradeCycleHtmlReport {
     $logoUri = Get-Windows11BrandLogoDataUri
     $logoHtml = if (-not [string]::IsNullOrWhiteSpace($logoUri)) { "<img class='logo' src='$logoUri' alt='WorkplaceCloudHub' />" } else { "" }
     $mode = if ($IsLive) { 'LIVE' } else { 'FINAL' }
+    $lotName = ''
+    $lotPath = [string]$script:LotRoot
+    if (-not [string]::IsNullOrWhiteSpace($lotPath)) {
+        try { $lotName = Split-Path -Leaf $lotPath } catch { $lotName = '' }
+    }
+    if ([string]::IsNullOrWhiteSpace($lotName)) { $lotName = 'Unknown LOT' }
+    $lotNameHtml = ConvertTo-HtmlText $lotName
+    $lotPathHtml = ConvertTo-HtmlText $lotPath
 
     $style = @"
 <style>
@@ -1261,6 +1288,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 24px; bac
 .header-card { display: flex; align-items: center; justify-content: space-between; background: #fff; border: 1px solid #DDE7F0; border-radius: 8px; padding: 18px 22px; margin-bottom: 18px; }
 .header-text .title { font-size: 22px; font-weight: 600; color: #1F2937; }
 .header-text .subtitle { font-size: 13px; color: #5F6B7A; margin-top: 2px; }
+.header-text .lot-name { font-size: 18px; font-weight: 700; color: #005A9E; margin-top: 8px; }
 .header-text .meta { font-size: 12px; color: #5F6B7A; margin-top: 10px; }
 .badge { display: inline-block; background: #E6F4FF; color: #005A9E; border: 1px solid #B9DDF7; border-radius: 10px; padding: 1px 10px; font-size: 11px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
 .logo { height: 46px; }
@@ -1277,11 +1305,12 @@ tr:nth-child(even) td { background: #F5F8FB; }
 "@
 
     $html = New-Object System.Collections.Generic.List[string]
-    [void]$html.Add("<html><head><meta charset='utf-8'><title>Windows 11 upgrade cycle $CycleNumber</title>$style</head><body>")
+    [void]$html.Add(("<html><head><meta charset='utf-8'><title>Windows 11 upgrade - {0} - cycle {1}</title>{2}</head><body>" -f $lotNameHtml,$CycleNumber,$style))
     [void]$html.Add("<div class='header-card'>")
     [void]$html.Add("<div class='header-text'>")
     [void]$html.Add(("<div class='title'>Windows 11 upgrade - cycle {0}<span class='badge'>{1}</span></div>" -f $CycleNumber,$mode))
     [void]$html.Add("<div class='subtitle'>Smart Intune Windows 11 Upgrade Toolkit</div>")
+    [void]$html.Add(("<div class='lot-name' title='{1}'>LOT: {0}</div>" -f $lotNameHtml,$lotPathHtml))
     [void]$html.Add(("<div class='meta'>Generated: {0} | Computers: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
     [void]$html.Add("</div>")
     [void]$html.Add($logoHtml)
@@ -1306,8 +1335,12 @@ tr:nth-child(even) td { background: #F5F8FB; }
             [void]$htmlReportColumns.Add('Remote PC logs')
         }
     }
-    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $rows -Columns @($htmlReportColumns)))
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $mainRows -Columns @($htmlReportColumns)))
     [void]$html.Add("<div class='footer'>Smart Intune Windows 11 Upgrade Toolkit - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div>")
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Run guard / admin share details</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $separatedDetailRows -Columns @($htmlReportColumns)))
+    [void]$html.Add("<div class='footer'>Rows excluded from Computer details: ADMIN_SHARE_UNREACHABLE and RUN_GUARD_ACTIVE.</div>")
     [void]$html.Add("</div>")
     [void]$html.Add("</body></html>")
 
