@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.23
+    0.1.25
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -59,7 +59,7 @@ param(
     [string]$SetupSourceConcurrencyGateRoot,
     [ValidateRange(0, 500)][int]$SetupSubnetConcurrencyLimit = 0,
     [string]$SetupSubnetPrefixLength = 'Auto',
-    [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 60,
+    [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 90,
     [string]$SetupSubnetConcurrencyGateRoot,
 
     [string]$AdInventoryCsv,
@@ -84,7 +84,7 @@ param(
     [ValidateRange(1, 60)][int]$JobPollSeconds = 2,
     [ValidateRange(0, 1440)][int]$DelayBetweenCyclesMinutes = 5,
     [ValidateRange(0, 1000)][int]$MaxCycles = 0,
-    [ValidateRange(0, 1440)][int]$PsExecTimeoutMinutes = 180,
+    [ValidateRange(0, 1440)][int]$PsExecTimeoutMinutes = 360,
 
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$UnexpectedArguments
