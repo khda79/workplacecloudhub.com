@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.6
+0.1.12
 #>
 
 #requires -Version 5.1
@@ -37,7 +37,7 @@ param(
     [bool]$NoCentralLogCollection = $false,
     [bool]$KeepCentralLogHistory = $false,
     [string]$CentralLogCollectionMode = 'Standard',
-    [int]$PsExecTimeoutMinutes = 180,
+    [int]$PsExecTimeoutMinutes = 360,
     [string]$GlobalWorkerLeasePath,
     [string]$GlobalWorkerLeaseMutexName
 )
@@ -298,7 +298,7 @@ function Convert-ToPsExecRemoteArgument {
     return ('"{0}"' -f ($text -replace '"', '\"'))
 }
 
-$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','Errors')
+$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')
 
 function Get-ResultValue {
     param(
@@ -323,6 +323,44 @@ function Get-CentralLogBucket {
         return 'ADMIN_SHARE_UNREACHABLE'
     }
 
+    foreach ($statusName in @('RemoteStatus','LauncherStatus')) {
+        $statusValue = Get-ResultValue -Result $Result -Name $statusName
+        if ($statusValue -like 'INSUFFICIENT_DISK*') {
+            return 'InsufficientDisk'
+        }
+        if ($statusValue -eq 'WINDOWS11_COMPAT_BLOCKER') {
+            return 'Compatibility'
+        }
+        if ($statusValue -eq 'PSEXEC_TIMEOUT') {
+            return 'PsExecTimeout'
+        }
+        if ($statusValue -eq 'SETUP_PROCESS_TIMEOUT') {
+            return 'SetupProcessTimeout'
+        }
+        if ($statusValue -eq 'SETUP_SOURCE_LANGUAGE_UNAVAILABLE') {
+            return 'SetupSourceLanguageUnavailable'
+        }
+        if ($statusValue -in @('SETUP_SUBNET_COPY_LEASE_TIMEOUT','SETUP_SOURCE_COPY_LEASE_TIMEOUT')) {
+            return 'SetupCopyLeaseTimeout'
+        }
+    }
+
+    foreach ($detailName in @('Detail','JobErrorMessage')) {
+        $detailValue = Get-ResultValue -Result $Result -Name $detailName
+        if ($detailValue -match '0xC1900200|0xC1900202|0xC1900208|Compatibility failure|Compatibility blocker') {
+            return 'Compatibility'
+        }
+        if ($detailValue -match 'No setup source subfolder under .+ contains language .+ in sources\\lang\\.ini') {
+            return 'SetupSourceLanguageUnavailable'
+        }
+        if ($detailValue -match 'setup\.exe timed out after') {
+            return 'SetupProcessTimeout'
+        }
+        if ($detailValue -match 'Timed out waiting for setup (subnet|source) copy lease') {
+            return 'SetupCopyLeaseTimeout'
+        }
+    }
+
     $exitCodeText = Get-ResultValue -Result $Result -Name 'ExitCode'
     $exitCodeValue = 0
     if ([int]::TryParse($exitCodeText, [ref]$exitCodeValue) -and $exitCodeValue -eq 0) {
@@ -336,7 +374,7 @@ function New-CentralLogTarget {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket
     )
 
     if ($KeepCentralLogHistory) {
@@ -357,7 +395,7 @@ function Publish-LauncherEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','Errors')][string]$Bucket,
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket,
         [Parameter(Mandatory = $true)][string]$WorkerLogPath,
         [AllowNull()][string]$StdoutLogPath,
         [AllowNull()][string]$StderrLogPath
@@ -498,7 +536,7 @@ function Collect-RemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket
     )
 
     if ($NoCentralLogCollection) { return '' }
