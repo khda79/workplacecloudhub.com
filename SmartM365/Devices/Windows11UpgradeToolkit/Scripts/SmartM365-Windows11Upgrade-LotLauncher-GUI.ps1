@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.13
+0.1.15
 #>
 param(
     [switch]$ValidateOnly
@@ -648,7 +648,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_SETUP_COPY_JITTER_SECONDS = '300'
     W11UT_SETUP_SUBNET_CONCURRENCY_LIMIT = '1'
     W11UT_SETUP_SUBNET_PREFIX_LENGTH = 'Auto'
-    W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES = '60'
+    W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES = '90'
     W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT = ''
     W11UT_AD_DOMAIN = ''
     W11UT_SETUP_EXECUTION_MODE = 'LocalCache'
@@ -660,7 +660,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = '0'
     W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS = '0'
     W11UT_DELAY_BETWEEN_CYCLES_MINUTES = '5'
-    W11UT_PSEXEC_TIMEOUT_MINUTES = '180'
+    W11UT_PSEXEC_TIMEOUT_MINUTES = '360'
     W11UT_GUI_DRY_RUN = '0'
     W11UT_GUI_KEEP_CENTRAL_LOG_HISTORY = '0'
     W11UT_GUI_NO_CENTRAL_LOG_COLLECTION = '0'
@@ -1366,12 +1366,12 @@ function Register-NumericSteppers {
     Register-NumericStepper -TextBoxName 'SetupCopyIpgText' -DownButtonName 'SetupCopyIpgDownButton' -UpButtonName 'SetupCopyIpgUpButton' -Default 20 -Minimum 0 -Step 5
     Register-NumericStepper -TextBoxName 'SetupCopyJitterText' -DownButtonName 'SetupCopyJitterDownButton' -UpButtonName 'SetupCopyJitterUpButton' -Default 300 -Minimum 0 -Step 30
     Register-NumericStepper -TextBoxName 'SetupSubnetLimitText' -DownButtonName 'SetupSubnetLimitDownButton' -UpButtonName 'SetupSubnetLimitUpButton' -Default 1 -Minimum 0
-    Register-NumericStepper -TextBoxName 'SetupSubnetLeaseText' -DownButtonName 'SetupSubnetLeaseDownButton' -UpButtonName 'SetupSubnetLeaseUpButton' -Default 60 -Minimum 1 -Step 5
+    Register-NumericStepper -TextBoxName 'SetupSubnetLeaseText' -DownButtonName 'SetupSubnetLeaseDownButton' -UpButtonName 'SetupSubnetLeaseUpButton' -Default 90 -Minimum 1 -Step 5
     Register-NumericStepper -TextBoxName 'ThrottleText' -DownButtonName 'ThrottleDownButton' -UpButtonName 'ThrottleUpButton' -Default 10 -Minimum 1
     Register-NumericStepper -TextBoxName 'ComputerDelayText' -DownButtonName 'ComputerDelayDownButton' -UpButtonName 'ComputerDelayUpButton' -Default 0 -Minimum 0 -Step 5
     Register-NumericStepper -TextBoxName 'CycleDelayText' -DownButtonName 'CycleDelayDownButton' -UpButtonName 'CycleDelayUpButton' -Default 5 -Minimum 0
     Register-NumericStepper -TextBoxName 'MaxCyclesText' -DownButtonName 'MaxCyclesDownButton' -UpButtonName 'MaxCyclesUpButton' -Default 0 -Minimum 0
-    Register-NumericStepper -TextBoxName 'PsExecTimeoutText' -DownButtonName 'PsExecTimeoutDownButton' -UpButtonName 'PsExecTimeoutUpButton' -Default 180 -Minimum 1 -Step 5
+    Register-NumericStepper -TextBoxName 'PsExecTimeoutText' -DownButtonName 'PsExecTimeoutDownButton' -UpButtonName 'PsExecTimeoutUpButton' -Default 360 -Minimum 1 -Step 5
     Register-NumericStepper -TextBoxName 'GlobalLimitOptionText' -DownButtonName 'GlobalLimitOptionDownButton' -UpButtonName 'GlobalLimitOptionUpButton' -Default 15 -Minimum 1
     Register-NumericStepper -TextBoxName 'GlobalLeaseText' -DownButtonName 'GlobalLeaseDownButton' -UpButtonName 'GlobalLeaseUpButton' -Default 0 -Minimum 0
 }
@@ -1597,7 +1597,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_THROTTLE                                 = Get-IntText -TextBox $controls.ThrottleText -Default 10 -Minimum 1
         W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS          = Get-IntText -TextBox $controls.ComputerDelayText -Default 0 -Minimum 0
         W11UT_DELAY_BETWEEN_CYCLES_MINUTES             = Get-IntText -TextBox $controls.CycleDelayText -Default 5 -Minimum 0
-        W11UT_PSEXEC_TIMEOUT_MINUTES                   = Get-IntText -TextBox $controls.PsExecTimeoutText -Default 180 -Minimum 1
+        W11UT_PSEXEC_TIMEOUT_MINUTES                   = Get-IntText -TextBox $controls.PsExecTimeoutText -Default 360 -Minimum 1
         W11UT_SETUP_EXECUTION_MODE                     = [string]$controls.SetupModeCombo.Text
         W11UT_SETUP_LANGUAGE                           = [string]$controls.SetupLanguageCombo.Text
         W11UT_SETUP_DYNAMIC_UPDATE                     = [string]$controls.SetupDynamicUpdateCombo.Text
@@ -1606,7 +1606,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_SETUP_COPY_JITTER_SECONDS                = Get-IntText -TextBox $controls.SetupCopyJitterText -Default 300 -Minimum 0
         W11UT_SETUP_SUBNET_CONCURRENCY_LIMIT           = Get-IntText -TextBox $controls.SetupSubnetLimitText -Default 1 -Minimum 0
         W11UT_SETUP_SUBNET_PREFIX_LENGTH               = [string]$controls.SetupSubnetPrefixCombo.Text
-        W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES   = Get-IntText -TextBox $controls.SetupSubnetLeaseText -Default 60 -Minimum 1
+        W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES   = Get-IntText -TextBox $controls.SetupSubnetLeaseText -Default 90 -Minimum 1
         W11UT_AD_DOMAIN                                = Get-ConfiguredValue 'W11UT_AD_DOMAIN'
         W11UT_AUDIT_ONLY                               = Get-BooleanText -CheckBox $controls.AuditOnlyCheck
         W11UT_ALLOW_POLICY_REPAIR                      = Get-BooleanText -CheckBox $controls.AllowPolicyRepairCheck
