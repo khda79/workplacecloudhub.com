@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.40
+    0.1.42
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,7 +75,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.40'
+$script:ScriptVersion = '0.1.42'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -148,6 +148,7 @@ function Get-SetupExitCodeInfo {
         '0x00000BC2' = 'Success; reboot required.'
         '0x8007000B' = 'Bad image format. Windows Setup could not read a required image; validate or recopy setup media.'
         '0x8007001F' = 'Windows Setup failed during downlevel gather/migration. Common cause: duplicate or invalid user profile registry entries; check setupact.log/setuperr.log for Duplicate profile detected and inspect HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList.'
+        '0x8007007F' = 'Windows Setup migration plugin failure. Check Panther logs for MIG plugin LoadDllServer/LoadLibraryExW failures such as CscMig.dll, WSManMigrationPlugin.dll, or RasMigPlugin.dll.'
         '0xC1900101' = 'Windows Setup rollback, often driver or firmware related. Confirm with setup logs or SetupDiag.'
         '0xC190010E' = 'Windows Setup requires EULA acceptance. Use /EULA accept for quiet or non-interactive Windows 11 Setup.'
         '0xC1900200' = 'Compatibility failure: device does not meet Windows Setup minimum requirements.'
@@ -1064,8 +1065,20 @@ function Test-SetupMediaIntegrityManifest {
     $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $MediaRoot
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
 
-    $rootFull = [System.IO.Path]::GetFullPath($MediaRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-    $rows = @(Import-Csv -LiteralPath $manifestPath -ErrorAction Stop)
+    try {
+        $rootFull = [System.IO.Path]::GetFullPath($MediaRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    }
+    catch {
+        throw ("Setup media integrity manifest media root cannot be resolved. MediaRoot={0}; Error={1}" -f $MediaRoot,$_.Exception.Message)
+    }
+
+    try {
+        $rows = @(Import-Csv -LiteralPath $manifestPath -ErrorAction Stop)
+    }
+    catch {
+        throw ("Setup media integrity manifest cannot be read. Manifest={0}; Error={1}" -f $manifestPath,$_.Exception.Message)
+    }
+
     if ($rows.Count -eq 0) {
         throw "Setup media integrity manifest is empty: $manifestPath"
     }
@@ -1078,42 +1091,60 @@ function Test-SetupMediaIntegrityManifest {
 
     $checkedFiles = 0
     $checkedBytes = 0L
+    $rowNumber = 1
     foreach ($row in $rows) {
-        $relativePath = ([string]$row.RelativePath).Trim().TrimStart('\', '/')
+        $rowNumber++
+        $rawRelativePath = [string]$row.RelativePath
+        $relativePath = $rawRelativePath.Trim().TrimStart('\', '/')
         if ([string]::IsNullOrWhiteSpace($relativePath)) {
-            throw "Setup media integrity manifest contains an empty RelativePath: $manifestPath"
+            throw ("Setup media integrity manifest contains an empty RelativePath. Manifest={0}; Row={1}" -f $manifestPath,$rowNumber)
         }
         if ([System.IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '(^|[\\/])\.\.([\\/]|$)') {
-            throw ("Setup media integrity manifest contains an unsafe RelativePath. Manifest={0}; RelativePath={1}" -f $manifestPath,$relativePath)
+            throw ("Setup media integrity manifest contains an unsafe RelativePath. Manifest={0}; Row={1}; RelativePath={2}" -f $manifestPath,$rowNumber,$relativePath)
+        }
+        if ($relativePath -match '[<>:"|?*\x00-\x1F]') {
+            throw ("Setup media integrity manifest contains an invalid RelativePath character. Manifest={0}; Row={1}; RelativePath={2}" -f $manifestPath,$rowNumber,$relativePath)
         }
 
-        $filePath = Join-Path $MediaRoot $relativePath
-        $fileFull = [System.IO.Path]::GetFullPath($filePath)
+        try {
+            $filePath = Join-Path $MediaRoot $relativePath
+            $fileFull = [System.IO.Path]::GetFullPath($filePath)
+        }
+        catch {
+            throw ("Setup media integrity manifest path cannot be resolved. Manifest={0}; Row={1}; RelativePath={2}; Error={3}" -f $manifestPath,$rowNumber,$relativePath,$_.Exception.Message)
+        }
+
         if (-not $fileFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw ("Setup media integrity manifest path escapes media root. Manifest={0}; RelativePath={1}" -f $manifestPath,$relativePath)
+            throw ("Setup media integrity manifest path escapes media root. Manifest={0}; Row={1}; RelativePath={2}; File={3}" -f $manifestPath,$rowNumber,$relativePath,$fileFull)
         }
         if (-not (Test-Path -LiteralPath $fileFull -PathType Leaf)) {
-            throw ("Setup media integrity check failed. File missing. Manifest={0}; RelativePath={1}" -f $manifestPath,$relativePath)
+            throw ("Setup media integrity check failed. File missing. Manifest={0}; Row={1}; RelativePath={2}; File={3}" -f $manifestPath,$rowNumber,$relativePath,$fileFull)
         }
 
         $expectedLength = 0L
         if (-not [int64]::TryParse([string]$row.Length, [ref]$expectedLength)) {
-            throw ("Setup media integrity manifest contains an invalid Length. Manifest={0}; RelativePath={1}; Length={2}" -f $manifestPath,$relativePath,$row.Length)
+            throw ("Setup media integrity manifest contains an invalid Length. Manifest={0}; Row={1}; RelativePath={2}; Length={3}" -f $manifestPath,$rowNumber,$relativePath,$row.Length)
         }
 
         $item = Get-Item -LiteralPath $fileFull -ErrorAction Stop
         if ([int64]$item.Length -ne $expectedLength) {
-            throw ("Setup media integrity check failed. Length mismatch. Manifest={0}; RelativePath={1}; ExpectedLength={2}; ActualLength={3}" -f $manifestPath,$relativePath,$expectedLength,$item.Length)
+            throw ("Setup media integrity check failed. Length mismatch. Manifest={0}; Row={1}; RelativePath={2}; File={3}; ExpectedLength={4}; ActualLength={5}" -f $manifestPath,$rowNumber,$relativePath,$fileFull,$expectedLength,$item.Length)
         }
 
         $expectedHash = ([string]$row.SHA256).Trim().ToUpperInvariant()
         if ($expectedHash -notmatch '^[A-F0-9]{64}$') {
-            throw ("Setup media integrity manifest contains an invalid SHA256. Manifest={0}; RelativePath={1}; SHA256={2}" -f $manifestPath,$relativePath,$row.SHA256)
+            throw ("Setup media integrity manifest contains an invalid SHA256. Manifest={0}; Row={1}; RelativePath={2}; SHA256={3}" -f $manifestPath,$rowNumber,$relativePath,$row.SHA256)
         }
 
-        $actualHash = (Get-SmartFileSha256 -Path $fileFull).ToUpperInvariant()
+        try {
+            $actualHash = (Get-SmartFileSha256 -Path $fileFull).ToUpperInvariant()
+        }
+        catch {
+            throw ("Setup media integrity check failed. Cannot hash file. Manifest={0}; Row={1}; RelativePath={2}; File={3}; Error={4}" -f $manifestPath,$rowNumber,$relativePath,$fileFull,$_.Exception.Message)
+        }
+
         if ($actualHash -ne $expectedHash) {
-            throw ("Setup media integrity check failed. SHA256 mismatch. Manifest={0}; RelativePath={1}; ExpectedSHA256={2}; ActualSHA256={3}" -f $manifestPath,$relativePath,$expectedHash,$actualHash)
+            throw ("Setup media integrity check failed. SHA256 mismatch. Manifest={0}; Row={1}; RelativePath={2}; File={3}; ExpectedSHA256={4}; ActualSHA256={5}" -f $manifestPath,$rowNumber,$relativePath,$fileFull,$expectedHash,$actualHash)
         }
 
         $checkedFiles++
@@ -1123,7 +1154,6 @@ function Test-SetupMediaIntegrityManifest {
     Write-SmartLog ("Setup media integrity manifest validated: Manifest={0}; Files={1}; Bytes={2}" -f $manifestPath,$checkedFiles,$checkedBytes)
     return $true
 }
-
 function Test-SetupMedia {
     param(
         [Parameter(Mandatory = $true)][string]$MediaPath,
@@ -1152,7 +1182,13 @@ function Test-SetupMedia {
     $mediaRoot = Split-Path -Parent $setupExe
     $null = Test-SetupInstallImageReadable -MediaRoot $mediaRoot
     if ($ValidateManifest) {
-        $null = Test-SetupMediaIntegrityManifest -MediaRoot $mediaRoot
+        try {
+            $null = Test-SetupMediaIntegrityManifest -MediaRoot $mediaRoot
+        }
+        catch {
+            $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $mediaRoot
+            throw ("Setup media integrity manifest validation failed. MediaRoot={0}; Manifest={1}; Error={2}" -f $mediaRoot,$manifestPath,$_.Exception.Message)
+        }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($ExpectedLanguage)) {
@@ -1163,9 +1199,8 @@ function Test-SetupMedia {
 
         $match = @($mediaLanguages | Where-Object { $_ -ieq $ExpectedLanguage } | Select-Object -First 1)
         if ($match.Count -eq 0) {
-            throw ("Setup media language mismatch. Expected={0}; Available={1}; MediaRoot={2}" -f $ExpectedLanguage,($mediaLanguages -join ','),$mediaRoot)
+            throw "Setup media language mismatch. Expected=$ExpectedLanguage; Found=$($mediaLanguages -join ','); MediaRoot=$mediaRoot"
         }
-
         $script:ResolvedSetupMediaLanguages = ($mediaLanguages -join ',')
     }
 
@@ -2821,11 +2856,99 @@ function Invoke-SetupDuplicateProfileRepair {
     return [pscustomobject]@{ Handled = $true; Status = 'SETUP_PROFILE_DUPLICATE_REPAIRED_REBOOT_REQUIRED'; NextAction = 'REBOOT_AND_RETRY_SETUP'; Detail = $script:SetupProfileRepairDetail; ExitCode = 0; ActionResult = 'SetupProfileDuplicateRepairedLocalAccount' }
 }
 
+function Get-SetupMigrationPluginFailure {
+    param([Parameter(Mandatory = $true)]$SetupExitInfo)
+
+    $pantherPaths = @(
+        'C:\$WINDOWS.~BT\Sources\Panther\setupact.log',
+        'C:\$WINDOWS.~BT\Sources\Panther\setuperr.log'
+    )
+    $patterns = @(
+        '0x8007007F',
+        'hr=\[0x8007007f\]',
+        'hr=0x8007007f',
+        'gle=0x7f',
+        'LoadDllServer',
+        'LoadLibraryExW',
+        'Failure while calling I(?:Discovery|PreApply|PostApply|PostApplySuccess|ApplySuccess)->',
+        'CscMig\.dll',
+        'WSManMigrationPlugin\.dll',
+        'RasMigPlugin\.dll'
+    )
+
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($path in $pantherPaths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try {
+            $matches = @(Select-String -LiteralPath $path -Pattern $patterns -ErrorAction Stop)
+            foreach ($match in $matches) {
+                $line = [string]$match.Line
+                $plugin = ''
+                $pluginMatch = [regex]::Match($line, '(?<Plugin>[A-Za-z0-9_.-]+\.dll)')
+                if ($pluginMatch.Success) { $plugin = $pluginMatch.Groups['Plugin'].Value }
+                [void]$records.Add([pscustomobject]@{
+                    SourcePath = $path
+                    LineNumber = $match.LineNumber
+                    Plugin = $plugin
+                    Evidence = $line.Trim()
+                })
+            }
+        }
+        catch {
+            Write-SmartLog ("Failed to inspect Panther migration plugin evidence: Path={0}; Error={1}" -f $path,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    if ($records.Count -eq 0) {
+        return [pscustomobject]@{ Found = $false }
+    }
+
+    $preferred = @($records | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Plugin) } | Select-Object -Last 1)
+    if (-not $preferred) { $preferred = @($records | Select-Object -Last 1) }
+    $record = $preferred | Select-Object -First 1
+
+    return [pscustomobject]@{
+        Found = $true
+        ErrorCode = [string]$SetupExitInfo.Hex
+        Plugin = [string]$record.Plugin
+        SourcePath = [string]$record.SourcePath
+        LineNumber = [int]$record.LineNumber
+        Evidence = [string]$record.Evidence
+    }
+}
+
+function Resolve-SetupMigrationPluginFailure {
+    param([Parameter(Mandatory = $true)]$SetupExitInfo)
+
+    $empty = [pscustomobject]@{ Handled = $false; Status = ''; NextAction = ''; Detail = ''; ExitCode = 1; ActionResult = '' }
+    $failure = Get-SetupMigrationPluginFailure -SetupExitInfo $SetupExitInfo
+    if (-not $failure.Found -and [string]$SetupExitInfo.Hex -ne '0x8007007F') { return $empty }
+
+    $detail = if ($failure.Found) {
+        ("Setup migration plugin failure detected. ErrorCode={0}; Plugin={1}; Source={2}; Line={3}; Evidence={4}" -f $failure.ErrorCode,$failure.Plugin,$failure.SourcePath,$failure.LineNumber,$failure.Evidence)
+    }
+    else {
+        ("Setup migration plugin failure detected from setup exit code. ErrorCode={0}; Panther={1}; PantherErrors={2}" -f $SetupExitInfo.Hex,$SetupExitInfo.PantherLog,$SetupExitInfo.PantherErrorLog)
+    }
+
+    return [pscustomobject]@{
+        Handled = $true
+        Status = 'SETUP_MIGRATION_PLUGIN_FAILURE'
+        NextAction = 'CHECK_SETUP_LOGS_OR_SETUPDIAG'
+        Detail = $detail
+        ExitCode = 1
+        ActionResult = 'SetupMigrationPluginFailure'
+    }
+}
 function Resolve-SetupFailureOutcome {
     param([Parameter(Mandatory = $true)]$SetupExitInfo)
 
     $profileOutcome = Invoke-SetupDuplicateProfileRepair -SetupExitInfo $SetupExitInfo
     if ($profileOutcome.Handled) { return $profileOutcome }
+
+    $pluginOutcome = Resolve-SetupMigrationPluginFailure -SetupExitInfo $SetupExitInfo
+    if ($pluginOutcome.Handled) { return $pluginOutcome }
+
     return [pscustomobject]@{ Handled = $false; Status = ''; NextAction = ''; Detail = ''; ExitCode = 1; ActionResult = '' }
 }
 function Save-RunResult {
@@ -3169,6 +3292,12 @@ catch {
         $status = 'SETUP_MEDIA_COPY_FAILED'
         $nextAction = 'CHECK_ROBOCOPY_LOG_AND_SETUP_SOURCE_NETWORK'
         $actionResult = 'SetupMediaCopyFailed'
+        $exitCode = 1
+    }
+    elseif ($detail -like 'Setup media integrity manifest validation failed.*') {
+        $status = 'SETUP_MEDIA_MANIFEST_VALIDATION_FAILED'
+        $nextAction = 'REGENERATE_SETUP_MEDIA_MANIFEST_OR_RECOPY_MEDIA'
+        $actionResult = 'SetupMediaManifestValidationFailed'
         $exitCode = 1
     }
     elseif ($detail -like 'Timed out waiting for setup subnet copy lease.*') {
