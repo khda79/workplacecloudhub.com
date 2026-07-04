@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.15
+0.1.17
 #>
 
 #requires -Version 5.1
@@ -298,7 +298,7 @@ function Convert-ToPsExecRemoteArgument {
     return ('"{0}"' -f ($text -replace '"', '\"'))
 }
 
-$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')
+$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')
 
 function Get-ResultValue {
     param(
@@ -343,6 +343,9 @@ function Get-CentralLogBucket {
         if ($statusValue -eq 'SETUP_MEDIA_COPY_FAILED') {
             return 'SetupMediaCopyFailure'
         }
+        if ($statusValue -eq 'SETUP_MEDIA_MANIFEST_VALIDATION_FAILED') {
+            return 'SetupMediaManifestFailure'
+        }
         if ($statusValue -eq 'SETUP_PROCESS_MONITOR_INTERRUPTED') {
             return 'SetupProcessInterrupted'
         }
@@ -354,6 +357,9 @@ function Get-CentralLogBucket {
         }
         if ($statusValue -in @('SETUP_MIGRATION_PROFILE_FAILURE','SETUP_MIGRATION_PROFILE_REPAIR_FAILED')) {
             return 'SetupMigrationProfileFailure'
+        }
+        if ($statusValue -eq 'SETUP_MIGRATION_PLUGIN_FAILURE') {
+            return 'SetupMigrationPluginFailure'
         }
         if ($statusValue -in @('SETUP_SUBNET_COPY_LEASE_TIMEOUT','SETUP_SOURCE_COPY_LEASE_TIMEOUT')) {
             return 'SetupCopyLeaseTimeout'
@@ -371,6 +377,9 @@ function Get-CentralLogBucket {
         if ($detailValue -match '0x8007001F|Duplicate profile detected|Duplicate setup migration profile|SetupProfileDuplicate') {
             return 'SetupMigrationProfileFailure'
         }
+        if ($detailValue -match '0x8007007F|Setup migration plugin failure|SetupMigrationPluginFailure|CscMig\\.dll|WSManMigrationPlugin\\.dll|RasMigPlugin\\.dll|LoadDllServer|LoadLibraryExW') {
+            return 'SetupMigrationPluginFailure'
+        }
         if ($detailValue -match 'setup\.exe timed out after') {
             return 'SetupProcessTimeout'
         }
@@ -379,6 +388,9 @@ function Get-CentralLogBucket {
         }
         if ($detailValue -match 'Robocopy setup media copy failed with exit code') {
             return 'SetupMediaCopyFailure'
+        }
+        if ($detailValue -match 'Setup media integrity manifest validation failed|Setup media integrity manifest contains|Setup media integrity check failed') {
+            return 'SetupMediaManifestFailure'
         }
         if ($detailValue -match 'Setup monitoring was interrupted before setup\.exe exit was observed') {
             return 'SetupProcessInterrupted'
@@ -401,7 +413,7 @@ function New-CentralLogTarget {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket
     )
 
     if ($KeepCentralLogHistory) {
@@ -422,7 +434,7 @@ function Publish-LauncherEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket,
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket,
         [Parameter(Mandatory = $true)][string]$WorkerLogPath,
         [AllowNull()][string]$StdoutLogPath,
         [AllowNull()][string]$StderrLogPath
@@ -563,7 +575,7 @@ function Collect-RemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket
     )
 
     if ($NoCentralLogCollection) { return '' }
