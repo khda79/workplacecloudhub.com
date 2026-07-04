@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.16
+0.1.17
 #>
 param(
     [switch]$ValidateOnly
@@ -508,7 +508,8 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_ALLOW_ADVANCED_DISK_CLEANUP'; Argument = '-AllowAdvancedDiskCleanup' },
         @{ Name = 'W11UT_SKIP_SETUP_MEDIA_PRECOPY'; Argument = '-SkipSetupMediaPreCopy' },
         @{ Name = 'W11UT_USE_TECHNICIAN_RUN_GUARD_HISTORY'; Argument = '-UseTechnicianRunGuardHistory' },
-        @{ Name = 'W11UT_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY'; Argument = '-IgnoreTechnicianRunGuardHistory' }
+        @{ Name = 'W11UT_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY'; Argument = '-IgnoreTechnicianRunGuardHistory' },
+        @{ Name = 'W11UT_SKIP_INTUNE_INVENTORY_REFRESH'; Argument = '-SkipIntuneInventoryRefresh' }
     )) {
         if ([string]$EnvironmentVariables[$pair.Name] -eq '1') {
             $commandParts.Add($pair.Argument)
@@ -530,6 +531,8 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES'; Argument = '-SetupSubnetConcurrencyLeaseMinutes' },
         @{ Name = 'W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT'; Argument = '-SetupSubnetConcurrencyGateRoot' },
         @{ Name = 'W11UT_AD_DOMAIN'; Argument = '-AdDomain' },
+        @{ Name = 'W11UT_INTUNE_TENANT_ID'; Argument = '-IntuneTenantId' },
+        @{ Name = 'W11UT_INTUNE_INVENTORY_PAGE_SIZE'; Argument = '-IntuneInventoryPageSize' },
         @{ Name = 'W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS'; Argument = '-DelayBetweenComputersSeconds' },
         @{ Name = 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES'; Argument = '-DelayBetweenCyclesMinutes' },
         @{ Name = 'W11UT_PSEXEC_TIMEOUT_MINUTES'; Argument = '-PsExecTimeoutMinutes' },
@@ -653,6 +656,9 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES = '90'
     W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT = ''
     W11UT_AD_DOMAIN = ''
+    W11UT_INTUNE_TENANT_ID = ''
+    W11UT_INTUNE_INVENTORY_PAGE_SIZE = '999'
+    W11UT_SKIP_INTUNE_INVENTORY_REFRESH = '0'
     W11UT_SETUP_EXECUTION_MODE = 'LocalCache'
     W11UT_SETUP_MEDIA_ID = 'Win11'
     W11UT_SETUP_LANGUAGE = 'MatchSystem'
@@ -1612,6 +1618,9 @@ function Get-ToolkitOptionEnvironment {
         W11UT_SETUP_SUBNET_PREFIX_LENGTH               = [string]$controls.SetupSubnetPrefixCombo.Text
         W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES   = Get-IntText -TextBox $controls.SetupSubnetLeaseText -Default 90 -Minimum 1
         W11UT_AD_DOMAIN                                = Get-ConfiguredValue 'W11UT_AD_DOMAIN'
+        W11UT_INTUNE_TENANT_ID                         = Get-ConfiguredValue 'W11UT_INTUNE_TENANT_ID'
+        W11UT_INTUNE_INVENTORY_PAGE_SIZE               = Get-ConfiguredValue 'W11UT_INTUNE_INVENTORY_PAGE_SIZE'
+        W11UT_SKIP_INTUNE_INVENTORY_REFRESH            = Get-ConfiguredValue 'W11UT_SKIP_INTUNE_INVENTORY_REFRESH'
         W11UT_AUDIT_ONLY                               = Get-BooleanText -CheckBox $controls.AuditOnlyCheck
         W11UT_ALLOW_POLICY_REPAIR                      = Get-BooleanText -CheckBox $controls.AllowPolicyRepairCheck
         W11UT_ALLOW_WU_RESET                           = Get-BooleanText -CheckBox $controls.AllowWUResetCheck
