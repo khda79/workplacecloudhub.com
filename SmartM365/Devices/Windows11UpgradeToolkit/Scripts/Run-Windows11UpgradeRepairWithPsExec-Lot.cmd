@@ -22,6 +22,8 @@ set "SCRIPT=%ROOT_DIR%\Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec
 set "COMPUTERS=%LOT_DIR%Computers.txt"
 set "PARENT_AD_CSV=%ROOT_DIR%\DevicesAD.csv"
 set "LOT_AD_CSV=%LOT_DIR%DevicesAD.csv"
+set "PARENT_INTUNE_CSV=%ROOT_DIR%\DevicesIntune.csv"
+set "LOT_INTUNE_CSV=%LOT_DIR%DevicesIntune.csv"
 set "AD_DOMAIN_FILE=%LOT_DIR%AdDomain.txt"
 set "PSEXEC_LOGS=%LOT_DIR%PsExecLogs"
 set "REPORTS=%LOT_DIR%Reports"
@@ -227,6 +229,12 @@ if not "%W11UT_RUN_GUARD_HOURS%"=="" if not "%TECH_RUN_GUARD_HOURS_PROVIDED%"=="
 set "AD_ARGS=-AdInventoryCsv ""%LOT_AD_CSV%"""
 if exist "%PARENT_AD_CSV%" set "AD_ARGS=%AD_ARGS% -AdRootInventoryCsv ""%PARENT_AD_CSV%"""
 if not "%W11UT_AD_DOMAIN%"=="" set "AD_ARGS=%AD_ARGS% -AdDomain ""%W11UT_AD_DOMAIN%"""
+
+set "INTUNE_ARGS=-IntuneInventoryCsv ""%LOT_INTUNE_CSV%"""
+if exist "%PARENT_INTUNE_CSV%" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneRootInventoryCsv ""%PARENT_INTUNE_CSV%"""
+if not "%W11UT_INTUNE_TENANT_ID%"=="" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneTenantId ""%W11UT_INTUNE_TENANT_ID%"""
+if not "%W11UT_INTUNE_INVENTORY_PAGE_SIZE%"=="" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneInventoryPageSize %W11UT_INTUNE_INVENTORY_PAGE_SIZE%"
+if /I "%W11UT_SKIP_INTUNE_INVENTORY_REFRESH%"=="1" set "INTUNE_ARGS=%INTUNE_ARGS% -SkipIntuneInventoryRefresh"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
   -ComputerListPath "%COMPUTERS%" ^
   -LogRoot "%PSEXEC_LOGS%" ^
@@ -241,6 +249,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
   %THROTTLE_ARG% ^
   %GLOBAL_CONCURRENCY_ARG% ^
   %AD_ARGS% ^
+  %INTUNE_ARGS% ^
   %TECH_RUN_GUARD_ARGS% ^
   -DelayBetweenComputersSeconds %W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS% ^
   -DelayBetweenCyclesMinutes %W11UT_DELAY_BETWEEN_CYCLES_MINUTES% ^
@@ -292,6 +301,9 @@ for /f "usebackq eol=# tokens=1* delims==" %%A in ("%CONFIG_FILE%") do (
     if /I "%%~A"=="W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT" if not defined W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT set "W11UT_SETUP_SUBNET_CONCURRENCY_GATE_ROOT=%%~B"
     if /I "%%~A"=="W11UT_CONFIRM_LOCAL_SETUP_SOURCE" if not defined W11UT_CONFIRM_LOCAL_SETUP_SOURCE set "W11UT_CONFIRM_LOCAL_SETUP_SOURCE=%%~B"
     if /I "%%~A"=="W11UT_AD_DOMAIN" if not defined W11UT_AD_DOMAIN set "W11UT_AD_DOMAIN=%%~B"
+    if /I "%%~A"=="W11UT_INTUNE_TENANT_ID" if not defined W11UT_INTUNE_TENANT_ID set "W11UT_INTUNE_TENANT_ID=%%~B"
+    if /I "%%~A"=="W11UT_INTUNE_INVENTORY_PAGE_SIZE" if not defined W11UT_INTUNE_INVENTORY_PAGE_SIZE set "W11UT_INTUNE_INVENTORY_PAGE_SIZE=%%~B"
+    if /I "%%~A"=="W11UT_SKIP_INTUNE_INVENTORY_REFRESH" if not defined W11UT_SKIP_INTUNE_INVENTORY_REFRESH set "W11UT_SKIP_INTUNE_INVENTORY_REFRESH=%%~B"
     if /I "%%~A"=="W11UT_THROTTLE" if not defined W11UT_THROTTLE set "W11UT_THROTTLE=%%~B"
     if /I "%%~A"=="W11UT_GLOBAL_CONCURRENCY_LIMIT" if not defined W11UT_GLOBAL_CONCURRENCY_LIMIT set "W11UT_GLOBAL_CONCURRENCY_LIMIT=%%~B"
     if /I "%%~A"=="W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES" if not defined W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES set "W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES=%%~B"

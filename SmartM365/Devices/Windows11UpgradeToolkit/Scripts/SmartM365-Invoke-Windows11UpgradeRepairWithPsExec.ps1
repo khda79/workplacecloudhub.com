@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.28
+    0.1.29
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -68,6 +68,12 @@ param(
     [string]$AdInventoryNameColumn,
     [string]$AdDomain,
     [switch]$SkipAdInventoryRefresh,
+    [string]$IntuneInventoryCsv,
+    [string]$IntuneRootInventoryCsv,
+    [string]$IntuneInventoryNameColumn,
+    [ValidateRange(1, 999)][int]$IntuneInventoryPageSize = 999,
+    [string]$IntuneTenantId,
+    [switch]$SkipIntuneInventoryRefresh,
 
     [string]$LogRoot,
     [string]$ReportRoot,
@@ -98,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.28'
+$script:LauncherVersion = '0.1.29'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -106,10 +112,13 @@ if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
 }
 $LocalWorkerPath = Join-Path $script:BaseDir 'SmartM365-Windows11Upgrade-PsExecWorker.ps1'
 $script:ExportAdScriptPath = Join-Path $script:BaseDir 'SmartM365-Windows11Upgrade-Export-ADDevicesCsv.ps1'
+$script:ExportIntuneScriptPath = Join-Path $script:BaseDir 'SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1'
 $script:AdInventoryFreshnessHours = 12
+$script:IntuneInventoryFreshnessHours = 2
 $ComputerListPath = [System.IO.Path]::GetFullPath($ComputerListPath)
 $script:LotRoot = Split-Path -Parent $ComputerListPath
 $script:LotAdInventoryCsv = Join-Path $script:LotRoot 'DevicesAD.csv'
+$script:LotIntuneInventoryCsv = Join-Path $script:LotRoot 'DevicesIntune.csv'
 if ([string]::IsNullOrWhiteSpace($LogRoot)) { $LogRoot = Join-Path (Split-Path -Parent $ComputerListPath) 'PsExecLogs' }
 if ([string]::IsNullOrWhiteSpace($ReportRoot)) { $ReportRoot = Join-Path (Split-Path -Parent $ComputerListPath) 'Reports' }
 if ([string]::IsNullOrWhiteSpace($CentralLogRoot)) { $CentralLogRoot = Join-Path (Split-Path -Parent $ComputerListPath) 'CentralLogs' }
@@ -141,6 +150,30 @@ if ([string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) { $AdInventoryCsv = [System.IO.Path]::GetFullPath($AdInventoryCsv) }
 if (-not [string]::IsNullOrWhiteSpace($AdRootInventoryCsv)) { $AdRootInventoryCsv = [System.IO.Path]::GetFullPath($AdRootInventoryCsv) }
+
+$IntuneInventoryUsesRecentRootCsv = $false
+if ([string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) {
+    $defaultRootIntuneCsv = Join-Path $script:ToolkitRoot 'DevicesIntune.csv'
+    if (Test-Path -LiteralPath $defaultRootIntuneCsv -PathType Leaf) {
+        $IntuneRootInventoryCsv = $defaultRootIntuneCsv
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) {
+    $intuneRootInventoryItem = Get-Item -LiteralPath $IntuneRootInventoryCsv -ErrorAction SilentlyContinue
+    if ($intuneRootInventoryItem) {
+        $intuneRootInventoryAge = (Get-Date) - $intuneRootInventoryItem.LastWriteTime
+        if ($intuneRootInventoryAge.TotalHours -le $script:IntuneInventoryFreshnessHours) {
+            $IntuneInventoryCsv = $intuneRootInventoryItem.FullName
+            $IntuneRootInventoryCsv = $intuneRootInventoryItem.FullName
+            $IntuneInventoryUsesRecentRootCsv = $true
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) {
+    $IntuneInventoryCsv = $script:LotIntuneInventoryCsv
+}
+if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) { $IntuneInventoryCsv = [System.IO.Path]::GetFullPath($IntuneInventoryCsv) }
+if (-not [string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) { $IntuneRootInventoryCsv = [System.IO.Path]::GetFullPath($IntuneRootInventoryCsv) }
 
 $script:RemoteBaseDir = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
 $script:RemoteScriptPath = Join-Path $script:RemoteBaseDir 'SmartM365-Invoke-Windows11UpgradeRepair.ps1'
@@ -809,6 +842,224 @@ function Add-AdInventoryFieldsToResult {
 
     return $Result
 }
+function Get-IntuneInventoryMap {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $false)][string]$NameColumn
+    )
+
+    $map = @{}
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $map }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $map }
+
+    $rows = @(Import-Csv -LiteralPath $Path)
+    if ($rows.Count -eq 0) { return $map }
+
+    if ([string]::IsNullOrWhiteSpace($NameColumn)) {
+        $candidateColumns = @('ComputerName','computerName','DeviceName','deviceName','ManagedDeviceName','managedDeviceName','Name','name')
+        $first = $rows | Select-Object -First 1
+        foreach ($candidate in $candidateColumns) {
+            if ($first.PSObject.Properties.Name -contains $candidate) {
+                $NameColumn = $candidate
+                break
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($NameColumn)) {
+        throw 'Unable to infer the Intune inventory device name column. Use -IntuneInventoryNameColumn.'
+    }
+
+    foreach ($row in $rows) {
+        $value = [string]$row.$NameColumn
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+
+        $short = (Get-ComputerListKey -ComputerName $value)
+        if ([string]::IsNullOrWhiteSpace($short)) { continue }
+
+        $present = $true
+        if ($row.PSObject.Properties.Name -contains 'IntuneInventoryPresent') {
+            $present = Test-BooleanLikeTrue -Value $row.IntuneInventoryPresent
+        }
+        if (-not $present) { continue }
+
+        if (-not $map.ContainsKey($short)) {
+            $map[$short] = $row
+        }
+        else {
+            $current = $map[$short]
+            $currentLastSync = [datetime]::MinValue
+            $candidateLastSync = [datetime]::MinValue
+            if ($current.PSObject.Properties['LastSyncDateTime']) { [datetime]::TryParse([string]$current.LastSyncDateTime, [ref]$currentLastSync) | Out-Null }
+            if ($row.PSObject.Properties['LastSyncDateTime']) { [datetime]::TryParse([string]$row.LastSyncDateTime, [ref]$candidateLastSync) | Out-Null }
+            if ($candidateLastSync -gt $currentLastSync) { $map[$short] = $row }
+        }
+    }
+
+    return $map
+}
+
+function Invoke-FullIntuneInventoryExport {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExportScriptPath,
+        [Parameter(Mandatory = $true)][string]$OutputPath,
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [Parameter(Mandatory = $true)][string]$ComputerListPath,
+        [Parameter(Mandatory = $false)][int]$PageSize = 999,
+        [Parameter(Mandatory = $false)][string]$TenantId
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $ExportScriptPath -PathType Leaf)) {
+            throw "SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1 not found: $ExportScriptPath"
+        }
+
+        $args = @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $ExportScriptPath,
+            '-OutputPath', $OutputPath,
+            '-ComputerListPath', $ComputerListPath,
+            '-PageSize', ([string]$PageSize),
+            '-ForceRefresh'
+        )
+        if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+            $args += '-TenantId'
+            $args += $TenantId
+        }
+
+        $output = & powershell.exe @args 2>&1
+        $exitCode = $LASTEXITCODE
+        $output | Out-File -LiteralPath $LogPath -Encoding UTF8 -Force
+
+        if ($exitCode -ne 0) {
+            throw "SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1 exited with code $exitCode. Log=$LogPath"
+        }
+        if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) {
+            throw "Intune CSV was not created: $OutputPath"
+        }
+
+        $map = Get-IntuneInventoryMap -Path $OutputPath -NameColumn 'ComputerName'
+        return [pscustomobject]@{ Success = $true; CsvPath = $OutputPath; LogPath = $LogPath; InventoryMap = $map; Error = '' }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; CsvPath = $OutputPath; LogPath = $LogPath; InventoryMap = @{}; Error = $_.Exception.Message }
+    }
+}
+
+function Test-IntuneInventoryWindows11 {
+    param([Parameter(Mandatory = $true)]$IntuneRow)
+
+    $operatingSystem = if ($IntuneRow.PSObject.Properties['OperatingSystem']) { [string]$IntuneRow.OperatingSystem } else { '' }
+    if ($operatingSystem -match '(?i)\bWindows\s+11\b') { return $true }
+
+    $osVersion = if ($IntuneRow.PSObject.Properties['OSVersion']) { [string]$IntuneRow.OSVersion } else { '' }
+    if ($osVersion -match '^(\d+)\.(\d+)\.(\d+)') {
+        $build = 0
+        if ([int]::TryParse($matches[3], [ref]$build) -and $build -ge 22000) { return $true }
+    }
+
+    return $false
+}
+
+function Get-AlreadyWindows11RowsFromIntuneInventory {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ComputerNames,
+        [Parameter(Mandatory = $true)][hashtable]$IntuneInventoryMap,
+        [Parameter(Mandatory = $true)][string]$IntuneInventoryCsv
+    )
+
+    foreach ($computer in $ComputerNames) {
+        $key = Get-ComputerListKey -ComputerName $computer
+        if ([string]::IsNullOrWhiteSpace($key) -or -not $IntuneInventoryMap.ContainsKey($key)) { continue }
+
+        $intuneRow = $IntuneInventoryMap[$key]
+        if (-not (Test-IntuneInventoryWindows11 -IntuneRow $intuneRow)) { continue }
+
+        [pscustomobject]@{
+            Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            ComputerName = $computer
+            CycleNumber = 0
+            LauncherStatus = 'ALREADY_WINDOWS11'
+            RemoteStatus = 'ALREADY_WINDOWS11'
+            RemoteNextAction = 'NO_ACTION_INTUNE_ALREADY_WINDOWS11'
+            ExitCode = 0
+            Detail = 'Intune inventory already reports Windows 11; PsExec launch skipped.'
+            JobErrorMessage = ''
+            IntuneInventoryPresent = $true
+            IntuneDeviceName = if ($intuneRow.PSObject.Properties['DeviceName']) { [string]$intuneRow.DeviceName } else { '' }
+            IntuneManagedDeviceName = if ($intuneRow.PSObject.Properties['ManagedDeviceName']) { [string]$intuneRow.ManagedDeviceName } else { '' }
+            IntuneManagedDeviceId = if ($intuneRow.PSObject.Properties['IntuneManagedDeviceId']) { [string]$intuneRow.IntuneManagedDeviceId } else { '' }
+            IntuneAzureADDeviceId = if ($intuneRow.PSObject.Properties['AzureADDeviceId']) { [string]$intuneRow.AzureADDeviceId } else { '' }
+            IntuneOperatingSystem = if ($intuneRow.PSObject.Properties['OperatingSystem']) { [string]$intuneRow.OperatingSystem } else { '' }
+            IntuneOSVersion = if ($intuneRow.PSObject.Properties['OSVersion']) { [string]$intuneRow.OSVersion } else { '' }
+            IntuneLastSyncDateTime = if ($intuneRow.PSObject.Properties['LastSyncDateTime']) { [string]$intuneRow.LastSyncDateTime } else { '' }
+            IntuneUserPrincipalName = if ($intuneRow.PSObject.Properties['UserPrincipalName']) { [string]$intuneRow.UserPrincipalName } else { '' }
+            IntuneComplianceState = if ($intuneRow.PSObject.Properties['ComplianceState']) { [string]$intuneRow.ComplianceState } else { '' }
+            IntuneManagementState = if ($intuneRow.PSObject.Properties['ManagementState']) { [string]$intuneRow.ManagementState } else { '' }
+            IntuneInventoryCsv = $IntuneInventoryCsv
+        }
+    }
+}
+
+function Add-IntuneInventoryFieldsToResult {
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [AllowNull()][hashtable]$IntuneInventoryMap,
+        [AllowNull()][string]$IntuneInventoryCsv
+    )
+
+    if ($null -eq $Result) { return $Result }
+    if (-not $Result.PSObject.Properties['ComputerName']) { return $Result }
+
+    $computerKey = Get-ComputerListKey -ComputerName ([string]$Result.ComputerName)
+    $hasInventory = ($null -ne $IntuneInventoryMap -and $IntuneInventoryMap.Count -gt 0)
+    $hasIntuneRow = ($hasInventory -and -not [string]::IsNullOrWhiteSpace($computerKey) -and $IntuneInventoryMap.ContainsKey($computerKey))
+
+    if ($hasIntuneRow) {
+        $intuneRow = $IntuneInventoryMap[$computerKey]
+        $fields = [ordered]@{
+            IntuneInventoryPresent = $true
+            IntuneDeviceName = if ($intuneRow.PSObject.Properties['DeviceName']) { [string]$intuneRow.DeviceName } else { '' }
+            IntuneManagedDeviceName = if ($intuneRow.PSObject.Properties['ManagedDeviceName']) { [string]$intuneRow.ManagedDeviceName } else { '' }
+            IntuneManagedDeviceId = if ($intuneRow.PSObject.Properties['IntuneManagedDeviceId']) { [string]$intuneRow.IntuneManagedDeviceId } else { '' }
+            IntuneAzureADDeviceId = if ($intuneRow.PSObject.Properties['AzureADDeviceId']) { [string]$intuneRow.AzureADDeviceId } else { '' }
+            IntuneOperatingSystem = if ($intuneRow.PSObject.Properties['OperatingSystem']) { [string]$intuneRow.OperatingSystem } else { '' }
+            IntuneOSVersion = if ($intuneRow.PSObject.Properties['OSVersion']) { [string]$intuneRow.OSVersion } else { '' }
+            IntuneLastSyncDateTime = if ($intuneRow.PSObject.Properties['LastSyncDateTime']) { [string]$intuneRow.LastSyncDateTime } else { '' }
+            IntuneUserPrincipalName = if ($intuneRow.PSObject.Properties['UserPrincipalName']) { [string]$intuneRow.UserPrincipalName } else { '' }
+            IntuneComplianceState = if ($intuneRow.PSObject.Properties['ComplianceState']) { [string]$intuneRow.ComplianceState } else { '' }
+            IntuneManagementState = if ($intuneRow.PSObject.Properties['ManagementState']) { [string]$intuneRow.ManagementState } else { '' }
+            IntuneInventoryCsv = $IntuneInventoryCsv
+        }
+    }
+    elseif ($hasInventory) {
+        $fields = [ordered]@{
+            IntuneInventoryPresent = $false
+            IntuneDeviceName = ''
+            IntuneManagedDeviceName = ''
+            IntuneManagedDeviceId = ''
+            IntuneAzureADDeviceId = ''
+            IntuneOperatingSystem = ''
+            IntuneOSVersion = ''
+            IntuneLastSyncDateTime = ''
+            IntuneUserPrincipalName = ''
+            IntuneComplianceState = ''
+            IntuneManagementState = ''
+            IntuneInventoryCsv = $IntuneInventoryCsv
+        }
+    }
+    else {
+        return $Result
+    }
+
+    foreach ($fieldName in $fields.Keys) {
+        $Result | Add-Member -NotePropertyName $fieldName -NotePropertyValue $fields[$fieldName] -Force
+    }
+
+    return $Result
+}
+
 function Test-SingleComputerLaunch {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -1035,6 +1286,12 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'AD'; Option = 'AdRootInventoryCsv'; Value = [string]$AdRootInventoryCsv }
     [pscustomobject]@{ Category = 'AD'; Option = 'AdDomain'; Value = [string]$AdDomain }
     [pscustomobject]@{ Category = 'AD'; Option = 'SkipAdInventoryRefresh'; Value = [string][bool]$SkipAdInventoryRefresh }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneInventoryCsv'; Value = [string]$IntuneInventoryCsv }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneRootInventoryCsv'; Value = [string]$IntuneRootInventoryCsv }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneInventoryNameColumn'; Value = [string]$IntuneInventoryNameColumn }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneInventoryPageSize'; Value = [string]$IntuneInventoryPageSize }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneTenantId'; Value = [string]$IntuneTenantId }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'SkipIntuneInventoryRefresh'; Value = [string][bool]$SkipIntuneInventoryRefresh }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'ThrottleLimit'; Value = [string]$ThrottleLimit }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLimit'; Value = [string]$GlobalConcurrencyLimit }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLeaseTimeoutMinutes'; Value = [string]$GlobalConcurrencyLeaseTimeoutMinutes }
@@ -1060,6 +1317,7 @@ Write-Host ("Technician     : Account={0}; UPN={1}; SID={2}; Auth={3}; Computer=
 Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser; SetupProfileRepair=$AllowSetupProfileRepair"
 Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "AD inventory  : Csv=$AdInventoryCsv; RootCsv=$AdRootInventoryCsv; Domain=$AdDomain; Refresh=$(-not $SkipAdInventoryRefresh); RecentRoot=$AdInventoryUsesRecentRootCsv"
+Write-Host "Intune invent.: Csv=$IntuneInventoryCsv; RootCsv=$IntuneRootInventoryCsv; Tenant=$IntuneTenantId; Refresh=$(-not $SkipIntuneInventoryRefresh); RecentRoot=$IntuneInventoryUsesRecentRootCsv"
 Write-Host "Tech run guard: Use=$script:UseEffectiveTechnicianRunGuardHistory; Requested=$UseTechnicianRunGuardHistory; Ignore=$IgnoreTechnicianRunGuardHistory; Hours=$RunGuardHours; Path=$script:TechnicianRunGuardHistoryPath"
 Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s)"
 Write-Host "LOT/run options:"
@@ -1089,6 +1347,18 @@ $reportColumns = @(
     'ADOperatingSystemVersion',
     'ADLastLogonTimestampUtc',
     'ADInventoryCsv',
+    'IntuneInventoryPresent',
+    'IntuneDeviceName',
+    'IntuneManagedDeviceName',
+    'IntuneManagedDeviceId',
+    'IntuneAzureADDeviceId',
+    'IntuneOperatingSystem',
+    'IntuneOSVersion',
+    'IntuneLastSyncDateTime',
+    'IntuneUserPrincipalName',
+    'IntuneComplianceState',
+    'IntuneManagementState',
+    'IntuneInventoryCsv',
     'SetupCacheAction',
     'SetupDynamicUpdate',
     'SelectedSetupSourcePath',
@@ -1551,6 +1821,92 @@ function Release-GlobalLease {
     }
 }
 
+$script:IntuneInventoryMap = @{}
+if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) {
+    try {
+        $refreshInitialIntuneInventory = $false
+        $initialIntuneInventoryReason = ''
+        $intuneInventoryItem = Get-Item -LiteralPath $IntuneInventoryCsv -ErrorAction SilentlyContinue
+        if (-not $intuneInventoryItem) {
+            $refreshInitialIntuneInventory = $true
+            $initialIntuneInventoryReason = 'missing'
+        }
+        elseif (-not $IntuneInventoryUsesRecentRootCsv) {
+            $intuneInventoryAge = (Get-Date) - $intuneInventoryItem.LastWriteTime
+            if ($intuneInventoryAge.TotalHours -gt $script:IntuneInventoryFreshnessHours) {
+                $refreshInitialIntuneInventory = $true
+                $initialIntuneInventoryReason = ('older than {0} hour(s); LastWriteTime={1}; Age={2:N1} hour(s)' -f $script:IntuneInventoryFreshnessHours,$intuneInventoryItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'),$intuneInventoryAge.TotalHours)
+            }
+        }
+
+        if ($IntuneInventoryUsesRecentRootCsv) {
+            Write-Host ("Intune inventory CSV is recent. Using root CSV in priority: {0}" -f $IntuneInventoryCsv) -ForegroundColor Green
+            $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
+        }
+        elseif ($refreshInitialIntuneInventory -and $DryRun) {
+            Write-Host ("DryRun: Intune inventory CSV is {0}; skipping automatic Intune managed device export." -f $initialIntuneInventoryReason) -ForegroundColor Yellow
+            if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
+                $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
+            }
+        }
+        elseif ($refreshInitialIntuneInventory -and -not $SkipIntuneInventoryRefresh) {
+            $initialIntuneInventoryLogPath = Join-Path $ReportRoot ("DevicesIntune_InitialRefresh_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+            Write-Host ("Intune inventory CSV is {0}. Running Intune managed device export before starting the lot..." -f $initialIntuneInventoryReason) -ForegroundColor Yellow
+            $initialIntuneInventory = Invoke-FullIntuneInventoryExport `
+                -ExportScriptPath $script:ExportIntuneScriptPath `
+                -OutputPath $IntuneInventoryCsv `
+                -LogPath $initialIntuneInventoryLogPath `
+                -ComputerListPath $ComputerListPath `
+                -PageSize $IntuneInventoryPageSize `
+                -TenantId $IntuneTenantId
+            if ($initialIntuneInventory.Success) {
+                $script:IntuneInventoryMap = $initialIntuneInventory.InventoryMap
+                Write-Host ("Initial Intune inventory refreshed. Devices={0}; CSV={1}" -f $script:IntuneInventoryMap.Count,$initialIntuneInventory.CsvPath) -ForegroundColor Green
+            }
+            else {
+                Write-Host ("WARNING: Initial Intune inventory refresh failed: {0}" -f $initialIntuneInventory.Error) -ForegroundColor Yellow
+                if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
+                    Write-Host ("Using existing Intune inventory CSV despite refresh failure: {0}" -f $IntuneInventoryCsv) -ForegroundColor Yellow
+                    $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
+                }
+            }
+        }
+        elseif (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
+            $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
+        }
+
+        if ($script:IntuneInventoryMap.Count -gt 0) {
+            $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
+            $alreadyWindows11FromIntune = @(Get-AlreadyWindows11RowsFromIntuneInventory -ComputerNames $currentComputers -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv)
+            if ($alreadyWindows11FromIntune.Count -gt 0) {
+                $intuneAlreadyPath = Join-Path $ReportRoot ("DevicesIntune_AlreadyWindows11_{0}.csv" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+                @($alreadyWindows11FromIntune) | Export-Csv -LiteralPath $intuneAlreadyPath -NoTypeInformation -Encoding UTF8
+                if ($DryRun) {
+                    Write-Host ("DryRun: Intune inventory detected {0} already-Windows11 computer(s). No Computers.txt change. CSV={1}" -f $alreadyWindows11FromIntune.Count,$intuneAlreadyPath) -ForegroundColor Yellow
+                }
+                else {
+                    $preMoveResult = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary $alreadyWindows11FromIntune
+                    if ($preMoveResult.Moved -gt 0) {
+                        Write-Host ("Intune inventory moved {0} already-Windows11 computer(s) from Computers.txt to {1}. Evidence={2}" -f $preMoveResult.Moved,$preMoveResult.AlreadyWindows11Path,$intuneAlreadyPath) -ForegroundColor Green
+                    }
+                    else {
+                        Write-Host ("Intune inventory detected already-Windows11 computer(s), but none were still present in Computers.txt. Evidence={0}" -f $intuneAlreadyPath) -ForegroundColor DarkGray
+                    }
+                }
+            }
+            else {
+                Write-Host ("Intune inventory precheck found no Windows 11 computer in current Computers.txt. CSV={0}" -f $IntuneInventoryCsv) -ForegroundColor DarkGray
+            }
+        }
+        else {
+            Write-Host ("Intune inventory precheck skipped: no Intune rows loaded. CSV={0}" -f $IntuneInventoryCsv) -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host ("WARN: Intune inventory precheck failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
+
 $script:AdInventoryMap = @{}
 if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
     try {
@@ -1677,6 +2033,7 @@ do {
                 if ($null -ne $activeTechRunGuard) {
                     $skipResult = New-TechnicianRunGuardSkippedResult -ComputerName $computer -CycleNumber $cycle -HistoryEntry $activeTechRunGuard -RunGuardHours $RunGuardHours
                     $skipResult = Add-AdInventoryFieldsToResult -Result $skipResult -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
+                    $skipResult = Add-IntuneInventoryFieldsToResult -Result $skipResult -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv
                     [void]$results.Add($skipResult)
                     Write-Host ("  [SKIPPED_BY_TECH_RUN_GUARD] {0}: {1}" -f $computer,$skipResult.Detail) -ForegroundColor DarkYellow
                     continue
@@ -1831,6 +2188,7 @@ do {
                         $item | Add-Member -NotePropertyName JobErrorMessage -NotePropertyValue ($jobErrors -join ' | ') -Force
                     }
                     $item = Add-AdInventoryFieldsToResult -Result $item -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
+                    $item = Add-IntuneInventoryFieldsToResult -Result $item -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv
                     if ($script:UseEffectiveTechnicianRunGuardHistory) {
                         $resultFqdn = if ($techRunGuardFqdnByJobId.ContainsKey([string]$job.Id)) { [string]$techRunGuardFqdnByJobId[[string]$job.Id] } else { Get-TechnicianRunGuardFqdn -ComputerName ([string]$item.ComputerName) -AdInventoryMap $script:AdInventoryMap }
                         Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $resultFqdn -InputComputerName ([string]$item.ComputerName) -RunGuardHours $RunGuardHours -State Result -Result $item -JobId ([string]$job.Id)
@@ -1872,7 +2230,7 @@ do {
 
     $reportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.csv" -f $cycle,$reportTimestamp)
-    $enrichedResults = @($results.ToArray() | ForEach-Object { Add-AdInventoryFieldsToResult -Result $_ -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv })
+    $enrichedResults = @($results.ToArray() | ForEach-Object { $row = Add-AdInventoryFieldsToResult -Result $_ -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv; Add-IntuneInventoryFieldsToResult -Result $row -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv })
     $normalizedResults = Get-Windows11ReportRows -Items @($enrichedResults)
     @($normalizedResults) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
