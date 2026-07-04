@@ -11,6 +11,8 @@
     - A site collection, including all subsites
     - A single web
     - A list of web URLs from a text or CSV file
+      Each listed web URL is treated as a root and its descendant subsites
+      are included by default.
 
     If OutputPath is not specified, the script creates a folder in the script
     directory using the target site or tenant name, then writes the CSV, run
@@ -37,7 +39,7 @@
     .\SmartM365-SharePointTarget-FileInventory.ps1 -TenantAdminUrl "https://yourtenant-admin.sharepoint.com" -UseEnvironmentVariables
 
 .VERSION
-    1.0.0
+    1.0.2
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Tenant')]
@@ -1151,26 +1153,31 @@ try {
         }
 
         'WebUrlsFile' {
-            $webUrls = @(Get-WebUrlsFromFile -Path $WebUrlsFile | Select-Object -Unique)
-            Write-Info -Color Green -Message ("Web URLs loaded from file: {0}" -f $webUrls.Count)
+            $rootWebUrls = @(Get-WebUrlsFromFile -Path $WebUrlsFile | Select-Object -Unique)
+            Write-Info -Color Green -Message ("Root web URLs loaded from file: {0}; descendant subsites are included." -f $rootWebUrls.Count)
 
-            foreach ($targetWebUrl in $webUrls) {
-                try {
-                    Export-WebInventory `
-                        -Url $targetWebUrl `
-                        -SiteCollectionUrl $targetWebUrl `
-                        -CsvPath $TempOutputPath `
-                        -Append:$script:CsvCreated `
-                        -IncludeHidden:$IncludeHiddenLibraries `
-                        -IncludeSystem:$IncludeSystemLibraries `
-                        -BatchSize $PageSize
-                }
-                catch {
-                    if ($script:InventoryStopRequested) {
-                        throw
+            foreach ($rootWebUrl in $rootWebUrls) {
+                $webUrls = @(Get-WebUrlsFromSite -Url $rootWebUrl | Select-Object -Unique)
+                Write-Info -Color Green -Message ("Web URLs expanded from root '{0}': {1}" -f $rootWebUrl, $webUrls.Count)
+
+                foreach ($targetWebUrl in $webUrls) {
+                    try {
+                        Export-WebInventory `
+                            -Url $targetWebUrl `
+                            -SiteCollectionUrl $rootWebUrl `
+                            -CsvPath $TempOutputPath `
+                            -Append:$script:CsvCreated `
+                            -IncludeHidden:$IncludeHiddenLibraries `
+                            -IncludeSystem:$IncludeSystemLibraries `
+                            -BatchSize $PageSize
                     }
-                    Write-Warning ("Failed to inventory web '{0}': {1}" -f $targetWebUrl, $_.Exception.Message)
-                    Stop-InventoryAfterError -Scope 'Web' -Url $targetWebUrl -Name $targetWebUrl -Message $_.Exception.Message
+                    catch {
+                        if ($script:InventoryStopRequested) {
+                            throw
+                        }
+                        Write-Warning ("Failed to inventory web '{0}': {1}" -f $targetWebUrl, $_.Exception.Message)
+                        Stop-InventoryAfterError -Scope 'Web' -Url $targetWebUrl -Name $targetWebUrl -Message $_.Exception.Message
+                    }
                 }
             }
         }

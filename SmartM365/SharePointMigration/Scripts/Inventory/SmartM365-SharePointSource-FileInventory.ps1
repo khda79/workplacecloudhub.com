@@ -7,6 +7,8 @@
     Shell, or from a PowerShell console started with farm administrator rights.
 
     The script scans document libraries and exports file metadata to a CSV file.
+    When -UseSiteUrlFilter/-SiteUrlsFile is used, each listed site URL is
+    treated as a root and its descendant subsites are included by default.
     It can target a web application, a site collection, or a specific web.
     If OutputPath is not specified, the script creates a folder in the script
     directory using the target site name, then writes the CSV, run log, and
@@ -35,7 +37,7 @@
     .\SmartM365-SharePointSource-FileInventory.ps1 -WebApplicationUrl "https://intranet" -IncludePermissionInventory
 
 .VERSION
-    1.0.0
+    1.0.2
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -570,6 +572,37 @@ function Import-SiteUrlFilter {
     return $filterPaths
 }
 
+function Test-PathMatchesSiteUrlFilter {
+    param(
+        [string]$WebPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($WebPath)) {
+        return $false
+    }
+
+    foreach ($filterPath in $script:SiteUrlFilterPaths) {
+        $normalizedFilterPath = ([string]$filterPath).TrimEnd('/')
+        if ([string]::IsNullOrWhiteSpace($normalizedFilterPath)) {
+            $normalizedFilterPath = '/'
+        }
+
+        if ($normalizedFilterPath -eq '/') {
+            return $true
+        }
+
+        if ($WebPath.Equals($normalizedFilterPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+
+        if ($WebPath.StartsWith(($normalizedFilterPath + '/'), [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Test-WebMatchesSiteUrlFilter {
     param(
         [Microsoft.SharePoint.SPWeb]$Web
@@ -580,7 +613,7 @@ function Test-WebMatchesSiteUrlFilter {
     }
 
     $webPath = Get-NormalizedUrlPath -Url $Web.Url
-    return $script:SiteUrlFilterPaths.Contains($webPath)
+    return (Test-PathMatchesSiteUrlFilter -WebPath $webPath)
 }
 
 function Get-TargetSafeName {
@@ -816,7 +849,7 @@ if ($script:UseSiteUrlFilter) {
     }
 
     $script:SiteUrlFilterPaths = Import-SiteUrlFilter -Path $SiteUrlsFile
-    Write-Host ("Site URL filter enabled: {0} paths loaded from {1}" -f $script:SiteUrlFilterPaths.Count, $SiteUrlsFile)
+    Write-Host ("Site URL filter enabled: {0} root paths loaded from {1}; descendant subsites are included." -f $script:SiteUrlFilterPaths.Count, $SiteUrlsFile)
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
