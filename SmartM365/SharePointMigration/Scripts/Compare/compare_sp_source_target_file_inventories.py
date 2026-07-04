@@ -1,10 +1,11 @@
 import argparse
 import builtins
 import csv
+import html
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 
 def print(*args, **kwargs):
@@ -209,6 +210,187 @@ def detect_csv_dialect(handle):
         return csv.Sniffer().sniff(sample, delimiters=",;\t")
     except csv.Error:
         return csv.excel
+
+
+def to_int(value):
+    try:
+        return int(str(value or "0").strip())
+    except ValueError:
+        return 0
+
+
+def html_escape(value):
+    return html.escape(str(value or ""), quote=True)
+
+
+def html_file_link(path):
+    path = Path(path)
+    return f'<a href="{html_escape(quote(path.name))}">{html_escape(path.name)}</a>'
+
+
+def format_integer(value):
+    return f"{to_int(value):,}".replace(",", " ")
+
+
+def top_file_difference_rows(library_summary_rows, limit=20):
+    def difference_count(row):
+        return (
+            to_int(row.get("MissingInTarget"))
+            + to_int(row.get("ExtraInTarget"))
+            + to_int(row.get("DifferentSize"))
+            + to_int(row.get("ChangedModifiedDate"))
+            + to_int(row.get("TargetOlderThanSource"))
+            + to_int(row.get("ChangedVersion"))
+        )
+
+    rows = [row for row in library_summary_rows if difference_count(row)]
+    rows.sort(
+        key=lambda row: (
+            -difference_count(row),
+            str(row.get("WebPath") or ""),
+            str(row.get("SourceLibraryTitle") or row.get("TargetLibraryTitle") or ""),
+        )
+    )
+    return rows[:limit]
+
+
+def create_file_html_summary(path, title, summary, library_summary_rows, report_links):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    matched = to_int(summary.get("MatchedKeys"))
+    missing = to_int(summary.get("MissingInTarget"))
+    extra = to_int(summary.get("ExtraInTarget"))
+    extra_folders = to_int(summary.get("ExtraFoldersInTarget"))
+    different_size = to_int(summary.get("DifferentSize"))
+    changed_modified = to_int(summary.get("ChangedModifiedDate"))
+    target_older = to_int(summary.get("TargetOlderThanSource"))
+    changed_version = to_int(summary.get("ChangedVersion"))
+    review_count = missing + extra + different_size + changed_modified + target_older + changed_version
+    status_text = "Review needed" if review_count or extra_folders else "No relevant difference"
+    status_class = "warn" if review_count else ("note" if extra_folders else "ok")
+
+    cards = [
+        ("Matched files", matched, "ok"),
+        ("Missing in target", missing, "bad" if missing else "ok"),
+        ("Extra in target", extra, "bad" if extra else "ok"),
+        ("Changed version", changed_version, "bad" if changed_version else "ok"),
+        ("Different size", different_size, "bad" if different_size else "ok"),
+        ("Target older", target_older, "bad" if target_older else "ok"),
+        ("Modified date", changed_modified, "note" if changed_modified else "ok"),
+        ("Extra folders", extra_folders, "note" if extra_folders else "ok"),
+    ]
+    card_html = [
+        f'<div class="metric {css_class}"><div class="metric-label">{html_escape(label)}</div><div class="metric-value">{format_integer(value)}</div></div>'
+        for label, value, css_class in cards
+    ]
+
+    report_link_rows = []
+    for label, target_path, description in report_links:
+        target_path = Path(target_path) if target_path else None
+        if not target_path or not target_path.exists():
+            continue
+        report_link_rows.append(
+            "<tr>"
+            f"<td>{html_escape(label)}</td>"
+            f"<td>{html_file_link(target_path)}</td>"
+            f"<td>{html_escape(description)}</td>"
+            "</tr>"
+        )
+    if not report_link_rows:
+        report_link_rows.append('<tr><td colspan="3" class="empty">No report files found.</td></tr>')
+
+    top_rows_html = []
+    for row in top_file_difference_rows(library_summary_rows):
+        top_rows_html.append(
+            "<tr>"
+            f"<td>{html_escape(row.get('Status'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('MissingInTarget'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('ExtraInTarget'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('ChangedVersion'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('DifferentSize'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('TargetOlderThanSource'))}</td>"
+            f"<td>{html_escape(row.get('WebPath'))}</td>"
+            f"<td>{html_escape(row.get('SourceLibraryTitle') or row.get('TargetLibraryTitle') or row.get('LibraryPath'))}</td>"
+            "</tr>"
+        )
+    if not top_rows_html:
+        top_rows_html.append('<tr><td colspan="8" class="empty">No library-level differences.</td></tr>')
+
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    document = f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{html_escape(title)}</title>
+<style>
+:root {{ color-scheme: light; --bg:#F5F8FB; --card:#FFFFFF; --text:#1F2937; --muted:#5F6B7A; --line:#DDE7F0; --accent:#0078D4; --ok:#107C10; --bad:#C50F1F; --note:#8A6A00; }}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; background:var(--bg); color:var(--text); font-family:"Segoe UI", Arial, sans-serif; font-size:14px; line-height:1.45; }}
+main {{ max-width:1320px; margin:0 auto; padding:28px; }}
+.header {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:22px 24px; margin-bottom:18px; display:flex; justify-content:space-between; gap:18px; align-items:flex-start; }}
+h1 {{ margin:0 0 6px; font-size:25px; font-weight:650; letter-spacing:0; }}
+.subtitle {{ color:var(--muted); }}
+.badge {{ display:inline-block; border:1px solid var(--line); border-radius:999px; padding:5px 10px; font-weight:600; background:#fff; white-space:nowrap; }}
+.badge.ok {{ color:var(--ok); border-color:#B8DAB8; background:#F1FAF1; }}
+.badge.warn {{ color:var(--bad); border-color:#F1B7BC; background:#FFF4F5; }}
+.badge.note {{ color:var(--note); border-color:#E7D99B; background:#FFF9DF; }}
+.metrics {{ display:grid; grid-template-columns:repeat(4, minmax(150px, 1fr)); gap:12px; margin-bottom:18px; }}
+.metric {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:15px; min-height:92px; }}
+.metric-label {{ color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
+.metric-value {{ font-size:28px; font-weight:700; margin-top:8px; }}
+.metric.ok .metric-value {{ color:var(--ok); }} .metric.bad .metric-value {{ color:var(--bad); }} .metric.note .metric-value {{ color:var(--note); }}
+.section {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:18px; margin-bottom:18px; }}
+h2 {{ margin:0 0 12px; font-size:17px; }}
+.grid {{ display:grid; grid-template-columns:220px minmax(0, 1fr); gap:8px 14px; }}
+.key {{ color:var(--muted); }}
+a {{ color:var(--accent); text-decoration:none; }} a:hover {{ text-decoration:underline; }}
+table {{ width:100%; border-collapse:collapse; }}
+th, td {{ border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; vertical-align:top; }}
+th {{ background:#F8FBFE; color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
+.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+.empty {{ color:var(--muted); text-align:center; padding:18px; }}
+.footer {{ color:var(--muted); font-size:12px; margin-top:16px; }}
+@media (max-width:1000px) {{ .metrics {{ grid-template-columns:repeat(2, minmax(150px, 1fr)); }} .header {{ display:block; }} .badge {{ margin-top:12px; }} }}
+</style>
+</head>
+<body>
+<main>
+  <div class="header">
+    <div>
+      <h1>{html_escape(title)}</h1>
+      <div class="subtitle">Generated at {html_escape(generated_at)}</div>
+    </div>
+    <div class="badge {status_class}">{html_escape(status_text)}</div>
+  </div>
+  <div class="metrics">{''.join(card_html)}</div>
+  <div class="section">
+    <h2>Run context</h2>
+    <div class="grid">
+      <div class="key">Source CSV</div><div>{html_escape(summary.get('SourceCsv'))}</div>
+      <div class="key">Target CSV</div><div>{html_escape(summary.get('TargetCsv'))}</div>
+      <div class="key">Source unique keys</div><div>{format_integer(summary.get('SourceUniqueKeys'))}</div>
+      <div class="key">Target unique keys</div><div>{format_integer(summary.get('TargetUniqueKeys'))}</div>
+      <div class="key">Size tolerance bytes</div><div>{format_integer(summary.get('SizeToleranceBytes'))}</div>
+      <div class="key">Modified date tolerance minutes</div><div>{html_escape(summary.get('ModifiedDateToleranceMinutes'))}</div>
+      <div class="key">Comparison key includes version</div><div>{html_escape(summary.get('ComparisonKeyIncludesVersion'))}</div>
+    </div>
+  </div>
+  <div class="section">
+    <h2>Report files</h2>
+    <table><thead><tr><th>Report</th><th>File</th><th>Description</th></tr></thead><tbody>{''.join(report_link_rows)}</tbody></table>
+  </div>
+  <div class="section">
+    <h2>Top libraries with differences</h2>
+    <table><thead><tr><th>Status</th><th>Missing</th><th>Extra</th><th>Version</th><th>Size</th><th>Older</th><th>Web path</th><th>Library</th></tr></thead><tbody>{''.join(top_rows_html)}</tbody></table>
+  </div>
+  <div class="footer">SmartM365 SharePoint migration file comparison summary.</div>
+</main>
+</body>
+</html>
+'''
+    path.write_text(document, encoding="utf-8", newline="\n")
+    return path
 
 
 def strip_query_from_path(value):
@@ -1392,6 +1574,9 @@ def main():
                 missing_row.update(missing_reason_details(record, target_path_index.get(comparison_path_key(key), [])))
                 missing_writer.writerow(missing_row)
 
+    report_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    html_summary_path = output_directory / f"{args.comparison_name}-summary-{report_timestamp}.html"
+
     summary = {
         "ComparisonName": args.comparison_name,
         "SourceCsv": str(source_csv),
@@ -1426,6 +1611,7 @@ def main():
         "ChangedModifiedDateCsv": str(changed_modified_date_path) if compare_modified_dates else "",
         "TargetOlderThanSourceCsv": str(target_older_than_source_path) if compare_modified_dates else "",
         "ChangedVersionCsv": str(changed_version_path),
+        "HtmlSummary": str(html_summary_path),
         "OutputDirectory": str(output_directory),
     }
 
@@ -1448,6 +1634,7 @@ def main():
             writer.writerow({column: entry.get(column, "") for column in EXTRA_FOLDER_COLUMNS})
 
     library_summary_path = output_directory / "LibrarySummary.csv"
+    library_summary_rows = []
     with library_summary_path.open("w", encoding="utf-8", newline="") as library_summary_handle:
         writer = csv.DictWriter(library_summary_handle, fieldnames=LIBRARY_SUMMARY_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
         writer.writeheader()
@@ -1467,7 +1654,28 @@ def main():
             entry["TargetOlderThanSourcePercent"] = percent(entry["TargetOlderThanSource"], entry["MatchedFiles"])
             entry["ChangedVersionPercent"] = percent(entry["ChangedVersion"], entry["SourceFiles"])
             entry["Status"] = library_status(entry)
-            writer.writerow({column: entry.get(column, "") for column in LIBRARY_SUMMARY_COLUMNS})
+            row = {column: entry.get(column, "") for column in LIBRARY_SUMMARY_COLUMNS}
+            library_summary_rows.append(row)
+            writer.writerow(row)
+
+    create_file_html_summary(
+        html_summary_path,
+        args.comparison_name,
+        summary,
+        library_summary_rows,
+        [
+            ("Summary", summary_path, "Run counters and comparison inputs."),
+            ("Library summary", library_summary_path, "Library-level file comparison summary."),
+            ("Missing in target", missing_path, "Source files absent from target or not usable at target."),
+            ("Extra in target", extra_path, "Target files not found in source."),
+            ("Different size", different_size_path, "Matched files with size differences beyond tolerance."),
+            ("Changed modified date", changed_modified_date_path, "Matched files with modified-date differences beyond tolerance."),
+            ("Target older than source", target_older_than_source_path, "Matched files where target is older than source."),
+            ("Changed version", changed_version_path, "Same-path files whose SharePoint version differs."),
+            ("Extra folders in target", extra_folders_path, "Target folders containing extra files."),
+            ("Duplicate keys", duplicate_keys_path, "Source or target duplicate comparison keys ignored."),
+        ],
+    )
 
     print("Comparison completed.")
     print(
@@ -1483,6 +1691,7 @@ def main():
     print(f"Target older than source: {target_older_than_source_path}")
     print(f"Changed version: {changed_version_path}")
     print(f"Duplicate keys: {duplicate_keys_path}")
+    print(f"HTML summary: {html_summary_path}")
 
 
 if __name__ == "__main__":
