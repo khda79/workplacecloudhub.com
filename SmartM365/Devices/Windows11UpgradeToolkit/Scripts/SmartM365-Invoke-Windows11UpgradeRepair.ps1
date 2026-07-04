@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.31
+    0.1.37
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -57,7 +57,7 @@ param(
     [string]$SetupSourceConcurrencyGateRoot,
     [ValidateRange(0, 500)][int]$SetupSubnetConcurrencyLimit = 0,
     [string]$SetupSubnetPrefixLength = 'Auto',
-    [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 60,
+    [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 90,
     [string]$SetupSubnetConcurrencyGateRoot,
     [ValidateRange(10, 200)][int]$MinimumFreeDiskGB = 32,
     [ValidateRange(0, 365)][int]$DiskCleanupTempFileMinAgeDays = 1,
@@ -74,7 +74,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.31'
+$script:ScriptVersion = '0.1.37'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -2512,6 +2512,50 @@ function Resolve-SetupUpgradeSuccessOutcome {
     }
 }
 
+function Resolve-PendingRebootOutcome {
+    param(
+        [Parameter(Mandatory = $true)]$PendingRebootInfo,
+        [Parameter(Mandatory = $true)][string]$RebootReason
+    )
+
+    $outcome = [ordered]@{
+        Status = 'PENDING_REBOOT'
+        NextAction = if ($AllowReboot) { 'REBOOT_SCHEDULED' } else { 'REBOOT_DEVICE' }
+        Detail = ("A reboot is pending and must be cleared before the Windows 11 upgrade can continue. Source(s)={0}" -f $PendingRebootInfo.Source)
+        ExitCode = 3
+        ActionResult = ''
+    }
+
+    if ($AllowReboot -and -not $AuditOnly) {
+        $rebootResult = Invoke-ControlledRebootWhenNoUser -Reason $RebootReason
+        switch ($rebootResult) {
+            'ScheduledNoUser' {
+                $outcome.ActionResult = 'RebootScheduledNoUser'
+                $outcome.ExitCode = 0
+            }
+            'UserConnected' {
+                $outcome.Status = 'PENDING_REBOOT_USER_CONNECTED'
+                $outcome.NextAction = 'WAIT_USER_LOGOFF_OR_REBOOT_DEVICE'
+                $outcome.ActionResult = 'RebootSkippedUserConnected'
+                $outcome.ExitCode = 0
+            }
+            'UserDetectionFailed' {
+                $outcome.Status = 'PENDING_REBOOT_USER_DETECTION_FAILED'
+                $outcome.NextAction = 'CHECK_USER_SESSIONS_BEFORE_REBOOT'
+                $outcome.ActionResult = 'RebootSkippedUserDetectionFailed'
+                $outcome.ExitCode = 3
+            }
+            'ScheduleFailed' {
+                $outcome.Status = 'PENDING_REBOOT_SCHEDULE_FAILED'
+                $outcome.NextAction = 'CHECK_REBOOT_SCHEDULE'
+                $outcome.ActionResult = 'RebootScheduleFailed'
+                $outcome.ExitCode = 1
+            }
+        }
+    }
+
+    return [pscustomobject]$outcome
+}
 function Save-RunResult {
     param([Parameter(Mandatory = $true)]$Result)
 
@@ -2640,8 +2684,16 @@ try {
         $exitCode = 3
     }
     elseif ($DirectSetupUpgrade) {
-        Write-SmartLog 'Direct setup upgrade requested. Skipping Intune enrollment, compatibility-indicator, pending-reboot, and policy-blocker gates; Windows Setup will perform final validation.' 'WARN'
-        if ($freeGb -lt $MinimumFreeDiskGB) {
+        Write-SmartLog 'Direct setup upgrade requested. Skipping Intune enrollment, compatibility-indicator, and policy-blocker gates; pending reboot can still trigger a controlled reboot when allowed and no interactive user is connected; Windows Setup will perform final validation.' 'WARN'
+        if ($pendingReboot -and $AllowReboot -and -not $AuditOnly) {
+            $pendingOutcome = Resolve-PendingRebootOutcome -PendingRebootInfo $pendingRebootInfo -RebootReason 'SmartM365 Windows 11 direct setup readiness reboot - no interactive user connected'
+            $status = $pendingOutcome.Status
+            $nextAction = $pendingOutcome.NextAction
+            $detail = $pendingOutcome.Detail
+            $exitCode = $pendingOutcome.ExitCode
+            $actionResult = $pendingOutcome.ActionResult
+        }
+        elseif ($freeGb -lt $MinimumFreeDiskGB) {
             $status = 'INSUFFICIENT_DISK'
             $nextAction = 'FREE_DISK_SPACE'
             $detail = ("FreeDiskGB={0}; RequiredGB={1}; DirectSetup=True; Setup media copy was not attempted." -f $freeGb,$MinimumFreeDiskGB)
@@ -2695,42 +2747,12 @@ try {
         $exitCode = 3
     }
     elseif ($pendingReboot) {
-        $status = 'PENDING_REBOOT'
-        $nextAction = if ($AllowReboot) { 'REBOOT_SCHEDULED' } else { 'REBOOT_DEVICE' }
-        $detail = ("A reboot is pending and must be cleared before the Windows 11 upgrade can continue. Source(s)={0}" -f $pendingRebootInfo.Source)
-        if ($AllowReboot -and -not $AuditOnly) {
-            $rebootResult = Invoke-ControlledRebootWhenNoUser -Reason 'SmartM365 Windows 11 upgrade readiness reboot - no interactive user connected'
-            switch ($rebootResult) {
-                'ScheduledNoUser' {
-                    $actionResult = 'RebootScheduledNoUser'
-                    $exitCode = 0
-                }
-                'UserConnected' {
-                    $status = 'PENDING_REBOOT_USER_CONNECTED'
-                    $nextAction = 'WAIT_USER_LOGOFF_OR_REBOOT_DEVICE'
-                    $actionResult = 'RebootSkippedUserConnected'
-                    $exitCode = 0
-                }
-                'UserDetectionFailed' {
-                    $status = 'PENDING_REBOOT_USER_DETECTION_FAILED'
-                    $nextAction = 'CHECK_USER_SESSIONS_BEFORE_REBOOT'
-                    $actionResult = 'RebootSkippedUserDetectionFailed'
-                    $exitCode = 3
-                }
-                'ScheduleFailed' {
-                    $status = 'PENDING_REBOOT_SCHEDULE_FAILED'
-                    $nextAction = 'CHECK_REBOOT_SCHEDULE'
-                    $actionResult = 'RebootScheduleFailed'
-                    $exitCode = 1
-                }
-                default {
-                    $exitCode = 3
-                }
-            }
-        }
-        else {
-            $exitCode = 3
-        }
+        $pendingOutcome = Resolve-PendingRebootOutcome -PendingRebootInfo $pendingRebootInfo -RebootReason 'SmartM365 Windows 11 upgrade readiness reboot - no interactive user connected'
+        $status = $pendingOutcome.Status
+        $nextAction = $pendingOutcome.NextAction
+        $detail = $pendingOutcome.Detail
+        $exitCode = $pendingOutcome.ExitCode
+        $actionResult = $pendingOutcome.ActionResult
     }
     elseif ($policy.HasLegacyBlocker) {
         $status = 'WU_POLICY_BLOCKER'
@@ -2801,6 +2823,30 @@ catch {
         $status = 'INSUFFICIENT_DISK'
         $nextAction = 'FREE_DISK_SPACE'
         $actionResult = 'SetupMediaCopyInsufficientDisk'
+        $exitCode = 3
+    }
+    elseif ($detail -like '*No setup source subfolder under*contains language*in sources\lang.ini*') {
+        $status = 'SETUP_SOURCE_LANGUAGE_UNAVAILABLE'
+        $nextAction = 'ADD_SETUP_SOURCE_LANGUAGE_OR_CHANGE_SETUP_LANGUAGE'
+        $actionResult = 'SetupSourceLanguageUnavailable'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'setup.exe timed out after *') {
+        $status = 'SETUP_PROCESS_TIMEOUT'
+        $nextAction = 'CHECK_SETUP_LOGS'
+        $actionResult = 'SetupProcessTimeout'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Timed out waiting for setup subnet copy lease.*') {
+        $status = 'SETUP_SUBNET_COPY_LEASE_TIMEOUT'
+        $nextAction = 'CHECK_SETUP_SUBNET_COPY_LEASE'
+        $actionResult = 'SetupSubnetCopyLeaseTimeout'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Timed out waiting for setup source copy lease.*') {
+        $status = 'SETUP_SOURCE_COPY_LEASE_TIMEOUT'
+        $nextAction = 'CHECK_SETUP_SOURCE_COPY_LEASE'
+        $actionResult = 'SetupSourceCopyLeaseTimeout'
         $exitCode = 3
     }
     else {
