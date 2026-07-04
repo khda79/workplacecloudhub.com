@@ -279,6 +279,7 @@ provide the guarded action switches by default; direct PowerShell calls do not.
 - `-DirectSetupUpgrade`: starts Windows setup directly after setup media validation/cache preparation; the script still blocks when the system drive is below `-MinimumFreeDiskGB`.
 - `-AllowReboot`: permits a controlled reboot when a pending reboot blocks progress.
 - `-AllowSetupCompletionRebootWhenNoUser`: after setup upgrade exits successfully or requests a reboot, schedules a reboot only when no interactive user is connected. If user detection fails, no automatic reboot is scheduled. LOT/config value: `W11UT_SETUP_REBOOT_WHEN_NO_USER=1`.
+- `-AllowSetupProfileRepair`: after Windows Setup fails with `0x8007001F`, repairs Panther-confirmed duplicate `ProfileList` entries only when the blocking SID is a local account profile under `C:\Users`. The registry key is exported before deletion. LOT/config value: `W11UT_ALLOW_SETUP_PROFILE_REPAIR=1`.
 - `-SkipVirtualMachines`: skips detected virtual machines before repair, setup copy, or upgrade actions.
 - `-AllowDiskCleanup`: when free disk is below `-MinimumFreeDiskGB`, removes only rebuildable caches and old SmartM365 logs before failing the device for disk space.
 - `-AllowAdvancedDiskCleanup`: optional heavier cleanup. Removes old guarded Windows upgrade folders when no setup/update activity appears active, then runs `DISM /Online /Cleanup-Image /StartComponentCleanup` only after safe cleanup still leaves insufficient free disk.
@@ -288,11 +289,20 @@ The script blocks setup upgrade when the device is already Windows 11, is not Wi
 
 ### Setup failure 0x8007001F and duplicate profiles
 
-When Windows Setup exits with `0x8007001F` during `Gather data`, check Panther logs for profile migration errors such as `Duplicate profile detected for S-...` or invalid user profile messages. In that case the setup media is usually valid; Windows Setup is blocked by duplicate or inconsistent profile registry entries under:
+When Windows Setup exits with `0x8007001F` during `Gather data`, Panther logs can show profile migration errors such as `Duplicate profile detected for S-...` or invalid user profile messages. In that case the setup media is usually valid; Windows Setup is blocked by duplicate or inconsistent profile registry entries under:
 
 ```text
 HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList
 ```
+
+
+With `-AllowSetupProfileRepair` / `W11UT_ALLOW_SETUP_PROFILE_REPAIR=1`, the endpoint can repair the specific Panther-reported duplicate only when all safety checks pass: the blocking SID is a local account, the profile path is under `C:\Users`, another SID still points to the same profile path, and the matching profile user is not actively connected. The deleted registry key is first exported to:
+
+```text
+C:\ProgramData\SmartM365\Windows11UpgradeToolkit\Backups\ProfileList
+```
+
+After a repair, the endpoint returns `SETUP_PROFILE_DUPLICATE_REPAIRED_REBOOT_REQUIRED`; if `-AllowReboot` is enabled and no interactive user is connected, it schedules a reboot so the next cycle can retry setup.
 
 Useful remote check:
 
@@ -338,10 +348,15 @@ LOT-*\PsExecLogs
 LOT-*\Reports
 LOT-*\CentralLogs\Success\<Computer>\Latest
 LOT-*\CentralLogs\ADMIN_SHARE_UNREACHABLE\<Computer>\Latest
+LOT-*\CentralLogs\InsufficientDisk\<Computer>\Latest
+LOT-*\CentralLogs\Compatibility\<Computer>\Latest
+LOT-*\CentralLogs\SetupSourceLanguageUnavailable\<Computer>\Latest
+LOT-*\CentralLogs\SetupMigrationProfileFailure\<Computer>\Latest
+LOT-*\CentralLogs\SetupMigrationProfileRepaired\<Computer>\Latest
 LOT-*\CentralLogs\Errors\<Computer>\Latest
 ```
 
-By default, the orchestrator uses `W11UT_CENTRAL_LOG_COLLECTION_MODE=Standard` / `-CentralLogCollectionMode Standard`: it copies `LastRun.json`, launcher evidence, the main SmartM365 logs, small setup evidence, and `Output` files while skipping large files such as Panther/setup logs. Skipped files are listed in `CentralLogCollection.skipped.txt`; full target logs remain available through `\\<Computer>\C$\ProgramData\SmartM365\Windows11UpgradeToolkit\Logs`. Use `W11UT_CENTRAL_LOG_COLLECTION_MODE=Full` or `-CentralLogCollectionMode Full` to restore the previous full mirror of remote `Logs`, `Output`, and `LastRun.json`. Successful endpoint runs go to `Success`, administrative-share failures go to `ADMIN_SHARE_UNREACHABLE`, and all other failures go to `Errors`. When central log history is enabled, `Latest` is replaced by a timestamped `CycleN_yyyyMMdd-HHmmss` folder.
+By default, the orchestrator uses `W11UT_CENTRAL_LOG_COLLECTION_MODE=Standard` / `-CentralLogCollectionMode Standard`: it copies `LastRun.json`, launcher evidence, the main SmartM365 logs, small setup evidence, and `Output` files while skipping large files such as Panther/setup logs. Skipped files are listed in `CentralLogCollection.skipped.txt`; full target logs remain available through `\\<Computer>\C$\ProgramData\SmartM365\Windows11UpgradeToolkit\Logs`. Use `W11UT_CENTRAL_LOG_COLLECTION_MODE=Full` or `-CentralLogCollectionMode Full` to restore the previous full mirror of remote `Logs`, `Output`, and `LastRun.json`. Successful endpoint runs go to `Success`, administrative-share failures go to `ADMIN_SHARE_UNREACHABLE`, disk failures go to `InsufficientDisk`, compatibility failures go to `Compatibility`, missing setup languages go to `SetupSourceLanguageUnavailable`, duplicate profile setup failures go to `SetupMigrationProfileFailure`, successful duplicate profile repairs go to `SetupMigrationProfileRepaired`, and uncategorized failures go to `Errors`. When central log history is enabled, `Latest` is replaced by a timestamped `CycleN_yyyyMMdd-HHmmss` folder.
 
 ## Multi-LOT Concurrency
 
