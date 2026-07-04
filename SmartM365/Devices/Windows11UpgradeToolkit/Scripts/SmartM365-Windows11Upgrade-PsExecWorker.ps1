@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.13
+0.1.15
 #>
 
 #requires -Version 5.1
@@ -298,7 +298,7 @@ function Convert-ToPsExecRemoteArgument {
     return ('"{0}"' -f ($text -replace '"', '\"'))
 }
 
-$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')
+$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')
 
 function Get-ResultValue {
     param(
@@ -337,6 +337,15 @@ function Get-CentralLogBucket {
         if ($statusValue -eq 'SETUP_PROCESS_TIMEOUT') {
             return 'SetupProcessTimeout'
         }
+        if ($statusValue -eq 'SETUP_MEDIA_COPY_TIMEOUT') {
+            return 'SetupMediaCopyTimeout'
+        }
+        if ($statusValue -eq 'SETUP_MEDIA_COPY_FAILED') {
+            return 'SetupMediaCopyFailure'
+        }
+        if ($statusValue -eq 'SETUP_PROCESS_MONITOR_INTERRUPTED') {
+            return 'SetupProcessInterrupted'
+        }
         if ($statusValue -eq 'SETUP_SOURCE_LANGUAGE_UNAVAILABLE') {
             return 'SetupSourceLanguageUnavailable'
         }
@@ -365,6 +374,15 @@ function Get-CentralLogBucket {
         if ($detailValue -match 'setup\.exe timed out after') {
             return 'SetupProcessTimeout'
         }
+        if ($detailValue -match 'Robocopy setup media copy timed out after') {
+            return 'SetupMediaCopyTimeout'
+        }
+        if ($detailValue -match 'Robocopy setup media copy failed with exit code') {
+            return 'SetupMediaCopyFailure'
+        }
+        if ($detailValue -match 'Setup monitoring was interrupted before setup\.exe exit was observed') {
+            return 'SetupProcessInterrupted'
+        }
         if ($detailValue -match 'Timed out waiting for setup (subnet|source) copy lease') {
             return 'SetupCopyLeaseTimeout'
         }
@@ -383,7 +401,7 @@ function New-CentralLogTarget {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket
     )
 
     if ($KeepCentralLogHistory) {
@@ -404,7 +422,7 @@ function Publish-LauncherEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket,
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket,
         [Parameter(Mandatory = $true)][string]$WorkerLogPath,
         [AllowNull()][string]$StdoutLogPath,
         [AllowNull()][string]$StderrLogPath
@@ -545,7 +563,7 @@ function Collect-RemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupProcessTimeout','PsExecTimeout','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket
     )
 
     if ($NoCentralLogCollection) { return '' }

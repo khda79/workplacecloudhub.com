@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.38
+    0.1.40
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,7 +75,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.38'
+$script:ScriptVersion = '0.1.40'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
@@ -1745,6 +1745,37 @@ function Get-RobocopyExitCodeMeaning {
     return (@($flags.ToArray()) -join '+')
 }
 
+function Get-RobocopyLogErrorSummary {
+    param([Parameter(Mandatory = $true)][string]$LogPath)
+
+    if ([string]::IsNullOrWhiteSpace($LogPath) -or -not (Test-Path -LiteralPath $LogPath -PathType Leaf)) { return '' }
+
+    try {
+        $lines = @(Get-Content -LiteralPath $LogPath -Tail 250 -ErrorAction Stop)
+        $errorLines = @($lines | Where-Object { [string]$_ -match '(?i)(ERREUR|ERROR)\s+\d+' })
+        if ($errorLines.Count -eq 0) { return '' }
+
+        $codes = New-Object System.Collections.ArrayList
+        foreach ($line in $errorLines) {
+            $text = [string]$line
+            if ($text -match '(?i)(?:ERREUR|ERROR)\s+(\d+)') {
+                if (-not @($codes.ToArray()).Contains($matches[1])) { [void]$codes.Add($matches[1]) }
+            }
+        }
+
+        $lastError = ([string]$errorLines[-1]) -replace '[\r\n]+', ' '
+        $lastError = $lastError.Trim()
+        if ($lastError.Length -gt 260) { $lastError = $lastError.Substring(0, 260) + '...' }
+
+        $codeText = (@($codes.ToArray()) -join ',')
+        if ([string]::IsNullOrWhiteSpace($codeText)) { $codeText = 'Unknown' }
+        return ("RobocopyErrors={0}; ErrorCodes={1}; LastRobocopyError={2}" -f $errorLines.Count,$codeText,$lastError)
+    }
+    catch {
+        return ("RobocopyErrorSummaryUnavailable={0}" -f $_.Exception.Message)
+    }
+}
+
 function Format-SmartProcessArgument {
     param([AllowNull()][string]$Argument)
 
@@ -1775,9 +1806,12 @@ function Invoke-RobocopySetupMediaCopy {
 
         $now = Get-Date
         if ($timeoutAt -and $now -ge $timeoutAt) {
-            Write-SmartLog ("Robocopy setup media copy timeout reached after {0} minute(s). PID={1}; ElapsedMinutes={2}; Log={3}" -f $SetupMediaCopyTimeoutMinutes,$process.Id,([math]::Round(($now - $startedAt).TotalMinutes, 1)),$LogPath) 'ERROR'
+            $robocopyErrorSummary = Get-RobocopyLogErrorSummary -LogPath $LogPath
+            $timeoutDetail = ("Robocopy setup media copy timed out after {0} minute(s). Log={1}" -f $SetupMediaCopyTimeoutMinutes,$LogPath)
+            if (-not [string]::IsNullOrWhiteSpace($robocopyErrorSummary)) { $timeoutDetail = ("{0}; {1}" -f $timeoutDetail,$robocopyErrorSummary) }
+            Write-SmartLog ("Robocopy setup media copy timeout reached after {0} minute(s). PID={1}; ElapsedMinutes={2}; Log={3}; {4}" -f $SetupMediaCopyTimeoutMinutes,$process.Id,([math]::Round(($now - $startedAt).TotalMinutes, 1)),$LogPath,$robocopyErrorSummary) 'ERROR'
             try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch { Write-SmartLog ("Failed to stop timed-out robocopy PID={0}: {1}" -f $process.Id,$_.Exception.Message) 'WARN' }
-            throw ("Robocopy setup media copy timed out after {0} minute(s). Log={1}" -f $SetupMediaCopyTimeoutMinutes,$LogPath)
+            throw $timeoutDetail
         }
 
         if (($now - $lastHeartbeatAt).TotalSeconds -ge $heartbeatSeconds) {
@@ -1864,7 +1898,9 @@ function Copy-SetupMediaToLocalCache {
 
             if ($copyExit -gt 7) {
                 $robocopyMeaning = Get-RobocopyExitCodeMeaning -ExitCode $copyExit
+                $robocopyErrorSummary = Get-RobocopyLogErrorSummary -LogPath $robocopyLog
                 $failureDetail = "Robocopy setup media copy failed with exit code $copyExit ($robocopyMeaning). Log=$robocopyLog"
+                if (-not [string]::IsNullOrWhiteSpace($robocopyErrorSummary)) { $failureDetail = ("{0}; {1}" -f $failureDetail,$robocopyErrorSummary) }
                 try {
                     $script:SetupCacheAction = 'CopyFailedCacheCleared'
                     Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail
@@ -2288,7 +2324,13 @@ function Invoke-SetupUpgrade {
     $heartbeatSeconds = [math]::Max(30, [int]$SetupProcessHeartbeatSeconds)
     $timeoutAt = if ($SetupProcessTimeoutMinutes -gt 0) { $startedAt.AddMinutes($SetupProcessTimeoutMinutes) } else { $null }
 
-    Write-SmartLog ("setup.exe started. {0}; HeartbeatSeconds={1}; TimeoutMinutes={2}" -f (Format-SetupProcessSnapshot -Process $process),$heartbeatSeconds,$SetupProcessTimeoutMinutes)
+    $script:SetupProcessStarted = $true
+    $script:SetupProcessExited = $false
+    $script:SetupProcessPid = [string]$process.Id
+    $script:SetupProcessStartTime = try { $process.StartTime.ToString('yyyy-MM-dd HH:mm:ss') } catch { '' }
+    $script:SetupProcessLastSnapshot = Format-SetupProcessSnapshot -Process $process
+    $script:SetupProcessLastHeartbeatUtc = (Get-Date).ToUniversalTime().ToString('o')
+    Write-SmartLog ("setup.exe started. {0}; HeartbeatSeconds={1}; TimeoutMinutes={2}" -f $script:SetupProcessLastSnapshot,$heartbeatSeconds,$SetupProcessTimeoutMinutes)
 
     while ($true) {
         try { $process.Refresh() } catch { }
@@ -2303,7 +2345,9 @@ function Invoke-SetupUpgrade {
         }
 
         if (($now - $lastHeartbeatAt).TotalSeconds -ge $heartbeatSeconds) {
-            Write-SmartLog ("setup.exe still running. ElapsedMinutes={0}; {1}" -f ([math]::Round(($now - $startedAt).TotalMinutes, 1)),(Format-SetupProcessSnapshot -Process $process))
+            $script:SetupProcessLastSnapshot = Format-SetupProcessSnapshot -Process $process
+            $script:SetupProcessLastHeartbeatUtc = $now.ToUniversalTime().ToString('o')
+            Write-SmartLog ("setup.exe still running. ElapsedMinutes={0}; {1}" -f ([math]::Round(($now - $startedAt).TotalMinutes, 1)),$script:SetupProcessLastSnapshot)
             $lastHeartbeatAt = $now
         }
 
@@ -2311,7 +2355,11 @@ function Invoke-SetupUpgrade {
     }
 
     $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $process.ExitCode
-    Write-SmartLog ("setup.exe exited. ElapsedMinutes={0}; {1}; {2}" -f ([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),(Format-SetupProcessSnapshot -Process $process),(Format-SetupExitCodeInfo -Info $setupExitInfo))
+    $script:SetupProcessExited = $true
+    $script:SetupProcessExitCode = [string]$process.ExitCode
+    $script:SetupProcessLastSnapshot = Format-SetupProcessSnapshot -Process $process
+    $script:SetupProcessLastHeartbeatUtc = (Get-Date).ToUniversalTime().ToString('o')
+    Write-SmartLog ("setup.exe exited. ElapsedMinutes={0}; {1}; {2}" -f ([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),$script:SetupProcessLastSnapshot,(Format-SetupExitCodeInfo -Info $setupExitInfo))
     return $process.ExitCode
 }
 
@@ -2829,6 +2877,13 @@ $script:SetupProfileRepairBlockingSid = ''
 $script:SetupProfileRepairKeptSid = ''
 $script:SetupProfileRepairProfilePath = ''
 $script:SetupProfileRepairBackupPath = ''
+$script:SetupProcessStarted = $false
+$script:SetupProcessExited = $false
+$script:SetupProcessPid = ''
+$script:SetupProcessStartTime = ''
+$script:SetupProcessLastSnapshot = ''
+$script:SetupProcessLastHeartbeatUtc = ''
+$script:SetupProcessExitCode = ''
 $computerSystem = $null
 
 try {
@@ -3065,7 +3120,24 @@ try {
     }
 }
 catch [System.OperationCanceledException] {
-    Write-SmartLog $_.Exception.Message 'WARN'
+    $operationDetail = [string]$_.Exception.Message
+    Write-SmartLog $operationDetail 'WARN'
+    if ($status -eq 'UNKNOWN' -and $script:SetupProcessStarted) {
+        $status = 'SETUP_PROCESS_MONITOR_INTERRUPTED'
+        $nextAction = 'CHECK_SETUP_PROCESS_OR_OS_STATUS'
+        $exitCode = 3
+        $runningText = 'Unknown'
+        if (-not [string]::IsNullOrWhiteSpace($script:SetupProcessPid)) {
+            try {
+                $runningProcess = Get-Process -Id ([int]$script:SetupProcessPid) -ErrorAction Stop
+                $runningText = if ($runningProcess.HasExited) { 'False' } else { 'True' }
+            }
+            catch { $runningText = 'False' }
+        }
+        $detail = ("Setup monitoring was interrupted before setup.exe exit was observed. PID={0}; StillRunning={1}; Started={2}; LastHeartbeatUtc={3}; LastSnapshot={4}; Interruption={5}" -f $script:SetupProcessPid,$runningText,$script:SetupProcessStartTime,$script:SetupProcessLastHeartbeatUtc,$script:SetupProcessLastSnapshot,$operationDetail)
+        $actionResult = 'SetupProcessMonitorInterrupted'
+        Write-SmartLog $detail 'WARN'
+    }
 }
 catch {
     $detail = $_.Exception.Message
@@ -3086,6 +3158,18 @@ catch {
         $nextAction = 'CHECK_SETUP_LOGS'
         $actionResult = 'SetupProcessTimeout'
         $exitCode = 3
+    }
+    elseif ($detail -like 'Robocopy setup media copy timed out after *') {
+        $status = 'SETUP_MEDIA_COPY_TIMEOUT'
+        $nextAction = 'CHECK_SETUP_SOURCE_NETWORK_OR_ROBOCOPY_LOG'
+        $actionResult = 'SetupMediaCopyTimeout'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Robocopy setup media copy failed with exit code *') {
+        $status = 'SETUP_MEDIA_COPY_FAILED'
+        $nextAction = 'CHECK_ROBOCOPY_LOG_AND_SETUP_SOURCE_NETWORK'
+        $actionResult = 'SetupMediaCopyFailed'
+        $exitCode = 1
     }
     elseif ($detail -like 'Timed out waiting for setup subnet copy lease.*') {
         $status = 'SETUP_SUBNET_COPY_LEASE_TIMEOUT'
