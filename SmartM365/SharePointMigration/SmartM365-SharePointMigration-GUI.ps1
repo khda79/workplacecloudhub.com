@@ -11,7 +11,7 @@
     Loads the GUI resources and exits without showing the window.
 
 .VERSION
-    1.0.6
+    1.0.7
 #>
 
 #Requires -Version 5.1
@@ -22,7 +22,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.6'
+$script:AppVersion = '1.0.7'
 $script:ScriptRoot = $PSScriptRoot
 
 Add-Type -AssemblyName PresentationFramework
@@ -30,6 +30,11 @@ Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
 . (Join-Path $script:ScriptRoot 'SmartM365.GuiSplash.ps1')
+
+$updateCheckModulePath = Join-Path $script:ScriptRoot 'SmartM365.GuiUpdateCheck.ps1'
+if (Test-Path -LiteralPath $updateCheckModulePath -PathType Leaf) {
+    . $updateCheckModulePath
+}
 
 $script:Splash = $null
 if (-not $ValidateOnly) {
@@ -890,6 +895,7 @@ $script:CurrentMigration  = $null
 $script:CurrentStatus     = $null
 $script:ConfigEditorLoading = $false
 $script:ConfigEditorDirty   = $false
+$script:UpdateCheckTimer     = $null
 
 # ---------------------------------------------------------------------------
 # Logo / icon
@@ -1416,6 +1422,23 @@ $btnRefreshLogs.Add_Click({ Refresh-LogList })
 # ---------------------------------------------------------------------------
 # Init and show
 # ---------------------------------------------------------------------------
+
+if (Get-Command -Name Start-SmartM365GuiUpdateCheck -ErrorAction SilentlyContinue) {
+    $script:Window.Add_ContentRendered({
+        try {
+            $manifestPath = Join-Path $script:ScriptRoot 'SmartM365.GuiUpdateCheck.psd1'
+            $script:UpdateCheckTimer = Start-SmartM365GuiUpdateCheck -Owner $script:Window -ManifestPath $manifestPath -AppRoot $script:ScriptRoot -OnStatus {
+                param(
+                    [string]$Message,
+                    [string]$Title
+                )
+                $null = $Message
+                $script:Window.Title = ("{0} - {1}" -f $script:AppName, $Title)
+            }
+        }
+        catch { [void]$_.Exception }
+    })
+}
 
 Load-Migrations
 Close-SmartM365GuiSplash -Splash $script:Splash
