@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.18
+0.1.19
 #>
 param(
     [switch]$ValidateOnly
@@ -745,6 +745,11 @@ if ($splashModulePath) {
     $splash = Start-SmartM365GuiSplash -Framework Wpf -ProductName 'Windows 11 Upgrade LOT Launcher'
 }
 
+$updateCheckModulePath = Join-Path $toolkitRoot 'SmartM365.GuiUpdateCheck.ps1'
+if (Test-Path -LiteralPath $updateCheckModulePath -PathType Leaf) {
+    . $updateCheckModulePath
+}
+
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -1297,6 +1302,7 @@ if (Test-Path -LiteralPath $headerLogoPath -PathType Leaf) {
 $script:Lots = @()
 $script:SelectedLot = $null
 $script:LastSingleRunFolder = $null
+$script:UpdateCheckTimer = $null
 
 function Add-Status {
     param(
@@ -1924,6 +1930,22 @@ $window.Add_Closed({
 if (Get-Command -Name Set-SmartM365WpfWindowVisible -ErrorAction SilentlyContinue) {
     $window.Add_SourceInitialized({
         Set-SmartM365WpfWindowVisible -Window $window
+    })
+}
+
+if (Get-Command -Name Start-SmartM365GuiUpdateCheck -ErrorAction SilentlyContinue) {
+    $window.Add_ContentRendered({
+        try {
+            $manifestPath = Join-Path $toolkitRoot 'SmartM365.GuiUpdateCheck.psd1'
+            $script:UpdateCheckTimer = Start-SmartM365GuiUpdateCheck -Owner $window -ManifestPath $manifestPath -AppRoot $toolkitRoot -OnStatus {
+                param(
+                    [string]$Message,
+                    [string]$Title
+                )
+                Add-Status -Title $Title -Message $Message
+            }
+        }
+        catch { [void]$_.Exception }
     })
 }
 
