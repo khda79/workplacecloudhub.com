@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.17
+0.1.19
 #>
 
 #requires -Version 5.1
@@ -560,6 +560,12 @@ function Update-ResultFromLastRun {
     if ($Result.RemoteStatus) {
         $Result.LauncherStatus = $Result.RemoteStatus
         $Result.ExitCode = [string]$LastRun.ExitCode
+        if ($LastRun.PSObject.Properties['Detail']) {
+            $Result.Detail = [string]$LastRun.Detail
+        }
+        else {
+            $Result.Detail = ''
+        }
     }
     if ($LastRun.PSObject.Properties['SetupCacheAction']) {
         $Result.SetupCacheAction = [string]$LastRun.SetupCacheAction
@@ -649,6 +655,7 @@ $result = [ordered]@{
     ControlledRebootUsers = ''
     RemoteLogsPath = ''
     PsExecLogPath = $logPath
+    JobErrorMessage = ''
 }
 
 try {
@@ -769,8 +776,14 @@ try {
     try { $process.Refresh() } catch { }
     if ($result.LauncherStatus -eq 'UNKNOWN') {
         if (-not $psExecTimedOut -and $process.HasExited) {
-            $result.ExitCode = [string]$process.ExitCode
-            $result.LauncherStatus = if ($process.ExitCode -eq 0) { 'SUCCESS' } else { "PSEXEC_EXIT_$($process.ExitCode)" }
+            if ($null -eq $process.ExitCode) {
+                $result.LauncherStatus = 'PSEXEC_EXIT_UNKNOWN'
+                $result.Detail = 'PsExec process exited but no native exit code was available.'
+            }
+            else {
+                $result.ExitCode = [string]$process.ExitCode
+                $result.LauncherStatus = if ($process.ExitCode -eq 0) { 'SUCCESS' } else { "PSEXEC_EXIT_$($process.ExitCode)" }
+            }
         }
     }
 
@@ -793,6 +806,13 @@ try {
         if ($nativeExitLine -and $nativeExitLine -match 'with error code\s+(?<Code>-?\d+)') {
             $result.ExitCode = $Matches.Code
             Add-Content -LiteralPath $logPath -Value ("[{0}] PsExec exit code recovered from native STDERR: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$result.ExitCode) -Encoding UTF8
+            $recoveredPsExecExitCode = 0
+            if ([int]::TryParse([string]$result.ExitCode, [ref]$recoveredPsExecExitCode) -and $result.LauncherStatus -in @('UNKNOWN','PSEXEC_EXIT_UNKNOWN','PSEXEC_EXIT_')) {
+                $result.LauncherStatus = if ($recoveredPsExecExitCode -eq 0) { 'SUCCESS' } else { "PSEXEC_EXIT_$recoveredPsExecExitCode" }
+                if ($result.LauncherStatus -ne 'PSEXEC_EXIT_UNKNOWN' -and $result.Detail -eq 'PsExec process exited but no native exit code was available.') {
+                    $result.Detail = ''
+                }
+            }
         }
     }
 
@@ -805,11 +825,29 @@ try {
     }
 
     $centralLogBucket = Get-CentralLogBucket -Result $result
-    $result.RemoteLogsPath = Collect-RemoteEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket $centralLogBucket
+    try {
+        $result.RemoteLogsPath = Collect-RemoteEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket $centralLogBucket
+    }
+    catch {
+        $centralLogError = "Central log collection failed: $($_.Exception.Message)"
+        $result.JobErrorMessage = $centralLogError
+        Add-Content -LiteralPath $logPath -Value ("[{0}] WARN {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$centralLogError) -Encoding UTF8
+        if ([string]::IsNullOrWhiteSpace($result.RemoteStatus)) {
+            throw
+        }
+    }
 }
 catch {
-    $result.LauncherStatus = 'ERROR'
-    $result.Detail = $_.Exception.Message
+    if (-not [string]::IsNullOrWhiteSpace($result.RemoteStatus)) {
+        $result.LauncherStatus = $result.RemoteStatus
+        if ([string]::IsNullOrWhiteSpace($result.JobErrorMessage)) {
+            $result.JobErrorMessage = $_.Exception.Message
+        }
+    }
+    else {
+        $result.LauncherStatus = 'ERROR'
+        $result.Detail = $_.Exception.Message
+    }
     Add-Content -LiteralPath $logPath -Value ("[{0}] ERROR {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$_.Exception.Message) -Encoding UTF8
     if ([string]::IsNullOrWhiteSpace($result.RemoteLogsPath)) {
         $result.RemoteLogsPath = Publish-LauncherEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket 'Errors' -WorkerLogPath $logPath -StdoutLogPath $stdoutPath -StderrLogPath $stderrPath
