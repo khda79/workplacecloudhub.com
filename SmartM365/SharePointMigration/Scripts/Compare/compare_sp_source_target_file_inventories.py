@@ -46,6 +46,28 @@ MISSING_IN_TARGET_COLUMNS = INVENTORY_COLUMNS + [
     "TargetVersionComparisons",
 ]
 
+MISSING_DIAGNOSTIC_COLUMNS = [
+    "Key",
+    "DiagnosticCategory",
+    "DiagnosticSignal",
+    "ActionHint",
+    "SourceFileName",
+    "SourceSizeBytes",
+    "SourceVersion",
+    "SourceModified",
+    "SourceWebUrl",
+    "SourceLibraryTitle",
+    "SourceServerRelativeUrl",
+    "TargetCandidateCount",
+    "TargetCandidateFileName",
+    "TargetCandidateSizeBytes",
+    "TargetCandidateVersion",
+    "TargetCandidateModified",
+    "TargetCandidateWebUrl",
+    "TargetCandidateLibraryTitle",
+    "TargetCandidateServerRelativeUrl",
+]
+
 DIFFERENT_SIZE_COLUMNS = [
     "Key",
     "SourceSizeBytes",
@@ -407,12 +429,16 @@ def replace_encoded_sharegate_character(match):
         return match.group(0)
 
     if character in SHAREGATE_REPLACED_CHARACTERS or character in {"/", "\\"} or character == "\t" or not character.isprintable():
+        if character == "%":
+            return SHAREGATE_REPLACEMENT_CHARACTER
         return SHAREGATE_REPLACEMENT_CHARACTER + match.group(1)
 
     return match.group(0)
 
 
 def replace_literal_percent_sequence(match):
+    if match.group(1).lower() == "25":
+        return SHAREGATE_REPLACEMENT_CHARACTER
     return SHAREGATE_REPLACEMENT_CHARACTER + match.group(1)
 
 
@@ -1084,6 +1110,147 @@ def missing_reason_details(source_record, target_path_records):
     }
 
 
+def normalized_text(value):
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def source_has_sharegate_sensitive_text(record):
+    source_path = str(record.get("ServerRelativeUrl") or record.get("FileUrl") or record.get("FileName") or "")
+    return bool(
+        re.search(r"%(?:26|23|25|22|2A|3A|3B|3C|3E|3F|5C|7B|7D|7E)", source_path, flags=re.IGNORECASE)
+        or any(character in source_path for character in "&#*:;<>?\\{}~")
+    )
+
+
+def target_candidate_score(source_record, target_record):
+    score = 0
+    if normalized_text(source_record.get("FileName")) == normalized_text(target_record.get("FileName")):
+        score += 20
+    if as_int(source_record.get("SizeBytes")) == as_int(target_record.get("SizeBytes")):
+        score += 15
+    if normalize_version(source_record.get("Version")) == normalize_version(target_record.get("Version")):
+        score += 15
+    if normalized_text(source_record.get("LibraryTitle")) == normalized_text(target_record.get("LibraryTitle")):
+        score += 8
+    if normalized_text(source_record.get("WebTitle")) == normalized_text(target_record.get("WebTitle")):
+        score += 4
+    if normalized_text(source_record.get("Modified")) == normalized_text(target_record.get("Modified")):
+        score += 3
+    return score
+
+
+def best_target_candidate(source_record, target_records, predicate):
+    candidates = [record for record in target_records if predicate(record)]
+    if not candidates:
+        return [], None
+    candidates.sort(key=lambda record: (-target_candidate_score(source_record, record), str(record.get("ServerRelativeUrl") or "").lower()))
+    return candidates, candidates[0]
+
+
+def missing_diagnostic_row(source_record, category, signal, action_hint, candidates=None, candidate=None):
+    candidates = candidates or []
+    candidate = candidate or (candidates[0] if candidates else {})
+    return {
+        "Key": source_record.get("Key", ""),
+        "DiagnosticCategory": category,
+        "DiagnosticSignal": signal,
+        "ActionHint": action_hint,
+        "SourceFileName": source_record.get("FileName", ""),
+        "SourceSizeBytes": source_record.get("SizeBytes", ""),
+        "SourceVersion": source_record.get("Version", ""),
+        "SourceModified": source_record.get("Modified", ""),
+        "SourceWebUrl": source_record.get("WebUrl", ""),
+        "SourceLibraryTitle": source_record.get("LibraryTitle", ""),
+        "SourceServerRelativeUrl": source_record.get("ServerRelativeUrl", ""),
+        "TargetCandidateCount": len(candidates),
+        "TargetCandidateFileName": candidate.get("FileName", ""),
+        "TargetCandidateSizeBytes": candidate.get("SizeBytes", ""),
+        "TargetCandidateVersion": candidate.get("Version", ""),
+        "TargetCandidateModified": candidate.get("Modified", ""),
+        "TargetCandidateWebUrl": candidate.get("WebUrl", ""),
+        "TargetCandidateLibraryTitle": candidate.get("LibraryTitle", ""),
+        "TargetCandidateServerRelativeUrl": candidate.get("ServerRelativeUrl", ""),
+    }
+
+
+def missing_diagnostics(source_record, missing_details, target_path_records, target_records):
+    rows = []
+    reason = missing_details.get("MissingReason")
+    if reason == "VersionMismatch":
+        rows.append(
+            missing_diagnostic_row(
+                source_record,
+                "WrongVersion",
+                "Target contains the same normalized path, but not the source version.",
+                "Remigrate or restore the expected source version.",
+                target_path_records,
+            )
+        )
+    elif reason == "TargetZeroBytes":
+        rows.append(
+            missing_diagnostic_row(
+                source_record,
+                "ZeroByteTarget",
+                "Target contains the same normalized path/version with a zero-byte file.",
+                "Delete the zero-byte target file and recopy it.",
+                target_path_records,
+            )
+        )
+    else:
+        source_name = normalized_text(source_record.get("FileName"))
+        source_size = as_int(source_record.get("SizeBytes"))
+        source_version = normalize_version(source_record.get("Version"))
+        source_modified = normalized_text(source_record.get("Modified"))
+        candidates, candidate = best_target_candidate(
+            source_record,
+            target_records,
+            lambda record: normalized_text(record.get("FileName")) == source_name
+            and as_int(record.get("SizeBytes")) == source_size
+            and normalize_version(record.get("Version")) == source_version,
+        )
+        if candidates:
+            rows.append(
+                missing_diagnostic_row(
+                    source_record,
+                    "PossibleRelocatedInTarget",
+                    "Target contains the same file name, size, and version at another path.",
+                    "Review whether the file was intentionally moved or should be recopied to the expected path.",
+                    candidates,
+                    candidate,
+                )
+            )
+
+        candidates, candidate = best_target_candidate(
+            source_record,
+            target_records,
+            lambda record: normalized_text(record.get("FileName")) == source_name
+            and as_int(record.get("SizeBytes")) == source_size
+            and normalized_text(record.get("Modified")) == source_modified,
+        )
+        if candidates:
+            rows.append(
+                missing_diagnostic_row(
+                    source_record,
+                    "PossibleSameContentDifferentVersion",
+                    "Target contains the same file name, size, and modified date, but not necessarily the same version.",
+                    "Review target version metadata before deciding whether to recopy.",
+                    candidates,
+                    candidate,
+                )
+            )
+
+        if source_has_sharegate_sensitive_text(source_record):
+            rows.append(
+                missing_diagnostic_row(
+                    source_record,
+                    "PossibleShareGateRename",
+                    "Source path contains characters or encoded sequences that ShareGate may rename.",
+                    "Check the target for a ShareGate-renamed path before treating it as truly absent.",
+                )
+            )
+    return rows
+
+
 def load_web_url_filter(path, prefixes, mappings=None):
     if not path:
         return None
@@ -1176,6 +1343,7 @@ def main():
     compare_modified_dates = args.modified_date_tolerance_minutes >= 0
 
     missing_path = output_directory / "MissingInTarget.csv"
+    missing_diagnostics_path = output_directory / "MissingDiagnostics.csv"
     extra_path = output_directory / "ExtraInTarget.csv"
     extra_folders_path = output_directory / "ExtraFoldersInTarget.csv"
     different_size_path = output_directory / "DifferentSize.csv"
@@ -1262,6 +1430,7 @@ def main():
 
         target_seen = set()
         target_valid_seen = set()
+        target_records = []
         target_path_index = {}
         target_total_rows = 0
         target_filtered_rows = 0
@@ -1333,6 +1502,7 @@ def main():
                 target_seen.add(key)
                 update_target_library(library_stats, target_lib_key, target_web_path, row, as_int(row.get("SizeBytes")) or 0)
                 target_record = inventory_record(row, key)
+                target_records.append(target_record)
                 target_path_index.setdefault(path_key, []).append(target_record)
                 source_record = source_index.get(key)
                 source_size = as_int(source_record["SizeBytes"]) if source_record is not None else None
@@ -1560,9 +1730,18 @@ def main():
 
     print("Finding source files missing from target...")
     missing = 0
-    with missing_path.open("w", encoding="utf-8", newline="") as missing_handle:
+    missing_diagnostic_count = 0
+    with missing_path.open("w", encoding="utf-8", newline="") as missing_handle, missing_diagnostics_path.open(
+        "w", encoding="utf-8", newline=""
+    ) as missing_diagnostics_handle:
         missing_writer = csv.DictWriter(missing_handle, fieldnames=MISSING_IN_TARGET_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
+        missing_diagnostics_writer = csv.DictWriter(
+            missing_diagnostics_handle,
+            fieldnames=MISSING_DIAGNOSTIC_COLUMNS,
+            delimiter=CSV_OUTPUT_DELIMITER,
+        )
         missing_writer.writeheader()
+        missing_diagnostics_writer.writeheader()
         for key, record in source_index.items():
             if key not in target_valid_seen:
                 missing += 1
@@ -1570,9 +1749,14 @@ def main():
                 web_path = record.get("WebPath") or ""
                 library_path = record.get("LibraryPath") or ""
                 ensure_library_summary(library_stats, lib_key, web_path, library_path)["MissingInTarget"] += 1
+                target_path_records = target_path_index.get(comparison_path_key(key), [])
+                missing_details = missing_reason_details(record, target_path_records)
                 missing_row = dict(record)
-                missing_row.update(missing_reason_details(record, target_path_index.get(comparison_path_key(key), [])))
+                missing_row.update(missing_details)
                 missing_writer.writerow(missing_row)
+                for diagnostic_row in missing_diagnostics(record, missing_details, target_path_records, target_records):
+                    missing_diagnostics_writer.writerow(diagnostic_row)
+                    missing_diagnostic_count += 1
 
     report_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     html_summary_path = output_directory / f"{args.comparison_name}-summary-{report_timestamp}.html"
@@ -1599,6 +1783,7 @@ def main():
         "ChangedModifiedDate": changed_modified_date,
         "TargetOlderThanSource": target_older_than_source,
         "ChangedVersion": changed_version,
+        "MissingDiagnostics": missing_diagnostic_count,
         "SizeToleranceBytes": args.size_tolerance_bytes,
         "ModifiedDateComparisonEnabled": compare_modified_dates,
         "ModifiedDateToleranceMinutes": args.modified_date_tolerance_minutes if compare_modified_dates else "",
@@ -1608,6 +1793,7 @@ def main():
         "ComparisonKeyIncludesVersion": True,
         "DuplicateKeysCsv": str(duplicate_keys_path),
         "ExtraFoldersInTargetCsv": str(extra_folders_path),
+        "MissingDiagnosticsCsv": str(missing_diagnostics_path),
         "ChangedModifiedDateCsv": str(changed_modified_date_path) if compare_modified_dates else "",
         "TargetOlderThanSourceCsv": str(target_older_than_source_path) if compare_modified_dates else "",
         "ChangedVersionCsv": str(changed_version_path),
@@ -1667,6 +1853,7 @@ def main():
             ("Summary", summary_path, "Run counters and comparison inputs."),
             ("Library summary", library_summary_path, "Library-level file comparison summary."),
             ("Missing in target", missing_path, "Source files absent from target or not usable at target."),
+            ("Missing diagnostics", missing_diagnostics_path, "Diagnostic hints for missing files: wrong version, zero-byte target, relocated candidates, and ShareGate rename suspects."),
             ("Extra in target", extra_path, "Target files not found in source."),
             ("Different size", different_size_path, "Matched files with size differences beyond tolerance."),
             ("Changed modified date", changed_modified_date_path, "Matched files with modified-date differences beyond tolerance."),
@@ -1687,6 +1874,7 @@ def main():
     print(f"Summary: {summary_path}")
     print(f"Library summary: {library_summary_path}")
     print(f"Extra folders in target: {extra_folders_path}")
+    print(f"Missing diagnostics: {missing_diagnostics_path}")
     print(f"Changed modified date: {changed_modified_date_path}")
     print(f"Target older than source: {target_older_than_source_path}")
     print(f"Changed version: {changed_version_path}")
