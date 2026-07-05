@@ -120,6 +120,19 @@ LOT-X\Run-Windows11UpgradeRepairWithPsExec-Once.cmd
 The launcher GUI reads the same config file to prefill its Options tab, then passes the
 selected values to the LOT window it starts.
 
+### GUI startup update check
+
+When the LOT launcher GUI opens, it starts a non-blocking GitHub version check from the
+local autonomous helper `SmartM365.GuiUpdateCheck.ps1` and the local manifest
+`SmartM365.GuiUpdateCheck.psd1`. The check compares the local GUI, endpoint script, PsExec
+launcher, and PsExec worker versions with the `main` branch on GitHub. If GitHub has a newer
+version, the GUI shows a short update prompt with an option to open the toolkit folder on
+GitHub.
+
+The update check is best-effort only: network, proxy, or GitHub errors do not block the GUI
+or LOT launches. Set `SMARTM365_GUI_UPDATE_CHECK=0` to disable this behavior for all
+SmartM365 GUI apps, or `W11UT_GUI_UPDATE_CHECK=0` to disable it only for this toolkit.
+
 ### Optional setup media SHA256 manifest
 
 For stronger corruption detection, generate one manifest per Windows setup media folder
