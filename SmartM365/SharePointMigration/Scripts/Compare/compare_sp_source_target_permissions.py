@@ -571,7 +571,7 @@ def replace_encoded_sharegate_character(match):
         return match.group(0)
 
     if character in SHAREGATE_REPLACED_CHARACTERS or character in {"/", "\\"} or character == "\t" or not character.isprintable():
-        return SHAREGATE_REPLACEMENT_CHARACTER
+        return SHAREGATE_REPLACEMENT_CHARACTER + match.group(1)
 
     return match.group(0)
 
