@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.6
+1.7
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.6'
+$GuiVersion = '1.7'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -320,6 +320,52 @@ function ConvertTo-CmdSetCommand {
     return 'set "{0}={1}"' -f $Name, ($Value -replace '"', '\"')
 }
 
+
+function New-GuiLaunchCommandFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string[]]$Commands,
+        [string]$NamePrefix = 'EHJIR-GUI',
+        [switch]$PauseWhenDone
+    )
+
+    $launcherRoot = Join-Path $env:TEMP 'SmartM365\IntuneHybridJoinToolkit\GuiLaunchers'
+    New-Item -ItemType Directory -Path $launcherRoot -Force | Out-Null
+
+    $safePrefix = [regex]::Replace($NamePrefix, '[^A-Za-z0-9._-]+', '-').Trim('-._')
+    if ([string]::IsNullOrWhiteSpace($safePrefix)) { $safePrefix = 'EHJIR-GUI' }
+
+    $launchPath = Join-Path $launcherRoot ('{0}_{1}.cmd' -f $safePrefix,(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+    $launchLines = New-Object System.Collections.Generic.List[string]
+    $launchLines.Add('@echo off')
+    $launchLines.Add('setlocal')
+    $launchLines.Add(('cd /d {0}' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
+    foreach ($command in @($Commands)) {
+        if (-not [string]::IsNullOrWhiteSpace($command)) {
+            $launchLines.Add($command)
+        }
+    }
+    $launchLines.Add('set "EXITCODE=%ERRORLEVEL%"')
+    if ($PauseWhenDone) {
+        $launchLines.Add('echo.')
+        $launchLines.Add('echo Finished with exit code %EXITCODE%.')
+        $launchLines.Add('pause')
+    }
+    $launchLines.Add('exit /b %EXITCODE%')
+
+    Set-Content -LiteralPath $launchPath -Value $launchLines -Encoding ASCII -Force
+    return $launchPath
+}
+
+function Start-GuiLaunchCommandFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$LaunchCommandPath,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory
+    )
+
+    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', (ConvertTo-CmdArgument -Value $LaunchCommandPath)) -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
+}
+
 function Resolve-GuiPsExecPath {
     param([string]$ToolkitRoot)
 
@@ -382,8 +428,8 @@ function Start-ToolkitLot {
     }
 
     $commands.Add(('call {0}{1}' -f (ConvertTo-CmdArgument -Value $wrapperPath), $extra))
-    $cmdLine = '/k ' + ($commands -join ' && ')
-    Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdLine -WorkingDirectory $Lot.Path -Verb RunAs | Out-Null
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $Lot.Path -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode)
+    Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $Lot.Path
 }
 
 function New-SingleComputerRunContext {
@@ -457,8 +503,8 @@ function Start-ToolkitSingleComputer {
     }
 
     $commands.Add(('pwsh.exe {0}' -f (($arguments | ForEach-Object { ConvertTo-CmdArgument -Value $_ }) -join ' ')))
-    $cmdLine = '/k ' + ($commands -join ' && ')
-    Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdLine -WorkingDirectory $context.Root -Verb RunAs | Out-Null
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $context.Root -Commands @($commands) -NamePrefix ('Single-' + $context.Name) -PauseWhenDone
+    Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $context.Root
     return $context
 }
 
