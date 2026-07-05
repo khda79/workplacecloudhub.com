@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.31
+    0.1.32
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.31'
+$script:LauncherVersion = '0.1.32'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -154,6 +154,9 @@ if (-not [string]::IsNullOrWhiteSpace($AdRootInventoryCsv)) { $AdRootInventoryCs
 $IntuneInventoryUsesRecentRootCsv = $false
 $requestedIntuneInventoryCsv = $IntuneInventoryCsv
 $defaultRootIntuneCsv = Join-Path $script:ToolkitRoot 'DevicesIntune.csv'
+$defaultLotIntuneFullName = [System.IO.Path]::GetFullPath($script:LotIntuneInventoryCsv)
+$requestedIntuneFullName = if (-not [string]::IsNullOrWhiteSpace($requestedIntuneInventoryCsv)) { [System.IO.Path]::GetFullPath($requestedIntuneInventoryCsv) } else { '' }
+
 if ([string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv) -and (Test-Path -LiteralPath $defaultRootIntuneCsv -PathType Leaf)) {
     $IntuneRootInventoryCsv = $defaultRootIntuneCsv
 }
@@ -161,16 +164,12 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) {
     $intuneRootInventoryItem = Get-Item -LiteralPath $IntuneRootInventoryCsv -ErrorAction SilentlyContinue
     if ($intuneRootInventoryItem) {
         $intuneRootFullName = [System.IO.Path]::GetFullPath($intuneRootInventoryItem.FullName)
-        $defaultLotIntuneFullName = [System.IO.Path]::GetFullPath($script:LotIntuneInventoryCsv)
-        $requestedIntuneFullName = if (-not [string]::IsNullOrWhiteSpace($requestedIntuneInventoryCsv)) { [System.IO.Path]::GetFullPath($requestedIntuneInventoryCsv) } else { '' }
         $requestedIntuneItem = if (-not [string]::IsNullOrWhiteSpace($requestedIntuneFullName)) { Get-Item -LiteralPath $requestedIntuneFullName -ErrorAction SilentlyContinue } else { $null }
         $shouldPreferRootIntuneCsv = [string]::IsNullOrWhiteSpace($requestedIntuneFullName) -or ($requestedIntuneFullName -eq $defaultLotIntuneFullName) -or (-not $requestedIntuneItem)
-        if ($shouldPreferRootIntuneCsv) {
+        $intuneRootInventoryAge = (Get-Date) - $intuneRootInventoryItem.LastWriteTime
+        if ($shouldPreferRootIntuneCsv -and $intuneRootInventoryAge.TotalHours -le $script:IntuneInventoryFreshnessHours) {
             $IntuneInventoryCsv = $intuneRootFullName
             $IntuneRootInventoryCsv = $intuneRootFullName
-        }
-        $intuneRootInventoryAge = (Get-Date) - $intuneRootInventoryItem.LastWriteTime
-        if ($intuneRootInventoryAge.TotalHours -le $script:IntuneInventoryFreshnessHours -and ([System.IO.Path]::GetFullPath($IntuneInventoryCsv) -eq $intuneRootFullName)) {
             $IntuneInventoryUsesRecentRootCsv = $true
         }
     }
