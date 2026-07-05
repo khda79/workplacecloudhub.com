@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.29
+    0.1.30
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.29'
+$script:LauncherVersion = '0.1.30'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -1315,7 +1315,7 @@ Write-Host "Repair script : $LocalScriptPath"
 Write-Host "Worker script : $LocalWorkerPath"
 Write-Host ("Technician     : Account={0}; UPN={1}; SID={2}; Auth={3}; Computer={4}" -f $script:TechnicianIdentity.Account,$script:TechnicianIdentity.UserPrincipalName,$script:TechnicianIdentity.Sid,$script:TechnicianIdentity.AuthenticationType,$script:TechnicianIdentity.ComputerName)
 Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser; SetupProfileRepair=$AllowSetupProfileRepair"
-Write-Host "Setup         : Allow=$AllowSetupUpgrade; Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
+Write-Host "Setup         : AllowSetupUpgrade=$AllowSetupUpgrade; DirectSetup=$DirectSetupUpgrade; Effective=$([bool]($AllowSetupUpgrade -or $DirectSetupUpgrade)); Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "AD inventory  : Csv=$AdInventoryCsv; RootCsv=$AdRootInventoryCsv; Domain=$AdDomain; Refresh=$(-not $SkipAdInventoryRefresh); RecentRoot=$AdInventoryUsesRecentRootCsv"
 Write-Host "Intune invent.: Csv=$IntuneInventoryCsv; RootCsv=$IntuneRootInventoryCsv; Tenant=$IntuneTenantId; Refresh=$(-not $SkipIntuneInventoryRefresh); RecentRoot=$IntuneInventoryUsesRecentRootCsv"
 Write-Host "Tech run guard: Use=$script:UseEffectiveTechnicianRunGuardHistory; Requested=$UseTechnicianRunGuardHistory; Ignore=$IgnoreTechnicianRunGuardHistory; Hours=$RunGuardHours; Path=$script:TechnicianRunGuardHistoryPath"
@@ -2013,6 +2013,7 @@ do {
     $runningJobs = @()
     $globalLeaseByJobId = @{}
     $techRunGuardFqdnByJobId = @{}
+    $jobStartedAtById = @{}
     $nextIndex = 0
 
     $liveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_live.html" -f $cycle)
@@ -2073,6 +2074,7 @@ do {
                 )
 
                 $job = Start-Job -Name ("W11UT_C{0}_{1}" -f $cycle,$computer) -FilePath $LocalWorkerPath -ArgumentList $workerArgs
+                $jobStartedAtById[[string]$job.Id] = Get-Date
                 if ($script:UseEffectiveTechnicianRunGuardHistory) {
                     $techRunGuardFqdnByJobId[[string]$job.Id] = $techRunGuardFqdn
                     Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $techRunGuardFqdn -InputComputerName $computer -RunGuardHours $RunGuardHours -State Started -Result $null -JobId ([string]$job.Id)
@@ -2101,9 +2103,19 @@ do {
         $finishedJobs = @($runningJobs | Where-Object { $_.State -ne 'Running' })
         if ($finishedJobs.Count -eq 0) {
             if (((Get-Date) - $lastProgressLog).TotalSeconds -ge 300) {
-                $waitingNames = @($runningJobs | ForEach-Object { $_.Name -replace '^W11UT_C\d+_','' })
-                Write-Host ("Waiting for {0} job(s); Elapsed={1} min; Running: {2}" -f $runningJobs.Count,[math]::Round(((Get-Date) - $cycleStart).TotalMinutes,1),($waitingNames -join ', '))
-                $lastProgressLog = Get-Date
+                $now = Get-Date
+                $waitingNames = @($runningJobs | ForEach-Object {
+                    $jobId = [string]$_.Id
+                    $jobName = $_.Name -replace '^W11UT_C\d+_',''
+                    if ($jobStartedAtById.ContainsKey($jobId)) {
+                        "{0} ({1}m)" -f $jobName,[math]::Round(($now - $jobStartedAtById[$jobId]).TotalMinutes,1)
+                    }
+                    else {
+                        $jobName
+                    }
+                })
+                Write-Host ("Waiting for {0} job(s); Elapsed={1} min; Running: {2}" -f $runningJobs.Count,[math]::Round(($now - $cycleStart).TotalMinutes,1),($waitingNames -join ', '))
+                $lastProgressLog = $now
             }
             Start-Sleep -Seconds $JobPollSeconds
             continue
@@ -2189,6 +2201,20 @@ do {
                     }
                     $item = Add-AdInventoryFieldsToResult -Result $item -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
                     $item = Add-IntuneInventoryFieldsToResult -Result $item -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv
+                    $jobIdForLog = [string]$job.Id
+                    $jobElapsedMinutes = if ($jobStartedAtById.ContainsKey($jobIdForLog)) { [math]::Round(((Get-Date) - $jobStartedAtById[$jobIdForLog]).TotalMinutes,1) } else { '' }
+                    $computerForLog = if ($item.PSObject.Properties['ComputerName']) { [string]$item.ComputerName } else { ($job.Name -replace '^W11UT_C\d+_','') }
+                    $launcherStatusForLog = if ($item.PSObject.Properties['LauncherStatus']) { [string]$item.LauncherStatus } else { '' }
+                    $remoteStatusForLog = if ($item.PSObject.Properties['RemoteStatus']) { [string]$item.RemoteStatus } else { '' }
+                    $statusForLog = if (-not [string]::IsNullOrWhiteSpace($remoteStatusForLog)) { $remoteStatusForLog } else { $launcherStatusForLog }
+                    $nextActionForLog = if ($item.PSObject.Properties['RemoteNextAction']) { [string]$item.RemoteNextAction } else { '' }
+                    $exitCodeForLog = if ($item.PSObject.Properties['ExitCode']) { [string]$item.ExitCode } else { '' }
+                    $detailForLog = if ($item.PSObject.Properties['Detail']) { [string]$item.Detail } else { '' }
+                    if ($detailForLog.Length -gt 180) { $detailForLog = $detailForLog.Substring(0,177) + '...' }
+                    $completionColor = 'Red'
+                    if ($exitCodeForLog -eq '0' -or $statusForLog -match 'ALREADY_WINDOWS11|SUCCESS|STARTED') { $completionColor = 'Green' }
+                    elseif ($statusForLog -match 'RUN_GUARD|PENDING|INSUFFICIENT|TIMEOUT|SKIPPED|READY') { $completionColor = 'Yellow' }
+                    Write-Host ("Completed {0}; Elapsed={1} min; Status={2}; NextAction={3}; ExitCode={4}; Detail={5}" -f $computerForLog,$jobElapsedMinutes,$statusForLog,$nextActionForLog,$exitCodeForLog,$detailForLog) -ForegroundColor $completionColor
                     if ($script:UseEffectiveTechnicianRunGuardHistory) {
                         $resultFqdn = if ($techRunGuardFqdnByJobId.ContainsKey([string]$job.Id)) { [string]$techRunGuardFqdnByJobId[[string]$job.Id] } else { Get-TechnicianRunGuardFqdn -ComputerName ([string]$item.ComputerName) -AdInventoryMap $script:AdInventoryMap }
                         Update-TechnicianRunGuardHistory -Path $script:TechnicianRunGuardHistoryPath -ComputerFqdn $resultFqdn -InputComputerName ([string]$item.ComputerName) -RunGuardHours $RunGuardHours -State Result -Result $item -JobId ([string]$job.Id)
@@ -2213,6 +2239,9 @@ do {
             }
             if ($techRunGuardFqdnByJobId.ContainsKey([string]$job.Id)) {
                 $techRunGuardFqdnByJobId.Remove([string]$job.Id)
+            }
+            if ($jobStartedAtById.ContainsKey([string]$job.Id)) {
+                $jobStartedAtById.Remove([string]$job.Id)
             }
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
