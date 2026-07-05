@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.63
+2.10.64
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.63"
+$LauncherVersion = "2.10.64"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -3476,6 +3476,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
     $runningJobs = @()
     $globalLeaseByJobId = @{}
+    $jobStartedAtById = @{}
     $nextIndex = 0
     $completed = 0
     $cycleStart = Get-Date
@@ -3516,6 +3517,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     $globalLeasePath,
                     $globalConcurrencyMutexName
                 )
+                $jobStartedAtById[[string]$job.Id] = Get-Date
             }
             catch {
                 Release-GlobalWorkerLease -LeasePath $globalLeasePath
@@ -3540,9 +3542,19 @@ function Invoke-IntuneHybridJoinRepairCycle {
         $finishedJobs = @($runningJobs | Where-Object { $_.State -ne "Running" })
         if ($finishedJobs.Count -eq 0) {
             if (((Get-Date) - $lastProgressLog).TotalSeconds -ge 300) {
-                $waitingNames = @($runningJobs | ForEach-Object { $_.Name -replace '^EHJIR_C\d+_','' })
-                Write-Host ("Waiting for {0} job(s); Elapsed={1} min; Running: {2}" -f $runningJobs.Count,[math]::Round(((Get-Date) - $cycleStart).TotalMinutes,1),($waitingNames -join ', '))
-                $lastProgressLog = Get-Date
+                $now = Get-Date
+                $waitingNames = @($runningJobs | ForEach-Object {
+                    $jobId = [string]$_.Id
+                    $jobName = $_.Name -replace '^EHJIR_C\d+_',''
+                    if ($jobStartedAtById.ContainsKey($jobId)) {
+                        "{0} ({1}m)" -f $jobName,[math]::Round(($now - $jobStartedAtById[$jobId]).TotalMinutes,1)
+                    }
+                    else {
+                        $jobName
+                    }
+                })
+                Write-Host ("Waiting for {0} job(s); Elapsed={1} min; Running: {2}" -f $runningJobs.Count,[math]::Round(($now - $cycleStart).TotalMinutes,1),($waitingNames -join ', '))
+                $lastProgressLog = $now
             }
             Start-Sleep -Seconds $JobPollSeconds
             continue
@@ -3717,6 +3729,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
             $jobIdKey = [string]$job.Id
+            if ($jobStartedAtById.ContainsKey($jobIdKey)) {
+                $jobStartedAtById.Remove($jobIdKey)
+            }
             if ($globalLeaseByJobId.ContainsKey($jobIdKey)) {
                 Release-GlobalWorkerLease -LeasePath $globalLeaseByJobId[$jobIdKey]
                 $globalLeaseByJobId.Remove($jobIdKey)
