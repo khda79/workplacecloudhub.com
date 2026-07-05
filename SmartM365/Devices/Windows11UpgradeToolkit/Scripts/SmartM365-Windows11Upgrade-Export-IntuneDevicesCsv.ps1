@@ -6,13 +6,13 @@ Exports Intune managed devices to DevicesIntune.csv for the Windows 11 Upgrade T
 Uses Microsoft Graph to read Intune managed devices from:
 /deviceManagement/managedDevices
 
-When this script is stored in a Scripts folder, the default output is DevicesIntune.csv in the parent folder.
-Otherwise, the default output is DevicesIntune.csv next to this script.
+When -ComputerListPath is provided, the default output is DevicesIntune.csv next to that Computers.txt.
+Otherwise, when this script is stored in a Scripts folder, the default output is DevicesIntune.csv in the parent folder.
 The CSV includes DeviceName and ComputerName columns so SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1
 can use it with -IntuneInventoryCsv.
 
 .PARAMETER OutputPath
-Destination CSV path. Defaults to DevicesIntune.csv in the parent folder when running from Scripts, otherwise next to this script.
+Destination CSV path. Defaults to DevicesIntune.csv next to -ComputerListPath when provided; otherwise in the parent folder when running from Scripts.
 
 .PARAMETER ComputerListPath
 Computers.txt path. Defaults to Computers.txt next to this script when present. If the default file is missing, all Intune managed devices are exported.
@@ -33,7 +33,7 @@ Exports the full managedDevice objects returned by Graph instead of the curated 
 Do not install Microsoft.Graph.Authentication automatically if it is missing.
 
 .PARAMETER ForceRefresh
-Regenerates the CSV even when a recent DevicesIntune.csv exists in the parent folder.
+Regenerates the CSV even when a recent DevicesIntune.csv exists in the parent folder for unscoped exports.
 
 .EXAMPLE
 .\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1
@@ -48,7 +48,7 @@ Regenerates the CSV even when a recent DevicesIntune.csv exists in the parent fo
 .\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1 -IntuneInventoryCsv .\DevicesIntune.csv
 
 .VERSION
-1.0.0
+1.0.1
 #>
 
 #requires -Version 5.1
@@ -67,7 +67,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ScriptVersion = "1.0.0"
+$ScriptVersion = "1.0.1"
 
 $BaseDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     $PSScriptRoot
@@ -85,10 +85,6 @@ if ((Split-Path -Leaf $BaseDir) -ieq "Scripts") {
 }
 
 $OutputPathWasProvided = -not [string]::IsNullOrWhiteSpace($OutputPath)
-if (-not $OutputPathWasProvided) {
-    $OutputPath = Join-Path $DefaultOutputDir "DevicesIntune.csv"
-}
-
 $ComputerListPathWasProvided = -not [string]::IsNullOrWhiteSpace($ComputerListPath)
 if ([string]::IsNullOrWhiteSpace($ComputerListPath)) {
     $ComputerListPath = Join-Path $BaseDir "Computers.txt"
@@ -97,10 +93,19 @@ if ([string]::IsNullOrWhiteSpace($ComputerListPath)) {
     }
 }
 
+if (-not $OutputPathWasProvided) {
+    if ($ComputerListPathWasProvided -and -not [string]::IsNullOrWhiteSpace($ComputerListPath)) {
+        $OutputPath = Join-Path (Split-Path -Parent ([System.IO.Path]::GetFullPath($ComputerListPath))) "DevicesIntune.csv"
+    }
+    else {
+        $OutputPath = Join-Path $DefaultOutputDir "DevicesIntune.csv"
+    }
+}
+
 if ($PageSize -lt 1) { $PageSize = 1 }
 if ($PageSize -gt 999) { $PageSize = 999 }
 
-if (-not $OutputPathWasProvided -and -not $ForceRefresh) {
+if (-not $OutputPathWasProvided -and -not $ComputerListPathWasProvided -and -not $ForceRefresh) {
     $parentDir = Split-Path -Parent $BaseDir
     if (-not [string]::IsNullOrWhiteSpace($parentDir)) {
         $parentInventoryPath = Join-Path $parentDir "DevicesIntune.csv"
