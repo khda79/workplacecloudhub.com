@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.17
+0.1.18
 #>
 param(
     [switch]$ValidateOnly
@@ -344,6 +344,52 @@ function ConvertTo-CmdSetCommand {
     return ('set "{0}={1}"' -f $Name, (($Value -replace '"', '\"')))
 }
 
+
+function New-GuiLaunchCommandFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string[]]$Commands,
+        [string]$NamePrefix = 'W11UT-GUI',
+        [switch]$PauseWhenDone
+    )
+
+    $launcherRoot = Join-Path $env:TEMP 'SmartM365\Windows11UpgradeToolkit\GuiLaunchers'
+    New-Item -ItemType Directory -Path $launcherRoot -Force | Out-Null
+
+    $safePrefix = [regex]::Replace($NamePrefix, '[^A-Za-z0-9._-]+', '-').Trim('-._')
+    if ([string]::IsNullOrWhiteSpace($safePrefix)) { $safePrefix = 'W11UT-GUI' }
+
+    $launchPath = Join-Path $launcherRoot ('{0}_{1}.cmd' -f $safePrefix,(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+    $launchLines = New-Object System.Collections.Generic.List[string]
+    $launchLines.Add('@echo off')
+    $launchLines.Add('setlocal')
+    $launchLines.Add(('cd /d {0}' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
+    foreach ($command in @($Commands)) {
+        if (-not [string]::IsNullOrWhiteSpace($command)) {
+            $launchLines.Add($command)
+        }
+    }
+    $launchLines.Add('set "EXITCODE=%ERRORLEVEL%"')
+    if ($PauseWhenDone) {
+        $launchLines.Add('echo.')
+        $launchLines.Add('echo Finished with exit code %EXITCODE%.')
+        $launchLines.Add('pause')
+    }
+    $launchLines.Add('exit /b %EXITCODE%')
+
+    Set-Content -LiteralPath $launchPath -Value $launchLines -Encoding ASCII -Force
+    return $launchPath
+}
+
+function Start-GuiLaunchCommandFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$LaunchCommandPath,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory
+    )
+
+    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', (ConvertTo-CmdArgument -Value $LaunchCommandPath)) -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
+}
+
 function Get-SingleComputerRunRoot {
     param([string]$ToolkitRoot)
     return Join-Path $ToolkitRoot 'SingleComputerRuns'
@@ -439,6 +485,7 @@ function Start-ToolkitLot {
     }
 
     $commandParts = New-Object System.Collections.Generic.List[string]
+    $commandParts.Add('call')
     $commandParts.Add((ConvertTo-CmdArgument -Value $wrapperPath))
     $commandParts.Add('-GlobalConcurrencyLimit')
     $commandParts.Add([string]$effectiveEnvironment.W11UT_GLOBAL_CONCURRENCY_LIMIT)
@@ -451,7 +498,8 @@ function Start-ToolkitLot {
     }
 
     $commands.Add(($commandParts -join ' '))
-    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', ($commands -join ' & ')) -WorkingDirectory $Lot.Path -Verb RunAs | Out-Null
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $Lot.Path -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode)
+    Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $Lot.Path
 }
 
 function Start-ToolkitSingleComputer {
@@ -556,7 +604,8 @@ function Start-ToolkitSingleComputer {
         $commandParts.Add((ConvertTo-CmdArgument -Value $argument))
     }
 
-    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', ($commandParts -join ' ')) -WorkingDirectory $run.RunPath -Verb RunAs | Out-Null
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @(($commandParts -join ' ')) -NamePrefix ('Single-' + $safeComputer) -PauseWhenDone
+    Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
     return $run
 }
 
