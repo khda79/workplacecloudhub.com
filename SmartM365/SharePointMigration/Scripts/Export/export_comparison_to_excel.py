@@ -23,6 +23,7 @@ SHEETS = [
     ("Summary", "Summary.csv"),
     ("LibrarySummary", "LibrarySummary.csv"),
     ("MissingInTarget", "MissingInTarget.csv"),
+    ("MissingDiagnostics", "MissingDiagnostics.csv"),
     ("ExtraInTarget", "ExtraInTarget.csv"),
     ("ExtraFoldersInTarget", "ExtraFoldersInTarget.csv"),
     ("DifferentSize", "DifferentSize.csv"),
