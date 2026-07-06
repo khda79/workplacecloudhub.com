@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.37
+    0.1.38
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.37'
+$script:LauncherVersion = '0.1.38'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -349,6 +349,34 @@ function Save-TechnicianRunGuardHistory {
     $History | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
+function Test-TechnicianRunGuardEntryShouldBlock {
+    param([AllowNull()]$Entry)
+
+    if (-not $Entry) { return $false }
+    $state = if ($Entry.PSObject.Properties['State']) { [string]$Entry.State } else { '' }
+    if ($state -ne 'Result') { return $true }
+
+    $launcherStatus = if ($Entry.PSObject.Properties['LauncherStatus']) { [string]$Entry.LauncherStatus } else { '' }
+    $remoteStatus = if ($Entry.PSObject.Properties['RemoteStatus']) { [string]$Entry.RemoteStatus } else { '' }
+    $detail = if ($Entry.PSObject.Properties['Detail']) { [string]$Entry.Detail } else { '' }
+    $jobErrorMessage = if ($Entry.PSObject.Properties['JobErrorMessage']) { [string]$Entry.JobErrorMessage } else { '' }
+    $effectiveStatus = @($remoteStatus, $launcherStatus) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+
+    if ($effectiveStatus -in @(
+        'ADMIN_SHARE_UNREACHABLE',
+        'DRYRUN_ADMIN_SHARE_UNREACHABLE',
+        'PSEXEC_EXIT_UNKNOWN',
+        'PSEXEC_COMMUNICATION_LOST',
+        'CENTRAL_LOG_COLLECTION_FAILED',
+        'REMOTE_LOG_COLLECTION_FAILED'
+    )) { return $false }
+
+    $combinedEvidence = @($detail, $jobErrorMessage) -join ' '
+    if ($combinedEvidence -match 'FailureType=(DNS_FAILED|SMB_PORT_445_UNREACHABLE|PING_OK_ADMIN_SHARE_FAILED|ADMIN_SHARE_UNREACHABLE)') { return $false }
+    if ($combinedEvidence -match 'Central log collection failed|Le chemin r.seau n.a pas .t. trouv.|network path was not found|Error communicating with PsExec service|Descripteur non valide') { return $false }
+
+    return $true
+}
 function Get-ActiveTechnicianRunGuardEntry {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -367,7 +395,7 @@ function Get-ActiveTechnicianRunGuardEntry {
             if ([string]$entry.ComputerFqdn -eq $LockedComputerFqdn) { $FoundRef.Value = $entry; break }
         }
     }
-    if ($found.ContainsKey('Value')) { return $found.Value }
+    if ($found.ContainsKey('Value') -and (Test-TechnicianRunGuardEntryShouldBlock -Entry $found.Value)) { return $found.Value }
     return $null
 }
 
@@ -463,6 +491,7 @@ function Update-TechnicianRunGuardHistory {
             Detail = if ($detail.Length -gt 800) { $detail.Substring(0, 800) } else { $detail }
             PsExecLogPath = $psExecLogPath
             RemoteLogsPath = $remoteLogsPath
+            JobErrorMessage = if ($LockedResult -and $LockedResult.PSObject.Properties['JobErrorMessage']) { [string]$LockedResult.JobErrorMessage } else { '' }
             JobId = [string]$LockedJobId
             CycleNumber = $LockedCycle
             ComputerListPath = $LockedComputerListPath
@@ -550,6 +579,36 @@ function Get-ComputerList {
         [void]$result.Add($name)
     }
     return @($result.ToArray())
+}
+
+function Get-ComputerListStats {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Computer list not found: $Path"
+    }
+
+    $rawNames = @(
+        Get-Content -LiteralPath $Path -ErrorAction Stop |
+            ForEach-Object { ([string]$_).Trim().Trim([char]34) } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not $_.StartsWith('#') }
+    )
+    $duplicateGroups = @(
+        $rawNames |
+            Group-Object { ([string]$_).ToUpperInvariant() } |
+            Where-Object { $_.Count -gt 1 } |
+            Sort-Object -Property @{ Expression = 'Count'; Descending = $true },Name
+    )
+    $duplicateLineCount = 0
+    foreach ($duplicateGroup in $duplicateGroups) { $duplicateLineCount += ([int]$duplicateGroup.Count - 1) }
+
+    return [pscustomobject]@{
+        RawLines = [int]$rawNames.Count
+        Unique = [int](@($rawNames | ForEach-Object { ([string]$_).ToUpperInvariant() } | Select-Object -Unique).Count)
+        DuplicateGroups = [int]$duplicateGroups.Count
+        DuplicateLines = [int]$duplicateLineCount
+        DuplicateSamples = [string](($duplicateGroups | Select-Object -First 10 | ForEach-Object { $_.Group[0] }) -join ', ')
+    }
 }
 
 function Get-ComputerListKey {
@@ -1542,6 +1601,95 @@ function Get-Windows11HtmlEffectiveStatus {
     return $launcherStatus
 }
 
+function Get-Windows11AdminShareFailureType {
+    param([AllowNull()][object]$Row)
+
+    if ($null -eq $Row) { return 'UNKNOWN' }
+    $detail = if ($Row.PSObject.Properties['Detail']) { [string]$Row.Detail } else { '' }
+    $jobErrorMessage = if ($Row.PSObject.Properties['JobErrorMessage']) { [string]$Row.JobErrorMessage } else { '' }
+    $evidence = @($detail, $jobErrorMessage) -join ' '
+    if ($evidence -match 'FailureType=(?<FailureType>[A-Z0-9_]+)') { return $Matches.FailureType }
+    if ($evidence -match 'DNS.*False|DNS_FAILED|host.*not.*found|nom.*introuvable') { return 'DNS_FAILED' }
+    if ($evidence -match 'SMB_PORT_445_UNREACHABLE|Tcp445=False|port\s+445') { return 'SMB_PORT_445_UNREACHABLE' }
+    if ($evidence -match 'AdminShare=False|Access is denied|Acc.s refus|administrative shares are not reachable') { return 'ADMIN_SHARE_UNREACHABLE' }
+    return 'UNKNOWN'
+}
+
+function New-Windows11CycleProgressRows {
+    param(
+        [Parameter(Mandatory = $true)][int]$CycleNumber,
+        [Parameter(Mandatory = $true)][datetime]$CycleStart,
+        [Parameter(Mandatory = $true)][int]$TotalComputers,
+        [Parameter(Mandatory = $true)][int]$QueuedComputers,
+        [Parameter(Mandatory = $true)][int]$CompletedComputers,
+        [Parameter(Mandatory = $true)][int]$RunningComputers,
+        [AllowNull()]$ComputerListStats
+    )
+
+    $remaining = [math]::Max(0, $TotalComputers - $CompletedComputers - $RunningComputers)
+    $duplicateGroups = if ($ComputerListStats -and $ComputerListStats.PSObject.Properties['DuplicateGroups']) { [int]$ComputerListStats.DuplicateGroups } else { 0 }
+    $duplicateLines = if ($ComputerListStats -and $ComputerListStats.PSObject.Properties['DuplicateLines']) { [int]$ComputerListStats.DuplicateLines } else { 0 }
+    $duplicateSamples = if ($ComputerListStats -and $ComputerListStats.PSObject.Properties['DuplicateSamples']) { [string]$ComputerListStats.DuplicateSamples } else { '' }
+    $rawLines = if ($ComputerListStats -and $ComputerListStats.PSObject.Properties['RawLines']) { [int]$ComputerListStats.RawLines } else { $TotalComputers }
+
+    return @([pscustomobject]@{
+        Cycle = $CycleNumber
+        Started = $CycleStart.ToString('yyyy-MM-dd HH:mm:ss')
+        ElapsedMinutes = [math]::Round(((Get-Date) - $CycleStart).TotalMinutes, 1)
+        ComputerListLines = $rawLines
+        TotalUnique = $TotalComputers
+        Queued = $QueuedComputers
+        CompletedRows = $CompletedComputers
+        Running = $RunningComputers
+        Remaining = $remaining
+        DuplicateGroups = $duplicateGroups
+        DuplicateLines = $duplicateLines
+        DuplicateSamples = $duplicateSamples
+    })
+}
+
+function New-Windows11RunningJobRows {
+    param(
+        [AllowEmptyCollection()][object[]]$RunningJobs,
+        [Parameter(Mandatory = $true)][hashtable]$JobStartedAtById
+    )
+
+    $now = Get-Date
+    return @($RunningJobs | ForEach-Object {
+        $jobId = [string]$_.Id
+        $computer = ([string]$_.Name) -replace '^W11UT_C\d+_',''
+        $started = if ($JobStartedAtById.ContainsKey($jobId)) { [datetime]$JobStartedAtById[$jobId] } else { [datetime]::MinValue }
+        [pscustomobject]@{
+            ComputerName = $computer
+            JobId = $jobId
+            State = [string]$_.State
+            Started = if ($started -gt [datetime]::MinValue) { $started.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+            ElapsedMinutes = if ($started -gt [datetime]::MinValue) { [math]::Round(($now - $started).TotalMinutes, 1) } else { '' }
+        }
+    })
+}
+
+function Export-Windows11ReportCsv {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if ($Rows -and $Rows.Count -gt 0) {
+        @($Rows) | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
+        return
+    }
+
+    $emptyRow = [ordered]@{}
+    foreach ($column in $reportColumns) { $emptyRow[$column] = '' }
+    $emptyRow['Local log'] = ''
+    $emptyRow['Collected logs'] = ''
+    $emptyRow['Remote PC logs'] = ''
+    @([pscustomobject]$emptyRow) | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
+    $lines = @(Get-Content -LiteralPath $Path -ErrorAction Stop)
+    if ($lines.Count -gt 0) { Set-Content -LiteralPath $Path -Value $lines[0] -Encoding UTF8 }
+}
+
 $script:BrandLogoDataUri = $null
 function Get-Windows11BrandLogoDataUri {
     if ($null -ne $script:BrandLogoDataUri) { return $script:BrandLogoDataUri }
@@ -1569,12 +1717,14 @@ function New-Windows11UpgradeCycleHtmlReport {
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][int]$CycleNumber,
         [Parameter(Mandatory = $true)][datetime]$GeneratedAt,
-        [switch]$IsLive
+        [switch]$IsLive,
+        [AllowEmptyCollection()][object[]]$CycleProgress = @(),
+        [AllowEmptyCollection()][object[]]$RunningJobRows = @()
     )
 
     $rows = @(Get-Windows11ReportRows -Items @($Summary | ForEach-Object { $_ }))
 
-    $separatedDetailStatuses = @('ADMIN_SHARE_UNREACHABLE', 'RUN_GUARD_ACTIVE')
+    $separatedDetailStatuses = @('ADMIN_SHARE_UNREACHABLE', 'RUN_GUARD_ACTIVE', 'SKIPPED_BY_TECH_RUN_GUARD')
     $mainRows = @($rows | Where-Object { $separatedDetailStatuses -notcontains (Get-Windows11HtmlEffectiveStatus -Row $_) })
     $separatedDetailRows = @($rows | Where-Object { $separatedDetailStatuses -contains (Get-Windows11HtmlEffectiveStatus -Row $_) })
 
@@ -1587,6 +1737,9 @@ function New-Windows11UpgradeCycleHtmlReport {
     })
     $nextActionCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.NextAction) } | Group-Object -Property NextAction | Sort-Object Count -Descending | ForEach-Object {
         [pscustomobject]@{ NextAction = $_.Name; Count = $_.Count }
+    })
+    $adminShareFailureCounts = @($rows | Where-Object { (Get-Windows11HtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = (Get-Windows11AdminShareFailureType -Row $_) } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object {
+        [pscustomobject]@{ FailureType = $_.Name; Count = $_.Count }
     })
 
     $logoUri = Get-Windows11BrandLogoDataUri
@@ -1630,7 +1783,7 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add(("<div class='title'>Windows 11 upgrade - cycle {0}<span class='badge'>{1}</span></div>" -f $CycleNumber,$mode))
     [void]$html.Add("<div class='subtitle'>Smart Intune Windows 11 Upgrade Toolkit</div>")
     [void]$html.Add(("<div class='lot-name' title='{1}'>LOT: {0}</div>" -f $lotNameHtml,$lotPathHtml))
-    [void]$html.Add(("<div class='meta'>Generated: {0} | Computers: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
+    [void]$html.Add(("<div class='meta'>Generated: {0} | Report rows: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
     [void]$html.Add(("<div class='meta'>Launcher log: {0}</div>" -f (New-HtmlLogLink -Path $script:LauncherLogPath)))
     [void]$html.Add("</div>")
     [void]$html.Add($logoHtml)
@@ -1639,9 +1792,22 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add("<div class='card'><h2>LOT/run options</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $optionRows -Columns @("Category", "Option", "Value")))
     [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Cycle progress</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows @($CycleProgress) -Columns @('Cycle','Started','ElapsedMinutes','ComputerListLines','TotalUnique','Queued','CompletedRows','Running','Remaining','DuplicateGroups','DuplicateLines','DuplicateSamples')))
+    [void]$html.Add("</div>")
+    if ($RunningJobRows -and $RunningJobRows.Count -gt 0) {
+        [void]$html.Add("<div class='card'><h2>Running jobs</h2>")
+        [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows @($RunningJobRows) -Columns @('ComputerName','JobId','State','Started','ElapsedMinutes')))
+        [void]$html.Add("</div>")
+    }
     [void]$html.Add("<div class='card'><h2>Status summary</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @("Status", "Count")))
     [void]$html.Add("</div>")
+    if ($adminShareFailureCounts.Count -gt 0) {
+        [void]$html.Add("<div class='card'><h2>Admin share failure summary</h2>")
+        [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $adminShareFailureCounts -Columns @('FailureType','Count')))
+        [void]$html.Add("</div>")
+    }
     [void]$html.Add("<div class='card'><h2>Next action summary</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $nextActionCounts -Columns @("NextAction", "Count")))
     [void]$html.Add("</div>")
@@ -1660,7 +1826,7 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add("</div>")
     [void]$html.Add("<div class='card'><h2>Run guard / admin share details</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $separatedDetailRows -Columns @($htmlReportColumns)))
-    [void]$html.Add("<div class='footer'>Rows excluded from Computer details: ADMIN_SHARE_UNREACHABLE and RUN_GUARD_ACTIVE.</div>")
+    [void]$html.Add("<div class='footer'>Rows excluded from Computer details: ADMIN_SHARE_UNREACHABLE, RUN_GUARD_ACTIVE, and SKIPPED_BY_TECH_RUN_GUARD.</div>")
     [void]$html.Add("</div>")
     [void]$html.Add("</body></html>")
 
@@ -2031,6 +2197,10 @@ $cycle = 0
 do {
     $cycle++
     $computers = @(Get-ComputerList -Path $ComputerListPath)
+    $computerListStats = Get-ComputerListStats -Path $ComputerListPath
+    if ($computerListStats.DuplicateGroups -gt 0) {
+        Write-Host ("Cycle {0}: Computers.txt contains {1} duplicate line(s) in {2} duplicate group(s). Duplicates ignored: {3}" -f $cycle,$computerListStats.DuplicateLines,$computerListStats.DuplicateGroups,$computerListStats.DuplicateSamples) -ForegroundColor Yellow
+    }
     if ($computers.Count -eq 0) {
         Write-Host "No computers found in $ComputerListPath." -ForegroundColor Yellow
         break
@@ -2052,12 +2222,16 @@ do {
     $nextIndex = 0
 
     $liveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_live.html" -f $script:LauncherLogSafeLotName,$cycle)
+    $liveCsvPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_live.csv" -f $script:LauncherLogSafeLotName,$cycle)
     $lastLiveHtmlWrite = [datetime]::MinValue
     $cycleStart = Get-Date
     $lastProgressLog = Get-Date
-    try { New-Windows11UpgradeCycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive }
-    catch { Write-Host ("Cycle {0}: failed to initialize live HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
-
+    try {
+        $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $runningJobs.Count -ComputerListStats $computerListStats
+        Export-Windows11ReportCsv -Rows @() -Path $liveCsvPath
+        New-Windows11UpgradeCycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $cycleProgress -RunningJobRows @()
+    }
+    catch { Write-Host ("Cycle {0}: failed to initialize live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
         while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit) {
             $computer = $computers[$nextIndex]
@@ -2151,6 +2325,17 @@ do {
                 })
                 Write-Host ("Waiting for {0} job(s); Elapsed={1} min; Running: {2}" -f $runningJobs.Count,[math]::Round(($now - $cycleStart).TotalMinutes,1),($waitingNames -join ', '))
                 $lastProgressLog = $now
+            }
+            if (((Get-Date) - $lastLiveHtmlWrite).TotalSeconds -ge 60) {
+                try {
+                    $liveRows = Get-Windows11ReportRows -Items @($results.ToArray())
+                    $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $runningJobs.Count -ComputerListStats $computerListStats
+                    $runningJobRows = New-Windows11RunningJobRows -RunningJobs @($runningJobs) -JobStartedAtById $jobStartedAtById
+                    Export-Windows11ReportCsv -Rows $liveRows -Path $liveCsvPath
+                    New-Windows11UpgradeCycleHtmlReport -Summary $liveRows -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $cycleProgress -RunningJobRows $runningJobRows
+                    $lastLiveHtmlWrite = Get-Date
+                }
+                catch { Write-Host ("Cycle {0}: failed to update live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
             }
             Start-Sleep -Seconds $JobPollSeconds
             continue
@@ -2281,30 +2466,40 @@ do {
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
 
+        $currentRunningJobs = @($runningJobs | Where-Object { $_.State -eq 'Running' })
         if (((Get-Date) - $lastLiveHtmlWrite).TotalSeconds -ge 3) {
             try {
-                New-Windows11UpgradeCycleHtmlReport -Summary @($results.ToArray()) -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive
+                $liveRows = Get-Windows11ReportRows -Items @($results.ToArray())
+                $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $currentRunningJobs.Count -ComputerListStats $computerListStats
+                $runningJobRows = New-Windows11RunningJobRows -RunningJobs $currentRunningJobs -JobStartedAtById $jobStartedAtById
+                Export-Windows11ReportCsv -Rows $liveRows -Path $liveCsvPath
+                New-Windows11UpgradeCycleHtmlReport -Summary $liveRows -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $cycleProgress -RunningJobRows $runningJobRows
                 $lastLiveHtmlWrite = Get-Date
             }
-            catch { Write-Host ("Cycle {0}: failed to update live HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+            catch { Write-Host ("Cycle {0}: failed to update live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
         }
 
-        $runningJobs = @($runningJobs | Where-Object { $_.State -eq 'Running' })
+        $runningJobs = $currentRunningJobs
     }
 
     $reportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_{2}.csv" -f $script:LauncherLogSafeLotName,$cycle,$reportTimestamp)
     $enrichedResults = @($results.ToArray() | ForEach-Object { $row = Add-AdInventoryFieldsToResult -Result $_ -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv; Add-IntuneInventoryFieldsToResult -Result $row -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv })
     $normalizedResults = Get-Windows11ReportRows -Items @($enrichedResults)
-    @($normalizedResults) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
+    Export-Windows11ReportCsv -Rows @($normalizedResults) -Path $reportPath
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
 
     $htmlReportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_{2}.html" -f $script:LauncherLogSafeLotName,$cycle,$reportTimestamp)
     try {
-        New-Windows11UpgradeCycleHtmlReport -Summary @($normalizedResults) -Path $htmlReportPath -CycleNumber $cycle -GeneratedAt (Get-Date)
+        $finalProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $computers.Count -CompletedComputers $normalizedResults.Count -RunningComputers 0 -ComputerListStats $computerListStats
+        New-Windows11UpgradeCycleHtmlReport -Summary @($normalizedResults) -Path $htmlReportPath -CycleNumber $cycle -GeneratedAt (Get-Date) -CycleProgress $finalProgress -RunningJobRows @()
         if (Test-Path -LiteralPath $liveHtmlPath -PathType Leaf) {
             Remove-Item -LiteralPath $liveHtmlPath -Force -ErrorAction Stop
             Write-Host ("Cycle {0}: removed live HTML report after final report creation: {1}" -f $cycle,$liveHtmlPath) -ForegroundColor DarkGray
+        }
+        if (Test-Path -LiteralPath $liveCsvPath -PathType Leaf) {
+            Remove-Item -LiteralPath $liveCsvPath -Force -ErrorAction Stop
+            Write-Host ("Cycle {0}: removed live CSV report after final report creation: {1}" -f $cycle,$liveCsvPath) -ForegroundColor DarkGray
         }
         Write-Host ("Cycle {0} HTML report: {1}" -f $cycle,$htmlReportPath) -ForegroundColor Green
     }
