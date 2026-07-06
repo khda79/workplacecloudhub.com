@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures registry detection for the generated language package.
 .VERSION
-    1.0.7
+    1.0.8
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -205,6 +205,17 @@ function Get-GraphCollectionItems {
     return @($items.ToArray())
 }
 
+function Get-IntuneWin32AppDetails {
+    param(
+        [Parameter(Mandatory = $true)][string]$GraphBaseUri,
+        [Parameter(Mandatory = $true)][object]$App
+    )
+
+    if ($null -eq $App -or -not $App.PSObject.Properties['id'] -or [string]::IsNullOrWhiteSpace([string]$App.id)) { return $App }
+    try { return Invoke-GraphJson -Method GET -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$($App.id)" }
+    catch { return $App }
+}
+
 function Test-IntuneAppHasCommittedContent {
     param([object]$App)
 
@@ -243,12 +254,13 @@ function Resolve-ExistingIntuneWin32App {
 
     $displayNameLiteral = ConvertTo-ODataStringLiteral -Value $DisplayName
     $filter = [uri]::EscapeDataString("displayName eq '$displayNameLiteral'")
-    $select = [uri]::EscapeDataString('id,displayName,notes,committedContentVersion')
+    $select = [uri]::EscapeDataString('id,displayName,notes')
     $matches = @(Get-GraphCollectionItems -Uri "$GraphBaseUri/deviceAppManagement/mobileApps?`$filter=$filter&`$select=$select")
     if ($matches.Count -eq 0) { return $null }
+    $detailedMatches = @($matches | ForEach-Object { Get-IntuneWin32AppDetails -GraphBaseUri $GraphBaseUri -App $_ })
 
-    $packageMatches = @($matches | Where-Object { [string]$_.notes -match [regex]::Escape("PackageId=$PackageId") })
-    $candidatePool = if ($packageMatches.Count -gt 0) { $packageMatches } else { $matches }
+    $packageMatches = @($detailedMatches | Where-Object { [string]$_.notes -match [regex]::Escape("PackageId=$PackageId") })
+    $candidatePool = if ($packageMatches.Count -gt 0) { $packageMatches } else { $detailedMatches }
     $committedCandidates = @($candidatePool | Where-Object { Test-IntuneAppHasCommittedContent -App $_ })
 
     if ($committedCandidates.Count -eq 1) { return $committedCandidates[0] }

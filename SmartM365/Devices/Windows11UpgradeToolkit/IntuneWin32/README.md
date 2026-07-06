@@ -197,6 +197,23 @@ Publish the FR app:
   -Language fr-FR
 ```
 
+Publish every generated full-media package except FR:
+
+```powershell
+.\IntuneWin32\Publish-AllSmartM365Windows11IntuneApp.ps1 `
+  -ExcludeLanguage fr-FR
+```
+
+Preview the same batch without creating or updating apps:
+
+```powershell
+.\IntuneWin32\Publish-AllSmartM365Windows11IntuneApp.ps1 `
+  -ExcludeLanguage fr-FR `
+  -WhatIf
+```
+
+The batch publisher defaults to `-PackageMode WithMedia` so existing `WithCacheOnly` packages under `Output` are not republished accidentally. Use `-PackageMode All` or `-PackageMode WithCacheOnly` when needed. It calls `Publish-SmartM365Windows11IntuneApp.ps1` once per selected `.intunewin` package and still creates/uploads apps only; assignments remain manual.
+
 Required Graph delegated permission:
 
 ```text
