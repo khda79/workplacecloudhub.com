@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.35
+    0.1.37
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.35'
+$script:LauncherVersion = '0.1.37'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -2051,7 +2051,7 @@ do {
     $jobStartedAtById = @{}
     $nextIndex = 0
 
-    $liveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_live.html" -f $cycle)
+    $liveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_live.html" -f $script:LauncherLogSafeLotName,$cycle)
     $lastLiveHtmlWrite = [datetime]::MinValue
     $cycleStart = Get-Date
     $lastProgressLog = Get-Date
@@ -2293,13 +2293,13 @@ do {
     }
 
     $reportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.csv" -f $cycle,$reportTimestamp)
+    $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_{2}.csv" -f $script:LauncherLogSafeLotName,$cycle,$reportTimestamp)
     $enrichedResults = @($results.ToArray() | ForEach-Object { $row = Add-AdInventoryFieldsToResult -Result $_ -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv; Add-IntuneInventoryFieldsToResult -Result $row -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv })
     $normalizedResults = Get-Windows11ReportRows -Items @($enrichedResults)
     @($normalizedResults) | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
 
-    $htmlReportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.html" -f $cycle,$reportTimestamp)
+    $htmlReportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_{2}.html" -f $script:LauncherLogSafeLotName,$cycle,$reportTimestamp)
     try {
         New-Windows11UpgradeCycleHtmlReport -Summary @($normalizedResults) -Path $htmlReportPath -CycleNumber $cycle -GeneratedAt (Get-Date)
         if (Test-Path -LiteralPath $liveHtmlPath -PathType Leaf) {
@@ -2333,7 +2333,7 @@ do {
             }
     )
     if ($sourceDistribution.Count -gt 0) {
-        $distributionPath = Join-Path $ReportRoot ("SetupSource_Distribution_cycle{0}_{1}.csv" -f $cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
+        $distributionPath = Join-Path $ReportRoot ("SetupSource_Distribution_{0}_cycle{1}_{2}.csv" -f $script:LauncherLogSafeLotName,$cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
         $sourceDistribution | Export-Csv -LiteralPath $distributionPath -NoTypeInformation -Encoding UTF8
         Write-Host ("Setup source distribution: {0}" -f $distributionPath) -ForegroundColor Green
         foreach ($sourceGroup in $sourceDistribution) {
