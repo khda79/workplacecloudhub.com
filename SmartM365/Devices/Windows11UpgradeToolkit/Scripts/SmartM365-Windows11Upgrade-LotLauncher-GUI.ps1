@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.20
+0.1.21
 #>
 param(
     [switch]$ValidateOnly
@@ -345,11 +345,21 @@ function ConvertTo-CmdSetCommand {
 }
 
 
+function ConvertTo-CmdWindowTitle {
+    param([AllowNull()][string]$Value)
+
+    $title = ([string]$Value -replace '[\r\n\t]+', ' ').Trim()
+    $title = $title -replace '[&|<>^]', '-'
+    if ($title.Length -gt 240) { $title = $title.Substring(0, 240) }
+    return $title
+}
+
 function New-GuiLaunchCommandFile {
     param(
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [Parameter(Mandatory = $true)][string[]]$Commands,
         [string]$NamePrefix = 'W11UT-GUI',
+        [string]$WindowTitle,
         [switch]$PauseWhenDone
     )
 
@@ -363,6 +373,9 @@ function New-GuiLaunchCommandFile {
     $launchLines = New-Object System.Collections.Generic.List[string]
     $launchLines.Add('@echo off')
     $launchLines.Add('setlocal')
+    if (-not [string]::IsNullOrWhiteSpace($WindowTitle)) {
+        $launchLines.Add(('title {0}' -f (ConvertTo-CmdWindowTitle -Value $WindowTitle)))
+    }
     $launchLines.Add(('cd /d {0}' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
     foreach ($command in @($Commands)) {
         if (-not [string]::IsNullOrWhiteSpace($command)) {
@@ -498,7 +511,8 @@ function Start-ToolkitLot {
     }
 
     $commands.Add(($commandParts -join ' '))
-    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $Lot.Path -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode)
+    $launchTitle = "{0} - started {1}" -f $Lot.Name,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $Lot.Path -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode) -WindowTitle $launchTitle
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $Lot.Path
 }
 
