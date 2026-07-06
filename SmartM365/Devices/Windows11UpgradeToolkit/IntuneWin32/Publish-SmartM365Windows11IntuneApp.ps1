@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures PowerShell detection for the generated language package.
 .VERSION
-    1.0.9
+    1.0.12
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -419,17 +419,68 @@ function Send-AzureHttpRequestWithRetry {
     }
 }
 
+function Get-SasExpiryUtc {
+    param([string]$Uri)
+
+    try {
+        $query = ([Uri]$Uri).Query.TrimStart('?')
+        foreach ($part in @($query -split '&')) {
+            $nameValue = $part -split '=', 2
+            if ($nameValue.Count -eq 2 -and $nameValue[0] -eq 'se') {
+                $decoded = [System.Net.WebUtility]::UrlDecode($nameValue[1])
+                return ([datetimeoffset]::Parse($decoded, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)).UtcDateTime
+            }
+        }
+    }
+    catch { }
+
+    return [datetime]::MinValue
+}
+
+function Request-IntuneAzureStorageUriRenewal {
+    param(
+        [Parameter(Mandatory = $true)][string]$FileUri,
+        [int]$PollSeconds,
+        [int]$TimeoutMinutes
+    )
+
+    Write-Step 'Requesting renewed Azure staging blob SAS from Intune.'
+    Invoke-GraphJson -Method POST -Uri "$FileUri/renewUpload" -Body @{} | Out-Null
+    $renewedFile = Wait-GraphContentFileState -Uri $FileUri -SuccessStates @('azureStorageUriRenewalSuccess') -FailureStates @('azureStorageUriRenewalFailed','azureStorageUriRequestFailed') -PollSeconds $PollSeconds -TimeoutMinutes $TimeoutMinutes -RequireAzureStorageUri
+    $renewedUri = [string]$renewedFile.azureStorageUri
+    if ([string]::IsNullOrWhiteSpace($renewedUri)) { throw 'Intune renewed upload state did not include azureStorageUri.' }
+    return $renewedUri
+}
+
 function Send-AzureBlockBlobFromIntuneWin {
     param(
         [string]$Path,
         [string]$ContentEntryName,
         [string]$AzureStorageUri,
         [int]$BlockSizeMB,
-        [int]$MaxRetries
+        [int]$MaxRetries,
+        [string]$FileUri,
+        [int]$PollSeconds = 10,
+        [int]$PollTimeoutMinutes = 30,
+        [int]$RenewBeforeExpiryMinutes = 5
     )
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     Add-Type -AssemblyName System.Net.Http
+
+    $currentAzureStorageUri = $AzureStorageUri
+    $sasExpiryUtc = Get-SasExpiryUtc -Uri $currentAzureStorageUri
+
+    function Use-FreshAzureStorageUri {
+        if ([string]::IsNullOrWhiteSpace($FileUri)) { return }
+
+        $renewAtUtc = (Get-Date).ToUniversalTime().AddMinutes($RenewBeforeExpiryMinutes)
+        if ($sasExpiryUtc -ne [datetime]::MinValue -and $sasExpiryUtc -le $renewAtUtc) {
+            Write-Step ("Azure staging blob SAS expires at {0:u}; renewing before continuing upload." -f $sasExpiryUtc)
+            $script:SmartM365RenewedAzureStorageUri = Request-IntuneAzureStorageUriRenewal -FileUri $FileUri -PollSeconds $PollSeconds -TimeoutMinutes $PollTimeoutMinutes
+            $script:SmartM365RenewedAzureStorageUriExpiryUtc = Get-SasExpiryUtc -Uri $script:SmartM365RenewedAzureStorageUri
+        }
+    }
 
     $blockSize = [Math]::Max(4, $BlockSizeMB) * 1MB
     $blockIds = New-Object System.Collections.Generic.List[string]
@@ -451,16 +502,44 @@ function Send-AzureBlockBlobFromIntuneWin {
                 $payload = New-Object byte[] $read
                 [Array]::Copy($buffer, $payload, $read)
 
+                Use-FreshAzureStorageUri
+                if (Test-Path -LiteralPath 'Variable:\script:SmartM365RenewedAzureStorageUri') {
+                    $currentAzureStorageUri = $script:SmartM365RenewedAzureStorageUri
+                    $sasExpiryUtc = $script:SmartM365RenewedAzureStorageUriExpiryUtc
+                    Remove-Variable -Name SmartM365RenewedAzureStorageUri -Scope Script -ErrorAction SilentlyContinue
+                    Remove-Variable -Name SmartM365RenewedAzureStorageUriExpiryUtc -Scope Script -ErrorAction SilentlyContinue
+                    if ($sasExpiryUtc -ne [datetime]::MinValue) { Write-Step ("Renewed Azure staging blob SAS expires at {0:u}." -f $sasExpiryUtc) }
+                }
+
                 $blockId = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(('block-{0:D8}' -f $index)))
                 $encodedBlockId = [Uri]::EscapeDataString($blockId)
-                $blockUri = Join-SasQuery -Uri $AzureStorageUri -Query "comp=block&blockid=$encodedBlockId"
+                $blockUri = Join-SasQuery -Uri $currentAzureStorageUri -Query "comp=block&blockid=$encodedBlockId"
                 $currentIndex = $index
 
-                Send-AzureHttpRequestWithRetry -Client $client -MaxRetries $MaxRetries -Operation "Azure block upload index=$currentIndex" -RequestFactory {
-                    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Put, [Uri]$blockUri)
-                    $request.Headers.Add('x-ms-version', '2020-10-02')
-                    $request.Content = New-Object System.Net.Http.ByteArrayContent -ArgumentList (, $payload)
-                    $request
+                try {
+                    Send-AzureHttpRequestWithRetry -Client $client -MaxRetries $MaxRetries -Operation "Azure block upload index=$currentIndex" -RequestFactory {
+                        $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Put, [Uri]$blockUri)
+                        $request.Headers.Add('x-ms-version', '2020-10-02')
+                        $request.Content = New-Object System.Net.Http.ByteArrayContent -ArgumentList (, $payload)
+                        $request
+                    }
+                }
+                catch {
+                    $message = [string]$_.Exception.Message
+                    if ([string]::IsNullOrWhiteSpace($FileUri) -or ($message -notmatch 'Status=403|AuthenticationFailed|Signature not valid in the specified time frame')) { throw }
+
+                    Write-Step ("Azure block upload index=$currentIndex failed with expired/invalid SAS. Requesting renewal and retrying the same block.")
+                    $currentAzureStorageUri = Request-IntuneAzureStorageUriRenewal -FileUri $FileUri -PollSeconds $PollSeconds -TimeoutMinutes $PollTimeoutMinutes
+                    $sasExpiryUtc = Get-SasExpiryUtc -Uri $currentAzureStorageUri
+                    if ($sasExpiryUtc -ne [datetime]::MinValue) { Write-Step ("Renewed Azure staging blob SAS expires at {0:u}." -f $sasExpiryUtc) }
+                    $blockUri = Join-SasQuery -Uri $currentAzureStorageUri -Query "comp=block&blockid=$encodedBlockId"
+
+                    Send-AzureHttpRequestWithRetry -Client $client -MaxRetries $MaxRetries -Operation "Azure block upload index=$currentIndex after SAS renewal" -RequestFactory {
+                        $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Put, [Uri]$blockUri)
+                        $request.Headers.Add('x-ms-version', '2020-10-02')
+                        $request.Content = New-Object System.Net.Http.ByteArrayContent -ArgumentList (, $payload)
+                        $request
+                    }
                 }
 
                 $blockIds.Add($blockId) | Out-Null
@@ -485,10 +564,19 @@ function Send-AzureBlockBlobFromIntuneWin {
     foreach ($blockId in $blockIds) { [void]$xmlBuilder.AppendFormat('<Latest>{0}</Latest>', [System.Security.SecurityElement]::Escape($blockId)) }
     [void]$xmlBuilder.Append('</BlockList>')
 
+    Use-FreshAzureStorageUri
+    if (Test-Path -LiteralPath 'Variable:\script:SmartM365RenewedAzureStorageUri') {
+        $currentAzureStorageUri = $script:SmartM365RenewedAzureStorageUri
+        $sasExpiryUtc = $script:SmartM365RenewedAzureStorageUriExpiryUtc
+        Remove-Variable -Name SmartM365RenewedAzureStorageUri -Scope Script -ErrorAction SilentlyContinue
+        Remove-Variable -Name SmartM365RenewedAzureStorageUriExpiryUtc -Scope Script -ErrorAction SilentlyContinue
+        if ($sasExpiryUtc -ne [datetime]::MinValue) { Write-Step ("Renewed Azure staging blob SAS expires at {0:u}." -f $sasExpiryUtc) }
+    }
+
     $client2 = New-Object System.Net.Http.HttpClient
     $client2.Timeout = [TimeSpan]::FromMinutes(30)
     try {
-        $commitUri = Join-SasQuery -Uri $AzureStorageUri -Query 'comp=blocklist'
+        $commitUri = Join-SasQuery -Uri $currentAzureStorageUri -Query 'comp=blocklist'
         $blockList = $xmlBuilder.ToString()
         Send-AzureHttpRequestWithRetry -Client $client2 -MaxRetries $MaxRetries -Operation 'Azure block list commit' -RequestFactory {
             $request2 = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Put, [Uri]$commitUri)
@@ -501,7 +589,6 @@ function Send-AzureBlockBlobFromIntuneWin {
         $client2.Dispose()
     }
 }
-
 $resolvedIntuneWinPath = (Resolve-Path -LiteralPath $IntuneWinPath).ProviderPath
 if (-not (Test-Path -LiteralPath $resolvedIntuneWinPath -PathType Leaf)) { throw "IntuneWin package not found: $IntuneWinPath" }
 if ([IO.Path]::GetExtension($resolvedIntuneWinPath) -ne '.intunewin') { throw "Expected a .intunewin file: $resolvedIntuneWinPath" }
@@ -697,7 +784,7 @@ Write-Step "Created content file: $fileId"
 
 $file = Wait-GraphContentFileState -Uri $fileUri -SuccessStates @('azureStorageUriRequestSuccess','azureStorageUriRenewalSuccess') -FailureStates @('azureStorageUriRequestFailed','azureStorageUriRenewalFailed') -PollSeconds $PollSeconds -TimeoutMinutes $PollTimeoutMinutes -RequireAzureStorageUri
 Write-Step "Uploading encrypted package payload to Azure staging blob. BlockSizeMB=$UploadBlockSizeMB; MaxRetries=$AzureUploadMaxRetries"
-Send-AzureBlockBlobFromIntuneWin -Path $resolvedIntuneWinPath -ContentEntryName ([string]$metadata.ContentEntryName) -AzureStorageUri ([string]$file.azureStorageUri) -BlockSizeMB $UploadBlockSizeMB -MaxRetries $AzureUploadMaxRetries
+Send-AzureBlockBlobFromIntuneWin -Path $resolvedIntuneWinPath -ContentEntryName ([string]$metadata.ContentEntryName) -AzureStorageUri ([string]$file.azureStorageUri) -BlockSizeMB $UploadBlockSizeMB -MaxRetries $AzureUploadMaxRetries -FileUri $fileUri -PollSeconds $PollSeconds -PollTimeoutMinutes $PollTimeoutMinutes
 Write-Step 'Azure upload completed.'
 
 $commitBody = [ordered]@{
