@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.32
+    0.1.34
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.32'
+$script:LauncherVersion = '0.1.34'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -125,6 +125,10 @@ if ([string]::IsNullOrWhiteSpace($CentralLogRoot)) { $CentralLogRoot = Join-Path
 $LogRoot = [System.IO.Path]::GetFullPath($LogRoot)
 $ReportRoot = [System.IO.Path]::GetFullPath($ReportRoot)
 $CentralLogRoot = [System.IO.Path]::GetFullPath($CentralLogRoot)
+$script:LauncherRunTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$script:LauncherLogRoot = Join-Path $script:LotRoot 'Logs'
+$script:LauncherLogPath = Join-Path $script:LauncherLogRoot ("SmartM365-W11UT-Launcher_{0}.log" -f $script:LauncherRunTimestamp)
+$script:LauncherLatestLogPath = Join-Path $script:LauncherLogRoot 'SmartM365-W11UT-Launcher_latest.log'
 
 $AdInventoryUsesRecentRootCsv = $false
 $effectiveRootAdInventoryCsv = $AdRootInventoryCsv
@@ -1081,6 +1085,16 @@ if ($script:IsSingleComputerLaunch) {
     $GlobalConcurrencyLimit = 0
 }
 
+function Write-LauncherLogLine {
+    param([AllowNull()][string]$Line)
+
+    foreach ($target in @($script:LauncherLogPath, $script:LauncherLatestLogPath)) {
+        if ([string]::IsNullOrWhiteSpace($target)) { continue }
+        try { Add-Content -LiteralPath $target -Value ([string]$Line) -Encoding UTF8 -ErrorAction Stop }
+        catch { }
+    }
+}
+
 function Write-Host {
     param(
         [Parameter(Position = 0)][object]$Object = '',
@@ -1089,11 +1103,13 @@ function Write-Host {
         [System.ConsoleColor]$BackgroundColor
     )
     $ts = if ($null -ne $Object -and '' -ne [string]$Object) { "[{0}] " -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') } else { '' }
-    $p = @{ Object = ($ts + [string]$Object) }
+    $line = $ts + [string]$Object
+    $p = @{ Object = $line }
     if ($PSBoundParameters.ContainsKey('ForegroundColor')) { $p['ForegroundColor'] = $ForegroundColor }
     if ($PSBoundParameters.ContainsKey('BackgroundColor')) { $p['BackgroundColor'] = $BackgroundColor }
     if ($PSBoundParameters.ContainsKey('NoNewline')) { $p['NoNewline'] = $NoNewline }
     Microsoft.PowerShell.Utility\Write-Host @p
+    Write-LauncherLogLine -Line $line
 }
 
 function Test-SetupSourceMapSyntax {
@@ -1176,6 +1192,10 @@ if (-not (Test-Path -LiteralPath $LocalWorkerPath -PathType Leaf)) {
 New-Directory -Path $LogRoot
 New-Directory -Path $ReportRoot
 New-Directory -Path $CentralLogRoot
+New-Directory -Path $script:LauncherLogRoot
+$launcherLogHeader = "[{0}] ===== SmartM365 Windows 11 Upgrade Toolkit launcher v{1} started. Lot={2}; ComputerList={3}; Technician={4}; TechComputer={5} =====" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$script:LauncherVersion,(Split-Path -Leaf $script:LotRoot),$ComputerListPath,$script:TechnicianIdentity.Account,$script:TechnicianIdentity.ComputerName
+Set-Content -LiteralPath $script:LauncherLogPath -Value $launcherLogHeader -Encoding UTF8 -Force
+Set-Content -LiteralPath $script:LauncherLatestLogPath -Value $launcherLogHeader -Encoding UTF8 -Force
 
 $script:TechnicianRunGuardHistoryPath = Get-TechnicianRunGuardHistoryPath
 $script:UseEffectiveTechnicianRunGuardHistory = ($UseTechnicianRunGuardHistory -and -not $IgnoreTechnicianRunGuardHistory -and -not $IgnoreRunGuard -and -not $DryRun -and $RunGuardHours -gt 0)
@@ -1308,12 +1328,17 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Paths'; Option = 'LogRoot'; Value = [string]$LogRoot }
     [pscustomobject]@{ Category = 'Paths'; Option = 'ReportRoot'; Value = [string]$ReportRoot }
     [pscustomobject]@{ Category = 'Paths'; Option = 'CentralLogRoot'; Value = [string]$CentralLogRoot }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'LauncherLogRoot'; Value = [string]$script:LauncherLogRoot }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'LauncherLogPath'; Value = [string]$script:LauncherLogPath }
+    [pscustomobject]@{ Category = 'Paths'; Option = 'LauncherLatestLogPath'; Value = [string]$script:LauncherLatestLogPath }
     [pscustomobject]@{ Category = 'Paths'; Option = 'NoCentralLogCollection'; Value = [string][bool]$NoCentralLogCollection }
     [pscustomobject]@{ Category = 'Paths'; Option = 'KeepCentralLogHistory'; Value = [string][bool]$KeepCentralLogHistory }
     [pscustomobject]@{ Category = 'Paths'; Option = 'CentralLogCollectionMode'; Value = [string]$CentralLogCollectionMode }
 )
 
 Write-Host "SmartM365 Windows 11 Upgrade Toolkit launcher v$script:LauncherVersion"
+Write-Host "LOT root      : $script:LotRoot"
+Write-Host "Launcher log  : $script:LauncherLogPath"
 Write-Host "Computer list : $ComputerListPath"
 Write-Host "PsExec        : $resolvedPsExec"
 Write-Host "Repair script : $LocalScriptPath"
@@ -1602,6 +1627,7 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add("<div class='subtitle'>Smart Intune Windows 11 Upgrade Toolkit</div>")
     [void]$html.Add(("<div class='lot-name' title='{1}'>LOT: {0}</div>" -f $lotNameHtml,$lotPathHtml))
     [void]$html.Add(("<div class='meta'>Generated: {0} | Computers: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
+    [void]$html.Add(("<div class='meta'>Launcher log: {0}</div>" -f (New-HtmlLogLink -Path $script:LauncherLogPath)))
     [void]$html.Add("</div>")
     [void]$html.Add($logoHtml)
     [void]$html.Add("</div>")
@@ -2272,7 +2298,10 @@ do {
     $htmlReportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_cycle{0}_{1}.html" -f $cycle,$reportTimestamp)
     try {
         New-Windows11UpgradeCycleHtmlReport -Summary @($normalizedResults) -Path $htmlReportPath -CycleNumber $cycle -GeneratedAt (Get-Date)
-        New-Windows11UpgradeCycleHtmlReport -Summary @($normalizedResults) -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive
+        if (Test-Path -LiteralPath $liveHtmlPath -PathType Leaf) {
+            Remove-Item -LiteralPath $liveHtmlPath -Force -ErrorAction Stop
+            Write-Host ("Cycle {0}: removed live HTML report after final report creation: {1}" -f $cycle,$liveHtmlPath) -ForegroundColor DarkGray
+        }
         Write-Host ("Cycle {0} HTML report: {1}" -f $cycle,$htmlReportPath) -ForegroundColor Green
     }
     catch { Write-Host ("Cycle {0}: failed to write HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
@@ -2316,6 +2345,8 @@ do {
     }
 }
 while ($true)
+
+Write-Host ("SmartM365 Windows 11 Upgrade Toolkit launcher finished. Log={0}" -f $script:LauncherLogPath)
 
 if ($null -ne $script:globalGateMutex) {
     try { $script:globalGateMutex.Dispose() } catch { }
