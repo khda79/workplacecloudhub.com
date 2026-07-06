@@ -4,7 +4,7 @@
 .DESCRIPTION
     Copies endpoint scripts to ProgramData, optionally copies packaged setup media or validates an existing cache, registers package detection state, and starts a SYSTEM scheduled task for asynchronous upgrade execution.
 .VERSION
-    1.0.4
+    1.0.5
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -28,6 +28,12 @@ $logRoot = Join-Path $DataRoot 'Logs\Intune'
 $setupCacheRoot = Join-Path $DataRoot 'SetupMedia'
 $registrySubKeyRoot = 'SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
 $registrySubKey = "$registrySubKeyRoot\$([string]$manifest.PackageId)"
+$packageMode = 'WithMedia'
+if ($manifest.PSObject.Properties['PackageMode'] -and -not [string]::IsNullOrWhiteSpace([string]$manifest.PackageMode)) { $packageMode = [string]$manifest.PackageMode }
+$requiresExistingSetupCache = $false
+if ($manifest.PSObject.Properties['RequiresExistingSetupCache']) { $requiresExistingSetupCache = [bool]$manifest.RequiresExistingSetupCache }
+$packageMediaRoot = Join-Path $packageRoot ("SetupMedia\{0}" -f $manifest.SetupCacheFolder)
+$targetMediaRoot = Join-Path $setupCacheRoot ([string]$manifest.SetupCacheFolder)
 
 function New-Directory {
     param([string]$Path)
@@ -68,6 +74,40 @@ function Write-InstallLog {
     $line = '{0} [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Level,$Message
     Add-Content -LiteralPath (Join-Path $logRoot 'Install.log') -Value $line -Encoding UTF8
 }
+
+function Get-OsFamily {
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $build = [int]$os.BuildNumber
+        if ($build -ge 22000 -or ([string]$os.Caption) -match 'Windows 11') { return 'Windows11' }
+        if ([string]$os.Caption -match 'Windows 10') { return 'Windows10' }
+        return 'Other'
+    }
+    catch { return 'Unknown' }
+}
+
+function Get-DirectorySizeBytes {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return [int64]0 }
+    $sum = [int64]0
+    foreach ($file in @(Get-ChildItem -LiteralPath $Path -File -Recurse -ErrorAction SilentlyContinue)) { $sum += [int64]$file.Length }
+    return $sum
+}
+
+function Set-PackageDetectionState {
+    param([string]$InstallState = 'Installed')
+
+    Write-InstallLog "Writing Intune detection registry state to HKLM:\$registrySubKey (64-bit registry view). InstallState=$InstallState"
+    Set-Registry64String -SubKey $registrySubKey -Name PackageId -Value ([string]$manifest.PackageId)
+    Set-Registry64String -SubKey $registrySubKey -Name PackageVersion -Value ([string]$manifest.PackageVersion)
+    Set-Registry64String -SubKey $registrySubKey -Name Language -Value ([string]$manifest.Language)
+    Set-Registry64String -SubKey $registrySubKey -Name MediaId -Value ([string]$manifest.MediaId)
+    Set-Registry64String -SubKey $registrySubKey -Name SetupCacheFolder -Value ([string]$manifest.SetupCacheFolder)
+    Set-Registry64String -SubKey $registrySubKey -Name PackageMode -Value $packageMode
+    Set-Registry64String -SubKey $registrySubKey -Name InstallState -Value $InstallState
+    Set-Registry64String -SubKey $registrySubKey -Name InstalledUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
+}
+
 function Test-SetupCacheReady {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -91,16 +131,16 @@ New-Directory -Path $intuneRoot
 New-Directory -Path $setupCacheRoot
 New-Directory -Path $logRoot
 
+if ((Get-OsFamily) -eq 'Windows11') {
+    Write-InstallLog 'Device is already Windows 11 during package install. Writing detection state, removing scheduled task if present, and exiting success.'
+    Set-PackageDetectionState -InstallState 'AlreadyWindows11'
+    try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+    exit 0
+}
+
 Copy-Item -LiteralPath (Join-Path $packageRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1') -Destination (Join-Path $DataRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $packageRoot 'Run-IntuneUpgrade.ps1') -Destination (Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1') -Force
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $intuneRoot 'PackageManifest.json') -Force
-
-$packageMediaRoot = Join-Path $packageRoot ("SetupMedia\{0}" -f $manifest.SetupCacheFolder)
-$targetMediaRoot = Join-Path $setupCacheRoot ([string]$manifest.SetupCacheFolder)
-$packageMode = 'WithMedia'
-if ($manifest.PSObject.Properties['PackageMode'] -and -not [string]::IsNullOrWhiteSpace([string]$manifest.PackageMode)) { $packageMode = [string]$manifest.PackageMode }
-$requiresExistingSetupCache = $false
-if ($manifest.PSObject.Properties['RequiresExistingSetupCache']) { $requiresExistingSetupCache = [bool]$manifest.RequiresExistingSetupCache }
 
 if ($requiresExistingSetupCache) {
     Write-InstallLog "Cache-only package mode enabled. Validating existing setup cache: $targetMediaRoot"
@@ -108,23 +148,40 @@ if ($requiresExistingSetupCache) {
 }
 else {
     if (-not (Test-Path -LiteralPath (Join-Path $packageMediaRoot 'setup.exe') -PathType Leaf)) { throw "Packaged setup.exe not found: $packageMediaRoot" }
+    if (-not (Test-Path -LiteralPath (Join-Path $packageMediaRoot 'sources\install.wim') -PathType Leaf)) { throw "Packaged sources\install.wim not found: $packageMediaRoot" }
 
-    Write-InstallLog "Copying packaged setup media to local cache: $packageMediaRoot -> $targetMediaRoot"
-    New-Directory -Path $targetMediaRoot
-    $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
-    $installRobocopyLog = Join-Path $logRoot 'Install-Robocopy.log'
-    & $robocopy $packageMediaRoot $targetMediaRoot /MIR /R:2 /W:5 /NP /NFL /NDL "/LOG+:$installRobocopyLog" | Out-Null
-    $copyExit = [int]$LASTEXITCODE
-    if ($copyExit -gt 7) { throw "Robocopy install media copy failed with exit code $copyExit." }
+    $targetCacheReady = $false
+    try {
+        [void](Test-SetupCacheReady -Path $targetMediaRoot)
+        $packageBytes = Get-DirectorySizeBytes -Path $packageMediaRoot
+        $targetBytes = Get-DirectorySizeBytes -Path $targetMediaRoot
+        if ($packageBytes -gt 0 -and $targetBytes -ge $packageBytes) { $targetCacheReady = $true }
+        else { Write-InstallLog ("Existing setup cache is present but smaller than package source. PackageBytes={0}; TargetBytes={1}; Cache={2}" -f $packageBytes,$targetBytes,$targetMediaRoot) 'WARN' }
+    }
+    catch {
+        Write-InstallLog ("Existing setup cache is not ready and will be refreshed. Cache={0}; Reason={1}" -f $targetMediaRoot,$_.Exception.Message) 'WARN'
+    }
+
+    if ($targetCacheReady) {
+        Write-InstallLog "Existing setup cache already looks ready. Skipping media recopy: $targetMediaRoot"
+    }
+    else {
+        if (Test-Path -LiteralPath $targetMediaRoot -PathType Container) {
+            Write-InstallLog "Removing incomplete setup cache before recopy: $targetMediaRoot"
+            Remove-Item -LiteralPath $targetMediaRoot -Recurse -Force -ErrorAction Stop
+        }
+        Write-InstallLog "Copying packaged setup media to local cache: $packageMediaRoot -> $targetMediaRoot"
+        New-Directory -Path $targetMediaRoot
+        $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
+        $installRobocopyLog = Join-Path $logRoot 'Install-Robocopy.log'
+        & $robocopy $packageMediaRoot $targetMediaRoot /MIR /R:2 /W:5 /NP /NFL /NDL "/LOG+:$installRobocopyLog" | Out-Null
+        $copyExit = [int]$LASTEXITCODE
+        Write-InstallLog "Robocopy setup media copy exit code: $copyExit; Log=$installRobocopyLog"
+        if ($copyExit -gt 7) { throw "Robocopy install media copy failed with exit code $copyExit. Log=$installRobocopyLog" }
+        [void](Test-SetupCacheReady -Path $targetMediaRoot)
+    }
 }
-Write-InstallLog "Writing Intune detection registry state to HKLM:\$registrySubKey (64-bit registry view)."
-Set-Registry64String -SubKey $registrySubKey -Name PackageId -Value ([string]$manifest.PackageId)
-Set-Registry64String -SubKey $registrySubKey -Name PackageVersion -Value ([string]$manifest.PackageVersion)
-Set-Registry64String -SubKey $registrySubKey -Name Language -Value ([string]$manifest.Language)
-Set-Registry64String -SubKey $registrySubKey -Name MediaId -Value ([string]$manifest.MediaId)
-Set-Registry64String -SubKey $registrySubKey -Name SetupCacheFolder -Value ([string]$manifest.SetupCacheFolder)
-Set-Registry64String -SubKey $registrySubKey -Name PackageMode -Value $packageMode
-Set-Registry64String -SubKey $registrySubKey -Name InstalledUtc -Value ((Get-Date).ToUniversalTime().ToString('o'))
+Set-PackageDetectionState -InstallState 'Installed'
 
 $runner = Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1'
 $runnerLog = Join-Path $logRoot 'Run-IntuneUpgrade.log'

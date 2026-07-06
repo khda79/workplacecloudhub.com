@@ -2,9 +2,9 @@
 .SYNOPSIS
     Publishes a SmartM365 Windows 11 Upgrade Toolkit .intunewin package to Intune.
 .DESCRIPTION
-    Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures registry detection for the generated language package.
+    Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures PowerShell detection for the generated language package.
 .VERSION
-    1.0.8
+    1.0.9
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -513,7 +513,12 @@ if ([string]::IsNullOrWhiteSpace($PackageVersion) -and $companionMetadata.Packag
 if ($Language -eq 'fr-FR' -and $companionMetadata.Language) { $Language = [string]$companionMetadata.Language }
 $languageFromPackageId = Get-LanguageFromPackageId -Value $PackageId
 if ($Language -eq 'fr-FR' -and $languageFromPackageId) { $Language = $languageFromPackageId }
-if ([string]::IsNullOrWhiteSpace($PackageVersion)) { throw "PackageVersion is required for Intune registry detection. Provide -PackageVersion or place the generated Detect.ps1 next to the .intunewin package." }
+if ([string]::IsNullOrWhiteSpace($PackageVersion)) { throw "PackageVersion is required for Intune detection. Provide -PackageVersion or place the generated Detect.ps1 next to the .intunewin package." }
+$packageDir = Split-Path -Parent $resolvedIntuneWinPath
+$detectScriptPath = Join-Path $packageDir 'Detect.ps1'
+if (-not (Test-Path -LiteralPath $detectScriptPath -PathType Leaf)) { throw "Generated Detect.ps1 not found next to the .intunewin package: $detectScriptPath" }
+$detectScriptContent = Get-Content -LiteralPath $detectScriptPath -Raw -ErrorAction Stop
+if ([string]::IsNullOrWhiteSpace($detectScriptContent)) { throw "Generated Detect.ps1 is empty: $detectScriptPath" }
 if ([string]::IsNullOrWhiteSpace($RequirementLanguage)) { $RequirementLanguage = $Language }
 $setupCacheFolder = [string]$companionMetadata.SetupCacheFolder
 if ([string]::IsNullOrWhiteSpace($setupCacheFolder)) { $setupCacheFolder = "Win11-$Language" }
@@ -538,7 +543,6 @@ Write-Step "Reading IntuneWin metadata: $resolvedIntuneWinPath"
 $metadata = Read-IntuneWinMetadata -Path $resolvedIntuneWinPath
 $encryptedSize = [int64]$metadata.SizeEncrypted
 $plainSize = [int64]$metadata.UnencryptedContentSize
-$registryKeyPath = "HKEY_LOCAL_MACHINE\SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages\$PackageId"
 
 $appBody = [ordered]@{
     '@odata.type' = '#microsoft.graph.win32LobApp'
@@ -570,13 +574,10 @@ $appBody = [ordered]@{
     )
     detectionRules = @(
         @{
-            '@odata.type' = '#microsoft.graph.win32LobAppRegistryDetection'
-            check32BitOn64System = $false
-            keyPath = $registryKeyPath
-            valueName = 'PackageVersion'
-            detectionType = 'string'
-            operator = 'equal'
-            detectionValue = $PackageVersion
+            '@odata.type' = '#microsoft.graph.win32LobAppPowerShellScriptDetection'
+            enforceSignatureCheck = $false
+            runAs32Bit = $false
+            scriptContent = ConvertTo-Base64Utf8 -Value $detectScriptContent
         }
     )
     returnCodes = @(
@@ -640,7 +641,7 @@ if (-not $PSCmdlet.ShouldProcess($DisplayName, 'Create or update Intune Win32 ap
         SetupFile = $metadata.SetupFile
         SizeEncrypted = $encryptedSize
         UnencryptedContentSize = $plainSize
-        DetectionRegistryKey = $registryKeyPath
+        DetectionScriptPath = $detectScriptPath
         UploadBlockSizeMB = $UploadBlockSizeMB
         AzureUploadMaxRetries = $AzureUploadMaxRetries
         ForceCreateNew = [bool]$ForceCreateNew
@@ -733,6 +734,6 @@ Write-Step 'App metadata and content version committed.'
     RequiresExistingSetupCache = $requiresExistingSetupCache
     ContentVersionId = $contentVersionId
     ContentFileId = $fileId
-    DetectionRegistryKey = $registryKeyPath
+    DetectionScriptPath = $detectScriptPath
     UpdatedExistingApp = [bool]$updatedExistingApp
 }
