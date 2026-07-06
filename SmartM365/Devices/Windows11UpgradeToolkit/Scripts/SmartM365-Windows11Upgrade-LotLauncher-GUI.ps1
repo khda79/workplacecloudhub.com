@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.19
+0.1.20
 #>
 param(
     [switch]$ValidateOnly
@@ -1754,6 +1754,25 @@ function Get-LaunchableLotSummaries {
     @($script:Lots | Where-Object { $_.ComputerCount -gt 0 -and $_.WrappersReady })
 }
 
+function Ensure-LotWrappersReady {
+    param([Parameter(Mandatory = $true)][pscustomobject]$Lot)
+
+    if ($Lot.WrappersReady) { return $Lot }
+
+    Add-Status -Title 'Wrappers' -Message ("Wrappers missing for {0}. Refreshing wrappers before launch..." -f $Lot.Name)
+    Invoke-LotWrapperRefresh -RootPath $toolkitRoot
+    Refresh-LotList
+
+    $refreshed = $script:Lots | Where-Object { $_.Name -eq $Lot.Name } | Select-Object -First 1
+    if (-not $refreshed) { throw ("LOT disappeared after wrapper refresh: {0}" -f $Lot.Name) }
+    if (-not $refreshed.WrappersReady) {
+        $missing = @($refreshed.MissingWrappers) -join ', '
+        throw ("Selected LOT wrappers are still missing after refresh: {0}. Missing={1}" -f $refreshed.Name,$missing)
+    }
+
+    return $refreshed
+}
+
 function Set-LotUiAvailability {
     param([bool]$Enabled)
 
@@ -1826,7 +1845,7 @@ $controls.LaunchLotButton.Add_Click({
     try {
         if (-not $script:SelectedLot) { return }
         if ($script:SelectedLot.ComputerCount -le 0) { throw 'Selected LOT has no device in Computers.txt.' }
-        if (-not $script:SelectedLot.WrappersReady) { throw 'Selected LOT wrappers are missing. Refresh wrappers first.' }
+        $script:SelectedLot = Ensure-LotWrappersReady -Lot $script:SelectedLot
         $environment = Get-ToolkitOptionEnvironment
         $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $script:SelectedLot.Path -EnvironmentVariables $environment
         if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $effectiveEnvironment -ScopeName $script:SelectedLot.Name)) { return }
@@ -1839,6 +1858,12 @@ $controls.LaunchLotButton.Add_Click({
 })
 $controls.LaunchAllButton.Add_Click({
     try {
+        $missingWrapperLots = @($script:Lots | Where-Object { $_.ComputerCount -gt 0 -and -not $_.WrappersReady })
+        if ($missingWrapperLots.Count -gt 0) {
+            Add-Status -Title 'Wrappers' -Message ("{0} LOT(s) have missing wrappers. Refreshing wrappers before launch all..." -f $missingWrapperLots.Count)
+            Invoke-LotWrapperRefresh -RootPath $toolkitRoot
+            Refresh-LotList
+        }
         $lots = Get-LaunchableLotSummaries
         if ($lots.Count -eq 0) { throw 'No ready LOT with devices was found.' }
         foreach ($lot in $lots) {
