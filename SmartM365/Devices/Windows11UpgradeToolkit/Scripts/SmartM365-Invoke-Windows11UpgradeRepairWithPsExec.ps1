@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.38
+    0.1.39
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.38'
+$script:LauncherVersion = '0.1.39'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -2328,7 +2328,7 @@ do {
             }
             if (((Get-Date) - $lastLiveHtmlWrite).TotalSeconds -ge 60) {
                 try {
-                    $liveRows = Get-Windows11ReportRows -Items @($results.ToArray())
+                    $liveRows = @(Get-Windows11ReportRows -Items @($results.ToArray()))
                     $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $runningJobs.Count -ComputerListStats $computerListStats
                     $runningJobRows = New-Windows11RunningJobRows -RunningJobs @($runningJobs) -JobStartedAtById $jobStartedAtById
                     Export-Windows11ReportCsv -Rows $liveRows -Path $liveCsvPath
@@ -2469,7 +2469,7 @@ do {
         $currentRunningJobs = @($runningJobs | Where-Object { $_.State -eq 'Running' })
         if (((Get-Date) - $lastLiveHtmlWrite).TotalSeconds -ge 3) {
             try {
-                $liveRows = Get-Windows11ReportRows -Items @($results.ToArray())
+                $liveRows = @(Get-Windows11ReportRows -Items @($results.ToArray()))
                 $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $currentRunningJobs.Count -ComputerListStats $computerListStats
                 $runningJobRows = New-Windows11RunningJobRows -RunningJobs $currentRunningJobs -JobStartedAtById $jobStartedAtById
                 Export-Windows11ReportCsv -Rows $liveRows -Path $liveCsvPath
@@ -2485,7 +2485,7 @@ do {
     $reportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $reportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_{2}.csv" -f $script:LauncherLogSafeLotName,$cycle,$reportTimestamp)
     $enrichedResults = @($results.ToArray() | ForEach-Object { $row = Add-AdInventoryFieldsToResult -Result $_ -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv; Add-IntuneInventoryFieldsToResult -Result $row -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv })
-    $normalizedResults = Get-Windows11ReportRows -Items @($enrichedResults)
+    $normalizedResults = @(Get-Windows11ReportRows -Items @($enrichedResults))
     Export-Windows11ReportCsv -Rows @($normalizedResults) -Path $reportPath
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
 
