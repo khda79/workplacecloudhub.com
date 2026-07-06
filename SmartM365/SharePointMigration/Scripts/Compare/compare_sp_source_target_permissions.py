@@ -42,6 +42,9 @@ PERMISSION_SUMMARY_COLUMNS = [
     "MissingInSPOPercent",
     "DisabledEntraUsersNotInSPO",
     "DisabledEntraUsersNotInSPOPercent",
+    "TargetHasMorePermissions",
+    "TargetHasLessPermissions",
+    "PermissionLevelDifferent",
     "ExtraInSPO",
     "ExtraInSPOPercent",
     "SourceWebUrl",
@@ -63,6 +66,9 @@ NUMERIC_COLUMNS = {
     "MatchedPermissions",
     "MissingInSPO",
     "ExtraInSPO",
+    "TargetHasMorePermissions",
+    "TargetHasLessPermissions",
+    "PermissionLevelDifferent",
     "SourceDuplicateKeysIgnored",
     "TargetDuplicateKeysIgnored",
     "SourceLimitedAccessOnlyIgnored",
@@ -102,6 +108,9 @@ COLUMN_WIDTHS = {
     "MissingInSPOPercent": 22,
     "DisabledEntraUsersNotInSPO": 28,
     "DisabledEntraUsersNotInSPOPercent": 34,
+    "TargetHasMorePermissions": 26,
+    "TargetHasLessPermissions": 26,
+    "PermissionLevelDifferent": 26,
     "ExtraInSPO": 14,
     "ExtraInSPOPercent": 20,
     "SourceWebUrl": 58,
@@ -117,6 +126,16 @@ COLUMN_WIDTHS = {
     "PrincipalName": 34,
     "PrincipalLoginName": 42,
     "PermissionLevels": 32,
+    "PrincipalMemberCount": 18,
+    "PrincipalUserMemberCount": 22,
+    "PrincipalDomainGroupMemberCount": 28,
+    "PrincipalMemberLoginNames": 64,
+    "PrincipalMemberDisplayNames": 64,
+    "PrincipalMemberLookupStatus": 30,
+    "PrincipalMemberEntraMatchedCount": 30,
+    "PrincipalMemberNotInEntraCount": 30,
+    "PrincipalMemberNotInEntraLoginNames": 72,
+    "PrincipalMemberNotInEntraDisplayNames": 72,
     "ComparisonPrincipal": 42,
     "ComparisonPermissionLevels": 34,
     "MappingSourceWebPath": 58,
@@ -145,6 +164,24 @@ PERMISSION_LEVEL_ALIASES = {
     "gestion de la hierarchie": "manage hierarchy",
     "gestion de la hiérarchie": "manage hierarchy",
     "interfaces restreintes pour la traduction": "restricted interfaces for translation",
+}
+
+EVERYONE_SOURCE_CLAIMS = {
+    "true",
+    "c:0(.s|true",
+}
+
+EVERYONE_SOURCE_NAMES = {
+    "everyone",
+    "tout le monde",
+}
+
+EVERYONE_EXCEPT_EXTERNAL_USERS_NAMES = {
+    "everyone except external users",
+}
+
+EVERYONE_EXCEPT_EXTERNAL_USERS_CLAIM_MARKERS = {
+    "spo-grid-all-users",
 }
 
 SHAREPOINT_ASSOCIATED_GROUP_SUFFIXES = {
@@ -392,11 +429,11 @@ def format_integer(value):
 def top_permission_difference_rows(permission_summary_rows, limit=20):
     rows = [
         row for row in permission_summary_rows
-        if to_int(row.get("MissingInSPO")) or to_int(row.get("DisabledEntraUsersNotInSPO")) or to_int(row.get("ExtraInSPO"))
+        if to_int(row.get("MissingInSPO")) or to_int(row.get("DisabledEntraUsersNotInSPO")) or to_int(row.get("TargetHasMorePermissions")) or to_int(row.get("TargetHasLessPermissions")) or to_int(row.get("PermissionLevelDifferent")) or to_int(row.get("ExtraInSPO"))
     ]
     rows.sort(
         key=lambda row: (
-            -(to_int(row.get("MissingInSPO")) + to_int(row.get("DisabledEntraUsersNotInSPO")) + to_int(row.get("ExtraInSPO"))),
+            -(to_int(row.get("MissingInSPO")) + to_int(row.get("DisabledEntraUsersNotInSPO")) + to_int(row.get("TargetHasLessPermissions")) + to_int(row.get("PermissionLevelDifferent")) + to_int(row.get("TargetHasMorePermissions")) + to_int(row.get("ExtraInSPO"))),
             str(row.get("ComparisonObjectPath") or ""),
         )
     )
@@ -411,17 +448,23 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     missing = to_int(summary_row.get("MissingInSPO"))
     disabled_missing = to_int(summary_row.get("DisabledEntraUsersNotInSPO"))
     extra = to_int(summary_row.get("ExtraInSPO"))
+    target_more = to_int(summary_row.get("TargetHasMorePermissions"))
+    target_less = to_int(summary_row.get("TargetHasLessPermissions"))
+    permission_different = to_int(summary_row.get("PermissionLevelDifferent"))
     not_entra = to_int(summary_row.get("SourceUsersNotInEntraIgnored"))
     source_la = to_int(summary_row.get("SourceLimitedAccessOnlyIgnored"))
     target_la = to_int(summary_row.get("TargetLimitedAccessOnlyIgnored"))
-    real_difference_count = missing + extra
-    status_text = "Review needed" if real_difference_count or disabled_missing else "No relevant difference"
-    status_class = "warn" if real_difference_count else ("note" if disabled_missing else "ok")
+    real_difference_count = missing + target_less + permission_different + extra
+    status_text = "Review needed" if real_difference_count or disabled_missing or target_more else "No relevant difference"
+    status_class = "warn" if real_difference_count else ("note" if disabled_missing or target_more else "ok")
 
     cards = [
         ("Matched", matched, "ok"),
         ("Missing in SPO", missing, "bad" if missing else "ok"),
         ("Disabled Entra users not in SPO", disabled_missing, "note" if disabled_missing else "ok"),
+        ("Target has more permissions", target_more, "note" if target_more else "ok"),
+        ("Target has less permissions", target_less, "bad" if target_less else "ok"),
+        ("Permission level different", permission_different, "bad" if permission_different else "ok"),
         ("Extra in SPO", extra, "bad" if extra else "ok"),
         ("Source users not in Entra", not_entra, "note" if not_entra else "ok"),
         ("Limited Access ignored", source_la + target_la, "muted"),
@@ -455,6 +498,9 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
             f"<td>{html_escape(row.get('Status'))}</td>"
             f"<td class=\"num\">{format_integer(row.get('MissingInSPO'))}</td>"
             f"<td class=\"num\">{format_integer(row.get('DisabledEntraUsersNotInSPO'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('TargetHasMorePermissions'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('TargetHasLessPermissions'))}</td>"
+            f"<td class=\"num\">{format_integer(row.get('PermissionLevelDifferent'))}</td>"
             f"<td class=\"num\">{format_integer(row.get('ExtraInSPO'))}</td>"
             f"<td>{html_escape(row.get('ObjectScope'))}</td>"
             f"<td>{html_escape(row.get('ComparisonObjectPath'))}</td>"
@@ -462,7 +508,7 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
             "</tr>"
         )
     if not top_rows_html:
-        top_rows_html.append('<tr><td colspan="7" class="empty">No object-level differences.</td></tr>')
+        top_rows_html.append('<tr><td colspan="10" class="empty">No object-level differences.</td></tr>')
 
     scope_rows_html = []
     for row in scope_rows:
@@ -542,7 +588,7 @@ th {{ background:#F8FBFE; color:#334155; font-size:12px; text-transform:uppercas
   </div>
   <div class="section">
     <h2>Top objects with differences</h2>
-    <table><thead><tr><th>Status</th><th>Missing</th><th>Disabled users</th><th>Extra</th><th>Scope</th><th>Object path</th><th>Title</th></tr></thead><tbody>{''.join(top_rows_html)}</tbody></table>
+    <table><thead><tr><th>Status</th><th>Missing</th><th>Disabled users</th><th>Target more</th><th>Target less</th><th>Different</th><th>Extra</th><th>Scope</th><th>Object path</th><th>Title</th></tr></thead><tbody>{''.join(top_rows_html)}</tbody></table>
   </div>
   <div class="section">
     <h2>Scope summary</h2>
@@ -766,6 +812,29 @@ def normalize_principal_text(value):
     return text
 
 
+def is_source_everyone_principal(row, normalized_principal):
+    principal_type = normalize_label(row.get("PrincipalType"))
+    principal_name = normalize_label(row.get("PrincipalName"))
+    principal_login = (row.get("PrincipalLoginName") or "").strip().lower()
+    return (
+        principal_type == "domaingroup"
+        and principal_name in EVERYONE_SOURCE_NAMES
+        and (normalized_principal in EVERYONE_SOURCE_CLAIMS or principal_login in EVERYONE_SOURCE_CLAIMS)
+    )
+
+
+def is_spo_everyone_except_external_users_principal(row, normalized_principal):
+    principal_type = normalize_label(row.get("PrincipalType"))
+    principal_name = normalize_label(row.get("PrincipalName"))
+    principal_login = (row.get("PrincipalLoginName") or "").strip().lower()
+    if principal_type not in {"domaingroup", "securitygroup"}:
+        return False
+    if principal_name in EVERYONE_EXCEPT_EXTERNAL_USERS_NAMES:
+        return True
+    if normalized_principal in EVERYONE_EXCEPT_EXTERNAL_USERS_NAMES:
+        return True
+    return any(marker in principal_login or marker in normalized_principal for marker in EVERYONE_EXCEPT_EXTERNAL_USERS_CLAIM_MARKERS)
+
 def parse_sharepoint_group_name(value):
     text = normalize_label(value)
     prefix_patterns = [
@@ -966,7 +1035,45 @@ def build_sharepoint_group_mappings(source_rows, target_rows, source_prefix=None
                 target_group_names_by_web=target_group_names_by_web,
             )
 
+    base_mapping_rows = list(mapping_rows)
+    known_source_web_paths = set(source_web_rows) | set(source_associated) | set(source_web_role_groups)
+    for mapping_row in base_mapping_rows:
+        source_object_path = mapping_row.get("MappingSourceObjectPath") or ""
+        if source_object_path:
+            continue
+        source_web_path = mapping_row.get("MappingSourceWebPath") or ""
+        target_web_path = mapping_row.get("MappingTargetWebPath") or ""
+        source_group_name = mapping_row.get("MappingSourcePrincipalName") or ""
+        target_group_name = mapping_row.get("MappingTargetPrincipalName") or ""
+        role = mapping_row.get("MappingRole") or ""
+        if not source_web_path or not target_web_path or not source_group_name or not target_group_name or not role:
+            continue
+        source_principal = normalize_principal_text(source_group_name)
+        target_group_principal = normalize_principal_text(target_group_name)
+        source_prefix = source_web_path.rstrip("/") + "/"
+        target_prefix = target_web_path.rstrip("/") + "/"
+        for descendant_source_web_path in sorted(known_source_web_paths):
+            if descendant_source_web_path == source_web_path or not descendant_source_web_path.startswith(source_prefix):
+                continue
+            suffix_path = descendant_source_web_path[len(source_prefix) :]
+            descendant_target_web_path = f"{target_prefix}{suffix_path}".rstrip("/")
+            if target_group_principal not in target_group_names_by_web.get(descendant_target_web_path, set()):
+                continue
+            add_sharepoint_group_mapping(
+                mappings,
+                mapping_rows,
+                descendant_source_web_path,
+                descendant_target_web_path,
+                role,
+                source_group_name,
+                target_group_name,
+                "InheritedAncestorWebGroup",
+                target_web_rows.get(descendant_target_web_path),
+                target_group_names_by_web=target_group_names_by_web,
+            )
     return mappings, mapping_rows
+
+
 
 def canonical_group_base(value):
     text = normalize_label(value)
@@ -995,7 +1102,7 @@ def normalize_principal(row, web_path="", object_path="", entra_user_aliases=Non
         group_base, suffix = parse_sharepoint_group_name(normalized)
         if suffix and canonical_group_base(group_base) in web_group_base_candidates(row, web_path):
             return f"sharepointgroup:{web_path}:{suffix}"
-    if principal_type == "domaingroup" and normalized == "true" and normalize_label(row.get("PrincipalName")) in {"everyone", "tout le monde"}:
+    if is_source_everyone_principal(row, normalized) or is_spo_everyone_except_external_users_principal(row, normalized):
         return "everyone"
     if principal_type == "user" and entra_user_aliases:
         return entra_user_aliases.get(normalized, normalized)
@@ -1050,6 +1157,39 @@ def attach_key(row, key):
     return new_row
 
 
+
+def split_principal_member_values(value):
+    if not value:
+        return []
+    return [part.strip() for part in str(value).split(" || ") if part.strip()]
+
+
+def enrich_sharepoint_group_member_entra_status(row, entra_user_aliases):
+    if normalize_label(row.get("PrincipalType")) != "sharepointgroup" or not entra_user_aliases:
+        return row
+    login_names = split_principal_member_values(row.get("PrincipalMemberLoginNames"))
+    display_names = split_principal_member_values(row.get("PrincipalMemberDisplayNames"))
+    if not login_names:
+        return row
+
+    missing_logins = []
+    missing_display_names = []
+    matched_count = 0
+    for index, login_name in enumerate(login_names):
+        normalized = normalize_principal_text(login_name)
+        if normalized and normalized in entra_user_aliases:
+            matched_count += 1
+            continue
+        missing_logins.append(login_name)
+        if index < len(display_names):
+            missing_display_names.append(display_names[index])
+
+    updated = dict(row)
+    updated["PrincipalMemberEntraMatchedCount"] = matched_count
+    updated["PrincipalMemberNotInEntraCount"] = len(missing_logins)
+    updated["PrincipalMemberNotInEntraLoginNames"] = " || ".join(missing_logins)
+    updated["PrincipalMemberNotInEntraDisplayNames"] = " || ".join(missing_display_names)
+    return updated
 def source_user_not_found_in_entra(row, entra_user_aliases):
     if not entra_user_aliases:
         return False
@@ -1078,6 +1218,111 @@ def key_has_comparable_permissions(key):
     return bool(key[3])
 
 
+
+def permission_identity_key(key):
+    return key[:3]
+
+
+def permission_set_from_key(key):
+    return {part for part in (key[3] or "").split("|") if part}
+
+
+def build_identity_lookup(keys):
+    lookup = defaultdict(list)
+    for key in keys:
+        lookup[permission_identity_key(key)].append(key)
+    return lookup
+
+
+def choose_best_target_permission_key(source_key, target_keys):
+    source_permissions = permission_set_from_key(source_key)
+    return sorted(
+        target_keys,
+        key=lambda target_key: (
+            -len(source_permissions & permission_set_from_key(target_key)),
+            len(source_permissions ^ permission_set_from_key(target_key)),
+            target_key[3],
+        ),
+    )[0]
+
+
+def compare_permission_key_sets(source_by_key, target_by_key, disabled_entra_users):
+    source_keys = set(source_by_key)
+    target_keys = set(target_by_key)
+    target_by_identity = build_identity_lookup(target_keys)
+    unmatched_target_keys = set(target_keys)
+
+    matched_keys = []
+    missing_keys = []
+    disabled_entra_missing_keys = []
+    target_has_more_pairs = []
+    target_has_less_pairs = []
+    permission_level_different_pairs = []
+
+    for source_key in sorted(source_keys):
+        if source_key in target_keys:
+            matched_keys.append(source_key)
+            unmatched_target_keys.discard(source_key)
+            continue
+
+        candidate_target_keys = target_by_identity.get(permission_identity_key(source_key), [])
+        if candidate_target_keys:
+            target_key = choose_best_target_permission_key(source_key, candidate_target_keys)
+            source_permissions = permission_set_from_key(source_key)
+            target_permissions = permission_set_from_key(target_key)
+            unmatched_target_keys.discard(target_key)
+
+            if source_permissions <= target_permissions:
+                matched_keys.append(source_key)
+                if target_permissions > source_permissions:
+                    target_has_more_pairs.append((source_key, target_key))
+                continue
+
+            if source_key_is_disabled_entra_user(source_by_key[source_key], source_key, disabled_entra_users):
+                disabled_entra_missing_keys.append(source_key)
+                continue
+
+            missing_keys.append(source_key)
+            if target_permissions < source_permissions:
+                target_has_less_pairs.append((source_key, target_key))
+            else:
+                permission_level_different_pairs.append((source_key, target_key))
+            continue
+
+        if source_key_is_disabled_entra_user(source_by_key[source_key], source_key, disabled_entra_users):
+            disabled_entra_missing_keys.append(source_key)
+        else:
+            missing_keys.append(source_key)
+
+    return {
+        "matched_keys": sorted(matched_keys),
+        "missing_keys": sorted(missing_keys),
+        "disabled_entra_missing_keys": sorted(disabled_entra_missing_keys),
+        "extra_keys": sorted(unmatched_target_keys),
+        "target_has_more_pairs": sorted(target_has_more_pairs),
+        "target_has_less_pairs": sorted(target_has_less_pairs),
+        "permission_level_different_pairs": sorted(permission_level_different_pairs),
+    }
+
+
+def with_target_permission_comparison(source_row, source_key, target_row, target_key, reason):
+    source_permissions = permission_set_from_key(source_key)
+    target_permissions = permission_set_from_key(target_key)
+    updated = dict(source_row)
+    updated["TargetPermissionLevels"] = target_row.get("PermissionLevels", "")
+    updated["TargetComparisonPermissionLevels"] = target_key[3]
+    updated["MissingPermissionLevels"] = "|".join(sorted(source_permissions - target_permissions))
+    updated["AdditionalTargetPermissionLevels"] = "|".join(sorted(target_permissions - source_permissions))
+    updated["ComparisonIgnoreReason"] = reason
+    return updated
+
+
+def rows_from_permission_pairs(pairs, source_by_key, target_by_key, reason):
+    return [
+        with_target_permission_comparison(source_by_key[source_key], source_key, target_by_key[target_key], target_key, reason)
+        for source_key, target_key in pairs
+    ]
+
 def percent(numerator, denominator):
     denominator = int(denominator or 0)
     if denominator <= 0:
@@ -1091,6 +1336,12 @@ def permission_summary_status(entry):
         differences.append("missing in SPO")
     if int(entry.get("DisabledEntraUsersNotInSPO") or 0):
         differences.append("disabled Entra users not in SPO")
+    if int(entry.get("TargetHasMorePermissions") or 0):
+        differences.append("target has more permissions")
+    if int(entry.get("TargetHasLessPermissions") or 0):
+        differences.append("target has less permissions")
+    if int(entry.get("PermissionLevelDifferent") or 0):
+        differences.append("permission level different")
     if int(entry.get("ExtraInSPO") or 0):
         differences.append("extra in SPO")
     if not differences:
@@ -1118,6 +1369,9 @@ def ensure_permission_summary(stats, object_scope, object_path):
             "MissingInSPOPercent": "0.000000",
             "DisabledEntraUsersNotInSPO": 0,
             "DisabledEntraUsersNotInSPOPercent": "0.000000",
+            "TargetHasMorePermissions": 0,
+            "TargetHasLessPermissions": 0,
+            "PermissionLevelDifferent": 0,
             "ExtraInSPO": 0,
             "ExtraInSPOPercent": "0.000000",
             "SourceWebUrl": "",
@@ -1144,7 +1398,7 @@ def update_permission_summary_metadata(entry, row, side):
             entry["TargetObjectUrl"] = row.get("ObjectUrl", "")
 
 
-def build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys):
+def build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys, target_has_more_pairs=None, target_has_less_pairs=None, permission_level_different_pairs=None):
     stats = {}
     for row in source_by_key.values():
         entry = ensure_permission_summary(stats, row.get("ComparisonObjectScope"), row.get("ComparisonObjectPath"))
@@ -1166,6 +1420,15 @@ def build_permission_summary(source_by_key, target_by_key, matched_keys, disable
     for key in extra_keys:
         object_scope, object_path = key[0], key[1]
         ensure_permission_summary(stats, object_scope, object_path)["ExtraInSPO"] += 1
+    for source_key, _target_key in target_has_more_pairs or []:
+        object_scope, object_path = source_key[0], source_key[1]
+        ensure_permission_summary(stats, object_scope, object_path)["TargetHasMorePermissions"] += 1
+    for source_key, _target_key in target_has_less_pairs or []:
+        object_scope, object_path = source_key[0], source_key[1]
+        ensure_permission_summary(stats, object_scope, object_path)["TargetHasLessPermissions"] += 1
+    for source_key, _target_key in permission_level_different_pairs or []:
+        object_scope, object_path = source_key[0], source_key[1]
+        ensure_permission_summary(stats, object_scope, object_path)["PermissionLevelDifferent"] += 1
 
     rows = []
     for entry in stats.values():
@@ -1178,7 +1441,7 @@ def build_permission_summary(source_by_key, target_by_key, matched_keys, disable
     return sorted(
         rows,
         key=lambda item: (
-            -int(item.get("MissingInSPO") or 0) - int(item.get("DisabledEntraUsersNotInSPO") or 0) - int(item.get("ExtraInSPO") or 0),
+            -int(item.get("MissingInSPO") or 0) - int(item.get("DisabledEntraUsersNotInSPO") or 0) - int(item.get("TargetHasLessPermissions") or 0) - int(item.get("PermissionLevelDifferent") or 0) - int(item.get("TargetHasMorePermissions") or 0) - int(item.get("ExtraInSPO") or 0),
             str(item.get("ObjectScope") or ""),
             str(item.get("ComparisonObjectPath") or ""),
         ),
@@ -1280,7 +1543,7 @@ def write_permission_comparison_report(
 
     for row in source_rows:
         key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings)
-        keyed = attach_key(row, key)
+        keyed = enrich_sharepoint_group_member_entra_status(attach_key(row, key), entra_user_aliases)
         if not key_has_comparable_permissions(key):
             source_limited_access_only.append(keyed)
             continue
@@ -1303,17 +1566,14 @@ def write_permission_comparison_report(
             continue
         target_by_key[key] = keyed
 
-    source_keys = set(source_by_key)
-    target_keys = set(target_by_key)
-    matched_keys = sorted(source_keys & target_keys)
-    raw_missing_keys = sorted(source_keys - target_keys)
-    disabled_entra_missing_keys = [
-        key for key in raw_missing_keys
-        if source_key_is_disabled_entra_user(source_by_key[key], key, disabled_entra_users)
-    ]
-    disabled_entra_missing_key_set = set(disabled_entra_missing_keys)
-    missing_keys = [key for key in raw_missing_keys if key not in disabled_entra_missing_key_set]
-    extra_keys = sorted(target_keys - source_keys)
+    comparison = compare_permission_key_sets(source_by_key, target_by_key, disabled_entra_users)
+    matched_keys = comparison["matched_keys"]
+    missing_keys = comparison["missing_keys"]
+    disabled_entra_missing_keys = comparison["disabled_entra_missing_keys"]
+    extra_keys = comparison["extra_keys"]
+    target_has_more_pairs = comparison["target_has_more_pairs"]
+    target_has_less_pairs = comparison["target_has_less_pairs"]
+    permission_level_different_pairs = comparison["permission_level_different_pairs"]
 
     summary_rows = [
         {
@@ -1325,6 +1585,9 @@ def write_permission_comparison_report(
             "MatchedPermissions": len(matched_keys),
             "MissingInSPO": len(missing_keys),
             "DisabledEntraUsersNotInSPO": len(disabled_entra_missing_keys),
+            "TargetHasMorePermissions": len(target_has_more_pairs),
+            "TargetHasLessPermissions": len(target_has_less_pairs),
+            "PermissionLevelDifferent": len(permission_level_different_pairs),
             "ExtraInSPO": len(extra_keys),
             "SourceDuplicateKeysIgnored": len(source_duplicates),
             "TargetDuplicateKeysIgnored": len(target_duplicates),
@@ -1360,6 +1623,9 @@ def write_permission_comparison_report(
         for key in disabled_entra_missing_keys
     ]
     extra_rows = rows_from_keys(extra_keys, target_by_key)
+    target_has_more_rows = rows_from_permission_pairs(target_has_more_pairs, source_by_key, target_by_key, "Target includes all source permission levels plus additional levels")
+    target_has_less_rows = rows_from_permission_pairs(target_has_less_pairs, source_by_key, target_by_key, "Target is missing one or more source permission levels")
+    permission_level_different_rows = rows_from_permission_pairs(permission_level_different_pairs, source_by_key, target_by_key, "Source and target permission levels differ")
 
     scope_counter = Counter()
     for key in matched_keys:
@@ -1370,11 +1636,17 @@ def write_permission_comparison_report(
         scope_counter[(key[0], "DisabledEntraUsersNotInSPO")] += 1
     for key in extra_keys:
         scope_counter[(key[0], "ExtraInSPO")] += 1
+    for source_key, _target_key in target_has_more_pairs:
+        scope_counter[(source_key[0], "TargetHasMorePermissions")] += 1
+    for source_key, _target_key in target_has_less_pairs:
+        scope_counter[(source_key[0], "TargetHasLessPermissions")] += 1
+    for source_key, _target_key in permission_level_different_pairs:
+        scope_counter[(source_key[0], "PermissionLevelDifferent")] += 1
     scope_rows = [
         {"ObjectScope": scope, "Status": status, "Count": count}
         for (scope, status), count in sorted(scope_counter.items())
     ]
-    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys)
+    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys, target_has_more_pairs, target_has_less_pairs, permission_level_different_pairs)
 
     summary_csv = output_dir / "Summary.csv"
     scope_csv = output_dir / "ScopeSummary.csv"
@@ -1382,6 +1654,9 @@ def write_permission_comparison_report(
     missing_csv = output_dir / "MissingInSPO.csv"
     disabled_entra_missing_csv = output_dir / "DisabledEntraUsersNotInSPO.csv"
     extra_csv = output_dir / "ExtraInSPO.csv"
+    target_has_more_csv = output_dir / "TargetHasMorePermissions.csv"
+    target_has_less_csv = output_dir / "TargetHasLessPermissions.csv"
+    permission_level_different_csv = output_dir / "PermissionLevelDifferent.csv"
     matched_csv = output_dir / "Matched.csv"
     duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
     duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
@@ -1395,7 +1670,7 @@ def write_permission_comparison_report(
     write_csv(permission_summary_csv, permission_summary_rows, PERMISSION_SUMMARY_COLUMNS)
 
     output_fields = list(source_rows[0].keys()) if source_rows else (list(target_rows[0].keys()) if target_rows else [])
-    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "ComparisonIgnoreReason"]:
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "PrincipalMemberEntraMatchedCount", "PrincipalMemberNotInEntraCount", "PrincipalMemberNotInEntraLoginNames", "PrincipalMemberNotInEntraDisplayNames", "ComparisonIgnoreReason"]:
         if extra_field not in output_fields:
             output_fields.append(extra_field)
     write_csv(missing_csv, missing_rows, output_fields)
@@ -1403,9 +1678,16 @@ def write_permission_comparison_report(
     write_csv(matched_csv, matched_rows, output_fields)
 
     target_fields = list(target_rows[0].keys()) if target_rows else output_fields
-    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "ComparisonIgnoreReason"]:
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "PrincipalMemberEntraMatchedCount", "PrincipalMemberNotInEntraCount", "PrincipalMemberNotInEntraLoginNames", "PrincipalMemberNotInEntraDisplayNames", "ComparisonIgnoreReason"]:
         if extra_field not in target_fields:
             target_fields.append(extra_field)
+    difference_fields = list(output_fields)
+    for extra_field in ["TargetPermissionLevels", "TargetComparisonPermissionLevels", "MissingPermissionLevels", "AdditionalTargetPermissionLevels"]:
+        if extra_field not in difference_fields:
+            difference_fields.append(extra_field)
+    write_csv(target_has_more_csv, target_has_more_rows, difference_fields)
+    write_csv(target_has_less_csv, target_has_less_rows, difference_fields)
+    write_csv(permission_level_different_csv, permission_level_different_rows, difference_fields)
     write_csv(extra_csv, extra_rows, target_fields)
     write_csv(duplicate_source_csv, source_duplicates, output_fields)
     write_csv(duplicate_target_csv, target_duplicates, target_fields)
@@ -1424,6 +1706,9 @@ def write_permission_comparison_report(
             ("ScopeSummary", list_rows_for_excel(scope_csv)),
             ("MissingInSPO", list_rows_for_excel(missing_csv)),
             ("DisabledUsers", list_rows_for_excel(disabled_entra_missing_csv)),
+            ("TargetMore", list_rows_for_excel(target_has_more_csv)),
+            ("TargetLess", list_rows_for_excel(target_has_less_csv)),
+            ("PermDifferent", list_rows_for_excel(permission_level_different_csv)),
             ("ExtraInSPO", list_rows_for_excel(extra_csv)),
             ("Matched", list_rows_for_excel(matched_csv)),
             ("DuplicateSource", list_rows_for_excel(duplicate_source_csv)),
@@ -1448,6 +1733,9 @@ def write_permission_comparison_report(
             ("Scope summary", scope_csv, "Counts grouped by object scope and status."),
             ("Missing in SPO", missing_csv, "Source permissions absent from SPO, excluding disabled Entra users."),
             ("Disabled Entra users", disabled_entra_missing_csv, "Source disabled Entra user permissions absent from SPO."),
+            ("Target has more permissions", target_has_more_csv, "Target principal has all source permission levels plus additional levels."),
+            ("Target has less permissions", target_has_less_csv, "Target principal is missing one or more source permission levels."),
+            ("Permission level different", permission_level_different_csv, "Source and target permission levels differ for the same object and principal."),
             ("Extra in SPO", extra_csv, "Target permissions not found in source."),
             ("Source users not in Entra", source_users_not_in_entra_csv, "Source users ignored because they are not in the Entra cache."),
             ("SharePoint group mappings", sharepoint_group_mappings_csv, "Detected and confirmed SharePoint group mappings."),
@@ -1460,6 +1748,9 @@ def write_permission_comparison_report(
         "MatchedPermissions": len(matched_keys),
         "MissingInSPO": len(missing_keys),
         "DisabledEntraUsersNotInSPO": len(disabled_entra_missing_keys),
+        "TargetHasMorePermissions": len(target_has_more_pairs),
+        "TargetHasLessPermissions": len(target_has_less_pairs),
+        "PermissionLevelDifferent": len(permission_level_different_pairs),
         "ExtraInSPO": len(extra_keys),
         "Summary": summary_csv,
         "Excel": xlsx_path,
@@ -1521,7 +1812,7 @@ def main():
 
     for row in source_rows:
         key = make_key(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings)
-        keyed = attach_key(row, key)
+        keyed = enrich_sharepoint_group_member_entra_status(attach_key(row, key), entra_user_aliases)
         if not key_has_comparable_permissions(key):
             source_limited_access_only.append(keyed)
             continue
@@ -1544,17 +1835,14 @@ def main():
             continue
         target_by_key[key] = keyed
 
-    source_keys = set(source_by_key)
-    target_keys = set(target_by_key)
-    matched_keys = sorted(source_keys & target_keys)
-    raw_missing_keys = sorted(source_keys - target_keys)
-    disabled_entra_missing_keys = [
-        key for key in raw_missing_keys
-        if source_key_is_disabled_entra_user(source_by_key[key], key, disabled_entra_users)
-    ]
-    disabled_entra_missing_key_set = set(disabled_entra_missing_keys)
-    missing_keys = [key for key in raw_missing_keys if key not in disabled_entra_missing_key_set]
-    extra_keys = sorted(target_keys - source_keys)
+    comparison = compare_permission_key_sets(source_by_key, target_by_key, disabled_entra_users)
+    matched_keys = comparison["matched_keys"]
+    missing_keys = comparison["missing_keys"]
+    disabled_entra_missing_keys = comparison["disabled_entra_missing_keys"]
+    extra_keys = comparison["extra_keys"]
+    target_has_more_pairs = comparison["target_has_more_pairs"]
+    target_has_less_pairs = comparison["target_has_less_pairs"]
+    permission_level_different_pairs = comparison["permission_level_different_pairs"]
 
     summary_rows = [
         {
@@ -1567,6 +1855,9 @@ def main():
             "MatchedPermissions": len(matched_keys),
             "MissingInSPO": len(missing_keys),
             "DisabledEntraUsersNotInSPO": len(disabled_entra_missing_keys),
+            "TargetHasMorePermissions": len(target_has_more_pairs),
+            "TargetHasLessPermissions": len(target_has_less_pairs),
+            "PermissionLevelDifferent": len(permission_level_different_pairs),
             "ExtraInSPO": len(extra_keys),
             "SourceDuplicateKeysIgnored": len(source_duplicates),
             "TargetDuplicateKeysIgnored": len(target_duplicates),
@@ -1591,6 +1882,9 @@ def main():
         for key in disabled_entra_missing_keys
     ]
     extra_rows = rows_from_keys(extra_keys, target_by_key)
+    target_has_more_rows = rows_from_permission_pairs(target_has_more_pairs, source_by_key, target_by_key, "Target includes all source permission levels plus additional levels")
+    target_has_less_rows = rows_from_permission_pairs(target_has_less_pairs, source_by_key, target_by_key, "Target is missing one or more source permission levels")
+    permission_level_different_rows = rows_from_permission_pairs(permission_level_different_pairs, source_by_key, target_by_key, "Source and target permission levels differ")
 
     scope_counter = Counter()
     for key in matched_keys:
@@ -1601,11 +1895,17 @@ def main():
         scope_counter[(key[0], "DisabledEntraUsersNotInSPO")] += 1
     for key in extra_keys:
         scope_counter[(key[0], "ExtraInSPO")] += 1
+    for source_key, _target_key in target_has_more_pairs:
+        scope_counter[(source_key[0], "TargetHasMorePermissions")] += 1
+    for source_key, _target_key in target_has_less_pairs:
+        scope_counter[(source_key[0], "TargetHasLessPermissions")] += 1
+    for source_key, _target_key in permission_level_different_pairs:
+        scope_counter[(source_key[0], "PermissionLevelDifferent")] += 1
     scope_rows = [
         {"ObjectScope": scope, "Status": status, "Count": count}
         for (scope, status), count in sorted(scope_counter.items())
     ]
-    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys)
+    permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys, target_has_more_pairs, target_has_less_pairs, permission_level_different_pairs)
 
     summary_csv = output_dir / "Summary.csv"
     scope_csv = output_dir / "ScopeSummary.csv"
@@ -1613,6 +1913,9 @@ def main():
     missing_csv = output_dir / "MissingInSPO.csv"
     disabled_entra_missing_csv = output_dir / "DisabledEntraUsersNotInSPO.csv"
     extra_csv = output_dir / "ExtraInSPO.csv"
+    target_has_more_csv = output_dir / "TargetHasMorePermissions.csv"
+    target_has_less_csv = output_dir / "TargetHasLessPermissions.csv"
+    permission_level_different_csv = output_dir / "PermissionLevelDifferent.csv"
     matched_csv = output_dir / "Matched.csv"
     duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
     duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
@@ -1626,7 +1929,7 @@ def main():
     write_csv(permission_summary_csv, permission_summary_rows, PERMISSION_SUMMARY_COLUMNS)
 
     output_fields = list(source_rows[0].keys()) if source_rows else []
-    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "ComparisonIgnoreReason"]:
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "PrincipalMemberEntraMatchedCount", "PrincipalMemberNotInEntraCount", "PrincipalMemberNotInEntraLoginNames", "PrincipalMemberNotInEntraDisplayNames", "ComparisonIgnoreReason"]:
         if extra_field not in output_fields:
             output_fields.append(extra_field)
     write_csv(missing_csv, missing_rows, output_fields)
@@ -1634,9 +1937,16 @@ def main():
     write_csv(matched_csv, matched_rows, output_fields)
 
     target_fields = list(target_rows[0].keys()) if target_rows else output_fields
-    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "ComparisonIgnoreReason"]:
+    for extra_field in ["ComparisonObjectScope", "ComparisonObjectPath", "ComparisonPrincipal", "ComparisonPermissionLevels", "PrincipalMemberEntraMatchedCount", "PrincipalMemberNotInEntraCount", "PrincipalMemberNotInEntraLoginNames", "PrincipalMemberNotInEntraDisplayNames", "ComparisonIgnoreReason"]:
         if extra_field not in target_fields:
             target_fields.append(extra_field)
+    difference_fields = list(output_fields)
+    for extra_field in ["TargetPermissionLevels", "TargetComparisonPermissionLevels", "MissingPermissionLevels", "AdditionalTargetPermissionLevels"]:
+        if extra_field not in difference_fields:
+            difference_fields.append(extra_field)
+    write_csv(target_has_more_csv, target_has_more_rows, difference_fields)
+    write_csv(target_has_less_csv, target_has_less_rows, difference_fields)
+    write_csv(permission_level_different_csv, permission_level_different_rows, difference_fields)
     write_csv(extra_csv, extra_rows, target_fields)
     write_csv(duplicate_source_csv, source_duplicates, output_fields)
     write_csv(duplicate_target_csv, target_duplicates, target_fields)
@@ -1655,6 +1965,9 @@ def main():
             ("ScopeSummary", list_rows_for_excel(scope_csv)),
             ("MissingInSPO", list_rows_for_excel(missing_csv)),
             ("DisabledUsers", list_rows_for_excel(disabled_entra_missing_csv)),
+            ("TargetMore", list_rows_for_excel(target_has_more_csv)),
+            ("TargetLess", list_rows_for_excel(target_has_less_csv)),
+            ("PermDifferent", list_rows_for_excel(permission_level_different_csv)),
             ("ExtraInSPO", list_rows_for_excel(extra_csv)),
             ("Matched", list_rows_for_excel(matched_csv)),
             ("DuplicateSource", list_rows_for_excel(duplicate_source_csv)),
@@ -1679,6 +1992,9 @@ def main():
             ("Scope summary", scope_csv, "Counts grouped by object scope and status."),
             ("Missing in SPO", missing_csv, "Source permissions absent from SPO, excluding disabled Entra users."),
             ("Disabled Entra users", disabled_entra_missing_csv, "Source disabled Entra user permissions absent from SPO."),
+            ("Target has more permissions", target_has_more_csv, "Target principal has all source permission levels plus additional levels."),
+            ("Target has less permissions", target_has_less_csv, "Target principal is missing one or more source permission levels."),
+            ("Permission level different", permission_level_different_csv, "Source and target permission levels differ for the same object and principal."),
             ("Extra in SPO", extra_csv, "Target permissions not found in source."),
             ("Source users not in Entra", source_users_not_in_entra_csv, "Source users ignored because they are not in the Entra cache."),
             ("SharePoint group mappings", sharepoint_group_mappings_csv, "Detected and confirmed SharePoint group mappings."),
@@ -1724,6 +2040,9 @@ def main():
     print(f"Matched permissions: {len(matched_keys)}")
     print(f"Missing in SPO: {len(missing_keys)}")
     print(f"Disabled Entra users not in SPO: {len(disabled_entra_missing_keys)}")
+    print(f"Target has more permissions: {len(target_has_more_pairs)}")
+    print(f"Target has less permissions: {len(target_has_less_pairs)}")
+    print(f"Permission level different: {len(permission_level_different_pairs)}")
     print(f"Extra in SPO: {len(extra_keys)}")
     print(f"Summary: {summary_csv}")
     print(f"Excel: {xlsx_path}")
@@ -1736,4 +2055,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
 
