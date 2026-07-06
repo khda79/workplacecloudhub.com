@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.34
+    0.1.35
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.34'
+$script:LauncherVersion = '0.1.35'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -127,8 +127,12 @@ $ReportRoot = [System.IO.Path]::GetFullPath($ReportRoot)
 $CentralLogRoot = [System.IO.Path]::GetFullPath($CentralLogRoot)
 $script:LauncherRunTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:LauncherLogRoot = Join-Path $script:LotRoot 'Logs'
-$script:LauncherLogPath = Join-Path $script:LauncherLogRoot ("SmartM365-W11UT-Launcher_{0}.log" -f $script:LauncherRunTimestamp)
-$script:LauncherLatestLogPath = Join-Path $script:LauncherLogRoot 'SmartM365-W11UT-Launcher_latest.log'
+$script:LauncherLotName = Split-Path -Leaf $script:LotRoot
+if ([string]::IsNullOrWhiteSpace($script:LauncherLotName)) { $script:LauncherLotName = 'UnknownLOT' }
+$script:LauncherLogSafeLotName = [regex]::Replace($script:LauncherLotName, '[^A-Za-z0-9._-]', '_')
+if ([string]::IsNullOrWhiteSpace($script:LauncherLogSafeLotName)) { $script:LauncherLogSafeLotName = 'UnknownLOT' }
+$script:LauncherLogPath = Join-Path $script:LauncherLogRoot ("SmartM365-W11UT-Launcher_{0}_{1}.log" -f $script:LauncherLogSafeLotName,$script:LauncherRunTimestamp)
+$script:LauncherLatestLogPath = Join-Path $script:LauncherLogRoot ("SmartM365-W11UT-Launcher_{0}_latest.log" -f $script:LauncherLogSafeLotName)
 
 $AdInventoryUsesRecentRootCsv = $false
 $effectiveRootAdInventoryCsv = $AdRootInventoryCsv
