@@ -66,6 +66,29 @@ For German media:
 
 The default media folder is inferred from language (`fr-FR` -> `FR-fr`, `de-DE` -> `DE-de`). Override with `-MediaFolder` when needed.
 
+## Build every SetupSource language package
+
+To build one full media `.intunewin` package for every valid media folder under `SetupSource`:
+
+```powershell
+.\IntuneWin32\Build-AllSmartM365Windows11IntunePackages.ps1 `
+  -GenerateMissingManifest `
+  -IntuneWinAppUtilPath C:\Tools\IntuneWinAppUtil.exe `
+  -Force
+```
+
+The script detects folders named like `FR-fr`, `DE-de`, `ES-es`, converts them to Intune package languages like `fr-FR`, `de-DE`, `es-ES`, refreshes missing media manifests when requested, and calls the single-language builder for each folder. Intermediate staging folders are removed after each successful package by default; use `-KeepStaging` only when you need to inspect the staged package source.
+
+To limit the build to selected media folders:
+
+```powershell
+.\IntuneWin32\Build-AllSmartM365Windows11IntunePackages.ps1 `
+  -IncludeMediaFolder FR-fr,DE-de `
+  -GenerateMissingManifest `
+  -IntuneWinAppUtilPath C:\Tools\IntuneWinAppUtil.exe `
+  -Force
+```
+
 ## Build a cache-only package
 
 Use `-WithCacheOnly` to create a lightweight package without Windows setup media. The generated app name is `Windows11UpgradeToolkit-fr-FR-WithCacheOnly` and the package id is `SmartM365-Windows11UpgradeToolkit-Win11-fr-FR-WithCacheOnly`.
