@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.19
+0.1.20
 #>
 
 #requires -Version 5.1
@@ -298,7 +298,27 @@ function Convert-ToPsExecRemoteArgument {
     return ('"{0}"' -f ($text -replace '"', '\"'))
 }
 
-$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')
+function Get-PsExecCommunicationFailureDetail {
+    param([AllowEmptyCollection()][string[]]$Lines)
+
+    $evidence = @($Lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' | '
+    if ([string]::IsNullOrWhiteSpace($evidence)) { return '' }
+    if ($evidence -match 'Error communicating with PsExec service on (?<Computer>[^:]+):\s*(?<Error>[^|\r\n]+)') {
+        return ("PsExec communication lost after launch. Computer={0}; Error={1}" -f $Matches.Computer.Trim(),$Matches.Error.Trim())
+    }
+    if ($evidence -match 'Descripteur non valide|The handle is invalid') {
+        return 'PsExec communication lost after launch. Error=Invalid handle from PsExec service.'
+    }
+    if ($evidence -match 'Erreur r.seau inattendue|unexpected network error') {
+        return 'PsExec communication lost after launch. Error=Unexpected network error.'
+    }
+    if ($evidence -match 'Le chemin r.seau n.a pas .t. trouv.|network path was not found') {
+        return 'PsExec communication lost after launch. Error=Network path was not found.'
+    }
+    return ''
+}
+
+$script:CentralLogBuckets = @('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteLogCollectionFailed','Errors')
 
 function Get-ResultValue {
     param(
@@ -322,6 +342,12 @@ function Get-CentralLogBucket {
     if ($launcherStatus -eq 'ADMIN_SHARE_UNREACHABLE' -or $launcherStatus -eq 'DRYRUN_ADMIN_SHARE_UNREACHABLE') {
         return 'ADMIN_SHARE_UNREACHABLE'
     }
+    if ($launcherStatus -eq 'PSEXEC_COMMUNICATION_LOST') {
+        return 'PsExecCommunicationLost'
+    }
+    if ($launcherStatus -eq 'REMOTE_LOG_COLLECTION_FAILED') {
+        return 'RemoteLogCollectionFailed'
+    }
 
     foreach ($statusName in @('RemoteStatus','LauncherStatus')) {
         $statusValue = Get-ResultValue -Result $Result -Name $statusName
@@ -333,6 +359,12 @@ function Get-CentralLogBucket {
         }
         if ($statusValue -eq 'PSEXEC_TIMEOUT') {
             return 'PsExecTimeout'
+        }
+        if ($statusValue -eq 'PSEXEC_COMMUNICATION_LOST') {
+            return 'PsExecCommunicationLost'
+        }
+        if ($statusValue -eq 'REMOTE_LOG_COLLECTION_FAILED') {
+            return 'RemoteLogCollectionFailed'
         }
         if ($statusValue -eq 'SETUP_PROCESS_TIMEOUT') {
             return 'SetupProcessTimeout'
@@ -398,6 +430,12 @@ function Get-CentralLogBucket {
         if ($detailValue -match 'Timed out waiting for setup (subnet|source) copy lease') {
             return 'SetupCopyLeaseTimeout'
         }
+        if ($detailValue -match 'Error communicating with PsExec service|Descripteur non valide|Erreur r.seau inattendue|unexpected network error') {
+            return 'PsExecCommunicationLost'
+        }
+        if ($detailValue -match 'Central log collection failed|Le chemin r.seau n.a pas .t. trouv.|network path was not found') {
+            return 'RemoteLogCollectionFailed'
+        }
     }
 
     $exitCodeText = Get-ResultValue -Result $Result -Name 'ExitCode'
@@ -413,7 +451,7 @@ function New-CentralLogTarget {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteLogCollectionFailed','Errors')][string]$Bucket
     )
 
     if ($KeepCentralLogHistory) {
@@ -434,7 +472,7 @@ function Publish-LauncherEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket,
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteLogCollectionFailed','Errors')][string]$Bucket,
         [Parameter(Mandatory = $true)][string]$WorkerLogPath,
         [AllowNull()][string]$StdoutLogPath,
         [AllowNull()][string]$StderrLogPath
@@ -581,7 +619,7 @@ function Collect-RemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteLogCollectionFailed','Errors')][string]$Bucket
     )
 
     if ($NoCentralLogCollection) { return '' }
@@ -816,6 +854,13 @@ try {
         }
     }
 
+    $psExecCommunicationFailureDetail = Get-PsExecCommunicationFailureDetail -Lines $stderrContent
+    if (-not [string]::IsNullOrWhiteSpace($psExecCommunicationFailureDetail) -and [string]::IsNullOrWhiteSpace($result.RemoteStatus)) {
+        $result.LauncherStatus = 'PSEXEC_COMMUNICATION_LOST'
+        $result.Detail = $psExecCommunicationFailureDetail
+        Add-Content -LiteralPath $logPath -Value ("[{0}] WARN {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$psExecCommunicationFailureDetail) -Encoding UTF8
+    }
+
     Start-Sleep -Seconds 3
     $remoteBaseShare = Convert-ToAdminSharePath -ComputerName $Computer -LocalPath $RemoteBaseDir
     $remoteLastRunPath = Join-Path $remoteBaseShare 'LastRun.json'
@@ -833,8 +878,23 @@ try {
         $result.JobErrorMessage = $centralLogError
         Add-Content -LiteralPath $logPath -Value ("[{0}] WARN {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$centralLogError) -Encoding UTF8
         if ([string]::IsNullOrWhiteSpace($result.RemoteStatus)) {
-            throw
+            if ($result.LauncherStatus -ne 'PSEXEC_COMMUNICATION_LOST') {
+                $result.LauncherStatus = 'REMOTE_LOG_COLLECTION_FAILED'
+                $result.Detail = $centralLogError
+            }
+            $centralLogBucket = Get-CentralLogBucket -Result $result
         }
+    }
+    if ([string]::IsNullOrWhiteSpace($result.RemoteLogsPath) -and [string]::IsNullOrWhiteSpace($result.RemoteStatus) -and $result.LauncherStatus -ne 'PSEXEC_COMMUNICATION_LOST') {
+        if ($result.LauncherStatus -eq 'SUCCESS' -or $result.LauncherStatus -eq 'PSEXEC_EXIT_UNKNOWN' -or $result.LauncherStatus -like 'PSEXEC_EXIT_*') {
+            $result.LauncherStatus = 'REMOTE_LOG_COLLECTION_FAILED'
+            if ([string]::IsNullOrWhiteSpace($result.Detail) -or $result.Detail -eq 'PsExec process exited but no native exit code was available.') {
+                $result.Detail = 'Remote script status could not be read because LastRun.json/log collection was unavailable after PsExec completed.'
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($result.RemoteLogsPath) -and $result.LauncherStatus -in @('PSEXEC_COMMUNICATION_LOST','REMOTE_LOG_COLLECTION_FAILED')) {
+        $result.RemoteLogsPath = Publish-LauncherEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket (Get-CentralLogBucket -Result $result) -WorkerLogPath $logPath -StdoutLogPath $stdoutPath -StderrLogPath $stderrPath
     }
 }
 catch {
