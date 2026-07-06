@@ -27,7 +27,7 @@
     .\SmartM365-SharePointSource-PermissionInventory.ps1 -WebUrl "https://intranet/sites/finance" -DocumentLibrariesOnly -IncludeItemPermissions
 
 .VERSION
-    1.0.4
+    1.1.0
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -170,6 +170,12 @@ $PermissionColumns = @(
     'PrincipalName',
     'PrincipalLoginName',
     'PrincipalId',
+    'PrincipalMemberCount',
+    'PrincipalUserMemberCount',
+    'PrincipalDomainGroupMemberCount',
+    'PrincipalMemberLoginNames',
+    'PrincipalMemberDisplayNames',
+    'PrincipalMemberLookupStatus',
     'PermissionLevels',
     'IsLimitedAccessOnly'
 )
@@ -488,6 +494,72 @@ function Get-AssociatedWebGroupNames {
     }
 }
 
+$script:SharePointGroupMembershipCache = @{}
+
+function Join-PrincipalMemberValues {
+    param(
+        [object[]]$Values
+    )
+
+    if (-not $Values -or $Values.Count -eq 0) {
+        return ''
+    }
+
+    return (($Values | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique) -join ' || ')
+}
+
+function Get-EmptyPrincipalMembershipInfo {
+    param(
+        [string]$Status = ''
+    )
+
+    [pscustomobject]@{
+        PrincipalMemberCount            = ''
+        PrincipalUserMemberCount        = ''
+        PrincipalDomainGroupMemberCount = ''
+        PrincipalMemberLoginNames       = ''
+        PrincipalMemberDisplayNames     = ''
+        PrincipalMemberLookupStatus     = $Status
+    }
+}
+
+function Get-PrincipalMembershipInfo {
+    param(
+        $Member
+    )
+
+    if (-not ($Member -is [Microsoft.SharePoint.SPGroup])) {
+        return Get-EmptyPrincipalMembershipInfo
+    }
+
+    $cacheKey = if ($null -ne $Member.ID) { [string]$Member.ID } else { [string]$Member.LoginName }
+    if ($script:SharePointGroupMembershipCache.ContainsKey($cacheKey)) {
+        return $script:SharePointGroupMembershipCache[$cacheKey]
+    }
+
+    try {
+        $members = @($Member.Users)
+        $loginNames = @($members | ForEach-Object { $_.LoginName })
+        $displayNames = @($members | ForEach-Object { $_.Name })
+        $domainGroupMembers = @($members | Where-Object { $_.IsDomainGroup })
+        $userMembers = @($members | Where-Object { -not $_.IsDomainGroup })
+
+        $info = [pscustomobject]@{
+            PrincipalMemberCount            = $members.Count
+            PrincipalUserMemberCount        = $userMembers.Count
+            PrincipalDomainGroupMemberCount = $domainGroupMembers.Count
+            PrincipalMemberLoginNames       = Join-PrincipalMemberValues -Values $loginNames
+            PrincipalMemberDisplayNames     = Join-PrincipalMemberValues -Values $displayNames
+            PrincipalMemberLookupStatus     = 'OK'
+        }
+    }
+    catch {
+        $info = Get-EmptyPrincipalMembershipInfo -Status ("Failed: {0}" -f $_.Exception.Message)
+    }
+
+    $script:SharePointGroupMembershipCache[$cacheKey] = $info
+    return $info
+}
 function Get-RoleAssignmentRows {
     param(
         [string]$SiteCollectionUrl,
@@ -521,6 +593,7 @@ function Get-RoleAssignmentRows {
         }
 
         $principal = Get-PrincipalInfo -Member $roleAssignment.Member
+        $membership = Get-PrincipalMembershipInfo -Member $roleAssignment.Member
         [pscustomobject]@{
             SiteCollectionUrl       = $SiteCollectionUrl
             WebUrl                  = $WebUrl
@@ -547,6 +620,12 @@ function Get-RoleAssignmentRows {
             PrincipalName           = $principal.PrincipalName
             PrincipalLoginName      = $principal.PrincipalLoginName
             PrincipalId             = $principal.PrincipalId
+            PrincipalMemberCount        = $membership.PrincipalMemberCount
+            PrincipalUserMemberCount    = $membership.PrincipalUserMemberCount
+            PrincipalDomainGroupMemberCount = $membership.PrincipalDomainGroupMemberCount
+            PrincipalMemberLoginNames   = $membership.PrincipalMemberLoginNames
+            PrincipalMemberDisplayNames = $membership.PrincipalMemberDisplayNames
+            PrincipalMemberLookupStatus = $membership.PrincipalMemberLookupStatus
             PermissionLevels        = ($permissionLevels -join '|')
             IsLimitedAccessOnly     = ($permissionLevels.Count -eq 1 -and $permissionLevels[0] -eq 'Limited Access')
         }
@@ -1171,3 +1250,10 @@ finally {
         Stop-TimestampedTranscript -Path $LogPath
     }
 }
+
+
+
+
+
+
+

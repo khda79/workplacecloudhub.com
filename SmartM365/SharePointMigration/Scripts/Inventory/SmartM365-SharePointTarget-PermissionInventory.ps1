@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.0.5
+    1.1.0
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -156,6 +156,12 @@ $PermissionColumns = @(
     'PrincipalName',
     'PrincipalLoginName',
     'PrincipalId',
+    'PrincipalMemberCount',
+    'PrincipalUserMemberCount',
+    'PrincipalDomainGroupMemberCount',
+    'PrincipalMemberLoginNames',
+    'PrincipalMemberDisplayNames',
+    'PrincipalMemberLookupStatus',
     'PermissionLevels',
     'IsLimitedAccessOnly'
 )
@@ -559,6 +565,78 @@ function Get-AssociatedWebGroupNames {
     }
 }
 
+$script:SharePointGroupMembershipCache = @{}
+
+function Join-PrincipalMemberValues {
+    param(
+        [object[]]$Values
+    )
+
+    if (-not $Values -or $Values.Count -eq 0) {
+        return ''
+    }
+
+    return (($Values | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique) -join ' || ')
+}
+
+function Get-EmptyPrincipalMembershipInfo {
+    param(
+        [string]$Status = ''
+    )
+
+    [pscustomobject]@{
+        PrincipalMemberCount            = ''
+        PrincipalUserMemberCount        = ''
+        PrincipalDomainGroupMemberCount = ''
+        PrincipalMemberLoginNames       = ''
+        PrincipalMemberDisplayNames     = ''
+        PrincipalMemberLookupStatus     = $Status
+    }
+}
+
+function Get-PrincipalMembershipInfo {
+    param(
+        $Member,
+        [string]$PrincipalType
+    )
+
+    if ($PrincipalType -ne 'SharePointGroup') {
+        return Get-EmptyPrincipalMembershipInfo
+    }
+
+    $groupIdentity = if (-not [string]::IsNullOrWhiteSpace([string]$Member.Title)) { [string]$Member.Title } else { [string]$Member.LoginName }
+    if ([string]::IsNullOrWhiteSpace($groupIdentity)) {
+        return Get-EmptyPrincipalMembershipInfo -Status 'Skipped: group identity is empty'
+    }
+
+    $cacheKey = if ($null -ne $Member.Id) { [string]$Member.Id } else { $groupIdentity.ToLowerInvariant() }
+    if ($script:SharePointGroupMembershipCache.ContainsKey($cacheKey)) {
+        return $script:SharePointGroupMembershipCache[$cacheKey]
+    }
+
+    try {
+        $members = @(Get-PnPGroupMember -Group $groupIdentity -ErrorAction Stop)
+        $loginNames = @($members | ForEach-Object { $_.LoginName })
+        $displayNames = @($members | ForEach-Object { $_.Title })
+        $domainGroupMembers = @($members | Where-Object { [string]$_.PrincipalType -match 'SecurityGroup|DistributionList|SharePointGroup' })
+        $userMembers = @($members | Where-Object { [string]$_.PrincipalType -eq 'User' })
+
+        $info = [pscustomobject]@{
+            PrincipalMemberCount            = $members.Count
+            PrincipalUserMemberCount        = $userMembers.Count
+            PrincipalDomainGroupMemberCount = $domainGroupMembers.Count
+            PrincipalMemberLoginNames       = Join-PrincipalMemberValues -Values $loginNames
+            PrincipalMemberDisplayNames     = Join-PrincipalMemberValues -Values $displayNames
+            PrincipalMemberLookupStatus     = 'OK'
+        }
+    }
+    catch {
+        $info = Get-EmptyPrincipalMembershipInfo -Status ("Failed: {0}" -f $_.Exception.Message)
+    }
+
+    $script:SharePointGroupMembershipCache[$cacheKey] = $info
+    return $info
+}
 function Get-RoleAssignmentRows {
     param(
         [string]$SiteCollectionUrl,
@@ -595,6 +673,7 @@ function Get-RoleAssignmentRows {
             }
 
             $principal = Get-PrincipalInfo -Member $member
+            $membership = Get-PrincipalMembershipInfo -Member $member -PrincipalType $principal.PrincipalType
             [pscustomobject]@{
                 SiteCollectionUrl        = $SiteCollectionUrl
                 WebUrl                   = $WebUrl
@@ -621,6 +700,12 @@ function Get-RoleAssignmentRows {
                 PrincipalName            = $principal.PrincipalName
                 PrincipalLoginName       = $principal.PrincipalLoginName
                 PrincipalId              = $principal.PrincipalId
+                PrincipalMemberCount         = $membership.PrincipalMemberCount
+                PrincipalUserMemberCount     = $membership.PrincipalUserMemberCount
+                PrincipalDomainGroupMemberCount = $membership.PrincipalDomainGroupMemberCount
+                PrincipalMemberLoginNames    = $membership.PrincipalMemberLoginNames
+                PrincipalMemberDisplayNames  = $membership.PrincipalMemberDisplayNames
+                PrincipalMemberLookupStatus  = $membership.PrincipalMemberLookupStatus
                 PermissionLevels         = ($permissionLevels -join '|')
                 IsLimitedAccessOnly      = ($permissionLevels.Count -eq 1 -and $permissionLevels[0] -eq 'Limited Access')
             }
@@ -1069,4 +1154,10 @@ finally {
         Stop-TimestampedTranscript -Path $LogPath
     }
 }
+
+
+
+
+
+
 
