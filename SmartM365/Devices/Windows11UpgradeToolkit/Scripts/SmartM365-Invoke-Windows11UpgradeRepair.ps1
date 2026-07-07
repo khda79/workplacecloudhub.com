@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.43
+    0.1.44
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,7 +75,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.43'
+$script:ScriptVersion = '0.1.44'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -2960,6 +2960,58 @@ function Save-RunResult {
     $Result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:LastRunPath -Encoding UTF8
 }
 
+function Save-SetupReturnCheckpoint {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][string]$NextAction,
+        [string]$Detail = '',
+        [string]$ActionResult = '',
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [string]$SetupExePath = ''
+    )
+
+    try {
+        $checkpoint = [pscustomobject]@{
+            RunId = $script:RunId
+            ComputerName = $script:ComputerName
+            StartTimeUtc = $script:ScriptStartUtc.ToString('o')
+            EndTimeUtc = (Get-Date).ToUniversalTime().ToString('o')
+            ScriptVersion = $script:ScriptVersion
+            Status = $Status
+            NextAction = $NextAction
+            Detail = $Detail
+            ActionResult = $ActionResult
+            ExitCode = $ExitCode
+            SetupExecutionMode = $SetupExecutionMode
+            SetupMediaId = $SetupMediaId
+            SetupLanguage = $SetupLanguage
+            SetupDynamicUpdate = $SetupDynamicUpdate
+            ResolvedSetupLanguage = $script:ResolvedSetupLanguage
+            SetupMediaLanguages = $script:ResolvedSetupMediaLanguages
+            SetupCachePath = $script:ResolvedSetupCachePath
+            SelectedSetupSourcePath = $script:SelectedSetupSourcePath
+            SetupSourceSelectionDetail = $script:SetupSourceSelectionDetail
+            SetupCacheAction = $script:SetupCacheAction
+            SetupProcessStarted = $script:SetupProcessStarted
+            SetupProcessExited = $script:SetupProcessExited
+            SetupProcessPid = $script:SetupProcessPid
+            SetupProcessStartTime = $script:SetupProcessStartTime
+            SetupProcessExitCode = $script:SetupProcessExitCode
+            SetupProcessLastSnapshot = $script:SetupProcessLastSnapshot
+            SetupProcessLastHeartbeatUtc = $script:SetupProcessLastHeartbeatUtc
+            SetupExePath = $SetupExePath
+            LogPath = $script:LogPath
+            CsvPath = $script:CsvPath
+            Checkpoint = 'SetupReturn'
+        }
+        Save-RunResult -Result $checkpoint
+        Write-SmartLog ("Setup return checkpoint saved before finalization. Status={0}; NextAction={1}; ExitCode={2}" -f $Status,$NextAction,$ExitCode)
+    }
+    catch {
+        Write-SmartLog ("Failed to save setup return checkpoint: {0}" -f $_.Exception.Message) 'WARN'
+    }
+}
+
 New-SmartDirectory -Path $script:LogDir
 New-SmartDirectory -Path $script:OutputDir
 $script:LocalIPv4Addresses = ''
@@ -3152,6 +3204,7 @@ try {
                     $nextAction = $outcome.NextAction
                     $exitCode = $outcome.ExitCode
                     if (-not [string]::IsNullOrWhiteSpace([string]$outcome.ActionResultSuffix)) { $actionResult = "$actionResult;$($outcome.ActionResultSuffix)" }
+                    Save-SetupReturnCheckpoint -Status $status -NextAction $nextAction -Detail $detail -ActionResult $actionResult -ExitCode $exitCode -SetupExePath $setupExe
                 }
                 else {
                     $failureOutcome = Resolve-SetupFailureOutcome -SetupExitInfo $setupExitInfo
@@ -3230,6 +3283,7 @@ try {
                 $nextAction = $outcome.NextAction
                 $exitCode = $outcome.ExitCode
                 if (-not [string]::IsNullOrWhiteSpace([string]$outcome.ActionResultSuffix)) { $actionResult = "$actionResult;$($outcome.ActionResultSuffix)" }
+                Save-SetupReturnCheckpoint -Status $status -NextAction $nextAction -Detail $detail -ActionResult $actionResult -ExitCode $exitCode -SetupExePath $setupExe
             }
             else {
                 $failureOutcome = Resolve-SetupFailureOutcome -SetupExitInfo $setupExitInfo
