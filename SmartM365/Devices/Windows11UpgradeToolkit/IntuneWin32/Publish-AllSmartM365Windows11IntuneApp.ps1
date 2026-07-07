@@ -8,7 +8,7 @@
     packages are selected so existing WithCacheOnly packages are not republished accidentally.
 
 .VERSION
-    1.0.0
+    1.0.1
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -23,6 +23,7 @@ param(
     [string[]]$ExcludePackageId,
     [switch]$ForceCreateNew,
     [switch]$DisableLanguageRequirementRule,
+    [ValidateRange(-1, 2147483647)][int]$MinimumFreeDiskSpaceInMB = -1,
     [int]$UploadBlockSizeMB = 16,
     [int]$AzureUploadMaxRetries = 5,
     [int]$PollSeconds = 10,
@@ -143,6 +144,7 @@ foreach ($package in $selected) {
         AzureUploadMaxRetries = $AzureUploadMaxRetries
         PollSeconds = $PollSeconds
         PollTimeoutMinutes = $PollTimeoutMinutes
+        MinimumFreeDiskSpaceInMB = $MinimumFreeDiskSpaceInMB
         GraphBaseUri = $GraphBaseUri
     }
     if ($ForceCreateNew) { $publishParams['ForceCreateNew'] = $true }
