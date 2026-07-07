@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.39
+    0.1.41
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.39'
+$script:LauncherVersion = '0.1.41'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -608,6 +608,56 @@ function Get-ComputerListStats {
         DuplicateGroups = [int]$duplicateGroups.Count
         DuplicateLines = [int]$duplicateLineCount
         DuplicateSamples = [string](($duplicateGroups | Select-Object -First 10 | ForEach-Object { $_.Group[0] }) -join ', ')
+    }
+}
+
+function Remove-DuplicateComputerListEntries {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Computer list not found: $Path"
+    }
+
+    $lines = @(Get-Content -LiteralPath $Path -ErrorAction Stop)
+    $seen = @{}
+    $output = New-Object System.Collections.Generic.List[string]
+    $duplicateGroups = @{}
+    $duplicateLines = 0
+
+    foreach ($line in $lines) {
+        $rawLine = [string]$line
+        $name = $rawLine.Trim().Trim([char]34)
+        if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith('#')) {
+            [void]$output.Add($rawLine)
+            continue
+        }
+
+        $key = $name.ToUpperInvariant()
+        if ($seen.ContainsKey($key)) {
+            $duplicateLines++
+            if (-not $duplicateGroups.ContainsKey($key)) { $duplicateGroups[$key] = $seen[$key] }
+            continue
+        }
+
+        $seen[$key] = $name
+        [void]$output.Add($rawLine)
+    }
+
+    if ($duplicateLines -le 0) {
+        return [pscustomobject]@{ Changed = $false; DuplicateGroups = 0; DuplicateLines = 0; DuplicateSamples = ''; BackupPath = '' }
+    }
+
+    $backupPath = "{0}.dedup_{1}.bak" -f $Path,(Get-Date -Format 'yyyyMMdd-HHmmss')
+    Copy-Item -LiteralPath $Path -Destination $backupPath -Force -ErrorAction Stop
+    Set-Content -LiteralPath $Path -Value $output -Encoding UTF8 -Force
+
+    $samples = @($duplicateGroups.Values | Select-Object -First 10)
+    return [pscustomobject]@{
+        Changed = $true
+        DuplicateGroups = [int]$duplicateGroups.Count
+        DuplicateLines = [int]$duplicateLines
+        DuplicateSamples = [string]($samples -join ', ')
+        BackupPath = [string]$backupPath
     }
 }
 
@@ -1420,6 +1470,16 @@ foreach ($optionRow in @($script:LauncherOptionRows)) {
 if ($script:IsSingleComputerLaunch) { Write-Host "Single PC     : worker limits ignored for one-computer launch." }
 Write-Host "Reports       : $ReportRoot"
 Write-Host ""
+try {
+    $computerListDedupe = Remove-DuplicateComputerListEntries -Path $ComputerListPath
+    if ($computerListDedupe.Changed) {
+        Write-Host ("Computer list deduplicated before lot start: RemovedDuplicateLines={0}; DuplicateGroups={1}; Samples={2}; Backup={3}" -f $computerListDedupe.DuplicateLines,$computerListDedupe.DuplicateGroups,$computerListDedupe.DuplicateSamples,$computerListDedupe.BackupPath) -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host ("WARN: failed to deduplicate Computers.txt before lot start: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+}
+
 
 $reportColumns = @(
     'Timestamp',
@@ -1753,6 +1813,24 @@ function New-Windows11UpgradeCycleHtmlReport {
     if ([string]::IsNullOrWhiteSpace($lotName)) { $lotName = 'Unknown LOT' }
     $lotNameHtml = ConvertTo-HtmlText $lotName
     $lotPathHtml = ConvertTo-HtmlText $lotPath
+    $cycleValues = @(
+        $rows |
+            ForEach-Object {
+                if ($_.PSObject.Properties['CycleNumber']) { [string]$_.CycleNumber }
+            } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+    $cycleLabel = if ($CycleNumber -le 0) {
+        'all cycles'
+    }
+    elseif ($CycleNumber -gt 1 -or $cycleValues.Count -gt 1) {
+        "cycles 1-$CycleNumber"
+    }
+    else {
+        "cycle $CycleNumber"
+    }
+    $cycleLabelHtml = ConvertTo-HtmlText $cycleLabel
 
     $style = @"
 <style>
@@ -1777,10 +1855,10 @@ tr:nth-child(even) td { background: #F5F8FB; }
 "@
 
     $html = New-Object System.Collections.Generic.List[string]
-    [void]$html.Add(("<html><head><meta charset='utf-8'><title>Windows 11 upgrade - {0} - cycle {1}</title>{2}</head><body>" -f $lotNameHtml,$CycleNumber,$style))
+    [void]$html.Add(("<html><head><meta charset='utf-8'><title>Windows 11 upgrade - {0} - {1}</title>{2}</head><body>" -f $lotNameHtml,$cycleLabelHtml,$style))
     [void]$html.Add("<div class='header-card'>")
     [void]$html.Add("<div class='header-text'>")
-    [void]$html.Add(("<div class='title'>Windows 11 upgrade - cycle {0}<span class='badge'>{1}</span></div>" -f $CycleNumber,$mode))
+    [void]$html.Add(("<div class='title'>Windows 11 upgrade - {0}<span class='badge'>{1}</span></div>" -f $cycleLabelHtml,$mode))
     [void]$html.Add("<div class='subtitle'>Smart Intune Windows 11 Upgrade Toolkit</div>")
     [void]$html.Add(("<div class='lot-name' title='{1}'>LOT: {0}</div>" -f $lotNameHtml,$lotPathHtml))
     [void]$html.Add(("<div class='meta'>Generated: {0} | Report rows: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
@@ -2194,6 +2272,12 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
     }
 }
 $cycle = 0
+$mergedHtmlReportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$mergedLiveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_{1}_live.html" -f $script:LauncherLogSafeLotName,$mergedHtmlReportTimestamp)
+$mergedFinalHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_{1}.html" -f $script:LauncherLogSafeLotName,$mergedHtmlReportTimestamp)
+$allCycleResults = New-Object System.Collections.ArrayList
+$allCycleProgressRows = New-Object System.Collections.ArrayList
+Write-Host ("Merged live HTML report: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkCyan
 do {
     $cycle++
     $computers = @(Get-ComputerList -Path $ComputerListPath)
@@ -2220,16 +2304,13 @@ do {
     $techRunGuardFqdnByJobId = @{}
     $jobStartedAtById = @{}
     $nextIndex = 0
-
-    $liveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_live.html" -f $script:LauncherLogSafeLotName,$cycle)
-    $liveCsvPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_live.csv" -f $script:LauncherLogSafeLotName,$cycle)
     $lastLiveHtmlWrite = [datetime]::MinValue
     $cycleStart = Get-Date
     $lastProgressLog = Get-Date
     try {
         $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $runningJobs.Count -ComputerListStats $computerListStats
-        Export-Windows11ReportCsv -Rows @() -Path $liveCsvPath
-        New-Windows11UpgradeCycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $cycleProgress -RunningJobRows @()
+        $mergedProgressRows = @($allCycleProgressRows.ToArray()) + @($cycleProgress)
+        New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows @()
     }
     catch { Write-Host ("Cycle {0}: failed to initialize live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
@@ -2331,8 +2412,9 @@ do {
                     $liveRows = @(Get-Windows11ReportRows -Items @($results.ToArray()))
                     $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $runningJobs.Count -ComputerListStats $computerListStats
                     $runningJobRows = New-Windows11RunningJobRows -RunningJobs @($runningJobs) -JobStartedAtById $jobStartedAtById
-                    Export-Windows11ReportCsv -Rows $liveRows -Path $liveCsvPath
-                    New-Windows11UpgradeCycleHtmlReport -Summary $liveRows -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $cycleProgress -RunningJobRows $runningJobRows
+                    $mergedLiveRows = @($allCycleResults.ToArray()) + $liveRows
+                    $mergedProgressRows = @($allCycleProgressRows.ToArray()) + @($cycleProgress)
+                    New-Windows11UpgradeCycleHtmlReport -Summary $mergedLiveRows -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows $runningJobRows
                     $lastLiveHtmlWrite = Get-Date
                 }
                 catch { Write-Host ("Cycle {0}: failed to update live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
@@ -2472,8 +2554,9 @@ do {
                 $liveRows = @(Get-Windows11ReportRows -Items @($results.ToArray()))
                 $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $currentRunningJobs.Count -ComputerListStats $computerListStats
                 $runningJobRows = New-Windows11RunningJobRows -RunningJobs $currentRunningJobs -JobStartedAtById $jobStartedAtById
-                Export-Windows11ReportCsv -Rows $liveRows -Path $liveCsvPath
-                New-Windows11UpgradeCycleHtmlReport -Summary $liveRows -Path $liveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $cycleProgress -RunningJobRows $runningJobRows
+                $mergedLiveRows = @($allCycleResults.ToArray()) + $liveRows
+                $mergedProgressRows = @($allCycleProgressRows.ToArray()) + @($cycleProgress)
+                New-Windows11UpgradeCycleHtmlReport -Summary $mergedLiveRows -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows $runningJobRows
                 $lastLiveHtmlWrite = Get-Date
             }
             catch { Write-Host ("Cycle {0}: failed to update live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
@@ -2489,21 +2572,14 @@ do {
     Export-Windows11ReportCsv -Rows @($normalizedResults) -Path $reportPath
     Write-Host ("Cycle {0} report: {1}" -f $cycle,$reportPath) -ForegroundColor Green
 
-    $htmlReportPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_cycle{1}_{2}.html" -f $script:LauncherLogSafeLotName,$cycle,$reportTimestamp)
     try {
         $finalProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $computers.Count -CompletedComputers $normalizedResults.Count -RunningComputers 0 -ComputerListStats $computerListStats
-        New-Windows11UpgradeCycleHtmlReport -Summary @($normalizedResults) -Path $htmlReportPath -CycleNumber $cycle -GeneratedAt (Get-Date) -CycleProgress $finalProgress -RunningJobRows @()
-        if (Test-Path -LiteralPath $liveHtmlPath -PathType Leaf) {
-            Remove-Item -LiteralPath $liveHtmlPath -Force -ErrorAction Stop
-            Write-Host ("Cycle {0}: removed live HTML report after final report creation: {1}" -f $cycle,$liveHtmlPath) -ForegroundColor DarkGray
-        }
-        if (Test-Path -LiteralPath $liveCsvPath -PathType Leaf) {
-            Remove-Item -LiteralPath $liveCsvPath -Force -ErrorAction Stop
-            Write-Host ("Cycle {0}: removed live CSV report after final report creation: {1}" -f $cycle,$liveCsvPath) -ForegroundColor DarkGray
-        }
-        Write-Host ("Cycle {0} HTML report: {1}" -f $cycle,$htmlReportPath) -ForegroundColor Green
+        foreach ($normalizedResult in @($normalizedResults)) { [void]$allCycleResults.Add($normalizedResult) }
+        [void]$allCycleProgressRows.Add($finalProgress)
+        New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress @($allCycleProgressRows.ToArray()) -RunningJobRows @()
+        Write-Host ("Merged live HTML report updated through cycle {0}: {1}" -f $cycle,$mergedLiveHtmlPath) -ForegroundColor Green
     }
-    catch { Write-Host ("Cycle {0}: failed to write HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+    catch { Write-Host ("Cycle {0}: failed to update merged live HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
 
     try {
         $moveAlreadyW11Result = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary @($normalizedResults)
@@ -2544,6 +2620,18 @@ do {
     }
 }
 while ($true)
+
+try {
+    if ($allCycleResults.Count -gt 0) {
+        New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedFinalHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -CycleProgress @($allCycleProgressRows.ToArray()) -RunningJobRows @()
+        if (Test-Path -LiteralPath $mergedLiveHtmlPath -PathType Leaf) {
+            Remove-Item -LiteralPath $mergedLiveHtmlPath -Force -ErrorAction Stop
+            Write-Host ("Removed merged live HTML report after final report creation: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkGray
+        }
+        Write-Host ("Merged final HTML report: {0}" -f $mergedFinalHtmlPath) -ForegroundColor Green
+    }
+}
+catch { Write-Host ("Failed to write merged final HTML report: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
 
 Write-Host ("SmartM365 Windows 11 Upgrade Toolkit launcher finished. Log={0}" -f $script:LauncherLogPath)
 
