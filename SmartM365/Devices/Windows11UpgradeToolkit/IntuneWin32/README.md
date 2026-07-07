@@ -154,13 +154,15 @@ Assign each language package only to devices with the matching Windows language,
 
 ## Publish to Intune with Graph
 
-The publishing helper creates the Win32 app and uploads the generated `.intunewin` through Microsoft Graph beta. It uses the generated `Detect.ps1` as the Intune detection rule. Detection succeeds when the device is already Windows 11, or when the package registry state written by `Install.ps1` matches the package version:
+The publishing helper creates the Win32 app and uploads the generated `.intunewin` through Microsoft Graph beta. It uses the generated `Detect.ps1` as the Intune detection rule. Detection succeeds when the device is already Windows 11, or when the package registry state written by `Install.ps1` is present in the 64-bit registry view, has the expected package id, has an installed state when that value exists, and reports the expected package version or a newer one:
 
 ```text
+HKLM\SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages\<PackageId>\PackageId
 HKLM\SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages\<PackageId>\PackageVersion
+HKLM\SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages\<PackageId>\InstallState
 ```
 
-`Install.ps1` writes this state explicitly through the 64-bit registry view. The generated `Detect.ps1` reads the same 64-bit view and also treats Windows 11 as already compliant.
+`Install.ps1` writes this state explicitly through the 64-bit registry view. The generated `Detect.ps1` reads the same 64-bit view, writes an `OK: ...` detection result to stdout, and also treats Windows 11 as already compliant.
 
 Prerequisite on the publishing workstation:
 
