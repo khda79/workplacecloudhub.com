@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.42
+    0.1.43
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,8 +75,9 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.42'
+$script:ScriptVersion = '0.1.43'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
+$script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
 $script:LogDir = Join-Path $DataRoot 'Logs'
 $script:OutputDir = Join-Path $DataRoot 'Output'
@@ -3000,6 +3001,8 @@ $script:SetupProfileRepairBlockingSid = ''
 $script:SetupProfileRepairKeptSid = ''
 $script:SetupProfileRepairProfilePath = ''
 $script:SetupProfileRepairBackupPath = ''
+$script:RunGuardReferenceEndTimeUtc = ''
+$script:RunGuardReferenceStatus = ''
 $script:SetupProcessStarted = $false
 $script:SetupProcessExited = $false
 $script:SetupProcessPid = ''
@@ -3012,13 +3015,36 @@ $computerSystem = $null
 try {
     if (-not $IgnoreRunGuard -and $RunGuardHours -gt 0 -and (Test-Path -LiteralPath $script:LastRunPath -PathType Leaf)) {
         $last = Get-Content -LiteralPath $script:LastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if ($last.EndTimeUtc) {
-            $lastEndUtc = [datetime]::Parse([string]$last.EndTimeUtc, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+        $lastStatus = ''
+        if ($last.PSObject.Properties['Status']) { $lastStatus = [string]$last.Status }
+        $guardReferenceEndUtcText = ''
+        $guardReferenceStatus = $lastStatus
+        if ($lastStatus -eq 'RUN_GUARD_ACTIVE') {
+            if ($last.PSObject.Properties['RunGuardReferenceEndTimeUtc'] -and -not [string]::IsNullOrWhiteSpace([string]$last.RunGuardReferenceEndTimeUtc)) {
+                $guardReferenceEndUtcText = [string]$last.RunGuardReferenceEndTimeUtc
+                if ($last.PSObject.Properties['RunGuardReferenceStatus'] -and -not [string]::IsNullOrWhiteSpace([string]$last.RunGuardReferenceStatus)) {
+                    $guardReferenceStatus = [string]$last.RunGuardReferenceStatus
+                }
+            }
+            else {
+                Write-SmartLog 'Previous LastRun status is RUN_GUARD_ACTIVE but has no preserved run guard reference; treating run guard as expired to avoid a retry self-lock.' 'WARN'
+            }
+        }
+        elseif ($last.PSObject.Properties['EndTimeUtc'] -and -not [string]::IsNullOrWhiteSpace([string]$last.EndTimeUtc)) {
+            $guardReferenceEndUtcText = [string]$last.EndTimeUtc
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($guardReferenceEndUtcText)) {
+            $lastEndUtc = [datetime]::Parse($guardReferenceEndUtcText, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
             $age = (Get-Date).ToUniversalTime() - $lastEndUtc
-            if ($age.TotalHours -lt $RunGuardHours) {
+            $guardSeconds = [double]($RunGuardHours * 3600)
+            if ($age.TotalSeconds -lt $guardSeconds) {
                 $status = 'RUN_GUARD_ACTIVE'
                 $nextAction = 'WAIT_OR_USE_IGNORE_RUN_GUARD'
-                $detail = ("Last run age {0:N1} hour(s), guard {1} hour(s)." -f $age.TotalHours,$RunGuardHours)
+                $script:RunGuardReferenceEndTimeUtc = $lastEndUtc.ToUniversalTime().ToString('o')
+                $script:RunGuardReferenceStatus = $guardReferenceStatus
+                $remainingSeconds = [math]::Max(0, ($guardSeconds - $age.TotalSeconds))
+                $detail = ("Last run age {0:N2} hour(s) ({1:N1} minute(s)); guard {2} hour(s); remaining {3:N0} second(s); referenceStatus={4}; referenceEndUtc={5}." -f $age.TotalHours,$age.TotalMinutes,$RunGuardHours,$remainingSeconds,$guardReferenceStatus,$script:RunGuardReferenceEndTimeUtc)
                 $exitCode = 3
                 throw [System.OperationCanceledException]::new($detail)
             }
@@ -3345,7 +3371,7 @@ finally {
     $result = [pscustomobject]@{
         RunId = $script:RunId
         ComputerName = $script:ComputerName
-        StartTimeUtc = ''
+        StartTimeUtc = $script:ScriptStartUtc.ToString('o')
         EndTimeUtc = (Get-Date).ToUniversalTime().ToString('o')
         ScriptVersion = $script:ScriptVersion
         Status = $status
@@ -3398,6 +3424,8 @@ finally {
         SetupProfileRepairKeptSid = $script:SetupProfileRepairKeptSid
         SetupProfileRepairProfilePath = $script:SetupProfileRepairProfilePath
         SetupProfileRepairBackupPath = $script:SetupProfileRepairBackupPath
+        RunGuardReferenceEndTimeUtc = $script:RunGuardReferenceEndTimeUtc
+        RunGuardReferenceStatus = $script:RunGuardReferenceStatus
         SetupExePath = $setupExe
         LogPath = $script:LogPath
         CsvPath = $script:CsvPath
