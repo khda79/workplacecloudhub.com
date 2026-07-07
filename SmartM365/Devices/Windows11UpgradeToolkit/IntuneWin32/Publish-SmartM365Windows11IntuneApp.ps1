@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures PowerShell detection for the generated language package.
 .VERSION
-    1.0.12
+    1.0.13
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -25,6 +25,7 @@ param(
     [ValidateSet('system','user')][string]$RunAsAccount = 'system',
     [ValidateSet('suppress','allow','basedOnReturnCode','force')][string]$DeviceRestartBehavior = 'suppress',
     [int]$InstallCommandLineTimeoutMinutes = 180,
+    [ValidateRange(-1, 2147483647)][int]$MinimumFreeDiskSpaceInMB = -1,
     [int]$UploadBlockSizeMB = 16,
     [int]$AzureUploadMaxRetries = 5,
     [int]$PollSeconds = 10,
@@ -626,6 +627,12 @@ if ([string]::IsNullOrWhiteSpace($Description)) {
     else { $Description = "SmartM365 Windows 11 Upgrade Toolkit package for Windows setup language $Language. Installs local media cache and starts the upgrade task asynchronously." }
 }
 
+$effectiveMinimumFreeDiskSpaceInMB = [int]$MinimumFreeDiskSpaceInMB
+if ($effectiveMinimumFreeDiskSpaceInMB -lt 0) {
+    if ($packageMode -eq 'WithMedia') { $effectiveMinimumFreeDiskSpaceInMB = 51200 }
+    else { $effectiveMinimumFreeDiskSpaceInMB = 0 }
+}
+
 Write-Step "Reading IntuneWin metadata: $resolvedIntuneWinPath"
 $metadata = Read-IntuneWinMetadata -Path $resolvedIntuneWinPath
 $encryptedSize = [int64]$metadata.SizeEncrypted
@@ -638,7 +645,7 @@ $appBody = [ordered]@{
     publisher = $Publisher
     developer = $Developer
     owner = $Owner
-    notes = "PackageId=$PackageId; PackageVersion=$PackageVersion; Language=$Language; RequirementLanguage=$RequirementLanguage; PackageMode=$packageMode; RequiresExistingSetupCache=$requiresExistingSetupCache"
+    notes = "PackageId=$PackageId; PackageVersion=$PackageVersion; Language=$Language; RequirementLanguage=$RequirementLanguage; PackageMode=$packageMode; RequiresExistingSetupCache=$requiresExistingSetupCache; MinimumFreeDiskSpaceInMB=$effectiveMinimumFreeDiskSpaceInMB"
     isFeatured = $false
     privacyInformationUrl = $null
     informationUrl = $null
@@ -676,6 +683,7 @@ $appBody = [ordered]@{
     )
     installCommandLineTimeoutInMinutes = $InstallCommandLineTimeoutMinutes
 }
+if ($effectiveMinimumFreeDiskSpaceInMB -gt 0) { $appBody['minimumFreeDiskSpaceInMB'] = $effectiveMinimumFreeDiskSpaceInMB }
 
 if (-not [string]::IsNullOrWhiteSpace($FinalizeExistingAppId)) {
     if ([string]::IsNullOrWhiteSpace($FinalizeContentVersionId)) { throw 'FinalizeContentVersionId is required when FinalizeExistingAppId is used.' }
@@ -723,6 +731,7 @@ if (-not $PSCmdlet.ShouldProcess($DisplayName, 'Create or update Intune Win32 ap
         LanguageRequirementRuleEnabled = (-not [bool]$DisableLanguageRequirementRule)
         PackageMode = $packageMode
         RequiresExistingSetupCache = $requiresExistingSetupCache
+        MinimumFreeDiskSpaceInMB = $effectiveMinimumFreeDiskSpaceInMB
         IntuneWinPath = $resolvedIntuneWinPath
         FileName = $metadata.FileName
         SetupFile = $metadata.SetupFile
@@ -819,6 +828,7 @@ Write-Step 'App metadata and content version committed.'
     LanguageRequirementRuleEnabled = (-not [bool]$DisableLanguageRequirementRule)
     PackageMode = $packageMode
     RequiresExistingSetupCache = $requiresExistingSetupCache
+    MinimumFreeDiskSpaceInMB = $effectiveMinimumFreeDiskSpaceInMB
     ContentVersionId = $contentVersionId
     ContentFileId = $fileId
     DetectionScriptPath = $detectScriptPath
