@@ -131,6 +131,10 @@ Recommended install timeout:
 
 The full package is large and the installer copies the packaged setup media from the Intune cache to `C:\ProgramData` before starting the scheduled task. The `WithCacheOnly` package is small and only validates an existing local setup cache.
 
+Disk space requirement:
+
+The publisher sets Intune `Disk space required (MB)` automatically to `51200` for full `WithMedia` packages. It leaves the value unset for `WithCacheOnly` packages unless you override it. Use `-MinimumFreeDiskSpaceInMB <MB>` to force a value, or `-MinimumFreeDiskSpaceInMB 0` to disable the requirement. This Intune requirement filters installation before download/install, but endpoint disk preflight checks still remain authoritative during upgrade execution.
+
 Detection rule:
 
 Use the generated detection script from:
