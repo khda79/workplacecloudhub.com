@@ -62,6 +62,9 @@ Minutes to wait between local Intune enrollment re-checks after auto-enrollment 
 .PARAMETER IntuneRetryMaxRetries
 Number of local Intune enrollment re-checks after auto-enrollment is triggered. Defaults to 5.
 
+.VERSION
+2.10.33
+
 .EXITCODES
 0 = Success (AzureAdJoined=YES, device auth is healthy, and Intune enrollment is present or was restored)
 3 = Skipped / No-op / Waiting / Retry exhausted (Intune enrolled while Hybrid Join unhealthy, leave not applicable, join/enrollment not completed yet)
@@ -89,7 +92,7 @@ param(
     [int]$IntuneRetryMaxRetries = 5
 )
 
-$ScriptVersion = "2.10.32"
+$ScriptVersion = "2.10.33"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
