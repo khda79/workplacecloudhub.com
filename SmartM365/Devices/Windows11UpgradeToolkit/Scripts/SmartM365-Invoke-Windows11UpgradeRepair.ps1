@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.44
+    0.1.45
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,7 +75,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.44'
+$script:ScriptVersion = '0.1.45'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -1755,18 +1755,195 @@ function Test-SetupCacheReady {
     return $setupExe
 }
 
+function Get-SetupCacheLockName {
+    param([Parameter(Mandatory = $true)][string]$CachePath)
+
+    $leaf = Split-Path -Path $CachePath -Leaf
+    if ([string]::IsNullOrWhiteSpace($leaf)) { $leaf = 'Default' }
+    $safe = $leaf -replace '[^A-Za-z0-9._-]', '_'
+    return "SetupCache-$safe.lock"
+}
+
+function Get-SetupCacheLockLeaseMinutes {
+    if ($SetupMediaCopyTimeoutMinutes -gt 0) { return [math]::Max(30, ($SetupMediaCopyTimeoutMinutes + 30)) }
+    return 240
+}
+
+function Test-SetupCacheLockProcessAlive {
+    param([AllowNull()][object]$ProcessId)
+
+    $pidValue = 0
+    if ($null -eq $ProcessId -or -not [int]::TryParse([string]$ProcessId, [ref]$pidValue) -or $pidValue -le 0) { return $false }
+    try { [void](Get-Process -Id $pidValue -ErrorAction Stop); return $true } catch { return $false }
+}
+
+function New-SetupCacheLockPayload {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][string]$LockPath,
+        [Parameter(Mandatory = $true)][string]$OwnerToken,
+        [Parameter(Mandatory = $true)][string]$Purpose,
+        [Parameter(Mandatory = $true)][int]$LeaseMinutes
+    )
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+    $processName = ''
+    try { $processName = (Get-Process -Id $PID -ErrorAction Stop).ProcessName } catch { }
+    return [pscustomobject]@{
+        OwnerToken = $OwnerToken
+        Owner = 'SmartM365-Invoke-Windows11UpgradeRepair'
+        ComputerName = $env:COMPUTERNAME
+        PID = $PID
+        ProcessName = $processName
+        RunId = $script:RunId
+        Purpose = $Purpose
+        CachePath = $CachePath
+        LockPath = $LockPath
+        StartedUtc = $nowUtc.ToString('o')
+        LastSeenUtc = $nowUtc.ToString('o')
+        ExpiresUtc = $nowUtc.AddMinutes($LeaseMinutes).ToString('o')
+    }
+}
+
+function Read-SetupCacheLockPayload {
+    param([Parameter(Mandatory = $true)][string]$LockPath)
+
+    $payloadPath = Join-Path $LockPath 'lock.json'
+    if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) { return $null }
+    try { return (Get-Content -LiteralPath $payloadPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
+}
+
+function Save-SetupCacheLockPayload {
+    param(
+        [Parameter(Mandatory = $true)][string]$LockPath,
+        [Parameter(Mandatory = $true)][object]$Payload
+    )
+
+    $payloadPath = Join-Path $LockPath 'lock.json'
+    $Payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $payloadPath -Encoding UTF8
+}
+
+function Format-SetupCacheLockPayload {
+    param([AllowNull()][object]$Payload)
+
+    if ($null -eq $Payload) { return 'LockPayload=<missing>' }
+    return ("Owner={0}; PID={1}; Process={2}; Purpose={3}; StartedUtc={4}; LastSeenUtc={5}; ExpiresUtc={6}" -f $Payload.Owner,$Payload.PID,$Payload.ProcessName,$Payload.Purpose,$Payload.StartedUtc,$Payload.LastSeenUtc,$Payload.ExpiresUtc)
+}
+
+function Acquire-SetupCacheLock {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][string]$Purpose,
+        [int]$LeaseMinutes = (Get-SetupCacheLockLeaseMinutes),
+        [int]$WaitSeconds = 300
+    )
+
+    $lockRoot = Join-Path $DataRoot 'Locks'
+    New-SmartDirectory -Path $lockRoot
+    $lockPath = Join-Path $lockRoot (Get-SetupCacheLockName -CachePath $CachePath)
+    $ownerToken = [guid]::NewGuid().ToString('N')
+    $deadline = (Get-Date).AddSeconds([math]::Max(0, $WaitSeconds))
+    $lastWaitLog = [datetime]::MinValue
+
+    while ($true) {
+        try {
+            New-Item -ItemType Directory -Path $lockPath -ErrorAction Stop | Out-Null
+            $payload = New-SetupCacheLockPayload -CachePath $CachePath -LockPath $lockPath -OwnerToken $ownerToken -Purpose $Purpose -LeaseMinutes $LeaseMinutes
+            Save-SetupCacheLockPayload -LockPath $lockPath -Payload $payload
+            Write-SmartLog ("Acquired setup cache lock: CachePath={0}; LeaseMinutes={1}; Lock={2}; {3}" -f $CachePath,$LeaseMinutes,$lockPath,(Format-SetupCacheLockPayload -Payload $payload))
+            return [pscustomobject]@{ LockPath = $lockPath; OwnerToken = $ownerToken; CachePath = $CachePath; LeaseMinutes = $LeaseMinutes; Purpose = $Purpose }
+        }
+        catch {
+            $payload = Read-SetupCacheLockPayload -LockPath $lockPath
+            $nowUtc = (Get-Date).ToUniversalTime()
+            if ($null -eq $payload) {
+                $lockItem = $null
+                try { $lockItem = Get-Item -LiteralPath $lockPath -ErrorAction Stop } catch { }
+                if ($null -ne $lockItem -and $lockItem.LastWriteTimeUtc -lt $nowUtc.AddMinutes(-5)) {
+                    Write-SmartLog ("Reclaiming empty stale setup cache lock: CachePath={0}; Lock={1}; LastWriteTimeUtc={2}" -f $CachePath,$lockPath,$lockItem.LastWriteTimeUtc.ToString('o')) 'WARN'
+                    Remove-Item -LiteralPath $lockPath -Recurse -Force -ErrorAction SilentlyContinue
+                    continue
+                }
+
+                if ($WaitSeconds -le 0 -or (Get-Date) -ge $deadline) {
+                    throw ("Setup cache is locked by another SmartM365 process. CachePath={0}; Lock={1}; {2}" -f $CachePath,$lockPath,(Format-SetupCacheLockPayload -Payload $payload))
+                }
+
+                if (((Get-Date) - $lastWaitLog).TotalSeconds -ge 60) {
+                    Write-SmartLog ("Waiting for setup cache lock payload: CachePath={0}; Lock={1}" -f $CachePath,$lockPath) 'WARN'
+                    $lastWaitLog = Get-Date
+                }
+                Start-Sleep -Seconds 10
+                continue
+            }
+            $expiresUtc = [datetime]::MinValue
+            $expired = $true
+            if ($null -ne $payload -and [datetime]::TryParse([string]$payload.ExpiresUtc, [ref]$expiresUtc)) { $expired = ($expiresUtc.ToUniversalTime() -lt $nowUtc) }
+            $processAlive = if ($null -ne $payload) { Test-SetupCacheLockProcessAlive -ProcessId $payload.PID } else { $false }
+
+            if ($expired -and -not $processAlive) {
+                Write-SmartLog ("Reclaiming stale setup cache lock: CachePath={0}; Lock={1}; {2}" -f $CachePath,$lockPath,(Format-SetupCacheLockPayload -Payload $payload)) 'WARN'
+                Remove-Item -LiteralPath $lockPath -Recurse -Force -ErrorAction SilentlyContinue
+                continue
+            }
+
+            if ($WaitSeconds -le 0 -or (Get-Date) -ge $deadline) {
+                throw ("Setup cache is locked by another SmartM365 process. CachePath={0}; Lock={1}; {2}" -f $CachePath,$lockPath,(Format-SetupCacheLockPayload -Payload $payload))
+            }
+
+            if (((Get-Date) - $lastWaitLog).TotalSeconds -ge 60) {
+                Write-SmartLog ("Waiting for setup cache lock: CachePath={0}; Lock={1}; {2}" -f $CachePath,$lockPath,(Format-SetupCacheLockPayload -Payload $payload)) 'WARN'
+                $lastWaitLog = Get-Date
+            }
+            Start-Sleep -Seconds 10
+        }
+    }
+}
+
+function Update-SetupCacheLock {
+    param([AllowNull()][object]$Lock)
+
+    if ($null -eq $Lock) { return }
+    $payload = Read-SetupCacheLockPayload -LockPath $Lock.LockPath
+    if ($null -eq $payload -or [string]$payload.OwnerToken -ne [string]$Lock.OwnerToken) { return }
+    $nowUtc = (Get-Date).ToUniversalTime()
+    $payload.LastSeenUtc = $nowUtc.ToString('o')
+    $payload.ExpiresUtc = $nowUtc.AddMinutes([int]$Lock.LeaseMinutes).ToString('o')
+    Save-SetupCacheLockPayload -LockPath $Lock.LockPath -Payload $payload
+}
+
+function Release-SetupCacheLock {
+    param([AllowNull()][object]$Lock)
+
+    if ($null -eq $Lock) { return }
+    $payload = Read-SetupCacheLockPayload -LockPath $Lock.LockPath
+    if ($null -ne $payload -and [string]$payload.OwnerToken -ne [string]$Lock.OwnerToken) {
+        Write-SmartLog ("Skipping setup cache lock release because owner changed. Lock={0}; {1}" -f $Lock.LockPath,(Format-SetupCacheLockPayload -Payload $payload)) 'WARN'
+        return
+    }
+    Remove-Item -LiteralPath $Lock.LockPath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-SmartLog ("Released setup cache lock: CachePath={0}; Lock={1}" -f $Lock.CachePath,$Lock.LockPath)
+}
+
 function Clear-SetupCachePath {
     param(
         [Parameter(Mandatory = $true)][string]$CachePath,
-        [Parameter(Mandatory = $true)][string]$Reason
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [switch]$LockAlreadyHeld
     )
 
     if (-not (Test-Path -LiteralPath $CachePath)) { return }
 
-    Write-SmartLog ("Clearing invalid local setup cache before recopy. CachePath={0}; Reason={1}" -f $CachePath,$Reason) 'WARN'
-    Remove-Item -LiteralPath $CachePath -Recurse -Force -ErrorAction Stop
+    $cacheLock = $null
+    try {
+        if (-not $LockAlreadyHeld) { $cacheLock = Acquire-SetupCacheLock -CachePath $CachePath -Purpose 'ClearInvalidCache' -WaitSeconds 300 }
+        Write-SmartLog ("Clearing invalid local setup cache before recopy. CachePath={0}; Reason={1}" -f $CachePath,$Reason) 'WARN'
+        Remove-Item -LiteralPath $CachePath -Recurse -Force -ErrorAction Stop
+    }
+    finally {
+        if (-not $LockAlreadyHeld) { Release-SetupCacheLock -Lock $cacheLock }
+    }
 }
-
 function Get-RobocopyExitCodeMeaning {
     param([Parameter(Mandatory = $true)][int]$ExitCode)
 
@@ -1824,7 +2001,8 @@ function Invoke-RobocopySetupMediaCopy {
     param(
         [Parameter(Mandatory = $true)][string]$RobocopyPath,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [Parameter(Mandatory = $true)][string]$LogPath
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [AllowNull()][object]$CacheLock
     )
 
     $argumentText = (@($Arguments) | ForEach-Object { Format-SmartProcessArgument -Argument $_ }) -join ' '
@@ -1852,12 +2030,14 @@ function Invoke-RobocopySetupMediaCopy {
 
         if (($now - $lastHeartbeatAt).TotalSeconds -ge $heartbeatSeconds) {
             Write-SmartLog ("Robocopy setup media copy still running. PID={0}; ElapsedMinutes={1}; TimeoutMinutes={2}; Log={3}" -f $process.Id,([math]::Round(($now - $startedAt).TotalMinutes, 1)),$SetupMediaCopyTimeoutMinutes,$LogPath)
+            Update-SetupCacheLock -Lock $CacheLock
             $lastHeartbeatAt = $now
         }
 
         Start-Sleep -Seconds 5
     }
 
+    Update-SetupCacheLock -Lock $CacheLock
     Write-SmartLog ("Robocopy setup media copy process exited. PID={0}; ElapsedMinutes={1}; ExitCode={2}; Log={3}" -f $process.Id,([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),$process.ExitCode,$LogPath)
     return [int]$process.ExitCode
 }
@@ -1883,13 +2063,15 @@ function Copy-SetupMediaToLocalCache {
     }
 
     $sourceLeasePath = ''
+    $cacheLock = $null
     if ($SetupSourceConcurrencyLimit -gt 0 -and -not [string]::IsNullOrWhiteSpace($SetupSourceConcurrencyGateRoot)) {
         $sourceLeasePath = Acquire-SetupSourceCopyLease -SourcePath $SourcePath
     }
 
-    Write-SmartLog ("Copying setup media on target from '{0}' to local cache '{1}'." -f $SourcePath,$CachePath)
-    $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
     try {
+        $cacheLock = Acquire-SetupCacheLock -CachePath $CachePath -Purpose ("SetupMediaCopy:{0}" -f $script:RunId) -WaitSeconds 300
+        Write-SmartLog ("Copying setup media on target from '{0}' to local cache '{1}'." -f $SourcePath,$CachePath)
+        $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
         if (Test-Path -LiteralPath $robocopy -PathType Leaf) {
             $robocopyArgs = @($SourcePath, $CachePath, '/MIR', '/Z', '/R:2', '/W:5', '/NP', '/NFL', '/NDL', "/LOG+:$robocopyLog")
             if ($SetupMediaCopyIpGapMilliseconds -gt 0) {
@@ -1910,13 +2092,13 @@ function Copy-SetupMediaToLocalCache {
             }
 
             try {
-                $copyExit = Invoke-RobocopySetupMediaCopy -RobocopyPath $robocopy -Arguments $robocopyArgs -LogPath $robocopyLog
+                $copyExit = Invoke-RobocopySetupMediaCopy -RobocopyPath $robocopy -Arguments $robocopyArgs -LogPath $robocopyLog -CacheLock $cacheLock
             }
             catch {
                 $failureDetail = $_.Exception.Message
                 try {
                     $script:SetupCacheAction = 'CopyFailedCacheCleared'
-                    Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail
+                    Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail -LockAlreadyHeld
                 }
                 catch {
                     $script:SetupCacheAction = 'CopyFailedCacheClearFailed'
@@ -1939,7 +2121,7 @@ function Copy-SetupMediaToLocalCache {
                 if (-not [string]::IsNullOrWhiteSpace($robocopyErrorSummary)) { $failureDetail = ("{0}; {1}" -f $failureDetail,$robocopyErrorSummary) }
                 try {
                     $script:SetupCacheAction = 'CopyFailedCacheCleared'
-                    Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail
+                    Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail -LockAlreadyHeld
                 }
                 catch {
                     $script:SetupCacheAction = 'CopyFailedCacheClearFailed'
@@ -1955,6 +2137,7 @@ function Copy-SetupMediaToLocalCache {
         }
     }
     finally {
+        Release-SetupCacheLock -Lock $cacheLock
         if (-not [string]::IsNullOrWhiteSpace($sourceLeasePath)) {
             Release-SetupSourceCopyLease -LeasePath $sourceLeasePath
         }
@@ -3380,7 +3563,13 @@ catch {
         $actionResult = 'SetupMediaManifestValidationFailed'
         $exitCode = 1
     }
-    elseif ($detail -like 'Timed out waiting for setup subnet copy lease.*') {
+        elseif ($detail -like 'Setup cache is locked by another SmartM365 process.*') {
+        $status = 'SETUP_CACHE_LOCKED'
+        $nextAction = 'WAIT_CACHE_UNLOCK_OR_RETRY'
+        $actionResult = 'SetupCacheLocked'
+        $exitCode = 3
+    }
+elseif ($detail -like 'Timed out waiting for setup subnet copy lease.*') {
         $status = 'SETUP_SUBNET_COPY_LEASE_TIMEOUT'
         $nextAction = 'CHECK_SETUP_SUBNET_COPY_LEASE'
         $actionResult = 'SetupSubnetCopyLeaseTimeout'

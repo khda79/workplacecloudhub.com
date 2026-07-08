@@ -151,6 +151,7 @@ Assign each language package only to devices with the matching Windows language,
 
 - This mode does not use `SetupSource$` or `SetupSourceGates$`.
 - Intune downloads the `.intunewin`; the full-package installer copies the packaged setup media to the toolkit local cache. The `WithCacheOnly` installer does not copy media and fails before detection if the local cache is missing.
+- The Intune installer and the endpoint upgrade script coordinate setup cache writes with an expiring local lock under `%ProgramData%\SmartM365\Windows11UpgradeToolkit\Locks`. If another SmartM365 process is copying or clearing the same cache, the Intune installer exits with `1618` so Intune retries instead of deleting a partial cache.
 - The scheduled task performs the upgrade asynchronously so Intune app installation can complete quickly.
 - Upgrade status remains in `LastRun.json`, endpoint CSV output, and logs under `C:\ProgramData\SmartM365\Windows11UpgradeToolkit`.
 - The package can be detected as installed even before Windows 11 is complete; use remediation/reporting to monitor final upgrade status.
