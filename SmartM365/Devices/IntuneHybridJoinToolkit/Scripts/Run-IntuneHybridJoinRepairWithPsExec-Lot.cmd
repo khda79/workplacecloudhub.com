@@ -9,11 +9,11 @@ if errorlevel 1 (
 )
 
 
-rem Shared LOT launcher. Keep LOT folders with tiny wrappers only.
+rem Shared LOT launcher. LOT definitions live under %ROOT_DIR%\Lots and run data under %ROOT_DIR%\Runs.
 rem The LOT wrapper sets EHJIR_LOT_DIR and optional execution switches.
 
 set "LOT_DIR=%EHJIR_LOT_DIR%"
-if "%LOT_DIR%"=="" set "LOT_DIR=%CD%\.."
+if "%LOT_DIR%"=="" set "LOT_DIR=%~dp0"
 
 set "IGNORE_RUN_GUARD_ARG="
 if /I "%EHJIR_IGNORE_RUN_GUARD%"=="1" (
@@ -25,22 +25,40 @@ if /I "%EHJIR_RUN_ONCE%"=="1" (
     set "RUN_ONCE_ARG=-RunOnce"
 )
 
-for %%I in ("%LOT_DIR%") do set "LOT_DIR=%%~fI\"
-set "ROOT_DIR=%LOT_DIR%.."
-for %%I in ("%ROOT_DIR%") do set "ROOT_DIR=%%~fI"
+for %%I in ("%LOT_DIR%") do set "LOT_DIR=%%~fI"
+if not "%LOT_DIR:~-1%"=="\" set "LOT_DIR=%LOT_DIR%\"
+for %%I in ("%LOT_DIR%..") do set "LOTS_DIR=%%~fI"
+for %%I in ("%LOTS_DIR%") do set "LOTS_NAME=%%~nxI"
+for %%I in ("%LOTS_DIR%\..") do set "ROOT_DIR=%%~fI"
+for %%I in ("%LOT_DIR%.") do set "LOT_NAME=%%~nxI"
+
+if /I not "%LOTS_NAME%"=="Lots" (
+    echo ERROR: LOT wrappers must run from the strict layout:
+    echo   %ROOT_DIR%\Lots\LOT-NAME
+    set "EXITCODE=1"
+    goto :END
+)
+
+if "%EHJIR_RUN_DIR%"=="" (
+    for /f "delims=" %%T in ('powershell.exe -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN_STAMP=%%T"
+    set "EHJIR_RUN_DIR=%ROOT_DIR%\Runs\%LOT_NAME%\!RUN_STAMP!"
+)
+for %%I in ("%EHJIR_RUN_DIR%") do set "RUN_DIR=%%~fI"
 
 set "SCRIPT=%ROOT_DIR%\Scripts\SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec.ps1"
 set "COMPUTERS=%LOT_DIR%Computers.txt"
 set "PARENT_INTUNE_CSV=%ROOT_DIR%\DevicesIntune.csv"
-set "LOT_INTUNE_CSV=%LOT_DIR%DevicesIntune.csv"
+set "LOT_INTUNE_CSV=%RUN_DIR%\DevicesIntune.csv"
 set "PARENT_AD_CSV=%ROOT_DIR%\DevicesAD.csv"
-set "LOT_AD_CSV=%LOT_DIR%DevicesAD.csv"
+set "LOT_AD_CSV=%RUN_DIR%\DevicesAD.csv"
 set "AD_DOMAIN_FILE=%LOT_DIR%AdDomain.txt"
-set "PSEXEC_LOGS=%LOT_DIR%PsExecLogs"
-set "REPORTS=%LOT_DIR%Reports"
-set "CENTRAL_LOGS=%LOT_DIR%CentralLogs"
+set "PSEXEC_LOGS=%RUN_DIR%\PsExecLogs"
+set "REPORTS=%RUN_DIR%\Reports"
+set "CENTRAL_LOGS=%RUN_DIR%\CentralLogs"
+set "ARCHIVES=%RUN_DIR%\Archives"
 set "PSEXEC_EXE=%ROOT_DIR%\Scripts\PsExec.exe"
-set "WRAPPER_REFRESH_SCRIPT=%ROOT_DIR%\Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
+
+for %%D in ("%RUN_DIR%" "%RUN_DIR%\Logs" "%PSEXEC_LOGS%" "%REPORTS%" "%CENTRAL_LOGS%" "%ARCHIVES%" "%RUN_DIR%\State") do if not exist "%%~D" mkdir "%%~D" >nul 2>&1
 
 call :PrintStartupInfo
 
@@ -58,25 +76,7 @@ if not exist "%COMPUTERS%" (
     goto :END
 )
 
-net session >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Run this CMD from an elevated administrator command prompt.
-    set "EXITCODE=1"
-    goto :END
-)
 
-if /I not "%EHJIR_SKIP_LOT_WRAPPER_REFRESH%"=="1" (
-    if exist "%WRAPPER_REFRESH_SCRIPT%" (
-        echo Refreshing LOT CMD wrappers...
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%WRAPPER_REFRESH_SCRIPT%" -RootPath "%ROOT_DIR%" >nul
-        if errorlevel 1 (
-            echo ERROR: LOT CMD wrapper refresh failed.
-            echo "%WRAPPER_REFRESH_SCRIPT%"
-            set "EXITCODE=1"
-            goto :END
-        )
-    )
-)
 
 set "DRY_RUN_REQUESTED=0"
 for %%A in (%*) do (
@@ -84,6 +84,13 @@ for %%A in (%*) do (
 )
 
 if not "%DRY_RUN_REQUESTED%"=="1" (
+    net session >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: Run this CMD from an elevated administrator command prompt.
+        set "EXITCODE=1"
+        goto :END
+    )
+
     if exist "%PSEXEC_EXE%" (
         set "PSEXEC_ARG=-PsExecPath ""%PSEXEC_EXE%"""
     ) else (
@@ -197,7 +204,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
   -ComputerListPath "%COMPUTERS%" %INTUNE_ARGS% %AD_ARGS% ^
   -LogRoot "%PSEXEC_LOGS%" ^
   -ReportRoot "%REPORTS%" ^
-  -CentralLogRoot "%CENTRAL_LOGS%" %ALLOW_DSREG_LEAVE_ARG% %ALLOW_STALE_INTUNE_CLEANUP_ARG% %ALLOW_REBOOT_NO_USER_ARG% %ALLOW_REBOOT_AFTER_LEAVE_ARG% %IGNORE_RUN_GUARD_ARG% %RUN_ONCE_ARG% %SKIP_VM_ARG% %SKIP_PRE_RUN_ARCHIVE_ARG% %CONTINUE_DNS_PREFLIGHT_ARG% %LOT_RUN_MUTEX_ARG% %PSEXEC_ARG% ^
+  -CentralLogRoot "%CENTRAL_LOGS%" ^
+  -ArchiveRoot "%ARCHIVES%" %ALLOW_DSREG_LEAVE_ARG% %ALLOW_STALE_INTUNE_CLEANUP_ARG% %ALLOW_REBOOT_NO_USER_ARG% %ALLOW_REBOOT_AFTER_LEAVE_ARG% %IGNORE_RUN_GUARD_ARG% %RUN_ONCE_ARG% %SKIP_VM_ARG% %SKIP_PRE_RUN_ARCHIVE_ARG% %CONTINUE_DNS_PREFLIGHT_ARG% %LOT_RUN_MUTEX_ARG% %PSEXEC_ARG% ^
   -ThrottleLimit %EHJIR_THROTTLE% %GLOBAL_CONCURRENCY_ARG% ^
   -DelayBetweenCyclesMinutes %EHJIR_DELAY_BETWEEN_CYCLES_MINUTES% %NIGHT_PAUSE_ARG% ^
   -NightPauseStartHour %EHJIR_NIGHT_PAUSE_START_HOUR% ^

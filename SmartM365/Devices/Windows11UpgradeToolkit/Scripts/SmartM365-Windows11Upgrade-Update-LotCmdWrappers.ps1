@@ -3,11 +3,11 @@
     Refreshes SmartM365 Windows 11 Upgrade Toolkit LOT CMD wrappers.
 
 .DESCRIPTION
-    Copies the standard tiny CMD wrappers from LOT-X to operational LOT-* folders.
-    LOT-X is the versioned template and is not modified by this script.
+    Copies the standard tiny CMD wrappers from Lots\LOT-TEMPLATE to operational Lots\LOT-* folders.
+    Lots\LOT-TEMPLATE is the versioned template and is not modified by this script.
 
 .VERSION
-    0.1.1
+    0.1.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -32,9 +32,10 @@ function Get-ToolkitRoot {
 }
 
 $root = Get-ToolkitRoot
-$template = Join-Path $root 'LOT-X'
+$lotsRoot = Join-Path $root 'Lots'
+$template = Join-Path $lotsRoot 'LOT-TEMPLATE'
 if (-not (Test-Path -LiteralPath $template -PathType Container)) {
-    throw "LOT-X template not found: $template"
+    throw "Lots\LOT-TEMPLATE template not found: $template"
 }
 
 $wrapperNames = @(
@@ -47,8 +48,8 @@ $wrapperNames = @(
 $configTemplate = Join-Path $root 'Windows11UpgradeToolkit.config.template'
 
 $lots = @(
-    Get-ChildItem -LiteralPath $root -Directory -Filter 'LOT-*' -ErrorAction Stop |
-        Where-Object { $_.Name -ine 'LOT-X' } |
+    Get-ChildItem -LiteralPath $lotsRoot -Directory -Filter 'LOT-*' -ErrorAction Stop |
+        Where-Object { $_.Name -ine 'LOT-TEMPLATE' } |
         Sort-Object Name
 )
 
