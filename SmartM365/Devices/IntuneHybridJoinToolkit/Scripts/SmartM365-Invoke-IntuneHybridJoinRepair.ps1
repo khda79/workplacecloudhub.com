@@ -11,7 +11,7 @@ C:\ProgramData\SmartM365\IntuneHybridJoinToolkit
 - If not domain joined => Exit 2.
 - If DC not reachable => Exit 4.
 - Run dsregcmd /status as SYSTEM and parse machine/device fields only. User PRT shown in SYSTEM context is intentionally ignored.
-- Run GPO-created user-context tasks DSREGCMD-Status-USER / DSREGCMD-RefreshPRT-USER to capture and refresh the actual interactive user's PRT when available.
+- Create and run SmartM365 user-context scheduled tasks to capture and refresh the actual interactive user's PRT when available.
 - If AzureAdJoined=YES and DeviceAuthStatus contains SUCCESS, or older dsreg output has KeySignTest=PASSED without DeviceAuthStatus, verify Intune enrollment.
 - If Hybrid Join is healthy but Intune is not enrolled => verify MDM auto-enrollment GPO/registry policy and HTTPS connectivity, then trigger auto-enrollment using the configured credential type.
 - If the launcher reports that the Entra hybrid object is pending, and the local device join is healthy => trigger Automatic-Device-Join and perform a bounded retry without dsregcmd /leave.
@@ -389,20 +389,21 @@ catch {
 }
 
 # ============================
-# Retry policy (no scheduled tasks)
+# Retry and user-context task policy
 # ============================
 $RetrySleepMinutes = 20
 $RetryMaxRetries   = 2
 $UserTaskWaitSeconds = 30
 $UserPrtRetryWaitSeconds = 30
 $GpUpdateWaitSeconds = 30
-$UserStatusTaskName = "DSREGCMD-Status-USER"
-$UserRefreshPrtTaskName = "DSREGCMD-RefreshPRT-USER"
-$UserIntuneAutoEnrollTaskName = "DEVICE-ENROLLER-AutoEnrollMDM-USER"
+$UserTaskFolderPath = "\SmartM365\IntuneHybridJoinToolkit"
+$UserStatusTaskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-UserDsregStatus"
+$UserRefreshPrtTaskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-UserRefreshPrt"
+$UserIntuneAutoEnrollTaskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-UserMdmAutoEnroll"
 
 Write-RunLog ("Retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -f $RetrySleepMinutes, $RetryMaxRetries)
 Write-RunLog ("Intune retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -f $IntuneRetrySleepMinutes, $IntuneRetryMaxRetries)
-Write-RunLog ("User task policy: StatusTask={0}; RefreshPrtTask={1}; IntuneAutoEnrollTask={2}; WaitSeconds={3}; RefreshWaitSeconds={4}" -f $UserStatusTaskName, $UserRefreshPrtTaskName, $UserIntuneAutoEnrollTaskName, $UserTaskWaitSeconds, $UserPrtRetryWaitSeconds)
+Write-RunLog ("User task policy: Folder={0}; StatusTask={1}; RefreshPrtTask={2}; IntuneAutoEnrollTask={3}; WaitSeconds={4}; RefreshWaitSeconds={5}" -f $UserTaskFolderPath, $UserStatusTaskName, $UserRefreshPrtTaskName, $UserIntuneAutoEnrollTaskName, $UserTaskWaitSeconds, $UserPrtRetryWaitSeconds)
 Write-RunLog "DNS policy: FlushDNS=True"
 Write-RunLog ("GPUpdate policy: Force=True; WaitSeconds={0}" -f $GpUpdateWaitSeconds)
 Write-RunLog ("Non-Intune MDM removal policy: AllowRemoveNonIntuneMdmEnrollment={0}" -f [bool]$AllowRemoveNonIntuneMdmEnrollment)
@@ -1169,6 +1170,100 @@ function Ensure-ScheduledTaskFolder {
     }
 }
 
+function Register-InteractiveUserScheduledTask {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskName,
+        [Parameter(Mandatory=$true)][string]$Description,
+        [Parameter(Mandatory=$true)][string]$CommandArguments
+    )
+
+    $normalizedTaskName = $TaskName.Trim()
+    if (-not $normalizedTaskName.StartsWith("\")) {
+        $normalizedTaskName = "\$normalizedTaskName"
+    }
+
+    $parts = @($normalizedTaskName.Trim("\").Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($parts.Count -lt 2) {
+        throw "Interactive user task must include a task folder: $TaskName"
+    }
+
+    $leafName = [string]$parts[-1]
+    $folderPath = "\" + (($parts | Select-Object -First ($parts.Count - 1)) -join "\")
+    if (-not (Ensure-ScheduledTaskFolder -TaskPath $folderPath)) {
+        throw "Unable to create or open scheduled task folder: $folderPath"
+    }
+
+    $service = New-Object -ComObject Schedule.Service
+    $service.Connect()
+    $folder = $service.GetFolder($folderPath)
+    $definition = $service.NewTask(0)
+
+    $definition.RegistrationInfo.Author = "SmartM365 Intune Hybrid Join Toolkit"
+    $definition.RegistrationInfo.Description = $Description
+    $definition.Settings.Enabled = $true
+    $definition.Settings.Hidden = $false
+    $definition.Settings.AllowDemandStart = $true
+    $definition.Settings.StartWhenAvailable = $true
+    $definition.Settings.DisallowStartIfOnBatteries = $false
+    $definition.Settings.StopIfGoingOnBatteries = $false
+    $definition.Settings.ExecutionTimeLimit = "PT10M"
+    $definition.Settings.MultipleInstances = 2
+
+    $definition.Principal.GroupId = "S-1-5-4"
+    $definition.Principal.LogonType = 4
+    $definition.Principal.RunLevel = 0
+
+    $action = $definition.Actions.Create(0)
+    $action.Path = "cmd.exe"
+    $action.Arguments = $CommandArguments
+
+    [void]$folder.RegisterTaskDefinition($leafName, $definition, 6, $null, $null, 4, $null)
+
+    return [PSCustomObject]@{
+        Success = $true
+        TaskName = $normalizedTaskName
+        Detail = "Registered or updated interactive-user scheduled task."
+    }
+}
+
+function Ensure-UserContextHelperTasks {
+    $taskDefinitions = @(
+        [PSCustomObject]@{
+            Name = $UserStatusTaskName
+            Description = "SmartM365 Intune Hybrid Join Toolkit - capture dsregcmd /status in the active interactive user context."
+            Arguments = "/d /c %windir%\System32\dsregcmd.exe /status > %windir%\Temp\SmartM365-IHJ-UserDsregStatus_%USERNAME%.txt 2>&1"
+        },
+        [PSCustomObject]@{
+            Name = $UserRefreshPrtTaskName
+            Description = "SmartM365 Intune Hybrid Join Toolkit - run dsregcmd /refreshprt in the active interactive user context."
+            Arguments = "/d /c %windir%\System32\dsregcmd.exe /refreshprt > %windir%\Temp\SmartM365-IHJ-UserRefreshPrt_%USERNAME%.txt 2>&1"
+        },
+        [PSCustomObject]@{
+            Name = $UserIntuneAutoEnrollTaskName
+            Description = "SmartM365 Intune Hybrid Join Toolkit - run deviceenroller /AutoEnrollMDM in the active interactive user context."
+            Arguments = "/d /c %windir%\System32\deviceenroller.exe /c /AutoEnrollMDM > %windir%\Temp\SmartM365-IHJ-UserMdmAutoEnroll_%USERNAME%.txt 2>&1"
+        }
+    )
+
+    $results = @()
+    foreach ($taskDefinition in $taskDefinitions) {
+        try {
+            $result = Register-InteractiveUserScheduledTask -TaskName $taskDefinition.Name -Description $taskDefinition.Description -CommandArguments $taskDefinition.Arguments
+            $results += $result
+            Write-RunLog ("User-context helper task ready. TaskName={0}; Detail={1}" -f $result.TaskName,$result.Detail)
+        }
+        catch {
+            $results += [PSCustomObject]@{ Success=$false; TaskName=$taskDefinition.Name; Detail=$_.Exception.Message }
+            Write-RunLog ("User-context helper task registration failed. TaskName={0}; Error={1}" -f $taskDefinition.Name,$_.Exception.Message)
+        }
+    }
+
+    return [PSCustomObject]@{
+        Success = (@($results | Where-Object { -not $_.Success }).Count -eq 0)
+        Results = $results
+        Detail = (($results | ForEach-Object { "{0}: {1}" -f $_.TaskName,$_.Detail }) -join " | ")
+    }
+}
 function Start-AutoDeviceJoinTask {
     try {
         $tn = "\Microsoft\Windows\Workplace Join\Automatic-Device-Join"
@@ -1270,9 +1365,9 @@ function Start-UserContextIntuneAutoEnrollment {
         if ($WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
         $expectedFileName = ""
         if (-not [string]::IsNullOrWhiteSpace($ExpectedUserName)) {
-            $expectedFileName = "AutoEnrollMDM_user_{0}.txt" -f $ExpectedUserName
+            $expectedFileName = "SmartM365-IHJ-UserMdmAutoEnroll_{0}.txt" -f $ExpectedUserName
         }
-        $sourceFile = Get-LatestUserTaskOutputFile -Filter "AutoEnrollMDM_user_*.txt" -Since $startedAt -ExpectedFileName $expectedFileName
+        $sourceFile = Get-LatestUserTaskOutputFile -Filter "SmartM365-IHJ-UserMdmAutoEnroll_*.txt" -Since $startedAt -ExpectedFileName $expectedFileName
 
         return [PSCustomObject]@{
             Success=$true
@@ -1659,12 +1754,12 @@ function Invoke-UserDsregStatusTaskSnapshot {
 
     $expectedFileName = ""
     if (-not [string]::IsNullOrWhiteSpace($ExpectedUserName)) {
-        $expectedFileName = "dsregcmd_user_{0}.txt" -f $ExpectedUserName
+        $expectedFileName = "SmartM365-IHJ-UserDsregStatus_{0}.txt" -f $ExpectedUserName
     }
 
-    $sourceFile = Get-LatestUserTaskOutputFile -Filter "dsregcmd_user_*.txt" -Since $startedAt -ExpectedFileName $expectedFileName
+    $sourceFile = Get-LatestUserTaskOutputFile -Filter "SmartM365-IHJ-UserDsregStatus_*.txt" -Since $startedAt -ExpectedFileName $expectedFileName
     if (-not $sourceFile) {
-        $expectedDetail = if ([string]::IsNullOrWhiteSpace($expectedFileName)) { "No recent dsregcmd_user_*.txt output file found after running user status task." } else { ("Expected user output file not found or not recent after running user status task: C:\Windows\Temp\{0}" -f $expectedFileName) }
+        $expectedDetail = if ([string]::IsNullOrWhiteSpace($expectedFileName)) { "No recent SmartM365-IHJ-UserDsregStatus_*.txt output file found after running user status task." } else { ("Expected user output file not found or not recent after running user status task: C:\Windows\Temp\{0}" -f $expectedFileName) }
         return [PSCustomObject]@{
             Success=$false
             TaskSuccess=$taskResult.Success
@@ -1707,9 +1802,9 @@ function Invoke-UserRefreshPrtTask {
     if ($WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
     $expectedFileName = ""
     if (-not [string]::IsNullOrWhiteSpace($ExpectedUserName)) {
-        $expectedFileName = "dsregcmd_refreshprt_user_{0}.txt" -f $ExpectedUserName
+        $expectedFileName = "SmartM365-IHJ-UserRefreshPrt_{0}.txt" -f $ExpectedUserName
     }
-    $sourceFile = Get-LatestUserTaskOutputFile -Filter "dsregcmd_refreshprt_user_*.txt" -Since $startedAt -ExpectedFileName $expectedFileName
+    $sourceFile = Get-LatestUserTaskOutputFile -Filter "SmartM365-IHJ-UserRefreshPrt_*.txt" -Since $startedAt -ExpectedFileName $expectedFileName
 
     return [PSCustomObject]@{
         Success=$taskResult.Success
@@ -2043,21 +2138,26 @@ function Register-UserAutoEnrollAtLogonTask {
         [Parameter(Mandatory=$true)][string]$AutoEnrollTaskName
     )
 
-    $taskName = "\IntuneHybridJoinToolkit\RunUserAutoEnrollAtLogon"
-    $helperCmdPath = Join-Path $DataRoot "RunUserAutoEnrollAtLogon.cmd"
+    $taskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-RunUserAutoEnrollAtLogon"
+    $helperCmdPath = Join-Path $DataRoot "SmartM365-IHJ-RunUserAutoEnrollAtLogon.cmd"
     $taskRun = ('cmd.exe /d /c "{0}"' -f $helperCmdPath)
 
     try {
+        $helperTaskResult = Ensure-UserContextHelperTasks
+        if (-not $helperTaskResult.Success) {
+            Write-RunLog ("Next-logon helper prerequisites were not fully registered. Detail={0}" -f $helperTaskResult.Detail)
+        }
+
         $helperLines = @(
             "@echo off",
-            "schtasks.exe /Run /TN ""$StatusTaskName"" > C:\Windows\Temp\EHJIR_nextlogon_status.txt 2>&1",
+            "schtasks.exe /Run /TN ""$StatusTaskName"" > C:\Windows\Temp\SmartM365-IHJ-NextLogonStatus.txt 2>&1",
             "timeout.exe /t 30 /nobreak > nul",
-            "schtasks.exe /Run /TN ""$AutoEnrollTaskName"" > C:\Windows\Temp\EHJIR_nextlogon_autoenroll.txt 2>&1"
+            "schtasks.exe /Run /TN ""$AutoEnrollTaskName"" > C:\Windows\Temp\SmartM365-IHJ-NextLogonAutoEnroll.txt 2>&1"
         )
         Set-Content -LiteralPath $helperCmdPath -Value $helperLines -Encoding ASCII -Force
         Write-RunLog ("Next-logon auto-enrollment helper command written: {0}" -f $helperCmdPath)
 
-        $taskFolderReady = Ensure-ScheduledTaskFolder -TaskPath "\IntuneHybridJoinToolkit"
+        $taskFolderReady = Ensure-ScheduledTaskFolder -TaskPath $UserTaskFolderPath
         if (-not $taskFolderReady) {
             Write-RunLog ("Next-logon auto-enrollment helper task folder could not be confirmed. Continuing with schtasks registration attempt. TaskName={0}" -f $taskName)
         }
@@ -2199,7 +2299,7 @@ function Export-EnrollmentDiagnostics {
     $files = @()
 
     $autoEnrollCopy = Copy-LatestMatchingFile `
-        -Filter "AutoEnrollMDM_user_*.txt" `
+        -Filter "SmartM365-IHJ-UserMdmAutoEnroll_*.txt" `
         -Since $Since `
         -DestinationDirectory $OutputDirPath `
         -Prefix $prefix
@@ -3000,7 +3100,12 @@ try {
     Write-RunLog ("Interactive user detection: HasUser={0}; User={1}; Domain={2}; AccountName={3}; AccountType={4}; IdentityResolved={5}; SessionName={6}; SessionId={7}; State={8}; IsRemote={9}; Detail={10}; IdentityDetail={11}" -f $interactiveUserDetected,$interactiveUserName,$interactiveUserDomain,$interactiveUserAccountName,$interactiveUserAccountType,$interactiveUserIdentityResolved,$interactiveSessionName,$interactiveSessionId,$interactiveSessionState,$interactiveSessionIsRemote,$interactiveSessionDetail,$interactiveUserIdentityDetail)
 
     if ($interactiveUserDetected -and $interactiveUserAccountType -ne "Local") {
-        # User-context status is collected through GPO-created on-demand scheduled tasks.
+        # User-context status is collected through SmartM365 on-demand scheduled tasks.
+        $helperTaskResult = Ensure-UserContextHelperTasks
+        if (-not $helperTaskResult.Success) {
+            Write-RunLog ("User-context helper tasks were not fully registered. Detail={0}" -f $helperTaskResult.Detail)
+        }
+
         $userStatusAttempted = $true
         $userStatus = Invoke-UserDsregStatusTaskSnapshot `
             -TaskName $UserStatusTaskName `

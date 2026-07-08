@@ -81,6 +81,18 @@ If DNS resolution fails on every sampled computer during preflight, the LOT stop
 jobs and writes `DNS_PREFLIGHT_ALL_SAMPLES_FAILED` rows. Set `EHJIR_CONTINUE_ON_DNS_PREFLIGHT_FAILURE=1`
 or pass `-ContinueOnDnsPreflightFailure` only after confirming that the network path is intentional.
 
+If user-context Hybrid Join or Intune enrollment evidence is required, the remote repair script creates or updates
+on-demand scheduled tasks locally on the target device under `\SmartM365\IntuneHybridJoinToolkit`. These tasks
+replace the former externally managed helper tasks and are used only to run user-context actions while the main repair
+continues to run as SYSTEM through PsExec:
+
+- `SmartM365-IHJ-UserDsregStatus`
+- `SmartM365-IHJ-UserRefreshPrt`
+- `SmartM365-IHJ-UserMdmAutoEnroll`
+- `SmartM365-IHJ-RunUserAutoEnrollAtLogon` when a next-logon user auto-enrollment helper is required.
+
+Task output is written under `C:\Windows\Temp\SmartM365-IHJ-*` and copied into the run evidence when available.
+
 By default, the launcher does not start a new cycle during the local night window from 20:00 to 07:00.
 This pause is checked before the first cycle and before every later cycle; it does not interrupt a cycle
 already running. Set `EHJIR_DISABLE_NIGHT_PAUSE=1` or pass `-DisableNightPause` to allow cycles at night.
