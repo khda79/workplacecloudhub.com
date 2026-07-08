@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.7
+1.8
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.7'
+$GuiVersion = '1.8'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -182,6 +182,54 @@ function Get-SafeLotName {
     return $safe
 }
 
+function Get-LotsRoot {
+    param([string]$RootPath)
+    return Join-Path $RootPath 'Lots'
+}
+
+function Get-RunsRoot {
+    param([string]$RootPath)
+    return Join-Path $RootPath 'Runs'
+}
+
+function Get-LotRunsRoot {
+    param(
+        [string]$RootPath,
+        [string]$LotName
+    )
+
+    return Join-Path (Get-RunsRoot -RootPath $RootPath) $LotName
+}
+
+function Get-ToolkitRootFromLotPath {
+    param([string]$LotPath)
+
+    $lotsRoot = Split-Path -Parent $LotPath
+    return Split-Path -Parent $lotsRoot
+}
+
+function New-LotRunContext {
+    param(
+        [string]$RootPath,
+        [string]$LotName
+    )
+
+    $runRoot = Get-LotRunsRoot -RootPath $RootPath -LotName $LotName
+    $runPath = Join-Path $runRoot (Get-Date -Format 'yyyyMMdd-HHmmss')
+    foreach ($folder in @('', 'Logs', 'PsExecLogs', 'Reports', 'CentralLogs', 'Archives', 'State')) {
+        $path = if ([string]::IsNullOrWhiteSpace($folder)) { $runPath } else { Join-Path $runPath $folder }
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+
+    [pscustomobject]@{
+        RunPath        = $runPath
+        LogRoot        = Join-Path $runPath 'PsExecLogs'
+        ReportRoot     = Join-Path $runPath 'Reports'
+        CentralLogRoot = Join-Path $runPath 'CentralLogs'
+        ArchiveRoot    = Join-Path $runPath 'Archives'
+    }
+}
+
 function Get-ComputerNamesFromFile {
     param([string]$Path)
 
@@ -198,13 +246,14 @@ function Get-ComputerNamesFromFile {
 function Get-LotFolders {
     param([string]$Root)
 
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+    $lotsRoot = Get-LotsRoot -RootPath $Root
+    if (-not (Test-Path -LiteralPath $lotsRoot -PathType Container)) {
         return @()
     }
 
     @(
-        Get-ChildItem -LiteralPath $Root -Directory -Filter 'LOT-*' -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -ine 'LOT-X' } |
+        Get-ChildItem -LiteralPath $lotsRoot -Directory -Filter 'LOT-*' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ine 'LOT-TEMPLATE' } |
             Sort-Object Name
     )
 }
@@ -285,7 +334,9 @@ function New-ToolkitLotFolder {
     )
 
     $safeName = Get-SafeLotName -Name $Name
-    $lotPath = Join-Path $ToolkitRoot $safeName
+    $lotsRoot = Get-LotsRoot -RootPath $ToolkitRoot
+    New-Item -ItemType Directory -Path $lotsRoot -Force | Out-Null
+    $lotPath = Join-Path $lotsRoot $safeName
     New-Item -ItemType Directory -Path $lotPath -Force | Out-Null
 
     $computersPath = Join-Path $lotPath 'Computers.txt'
@@ -395,8 +446,9 @@ function Start-ToolkitLot {
         [hashtable]$Environment
     )
 
-    $lotToolkitRoot = Split-Path -Parent $Lot.Path
+    $lotToolkitRoot = Get-ToolkitRootFromLotPath -LotPath $Lot.Path
     Invoke-LotWrapperRefresh -ToolkitRoot $lotToolkitRoot -LotPath $Lot.Path
+    $run = New-LotRunContext -RootPath $lotToolkitRoot -LotName $Lot.Name
 
     $wrapperMap = @{
         Loop                = 'Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd'
@@ -417,9 +469,14 @@ function Start-ToolkitLot {
         }
     }
 
+    $effectiveEnvironment = @{}
+    foreach ($key in $Environment.Keys) { $effectiveEnvironment[$key] = $Environment[$key] }
+    $effectiveEnvironment['EHJIR_LOT_DIR'] = $Lot.Path
+    $effectiveEnvironment['EHJIR_RUN_DIR'] = $run.RunPath
+
     $commands = New-Object System.Collections.Generic.List[string]
-    foreach ($key in ($Environment.Keys | Sort-Object)) {
-        $commands.Add((ConvertTo-CmdSetCommand -Name $key -Value ([string]$Environment[$key])))
+    foreach ($key in ($effectiveEnvironment.Keys | Sort-Object)) {
+        $commands.Add((ConvertTo-CmdSetCommand -Name $key -Value ([string]$effectiveEnvironment[$key])))
     }
 
     $extra = ''
@@ -428,8 +485,8 @@ function Start-ToolkitLot {
     }
 
     $commands.Add(('call {0}{1}' -f (ConvertTo-CmdArgument -Value $wrapperPath), $extra))
-    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $Lot.Path -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode)
-    Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $Lot.Path
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode)
+    Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
 }
 
 function New-SingleComputerRunContext {
@@ -438,16 +495,34 @@ function New-SingleComputerRunContext {
         [string]$ComputerName
     )
 
-    $safeName = Get-SafeLotName -Name $ComputerName
-    $root = Join-Path $ToolkitRoot "Runs\SingleComputer\$safeName"
-    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    $trimmed = $ComputerName.Trim().Trim([char]34)
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        throw 'Enter a computer name.'
+    }
+
+    $safeName = [regex]::Replace($trimmed, '[^A-Za-z0-9._-]+', '-').Trim('-._')
+    if ([string]::IsNullOrWhiteSpace($safeName)) {
+        $safeName = 'Computer'
+    }
+
+    $root = Join-Path (Join-Path $ToolkitRoot 'Runs\SingleComputer') ("{0}_{1}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $safeName)
+    foreach ($folder in @('', 'Logs', 'PsExecLogs', 'Reports', 'CentralLogs', 'Archives', 'State')) {
+        $path = if ([string]::IsNullOrWhiteSpace($folder)) { $root } else { Join-Path $root $folder }
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+
     $computersPath = Join-Path $root 'Computers.txt'
-    Set-Content -LiteralPath $computersPath -Value $ComputerName -Encoding ASCII
+    Set-Content -LiteralPath $computersPath -Value $trimmed -Encoding UTF8 -Force
 
     [pscustomobject]@{
-        Root          = $root
-        ComputersPath = $computersPath
-        Name          = $safeName
+        Root           = $root
+        ComputersPath  = $computersPath
+        ComputerName   = $trimmed
+        Name           = $safeName
+        LogRoot        = Join-Path $root 'PsExecLogs'
+        ReportRoot     = Join-Path $root 'Reports'
+        CentralLogRoot = Join-Path $root 'CentralLogs'
+        ArchiveRoot    = Join-Path $root 'Archives'
     }
 }
 
@@ -466,12 +541,12 @@ function Start-ToolkitSingleComputer {
         throw "Launcher script not found: $script"
     }
 
-    $psExecPath = Resolve-GuiPsExecPath -ToolkitRoot $ToolkitRoot
-    if (-not $psExecPath) {
+    $isDryRun = @($ExtraArguments) -contains '-DryRun'
+    $psExecPath = if ($isDryRun) { $null } else { Resolve-GuiPsExecPath -ToolkitRoot $ToolkitRoot }
+    if (-not $isDryRun -and -not $psExecPath) {
         throw 'PsExec.exe was not found in Scripts, System32, or PATH.'
     }
 
-    $runMode = if ($Mode -like 'Loop*') { 'Loop' } else { 'Once' }
     $ignoreGuard = $Mode -like '*IgnoreRunGuard'
 
     $commands = New-Object System.Collections.Generic.List[string]
@@ -484,14 +559,20 @@ function Start-ToolkitSingleComputer {
         '-ExecutionPolicy', 'Bypass',
         '-File', $script,
         '-ComputerListPath', $context.ComputersPath,
-        '-PsExecPath', $psExecPath,
-        '-Mode', $runMode,
-        '-LotName', ('SingleComputer-' + $context.Name),
-        '-RunRoot', $context.Root,
+        '-LogRoot', $context.LogRoot,
+        '-ReportRoot', $context.ReportRoot,
+        '-CentralLogRoot', $context.CentralLogRoot,
+        '-ArchiveRoot', $context.ArchiveRoot,
         '-ThrottleLimit', '1',
         '-GlobalConcurrencyLimit', '0'
     )
 
+    if ($psExecPath) {
+        $arguments += @('-PsExecPath', $psExecPath)
+    }
+    if ($Mode -like 'Once*') {
+        $arguments += '-RunOnce'
+    }
     if ($ignoreGuard) {
         $arguments += '-IgnoreRunGuard'
     }
@@ -562,6 +643,8 @@ function Get-IntText {
 }
 
 $toolkitRoot = Get-ToolkitRoot
+New-Item -ItemType Directory -Path (Get-LotsRoot -RootPath $toolkitRoot) -Force | Out-Null
+New-Item -ItemType Directory -Path (Get-RunsRoot -RootPath $toolkitRoot) -Force | Out-Null
 $script:GuiStartupLogPath = Join-Path $toolkitRoot 'GuiLauncherStartup.log'
 $script:PsExecLauncherPath = Join-Path $toolkitRoot 'Scripts\SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec.ps1'
 $script:PsExecLauncherVersion = Get-ScriptHeaderVersion -Path $script:PsExecLauncherPath

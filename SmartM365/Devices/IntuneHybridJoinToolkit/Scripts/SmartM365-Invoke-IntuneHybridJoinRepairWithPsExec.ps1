@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.64
+2.10.66
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.64"
+$LauncherVersion = "2.10.66"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -348,6 +348,11 @@ if (-not $AdInventoryCsvWasProvided) {
     }
 }
 
+$LogRootWasProvided = -not [string]::IsNullOrWhiteSpace($LogRoot)
+$ReportRootWasProvided = -not [string]::IsNullOrWhiteSpace($ReportRoot)
+$CentralLogRootWasProvided = -not [string]::IsNullOrWhiteSpace($CentralLogRoot)
+$ArchiveRootWasProvided = -not [string]::IsNullOrWhiteSpace($ArchiveRoot)
+
 if ([string]::IsNullOrWhiteSpace($PsExecPath)) {
     $PsExecPath = Join-Path $BaseDir "PsExec.exe"
 }
@@ -364,6 +369,22 @@ if ([string]::IsNullOrWhiteSpace($CentralLogRoot)) {
 }
 
 $ComputerListPath = [System.IO.Path]::GetFullPath($ComputerListPath)
+$LotRoot = Split-Path -Parent $ComputerListPath
+$launcherRunTimestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$defaultRunRoot = $null
+$lotParent = Split-Path -Parent $LotRoot
+if ((Split-Path -Leaf $lotParent) -eq "Lots") {
+    $toolkitRootFromLot = Split-Path -Parent $lotParent
+    $lotNameFromPath = Split-Path -Leaf $LotRoot
+    $defaultRunRoot = Join-Path (Join-Path (Join-Path $toolkitRootFromLot "Runs") $lotNameFromPath) $launcherRunTimestamp
+}
+if ($defaultRunRoot) {
+    if (-not $LogRootWasProvided) { $LogRoot = Join-Path $defaultRunRoot "PsExecLogs" }
+    if (-not $ReportRootWasProvided) { $ReportRoot = Join-Path $defaultRunRoot "Reports" }
+    if (-not $CentralLogRootWasProvided) { $CentralLogRoot = Join-Path $defaultRunRoot "CentralLogs" }
+    if (-not $ArchiveRootWasProvided) { $ArchiveRoot = Join-Path $defaultRunRoot "Archives" }
+}
+
 $LocalScriptPath = [System.IO.Path]::GetFullPath($LocalScriptPath)
 if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) { $IntuneInventoryCsv = [System.IO.Path]::GetFullPath($IntuneInventoryCsv) }
 if (-not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)) { $EntraInventoryCsv = [System.IO.Path]::GetFullPath($EntraInventoryCsv) }
@@ -371,7 +392,6 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) { $AdInventoryCsv = [Sys
 $LogRoot = [System.IO.Path]::GetFullPath($LogRoot)
 $ReportRoot = [System.IO.Path]::GetFullPath($ReportRoot)
 $CentralLogRoot = [System.IO.Path]::GetFullPath($CentralLogRoot)
-$LotRoot = Split-Path -Parent $ComputerListPath
 if ([string]::IsNullOrWhiteSpace($ArchiveRoot)) {
     $ArchiveRoot = Join-Path $LotRoot "Archives"
 }
@@ -449,7 +469,11 @@ function Acquire-LotRunMutex {
     return $mutex
 }
 
-$LauncherStartupLogPath = Join-Path $LotRoot "LauncherStartup.log"
+$LauncherStartupLogRoot = Join-Path (Split-Path -Parent $LogRoot) "Logs"
+if (-not (Test-Path -LiteralPath $LauncherStartupLogRoot -PathType Container)) {
+    New-Item -ItemType Directory -Path $LauncherStartupLogRoot -Force | Out-Null
+}
+$LauncherStartupLogPath = Join-Path $LauncherStartupLogRoot "LauncherStartup.log"
 
 function Write-LauncherStartupLine {
     param([string]$Message)
@@ -698,9 +722,87 @@ function Resolve-PsExecPath {
     throw ("PsExec.exe not found. Place PsExec.exe next to this launcher ({0}) or add PsExec.exe to PATH. You can also pass -PsExecPath <path>." -f $BaseDir)
 }
 
+function Get-PsExecSecurityEvidence {
+    param([AllowNull()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [pscustomobject]@{
+            CheckStatus = 'SkippedDryRun'
+            Path = ''
+            FileName = ''
+            LengthBytes = ''
+            SHA256 = ''
+            SignatureStatus = ''
+            SignerSubject = ''
+            SignerIssuer = ''
+            ProductName = ''
+            FileDescription = ''
+            FileVersion = ''
+            ProductVersion = ''
+            IsMicrosoftSigned = $true
+            IsExpectedFileName = $true
+            IsCompliant = $true
+            Detail = 'DryRun=True; PsExec is not required.'
+        }
+    }
+
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    $hash = Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256 -ErrorAction Stop
+    $signature = Get-AuthenticodeSignature -LiteralPath $item.FullName -ErrorAction Stop
+    $versionInfo = $item.VersionInfo
+    $signerSubject = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { '' }
+    $signerIssuer = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Issuer } else { '' }
+    $isMicrosoftSigned = ([string]$signature.Status -eq 'Valid' -and ($signerSubject -match '(^|,\s*)(CN|O)=Microsoft Corporation(,|$)'))
+    $isExpectedFileName = ($item.Name -match '^(?i:PsExec|PsExec64)\.exe$')
+    $isCompliant = ($isMicrosoftSigned -and $isExpectedFileName)
+    $detail = if ($isCompliant) { 'Microsoft-signed PsExec binary accepted.' } else { 'Blocked: PsExec must be named PsExec.exe/PsExec64.exe and have a valid Microsoft Corporation Authenticode signature.' }
+
+    [pscustomobject]@{
+        CheckStatus = if ($isCompliant) { 'Compliant' } else { 'Blocked' }
+        Path = [string]$item.FullName
+        FileName = [string]$item.Name
+        LengthBytes = [string]$item.Length
+        SHA256 = [string]$hash.Hash
+        SignatureStatus = [string]$signature.Status
+        SignerSubject = $signerSubject
+        SignerIssuer = $signerIssuer
+        ProductName = [string]$versionInfo.ProductName
+        FileDescription = [string]$versionInfo.FileDescription
+        FileVersion = [string]$versionInfo.FileVersion
+        ProductVersion = [string]$versionInfo.ProductVersion
+        IsMicrosoftSigned = [bool]$isMicrosoftSigned
+        IsExpectedFileName = [bool]$isExpectedFileName
+        IsCompliant = [bool]$isCompliant
+        Detail = $detail
+    }
+}
+
+function Assert-PsExecSecurityEvidence {
+    param([Parameter(Mandatory = $true)]$Evidence)
+
+    if (-not [bool]$Evidence.IsCompliant) {
+        throw ("PsExec security validation failed. Status={0}; Path={1}; SignatureStatus={2}; Signer={3}; SHA256={4}; Detail={5}" -f $Evidence.CheckStatus,$Evidence.Path,$Evidence.SignatureStatus,$Evidence.SignerSubject,$Evidence.SHA256,$Evidence.Detail)
+    }
+}
+
+function ConvertTo-PsExecSecurityEvidenceRows {
+    param([AllowNull()]$Evidence)
+
+    if ($null -eq $Evidence) { return @() }
+    $fields = @('CheckStatus','Path','FileName','LengthBytes','SHA256','SignatureStatus','SignerSubject','SignerIssuer','ProductName','FileDescription','FileVersion','ProductVersion','IsMicrosoftSigned','IsExpectedFileName','IsCompliant','Detail')
+    return @($fields | ForEach-Object {
+        [pscustomobject]@{ Field = $_; Value = if ($Evidence.PSObject.Properties[$_]) { [string]$Evidence.$_ } else { '' } }
+    })
+}
+
 if (-not $DryRun) {
     $PsExecPath = Resolve-PsExecPath -Path $PsExecPath
 }
+$psExecSecurityPath = if ($DryRun) { '' } else { $PsExecPath }
+$script:PsExecSecurityEvidence = Get-PsExecSecurityEvidence -Path $psExecSecurityPath
+if (-not $DryRun) { Assert-PsExecSecurityEvidence -Evidence $script:PsExecSecurityEvidence }
+$script:PsExecSecurityEvidenceRows = @(ConvertTo-PsExecSecurityEvidenceRows -Evidence $script:PsExecSecurityEvidence)
+Write-LauncherStartupLine ("PsExec sec. : Status={0}; SHA256={1}; Signature={2}; Signer={3}; Version={4}" -f $script:PsExecSecurityEvidence.CheckStatus,$script:PsExecSecurityEvidence.SHA256,$script:PsExecSecurityEvidence.SignatureStatus,$script:PsExecSecurityEvidence.SignerSubject,$script:PsExecSecurityEvidence.FileVersion)
 
 if (-not (Test-Path -LiteralPath $LogRoot)) {
     New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
@@ -1837,6 +1939,11 @@ tr:nth-child(even) td { background: #F5F8FB; }
     $html += "<div class='subtitle'>Smart Intune Hybrid Join Toolkit</div>"
     $html += "<div class='meta'>Generated: $($GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')) | Computers: $($rows.Count) | Launcher: v$LauncherVersion</div>"
     $html += "</div>$logoHtml</div>"
+    $securityRows = @($script:PsExecSecurityEvidenceRows | ForEach-Object { $_ })
+    $html += "<div class='card'><h2>Security evidence</h2>"
+    $html += ConvertTo-SimpleHtmlTable -Rows $securityRows -Columns @('Field','Value')
+    $html += "<div class='footer'>Non-dry-run PsExec execution is blocked unless the binary is Microsoft-signed and named PsExec.exe or PsExec64.exe.</div>"
+    $html += "</div>"
     $html += "<div class='card'><h2>Status summary</h2>"
     $html += ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @("Status","Count")
     $html += "</div>"
@@ -2098,6 +2205,7 @@ Write-Host "Script hash  : $localScriptHashForDisplay"
 Write-Host "Remote path  : $RemoteScriptPath"
 Write-Host "Computers   : $ComputerListPath"
 Write-Host "PsExec      : $PsExecPath"
+Write-Host ("PsExec sec. : Status={0}; SHA256={1}; Signature={2}; Signer={3}; Version={4}" -f $script:PsExecSecurityEvidence.CheckStatus,$script:PsExecSecurityEvidence.SHA256,$script:PsExecSecurityEvidence.SignatureStatus,$script:PsExecSecurityEvidence.SignerSubject,$script:PsExecSecurityEvidence.FileVersion)
 Write-Host "Script args : $($scriptArgsBase -join ' ')"
 Write-Host "Dry run     : $([bool]$DryRun)"
 Write-Host "Skip VMs    : $([bool]$SkipVirtualMachines)"

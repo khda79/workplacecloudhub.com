@@ -10,7 +10,7 @@ if errorlevel 1 (
 
 
 rem Root launcher.
-rem Refreshes the tiny CMD wrappers in all LOT-* folders.
+rem Refreshes the tiny CMD wrappers in all Lots\LOT-* folders.
 set "ROOT_DIR=%CD%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
 call :PrintStartupInfo
@@ -25,7 +25,7 @@ if not exist "%SCRIPT%" (
 net session >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Run this CMD from an elevated administrator command prompt.
-    echo It updates CMD files inside LOT-* folders under:
+    echo It updates CMD files inside Lots\LOT-* folders under:
     echo "%ROOT_DIR%"
     set "EXITCODE=1"
     goto :END
@@ -49,6 +49,6 @@ echo SmartM365 Intune Hybrid Join Toolkit - LOT wrapper refresh launcher
 echo Started : %DATE% %TIME%
 echo Root    : %ROOT_DIR%
 echo Script  : %SCRIPT%
-echo Target  : LOT-* folders under %ROOT_DIR%
+echo Target  : Lots\LOT-* folders under %ROOT_DIR%
 echo.
 exit /b 0

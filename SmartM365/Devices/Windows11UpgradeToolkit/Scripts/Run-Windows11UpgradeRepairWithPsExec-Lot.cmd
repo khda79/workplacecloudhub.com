@@ -8,30 +8,46 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem Shared LOT launcher. Keep LOT folders with tiny wrappers only.
+rem Shared LOT launcher. LOT definitions live under %ROOT_DIR%\Lots and run data under %ROOT_DIR%\Runs.
 rem The LOT wrapper sets W11UT_LOT_DIR and optional execution switches.
 
 set "LOT_DIR=%W11UT_LOT_DIR%"
-if "%LOT_DIR%"=="" set "LOT_DIR=%CD%\.."
+if "%LOT_DIR%"=="" set "LOT_DIR=%~dp0"
 
-for %%I in ("%LOT_DIR%") do set "LOT_DIR=%%~fI\"
-set "ROOT_DIR=%LOT_DIR%.."
-for %%I in ("%ROOT_DIR%") do set "ROOT_DIR=%%~fI"
+for %%I in ("%LOT_DIR%") do set "LOT_DIR=%%~fI"
+if not "%LOT_DIR:~-1%"=="\" set "LOT_DIR=%LOT_DIR%\"
+for %%I in ("%LOT_DIR%..") do set "LOTS_DIR=%%~fI"
+for %%I in ("%LOTS_DIR%\..") do set "ROOT_DIR=%%~fI"
+for %%I in ("%LOT_DIR%.") do set "LOT_NAME=%%~nxI"
+
+if /I not "%LOTS_DIR:~-4%"=="Lots" (
+    echo ERROR: LOT wrappers must run from the strict layout:
+    echo   %ROOT_DIR%\Lots\LOT-NAME
+    set "EXITCODE=1"
+    goto :END
+)
+
+if "%W11UT_RUN_DIR%"=="" (
+    for /f "delims=" %%T in ('powershell.exe -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN_STAMP=%%T"
+    set "W11UT_RUN_DIR=%ROOT_DIR%\Runs\%LOT_NAME%\!RUN_STAMP!"
+)
+for %%I in ("%W11UT_RUN_DIR%") do set "RUN_DIR=%%~fI"
 
 set "SCRIPT=%ROOT_DIR%\Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1"
 set "COMPUTERS=%LOT_DIR%Computers.txt"
 set "PARENT_AD_CSV=%ROOT_DIR%\DevicesAD.csv"
-set "LOT_AD_CSV=%LOT_DIR%DevicesAD.csv"
+set "LOT_AD_CSV=%RUN_DIR%\DevicesAD.csv"
 set "PARENT_INTUNE_CSV=%ROOT_DIR%\DevicesIntune.csv"
-set "LOT_INTUNE_CSV=%LOT_DIR%DevicesIntune.csv"
+set "LOT_INTUNE_CSV=%RUN_DIR%\DevicesIntune.csv"
 set "AD_DOMAIN_FILE=%LOT_DIR%AdDomain.txt"
-set "PSEXEC_LOGS=%LOT_DIR%PsExecLogs"
-set "REPORTS=%LOT_DIR%Reports"
-set "CENTRAL_LOGS=%LOT_DIR%CentralLogs"
+set "PSEXEC_LOGS=%RUN_DIR%\PsExecLogs"
+set "REPORTS=%RUN_DIR%\Reports"
+set "CENTRAL_LOGS=%RUN_DIR%\CentralLogs"
 set "PSEXEC_EXE=%ROOT_DIR%\Scripts\PsExec.exe"
 set "LOT_CONFIG_FILE=%LOT_DIR%Windows11UpgradeToolkit.config"
 set "ROOT_CONFIG_FILE=%ROOT_DIR%\Windows11UpgradeToolkit.config"
 
+for %%D in ("%RUN_DIR%" "%RUN_DIR%\Logs" "%PSEXEC_LOGS%" "%REPORTS%" "%CENTRAL_LOGS%" "%RUN_DIR%\State") do if not exist "%%~D" mkdir "%%~D" >nul 2>&1
 call :LOAD_CONFIG "%LOT_CONFIG_FILE%"
 call :LOAD_CONFIG "%ROOT_CONFIG_FILE%"
 
@@ -61,6 +77,8 @@ if not defined W11UT_SETUP_SOURCE_CONCURRENCY_LEASE_MINUTES set "W11UT_SETUP_SOU
 if not defined W11UT_SETUP_SUBNET_CONCURRENCY_LIMIT set "W11UT_SETUP_SUBNET_CONCURRENCY_LIMIT=1"
 if not defined W11UT_SETUP_SUBNET_PREFIX_LENGTH set "W11UT_SETUP_SUBNET_PREFIX_LENGTH=Auto"
 if not defined W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES set "W11UT_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES=90"
+if /I "%W11UT_DIRECT_SETUP_UPGRADE%"=="1" set "W11UT_ALLOW_REBOOT=1"
+if /I "%W11UT_DIRECT_SETUP_UPGRADE%"=="1" set "W11UT_SETUP_REBOOT_WHEN_NO_USER=1"
 
 set "W11UT_ALLOW_SETUP_SOURCE_VALIDATION=0"
 if /I "%W11UT_DIRECT_SETUP_UPGRADE%"=="1" set "W11UT_ALLOW_SETUP_SOURCE_VALIDATION=1"
@@ -108,12 +126,6 @@ if not exist "%COMPUTERS%" (
     goto :END
 )
 
-net session >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Run this CMD from an elevated administrator command prompt.
-    set "EXITCODE=1"
-    goto :END
-)
 
 set "DRY_RUN_REQUESTED=0"
 for %%A in (%*) do (
@@ -121,6 +133,13 @@ for %%A in (%*) do (
 )
 
 if not "%DRY_RUN_REQUESTED%"=="1" (
+    net session >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: Run this CMD from an elevated administrator command prompt.
+        set "EXITCODE=1"
+        goto :END
+    )
+
     if exist "%PSEXEC_EXE%" (
         set "PSEXEC_ARG=-PsExecPath ""%PSEXEC_EXE%"""
     ) else (
@@ -240,6 +259,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
   -LogRoot "%PSEXEC_LOGS%" ^
   -ReportRoot "%REPORTS%" ^
   -CentralLogRoot "%CENTRAL_LOGS%" ^
+  -LauncherLogRoot "%RUN_DIR%\Logs" ^
   -CentralLogCollectionMode "%W11UT_CENTRAL_LOG_COLLECTION_MODE%" ^
   %RUN_ONCE_ARG% ^
   %IGNORE_RUN_GUARD_ARG% ^
