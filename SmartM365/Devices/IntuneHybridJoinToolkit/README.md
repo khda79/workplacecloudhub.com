@@ -15,17 +15,17 @@ Export-ADDevicesCsv.cmd
 Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd
 Update-LotCmdWrappers.cmd
 Scripts\
-LOT-X\
+Lots\LOT-TEMPLATE\
 ```
 
 - `Export-IntuneDevicesCsv.cmd` exports the global Intune inventory to `DevicesIntune.csv`.
 - `Export-EntraDevicesCsv.cmd` exports the global Entra device inventory to `DevicesEntra.csv`.
 - `Export-ADDevicesCsv.cmd` exports AD computer objects to `DevicesAD.csv`. From the toolkit root, it exports all domains in the current AD forest by default; pass `-Domain <domain>` or set `EHJIR_AD_DOMAIN` to limit the export to one domain.
-- `Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd` opens a GUI to create a local `LOT-*` folder from a computer list file and optionally launch it.
-- `Update-LotCmdWrappers.cmd` refreshes the small CMD wrappers in operational `LOT-*` folders.
+- `Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd` opens a GUI to create a local `Lots\LOT-*` folder from a computer list file and optionally launch it.
+- `Update-LotCmdWrappers.cmd` refreshes the small CMD wrappers in operational `Lots\LOT-*` folders.
 - `Scripts\` contains the shared PowerShell scripts and shared LOT launchers.
-- `LOT-X\` is the neutral template for LOT folders.
-- Operational `LOT-*` folders are ignored by Git because they can contain real computer lists.
+- `Lots\LOT-TEMPLATE\` is the neutral template for LOT folders.
+- Operational `Lots\LOT-*` folders contain LOT configuration and computer lists. Runtime data is written under `Runs\<LOT>\<yyyyMMdd-HHmmss>` so logs, reports, collected central logs, archives, and per-run inventory CSV files stay separate from configuration.
 
 ## Scripts
 
@@ -64,7 +64,7 @@ Export-IntuneDevicesCsv.cmd
 Run repair from a LOT folder:
 
 ```cmd
-Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd
+Lots\LOT-A\Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd
 ```
 
 Before launching a LOT, the CMD and PowerShell launchers verify that `PsExec.exe` is available
@@ -102,7 +102,7 @@ LOT wrappers skip detected virtual machines by default before remote copy or rep
 
 ```cmd
 set EHJIR_SKIP_VIRTUAL_MACHINES=0
-Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd
+Lots\LOT-A\Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd
 ```
 
 LOT wrappers also enable the guarded repair defaults used by the GUI:
@@ -117,7 +117,7 @@ Set any of these values to `0` before launching a LOT to disable that action.
 Force a rerun that bypasses the target run guard:
 
 ```cmd
-Run-IntuneHybridJoinRepairWithPsExec-Loop-IgnoreRunGuard.cmd
+Lots\LOT-A\Run-IntuneHybridJoinRepairWithPsExec-Loop-IgnoreRunGuard.cmd
 ```
 
 Refresh LOT wrappers after creating or importing operational LOT folders:
@@ -126,8 +126,8 @@ Refresh LOT wrappers after creating or importing operational LOT folders:
 Update-LotCmdWrappers.cmd
 ```
 
-This skips the versioned `LOT-X` template and creates a blank `AdDomain.txt` in any operational
-`LOT-*` folder where it is missing.
+This skips the versioned `Lots\LOT-TEMPLATE` template and creates a blank `AdDomain.txt` in any operational
+`Lots\LOT-*` folder where it is missing.
 
 Use `Export-ADDevicesCsv.cmd` from the toolkit root to create a forest-wide `DevicesAD.csv`.
 LOT runs pass this root CSV separately and use it in priority when it exists and is less than
@@ -135,7 +135,7 @@ LOT runs pass this root CSV separately and use it in priority when it exists and
 as a forest-wide AD export. A LOT can still use a per-LOT AD domain by setting `EHJIR_AD_DOMAIN`
 before launching the LOT, or by creating an `AdDomain.txt` file in that LOT folder with the domain
 name on the first line. In that domain-specific fallback mode, the repair launcher writes and
-refreshes `LOT-*\DevicesAD.csv` so different LOT folders can target different AD domains without
+refreshes `Runs\<LOT>\<yyyyMMdd-HHmmss>\DevicesAD.csv` so different LOT folders can target different AD domains without
 overwriting each other's AD inventory.
 
 Open the LOT launcher GUI:
@@ -144,7 +144,7 @@ Open the LOT launcher GUI:
 Start-IntuneHybridJoinRepair-LotLauncher-GUI.cmd
 ```
 
-The GUI has an existing-LOT tab with a drop-down list of available operational `LOT-*` folders.
+The GUI has an existing-LOT tab with a drop-down list of available operational `Lots\LOT-*` folders.
 After a LOT is selected, it shows only the device count, AD scope, global worker limit, and launch mode.
 It can launch the selected LOT or all launchable LOT folders; empty LOT folders or folders with
 missing wrappers are skipped. When no operational LOT exists, the LOT selector and launch buttons
@@ -168,10 +168,10 @@ The repair script must remain self-contained. Do not add mandatory runtime depen
 ## Notes
 
 - LOT folders should only contain `Computers.txt` and the small CMD wrappers.
-- Reports are written under `LOT-*\Reports`.
-- A live cycle CSV is written under `LOT-*\Reports` as computers complete.
-- Per-computer PsExec logs are written under `LOT-*\PsExecLogs`.
-- Collected remote evidence is written under `LOT-*\CentralLogs`.
-- Previous `CentralLogs`, `PsExecLogs`, and `Reports` folders are archived under `LOT-*\Archives` at the start of a LOT run by default.
+- Reports are written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Reports`.
+- A live cycle CSV is written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Reports` as computers complete.
+- Per-computer PsExec logs are written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\PsExecLogs`.
+- Collected remote evidence is written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\CentralLogs`.
+- Previous `CentralLogs`, `PsExecLogs`, and `Reports` folders are archived under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Archives` at the start of a LOT run by default.
 - Already enrolled computers are moved from `Computers.txt` to `ComputersAlreadyEnrolled.txt`.
 - Generated inventories, logs and reports are ignored by Git.
