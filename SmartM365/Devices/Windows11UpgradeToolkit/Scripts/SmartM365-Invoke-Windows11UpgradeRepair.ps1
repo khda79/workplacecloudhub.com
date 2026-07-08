@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.46
+    0.1.47
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,7 +75,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.46'
+$script:ScriptVersion = '0.1.47'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -105,6 +105,41 @@ function Write-SmartLog {
     foreach ($line in ($Message -split "`r?`n")) {
         $entry = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Level,$line
         Add-Content -LiteralPath $script:LogPath -Value $entry -Encoding UTF8
+    }
+}
+
+function Protect-Windows11ToolkitPathAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$Directory
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+        if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) {
+            Write-SmartLog ("ACL hardening skipped because icacls.exe was not found. Path={0}" -f $Path) 'WARN'
+            return
+        }
+
+        $grants = if ($Directory) {
+            @('*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','*S-1-5-32-545:(OI)(CI)RX')
+        }
+        else {
+            @('*S-1-5-18:F','*S-1-5-32-544:F','*S-1-5-32-545:RX')
+        }
+
+        $output = & $icacls $Path '/inheritance:r' '/grant:r' $grants 2>&1
+        $exitCode = [int]$LASTEXITCODE
+        if ($exitCode -ne 0) {
+            Write-SmartLog ("ACL hardening failed. Path={0}; ExitCode={1}; Output={2}" -f $Path,$exitCode,(($output | Out-String).Trim())) 'WARN'
+            return
+        }
+
+        Write-SmartLog ("ACL hardening applied. Path={0}; Directory={1}" -f $Path,[bool]$Directory)
+    }
+    catch {
+        Write-SmartLog ("ACL hardening threw an exception. Path={0}; Error={1}" -f $Path,$_.Exception.Message) 'WARN'
     }
 }
 
@@ -3197,6 +3232,10 @@ function Save-SetupReturnCheckpoint {
 
 New-SmartDirectory -Path $script:LogDir
 New-SmartDirectory -Path $script:OutputDir
+Protect-Windows11ToolkitPathAcl -Path $DataRoot -Directory
+Protect-Windows11ToolkitPathAcl -Path $script:LogDir -Directory
+Protect-Windows11ToolkitPathAcl -Path $script:OutputDir -Directory
+Protect-Windows11ToolkitPathAcl -Path $MyInvocation.MyCommand.Path
 $script:LocalIPv4Addresses = ''
 try { $script:LocalIPv4Addresses = (@(Get-LocalIPv4Addresses) -join ',') } catch { $script:LocalIPv4Addresses = '' }
 Write-SmartLog ("===== {0} v{1} started. ComputerName={2}; LocalIPv4={3}; RunId={4} =====" -f $script:ScriptName,$script:ScriptVersion,$script:ComputerName,$script:LocalIPv4Addresses,$script:RunId)

@@ -63,7 +63,7 @@ Minutes to wait between local Intune enrollment re-checks after auto-enrollment 
 Number of local Intune enrollment re-checks after auto-enrollment is triggered. Defaults to 5.
 
 .VERSION
-2.10.33
+2.10.35
 
 .EXITCODES
 0 = Success (AzureAdJoined=YES, device auth is healthy, and Intune enrollment is present or was restored)
@@ -92,7 +92,7 @@ param(
     [int]$IntuneRetryMaxRetries = 5
 )
 
-$ScriptVersion = "2.10.33"
+$ScriptVersion = "2.10.35"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
@@ -403,13 +403,51 @@ $UserTaskFolderPath = "\SmartM365\IntuneHybridJoinToolkit"
 $UserStatusTaskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-UserDsregStatus"
 $UserRefreshPrtTaskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-UserRefreshPrt"
 $UserIntuneAutoEnrollTaskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-UserMdmAutoEnroll"
+$UserNextLogonAutoEnrollTaskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-RunUserAutoEnrollAtLogon"
 
 Write-RunLog ("Retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -f $RetrySleepMinutes, $RetryMaxRetries)
 Write-RunLog ("Intune retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -f $IntuneRetrySleepMinutes, $IntuneRetryMaxRetries)
-Write-RunLog ("User task policy: Folder={0}; StatusTask={1}; RefreshPrtTask={2}; IntuneAutoEnrollTask={3}; WaitSeconds={4}; RefreshWaitSeconds={5}" -f $UserTaskFolderPath, $UserStatusTaskName, $UserRefreshPrtTaskName, $UserIntuneAutoEnrollTaskName, $UserTaskWaitSeconds, $UserPrtRetryWaitSeconds)
+Write-RunLog ("User task policy: Folder={0}; StatusTask={1}; RefreshPrtTask={2}; IntuneAutoEnrollTask={3}; NextLogonTask={4}; WaitSeconds={5}; RefreshWaitSeconds={6}" -f $UserTaskFolderPath, $UserStatusTaskName, $UserRefreshPrtTaskName, $UserIntuneAutoEnrollTaskName, $UserNextLogonAutoEnrollTaskName, $UserTaskWaitSeconds, $UserPrtRetryWaitSeconds)
 Write-RunLog "DNS policy: FlushDNS=True"
 Write-RunLog ("GPUpdate policy: Force=True; WaitSeconds={0}" -f $GpUpdateWaitSeconds)
 Write-RunLog ("Non-Intune MDM removal policy: AllowRemoveNonIntuneMdmEnrollment={0}" -f [bool]$AllowRemoveNonIntuneMdmEnrollment)
+
+$LegacyNextLogonAutoEnrollCmdPath = Join-Path $DataRoot "SmartM365-IHJ-RunUserAutoEnrollAtLogon.cmd"
+try {
+    if (Test-Path -LiteralPath $LegacyNextLogonAutoEnrollCmdPath) {
+        Remove-Item -LiteralPath $LegacyNextLogonAutoEnrollCmdPath -Force -ErrorAction Stop
+        Write-RunLog ("Removed legacy next-logon helper command: {0}" -f $LegacyNextLogonAutoEnrollCmdPath)
+    }
+}
+catch {
+    Write-RunLog ("Legacy next-logon helper command cleanup failed. Path={0}; Error={1}" -f $LegacyNextLogonAutoEnrollCmdPath,$_.Exception.Message)
+}
+
+try {
+    $service = New-Object -ComObject Schedule.Service
+    $service.Connect()
+    $folder = $service.GetFolder($UserTaskFolderPath)
+    $taskLeafName = [string](@($UserNextLogonAutoEnrollTaskName.Trim("\").Split("\"))[-1])
+    $task = $folder.GetTask($taskLeafName)
+    $legacyTaskAction = $false
+    foreach ($action in @($task.Definition.Actions)) {
+        $actionPath = [string]$action.Path
+        $actionArguments = [string]$action.Arguments
+        if (($actionPath -match '(?i)(^|\\)cmd\.exe$') -and ($actionArguments -match '(?i)SmartM365-IHJ-RunUserAutoEnrollAtLogon\.cmd')) {
+            $legacyTaskAction = $true
+        }
+    }
+    if ($legacyTaskAction) {
+        $folder.DeleteTask($taskLeafName, 0)
+        Write-RunLog ("Removed legacy next-logon task because it referenced a local helper command. TaskName={0}" -f $UserNextLogonAutoEnrollTaskName)
+    }
+}
+catch {
+    $hresult = $_.Exception.HResult
+    if ($hresult -notin @(-2147024894, -2147024893)) {
+        Write-RunLog ("Legacy next-logon task inspection failed. TaskName={0}; Error={1}" -f $UserNextLogonAutoEnrollTaskName,$_.Exception.Message)
+    }
+}
 
 # Transcript (best effort)
 $TranscriptStarted = $false
@@ -1171,6 +1209,16 @@ function Ensure-ScheduledTaskFolder {
         Write-RunLog ("Scheduled task folder creation failed. TaskPath={0}; Error={1}" -f $normalizedPath,$_.Exception.Message)
         return $false
     }
+}
+
+function ConvertTo-SchtasksRunArguments {
+    param([Parameter(Mandatory=$true)][string]$TaskName)
+
+    if ($TaskName -match '"') {
+        throw "Scheduled task name contains an unsupported double quote: $TaskName"
+    }
+
+    return ('/Run /TN "{0}"' -f $TaskName)
 }
 
 function Register-InteractiveUserScheduledTask {
@@ -2141,9 +2189,8 @@ function Register-UserAutoEnrollAtLogonTask {
         [Parameter(Mandatory=$true)][string]$AutoEnrollTaskName
     )
 
-    $taskName = "\SmartM365\IntuneHybridJoinToolkit\SmartM365-IHJ-RunUserAutoEnrollAtLogon"
-    $helperCmdPath = Join-Path $DataRoot "SmartM365-IHJ-RunUserAutoEnrollAtLogon.cmd"
-    $taskRun = ('cmd.exe /d /c "{0}"' -f $helperCmdPath)
+    $taskName = $UserNextLogonAutoEnrollTaskName
+    $legacyHelperCmdPath = Join-Path $DataRoot "SmartM365-IHJ-RunUserAutoEnrollAtLogon.cmd"
 
     try {
         $helperTaskResult = Ensure-UserContextHelperTasks
@@ -2151,29 +2198,78 @@ function Register-UserAutoEnrollAtLogonTask {
             Write-RunLog ("Next-logon helper prerequisites were not fully registered. Detail={0}" -f $helperTaskResult.Detail)
         }
 
-        $helperLines = @(
-            "@echo off",
-            "schtasks.exe /Run /TN ""$StatusTaskName"" > C:\Windows\Temp\SmartM365-IHJ-NextLogonStatus.txt 2>&1",
-            "timeout.exe /t 30 /nobreak > nul",
-            "schtasks.exe /Run /TN ""$AutoEnrollTaskName"" > C:\Windows\Temp\SmartM365-IHJ-NextLogonAutoEnroll.txt 2>&1"
-        )
-        Set-Content -LiteralPath $helperCmdPath -Value $helperLines -Encoding ASCII -Force
-        Write-RunLog ("Next-logon auto-enrollment helper command written: {0}" -f $helperCmdPath)
+        $legacyCleanupDetail = "Legacy helper command was not present."
+        if (Test-Path -LiteralPath $legacyHelperCmdPath) {
+            try {
+                Remove-Item -LiteralPath $legacyHelperCmdPath -Force -ErrorAction Stop
+                $legacyCleanupDetail = ("Removed legacy helper command: {0}" -f $legacyHelperCmdPath)
+            }
+            catch {
+                $legacyCleanupDetail = ("Legacy helper command could not be removed: {0}. Error={1}" -f $legacyHelperCmdPath,$_.Exception.Message)
+            }
+            Write-RunLog $legacyCleanupDetail
+        }
 
         $taskFolderReady = Ensure-ScheduledTaskFolder -TaskPath $UserTaskFolderPath
         if (-not $taskFolderReady) {
-            Write-RunLog ("Next-logon auto-enrollment helper task folder could not be confirmed. Continuing with schtasks registration attempt. TaskName={0}" -f $taskName)
+            throw "Next-logon auto-enrollment helper task folder could not be confirmed: $UserTaskFolderPath"
         }
 
-        $createResult = Invoke-SchtasksCreate -TaskName $taskName -Trigger "ONLOGON" -RunAs "SYSTEM" -RunLevel "HIGHEST" -TaskRun $taskRun
-        $exitCode = $createResult.ExitCode
-        Write-RunLog ("Next-logon auto-enrollment helper task registration. TaskName={0}; ExitCode={1}; Output={2}" -f $taskName,$exitCode,$createResult.Output)
+        $normalizedTaskName = $taskName.Trim()
+        if (-not $normalizedTaskName.StartsWith("\")) {
+            $normalizedTaskName = "\$normalizedTaskName"
+        }
+
+        $parts = @($normalizedTaskName.Trim("\").Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($parts.Count -lt 2) {
+            throw "Next-logon task must include a task folder: $taskName"
+        }
+
+        $leafName = [string]$parts[-1]
+        $folderPath = "\" + (($parts | Select-Object -First ($parts.Count - 1)) -join "\")
+        $schtasksPath = Join-Path $env:WINDIR "System32\schtasks.exe"
+        $statusTaskArguments = ConvertTo-SchtasksRunArguments -TaskName $StatusTaskName
+        $autoEnrollTaskArguments = ConvertTo-SchtasksRunArguments -TaskName $AutoEnrollTaskName
+
+        $service = New-Object -ComObject Schedule.Service
+        $service.Connect()
+        $folder = $service.GetFolder($folderPath)
+        $definition = $service.NewTask(0)
+
+        $definition.RegistrationInfo.Author = "SmartM365 Intune Hybrid Join Toolkit"
+        $definition.RegistrationInfo.Description = "SmartM365 Intune Hybrid Join Toolkit - trigger user-context auto-enrollment helper tasks at next user logon."
+        $definition.Settings.Enabled = $true
+        $definition.Settings.Hidden = $false
+        $definition.Settings.AllowDemandStart = $true
+        $definition.Settings.StartWhenAvailable = $true
+        $definition.Settings.DisallowStartIfOnBatteries = $false
+        $definition.Settings.StopIfGoingOnBatteries = $false
+        $definition.Settings.ExecutionTimeLimit = "PT10M"
+        $definition.Settings.MultipleInstances = 2
+
+        $definition.Principal.UserId = "SYSTEM"
+        $definition.Principal.LogonType = 5
+        $definition.Principal.RunLevel = 1
+
+        $trigger = $definition.Triggers.Create(9)
+        $trigger.Enabled = $true
+
+        $statusAction = $definition.Actions.Create(0)
+        $statusAction.Path = $schtasksPath
+        $statusAction.Arguments = $statusTaskArguments
+
+        $autoEnrollAction = $definition.Actions.Create(0)
+        $autoEnrollAction.Path = $schtasksPath
+        $autoEnrollAction.Arguments = $autoEnrollTaskArguments
+
+        [void]$folder.RegisterTaskDefinition($leafName, $definition, 6, "SYSTEM", $null, 5, $null)
+        Write-RunLog ("Next-logon auto-enrollment helper task registration succeeded. TaskName={0}; Action={1}; StatusArgs={2}; AutoEnrollArgs={3}; LegacyCleanup={4}" -f $normalizedTaskName,$schtasksPath,$statusTaskArguments,$autoEnrollTaskArguments,$legacyCleanupDetail)
 
         return [PSCustomObject]@{
-            Success = ($exitCode -eq 0)
-            TaskName = $taskName
-            ExitCode = $exitCode
-            Detail = $createResult.Output
+            Success = $true
+            TaskName = $normalizedTaskName
+            ExitCode = 0
+            Detail = ("Registered SYSTEM ONLOGON task with direct schtasks actions; {0}" -f $legacyCleanupDetail)
         }
     }
     catch {

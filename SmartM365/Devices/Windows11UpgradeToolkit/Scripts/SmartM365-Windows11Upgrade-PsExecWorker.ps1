@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.21
+0.1.22
 #>
 
 #requires -Version 5.1
@@ -243,6 +243,35 @@ function Convert-ToAdminSharePath {
     return "\\$ComputerName\$drive`$\$rest"
 }
 
+function Protect-RemoteToolkitPathAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [switch]$Directory
+    )
+
+    $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+    if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) {
+        Add-Content -LiteralPath $LogPath -Value ("[{0}] WARN ACL hardening skipped because icacls.exe was not found. Path={1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Path) -Encoding UTF8
+        return
+    }
+
+    $grants = if ($Directory) {
+        @('*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','*S-1-5-32-545:(OI)(CI)RX')
+    }
+    else {
+        @('*S-1-5-18:F','*S-1-5-32-544:F','*S-1-5-32-545:RX')
+    }
+
+    $output = & $icacls $Path '/inheritance:r' '/grant:r' $grants 2>&1
+    $exitCode = [int]$LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw ("ACL hardening failed. Path={0}; ExitCode={1}; Output={2}" -f $Path,$exitCode,(($output | Out-String).Trim()))
+    }
+
+    Add-Content -LiteralPath $LogPath -Value ("[{0}] ACL hardening applied. Path={1}; Directory={2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Path,[bool]$Directory) -Encoding UTF8
+}
+
 function Copy-DirectoryContent {
     param(
         [Parameter(Mandatory = $true)][string]$SourcePath,
@@ -261,8 +290,10 @@ function Copy-RemotePayload {
 
     $remoteBaseShare = Convert-ToAdminSharePath -ComputerName $ComputerName -LocalPath $RemoteBaseDir
     New-Directory -Path $remoteBaseShare
+    Protect-RemoteToolkitPathAcl -Path $remoteBaseShare -LogPath $LogPath -Directory
     $remoteScriptShare = Join-Path $remoteBaseShare (Split-Path -Leaf $RemoteScriptPath)
     Copy-Item -LiteralPath $LocalScriptPath -Destination $remoteScriptShare -Force -ErrorAction Stop
+    Protect-RemoteToolkitPathAcl -Path $remoteScriptShare -LogPath $LogPath
 
     $localHash = (Get-FileHash -LiteralPath $LocalScriptPath -Algorithm SHA256).Hash
     $remoteHash = (Get-FileHash -LiteralPath $remoteScriptShare -Algorithm SHA256).Hash
