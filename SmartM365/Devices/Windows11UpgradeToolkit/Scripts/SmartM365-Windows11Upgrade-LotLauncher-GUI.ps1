@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.22
+0.1.25
 #>
 param(
     [switch]$ValidateOnly
@@ -122,6 +122,54 @@ function Get-LotConfigPath {
     return Join-Path $LotPath 'Windows11UpgradeToolkit.config'
 }
 
+function Get-LotsRoot {
+    param([string]$RootPath)
+    return Join-Path $RootPath 'Lots'
+}
+
+function Get-RunsRoot {
+    param([string]$RootPath)
+    return Join-Path $RootPath 'Runs'
+}
+
+function Get-LotRunsRoot {
+    param(
+        [string]$RootPath,
+        [string]$LotName
+    )
+
+    return Join-Path (Get-RunsRoot -RootPath $RootPath) $LotName
+}
+
+function Get-ToolkitRootFromLotPath {
+    param([string]$LotPath)
+
+    $lotsRoot = Split-Path -Parent $LotPath
+    return Split-Path -Parent $lotsRoot
+}
+
+function New-LotRunContext {
+    param(
+        [string]$RootPath,
+        [string]$LotName
+    )
+
+    $runRoot = Get-LotRunsRoot -RootPath $RootPath -LotName $LotName
+    $runPath = Join-Path $runRoot (Get-Date -Format 'yyyyMMdd-HHmmss')
+    foreach ($folder in @('', 'Logs', 'PsExecLogs', 'Reports', 'CentralLogs', 'State')) {
+        $path = if ([string]::IsNullOrWhiteSpace($folder)) { $runPath } else { Join-Path $runPath $folder }
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+
+    [pscustomobject]@{
+        RunPath         = $runPath
+        LogRoot         = Join-Path $runPath 'PsExecLogs'
+        ReportRoot      = Join-Path $runPath 'Reports'
+        CentralLogRoot  = Join-Path $runPath 'CentralLogs'
+        LauncherLogRoot = Join-Path $runPath 'Logs'
+    }
+}
+
 function Test-LotConfigCanOverrideEnvironmentValue {
     param(
         [string]$Name,
@@ -214,13 +262,14 @@ function Get-ComputerNamesFromFile {
 function Get-LotFolders {
     param([string]$RootPath)
 
-    if (-not (Test-Path -LiteralPath $RootPath -PathType Container)) {
+    $lotsRoot = Get-LotsRoot -RootPath $RootPath
+    if (-not (Test-Path -LiteralPath $lotsRoot -PathType Container)) {
         return @()
     }
 
     @(
-        Get-ChildItem -LiteralPath $RootPath -Directory -Filter 'LOT-*' -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -ine 'LOT-X' } |
+        Get-ChildItem -LiteralPath $lotsRoot -Directory -Filter 'LOT-*' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ine 'LOT-TEMPLATE' } |
             Sort-Object Name
     )
 }
@@ -255,17 +304,19 @@ function Get-LotSummary {
     $computersPath = Join-Path $LotPath 'Computers.txt'
     $wrappers = Test-LotWrapperSet -LotPath $LotPath
     $count = @(Get-ComputerNamesFromFile -Path $computersPath).Count
+    $rootPath = Get-ToolkitRootFromLotPath -LotPath $LotPath
+    $lotName = Split-Path -Leaf $LotPath
 
     [pscustomobject]@{
-        Name            = Split-Path -Leaf $LotPath
+        Name            = $lotName
         Path            = $LotPath
         ComputersPath   = $computersPath
-        ReportsPath     = Join-Path $LotPath 'Reports'
+        ReportsPath     = Get-LotRunsRoot -RootPath $rootPath -LotName $lotName
         ComputerCount   = $count
         UpgradeScope    = 'Windows 10 readiness, policy repair, guarded Windows 11 upgrade'
         WrappersReady   = $wrappers.Ready
         MissingWrappers = $wrappers.Missing
-        Display         = ('{0} ({1} devices)' -f (Split-Path -Leaf $LotPath), $count)
+        Display         = ('{0} ({1} devices)' -f $lotName, $count)
     }
 }
 
@@ -290,7 +341,10 @@ function New-ToolkitLotFolder {
     )
 
     $safeName = Get-SafeLotName -Name $Name
-    $lotPath = Join-Path $RootPath $safeName
+    $lotsRoot = Get-LotsRoot -RootPath $RootPath
+    New-Item -ItemType Directory -Path $lotsRoot -Force | Out-Null
+
+    $lotPath = Join-Path $lotsRoot $safeName
     if (Test-Path -LiteralPath $lotPath) {
         throw "LOT folder already exists: $lotPath"
     }
@@ -405,7 +459,7 @@ function Start-GuiLaunchCommandFile {
 
 function Get-SingleComputerRunRoot {
     param([string]$ToolkitRoot)
-    return Join-Path $ToolkitRoot 'SingleComputerRuns'
+    return Join-Path (Get-RunsRoot -RootPath $ToolkitRoot) 'SingleComputer'
 }
 
 function New-SingleComputerRunContext {
@@ -430,7 +484,7 @@ function New-SingleComputerRunContext {
     $computersPath = Join-Path $runPath 'Computers.txt'
     Set-Content -LiteralPath $computersPath -Value $trimmed -Encoding UTF8 -Force
 
-    foreach ($folder in @('PsExecLogs','Reports','CentralLogs')) {
+    foreach ($folder in @('Logs','PsExecLogs','Reports','CentralLogs','State')) {
         New-Item -ItemType Directory -Path (Join-Path $runPath $folder) -Force | Out-Null
     }
 
@@ -489,6 +543,10 @@ function Start-ToolkitLot {
     [void](Resolve-GuiPsExecPath -ToolkitRoot $toolkitRoot)
 
     $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $Lot.Path -EnvironmentVariables $EnvironmentVariables
+    $run = New-LotRunContext -RootPath $toolkitRoot -LotName $Lot.Name
+    $effectiveEnvironment['W11UT_RUN_DIR'] = $run.RunPath
+    $effectiveEnvironment['W11UT_LOT_DIR'] = $Lot.Path
+
     $commands = New-Object System.Collections.Generic.List[string]
     foreach ($name in @($effectiveEnvironment.Keys | Sort-Object)) {
         $value = [string]$effectiveEnvironment[$name]
@@ -512,8 +570,8 @@ function Start-ToolkitLot {
 
     $commands.Add(($commandParts -join ' '))
     $launchTitle = "{0} - started {1}" -f $Lot.Name,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $Lot.Path -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode) -WindowTitle $launchTitle
-    Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $Lot.Path
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode) -WindowTitle $launchTitle
+    Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
 }
 
 function Start-ToolkitSingleComputer {
@@ -541,6 +599,7 @@ function Start-ToolkitSingleComputer {
         '-LogRoot', $run.LogRoot,
         '-ReportRoot', $run.ReportRoot,
         '-CentralLogRoot', $run.CentralLogRoot,
+        '-LauncherLogRoot', $run.LauncherLogRoot,
         '-ThrottleLimit', '1',
         '-GlobalConcurrencyLimit', '0',
         '-GlobalConcurrencyLeaseTimeoutMinutes', [string]$EnvironmentVariables.W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES
@@ -691,6 +750,8 @@ function Get-IntText {
 }
 
 $toolkitRoot = Get-ToolkitRoot
+New-Item -ItemType Directory -Path (Get-LotsRoot -RootPath $toolkitRoot) -Force | Out-Null
+New-Item -ItemType Directory -Path (Get-RunsRoot -RootPath $toolkitRoot) -Force | Out-Null
 $script:ToolkitConfigPath = Join-Path $toolkitRoot 'Windows11UpgradeToolkit.config'
 $script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
 $script:SetupSourcePlaceholder = '\\server\share\Windows11'
@@ -738,7 +799,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_GUI_MAX_CYCLES = '0'
     W11UT_USE_TECHNICIAN_RUN_GUARD_HISTORY = '1'
     W11UT_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY = '0'
-    W11UT_RUN_GUARD_HOURS = '12'
+    W11UT_RUN_GUARD_HOURS = '3'
 }
 $launchAllLotStartDelaySeconds = 5
 
