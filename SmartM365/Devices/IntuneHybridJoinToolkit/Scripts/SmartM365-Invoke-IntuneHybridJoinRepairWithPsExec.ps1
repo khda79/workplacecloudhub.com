@@ -157,7 +157,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic full inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.66
+2.10.69
 #>
 
 #requires -Version 5.1
@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.67"
+$LauncherVersion = "2.10.69"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -474,6 +474,7 @@ if (-not (Test-Path -LiteralPath $LauncherStartupLogRoot -PathType Container)) {
     New-Item -ItemType Directory -Path $LauncherStartupLogRoot -Force | Out-Null
 }
 $LauncherStartupLogPath = Join-Path $LauncherStartupLogRoot "LauncherStartup.log"
+$script:LauncherLogPath = $LauncherStartupLogPath
 
 function Write-LauncherStartupLine {
     param([string]$Message)
@@ -1292,8 +1293,10 @@ function Get-NextActionFromLauncherStatus {
         "PSEXEC_TIMEOUT" { return "CHECK_REMOTE_LOG_OR_RETRY" }
         "PSEXEC_COMMUNICATION_LOST" { return "RETRY_PSEXEC_OR_CHECK_REMOTE_SERVICE" }
         "PSEXEC_EXIT_UNKNOWN" { return "CHECK_CURRENT_RUN_REMOTE_LOG" }
+        "PSEXEC_EXIT_-1073741790" { return "CHECK_EDR_OR_EXECUTION_POLICY_BLOCK" }
         default {
             if ($Status -like "ERROR*") { return "CHECK_CONNECTIVITY_OR_ADMIN_ACCESS" }
+            if ($Status -like "PSEXEC_EXIT_-1073741790*") { return "CHECK_EDR_OR_EXECUTION_POLICY_BLOCK" }
             if ($Status -like "PSEXEC_EXIT*") { return "CHECK_CURRENT_RUN_REMOTE_LOG" }
             return "REVIEW_LOGS"
         }
@@ -1590,6 +1593,34 @@ function Get-ComputerList {
         Select-Object -Unique)
 }
 
+function Get-ComputerListStats {
+    param([Parameter(Mandatory=$true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [pscustomobject]@{ RawLines = 0; Unique = 0; DuplicateGroups = 0; DuplicateLines = 0; DuplicateSamples = '' }
+    }
+
+    $rawNames = @(
+        Get-Content -LiteralPath $Path |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not $_.StartsWith('#') }
+    )
+    $duplicateGroups = @(
+        $rawNames |
+            Group-Object { ([string]$_).ToUpperInvariant() } |
+            Where-Object { $_.Count -gt 1 }
+    )
+    $duplicateLineCount = 0
+    foreach ($duplicateGroup in $duplicateGroups) { $duplicateLineCount += ([int]$duplicateGroup.Count - 1) }
+
+    return [pscustomobject]@{
+        RawLines = [int]$rawNames.Count
+        Unique = [int](@($rawNames | ForEach-Object { ([string]$_).ToUpperInvariant() } | Select-Object -Unique).Count)
+        DuplicateGroups = [int]$duplicateGroups.Count
+        DuplicateLines = [int]$duplicateLineCount
+        DuplicateSamples = [string](($duplicateGroups | Select-Object -First 10 | ForEach-Object { $_.Group[0] }) -join ', ')
+    }
+}
 function Get-ComputerListKey {
     param([Parameter(Mandatory=$true)][string]$ComputerName)
 
@@ -1741,6 +1772,93 @@ function ConvertTo-HtmlText {
     return [System.Security.SecurityElement]::Escape([string]$Value)
 }
 
+function ConvertTo-FileUri {
+    param([AllowNull()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    $value = ([string]$Path).Trim()
+    try {
+        if ($value.StartsWith('\\')) {
+            $parts = $value.TrimStart('\') -split '\\'
+            if ($parts.Count -ge 2) {
+                $server = [System.Uri]::EscapeDataString($parts[0])
+                $share = [System.Uri]::EscapeDataString($parts[1])
+                $rest = ''
+                if ($parts.Count -gt 2) {
+                    $rest = '/' + (($parts[2..($parts.Count - 1)] | ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join '/')
+                }
+                return ('file://{0}/{1}{2}' -f $server,$share,$rest)
+            }
+        }
+        return ([System.Uri]::new([System.IO.Path]::GetFullPath($value))).AbsoluteUri
+    }
+    catch { return '' }
+}
+
+function New-HtmlLogLink {
+    param(
+        [AllowNull()][string]$Path,
+        [string]$Label = 'Open'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '-' }
+    $uri = ConvertTo-FileUri -Path $Path
+    if ([string]::IsNullOrWhiteSpace($uri)) { return (ConvertTo-HtmlText $Path) }
+    return ('<a href="{0}" title="{1}">{2}</a>' -f (ConvertTo-HtmlText $uri),(ConvertTo-HtmlText $Path),(ConvertTo-HtmlText $Label))
+}
+
+function Get-RemotePcLogsPath {
+    param([AllowNull()][string]$ComputerName)
+    if ([string]::IsNullOrWhiteSpace($ComputerName)) { return '' }
+    return ('\\{0}\C$\ProgramData\SmartM365\IntuneHybridJoinToolkit\Logs' -f ([string]$ComputerName).Trim())
+}
+
+function Get-HybridJoinHtmlEffectiveStatus {
+    param([AllowNull()][object]$Row)
+    if ($null -eq $Row) { return '' }
+    if ($Row.PSObject.Properties['EffectiveStatus'] -and -not [string]::IsNullOrWhiteSpace([string]$Row.EffectiveStatus)) { return [string]$Row.EffectiveStatus }
+    if ($Row.PSObject.Properties['Status']) { return [string]$Row.Status }
+    return ''
+}
+
+function Get-HybridJoinHtmlEffectiveNextAction {
+    param([AllowNull()][object]$Row)
+    if ($null -eq $Row) { return '' }
+    if ($Row.PSObject.Properties['EffectiveNextAction'] -and -not [string]::IsNullOrWhiteSpace([string]$Row.EffectiveNextAction)) { return [string]$Row.EffectiveNextAction }
+    if ($Row.PSObject.Properties['NextAction']) { return [string]$Row.NextAction }
+    return ''
+}
+
+function Get-HybridJoinAdminShareFailureType {
+    param([AllowNull()][object]$Row)
+    if ($null -eq $Row) { return 'UNKNOWN' }
+    if ($Row.PSObject.Properties['AdminShareFailureType'] -and -not [string]::IsNullOrWhiteSpace([string]$Row.AdminShareFailureType)) { return [string]$Row.AdminShareFailureType }
+    $evidence = @(
+        $(if ($Row.PSObject.Properties['RemoteDetail']) { [string]$Row.RemoteDetail } else { '' }),
+        $(if ($Row.PSObject.Properties['ErrorMessage']) { [string]$Row.ErrorMessage } else { '' }),
+        $(if ($Row.PSObject.Properties['JobErrorMessage']) { [string]$Row.JobErrorMessage } else { '' })
+    ) -join ' '
+    if ($evidence -match 'DNS_FAILED') { return 'DNS_FAILED' }
+    if ($evidence -match 'PING_FAILED_ADMIN_SHARE_FAILED') { return 'PING_FAILED_ADMIN_SHARE_FAILED' }
+    if ($evidence -match 'PING_OK_ADMIN_SHARE_FAILED') { return 'PING_OK_ADMIN_SHARE_FAILED' }
+    return 'UNKNOWN'
+}
+
+function Get-HybridJoinHtmlReportRows {
+    param([AllowEmptyCollection()][object[]]$Items)
+
+    $columns = @(Get-LauncherReportColumns)
+    return @($Items | ForEach-Object {
+        $portable = ConvertTo-PortableReportRow -Row $_
+        $row = [ordered]@{}
+        foreach ($column in $columns) { $row[$column] = if ($portable.PSObject.Properties[$column]) { [string]$portable.$column } else { '' } }
+        $row['Local log'] = New-HtmlLogLink -Path $row['LogPath']
+        $row['Collected logs'] = New-HtmlLogLink -Path $row['RemoteLogsPath']
+        $row['Current run logs'] = New-HtmlLogLink -Path $row['RemoteCurrentRunLogsPath']
+        $row['Remote PC logs'] = New-HtmlLogLink -Path (Get-RemotePcLogsPath -ComputerName $row['Computer'])
+        [pscustomobject]$row
+    })
+}
 function ConvertTo-SimpleHtmlTable {
     param(
         [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Rows,
@@ -1779,7 +1897,12 @@ function ConvertTo-SimpleHtmlTable {
             if ($property) {
                 $value = $property.Value
             }
-            [void]$html.Add(("<td>{0}</td>" -f (ConvertTo-HtmlText $value)))
+            if ($column -eq 'Local log' -or $column -eq 'Collected logs' -or $column -eq 'Current run logs' -or $column -eq 'Remote PC logs') {
+                [void]$html.Add(("<td>{0}</td>" -f $value))
+            }
+            else {
+                [void]$html.Add(("<td>{0}</td>" -f (ConvertTo-HtmlText $value)))
+            }
         }
         [void]$html.Add("</tr>")
     }
@@ -1896,21 +2019,72 @@ function New-CycleHtmlReport {
         [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Summary,
         [Parameter(Mandatory=$true)][string]$Path,
         [Parameter(Mandatory=$true)][int]$CycleNumber,
-        [Parameter(Mandatory=$true)][datetime]$GeneratedAt
+        [Parameter(Mandatory=$true)][datetime]$GeneratedAt,
+        [switch]$IsLive,
+        [AllowEmptyCollection()][object[]]$CycleProgress = @(),
+        [AllowEmptyCollection()][object[]]$RunningJobRows = @()
     )
 
-    $rows = @(Get-PortableReportRows -Rows @($Summary | ForEach-Object { $_ }))
+    $rows = @(Get-HybridJoinHtmlReportRows -Items @($Summary | ForEach-Object { $_ }))
+    $separatedStatuses = @('ADMIN_SHARE_UNREACHABLE','DNS_PREFLIGHT_ALL_SAMPLES_FAILED','RUN_GUARD_ACTIVE')
+    $mainRows = @($rows | Where-Object { $separatedStatuses -notcontains (Get-HybridJoinHtmlEffectiveStatus -Row $_) })
+    $separatedRows = @($rows | Where-Object { $separatedStatuses -contains (Get-HybridJoinHtmlEffectiveStatus -Row $_) })
 
-    $statusCounts = @($rows | Group-Object -Property Status | Sort-Object Count -Descending | ForEach-Object {
-        [PSCustomObject]@{ Status=$_.Name; Count=$_.Count }
-    })
-    $nextActionCounts = @($rows | Group-Object -Property NextAction | Sort-Object Count -Descending | ForEach-Object {
-        [PSCustomObject]@{ NextAction=$_.Name; Count=$_.Count }
-    })
+    $effectiveRows = @($rows | ForEach-Object { [pscustomobject]@{ Status = Get-HybridJoinHtmlEffectiveStatus -Row $_; NextAction = Get-HybridJoinHtmlEffectiveNextAction -Row $_ } })
+    $statusCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Status) } | Group-Object -Property Status | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ Status=$_.Name; Count=$_.Count } })
+    $nextActionCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.NextAction) } | Group-Object -Property NextAction | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ NextAction=$_.Name; Count=$_.Count } })
+    $adminShareFailureCounts = @($rows | Where-Object { (Get-HybridJoinHtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = Get-HybridJoinAdminShareFailureType -Row $_ } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ FailureType=$_.Name; Count=$_.Count } })
+
+    $computerListStats = $script:CurrentCycleComputerListStats
+    if ($CycleProgress.Count -eq 0) {
+        $CycleProgress = @([pscustomobject]@{
+            Cycle = $CycleNumber
+            Generated = $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')
+            ComputerListLines = $(if ($computerListStats -and $computerListStats.PSObject.Properties['RawLines']) { [int]$computerListStats.RawLines } else { '' })
+            TotalUnique = $(if ($script:CurrentCycleTotalComputers) { [int]$script:CurrentCycleTotalComputers } else { $rows.Count })
+            ReportRows = $rows.Count
+            DuplicateGroups = $(if ($computerListStats -and $computerListStats.PSObject.Properties['DuplicateGroups']) { [int]$computerListStats.DuplicateGroups } else { 0 })
+            DuplicateLines = $(if ($computerListStats -and $computerListStats.PSObject.Properties['DuplicateLines']) { [int]$computerListStats.DuplicateLines } else { 0 })
+            DuplicateSamples = $(if ($computerListStats -and $computerListStats.PSObject.Properties['DuplicateSamples']) { [string]$computerListStats.DuplicateSamples } else { '' })
+        })
+    }
+
+    $identity = $null
+    try { $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent() } catch { }
+    $optionRows = @(
+        [pscustomobject]@{ Category='Operator'; Option='TechnicianAccount'; Value=$(if ($identity) { [string]$identity.Name } else { [Environment]::UserName }) }
+        [pscustomobject]@{ Category='Operator'; Option='TechnicianSID'; Value=$(if ($identity -and $identity.User) { [string]$identity.User.Value } else { '' }) }
+        [pscustomobject]@{ Category='Operator'; Option='TechnicianAuthType'; Value=$(if ($identity) { [string]$identity.AuthenticationType } else { '' }) }
+        [pscustomobject]@{ Category='Operator'; Option='TechnicianComputer'; Value=$env:COMPUTERNAME }
+        [pscustomobject]@{ Category='Mode'; Option='DryRun'; Value=[string][bool]$DryRun }
+        [pscustomobject]@{ Category='Mode'; Option='AuditOnly'; Value=[string][bool]$AuditOnly }
+        [pscustomobject]@{ Category='Mode'; Option='RunOnce'; Value=[string][bool]$RunOnce }
+        [pscustomobject]@{ Category='Mode'; Option='IgnoreRunGuard'; Value=[string][bool]$IgnoreRunGuard }
+        [pscustomobject]@{ Category='Mode'; Option='IgnoreRunGuardEveryCycle'; Value=[string][bool]$IgnoreRunGuardEveryCycle }
+        [pscustomobject]@{ Category='Mode'; Option='SkipVirtualMachines'; Value=[string][bool]$SkipVirtualMachines }
+        [pscustomobject]@{ Category='Mode'; Option='DisableNightPause'; Value=[string][bool]$DisableNightPause }
+        [pscustomobject]@{ Category='Actions'; Option='AllowDsregLeave'; Value=[string][bool]$AllowDsregLeave }
+        [pscustomobject]@{ Category='Actions'; Option='AllowRebootWhenNoInteractiveUser'; Value=[string][bool]$AllowRebootWhenNoInteractiveUser }
+        [pscustomobject]@{ Category='Actions'; Option='AllowRebootAfterDsregLeave'; Value=[string][bool]$AllowRebootAfterDsregLeave }
+        [pscustomobject]@{ Category='Actions'; Option='AllowRemoveNonIntuneMdmEnrollment'; Value=[string][bool]$AllowRemoveNonIntuneMdmEnrollment }
+        [pscustomobject]@{ Category='Actions'; Option='AllowRemoveStaleIntuneEnrollment'; Value=[string][bool]$AllowRemoveStaleIntuneEnrollment }
+        [pscustomobject]@{ Category='Timing'; Option='PsExecTimeoutMinutes'; Value=[string]$PsExecTimeoutMinutes }
+        [pscustomobject]@{ Category='Timing'; Option='CommunicationLostEvidenceWaitMinutes'; Value=[string]$CommunicationLostEvidenceWaitMinutes }
+        [pscustomobject]@{ Category='Timing'; Option='JobPollSeconds'; Value=[string]$JobPollSeconds }
+        [pscustomobject]@{ Category='Parallelism'; Option='ThrottleLimit'; Value=[string]$ThrottleLimit }
+        [pscustomobject]@{ Category='Parallelism'; Option='GlobalConcurrencyLimit'; Value=[string]$GlobalConcurrencyLimit }
+        [pscustomobject]@{ Category='Paths'; Option='ComputerListPath'; Value=[string]$ComputerListPath }
+        [pscustomobject]@{ Category='Paths'; Option='LogRoot'; Value=[string]$LogRoot }
+        [pscustomobject]@{ Category='Paths'; Option='ReportRoot'; Value=[string]$ReportRoot }
+        [pscustomobject]@{ Category='Paths'; Option='CentralLogRoot'; Value=[string]$CentralLogRoot }
+        [pscustomobject]@{ Category='Paths'; Option='LauncherLogPath'; Value=[string]$script:LauncherLogPath }
+    )
 
     $logoUri = Get-IntuneHybridJoinBrandLogoDataUri
     $logoHtml = if (-not [string]::IsNullOrWhiteSpace($logoUri)) { "<img class='logo' src='$logoUri' alt='WorkplaceCloudHub' />" } else { "" }
-    $mode = if ($Path -match '_Live_') { 'LIVE' } else { 'FINAL' }
+    $mode = if ($IsLive -or $Path -match '_Live_') { 'LIVE' } else { 'FINAL' }
+    $lotName = if (-not [string]::IsNullOrWhiteSpace([string]$LotRoot)) { Split-Path -Leaf $LotRoot } else { 'Unknown LOT' }
+    $cycleLabel = if ($CycleNumber -le 0) { 'all cycles' } else { "cycle $CycleNumber" }
 
     $style = @"
 <style>
@@ -1918,10 +2092,11 @@ body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 24px; bac
 .header-card { display: flex; align-items: center; justify-content: space-between; background: #fff; border: 1px solid #DDE7F0; border-radius: 8px; padding: 18px 22px; margin-bottom: 18px; }
 .header-text .title { font-size: 22px; font-weight: 600; color: #1F2937; }
 .header-text .subtitle { font-size: 13px; color: #5F6B7A; margin-top: 2px; }
+.header-text .lot-name { font-size: 18px; font-weight: 700; color: #005A9E; margin-top: 8px; }
 .header-text .meta { font-size: 12px; color: #5F6B7A; margin-top: 10px; }
 .badge { display: inline-block; background: #E6F4FF; color: #005A9E; border: 1px solid #B9DDF7; border-radius: 10px; padding: 1px 10px; font-size: 11px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
 .logo { height: 46px; }
-.card { background: #fff; border: 1px solid #DDE7F0; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; }
+.card { background: #fff; border: 1px solid #DDE7F0; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; overflow-x: auto; }
 h2 { font-size: 15px; margin: 0 0 8px 0; color: #1F2937; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; }
 th { background: #0078D4; color: #fff; text-align: left; font-weight: 600; }
@@ -1933,94 +2108,52 @@ tr:nth-child(even) td { background: #F5F8FB; }
 </style>
 "@
 
-    $html = @()
-    $html += "<html><head><meta charset='utf-8'>$style<title>Intune Hybrid Join repair cycle $CycleNumber</title></head><body>"
-    $html += "<div class='header-card'><div class='header-text'>"
-    $html += "<div class='title'>Intune Hybrid Join repair - cycle $CycleNumber<span class='badge'>$mode</span></div>"
-    $html += "<div class='subtitle'>Smart Intune Hybrid Join Toolkit</div>"
-    $html += "<div class='meta'>Generated: $($GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')) | Computers: $($rows.Count) | Launcher: v$LauncherVersion</div>"
-    $html += "</div>$logoHtml</div>"
-    $securityRows = @($script:PsExecSecurityEvidenceRows | ForEach-Object { $_ })
-    $html += "<div class='card'><h2>Security evidence</h2>"
-    $html += ConvertTo-SimpleHtmlTable -Rows $securityRows -Columns @('Field','Value')
-    $html += "<div class='footer'>Non-dry-run PsExec execution is blocked unless the binary is Microsoft-signed and named PsExec.exe or PsExec64.exe.</div>"
-    $html += "</div>"
-    $html += "<div class='card'><h2>Status summary</h2>"
-    $html += ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @("Status","Count")
-    $html += "</div>"
-    $html += "<div class='card'><h2>Next action summary</h2>"
-    $html += ConvertTo-SimpleHtmlTable -Rows $nextActionCounts -Columns @("NextAction","Count")
-    $html += "</div>"
-    $html += "<div class='card'><h2>Computer details</h2>"
-    $detailColumns = @(
-        "Cycle",
-        "Timestamp",
-        "Computer",
-        "ConnectionTarget",
-        "Status",
-        "EffectiveStatus",
-        "NextAction",
-        "EffectiveNextAction",
-        "RemoteStatus",
-        "RemoteExitCode",
-        "PsExecExitCode",
-        "RemoteDetail",
-        "InteractiveUserAccountName",
-        "InteractiveUserAccountType",
-        "InteractiveSessionName",
-        "InteractiveSessionState",
-        "UserIsUserAzureAD",
-        "UserAzureAdPrt",
-        "UserSessionIsNotRemote",
-        "ErrorMessage",
-        "IntuneInventoryPresent",
-        "EntraInventoryPresent",
-        "EntraRegisteredState",
-        "EntraAlternativeSecurityIdCount",
-        "EntraPendingReason",
-        "EntraRegistrationDateTime",
-        "EntraTrustType",
-        "EntraDeviceId",
-        "EntraObjectId",
-        "ADInventoryPresent",
-        "ADDomain",
-        "ADEnabled",
-        "ADDNSHostName",
-        "ADDistinguishedName",
-        "ADOperatingSystem",
-        "ADLastLogonTimestampUtc",
-        "PostCycleIntuneInventoryChecked",
-        "PostCycleIntuneInventoryPresent",
-        "PostCycleIntuneEnrollmentDetected",
-        "PostCycleIntuneInventoryCsv",
-        "PostCycleIntuneInventoryError",
-        "PostCycleEntraInventoryChecked",
-        "PostCycleEntraInventoryPresent",
-        "PostCycleEntraRegisteredState",
-        "PostCycleEntraAlternativeSecurityIdCount",
-        "PostCycleEntraPendingResolved",
-        "PostCycleEntraInventoryCsv",
-        "PostCycleEntraInventoryError",
-        "PostCycleADInventoryChecked",
-        "PostCycleADInventoryPresent",
-        "PostCycleADInventoryCsv",
-        "PostCycleADInventoryError",
-        "AdminShareReachable",
-        "AdminShareFailureType",
-        "PingReachable",
-        "DnsResolved",
-        "RemoteLogsCollected",
-        "RemoteLogsPath",
-        "RemoteCurrentRunLogsPath",
-        "LogPath"
-    )
-    $html += ConvertTo-SimpleHtmlTable -Rows $rows -Columns $detailColumns
-    $html += "<div class='footer'>Smart Intune Hybrid Join Toolkit - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div>"
-    $html += "</div>"
-    $html += "</body></html>"
-    $html -join "`r`n" | Out-File -LiteralPath $Path -Encoding UTF8 -Force
-}
+    $html = New-Object System.Collections.Generic.List[string]
+    [void]$html.Add(("<html><head><meta charset='utf-8'>{0}<title>Intune Hybrid Join repair - {1}</title></head><body>" -f $style,(ConvertTo-HtmlText $cycleLabel)))
+    [void]$html.Add("<div class='header-card'><div class='header-text'>")
+    [void]$html.Add(("<div class='title'>Intune Hybrid Join repair - {0}<span class='badge'>{1}</span></div>" -f (ConvertTo-HtmlText $cycleLabel),$mode))
+    [void]$html.Add("<div class='subtitle'>Smart Intune Hybrid Join Toolkit</div>")
+    [void]$html.Add(("<div class='lot-name' title='{1}'>LOT: {0}</div>" -f (ConvertTo-HtmlText $lotName),(ConvertTo-HtmlText $LotRoot)))
+    [void]$html.Add(("<div class='meta'>Generated: {0} | Report rows: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $LauncherVersion)))
+    [void]$html.Add(("<div class='meta'>Launcher log: {0}</div>" -f (New-HtmlLogLink -Path $script:LauncherLogPath)))
+    [void]$html.Add("</div>$logoHtml</div>")
 
+    [void]$html.Add("<div class='card'><h2>LOT/run options</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $optionRows -Columns @('Category','Option','Value')))
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Security evidence</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows @($script:PsExecSecurityEvidenceRows) -Columns @('Field','Value')))
+    [void]$html.Add("<div class='footer'>Non-dry-run PsExec execution is blocked unless the binary is Microsoft-signed and named PsExec.exe or PsExec64.exe.</div></div>")
+    [void]$html.Add("<div class='card'><h2>Cycle progress</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $CycleProgress))
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Running jobs</h2>")
+    if ($RunningJobRows.Count -gt 0) { [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $RunningJobRows)) } else { [void]$html.Add("<div class='empty'>No running jobs captured for this render.</div>") }
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Status summary</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @('Status','Count')))
+    [void]$html.Add("</div>")
+    if ($adminShareFailureCounts.Count -gt 0) {
+        [void]$html.Add("<div class='card'><h2>Admin share failure summary</h2>")
+        [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $adminShareFailureCounts -Columns @('FailureType','Count')))
+        [void]$html.Add("</div>")
+    }
+    [void]$html.Add("<div class='card'><h2>Next action summary</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $nextActionCounts -Columns @('NextAction','Count')))
+    [void]$html.Add("</div>")
+
+    $detailColumns = @('Cycle','Timestamp','Computer','ConnectionTarget','Status','EffectiveStatus','NextAction','EffectiveNextAction','RemoteStatus','RemoteExitCode','PsExecExitCode','RemoteDetail','Local log','Collected logs','Current run logs','Remote PC logs','InteractiveUserAccountName','InteractiveUserAccountType','InteractiveSessionName','InteractiveSessionState','UserIsUserAzureAD','UserAzureAdPrt','UserSessionIsNotRemote','ErrorMessage','JobErrorMessage','IntuneInventoryPresent','EntraInventoryPresent','EntraRegisteredState','EntraAlternativeSecurityIdCount','EntraPendingReason','EntraRegistrationDateTime','EntraTrustType','EntraDeviceId','EntraObjectId','ADInventoryPresent','ADDomain','ADEnabled','ADDNSHostName','ADDistinguishedName','ADOperatingSystem','ADLastLogonTimestampUtc','PostCycleIntuneInventoryChecked','PostCycleIntuneInventoryPresent','PostCycleIntuneEnrollmentDetected','PostCycleIntuneInventoryCsv','PostCycleIntuneInventoryError','PostCycleEntraInventoryChecked','PostCycleEntraInventoryPresent','PostCycleEntraRegisteredState','PostCycleEntraAlternativeSecurityIdCount','PostCycleEntraPendingResolved','PostCycleEntraInventoryCsv','PostCycleEntraInventoryError','PostCycleADInventoryChecked','PostCycleADInventoryPresent','PostCycleADInventoryCsv','PostCycleADInventoryError','AdminShareReachable','AdminShareFailureType','PingReachable','DnsResolved','RemoteLogsCollected','RemoteLogsPath','RemoteCurrentRunLogsPath','LogPath')
+    [void]$html.Add("<div class='card'><h2>Computer details</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $mainRows -Columns $detailColumns))
+    [void]$html.Add("<div class='footer'>Smart Intune Hybrid Join Toolkit - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div></div>")
+    if ($separatedRows.Count -gt 0) {
+        [void]$html.Add("<div class='card'><h2>Run guard / admin share details</h2>")
+        [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $separatedRows -Columns $detailColumns))
+        [void]$html.Add("<div class='footer'>Rows excluded from Computer details: ADMIN_SHARE_UNREACHABLE, DNS_PREFLIGHT_ALL_SAMPLES_FAILED, and RUN_GUARD_ACTIVE.</div></div>")
+    }
+    [void]$html.Add("</body></html>")
+    [System.IO.File]::WriteAllText($Path, ($html -join "`r`n"), [System.Text.UTF8Encoding]::new($false))
+}
 $scriptArgsBase = @()
 if ($AllowDsregLeave) { $scriptArgsBase += "-AllowDsregLeave" }
 if ($AllowRebootWhenNoInteractiveUser) { $scriptArgsBase += "-AllowRebootWhenNoInteractiveUser" }
@@ -2440,15 +2573,15 @@ function Get-ComputerDnsCandidates {
         [AllowNull()][string]$DomainSuffix
     )
 
-    $candidates = New-Object System.Collections.Generic.List[string]
+    $candidates = @()
     $shortName = ([string]$ComputerName).Trim()
     if (-not [string]::IsNullOrWhiteSpace($shortName)) {
-        $candidates.Add($shortName)
+        $candidates += $shortName
     }
 
     $suffix = ([string]$DomainSuffix).Trim().Trim('.')
     if ($shortName -notmatch '\.' -and -not [string]::IsNullOrWhiteSpace($suffix)) {
-        $candidates.Add(("{0}.{1}" -f $shortName,$suffix))
+        $candidates += ("{0}.{1}" -f $shortName,$suffix)
     }
 
     return @($candidates | Select-Object -Unique)
@@ -2488,16 +2621,16 @@ function Resolve-ComputerConnectionTarget {
 }
 function Test-SampleDnsResolution {
     param(
-        [Parameter(Mandatory=$true)][string[]]$ComputerNames,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$ComputerNames,
         [AllowNull()][string]$DomainSuffix,
         [int]$SampleSize = 5
     )
 
-    $allNames = @($ComputerNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $allNames = @($ComputerNames | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $sample = if ($allNames.Count -le $SampleSize) { @($allNames) } else { @($allNames | Get-Random -Count $SampleSize) }
     $resolved = 0
     $failed = 0
-    $results = New-Object System.Collections.Generic.List[object]
+    $results = @()
     foreach ($name in $sample) {
         $dnsResult = Resolve-ComputerConnectionTarget -ComputerName $name -DomainSuffix $DomainSuffix
         if ($dnsResult.Resolved) {
@@ -2506,7 +2639,7 @@ function Test-SampleDnsResolution {
         else {
             $failed++
         }
-        $results.Add($dnsResult)
+        $results += $dnsResult
     }
 
     return [PSCustomObject]@{
@@ -2525,6 +2658,12 @@ function Invoke-IntuneHybridJoinRepairCycle {
     )
 
     $computers = @(Get-ComputerList -Path $ComputerListPath)
+    $computerListStats = Get-ComputerListStats -Path $ComputerListPath
+    $script:CurrentCycleTotalComputers = $computers.Count
+    $script:CurrentCycleComputerListStats = $computerListStats
+    if ($computerListStats.DuplicateGroups -gt 0) {
+        Write-Host ("Cycle {0}: Computers.txt contains {1} duplicate line(s) in {2} duplicate group(s). Duplicates ignored: {3}" -f $CycleNumber,$computerListStats.DuplicateLines,$computerListStats.DuplicateGroups,$computerListStats.DuplicateSamples) -ForegroundColor Yellow
+    }
     if (-not $computers -or $computers.Count -eq 0) {
         Write-Host "No computers found in $ComputerListPath." -ForegroundColor Yellow
         return $null
@@ -2553,6 +2692,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 if ($preMoveResult.Moved -gt 0) {
                     Write-Host ("Cycle {0}: pre-filtered {1} already-enrolled computer(s) from DevicesIntune.csv to {2}. PsExec will be skipped for them." -f $CycleNumber,$preMoveResult.Moved,$preMoveResult.AlreadyEnrolledPath) -ForegroundColor Green
                     $computers = @(Get-ComputerList -Path $ComputerListPath)
+                    $computerListStats = Get-ComputerListStats -Path $ComputerListPath
+                    $script:CurrentCycleTotalComputers = $computers.Count
+                    $script:CurrentCycleComputerListStats = $computerListStats
                     if (-not $computers -or $computers.Count -eq 0) {
                         Write-Host ("Cycle {0}: all computers were already present in Intune inventory. Nothing left to run." -f $CycleNumber) -ForegroundColor Green
                         return $null
@@ -2570,7 +2712,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
     $liveSummaryPath = Join-Path $ReportRoot ("PsExec_IntuneHybridJoinRepair_Live_cycle{0}_{1}.csv" -f $CycleNumber,(Get-Date -Format "yyyyMMdd_HHmmss"))
     $liveHtmlPath = [System.IO.Path]::ChangeExtension($liveSummaryPath, ".html")
     Initialize-LiveCycleReport -Path $liveSummaryPath -Columns $reportColumns
-    New-CycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
+    New-CycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date) -IsLive
 
     $dnsCheck = Test-SampleDnsResolution -ComputerNames $computers -DomainSuffix $AdDomain
     if ($dnsCheck.AllFailed) {
@@ -2624,7 +2766,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             $summaryRows = @($summary | ForEach-Object { $_ })
             $summaryPath = Join-Path $ReportRoot ("PsExec_IntuneHybridJoinRepair_Summary_cycle{0}_{1}.csv" -f $CycleNumber,(Get-Date -Format "yyyyMMdd_HHmmss"))
             Get-PortableReportRows -Rows $summaryRows | Select-Object $reportColumns | Export-Csv -LiteralPath $summaryPath -NoTypeInformation -Encoding UTF8
-            New-CycleHtmlReport -Summary $summaryRows -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
+            New-CycleHtmlReport -Summary $summaryRows -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date) -IsLive
             $htmlPath = [System.IO.Path]::ChangeExtension($summaryPath, ".html")
             New-CycleHtmlReport -Summary $summaryRows -Path $htmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
             Write-Host ("Cycle {0} stopped by DNS preflight. Summary: {1}" -f $CycleNumber,$summaryPath) -ForegroundColor Red
@@ -2823,11 +2965,13 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     "PSEXEC_TIMEOUT" { return "CHECK_REMOTE_LOG_OR_RETRY" }
                     "PSEXEC_COMMUNICATION_LOST" { return "RETRY_PSEXEC_OR_CHECK_REMOTE_SERVICE" }
                     "PSEXEC_EXIT_UNKNOWN" { return "CHECK_CURRENT_RUN_REMOTE_LOG" }
+        "PSEXEC_EXIT_-1073741790" { return "CHECK_EDR_OR_EXECUTION_POLICY_BLOCK" }
                     "REMOTE_DIRECTORY_CREATE_FAILED" { return "FIX_SCRIPT_COPY_OR_ADMIN_SHARE" }
                     "REMOTE_SCRIPT_COPY_FAILED" { return "FIX_SCRIPT_COPY_OR_SECURITY" }
                     "REMOTE_SCRIPT_MISSING" { return "FIX_SCRIPT_COPY_OR_SECURITY" }
                     default {
                     if ($Status -like "ERROR*") { return "CHECK_CONNECTIVITY_OR_ADMIN_ACCESS" }
+            if ($Status -like "PSEXEC_EXIT_-1073741790*") { return "CHECK_EDR_OR_EXECUTION_POLICY_BLOCK" }
                     if ($Status -like "PSEXEC_EXIT*") { return "CHECK_CURRENT_RUN_REMOTE_LOG" }
                     return "REVIEW_LOGS"
                 }
@@ -3481,6 +3625,11 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     $result.ErrorMessage = $result.RemoteDetail
                 }
             }
+            if ($result.Status -eq "PSEXEC_EXIT_-1073741790") {
+                $accessDeniedDetail = "Remote PowerShell exited with 0xC0000022 (STATUS_ACCESS_DENIED) after PsExec started it. Check EDR, AppLocker, WDAC, PowerShell policy, or local execution permissions on the target."
+                if ([string]::IsNullOrWhiteSpace($result.RemoteDetail)) { $result.RemoteDetail = $accessDeniedDetail }
+                if ([string]::IsNullOrWhiteSpace($result.ErrorMessage)) { $result.ErrorMessage = $accessDeniedDetail }
+            }
             $derivedNextAction = Get-NextActionFromLauncherStatus -Status $result.Status
             if ((-not [string]::IsNullOrWhiteSpace($result.RemoteNextAction)) -and $result.RemoteNextAction -ne "REVIEW_LOGS") {
                 $result.NextAction = $result.RemoteNextAction
@@ -3886,7 +4035,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     if (($completed % 10) -eq 0) {
                         try {
                             $liveRows = @($summary | ForEach-Object { $_ })
-                            New-CycleHtmlReport -Summary $liveRows -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
+                            New-CycleHtmlReport -Summary $liveRows -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date) -IsLive
                         }
                         catch {
                             Write-Host ("Cycle {0}: failed to update live HTML report: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
@@ -4109,7 +4258,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
     }
 
     try {
-        New-CycleHtmlReport -Summary $summaryRowsForPostCycle -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
+        New-CycleHtmlReport -Summary $summaryRowsForPostCycle -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date) -IsLive
     }
     catch {
         Write-Host ("Cycle {0}: failed to write final live HTML report: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
