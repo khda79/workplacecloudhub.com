@@ -219,7 +219,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.66"
+$LauncherVersion = "2.10.67"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -1484,6 +1484,7 @@ function Get-LauncherReportColumns {
         "LauncherVersion",
         "Cycle",
         "Computer",
+        "ConnectionTarget",
         "Timestamp",
         "DryRun",
         "DnsResolved",
@@ -1955,6 +1956,7 @@ tr:nth-child(even) td { background: #F5F8FB; }
         "Cycle",
         "Timestamp",
         "Computer",
+        "ConnectionTarget",
         "Status",
         "EffectiveStatus",
         "NextAction",
@@ -2432,9 +2434,62 @@ function Release-GlobalWorkerLease {
     }
 }
 
+function Get-ComputerDnsCandidates {
+    param(
+        [Parameter(Mandatory=$true)][string]$ComputerName,
+        [AllowNull()][string]$DomainSuffix
+    )
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    $shortName = ([string]$ComputerName).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($shortName)) {
+        $candidates.Add($shortName)
+    }
+
+    $suffix = ([string]$DomainSuffix).Trim().Trim('.')
+    if ($shortName -notmatch '\.' -and -not [string]::IsNullOrWhiteSpace($suffix)) {
+        $candidates.Add(("{0}.{1}" -f $shortName,$suffix))
+    }
+
+    return @($candidates | Select-Object -Unique)
+}
+
+function Resolve-ComputerConnectionTarget {
+    param(
+        [Parameter(Mandatory=$true)][string]$ComputerName,
+        [AllowNull()][string]$DomainSuffix
+    )
+
+    $lastError = ""
+    $candidates = @(Get-ComputerDnsCandidates -ComputerName $ComputerName -DomainSuffix $DomainSuffix)
+    foreach ($candidate in $candidates) {
+        try {
+            $dns = [System.Net.Dns]::GetHostEntry($candidate)
+            return [PSCustomObject]@{
+                Computer = $ComputerName
+                ConnectionTarget = $candidate
+                Resolved = $true
+                AddressList = (($dns.AddressList | ForEach-Object { $_.IPAddressToString }) -join ";")
+                Error = ""
+            }
+        }
+        catch {
+            $lastError = $_.Exception.Message
+        }
+    }
+
+    return [PSCustomObject]@{
+        Computer = $ComputerName
+        ConnectionTarget = $(if ($candidates.Count -gt 0) { $candidates[-1] } else { $ComputerName })
+        Resolved = $false
+        AddressList = ""
+        Error = $lastError
+    }
+}
 function Test-SampleDnsResolution {
     param(
         [Parameter(Mandatory=$true)][string[]]$ComputerNames,
+        [AllowNull()][string]$DomainSuffix,
         [int]$SampleSize = 5
     )
 
@@ -2442,21 +2497,24 @@ function Test-SampleDnsResolution {
     $sample = if ($allNames.Count -le $SampleSize) { @($allNames) } else { @($allNames | Get-Random -Count $SampleSize) }
     $resolved = 0
     $failed = 0
+    $results = New-Object System.Collections.Generic.List[object]
     foreach ($name in $sample) {
-        try {
-            $null = [System.Net.Dns]::GetHostAddresses($name.Trim())
+        $dnsResult = Resolve-ComputerConnectionTarget -ComputerName $name -DomainSuffix $DomainSuffix
+        if ($dnsResult.Resolved) {
             $resolved++
         }
-        catch {
+        else {
             $failed++
         }
+        $results.Add($dnsResult)
     }
 
     return [PSCustomObject]@{
-        Tested   = $sample.Count
-        Resolved = $resolved
-        Failed   = $failed
+        Tested    = $sample.Count
+        Resolved  = $resolved
+        Failed    = $failed
         AllFailed = ($failed -eq $sample.Count -and $sample.Count -gt 0)
+        Samples   = @($results)
     }
 }
 
@@ -2514,7 +2572,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
     Initialize-LiveCycleReport -Path $liveSummaryPath -Columns $reportColumns
     New-CycleHtmlReport -Summary @() -Path $liveHtmlPath -CycleNumber $CycleNumber -GeneratedAt (Get-Date)
 
-    $dnsCheck = Test-SampleDnsResolution -ComputerNames $computers
+    $dnsCheck = Test-SampleDnsResolution -ComputerNames $computers -DomainSuffix $AdDomain
     if ($dnsCheck.AllFailed) {
         Write-Host ""
         Write-Host ("*** DNS WARNING: resolution failed on all {0} sampled computers. Check VPN connectivity and DNS configuration on this machine before continuing. ***" -f $dnsCheck.Tested) -ForegroundColor Red
@@ -2523,7 +2581,15 @@ function Invoke-IntuneHybridJoinRepairCycle {
         if (-not $ContinueOnDnsPreflightFailure) {
             $status = "DNS_PREFLIGHT_ALL_SAMPLES_FAILED"
             $nextAction = Get-NextActionFromLauncherStatus -Status $status
-            $detail = ("DNS resolution failed for all {0} sampled computer(s). Cycle stopped before queuing PsExec jobs. Use -ContinueOnDnsPreflightFailure only after confirming the network path is intentional." -f $dnsCheck.Tested)
+            $sampleDetails = @($dnsCheck.Samples | ForEach-Object { "{0}->{1}" -f $_.Computer,$_.ConnectionTarget }) -join "; "
+            $detail = ("DNS resolution failed for all {0} sampled computer(s). Cycle stopped before queuing PsExec jobs. DomainSuffix={1}; Samples={2}. Use -ContinueOnDnsPreflightFailure only after confirming the network path is intentional." -f $dnsCheck.Tested,$AdDomain,$sampleDetails)
+            $dnsSamplesByComputer = @{}
+            foreach ($sample in @($dnsCheck.Samples)) {
+                $sampleKey = ([string]$sample.Computer).Trim().Split('.')[0].ToUpperInvariant()
+                if (-not [string]::IsNullOrWhiteSpace($sampleKey) -and -not $dnsSamplesByComputer.ContainsKey($sampleKey)) {
+                    $dnsSamplesByComputer[$sampleKey] = $sample
+                }
+            }
 
             foreach ($computer in $computers) {
                 $row = [ordered]@{}
@@ -2533,9 +2599,18 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $row["Computer"] = $computer
                 $row["Timestamp"] = Get-Date
                 $row["DryRun"] = [bool]$DryRun
-                $row["DnsResolved"] = $false
-                $row["AdminShareReachable"] = $false
-                $row["PingReachable"] = $false
+                $computerKey = ([string]$computer).Trim().Split('.')[0].ToUpperInvariant()
+                if ($dnsSamplesByComputer.ContainsKey($computerKey)) {
+                    $sample = $dnsSamplesByComputer[$computerKey]
+                    $row["ConnectionTarget"] = $sample.ConnectionTarget
+                    $row["DnsResolved"] = [bool]$sample.Resolved
+                    $row["DnsAddressList"] = $sample.AddressList
+                }
+                else {
+                    $candidates = @(Get-ComputerDnsCandidates -ComputerName $computer -DomainSuffix $AdDomain)
+                    $row["ConnectionTarget"] = if ($candidates.Count -gt 0) { $candidates[-1] } else { $computer }
+                }
+                $row["RemoteDetail"] = "Cycle stopped by DNS preflight before ping, ADMIN$ or PsExec. Blank reachability fields mean not tested."
                 $row["Status"] = $status
                 $row["EffectiveStatus"] = $status
                 $row["NextAction"] = $nextAction
@@ -2564,6 +2639,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
     $worker = {
         param(
             [string]$Computer,
+            [string]$ConnectionTarget,
             [int]$CycleNumber,
             [string]$LocalScriptPath,
             [string]$ScriptName,
@@ -2992,9 +3068,11 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
         }
 
+        if ([string]::IsNullOrWhiteSpace($ConnectionTarget)) { $ConnectionTarget = $Computer }
+
         $runId = Get-Date -Format "yyyyMMdd_HHmmss"
         $logPath = Join-Path $LogRoot ("{0}_cycle{1}_{2}.log" -f $Computer, $CycleNumber, $runId)
-        $remoteRootShare = "\\$Computer\C$"
+        $remoteRootShare = "\\$ConnectionTarget\C$"
         $remoteAdminDir = Join-Path $remoteRootShare $RemoteRelativeDir
         $remoteAdminScript = Join-Path $remoteAdminDir $ScriptName
         $remoteDataAdminDir = Join-Path $remoteRootShare $RemoteDataRelativeDir
@@ -3011,6 +3089,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             LauncherVersion = $LauncherVersion
             Cycle = $CycleNumber
             Computer = $Computer
+            ConnectionTarget = $ConnectionTarget
             Timestamp = Get-Date
             DryRun = $DryRun
             DnsResolved = $false
@@ -3086,7 +3165,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
 
         try {
-            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting $Computer. Cycle=$CycleNumber" | Set-Content -LiteralPath $logPath -Encoding UTF8
+            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting $Computer. ConnectionTarget=$ConnectionTarget. Cycle=$CycleNumber" | Set-Content -LiteralPath $logPath -Encoding UTF8
             $inventoryKey = ($Computer.Split(".")[0]).ToUpperInvariant()
             if ($IntuneInventorySet -and $IntuneInventorySet.Count -gt 0) {
                 $result.IntuneInventoryPresent = [bool]$IntuneInventorySet.ContainsKey($inventoryKey)
@@ -3120,7 +3199,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
 
             try {
-                $dns = [System.Net.Dns]::GetHostEntry($Computer)
+                $dns = [System.Net.Dns]::GetHostEntry($ConnectionTarget)
                 $result.DnsResolved = $true
                 $result.DnsAddressList = (($dns.AddressList | ForEach-Object { $_.IPAddressToString }) -join ";")
                 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] DNS resolved: $($result.DnsAddressList)" | Add-Content -LiteralPath $logPath -Encoding UTF8
@@ -3129,7 +3208,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: DNS resolution failed: $($_.Exception.Message)" | Add-Content -LiteralPath $logPath -Encoding UTF8
             }
 
-            $result.PingReachable = Test-Connection -ComputerName $Computer -Count 1 -Quiet -ErrorAction SilentlyContinue
+            $result.PingReachable = Test-Connection -ComputerName $ConnectionTarget -Count 1 -Quiet -ErrorAction SilentlyContinue
             if (-not $result.PingReachable) {
                 "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: Ping failed. Trying administrative shares anyway." | Add-Content -LiteralPath $logPath -Encoding UTF8
             }
@@ -3151,8 +3230,8 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     Start-Sleep -Seconds $delaySeconds
                 }
 
-                $adminShare = "\\$Computer\ADMIN$"
-                $rootShare = "\\$Computer\C$"
+                $adminShare = "\\$ConnectionTarget\ADMIN$"
+                $rootShare = "\\$ConnectionTarget\C$"
                 $adminShareReachable = Test-Path -LiteralPath $adminShare -ErrorAction SilentlyContinue
                 $rootShareReachable = Test-Path -LiteralPath $rootShare -ErrorAction SilentlyContinue
                 $result.AdminShareReachable = ($adminShareReachable -and $rootShareReachable)
@@ -3295,7 +3374,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
 
             $argsList = @(
-                "\\$Computer",
+                "\\$ConnectionTarget",
                 "-accepteula",
                 "-nobanner",
                 "-s",
@@ -3593,6 +3672,8 @@ function Invoke-IntuneHybridJoinRepairCycle {
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
         while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit) {
             $computer = $computers[$nextIndex]
+            $connectionTargetInfo = Resolve-ComputerConnectionTarget -ComputerName $computer -DomainSuffix $AdDomain
+            $connectionTarget = $connectionTargetInfo.ConnectionTarget
             $nextIndex++
 
             $globalLeasePath = Acquire-GlobalWorkerLease -Computer $computer -CycleNumber $CycleNumber
@@ -3601,6 +3682,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 $cycleScriptArgsJson = ([pscustomobject]@{ Args = @($CycleScriptArgs) } | ConvertTo-Json -Compress)
                 $job = Start-Job -Name ("EHJIR_C{0}_{1}" -f $CycleNumber,$computer) -ScriptBlock $worker -ArgumentList @(
                     $computer,
+                    $connectionTarget,
                     $CycleNumber,
                     $LocalScriptPath,
                     $ScriptName,
