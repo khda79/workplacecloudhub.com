@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.8
+1.9
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.8'
+$GuiVersion = '1.9'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -372,11 +372,21 @@ function ConvertTo-CmdSetCommand {
 }
 
 
+function ConvertTo-CmdWindowTitle {
+    param([AllowNull()][string]$Value)
+
+    $title = ([string]$Value -replace '[\r\n\t]+', ' ').Trim()
+    $title = $title -replace '[&|<>^]', '-'
+    if ($title.Length -gt 240) { $title = $title.Substring(0, 240) }
+    return $title
+}
+
 function New-GuiLaunchCommandFile {
     param(
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [Parameter(Mandatory = $true)][string[]]$Commands,
         [string]$NamePrefix = 'EHJIR-GUI',
+        [string]$WindowTitle,
         [switch]$PauseWhenDone
     )
 
@@ -390,6 +400,9 @@ function New-GuiLaunchCommandFile {
     $launchLines = New-Object System.Collections.Generic.List[string]
     $launchLines.Add('@echo off')
     $launchLines.Add('setlocal')
+    if (-not [string]::IsNullOrWhiteSpace($WindowTitle)) {
+        $launchLines.Add(('title {0}' -f (ConvertTo-CmdWindowTitle -Value $WindowTitle)))
+    }
     $launchLines.Add(('cd /d {0}' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
     foreach ($command in @($Commands)) {
         if (-not [string]::IsNullOrWhiteSpace($command)) {
@@ -485,7 +498,8 @@ function Start-ToolkitLot {
     }
 
     $commands.Add(('call {0}{1}' -f (ConvertTo-CmdArgument -Value $wrapperPath), $extra))
-    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode)
+    $launchTitle = "{0} - started {1}" -f $Lot.Name,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode) -WindowTitle $launchTitle
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
 }
 
@@ -584,7 +598,8 @@ function Start-ToolkitSingleComputer {
     }
 
     $commands.Add(('pwsh.exe {0}' -f (($arguments | ForEach-Object { ConvertTo-CmdArgument -Value $_ }) -join ' ')))
-    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $context.Root -Commands @($commands) -NamePrefix ('Single-' + $context.Name) -PauseWhenDone
+    $launchTitle = "Single {0} - started {1}" -f $context.Name,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $context.Root -Commands @($commands) -NamePrefix ('Single-' + $context.Name) -WindowTitle $launchTitle -PauseWhenDone
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $context.Root
     return $context
 }
