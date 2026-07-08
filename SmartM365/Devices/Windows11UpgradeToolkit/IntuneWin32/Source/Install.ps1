@@ -4,7 +4,7 @@
 .DESCRIPTION
     Copies endpoint scripts to ProgramData, optionally copies packaged setup media or validates an existing cache, registers package detection state, and starts a SYSTEM scheduled task for asynchronous upgrade execution.
 .VERSION
-    1.0.6
+    1.0.7
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -38,6 +38,36 @@ $targetMediaRoot = Join-Path $setupCacheRoot ([string]$manifest.SetupCacheFolder
 function New-Directory {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { New-Item -ItemType Directory -Path $Path -Force | Out-Null }
+}
+
+function Protect-ToolkitPathAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$Directory
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+    if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) {
+        Write-InstallLog ("ACL hardening skipped because icacls.exe was not found. Path={0}" -f $Path) 'WARN'
+        return
+    }
+
+    $grants = if ($Directory) {
+        @('*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','*S-1-5-32-545:(OI)(CI)RX')
+    }
+    else {
+        @('*S-1-5-18:F','*S-1-5-32-544:F','*S-1-5-32-545:RX')
+    }
+
+    $output = & $icacls $Path '/inheritance:r' '/grant:r' $grants 2>&1
+    $exitCode = [int]$LASTEXITCODE
+    if ($exitCode -ne 0) {
+        Write-InstallLog ("ACL hardening failed. Path={0}; ExitCode={1}; Output={2}" -f $Path,$exitCode,(($output | Out-String).Trim())) 'WARN'
+        return
+    }
+
+    Write-InstallLog ("ACL hardening applied. Path={0}; Directory={1}" -f $Path,[bool]$Directory)
 }
 
 function Open-Registry64LocalMachine {
@@ -260,6 +290,10 @@ New-Directory -Path $DataRoot
 New-Directory -Path $intuneRoot
 New-Directory -Path $setupCacheRoot
 New-Directory -Path $logRoot
+Protect-ToolkitPathAcl -Path $DataRoot -Directory
+Protect-ToolkitPathAcl -Path $intuneRoot -Directory
+Protect-ToolkitPathAcl -Path $setupCacheRoot -Directory
+Protect-ToolkitPathAcl -Path $logRoot -Directory
 
 if ((Get-OsFamily) -eq 'Windows11') {
     Write-InstallLog 'Device is already Windows 11 during package install. Writing detection state, removing scheduled task if present, and exiting success.'
@@ -271,10 +305,14 @@ if ((Get-OsFamily) -eq 'Windows11') {
 Copy-Item -LiteralPath (Join-Path $packageRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1') -Destination (Join-Path $DataRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $packageRoot 'Run-IntuneUpgrade.ps1') -Destination (Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1') -Force
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $intuneRoot 'PackageManifest.json') -Force
+Protect-ToolkitPathAcl -Path (Join-Path $DataRoot 'SmartM365-Invoke-Windows11UpgradeRepair.ps1')
+Protect-ToolkitPathAcl -Path (Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1')
+Protect-ToolkitPathAcl -Path (Join-Path $intuneRoot 'PackageManifest.json')
 
 if ($requiresExistingSetupCache) {
     Write-InstallLog "Cache-only package mode enabled. Validating existing setup cache: $targetMediaRoot"
     [void](Test-SetupCacheReady -Path $targetMediaRoot)
+    Protect-ToolkitPathAcl -Path $targetMediaRoot -Directory
 }
 else {
     if (-not (Test-Path -LiteralPath (Join-Path $packageMediaRoot 'setup.exe') -PathType Leaf)) { throw "Packaged setup.exe not found: $packageMediaRoot" }
@@ -313,6 +351,7 @@ else {
             if ($copyExit -gt 7) { throw "Robocopy install media copy failed with exit code $copyExit. Log=$installRobocopyLog" }
             [void](Test-SetupCacheReady -Path $targetMediaRoot)
         }
+        Protect-ToolkitPathAcl -Path $targetMediaRoot -Directory
     }
     catch {
         if ($_.Exception.Message -like 'Setup cache is locked by another SmartM365 process.*') {
@@ -330,12 +369,13 @@ Set-PackageDetectionState -InstallState 'Installed'
 $runner = Join-Path $intuneRoot 'Run-IntuneUpgrade.ps1'
 $runnerLog = Join-Path $logRoot 'Run-IntuneUpgrade.log'
 $taskArgument = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -DataRoot "{1}" -TaskName "{2}"' -f $runner,$DataRoot,$TaskName
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $taskArgument
+$powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$action = New-ScheduledTaskAction -Execute $powerShellExe -Argument $taskArgument
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(2) -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration (New-TimeSpan -Days 30)
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-Write-InstallLog "Scheduled task action: powershell.exe $taskArgument"
+Write-InstallLog ("Scheduled task action: {0} {1}" -f $powerShellExe,$taskArgument)
 Write-InstallLog "Runner log expected at: $runnerLog"
 Start-ScheduledTask -TaskName $TaskName
 
