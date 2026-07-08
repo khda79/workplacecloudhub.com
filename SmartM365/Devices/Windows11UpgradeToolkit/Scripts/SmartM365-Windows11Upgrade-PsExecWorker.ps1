@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.20
+0.1.21
 #>
 
 #requires -Version 5.1
@@ -587,6 +587,54 @@ function Collect-StandardRemoteEvidence {
 
     Copy-CentralEvidenceDirectorySmallFiles -SourceRoot (Join-Path $RemoteBaseShare 'Output') -TargetRoot $TargetPath -RelativeRoot 'Output' -MaxBytes 2MB
 }
+function Get-RemoteEndpointLatestLogPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$RemoteBaseDir
+    )
+
+    $remoteBaseShare = Convert-ToAdminSharePath -ComputerName $ComputerName -LocalPath $RemoteBaseDir
+    $remoteLogsShare = Join-Path $remoteBaseShare 'Logs'
+    if (-not (Test-Path -LiteralPath $remoteLogsShare -PathType Container)) { return '' }
+
+    $latest = Get-ChildItem -LiteralPath $remoteLogsShare -Filter 'SmartM365-Invoke-Windows11UpgradeRepair_*.log' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($latest) { return [string]$latest.FullName }
+    return ''
+}
+
+function Get-RemoteEndpointSetupMonitorRecovery {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$RemoteBaseDir,
+        [AllowNull()][string]$PsExecExitCode
+    )
+
+    $latestLog = Get-RemoteEndpointLatestLogPath -ComputerName $ComputerName -RemoteBaseDir $RemoteBaseDir
+    if ([string]::IsNullOrWhiteSpace($latestLog)) { return $null }
+
+    $tail = @(Get-Content -LiteralPath $latestLog -Tail 120 -ErrorAction SilentlyContinue)
+    if ($tail.Count -eq 0) { return $null }
+
+    $tailText = ($tail -join "`n")
+    $hasFinal = ($tailText -match 'Final Status=')
+    $setupStarted = ($tailText -match 'Starting setup upgrade:|setup\.exe started\.')
+    $setupStillRunning = ($tailText -match 'setup\.exe still running\.')
+    $setupExited = ($tailText -match 'setup\.exe exited\.')
+
+    if (-not $hasFinal -and $setupStarted -and ($setupStillRunning -or -not $setupExited)) {
+        return [pscustomobject]@{
+            Status = 'SETUP_PROCESS_MONITOR_INTERRUPTED'
+            NextAction = 'CHECK_SETUP_PROCESS_OR_OS_STATUS'
+            ExitCode = '3'
+            Detail = ("PsExec exited with code {0} before the endpoint wrote Final Status, but the remote endpoint log shows setup.exe was started and was still being monitored. RemoteLog={1}" -f $PsExecExitCode,$latestLog)
+            RemoteLogPath = $latestLog
+        }
+    }
+
+    return $null
+}
 function Update-ResultFromLastRun {
     param(
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Result,
@@ -867,6 +915,16 @@ try {
     if (Test-Path -LiteralPath $remoteLastRunPath -PathType Leaf) {
         $lastRun = Get-Content -LiteralPath $remoteLastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         Update-ResultFromLastRun -Result $result -LastRun $lastRun
+    }
+    elseif ($result.LauncherStatus -like 'PSEXEC_EXIT_*' -or $result.LauncherStatus -eq 'PSEXEC_EXIT_UNKNOWN' -or $result.LauncherStatus -eq 'PSEXEC_COMMUNICATION_LOST') {
+        $setupRecovery = Get-RemoteEndpointSetupMonitorRecovery -ComputerName $Computer -RemoteBaseDir $RemoteBaseDir -PsExecExitCode ([string]$result.ExitCode)
+        if ($setupRecovery) {
+            $result.LauncherStatus = [string]$setupRecovery.Status
+            $result.RemoteNextAction = [string]$setupRecovery.NextAction
+            $result.ExitCode = [string]$setupRecovery.ExitCode
+            $result.Detail = [string]$setupRecovery.Detail
+            Add-Content -LiteralPath $logPath -Value ("[{0}] WARN Reclassified PsExec exit as {1}: {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$result.LauncherStatus,$result.Detail) -Encoding UTF8
+        }
     }
 
     $centralLogBucket = Get-CentralLogBucket -Result $result

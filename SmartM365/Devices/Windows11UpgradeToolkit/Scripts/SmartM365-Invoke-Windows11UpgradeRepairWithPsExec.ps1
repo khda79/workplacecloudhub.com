@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.41
+    0.1.44
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -29,7 +29,7 @@ param(
     [switch]$IgnoreRunGuard,
     [switch]$UseTechnicianRunGuardHistory,
     [switch]$IgnoreTechnicianRunGuardHistory,
-    [ValidateRange(0, 168)][int]$RunGuardHours = 12,
+    [ValidateRange(0, 168)][int]$RunGuardHours = 3,
     [switch]$AllowPolicyRepair,
     [switch]$AllowWUReset,
     [switch]$AllowForceUpgrade,
@@ -104,7 +104,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.41'
+$script:LauncherVersion = '0.1.44'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -361,21 +361,74 @@ function Test-TechnicianRunGuardEntryShouldBlock {
     $detail = if ($Entry.PSObject.Properties['Detail']) { [string]$Entry.Detail } else { '' }
     $jobErrorMessage = if ($Entry.PSObject.Properties['JobErrorMessage']) { [string]$Entry.JobErrorMessage } else { '' }
     $effectiveStatus = @($remoteStatus, $launcherStatus) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+    $effectiveStatusUpper = if ([string]::IsNullOrWhiteSpace($effectiveStatus)) { '' } else { ([string]$effectiveStatus).ToUpperInvariant() }
+    $combinedEvidence = @($detail, $jobErrorMessage) -join ' '
 
-    if ($effectiveStatus -in @(
+    if ([string]::IsNullOrWhiteSpace($effectiveStatusUpper)) { return $false }
+
+    if ($effectiveStatusUpper -in @(
         'ADMIN_SHARE_UNREACHABLE',
         'DRYRUN_ADMIN_SHARE_UNREACHABLE',
+        'DRYRUN_READY',
+        'READY_TO_FORCE_UPGRADE',
+        'DIRECT_SETUP_UPGRADE_READY',
+        'SETUP_UPGRADE_READY',
+        'RUN_GUARD_ACTIVE',
+        'INSUFFICIENT_DISK',
+        'INSUFFICIENT_DISK_AFTER_CLEANUP',
+        'UNSUPPORTED_OS',
+        'NOT_INTUNE_ENROLLED',
+        'WINDOWS11_COMPAT_BLOCKER',
+        'WU_POLICY_BLOCKER',
+        'SETUP_SOURCE_LANGUAGE_UNAVAILABLE',
+        'SETUP_CACHE_LOCKED',
+        'SETUP_MEDIA_COPY_TIMEOUT',
+        'SETUP_MEDIA_COPY_FAILED',
+        'SETUP_MEDIA_MANIFEST_VALIDATION_FAILED',
+        'SETUP_SUBNET_COPY_LEASE_TIMEOUT',
+        'SETUP_SOURCE_COPY_LEASE_TIMEOUT',
+        'SETUP_PROCESS_TIMEOUT',
+        'SETUP_PROCESS_MONITOR_INTERRUPTED',
+        'SETUP_MIGRATION_PROFILE_FAILURE',
+        'SETUP_MIGRATION_PROFILE_REPAIR_FAILED',
+        'SETUP_PROFILE_DUPLICATE_REPAIRED_REBOOT_REQUIRED',
+        'SETUP_MIGRATION_PLUGIN_FAILURE',
+        'DIRECT_SETUP_UPGRADE_FAILED',
+        'SETUP_UPGRADE_FAILED',
+        'ERROR',
+        'JOB_ERROR',
+        'RUNSPACE_BROKEN',
         'PSEXEC_EXIT_UNKNOWN',
         'PSEXEC_COMMUNICATION_LOST',
         'CENTRAL_LOG_COLLECTION_FAILED',
-        'REMOTE_LOG_COLLECTION_FAILED'
+        'REMOTE_LOG_COLLECTION_FAILED',
+        'REMOTE_PAYLOAD_COPY_FAILED'
     )) { return $false }
 
-    $combinedEvidence = @($detail, $jobErrorMessage) -join ' '
     if ($combinedEvidence -match 'FailureType=(DNS_FAILED|SMB_PORT_445_UNREACHABLE|PING_OK_ADMIN_SHARE_FAILED|ADMIN_SHARE_UNREACHABLE)') { return $false }
     if ($combinedEvidence -match 'Central log collection failed|Le chemin r.seau n.a pas .t. trouv.|network path was not found|Error communicating with PsExec service|Descripteur non valide') { return $false }
 
-    return $true
+    if ($effectiveStatusUpper -in @(
+        'DIRECT_SETUP_UPGRADE_STARTED',
+        'DIRECT_SETUP_UPGRADE_REBOOT_REQUIRED',
+        'DIRECT_SETUP_UPGRADE_REBOOT_SCHEDULED_NO_USER',
+        'DIRECT_SETUP_UPGRADE_REBOOT_SKIPPED_USER_CONNECTED',
+        'DIRECT_SETUP_UPGRADE_REBOOT_SKIPPED_USER_DETECTION_FAILED',
+        'SETUP_UPGRADE_STARTED',
+        'SETUP_UPGRADE_REBOOT_REQUIRED',
+        'SETUP_UPGRADE_REBOOT_SCHEDULED_NO_USER',
+        'SETUP_UPGRADE_REBOOT_SKIPPED_USER_CONNECTED',
+        'SETUP_UPGRADE_REBOOT_SKIPPED_USER_DETECTION_FAILED',
+        'PENDING_REBOOT',
+        'PENDING_REBOOT_USER_CONNECTED',
+        'PENDING_REBOOT_USER_DETECTION_FAILED',
+        'PENDING_REBOOT_SCHEDULE_FAILED',
+        'WINDOWS_UPDATE_FORCE_TRIGGERED',
+        'WU_RESET_COMPLETED'
+    )) { return $true }
+
+    if ($effectiveStatusUpper -like '*_STARTED' -or $effectiveStatusUpper -like '*_REBOOT_REQUIRED' -or $effectiveStatusUpper -like '*_REBOOT_SCHEDULED_NO_USER') { return $true }
+    return $false
 }
 function Get-ActiveTechnicianRunGuardEntry {
     param(

@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.21
+0.1.22
 #>
 param(
     [switch]$ValidateOnly
@@ -703,7 +703,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_ALLOW_SETUP_UPGRADE = '1'
     W11UT_DIRECT_SETUP_UPGRADE = '0'
     W11UT_ALLOW_REBOOT = '1'
-    W11UT_SETUP_REBOOT_WHEN_NO_USER = '0'
+    W11UT_SETUP_REBOOT_WHEN_NO_USER = '1'
     W11UT_ALLOW_SETUP_PROFILE_REPAIR = '1'
     W11UT_SKIP_VIRTUAL_MACHINES = '1'
     W11UT_ALLOW_DISK_CLEANUP = '1'
