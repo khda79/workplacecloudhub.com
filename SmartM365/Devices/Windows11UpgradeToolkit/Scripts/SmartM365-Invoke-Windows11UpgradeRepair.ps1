@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.45
+    0.1.46
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -21,7 +21,7 @@
 [CmdletBinding()]
 param(
     [switch]$IgnoreRunGuard,
-    [ValidateRange(0, 168)][int]$RunGuardHours = 12,
+    [ValidateRange(0, 168)][int]$RunGuardHours = 3,
 
     [switch]$AuditOnly,
     [switch]$AllowPolicyRepair,
@@ -75,7 +75,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.45'
+$script:ScriptVersion = '0.1.46'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
