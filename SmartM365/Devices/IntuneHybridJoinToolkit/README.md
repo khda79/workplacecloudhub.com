@@ -89,7 +89,8 @@ continues to run as SYSTEM through PsExec:
 - `SmartM365-IHJ-UserDsregStatus`
 - `SmartM365-IHJ-UserRefreshPrt`
 - `SmartM365-IHJ-UserMdmAutoEnroll`
-- `SmartM365-IHJ-RunUserAutoEnrollAtLogon` when a next-logon user auto-enrollment helper is required.
+- `SmartM365-IHJ-RunUserAutoEnrollAtLogon` when a next-logon user auto-enrollment helper is required. This task
+  stores direct `schtasks.exe /Run` actions in the scheduled task definition and removes the former local `.cmd` helper if present.
 
 Task output is written under `C:\Windows\Temp\SmartM365-IHJ-*` and copied into the run evidence when available.
 

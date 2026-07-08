@@ -359,6 +359,8 @@ Remote runtime data is written under:
 C:\ProgramData\SmartM365\Windows11UpgradeToolkit
 ```
 
+The toolkit hardens this runtime tree before executing SYSTEM-side payloads: SYSTEM and local Administrators keep Full Control, while local Users keep Read/Execute only.
+
 Operator-side output:
 
 ```text
