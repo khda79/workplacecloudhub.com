@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.27
+1.28
 
 .NOTES
-    Version: 1.27
+    Version: 1.28
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -232,7 +232,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.27"
+$ScriptVersion = "1.28"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -517,23 +517,50 @@ function ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings {
     param([AllowNull()][object[]]$Warnings)
 
     $results = @()
+    $seen = @{}
     $currentObjectPath = ''
+
     foreach ($warning in @($Warnings)) {
         if ($null -eq $warning) { continue }
         $message = [string]$warning
         if ([string]::IsNullOrWhiteSpace($message)) { continue }
 
+        $issue = ''
+        $suggestedAction = ''
+
         if ($message -match '^The object (?<Path>.+?) has been corrupted or isn''t compatible') {
             $currentObjectPath = $Matches['Path']
-            continue
+            $issue = 'ExchangeObjectInconsistentState'
+            $suggestedAction = 'Open the recipient in Exchange Management Shell and repair the validation errors reported for this object.'
+        }
+        elseif ($message -match 'There is no primary SMTP address') {
+            $issue = 'MissingPrimarySmtpAddress'
+            $suggestedAction = 'Set or repair the primary SMTP address on the recipient before migration or synchronization decisions.'
+        }
+        elseif ($message -match 'ExternalEmailAddress is mandatory on MailUser') {
+            $issue = 'MissingExternalEmailAddress'
+            $suggestedAction = 'Set a valid ExternalEmailAddress or targetAddress for the MailUser or remote mailbox.'
+        }
+        elseif ($message -match 'mail contact and mail user must have a valid external e-mail address') {
+            $issue = 'InvalidExternalEmailAddress'
+            $suggestedAction = 'Review ExternalEmailAddress or targetAddress syntax and make sure it contains a valid routable SMTP address.'
+        }
+        elseif ($message -match 'The property "DisplayName".* is invalid') {
+            $issue = 'InvalidDisplayName'
+            $suggestedAction = 'Remove invalid leading or trailing whitespace or unsupported characters from DisplayName.'
         }
 
-        if ($message -match 'ExternalEmailAddress is mandatory on MailUser') {
-            $results += [pscustomobject]@{
-                WarningType = 'MissingExternalEmailAddress'
-                ObjectPath  = $currentObjectPath
-                Message     = $message
-            }
+        if ([string]::IsNullOrWhiteSpace($issue)) { continue }
+
+        $dedupeKey = ('{0}|{1}|{2}' -f $issue, $currentObjectPath, $message)
+        if ($seen.ContainsKey($dedupeKey)) { continue }
+        $seen[$dedupeKey] = $true
+
+        $results += [pscustomobject]@{
+            Issue           = $issue
+            ObjectPath      = $currentObjectPath
+            Warning         = $message
+            SuggestedAction = $suggestedAction
         }
     }
 
@@ -569,7 +596,7 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     $dataQualityWarnings = @(ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings -Warnings $remoteWarningRecords)
     $Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings = @($dataQualityWarnings)
     if ($dataQualityWarnings.Count -gt 0) {
-        WriteLog -Message ("Exchange remote mailbox data quality warnings captured. Missing ExternalEmailAddress on MailUser: {0}" -f $dataQualityWarnings.Count) 'WARN'
+        WriteLog -Message ("Exchange remote mailbox data quality warnings captured: {0}" -f $dataQualityWarnings.Count) 'WARN'
     }
 
     $seenRemoteGuids = @{}
@@ -920,29 +947,31 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         [pscustomobject]@{ Title = 'Domain summary'; Html = $domainTableHtml }
     )
 
-    $externalEmailWarnings = @($RemoteMailboxDataQualityWarnings | Where-Object { $_.WarningType -eq 'MissingExternalEmailAddress' } | Select-Object -First 100)
-    if ($externalEmailWarnings.Count -gt 0) {
-        $warningRowsHtml = foreach ($warningRow in $externalEmailWarnings) {
+    $exchangeDataQualityWarnings = @($RemoteMailboxDataQualityWarnings | Select-Object -First 100)
+    if ($exchangeDataQualityWarnings.Count -gt 0) {
+        $warningRowsHtml = foreach ($warningRow in $exchangeDataQualityWarnings) {
             @"
 <tr>
-  <td style="width:70px;border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#92400e;font-weight:700;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.WarningType)</td>
+  <td style="width:160px;border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#92400e;font-weight:700;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.Issue)</td>
   <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#78350f;word-break:break-all;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.ObjectPath)</td>
-  <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#78350f;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.Message)</td>
+  <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#78350f;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.Warning)</td>
+  <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#78350f;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.SuggestedAction)</td>
 </tr>
 "@
         }
         $warningsTableHtml = @"
-<p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Top 100 Exchange data quality warnings captured during Get-RemoteMailbox.</p>
+<p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Top 100 Exchange object data quality warnings captured during Get-RemoteMailbox.</p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #f59e0b;font-size:12px;background:#fffbeb;">
   <tr>
-    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Type</th>
+    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Issue</th>
     <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Object path</th>
     <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Warning</th>
+    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Suggested action</th>
   </tr>
   $($warningRowsHtml -join "`r`n")
 </table>
 "@
-        $sections += [pscustomobject]@{ Title = 'Remote mailbox data quality warnings'; Html = $warningsTableHtml }
+        $sections += [pscustomobject]@{ Title = 'Exchange object data quality warnings - Top 100'; Html = $warningsTableHtml }
     }
 
     $sections += [pscustomobject]@{ Title = 'Files'; Html = $filesTableHtml }
