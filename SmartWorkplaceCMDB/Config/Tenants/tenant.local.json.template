@@ -1,0 +1,22 @@
+{
+  "Tenant": "Default",
+  "DisplayName": "Example tenant",
+  "MicrosoftGraph": {
+    "TenantId": "",
+    "ClientId": "",
+    "CertificateThumbprint": "",
+    "Scopes": [
+      "https://graph.microsoft.com/.default"
+    ]
+  },
+  "ExchangeOnline": {
+    "Enabled": true,
+    "Organization": ""
+  },
+  "Output": {
+    "DataRootPath": "",
+    "DataAllRootPath": "",
+    "LatestOutputRootPath": "",
+    "LogRootPath": ""
+  }
+}

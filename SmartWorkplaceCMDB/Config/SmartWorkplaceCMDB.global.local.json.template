@@ -1,0 +1,28 @@
+{
+  "Tenant": "Default",
+  "Output": {
+    "DataRootPath": "{{ProjectRootPath}}\\Data\\Tenants\\{{Tenant}}",
+    "DataAllRootPath": "{{DataRootPath}}\\DATA-ALL",
+    "LatestOutputRootPath": "{{DataRootPath}}\\DATA-LAST",
+    "LogRootPath": "{{DataRootPath}}\\LOG-ALL"
+  },
+  "Collection": {
+    "AuthenticationMode": "AppOnly",
+    "Cloud": "Public",
+    "IncludeEntra": true,
+    "IncludeIntune": true,
+    "IncludeLicensing": true,
+    "IncludeExchangeOnline": true,
+    "IncludeActiveDirectory": false
+  },
+  "PowerBI": {
+    "Enabled": true,
+    "OutputFolderName": "PowerBI",
+    "FirstExperience": "ExecutiveOverview"
+  },
+  "DataQuality": {
+    "FreshnessWarningHours": 48,
+    "FreshnessCriticalHours": 168,
+    "DefaultConfidenceScore": 0.5
+  }
+}
