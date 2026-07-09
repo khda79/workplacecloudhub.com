@@ -1316,8 +1316,8 @@ function New-SmartM365EmailBody {
           $messageHtml
           $actionSectionHtml
           $summarySectionHtml
-          $pathSectionHtml
           $customSectionsHtml
+          $pathSectionHtml
           $BodyHtml
           <tr>
             <td style="background:#f8fafc;border-top:1px solid #d9e2ec;padding:12px 24px;color:#64748b;font-size:12px;line-height:18px;">
