@@ -1,6 +1,6 @@
 # Intune Remediation Scripts
 
-This folder groups SmartM365 Intune remediation, detection, diagnostic, and action scripts by functional area and scenario. It belongs to `IntuneRemediation`, together with the CLI and GUI managers used to publish and manage these packages in Microsoft Intune.
+This folder groups SmartM365 Intune remediation, detection, diagnostic, and action scripts by functional area and scenario. It belongs to `IntuneRemediation`, together with the GUI manager used to publish and manage these packages in Microsoft Intune.
 
 ## Organization
 
@@ -51,6 +51,6 @@ Before publishing a package to Intune:
 - run PSScriptAnalyzer when possible;
 - confirm that remediation logic is idempotent;
 - avoid storing tenant-specific values, group IDs, hostnames, or customer data in scripts;
-- use the GUI or CLI manager to publish with delegated Graph authentication.
+- use the GUI manager to publish with delegated Graph authentication.
 
 Generated exports, downloaded cloud scripts, reports, logs, and local archives are runtime artifacts and should remain outside Git.

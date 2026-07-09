@@ -8,13 +8,12 @@ This area contains both the remediation packages themselves and the local operat
 
 - `Packages/`: detection, remediation, diagnostic, and action scripts organized by Intune scenario.
 - `GUI/`: WPF operator interface for local package review, Intune cloud comparison, PSScriptAnalyzer checks, publish/update actions, export, reset history, and cloud deletion.
-- `CLI/`: delegated interactive deployment utility for creating or updating Intune remediation packages from PowerShell.
 
 ## Authentication Model
 
-The GUI and CLI tools use delegated interactive Microsoft Graph authentication. They do not use stored credentials, client secrets, certificates, or SmartM365 app-only authentication.
+The GUI uses delegated interactive Microsoft Graph authentication. It does not use stored credentials, client secrets, certificates, or SmartM365 app-only authentication.
 
-Typical delegated scopes are documented in each tool README:
+Typical delegated scopes are documented in the GUI README:
 
 - `DeviceManagementScripts.ReadWrite.All`
 - `DeviceManagementConfiguration.Read.All`
@@ -47,4 +46,3 @@ Runtime configuration, logs, local archives, downloaded cloud exports, and execu
 
 - `Packages/README.md`: package organization and scenario map.
 - `GUI/README.md`: GUI launch, actions, authentication, configuration, and logs.
-- `CLI/README.md`: CLI deployment examples and options.
