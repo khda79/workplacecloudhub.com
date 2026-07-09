@@ -25,7 +25,7 @@
   "LocalMailboxOnlyAdPermissionCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxPermissions\\OnlyADPermission",
   "LocalMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\Mailboxes",
   "RemoteMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\RemoteMailboxes",
-  "IncludeRemoteMailboxes": false,
+  "IncludeRemoteMailboxes": true,
   "LocalMailboxReportCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxReports",
   "LocalMailboxCombinedPermissionCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxPermissions\\CombinedWithADPermission",
   "EnableWeeklyHistory": true,
