@@ -8,6 +8,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if not exist "%POWERSHELL_EXE%" (
+    where powershell.exe >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: powershell.exe not found.
+        set "EXITCODE=9009"
+        goto :END
+    )
+    set "POWERSHELL_EXE=powershell.exe"
+)
+
 rem Shared LOT launcher. LOT definitions live under %ROOT_DIR%\Lots and run data under %ROOT_DIR%\Runs.
 rem The LOT wrapper sets W11UT_LOT_DIR and optional execution switches.
 
@@ -28,7 +39,7 @@ if /I not "%LOTS_DIR:~-4%"=="Lots" (
 )
 
 if "%W11UT_RUN_DIR%"=="" (
-    for /f "delims=" %%T in ('powershell.exe -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN_STAMP=%%T"
+    for /f "delims=" %%T in ('"%POWERSHELL_EXE%" -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN_STAMP=%%T"
     set "W11UT_RUN_DIR=%ROOT_DIR%\Runs\%LOT_NAME%\!RUN_STAMP!"
 )
 for %%I in ("%W11UT_RUN_DIR%") do set "RUN_DIR=%%~fI"
@@ -260,29 +271,13 @@ if exist "%PARENT_INTUNE_CSV%" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneRootInvento
 if not "%W11UT_INTUNE_TENANT_ID%"=="" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneTenantId ""%W11UT_INTUNE_TENANT_ID%"""
 if not "%W11UT_INTUNE_INVENTORY_PAGE_SIZE%"=="" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneInventoryPageSize %W11UT_INTUNE_INVENTORY_PAGE_SIZE%"
 if /I "%W11UT_SKIP_INTUNE_INVENTORY_REFRESH%"=="1" set "INTUNE_ARGS=%INTUNE_ARGS% -SkipIntuneInventoryRefresh"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" ^
-  -ComputerListPath "%COMPUTERS%" ^
-  -LogRoot "%PSEXEC_LOGS%" ^
-  -ReportRoot "%REPORTS%" ^
-  -CentralLogRoot "%CENTRAL_LOGS%" ^
-  -LauncherLogRoot "%RUN_DIR%\Logs" ^
-  -CentralLogCollectionMode "%W11UT_CENTRAL_LOG_COLLECTION_MODE%" ^
-  %RUN_ONCE_ARG% ^
-  %IGNORE_RUN_GUARD_ARG% ^
-  %ACTION_ARGS% ^
-  %SETUP_ARGS% ^
-  %PSEXEC_ARG% ^
-  %THROTTLE_ARG% ^
-  %GLOBAL_CONCURRENCY_ARG% ^
-  %AD_ARGS% ^
-  %INTUNE_ARGS% ^
-  %TECH_RUN_GUARD_ARGS% ^
-  -DelayBetweenComputersSeconds %W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS% ^
-  -DelayBetweenCyclesMinutes %W11UT_DELAY_BETWEEN_CYCLES_MINUTES% ^
-  -PsExecTimeoutMinutes %W11UT_PSEXEC_TIMEOUT_MINUTES% ^
-  %*
+"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" -ComputerListPath "%COMPUTERS%" -LogRoot "%PSEXEC_LOGS%" -ReportRoot "%REPORTS%" -CentralLogRoot "%CENTRAL_LOGS%" -LauncherLogRoot "%RUN_DIR%\Logs" -CentralLogCollectionMode "%W11UT_CENTRAL_LOG_COLLECTION_MODE%" %RUN_ONCE_ARG% %IGNORE_RUN_GUARD_ARG% %ACTION_ARGS% %SETUP_ARGS% %PSEXEC_ARG% %THROTTLE_ARG% %GLOBAL_CONCURRENCY_ARG% %AD_ARGS% %INTUNE_ARGS% %TECH_RUN_GUARD_ARGS% -DelayBetweenComputersSeconds %W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS% -DelayBetweenCyclesMinutes %W11UT_DELAY_BETWEEN_CYCLES_MINUTES% -PsExecTimeoutMinutes %W11UT_PSEXEC_TIMEOUT_MINUTES% %*
 
 set "EXITCODE=%ERRORLEVEL%"
+if "%EXITCODE%"=="9009" (
+    echo ERROR: Command not found while launching the Windows 11 Upgrade Toolkit.
+    echo        Check powershell.exe, PsExec.exe, the LOT wrapper arguments, and any custom command line suffix.
+)
 
 :END
 echo.
