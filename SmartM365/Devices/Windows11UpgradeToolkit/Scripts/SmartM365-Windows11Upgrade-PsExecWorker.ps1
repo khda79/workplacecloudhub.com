@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.22
+0.1.23
 #>
 
 #requires -Version 5.1
@@ -123,6 +123,37 @@ function New-Directory {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         New-Item -ItemType Directory -Path $Path -Force -ErrorAction Stop | Out-Null
     }
+}
+
+function ConvertTo-SafePathSegment {
+    param([AllowNull()][string]$Value)
+
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return 'UnknownComputer' }
+    $safe = [regex]::Replace($text, '[^A-Za-z0-9._-]', '_')
+    $safe = $safe.Trim(' ','.','_','-')
+    if ([string]::IsNullOrWhiteSpace($safe)) { return 'UnknownComputer' }
+    return $safe
+}
+
+function Get-ComputerPathKey {
+    param([Parameter(Mandatory = $true)][string]$ComputerName)
+
+    $shortName = (($ComputerName -split '\.')[0]).Trim()
+    if ([string]::IsNullOrWhiteSpace($shortName)) { $shortName = $ComputerName }
+    $safeShortName = ConvertTo-SafePathSegment -Value $shortName
+
+    $normalizedFullName = $ComputerName.Trim().ToLowerInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalizedFullName)
+        $hash = (($sha256.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0,8)
+    }
+    finally {
+        $sha256.Dispose()
+    }
+
+    return ('{0}-{1}' -f $safeShortName,$hash)
 }
 
 function Test-TcpPort {
@@ -485,18 +516,20 @@ function New-CentralLogTarget {
         [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteLogCollectionFailed','Errors')][string]$Bucket
     )
 
+    $computerPathKey = Get-ComputerPathKey -ComputerName $ComputerName
+
     if ($KeepCentralLogHistory) {
-        return (Join-Path (Join-Path (Join-Path $CentralLogRoot $Bucket) $ComputerName) ("Cycle{0}_{1}" -f $Cycle,(Get-Date -Format 'yyyyMMdd-HHmmss')))
+        return (Join-Path (Join-Path (Join-Path $CentralLogRoot $Bucket) $computerPathKey) ("Cycle{0}_{1}" -f $Cycle,(Get-Date -Format 'yyyyMMdd-HHmmss')))
     }
 
     foreach ($otherBucket in $script:CentralLogBuckets) {
-        $otherLatest = Join-Path (Join-Path (Join-Path $CentralLogRoot $otherBucket) $ComputerName) 'Latest'
+        $otherLatest = Join-Path (Join-Path (Join-Path $CentralLogRoot $otherBucket) $computerPathKey) 'Latest'
         if (Test-Path -LiteralPath $otherLatest) {
             Remove-Item -LiteralPath $otherLatest -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
-    return (Join-Path (Join-Path (Join-Path $CentralLogRoot $Bucket) $ComputerName) 'Latest')
+    return (Join-Path (Join-Path (Join-Path $CentralLogRoot $Bucket) $computerPathKey) 'Latest')
 }
 
 function Publish-LauncherEvidence {
@@ -518,11 +551,15 @@ function Publish-LauncherEvidence {
     New-Directory -Path $target
 
     if (Test-Path -LiteralPath $WorkerLogPath -PathType Leaf) {
-        Copy-Item -LiteralPath $WorkerLogPath -Destination (Join-Path $target (Split-Path -Leaf $WorkerLogPath)) -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $WorkerLogPath -Destination (Join-Path $target 'Worker.log') -Force -ErrorAction SilentlyContinue
     }
     foreach ($extraLog in @($StdoutLogPath,$StderrLogPath)) {
         if (-not [string]::IsNullOrWhiteSpace($extraLog) -and (Test-Path -LiteralPath $extraLog -PathType Leaf)) {
-            Copy-Item -LiteralPath $extraLog -Destination (Join-Path $target (Split-Path -Leaf $extraLog)) -Force -ErrorAction SilentlyContinue
+            $extraName = Split-Path -Leaf $extraLog
+            if ($extraName -like '*.stdout.txt') { $extraName = 'PsExec.stdout.txt' }
+            elseif ($extraName -like '*.stderr.txt') { $extraName = 'PsExec.stderr.txt' }
+            else { $extraName = ConvertTo-SafePathSegment -Value $extraName }
+            Copy-Item -LiteralPath $extraLog -Destination (Join-Path $target $extraName) -Force -ErrorAction SilentlyContinue
         }
     }
     return $target
@@ -726,7 +763,8 @@ function Collect-RemoteEvidence {
     return $target
 }
 New-Directory -Path $LogRoot
-$logPath = Join-Path $LogRoot ("{0}_cycle{1}_{2}.log" -f $Computer,$CycleNumber,(Get-Date -Format 'yyyyMMdd-HHmmss'))
+$computerPathKey = Get-ComputerPathKey -ComputerName $Computer
+$logPath = Join-Path $LogRoot ("{0}_cycle{1}_{2}.log" -f $computerPathKey,$CycleNumber,(Get-Date -Format 'yyyyMMdd-HHmmss'))
 $stdoutPath = "$logPath.stdout.txt"
 $stderrPath = "$logPath.stderr.txt"
 
