@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.47
+    0.1.48
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -67,6 +67,7 @@ param(
     [ValidateRange(0, 86400)][int]$RebootDelaySeconds = 180,
     [ValidateRange(30, 3600)][int]$SetupProcessHeartbeatSeconds = 300,
     [ValidateRange(0, 1440)][int]$SetupProcessTimeoutMinutes = 0,
+    [ValidateRange(1, 1000)][int]$LocalFileRetentionCount = 10,
 
     [string]$DataRoot = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
 )
@@ -105,6 +106,69 @@ function Write-SmartLog {
     foreach ($line in ($Message -split "`r?`n")) {
         $entry = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Level,$line
         Add-Content -LiteralPath $script:LogPath -Value $entry -Encoding UTF8
+    }
+}
+
+function Invoke-LocalFileRetention {
+    param([ValidateRange(1, 1000)][int]$KeepLast = 10)
+
+    $sets = @(
+        [pscustomobject]@{ Name = 'EndpointLogs'; Path = $script:LogDir; Filter = 'SmartM365-Invoke-Windows11UpgradeRepair_*.log'; ProtectedPaths = @($script:LogPath) },
+        [pscustomobject]@{ Name = 'SetupUpgradeLogs'; Path = $script:SetupLogDir; Filter = '*'; ProtectedPaths = @() },
+        [pscustomobject]@{ Name = 'OutputCsv'; Path = $script:OutputDir; Filter = 'SmartM365_Windows11Upgrade_*.csv'; ProtectedPaths = @($script:CsvPath) }
+    )
+
+    foreach ($set in $sets) {
+        try {
+            if ([string]::IsNullOrWhiteSpace([string]$set.Path) -or -not (Test-Path -LiteralPath $set.Path -PathType Container)) { continue }
+
+            $protected = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($protectedPath in @($set.ProtectedPaths)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$protectedPath)) {
+                    try { [void]$protected.Add([System.IO.Path]::GetFullPath([string]$protectedPath)) } catch { }
+                }
+            }
+
+            $files = @(Get-ChildItem -LiteralPath $set.Path -Filter $set.Filter -File -ErrorAction SilentlyContinue)
+            if ($files.Count -le $KeepLast) { continue }
+
+            $protectedCount = 0
+            foreach ($file in $files) {
+                try {
+                    if ($protected.Contains([System.IO.Path]::GetFullPath($file.FullName))) { $protectedCount++ }
+                }
+                catch { }
+            }
+
+            $keepUnprotected = [Math]::Max(0, $KeepLast - $protectedCount)
+            $removeFiles = @(
+                $files |
+                    Where-Object {
+                        try { -not $protected.Contains([System.IO.Path]::GetFullPath($_.FullName)) }
+                        catch { $true }
+                    } |
+                    Sort-Object LastWriteTimeUtc, Name -Descending |
+                    Select-Object -Skip $keepUnprotected
+            )
+
+            $removed = 0
+            foreach ($file in $removeFiles) {
+                try {
+                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    $removed++
+                }
+                catch {
+                    Write-SmartLog ("Local file retention could not remove {0}: {1}" -f $file.FullName,$_.Exception.Message) 'WARN'
+                }
+            }
+
+            if ($removed -gt 0) {
+                Write-SmartLog ("Local file retention {0}: RemovedFiles={1}; KeepLast={2}; Path={3}; Filter={4}" -f $set.Name,$removed,$KeepLast,$set.Path,$set.Filter)
+            }
+        }
+        catch {
+            Write-SmartLog ("Local file retention failed for {0}: {1}" -f $set.Name,$_.Exception.Message) 'WARN'
+        }
     }
 }
 
@@ -3730,6 +3794,7 @@ finally {
     if ($status -eq 'WINDOWS11_COMPAT_BLOCKER' -and -not [string]::IsNullOrWhiteSpace($finalW11BlockingReasons) -and $finalW11BlockingReasons -ne $detail) {
         Write-SmartLog ("Final Windows11CompatibilityReasons={0}" -f $finalW11BlockingReasons)
     }
+    Invoke-LocalFileRetention -KeepLast $LocalFileRetentionCount
     Write-Output ("Status={0}; NextAction={1}; ExitCode={2}; Log={3}" -f $status,$nextAction,$exitCode,$script:LogPath)
 }
 
