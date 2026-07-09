@@ -18,6 +18,7 @@ Most tools are designed to run directly from their project folder. Local tenant 
 - `SmartCitrix/`: Citrix on-premises and Citrix Cloud inventory scripts, with separate implementation areas for each platform model.
 - `SmartThinClient/`: Windows endpoint thin-client shell tooling for controlled Citrix, Azure Virtual Desktop, or web workspace access.
 - `SmartFinOps/`: read-only FinOps reporting that consumes SmartInventory exports and produces CSV plus HTML reports.
+- `SmartWorkplaceCMDB/`: autonomous Workplace CMDB project with native collectors, normalized CMDB outputs, local reports, and Power BI-ready tables.
 
 Additional project directories will be added over time.
 
@@ -39,6 +40,7 @@ Recommended entry points:
 - Citrix inventory scripts: `SmartCitrix/README.md`
 - Windows thin-client endpoint tooling: `SmartThinClient/README.md`
 - Workplace FinOps reporting: `SmartFinOps/README.md`
+- Workplace CMDB: `SmartWorkplaceCMDB/README.md`
 
 For SmartM365 tenant-based inventory scripts, start with `SmartM365/Setup/README.md` and `SmartM365/Setup/SmartM365-AppRegistration-Permissions.md`. Device tools under `SmartM365/Devices/` are mostly local endpoint tools and do not require the SmartM365 app-only setup unless their own README explicitly says so.
 
@@ -156,6 +158,10 @@ The GUI and CLI use delegated interactive Microsoft Graph authentication. They d
 ## SmartFinOps Tools
 
 `SmartFinOps/` contains read-only FinOps reporting tools. The first scope, **SmartFinOps Workplace**, consumes SmartM365 SmartInventory `DATA-LAST` CSV exports and produces optimization CSV files plus a standalone HTML report for Microsoft 365, Intune, Entra, Active Directory, and Exchange signals.
+
+## SmartWorkplaceCMDB Tools
+
+`SmartWorkplaceCMDB/` contains an autonomous Workplace CMDB project for Microsoft workplace environments. It is designed to collect Entra ID, Intune, Microsoft 365 licensing, and Exchange Online data, normalize it into CMDB entities and relationships, generate local overview reports, and publish Power BI-ready tables for executive overview and detailed inventory reporting.
 
 ## Contact
 

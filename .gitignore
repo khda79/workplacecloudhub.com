@@ -26,6 +26,10 @@ SmartFinOps/**
 !SmartFinOps/
 !SmartFinOps/**/
 !SmartFinOps/**/.gitkeep
+SmartWorkplaceCMDB/**
+!SmartWorkplaceCMDB/
+!SmartWorkplaceCMDB/**/
+!SmartWorkplaceCMDB/**/.gitkeep
 .delete-empty/
 
 # Local documentation / agent notes
@@ -122,6 +126,14 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartFinOps/**/*.html
 !/SmartFinOps/**/*.json.template
 !/SmartFinOps/SmartFinOps.global.local.json.template
+!/SmartWorkplaceCMDB/README.md
+!/SmartWorkplaceCMDB/**/*.ps1
+!/SmartWorkplaceCMDB/**/*.psm1
+!/SmartWorkplaceCMDB/**/*.psd1
+!/SmartWorkplaceCMDB/**/*.cmd
+!/SmartWorkplaceCMDB/**/*.md
+!/SmartWorkplaceCMDB/**/*.json.template
+!/SmartWorkplaceCMDB/Schema/**/*.json
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md
@@ -200,6 +212,9 @@ Logs/
 # Reports / exports
 Exports/
 Reports/
+!SmartWorkplaceCMDB/Reports/
+!SmartWorkplaceCMDB/Reports/**/
+!SmartWorkplaceCMDB/Reports/**/*.ps1
 CSV/
 Output/
 SmartM365/Data/**
@@ -207,6 +222,7 @@ SmartAzure/Data/**
 SmartAzureVirtualDesktop/Data/**
 SmartCitrix/Data/**
 SmartFinOps/Data/**
+SmartWorkplaceCMDB/Data/**
 
 # Temporary
 Temp/
