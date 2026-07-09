@@ -22,11 +22,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.4.5
+    1.4.6
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.4.5
+    Version     : 1.4.6
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
@@ -34,6 +34,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.4.6
+      - Adds detailed readiness collector progress logs to identify long-running Exchange cmdlets.
+
     1.4.5
       - Writes LOG-ALL log/transcript, publishes DATA-LAST copies, and uploads weekly history.
       - Sends the summary mail with the shared SmartM365 template and SharePoint links.
@@ -126,7 +129,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.4.5"
+$ScriptVersion = "1.4.6"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1105,10 +1108,20 @@ function Invoke-ExchangeReadinessCollector {
         [Parameter(Mandatory)][scriptblock]$ScriptBlock
     )
 
+    $collectorStart = Get-Date
+    $rowCountBefore = if ($Rows) { $Rows.Count } else { 0 }
+    Write-Log ("Starting Exchange readiness collector: {0}" -f $CollectorName)
+
     try {
         & $ScriptBlock
+        $rowCountAfter = if ($Rows) { $Rows.Count } else { 0 }
+        $rowsAdded = $rowCountAfter - $rowCountBefore
+        $duration = (Get-Date) - $collectorStart
+        Write-Log ("Finished Exchange readiness collector: {0}. RowsAdded: {1}. Duration: {2}" -f $CollectorName, $rowsAdded, $duration)
     }
     catch {
+        $duration = (Get-Date) - $collectorStart
+        Write-Log ("Exchange readiness collector failed: {0}. Duration: {1}. Error: {2}" -f $CollectorName, $duration, $_.Exception.Message) -Level "WARN"
         Add-ExchangeReadinessRow -Rows $Rows -Category "CollectorError" -ObjectName $CollectorName -Setting "Collection" -Value "Failed" -MigrationFocus "Review this collection failure before migration readiness sign-off." -Importance "Warning" -CollectionStatus "ERROR" -ErrorMessage $_.Exception.Message
     }
 }
@@ -1209,7 +1222,12 @@ function Get-ExchangeReadinessInventory {
             @{ Name = "Autodiscover"; Cmdlet = "Get-AutodiscoverVirtualDirectory" }
         )
         foreach ($definition in $virtualDirectoryCmdlets) {
-            if (-not (Get-Command $definition.Cmdlet -ErrorAction SilentlyContinue)) { continue }
+            if (-not (Get-Command $definition.Cmdlet -ErrorAction SilentlyContinue)) {
+                Write-Log ("Skipping virtual directory collector because cmdlet is unavailable: {0}" -f $definition.Cmdlet)
+                continue
+            }
+
+            Write-Log ("Collecting virtual directories with {0}" -f $definition.Cmdlet)
             foreach ($item in @(& $definition.Cmdlet -ErrorAction Stop | Sort-Object Identity)) {
                 Add-ExchangeReadinessProperties -Rows $rows -Category ("VirtualDirectory:{0}" -f $definition.Name) -InputObject $item -ObjectName $item.Identity -Properties @("Server", "InternalUrl", "ExternalUrl", "InternalAuthenticationMethods", "ExternalAuthenticationMethods", "BasicAuthentication", "WindowsAuthentication", "OAuthAuthentication", "ClientCertAuth") -MigrationFocus "Namespace, URL and authentication inventory for Exchange SE coexistence, load balancer, certificate, and client access planning." -Importance "Review"
             }
@@ -1223,14 +1241,19 @@ function Get-ExchangeReadinessInventory {
         }
 
         foreach ($serverName in $certificateServers) {
+            Write-Log ("Collecting Exchange certificates from {0}" -f $serverName)
             try {
+                $serverCertificateCount = 0
                 foreach ($item in @(Get-ExchangeCertificate -Server $serverName -ErrorAction Stop | Sort-Object NotAfter)) {
+                    $serverCertificateCount++
                     $objectName = "{0}:{1}" -f $serverName, $item.Thumbprint
                     Add-ExchangeReadinessRow -Rows $rows -Category "ExchangeCertificate" -ObjectName $objectName -Setting "Server" -Value $serverName -MigrationFocus "Certificate coverage and expiration are critical for HTTPS, SMTP TLS, hybrid, and Exchange SE namespace readiness." -Importance "Review"
                     Add-ExchangeReadinessProperties -Rows $rows -Category "ExchangeCertificate" -InputObject $item -ObjectName $objectName -Properties @("Subject", "CertificateDomains", "Services", "NotBefore", "NotAfter", "IsSelfSigned", "Status") -MigrationFocus "Certificate coverage and expiration are critical for HTTPS, SMTP TLS, hybrid, and Exchange SE namespace readiness." -Importance "Review"
                 }
+                Write-Log ("Finished Exchange certificates from {0}. Certificates: {1}" -f $serverName, $serverCertificateCount)
             }
             catch {
+                Write-Log ("Exchange certificate collection failed for {0}: {1}" -f $serverName, $_.Exception.Message) -Level "WARN"
                 Add-ExchangeReadinessRow -Rows $rows -Category "ExchangeCertificate" -ObjectName $serverName -Setting "Collection" -Value "Failed" -MigrationFocus "Review certificate collection failure for this server before namespace, TLS, hybrid, or SE readiness sign-off." -Importance "Warning" -CollectionStatus "ERROR" -ErrorMessage $_.Exception.Message
             }
         }
