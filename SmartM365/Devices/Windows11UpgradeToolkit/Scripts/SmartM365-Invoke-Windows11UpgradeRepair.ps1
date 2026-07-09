@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.49
+    0.1.51
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -68,6 +68,7 @@ param(
     [ValidateRange(0, 365)][int]$DiskCleanupTempFileMinAgeDays = 1,
     [ValidateRange(0, 365)][int]$DiskCleanupLogRetentionDays = 14,
     [ValidateRange(0, 365)][int]$DiskCleanupUpgradeFolderMinAgeDays = 14,
+    [ValidateRange(0, 365)][int]$DiskCleanupBrowserCacheMinAgeDays = 0,
     [ValidateRange(0, 86400)][int]$RebootDelaySeconds = 180,
     [ValidateRange(30, 3600)][int]$SetupProcessHeartbeatSeconds = 300,
     [ValidateRange(0, 1440)][int]$SetupProcessTimeoutMinutes = 0,
@@ -80,7 +81,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.49'
+$script:ScriptVersion = '0.1.51'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -2336,6 +2337,27 @@ function Convert-BytesToGbText {
     return ([math]::Round(([double]$Bytes / 1GB), 2)).ToString('0.##')
 }
 
+function ConvertTo-CleanupFullPathKey {
+    param([AllowNull()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    try { return [System.IO.Path]::GetFullPath($Path).TrimEnd('\').ToUpperInvariant() } catch { return '' }
+}
+
+function Test-CleanupPathExcluded {
+    param(
+        [Parameter(Mandatory = $true)][string]$PathKey,
+        [Parameter(Mandatory = $true)][string[]]$ExcludePathKeys
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathKey)) { return $false }
+    foreach ($excludeKey in @($ExcludePathKeys)) {
+        if ([string]::IsNullOrWhiteSpace($excludeKey)) { continue }
+        if ($PathKey -eq $excludeKey -or $PathKey.StartsWith($excludeKey + '\')) { return $true }
+    }
+    return $false
+}
+
 function Remove-PathChildrenForCleanup {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -2345,27 +2367,45 @@ function Remove-PathChildrenForCleanup {
 
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return 0 }
 
-    $exclude = @{}
-    foreach ($item in @($ExcludeLiteralPaths)) {
-        if (-not [string]::IsNullOrWhiteSpace($item)) {
-            try { $exclude[[System.IO.Path]::GetFullPath($item).TrimEnd('\').ToUpperInvariant()] = $true } catch { }
+    $excludePathKeys = @(
+        foreach ($item in @($ExcludeLiteralPaths)) {
+            $key = ConvertTo-CleanupFullPathKey -Path $item
+            if (-not [string]::IsNullOrWhiteSpace($key)) { $key }
         }
-    }
+    )
 
     $removed = 0
-    foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)) {
-        $childFull = ''
-        try { $childFull = [System.IO.Path]::GetFullPath($child.FullName).TrimEnd('\').ToUpperInvariant() } catch { $childFull = '' }
-        if ($childFull -and $exclude.ContainsKey($childFull)) { continue }
-        if ($PSBoundParameters.ContainsKey('OlderThan') -and $child.LastWriteTime -gt $OlderThan) { continue }
+    $hasAgeFilter = $PSBoundParameters.ContainsKey('OlderThan')
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        $fileKey = ConvertTo-CleanupFullPathKey -Path $file.FullName
+        if (Test-CleanupPathExcluded -PathKey $fileKey -ExcludePathKeys $excludePathKeys) { continue }
+        if ($hasAgeFilter -and $file.LastWriteTime -gt $OlderThan) { continue }
         try {
-            Remove-Item -LiteralPath $child.FullName -Recurse -Force -ErrorAction Stop
+            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
             $removed++
         }
         catch {
-            Write-SmartLog ("Cleanup skipped locked item '{0}': {1}" -f $child.FullName,$_.Exception.Message) 'WARN'
+            Write-SmartLog ("Cleanup skipped locked file '{0}': {1}" -f $file.FullName,$_.Exception.Message) 'WARN'
         }
     }
+
+    foreach ($directory in @(Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue | Sort-Object FullName -Descending)) {
+        $directoryKey = ConvertTo-CleanupFullPathKey -Path $directory.FullName
+        if (Test-CleanupPathExcluded -PathKey $directoryKey -ExcludePathKeys $excludePathKeys) { continue }
+        if ($hasAgeFilter -and $directory.LastWriteTime -gt $OlderThan) { continue }
+        try {
+            $hasChildren = @(Get-ChildItem -LiteralPath $directory.FullName -Force -ErrorAction SilentlyContinue).Count -gt 0
+            if (-not $hasChildren) {
+                Remove-Item -LiteralPath $directory.FullName -Force -ErrorAction Stop
+                $removed++
+            }
+        }
+        catch {
+            Write-SmartLog ("Cleanup skipped locked directory '{0}': {1}" -f $directory.FullName,$_.Exception.Message) 'WARN'
+        }
+    }
+
     return $removed
 }
 
@@ -2430,44 +2470,293 @@ function Test-WindowsSetupOrUpgradeBusy {
     return $false
 }
 
-function Invoke-SafeDiskCleanup {
-    $beforeFree = Get-SystemDriveFreeGb
-    Write-SmartLog ("Starting safe disk cleanup. FreeDiskGB before={0}." -f $beforeFree)
-
-    $results = New-Object System.Collections.ArrayList
-    $tempCutoff = (Get-Date).AddDays(-1 * $DiskCleanupTempFileMinAgeDays)
-    $logCutoff = (Get-Date).AddDays(-1 * $DiskCleanupLogRetentionDays)
-
-    $tempPaths = New-Object System.Collections.ArrayList
-    foreach ($path in @($env:TEMP,$env:TMP,(Join-Path $env:SystemRoot 'Temp'))) {
-        if (-not [string]::IsNullOrWhiteSpace($path) -and -not @($tempPaths.ToArray()).Contains($path)) {
-            [void]$tempPaths.Add($path)
+function Stop-WindowsUpdateServicesForCleanup {
+    $stoppedServices = New-Object System.Collections.Generic.List[string]
+    foreach ($serviceName in @('wuauserv','bits','dosvc')) {
+        try {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -ne $service -and $service.Status -eq 'Running') {
+                Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+                [void]$stoppedServices.Add($serviceName)
+                Write-SmartLog ("Disk cleanup requested service stop: {0}" -f $serviceName)
+            }
+        }
+        catch {
+            Write-SmartLog ("Disk cleanup could not stop service {0}: {1}" -f $serviceName,$_.Exception.Message) 'WARN'
         }
     }
-    foreach ($path in @($tempPaths.ToArray())) {
-        [void]$results.Add((Invoke-CleanupArea -Name 'Temp' -Path $path -OlderThan $tempCutoff))
+
+    if ($stoppedServices.Count -gt 0) { Start-Sleep -Seconds 2 }
+    return @($stoppedServices.ToArray())
+}
+
+function Start-WindowsUpdateServicesAfterCleanup {
+    param([string[]]$ServiceNames = @())
+
+    foreach ($serviceName in @($ServiceNames | Select-Object -Unique)) {
+        try {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -ne $service -and $service.Status -ne 'Running') {
+                Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+                Write-SmartLog ("Disk cleanup requested service restart: {0}" -f $serviceName)
+            }
+        }
+        catch {
+            Write-SmartLog ("Disk cleanup could not restart service {0}: {1}" -f $serviceName,$_.Exception.Message) 'WARN'
+        }
     }
 
-    $deliveryOptimizationCache = Join-Path $env:SystemRoot 'ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache'
-    [void]$results.Add((Invoke-CleanupArea -Name 'DeliveryOptimizationCache' -Path $deliveryOptimizationCache -OlderThan $tempCutoff))
+    if (@($ServiceNames).Count -gt 0) { Start-Sleep -Seconds 2 }
+}
 
-    $wuDownload = Join-Path $env:SystemRoot 'SoftwareDistribution\Download'
-    if (Test-WindowsUpdateBusy) {
-        Write-SmartLog ("Disk cleanup skipped Windows Update download cache because update/setup activity appears active: {0}" -f $wuDownload) 'WARN'
-    }
-    else {
-        [void]$results.Add((Invoke-CleanupArea -Name 'WindowsUpdateDownloadCache' -Path $wuDownload -OlderThan $tempCutoff))
+function Get-UserProfileFoldersForCleanup {
+    $systemDrive = ([System.IO.Path]::GetPathRoot($env:SystemRoot)).TrimEnd('\')
+    $usersRoot = Join-Path $systemDrive 'Users'
+    if (-not (Test-Path -LiteralPath $usersRoot -PathType Container)) {
+        Write-SmartLog ("Disk cleanup skipped user profile cleanup because Users root was not found: {0}" -f $usersRoot) 'WARN'
+        return @()
     }
 
-    $currentCache = Get-CurrentSetupCachePathForCleanup
-    [void]$results.Add((Invoke-CleanupArea -Name 'OldSmartM365SetupMedia' -Path $SetupCacheRoot -ExcludeLiteralPaths @($currentCache)))
-    [void]$results.Add((Invoke-CleanupArea -Name 'OldSmartM365Logs' -Path $script:LogDir -OlderThan $logCutoff -ExcludeLiteralPaths @($script:LogPath)))
+    return @(Get-ChildItem -LiteralPath $usersRoot -Force -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('Default','Default User','Public','All Users') })
+}
+
+function Invoke-UserTempCleanup {
+    $before = Get-SystemDriveFreeGb
+    $profiles = @(Get-UserProfileFoldersForCleanup)
+    $profileCount = 0
+    foreach ($profile in $profiles) {
+        $userTemp = Join-Path $profile.FullName 'AppData\Local\Temp'
+        if (Test-Path -LiteralPath $userTemp -PathType Container) {
+            $profileCount++
+            [void](Invoke-CleanupArea -Name 'UserTemp' -Path $userTemp)
+        }
+    }
+
+    $after = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($after - $before), 2))
+    Write-SmartLog ("Disk cleanup user temp completed. ProfileTempFolders={0}; FreedGB={1}." -f $profileCount,$freed)
+}
+
+function Get-BrowserCacheDefinition {
+    param([Parameter(Mandatory = $true)][string]$Browser)
+
+    switch ($Browser) {
+        'Edge' {
+            return [pscustomobject]@{
+                ProfileRootRelativePath = 'AppData\Local\Microsoft\Edge\User Data'
+                CacheRelativePaths = @('Cache','Code Cache','GPUCache','Service Worker\CacheStorage','DawnCache','ShaderCache','GrShaderCache','Media Cache')
+            }
+        }
+        'Chrome' {
+            return [pscustomobject]@{
+                ProfileRootRelativePath = 'AppData\Local\Google\Chrome\User Data'
+                CacheRelativePaths = @('Cache','Code Cache','GPUCache','Service Worker\CacheStorage','DawnCache','ShaderCache','GrShaderCache','Media Cache')
+            }
+        }
+        'Firefox' {
+            return [pscustomobject]@{
+                ProfileRootRelativePath = 'AppData\Local\Mozilla\Firefox\Profiles'
+                CacheRelativePaths = @('cache2','startupCache','shader-cache')
+            }
+        }
+        default { return $null }
+    }
+}
+
+function Invoke-BrowserUserCacheCleanup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$Browser,
+        [Parameter(Mandatory = $true)][string]$ProcessName,
+        [Parameter(Mandatory = $true)][datetime]$OlderThan
+    )
+
+    $definition = Get-BrowserCacheDefinition -Browser $Browser
+    if ($null -eq $definition) {
+        Write-SmartLog ("Disk cleanup skipped browser cache. Label={0}; Reason=UnsupportedBrowser; Browser={1}" -f $Label,$Browser) 'WARN'
+        return
+    }
+
+    if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue) {
+        Write-SmartLog ("Disk cleanup skipped browser cache. Label={0}; Reason=ProcessActive; ProcessName={1}" -f $Label,$ProcessName) 'WARN'
+        return
+    }
+
+    $before = Get-SystemDriveFreeGb
+    $profileCount = 0
+    $browserProfileCount = 0
+    $cacheFolderCount = 0
+    foreach ($profile in @(Get-UserProfileFoldersForCleanup)) {
+        $profileCount++
+        $browserProfileRoot = Join-Path $profile.FullName $definition.ProfileRootRelativePath
+        if (-not (Test-Path -LiteralPath $browserProfileRoot -PathType Container)) { continue }
+
+        foreach ($browserProfile in @(Get-ChildItem -LiteralPath $browserProfileRoot -Force -Directory -ErrorAction SilentlyContinue)) {
+            $browserProfileHasCache = $false
+            foreach ($relativePath in @($definition.CacheRelativePaths)) {
+                $cachePath = Join-Path $browserProfile.FullName $relativePath
+                if (-not (Test-Path -LiteralPath $cachePath -PathType Container)) { continue }
+                $cacheFolderCount++
+                $browserProfileHasCache = $true
+                [void](Invoke-CleanupArea -Name $Label -Path $cachePath -OlderThan $OlderThan)
+            }
+            if ($browserProfileHasCache) { $browserProfileCount++ }
+        }
+    }
+
+    $after = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($after - $before), 2))
+    Write-SmartLog ("Disk cleanup browser cache completed. Label={0}; Browser={1}; UserProfilesScanned={2}; BrowserProfilesWithCache={3}; CacheFolders={4}; FreedGB={5}." -f $Label,$Browser,$profileCount,$browserProfileCount,$cacheFolderCount,$freed)
+}
+
+function Invoke-RecycleBinCleanup {
+    $before = Get-SystemDriveFreeGb
+    try {
+        Clear-RecycleBin -Force -ErrorAction SilentlyContinue | Out-Null
+        $after = Get-SystemDriveFreeGb
+        $freed = [math]::Max(0, [math]::Round(($after - $before), 2))
+        Write-SmartLog ("Disk cleanup recycle bin completed. FreedGB={0}." -f $freed)
+    }
+    catch {
+        Write-SmartLog ("Disk cleanup skipped recycle bin: {0}" -f $_.Exception.Message) 'WARN'
+    }
+}
+
+function Invoke-SmartM365RuntimeCleanup {
+    param([Parameter(Mandatory = $true)][datetime]$OlderThan)
+
+    $runtimeRoot = Join-Path $env:ProgramData 'SmartM365\IntuneRemediation'
+    foreach ($target in @(
+        [pscustomobject]@{ Name = 'SmartM365RuntimeLogs'; Path = (Join-Path $runtimeRoot 'Logs') },
+        [pscustomobject]@{ Name = 'SmartM365RuntimeTemp'; Path = (Join-Path $runtimeRoot 'Temp') },
+        [pscustomobject]@{ Name = 'SmartM365RuntimeCache'; Path = (Join-Path $runtimeRoot 'Cache') }
+    )) {
+        [void](Invoke-CleanupArea -Name $target.Name -Path $target.Path -OlderThan $OlderThan)
+    }
+}
+
+function Get-ModerateCustomCleanupDirectoryList {
+    return @(
+        [pscustomobject]@{ Label = 'BMCClientPatchDownload'; Path = 'C:\Program Files\BMC Software\Client Management\Client\data\FileStore\downstream\PatchDownload'; MinimumAgeDays = 0; DeleteRoot = $false }
+    )
+}
+
+function Invoke-ModerateCustomCleanupDirectoryList {
+    foreach ($target in @(Get-ModerateCustomCleanupDirectoryList)) {
+        if ($null -eq $target -or [string]::IsNullOrWhiteSpace([string]$target.Path)) { continue }
+        $label = if ([string]::IsNullOrWhiteSpace([string]$target.Label)) { 'CustomDirectory' } else { [string]$target.Label }
+        $minimumAgeDays = 0
+        if ($target.PSObject.Properties['MinimumAgeDays']) { $minimumAgeDays = [int]$target.MinimumAgeDays }
+        $cutoff = (Get-Date).AddDays(-1 * [math]::Abs($minimumAgeDays))
+
+        if ($target.PSObject.Properties['DeleteRoot'] -and [bool]$target.DeleteRoot) {
+            try {
+                if (-not (Test-Path -LiteralPath ([string]$target.Path) -PathType Container)) {
+                    Write-SmartLog ("Disk cleanup custom directory skipped, path missing: {0} ({1})" -f $label,$target.Path)
+                    continue
+                }
+                $item = Get-Item -LiteralPath ([string]$target.Path) -Force -ErrorAction Stop
+                if ($item.LastWriteTime -gt $cutoff) {
+                    Write-SmartLog ("Disk cleanup custom directory skipped, root too recent: {0}; LastWrite={1}; MinimumAgeDays={2}" -f $target.Path,$item.LastWriteTime,$minimumAgeDays) 'WARN'
+                    continue
+                }
+                $beforeBytes = Get-PathSizeBytes -Path ([string]$target.Path)
+                Remove-Item -LiteralPath ([string]$target.Path) -Recurse -Force -ErrorAction Stop
+                Write-SmartLog ("Disk cleanup custom directory root removed. Label={0}; Path={1}; FreedGBApprox={2}" -f $label,$target.Path,(Convert-BytesToGbText -Bytes $beforeBytes))
+            }
+            catch {
+                Write-SmartLog ("Disk cleanup custom directory root removal failed. Label={0}; Path={1}; Error={2}" -f $label,$target.Path,$_.Exception.Message) 'WARN'
+            }
+        }
+        else {
+            [void](Invoke-CleanupArea -Name $label -Path ([string]$target.Path) -OlderThan $cutoff)
+        }
+    }
+}
+
+function Invoke-ModerateDiskCleanupStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][scriptblock]$Action
+    )
+
+    try {
+        if ((Get-SystemDriveFreeGb) -ge $MinimumFreeDiskGB) {
+            Write-SmartLog ("Disk cleanup step skipped because target free space is already reached. Step={0}; FreeDiskGB={1}; RequiredGB={2}." -f $Name,(Get-SystemDriveFreeGb),$MinimumFreeDiskGB)
+            return
+        }
+        Write-SmartLog ("Disk cleanup step started. Step={0}." -f $Name)
+        & $Action
+        Write-SmartLog ("Disk cleanup step finished. Step={0}; FreeDiskGB={1}." -f $Name,(Get-SystemDriveFreeGb))
+    }
+    catch {
+        Write-SmartLog ("Disk cleanup step failed. Step={0}; Error={1}" -f $Name,$_.Exception.Message) 'WARN'
+    }
+}
+
+function Invoke-SafeDiskCleanup {
+    $beforeFree = Get-SystemDriveFreeGb
+    Write-SmartLog ("Starting moderate disk cleanup. FreeDiskGB before={0}; RequiredGB={1}." -f $beforeFree,$MinimumFreeDiskGB)
+
+    $tempCutoff = (Get-Date).AddDays(-1 * $DiskCleanupTempFileMinAgeDays)
+    $logCutoff = (Get-Date).AddDays(-1 * $DiskCleanupLogRetentionDays)
+    $browserCutoff = (Get-Date).AddDays(-1 * $DiskCleanupBrowserCacheMinAgeDays)
+
+    Invoke-ModerateDiskCleanupStep -Name 'WindowsTemp' -Action {
+        $tempPaths = New-Object System.Collections.ArrayList
+        foreach ($path in @($env:TEMP,$env:TMP,(Join-Path $env:SystemRoot 'Temp'))) {
+            if (-not [string]::IsNullOrWhiteSpace($path) -and -not @($tempPaths.ToArray()).Contains($path)) {
+                [void]$tempPaths.Add($path)
+            }
+        }
+        foreach ($path in @($tempPaths.ToArray())) {
+            [void](Invoke-CleanupArea -Name 'Temp' -Path $path -OlderThan $tempCutoff)
+        }
+    }
+
+    Invoke-ModerateDiskCleanupStep -Name 'WindowsUpdateAndDeliveryOptimizationCaches' -Action {
+        $deliveryOptimizationCache = Join-Path $env:SystemRoot 'ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache'
+        $wuDownload = Join-Path $env:SystemRoot 'SoftwareDistribution\Download'
+        if (Test-WindowsUpdateBusy) {
+            Write-SmartLog ("Disk cleanup skipped Windows Update and Delivery Optimization caches because update/setup activity appears active: WU={0}; DO={1}" -f $wuDownload,$deliveryOptimizationCache) 'WARN'
+        }
+        else {
+            $stoppedServices = @(Stop-WindowsUpdateServicesForCleanup)
+            try {
+                [void](Invoke-CleanupArea -Name 'DeliveryOptimizationCache' -Path $deliveryOptimizationCache -OlderThan $tempCutoff)
+                [void](Invoke-CleanupArea -Name 'WindowsUpdateDownloadCache' -Path $wuDownload -OlderThan $tempCutoff)
+            }
+            finally {
+                Start-WindowsUpdateServicesAfterCleanup -ServiceNames $stoppedServices
+            }
+        }
+    }
+
+    Invoke-ModerateDiskCleanupStep -Name 'UserTemp' -Action { Invoke-UserTempCleanup }
+    Invoke-ModerateDiskCleanupStep -Name 'EdgeUserCache' -Action { Invoke-BrowserUserCacheCleanup -Label 'EdgeUserCache' -Browser 'Edge' -ProcessName 'msedge' -OlderThan $browserCutoff }
+    Invoke-ModerateDiskCleanupStep -Name 'ChromeUserCache' -Action { Invoke-BrowserUserCacheCleanup -Label 'ChromeUserCache' -Browser 'Chrome' -ProcessName 'chrome' -OlderThan $browserCutoff }
+    Invoke-ModerateDiskCleanupStep -Name 'FirefoxUserCache' -Action { Invoke-BrowserUserCacheCleanup -Label 'FirefoxUserCache' -Browser 'Firefox' -ProcessName 'firefox' -OlderThan $browserCutoff }
+    Invoke-ModerateDiskCleanupStep -Name 'RecycleBin' -Action { Invoke-RecycleBinCleanup }
+
+    Invoke-ModerateDiskCleanupStep -Name 'OldWindowsUpgradeFolders' -Action { [void](Invoke-OldUpgradeFolderCleanup) }
+
+    Invoke-ModerateDiskCleanupStep -Name 'SmartM365RuntimeOldContent' -Action { Invoke-SmartM365RuntimeCleanup -OlderThan $logCutoff }
+    Invoke-ModerateDiskCleanupStep -Name 'CustomCleanupDirectories' -Action { Invoke-ModerateCustomCleanupDirectoryList }
+
+    Invoke-ModerateDiskCleanupStep -Name 'Windows11UpgradeToolkitOldContent' -Action {
+        $currentCache = Get-CurrentSetupCachePathForCleanup
+        [void](Invoke-CleanupArea -Name 'OldSmartM365SetupMedia' -Path $SetupCacheRoot -ExcludeLiteralPaths @($currentCache))
+        [void](Invoke-CleanupArea -Name 'OldSmartM365Logs' -Path $script:LogDir -OlderThan $logCutoff -ExcludeLiteralPaths @($script:LogPath))
+        [void](Invoke-CleanupArea -Name 'OldSmartM365Output' -Path $script:OutputDir -OlderThan $logCutoff -ExcludeLiteralPaths @($script:CsvPath))
+    }
+
+    Invoke-ModerateDiskCleanupStep -Name 'DismComponentCleanup' -Action { [void](Invoke-DismComponentCleanup) }
 
     $afterFree = Get-SystemDriveFreeGb
     $freed = [math]::Max(0, [math]::Round(($afterFree - $beforeFree), 2))
-    $script:DiskCleanupAction = ("SafeCleanup; BeforeGB={0}; AfterGB={1}; FreedGB={2}" -f $beforeFree,$afterFree,$freed)
+    $script:DiskCleanupAction = ("ModerateCleanup; BeforeGB={0}; AfterGB={1}; FreedGB={2}; BrowserCacheMinAgeDays={3}" -f $beforeFree,$afterFree,$freed,$DiskCleanupBrowserCacheMinAgeDays)
     $script:DiskCleanupFreedGB = $freed
-    Write-SmartLog ("Safe disk cleanup completed. FreeDiskGB after={0}; FreedGB={1}." -f $afterFree,$freed)
+    Write-SmartLog ("Moderate disk cleanup completed. FreeDiskGB after={0}; FreedGB={1}." -f $afterFree,$freed)
     return $afterFree
 }
 
@@ -3055,6 +3344,7 @@ function New-RetryAfterRebootArgumentList {
         DiskCleanupTempFileMinAgeDays = $DiskCleanupTempFileMinAgeDays
         DiskCleanupLogRetentionDays = $DiskCleanupLogRetentionDays
         DiskCleanupUpgradeFolderMinAgeDays = $DiskCleanupUpgradeFolderMinAgeDays
+        DiskCleanupBrowserCacheMinAgeDays = $DiskCleanupBrowserCacheMinAgeDays
         RebootDelaySeconds = $RebootDelaySeconds
         SetupProcessHeartbeatSeconds = $SetupProcessHeartbeatSeconds
         SetupProcessTimeoutMinutes = $SetupProcessTimeoutMinutes
@@ -3713,7 +4003,7 @@ try {
             $freeGb = Get-SystemDriveFreeGb
         }
 
-        if ($freeGb -lt $MinimumFreeDiskGB -and ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup)) {
+        if ($freeGb -lt $MinimumFreeDiskGB -and ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) -and [string]::IsNullOrWhiteSpace($script:AdvancedDiskCleanupAction)) {
             try {
                 $freeGb = Invoke-OldUpgradeFolderCleanup
             }
@@ -3724,7 +4014,7 @@ try {
             }
         }
 
-        if ($freeGb -lt $MinimumFreeDiskGB -and ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup)) {
+        if ($freeGb -lt $MinimumFreeDiskGB -and ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) -and [string]::IsNullOrWhiteSpace($script:DismCleanupAction)) {
             try {
                 $freeGb = Invoke-DismComponentCleanup
             }
