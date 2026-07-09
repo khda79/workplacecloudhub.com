@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.28
+1.29
 
 .NOTES
-    Version: 1.28
+    Version: 1.29
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -232,7 +232,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.28"
+$ScriptVersion = "1.29"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -950,23 +950,31 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
     $exchangeDataQualityWarnings = @($RemoteMailboxDataQualityWarnings | Select-Object -First 100)
     if ($exchangeDataQualityWarnings.Count -gt 0) {
         $warningRowsHtml = foreach ($warningRow in $exchangeDataQualityWarnings) {
+            $issueLabel = switch ([string]$warningRow.Issue) {
+                'ExchangeObjectInconsistentState' { 'Inconsistent state'; break }
+                'MissingPrimarySmtpAddress' { 'Missing primary SMTP'; break }
+                'MissingExternalEmailAddress' { 'Missing external address'; break }
+                'InvalidExternalEmailAddress' { 'Invalid external address'; break }
+                'InvalidDisplayName' { 'Invalid display name'; break }
+                default { [string]$warningRow.Issue }
+            }
             @"
 <tr>
-  <td style="width:160px;border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#92400e;font-weight:700;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.Issue)</td>
-  <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#78350f;word-break:break-all;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.ObjectPath)</td>
-  <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#78350f;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.Warning)</td>
-  <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#78350f;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.SuggestedAction)</td>
+  <td valign="top" style="width:165px;border-bottom:1px solid #fde68a;padding:10px 12px;font-size:12px;color:#92400e;font-weight:700;line-height:1.35;">$(ConvertTo-SmartM365EmailHtmlText $issueLabel)</td>
+  <td valign="top" style="border-bottom:1px solid #fde68a;padding:10px 12px;font-size:12px;color:#78350f;line-height:1.4;">
+    <div style="font-weight:700;margin:0 0 6px 0;color:#78350f;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.Warning)</div>
+    <div style="margin:0 0 6px 0;font-family:Consolas,'Courier New',monospace;font-size:11px;color:#92400e;word-break:break-word;overflow-wrap:anywhere;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.ObjectPath)</div>
+    <div style="margin:0;color:#92400e;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.SuggestedAction)</div>
+  </td>
 </tr>
 "@
         }
         $warningsTableHtml = @"
 <p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Top 100 Exchange object data quality warnings captured during Get-RemoteMailbox.</p>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #f59e0b;font-size:12px;background:#fffbeb;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #f59e0b;font-size:12px;background:#fffbeb;table-layout:fixed;">
   <tr>
-    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Issue</th>
-    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Object path</th>
-    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Warning</th>
-    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Suggested action</th>
+    <th align="left" style="width:165px;background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px 12px;color:#92400e;text-transform:uppercase;">Issue</th>
+    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px 12px;color:#92400e;text-transform:uppercase;">Details</th>
   </tr>
   $($warningRowsHtml -join "`r`n")
 </table>
