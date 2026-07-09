@@ -252,10 +252,27 @@ function Save-SmartM365WeeklyInventoryHistory {
     }
 }
 
+function Add-SmartM365WeeklyHistory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$SourceCsvPaths,
+        [string]$HistoryRootPath,
+        [int]$RetentionWeeks = 52,
+        [string]$HistoryLabel = 'SmartM365 inventory'
+    )
+    if ([string]::IsNullOrWhiteSpace($HistoryRootPath)) {
+        $firstSource = @($SourceCsvPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) | Select-Object -First 1
+        if ($firstSource) {
+            $sourceFolder = Split-Path -Path $firstSource -Parent
+            if (-not [string]::IsNullOrWhiteSpace($sourceFolder)) { $HistoryRootPath = Join-Path -Path $sourceFolder -ChildPath 'WeeklyHistory' }
+        }
+    }
+    Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceCsvPaths -HistoryRootPath $HistoryRootPath -RetentionWeeks $RetentionWeeks -HistoryLabel $HistoryLabel
+}
 function Invoke-SmartM365WeeklyInventoryHistoryForCsv {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string[]]$SourceFiles, [string]$TimestampedPath)
-    $enabled = [bool](Get-SmartM365WeeklyHistoryConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $false)
+    $enabled = [bool](Get-SmartM365WeeklyHistoryConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $true)
     if (-not $enabled) { return }
     $historyRootPath = Get-SmartM365WeeklyHistoryConfigValue -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
     if ([string]::IsNullOrWhiteSpace($historyRootPath) -and -not [string]::IsNullOrWhiteSpace($TimestampedPath)) {
@@ -2860,6 +2877,6 @@ Export-ModuleMember -Function `
     ConvertToRecipientArray, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
     TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, Invoke-SmartM365SharePointCsvUpload, `
-    ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, `
+    ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession

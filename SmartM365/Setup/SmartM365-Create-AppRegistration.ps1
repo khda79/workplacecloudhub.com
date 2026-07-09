@@ -99,8 +99,9 @@
 
 .EXAMPLE
     .\Setup\SmartM365-Create-AppRegistration.ps1 -RemoveAppRegistration -Confirm
+.VERSION
+1.0
 #>
-
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$Tenant = 'test',
@@ -518,6 +519,7 @@ function Get-SmartM365RequiredApiResource {
 
     $graphPermissions = @(
         'AuditLog.Read.All',
+        'BackupRestore-Configuration.Read.All',
         'Directory.Read.All',
         'User.Read.All',
         'Device.Read.All',
@@ -2173,4 +2175,3 @@ finally {
     Close-SmartM365ExchangeOnlineSetupSession
     Close-SmartM365SetupLogging
 }
-
