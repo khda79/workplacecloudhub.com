@@ -228,12 +228,58 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
 $WeeklyHistoryRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
+function Ensure-SmartM365ExchangeScriptScope {
+    [CmdletBinding()]
+    param(
+        [string[]]$RequiredCommands = @("Get-Mailbox", "Set-ADServerSettings"),
+        [switch]$ViewEntireForest
+    )
+
+    $snapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn"
+
+    if (-not (Get-PSSnapin $snapinName -Registered -ErrorAction SilentlyContinue)) {
+        WriteLog -Message "Exchange Management PSSnapin '$snapinName' is not registered on this server." "ERROR"
+        return $false
+    }
+
+    if (-not (Get-Command -Name Get-Mailbox -ErrorAction SilentlyContinue)) {
+        try {
+            if (-not (Get-PSSnapin $snapinName -ErrorAction SilentlyContinue)) {
+                Add-PSSnapin $snapinName -ErrorAction Stop
+                WriteLog -Message "Exchange snap-in loaded in script scope."
+            }
+        }
+        catch {
+            WriteLog -Message ("Failed to load Exchange snap-in in script scope: {0}" -f $_.Exception.Message) "ERROR"
+            return $false
+        }
+    }
+
+    $missingCommands = @($RequiredCommands | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique | Where-Object { -not (Get-Command -Name $_ -ErrorAction SilentlyContinue) })
+    if ($missingCommands.Count -gt 0) {
+        WriteLog -Message ("Exchange cmdlet(s) not available in script scope: {0}" -f ($missingCommands -join ', ')) "ERROR"
+        return $false
+    }
+
+    if ($ViewEntireForest) {
+        try {
+            Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
+            WriteLog -Message "Set-ADServerSettings -ViewEntireForest True applied successfully."
+        }
+        catch {
+            WriteLog -Message ("Failed to apply Set-ADServerSettings -ViewEntireForest True: {0}" -f $_.Exception.Message) "ERROR"
+            return $false
+        }
+    }
+
+    return $true
+}
 $LimitResultSize = $null
 if ($LimitResultSize) {
     $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion (LimitResultSize : $LimitResultSize)..."
@@ -730,7 +776,7 @@ if ($DryRun) {
         }
 
         if (-not $ReportOnly) {
-            if (-not (EnsureExchangePSSnapinLoaded -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings") -ViewEntireForest)) {
+            if (-not (Ensure-SmartM365ExchangeScriptScope -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings") -ViewEntireForest)) {
                 throw 'Exchange Management Tools were not detected or the Exchange snap-in could not be loaded.'
             }
 
@@ -770,7 +816,7 @@ if ($ReportOnly) {
     return
 }
 
-if (-not (EnsureExchangePSSnapinLoaded -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings") -ViewEntireForest)) {
+if (-not (Ensure-SmartM365ExchangeScriptScope -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings") -ViewEntireForest)) {
     Write-Error "Exchange environment not ready. Exiting script."
     $errorMessage = "Exchange environment not ready. Exiting script."
     $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
