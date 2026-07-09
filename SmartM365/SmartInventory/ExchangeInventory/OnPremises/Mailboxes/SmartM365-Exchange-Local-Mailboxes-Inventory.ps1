@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.25
+1.26
 
 .NOTES
-    Version: 1.25
+    Version: 1.26
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -232,7 +232,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.25"
+$ScriptVersion = "1.26"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -242,9 +242,28 @@ $RemoteMailboxOutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig
 $configuredIncludeRemoteMailboxes = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludeRemoteMailboxes' -DefaultValue $true)
 if (-not $PSBoundParameters.ContainsKey('IncludeRemoteMailboxes')) { $IncludeRemoteMailboxes = $configuredIncludeRemoteMailboxes }
 if ($RemoteMailboxesOnly) { $IncludeRemoteMailboxes = $true }
-if ([string]::IsNullOrWhiteSpace($RemoteMailboxOutputPath) -and -not [string]::IsNullOrWhiteSpace($OutputPath)) {
-    $RemoteMailboxOutputPath = Join-Path -Path (Split-Path -Path $OutputPath -Parent) -ChildPath 'RemoteMailboxes'
+function Resolve-SmartM365RemoteMailboxOutputPath {
+    [CmdletBinding()]
+    param(
+        [string]$ConfiguredPath,
+        [string]$LocalMailboxOutputPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LocalMailboxOutputPath)) { return $ConfiguredPath }
+
+    $defaultRemotePath = Join-Path -Path (Split-Path -Path $LocalMailboxOutputPath -Parent) -ChildPath 'RemoteMailboxes'
+    if ([string]::IsNullOrWhiteSpace($ConfiguredPath)) { return $defaultRemotePath }
+
+    $normalizedConfiguredPath = $ConfiguredPath.TrimEnd('\')
+    if ($normalizedConfiguredPath -match '\\Exchange\\EXO\\Mailboxes$') {
+        $legacyRemotePathMessage = ("RemoteMailboxCsvLogFolderPath used legacy EXO path; using on-prem remote mailbox path instead: {0}" -f $defaultRemotePath)
+        if (Get-Command WriteLog -ErrorAction SilentlyContinue) { WriteLog -Message $legacyRemotePathMessage 'WARN' } else { Write-Warning $legacyRemotePathMessage }
+        return $defaultRemotePath
+    }
+
+    return $ConfiguredPath
 }
+$RemoteMailboxOutputPath = Resolve-SmartM365RemoteMailboxOutputPath -ConfiguredPath $RemoteMailboxOutputPath -LocalMailboxOutputPath $OutputPath
 function Ensure-SmartM365ExchangeScriptScope {
     [CmdletBinding()]
     param(
@@ -573,6 +592,7 @@ $script:MailSmtpPort = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $script:MailSendMailMode = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SendMailMode' -DefaultValue ''
 $script:MailFrom = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue ''
 $script:MailTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue ''
+$script:MailErrorTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ErrorMailTo' -DefaultValue ''
 $script:MailCc = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Cc' -DefaultValue ''
 
 function Send-SmartM365OptionalEmailHtmlReport {
@@ -585,21 +605,25 @@ function Send-SmartM365OptionalEmailHtmlReport {
         [string[]]$Attachments
     )
 
+    $recipient = if (-not [string]::IsNullOrWhiteSpace($script:MailTo)) { $script:MailTo } elseif (-not [string]::IsNullOrWhiteSpace($script:MailErrorTo)) { $script:MailErrorTo } else { '' }
+    if ([string]::IsNullOrWhiteSpace($script:MailFrom)) { throw 'Email notification requires From in configuration.' }
+    if ([string]::IsNullOrWhiteSpace($recipient)) { throw 'Email notification requires To or ErrorMailTo in configuration.' }
+
     try {
-        $mailParams = @{ BodyHtml = $BodyHtml }
+        $mailParams = @{ BodyHtml = $BodyHtml; From = $script:MailFrom; To = $recipient }
         if (-not [string]::IsNullOrWhiteSpace($script:MailSmtpServer)) { $mailParams['SmtpServer'] = $script:MailSmtpServer }
         if ($script:MailSmtpPort -gt 0) { $mailParams['SmtpPort'] = $script:MailSmtpPort }
         if (-not [string]::IsNullOrWhiteSpace($script:MailSendMailMode)) { $mailParams['SendMailMode'] = $script:MailSendMailMode }
-        if (-not [string]::IsNullOrWhiteSpace($script:MailFrom)) { $mailParams['From'] = $script:MailFrom }
-        if (-not [string]::IsNullOrWhiteSpace($script:MailTo)) { $mailParams['To'] = $script:MailTo }
         if (-not [string]::IsNullOrWhiteSpace($script:MailCc)) { $mailParams['Cc'] = $script:MailCc }
         if ($Attachments -and $Attachments.Count -gt 0) { $mailParams['Attachments'] = $Attachments }
         SendEmailHtmlReport @mailParams
+        WriteLog -Message ("Email notification sent. From: {0}; To: {1}" -f $script:MailFrom, $recipient)
     }
     catch {
-        $message = "Email notification skipped or failed: $($_.Exception.Message)"
-        if (Get-Command WriteLog -ErrorAction SilentlyContinue) { WriteLog -Message $message 'WARN' }
-        else { Write-Warning $message }
+        $message = "Email notification failed: $($_.Exception.Message)"
+        if (Get-Command WriteLog -ErrorAction SilentlyContinue) { WriteLog -Message $message 'ERROR' }
+        else { Write-Error $message }
+        throw
     }
 }
 
@@ -878,7 +902,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $reportOutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxReportCsvLogFolderPath' -DefaultValue (Join-Path -Path $OutputPath -ChildPath 'Reports')
     if (-not (Test-Path -LiteralPath $reportOutputPath)) { New-Item -ItemType Directory -Path $reportOutputPath -Force | Out-Null }
     $localMailboxFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
-    $remoteMailboxFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RemoteMailboxCsvLogFolderPath' -DefaultValue ''
+    $remoteMailboxFolder = $RemoteMailboxOutputPath
     $latestCsvFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
     $localCsv = Join-Path -Path $localMailboxFolder -ChildPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
     $latestLocalCsv = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv' } else { $null }
@@ -887,6 +911,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $dailyCsv = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats.csv'
     $summaryCsv = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats_Summary.csv'
     $latestDailyCsv = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats.csv' } else { $null }
+    $latestSummaryCsv = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats_Summary.csv' } else { $null }
     $allowedTypes = @('UserMailbox', 'SharedMailbox', 'RoomMailbox', 'EquipmentMailbox', 'RemoteUserMailbox', 'RemoteSharedMailbox')
     $remoteTypes = @('RemoteUserMailbox', 'RemoteSharedMailbox')
     $records = @()
@@ -941,29 +966,45 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
         }
     }
     $summaryUpload = $null
-    try {
-        $summaryUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsv
+    if ($latestSummaryCsv) {
+        $latestSummaryDir = Split-Path -Path $latestSummaryCsv -Parent
+        if (-not (Test-Path -LiteralPath $latestSummaryDir)) { New-Item -ItemType Directory -Path $latestSummaryDir -Force | Out-Null }
+        Copy-Item -LiteralPath $summaryCsv -Destination $latestSummaryCsv -Force
+        try {
+            $summaryUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestSummaryCsv
+        }
+        catch {
+            WriteLog -Message ('Failed to upload latest mailbox summary CSV to SharePoint: {0}' -f $_.Exception.Message) 'WARN'
+        }
     }
-    catch {
-        WriteLog -Message ('Failed to upload mailbox summary CSV to SharePoint: {0}' -f $_.Exception.Message) 'WARN'
+    if (-not $summaryUpload) {
+        try {
+            $summaryUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsv
+        }
+        catch {
+            WriteLog -Message ('Failed to upload mailbox summary CSV to SharePoint: {0}' -f $_.Exception.Message) 'WARN'
+        }
     }
     $historyDailySource = if ($latestDailyCsv -and (Test-Path -LiteralPath $latestDailyCsv -PathType Leaf)) { $latestDailyCsv } else { $dailyCsv }
+    $historySummarySource = if ($latestSummaryCsv -and (Test-Path -LiteralPath $latestSummaryCsv -PathType Leaf)) { $latestSummaryCsv } else { $summaryCsv }
     if ($EnableWeeklyHistory -and -not [string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath) -and (Get-Command Add-SmartM365WeeklyHistory -ErrorAction SilentlyContinue)) {
-        Add-SmartM365WeeklyHistory -SourceCsvPaths @($historyDailySource, $summaryCsv) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Exchange on-prem mailbox daily stats' | Out-Null
+        Add-SmartM365WeeklyHistory -SourceCsvPaths @($historyDailySource, $historySummarySource) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Exchange on-prem mailbox daily stats' | Out-Null
     }
     RemoveOldFiles -Path $reportOutputPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
     $localMailboxUpload = if ($latestLocalCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestLocalCsv } else { $null }
     if (-not $localMailboxUpload) { $localMailboxUpload = Get-SmartM365SharePointUploadRecordByLocalPath -Path $localCsv }
     $remoteMailboxUpload = if ($latestRemoteCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestRemoteCsv } else { $null }
     if (-not $remoteMailboxUpload -and $remoteCsv) { $remoteMailboxUpload = Get-SmartM365SharePointUploadRecordByLocalPath -Path $remoteCsv }
+    $summaryCsvForMail = if ($latestSummaryCsv -and (Test-Path -LiteralPath $latestSummaryCsv -PathType Leaf)) { $latestSummaryCsv } else { $summaryCsv }
     try {
-        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsv -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -Title ($TaskName + ' - Mailbox report')
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -Title ($TaskName + ' - Mailbox report')
         Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
     }
     catch {
-        WriteLog -Message ('Failed to send mailbox report email: {0}' -f $_.Exception.Message) 'WARN'
+        WriteLog -Message ('Failed to send mailbox report email: {0}' -f $_.Exception.Message) 'ERROR'
+        throw
     }
-    return [pscustomobject]@{ DailyStatsCsv = $dailyCsv; SummaryCsv = $summaryCsv; RowCount = $report.Count }
+    return [pscustomobject]@{ DailyStatsCsv = $dailyCsv; SummaryCsv = $summaryCsvForMail; RowCount = $report.Count }
 }
 try {
     Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
