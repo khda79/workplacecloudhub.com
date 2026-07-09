@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.20
+1.23
 
 .NOTES
-    Version: 1.20
+    Version: 1.23
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.22"
+$ScriptVersion = "1.23"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -312,7 +312,16 @@ function Publish-SmartM365ExchangeLocalMailboxCsv {
 
     if ([string]::IsNullOrWhiteSpace($SourcePath) -or -not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { return }
 
+    Register-SmartM365GeneratedCsv -Path $SourcePath
+    $sourceUpload = $null
+    try {
+        $sourceUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $SourcePath
+    } catch {
+        WriteLog -Message ("Failed to upload source CSV to SharePoint for '{0}': {1}" -f $SourcePath, $_.Exception.Message) -Level 'WARNING'
+    }
+
     $publishedPath = $SourcePath
+    $latestUpload = $null
     $latestCsvFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
     if (-not [string]::IsNullOrWhiteSpace($latestCsvFolder)) {
         try {
@@ -322,7 +331,7 @@ function Publish-SmartM365ExchangeLocalMailboxCsv {
             Copy-Item -LiteralPath $SourcePath -Destination $latestPath -Force -ErrorAction Stop
             Register-SmartM365GeneratedCsv -Path $latestPath
             WriteLog -Message ("CSV latest copy written to: {0}" -f $latestPath)
-            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath
+            $latestUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath
             $publishedPath = $latestPath
         } catch {
             WriteLog -Message ("Failed to publish latest CSV copy for '{0}': {1}" -f $SourcePath, $_.Exception.Message) -Level 'WARNING'
@@ -332,6 +341,34 @@ function Publish-SmartM365ExchangeLocalMailboxCsv {
     if ($EnableWeeklyHistory -and -not [string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath) -and (Get-Command Add-SmartM365WeeklyHistory -ErrorAction SilentlyContinue)) {
         Add-SmartM365WeeklyHistory -SourceCsvPaths @($publishedPath) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel $HistoryLabel | Out-Null
     }
+
+    return [pscustomobject]@{
+        SourcePath   = $SourcePath
+        LatestPath   = $publishedPath
+        SourceUpload = $sourceUpload
+        LatestUpload = $latestUpload
+    }
+}
+
+function Get-SmartM365SharePointUploadRecordByLocalPath {
+    [CmdletBinding()]
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not $global:SmartM365SharePointUploadedFiles) { return $null }
+
+    $resolvedPath = $Path
+    try {
+        if (Test-Path -LiteralPath $Path) {
+            $resolvedPath = (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName
+        }
+    } catch {}
+
+    $matches = @($global:SmartM365SharePointUploadedFiles | Where-Object {
+        $_.LocalFilePath -and ([string]::Equals([string]$_.LocalFilePath, [string]$resolvedPath, [System.StringComparison]::OrdinalIgnoreCase))
+    })
+
+    if ($matches.Count -gt 0) { return $matches[-1] }
+    return $null
 }
 # Atomic CSV export helper
 function Export-CsvAtomic {
@@ -524,8 +561,12 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         [Parameter(Mandatory = $true)]
         [string]$SummaryCsv,
 
+        [string]$LocalMailboxCsv,
+        [string]$LatestLocalMailboxCsv,
+
         [AllowNull()]$DailyStatsUpload,
         [AllowNull()]$SummaryUpload,
+        [AllowNull()]$LocalMailboxUpload,
 
         [Parameter(Mandatory = $true)]
         [string]$Title
@@ -612,6 +653,10 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
 "@
 
     $fileRows = @()
+    $localMailboxPathForMail = if (-not [string]::IsNullOrWhiteSpace($LatestLocalMailboxCsv)) { $LatestLocalMailboxCsv } else { $LocalMailboxCsv }
+    if (-not [string]::IsNullOrWhiteSpace($localMailboxPathForMail)) {
+        $fileRows += [pscustomobject]@{ Label = 'Mailbox inventory'; Path = $localMailboxPathForMail; WebUrl = if ($LocalMailboxUpload -and $LocalMailboxUpload.WebUrl) { [string]$LocalMailboxUpload.WebUrl } else { '' } }
+    }
     if (-not [string]::IsNullOrWhiteSpace($LatestDailyStatsCsv)) {
         $fileRows += [pscustomobject]@{ Label = 'Daily stats'; Path = $LatestDailyStatsCsv; WebUrl = if ($DailyStatsUpload -and $DailyStatsUpload.WebUrl) { [string]$DailyStatsUpload.WebUrl } else { '' } }
     }
@@ -619,7 +664,6 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         $fileRows += [pscustomobject]@{ Label = 'Daily stats'; Path = $DailyStatsCsv; WebUrl = if ($DailyStatsUpload -and $DailyStatsUpload.WebUrl) { [string]$DailyStatsUpload.WebUrl } else { '' } }
     }
     $fileRows += [pscustomobject]@{ Label = 'Summary'; Path = $SummaryCsv; WebUrl = if ($SummaryUpload -and $SummaryUpload.WebUrl) { [string]$SummaryUpload.WebUrl } else { '' } }
-
     $fileRowsHtml = foreach ($fileRow in $fileRows) {
         $rowCount = Get-SmartM365MailboxReportCsvRowCount -Path $fileRow.Path
         $pathHtml = New-SmartM365ExchangeMailboxReportLinkHtml -Text $fileRow.Path -Url $fileRow.WebUrl
@@ -668,6 +712,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $remoteMailboxFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RemoteMailboxCsvLogFolderPath' -DefaultValue ''
     $latestCsvFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
     $localCsv = Join-Path -Path $localMailboxFolder -ChildPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
+    $latestLocalCsv = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv' } else { $null }
     $remoteCsv = if ($remoteMailboxFolder) { Join-Path -Path $remoteMailboxFolder -ChildPath 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' } else { $null }
     $dailyCsv = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats.csv'
     $summaryCsv = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats_Summary.csv'
@@ -726,8 +771,10 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
         Add-SmartM365WeeklyHistory -SourceCsvPaths @($historyDailySource, $summaryCsv) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Exchange on-prem mailbox daily stats' | Out-Null
     }
     RemoveOldFiles -Path $reportOutputPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+    $localMailboxUpload = if ($latestLocalCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestLocalCsv } else { $null }
+    if (-not $localMailboxUpload) { $localMailboxUpload = Get-SmartM365SharePointUploadRecordByLocalPath -Path $localCsv }
     try {
-        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -Title ($TaskName + ' - Mailbox report')
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsv -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -Title ($TaskName + ' - Mailbox report')
         Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
     }
     catch {
@@ -786,9 +833,9 @@ if ($DryRun) {
         throw
     }
     finally {
+        Stop-SmartM365TranscriptSafely
         if ($dryRunError) { try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $dryRunError -FailureStage 'DryRun' } catch {} }
         else { try { Complete-SmartM365ExecutionContext -Status Auto } catch {} }
-        Stop-SmartM365TranscriptSafely
     }
     return
 }
@@ -804,9 +851,9 @@ if ($ReportOnly) {
         throw
     }
     finally {
+        Stop-SmartM365TranscriptSafely
         if ($reportOnlyError) { try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $reportOnlyError -FailureStage 'ReportOnly' } catch {} }
         else { try { Complete-SmartM365ExecutionContext -Status Auto } catch {} }
-        Stop-SmartM365TranscriptSafely
     }
     return
 }
@@ -2031,7 +2078,7 @@ throw $errorMessage
                 try {
                     Export-CsvAtomic -InputObject $Global:ScriptOverallMailboxData -Path $globalCombinedCsvFile -Encoding UTF8
                     WriteLog -Message "Successfully exported combined data to '$globalCombinedCsvFile'."
-                    Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $globalCombinedCsvFile -LatestFileName (Split-Path -Path $globalCombinedCsvFile -Leaf)
+                    $null = Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $globalCombinedCsvFile -LatestFileName (Split-Path -Path $globalCombinedCsvFile -Leaf)
                     Write-Host -ForegroundColor Green "All processed mailbox data exported to: $globalCombinedCsvFile"
 					$InputCsvForDuplicateScan = $globalCombinedCsvFile
 					$scriptdatamailbox = $true
@@ -2113,7 +2160,7 @@ throw $errorMessage
                 try {
                     Export-CsvAtomic -InputObject $Global:ScriptOverallMailboxData -Path $combinedCsvFileForNonDetectAll -Encoding UTF8
                     WriteLog -Message "Successfully exported combined data to '$combinedCsvFileForNonDetectAll'."
-                    Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $combinedCsvFileForNonDetectAll -LatestFileName (Split-Path -Path $combinedCsvFileForNonDetectAll -Leaf)
+                    $null = Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $combinedCsvFileForNonDetectAll -LatestFileName (Split-Path -Path $combinedCsvFileForNonDetectAll -Leaf)
                     Write-Host -ForegroundColor Green "All processed mailbox data for specified scope exported to: $combinedCsvFileForNonDetectAll"
 					$InputCsvForDuplicateScan = $combinedCsvFileForNonDetectAll
 					$scriptdatamailbox = $true
@@ -2489,8 +2536,8 @@ if ($InventoryCompletedSuccessfully -eq $false) {
 $interruptionMessageRedundant = "Script (outer finally) interrupted or terminated due to an error. Total duration: $($EndTimeFinalRedundant - $StartTime)."
 
 Write-Host -ForegroundColor Yellow $interruptionMessageRedundant
-    try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'Inventory' } catch {}
     Stop-SmartM365TranscriptSafely
+    try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'Inventory' } catch {}
 }
 Else
 {
@@ -2563,8 +2610,8 @@ Else
 	RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 	WriteLog -Message "$TaskName completed."
+    Stop-SmartM365TranscriptSafely
     try { Complete-SmartM365ExecutionContext -Status Auto } catch {}
-	Stop-SmartM365TranscriptSafely
 	#endregion
 }
 }
