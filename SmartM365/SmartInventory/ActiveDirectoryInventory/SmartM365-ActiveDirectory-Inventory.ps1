@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.5
+1.6
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -251,11 +251,21 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$Subject,
-        [Parameter(Mandatory = $true)][string]$BodyHtml
+        [Parameter(Mandatory = $true)][string]$BodyHtml,
+        [string]$To = ''
     )
 
     $effectiveSendMailMode = Get-SmartM365AdInventorySendMailMode -Config $ScriptLocalConfig
-    SendEmailHtmlReport -Subject $Subject -BodyHtml $BodyHtml -SendMailMode $effectiveSendMailMode
+    $mailParams = @{
+        Subject      = $Subject
+        BodyHtml     = $BodyHtml
+        SendMailMode = $effectiveSendMailMode
+    }
+    if (-not [string]::IsNullOrWhiteSpace($To)) {
+        $mailParams['To'] = $To
+    }
+
+    SendEmailHtmlReport @mailParams
 }
 
 
@@ -317,7 +327,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -1918,7 +1928,11 @@ try {
 </ul>
 </body></html>
 "@
-                        Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
+                        $duplicateNotificationTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
+                        if ([string]::IsNullOrWhiteSpace($duplicateNotificationTo)) {
+                            throw 'Duplicate identity notification requires To in configuration. ErrorMailTo is reserved for error notifications.'
+                        }
+                        Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody -To $duplicateNotificationTo
                         Set-Content -LiteralPath $DuplicateNotificationLastSentFilePath -Value $todayStamp -Encoding UTF8
                         WriteLog -Message ("Duplicate identity notification sent. Last-sent marker updated: {0}" -f $DuplicateNotificationLastSentFilePath)
                     }
