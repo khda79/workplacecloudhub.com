@@ -31,6 +31,8 @@
         "ConvertTo-SmartM365EmailBody",
         "ExportAndCopyCsv",
         "ExportAndCopyCsvFromConvert",
+        "ConvertTo-SmartM365SharePointDataRootPath",
+        "Get-SmartM365SharePointRelativeFilePath",
         "Invoke-SmartM365SharePointCsvUpload",
         "NewRemoteScheduledTaskAndWait",
         "SendEmailHtmlReport",
