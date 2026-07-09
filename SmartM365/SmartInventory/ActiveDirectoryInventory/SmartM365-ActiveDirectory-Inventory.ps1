@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.4
+1.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -222,6 +222,42 @@ function Get-ScriptLocalConfigValue {
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
 
+function Get-SmartM365AdInventorySendMailMode {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config
+    )
+
+    $configuredMode = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'SendMailMode' -DefaultValue '')
+    if (-not [string]::IsNullOrWhiteSpace($configuredMode)) {
+        $configuredMode = $configuredMode.Trim()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($configuredMode) -or $configuredMode -in @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+        $smtpServer = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'SmtpServer' -DefaultValue '')
+        if ([string]::IsNullOrWhiteSpace($smtpServer)) { return 'Graph' }
+        return 'SMTP'
+    }
+
+    switch ($configuredMode.ToLowerInvariant()) {
+        'graph' { return 'Graph' }
+        'smtp'  { return 'SMTP' }
+        'both'  { return 'Both' }
+        default { throw ("Invalid SendMailMode '{0}'. Use Graph, SMTP, or Both." -f $configuredMode) }
+    }
+}
+
+function Send-SmartM365AdInventoryEmailHtmlReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Subject,
+        [Parameter(Mandatory = $true)][string]$BodyHtml
+    )
+
+    $effectiveSendMailMode = Get-SmartM365AdInventorySendMailMode -Config $ScriptLocalConfig
+    SendEmailHtmlReport -Subject $Subject -BodyHtml $BodyHtml -SendMailMode $effectiveSendMailMode
+}
+
 
 
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
@@ -281,7 +317,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -1882,7 +1918,7 @@ try {
 </ul>
 </body></html>
 "@
-                        SendEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
+                        Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
                         Set-Content -LiteralPath $DuplicateNotificationLastSentFilePath -Value $todayStamp -Encoding UTF8
                         WriteLog -Message ("Duplicate identity notification sent. Last-sent marker updated: {0}" -f $DuplicateNotificationLastSentFilePath)
                     }
@@ -1980,7 +2016,7 @@ catch {
 </body>
 </html>
 "@
-        SendEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
+        Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
         WriteLog -Message "Global error email notification sent."
     }
     catch {
