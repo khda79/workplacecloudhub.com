@@ -16,7 +16,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.3
+1.4
 
 
 .NOTES
@@ -363,7 +363,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AutopilotDevicesCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -410,7 +410,10 @@ try {
 
     if ($Connect) {
         Write-Host "Connect switch specified: existing Graph session (if any) will be disconnected and reconnected..." -ForegroundColor Cyan
-        try { Disconnect-MgGraph | Out-Null } catch { }
+        if ($graphContext) {
+            try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
+            $graphContext = $null
+        }
         $needConnect = $true
     } else {
         if ($graphContext -and (Test-GraphConnection)) {
@@ -607,7 +610,9 @@ finally {
     if ($connectedGraphInThisRun) {
         Write-Host "`n--- Disconnect Cloud Services ---"
         try {
-            try { Disconnect-MgGraph | Out-Null } catch { }
+            if (Get-MgContext -ErrorAction SilentlyContinue) {
+                try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
+            }
         } catch {
             WriteLog -Message ("Error during Graph disconnect in finally: {0}" -f $_) "WARNING"
         }
