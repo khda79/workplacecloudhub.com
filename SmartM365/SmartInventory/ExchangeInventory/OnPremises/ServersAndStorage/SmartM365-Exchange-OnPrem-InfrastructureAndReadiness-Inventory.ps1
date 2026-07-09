@@ -22,18 +22,21 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.4.3
+    1.4.4
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.4.3
+    Version     : 1.4.4
     Requirements:
-      - Run from Exchange Management Shell on Exchange 2016
+      - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
       - Remote WMI/DCOM access to Exchange servers
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.4.4
+      - Loads the Exchange 2016 PowerShell snap-in directly when required.
+
     1.4.3
       - Allows readiness collectors to start with an empty row list.
 
@@ -118,7 +121,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.4.3"
+$ScriptVersion = "1.4.4"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -360,8 +363,22 @@ function Export-ServersAndStorageCsv {
 }
 
 function Test-ExchangeShell {
+    if ($PSVersionTable.PSEdition -ne 'Desktop') {
+        throw "Exchange 2016 snap-ins require Windows PowerShell 5.1. Run with C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe."
+    }
+
+    $snapinName = 'Microsoft.Exchange.Management.PowerShell.SnapIn'
+    if (-not (Get-PSSnapin $snapinName -Registered -ErrorAction SilentlyContinue)) {
+        throw "Exchange Management PSSnapin '$snapinName' is not registered. Run this script on an Exchange 2016 server with the Management Tools installed."
+    }
+
+    if (-not (Get-PSSnapin $snapinName -ErrorAction SilentlyContinue)) {
+        Write-Log "Exchange PSSnapin '$snapinName' is not loaded. Loading it now."
+        Add-PSSnapin $snapinName -ErrorAction Stop
+    }
+
     if (-not (Get-Command Get-ExchangeServer -ErrorAction SilentlyContinue)) {
-        throw "Exchange cmdlets are not available. Run this script from the Exchange Management Shell."
+        throw "Exchange cmdlets are not available after loading the Exchange PSSnapin."
     }
 }
 
