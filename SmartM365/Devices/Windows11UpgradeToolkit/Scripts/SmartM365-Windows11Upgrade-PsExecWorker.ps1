@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.24
+0.1.25
 #>
 
 #requires -Version 5.1
@@ -763,7 +763,7 @@ function Update-ResultFromLastRun {
     if ($LastRun.PSObject.Properties['SetupCacheAction']) {
         $Result.SetupCacheAction = [string]$LastRun.SetupCacheAction
     }
-    foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers','SetupProfileRepairAction','SetupProfileRepairDetail','SetupProfileRepairBlockingSid','SetupProfileRepairKeptSid','SetupProfileRepairProfilePath','SetupProfileRepairBackupPath','ControlledRebootAction','ControlledRebootDetail','ControlledRebootUserCount','ControlledRebootUsers')) {
+    foreach ($propertyName in @('SetupDynamicUpdate','SelectedSetupSourcePath','SetupSourceSelectionDetail','DiskCleanupAction','DiskCleanupFreedGB','AdvancedDiskCleanupAction','AdvancedDiskCleanupFreedGB','DismCleanupAction','DismCleanupFreedGB','SetupCompletionRebootAction','SetupCompletionRebootDetail','SetupCompletionRebootUserCount','SetupCompletionRebootUsers','SetupProfileRepairAction','SetupProfileRepairDetail','SetupProfileRepairBlockingSid','SetupProfileRepairKeptSid','SetupProfileRepairProfilePath','SetupProfileRepairBackupPath','ControlledRebootAction','ControlledRebootDetail','ControlledRebootUserCount','ControlledRebootUsers','RetryAfterRebootAction','RetryAfterRebootDetail','RetryAfterRebootAttempt','RetryAfterRebootMaxAttempts','RetryAfterRebootTaskName')) {
         if ($LastRun.PSObject.Properties[$propertyName]) {
             $Result[$propertyName] = [string]$LastRun.$propertyName
         }
@@ -848,6 +848,11 @@ $result = [ordered]@{
     ControlledRebootDetail = ''
     ControlledRebootUserCount = ''
     ControlledRebootUsers = ''
+    RetryAfterRebootAction = ''
+    RetryAfterRebootDetail = ''
+    RetryAfterRebootAttempt = ''
+    RetryAfterRebootMaxAttempts = ''
+    RetryAfterRebootTaskName = ''
     RemoteLogsPath = ''
     PsExecLogPath = $logPath
     JobErrorMessage = ''
