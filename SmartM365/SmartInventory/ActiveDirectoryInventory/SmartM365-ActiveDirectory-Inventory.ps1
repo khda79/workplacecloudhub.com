@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.10
+1.12
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -57,7 +57,10 @@ param(
     [switch]$ForceSendDuplicateNotification,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipDailyReport
+    [switch]$SkipDailyReport,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ForceSendDailySummary
 )
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -283,6 +286,92 @@ function Add-SmartM365SharePointUploadLabel {
     return $UploadRecord
 }
 
+function New-SmartM365AdDuplicatePreviewSection {
+    [CmdletBinding()]
+    param(
+        [array]$Rows,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('UPN','SMTP')]
+        [string]$DuplicateType,
+        [int]$Limit = 50
+    )
+
+    $items = @($Rows | Where-Object { $_ })
+    if ($items.Count -eq 0) { return $null }
+
+    $valueProperty = if ($DuplicateType -eq 'UPN') { 'UserPrincipalName' } else { 'SmtpAddress' }
+    $label = if ($DuplicateType -eq 'UPN') { 'duplicate UPN' } else { 'duplicate SMTP address' }
+    $title = if ($DuplicateType -eq 'UPN') { 'Top 50 duplicate UPNs' } else { 'Top 50 duplicate SMTP addresses' }
+
+    $groups = @(
+        $items |
+            Where-Object {
+                $property = $_.PSObject.Properties[$valueProperty]
+                $null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)
+            } |
+            Group-Object -Property $valueProperty |
+            Where-Object { $_.Count -gt 1 } |
+            Sort-Object -Property @{ Expression = 'Count'; Descending = $true }, Name
+    )
+    if ($groups.Count -eq 0) { return $null }
+
+    $topGroups = @($groups | Select-Object -First $Limit)
+    $tableRows = foreach ($group in $topGroups) {
+        $accounts = @(
+            foreach ($row in @($group.Group)) {
+                $domainNameShort = [string]$row.DomainNameShort
+                $samAccountName = [string]$row.SamAccountName
+                $userPrincipalName = [string]$row.UserPrincipalName
+
+                if ($DuplicateType -eq 'UPN') {
+                    if (-not [string]::IsNullOrWhiteSpace($domainNameShort) -and -not [string]::IsNullOrWhiteSpace($samAccountName)) { '{0}\{1}' -f $domainNameShort, $samAccountName; continue }
+                    if (-not [string]::IsNullOrWhiteSpace($samAccountName)) { $samAccountName; continue }
+                    if (-not [string]::IsNullOrWhiteSpace($userPrincipalName)) { $userPrincipalName; continue }
+                }
+                else {
+                    if (-not [string]::IsNullOrWhiteSpace($userPrincipalName)) { $userPrincipalName; continue }
+                    if (-not [string]::IsNullOrWhiteSpace($domainNameShort) -and -not [string]::IsNullOrWhiteSpace($samAccountName)) { '{0}\{1}' -f $domainNameShort, $samAccountName; continue }
+                    if (-not [string]::IsNullOrWhiteSpace($samAccountName)) { $samAccountName; continue }
+                }
+            }
+        ) | Sort-Object -Unique
+
+        $domains = @(
+            foreach ($row in @($group.Group)) {
+                $domainName = [string]$row.DomainName
+                if (-not [string]::IsNullOrWhiteSpace($domainName)) { $domainName }
+            }
+        ) | Sort-Object -Unique
+
+        $accountPreview = @($accounts | Select-Object -First 8) -join ', '
+        if ($accounts.Count -gt 8) { $accountPreview = '{0}, +{1} more' -f $accountPreview, ($accounts.Count - 8) }
+        $domainPreview = @($domains | Select-Object -First 5) -join ', '
+        if ($domains.Count -gt 5) { $domainPreview = '{0}, +{1} more' -f $domainPreview, ($domains.Count - 5) }
+
+        $valueHtml = ConvertTo-SmartM365EmailHtmlText $group.Name
+        $countHtml = ConvertTo-SmartM365EmailHtmlText $group.Count
+        $accountsHtml = ConvertTo-SmartM365EmailHtmlText $accountPreview
+        $domainsHtml = ConvertTo-SmartM365EmailHtmlText $domainPreview
+
+        "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$valueHtml</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:13px;font-weight:700;color:#111827;`">$countHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$accountsHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$domainsHtml</td></tr>"
+    }
+
+    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing top {0} of {1} {2} value(s). Full details are available in the CSV files.' -f $topGroups.Count, $groups.Count, $label)
+    $html = @"
+<div style="font-size:13px;color:#64748b;margin-bottom:8px;">$caption</div>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Value</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Count</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Accounts</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Domains</th>
+  </tr>
+  $($tableRows -join "`n")
+</table>
+"@
+
+    return [pscustomobject]@{ Title = $title; Html = $html }
+}
 function Send-SmartM365AdInventoryEmailHtmlReport {
     [CmdletBinding()]
     param(
@@ -335,6 +424,8 @@ $DailyReportInactiveDays = [int](Get-ScriptLocalConfigValue -Config $ScriptLocal
 $EnableDailyReportLock = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDailyReportLock' -DefaultValue $true)
 $DailyReportLockRoot = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DailyReportLockRoot' -DefaultValue 'C:\ProgramData\SmartM365\Locks'
 $DailyReportLockName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DailyReportLockName' -DefaultValue 'SmartM365-ActiveDirectory-Inventory-DailyReport'
+$EnableDailySummaryEmail = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDailySummaryEmail' -DefaultValue $true)
+$DailySummaryLastSentFilePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DailySummaryLastSentFilePath' -DefaultValue ''
 $ConfiguredDomainParallelThrottleLimit = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DomainParallelThrottleLimit' -DefaultValue 1)
 $EffectiveDomainParallelThrottleLimit = if ($DomainParallelThrottleLimit -gt 0) { $DomainParallelThrottleLimit } else { $ConfiguredDomainParallelThrottleLimit }
 if ($EffectiveDomainParallelThrottleLimit -lt 1) { $EffectiveDomainParallelThrottleLimit = 1 }
@@ -363,7 +454,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.12"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -976,6 +1067,335 @@ try {
         WriteLog -Message 'Active Directory daily reports generated successfully.'
         return $true
     }
+    function Get-SmartM365AdCsvDataRowCount {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)][string]$Path)
+
+        if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return 0 }
+
+        [int64]$lineCount = 0
+        foreach ($line in [System.IO.File]::ReadLines($Path)) { $lineCount++ }
+        if ($lineCount -le 0) { return 0 }
+        return [Math]::Max(0, $lineCount - 1)
+    }
+
+    function Get-SmartM365AdCsvDistinctValueCount {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)][string]$Path,
+            [Parameter(Mandatory = $true)][string]$ColumnName
+        )
+
+        if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return 0 }
+
+        $values = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($row in @(Import-Csv -LiteralPath $Path -Encoding UTF8)) {
+            $property = $row.PSObject.Properties[$ColumnName]
+            if ($null -eq $property) { continue }
+
+            $value = [string]$property.Value
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                [void]$values.Add($value.Trim())
+            }
+        }
+
+        return $values.Count
+    }
+
+    function ConvertTo-SmartM365AdSummaryInt64 {
+        [CmdletBinding()]
+        param([AllowNull()]$Value)
+
+        if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return 0 }
+        [int64]$parsed = 0
+        if ([int64]::TryParse(([string]$Value).Trim(), [ref]$parsed)) { return $parsed }
+        return 0
+    }
+
+    function Format-SmartM365AdSummaryNumber {
+        [CmdletBinding()]
+        param([AllowNull()]$Value)
+
+        $number = ConvertTo-SmartM365AdSummaryInt64 -Value $Value
+        return $number.ToString('N0', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+
+    function Format-SmartM365AdSummaryDelta {
+        [CmdletBinding()]
+        param(
+            [AllowNull()]$Current,
+            [AllowNull()]$Previous,
+            [bool]$HasPrevious
+        )
+
+        if (-not $HasPrevious) { return 'n/a' }
+
+        $delta = (ConvertTo-SmartM365AdSummaryInt64 -Value $Current) - (ConvertTo-SmartM365AdSummaryInt64 -Value $Previous)
+        if ($delta -gt 0) { return ('+{0}' -f (Format-SmartM365AdSummaryNumber -Value $delta)) }
+        if ($delta -lt 0) { return ('-{0}' -f (Format-SmartM365AdSummaryNumber -Value ([Math]::Abs($delta)))) }
+        return '0'
+    }
+
+    function Get-SmartM365AdDailySummarySnapshot {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)][string]$SourceFolder)
+
+        if ([string]::IsNullOrWhiteSpace($SourceFolder) -or -not (Test-Path -LiteralPath $SourceFolder)) {
+            WriteLog -Message ("AD daily summary source folder unavailable: {0}" -f $SourceFolder) -Level 'WARNING'
+            return $null
+        }
+
+        $usersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_AllDomains.csv'
+        $computersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Computers_AllDomains.csv'
+        $groupsCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Groups_AllDomains.csv'
+        $ousCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_OUs_AllDomains.csv'
+        $contactsCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Contacts_AllDomains.csv'
+        $duplicateUpnCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_DuplicateUPN.csv'
+        $duplicateSmtpCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_DuplicateSMTP.csv'
+
+        foreach ($requiredCsv in @($usersCsv, $computersCsv, $groupsCsv, $ousCsv, $contactsCsv)) {
+            if (-not (Test-Path -LiteralPath $requiredCsv)) {
+                WriteLog -Message ("AD daily summary skipped because required source CSV is missing: {0}" -f $requiredCsv) -Level 'WARNING'
+                return $null
+            }
+        }
+
+        return [PSCustomObject][ordered]@{
+            SnapshotDate                   = (Get-Date).ToString('yyyy-MM-dd')
+            GeneratedAt                    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
+            DomainCount                    = Get-SmartM365AdCsvDistinctValueCount -Path $usersCsv -ColumnName 'DomainName'
+            TotalUsers                     = Get-SmartM365AdCsvDataRowCount -Path $usersCsv
+            TotalComputers                 = Get-SmartM365AdCsvDataRowCount -Path $computersCsv
+            TotalGroups                    = Get-SmartM365AdCsvDataRowCount -Path $groupsCsv
+            TotalOUs                       = Get-SmartM365AdCsvDataRowCount -Path $ousCsv
+            TotalContacts                  = Get-SmartM365AdCsvDataRowCount -Path $contactsCsv
+            DistinctDuplicateUPNs          = Get-SmartM365AdCsvDistinctValueCount -Path $duplicateUpnCsv -ColumnName 'UserPrincipalName'
+            AffectedDuplicateUPNAccounts   = Get-SmartM365AdCsvDataRowCount -Path $duplicateUpnCsv
+            DistinctDuplicateSMTPAddresses = Get-SmartM365AdCsvDistinctValueCount -Path $duplicateSmtpCsv -ColumnName 'SmtpAddress'
+            AffectedDuplicateSMTPEntries   = Get-SmartM365AdCsvDataRowCount -Path $duplicateSmtpCsv
+        }
+    }
+
+    function Get-SmartM365AdPreviousDailySummarySnapshot {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)][string]$SummaryCsvPath)
+
+        if ([string]::IsNullOrWhiteSpace($SummaryCsvPath) -or -not (Test-Path -LiteralPath $SummaryCsvPath)) { return $null }
+
+        $today = (Get-Date).Date
+        $previousRows = @(
+            foreach ($row in @(Import-Csv -LiteralPath $SummaryCsvPath -Encoding UTF8)) {
+                $snapshotDate = [datetime]::MinValue
+                if (-not [datetime]::TryParse([string]$row.SnapshotDate, [ref]$snapshotDate)) { continue }
+                if ($snapshotDate.Date -ge $today) { continue }
+
+                [PSCustomObject]@{
+                    SortDate = $snapshotDate.Date
+                    Row      = $row
+                }
+            }
+        )
+
+        if ($previousRows.Count -eq 0) { return $null }
+        return @($previousRows | Sort-Object SortDate -Descending | Select-Object -First 1)[0].Row
+    }
+
+    function New-SmartM365AdDailySummaryDiffSection {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]$Current,
+            [AllowNull()]$Previous
+        )
+
+        $hasPrevious = $null -ne $Previous
+        $metrics = @(
+            [pscustomobject]@{ Label = 'Domains'; Property = 'DomainCount' }
+            [pscustomobject]@{ Label = 'Users'; Property = 'TotalUsers' }
+            [pscustomobject]@{ Label = 'Computers'; Property = 'TotalComputers' }
+            [pscustomobject]@{ Label = 'Groups'; Property = 'TotalGroups' }
+            [pscustomobject]@{ Label = 'OUs'; Property = 'TotalOUs' }
+            [pscustomobject]@{ Label = 'Contacts'; Property = 'TotalContacts' }
+            [pscustomobject]@{ Label = 'Distinct duplicate UPNs'; Property = 'DistinctDuplicateUPNs' }
+            [pscustomobject]@{ Label = 'Affected duplicate UPN accounts'; Property = 'AffectedDuplicateUPNAccounts' }
+            [pscustomobject]@{ Label = 'Distinct duplicate SMTP addresses'; Property = 'DistinctDuplicateSMTPAddresses' }
+            [pscustomobject]@{ Label = 'Affected duplicate SMTP entries'; Property = 'AffectedDuplicateSMTPEntries' }
+        )
+
+        $rows = foreach ($metric in $metrics) {
+            $currentProperty = $Current.PSObject.Properties[$metric.Property]
+            $currentValue = if ($null -ne $currentProperty) { $currentProperty.Value } else { 0 }
+            $previousProperty = if ($hasPrevious) { $Previous.PSObject.Properties[$metric.Property] } else { $null }
+            $previousValue = if ($null -ne $previousProperty) { $previousProperty.Value } else { $null }
+            $delta = Format-SmartM365AdSummaryDelta -Current $currentValue -Previous $previousValue -HasPrevious $hasPrevious
+            $deltaColor = '#334155'
+            if ($delta -like '+*') { $deltaColor = '#1d4ed8' }
+            elseif ($delta -like '-*') { $deltaColor = '#b91c1c' }
+
+            $labelHtml = ConvertTo-SmartM365EmailHtmlText $metric.Label
+            $currentHtml = ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber -Value $currentValue)
+            $previousHtml = if ($hasPrevious) { ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber -Value $previousValue) } else { 'n/a' }
+            $deltaHtml = ConvertTo-SmartM365EmailHtmlText $delta
+
+            "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$labelHtml</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#111827;`">$currentHtml</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$previousHtml</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:$deltaColor;`">$deltaHtml</td></tr>"
+        }
+
+        $previousLabel = if ($hasPrevious) { ConvertTo-SmartM365EmailHtmlText ("Previous older scan: {0}" -f $Previous.SnapshotDate) } else { 'No previous older daily summary snapshot found. This run becomes the comparison baseline.' }
+        $html = @"
+<div style="font-size:13px;color:#64748b;margin-bottom:8px;">$previousLabel</div>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Metric</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Current</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Previous</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Delta</th>
+  </tr>
+  $($rows -join "`n")
+</table>
+"@
+
+        return [pscustomobject]@{ Title = 'Diff since previous scan'; Html = $html }
+    }
+
+    function Invoke-SmartM365AdDailySummaryEmail {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)][string]$SourceFolder,
+            [Parameter(Mandatory = $true)][string]$SummaryOutputPath,
+            [string]$LatestFolderPath,
+            [string]$LastSentFilePath,
+            [bool]$ForceSend = $false
+        )
+
+        if (-not $EnableDailySummaryEmail) {
+            WriteLog -Message 'Active Directory daily summary email skipped because EnableDailySummaryEmail is disabled.'
+            return $false
+        }
+
+        if ([string]::IsNullOrWhiteSpace($LastSentFilePath)) {
+            $LastSentFilePath = Join-Path -Path $SummaryOutputPath -ChildPath 'AD_DailySummary_LastSent.txt'
+        }
+
+        $todayStamp = (Get-Date).ToString('yyyy-MM-dd')
+        $lastSentStamp = ''
+        if (Test-Path -LiteralPath $LastSentFilePath) {
+            $lastSentStamp = (Get-Content -LiteralPath $LastSentFilePath -Raw -ErrorAction SilentlyContinue).Trim()
+        }
+
+        if ($lastSentStamp -eq $todayStamp -and -not $ForceSend) {
+            WriteLog -Message ("Active Directory daily summary email already sent today ({0}). Use -ForceSendDailySummary to resend." -f $todayStamp)
+            return $false
+        }
+
+        $summarySnapshot = Get-SmartM365AdDailySummarySnapshot -SourceFolder $SourceFolder
+        if ($null -eq $summarySnapshot) { return $false }
+
+        if (-not (Test-Path -LiteralPath $SummaryOutputPath)) {
+            New-Item -Path $SummaryOutputPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+
+        $summaryCsvPath = Join-Path -Path $SummaryOutputPath -ChildPath 'AD_Inventory_DailySummary.csv'
+        $previousSnapshot = Get-SmartM365AdPreviousDailySummarySnapshot -SummaryCsvPath $summaryCsvPath
+
+        if (Test-Path -LiteralPath $summaryCsvPath) {
+            $summarySnapshot | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip 1 | Add-Content -LiteralPath $summaryCsvPath -Encoding UTF8
+            WriteLog -Message ("AD daily summary snapshot appended: {0}" -f $summaryCsvPath)
+        }
+        else {
+            $summarySnapshot | Export-Csv -LiteralPath $summaryCsvPath -NoTypeInformation -Encoding UTF8
+            WriteLog -Message ("AD daily summary snapshot created: {0}" -f $summaryCsvPath)
+        }
+
+        if (-not $global:csvGeneratedPaths -or -not ($global:csvGeneratedPaths -is [System.Collections.Generic.HashSet[string]])) {
+            $existingCsvGeneratedPaths = @($global:csvGeneratedPaths)
+            $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($existingCsvGeneratedPath in $existingCsvGeneratedPaths) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$existingCsvGeneratedPath)) {
+                    [void]$global:csvGeneratedPaths.Add([string]$existingCsvGeneratedPath)
+                }
+            }
+        }
+        [void]$global:csvGeneratedPaths.Add($summaryCsvPath)
+
+        $summarySharePointUploads = @()
+        $sourceUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsvPath
+        $sourceUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $sourceUpload -Label 'AD daily summary (DATA-ALL)'
+        if ($sourceUpload) { $summarySharePointUploads += $sourceUpload }
+
+        $latestSummaryPath = $null
+        if (-not [string]::IsNullOrWhiteSpace($LatestFolderPath)) {
+            if (-not (Test-Path -LiteralPath $LatestFolderPath)) {
+                New-Item -Path $LatestFolderPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                WriteLog -Message ("Created missing LatestCsvFolderPath directory: {0}" -f $LatestFolderPath)
+            }
+
+            $latestSummaryPath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($summaryCsvPath))
+            Copy-Item -LiteralPath $summaryCsvPath -Destination $latestSummaryPath -Force -ErrorAction Stop
+            WriteLog -Message ("AD daily summary copied to LatestCsvFolderPath: {0}" -f $latestSummaryPath)
+
+            $latestUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestSummaryPath
+            $latestUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $latestUpload -Label 'AD daily summary (DATA-LAST)'
+            if ($latestUpload) { $summarySharePointUploads += $latestUpload }
+        }
+
+        $dailySummaryTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
+        if ([string]::IsNullOrWhiteSpace($dailySummaryTo)) {
+            WriteLog -Message 'Active Directory daily summary email skipped because To is not configured.' -Level 'WARNING'
+            return $false
+        }
+
+        $diffSection = New-SmartM365AdDailySummaryDiffSection -Current $summarySnapshot -Previous $previousSnapshot
+        $sharePointSection = New-SmartM365SharePointLinksSection -UploadRecords $summarySharePointUploads
+        $sections = @($diffSection)
+        if ($sharePointSection) { $sections += $sharePointSection }
+
+        $hasDuplicateIdentities = ((ConvertTo-SmartM365AdSummaryInt64 -Value $summarySnapshot.AffectedDuplicateUPNAccounts) -gt 0) -or ((ConvertTo-SmartM365AdSummaryInt64 -Value $summarySnapshot.AffectedDuplicateSMTPEntries) -gt 0)
+        $severity = if ($hasDuplicateIdentities) { 'Warning' } else { 'Success' }
+        $actionTitle = if ($hasDuplicateIdentities) { 'Review required' } else { 'No duplicate identity conflict detected' }
+        $actionHtml = if ($hasDuplicateIdentities) { 'Review duplicate UPN and SMTP counters before identity cleanup, migration, or synchronization decisions.' } else { 'Keep the generated CSV files as the daily Active Directory inventory baseline.' }
+
+        $summaryRows = @(
+            [pscustomobject]@{ Label = 'Domains'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.DomainCount }
+            [pscustomobject]@{ Label = 'Users'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalUsers }
+            [pscustomobject]@{ Label = 'Computers'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalComputers }
+            [pscustomobject]@{ Label = 'Groups'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalGroups }
+            [pscustomobject]@{ Label = 'OUs'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalOUs }
+            [pscustomobject]@{ Label = 'Contacts'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.TotalContacts }
+            [pscustomobject]@{ Label = 'Duplicate UPN accounts'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.AffectedDuplicateUPNAccounts }
+            [pscustomobject]@{ Label = 'Duplicate SMTP entries'; Value = Format-SmartM365AdSummaryNumber -Value $summarySnapshot.AffectedDuplicateSMTPEntries }
+        )
+
+        $pathRows = @(
+            [pscustomobject]@{ Label = 'Source folder'; Path = $SourceFolder }
+            [pscustomobject]@{ Label = 'Daily summary'; Path = $summaryCsvPath }
+        )
+        if (-not [string]::IsNullOrWhiteSpace($latestSummaryPath)) {
+            $pathRows += [pscustomobject]@{ Label = 'Latest summary'; Path = $latestSummaryPath }
+        }
+
+        $emailBody = New-SmartM365EmailBody `
+            -Title 'Active Directory daily summary' `
+            -Category 'SmartM365 Active Directory' `
+            -Severity $severity `
+            -Tenant $Tenant `
+            -HostName $env:COMPUTERNAME `
+            -Message 'Daily Active Directory inventory summary with comparison against the latest available scan from a previous day.' `
+            -ActionTitle $actionTitle `
+            -ActionHtml $actionHtml `
+            -SummaryRows $summaryRows `
+            -PathRows $pathRows `
+            -Sections $sections `
+            -Footer 'This automated message was generated by SmartM365. Use the exported CSV paths and SharePoint links as the inventory source of truth.'
+
+        Send-SmartM365AdInventoryEmailHtmlReport -Subject 'SmartM365 Active Directory daily summary' -BodyHtml $emailBody -To $dailySummaryTo
+
+        $lastSentFolder = Split-Path -Path $LastSentFilePath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($lastSentFolder) -and -not (Test-Path -LiteralPath $lastSentFolder)) {
+            New-Item -Path $lastSentFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+        Set-Content -LiteralPath $LastSentFilePath -Value $todayStamp -Encoding UTF8
+        WriteLog -Message ("Active Directory daily summary email sent. Last-sent marker updated: {0}" -f $LastSentFilePath)
+        return $true
+    }
     function Get-ADStringValue {
         param([object]$Value)
         if ($null -eq $Value) { return $null }
@@ -1218,6 +1638,17 @@ try {
             -UseDailyLock $EnableDailyReportLock `
             -LockRoot $DailyReportLockRoot `
             -LockName $DailyReportLockName | Out-Null
+
+        try {
+            Invoke-SmartM365AdDailySummaryEmail -SourceFolder $reportSourceFolder `
+                -SummaryOutputPath $OutputPath `
+                -LatestFolderPath $destinationRootPath `
+                -LastSentFilePath $DailySummaryLastSentFilePath `
+                -ForceSend ([bool]$ForceSendDailySummary) | Out-Null
+        }
+        catch {
+            WriteLog -Message ("Active Directory daily summary email failed in ReportOnly mode: {0}" -f $_) -Level 'WARNING'
+        }
 
         Remove-OldFiles -Path $OutputPath -Filter "*.csv" -OlderThanDays 30
         Remove-OldFiles -Path $OutputPath -Filter "*.log" -OlderThanDays 30
@@ -1967,8 +2398,12 @@ try {
                             [pscustomobject]@{ Label = 'Duplicate UPN'; Path = $duplicateUpnCsv }
                             [pscustomobject]@{ Label = 'Duplicate SMTP'; Path = $duplicateSmtpCsv }
                         )
+                        $duplicateUpnPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateUpnRows -DuplicateType 'UPN' -Limit 50
+                        $duplicateSmtpPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateSmtpRows -DuplicateType 'SMTP' -Limit 50
                         $duplicateSharePointSection = New-SmartM365SharePointLinksSection -UploadRecords $duplicateSharePointUploads
                         $duplicateSections = @()
+                        if ($duplicateUpnPreviewSection) { $duplicateSections += $duplicateUpnPreviewSection }
+                        if ($duplicateSmtpPreviewSection) { $duplicateSections += $duplicateSmtpPreviewSection }
                         if ($duplicateSharePointSection) { $duplicateSections += $duplicateSharePointSection }
 
                         $emailBody = New-SmartM365EmailBody `
@@ -2058,6 +2493,27 @@ try {
     }
     else {
         WriteLog -Message "Daily Active Directory report skipped because -SkipDailyReport was specified."
+    }
+    # ------------------------------------------------------
+    # DAILY ACTIVE DIRECTORY SUMMARY EMAIL
+    # ------------------------------------------------------
+    if (-not $DuplicateAnalysisOnly -and -not $SkipDailyReport) {
+        try {
+            Invoke-SmartM365AdDailySummaryEmail -SourceFolder $OutputPath `
+                -SummaryOutputPath $OutputPath `
+                -LatestFolderPath $destinationRootPath `
+                -LastSentFilePath $DailySummaryLastSentFilePath `
+                -ForceSend ([bool]$ForceSendDailySummary) | Out-Null
+        }
+        catch {
+            WriteLog -Message ("Active Directory daily summary email failed: {0}" -f $_) -Level 'WARNING'
+        }
+    }
+    elseif ($DuplicateAnalysisOnly) {
+        WriteLog -Message "Daily Active Directory summary email skipped in DuplicateAnalysisOnly mode."
+    }
+    else {
+        WriteLog -Message "Daily Active Directory summary email skipped because -SkipDailyReport was specified."
     }
     # ------------------------------------------------------
     # WEEKLY INVENTORY HISTORY
