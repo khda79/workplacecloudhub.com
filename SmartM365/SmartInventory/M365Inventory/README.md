@@ -8,6 +8,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 - `Domains/`: verified domain inventory.
 - `IntuneInventory/`: Intune inventory, Windows Update reporting, Autopilot, RBAC, applications, and remediation export utilities.
 - `Licensing/`: license and service plan inventory.
+- `SyncHealth/`: Azure AD Connect synchronization freshness checks and stale hybrid data alerts.
 - `Usage/`: Microsoft 365 user and workload usage reports for FinOps and usage analysis.
 - `Users/`: active user inventory.
 

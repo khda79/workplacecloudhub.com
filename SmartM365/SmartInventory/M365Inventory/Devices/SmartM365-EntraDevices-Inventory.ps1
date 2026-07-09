@@ -18,9 +18,9 @@ and exports a CSV with relevant device properties:
 - Parsed Autopilot ZTDID from labels/PhysicalIds
 
 Generates additional focused reports:
-- Global "Registered pending" devices (no ApproximateLastSignInDateTime)
+- Global "Registered pending" devices (official criterion: TrustType ServerAd with no AlternativeSecurityIds)
 - HardwareId conflicts (same HardwareId mapped to multiple DeviceId)
-- HardwareId conflicts that contain devices that never signed in (Registered pending-like)
+- HardwareId conflicts that contain true pending devices (IsPending)
 - Remediation suggestions: removal candidates for stale/duplicate devices, plus a PS1 script
   containing Remove-MgDevice -WhatIf commands (for manual review and execution).
 
@@ -46,11 +46,9 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.1
-
-
+1.2
 .NOTES
-    Version : 1.1
+    Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
 Scopes: Directory.Read.All
@@ -459,7 +457,9 @@ function Get-EntraDeviceColumns {
         "HardwareId",
         "UserGroupId",
         "UserHardwareId",
-        "AutopilotZTDID"
+        "AutopilotZTDID",
+        "HasAlternativeSecurityIds",
+        "IsPending"
     )
 }
 
@@ -557,7 +557,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.2"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
@@ -754,6 +754,18 @@ try {
             $ztdid = Get-LabelValue -Labels $systemLabels -TagName "ZTDID"
         }
 
+        $altSecIds = Get-SafeProperty $_ 'AlternativeSecurityIds'
+        $hasAltSecIds = $false
+        if ($altSecIds) {
+            if ($altSecIds -is [System.Collections.IEnumerable] -and -not ($altSecIds -is [string])) {
+                $hasAltSecIds = (@($altSecIds) | Where-Object { $null -ne $_ }).Count -gt 0
+            }
+            else {
+                $hasAltSecIds = -not [string]::IsNullOrWhiteSpace([string]$altSecIds)
+            }
+        }
+        $trustTypeVal = Get-SafeProperty $_ 'TrustType'
+        $isPending = ($trustTypeVal -eq 'ServerAd') -and (-not $hasAltSecIds)
         [PSCustomObject]@{
             "ObjectId"                        = $objId
             "DeviceId"                        = Get-SafeProperty $_ 'DeviceId'
@@ -796,6 +808,8 @@ try {
             "UserGroupId"                     = $userGroupId
             "UserHardwareId"                  = $userHardwareId
             "AutopilotZTDID"                  = $ztdid
+            "HasAlternativeSecurityIds"       = $hasAltSecIds
+            "IsPending"                       = $isPending
         }
     }
 
@@ -837,14 +851,15 @@ try {
     $mainLatestCsvPath = $global:csvFilePath3
 
     # ------------------------
-    # Global report: Registered pending (no ApproximateLastSignInDateTime)
+    # Global report: Registered pending using the official Microsoft criterion.
+    # IsPending = TrustType ServerAd and no AlternativeSecurityIds.
     # ------------------------
-    WriteLog -Message "Building global Registered pending report (devices that never signed in)..."
+    WriteLog -Message "Building global Registered pending report (IsPending = true, official Microsoft criterion)..."
 
-    $registeredPending = $results | Where-Object {
-        -not $_.ApproximateLastSignInDateTime
-    }
+    $registeredPending = $results | Where-Object { $_.IsPending -eq $true }
+    $legacyPending = $results | Where-Object { -not $_.ApproximateLastSignInDateTime }
     $registeredPendingCount = @($registeredPending).Count
+    WriteLog -Message ("Registered pending official IsPending: {0}; legacy no LastSignIn heuristic: {1}." -f $registeredPendingCount, @($legacyPending).Count)
 
     if ($registeredPending -and $registeredPending.Count -gt 0) {
         WriteLog -Message ("Registered pending devices found: {0}" -f $registeredPending.Count)
@@ -861,7 +876,7 @@ try {
         WriteLog -Message "Global Registered pending report exported."
     }
     else {
-        WriteLog -Message "No Registered pending devices found (all have a last sign-in time)." "INFO"
+        WriteLog -Message "No Registered pending devices found (all ServerAd devices have AlternativeSecurityIds)." "INFO"
     }
 
     # ------------------------
@@ -923,10 +938,9 @@ try {
         WriteLog -Message "HardwareId conflict report exported (HardwareId -> multiple DeviceId)."
 
         # ------------------------
-        # Sub-report: HardwareId conflicts where some devices have never signed in
-        # (Registered pending-like devices)
+        # Sub-report: HardwareId conflicts where some devices are truly pending
         # ------------------------
-        WriteLog -Message "Building sub-report for HardwareId conflicts with devices that never signed in (Registered pending-like)..."
+        WriteLog -Message "Building sub-report for HardwareId conflicts with pending devices (IsPending = true)..."
 
         $hwPending = @()
 
@@ -936,10 +950,10 @@ try {
 
             if (-not $devicesForHw) { continue }
 
-            $neverSignedIn = $devicesForHw | Where-Object { -not $_.ApproximateLastSignInDateTime }
+            $pendingInGroup = $devicesForHw | Where-Object { $_.IsPending -eq $true }
 
-            if ($neverSignedIn.Count -gt 0) {
-                foreach ($d in $neverSignedIn) {
+            if ($pendingInGroup.Count -gt 0) {
+                foreach ($d in $pendingInGroup) {
                     $hwPending += [PSCustomObject]@{
                         "HardwareId"                     = $currentHw
                         "ObjectId"                       = $d.ObjectId
@@ -953,13 +967,15 @@ try {
                         "RegistrationDateTime"           = $d.RegistrationDateTime
                         "ApproximateLastSignInDateTime"  = $d.ApproximateLastSignInDateTime
                         "AutopilotZTDID"                 = $d.AutopilotZTDID
+                        "HasAlternativeSecurityIds"      = $d.HasAlternativeSecurityIds
+                        "IsPending"                      = $d.IsPending
                     }
                 }
             }
         }
 
         if ($hwPending.Count -gt 0) {
-            WriteLog -Message "Registered pending-like entries in HardwareId conflicts: $($hwPending.Count)"
+            WriteLog -Message "Pending devices inside HardwareId conflicts: $($hwPending.Count)"
 
             $BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPending"
 
@@ -970,10 +986,10 @@ try {
                 -Encoding "UTF8" `
                 -NoTypeInformation
 
-            WriteLog -Message "Registered pending-like HardwareId conflict report exported."
+            WriteLog -Message "Pending devices in HardwareId conflict report exported."
         }
         else {
-            WriteLog -Message "No Registered pending-like devices found inside HardwareId conflicts." "INFO"
+            WriteLog -Message "No pending devices found inside HardwareId conflicts." "INFO"
         }
     }
     else {

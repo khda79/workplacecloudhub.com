@@ -22,8 +22,8 @@
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
-  "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\UpgradeEligibility",
+  "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\M365\\Backup\\ProtectedMailboxes",
   "EnableWeeklyHistory": true,
-  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\UpgradeEligibility\\WeeklyHistory",
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\M365\\Backup\\ProtectedMailboxes\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
 }

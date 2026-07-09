@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.17
+1.19
 
 .NOTES
-    Version: 1.17
+    Version: 1.19
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,8 +228,11 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.19"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
+$EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
+$WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
+$WeeklyHistoryRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $LimitResultSize = $null
 if ($LimitResultSize) {
@@ -253,6 +256,37 @@ function Register-SmartM365GeneratedCsv {
     [void]$global:csvGeneratedPaths.Add($Path)
 }
 
+function Publish-SmartM365ExchangeLocalMailboxCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [string]$LatestFileName,
+        [string]$HistoryLabel = 'Exchange on-prem mailboxes'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SourcePath) -or -not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { return }
+
+    $publishedPath = $SourcePath
+    $latestCsvFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+    if (-not [string]::IsNullOrWhiteSpace($latestCsvFolder)) {
+        try {
+            if (-not (Test-Path -LiteralPath $latestCsvFolder)) { New-Item -ItemType Directory -Path $latestCsvFolder -Force | Out-Null }
+            if ([string]::IsNullOrWhiteSpace($LatestFileName)) { $LatestFileName = Split-Path -Path $SourcePath -Leaf }
+            $latestPath = Join-Path -Path $latestCsvFolder -ChildPath $LatestFileName
+            Copy-Item -LiteralPath $SourcePath -Destination $latestPath -Force -ErrorAction Stop
+            Register-SmartM365GeneratedCsv -Path $latestPath
+            WriteLog -Message ("CSV latest copy written to: {0}" -f $latestPath)
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath
+            $publishedPath = $latestPath
+        } catch {
+            WriteLog -Message ("Failed to publish latest CSV copy for '{0}': {1}" -f $SourcePath, $_.Exception.Message) -Level 'WARNING'
+        }
+    }
+
+    if ($EnableWeeklyHistory -and -not [string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath) -and (Get-Command Add-SmartM365WeeklyHistory -ErrorAction SilentlyContinue)) {
+        Add-SmartM365WeeklyHistory -SourceCsvPaths @($publishedPath) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel $HistoryLabel | Out-Null
+    }
+}
 # Atomic CSV export helper
 function Export-CsvAtomic {
     [CmdletBinding()]
@@ -646,6 +680,10 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     Export-CsvAtomic -InputObject @($summary + ([pscustomobject]$totalRow)) -Path $summaryCsv -Encoding UTF8 -Delimiter ';'
     if ($latestDailyCsv) { $latestDir = Split-Path -Path $latestDailyCsv -Parent; if (-not (Test-Path -LiteralPath $latestDir)) { New-Item -ItemType Directory -Path $latestDir -Force | Out-Null }; Copy-Item -LiteralPath $dailyCsv -Destination $latestDailyCsv -Force; Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestDailyCsv }
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsv
+    $historyDailySource = if ($latestDailyCsv -and (Test-Path -LiteralPath $latestDailyCsv -PathType Leaf)) { $latestDailyCsv } else { $dailyCsv }
+    if ($EnableWeeklyHistory -and -not [string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath) -and (Get-Command Add-SmartM365WeeklyHistory -ErrorAction SilentlyContinue)) {
+        Add-SmartM365WeeklyHistory -SourceCsvPaths @($historyDailySource, $summaryCsv) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Exchange on-prem mailbox daily stats' | Out-Null
+    }
     RemoveOldFiles -Path $reportOutputPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
     try {
         $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -SummaryCsv $summaryCsv -Title ($TaskName + ' - Mailbox report')
@@ -664,6 +702,7 @@ try {
 	WriteLog -Message $MyInvocation.MyCommand.Name
 	WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
 	$OutputPath = $InitializeOutputPath
+    if ([string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath)) { $WeeklyHistoryFolderPath = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory' }
 	WriteLog -Message "Starting $TaskName..."
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
@@ -1949,6 +1988,7 @@ throw $errorMessage
                 try {
                     Export-CsvAtomic -InputObject $Global:ScriptOverallMailboxData -Path $globalCombinedCsvFile -Encoding UTF8
                     WriteLog -Message "Successfully exported combined data to '$globalCombinedCsvFile'."
+                    Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $globalCombinedCsvFile -LatestFileName (Split-Path -Path $globalCombinedCsvFile -Leaf)
                     Write-Host -ForegroundColor Green "All processed mailbox data exported to: $globalCombinedCsvFile"
 					$InputCsvForDuplicateScan = $globalCombinedCsvFile
 					$scriptdatamailbox = $true
@@ -2030,6 +2070,7 @@ throw $errorMessage
                 try {
                     Export-CsvAtomic -InputObject $Global:ScriptOverallMailboxData -Path $combinedCsvFileForNonDetectAll -Encoding UTF8
                     WriteLog -Message "Successfully exported combined data to '$combinedCsvFileForNonDetectAll'."
+                    Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $combinedCsvFileForNonDetectAll -LatestFileName (Split-Path -Path $combinedCsvFileForNonDetectAll -Leaf)
                     Write-Host -ForegroundColor Green "All processed mailbox data for specified scope exported to: $combinedCsvFileForNonDetectAll"
 					$InputCsvForDuplicateScan = $combinedCsvFileForNonDetectAll
 					$scriptdatamailbox = $true
