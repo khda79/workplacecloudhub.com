@@ -22,11 +22,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.4.4
+    1.4.5
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.4.4
+    Version     : 1.4.5
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
@@ -34,6 +34,11 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.4.5
+      - Writes LOG-ALL log/transcript, publishes DATA-LAST copies, and uploads weekly history.
+      - Sends the summary mail with the shared SmartM365 template and SharePoint links.
+      - Keeps launcher snap-in loading inside the script for script-scope validation.
+
     1.4.4
       - Loads the Exchange 2016 PowerShell snap-in directly when required.
 
@@ -121,7 +126,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.4.4"
+$ScriptVersion = "1.4.5"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -189,7 +194,18 @@ else {
 }
 
 $OutputFolder = Join-Path $OutputRoot $RunId
-$LogFile = Join-Path $OutputFolder "$ScriptName-v$ScriptVersion.log"
+$LogRoot = Resolve-SmartM365ConfigTokenValue -Value '{{LogAllRootPath}}'
+if ([string]::IsNullOrWhiteSpace($LogRoot) -or $LogRoot -eq '{{LogAllRootPath}}') {
+    $LogRoot = Join-Path -Path (Split-Path -Path $OutputRoot -Parent) -ChildPath 'LOG-ALL'
+}
+$LogFolder = Join-Path -Path $LogRoot -ChildPath $ScriptName
+$LogFile = Join-Path $LogFolder "$ScriptName-$RunId.log"
+$TranscriptFile = Join-Path $LogFolder "$ScriptName-$RunId`_Transcript.log"
+$script:TranscriptStarted = $false
+$script:ServersAndStorageGeneratedCsvPaths = New-Object 'System.Collections.Generic.List[string]'
+$script:ServersAndStorageSharePointUploads = New-Object System.Collections.ArrayList
+$script:ServersAndStorageWarningCount = 0
+$script:ServersAndStorageErrorCount = 0
 
 function Write-Log {
     param(
@@ -200,12 +216,50 @@ function Write-Log {
         [string]$Level = "INFO"
     )
 
+    if ($Level -eq 'WARN') { $script:ServersAndStorageWarningCount++ }
+    if ($Level -eq 'ERROR') { $script:ServersAndStorageErrorCount++ }
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = @([regex]::Split(([string]$Message), '\r?\n') | ForEach-Object { "$timestamp [$Level] $_" })
     $line | ForEach-Object { Write-Host $_ }
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
 }
 
+function Stop-ServersAndStorageTranscriptSafely {
+    if (-not $script:TranscriptStarted) { return }
+    try { Stop-Transcript | Out-Null } catch {}
+    $script:TranscriptStarted = $false
+}
+
+function Complete-ServersAndStorageRun {
+    param(
+        [Parameter(Mandatory)][string]$Status,
+        [Parameter(Mandatory)][datetime]$Started,
+        [AllowNull()][string]$ErrorMessage
+    )
+
+    $ended = Get-Date
+    Write-Log 'Execution summary:'
+    Write-Log ("  Status: {0}" -f $Status)
+    Write-Log ("  Duration: {0}" -f ($ended - $Started))
+    Write-Log ("  Started: {0}" -f $Started.ToString('yyyy-MM-dd HH:mm:ss zzz'))
+    Write-Log ("  Ended: {0}" -f $ended.ToString('yyyy-MM-dd HH:mm:ss zzz'))
+    Write-Log ("  ScriptName: {0}" -f $ScriptName)
+    Write-Log ("  ScriptVersion: {0}" -f $ScriptVersion)
+    Write-Log ("  TenantKey: {0}" -f $Tenant)
+    Write-Log ("  OutputPath: {0}" -f $OutputFolder)
+    Write-Log ("  LogTextFile: {0}" -f $LogFile)
+    Write-Log ("  TranscriptFile: {0}" -f $TranscriptFile)
+    Write-Log ("  GeneratedCsvFiles: {0}" -f $script:ServersAndStorageGeneratedCsvPaths.Count)
+    Write-Log ("  Warnings: {0}" -f $script:ServersAndStorageWarningCount)
+    Write-Log ("  Errors: {0}" -f $script:ServersAndStorageErrorCount)
+    if (-not [string]::IsNullOrWhiteSpace($ErrorMessage)) { Write-Log ("  ErrorMessage: {0}" -f $ErrorMessage) }
+
+    Stop-ServersAndStorageTranscriptSafely
+    Invoke-ServersAndStorageSharePointUpload -LocalFilePath $LogFile
+    if (Test-Path -LiteralPath $TranscriptFile -PathType Leaf) {
+        Invoke-ServersAndStorageSharePointUpload -LocalFilePath $TranscriptFile
+    }
+}
 function Ensure-Directory {
     param(
         [Parameter(Mandatory)]
@@ -241,7 +295,7 @@ function Get-SmartM365EffectiveConfigValue {
 }
 
 function Import-SmartM365CoreModule {
-    if ((Get-Command Publish-CoreSmartM365Csv -ErrorAction SilentlyContinue) -and (Get-Command SendEmailHtmlReport -ErrorAction SilentlyContinue)) {
+    if ((Get-Command Publish-CoreSmartM365Csv -ErrorAction SilentlyContinue) -and (Get-Command Send-CoreEmailHtmlReport -ErrorAction SilentlyContinue)) {
         return
     }
 
@@ -290,7 +344,7 @@ function Invoke-ServersAndStorageSharePointUpload {
 
     try {
         Import-SmartM365CoreModule
-        Invoke-CoreSmartM365SharePointCsvUpload `
+        $record = Invoke-CoreSmartM365SharePointCsvUpload `
             -LocalFilePath $LocalFilePath `
             -Enabled $true `
             -SiteHostname (Get-SmartM365EffectiveConfigValue -Name 'SharePointSiteHostname' -DefaultValue '') `
@@ -300,11 +354,61 @@ function Invoke-ServersAndStorageSharePointUpload {
             -AppId (Get-SmartM365EffectiveConfigValue -Name 'AppId' -DefaultValue '') `
             -TenantId (Get-SmartM365EffectiveConfigValue -Name 'TenantId' -DefaultValue '') `
             -Thumbprint $thumbprint
+        if ($record) {
+            [void]$script:ServersAndStorageSharePointUploads.Add($record)
+        }
         Write-Log "SharePoint upload requested: $LocalFilePath"
+        return $record
     }
     catch {
         Write-Log "SharePoint upload failed (non-blocking): $($_.Exception.Message)" "WARN"
     }
+}
+
+function ConvertTo-ServersAndStorageEmailHtmlText {
+    param([AllowNull()]$Value)
+
+    if (Get-Command ConvertTo-CoreSmartM365EmailHtmlText -ErrorAction SilentlyContinue) {
+        return ConvertTo-CoreSmartM365EmailHtmlText -Value $Value
+    }
+
+    if ($null -eq $Value) { return '' }
+    return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+function New-ServersAndStorageEmailLinkHtml {
+    param(
+        [AllowNull()][string]$Text,
+        [AllowNull()][string]$Url
+    )
+
+    $safeText = ConvertTo-ServersAndStorageEmailHtmlText -Value $Text
+    if (-not [string]::IsNullOrWhiteSpace($Url)) {
+        $safeUrl = ConvertTo-ServersAndStorageEmailHtmlText -Value $Url
+        return "<a href=`"$safeUrl`" style=`"color:#2563eb;text-decoration:underline;`">$safeText</a>"
+    }
+
+    return $safeText
+}
+
+function New-ServersAndStorageSharePointLinksSectionHtml {
+    param([array]$UploadRecords)
+
+    $records = @($UploadRecords | Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace([string]$_.WebUrl) })
+    if ($records.Count -eq 0) { return $null }
+
+    $rowsHtml = foreach ($record in $records) {
+        $label = if ($record.FileName) { [string]$record.FileName } else { [string]$record.SharePointPath }
+        $pathText = if ($record.SharePointPath) { [string]$record.SharePointPath } else { [string]$record.WebUrl }
+        $linkHtml = New-ServersAndStorageEmailLinkHtml -Text $pathText -Url ([string]$record.WebUrl)
+        "<tr><td style=`"width:220px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $label)</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;word-break:break-all;`">$linkHtml</td></tr>"
+    }
+
+    return @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  $($rowsHtml -join "`n")
+</table>
+"@
 }
 
 function Send-ServersAndStorageHtmlReport {
@@ -316,7 +420,16 @@ function Send-ServersAndStorageHtmlReport {
         [string]$Subject,
 
         [Parameter(Mandatory)]
-        [string[]]$Attachments
+        [string[]]$Attachments,
+
+        [Parameter(Mandatory)]
+        [pscustomobject]$Summary,
+
+        [Parameter(Mandatory)]
+        [array]$PerServerSummary,
+
+        [Parameter(Mandatory)]
+        [array]$ReadinessInventory
     )
 
     if (-not (Test-Path -LiteralPath $HtmlReportPath -PathType Leaf)) {
@@ -334,8 +447,88 @@ function Send-ServersAndStorageHtmlReport {
     $smtpServer = [string](Get-SmartM365EffectiveConfigValue -Name 'SmtpServer' -DefaultValue '')
     $sendMailMode = [string](Get-SmartM365EffectiveConfigValue -Name 'SendMailMode' -DefaultValue '')
     $cc = [string](Get-SmartM365EffectiveConfigValue -Name 'Cc' -DefaultValue '')
-    $bodyHtml = Get-Content -LiteralPath $HtmlReportPath -Raw -ErrorAction Stop
     $existingAttachments = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+
+    $summaryRows = @(
+        [pscustomobject]@{ Label = 'Exchange servers'; Value = $Summary.ExchangeServersCount }
+        [pscustomobject]@{ Label = 'Total memory (TB)'; Value = $Summary.TotalMemoryTB }
+        [pscustomobject]@{ Label = 'Total logical disk size (TB)'; Value = $Summary.TotalLogicalDiskSizeTB }
+        [pscustomobject]@{ Label = 'Logical disk free (TB)'; Value = $Summary.TotalLogicalDiskFreeTB }
+        [pscustomobject]@{ Label = 'Low space warnings'; Value = $Summary.LowSpaceWarnings }
+        [pscustomobject]@{ Label = 'Readiness warnings'; Value = $Summary.ExchangeReadinessWarnings }
+        [pscustomobject]@{ Label = 'Readiness errors'; Value = $Summary.ExchangeReadinessErrors }
+    )
+
+    $sections = @()
+    $perServerRows = @($PerServerSummary | Sort-Object ExchangeServerName | Select-Object -First 50)
+    if ($perServerRows.Count -gt 0) {
+        $serverRowsHtml = foreach ($server in $perServerRows) {
+            "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.ExchangeServerName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.ServerRole)</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.MemoryGB)</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.LogicalDiskFreeGB)</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#92400e;font-weight:700;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.LowSpaceLogicalDiskCount)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.LogicalDiskCollectionStatus)</td></tr>"
+        }
+        $serversSectionHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Server</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Role</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Memory GB</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Free GB</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Low disks</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Disk status</th>
+  </tr>
+  $($serverRowsHtml -join "`n")
+</table>
+"@
+        $sections += [pscustomobject]@{ Title = 'Server preview'; Html = $serversSectionHtml }
+    }
+
+    $readinessRows = @($ReadinessInventory | Where-Object { $_.CollectionStatus -eq 'ERROR' -or $_.CollectionStatus -eq 'WARNING' -or $_.Importance -eq 'Error' -or $_.Importance -eq 'Warning' } | Select-Object -First 25)
+    if ($readinessRows.Count -gt 0) {
+        $readinessRowsHtml = foreach ($row in $readinessRows) {
+            "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $row.Category)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $row.Setting)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $row.Value)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $row.Importance)</td></tr>"
+        }
+        $readinessSectionHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Category</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Setting</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Value</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Importance</th>
+  </tr>
+  $($readinessRowsHtml -join "`n")
+</table>
+"@
+        $sections += [pscustomobject]@{ Title = 'Top readiness warnings'; Html = $readinessSectionHtml }
+    }
+
+    $sharePointSectionHtml = New-ServersAndStorageSharePointLinksSectionHtml -UploadRecords $script:ServersAndStorageSharePointUploads
+    if ($sharePointSectionHtml) {
+        $sections += [pscustomobject]@{ Title = 'SharePoint links'; Html = $sharePointSectionHtml }
+    }
+
+    $latestCsvFolder = [string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')
+    $pathRows = @(
+        [pscustomobject]@{ Label = 'DATA-ALL run'; Path = $OutputFolder }
+        [pscustomobject]@{ Label = 'DATA-LAST'; Path = $latestCsvFolder }
+        [pscustomobject]@{ Label = 'LOG-ALL'; Path = $LogFolder }
+        [pscustomobject]@{ Label = 'HTML report'; Path = $HtmlReportPath }
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Path) }
+
+    $severity = if ($Summary.ExchangeReadinessErrors -gt 0 -or $Summary.LogicalDiskCollectionErrors -gt 0 -or $Summary.DiskDriveCollectionErrors -gt 0 -or $Summary.ComputeCollectionErrors -gt 0) { 'Warning' } else { 'Success' }
+    $actionTitle = if ($severity -eq 'Warning') { 'Review required' } else { '' }
+    $actionHtml = if ($severity -eq 'Warning') { 'Review readiness warnings/errors and low disk capacity before Exchange decommissioning or migration decisions.' } else { '' }
+    $bodyHtml = New-CoreSmartM365EmailBody `
+        -Title $Subject `
+        -Category 'SmartM365 Exchange OnPrem' `
+        -Severity $severity `
+        -Tenant $Tenant `
+        -HostName $env:COMPUTERNAME `
+        -Message 'Exchange on-premises infrastructure and migration readiness inventory completed.' `
+        -ActionTitle $actionTitle `
+        -ActionHtml $actionHtml `
+        -SummaryRows $summaryRows `
+        -Sections $sections `
+        -PathRows $pathRows `
+        -Footer 'This automated message was generated by SmartM365. Use the exported CSV files and SharePoint links as the source of truth.'
 
     $mailParams = @{
         From        = $from
@@ -348,7 +541,7 @@ function Send-ServersAndStorageHtmlReport {
     if (-not [string]::IsNullOrWhiteSpace($sendMailMode)) { $mailParams['SendMailMode'] = $sendMailMode }
     if (-not [string]::IsNullOrWhiteSpace($cc)) { $mailParams['Cc'] = $cc }
 
-    SendEmailHtmlReport @mailParams
+    Send-CoreEmailHtmlReport @mailParams
 }
 function Export-ServersAndStorageCsv {
     param(
@@ -359,9 +552,41 @@ function Export-ServersAndStorageCsv {
 
     Import-SmartM365CoreModule
     Publish-CoreSmartM365Csv -Data @($Data) -TimestampedPath $Path -Delimiter ';' -NoSharePointUpload | Out-Null
+    $script:ServersAndStorageGeneratedCsvPaths.Add($Path) | Out-Null
     Invoke-ServersAndStorageSharePointUpload -LocalFilePath $Path
+
+    $latestCsvFolder = [string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')
+    if (-not [string]::IsNullOrWhiteSpace($latestCsvFolder)) {
+        Ensure-Directory -Path $latestCsvFolder
+        $latestPath = Join-Path -Path $latestCsvFolder -ChildPath (Split-Path -Path $Path -Leaf)
+        Copy-Item -LiteralPath $Path -Destination $latestPath -Force -ErrorAction Stop
+        $script:ServersAndStorageGeneratedCsvPaths.Add($latestPath) | Out-Null
+        Write-Log ("CSV latest copy written to: {0}" -f $latestPath)
+        Invoke-ServersAndStorageSharePointUpload -LocalFilePath $latestPath
+    }
 }
 
+function Save-ServersAndStorageWeeklyHistory {
+    $weeklyHistoryEnabled = [bool](Get-SmartM365EffectiveConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $true)
+    if (-not $weeklyHistoryEnabled) { return }
+
+    $weeklyHistoryPath = [string](Get-SmartM365EffectiveConfigValue -Name 'WeeklyHistoryFolderPath' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($weeklyHistoryPath)) { return }
+
+    $weeklyHistoryPath = Resolve-SmartM365ConfigTokenValue -Value $weeklyHistoryPath
+    $sourceCsvPaths = @($script:ServersAndStorageGeneratedCsvPaths | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -Unique)
+    if ($sourceCsvPaths.Count -eq 0) { return }
+
+    try {
+        Import-SmartM365CoreModule
+        if (Get-Command Add-CoreSmartM365WeeklyHistory -ErrorAction SilentlyContinue) {
+            Add-CoreSmartM365WeeklyHistory -SourceCsvPaths $sourceCsvPaths -HistoryRootPath $weeklyHistoryPath -RetentionWeeks ([int](Get-SmartM365EffectiveConfigValue -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)) -HistoryLabel 'Exchange on-prem infrastructure and readiness' | Out-Null
+        }
+    }
+    catch {
+        Write-Log "Weekly history upload failed (non-blocking): $($_.Exception.Message)" 'WARN'
+    }
+}
 function Test-ExchangeShell {
     if ($PSVersionTable.PSEdition -ne 'Desktop') {
         throw "Exchange 2016 snap-ins require Windows PowerShell 5.1. Run with C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe."
@@ -1268,8 +1493,13 @@ td.num, th.num { text-align: right; }
     Set-Content -Path $Path -Value $html -Encoding UTF8
 }
 
+$StartTime = Get-Date
+
 try {
     Ensure-Directory -Path $OutputFolder
+    Ensure-Directory -Path $LogFolder
+    Start-Transcript -Path $TranscriptFile -Append | Out-Null
+    $script:TranscriptStarted = $true
     Write-Log "Starting $ScriptName v$ScriptVersion. RunId: $RunId"
     Write-Log "Output folder: $OutputFolder"
     Write-Log "Collection method: WMI/DCOM only"
@@ -1476,17 +1706,25 @@ try {
     $htmlSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_InfrastructureAndReadiness_Report.html"
     New-HtmlExecutiveSummary -Summary $summary -PerServerSummary $perServerSummary -ReadinessInventory $exchangeReadinessInventory -Path $htmlSummaryPath
     Write-Log "HTML executive summary exported to: $htmlSummaryPath"
+    Invoke-ServersAndStorageSharePointUpload -LocalFilePath $htmlSummaryPath
+    Save-ServersAndStorageWeeklyHistory
 
     $mailSubject = "SmartM365 Exchange OnPrem Servers and Storage inventory - $RunId"
     Send-ServersAndStorageHtmlReport `
         -HtmlReportPath $htmlSummaryPath `
         -Subject $mailSubject `
-        -Attachments @($htmlSummaryPath, $summaryPath, $perServerSummaryPath, $exchangeReadinessPath)
+        -Attachments @($htmlSummaryPath, $summaryPath, $perServerSummaryPath, $exchangeReadinessPath) `
+        -Summary $summary `
+        -PerServerSummary @($perServerSummary) `
+        -ReadinessInventory @($exchangeReadinessInventory)
     Write-Log "HTML executive summary email sent."
 
     Write-Log "Completed successfully."
+    Complete-ServersAndStorageRun -Status 'Success' -Started $StartTime -ErrorMessage $null
 }
 catch {
-    Write-Log -Level "ERROR" -Message $_.Exception.Message
+    $message = $_.Exception.Message
+    try { Write-Log -Level "ERROR" -Message $message } catch {}
+    try { Complete-ServersAndStorageRun -Status 'Failed' -Started $StartTime -ErrorMessage $message } catch {}
     throw
 }
