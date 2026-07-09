@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.6
+1.7
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -327,7 +327,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -1943,7 +1943,31 @@ try {
             }
         }
         catch {
-            WriteLog -Message ("Duplicate user identity analysis failed: {0}" -f $_)
+            $duplicateAnalysisError = $_
+            WriteLog -Message ("Duplicate user identity analysis failed: {0}" -f $duplicateAnalysisError)
+
+            try {
+                $emailSubject = "[ERROR] SmartM365 Active Directory duplicate identity analysis"
+                $emailBody = @"
+<html>
+<body>
+    <h3>Active Directory Duplicate Identity Analysis - Error</h3>
+    <p><b>Script:</b> $($MyInvocation.MyCommand.Name)</p>
+    <p><b>Version:</b> $ScriptVersion</p>
+    <p><b>Tenant:</b> $Tenant</p>
+    <p><b>Host:</b> $env:COMPUTERNAME</p>
+    <p><b>Date:</b> $(Get-Date)</p>
+    <p><b>Error:</b></p>
+    <pre>$duplicateAnalysisError</pre>
+</body>
+</html>
+"@
+                Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
+                WriteLog -Message "Duplicate identity analysis error email notification sent."
+            }
+            catch {
+                WriteLog -Message ("Failed to send duplicate identity analysis error email notification: {0}" -f $_)
+            }
         }
     }
     else {
