@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.8
+1.9
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -313,7 +313,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.8"
+    $ScriptVersion = "1.9"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -657,9 +657,12 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         Write-Host "Email address policy enabled recipients: $policyEnabledCount. Details are available in the detail CSV."
     }
 
-    Publish-SmartM365Csv -Data @($results | Sort-Object Status, Identity) -TimestampedPath $outDetail -LatestPath $latestDetail | Out-Null
+    $publishResults = @()
+    $detailPublish = Publish-SmartM365Csv -Data @($results | Sort-Object Status, Identity) -TimestampedPath $outDetail -LatestPath $latestDetail
+    if ($detailPublish) { $publishResults += $detailPublish }
     if ($addedOperations.Count -gt 0) {
-        Publish-SmartM365Csv -Data @($addedOperations) -TimestampedPath $outAdded -LatestPath $latestAdded | Out-Null
+        $addedPublish = Publish-SmartM365Csv -Data @($addedOperations) -TimestampedPath $outAdded -LatestPath $latestAdded
+        if ($addedPublish) { $publishResults += $addedPublish }
     }
 
     # Dedicated CSV for "missing but in allowlist" (exclude Added)
@@ -667,7 +670,8 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         $_.AllowListMatch -and $_.Status -like 'Missing*' -and $_.Status -notlike '*NotInAllowList*' -and $_.Status -ne 'Added'
     }
     if ($allowMissing.Count -gt 0) {
-        Publish-SmartM365Csv -Data @($allowMissing | Select-Object Identity, DisplayName, PrimaryAddress, ExpectedAddress, Status, EmailAddressPolicyEnabled, PolicyWarning) -TimestampedPath $outAllowMissing -LatestPath $latestAllowMissing | Out-Null
+        $allowMissingPublish = Publish-SmartM365Csv -Data @($allowMissing | Select-Object Identity, DisplayName, PrimaryAddress, ExpectedAddress, Status, EmailAddressPolicyEnabled, PolicyWarning) -TimestampedPath $outAllowMissing -LatestPath $latestAllowMissing
+        if ($allowMissingPublish) { $publishResults += $allowMissingPublish }
     }
 
     $summary = @(
@@ -684,7 +688,8 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount },
         [PSCustomObject]@{ Summary = "Allowlist entries loaded";              Count = $script:AllowListRowCount }
     )
-    Publish-SmartM365Csv -Data @($summary) -TimestampedPath $outSummary -LatestPath $latestSummary | Out-Null
+    $summaryPublish = Publish-SmartM365Csv -Data @($summary) -TimestampedPath $outSummary -LatestPath $latestSummary
+    if ($summaryPublish) { $publishResults += $summaryPublish }
 
     Write-Host "`n===== Summary ====="
     foreach ($item in $summary) {
@@ -706,18 +711,14 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
 # === Email notification ====
 # ===========================
 try {
-    # HTML encoding helper
-    Add-Type -AssemblyName System.Web | Out-Null
-    function Encode([string]$s) { return [System.Web.HttpUtility]::HtmlEncode($s) }
+    function Encode([string]$s) { return (ConvertTo-SmartM365EmailHtmlText $s) }
 
-    # Recipients (support ; or ,)
     $MailTo = @($To) -split '[;,]\s*' | Where-Object { $_ -and $_.Trim() -ne '' }
     $MailCc = @($Cc) -split '[;,]\s*' | Where-Object { $_ -and $_.Trim() -ne '' }
 
     $MailFrom    = $From
     $MailSubject = $Subject
 
-    # Attach CSV reports
     $attachments = @()
     if (Test-Path $outDetail)        { $attachments += $outDetail }
     if (Test-Path $outSummary)       { $attachments += $outSummary }
@@ -728,125 +729,101 @@ try {
         Write-Host "Email skipped: incomplete email parameters (From/To)."
     }
     else {
-        $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         $totalCount = [int](($summary | Where-Object { $_.Summary -eq 'Total recipients processed' } | Select-Object -First 1).Count)
         $presentCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address present' } | Select-Object -First 1).Count)
         $missingCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address missing' } | Select-Object -First 1).Count)
         $allowMissingCount = [int](($summary | Where-Object { $_.Summary -eq 'With missing but in allowlist' } | Select-Object -First 1).Count)
         $notAllowMissingCount = [int](($summary | Where-Object { $_.Summary -eq 'With missing but NOT in allowlist' } | Select-Object -First 1).Count)
         $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
-        $modeLabel = if ($AddMissingAddress) { 'Write mode' } else { 'Read-only mode' }
-        $modeColor = if ($AddMissingAddress) { '#b45309' } else { '#047857' }
-        $allowListMode = if ($SkipAllowListCsv) { 'Allowlist skipped' } else { 'Allowlist enforced' }
+        $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
         $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SendMailMode)) { if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' } } else { $SendMailMode.Trim() }
-        $transportLabel = switch ($effectiveSendMailMode) { 'Graph' { 'Microsoft Graph' } 'SMTP' { "SMTP $SmtpServer`:$SmtpPort" } 'Both' { "Microsoft Graph with SMTP fallback $SmtpServer`:$SmtpPort" } default { $effectiveSendMailMode } }
 
-        # Build summary table rows
-        $rowsSummary = foreach ($row in $summary) {
-            "<tr><td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#334155;'>$(Encode $row.Summary)</td><td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700;color:#0f172a;'>$([string]$row.Count)</td></tr>"
-        }
+        $summaryRowsForEmail = @(
+            [pscustomobject]@{ Label = 'Total recipients processed'; Value = $totalCount }
+            [pscustomobject]@{ Label = 'With expected address present'; Value = $presentCount }
+            [pscustomobject]@{ Label = 'With expected address missing'; Value = $missingCount }
+            [pscustomobject]@{ Label = 'Missing but in allowlist'; Value = $allowMissingCount }
+            [pscustomobject]@{ Label = 'Missing but not in allowlist'; Value = $notAllowMissingCount }
+            [pscustomobject]@{ Label = 'Email address policy enabled'; Value = $policyEnabledCountForMail }
+            [pscustomobject]@{ Label = 'Addresses added'; Value = $addedCount }
+        )
 
-        # Build HTML section listing "missing but in allowlist"
-        if (-not $allowMissing) {
-            $allowMissing = $results | Where-Object {
-                $_.AllowListMatch -and $_.Status -like 'Missing*' -and $_.Status -notlike '*NotInAllowList*' -and $_.Status -ne 'Added'
+        $pathRows = @(
+            [pscustomobject]@{ Label = 'Detail CSV'; Path = $outDetail }
+            [pscustomobject]@{ Label = 'Summary CSV'; Path = $outSummary }
+        )
+        if (Test-Path $outAdded) { $pathRows += [pscustomobject]@{ Label = 'Added CSV'; Path = $outAdded } }
+        if (Test-Path $outAllowMissing) { $pathRows += [pscustomobject]@{ Label = 'Allowlist missing CSV'; Path = $outAllowMissing } }
+
+        $scopeHtml = if ($AllOrganizationalUnit) { 'ALL (entire forest)' } else { ($OrganizationalUnit | ForEach-Object { Encode $_ }) -join '<br/>' }
+        $modeLabel = if ($AddMissingAddress) { 'Write mode' } else { 'Read-only mode' }
+        $allowListMode = if ($SkipAllowListCsv) { 'Allowlist skipped' } else { 'Allowlist enforced' }
+        $scopeSectionHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr><td style="width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Mode</td><td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(Encode $modeLabel)</td></tr>
+  <tr><td style="width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Allowlist</td><td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(Encode $allowListMode)</td></tr>
+  <tr><td style="width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Expected suffix</td><td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(Encode $ExpectedSuffix)</td></tr>
+  <tr><td style="width:180px;background:#f8fafc;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Scope</td><td style="padding:10px 12px;font-size:13px;color:#334155;word-break:break-all;">$scopeHtml</td></tr>
+</table>
+"@
+
+        $sections = @([pscustomobject]@{ Title = 'Scope'; Html = $scopeSectionHtml })
+
+        $missingPreviewRows = @($results | Where-Object { $_.Status -like 'Missing*' } | Sort-Object Status, DisplayName | Select-Object -First 50)
+        if ($missingPreviewRows.Count -gt 0) {
+            $missingRowsHtml = foreach ($row in $missingPreviewRows) {
+                "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.DisplayName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.PrimaryAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.ExpectedAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(Encode $row.Status)</td></tr>"
             }
-        }
-
-        $rowsAllow = foreach ($row in ($allowMissing | Sort-Object DisplayName)) {
-            "<tr><td style='padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#0f172a;'>$(Encode $row.DisplayName)</td><td style='padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#475569;'>$(Encode $row.PrimaryAddress)</td><td style='padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#475569;'>$(Encode $row.ExpectedAddress)</td><td style='padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#b45309;font-weight:600;'>$(Encode $row.Status)</td></tr>"
-        }
-
-        $allowSection = if (@($allowMissing).Count -gt 0) {
-@"
-<div style="margin-top:22px;">
-  <h3 style="margin:0 0 10px 0;font-size:16px;color:#0f172a;">Allowlisted missing addresses</h3>
-  <table role="presentation" style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-    <thead>
-      <tr style="background:#f8fafc;">
-        <th style="padding:10px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Display name</th>
-        <th style="padding:10px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Primary SMTP</th>
-        <th style="padding:10px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Expected proxy</th>
-        <th style="padding:10px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      $($rowsAllow -join "`n")
-    </tbody>
-  </table>
-</div>
+            $missingSectionHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Display name</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Primary SMTP</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Expected proxy</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Status</th>
+  </tr>
+  $($missingRowsHtml -join "`n")
+</table>
 "@
-        } else {
-            '<div style="margin-top:22px;padding:14px 16px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;color:#166534;font-weight:600;">No allowlisted mailbox is missing the expected address.</div>'
+            $sections += [pscustomobject]@{ Title = 'Top 50 missing proxy addresses'; Html = $missingSectionHtml }
         }
 
-        # OU section text
-        $ouHtml = if ($AllOrganizationalUnit) { "ALL (entire forest)" } else { ($OrganizationalUnit | ForEach-Object { Encode $_ }) -join "<br/>" }
-        $attachmentNames = @($attachments | ForEach-Object { "<code style='background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:2px 5px;color:#334155;'>$(Encode (Split-Path -Leaf $_))</code>" }) -join ' '
-
-        $body = @"
-<html>
-  <body style="margin:0;padding:0;background:#f6f8fb;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
-    <div style="max-width:980px;margin:0 auto;padding:24px;">
-      <div style="background:#ffffff;border:1px solid #dbe3ef;border-radius:10px;overflow:hidden;">
-        <div style="background:linear-gradient(135deg,#0f766e,#2563eb);padding:22px 26px;color:#ffffff;">
-          <div style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.9;">Smart365 Exchange OnPrem</div>
-          <h1 style="margin:6px 0 0 0;font-size:24px;line-height:1.25;">$(Encode $MailSubject)</h1>
-          <div style="margin-top:10px;font-size:13px;opacity:.95;">Generated $now - Transport: $(Encode $transportLabel)</div>
-        </div>
-
-        <div style="padding:22px 26px;">
-          <div style="margin-bottom:18px;">
-            <span style="display:inline-block;background:$modeColor;color:#ffffff;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;">$modeLabel</span>
-            <span style="display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;margin-left:6px;">$allowListMode</span>
-          </div>
-
-          <table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:20px;">
-            <tr>
-              <td style="width:20%;padding:0 8px 8px 0;"><div style="border:1px solid #dbe3ef;border-radius:8px;padding:14px;background:#f8fafc;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:700;">Total checked</div><div style="font-size:26px;font-weight:800;color:#0f172a;margin-top:4px;">$totalCount</div></div></td>
-              <td style="width:20%;padding:0 8px 8px 0;"><div style="border:1px solid #bbf7d0;border-radius:8px;padding:14px;background:#f0fdf4;"><div style="font-size:11px;text-transform:uppercase;color:#166534;font-weight:700;">Present</div><div style="font-size:26px;font-weight:800;color:#166534;margin-top:4px;">$presentCount</div></div></td>
-              <td style="width:20%;padding:0 8px 8px 0;"><div style="border:1px solid #fed7aa;border-radius:8px;padding:14px;background:#fff7ed;"><div style="font-size:11px;text-transform:uppercase;color:#9a3412;font-weight:700;">Missing</div><div style="font-size:26px;font-weight:800;color:#9a3412;margin-top:4px;">$missingCount</div></div></td>
-              <td style="width:20%;padding:0 8px 8px 0;"><div style="border:1px solid #bfdbfe;border-radius:8px;padding:14px;background:#eff6ff;"><div style="font-size:11px;text-transform:uppercase;color:#1d4ed8;font-weight:700;">Allowlisted</div><div style="font-size:26px;font-weight:800;color:#1d4ed8;margin-top:4px;">$allowMissingCount</div></div></td>
-              <td style="width:20%;padding:0 0 8px 0;"><div style="border:1px solid #e9d5ff;border-radius:8px;padding:14px;background:#faf5ff;"><div style="font-size:11px;text-transform:uppercase;color:#7e22ce;font-weight:700;">Added</div><div style="font-size:26px;font-weight:800;color:#7e22ce;margin-top:4px;">$addedCount</div></div></td>
-            </tr>
-          </table>
-
-          <div style="border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;padding:14px 16px;margin-bottom:20px;">
-            <div style="font-size:13px;color:#334155;line-height:1.55;">
-              <strong>Scope:</strong> $ouHtml<br/>
-              <strong>Expected suffix:</strong> $(Encode $ExpectedSuffix)<br/>
-              <strong>Not in allowlist:</strong> $notAllowMissingCount
-            </div>
-          </div>
-
-          <h3 style="margin:0 0 10px 0;font-size:16px;color:#0f172a;">Summary</h3>
-          <table role="presentation" style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-            <thead>
-              <tr style="background:#f8fafc;">
-                <th style="padding:10px 12px;text-align:left;color:#475569;font-size:12px;text-transform:uppercase;">Metric</th>
-                <th style="padding:10px 12px;text-align:right;color:#475569;font-size:12px;text-transform:uppercase;">Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              $($rowsSummary -join "`n")
-            </tbody>
-          </table>
-
-          $allowSection
-
-          <div style="margin-top:22px;padding-top:14px;border-top:1px solid #e5e7eb;color:#64748b;font-size:12px;line-height:1.6;">
-            Detailed CSV reports are attached.<br/>
-            $attachmentNames
-          </div>
-        </div>
-      </div>
-    </div>
-  </body>
-</html>
+        $sharePointRecords = @($publishResults | ForEach-Object { $_.SharePointUploads } | Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace([string]$_.WebUrl) })
+        if ($sharePointRecords.Count -gt 0) {
+            $sharePointRowsHtml = foreach ($record in $sharePointRecords) {
+                $label = if ($record.FileName) { [string]$record.FileName } else { [string]$record.SharePointPath }
+                $pathText = if ($record.SharePointPath) { [string]$record.SharePointPath } else { [string]$record.WebUrl }
+                "<tr><td style=`"width:220px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;`">$(Encode $label)</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;word-break:break-all;`"><a href=`"$(Encode $record.WebUrl)`" style=`"color:#2563eb;text-decoration:underline;`">$(Encode $pathText)</a></td></tr>"
+            }
+            $sharePointSectionHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  $($sharePointRowsHtml -join "`n")
+</table>
 "@
+            $sections += [pscustomobject]@{ Title = 'SharePoint links'; Html = $sharePointSectionHtml }
+        }
+
+        $severity = if ($AddMissingAddress -and $addedCount -gt 0) { 'Success' } elseif ($missingCount -gt 0) { 'Warning' } else { 'Success' }
+        $actionTitle = if ($missingCount -gt 0) { 'Review required' } else { '' }
+        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Use write mode only after validating the scope and allowlist decision.' } else { '' }
+        $message = if ($missingCount -gt 0) { 'Exchange on-premises proxy address audit found missing expected proxy addresses.' } else { 'Exchange on-premises proxy address audit completed without missing expected proxy addresses.' }
+
+        $body = New-SmartM365EmailBody `
+            -Title $MailSubject `
+            -Category 'SmartM365 Exchange OnPrem' `
+            -Severity $severity `
+            -Tenant $Tenant `
+            -HostName $env:COMPUTERNAME `
+            -Message $message `
+            -ActionTitle $actionTitle `
+            -ActionHtml $actionHtml `
+            -SummaryRows $summaryRowsForEmail `
+            -PathRows $pathRows `
+            -Sections $sections `
+            -Footer 'This automated message was generated by SmartM365. Use the exported CSV files and SharePoint links as the source of truth.'
 
         SendEmailHtmlReport -SendMailMode $effectiveSendMailMode -SmtpServer $SmtpServer -SmtpPort $SmtpPort -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments
-        Write-Host "Email sent to '$($MailTo -join ';')' via $transportLabel."
+        Write-Host "Email sent to '$($MailTo -join ';')' via $effectiveSendMailMode."
     }
 } catch {
     Write-Warning "Email send failed: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
@@ -868,6 +845,19 @@ try {
 	RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
     WriteLog -Message "$TaskName completed."
+    try {
+        $smartM365TranscriptPath = $null
+        $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+        if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) {
+            $smartM365TranscriptPath = $smartM365TranscriptVariable.Value
+        }
+        else {
+            $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+            if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value }
+        }
+        Stop-Transcript | Out-Null
+        if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath }
+    }
+    catch {}
     Complete-SmartM365ExecutionContext -Status Success
-    Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
     #endregion
