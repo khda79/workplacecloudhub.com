@@ -21,5 +21,5 @@
   "SharePointSiteHostname": "contoso.sharepoint.com",
   "SharePointSitePath": "/sites/smartm365",
   "SharePointLibraryDisplayName": "Documents",
-  "SharePointTargetFolderPath": "SmartM365/CSV"
+  "SharePointTargetFolderPath": "SMART-M365/DATA"
 }

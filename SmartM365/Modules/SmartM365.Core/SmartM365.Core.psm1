@@ -549,6 +549,16 @@ function Complete-SmartM365ExecutionContext {
         }
     }
 
+    # Upload run log files to SharePoint after transcript closure, when available.
+    $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+        Sort-Object -Unique
+    foreach ($logUploadCandidate in $logUploadCandidates) {
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $logUploadCandidate | Out-Null
+    }
+    if ($global:SmartM365SharePointUploadedFiles) {
+        $summary['SharePointUploads'] = @($global:SmartM365SharePointUploadedFiles).Count
+    }
     WriteLog -Message 'Execution summary:' -Level 'INFO'
     foreach ($key in $summary.Keys) {
         $value = $summary[$key]
@@ -894,8 +904,15 @@ function Publish-SmartM365Csv {
         }
     }
 
+    $sharePointUploads = @()
     if (-not $NoSharePointUpload) {
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $publishedPath
+        $uploadCandidates = @($TimestampedPath)
+        if (-not [string]::IsNullOrWhiteSpace($LatestPath)) { $uploadCandidates += $LatestPath }
+        foreach ($uploadCandidate in @($uploadCandidates | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)) {
+            if (-not (Test-Path -LiteralPath $uploadCandidate)) { continue }
+            $uploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $uploadCandidate
+            if ($uploadRecord) { $sharePointUploads += $uploadRecord }
+        }
     }
 
     Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($publishedPath) -TimestampedPath $TimestampedPath
@@ -904,6 +921,7 @@ function Publish-SmartM365Csv {
         TimestampedPath = $TimestampedPath
         LatestPath      = $LatestPath
         PublishedPath   = $publishedPath
+        SharePointUploads = $sharePointUploads
     }
 }
 
@@ -2204,6 +2222,7 @@ function Invoke-SmartM365SharePointLargeFileUpload {
     }
 
     $uploadUrl = [string]$session.uploadUrl
+    $lastUploadResponse = $null
     $stream = [System.IO.File]::OpenRead($LocalFilePath)
     try {
         $buffer = New-Object byte[] $ChunkSizeBytes
@@ -2232,7 +2251,8 @@ function Invoke-SmartM365SharePointLargeFileUpload {
             $uploaded = $false
             for ($attempt = 1; -not $uploaded -and $attempt -le 4; $attempt++) {
                 try {
-                    Invoke-RestMethod -Method Put -Uri $uploadUrl -Headers $headers -Body $chunk -ErrorAction Stop | Out-Null
+                    $uploadResponse = Invoke-RestMethod -Method Put -Uri $uploadUrl -Headers $headers -Body $chunk -ErrorAction Stop
+                    if ($uploadResponse) { $lastUploadResponse = $uploadResponse }
                     $uploaded = $true
                 }
                 catch {
@@ -2253,7 +2273,71 @@ function Invoke-SmartM365SharePointLargeFileUpload {
     finally {
         $stream.Dispose()
     }
+    return $lastUploadResponse
 }
+function ConvertTo-SmartM365SharePointDataRootPath {
+    [CmdletBinding()]
+    param([AllowNull()][string]$TargetFolderPath)
+
+    if ([string]::IsNullOrWhiteSpace($TargetFolderPath)) { return $TargetFolderPath }
+
+    $normalized = ([string]$TargetFolderPath -replace '\\', '/').Trim('/')
+    if ($normalized -match '^(?<Parent>.*?)(?:/)?CSV$') {
+        $parent = [string]$matches['Parent']
+        if ([string]::IsNullOrWhiteSpace($parent)) { return 'DATA' }
+        return ($parent.TrimEnd('/') + '/DATA')
+    }
+
+    return $normalized
+}
+
+function Get-SmartM365SharePointRelativeFilePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$LocalFilePath)
+
+    try { $normalizedPath = [System.IO.Path]::GetFullPath($LocalFilePath) }
+    catch { $normalizedPath = [string]$LocalFilePath }
+
+    $normalizedPath = $normalizedPath -replace '/', '\'
+    foreach ($rootName in @('DATA-LAST','DATA-ALL','LOG-ALL')) {
+        $match = [regex]::Match($normalizedPath, ('\\' + [regex]::Escape($rootName) + '\\'), [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($match.Success) {
+            $relativePath = $normalizedPath.Substring($match.Index + 1)
+            return (($relativePath -replace '\\', '/').Trim('/'))
+        }
+    }
+
+    return [System.IO.Path]::GetFileName($LocalFilePath)
+}
+
+function Add-SmartM365SharePointUploadRecord {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LocalFilePath,
+        [Parameter(Mandatory)][string]$SharePointPath,
+        [Parameter(Mandatory)][string]$DriveId,
+        [AllowNull()]$DriveItem
+    )
+
+    $fileInfo = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
+    $record = [pscustomobject][ordered]@{
+        LocalFilePath  = $fileInfo.FullName
+        FileName       = $fileInfo.Name
+        SharePointPath = $SharePointPath
+        WebUrl         = if ($DriveItem -and $DriveItem.webUrl) { [string]$DriveItem.webUrl } else { '' }
+        DriveId        = $DriveId
+        ItemId         = if ($DriveItem -and $DriveItem.id) { [string]$DriveItem.id } else { '' }
+        Size           = $fileInfo.Length
+        UploadedAt     = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
+    }
+
+    if (-not $global:SmartM365SharePointUploadedFiles) {
+        $global:SmartM365SharePointUploadedFiles = New-Object System.Collections.ArrayList
+    }
+    [void]$global:SmartM365SharePointUploadedFiles.Add($record)
+    return $record
+}
+
 function Invoke-SmartM365SharePointCsvUpload {
     [CmdletBinding()]
     param(
@@ -2270,7 +2354,7 @@ function Invoke-SmartM365SharePointCsvUpload {
 
     if (-not $Enabled) { return }
     if (-not (Test-Path -LiteralPath $LocalFilePath)) {
-        WriteLog -Message "SharePoint upload skipped: local CSV not found: $LocalFilePath" -Level "WARNING"
+        WriteLog -Message "SharePoint upload skipped: local file not found: $LocalFilePath" -Level "WARNING"
         return
     }
     if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) {
@@ -2308,26 +2392,41 @@ function Invoke-SmartM365SharePointCsvUpload {
         }
 
         $fileInfo = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
-        $fileName = $fileInfo.Name
-        $targetPath = ConvertTo-GraphDrivePath (Join-Path -Path $TargetFolderPath -ChildPath $fileName)
+        $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
+        $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $fileInfo.FullName
+        $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
+        $targetPath = ConvertTo-GraphDrivePath $sharePointPath
         $largeUploadThresholdBytes = 250MB
+        $uploadedItem = $null
+
         if ($fileInfo.Length -gt $largeUploadThresholdBytes) {
-            WriteLog -Message ("SharePoint CSV large upload started: {0}/{1} ({2:N1} MB)" -f $TargetFolderPath, $fileName, ($fileInfo.Length / 1MB))
-            Invoke-SmartM365SharePointLargeFileUpload -LocalFilePath $LocalFilePath -DriveId $driveId -TargetPath $targetPath
-            WriteLog -Message "SharePoint CSV uploaded: $TargetFolderPath/$fileName"
-            return
+            WriteLog -Message ("SharePoint large file upload started: {0} ({1:N1} MB)" -f $sharePointPath, ($fileInfo.Length / 1MB))
+            $uploadedItem = Invoke-SmartM365SharePointLargeFileUpload -LocalFilePath $fileInfo.FullName -DriveId $driveId -TargetPath $targetPath
+        }
+        else {
+            $bytes = [System.IO.File]::ReadAllBytes($fileInfo.FullName)
+            $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
+            $uploadedItem = Invoke-SmartM365GraphRestWithRetry -Method PUT -Uri $uri -Body $bytes -ContentType 'application/octet-stream' -Operation 'Upload SharePoint file'
         }
 
-        $bytes = [System.IO.File]::ReadAllBytes($LocalFilePath)
-        $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
-        Invoke-SmartM365GraphRestWithRetry -Method PUT -Uri $uri -Body $bytes -ContentType 'application/octet-stream' -Operation 'Upload SharePoint CSV' | Out-Null
-        WriteLog -Message "SharePoint CSV uploaded: $TargetFolderPath/$fileName"
+        if (-not $uploadedItem -or (-not $uploadedItem.webUrl -and -not $uploadedItem.id)) {
+            $itemUri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}" -f $driveId, $targetPath
+            $uploadedItem = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri $itemUri -Operation 'Resolve uploaded SharePoint file'
+        }
+
+        $record = Add-SmartM365SharePointUploadRecord -LocalFilePath $fileInfo.FullName -SharePointPath $sharePointPath -DriveId $driveId -DriveItem $uploadedItem
+        if (-not [string]::IsNullOrWhiteSpace($record.WebUrl)) {
+            WriteLog -Message ("SharePoint file uploaded: {0} ({1})" -f $record.SharePointPath, $record.WebUrl)
+        }
+        else {
+            WriteLog -Message ("SharePoint file uploaded: {0}" -f $record.SharePointPath)
+        }
+        return $record
     }
     catch {
         WriteLog -Message ("SharePoint upload failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
     }
 }
-
 function ExportAndCopyCsv {
     [CmdletBinding()]
     param (
@@ -3032,7 +3131,7 @@ Export-ModuleMember -Function `
     Set-SmartM365CoreContext, Write-SmartM365CsvAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
-    TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, Invoke-SmartM365SharePointCsvUpload, `
+    TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Invoke-SmartM365SharePointCsvUpload, `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession
