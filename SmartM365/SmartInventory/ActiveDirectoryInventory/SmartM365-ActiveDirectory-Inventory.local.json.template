@@ -49,5 +49,7 @@
   "DailyReportInactiveDays": 90,
   "EnableDailyReportLock": true,
   "DailyReportLockRoot": "C:\\ProgramData\\SmartM365\\Locks",
-  "DailyReportLockName": "SmartM365-ActiveDirectory-Inventory-DailyReport"
+  "DailyReportLockName": "SmartM365-ActiveDirectory-Inventory-DailyReport",
+  "EnableDailySummaryEmail": true,
+  "DailySummaryLastSentFilePath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory\\AD_DailySummary_LastSent.txt"
 }
