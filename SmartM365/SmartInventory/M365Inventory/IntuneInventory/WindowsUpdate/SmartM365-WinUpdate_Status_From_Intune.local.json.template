@@ -23,7 +23,7 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\WindowsUpdate\\Status",
-  "ReadinessCsvPath": "{{DataAllRootPath}}\\Intune\\WindowsUpdate\\Readiness\\M365_Win11_Readiness_From_Intune.csv",
+  "ReadinessCsvPath": "{{LatestCsvFolderPath}}\\Intune_Devices_UpgradeEligibility.csv",
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\WindowsUpdate\\Status\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
