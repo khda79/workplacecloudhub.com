@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.7
+1.8
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -327,7 +327,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.8"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -1910,23 +1910,93 @@ try {
                         }
 
                         $emailSubject = "SmartM365 Active Directory duplicate identities detected"
+                        $notificationGeneratedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
+                        $htmlSourceUsersCsv = [System.Net.WebUtility]::HtmlEncode([string]$combinedUsersCsv)
+                        $htmlDuplicateUpnCsv = [System.Net.WebUtility]::HtmlEncode([string]$duplicateUpnCsv)
+                        $htmlDuplicateSmtpCsv = [System.Net.WebUtility]::HtmlEncode([string]$duplicateSmtpCsv)
+                        $htmlTenant = [System.Net.WebUtility]::HtmlEncode([string]$Tenant)
+                        $htmlHost = [System.Net.WebUtility]::HtmlEncode([string]$env:COMPUTERNAME)
+                        $htmlGeneratedAt = [System.Net.WebUtility]::HtmlEncode([string]$notificationGeneratedAt)
                         $emailBody = @"
-<html><body>
-<h2>SmartM365 Active Directory duplicate identities detected</h2>
-<p>Duplicate identity analysis found conflicts in Active Directory user data.</p>
-<ul>
-<li>Distinct duplicate UPNs: $upnDuplicateCount</li>
-<li>Affected UPN accounts: $($duplicateUpnRows.Count)</li>
-<li>Distinct duplicate SMTP addresses: $smtpDuplicateCount</li>
-<li>Affected SMTP entries: $($duplicateSmtpRows.Count)</li>
-</ul>
-<p>Source users CSV: $combinedUsersCsv</p>
-<p>Output files:</p>
-<ul>
-<li>$duplicateUpnCsv</li>
-<li>$duplicateSmtpCsv</li>
-</ul>
-</body></html>
+<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Segoe UI,Arial,sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;background:#ffffff;border:1px solid #d9e2ec;border-radius:6px;overflow:hidden;">
+          <tr>
+            <td style="background:#0f172a;color:#ffffff;padding:20px 24px;">
+              <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#93c5fd;font-weight:700;">SmartM365 Active Directory</div>
+              <div style="font-size:24px;line-height:30px;font-weight:700;margin-top:6px;">Duplicate identities detected</div>
+              <div style="font-size:13px;color:#cbd5e1;margin-top:8px;">Tenant: $htmlTenant &nbsp;|&nbsp; Host: $htmlHost &nbsp;|&nbsp; Generated: $htmlGeneratedAt</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:22px 24px 8px 24px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
+                <tr>
+                  <td style="background:#fff7ed;border:1px solid #fed7aa;border-left:5px solid #f97316;padding:12px 14px;border-radius:4px;">
+                    <div style="font-size:14px;font-weight:700;color:#9a3412;">Action required</div>
+                    <div style="font-size:13px;line-height:19px;color:#7c2d12;margin-top:4px;">Review the duplicate UPN and SMTP CSV files before identity cleanup, migration, or synchronization decisions.</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:14px 24px 4px 24px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+                <tr>
+                  <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Check</th>
+                  <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Distinct duplicates</th>
+                  <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Affected entries</th>
+                </tr>
+                <tr>
+                  <td style="border-bottom:1px solid #eef2f7;padding:12px;font-size:14px;font-weight:600;">UserPrincipalName</td>
+                  <td align="right" style="border-bottom:1px solid #eef2f7;padding:12px;font-size:18px;font-weight:700;color:#b45309;">$upnDuplicateCount</td>
+                  <td align="right" style="border-bottom:1px solid #eef2f7;padding:12px;font-size:18px;font-weight:700;color:#b45309;">$($duplicateUpnRows.Count)</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px;font-size:14px;font-weight:600;">SMTP proxy address</td>
+                  <td align="right" style="padding:12px;font-size:18px;font-weight:700;color:#b45309;">$smtpDuplicateCount</td>
+                  <td align="right" style="padding:12px;font-size:18px;font-weight:700;color:#b45309;">$($duplicateSmtpRows.Count)</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 24px 0 24px;">
+              <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:8px;">Source dataset</div>
+              <div style="font-family:Consolas,'Courier New',monospace;font-size:12px;line-height:18px;background:#f8fafc;border:1px solid #d9e2ec;border-radius:4px;padding:10px 12px;color:#334155;word-break:break-all;">$htmlSourceUsersCsv</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 24px 22px 24px;">
+              <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:8px;">Generated output files</div>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+                <tr>
+                  <td style="width:150px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Duplicate UPN</td>
+                  <td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;">$htmlDuplicateUpnCsv</td>
+                </tr>
+                <tr>
+                  <td style="width:150px;background:#f8fafc;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Duplicate SMTP</td>
+                  <td style="padding:10px 12px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;">$htmlDuplicateSmtpCsv</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f8fafc;border-top:1px solid #d9e2ec;padding:12px 24px;color:#64748b;font-size:12px;line-height:18px;">
+              This automated message was generated by SmartM365. Use the attached/exported CSV paths above as the source of truth for remediation.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
 "@
                         $duplicateNotificationTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
                         if ([string]::IsNullOrWhiteSpace($duplicateNotificationTo)) {
