@@ -11,3 +11,12 @@ Exchange 2016 local mailbox inventory script with integrated reporting.
 - `Start-SmartM365-Exchange-Local-Mailboxes-Inventory-Prod.cmd` / `Start-SmartM365-Exchange-Local-Mailboxes-Inventory-Test.cmd`: standard local mailbox inventory.
 - `Start-SmartM365-Exchange-Local-Mailboxes-ADPermissions-Prod.cmd` / `Start-SmartM365-Exchange-Local-Mailboxes-ADPermissions-Test.cmd`: AD permission export only (`-OnlyADPermission`).
 - `Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions-Prod.cmd` / `Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions-Test.cmd`: standard inventory with AD permissions (`-IncludeADPermission`).
+## Configuration
+
+SharePoint upload is inherited from the tenant/global configuration by default. If `SmartM365-Exchange-Local-Mailboxes-Inventory.local.json` already exists on an Exchange server from an older template, make sure it contains:
+
+```json
+"EnableSharePointUpload": "__USE_GLOBAL__"
+```
+
+or set it explicitly to `true` for that script.
