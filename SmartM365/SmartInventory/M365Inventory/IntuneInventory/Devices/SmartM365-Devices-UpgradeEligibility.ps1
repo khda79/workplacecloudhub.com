@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
     Generates a CSV report of Endpoint Analytics Work From Anywhere devices
-    with Windows upgrade eligibility and hardware check flags.
+    with Windows upgrade eligibility, normalized readiness join keys, and hardware check flags.
 
 .DESCRIPTION
     Uses Microsoft Graph (Endpoint Analytics) to query userExperienceAnalyticsWorkFromAnywhereDevice
     and exports a CSV containing:
       - DeviceName, Manufacturer, Model, OSVersion
-      - UpgradeEligibility
+      - NormalizedDeviceName, GraphId, AzureAdJoinType, UpgradeEligibility, UpgradeEligibilityLabel
       - RamCheckFailed, StorageCheckFailed
       - ProcessorCoreCountCheckFailed, ProcessorSpeedCheckFailed
       - TPMCheckFailed, SecureBootCheckFailed
@@ -22,7 +22,7 @@
       - Sends an error email with the log attached in case of global failure (if Send-SmartM365Mail is available)
 
 .PARAMETER OutputPath
-    Optional output directory for CSV and log file. If not specified, the script directory is used.
+    Optional output directory for CSV and log file. If not specified, ScriptCsvLogFolderPath from local JSON is used.
 
 .PARAMETER Connect
     Forces a (re)connection to Microsoft Graph (disconnects any existing Graph session first).
@@ -35,17 +35,20 @@
     Example:
         "contains(deviceName, 'LAPTOP')" or "upgradeEligibility ne 'none'".
 
+.PARAMETER MaxDevices
+    Optional local row limit after Graph retrieval. 0 means all rows.
+
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1
 
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.2
+1.3
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.2
+    Version : 1.3
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -55,7 +58,8 @@
 [CmdletBinding()]
 param (
     [string]$Tenant = 'test',
-[Parameter(Mandatory = $false)]
+
+    [Parameter(Mandatory = $false)]
     [string]$OutputPath,
 
     [Parameter(Mandatory = $false)]
@@ -65,7 +69,10 @@ param (
     [switch]$InteractiveAuth,
 
     [Parameter(Mandatory = $false)]
-    [string]$Filter
+    [string]$Filter,
+
+    [Parameter(Mandatory = $false)]
+    [int]$MaxDevices = 0
 )
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -89,7 +96,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.2"
+$ScriptVersion = "1.3"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -254,7 +261,7 @@ $global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocal
 $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
-$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''`r`n$ConfiguredScriptCsvLogFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ScriptCsvLogFolderPath' -DefaultValue ''
 $AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
@@ -268,14 +275,20 @@ $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'L
 try {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-    if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-        $ScriptCsvLogFolderPath = $scriptDir
-    }
-    else {
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
         if (-not (Test-Path -LiteralPath $OutputPath)) {
             New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
         }
         $ScriptCsvLogFolderPath = (Resolve-Path -LiteralPath $OutputPath).Path
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($ConfiguredScriptCsvLogFolderPath)) {
+        if (-not (Test-Path -LiteralPath $ConfiguredScriptCsvLogFolderPath)) {
+            New-Item -Path $ConfiguredScriptCsvLogFolderPath -ItemType Directory -Force | Out-Null
+        }
+        $ScriptCsvLogFolderPath = (Resolve-Path -LiteralPath $ConfiguredScriptCsvLogFolderPath).Path
+    }
+    else {
+        $ScriptCsvLogFolderPath = $scriptDir
     }
 
     $coreModulePath = & {
@@ -403,6 +416,29 @@ function Ensure-GraphConnection {
 
 #endregion Microsoft Graph connection
 
+function Normalize-DeviceName {
+    param([Parameter(Mandatory = $false)][string]$DeviceName)
+
+    if ([string]::IsNullOrWhiteSpace($DeviceName)) { return $null }
+    $normalized = $DeviceName.Trim().ToLowerInvariant()
+    if ($normalized -match '^([^\.]+)\.') { $normalized = $Matches[1] }
+    $normalized = -join ($normalized.ToCharArray() | Where-Object { $_ -match '[a-z0-9\-]' })
+    return $normalized
+}
+
+function Get-UpgradeEligibilityLabel {
+    param([Parameter(Mandatory = $false)][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return 'Unknown' }
+
+    switch -Regex ($Value.Trim()) {
+        '^(0|eligible|capable|ready)$' { return 'Eligible' }
+        '^(1|notEligible|notCapable|notReady)$' { return 'NotEligible' }
+        '^(2|unknown|undetermined|notApplicable)$' { return 'NotApplicableOrUnknown' }
+        default { return $Value }
+    }
+}
+
 #region Main logic
 
 try {
@@ -422,10 +458,12 @@ try {
     WriteLogSmartM365 -Message "Querying Endpoint Analytics Work From Anywhere (upgrade eligibility) from Microsoft Graph..." -Level "INFO"
 
     $wfaSelectProps = @(
+        "id",
         "deviceName",
         "manufacturer",
         "model",
         "osVersion",
+        "azureAdJoinType",
         "upgradeEligibility",
         "ramCheckFailed",
         "storageCheckFailed",
@@ -517,28 +555,81 @@ try {
     WriteLogSmartM365 -Message ("Retrieved {0} devices from Work From Anywhere metrics." -f $allDevices.Count) -Level "INFO"
 
     # Project devices into a clean object with guaranteed column order
-    $reportData = $allDevices | Select-Object `
-        @{ Name = "DeviceName";                     Expression = { $_.deviceName } }, `
-        @{ Name = "Manufacturer";                   Expression = { $_.manufacturer } }, `
-        @{ Name = "Model";                          Expression = { $_.model } }, `
-        @{ Name = "OSVersion";                      Expression = { $_.osVersion } }, `
-        @{ Name = "UpgradeEligibility";             Expression = { $_.upgradeEligibility } }, `
-        @{ Name = "RamCheckFailed";                 Expression = { $_.ramCheckFailed } }, `
-        @{ Name = "StorageCheckFailed";             Expression = { $_.storageCheckFailed } }, `
-        @{ Name = "ProcessorCoreCountCheckFailed";  Expression = { $_.processorCoreCountCheckFailed } }, `
-        @{ Name = "ProcessorSpeedCheckFailed";      Expression = { $_.processorSpeedCheckFailed } }, `
-        @{ Name = "TPMCheckFailed";                 Expression = { $_.tpmCheckFailed } }, `
-        @{ Name = "SecureBootCheckFailed";          Expression = { $_.secureBootCheckFailed } }, `
-        @{ Name = "ProcessorFamilyCheckFailed";     Expression = { $_.processorFamilyCheckFailed } }, `
-        @{ Name = "Processor64BitCheckFailed";      Expression = { $_.processor64BitCheckFailed } }, `
-        @{ Name = "OSCheckFailed";                  Expression = { $_.osCheckFailed } }
+    if ($MaxDevices -gt 0 -and $allDevices.Count -gt $MaxDevices) {
+        WriteLogSmartM365 -Message ("MaxDevices={0}: limiting local report rows from {1} to {0}." -f $MaxDevices, $allDevices.Count) -Level "WARNING"
+        $allDevices = @($allDevices | Select-Object -First $MaxDevices)
+    }
+
+    $exportDateTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $projectedRows = @($allDevices | ForEach-Object {
+        $deviceName = [string]$_.deviceName
+        [pscustomobject]@{
+            DeviceName                    = $deviceName
+            NormalizedDeviceName          = Normalize-DeviceName -DeviceName $deviceName
+            GraphId                       = [string]$_.id
+            Manufacturer                  = [string]$_.manufacturer
+            Model                         = [string]$_.model
+            OSVersion                     = [string]$_.osVersion
+            AzureAdJoinType               = [string]$_.azureAdJoinType
+            UpgradeEligibility            = [string]$_.upgradeEligibility
+            UpgradeEligibilityLabel       = Get-UpgradeEligibilityLabel -Value ([string]$_.upgradeEligibility)
+            RamCheckFailed                = $_.ramCheckFailed
+            StorageCheckFailed            = $_.storageCheckFailed
+            ProcessorCoreCountCheckFailed = $_.processorCoreCountCheckFailed
+            ProcessorSpeedCheckFailed     = $_.processorSpeedCheckFailed
+            TPMCheckFailed                = $_.tpmCheckFailed
+            SecureBootCheckFailed         = $_.secureBootCheckFailed
+            ProcessorFamilyCheckFailed    = $_.processorFamilyCheckFailed
+            Processor64BitCheckFailed     = $_.processor64BitCheckFailed
+            OSCheckFailed                 = $_.osCheckFailed
+            ExportDateTime                = $exportDateTime
+            RunId                         = $runId
+        }
+    })
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $reportName = "Intune_Devices_UpgradeEligibility"
+    $duplicateReportName = "Intune_Devices_UpgradeEligibility_DuplicatesByName"
     $csvFileName = "{0}_{1}.csv" -f $reportName, $timestamp
     $csvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath $csvFileName
     $latestCsvPath = if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $null } else { Join-Path -Path $LatestCsvFolderPath -ChildPath "$reportName.csv" }
+    $duplicateCsvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath ("{0}_{1}.csv" -f $duplicateReportName, $timestamp)
+    $latestDuplicateCsvPath = if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $null } else { Join-Path -Path $LatestCsvFolderPath -ChildPath "$duplicateReportName.csv" }
 
+    $duplicateGroups = @(
+        $projectedRows |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.NormalizedDeviceName) } |
+            Group-Object -Property NormalizedDeviceName |
+            Where-Object { $_.Count -gt 1 }
+    )
+
+    if ($duplicateGroups.Count -gt 0) {
+        $duplicateRows = foreach ($group in $duplicateGroups) {
+            foreach ($row in $group.Group) {
+                $row | Select-Object @{Name='DuplicateKey';Expression={$group.Name}}, @{Name='DuplicateCount';Expression={$group.Count}}, *
+            }
+        }
+
+        if ($latestDuplicateCsvPath) {
+            Export-SmartM365Csv -Data @($duplicateRows) -TimestampedPath $duplicateCsvPath -LatestPath $latestDuplicateCsvPath | Out-Null
+        }
+        else {
+            Export-SmartM365Csv -Data @($duplicateRows) -TimestampedPath $duplicateCsvPath | Out-Null
+        }
+        WriteLogSmartM365 -Message ("Duplicate readiness audit exported: {0}; duplicate groups: {1}" -f $duplicateCsvPath, $duplicateGroups.Count) -Level "WARNING"
+    }
+
+    $seenNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $reportData = @(
+        $projectedRows |
+            Sort-Object -Property NormalizedDeviceName, DeviceName |
+            Where-Object {
+                if ([string]::IsNullOrWhiteSpace($_.NormalizedDeviceName)) { $true }
+                else { $seenNames.Add($_.NormalizedDeviceName) }
+            }
+    )
+
+    WriteLogSmartM365 -Message ("Readiness rows after de-duplication: {0}; duplicates removed: {1}" -f $reportData.Count, ($projectedRows.Count - $reportData.Count)) -Level "INFO"
     WriteLogSmartM365 -Message ("Exporting report to CSV: {0}" -f $csvPath) -Level "INFO"
 
     if ($latestCsvPath) {

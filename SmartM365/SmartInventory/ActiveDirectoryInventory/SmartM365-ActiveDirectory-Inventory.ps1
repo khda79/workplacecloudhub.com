@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.3
+1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -49,6 +49,12 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$ReportOnly,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$DuplicateAnalysisOnly,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ForceSendDuplicateNotification,
 
     [Parameter(Mandatory = $false)]
     [switch]$SkipDailyReport
@@ -235,6 +241,8 @@ $EnableUserInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalCon
 $EnableGroupInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableGroupInventory' -DefaultValue $true)
 $EnableContactInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableContactInventory' -DefaultValue $true)
 $EnableDuplicateAnalysis = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDuplicateAnalysis' -DefaultValue $true)
+$EnableDuplicateNotification = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDuplicateNotification' -DefaultValue $true)
+$DuplicateNotificationLastSentFilePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DuplicateNotificationLastSentFilePath' -DefaultValue ''
 $DeleteTemporaryPerDomainCsv = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeleteTemporaryPerDomainCsv' -DefaultValue $true)
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -273,7 +281,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -296,14 +304,19 @@ catch {
 # MAIN TRY / CATCH / FINALLY
 # ==========================================================
 try {
-    if (-not $ReportOnly) {
+    if (-not $ReportOnly -and -not $DuplicateAnalysisOnly) {
         Import-Module ActiveDirectory -ErrorAction Stop
         WriteLog -Message "ActiveDirectory module imported successfully."
         Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ActiveDirectory') -RequireActiveDirectoryRead | Out-Null
     }
     else {
         Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) | Out-Null
-        WriteLog -Message "ReportOnly mode enabled. Live Active Directory inventory collection will be skipped."
+        if ($DuplicateAnalysisOnly) {
+            WriteLog -Message "DuplicateAnalysisOnly mode enabled. Live Active Directory inventory collection will be skipped."
+        }
+        else {
+            WriteLog -Message "ReportOnly mode enabled. Live Active Directory inventory collection will be skipped."
+        }
     }
 
     # ----------------------------------------------------------
@@ -334,16 +347,21 @@ try {
 
     $utcDate     = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     $baseFolder  = Join-Path $OutputPath "Not-CSV-Combined"
-    if ($DomainWorker -and -not [string]::IsNullOrWhiteSpace($DomainWorkerTempFolder)) {
+    $tempFolder = $null
+    if ($DuplicateAnalysisOnly) {
+        WriteLog -Message "Temporary per-domain export folder skipped in DuplicateAnalysisOnly mode."
+    }
+    elseif ($DomainWorker -and -not [string]::IsNullOrWhiteSpace($DomainWorkerTempFolder)) {
         $tempFolder = $DomainWorkerTempFolder
     }
     else {
         $tempFolder = Join-Path $baseFolder $utcDate
     }
-    $null = New-Item -ItemType Directory -Path $tempFolder -Force
 
-    WriteLog -Message ("Temporary per-domain export folder ready: {0}" -f $tempFolder)
-
+    if (-not [string]::IsNullOrWhiteSpace($tempFolder)) {
+        $null = New-Item -ItemType Directory -Path $tempFolder -Force
+        WriteLog -Message ("Temporary per-domain export folder ready: {0}" -f $tempFolder)
+    }
     function Get-DomainNameShort {
         param(
             [Parameter(Mandatory = $false)]
@@ -1124,6 +1142,16 @@ try {
         return
     }
 
+    $combinedUsersCsv     = Join-Path $OutputPath "AD_Users_AllDomains.csv"
+    $combinedComputersCsv = Join-Path $OutputPath "AD_Computers_AllDomains.csv"
+    $combinedGroupsCsv    = Join-Path $OutputPath "AD_Groups_AllDomains.csv"
+    $combinedOusCsv       = Join-Path $OutputPath "AD_OUs_AllDomains.csv"
+    $combinedContactsCsv  = Join-Path $OutputPath "AD_Contacts_AllDomains.csv"
+    $duplicateUpnCsv      = Join-Path $OutputPath "AD_Users_DuplicateUPN.csv"
+    $duplicateSmtpCsv     = Join-Path $OutputPath "AD_Users_DuplicateSMTP.csv"
+
+    if (-not $DuplicateAnalysisOnly) {
+
     if ($TargetDomains -and $TargetDomains.Count -gt 0) {
         $DomainsToProcess = $TargetDomains
         WriteLog -Message ("Using explicitly provided target domains: {0}" -f ($DomainsToProcess -join ', '))
@@ -1676,15 +1704,38 @@ try {
         WriteLog -Message ("Copy to LatestCsvFolderPath failed: {0}" -f $_)
     }
 
+    }
+    else {
+        WriteLog -Message "DuplicateAnalysisOnly mode: using existing combined users CSV for duplicate analysis."
+        if ($destinationRootPath) {
+            $latestUsersCsv = Join-Path $destinationRootPath "AD_Users_AllDomains.csv"
+            if (Test-Path -LiteralPath $latestUsersCsv) {
+                $combinedUsersCsv = $latestUsersCsv
+                WriteLog -Message ("DuplicateAnalysisOnly source CSV: {0}" -f $combinedUsersCsv)
+            }
+            else {
+                WriteLog -Message ("Latest AD users CSV not found, falling back to OutputPath: {0}" -f $latestUsersCsv) -Level "WARNING"
+            }
+
+            foreach ($latestName in @('AD_Computers_AllDomains.csv', 'AD_Groups_AllDomains.csv', 'AD_OUs_AllDomains.csv', 'AD_Contacts_AllDomains.csv')) {
+                $candidatePath = Join-Path $destinationRootPath $latestName
+                if (-not (Test-Path -LiteralPath $candidatePath)) { continue }
+                switch ($latestName) {
+                    'AD_Computers_AllDomains.csv' { $combinedComputersCsv = $candidatePath }
+                    'AD_Groups_AllDomains.csv'    { $combinedGroupsCsv = $candidatePath }
+                    'AD_OUs_AllDomains.csv'       { $combinedOusCsv = $candidatePath }
+                    'AD_Contacts_AllDomains.csv'  { $combinedContactsCsv = $candidatePath }
+                }
+            }
+        }
+    }
+
     # ------------------------------------------------------
     # DUPLICATE USER IDENTITY ANALYSIS
     # ------------------------------------------------------
     if ($EnableDuplicateAnalysis) {
         try {
             WriteLog -Message "Starting duplicate UPN and SMTP proxy address analysis..."
-
-            $duplicateUpnCsv = Join-Path $OutputPath "AD_Users_DuplicateUPN.csv"
-            $duplicateSmtpCsv = Join-Path $OutputPath "AD_Users_DuplicateSMTP.csv"
 
             if (-not (Test-Path -Path $combinedUsersCsv)) {
                 WriteLog -Message ("WARNING: Combined users CSV not found, skipping duplicate analysis: {0}" -f $combinedUsersCsv)
@@ -1790,6 +1841,55 @@ try {
                         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
                     }
                 }
+
+                $hasDuplicateIdentities = (($upnDuplicateCount -gt 0) -or ($smtpDuplicateCount -gt 0))
+                if ($EnableDuplicateNotification -and $hasDuplicateIdentities) {
+                    if ([string]::IsNullOrWhiteSpace($DuplicateNotificationLastSentFilePath)) {
+                        $DuplicateNotificationLastSentFilePath = Join-Path $OutputPath 'AD_DuplicateNotification_LastSent.txt'
+                    }
+
+                    $todayStamp = (Get-Date).ToString('yyyy-MM-dd')
+                    $lastSentStamp = ''
+                    if (Test-Path -LiteralPath $DuplicateNotificationLastSentFilePath) {
+                        $lastSentStamp = (Get-Content -LiteralPath $DuplicateNotificationLastSentFilePath -Raw -ErrorAction SilentlyContinue).Trim()
+                    }
+
+                    if ($lastSentStamp -eq $todayStamp -and -not $ForceSendDuplicateNotification) {
+                        WriteLog -Message ("Duplicate identity notification already sent today ({0}). Use -ForceSendDuplicateNotification to resend." -f $todayStamp)
+                    }
+                    else {
+                        $notificationFolder = Split-Path -Path $DuplicateNotificationLastSentFilePath -Parent
+                        if (-not [string]::IsNullOrWhiteSpace($notificationFolder) -and -not (Test-Path -LiteralPath $notificationFolder)) {
+                            New-Item -Path $notificationFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                        }
+
+                        $emailSubject = "SmartM365 Active Directory duplicate identities detected"
+                        $emailBody = @"
+<html><body>
+<h2>SmartM365 Active Directory duplicate identities detected</h2>
+<p>Duplicate identity analysis found conflicts in Active Directory user data.</p>
+<ul>
+<li>Distinct duplicate UPNs: $upnDuplicateCount</li>
+<li>Affected UPN accounts: $($duplicateUpnRows.Count)</li>
+<li>Distinct duplicate SMTP addresses: $smtpDuplicateCount</li>
+<li>Affected SMTP entries: $($duplicateSmtpRows.Count)</li>
+</ul>
+<p>Source users CSV: $combinedUsersCsv</p>
+<p>Output files:</p>
+<ul>
+<li>$duplicateUpnCsv</li>
+<li>$duplicateSmtpCsv</li>
+</ul>
+</body></html>
+"@
+                        SendEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
+                        Set-Content -LiteralPath $DuplicateNotificationLastSentFilePath -Value $todayStamp -Encoding UTF8
+                        WriteLog -Message ("Duplicate identity notification sent. Last-sent marker updated: {0}" -f $DuplicateNotificationLastSentFilePath)
+                    }
+                }
+                elseif (-not $EnableDuplicateNotification) {
+                    WriteLog -Message "Duplicate identity notification skipped because EnableDuplicateNotification is disabled."
+                }
             }
         }
         catch {
@@ -1803,16 +1903,23 @@ try {
     # ------------------------------------------------------
     # DAILY ACTIVE DIRECTORY REPORTS
     # ------------------------------------------------------
-    Invoke-ActiveDirectoryDailyReport -SourceFolder $OutputPath `
-        -ReportOutputPath $OutputPath `
-        -LatestFolderPath $destinationRootPath `
-        -AllowedOS $DailyReportAllowedOS `
-        -TargetDomains $TargetDomains `
-        -InactiveDays $DailyReportInactiveDays `
-        -UseDailyLock $EnableDailyReportLock `
-        -LockRoot $DailyReportLockRoot `
-        -LockName $DailyReportLockName | Out-Null
-
+    if (-not $DuplicateAnalysisOnly -and -not $SkipDailyReport) {
+        Invoke-ActiveDirectoryDailyReport -SourceFolder $OutputPath `
+            -ReportOutputPath $OutputPath `
+            -LatestFolderPath $destinationRootPath `
+            -AllowedOS $DailyReportAllowedOS `
+            -TargetDomains $TargetDomains `
+            -InactiveDays $DailyReportInactiveDays `
+            -UseDailyLock $EnableDailyReportLock `
+            -LockRoot $DailyReportLockRoot `
+            -LockName $DailyReportLockName | Out-Null
+    }
+    elseif ($DuplicateAnalysisOnly) {
+        WriteLog -Message "Daily Active Directory report skipped in DuplicateAnalysisOnly mode."
+    }
+    else {
+        WriteLog -Message "Daily Active Directory report skipped because -SkipDailyReport was specified."
+    }
     # ------------------------------------------------------
     # WEEKLY INVENTORY HISTORY
     # ------------------------------------------------------
@@ -1839,7 +1946,12 @@ try {
     # ------------------------------------------------------
     # CLEANUP TEMPORARY PER-DOMAIN CSV FILES
     # ------------------------------------------------------
-    Remove-TemporaryInventoryFolder -TempFolder $tempFolder -BaseFolder $baseFolder
+    if (-not $DuplicateAnalysisOnly) {
+        Remove-TemporaryInventoryFolder -TempFolder $tempFolder -BaseFolder $baseFolder
+    }
+    else {
+        WriteLog -Message "Temporary per-domain cleanup skipped in DuplicateAnalysisOnly mode."
+    }
 
     # ------------------------------------------------------
     # CLEANUP OLD FILES

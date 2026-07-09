@@ -22,12 +22,9 @@
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
-  "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\BackupProtection",
-  "EXOMailboxesCsvPath": "",
-  "GroupDisplayName": "",
-  "GroupObjectId": "",
-  "CertificateThumbprint": "",
+  "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\M365\\SyncHealth\\AzureADConnect",
+  "SyncAgeThresholdMinutes": 180,
   "EnableWeeklyHistory": true,
-  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\BackupProtection\\WeeklyHistory",
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\M365\\SyncHealth\\AzureADConnect\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
 }
