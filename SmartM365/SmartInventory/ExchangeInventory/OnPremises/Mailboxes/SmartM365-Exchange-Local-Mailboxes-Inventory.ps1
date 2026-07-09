@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Inventories all local Exchange mailboxes in an on-premises environment.
+    Inventories local and optional remote Exchange mailboxes in an on-premises environment.
 
 .DESCRIPTION
     This script scans and exports detailed information about Exchange mailboxes, including:
@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.23
+1.24
 
 .NOTES
-    Version: 1.23
+    Version: 1.24
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -44,6 +44,10 @@ param (
     [bool]$ForceOverwriteCSV = $true,
     [Parameter(Mandatory = $false)]
     [bool]$GenerateReport = $true,
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeRemoteMailboxes,
+    [Parameter(Mandatory = $false)]
+    [switch]$RemoteMailboxesOnly,
     [Parameter(Mandatory = $false)]
     [bool]$ReportOnly = $false,
     [Parameter(Mandatory = $false)]
@@ -228,12 +232,19 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.23"
+$ScriptVersion = "1.24"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
 $WeeklyHistoryRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
+$RemoteMailboxOutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RemoteMailboxCsvLogFolderPath' -DefaultValue ''
+$configuredIncludeRemoteMailboxes = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludeRemoteMailboxes' -DefaultValue $false)
+if ($configuredIncludeRemoteMailboxes) { $IncludeRemoteMailboxes = $true }
+if ($RemoteMailboxesOnly) { $IncludeRemoteMailboxes = $true }
+if ([string]::IsNullOrWhiteSpace($RemoteMailboxOutputPath) -and -not [string]::IsNullOrWhiteSpace($OutputPath)) {
+    $RemoteMailboxOutputPath = Join-Path -Path (Split-Path -Path $OutputPath -Parent) -ChildPath 'RemoteMailboxes'
+}
 function Ensure-SmartM365ExchangeScriptScope {
     [CmdletBinding()]
     param(
@@ -392,6 +403,157 @@ function Export-CsvAtomic {
     Register-SmartM365GeneratedCsv -Path $Path
 }
 
+function ConvertTo-SmartM365ExchangeMailboxSemicolonList {
+    [CmdletBinding()]
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return '' }
+    $items = @($Value | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ })
+    if ($items.Count -eq 0) { return '' }
+    return (($items | Select-Object -Unique) -join ';')
+}
+
+function Get-SmartM365ExchangeRemoteMailboxDelegationSummary {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Identity)
+
+    $result = [ordered]@{ FullAccessUsers = ''; SendAsUsers = '' }
+    try {
+        $fullAccess = Get-MailboxPermission -Identity $Identity -ErrorAction Stop | Where-Object { $_.AccessRights -contains 'FullAccess' -and -not $_.IsInherited -and -not $_.Deny -and $_.User -notlike 'NT AUTHORITY\SELF' } | Select-Object -ExpandProperty User
+        $result.FullAccessUsers = ConvertTo-SmartM365ExchangeMailboxSemicolonList -Value $fullAccess
+    }
+    catch { $result.FullAccessUsers = "ERROR: $($_.Exception.Message)" }
+
+    try {
+        $sendAs = Get-ADPermission -Identity $Identity -ErrorAction Stop | Where-Object { $_.ExtendedRights -like '*Send-As*' -and -not $_.IsInherited -and $_.User -notlike 'NT AUTHORITY\SELF' } | Select-Object -ExpandProperty User
+        $result.SendAsUsers = ConvertTo-SmartM365ExchangeMailboxSemicolonList -Value $sendAs
+    }
+    catch { $result.SendAsUsers = "ERROR: $($_.Exception.Message)" }
+    return [pscustomobject]$result
+}
+
+function ConvertTo-SmartM365ExchangeRemoteMailboxRecord {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Mailbox,
+        [switch]$IncludeDelegation
+    )
+
+    $domain = Get-SmartM365MailboxReportDomain -DistinguishedName ([string]$Mailbox.DistinguishedName)
+    if ([string]::IsNullOrWhiteSpace($domain)) { $domain = 'Unknown' }
+
+    $record = [ordered]@{
+        DomainName                   = $domain
+        Name                         = $Mailbox.Name
+        DisplayName                  = $Mailbox.DisplayName
+        Alias                        = $Mailbox.Alias
+        PrimarySmtpAddress           = if ($Mailbox.PrimarySmtpAddress) { $Mailbox.PrimarySmtpAddress.ToString() } else { '' }
+        WindowsEmailAddress          = if ($Mailbox.WindowsEmailAddress) { $Mailbox.WindowsEmailAddress.ToString() } else { '' }
+        UserPrincipalName            = $Mailbox.UserPrincipalName
+        SamAccountName               = $Mailbox.SamAccountName
+        RecipientType                = if ($Mailbox.RecipientType) { $Mailbox.RecipientType.ToString() } else { '' }
+        RecipientTypeDetails         = if ($Mailbox.RecipientTypeDetails) { $Mailbox.RecipientTypeDetails.ToString() } else { 'RemoteUserMailbox' }
+        RemoteRoutingAddress         = if ($Mailbox.RemoteRoutingAddress) { $Mailbox.RemoteRoutingAddress.ToString() } else { '' }
+        RemoteRecipientType          = if ($Mailbox.RemoteRecipientType) { $Mailbox.RemoteRecipientType.ToString() } else { '' }
+        OnPremisesOrganizationalUnit = $Mailbox.OnPremisesOrganizationalUnit
+        DistinguishedName            = $Mailbox.DistinguishedName
+        ObjectCategory               = if ($Mailbox.ObjectCategory) { $Mailbox.ObjectCategory.ToString() } else { '' }
+        WhenCreated                  = $Mailbox.WhenCreated
+        WhenChanged                  = $Mailbox.WhenChanged
+        MailboxRelease               = $Mailbox.MailboxRelease
+        WhenMailboxCreated           = $Mailbox.WhenMailboxCreated
+        AccountDisabled              = $Mailbox.AccountDisabled
+        ExchangeUserAccountControl   = $Mailbox.ExchangeUserAccountControl
+        ArchiveState                 = if ($Mailbox.ArchiveState) { $Mailbox.ArchiveState.ToString() } else { '' }
+        ArchiveQuota                 = if ($Mailbox.ArchiveQuota) { $Mailbox.ArchiveQuota.ToString() } else { '' }
+        ArchiveWarningQuota          = if ($Mailbox.ArchiveWarningQuota) { $Mailbox.ArchiveWarningQuota.ToString() } else { '' }
+        DeliverToMailboxAndForward   = $Mailbox.DeliverToMailboxAndForward
+        ForwardingAddress            = if ($Mailbox.ForwardingAddress) { $Mailbox.ForwardingAddress.ToString() } else { '' }
+        IsValid                      = $Mailbox.IsValid
+        MailboxMoveTargetMDB         = if ($Mailbox.MailboxMoveTargetMDB) { $Mailbox.MailboxMoveTargetMDB.ToString() } else { '' }
+        MailboxMoveSourceMDB         = if ($Mailbox.MailboxMoveSourceMDB) { $Mailbox.MailboxMoveSourceMDB.ToString() } else { '' }
+        MailboxMoveFlags             = if ($Mailbox.MailboxMoveFlags) { $Mailbox.MailboxMoveFlags.ToString() } else { '' }
+        MailboxMoveRemoteHostName    = $Mailbox.MailboxMoveRemoteHostName
+        MailboxMoveBatchName         = $Mailbox.MailboxMoveBatchName
+        MailboxMoveStatus            = if ($Mailbox.MailboxMoveStatus) { $Mailbox.MailboxMoveStatus.ToString() } else { '' }
+        SendOnBehalf                 = ConvertTo-SmartM365ExchangeMailboxSemicolonList -Value $Mailbox.GrantSendOnBehalfTo
+    }
+
+    if ($IncludeDelegation) {
+        $delegation = Get-SmartM365ExchangeRemoteMailboxDelegationSummary -Identity ([string]$Mailbox.Identity)
+        $record.FullAccessUsers = $delegation.FullAccessUsers
+        $record.SendAsUsers = $delegation.SendAsUsers
+    }
+
+    $record.ExchangeGuid = if ($Mailbox.ExchangeGuid) { $Mailbox.ExchangeGuid.ToString() } else { '' }
+    $immutableIdValue = ''
+    if ($Mailbox.Guid) { try { $immutableIdValue = [System.Convert]::ToBase64String($Mailbox.Guid.ToByteArray()) } catch { $immutableIdValue = '' } }
+    $record.ImmutableId = $immutableIdValue
+    $record.ObjectGuid = if ($Mailbox.Guid) { $Mailbox.Guid.ToString() } else { '' }
+    return [pscustomobject]$record
+}
+
+function Invoke-SmartM365ExchangeRemoteMailboxInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RemoteOutputPath,
+        [string[]]$IncludedLDAPPaths = @()
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RemoteOutputPath)) { $RemoteOutputPath = Join-Path -Path (Split-Path -Path $OutputPath -Parent) -ChildPath 'RemoteMailboxes' }
+    if (-not (Test-Path -LiteralPath $RemoteOutputPath)) { New-Item -ItemType Directory -Path $RemoteOutputPath -Force | Out-Null }
+    WriteLog -Message ("Starting Exchange remote mailbox inventory. OutputPath: {0}" -f $RemoteOutputPath)
+    Write-Host "Starting Exchange remote mailbox inventory... $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
+
+    $allRemoteMailboxes = @()
+    if ($IncludedLDAPPaths -and $IncludedLDAPPaths.Count -gt 0) {
+        foreach ($scope in $IncludedLDAPPaths) {
+            WriteLog -Message ("Retrieving remote mailboxes from scope: {0}" -f $scope)
+            try {
+                $remoteInScope = @(Get-RemoteMailbox -OnPremisesOrganizationalUnit $scope -ResultSize Unlimited -ErrorAction Stop)
+                $allRemoteMailboxes += $remoteInScope
+                WriteLog -Message ("Found {0} remote mailboxes in scope: {1}" -f $remoteInScope.Count, $scope)
+            }
+            catch { WriteLog -Message ("WARNING: Failed to retrieve remote mailboxes from scope '{0}': {1}" -f $scope, $_.Exception.Message) }
+        }
+    }
+    else { $allRemoteMailboxes = @(Get-RemoteMailbox -ResultSize Unlimited -ErrorAction Stop) }
+
+    $seenRemoteGuids = @{}
+    $records = @()
+    $index = 0
+    $total = $allRemoteMailboxes.Count
+    foreach ($remoteMailbox in $allRemoteMailboxes) {
+        $index++
+        $key = if ($remoteMailbox.Guid) { $remoteMailbox.Guid.ToString() } else { [string]$remoteMailbox.Identity }
+        if (-not [string]::IsNullOrWhiteSpace($key) -and $seenRemoteGuids.ContainsKey($key)) { continue }
+        if (-not [string]::IsNullOrWhiteSpace($key)) { $seenRemoteGuids[$key] = $true }
+        if ($total -gt 0) { Write-Progress -Activity 'Processing Exchange remote mailboxes' -Status ("{0} of {1}: {2}" -f $index, $total, $remoteMailbox.Name) -PercentComplete (($index / $total) * 100) }
+        $records += ConvertTo-SmartM365ExchangeRemoteMailboxRecord -Mailbox $remoteMailbox -IncludeDelegation:($IncludeADPermission -or $OnlyADPermission)
+    }
+    Write-Progress -Activity 'Processing Exchange remote mailboxes' -Completed
+
+    if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.DomainName -in $TargetDomains }) }
+    if ($records.Count -eq 0) {
+        WriteLog -Message 'No remote mailboxes were found. Remote mailbox CSV export skipped.'
+        return [pscustomobject]@{ RecordCount = 0; CombinedCsv = $null; PerDomainCsvs = @(); PublishResult = $null }
+    }
+
+    $suffix = if ($OnlyADPermission) { '_OnlyADPermission.csv' } else { '.csv' }
+    $perDomainPaths = @()
+    foreach ($group in ($records | Group-Object -Property DomainName)) {
+        $safeDomain = if ([string]::IsNullOrWhiteSpace($group.Name)) { 'Unknown' } else { $group.Name -replace '[^a-zA-Z0-9.-]', '_' }
+        $perDomainPath = Join-Path -Path $RemoteOutputPath -ChildPath ("Exchange_OnPrem_RemoteMailboxes_{0}{1}" -f $safeDomain, $suffix)
+        Export-CsvAtomic -InputObject @($group.Group) -Path $perDomainPath -Encoding UTF8
+        $perDomainPaths += $perDomainPath
+    }
+
+    $combinedPath = Join-Path -Path $RemoteOutputPath -ChildPath ("Exchange_OnPrem_RemoteMailboxes_AllDomains{0}" -f $suffix)
+    Export-CsvAtomic -InputObject @($records) -Path $combinedPath -Encoding UTF8
+    $publishResult = Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $combinedPath -LatestFileName (Split-Path -Path $combinedPath -Leaf) -HistoryLabel 'Exchange on-prem remote mailboxes'
+    WriteLog -Message ("Exchange remote mailbox inventory completed. Records: {0}; CombinedCsv: {1}" -f $records.Count, $combinedPath)
+    return [pscustomobject]@{ RecordCount = $records.Count; CombinedCsv = $combinedPath; PerDomainCsvs = $perDomainPaths; PublishResult = $publishResult }
+}
 [string]$inputFolderCSVfiles
 [string]$excludeMailboxesFile
 
@@ -563,10 +725,13 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
 
         [string]$LocalMailboxCsv,
         [string]$LatestLocalMailboxCsv,
+        [string]$RemoteMailboxCsv,
+        [string]$LatestRemoteMailboxCsv,
 
         [AllowNull()]$DailyStatsUpload,
         [AllowNull()]$SummaryUpload,
         [AllowNull()]$LocalMailboxUpload,
+        [AllowNull()]$RemoteMailboxUpload,
 
         [Parameter(Mandatory = $true)]
         [string]$Title
@@ -657,6 +822,10 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
     if (-not [string]::IsNullOrWhiteSpace($localMailboxPathForMail)) {
         $fileRows += [pscustomobject]@{ Label = 'Mailbox inventory'; Path = $localMailboxPathForMail; WebUrl = if ($LocalMailboxUpload -and $LocalMailboxUpload.WebUrl) { [string]$LocalMailboxUpload.WebUrl } else { '' } }
     }
+    $remoteMailboxPathForMail = if (-not [string]::IsNullOrWhiteSpace($LatestRemoteMailboxCsv)) { $LatestRemoteMailboxCsv } else { $RemoteMailboxCsv }
+    if (-not [string]::IsNullOrWhiteSpace($remoteMailboxPathForMail) -and (Test-Path -LiteralPath $remoteMailboxPathForMail -PathType Leaf)) {
+        $fileRows += [pscustomobject]@{ Label = 'Remote mailbox inventory'; Path = $remoteMailboxPathForMail; WebUrl = if ($RemoteMailboxUpload -and $RemoteMailboxUpload.WebUrl) { [string]$RemoteMailboxUpload.WebUrl } else { '' } }
+    }
     if (-not [string]::IsNullOrWhiteSpace($LatestDailyStatsCsv)) {
         $fileRows += [pscustomobject]@{ Label = 'Daily stats'; Path = $LatestDailyStatsCsv; WebUrl = if ($DailyStatsUpload -and $DailyStatsUpload.WebUrl) { [string]$DailyStatsUpload.WebUrl } else { '' } }
     }
@@ -714,16 +883,28 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $localCsv = Join-Path -Path $localMailboxFolder -ChildPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
     $latestLocalCsv = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv' } else { $null }
     $remoteCsv = if ($remoteMailboxFolder) { Join-Path -Path $remoteMailboxFolder -ChildPath 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' } else { $null }
+    $latestRemoteCsv = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' } else { $null }
     $dailyCsv = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats.csv'
     $summaryCsv = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats_Summary.csv'
     $latestDailyCsv = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_Mailboxes_DailyStats.csv' } else { $null }
     $allowedTypes = @('UserMailbox', 'SharedMailbox', 'RoomMailbox', 'EquipmentMailbox', 'RemoteUserMailbox', 'RemoteSharedMailbox')
     $remoteTypes = @('RemoteUserMailbox', 'RemoteSharedMailbox')
     $records = @()
-    if ($UseCurrentInventoryData -and $Global:ScriptOverallMailboxData -and $Global:ScriptOverallMailboxData.Count -gt 0) { $records += $Global:ScriptOverallMailboxData | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ } }
-    elseif (Test-Path -LiteralPath $localCsv) { [void](Test-SmartM365MailboxReportCsvSchema -Path $localCsv); $records += Import-SmartM365MailboxReportCsv -Path $localCsv | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ } }
-    else { throw ('Local mailbox CSV not found for report generation: {0}' -f $localCsv) }
-    if ($remoteCsv -and (Test-Path -LiteralPath $remoteCsv)) { [void](Test-SmartM365MailboxReportCsvSchema -Path $remoteCsv); $records += Import-SmartM365MailboxReportCsv -Path $remoteCsv | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ -Remote } }
+    $remoteCsvAvailable = ($remoteCsv -and (Test-Path -LiteralPath $remoteCsv -PathType Leaf))
+    if ($UseCurrentInventoryData -and $Global:ScriptOverallMailboxData -and $Global:ScriptOverallMailboxData.Count -gt 0) {
+        $records += $Global:ScriptOverallMailboxData | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ }
+    }
+    elseif (Test-Path -LiteralPath $localCsv -PathType Leaf) {
+        [void](Test-SmartM365MailboxReportCsvSchema -Path $localCsv)
+        $records += Import-SmartM365MailboxReportCsv -Path $localCsv | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ }
+    }
+    elseif (-not $remoteCsvAvailable) {
+        throw ('Local mailbox CSV not found for report generation: {0}' -f $localCsv)
+    }
+    else {
+        WriteLog -Message ('Local mailbox CSV not found; mailbox report will use remote mailbox CSV only. Missing local path: {0}' -f $localCsv) 'WARN'
+    }
+    if ($remoteCsvAvailable) { [void](Test-SmartM365MailboxReportCsvSchema -Path $remoteCsv); $records += Import-SmartM365MailboxReportCsv -Path $remoteCsv | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ -Remote } }
     $records = @($records | Where-Object { $_.RecipientTypeDetails -and ($allowedTypes -contains $_.RecipientTypeDetails) })
     if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.ADDomain -in $TargetDomains }) }
     if ($records.Count -eq 0) { WriteLog -Message 'No mailbox data available for report generation.' 'WARN'; return $null }
@@ -773,8 +954,10 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     RemoveOldFiles -Path $reportOutputPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
     $localMailboxUpload = if ($latestLocalCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestLocalCsv } else { $null }
     if (-not $localMailboxUpload) { $localMailboxUpload = Get-SmartM365SharePointUploadRecordByLocalPath -Path $localCsv }
+    $remoteMailboxUpload = if ($latestRemoteCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestRemoteCsv } else { $null }
+    if (-not $remoteMailboxUpload -and $remoteCsv) { $remoteMailboxUpload = Get-SmartM365SharePointUploadRecordByLocalPath -Path $remoteCsv }
     try {
-        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsv -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -Title ($TaskName + ' - Mailbox report')
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsv -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -Title ($TaskName + ' - Mailbox report')
         Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
     }
     catch {
@@ -818,7 +1001,7 @@ if ($DryRun) {
         }
 
         if (-not $ReportOnly) {
-            if (-not (Ensure-SmartM365ExchangeScriptScope -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings") -ViewEntireForest)) {
+            if (-not (Ensure-SmartM365ExchangeScriptScope -RequiredCommands @(if ($IncludeRemoteMailboxes) { "Get-Mailbox"; "Get-RemoteMailbox"; "Set-ADServerSettings" } else { "Get-Mailbox"; "Set-ADServerSettings" }) -ViewEntireForest)) {
                 throw 'Exchange Management Tools were not detected or the Exchange snap-in could not be loaded.'
             }
 
@@ -858,7 +1041,7 @@ if ($ReportOnly) {
     return
 }
 
-if (-not (Ensure-SmartM365ExchangeScriptScope -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings") -ViewEntireForest)) {
+if (-not (Ensure-SmartM365ExchangeScriptScope -RequiredCommands @(if ($IncludeRemoteMailboxes) { "Get-Mailbox"; "Get-RemoteMailbox"; "Set-ADServerSettings" } else { "Get-Mailbox"; "Set-ADServerSettings" }) -ViewEntireForest)) {
     Write-Error "Exchange environment not ready. Exiting script."
     $errorMessage = "Exchange environment not ready. Exiting script."
     $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
@@ -873,6 +1056,7 @@ $scriptScopeExchangeCommands = @(
     "Get-MobileDevice",
     "Get-ADPermission"
 )
+if ($IncludeRemoteMailboxes) { $scriptScopeExchangeCommands += "Get-RemoteMailbox" }
 if (-not (Get-Command -Name Get-Mailbox -ErrorAction SilentlyContinue)) {
     WriteLog -Message "Exchange cmdlets are loaded in module scope; loading Exchange snap-in in script scope for mailbox processing."
     try {
@@ -894,6 +1078,13 @@ if ($missingScriptScopeExchangeCommands.Count -gt 0) {
 }
 
 $preflightOutputPaths = @($OutputPath)
+if ($IncludeRemoteMailboxes) {
+    if ([string]::IsNullOrWhiteSpace($RemoteMailboxOutputPath)) {
+        $RemoteMailboxOutputPath = Join-Path -Path (Split-Path -Path $OutputPath -Parent) -ChildPath 'RemoteMailboxes'
+    }
+    if (-not (Test-Path -LiteralPath $RemoteMailboxOutputPath)) { New-Item -ItemType Directory -Path $RemoteMailboxOutputPath -Force | Out-Null }
+    $preflightOutputPaths += $RemoteMailboxOutputPath
+}
 if ($OnlyADPermission -or $IncludeADPermission) {
     try {
         if ([string]::IsNullOrWhiteSpace($OutputPathOnlyADPermission)) {
@@ -959,8 +1150,8 @@ try { # Main try block for script execution and interruption handling
     Write-Host "Starting script '$($MyInvocation.MyCommand.Name)' - Version $ScriptVersion ... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
     Write-Host "Output Path for this run: $OutputPath"
     WriteLog -Message "Output Path for this run: $OutputPath"
-WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, ForceOverwriteCSV = $ForceOverwriteCSV"
-    Write-Host "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, ForceOverwriteCSV = $ForceOverwriteCSV"
+WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
+    Write-Host "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
     Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1))
 
     # ViewEntireForest is applied during Exchange readiness validation.
@@ -1942,7 +2133,12 @@ WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADP
     #region Main Script Block
     $InventoryCompletedSuccessfully = $false # Initialize completion flag
     try { # Main try block for script execution
-        if ($DetectAllDomains)
+        if ($RemoteMailboxesOnly)
+        {
+            WriteLog -Message 'RemoteMailboxesOnly mode is enabled. Local mailbox collection will be skipped.'
+            Write-Host 'RemoteMailboxesOnly mode is enabled. Local mailbox collection will be skipped.' -ForegroundColor Cyan
+        }
+        elseif ($DetectAllDomains)
         {
             Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1))
             WriteLog -Message "DetectAllDomains mode enabled. Checking for Active Directory module..."
@@ -2175,6 +2371,16 @@ throw $errorMessage
                 Write-Host -ForegroundColor Yellow "No mailbox data was collected for the specified OUs/scope. The combined file '$combinedCsvFileForNonDetectAll' will not be created or will be empty."
             }
         }
+        if ($IncludeRemoteMailboxes) {
+            $remoteResult = Invoke-SmartM365ExchangeRemoteMailboxInventory -RemoteOutputPath $RemoteMailboxOutputPath -IncludedLDAPPaths $IncludedOrganizationalUnit
+            if ($remoteResult -and $remoteResult.CombinedCsv) {
+                WriteLog -Message ("Remote mailbox inventory generated. Records: {0}; CombinedCsv: {1}" -f $remoteResult.RecordCount, $remoteResult.CombinedCsv)
+            }
+        }
+        else {
+            WriteLog -Message 'Remote mailbox inventory skipped. Use -IncludeRemoteMailboxes or set IncludeRemoteMailboxes to true in local config to enable it.'
+        }
+
         WriteLog -Message "END of script main logic execution."
         Write-Host "END of script main logic execution... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
         $InventoryCompletedSuccessfully = $true # Set flag for successful completion
@@ -2608,6 +2814,9 @@ Else
 	# Clean up old CSV files + old log files
 	# Automatically excludes all generated CSVs via global:csvGeneratedPaths + current transcript and log files via global variables
 	RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+    if ($IncludeRemoteMailboxes -and -not [string]::IsNullOrWhiteSpace($RemoteMailboxOutputPath) -and (Test-Path -LiteralPath $RemoteMailboxOutputPath)) {
+        RemoveOldFiles -Path $RemoteMailboxOutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+    }
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 	WriteLog -Message "$TaskName completed."
     Stop-SmartM365TranscriptSafely
