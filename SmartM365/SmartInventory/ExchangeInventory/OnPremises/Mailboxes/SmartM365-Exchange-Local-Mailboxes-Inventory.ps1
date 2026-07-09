@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.24
+1.25
 
 .NOTES
-    Version: 1.24
+    Version: 1.25
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -232,15 +232,15 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.24"
+$ScriptVersion = "1.25"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
 $WeeklyHistoryRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalMailboxCsvLogFolderPath' -DefaultValue $OutputPath
 $RemoteMailboxOutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RemoteMailboxCsvLogFolderPath' -DefaultValue ''
-$configuredIncludeRemoteMailboxes = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludeRemoteMailboxes' -DefaultValue $false)
-if ($configuredIncludeRemoteMailboxes) { $IncludeRemoteMailboxes = $true }
+$configuredIncludeRemoteMailboxes = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludeRemoteMailboxes' -DefaultValue $true)
+if (-not $PSBoundParameters.ContainsKey('IncludeRemoteMailboxes')) { $IncludeRemoteMailboxes = $configuredIncludeRemoteMailboxes }
 if ($RemoteMailboxesOnly) { $IncludeRemoteMailboxes = $true }
 if ([string]::IsNullOrWhiteSpace($RemoteMailboxOutputPath) -and -not [string]::IsNullOrWhiteSpace($OutputPath)) {
     $RemoteMailboxOutputPath = Join-Path -Path (Split-Path -Path $OutputPath -Parent) -ChildPath 'RemoteMailboxes'
