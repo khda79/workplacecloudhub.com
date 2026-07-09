@@ -238,9 +238,16 @@ function Save-SmartM365WeeklyInventoryHistory {
         HistoryRootPath = $HistoryRootPath
         Files           = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
     }
-    $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path -Path $weekFolder -ChildPath 'manifest.json') -Encoding UTF8
+    $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
+    $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
     if ($copiedFiles.Count -gt 0) { WriteLog -Message ("Weekly {0} history saved for {1}: {2} new file(s) in {3}" -f $HistoryLabel, $weekName, $copiedFiles.Count, $weekFolder) }
     else { WriteLog -Message ("Weekly {0} history already exists for {1}. Snapshot skipped: {2}" -f $HistoryLabel, $weekName, $weekFolder) }
+
+    $historyUploadCandidates = @(Get-ChildItem -LiteralPath $weekFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.csv', '.json') } | Sort-Object Name)
+    foreach ($historyUploadCandidate in $historyUploadCandidates) {
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName | Out-Null
+    }
+
     if ($RetentionWeeks -gt 0) {
         $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{4}-W\d{2}$' } | Sort-Object Name -Descending | Select-Object -Skip $RetentionWeeks)
         foreach ($oldWeekFolder in $oldWeekFolders) {
