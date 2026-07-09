@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.23
+0.1.24
 #>
 
 #requires -Version 5.1
@@ -407,7 +407,7 @@ function Get-CentralLogBucket {
     if ($launcherStatus -eq 'PSEXEC_COMMUNICATION_LOST') {
         return 'PsExecCommunicationLost'
     }
-    if ($launcherStatus -eq 'REMOTE_LOG_COLLECTION_FAILED') {
+    if ($launcherStatus -eq 'REMOTE_LOG_COLLECTION_FAILED' -or $launcherStatus -eq 'STALE_LASTRUN_IGNORED') {
         return 'RemoteLogCollectionFailed'
     }
 
@@ -425,7 +425,7 @@ function Get-CentralLogBucket {
         if ($statusValue -eq 'PSEXEC_COMMUNICATION_LOST') {
             return 'PsExecCommunicationLost'
         }
-        if ($statusValue -eq 'REMOTE_LOG_COLLECTION_FAILED') {
+        if ($statusValue -eq 'REMOTE_LOG_COLLECTION_FAILED' -or $statusValue -eq 'STALE_LASTRUN_IGNORED') {
             return 'RemoteLogCollectionFailed'
         }
         if ($statusValue -eq 'SETUP_PROCESS_TIMEOUT') {
@@ -703,6 +703,45 @@ function Get-RemoteEndpointSetupMonitorRecovery {
 
     return $null
 }
+function Test-LastRunFreshness {
+    param(
+        [Parameter(Mandatory = $true)]$LastRunItem,
+        [Parameter(Mandatory = $true)]$LastRun,
+        [Parameter(Mandatory = $true)][datetime]$WorkerStartedUtc
+    )
+
+    $minimumUtc = $WorkerStartedUtc.AddMinutes(-2)
+    $lastWriteUtc = $LastRunItem.LastWriteTimeUtc
+    $timeValues = New-Object System.Collections.Generic.List[datetime]
+    foreach ($propertyName in @('EndTimeUtc','StartTimeUtc')) {
+        if ($LastRun.PSObject.Properties[$propertyName] -and -not [string]::IsNullOrWhiteSpace([string]$LastRun.$propertyName)) {
+            try {
+                $parsed = [datetime]::Parse([string]$LastRun.$propertyName, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                [void]$timeValues.Add($parsed.ToUniversalTime())
+            }
+            catch { }
+        }
+    }
+
+    $latestContentUtc = $null
+    if ($timeValues.Count -gt 0) {
+        $latestContentUtc = @($timeValues | Sort-Object -Descending | Select-Object -First 1)[0]
+    }
+
+    $freshByWriteTime = ($lastWriteUtc -ge $minimumUtc)
+    $freshByContentTime = ($null -ne $latestContentUtc -and $latestContentUtc -ge $minimumUtc)
+    if ($freshByWriteTime -or $freshByContentTime) {
+        return [pscustomobject]@{
+            IsFresh = $true
+            Detail = ("LastRun accepted. LastWriteTimeUtc={0:o}; LatestContentUtc={1}; WorkerStartedUtc={2:o}." -f $lastWriteUtc, $(if ($latestContentUtc) { $latestContentUtc.ToString('o') } else { '' }), $WorkerStartedUtc)
+        }
+    }
+
+    return [pscustomobject]@{
+        IsFresh = $false
+        Detail = ("Ignored stale LastRun.json. LastWriteTimeUtc={0:o}; LatestContentUtc={1}; WorkerStartedUtc={2:o}; MinimumAcceptedUtc={3:o}." -f $lastWriteUtc, $(if ($latestContentUtc) { $latestContentUtc.ToString('o') } else { '' }), $WorkerStartedUtc, $minimumUtc)
+    }
+}
 function Update-ResultFromLastRun {
     param(
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Result,
@@ -763,6 +802,7 @@ function Collect-RemoteEvidence {
     return $target
 }
 New-Directory -Path $LogRoot
+$workerStartedUtc = (Get-Date).ToUniversalTime()
 $computerPathKey = Get-ComputerPathKey -ComputerName $Computer
 $logPath = Join-Path $LogRoot ("{0}_cycle{1}_{2}.log" -f $computerPathKey,$CycleNumber,(Get-Date -Format 'yyyyMMdd-HHmmss'))
 $stdoutPath = "$logPath.stdout.txt"
@@ -982,8 +1022,18 @@ try {
     $remoteBaseShare = Convert-ToAdminSharePath -ComputerName $Computer -LocalPath $RemoteBaseDir
     $remoteLastRunPath = Join-Path $remoteBaseShare 'LastRun.json'
     if (Test-Path -LiteralPath $remoteLastRunPath -PathType Leaf) {
+        $lastRunItem = Get-Item -LiteralPath $remoteLastRunPath -ErrorAction Stop
         $lastRun = Get-Content -LiteralPath $remoteLastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        Update-ResultFromLastRun -Result $result -LastRun $lastRun
+        $lastRunFreshness = Test-LastRunFreshness -LastRunItem $lastRunItem -LastRun $lastRun -WorkerStartedUtc $workerStartedUtc
+        if ($lastRunFreshness.IsFresh) {
+            Update-ResultFromLastRun -Result $result -LastRun $lastRun
+        }
+        else {
+            $previousStatus = $result.LauncherStatus
+            $result.LauncherStatus = 'STALE_LASTRUN_IGNORED'
+            $result.Detail = ("{0} PreviousLauncherStatus={1}" -f $lastRunFreshness.Detail,$previousStatus)
+            Add-Content -LiteralPath $logPath -Value ("[{0}] WARN {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$result.Detail) -Encoding UTF8
+        }
     }
     elseif ($result.LauncherStatus -like 'PSEXEC_EXIT_*' -or $result.LauncherStatus -eq 'PSEXEC_EXIT_UNKNOWN' -or $result.LauncherStatus -eq 'PSEXEC_COMMUNICATION_LOST') {
         $setupRecovery = Get-RemoteEndpointSetupMonitorRecovery -ComputerName $Computer -RemoteBaseDir $RemoteBaseDir -PsExecExitCode ([string]$result.ExitCode)
