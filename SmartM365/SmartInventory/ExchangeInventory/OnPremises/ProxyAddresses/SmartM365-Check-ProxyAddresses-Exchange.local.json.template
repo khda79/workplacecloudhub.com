@@ -24,7 +24,7 @@
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "OrganizationalUnit": "",
   "ExpectedSuffix": "",
-  "To": "",
+  "To": "__USE_GLOBAL__",
   "ProxyAddressesCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ProxyAddresses",
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ProxyAddresses\\WeeklyHistory",
