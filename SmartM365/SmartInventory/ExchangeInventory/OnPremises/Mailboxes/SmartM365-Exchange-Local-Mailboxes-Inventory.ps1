@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.19
+1.20
 
 .NOTES
-    Version: 1.19
+    Version: 1.20
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -228,7 +228,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.19"
+$ScriptVersion = "1.20"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -730,11 +730,13 @@ if ($DryRun) {
         }
 
         if (-not $ReportOnly) {
+            if (-not (EnsureExchangePSSnapinLoaded -RequiredCommands @("Get-Mailbox", "Set-ADServerSettings") -ViewEntireForest)) {
+                throw 'Exchange Management Tools were not detected or the Exchange snap-in could not be loaded.'
+            }
+
             $exchangeCmdletAvailable = [bool](Get-Command Get-Mailbox -ErrorAction SilentlyContinue)
-            $exchangeSnapinRegistered = [bool](Get-PSSnapin -Registered Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue)
             Write-Host "Exchange Get-Mailbox available: $exchangeCmdletAvailable"
-            Write-Host "Exchange snap-in registered: $exchangeSnapinRegistered"
-            if (-not $exchangeCmdletAvailable -and -not $exchangeSnapinRegistered) { throw 'Exchange Management Tools were not detected.' }
+            if (-not $exchangeCmdletAvailable) { throw 'Get-Mailbox is not available after Exchange snap-in load.' }
         }
     }
     catch {
