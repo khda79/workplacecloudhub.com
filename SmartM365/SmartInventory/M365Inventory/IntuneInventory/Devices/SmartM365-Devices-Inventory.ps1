@@ -4,7 +4,7 @@ Generates a detailed inventory of Intune-managed devices using Microsoft Graph A
 
 .DESCRIPTION
 Connects to Microsoft Graph, retrieves all Windows managed devices from Intune,
-adds PhysicalMemoryGB (RAM) via a per-device GET with $select=physicalMemoryInBytes.
+adds PhysicalMemoryGB (RAM) via Graph JSON batching with $select=physicalMemoryInBytes and a per-device fallback.
 Exports results to CSV.
 
 .PARAMETER OutputPath
@@ -16,11 +16,11 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.1
+1.2
 
 
 .NOTES
-    Version : 1.1
+    Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementManagedDevices.Read.All
@@ -298,6 +298,120 @@ function Get-ManagedDeviceRamBytes {
 }
 
 
+# Helper: Bulk RAM lookup via Graph JSON batching ($batch, max 20 sub-requests per call)
+# Returns hashtable: managedDeviceId -> physicalMemoryInBytes ([int64])
+function Get-ManagedDeviceRamMap {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$ManagedDeviceIds,
+        [int]$BatchSize  = 20,
+        [int]$MaxRetries = 5
+    )
+
+    $ids = @($ManagedDeviceIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $ramMap = @{}
+    $total  = $ids.Count
+    if ($total -eq 0) { return $ramMap }
+
+    if ($BatchSize -lt 1) { $BatchSize = 20 }
+    if ($BatchSize -gt 20) { $BatchSize = 20 }
+
+    WriteLog -Message ("RAM bulk lookup via Graph batching: {0} devices, batch size {1}..." -f $total, $BatchSize) "INFO"
+
+    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
+    $swTotal = [System.Diagnostics.Stopwatch]::StartNew()
+    $batchIdx = 0
+
+    for ($i = 0; $i -lt $total; $i += $BatchSize) {
+        $endIdx = [math]::Min($i + $BatchSize - 1, $total - 1)
+        $pending = @($ids[$i..$endIdx])
+        $attempt = 0
+        $batchIdx++
+
+        while ($pending.Count -gt 0 -and $attempt -le $MaxRetries) {
+            $idToDevice = @{}
+            $requests = New-Object System.Collections.Generic.List[object]
+            $j = 1
+
+            foreach ($id in $pending) {
+                $localId = [string]$j
+                $idToDevice[$localId] = $id
+                $requests.Add(@{
+                    id     = $localId
+                    method = "GET"
+                    url    = "/deviceManagement/managedDevices/$id" + '?$select=id,physicalMemoryInBytes'
+                }) | Out-Null
+                $j++
+            }
+
+            $body = @{ requests = $requests } | ConvertTo-Json -Depth 5
+
+            try {
+                $resp = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType "application/json" -ErrorAction Stop
+            }
+            catch {
+                $attempt++
+                WriteLog -Message ("Graph batch RAM lookup failed (attempt {0}/{1}): {2}. Waiting 10s..." -f $attempt, $MaxRetries, $_.Exception.Message) "WARNING"
+                Start-Sleep -Seconds 10
+                continue
+            }
+
+            $retryIds = New-Object System.Collections.Generic.List[string]
+            $retryAfter = 0
+
+            foreach ($r in @($resp.responses)) {
+                $managedDeviceId = $idToDevice[[string]$r.id]
+
+                if ([int]$r.status -eq 200) {
+                    $bytes = 0L
+                    if ($r.body -and $r.body.physicalMemoryInBytes) {
+                        $bytes = [int64]$r.body.physicalMemoryInBytes
+                    }
+                    if ($bytes -gt 0) {
+                        $mapKey = if ($r.body.id) { [string]$r.body.id } else { [string]$managedDeviceId }
+                        $ramMap[$mapKey] = $bytes
+                    }
+                }
+                elseif ([int]$r.status -eq 429 -or [int]$r.status -ge 500) {
+                    $retryIds.Add($managedDeviceId) | Out-Null
+                    if ($r.headers -and $r.headers.'Retry-After') {
+                        $ra = 0
+                        if ([int]::TryParse([string]$r.headers.'Retry-After', [ref]$ra) -and $ra -gt $retryAfter) {
+                            $retryAfter = $ra
+                        }
+                    }
+                }
+                else {
+                    WriteLog -Message ("RAM lookup failed for device {0} - HTTP {1}" -f $managedDeviceId, $r.status) "WARNING"
+                }
+            }
+
+            $pending = @($retryIds)
+            if ($pending.Count -gt 0) {
+                $attempt++
+                $wait = if ($retryAfter -gt 0) { $retryAfter } else { 5 * $attempt }
+                WriteLog -Message ("Throttled/transient RAM lookup errors on {0} sub-request(s). Waiting {1}s before retry (attempt {2}/{3})..." -f $pending.Count, $wait, $attempt, $MaxRetries) "WARNING"
+                Start-Sleep -Seconds $wait
+            }
+        }
+
+        foreach ($id in $pending) {
+            $rb = Get-ManagedDeviceRamBytes -ManagedDeviceId $id
+            if ($rb) { $ramMap[[string]$id] = $rb }
+        }
+
+        $processed = $endIdx + 1
+        if (($batchIdx % 50) -eq 0 -or $processed -ge $total) {
+            $pct = [math]::Round(100 * $processed / $total)
+            WriteLog -Message ("RAM bulk lookup progress: {0} / {1} ({2}%)" -f $processed, $total, $pct) "INFO"
+        }
+    }
+
+    $swTotal.Stop()
+    WriteLog -Message ("RAM bulk lookup completed: {0} / {1} devices with RAM value in {2} s." -f $ramMap.Count, $total, [math]::Round($swTotal.Elapsed.TotalSeconds)) "INFO"
+
+    return $ramMap
+}
 # Helper: Build Entra device map (deviceId GUID -> {Id,DeviceId,DisplayName,ApproximateLastSignInDateTime})
 function Get-EntraDeviceMap {
     [CmdletBinding()]
@@ -393,7 +507,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.2"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -494,12 +608,15 @@ try {
     # ------------------------
     # Build result objects
     # ------------------------
+    $deviceIds = @($devices | ForEach-Object { Get-SafeProperty $_ 'Id' } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $ramMap = Get-ManagedDeviceRamMap -ManagedDeviceIds $deviceIds
+
     $results = $devices | ForEach-Object {
         $devId   = Get-SafeProperty $_ 'Id'
         $physicalMemoryGB = $null
-        $rb = Get-ManagedDeviceRamBytes -ManagedDeviceId $devId
-        if ($rb) { $physicalMemoryGB = [math]::Round([double]$rb / 1GB, 2) }
-
+        if ($devId -and $ramMap.ContainsKey([string]$devId)) {
+            $physicalMemoryGB = [math]::Round([double]$ramMap[[string]$devId] / 1GB, 2)
+        }
         # Entra correlation (AzureADDeviceId == Entra deviceId GUID)
         $entraInfo = $null
         $aadDeviceId = Get-SafeProperty $_ 'AzureADDeviceId'

@@ -32,6 +32,8 @@
   "EnableGroupInventory": true,
   "EnableContactInventory": true,
   "EnableDuplicateAnalysis": true,
+  "EnableDuplicateNotification": true,
+  "DuplicateNotificationLastSentFilePath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory\\AD_DuplicateNotification_LastSent.txt",
   "DomainParallelThrottleLimit": 1,
   "DeleteTemporaryPerDomainCsv": true,
   "EnableWeeklyHistory": true,
