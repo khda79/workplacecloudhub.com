@@ -554,22 +554,32 @@ function Complete-SmartM365ExecutionContext {
         }
     }
 
-    # Upload run log files to SharePoint after transcript closure, when available.
-    $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
-        Sort-Object -Unique
-    foreach ($logUploadCandidate in $logUploadCandidates) {
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $logUploadCandidate | Out-Null
-    }
     if ($global:SmartM365SharePointUploadedFiles) {
         $summary['SharePointUploads'] = @($global:SmartM365SharePointUploadedFiles).Count
     }
+
     WriteLog -Message 'Execution summary:' -Level 'INFO'
     foreach ($key in $summary.Keys) {
         $value = $summary[$key]
         if ($null -eq $value) { continue }
         if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { continue }
         WriteLog -Message ('  {0}: {1}' -f $key, $value) -Level 'INFO'
+    }
+
+    # Upload run log files after the execution summary is written, so SharePoint keeps the final log content.
+    $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+        Sort-Object -Unique
+    $logUploadStartCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { 0 }
+    foreach ($logUploadCandidate in $logUploadCandidates) {
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $logUploadCandidate | Out-Null
+    }
+    $logUploadEndCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { $logUploadStartCount }
+    if ($logUploadEndCount -gt $logUploadStartCount) {
+        WriteLog -Message ('Run log SharePoint uploads: {0}' -f ($logUploadEndCount - $logUploadStartCount)) -Level 'INFO'
+        if (-not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile) -and (Test-Path -LiteralPath $global:LogTextFile -PathType Leaf)) {
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $global:LogTextFile | Out-Null
+        }
     }
 }
 
