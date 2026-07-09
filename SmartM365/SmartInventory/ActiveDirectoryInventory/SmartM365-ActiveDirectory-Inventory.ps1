@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.9
+1.10
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -247,6 +247,42 @@ function Get-SmartM365AdInventorySendMailMode {
     }
 }
 
+function New-SmartM365SharePointLinksSection {
+    [CmdletBinding()]
+    param([array]$UploadRecords)
+
+    $records = @($UploadRecords | Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace([string]$_.WebUrl) })
+    if ($records.Count -eq 0) { return $null }
+
+    $rows = foreach ($record in $records) {
+        $label = ConvertTo-SmartM365EmailHtmlText $record.Label
+        if ([string]::IsNullOrWhiteSpace($label)) { $label = ConvertTo-SmartM365EmailHtmlText $record.FileName }
+        $url = ConvertTo-SmartM365EmailHtmlText $record.WebUrl
+        $sharePointPath = ConvertTo-SmartM365EmailHtmlText $record.SharePointPath
+        "<tr><td style=`"width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;`">$label</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;word-break:break-all;`"><a href=`"$url`" style=`"color:#2563eb;text-decoration:underline;`">$sharePointPath</a></td></tr>"
+    }
+
+    $tableHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  $($rows -join "`n")
+</table>
+"@
+
+    return [pscustomobject]@{ Title = 'SharePoint links'; Html = $tableHtml }
+}
+
+function Add-SmartM365SharePointUploadLabel {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$UploadRecord,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    if (-not $UploadRecord) { return $null }
+    $UploadRecord | Add-Member -NotePropertyName Label -NotePropertyValue $Label -Force
+    return $UploadRecord
+}
+
 function Send-SmartM365AdInventoryEmailHtmlReport {
     [CmdletBinding()]
     param(
@@ -327,7 +363,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -834,9 +870,10 @@ try {
             $latestFilePath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($OutputFilePath))
             Copy-Item -LiteralPath $OutputFilePath -Destination $latestFilePath -Force -ErrorAction Stop
             WriteLog -Message ("Daily report CSV copied to LatestCsvFolderPath: {0}" -f $latestFilePath)
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestFilePath | Out-Null
         }
 
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $OutputFilePath
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $OutputFilePath | Out-Null
     }
 
     function Invoke-ActiveDirectoryDailyReport {
@@ -1735,7 +1772,8 @@ try {
                     $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($combinedCsv))
                     Copy-Item -LiteralPath $combinedCsv -Destination $destinationFile -Force -ErrorAction Stop
                     WriteLog -Message ("Copied combined CSV '{0}' to '{1}'" -f $combinedCsv, $destinationFile)
-                    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
+                    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $combinedCsv | Out-Null
+                    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile | Out-Null
                 }
                 else {
                     WriteLog -Message ("Combined CSV not found, skipping copy: {0}" -f $combinedCsv)
@@ -1879,12 +1917,20 @@ try {
                 $smtpDuplicateCount = @($smtpMap.Keys | Where-Object { $smtpMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate SMTP analysis complete. Distinct duplicate addresses: {0}. Affected entries: {1}. Output: {2}" -f $smtpDuplicateCount, $duplicateSmtpRows.Count, $duplicateSmtpCsv)
 
+                $duplicateSharePointUploads = @()
                 foreach ($duplicateCsv in @($duplicateUpnCsv, $duplicateSmtpCsv)) {
                     if ($destinationRootPath -and (Test-Path -Path $duplicateCsv)) {
+                        $duplicateLabel = if ($duplicateCsv -eq $duplicateUpnCsv) { 'Duplicate UPN' } else { 'Duplicate SMTP' }
+                        $sourceUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $duplicateCsv
+                        $sourceUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $sourceUpload -Label ("{0} (DATA-ALL)" -f $duplicateLabel)
+                        if ($sourceUpload) { $duplicateSharePointUploads += $sourceUpload }
+
                         $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($duplicateCsv))
                         Copy-Item -LiteralPath $duplicateCsv -Destination $destinationFile -Force -ErrorAction Stop
                         WriteLog -Message ("Copied '{0}' to '{1}'" -f $duplicateCsv, $destinationFile)
-                        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
+                        $latestUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
+                        $latestUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $latestUpload -Label ("{0} (DATA-LAST)" -f $duplicateLabel)
+                        if ($latestUpload) { $duplicateSharePointUploads += $latestUpload }
                     }
                 }
 
@@ -1921,6 +1967,10 @@ try {
                             [pscustomobject]@{ Label = 'Duplicate UPN'; Path = $duplicateUpnCsv }
                             [pscustomobject]@{ Label = 'Duplicate SMTP'; Path = $duplicateSmtpCsv }
                         )
+                        $duplicateSharePointSection = New-SmartM365SharePointLinksSection -UploadRecords $duplicateSharePointUploads
+                        $duplicateSections = @()
+                        if ($duplicateSharePointSection) { $duplicateSections += $duplicateSharePointSection }
+
                         $emailBody = New-SmartM365EmailBody `
                             -Title 'Duplicate identities detected' `
                             -Category 'SmartM365 Active Directory' `
@@ -1932,7 +1982,8 @@ try {
                             -ActionHtml 'Review the duplicate UPN and SMTP CSV files before identity cleanup, migration, or synchronization decisions.' `
                             -SummaryRows $duplicateSummaryRows `
                             -PathRows $duplicatePathRows `
-                            -Footer 'This automated message was generated by SmartM365. Use the exported CSV paths above as the source of truth for remediation.'
+                            -Sections $duplicateSections `
+                            -Footer 'This automated message was generated by SmartM365. Use the exported CSV paths and SharePoint links above as the source of truth for remediation.'
                         $duplicateNotificationTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
                         if ([string]::IsNullOrWhiteSpace($duplicateNotificationTo)) {
                             throw 'Duplicate identity notification requires To in configuration. ErrorMailTo is reserved for error notifications.'
