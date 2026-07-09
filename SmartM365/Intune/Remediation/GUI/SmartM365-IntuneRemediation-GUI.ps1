@@ -22,9 +22,12 @@
     - DeviceManagementScripts.ReadWrite.All
     - DeviceManagementConfiguration.Read.All
 
+.VERSION
+    1.1
+
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version: 1.0
+    Version: 1.1
 #>
 
 [CmdletBinding()]
@@ -3497,7 +3500,7 @@ Add-Type -AssemblyName System.Windows.Forms
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Intune Remediation GUI"
+        Title="SmartM365 Intune Remediation"
         Width="1320"
         Height="860"
         MinWidth="1100"
@@ -3511,9 +3514,9 @@ Add-Type -AssemblyName System.Windows.Forms
         <SolidColorBrush x:Key="MutedBrush" Color="#607086"/>
         <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF"/>
         <SolidColorBrush x:Key="PanelBorderBrush" Color="#D7E1EA"/>
-        <SolidColorBrush x:Key="HeaderBrush" Color="#071D33"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#00A9E0"/>
-        <SolidColorBrush x:Key="AccentDarkBrush" Color="#0078A6"/>
+        <SolidColorBrush x:Key="HeaderBrush" Color="#061A2B"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#00AEEF"/>
+        <SolidColorBrush x:Key="AccentDarkBrush" Color="#0078A8"/>
         <SolidColorBrush x:Key="SoftAccentBrush" Color="#E8F7FC"/>
 
         <Style TargetType="Button">
@@ -3753,7 +3756,7 @@ Add-Type -AssemblyName System.Windows.Forms
 
         <Border Grid.Row="0"
                 Background="{StaticResource HeaderBrush}"
-                BorderBrush="#0BA6D6"
+                BorderBrush="#00AEEF"
                 BorderThickness="0,0,0,3"
                 CornerRadius="8"
                 Padding="18,10">
@@ -3774,7 +3777,7 @@ Add-Type -AssemblyName System.Windows.Forms
                     <Image x:Name="LogoImage" Stretch="Uniform" VerticalAlignment="Center"/>
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="Smart Intune Remediation GUI"
+                    <TextBlock Text="SmartM365 Intune Remediation"
                                Foreground="#FFFFFF"
                                FontSize="22"
                                FontWeight="SemiBold"
@@ -3786,8 +3789,8 @@ Add-Type -AssemblyName System.Windows.Forms
                 </StackPanel>
                 <Border Grid.Column="2"
                         VerticalAlignment="Center"
-                        Background="#143657"
-                        BorderBrush="#24577F"
+                        Background="#0B2A44"
+                        BorderBrush="#1D5E86"
                         BorderThickness="1"
                         CornerRadius="8"
                         Padding="14,9"
