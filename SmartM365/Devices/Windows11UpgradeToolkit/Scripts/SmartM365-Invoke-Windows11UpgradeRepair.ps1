@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.48
+    0.1.49
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -32,6 +32,10 @@ param(
     [switch]$AllowReboot,
     [switch]$AllowSetupCompletionRebootWhenNoUser,
     [switch]$AllowSetupProfileRepair,
+    [switch]$ScheduleRetryAfterReboot,
+    [switch]$RetryAfterRebootTaskRun,
+    [ValidateRange(1, 30)][int]$RetryAfterRebootMaxAttempts = 3,
+    [ValidateRange(0, 3600)][int]$RetryAfterRebootDelaySeconds = 300,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
     [switch]$AllowAdvancedDiskCleanup,
@@ -76,17 +80,22 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.47'
+$script:ScriptVersion = '0.1.49'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
+$script:EndpointScriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
 $script:LogDir = Join-Path $DataRoot 'Logs'
 $script:OutputDir = Join-Path $DataRoot 'Output'
 $script:SetupLogDir = Join-Path $script:LogDir 'SetupUpgrade'
 $script:InputDir = Join-Path $DataRoot 'Input'
+$script:StateDir = Join-Path $DataRoot 'State'
 $script:LogPath = Join-Path $script:LogDir ("{0}_{1}_{2}.log" -f $script:ScriptName,$script:ComputerName,$script:RunId)
 $script:CsvPath = Join-Path $script:OutputDir ("SmartM365_Windows11Upgrade_{0}_{1}.csv" -f $script:ComputerName,$script:RunId)
 $script:LastRunPath = Join-Path $DataRoot 'LastRun.json'
+$script:RetryAfterRebootTaskName = 'SmartM365-Windows11UpgradeToolkit-RetryAfterReboot'
+$script:RetryAfterRebootStatePath = Join-Path $script:StateDir 'RetryAfterReboot.json'
+$script:RetryAfterRebootRunnerPath = Join-Path $script:StateDir 'RetryAfterRebootRunner.ps1'
 $script:SetupMediaManifestFileName = 'SmartM365-SetupMediaManifest.sha256.csv'
 
 function New-SmartDirectory {
@@ -175,14 +184,23 @@ function Invoke-LocalFileRetention {
 function Protect-Windows11ToolkitPathAcl {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [switch]$Directory
+        [switch]$Directory,
+        [switch]$RequireSuccess
     )
 
     try {
-        if (-not (Test-Path -LiteralPath $Path)) { return }
+        if (-not (Test-Path -LiteralPath $Path)) {
+            $message = "ACL hardening target does not exist. Path={0}" -f $Path
+            if ($RequireSuccess) { throw $message }
+            Write-SmartLog $message 'WARN'
+            return
+        }
+
         $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
         if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) {
-            Write-SmartLog ("ACL hardening skipped because icacls.exe was not found. Path={0}" -f $Path) 'WARN'
+            $message = "ACL hardening skipped because icacls.exe was not found. Path={0}" -f $Path
+            if ($RequireSuccess) { throw $message }
+            Write-SmartLog $message 'WARN'
             return
         }
 
@@ -196,13 +214,16 @@ function Protect-Windows11ToolkitPathAcl {
         $output = & $icacls $Path '/inheritance:r' '/grant:r' $grants 2>&1
         $exitCode = [int]$LASTEXITCODE
         if ($exitCode -ne 0) {
-            Write-SmartLog ("ACL hardening failed. Path={0}; ExitCode={1}; Output={2}" -f $Path,$exitCode,(($output | Out-String).Trim())) 'WARN'
+            $message = "ACL hardening failed. Path={0}; ExitCode={1}; Output={2}" -f $Path,$exitCode,(($output | Out-String).Trim())
+            if ($RequireSuccess) { throw $message }
+            Write-SmartLog $message 'WARN'
             return
         }
 
         Write-SmartLog ("ACL hardening applied. Path={0}; Directory={1}" -f $Path,[bool]$Directory)
     }
     catch {
+        if ($RequireSuccess) { throw }
         Write-SmartLog ("ACL hardening threw an exception. Path={0}; Error={1}" -f $Path,$_.Exception.Message) 'WARN'
     }
 }
@@ -2921,8 +2942,260 @@ function Resolve-PendingRebootOutcome {
         }
     }
 
+    if ($ScheduleRetryAfterReboot -and -not $AuditOnly -and $outcome.Status -like 'PENDING_REBOOT*') {
+        try {
+            Register-RetryAfterRebootTask -Reason $outcome.Status
+            $outcome.NextAction = 'REBOOT_DEVICE_THEN_RETRY_AT_STARTUP'
+            $outcome.Detail = ("{0}; RetryAfterReboot=Scheduled; TaskName={1}; DelaySeconds={2}; MaxAttempts={3}" -f $outcome.Detail,$script:RetryAfterRebootTaskName,$RetryAfterRebootDelaySeconds,$RetryAfterRebootMaxAttempts)
+            if ([string]::IsNullOrWhiteSpace([string]$outcome.ActionResult)) {
+                $outcome.ActionResult = 'RetryAfterRebootScheduled'
+            }
+            else {
+                $outcome.ActionResult = "{0};RetryAfterRebootScheduled" -f $outcome.ActionResult
+            }
+        }
+        catch {
+            $script:RetryAfterRebootAction = 'ScheduleFailed'
+            $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+            $script:RetryAfterRebootDetail = $_.Exception.Message
+            $outcome.NextAction = 'CHECK_RETRY_AFTER_REBOOT_TASK_OR_REBOOT_DEVICE'
+            $outcome.Detail = ("{0}; RetryAfterReboot=ScheduleFailed; Error={1}" -f $outcome.Detail,$_.Exception.Message)
+            if ([string]::IsNullOrWhiteSpace([string]$outcome.ActionResult)) {
+                $outcome.ActionResult = 'RetryAfterRebootScheduleFailed'
+            }
+            else {
+                $outcome.ActionResult = "{0};RetryAfterRebootScheduleFailed" -f $outcome.ActionResult
+            }
+            Write-SmartLog ("Retry-after-reboot task scheduling failed: {0}" -f $_.Exception.Message) 'WARN'
+        }
+    }
+
     return [pscustomobject]$outcome
 }
+function Set-RetryAfterRebootStateProperty {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Value
+    )
+
+    if ($State.PSObject.Properties[$Name]) {
+        $State.$Name = $Value
+    }
+    else {
+        Add-Member -InputObject $State -NotePropertyName $Name -NotePropertyValue $Value -Force
+    }
+}
+
+function Read-RetryAfterRebootState {
+    if (-not (Test-Path -LiteralPath $script:RetryAfterRebootStatePath -PathType Leaf)) { return $null }
+    return Get-Content -LiteralPath $script:RetryAfterRebootStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+}
+
+function Write-RetryAfterRebootState {
+    param([Parameter(Mandatory = $true)]$State)
+
+    New-SmartDirectory -Path $script:StateDir
+    $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:RetryAfterRebootStatePath -Encoding UTF8
+}
+
+function New-RetryAfterRebootArgumentList {
+    $arguments = New-Object System.Collections.Generic.List[string]
+
+    foreach ($switchName in @(
+        'IgnoreRunGuard',
+        'AuditOnly',
+        'AllowPolicyRepair',
+        'AllowWUReset',
+        'AllowForceUpgrade',
+        'AllowSetupUpgrade',
+        'DirectSetupUpgrade',
+        'AllowReboot',
+        'AllowSetupCompletionRebootWhenNoUser',
+        'AllowSetupProfileRepair',
+        'ScheduleRetryAfterReboot',
+        'SkipVirtualMachines',
+        'AllowDiskCleanup',
+        'AllowAdvancedDiskCleanup',
+        'AllowDismComponentCleanup',
+        'SkipSetupMediaPreCopy'
+    )) {
+        $value = Get-Variable -Name $switchName -ValueOnly -ErrorAction SilentlyContinue
+        if ($value) { [void]$arguments.Add("-$switchName") }
+    }
+
+    if (-not $arguments.Contains('-IgnoreRunGuard')) { [void]$arguments.Add('-IgnoreRunGuard') }
+    if (-not $arguments.Contains('-ScheduleRetryAfterReboot')) { [void]$arguments.Add('-ScheduleRetryAfterReboot') }
+
+    $valueParameters = [ordered]@{
+        RunGuardHours = $RunGuardHours
+        RetryAfterRebootMaxAttempts = $RetryAfterRebootMaxAttempts
+        RetryAfterRebootDelaySeconds = $RetryAfterRebootDelaySeconds
+        SetupSourcePath = $SetupSourcePath
+        SetupSourceMapPath = $SetupSourceMapPath
+        SetupExecutionMode = $SetupExecutionMode
+        SetupMediaId = $SetupMediaId
+        SetupLanguage = $SetupLanguage
+        SetupDynamicUpdate = $SetupDynamicUpdate
+        SetupCacheRoot = $SetupCacheRoot
+        SetupSourceCandidateLimit = $SetupSourceCandidateLimit
+        SetupSourceValidationRetries = $SetupSourceValidationRetries
+        SetupSourceValidationRetryDelaySeconds = $SetupSourceValidationRetryDelaySeconds
+        SetupMediaCopyIpGapMilliseconds = $SetupMediaCopyIpGapMilliseconds
+        SetupMediaCopyTimeoutMinutes = $SetupMediaCopyTimeoutMinutes
+        SetupMediaCopyJitterSeconds = $SetupMediaCopyJitterSeconds
+        SetupSourceConcurrencyLimit = $SetupSourceConcurrencyLimit
+        SetupSourceConcurrencyLeaseMinutes = $SetupSourceConcurrencyLeaseMinutes
+        SetupSourceConcurrencyGateRoot = $SetupSourceConcurrencyGateRoot
+        SetupSubnetConcurrencyLimit = $SetupSubnetConcurrencyLimit
+        SetupSubnetPrefixLength = $SetupSubnetPrefixLength
+        SetupSubnetConcurrencyLeaseMinutes = $SetupSubnetConcurrencyLeaseMinutes
+        SetupSubnetConcurrencyGateRoot = $SetupSubnetConcurrencyGateRoot
+        MinimumFreeDiskGB = $MinimumFreeDiskGB
+        DiskCleanupTempFileMinAgeDays = $DiskCleanupTempFileMinAgeDays
+        DiskCleanupLogRetentionDays = $DiskCleanupLogRetentionDays
+        DiskCleanupUpgradeFolderMinAgeDays = $DiskCleanupUpgradeFolderMinAgeDays
+        RebootDelaySeconds = $RebootDelaySeconds
+        SetupProcessHeartbeatSeconds = $SetupProcessHeartbeatSeconds
+        SetupProcessTimeoutMinutes = $SetupProcessTimeoutMinutes
+        LocalFileRetentionCount = $LocalFileRetentionCount
+        DataRoot = $DataRoot
+    }
+
+    foreach ($entry in $valueParameters.GetEnumerator()) {
+        if ($null -eq $entry.Value) { continue }
+        $text = [string]$entry.Value
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        [void]$arguments.Add("-$($entry.Key)")
+        [void]$arguments.Add($text)
+    }
+
+    return @($arguments)
+}
+
+function Write-RetryAfterRebootRunner {
+    $escapedStatePath = $script:RetryAfterRebootStatePath.Replace("'", "''")
+    $runnerContent = @"
+`$ErrorActionPreference = 'Stop'
+`$statePath = '$escapedStatePath'
+`$state = Get-Content -LiteralPath `$statePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+`$delaySeconds = 0
+if (`$state.PSObject.Properties['DelaySeconds']) { `$delaySeconds = [int]`$state.DelaySeconds }
+if (`$delaySeconds -gt 0) { Start-Sleep -Seconds `$delaySeconds }
+`$arguments = @()
+if (`$state.PSObject.Properties['Arguments']) { `$arguments = @(`$state.Arguments | ForEach-Object { [string]`$_ }) }
+`$arguments += '-RetryAfterRebootTaskRun'
+& ([string]`$state.ScriptPath) @arguments
+`$exitCode = if (`$global:LASTEXITCODE -is [int]) { [int]`$global:LASTEXITCODE } else { 0 }
+exit `$exitCode
+"@
+    $runnerContent | Set-Content -LiteralPath $script:RetryAfterRebootRunnerPath -Encoding UTF8
+}
+
+function Register-RetryAfterRebootTask {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $script:RetryAfterRebootAction = 'ScheduleRequested'
+    New-SmartDirectory -Path $script:StateDir
+    Protect-Windows11ToolkitPathAcl -Path $DataRoot -Directory -RequireSuccess
+    Protect-Windows11ToolkitPathAcl -Path $script:StateDir -Directory -RequireSuccess
+    Protect-Windows11ToolkitPathAcl -Path $script:EndpointScriptPath -RequireSuccess
+
+    $previousAttempts = 0
+    try {
+        $existingState = Read-RetryAfterRebootState
+        if ($existingState -and $existingState.PSObject.Properties['Attempts']) { $previousAttempts = [int]$existingState.Attempts }
+    }
+    catch {
+        Write-SmartLog ("Existing retry-after-reboot state could not be read and will be replaced: {0}" -f $_.Exception.Message) 'WARN'
+    }
+
+    $state = [pscustomobject]@{
+        TaskName = $script:RetryAfterRebootTaskName
+        ScriptPath = $script:EndpointScriptPath
+        Arguments = @(New-RetryAfterRebootArgumentList)
+        Attempts = $previousAttempts
+        MaxAttempts = $RetryAfterRebootMaxAttempts
+        DelaySeconds = $RetryAfterRebootDelaySeconds
+        Reason = $Reason
+        ComputerName = $script:ComputerName
+        CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        LastScheduledUtc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    Write-RetryAfterRebootState -State $state
+    Write-RetryAfterRebootRunner
+    Protect-Windows11ToolkitPathAcl -Path $script:RetryAfterRebootStatePath -RequireSuccess
+    Protect-Windows11ToolkitPathAcl -Path $script:RetryAfterRebootRunnerPath -RequireSuccess
+
+    $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $script:RetryAfterRebootRunnerPath
+    $createArgs = @('/Create','/TN',$script:RetryAfterRebootTaskName,'/SC','ONSTART','/RU','SYSTEM','/RL','HIGHEST','/TR',$taskCommand,'/F')
+    $output = & schtasks.exe @createArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ("schtasks.exe failed with exit code {0}: {1}" -f $LASTEXITCODE,(@($output) -join ' '))
+    }
+
+    $script:RetryAfterRebootAction = 'Scheduled'
+    $script:RetryAfterRebootAttempt = [string]$previousAttempts
+    $script:RetryAfterRebootMaxAttempts = [string]$RetryAfterRebootMaxAttempts
+    $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+    $script:RetryAfterRebootDetail = ("Task={0}; DelaySeconds={1}; MaxAttempts={2}; Reason={3}" -f $script:RetryAfterRebootTaskName,$RetryAfterRebootDelaySeconds,$RetryAfterRebootMaxAttempts,$Reason)
+    Write-SmartLog ("Retry-after-reboot task scheduled. {0}" -f $script:RetryAfterRebootDetail)
+}
+
+function Start-RetryAfterRebootTaskRun {
+    $script:RetryAfterRebootAction = 'TaskRun'
+    $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+
+    $state = Read-RetryAfterRebootState
+    if (-not $state) {
+        $script:RetryAfterRebootDetail = 'Retry-after-reboot task run started but state file is missing.'
+        return [pscustomobject]@{ Exhausted = $false }
+    }
+
+    $attempts = 0
+    if ($state.PSObject.Properties['Attempts']) { $attempts = [int]$state.Attempts }
+    $attempts++
+    $maxAttempts = $RetryAfterRebootMaxAttempts
+    if ($state.PSObject.Properties['MaxAttempts']) { $maxAttempts = [int]$state.MaxAttempts }
+
+    Set-RetryAfterRebootStateProperty -State $state -Name 'Attempts' -Value $attempts
+    Set-RetryAfterRebootStateProperty -State $state -Name 'LastAttemptUtc' -Value ((Get-Date).ToUniversalTime().ToString('o'))
+    Write-RetryAfterRebootState -State $state
+
+    $script:RetryAfterRebootAttempt = [string]$attempts
+    $script:RetryAfterRebootMaxAttempts = [string]$maxAttempts
+    $script:RetryAfterRebootDetail = ("Task={0}; Attempt={1}; MaxAttempts={2}" -f $script:RetryAfterRebootTaskName,$attempts,$maxAttempts)
+    Write-SmartLog ("Retry-after-reboot task run started. {0}" -f $script:RetryAfterRebootDetail)
+
+    return [pscustomobject]@{ Exhausted = ($attempts -gt $maxAttempts); Attempts = $attempts; MaxAttempts = $maxAttempts }
+}
+
+function Unregister-RetryAfterRebootTask {
+    param([string]$Reason = '')
+
+    $messages = New-Object System.Collections.Generic.List[string]
+    $deleteOutput = & schtasks.exe /Delete /TN $script:RetryAfterRebootTaskName /F 2>&1
+    if ($LASTEXITCODE -ne 0 -and (@($deleteOutput) -join ' ') -notmatch 'cannot find|The system cannot find') {
+        [void]$messages.Add(("Task delete failed: {0}" -f (@($deleteOutput) -join ' ')))
+    }
+
+    foreach ($path in @($script:RetryAfterRebootRunnerPath,$script:RetryAfterRebootStatePath)) {
+        try {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+        }
+        catch {
+            [void]$messages.Add(("Remove failed for {0}: {1}" -f $path,$_.Exception.Message))
+        }
+    }
+
+    if ($messages.Count -gt 0) {
+        Write-SmartLog ("Retry-after-reboot cleanup completed with warning(s). Reason={0}; {1}" -f $Reason,($messages -join '; ')) 'WARN'
+    }
+    else {
+        Write-SmartLog ("Retry-after-reboot task/state cleaned up. Reason={0}" -f $Reason)
+    }
+}
+
 function Get-SetupDuplicateProfileFailure {
     $pantherPaths = @(
         'C:\$WINDOWS.~BT\Sources\Panther\setupact.log',
@@ -3296,10 +3569,12 @@ function Save-SetupReturnCheckpoint {
 
 New-SmartDirectory -Path $script:LogDir
 New-SmartDirectory -Path $script:OutputDir
+New-SmartDirectory -Path $script:StateDir
 Protect-Windows11ToolkitPathAcl -Path $DataRoot -Directory
 Protect-Windows11ToolkitPathAcl -Path $script:LogDir -Directory
 Protect-Windows11ToolkitPathAcl -Path $script:OutputDir -Directory
-Protect-Windows11ToolkitPathAcl -Path $MyInvocation.MyCommand.Path
+Protect-Windows11ToolkitPathAcl -Path $script:StateDir -Directory
+Protect-Windows11ToolkitPathAcl -Path $script:EndpointScriptPath
 $script:LocalIPv4Addresses = ''
 try { $script:LocalIPv4Addresses = (@(Get-LocalIPv4Addresses) -join ',') } catch { $script:LocalIPv4Addresses = '' }
 Write-SmartLog ("===== {0} v{1} started. ComputerName={2}; LocalIPv4={3}; RunId={4} =====" -f $script:ScriptName,$script:ScriptVersion,$script:ComputerName,$script:LocalIPv4Addresses,$script:RunId)
@@ -3330,6 +3605,11 @@ $script:ControlledRebootAction = ''
 $script:ControlledRebootDetail = ''
 $script:ControlledRebootUserCount = ''
 $script:ControlledRebootUsers = ''
+$script:RetryAfterRebootAction = ''
+$script:RetryAfterRebootDetail = ''
+$script:RetryAfterRebootAttempt = ''
+$script:RetryAfterRebootMaxAttempts = ''
+$script:RetryAfterRebootTaskNameResult = ''
 $script:UserRebootNotificationSent = ''
 $script:UserRebootNotificationLang = ''
 $script:UserRebootNotificationMessage = ''
@@ -3351,6 +3631,18 @@ $script:SetupProcessExitCode = ''
 $computerSystem = $null
 
 try {
+    if ($RetryAfterRebootTaskRun) {
+        $retryTaskRun = Start-RetryAfterRebootTaskRun
+        if ($retryTaskRun.Exhausted) {
+            $status = 'RETRY_AFTER_REBOOT_EXHAUSTED'
+            $nextAction = 'CHECK_PENDING_REBOOT_OR_RELAUNCH_LOT'
+            $detail = ("Retry-after-reboot task exceeded max attempts. Attempt={0}; MaxAttempts={1}; TaskName={2}." -f $retryTaskRun.Attempts,$retryTaskRun.MaxAttempts,$script:RetryAfterRebootTaskName)
+            $exitCode = 3
+            Unregister-RetryAfterRebootTask -Reason $status
+            throw [System.OperationCanceledException]::new($detail)
+        }
+    }
+
     if (-not $IgnoreRunGuard -and $RunGuardHours -gt 0 -and (Test-Path -LiteralPath $script:LastRunPath -PathType Leaf)) {
         $last = Get-Content -LiteralPath $script:LastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $lastStatus = ''
@@ -3457,7 +3749,7 @@ try {
     }
     elseif ($DirectSetupUpgrade) {
         Write-SmartLog 'Direct setup upgrade requested. Skipping Intune enrollment, compatibility-indicator, and policy-blocker gates; pending reboot can still trigger a controlled reboot when allowed and no interactive user is connected; Windows Setup will perform final validation.' 'WARN'
-        if ($pendingReboot -and $AllowReboot -and -not $AuditOnly) {
+        if ($pendingReboot -and ($AllowReboot -or $ScheduleRetryAfterReboot) -and -not $AuditOnly) {
             $pendingOutcome = Resolve-PendingRebootOutcome -PendingRebootInfo $pendingRebootInfo -RebootReason 'SmartM365 Windows 11 direct setup readiness reboot - no interactive user connected'
             $status = $pendingOutcome.Status
             $nextAction = $pendingOutcome.NextAction
@@ -3761,6 +4053,11 @@ finally {
         ControlledRebootDetail = $script:ControlledRebootDetail
         ControlledRebootUserCount = $script:ControlledRebootUserCount
         ControlledRebootUsers = $script:ControlledRebootUsers
+        RetryAfterRebootAction = $script:RetryAfterRebootAction
+        RetryAfterRebootDetail = $script:RetryAfterRebootDetail
+        RetryAfterRebootAttempt = $script:RetryAfterRebootAttempt
+        RetryAfterRebootMaxAttempts = $script:RetryAfterRebootMaxAttempts
+        RetryAfterRebootTaskName = $script:RetryAfterRebootTaskNameResult
         UserRebootNotificationSent = $script:UserRebootNotificationSent
         UserRebootNotificationLang = $script:UserRebootNotificationLang
         UserRebootNotificationMessage = $script:UserRebootNotificationMessage
@@ -3778,6 +4075,9 @@ finally {
     }
 
     Save-RunResult -Result $result
+    if (($RetryAfterRebootTaskRun -or (Test-Path -LiteralPath $script:RetryAfterRebootStatePath -PathType Leaf)) -and $status -notlike 'PENDING_REBOOT*') {
+        Unregister-RetryAfterRebootTask -Reason $status
+    }
     Write-SmartLog ("Final Status={0}; ComputerName={1}; LocalIPv4={2}; NextAction={3}; ExitCode={4}" -f $status,$script:ComputerName,$script:LocalIPv4Addresses,$nextAction,$exitCode)
     if ($status -like 'PENDING_REBOOT*') {
         $rebootExplanation = switch ($status) {
