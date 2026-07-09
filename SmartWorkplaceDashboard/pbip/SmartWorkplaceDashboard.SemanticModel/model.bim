@@ -1,0 +1,745 @@
+{
+  "name": "SmartWorkplaceDashboard",
+  "compatibilityLevel": 1567,
+  "model": {
+    "culture": "en-US",
+    "defaultPowerBIDataSourceVersion": "powerBI_V3",
+    "expressions": [
+      {
+        "name": "TenantKey",
+        "kind": "m",
+        "expression": "\"Default\""
+      },
+      {
+        "name": "HistoryMonths",
+        "kind": "m",
+        "expression": "12"
+      },
+      {
+        "name": "SmartInventoryLatestPath",
+        "kind": "m",
+        "expression": "\"C:\\Temp\\WORKPLACE\\SMART-M365\\DATA-LAST\""
+      },
+      {
+        "name": "SmartInventoryHistoryPath",
+        "kind": "m",
+        "expression": "\"C:\\Temp\\WORKPLACE\\SMART-M365\\DATA-ALL\""
+      },
+      {
+        "name": "CMDBPowerBIPath",
+        "kind": "m",
+        "expression": "\"..\\SmartWorkplaceCMDB\\Data\\Tenants\\Default\\DATA-LAST\\PowerBI\""
+      },
+      {
+        "name": "fnLoadCsv",
+        "kind": "m",
+        "expression": "(folderPath as text, fileName as text) as table => let Files = try Folder.Files(folderPath) otherwise #table(type table [Name = text, Content = binary, Extension = text, Folder Path = text, Date modified = datetime], {}), Match = Table.SelectRows(Files, each [Name] = fileName), Output = if Table.RowCount(Match) = 0 then #table({}, {}) else let Content = Match{0}[Content], Csv = Csv.Document(Content, [Delimiter = \",\", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]), Promoted = Table.PromoteHeaders(Csv, [PromoteAllScalars = true]) in Promoted in Output"
+      },
+      {
+        "name": "fnLoadCmdbTable",
+        "kind": "m",
+        "expression": "(fileName as text) as table => fnLoadCsv(CMDBPowerBIPath, fileName)"
+      },
+      {
+        "name": "fnLoadHistoryFolder",
+        "kind": "m",
+        "expression": "(historyRootPath as text, optional fileName as nullable text) as table => let Files = try Folder.Files(historyRootPath) otherwise #table(type table [Name = text, Content = binary, Extension = text, Folder Path = text, Date modified = datetime], {}), CsvFiles = Table.SelectRows(Files, each Text.Lower([Extension]) = \".csv\" and (fileName = null or [Name] = fileName)), Tables = List.Transform(Table.ToRecords(CsvFiles), (r as record) => let Csv = Csv.Document(r[Content], [Delimiter = \",\", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]), Promoted = Table.PromoteHeaders(Csv, [PromoteAllScalars = true]), FolderParts = List.RemoveItems(Text.Split(Text.TrimEnd(r[Folder Path], {\"\\\\\", \"/\"}), \"\\\\\"), {\"\"}), SnapshotWeek = if List.Count(FolderParts) = 0 then null else List.Last(FolderParts), WithWeek = Table.AddColumn(Promoted, \"SnapshotWeek\", each SnapshotWeek, type text), WithFile = Table.AddColumn(WithWeek, \"SnapshotFile\", each r[Name], type text), WithModified = Table.AddColumn(WithFile, \"SnapshotModifiedDateTime\", each r[Date modified], type datetime) in WithModified), Output = if List.Count(Tables) = 0 then #table({}, {}) else Table.Combine(Tables) in Output"
+      },
+      {
+        "name": "fnSourceFreshness",
+        "kind": "m",
+        "expression": "(folderPath as text, fileName as text, sourceName as text) as table => let Files = try Folder.Files(folderPath) otherwise #table(type table [Name = text, Content = binary, Extension = text, Folder Path = text, Date modified = datetime], {}), Match = Table.SelectRows(Files, each [Name] = fileName), Exists = Table.RowCount(Match) > 0, Modified = if Exists then Match{0}[Date modified] else null, Rows = if Exists then try Table.RowCount(fnLoadCsv(folderPath, fileName)) otherwise null else null, Output = #table(type table [SourceName = text, FileName = text, Exists = logical, LastModifiedDateTime = nullable datetime, RowCount = nullable number], {{sourceName, fileName, Exists, Modified, Rows}}) in Output"
+      }
+    ],
+    "tables": [
+      {
+        "name": "DimTenant",
+        "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantDisplayName",
+            "dataType": "string",
+            "sourceColumn": "TenantDisplayName"
+          },
+          {
+            "name": "Environment",
+            "dataType": "string",
+            "sourceColumn": "Environment"
+          },
+          {
+            "name": "LastRefreshDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "LastRefreshDateTime"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "DimTenant",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"DimTenant.csv\"), Output = Table.SelectColumns(Source, {\"TenantKey\", \"TenantDisplayName\", \"Environment\", \"LastRefreshDateTime\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "DimDate",
+        "columns": [
+          {
+            "name": "Date",
+            "dataType": "dateTime",
+            "sourceColumn": "Date"
+          },
+          {
+            "name": "Year",
+            "dataType": "int64",
+            "sourceColumn": "Year"
+          },
+          {
+            "name": "Quarter",
+            "dataType": "string",
+            "sourceColumn": "Quarter"
+          },
+          {
+            "name": "Month",
+            "dataType": "int64",
+            "sourceColumn": "Month"
+          },
+          {
+            "name": "MonthName",
+            "dataType": "string",
+            "sourceColumn": "MonthName"
+          },
+          {
+            "name": "Day",
+            "dataType": "int64",
+            "sourceColumn": "Day"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "DimDate",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"DimDate.csv\"), Output = Table.SelectColumns(Source, {\"Date\", \"Year\", \"Quarter\", \"Month\", \"MonthName\", \"Day\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "DimUser",
+        "columns": [
+          {
+            "name": "CmdbUserId",
+            "dataType": "string",
+            "sourceColumn": "CmdbUserId"
+          },
+          {
+            "name": "UserPrincipalName",
+            "dataType": "string",
+            "sourceColumn": "UserPrincipalName"
+          },
+          {
+            "name": "DisplayName",
+            "dataType": "string",
+            "sourceColumn": "DisplayName"
+          },
+          {
+            "name": "AccountEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "AccountEnabled"
+          },
+          {
+            "name": "UserType",
+            "dataType": "string",
+            "sourceColumn": "UserType"
+          },
+          {
+            "name": "Department",
+            "dataType": "string",
+            "sourceColumn": "Department"
+          },
+          {
+            "name": "JobTitle",
+            "dataType": "string",
+            "sourceColumn": "JobTitle"
+          },
+          {
+            "name": "ConfidenceScore",
+            "dataType": "double",
+            "sourceColumn": "ConfidenceScore"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "DimUser",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"DimUser.csv\"), Output = Table.SelectColumns(Source, {\"CmdbUserId\", \"UserPrincipalName\", \"DisplayName\", \"AccountEnabled\", \"UserType\", \"Department\", \"JobTitle\", \"ConfidenceScore\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "DimDevice",
+        "columns": [
+          {
+            "name": "CmdbDeviceId",
+            "dataType": "string",
+            "sourceColumn": "CmdbDeviceId"
+          },
+          {
+            "name": "DeviceName",
+            "dataType": "string",
+            "sourceColumn": "DeviceName"
+          },
+          {
+            "name": "OperatingSystem",
+            "dataType": "string",
+            "sourceColumn": "OperatingSystem"
+          },
+          {
+            "name": "OperatingSystemVersion",
+            "dataType": "string",
+            "sourceColumn": "OperatingSystemVersion"
+          },
+          {
+            "name": "Ownership",
+            "dataType": "string",
+            "sourceColumn": "Ownership"
+          },
+          {
+            "name": "ComplianceState",
+            "dataType": "string",
+            "sourceColumn": "ComplianceState"
+          },
+          {
+            "name": "ManagementState",
+            "dataType": "string",
+            "sourceColumn": "ManagementState"
+          },
+          {
+            "name": "ConfidenceScore",
+            "dataType": "double",
+            "sourceColumn": "ConfidenceScore"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "DimDevice",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"DimDevice.csv\"), Output = Table.SelectColumns(Source, {\"CmdbDeviceId\", \"DeviceName\", \"OperatingSystem\", \"OperatingSystemVersion\", \"Ownership\", \"ComplianceState\", \"ManagementState\", \"ConfidenceScore\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "DimGroup",
+        "columns": [
+          {
+            "name": "CmdbGroupId",
+            "dataType": "string",
+            "sourceColumn": "CmdbGroupId"
+          },
+          {
+            "name": "DisplayName",
+            "dataType": "string",
+            "sourceColumn": "DisplayName"
+          },
+          {
+            "name": "MailEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "MailEnabled"
+          },
+          {
+            "name": "SecurityEnabled",
+            "dataType": "boolean",
+            "sourceColumn": "SecurityEnabled"
+          },
+          {
+            "name": "GroupTypes",
+            "dataType": "string",
+            "sourceColumn": "GroupTypes"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "DimGroup",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"DimGroup.csv\"), Output = Table.SelectColumns(Source, {\"CmdbGroupId\", \"DisplayName\", \"MailEnabled\", \"SecurityEnabled\", \"GroupTypes\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "DimLicenseSku",
+        "columns": [
+          {
+            "name": "SkuId",
+            "dataType": "string",
+            "sourceColumn": "SkuId"
+          },
+          {
+            "name": "SkuPartNumber",
+            "dataType": "string",
+            "sourceColumn": "SkuPartNumber"
+          },
+          {
+            "name": "ConsumedUnits",
+            "dataType": "int64",
+            "sourceColumn": "ConsumedUnits"
+          },
+          {
+            "name": "EnabledUnits",
+            "dataType": "int64",
+            "sourceColumn": "EnabledUnits"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "DimLicenseSku",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"DimLicenseSku.csv\"), Output = Table.SelectColumns(Source, {\"SkuId\", \"SkuPartNumber\", \"ConsumedUnits\", \"EnabledUnits\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FactUserLicense",
+        "columns": [
+          {
+            "name": "CmdbUserId",
+            "dataType": "string",
+            "sourceColumn": "CmdbUserId"
+          },
+          {
+            "name": "SkuId",
+            "dataType": "string",
+            "sourceColumn": "SkuId"
+          },
+          {
+            "name": "AssignmentState",
+            "dataType": "string",
+            "sourceColumn": "AssignmentState"
+          },
+          {
+            "name": "AssignedDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "AssignedDateTime"
+          },
+          {
+            "name": "SourceSystem",
+            "dataType": "string",
+            "sourceColumn": "SourceSystem"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "FactUserLicense",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"FactUserLicense.csv\"), Output = Table.SelectColumns(Source, {\"CmdbUserId\", \"SkuId\", \"AssignmentState\", \"AssignedDateTime\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FactDeviceCompliance",
+        "columns": [
+          {
+            "name": "CmdbDeviceId",
+            "dataType": "string",
+            "sourceColumn": "CmdbDeviceId"
+          },
+          {
+            "name": "ComplianceState",
+            "dataType": "string",
+            "sourceColumn": "ComplianceState"
+          },
+          {
+            "name": "LastSyncDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "LastSyncDateTime"
+          },
+          {
+            "name": "SourceSystem",
+            "dataType": "string",
+            "sourceColumn": "SourceSystem"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "FactDeviceCompliance",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"FactDeviceCompliance.csv\"), Output = Table.SelectColumns(Source, {\"CmdbDeviceId\", \"ComplianceState\", \"LastSyncDateTime\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FactMailbox",
+        "columns": [
+          {
+            "name": "CmdbMailboxId",
+            "dataType": "string",
+            "sourceColumn": "CmdbMailboxId"
+          },
+          {
+            "name": "CmdbUserId",
+            "dataType": "string",
+            "sourceColumn": "CmdbUserId"
+          },
+          {
+            "name": "RecipientTypeDetails",
+            "dataType": "string",
+            "sourceColumn": "RecipientTypeDetails"
+          },
+          {
+            "name": "ArchiveStatus",
+            "dataType": "string",
+            "sourceColumn": "ArchiveStatus"
+          },
+          {
+            "name": "SourceSystem",
+            "dataType": "string",
+            "sourceColumn": "SourceSystem"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "FactMailbox",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"FactMailbox.csv\"), Output = Table.SelectColumns(Source, {\"CmdbMailboxId\", \"CmdbUserId\", \"RecipientTypeDetails\", \"ArchiveStatus\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FactUserDeviceRelationship",
+        "columns": [
+          {
+            "name": "CmdbRelationshipId",
+            "dataType": "string",
+            "sourceColumn": "CmdbRelationshipId"
+          },
+          {
+            "name": "CmdbUserId",
+            "dataType": "string",
+            "sourceColumn": "CmdbUserId"
+          },
+          {
+            "name": "CmdbDeviceId",
+            "dataType": "string",
+            "sourceColumn": "CmdbDeviceId"
+          },
+          {
+            "name": "RelationshipType",
+            "dataType": "string",
+            "sourceColumn": "RelationshipType"
+          },
+          {
+            "name": "ConfidenceScore",
+            "dataType": "double",
+            "sourceColumn": "ConfidenceScore"
+          },
+          {
+            "name": "SourceSystem",
+            "dataType": "string",
+            "sourceColumn": "SourceSystem"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "FactUserDeviceRelationship",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"FactUserDeviceRelationship.csv\"), Output = Table.SelectColumns(Source, {\"CmdbRelationshipId\", \"CmdbUserId\", \"CmdbDeviceId\", \"RelationshipType\", \"ConfidenceScore\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FactDataQuality",
+        "columns": [
+          {
+            "name": "FindingId",
+            "dataType": "string",
+            "sourceColumn": "FindingId"
+          },
+          {
+            "name": "Severity",
+            "dataType": "string",
+            "sourceColumn": "Severity"
+          },
+          {
+            "name": "EntityType",
+            "dataType": "string",
+            "sourceColumn": "EntityType"
+          },
+          {
+            "name": "FindingType",
+            "dataType": "string",
+            "sourceColumn": "FindingType"
+          },
+          {
+            "name": "DetectedDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "DetectedDateTime"
+          },
+          {
+            "name": "SourceSystem",
+            "dataType": "string",
+            "sourceColumn": "SourceSystem"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "FactDataQuality",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source = fnLoadCmdbTable(\"FactDataQuality.csv\"), Output = Table.SelectColumns(Source, {\"FindingId\", \"Severity\", \"EntityType\", \"FindingType\", \"DetectedDateTime\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "SourceCatalog",
+        "columns": [
+          {
+            "name": "SourceArea",
+            "dataType": "string",
+            "sourceColumn": "SourceArea"
+          },
+          {
+            "name": "SourceName",
+            "dataType": "string",
+            "sourceColumn": "SourceName"
+          },
+          {
+            "name": "FileName",
+            "dataType": "string",
+            "sourceColumn": "FileName"
+          },
+          {
+            "name": "SourceRoot",
+            "dataType": "string",
+            "sourceColumn": "SourceRoot"
+          },
+          {
+            "name": "LoadPriority",
+            "dataType": "int64",
+            "sourceColumn": "LoadPriority"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "SourceCatalog",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "#table(type table [SourceArea = text, SourceName = text, FileName = text, SourceRoot = text, LoadPriority = number], {{\"CMDB\", \"Tenant\", \"DimTenant.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Users\", \"DimUser.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Devices\", \"DimDevice.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Licenses\", \"DimLicenseSku.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Mailbox fact\", \"FactMailbox.csv\", \"CMDBPowerBIPath\", 1}, {\"SmartInventory\", \"Active users\", \"M365_Users_Active.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Entra devices\", \"M365_Entra_Devices.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Intune devices\", \"Intune_Devices_Inventory.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"EXO mailboxes\", \"Exchange_EXO_Mailboxes_AllDomains.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"On-prem mailboxes\", \"Exchange_OnPrem_Mailboxes_AllDomains.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"License assignments\", \"M365_Licenses_Users.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Backup protected mailboxes\", \"M365_Backup_ProtectedMailboxes.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Sync health\", \"M365_Entra_AzureADConnect_SyncHealth.csv\", \"SmartInventoryLatestPath\", 2}})"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FactSourceFreshness",
+        "columns": [
+          {
+            "name": "SourceName",
+            "dataType": "string",
+            "sourceColumn": "SourceName"
+          },
+          {
+            "name": "FileName",
+            "dataType": "string",
+            "sourceColumn": "FileName"
+          },
+          {
+            "name": "Exists",
+            "dataType": "boolean",
+            "sourceColumn": "Exists"
+          },
+          {
+            "name": "LastModifiedDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "LastModifiedDateTime"
+          },
+          {
+            "name": "RowCount",
+            "dataType": "int64",
+            "sourceColumn": "RowCount"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "FactSourceFreshness",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Rows = Table.ToRecords(SourceCatalog), Tables = List.Transform(Rows, each fnSourceFreshness(if [SourceRoot] = \"CMDBPowerBIPath\" then CMDBPowerBIPath else SmartInventoryLatestPath, [FileName], [SourceName])), Output = if List.Count(Tables) = 0 then #table(type table [SourceName = text, FileName = text, Exists = logical, LastModifiedDateTime = nullable datetime, RowCount = nullable number], {}) else Table.Combine(Tables) in Output"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Measures",
+        "columns": [
+          {
+            "name": "MeasureHost",
+            "dataType": "string",
+            "isHidden": true,
+            "sourceColumn": "MeasureHost"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Measures",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "#table(type table [MeasureHost = text], {{\"Measures\"}})"
+            }
+          }
+        ],
+        "measures": [
+          {
+            "name": "Users",
+            "expression": "DISTINCTCOUNT(DimUser[CmdbUserId])",
+            "formatString": "0"
+          },
+          {
+            "name": "Enabled Users",
+            "expression": "CALCULATE(DISTINCTCOUNT(DimUser[CmdbUserId]), DimUser[AccountEnabled] = TRUE())",
+            "formatString": "0"
+          },
+          {
+            "name": "Devices",
+            "expression": "DISTINCTCOUNT(DimDevice[CmdbDeviceId])",
+            "formatString": "0"
+          },
+          {
+            "name": "Compliant Devices",
+            "expression": "CALCULATE(DISTINCTCOUNT(FactDeviceCompliance[CmdbDeviceId]), FactDeviceCompliance[ComplianceState] = \"Compliant\")",
+            "formatString": "0"
+          },
+          {
+            "name": "Mailboxes",
+            "expression": "DISTINCTCOUNT(FactMailbox[CmdbMailboxId])",
+            "formatString": "0"
+          },
+          {
+            "name": "Assigned Licenses",
+            "expression": "COUNTROWS(FactUserLicense)",
+            "formatString": "0"
+          },
+          {
+            "name": "Enabled License Units",
+            "expression": "SUM(DimLicenseSku[EnabledUnits])",
+            "formatString": "0"
+          },
+          {
+            "name": "Consumed License Units",
+            "expression": "SUM(DimLicenseSku[ConsumedUnits])",
+            "formatString": "0"
+          },
+          {
+            "name": "Available License Units",
+            "expression": "[Enabled License Units] - [Consumed License Units]",
+            "formatString": "0"
+          },
+          {
+            "name": "Data Quality Findings",
+            "expression": "COUNTROWS(FactDataQuality)",
+            "formatString": "0"
+          },
+          {
+            "name": "Sources Expected",
+            "expression": "COUNTROWS(SourceCatalog)",
+            "formatString": "0"
+          },
+          {
+            "name": "Sources Available",
+            "expression": "CALCULATE(COUNTROWS(FactSourceFreshness), FactSourceFreshness[Exists] = TRUE())",
+            "formatString": "0"
+          },
+          {
+            "name": "Source Availability %",
+            "expression": "DIVIDE([Sources Available], [Sources Expected])",
+            "formatString": "0.0%"
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "FactUserLicense_DimUser",
+        "fromTable": "FactUserLicense",
+        "fromColumn": "CmdbUserId",
+        "toTable": "DimUser",
+        "toColumn": "CmdbUserId"
+      },
+      {
+        "name": "FactUserLicense_DimLicenseSku",
+        "fromTable": "FactUserLicense",
+        "fromColumn": "SkuId",
+        "toTable": "DimLicenseSku",
+        "toColumn": "SkuId"
+      },
+      {
+        "name": "FactDeviceCompliance_DimDevice",
+        "fromTable": "FactDeviceCompliance",
+        "fromColumn": "CmdbDeviceId",
+        "toTable": "DimDevice",
+        "toColumn": "CmdbDeviceId"
+      },
+      {
+        "name": "FactUserDeviceRelationship_DimUser",
+        "fromTable": "FactUserDeviceRelationship",
+        "fromColumn": "CmdbUserId",
+        "toTable": "DimUser",
+        "toColumn": "CmdbUserId"
+      },
+      {
+        "name": "FactUserDeviceRelationship_DimDevice",
+        "fromTable": "FactUserDeviceRelationship",
+        "fromColumn": "CmdbDeviceId",
+        "toTable": "DimDevice",
+        "toColumn": "CmdbDeviceId"
+      },
+      {
+        "name": "FactMailbox_DimUser",
+        "fromTable": "FactMailbox",
+        "fromColumn": "CmdbUserId",
+        "toTable": "DimUser",
+        "toColumn": "CmdbUserId"
+      }
+    ],
+    "annotations": [
+      {
+        "name": "SmartWorkplaceDashboard.SourcePolicy",
+        "value": "CMDB tables are curated; SmartInventory latest and weekly history provide operational state and trends."
+      }
+    ]
+  }
+}
