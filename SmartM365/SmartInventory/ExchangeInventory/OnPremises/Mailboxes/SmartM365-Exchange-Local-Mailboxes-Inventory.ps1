@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.29
+1.30
 
 .NOTES
-    Version: 1.29
+    Version: 1.30
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -232,7 +232,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.29"
+$ScriptVersion = "1.30"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -969,8 +969,32 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
 </tr>
 "@
         }
+        $issueCountRowsHtml = foreach ($issueGroup in @($RemoteMailboxDataQualityWarnings | Group-Object Issue | Sort-Object @{ Expression = 'Count'; Descending = $true }, @{ Expression = 'Name'; Descending = $false })) {
+            $issueLabel = switch ([string]$issueGroup.Name) {
+                'ExchangeObjectInconsistentState' { 'Inconsistent state'; break }
+                'MissingPrimarySmtpAddress' { 'Missing primary SMTP'; break }
+                'MissingExternalEmailAddress' { 'Missing external address'; break }
+                'InvalidExternalEmailAddress' { 'Invalid external address'; break }
+                'InvalidDisplayName' { 'Invalid display name'; break }
+                default { [string]$issueGroup.Name }
+            }
+            @"
+<tr>
+  <td style="border-bottom:1px solid #fde68a;padding:8px 10px;font-size:12px;color:#78350f;font-weight:700;">$(ConvertTo-SmartM365EmailHtmlText $issueLabel)</td>
+  <td align="right" style="border-bottom:1px solid #fde68a;padding:8px 10px;font-size:12px;color:#78350f;font-weight:700;">$(ConvertTo-SmartM365EmailHtmlText $issueGroup.Count)</td>
+</tr>
+"@
+        }
         $warningsTableHtml = @"
-<p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Top 100 Exchange object data quality warnings captured during Get-RemoteMailbox.</p>
+<p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Exchange object data quality warnings captured during Get-RemoteMailbox.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:420px;border-collapse:collapse;border:1px solid #f59e0b;font-size:12px;background:#fffbeb;margin:0 0 14px 0;">
+  <tr>
+    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:9px 10px;color:#92400e;text-transform:uppercase;">Issue</th>
+    <th align="right" style="width:90px;background:#fef3c7;border-bottom:1px solid #f59e0b;padding:9px 10px;color:#92400e;text-transform:uppercase;">Count</th>
+  </tr>
+  $($issueCountRowsHtml -join "`r`n")
+</table>
+<p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Top 100 detailed warnings.</p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #f59e0b;font-size:12px;background:#fffbeb;table-layout:fixed;">
   <tr>
     <th align="left" style="width:165px;background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px 12px;color:#92400e;text-transform:uppercase;">Issue</th>
