@@ -26,7 +26,7 @@
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.4.6
+    Version     : 1.4.7
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
@@ -129,7 +129,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.4.6"
+$ScriptVersion = "1.4.7"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -298,7 +298,7 @@ function Get-SmartM365EffectiveConfigValue {
 }
 
 function Import-SmartM365CoreModule {
-    if ((Get-Command Publish-CoreSmartM365Csv -ErrorAction SilentlyContinue) -and (Get-Command Send-CoreEmailHtmlReport -ErrorAction SilentlyContinue)) {
+    if ((Get-Command Publish-CoreSmartM365Csv -ErrorAction SilentlyContinue) -and (Get-Command CoreSendEmailHtmlReport -ErrorAction SilentlyContinue)) {
         return
     }
 
@@ -544,7 +544,7 @@ function Send-ServersAndStorageHtmlReport {
     if (-not [string]::IsNullOrWhiteSpace($sendMailMode)) { $mailParams['SendMailMode'] = $sendMailMode }
     if (-not [string]::IsNullOrWhiteSpace($cc)) { $mailParams['Cc'] = $cc }
 
-    Send-CoreEmailHtmlReport @mailParams
+    CoreSendEmailHtmlReport @mailParams
 }
 function Export-ServersAndStorageCsv {
     param(
