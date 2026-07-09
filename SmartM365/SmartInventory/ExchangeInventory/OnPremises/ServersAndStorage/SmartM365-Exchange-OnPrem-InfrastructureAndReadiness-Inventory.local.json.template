@@ -17,7 +17,7 @@
   "SendMailMode": "SMTP",
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
-  "EnableSharePointUpload": false,
+  "EnableSharePointUpload": "__USE_GLOBAL__",
   "SharePointSiteHostname": "__USE_GLOBAL__",
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
