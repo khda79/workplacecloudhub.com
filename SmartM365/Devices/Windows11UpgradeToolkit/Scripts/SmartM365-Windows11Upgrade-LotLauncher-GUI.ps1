@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.25
+0.1.26
 #>
 param(
     [switch]$ValidateOnly
@@ -622,6 +622,7 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_ALLOW_SETUP_UPGRADE'; Argument = '-AllowSetupUpgrade' },
         @{ Name = 'W11UT_DIRECT_SETUP_UPGRADE'; Argument = '-DirectSetupUpgrade' },
         @{ Name = 'W11UT_ALLOW_REBOOT'; Argument = '-AllowReboot' },
+        @{ Name = 'W11UT_SCHEDULE_RETRY_AFTER_REBOOT'; Argument = '-ScheduleRetryAfterReboot' },
         @{ Name = 'W11UT_ALLOW_SETUP_PROFILE_REPAIR'; Argument = '-AllowSetupProfileRepair' },
         @{ Name = 'W11UT_SETUP_REBOOT_WHEN_NO_USER'; Argument = '-AllowSetupCompletionRebootWhenNoUser' },
         @{ Name = 'W11UT_SKIP_VIRTUAL_MACHINES'; Argument = '-SkipVirtualMachines' },
@@ -657,7 +658,9 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS'; Argument = '-DelayBetweenComputersSeconds' },
         @{ Name = 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES'; Argument = '-DelayBetweenCyclesMinutes' },
         @{ Name = 'W11UT_PSEXEC_TIMEOUT_MINUTES'; Argument = '-PsExecTimeoutMinutes' },
-        @{ Name = 'W11UT_RUN_GUARD_HOURS'; Argument = '-RunGuardHours' }
+        @{ Name = 'W11UT_RUN_GUARD_HOURS'; Argument = '-RunGuardHours' },
+        @{ Name = 'W11UT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS'; Argument = '-RetryAfterRebootMaxAttempts' },
+        @{ Name = 'W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS'; Argument = '-RetryAfterRebootDelaySeconds' }
     )) {
         $value = [string]$EnvironmentVariables[$pair.Name]
         if (-not [string]::IsNullOrWhiteSpace($value)) {
@@ -764,6 +767,9 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_ALLOW_SETUP_UPGRADE = '1'
     W11UT_DIRECT_SETUP_UPGRADE = '0'
     W11UT_ALLOW_REBOOT = '1'
+    W11UT_SCHEDULE_RETRY_AFTER_REBOOT = '1'
+    W11UT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS = '3'
+    W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS = '300'
     W11UT_SETUP_REBOOT_WHEN_NO_USER = '1'
     W11UT_ALLOW_SETUP_PROFILE_REPAIR = '1'
     W11UT_SKIP_VIRTUAL_MACHINES = '1'
@@ -1107,6 +1113,7 @@ $xaml = @'
                                     <CheckBox x:Name="AllowForceUpgradeCheck" Content="Allow force upgrade"/>
                                     <CheckBox x:Name="AllowSetupUpgradeCheck" Content="Allow setup upgrade"/>
                                     <CheckBox x:Name="AllowRebootCheck" Content="Allow reboot"/>
+                                    <CheckBox x:Name="ScheduleRetryAfterRebootCheck" Content="Retry at next startup"/>
                                     <CheckBox x:Name="SetupCompletionRebootCheck" Content="Reboot after setup if no user"/>
                                     <CheckBox x:Name="AllowSetupProfileRepairCheck" Content="Repair local duplicate setup profiles"/>
                                     <CheckBox x:Name="DirectSetupUpgradeCheck" Content="Direct setup upgrade"/>
@@ -1322,7 +1329,7 @@ $controls = @{}
     'OpenSingleRunFolderButton','NewLotNameText','CreateLotButton','NewLotComputersPathText',
     'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowPolicyRepairCheck',
     'AllowWUResetCheck','AllowForceUpgradeCheck','AllowSetupUpgradeCheck','AllowRebootCheck',
-    'SetupCompletionRebootCheck','AllowSetupProfileRepairCheck',
+    'ScheduleRetryAfterRebootCheck','SetupCompletionRebootCheck','AllowSetupProfileRepairCheck',
     'DirectSetupUpgradeCheck','SkipVirtualMachinesCheck','SkipSetupPreCopyCheck',
     'AllowDiskCleanupCheck','AllowAdvancedCleanupCheck','KeepCentralHistoryCheck',
     'NoCentralCollectionCheck','UseTechRunGuardHistoryCheck','IgnoreTechRunGuardHistoryCheck','SetupSourceText','SetupSourceMapText','SetupModeCombo',
@@ -1614,6 +1621,7 @@ function Initialize-Options {
     $controls.AllowForceUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_FORCE_UPGRADE') -eq '1')
     $controls.AllowSetupUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_SETUP_UPGRADE') -eq '1')
     $controls.AllowRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_REBOOT') -ne '0')
+    $controls.ScheduleRetryAfterRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SCHEDULE_RETRY_AFTER_REBOOT') -ne '0')
     $controls.SetupCompletionRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SETUP_REBOOT_WHEN_NO_USER') -ne '0')
     $controls.AllowSetupProfileRepairCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_SETUP_PROFILE_REPAIR') -ne '0')
     $controls.DirectSetupUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_DIRECT_SETUP_UPGRADE') -eq '1')
@@ -1671,6 +1679,7 @@ function Invoke-LauncherOptionStateUpdate {
         $controls.AllowSetupUpgradeCheck,
         $controls.DirectSetupUpgradeCheck,
         $controls.AllowRebootCheck,
+        $controls.ScheduleRetryAfterRebootCheck,
         $controls.SetupCompletionRebootCheck,
         $controls.AllowSetupProfileRepairCheck,
         $controls.SkipVirtualMachinesCheck,
@@ -1758,6 +1767,9 @@ function Get-ToolkitOptionEnvironment {
         W11UT_ALLOW_SETUP_UPGRADE                      = Get-BooleanText -CheckBox $controls.AllowSetupUpgradeCheck
         W11UT_DIRECT_SETUP_UPGRADE                     = Get-BooleanText -CheckBox $controls.DirectSetupUpgradeCheck
         W11UT_ALLOW_REBOOT                             = Get-BooleanText -CheckBox $controls.AllowRebootCheck
+        W11UT_SCHEDULE_RETRY_AFTER_REBOOT       = Get-BooleanText -CheckBox $controls.ScheduleRetryAfterRebootCheck
+        W11UT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS   = Get-ConfiguredValue 'W11UT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS'
+        W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS  = Get-ConfiguredValue 'W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS'
         W11UT_SETUP_REBOOT_WHEN_NO_USER                = Get-BooleanText -CheckBox $controls.SetupCompletionRebootCheck
         W11UT_ALLOW_SETUP_PROFILE_REPAIR               = Get-BooleanText -CheckBox $controls.AllowSetupProfileRepairCheck
         W11UT_SKIP_VIRTUAL_MACHINES                    = Get-BooleanText -CheckBox $controls.SkipVirtualMachinesCheck

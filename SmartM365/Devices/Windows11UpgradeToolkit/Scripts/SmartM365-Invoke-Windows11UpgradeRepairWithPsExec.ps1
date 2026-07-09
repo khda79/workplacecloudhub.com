@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.46
+    0.1.47
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -38,6 +38,9 @@ param(
     [switch]$AllowReboot,
     [switch]$AllowSetupCompletionRebootWhenNoUser,
     [switch]$AllowSetupProfileRepair,
+    [switch]$ScheduleRetryAfterReboot,
+    [ValidateRange(1, 30)][int]$RetryAfterRebootMaxAttempts = 3,
+    [ValidateRange(0, 3600)][int]$RetryAfterRebootDelaySeconds = 300,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
     [switch]$AllowAdvancedDiskCleanup,
@@ -1491,6 +1494,9 @@ if ($DirectSetupUpgrade) { [void]$remoteArgs.Add('-DirectSetupUpgrade') }
 if ($AllowReboot) { [void]$remoteArgs.Add('-AllowReboot') }
 if ($AllowSetupCompletionRebootWhenNoUser) { [void]$remoteArgs.Add('-AllowSetupCompletionRebootWhenNoUser') }
 if ($AllowSetupProfileRepair) { [void]$remoteArgs.Add('-AllowSetupProfileRepair') }
+if ($ScheduleRetryAfterReboot) { [void]$remoteArgs.Add('-ScheduleRetryAfterReboot') }
+[void]$remoteArgs.Add('-RetryAfterRebootMaxAttempts'); [void]$remoteArgs.Add([string]$RetryAfterRebootMaxAttempts)
+[void]$remoteArgs.Add('-RetryAfterRebootDelaySeconds'); [void]$remoteArgs.Add([string]$RetryAfterRebootDelaySeconds)
 if ($SkipVirtualMachines) { [void]$remoteArgs.Add('-SkipVirtualMachines') }
 if ($AllowDiskCleanup) { [void]$remoteArgs.Add('-AllowDiskCleanup') }
 if ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) { [void]$remoteArgs.Add('-AllowAdvancedDiskCleanup') }
@@ -1552,6 +1558,9 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowReboot'; Value = [string][bool]$AllowReboot }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowSetupCompletionRebootWhenNoUser'; Value = [string][bool]$AllowSetupCompletionRebootWhenNoUser }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowSetupProfileRepair'; Value = [string][bool]$AllowSetupProfileRepair }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'ScheduleRetryAfterReboot'; Value = [string][bool]$ScheduleRetryAfterReboot }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'RetryAfterRebootMaxAttempts'; Value = [string]$RetryAfterRebootMaxAttempts }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'RetryAfterRebootDelaySeconds'; Value = [string]$RetryAfterRebootDelaySeconds }
     [pscustomobject]@{ Category = 'Actions'; Option = 'SkipVirtualMachines'; Value = [string][bool]$SkipVirtualMachines }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowDiskCleanup'; Value = [string][bool]$AllowDiskCleanup }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowAdvancedDiskCleanup'; Value = [string][bool]($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) }
@@ -1690,6 +1699,11 @@ $reportColumns = @(
     'ControlledRebootDetail',
     'ControlledRebootUserCount',
     'ControlledRebootUsers',
+    'RetryAfterRebootAction',
+    'RetryAfterRebootDetail',
+    'RetryAfterRebootAttempt',
+    'RetryAfterRebootMaxAttempts',
+    'RetryAfterRebootTaskName',
     'UserRebootNotificationSent',
     'UserRebootNotificationLang',
     'UserRebootNotificationMessage',
