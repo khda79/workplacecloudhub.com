@@ -11,7 +11,7 @@
   "RetentionMaxCSV": "__USE_GLOBAL__",
   "RetentionMaxLogs": "__USE_GLOBAL__",
   "ErrorMailTo": "__USE_GLOBAL__",
-  "To": "",
+  "To": "__USE_GLOBAL__",
   "EnableTeamsNotifications": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
   "SendMailMode": "__USE_GLOBAL__",
