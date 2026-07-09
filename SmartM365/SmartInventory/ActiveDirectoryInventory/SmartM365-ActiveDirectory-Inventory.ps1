@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.12
+1.13
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -301,7 +301,7 @@ function New-SmartM365AdDuplicatePreviewSection {
 
     $valueProperty = if ($DuplicateType -eq 'UPN') { 'UserPrincipalName' } else { 'SmtpAddress' }
     $label = if ($DuplicateType -eq 'UPN') { 'duplicate UPN' } else { 'duplicate SMTP address' }
-    $title = if ($DuplicateType -eq 'UPN') { 'Top 50 duplicate UPNs' } else { 'Top 50 duplicate SMTP addresses' }
+    $title = if ($DuplicateType -eq 'UPN') { 'Top 50 duplicate UPN accounts' } else { 'Top 50 duplicate SMTP entries' }
 
     $groups = @(
         $items |
@@ -317,54 +317,47 @@ function New-SmartM365AdDuplicatePreviewSection {
 
     $topGroups = @($groups | Select-Object -First $Limit)
     $tableRows = foreach ($group in $topGroups) {
-        $accounts = @(
-            foreach ($row in @($group.Group)) {
-                $domainNameShort = [string]$row.DomainNameShort
-                $samAccountName = [string]$row.SamAccountName
-                $userPrincipalName = [string]$row.UserPrincipalName
+        $sortedRows = @($group.Group | Sort-Object DomainName, SamAccountName, UserPrincipalName)
+        $firstInGroup = $true
+        foreach ($row in $sortedRows) {
+            $valueCell = if ($firstInGroup) { ConvertTo-SmartM365EmailHtmlText $group.Name } else { '' }
+            $countCell = if ($firstInGroup) { ConvertTo-SmartM365EmailHtmlText $group.Count } else { '' }
+            $firstInGroup = $false
 
-                if ($DuplicateType -eq 'UPN') {
-                    if (-not [string]::IsNullOrWhiteSpace($domainNameShort) -and -not [string]::IsNullOrWhiteSpace($samAccountName)) { '{0}\{1}' -f $domainNameShort, $samAccountName; continue }
-                    if (-not [string]::IsNullOrWhiteSpace($samAccountName)) { $samAccountName; continue }
-                    if (-not [string]::IsNullOrWhiteSpace($userPrincipalName)) { $userPrincipalName; continue }
-                }
-                else {
-                    if (-not [string]::IsNullOrWhiteSpace($userPrincipalName)) { $userPrincipalName; continue }
-                    if (-not [string]::IsNullOrWhiteSpace($domainNameShort) -and -not [string]::IsNullOrWhiteSpace($samAccountName)) { '{0}\{1}' -f $domainNameShort, $samAccountName; continue }
-                    if (-not [string]::IsNullOrWhiteSpace($samAccountName)) { $samAccountName; continue }
-                }
-            }
-        ) | Sort-Object -Unique
+            $domainNameShort = [string]$row.DomainNameShort
+            $domainName = [string]$row.DomainName
+            $samAccountName = [string]$row.SamAccountName
+            $userPrincipalName = [string]$row.UserPrincipalName
+            $accountText = ''
+            if (-not [string]::IsNullOrWhiteSpace($domainNameShort) -and -not [string]::IsNullOrWhiteSpace($samAccountName)) { $accountText = '{0}\{1}' -f $domainNameShort, $samAccountName }
+            elseif (-not [string]::IsNullOrWhiteSpace($samAccountName)) { $accountText = $samAccountName }
+            elseif (-not [string]::IsNullOrWhiteSpace($userPrincipalName)) { $accountText = $userPrincipalName }
 
-        $domains = @(
-            foreach ($row in @($group.Group)) {
-                $domainName = [string]$row.DomainName
-                if (-not [string]::IsNullOrWhiteSpace($domainName)) { $domainName }
-            }
-        ) | Sort-Object -Unique
+            $enabledText = [string]$row.Enabled
+            if ([string]::IsNullOrWhiteSpace($enabledText)) { $enabledText = 'Unknown' }
+            $lastLogonText = [string]$row.LastLogonDate
+            if ([string]::IsNullOrWhiteSpace($lastLogonText)) { $lastLogonText = 'Never / unavailable' }
 
-        $accountPreview = @($accounts | Select-Object -First 8) -join ', '
-        if ($accounts.Count -gt 8) { $accountPreview = '{0}, +{1} more' -f $accountPreview, ($accounts.Count - 8) }
-        $domainPreview = @($domains | Select-Object -First 5) -join ', '
-        if ($domains.Count -gt 5) { $domainPreview = '{0}, +{1} more' -f $domainPreview, ($domains.Count - 5) }
+            $accountHtml = ConvertTo-SmartM365EmailHtmlText $accountText
+            $enabledHtml = ConvertTo-SmartM365EmailHtmlText $enabledText
+            $lastLogonHtml = ConvertTo-SmartM365EmailHtmlText $lastLogonText
+            $domainHtml = ConvertTo-SmartM365EmailHtmlText $domainName
 
-        $valueHtml = ConvertTo-SmartM365EmailHtmlText $group.Name
-        $countHtml = ConvertTo-SmartM365EmailHtmlText $group.Count
-        $accountsHtml = ConvertTo-SmartM365EmailHtmlText $accountPreview
-        $domainsHtml = ConvertTo-SmartM365EmailHtmlText $domainPreview
-
-        "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$valueHtml</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:13px;font-weight:700;color:#111827;`">$countHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$accountsHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$domainsHtml</td></tr>"
+            "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$valueCell</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:13px;font-weight:700;color:#111827;`">$countCell</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$accountHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$enabledHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;white-space:nowrap;`">$lastLogonHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$domainHtml</td></tr>"
+        }
     }
 
-    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing top {0} of {1} {2} value(s). Full details are available in the CSV files.' -f $topGroups.Count, $groups.Count, $label)
+    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing accounts for top {0} of {1} {2} value(s). Full details are available in the CSV files.' -f $topGroups.Count, $groups.Count, $label)
     $html = @"
 <div style="font-size:13px;color:#64748b;margin-bottom:8px;">$caption</div>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
   <tr>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Value</th>
     <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Count</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Accounts</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Domains</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Account</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Enabled</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Last logon</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Domain</th>
   </tr>
   $($tableRows -join "`n")
 </table>
@@ -454,7 +447,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -2293,6 +2286,7 @@ try {
                             SamAccountName    = $u.SamAccountName
                             DisplayName       = $u.DisplayName
                             Enabled           = $u.Enabled
+                            LastLogonDate     = $u.LastLogonDate
                             DistinguishedName = $u.DistinguishedName
                         })
                     }
@@ -2312,6 +2306,7 @@ try {
                                 SamAccountName      = $u.SamAccountName
                                 DisplayName         = $u.DisplayName
                                 Enabled             = $u.Enabled
+                                LastLogonDate       = $u.LastLogonDate
                                 DistinguishedName   = $u.DistinguishedName
                             }
                         }
@@ -2338,6 +2333,7 @@ try {
                                 SamAccountName       = $e.SamAccountName
                                 DisplayName          = $e.DisplayName
                                 Enabled              = $e.Enabled
+                                LastLogonDate        = $e.LastLogonDate
                                 DistinguishedName    = $e.DistinguishedName
                             }
                         }
