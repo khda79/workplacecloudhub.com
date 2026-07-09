@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.26
+1.27
 
 .NOTES
-    Version: 1.26
+    Version: 1.27
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -232,7 +232,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.26"
+$ScriptVersion = "1.27"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -512,6 +512,33 @@ function ConvertTo-SmartM365ExchangeRemoteMailboxRecord {
     return [pscustomobject]$record
 }
 
+function ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Warnings)
+
+    $results = @()
+    $currentObjectPath = ''
+    foreach ($warning in @($Warnings)) {
+        if ($null -eq $warning) { continue }
+        $message = [string]$warning
+        if ([string]::IsNullOrWhiteSpace($message)) { continue }
+
+        if ($message -match '^The object (?<Path>.+?) has been corrupted or isn''t compatible') {
+            $currentObjectPath = $Matches['Path']
+            continue
+        }
+
+        if ($message -match 'ExternalEmailAddress is mandatory on MailUser') {
+            $results += [pscustomobject]@{
+                WarningType = 'MissingExternalEmailAddress'
+                ObjectPath  = $currentObjectPath
+                Message     = $message
+            }
+        }
+    }
+
+    return @($results)
+}
 function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     [CmdletBinding()]
     param(
@@ -525,18 +552,25 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     Write-Host "Starting Exchange remote mailbox inventory... $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 
     $allRemoteMailboxes = @()
+    $remoteWarningRecords = @()
     if ($IncludedLDAPPaths -and $IncludedLDAPPaths.Count -gt 0) {
         foreach ($scope in $IncludedLDAPPaths) {
             WriteLog -Message ("Retrieving remote mailboxes from scope: {0}" -f $scope)
             try {
-                $remoteInScope = @(Get-RemoteMailbox -OnPremisesOrganizationalUnit $scope -ResultSize Unlimited -ErrorAction Stop)
+                $remoteInScope = @(Get-RemoteMailbox -OnPremisesOrganizationalUnit $scope -ResultSize Unlimited -WarningVariable +remoteWarningRecords -ErrorAction Stop)
                 $allRemoteMailboxes += $remoteInScope
                 WriteLog -Message ("Found {0} remote mailboxes in scope: {1}" -f $remoteInScope.Count, $scope)
             }
             catch { WriteLog -Message ("WARNING: Failed to retrieve remote mailboxes from scope '{0}': {1}" -f $scope, $_.Exception.Message) }
         }
     }
-    else { $allRemoteMailboxes = @(Get-RemoteMailbox -ResultSize Unlimited -ErrorAction Stop) }
+    else { $allRemoteMailboxes = @(Get-RemoteMailbox -ResultSize Unlimited -WarningVariable remoteWarningRecords -ErrorAction Stop) }
+
+    $dataQualityWarnings = @(ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings -Warnings $remoteWarningRecords)
+    $Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings = @($dataQualityWarnings)
+    if ($dataQualityWarnings.Count -gt 0) {
+        WriteLog -Message ("Exchange remote mailbox data quality warnings captured. Missing ExternalEmailAddress on MailUser: {0}" -f $dataQualityWarnings.Count) 'WARN'
+    }
 
     $seenRemoteGuids = @{}
     $records = @()
@@ -555,7 +589,7 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.DomainName -in $TargetDomains }) }
     if ($records.Count -eq 0) {
         WriteLog -Message 'No remote mailboxes were found. Remote mailbox CSV export skipped.'
-        return [pscustomobject]@{ RecordCount = 0; CombinedCsv = $null; PerDomainCsvs = @(); PublishResult = $null }
+        return [pscustomobject]@{ RecordCount = 0; CombinedCsv = $null; PerDomainCsvs = @(); PublishResult = $null; DataQualityWarnings = $dataQualityWarnings }
     }
 
     $suffix = if ($OnlyADPermission) { '_OnlyADPermission.csv' } else { '.csv' }
@@ -571,7 +605,7 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     Export-CsvAtomic -InputObject @($records) -Path $combinedPath -Encoding UTF8
     $publishResult = Publish-SmartM365ExchangeLocalMailboxCsv -SourcePath $combinedPath -LatestFileName (Split-Path -Path $combinedPath -Leaf) -HistoryLabel 'Exchange on-prem remote mailboxes'
     WriteLog -Message ("Exchange remote mailbox inventory completed. Records: {0}; CombinedCsv: {1}" -f $records.Count, $combinedPath)
-    return [pscustomobject]@{ RecordCount = $records.Count; CombinedCsv = $combinedPath; PerDomainCsvs = $perDomainPaths; PublishResult = $publishResult }
+    return [pscustomobject]@{ RecordCount = $records.Count; CombinedCsv = $combinedPath; PerDomainCsvs = $perDomainPaths; PublishResult = $publishResult; DataQualityWarnings = $dataQualityWarnings }
 }
 [string]$inputFolderCSVfiles
 [string]$excludeMailboxesFile
@@ -757,6 +791,8 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         [AllowNull()]$LocalMailboxUpload,
         [AllowNull()]$RemoteMailboxUpload,
 
+        [object[]]$RemoteMailboxDataQualityWarnings = @(),
+
         [Parameter(Mandatory = $true)]
         [string]$Title
     )
@@ -882,8 +918,34 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
 
     $sections = @(
         [pscustomobject]@{ Title = 'Domain summary'; Html = $domainTableHtml }
-        [pscustomobject]@{ Title = 'Files'; Html = $filesTableHtml }
     )
+
+    $externalEmailWarnings = @($RemoteMailboxDataQualityWarnings | Where-Object { $_.WarningType -eq 'MissingExternalEmailAddress' } | Select-Object -First 100)
+    if ($externalEmailWarnings.Count -gt 0) {
+        $warningRowsHtml = foreach ($warningRow in $externalEmailWarnings) {
+            @"
+<tr>
+  <td style="width:70px;border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#92400e;font-weight:700;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.WarningType)</td>
+  <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#78350f;word-break:break-all;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.ObjectPath)</td>
+  <td style="border-bottom:1px solid #fde68a;padding:9px 10px;font-size:12px;color:#78350f;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.Message)</td>
+</tr>
+"@
+        }
+        $warningsTableHtml = @"
+<p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Top 100 Exchange data quality warnings captured during Get-RemoteMailbox.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #f59e0b;font-size:12px;background:#fffbeb;">
+  <tr>
+    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Type</th>
+    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Object path</th>
+    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px;color:#92400e;text-transform:uppercase;">Warning</th>
+  </tr>
+  $($warningRowsHtml -join "`r`n")
+</table>
+"@
+        $sections += [pscustomobject]@{ Title = 'Remote mailbox data quality warnings'; Html = $warningsTableHtml }
+    }
+
+    $sections += [pscustomobject]@{ Title = 'Files'; Html = $filesTableHtml }
 
     return New-SmartM365EmailBody `
         -Title 'Mailbox inventory summary' `
@@ -996,8 +1058,9 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $remoteMailboxUpload = if ($latestRemoteCsv) { Get-SmartM365SharePointUploadRecordByLocalPath -Path $latestRemoteCsv } else { $null }
     if (-not $remoteMailboxUpload -and $remoteCsv) { $remoteMailboxUpload = Get-SmartM365SharePointUploadRecordByLocalPath -Path $remoteCsv }
     $summaryCsvForMail = if ($latestSummaryCsv -and (Test-Path -LiteralPath $latestSummaryCsv -PathType Leaf)) { $latestSummaryCsv } else { $summaryCsv }
+    $remoteMailboxDataQualityWarnings = @($Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings)
     try {
-        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -Title ($TaskName + ' - Mailbox report')
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -Title ($TaskName + ' - Mailbox report')
         Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
     }
     catch {
