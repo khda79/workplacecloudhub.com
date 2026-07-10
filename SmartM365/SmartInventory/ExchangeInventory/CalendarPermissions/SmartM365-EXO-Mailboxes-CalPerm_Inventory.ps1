@@ -31,11 +31,9 @@
 .PARAMETER TopMailboxes
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 .VERSION
-1.5
-
-
+1.7
 .NOTES
-    Version : 1.1
+    Version : 1.7
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Hybrid (Online & On-Prem)
 #>
@@ -257,7 +255,7 @@ function Join-ModulePath {
 }
 
 # ------------------------- Init & Environment -------------------------
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.7"
 if ($Online) {
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
@@ -334,34 +332,6 @@ function Disconnect-ExchangeOnlineSafe {
 
 if ($Online) {
     # -------------------------
-    # Exchange Online connection (EXO)
-    # -------------------------
-    try {
-        Ensure-ExchangeOnlineModule
-
-        if ($Connect) {
-            Write-Host "Connect switch specified: existing Exchange Online session will be disconnected and reconnected..." -ForegroundColor Cyan
-        }
-
-        Disconnect-ExchangeOnlineSafe
-
-        WriteLog -Message "Connecting to Exchange Online with app-only certificate authentication." "INFO"
-        Connect-ExchangeOnline `
-            -AppId $AppId `
-            -CertificateThumbprint $Thumb `
-            -Organization $OrgDomain `
-            -ShowBanner:$false `
-            -ErrorAction Stop | Out-Null
-        WriteLog -Message "Connected to Exchange Online."
-    }
-    catch {
-        WriteLog -Message ("Failed to connect to Exchange Online: {0}" -f $_.Exception.Message) "ERROR"
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-        Complete-SmartM365ExecutionContext -Status Auto
-        exit 1
-    }
-
-    # -------------------------
     # -------------------------
     # Detect existing Graph session (standard SmartM365 block)
     # -------------------------
@@ -416,6 +386,35 @@ if ($Online) {
         }
 
         $connectedGraphInThisRun = $connectResult.GraphConnected
+    }
+
+
+    # -------------------------
+    # Exchange Online connection (EXO)
+    # -------------------------
+    try {
+        Ensure-ExchangeOnlineModule
+
+        if ($Connect) {
+            Write-Host "Connect switch specified: existing Exchange Online session will be disconnected and reconnected..." -ForegroundColor Cyan
+        }
+
+        Disconnect-ExchangeOnlineSafe
+
+        WriteLog -Message "Connecting to Exchange Online with app-only certificate authentication." "INFO"
+        Connect-ExchangeOnline `
+            -AppId $AppId `
+            -CertificateThumbprint $Thumb `
+            -Organization $OrgDomain `
+            -ShowBanner:$false `
+            -ErrorAction Stop | Out-Null
+        WriteLog -Message "Connected to Exchange Online."
+    }
+    catch {
+        WriteLog -Message ("Failed to connect to Exchange Online: {0}" -f $_.Exception.Message) "ERROR"
+        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Complete-SmartM365ExecutionContext -Status Auto
+        exit 1
     }
 
 } else {
@@ -687,14 +686,14 @@ foreach ($mbx in $mailboxes) {
                     }
                 } catch {
                     $errMsg = "Permission error for $primarySMTP ($folderPath) : $($_.Exception.Message)"
-                    Write-Warning $errMsg
+                    WriteLog -Message $errMsg "WARN"
                     $errors += $errMsg
                 }
             }
         }
     } catch {
         $errMsg = "Error for $primarySMTP : $($_.Exception.Message)"
-        Write-Warning $errMsg
+        WriteLog -Message $errMsg "WARN"
         $errors += $errMsg
     }
 }
@@ -718,8 +717,25 @@ if ($results.Count -gt 0) {
 }
 
 if ($errors.Count -gt 0) {
-    Add-Content -Path $logTextFile -Value "`n=== ERRORS ==="
+    Add-Content -Path $logTextFile -Value "`n=== MAILBOX-LEVEL ERRORS ==="
     $errors | ForEach-Object { Add-Content -Path $logTextFile -Value $_ }
+
+    $errorRows = for ($i = 0; $i -lt $errors.Count; $i++) {
+        [pscustomobject]@{
+            Index   = $i + 1
+            Message = [string]$errors[$i]
+        }
+    }
+
+    $errorBaseFileName = if ($Online) { "Exchange_EXO_MailboxCalendarPermissions_Errors" } else { "Exchange_OnPrem_MailboxCalendarPermissions_Errors" }
+    ExportAndCopyCsv -BaseFileName $errorBaseFileName `
+        -OutputPath $OutputPath `
+        -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
+        -Data $errorRows `
+        -Encoding "UTF8" `
+        -NoTypeInformation
+
+    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced, but final status must be CompletedWithWarnings." -f $errors.Count) "WARN"
 }
 
 Write-Host "`n=== SUMMARY ===" -ForegroundColor Cyan
