@@ -6,4 +6,4 @@ Exchange 2016 on-premises scripts that require Exchange Management Tools or the 
 
 - `Mailboxes/`: local mailbox inventory and reporting.
 - `ProxyAddresses/`: proxy address audit for user/shared mailboxes. Standard Test/Prod launchers are read-only; separate `Write-*` launchers are guarded for remediation.
-- `ServersAndStorage/`: Exchange 2016 server, compute, memory, disk, optional database path, and service health inventory.`r`n- `ExchangeSEPreCheck/`: Active Directory multi-domain pre-check before Exchange SE forest/domain preparation.
+- `ServersAndStorage/`: Exchange 2016 server, compute, memory, disk, optional database path, and service health inventory.
