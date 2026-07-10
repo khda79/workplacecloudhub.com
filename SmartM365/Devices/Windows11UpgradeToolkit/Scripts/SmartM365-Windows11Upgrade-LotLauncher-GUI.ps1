@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.27
+0.1.28
 #>
 param(
     [switch]$ValidateOnly
@@ -490,6 +490,7 @@ function New-SingleComputerRunContext {
 
     [pscustomobject]@{
         ComputerName   = $trimmed
+        SafeComputerName = $safeComputer
         RunPath        = $runPath
         ComputersPath  = $computersPath
         LogRoot        = Join-Path $runPath 'PsExecLogs'
@@ -681,7 +682,7 @@ function Start-ToolkitSingleComputer {
         $commandParts.Add((ConvertTo-CmdArgument -Value $argument))
     }
 
-    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @(($commandParts -join ' ')) -NamePrefix ('Single-' + $safeComputer) -PauseWhenDone
+    $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @(($commandParts -join ' ')) -NamePrefix ('Single-' + $run.SafeComputerName) -PauseWhenDone
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
     return $run
 }
