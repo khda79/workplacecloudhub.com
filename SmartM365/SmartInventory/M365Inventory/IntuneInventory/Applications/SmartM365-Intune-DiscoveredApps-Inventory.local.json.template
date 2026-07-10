@@ -25,8 +25,11 @@
   "DiscoveredAppsCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\Applications\\DiscoveredApps",
   "GraphMaxRetryAttempts": 8,
   "GraphRetryDefaultSeconds": 30,
-  "GraphRequestDelayMs": 1000,
+  "GraphRequestDelayMs": 100,
   "GraphRetryMaxSeconds": 300,
+  "DeviceDetailMode": "All",
+  "TopAppsByDeviceCount": 500,
+  "ProgressEveryApps": 250,
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Applications\\DiscoveredApps\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
