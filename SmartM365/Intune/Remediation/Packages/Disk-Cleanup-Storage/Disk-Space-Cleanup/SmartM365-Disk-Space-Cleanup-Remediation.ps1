@@ -1,19 +1,19 @@
 <#
 .SYNOPSIS
-    Frees disk space to improve Windows upgrade readiness without forcing a reboot.
+    Frees system drive space with controlled cleanup levels without forcing a reboot.
 
 .VERSION
-    1.7
+    1.8
 #>
-# Name: SmartM365-Upgrade-Storage-Readiness-Remediation.ps1
-# Version: 1.7
-# Description: Frees disk space to improve Windows upgrade readiness without forcing a reboot.
+# Name: SmartM365-Disk-Space-Cleanup-Remediation.ps1
+# Version: 1.8
+# Description: Frees system drive space with controlled cleanup levels without forcing a reboot.
 
 $ErrorActionPreference = "Stop"
 
-$ScriptName = "SmartM365-Upgrade-Storage-Readiness-Remediation"
-$Version = "1.7"
-$Scenario = "Upgrade-Storage-Readiness"
+$ScriptName = "SmartM365-Disk-Space-Cleanup-Remediation"
+$Version = "1.8"
+$Scenario = "Disk-Space-Cleanup"
 $MinimumTargetFreeSpaceGB = 50
 $Windows10Only = $true
 $CleanupLevel = "Moderate"

@@ -1,18 +1,18 @@
 <#
 .SYNOPSIS
-    Detects whether the system drive has enough free space for Windows upgrade readiness.
+    Detects whether the system drive is below the managed free-space threshold.
 
 .VERSION
-    1.5
+    1.6
 #>
-# Name: SmartM365-Upgrade-Storage-Readiness-Detection.ps1
-# Version: 1.5
-# Description: Detects whether the system drive has enough free space for Windows upgrade readiness.
+# Name: SmartM365-Disk-Space-Cleanup-Detection.ps1
+# Version: 1.6
+# Description: Detects whether the system drive is below the managed free-space threshold.
 
 $ErrorActionPreference = "Stop"
 
-$ScriptName = "SmartM365-Upgrade-Storage-Readiness-Detection"
-$Version = "1.5"
+$ScriptName = "SmartM365-Disk-Space-Cleanup-Detection"
+$Version = "1.6"
 $MinimumFreeSpaceGB = 50
 $Windows10Only = $true
 

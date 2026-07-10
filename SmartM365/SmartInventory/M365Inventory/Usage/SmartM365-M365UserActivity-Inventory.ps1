@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.1
+1.2
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -31,7 +31,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.1'
+$ScriptVersion = '1.2'
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -371,7 +371,31 @@ $logPath = Join-Path -Path $logFolder -ChildPath ("SmartM365-M365UserActivity-In
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
 Import-Module $modulePath -Force -ErrorAction Stop
 
+$global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
+$global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
+$global:EnableSharePointUpload = [bool](Get-SmartM365ConfigValue -Name 'EnableSharePointUpload' -DefaultValue $false)
+$global:SharePointSiteHostname = Get-SmartM365ConfigValue -Name 'SharePointSiteHostname' -DefaultValue ''
+$global:SharePointSitePath = Get-SmartM365ConfigValue -Name 'SharePointSitePath' -DefaultValue ''
+$global:SharePointLibraryDisplayName = Get-SmartM365ConfigValue -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
+$global:SharePointTargetFolderPath = Get-SmartM365ConfigValue -Name 'SharePointTargetFolderPath' -DefaultValue ''
+
 Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $runOutputRoot -LatestOutputRoot $LatestCsvFolderPath -LogPath $logPath
+$global:LogTextFile = $logPath
+$global:logTextFile = $logPath
+$global:LogPath = $logFolder
+$global:logTranscriptFile = Join-Path -Path $logFolder -ChildPath ("SmartM365-M365UserActivity-Inventory_{0}_Transcript.log" -f $runId)
+
+function Stop-SmartM365UsageTranscript {
+    [CmdletBinding()]
+    param()
+    try {
+        Stop-Transcript | Out-Null
+        if ($global:logTranscriptFile -and (Get-Command Update-SmartM365TimestampedTranscript -ErrorAction SilentlyContinue)) {
+            Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile
+        }
+    }
+    catch {}
+}
 $selectedReports = Resolve-M365UsageReportSelection -RequestedReports $Reports
 $selectedReportCommands = @($selectedReports | ForEach-Object { $_.Command })
 $requiredReportCommands = @(($selectedReportCommands + @('Invoke-MgGraphRequest')) | Sort-Object -Unique)
@@ -380,6 +404,7 @@ try {
     foreach ($folder in @($runOutputRoot, $LatestCsvFolderPath, $logFolder)) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
     }
+    Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
 
     Invoke-SmartM365Preflight `
         -ScriptName 'SmartM365-M365UserActivity-Inventory' `
@@ -425,6 +450,8 @@ try {
         LatestFolder = $LatestCsvFolderPath
         RunId = $runId
     } | Out-Null
+    Stop-SmartM365UsageTranscript
+    Complete-SmartM365ExecutionContext -Status Auto
 }
 catch {
     $message = $_.Exception.Message
@@ -439,5 +466,13 @@ catch {
         } | Out-Null
     }
     catch { WriteLog ("Teams alert notification failed: {0}" -f $_.Exception.Message) 'WARNING' }
+    Stop-SmartM365UsageTranscript
+    try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'M365UsageInventory' } catch {}
     throw
+}
+
+finally {
+    try { RemoveOldFiles -Path $runOutputRoot -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile } catch {}
+    try { RemoveOldFiles -Path $logFolder -Filter '*.log' -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile } catch {}
+    try { Stop-SmartM365UsageTranscript } catch {}
 }

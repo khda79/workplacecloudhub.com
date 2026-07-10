@@ -4,7 +4,7 @@
     with Windows upgrade eligibility, normalized readiness join keys, and hardware check flags.
 
 .DESCRIPTION
-    Uses Microsoft Graph (Endpoint Analytics) to query userExperienceAnalyticsWorkFromAnywhereDevice
+    Uses Microsoft Graph (Endpoint Analytics) to export Windows upgrade readiness summary data
     and exports a CSV containing:
       - DeviceName, Manufacturer, Model, OSVersion
       - NormalizedDeviceName, GraphId, AzureAdJoinType, UpgradeEligibility, UpgradeEligibilityLabel
@@ -31,7 +31,7 @@
     Uses interactive authentication instead of app-only authentication when connecting to Microsoft Graph.
 
 .PARAMETER Filter
-    Optional OData filter applied on userExperienceAnalyticsWorkFromAnywhereDevice (server-side).
+    Optional OData filter applied only when -AttemptDeviceDetails is used with the legacy device-level route.
     Example:
         "contains(deviceName, 'LAPTOP')" or "upgradeEligibility ne 'none'".
 
@@ -44,11 +44,11 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.3
+1.6
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.3
+    Version : 1.6
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -72,7 +72,10 @@ param (
     [string]$Filter,
 
     [Parameter(Mandatory = $false)]
-    [int]$MaxDevices = 0
+    [int]$MaxDevices = 0,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$AttemptDeviceDetails
 )
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -96,7 +99,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.6"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -261,7 +264,8 @@ $global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocal
 $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
-$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''`r`n$ConfiguredScriptCsvLogFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ScriptCsvLogFolderPath' -DefaultValue ''
+$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+$ConfiguredScriptCsvLogFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ScriptCsvLogFolderPath' -DefaultValue ''
 $AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
@@ -408,7 +412,7 @@ function Ensure-GraphConnection {
     }
     else {
         WriteLogSmartM365 -Message "Connecting to Microsoft Graph using app-only certificate authentication..." -Level "INFO"
-        Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumb
+        Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumb -NoWelcome
     }
 
     WriteLogSmartM365 -Message "Connected to Microsoft Graph successfully." -Level "SUCCESS"
@@ -439,6 +443,76 @@ function Get-UpgradeEligibilityLabel {
     }
 }
 
+function Export-HardwareReadinessSummary {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseUri,
+        [Parameter(Mandatory = $false)][string]$Reason = ''
+    )
+
+    $endpoint = "$BaseUri/userExperienceAnalyticsWorkFromAnywhereHardwareReadinessMetric"
+    WriteLogSmartM365 -Message ("Exporting Work From Anywhere hardware readiness summary: {0}" -f $endpoint) -Level "INFO"
+    $summary = Invoke-MgGraphRequest -Method GET -Uri $endpoint
+
+    $devicesSummaryEndpoint = "$BaseUri/userExperienceAnalyticsSummarizeWorkFromAnywhereDevices()"
+    $devicesSummary = $null
+    try {
+        WriteLogSmartM365 -Message ("Exporting Work From Anywhere device scope summary: {0}" -f $devicesSummaryEndpoint) -Level "INFO"
+        $devicesSummary = Invoke-MgGraphRequest -Method GET -Uri $devicesSummaryEndpoint
+    }
+    catch {
+        WriteLogSmartM365 -Message ("Optional Work From Anywhere device scope summary unavailable: {0}" -f $_.Exception.Message) -Level "INFO"
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $summaryReportName = "Intune_Devices_UpgradeEligibility_Summary"
+    $summaryCsvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath ("{0}_{1}.csv" -f $summaryReportName, $timestamp)
+    $latestSummaryCsvPath = if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $null } else { Join-Path -Path $LatestCsvFolderPath -ChildPath "$summaryReportName.csv" }
+    $eligiblePercent = if ([int]$summary.totalDeviceCount -gt 0) { [math]::Round(([double]$summary.upgradeEligibleDeviceCount / [double]$summary.totalDeviceCount) * 100, 2) } else { 0 }
+
+    $row = [pscustomobject]@{
+        ReportType                                = 'HardwareReadinessSummary'
+        ReportMode                                = 'Summary'
+        GraphId                                   = [string]$summary.id
+        TotalDeviceCount                          = [int]$summary.totalDeviceCount
+        UpgradeEligibleDeviceCount                = [int]$summary.upgradeEligibleDeviceCount
+        UpgradeEligiblePercentage                 = $eligiblePercent
+        OSCheckFailedPercentage                   = [double]$summary.osCheckFailedPercentage
+        Processor64BitCheckFailedPercentage       = [double]$summary.processor64BitCheckFailedPercentage
+        ProcessorCoreCountCheckFailedPercentage   = [double]$summary.processorCoreCountCheckFailedPercentage
+        ProcessorFamilyCheckFailedPercentage      = [double]$summary.processorFamilyCheckFailedPercentage
+        ProcessorSpeedCheckFailedPercentage       = [double]$summary.processorSpeedCheckFailedPercentage
+        RamCheckFailedPercentage                  = [double]$summary.ramCheckFailedPercentage
+        SecureBootCheckFailedPercentage           = [double]$summary.secureBootCheckFailedPercentage
+        StorageCheckFailedPercentage              = [double]$summary.storageCheckFailedPercentage
+        TPMCheckFailedPercentage                  = [double]$summary.tpmCheckFailedPercentage
+        WfaTotalDevices                           = [int]$devicesSummary.totalDevices
+        WfaIntuneDevices                          = [int]$devicesSummary.intuneDevices
+        WfaWindows10Devices                       = [int]$devicesSummary.windows10Devices
+        WfaUnsupportedOSVersionDevices            = [int]$devicesSummary.unsupportedOSversionDevices
+        WfaDevicesNotAutopilotRegistered          = [int]$devicesSummary.devicesNotAutopilotRegistered
+        WfaDevicesWithoutAutopilotProfileAssigned = [int]$devicesSummary.devicesWithoutAutopilotProfileAssigned
+        WfaDevicesWithoutCloudIdentity            = [int]$devicesSummary.devicesWithoutCloudIdentity
+        WfaCoManagedDevices                       = [int]$devicesSummary.coManagedDevices
+        WfaTenantAttachDevices                    = [int]$devicesSummary.tenantAttachDevices
+        WfaWindows10DevicesWithoutTenantAttach    = [int]$devicesSummary.windows10DevicesWithoutTenantAttach
+        SourceGraphEndpoint                       = $endpoint
+        DeviceScopeSummaryGraphEndpoint           = $devicesSummaryEndpoint
+        FallbackReason                            = $Reason
+        ExportDateTime                            = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        RunId                                     = $runId
+    }
+
+    if ($latestSummaryCsvPath) {
+        Export-SmartM365Csv -Data @($row) -TimestampedPath $summaryCsvPath -LatestPath $latestSummaryCsvPath | Out-Null
+        WriteLogSmartM365 -Message ("Latest summary CSV updated: {0}" -f $latestSummaryCsvPath) -Level "SUCCESS"
+    }
+    else {
+        Export-SmartM365Csv -Data @($row) -TimestampedPath $summaryCsvPath | Out-Null
+    }
+
+    WriteLogSmartM365 -Message ("Hardware readiness summary exported: {0}; TotalDeviceCount={1}; UpgradeEligibleDeviceCount={2}; UpgradeEligiblePercentage={3}" -f $summaryCsvPath, $row.TotalDeviceCount, $row.UpgradeEligibleDeviceCount, $row.UpgradeEligiblePercentage) -Level "SUCCESS"
+    Write-Host "Hardware readiness summary exported: $summaryCsvPath" -ForegroundColor Green
+}
 #region Main logic
 
 try {
@@ -451,7 +525,7 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
         $preflightOutputPaths += $LatestCsvFolderPath
     }
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths $preflightOutputPaths -GraphProbeUris @('https://graph.microsoft.com/beta/deviceManagement/userExperienceAnalyticsWorkFromAnywhereMetrics') | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths $preflightOutputPaths -GraphProbeUris @('https://graph.microsoft.com/beta/deviceManagement/userExperienceAnalyticsWorkFromAnywhereHardwareReadinessMetric') | Out-Null
 
     # ---------------- Work From Anywhere / Upgrade Eligibility (Endpoint Analytics) ----------------
 
@@ -479,6 +553,20 @@ try {
     # Use beta endpoint for Endpoint Analytics WFA because v1.0 route may not be available
     $graphBase = "https://graph.microsoft.com/beta"
     $baseUri   = "$graphBase/deviceManagement"
+    if (-not $AttemptDeviceDetails) {
+        if (-not [string]::IsNullOrWhiteSpace($Filter)) {
+            WriteLogSmartM365 -Message "Filter is ignored in summary mode. Use -AttemptDeviceDetails to apply device-level filtering if the Graph route becomes available." -Level "INFO"
+        }
+        if ($MaxDevices -gt 0) {
+            WriteLogSmartM365 -Message "MaxDevices is ignored in summary mode. Use -AttemptDeviceDetails to apply a device-level row limit if the Graph route becomes available." -Level "INFO"
+        }
+
+        Export-HardwareReadinessSummary -BaseUri $baseUri -Reason 'Summary-first default. The device-level Work From Anywhere metricDevices route is currently unavailable in this tenant/API.'
+        WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully =====" -Level "INFO"
+        exit 0
+    }
+
+    WriteLogSmartM365 -Message "AttemptDeviceDetails specified: trying legacy Work From Anywhere metricDevices route." -Level "INFO"
 
     # Step 1: get Work From Anywhere metrics (usually one item)
     $metrics = $null
@@ -488,24 +576,17 @@ try {
     }
     catch {
         $errText = $_.Exception.Message
-        WriteLogSmartM365 -Message ("Call to userExperienceAnalyticsWorkFromAnywhereMetrics failed: {0}" -f $errText) -Level "ERROR"
-
-        if ($errText -like "*No OData route exists that match template*") {
-            WriteLogSmartM365 -Message "Endpoint Analytics 'Work From Anywhere' API route is not available in this tenant. Check that Endpoint Analytics / Work from anywhere is enabled in Intune." -Level "WARNING"
-        }
-
-        Write-Host "Work From Anywhere Graph API is not available in this tenant. Cannot generate upgrade eligibility report via Graph." -ForegroundColor Yellow
-        WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory finished (WFA API not available) =====" -Level "INFO"
-        exit 1
+        WriteLogSmartM365 -Message ("Device-level Work From Anywhere metrics route unavailable; exporting supported summary instead: {0}" -f $errText) -Level "INFO"
+        Export-HardwareReadinessSummary -BaseUri $baseUri -Reason ("Device-level Work From Anywhere metrics route unavailable: {0}" -f $errText)
+        WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully =====" -Level "INFO"
+        exit 0
     }
-
     if (-not $metrics -or $metrics.Count -eq 0) {
-        WriteLogSmartM365 -Message "No userExperienceAnalyticsWorkFromAnywhereMetrics found. Make sure Endpoint Analytics / Work From Anywhere is enabled." -Level "WARNING"
-        Write-Host "No Work From Anywhere metrics found. Check Endpoint Analytics configuration." -ForegroundColor Yellow
-        WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory finished (no metrics) =====" -Level "INFO"
-        exit 1
+        WriteLogSmartM365 -Message "No userExperienceAnalyticsWorkFromAnywhereMetrics found; exporting supported hardware readiness summary instead." -Level "INFO"
+        Export-HardwareReadinessSummary -BaseUri $baseUri -Reason 'No device-level Work From Anywhere metrics returned.'
+        WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully =====" -Level "INFO"
+        exit 0
     }
-
     WriteLogSmartM365 -Message ("Number of Work From Anywhere metrics objects returned: {0}" -f $metrics.Count) -Level "DEBUG"
 
     $allDevices = @()
