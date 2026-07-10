@@ -28,15 +28,15 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.2
+    Version : 1.5
 
 .VERSION
-1.2
+1.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.2
+    Version : 1.5
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -54,7 +54,22 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 5000)]
-    [int]$DelayMs = 300
+    [int]$DelayMs = 300,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('All', 'None', 'NonZero', 'Top')]
+    [string]$DeviceDetailMode = 'All',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$TopAppsByDeviceCount = 500,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(0, [int]::MaxValue)]
+    [int]$ProgressEveryApps = 250,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ResetResume
 )
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -73,7 +88,7 @@ $tenantContextPath = & {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 . $tenantContextPath
-Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
+$script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 # ==========================================================
 # PowerShell 7 minimum
@@ -261,11 +276,26 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.2"
+$ScriptVersion = "1.5"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
-    $DelayMs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRequestDelayMs' -DefaultValue 1000)
+    $DelayMs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRequestDelayMs' -DefaultValue 100)
+}
+if (-not $PSBoundParameters.ContainsKey('DeviceDetailMode')) {
+    $DeviceDetailMode = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceDetailMode' -DefaultValue 'All')
+}
+if ($DeviceDetailMode -notin @('All', 'None', 'NonZero', 'Top')) {
+    throw "Invalid DeviceDetailMode '$DeviceDetailMode'. Valid values: All, None, NonZero, Top."
+}
+if (-not $PSBoundParameters.ContainsKey('TopAppsByDeviceCount')) {
+    $TopAppsByDeviceCount = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TopAppsByDeviceCount' -DefaultValue 500)
+}
+if ($TopAppsByDeviceCount -lt 1) {
+    throw "TopAppsByDeviceCount must be greater than 0."
+}
+if (-not $PSBoundParameters.ContainsKey('ProgressEveryApps')) {
+    $ProgressEveryApps = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProgressEveryApps' -DefaultValue 250)
 }
 $script:GraphMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphMaxRetryAttempts' -DefaultValue 8)
 $script:GraphRetryDefaultSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryDefaultSeconds' -DefaultValue 30)
@@ -276,6 +306,12 @@ $script:Stat_AppsWindows      = 0
 $script:Stat_AppsProcessed    = 0
 $script:Stat_AppsSkipped      = 0
 $script:Stat_DeviceDetailRows = 0
+$script:Stat_DetailAppsSkippedByResume = 0
+$script:DeviceDetailResumePath = ''
+$script:DeviceDetailPartialPath = ''
+$script:DeviceDetailTimestampedPath = ''
+$script:DeviceDetailCompleted = $false
+$script:Stat_DetailAppsTargeted = 0
 $script:Stat_GraphCalls       = 0
 $script:Stat_ThrottleRetries  = 0
 
@@ -294,6 +330,10 @@ try {
     WriteLog -Message "MaxApps            : $(if ($MaxApps -eq 0) { 'unlimited' } else { $MaxApps })"
     WriteLog -Message "DryRun             : $DryRun"
     WriteLog -Message "DelayMs            : $DelayMs"
+    WriteLog -Message "DeviceDetailMode   : $DeviceDetailMode"
+    WriteLog -Message "TopAppsByDeviceCount: $TopAppsByDeviceCount"
+    WriteLog -Message "ProgressEveryApps  : $ProgressEveryApps"
+    WriteLog -Message "ResetResume        : $ResetResume"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
     exit 1
@@ -401,6 +441,151 @@ function Invoke-GraphPagedRequest {
     return $allItems
 }
 
+function Stop-DiscoveredAppsTranscript {
+    [CmdletBinding()]
+    param()
+
+    try {
+        if ($global:logTranscriptFile -and (Test-Path -LiteralPath $global:logTranscriptFile)) {
+            Stop-Transcript | Out-Null
+        }
+    } catch {}
+}
+
+function New-DiscoveredAppsDeviceDetailRecord {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object]$App,
+        [Parameter(Mandatory = $false)][object]$Device
+    )
+
+    [pscustomobject]@{
+        AppId                  = $App.id
+        AppName                = $App.displayName
+        AppVersion             = $App.version
+        AppPublisher           = $App.publisher
+        Platform               = $App.platform
+        DeviceId               = if ($Device) { $Device.id } else { '' }
+        DeviceName             = if ($Device) { $Device.deviceName } else { '' }
+        OperatingSystem        = if ($Device) { $Device.operatingSystem } else { '' }
+        OSVersion              = if ($Device) { $Device.osVersion } else { '' }
+        UserPrincipalName      = if ($Device) { $Device.userPrincipalName } else { '' }
+        LastSyncDateTime       = if ($Device) { $Device.lastSyncDateTime } else { '' }
+        EnrolledDateTime       = if ($Device) { $Device.enrolledDateTime } else { '' }
+        ManagedDeviceOwnerType = if ($Device) { $Device.managedDeviceOwnerType } else { '' }
+        ComplianceState        = if ($Device) { $Device.complianceState } else { '' }
+        AzureADDeviceId        = if ($Device) { $Device.azureADDeviceId } else { '' }
+    }
+}
+
+function Write-DiscoveredAppsCsvRows {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows
+    )
+
+    if (-not $Rows -or $Rows.Count -eq 0) { return }
+    $folder = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+    if (Test-Path -LiteralPath $Path) {
+        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append
+    } else {
+        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+    }
+}
+
+function Get-DiscoveredAppsResumeState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+    } catch {
+        WriteLog -Message "Ignoring unreadable resume state '$Path': $_" "WARNING"
+        return $null
+    }
+}
+
+function Save-DiscoveredAppsResumeState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$PartialPath,
+        [Parameter(Mandatory = $true)][string]$TimestampedPath,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][int]$TargetCount,
+        [Parameter(Mandatory = $true)][string[]]$ProcessedAppIds,
+        [Parameter(Mandatory = $true)][int]$ProcessedCount,
+        [Parameter(Mandatory = $true)][int]$SkippedCount,
+        [Parameter(Mandatory = $true)][int]$DetailRows
+    )
+
+    $state = [ordered]@{
+        Script           = $TaskName
+        DeviceDetailMode = $Mode
+        TargetCount      = $TargetCount
+        PartialPath      = $PartialPath
+        TimestampedPath  = $TimestampedPath
+        ProcessedAppIds  = @($ProcessedAppIds)
+        ProcessedCount   = $ProcessedCount
+        SkippedCount     = $SkippedCount
+        DeviceDetailRows = $DetailRows
+        Updated          = (Get-Date).ToString('o')
+    }
+    $folder = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+    $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function Complete-DiscoveredAppsStreamExport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$PartialPath,
+        [Parameter(Mandatory = $true)][string]$TimestampedPath,
+        [Parameter(Mandatory = $true)][string]$OutputPath,
+        [Parameter(Mandatory = $true)][string]$GlobalPath,
+        [Parameter(Mandatory = $true)][string]$BaseFileName
+    )
+
+    if (-not (Test-Path -LiteralPath $PartialPath)) {
+        WriteLog -Message "DeviceDetail partial CSV not found; no DeviceDetail CSV to finalize: $PartialPath" "WARNING"
+        return $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($GlobalPath)) { $GlobalPath = $OutputPath }
+    if (-not (Test-Path -LiteralPath $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $GlobalPath)) { New-Item -ItemType Directory -Path $GlobalPath -Force | Out-Null }
+
+    Copy-Item -LiteralPath $PartialPath -Destination $TimestampedPath -Force
+    $localLatestPath = Join-Path -Path $OutputPath -ChildPath ("$BaseFileName.csv")
+    $globalLatestPath = Join-Path -Path $GlobalPath -ChildPath ("$BaseFileName.csv")
+    Copy-Item -LiteralPath $TimestampedPath -Destination $localLatestPath -Force
+    Copy-Item -LiteralPath $TimestampedPath -Destination $globalLatestPath -Force
+
+    if (-not $global:csvGeneratedPaths) {
+        $global:csvGeneratedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    [void]$global:csvGeneratedPaths.Add($TimestampedPath)
+    [void]$global:csvGeneratedPaths.Add($localLatestPath)
+    [void]$global:csvGeneratedPaths.Add($globalLatestPath)
+
+    if (Get-Command -Name Invoke-SmartM365SharePointCsvUpload -ErrorAction SilentlyContinue) {
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $globalLatestPath | Out-Null
+    }
+    if (Get-Command -Name Invoke-SmartM365WeeklyInventoryHistoryForCsv -ErrorAction SilentlyContinue) {
+        Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($globalLatestPath) -TimestampedPath $TimestampedPath | Out-Null
+    }
+
+    Remove-Item -LiteralPath $PartialPath -Force -ErrorAction SilentlyContinue
+    WriteLog -Message "DeviceDetail CSV finalized: $TimestampedPath" "INFO"
+    return $TimestampedPath
+}
 # ==========================================================
 # MAIN TRY / CATCH / FINALLY
 # ==========================================================
@@ -476,11 +661,10 @@ try {
     }
 
     # ----------------------------------------------------------
-    # Build Summary records (one row per app)
+    # Build and export Summary records before long DeviceDetail calls
     # ----------------------------------------------------------
     WriteLog -Message "Building Summary records..." "INFO"
     $summaryRecords = [System.Collections.Generic.List[psobject]]::new()
-
     foreach ($app in $windowsApps) {
         $summaryRecords.Add([pscustomobject]@{
             AppId        = $app.id
@@ -493,115 +677,191 @@ try {
     }
     WriteLog -Message "Summary records built: $($summaryRecords.Count) rows." "INFO"
 
+    $globalPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+    if ($DryRun) {
+        WriteLog -Message "DryRun enabled - Summary CSV export skipped." "INFO"
+    } else {
+        WriteLog -Message "Exporting Summary CSV ($($summaryRecords.Count) rows)..." "INFO"
+        ExportAndCopyCsv `
+            -BaseFileName "Intune_DiscoveredApps_Summary" `
+            -OutputPath $OutputPath `
+            -GlobalPath $globalPath `
+            -Data $summaryRecords `
+            -Encoding "UTF8" `
+            -NoTypeInformation
+        WriteLog -Message "Summary export completed: $global:csvFilePath1" "INFO"
+    }
+
     # ----------------------------------------------------------
-    # Retrieve managed devices per app (DeviceDetail records)
+    # Build DeviceDetail records with streaming export and resume support
     # ----------------------------------------------------------
-    WriteLog -Message "Retrieving managed devices for $($windowsApps.Count) Windows apps..." "INFO"
     $detailRecords = [System.Collections.Generic.List[psobject]]::new()
-    $appIndex      = 0
+    $detailApps = switch ($DeviceDetailMode) {
+        'None' { @() }
+        'NonZero' { @($windowsApps | Where-Object { [int]($_.deviceCount) -gt 0 }) }
+        'Top' {
+            @($windowsApps |
+                Sort-Object -Property @{ Expression = { [int]($_.deviceCount) }; Descending = $true }, displayName, version |
+                Select-Object -First $TopAppsByDeviceCount)
+        }
+        default { @($windowsApps) }
+    }
 
-    foreach ($app in $windowsApps) {
-        $appIndex++
-        $pctComplete = [math]::Round(($appIndex / $windowsApps.Count) * 100, 1)
+    $script:Stat_DetailAppsTargeted = $detailApps.Count
+    WriteLog -Message ("Device detail mode '{0}' selected {1} app(s) out of {2} Windows apps." -f $DeviceDetailMode, $detailApps.Count, $windowsApps.Count) "INFO"
 
-        Write-Progress `
-            -Activity        'Retrieving device details per app' `
-            -Status          "App $appIndex / $($windowsApps.Count): $($app.displayName) v$($app.version)  ($pctComplete%)" `
-            -PercentComplete $pctComplete
+    if ($DeviceDetailMode -eq 'None') {
+        WriteLog -Message "DeviceDetailMode=None; skipping per-app managedDevices retrieval." "INFO"
+    } elseif ($detailApps.Count -eq 0) {
+        WriteLog -Message "No applications selected for DeviceDetail export (mode=$DeviceDetailMode)." "INFO"
+    } else {
+        WriteLog -Message "Building DeviceDetail records for $($detailApps.Count) applications (mode=$DeviceDetailMode)..." "INFO"
 
-        $devicesUri = "https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/$($app.id)/managedDevices" +
-                      '?$top=999&$select=id,deviceName,operatingSystem,osVersion,userPrincipalName,' +
-                      'lastSyncDateTime,enrolledDateTime,managedDeviceOwnerType,complianceState'
+        $detailBaseFileName = 'Intune_DiscoveredApps_DeviceDetail'
+        $detailTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+        $script:DeviceDetailResumePath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName.resume.json"
+        $processedAppIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $streamingEnabled = -not $DryRun
 
-        try {
-            if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
-            $devices = Invoke-GraphPagedRequest -InitialUri $devicesUri
+        if ($streamingEnabled -and $ResetResume) {
+            $oldState = Get-DiscoveredAppsResumeState -Path $script:DeviceDetailResumePath
+            if ($oldState -and $oldState.PartialPath) { Remove-Item -LiteralPath ([string]$oldState.PartialPath) -Force -ErrorAction SilentlyContinue }
+            if ($oldState -and $oldState.TimestampedPath) { Remove-Item -LiteralPath ([string]$oldState.TimestampedPath) -Force -ErrorAction SilentlyContinue }
+            Remove-Item -LiteralPath $script:DeviceDetailResumePath -Force -ErrorAction SilentlyContinue
+            WriteLog -Message "ResetResume enabled; previous DeviceDetail resume state removed." "INFO"
+        }
 
-            if ($devices.Count -eq 0) {
-                # Preserve app row even when no device is returned
-                $detailRecords.Add([pscustomobject]@{
-                    AppId                  = $app.id
-                    AppName                = $app.displayName
-                    AppVersion             = $app.version
-                    AppPublisher           = $app.publisher
-                    Platform               = $app.platform
-                    DeviceId               = ''
-                    DeviceName             = ''
-                    OperatingSystem        = ''
-                    OSVersion              = ''
-                    UserPrincipalName      = ''
-                    LastSyncDateTime       = ''
-                    EnrolledDateTime       = ''
-                    ManagedDeviceOwnerType = ''
-                    ComplianceState        = ''
-                    AzureADDeviceId        = ''
-                })
-            } else {
-                foreach ($device in $devices) {
-                    $detailRecords.Add([pscustomobject]@{
-                        AppId                  = $app.id
-                        AppName                = $app.displayName
-                        AppVersion             = $app.version
-                        AppPublisher           = $app.publisher
-                        Platform               = $app.platform
-                        DeviceId               = $device.id
-                        DeviceName             = $device.deviceName
-                        OperatingSystem        = $device.operatingSystem
-                        OSVersion              = $device.osVersion
-                        UserPrincipalName      = $device.userPrincipalName
-                        LastSyncDateTime       = $device.lastSyncDateTime
-                        EnrolledDateTime       = $device.enrolledDateTime
-                        ManagedDeviceOwnerType = $device.managedDeviceOwnerType
-                        ComplianceState        = $device.complianceState
-                    })
+        $resumeState = if ($streamingEnabled) { Get-DiscoveredAppsResumeState -Path $script:DeviceDetailResumePath } else { $null }
+        if ($resumeState -and $resumeState.DeviceDetailMode -eq $DeviceDetailMode -and $resumeState.PartialPath -and (Test-Path -LiteralPath ([string]$resumeState.PartialPath))) {
+            $script:DeviceDetailPartialPath = [string]$resumeState.PartialPath
+            $script:DeviceDetailTimestampedPath = [string]$resumeState.TimestampedPath
+            foreach ($id in @($resumeState.ProcessedAppIds)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$id)) { [void]$processedAppIds.Add([string]$id) }
+            }
+            $script:Stat_AppsProcessed = [int]$resumeState.ProcessedCount
+            $script:Stat_AppsSkipped = [int]$resumeState.SkippedCount
+            $script:Stat_DeviceDetailRows = [int]$resumeState.DeviceDetailRows
+            WriteLog -Message "Resuming DeviceDetail export from $($processedAppIds.Count) processed app ids; partial CSV: $script:DeviceDetailPartialPath" "INFO"
+        } else {
+            if ($resumeState) { WriteLog -Message "Existing DeviceDetail resume state is incompatible or partial CSV is missing; starting a new DeviceDetail export." "WARNING" }
+            $script:DeviceDetailPartialPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.partial.csv"
+            $script:DeviceDetailTimestampedPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.csv"
+            Remove-Item -LiteralPath $script:DeviceDetailPartialPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $script:DeviceDetailResumePath -Force -ErrorAction SilentlyContinue
+        }
+
+        $appIndex = 0
+        foreach ($app in $detailApps) {
+            $appIndex++
+            if ($processedAppIds.Contains([string]$app.id)) {
+                $script:Stat_DetailAppsSkippedByResume++
+                continue
+            }
+
+            $pctComplete = [math]::Round(($appIndex / $detailApps.Count) * 100, 1)
+            Write-Progress `
+                -Activity "Collecting Intune discovered app device details" `
+                -Status "App $appIndex / $($detailApps.Count): $($app.displayName) v$($app.version) ($pctComplete%)" `
+                -PercentComplete $pctComplete
+
+            if ($ProgressEveryApps -gt 0 -and (($appIndex % $ProgressEveryApps -eq 0) -or $appIndex -eq $detailApps.Count)) {
+                WriteLog -Message ("Device detail progress: {0}/{1} apps ({2}%). DetailRows={3}; Processed={4}; Skipped={5}; ResumedSkipped={6}; GraphCalls={7}; ThrottleRetries={8}" -f $appIndex, $detailApps.Count, $pctComplete, $script:Stat_DeviceDetailRows, $script:Stat_AppsProcessed, $script:Stat_AppsSkipped, $script:Stat_DetailAppsSkippedByResume, $script:Stat_GraphCalls, $script:Stat_ThrottleRetries) "INFO"
+            }
+
+            try {
+                if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+                $devicesUri = 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/' + $app.id + '/managedDevices' +
+                    '?$top=999&$select=id,deviceName,operatingSystem,osVersion,userPrincipalName,' +
+                    'lastSyncDateTime,enrolledDateTime,managedDeviceOwnerType,complianceState,azureADDeviceId'
+                $devices = Invoke-GraphPagedRequest -InitialUri $devicesUri
+
+                $appRows = [System.Collections.Generic.List[psobject]]::new()
+                if (-not $devices -or $devices.Count -eq 0) {
+                    $appRows.Add((New-DiscoveredAppsDeviceDetailRecord -App $app -Device $null))
                     $script:Stat_DeviceDetailRows++
+                } else {
+                    foreach ($device in $devices) {
+                        $appRows.Add((New-DiscoveredAppsDeviceDetailRecord -App $app -Device $device))
+                        $script:Stat_DeviceDetailRows++
+                    }
+                }
+
+                if ($streamingEnabled) {
+                    Write-DiscoveredAppsCsvRows -Path $script:DeviceDetailPartialPath -Rows @($appRows)
+                } else {
+                    foreach ($row in $appRows) { $detailRecords.Add($row) }
+                }
+
+                $script:Stat_AppsProcessed++
+                [void]$processedAppIds.Add([string]$app.id)
+
+                if ($streamingEnabled -and (($script:Stat_AppsProcessed + $script:Stat_AppsSkipped) % 25 -eq 0 -or $appIndex -eq $detailApps.Count)) {
+                    Save-DiscoveredAppsResumeState `
+                        -Path $script:DeviceDetailResumePath `
+                        -PartialPath $script:DeviceDetailPartialPath `
+                        -TimestampedPath $script:DeviceDetailTimestampedPath `
+                        -Mode $DeviceDetailMode `
+                        -TargetCount $script:Stat_DetailAppsTargeted `
+                        -ProcessedAppIds @($processedAppIds) `
+                        -ProcessedCount $script:Stat_AppsProcessed `
+                        -SkippedCount $script:Stat_AppsSkipped `
+                        -DetailRows $script:Stat_DeviceDetailRows
+                }
+            } catch {
+                WriteLog -Message "Failed to retrieve devices for app '$($app.displayName)' (Id=$($app.id)): $_" "WARNING"
+                $script:Stat_AppsSkipped++
+                [void]$processedAppIds.Add([string]$app.id)
+                if ($streamingEnabled) {
+                    Save-DiscoveredAppsResumeState `
+                        -Path $script:DeviceDetailResumePath `
+                        -PartialPath $script:DeviceDetailPartialPath `
+                        -TimestampedPath $script:DeviceDetailTimestampedPath `
+                        -Mode $DeviceDetailMode `
+                        -TargetCount $script:Stat_DetailAppsTargeted `
+                        -ProcessedAppIds @($processedAppIds) `
+                        -ProcessedCount $script:Stat_AppsProcessed `
+                        -SkippedCount $script:Stat_AppsSkipped `
+                        -DetailRows $script:Stat_DeviceDetailRows
                 }
             }
-            $script:Stat_AppsProcessed++
-        } catch {
-            WriteLog -Message "Failed to retrieve devices for app '$($app.displayName)' (Id=$($app.id)): $_" "WARNING"
-            $script:Stat_AppsSkipped++
+        }
+
+        Write-Progress -Activity "Collecting Intune discovered app device details" -Completed
+
+        if ($streamingEnabled) {
+            Save-DiscoveredAppsResumeState `
+                -Path $script:DeviceDetailResumePath `
+                -PartialPath $script:DeviceDetailPartialPath `
+                -TimestampedPath $script:DeviceDetailTimestampedPath `
+                -Mode $DeviceDetailMode `
+                -TargetCount $script:Stat_DetailAppsTargeted `
+                -ProcessedAppIds @($processedAppIds) `
+                -ProcessedCount $script:Stat_AppsProcessed `
+                -SkippedCount $script:Stat_AppsSkipped `
+                -DetailRows $script:Stat_DeviceDetailRows
+
+            if (($script:Stat_AppsProcessed + $script:Stat_AppsSkipped) -eq $script:Stat_DetailAppsTargeted) {
+                $completedPath = Complete-DiscoveredAppsStreamExport `
+                    -PartialPath $script:DeviceDetailPartialPath `
+                    -TimestampedPath $script:DeviceDetailTimestampedPath `
+                    -OutputPath $OutputPath `
+                    -GlobalPath $globalPath `
+                    -BaseFileName $detailBaseFileName
+                if ($completedPath) {
+                    $script:DeviceDetailCompleted = $true
+                    Remove-Item -LiteralPath $script:DeviceDetailResumePath -Force -ErrorAction SilentlyContinue
+                }
+            } else {
+                WriteLog -Message "DeviceDetail export incomplete; partial CSV and resume state kept: $script:DeviceDetailPartialPath" "WARNING"
+            }
         }
     }
 
-    Write-Progress -Activity 'Retrieving device details per app' -Completed
-
-    WriteLog -Message "Device detail retrieval complete." "INFO"
-    WriteLog -Message "  Detail rows (app/device pairs) : $($script:Stat_DeviceDetailRows)" "INFO"
-    WriteLog -Message "  Apps processed successfully    : $($script:Stat_AppsProcessed)" "INFO"
-    WriteLog -Message "  Apps skipped (errors)          : $($script:Stat_AppsSkipped)" "INFO"
-
-    # ----------------------------------------------------------
-    # Export CSV files
-    # ----------------------------------------------------------
-    if ($DryRun) {
-        WriteLog -Message "DryRun mode: CSV export skipped. Summary=$($summaryRecords.Count) rows, Detail=$($detailRecords.Count) rows." "WARNING"
-    } else {
-        $globalPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
-
-        WriteLog -Message "Exporting Summary CSV ($($summaryRecords.Count) rows)..." "INFO"
-        ExportAndCopyCsv `
-            -BaseFileName      "Intune_DiscoveredApps_Summary" `
-            -OutputPath        $OutputPath `
-            -GlobalPath        $globalPath `
-            -Data              $summaryRecords `
-            -Encoding          "UTF8" `
-            -NoTypeInformation
-        WriteLog -Message "Summary export completed: $global:csvFilePath1" "INFO"
-
-        WriteLog -Message "Exporting DeviceDetail CSV ($($detailRecords.Count) rows)..." "INFO"
-        ExportAndCopyCsv `
-            -BaseFileName      "Intune_DiscoveredApps_DeviceDetail" `
-            -OutputPath        $OutputPath `
-            -GlobalPath        $globalPath `
-            -Data              $detailRecords `
-            -Encoding          "UTF8" `
-            -NoTypeInformation
-        WriteLog -Message "DeviceDetail export completed: $global:csvFilePath1" "INFO"
-    }
+    WriteLog -Message ("DeviceDetail completed. TargetApps={0}; Processed={1}; Skipped={2}; ResumedSkipped={3}; Rows={4}" -f $script:Stat_DetailAppsTargeted, $script:Stat_AppsProcessed, $script:Stat_AppsSkipped, $script:Stat_DetailAppsSkippedByResume, $script:Stat_DeviceDetailRows) "INFO"
 
 } catch {
     $globalError = $_
+    $script:RunError = $globalError
     WriteLog -Message ("Global error in $TaskName : {0}" -f $globalError) "ERROR"
     Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
 
@@ -647,11 +907,24 @@ $($global:LogTextFile)
     $elapsed    = $stopwatch.Elapsed
     $elapsedStr = '{0:D2}h {1:D2}m {2:D2}s' -f $elapsed.Hours, $elapsed.Minutes, $elapsed.Seconds
 
+    $detailCompletionCount = $script:Stat_AppsProcessed + $script:Stat_AppsSkipped
+    if ($script:Stat_DetailAppsTargeted -gt 0 -and $detailCompletionCount -lt $script:Stat_DetailAppsTargeted -and -not $script:RunError) {
+        $incompleteMessage = "DeviceDetail run incomplete: processed/skipped $detailCompletionCount of $($script:Stat_DetailAppsTargeted) targeted apps. Resume state: $($script:DeviceDetailResumePath)"
+        WriteLog -Message $incompleteMessage "ERROR"
+        $exception = [System.Exception]::new($incompleteMessage)
+        $script:RunError = [System.Management.Automation.ErrorRecord]::new($exception, 'DiscoveredAppsIncomplete', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    } elseif ($script:Stat_DetailAppsTargeted -gt 0 -and -not $DryRun -and -not $script:DeviceDetailCompleted -and -not $script:RunError) {
+        $incompleteMessage = "DeviceDetail CSV was not finalized although all targeted apps were processed. Resume state: $($script:DeviceDetailResumePath)"
+        WriteLog -Message $incompleteMessage "ERROR"
+        $exception = [System.Exception]::new($incompleteMessage)
+        $script:RunError = [System.Management.Automation.ErrorRecord]::new($exception, 'DiscoveredAppsExportIncomplete', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+    }
     WriteLog -Message "=== Run summary ==="
     WriteLog -Message "  Total apps retrieved (all platforms) : $($script:Stat_AppsTotal)"
     WriteLog -Message "  Windows apps found                   : $($script:Stat_AppsWindows)"
     WriteLog -Message "  Apps processed successfully          : $($script:Stat_AppsProcessed)"
     WriteLog -Message "  Apps skipped (errors)                : $($script:Stat_AppsSkipped)"
+    WriteLog -Message "  Apps skipped by resume               : $($script:Stat_DetailAppsSkippedByResume)"
     WriteLog -Message "  Device detail rows exported          : $($script:Stat_DeviceDetailRows)"
     WriteLog -Message "  Graph API calls                      : $($script:Stat_GraphCalls)"
     WriteLog -Message "  Throttle retries (429)               : $($script:Stat_ThrottleRetries)"
@@ -659,10 +932,10 @@ $($global:LogTextFile)
     WriteLog -Message "$TaskName completed."
 
     try {
+        Stop-DiscoveredAppsTranscript
         $summaryStatus = if ($script:RunError) { 'Failed' } else { 'Auto' }
         Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $script:RunError
     } catch {
         WriteLog -Message ("Failed to write execution summary: {0}" -f $_) "WARNING"
     }
-    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
 }
