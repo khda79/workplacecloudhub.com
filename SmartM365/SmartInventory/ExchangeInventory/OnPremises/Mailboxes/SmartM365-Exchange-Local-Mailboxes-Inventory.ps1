@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.30
+1.31
 
 .NOTES
-    Version: 1.30
+    Version: 1.31
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -37,9 +37,9 @@ param (
     [Parameter(Mandatory = $false)]
     [bool]$DetectAllDomains = $true,
     [Parameter(Mandatory = $false)]
-    [bool]$IncludeADPermission = $false,
+    [switch]$IncludeADPermission,
     [Parameter(Mandatory = $false)]
-    [bool]$OnlyADPermission = $false,
+    [switch]$OnlyADPermission,
     [Parameter(Mandatory = $false)]
     [bool]$ForceOverwriteCSV = $true,
     [Parameter(Mandatory = $false)]
@@ -232,7 +232,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.30"
+$ScriptVersion = "1.31"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
