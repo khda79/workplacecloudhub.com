@@ -24,7 +24,7 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .VERSION
-1.1
+1.3
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -55,12 +55,12 @@ $tenantContextPath = & {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 . $tenantContextPath
-Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
+$script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.1'
+$ScriptVersion = '1.3'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -112,6 +112,7 @@ function Get-SmartM365GlobalConfig {
     param()
 
     if ($null -ne $script:SmartM365GlobalConfig) { return $script:SmartM365GlobalConfig }
+    if ($null -ne $script:SmartM365EffectiveConfig) { $script:SmartM365GlobalConfig = $script:SmartM365EffectiveConfig; return $script:SmartM365GlobalConfig }
     $script:SmartM365GlobalConfig = [pscustomobject]@{}
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
@@ -195,6 +196,20 @@ function Disconnect-GraphSafe {
         }
     }
     catch { WriteLog -Message ("Disconnect-MgGraph failed (non-fatal): {0}" -f $_.Exception.Message) -Level WARNING }
+}
+
+
+function Stop-SmartM365TranscriptSafely {
+    [CmdletBinding()]
+    param()
+
+    try { Stop-Transcript | Out-Null } catch {}
+    try {
+        if (-not [string]::IsNullOrWhiteSpace([string]$global:logTranscriptFile) -and
+            (Test-Path -LiteralPath $global:logTranscriptFile -PathType Leaf)) {
+            Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile
+        }
+    } catch {}
 }
 
 function Connect-GraphForBackupInventory {
@@ -303,6 +318,11 @@ $ScriptLocalConfig = Get-ScriptLocalConfig
 
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
+$global:EnableSharePointUpload = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableSharePointUpload' -DefaultValue $false)
+$global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSiteHostname' -DefaultValue ''
+$global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
+$global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
+$global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
@@ -383,6 +403,7 @@ try {
         LogFile = $global:LogTextFile
     }
 
+    try { Stop-SmartM365TranscriptSafely } catch {}
     try { Complete-SmartM365ExecutionContext -Status Auto } catch {}
     Disconnect-GraphSafe
 }
@@ -395,6 +416,7 @@ catch {
         Operation = $CurrentOperation
         LogFile = $global:LogTextFile
     }
+    try { Stop-SmartM365TranscriptSafely } catch {}
     try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage $CurrentOperation } catch {}
     Disconnect-GraphSafe
     throw
