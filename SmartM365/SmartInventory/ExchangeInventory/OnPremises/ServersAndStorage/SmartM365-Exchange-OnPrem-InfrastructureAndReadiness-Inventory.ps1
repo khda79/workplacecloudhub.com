@@ -26,7 +26,7 @@
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.4.7
+    Version     : 1.4.8
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
@@ -129,7 +129,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.4.7"
+$ScriptVersion = "1.4.8"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -452,92 +452,16 @@ function Send-ServersAndStorageHtmlReport {
     $cc = [string](Get-SmartM365EffectiveConfigValue -Name 'Cc' -DefaultValue '')
     $existingAttachments = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
 
-    $summaryRows = @(
-        [pscustomobject]@{ Label = 'Exchange servers'; Value = $Summary.ExchangeServersCount }
-        [pscustomobject]@{ Label = 'Total memory (TB)'; Value = $Summary.TotalMemoryTB }
-        [pscustomobject]@{ Label = 'Total logical disk size (TB)'; Value = $Summary.TotalLogicalDiskSizeTB }
-        [pscustomobject]@{ Label = 'Logical disk free (TB)'; Value = $Summary.TotalLogicalDiskFreeTB }
-        [pscustomobject]@{ Label = 'Low space warnings'; Value = $Summary.LowSpaceWarnings }
-        [pscustomobject]@{ Label = 'Readiness warnings'; Value = $Summary.ExchangeReadinessWarnings }
-        [pscustomobject]@{ Label = 'Readiness errors'; Value = $Summary.ExchangeReadinessErrors }
-    )
-
-    $sections = @()
-    $perServerRows = @($PerServerSummary | Sort-Object ExchangeServerName | Select-Object -First 50)
-    if ($perServerRows.Count -gt 0) {
-        $serverRowsHtml = foreach ($server in $perServerRows) {
-            "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.ExchangeServerName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.ServerRole)</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.MemoryGB)</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.LogicalDiskFreeGB)</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#92400e;font-weight:700;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.LowSpaceLogicalDiskCount)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $server.LogicalDiskCollectionStatus)</td></tr>"
-        }
-        $serversSectionHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Server</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Role</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Memory GB</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Free GB</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Low disks</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Disk status</th>
-  </tr>
-  $($serverRowsHtml -join "`n")
-</table>
-"@
-        $sections += [pscustomobject]@{ Title = 'Server preview'; Html = $serversSectionHtml }
+    $reportHtml = Get-Content -LiteralPath $HtmlReportPath -Raw -ErrorAction Stop
+    if ($reportHtml -notmatch 'SmartM365EmailTemplate:v1') {
+        $reportHtml = "<!-- SmartM365EmailTemplate:v1 -->`r`n$reportHtml"
     }
-
-    $readinessRows = @($ReadinessInventory | Where-Object { $_.CollectionStatus -eq 'ERROR' -or $_.CollectionStatus -eq 'WARNING' -or $_.Importance -eq 'Error' -or $_.Importance -eq 'Warning' } | Select-Object -First 25)
-    if ($readinessRows.Count -gt 0) {
-        $readinessRowsHtml = foreach ($row in $readinessRows) {
-            "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $row.Category)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $row.Setting)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $row.Value)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $row.Importance)</td></tr>"
-        }
-        $readinessSectionHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Category</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Setting</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Value</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Importance</th>
-  </tr>
-  $($readinessRowsHtml -join "`n")
-</table>
-"@
-        $sections += [pscustomobject]@{ Title = 'Top readiness warnings'; Html = $readinessSectionHtml }
-    }
-
-    $sharePointSectionHtml = New-ServersAndStorageSharePointLinksSectionHtml -UploadRecords $script:ServersAndStorageSharePointUploads
-    if ($sharePointSectionHtml) {
-        $sections += [pscustomobject]@{ Title = 'SharePoint links'; Html = $sharePointSectionHtml }
-    }
-
-    $latestCsvFolder = [string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')
-    $pathRows = @(
-        [pscustomobject]@{ Label = 'DATA-ALL run'; Path = $OutputFolder }
-        [pscustomobject]@{ Label = 'DATA-LAST'; Path = $latestCsvFolder }
-        [pscustomobject]@{ Label = 'LOG-ALL'; Path = $LogFolder }
-        [pscustomobject]@{ Label = 'HTML report'; Path = $HtmlReportPath }
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Path) }
-
-    $severity = if ($Summary.ExchangeReadinessErrors -gt 0 -or $Summary.LogicalDiskCollectionErrors -gt 0 -or $Summary.DiskDriveCollectionErrors -gt 0 -or $Summary.ComputeCollectionErrors -gt 0) { 'Warning' } else { 'Success' }
-    $actionTitle = if ($severity -eq 'Warning') { 'Review required' } else { '' }
-    $actionHtml = if ($severity -eq 'Warning') { 'Review readiness warnings/errors and low disk capacity before Exchange decommissioning or migration decisions.' } else { '' }
-    $bodyHtml = New-CoreSmartM365EmailBody `
-        -Title $Subject `
-        -Category 'SmartM365 Exchange OnPrem' `
-        -Severity $severity `
-        -Tenant $Tenant `
-        -HostName $env:COMPUTERNAME `
-        -Message 'Exchange on-premises infrastructure and migration readiness inventory completed.' `
-        -ActionTitle $actionTitle `
-        -ActionHtml $actionHtml `
-        -SummaryRows $summaryRows `
-        -Sections $sections `
-        -PathRows $pathRows `
-        -Footer 'This automated message was generated by SmartM365. Use the exported CSV files and SharePoint links as the source of truth.'
 
     $mailParams = @{
         From        = $from
         To          = $to
         Subject     = $Subject
-        BodyHtml    = $bodyHtml
+        BodyHtml    = $reportHtml
         Attachments = $existingAttachments
     }
     if (-not [string]::IsNullOrWhiteSpace($smtpServer)) { $mailParams['SmtpServer'] = $smtpServer }
