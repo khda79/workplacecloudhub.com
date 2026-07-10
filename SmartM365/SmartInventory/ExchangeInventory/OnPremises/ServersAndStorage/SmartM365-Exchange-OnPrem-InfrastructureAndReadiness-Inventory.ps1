@@ -22,11 +22,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.5.1
+    1.5.2
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.5.1
+    Version     : 1.5.2
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
@@ -34,6 +34,10 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.5.2
+      - Stops attaching the HTML report when it is already used as the email body.
+      - Uses Outlook-friendly inline/table layout for the report header and KPI cards.
+
     1.5.1
       - Fixes report-only regeneration when a source CSV contains a single row under StrictMode.
 
@@ -140,7 +144,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.5.1"
+$ScriptVersion = "1.5.2"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1490,23 +1494,24 @@ td.num, th.num { text-align: right; }
 </style>
 </head>
 <body>
-<div class="shell">
-  <div class="panel">
-    <div class="hero">
-      <div class="eyebrow">Smart365 Exchange OnPrem</div>
-      <h1>Exchange On-Premises Infrastructure and Readiness</h1>
-      <div class="subtitle">Executive summary generated on $(Format-HtmlValue $Summary.ExecutionDate) - RunId $(Format-HtmlValue $Summary.RunId)</div>
+<div class="shell" style="max-width:1180px;margin:0 auto;padding:24px;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+  <div class="panel" style="background:#ffffff;border:1px solid #dbe3ef;border-radius:10px;overflow:hidden;">
+    <div class="hero" style="background:#0f766e;color:#ffffff;padding:24px 28px;">
+      <div class="eyebrow" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.9;font-weight:700;color:#ffffff;">Smart365 Exchange OnPrem</div>
+      <h1 style="font-size:26px;line-height:1.25;margin:6px 0 0 0;color:#ffffff;">Exchange On-Premises Infrastructure and Readiness</h1>
+      <div class="subtitle" style="margin-top:10px;font-size:13px;opacity:.95;color:#ffffff;">Executive summary generated on $(Format-HtmlValue $Summary.ExecutionDate) - RunId $(Format-HtmlValue $Summary.RunId)</div>
     </div>
 
-    <div class="content">
-      <div class="cards">
-        <div class="card"><div class="label">Exchange VMs</div><div class="value">$(Format-HtmlValue $Summary.ExchangeServersCount)</div><div class="unit">servers identified</div></div>
-        <div class="card blue"><div class="label">vCPU</div><div class="value">$(Format-HtmlValue $Summary.TotalLogicalProcessorCount)</div><div class="unit">logical processors</div></div>
-        <div class="card green"><div class="label">RAM</div><div class="value">$(Format-HtmlValue $Summary.TotalMemoryGB)</div><div class="unit">GB</div></div>
-        <div class="card amber"><div class="label">Disks</div><div class="value">$(Format-HtmlValue $Summary.TotalDiskDriveCount)</div><div class="unit">WMI disk drives</div></div>
-        <div class="card purple"><div class="label">Provisioned Storage</div><div class="value">$(Format-HtmlValue $Summary.TotalDiskDriveSizeTB)</div><div class="unit">TB</div></div>
-      </div>
-
+    <div class="content" style="padding:24px 28px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:10px;border:0;margin:0 0 22px 0;font-size:12px;">
+        <tr>
+          <td style="width:20%;vertical-align:top;border:1px solid #dbe3ef;border-radius:8px;padding:14px;background:#f8fafc;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Exchange VMs</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#0f172a;">$(Format-HtmlValue $Summary.ExchangeServersCount)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">servers identified</div></td>
+          <td style="width:20%;vertical-align:top;border:1px solid #bfdbfe;border-radius:8px;padding:14px;background:#eff6ff;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">vCPU</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#1d4ed8;">$(Format-HtmlValue $Summary.TotalLogicalProcessorCount)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">logical processors</div></td>
+          <td style="width:20%;vertical-align:top;border:1px solid #bbf7d0;border-radius:8px;padding:14px;background:#f0fdf4;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">RAM</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#166534;">$(Format-HtmlValue $Summary.TotalMemoryGB)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">GB</div></td>
+          <td style="width:20%;vertical-align:top;border:1px solid #fed7aa;border-radius:8px;padding:14px;background:#fff7ed;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Disks</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#9a3412;">$(Format-HtmlValue $Summary.TotalDiskDriveCount)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">WMI disk drives</div></td>
+          <td style="width:20%;vertical-align:top;border:1px solid #e9d5ff;border-radius:8px;padding:14px;background:#faf5ff;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Provisioned Storage</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#7e22ce;">$(Format-HtmlValue $Summary.TotalDiskDriveSizeTB)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">TB</div></td>
+        </tr>
+      </table>
       <div class="summary">
         The current Exchange on-premises footprint represents <strong>$(Format-HtmlValue $Summary.ExchangeServersCount) virtual machines</strong>, <strong>$(Format-HtmlValue $Summary.TotalLogicalProcessorCount) vCPU</strong>, <strong>$(Format-HtmlValue $Summary.TotalMemoryGB) GB RAM</strong>, and <strong>$(Format-HtmlValue $Summary.TotalDiskDriveCount) disks</strong>. The full readiness section below supports Exchange SE preparation, Exchange Online coexistence, dependency review, and decommissioning sign-off.
       </div>
@@ -1601,7 +1606,7 @@ function Invoke-ServersAndStorageHtmlReportRegeneration {
         Send-ServersAndStorageHtmlReport `
             -HtmlReportPath $htmlSummaryPath `
             -Subject $mailSubject `
-            -Attachments @($htmlSummaryPath, $summaryPath, $perServerSummaryPath, $exchangeReadinessPath) `
+            -Attachments @($summaryPath, $perServerSummaryPath, $exchangeReadinessPath) `
             -Summary $summary `
             -PerServerSummary @($perServerSummary) `
             -ReadinessInventory @($exchangeReadinessInventory)
@@ -1839,7 +1844,7 @@ try {
     Send-ServersAndStorageHtmlReport `
         -HtmlReportPath $htmlSummaryPath `
         -Subject $mailSubject `
-        -Attachments @($htmlSummaryPath, $summaryPath, $perServerSummaryPath, $exchangeReadinessPath) `
+        -Attachments @($summaryPath, $perServerSummaryPath, $exchangeReadinessPath) `
         -Summary $summary `
         -PerServerSummary @($perServerSummary) `
         -ReadinessInventory @($exchangeReadinessInventory)
