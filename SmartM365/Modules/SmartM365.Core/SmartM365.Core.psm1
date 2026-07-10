@@ -1563,7 +1563,6 @@ function SendEmailHtmlReport {
     param(
         [string]$SmtpServer = "",
         [int]$SmtpPort = 25,
-        [ValidateSet("Graph","SMTP","Both")]
         [string]$SendMailMode = "",
         [string]$From = "",
         [string]$To = "",
@@ -1683,7 +1682,6 @@ function Send-SmartM365Mail {
     param(
         [string]$SmtpServer = "",
         [int]$SmtpPort = 25,
-        [ValidateSet("Graph","SMTP","Both")]
         [string]$SendMailMode = "",
         [string]$From = "",
         [string]$To = "",
@@ -1712,16 +1710,21 @@ function Send-SmartM365Mail {
 
     $htmlBody = if (-not [string]::IsNullOrWhiteSpace($BodyHtml)) { $BodyHtml } else { $Body }
 
-    SendEmailHtmlReport `
-        -SmtpServer $SmtpServer `
-        -SmtpPort $SmtpPort `
-        -SendMailMode $SendMailMode `
-        -From $From `
-        -To $To `
-        -Cc $Cc `
-        -Subject $Subject `
-        -BodyHtml $htmlBody `
-        -Attachments $Attachments
+    $mailParams = @{
+        SmtpServer = $SmtpServer
+        SmtpPort   = $SmtpPort
+        From       = $From
+        To         = $To
+        Cc         = $Cc
+        Subject    = $Subject
+        BodyHtml   = $htmlBody
+        Attachments = $Attachments
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SendMailMode)) {
+        $mailParams['SendMailMode'] = $SendMailMode
+    }
+
+    SendEmailHtmlReport @mailParams
 }
 
 function SendFileListEmailReport {
@@ -2444,6 +2447,119 @@ function Invoke-SmartM365SharePointCsvUpload {
         WriteLog -Message ("SharePoint upload failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
     }
 }
+function Invoke-SmartM365SharePointFileDownload {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LocalFilePath,
+        [bool]$Enabled = [bool]$global:EnableSharePointUpload,
+        [string]$SiteHostname = $global:SharePointSiteHostname,
+        [string]$SitePath = $global:SharePointSitePath,
+        [string]$LibraryDisplayName = $global:SharePointLibraryDisplayName,
+        [string]$TargetFolderPath = $global:SharePointTargetFolderPath,
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb }),
+        [switch]$Force
+    )
+
+    if (-not $Force -and (Test-Path -LiteralPath $LocalFilePath -PathType Leaf)) {
+        return (Get-Item -LiteralPath $LocalFilePath -ErrorAction SilentlyContinue)
+    }
+    if (-not $Enabled) { return $null }
+    if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) {
+        WriteLog -Message "SharePoint download skipped: SharePointSiteHostname, SharePointSitePath, SharePointLibraryDisplayName or SharePointTargetFolderPath is missing." -Level "WARNING"
+        return $null
+    }
+    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) {
+        return $null
+    }
+
+    try {
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) { $script:SmartM365SharePointDriveIdCache = @{} }
+
+        $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
+        if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
+            $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
+        }
+        else {
+            $site = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath) -Operation 'Resolve SharePoint site'
+            $drives = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id) -Operation 'Resolve SharePoint document libraries'
+            $driveList = @($drives.value)
+            $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
+            $drive = @($driveList | Where-Object { $_.name -ieq $LibraryDisplayName } | Select-Object -First 1)[0]
+            if (-not $drive) {
+                $targetNorm = & $normalize $LibraryDisplayName
+                $drive = @($driveList | Where-Object { (& $normalize $_.name) -ieq $targetNorm } | Select-Object -First 1)[0]
+            }
+            if (-not $drive) {
+                $available = ($driveList | ForEach-Object { $_.name }) -join ' | '
+                WriteLog -Message "SharePoint download skipped: document library '$LibraryDisplayName' not found. Available drives: $available" -Level "WARNING"
+                return $null
+            }
+            $driveId = $drive.id
+            $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
+        }
+
+        $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
+        $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $LocalFilePath
+        $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
+        $targetPath = ConvertTo-GraphDrivePath $sharePointPath
+        $destinationFolder = Split-Path -Path $LocalFilePath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($destinationFolder) -and -not (Test-Path -LiteralPath $destinationFolder)) {
+            New-Item -Path $destinationFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+
+        $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
+        Invoke-MgGraphRequest -Method GET -Uri $uri -OutputFilePath $LocalFilePath -ErrorAction Stop | Out-Null
+        if (Test-Path -LiteralPath $LocalFilePath -PathType Leaf) {
+            $item = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
+            WriteLog -Message ("SharePoint file downloaded: {0} -> {1}" -f $sharePointPath, $item.FullName) -Level "INFO"
+            return $item
+        }
+    }
+    catch {
+        WriteLog -Message ("SharePoint download failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
+    }
+
+    return $null
+}
+
+function Resolve-SmartM365CsvPathWithSharePointFallback {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Description = 'CSV',
+        [switch]$Required
+    )
+
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return $Path }
+
+    WriteLog -Message ("{0} not found locally, attempting SharePoint recovery: {1}" -f $Description, $Path) -Level "WARNING"
+    $downloaded = Invoke-SmartM365SharePointFileDownload -LocalFilePath $Path
+    if ($downloaded -and (Test-Path -LiteralPath $downloaded.FullName -PathType Leaf)) { return $downloaded.FullName }
+
+    if ($Required) { throw ("Required {0} not found locally or in SharePoint: {1}" -f $Description, $Path) }
+    return $null
+}
+
+function Import-SmartM365CsvWithSharePointFallback {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Description = 'CSV',
+        [string]$Delimiter = '',
+        [string]$Encoding = '',
+        [switch]$Required
+    )
+
+    $resolvedPath = Resolve-SmartM365CsvPathWithSharePointFallback -Path $Path -Description $Description -Required:$Required
+    if ([string]::IsNullOrWhiteSpace($resolvedPath)) { return @() }
+
+    $params = @{ LiteralPath = $resolvedPath; ErrorAction = 'Stop' }
+    if (-not [string]::IsNullOrWhiteSpace($Delimiter)) { $params.Delimiter = [char]$Delimiter[0] }
+    if (-not [string]::IsNullOrWhiteSpace($Encoding)) { $params.Encoding = $Encoding }
+    return @(Import-Csv @params)
+}
 function ExportAndCopyCsv {
     [CmdletBinding()]
     param (
@@ -3148,7 +3264,7 @@ Export-ModuleMember -Function `
     Set-SmartM365CoreContext, Write-SmartM365CsvAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
-    TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Invoke-SmartM365SharePointCsvUpload, `
+    TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Invoke-SmartM365SharePointCsvUpload, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession
