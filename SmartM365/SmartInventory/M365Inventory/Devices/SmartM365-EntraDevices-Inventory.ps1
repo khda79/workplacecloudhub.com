@@ -46,7 +46,7 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.2
+1.5
 .NOTES
     Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -557,7 +557,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.2"
+$ScriptVersion = "1.5"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
@@ -942,35 +942,40 @@ try {
         # ------------------------
         WriteLog -Message "Building sub-report for HardwareId conflicts with pending devices (IsPending = true)..."
 
-        $hwPending = @()
+        $devicesByHardwareId = @{}
+        foreach ($device in $results) {
+            if (-not $device.HardwareId -or $device.HardwareId.Trim().Length -eq 0) { continue }
+            if (-not $devicesByHardwareId.ContainsKey($device.HardwareId)) {
+                $devicesByHardwareId[$device.HardwareId] = New-Object System.Collections.Generic.List[object]
+            }
+            $devicesByHardwareId[$device.HardwareId].Add($device) | Out-Null
+        }
+
+        $hwPending = New-Object System.Collections.Generic.List[object]
 
         foreach ($hwGroup in $hwConflicts) {
-            $currentHw    = $hwGroup.HardwareId
-            $devicesForHw = $results | Where-Object { $_.HardwareId -eq $currentHw }
+            $currentHw = $hwGroup.HardwareId
+            if (-not $devicesByHardwareId.ContainsKey($currentHw)) { continue }
 
-            if (-not $devicesForHw) { continue }
+            foreach ($d in $devicesByHardwareId[$currentHw]) {
+                if ($d.IsPending -ne $true) { continue }
 
-            $pendingInGroup = $devicesForHw | Where-Object { $_.IsPending -eq $true }
-
-            if ($pendingInGroup.Count -gt 0) {
-                foreach ($d in $pendingInGroup) {
-                    $hwPending += [PSCustomObject]@{
-                        "HardwareId"                     = $currentHw
-                        "ObjectId"                       = $d.ObjectId
-                        "DeviceId"                       = $d.DeviceId
-                        "DisplayName"                    = $d.DisplayName
-                        "OperatingSystem"                = $d.OperatingSystem
-                        "OperatingSystemVersion"         = $d.OperatingSystemVersion
-                        "TrustType"                      = $d.TrustType
-                        "OnPremisesSyncEnabled"          = $d.OnPremisesSyncEnabled
-                        "OnPremisesLastSyncDateTime"     = $d.OnPremisesLastSyncDateTime
-                        "RegistrationDateTime"           = $d.RegistrationDateTime
-                        "ApproximateLastSignInDateTime"  = $d.ApproximateLastSignInDateTime
-                        "AutopilotZTDID"                 = $d.AutopilotZTDID
-                        "HasAlternativeSecurityIds"      = $d.HasAlternativeSecurityIds
-                        "IsPending"                      = $d.IsPending
-                    }
-                }
+                $hwPending.Add([PSCustomObject]@{
+                    "HardwareId"                     = $currentHw
+                    "ObjectId"                       = $d.ObjectId
+                    "DeviceId"                       = $d.DeviceId
+                    "DisplayName"                    = $d.DisplayName
+                    "OperatingSystem"                = $d.OperatingSystem
+                    "OperatingSystemVersion"         = $d.OperatingSystemVersion
+                    "TrustType"                      = $d.TrustType
+                    "OnPremisesSyncEnabled"          = $d.OnPremisesSyncEnabled
+                    "OnPremisesLastSyncDateTime"     = $d.OnPremisesLastSyncDateTime
+                    "RegistrationDateTime"           = $d.RegistrationDateTime
+                    "ApproximateLastSignInDateTime"  = $d.ApproximateLastSignInDateTime
+                    "AutopilotZTDID"                 = $d.AutopilotZTDID
+                    "HasAlternativeSecurityIds"      = $d.HasAlternativeSecurityIds
+                    "IsPending"                      = $d.IsPending
+                }) | Out-Null
             }
         }
 
@@ -1292,7 +1297,8 @@ finally {
     WriteLog -Message "$TaskName completed (finally block)."
 
     try {
-        Complete-SmartM365ExecutionContext -Status Auto`r`n        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Complete-SmartM365ExecutionContext -Status Auto
     } catch {
     }
 

@@ -37,7 +37,7 @@ SmartM365-*-Diagnostic.ps1
 - `WindowsUpdate/Cache-Health/`: replaces download failure scenarios.
 - `Intune-MDM/MDM-Enrollment-Repair/`: consolidates stale device join, enrollment state, Hybrid Join, and missing MDM task scenarios. The detection script targets stale or broken local state; if it runs through Intune, basic IME reachability is already proven.
 - `SetupDiag-Upgrade/Upgrade-Staging-Health/`: consolidates missing upgrade files and upgrade residue scenarios.
-- `Disk-Cleanup-Storage/Upgrade-Storage-Readiness/`: consolidates free space, cleanup candidates, and forced disk cleanup scenarios.
+- `Disk-Cleanup-Storage/Disk-Space-Cleanup/`: consolidates low free space, cleanup candidates, and forced disk cleanup scenarios.
 - `DeliveryOptimization/ContentEngine-Health/`: replaces the older Delivery Optimization issue scenario.
 - `UWP-Store-AppRepository/WU-Health/`: replaces the older broad endpoint repair scenario.
 - `SetupDiag-Upgrade/Upgrade-Diagnostics/`: consolidates SetupDiag-required and upgrade-blocking issue scenarios.

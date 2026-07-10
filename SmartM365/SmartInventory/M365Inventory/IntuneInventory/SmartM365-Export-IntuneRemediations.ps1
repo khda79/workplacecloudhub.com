@@ -23,11 +23,11 @@
     Interactive delegated permission for Microsoft Graph PowerShell:
     - DeviceManagementScripts.Read.All
 .VERSION
-1.1
+1.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.1
+    Version : 1.2
 #>
 
 [CmdletBinding()]
@@ -57,7 +57,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.2"
 
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -514,12 +514,36 @@ $OutputRoot = CoreInitializeScriptEnvironment -OutputPathInit $OutputRoot -LogFi
 $script:SmartM365TranscriptStarted = $false
 Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
 $script:SmartM365TranscriptStarted = $true
+function Stop-IntuneRemediationsTranscript {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:SmartM365TranscriptStarted) { return }
+
+    try { Stop-Transcript | Out-Null } catch { }
+    try {
+        $smartM365TranscriptPath = $null
+        $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+        if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) {
+            $smartM365TranscriptPath = $smartM365TranscriptVariable.Value
+        }
+        else {
+            $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+            if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) {
+                $smartM365TranscriptPath = $smartM365TranscriptVariable.Value
+            }
+        }
+        if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath }
+    }
+    catch { }
+    $script:SmartM365TranscriptStarted = $false
+}
+
 trap {
     $errorRecord = $_
     if ($script:SmartM365TranscriptStarted) {
+        Stop-IntuneRemediationsTranscript
         Complete-CoreSmartM365ExecutionContext -Status Failed -ErrorRecord $errorRecord
-        try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch { }
-        $script:SmartM365TranscriptStarted = $false
     }
     throw $errorRecord
 }
@@ -679,7 +703,6 @@ Write-Output "Log folder: $global:LogPath"
 Write-Output "Transcript: $global:logTranscriptFile"
 
 if ($script:SmartM365TranscriptStarted) {
+    Stop-IntuneRemediationsTranscript
     Complete-CoreSmartM365ExecutionContext -Status Auto
-    Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-    $script:SmartM365TranscriptStarted = $false
 }

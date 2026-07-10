@@ -27,8 +27,11 @@
 
 .PARAMETER InteractiveAuth
     Uses interactive authentication for Microsoft Graph instead of app-only certificate authentication.
+
+.PARAMETER TopMailboxes
+    Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 .VERSION
-1.1
+1.5
 
 
 .NOTES
@@ -44,6 +47,7 @@ param(
     [switch]$PrimaryOnly = $true,
     [switch]$EmitNoPermRow = $true,
     [switch]$InteractiveAuth,
+    [int]$TopMailboxes = 0,
     [string]$OutputPath
 )
 
@@ -253,7 +257,7 @@ function Join-ModulePath {
 }
 
 # ------------------------- Init & Environment -------------------------
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.5"
 if ($Online) {
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
@@ -311,29 +315,53 @@ function Invoke-Quiet {
     }
 }
 
+function Ensure-ExchangeOnlineModule {
+    $m = Get-Module -ListAvailable -Name "ExchangeOnlineManagement" | Sort-Object Version -Descending | Select-Object -First 1
+    if (-not $m) {
+        throw "Required module 'ExchangeOnlineManagement' is not installed. Install it with: Install-Module ExchangeOnlineManagement"
+    }
+    Import-Module ExchangeOnlineManagement -ErrorAction Stop
+}
+
+function Disconnect-ExchangeOnlineSafe {
+    try {
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop | Out-Null
+    }
+    catch {
+        WriteLog -Message ("Disconnect-ExchangeOnline failed (non-fatal): {0}" -f $_.Exception.Message) "WARN"
+    }
+}
+
 if ($Online) {
     # -------------------------
     # Exchange Online connection (EXO)
     # -------------------------
-    $exoNeedConnect = $Connect -or (-not (Get-ConnectionInformation))
-    if ($Connect -and (Get-ConnectionInformation)) {
-        Write-Host "Connect switch specified: existing EXO session will be disconnected and reconnected..." -ForegroundColor Cyan
-        Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$true
-        $exoNeedConnect = $true
-    }
+    try {
+        Ensure-ExchangeOnlineModule
 
-    if ($exoNeedConnect) {
-        Write-Host "Connecting to Exchange Online (Connect-SmartM365CloudSession)..." -ForegroundColor Cyan
-        $exoResult = Connect-SmartM365CloudSession -ExchangeOnline $true -Graph $false
-        if (-not $exoResult.ExchangeOnlineConnected) {
-            WriteLog -Message "Failed to connect to Exchange Online." "ERROR"
-            Complete-SmartM365ExecutionContext -Status Auto`r`n            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-            exit 1
+        if ($Connect) {
+            Write-Host "Connect switch specified: existing Exchange Online session will be disconnected and reconnected..." -ForegroundColor Cyan
         }
-    } else {
-        Write-Host "Existing Exchange Online session detected. Reusing current connection." -ForegroundColor Cyan
+
+        Disconnect-ExchangeOnlineSafe
+
+        WriteLog -Message "Connecting to Exchange Online with app-only certificate authentication." "INFO"
+        Connect-ExchangeOnline `
+            -AppId $AppId `
+            -CertificateThumbprint $Thumb `
+            -Organization $OrgDomain `
+            -ShowBanner:$false `
+            -ErrorAction Stop | Out-Null
+        WriteLog -Message "Connected to Exchange Online."
+    }
+    catch {
+        WriteLog -Message ("Failed to connect to Exchange Online: {0}" -f $_.Exception.Message) "ERROR"
+        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Complete-SmartM365ExecutionContext -Status Auto
+        exit 1
     }
 
+    # -------------------------
     # -------------------------
     # Detect existing Graph session (standard SmartM365 block)
     # -------------------------
@@ -382,7 +410,8 @@ if ($Online) {
 
         if (-not $connectResult.GraphConnected) {
             WriteLog -Message "Failed to connect to Microsoft Graph." "ERROR"
-            Complete-SmartM365ExecutionContext -Status Auto`r`n            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+            Complete-SmartM365ExecutionContext -Status Auto
             throw "Failed to connect to Microsoft Graph."
         }
 
@@ -406,7 +435,8 @@ if ($Online) {
             }
         } catch {
             WriteLog -Message "Unable to load Exchange Management Shell. Check your environment." "ERROR"
-            Complete-SmartM365ExecutionContext -Status Auto`r`n            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+            Complete-SmartM365ExecutionContext -Status Auto
             exit 1
         }
     } else {
@@ -446,15 +476,22 @@ try {
     }
 } catch {
     WriteLog -Message "Mailbox enumeration failed : $($_.Exception.Message)" "ERROR"
-    Complete-SmartM365ExecutionContext -Status Auto`r`n    Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+    Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+    Complete-SmartM365ExecutionContext -Status Auto
     exit 1
 }
 
 $total = $mailboxes.Count
 WriteLog -Message "Total mailboxes found: $total"
+if ($TopMailboxes -gt 0 -and $total -gt $TopMailboxes) {
+    WriteLog -Message ("TopMailboxes enabled: processing first {0} of {1} mailboxes." -f $TopMailboxes, $total) "WARN"
+    $mailboxes = @($mailboxes | Select-Object -First $TopMailboxes)
+    $total = $mailboxes.Count
+}
 if ($total -eq 0) {
     WriteLog -Message "No mailboxes found. Stopping."
-    Complete-SmartM365ExecutionContext -Status Auto`r`n    Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+    Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+    Complete-SmartM365ExecutionContext -Status Auto
     exit 0
 }
 
@@ -525,13 +562,13 @@ function Try-GetFolderPermission {
                                   @{Name = "CalendarFolder"; Expression = { $fname }},
                                   @{Name = "User";           Expression = { $_.User }},
                                   @{Name = "AccessRights";   Expression = { ($_.AccessRights -join ",") }}
-                return ,@($true, $perms, $identity)  # success flag, data, used identity
+                return @($true, $perms, $identity)  # success flag, data, used identity
             } catch {
                 # Try next combination
             }
         }
     }
-    return ,@($false, $null, $null)
+    return @($false, $null, $null)
 }
 
 # Helper: emit a "(none)" row when calendar exists but no explicit permissions
@@ -699,4 +736,5 @@ Write-Host "- Log              : $global:logTextFile"
 RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
 RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 WriteLog -Message "$TaskName completed."
-Complete-SmartM365ExecutionContext -Status Auto`r`nStop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+Complete-SmartM365ExecutionContext -Status Auto

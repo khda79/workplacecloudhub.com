@@ -44,12 +44,12 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Get-IntuneAutopatchAlerts.ps1
 .VERSION
-1.1
+1.6
 
 
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-    Version : 1.1
+    Version : 1.6
 #>
 
 [CmdletBinding()]
@@ -87,7 +87,7 @@ $tenantContextPath = & {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 . $tenantContextPath
-Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
+$script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -102,7 +102,7 @@ else {
     throw 'Unable to determine script directory.'
 }
 
-$script:SmartM365GlobalConfig = $null
+if ($null -eq $script:SmartM365GlobalConfig) { $script:SmartM365GlobalConfig = [pscustomobject]@{} }
 
 function Import-SmartM365CorePreflight {
     if (Get-Command Invoke-CoreSmartM365Preflight -ErrorAction SilentlyContinue) { return }
@@ -269,6 +269,11 @@ function Get-ScriptLocalConfigValue {
 $ScriptLocalConfig = Get-ScriptLocalConfig
 $OutputFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OutputFolder' -DefaultValue $OutputFolder
 $TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue $TenantId
+$DataAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DataAllRootPath' -DefaultValue ''
+$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+$AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue ''
+$Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue ''
+$Thumbprint = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
 $global:ErrorMailTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ErrorMailTo' -DefaultValue ''
@@ -280,11 +285,20 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
 
 if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
-    $OutputFolder = $ScriptRoot
+    if (-not [string]::IsNullOrWhiteSpace($DataAllRootPath)) {
+        $OutputFolder = Join-Path -Path $DataAllRootPath -ChildPath 'Intune\WindowsUpdate\AutopatchAlerts'
+    }
+    else {
+        $OutputFolder = $ScriptRoot
+    }
 }
-$ScriptVersion = "1.1"
+if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
+    $LatestCsvFolderPath = $OutputFolder
+}
+$ScriptVersion = "1.6"
 $ScriptName = 'Get-IntuneAutopatchAlerts'
 $StartTime = Get-Date
+$RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
 $RunId = [guid]::NewGuid().Guid
 $LogFolder = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path -Path $OutputFolder -ChildPath 'Logs'
@@ -292,9 +306,25 @@ $LogFolder = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path -Path $LogAllRootPath -ChildPath $ScriptName
 }
 $LogFile = Join-Path -Path $LogFolder -ChildPath ("{0}_{1}_{2:yyyyMMdd_HHmmss}.log" -f $ScriptName, $ScriptVersion, $StartTime)
-$SummaryCsvPath = Join-Path -Path $OutputFolder -ChildPath "Intune_AutopatchAlerts_Summary.csv"
-$DetailCsvPath = Join-Path -Path $OutputFolder -ChildPath "Intune_AutopatchAlerts_Detail.csv"
-$PolicyCsvPath = Join-Path -Path $OutputFolder -ChildPath "Intune_AutopatchAlerts_PolicySummary.csv"
+$TranscriptFile = Join-Path -Path $LogFolder -ChildPath ("{0}_{1}_{2:yyyyMMdd_HHmmss}_Transcript.log" -f $ScriptName, $ScriptVersion, $StartTime)
+$global:SmartM365ExecutionStartTime = $StartTime
+$global:SmartM365ExecutionSummaryWritten = $false
+$global:SmartM365WarningCount = 0
+$global:SmartM365ErrorCount = 0
+$global:SmartM365ScriptName = $ScriptName
+$global:BasePath = $OutputFolder
+$global:LogPath = $LogFolder
+$global:LogTextFile = $LogFile
+$global:logTranscriptFile = $TranscriptFile
+$SummaryCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_AutopatchAlerts_Summary_{0}.csv" -f $RunStamp)
+$DetailCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_AutopatchAlerts_Detail_{0}.csv" -f $RunStamp)
+$PolicyCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_AutopatchAlerts_PolicySummary_{0}.csv" -f $RunStamp)
+$SummaryLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_AutopatchAlerts_Summary.csv"
+$DetailLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_AutopatchAlerts_Detail.csv"
+$PolicyLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_AutopatchAlerts_PolicySummary.csv"
+$PolicyColumns = @('PolicyId','PolicyName','ExpediteQUReleaseDate','CountDevicesErrorStatus','CountDevicesInProgressStatus','CountDevicesSuccessStatus')
+$DetailColumns = @('AlertName','Severity','Category','AffectedUpdateType','DeviceName','DeviceId','PolicyId','PolicyName','EventDateUtc','LastScanUtc','AggregateState','CurrentStatus','SourceReport')
+$SummaryColumns = @('AlertName','Severity','Category','AffectedUpdateType','Impact','FirstSeenUtc','LastSeenUtc','SourceReport')
 
 function Write-Log {
     param(
@@ -306,6 +336,8 @@ function Write-Log {
         [string]$Level = 'INFO'
     )
 
+    if ($Level -eq 'WARN') { $global:SmartM365WarningCount = [int]$global:SmartM365WarningCount + 1 }
+    elseif ($Level -eq 'ERROR') { $global:SmartM365ErrorCount = [int]$global:SmartM365ErrorCount + 1 }
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $lines = @([regex]::Split(([string]$Message), '\r?\n') | ForEach-Object { "{0} [{1}] [{2}] {3}" -f $timestamp, $Level, $RunId, $_ })
     $lines | ForEach-Object { Write-Host $_ }
@@ -335,12 +367,21 @@ function Import-RequiredModule {
 
 function Connect-GraphSession {
     $scopes = @('DeviceManagementConfiguration.ReadWrite.All','DeviceManagementApps.ReadWrite.All','DeviceManagementManagedDevices.ReadWrite.All')
-    $connectParams = @{ Scopes = $scopes; NoWelcome = $true }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    if ($UseDeviceCode) { $connectParams['UseDeviceCode'] = $true }
-    Write-Log -Message ("Connecting to Microsoft Graph with scopes: {0}" -f ($scopes -join ', '))
+    $certificateThumbprint = if (-not [string]::IsNullOrWhiteSpace($Thumbprint)) { $Thumbprint } else { $Thumb }
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
-    Connect-MgGraph @connectParams | Out-Null
+
+    if (-not [string]::IsNullOrWhiteSpace($AppId) -and -not [string]::IsNullOrWhiteSpace($TenantId) -and -not [string]::IsNullOrWhiteSpace($certificateThumbprint)) {
+        Write-Log -Message 'Connecting to Microsoft Graph using app-only certificate authentication.'
+        Connect-MgGraph -TenantId $TenantId -ClientId $AppId -CertificateThumbprint $certificateThumbprint -NoWelcome | Out-Null
+    }
+    else {
+        $connectParams = @{ Scopes = $scopes; NoWelcome = $true }
+        if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+        if ($UseDeviceCode) { $connectParams['UseDeviceCode'] = $true }
+        Write-Log -Message ("Connecting to Microsoft Graph with delegated scopes: {0}" -f ($scopes -join ', '))
+        Connect-MgGraph @connectParams | Out-Null
+    }
+
     $context = Get-MgContext
     Write-Log -Message ("Connected to tenant [{0}] as [{1}]" -f $context.TenantId, $context.Account)
 }
@@ -595,9 +636,13 @@ function Group-AlertSummary {
     return @($summary | Sort-Object -Property @{ Expression = 'Impact'; Descending = $true }, AlertName)
 }
 
+$script:CompletionStatus = 'Success'
+$script:CompletionError = $null
+$script:TranscriptStarted = $false
 try {
     Ensure-Folder -Path $OutputFolder
     Ensure-Folder -Path $LogFolder
+    try { Start-Transcript -Path $TranscriptFile -Force -ErrorAction Stop | Out-Null; $script:TranscriptStarted = $true } catch { Write-Log -Message ("Transcript start failed: {0}" -f $_.Exception.Message) -Level WARN }
     Test-Ps7
     Import-RequiredModule -Name Microsoft.Graph.Authentication
 
@@ -606,8 +651,7 @@ try {
     Connect-GraphSession
     Import-SmartM365CorePreflight
     Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($OutputFolder, $LogFolder) -GraphProbeUris @(
-        'https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles?$top=1',
-        'https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs?$top=1'
+        'https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles?$top=1'
     ) | Out-Null
 
 
@@ -648,21 +692,23 @@ try {
             $qualityErrorRows = Import-ExportedCsv -ReportName 'QualityUpdateDeviceErrorsByPolicy' -Select @('DeviceId','DeviceName','PolicyId','ExpediteQUReleaseDate','AlertMessage','Win32ErrorCode') -Filter $filter
             foreach ($item in (Convert-QualityErrorRowsToAlertDetails -Rows $qualityErrorRows -PolicyMap $qualityPolicyMap)) { $detailRows.Add($item) }
         }
-        Publish-CoreSmartM365Csv -Data $qualityPolicyRows.ToArray() -TimestampedPath $PolicyCsvPath | Out-Null
+        Publish-CoreSmartM365Csv -Data $qualityPolicyRows.ToArray() -TimestampedPath $PolicyCsvPath -LatestPath $PolicyLatestCsvPath -Columns $PolicyColumns | Out-Null
         Write-Log -Message ("Policy summary CSV written to [{0}]" -f $PolicyCsvPath)
     }
 
     $detailOutput = @($detailRows.ToArray() | Sort-Object -Property @{ Expression = 'EventDateUtc'; Descending = $true }, DeviceName)
     $summaryOutput = Group-AlertSummary -Details $detailOutput
 
-    Publish-CoreSmartM365Csv -Data $detailOutput -TimestampedPath $DetailCsvPath | Out-Null
-    Publish-CoreSmartM365Csv -Data $summaryOutput -TimestampedPath $SummaryCsvPath | Out-Null
+    Publish-CoreSmartM365Csv -Data $detailOutput -TimestampedPath $DetailCsvPath -LatestPath $DetailLatestCsvPath -Columns $DetailColumns | Out-Null
+    Publish-CoreSmartM365Csv -Data $summaryOutput -TimestampedPath $SummaryCsvPath -LatestPath $SummaryLatestCsvPath -Columns $SummaryColumns | Out-Null
 
     Write-Log -Message ("Detail CSV written to [{0}]" -f $DetailCsvPath)
     Write-Log -Message ("Summary CSV written to [{0}]" -f $SummaryCsvPath)
     Write-Log -Message ("Completed successfully. Summary rows: {0}. Detail rows: {1}." -f $summaryOutput.Count, $detailOutput.Count)
 }
 catch {
+    $script:CompletionStatus = 'Failed'
+    $script:CompletionError = $_
     Write-Log -Message $_.Exception.Message -Level ERROR
     throw
 }
@@ -674,4 +720,8 @@ finally {
     }
     $duration = (Get-Date) - $StartTime
     Write-Log -Message ("Finished in {0:c}" -f $duration)
+    if ($script:TranscriptStarted) { try { Stop-Transcript | Out-Null } catch {} }
+    if (Get-Command Complete-CoreSmartM365ExecutionContext -ErrorAction SilentlyContinue) {
+        Complete-CoreSmartM365ExecutionContext -Status $script:CompletionStatus -ErrorRecord $script:CompletionError
+    }
 }

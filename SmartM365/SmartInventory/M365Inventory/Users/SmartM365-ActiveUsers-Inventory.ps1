@@ -19,7 +19,7 @@
     Version : 1.2
 
 .VERSION
-1.2
+1.3
 
 .NOTES
     Version : 1.2
@@ -357,7 +357,7 @@ $csvPathLatest            = ""
 
 try {
     #region Initialization
-$ScriptVersion = "1.2"
+$ScriptVersion = "1.3"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
@@ -739,38 +739,36 @@ finally {
     #region Stop Transcript + final status
 
     try {
-        $summaryStatus = if ($global:ScriptFailed) { 'Failed' } else { 'Auto' }
-        $summaryError = if ($global:ScriptFailed) { $globalError } else { $null }
-        Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $summaryError -FailureStage $currentOperation
-    } catch {
-        WriteLog -Message ("Failed to write execution summary: {0}" -f $_) "WARNING"
-    }
-    try {
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Stop-Transcript | Out-Null
+        try {
+            $smartM365TranscriptPath = $null
+            $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+            if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) {
+                $smartM365TranscriptPath = $smartM365TranscriptVariable.Value
+            }
+            else {
+                $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue
+                if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) {
+                    $smartM365TranscriptPath = $smartM365TranscriptVariable.Value
+                }
+            }
+            if ($smartM365TranscriptPath) {
+                Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath
+            }
+        }
+        catch {}
     }
     catch {
         # Ignore transcript stop errors
     }
 
-    if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
-        if ($global:ScriptFailed) {
-            WriteLog -Message "SCRIPT FINISHED WITH ERRORS" "ERROR"
-        }
-        else {
-            WriteLog -Message "SCRIPT COMPLETED SUCCESSFULLY" "SUCCESS"
-        }
+    try {
+        $summaryStatus = if ($global:ScriptFailed) { 'Failed' } else { 'Auto' }
+        $summaryError = if ($global:ScriptFailed) { $globalError } else { $null }
+        Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $summaryError -FailureStage $currentOperation
     }
-    else {
-        if ($global:ScriptFailed) {
-            Write-Host "SCRIPT FINISHED WITH ERRORS" -ForegroundColor Red
-        }
-        else {
-            Write-Host "SCRIPT COMPLETED SUCCESSFULLY" -ForegroundColor Green
-        }
-    }
-
-    if ($global:ScriptFailed) {
-        exit 1
+    catch {
+        WriteLog -Message ("Failed to write execution summary: {0}" -f $_) "WARNING"
     }
 
     #endregion Stop Transcript + final status
