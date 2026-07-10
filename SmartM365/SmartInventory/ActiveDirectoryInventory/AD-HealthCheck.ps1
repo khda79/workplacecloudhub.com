@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.1
+    1.0.2
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -59,8 +59,14 @@ $TenantContextPath = & {
 }
 . $TenantContextPath
 $TenantContext = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-$SmartM365Root = $TenantContext.WorkspaceRootPath
-$CoreModulePath = Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1'
+$TenantContextDirectory = Split-Path -Path $TenantContextPath -Parent
+$SmartM365ProjectRoot = if ((Split-Path -Path $TenantContextDirectory -Leaf) -ieq 'Config') {
+    Split-Path -Path $TenantContextDirectory -Parent
+}
+else {
+    $TenantContextDirectory
+}
+$CoreModulePath = Join-Path $SmartM365ProjectRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
 Import-Module $CoreModulePath -Force -ErrorAction Stop
 $LocalConfigPath = Join-Path $PSScriptRoot ("$ScriptBaseName.local.json")
 $LocalTemplatePath = "$LocalConfigPath.template"
