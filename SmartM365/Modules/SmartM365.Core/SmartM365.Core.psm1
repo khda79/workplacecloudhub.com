@@ -380,6 +380,79 @@ function WriteLog {
     Invoke-SmartM365TeamsNotificationFromLog -Message $Message -Level $Level
 }
 
+
+function Get-SmartM365ModuleDiagnosticText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [switch]$IncludeAvailable
+    )
+
+    $module = @(Get-Module -Name $Name | Sort-Object Version -Descending | Select-Object -First 1)[0]
+    $state = 'loaded'
+    if (-not $module -and $IncludeAvailable) {
+        $module = @(Get-Module -ListAvailable -Name $Name | Sort-Object Version -Descending | Select-Object -First 1)[0]
+        $state = 'available'
+    }
+
+    if (-not $module) {
+        return ("{0}: not found" -f $Name)
+    }
+
+    $version = if ($module.Version) { $module.Version.ToString() } else { 'unknown' }
+    $displayName = if (-not [string]::IsNullOrWhiteSpace([string]$module.Name)) { [string]$module.Name } else { $Name }
+    $text = ("{0}: {1} ({2})" -f $displayName, $version, $state)
+    if (-not [string]::IsNullOrWhiteSpace([string]$module.Path)) {
+        $text = "{0}; Path={1}" -f $text, $module.Path
+    }
+    return $text
+}
+
+function Write-SmartM365LoadedModuleVersions {
+    [CmdletBinding()]
+    param(
+        [string]$Header = 'Loaded module versions:',
+        [string[]]$ModuleNames = @(
+            'SmartM365.Core',
+            'SmartM365-WindowsPowerShell5',
+            'Microsoft.Graph.Authentication',
+            'Microsoft.Graph.Users',
+            'Microsoft.Graph.Groups',
+            'Microsoft.Graph.Identity.DirectoryManagement',
+            'Microsoft.Graph.DeviceManagement',
+            'Microsoft.Graph.Devices',
+            'Microsoft.Graph.Reports',
+            'ExchangeOnlineManagement',
+            'ActiveDirectory'
+        )
+    )
+
+    $names = New-Object 'System.Collections.Generic.List[string]'
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($name in $ModuleNames) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        if ($seen.Add($name)) { $names.Add($name) }
+    }
+
+    foreach ($module in @(Get-Module | Where-Object { $_.Name -like 'SmartM365*' -or $_.Name -like 'Microsoft.Graph*' -or $_.Name -eq 'ExchangeOnlineManagement' -or $_.Name -eq 'ActiveDirectory' } | Sort-Object Name)) {
+        if ($module -and $seen.Add([string]$module.Name)) { $names.Add([string]$module.Name) }
+    }
+
+    $diagnostics = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($name in $names) {
+        $module = @(Get-Module -Name $name | Sort-Object Version -Descending | Select-Object -First 1)[0]
+        if (-not $module) { continue }
+        $diagnostics.Add((Get-SmartM365ModuleDiagnosticText -Name $name))
+    }
+
+    if ($diagnostics.Count -eq 0) { return }
+
+    WriteLog -Message $Header -Level 'INFO'
+    foreach ($diagnostic in $diagnostics) {
+        WriteLog -Message ("  {0}" -f $diagnostic) -Level 'INFO'
+    }
+}
 function Get-SmartM365ScriptVersionFromFile {
     [CmdletBinding()]
     param([string]$Path)
@@ -487,6 +560,7 @@ function Write-SmartM365ExecutionContext {
         if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { continue }
         WriteLog -Message ('  {0}: {1}' -f $key, $value) -Level 'INFO'
     }
+    Write-SmartM365LoadedModuleVersions
 }
 
 function Complete-SmartM365ExecutionContext {
@@ -2955,7 +3029,7 @@ function Invoke-SmartM365Preflight {
             $failures.Add("Required PowerShell module not found: $moduleName")
         }
         else {
-            WriteLog -Message ("Preflight module OK: {0}" -f $moduleName) -Level "INFO"
+            WriteLog -Message ("Preflight module OK: {0}" -f (Get-SmartM365ModuleDiagnosticText -Name $moduleName -IncludeAvailable)) -Level "INFO"
         }
     }
 
@@ -3174,6 +3248,7 @@ function Connect-SmartM365CloudSession {
                     }
                     WriteLog "Loading Graph submodule: $module..." "INFO"
                     Import-Module $availableModule.Path -ErrorAction Stop
+                    WriteLog -Message ("Loaded module version: {0}" -f (Get-SmartM365ModuleDiagnosticText -Name $module)) -Level "INFO"
                 }
             }
         } catch {
@@ -3193,6 +3268,7 @@ function Connect-SmartM365CloudSession {
                 }
                 WriteLog "Loading ExchangeOnlineManagement module..." "INFO"
                 Import-Module ExchangeOnlineManagement -ErrorAction Stop
+                WriteLog -Message ("Loaded module version: {0}" -f (Get-SmartM365ModuleDiagnosticText -Name 'ExchangeOnlineManagement')) -Level "INFO"
             }
         } catch {
             WriteLog "Failed to load ExchangeOnlineManagement module: $($_.Exception.Message)" "ERROR"
@@ -3293,7 +3369,7 @@ function Disconnect-SmartM365CloudSession {
 #endregion
 
 Export-ModuleMember -Function `
-    Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Write-SmartM365ExecutionContext, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
+    Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     Set-SmartM365CoreContext, Write-SmartM365CsvAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
