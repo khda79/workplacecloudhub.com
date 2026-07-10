@@ -2241,39 +2241,53 @@ function Invoke-SmartM365SharePointLargeFileUpload {
         throw "SharePoint upload session did not return an uploadUrl."
     }
 
-    try { Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue } catch {}
+    $chunkMultiple = 327680
+    if (($ChunkSizeBytes % $chunkMultiple) -ne 0) {
+        $ChunkSizeBytes = [int]([math]::Floor($ChunkSizeBytes / $chunkMultiple) * $chunkMultiple)
+        if ($ChunkSizeBytes -lt $chunkMultiple) { $ChunkSizeBytes = $chunkMultiple }
+    }
 
     $uploadUrl = [string]$session.uploadUrl
     $lastUploadResponse = $null
     $stream = [System.IO.File]::OpenRead($LocalFilePath)
-    $httpClient = [System.Net.Http.HttpClient]::new()
     try {
+        $fileSize = [int64]$stream.Length
         $buffer = New-Object byte[] $ChunkSizeBytes
         $offset = [int64]0
-        while ($offset -lt $stream.Length) {
-            $remaining = $stream.Length - $offset
+        while ($offset -lt $fileSize) {
+            $remaining = $fileSize - $offset
             $readSize = [int][math]::Min($ChunkSizeBytes, $remaining)
             $bytesRead = $stream.Read($buffer, 0, $readSize)
             if ($bytesRead -le 0) { break }
 
+            $chunk = New-Object byte[] $bytesRead
+            [System.Array]::Copy($buffer, 0, $chunk, 0, $bytesRead)
             $rangeEnd = $offset + $bytesRead - 1
             $uploaded = $false
             for ($attempt = 1; -not $uploaded -and $attempt -le 4; $attempt++) {
-                $content = $null
                 $response = $null
                 $responseBody = $null
                 $statusCode = $null
                 try {
-                    $content = [System.Net.Http.ByteArrayContent]::new($buffer, 0, $bytesRead)
-                    $content.Headers.ContentLength = [int64]$bytesRead
-                    $content.Headers.ContentRange = [System.Net.Http.Headers.ContentRangeHeaderValue]::new([int64]$offset, [int64]$rangeEnd, [int64]$stream.Length)
+                    $headers = @{ 'Content-Range' = ("bytes {0}-{1}/{2}" -f $offset, $rangeEnd, $fileSize) }
+                    $putParams = @{
+                        Method      = 'PUT'
+                        Uri         = $uploadUrl
+                        Headers     = $headers
+                        ContentType = 'application/octet-stream'
+                        Body        = $chunk
+                        ErrorAction = 'Stop'
+                    }
+                    if ((Get-Command Invoke-WebRequest -ErrorAction Stop).Parameters.ContainsKey('UseBasicParsing')) {
+                        $putParams.UseBasicParsing = $true
+                    }
 
-                    $response = $httpClient.PutAsync($uploadUrl, $content).GetAwaiter().GetResult()
+                    $response = Invoke-WebRequest @putParams
                     $statusCode = [int]$response.StatusCode
-                    $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                    $responseBody = [string]$response.Content
 
-                    if (-not $response.IsSuccessStatusCode) {
-                        throw ("SharePoint chunk upload failed. Status={0} ({1}). Body: {2}" -f $statusCode, $response.ReasonPhrase, $responseBody)
+                    if ($statusCode -lt 200 -or $statusCode -gt 299) {
+                        throw ("SharePoint chunk upload failed. Status={0}. Body: {1}" -f $statusCode, $responseBody)
                     }
 
                     if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
@@ -2282,16 +2296,27 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                     $uploaded = $true
                 }
                 catch {
+                    try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+                    try {
+                        if ($_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
+                            $responseBody = [string]$_.ErrorDetails.Message
+                        }
+                    } catch {}
                     $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $_.Exception.Message -match 'timeout|temporarily unavailable|throttl'
-                    if (-not $isTransient -or $attempt -ge 4) { throw }
+                    if (-not $isTransient -or $attempt -ge 4) {
+                        if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                            throw ("SharePoint chunk upload failed. Status={0}. Error={1}. Body={2}" -f $statusText, $_.Exception.Message, $responseBody)
+                        }
+                        throw
+                    }
                     $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (10 * $attempt) -MaximumSeconds 300
                     $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
                     WriteLog -Message ("SharePoint chunk upload transient failure. Status={0}; attempt {1}/4; retrying in {2}s." -f $statusText, $attempt, $delay) -Level "WARNING"
                     Start-Sleep -Seconds $delay
                 }
                 finally {
-                    if ($null -ne $response) { $response.Dispose() }
-                    if ($null -ne $content) { $content.Dispose() }
+                    if ($null -ne $response -and $response -is [System.IDisposable]) { $response.Dispose() }
                 }
             }
 
@@ -2299,7 +2324,6 @@ function Invoke-SmartM365SharePointLargeFileUpload {
         }
     }
     finally {
-        $httpClient.Dispose()
         $stream.Dispose()
     }
     return $lastUploadResponse
