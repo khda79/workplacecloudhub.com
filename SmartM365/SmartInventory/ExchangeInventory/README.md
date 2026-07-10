@@ -12,4 +12,4 @@ Exchange Online inventory and comparison scripts.
 - `Permissions/`: mailbox permission report grouped by delegated user across on-premises and EXO sources.
 - `OnPremises/Mailboxes/`: Exchange 2016 on-premises mailbox inventory and reporting.
 - `OnPremises/ProxyAddresses/`: Exchange 2016 on-premises proxy address audit and remediation.
-- `OnPremises/ServersAndStorage/`: Exchange 2016 server, compute, memory, disk, optional database path, and service health inventory.`r`n- `OnPremises/ExchangeSEPreCheck/`: Active Directory readiness checks before Exchange SE schema, AD, and domain preparation.
+- `OnPremises/ServersAndStorage/`: Exchange 2016 server, compute, memory, disk, optional database path, and service health inventory.
