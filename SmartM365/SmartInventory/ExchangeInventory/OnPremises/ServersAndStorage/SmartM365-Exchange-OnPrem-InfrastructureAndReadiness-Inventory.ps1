@@ -22,11 +22,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.4.6
+    1.5.0
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.4.9
+    Version     : 1.5.0
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
@@ -34,6 +34,10 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.5.0
+      - Adds report-only regeneration from existing DATA-ALL CSV files.
+      - Adds priority issue and readiness status summary tables to the HTML report.
+
     1.4.6
       - Adds detailed readiness collector progress logs to identify long-running Exchange cmdlets.
 
@@ -104,6 +108,10 @@ param(
 
     [switch]$SkipFqdnAndUseServerName,
 
+    [string]$RegenerateHtmlReportFromFolder,
+
+    [switch]$SendRegeneratedReportMail,
+
     [int]$LowFreeSpaceThresholdPercent = 15
 )
 
@@ -129,7 +137,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.4.9"
+$ScriptVersion = "1.5.0"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -196,7 +204,12 @@ else {
     $OutputRoot = Resolve-SmartM365ConfigTokenValue -Value $OutputRoot
 }
 
-$OutputFolder = Join-Path $OutputRoot $RunId
+if (-not [string]::IsNullOrWhiteSpace($RegenerateHtmlReportFromFolder)) {
+    $OutputFolder = Resolve-SmartM365ConfigTokenValue -Value $RegenerateHtmlReportFromFolder
+}
+else {
+    $OutputFolder = Join-Path $OutputRoot $RunId
+}
 $LogRoot = Resolve-SmartM365ConfigTokenValue -Value '{{LogAllRootPath}}'
 if ([string]::IsNullOrWhiteSpace($LogRoot) -or $LogRoot -eq '{{LogAllRootPath}}') {
     $LogRoot = Join-Path -Path (Split-Path -Path $OutputRoot -Parent) -ChildPath 'LOG-ALL'
@@ -1281,6 +1294,94 @@ function New-HtmlExecutiveSummary {
     $readinessErrorCount = @($readinessRows | Where-Object { $_.CollectionStatus -eq "ERROR" -or $_.Importance -eq "Error" }).Count
     $readinessWarningCount = @($readinessRows | Where-Object { $_.CollectionStatus -eq "WARNING" -or $_.Importance -eq "Warning" }).Count
     $readinessSortedRows = @($readinessRows | Sort-Object @{ Expression = { if ($_.CollectionStatus -eq "ERROR" -or $_.Importance -eq "Error") { 0 } elseif ($_.CollectionStatus -eq "WARNING" -or $_.Importance -eq "Warning") { 1 } elseif ($_.Importance -eq "Review") { 2 } else { 3 } } }, Category, ObjectName, Setting)
+    $priorityRows = New-Object System.Collections.ArrayList
+    foreach ($server in @($PerServerSummary | Sort-Object ExchangeServerName)) {
+        if ([string]$server.ComputeCollectionStatus -eq 'ERROR') {
+            [void]$priorityRows.Add([pscustomobject]@{ Severity = 'Error'; Category = 'Infrastructure'; ObjectName = $server.ExchangeServerName; Issue = 'Compute collection'; Status = $server.ComputeCollectionStatus; Details = 'CPU/RAM inventory failed or returned no data for this server.' })
+        }
+        if ([string]$server.DiskDriveCollectionStatus -eq 'ERROR') {
+            [void]$priorityRows.Add([pscustomobject]@{ Severity = 'Error'; Category = 'Infrastructure'; ObjectName = $server.ExchangeServerName; Issue = 'Disk drive collection'; Status = $server.DiskDriveCollectionStatus; Details = 'Physical disk inventory failed or returned errors for this server.' })
+        }
+        if ([string]$server.LogicalDiskCollectionStatus -eq 'ERROR') {
+            [void]$priorityRows.Add([pscustomobject]@{ Severity = 'Error'; Category = 'Infrastructure'; ObjectName = $server.ExchangeServerName; Issue = 'Logical disk collection'; Status = $server.LogicalDiskCollectionStatus; Details = 'Logical disk inventory failed or returned errors for this server.' })
+        }
+        if ([int]$server.LowSpaceLogicalDiskCount -gt 0) {
+            [void]$priorityRows.Add([pscustomobject]@{ Severity = 'Warning'; Category = 'Capacity'; ObjectName = $server.ExchangeServerName; Issue = 'Low disk space'; Status = 'WARNING'; Details = ('{0} logical disk(s) below the configured free-space threshold.' -f $server.LowSpaceLogicalDiskCount) })
+        }
+    }
+    foreach ($row in @($readinessSortedRows | Where-Object { $_.CollectionStatus -eq 'ERROR' -or $_.CollectionStatus -eq 'WARNING' -or $_.Importance -eq 'Error' -or $_.Importance -eq 'Warning' })) {
+        $severity = if ($row.CollectionStatus -eq 'ERROR' -or $row.Importance -eq 'Error') { 'Error' } else { 'Warning' }
+        $details = if (-not [string]::IsNullOrWhiteSpace([string]$row.ErrorMessage)) { $row.ErrorMessage } else { $row.MigrationFocus }
+        [void]$priorityRows.Add([pscustomobject]@{ Severity = $severity; Category = $row.Category; ObjectName = $row.ObjectName; Issue = $row.Setting; Status = $row.CollectionStatus; Details = $details })
+    }
+
+    $priorityRowsSorted = @($priorityRows | Sort-Object @{ Expression = { if ($_.Severity -eq 'Error') { 0 } else { 1 } } }, Category, ObjectName, Issue | Select-Object -First 100)
+    $priorityIssuesSection = if ($priorityRowsSorted.Count -gt 0) {
+        $priorityRowsHtml = foreach ($row in $priorityRowsSorted) {
+            $severityClass = if ($row.Severity -eq 'Error') { 'status-error' } else { 'status-warning' }
+            "<tr><td><span class='badge $severityClass'>$(Format-HtmlValue $row.Severity)</span></td><td>$(Format-HtmlValue $row.Category)</td><td>$(Format-HtmlValue $row.ObjectName)</td><td>$(Format-HtmlValue $row.Issue)</td><td><span class='badge $severityClass'>$(Format-HtmlValue $row.Status)</span></td><td>$(Format-HtmlValue $row.Details)</td></tr>"
+        }
+@"
+      <h2>Priority issues summary</h2>
+      <table class="priority-table">
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>Area</th>
+            <th>Object</th>
+            <th>Issue</th>
+            <th>Status</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          $($priorityRowsHtml -join "`r`n")
+        </tbody>
+      </table>
+"@
+    } else {
+@"
+      <h2>Priority issues summary</h2>
+      <div class="summary">No priority infrastructure or readiness errors were detected in this run.</div>
+"@
+    }
+
+    $statusSummaryRows = foreach ($categoryGroup in ($readinessRows | Group-Object Category | Sort-Object Name)) {
+        $groupRows = @($categoryGroup.Group)
+        [pscustomobject]@{
+            Category         = $categoryGroup.Name
+            Total            = $groupRows.Count
+            Ok               = @($groupRows | Where-Object { $_.CollectionStatus -eq 'OK' -and $_.Importance -notin @('Review', 'Warning', 'Error') }).Count
+            Review           = @($groupRows | Where-Object { $_.Importance -eq 'Review' -and $_.CollectionStatus -eq 'OK' }).Count
+            Warning          = @($groupRows | Where-Object { $_.CollectionStatus -eq 'WARNING' -or $_.Importance -eq 'Warning' }).Count
+            Error            = @($groupRows | Where-Object { $_.CollectionStatus -eq 'ERROR' -or $_.Importance -eq 'Error' }).Count
+            CollectionErrors = @($groupRows | Where-Object { $_.CollectionStatus -eq 'ERROR' }).Count
+        }
+    }
+    $statusSummarySection = if (@($statusSummaryRows).Count -gt 0) {
+        $statusRowsHtml = foreach ($row in $statusSummaryRows) {
+            "<tr><td>$(Format-HtmlValue $row.Category)</td><td class='num'>$(Format-HtmlValue $row.Total)</td><td class='num'>$(Format-HtmlValue $row.Ok)</td><td class='num'>$(Format-HtmlValue $row.Review)</td><td class='num'>$(Format-HtmlValue $row.Warning)</td><td class='num'>$(Format-HtmlValue $row.Error)</td><td class='num'>$(Format-HtmlValue $row.CollectionErrors)</td></tr>"
+        }
+@"
+      <h2>Readiness status summary</h2>
+      <table class="status-summary-table">
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th class="num">Total</th>
+            <th class="num">OK</th>
+            <th class="num">Review</th>
+            <th class="num">Warnings</th>
+            <th class="num">Errors</th>
+            <th class="num">Collection errors</th>
+          </tr>
+        </thead>
+        <tbody>
+          $($statusRowsHtml -join "`r`n")
+        </tbody>
+      </table>
+"@
+    } else { '' }
     $readinessCategoryBlocks = foreach ($categoryGroup in ($readinessSortedRows | Group-Object Category | Sort-Object Name)) {
         $categoryRowsHtml = foreach ($row in $categoryGroup.Group) {
             $statusClass = switch ([string]$row.CollectionStatus) {
@@ -1425,6 +1526,10 @@ td.num, th.num { text-align: right; }
         </tbody>
       </table>
 
+      $priorityIssuesSection
+
+      $statusSummarySection
+
       $readinessSection
 
       <div class="footer">
@@ -1440,6 +1545,69 @@ td.num, th.num { text-align: right; }
     Set-Content -Path $Path -Value $html -Encoding UTF8
 }
 
+function Import-ServersAndStorageExistingCsv {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Description
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Required $Description CSV not found: $Path"
+    }
+
+    return @(Import-Csv -LiteralPath $Path -Delimiter ';')
+}
+
+function Invoke-ServersAndStorageHtmlReportRegeneration {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RunFolder,
+
+        [switch]$SendMail
+    )
+
+    if (-not (Test-Path -LiteralPath $RunFolder -PathType Container)) {
+        throw "Existing DATA-ALL run folder not found: $RunFolder"
+    }
+
+    $summaryPath = Join-Path $RunFolder "Exchange_OnPrem_Servers_Inventory_Summary.csv"
+    $perServerSummaryPath = Join-Path $RunFolder "Exchange_OnPrem_Infrastructure_PerServerSummary.csv"
+    $exchangeReadinessPath = Join-Path $RunFolder "Exchange_OnPrem_MigrationReadiness_Config.csv"
+    $htmlSummaryPath = Join-Path $RunFolder "Exchange_OnPrem_InfrastructureAndReadiness_Report.html"
+
+    Write-Log "Regenerating HTML executive summary from existing DATA-ALL CSV files."
+    Write-Log "Existing run folder: $RunFolder"
+
+    $summaryRows = Import-ServersAndStorageExistingCsv -Path $summaryPath -Description 'global summary'
+    if ($summaryRows.Count -lt 1) { throw "Global summary CSV is empty: $summaryPath" }
+
+    $summary = $summaryRows | Select-Object -First 1
+    $perServerSummary = Import-ServersAndStorageExistingCsv -Path $perServerSummaryPath -Description 'per-server infrastructure summary'
+    $exchangeReadinessInventory = Import-ServersAndStorageExistingCsv -Path $exchangeReadinessPath -Description 'Exchange readiness configuration'
+
+    New-HtmlExecutiveSummary -Summary $summary -PerServerSummary @($perServerSummary) -ReadinessInventory @($exchangeReadinessInventory) -Path $htmlSummaryPath
+    Write-Log "HTML executive summary regenerated to: $htmlSummaryPath"
+    Invoke-ServersAndStorageSharePointUpload -LocalFilePath $htmlSummaryPath
+
+    if ($SendMail) {
+        $subjectRunId = if (-not [string]::IsNullOrWhiteSpace([string]$summary.RunId)) { [string]$summary.RunId } else { Split-Path -Path $RunFolder -Leaf }
+        $mailSubject = "SmartM365 Exchange OnPrem Servers and Storage inventory - $subjectRunId"
+        Send-ServersAndStorageHtmlReport `
+            -HtmlReportPath $htmlSummaryPath `
+            -Subject $mailSubject `
+            -Attachments @($htmlSummaryPath, $summaryPath, $perServerSummaryPath, $exchangeReadinessPath) `
+            -Summary $summary `
+            -PerServerSummary @($perServerSummary) `
+            -ReadinessInventory @($exchangeReadinessInventory)
+        Write-Log "Regenerated HTML executive summary email sent."
+    }
+    else {
+        Write-Log "Regenerated report email was skipped. Use -SendRegeneratedReportMail to send it."
+    }
+}
 $StartTime = Get-Date
 
 try {
@@ -1449,6 +1617,14 @@ try {
     $script:TranscriptStarted = $true
     Write-Log "Starting $ScriptName v$ScriptVersion. RunId: $RunId"
     Write-Log "Output folder: $OutputFolder"
+
+    if (-not [string]::IsNullOrWhiteSpace($RegenerateHtmlReportFromFolder)) {
+        Write-Log "Mode: HTML report regeneration from existing DATA-ALL CSV files. Exchange collection is skipped."
+        Invoke-ServersAndStorageHtmlReportRegeneration -RunFolder $OutputFolder -SendMail:$SendRegeneratedReportMail
+        Write-Log "Completed regenerated report workflow."
+        Complete-ServersAndStorageRun -Status 'Success' -Started $StartTime -ErrorMessage $null
+        return
+    }
     Write-Log "Collection method: WMI/DCOM only"
 
     Test-ExchangeShell
