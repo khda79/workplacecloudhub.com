@@ -25,5 +25,6 @@
   "ADHealthCheckCsvLogFolderPath": "{{DataAllRootPath}}\\ActiveDirectory\\HealthCheck",
   "AppendHistory": false,
   "HistoryCsvPath": "{{DataAllRootPath}}\\ActiveDirectory\\HealthCheck\\AD_HealthCheck_History.csv",
-  "AlwaysSend": false
+  "AlwaysSend": false,
+  "EnableRemoteDcAdminChecks": false
 }

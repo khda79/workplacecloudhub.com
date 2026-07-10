@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.3
+    1.0.4
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -34,7 +34,8 @@ param(
     [int]$ReplicationDelayWarningHours = 24,
     [int]$DfsrBacklogWarningCount = 100,
     [int]$DfsrBacklogCriticalCount = 1000,
-    [switch]$SkipDfsrBacklog
+    [switch]$SkipDfsrBacklog,
+    [switch]$EnableRemoteDcAdminChecks
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -45,7 +46,7 @@ $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Glo
 $RunId = [guid]::NewGuid().ToString()
 $Rows = New-Object 'System.Collections.Generic.List[object]'
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.3'
+$ScriptVersion = '1.0.4'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -111,6 +112,7 @@ $LatestCsvFolderPath = [string](Get-LocalConfigValue 'LatestCsvFolderPath' $Tena
 if (-not $PSBoundParameters.ContainsKey('AlwaysSend')) { $AlwaysSend = [bool](Get-LocalConfigValue 'AlwaysSend' $false) }
 if (-not $PSBoundParameters.ContainsKey('AppendHistory')) { $AppendHistory = [bool](Get-LocalConfigValue 'AppendHistory' $false) }
 if ([string]::IsNullOrWhiteSpace($HistoryCsvPath)) { $HistoryCsvPath = [string](Get-LocalConfigValue 'HistoryCsvPath' '{{DataAllRootPath}}\ActiveDirectory\HealthCheck\AD_HealthCheck_History.csv') }
+if (-not $PSBoundParameters.ContainsKey('EnableRemoteDcAdminChecks')) { $EnableRemoteDcAdminChecks = [bool](Get-LocalConfigValue 'EnableRemoteDcAdminChecks' $false) }
 function ConvertTo-IsoUtc([datetime]$d){ if($null -eq $d -or $d -eq [datetime]::MinValue){''}else{$d.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)} }
 function Num($v){ if($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)){''}else{ try{([double]$v).ToString('0.########',[Globalization.CultureInfo]::InvariantCulture)}catch{[string]$v} } }
 function Ms($s){ [int64][math]::Max(0,((Get-Date)-$s).TotalMilliseconds) }
@@ -175,14 +177,30 @@ function Invoke-DcCheck($ForestName,$DomainName,$DC,$AllDcs){
     $dcName=if($DC.HostName){[string]$DC.HostName}else{[string]$DC.Name}
     foreach($port in 389,3268,445){$s=Get-Date;try{$ok=Invoke-Retry {Test-Port $dcName $port};$stat=if($ok -or ($port -eq 3268 -and -not $DC.IsGlobalCatalog)){'OK'}else{'Critical'};Add-Row $ForestName $DomainName $dcName Connectivity "TCP $port" $stat ([int]$ok) "Reachable=$ok" 'Open' "TCP port $port" (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Connectivity "TCP $port" Critical 0 Error Open $_.Exception.Message (Ms $s)}}
     $s=Get-Date;try{$ok=Invoke-Retry {Test-Connection -ComputerName $dcName -Count 1 -Quiet -ErrorAction Stop};Add-Row $ForestName $DomainName $dcName Connectivity Ping $(if($ok){'OK'}else{'Critical'}) ([int]$ok) "Reachable=$ok" Reachable 'ICMP echo test' (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Connectivity Ping Critical 0 Error Reachable $_.Exception.Message (Ms $s)}
-    foreach($svcName in 'NTDS','DNS','Netlogon','KDC','W32Time','DFSR'){$s=Get-Date;try{$svc=Invoke-Retry {Get-Service -ComputerName $dcName -Name $svcName -ErrorAction Stop};$ok=$svc.Status -eq 'Running';Add-Row $ForestName $DomainName $dcName Services $svcName $(if($ok){'OK'}else{'Critical'}) ([int]$ok) $svc.Status Running "Service $svcName" (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Services $svcName Critical 0 Error Running $_.Exception.Message (Ms $s)}}
+    if ($EnableRemoteDcAdminChecks) {
+        foreach($svcName in 'NTDS','DNS','Netlogon','KDC','W32Time','DFSR') {
+            $s=Get-Date;try{$svc=Invoke-Retry {Get-Service -ComputerName $dcName -Name $svcName -ErrorAction Stop};$ok=$svc.Status -eq 'Running';Add-Row $ForestName $DomainName $dcName Services $svcName $(if($ok){'OK'}else{'Critical'}) ([int]$ok) $svc.Status Running "Service $svcName" (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Services $svcName Critical 0 Error Running $_.Exception.Message (Ms $s)}
+        }
+    }
+    else {
+        foreach($svcName in 'NTDS','DNS','Netlogon','KDC','W32Time','DFSR') {
+            $s=Get-Date;Add-Row $ForestName $DomainName $dcName Services $svcName Warning '' NotMeasured 'Requires T0 remote DC admin' 'Skipped by default to avoid remote service-control access to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
+        }
+    }
     $s=Get-Date;try{$f=@(Invoke-Retry {Get-ADReplicationFailure -Target $dcName -Scope Server -ErrorAction Stop});$det=($f|Select-Object -First 5|ForEach-Object{"$($_.Partner): $($_.FailureCount) since $(ConvertTo-IsoUtc $_.FirstFailureTime)"}) -join '; ';Add-Row $ForestName $DomainName $dcName Replication ReplicationFailures $(if($f.Count -eq 0){'OK'}else{'Critical'}) $f.Count "Failures=$($f.Count)" 0 $det (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Replication ReplicationFailures Critical '' Error 0 $_.Exception.Message (Ms $s)}
     $s=Get-Date;try{$m=@(Invoke-Retry {Get-ADReplicationPartnerMetadata -Target $dcName -Scope Server -ErrorAction Stop});$old=@($m|Where-Object{$_.LastReplicationSuccess -and $_.LastReplicationSuccess -ne [datetime]::MinValue}|Sort-Object LastReplicationSuccess|Select-Object -First 1)[0];$max=0;if($old){$max=[math]::Round(((Get-Date).ToUniversalTime()-$old.LastReplicationSuccess.ToUniversalTime()).TotalHours,2)};$stat=if($max -gt $ReplicationDelayWarningHours){'Warning'}else{'OK'};Add-Row $ForestName $DomainName $dcName Replication MaxLastSuccessDelayHours $stat $max $(if($old){ConvertTo-IsoUtc $old.LastReplicationSuccess}else{''}) "<= $ReplicationDelayWarningHours hours" "Partners=$($m.Count)" (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Replication MaxLastSuccessDelayHours Critical '' Error "<= $ReplicationDelayWarningHours hours" $_.Exception.Message (Ms $s)}
     foreach($sh in 'SYSVOL','NETLOGON'){$s=Get-Date;$unc="\\$dcName\$sh";try{$ok=Invoke-Retry {Test-Path -LiteralPath $unc -PathType Container};Add-Row $ForestName $DomainName $dcName SYSVOL $sh $(if($ok){'OK'}else{'Critical'}) ([int]$ok) $unc Available "Share available=$ok" (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName SYSVOL $sh Critical 0 $unc Available $_.Exception.Message (Ms $s)}}
     if(-not $SkipDfsrBacklog -and $AllDcs.Count -gt 1){$src=@($AllDcs|Where-Object{$_ -ine $dcName}|Select-Object -First 1)[0];$s=Get-Date;try{$n=Get-DfsrBacklog $src $dcName;if($null -eq $n){Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog OK '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" "Not measurable from $src to $dcName" (Ms $s)}else{$st=if($n -gt $DfsrBacklogCriticalCount){'Critical'}elseif($n -gt $DfsrBacklogWarningCount){'Warning'}else{'OK'};Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog $st $n "$src->$dcName" "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" 'DFSR backlog measured' (Ms $s)}}catch{Add-Row $ForestName $DomainName $dcName SYSVOL DFSRBacklog OK '' NotMeasured "Warning>$DfsrBacklogWarningCount; Critical>$DfsrBacklogCriticalCount" $_.Exception.Message (Ms $s)}}
     $s=Get-Date;try{$r=Resolve-DnsName -Name $dcName -ErrorAction Stop;Add-Row $ForestName $DomainName $dcName DNS ResolveDC OK $r.Count $dcName '>= 1 record' (($r|Select-Object -First 3|ForEach-Object{$_.IPAddress}) -join '; ') (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName DNS ResolveDC Critical 0 $dcName '>= 1 record' $_.Exception.Message (Ms $s)}
     $s=Get-Date;try{$off=Invoke-Retry {Get-TimeOffsetMinute $dcName};Add-Row $ForestName $DomainName $dcName Time W32TimeOffsetMinutes $(if($off -gt $TimeOffsetWarningMinutes){'Warning'}else{'OK'}) $off 'Absolute max sample offset' "<= $TimeOffsetWarningMinutes minutes" 'w32tm /stripchart samples=3' (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Time W32TimeOffsetMinutes Warning '' NotMeasured "<= $TimeOffsetWarningMinutes minutes" $_.Exception.Message (Ms $s)}
-    $s=Get-Date;try{$vol=Invoke-Retry {Get-ADDbVolume $dcName};$disk=Invoke-Retry {Get-Disk $dcName $vol};$st=if($disk.FreePct -lt $DiskFreePercentCritical -or $disk.FreeGb -lt $DiskFreeGbCritical){'Critical'}else{'OK'};Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent $st $disk.FreePct "$vol free $($disk.FreeGb) GB" ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" 'AD DB volume via ntdsutil, fallback system drive' (Ms $s);Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreeGB $st $disk.FreeGb "$vol free $($disk.FreePct) percent" ">= $DiskFreeGbCritical GB and >= $DiskFreePercentCritical percent" 'Same volume as percent check' (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent Critical '' Error ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" $_.Exception.Message (Ms $s)}
+    $s=Get-Date
+    if ($EnableRemoteDcAdminChecks) {
+        try{$vol=Invoke-Retry {Get-ADDbVolume $dcName};$disk=Invoke-Retry {Get-Disk $dcName $vol};$st=if($disk.FreePct -lt $DiskFreePercentCritical -or $disk.FreeGb -lt $DiskFreeGbCritical){'Critical'}else{'OK'};Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent $st $disk.FreePct "$vol free $($disk.FreeGb) GB" ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" 'AD DB volume via ntdsutil, fallback system drive' (Ms $s);Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreeGB $st $disk.FreeGb "$vol free $($disk.FreePct) percent" ">= $DiskFreeGbCritical GB and >= $DiskFreePercentCritical percent" 'Same volume as percent check' (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent Critical '' Error ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" $_.Exception.Message (Ms $s)}
+    }
+    else {
+        Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreePercent Warning '' NotMeasured ">= $DiskFreePercentCritical percent and >= $DiskFreeGbCritical GB" 'Skipped by default to avoid WinRM/CIM remote admin logon to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
+        Add-Row $ForestName $DomainName $dcName Disk ADDatabaseVolumeFreeGB Warning '' NotMeasured ">= $DiskFreeGbCritical GB and >= $DiskFreePercentCritical percent" 'Skipped by default to avoid WinRM/CIM remote admin logon to domain controllers. Use -EnableRemoteDcAdminChecks with a T0 account.' (Ms $s)
+    }
 }
 function Invoke-DomainCheck($ForestName,[string]$DomainName,$ForestInfo){
     $domain=Invoke-Retry {Get-ADDomain -Identity $DomainName -Server $DomainName -ErrorAction Stop}
@@ -218,6 +236,7 @@ try{
     WriteLog -Message ("Script environment initialized at {0}" -f $OutputFolder)
     WriteLog -Message ("Starting {0}" -f $TaskName)
     Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputFolder) -RequiredModules @('ActiveDirectory') -RequireActiveDirectoryRead | Out-Null
+    if (-not $EnableRemoteDcAdminChecks) { WriteLog -Message 'Remote DC admin checks are disabled. Service status and AD database disk checks will be marked NotMeasured; use -EnableRemoteDcAdminChecks only with a T0 account.' -Level 'INFO' }
     $forest=Invoke-Retry {Get-ADForest -ErrorAction Stop}; $forestName=[string]$forest.Name
     foreach($role in 'SchemaMaster','DomainNamingMaster'){$s=Get-Date;try{$h=[string]$forest.$role;$ok=Test-Port $h 389;Add-Row $forestName $forest.RootDomain $h FSMO $role $(if($ok){'OK'}else{'Critical'}) ([int]$ok) $h 'LDAP 389 reachable' "Forest FSMO holder for $role" (Ms $s)}catch{Add-Row $forestName $forest.RootDomain '' FSMO $role Critical 0 Error 'LDAP 389 reachable' $_.Exception.Message (Ms $s)}}
     $s=Get-Date;try{$cfg=(Get-ADRootDSE -Server $forest.RootDomain -ErrorAction Stop).configurationNamingContext;$ds="CN=Directory Service,CN=Windows NT,CN=Services,$cfg";$obj=Get-ADObject -Identity $ds -Properties tombstoneLifetime -Server $forest.RootDomain -ErrorAction Stop;$tomb=if($obj.tombstoneLifetime){[int]$obj.tombstoneLifetime}else{180};Add-Row $forestName $forest.RootDomain '' Tombstone TombstoneLifetimeDays OK $tomb 'Forest tombstone lifetime' 'Compare with oldest replication failure' $ds (Ms $s)}catch{$tomb=180;Add-Row $forestName $forest.RootDomain '' Tombstone TombstoneLifetimeDays Warning $tomb Defaulted 'Compare with oldest replication failure' $_.Exception.Message (Ms $s)}
