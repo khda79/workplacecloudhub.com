@@ -29,7 +29,7 @@
     warning and exports the partial result set. Defaults to 2000.
 
 .VERSION
-1.5
+1.6
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -45,6 +45,7 @@
       - Added MaxPages pagination guard with graceful partial export.
       - Added Graph access probe with full error body logging for 403 diagnostics.
       - StrictMode-safe status property access in protected unit filtering.
+    - v1.6: Return Graph collection as a flat object array to avoid Generic.List output binding failures after pagination.
 #>
 
 [CmdletBinding()]
@@ -77,7 +78,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.5'
+$ScriptVersion = '1.6'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -269,7 +270,7 @@ function Invoke-SmartM365GraphCollectionRequest {
         [ValidateRange(1, 100000)][int]$MaxPages = 2000
     )
 
-    $items = New-Object System.Collections.Generic.List[object]
+    $items = New-Object System.Collections.ArrayList
     $nextUri = $Uri
     $pageIndex = 0
     while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
@@ -295,7 +296,7 @@ function Invoke-SmartM365GraphCollectionRequest {
         $nextUri = if ($nextLinkProperty -and $null -ne $nextLinkProperty.Value) { [string]$nextLinkProperty.Value } else { '' }
     }
     WriteLog -Message ("Graph collection completed: {0} pages, {1} items." -f $pageIndex, $items.Count) -Level SUCCESS
-    return @($items)
+    return @($items.ToArray())
 }
 
 function Test-SmartM365GraphAccess {
