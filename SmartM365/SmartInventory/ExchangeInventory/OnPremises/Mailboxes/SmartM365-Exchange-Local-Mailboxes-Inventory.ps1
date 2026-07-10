@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.31
+1.32
 
 .NOTES
-    Version: 1.31
+    Version: 1.32
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -232,7 +232,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.31"
+$ScriptVersion = "1.32"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -1260,15 +1260,29 @@ if ($OnlyADPermission -or $IncludeADPermission) {
         throw
     }
 
-    if ([string]::IsNullOrWhiteSpace($OutputPathOnlyADPermission) -or -not (Test-Path $OutputPathOnlyADPermission)) {
-        $errorMessage = "The share '$OutputPathOnlyADPermission' is not available. Stopping the script."
+    if ([string]::IsNullOrWhiteSpace($OutputPathOnlyADPermission)) {
+        $errorMessage = 'LocalMailboxOnlyAdPermissionCsvLogFolderPath is not configured. Stopping the script.'
         Write-Host $errorMessage -ForegroundColor Red
         $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
         Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
         throw $errorMessage
     }
 
-    Write-Host "The network share '$OutputPathOnlyADPermission' is available. Continuing the script..." -ForegroundColor Green
+    if (-not (Test-Path -LiteralPath $OutputPathOnlyADPermission)) {
+        try {
+            New-Item -ItemType Directory -Path $OutputPathOnlyADPermission -Force -ErrorAction Stop | Out-Null
+            WriteLog -Message ("Created OnlyADPermission output folder: {0}" -f $OutputPathOnlyADPermission)
+        }
+        catch {
+            $errorMessage = "The output folder '$OutputPathOnlyADPermission' could not be created or accessed: $($_.Exception.Message). Stopping the script."
+            Write-Host $errorMessage -ForegroundColor Red
+            $body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
+            Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
+            throw $errorMessage
+        }
+    }
+
+    Write-Host "The output folder '$OutputPathOnlyADPermission' is available. Continuing the script..." -ForegroundColor Green
     $preflightOutputPaths += $OutputPathOnlyADPermission
 }
 
