@@ -17,7 +17,16 @@ Optional: limit scope to a specific Intune managed device.
 Optional: limit scope to a specific Windows device name (exact or startswith).
 
 .PARAMETER IncludeComplianceSettings
-Fetch and process per-setting noncompliant details to compute category rollup (default: $true).
+Fetch and process per-setting noncompliant details to compute category rollup when policy-state detail collection is enabled.
+
+.PARAMETER IncludePolicyStates
+Fetch per-device compliance policy states and optional setting states. This is detailed and can be slow on large tenants.
+
+.PARAMETER EnableDirectoryEnrichment
+Resolve Entra directory details such as on-premises OU/domain per device. This adds Graph calls and is disabled by default for full-tenant runs.
+
+.PARAMETER MaxDevices
+Optional cap for smoke tests. 0 means no cap.
 
 .PARAMETER AllDevices
 If present (or if no device filter is supplied), process all Windows managed devices.
@@ -27,14 +36,14 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.3
+    Version : 1.4
 
 .VERSION
-1.3
+1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.3
+    Version : 1.4
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
 #>
@@ -50,6 +59,15 @@ param(
 
     [Parameter(Mandatory = $false)]
     [bool]$IncludeComplianceSettings = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$IncludePolicyStates = $false,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$EnableDirectoryEnrichment = $false,
+
+    [Parameter(Mandatory = $false)]
+    [int]$MaxDevices = 0,
 
     [Parameter(Mandatory = $false)]
     [switch]$AllDevices,
@@ -267,7 +285,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -277,11 +295,19 @@ $OutputPath = $ScriptCsvLogFolderPath
 $script:GraphRequestDelayMs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRequestDelayMs' -DefaultValue 250)
 $script:GraphMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphMaxRetryAttempts' -DefaultValue 6)
 $script:GraphRetryMaxSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryMaxSeconds' -DefaultValue 180)
+$script:ManagedDevicePageSize = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ManagedDevicePageSize' -DefaultValue 999)
+if ($script:ManagedDevicePageSize -lt 1) { $script:ManagedDevicePageSize = 999 }
+if ($script:ManagedDevicePageSize -gt 999) { $script:ManagedDevicePageSize = 999 }
+$script:MaxDevicesEffective = if ($PSBoundParameters.ContainsKey('MaxDevices')) { [int]$MaxDevices } else { [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxDevices' -DefaultValue 0) }
+if ($script:MaxDevicesEffective -lt 0) { $script:MaxDevicesEffective = 0 }
+$script:IncludePolicyStatesEffective = if ($PSBoundParameters.ContainsKey('IncludePolicyStates')) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $false) }
+$script:EnableDirectoryEnrichmentEffective = if ($PSBoundParameters.ContainsKey('EnableDirectoryEnrichment')) { [bool]$EnableDirectoryEnrichment } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDirectoryEnrichment' -DefaultValue $false) }
 $script:MaxPolicyStateFailures = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxPolicyStateFailures' -DefaultValue 100)
 $script:MaxConsecutivePolicyStateFailures = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxConsecutivePolicyStateFailures' -DefaultValue 25)
 $script:PolicyStateFailureCount = 0
 $script:ConsecutivePolicyStateFailures = 0
-$script:PolicyStateCollectionDisabled = $false
+$script:PolicyStateCollectionDisabled = -not $script:IncludePolicyStatesEffective
+$script:ComplianceFatalError = $null
 
 $logDir = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path $ScriptCsvLogFolderPath "Log"
@@ -292,6 +318,9 @@ $logDir = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
 $mainCsv = Join-Path $ScriptCsvLogFolderPath "Intune_Devices_Compliance.csv"
 $tsCsv = Join-Path $ScriptCsvLogFolderPath ("Intune_Devices_Compliance_{0}.csv" -f $ts)
 $lastCsv = Join-Path $LatestCsvFolderPath "Intune_Devices_Compliance.csv"
+$policyMainCsv = Join-Path $ScriptCsvLogFolderPath "Intune_Devices_Compliance_Policies.csv"
+$policyTsCsv = Join-Path $ScriptCsvLogFolderPath ("Intune_Devices_Compliance_Policies_{0}.csv" -f $ts)
+$policyLastCsv = Join-Path $LatestCsvFolderPath "Intune_Devices_Compliance_Policies.csv"
 
 foreach ($dir in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logDir)) {
     try { New-Item -ItemType Directory -Force -Path $dir | Out-Null } catch { }
@@ -406,6 +435,87 @@ function Invoke-WithRetry {
             Start-Sleep -Seconds $delay
         }
     }
+}
+
+
+function Invoke-GraphPagedCollection {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+
+        [Parameter(Mandatory = $false)]
+        [string]$Operation = 'Graph paged collection',
+
+        [Parameter(Mandatory = $false)]
+        [int]$MaxItems = 0
+    )
+
+    $items = New-Object System.Collections.Generic.List[object]
+    $nextLink = $Uri
+    $pageNumber = 0
+
+    while ($nextLink) {
+        $pageNumber++
+        $currentUri = $nextLink
+        $page = Invoke-WithRetry -Operation $Operation -Script {
+            Invoke-MgGraphRequest -Method GET -Uri $currentUri -ErrorAction Stop
+        }
+
+        if ($page -and $page.value) {
+            foreach ($item in @($page.value)) {
+                $items.Add($item) | Out-Null
+                if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
+            }
+        }
+
+        Write-Host ("{0}: page {1}, total {2}" -f $Operation, $pageNumber, $items.Count) -ForegroundColor DarkCyan
+
+        if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
+        $nextLink = if ($page.'@odata.nextLink') { $page.'@odata.nextLink' } else { $null }
+    }
+
+    return @($items)
+}
+
+function Get-ManagedWindowsDevicesFast {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$ManagedDeviceId,
+
+        [Parameter(Mandatory = $false)]
+        [string]$DeviceName,
+
+        [Parameter(Mandatory = $false)]
+        [int]$MaxItems = 0
+    )
+
+    $select = 'id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName'
+
+    if (-not [string]::IsNullOrWhiteSpace($ManagedDeviceId)) {
+        $uri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$ManagedDeviceId`?`$select=$select"
+        $device = Invoke-WithRetry -Operation 'Get Intune managed device' -Script {
+            Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+        }
+        return @($device)
+    }
+
+    $pageSize = $script:ManagedDevicePageSize
+    if ($pageSize -lt 1 -or $pageSize -gt 999) { $pageSize = 999 }
+
+    if (-not [string]::IsNullOrWhiteSpace($DeviceName)) {
+        $escaped = $DeviceName.Replace("'", "''")
+        $exactUri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$filter=operatingSystem eq 'Windows' and deviceName eq '$escaped'&`$select=$select&`$top=1"
+        $exact = Invoke-GraphPagedCollection -Uri $exactUri -Operation 'Get Intune managedDevices exact-name page' -MaxItems 1
+        if ($exact -and $exact.Count -gt 0) { return @($exact) }
+
+        $startsWithUri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$filter=operatingSystem eq 'Windows' and startswith(deviceName,'$escaped')&`$select=$select&`$top=1"
+        return @(Invoke-GraphPagedCollection -Uri $startsWithUri -Operation 'Get Intune managedDevices startswith-name page' -MaxItems 1)
+    }
+
+    $uri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$filter=operatingSystem eq 'Windows'&`$select=$select&`$top=$pageSize"
+    return @(Invoke-GraphPagedCollection -Uri $uri -Operation 'Get Intune managedDevices page' -MaxItems $MaxItems)
 }
 
 function Get-ADPartsFromDN {
@@ -702,55 +812,30 @@ try {
                       ([string]::IsNullOrWhiteSpace($ManagedDeviceId) -and [string]::IsNullOrWhiteSpace($DeviceName))
 
         if ($processAll) {
-            # All Windows devices
-            Write-Host "Retrieving all Intune managed Windows devices..." -ForegroundColor Cyan
-            $devices = Invoke-WithRetry -Script {
-                Get-MgDeviceManagementManagedDevice `
-                    -Filter "operatingSystem eq 'Windows'" `
-                    -All `
-                    -Property "id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName"
+            Write-Host "Retrieving all Intune managed Windows devices with explicit Graph paging..." -ForegroundColor Cyan
+            if ($script:MaxDevicesEffective -gt 0) {
+                Write-Host ("MaxDevices smoke cap active: {0}" -f $script:MaxDevicesEffective) -ForegroundColor Yellow
             }
+            $devices = @(Get-ManagedWindowsDevicesFast -MaxItems $script:MaxDevicesEffective)
             if (-not $devices -or $devices.Count -eq 0) {
                 Write-Error "No Windows managed devices found."
                 throw "No Windows managed devices found."
             }
         } elseif (-not [string]::IsNullOrWhiteSpace($ManagedDeviceId)) {
             Write-Host "Resolving device by ManagedDeviceId '$ManagedDeviceId'..." -ForegroundColor Cyan
-            $light = Invoke-WithRetry -Script {
-                Get-MgDeviceManagementManagedDevice `
-                    -ManagedDeviceId $ManagedDeviceId `
-                    -Property "id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName"
-            }
-            if (-not $light) {
+            $devices = @(Get-ManagedWindowsDevicesFast -ManagedDeviceId $ManagedDeviceId -MaxItems 1)
+            if (-not $devices -or $devices.Count -eq 0) {
                 throw ("No device found with ManagedDeviceId='{0}'." -f $ManagedDeviceId)
             }
-            $devices = @($light)
         } else {
             Write-Host "Resolving device by DeviceName '$DeviceName'..." -ForegroundColor Cyan
-            $escaped = $DeviceName.Replace("'", "''")
-
-            $light = Invoke-WithRetry -Script {
-                Get-MgDeviceManagementManagedDevice `
-                    -Filter "operatingSystem eq 'Windows' and deviceName eq '$escaped'" `
-                    -Top 1 `
-                    -Property "id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName"
-            }
-
-            if (-not $light) {
-                $light = Invoke-WithRetry -Script {
-                    Get-MgDeviceManagementManagedDevice `
-                        -Filter "operatingSystem eq 'Windows' and startswith(deviceName,'$escaped')" `
-                        -Top 1 `
-                        -Property "id,deviceName,manufacturer,model,operatingSystem,lastSyncDateTime,complianceState,complianceGracePeriodExpirationDateTime,azureADDeviceId,userPrincipalName"
-                }
-            }
-
-            if (-not $light) {
+            $devices = @(Get-ManagedWindowsDevicesFast -DeviceName $DeviceName -MaxItems 1)
+            if (-not $devices -or $devices.Count -eq 0) {
                 throw ("No Windows device found for DeviceName='{0}'." -f $DeviceName)
             }
-
-            $devices = @($light)
         }
+
+        Write-Host ("Managed Windows devices selected for compliance summary: {0}" -f @($devices).Count) -ForegroundColor Cyan
     } catch {
         Write-Error "Failed to resolve target devices. $_"
         throw
@@ -780,7 +865,7 @@ try {
         $dirSource    = $null
         $entraObjId   = $null
 
-        if ($azureId) {
+        if ($script:EnableDirectoryEnrichmentEffective -and $azureId) {
             if ($aadCache.ContainsKey($azureId)) {
                 $adOU       = $aadCache[$azureId].AD_OU
                 $adDomain   = $aadCache[$azureId].AD_Domain
@@ -796,7 +881,9 @@ try {
             }
         } elseif ($primaryUpn) {
             $adDomain  = ($primaryUpn -split '@', 2)[1]
-            $dirSource = 'AADOnly'
+            $dirSource = if ($script:EnableDirectoryEnrichmentEffective) { 'AADOnly' } else { 'NotEnriched' }
+        } else {
+            $dirSource = if ($script:EnableDirectoryEnrichmentEffective) { $null } else { 'NotEnriched' }
         }
 
         # main row
@@ -969,20 +1056,41 @@ try {
     # 3) Output
     if ($rows.Count -gt 0) {
         Write-Host ""
-        Write-Host "Devices summary:" -ForegroundColor Cyan
-        $rows | Select-Object `
-            DeviceName, Manufacturer, Model, OperatingSystem, LastSyncDateTime, `
-            ComplianceState, ComplianceGracePeriodExpirationDateTime, `
-            AD_Domain, AD_OU, DirectorySource |
-        Format-Table -AutoSize
+        Write-Host ("Devices compliance summary: {0} row(s)" -f $rows.Count) -ForegroundColor Cyan
+
+        $summaryOut = $rows |
+            Sort-Object DeviceName |
+            Select-Object `
+                DeviceName, AzureADDeviceId, EntraObjectId, Manufacturer, Model, OperatingSystem, LastSyncDateTime, `
+                ComplianceState, ComplianceGracePeriodExpirationDateTime, `
+                AD_Domain, AD_OU, DirectorySource
+
+        $summaryOut | Select-Object -First 25 | Format-Table -AutoSize
+        if ($summaryOut.Count -gt 25) {
+            Write-Host ("Displayed first 25 of {0} device summary rows." -f $summaryOut.Count) -ForegroundColor DarkCyan
+        }
+
+        try {
+            Write-SmartM365CsvAtomically -Data @($summaryOut) -Path $mainCsv
+            Export-SmartM365Csv -Data @($summaryOut) -TimestampedPath $tsCsv -LatestPath $lastCsv | Out-Null
+
+            Write-Host "Compliance summary CSV saved: $mainCsv"
+            Write-Host "Compliance summary CSV timestamped: $tsCsv"
+            Write-Host "Compliance summary CSV (last): $lastCsv"
+        } catch {
+            Write-Warning "Failed to export compliance summary CSVs: $_"
+        }
     } else {
         Write-Host ""
-        Write-Host "No devices to display." -ForegroundColor Yellow
+        Write-Host "No devices to display or export." -ForegroundColor Yellow
     }
 
-    if ($polAll.Count -gt 0) {
+    if (-not $script:IncludePolicyStatesEffective) {
         Write-Host ""
-        Write-Host "Compliance details (per policy):" -ForegroundColor Cyan
+        Write-Host "Compliance policy detail collection skipped by default. Use -IncludePolicyStates `$true for detailed per-policy CSV." -ForegroundColor Yellow
+    } elseif ($polAll.Count -gt 0) {
+        Write-Host ""
+        Write-Host ("Compliance details per policy: {0} row(s)" -f $polAll.Count) -ForegroundColor Cyan
 
         $polOut = $polAll |
             Sort-Object DeviceName, displayName, version |
@@ -993,17 +1101,20 @@ try {
                 Firewall, CodeIntegrity, OSVersion, UEFI, `
                 AD_Domain, AD_OU, DirectorySource
 
-        $polOut | Format-Table -AutoSize -Wrap
+        $polOut | Select-Object -First 50 | Format-Table -AutoSize -Wrap
+        if ($polOut.Count -gt 50) {
+            Write-Host ("Displayed first 50 of {0} policy detail rows." -f $polOut.Count) -ForegroundColor DarkCyan
+        }
 
         try {
-            Write-SmartM365CsvAtomically -Data @($polOut) -Path $mainCsv
-            Export-SmartM365Csv -Data @($polOut) -TimestampedPath $tsCsv -LatestPath $lastCsv | Out-Null
+            Write-SmartM365CsvAtomically -Data @($polOut) -Path $policyMainCsv
+            Export-SmartM365Csv -Data @($polOut) -TimestampedPath $policyTsCsv -LatestPath $policyLastCsv | Out-Null
 
-            Write-Host "Compliance CSV saved: $mainCsv"
-            Write-Host "Compliance CSV timestamped: $tsCsv"
-            Write-Host "Compliance CSV (last): $lastCsv"
+            Write-Host "Compliance policy CSV saved: $policyMainCsv"
+            Write-Host "Compliance policy CSV timestamped: $policyTsCsv"
+            Write-Host "Compliance policy CSV (last): $policyLastCsv"
         } catch {
-            Write-Warning "Failed to export compliance CSVs: $_"
+            Write-Warning "Failed to export compliance policy CSVs: $_"
         }
     } else {
         Write-Host ""
@@ -1011,7 +1122,9 @@ try {
     }
 }
 catch {
+    $script:ComplianceFatalError = $_
     Write-Host "A global error occurred in M365-Devices-Compliance.ps1 : $($_.Exception.Message)" -ForegroundColor Red
+    Write-Error $script:ComplianceFatalError
 }
 finally {
     # Disconnect Graph only if we connected it in this run
@@ -1031,5 +1144,10 @@ finally {
                 Update-SmartM365TimestampedTranscript -Path $transcriptPath
             }
         } catch { }
+    } catch { }
+
+    try {
+        $finalStatus = if ($script:ComplianceFatalError) { 'Failed' } else { 'Auto' }
+        Complete-SmartM365ExecutionContext -Status $finalStatus
     } catch { }
 }
