@@ -10,7 +10,7 @@
     - Disk drives from Win32_DiskDrive
     - Optional Exchange mailbox database paths
     - Optional Exchange service health
-    - Exchange schema and migration readiness configuration
+    - Exchange schema and readiness configuration
     - Per-server decommissioning summary
     - Global CSV summary
     - HTML executive summary for slide integration
@@ -26,7 +26,7 @@
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.4.8
+    Version     : 1.4.9
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
@@ -52,10 +52,10 @@
       - Renames the script to Exchange OnPrem Infrastructure and Readiness inventory.
 
     1.4.1
-      - Renders the full Exchange migration readiness inventory in the HTML report.
+      - Renders the full Exchange readiness inventory in the HTML report.
 
     1.4.0
-      - Adds AD Exchange schema and Exchange migration readiness configuration inventory.
+      - Adds AD Exchange schema and Exchange readiness configuration inventory.
 
     1.3.7
       - Applies the script local JSON overrides before reading mail and SharePoint settings.
@@ -129,7 +129,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.4.8"
+$ScriptVersion = "1.4.9"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1307,7 +1307,7 @@ function New-HtmlExecutiveSummary {
             <th>Value</th>
             <th>Importance</th>
             <th>Status</th>
-            <th>Migration focus</th>
+            <th>Readiness focus</th>
             <th>Error</th>
           </tr>
         </thead>
@@ -1320,7 +1320,7 @@ function New-HtmlExecutiveSummary {
 
     $readinessSection = if ($readinessRows.Count -gt 0) {
 @"
-      <h2>Exchange migration readiness configuration</h2>
+      <h2>Exchange readiness configuration</h2>
       <div class="summary">
         Collected <strong>$(Format-HtmlValue $readinessRows.Count)</strong> Exchange configuration readiness records for Exchange SE and Exchange Online planning. AD schema rangeUpper: <strong>$(Format-HtmlValue $Summary.ExchangeSchemaRangeUpper)</strong>. Exchange organization objectVersion: <strong>$(Format-HtmlValue $Summary.ExchangeOrgObjectVersion)</strong>. Review warnings: <strong>$(Format-HtmlValue $readinessWarningCount)</strong>. Collection errors: <strong>$(Format-HtmlValue $readinessErrorCount)</strong>. Every collected readiness record is rendered below and also attached as CSV.
       </div>
@@ -1334,7 +1334,7 @@ function New-HtmlExecutiveSummary {
 <html>
 <head>
 <meta charset="utf-8">
-<title>Exchange On-Premises Infrastructure and Migration Readiness</title>
+<title>Exchange On-Premises Infrastructure and Readiness</title>
 <style>
 body { margin: 0; padding: 0; background: #f6f8fb; color: #0f172a; font-family: Segoe UI, Arial, sans-serif; }
 .shell { max-width: 1180px; margin: 0 auto; padding: 24px; }
@@ -1390,7 +1390,7 @@ td.num, th.num { text-align: right; }
   <div class="panel">
     <div class="hero">
       <div class="eyebrow">Smart365 Exchange OnPrem</div>
-      <h1>Exchange On-Premises Infrastructure and Migration Readiness</h1>
+      <h1>Exchange On-Premises Infrastructure and Readiness</h1>
       <div class="subtitle">Executive summary generated on $(Format-HtmlValue $Summary.ExecutionDate) - RunId $(Format-HtmlValue $Summary.RunId)</div>
     </div>
 
@@ -1540,11 +1540,11 @@ try {
         Write-Log "Mailbox database path inventory exported to: $databasePathsPath"
     }
 
-    Write-Log "Collecting Exchange schema and migration readiness configuration."
+    Write-Log "Collecting Exchange schema and readiness configuration."
     $exchangeReadinessInventory = @(Get-ExchangeReadinessInventory -ExchangeServerNames @($exchangeServers.Name))
     $exchangeReadinessPath = Join-Path $OutputFolder "Exchange_OnPrem_MigrationReadiness_Config.csv"
     Export-ServersAndStorageCsv -Data @($exchangeReadinessInventory) -Path $exchangeReadinessPath
-    Write-Log "Exchange schema and migration readiness configuration exported to: $exchangeReadinessPath"
+    Write-Log "Exchange schema and readiness configuration exported to: $exchangeReadinessPath"
 
     $logicalDiskRows = @($logicalDiskInventory)
     $successfulLogicalDiskRows = @($logicalDiskRows | Where-Object { $_.CollectionStatus -eq "OK" })
