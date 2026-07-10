@@ -23,12 +23,28 @@
 .PARAMETER OutputPath
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
+.PARAMETER MaxPages
+    Maximum number of Graph pages to retrieve. Acts as a safety guard against endless pagination and
+    as a quick smoke test limiter (e.g. -MaxPages 3). When the limit is reached the script logs a
+    warning and exports the partial result set. Defaults to 2000.
+
 .VERSION
-1.4
+1.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Required application permission: BackupRestore-Configuration.Read.All
+    Uses the Graph v1.0 Backup Storage API (GA). Note: displayName and email properties of
+    mailbox protection units are only returned with delegated permissions, not app-only.
+    v1.5 changes:
+      - Switched Graph endpoint from beta to v1.0.
+      - Replaced Invoke-MgGraphRequest -OutputType PSObject with -OutputType Json plus
+        ConvertFrom-Json to work around the SDK JSON-to-PSObject conversion failure
+        ("Argument types do not match") observed on large result sets.
+      - Added per-page progress logging (page number, page item count, cumulative count).
+      - Added MaxPages pagination guard with graceful partial export.
+      - Added Graph access probe with full error body logging for 403 diagnostics.
+      - StrictMode-safe status property access in protected unit filtering.
 #>
 
 [CmdletBinding()]
@@ -37,7 +53,8 @@ param(
     [switch]$Connect,
     [switch]$InteractiveAuth,
     [switch]$IncludeNonProtected,
-    [string]$OutputPath
+    [string]$OutputPath,
+    [ValidateRange(1, 100000)][int]$MaxPages = 2000
 )
 
 $tenantContextPath = & {
@@ -60,7 +77,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.4'
+$ScriptVersion = '1.5'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -233,29 +250,75 @@ function Connect-GraphForBackupInventory {
     WriteLog -Message 'Connected to Microsoft Graph.' -Level SUCCESS
 }
 
+function Get-SmartM365GraphErrorBody {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ErrorRecord)
+
+    try {
+        if ($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ErrorDetails.Message)) {
+            return [string]$ErrorRecord.ErrorDetails.Message
+        }
+    } catch {}
+    return ''
+}
+
 function Invoke-SmartM365GraphCollectionRequest {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Uri)
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [ValidateRange(1, 100000)][int]$MaxPages = 2000
+    )
 
     $items = New-Object System.Collections.Generic.List[object]
     $nextUri = $Uri
+    $pageIndex = 0
     while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
-        WriteLog -Message ("Calling Graph: {0}" -f $nextUri) -Level DEBUG
-        $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -OutputType PSObject -ErrorAction Stop
-        if ($response.PSObject.Properties['value']) { foreach ($item in @($response.value)) { [void]$items.Add($item) } }
-        else { [void]$items.Add($response) }
+        if ($pageIndex -ge $MaxPages) {
+            WriteLog -Message ("Graph pagination stopped at MaxPages limit ({0}). Result set is PARTIAL: {1} items retrieved." -f $MaxPages, $items.Count) -Level WARNING
+            break
+        }
+        $pageIndex++
+        WriteLog -Message ("Calling Graph (page {0}): {1}" -f $pageIndex, $nextUri) -Level DEBUG
+        try {
+            $rawJson = Invoke-MgGraphRequest -Method GET -Uri $nextUri -OutputType Json -ErrorAction Stop
+            $response = $rawJson | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            $errorBody = Get-SmartM365GraphErrorBody -ErrorRecord $_
+            WriteLog -Message ("Graph request failed on page {0} (cumulative items so far: {1}). Error: {2} Body: {3}" -f $pageIndex, $items.Count, $_.Exception.Message, $errorBody) -Level ERROR
+            throw
+        }
+        $pageItems = if ($response.PSObject.Properties['value']) { @($response.value) } else { @($response) }
+        foreach ($item in $pageItems) { [void]$items.Add($item) }
+        WriteLog -Message ("Graph page {0} retrieved: {1} items (cumulative: {2})." -f $pageIndex, $pageItems.Count, $items.Count) -Level INFO
         $nextLinkProperty = $response.PSObject.Properties['@odata.nextLink']
-        $nextUri = if ($nextLinkProperty) { [string]$nextLinkProperty.Value } else { '' }
+        $nextUri = if ($nextLinkProperty -and $null -ne $nextLinkProperty.Value) { [string]$nextLinkProperty.Value } else { '' }
     }
+    WriteLog -Message ("Graph collection completed: {0} pages, {1} items." -f $pageIndex, $items.Count) -Level SUCCESS
     return @($items)
+}
+
+function Test-SmartM365GraphAccess {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Uri)
+
+    try {
+        Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputType Json -ErrorAction Stop | Out-Null
+        WriteLog -Message ("Graph access probe OK: {0}" -f $Uri) -Level INFO
+    }
+    catch {
+        $errorBody = Get-SmartM365GraphErrorBody -ErrorRecord $_
+        WriteLog -Message ("Graph access probe failed: {0} Error: {1} Body: {2}" -f $Uri, $_.Exception.Message, $errorBody) -Level ERROR
+        throw
+    }
 }
 
 function Get-BackupMailboxProtectionUnits {
     [CmdletBinding()]
     param()
 
-    $uri = 'https://graph.microsoft.com/beta/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?$top=999'
-    return @(Invoke-SmartM365GraphCollectionRequest -Uri $uri)
+    $uri = 'https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?$top=999'
+    return @(Invoke-SmartM365GraphCollectionRequest -Uri $uri -MaxPages $MaxPages)
 }
 
 function Get-SmartM365NestedValue {
@@ -365,28 +428,32 @@ try {
     WriteLog -Message "Tenant profile: $Tenant" -Level INFO
     WriteLog -Message "Default WeeklyHistoryFolderPath: $WeeklyHistoryFolderPath" -Level INFO
     WriteLog -Message "IncludeNonProtected: $($IncludeNonProtected.IsPresent)" -Level INFO
+    WriteLog -Message "MaxPages: $MaxPages" -Level INFO
     if ($Connect) { WriteLog -Message 'Connect switch specified; Graph connection will be established by this script.' -Level INFO }
 
     $CurrentOperation = 'ConnectGraph'
     Connect-GraphForBackupInventory -UseInteractiveAuth:$InteractiveAuth -AppId $AppId -TenantId $TenantId -Thumbprint $Thumb
+
+    $CurrentOperation = 'GraphAccessProbe'
+    Test-SmartM365GraphAccess -Uri "https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?`$top=1"
 
     $CurrentOperation = 'Preflight'
     Invoke-SmartM365Preflight `
         -ScriptName $TaskName `
         -RequiredModules @('Microsoft.Graph.Authentication') `
         -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath) `
-        -GraphProbeUris @("https://graph.microsoft.com/beta/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?`$top=1") | Out-Null
+        -GraphProbeUris @("https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?`$top=1") | Out-Null
 
     $CurrentOperation = 'RetrieveBackupProtectionUnits'
     $allUnits = @(Get-BackupMailboxProtectionUnits)
-    $selectedUnits = if ($IncludeNonProtected) { $allUnits } else { @($allUnits | Where-Object { [string]$_.status -eq 'protected' }) }
+    $selectedUnits = if ($IncludeNonProtected) { $allUnits } else { @($allUnits | Where-Object { (Get-SmartM365NestedValue -Object $_ -Names @('status', 'protectionStatus')) -eq 'protected' }) }
     $exportDateTime = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     $rows = @($selectedUnits | ForEach-Object { ConvertTo-BackupMailboxInventoryRow -Unit $_ -ExportDateTime $exportDateTime -RunId $runId })
 
     $CurrentOperation = 'ExportCsv'
     Export-SmartM365Csv -Data $rows -TimestampedPath $timestampedCsvPath -LatestPath $latestCsvPath | Out-Null
 
-    $protectedCount = @($allUnits | Where-Object { [string]$_.status -eq 'protected' }).Count
+    $protectedCount = @($allUnits | Where-Object { (Get-SmartM365NestedValue -Object $_ -Names @('status', 'protectionStatus')) -eq 'protected' }).Count
     $resultSummary = "M365 Backup protected mailbox inventory completed. Exported rows: {0}; protected units: {1}; total units: {2}." -f $rows.Count, $protectedCount, $allUnits.Count
     WriteLog -Message $resultSummary -Level SUCCESS
 
