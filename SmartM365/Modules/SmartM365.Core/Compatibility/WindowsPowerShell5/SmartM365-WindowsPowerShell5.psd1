@@ -1,6 +1,6 @@
 @{
     RootModule = "SmartM365-WindowsPowerShell5.psm1"
-    ModuleVersion = "1.0.9"
+    ModuleVersion = "1.0.10"
     GUID = "dde15961-7933-412f-8d09-e1dd8a889b65"
     Author = "Internal automation team"
     CompanyName = "Internal"
@@ -14,6 +14,8 @@
         "EnsureExchangePSSnapinLoaded",
         "Format-SmartM365LogLine",
         "Update-SmartM365TimestampedTranscript",
+        "Get-SmartM365ModuleDiagnosticText",
+        "Write-SmartM365LoadedModuleVersions",
         "Complete-SmartM365ExecutionContext",
         "WriteLog",
         "Set-SmartM365CoreContext",
