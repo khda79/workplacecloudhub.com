@@ -24,7 +24,7 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .VERSION
-1.3
+1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -60,7 +60,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.3'
+$ScriptVersion = '1.4'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -254,7 +254,7 @@ function Get-BackupMailboxProtectionUnits {
     [CmdletBinding()]
     param()
 
-    $uri = 'https://graph.microsoft.com/beta/solutions/backupRestore/protectionUnits?$top=999'
+    $uri = 'https://graph.microsoft.com/beta/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?$top=999'
     return @(Invoke-SmartM365GraphCollectionRequest -Uri $uri)
 }
 
@@ -285,11 +285,11 @@ function ConvertTo-BackupMailboxInventoryRow {
         RunId                   = $RunId
         ProtectionUnitId        = Get-SmartM365NestedValue -Object $Unit -Names @('id')
         Status                  = Get-SmartM365NestedValue -Object $Unit -Names @('status', 'protectionStatus')
-        DisplayName             = Get-SmartM365NestedValue -Object $mailboxInfo -Names @('displayName', 'name')
-        UserPrincipalName       = Get-SmartM365NestedValue -Object $mailboxInfo -Names @('userPrincipalName', 'upn')
-        Mail                    = Get-SmartM365NestedValue -Object $mailboxInfo -Names @('mail', 'emailAddress', 'primarySmtpAddress')
-        MailboxId               = Get-SmartM365NestedValue -Object $mailboxInfo -Names @('id', 'mailboxId', 'userId')
-        MailboxType             = Get-SmartM365NestedValue -Object $mailboxInfo -Names @('mailboxType', 'recipientTypeDetails')
+        DisplayName             = if ($mailboxInfo) { Get-SmartM365NestedValue -Object $mailboxInfo -Names @('displayName', 'name') } else { Get-SmartM365NestedValue -Object $Unit -Names @('displayName') }
+        UserPrincipalName       = if ($mailboxInfo) { Get-SmartM365NestedValue -Object $mailboxInfo -Names @('userPrincipalName', 'upn') } else { '' }
+        Mail                    = if ($mailboxInfo) { Get-SmartM365NestedValue -Object $mailboxInfo -Names @('mail', 'emailAddress', 'primarySmtpAddress') } else { Get-SmartM365NestedValue -Object $Unit -Names @('email') }
+        MailboxId               = if ($mailboxInfo) { Get-SmartM365NestedValue -Object $mailboxInfo -Names @('id', 'mailboxId', 'userId') } else { Get-SmartM365NestedValue -Object $Unit -Names @('directoryObjectId') }
+        MailboxType             = if ($mailboxInfo) { Get-SmartM365NestedValue -Object $mailboxInfo -Names @('mailboxType', 'recipientTypeDetails') } else { Get-SmartM365NestedValue -Object $Unit -Names @('mailboxType') }
         ProtectionPolicyId      = Get-SmartM365NestedValue -Object $Unit -Names @('protectionPolicyId', 'policyId')
         ProtectionPolicyName    = Get-SmartM365NestedValue -Object $Unit -Names @('protectionPolicyName', 'policyName')
         CreatedDateTime         = Get-SmartM365NestedValue -Object $Unit -Names @('createdDateTime')
@@ -375,7 +375,7 @@ try {
         -ScriptName $TaskName `
         -RequiredModules @('Microsoft.Graph.Authentication') `
         -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath) `
-        -GraphProbeUris @("https://graph.microsoft.com/beta/solutions/backupRestore/protectionUnits?`$top=1") | Out-Null
+        -GraphProbeUris @("https://graph.microsoft.com/beta/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?`$top=1") | Out-Null
 
     $CurrentOperation = 'RetrieveBackupProtectionUnits'
     $allUnits = @(Get-BackupMailboxProtectionUnits)
