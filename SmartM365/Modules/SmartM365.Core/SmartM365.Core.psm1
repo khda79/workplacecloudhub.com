@@ -2283,7 +2283,36 @@ function Invoke-SmartM365GraphRestWithRetry {
             try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
             $message = [string]$_.Exception.Message
             $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable'
-            if (-not $isTransient -or $attempt -ge $MaxAttempts) { throw }
+            if (-not $isTransient -or $attempt -ge $MaxAttempts) {
+                $responseBody = $null
+                try {
+                    if ($_.Exception.Response) {
+                        $errorResponse = $_.Exception.Response
+                        if ($errorResponse -is [System.Net.Http.HttpResponseMessage]) {
+                            if ($errorResponse.Content) {
+                                $responseBody = $errorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                            }
+                        }
+                        else {
+                            $responseStream = $errorResponse.GetResponseStream()
+                            if ($responseStream) {
+                                $reader = New-Object System.IO.StreamReader($responseStream)
+                                try { $responseBody = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                            }
+                        }
+                    }
+                } catch {}
+                try {
+                    if ([string]::IsNullOrWhiteSpace($responseBody) -and $_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
+                        $responseBody = [string]$_.ErrorDetails.Message
+                    }
+                } catch {}
+                $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                    throw ("{0} failed. Method={1}; Status={2}; Error={3}; Body={4}" -f $Operation, $Method, $statusText, $message, $responseBody)
+                }
+                throw ("{0} failed. Method={1}; Status={2}; Error={3}. No response body was returned." -f $Operation, $Method, $statusText, $message)
+            }
 
             $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
             $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
@@ -2306,7 +2335,6 @@ function Invoke-SmartM365SharePointLargeFileUpload {
     $sessionBody = @{
         item = @{
             '@microsoft.graph.conflictBehavior' = 'replace'
-            name = $fileInfo.Name
         }
     } | ConvertTo-Json -Depth 5
     $sessionUri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/createUploadSession" -f $DriveId, $TargetPath
