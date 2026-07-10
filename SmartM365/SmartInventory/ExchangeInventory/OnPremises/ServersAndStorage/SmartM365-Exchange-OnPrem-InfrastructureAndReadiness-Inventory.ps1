@@ -22,11 +22,11 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.5.0
+    1.5.1
 
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.5.0
+    Version     : 1.5.1
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange read permissions
@@ -34,6 +34,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.5.1
+      - Fixes report-only regeneration when a source CSV contains a single row under StrictMode.
+
     1.5.0
       - Adds report-only regeneration from existing DATA-ALL CSV files.
       - Adds priority issue and readiness status summary tables to the HTML report.
@@ -137,7 +140,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.5.0"
+$ScriptVersion = "1.5.1"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1581,12 +1584,12 @@ function Invoke-ServersAndStorageHtmlReportRegeneration {
     Write-Log "Regenerating HTML executive summary from existing DATA-ALL CSV files."
     Write-Log "Existing run folder: $RunFolder"
 
-    $summaryRows = Import-ServersAndStorageExistingCsv -Path $summaryPath -Description 'global summary'
+    $summaryRows = @(Import-ServersAndStorageExistingCsv -Path $summaryPath -Description 'global summary')
     if ($summaryRows.Count -lt 1) { throw "Global summary CSV is empty: $summaryPath" }
 
     $summary = $summaryRows | Select-Object -First 1
-    $perServerSummary = Import-ServersAndStorageExistingCsv -Path $perServerSummaryPath -Description 'per-server infrastructure summary'
-    $exchangeReadinessInventory = Import-ServersAndStorageExistingCsv -Path $exchangeReadinessPath -Description 'Exchange readiness configuration'
+    $perServerSummary = @(Import-ServersAndStorageExistingCsv -Path $perServerSummaryPath -Description 'per-server infrastructure summary')
+    $exchangeReadinessInventory = @(Import-ServersAndStorageExistingCsv -Path $exchangeReadinessPath -Description 'Exchange readiness configuration')
 
     New-HtmlExecutiveSummary -Summary $summary -PerServerSummary @($perServerSummary) -ReadinessInventory @($exchangeReadinessInventory) -Path $htmlSummaryPath
     Write-Log "HTML executive summary regenerated to: $htmlSummaryPath"
