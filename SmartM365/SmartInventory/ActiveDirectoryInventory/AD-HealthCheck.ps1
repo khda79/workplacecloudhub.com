@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.0
+    1.0.1
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -14,7 +14,8 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost','',Justification='Final console status is intentional for command-line use.')]
 [CmdletBinding()]
 param(
-    [string]$OutputFolder = (Join-Path $PSScriptRoot 'Output'),
+    [string]$Tenant = 'test',
+    [string]$OutputFolder = '',
     [switch]$AppendHistory,
     [string]$HistoryCsvPath,
     [string[]]$To = @(),
@@ -43,6 +44,65 @@ $RunStarted = Get-Date
 $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)
 $RunId = [guid]::NewGuid().ToString()
 $Rows = New-Object 'System.Collections.Generic.List[object]'
+$ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+$TenantContextPath = & {
+    $d = $PSScriptRoot
+    while ($d) {
+        foreach ($candidate in @((Join-Path $d 'SmartM365-TenantContext.ps1'), (Join-Path $d 'Config\SmartM365-TenantContext.ps1'))) {
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365-TenantContext.ps1 not found.'
+}
+. $TenantContextPath
+$TenantContext = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
+$SmartM365Root = $TenantContext.WorkspaceRootPath
+$CoreModulePath = Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1'
+Import-Module $CoreModulePath -Force -ErrorAction Stop
+$LocalConfigPath = Join-Path $PSScriptRoot ("$ScriptBaseName.local.json")
+$LocalTemplatePath = "$LocalConfigPath.template"
+if (-not (Test-Path -LiteralPath $LocalConfigPath)) {
+    if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) {
+        Initialize-SmartM365LocalJsonFromTemplate -Path $LocalConfigPath -TemplatePath $LocalTemplatePath -ConfigDescription 'script local configuration' | Out-Null
+    }
+    elseif (Test-Path -LiteralPath $LocalTemplatePath) {
+        Copy-Item -LiteralPath $LocalTemplatePath -Destination $LocalConfigPath -ErrorAction Stop
+    }
+}
+$ScriptConfig = if (Test-Path -LiteralPath $LocalConfigPath) { Get-Content -LiteralPath $LocalConfigPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+function Resolve-ConfigToken([AllowNull()][object]$Value) {
+    if ($Value -isnot [string]) { return $Value }
+    $resolved = $Value
+    for ($i = 0; $i -lt 10; $i++) {
+        $tokenMatches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
+        if ($tokenMatches.Count -eq 0) { break }
+        foreach ($match in $tokenMatches) {
+            $name = $match.Groups['Name'].Value
+            $prop = $TenantContext.PSObject.Properties[$name]
+            if ($prop -and $null -ne $prop.Value) { $resolved = $resolved.Replace($match.Value, [string]$prop.Value) }
+        }
+    }
+    return $resolved
+}
+function Get-LocalConfigValue([string]$Name, [AllowNull()][object]$DefaultValue) {
+    $prop = $ScriptConfig.PSObject.Properties[$Name]
+    if ($prop -and $null -ne $prop.Value) {
+        if ($prop.Value -isnot [string] -or ($prop.Value.Trim() -and $prop.Value.Trim() -notin @('__USE_GLOBAL__','USE_GLOBAL'))) {
+            return Resolve-ConfigToken $prop.Value
+        }
+    }
+    $ctxProp = $TenantContext.PSObject.Properties[$Name]
+    if ($ctxProp -and $null -ne $ctxProp.Value) { return Resolve-ConfigToken $ctxProp.Value }
+    return Resolve-ConfigToken $DefaultValue
+}
+if ([string]::IsNullOrWhiteSpace($OutputFolder)) { $OutputFolder = [string](Get-LocalConfigValue 'ADHealthCheckCsvLogFolderPath' '{{DataAllRootPath}}\ActiveDirectory\HealthCheck') }
+$LatestCsvFolderPath = [string](Get-LocalConfigValue 'LatestCsvFolderPath' $TenantContext.LatestCsvFolderPath)
+if (-not $PSBoundParameters.ContainsKey('AlwaysSend')) { $AlwaysSend = [bool](Get-LocalConfigValue 'AlwaysSend' $false) }
+if (-not $PSBoundParameters.ContainsKey('AppendHistory')) { $AppendHistory = [bool](Get-LocalConfigValue 'AppendHistory' $false) }
+if ([string]::IsNullOrWhiteSpace($HistoryCsvPath)) { $HistoryCsvPath = [string](Get-LocalConfigValue 'HistoryCsvPath' '{{DataAllRootPath}}\ActiveDirectory\HealthCheck\AD_HealthCheck_History.csv') }
 function ConvertTo-IsoUtc([datetime]$d){ if($null -eq $d -or $d -eq [datetime]::MinValue){''}else{$d.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)} }
 function Num($v){ if($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)){''}else{ try{([double]$v).ToString('0.########',[Globalization.CultureInfo]::InvariantCulture)}catch{[string]$v} } }
 function Ms($s){ [int64][math]::Max(0,((Get-Date)-$s).TotalMilliseconds) }
@@ -82,10 +142,14 @@ function Get-DfsrBacklog([string]$Src,[string]$Dst){
     $null
 }
 function Send-ReportMail([string]$Subject,[string]$Body){
-    if([string]::IsNullOrWhiteSpace($SmtpServer) -or [string]::IsNullOrWhiteSpace($From) -or $To.Count -eq 0){Write-Warning 'Email not sent: SmtpServer, From, or To is missing.';return}
-    $p=@{SmtpServer=$SmtpServer;Port=$SmtpPort;From=$From;To=$To;Subject=$Subject;Body=$Body;BodyAsHtml=$true;Encoding=[Text.Encoding]::UTF8}
-    if($UseSsl){$p.UseSsl=$true}; if($PSBoundParameters.ContainsKey('SmtpCredential')){$p.Credential=$SmtpCredential}
-    Send-MailMessage @p
+    $mailParams = @{ Subject = $Subject; BodyHtml = $Body; VerboseLog = $true }
+    if (-not [string]::IsNullOrWhiteSpace($SmtpServer)) { $mailParams.SmtpServer = $SmtpServer }
+    if (-not [string]::IsNullOrWhiteSpace($SendMailMode)) { $mailParams.SendMailMode = $SendMailMode }
+    if (-not [string]::IsNullOrWhiteSpace($From)) { $mailParams.From = $From }
+    if ($To.Count -gt 0) { $mailParams.To = ($To -join ';') }
+    if (-not [string]::IsNullOrWhiteSpace($Cc)) { $mailParams.Cc = $Cc }
+    if ($SmtpPort -ne 25) { $mailParams.SmtpPort = $SmtpPort }
+    SendEmailHtmlReport @mailParams
 }
 function ConvertTo-ReportHtml($r,[string]$status,[datetime]$started,[datetime]$ended,[string]$csv){
     $c=@{OK='#107c10';Warning='#ff8c00';Critical='#d13438'}[$status]; $find=@($r|Where-Object Status -ne OK|Sort-Object @{Expression={Rank $_.Status}},Domain,DC,Category,Check|Select-Object -First 200); $b=[Text.StringBuilder]::new()
@@ -140,13 +204,24 @@ try{
     $oldest=0.0;foreach($d in @($forest.Domains|Sort-Object)){try{foreach($f in @(Get-ADReplicationFailure -Target $d -Scope Domain -ErrorAction Stop)){if($f.FirstFailureTime -and $f.FirstFailureTime -ne [datetime]::MinValue){$days=((Get-Date).ToUniversalTime()-$f.FirstFailureTime.ToUniversalTime()).TotalDays;if($days -gt $oldest){$oldest=$days}}}}catch{ $null = $_ }}
     $st=if($oldest -gt $tomb){'Critical'}elseif($oldest -gt ($tomb*.8)){'Warning'}else{'OK'};Add-Row $forestName $forest.RootDomain '' Tombstone OldestReplicationFailureAgeDays $st ([math]::Round($oldest,2)) "TombstoneLifetimeDays=$tomb" "Critical > $tomb days; Warning > 80 percent" 'Compared with forest tombstone lifetime' 0
     $stamp=(Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
-    if($AppendHistory){if([string]::IsNullOrWhiteSpace($HistoryCsvPath)){$HistoryCsvPath=Join-Path $OutputFolder 'AD_HealthCheck_History.csv'};$csv=$HistoryCsvPath;if(Test-Path $csv){$Rows|Export-Csv $csv -NoTypeInformation -Append -Encoding utf8BOM}else{$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}}else{$csv=Join-Path $OutputFolder "AD_HealthCheck_$stamp.csv";$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}
+    if($AppendHistory){$csv=$HistoryCsvPath;if(Test-Path $csv){$Rows|Export-Csv $csv -NoTypeInformation -Append -Encoding utf8BOM}else{$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}}else{$csv=Join-Path $OutputFolder "AD_HealthCheck_$stamp.csv";$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}
+    if(-not (Test-Path -LiteralPath $LatestCsvFolderPath)){New-Item -Path $LatestCsvFolderPath -ItemType Directory -Force|Out-Null}
+    $latestCsv=Join-Path $LatestCsvFolderPath 'AD_HealthCheck.csv'
+    $Rows|Export-Csv $latestCsv -NoTypeInformation -Encoding utf8BOM
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csv
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestCsv
     $end=Get-Date;$all=@($Rows);$worst=Worst $all;$subject="[$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml $all $worst $RunStarted $end $csv;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
-    Write-Host "AD Health Check completed. Status=$worst; Rows=$($all.Count); Csv=$csv";if($worst -eq 'Critical'){exit 2};if($worst -eq 'Warning'){exit 1};exit 0
+    $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
+    Complete-SmartM365ExecutionContext -Status $summaryStatus -GeneratedCsvPaths @($csv,$latestCsv) -ResultSummary "AD health worst status: $worst; rows: $($all.Count)"
+    try { Stop-Transcript | Out-Null } catch { $null = $_ }
+    Write-Host "AD Health Check completed. Status=$worst; Rows=$($all.Count); Csv=$csv; Latest=$latestCsv"
+    if($worst -eq 'Critical'){exit 2};if($worst -eq 'Warning'){exit 1};exit 0
 }catch{
     Add-Row '' '' '' Script UnhandledError Critical 0 Failed 'Script completes' $_.Exception.Message 0
     if(-not (Test-Path -LiteralPath $OutputFolder)){New-Item -Path $OutputFolder -ItemType Directory -Force|Out-Null}
     $csv=Join-Path $OutputFolder ("AD_HealthCheck_FAILED_{0}.csv" -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture));$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM
-    try{$html=ConvertTo-ReportHtml @($Rows) Critical $RunStarted (Get-Date) $csv;if($AlwaysSend -or -not [string]::IsNullOrWhiteSpace($SmtpServer)){Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}}catch{Write-Warning $_.Exception.Message}
+    try{$html=ConvertTo-ReportHtml @($Rows) Critical $RunStarted (Get-Date) $csv;Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
+    try { Complete-SmartM365ExecutionContext -Status Failed -GeneratedCsvPaths @($csv) -ResultSummary 'AD health check failed before completion.' } catch { $null = $_ }
+    try { Stop-Transcript | Out-Null } catch { $null = $_ }
     Write-Error $_;exit 2
 }
