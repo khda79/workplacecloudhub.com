@@ -2241,9 +2241,12 @@ function Invoke-SmartM365SharePointLargeFileUpload {
         throw "SharePoint upload session did not return an uploadUrl."
     }
 
+    try { Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue } catch {}
+
     $uploadUrl = [string]$session.uploadUrl
     $lastUploadResponse = $null
     $stream = [System.IO.File]::OpenRead($LocalFilePath)
+    $httpClient = [System.Net.Http.HttpClient]::new()
     try {
         $buffer = New-Object byte[] $ChunkSizeBytes
         $offset = [int64]0
@@ -2253,31 +2256,32 @@ function Invoke-SmartM365SharePointLargeFileUpload {
             $bytesRead = $stream.Read($buffer, 0, $readSize)
             if ($bytesRead -le 0) { break }
 
-            $chunk = if ($bytesRead -eq $buffer.Length) {
-                $buffer
-            }
-            else {
-                $tmp = New-Object byte[] $bytesRead
-                [System.Array]::Copy($buffer, 0, $tmp, 0, $bytesRead)
-                $tmp
-            }
-
             $rangeEnd = $offset + $bytesRead - 1
-            $headers = @{
-                'Content-Length' = [string]$bytesRead
-                'Content-Range'  = ('bytes {0}-{1}/{2}' -f $offset, $rangeEnd, $stream.Length)
-            }
-
             $uploaded = $false
             for ($attempt = 1; -not $uploaded -and $attempt -le 4; $attempt++) {
+                $content = $null
+                $response = $null
+                $responseBody = $null
+                $statusCode = $null
                 try {
-                    $uploadResponse = Invoke-RestMethod -Method Put -Uri $uploadUrl -Headers $headers -Body $chunk -ErrorAction Stop
-                    if ($uploadResponse) { $lastUploadResponse = $uploadResponse }
+                    $content = [System.Net.Http.ByteArrayContent]::new($buffer, 0, $bytesRead)
+                    $content.Headers.ContentLength = [int64]$bytesRead
+                    $content.Headers.ContentRange = [System.Net.Http.Headers.ContentRangeHeaderValue]::new([int64]$offset, [int64]$rangeEnd, [int64]$stream.Length)
+
+                    $response = $httpClient.PutAsync($uploadUrl, $content).GetAwaiter().GetResult()
+                    $statusCode = [int]$response.StatusCode
+                    $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+                    if (-not $response.IsSuccessStatusCode) {
+                        throw ("SharePoint chunk upload failed. Status={0} ({1}). Body: {2}" -f $statusCode, $response.ReasonPhrase, $responseBody)
+                    }
+
+                    if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                        try { $lastUploadResponse = $responseBody | ConvertFrom-Json -ErrorAction Stop } catch { $lastUploadResponse = $responseBody }
+                    }
                     $uploaded = $true
                 }
                 catch {
-                    $statusCode = $null
-                    try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
                     $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $_.Exception.Message -match 'timeout|temporarily unavailable|throttl'
                     if (-not $isTransient -or $attempt -ge 4) { throw }
                     $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (10 * $attempt) -MaximumSeconds 300
@@ -2285,12 +2289,17 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                     WriteLog -Message ("SharePoint chunk upload transient failure. Status={0}; attempt {1}/4; retrying in {2}s." -f $statusText, $attempt, $delay) -Level "WARNING"
                     Start-Sleep -Seconds $delay
                 }
+                finally {
+                    if ($null -ne $response) { $response.Dispose() }
+                    if ($null -ne $content) { $content.Dispose() }
+                }
             }
 
             $offset += $bytesRead
         }
     }
     finally {
+        $httpClient.Dispose()
         $stream.Dispose()
     }
     return $lastUploadResponse
