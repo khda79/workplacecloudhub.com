@@ -3507,17 +3507,17 @@ Add-Type -AssemblyName System.Windows.Forms
         MinHeight="720"
         WindowStartupLocation="CenterScreen"
         WindowState="Maximized"
-        Background="#F4F8FB"
-        FontFamily="Segoe UI">
+        Background="#F5F8FB"
+        FontFamily="Segoe UI" FontSize="12" UseLayoutRounding="True" SnapsToDevicePixels="True">
     <Window.Resources>
-        <SolidColorBrush x:Key="InkBrush" Color="#102033"/>
-        <SolidColorBrush x:Key="MutedBrush" Color="#607086"/>
+        <SolidColorBrush x:Key="InkBrush" Color="#1F2937"/>
+        <SolidColorBrush x:Key="MutedBrush" Color="#475569"/>
         <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="PanelBorderBrush" Color="#D7E1EA"/>
-        <SolidColorBrush x:Key="HeaderBrush" Color="#061A2B"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#00AEEF"/>
-        <SolidColorBrush x:Key="AccentDarkBrush" Color="#0078A8"/>
-        <SolidColorBrush x:Key="SoftAccentBrush" Color="#E8F7FC"/>
+        <SolidColorBrush x:Key="PanelBorderBrush" Color="#D8E4F0"/>
+        <SolidColorBrush x:Key="HeaderBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#0078D4"/>
+        <SolidColorBrush x:Key="AccentDarkBrush" Color="#005A9E"/>
+        <SolidColorBrush x:Key="SoftAccentBrush" Color="#E7F3FF"/>
 
         <Style TargetType="Button">
             <Setter Property="Margin" Value="0,0,8,0"/>
@@ -3526,7 +3526,7 @@ Add-Type -AssemblyName System.Windows.Forms
             <Setter Property="ToolTipService.ShowOnDisabled" Value="True"/>
             <Setter Property="Background" Value="#FFFFFF"/>
             <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
-            <Setter Property="BorderBrush" Value="#B9C8D7"/>
+            <Setter Property="BorderBrush" Value="#CBDDEC"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -3652,22 +3652,22 @@ Add-Type -AssemblyName System.Windows.Forms
             <Setter Property="ColumnHeaderHeight" Value="36"/>
             <Setter Property="RowHeaderWidth" Value="0"/>
             <Setter Property="Background" Value="#FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#D7E3EC"/>
+            <Setter Property="BorderBrush" Value="#D8E4F0"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="HorizontalGridLinesBrush" Value="#E6EEF5"/>
-            <Setter Property="AlternatingRowBackground" Value="#F7FAFD"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#EEF4FA"/>
+            <Setter Property="AlternatingRowBackground" Value="#F8FBFE"/>
             <Setter Property="RowBackground" Value="#FFFFFF"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
         </Style>
         <Style TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#EAF3F9"/>
-            <Setter Property="Foreground" Value="#102B43"/>
+            <Setter Property="Background" Value="#F3F8FD"/>
+            <Setter Property="Foreground" Value="#1F2937"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Padding" Value="11,8"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="BorderBrush" Value="#D7E3EC"/>
+            <Setter Property="BorderBrush" Value="#D8E4F0"/>
             <Setter Property="BorderThickness" Value="0,0,0,1"/>
         </Style>
         <Style TargetType="DataGridRow">
@@ -3677,11 +3677,11 @@ Add-Type -AssemblyName System.Windows.Forms
             <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#E9F6FE"/>
+                    <Setter Property="Background" Value="#F8FBFE"/>
                 </Trigger>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#CFE8F8"/>
-                    <Setter Property="Foreground" Value="#061E33"/>
+                    <Setter Property="Background" Value="#E6F4FF"/>
+                    <Setter Property="Foreground" Value="#005A9E"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -3694,7 +3694,7 @@ Add-Type -AssemblyName System.Windows.Forms
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="Transparent"/>
-                    <Setter Property="Foreground" Value="#061E33"/>
+                    <Setter Property="Foreground" Value="#005A9E"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -3704,7 +3704,7 @@ Add-Type -AssemblyName System.Windows.Forms
             <Setter Property="Padding" Value="0"/>
         </Style>
         <Style TargetType="TabItem">
-            <Setter Property="Foreground" Value="#17324D"/>
+            <Setter Property="Foreground" Value="#475569"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="10,5"/>
@@ -3713,7 +3713,7 @@ Add-Type -AssemblyName System.Windows.Forms
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
                         <Border x:Name="TabBorder"
-                                Background="#F4F8FB"
+                                Background="#F5F8FB"
                                 BorderBrush="#D7E3EC"
                                 BorderThickness="1"
                                 CornerRadius="6"
@@ -3724,13 +3724,13 @@ Add-Type -AssemblyName System.Windows.Forms
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="TabBorder" Property="Background" Value="#D7ECFA"/>
-                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#6FB9E2"/>
-                                <Setter Property="Foreground" Value="#061E33"/>
+                                <Setter TargetName="TabBorder" Property="Background" Value="#E6F4FF"/>
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#B9DDF7"/>
+                                <Setter Property="Foreground" Value="#005A9E"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="TabBorder" Property="Background" Value="#E9F6FE"/>
-                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#9FD2EC"/>
+                                <Setter TargetName="TabBorder" Property="Background" Value="#F8FBFE"/>
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#B9DDF7"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.55"/>
@@ -3749,54 +3749,71 @@ Add-Type -AssemblyName System.Windows.Forms
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
+            <RowDefinition Height="0"/>
             <RowDefinition Height="2*"/>
             <RowDefinition Height="3*"/>
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
-                Background="{StaticResource HeaderBrush}"
-                BorderBrush="#00AEEF"
-                BorderThickness="0,0,0,3"
                 CornerRadius="8"
-                Padding="18,10">
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                Background="{StaticResource PanelBrush}"
+                Padding="20"
+                Margin="0,0,0,14">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="190"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <Border x:Name="LogoLink"
-                        Grid.Column="0"
-                        Width="190"
-                        Height="92"
-                        Margin="0,0,26,0"
-                        VerticalAlignment="Center"
-                        Cursor="Hand"
-                        ToolTip="Open WorkplaceCloudHub.com">
-                    <Image x:Name="LogoImage" Stretch="Uniform" VerticalAlignment="Center"/>
-                </Border>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <Border Background="{StaticResource SoftAccentBrush}"
+                            BorderBrush="#B5DCFF"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="10,3"
+                            HorizontalAlignment="Left"
+                            Margin="0,0,0,14">
+                        <TextBlock Text="SMARTM365 INTUNE"
+                                   Foreground="{StaticResource AccentDarkBrush}"
+                                   FontWeight="SemiBold"/>
+                    </Border>
                     <TextBlock Text="SmartM365 Intune Remediation"
-                               Foreground="#FFFFFF"
-                               FontSize="22"
+                               Foreground="{StaticResource InkBrush}"
+                               FontSize="28"
                                FontWeight="SemiBold"
-                               Margin="0,1,0,10"/>
+                               Margin="0,0,0,14"/>
                     <StackPanel Orientation="Horizontal">
                         <Button x:Name="ConnectButton" Content="Connect Graph" Style="{StaticResource PrimaryButton}"/>
                         <Button x:Name="RefreshButton" Content="Refresh all"/>
                     </StackPanel>
                 </StackPanel>
+                <Border x:Name="LogoLink"
+                        Grid.Column="1"
+                        BorderBrush="{StaticResource PanelBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Background="#F8FBFF"
+                        Padding="12"
+                        Margin="18,0,18,0"
+                        Cursor="Hand"
+                        ToolTip="Open WorkplaceCloudHub.com">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <Image x:Name="LogoImage" Width="128" Height="72" Stretch="Uniform" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <TextBlock Text="workplacecloudhub.com" Foreground="{StaticResource MutedBrush}" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Border>
                 <Border Grid.Column="2"
                         VerticalAlignment="Center"
-                        Background="#0B2A44"
-                        BorderBrush="#1D5E86"
+                        Background="#F8FBFF"
+                        BorderBrush="{StaticResource PanelBorderBrush}"
                         BorderThickness="1"
                         CornerRadius="8"
                         Padding="14,9"
                         MinWidth="250">
                     <TextBlock x:Name="StatusText"
-                               Foreground="#D9F6FF"
+                               Foreground="{StaticResource MutedBrush}"
                                FontSize="12"
                                FontWeight="SemiBold"
                                TextAlignment="Right"/>
