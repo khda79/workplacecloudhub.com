@@ -2641,8 +2641,12 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                         Body        = $chunk
                         ErrorAction = 'Stop'
                     }
-                    if ((Get-Command Invoke-WebRequest -ErrorAction Stop).Parameters.ContainsKey('UseBasicParsing')) {
+                    $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
+                    if ($invokeWebRequestCommand.Parameters.ContainsKey('UseBasicParsing')) {
                         $putParams.UseBasicParsing = $true
+                    }
+                    if ($invokeWebRequestCommand.Parameters.ContainsKey('SkipHttpErrorCheck')) {
+                        $putParams.SkipHttpErrorCheck = $true
                     }
 
                     $response = Invoke-WebRequest @putParams
@@ -2659,19 +2663,38 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                     $uploaded = $true
                 }
                 catch {
-                    try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
                     try {
-                        if ($_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
+                        if ($_.Exception.Response) {
+                            $errorResponse = $_.Exception.Response
+                            if ($errorResponse -is [System.Net.Http.HttpResponseMessage]) {
+                                $statusCode = [int]$errorResponse.StatusCode
+                                if ($errorResponse.Content) {
+                                    $responseBody = $errorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                                }
+                            }
+                            else {
+                                $statusCode = [int]$errorResponse.StatusCode
+                                $responseStream = $errorResponse.GetResponseStream()
+                                if ($responseStream) {
+                                    $reader = New-Object System.IO.StreamReader($responseStream)
+                                    try { $responseBody = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                                }
+                            }
+                        }
+                    } catch {}
+                    try {
+                        if ([string]::IsNullOrWhiteSpace($responseBody) -and $_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
                             $responseBody = [string]$_.ErrorDetails.Message
                         }
                     } catch {}
                     $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $_.Exception.Message -match 'timeout|temporarily unavailable|throttl'
                     if (-not $isTransient -or $attempt -ge 4) {
+                        $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                        $rangeText = "bytes {0}-{1}/{2}" -f $offset, $rangeEnd, $fileSize
                         if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
-                            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
-                            throw ("SharePoint chunk upload failed. Status={0}. Error={1}. Body={2}" -f $statusText, $_.Exception.Message, $responseBody)
+                            throw ("SharePoint chunk upload failed. Status={0}. Range={1}. Error={2}. Body={3}" -f $statusText, $rangeText, $_.Exception.Message, $responseBody)
                         }
-                        throw
+                        throw ("SharePoint chunk upload failed. Status={0}. Range={1}. Error={2}. No response body was returned." -f $statusText, $rangeText, $_.Exception.Message)
                     }
                     $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (10 * $attempt) -MaximumSeconds 300
                     $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
