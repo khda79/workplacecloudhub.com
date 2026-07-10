@@ -20,7 +20,7 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .VERSION
-1.0
+1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -50,7 +50,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0'
+$ScriptVersion = '1.4'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 
@@ -101,7 +101,7 @@ function Resolve-SmartM365ConfigValue {
         $matches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
         if ($matches.Count -eq 0) { break }
         $changed = $false
-        foreach ($match in $tokenMatches) {
+        foreach ($match in $matches) {
             $tokenProperty = $globalConfig.PSObject.Properties[$match.Groups['Name'].Value]
             if ($null -eq $tokenProperty -or $null -eq $tokenProperty.Value) { continue }
             $tokenValue = Resolve-SmartM365ConfigValue -Value $tokenProperty.Value
@@ -146,6 +146,21 @@ function Import-SmartM365CoreModule {
     Import-Module $modulePath -Force -ErrorAction Stop
 }
 
+function Get-CsvPropertyValue {
+    param(
+        [Parameter(Mandatory)]$Row,
+        [Parameter(Mandatory)][string[]]$Names,
+        [string]$DefaultValue = ''
+    )
+
+    foreach ($name in $Names) {
+        $property = $Row.PSObject.Properties[$name]
+        if ($null -ne $property -and $null -ne $property.Value) {
+            return [string]$property.Value
+        }
+    }
+    return $DefaultValue
+}
 function Split-PermissionList {
     param([AllowNull()][object]$Value)
     if ($null -eq $Value) { return @() }
@@ -241,41 +256,49 @@ try {
 
     $CurrentOperation = 'LoadSourceCsv'
     $sourceRows = [System.Collections.Generic.List[object]]::new()
-    if (-not [string]::IsNullOrWhiteSpace($LocalMailboxesCsvPath) -and (Test-Path -LiteralPath $LocalMailboxesCsvPath)) {
-        foreach ($row in @(Import-Csv -LiteralPath $LocalMailboxesCsvPath)) {
-            $sourceRows.Add([pscustomobject]@{
-                Source = 'Local'
-                Identity = [string]$row.Identity
-                PrimarySMTPaddress = [string]$row.PrimarySMTPaddress
-                DistinguishedName = [string]$row.DistinguishedName
-                ExternalDirectoryObjectId = ''
-                DomainName = [string]$row.DomainName
-                SamAccountName = [string]$row.SamAccountName
-                FullAccess = [string]$row.FullAccess
-                SendAs = [string]$row.SendAs
-                GrantSendOnBehalfTo = [string]$row.GrantSendOnBehalfTo
-            }) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($LocalMailboxesCsvPath)) {
+        $localMailboxRows = @(Import-SmartM365CsvWithSharePointFallback -Path $LocalMailboxesCsvPath -Description 'Local mailbox CSV')
+        if ($localMailboxRows.Count -gt 0) {
+            foreach ($row in $localMailboxRows) {
+                $sourceRows.Add([pscustomobject]@{
+                    Source = 'Local'
+                    Identity = Get-CsvPropertyValue -Row $row -Names @('Identity','Name','DisplayName')
+                    PrimarySMTPaddress = Get-CsvPropertyValue -Row $row -Names @('PrimarySMTPaddress','PrimarySmtpAddress','PrimarySMTPAddress','PrimaryEmailAddress')
+                    DistinguishedName = Get-CsvPropertyValue -Row $row -Names @('DistinguishedName')
+                    ExternalDirectoryObjectId = Get-CsvPropertyValue -Row $row -Names @('ExternalDirectoryObjectId','ExternalDirectoryObjectID','Guid')
+                    DomainName = Get-CsvPropertyValue -Row $row -Names @('DomainName','Domain')
+                    SamAccountName = Get-CsvPropertyValue -Row $row -Names @('SamAccountName','SAMAccountName','Sam')
+                    FullAccess = Get-CsvPropertyValue -Row $row -Names @('FullAccess','FullAccessPermissions')
+                    SendAs = Get-CsvPropertyValue -Row $row -Names @('SendAs','SendAsPermissions')
+                    GrantSendOnBehalfTo = Get-CsvPropertyValue -Row $row -Names @('GrantSendOnBehalfTo','SendOnBehalf','SendOnBehalfTo')
+                }) | Out-Null
+            }
         }
+        else { WriteLog -Message "Local mailbox CSV not found locally or in SharePoint: $LocalMailboxesCsvPath" -Level WARNING }
     }
-    else { WriteLog -Message "Local mailbox CSV not found or not configured: $LocalMailboxesCsvPath" -Level WARNING }
+    else { WriteLog -Message "Local mailbox CSV not configured: $LocalMailboxesCsvPath" -Level WARNING }
 
-    if (-not [string]::IsNullOrWhiteSpace($ExoMailboxesCsvPath) -and (Test-Path -LiteralPath $ExoMailboxesCsvPath)) {
-        foreach ($row in @(Import-Csv -LiteralPath $ExoMailboxesCsvPath)) {
-            $sourceRows.Add([pscustomobject]@{
-                Source = 'EXO'
-                Identity = [string]$row.UserPrincipalName
-                PrimarySMTPaddress = [string]$row.PrimarySmtpAddress
-                DistinguishedName = ''
-                ExternalDirectoryObjectId = [string]$row.ExternalDirectoryObjectId
-                DomainName = ''
-                SamAccountName = [string]$row.SamAccountName
-                FullAccess = [string]$row.FullAccess
-                SendAs = [string]$row.SendAs
-                GrantSendOnBehalfTo = [string]$row.GrantSendOnBehalfTo
-            }) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($ExoMailboxesCsvPath)) {
+        $exoMailboxRows = @(Import-SmartM365CsvWithSharePointFallback -Path $ExoMailboxesCsvPath -Description 'EXO mailbox CSV')
+        if ($exoMailboxRows.Count -gt 0) {
+            foreach ($row in $exoMailboxRows) {
+                $sourceRows.Add([pscustomobject]@{
+                    Source = 'EXO'
+                    Identity = Get-CsvPropertyValue -Row $row -Names @('UserPrincipalName','Identity','DisplayName')
+                    PrimarySMTPaddress = Get-CsvPropertyValue -Row $row -Names @('PrimarySmtpAddress','PrimarySMTPaddress','PrimarySMTPAddress','PrimaryEmailAddress')
+                    DistinguishedName = Get-CsvPropertyValue -Row $row -Names @('DistinguishedName')
+                    ExternalDirectoryObjectId = Get-CsvPropertyValue -Row $row -Names @('ExternalDirectoryObjectId','ExternalDirectoryObjectID','ExternalDirectoryObjectGuid','Guid')
+                    DomainName = Get-CsvPropertyValue -Row $row -Names @('DomainName','Domain')
+                    SamAccountName = Get-CsvPropertyValue -Row $row -Names @('SamAccountName','SAMAccountName','Sam','Alias')
+                    FullAccess = Get-CsvPropertyValue -Row $row -Names @('FullAccess','FullAccessPermissions')
+                    SendAs = Get-CsvPropertyValue -Row $row -Names @('SendAs','SendAsPermissions')
+                    GrantSendOnBehalfTo = Get-CsvPropertyValue -Row $row -Names @('GrantSendOnBehalfTo','SendOnBehalf','SendOnBehalfTo')
+                }) | Out-Null
+            }
         }
+        else { WriteLog -Message "EXO mailbox CSV not found locally or in SharePoint: $ExoMailboxesCsvPath" -Level WARNING }
     }
-    else { WriteLog -Message "EXO mailbox CSV not found or not configured: $ExoMailboxesCsvPath" -Level WARNING }
+    else { WriteLog -Message "EXO mailbox CSV not configured: $ExoMailboxesCsvPath" -Level WARNING }
 
     if ($sourceRows.Count -eq 0) { throw 'No source mailbox rows were loaded. Check LocalMailboxesCsvPath and ExoMailboxesCsvPath.' }
 
@@ -335,16 +358,15 @@ try {
     $message = "Mailbox permissions by user report completed. Source mailboxes: {0}; delegated users: {1}." -f $sourceRows.Count, $reportRows.Count
     WriteLog -Message $message -Level SUCCESS
     Send-PermissionsTeamsInfo -Message $message -Facts @{ Script = $MyInvocation.MyCommand.Name; SourceRows = $sourceRows.Count; DelegatedUsers = $reportRows.Count; LatestCsvPath = $latestCsvPath; LogFile = $global:LogTextFile }
-
-    Complete-SmartM365ExecutionContext -Status Auto
     try { Stop-Transcript | Out-Null } catch {}
+    Complete-SmartM365ExecutionContext -Status Auto
     try { RemoveOldFiles -Path $ScriptCsvLogFolderPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile } catch {}
     try { RemoveOldFiles -Path $logRoot -Filter '*.log' -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile } catch {}
 }
 catch {
     $globalError = $_
     WriteLog -Message ("Global error during {0}: {1}" -f $CurrentOperation, $globalError.Exception.Message) -Level ERROR
-    try { Complete-SmartM365ExecutionContext -Status Auto } catch {}
     try { Stop-Transcript | Out-Null } catch {}
+    try { Complete-SmartM365ExecutionContext -Status Auto } catch {}
     exit 1
 }

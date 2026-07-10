@@ -37,9 +37,9 @@ PARAMETERS
   -RiskTopN                  : Number of top-risk policies shown in email (default: 10)
 
 VERSION
-  1.4.0
+  1.5
 .VERSION
-1.1
+1.6
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -77,7 +77,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.6"
 
 # ==========================================================
 # App-only authentication parameters
@@ -261,6 +261,10 @@ $LastStatusDateColumn = "LastUpdateStatusTime"
 # Win11 Readiness enrichment input
 # ==========================================================
 $ReadinessCsvPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ReadinessCsvPath' -DefaultValue ""
+$ReadinessSummaryCsvPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ReadinessSummaryCsvPath' -DefaultValue ""
+if ([string]::IsNullOrWhiteSpace($ReadinessSummaryCsvPath) -and -not [string]::IsNullOrWhiteSpace($ReadinessCsvPath)) {
+    $ReadinessSummaryCsvPath = $ReadinessCsvPath -replace '_UpgradeEligibility\.csv$', '_UpgradeEligibility_Summary.csv'
+}
 
 # ==========================================================
 # Output paths (UNC)
@@ -308,9 +312,10 @@ $RiskIncludeUnknown = $false
 # ==========================================================
 # Graph mail configuration
 # ==========================================================
-$From              = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue ""
-
-$ErrorMailTo   = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ErrorMailTo' -DefaultValue ""
+$From        = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue ""
+$To          = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue ""
+$Cc          = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Cc' -DefaultValue ""
+$ErrorMailTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ErrorMailTo' -DefaultValue ""
 
 $SummaryStatePath = Join-Path $ScriptCsvLogFolderPath "Intune_WindowsUpdate_Status.lastcount.txt"
 
@@ -484,8 +489,10 @@ function Send-FatalErrorEmail {
 
     try {
         Import-SmartM365CorePreflight
-        Send-CoreSmartM365Mail -From $From -To $ErrorMailTo -Subject $Subject -BodyHtml $HtmlBody
-        Write-Log "Fatal error email sent via Graph." "INFO" "MAIL"
+        $mailParams = @{ To = $ErrorMailTo; Subject = $Subject; BodyHtml = $HtmlBody }
+        if (-not [string]::IsNullOrWhiteSpace($From)) { $mailParams['From'] = $From }
+        Send-CoreSmartM365Mail @mailParams
+        Write-Log "Fatal error email sent." "INFO" "MAIL"
     }
     catch {
         Write-Log "Failed to send fatal error email: $($_.Exception.Message)" "WARN" "MAIL"
@@ -497,15 +504,19 @@ function Send-SummaryEmail {
 
     if (-not $EnableSummaryEmail) { return }
     if ($DryRun) { Write-Log "DryRun: skipping summary email." "INFO" "DRYRUN"; return }
-    if ([string]::IsNullOrWhiteSpace($ErrorMailTo)) { return }
+    if ([string]::IsNullOrWhiteSpace($To)) { throw "Summary email requires To in configuration." }
 
     try {
         Import-SmartM365CorePreflight
-        Send-CoreSmartM365Mail -From $From -To $ErrorMailTo -Subject $Subject -BodyHtml $HtmlBody
-        Write-Log "Summary email sent via Graph." "INFO" "MAIL"
+        $mailParams = @{ To = $To; Subject = $Subject; BodyHtml = $HtmlBody }
+        if (-not [string]::IsNullOrWhiteSpace($From)) { $mailParams['From'] = $From }
+        if (-not [string]::IsNullOrWhiteSpace($Cc)) { $mailParams['Cc'] = $Cc }
+        Send-CoreSmartM365Mail @mailParams
+        Write-Log "Summary email sent." "INFO" "MAIL"
     }
     catch {
-        Write-Log "Failed to send summary email: $($_.Exception.Message)" "WARN" "MAIL"
+        Write-Log "Failed to send summary email: $($_.Exception.Message)" "ERROR" "MAIL"
+        throw
     }
 }
 
@@ -614,13 +625,79 @@ function Try-GetGraphErrorMessage {
     return $bodyText
 }
 
+function Get-GraphHttpStatusCode {
+    param([Parameter(Mandatory=$true)]$ErrorRecord)
+
+    try {
+        if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
+            return [int]$ErrorRecord.Exception.Response.StatusCode
+        }
+    } catch { }
+    return $null
+}
+
+function Get-GraphRetryDelaySeconds {
+    param(
+        [Parameter(Mandatory=$true)]$ErrorRecord,
+        [Parameter(Mandatory=$true)][int]$Attempt
+    )
+
+    try {
+        $retryAfter = $ErrorRecord.Exception.Response.Headers.RetryAfter
+        if ($retryAfter) {
+            if ($retryAfter.Delta) { return [math]::Max(1, [int][math]::Ceiling($retryAfter.Delta.TotalSeconds)) }
+            if ($retryAfter.Date) {
+                $seconds = [int][math]::Ceiling(($retryAfter.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds)
+                if ($seconds -gt 0) { return $seconds }
+            }
+        }
+    } catch { }
+
+    return [math]::Min(90, (10 * $Attempt) + (Get-Random -Minimum 1 -Maximum 5))
+}
+
+function Test-GraphTransientError {
+    param([Parameter(Mandatory=$true)]$ErrorRecord)
+
+    $statusCode = Get-GraphHttpStatusCode -ErrorRecord $ErrorRecord
+    return ($statusCode -eq 429 -or ($statusCode -ge 500 -and $statusCode -le 599))
+}
+
+function Invoke-GraphRestMethodWithRetry {
+    param(
+        [Parameter(Mandatory=$true)][ValidateSet('GET','POST')][string]$Method,
+        [Parameter(Mandatory=$true)][string]$Uri,
+        [Parameter(Mandatory=$true)][hashtable]$Headers,
+        [Parameter()][object]$Body,
+        [Parameter()][string]$ContentType,
+        [Parameter()][int]$MaxAttempts = 8,
+        [Parameter()][string]$Operation = 'Graph request'
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $params = @{ Method = $Method; Uri = $Uri; Headers = $Headers }
+            if ($null -ne $Body) { $params['Body'] = $Body }
+            if (-not [string]::IsNullOrWhiteSpace($ContentType)) { $params['ContentType'] = $ContentType }
+            return Invoke-RestMethod @params
+        }
+        catch {
+            if ($attempt -ge $MaxAttempts -or -not (Test-GraphTransientError -ErrorRecord $_)) { throw }
+            $statusCode = Get-GraphHttpStatusCode -ErrorRecord $_
+            $delay = Get-GraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt
+            Write-Log "$Operation transient Graph failure. Status=$statusCode; attempt $attempt/$MaxAttempts; waiting ${delay}s." "WARN" "GRAPH"
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 function Invoke-GraphGetAllPages {
     param([Parameter(Mandatory=$true)][string]$Uri,[Parameter(Mandatory=$true)][hashtable]$Headers)
 
     $all = New-Object System.Collections.Generic.List[object]
     $next = $Uri
     while ($next) {
-        $resp = Invoke-RestMethod -Method GET -Uri $next -Headers $Headers
+        $resp = Invoke-GraphRestMethodWithRetry -Method GET -Uri $next -Headers $Headers -Operation "Graph paging GET"
         if ($resp.value) { $resp.value | ForEach-Object { $all.Add($_) | Out-Null } }
         $next = $resp.'@odata.nextLink'
     }
@@ -659,14 +736,14 @@ function Start-IntuneExportJobRaw {
     $selectCount = if ($Select) { $Select.Count } else { 0 }
     Write-Log "Starting export job: reportName=$ReportName filter=$Filter selectCount=$selectCount" "INFO" "GRAPH"
 
-    $resp = Invoke-RestMethod -Method POST -Uri $uri -Headers $Headers -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
+    $resp = Invoke-GraphRestMethodWithRetry -Method POST -Uri $uri -Headers $Headers -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -Operation "Start Intune export job"
     if (-not $resp -or [string]::IsNullOrWhiteSpace($resp.id)) { throw "exportJobs POST returned no job id." }
     return $resp.id
 }
 
 function Get-IntuneExportJob {
     param([Parameter(Mandatory=$true)][string]$JobId,[Parameter(Mandatory=$true)][hashtable]$Headers)
-    return Invoke-RestMethod -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs('$JobId')" -Headers $Headers
+    return Invoke-GraphRestMethodWithRetry -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs('$JobId')" -Headers $Headers -Operation "Get Intune export job"
 }
 
 function Wait-IntuneExportJobComplete {
@@ -855,7 +932,7 @@ function Get-BlockingReason {
         [string]$LatestAlertMessageLoc
     )
 
-    $state = ($AggregateState ?? "").ToLowerInvariant()
+    $state = $(if ($null -eq $AggregateState) { "" } else { $AggregateState }).ToLowerInvariant()
     $alert = "$LatestAlertMessageLoc"
 
     if ($state -match "fail|error|blocked") {
@@ -949,8 +1026,7 @@ try {
     $headers = @{ Authorization = "Bearer $token" }
     Import-SmartM365CorePreflight
     Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequiredModules @('MSAL.PS') -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $ArchivePath, $LogsPath, $WorkPath) -GraphAccessToken $token -GraphProbeUris @(
-        'https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles?$top=1',
-        'https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs?$top=1'
+        'https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles?$top=1'
     ) | Out-Null
 
 
@@ -1035,14 +1111,56 @@ try {
     $readinessNotMatched      = 0
     $readinessMatchPct        = 0.0
     $readinessEligibilityDist = ""
+    $readinessMode            = $(if ($EnableReadinessEnrichment) { "Pending" } else { "Disabled" })
+    $readinessSummaryText     = ""
 
     if ($EnableReadinessEnrichment) {
-        if (-not (Test-Path $ReadinessCsvPath)) {
-            Write-Log "Readiness CSV not found, enrichment skipped: $ReadinessCsvPath" "WARN" "READINESS"
+        $resolvedReadinessCsvPath = $null
+        $resolvedReadinessSummaryCsvPath = $null
+        if (-not [string]::IsNullOrWhiteSpace($ReadinessCsvPath)) {
+            $resolvedReadinessCsvPath = Resolve-CoreSmartM365CsvPathWithSharePointFallback -Path $ReadinessCsvPath -Description 'Device-level Readiness CSV'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ReadinessSummaryCsvPath)) {
+            $resolvedReadinessSummaryCsvPath = Resolve-CoreSmartM365CsvPathWithSharePointFallback -Path $ReadinessSummaryCsvPath -Description 'Readiness summary CSV'
+        }
+
+        if ([string]::IsNullOrWhiteSpace($resolvedReadinessCsvPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($resolvedReadinessSummaryCsvPath) -and (Test-Path $resolvedReadinessSummaryCsvPath)) {
+                Write-Log "Device-level Readiness CSV not found; using summary context only: $resolvedReadinessSummaryCsvPath" "INFO" "READINESS"
+                $readinessMode = "SummaryOnly"
+                $summaryRow = @(Import-Csv -Path $resolvedReadinessSummaryCsvPath | Select-Object -First 1)
+                if ($summaryRow.Count -gt 0) {
+                    $s = $summaryRow[0]
+                    $readinessSummaryText = "TotalDeviceCount={0}; UpgradeEligibleDeviceCount={1}; UpgradeEligiblePercentage={2}; ProcessorFamilyCheckFailedPercentage={3}; TPMCheckFailedPercentage={4}; SecureBootCheckFailedPercentage={5}" -f $s.TotalDeviceCount,$s.UpgradeEligibleDeviceCount,$s.UpgradeEligiblePercentage,$s.ProcessorFamilyCheckFailedPercentage,$s.TPMCheckFailedPercentage,$s.SecureBootCheckFailedPercentage
+                    Write-Log "Readiness summary: $readinessSummaryText" "INFO" "READINESS"
+                }
+
+                $tmp = New-Object System.Collections.Generic.List[object]
+                foreach ($row in $rawRows) {
+                    $o = [ordered]@{}
+                    foreach ($pp in $row.PSObject.Properties) { $o[$pp.Name] = $pp.Value }
+                    $o["NormalizedDeviceName"]    = Normalize-DeviceName -DeviceName $row.DeviceName
+                    $o["ReadinessMatch"]          = "SummaryOnly"
+                    $o["UpgradeEligibility"]      = ""
+                    $o["UpgradeEligibilityLabel"] = ""
+                    $o["AzureAdJoinType"]         = ""
+                    $o["ReadinessGraphId"]        = ""
+                    $o["ReadinessExportDateTime"] = ""
+                    $o["ReadinessRunId"]          = ""
+                    $o["OSVersion"]               = ""
+                    $tmp.Add([pscustomobject]$o) | Out-Null
+                }
+                $enrichedRows = $tmp
+            }
+            else {
+                $readinessMode = "Missing"
+                Write-Log "Readiness CSV not found locally or in SharePoint, enrichment skipped: $ReadinessCsvPath" "WARN" "READINESS"
+            }
         }
         else {
-            Write-Log "Loading Readiness CSV: $ReadinessCsvPath" "INFO" "READINESS"
-            $rd = Import-Csv -Path $ReadinessCsvPath
+            $readinessMode = "Joined"
+            Write-Log "Loading Readiness CSV: $resolvedReadinessCsvPath" "INFO" "READINESS"
+            $rd = Import-Csv -Path $resolvedReadinessCsvPath
             $readinessTotal = @($rd).Count
             Write-Log "Readiness rows loaded: $readinessTotal" "INFO" "READINESS"
 
@@ -1352,8 +1470,10 @@ $(if ($DryRun) { "<li><b style='color:#b00020;'>DRY-RUN MODE: no files written</
 <h3 style="margin:16px 0 8px 0;">Readiness Enrichment</h3>
 <ul>
 <li><b>Enabled</b>: $(Html-Encode $EnableReadinessEnrichment)</li>
+<li><b>Mode</b>: $(Html-Encode $readinessMode)</li>
 <li><b>Readiness rows</b>: $readinessTotal  |  <b>Matched</b>: $readinessMatched  |  <b>NotMatched</b>: $readinessNotMatched  |  <b>MatchPct</b>: $readinessMatchPct%</li>
 <li><b>Eligibility distribution</b>: $(Html-Encode $readinessEligibilityDist)</li>
+<li><b>Summary</b>: $(Html-Encode $readinessSummaryText)</li>
 </ul>
 
 <h3 style="margin:16px 0 8px 0;">Output CSV</h3>
@@ -1379,7 +1499,7 @@ $topRiskTable
 </body></html>
 "@
 
-        Write-Log "Summary email disabled; error emails only." "INFO" "SMTP"
+        Send-SummaryEmail -Subject $subject -HtmlBody $html
         Save-SummaryState -Count $count -StatePath $SummaryStatePath
     }
     else {
