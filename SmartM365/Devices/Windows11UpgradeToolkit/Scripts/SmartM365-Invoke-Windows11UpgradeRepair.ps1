@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.51
+    0.1.52
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -81,7 +81,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.51'
+$script:ScriptVersion = '0.1.52'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -3426,7 +3426,7 @@ function Register-RetryAfterRebootTask {
 
     $script:RetryAfterRebootAction = 'Scheduled'
     $script:RetryAfterRebootAttempt = [string]$previousAttempts
-    $script:RetryAfterRebootMaxAttempts = [string]$RetryAfterRebootMaxAttempts
+    $script:RetryAfterRebootMaxAttemptsResult = [string]$RetryAfterRebootMaxAttempts
     $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
     $script:RetryAfterRebootDetail = ("Task={0}; DelaySeconds={1}; MaxAttempts={2}; Reason={3}" -f $script:RetryAfterRebootTaskName,$RetryAfterRebootDelaySeconds,$RetryAfterRebootMaxAttempts,$Reason)
     Write-SmartLog ("Retry-after-reboot task scheduled. {0}" -f $script:RetryAfterRebootDetail)
@@ -3453,7 +3453,7 @@ function Start-RetryAfterRebootTaskRun {
     Write-RetryAfterRebootState -State $state
 
     $script:RetryAfterRebootAttempt = [string]$attempts
-    $script:RetryAfterRebootMaxAttempts = [string]$maxAttempts
+    $script:RetryAfterRebootMaxAttemptsResult = [string]$maxAttempts
     $script:RetryAfterRebootDetail = ("Task={0}; Attempt={1}; MaxAttempts={2}" -f $script:RetryAfterRebootTaskName,$attempts,$maxAttempts)
     Write-SmartLog ("Retry-after-reboot task run started. {0}" -f $script:RetryAfterRebootDetail)
 
@@ -3898,7 +3898,7 @@ $script:ControlledRebootUsers = ''
 $script:RetryAfterRebootAction = ''
 $script:RetryAfterRebootDetail = ''
 $script:RetryAfterRebootAttempt = ''
-$script:RetryAfterRebootMaxAttempts = ''
+$script:RetryAfterRebootMaxAttemptsResult = ''
 $script:RetryAfterRebootTaskNameResult = ''
 $script:UserRebootNotificationSent = ''
 $script:UserRebootNotificationLang = ''
@@ -4346,7 +4346,7 @@ finally {
         RetryAfterRebootAction = $script:RetryAfterRebootAction
         RetryAfterRebootDetail = $script:RetryAfterRebootDetail
         RetryAfterRebootAttempt = $script:RetryAfterRebootAttempt
-        RetryAfterRebootMaxAttempts = $script:RetryAfterRebootMaxAttempts
+        RetryAfterRebootMaxAttempts = $script:RetryAfterRebootMaxAttemptsResult
         RetryAfterRebootTaskName = $script:RetryAfterRebootTaskNameResult
         UserRebootNotificationSent = $script:UserRebootNotificationSent
         UserRebootNotificationLang = $script:UserRebootNotificationLang
