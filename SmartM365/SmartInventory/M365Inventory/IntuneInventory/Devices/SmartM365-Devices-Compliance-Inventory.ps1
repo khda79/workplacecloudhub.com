@@ -36,14 +36,14 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.4
+    Version : 1.5
 
 .VERSION
-1.4
+1.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.4
+    Version : 1.5
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
 #>
@@ -285,7 +285,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -475,7 +475,7 @@ function Invoke-GraphPagedCollection {
         $nextLink = if ($page.'@odata.nextLink') { $page.'@odata.nextLink' } else { $null }
     }
 
-    return @($items)
+    return $items.ToArray()
 }
 
 function Get-ManagedWindowsDevicesFast {
