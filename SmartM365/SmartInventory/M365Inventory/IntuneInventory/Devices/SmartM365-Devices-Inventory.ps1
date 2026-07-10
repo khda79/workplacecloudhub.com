@@ -16,7 +16,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.2
+1.4
 
 
 .NOTES
@@ -507,7 +507,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.2"
+$ScriptVersion = "1.4"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -554,7 +554,9 @@ try {
 
     if ($Connect) {
         Write-Host "Connect switch specified: existing Graph session (if any) will be disconnected and reconnected..." -ForegroundColor Cyan
-        try { Disconnect-MgGraph | Out-Null } catch { }
+        if ($graphContext) {
+            try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
+        }
         $needConnect = $true
     } else {
         if ($graphContext -and (Test-GraphConnection)) {
@@ -783,7 +785,9 @@ finally {
     if ($connectedGraphInThisRun) {
         Write-Host "`n--- Disconnect Cloud Services ---"
         try {
-            try { Disconnect-MgGraph | Out-Null } catch { }
+            if (Get-MgContext -ErrorAction SilentlyContinue) {
+                try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
+            }
         } catch {
             WriteLog -Message ("Error during Graph disconnect in finally: {0}" -f $_) "WARNING"
         }
@@ -800,7 +804,8 @@ finally {
     WriteLog -Message "$TaskName completed (finally block)."
 
     try {
-        Complete-SmartM365ExecutionContext -Status Auto`r`n        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Complete-SmartM365ExecutionContext -Status Auto
     } catch {
         # ignore
     }
