@@ -17,10 +17,10 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.32
+1.33
 
 .NOTES
-    Version: 1.32
+    Version: 1.33
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
 #>
@@ -232,7 +232,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.32"
+$ScriptVersion = "1.33"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -242,6 +242,11 @@ $RemoteMailboxOutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig
 $configuredIncludeRemoteMailboxes = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludeRemoteMailboxes' -DefaultValue $true)
 if (-not $PSBoundParameters.ContainsKey('IncludeRemoteMailboxes')) { $IncludeRemoteMailboxes = $configuredIncludeRemoteMailboxes }
 if ($RemoteMailboxesOnly) { $IncludeRemoteMailboxes = $true }
+$OnlyADPermissionSkippedRemoteMailboxes = $false
+if ($OnlyADPermission -and -not $RemoteMailboxesOnly -and -not $PSBoundParameters.ContainsKey('IncludeRemoteMailboxes')) {
+    $IncludeRemoteMailboxes = $false
+    $OnlyADPermissionSkippedRemoteMailboxes = $true
+}
 function Resolve-SmartM365RemoteMailboxOutputPath {
     [CmdletBinding()]
     param(
@@ -1329,8 +1334,13 @@ try { # Main try block for script execution and interruption handling
     Write-Host "Starting script '$($MyInvocation.MyCommand.Name)' - Version $ScriptVersion ... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
     Write-Host "Output Path for this run: $OutputPath"
     WriteLog -Message "Output Path for this run: $OutputPath"
-WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
+    WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
     Write-Host "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
+    if ($OnlyADPermissionSkippedRemoteMailboxes) {
+        $skipRemoteMessage = 'OnlyADPermission mode is active; remote mailbox inventory is skipped by default. Pass -IncludeRemoteMailboxes explicitly to include remote mailbox delegation.'
+        WriteLog -Message $skipRemoteMessage
+        Write-Host $skipRemoteMessage -ForegroundColor Yellow
+    }
     Write-Host ('-' * ($host.UI.RawUI.WindowSize.Width - 1))
 
     # ViewEntireForest is applied during Exchange readiness validation.
