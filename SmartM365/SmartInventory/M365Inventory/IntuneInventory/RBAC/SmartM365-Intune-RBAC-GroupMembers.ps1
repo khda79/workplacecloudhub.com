@@ -29,7 +29,7 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.1
+1.4
 
 
 .NOTES
@@ -439,7 +439,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.4"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -671,10 +671,11 @@ $ScriptVersion = "1.1"
     $RemovedMembers  = [System.Collections.Generic.List[PSCustomObject]]::new()
     $DiffAvailable   = $false
 
-    if (Test-Path $PreviousCsvPath) {
-        WriteLog -Message "Loading previous CSV for diff: $PreviousCsvPath" "INFO"
+    $resolvedPreviousCsvPath = Resolve-SmartM365CsvPathWithSharePointFallback -Path $PreviousCsvPath -Description 'Previous RBAC CSV'
+    if (-not [string]::IsNullOrWhiteSpace($resolvedPreviousCsvPath)) {
+        WriteLog -Message "Loading previous CSV for diff: $resolvedPreviousCsvPath" "INFO"
 
-        $PreviousData    = Import-Csv -Path $PreviousCsvPath -Delimiter ";"
+        $PreviousData    = Import-Csv -Path $resolvedPreviousCsvPath -Delimiter ";"
         $PreviousMembers = @{}
         foreach ($Row in $PreviousData) {
             if ($Row.UserPrincipalName -and $Row.GroupName) {
@@ -713,7 +714,7 @@ $ScriptVersion = "1.1"
         WriteLog -Message "Diff computed. Added=$($AddedMembers.Count) Removed=$($RemovedMembers.Count)" "INFO"
     }
     else {
-        WriteLog -Message "No previous CSV found at $PreviousCsvPath - diff section will not be included in email." "INFO"
+        WriteLog -Message "No previous CSV found locally or in SharePoint at $PreviousCsvPath - diff section will not be included in email." "INFO"
     }
 
     #endregion Load Previous CSV and Compute Diff
@@ -1051,7 +1052,8 @@ finally {
 
     #region Stop Transcript
 
-    Complete-SmartM365ExecutionContext -Status Auto`r`n    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+    Complete-SmartM365ExecutionContext -Status Auto
 
     if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
         if ($global:ScriptFailed) {
