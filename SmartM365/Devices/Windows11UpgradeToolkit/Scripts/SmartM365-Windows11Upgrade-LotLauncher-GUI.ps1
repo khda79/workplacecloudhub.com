@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.26
+0.1.27
 #>
 param(
     [switch]$ValidateOnly
@@ -495,6 +495,7 @@ function New-SingleComputerRunContext {
         LogRoot        = Join-Path $runPath 'PsExecLogs'
         ReportRoot     = Join-Path $runPath 'Reports'
         CentralLogRoot = Join-Path $runPath 'CentralLogs'
+        LauncherLogRoot = Join-Path $runPath 'Logs'
     }
 }
 
