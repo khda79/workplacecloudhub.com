@@ -2543,7 +2543,7 @@ function Resolve-SmartM365CsvPathWithSharePointFallback {
 
     if (Test-Path -LiteralPath $Path -PathType Leaf) { return $Path }
 
-    WriteLog -Message ("{0} not found locally, attempting SharePoint recovery: {1}" -f $Description, $Path) -Level "WARNING"
+    WriteLog -Message ("{0} not found locally, attempting SharePoint recovery: {1}" -f $Description, $Path) -Level "INFO"
     $downloaded = Invoke-SmartM365SharePointFileDownload -LocalFilePath $Path
     if ($downloaded -and (Test-Path -LiteralPath $downloaded.FullName -PathType Leaf)) { return $downloaded.FullName }
 
