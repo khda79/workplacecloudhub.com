@@ -112,7 +112,7 @@ if %ROBOCOPY_EXIT% GEQ 8 (
 )
 
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%LOCAL_SCRIPT_DIR%','%LOCAL_SMARTM365_ROOT%\Config','%LOCAL_SMARTM365_ROOT%\Modules\SmartM365.Core' -Include *.ps1,*.psm1,*.psd1 -File -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
-"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -File "%LOCAL_SCRIPT_DIR%\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1" -Tenant test
+"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -File "%LOCAL_SCRIPT_DIR%\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1" -Tenant test %*
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 exit /b %EXIT_CODE%
