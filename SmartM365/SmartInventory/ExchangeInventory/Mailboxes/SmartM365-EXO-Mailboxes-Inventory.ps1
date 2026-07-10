@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.1
+1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -306,7 +306,7 @@ function Send-FatalErrorEmail {
 }
 
 #region Init
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.4"
 $CsvSuffix = if ($Top100) { "_top100" } else { "" }
 if ($PermissionsOnly -and (-not $IncludePerm)) {
     # PermissionsOnly is meaningful only when permissions are being collected live
@@ -683,14 +683,15 @@ function Invoke-ExoSafe {
         param([string]$Path)
         $dict = @{}
         try {
-            if (-not (Test-Path -LiteralPath $Path)) {
+            $resolvedPath = Resolve-SmartM365CsvPathWithSharePointFallback -Path $Path -Description 'M365 users snapshot'
+            if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
                 WriteLog -Message "M365 users snapshot not found at $Path. Will continue without M365 enrichment." "WARNING"
                 return $dict
             }
-            $fi = Get-Item -LiteralPath $Path -ErrorAction Stop
+            $fi = Get-Item -LiteralPath $resolvedPath -ErrorAction Stop
     WriteLog -Message "Loading M365 users snapshot: $($fi.FullName) (LastWrite: $($fi.LastWriteTime))" "INFO"
 
-            $rows = Invoke-WithRetry -ScriptBlock { param($p) Import-Csv -LiteralPath $p -ErrorAction Stop } -Args @($Path)
+            $rows = Invoke-WithRetry -ScriptBlock { param($p) Import-Csv -LiteralPath $p -ErrorAction Stop } -Args @($resolvedPath)
             $count = 0
             foreach ($r in $rows) {
                 $upn = [string]$r.'User principal name'
@@ -712,14 +713,15 @@ function Invoke-ExoSafe {
         $dnDict  = @{}
 
         try {
-            if (-not (Test-Path -LiteralPath $Path)) {
+            $resolvedPath = Resolve-SmartM365CsvPathWithSharePointFallback -Path $Path -Description 'AD users snapshot'
+            if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
                 WriteLog -Message "AD users snapshot not found at $Path. Will continue without AD enrichment." "WARNING"
                 return @{ Upn = $upnDict; Dn = $dnDict }
             }
-            $fi = Get-Item -LiteralPath $Path -ErrorAction Stop
+            $fi = Get-Item -LiteralPath $resolvedPath -ErrorAction Stop
             WriteLog -Message "Loading AD users snapshot: $($fi.FullName) (LastWrite: $($fi.LastWriteTime))" "INFO"
 
-            $rows = Invoke-WithRetry -ScriptBlock { param($p) Import-Csv -LiteralPath $p -ErrorAction Stop } -Args @($Path)
+            $rows = Invoke-WithRetry -ScriptBlock { param($p) Import-Csv -LiteralPath $p -ErrorAction Stop } -Args @($resolvedPath)
             $count = 0
             foreach ($r in $rows) {
                 $upn = [string]$r.UserPrincipalName
@@ -1087,13 +1089,14 @@ function Convert-ToMBInteger {
         $dict=@{}
         try{
             $permFile=Join-Path $ScriptCsvLogFolderPath "Exchange_EXO_Mailboxes_AllDomains_Permissions.csv"
-            if (-not (Test-Path -LiteralPath $permFile)){
+            $resolvedPermFile = Resolve-SmartM365CsvPathWithSharePointFallback -Path $permFile -Description 'Permissions snapshot'
+            if ([string]::IsNullOrWhiteSpace($resolvedPermFile)){
                 WriteLog -Message "Permissions snapshot not found at $permFile. Default CSV will have blank permission columns." "WARNING"
                 return $dict
             }
-            $fi=Get-Item -LiteralPath $permFile -ErrorAction Stop
+            $fi=Get-Item -LiteralPath $resolvedPermFile -ErrorAction Stop
             WriteLog -Message "Loading permissions snapshot: $($fi.FullName) (LastWrite: $($fi.LastWriteTime))"
-            $rows=Invoke-WithRetry -ScriptBlock { param($p) Import-Csv -LiteralPath $p -ErrorAction Stop } -Args @($permFile)
+            $rows=Invoke-WithRetry -ScriptBlock { param($p) Import-Csv -LiteralPath $p -ErrorAction Stop } -Args @($resolvedPermFile)
             $count=0
             foreach($row in $rows){
                 $upn=[string]$row.UserPrincipalName
@@ -1121,15 +1124,16 @@ function Convert-ToMBInteger {
         $dict=@{}
         try{
             if ([string]::IsNullOrWhiteSpace($StatsCsvPath)) { return $dict }
-            if (-not (Test-Path -LiteralPath $StatsCsvPath)){
+            $resolvedStatsCsvPath = Resolve-SmartM365CsvPathWithSharePointFallback -Path $StatsCsvPath -Description 'Stats snapshot'
+            if ([string]::IsNullOrWhiteSpace($resolvedStatsCsvPath)){
                 WriteLog -Message "Stats snapshot not found at $StatsCsvPath. Stats columns will be blank." "WARNING"
                 return $dict
             }
 
-            $fi=Get-Item -LiteralPath $StatsCsvPath -ErrorAction Stop
+            $fi=Get-Item -LiteralPath $resolvedStatsCsvPath -ErrorAction Stop
             WriteLog -Message "Loading stats snapshot: $($fi.FullName) (LastWrite: $($fi.LastWriteTime))"
 
-            $rows=Invoke-WithRetry -ScriptBlock { param($p) Import-Csv -LiteralPath $p -ErrorAction Stop } -Args @($StatsCsvPath)
+            $rows=Invoke-WithRetry -ScriptBlock { param($p) Import-Csv -LiteralPath $p -ErrorAction Stop } -Args @($resolvedStatsCsvPath)
             $count=0
             foreach($row in $rows){
                 $smtp=[string]$row.PrimarySmtpAddress
@@ -2342,7 +2346,8 @@ ExportAndCopyCsv -BaseFileName "Exchange_EXO_Mailboxes_AllDomains_Stats$CsvSuffi
     Write-Host "`n--- Disconnect Cloud Services ---"
     Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $true
     WriteLog -Message "$TaskName completed."
-    Complete-SmartM365ExecutionContext -Status Auto`r`n    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+    Complete-SmartM365ExecutionContext -Status Auto
     RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
     RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
     $swStageCleanup.Stop(); Add-PerfSeconds -Key "Stage_DisconnectCleanup_Seconds" -Seconds $swStageCleanup.Elapsed.TotalSeconds
@@ -2382,6 +2387,7 @@ $($global:LogTextFile)
         Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $true
     } catch {}
 
-    Complete-SmartM365ExecutionContext -Status Auto`r`n    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+    try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+    Complete-SmartM365ExecutionContext -Status Auto
     exit 1
 }
