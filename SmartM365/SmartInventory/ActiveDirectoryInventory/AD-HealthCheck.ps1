@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.4
+    1.0.5
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -46,7 +46,7 @@ $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Glo
 $RunId = [guid]::NewGuid().ToString()
 $Rows = New-Object 'System.Collections.Generic.List[object]'
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.4'
+$ScriptVersion = '1.0.5'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -161,7 +161,8 @@ function Send-ReportMail([string]$Subject,[string]$Body){
     if ($SmtpPort -ne 25) { $mailParams.SmtpPort = $SmtpPort }
     SendEmailHtmlReport @mailParams
 }
-function ConvertTo-ReportHtml($r,[string]$status,[datetime]$started,[datetime]$ended,[string]$csv){
+function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[datetime]$ended,[string]$csv){
+    $r = @($r)
     $c=@{OK='#107c10';Warning='#ff8c00';Critical='#d13438'}[$status]; $find=@($r|Where-Object Status -ne OK|Sort-Object @{Expression={Rank $_.Status}},Domain,DC,Category,Check|Select-Object -First 200); $b=[Text.StringBuilder]::new()
     [void]$b.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dde7f0;padding:7px;font-size:12px;text-align:left;vertical-align:top}th{background:#eef6fc}.rowOK{background:#f3fbf3}.rowWarning{background:#fff7e6}.rowCritical{background:#fde7e9}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}</style></head><body>')
     [void]$b.AppendLine(("<div class='card'><h1>Active Directory Health Check <span class='pill' style='background:{0}'>{1}</span></h1><p>RunId: {2}<br>Machine: {3}<br>Started UTC: {4}<br>Ended UTC: {5}<br>Duration: {6}<br>CSV: {7}</p></div>" -f $c,$status,(ConvertTo-HtmlSafe $RunId),(ConvertTo-HtmlSafe $env:COMPUTERNAME),(ConvertTo-IsoUtc $started),(ConvertTo-IsoUtc $ended),(ConvertTo-HtmlSafe ((New-TimeSpan -Start $started -End $ended).ToString())),(ConvertTo-HtmlSafe $csv)))
@@ -250,18 +251,19 @@ try{
     $Rows|Export-Csv $latestCsv -NoTypeInformation -Encoding utf8BOM
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csv
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestCsv
-    $end=Get-Date;$all=@($Rows);$worst=Worst $all;$subject="[$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml $all $worst $RunStarted $end $csv;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
+    $end=Get-Date;$all=@($Rows);$worst=Worst $all;$subject="[$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
     $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
-    Complete-SmartM365ExecutionContext -Status $summaryStatus -GeneratedCsvPaths @($csv,$latestCsv) -ResultSummary "AD health worst status: $worst; rows: $($all.Count)"
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
+    Complete-SmartM365ExecutionContext -Status $summaryStatus -GeneratedCsvPaths @($csv,$latestCsv) -ResultSummary "AD health worst status: $worst; rows: $($all.Count)"
     Write-Host "AD Health Check completed. Status=$worst; Rows=$($all.Count); Csv=$csv; Latest=$latestCsv"
     if($worst -eq 'Critical'){exit 2};if($worst -eq 'Warning'){exit 1};exit 0
 }catch{
-    Add-Row '' '' '' Script UnhandledError Critical 0 Failed 'Script completes' $_.Exception.Message 0
+    $runError = $_
+    Add-Row '' '' '' Script UnhandledError Critical 0 Failed 'Script completes' $runError.Exception.Message 0
     if(-not (Test-Path -LiteralPath $OutputFolder)){New-Item -Path $OutputFolder -ItemType Directory -Force|Out-Null}
     $csv=Join-Path $OutputFolder ("AD_HealthCheck_FAILED_{0}.csv" -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture));$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM
-    try{$html=ConvertTo-ReportHtml @($Rows) Critical $RunStarted (Get-Date) $csv;Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
-    try { Complete-SmartM365ExecutionContext -Status Failed -GeneratedCsvPaths @($csv) -ResultSummary 'AD health check failed before completion.' } catch { $null = $_ }
+    try{$html=ConvertTo-ReportHtml -r @($Rows) -status 'Critical' -started $RunStarted -ended (Get-Date) -csv $csv;Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
-    Write-Error $_;exit 2
+    try { Complete-SmartM365ExecutionContext -Status Failed -GeneratedCsvPaths @($csv) -ResultSummary 'AD health check failed before completion.' } catch { $null = $_ }
+    Write-Error $runError;exit 2
 }
