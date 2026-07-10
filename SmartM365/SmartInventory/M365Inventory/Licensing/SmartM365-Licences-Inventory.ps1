@@ -4,7 +4,7 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.1
+1.5
 
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
@@ -568,7 +568,7 @@ function Add-GroupAgg {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.1"
+$ScriptVersion = "1.5"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $connectedGraphInThisRun = $false
@@ -601,7 +601,12 @@ try {
   }
 
   $currentOperation = "Disconnect existing Microsoft Graph session"
-  Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true -VerboseDisconnect:$true
+  try {
+    Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true -VerboseDisconnect:$true
+  }
+  catch {
+    WriteLog -Message ("Existing Microsoft Graph session cleanup did not complete: {0}" -f $_.Exception.Message) "WARN"
+  }
 
   $currentOperation = "Connect to Microsoft Graph"
   $connectParams = @{
@@ -956,7 +961,7 @@ $BaseFileName = "M365_Licenses_Groups"
   }
 
   # ---------------- Disconnect / Cleanup ----------------
-  $usersProcessedCount = @($users).Count
+  $usersProcessedCount = if ($null -eq $users) { 0 } else { [int]$users.Count }
   $userLicenseRowCount = $resultsUsers.Count
   $servicePlanRowCount = $rowsPlansDetailed.Count
   $tenantSkuRowCount = $tenantRows.Count
@@ -966,12 +971,27 @@ $BaseFileName = "M365_Licenses_Groups"
     $currentOperation = "Disconnect Microsoft Graph"
     Write-Host ""
     Write-Host "--- Disconnect Cloud Services ---"
-    Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true
+    try {
+      Disconnect-SmartM365CloudSession -ExchangeOnline $false -Graph $true
+    }
+    catch {
+      WriteLog -Message ("Microsoft Graph disconnect cleanup did not complete: {0}" -f $_.Exception.Message) "WARN"
+    }
   }
 
   $currentOperation = "Apply retention cleanup"
-  RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
-  RemoveOldFiles -Path $global:LogPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
+  try {
+    RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+  }
+  catch {
+    WriteLog -Message ("CSV retention cleanup failed: {0}" -f $_.Exception.Message) "WARN"
+  }
+  try {
+    RemoveOldFiles -Path $global:LogPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
+  }
+  catch {
+    WriteLog -Message ("Log retention cleanup failed: {0}" -f $_.Exception.Message) "WARN"
+  }
 
   $currentOperation = "Send Teams completion notification"
   Send-LicensesInventorySuccessNotification `
@@ -983,7 +1003,8 @@ $BaseFileName = "M365_Licenses_Groups"
     -OutputPath $OutputPath
 
   WriteLog -Message "$TaskName completed."
-  Complete-SmartM365ExecutionContext -Status Auto`r`n  try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+  try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+  Complete-SmartM365ExecutionContext -Status Auto
 }
 catch {
   $globalError = $_
@@ -1011,7 +1032,7 @@ $($global:logTextFile)
       $attachments = @($global:logTextFile)
     }
 
-    Send-SmartM365Mail -Subject $title -BodyHtml $bodyHtml -Attachments $attachments -HighPriority
+    Send-SmartM365Mail -Subject $title -BodyHtml $bodyHtml -Attachments $attachments -SendMailMode Graph -HighPriority
   } catch {
     WriteLog -Message ("Failed to send global error notification email: {0}" -f $_) "ERROR"
   }
@@ -1024,6 +1045,7 @@ $($global:logTextFile)
     WriteLog -Message ("Failed to disconnect Microsoft Graph after error: {0}" -f $_.Exception.Message) "WARNING"
   }
 
-  Complete-SmartM365ExecutionContext -Status Auto`r`n  try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+  try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
+  Complete-SmartM365ExecutionContext -Status Auto
   exit 1
 }
