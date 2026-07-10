@@ -24,7 +24,7 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .VERSION
-1.1
+1.8
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -55,15 +55,14 @@ $tenantContextPath = & {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 . $tenantContextPath
-Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
+$script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.1'
+$ScriptVersion = '1.8'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
-$script:SmartM365GlobalConfig = $null
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     Write-Host 'This script requires PowerShell 7 or later.' -ForegroundColor Red
@@ -232,11 +231,202 @@ function Send-SyncHealthTeamsNotification {
     }
 }
 
+function Get-SyncHealthSendMailMode {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Config)
+
+    $configuredMode = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'SendMailMode' -DefaultValue '')
+    if (-not [string]::IsNullOrWhiteSpace($configuredMode)) { $configuredMode = $configuredMode.Trim() }
+
+    if ([string]::IsNullOrWhiteSpace($configuredMode) -or $configuredMode -in @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+        $smtpServer = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'SmtpServer' -DefaultValue '')
+        if ([string]::IsNullOrWhiteSpace($smtpServer)) { return 'Graph' }
+        return 'SMTP'
+    }
+
+    switch ($configuredMode.ToLowerInvariant()) {
+        'graph' { return 'Graph' }
+        'smtp' { return 'SMTP' }
+        'both' { return 'Both' }
+        default { throw ("Invalid SendMailMode '{0}'. Use Graph, SMTP, or Both." -f $configuredMode) }
+    }
+}
+
+function Resolve-SyncHealthMailValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$DefaultValue = ''
+    )
+
+    $value = [string](Get-ScriptLocalConfigValue -Config $Config -Name $Name -DefaultValue $DefaultValue)
+    if ($value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return $DefaultValue }
+    return $value
+}
+
+function ConvertTo-SyncHealthRecipientString {
+    [CmdletBinding()]
+    param([string]$Recipients)
+
+    if ([string]::IsNullOrWhiteSpace($Recipients)) { return '' }
+    return (@($Recipients -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ';')
+}
+
+function Send-SyncHealthMailNotification {
+    [CmdletBinding()]
+    param(
+        [ValidateSet('SUCCESS','WARNING','ERROR')][string]$Level,
+        [string]$Title,
+        [string]$Message,
+        [hashtable]$Facts,
+        [string[]]$Attachments
+    )
+
+    try {
+        $from = Resolve-SyncHealthMailValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue ''
+        if ([string]::IsNullOrWhiteSpace($from)) {
+            throw 'Sync Health email notification requires From in configuration.'
+        }
+        $to = ConvertTo-SyncHealthRecipientString -Recipients (Resolve-SyncHealthMailValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
+        if ([string]::IsNullOrWhiteSpace($to)) {
+            $to = ConvertTo-SyncHealthRecipientString -Recipients (Resolve-SyncHealthMailValue -Config $ScriptLocalConfig -Name 'ErrorMailTo' -DefaultValue '')
+        }
+        if ([string]::IsNullOrWhiteSpace($to)) {
+            throw 'Sync Health email notification requires To or ErrorMailTo in configuration.'
+        }
+
+        $cc = ConvertTo-SyncHealthRecipientString -Recipients (Resolve-SyncHealthMailValue -Config $ScriptLocalConfig -Name 'Cc' -DefaultValue '')
+        $overallStatus = if ($Facts -and $Facts.ContainsKey('OverallStatus')) { [string]$Facts['OverallStatus'] } else { $Level }
+        $syncEnabled = if ($Facts -and $Facts.ContainsKey('SyncEnabled')) { [string]$Facts['SyncEnabled'] } else { '' }
+        $syncAgeText = if ($Facts -and $Facts.ContainsKey('SyncAgeMinutes')) { [string]$Facts['SyncAgeMinutes'] } else { '' }
+        $thresholdText = if ($Facts -and $Facts.ContainsKey('ThresholdMinutes')) { [string]$Facts['ThresholdMinutes'] } else { '' }
+        $lastSyncText = if ($Facts -and $Facts.ContainsKey('LastSyncDateTimeUtc')) { [string]$Facts['LastSyncDateTimeUtc'] } else { '' }
+        $latestCsvPathForMail = if ($Facts -and $Facts.ContainsKey('LatestCsvPath')) { [string]$Facts['LatestCsvPath'] } else { '' }
+        $logFileForMail = if ($Facts -and $Facts.ContainsKey('LogFile')) { [string]$Facts['LogFile'] } else { '' }
+
+        $syncEnabledStatus = if ($syncEnabled -eq 'True') { 'OK' } elseif ([string]::IsNullOrWhiteSpace($syncEnabled)) { 'WARNING' } else { 'ERROR' }
+        $syncAgeStatus = if ($overallStatus -eq 'ERROR') { 'ERROR' } elseif ($overallStatus -eq 'WARNING') { 'WARNING' } else { 'OK' }
+
+        $emailSeverity = switch ($Level) {
+            'SUCCESS' { 'Success' }
+            'WARNING' { 'Warning' }
+            'ERROR' { 'Error' }
+            default { 'Info' }
+        }
+
+        function ConvertTo-SyncHealthMailHtmlText {
+            param([AllowNull()]$Value)
+            if ($null -eq $Value) { return '' }
+            return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+        }
+
+        function New-SyncHealthStatusBadgeHtml {
+            param([string]$Status)
+            $normalizedStatus = if ([string]::IsNullOrWhiteSpace($Status)) { 'INFO' } else { $Status.ToUpperInvariant() }
+            $badge = switch ($normalizedStatus) {
+                'OK' { @{ Text = 'OK'; Bg = '#dcfce7'; Border = '#86efac'; Color = '#166534' } }
+                'SUCCESS' { @{ Text = 'OK'; Bg = '#dcfce7'; Border = '#86efac'; Color = '#166534' } }
+                'WARNING' { @{ Text = 'WARNING'; Bg = '#fef3c7'; Border = '#fcd34d'; Color = '#92400e' } }
+                'ERROR' { @{ Text = 'ERROR'; Bg = '#fee2e2'; Border = '#fca5a5'; Color = '#991b1b' } }
+                default { @{ Text = $normalizedStatus; Bg = '#e0f2fe'; Border = '#7dd3fc'; Color = '#075985' } }
+            }
+            return '<span style="display:inline-block;min-width:72px;text-align:center;border-radius:999px;border:1px solid {0};background:{1};color:{2};font-size:11px;line-height:18px;font-weight:700;letter-spacing:.2px;">{3}</span>' -f $badge.Border, $badge.Bg, $badge.Color, $badge.Text
+        }
+
+        function New-SyncHealthTestRowHtml {
+            param(
+                [string]$Check,
+                [string]$Status,
+                [string]$Value,
+                [string]$Detail
+            )
+            $safeCheck = ConvertTo-SyncHealthMailHtmlText $Check
+            $safeValue = ConvertTo-SyncHealthMailHtmlText $Value
+            $safeDetail = ConvertTo-SyncHealthMailHtmlText $Detail
+            $badgeHtml = New-SyncHealthStatusBadgeHtml -Status $Status
+            return '<tr><td style="border-bottom:1px solid #e5edf5;padding:10px 12px;font-size:13px;color:#334155;">{0}<div style="font-size:11px;line-height:16px;color:#64748b;margin-top:2px;">{1}</div></td><td align="right" style="border-bottom:1px solid #e5edf5;padding:10px 12px;font-size:13px;font-weight:700;color:#111827;">{2}</td><td align="right" style="border-bottom:1px solid #e5edf5;padding:10px 12px;">{3}</td></tr>' -f $safeCheck, $safeDetail, $safeValue, $badgeHtml
+        }
+
+        $testRows = @(
+            New-SyncHealthTestRowHtml -Check 'Directory synchronization enabled' -Status $syncEnabledStatus -Value $syncEnabled -Detail 'Expected value: True'
+            New-SyncHealthTestRowHtml -Check 'Last synchronization freshness' -Status $syncAgeStatus -Value ("{0} min" -f $syncAgeText) -Detail ("Threshold: {0} min" -f $thresholdText)
+            New-SyncHealthTestRowHtml -Check 'Last synchronization timestamp' -Status 'INFO' -Value $lastSyncText -Detail 'UTC timestamp reported by Microsoft Graph'
+        )
+        $testsHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;border-radius:4px;overflow:hidden;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Check</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Value</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Status</th>
+  </tr>
+  $($testRows -join "`n")
+</table>
+"@
+
+        $pathRows = @()
+        if (-not [string]::IsNullOrWhiteSpace($latestCsvPathForMail)) {
+            $pathRows += '<div style="margin-top:4px;"><span style="font-weight:700;color:#475569;">CSV:</span> <span style="font-family:Consolas,''Courier New'',monospace;word-break:break-all;">' + (ConvertTo-SyncHealthMailHtmlText $latestCsvPathForMail) + '</span></div>'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($logFileForMail)) {
+            $pathRows += '<div style="margin-top:4px;"><span style="font-weight:700;color:#475569;">Log:</span> <span style="font-family:Consolas,''Courier New'',monospace;word-break:break-all;">' + (ConvertTo-SyncHealthMailHtmlText $logFileForMail) + '</span></div>'
+        }
+        $technicalFilesHtml = ''
+        if ($pathRows.Count -gt 0) {
+            $technicalFilesHtml = @"
+          <tr>
+            <td style="padding:12px 24px 4px 24px;color:#64748b;font-size:11px;line-height:16px;">
+              <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px;">Technical files</div>
+              $($pathRows -join "`n")
+            </td>
+          </tr>
+"@
+        }
+
+        $bodyHtml = New-SmartM365EmailBody -Title $Title -Category 'SmartM365 Sync Health' -Severity $emailSeverity -Message $Message -Sections @([pscustomobject]@{ Title = 'Checks'; Html = $testsHtml }) -BodyHtml $technicalFilesHtml
+        $validAttachments = @($Attachments | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+        $sendMailMode = Get-SyncHealthSendMailMode -Config $ScriptLocalConfig
+
+        if ($sendMailMode -in @('Graph','Both')) {
+            Send-SmartM365GraphMail -From $from -To $to -Cc $cc -Subject $Title -BodyHtml $bodyHtml -Attachments $validAttachments
+        }
+
+        if ($sendMailMode -in @('SMTP','Both')) {
+            $smtpServer = Resolve-SyncHealthMailValue -Config $ScriptLocalConfig -Name 'SmtpServer' -DefaultValue ''
+            if ([string]::IsNullOrWhiteSpace($smtpServer)) { throw 'SmtpServer is required when SendMailMode is SMTP or Both.' }
+            $smtpPort = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SmtpPort' -DefaultValue 25)
+            $smtpParams = @{
+                SmtpServer = $smtpServer
+                Port = $smtpPort
+                From = $from
+                To = @($to -split ';' | Where-Object { $_ })
+                Subject = $Title
+                Body = $bodyHtml
+                BodyAsHtml = $true
+                ErrorAction = 'Stop'
+            }
+            if (-not [string]::IsNullOrWhiteSpace($cc)) { $smtpParams['Cc'] = @($cc -split ';' | Where-Object { $_ }) }
+            if ($validAttachments.Count -gt 0) { $smtpParams['Attachments'] = $validAttachments }
+            Send-MailMessage @smtpParams
+            WriteLog -Message ("SMTP mail sent from {0} to {1}" -f $from, $to) -Level SUCCESS
+        }
+    }
+    catch {
+        WriteLog -Message ("Sync Health email notification failed: {0}" -f $_.Exception.Message) -Level ERROR
+        throw
+    }
+}
+
 Import-SmartM365CoreModule
 $ScriptLocalConfig = Get-ScriptLocalConfig
 
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
+$global:EnableSharePointUpload = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableSharePointUpload' -DefaultValue $false)
+$global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSiteHostname' -DefaultValue ''
+$global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
+$global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
+$global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
@@ -264,6 +454,20 @@ $logPath = Join-Path -Path $logRoot -ChildPath ("SmartM365-AzureADConnect-SyncHe
 foreach ($folder in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logRoot)) { if (-not (Test-Path -LiteralPath $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null } }
 Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $logPath
 $global:LogTextFile = $logPath
+
+function Stop-SmartM365SyncHealthTranscript {
+    [CmdletBinding()]
+    param()
+    try {
+        Stop-Transcript | Out-Null
+        $transcriptPath = $global:logTranscriptFile
+        if (-not $transcriptPath) { $transcriptPath = $global:LogTranscriptFile }
+        if ($transcriptPath -and (Get-Command Update-SmartM365TimestampedTranscript -ErrorAction SilentlyContinue)) {
+            Update-SmartM365TimestampedTranscript -Path $transcriptPath
+        }
+    }
+    catch {}
+}
 
 try {
     $CurrentOperation = 'InitializeScriptEnvironment'
@@ -346,30 +550,42 @@ try {
         WeeklyHistoryFolderPath = $WeeklyHistoryFolderPath
         LogFile = $global:LogTextFile
     }
+    $CurrentOperation = 'SendNotifications'
     if ($overallStatus -eq 'OK') {
         Send-SyncHealthTeamsNotification -Level SUCCESS -Title 'Azure AD Connect sync health success' -Message $message -Facts $facts
+        Send-SyncHealthMailNotification -Level SUCCESS -Title 'Azure AD Connect sync health success' -Message $message -Facts $facts -Attachments @($latestCsvPath)
     }
     else {
         Send-SyncHealthTeamsNotification -Level WARNING -Title 'Azure AD Connect sync health warning' -Message $message -Facts $facts
+        Send-SyncHealthMailNotification -Level WARNING -Title 'Azure AD Connect sync health warning' -Message $message -Facts $facts -Attachments @($latestCsvPath)
     }
 
+    Stop-SmartM365SyncHealthTranscript
     try { Complete-SmartM365ExecutionContext -Status Auto } catch {}
     Disconnect-GraphSafe
 }
 catch {
     $globalError = $_
     WriteLog -Message ("Global error during {0}: {1}" -f $CurrentOperation, $globalError.Exception.Message) -Level ERROR
-    Send-SyncHealthTeamsNotification -Level ERROR -Title 'Azure AD Connect sync health failed' -Message $globalError.Exception.Message -Facts @{
+    $errorFacts = @{
         Script = $MyInvocation.MyCommand.Name
         TenantOrOrganization = $OrgDomain
         Operation = $CurrentOperation
         LogFile = $global:LogTextFile
     }
+    Send-SyncHealthTeamsNotification -Level ERROR -Title 'Azure AD Connect sync health failed' -Message $globalError.Exception.Message -Facts $errorFacts
+    try {
+        Send-SyncHealthMailNotification -Level ERROR -Title 'Azure AD Connect sync health failed' -Message $globalError.Exception.Message -Facts $errorFacts
+    }
+    catch {
+        WriteLog -Message ("Failed to send Sync Health error email notification: {0}" -f $_.Exception.Message) -Level ERROR
+    }
+    Stop-SmartM365SyncHealthTranscript
     try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage $CurrentOperation } catch {}
     Disconnect-GraphSafe
     throw
 }
 finally {
     try { RemoveOldFiles -Path $ScriptCsvLogFolderPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile } catch {}
-    try { Stop-SmartM365TranscriptSafely } catch {}
+    try { Stop-SmartM365SyncHealthTranscript } catch {}
 }
