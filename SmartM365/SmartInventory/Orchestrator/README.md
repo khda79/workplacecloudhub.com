@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.2.0) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.0) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -17,10 +17,12 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `Start-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: `-Tenant prod -Connect`. |
 | `Start-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: `-Tenant test -Connect`. |
 
-Runtime files (tenant-isolated, created automatically, all Git-ignored). The orchestrator data and log folders are automatically suffixed with the local computer name (for example `{{DataAllRootPath}}\Orchestrator\SRV01`), so several servers can share the same UNC `DataAllRootPath`/`LogAllRootPath` without state, lock, CSV or log collisions:
+Runtime files are tenant-isolated, created automatically and Git-ignored. State, job-run CSVs and logs use a per-server suffix (for example `{{DataAllRootPath}}\Orchestrator\SRV01`) to prevent collisions. The lifecycle CSV stays one level above the server folders so it provides a single tenant-wide history across all orchestrator servers:
 
 | File | Location | Purpose |
 | --- | --- | --- |
+| `Orchestrator_Runs.csv` | `{{DataAllRootPath}}\Orchestrator` | Tenant-wide lifecycle history: one row per orchestrator process, shared across servers and retained indefinitely. |
+| `Orchestrator_Runs.lock` | `{{DataAllRootPath}}\Orchestrator` | Cross-process file lock serializing lifecycle CSV updates from all servers. |
 | `Orchestrator-State.json` | `{{DataAllRootPath}}\Orchestrator` | Per-job state (last occurrence, last run, running PID). Atomic writes. |
 | `Orchestrator-Heartbeat.json` | `{{DataAllRootPath}}\Orchestrator` | Rewritten at every tick: timestamp, PID, running jobs. |
 | `Orchestrator.lock` | `{{DataAllRootPath}}\Orchestrator` | Global lock; prevents two instances for the same tenant. Stale locks (dead PID) are recovered with a warning. |
@@ -28,7 +30,7 @@ Runtime files (tenant-isolated, created automatically, all Git-ignored). The orc
 | `SmartM365-Inventory-Orchestrator_<yyyyMMdd>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator` | Orchestrator log, daily rotation. |
 | `<JobName>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator\Jobs\<JobName>` | One log per job execution (stdout + stderr of the child process). |
 
-Because state, lock, logs and CSVs live under the tenant data roots plus a per-server subfolder, `prod` and `test` orchestrators are fully isolated, and several servers can run orchestrators against the same shared data roots. Note: each server keeps its own state, so a job allowed on several servers runs on each of them - pin every scheduled job to exactly one server through `AllowedServers` and treat the other servers as manual standby.
+Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle histories remain isolated. Each server still keeps its own scheduler state, so a job allowed on several servers runs on each of them - pin every scheduled job to exactly one server through `AllowedServers` and treat the other servers as manual standby.
 
 ## Design
 
@@ -78,6 +80,8 @@ Because state, lock, logs and CSVs live under the tenant data roots plus a per-s
 ### Results and notifications
 
 - Every execution is appended to the daily tracking CSV: `JobName, ScheduledTime, StartTime, EndTime, DurationSec, ExitCode, Status (Success/Failed/TimedOut/Skipped/Retried/Interrupted), RetryCount, LogPath`.
+- Every orchestrator process is registered in the tenant-wide `Orchestrator_Runs.csv`: run ID, tenant, local/UTC start and end times, duration, server, Windows user, PID, script/PowerShell versions, mode, connection flag, status, exit code, stop reason and sanitized error. Rows start as `Running` and are finalized as `Success`, `Failed` or `Rejected`.
+- On a later start, an unfinished `Running` row for the same server is changed to `Interrupted` when its recorded PID and start time no longer match a live PowerShell process. The shared CSV is rewritten atomically under `Orchestrator_Runs.lock`; it has no automatic retention.
 - Emails use `System.Net.Mail.MailMessage` with explicit UTF-8 sent through `SmtpClient` (never `Send-MailMessage`), `UseDefaultCredentials` or anonymous relay, IPv4 resolution of the SMTP endpoint with an optional pinned `RelayIp`, HTML bodies, no BCC by default.
   - `JobMailMode`: `Always` (email for every final job completion), `OnError` (final failures only, default), `Never` (no job emails). This is intentionally a dedicated key: the ecosystem-wide `SendMailMode` key carries the mail transport (Graph/SMTP/Both) and is not used by the orchestrator.
   - Optional daily HTML summary (`SendDailySummaryEmail` + `DailySummaryTime`) recapping all executions of the last 24 hours with color-coded statuses (inline styles, no external CSS).
