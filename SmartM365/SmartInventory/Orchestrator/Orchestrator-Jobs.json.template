@@ -1,0 +1,408 @@
+{
+  "Jobs": [
+    {
+      "Name": "M365-VerifiedDomains-Inventory",
+      "ScriptPath": "M365Inventory\\Domains\\SmartM365-VerifiedDomains-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": true,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 60,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["06:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "AD-Inventory",
+      "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "AD",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 360,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["01:30", "11:30"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "AD-HealthCheck",
+      "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-HealthCheck.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "AD",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 120,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["05:30"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "M365-ActiveUsers-Inventory",
+      "ScriptPath": "M365Inventory\\Users\\SmartM365-ActiveUsers-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["02:00", "12:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "M365-Licences-Inventory",
+      "ScriptPath": "M365Inventory\\Licensing\\SmartM365-Licences-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 120,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["02:30", "12:15"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "M365-EntraDevices-Inventory",
+      "ScriptPath": "M365Inventory\\Devices\\SmartM365-EntraDevices-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["03:00", "12:30"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "M365-Teams-Inventory",
+      "ScriptPath": "M365Inventory\\Teams\\SmartM365-Teams-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Weekly",
+        "DaysOfWeek": ["Monday"],
+        "Times": ["04:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "M365-SPO-Inventory",
+      "ScriptPath": "M365Inventory\\SharePoint\\SmartM365-SPO-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 480,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Weekly",
+        "DaysOfWeek": ["Monday"],
+        "Times": ["04:30"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "Intune-Devices-Inventory",
+      "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Intune",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["03:30", "12:30"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "Intune-Devices-Compliance-Inventory",
+      "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-Compliance-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Intune",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["03:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "Intune-WindowsAutopilot-Inventory",
+      "ScriptPath": "M365Inventory\\IntuneInventory\\Autopilot\\SmartM365-WindowsAutopilot-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Intune",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 120,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Weekly",
+        "DaysOfWeek": ["Monday"],
+        "Times": ["05:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "EXO-Mailboxes-Inventory",
+      "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
+      "Arguments": "-IncludeStats",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": ["EXO-Mailboxes-Inventory-Fast"],
+      "AllowedServers": [],
+      "TimeoutMinutes": 1200,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": false,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["01:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "EXO-Mailboxes-Permissions",
+      "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
+      "Arguments": "-PermissionsOnly -ParallelThrottle 4",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": ["EXO-Mailboxes-Inventory"],
+      "AllowedServers": [],
+      "TimeoutMinutes": 600,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["01:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "EXO-Mailboxes-Inventory-Fast",
+      "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["01:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "EXO-Mailboxes-CalendarPermissions",
+      "ScriptPath": "ExchangeInventory\\CalendarPermissions\\SmartM365-EXO-Mailboxes-CalPerm_Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": ["EXO-Mailboxes-Inventory"],
+      "AllowedServers": [],
+      "TimeoutMinutes": 720,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["01:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "EXO-AcceptedDomains-Inventory",
+      "ScriptPath": "ExchangeInventory\\AcceptedDomains\\SmartM365-EXO-AcceptedDomains-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 60,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["04:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "EXO-MigrationJobs-Inventory",
+      "ScriptPath": "ExchangeInventory\\Migration\\SmartM365-EXO-MigJob-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 120,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["06:00", "12:00", "18:00"],
+        "MissedRunPolicy": "Skip"
+      }
+    },
+    {
+      "Name": "Mailboxes-PermissionsByUser-Report",
+      "ScriptPath": "ExchangeInventory\\Permissions\\SmartM365-Mailboxes-AllSources-PermissionsByUserReport.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 2880,
+      "MaxRetries": 0,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["20:00"],
+        "MissedRunPolicy": "Skip"
+      }
+    },
+    {
+      "Name": "Exchange2016-Local-Mailboxes-Inventory",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
+      "Arguments": "-IncludeADPermission",
+      "Enabled": false,
+      "Group": "Exchange2016",
+      "DependsOn": ["Exchange2016-Local-Mailboxes-Fast"],
+      "AllowedServers": [],
+      "PowerShellEdition": "WindowsPowerShell",
+      "TimeoutMinutes": 480,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["01:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "Exchange2016-Local-Mailboxes-Fast",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange2016",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "PowerShellEdition": "WindowsPowerShell",
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["01:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "Exchange2016-ProxyAddresses-Check",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\SmartM365-Check-ProxyAddresses-Exchange.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange2016",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "PowerShellEdition": "WindowsPowerShell",
+      "TimeoutMinutes": 120,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": ["05:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "Exchange2016-Infrastructure-Inventory",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange2016",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "PowerShellEdition": "WindowsPowerShell",
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Weekly",
+        "DaysOfWeek": ["Monday"],
+        "Times": ["06:00"],
+        "MissedRunPolicy": "RunOnce"
+      }
+    }
+  ]
+}

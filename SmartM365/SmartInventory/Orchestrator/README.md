@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.0.0) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.2.0) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -10,11 +10,12 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | --- | --- |
 | `SmartM365-Inventory-Orchestrator.ps1` | Orchestrator script (PowerShell 7). |
 | `SmartM365-Inventory-Orchestrator.local.json.template` | Safe committed template; copied to `SmartM365-Inventory-Orchestrator.local.json` at first run (the runtime `.local.json` is Git-ignored). |
-| `Orchestrator-Jobs.json` | Jobs manifest (schedules, retries, dependencies). Hot reloaded on change. |
+| `Orchestrator-Jobs.json.template` | Safe committed jobs-manifest template (all schedules, neutral `AllowedServers`). |
+| `Orchestrator-Jobs.json` | Runtime jobs manifest, auto-created from the template at first run and Git-ignored: it carries operational values (Enabled flags, schedules, real server names in `AllowedServers`). Hot reloaded on change. |
 | `Start-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: `-Tenant prod -Connect`. |
 | `Start-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: `-Tenant test -Connect`. |
 
-Runtime files (tenant-isolated, created automatically, all Git-ignored):
+Runtime files (tenant-isolated, created automatically, all Git-ignored). The orchestrator data and log folders are automatically suffixed with the local computer name (for example `{{DataAllRootPath}}\Orchestrator\SRV01`), so several servers can share the same UNC `DataAllRootPath`/`LogAllRootPath` without state, lock, CSV or log collisions:
 
 | File | Location | Purpose |
 | --- | --- | --- |
@@ -25,7 +26,7 @@ Runtime files (tenant-isolated, created automatically, all Git-ignored):
 | `SmartM365-Inventory-Orchestrator_<yyyyMMdd>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator` | Orchestrator log, daily rotation. |
 | `<JobName>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator\Jobs\<JobName>` | One log per job execution (stdout + stderr of the child process). |
 
-Because state, lock, logs and CSVs live under the tenant data roots, `prod` and `test` orchestrators are fully isolated and can run side by side.
+Because state, lock, logs and CSVs live under the tenant data roots plus a per-server subfolder, `prod` and `test` orchestrators are fully isolated, and several servers can run orchestrators against the same shared data roots. Note: each server keeps its own state, so a job allowed on several servers runs on each of them - pin every scheduled job to exactly one server through `AllowedServers` and treat the other servers as manual standby.
 
 ## Design
 
@@ -33,7 +34,14 @@ Because state, lock, logs and CSVs live under the tenant data roots, `prod` and 
 
 - One resident instance per tenant, bounded lifetime (`MaxLifetimeHours`, default 24), exit code 0 on recycle.
 - 60-second tick: reload the manifest if it changed on disk, supervise running children, compute due occurrences, launch jobs, send the optional daily summary, rewrite the heartbeat, save state.
-- Every job runs in its own detached `pwsh` child process (`-NoProfile -ExecutionPolicy Bypass`), which also isolates module/assembly conflicts between scripts (Graph SDK vs MSAL).
+- Every job runs in its own detached child process (`-NoProfile -ExecutionPolicy Bypass`), which also isolates module/assembly conflicts between scripts (Graph SDK vs MSAL). The engine is `pwsh` by default; jobs with `PowerShellEdition = "WindowsPowerShell"` run in `powershell.exe` 5.1 instead (required by the Exchange on-premises scripts).
+
+### Server allowlist
+
+- `AllowedServers` in the orchestrator `.local.json` is the default list of computer names allowed to run jobs (empty = all servers allowed).
+- Each job may carry its own `AllowedServers` list in the manifest; a non-empty job list overrides the default list for that job.
+- A job whose effective allowlist does not contain the local computer name is never launched on this server - not by schedule, not by catch-up, and not by `-Force` (refused with a warning). Excluded jobs are listed once in the log at manifest load, and a dependency that is not allowed on this server never blocks its dependents.
+- Typical use: run the cloud inventory jobs on the scheduler servers (default list) and pin the Exchange 2016 on-premises jobs to the Exchange server through their per-job list.
 
 ### Detached jobs and re-adoption (jobs longer than 24 hours)
 
@@ -69,9 +77,9 @@ Because state, lock, logs and CSVs live under the tenant data roots, `prod` and 
 
 - Every execution is appended to the daily tracking CSV: `JobName, ScheduledTime, StartTime, EndTime, DurationSec, ExitCode, Status (Success/Failed/TimedOut/Skipped/Retried/Interrupted), RetryCount, LogPath`.
 - Emails use `System.Net.Mail.MailMessage` with explicit UTF-8 sent through `SmtpClient` (never `Send-MailMessage`), `UseDefaultCredentials` or anonymous relay, IPv4 resolution of the SMTP endpoint with an optional pinned `RelayIp`, HTML bodies, no BCC by default.
-  - `SendMailMode`: `Always` (email for every final job completion), `OnError` (final failures only, default), `Never` (no job emails).
+  - `JobMailMode`: `Always` (email for every final job completion), `OnError` (final failures only, default), `Never` (no job emails). This is intentionally a dedicated key: the ecosystem-wide `SendMailMode` key carries the mail transport (Graph/SMTP/Both) and is not used by the orchestrator.
   - Optional daily HTML summary (`SendDailySummaryEmail` + `DailySummaryTime`) recapping all executions of the last 24 hours with color-coded statuses (inline styles, no external CSS).
-  - A fatal error email is sent if the orchestrator itself crashes (also on an invalid manifest at startup), independent of `SendMailMode`.
+  - A fatal error email is sent if the orchestrator itself crashes (also on an invalid manifest at startup), independent of `JobMailMode`.
   - When `SmtpServer`, `From` or the recipient is empty, mail is disabled with a warning.
 
 ## Jobs manifest schema (`Orchestrator-Jobs.json`)
@@ -108,6 +116,8 @@ Because state, lock, logs and CSVs live under the tenant data roots, `prod` and 
 | `Enabled` | `false` by default; only enabled jobs are scheduled. |
 | `Group` | Logical group (AD, Exchange, M365, Intune); informational. |
 | `DependsOn` | List of job names that must complete first (cycle-checked at load). |
+| `AllowedServers` | Computer names allowed to run this job. Empty = inherit the orchestrator `AllowedServers` default (empty default = all servers). |
+| `PowerShellEdition` | `PowerShell7` (default, `pwsh`) or `WindowsPowerShell` (`powershell.exe` 5.1, required for Exchange on-premises scripts). |
 | `TimeoutMinutes` | Process-tree kill after this duration (0 disables; may exceed 1440). Default 240. |
 | `MaxRetries` / `RetryDelaySeconds` | Retry policy after Failed/TimedOut/Interrupted. Defaults 0 / 300. |
 | `ContinueOnError` | When `false` and the job finally fails, dependents due at the same occurrence are `Skipped`. Default `true`. |
@@ -118,7 +128,9 @@ Because state, lock, logs and CSVs live under the tenant data roots, `prod` and 
 
 The manifest is hot reloaded at every tick when its file changes; an invalid manifest is rejected with an error email and the last valid version stays in effect (no orchestrator restart needed to change the planning).
 
-All shipped jobs are `Enabled=false` except `M365-VerifiedDomains-Inventory` (small, read-only, safe daily example). The manifest also contains one example of each schedule type (Weekly `AD-Inventory`, Daily-once `M365-EntraDevices-Inventory`, Daily multi-time `EXO-MigrationJobs-Inventory` with `Skip`) and one long job with `TimeoutMinutes` > 1440 (`Mailboxes-PermissionsByUser-Report`). Before enabling a job, make sure its own runtime `.local.json` exists next to the target script (the child runs unattended; app-only auth must be configured).
+All shipped jobs are `Enabled=false` except `M365-VerifiedDomains-Inventory` (small, read-only, safe daily example). The template contains examples of each schedule type (Weekly, Daily once, Daily multi-time with `Skip`), one long job with `TimeoutMinutes` > 1440 (`Mailboxes-PermissionsByUser-Report`), and the `Exchange2016` group running with `PowerShellEdition = "WindowsPowerShell"`; pin those to the Exchange server through their `AllowedServers` list in the runtime manifest.
+
+Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a nightly full job (for example `EXO-Mailboxes-Inventory` with `-IncludeStats`, `Exchange2016-Local-Mailboxes-Inventory` with `-IncludeADPermission`) plus a midday `-Fast` job running the same script without the expensive switches. The `-Fast` job declares `DependsOn` on the full job so the two never overlap on the same CSVs, and uses `MissedRunPolicy = "Skip"` (a missed midday refresh has no value later). Before enabling a job, make sure its own runtime `.local.json` exists next to the target script (the child runs unattended; app-only auth must be configured).
 
 ## State file schema (`Orchestrator-State.json`)
 
@@ -150,7 +162,7 @@ All shipped jobs are `Enabled=false` except `M365-VerifiedDomains-Inventory` (sm
 
 Created from the committed template at first run. Keys follow the SmartM365 pattern: `__USE_GLOBAL__` inherits from `SmartM365.global.local.json`, and `{{DataAllRootPath}}`-style tokens are resolved through the tenant context.
 
-Orchestrator-specific keys: `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
+Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (default server allowlist, empty = all), `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
 
 ## Parameters
 
@@ -211,9 +223,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "SmartM365\SmartInventory\Orchestr
 
 - **Is the loop alive?** Check `Orchestrator-Heartbeat.json` (timestamp must move every tick) and the daily orchestrator log.
 - **Exit code 3 / "Another orchestrator instance is already running"**: a live instance holds `Orchestrator.lock`. If no `pwsh` orchestrator is actually running, the lock is stale and the next start recovers it automatically.
-- **A job never starts**: check `Enabled`, the `-Only`/`-Skip` filters, the dependency chain (a parent pending retry blocks dependents), and the concurrency queue messages in the log.
+- **A job never starts**: check `Enabled`, the server allowlist (the startup log lists "Jobs not allowed on this server"; `-DryRun` shows the effective allowed list per job), the `-Only`/`-Skip` filters, the dependency chain (a parent pending retry blocks dependents), and the concurrency queue messages in the log.
 - **Job marked `Interrupted`**: the child PID disappeared while the orchestrator was down (reboot, kill, crash). The retry policy applies; check the job log for partial output.
 - **Job marked `Skipped`**: previous run still in progress at the new occurrence (overlap guard), missed occurrence with `MissedRunPolicy=Skip`, or a parent with `ContinueOnError=false` finally failed.
-- **No emails**: verify `SmtpServer`, `From`, `To`/`ErrorMailTo` (global or local values), `SendMailMode`, and DNS/IPv4 reachability of the relay; pin `RelayIp` when DNS is unreliable.
+- **No emails**: verify `SmtpServer`, `From`, `To`/`ErrorMailTo` (global or local values), `JobMailMode`, and DNS/IPv4 reachability of the relay; pin `RelayIp` when DNS is unreliable.
 - **Manifest changes ignored**: the file is reloaded only when its timestamp changes and it validates; an invalid manifest is rejected (error email) and the last valid version stays in effect.
 - **Child exit code could not be read**: logged as a warning and treated as Success; check the job log to confirm the actual result.
