@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.5
+    1.0.6
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -46,7 +46,7 @@ $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Glo
 $RunId = [guid]::NewGuid().ToString()
 $Rows = New-Object 'System.Collections.Generic.List[object]'
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.5'
+$ScriptVersion = '1.0.6'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -116,8 +116,36 @@ if (-not $PSBoundParameters.ContainsKey('EnableRemoteDcAdminChecks')) { $EnableR
 function ConvertTo-IsoUtc([datetime]$d){ if($null -eq $d -or $d -eq [datetime]::MinValue){''}else{$d.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)} }
 function Num($v){ if($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)){''}else{ try{([double]$v).ToString('0.########',[Globalization.CultureInfo]::InvariantCulture)}catch{[string]$v} } }
 function Ms($s){ [int64][math]::Max(0,((Get-Date)-$s).TotalMilliseconds) }
-function Add-Row{ param($Forest,$Domain,$DC,[string]$Category,[string]$Check,[ValidateSet('OK','Warning','Critical')]$Status,$NumericValue,$TextValue,$Threshold,$Details,[int64]$DurationMs)
-    [void]$Rows.Add([pscustomobject][ordered]@{RunId=$RunId;RunDateUtc=$RunDateUtc;Forest=[string]$Forest;Domain=[string]$Domain;DC=[string]$DC;Category=$Category;Check=$Check;Status=$Status;NumericValue=(Num $NumericValue);TextValue=[string]$TextValue;Threshold=[string]$Threshold;Details=[string]$Details;DurationMs=$DurationMs})
+function Add-Row{
+    param(
+        [AllowNull()][object]$Forest,
+        [AllowNull()][object]$Domain,
+        [AllowNull()][object]$DC,
+        [string]$Category,
+        [string]$Check,
+        [ValidateSet('OK','Warning','Critical')][string]$Status,
+        [AllowNull()][object]$NumericValue,
+        [AllowNull()][object]$TextValue,
+        [AllowNull()][object]$Threshold,
+        [AllowNull()][object]$Details,
+        [int64]$DurationMs
+    )
+    $row = [ordered]@{
+        RunId = $RunId
+        RunDateUtc = $RunDateUtc
+        Forest = [string]$Forest
+        Domain = [string]$Domain
+        DC = [string]$DC
+        Category = $Category
+        Check = $Check
+        Status = $Status
+        NumericValue = (Num $NumericValue)
+        TextValue = [string]$TextValue
+        Threshold = [string]$Threshold
+        Details = [string]$Details
+        DurationMs = $DurationMs
+    }
+    [void]$Rows.Add([object]([pscustomobject]$row))
 }
 function Invoke-Retry([scriptblock]$ScriptBlock){
     for($i=1;$i -le [math]::Max(1,$RetryCount);$i++){
@@ -239,9 +267,12 @@ try{
     Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputFolder) -RequiredModules @('ActiveDirectory') -RequireActiveDirectoryRead | Out-Null
     if (-not $EnableRemoteDcAdminChecks) { WriteLog -Message 'Remote DC admin checks are disabled. Service status and AD database disk checks will be marked NotMeasured; use -EnableRemoteDcAdminChecks only with a T0 account.' -Level 'INFO' }
     $forest=Invoke-Retry {Get-ADForest -ErrorAction Stop}; $forestName=[string]$forest.Name
+    WriteLog -Message ("Forest discovered: {0}; Domains: {1}" -f $forestName, @($forest.Domains).Count) -Level 'INFO'
+    WriteLog -Message 'Collecting forest FSMO checks.' -Level 'INFO'
     foreach($role in 'SchemaMaster','DomainNamingMaster'){$s=Get-Date;try{$h=[string]$forest.$role;$ok=Test-Port $h 389;Add-Row $forestName $forest.RootDomain $h FSMO $role $(if($ok){'OK'}else{'Critical'}) ([int]$ok) $h 'LDAP 389 reachable' "Forest FSMO holder for $role" (Ms $s)}catch{Add-Row $forestName $forest.RootDomain '' FSMO $role Critical 0 Error 'LDAP 389 reachable' $_.Exception.Message (Ms $s)}}
+    WriteLog -Message 'Collecting tombstone lifetime.' -Level 'INFO'
     $s=Get-Date;try{$cfg=(Get-ADRootDSE -Server $forest.RootDomain -ErrorAction Stop).configurationNamingContext;$ds="CN=Directory Service,CN=Windows NT,CN=Services,$cfg";$obj=Get-ADObject -Identity $ds -Properties tombstoneLifetime -Server $forest.RootDomain -ErrorAction Stop;$tomb=if($obj.tombstoneLifetime){[int]$obj.tombstoneLifetime}else{180};Add-Row $forestName $forest.RootDomain '' Tombstone TombstoneLifetimeDays OK $tomb 'Forest tombstone lifetime' 'Compare with oldest replication failure' $ds (Ms $s)}catch{$tomb=180;Add-Row $forestName $forest.RootDomain '' Tombstone TombstoneLifetimeDays Warning $tomb Defaulted 'Compare with oldest replication failure' $_.Exception.Message (Ms $s)}
-    foreach($d in @($forest.Domains|Sort-Object)){try{Invoke-DomainCheck $forestName ([string]$d) $forest}catch{Add-Row $forestName ([string]$d) '' Domain DomainScan Critical 0 Failed 'Domain scan succeeds' $_.Exception.Message 0}}
+    foreach($d in @($forest.Domains|Sort-Object)){WriteLog -Message ("Collecting domain checks: {0}" -f $d) -Level 'INFO';try{Invoke-DomainCheck $forestName ([string]$d) $forest}catch{Add-Row $forestName ([string]$d) '' Domain DomainScan Critical 0 Failed 'Domain scan succeeds' $_.Exception.Message 0}}
     $oldest=0.0;foreach($d in @($forest.Domains|Sort-Object)){try{foreach($f in @(Get-ADReplicationFailure -Target $d -Scope Domain -ErrorAction Stop)){if($f.FirstFailureTime -and $f.FirstFailureTime -ne [datetime]::MinValue){$days=((Get-Date).ToUniversalTime()-$f.FirstFailureTime.ToUniversalTime()).TotalDays;if($days -gt $oldest){$oldest=$days}}}}catch{ $null = $_ }}
     $st=if($oldest -gt $tomb){'Critical'}elseif($oldest -gt ($tomb*.8)){'Warning'}else{'OK'};Add-Row $forestName $forest.RootDomain '' Tombstone OldestReplicationFailureAgeDays $st ([math]::Round($oldest,2)) "TombstoneLifetimeDays=$tomb" "Critical > $tomb days; Warning > 80 percent" 'Compared with forest tombstone lifetime' 0
     $stamp=(Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
@@ -259,11 +290,17 @@ try{
     if($worst -eq 'Critical'){exit 2};if($worst -eq 'Warning'){exit 1};exit 0
 }catch{
     $runError = $_
-    Add-Row '' '' '' Script UnhandledError Critical 0 Failed 'Script completes' $runError.Exception.Message 0
+    $runErrorDetail = @(
+        "Exception: $($runError.Exception.GetType().FullName): $($runError.Exception.Message)"
+        if ($runError.InvocationInfo -and $runError.InvocationInfo.PositionMessage) { "Position: $($runError.InvocationInfo.PositionMessage)" }
+        if ($runError.ScriptStackTrace) { "Stack: $($runError.ScriptStackTrace)" }
+    ) -join ' | '
+    try { WriteLog -Message $runErrorDetail -Level 'ERROR' } catch { Write-Warning $runErrorDetail }
+    Add-Row '' '' '' Script UnhandledError Critical 0 Failed 'Script completes' $runErrorDetail 0
     if(-not (Test-Path -LiteralPath $OutputFolder)){New-Item -Path $OutputFolder -ItemType Directory -Force|Out-Null}
     $csv=Join-Path $OutputFolder ("AD_HealthCheck_FAILED_{0}.csv" -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture));$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM
     try{$html=ConvertTo-ReportHtml -r @($Rows) -status 'Critical' -started $RunStarted -ended (Get-Date) -csv $csv;Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
     try { Complete-SmartM365ExecutionContext -Status Failed -GeneratedCsvPaths @($csv) -ResultSummary 'AD health check failed before completion.' } catch { $null = $_ }
-    Write-Error $runError;exit 2
+    Write-Error $runErrorDetail;exit 2
 }
