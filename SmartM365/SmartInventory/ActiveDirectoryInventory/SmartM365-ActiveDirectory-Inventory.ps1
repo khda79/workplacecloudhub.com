@@ -22,8 +22,14 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.13
+1.15
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
+    Minimum permissions: read access to all target AD domains and user/computer/group attributes collected by Get-AD* cmdlets.
+    Conditional: Mail.Send is required only when Graph mail notifications are enabled; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: PowerShell 7+, RSAT ActiveDirectory module, and read access to every targeted domain/Global Catalog.
@@ -398,8 +404,16 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $DomainFriendlyNames = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DomainFriendlyNames' -DefaultValue ([pscustomobject]@{})
-$IntuneEnrollmentGroupPattern = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IntuneEnrollmentGroupPattern' -DefaultValue '*GG_INTUNE_ENROLLMENT*'
-$Windows11UpgradeGroupPattern = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Windows11UpgradeGroupPattern' -DefaultValue '*GG_INTUNE_UPGRADEW11*'
+$ConfiguredComputerGroupNamesRaw = @(Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ComputerMembershipGroupNames' -DefaultValue @())
+$ConfiguredComputerGroupNames = for ($groupIndex = 0; $groupIndex -lt 10; $groupIndex++) {
+    if ($groupIndex -lt $ConfiguredComputerGroupNamesRaw.Count -and $null -ne $ConfiguredComputerGroupNamesRaw[$groupIndex]) {
+        ([string]$ConfiguredComputerGroupNamesRaw[$groupIndex]).Trim()
+    }
+    else {
+        ''
+    }
+}
+WriteLog -Message ("Configured computer membership group slots: {0}" -f (($ConfiguredComputerGroupNames | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_)) { '<empty>' } else { $_ } }) -join ', '))
 $EnableOuInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableOuInventory' -DefaultValue $true)
 $EnableComputerInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableComputerInventory' -DefaultValue $true)
 $EnableUserInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableUserInventory' -DefaultValue $true)
@@ -448,7 +462,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.15"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -679,6 +693,8 @@ try {
             return
         }
 
+        $combinedRowsForValidation = @(Import-Csv -LiteralPath $DestinationFile -ErrorAction Stop)
+        Assert-SmartM365CsvDataCompleteness -Data $combinedRowsForValidation -TimestampedPath $DestinationFile -LatestPath $DestinationFile
         WriteLog -Message ("Combined {0} file(s), {1} row(s), into '{2}'" -f $files.Count, $combinedRowCount, $DestinationFile)
     }
 
@@ -1826,10 +1842,21 @@ try {
                     [void]($computerCount++)
                     $computer = $_
                     $computerGroupNames = Get-ComputerGroupNames -Computer $computer -Server $currentDomainName -DomainSid $domainSid -ResolveNestedGroups:$ResolveNestedComputerGroups -GroupNameByDNCache $GroupNameByDNCache -GroupParentsByDNCache $GroupParentsByDNCache -GroupNameBySIDCache $GroupNameBySIDCache
-                    $hasGroupAddIntune  = [bool]($computerGroupNames | Where-Object { $_ -like $IntuneEnrollmentGroupPattern })
-                    $hasGroupUpgradeW11 = [bool]($computerGroupNames | Where-Object { $_ -like $Windows11UpgradeGroupPattern })
+                    $computerGroupNameSet = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+                    foreach ($computerGroupName in @($computerGroupNames)) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$computerGroupName)) {
+                            [void]$computerGroupNameSet.Add([string]$computerGroupName)
+                        }
+                    }
+                    $configuredGroupFlags = New-Object System.Collections.Generic.List[bool]
+                    $configuredGroupMatches = New-Object System.Collections.Generic.List[string]
+                    foreach ($configuredGroupName in $ConfiguredComputerGroupNames) {
+                        $isConfiguredGroupMember = (-not [string]::IsNullOrWhiteSpace($configuredGroupName)) -and $computerGroupNameSet.Contains($configuredGroupName)
+                        [void]$configuredGroupFlags.Add([bool]$isConfiguredGroupMember)
+                        if ($isConfiguredGroupMember) { [void]$configuredGroupMatches.Add($configuredGroupName) }
+                    }
 
-                    [PSCustomObject][ordered]@{
+                    $computerRow = [ordered]@{
                         DomainName              = $currentDomainName
                         ObjectType              = $CurrentObjectType
                         SamAccountName          = $computer.SamAccountName
@@ -1903,9 +1930,12 @@ try {
                         DomainNameShort         = Get-DomainNameShort -DomainName $currentDomainName
                         DomainAndSam            = Get-NormalizedDomainAndSam -DomainNameShort (Get-DomainNameShort -DomainName $currentDomainName) -SamAccountName $computer.SamAccountName
                         ImmutableId_AD          = Convert-GuidToImmutableId -ObjectGuid ([string]$computer.ObjectGUID)
-                        Has_Group_AddIntune     = $hasGroupAddIntune
-                        Has_Group_UpgradeW11    = $hasGroupUpgradeW11
                     }
+                    for ($configuredGroupIndex = 0; $configuredGroupIndex -lt 10; $configuredGroupIndex++) {
+                        $computerRow[("Has_ConfiguredGroup{0:D2}" -f ($configuredGroupIndex + 1))] = [bool]$configuredGroupFlags[$configuredGroupIndex]
+                    }
+                    $computerRow['ConfiguredGroupMatches'] = ($configuredGroupMatches -join ';')
+                    [PSCustomObject]$computerRow
                 } |
                 Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
@@ -2314,6 +2344,7 @@ try {
                     }
                 )
 
+                Assert-SmartM365CsvDataCompleteness -Data $duplicateUpnRows -TimestampedPath $duplicateUpnCsv -LatestPath $duplicateUpnCsv
                 $duplicateUpnRows | Export-Csv -Path $duplicateUpnCsv -NoTypeInformation -Encoding UTF8
                 $upnDuplicateCount = @($upnMap.Keys | Where-Object { $upnMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate UPN analysis complete. Distinct duplicate UPNs: {0}. Affected accounts: {1}. Output: {2}" -f $upnDuplicateCount, $duplicateUpnRows.Count, $duplicateUpnCsv)
@@ -2341,6 +2372,7 @@ try {
                     }
                 )
 
+                Assert-SmartM365CsvDataCompleteness -Data $duplicateSmtpRows -TimestampedPath $duplicateSmtpCsv -LatestPath $duplicateSmtpCsv
                 $duplicateSmtpRows | Export-Csv -Path $duplicateSmtpCsv -NoTypeInformation -Encoding UTF8
                 $smtpDuplicateCount = @($smtpMap.Keys | Where-Object { $smtpMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate SMTP analysis complete. Distinct duplicate addresses: {0}. Affected entries: {1}. Output: {2}" -f $smtpDuplicateCount, $duplicateSmtpRows.Count, $duplicateSmtpCsv)

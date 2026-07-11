@@ -99,8 +99,14 @@
 
 .EXAMPLE
     .\Setup\SmartM365-Create-AppRegistration.ps1 -RemoveAppRegistration -Confirm
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: Microsoft.Graph.Authentication; Microsoft.Graph.Applications; ExchangeOnlineManagement.
+    Interactive delegated setup scopes: Application.ReadWrite.All; AppRoleAssignment.ReadWrite.All; Directory.Read.All; Group.ReadWrite.All; RoleManagement.ReadWrite.Directory; Sites.FullControl.All; Channel.Create; Channel.ReadBasic.All.
+    Runtime app permissions created: see SmartM365-AppRegistration-Permissions.md and Get-RequiredApiResource.
+
 .VERSION
-1.0
+1.1
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -313,27 +319,40 @@ function ConvertTo-ODataStringLiteral {
     return $Value.Replace("'", "''")
 }
 
+function Ensure-SmartM365SetupModule {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+
+    $availableModule = Get-Module -ListAvailable -Name $Name | Sort-Object Version -Descending | Select-Object -First 1
+    if (-not $availableModule) {
+        Write-SmartM365SetupStatus -Level WARN -Message ("Required setup module '{0}' is missing. Installing with Install-Module -Scope CurrentUser -Force -AllowClobber." -f $Name)
+        Install-Module -Name $Name -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+        $availableModule = Get-Module -ListAvailable -Name $Name | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $availableModule) {
+            throw ("Required setup module '{0}' could not be resolved after installation." -f $Name)
+        }
+    }
+
+    Import-Module $Name -ErrorAction Stop
+    $loadedModule = Get-Module -Name $Name | Sort-Object Version -Descending | Select-Object -First 1
+    if (-not $loadedModule) { $loadedModule = $availableModule }
+    Write-SmartM365SetupStatus -Message ("Setup module ready: {0} {1}; Path={2}" -f $loadedModule.Name, $loadedModule.Version, $loadedModule.Path) -Level OK
+}
+
 function Import-RequiredGraphModule {
     $requiredModules = @(
         'Microsoft.Graph.Authentication',
-        'Microsoft.Graph.Applications'
+        'Microsoft.Graph.Applications',
+        'ExchangeOnlineManagement'
     )
 
     foreach ($moduleName in $requiredModules) {
-        if (-not (Get-Module -ListAvailable -Name $moduleName)) {
-            throw "Required module '$moduleName' is not installed. Install it with: Install-Module $moduleName -Scope CurrentUser"
-        }
-        Import-Module $moduleName -ErrorAction Stop
+        Ensure-SmartM365SetupModule -Name $moduleName
     }
 }
 
 function Import-RequiredExchangeOnlineModule {
-    $moduleName = 'ExchangeOnlineManagement'
-    if (-not (Get-Module -ListAvailable -Name $moduleName)) {
-        throw "Required module '$moduleName' is not installed. Install it with: Install-Module $moduleName -Scope CurrentUser"
-    }
-
-    Import-Module $moduleName -ErrorAction Stop
+    Ensure-SmartM365SetupModule -Name 'ExchangeOnlineManagement'
 }
 
 function Disconnect-SmartM365ExistingGraphSession {

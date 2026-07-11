@@ -37,7 +37,7 @@ Shows what would be installed without installing modules.
 Skips Import-Module validation after installation.
 
 .NOTES
-Version: 1.1
+Version: 1.2
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -73,9 +73,13 @@ $requiredModules += @(
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Groups',
     'Microsoft.Graph.Identity.DirectoryManagement',
+    'Microsoft.Graph.Sites',
+    'Microsoft.Graph.Teams',
     'Microsoft.Graph.DeviceManagement',
     'Microsoft.Graph.DeviceManagement.Administration',
     'Microsoft.Graph.DeviceManagement.Enrollment',
+    'Microsoft.Graph.Beta.DeviceManagement',
+    'Microsoft.Graph.Beta.Reports',
     'Microsoft.Graph.Policies',
     'Microsoft.Graph.Reports',
     'ExchangeOnlineManagement',
@@ -176,6 +180,16 @@ if (-not $SkipImportValidation) {
     foreach ($moduleName in $requiredModules) {
         Write-SmartM365SetupLog -Message ("Validating module import: {0}" -f $moduleName)
         Import-Module -Name $moduleName -ErrorAction Stop
+        $loadedModule = Get-Module -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $loadedModule) {
+            $loadedModule = Get-Module -ListAvailable -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+        }
+        if ($loadedModule) {
+            Write-SmartM365SetupLog -Level SUCCESS -Message ("Module ready: {0} {1}; Path={2}" -f $loadedModule.Name, $loadedModule.Version, $loadedModule.Path)
+        }
+        else {
+            throw ("Module import reported success but module version could not be resolved: {0}" -f $moduleName)
+        }
     }
 }
 

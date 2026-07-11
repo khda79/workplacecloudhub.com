@@ -24,8 +24,14 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .VERSION
-1.8
+1.9
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: Directory.Read.All.
+    Conditional: Mail.Send is required when SyncHealth email notification is enabled; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph.Authentication, SmartM365.Core.psd1
@@ -61,7 +67,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.8'
+$ScriptVersion = '1.9'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 

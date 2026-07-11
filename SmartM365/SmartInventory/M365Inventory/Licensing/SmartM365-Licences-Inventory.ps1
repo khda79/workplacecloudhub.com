@@ -4,11 +4,17 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.5
+1.6
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups.
+    Minimum Graph application permissions: Directory.Read.All; User.Read.All; Group.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.1
+    Version : 1.2
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -568,7 +574,7 @@ function Add-GroupAgg {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $connectedGraphInThisRun = $false
