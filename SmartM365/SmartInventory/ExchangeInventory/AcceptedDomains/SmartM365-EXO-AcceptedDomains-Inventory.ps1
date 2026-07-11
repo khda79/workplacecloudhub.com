@@ -95,8 +95,7 @@ function Get-ScriptLocalConfig {
 
             Copy-Item -LiteralPath $templatePath -Destination $configPath -ErrorAction Stop
             Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
-            Write-Host 'Edit the local JSON now if needed. Press Enter to continue with the current file values.' -ForegroundColor Yellow
-            Read-Host 'Press Enter to continue'
+            Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
         }
     }
 
@@ -252,8 +251,7 @@ function Get-ScriptLocalConfig {
 
             Copy-Item -LiteralPath $templatePath -Destination $configPath -ErrorAction Stop
             Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
-            Write-Host 'Edit the local JSON now if needed. Press Enter to continue with the current file values.' -ForegroundColor Yellow
-            Read-Host 'Press Enter to continue'
+            Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
         }
     }
 

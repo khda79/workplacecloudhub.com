@@ -54,17 +54,10 @@ function Initialize-SmartM365LocalJsonFromTemplate {
         "Created $ConfigDescription from template.",
         "Local JSON: $Path",
         "Template: $TemplatePath",
-        'Edit the local JSON now if needed. When ready, press Enter to continue.',
-        'If you press Enter without editing, the script continues with the default template values.'
+        'Review the generated local JSON values; continuing with default template values unless edited before next run.'
     ) -join [Environment]::NewLine
 
     Write-Host $message -ForegroundColor Yellow
-    try {
-        Read-Host 'Press Enter to continue'
-    }
-    catch {
-        Write-Host 'Unable to pause for input. Continuing with the generated local JSON.' -ForegroundColor Yellow
-    }
 
     return $true
 }
