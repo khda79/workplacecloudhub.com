@@ -42,14 +42,14 @@ Optional tenant ID used at connect time.
 Uses device code authentication.
 
 .EXAMPLE
-pwsh -File .\SmartM365-Get-IntuneAutopatchAlerts.ps1
+pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.7
+1.9
 
 
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-    Version : 1.7
+    Version : 1.9
 #>
 
 [CmdletBinding()]
@@ -295,7 +295,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.9"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -316,12 +316,12 @@ $global:BasePath = $OutputFolder
 $global:LogPath = $LogFolder
 $global:LogTextFile = $LogFile
 $global:logTranscriptFile = $TranscriptFile
-$SummaryCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_AutopatchAlerts_Summary_{0}.csv" -f $RunStamp)
-$DetailCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_AutopatchAlerts_Detail_{0}.csv" -f $RunStamp)
-$PolicyCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_AutopatchAlerts_PolicySummary_{0}.csv" -f $RunStamp)
-$SummaryLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_AutopatchAlerts_Summary.csv"
-$DetailLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_AutopatchAlerts_Detail.csv"
-$PolicyLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_AutopatchAlerts_PolicySummary.csv"
+$SummaryCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_WindowsAutopatch_Alerts_Summary_{0}.csv" -f $RunStamp)
+$DetailCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_WindowsAutopatch_Alerts_Detail_{0}.csv" -f $RunStamp)
+$PolicyCsvPath = Join-Path -Path $OutputFolder -ChildPath ("Intune_WindowsAutopatch_Alerts_PolicySummary_{0}.csv" -f $RunStamp)
+$SummaryLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_WindowsAutopatch_Alerts_Summary.csv"
+$DetailLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_WindowsAutopatch_Alerts_Detail.csv"
+$PolicyLatestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "Intune_WindowsAutopatch_Alerts_PolicySummary.csv"
 $PolicyColumns = @('PolicyId','PolicyName','ExpediteQUReleaseDate','CountDevicesErrorStatus','CountDevicesInProgressStatus','CountDevicesSuccessStatus')
 $DetailColumns = @('AlertName','Severity','Category','AffectedUpdateType','DeviceName','DeviceId','PolicyId','PolicyName','EventDateUtc','LastScanUtc','AggregateState','CurrentStatus','SourceReport')
 $SummaryColumns = @('AlertName','Severity','Category','AffectedUpdateType','Impact','FirstSeenUtc','LastSeenUtc','SourceReport')
