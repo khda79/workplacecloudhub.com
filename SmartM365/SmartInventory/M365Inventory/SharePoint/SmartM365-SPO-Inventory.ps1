@@ -47,8 +47,15 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.5
+0.7
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; optional PnP.PowerShell only when -UsePnPDeepScan is used.
+    Minimum Graph application permissions for default inventory: Reports.Read.All; Sites.Read.All; Directory.Read.All.
+    Optional PnP deep sharing scan may require SharePoint site-level access for scanned sites.
+    Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph.Authentication, SmartM365.Core.psd1
@@ -83,7 +90,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '0.5'
+$ScriptVersion = '0.7'
 $CurrentOperation = 'Initialize'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -206,15 +213,19 @@ function New-SpoHtmlSummary {
 }
 
 function Get-SpoMailAttachmentPaths {
-    param([Parameter(Mandatory)][string]$LatestFolder)
+    param(
+        [Parameter(Mandatory)][string]$LatestFolder,
+        [long]$MaxTotalBytes = 2MB
+    )
 
     $candidateNames = @(
         'M365_SPO_Sites.csv',
-        'M365_SPO_Lists.csv',
+        'M365_SPO_ExternalSharing.csv',
         'M365_SPO_Permissions.csv',
-        'M365_SPO_ExternalSharing.csv'
+        'M365_SPO_Lists.csv'
     )
     $attachments = New-Object System.Collections.Generic.List[string]
+    [long]$totalBytes = 0
     foreach ($name in $candidateNames) {
         $candidate = Join-Path -Path $LatestFolder -ChildPath $name
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
@@ -223,7 +234,15 @@ function Get-SpoMailAttachmentPaths {
             Write-SpoLog -Message ("Mail attachment skipped because it exceeds Graph inline attachment limit: {0} ({1:n1} MB)." -f $candidate, ($sizeBytes / 1MB)) -Level WARNING
             continue
         }
+        if (($totalBytes + $sizeBytes) -gt $MaxTotalBytes) {
+            Write-SpoLog -Message ("Mail attachment skipped to keep Graph sendMail payload small: {0} ({1:n1} MB); current total {2:n1} MB; limit {3:n1} MB." -f $candidate, ($sizeBytes / 1MB), ($totalBytes / 1MB), ($MaxTotalBytes / 1MB)) -Level WARNING
+            continue
+        }
         $attachments.Add($candidate) | Out-Null
+        $totalBytes += $sizeBytes
+    }
+    if ($attachments.Count -gt 0) {
+        Write-SpoLog -Message ("Mail attachments selected: {0} file(s), {1:n1} MB total." -f $attachments.Count, ($totalBytes / 1MB)) -Level INFO
     }
     return @($attachments)
 }
