@@ -8,7 +8,7 @@ if not exist "%PWSH%" (
   pause
   exit /b 1
 )
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-SPO-Inventory.ps1" -Tenant test -MaxSites 10 -DryRun %*
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-SPO-Inventory.ps1" -Tenant test -MaxSites 10 -DryRun -MaxItems 25 %*
 set "EXITCODE=%ERRORLEVEL%"
 pause
 exit /b %EXITCODE%

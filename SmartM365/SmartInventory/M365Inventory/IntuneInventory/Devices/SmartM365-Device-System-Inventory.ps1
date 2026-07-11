@@ -53,8 +53,20 @@ param(
     [switch]$InteractiveAuth,
 
     [Parameter(Mandatory = $false)]
-    [string]$PlatformScriptId = "0d121c5c-65cc-480f-b07a-9ae79d2d928d"
+    [string]$PlatformScriptId = "0d121c5c-65cc-480f-b07a-9ae79d2d928d",
+    [int]$MaxItems = 0
 )
+if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
+    $global:SmartM365MaxItems = [int]$MaxItems
+    $global:SmartM365TestMaxItems = [int]$MaxItems
+    $global:SmartM365IsMaxItemsRun = $true
+    foreach ($smartM365LimitName in @('TopUsers','TopMailboxes','MaxDevices','MaxSites','MaxTeams','MaxApps','MaxPolicies','Limit','MaxPages')) {
+        $smartM365LimitVariable = Get-Variable -Name $smartM365LimitName -Scope Script -ErrorAction SilentlyContinue
+        if ($smartM365LimitVariable -and -not $PSBoundParameters.ContainsKey($smartM365LimitName) -and $null -ne $smartM365LimitVariable.Value) {
+            Set-Variable -Name $smartM365LimitName -Value ([int]$MaxItems) -Scope Script
+        }
+    }
+}
 $tenantContextPath = & {
     $d = $PSScriptRoot
     while ($d) {

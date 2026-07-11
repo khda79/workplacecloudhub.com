@@ -11,7 +11,7 @@ if not exist "%PWSH%" (
   popd
   exit /b 1
 )
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-Teams-Inventory.ps1" -Tenant test
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-Teams-Inventory.ps1" -Tenant test -MaxItems 25
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 exit /b %EXIT_CODE%
