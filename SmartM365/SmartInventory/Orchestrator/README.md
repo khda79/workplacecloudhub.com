@@ -12,6 +12,7 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `SmartM365-Inventory-Orchestrator.local.json.template` | Safe committed template; copied to `SmartM365-Inventory-Orchestrator.local.json` at first run (the runtime `.local.json` is Git-ignored). |
 | `Orchestrator-Jobs.json.template` | Safe committed jobs-manifest template (all schedules, neutral `AllowedServers`). |
 | `Orchestrator-Jobs.json` | Runtime jobs manifest, auto-created from the template at first run and Git-ignored: it carries operational values (Enabled flags, schedules, real server names in `AllowedServers`). Hot reloaded on change. |
+| `Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1` | Installs or removes the unattended Windows scheduled task under a dedicated service account. |
 | `Start-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: `-Tenant prod -Connect`. |
 | `Start-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: `-Tenant test -Connect`. |
 
@@ -188,11 +189,46 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SmtpPort`, `U
 
 ## Task Scheduler configuration
 
+### Automated installation
+
+Run the installer from an elevated PowerShell session. It securely prompts for the dedicated service-account password; the password is never accepted as a command-line parameter. `SYSTEM` and `LocalSystem` are explicitly refused because a privileged task must not launch repository files that could be modified by non-administrators.
+
+```powershell
+.\SmartM365\SmartInventory\Orchestrator\Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 `
+    -Tenant prod `
+    -ServiceAccount 'CONTOSO\svc-smartm365' `
+    -StartNow
+```
+
+The default task name is `SmartM365 Inventory Orchestrator - <Tenant>`. Use `-TaskName` to override it. The installer verifies administrator rights, PowerShell 7, the orchestrator, the jobs/config templates, and the SmartM365 tenant-context helper before registration.
+
+The installed task:
+
+- directly runs `pwsh.exe -File SmartM365-Inventory-Orchestrator.ps1 -Tenant <prod|test> -Connect`;
+- starts five minutes after server startup;
+- starts daily at midnight and repeats every 30 minutes for one day;
+- ignores a new start while an instance is already running;
+- starts as soon as possible after a missed trigger;
+- retries three times, one minute apart, after a failed task start;
+- has no Task Scheduler execution time limit because the orchestrator manages its own lifetime.
+
+To remove the task (no credential prompt):
+
+```powershell
+.\SmartM365\SmartInventory\Orchestrator\Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 `
+    -Tenant prod `
+    -Uninstall
+```
+
+The service account must already have the local/domain rights and file/certificate access required by the enabled inventory jobs. Restrict write access to the repository checkout and orchestrator files to trusted administrators and the deployment process.
+
+### Manual configuration
+
 Create ONE task (per tenant) running the launcher, for example `Start-SmartM365-Inventory-Orchestrator-Prod.cmd`:
 
 - General: dedicated service account with "Log on as a batch job", "Run whether user is logged on or not", "Run with highest privileges" if the inventory scripts need it. The account needs write access to the SmartM365 `Data` folders and the certificate/private key used by app-only auth.
 - Triggers:
-  - "At startup" (delay 1-2 minutes recommended).
+  - "At startup" (delay 5 minutes recommended).
   - Daily at a fixed time (for example 05:55). Recommended: set the daily trigger to "Repeat task every 30 minutes for a duration of 1 day". Combined with "Do not start a new instance", the repetition is ignored while the resident instance is alive and simply relaunches the orchestrator shortly after its 24h recycle exit, whatever time the previous instance started.
 - Settings:
   - "Run task as soon as possible after a scheduled start is missed": enabled.
