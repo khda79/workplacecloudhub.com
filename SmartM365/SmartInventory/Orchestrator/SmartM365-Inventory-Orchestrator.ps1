@@ -19,6 +19,16 @@ therefore span several orchestrator lifecycles without being interrupted.
 Features:
 - Daily and weekly schedules, one or several times per day, per-job MissedRunPolicy
   (RunOnce catch-up or Skip).
+- Server allowlist: the AllowedServers configuration value lists the servers allowed to
+  run jobs by default (empty = all servers), and each job may carry its own
+  AllowedServers list in the manifest. Jobs not allowed on the local computer name are
+  never launched here (including through -Force).
+- Per-job PowerShellEdition: jobs run in pwsh (PowerShell7, default) or powershell.exe
+  (WindowsPowerShell) child processes; Exchange on-premises scripts require
+  WindowsPowerShell.
+- Per-server folders: the orchestrator data and log folders are automatically suffixed
+  with the local computer name, so several servers can share the same UNC
+  DataAllRootPath/LogAllRootPath without state, lock or log collisions.
 - Global MaxConcurrency with queueing (a due occurrence is never lost while waiting).
 - DependsOn chains executed in topological order; dependents skipped when a parent with
   ContinueOnError=false finally fails.
@@ -27,7 +37,7 @@ Features:
 - Timeout with process-tree kill, retry policy (MaxRetries / RetryDelaySeconds).
 - Daily job-runs CSV (atomic writes), orchestrator log with daily rotation, one log per
   job execution, retention cleanup, heartbeat file refreshed at every tick.
-- HTML error email on final job failure (SendMailMode Always/OnError/Never), optional
+- HTML error email on final job failure (JobMailMode Always/OnError/Never), optional
   daily HTML summary email, fatal error email if the orchestrator itself crashes.
   Mail uses System.Net.Mail with explicit UTF-8 over SmtpClient (never Send-MailMessage),
   IPv4 resolution of the SMTP endpoint with optional pinned RelayIp.
@@ -71,7 +81,7 @@ Overrides the state file path. Default: Orchestrator-State.json in the orchestra
 folder ({{DataAllRootPath}}\Orchestrator).
 
 .VERSION
-1.0.0
+1.2.0
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -80,7 +90,7 @@ folder ({{DataAllRootPath}}\Orchestrator).
     manages its own connections inside its own child process.
 
 .NOTES
-    Version : 1.0.0
+    Version : 1.2.0
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -102,7 +112,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.2.0'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -513,6 +523,15 @@ function ConvertTo-NormalizedJob {
     if ($RawJob.PSObject.Properties['RetryDelaySeconds'] -and $null -ne $RawJob.RetryDelaySeconds) { $retryDelaySeconds = [int]$RawJob.RetryDelaySeconds }
     $continueOnError = $true
     if ($RawJob.PSObject.Properties['ContinueOnError']) { $continueOnError = [bool]$RawJob.ContinueOnError }
+    $allowedServers = @()
+    if ($RawJob.PSObject.Properties['AllowedServers'] -and $null -ne $RawJob.AllowedServers) {
+        $allowedServers = @($RawJob.AllowedServers | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    }
+    $powerShellEdition = 'PowerShell7'
+    if ($RawJob.PSObject.Properties['PowerShellEdition'] -and $RawJob.PowerShellEdition) { $powerShellEdition = [string]$RawJob.PowerShellEdition }
+    if ($powerShellEdition -notin @('PowerShell7', 'WindowsPowerShell')) {
+        $Errors.Add("Job '$name': PowerShellEdition must be 'PowerShell7' or 'WindowsPowerShell'.")
+    }
 
     $scheduleType = ''
     $times = @()
@@ -555,6 +574,8 @@ function ConvertTo-NormalizedJob {
         MaxRetries = $maxRetries
         RetryDelaySeconds = $retryDelaySeconds
         ContinueOnError = $continueOnError
+        AllowedServers = $allowedServers
+        PowerShellEdition = $powerShellEdition
         Schedule = [pscustomobject]@{
             Type = $scheduleType
             Times = $times
@@ -653,7 +674,8 @@ function Update-JobsManifestIfChanged {
     try {
         $newManifest = Read-JobsManifest -Path $script:Settings.JobsManifestPath
         $script:Manifest = $newManifest
-        Write-OrchestratorLog -Message ("Jobs manifest reloaded ({0} jobs)." -f @($newManifest.OrderedJobs).Count)
+        Write-OrchestratorLog -Message ("Jobs manifest reloaded ({0} jobs)." -f $newManifest.OrderedJobs.Count)
+        Write-ServerAllowlistSummary
         Initialize-NewJobStates
     }
     catch {
@@ -908,6 +930,20 @@ function Get-PwshPath {
     throw 'pwsh.exe not found.'
 }
 
+function Get-JobEngine {
+    # Returns the child-process engine for a job: pwsh (default) or Windows
+    # PowerShell 5.1 for jobs that declare PowerShellEdition = WindowsPowerShell
+    # (Exchange on-premises scripts).
+    param([AllowNull()]$Job)
+
+    if ($null -ne $Job -and $Job.PowerShellEdition -eq 'WindowsPowerShell') {
+        $path = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $path)) { throw 'powershell.exe (Windows PowerShell 5.1) not found.' }
+        return [pscustomobject]@{ Path = $path; ProcessName = 'powershell' }
+    }
+    return [pscustomobject]@{ Path = (Get-PwshPath); ProcessName = 'pwsh' }
+}
+
 function Stop-ProcessTree {
     param([Parameter(Mandatory = $true)][int]$TargetPid)
 
@@ -923,12 +959,13 @@ function Stop-ProcessTree {
 function Test-ProcessMatchesRecord {
     param(
         [Parameter(Mandatory = $true)][int]$RecordedPid,
-        [Parameter(Mandatory = $true)][datetime]$ExpectedStartTime
+        [Parameter(Mandatory = $true)][datetime]$ExpectedStartTime,
+        [string]$ExpectedProcessName = 'pwsh'
     )
 
     $process = Get-Process -Id $RecordedPid -ErrorAction SilentlyContinue
     if (-not $process) { return $null }
-    if ($process.ProcessName -ne 'pwsh') { return $null }
+    if ($process.ProcessName -ne $ExpectedProcessName) { return $null }
     $actualStart = $null
     try { $actualStart = $process.StartTime } catch { return $null }
     if ([math]::Abs(($actualStart - $ExpectedStartTime).TotalSeconds) -gt 5) { return $null }
@@ -965,7 +1002,10 @@ function Start-InventoryJob {
     if (-not [string]::IsNullOrWhiteSpace($Job.Arguments)) { $argumentPart = ' ' + $Job.Arguments.Trim() }
     $connectPart = ''
     if ($Connect) { $connectPart = ' -Connect' }
+    # Out-File:Encoding pins the *>> redirection to UTF-8: Windows PowerShell 5.1
+    # would otherwise append UTF-16 output to the UTF-8 job log.
     $command = "`$ErrorActionPreference = 'Continue'; " +
+        "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
         "& '" + $escapedScript + "'" + $argumentPart + " -Tenant '" + $escapedTenant + "'" + $connectPart + " *>> '" + $escapedLog + "'; " +
         "if (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } else { exit 0 }"
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
@@ -973,8 +1013,9 @@ function Start-InventoryJob {
     $headerLine = "[{0}] {1} launching job {2} (attempt {3}, scheduled {4})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm:ss')
     try { [System.IO.File]::WriteAllText($logPath, $headerLine + [Environment]::NewLine) } catch { }
 
+    $engine = Get-JobEngine -Job $Job
     try {
-        $process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand) -WindowStyle Hidden -PassThru
+        $process = Start-Process -FilePath $engine.Path -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand) -WindowStyle Hidden -PassThru
     }
     catch {
         Write-OrchestratorLog -Message ("Job {0}: failed to start child process: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
@@ -994,6 +1035,7 @@ function Start-InventoryJob {
         LogPath = $logPath
         Attempt = $Attempt
         TimeoutMinutes = $Job.TimeoutMinutes
+        ProcessName = $engine.ProcessName
     }
     $state.Running = @{
         Pid = $process.Id
@@ -1002,13 +1044,14 @@ function Start-InventoryJob {
         LogPath = $logPath
         Attempt = $Attempt
         TimeoutMinutes = $Job.TimeoutMinutes
+        ProcessName = $engine.ProcessName
     }
     $state.LastRunStart = ConvertTo-StateTime -Value $processStart
     $state.LastStatus = 'Running'
     $state.RetryCount = $Attempt
     $state.PendingRetry = $null
     Save-OrchestratorState
-    Write-OrchestratorLog -Message ("Job {0}: started PID {1} (attempt {2}, scheduled {3}, timeout {4} min, log {5})." -f $Job.Name, $process.Id, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath)
+    Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath)
 }
 
 function Complete-JobRun {
@@ -1074,10 +1117,10 @@ function Complete-JobRun {
         Write-OrchestratorLog -Message ("Job {0}: retry {1}/{2} scheduled after {3}s." -f $JobName, ($attempt + 1), $manifestJob.MaxRetries, $manifestJob.RetryDelaySeconds) -Level WARN
     }
 
-    $sendMailMode = $script:Settings.SendMailMode
+    $jobMailMode = $script:Settings.JobMailMode
     $shouldEmail = $false
-    if ($sendMailMode -eq 'Always' -and -not $retryScheduled) { $shouldEmail = $true }
-    elseif ($sendMailMode -eq 'OnError' -and $status -ne 'Success' -and -not $retryScheduled) { $shouldEmail = $true }
+    if ($jobMailMode -eq 'Always' -and -not $retryScheduled) { $shouldEmail = $true }
+    elseif ($jobMailMode -eq 'OnError' -and $status -ne 'Success' -and -not $retryScheduled) { $shouldEmail = $true }
     if ($shouldEmail) {
         $details = [ordered]@{
             'Job' = $JobName
@@ -1137,8 +1180,10 @@ function Restore-RunningJobs {
         $record = $state.Running
         $expectedStart = ConvertFrom-StateTime -Text ([string]$record.StartTime)
         $recordedPid = [int]$record.Pid
+        $expectedProcessName = 'pwsh'
+        if ($record.ContainsKey('ProcessName') -and $record.ProcessName) { $expectedProcessName = [string]$record.ProcessName }
         $process = $null
-        if ($null -ne $expectedStart) { $process = Test-ProcessMatchesRecord -RecordedPid $recordedPid -ExpectedStartTime $expectedStart }
+        if ($null -ne $expectedStart) { $process = Test-ProcessMatchesRecord -RecordedPid $recordedPid -ExpectedStartTime $expectedStart -ExpectedProcessName $expectedProcessName }
 
         $runInfo = @{
             StartTime = $expectedStart
@@ -1171,6 +1216,31 @@ function Test-JobSelected {
     if ($Skip.Count -gt 0 -and $Skip -contains $JobName) { return $false }
     if ($Only.Count -gt 0 -and $Only -notcontains $JobName) { return $false }
     return $true
+}
+
+function Get-JobEffectiveAllowedServers {
+    param([Parameter(Mandatory = $true)]$Job)
+
+    $list = @($Job.AllowedServers)
+    if ($list.Count -eq 0) { $list = @($script:Settings.DefaultAllowedServers) }
+    return $list
+}
+
+function Test-JobAllowedOnServer {
+    # Empty effective list = every server is allowed. Comparison uses the local
+    # computer name (case-insensitive).
+    param([Parameter(Mandatory = $true)]$Job)
+
+    $list = Get-JobEffectiveAllowedServers -Job $Job
+    if ($list.Count -eq 0) { return $true }
+    return ($list -contains $env:COMPUTERNAME)
+}
+
+function Write-ServerAllowlistSummary {
+    $blocked = @($script:Manifest.OrderedJobs | Where-Object { -not (Test-JobAllowedOnServer -Job $_) } | ForEach-Object { $_.Name })
+    if ($blocked.Count -gt 0) {
+        Write-OrchestratorLog -Message ("Jobs not allowed on this server ({0}): {1}" -f $env:COMPUTERNAME, ($blocked -join ', '))
+    }
 }
 
 function Set-OccurrenceSkipped {
@@ -1208,6 +1278,7 @@ function Invoke-MissedRunCatchUp {
     $now = Get-Date
     foreach ($job in $script:Manifest.OrderedJobs) {
         if (-not $job.Enabled) { continue }
+        if (-not (Test-JobAllowedOnServer -Job $job)) { continue }
         if ($job.Schedule.MissedRunPolicy -ne 'Skip') { continue }
         $state = Get-JobState -JobName $job.Name
         if ($script:RunningJobs.ContainsKey($job.Name)) { continue }
@@ -1228,8 +1299,15 @@ function Invoke-LaunchPhase {
     foreach ($job in $script:Manifest.OrderedJobs) {
         $name = $job.Name
         if (-not (Test-JobSelected -JobName $name)) { continue }
-        $state = Get-JobState -JobName $name
         $isForced = ($script:ForcedPending -contains $name)
+        if (-not (Test-JobAllowedOnServer -Job $job)) {
+            if ($isForced) {
+                Write-OrchestratorLog -Message ("Job {0}: -Force refused; this server is not in the job allowlist ({1})." -f $name, ((Get-JobEffectiveAllowedServers -Job $job) -join ', ')) -Level WARN
+                $script:ForcedPending = @($script:ForcedPending | Where-Object { $_ -ne $name })
+            }
+            continue
+        }
+        $state = Get-JobState -JobName $name
         $lastOccurrence = ConvertFrom-StateTime -Text ([string]$state.LastScheduledOccurrence)
 
         # Per-job overlap guard: a job still running at its next occurrence is not
@@ -1280,7 +1358,9 @@ function Invoke-LaunchPhase {
                 if ($null -ne $depState.PendingRetry) { $deferred = $true; break }
                 $depJob = $null
                 if ($script:Manifest.JobsByName.ContainsKey($dep)) { $depJob = $script:Manifest.JobsByName[$dep] }
-                if ($null -ne $depJob -and $depJob.Enabled) {
+                # A dependency that is not allowed on this server never runs here and
+                # must not block its dependents.
+                if ($null -ne $depJob -and $depJob.Enabled -and (Test-JobAllowedOnServer -Job $depJob)) {
                     $depLast = ConvertFrom-StateTime -Text ([string]$depState.LastScheduledOccurrence)
                     $depDue = Get-DueOccurrence -Job $depJob -LastOccurrence $depLast -Now $Now
                     if ($null -ne $depDue) { $deferred = $true; break }
@@ -1446,11 +1526,13 @@ function Show-DryRunPlan {
         if (-not $job.Enabled) { $flags += 'disabled' }
         if (-not (Test-JobSelected -JobName $job.Name)) { $flags += 'filtered out by -Only/-Skip' }
         if ($job.DependsOn.Count -gt 0) { $flags += ('depends on ' + ($job.DependsOn -join ', ')) }
+        if ($job.PowerShellEdition -eq 'WindowsPowerShell') { $flags += 'WindowsPowerShell' }
+        if (-not (Test-JobAllowedOnServer -Job $job)) { $flags += ('not allowed on this server; allowed: ' + ((Get-JobEffectiveAllowedServers -Job $job) -join ', ')) }
         $flagText = ''
         if ($flags.Count -gt 0) { $flagText = ' [' + ($flags -join '; ') + ']' }
         Write-OrchestratorLog -Message ("Job {0} (group {1}): {2}; policy {3}; timeout {4} min; retries {5}{6}" -f $job.Name, $job.Group, $scheduleText, $schedule.MissedRunPolicy, $job.TimeoutMinutes, $job.MaxRetries, $flagText)
 
-        if (-not $job.Enabled -or -not (Test-JobSelected -JobName $job.Name)) { continue }
+        if (-not $job.Enabled -or -not (Test-JobSelected -JobName $job.Name) -or -not (Test-JobAllowedOnServer -Job $job)) { continue }
         $state = $null
         if ($script:State.Jobs.ContainsKey($job.Name)) { $state = $script:State.Jobs[$job.Name] }
         if ($null -ne $state) {
@@ -1501,6 +1583,12 @@ try {
     $dataFolder = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'OrchestratorDataFolderPath' -DefaultValue (Join-Path -Path $PSScriptRoot -ChildPath 'Output')
     $logFolder = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'OrchestratorLogFolderPath' -DefaultValue (Join-Path -Path $dataFolder -ChildPath 'Logs')
 
+    # Per-server isolation: DataAllRootPath/LogAllRootPath may be a UNC share used by
+    # several orchestrator servers. State, lock, heartbeat, job-runs CSVs and logs are
+    # therefore suffixed with the local computer name so instances never collide.
+    if ((Split-Path -Path $dataFolder -Leaf) -ne $env:COMPUTERNAME) { $dataFolder = Join-Path -Path $dataFolder -ChildPath $env:COMPUTERNAME }
+    if ((Split-Path -Path $logFolder -Leaf) -ne $env:COMPUTERNAME) { $logFolder = Join-Path -Path $logFolder -ChildPath $env:COMPUTERNAME }
+
     $effectiveMaxConcurrency = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'MaxConcurrency' -DefaultValue 2
     if ($MaxConcurrency -gt 0) { $effectiveMaxConcurrency = $MaxConcurrency }
     $effectiveMaxLifetimeHours = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'MaxLifetimeHours' -DefaultValue 24
@@ -1517,10 +1605,22 @@ try {
     if ([string]::IsNullOrWhiteSpace($mailTo)) { $mailTo = $errorMailTo }
     if ([string]::IsNullOrWhiteSpace($errorMailTo)) { $errorMailTo = $mailTo }
     $smtpServer = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SmtpServer' -DefaultValue '')
-    $sendMailMode = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SendMailMode' -DefaultValue 'OnError')
-    if ($sendMailMode -notin @('Always', 'OnError', 'Never')) {
-        Write-Host ("Invalid SendMailMode '{0}'; falling back to OnError." -f $sendMailMode) -ForegroundColor Yellow
-        $sendMailMode = 'OnError'
+    # AllowedServers: default server allowlist for every job (empty = all servers).
+    # Accepts a JSON array or a comma/semicolon separated string.
+    $allowedServersRaw = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AllowedServers' -DefaultValue @()
+    $defaultAllowedServers = @()
+    if ($null -ne $allowedServersRaw) {
+        if ($allowedServersRaw -is [string]) { $defaultAllowedServers = @($allowedServersRaw -split '[;,]') }
+        else { $defaultAllowedServers = @($allowedServersRaw) }
+        $defaultAllowedServers = @($defaultAllowedServers | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    }
+
+    # JobMailMode is intentionally a dedicated key: the ecosystem-wide SendMailMode key
+    # carries the mail transport (Graph/SMTP/Both), not a notification policy.
+    $jobMailMode = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'JobMailMode' -DefaultValue 'OnError')
+    if ($jobMailMode -notin @('Always', 'OnError', 'Never')) {
+        Write-Host ("Invalid JobMailMode '{0}'; falling back to OnError." -f $jobMailMode) -ForegroundColor Yellow
+        $jobMailMode = 'OnError'
     }
 
     $script:Settings = [pscustomobject]@{
@@ -1545,7 +1645,8 @@ try {
         UseIntegratedAuth = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'UseIntegratedAuth' -DefaultValue $true
         UseSsl = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'UseSsl' -DefaultValue $false
         RelayIp = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'RelayIp' -DefaultValue '')
-        SendMailMode = $sendMailMode
+        JobMailMode = $jobMailMode
+        DefaultAllowedServers = $defaultAllowedServers
         SendDailySummaryEmail = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'SendDailySummaryEmail' -DefaultValue $false
         DailySummaryTime = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'DailySummaryTime' -DefaultValue '07:00')
         OrchestratorLogRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorLogRetentionDays' -DefaultValue 30
@@ -1577,9 +1678,18 @@ try {
         Write-OrchestratorLog -Message "Email notifications are disabled (SmtpServer, From or recipient missing in configuration)." -Level WARN
     }
 
+    if (-not (Test-Path -LiteralPath $script:Settings.JobsManifestPath)) {
+        $manifestTemplatePath = '{0}.template' -f $script:Settings.JobsManifestPath
+        if (Test-Path -LiteralPath $manifestTemplatePath) {
+            Copy-Item -LiteralPath $manifestTemplatePath -Destination $script:Settings.JobsManifestPath -ErrorAction Stop
+            Write-OrchestratorLog -Message ("Created jobs manifest from template: {0}. Adjust Enabled/Schedule/AllowedServers locally; this runtime manifest stays out of Git." -f $script:Settings.JobsManifestPath) -Level WARN
+        }
+    }
+
     try {
         $script:Manifest = Read-JobsManifest -Path $script:Settings.JobsManifestPath
         Write-OrchestratorLog -Message ("Jobs manifest loaded: {0} ({1} jobs, {2} enabled)." -f $script:Settings.JobsManifestPath, @($script:Manifest.OrderedJobs).Count, @($script:Manifest.OrderedJobs | Where-Object { $_.Enabled }).Count)
+        Write-ServerAllowlistSummary
     }
     catch {
         Write-OrchestratorLog -Message $_.Exception.Message -Level ERROR
