@@ -33,8 +33,20 @@ param(
   [switch]$ServicePlans,
   [string]$SkuNameCsvPath = $(Join-Path $PSScriptRoot 'Product names and service plan identifiers for licensing.csv'),
   [switch]$RequireSkuNameCsv,
-  [switch]$InteractiveAuth
+  [switch]$InteractiveAuth,
+    [int]$MaxItems = 0
 )
+if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
+    $global:SmartM365MaxItems = [int]$MaxItems
+    $global:SmartM365TestMaxItems = [int]$MaxItems
+    $global:SmartM365IsMaxItemsRun = $true
+    foreach ($smartM365LimitName in @('TopUsers','TopMailboxes','MaxDevices','MaxSites','MaxTeams','MaxApps','MaxPolicies','Limit','MaxPages')) {
+        $smartM365LimitVariable = Get-Variable -Name $smartM365LimitName -Scope Script -ErrorAction SilentlyContinue
+        if ($smartM365LimitVariable -and -not $PSBoundParameters.ContainsKey($smartM365LimitName) -and $null -ne $smartM365LimitVariable.Value) {
+            Set-Variable -Name $smartM365LimitName -Value ([int]$MaxItems) -Scope Script
+        }
+    }
+}
 $tenantContextPath = & {
     $d = $PSScriptRoot
     while ($d) {

@@ -27,7 +27,7 @@ if not defined PWSH (
     popd
     exit /b 1
 )
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-M365UserActivity-Inventory.ps1" -Tenant test -Period D180 -Connect %*
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-M365UserActivity-Inventory.ps1" -Tenant test -Period D180 -Connect -MaxItems 25 %*
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 exit /b %EXIT_CODE%
