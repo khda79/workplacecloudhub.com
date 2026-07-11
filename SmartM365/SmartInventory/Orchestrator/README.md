@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.0) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.2) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -27,8 +27,8 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | `Orchestrator-Heartbeat.json` | `{{DataAllRootPath}}\Orchestrator` | Rewritten at every tick: timestamp, PID, running jobs. |
 | `Orchestrator.lock` | `{{DataAllRootPath}}\Orchestrator` | Global lock; prevents two instances for the same tenant. Stale locks (dead PID) are recovered with a warning. |
 | `Orchestrator_JobRuns_<yyyyMMdd>.csv` | `{{DataAllRootPath}}\Orchestrator\JobRuns` | Daily job-run tracking CSV (atomic writes). |
-| `SmartM365-Inventory-Orchestrator_<yyyyMMdd>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator` | Orchestrator log, daily rotation. |
-| `<JobName>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator\Jobs\<JobName>` | One log per job execution (stdout + stderr of the child process). |
+| `SmartM365-Inventory-Orchestrator_<Server>_<yyyyMMdd>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator\<Server>` | Orchestrator log, daily rotation. |
+| `<JobName>_<Server>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator\<Server>\Jobs\<JobName>` | One log per job execution (stdout + stderr of the child process). |
 
 Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle histories remain isolated. Each server still keeps its own scheduler state, so a job allowed on several servers runs on each of them - pin every scheduled job to exactly one server through `AllowedServers` and treat the other servers as manual standby.
 
@@ -82,11 +82,11 @@ Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle
 - Every execution is appended to the daily tracking CSV: `JobName, ScheduledTime, StartTime, EndTime, DurationSec, ExitCode, Status (Success/Failed/TimedOut/Skipped/Retried/Interrupted), RetryCount, LogPath`.
 - Every orchestrator process is registered in the tenant-wide `Orchestrator_Runs.csv`: run ID, tenant, local/UTC start and end times, duration, server, Windows user, PID, script/PowerShell versions, mode, connection flag, status, exit code, stop reason and sanitized error. Rows start as `Running` and are finalized as `Success`, `Failed` or `Rejected`.
 - On a later start, an unfinished `Running` row for the same server is changed to `Interrupted` when its recorded PID and start time no longer match a live PowerShell process. The shared CSV is rewritten atomically under `Orchestrator_Runs.lock`; it has no automatic retention.
-- Emails use `System.Net.Mail.MailMessage` with explicit UTF-8 sent through `SmtpClient` (never `Send-MailMessage`), `UseDefaultCredentials` or anonymous relay, IPv4 resolution of the SMTP endpoint with an optional pinned `RelayIp`, HTML bodies, no BCC by default.
-  - `JobMailMode`: `Always` (email for every final job completion), `OnError` (final failures only, default), `Never` (no job emails). This is intentionally a dedicated key: the ecosystem-wide `SendMailMode` key carries the mail transport (Graph/SMTP/Both) and is not used by the orchestrator.
+- Emails use the shared `SmartM365.Core` mail helper (`Send-SmartM365Mail`), so the orchestrator follows the same `SendMailMode` behavior as inventory scripts: `Graph`, `SMTP`, or `Both`. With an empty `SmtpServer`, Graph is the default. HTML branding and saved mail copies are handled by the shared mail layer.
+  - `JobMailMode`: `Always` (email for every final job completion), `OnError` (final failures only, default), `Never` (no job emails). This remains a dedicated notification policy key; `SendMailMode` controls only the transport.
   - Optional daily HTML summary (`SendDailySummaryEmail` + `DailySummaryTime`) recapping all executions of the last 24 hours with color-coded statuses (inline styles, no external CSS).
   - A fatal error email is sent if the orchestrator itself crashes (also on an invalid manifest at startup), independent of `JobMailMode`.
-  - When `SmtpServer`, `From` or the recipient is empty, mail is disabled with a warning.
+  - Mail is disabled only when required values for the selected transport are missing, for example `From`, recipient, Graph app auth for Graph mode, or `SmtpServer` for SMTP mode.
 
 ## Jobs manifest schema (`Orchestrator-Jobs.json`)
 
@@ -168,7 +168,7 @@ Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a n
 
 Created from the committed template at first run. Keys follow the SmartM365 pattern: `__USE_GLOBAL__` inherits from `SmartM365.global.local.json`, and `{{DataAllRootPath}}`-style tokens are resolved through the tenant context.
 
-Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (default server allowlist, empty = all), `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
+Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (default server allowlist, empty = all), `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
 
 ## Parameters
 
