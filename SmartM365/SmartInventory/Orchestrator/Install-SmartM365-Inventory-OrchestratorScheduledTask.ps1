@@ -42,7 +42,7 @@ Forces the guided interactive workflow. This is used by the CMD launcher.
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -Uninstall
 
 .VERSION
-1.1.0
+1.1.1
 
 .REQUIREMENTS
     Windows PowerShell 5.1 or PowerShell 7. The script requests UAC elevation when needed.
@@ -166,8 +166,16 @@ trap {
 
 if (-not (Test-IsAdministrator)) {
     $windowsPowerShellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    if (-not (Test-Path -LiteralPath $windowsPowerShellPath -PathType Leaf)) {
-        throw "Trusted Windows PowerShell executable not found: $windowsPowerShellPath"
+    $elevationPowerShellPath = $null
+    try {
+        $elevationPowerShellPath = Get-PowerShell7Path
+    }
+    catch {
+        if (-not (Test-Path -LiteralPath $windowsPowerShellPath -PathType Leaf)) {
+            throw "No trusted PowerShell host was found for UAC elevation."
+        }
+        $elevationPowerShellPath = $windowsPowerShellPath
+        Write-InstallerMessage 'PowerShell 7 was not found in Program Files; using Windows PowerShell for UAC elevation.'
     }
 
     foreach ($unsafeValue in @($ServiceAccount, $TaskName)) {
@@ -200,10 +208,15 @@ if (-not (Test-IsAdministrator)) {
         if ($WhatIfPreference) { $elevationArguments += '-WhatIf' }
     }
 
+    $elevationWorkingDirectory = $scriptDirectory
+    if ($scriptDirectory.StartsWith('\\', [StringComparison]::Ordinal)) {
+        $elevationWorkingDirectory = $env:SystemRoot
+    }
+
     Write-InstallerMessage 'Administrator rights are required. Requesting elevation through UAC.'
-    $elevationProcess = Start-Process -FilePath $windowsPowerShellPath `
+    $elevationProcess = Start-Process -FilePath $elevationPowerShellPath `
         -ArgumentList ($elevationArguments -join ' ') `
-        -WorkingDirectory $scriptDirectory `
+        -WorkingDirectory $elevationWorkingDirectory `
         -Verb RunAs `
         -Wait `
         -PassThru
@@ -310,10 +323,15 @@ $actionArguments = @(
     $Tenant,
     '-Connect'
 ) -join ' '
+$taskWorkingDirectory = $scriptDirectory
+if ($scriptDirectory.StartsWith('\\', [StringComparison]::Ordinal)) {
+    $taskWorkingDirectory = $env:SystemRoot
+}
+
 $actionParameters = @{
     Execute = $powerShell7Path
     Argument = $actionArguments
-    WorkingDirectory = $scriptDirectory
+    WorkingDirectory = $taskWorkingDirectory
 }
 $action = New-ScheduledTaskAction @actionParameters
 
