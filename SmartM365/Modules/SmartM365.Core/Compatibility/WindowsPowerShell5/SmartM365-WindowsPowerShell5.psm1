@@ -36,8 +36,7 @@ function Initialize-SmartM365ModuleGlobalConfigFromTemplate {
     Write-Host "Created missing global local configuration from template." -ForegroundColor Yellow
     Write-Host ("Local JSON : {0}" -f $Path) -ForegroundColor Yellow
     Write-Host ("Template   : {0}" -f $TemplatePath) -ForegroundColor Yellow
-    Write-Host 'Edit the local JSON now if needed. Press Enter to continue with the current file values.' -ForegroundColor Yellow
-    Read-Host 'Press Enter to continue' | Out-Null
+    Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
     return $true
 }
 function Get-SmartM365EffectiveModuleGlobalConfig {
