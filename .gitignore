@@ -192,6 +192,7 @@ SmartM365/Devices/Windows11UpgradeToolkit/**/SetupMedia/
 *.local.json
 SmartM365/Communications/ExchangeUserNotifications/**/Templates.local/**
 SmartM365/**/SmartM365-IntuneRemediation-GUI.config.json
+SmartM365/SmartInventory/Orchestrator/Orchestrator-Jobs.json
 
 # Secrets / Certificates
 *.pfx
