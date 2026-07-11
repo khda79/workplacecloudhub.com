@@ -47,7 +47,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.7
+0.8
 
 
 .REQUIREMENTS
@@ -90,7 +90,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '0.7'
+$ScriptVersion = '0.8'
 $CurrentOperation = 'Initialize'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -207,9 +207,10 @@ function New-SpoHtmlSummary {
     $alertRows=foreach($alert in @($Alerts|Sort-Object @{Expression={if($_.Severity -eq 'Critical'){0}else{1}}},Category,SiteUrl|Select-Object -First 100)){ $rowColor=if($alert.Severity -eq 'Critical'){'#fee2e2'}else{'#fef3c7'}; '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;background:{0};font-weight:700;">{1}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{2}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;word-break:break-all;">{3}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{4}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{5}</td></tr>' -f $rowColor,(ConvertTo-SpoHtml $alert.Severity),(ConvertTo-SpoHtml $alert.Category),(ConvertTo-SpoHtml $alert.SiteUrl),(ConvertTo-SpoHtml $alert.Value),(ConvertTo-SpoHtml $alert.Details) }
     if(-not $alertRows){$alertRows=@('<tr><td colspan="5" style="padding:10px;color:#166534;">No Warning or Critical alert detected.</td></tr>')}
     $summaryRows=foreach($key in ($Summary.Keys|Sort-Object)){ '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;color:#475569;">{0}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;font-weight:700;">{1}</td></tr>' -f (ConvertTo-SpoHtml $key),(ConvertTo-SpoHtml $Summary[$key]) }
+    $globalRows = @('SharePointSites','OneDriveSites','ListsProcessed','StorageUsedGB','StorageQuotaGB','CriticalAlerts','WarningAlerts','InventoryMode') | ForEach-Object { if ($Summary.Contains($_)) { '<td style="padding:10px 12px;border:1px solid #d9e2ec;background:#f8fafc;min-width:120px;"><div style="font-size:11px;color:#64748b;text-transform:uppercase;">{0}</div><div style="font-size:20px;font-weight:700;color:#0f172a;">{1}</div></td>' -f (ConvertTo-SpoHtml $_),(ConvertTo-SpoHtml $Summary[$_]) } }
     $topRows=foreach($site in @($TopSites|Select-Object -First 20)){ '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;word-break:break-all;">{0}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;font-weight:700;">{1}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;">{2}</td></tr>' -f (ConvertTo-SpoHtml $site.SiteUrl),(ConvertTo-SpoHtml $site.StorageUsedGB),(ConvertTo-SpoHtml $site.StorageQuotaPercent) }
     $technicalHtml="<div style='margin-top:18px;font-size:11px;line-height:16px;color:#64748b;'><div><strong>CSV:</strong> <span style='font-family:Consolas,monospace;word-break:break-all;'>$(ConvertTo-SpoHtml $CsvFolderPath)</span></div><div><strong>Log:</strong> <span style='font-family:Consolas,monospace;word-break:break-all;'>$(ConvertTo-SpoHtml $LogFilePath)</span></div></div>"
-    return "<div style='margin:0 0 16px 0;'><span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:12px;font-weight:700;'>$WorstStatus</span></div><h2 style='font-size:15px;margin:0 0 8px;'>Alerts</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Severity</th><th align='left' style='padding:8px;background:#f8fafc;'>Category</th><th align='left' style='padding:8px;background:#f8fafc;'>Site</th><th align='left' style='padding:8px;background:#f8fafc;'>Value</th><th align='left' style='padding:8px;background:#f8fafc;'>Details</th></tr>$($alertRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Summary</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'>$($summaryRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Top 20 largest sites</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Site URL</th><th align='right' style='padding:8px;background:#f8fafc;'>Used GB</th><th align='right' style='padding:8px;background:#f8fafc;'>Quota %</th></tr>$($topRows -join '')</table>$technicalHtml"
+    return "<div style='margin:0 0 16px 0;'><span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:12px;font-weight:700;'>$WorstStatus</span></div><h2 style='font-size:15px;margin:0 0 8px;'>Global summary</h2><table width='100%' style='border-collapse:collapse;margin-bottom:16px;'><tr>$($globalRows -join '')</tr></table><h2 style='font-size:15px;margin:0 0 8px;'>Alerts</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Severity</th><th align='left' style='padding:8px;background:#f8fafc;'>Category</th><th align='left' style='padding:8px;background:#f8fafc;'>Site</th><th align='left' style='padding:8px;background:#f8fafc;'>Value</th><th align='left' style='padding:8px;background:#f8fafc;'>Details</th></tr>$($alertRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Summary</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'>$($summaryRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Top 20 largest sites</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Site URL</th><th align='right' style='padding:8px;background:#f8fafc;'>Used GB</th><th align='right' style='padding:8px;background:#f8fafc;'>Quota %</th></tr>$($topRows -join '')</table>$technicalHtml"
 }
 
 function Get-SpoMailAttachmentPaths {
@@ -788,6 +789,8 @@ try {
         Duration = ('{0:hh\:mm\:ss}' -f $duration)
         InventoryMode = if ($DeepSharingScanEnabled) { 'GraphAppOnly+OptionalPnPDeepScan' } else { 'GraphAppOnly' }
         SitesProcessed = $siteArray.Count
+        SharePointSites = @($siteArray | Where-Object { -not [bool]$_.IsOneDrive }).Count
+        OneDriveSites = @($siteArray | Where-Object { [bool]$_.IsOneDrive }).Count
         ListsProcessed = $listArray.Count
         PermissionRows = $permissionArray.Count
         ExternalSharingRows = $sharingArray.Count
