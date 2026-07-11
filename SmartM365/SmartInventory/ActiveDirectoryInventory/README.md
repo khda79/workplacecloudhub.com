@@ -5,6 +5,7 @@ Active Directory inventory and reporting scripts.
 ## Scripts
 
 - `SmartM365-ActiveDirectory-Inventory.ps1`: full AD inventory across domains, combined CSV generation, duplicate checks, weekly inventory history, and daily AD computer/user reports.
+- `SmartM365-ActiveDirectory-HealthCheck.ps1`: AD forest health check across domains and domain controllers, with CSV export, mail report, LOG-ALL log/transcript finalization, and SharePoint upload when enabled.
 - Use `SmartM365-ActiveDirectory-Inventory.ps1 -ReportOnly` to regenerate daily reports from existing consolidated inventory CSV files without a live AD scan.
 
 ## Duplicate Identity Notification
