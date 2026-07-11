@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.2
+1.3
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -31,7 +31,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.2'
+$ScriptVersion = '1.3'
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -365,7 +365,7 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path -Path $dataAllRoot -ChildPath 'M365\Usage'
 }
 $runOutputRoot = Join-Path -Path $OutputPath -ChildPath $runId
-$logFolder = Join-Path -Path $logAllRoot -ChildPath 'M365\Usage'
+$logFolder = Join-Path -Path $logAllRoot -ChildPath 'SmartM365-M365UserActivity-Inventory'
 $logPath = Join-Path -Path $logFolder -ChildPath ("SmartM365-M365UserActivity-Inventory_{0}.log" -f $runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
