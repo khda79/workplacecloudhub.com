@@ -46,9 +46,15 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.5
+1.6
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement.
+    Minimum Graph application permissions: Directory.Read.All; Device.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.2
+    Version : 1.3
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
 Minimum application permissions: Directory.Read.All, Device.Read.All
@@ -557,7 +563,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath

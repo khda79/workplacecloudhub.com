@@ -56,13 +56,19 @@
 .PARAMETER Subject
     Subject for notification email.
 
+
+.REQUIREMENTS
+    Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
+    Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module.
+    Minimum permissions: Exchange on-premises recipient read access and AD read access for proxyAddresses, primary SMTP, UPN and related recipient attributes.
+    Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     - Requires Exchange 2016 Management Tools.
     - Generates detailed, summary, and added addresses CSV reports.
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.9
+1.10
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -314,7 +320,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.9"
+    $ScriptVersion = "1.10"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

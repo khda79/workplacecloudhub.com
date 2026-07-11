@@ -22,8 +22,14 @@
 .PARAMETER DefaultOnly
     Exports only the default accepted domain.
 .VERSION
-1.3
+1.4
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; ExchangeOnlineManagement.
+    Minimum permissions: Exchange.ManageAsApp plus an Exchange Online app-only RBAC role allowing Get-AcceptedDomain; Global Reader is the default read-only service-principal role.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: Exchange Online app-only RBAC must allow Get-AcceptedDomain.
@@ -451,7 +457,7 @@ function Send-AcceptedDomainsSuccessNotification {
 }
 
 #region Init
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 $TaskNameCore  = "Exchange Online accepted domains inventory"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $currentOperation = "Initialize script environment"
