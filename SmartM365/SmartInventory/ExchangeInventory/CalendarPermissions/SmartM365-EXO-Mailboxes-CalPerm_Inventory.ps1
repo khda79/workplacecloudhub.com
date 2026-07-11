@@ -31,9 +31,16 @@
 .PARAMETER TopMailboxes
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 .VERSION
-1.7
+1.10
+
+.REQUIREMENTS
+    PowerShell 7+ for Exchange Online mode; Windows PowerShell 5.1 with Exchange Management Tools for on-premises fallback mode.
+    Modules: SmartM365.Core; ExchangeOnlineManagement.
+    Minimum permissions: Exchange.ManageAsApp plus Exchange Online app-only RBAC allowing Get-Mailbox and mailbox folder permission reads; Global Reader is the default read-only service-principal role.
+    Optional on-premises mode requires Exchange Management Shell readiness and Exchange recipient read access.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.7
+    Version : 1.10
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Hybrid (Online & On-Prem)
     Minimum permissions: Exchange Online app-only RBAC must allow Get-Mailbox and mailbox folder permission read cmdlets.
@@ -256,7 +263,7 @@ function Join-ModulePath {
 }
 
 # ------------------------- Init & Environment -------------------------
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.10"
 if ($Online) {
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
@@ -327,7 +334,7 @@ function Disconnect-ExchangeOnlineSafe {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop | Out-Null
     }
     catch {
-        WriteLog -Message ("Disconnect-ExchangeOnline failed (non-fatal): {0}" -f $_.Exception.Message) "WARN"
+        WriteLog -Message ("Disconnect-ExchangeOnline failed (non-fatal): {0}" -f $_.Exception.Message) "WARNING"
     }
 }
 
@@ -431,7 +438,7 @@ if ($Online) {
                 WriteLog -Message "Set-ADServerSettings -ViewEntireForest $true applied."
             }
             catch {
-                WriteLog -Message "Unable to apply Set-ADServerSettings : $($_.Exception.Message)" "WARN"
+                WriteLog -Message "Unable to apply Set-ADServerSettings : $($_.Exception.Message)" "WARNING"
             }
         } catch {
             WriteLog -Message "Unable to load Exchange Management Shell. Check your environment." "ERROR"
@@ -484,7 +491,7 @@ try {
 $total = $mailboxes.Count
 WriteLog -Message "Total mailboxes found: $total"
 if ($TopMailboxes -gt 0 -and $total -gt $TopMailboxes) {
-    WriteLog -Message ("TopMailboxes enabled: processing first {0} of {1} mailboxes." -f $TopMailboxes, $total) "WARN"
+    WriteLog -Message ("TopMailboxes enabled: processing first {0} of {1} mailboxes." -f $TopMailboxes, $total) "WARNING"
     $mailboxes = @($mailboxes | Select-Object -First $TopMailboxes)
     $total = $mailboxes.Count
 }
@@ -562,13 +569,21 @@ function Try-GetFolderPermission {
                                   @{Name = "CalendarFolder"; Expression = { $fname }},
                                   @{Name = "User";           Expression = { $_.User }},
                                   @{Name = "AccessRights";   Expression = { ($_.AccessRights -join ",") }}
-                return @($true, $perms, $identity)  # success flag, data, used identity
+                return [pscustomobject]@{
+                    Ok          = $true
+                    Permissions = @($perms)
+                    Identity    = $identity
+                }
             } catch {
                 # Try next combination
             }
         }
     }
-    return @($false, $null, $null)
+    return [pscustomobject]@{
+        Ok          = $false
+        Permissions = @()
+        Identity    = $null
+    }
 }
 
 # Helper: emit a "(none)" row when calendar exists but no explicit permissions
@@ -604,7 +619,10 @@ foreach ($mbx in $mailboxes) {
             $mailboxIds = if ($Online) { @($upn, $primarySMTP) } else { @($mbx.Identity, $primarySMTP) }
 
             # 1) Canonical "Calendar"
-            $ok, $permissions, $usedIdentity = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendar') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+            $permissionResult = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendar') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+            $ok = [bool]$permissionResult.Ok
+            $permissions = @($permissionResult.Permissions)
+            $usedIdentity = $permissionResult.Identity
             if ($ok) {
                 WriteLog -Message "Calendar folder found for $primarySMTP (via canonical : $usedIdentity)" "INFO"
                 if ($permissions -and $permissions.Count -gt 0) {
@@ -617,7 +635,10 @@ foreach ($mbx in $mailboxes) {
                 $calendarFolders = Get-CalendarFoldersSafe -Mbx $mbx -IsOnline:$Online -PrimaryOnly:$true
                 if ($calendarFolders -and $calendarFolders.Count -gt 0) {
                     $folderPath = $calendarFolders[0].FolderPath.TrimStart("/")
-                    $ok2, $permissions2, $usedIdentity2 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @($folderPath) -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+                    $permissionResult2 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @($folderPath) -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+                    $ok2 = [bool]$permissionResult2.Ok
+                    $permissions2 = @($permissionResult2.Permissions)
+                    $usedIdentity2 = $permissionResult2.Identity
                     if ($ok2) {
                         WriteLog -Message "Calendar folder found for $primarySMTP (via stats : $usedIdentity2)" "INFO"
                         if ($permissions2 -and $permissions2.Count -gt 0) {
@@ -627,7 +648,10 @@ foreach ($mbx in $mailboxes) {
                         }
                     } else {
                         # 3) Common localized names
-                        $ok3, $permissions3, $usedIdentity3 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendrier','Kalender','Calendario') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+                        $permissionResult3 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendrier','Kalender','Calendario') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+                        $ok3 = [bool]$permissionResult3.Ok
+                        $permissions3 = @($permissionResult3.Permissions)
+                        $usedIdentity3 = $permissionResult3.Identity
                         if ($ok3) {
                             WriteLog -Message "Calendar folder found for $primarySMTP (via common localized name : $usedIdentity3)" "INFO"
                             if ($permissions3 -and $permissions3.Count -gt 0) {
@@ -638,12 +662,15 @@ foreach ($mbx in $mailboxes) {
                                 $results += (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
                             }
                         } else {
-                            WriteLog -Message "No calendar folder found for $primarySMTP" "WARN"
+                            WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
                         }
                     }
                 } else {
                     # Last try with localized names if stats empty
-                    $ok4, $permissions4, $usedIdentity4 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendrier','Kalender','Calendario') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+                    $permissionResult4 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendrier','Kalender','Calendario') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+                    $ok4 = [bool]$permissionResult4.Ok
+                    $permissions4 = @($permissionResult4.Permissions)
+                    $usedIdentity4 = $permissionResult4.Identity
                     if ($ok4) {
                         WriteLog -Message "Calendar folder found for $primarySMTP (via common localized name : $usedIdentity4)" "INFO"
                         if ($permissions4 -and $permissions4.Count -gt 0) {
@@ -654,7 +681,7 @@ foreach ($mbx in $mailboxes) {
                             $results += (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
                         }
                     } else {
-                        WriteLog -Message "No calendar folder found for $primarySMTP" "WARN"
+                        WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
                     }
                 }
             }
@@ -687,14 +714,14 @@ foreach ($mbx in $mailboxes) {
                     }
                 } catch {
                     $errMsg = "Permission error for $primarySMTP ($folderPath) : $($_.Exception.Message)"
-                    WriteLog -Message $errMsg "WARN"
+                    WriteLog -Message $errMsg "WARNING"
                     $errors += $errMsg
                 }
             }
         }
     } catch {
         $errMsg = "Error for $primarySMTP : $($_.Exception.Message)"
-        WriteLog -Message $errMsg "WARN"
+        WriteLog -Message $errMsg "WARNING"
         $errors += $errMsg
     }
 }
@@ -736,7 +763,7 @@ if ($errors.Count -gt 0) {
         -Encoding "UTF8" `
         -NoTypeInformation
 
-    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced, but final status must be CompletedWithWarnings." -f $errors.Count) "WARN"
+    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced, but final status must be CompletedWithWarnings." -f $errors.Count) "WARNING"
 }
 
 Write-Host "`n=== SUMMARY ===" -ForegroundColor Cyan
@@ -754,4 +781,5 @@ RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMax
 RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 WriteLog -Message "$TaskName completed."
 Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-Complete-SmartM365ExecutionContext -Status Auto
+$finalStatus = if ($errors.Count -gt 0) { 'CompletedWithWarnings' } else { 'Auto' }
+Complete-SmartM365ExecutionContext -Status $finalStatus
