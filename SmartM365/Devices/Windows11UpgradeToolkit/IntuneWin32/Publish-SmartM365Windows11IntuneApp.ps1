@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures PowerShell detection for the generated language package.
 .VERSION
-    1.0.15
+    1.0.16
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -33,6 +33,7 @@ param(
     [switch]$DisableLanguageRequirementRule,
     [string]$ExistingAppId,
     [switch]$UpdateMetadataOnly,
+    [switch]$UpdateDetectionRules,
     [switch]$ForceCreateNew,
     [string]$FinalizeExistingAppId,
     [string]$FinalizeContentVersionId = '1',
@@ -287,6 +288,19 @@ function ConvertTo-Base64Utf8 {
     return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$Value))
 }
 
+function Set-DetectScriptPackageMetadata {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptContent,
+        [Parameter(Mandatory = $true)][string]$PackageId,
+        [Parameter(Mandatory = $true)][string]$PackageVersion
+    )
+
+    $escapedPackageId = $PackageId -replace "'", "''"
+    $escapedPackageVersion = $PackageVersion -replace "'", "''"
+    $updated = [regex]::Replace($ScriptContent, "(?m)^(\s*\`$packageId\s*=\s*)'[^']*'", "`$1'$escapedPackageId'", 1)
+    $updated = [regex]::Replace($updated, "(?m)^(\s*\`$packageVersion\s*=\s*)'[^']*'", "`$1'$escapedPackageVersion'", 1)
+    return $updated
+}
 function New-EndpointRequirementRule {
     param(
         [Parameter(Mandatory = $true)][string]$Language,
@@ -608,6 +622,7 @@ $detectScriptPath = Join-Path $packageDir 'Detect.ps1'
 if (-not (Test-Path -LiteralPath $detectScriptPath -PathType Leaf)) { throw "Generated Detect.ps1 not found next to the .intunewin package: $detectScriptPath" }
 $detectScriptContent = Get-Content -LiteralPath $detectScriptPath -Raw -ErrorAction Stop
 if ([string]::IsNullOrWhiteSpace($detectScriptContent)) { throw "Generated Detect.ps1 is empty: $detectScriptPath" }
+$detectScriptContent = Set-DetectScriptPackageMetadata -ScriptContent $detectScriptContent -PackageId $PackageId -PackageVersion $PackageVersion
 if ([string]::IsNullOrWhiteSpace($RequirementLanguage)) { $RequirementLanguage = $Language }
 $setupCacheFolder = [string]$companionMetadata.SetupCacheFolder
 if ([string]::IsNullOrWhiteSpace($setupCacheFolder)) { $setupCacheFolder = "Win11-$Language" }
@@ -756,8 +771,12 @@ if ($UpdateMetadataOnly) {
     if ([string]::IsNullOrWhiteSpace($appId)) { throw 'Existing Intune app lookup did not return a mobile app id.' }
 
     $metadataPatchBody = Copy-OrderedHashtable -InputObject $appBody
-    foreach ($metadataOnlyExcludedProperty in @('applicableArchitectures','fileName','setupFilePath')) {
+    foreach ($metadataOnlyExcludedProperty in @('applicableArchitectures','fileName','setupFilePath','requirementRules','detectionRules','notes')) {
         if ($metadataPatchBody.Contains($metadataOnlyExcludedProperty)) { $metadataPatchBody.Remove($metadataOnlyExcludedProperty) }
+    }
+    if ($UpdateDetectionRules) {
+        $metadataPatchBody['notes'] = $appBody['notes']
+        $metadataPatchBody['detectionRules'] = $appBody['detectionRules']
     }
     if ($effectiveMinimumFreeDiskSpaceInMB -le 0) { $metadataPatchBody['minimumFreeDiskSpaceInMB'] = $null }
 
