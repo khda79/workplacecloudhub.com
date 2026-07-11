@@ -8,7 +8,7 @@
     packages are selected so existing WithCacheOnly packages are not republished accidentally.
 
 .VERSION
-    1.0.2
+    1.0.3
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -21,8 +21,10 @@ param(
     [ValidatePattern('^[a-z]{2}-[A-Z]{2}$')][string[]]$ExcludeLanguage,
     [string[]]$IncludePackageId,
     [string[]]$ExcludePackageId,
+    [string]$PackageVersion,
     [switch]$ForceCreateNew,
     [switch]$UpdateMetadataOnly,
+    [switch]$UpdateDetectionRules,
     [switch]$DisableLanguageRequirementRule,
     [ValidateRange(-1, 2147483647)][int]$MinimumFreeDiskSpaceInMB = -1,
     [int]$UploadBlockSizeMB = 16,
@@ -150,6 +152,8 @@ foreach ($package in $selected) {
     }
     if ($ForceCreateNew) { $publishParams['ForceCreateNew'] = $true }
     if ($UpdateMetadataOnly) { $publishParams['UpdateMetadataOnly'] = $true }
+    if ($UpdateDetectionRules) { $publishParams['UpdateDetectionRules'] = $true }
+    if (-not [string]::IsNullOrWhiteSpace($PackageVersion)) { $publishParams['PackageVersion'] = $PackageVersion }
     if ($DisableLanguageRequirementRule) { $publishParams['DisableLanguageRequirementRule'] = $true }
     if ($NoConnect) { $publishParams['NoConnect'] = $true }
 

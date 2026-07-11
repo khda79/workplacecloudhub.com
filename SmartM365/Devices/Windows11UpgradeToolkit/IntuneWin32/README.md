@@ -220,11 +220,21 @@ Update only existing Intune app metadata, for example after changing `Disk space
   -MinimumFreeDiskSpaceInMB 40960
 ```
 
-Update metadata for every generated full-media package without uploading package content:
+Update metadata for every generated full-media package without uploading package content. By default, this does not update Intune detection rules, so a disk-space metadata change cannot accidentally require a newer package version than the content already uploaded to Intune:
 
 ```powershell
 .\IntuneWin32\Publish-AllSmartM365Windows11IntuneApp.ps1 `
   -UpdateMetadataOnly `
+  -MinimumFreeDiskSpaceInMB 40960
+```
+
+Update detection rules without uploading package content only when that is intentional, for example to align detection with the package version already deployed in Intune:
+
+```powershell
+.\IntuneWin32\Publish-AllSmartM365Windows11IntuneApp.ps1 `
+  -UpdateMetadataOnly `
+  -UpdateDetectionRules `
+  -PackageVersion 0.1.47 `
   -MinimumFreeDiskSpaceInMB 40960
 ```
 
@@ -236,7 +246,7 @@ Preview the same batch without creating or updating apps:
   -WhatIf
 ```
 
-The batch publisher defaults to `-PackageMode WithMedia` so existing `WithCacheOnly` packages under `Output` are not republished accidentally. Use `-PackageMode All` or `-PackageMode WithCacheOnly` when needed. It calls `Publish-SmartM365Windows11IntuneApp.ps1` once per selected `.intunewin` package. By default it creates/uploads app content; with `-UpdateMetadataOnly`, it only patches existing app metadata and does not upload package content. Assignments remain manual.
+The batch publisher defaults to `-PackageMode WithMedia` so existing `WithCacheOnly` packages under `Output` are not republished accidentally. Use `-PackageMode All` or `-PackageMode WithCacheOnly` when needed. It calls `Publish-SmartM365Windows11IntuneApp.ps1` once per selected `.intunewin` package. By default it creates/uploads app content; with `-UpdateMetadataOnly`, it patches existing app metadata and does not upload package content. Detection rules are preserved unless `-UpdateDetectionRules` is also specified. Assignments remain manual.
 
 Required Graph delegated permission:
 
