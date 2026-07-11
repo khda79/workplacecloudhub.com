@@ -196,6 +196,8 @@ The installer can be started from a standard PowerShell session and requests UAC
 
 For interactive setup, run or double-click the thin launcher below. The PowerShell installer itself requests UAC elevation, prompts for install/uninstall and prod/test, validates the service account, and asks whether the task should start immediately. The CMD file only invokes the PowerShell workflow.
 
+All CMD launchers in this folder use `pushd` / `popd` so they can start from a UNC share. The installer launcher preserves the original UNC script path, tries the trusted PowerShell 7 executable under Program Files first, and falls back to Windows PowerShell only when PowerShell 7 is unavailable.
+
 ```text
 .\SmartM365\SmartInventory\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd
 ```
