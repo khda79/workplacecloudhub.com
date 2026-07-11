@@ -4,7 +4,7 @@
 .DESCRIPTION
     Creates a Win32 LOB app in Intune with Microsoft Graph beta, uploads the encrypted package payload, commits the content version, and configures PowerShell detection for the generated language package.
 .VERSION
-    1.0.13
+    1.0.15
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -32,6 +32,7 @@ param(
     [int]$PollTimeoutMinutes = 45,
     [switch]$DisableLanguageRequirementRule,
     [string]$ExistingAppId,
+    [switch]$UpdateMetadataOnly,
     [switch]$ForceCreateNew,
     [string]$FinalizeExistingAppId,
     [string]$FinalizeContentVersionId = '1',
@@ -629,9 +630,11 @@ if ([string]::IsNullOrWhiteSpace($Description)) {
 
 $effectiveMinimumFreeDiskSpaceInMB = [int]$MinimumFreeDiskSpaceInMB
 if ($effectiveMinimumFreeDiskSpaceInMB -lt 0) {
-    if ($packageMode -eq 'WithMedia') { $effectiveMinimumFreeDiskSpaceInMB = 51200 }
+    if ($packageMode -eq 'WithMedia') { $effectiveMinimumFreeDiskSpaceInMB = 40960 }
     else { $effectiveMinimumFreeDiskSpaceInMB = 0 }
 }
+
+if ($UpdateMetadataOnly -and $ForceCreateNew) { throw '-UpdateMetadataOnly cannot be used with -ForceCreateNew because no content upload or app creation is performed.' }
 
 Write-Step "Reading IntuneWin metadata: $resolvedIntuneWinPath"
 $metadata = Read-IntuneWinMetadata -Path $resolvedIntuneWinPath
@@ -716,6 +719,65 @@ if (-not [string]::IsNullOrWhiteSpace($FinalizeExistingAppId)) {
         DisplayName = $DisplayName
         ContentVersionId = $FinalizeContentVersionId
         Action = 'FinalizeExistingApp'
+    }
+    return
+}
+
+if ($UpdateMetadataOnly) {
+    Write-Step "Updating app metadata only: $DisplayName"
+    if (-not $PSCmdlet.ShouldProcess($DisplayName, 'Update Intune Win32 app metadata without uploading package content')) {
+        [pscustomobject]@{
+            DisplayName = $DisplayName
+            PackageId = $PackageId
+            PackageVersion = $PackageVersion
+            Language = $Language
+            RequirementLanguage = $RequirementLanguage
+            LanguageRequirementRuleEnabled = (-not [bool]$DisableLanguageRequirementRule)
+            PackageMode = $packageMode
+            RequiresExistingSetupCache = $requiresExistingSetupCache
+            MinimumFreeDiskSpaceInMB = $effectiveMinimumFreeDiskSpaceInMB
+            IntuneWinPath = $resolvedIntuneWinPath
+            DetectionScriptPath = $detectScriptPath
+            ExistingAppId = $ExistingAppId
+            Action = 'UpdateMetadataOnly'
+        }
+        return
+    }
+
+    Assert-GraphCommand
+    if (-not $NoConnect) {
+        Write-Step 'Connecting to Microsoft Graph.'
+        Connect-MgGraph -Scopes @('DeviceManagementApps.ReadWrite.All') -NoWelcome | Out-Null
+    }
+
+    $app = Resolve-ExistingIntuneWin32App -GraphBaseUri $GraphBaseUri -AppId $ExistingAppId -DisplayName $DisplayName -PackageId $PackageId
+    if (-not $app) { throw "No existing Intune app found for metadata-only update. DisplayName=$DisplayName; PackageId=$PackageId. Specify -ExistingAppId if needed." }
+    $appId = [string]$app.id
+    if ([string]::IsNullOrWhiteSpace($appId)) { throw 'Existing Intune app lookup did not return a mobile app id.' }
+
+    $metadataPatchBody = Copy-OrderedHashtable -InputObject $appBody
+    foreach ($metadataOnlyExcludedProperty in @('applicableArchitectures','fileName','setupFilePath')) {
+        if ($metadataPatchBody.Contains($metadataOnlyExcludedProperty)) { $metadataPatchBody.Remove($metadataOnlyExcludedProperty) }
+    }
+    if ($effectiveMinimumFreeDiskSpaceInMB -le 0) { $metadataPatchBody['minimumFreeDiskSpaceInMB'] = $null }
+
+    Invoke-GraphJson -Method PATCH -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId" -Body $metadataPatchBody | Out-Null
+    Write-Step "Existing Intune app metadata updated without content upload: $appId"
+    [pscustomobject]@{
+        AppId = $appId
+        DisplayName = $DisplayName
+        PackageId = $PackageId
+        PackageVersion = $PackageVersion
+        Language = $Language
+        RequirementLanguage = $RequirementLanguage
+        LanguageRequirementRuleEnabled = (-not [bool]$DisableLanguageRequirementRule)
+        PackageMode = $packageMode
+        RequiresExistingSetupCache = $requiresExistingSetupCache
+        MinimumFreeDiskSpaceInMB = $effectiveMinimumFreeDiskSpaceInMB
+        DetectionScriptPath = $detectScriptPath
+        UpdatedExistingApp = $true
+        UploadedContent = $false
+        Action = 'UpdateMetadataOnly'
     }
     return
 }
