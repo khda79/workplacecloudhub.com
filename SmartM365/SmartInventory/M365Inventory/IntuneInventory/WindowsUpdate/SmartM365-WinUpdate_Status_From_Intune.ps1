@@ -43,6 +43,7 @@ VERSION
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
+    Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
 #>
 
 param(
@@ -1025,7 +1026,7 @@ try {
 
     $headers = @{ Authorization = "Bearer $token" }
     Import-SmartM365CorePreflight
-    Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequiredModules @('MSAL.PS') -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $ArchivePath, $LogsPath, $WorkPath) -GraphAccessToken $token -GraphProbeUris @(
+    Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequiredModules @('MSAL.PS') -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $ArchivePath, $LogsPath, $WorkPath) -GraphAccessToken $token -RequiredGraphApplicationPermissions @('DeviceManagementConfiguration.Read.All','DeviceManagementManagedDevices.Read.All') -GraphProbeUris @(
         'https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles?$top=1'
     ) | Out-Null
 

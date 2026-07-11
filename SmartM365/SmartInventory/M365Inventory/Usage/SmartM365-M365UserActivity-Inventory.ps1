@@ -13,7 +13,7 @@ SmartFinOps and downstream inventory analysis.
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
 Requires: PowerShell 7+, Microsoft.Graph.Reports, SmartM365.Core.psd1
-Scopes: Reports.Read.All
+Minimum application permissions: Reports.Read.All
 #>
 
 [CmdletBinding()]
@@ -410,6 +410,7 @@ try {
         -ScriptName 'SmartM365-M365UserActivity-Inventory' `
         -RequiredModules @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Reports') `
         -RequiredCommands $requiredReportCommands `
+        -RequiredGraphApplicationPermissions @('Reports.Read.All') `
         -OutputPaths @($runOutputRoot, $LatestCsvFolderPath) | Out-Null
 
     if ($ValidateOnly) {

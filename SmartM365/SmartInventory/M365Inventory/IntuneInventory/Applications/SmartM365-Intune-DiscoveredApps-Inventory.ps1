@@ -42,6 +42,7 @@
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
               LatestCsvFolderPath -> DATA-LAST folder (GlobalPath / copy destination)
     Graph permission required (application): DeviceManagementApps.Read.All
+    Minimum application permissions: DeviceManagementApps.Read.All, DeviceManagementManagedDevices.Read.All
 #>
 
 param(
@@ -791,7 +792,7 @@ try {
     }
 
     # ----------------------------------------------------------
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @('https://graph.microsoft.com/v1.0/deviceManagement/detectedApps?$top=1') | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('DeviceManagementApps.Read.All','DeviceManagementManagedDevices.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/deviceManagement/detectedApps?$top=1') | Out-Null
 
     # Retrieve ALL discovered apps - filter Windows client-side
     # Note: $filter on platform is not guaranteed on this endpoint;
