@@ -44,12 +44,12 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Get-IntuneAutopatchAlerts.ps1
 .VERSION
-1.6
+1.7
 
 
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-    Version : 1.6
+    Version : 1.7
 #>
 
 [CmdletBinding()]
@@ -295,8 +295,8 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.6"
-$ScriptName = 'Get-IntuneAutopatchAlerts'
+$ScriptVersion = "1.7"
+$ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
 $RunId = [guid]::NewGuid().Guid
