@@ -26,6 +26,7 @@ Forces interactive authentication instead of app-only certificate authentication
 Date: October 2025
 Dependencies: SmartM365.Core module
 Required Modules: ExchangeOnlineManagement, Microsoft.Graph (handled by SmartM365.Core)
+    Minimum permissions: Exchange Online app-only RBAC must allow Get-MigrationBatch and migration user read cmdlets.
 #>
 
 param(

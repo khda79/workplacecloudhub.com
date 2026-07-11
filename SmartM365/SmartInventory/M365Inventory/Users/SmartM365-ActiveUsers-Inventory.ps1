@@ -25,7 +25,7 @@
     Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
-    Scopes: User.Read.All, Directory.Read.All, AuditLog.Read.All
+    Minimum application permissions: User.Read.All, Directory.Read.All, AuditLog.Read.All
 
 .EXAMPLE
     .\SmartM365-ActiveUsers-Inventory.ps1
@@ -448,7 +448,7 @@ $ScriptVersion = "1.3"
         $connectedGraphInThisRun = $connectResult.GraphConnected
         WriteLog -Message "Microsoft Graph connection established successfully." "INFO"
         $currentOperation = "Run Microsoft Graph preflight"
-        Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Users') -RequiredCommands @('Get-MgUser') -OutputPaths @($OutputPath) -GraphProbeUris @(
+        Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Users') -RequiredCommands @('Get-MgUser') -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('User.Read.All','AuditLog.Read.All','Directory.Read.All') -GraphProbeUris @(
             'https://graph.microsoft.com/v1.0/users?$select=id,signInActivity&$top=1',
             'https://graph.microsoft.com/v1.0/organization'
         ) | Out-Null

@@ -30,6 +30,7 @@
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
+    Minimum application permissions: User.Read.All; Exchange Online RBAC must allow Get-Mailbox and related read cmdlets.
 #>
 
 param(
@@ -624,7 +625,7 @@ function Invoke-ExoSafe {
 
     #endregion
 
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -ExchangeOnlineProbeCommands @('Get-Mailbox') -GraphProbeUris @('https://graph.microsoft.com/v1.0/users?$top=1') | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -ExchangeOnlineProbeCommands @('Get-Mailbox') -RequiredGraphApplicationPermissions @('User.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/users?$top=1') | Out-Null
 
     # --- Retry helper ----------------------------------------------------
     function Invoke-WithRetry {

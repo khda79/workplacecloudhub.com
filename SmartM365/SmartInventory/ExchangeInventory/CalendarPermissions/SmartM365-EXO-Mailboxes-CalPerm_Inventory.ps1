@@ -36,6 +36,7 @@
     Version : 1.7
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Hybrid (Online & On-Prem)
+    Minimum permissions: Exchange Online app-only RBAC must allow Get-Mailbox and mailbox folder permission read cmdlets.
 #>
 
 param(
