@@ -281,9 +281,7 @@ function Initialize-GuiLocalJsonFilesFromTemplates {
     foreach ($pair in $created) {
         Write-Host ("- {0}: {1}" -f $pair.Description, $pair.LocalPath) -ForegroundColor Yellow
     }
-    Write-Host 'Edit the local JSON now if needed. Press Enter to continue with the current file values.' -ForegroundColor Yellow
-    try { Read-Host 'Press Enter to continue' | Out-Null }
-    catch { Write-Host 'Unable to pause for input. Continuing with the generated local JSON.' -ForegroundColor Yellow }
+    Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
 }
 function Get-ConfigPropertyValue {
     param(
