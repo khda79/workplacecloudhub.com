@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.7
+    1.0.8
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -46,7 +46,7 @@ $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Glo
 $RunId = [guid]::NewGuid().ToString()
 $Rows = [System.Collections.ArrayList]::new()
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.7'
+$ScriptVersion = '1.0.8'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -113,6 +113,15 @@ if (-not $PSBoundParameters.ContainsKey('AlwaysSend')) { $AlwaysSend = [bool](Ge
 if (-not $PSBoundParameters.ContainsKey('AppendHistory')) { $AppendHistory = [bool](Get-LocalConfigValue 'AppendHistory' $false) }
 if ([string]::IsNullOrWhiteSpace($HistoryCsvPath)) { $HistoryCsvPath = [string](Get-LocalConfigValue 'HistoryCsvPath' '{{DataAllRootPath}}\ActiveDirectory\HealthCheck\AD_HealthCheck_History.csv') }
 if (-not $PSBoundParameters.ContainsKey('EnableRemoteDcAdminChecks')) { $EnableRemoteDcAdminChecks = [bool](Get-LocalConfigValue 'EnableRemoteDcAdminChecks' $false) }
+if ([string]::IsNullOrWhiteSpace($From)) { $From = [string](Get-LocalConfigValue 'From' '') }
+if ([string]::IsNullOrWhiteSpace($SmtpServer)) { $SmtpServer = [string](Get-LocalConfigValue 'SmtpServer' '') }
+$SendMailMode = [string](Get-LocalConfigValue 'SendMailMode' '')
+$Cc = [string](Get-LocalConfigValue 'Cc' '')
+if ($To.Count -eq 0) {
+    $configuredTo = [string](Get-LocalConfigValue 'To' '')
+    if ([string]::IsNullOrWhiteSpace($configuredTo)) { $configuredTo = [string](Get-LocalConfigValue 'ErrorMailTo' '') }
+    if (-not [string]::IsNullOrWhiteSpace($configuredTo)) { $To = @($configuredTo -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+}
 function ConvertTo-IsoUtc([datetime]$d){ if($null -eq $d -or $d -eq [datetime]::MinValue){''}else{$d.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)} }
 function Num($v){ if($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)){''}else{ try{([double]$v).ToString('0.########',[Globalization.CultureInfo]::InvariantCulture)}catch{[string]$v} } }
 function Ms($s){ [int64][math]::Max(0,((Get-Date)-$s).TotalMilliseconds) }
