@@ -26,8 +26,15 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.4
+1.7
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; ExchangeOnlineManagement; Microsoft.Graph.Authentication when Graph enrichment is used.
+    Minimum permissions: Exchange.ManageAsApp plus Exchange Online app-only RBAC allowing Get-Mailbox and optional mailbox statistics/permission cmdlets; Global Reader is the default read-only service-principal role.
+    Minimum Graph application permissions: User.Read.All for user enrichment.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: User.Read.All; Exchange Online RBAC must allow Get-Mailbox and related read cmdlets.
@@ -307,7 +314,7 @@ function Send-FatalErrorEmail {
 }
 
 #region Init
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.7"
 $CsvSuffix = if ($Top100) { "_top100" } else { "" }
 if ($PermissionsOnly -and (-not $IncludePerm)) {
     # PermissionsOnly is meaningful only when permissions are being collected live
@@ -1263,7 +1270,7 @@ return @{
         "ArchiveStatus","ArchiveName","ArchiveQuotaGB","ArchiveWarningQuotaGB",
         "CustomAttribute1","CustomAttribute2","CustomAttribute3","CustomAttribute4","CustomAttribute5","CustomAttribute6","CustomAttribute7","CustomAttribute8","CustomAttribute9","CustomAttribute10",
         "CustomAttribute11","CustomAttribute12","CustomAttribute13","CustomAttribute14","CustomAttribute15","ExternalDirectoryObjectId","MailboxPlan",
-        "TotalItemSizeMB_Integer","Archive_TotalItemSizeMB_Integer","ImmutableId","OnPremisesImmutableId"
+        "Archive_TotalItemSizeMB_Integer","ImmutableId","OnPremisesImmutableId"
     )
     $columnOrderArchive = @('UserPrincipalName','PrimarySmtpAddress','OrganizationalUnit','Archive_TotalItemSizeGB','Archive_ItemCount','Archive_LastLogonTime','Archive_TotalItemSizeMB_Integer','ImmutableId')
     # =====================================================================
@@ -1862,7 +1869,6 @@ return @{
                     PrimarySmtpAddress              = $mb.PrimarySmtpAddress
                     StatsSource                     = $statsSourceLabel
                     TotalItemSizeGB                 = $totalSizeGB
-                    TotalItemSizeMB_Integer         = $totalSizeMB
                     ItemCount                       = $itemCount
                     LastLogonTime                   = $lastLogon
                     LastUserActionTime              = $lastAction
@@ -2153,7 +2159,6 @@ return @{
                                              }
                                              else { $null }
 
-                TotalItemSizeMB_Integer          = $totalSizeMB
                 Archive_TotalItemSizeMB_Integer  = $archiveSizeMB
                 ImmutableId                      = if ($mb.ExternalDirectoryObjectId) {
                                                        try { [Convert]::ToBase64String(([GUID]$mb.ExternalDirectoryObjectId).ToByteArray()) } catch { "" }
@@ -2203,6 +2208,58 @@ return @{
     $swStageExport = [System.Diagnostics.Stopwatch]::StartNew()
     $exportData = $resultsDetailed | Select-Object -Property $columnOrderDefault
     $exportDataArchive = $resultsArchiveOnly | Select-Object -Property $columnOrderArchive
+    $columnOrderStats = @(
+        'Identity','UserPrincipalName','PrimarySmtpAddress','StatsSource',
+        'TotalItemSizeGB','ItemCount','LastLogonTime','LastUserActionTime',
+        'Archive_TotalItemSizeGB','Archive_TotalItemSizeMB_Integer','Archive_ItemCount','Archive_LastLogonTime'
+    )
+    $exportDataStats = @()
+    if ($UseLiveStats) {
+        $exportDataStats = @($resultsStats | Select-Object -Property $columnOrderStats)
+        $statsCompletenessIssues = New-Object System.Collections.Generic.List[object]
+        $expectedStatsRows = @($exportData).Count
+        $actualStatsRows = @($exportDataStats).Count
+        if ($actualStatsRows -ne $expectedStatsRows) {
+            $statsCompletenessIssues.Add([PSCustomObject]@{
+                RowNumber = ''
+                UserPrincipalName = ''
+                PrimarySmtpAddress = ''
+                Identity = ''
+                MissingFields = 'StatsRowCount'
+                StatsSource = ''
+                Details = ("Expected {0} stats rows but collected {1}." -f $expectedStatsRows, $actualStatsRows)
+            }) | Out-Null
+        }
+        $statsRowNumber = 0
+        foreach ($statsRow in $exportDataStats) {
+            $statsRowNumber++
+            $missingFields = @()
+            foreach ($fieldName in @('TotalItemSizeGB','ItemCount')) {
+                if ([string]::IsNullOrWhiteSpace([string]$statsRow.$fieldName)) {
+                    $missingFields += $fieldName
+                }
+            }
+            if ($missingFields.Count -gt 0) {
+                $statsCompletenessIssues.Add([PSCustomObject]@{
+                    RowNumber = $statsRowNumber
+                    UserPrincipalName = $statsRow.UserPrincipalName
+                    PrimarySmtpAddress = $statsRow.PrimarySmtpAddress
+                    Identity = $statsRow.Identity
+                    MissingFields = ($missingFields -join ';')
+                    StatsSource = $statsRow.StatsSource
+                    Details = 'Critical live mailbox statistics fields are missing.'
+                }) | Out-Null
+            }
+        }
+        if ($statsCompletenessIssues.Count -gt 0) {
+            Add-ErrorBucket "StatsCompleteness"
+            $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+            $statsDiagnosticPath = Join-Path $OutputPath ("Exchange_EXO_Mailboxes_AllDomains_Stats_Incomplete_{0}.csv" -f $timestamp)
+            $statsCompletenessIssues | Export-Csv -Path $statsDiagnosticPath -NoTypeInformation -Encoding UTF8
+            WriteLog -Message ("Live stats completeness validation failed for {0} issue row(s). Diagnostic exported to: {1}. DATA-LAST and SharePoint CSV publication are skipped." -f $statsCompletenessIssues.Count, $statsDiagnosticPath) "ERROR"
+            throw ("Live mailbox statistics export is incomplete for {0} issue row(s). DATA-LAST CSVs were not updated. Diagnostic: {1}" -f $statsCompletenessIssues.Count, $statsDiagnosticPath)
+        }
+    }
 
     $globalPathForStdExports = $GlobalExportPath
     $globalPathForPermExport = $GlobalExportPath
@@ -2238,13 +2295,7 @@ return @{
         WriteLog -Message "CSV STATS not exported: -IncludeStats was not specified. Use -IncludeStats to collect and export live mailbox statistics." "WARNING"
         Write-Host "CSV STATS skipped (no -IncludeStats). See log for details." -ForegroundColor Yellow
     } else {
-        $columnOrderStats = @(
-            'Identity','UserPrincipalName','PrimarySmtpAddress','StatsSource',
-            'TotalItemSizeGB','TotalItemSizeMB_Integer','ItemCount','LastLogonTime','LastUserActionTime',
-            'Archive_TotalItemSizeGB','Archive_TotalItemSizeMB_Integer','Archive_ItemCount','Archive_LastLogonTime'
-        )
-        $exportDataStats = $resultsStats | Select-Object -Property $columnOrderStats
-ExportAndCopyCsv -BaseFileName "Exchange_EXO_Mailboxes_AllDomains_Stats$CsvSuffix" `
+        ExportAndCopyCsv -BaseFileName "Exchange_EXO_Mailboxes_AllDomains_Stats$CsvSuffix" `
            -OutputPath $OutputPath `
            -GlobalPath $globalPathForStdExports `
            -Data $exportDataStats `

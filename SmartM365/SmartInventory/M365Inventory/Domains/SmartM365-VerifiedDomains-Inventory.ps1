@@ -19,8 +19,14 @@
 .PARAMETER OutputFileName
     Base CSV file name (default: M365_Entra_VerifiedDomains.csv)
 .VERSION
-1.3
+1.4
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement.
+    Minimum Graph application permissions: Directory.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Requires: PowerShell 7+, Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, SmartM365.Core.psd1
     Minimum application permissions: Directory.Read.All
@@ -385,7 +391,7 @@ function Send-VerifiedDomainsTeamsAlert {
 }
 
 #region Init
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 $TaskNameCore  = "Azure AD verified domains inventory"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $currentOperation = 'InitializeScriptEnvironment'

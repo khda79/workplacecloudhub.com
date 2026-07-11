@@ -29,8 +29,14 @@
     warning and exports the partial result set. Defaults to 2000.
 
 .VERSION
-1.6
+1.7
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: BackupRestore-Configuration.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Required application permission: BackupRestore-Configuration.Read.All
@@ -79,7 +85,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.6'
+$ScriptVersion = '1.7'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null

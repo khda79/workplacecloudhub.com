@@ -19,8 +19,14 @@
 .PARAMETER OutputPath
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
+.REQUIREMENTS
+    PowerShell 7+, SmartM365.Core module, read access to both source mailbox permission CSV files,
+    and write access to configured DATA-ALL, DATA-LAST, and LOG-ALL folders. This generator does not
+    query AD, EXO, Graph, or Exchange on-prem directly; data completeness depends on the supplied
+    Exchange_OnPrem and Exchange_EXO mailbox permission exports.
+
 .VERSION
-1.4
+1.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -50,7 +56,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.4'
+$ScriptVersion = '1.5'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 
@@ -253,6 +259,7 @@ try {
     $latestCsvPath = Join-Path $LatestCsvFolderPath 'Exchange_Mailboxes_AllSources_PermissionsByUser.csv'
     Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
     WriteLog -Message "Starting $TaskName." -Level INFO
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($ScriptCsvLogFolderPath,$LatestCsvFolderPath,$logRoot) | Out-Null
 
     $CurrentOperation = 'LoadSourceCsv'
     $sourceRows = [System.Collections.Generic.List[object]]::new()
@@ -274,9 +281,9 @@ try {
                 }) | Out-Null
             }
         }
-        else { WriteLog -Message "Local mailbox CSV not found locally or in SharePoint: $LocalMailboxesCsvPath" -Level WARNING }
+        else { throw "Local mailbox CSV not found locally or in SharePoint: $LocalMailboxesCsvPath" }
     }
-    else { WriteLog -Message "Local mailbox CSV not configured: $LocalMailboxesCsvPath" -Level WARNING }
+    else { throw 'Local mailbox CSV path is not configured.' }
 
     if (-not [string]::IsNullOrWhiteSpace($ExoMailboxesCsvPath)) {
         $exoMailboxRows = @(Import-SmartM365CsvWithSharePointFallback -Path $ExoMailboxesCsvPath -Description 'EXO mailbox CSV')
@@ -296,9 +303,9 @@ try {
                 }) | Out-Null
             }
         }
-        else { WriteLog -Message "EXO mailbox CSV not found locally or in SharePoint: $ExoMailboxesCsvPath" -Level WARNING }
+        else { throw "EXO mailbox CSV not found locally or in SharePoint: $ExoMailboxesCsvPath" }
     }
-    else { WriteLog -Message "EXO mailbox CSV not configured: $ExoMailboxesCsvPath" -Level WARNING }
+    else { throw 'EXO mailbox CSV path is not configured.' }
 
     if ($sourceRows.Count -eq 0) { throw 'No source mailbox rows were loaded. Check LocalMailboxesCsvPath and ExoMailboxesCsvPath.' }
 

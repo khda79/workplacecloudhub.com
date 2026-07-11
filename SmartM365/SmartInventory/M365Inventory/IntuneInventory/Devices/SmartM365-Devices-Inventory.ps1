@@ -16,11 +16,17 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.4
+1.5
 
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; Device.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.2
+    Version : 1.3
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementManagedDevices.Read.All
@@ -508,7 +514,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 try {

@@ -29,11 +29,17 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.4
+1.5
 
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: Group.Read.All; GroupMember.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.1
+    Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
 
@@ -440,7 +446,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')

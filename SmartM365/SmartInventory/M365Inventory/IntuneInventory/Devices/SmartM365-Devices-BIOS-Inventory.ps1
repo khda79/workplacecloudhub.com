@@ -43,11 +43,17 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
 .VERSION
-1.3
+1.4
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.1
+    Version : 1.2
     Minimum application permissions: DeviceManagementManagedDevices.Read.All
 #>
 
@@ -464,7 +470,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {

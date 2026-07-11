@@ -29,11 +29,17 @@
     The GUID of the Intune Platform Script (Detect-DeviceSystemInfo) deployed to devices.
     Required to retrieve SecureBoot/BIOS/FirmwareType results from deviceRunStates.
 .VERSION
-1.4
+1.5
 
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.1
+    Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -511,7 +517,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {

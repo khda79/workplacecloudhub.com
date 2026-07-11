@@ -1,8 +1,19 @@
 <#
 .SYNOPSIS
 Generates Windows 11 readiness issue tables for PowerBI from SmartInventory CSV exports.
+
+.REQUIREMENTS
+- PowerShell 7+
+- SmartM365.Core module
+- Read access to DATA-LAST SmartInventory CSV exports
+- Write access to the configured DATA-ALL, DATA-LAST, and WeeklyHistory output folders
+- Required input CSV files: AD_Computers_AllDomains.csv, Intune_Devices_LocalSystem.csv,
+  Intune_WindowsUpdate_Status.csv, Intune_Devices_Win11Readiness.csv,
+  Intune_Devices_Inventory.csv, M365_Entra_Devices.csv, Intune_Devices_BIOS.csv,
+  Intune_Devices_Compliance.csv
+
 .VERSION
-1.0
+1.1
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -16,7 +27,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion='1.0'
+$ScriptVersion='1.1'
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
 function Warn([string]$m){Write-Warning $m}
@@ -55,9 +66,9 @@ function CopyCsv($s,$d){
 function ExportIssues($rows){
   foreach($f in @($OutputFolder,$LatestFolder,(Join-Path $OutputFolder 'Archive'))){if(!(Test-Path $f)){New-Item -ItemType Directory -Path $f -Force|Out-Null}}
   $main=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues.csv'; $latest=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues.csv'; $archive=Join-Path (Join-Path $OutputFolder 'Archive') "Intune_Windows11_Readiness_Issues_$RunStamp.csv"
-  $rows|Sort-Object PriorityScore,IssueCode,ObjectGUID_Norm|Export-Csv $main -NoTypeInformation -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
+  Assert-SmartM365CsvDataCompleteness -Data $rows -TimestampedPath $main -LatestPath $latest; $rows|Sort-Object PriorityScore,IssueCode,ObjectGUID_Norm|Export-Csv $main -NoTypeInformation -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
   $summary=@($rows|Group-Object IssueCode,Area,Potential_Issue,IssueCategory,PriorityScore,IsBlocking|Sort-Object Count -Descending|%{$p=$_.Name -split ', ',6; [pscustomobject]@{IssueCode=$p[0];Area=$p[1];Potential_Issue=$p[2];IssueCategory=$p[3];PriorityScore=[int]$p[4];IsBlocking=[bool]::Parse($p[5]);Count=$_.Count}})
-  $sm=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; $summary|Export-Csv $sm -NoTypeInformation -Encoding UTF8; CopyCsv $sm $sl
+  $sm=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; $summary|Export-Csv $sm -NoTypeInformation -Encoding UTF8; CopyCsv $sm $sl
   $files=@($main,$latest,$archive,$sm,$sl)
   if(!$SkipLegacyAliases){$lm=Join-Path $OutputFolder 'Mig_Win11Migration_Issues_Expanded.csv'; $ll=Join-Path $LatestFolder 'Mig_Win11Migration_Issues_Expanded.csv'; CopyCsv $main $lm; CopyCsv $main $ll; $files+=@($lm,$ll)}
   $files
@@ -82,7 +93,7 @@ function PublishWeeklyHistory($files){
 }
 try{
   Log "Starting $ScriptName v$ScriptVersion"
-  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -Force
+  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
   if(!$OutputFolder){$OutputFolder=Cfg $lc 'ScriptCsvLogFolderPath' (Join-Path (Cfg $lc 'DataAllRootPath' $PSScriptRoot) 'Intune\WindowsUpdate\Windows11ReadinessIssues')}
@@ -90,7 +101,8 @@ try{
   $global:EnableSharePointUpload=CB $lc 'EnableSharePointUpload' $false; if($DisableSharePointUpload){$global:EnableSharePointUpload=$false}; if(!(CB $lc 'EmitLegacyPowerBIAlias' $true)){$SkipLegacyAliases=$true}
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
-  $ad=Csv 'AD_Computers_AllDomains.csv' -Req; $local=Csv 'Intune_Devices_LocalSystem.csv'; $wu=Csv 'Intune_WindowsUpdate_Status.csv'; $ready=Csv 'Intune_Devices_Win11Readiness.csv'; $intune=Csv 'Intune_Devices_Inventory.csv'; $entra=Csv 'M365_Entra_Devices.csv'; $bios=Csv 'Intune_Devices_BIOS.csv'; $comp=Csv 'Intune_Devices_Compliance.csv'
+  Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LatestFolder) | Out-Null
+  $ad=Csv 'AD_Computers_AllDomains.csv' -Req; $local=Csv 'Intune_Devices_LocalSystem.csv' -Req; $wu=Csv 'Intune_WindowsUpdate_Status.csv' -Req; $ready=Csv 'Intune_Devices_Win11Readiness.csv' -Req; $intune=Csv 'Intune_Devices_Inventory.csv' -Req; $entra=Csv 'M365_Entra_Devices.csv' -Req; $bios=Csv 'Intune_Devices_BIOS.csv' -Req; $comp=Csv 'Intune_Devices_Compliance.csv' -Req
   $adName=@{}; foreach($r in $ad){AddMap $adName (N(P $r Name,SamAccountName)) $r}
   $localAad=@{};$localName=@{}; foreach($r in $local){AddMap $localAad (P $r AzureADDeviceId) $r; AddMap $localName (N(P $r DeviceName)) $r}
   $readyName=@{};$readyGraph=@{}; foreach($r in $ready){AddMap $readyName (N(P $r NormalizedDeviceName,DeviceName)) $r; AddMap $readyGraph (P $r GraphId) $r}

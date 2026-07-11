@@ -36,14 +36,20 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.5
+    Version : 1.6
 
 .VERSION
-1.5
+1.6
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; Device.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.5
+    Version : 1.6
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -286,7 +292,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'

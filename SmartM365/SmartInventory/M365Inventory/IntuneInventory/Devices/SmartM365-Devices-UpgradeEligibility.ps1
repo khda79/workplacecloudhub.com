@@ -44,11 +44,17 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.6
+1.7
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.6
+    Version : 1.7
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -100,7 +106,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {

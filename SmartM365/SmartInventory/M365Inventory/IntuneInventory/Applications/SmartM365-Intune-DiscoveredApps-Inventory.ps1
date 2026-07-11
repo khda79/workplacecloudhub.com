@@ -28,15 +28,21 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.6
+    Version : 1.7
 
 .VERSION
-1.6
+1.7
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: DeviceManagementApps.Read.All; DeviceManagementManagedDevices.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.6
+    Version : 1.7
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -284,7 +290,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {

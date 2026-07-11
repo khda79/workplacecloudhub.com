@@ -2221,6 +2221,7 @@ function InitializeScriptEnvironment {
     $global:SmartM365WarningCount = 0
     $global:SmartM365ErrorCount = 0
     $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    Initialize-SmartM365DefaultCsvValidationRules
     $global:BasePath = $OutputPathInit
 	$global:SmartM365ScriptName = $LogFileName
 	$global:LogPath = Join-Path -Path $logAllRootPath -ChildPath $LogFileName
@@ -2276,6 +2277,8 @@ function ExportAndCopyCsv {
     $global:csvFilePath1 = Join-Path $OutputPath "$BaseFileName`_$timestamp.csv"
     $global:csvFilePath2 = Join-Path $OutputPath "$BaseFileName.csv"
     $global:csvFilePath3 = Join-Path $GlobalPath "$BaseFileName.csv"
+
+    Assert-SmartM365CsvDataCompleteness -Data $Data -BaseFileName $BaseFileName -TimestampedPath $global:csvFilePath1 -LatestPath $global:csvFilePath3
 
     # Init global exclusion set
     if (-not $global:csvGeneratedPaths) {
@@ -2381,6 +2384,8 @@ function ExportAndCopyCsvFromConvert {
     $global:csvFilePath1 = Join-Path $OutputPath "$BaseFileName`_$timestamp.csv"
     $global:csvFilePath2 = Join-Path $OutputPath "$BaseFileName.csv"
     $global:csvFilePath3 = Join-Path $GlobalPath "$BaseFileName.csv"
+
+    Assert-SmartM365CsvDataCompleteness -Data $Data -BaseFileName $BaseFileName -TimestampedPath $global:csvFilePath1 -LatestPath $global:csvFilePath3
 
     # Init global exclusion set
     if (-not $global:csvGeneratedPaths) {
@@ -3218,6 +3223,203 @@ function Set-SmartM365CoreContext {
     if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $global:LogTextFile = $LogPath }
 }
 
+function Get-SmartM365CsvValidationBaseName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    if ([string]::IsNullOrWhiteSpace($name)) { return '' }
+    return ($name -replace '_\d{8}[-_]\d{6}$', '')
+}
+
+function Get-SmartM365CsvValidationRule {
+    [CmdletBinding()]
+    param([string]$BaseFileName,[string]$TimestampedPath,[string]$LatestPath)
+    $rules = $global:SmartM365CsvValidationRules
+    if ($null -eq $rules -or -not ($rules -is [hashtable])) { return $null }
+    $candidateKeys = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @($BaseFileName, $LatestPath, $TimestampedPath)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        [void]$candidateKeys.Add($candidate)
+        [void]$candidateKeys.Add((Split-Path -Path $candidate -Leaf))
+        $base = Get-SmartM365CsvValidationBaseName -Path $candidate
+        [void]$candidateKeys.Add($base)
+        if (-not [string]::IsNullOrWhiteSpace($base)) {
+            [void]$candidateKeys.Add(($base + '.csv'))
+            foreach ($normalizedBase in @(
+                ($base -replace '_PARTIAL$', ''),
+                ($base -replace '_top100$', ''),
+                (($base -replace '_top100$', '') -replace '_PARTIAL$', '')
+            )) {
+                if (-not [string]::IsNullOrWhiteSpace($normalizedBase)) {
+                    [void]$candidateKeys.Add($normalizedBase)
+                    [void]$candidateKeys.Add(($normalizedBase + '.csv'))
+                }
+            }
+        }
+    }
+    foreach ($key in @($candidateKeys | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if ($rules.ContainsKey($key)) { return $rules[$key] }
+    }
+    return $null
+}
+
+function Assert-SmartM365CsvDataCompleteness {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Data,[string[]]$Columns=@(),[string]$BaseFileName,[string]$TimestampedPath,[string]$LatestPath)
+    $rule = Get-SmartM365CsvValidationRule -BaseFileName $BaseFileName -TimestampedPath $TimestampedPath -LatestPath $LatestPath
+    if ($null -eq $rule) {
+        if ($global:SmartM365RequireCsvValidationRules) {
+            $name = if (-not [string]::IsNullOrWhiteSpace($BaseFileName)) { $BaseFileName } elseif (-not [string]::IsNullOrWhiteSpace($LatestPath)) { Get-SmartM365CsvValidationBaseName -Path $LatestPath } else { Get-SmartM365CsvValidationBaseName -Path $TimestampedPath }
+            throw ("CSV validation rule is missing for '{0}'. DATA-LAST publication is blocked." -f $name)
+        }
+        return
+    }
+    $rows = @($Data)
+    $displayName = if ($rule.ContainsKey('Name') -and -not [string]::IsNullOrWhiteSpace([string]$rule.Name)) { [string]$rule.Name } elseif (-not [string]::IsNullOrWhiteSpace($BaseFileName)) { $BaseFileName } elseif (-not [string]::IsNullOrWhiteSpace($LatestPath)) { Get-SmartM365CsvValidationBaseName -Path $LatestPath } else { Get-SmartM365CsvValidationBaseName -Path $TimestampedPath }
+    $allowEmptyDataset = ($rule.ContainsKey('AllowEmptyDataset') -and [bool]$rule.AllowEmptyDataset)
+    $criticalFields = @($rule.CriticalFields | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $requiredColumns = @($rule.RequiredColumns | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $expectedRowCount = $null
+    if ($rule.ContainsKey('ExpectedRowCount') -and $null -ne $rule.ExpectedRowCount -and [string]$rule.ExpectedRowCount -ne '') { $expectedRowCount = [int]$rule.ExpectedRowCount }
+    if ($rows.Count -eq 0 -and -not $allowEmptyDataset) { throw ("CSV '{0}' has 0 rows while this dataset is not declared as empty-capable. DATA-LAST publication is blocked." -f $displayName) }
+    if ($null -ne $expectedRowCount -and $rows.Count -ne $expectedRowCount) { throw ("CSV '{0}' row count mismatch. Expected {1}, got {2}. DATA-LAST publication is blocked." -f $displayName, $expectedRowCount, $rows.Count) }
+    $availableColumns = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($column in @($Columns)) { if (-not [string]::IsNullOrWhiteSpace([string]$column)) { [void]$availableColumns.Add([string]$column) } }
+    foreach ($row in @($rows | Select-Object -First 1)) { foreach ($property in @($row.PSObject.Properties.Name)) { if (-not [string]::IsNullOrWhiteSpace([string]$property)) { [void]$availableColumns.Add([string]$property) } } }
+    foreach ($column in @($requiredColumns + $criticalFields | Select-Object -Unique)) { if (-not $availableColumns.Contains([string]$column)) { throw ("CSV '{0}' is missing required column '{1}'. DATA-LAST publication is blocked." -f $displayName, $column) } }
+    $missingValues = New-Object System.Collections.Generic.List[string]
+    $rowNumber = 1
+    foreach ($row in $rows) {
+        foreach ($field in $criticalFields) {
+            $property = $row.PSObject.Properties[$field]
+            $value = if ($null -ne $property) { $property.Value } else { $null }
+            if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) { [void]$missingValues.Add(("row {0}, field {1}" -f $rowNumber, $field)); if ($missingValues.Count -ge 10) { break } }
+        }
+        if ($missingValues.Count -ge 10) { break }
+        $rowNumber++
+    }
+    if ($missingValues.Count -gt 0) { throw ("CSV '{0}' has empty critical business fields: {1}. DATA-LAST publication is blocked." -f $displayName, ($missingValues -join '; ')) }
+    WriteLog -Message ("CSV validation passed for '{0}'. Rows: {1}; CriticalFields: {2}" -f $displayName, $rows.Count, ($criticalFields -join ', '))
+}
+function Add-SmartM365CsvValidationRule {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$Rules,
+        [Parameter(Mandatory)][string]$BaseFileName,
+        [Parameter(Mandatory)][string[]]$CriticalFields,
+        [string[]]$RequiredColumns = @(),
+        [switch]$AllowEmptyDataset,
+        [string]$Name = ''
+    )
+
+    $ruleName = if ([string]::IsNullOrWhiteSpace($Name)) { $BaseFileName } else { $Name }
+    $Rules[$BaseFileName] = @{
+        Name              = $ruleName
+        CriticalFields    = @($CriticalFields)
+        RequiredColumns   = @($RequiredColumns)
+        AllowEmptyDataset = [bool]$AllowEmptyDataset
+    }
+}
+
+function Initialize-SmartM365DefaultCsvValidationRules {
+    [CmdletBinding()]
+    param()
+
+    if ($global:SmartM365CsvValidationRules -isnot [hashtable]) {
+        $global:SmartM365CsvValidationRules = @{}
+    }
+
+    $rules = $global:SmartM365CsvValidationRules
+    $add = { param($Base,$Fields,$AllowEmpty) Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName $Base -CriticalFields $Fields -AllowEmptyDataset:$AllowEmpty }
+
+    & $add 'AD_HealthCheck' @('Forest','Domain','Category','Check','Status') $false
+    & $add 'AD_Inventory_DailySummary' @('SnapshotDate','GeneratedAt') $false
+    & $add 'AD_Users_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
+    & $add 'AD_Computers_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
+    & $add 'AD_Groups_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
+    & $add 'AD_OUs_AllDomains' @('DomainName','Name','DistinguishedName') $false
+    & $add 'AD_Contacts_AllDomains' @('DomainName','DisplayName') $true
+    & $add 'AD_Users_DailyStats' @('Date','DomainName') $false
+    & $add 'AD_Computers_DailyStats' @('Date','DomainName') $false
+    & $add 'AD_Users_DuplicateUPN' @('UserPrincipalName','SamAccountName','DistinguishedName') $true
+    & $add 'AD_Users_DuplicateSMTP' @('SmtpAddress','UserPrincipalName','SamAccountName','DistinguishedName') $true
+
+    & $add 'Exchange_EXO_AcceptedDomains' @('Name','DomainName','DomainType') $false
+    & $add 'Exchange_EXO_Mailboxes_AllDomains' @('UserPrincipalName','PrimarySmtpAddress','MailboxGuid') $false
+    & $add 'Exchange_EXO_Mailboxes_AllDomains_Archive' @('UserPrincipalName','PrimarySmtpAddress') $false
+    & $add 'Exchange_EXO_Mailboxes_AllDomains_Stats' @('UserPrincipalName','PrimarySmtpAddress','TotalItemSizeGB','ItemCount') $false
+    & $add 'Exchange_EXO_Mailboxes_AllDomains_Permissions' @('UserPrincipalName','PrimarySmtpAddress') $false
+    & $add 'Exchange_EXO_MailboxCalendarPermissions_AllDomains' @('Mailbox','User','AccessRights') $false
+    & $add 'Exchange_EXO_MailboxCalendarPermissions_Errors' @('Index','Message') $true
+    & $add 'Exchange_EXO_MigrationJobs' @('BatchName','BatchStatus') $true
+    & $add 'Exchange_Mailboxes_AllSources_PermissionsByUser' @('ResolvedUser','PrimarySMTPaddress','Source') $true
+    & $add 'M365_Backup_ProtectedMailboxes' @('ProtectionUnitId','Status') $true
+
+    & $add 'Exchange_OnPrem_Mailboxes_AllDomains' @('DomainName','SamAccountName','PrimarySMTPaddress','ObjectGUID') $false
+    & $add 'Exchange_OnPrem_Mailboxes_AllDomains_OnlyADPermission' @('DomainName','SamAccountName','PrimarySMTPaddress','ObjectGUID') $false
+    & $add 'Exchange_OnPrem_RemoteMailboxes_AllDomains' @('DomainName','SamAccountName','PrimarySmtpAddress','ObjectGuid') $false
+    & $add 'Exchange_OnPrem_Mailboxes_DailyStats' @('Date','DomainName') $false
+    & $add 'Exchange_OnPrem_Mailboxes_DailyStats_Summary' @('DomainName','TotalMailboxCount') $false
+    & $add 'Exchange_OnPrem_ProxyAddresses_Check' @('Identity','PrimaryAddress','ExpectedAddress','Status') $false
+    & $add 'Exchange_OnPrem_ProxyAddresses_Summary' @('Summary','Count') $false
+    & $add 'Exchange_OnPrem_Servers_Inventory' @('Name','Fqdn','ServerRole') $false
+    & $add 'Exchange_OnPrem_Servers_Inventory_Summary' @('ScriptName','RunId','ExchangeServersCount') $false
+    & $add 'Exchange_OnPrem_Servers_RemoteAccess' @('ExchangeServerName','ComputerNameTried') $false
+    & $add 'Exchange_OnPrem_Servers_Compute' @('ExchangeServerName','ComputerNameTried','CollectionStatus') $false
+    & $add 'Exchange_OnPrem_Servers_LogicalDisks' @('ExchangeServerName','ComputerNameTried','DeviceId','CollectionStatus') $false
+    & $add 'Exchange_OnPrem_Servers_DiskDrives' @('ExchangeServerName','ComputerNameTried','Index','CollectionStatus') $false
+    & $add 'Exchange_OnPrem_Infrastructure_PerServerSummary' @('ExchangeServerName','ServerRole') $false
+    & $add 'Exchange_OnPrem_MigrationReadiness_Config' @('Category','ObjectName','Setting','CollectionStatus') $false
+
+    & $add 'M365_Users_Active' @('User principal name','Object Id','AccountEnabled') $false
+    & $add 'M365_Users_Activity' @('RunId','UserPrincipalName','ReportRefreshDate') $false
+    & $add 'M365_Mailbox_Usage' @('RunId','User Principal Name','Report Refresh Date') $false
+    & $add 'M365_OneDrive_Usage' @('RunId','Site Id','Report Refresh Date') $false
+    & $add 'M365_SharePoint_SiteUsage' @('RunId','Site Id','Report Refresh Date') $false
+    & $add 'M365_Apps_Activations' @('RunId','User Principal Name','Report Refresh Date') $false
+    & $add 'M365_Teams_UserActivity' @('RunId','User Principal Name','Report Refresh Date') $false
+    & $add 'M365_Email_Activity' @('RunId','User Principal Name','Report Refresh Date') $false
+    & $add 'M365_Entra_VerifiedDomains' @('Id','IsVerified') $false
+    & $add 'M365_Entra_AzureADConnect_SyncHealth' @('CheckName','Status','ExportDateTime','RunId') $false
+
+    & $add 'M365_Licenses_Users' @('Id','User principal name','UserId','SkuId','SkuPartNumber') $false
+    & $add 'M365_Licenses_ServicePlans' @('Id','User principal name','SkuId','PlanId','PlanName') $false
+    & $add 'M365_Licenses_ServicePlans_Detailed' @('Id','User principal name','SkuId','PlanId','PlanName') $false
+    & $add 'M365_Licenses_Tenant' @('Id','TenantSkuPartNumber') $false
+    & $add 'M365_Licenses_Groups' @('Id','GroupId','GroupDisplayName') $true
+
+    & $add 'M365_Entra_Devices' @('ObjectId','DeviceId','DisplayName') $false
+    & $add 'M365_Entra_Devices_RegisteredPending' @('ObjectId','DeviceId','DisplayName') $true
+    & $add 'M365_Entra_Devices_HardwareIdConflicts' @('HardwareId','DeviceCount') $true
+    & $add 'M365_Entra_Devices_HardwareIdConflicts_RegisteredPending' @('HardwareId','ObjectId','DeviceId') $true
+    & $add 'M365_Entra_Devices_RemovalCandidates' @('HardwareId','CandidateObjectId','PrimaryObjectId','Reason') $true
+
+    & $add 'Intune_Devices_Inventory' @('Device ID','Device name','Azure AD Device ID') $false
+    & $add 'Intune_Devices_Compliance' @('DeviceName') $false
+    & $add 'Intune_Devices_BIOS' @('ManagedDeviceId','DeviceName','AzureADDeviceId') $false
+    & $add 'Intune_Devices_LocalSystem' @('DeviceName','DeviceId','AzureADDeviceId') $false
+    & $add 'Intune_Autopilot_Devices' @('Autopilot ID','Serial number') $false
+    & $add 'Intune_Devices_UpgradeEligibility_Summary' @('ReportType','ExportDateTime') $false
+    & $add 'Intune_Devices_Win11Readiness' @('DeviceName','GraphId','RunId') $false
+    & $add 'Intune_WindowsUpdate_Status' @('PolicyId','DeviceId','DeviceName','AggregateState') $false
+    & $add 'Intune_AutopatchAlerts_Detail' @('AlertName','Severity','SourceReport') $true
+    & $add 'Intune_AutopatchAlerts_Summary' @('AlertName','Severity','SourceReport') $true
+    & $add 'Intune_AutopatchAlerts_PolicySummary' @('PolicyId','PolicyName') $true
+    & $add 'Intune_DiscoveredApps_Summary' @('AppId','AppName','Platform') $false
+    & $add 'Intune_DiscoveredApps_DeviceDetail' @('AppId','AppName','DeviceId','DeviceName') $true
+    & $add 'Intune_RBAC_GroupMembers' @('Country','IntuneRole','GroupName','GroupFound') $false
+
+    & $add 'M365_SPO_Sites' @('RunId','SiteUrl','Status') $false
+    & $add 'M365_SPO_Lists' @('RunId','SiteUrl','ListId','Status') $true
+    & $add 'M365_SPO_Permissions' @('RunId','SiteUrl','Status') $true
+    & $add 'M365_SPO_ExternalSharing' @('RunId','SiteUrl','SharingSignal','Status') $true
+    & $add 'M365_Teams_Teams' @('RunId','TeamId','TeamDisplayName','Status') $true
+    & $add 'M365_Teams_Members' @('RunId','TeamId','UserId','Role','Status') $true
+    & $add 'M365_Teams_Guests' @('RunId','TeamId','UserId','Status') $true
+    & $add 'M365_Teams_Channels' @('RunId','TeamId','ChannelId','ChannelDisplayName','Status') $true
+
+    WriteLog -Message ("SmartM365 CSV validation rules loaded: {0}" -f $rules.Count) -Level 'INFO'
+}
 function Write-SmartM365CsvAtomically {
     [CmdletBinding()]
     param(
@@ -3228,6 +3430,8 @@ function Write-SmartM365CsvAtomically {
         [string]$Encoding = "UTF8",
         [string]$Delimiter = ","
     )
+
+    Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $Path -LatestPath $Path
 
     $parent = Split-Path -Path $Path -Parent
     if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
@@ -3273,6 +3477,8 @@ function Publish-SmartM365Csv {
         [int]$RetentionMaxCsv = -1,
         [switch]$NoSharePointUpload
     )
+
+    Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath
 
     Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
     WriteLog -Message ("CSV exported to: {0}" -f $TimestampedPath)
