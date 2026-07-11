@@ -8,7 +8,7 @@
     packages are selected so existing WithCacheOnly packages are not republished accidentally.
 
 .VERSION
-    1.0.1
+    1.0.2
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -22,6 +22,7 @@ param(
     [string[]]$IncludePackageId,
     [string[]]$ExcludePackageId,
     [switch]$ForceCreateNew,
+    [switch]$UpdateMetadataOnly,
     [switch]$DisableLanguageRequirementRule,
     [ValidateRange(-1, 2147483647)][int]$MinimumFreeDiskSpaceInMB = -1,
     [int]$UploadBlockSizeMB = 16,
@@ -134,7 +135,7 @@ if ($selected.Count -eq 0) {
     throw "No .intunewin package matched the requested filters. OutputRoot=$OutputRoot; PackageMode=$PackageMode"
 }
 
-Write-Step ("Publishing {0} package(s). OutputRoot={1}; PackageMode={2}" -f $selected.Count,$OutputRoot,$PackageMode)
+Write-Step ("Publishing/updating {0} package(s). OutputRoot={1}; PackageMode={2}; UpdateMetadataOnly={3}" -f $selected.Count,$OutputRoot,$PackageMode,[bool]$UpdateMetadataOnly)
 foreach ($package in $selected) {
     Write-Step ("Package: {0}; Language={1}; Mode={2}; Version={3}" -f $package.PackageId,$package.Language,$package.PackageMode,$package.PackageVersion)
 
@@ -148,6 +149,7 @@ foreach ($package in $selected) {
         GraphBaseUri = $GraphBaseUri
     }
     if ($ForceCreateNew) { $publishParams['ForceCreateNew'] = $true }
+    if ($UpdateMetadataOnly) { $publishParams['UpdateMetadataOnly'] = $true }
     if ($DisableLanguageRequirementRule) { $publishParams['DisableLanguageRequirementRule'] = $true }
     if ($NoConnect) { $publishParams['NoConnect'] = $true }
 
@@ -156,7 +158,8 @@ foreach ($package in $selected) {
         continue
     }
 
-    if ($PSCmdlet.ShouldProcess($package.PackageId, 'Publish SmartM365 Windows 11 Intune app')) {
+    $actionText = if ($UpdateMetadataOnly) { 'Update SmartM365 Windows 11 Intune app metadata' } else { 'Publish SmartM365 Windows 11 Intune app' }
+    if ($PSCmdlet.ShouldProcess($package.PackageId, $actionText)) {
         & $PublisherScriptPath @publishParams
     }
 }

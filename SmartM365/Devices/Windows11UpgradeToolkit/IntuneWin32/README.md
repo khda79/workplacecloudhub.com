@@ -133,7 +133,7 @@ The full package is large and the installer copies the packaged setup media from
 
 Disk space requirement:
 
-The publisher sets Intune `Disk space required (MB)` automatically to `51200` for full `WithMedia` packages. It leaves the value unset for `WithCacheOnly` packages unless you override it. Use `-MinimumFreeDiskSpaceInMB <MB>` to force a value, or `-MinimumFreeDiskSpaceInMB 0` to disable the requirement. This Intune requirement filters installation before download/install, but endpoint disk preflight checks still remain authoritative during upgrade execution.
+The publisher sets Intune `Disk space required (MB)` automatically to `40960` for full `WithMedia` packages. It leaves the value unset for `WithCacheOnly` packages unless you override it. Use `-MinimumFreeDiskSpaceInMB <MB>` to force a value, or `-MinimumFreeDiskSpaceInMB 0` to disable the requirement. This Intune requirement filters installation before download/install. The `40960` MB default covers the local setup media copy plus the endpoint default `MinimumFreeDiskGB=32`; endpoint disk preflight checks still remain authoritative during upgrade execution.
 
 Detection rule:
 
@@ -211,6 +211,23 @@ Publish every generated full-media package except FR:
   -ExcludeLanguage fr-FR
 ```
 
+Update only existing Intune app metadata, for example after changing `Disk space required (MB)`, without creating a new content version or uploading the `.intunewin` payload again:
+
+```powershell
+.\IntuneWin32\Publish-SmartM365Windows11IntuneApp.ps1 `
+  -IntuneWinPath C:\tmp\SmartM365-W11UT-FR\Output\SmartM365-Windows11UpgradeToolkit-Win11-fr-FR.intunewin `
+  -UpdateMetadataOnly `
+  -MinimumFreeDiskSpaceInMB 40960
+```
+
+Update metadata for every generated full-media package without uploading package content:
+
+```powershell
+.\IntuneWin32\Publish-AllSmartM365Windows11IntuneApp.ps1 `
+  -UpdateMetadataOnly `
+  -MinimumFreeDiskSpaceInMB 40960
+```
+
 Preview the same batch without creating or updating apps:
 
 ```powershell
@@ -219,7 +236,7 @@ Preview the same batch without creating or updating apps:
   -WhatIf
 ```
 
-The batch publisher defaults to `-PackageMode WithMedia` so existing `WithCacheOnly` packages under `Output` are not republished accidentally. Use `-PackageMode All` or `-PackageMode WithCacheOnly` when needed. It calls `Publish-SmartM365Windows11IntuneApp.ps1` once per selected `.intunewin` package and still creates/uploads apps only; assignments remain manual.
+The batch publisher defaults to `-PackageMode WithMedia` so existing `WithCacheOnly` packages under `Output` are not republished accidentally. Use `-PackageMode All` or `-PackageMode WithCacheOnly` when needed. It calls `Publish-SmartM365Windows11IntuneApp.ps1` once per selected `.intunewin` package. By default it creates/uploads app content; with `-UpdateMetadataOnly`, it only patches existing app metadata and does not upload package content. Assignments remain manual.
 
 Required Graph delegated permission:
 
