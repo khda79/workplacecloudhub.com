@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.49
+    0.1.50
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -109,7 +109,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.48'
+$script:LauncherVersion = '0.1.50'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -1821,6 +1821,23 @@ function Get-Windows11ReportRows {
 }
 
 
+function Get-Windows11LatestRowsByComputer {
+    param([AllowEmptyCollection()][object[]]$Rows)
+
+    $latestByComputer = @{}
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row) { continue }
+        $computer = if ($row.PSObject.Properties['ComputerName']) { [string]$row.ComputerName } else { '' }
+        if ([string]::IsNullOrWhiteSpace($computer)) { continue }
+        $key = Get-ComputerListKey -ComputerName $computer
+        if ([string]::IsNullOrWhiteSpace($key)) { $key = $computer.ToUpperInvariant() }
+        $latestByComputer[$key] = $row
+    }
+
+    return @($latestByComputer.GetEnumerator() | Sort-Object Name | ForEach-Object { $_.Value })
+}
+
+
 function Get-Windows11HtmlEffectiveStatus {
     param([AllowNull()][object]$Row)
 
@@ -1957,6 +1974,7 @@ function New-Windows11UpgradeCycleHtmlReport {
     )
 
     $rows = @(Get-Windows11ReportRows -Items @($Summary | ForEach-Object { $_ }))
+    $latestRows = @(Get-Windows11LatestRowsByComputer -Rows $rows)
 
     $separatedDetailStatuses = @('ADMIN_SHARE_UNREACHABLE', 'RUN_GUARD_ACTIVE', 'SKIPPED_BY_TECH_RUN_GUARD')
     $mainRows = @($rows | Where-Object { $separatedDetailStatuses -notcontains (Get-Windows11HtmlEffectiveStatus -Row $_) })
@@ -1971,6 +1989,16 @@ function New-Windows11UpgradeCycleHtmlReport {
     })
     $nextActionCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.NextAction) } | Group-Object -Property NextAction | Sort-Object Count -Descending | ForEach-Object {
         [pscustomobject]@{ NextAction = $_.Name; Count = $_.Count }
+    })
+    $latestEffectiveRows = foreach ($row in $latestRows) {
+        $eff = Get-Windows11HtmlEffectiveStatus -Row $row
+        [pscustomobject]@{ EffectiveStatus = $eff; NextAction = [string]$row.RemoteNextAction }
+    }
+    $latestStatusCounts = @($latestEffectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.EffectiveStatus) } | Group-Object -Property EffectiveStatus | Sort-Object Count -Descending | ForEach-Object {
+        [pscustomobject]@{ Status = $_.Name; Count = $_.Count }
+    })
+    $latestAdminShareFailureCounts = @($latestRows | Where-Object { (Get-Windows11HtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = (Get-Windows11AdminShareFailureType -Row $_) } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object {
+        [pscustomobject]@{ FailureType = $_.Name; Count = $_.Count }
     })
     $adminShareFailureCounts = @($rows | Where-Object { (Get-Windows11HtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = (Get-Windows11AdminShareFailureType -Row $_) } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object {
         [pscustomobject]@{ FailureType = $_.Name; Count = $_.Count }
@@ -2035,7 +2063,7 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add(("<div class='title'>Windows 11 upgrade - {0}<span class='badge'>{1}</span></div>" -f $cycleLabelHtml,$mode))
     [void]$html.Add("<div class='subtitle'>Smart Intune Windows 11 Upgrade Toolkit</div>")
     [void]$html.Add(("<div class='lot-name' title='{1}'>LOT: {0}</div>" -f $lotNameHtml,$lotPathHtml))
-    [void]$html.Add(("<div class='meta'>Generated: {0} | Report rows: {1} | Launcher: v{2}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
+    [void]$html.Add(("<div class='meta'>Generated: {0} | Report rows: {1} | Unique computers: {2} | Launcher: v{3}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,$latestRows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
     [void]$html.Add(("<div class='meta'>Launcher log: {0}</div>" -f (New-HtmlLogLink -Path $script:LauncherLogPath)))
     [void]$html.Add("</div>")
     [void]$html.Add($logoHtml)
@@ -2057,11 +2085,19 @@ tr:nth-child(even) td { background: #F5F8FB; }
         [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows @($RunningJobRows) -Columns @('ComputerName','JobId','State','Started','ElapsedMinutes')))
         [void]$html.Add("</div>")
     }
-    [void]$html.Add("<div class='card'><h2>Status summary</h2>")
+    [void]$html.Add("<div class='card'><h2>Latest status by unique computer</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $latestStatusCounts -Columns @("Status", "Count")))
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Status summary by attempts</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @("Status", "Count")))
     [void]$html.Add("</div>")
+    if ($latestAdminShareFailureCounts.Count -gt 0) {
+        [void]$html.Add("<div class='card'><h2>Latest admin share failure by unique computer</h2>")
+        [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $latestAdminShareFailureCounts -Columns @('FailureType','Count')))
+        [void]$html.Add("</div>")
+    }
     if ($adminShareFailureCounts.Count -gt 0) {
-        [void]$html.Add("<div class='card'><h2>Admin share failure summary</h2>")
+        [void]$html.Add("<div class='card'><h2>Admin share failure summary by attempts</h2>")
         [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $adminShareFailureCounts -Columns @('FailureType','Count')))
         [void]$html.Add("</div>")
     }
