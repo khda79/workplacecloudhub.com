@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.28
+0.1.30
 #>
 param(
     [switch]$ValidateOnly
@@ -457,6 +457,30 @@ function Start-GuiLaunchCommandFile {
     Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', (ConvertTo-CmdArgument -Value $LaunchCommandPath)) -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
 }
 
+function Start-LotHtmlReportOpenWatcher {
+    param(
+        [Parameter(Mandatory = $true)][string]$ReportRoot,
+        [int]$TimeoutSeconds = 900
+    )
+
+    $resolvedReportRoot = [System.IO.Path]::GetFullPath($ReportRoot)
+    $escapedReportRoot = $resolvedReportRoot.Replace("'", "''")
+    $watcherScript = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+`$reportRoot = '$escapedReportRoot'
+`$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+while ((Get-Date) -lt `$deadline) {
+    `$report = Get-ChildItem -LiteralPath `$reportRoot -Filter '*_live.html' -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (`$report) {
+        Start-Process -FilePath `$report.FullName | Out-Null
+        exit 0
+    }
+    Start-Sleep -Seconds 2
+}
+"@
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($watcherScript))
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encodedCommand) -WindowStyle Hidden | Out-Null
+}
 function Get-SingleComputerRunRoot {
     param([string]$ToolkitRoot)
     return Join-Path (Get-RunsRoot -RootPath $ToolkitRoot) 'SingleComputer'
@@ -534,7 +558,7 @@ function Start-ToolkitLot {
         'Once' { 'Run-Windows11UpgradeRepairWithPsExec-Once.cmd'; break }
         'LoopIgnoreRunGuard' { 'Run-Windows11UpgradeRepairWithPsExec-Loop-IgnoreRunGuard.cmd'; break }
         'OnceIgnoreRunGuard' { 'Run-Windows11UpgradeRepairWithPsExec-Once-IgnoreRunGuard.cmd'; break }
-        default { 'Run-Windows11UpgradeRepairWithPsExec-Once.cmd' }
+        default { 'Run-Windows11UpgradeRepairWithPsExec-Loop.cmd' }
     }
 
     $wrapperPath = Join-Path $Lot.Path $wrapperName
@@ -571,9 +595,10 @@ function Start-ToolkitLot {
     }
 
     $commands.Add(($commandParts -join ' '))
-    $launchTitle = "{0} - started {1}" -f $Lot.Name,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    $launchTitle = "{0} - {1} - started {2}" -f $Lot.Name,$Mode,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode) -WindowTitle $launchTitle
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
+    Start-LotHtmlReportOpenWatcher -ReportRoot $run.ReportRoot
 }
 
 function Start-ToolkitSingleComputer {
@@ -1610,7 +1635,7 @@ function Reset-GuiOptionsToDefaults {
 }
 
 function Initialize-Options {
-    Initialize-Combo -Combo $controls.LotModeCombo -Values @('Once','Loop','OnceIgnoreRunGuard','LoopIgnoreRunGuard') -Selected 'Once'
+    Initialize-Combo -Combo $controls.LotModeCombo -Values @('Loop','Once','LoopIgnoreRunGuard','OnceIgnoreRunGuard') -Selected 'Loop'
     Initialize-Combo -Combo $controls.SingleModeCombo -Values @('Once','OnceIgnoreRunGuard','Loop','LoopIgnoreRunGuard') -Selected 'Once'
     Initialize-Combo -Combo $controls.SetupModeCombo -Values @('LocalCache','Share','Auto') -Selected (Get-ConfiguredValue 'W11UT_SETUP_EXECUTION_MODE')
     Initialize-Combo -Combo $controls.SetupLanguageCombo -Values @('MatchSystem','Any','fr-FR','en-GB','en-US','de-DE','es-ES','it-IT','nl-NL','pt-PT','pl-PL') -Selected (Get-ConfiguredValue 'W11UT_SETUP_LANGUAGE')
