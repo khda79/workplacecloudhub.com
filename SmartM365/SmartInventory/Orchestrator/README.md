@@ -211,11 +211,12 @@ Running the PowerShell installer directly without parameters opens the same guid
     -StartNow
 ```
 
-The default task name is `SmartM365 Inventory Orchestrator - <Tenant>`. Use `-TaskName` to override it. The installer verifies administrator rights, PowerShell 7, the orchestrator, the jobs/config templates, and the SmartM365 tenant-context helper before registration.
+The default registered task path is `\WCH\SmartM365 Inventory Orchestrator - <Tenant>`. Use `-TaskName` to override the task name. The installer creates the `WCH` Task Scheduler folder when needed, verifies administrator rights, PowerShell 7, the orchestrator, the jobs/config templates, and the SmartM365 tenant-context helper before registration. After successful registration, it removes an exact-name legacy copy from the Task Scheduler root; uninstall checks both `\WCH\` and the legacy root.
 
 The installed task:
 
 - directly runs `pwsh.exe -File SmartM365-Inventory-Orchestrator.ps1 -Tenant <prod|test> -Connect`;
+- is stored in the `\WCH\` Task Scheduler folder;
 - starts five minutes after server startup;
 - starts daily at midnight and repeats every 30 minutes for one day;
 - ignores a new start while an instance is already running;
@@ -235,7 +236,7 @@ The service account must already have the local/domain rights and file/certifica
 
 ### Manual configuration
 
-Create ONE task (per tenant) running the launcher, for example `Start-SmartM365-Inventory-Orchestrator-Prod.cmd`:
+Create ONE task per tenant under the `\WCH\` Task Scheduler folder, running the launcher such as `Start-SmartM365-Inventory-Orchestrator-Prod.cmd`:
 
 - General: dedicated service account with "Log on as a batch job", "Run whether user is logged on or not", "Run with highest privileges" if the inventory scripts need it. The account needs write access to the SmartM365 `Data` folders and the certificate/private key used by app-only auth.
 - Triggers:

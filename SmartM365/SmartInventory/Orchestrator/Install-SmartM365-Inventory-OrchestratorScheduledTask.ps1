@@ -42,7 +42,7 @@ Forces the guided interactive workflow. This is used by the CMD launcher.
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -Uninstall
 
 .VERSION
-1.1.1
+1.1.2
 
 .REQUIREMENTS
     Windows PowerShell 5.1 or PowerShell 7. The script requests UAC elevation when needed.
@@ -63,7 +63,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$taskPath = '\'
+$taskFolderName = 'WCH'
+$taskPath = '\WCH\'
+$legacyTaskPath = '\'
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $orchestratorPath = Join-Path $scriptDirectory 'SmartM365-Inventory-Orchestrator.ps1'
 $jobsManifestTemplatePath = Join-Path $scriptDirectory 'Orchestrator-Jobs.json.template'
@@ -156,6 +158,34 @@ function Wait-InteractiveClose {
     }
 }
 
+
+function Initialize-WchScheduledTaskFolder {
+    param([Parameter(Mandatory = $true)][string]$FolderName)
+
+    $taskService = $null
+    $rootFolder = $null
+    $targetFolder = $null
+    try {
+        $taskService = New-Object -ComObject 'Schedule.Service'
+        $taskService.Connect()
+        $normalizedFolderPath = '\{0}' -f $FolderName.Trim('\')
+        try {
+            $targetFolder = $taskService.GetFolder($normalizedFolderPath)
+        }
+        catch {
+            $rootFolder = $taskService.GetFolder('\')
+            $targetFolder = $rootFolder.CreateFolder($FolderName.Trim('\'))
+            Write-InstallerMessage "Task Scheduler folder created: $normalizedFolderPath"
+        }
+    }
+    finally {
+        foreach ($comObject in @($targetFolder, $rootFolder, $taskService)) {
+            if ($null -ne $comObject -and [Runtime.InteropServices.Marshal]::IsComObject($comObject)) {
+                [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($comObject)
+            }
+        }
+    }
+}
 $script:InteractiveMode = $Interactive -or $PSBoundParameters.Count -eq 0
 
 trap {
@@ -265,23 +295,30 @@ if ($script:InteractiveMode) {
 if ([string]::IsNullOrWhiteSpace($TaskName)) {
     $TaskName = "SmartM365 Inventory Orchestrator - $Tenant"
 }
-if ($TaskName.IndexOf('\') -ge 0) {
-    throw 'TaskName must not contain a backslash. The task is registered in the Task Scheduler root folder.'
+if ($TaskName.IndexOfAny([char[]]'\/:*?"<>|[]') -ge 0) {
+    throw 'TaskName contains a character that is not allowed in a scheduled-task name.'
 }
 
 if ($Uninstall) {
     if ($StartNow) {
         throw 'StartNow cannot be combined with Uninstall.'
     }
-    $existingTask = Get-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($null -eq $existingTask) {
-        Write-InstallerMessage "Scheduled task does not exist: $TaskName"
-        Wait-InteractiveClose
-        return
+
+    $taskWasFound = $false
+    foreach ($candidateTaskPath in @($taskPath, $legacyTaskPath)) {
+        $existingTask = Get-ScheduledTask -TaskPath $candidateTaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($null -eq $existingTask) {
+            continue
+        }
+        $taskWasFound = $true
+        if ($PSCmdlet.ShouldProcess("$candidateTaskPath$TaskName", 'Unregister scheduled task')) {
+            Unregister-ScheduledTask -TaskPath $candidateTaskPath -TaskName $TaskName -Confirm:$false
+            Write-InstallerMessage "Scheduled task removed: $candidateTaskPath$TaskName"
+        }
     }
-    if ($PSCmdlet.ShouldProcess("$taskPath$TaskName", 'Unregister scheduled task')) {
-        Unregister-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -Confirm:$false
-        Write-InstallerMessage "Scheduled task removed: $TaskName"
+
+    if (-not $taskWasFound) {
+        Write-InstallerMessage "Scheduled task does not exist in $taskPath or the legacy root folder: $TaskName"
     }
     Wait-InteractiveClose
     return
@@ -379,6 +416,8 @@ try {
     $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($credential.Password)
     $plainTextPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
 
+    Initialize-WchScheduledTaskFolder -FolderName $taskFolderName
+
     $registrationParameters = @{
         TaskPath = $taskPath
         TaskName = $TaskName
@@ -393,7 +432,13 @@ try {
     }
     Register-ScheduledTask @registrationParameters | Out-Null
 
-    Write-InstallerMessage "Scheduled task registered: $TaskName"
+    Write-InstallerMessage "Scheduled task registered: $taskPath$TaskName"
+    $legacyTask = Get-ScheduledTask -TaskPath $legacyTaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($null -ne $legacyTask -and $PSCmdlet.ShouldProcess("$legacyTaskPath$TaskName", 'Remove legacy root scheduled task')) {
+        Unregister-ScheduledTask -TaskPath $legacyTaskPath -TaskName $TaskName -Confirm:$false
+        Write-InstallerMessage "Legacy root scheduled task removed: $legacyTaskPath$TaskName"
+    }
+
     Write-InstallerMessage "Run account: $ServiceAccount"
     Write-InstallerMessage "Action: $powerShell7Path $actionArguments"
     if ($StartNow) {
