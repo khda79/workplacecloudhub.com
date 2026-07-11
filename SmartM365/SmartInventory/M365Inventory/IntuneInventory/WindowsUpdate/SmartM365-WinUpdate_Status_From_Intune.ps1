@@ -20,7 +20,7 @@ and full remediation columns. Single CSV output for Power BI consumption.
     - Fatal error HTML email (on failure)
     - Optional success/summary HTML email with KPI tables
 
-REQUIREMENTS
+.REQUIREMENTS
 - PowerShell 7+
 - MSAL.PS module
 - App-only certificate authentication for Graph
@@ -39,7 +39,7 @@ PARAMETERS
 VERSION
   1.5
 .VERSION
-1.6
+1.7
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -78,7 +78,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 
 # ==========================================================
 # App-only authentication parameters

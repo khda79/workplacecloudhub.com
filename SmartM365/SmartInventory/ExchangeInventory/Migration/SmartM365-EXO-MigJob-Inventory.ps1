@@ -17,11 +17,17 @@ Forces a (reconnection) to cloud services when specified, or auto-connects if no
 .PARAMETER InteractiveAuth
 Forces interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.3
+1.4
 
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; ExchangeOnlineManagement.
+    Minimum permissions: Exchange.ManageAsApp plus Exchange Online app-only RBAC allowing Get-MigrationBatch and related migration user/detail reads; Global Reader is the default read-only service-principal role.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.1
+    Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
 Date: October 2025
 Dependencies: SmartM365.Core module
@@ -337,7 +343,7 @@ function Get-AllPreviousCsvPaths {
 #endregion
 
 #region Module Import and Initialization
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMigrationJobCsvLogFolderPath' -DefaultValue $OutputPath
 try {

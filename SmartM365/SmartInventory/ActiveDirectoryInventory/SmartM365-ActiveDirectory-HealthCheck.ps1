@@ -2,11 +2,18 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.12
+    1.0.13
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
     Minimum permissions: PowerShell 7+, RSAT ActiveDirectory module, and read access to the AD forest/domains. Remote DC admin checks require explicit T0/admin rights only when -EnableRemoteDcAdminChecks is used.
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
+    Minimum permissions: read access to the AD forest/domains through Get-ADForest, Get-ADDomain, Get-ADDomainController, Get-ADReplication* and related read-only AD cmdlets.
+    Optional: -EnableRemoteDcAdminChecks requires explicit tier-0/admin rights for remote DC service, event, disk and AD database checks.
+    Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 #>
 #requires -Version 7.0
 #requires -Modules ActiveDirectory
@@ -48,7 +55,7 @@ $RunId = [guid]::NewGuid().ToString()
 $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.12'
+$ScriptVersion = '1.0.13'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -356,9 +363,11 @@ try{
     $st=if($oldest -gt $tomb){'Critical'}elseif($oldest -gt ($tomb*.8)){'Warning'}else{'OK'};Add-Row $forestName $forest.RootDomain '' Tombstone OldestReplicationFailureAgeDays $st ([math]::Round($oldest,2)) "TombstoneLifetimeDays=$tomb" "Critical > $tomb days; Warning > 80 percent" 'Compared with forest tombstone lifetime' 0
     $stamp=(Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
     $all = Get-RowSnapshot
-    if($AppendHistory){$csv=$HistoryCsvPath;if(Test-Path $csv){$all|Export-Csv $csv -NoTypeInformation -Append -Encoding utf8BOM}else{$all|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}}else{$csv=Join-Path $OutputFolder "AD_HealthCheck_$stamp.csv";$all|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}
     if(-not (Test-Path -LiteralPath $LatestCsvFolderPath)){New-Item -Path $LatestCsvFolderPath -ItemType Directory -Force|Out-Null}
     $latestCsv=Join-Path $LatestCsvFolderPath 'AD_HealthCheck.csv'
+    if($AppendHistory){$csv=$HistoryCsvPath}else{$csv=Join-Path $OutputFolder "AD_HealthCheck_$stamp.csv"}
+    Assert-SmartM365CsvDataCompleteness -Data $all -TimestampedPath $csv -LatestPath $latestCsv
+    if($AppendHistory){if(Test-Path $csv){$all|Export-Csv $csv -NoTypeInformation -Append -Encoding utf8BOM}else{$all|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}}else{$all|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}
     $all|Export-Csv $latestCsv -NoTypeInformation -Encoding utf8BOM
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csv
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestCsv

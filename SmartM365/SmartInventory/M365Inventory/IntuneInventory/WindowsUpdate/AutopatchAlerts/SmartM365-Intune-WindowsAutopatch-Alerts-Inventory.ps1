@@ -44,12 +44,18 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.9
+1.10
 
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Minimum Graph application permissions: DeviceManagementConfiguration.Read.All; DeviceManagementManagedDevices.Read.All; DeviceManagementApps.Read.All.
+    Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-    Version : 1.9
+    Version : 1.10
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All, DeviceManagementApps.Read.All
 #>
 
@@ -296,7 +302,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')

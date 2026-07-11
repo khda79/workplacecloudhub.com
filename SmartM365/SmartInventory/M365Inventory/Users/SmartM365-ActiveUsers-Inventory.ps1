@@ -16,13 +16,19 @@
 
 .PARAMETER InteractiveAuth
     Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.2
+    Version : 1.3
 
 .VERSION
-1.3
+1.4
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Users.
+    Minimum Graph application permissions: User.Read.All; AuditLog.Read.All; Directory.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.2
+    Version : 1.3
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
     Minimum application permissions: User.Read.All, Directory.Read.All, AuditLog.Read.All
@@ -357,7 +363,7 @@ $csvPathLatest            = ""
 
 try {
     #region Initialization
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath

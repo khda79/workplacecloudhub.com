@@ -5,6 +5,7 @@ This document explains the permissions added by `Setup/SmartM365-Create-AppRegis
 ## Important Notes
 
 - The permissions below are Microsoft Graph **Application** permissions for the SmartM365 app registration.
+- Runtime scripts must not create or publish business CSV files when a required permission/module probe fails, when a mandatory source snapshot is missing, or when collected data is detected as incomplete. Diagnostic CSV files are allowed only in the timestamped run folder and must not replace DATA-LAST.
 - `Setup/SmartM365-Create-AppRegistration.ps1` runs only with interactive delegated authentication: an administrator signs in with the rights needed to create or update the app registration.
 - `Setup/SmartM365-Create-AppRegistration.ps1` is a special setup script. Its interactive setup rights are not the runtime privilege baseline for inventory scripts.
 - In multi-tenant mode, run the bootstrap separately per tenant with `-Tenant <TenantKey>`. App, certificate, SharePoint, mail, and Teams values remain in `Config/Tenants/<TenantKey>.local.json`, never in Git.
@@ -96,7 +97,11 @@ This scope is not a SmartM365 runtime application permission. It is requested fr
 | `Microsoft.Graph.Users` | User cmdlets such as `Get-MgUser` where scripts use typed Graph SDK cmdlets. | PSGallery |
 | `Microsoft.Graph.Groups` | Group cmdlets used by setup and group-oriented inventories when typed cmdlets are required. | PSGallery |
 | `Microsoft.Graph.Identity.DirectoryManagement` | Domains, organization, licensing, and Entra device cmdlets. | PSGallery |
+| `Microsoft.Graph.Sites` | SharePoint site/list/drive typed cmdlets when SPO inventory or setup paths use SDK cmdlets instead of raw Graph requests. | PSGallery |
+| `Microsoft.Graph.Teams` | Teams typed cmdlets and Teams setup/inventory fallback paths. | PSGallery |
 | `Microsoft.Graph.DeviceManagement*` | Intune device, app, enrollment, policy, script, and report inventories. | PSGallery |
+| `Microsoft.Graph.Beta.DeviceManagement` | Beta Intune and Endpoint Analytics cmdlets/endpoints used by inventories that target Graph beta. | PSGallery |
+| `Microsoft.Graph.Beta.Reports` | Beta report export helpers when Graph beta reporting cmdlets are used. | PSGallery |
 | `Microsoft.Graph.Reports` | Microsoft 365 usage report cmdlets/endpoints. | PSGallery |
 | `ExchangeOnlineManagement` | Exchange Online app-only and delegated PowerShell inventories. | PSGallery |
 | `PnP.PowerShell` | Optional SharePoint deep scan mode only; not required for the default SPO Graph inventory. | PSGallery |
@@ -161,3 +166,13 @@ Do not add `Teamwork.Migrate.All` for normal campaign messages. That permission 
 - Verify that all SharePoint uploads remain compatible with `Sites.Selected`; reintroduce `Files.ReadWrite.All` or `Sites.ReadWrite.All` only as a documented last resort.
 - Review later whether the Entra `Global Reader` role can be replaced with a more granular Exchange RBAC assignment once the exact needs of EXO scripts are stable.
 - If the Teams SharePoint site is not immediately available, rerun the bootstrap later: Teams site provisioning is asynchronous on the Microsoft 365 side.
+## CSV completeness and publication gate
+
+SmartInventory scripts must not publish a business CSV to DATA-LAST, SharePoint, or WeeklyHistory when the exported dataset is known to be incomplete. The shared SmartM365.Core CSV gate loads the default validation registry at script initialization and blocks publication when one of these conditions is detected:
+
+- a declared critical business field is missing from the CSV schema;
+- a declared critical business field is empty on any exported row;
+- an expected row count is declared and does not match the exported row count;
+- the dataset is empty while the validation rule does not explicitly allow an empty dataset.
+
+The validation registry currently covers the standard AD, Exchange on-premises, Exchange Online, Microsoft 365, Intune, SharePoint, Teams, Backup, SyncHealth, usage, licensing, Windows Update, and Power BI issue-generator CSV outputs. Scripts with custom direct CSV writers must call `Assert-SmartM365CsvDataCompleteness` before copying to DATA-LAST or uploading to SharePoint.

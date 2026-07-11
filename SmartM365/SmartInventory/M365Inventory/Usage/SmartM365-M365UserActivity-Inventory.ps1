@@ -8,8 +8,14 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.3
+1.4
 
+
+.REQUIREMENTS
+    PowerShell 7+.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
+    Minimum Graph application permissions: Reports.Read.All.
+    Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
 Requires: PowerShell 7+, Microsoft.Graph.Reports, SmartM365.Core.psd1
@@ -31,7 +37,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.3'
+$ScriptVersion = '1.4'
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {

@@ -13,12 +13,12 @@ SmartM365 - Windows 11 Readiness export from Intune Endpoint Analytics (Work fro
     - Fatal error HTML email (on failure)
     - Optional success/summary HTML email with KPI tables
 
-REQUIREMENTS
+.REQUIREMENTS
 - PowerShell 7+
 - MSAL.PS module
 - App-only certificate authentication for Graph
 - SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1) [if SharePoint upload enabled]
-- Graph app permissions: DeviceManagementManagedDevices.Read.All
+- Graph app permissions: DeviceManagementManagedDevices.Read.All (validated before CSV export)
 
 PARAMETERS
   -DryRun             : Run all API calls and processing; skip file writes and emails
@@ -38,7 +38,7 @@ Logs (timestamped, keep 10):
 {{DataAllRootPath}}\Intune\WindowsUpdate\Win11Readiness\Logs\SmartM365-Win11-Readiness-From-Intune-yyyyMMdd_HHmmss.log
 
 .VERSION
-1.2
+1.4
 #>
 
 param(
@@ -53,7 +53,7 @@ param(
 # ==========================================================
 # SmartM365 - Version
 # ==========================================================
-$ScriptVersion = "1.2"
+$ScriptVersion = "1.4"
 
 # ==========================================================
 # SmartM365 - App-only authentication parameters
@@ -184,6 +184,7 @@ $SmartM365Root = Find-SmartM365Root
 . (Join-Path -Path $SmartM365Root -ChildPath 'Config\SmartM365-TenantContext.ps1')
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 Import-Module (Join-Path -Path $SmartM365Root -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1') -Force -ErrorAction Stop
+Initialize-SmartM365DefaultCsvValidationRules
 $ScriptLocalConfig = Get-SmartM365ScriptLocalConfig
 $AppId = Get-SmartM365ScriptConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue ''
 $TenantId = Get-SmartM365ScriptConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue ''
@@ -380,7 +381,7 @@ function Send-SummaryEmail {
         Write-Log "Summary email sent." "INFO" "MAIL"
     }
     catch {
-        Write-Log "Failed to send summary email: $($_.Exception.Message)" "WARN" "MAIL"
+        Write-Log "Failed to send summary email: $($_.Exception.Message)" "ERROR" "MAIL"; throw
     }
 }
 
@@ -687,6 +688,8 @@ try {
 
     Prune-Files -Folder $LogsPath -Filter "$ScriptName-*.log" -Keep 10
 
+    Invoke-SmartM365Preflight -ScriptName $ScriptName -RequiredModules @('MSAL.PS') -OutputPaths @($BasePath,$ArchivePath,$LogsPath,$DataLastPath) | Out-Null
+
     # ----------------------------------------------------------
     # SmartM365.Core is imported during tenant/config initialization.
     # Legacy SharePoint upload remains disabled; SmartM365 upload runs after CSV export.
@@ -722,6 +725,12 @@ try {
     Write-Log "Access token acquired at $($script:TokenAcquiredAt.ToString('HH:mm:ss'))." "INFO" "AUTH"
 
     $headers = @{ Authorization = "Bearer $token" }
+
+    Invoke-SmartM365Preflight `
+        -ScriptName $ScriptName `
+        -RequiredGraphApplicationPermissions @('DeviceManagementManagedDevices.Read.All') `
+        -GraphAccessToken $token `
+        -GraphProbeUris @("https://graph.microsoft.com/beta/deviceManagement/userExperienceAnalyticsWorkFromAnywhereMetrics('allDevices')/metricDevices?`$top=1") | Out-Null
 
     # ----------------------------------------------------------
     # Graph query
@@ -958,12 +967,3 @@ catch {
 finally {
     Cleanup-TempFiles
 }
-
-
-
-
-
-
-
-
-

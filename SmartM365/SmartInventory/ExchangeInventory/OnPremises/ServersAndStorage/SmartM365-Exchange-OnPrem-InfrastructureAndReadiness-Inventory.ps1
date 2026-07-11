@@ -22,11 +22,17 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.5.2
+    1.5.4
 
+
+.REQUIREMENTS
+    Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
+    Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
+    Minimum permissions: Exchange on-premises read access for Get-ExchangeServer and virtual directory/readiness cmdlets; WMI/DCOM read access to target servers for compute, disk and storage inventory.
+    Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.5.2
+    Version     : 1.5.4
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -37,7 +43,7 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
-    1.5.2
+    1.5.3
       - Stops attaching the HTML report when it is already used as the email body.
       - Uses Outlook-friendly inline/table layout for the report header and KPI cards.
 
@@ -147,7 +153,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.5.2"
+$ScriptVersion = "1.5.4"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1638,7 +1644,10 @@ try {
     }
     Write-Log "Collection method: WMI/DCOM only"
 
+    Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LogFolder) | Out-Null
+
     Test-ExchangeShell
+    Invoke-SmartM365Preflight -ScriptName $ScriptName -RequireExchangeOnPrem | Out-Null
 
     Write-Log "Collecting Exchange servers."
     $exchangeServers = @(Get-ExchangeServer | Sort-Object Name)
