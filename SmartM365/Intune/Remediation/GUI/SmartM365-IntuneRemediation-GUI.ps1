@@ -798,10 +798,8 @@ function Initialize-GuiConfigurationFromTemplate {
         'Created Intune Remediation GUI local JSON from template.',
         "Local JSON: $script:ConfigPath",
         "Template: $templatePath",
-        'Edit the local JSON now if needed. When ready, press Enter to continue.',
-        'If you press Enter without editing, the GUI continues with the default template values.'
+        'Review the generated local JSON values; continuing with default template values unless edited before next run.'
     )) -join [Environment]::NewLine) -ForegroundColor Yellow
-    Read-Host 'Press Enter to continue' | Out-Null
     return $true
 }
 
