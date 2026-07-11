@@ -10,8 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.52
-
+    0.1.53
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -36,6 +35,7 @@ param(
     [switch]$RetryAfterRebootTaskRun,
     [ValidateRange(1, 30)][int]$RetryAfterRebootMaxAttempts = 3,
     [ValidateRange(0, 3600)][int]$RetryAfterRebootDelaySeconds = 300,
+    [ValidateRange(0, 3650)][int]$ForceRequiredRebootWhenUptimeOverDays = 7,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
     [switch]$AllowAdvancedDiskCleanup,
@@ -81,7 +81,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.52'
+$script:ScriptVersion = '0.1.53'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -339,6 +339,75 @@ function Get-OsSummary {
     }
 }
 
+function Get-DeviceUptimeSummary {
+    param($LastBootUpTime)
+
+    $lastBoot = $null
+    if ($LastBootUpTime -is [datetime]) {
+        $lastBoot = [datetime]$LastBootUpTime
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace([string]$LastBootUpTime)) {
+        try { $lastBoot = [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$LastBootUpTime) } catch { $lastBoot = $null }
+    }
+
+    if (-not $lastBoot) {
+        return [pscustomobject]@{
+            DetectionSucceeded = $false
+            LastBootUpTime = ''
+            UptimeDays = ''
+            UptimeHours = ''
+            ThresholdDays = $ForceRequiredRebootWhenUptimeOverDays
+            ThresholdExceeded = $false
+            Detail = 'LastBootUpTime could not be determined.'
+        }
+    }
+
+    $uptime = (Get-Date) - $lastBoot
+    $uptimeDays = [math]::Round([double]$uptime.TotalDays, 2)
+    $uptimeHours = [math]::Round([double]$uptime.TotalHours, 1)
+    $thresholdExceeded = ($ForceRequiredRebootWhenUptimeOverDays -gt 0 -and $uptime.TotalDays -ge $ForceRequiredRebootWhenUptimeOverDays)
+
+    return [pscustomobject]@{
+        DetectionSucceeded = $true
+        LastBootUpTime = $lastBoot.ToString('yyyy-MM-dd HH:mm:ss')
+        UptimeDays = $uptimeDays
+        UptimeHours = $uptimeHours
+        ThresholdDays = $ForceRequiredRebootWhenUptimeOverDays
+        ThresholdExceeded = $thresholdExceeded
+        Detail = ("LastBootUpTime={0}; UptimeDays={1}; UptimeHours={2}; ForceRequiredRebootWhenUptimeOverDays={3}; ThresholdExceeded={4}" -f $lastBoot.ToString('yyyy-MM-dd HH:mm:ss'),$uptimeDays,$uptimeHours,$ForceRequiredRebootWhenUptimeOverDays,$thresholdExceeded)
+    }
+}
+
+function Test-RequiredRebootForceByUptime {
+    if ($ForceRequiredRebootWhenUptimeOverDays -le 0) { return $false }
+    if (-not $AllowReboot -or $AuditOnly) { return $false }
+    if ($null -eq $script:DeviceUptimeSummary) { return $false }
+    if (-not $script:DeviceUptimeSummary.DetectionSucceeded) { return $false }
+    return [bool]$script:DeviceUptimeSummary.ThresholdExceeded
+}
+
+function Invoke-RequiredRebootForcedByUptime {
+    param(
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [Parameter(Mandatory = $true)][ValidateSet('PendingReboot','SetupCompletion')][string]$Context
+    )
+
+    if (-not (Test-RequiredRebootForceByUptime)) { return 'NotApplicable' }
+
+    try {
+        shutdown.exe /r /t $RebootDelaySeconds /c $Reason | Out-Null
+        $script:RequiredRebootByUptimeAction = ("{0}Forced" -f $Context)
+        $script:RequiredRebootByUptimeDetail = ("Required reboot forced because uptime is {0} day(s), threshold is {1} day(s). Reboot scheduled in {2} second(s). Reason={3}" -f $script:DeviceUptimeSummary.UptimeDays,$ForceRequiredRebootWhenUptimeOverDays,$RebootDelaySeconds,$Reason)
+        Write-SmartLog $script:RequiredRebootByUptimeDetail 'WARN'
+        return 'ForcedByUptime'
+    }
+    catch {
+        $script:RequiredRebootByUptimeAction = ("{0}ForceFailed" -f $Context)
+        $script:RequiredRebootByUptimeDetail = ("Required reboot force failed: {0}" -f $_.Exception.Message)
+        Write-SmartLog $script:RequiredRebootByUptimeDetail 'ERROR'
+        return 'ScheduleFailed'
+    }
+}
 function Get-ComputerSystemSummary {
     $system = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
     $manufacturer = [string]$system.Manufacturer
@@ -3087,6 +3156,13 @@ function Send-UserRebootNotification {
 function Invoke-ControlledRebootWhenNoUser {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
+    $forcedRebootResult = Invoke-RequiredRebootForcedByUptime -Reason $Reason -Context PendingReboot
+    if ($forcedRebootResult -ne 'NotApplicable') {
+        $script:ControlledRebootAction = if ($forcedRebootResult -eq 'ForcedByUptime') { 'ForcedByUptime' } else { 'ScheduleFailed' }
+        $script:ControlledRebootDetail = $script:RequiredRebootByUptimeDetail
+        return $forcedRebootResult
+    }
+
     $summary = Get-InteractiveUserSessionSummary
     $script:ControlledRebootUserCount = [string]$summary.InteractiveUserCount
     $script:ControlledRebootUsers = [string]$summary.InteractiveUsers
@@ -3121,6 +3197,14 @@ function Invoke-ControlledRebootWhenNoUser {
 }
 function Invoke-SetupCompletionRebootWhenNoUser {
     if (-not $AllowSetupCompletionRebootWhenNoUser) { return 'NotRequested' }
+    if (-not $AllowReboot) { return 'NotAllowed' }
+
+    $forcedRebootResult = Invoke-RequiredRebootForcedByUptime -Reason 'SmartM365 Windows 11 setup completion reboot - uptime threshold exceeded' -Context SetupCompletion
+    if ($forcedRebootResult -ne 'NotApplicable') {
+        $script:SetupCompletionRebootAction = if ($forcedRebootResult -eq 'ForcedByUptime') { 'ForcedByUptime' } else { 'ScheduleFailed' }
+        $script:SetupCompletionRebootDetail = $script:RequiredRebootByUptimeDetail
+        return $forcedRebootResult
+    }
 
     $summary = Get-InteractiveUserSessionSummary
     $script:SetupCompletionRebootUserCount = [string]$summary.InteractiveUserCount
@@ -3174,6 +3258,9 @@ function Resolve-SetupUpgradeSuccessOutcome {
         'ScheduledNoUser' {
             return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SCHEDULED_NO_USER"; NextAction = 'REBOOT_SCHEDULED'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootScheduledNoUser' }
         }
+        'ForcedByUptime' {
+            return [pscustomobject]@{ Status = "${Prefix}_SUCCESS_FORCE_REBOOT_UPTIME_EXCEEDED"; NextAction = 'REBOOT_TRIGGERED_WAIT_NEXT_CYCLE'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootForcedByUptime' }
+        }
         'UserConnected' {
             return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SKIPPED_USER_CONNECTED"; NextAction = 'WAIT_USER_LOGOFF_OR_REBOOT_DEVICE'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootSkippedUserConnected' }
         }
@@ -3182,6 +3269,9 @@ function Resolve-SetupUpgradeSuccessOutcome {
         }
         'ScheduleFailed' {
             return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SCHEDULE_FAILED"; NextAction = 'CHECK_REBOOT_SCHEDULE'; ExitCode = 1; ActionResultSuffix = 'SetupCompletionRebootScheduleFailed' }
+        }
+        'NotAllowed' {
+            return [pscustomobject]@{ Status = $baseStatus; NextAction = $baseNextAction; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootNotAllowed' }
         }
         default {
             return [pscustomobject]@{ Status = $baseStatus; NextAction = $baseNextAction; ExitCode = 0; ActionResultSuffix = $suffix }
@@ -3215,6 +3305,13 @@ function Resolve-PendingRebootOutcome {
                 $outcome.NextAction = 'WAIT_USER_LOGOFF_OR_REBOOT_DEVICE'
                 $outcome.ActionResult = 'RebootSkippedUserConnected'
                 $outcome.ExitCode = 0
+            }
+            'ForcedByUptime' {
+                $outcome.Status = 'PENDING_REBOOT_FORCE_REBOOT_UPTIME_EXCEEDED'
+                $outcome.NextAction = 'REBOOT_TRIGGERED_WAIT_NEXT_CYCLE'
+                $outcome.ActionResult = 'RebootForcedByUptime'
+                $outcome.ExitCode = 0
+                $outcome.Detail = ("{0}; {1}" -f $outcome.Detail,$script:RequiredRebootByUptimeDetail)
             }
             'UserDetectionFailed' {
                 $outcome.Status = 'PENDING_REBOOT_USER_DETECTION_FAILED'
@@ -3320,6 +3417,7 @@ function New-RetryAfterRebootArgumentList {
         RunGuardHours = $RunGuardHours
         RetryAfterRebootMaxAttempts = $RetryAfterRebootMaxAttempts
         RetryAfterRebootDelaySeconds = $RetryAfterRebootDelaySeconds
+        ForceRequiredRebootWhenUptimeOverDays = $ForceRequiredRebootWhenUptimeOverDays
         SetupSourcePath = $SetupSourcePath
         SetupSourceMapPath = $SetupSourceMapPath
         SetupExecutionMode = $SetupExecutionMode
@@ -3900,6 +3998,8 @@ $script:RetryAfterRebootDetail = ''
 $script:RetryAfterRebootAttempt = ''
 $script:RetryAfterRebootMaxAttemptsResult = ''
 $script:RetryAfterRebootTaskNameResult = ''
+$script:RequiredRebootByUptimeAction = ''
+$script:RequiredRebootByUptimeDetail = ''
 $script:UserRebootNotificationSent = ''
 $script:UserRebootNotificationLang = ''
 $script:UserRebootNotificationMessage = ''
@@ -3982,9 +4082,12 @@ try {
 
     $os = Get-OsSummary
     Write-SmartLog ("Startup OS before upgrade: ComputerName={0}; LocalIPv4={1}; Caption={2}; Version={3}; Build={4}; Architecture={5}; Family={6}" -f $script:ComputerName,$script:LocalIPv4Addresses,$os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
+    $script:DeviceUptimeSummary = Get-DeviceUptimeSummary -LastBootUpTime $os.LastBootUpTime
+    Write-SmartLog ("Startup uptime before upgrade: {0}" -f $script:DeviceUptimeSummary.Detail)
     $freeGb = Get-SystemDriveFreeGb
     $pendingRebootInfo = Test-PendingReboot
     $pendingReboot = $pendingRebootInfo.IsPending
+    Write-SmartLog ("Startup reboot requirement before upgrade: PendingReboot={0}; Source(s)={1}; ForceRequiredRebootWhenUptimeOverDays={2}; UptimeThresholdExceeded={3}" -f $pendingReboot,$pendingRebootInfo.Source,$ForceRequiredRebootWhenUptimeOverDays,$script:DeviceUptimeSummary.ThresholdExceeded)
     if ($pendingReboot) {
         Write-SmartLog ("Pending reboot detected before upgrade. Source(s)={0}" -f $pendingRebootInfo.Source) 'WARN'
     }
@@ -4339,6 +4442,11 @@ finally {
         SetupCompletionRebootDetail = $script:SetupCompletionRebootDetail
         SetupCompletionRebootUserCount = $script:SetupCompletionRebootUserCount
         SetupCompletionRebootUsers = $script:SetupCompletionRebootUsers
+        RequiredRebootByUptimeAction = $script:RequiredRebootByUptimeAction
+        RequiredRebootByUptimeDetail = $script:RequiredRebootByUptimeDetail
+        LastBootUpTime = if ($script:DeviceUptimeSummary) { $script:DeviceUptimeSummary.LastBootUpTime } else { '' }
+        UptimeDays = if ($script:DeviceUptimeSummary) { $script:DeviceUptimeSummary.UptimeDays } else { '' }
+        ForceRequiredRebootWhenUptimeOverDays = $ForceRequiredRebootWhenUptimeOverDays
         ControlledRebootAction = $script:ControlledRebootAction
         ControlledRebootDetail = $script:ControlledRebootDetail
         ControlledRebootUserCount = $script:ControlledRebootUserCount

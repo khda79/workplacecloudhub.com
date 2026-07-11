@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.30
+0.1.31
 #>
 param(
     [switch]$ValidateOnly
@@ -687,7 +687,8 @@ function Start-ToolkitSingleComputer {
         @{ Name = 'W11UT_PSEXEC_TIMEOUT_MINUTES'; Argument = '-PsExecTimeoutMinutes' },
         @{ Name = 'W11UT_RUN_GUARD_HOURS'; Argument = '-RunGuardHours' },
         @{ Name = 'W11UT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS'; Argument = '-RetryAfterRebootMaxAttempts' },
-        @{ Name = 'W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS'; Argument = '-RetryAfterRebootDelaySeconds' }
+        @{ Name = 'W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS'; Argument = '-RetryAfterRebootDelaySeconds' },
+        @{ Name = 'W11UT_FORCE_REQUIRED_REBOOT_WHEN_UPTIME_OVER_DAYS'; Argument = '-ForceRequiredRebootWhenUptimeOverDays' }
     )) {
         $value = [string]$EnvironmentVariables[$pair.Name]
         if (-not [string]::IsNullOrWhiteSpace($value)) {
@@ -797,6 +798,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_SCHEDULE_RETRY_AFTER_REBOOT = '1'
     W11UT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS = '3'
     W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS = '300'
+    W11UT_FORCE_REQUIRED_REBOOT_WHEN_UPTIME_OVER_DAYS = '7'
     W11UT_SETUP_REBOOT_WHEN_NO_USER = '1'
     W11UT_ALLOW_SETUP_PROFILE_REPAIR = '1'
     W11UT_SKIP_VIRTUAL_MACHINES = '1'
@@ -1153,6 +1155,17 @@ $xaml = @'
                                     <CheckBox x:Name="UseTechRunGuardHistoryCheck" Content="Use technician run guard history"/>
                                     <CheckBox x:Name="IgnoreTechRunGuardHistoryCheck" Content="Ignore technician run guard history"/>
                                 </WrapPanel>
+                                <TextBlock Text="Force required reboot after uptime days" Margin="0,18,0,0"/>
+                                <Grid Margin="0,4,0,10" Width="220" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="32"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="32"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="ForceRequiredRebootDaysDownButton" Grid.Column="0" Content="-" Style="{StaticResource StepperButtonStyle}"/>
+                                    <TextBox x:Name="ForceRequiredRebootDaysText" Grid.Column="1" Style="{StaticResource NumericTextBoxStyle}"/>
+                                    <Button x:Name="ForceRequiredRebootDaysUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
+                                </Grid>
                                 <TextBlock Text="Setup source" Margin="0,18,0,0"/>
                                 <TextBox x:Name="SetupSourceText"/>
                                 <TextBlock Text="Setup source map"/>
@@ -1356,7 +1369,8 @@ $controls = @{}
     'OpenSingleRunFolderButton','NewLotNameText','CreateLotButton','NewLotComputersPathText',
     'OpenNewLotComputersButton','DryRunCheck','AuditOnlyCheck','AllowPolicyRepairCheck',
     'AllowWUResetCheck','AllowForceUpgradeCheck','AllowSetupUpgradeCheck','AllowRebootCheck',
-    'ScheduleRetryAfterRebootCheck','SetupCompletionRebootCheck','AllowSetupProfileRepairCheck',
+    'ScheduleRetryAfterRebootCheck','SetupCompletionRebootCheck','ForceRequiredRebootDaysText',
+    'ForceRequiredRebootDaysDownButton','ForceRequiredRebootDaysUpButton','AllowSetupProfileRepairCheck',
     'DirectSetupUpgradeCheck','SkipVirtualMachinesCheck','SkipSetupPreCopyCheck',
     'AllowDiskCleanupCheck','AllowAdvancedCleanupCheck','KeepCentralHistoryCheck',
     'NoCentralCollectionCheck','UseTechRunGuardHistoryCheck','IgnoreTechRunGuardHistoryCheck','SetupSourceText','SetupSourceMapText','SetupModeCombo',
@@ -1535,6 +1549,7 @@ function Register-NumericStepper {
 
 function Register-NumericSteppers {
     Register-NumericStepper -TextBoxName 'GlobalLimitText' -DownButtonName 'GlobalLimitDownButton' -UpButtonName 'GlobalLimitUpButton' -Default 15 -Minimum 1
+    Register-NumericStepper -TextBoxName 'ForceRequiredRebootDaysText' -DownButtonName 'ForceRequiredRebootDaysDownButton' -UpButtonName 'ForceRequiredRebootDaysUpButton' -Default 7 -Minimum 0
     Register-NumericStepper -TextBoxName 'SetupCandidateLimitText' -DownButtonName 'SetupCandidateLimitDownButton' -UpButtonName 'SetupCandidateLimitUpButton' -Default 5 -Minimum 0
     Register-NumericStepper -TextBoxName 'SetupCopyIpgText' -DownButtonName 'SetupCopyIpgDownButton' -UpButtonName 'SetupCopyIpgUpButton' -Default 20 -Minimum 0 -Step 5
     Register-NumericStepper -TextBoxName 'SetupCopyJitterText' -DownButtonName 'SetupCopyJitterDownButton' -UpButtonName 'SetupCopyJitterUpButton' -Default 300 -Minimum 0 -Step 30
@@ -1650,6 +1665,7 @@ function Initialize-Options {
     $controls.AllowRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_REBOOT') -ne '0')
     $controls.ScheduleRetryAfterRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SCHEDULE_RETRY_AFTER_REBOOT') -ne '0')
     $controls.SetupCompletionRebootCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SETUP_REBOOT_WHEN_NO_USER') -ne '0')
+    $controls.ForceRequiredRebootDaysText.Text = Get-ConfiguredValue 'W11UT_FORCE_REQUIRED_REBOOT_WHEN_UPTIME_OVER_DAYS'
     $controls.AllowSetupProfileRepairCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_ALLOW_SETUP_PROFILE_REPAIR') -ne '0')
     $controls.DirectSetupUpgradeCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_DIRECT_SETUP_UPGRADE') -eq '1')
     $controls.SkipVirtualMachinesCheck.IsChecked = ((Get-ConfiguredValue 'W11UT_SKIP_VIRTUAL_MACHINES') -eq '1')
@@ -1797,6 +1813,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_SCHEDULE_RETRY_AFTER_REBOOT       = Get-BooleanText -CheckBox $controls.ScheduleRetryAfterRebootCheck
         W11UT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS   = Get-ConfiguredValue 'W11UT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS'
         W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS  = Get-ConfiguredValue 'W11UT_RETRY_AFTER_REBOOT_DELAY_SECONDS'
+        W11UT_FORCE_REQUIRED_REBOOT_WHEN_UPTIME_OVER_DAYS = Get-IntText -TextBox $controls.ForceRequiredRebootDaysText -Default 7 -Minimum 0
         W11UT_SETUP_REBOOT_WHEN_NO_USER                = Get-BooleanText -CheckBox $controls.SetupCompletionRebootCheck
         W11UT_ALLOW_SETUP_PROFILE_REPAIR               = Get-BooleanText -CheckBox $controls.AllowSetupProfileRepairCheck
         W11UT_SKIP_VIRTUAL_MACHINES                    = Get-BooleanText -CheckBox $controls.SkipVirtualMachinesCheck
