@@ -1,5 +1,4 @@
 #Requires -Version 5.1
-#Requires -RunAsAdministrator
 
 <#
 .SYNOPSIS
@@ -9,7 +8,8 @@ Installs or removes the SmartM365 Inventory Orchestrator scheduled task.
 Registers an unattended scheduled task that runs the SmartM365 Inventory Orchestrator
 directly with PowerShell 7 under a dedicated service account. The service-account
 password is requested through Get-Credential and is never accepted as a command-line
-parameter.
+parameter. When launched without parameters, the script requests elevation and guides the
+user through tenant, action, service-account, and immediate-start choices.
 
 The task starts five minutes after server startup. A daily trigger at midnight repeats
 every 30 minutes for one day so the orchestrator is restarted after its normal lifetime
@@ -32,6 +32,9 @@ Starts the task immediately after successful registration.
 .PARAMETER Uninstall
 Removes the scheduled task instead of installing it. No credential is requested.
 
+.PARAMETER Interactive
+Forces the guided interactive workflow. This is used by the CMD launcher.
+
 .EXAMPLE
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -ServiceAccount 'CONTOSO\svc-smartm365' -StartNow
 
@@ -39,10 +42,10 @@ Removes the scheduled task instead of installing it. No credential is requested.
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -Uninstall
 
 .VERSION
-1.0.0
+1.1.0
 
 .REQUIREMENTS
-    Windows PowerShell 5.1 or PowerShell 7 running as administrator.
+    Windows PowerShell 5.1 or PowerShell 7. The script requests UAC elevation when needed.
     PowerShell 7 installed on the local computer.
     A dedicated service account with access to the repository, tenant configuration,
     certificates, data roots, and log roots required by the orchestrated jobs.
@@ -55,7 +58,8 @@ param(
     [string]$ServiceAccount = '',
     [string]$TaskName = '',
     [switch]$StartNow,
-    [switch]$Uninstall
+    [switch]$Uninstall,
+    [switch]$Interactive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,7 +73,7 @@ $tenantContextPath = Join-Path $smartM365Root 'Config\SmartM365-TenantContext.ps
 
 function Write-InstallerMessage {
     param([Parameter(Mandatory = $true)][string]$Message)
-    Write-Output ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message)
+    Microsoft.PowerShell.Utility\Write-Host ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message)
 }
 
 function Test-IsAdministrator {
@@ -98,10 +102,6 @@ function Get-PowerShell7Path {
     if (-not [string]::IsNullOrWhiteSpace($programFilesX86)) {
         $candidates.Add((Join-Path $programFilesX86 'PowerShell\7\pwsh.exe'))
     }
-    $pathCommand = Get-Command pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -ne $pathCommand -and -not [string]::IsNullOrWhiteSpace($pathCommand.Source)) {
-        $candidates.Add($pathCommand.Source)
-    }
     foreach ($candidate in $candidates) {
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
             continue
@@ -120,9 +120,135 @@ function ConvertTo-QuotedArgument {
     return ('"{0}"' -f ($Value -replace '"', '\"'))
 }
 
-if (-not (Test-IsAdministrator)) {
-    throw 'Administrator rights are required to install or remove the scheduled task.'
+function Read-InstallerChoice {
+    param(
+        [Parameter(Mandatory = $true)][string]$Prompt,
+        [Parameter(Mandatory = $true)][string[]]$AllowedValues
+    )
+
+    while ($true) {
+        $value = Read-Host ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Prompt)
+        if ($value -in $AllowedValues) {
+            return $value
+        }
+        Write-InstallerMessage ('Invalid choice. Allowed values: {0}' -f ($AllowedValues -join ', '))
+    }
 }
+
+function Read-InstallerYesNo {
+    param([Parameter(Mandatory = $true)][string]$Prompt)
+
+    while ($true) {
+        $value = Read-Host ('[{0}] {1} [Y/N]' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Prompt)
+        switch ($value.Trim().ToLowerInvariant()) {
+            'y' { return $true }
+            'yes' { return $true }
+            'n' { return $false }
+            'no' { return $false }
+            default { Write-InstallerMessage 'Invalid choice. Enter Y or N.' }
+        }
+    }
+}
+
+function Wait-InteractiveClose {
+    if ($script:InteractiveMode) {
+        [void](Read-Host ('[{0}] Press Enter to close' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')))
+    }
+}
+
+$script:InteractiveMode = $Interactive -or $PSBoundParameters.Count -eq 0
+
+trap {
+    Write-InstallerMessage ('ERROR: {0}' -f $_.Exception.Message)
+    Wait-InteractiveClose
+    exit 1
+}
+
+if (-not (Test-IsAdministrator)) {
+    $windowsPowerShellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $windowsPowerShellPath -PathType Leaf)) {
+        throw "Trusted Windows PowerShell executable not found: $windowsPowerShellPath"
+    }
+
+    foreach ($unsafeValue in @($ServiceAccount, $TaskName)) {
+        if (-not [string]::IsNullOrWhiteSpace($unsafeValue) -and $unsafeValue -match '[\r\n"]') {
+            throw 'ServiceAccount and TaskName must not contain quotes or line breaks.'
+        }
+    }
+
+    $elevationArguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        (ConvertTo-QuotedArgument -Value $MyInvocation.MyCommand.Path)
+    )
+
+    if ($script:InteractiveMode) {
+        $elevationArguments += '-Interactive'
+    }
+    else {
+        $elevationArguments += @('-Tenant', $Tenant)
+        if (-not [string]::IsNullOrWhiteSpace($ServiceAccount)) {
+            $elevationArguments += @('-ServiceAccount', (ConvertTo-QuotedArgument -Value $ServiceAccount))
+        }
+        if (-not [string]::IsNullOrWhiteSpace($TaskName)) {
+            $elevationArguments += @('-TaskName', (ConvertTo-QuotedArgument -Value $TaskName))
+        }
+        if ($StartNow) { $elevationArguments += '-StartNow' }
+        if ($Uninstall) { $elevationArguments += '-Uninstall' }
+        if ($WhatIfPreference) { $elevationArguments += '-WhatIf' }
+    }
+
+    Write-InstallerMessage 'Administrator rights are required. Requesting elevation through UAC.'
+    $elevationProcess = Start-Process -FilePath $windowsPowerShellPath `
+        -ArgumentList ($elevationArguments -join ' ') `
+        -WorkingDirectory $scriptDirectory `
+        -Verb RunAs `
+        -Wait `
+        -PassThru
+    exit $elevationProcess.ExitCode
+}
+
+if ($script:InteractiveMode) {
+    Write-InstallerMessage 'SmartM365 Inventory Orchestrator scheduled-task installer'
+    Write-InstallerMessage '1 - Install or update the scheduled task'
+    Write-InstallerMessage '2 - Uninstall the scheduled task'
+    $actionChoice = Read-InstallerChoice -Prompt 'Select an action [1-2]' -AllowedValues @('1', '2')
+    $Uninstall = $actionChoice -eq '2'
+
+    Write-InstallerMessage '1 - prod'
+    Write-InstallerMessage '2 - test'
+    $tenantChoice = Read-InstallerChoice -Prompt 'Select the tenant profile [1-2]' -AllowedValues @('1', '2')
+    $Tenant = if ($tenantChoice -eq '1') { 'prod' } else { 'test' }
+
+    if ($Uninstall) {
+        if (-not (Read-InstallerYesNo -Prompt "Remove SmartM365 Inventory Orchestrator - $Tenant?")) {
+            Write-InstallerMessage 'Uninstall cancelled.'
+            Wait-InteractiveClose
+            return
+        }
+        $StartNow = $false
+        $ServiceAccount = ''
+    }
+    else {
+        while ($true) {
+            $candidateAccount = Read-Host ('[{0}] Dedicated service account (DOMAIN\user or user@domain)' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+            if ([string]::IsNullOrWhiteSpace($candidateAccount)) {
+                Write-InstallerMessage 'The service account is required.'
+                continue
+            }
+            if ($candidateAccount -notmatch '^(?:[A-Za-z0-9._-]+\\[A-Za-z0-9._$+-]+|[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+)$') {
+                Write-InstallerMessage 'Invalid account format. Use DOMAIN\user or user@domain without spaces.'
+                continue
+            }
+            $ServiceAccount = $candidateAccount
+            break
+        }
+        $StartNow = Read-InstallerYesNo -Prompt 'Start the task immediately after installation?'
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($TaskName)) {
     $TaskName = "SmartM365 Inventory Orchestrator - $Tenant"
 }
@@ -137,24 +263,26 @@ if ($Uninstall) {
     $existingTask = Get-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($null -eq $existingTask) {
         Write-InstallerMessage "Scheduled task does not exist: $TaskName"
+        Wait-InteractiveClose
         return
     }
     if ($PSCmdlet.ShouldProcess("$taskPath$TaskName", 'Unregister scheduled task')) {
         Unregister-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -Confirm:$false
         Write-InstallerMessage "Scheduled task removed: $TaskName"
     }
+    Wait-InteractiveClose
     return
 }
 
 if ([string]::IsNullOrWhiteSpace($ServiceAccount)) {
     throw 'ServiceAccount is required when installing the scheduled task.'
 }
-$serviceAccountSid = Resolve-AccountSid -AccountName $ServiceAccount
 $normalizedServiceAccount = $ServiceAccount.Trim().ToLowerInvariant()
 $forbiddenServiceAccounts = @('system', 'localsystem', 'nt authority\system', 's-1-5-18')
 if ($normalizedServiceAccount -in $forbiddenServiceAccounts) {
     throw 'SYSTEM and LocalSystem are refused. Use a dedicated service account because the repository scripts may be modifiable outside the Administrators group.'
 }
+$serviceAccountSid = Resolve-AccountSid -AccountName $ServiceAccount
 if ($serviceAccountSid -eq 'S-1-5-18') {
     throw 'SYSTEM and LocalSystem are refused. Use a dedicated service account because the repository scripts may be modifiable outside the Administrators group.'
 }
@@ -215,6 +343,7 @@ $plainTextPassword = $null
 
 try {
     if (-not $PSCmdlet.ShouldProcess("$taskPath$TaskName", "Register scheduled task as $ServiceAccount")) {
+        Wait-InteractiveClose
         return
     }
     $credentialParameters = @{
@@ -261,3 +390,5 @@ finally {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer)
     }
 }
+
+Wait-InteractiveClose
