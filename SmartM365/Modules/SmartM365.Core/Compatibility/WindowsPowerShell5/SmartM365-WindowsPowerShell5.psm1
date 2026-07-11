@@ -288,6 +288,122 @@ function Invoke-SmartM365WeeklyInventoryHistoryForCsv {
     Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceFiles -HistoryRootPath $historyRootPath -RetentionWeeks $retentionWeeks
 }
 
+
+function Get-SmartM365MaxItemsValue {
+    [CmdletBinding()]
+    param()
+
+    foreach ($name in @('SmartM365MaxItems','SmartM365TestMaxItems','MaxItems')) {
+        $variable = Get-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue
+        if ($variable -and $null -ne $variable.Value) {
+            try {
+                $value = [int]$variable.Value
+                if ($value -gt 0) { return $value }
+            }
+            catch { }
+        }
+    }
+
+    return 0
+}
+
+function Test-SmartM365MaxItemsMode {
+    [CmdletBinding()]
+    param()
+
+    return ((Get-SmartM365MaxItemsValue) -gt 0)
+}
+
+function Get-SmartM365MaxItemsSuffix {
+    [CmdletBinding()]
+    param()
+
+    $maxItems = Get-SmartM365MaxItemsValue
+    if ($maxItems -le 0) { return '' }
+    return ('_MAXITEMS-{0}' -f $maxItems)
+}
+
+function Set-SmartM365MaxItemsMode {
+    [CmdletBinding()]
+    param([int]$MaxItems)
+
+    if ($MaxItems -gt 0) {
+        $global:SmartM365MaxItems = $MaxItems
+        $global:SmartM365TestMaxItems = $MaxItems
+        $global:SmartM365IsMaxItemsRun = $true
+        WriteLog -Message ("MaxItems test mode active: only a bounded dataset should be collected/exported. Power BI DATA-LAST and WeeklyHistory standard publication must not be updated by this run. MaxItems={0}" -f $MaxItems) -Level 'WARNING'
+    }
+}
+
+function Add-SmartM365MaxItemsSuffixToCsvPath {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Path)
+
+    $suffix = Get-SmartM365MaxItemsSuffix
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($suffix)) { return $Path }
+
+    $folder = Split-Path -Path $Path -Parent
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    $extension = [System.IO.Path]::GetExtension($Path)
+    if ($name -match [regex]::Escape($suffix)) { return $Path }
+    if ([string]::IsNullOrWhiteSpace($folder)) { return ("{0}{1}{2}" -f $name, $suffix, $extension) }
+    return (Join-Path -Path $folder -ChildPath ("{0}{1}{2}" -f $name, $suffix, $extension))
+}
+
+function Add-SmartM365MaxItemsSuffixToBaseName {
+    [CmdletBinding()]
+    param([string]$BaseFileName)
+
+    $suffix = Get-SmartM365MaxItemsSuffix
+    if ([string]::IsNullOrWhiteSpace($BaseFileName) -or [string]::IsNullOrWhiteSpace($suffix)) { return $BaseFileName }
+    if ($BaseFileName -match [regex]::Escape($suffix)) { return $BaseFileName }
+    return ("{0}{1}" -f $BaseFileName, $suffix)
+}
+
+function Add-SmartM365MaxItemsMailBanner {
+    [CmdletBinding()]
+    param([AllowNull()][string]$BodyHtml)
+
+    $maxItems = Get-SmartM365MaxItemsValue
+    if ($maxItems -le 0) { return $BodyHtml }
+    if ($BodyHtml -match 'SmartM365MaxItemsBanner') { return $BodyHtml }
+
+    $banner = @"
+<div class="SmartM365MaxItemsBanner" style="margin:12px 0;padding:12px 14px;border:1px solid #f59e0b;border-left:6px solid #d97706;background:#fffbeb;color:#92400e;font-family:Segoe UI,Arial,sans-serif;font-size:13px;line-height:19px;">
+  <strong>TEST RUN - MaxItems=$maxItems.</strong> This email and the generated CSV files come from a bounded SmartM365 test run. CSV names include <code>MAXITEMS-$maxItems</code> and must not be used by Power BI production datasets.
+</div>
+"@
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { return $banner }
+    if ($BodyHtml -match '(?is)<body\b[^>]*>') {
+        return ([regex]::Replace($BodyHtml, '(?is)(<body\b[^>]*>)', ('$1' + "`n" + $banner), 1))
+    }
+    return ($banner + "`n" + [string]$BodyHtml)
+}
+
+function Add-SmartM365MaxItemsSubjectPrefix {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Subject)
+
+    $maxItems = Get-SmartM365MaxItemsValue
+    if ($maxItems -le 0) { return $Subject }
+    $prefix = "[MAXITEMS-$maxItems TEST]"
+    if ([string]::IsNullOrWhiteSpace($Subject)) { return $prefix }
+    if ($Subject -like "*MAXITEMS-$maxItems*") { return $Subject }
+    return ("{0} {1}" -f $prefix, $Subject)
+}
+
+function Limit-SmartM365RowsForMaxItems {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Data)
+
+    $maxItems = Get-SmartM365MaxItemsValue
+    if ($maxItems -le 0 -or $null -eq $Data) { return @($Data) }
+    $rows = @($Data)
+    if ($rows.Count -le $maxItems) { return $rows }
+    WriteLog -Message ("MaxItems={0}: limiting exported CSV rows from {1} to {0}." -f $maxItems, $rows.Count) -Level 'WARNING'
+    return @($rows | Select-Object -First $maxItems)
+}
 function Format-SmartM365LogLine {
     param(
         [AllowEmptyString()][string]$Message,
@@ -1740,6 +1856,9 @@ function SendEmailHtmlReport {
         }
 
         # Recipients
+        $Subject = Add-SmartM365MaxItemsSubjectPrefix -Subject $Subject
+        $BodyHtml = Add-SmartM365MaxItemsMailBanner -BodyHtml $BodyHtml
+
         $toArray = ConvertToRecipientArray -Recipients $To
         $ccArray = if ($Cc) { ConvertToRecipientArray -Recipients $Cc } else { @() }
 
@@ -2237,6 +2356,14 @@ function InitializeScriptEnvironment {
 
     $global:LogTextFile = Join-Path $global:LogPath "$LogFileName-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
     $global:logTranscriptFile = Join-Path $global:LogPath "$LogFileName-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss')_Transcript.log"
+
+    try {
+        $callerMaxItemsVariable = Get-Variable -Name MaxItems -Scope 1 -ErrorAction SilentlyContinue
+        if ($callerMaxItemsVariable -and $null -ne $callerMaxItemsVariable.Value -and [int]$callerMaxItemsVariable.Value -gt 0) {
+            Set-SmartM365MaxItemsMode -MaxItems ([int]$callerMaxItemsVariable.Value)
+        }
+    }
+    catch { }
     if ($global:RetentionMaxLogs -gt 0) {
         RemoveOldFiles -FolderPath $global:LogPath -FilePattern "$LogFileName*.log" -MaxFiles $global:RetentionMaxLogs
     }
@@ -2274,9 +2401,14 @@ function ExportAndCopyCsv {
     )
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $global:csvFilePath1 = Join-Path $OutputPath "$BaseFileName`_$timestamp.csv"
-    $global:csvFilePath2 = Join-Path $OutputPath "$BaseFileName.csv"
-    $global:csvFilePath3 = Join-Path $GlobalPath "$BaseFileName.csv"
+    $runBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileName
+    $global:csvFilePath1 = Join-Path $OutputPath "$runBaseFileName`_$timestamp.csv"
+    $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
+    $global:csvFilePath3 = Join-Path $GlobalPath "$runBaseFileName.csv"
+    $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
+    }
 
     Assert-SmartM365CsvDataCompleteness -Data $Data -BaseFileName $BaseFileName -TimestampedPath $global:csvFilePath1 -LatestPath $global:csvFilePath3
 
@@ -2348,7 +2480,12 @@ function ExportAndCopyCsv {
     }
 
     $historySourcePath = if (Test-Path -LiteralPath $csvFilePath3 -PathType Leaf) { $csvFilePath3 } else { $csvFilePath2 }
-    Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
+    }
+    else {
+        Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+    }
 
     # Final log
     WriteLog -Message "CSV export completed: $csvFilePath1"
@@ -2381,9 +2518,14 @@ function ExportAndCopyCsvFromConvert {
     )
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $global:csvFilePath1 = Join-Path $OutputPath "$BaseFileName`_$timestamp.csv"
-    $global:csvFilePath2 = Join-Path $OutputPath "$BaseFileName.csv"
-    $global:csvFilePath3 = Join-Path $GlobalPath "$BaseFileName.csv"
+    $runBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileName
+    $global:csvFilePath1 = Join-Path $OutputPath "$runBaseFileName`_$timestamp.csv"
+    $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
+    $global:csvFilePath3 = Join-Path $GlobalPath "$runBaseFileName.csv"
+    $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
+    }
 
     Assert-SmartM365CsvDataCompleteness -Data $Data -BaseFileName $BaseFileName -TimestampedPath $global:csvFilePath1 -LatestPath $global:csvFilePath3
 
@@ -2446,7 +2588,12 @@ function ExportAndCopyCsvFromConvert {
         }
 
         $historySourcePath = if (Test-Path -LiteralPath $csvFilePath3 -PathType Leaf) { $csvFilePath3 } else { $csvFilePath2 }
+        if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
+    }
+    else {
         Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+    }
 
     } catch {
         WriteLog -Message "Unexpected error during CSV export process: $_" -Level Error
@@ -2582,7 +2729,7 @@ function Connect-SmartM365CloudSession {
 	#$OrgDomain = "contoso.onmicrosoft.com"
 	#Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumb -NoWelcome
 	#Connect-ExchangeOnline -AppId $AppId -Organization $OrgDomain -CertificateThumbprint $Thumb -ShowBanner:$false
-	
+
     $useCertAuth = $AppId -and $Thumbprint -and $TenantId
 
     if ($Graph) {
@@ -2624,7 +2771,7 @@ function Connect-SmartM365CloudSession {
             return
         }
     }
-	
+
 	if ($ExchangeOnline) {
 		try {
 			if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
@@ -2673,7 +2820,7 @@ function Connect-SmartM365CloudSession {
             WriteLog "Failed to connect to Exchange Online: $($_.Exception.Message)" "ERROR"
         }
     }
-	
+
     return @{
         ExchangeOnlineConnected = $exchangeSuccess
         GraphConnected = $graphSuccess
@@ -3228,7 +3375,9 @@ function Get-SmartM365CsvValidationBaseName {
     param([Parameter(Mandatory)][string]$Path)
     $name = [System.IO.Path]::GetFileNameWithoutExtension($Path)
     if ([string]::IsNullOrWhiteSpace($name)) { return '' }
-    return ($name -replace '_\d{8}[-_]\d{6}$', '')
+    $baseName = ($name -replace '_\d{8}[-_]\d{6}$', '')
+    $baseName = ($baseName -replace '_MAXITEMS-\d+$', '')
+    return $baseName
 }
 
 function Get-SmartM365CsvValidationRule {
@@ -3478,6 +3627,13 @@ function Publish-SmartM365Csv {
         [switch]$NoSharePointUpload
     )
 
+    $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    if (Test-SmartM365MaxItemsMode) {
+        $TimestampedPath = Add-SmartM365MaxItemsSuffixToCsvPath -Path $TimestampedPath
+        if (-not [string]::IsNullOrWhiteSpace($LatestPath)) { $LatestPath = Add-SmartM365MaxItemsSuffixToCsvPath -Path $LatestPath }
+        WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
+    }
+
     Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath
 
     Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
@@ -3519,7 +3675,12 @@ function Publish-SmartM365Csv {
         }
     }
 
-    Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($publishedPath) -TimestampedPath $TimestampedPath
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
+    }
+    else {
+        Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($publishedPath) -TimestampedPath $TimestampedPath
+    }
 
     return New-Object psobject -Property @{
         TimestampedPath = $TimestampedPath

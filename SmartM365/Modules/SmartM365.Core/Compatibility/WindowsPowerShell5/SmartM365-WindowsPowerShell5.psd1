@@ -1,6 +1,6 @@
 @{
     RootModule = "SmartM365-WindowsPowerShell5.psm1"
-    ModuleVersion = "1.0.14"
+    ModuleVersion = "1.0.15"
     GUID = "dde15961-7933-412f-8d09-e1dd8a889b65"
     Author = "Internal automation team"
     CompanyName = "Internal"
@@ -19,6 +19,15 @@
         "Complete-SmartM365ExecutionContext",
         "WriteLog",
         "Set-SmartM365CoreContext",
+        "Get-SmartM365MaxItemsValue",
+        "Test-SmartM365MaxItemsMode",
+        "Get-SmartM365MaxItemsSuffix",
+        "Set-SmartM365MaxItemsMode",
+        "Add-SmartM365MaxItemsSuffixToCsvPath",
+        "Add-SmartM365MaxItemsSuffixToBaseName",
+        "Add-SmartM365MaxItemsMailBanner",
+        "Add-SmartM365MaxItemsSubjectPrefix",
+        "Limit-SmartM365RowsForMaxItems",
         "Get-SmartM365CsvValidationBaseName",
         "Get-SmartM365CsvValidationRule",
         "Assert-SmartM365CsvDataCompleteness",
