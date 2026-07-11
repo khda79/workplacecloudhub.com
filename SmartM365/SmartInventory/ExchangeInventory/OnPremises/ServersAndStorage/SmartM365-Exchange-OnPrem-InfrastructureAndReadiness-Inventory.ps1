@@ -29,8 +29,11 @@
     Version     : 1.5.2
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
-      - Exchange read permissions
-      - Remote WMI/DCOM access to Exchange servers
+      - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
+        virtual directory, certificate, service health and readiness Get-* cmdlets
+      - Active Directory / Exchange organization read access for schema and organization readiness checks
+      - Remote WMI/DCOM read access to Exchange servers for Win32_Processor,
+        Win32_ComputerSystem, Win32_LogicalDisk and Win32_DiskDrive
       - PowerShell 5.1 or later
 
 .CHANGELOG
