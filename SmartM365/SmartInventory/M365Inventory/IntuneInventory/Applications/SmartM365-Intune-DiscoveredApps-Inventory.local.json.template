@@ -28,6 +28,7 @@
   "GraphRequestDelayMs": 100,
   "GraphRetryMaxSeconds": 300,
   "DeviceDetailMode": "All",
+  "DeviceDetailCacheMaxAgeDays": 7,
   "TopAppsByDeviceCount": 500,
   "ProgressEveryApps": 250,
   "EnableWeeklyHistory": true,
