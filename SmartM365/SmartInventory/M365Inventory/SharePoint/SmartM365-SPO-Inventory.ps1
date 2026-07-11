@@ -53,7 +53,11 @@
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph.Authentication, SmartM365.Core.psd1
     Optional: PnP.PowerShell only when -UsePnPDeepScan is used.
-    Required for normal runtime: app-only certificate authentication with Graph application permissions such as Reports.Read.All and Sites.Read.All. Do not grant SharePoint Administrator or Sites.FullControl.All only for this inventory.
+    Minimum Microsoft Graph application permissions for default inventory:
+      - Reports.Read.All for SharePoint and OneDrive usage reports.
+      - Sites.Read.All for site and list inventory.
+      - Directory.Read.All for organization context and owner/directory enrichment.
+    Optional PnP deep sharing scan may require SharePoint site-level access for the scanned sites. Do not grant SharePoint Administrator or Sites.FullControl.All only for the default Graph inventory.
 #>
 
 [CmdletBinding()]
@@ -535,6 +539,11 @@ function Convert-SpoReportRowToSiteSeed {
 }
 
 Import-SmartM365CoreModule
+$requiredSpoModules = @('Microsoft.Graph.Authentication')
+if ($UsePnPDeepScan) { $requiredSpoModules += 'PnP.PowerShell' }
+Invoke-SmartM365Preflight `
+    -ScriptName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) `
+    -RequiredModules $requiredSpoModules | Out-Null
 Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 if ($UsePnPDeepScan) { Import-Module PnP.PowerShell -ErrorAction Stop }
 
@@ -582,6 +591,16 @@ $scriptError = $null
 try {
     $CurrentOperation = 'Connect Microsoft Graph'
     Connect-SpoGraph -Config $ScriptLocalConfig -UseInteractiveAuth:$InteractiveAuth
+
+    $CurrentOperation = 'Run Graph permission probes'
+    Invoke-SmartM365Preflight `
+        -ScriptName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) `
+        -RequiredModules $requiredSpoModules `
+        -GraphProbeUris @(
+            'https://graph.microsoft.com/v1.0/organization?$select=id,displayName',
+            'https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period=''D7'')',
+            'https://graph.microsoft.com/v1.0/sites?search=*&$top=1'
+        ) | Out-Null
 
     $CurrentOperation = 'Get Graph usage reports'
     $rawReportFolder = Join-Path -Path $initializedOutput -ChildPath 'RawGraphReports'
