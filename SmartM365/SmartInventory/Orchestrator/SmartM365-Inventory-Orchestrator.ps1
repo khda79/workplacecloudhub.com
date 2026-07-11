@@ -39,8 +39,8 @@ Features:
   log with daily rotation, one log per job execution, retention cleanup and heartbeat.
 - HTML error email on final job failure (JobMailMode Always/OnError/Never), optional
   daily HTML summary email, fatal error email if the orchestrator itself crashes.
-  Mail uses System.Net.Mail with explicit UTF-8 over SmtpClient (never Send-MailMessage),
-  IPv4 resolution of the SMTP endpoint with optional pinned RelayIp.
+  Mail uses the shared SmartM365.Core mail helper, so the orchestrator supports the same
+  Graph/SMTP/Both transport selection, branding and HTML copy behavior as inventory scripts.
 
 .PARAMETER Tenant
 Tenant profile key to load from Config/Tenants. Defaults to test.
@@ -81,16 +81,17 @@ Overrides the state file path. Default: Orchestrator-State.json in the orchestra
 folder ({{DataAllRootPath}}\Orchestrator).
 
 .VERSION
-1.3.0
+1.3.2
 
 .REQUIREMENTS
     PowerShell 7+.
     Config/SmartM365-TenantContext.ps1 (SmartM365 tenant context helper).
-    No Graph/Exchange module is required by the orchestrator itself; each job script
-    manages its own connections inside its own child process.
+    SmartM365.Core. Microsoft Graph modules are required only when the orchestrator mail
+    transport is Graph or Both; each job script manages its own inventory connections
+    inside its own child process.
 
 .NOTES
-    Version : 1.3.0
+    Version : 1.3.2
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -112,7 +113,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.0'
+$ScriptVersion = '1.3.2'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -189,6 +190,18 @@ function Find-SmartM365TenantContextPath {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 
+function Find-SmartM365CoreModulePath {
+    $d = $PSScriptRoot
+    while ($d) {
+        $candidate = Join-Path -Path $d -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+
+        $parent = Split-Path -Path $d -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    throw 'SmartM365.Core module manifest not found.'
+}
 function Get-SmartM365ScriptLocalConfig {
     $configPath = Join-Path -Path $PSScriptRoot -ChildPath ('{0}.local.json' -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
     if (-not (Test-Path -LiteralPath $configPath)) {
@@ -278,7 +291,7 @@ function Get-SmartM365ScriptConfigBool {
 # Logging (orchestrator log with daily rotation)
 # ==========================================================
 function Get-OrchestratorLogPath {
-    return Join-Path -Path $script:Settings.OrchestratorLogFolderPath -ChildPath ("{0}_{1}.log" -f $ScriptName, (Get-Date).ToString('yyyyMMdd'))
+    return Join-Path -Path $script:Settings.OrchestratorLogFolderPath -ChildPath ("{0}_{1}_{2}.log" -f $ScriptName, $env:COMPUTERNAME, (Get-Date).ToString('yyyyMMdd'))
 }
 
 function Write-OrchestratorLog {
@@ -403,7 +416,7 @@ function Send-OrchestratorMail {
     )
 
     if (-not $script:Settings.MailEnabled) {
-        Write-OrchestratorLog -Message ("Mail disabled (SmtpServer/From/recipient missing); email not sent: {0}" -f $Subject) -Level WARN
+        Write-OrchestratorLog -Message ("Mail disabled ({0}); email not sent: {1}" -f $script:Settings.MailConfigIssue, $Subject) -Level WARN
         return $false
     }
     $to = $script:Settings.MailTo
@@ -413,22 +426,16 @@ function Send-OrchestratorMail {
         return $false
     }
     try {
-        if ([string]::IsNullOrWhiteSpace($script:SmtpEndpoint)) {
-            if (-not [string]::IsNullOrWhiteSpace($script:Settings.RelayIp)) {
-                $script:SmtpEndpoint = $script:Settings.RelayIp
-            }
-            else {
-                $script:SmtpEndpoint = Resolve-IPv4Address -HostName $script:Settings.SmtpServer
-            }
+        if (-not [string]::IsNullOrWhiteSpace($script:Settings.MailBcc)) {
+            Write-OrchestratorLog -Message "Bcc is configured but is not supported by the shared SmartM365 mail helper; Bcc is ignored for orchestrator mail." -Level WARN
         }
-        $mail = New-HtmlMailMessage -From $script:Settings.MailFrom -To $to -Subject $Subject -HtmlBody $HtmlBody -Cc $script:Settings.MailCc -Bcc $script:Settings.MailBcc
-        Send-HtmlMail -MailMessage $mail -SmtpEndpoint $script:SmtpEndpoint -SmtpPort $script:Settings.SmtpPort -UseIntegratedAuth $script:Settings.UseIntegratedAuth -UseSsl $script:Settings.UseSsl
-        Write-OrchestratorLog -Message ("Email sent: {0}" -f $Subject)
+
+        Send-SmartM365Mail -SmtpServer $script:Settings.SmtpServer -SmtpPort $script:Settings.SmtpPort -SendMailMode $script:Settings.SendMailMode -From $script:Settings.MailFrom -To $to -Cc $script:Settings.MailCc -Subject $Subject -BodyHtml $HtmlBody -BodyAsHtml -HighPriority:$IsError -ErrorAction Stop
+        Write-OrchestratorLog -Message ("Email sent via {0}: {1}" -f $script:Settings.SendMailMode, $Subject)
         return $true
     }
     catch {
-        $script:SmtpEndpoint = ''
-        Write-OrchestratorLog -Message ("Failed to send email '{0}': {1}" -f $Subject, $_.Exception.Message) -Level WARN
+        Write-OrchestratorLog -Message ("Failed to send email via {0} '{1}': {2}" -f $script:Settings.SendMailMode, $Subject, $_.Exception.Message) -Level WARN
         return $false
     }
 }
@@ -879,14 +886,34 @@ function Protect-OrchestratorRunText {
     return $cleanText
 }
 
+function Test-OrchestratorRunsCsvLockException {
+    param([AllowNull()][Exception]$Exception)
+
+    $current = $Exception
+    while ($null -ne $current) {
+        if ($current -is [System.IO.IOException] -or $current -is [UnauthorizedAccessException]) {
+            return $true
+        }
+        $current = $current.InnerException
+    }
+
+    return $false
+}
+
 function Invoke-WithOrchestratorRunsCsvLock {
     param(
         [Parameter(Mandatory = $true)][scriptblock]$Action,
-        [AllowEmptyCollection()][object[]]$ArgumentList = @()
+        [AllowEmptyCollection()][object[]]$ArgumentList = @(),
+        [int]$TimeoutSeconds = 120,
+        [int]$RetryDelayMilliseconds = 250
     )
 
     $lockStream = $null
-    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+    $deadline = (Get-Date).AddSeconds([Math]::Max(1, $TimeoutSeconds))
+    $lastException = $null
+    $attempt = 0
+
+    while ((Get-Date) -lt $deadline) {
         try {
             $lockStream = [System.IO.File]::Open(
                 $script:Settings.OrchestratorRunsLockPath,
@@ -897,12 +924,21 @@ function Invoke-WithOrchestratorRunsCsvLock {
             break
         }
         catch {
-            if ($_.Exception -isnot [System.IO.IOException] -or $attempt -eq 49) { throw }
-            Start-Sleep -Milliseconds 100
+            $lastException = $_.Exception
+            if (-not (Test-OrchestratorRunsCsvLockException -Exception $lastException)) { throw }
+            $attempt++
+            if (($attempt % 40) -eq 0) {
+                Write-OrchestratorLog -Message ("Waiting for orchestrator-runs CSV lock: {0}" -f $script:Settings.OrchestratorRunsLockPath) -Level WARN
+            }
+            Start-Sleep -Milliseconds ([Math]::Max(50, $RetryDelayMilliseconds))
         }
     }
 
-    if ($null -eq $lockStream) { throw 'Could not acquire the orchestrator-runs CSV lock.' }
+    if ($null -eq $lockStream) {
+        $detail = if ($lastException) { $lastException.Message } else { 'timeout elapsed' }
+        throw ("Could not acquire the orchestrator-runs CSV lock after {0}s: {1}. Last error: {2}" -f $TimeoutSeconds, $script:Settings.OrchestratorRunsLockPath, $detail)
+    }
+
     try {
         & $Action @ArgumentList
     }
@@ -910,7 +946,6 @@ function Invoke-WithOrchestratorRunsCsvLock {
         $lockStream.Dispose()
     }
 }
-
 function Read-OrchestratorRunsCsv {
     $csvPath = $script:Settings.OrchestratorRunsCsvPath
     if (-not (Test-Path -LiteralPath $csvPath)) { return @() }
@@ -1009,10 +1044,15 @@ function Add-OrchestratorRunTracking {
         }
         Write-OrchestratorRunsCsv -Rows $rows
     }
-    Invoke-WithOrchestratorRunsCsvLock -Action $action -ArgumentList @($runId, $startTime, $detectedAt, $server)
-
-    $script:OrchestratorRunId = $runId
-    $script:OrchestratorRunRegistered = $true
+    try {
+        Invoke-WithOrchestratorRunsCsvLock -Action $action -ArgumentList @($runId, $startTime, $detectedAt, $server)
+        $script:OrchestratorRunId = $runId
+        $script:OrchestratorRunRegistered = $true
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Lifecycle run tracking skipped; orchestrator continues. {0}" -f $_.Exception.Message) -Level WARN
+        $script:OrchestratorRunRegistered = $false
+    }
 }
 
 function Complete-OrchestratorRunTracking {
@@ -1044,7 +1084,12 @@ function Complete-OrchestratorRunTracking {
         $row.ErrorMessage = Protect-OrchestratorRunText -Text $ErrorMessage
         Write-OrchestratorRunsCsv -Rows $rows
     }
-    Invoke-WithOrchestratorRunsCsvLock -Action $action -ArgumentList @($endTime, $Status, $ExitCode, $StopReason, $ErrorMessage, $script:OrchestratorRunId)
+    try {
+        Invoke-WithOrchestratorRunsCsvLock -Action $action -ArgumentList @($endTime, $Status, $ExitCode, $StopReason, $ErrorMessage, $script:OrchestratorRunId)
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Lifecycle run completion update skipped. {0}" -f $_.Exception.Message) -Level WARN
+    }
 }
 
 # ==========================================================
@@ -1184,7 +1229,7 @@ function Start-InventoryJob {
     $startTime = Get-Date
     $logFolder = Join-Path -Path $script:Settings.JobLogFolderPath -ChildPath $Job.Name
     if (-not (Test-Path -LiteralPath $logFolder)) { New-Item -ItemType Directory -Path $logFolder -Force | Out-Null }
-    $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $Job.Name, $startTime.ToString('yyyyMMdd_HHmmss'))
+    $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}_{2}.log" -f $Job.Name, $env:COMPUTERNAME, $startTime.ToString('yyyyMMdd_HHmmss'))
 
     if (-not (Test-Path -LiteralPath $scriptFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: script not found: {1}" -f $Job.Name, $scriptFullPath) -Level ERROR
@@ -1772,6 +1817,8 @@ $script:State = $null
 
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
+    $coreModulePath = Find-SmartM365CoreModulePath
+    Import-Module $coreModulePath -Force -ErrorAction Stop
     . $tenantContextPath
     $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     $localConfig = Get-SmartM365ScriptLocalConfig
@@ -1808,6 +1855,25 @@ try {
     if ([string]::IsNullOrWhiteSpace($mailTo)) { $mailTo = $errorMailTo }
     if ([string]::IsNullOrWhiteSpace($errorMailTo)) { $errorMailTo = $mailTo }
     $smtpServer = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SmtpServer' -DefaultValue '')
+    $sendMailMode = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SendMailMode' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($sendMailMode)) { $sendMailMode = if ([string]::IsNullOrWhiteSpace($smtpServer)) { 'Graph' } else { 'SMTP' } }
+    $sendMailMode = $sendMailMode.Trim()
+    if ($sendMailMode -notin @('Graph', 'SMTP', 'Both')) { $sendMailMode = 'Graph' }
+
+    $global:AppId = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AppId' -DefaultValue '')
+    $global:TenantId = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'TenantId' -DefaultValue '')
+    $global:Thumb = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'Thumb' -DefaultValue '')
+    $global:Thumbprint = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'Thumbprint' -DefaultValue $global:Thumb)
+
+    $mailConfigIssues = @()
+    if ([string]::IsNullOrWhiteSpace($mailFrom)) { $mailConfigIssues += 'From missing' }
+    if ([string]::IsNullOrWhiteSpace($mailTo)) { $mailConfigIssues += 'To/ErrorMailTo missing' }
+    $canGraphMail = -not [string]::IsNullOrWhiteSpace($global:AppId) -and -not [string]::IsNullOrWhiteSpace($global:TenantId) -and -not [string]::IsNullOrWhiteSpace($global:Thumbprint)
+    $canSmtpMail = -not [string]::IsNullOrWhiteSpace($smtpServer)
+    if ($sendMailMode -eq 'Graph' -and -not $canGraphMail) { $mailConfigIssues += 'Graph app auth missing (AppId/TenantId/Thumbprint)' }
+    if ($sendMailMode -eq 'SMTP' -and -not $canSmtpMail) { $mailConfigIssues += 'SmtpServer missing for SMTP mode' }
+    if ($sendMailMode -eq 'Both' -and -not ($canGraphMail -or $canSmtpMail)) { $mailConfigIssues += 'Graph app auth and SMTP fallback missing' }
+    $mailConfigIssueText = if ($mailConfigIssues.Count -gt 0) { $mailConfigIssues -join '; ' } else { '' }
     # AllowedServers: default server allowlist for every job (empty = all servers).
     # Accepts a JSON array or a comma/semicolon separated string.
     $allowedServersRaw = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AllowedServers' -DefaultValue @()
@@ -1847,6 +1913,9 @@ try {
         MailBcc = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'Bcc' -DefaultValue '')
         SmtpServer = $smtpServer
         SmtpPort = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'SmtpPort' -DefaultValue 25
+        SendMailMode = $sendMailMode
+        GraphMailConfigured = $canGraphMail
+        SmtpMailConfigured = $canSmtpMail
         UseIntegratedAuth = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'UseIntegratedAuth' -DefaultValue $true
         UseSsl = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'UseSsl' -DefaultValue $false
         RelayIp = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'RelayIp' -DefaultValue '')
@@ -1857,13 +1926,17 @@ try {
         OrchestratorLogRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorLogRetentionDays' -DefaultValue 30
         JobLogRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'JobLogRetentionDays' -DefaultValue 30
         JobRunsCsvRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'JobRunsCsvRetentionDays' -DefaultValue 90
-        MailEnabled = (-not [string]::IsNullOrWhiteSpace($smtpServer)) -and (-not [string]::IsNullOrWhiteSpace($mailFrom)) -and (-not [string]::IsNullOrWhiteSpace($mailTo))
+        MailEnabled = ($mailConfigIssues.Count -eq 0)
+        MailConfigIssue = $mailConfigIssueText
     }
 
     foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath)) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     }
     $script:LogReady = $true
+    $global:LogTextFile = Get-OrchestratorLogPath
+    $global:SmartM365WarningCount = 0
+    $global:SmartM365ErrorCount = 0
 }
 catch {
     Write-Host ("Configuration error: {0}" -f $_.Exception.Message) -ForegroundColor Red
@@ -1884,8 +1957,11 @@ $script:OrchestratorRunErrorText = ''
 try {
     Add-OrchestratorRunTracking
     Write-OrchestratorLog -Message ("{0} v{1} starting (PID {2}, tenant {3}, MaxConcurrency {4}, MaxLifetimeHours {5})." -f $ScriptName, $ScriptVersion, $PID, $Tenant, $script:Settings.MaxConcurrency, $script:Settings.MaxLifetimeHours)
+    Write-OrchestratorLog -Message ("Runtime context: server={0}; user={1}; pid={2}; PowerShell={3}; edition={4}; process64bit={5}." -f $env:COMPUTERNAME, (Get-OrchestratorRunUserName), $PID, $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, [Environment]::Is64BitProcess)
+    Write-OrchestratorLog -Message ("Paths: scriptRoot={0}; currentDirectory={1}; data={2}; log={3}; jobLogs={4}; state={5}; heartbeat={6}; runCsv={7}." -f $PSScriptRoot, (Get-Location).Path, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.StatePath, $script:Settings.HeartbeatPath, $script:Settings.OrchestratorRunsCsvPath)
+    Write-OrchestratorLog -Message ("Mail context: enabled={0}; mode={1}; graphConfigured={2}; smtpConfigured={3}; fromConfigured={4}; recipientConfigured={5}; jobMailMode={6}; dailySummary={7}." -f $script:Settings.MailEnabled, $script:Settings.SendMailMode, $script:Settings.GraphMailConfigured, $script:Settings.SmtpMailConfigured, (-not [string]::IsNullOrWhiteSpace($script:Settings.MailFrom)), (-not [string]::IsNullOrWhiteSpace($script:Settings.MailTo)), $script:Settings.JobMailMode, $script:Settings.SendDailySummaryEmail)
     if (-not $script:Settings.MailEnabled) {
-        Write-OrchestratorLog -Message "Email notifications are disabled (SmtpServer, From or recipient missing in configuration)." -Level WARN
+        Write-OrchestratorLog -Message ("Email notifications are disabled ({0})." -f $script:Settings.MailConfigIssue) -Level WARN
     }
 
     if (-not (Test-Path -LiteralPath $script:Settings.JobsManifestPath)) {

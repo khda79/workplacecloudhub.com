@@ -9,6 +9,7 @@
   "Bcc": "",
   "From": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
+  "SendMailMode": "__USE_GLOBAL__",
   "JobMailMode": "OnError",
   "SmtpPort": 25,
   "UseIntegratedAuth": true,
