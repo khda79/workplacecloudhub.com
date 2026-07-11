@@ -66,6 +66,7 @@
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
+    Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange recipient read access, and AD read access.
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]

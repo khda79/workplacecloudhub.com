@@ -20,6 +20,10 @@
     Base CSV file name (default: M365_Entra_VerifiedDomains.csv)
 .VERSION
 1.3
+
+.NOTES
+    Requires: PowerShell 7+, Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, SmartM365.Core.psd1
+    Minimum application permissions: Directory.Read.All
 #>
 
 param(
@@ -443,7 +447,7 @@ try {
         -RequiredModules @('Microsoft.Graph.Authentication','Microsoft.Graph.Identity.DirectoryManagement') `
         -RequiredCommands @('Get-MgDomain') `
         -OutputPaths @($OutputPath) `
-        -GraphProbeUris @('https://graph.microsoft.com/v1.0/domains?$top=1') | Out-Null
+        -RequiredGraphApplicationPermissions @('Directory.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/domains?$top=1') | Out-Null
 
     # ==========================================================
     # Retrieve verified domains

@@ -28,7 +28,8 @@
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Required application permission: Directory.Read.All
+    Requires: PowerShell 7+, Microsoft.Graph.Authentication, SmartM365.Core.psd1
+    Minimum application permissions: Directory.Read.All
 #>
 
 [CmdletBinding()]
@@ -485,7 +486,7 @@ try {
     Connect-GraphForSyncHealth -UseInteractiveAuth:$InteractiveAuth -AppId $AppId -TenantId $TenantId -Thumbprint $Thumb
 
     $CurrentOperation = 'Preflight'
-    Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath) -GraphProbeUris @('https://graph.microsoft.com/v1.0/organization?$select=id,displayName,onPremisesSyncEnabled,onPremisesLastSyncDateTime') | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath) -RequiredGraphApplicationPermissions @('Directory.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/organization?$select=id,displayName,onPremisesSyncEnabled,onPremisesLastSyncDateTime') | Out-Null
 
     $CurrentOperation = 'ReadOrganizationSyncState'
     $orgResponse = Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/organization?$select=id,displayName,onPremisesSyncEnabled,onPremisesLastSyncDateTime' -OutputType PSObject -ErrorAction Stop

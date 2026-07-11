@@ -53,6 +53,7 @@
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
       - SmartM365.Core.psm1 in the same folder or in a Modules subfolder
+    Minimum application permissions: DeviceManagementManagedDevices.Read.All
 #>
 
 [CmdletBinding()]
@@ -525,7 +526,7 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
         $preflightOutputPaths += $LatestCsvFolderPath
     }
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths $preflightOutputPaths -GraphProbeUris @('https://graph.microsoft.com/beta/deviceManagement/userExperienceAnalyticsWorkFromAnywhereHardwareReadinessMetric') | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths $preflightOutputPaths -RequiredGraphApplicationPermissions @('DeviceManagementManagedDevices.Read.All') -GraphProbeUris @('https://graph.microsoft.com/beta/deviceManagement/userExperienceAnalyticsWorkFromAnywhereHardwareReadinessMetric') | Out-Null
 
     # ---------------- Work From Anywhere / Upgrade Eligibility (Endpoint Analytics) ----------------
 

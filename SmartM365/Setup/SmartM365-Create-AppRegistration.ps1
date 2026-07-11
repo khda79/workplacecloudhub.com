@@ -152,7 +152,7 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$SharePointTargetFolderPath = 'SMART-M365/CSV',
+    [string]$SharePointTargetFolderPath = 'SMART-M365/DATA',
 
     [Parameter()]
     [string]$MailSenderAddress,
@@ -523,7 +523,14 @@ function Get-SmartM365RequiredApiResource {
         'Directory.Read.All',
         'User.Read.All',
         'Device.Read.All',
+        'Group.Read.All',
         'GroupMember.Read.All',
+        'Reports.Read.All',
+        'Sites.Read.All',
+        'Team.ReadBasic.All',
+        'TeamMember.Read.All',
+        'Channel.ReadBasic.All',
+        'ChannelMember.Read.All',
         'DeviceManagementApps.Read.All',
         'DeviceManagementConfiguration.Read.All',
         'DeviceManagementManagedDevices.Read.All',

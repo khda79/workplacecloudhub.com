@@ -26,6 +26,7 @@
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
+    Minimum permissions: Exchange Online app-only RBAC must allow Get-AcceptedDomain.
 #>
 
 param(
