@@ -6,5 +6,13 @@
   "LatestCsvFolderPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\DATA-LAST",
   "LogAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{TenantKey}}\\LOG-ALL",
   "RetentionMaxCSV": 30,
-  "RetentionMaxLogs": 30
+  "RetentionMaxLogs": 30,
+  "MailBrandingEnabled": true,
+  "MailClientName": "",
+  "MailClientLogoPath": "",
+  "MailClientLogoMaxKB": 200,
+  "MailFooterProductName": "workplacecloudhub.com",
+  "MailFooterWebsiteUrl": "https://workplacecloudhub.com/",
+  "MailFooterGitHubLabel": "khda79/workplacecloudhub.com",
+  "MailFooterGitHubUrl": "https://github.com/khda79/workplacecloudhub.com"
 }
