@@ -48,6 +48,7 @@ Default: 3.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Version : 1.1
+    Minimum application permissions: DeviceManagementManagedDevices.Read.All
 #>
 
 param(
@@ -549,7 +550,7 @@ try {
     }
 
     # ------------------------
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @('https://graph.microsoft.com/beta/deviceManagement/managedDevices?$top=1') | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('DeviceManagementManagedDevices.Read.All') -GraphProbeUris @('https://graph.microsoft.com/beta/deviceManagement/managedDevices?$top=1') | Out-Null
 
     # Retrieve Intune managed devices (Windows only)
     # ------------------------

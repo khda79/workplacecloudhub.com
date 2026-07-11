@@ -50,6 +50,7 @@ pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
     Version : 1.9
+    Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All, DeviceManagementApps.Read.All
 #>
 
 [CmdletBinding()]
@@ -650,7 +651,7 @@ try {
     Write-Log -Message ("Using output folder [{0}]" -f $OutputFolder)
     Connect-GraphSession
     Import-SmartM365CorePreflight
-    Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($OutputFolder, $LogFolder) -GraphProbeUris @(
+    Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($OutputFolder, $LogFolder) -RequiredGraphApplicationPermissions @('DeviceManagementConfiguration.Read.All','DeviceManagementManagedDevices.Read.All','DeviceManagementApps.Read.All') -GraphProbeUris @(
         'https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles?$top=1'
     ) | Out-Null
 

@@ -37,7 +37,7 @@ Shows what would be installed without installing modules.
 Skips Import-Module validation after installation.
 
 .NOTES
-Version: 1.0
+Version: 1.1
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -47,8 +47,8 @@ param(
     [string]$Scope = 'CurrentUser',
     [string]$Repository = 'PSGallery',
     [switch]$TrustRepository,
-    [switch]$Force,
-    [switch]$AllowClobber,
+    [switch]$Force = $true,
+    [switch]$AllowClobber = $true,
     [switch]$SkipPublisherCheck,
     [switch]$SkipMicrosoftGraphMetaModule,
     [switch]$SkipImportValidation
@@ -79,6 +79,7 @@ $requiredModules += @(
     'Microsoft.Graph.Policies',
     'Microsoft.Graph.Reports',
     'ExchangeOnlineManagement',
+    'PnP.PowerShell',
     'MSAL.PS'
 )
 

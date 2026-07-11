@@ -46,6 +46,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Version : 1.5
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
+    Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
 #>
 
 [CmdletBinding()]
@@ -796,7 +797,7 @@ try {
     }
 
     # ==========================================================
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @(
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('DeviceManagementManagedDevices.Read.All','DeviceManagementConfiguration.Read.All','Device.Read.All') -GraphProbeUris @(
         'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=1',
         'https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies?$top=1'
     ) | Out-Null

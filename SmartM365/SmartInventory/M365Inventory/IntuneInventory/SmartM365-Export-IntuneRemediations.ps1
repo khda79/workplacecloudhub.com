@@ -28,6 +28,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Version : 1.2
+    Minimum application permissions: DeviceManagementScripts.Read.All, Group.Read.All
 #>
 
 [CmdletBinding()]
@@ -567,7 +568,7 @@ Connect-IntuneGraph `
     -UseDeviceCodeAuth ([bool]$DeviceCodeAuth) `
     -Scopes $InteractiveScopes
 
-Invoke-CoreSmartM365Preflight -ScriptName $scriptName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($exportFolders.Root, $exportFolders.Run, $scriptsRoot, $global:LogPath) -GraphProbeUris @("$graphBaseUri/deviceManagement/deviceHealthScripts?`$top=1") | Out-Null
+Invoke-CoreSmartM365Preflight -ScriptName $scriptName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($exportFolders.Root, $exportFolders.Run, $scriptsRoot, $global:LogPath) -RequiredGraphApplicationPermissions @('DeviceManagementScripts.Read.All','Group.Read.All') -GraphProbeUris @("$graphBaseUri/deviceManagement/deviceHealthScripts?`$top=1") | Out-Null
 
 Write-Output "Retrieving Intune remediation list..."
 $listUri = "$graphBaseUri/deviceManagement/deviceHealthScripts"

@@ -51,7 +51,7 @@ Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" t
     Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
-Scopes: Directory.Read.All
+Minimum application permissions: Directory.Read.All, Device.Read.All
 #>
 
 param(
@@ -632,7 +632,7 @@ try {
         -RequiredModules @('Microsoft.Graph.Authentication','Microsoft.Graph.Identity.DirectoryManagement') `
         -RequiredCommands @('Get-MgDevice') `
         -OutputPaths @($OutputPath) `
-        -GraphProbeUris @(
+        -RequiredGraphApplicationPermissions @('Directory.Read.All','Device.Read.All') -GraphProbeUris @(
         'https://graph.microsoft.com/v1.0/devices?$top=1',
         'https://graph.microsoft.com/v1.0/organization'
     ) | Out-Null

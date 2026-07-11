@@ -46,6 +46,7 @@
 
     # Full run - subset of countries
     .\SmartM365-Intune-RBAC-GroupMembers.ps1 -Countries @("FR","DE")
+    Minimum application permissions: Group.Read.All, GroupMember.Read.All
 #>
 
 param(
@@ -540,7 +541,7 @@ $ScriptVersion = "1.4"
 
     #endregion Connect to Microsoft Graph
 
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @('https://graph.microsoft.com/v1.0/groups?$top=1') | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('Group.Read.All','GroupMember.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/groups?$top=1') | Out-Null
 
     #region Retrieve Group Members
 

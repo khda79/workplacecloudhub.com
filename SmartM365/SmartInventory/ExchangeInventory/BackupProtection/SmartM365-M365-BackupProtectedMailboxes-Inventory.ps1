@@ -46,6 +46,7 @@
       - Added Graph access probe with full error body logging for 403 diagnostics.
       - StrictMode-safe status property access in protected unit filtering.
     - v1.6: Return Graph collection as a flat object array to avoid Generic.List output binding failures after pagination.
+    Minimum application permissions: BackupRestore-Configuration.Read.All
 #>
 
 [CmdletBinding()]
@@ -443,7 +444,7 @@ try {
         -ScriptName $TaskName `
         -RequiredModules @('Microsoft.Graph.Authentication') `
         -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath) `
-        -GraphProbeUris @("https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?`$top=1") | Out-Null
+        -RequiredGraphApplicationPermissions @('BackupRestore-Configuration.Read.All') -GraphProbeUris @("https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?`$top=1") | Out-Null
 
     $CurrentOperation = 'RetrieveBackupProtectionUnits'
     $allUnits = @(Get-BackupMailboxProtectionUnits)

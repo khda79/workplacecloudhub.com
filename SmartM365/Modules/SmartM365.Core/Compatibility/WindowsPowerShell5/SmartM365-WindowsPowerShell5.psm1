@@ -641,7 +641,9 @@ function Complete-SmartM365ExecutionContext {
     }
 
     # Upload run log files after the execution summary is written, so SharePoint keeps the final log content.
-    $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile) |
+    $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile)
+    if ($global:SmartM365MailHtmlFiles) { $logUploadCandidates += @($global:SmartM365MailHtmlFiles) }
+    $logUploadCandidates = $logUploadCandidates |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
         Sort-Object -Unique
     $logUploadStartCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { 0 }
@@ -998,6 +1000,142 @@ function EnsureExchangePSSnapinLoaded {
 
     return $true
 }
+function Get-SmartM365MailLogFolder {
+    [CmdletBinding()]
+    param()
+
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:LogPath)) { $candidates += [string]$global:LogPath }
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
+        try { $candidates += (Split-Path -Path ([string]$global:LogTextFile) -Parent) } catch {}
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:logTranscriptFile)) {
+        try { $candidates += (Split-Path -Path ([string]$global:logTranscriptFile) -Parent) } catch {}
+    }
+
+    foreach ($candidate in @($candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        try {
+            if (-not (Test-Path -LiteralPath $candidate)) {
+                New-Item -Path $candidate -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            }
+            return $candidate
+        }
+        catch {
+            try { WriteLog -Message ("Mail log folder is not writable: {0}. {1}" -f $candidate, $_.Exception.Message) -Level "WARNING" } catch {}
+        }
+    }
+
+    return $null
+}
+
+function ConvertTo-SmartM365SafeFileName {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$Text,
+        [int]$MaxLength = 90
+    )
+
+    $safe = if ([string]::IsNullOrWhiteSpace($Text)) { 'SmartM365-Mail' } else { [string]$Text }
+    foreach ($invalid in [System.IO.Path]::GetInvalidFileNameChars()) {
+        $safe = $safe.Replace([string]$invalid, '_')
+    }
+    $safe = [regex]::Replace($safe, '\s+', ' ').Trim()
+    if ($safe.Length -gt $MaxLength) { $safe = $safe.Substring(0, $MaxLength).Trim() }
+    if ([string]::IsNullOrWhiteSpace($safe)) { $safe = 'SmartM365-Mail' }
+    return $safe
+}
+
+function Save-SmartM365MailHtmlCopy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Subject,
+        [Parameter(Mandatory)][string]$BodyHtml
+    )
+
+    try {
+        $folder = Get-SmartM365MailLogFolder
+        if ([string]::IsNullOrWhiteSpace($folder)) { return $null }
+
+        $timestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
+        $safeSubject = ConvertTo-SmartM365SafeFileName -Text $Subject
+        $path = Join-Path -Path $folder -ChildPath ("{0}_{1}.htm" -f $timestamp, $safeSubject)
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($path, $BodyHtml, $utf8NoBom)
+
+        if (-not $global:SmartM365MailHtmlFiles) {
+            $global:SmartM365MailHtmlFiles = New-Object System.Collections.ArrayList
+        }
+        [void]$global:SmartM365MailHtmlFiles.Add($path)
+        WriteLog -Message ("Mail HTML copy saved: {0}" -f $path) -Level "INFO"
+        return $path
+    }
+    catch {
+        WriteLog -Message ("Mail HTML copy failed: {0}" -f $_.Exception.Message) -Level "ERROR"
+        throw
+    }
+}
+
+function New-SmartM365MailFilesHtmlSection {
+    [CmdletBinding()]
+    param([string[]]$Files)
+
+    $existingFiles = @($Files | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -Unique)
+    if ($existingFiles.Count -eq 0) { return '' }
+
+    $rows = @()
+    foreach ($path in $existingFiles) {
+        $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+        if ($null -eq $item) { continue }
+        $uploadRecord = $null
+        if ($global:SmartM365SharePointUploadedFiles) {
+            $uploadRecord = @($global:SmartM365SharePointUploadedFiles | Where-Object { $_.LocalFilePath -eq $item.FullName } | Select-Object -Last 1)
+        }
+        $label = ConvertTo-SmartM365EmailHtmlText $item.Name
+        if ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.WebUrl)) {
+            $escapedUrl = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.WebUrl)
+            $escapedPath = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
+            $locationHtml = "<a href=`"$escapedUrl`" style=`"color:#075985;text-decoration:underline;`">$escapedPath</a>"
+        }
+        elseif ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.SharePointPath)) {
+            $locationHtml = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
+        }
+        else {
+            $locationHtml = ConvertTo-SmartM365EmailHtmlText $item.FullName
+        }
+        $sizeKb = [Math]::Round(($item.Length / 1KB), 1)
+        $rows += "<tr><td style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;`">$label</td><td style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;word-break:break-all;`">$locationHtml</td><td align=`"right`" style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;white-space:nowrap;`">$sizeKb KB</td></tr>"
+    }
+
+    if ($rows.Count -eq 0) { return '' }
+    return @"
+<div style="margin-top:18px;">
+  <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Technical files</div>
+  <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;">
+    <tr><th align="left" style="background:#f8fafc;padding:5px 7px;font-size:10px;color:#475569;text-transform:uppercase;">File</th><th align="left" style="background:#f8fafc;padding:5px 7px;font-size:10px;color:#475569;text-transform:uppercase;">Location</th><th align="right" style="background:#f8fafc;padding:5px 7px;font-size:10px;color:#475569;text-transform:uppercase;">Size</th></tr>
+    $($rows -join "`n")
+  </table>
+</div>
+"@
+}
+
+function Add-SmartM365MailFilesSection {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$BodyHtml,
+        [string[]]$Files
+    )
+
+    $section = New-SmartM365MailFilesHtmlSection -Files $Files
+    if ([string]::IsNullOrWhiteSpace($section)) { return $BodyHtml }
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { return $section }
+    if ($BodyHtml -match '(?is)</body>') {
+        return ([regex]::Replace($BodyHtml, '(?is)</body>', ($section + "`n</body>"), 1))
+    }
+    return ([string]$BodyHtml + "`n" + $section)
+}
+
+
 function ConvertToRecipientArray {
     [CmdletBinding()]
     param(
@@ -1126,6 +1264,8 @@ function Send-SmartM365GraphMail {
         [Parameter(Mandatory)][string]$Subject,
         [Parameter(Mandatory)][string]$BodyHtml,
         [string[]]$Attachments,
+        [switch]$AllowAttachments,
+        [switch]$SkipHtmlCopy,
         [string]$AppId = $global:AppId,
         [string]$TenantId = $global:TenantId,
         [string]$Thumbprint = $global:Thumbprint
@@ -1143,15 +1283,24 @@ function Send-SmartM365GraphMail {
         throw "Send-SmartM365GraphMail: Microsoft Graph app-only connection failed."
     }
 
-    $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
+    $graphAttachmentPaths = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($graphAttachmentPaths.Count -gt 0) {
+        $BodyHtml = Add-SmartM365MailFilesSection -BodyHtml $BodyHtml -Files $graphAttachmentPaths
+        if (-not $AllowAttachments) {
+            WriteLog -Message 'Graph mail attachments are disabled by default; referenced files were added to the mail body instead.' -Level 'INFO'
+            $graphAttachmentPaths = @()
+        }
+    }
 
+    $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
+    if (-not $SkipHtmlCopy) { Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null }
     $message = @{
         subject      = $Subject
         body         = @{ contentType = 'HTML'; content = $BodyHtml }
         toRecipients = ConvertTo-SmartM365GraphRecipient -Recipients $toArray
     }
     if ($ccArray.Count -gt 0) { $message['ccRecipients'] = ConvertTo-SmartM365GraphRecipient -Recipients $ccArray }
-    $graphAttachments = ConvertTo-SmartM365GraphFileAttachment -Attachments $Attachments
+    $graphAttachments = ConvertTo-SmartM365GraphFileAttachment -Attachments $graphAttachmentPaths
     if ($graphAttachments.Count -gt 0) { $message['attachments'] = $graphAttachments }
 
     $body = @{ message = $message; saveToSentItems = $false } | ConvertTo-Json -Depth 12
@@ -1571,6 +1720,7 @@ function SendEmailHtmlReport {
         [string]$Subject = "SmartM365 Report",                         # Default subject
         [string]$BodyHtml,                                   # HTML body (required)
         [string[]]$Attachments,                              # Attachments
+        [switch]$AllowAttachments,
         [switch]$VerboseLog                                  # Enable verbose logging
     )
 
@@ -1612,13 +1762,20 @@ function SendEmailHtmlReport {
             }
         }
 
-        # Filter attachments that exist
-        $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
+        # Filter attachments that exist and list them in the mail body by default.
         $atts = @()
         foreach ($a in ($Attachments | Where-Object { $_ })) {
             if (Test-Path $a) { $atts += $a }
         }
-
+        if ($atts.Count -gt 0) {
+            $BodyHtml = Add-SmartM365MailFilesSection -BodyHtml $BodyHtml -Files $atts
+            if (-not $AllowAttachments) {
+                WriteLog -Message 'Email attachments are disabled by default; referenced files were added to the mail body instead.' -Level 'INFO'
+                $atts = @()
+            }
+        }
+        $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
+        Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null
         $effectiveSendMailMode = $SendMailMode
         if ([string]::IsNullOrWhiteSpace($effectiveSendMailMode)) {
             $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' }
@@ -1642,7 +1799,7 @@ function SendEmailHtmlReport {
         if ($atts.Count   -gt 0) { $mailParams['Attachments'] = $atts }
 
         if ($effectiveSendMailMode -eq 'Graph') {
-            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy
             if ($PSBoundParameters.ContainsKey('VerboseLog')) {
                 WriteLog -Message "Email sent to $($toArray -join ';') via Microsoft Graph" -Level "SUCCESS"
             }
@@ -1659,7 +1816,7 @@ function SendEmailHtmlReport {
         }
 
         try {
-            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy
             if ($PSBoundParameters.ContainsKey('VerboseLog')) {
                 WriteLog -Message "Email sent to $($toArray -join ';') via Microsoft Graph" -Level "SUCCESS"
             }
@@ -1736,14 +1893,93 @@ function TestSharePath {
     }
 }
 
+function ConvertFrom-SmartM365JwtPayload {
+    [CmdletBinding()]
+    param([string]$AccessToken)
+
+    if ([string]::IsNullOrWhiteSpace($AccessToken)) { return $null }
+    $parts = $AccessToken.Split('.')
+    if ($parts.Count -lt 2) { return $null }
+    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+    switch ($payload.Length % 4) {
+        2 { $payload += '==' }
+        3 { $payload += '=' }
+        1 { return $null }
+    }
+    try {
+        $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+        return $json | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-SmartM365GraphGrantedPermissionValues {
+    [CmdletBinding()]
+    param([string]$GraphAccessToken)
+
+    $granted = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    if (-not [string]::IsNullOrWhiteSpace($GraphAccessToken)) {
+        $claims = ConvertFrom-SmartM365JwtPayload -AccessToken $GraphAccessToken
+        foreach ($role in @($claims.roles)) { if (-not [string]::IsNullOrWhiteSpace([string]$role)) { [void]$granted.Add([string]$role) } }
+        foreach ($scope in @(([string]$claims.scp) -split '\s+')) { if (-not [string]::IsNullOrWhiteSpace($scope)) { [void]$granted.Add($scope) } }
+        return @($granted)
+    }
+
+    $context = $null
+    try { $context = Get-MgContext -ErrorAction SilentlyContinue } catch { $context = $null }
+    if ($null -eq $context) { return @($granted) }
+
+    foreach ($scope in @($context.Scopes)) { if (-not [string]::IsNullOrWhiteSpace([string]$scope)) { [void]$granted.Add([string]$scope) } }
+
+    $clientId = [string]$context.ClientId
+    if ([string]::IsNullOrWhiteSpace($clientId)) { return @($granted) }
+
+    try {
+        $escapedClientId = $clientId.Replace("'", "''")
+        $appResponse = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '{0}'&`$select=id,appId,displayName" -f $escapedClientId) -OutputType PSObject -ErrorAction Stop
+        $appServicePrincipal = @($appResponse.value) | Select-Object -First 1
+        if ($null -eq $appServicePrincipal -or [string]::IsNullOrWhiteSpace([string]$appServicePrincipal.id)) { return @($granted) }
+
+        $graphResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'&`$select=id,appRoles" -OutputType PSObject -ErrorAction Stop
+        $graphServicePrincipal = @($graphResponse.value) | Select-Object -First 1
+        if ($null -eq $graphServicePrincipal -or [string]::IsNullOrWhiteSpace([string]$graphServicePrincipal.id)) { return @($granted) }
+
+        $roleLookup = @{}
+        foreach ($role in @($graphServicePrincipal.appRoles)) {
+            if ($null -ne $role.id -and -not [string]::IsNullOrWhiteSpace([string]$role.value)) {
+                $roleLookup[[string]$role.id] = [string]$role.value
+            }
+        }
+
+        $assignments = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/servicePrincipals/{0}/appRoleAssignments?`$top=999" -f $appServicePrincipal.id) -OutputType PSObject -ErrorAction Stop
+        foreach ($assignment in @($assignments.value)) {
+            if ([string]$assignment.resourceId -ne [string]$graphServicePrincipal.id) { continue }
+            $roleId = [string]$assignment.appRoleId
+            if ($roleLookup.ContainsKey($roleId)) { [void]$granted.Add($roleLookup[$roleId]) }
+        }
+    }
+    catch {
+        WriteLog -Message ("Preflight Graph app role lookup could not be completed: {0}" -f $_.Exception.Message) -Level "WARNING"
+    }
+
+    return @($granted)
+}
 function Invoke-SmartM365Preflight {
     [CmdletBinding()]
     param(
         [string]$ScriptName = $MyInvocation.MyCommand.Name,
         [string[]]$RequiredModules = @(),
+        [switch]$SkipMissingModuleInstall,
+        [ValidateSet('CurrentUser','AllUsers')]
+        [string]$InstallModuleScope = 'CurrentUser',
+        [string]$InstallModuleRepository = 'PSGallery',
         [string[]]$RequiredCommands = @(),
         [string[]]$OutputPaths = @(),
         [string[]]$GraphProbeUris = @(),
+        [string[]]$RequiredGraphApplicationPermissions = @(),
         [string]$GraphAccessToken,
         [string[]]$ExchangeOnlineProbeCommands = @(),
         [switch]$RequireActiveDirectoryRead,
@@ -1755,14 +1991,38 @@ function Invoke-SmartM365Preflight {
     WriteLog -Message ("Preflight started for {0}" -f $ScriptName) -Level "INFO"
 
     foreach ($moduleName in @($RequiredModules | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
-        if (-not (Get-Module -ListAvailable -Name $moduleName)) {
-            $failures.Add("Required PowerShell module not found: $moduleName")
+        $availableModule = Get-Module -ListAvailable -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+        if ($null -eq $availableModule) {
+            $nonInstallableModules = @('ActiveDirectory')
+            if ($SkipMissingModuleInstall -or $moduleName -in $nonInstallableModules) {
+                $failures.Add("Required PowerShell module not found: $moduleName")
+                continue
+            }
+            if (-not (Get-Command -Name Install-Module -ErrorAction SilentlyContinue)) {
+                $failures.Add("Required PowerShell module not found and Install-Module is unavailable: $moduleName")
+                continue
+            }
+            try {
+                WriteLog -Message ("Preflight module missing; installing {0} from {1} with Scope={2}." -f $moduleName, $InstallModuleRepository, $InstallModuleScope) -Level "WARNING"
+                Install-Module -Name $moduleName -Scope $InstallModuleScope -Repository $InstallModuleRepository -Force -AllowClobber -ErrorAction Stop
+                $availableModule = Get-Module -ListAvailable -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+                if ($null -eq $availableModule) { throw "Install-Module completed but module was not found in module paths." }
+                WriteLog -Message ("Preflight module installed: {0} {1}; Path={2}" -f $availableModule.Name, $availableModule.Version, $availableModule.Path) -Level "SUCCESS"
+            }
+            catch {
+                $failures.Add("Required PowerShell module '$moduleName' could not be installed: $($_.Exception.Message)")
+                continue
+            }
         }
-        else {
+
+        try {
+            Import-Module -Name $moduleName -ErrorAction Stop
             WriteLog -Message ("Preflight module OK: {0}" -f (Get-SmartM365ModuleDiagnosticText -Name $moduleName -IncludeAvailable)) -Level "INFO"
         }
+        catch {
+            $failures.Add("Required PowerShell module '$moduleName' could not be imported: $($_.Exception.Message)")
+        }
     }
-
     foreach ($commandName in @($RequiredCommands | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
         if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
             $failures.Add("Required PowerShell command not found: $commandName")
@@ -1825,6 +2085,24 @@ function Invoke-SmartM365Preflight {
         }
     }
 
+    $requiredGraphPermissions = @($RequiredGraphApplicationPermissions | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if ($requiredGraphPermissions.Count -gt 0) {
+        WriteLog -Message ("Preflight minimum Graph application permissions: {0}" -f ($requiredGraphPermissions -join ', ')) -Level "INFO"
+        try {
+            $grantedGraphPermissions = @(Get-SmartM365GraphGrantedPermissionValues -GraphAccessToken $GraphAccessToken)
+            foreach ($permissionName in $requiredGraphPermissions) {
+                if ($grantedGraphPermissions -notcontains $permissionName) {
+                    $failures.Add("Missing Microsoft Graph application permission: $permissionName")
+                }
+                else {
+                    WriteLog -Message ("Preflight Graph permission declared and granted: {0}" -f $permissionName) -Level "INFO"
+                }
+            }
+        }
+        catch {
+            $failures.Add("Graph application permission validation failed: $($_.Exception.Message)")
+        }
+    }
     if ($GraphProbeUris.Count -gt 0) {
         $useAccessToken = -not [string]::IsNullOrWhiteSpace($GraphAccessToken)
         if (-not $useAccessToken) {

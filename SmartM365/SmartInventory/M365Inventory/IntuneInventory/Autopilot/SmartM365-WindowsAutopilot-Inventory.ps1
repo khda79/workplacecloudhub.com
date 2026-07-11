@@ -24,6 +24,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementServiceConfig.Read.All
+    Minimum application permissions: DeviceManagementServiceConfig.Read.All, Device.Read.All
 #>
 
 param(
@@ -447,7 +448,7 @@ try {
     }
 
     # ------------------------
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @(
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('DeviceManagementServiceConfig.Read.All','Device.Read.All') -GraphProbeUris @(
         'https://graph.microsoft.com/v1.0/deviceManagement/windowsAutopilotDeviceIdentities?$top=1',
         'https://graph.microsoft.com/v1.0/devices?$top=1'
     ) | Out-Null

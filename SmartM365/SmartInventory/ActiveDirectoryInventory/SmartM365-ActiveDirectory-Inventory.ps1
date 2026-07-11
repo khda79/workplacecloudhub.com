@@ -26,6 +26,7 @@
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
+    Minimum permissions: PowerShell 7+, RSAT ActiveDirectory module, and read access to every targeted domain/Global Catalog.
 #>
 
 [CmdletBinding()]

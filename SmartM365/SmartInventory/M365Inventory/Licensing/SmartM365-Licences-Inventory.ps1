@@ -10,7 +10,7 @@
   Author: https://github.com/khda79/workplacecloudhub.com
     Version : 1.1
   PowerShell: PowerShell 7+
-  Scopes: Directory.Read.All, User.Read.All
+  Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
             Microsoft.Graph.Identity.DirectoryManagement
             Microsoft.Graph.Users
@@ -635,7 +635,7 @@ try {
   $connectedGraphInThisRun = $connectResult.GraphConnected
 
   $currentOperation = "Run preflight checks"
-  Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -GraphProbeUris @(
+  Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('Directory.Read.All','User.Read.All','Group.Read.All') -GraphProbeUris @(
     'https://graph.microsoft.com/v1.0/subscribedSkus',
     'https://graph.microsoft.com/v1.0/users?$top=1',
     'https://graph.microsoft.com/v1.0/groups?$top=1'
