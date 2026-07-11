@@ -1,6 +1,6 @@
 @{
     RootModule = "SmartM365-WindowsPowerShell5.psm1"
-    ModuleVersion = "1.0.15"
+    ModuleVersion = "1.0.16"
     GUID = "dde15961-7933-412f-8d09-e1dd8a889b65"
     Author = "Internal automation team"
     CompanyName = "Internal"
@@ -43,6 +43,10 @@
         "SendFileListEmailReport",
         "NewTableFilesEmailBody",
         "ConvertTo-SmartM365EmailHtmlText",
+        "ConvertTo-SmartM365ConfigBoolean",
+        "Get-SmartM365MailBrandingConfig",
+        "ConvertTo-SmartM365MailLogoDataUri",
+        "Add-SmartM365MailBranding",
         "New-SmartM365EmailBody",
         "ConvertTo-SmartM365EmailBody",
         "ExportAndCopyCsv",

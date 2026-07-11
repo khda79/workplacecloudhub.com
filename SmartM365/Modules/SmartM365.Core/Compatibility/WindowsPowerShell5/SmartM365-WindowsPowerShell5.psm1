@@ -1433,6 +1433,189 @@ function ConvertTo-SmartM365EmailHtmlText {
     return [System.Net.WebUtility]::HtmlEncode([string]$Value)
 }
 
+
+function ConvertTo-SmartM365ConfigBoolean {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Value,
+        [bool]$DefaultValue = $false
+    )
+
+    if ($null -eq $Value) { return $DefaultValue }
+    if ($Value -is [bool]) { return [bool]$Value }
+
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text) -or $text -in @('__USE_GLOBAL__','USE_GLOBAL')) { return $DefaultValue }
+
+    switch -Regex ($text.ToLowerInvariant()) {
+        '^(true|1|yes|y|on)$' { return $true }
+        '^(false|0|no|n|off)$' { return $false }
+        default { return $DefaultValue }
+    }
+}
+
+function Get-SmartM365MailBrandingConfig {
+    [CmdletBinding()]
+    param()
+
+    $moduleLocalConfig = Get-ModuleLocalConfig
+    $callerLocalConfig = Get-SmartM365CallerLocalConfig
+
+    function Get-MailBrandingValue {
+        param([string]$Name, [AllowNull()]$DefaultValue = $null)
+        $value = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $Name -DefaultValue $DefaultValue
+        return Get-ModuleLocalConfigValue -Config $callerLocalConfig -Name $Name -DefaultValue $value
+    }
+
+    $enabledValue = Get-MailBrandingValue -Name 'MailBrandingEnabled' -DefaultValue $true
+    $maxLogoKbValue = Get-MailBrandingValue -Name 'MailClientLogoMaxKB' -DefaultValue 200
+    $maxLogoKb = 200
+    if ($null -ne $maxLogoKbValue) { [void][int]::TryParse([string]$maxLogoKbValue, [ref]$maxLogoKb) }
+    if ($maxLogoKb -lt 1) { $maxLogoKb = 200 }
+
+    return [pscustomobject]@{
+        Enabled = ConvertTo-SmartM365ConfigBoolean -Value $enabledValue -DefaultValue $true
+        ClientName = [string](Get-MailBrandingValue -Name 'MailClientName' -DefaultValue '')
+        ClientLogoPath = [string](Get-MailBrandingValue -Name 'MailClientLogoPath' -DefaultValue '')
+        ClientLogoMaxKB = $maxLogoKb
+        FooterProductName = [string](Get-MailBrandingValue -Name 'MailFooterProductName' -DefaultValue 'workplacecloudhub.com')
+        FooterWebsiteUrl = [string](Get-MailBrandingValue -Name 'MailFooterWebsiteUrl' -DefaultValue 'https://workplacecloudhub.com/')
+        FooterGitHubLabel = [string](Get-MailBrandingValue -Name 'MailFooterGitHubLabel' -DefaultValue 'khda79/workplacecloudhub.com')
+        FooterGitHubUrl = [string](Get-MailBrandingValue -Name 'MailFooterGitHubUrl' -DefaultValue 'https://github.com/khda79/workplacecloudhub.com')
+    }
+}
+
+function ConvertTo-SmartM365MailLogoDataUri {
+    [CmdletBinding()]
+    param(
+        [string]$Path,
+        [int]$MaxKB = 200
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+
+    $resolvedPath = Resolve-SmartM365ConfigValue -Value $Path
+    if ([string]::IsNullOrWhiteSpace($resolvedPath) -or -not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        WriteLog -Message ("Mail branding logo file not found: {0}" -f $Path) -Level 'WARNING'
+        return ''
+    }
+
+    try {
+        $item = Get-Item -LiteralPath $resolvedPath -ErrorAction Stop
+        $maxBytes = [int64]$MaxKB * 1KB
+        if ($item.Length -gt $maxBytes) {
+            WriteLog -Message ("Mail branding logo skipped because it is larger than {0} KB: {1}" -f $MaxKB, $item.FullName) -Level 'WARNING'
+            return ''
+        }
+
+        $extension = [System.IO.Path]::GetExtension($item.FullName).TrimStart('.').ToLowerInvariant()
+        $contentType = switch ($extension) {
+            'png'  { 'image/png' }
+            'jpg'  { 'image/jpeg' }
+            'jpeg' { 'image/jpeg' }
+            'gif'  { 'image/gif' }
+            'svg'  { 'image/svg+xml' }
+            default { 'application/octet-stream' }
+        }
+
+        $bytes = [System.IO.File]::ReadAllBytes($item.FullName)
+        return ('data:{0};base64,{1}' -f $contentType, [Convert]::ToBase64String($bytes))
+    }
+    catch {
+        WriteLog -Message ("Mail branding logo could not be read: {0}" -f $_.Exception.Message) -Level 'WARNING'
+        return ''
+    }
+}
+
+function Add-SmartM365MailBranding {
+    [CmdletBinding()]
+    param([AllowNull()][string]$BodyHtml)
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { $BodyHtml = '' }
+    if ($BodyHtml -match 'SmartM365MailBranding:v1') { return $BodyHtml }
+
+    $branding = Get-SmartM365MailBrandingConfig
+    $clientName = ConvertTo-SmartM365EmailHtmlText $branding.ClientName
+    $productName = ConvertTo-SmartM365EmailHtmlText $branding.FooterProductName
+    $websiteUrl = ConvertTo-SmartM365EmailHtmlText $branding.FooterWebsiteUrl
+    $githubLabel = ConvertTo-SmartM365EmailHtmlText $branding.FooterGitHubLabel
+    $githubUrl = ConvertTo-SmartM365EmailHtmlText $branding.FooterGitHubUrl
+
+    $logoHtml = ''
+    if ($branding.Enabled) {
+        $logoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $branding.ClientLogoPath -MaxKB $branding.ClientLogoMaxKB
+        if (-not [string]::IsNullOrWhiteSpace($logoDataUri)) {
+            $safeLogoDataUri = ConvertTo-SmartM365EmailHtmlText $logoDataUri
+            $logoHtml = "<td style=`"width:1%;padding-right:14px;vertical-align:middle;`"><img src=`"$safeLogoDataUri`" alt=`"$clientName`" style=`"display:block;max-height:44px;max-width:160px;border:0;outline:none;text-decoration:none;`" /></td>"
+        }
+    }
+
+    $clientLabelHtml = ''
+    if ($branding.Enabled -and -not [string]::IsNullOrWhiteSpace($clientName)) {
+        $clientLabelHtml = @"
+<td style="vertical-align:middle;">
+  <div style="font-size:11px;line-height:15px;text-transform:uppercase;letter-spacing:0;color:#64748b;font-weight:700;">Client</div>
+  <div style="font-size:20px;line-height:26px;color:#0f172a;font-weight:700;">$clientName</div>
+</td>
+"@
+    }
+    elseif ($branding.Enabled -and -not [string]::IsNullOrWhiteSpace($logoHtml)) {
+        $clientLabelHtml = '<td style="vertical-align:middle;"><div style="font-size:13px;line-height:18px;color:#64748b;font-weight:600;">SmartM365 report</div></td>'
+    }
+
+    $headerHtml = ''
+    if ($branding.Enabled -and (-not [string]::IsNullOrWhiteSpace($logoHtml) -or -not [string]::IsNullOrWhiteSpace($clientLabelHtml))) {
+        $headerHtml = @"
+<!-- SmartM365MailBranding:v1 -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:18px 0 0 0;border-collapse:collapse;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;background:#ffffff;border:1px solid #d9e2ec;border-radius:6px;border-collapse:separate;">
+        <tr>
+          <td style="padding:14px 20px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+              <tr>$logoHtml$clientLabelHtml</tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+"@
+    }
+    else {
+        $headerHtml = '<!-- SmartM365MailBranding:v1 -->'
+    }
+
+    $footerHtml = @"
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:0 0 18px 0;border-collapse:collapse;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;border-collapse:collapse;">
+        <tr>
+          <td style="padding:12px 20px;color:#64748b;font-family:Segoe UI,Arial,sans-serif;font-size:11px;line-height:16px;text-align:center;">
+            <strong style="color:#334155;">$productName</strong><br />
+            <a href="$websiteUrl" style="color:#2563eb;text-decoration:none;">$websiteUrl</a><br />
+            <a href="$githubUrl" style="color:#2563eb;text-decoration:none;">$githubLabel</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+"@
+
+    if ($BodyHtml -match '(?is)<body\b[^>]*>') {
+        $branded = [regex]::Replace($BodyHtml, '(?is)(<body\b[^>]*>)', ('$1' + "`n" + $headerHtml), 1)
+        if ($branded -match '(?is)</body>') {
+            return [regex]::Replace($branded, '(?is)</body>', ($footerHtml + "`n" + '</body>'), 1)
+        }
+        return ($branded + "`n" + $footerHtml)
+    }
+
+    return ($headerHtml + "`n" + $BodyHtml + "`n" + $footerHtml)
+}
 function New-SmartM365EmailBody {
     [CmdletBinding()]
     param(
@@ -1627,11 +1810,11 @@ function ConvertTo-SmartM365EmailBody {
     }
 
     if ([string]::IsNullOrWhiteSpace($BodyHtml)) {
-        return New-SmartM365EmailBody -Title $effectiveTitle -Category $Category -Severity $Severity
+        return Add-SmartM365MailBranding -BodyHtml (New-SmartM365EmailBody -Title $effectiveTitle -Category $Category -Severity $Severity)
     }
 
     if ($BodyHtml -match 'SmartM365EmailTemplate:v1') {
-        return $BodyHtml
+        return Add-SmartM365MailBranding -BodyHtml $BodyHtml
     }
 
     $legacyHtml = [string]$BodyHtml
@@ -1658,7 +1841,7 @@ function ConvertTo-SmartM365EmailBody {
           </tr>
 "@
 
-    return New-SmartM365EmailBody -Title $effectiveTitle -Category $Category -Severity $Severity -BodyHtml $wrappedBody
+    return Add-SmartM365MailBranding -BodyHtml (New-SmartM365EmailBody -Title $effectiveTitle -Category $Category -Severity $Severity -BodyHtml $wrappedBody)
 }
 
 function NewSimpleEmailBody {
