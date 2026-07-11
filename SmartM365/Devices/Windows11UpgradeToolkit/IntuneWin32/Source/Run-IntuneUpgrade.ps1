@@ -4,7 +4,7 @@
 .DESCRIPTION
     Executes the local endpoint script against the packaged setup media cache and removes the scheduled task once the device is already Windows 11.
 .VERSION
-    1.0.7
+    1.0.8
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -88,6 +88,7 @@ $args = @(
     '-DirectSetupUpgrade',
     '-SkipVirtualMachines',
     '-AllowReboot',
+    '-AllowSetupCompletionRebootWhenNoUser',
     '-AllowSetupProfileRepair',
     '-AllowDiskCleanup',
     '-SetupExecutionMode', 'LocalCache',
@@ -98,6 +99,7 @@ $args = @(
     '-SetupProcessHeartbeatSeconds', '300',
     '-SetupProcessTimeoutMinutes', '0',
     '-SetupMediaCopyTimeoutMinutes', '180',
+    '-ForceRequiredRebootWhenUptimeOverDays', '7',
     '-DataRoot', $DataRoot
 )
 

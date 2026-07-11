@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.48
+    0.1.49
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -41,6 +41,7 @@ param(
     [switch]$ScheduleRetryAfterReboot,
     [ValidateRange(1, 30)][int]$RetryAfterRebootMaxAttempts = 3,
     [ValidateRange(0, 3600)][int]$RetryAfterRebootDelaySeconds = 300,
+    [ValidateRange(0, 3650)][int]$ForceRequiredRebootWhenUptimeOverDays = 7,
     [switch]$SkipVirtualMachines,
     [switch]$AllowDiskCleanup,
     [switch]$AllowAdvancedDiskCleanup,
@@ -1500,6 +1501,7 @@ if ($AllowSetupProfileRepair) { [void]$remoteArgs.Add('-AllowSetupProfileRepair'
 if ($ScheduleRetryAfterReboot) { [void]$remoteArgs.Add('-ScheduleRetryAfterReboot') }
 [void]$remoteArgs.Add('-RetryAfterRebootMaxAttempts'); [void]$remoteArgs.Add([string]$RetryAfterRebootMaxAttempts)
 [void]$remoteArgs.Add('-RetryAfterRebootDelaySeconds'); [void]$remoteArgs.Add([string]$RetryAfterRebootDelaySeconds)
+[void]$remoteArgs.Add('-ForceRequiredRebootWhenUptimeOverDays'); [void]$remoteArgs.Add([string]$ForceRequiredRebootWhenUptimeOverDays)
 if ($SkipVirtualMachines) { [void]$remoteArgs.Add('-SkipVirtualMachines') }
 if ($AllowDiskCleanup) { [void]$remoteArgs.Add('-AllowDiskCleanup') }
 if ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) { [void]$remoteArgs.Add('-AllowAdvancedDiskCleanup') }
@@ -1564,6 +1566,7 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Actions'; Option = 'ScheduleRetryAfterReboot'; Value = [string][bool]$ScheduleRetryAfterReboot }
     [pscustomobject]@{ Category = 'Actions'; Option = 'RetryAfterRebootMaxAttempts'; Value = [string]$RetryAfterRebootMaxAttempts }
     [pscustomobject]@{ Category = 'Actions'; Option = 'RetryAfterRebootDelaySeconds'; Value = [string]$RetryAfterRebootDelaySeconds }
+    [pscustomobject]@{ Category = 'Actions'; Option = 'ForceRequiredRebootWhenUptimeOverDays'; Value = [string]$ForceRequiredRebootWhenUptimeOverDays }
     [pscustomobject]@{ Category = 'Actions'; Option = 'SkipVirtualMachines'; Value = [string][bool]$SkipVirtualMachines }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowDiskCleanup'; Value = [string][bool]$AllowDiskCleanup }
     [pscustomobject]@{ Category = 'Actions'; Option = 'AllowAdvancedDiskCleanup'; Value = [string][bool]($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) }
@@ -1623,7 +1626,7 @@ Write-Host ("PsExec sec.   : Status={0}; SHA256={1}; Signature={2}; Signer={3}; 
 Write-Host "Repair script : $LocalScriptPath"
 Write-Host "Worker script : $LocalWorkerPath"
 Write-Host ("Technician     : Account={0}; UPN={1}; SID={2}; Auth={3}; Computer={4}" -f $script:TechnicianIdentity.Account,$script:TechnicianIdentity.UserPrincipalName,$script:TechnicianIdentity.Sid,$script:TechnicianIdentity.AuthenticationType,$script:TechnicianIdentity.ComputerName)
-Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser; SetupProfileRepair=$AllowSetupProfileRepair"
+Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser; SetupProfileRepair=$AllowSetupProfileRepair; ForceRequiredRebootWhenUptimeOverDays=$ForceRequiredRebootWhenUptimeOverDays"
 Write-Host "Setup         : AllowSetupUpgrade=$AllowSetupUpgrade; DirectSetup=$DirectSetupUpgrade; Effective=$([bool]($AllowSetupUpgrade -or $DirectSetupUpgrade)); Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "AD inventory  : Csv=$AdInventoryCsv; RootCsv=$AdRootInventoryCsv; Domain=$AdDomain; Refresh=$(-not $SkipAdInventoryRefresh); RecentRoot=$AdInventoryUsesRecentRootCsv"
 Write-Host "Intune invent.: Csv=$IntuneInventoryCsv; RootCsv=$IntuneRootInventoryCsv; Tenant=$IntuneTenantId; Refresh=$(-not $SkipIntuneInventoryRefresh); RecentRoot=$IntuneInventoryUsesRecentRootCsv"
