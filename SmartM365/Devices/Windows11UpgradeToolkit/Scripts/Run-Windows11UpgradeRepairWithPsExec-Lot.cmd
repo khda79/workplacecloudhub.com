@@ -172,11 +172,18 @@ if not "%DRY_RUN_REQUESTED%"=="1" (
 )
 
 set "RUN_ONCE_ARG="
-if /I "%W11UT_RUN_ONCE%"=="1" set "RUN_ONCE_ARG=-RunOnce"
+set "RUN_MODE_LABEL=Loop"
+if /I "%W11UT_RUN_ONCE%"=="1" (
+    set "RUN_ONCE_ARG=-RunOnce"
+    set "RUN_MODE_LABEL=Once"
+)
 
 set "IGNORE_RUN_GUARD_ARG="
-if /I "%W11UT_IGNORE_RUN_GUARD%"=="1" set "IGNORE_RUN_GUARD_ARG=-IgnoreRunGuard"
-
+if /I "%W11UT_IGNORE_RUN_GUARD%"=="1" (
+    set "IGNORE_RUN_GUARD_ARG=-IgnoreRunGuard"
+    set "RUN_MODE_LABEL=%RUN_MODE_LABEL%IgnoreRunGuard"
+)
+title SmartM365 W11UT - %LOT_NAME% - %RUN_MODE_LABEL%
 set "SETUP_ARGS="
 if /I "%W11UT_ALLOW_SETUP_UPGRADE%"=="1" set "SETUP_ARGS=%SETUP_ARGS% -AllowSetupUpgrade"
 if /I "%W11UT_DIRECT_SETUP_UPGRADE%"=="1" set "SETUP_ARGS=%SETUP_ARGS% -DirectSetupUpgrade"
