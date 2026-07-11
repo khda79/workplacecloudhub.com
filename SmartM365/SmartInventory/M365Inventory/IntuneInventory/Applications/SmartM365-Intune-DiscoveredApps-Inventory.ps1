@@ -28,15 +28,15 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.5
+    Version : 1.6
 
 .VERSION
-1.5
+1.6
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.5
+    Version : 1.6
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -69,7 +69,14 @@ param(
     [int]$ProgressEveryApps = 250,
 
     [Parameter(Mandatory = $false)]
-    [switch]$ResetResume
+    [switch]$ResetResume,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$RefreshDeviceDetailCache,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(0, [int]::MaxValue)]
+    [int]$DeviceDetailCacheMaxAgeDays = 7
 )
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -276,7 +283,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -297,6 +304,10 @@ if ($TopAppsByDeviceCount -lt 1) {
 if (-not $PSBoundParameters.ContainsKey('ProgressEveryApps')) {
     $ProgressEveryApps = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProgressEveryApps' -DefaultValue 250)
 }
+if (-not $PSBoundParameters.ContainsKey('DeviceDetailCacheMaxAgeDays')) {
+    $DeviceDetailCacheMaxAgeDays = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceDetailCacheMaxAgeDays' -DefaultValue 7)
+}
+$script:UsePreviousDeviceDetailCache = -not $RefreshDeviceDetailCache
 $script:GraphMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphMaxRetryAttempts' -DefaultValue 8)
 $script:GraphRetryDefaultSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryDefaultSeconds' -DefaultValue 30)
 $script:GraphRetryMaxSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryMaxSeconds' -DefaultValue 300)
@@ -307,6 +318,8 @@ $script:Stat_AppsProcessed    = 0
 $script:Stat_AppsSkipped      = 0
 $script:Stat_DeviceDetailRows = 0
 $script:Stat_DetailAppsSkippedByResume = 0
+$script:Stat_DetailAppsFromCache = 0
+$script:Stat_DeviceDetailRowsFromCache = 0
 $script:DeviceDetailResumePath = ''
 $script:DeviceDetailPartialPath = ''
 $script:DeviceDetailTimestampedPath = ''
@@ -333,6 +346,9 @@ try {
     WriteLog -Message "DeviceDetailMode   : $DeviceDetailMode"
     WriteLog -Message "TopAppsByDeviceCount: $TopAppsByDeviceCount"
     WriteLog -Message "ProgressEveryApps  : $ProgressEveryApps"
+    WriteLog -Message "Use previous DeviceDetail cache: $script:UsePreviousDeviceDetailCache"
+    WriteLog -Message "DeviceDetail cache max age days: $DeviceDetailCacheMaxAgeDays"
+    WriteLog -Message "RefreshDeviceDetailCache: $RefreshDeviceDetailCache"
     WriteLog -Message "ResetResume        : $ResetResume"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
@@ -495,6 +511,152 @@ function Write-DiscoveredAppsCsvRows {
     } else {
         $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
     }
+}
+
+
+function Get-DiscoveredAppsAppDeviceCount {
+    [CmdletBinding()]
+    param([AllowNull()]$App)
+
+    $count = 0
+    try {
+        if ($App -and $null -ne $App.deviceCount -and [int]::TryParse([string]$App.deviceCount, [ref]$count)) {
+            return $count
+        }
+    } catch {}
+    return 0
+}
+
+function Use-DiscoveredAppsDeviceDetailCache {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][object[]]$TargetApps,
+        [Parameter(Mandatory = $true)][string]$PartialPath,
+        [Parameter(Mandatory = $true)]$ProcessedAppIds,
+        [Parameter(Mandatory = $true)]$CachedAppIds,
+        [int]$MaxAgeDays = 7
+    )
+
+    $result = [ordered]@{
+        CachePath = $CachePath
+        Used      = $false
+        Apps      = 0
+        Rows      = 0
+        Reason    = ''
+    }
+
+    if (-not (Test-Path -LiteralPath $CachePath)) {
+        $result.Reason = 'cache file not found'
+        return [pscustomobject]$result
+    }
+
+    $cacheItem = Get-Item -LiteralPath $CachePath -ErrorAction Stop
+    if ($MaxAgeDays -gt 0 -and $cacheItem.LastWriteTime -lt (Get-Date).AddDays(-1 * $MaxAgeDays)) {
+        $result.Reason = ("cache file older than {0} day(s): {1}" -f $MaxAgeDays, $cacheItem.LastWriteTime)
+        return [pscustomobject]$result
+    }
+
+    $targetById = @{}
+    foreach ($app in @($TargetApps)) {
+        $id = [string]$app.id
+        if (-not [string]::IsNullOrWhiteSpace($id) -and -not $targetById.ContainsKey($id)) {
+            $targetById[$id] = $app
+        }
+    }
+    if ($targetById.Count -eq 0) {
+        $result.Reason = 'no target apps'
+        return [pscustomobject]$result
+    }
+
+    $statsById = @{}
+    try {
+        Import-Csv -LiteralPath $CachePath | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AppId) -and $targetById.ContainsKey([string]$_.AppId) } | ForEach-Object {
+            $id = [string]$_.AppId
+
+            if (-not $statsById.ContainsKey($id)) {
+                $statsById[$id] = [pscustomobject]@{
+                    AppId      = $id
+                    AppName    = [string]$_.AppName
+                    AppVersion = [string]$_.AppVersion
+                    Publisher  = [string]$_.AppPublisher
+                    Platform   = [string]$_.Platform
+                    Rows       = 0
+                    DeviceRows = 0
+                    MetadataOk = $true
+                }
+            }
+
+            $stat = $statsById[$id]
+            $stat.Rows++
+            if (-not [string]::IsNullOrWhiteSpace([string]$_.DeviceId)) { $stat.DeviceRows++ }
+
+            $app = $targetById[$id]
+            if ([string]$_.AppName -ne [string]$app.displayName -or
+                [string]$_.AppVersion -ne [string]$app.version -or
+                [string]$_.AppPublisher -ne [string]$app.publisher -or
+                [string]$_.Platform -ne [string]$app.platform) {
+                $stat.MetadataOk = $false
+            }
+        }
+    }
+    catch {
+        $result.Reason = "failed to read cache stats: $_"
+        return [pscustomobject]$result
+    }
+
+    $cacheable = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in @($statsById.Keys)) {
+        $stat = $statsById[$id]
+        $app = $targetById[$id]
+        $expectedDeviceCount = Get-DiscoveredAppsAppDeviceCount -App $app
+        $deviceCountOk = if ($expectedDeviceCount -eq 0) {
+            $stat.Rows -gt 0 -and $stat.DeviceRows -eq 0
+        } else {
+            $stat.DeviceRows -eq $expectedDeviceCount
+        }
+
+        if ($stat.MetadataOk -and $deviceCountOk) {
+            [void]$cacheable.Add($id)
+        }
+    }
+
+    if ($cacheable.Count -eq 0) {
+        $result.Reason = 'no cache rows match current app metadata/device counts'
+        return [pscustomobject]$result
+    }
+
+    $batch = New-Object 'System.Collections.Generic.List[object]'
+    try {
+        Import-Csv -LiteralPath $CachePath | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AppId) -and $cacheable.Contains([string]$_.AppId) } | ForEach-Object {
+            $id = [string]$_.AppId
+
+            $batch.Add($_) | Out-Null
+            $result.Rows++
+            if ($batch.Count -ge 5000) {
+                Write-DiscoveredAppsCsvRows -Path $PartialPath -Rows $batch.ToArray()
+                $batch.Clear()
+            }
+        }
+        if ($batch.Count -gt 0) {
+            Write-DiscoveredAppsCsvRows -Path $PartialPath -Rows $batch.ToArray()
+            $batch.Clear()
+        }
+    }
+    catch {
+        $result.Reason = "failed to copy cache rows: $_"
+        return [pscustomobject]$result
+    }
+
+    foreach ($id in @($cacheable)) {
+        [void]$ProcessedAppIds.Add($id)
+        [void]$CachedAppIds.Add($id)
+    }
+
+    $result.Used = $true
+    $result.Apps = $cacheable.Count
+    $result.Reason = 'cache rows reused'
+    return [pscustomobject]$result
 }
 
 function Get-DiscoveredAppsResumeState {
@@ -721,6 +883,7 @@ try {
         $detailTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $script:DeviceDetailResumePath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName.resume.json"
         $processedAppIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $cachedAppIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $streamingEnabled = -not $DryRun
 
         if ($streamingEnabled -and $ResetResume) {
@@ -748,13 +911,51 @@ try {
             $script:DeviceDetailTimestampedPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.csv"
             Remove-Item -LiteralPath $script:DeviceDetailPartialPath -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $script:DeviceDetailResumePath -Force -ErrorAction SilentlyContinue
+
+            if ($streamingEnabled -and $script:UsePreviousDeviceDetailCache -and $DeviceDetailMode -ne 'None') {
+                $cacheCandidates = New-Object 'System.Collections.Generic.List[string]'
+                if (-not [string]::IsNullOrWhiteSpace($globalPath)) {
+                    $cacheCandidates.Add((Join-Path -Path $globalPath -ChildPath "$detailBaseFileName.csv")) | Out-Null
+                }
+                if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+                    $cacheCandidates.Add((Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName.csv")) | Out-Null
+                }
+
+                $cachePath = @($cacheCandidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1)[0]
+                if ($cachePath) {
+                    WriteLog -Message "Previous DeviceDetail cache candidate found: $cachePath" "INFO"
+                    $cacheResult = Use-DiscoveredAppsDeviceDetailCache `
+                        -CachePath $cachePath `
+                        -TargetApps @($detailApps) `
+                        -PartialPath $script:DeviceDetailPartialPath `
+                        -ProcessedAppIds $processedAppIds `
+                        -CachedAppIds $cachedAppIds `
+                        -MaxAgeDays $DeviceDetailCacheMaxAgeDays
+
+                    if ($cacheResult.Used) {
+                        $script:Stat_DetailAppsFromCache = [int]$cacheResult.Apps
+                        $script:Stat_DeviceDetailRowsFromCache = [int]$cacheResult.Rows
+                        $script:Stat_AppsProcessed += [int]$cacheResult.Apps
+                        $script:Stat_DeviceDetailRows += [int]$cacheResult.Rows
+                        WriteLog -Message ("Previous DeviceDetail cache reused: Apps={0}; Rows={1}; Cache={2}" -f $cacheResult.Apps, $cacheResult.Rows, $cacheResult.CachePath) "INFO"
+                    } else {
+                        WriteLog -Message ("Previous DeviceDetail cache not reused: {0}" -f $cacheResult.Reason) "INFO"
+                    }
+                } else {
+                    WriteLog -Message "No previous DeviceDetail cache found; falling back to DeviceDetailMode=$DeviceDetailMode Graph collection." "INFO"
+                }
+            } elseif ($RefreshDeviceDetailCache) {
+                WriteLog -Message "RefreshDeviceDetailCache specified; previous DeviceDetail cache bypassed." "INFO"
+            }
         }
 
         $appIndex = 0
         foreach ($app in $detailApps) {
             $appIndex++
             if ($processedAppIds.Contains([string]$app.id)) {
-                $script:Stat_DetailAppsSkippedByResume++
+                if (-not $cachedAppIds.Contains([string]$app.id)) {
+                    $script:Stat_DetailAppsSkippedByResume++
+                }
                 continue
             }
 
@@ -765,7 +966,7 @@ try {
                 -PercentComplete $pctComplete
 
             if ($ProgressEveryApps -gt 0 -and (($appIndex % $ProgressEveryApps -eq 0) -or $appIndex -eq $detailApps.Count)) {
-                WriteLog -Message ("Device detail progress: {0}/{1} apps ({2}%). DetailRows={3}; Processed={4}; Skipped={5}; ResumedSkipped={6}; GraphCalls={7}; ThrottleRetries={8}" -f $appIndex, $detailApps.Count, $pctComplete, $script:Stat_DeviceDetailRows, $script:Stat_AppsProcessed, $script:Stat_AppsSkipped, $script:Stat_DetailAppsSkippedByResume, $script:Stat_GraphCalls, $script:Stat_ThrottleRetries) "INFO"
+                WriteLog -Message ("Device detail progress: {0}/{1} apps ({2}%). DetailRows={3}; Processed={4}; Skipped={5}; CacheApps={6}; ResumedSkipped={7}; GraphCalls={8}; ThrottleRetries={9}" -f $appIndex, $detailApps.Count, $pctComplete, $script:Stat_DeviceDetailRows, $script:Stat_AppsProcessed, $script:Stat_AppsSkipped, $script:Stat_DetailAppsFromCache, $script:Stat_DetailAppsSkippedByResume, $script:Stat_GraphCalls, $script:Stat_ThrottleRetries) "INFO"
             }
 
             try {
@@ -857,7 +1058,7 @@ try {
         }
     }
 
-    WriteLog -Message ("DeviceDetail completed. TargetApps={0}; Processed={1}; Skipped={2}; ResumedSkipped={3}; Rows={4}" -f $script:Stat_DetailAppsTargeted, $script:Stat_AppsProcessed, $script:Stat_AppsSkipped, $script:Stat_DetailAppsSkippedByResume, $script:Stat_DeviceDetailRows) "INFO"
+    WriteLog -Message ("DeviceDetail completed. TargetApps={0}; Processed={1}; Skipped={2}; CacheApps={3}; ResumedSkipped={4}; Rows={5}; CacheRows={6}" -f $script:Stat_DetailAppsTargeted, $script:Stat_AppsProcessed, $script:Stat_AppsSkipped, $script:Stat_DetailAppsFromCache, $script:Stat_DetailAppsSkippedByResume, $script:Stat_DeviceDetailRows, $script:Stat_DeviceDetailRowsFromCache) "INFO"
 
 } catch {
     $globalError = $_
@@ -925,7 +1126,9 @@ $($global:LogTextFile)
     WriteLog -Message "  Apps processed successfully          : $($script:Stat_AppsProcessed)"
     WriteLog -Message "  Apps skipped (errors)                : $($script:Stat_AppsSkipped)"
     WriteLog -Message "  Apps skipped by resume               : $($script:Stat_DetailAppsSkippedByResume)"
+    WriteLog -Message "  Apps served from cache               : $($script:Stat_DetailAppsFromCache)"
     WriteLog -Message "  Device detail rows exported          : $($script:Stat_DeviceDetailRows)"
+    WriteLog -Message "  Device detail rows from cache        : $($script:Stat_DeviceDetailRowsFromCache)"
     WriteLog -Message "  Graph API calls                      : $($script:Stat_GraphCalls)"
     WriteLog -Message "  Throttle retries (429)               : $($script:Stat_ThrottleRetries)"
     WriteLog -Message "  Elapsed time                         : $elapsedStr"
