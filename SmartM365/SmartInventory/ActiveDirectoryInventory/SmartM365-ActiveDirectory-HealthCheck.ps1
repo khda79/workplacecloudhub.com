@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.11
+    1.0.12
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -45,8 +45,9 @@ $RunStarted = Get-Date
 $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)
 $RunId = [guid]::NewGuid().ToString()
 $Rows = [System.Collections.ArrayList]::new()
+$DomainFacts = [System.Collections.ArrayList]::new()
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.11'
+$ScriptVersion = '1.0.12'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -227,18 +228,53 @@ function Send-ReportMail([string]$Subject,[string]$Body){
     if ($SmtpPort -ne 25) { $mailParams.SmtpPort = $SmtpPort }
     SendEmailHtmlReport @mailParams
 }
-function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[datetime]$ended,[string]$csv){
+function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[datetime]$ended,[string]$csv,[AllowNull()][object]$forestInfo=$null,[bool]$RemoteDcAdminChecksEnabled=$false){
     $r = @($r)
-    $c=@{OK='#107c10';Warning='#ff8c00';Critical='#d13438'}[$status]; $find=@($r|Where-Object Status -ne OK|Sort-Object @{Expression={Rank $_.Status}},Domain,DC,Category,Check|Select-Object -First 200); $b=[Text.StringBuilder]::new()
-    [void]$b.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dde7f0;padding:7px;font-size:12px;text-align:left;vertical-align:top}th{background:#eef6fc}.rowOK{background:#f3fbf3}.rowWarning{background:#fff7e6}.rowCritical{background:#fde7e9}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}</style></head><body>')
-    [void]$b.AppendLine(("<div class='card'><h1>Active Directory Health Check <span class='pill' style='background:{0}'>{1}</span></h1><p>RunId: {2}<br>Machine: {3}<br>Started UTC: {4}<br>Ended UTC: {5}<br>Duration: {6}<br>CSV: {7}</p></div>" -f $c,$status,(ConvertTo-HtmlSafe $RunId),(ConvertTo-HtmlSafe $env:COMPUTERNAME),(ConvertTo-IsoUtc $started),(ConvertTo-IsoUtc $ended),(ConvertTo-HtmlSafe ((New-TimeSpan -Start $started -End $ended).ToString())),(ConvertTo-HtmlSafe $csv)))
-    [void]$b.AppendLine(("<div class='card'><b>Summary</b>: Critical={0}; Warning={1}; OK={2}; Total={3}</div>" -f @($r|Where-Object Status -eq Critical).Count,@($r|Where-Object Status -eq Warning).Count,@($r|Where-Object Status -eq OK).Count,$r.Count))
+    $facts = @($DomainFacts.ToArray())
+    $c = @{OK='#107c10';Warning='#ff8c00';Critical='#d13438'}[$status]
+    $criticalRows = @($r | Where-Object Status -eq Critical)
+    $warningRows = @($r | Where-Object Status -eq Warning)
+    $okRows = @($r | Where-Object Status -eq OK)
+    $find = @($r | Where-Object Status -ne OK | Sort-Object @{Expression={Rank $_.Status}},Domain,DC,Category,Check | Select-Object -First 200)
+    $forestName = if ($forestInfo -and $forestInfo.Name) { [string]$forestInfo.Name } else { [string](@($r | Where-Object Forest | Select-Object -ExpandProperty Forest -First 1)[0]) }
+    $rootDomain = if ($forestInfo -and $forestInfo.RootDomain) { [string]$forestInfo.RootDomain } else { [string](@($r | Where-Object Domain | Select-Object -ExpandProperty Domain -First 1)[0]) }
+    $forestMode = if ($forestInfo -and $forestInfo.ForestMode) { [string]$forestInfo.ForestMode } else { 'NotAvailable' }
+    $domains = if ($forestInfo -and $forestInfo.Domains) { @($forestInfo.Domains | Sort-Object) } else { @($r | Where-Object Domain | Select-Object -ExpandProperty Domain -Unique | Sort-Object) }
+    $domainBadges = (@($domains) | ForEach-Object { '<span class="tag">' + (ConvertTo-HtmlSafe $_) + '</span>' }) -join ' '
+    $dcNames = @($r | Where-Object { $_.Category -eq 'Connectivity' -and $_.Check -eq 'Ping' -and $_.DC } | Select-Object -ExpandProperty DC -Unique | Sort-Object)
+    $gcCount = if ($facts.Count -gt 0) { ($facts | Measure-Object -Property GlobalCatalogCount -Sum).Sum } else { '' }
+    $lockedTotal = 0
+    foreach ($row in @($r | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' })) {
+        $value = 0.0
+        if ([double]::TryParse([string]$row.NumericValue,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$value)) { $lockedTotal += [int]$value }
+    }
+    $domainsWithCritical = @($criticalRows | Where-Object Domain | Select-Object -ExpandProperty Domain -Unique).Count
+    $dcsWithCritical = @($criticalRows | Where-Object DC | Select-Object -ExpandProperty DC -Unique).Count
+    $unreachableDcs = @($criticalRows | Where-Object { $_.Category -eq 'Connectivity' -and $_.DC } | Select-Object -ExpandProperty DC -Unique).Count
+    $replicationCritical = @($criticalRows | Where-Object Category -eq Replication).Count
+    $sysvolCritical = @($criticalRows | Where-Object { $_.Category -eq 'SYSVOL' -and $_.Check -in @('SYSVOL','NETLOGON') }).Count
+    $b = [Text.StringBuilder]::new()
+    [void]$b.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}.muted{color:#52657a}.small{font-size:11px}.metric{font-size:22px;font-weight:700;color:#0f172a}.tag{display:inline-block;border:1px solid #cbd8e6;background:#f8fbfe;border-radius:999px;padding:3px 8px;margin:2px;font-size:11px}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}.grid{width:100%;border-collapse:separate;border-spacing:8px}.grid td{border:1px solid #dde7f0;background:#f8fbfe;border-radius:6px;padding:10px}.riskCritical{color:#b42318;font-weight:700}.riskWarning{color:#b54708;font-weight:700}.riskOK{color:#067647;font-weight:700}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dde7f0;padding:7px;font-size:12px;text-align:left;vertical-align:top}th{background:#eef6fc}.rowOK{background:#f3fbf3}.rowWarning{background:#fff7e6}.rowCritical{background:#fde7e9}</style></head><body>')
+    [void]$b.AppendLine(("<div class='card'><h1>Active Directory Health Check <span class='pill' style='background:{0}'>{1}</span></h1><p class='muted'>RunId: {2}<br>Machine: {3}<br>Started UTC: {4}<br>Ended UTC: {5}<br>Duration: {6}</p></div>" -f $c,$status,(ConvertTo-HtmlSafe $RunId),(ConvertTo-HtmlSafe $env:COMPUTERNAME),(ConvertTo-IsoUtc $started),(ConvertTo-IsoUtc $ended),(ConvertTo-HtmlSafe ((New-TimeSpan -Start $started -End $ended).ToString()))))
+    [void]$b.AppendLine(("<div class='card'><h2>Forest recap</h2><table><tr><th>Forest</th><td>{0}</td><th>Root domain</th><td>{1}</td></tr><tr><th>Forest mode</th><td>{2}</td><th>Remote DC admin checks</th><td>{3}</td></tr><tr><th>Domains</th><td>{4}</td><th>Domain controllers</th><td>{5}</td></tr><tr><th>Global catalogs</th><td>{6}</td><th>Domains scanned</th><td>{7}</td></tr></table></div>" -f (ConvertTo-HtmlSafe $forestName),(ConvertTo-HtmlSafe $rootDomain),(ConvertTo-HtmlSafe $forestMode),$(if($RemoteDcAdminChecksEnabled){'Enabled'}else{'Disabled'}),@($domains).Count,$dcNames.Count,$gcCount,$domainBadges))
+    [void]$b.AppendLine(("<div class='card'><h2>Operational recap</h2><table class='grid'><tr><td><div class='metric'>{0}</div><div>Total checks</div></td><td><div class='metric riskCritical'>{1}</div><div>Critical</div></td><td><div class='metric riskWarning'>{2}</div><div>Warning</div></td><td><div class='metric riskOK'>{3}</div><div>OK</div></td></tr><tr><td><div class='metric'>{4}</div><div>Domains with critical findings</div></td><td><div class='metric'>{5}</div><div>DCs with critical findings</div></td><td><div class='metric'>{6}</div><div>Unreachable DCs</div></td><td><div class='metric'>{7}</div><div>Locked user accounts</div></td></tr><tr><td><div class='metric'>{8}</div><div>Replication critical rows</div></td><td><div class='metric'>{9}</div><div>SYSVOL/NETLOGON critical rows</div></td><td><div class='metric'>{10}</div><div>Total DCs</div></td><td><div class='metric'>{11}</div><div>Domains</div></td></tr></table></div>" -f $r.Count,$criticalRows.Count,$warningRows.Count,$okRows.Count,$domainsWithCritical,$dcsWithCritical,$unreachableDcs,$lockedTotal,$replicationCritical,$sysvolCritical,$dcNames.Count,@($domains).Count))
+    [void]$b.AppendLine('<div class="card"><h2>FSMO roles</h2><table><tr><th>Scope</th><th>Domain</th><th>Role</th><th>Holder</th><th>Status</th></tr>')
+    foreach ($x in @($r | Where-Object Category -eq FSMO | Sort-Object Domain,Check)) { $scope = if ($x.Check -in @('SchemaMaster','DomainNamingMaster')) { 'Forest' } else { 'Domain' }; [void]$b.AppendLine(("<tr class='row{0}'><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{0}</td></tr>" -f (ConvertTo-HtmlSafe $x.Status),(ConvertTo-HtmlSafe $scope),(ConvertTo-HtmlSafe $x.Domain),(ConvertTo-HtmlSafe $x.Check),(ConvertTo-HtmlSafe $x.DC))) }
+    [void]$b.AppendLine('</table></div>')
+    [void]$b.AppendLine('<div class="card"><h2>Priority findings</h2><table><tr><th>Type</th><th>Name</th><th>Critical</th><th>Warning</th></tr>')
+    $priorityGroups = @()
+    $priorityGroups += @($r | Where-Object DC | Group-Object DC | ForEach-Object { $it = @($_.Group); [pscustomobject]@{ Type='DC'; Name=$_.Name; Critical=@($it | Where-Object Status -eq Critical).Count; Warning=@($it | Where-Object Status -eq Warning).Count } })
+    $priorityGroups += @($r | Group-Object Category | ForEach-Object { $it = @($_.Group); [pscustomobject]@{ Type='Category'; Name=$_.Name; Critical=@($it | Where-Object Status -eq Critical).Count; Warning=@($it | Where-Object Status -eq Warning).Count } })
+    foreach ($g in @($priorityGroups | Where-Object { $_.Critical -gt 0 -or $_.Warning -gt 0 } | Sort-Object @{Expression='Critical';Descending=$true},@{Expression='Warning';Descending=$true},Type,Name | Select-Object -First 20)) { [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td class='riskCritical'>{2}</td><td class='riskWarning'>{3}</td></tr>" -f (ConvertTo-HtmlSafe $g.Type),(ConvertTo-HtmlSafe $g.Name),$g.Critical,$g.Warning)) }
+    [void]$b.AppendLine('</table></div>')
+    [void]$b.AppendLine('<div class="card"><h2>Domain status summary</h2><table><tr><th>Domain</th><th>DCs</th><th>OK</th><th>Warning</th><th>Critical</th><th>Locked users</th><th>FSMO</th><th>Replication</th><th>SYSVOL</th></tr>')
+    foreach ($g in ($r | Where-Object Domain | Group-Object Domain | Sort-Object Name)) { $it = @($g.Group); $fact = @($facts | Where-Object Domain -eq $g.Name | Select-Object -First 1)[0]; $locked = @($it | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' } | Select-Object -First 1)[0]; $lockedValue = if ($locked) { $locked.NumericValue } else { '' }; $fsmoWorst = Worst @($it | Where-Object Category -eq FSMO); $repWorst = Worst @($it | Where-Object Category -eq Replication); $sysvolWorst = Worst @($it | Where-Object Category -eq SYSVOL); $dcCount = if ($fact) { $fact.DCCount } else { @($it | Where-Object DC | Select-Object -ExpandProperty DC -Unique).Count }; [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td class='risk{6}'>{6}</td><td class='risk{7}'>{7}</td><td class='risk{8}'>{8}</td></tr>" -f (ConvertTo-HtmlSafe $g.Name),$dcCount,@($it | Where-Object Status -eq OK).Count,@($it | Where-Object Status -eq Warning).Count,@($it | Where-Object Status -eq Critical).Count,(ConvertTo-HtmlSafe $lockedValue),$fsmoWorst,$repWorst,$sysvolWorst)) }
+    [void]$b.AppendLine('</table></div>')
     [void]$b.AppendLine('<div class="card"><h2>Critical and warning findings</h2><table><tr><th>Status</th><th>Domain</th><th>DC</th><th>Category</th><th>Check</th><th>Value</th><th>Threshold</th><th>Details</th></tr>')
-    if($find.Count -eq 0){[void]$b.AppendLine('<tr class="rowOK"><td colspan="8">No critical or warning findings.</td></tr>')}
-    foreach($x in $find){[void]$b.AppendLine(("<tr class='row{0}'><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td>{7}</td></tr>" -f (ConvertTo-HtmlSafe $x.Status),(ConvertTo-HtmlSafe $x.Domain),(ConvertTo-HtmlSafe $x.DC),(ConvertTo-HtmlSafe $x.Category),(ConvertTo-HtmlSafe $x.Check),(ConvertTo-HtmlSafe $x.NumericValue),(ConvertTo-HtmlSafe $x.Threshold),(ConvertTo-HtmlSafe $x.Details)))}
-    [void]$b.AppendLine('</table></div><div class="card"><h2>OK summary by domain</h2><table><tr><th>Domain</th><th>OK</th><th>Warning</th><th>Critical</th></tr>')
-    foreach($g in ($r|Where-Object Domain|Group-Object Domain|Sort-Object Name)){ $it=@($g.Group); [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td></tr>" -f (ConvertTo-HtmlSafe $g.Name),@($it|Where-Object Status -eq OK).Count,@($it|Where-Object Status -eq Warning).Count,@($it|Where-Object Status -eq Critical).Count)) }
-    [void]$b.AppendLine('</table></div></body></html>'); $b.ToString()
+    if ($find.Count -eq 0) { [void]$b.AppendLine('<tr class="rowOK"><td colspan="8">No critical or warning findings.</td></tr>') }
+    foreach ($x in $find) { [void]$b.AppendLine(("<tr class='row{0}'><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td>{7}</td></tr>" -f (ConvertTo-HtmlSafe $x.Status),(ConvertTo-HtmlSafe $x.Domain),(ConvertTo-HtmlSafe $x.DC),(ConvertTo-HtmlSafe $x.Category),(ConvertTo-HtmlSafe $x.Check),(ConvertTo-HtmlSafe $x.NumericValue),(ConvertTo-HtmlSafe $x.Threshold),(ConvertTo-HtmlSafe $x.Details))) }
+    [void]$b.AppendLine('</table></div><div class="card small"><h2>Technical files</h2><p>CSV: ' + (ConvertTo-HtmlSafe $csv) + '</p></div></body></html>')
+    $b.ToString()
 }
 function Invoke-DcCheck($ForestName,$DomainName,$DC,$AllDcs){
     $dcName=if($DC.HostName){[string]$DC.HostName}else{[string]$DC.Name}
@@ -273,6 +309,7 @@ function Invoke-DomainCheck($ForestName,[string]$DomainName,$ForestInfo){
     $domain=Invoke-Retry {Get-ADDomain -Identity $DomainName -Server $DomainName -ErrorAction Stop}
     $dcs=@(Invoke-Retry {Get-ADDomainController -Filter * -Server $DomainName -ErrorAction Stop}|Sort-Object HostName)
     $dcNames=@($dcs|ForEach-Object{if($_.HostName){[string]$_.HostName}else{[string]$_.Name}})
+    [void]$DomainFacts.Add([pscustomobject]@{Domain=$DomainName;DomainMode=[string]$domain.DomainMode;DCCount=@($dcs).Count;GlobalCatalogCount=@($dcs|Where-Object IsGlobalCatalog).Count;PDCEmulator=[string]$domain.PDCEmulator;RIDMaster=[string]$domain.RIDMaster;InfrastructureMaster=[string]$domain.InfrastructureMaster})
     $s=Get-Date;try{$srv=@(Resolve-DnsName -Name "_ldap._tcp.$DomainName" -Type SRV -ErrorAction Stop);$targets=@($srv|Select-Object -First 5|ForEach-Object{$target=Get-ObjectPropertyValue $_ @('NameTarget','NameHost','Target','Name');$port=Get-ObjectPropertyValue $_ @('Port');if($port){"$target`:$port"}else{$target}});Add-Row $ForestName $DomainName '' DNS LDAP_SRV $(if($srv.Count -gt 0){'OK'}else{'Critical'}) $srv.Count "_ldap._tcp.$DomainName" '>= 1 SRV record' ($targets -join '; ') (Ms $s)}catch{Add-Row $ForestName $DomainName '' DNS LDAP_SRV Critical 0 "_ldap._tcp.$DomainName" '>= 1 SRV record' $_.Exception.Message (Ms $s)}
     foreach($dc in $dcs){Invoke-DcCheck $ForestName $DomainName $dc $dcNames}
     foreach($role in 'PDCEmulator','RIDMaster','InfrastructureMaster'){$s=Get-Date;try{$h=[string]$domain.$role;$ok=Test-Port $h 389;Add-Row $ForestName $DomainName $h FSMO $role $(if($ok){'OK'}else{'Critical'}) ([int]$ok) $h 'LDAP 389 reachable' "Domain FSMO holder for $role" (Ms $s)}catch{Add-Row $ForestName $DomainName '' FSMO $role Critical 0 Error 'LDAP 389 reachable' $_.Exception.Message (Ms $s)}}
@@ -324,7 +361,7 @@ try{
     $all|Export-Csv $latestCsv -NoTypeInformation -Encoding utf8BOM
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csv
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestCsv
-    $end=Get-Date;$worst=Worst $all;$subject="[$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
+    $end=Get-Date;$worst=Worst $all;$subject="[$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv -forestInfo $forest -RemoteDcAdminChecksEnabled:$EnableRemoteDcAdminChecks;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
     $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
     $global:csvGeneratedPaths = @($csv, $latestCsv)
