@@ -35,8 +35,8 @@ Features:
 - Per-job overlap guard based on the state file (effective across recycles) and a global
   lock file so two orchestrator instances never run together for the same tenant.
 - Timeout with process-tree kill, retry policy (MaxRetries / RetryDelaySeconds).
-- Daily job-runs CSV (atomic writes), orchestrator log with daily rotation, one log per
-  job execution, retention cleanup, heartbeat file refreshed at every tick.
+- Tenant-wide orchestrator lifecycle CSV, daily job-runs CSV (atomic writes), orchestrator
+  log with daily rotation, one log per job execution, retention cleanup and heartbeat.
 - HTML error email on final job failure (JobMailMode Always/OnError/Never), optional
   daily HTML summary email, fatal error email if the orchestrator itself crashes.
   Mail uses System.Net.Mail with explicit UTF-8 over SmtpClient (never Send-MailMessage),
@@ -81,7 +81,7 @@ Overrides the state file path. Default: Orchestrator-State.json in the orchestra
 folder ({{DataAllRootPath}}\Orchestrator).
 
 .VERSION
-1.2.0
+1.3.0
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -90,7 +90,7 @@ folder ({{DataAllRootPath}}\Orchestrator).
     manages its own connections inside its own child process.
 
 .NOTES
-    Version : 1.2.0
+    Version : 1.3.0
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -112,7 +112,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.2.0'
+$ScriptVersion = '1.3.0'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -850,6 +850,204 @@ function Add-JobRunCsvRow {
 }
 
 # ==========================================================
+# Orchestrator lifecycle runs CSV (shared per tenant)
+# ==========================================================
+function Get-OrchestratorRunMode {
+    if ($DryRun) { return 'DryRun' }
+    if ($Once) { return 'Once' }
+    return 'Resident'
+}
+
+function Get-OrchestratorRunUserName {
+    try {
+        return [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    }
+    catch {
+        if (-not [string]::IsNullOrWhiteSpace($env:USERDOMAIN)) {
+            return '{0}\{1}' -f $env:USERDOMAIN, $env:USERNAME
+        }
+        return [string]$env:USERNAME
+    }
+}
+
+function Protect-OrchestratorRunText {
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    $cleanText = (($Text -replace '[\r\n]+', ' ') -replace '\s{2,}', ' ').Trim()
+    if ($cleanText.Length -gt 1000) { $cleanText = $cleanText.Substring(0, 1000) }
+    return $cleanText
+}
+
+function Invoke-WithOrchestratorRunsCsvLock {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$Action,
+        [AllowEmptyCollection()][object[]]$ArgumentList = @()
+    )
+
+    $lockStream = $null
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        try {
+            $lockStream = [System.IO.File]::Open(
+                $script:Settings.OrchestratorRunsLockPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None
+            )
+            break
+        }
+        catch {
+            if ($_.Exception -isnot [System.IO.IOException] -or $attempt -eq 49) { throw }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+
+    if ($null -eq $lockStream) { throw 'Could not acquire the orchestrator-runs CSV lock.' }
+    try {
+        & $Action @ArgumentList
+    }
+    finally {
+        $lockStream.Dispose()
+    }
+}
+
+function Read-OrchestratorRunsCsv {
+    $csvPath = $script:Settings.OrchestratorRunsCsvPath
+    if (-not (Test-Path -LiteralPath $csvPath)) { return @() }
+    if ((Get-Item -LiteralPath $csvPath).Length -eq 0) { return @() }
+    return @(Import-Csv -LiteralPath $csvPath)
+}
+
+function Write-OrchestratorRunsCsv {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows)
+
+    $columns = @(
+        'RunId',
+        'Tenant',
+        'StartDateTime',
+        'StartDateTimeUtc',
+        'EndDateTime',
+        'EndDateTimeUtc',
+        'DurationSec',
+        'Server',
+        'User',
+        'ProcessId',
+        'OrchestratorVersion',
+        'PowerShellVersion',
+        'Mode',
+        'Connect',
+        'Status',
+        'ExitCode',
+        'StopReason',
+        'ErrorMessage'
+    )
+    $csvLines = @($Rows | Select-Object -Property $columns | ConvertTo-Csv -NoTypeInformation)
+    $content = ($csvLines -join [Environment]::NewLine) + [Environment]::NewLine
+    Write-FileAtomically -Path $script:Settings.OrchestratorRunsCsvPath -Content $content
+}
+
+function Test-OrchestratorRunProcessActive {
+    param(
+        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][string]$StartDateTime
+    )
+
+    try {
+        $process = Get-Process -Id $ProcessId -ErrorAction Stop
+        if ($process.ProcessName -notin @('pwsh', 'powershell')) { return $false }
+        $expectedStart = ConvertFrom-StateTime -Text $StartDateTime
+        if ($null -eq $expectedStart) { return $false }
+        return [math]::Abs(($process.StartTime - $expectedStart).TotalSeconds) -le 5
+    }
+    catch {
+        return $false
+    }
+}
+
+function Add-OrchestratorRunTracking {
+    $runId = [guid]::NewGuid().ToString()
+    $startTime = $script:StartTime
+    $detectedAt = (Get-Date).ToString('o')
+    $server = [string]$env:COMPUTERNAME
+
+    $action = {
+        param($runId, $startTime, $detectedAt, $server)
+        $rows = @(Read-OrchestratorRunsCsv)
+        foreach ($row in $rows) {
+            if ($row.Status -ne 'Running' -or $row.Tenant -ne $Tenant -or $row.Server -ne $server) { continue }
+            $isActive = $false
+            [int]$recordedPid = 0
+            if ([int]::TryParse([string]$row.ProcessId, [ref]$recordedPid)) {
+                $isActive = Test-OrchestratorRunProcessActive -ProcessId $recordedPid -StartDateTime ([string]$row.StartDateTime)
+            }
+            if ($isActive) { continue }
+
+            $row.Status = 'Interrupted'
+            $row.StopReason = 'UnexpectedStop'
+            $row.ErrorMessage = "Detected at $detectedAt by a later orchestrator start; the recorded process is no longer running."
+        }
+
+        $rows += [pscustomobject][ordered]@{
+            RunId = $runId
+            Tenant = $Tenant
+            StartDateTime = $startTime.ToString('o')
+            StartDateTimeUtc = $startTime.ToUniversalTime().ToString('o')
+            EndDateTime = ''
+            EndDateTimeUtc = ''
+            DurationSec = ''
+            Server = $server
+            User = Get-OrchestratorRunUserName
+            ProcessId = [string]$PID
+            OrchestratorVersion = $ScriptVersion
+            PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+            Mode = Get-OrchestratorRunMode
+            Connect = [string]$Connect.IsPresent
+            Status = 'Running'
+            ExitCode = ''
+            StopReason = ''
+            ErrorMessage = ''
+        }
+        Write-OrchestratorRunsCsv -Rows $rows
+    }
+    Invoke-WithOrchestratorRunsCsvLock -Action $action -ArgumentList @($runId, $startTime, $detectedAt, $server)
+
+    $script:OrchestratorRunId = $runId
+    $script:OrchestratorRunRegistered = $true
+}
+
+function Complete-OrchestratorRunTracking {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [Parameter(Mandatory = $true)][string]$StopReason,
+        [AllowNull()][AllowEmptyString()][string]$ErrorMessage = ''
+    )
+
+    if (-not $script:OrchestratorRunRegistered) { return }
+    $endTime = Get-Date
+
+    $action = {
+        param($endTime, $Status, $ExitCode, $StopReason, $ErrorMessage, $RunId)
+        $rows = @(Read-OrchestratorRunsCsv)
+        $row = $rows | Where-Object { $_.RunId -eq $RunId } | Select-Object -First 1
+        if ($null -eq $row) { throw "Orchestrator run '$RunId' was not found in the lifecycle CSV." }
+
+        $startTime = ConvertFrom-StateTime -Text ([string]$row.StartDateTime)
+        $row.EndDateTime = $endTime.ToString('o')
+        $row.EndDateTimeUtc = $endTime.ToUniversalTime().ToString('o')
+        if ($null -ne $startTime) {
+            $row.DurationSec = [string][int][math]::Max(0, ($endTime - $startTime).TotalSeconds)
+        }
+        $row.Status = $Status
+        $row.ExitCode = [string]$ExitCode
+        $row.StopReason = $StopReason
+        $row.ErrorMessage = Protect-OrchestratorRunText -Text $ErrorMessage
+        Write-OrchestratorRunsCsv -Rows $rows
+    }
+    Invoke-WithOrchestratorRunsCsvLock -Action $action -ArgumentList @($endTime, $Status, $ExitCode, $StopReason, $ErrorMessage, $script:OrchestratorRunId)
+}
+
+# ==========================================================
 # Global lock and heartbeat
 # ==========================================================
 function Enter-OrchestratorLock {
@@ -1583,6 +1781,11 @@ try {
     $dataFolder = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'OrchestratorDataFolderPath' -DefaultValue (Join-Path -Path $PSScriptRoot -ChildPath 'Output')
     $logFolder = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'OrchestratorLogFolderPath' -DefaultValue (Join-Path -Path $dataFolder -ChildPath 'Logs')
 
+    $sharedDataFolder = $dataFolder
+    if ((Split-Path -Path $sharedDataFolder -Leaf) -eq $env:COMPUTERNAME) {
+        $sharedDataFolder = Split-Path -Path $sharedDataFolder -Parent
+    }
+
     # Per-server isolation: DataAllRootPath/LogAllRootPath may be a UNC share used by
     # several orchestrator servers. State, lock, heartbeat, job-runs CSVs and logs are
     # therefore suffixed with the local computer name so instances never collide.
@@ -1628,6 +1831,8 @@ try {
         OrchestratorLogFolderPath = $logFolder
         JobLogFolderPath = (Join-Path -Path $logFolder -ChildPath 'Jobs')
         JobRunsFolderPath = (Join-Path -Path $dataFolder -ChildPath 'JobRuns')
+        OrchestratorRunsCsvPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.csv')
+        OrchestratorRunsLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.lock')
         StatePath = $effectiveStatePath
         LockPath = (Join-Path -Path $dataFolder -ChildPath 'Orchestrator.lock')
         HeartbeatPath = (Join-Path -Path $dataFolder -ChildPath 'Orchestrator-Heartbeat.json')
@@ -1655,7 +1860,7 @@ try {
         MailEnabled = (-not [string]::IsNullOrWhiteSpace($smtpServer)) -and (-not [string]::IsNullOrWhiteSpace($mailFrom)) -and (-not [string]::IsNullOrWhiteSpace($mailTo))
     }
 
-    foreach ($folder in @($script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath)) {
+    foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath)) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     }
     $script:LogReady = $true
@@ -1671,8 +1876,13 @@ catch {
 $script:ExitCode = 0
 $script:StartTime = Get-Date
 $script:LifetimeDeadline = $script:StartTime.AddHours($script:Settings.MaxLifetimeHours)
+$script:OrchestratorRunId = ''
+$script:OrchestratorRunRegistered = $false
+$script:OrchestratorStopReason = 'NormalShutdown'
+$script:OrchestratorRunErrorText = ''
 
 try {
+    Add-OrchestratorRunTracking
     Write-OrchestratorLog -Message ("{0} v{1} starting (PID {2}, tenant {3}, MaxConcurrency {4}, MaxLifetimeHours {5})." -f $ScriptName, $ScriptVersion, $PID, $Tenant, $script:Settings.MaxConcurrency, $script:Settings.MaxLifetimeHours)
     if (-not $script:Settings.MailEnabled) {
         Write-OrchestratorLog -Message "Email notifications are disabled (SmtpServer, From or recipient missing in configuration)." -Level WARN
@@ -1695,6 +1905,7 @@ try {
         Write-OrchestratorLog -Message $_.Exception.Message -Level ERROR
         Send-OrchestratorFatalEmail -ErrorText $_.Exception.Message
         $script:ExitCode = 2
+        $script:OrchestratorStopReason = 'ManifestError'
         throw
     }
 
@@ -1708,11 +1919,13 @@ try {
 
     if ($DryRun) {
         Show-DryRunPlan
+        $script:OrchestratorStopReason = 'DryRun'
         exit 0
     }
 
     if (-not (Enter-OrchestratorLock)) {
         $script:ExitCode = 3
+        $script:OrchestratorStopReason = 'LockConflict'
         exit 3
     }
     $script:LockOwned = $true
@@ -1740,10 +1953,12 @@ try {
 
         if ($Once) {
             Write-OrchestratorLog -Message "Single tick complete (-Once); exiting. Launched jobs keep running detached."
+            $script:OrchestratorStopReason = 'Once'
             break
         }
         if ((Get-Date) -ge $script:LifetimeDeadline) {
             Write-OrchestratorLog -Message ("Maximum lifetime of {0} hour(s) reached; recycling. No new job will be launched by this instance." -f $script:Settings.MaxLifetimeHours)
+            $script:OrchestratorStopReason = 'MaxLifetime'
             break
         }
         Start-Sleep -Seconds $script:Settings.TickSeconds
@@ -1760,6 +1975,10 @@ try {
 catch {
     if ($script:ExitCode -eq 0) { $script:ExitCode = 1 }
     $errorText = "{0}`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace
+    $script:OrchestratorRunErrorText = $errorText
+    if ($script:OrchestratorStopReason -eq 'NormalShutdown') {
+        $script:OrchestratorStopReason = 'FatalError'
+    }
     Write-OrchestratorLog -Message ("Fatal orchestrator error: {0}" -f $errorText) -Level ERROR
     if ($script:ExitCode -eq 1) { Send-OrchestratorFatalEmail -ErrorText $errorText }
 }
@@ -1768,6 +1987,15 @@ finally {
         try { Save-OrchestratorState } catch { }
     }
     Exit-OrchestratorLock
+    $runStatus = 'Failed'
+    if ($script:ExitCode -eq 0) { $runStatus = 'Success' }
+    elseif ($script:ExitCode -eq 3) { $runStatus = 'Rejected' }
+    try {
+        Complete-OrchestratorRunTracking -Status $runStatus -ExitCode $script:ExitCode -StopReason $script:OrchestratorStopReason -ErrorMessage $script:OrchestratorRunErrorText
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Failed to finalize orchestrator lifecycle tracking: {0}" -f $_.Exception.Message) -Level WARN
+    }
 }
 
 exit $script:ExitCode
