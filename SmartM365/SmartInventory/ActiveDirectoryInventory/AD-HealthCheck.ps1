@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.8
+    1.0.9
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -46,7 +46,7 @@ $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Glo
 $RunId = [guid]::NewGuid().ToString()
 $Rows = [System.Collections.ArrayList]::new()
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.8'
+$ScriptVersion = '1.0.9'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -298,7 +298,8 @@ try{
     $end=Get-Date;$worst=Worst $all;$subject="[$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
     $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
-    Complete-SmartM365ExecutionContext -Status $summaryStatus -GeneratedCsvPaths @($csv,$latestCsv) -ResultSummary "AD health worst status: $worst; rows: $($all.Count)"
+    $global:csvGeneratedPaths = @($csv, $latestCsv)
+    Complete-SmartM365ExecutionContext -Status $summaryStatus
     Write-Host "AD Health Check completed. Status=$worst; Rows=$($all.Count); Csv=$csv; Latest=$latestCsv"
     if($worst -eq 'Critical'){exit 2};if($worst -eq 'Warning'){exit 1};exit 0
 }catch{
@@ -314,6 +315,7 @@ try{
     $csv=Join-Path $OutputFolder ("AD_HealthCheck_FAILED_{0}.csv" -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture));$failedRows=Get-RowSnapshot;$failedRows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM
     try{$html=ConvertTo-ReportHtml -r $failedRows -status 'Critical' -started $RunStarted -ended (Get-Date) -csv $csv;Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
-    try { Complete-SmartM365ExecutionContext -Status Failed -GeneratedCsvPaths @($csv) -ResultSummary 'AD health check failed before completion.' } catch { $null = $_ }
+    $global:csvGeneratedPaths = @($csv)
+    try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'ADHealthCheck' } catch { $null = $_ }
     Write-Error $runErrorDetail;exit 2
 }
