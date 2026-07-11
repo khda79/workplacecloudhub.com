@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.6
+    1.0.7
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -44,9 +44,9 @@ $ErrorActionPreference = 'Stop'
 $RunStarted = Get-Date
 $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)
 $RunId = [guid]::NewGuid().ToString()
-$Rows = New-Object 'System.Collections.Generic.List[object]'
+$Rows = [System.Collections.ArrayList]::new()
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.6'
+$ScriptVersion = '1.0.7'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -145,7 +145,10 @@ function Add-Row{
         Details = [string]$Details
         DurationMs = $DurationMs
     }
-    [void]$Rows.Add([object]([pscustomobject]$row))
+    [void]$Rows.Add([pscustomobject]$row)
+}
+function Get-RowSnapshot{
+    @($Rows.ToArray())
 }
 function Invoke-Retry([scriptblock]$ScriptBlock){
     for($i=1;$i -le [math]::Max(1,$RetryCount);$i++){
@@ -276,13 +279,14 @@ try{
     $oldest=0.0;foreach($d in @($forest.Domains|Sort-Object)){try{foreach($f in @(Get-ADReplicationFailure -Target $d -Scope Domain -ErrorAction Stop)){if($f.FirstFailureTime -and $f.FirstFailureTime -ne [datetime]::MinValue){$days=((Get-Date).ToUniversalTime()-$f.FirstFailureTime.ToUniversalTime()).TotalDays;if($days -gt $oldest){$oldest=$days}}}}catch{ $null = $_ }}
     $st=if($oldest -gt $tomb){'Critical'}elseif($oldest -gt ($tomb*.8)){'Warning'}else{'OK'};Add-Row $forestName $forest.RootDomain '' Tombstone OldestReplicationFailureAgeDays $st ([math]::Round($oldest,2)) "TombstoneLifetimeDays=$tomb" "Critical > $tomb days; Warning > 80 percent" 'Compared with forest tombstone lifetime' 0
     $stamp=(Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
-    if($AppendHistory){$csv=$HistoryCsvPath;if(Test-Path $csv){$Rows|Export-Csv $csv -NoTypeInformation -Append -Encoding utf8BOM}else{$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}}else{$csv=Join-Path $OutputFolder "AD_HealthCheck_$stamp.csv";$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}
+    $all = Get-RowSnapshot
+    if($AppendHistory){$csv=$HistoryCsvPath;if(Test-Path $csv){$all|Export-Csv $csv -NoTypeInformation -Append -Encoding utf8BOM}else{$all|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}}else{$csv=Join-Path $OutputFolder "AD_HealthCheck_$stamp.csv";$all|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM}
     if(-not (Test-Path -LiteralPath $LatestCsvFolderPath)){New-Item -Path $LatestCsvFolderPath -ItemType Directory -Force|Out-Null}
     $latestCsv=Join-Path $LatestCsvFolderPath 'AD_HealthCheck.csv'
-    $Rows|Export-Csv $latestCsv -NoTypeInformation -Encoding utf8BOM
+    $all|Export-Csv $latestCsv -NoTypeInformation -Encoding utf8BOM
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csv
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestCsv
-    $end=Get-Date;$all=@($Rows);$worst=Worst $all;$subject="[$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
+    $end=Get-Date;$worst=Worst $all;$subject="[$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
     $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
     Complete-SmartM365ExecutionContext -Status $summaryStatus -GeneratedCsvPaths @($csv,$latestCsv) -ResultSummary "AD health worst status: $worst; rows: $($all.Count)"
@@ -298,8 +302,8 @@ try{
     try { WriteLog -Message $runErrorDetail -Level 'ERROR' } catch { Write-Warning $runErrorDetail }
     Add-Row '' '' '' Script UnhandledError Critical 0 Failed 'Script completes' $runErrorDetail 0
     if(-not (Test-Path -LiteralPath $OutputFolder)){New-Item -Path $OutputFolder -ItemType Directory -Force|Out-Null}
-    $csv=Join-Path $OutputFolder ("AD_HealthCheck_FAILED_{0}.csv" -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture));$Rows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM
-    try{$html=ConvertTo-ReportHtml -r @($Rows) -status 'Critical' -started $RunStarted -ended (Get-Date) -csv $csv;Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
+    $csv=Join-Path $OutputFolder ("AD_HealthCheck_FAILED_{0}.csv" -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture));$failedRows=Get-RowSnapshot;$failedRows|Export-Csv $csv -NoTypeInformation -Encoding utf8BOM
+    try{$html=ConvertTo-ReportHtml -r $failedRows -status 'Critical' -started $RunStarted -ended (Get-Date) -csv $csv;Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
     try { Complete-SmartM365ExecutionContext -Status Failed -GeneratedCsvPaths @($csv) -ResultSummary 'AD health check failed before completion.' } catch { $null = $_ }
     Write-Error $runErrorDetail;exit 2
