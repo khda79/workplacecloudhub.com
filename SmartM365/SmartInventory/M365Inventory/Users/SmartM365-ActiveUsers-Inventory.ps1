@@ -19,7 +19,7 @@
     Version : 1.6
 
 .VERSION
-1.7
+1.8
 
 
 .REQUIREMENTS
@@ -251,7 +251,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
 }
 catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
@@ -374,7 +374,7 @@ $csvPathLatest            = ""
 
 try {
     #region Initialization
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.8"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
@@ -800,8 +800,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCI7970sBqdHZtZ
-# w+VjJPWuxC0ARLWRn4/3vsDqXO1VL6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3pylUv2K9yk7z
+# ocxN8j0vYCJn7eZaKQK8R298B9rYR6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -827,14 +827,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCARRd8rQIrC2eE890OFeS0Aa0GvZyT67YgXMUiq36BWnzANBgkqhkiG9w0B
-# AQEFAASCAYAUH5YkcgMY28GHQUqoT8x6BUwC1tNnnzz1J4sba5cPFmxAE/sgToOz
-# KiH7u8WDMbSsAwrMW1m+pcj/RyFrYOc64mrihdSMHlzNSii66m+Cqdb2d1iLemVN
-# QqcVWOG3wjA4PiL27jgh9JgFz6gCsmUhk2J/vR3YCT6wJ8KRx+IFSBGQDjVh3PgZ
-# WRDYPE7qt/kt+sg+H5xdZM+H3sFyLIu1faMaKOKNqcc11+jV869pDGyKAtvJ/v2E
-# kEXkYn6PbtjBoexZGPiIgn/C+5qIXsG8JSr8Uja8NytWkRGTF4wqiGOy2WhtuVYY
-# bDFEjuSHzrKuP0GcQL9B4BEbKf5me7p/wFYP4ar4yV4xgRo1vhR37AQ16jecvH7n
-# /Zwp96wRHOByMZWfyY1e9f3ilJ6MT/GJxLP9ztzXn2pOxijD0W9rPRvLkzHxVJzd
-# BDApp89NI4nUVPaDUi7XN0t38MjaSRPzRY5IYJODljMUXUPrE3NoJq+eD9xrhTHr
-# j7XwrVU7dcg=
+# BDEiBCBNBQvmnxzKPBspx2hSzz/3IKbfV9/WnJk5ZTTEKtwrczANBgkqhkiG9w0B
+# AQEFAASCAYCLmzR/jalVn7OuIXW+hOpGiNUQrmE1eXbWMOLjaFOuOMKDxsA7RdGI
+# g13cTLyMlhxmxTCSkrqPbKVQRum8wt6Xfv/tKZc3cqc/m6G/dMfDEvMq/c+CBWgC
+# UDl+lLYGsFPyMeBlUfoRvfwN0nNOoE/EAKNg4QWrjJ0zg9kX4xtOEBn4gmVdBZtz
+# idswFXQLIrra8jJNe4vtg/RyqlF5k8aE3v2kj56yAWkhaETUeJ6nbA6XGW7Hwg8z
+# f+29W75zRAnT2OpUscQPXPkxQjgamsEgYvqVpdo7wYPb3rHSH34llyA9bufRsZ+F
+# ABqeb8oVZVB+3alp7Dtr6oZIx1nlvLnlqOZwdQOnylQTPQjp24TFxSHxliLx0wrX
+# rRmIAy27uMxjGiV5PD3U4WhiJ00rZdL7UMEtAe7dYLqjGg+AyOMvpBPvpH+FVIr5
+# y5qPx2vxngIC4DVlRiVieSB2kClnZd0na8ZWJf9rEsQlNF6fxEdW/4ggBkcGgJzf
+# 86tQlf4axWM=
 # SIG # End signature block

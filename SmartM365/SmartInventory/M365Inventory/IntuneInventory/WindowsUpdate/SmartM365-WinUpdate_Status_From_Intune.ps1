@@ -39,7 +39,7 @@ PARAMETERS
 VERSION
   1.5
 .VERSION
-1.9
+1.10
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -90,7 +90,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 
 # ==========================================================
 # App-only authentication parameters
@@ -356,7 +356,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module -Name $modulePath -MinimumVersion '1.0.23' -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.24' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -1550,8 +1550,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCARYj8kIPugCHak
-# m6ba3osCiH2ckRZfQ9bPZ8/qvKI8TaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBORve2sY4NmqXi
+# hMj5P6eIiXmQznYnHmJPB1qcxnbnHKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1577,14 +1577,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAoNlT8cbqIkTA55XWt1ywz635i+WfTSYI7F60CLncvZDANBgkqhkiG9w0B
-# AQEFAASCAYBgsfxtsPM/aPktZ35HMx+p7+T/o5huImjCf1728SPWp0lDZpAT4kjl
-# 1Ly90tSIAVdoGjmd7XHvjguZLC2gYUcK5DJ5rJX8ZkLa4m0nyULfPBbW/xkHmnmg
-# 5yFG6pC8MXK2hvBqn6dipPybW5Ad4Ol8kayOfym9j8/1xaTDwZyU5sO+aZR/HJcr
-# ZBmq1ztDzJKV+Th8/J3WiDkbnMXFofJ1k2BToNF3bBHh4KyLsLtIFD1V6FwhLT8h
-# rvkjGGfN/DRLdZSlwakodbZRiJEajcQGIyASvOdANrhrSpeAe24kciV1RraVZVB5
-# vpbmpLFzWfGAZxxag8NrazlnLWmzsvH8To41i6RxfBoeUhKDqVcjEbjIYqTChh2j
-# qFD9cQR3CRoBSfIMGZwcP9nxPPrcJJQkBcIlWHqguIATTZlnm2NWI6HjYYGAO5/7
-# BYwa+n+hlqgusEAyAhT1WwuZ3UQE75l5L5ad7Chfo4ylJTFUCNolsk+JV4ugB+bV
-# NUvy30QeN1w=
+# BDEiBCC9gqEejMB6/8ZXfBRXQdMaB3wnUbSYeqPFAKDf01pghTANBgkqhkiG9w0B
+# AQEFAASCAYCyQwK/fyet16X33far5iFf2W8Z47xD6d22jA6yrZDvmRXQTB8xGfg7
+# N1O2uMcn3jd2M+S6Wi3sybwWgvW66ZivqrZrCVQ1mZBb4NRiYE1RMzTD35USOQ//
+# xPeZZ5tHL87Jwp81Pv6DJL6cTGPYaQUgy+V5Ii6V3qbin7uSO38YAvJrB5AuuQhD
+# CFo8Qge45HwEOOp8KbKgcQ9V0ox+s/gSG+HNJ/lvpj1gqh2noTB4aZYdW0AY2BF7
+# jIgWU7IrjL5syIn1zTLEVp8r/H1iRq2O2GRkoHuo5RartiRZY3bCnQ+tbiG5I4NQ
+# vexeOd/JqrW9r883X1ffM+HSpRY12zZYQfc+EsckP2bu8dPTXZtwirCxgop60Aas
+# TFB3V2jAOFeddMFHbTL5Fh/mUzLFQlgKvzpzwncwaY3arP8iNlrHbx2WD2mIierj
+# oZr1v5wkY6w3SY8j3QXSgTcmUzQEHZzjHdhRBzl//jKvveM/VDU33EZ8HPOc7/qQ
+# /CAuoqrTSeI=
 # SIG # End signature block

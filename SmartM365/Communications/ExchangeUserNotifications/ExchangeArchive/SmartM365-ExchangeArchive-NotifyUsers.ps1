@@ -59,7 +59,7 @@ Runs the configured archive campaign in dry-run mode using the recipients path a
 Sends the archive notification to a pilot CSV even when rows are below the configured mailbox-size threshold.
 
 .VERSION
-1.2
+1.3
 #>
 [CmdletBinding()]
 param(
@@ -153,7 +153,7 @@ $tenantContextPath = Find-UpwardFile -FileName 'Config\SmartM365-TenantContext.p
 $effectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $coreModulePath = Find-UpwardFile -FileName 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module $coreModulePath -MinimumVersion '1.0.23' -Force -ErrorAction Stop
+Import-Module $coreModulePath -MinimumVersion '1.0.24' -Force -ErrorAction Stop
 
 $commModulePath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'SmartM365.Communications.psm1'
 Import-Module $commModulePath -Force -DisableNameChecking
@@ -468,8 +468,8 @@ catch {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArrCHHdj1PTiKf
-# FdlVV1GJmXFOQUCl0jl5v3bzTAPfAaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8XMsRXoIOCMxw
+# iKVrvArv/p24M53tn4+TJoC5ICcx+aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -495,14 +495,14 @@ catch {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBGyTH1wCgYaI4xZ58amHnbiDdsSZefo+6VK9Ar4eOC2DANBgkqhkiG9w0B
-# AQEFAASCAYBHZtN7CD7y38REUASWRYY5vs3wUVmR5WxUJSolBTJ0VwNueELQDaj4
-# b5HXlRYjDsBvfwzwl82eTrYeM2ytrvXDwnI+2xx9zAVw5YKNTFjJcUvrJfEWDMKK
-# Fs2uDSesmg7AvbNWM3O9LFezFJmziF1XCa5qD1Teld0Bunyk46RSsUp2dknQS9MX
-# j6VEk3MX7HS1wRURBl54mjuEnAzMYZLq2TCopGt4CtZ0GaMaN22h5UqJQsO7aZMN
-# H0i/JEcZ8LSe3/BY1YA1Xt2CcbEWpEkBFBUEQVwfflb8iwLINmVGpyIi0Tlq9/So
-# 19TCuKVjy4LT6r6eGiSeKlLr57WwLKPi/vGXma9ejC3YNxSIMvnn6GcuvIh76peX
-# /bszyHNtQybur1sdMEaB7hoby3aOj/aOz9YnePoQo6oVR6mOpMod5BqA6kc+AN+b
-# zsh0CRPgT9gs0jEWP3cdDEXEjnZRBxwdkdTk/oVX0YAlFU4cZ6zjGs2fQDlQ+M90
-# 4DcfcgU6HWA=
+# BDEiBCBwDQuX3nGFJVpB2gp4RrwW2Q2GucbfDgATJ6qLS3lnszANBgkqhkiG9w0B
+# AQEFAASCAYAYJ8rQ1eOIC/uY1Y959ltxgG2Ycra5ECnVQVQvwRURyGRxwbuUrPP8
+# SlBGuBs8eYdv1BvrDfWGv2L4Bd4PJ3XCTpkiCVGFYQEslrBk+K09tj6FSAhctrHP
+# vESgT22W8RwZBjebCz6wUov7gJRmWCuMVjeXaY83DWhhcjMVXYSFD7cG7AWmZqOk
+# 4NMli9QUkPwjoee9xq3RM/Qnrgh5j6v3A6j6d/SblzIHX+hgqO9cZFvtpbSW0zCS
+# COiMY9BSxUxY4ICsLcfwZHbrvPtUg4wEhG9EdB5lbbgpfvs57OoWEzhCA9AGgAGT
+# e7GALn1RUmnC09oxQ6W2TdXPApPBc4UHanKHVfoiTh8vrXk4RjS1sl74lzTgmP0u
+# k3+KKae3MbO3DUtHQhr3ECVZYKw7/mF8Hf1h5LseaBKCWuJqc2gC+Qp6NL71Ex3k
+# OHlybZ4mFfZhiw+xI+3Vv/C9mzPQ3o+l8LHMWOej2iT7Miide87NLbjVosWeYmMP
+# n2sG178xglk=
 # SIG # End signature block

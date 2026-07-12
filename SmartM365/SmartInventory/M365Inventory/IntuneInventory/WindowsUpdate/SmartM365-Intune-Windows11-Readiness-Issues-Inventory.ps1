@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables for PowerBI from SmartInventory CSV 
   Intune_Devices_Compliance.csv
 
 .VERSION
-1.4
+1.5
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -43,7 +43,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.4"
+$ScriptVersion="1.5"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
 function Warn([string]$m){Write-Warning $m}
@@ -109,7 +109,7 @@ function PublishWeeklyHistory($files){
 }
 try{
   Log "Starting $ScriptName v$ScriptVersion"
-  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.23' -Force; Initialize-SmartM365DefaultCsvValidationRules
+  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.24' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
   if(!$OutputFolder){$OutputFolder=Cfg $lc 'ScriptCsvLogFolderPath' (Join-Path (Cfg $lc 'DataAllRootPath' $PSScriptRoot) 'Intune\WindowsUpdate\Windows11ReadinessIssues')}
@@ -157,8 +157,8 @@ try{
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDS3kBYuIlds9jp
-# Wap/IXDVEd6LWsvriIaonusZzppYb6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRmygEQV+coQr9
+# vRB3LVmqs4ur2Q4sEMGbbriGQHg8F6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -184,14 +184,14 @@ try{
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCx/zZwjzYIQVpoY52iQHq4IFDDzwDrsqMqhMht40zMMDANBgkqhkiG9w0B
-# AQEFAASCAYCjuUc2NoSrkxUXsqA5gA9k8B9F4A2p8S02tiaB6Vq3nj31rIGrTlrK
-# KZ0xAyds+RwiORqrH38Eh7q5NIwKlIPZfpslhII2b3J29jKxe9EINzmyH0sB2tI1
-# vET8Vh1wROSmB0OaCFb8gq9Av9e53Qo0guIEpz6j0my0/j3ViUvXyJFXjjYhkV88
-# frQEDvsabP/0qMFJiAsP8SmgbBSmpYD4Uw1pEne9i1UV+8ZHkZyKlLvgDb3OZQMY
-# YMZ5NeJi7EQwOE6tGHKw39Pt0NSdFF63QrDbU95V8+eNh4qO277xqF77QoDiCs2W
-# 3HFgAOhIsNWFgIHnnvjVisfH7aoxcgitbJLzmd/BgLIfYTKB3v7qKp4dDBowS0qR
-# g8nffQC2OzauMnEIN9pKlfoAOuEtVeFr1hhBEA6GJJg1CobExzY5FTtsTuHvjywD
-# qc3Ekv17jvM+IJfIp52lKSroiAyOevKSeOUSu5KUkoyKY/do8vN3+i43vbjqmTie
-# WtkXFHypu5o=
+# BDEiBCBT+vccVJQdW1FvaHyHuWBW/d2Iz4mc3TIF3hgEW2IyjDANBgkqhkiG9w0B
+# AQEFAASCAYCOhEnTF/3ItRnefLRZUNURkXQOzUzdvB+Jzenonr6DjL97qh8KHB3J
+# D24GlJV24baPK5xMtsj+rpIN9wUjAF78Qw2mrIWOiwJHg8Eh9gWOdiu6DANpLMUC
+# 9iLuoeKuLFAU7qarXQjvf7vV7C07IxZplSFlMplZz2Y/cqkGg4Zt7xTIrruVICRd
+# o8YXaOvsn5VIc04RA7LC+ri+LEz1nPmWTIg9h0GvtBBFagRPE2gcGKpLvxxJIu3F
+# idrOgyB1NXXwkYVaA3fBKyn4D1PPIbBcAEdN4RGVLytSCKftmY7mx0K3/p3yRbfm
+# v++pC2HYWBavGq3S2Y+gXxUV5h2G2tE576jG3DypESMi3tfL+suyQi0WGF79AhNT
+# H2ZAMQIfBp3ieGl/kLaXQr87Jn99XboQtE9snmmeHs+x181HrrB17dkTfWbGealw
+# kkaLNv5Z3WAQQcskU4R8prp54WLPRPy+i9C69WUp/7sD4kMT3RY3EM7B8MkkdRAu
+# HG4TbKOe/DM=
 # SIG # End signature block

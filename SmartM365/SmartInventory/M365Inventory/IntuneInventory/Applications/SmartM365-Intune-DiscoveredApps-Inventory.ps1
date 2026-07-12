@@ -31,7 +31,7 @@
     Version : 1.8
 
 .VERSION
-1.9
+1.10
 
 
 .REQUIREMENTS
@@ -292,7 +292,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     exit 1
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -1164,8 +1164,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/663pscKCRl/d
-# y/UBm4TT+C5n27bC6VSO9P3L+YsTl6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6EePqHcWu1g+P
+# qaf8IOxlZ4mwsENlmTpTReJfDOZB0KCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1191,14 +1191,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCoAprCKEd/yO9RdOX4I3B6cTT3TzHdbQQag5udNCcC8TANBgkqhkiG9w0B
-# AQEFAASCAYCobC4XXfjNiFHDyAfjF5rNHUoWESIAzgpiUej4LCHxBiqjJZnNZurf
-# +BLEzmhC5YSkWkCccluDCSGWxmOb5EcFdUpVCcHBFa4FT+acLEyAde2ywtxJp/iB
-# 7SPdhmeokLMhW/4iZEIYBexTlkpFxEL+TG4hKEAEKYaYxeKWfRTeBVvMMRI/6Qnl
-# W68Hol3BQUAGrGszlDeiSCkG6Juh1u1ZLtevS+G+oVeA2xpyduvfJliktrDiGe64
-# 6W/b7VJTCzo1/q/rELhUTX8/TA+uulRkVoU3RlG8CKTjwHpUJZ4fKAMLfbRyvFPP
-# /Oz7uO5fJPVIp3i9qFp9TnozXNwjD8tmE3z60YxkiRkk3coHjbYL49VXYIn3sq8f
-# re/giSsB4WPHvPXngsNXeROLaKZo2Nc0dLKUDdWqZzAXca6NwkzULYc06KvcDwUV
-# IPIvjY6Gp/lnLdaH4TzkzodNAMkwXc2RBSHviTFcDts+LYiCm7DhQjnxvstlhDzb
-# 4gpf0zCiSJs=
+# BDEiBCC2o0o+ZPhbEw6v+T1UIfyJgkNXcjTqh0ldQ3ZNGWanozANBgkqhkiG9w0B
+# AQEFAASCAYBLM40tnw8pYJATzRBkSlTaC/ATgE79R9W5ZIIw926DgN0umel2BM84
+# /BCJ5r48oLccJvnlSo7mfItKxoLvWv+30KFyP71lx4g+rSBgWY8qlZVJcfCc2ALD
+# q70K488RKLnob/GQRfYcVprpJrpavaC+qKhIRWtDOKvxkVzGwEJ+4JlJ+CbC7YYz
+# dvvtz5gCsUUIRO1FCwdkLrdNTZmJErwixpFzeIwb31a76pytg8JymoRjmLhgNeJR
+# kiyGdkLl0gNpXqzte/KBabr/9ijUDf3EezmgWx7Suh5D3+vQv/pNODDwZIT7S07s
+# AQMQVf1E3egx6jxsEx0xoh8n3da3cS3lTZoKibJJBWcORxhjUUyZrrQqmA/Cavkj
+# ShKwSAqy/7LjBTVejvMfwQeehVUPEmBSzwBGHo99mnOjrpze0XZhfMGDH17QwybW
+# KjKXue308ZyWz7zdaI+Y4b2QMTPuqSQmyJxpmIjzpmMzbKzr1qAK3ESTQk2jK6v5
+# eHZBAS+QNEQ=
 # SIG # End signature block
