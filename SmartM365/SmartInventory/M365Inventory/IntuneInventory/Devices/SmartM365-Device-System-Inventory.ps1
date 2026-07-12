@@ -26,10 +26,10 @@
     Uses interactive authentication instead of app-only certificate authentication.
 
 .PARAMETER PlatformScriptId
-    The GUID of the Intune Platform Script (Detect-DeviceSystemInfo) deployed to devices.
-    Required to retrieve SecureBoot/BIOS/FirmwareType results from deviceRunStates.
+    The GUID of the Intune Platform Script (SmartM365-Detect-DeviceSystemInfo) deployed to devices.
+    Required to retrieve SecureBoot/BIOS/FirmwareType/LastBootUpTime results from deviceRunStates.
 .VERSION
-1.9
+2.0
 
 
 
@@ -39,7 +39,7 @@
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.7
+    Version : 2.0
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -488,8 +488,8 @@ function Get-PlatformScriptRunStates {
 function Parse-PlatformScriptStdout {
     <#
     .SYNOPSIS
-        Parses the pipe-delimited stdout from the Detect-DeviceSystemInfo Platform Script.
-        Format: SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>
+        Parses the pipe-delimited stdout from the SmartM365-Detect-DeviceSystemInfo Platform Script.
+        Format: SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>
         Returns a hashtable with each key/value pair.
     #>
     [CmdletBinding()]
@@ -500,10 +500,11 @@ function Parse-PlatformScriptStdout {
     )
 
     $result = @{
-        SecureBoot   = $null
-        BIOSVersion  = $null
-        BIOSDate     = $null
-        FirmwareType = $null
+        SecureBoot     = $null
+        BIOSVersion    = $null
+        BIOSDate       = $null
+        FirmwareType   = $null
+        LastBootUpTime = $null
     }
 
     if ([string]::IsNullOrWhiteSpace($ResultMessage)) {
@@ -527,7 +528,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.9"
+$ScriptVersion = "2.0"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -644,12 +645,12 @@ try {
     $secureBootMap = @{}
 
     if (-not [string]::IsNullOrWhiteSpace($PlatformScriptId)) {
-        WriteLog -Message "Phase 2: Retrieving SecureBoot status from Platform Script deviceRunStates..." "INFO"
+        WriteLog -Message "Phase 2: Retrieving device system information from Platform Script deviceRunStates..." "INFO"
         $secureBootMap = Get-PlatformScriptRunStates -ScriptId $PlatformScriptId
     }
     else {
         WriteLog -Message "Phase 2: Skipped (no -PlatformScriptId provided). SecureBoot column will be empty." "WARNING"
-        WriteLog -Message "To populate SecureBoot/BIOS/FirmwareType, deploy the Detect-DeviceSystemInfo Platform Script and pass its GUID via -PlatformScriptId." "WARNING"
+        WriteLog -Message "To populate SecureBoot/BIOS/FirmwareType/LastBootUpTime, deploy the SmartM365-Detect-DeviceSystemInfo Platform Script and pass its GUID via -PlatformScriptId." "WARNING"
     }
 
     # ======================================================
@@ -663,7 +664,7 @@ try {
         $hw = $device.hardwareInformation
 
         # Platform Script data (SecureBoot, BIOSVersion, FirmwareType)
-        $psData = @{ SecureBoot = $null; BIOSVersion = $null; BIOSDate = $null; FirmwareType = $null }
+        $psData = @{ SecureBoot = $null; BIOSVersion = $null; BIOSDate = $null; FirmwareType = $null; LastBootUpTime = $null }
         $psLastUpdate = $null
         if ($secureBootMap.ContainsKey($device.id)) {
             $runState = $secureBootMap[$device.id]
@@ -681,6 +682,10 @@ try {
             BIOSDate                          = $psData.BIOSDate
             FirmwareType                      = $psData.FirmwareType
             PlatformScriptLastUpdate          = $psLastUpdate
+            LastRebootDate                    = $psData.LastBootUpTime
+            'Last Reboot Date'                = $psData.LastBootUpTime
+            LastBootUpTime                    = $psData.LastBootUpTime
+            LastBootTime                      = $psData.LastBootUpTime
             IsEncrypted                       = if ($hw) { $hw.isEncrypted } else { $null }
             DeviceGuardVBSState               = if ($hw) { $hw.deviceGuardVirtualizationBasedSecurityState } else { $null }
             DeviceGuardVBSHardwareRequirement = if ($hw) { $hw.deviceGuardVirtualizationBasedSecurityHardwareRequirementState } else { $null }
