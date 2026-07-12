@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Resident scheduler that runs SmartInventory scripts unattended at their configured times.
 
@@ -41,6 +41,8 @@ Features:
   daily HTML summary email, fatal error email if the orchestrator itself crashes.
   Mail uses the shared SmartM365.Core mail helper, so the orchestrator supports the same
   Graph/SMTP/Both transport selection, branding and HTML copy behavior as inventory scripts.
+- Optional Authenticode validation before job launch, disabled by default and usable
+  in Audit mode before switching to Enforce.
 
 .PARAMETER Tenant
 Tenant profile key to load from Config/Tenants. Defaults to test.
@@ -81,7 +83,7 @@ Overrides the state file path. Default: Orchestrator-State.json in the orchestra
 folder ({{DataAllRootPath}}\Orchestrator).
 
 .VERSION
-1.3.2
+1.3.4
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -91,7 +93,7 @@ folder ({{DataAllRootPath}}\Orchestrator).
     inside its own child process.
 
 .NOTES
-    Version : 1.3.2
+    Version : 1.3.4
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -113,7 +115,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.2'
+$ScriptVersion = '1.3.4'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1163,6 +1165,254 @@ function Write-OrchestratorHeartbeat {
 }
 
 # ==========================================================
+# Authenticode validation (optional, audit/enforce)
+# ==========================================================
+function ConvertTo-OrchestratorStringList {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return @() }
+    if ($Value -is [string]) { return @($Value -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+    return @($Value | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+}
+
+function Resolve-OrchestratorAuthenticodeCertificatePath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path -Path $PSScriptRoot -ChildPath $Path))
+}
+
+function Install-OrchestratorAuthenticodeTrustedCertificates {
+    if (-not $script:Settings.AuthenticodeValidationEnabled) { return }
+    if (-not $script:Settings.AuthenticodeInstallTrustedCertificates) { return }
+
+    $certificatePaths = @(ConvertTo-OrchestratorStringList -Value $script:Settings.AuthenticodeTrustedCertificatePaths)
+    if ($certificatePaths.Count -eq 0) {
+        Write-OrchestratorLog -Message 'Authenticode trust install enabled but no AuthenticodeTrustedCertificatePaths are configured.' -Level WARN
+        return
+    }
+
+    $targetStores = @()
+    if ($script:Settings.AuthenticodeInstallTrustedRoot) { $targetStores += 'Root' }
+    if ($script:Settings.AuthenticodeInstallTrustedPublisher) { $targetStores += 'TrustedPublisher' }
+    if ($targetStores.Count -eq 0) {
+        Write-OrchestratorLog -Message 'Authenticode trust install enabled but both target stores are disabled.' -Level WARN
+        return
+    }
+
+    foreach ($configuredPath in $certificatePaths) {
+        $certPath = Resolve-OrchestratorAuthenticodeCertificatePath -Path $configuredPath
+        if (-not (Test-Path -LiteralPath $certPath)) {
+            $message = "Authenticode trusted certificate file not found: $certPath"
+            $level = if ($script:Settings.AuthenticodeValidationMode -eq 'Enforce') { 'ERROR' } else { 'WARN' }
+            Write-OrchestratorLog -Message $message -Level $level
+            if ($script:Settings.AuthenticodeValidationMode -eq 'Enforce') { throw $message }
+            continue
+        }
+
+        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath)
+        $thumbprint = ([string]$cert.Thumbprint).Replace(' ', '').ToUpperInvariant()
+        $allowedThumbprints = @($script:Settings.AuthenticodeAllowedThumbprints)
+        if ($allowedThumbprints.Count -gt 0 -and $allowedThumbprints -notcontains $thumbprint) {
+            $message = "Authenticode trusted certificate skipped because thumbprint $thumbprint is not in AuthenticodeAllowedThumbprints: $certPath"
+            $level = if ($script:Settings.AuthenticodeValidationMode -eq 'Enforce') { 'ERROR' } else { 'WARN' }
+            Write-OrchestratorLog -Message $message -Level $level
+            if ($script:Settings.AuthenticodeValidationMode -eq 'Enforce') { throw $message }
+            continue
+        }
+
+        foreach ($storeName in $targetStores) {
+            $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+            try {
+                $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                $existing = @($store.Certificates | Where-Object { ([string]$_.Thumbprint).Replace(' ', '').ToUpperInvariant() -eq $thumbprint })
+                if ($existing.Count -gt 0) {
+                    Write-OrchestratorLog -Message ("Authenticode trusted certificate already present: store=CurrentUser\{0}; thumbprint={1}; subject={2}" -f $storeName, $thumbprint, $cert.Subject)
+                }
+                else {
+                    $store.Add($cert)
+                    Write-OrchestratorLog -Message ("Authenticode trusted certificate installed: store=CurrentUser\{0}; thumbprint={1}; subject={2}; source={3}" -f $storeName, $thumbprint, $cert.Subject, $certPath)
+                }
+            }
+            catch {
+                $message = "Authenticode trusted certificate install failed: store=CurrentUser\$storeName; thumbprint=$thumbprint; error=$($_.Exception.Message)"
+                $level = if ($script:Settings.AuthenticodeValidationMode -eq 'Enforce') { 'ERROR' } else { 'WARN' }
+                Write-OrchestratorLog -Message $message -Level $level
+                if ($script:Settings.AuthenticodeValidationMode -eq 'Enforce') { throw $message }
+            }
+            finally {
+                if ($store) { $store.Close() }
+            }
+        }
+    }
+}
+
+function Get-OrchestratorAuthenticodeFileList {
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [Parameter(Mandatory = $true)][string]$ScriptFullPath
+    )
+
+    $items = New-Object System.Collections.Generic.List[object]
+    $items.Add([pscustomobject]@{ Role = 'JobScript'; Path = $ScriptFullPath })
+
+    if ($script:Settings.AuthenticodeCheckCoreModule) {
+        $coreManifest = [string]$script:Settings.CoreModulePath
+        if (-not [string]::IsNullOrWhiteSpace($coreManifest)) {
+            $items.Add([pscustomobject]@{ Role = 'SmartM365.Core manifest'; Path = $coreManifest })
+            $coreScript = Join-Path -Path (Split-Path -Path $coreManifest -Parent) -ChildPath 'SmartM365.Core.psm1'
+            $items.Add([pscustomobject]@{ Role = 'SmartM365.Core module'; Path = $coreScript })
+        }
+    }
+
+    if ($script:Settings.AuthenticodeCheckWindowsPowerShellModule -and $Job.PowerShellEdition -eq 'WindowsPowerShell') {
+        $coreRoot = Split-Path -Path ([string]$script:Settings.CoreModulePath) -Parent
+        $ps5Root = Join-Path -Path $coreRoot -ChildPath 'Compatibility\WindowsPowerShell5'
+        foreach ($name in @('SmartM365-WindowsPowerShell5.psd1', 'SmartM365-WindowsPowerShell5.psm1')) {
+            $candidate = Join-Path -Path $ps5Root -ChildPath $name
+            if (Test-Path -LiteralPath $candidate) {
+                $items.Add([pscustomobject]@{ Role = 'SmartM365 WindowsPowerShell5 compatibility'; Path = $candidate })
+            }
+        }
+    }
+
+    return @($items)
+}
+
+function Test-OrchestratorAuthenticodeFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Role
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [pscustomobject]@{
+            Role = $Role
+            Path = $Path
+            Status = 'Missing'
+            Thumbprint = ''
+            Subject = ''
+            Signer = ''
+            IsValid = $false
+            Detail = 'File not found.'
+        }
+    }
+
+    try {
+        $signature = Get-AuthenticodeSignature -FilePath $Path -ErrorAction Stop
+        $thumbprint = ''
+        $subject = ''
+        if ($signature.SignerCertificate) {
+            $thumbprint = [string]$signature.SignerCertificate.Thumbprint
+            $subject = [string]$signature.SignerCertificate.Subject
+        }
+
+        $allowedThumbprints = @($script:Settings.AuthenticodeAllowedThumbprints)
+        $thumbprintAllowed = $true
+        if ($allowedThumbprints.Count -gt 0) {
+            $thumbprintAllowed = $false
+            if (-not [string]::IsNullOrWhiteSpace($thumbprint)) {
+                $thumbprintAllowed = ($allowedThumbprints -contains $thumbprint.ToUpperInvariant())
+            }
+        }
+
+        $isValid = ([string]$signature.Status -eq 'Valid') -and $thumbprintAllowed
+        $detail = [string]$signature.StatusMessage
+        if ([string]::IsNullOrWhiteSpace($detail)) { $detail = [string]$signature.Status }
+        if ([string]$signature.Status -eq 'Valid' -and -not $thumbprintAllowed) {
+            $detail = 'Signature is valid, but the signer thumbprint is not in AuthenticodeAllowedThumbprints.'
+        }
+
+        return [pscustomobject]@{
+            Role = $Role
+            Path = $Path
+            Status = [string]$signature.Status
+            Thumbprint = $thumbprint
+            Subject = $subject
+            Signer = $subject
+            IsValid = $isValid
+            Detail = $detail
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Role = $Role
+            Path = $Path
+            Status = 'Error'
+            Thumbprint = ''
+            Subject = ''
+            Signer = ''
+            IsValid = $false
+            Detail = $_.Exception.Message
+        }
+    }
+}
+
+function New-OrchestratorAuthenticodeHtmlReport {
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)]$Results
+    )
+
+    $rows = @()
+    foreach ($result in $Results) {
+        $color = if ($result.IsValid) { '#107C10' } else { '#D13438' }
+        $rows += "<tr><td style='padding:4px 8px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $result.Role)</td><td style='padding:4px 8px;border:1px solid #DDDDDD;color:$color;'>$(ConvertTo-HtmlText -Text $result.Status)</td><td style='padding:4px 8px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $result.Thumbprint)</td><td style='padding:4px 8px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $result.Path)</td><td style='padding:4px 8px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $result.Detail)</td></tr>"
+    }
+
+    return @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2 style='color:#D13438;'>Authenticode validation rejected job $(ConvertTo-HtmlText -Text $JobName)</h2>
+<table style='border-collapse:collapse;'>
+<tr><th style='padding:4px 8px;border:1px solid #DDDDDD;'>Role</th><th style='padding:4px 8px;border:1px solid #DDDDDD;'>Status</th><th style='padding:4px 8px;border:1px solid #DDDDDD;'>Thumbprint</th><th style='padding:4px 8px;border:1px solid #DDDDDD;'>Path</th><th style='padding:4px 8px;border:1px solid #DDDDDD;'>Detail</th></tr>
+$($rows -join "`n")
+</table>
+<p>Mode: $(ConvertTo-HtmlText -Text $script:Settings.AuthenticodeValidationMode). Tenant: $(ConvertTo-HtmlText -Text $Tenant). Server: $(ConvertTo-HtmlText -Text $env:COMPUTERNAME).</p>
+</body></html>
+"@
+}
+
+function Invoke-OrchestratorAuthenticodeValidation {
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [Parameter(Mandatory = $true)][string]$ScriptFullPath
+    )
+
+    if (-not $script:Settings.AuthenticodeValidationEnabled) {
+        return [pscustomobject]@{ Allowed = $true; Results = @(); Summary = 'Authenticode validation disabled.' }
+    }
+
+    $results = @()
+    foreach ($item in (Get-OrchestratorAuthenticodeFileList -Job $Job -ScriptFullPath $ScriptFullPath)) {
+        $result = Test-OrchestratorAuthenticodeFile -Path $item.Path -Role $item.Role
+        $results += $result
+        if ($result.IsValid) {
+            Write-OrchestratorLog -Message ("Authenticode {0}: valid; thumbprint={1}; subject={2}; path={3}" -f $result.Role, $result.Thumbprint, $result.Subject, $result.Path)
+        }
+        else {
+            $level = if ($script:Settings.AuthenticodeValidationMode -eq 'Enforce') { 'ERROR' } else { 'WARN' }
+            Write-OrchestratorLog -Message ("Authenticode {0}: {1}; thumbprint={2}; path={3}; detail={4}" -f $result.Role, $result.Status, $result.Thumbprint, $result.Path, $result.Detail) -Level $level
+        }
+    }
+
+    $failed = @($results | Where-Object { -not $_.IsValid })
+    if ($failed.Count -eq 0) {
+        return [pscustomobject]@{ Allowed = $true; Results = $results; Summary = 'Authenticode validation passed.' }
+    }
+
+    $summary = "Authenticode validation found $($failed.Count) invalid or untrusted file(s). Mode=$($script:Settings.AuthenticodeValidationMode)."
+    if ($script:Settings.AuthenticodeValidationMode -eq 'Enforce') {
+        $body = New-OrchestratorAuthenticodeHtmlReport -JobName $Job.Name -Results $results
+        Send-OrchestratorMail -Subject ("[CRITICAL][SmartM365 Orchestrator][$Tenant] Authenticode rejected job $($Job.Name)") -HtmlBody $body -IsError | Out-Null
+        return [pscustomobject]@{ Allowed = $false; Results = $results; Summary = $summary }
+    }
+
+    return [pscustomobject]@{ Allowed = $true; Results = $results; Summary = $summary }
+}
+
 # Child process management
 # ==========================================================
 function Get-PwshPath {
@@ -1235,6 +1485,16 @@ function Start-InventoryJob {
         Write-OrchestratorLog -Message ("Job {0}: script not found: {1}" -f $Job.Name, $scriptFullPath) -Level ERROR
         $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Script not found: {0}" -f $scriptFullPath)
+        return
+    }
+
+    $authenticodeResult = Invoke-OrchestratorAuthenticodeValidation -Job $Job -ScriptFullPath $scriptFullPath
+    if (-not $authenticodeResult.Allowed) {
+        Write-OrchestratorLog -Message ("Job {0}: launch rejected by Authenticode validation. {1}" -f $Job.Name, $authenticodeResult.Summary) -Level ERROR
+        $rejectLine = "[{0}] {1} rejected job {2}: AuthenticodeRejected. {3}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $authenticodeResult.Summary
+        try { [System.IO.File]::WriteAllText($logPath, $rejectLine + [Environment]::NewLine) } catch { }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
+        Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText ("AuthenticodeRejected: {0}" -f $authenticodeResult.Summary)
         return
     }
 
@@ -1874,6 +2134,17 @@ try {
     if ($sendMailMode -eq 'SMTP' -and -not $canSmtpMail) { $mailConfigIssues += 'SmtpServer missing for SMTP mode' }
     if ($sendMailMode -eq 'Both' -and -not ($canGraphMail -or $canSmtpMail)) { $mailConfigIssues += 'Graph app auth and SMTP fallback missing' }
     $mailConfigIssueText = if ($mailConfigIssues.Count -gt 0) { $mailConfigIssues -join '; ' } else { '' }
+    $authenticodeValidationEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeValidationEnabled' -DefaultValue $false
+    $authenticodeValidationMode = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AuthenticodeValidationMode' -DefaultValue 'Audit')
+    if ($authenticodeValidationMode -notin @('Audit', 'Enforce')) { $authenticodeValidationMode = 'Audit' }
+    $authenticodeAllowedThumbprints = @(ConvertTo-OrchestratorStringList -Value (Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AuthenticodeAllowedThumbprints' -DefaultValue @()) | ForEach-Object { $_.Replace(' ', '').ToUpperInvariant() } | Where-Object { $_ })
+    $authenticodeCheckCoreModule = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeCheckCoreModule' -DefaultValue $true
+    $authenticodeCheckWindowsPowerShellModule = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeCheckWindowsPowerShellModule' -DefaultValue $true
+    $authenticodeInstallTrustedCertificates = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeInstallTrustedCertificates' -DefaultValue $false
+    $authenticodeTrustedCertificatePaths = @(ConvertTo-OrchestratorStringList -Value (Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AuthenticodeTrustedCertificatePaths' -DefaultValue @()))
+    $authenticodeInstallTrustedRoot = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeInstallTrustedRoot' -DefaultValue $true
+    $authenticodeInstallTrustedPublisher = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeInstallTrustedPublisher' -DefaultValue $true
+
     # AllowedServers: default server allowlist for every job (empty = all servers).
     # Accepts a JSON array or a comma/semicolon separated string.
     $allowedServersRaw = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AllowedServers' -DefaultValue @()
@@ -1906,6 +2177,16 @@ try {
         MaxConcurrency = [math]::Max(1, $effectiveMaxConcurrency)
         MaxLifetimeHours = [math]::Max(1, $effectiveMaxLifetimeHours)
         TickSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'TickSeconds' -DefaultValue 60))
+        CoreModulePath = $coreModulePath
+        AuthenticodeValidationEnabled = $authenticodeValidationEnabled
+        AuthenticodeValidationMode = $authenticodeValidationMode
+        AuthenticodeAllowedThumbprints = $authenticodeAllowedThumbprints
+        AuthenticodeCheckCoreModule = $authenticodeCheckCoreModule
+        AuthenticodeCheckWindowsPowerShellModule = $authenticodeCheckWindowsPowerShellModule
+        AuthenticodeInstallTrustedCertificates = $authenticodeInstallTrustedCertificates
+        AuthenticodeTrustedCertificatePaths = $authenticodeTrustedCertificatePaths
+        AuthenticodeInstallTrustedRoot = $authenticodeInstallTrustedRoot
+        AuthenticodeInstallTrustedPublisher = $authenticodeInstallTrustedPublisher
         MailFrom = $mailFrom
         MailTo = $mailTo
         ErrorMailTo = $errorMailTo
@@ -1960,6 +2241,8 @@ try {
     Write-OrchestratorLog -Message ("Runtime context: server={0}; user={1}; pid={2}; PowerShell={3}; edition={4}; process64bit={5}." -f $env:COMPUTERNAME, (Get-OrchestratorRunUserName), $PID, $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, [Environment]::Is64BitProcess)
     Write-OrchestratorLog -Message ("Paths: scriptRoot={0}; currentDirectory={1}; data={2}; log={3}; jobLogs={4}; state={5}; heartbeat={6}; runCsv={7}." -f $PSScriptRoot, (Get-Location).Path, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.StatePath, $script:Settings.HeartbeatPath, $script:Settings.OrchestratorRunsCsvPath)
     Write-OrchestratorLog -Message ("Mail context: enabled={0}; mode={1}; graphConfigured={2}; smtpConfigured={3}; fromConfigured={4}; recipientConfigured={5}; jobMailMode={6}; dailySummary={7}." -f $script:Settings.MailEnabled, $script:Settings.SendMailMode, $script:Settings.GraphMailConfigured, $script:Settings.SmtpMailConfigured, (-not [string]::IsNullOrWhiteSpace($script:Settings.MailFrom)), (-not [string]::IsNullOrWhiteSpace($script:Settings.MailTo)), $script:Settings.JobMailMode, $script:Settings.SendDailySummaryEmail)
+    Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
+    Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
         Write-OrchestratorLog -Message ("Email notifications are disabled ({0})." -f $script:Settings.MailConfigIssue) -Level WARN
     }
@@ -2075,3 +2358,46 @@ finally {
 }
 
 exit $script:ExitCode
+
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMAR/+eDBQPqDw
+# 0JEHB7LHlse//FWg3LsO+eGbd1Hem6CCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDyT/8MECBOYfCxFo6d
+# +5puKYOzrGEzkPL6KcqDXLR7iDANBgkqhkiG9w0BAQEFAASCAYCdUOBy3QcJ1Jme
+# maZACR6aEaxq4LrhM9ZlWqr51nYUTRtE21qC8rBDLn1z2Zw0eIHdI7j4ibi/V0A3
+# jxRge+VTXmXXgS7aYP6whyrzCKyA9En9nSIPyNg72s+F0p9PRDWcqD8+gi2s4hIs
+# vGU95GQTaweoC76Jyb0+0/tRNF9lza+29+td+aehY4C56/xWnoYqaQNHRUk5Uj44
+# OgTWnRmf9MDg/8qPqpM9+wm9eo8rt9pWx704HPy9zS7k3LnG3tPJLnYB2PqHAAWm
+# Arjg3psi7yvWcj5QPEfwYeosHAA4kEYITBTDjuVDszm3T9+JSSuXfJkwXlSlplMe
+# Lu6Y67x0gdq+2Acp1x/BoP2RqoFSipaf8Xe1rsY4QvKKuUXDke5Ktun4nX6KQ654
+# PJiJ2p1rnSEx0kgonaMiPrDHCFxGTW2FuIDgAoI5/9J/LT3o7oPWBcRu2S+Ovhf6
+# VBUfKI8f44gsy5JbuLIVrme/BSbmV78BAhvLD7QFKT8NOqzMgZ0=
+# SIG # End signature block

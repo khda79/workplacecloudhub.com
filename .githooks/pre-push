@@ -1,0 +1,40 @@
+#!/bin/sh
+# SmartM365 repository pre-push hook: sign PowerShell files before pushing.
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$repo_root" ]; then
+  echo "SmartM365 pre-push: unable to resolve repository root." >&2
+  exit 1
+fi
+
+sign_script="$repo_root/SmartM365/SmartInventory/Orchestrator/Sign-SmartM365RepositoryPowerShellScripts.ps1"
+if [ ! -f "$sign_script" ]; then
+  echo "SmartM365 pre-push: signing script not found: $sign_script" >&2
+  exit 1
+fi
+
+if command -v pwsh.exe >/dev/null 2>&1; then
+  ps_cmd="pwsh.exe"
+elif command -v pwsh >/dev/null 2>&1; then
+  ps_cmd="pwsh"
+elif command -v powershell.exe >/dev/null 2>&1; then
+  ps_cmd="powershell.exe"
+else
+  echo "SmartM365 pre-push: PowerShell was not found." >&2
+  exit 1
+fi
+
+"$ps_cmd" -NoProfile -ExecutionPolicy Bypass -File "$sign_script" -RepoRoot "$repo_root" -IncludeUntracked
+rc=$?
+if [ $rc -ne 0 ]; then
+  echo "SmartM365 pre-push: Authenticode signing failed." >&2
+  exit $rc
+fi
+
+if ! git -C "$repo_root" diff --quiet -- '*.ps1' '*.psm1' '*.psd1' '*.ps1xml'; then
+  echo "SmartM365 pre-push: signatures were updated. Commit the signature changes, then push again." >&2
+  git -C "$repo_root" status --short -- '*.ps1' '*.psm1' '*.psd1' '*.ps1xml' >&2
+  exit 1
+fi
+
+exit 0
