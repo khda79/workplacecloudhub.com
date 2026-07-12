@@ -115,7 +115,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.6'
+$ScriptVersion = '1.3.7'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -698,6 +698,14 @@ function ConvertTo-NormalizedJob {
     if ($RawJob.PSObject.Properties['AllowedServers'] -and $null -ne $RawJob.AllowedServers) {
         $allowedServers = @($RawJob.AllowedServers | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
     }
+    $requiredLogPatterns = @('Execution context:|Environment initialized successfully|Starting .* v')
+    if ($RawJob.PSObject.Properties['RequiredLogPatterns']) {
+        $requiredLogPatterns = @($RawJob.RequiredLogPatterns | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    }
+    $minimumSuccessDurationSeconds = 0
+    if ($RawJob.PSObject.Properties['MinimumSuccessDurationSeconds'] -and $null -ne $RawJob.MinimumSuccessDurationSeconds) {
+        $minimumSuccessDurationSeconds = [int]$RawJob.MinimumSuccessDurationSeconds
+    }
     $powerShellEdition = 'PowerShell7'
     if ($RawJob.PSObject.Properties['PowerShellEdition'] -and $RawJob.PowerShellEdition) { $powerShellEdition = [string]$RawJob.PowerShellEdition }
     if ($powerShellEdition -notin @('PowerShell7', 'WindowsPowerShell')) {
@@ -746,6 +754,8 @@ function ConvertTo-NormalizedJob {
         RetryDelaySeconds = $retryDelaySeconds
         ContinueOnError = $continueOnError
         AllowedServers = $allowedServers
+        RequiredLogPatterns = $requiredLogPatterns
+        MinimumSuccessDurationSeconds = $minimumSuccessDurationSeconds
         PowerShellEdition = $powerShellEdition
         Schedule = [pscustomobject]@{
             Type = $scheduleType
@@ -1688,7 +1698,7 @@ function Start-InventoryJob {
     $command = "`$ErrorActionPreference = 'Continue'; " +
         "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
         "& '" + $escapedScript + "'" + $argumentPart + " -Tenant '" + $escapedTenant + "'" + $connectPart + " *>> '" + $escapedLog + "'; " +
-        "if (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } else { exit 0 }"
+        "if (-not `$?) { exit 1 } elseif (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } else { exit 0 }"
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
 
     $headerLine = "[{0}] {1} launching job {2} (attempt {3}, scheduled {4})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm:ss')
@@ -1736,6 +1746,56 @@ function Start-InventoryJob {
     Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath)
 }
 
+function Test-JobRunSuccessEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [AllowNull()][string]$LogPath,
+        [int]$DurationSec,
+        [AllowNull()]$ManifestJob
+    )
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $ManifestJob) { return [pscustomobject]@{ IsValid = $true; Message = '' } }
+
+    $minimumDuration = 0
+    if ($ManifestJob.PSObject.Properties['MinimumSuccessDurationSeconds'] -and $null -ne $ManifestJob.MinimumSuccessDurationSeconds) {
+        $minimumDuration = [int]$ManifestJob.MinimumSuccessDurationSeconds
+    }
+    if ($minimumDuration -gt 0 -and $DurationSec -lt $minimumDuration) {
+        $issues.Add(("duration {0}s is lower than required minimum {1}s" -f $DurationSec, $minimumDuration))
+    }
+
+    $patterns = @()
+    if ($ManifestJob.PSObject.Properties['RequiredLogPatterns'] -and $null -ne $ManifestJob.RequiredLogPatterns) {
+        $patterns = @($ManifestJob.RequiredLogPatterns | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    }
+    if ($patterns.Count -gt 0) {
+        if ([string]::IsNullOrWhiteSpace($LogPath) -or -not (Test-Path -LiteralPath $LogPath)) {
+            $issues.Add('job log is missing; required success evidence cannot be verified')
+        }
+        else {
+            $logText = ''
+            try { $logText = [System.IO.File]::ReadAllText($LogPath) }
+            catch { $issues.Add(("job log cannot be read: {0}" -f $_.Exception.Message)) }
+            if (-not [string]::IsNullOrEmpty($logText)) {
+                foreach ($pattern in $patterns) {
+                    if ($logText -notmatch $pattern) {
+                        $issues.Add(("job log does not contain required success evidence pattern: {0}" -f $pattern))
+                    }
+                }
+            }
+            elseif ($issues.Count -eq 0) {
+                $issues.Add('job log is empty; required success evidence cannot be verified')
+            }
+        }
+    }
+
+    if ($issues.Count -gt 0) {
+        return [pscustomobject]@{ IsValid = $false; Message = ($issues -join '; ') }
+    }
+    return [pscustomobject]@{ IsValid = $true; Message = '' }
+}
+
 function Complete-JobRun {
     param(
         [Parameter(Mandatory = $true)][string]$JobName,
@@ -1767,6 +1827,16 @@ function Complete-JobRun {
 
     $durationSec = [int][math]::Max(0, ($EndTime - [datetime]$RunInfo.StartTime).TotalSeconds)
     $attempt = [int]$RunInfo.Attempt
+
+    if ($status -eq 'Success') {
+        $evidence = Test-JobRunSuccessEvidence -JobName $JobName -LogPath ([string]$RunInfo.LogPath) -DurationSec $durationSec -ManifestJob $manifestJob
+        if (-not $evidence.IsValid) {
+            $status = 'Failed'
+            $message = "Job success evidence validation failed: $($evidence.Message)"
+            if ([string]::IsNullOrWhiteSpace($ErrorText)) { $ErrorText = $message } else { $ErrorText = $ErrorText + '; ' + $message }
+            Write-OrchestratorLog -Message ("Job {0}: {1}" -f $JobName, $message) -Level ERROR
+        }
+    }
 
     $retryScheduled = $false
     if ($status -ne 'Success' -and $null -ne $manifestJob -and $attempt -lt $manifestJob.MaxRetries) {
@@ -2588,8 +2658,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhUA/uDrau/zY2
-# H5nuJ/GyAq7caEBWKlBQkdalaMhcPqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbNif5d6fFh1Pi
+# thYCGwbW5DFeiV/KagOZTmL/SZXBo6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2615,14 +2685,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBrn2fA8ydu58+g6RTZD45nan+G9ghY1rVybrBFB25nUzANBgkqhkiG9w0B
-# AQEFAASCAYCgzZ/YtF+6vwuTP+krRwHTX8dKAm88PzwAQerQdnFlfWLEnZepd4qh
-# bM+8Oj/qZ1scLMURrGjr0iuyEcr3aEVr2/m3VjlFTC+AUB5zO85TXqPS7nIbsl+d
-# olvXe1MhgLALQUdn7n5CcK5JCdDBovTnANcKJ9yG/lbzBT8jHIXohzRxpox3LTJd
-# nzh4rj+WgWTLW2WbwK4xRQBJ6nTnanqsb/3O4Fpdp3tsSiLkA2WO3w7NVXBt943v
-# iz/IiVHtm9MLIol1K3nnt4Sq82l4cq3VTIdo5Yga0qIZjbgq3mnATkBe2mdmGiy5
-# bVF4ysR9p5HJhDeUXPluDY4bELyLdng695pQL9nrt62uM6kCloxtkhm3DufTlemH
-# 6h9mC6ou58RSt+E+U83sx1TZBJq+UqNOXQRmUbcRxyX+4J5r5+a3VKNfnwFkPIMr
-# 9BeXZt3n6wXphB3p9Quaa3H2KoM/EF2qNHpNE5dYBa2DxqBcdj3hqQRxZnZpaaer
-# QXOdJPmjSAg=
+# BDEiBCD1GeTxPh7MyZeQo3tzFq4q2bxxf554+6aSUYk5QZqVXjANBgkqhkiG9w0B
+# AQEFAASCAYCCmR0Acyfn7SoiMeSwLzb2Y57KLhhFBXlxi6eiPFpVY7sYvFGSQ928
+# wwBqiQBHPGIlpsbYvHdZSi4eY06/sfBfbhi5+XqJXg8CEQwDV5xAtCLq1D25ynQC
+# R9cyQukk73ZoZy99dhOnHTcTNAPqLaa4E4KOiBiNMfKWf0HwC3nrG57pxEsNGYQB
+# v/bVJmhtKmf26dHVibw/dzMkFwSqOtEXFP4kBTWHfNNQo94g5tx213tIsLwJMcd2
+# mxFrLvqpXNznhbNWkVI5oHcKBqCk0Iy5mui+iqhp1ME5pYHZIgAbUPyzkbVDzFRc
+# +y7YeihlHWO9TliYK3Gh3LWxsKTDlFSBvpJXDJeksFAd6LqC1Y6SUtexLHoJq1iz
+# rnNeTjsv3Qm9uQHrG4OrMZX7MupJoqyv7MHSSSDlV3VqZucJKXHXDBmPKG1yQfgA
+# t/uoHtVji3GndbaGzZV9qsz61Ef8kH+EcRJWRCdWUbVEWqkrxMuKqmpuUgXASqnh
+# QFNaf3jwZz4=
 # SIG # End signature block
