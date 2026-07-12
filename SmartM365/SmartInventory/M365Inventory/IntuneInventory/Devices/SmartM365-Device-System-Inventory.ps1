@@ -29,7 +29,7 @@
     The GUID of the Intune Platform Script (Detect-DeviceSystemInfo) deployed to devices.
     Required to retrieve SecureBoot/BIOS/FirmwareType results from deviceRunStates.
 .VERSION
-1.8
+1.9
 
 
 
@@ -361,7 +361,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -527,7 +527,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -789,8 +789,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTF52i6YXXL2xT
-# zyJ3HwZ1s5ncaG6q1pvDWubQjO6sFaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBN6/+ztrJeqTBM
+# 5fFtTwaHq4V8cPZU7QqChdmGqii/6qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -816,14 +816,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCA/8MhA5qOQvLZ+9cBHmfPKDMM1/lna6jw/q5El9DOL1DANBgkqhkiG9w0B
-# AQEFAASCAYCwX0TALNgooW3TkPVbDZdrxs7370jGHElvn7Zzz76FbN2neuQwOlt3
-# rpQ7tIhq4jmvcfj5qud/UC+/HXF5Yfk+iev9CGLZH9w/iRLSqFUT5SLf8HJd8SJO
-# lfQmfHBpBtvU/caAdXL2utpDt0RYD/Kg54WgaU9tQIEfdmge11rB222ZUq6bFUEn
-# Zyxi8shKx78aPiM6ABBrSJnuPao74XWMzuuw81ZlqPYpxR5tHRR4sVMPFR/iVwMN
-# qk6e51s/4GH+862O4JmdYp56ic7ab63wuVT2jo88kTy/7vnwcOt1GwL/1xYFgM4e
-# +XxsIrP2GjP2pD1OHV6peuWRIMNaCDG/cqUxdiDc2yAZHp+m+scU/3NEHacL8iFo
-# cu2fpxtm/0QQl7TZVZJ23RgVQC8H46u19NUVQlvI3QveHsTdwuo+68Hwrw6HcR9K
-# 0jvjnG9oXaU7TAskmGLA1W6hbbZ2IGKwxe6p6VAZa9TuVeq+wyoewGM+mJInO4nX
-# duJmMoGv69c=
+# BDEiBCD2k91oDyCT6nCZ+Eefam3a0DHRdjq1zTLahhtlpLmZvTANBgkqhkiG9w0B
+# AQEFAASCAYBKB8Q68/SFFSLO4dzhjG359gBTr8rQsctYNI1gDNxVIjuOzKtton1b
+# Bm1NDRKoTqOiNJaW4+gudTTfrkoG44UsJFHxtnCivdIxGl5I0sPgkOwa0Hfv/Mop
+# ou4vb39g+I2SjvKfsVi4ZG0IqjM/xeSOUJdqQm2ztjKZwrhCw98m2fzBaOX1frXv
+# 3qRyXrtTOPoMpXWv12o/MIvFlQnYM20UP8EvKhk5rBb3ExorfIh6gYZtPOwcyME0
+# DRkawE7E6gwtccaNBwNOR86iVZzOkEXOzUsVRGVfQZtzeygJrnNcQLHewSOx3pmy
+# A/O+LzOOKzsfr4fSh9yX6aAQqeg0W2A1k/rZE0Q70XXtuRZQoEvfjnsUz6ezgfXt
+# 3G8QqFt9lVtL9SYUklXN0gUtNu4aD7nhlciwhyuUFsm5ChWoL0gI5wccDh+AGqAV
+# IN70HSZZhBr7bwgPsIKIlE1H4bTln6PHQNrt13e+Wk3rKm6Ugg4NU660Lynr4K4m
+# dM35o3PhYbU=
 # SIG # End signature block

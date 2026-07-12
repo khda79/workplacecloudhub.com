@@ -16,7 +16,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.8
+1.9
 
 
 
@@ -247,7 +247,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -525,7 +525,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -837,8 +837,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNT1cgoZd5vVUu
-# Mvfhi7wR3YN/UfJnZE1R0aGYa1w9vKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC18pcyrforxiSg
+# sF2KGeJhxe4Q32d2O9HRkk8uAuPrFaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -864,14 +864,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBSxjDAu4HiaqWj/UwZCuKtxg9wWw+M2Mo0IED4JB2SeDANBgkqhkiG9w0B
-# AQEFAASCAYBDbUQnA3NrFQ1Jh713hM0APqr6t9zrofj7t39V+t8+BQUpoFN3w1kF
-# FvRFsY5jvbW6sp5/BOOGr5cP47kjZS8WzhmZJAoePhpxgBqviTAxuKjZgoICFFCD
-# etdb1o/kuQV/5bh96SZhUKvulIM8mh1o02/4/k1W05L9noumXVQMNRlftqKee1dR
-# pJKTdCCbT15SFSvvEhSzd3IJddO0ek12spt3AQ2qahPFzzkFqJlF37YINOfXIaZI
-# 9eDnjqejxeLHpGGw+ZbDWUxBIxQQLLMgwGbHjSPB3OFDkBdqTBu7Mg4fDQbUINGy
-# 6mlPP9rcQWkpIYgyyatNOn4EnMAH62NfXGSCleL/0t8lG7XduRGnJRYH1CFuymsZ
-# +fIeQCeWa8f2ULPJ8V2NR/tOwOGpOjLI8h+RnI1Z8GN6CxJG77l5DtCEJ42Lgb3v
-# PdZtHbhM5THoAWzP8LBEqtEALOTiOWywjL1LAjw1iDPgmn8WMF30fLEyOh052BDb
-# ZBoYdm2Zh5M=
+# BDEiBCDqArX6gDpYuE6lIbFszQkpE6PyRWaMhp0WMm5O18NFCzANBgkqhkiG9w0B
+# AQEFAASCAYBiYrjnxKMtIxiXAj6FlBdr0P73oCo1URV1XFSlFa+o5yzlddb4jcRc
+# 4AGRFsU8rhpY9G4J5jPQdYpOXtD0J3nEOQWiRXHo8LCrxReUBYG/APlANPjHTlXR
+# P/pXIEjJKIcxo3rmU2cBILJUj4DW+LtCT0EiRdkLBIPjahHrUgGOk4bDKFsEIsTo
+# cxtfQNcJG26NrZJ5f37J3xJu5wxpvz+vIMQUdsMmoK5s3bZMmQcl6NL+O2RiTnUD
+# OLCdFqiOJCWv0slxXsD+gXkCov2YzxD24Zd2K/1c6tiN2Q8NdjU99AnwJ0lfk+8i
+# ImqplVsdluDV4OMuVfTsWLKeFgnGND1yfqIHGXEVRawa1tZwy+N2JpMA9RGrqJ2r
+# +Uer4+gxvDwjFsIS83c+IyUE8zI9kAWeEivxvJCchtnTfWveWonaKt8JzgSgZiAy
+# 3HhLt4dtVAn0/42Lqq7FUbvilHjLOJTLqZ+obDYTEZFMZqXOdPxJeacIGy5GoYlW
+# FfNHiI2iavU=
 # SIG # End signature block

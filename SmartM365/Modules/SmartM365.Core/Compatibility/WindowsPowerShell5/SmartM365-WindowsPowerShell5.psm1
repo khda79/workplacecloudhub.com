@@ -43,8 +43,19 @@ function Get-SmartM365EffectiveModuleGlobalConfig {
     [CmdletBinding()]
     param()
 
-    if ($null -ne $script:SmartM365GlobalConfig) {
+    if ($null -ne $global:SmartM365GlobalConfig -and $global:SmartM365GlobalConfig.PSObject.Properties.Count -gt 0) {
+        $script:SmartM365GlobalConfig = $global:SmartM365GlobalConfig
         return $script:SmartM365GlobalConfig
+    }
+
+    if ($null -ne $script:SmartM365GlobalConfig) {
+        $requestedTenantKey = [string]$global:SmartM365Tenant
+        $cachedTenantKey = ''
+        $cachedTenantProperty = $script:SmartM365GlobalConfig.PSObject.Properties['TenantKey']
+        if ($null -ne $cachedTenantProperty -and $null -ne $cachedTenantProperty.Value) { $cachedTenantKey = [string]$cachedTenantProperty.Value }
+        if ([string]::IsNullOrWhiteSpace($requestedTenantKey) -or [string]::IsNullOrWhiteSpace($cachedTenantKey) -or $requestedTenantKey -ieq $cachedTenantKey) {
+            return $script:SmartM365GlobalConfig
+        }
     }
 
     $script:SmartM365GlobalConfig = [pscustomobject]@{}
@@ -3974,8 +3985,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcvLo5huNJprAh
-# OY+JEghs63EMY7RcNkeI8pxKb3lrLaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsxHSZo+PyBjsH
+# fnU/HdmmX7U6ib8vQK/WiNtPLKOl5KCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -4001,14 +4012,14 @@ function Export-SmartM365Csv {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDQKl6xS7yr8P90fNylqN4tUXJqObo8WtkP4Em8B9VWvzANBgkqhkiG9w0B
-# AQEFAASCAYCNrT92Ol/xCQ3nm54BAatZeIqM0wCUDpE0brhKd9o7z4CXNiW3VR2v
-# Wd+zcOGqfK3XdUv/MV01/8gSuzW5b5lZM7S3tQLejgx0Cu/tHoJ1cly3Ba86d8oY
-# 0lx18/0HOV8AKm8Ja3brWNHkg8ZT8T6n299y8uAaq+3QOYLFakaqmWPXtXw1+Eh7
-# WfQccGIBd1oLOZpuoMtk/y9vF/0bj0esDdgudVPRENJGl8jQAN7pezIfJue1zYmd
-# qbqqOxQdG5E92u15GTg/EJogZi6Rr+jc5XtQBnrLCXiKRxqpBuKTPt1L9cIDi8dl
-# 5bkdCkviEetPSGKHUyQ+gsuV2UPkIZStbDK5/SLPwsPDHXaEsSP59u2+w9KbZpU2
-# FdQgbL8fb1xtQWEd6qZkKXEobe+p58oT6FwDq1GWSNvutgcg+xivAdGi/Wrqmd45
-# j5jwiWR9WmkZfmiEB8DdPlpqFOx9NSXwUb6WAFuac41cPi5gu9xnO/Fx6I8OcHws
-# 5YJYac2jclo=
+# BDEiBCBsSetsopq1Pyt4Ke1lJk2QOAOnM0yCqDV8LMcHzLwixzANBgkqhkiG9w0B
+# AQEFAASCAYB1JyJuaChPxSRZ+z4nzgts9yFlKUBrgZgkmM0Z9q2F2/ZatXolv4OF
+# O44mLChqPvBZQGBVs7VXohQqsQIKEgmKiDuQuiAmPxB4MnTkEb4P87b99pJbs8hx
+# 4x/7K2zNnYCgbM+Q2vnSzrvsFNRDEV0sQSSOuOiyNSjWo98CEkxmZSuRwblRerWy
+# rqMHmoReNpa4V8dCPzImVWyJ6Qf+AU8Jvd2CtQqmBidlPzo+9RcaLL1N01fpkZIs
+# B8+gr9KbMIBsP9J4yC29YSPIHVbSzO79zlOc4aihVyW7Ww0UDAPuwl25TpS5FRX/
+# k827GD9BQOFQJ9QoojXeipCINJ1Vg78u6/cqWFI0I1McIYcpdaTyvbQBrTFMC6mQ
+# 215vyMlT978Jj99nMXG5Ms3mWihrTwgKLCkr/cTQPZiY+m7AAirSM3yKhAuY+DvK
+# 0cq1bHAMJwi3FUBjzvDsA5HWwtZnTup8b1wm689lFF72vac2hqRG6RzToRShImlI
+# NMXM0jTQ7jY=
 # SIG # End signature block
