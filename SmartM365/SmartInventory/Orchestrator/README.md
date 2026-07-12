@@ -13,6 +13,7 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `Orchestrator-Jobs.json.template` | Safe committed jobs-manifest template (all schedules, neutral `AllowedServers`). |
 | `Orchestrator-Jobs.json` | Runtime jobs manifest, auto-created from the template at first run and Git-ignored: it carries operational values (Enabled flags, schedules, real server names in `AllowedServers`). Hot reloaded on change. |
 | `Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1` | Installs or removes the unattended Windows scheduled task under a dedicated service account. |
+| `Install-SmartM365-OrchestratorCodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `CurrentUser` or `LocalMachine` trust stores. |
 | `Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
 | `Start-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: `-Tenant prod -Connect`. |
 | `Start-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: `-Tenant test -Connect`. |
@@ -51,6 +52,18 @@ When `AuthenticodeValidationEnabled=true`, the orchestrator checks signatures be
 The public self-signed certificate is stored in the repo under `Orchestrator\Certificates`; this is safe because it does not contain the private key. When `AuthenticodeInstallTrustedCertificates=true`, the orchestrator imports only configured certificate files whose thumbprint is allowed into `CurrentUser\Root` and `CurrentUser\TrustedPublisher`, so scheduled-task service accounts can validate signatures without manual certificate-store setup.
 
 Repository signing is handled by `LOCAL_TOOLS\Sign-RepositoryPowerShellScripts.ps1`. The local Git hook path is `.githooks`; the `pre-push` hook runs the signing helper before a push and blocks the push when signatures changed, so the updated signatures must be committed first.
+
+To pre-install the public certificate manually for the current user, run:
+
+```powershell
+& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File ".\SmartM365\SmartInventory\Orchestrator\Install-SmartM365-OrchestratorCodeSigningCertificate.ps1"
+```
+
+For a machine-wide trust install, run from an elevated PowerShell session:
+
+```powershell
+& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File ".\SmartM365\SmartInventory\Orchestrator\Install-SmartM365-OrchestratorCodeSigningCertificate.ps1" -StoreLocation LocalMachine
+```
 
 ## Design
 
