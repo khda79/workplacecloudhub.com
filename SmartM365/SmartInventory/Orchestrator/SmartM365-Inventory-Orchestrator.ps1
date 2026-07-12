@@ -115,7 +115,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.7'
+$ScriptVersion = '1.3.8'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1693,6 +1693,7 @@ function Start-InventoryJob {
     if (-not [string]::IsNullOrWhiteSpace($Job.Arguments)) { $argumentPart = ' ' + $Job.Arguments.Trim() }
     $connectPart = ''
     if ($Connect) { $connectPart = ' -Connect' }
+    $engine = Get-JobEngine -Job $Job
     # Out-File:Encoding pins the *>> redirection to UTF-8: Windows PowerShell 5.1
     # would otherwise append UTF-16 output to the UTF-8 job log.
     $command = "`$ErrorActionPreference = 'Continue'; " +
@@ -1701,10 +1702,15 @@ function Start-InventoryJob {
         "if (-not `$?) { exit 1 } elseif (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } else { exit 0 }"
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
 
-    $headerLine = "[{0}] {1} launching job {2} (attempt {3}, scheduled {4})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm:ss')
-    try { [System.IO.File]::WriteAllText($logPath, $headerLine + [Environment]::NewLine) } catch { }
+    $headerLines = @(
+        ("[{0}] {1} launching job {2} (attempt {3}, scheduled {4})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm:ss')),
+        ("[{0}] Script path verified: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $scriptFullPath),
+        ("[{0}] PowerShell engine: {1} ({2})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $engine.Path, $Job.PowerShellEdition),
+        ("[{0}] Child command: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $command),
+        ("[{0}] Start-Process arguments: -NoProfile -ExecutionPolicy Bypass -EncodedCommand <encoded; decoded child command logged above>" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'))
+    )
+    try { [System.IO.File]::WriteAllLines($logPath, $headerLines, [System.Text.UTF8Encoding]::new($false)) } catch { }
 
-    $engine = Get-JobEngine -Job $Job
     try {
         $process = Start-Process -FilePath $engine.Path -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand) -WindowStyle Hidden -PassThru
     }
@@ -1743,7 +1749,7 @@ function Start-InventoryJob {
     $state.PendingRetry = $null
     Save-OrchestratorState
 
-    Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath)
+    Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6}, script {7}; command {8})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath, $scriptFullPath, $command)
 }
 
 function Test-JobRunSuccessEvidence {
@@ -2658,8 +2664,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbNif5d6fFh1Pi
-# thYCGwbW5DFeiV/KagOZTmL/SZXBo6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBiS9lQuqRuxNCp
+# MOBancSk5shb6wu7INQr7P1GOyT1UqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2685,14 +2691,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCD1GeTxPh7MyZeQo3tzFq4q2bxxf554+6aSUYk5QZqVXjANBgkqhkiG9w0B
-# AQEFAASCAYCCmR0Acyfn7SoiMeSwLzb2Y57KLhhFBXlxi6eiPFpVY7sYvFGSQ928
-# wwBqiQBHPGIlpsbYvHdZSi4eY06/sfBfbhi5+XqJXg8CEQwDV5xAtCLq1D25ynQC
-# R9cyQukk73ZoZy99dhOnHTcTNAPqLaa4E4KOiBiNMfKWf0HwC3nrG57pxEsNGYQB
-# v/bVJmhtKmf26dHVibw/dzMkFwSqOtEXFP4kBTWHfNNQo94g5tx213tIsLwJMcd2
-# mxFrLvqpXNznhbNWkVI5oHcKBqCk0Iy5mui+iqhp1ME5pYHZIgAbUPyzkbVDzFRc
-# +y7YeihlHWO9TliYK3Gh3LWxsKTDlFSBvpJXDJeksFAd6LqC1Y6SUtexLHoJq1iz
-# rnNeTjsv3Qm9uQHrG4OrMZX7MupJoqyv7MHSSSDlV3VqZucJKXHXDBmPKG1yQfgA
-# t/uoHtVji3GndbaGzZV9qsz61Ef8kH+EcRJWRCdWUbVEWqkrxMuKqmpuUgXASqnh
-# QFNaf3jwZz4=
+# BDEiBCAn6y9uQxRKvUHyym9FBUQFNxd3f3auRLDw+2/2T/WdXDANBgkqhkiG9w0B
+# AQEFAASCAYB2g13YfHWj9TIdjvtA/dTIIZtN2N8Y2Xkk9o7RwHGVdSxLYabzqOOg
+# ECi5nleqsjLPYtQ4CsnQO5kbOlqtyIrjrZ9TIk+1R0oWEzFeYGTvDFmxTJREoGkK
+# A3MS3ghahY3HMNFc/F8kX9I0rKkd6Ni/NZbjylEGOkmd/Q/71+VkYtLLKOxbBR/M
+# RfoGKCFbZ4JyrXjX7AV5LIVpkv7Q98S2efOugb/xumeFJy/EgkkpLTZsPmicUmFL
+# fX8HKSHgx2fLLfzd+5oFHDxurnqL/bHmLr8y8wUa5dfYK4iWWoXdNsiOa02p0wRf
+# FwsgCNV9zRMYxHliN1LTP24NGodmIWj5kd1uaNmkjfVT1pww+S9NsaIF9lu13r9g
+# sM9O/ZPwPblXMXXOSPAdPvVN5HYa4tbB814H5OBwWPuz7A0PX1VyQCvV3IbfDMIC
+# coc7ytzyrPcMZEKtK0DekYq7DCHMcYhD8lq+RaxeubL5wLHU2sfBZ2kTmmsH6Gmq
+# XXqJhw6NmGU=
 # SIG # End signature block
