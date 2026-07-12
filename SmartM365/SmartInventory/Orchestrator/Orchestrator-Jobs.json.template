@@ -384,9 +384,7 @@
       "Arguments": "",
       "Enabled": false,
       "Group": "Exchange2016",
-      "DependsOn": [
-        "Exchange2016-Local-Mailboxes-Fast"
-      ],
+      "DependsOn": [],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
       "TimeoutMinutes": 480,
@@ -400,7 +398,6 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "DependencyWaitTimeoutMinutes": 600,
       "LauncherPath": "ExchangeInventory\\OnPremises\\Mailboxes\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions-{{Tenant}}.cmd"
     },
     {
