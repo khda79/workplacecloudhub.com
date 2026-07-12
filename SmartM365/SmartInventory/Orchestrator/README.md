@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.6) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.9) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -106,7 +106,7 @@ For a machine-wide trust install, run from an elevated PowerShell session:
 ### Concurrency, queueing, dependencies, overlap
 
 - Global `MaxConcurrency` (default 2). Jobs due beyond the limit stay queued (their occurrence remains due, never lost) and start as soon as a slot frees. Re-adopted jobs count toward the limit.
-- `DependsOn`: jobs due at the same occurrence run chained in topological order (the manifest is rejected at load time on a cycle). A dependent waits while a parent is running, due, or pending a retry. If a parent with `ContinueOnError=false` finally fails, dependents due at the same occurrence are marked `Skipped`.
+- `DependsOn`: jobs due at the same occurrence run chained in topological order (the manifest is rejected at load time on a cycle). A dependent waits while a parent is running, due, or pending a retry. If a parent with `ContinueOnError=false` finally fails, dependents due at the same occurrence are marked `BlockedDependencyFailed`. If a dependency wait exceeds `DependencyWaitTimeoutMinutes`, the occurrence is marked `BlockedDependencyTimeout`.
 - Overlap guards:
   - Global lock file: two orchestrator instances never run at the same time for the same tenant; a stale lock (dead PID) is recovered with a warning (exit code 3 when a live instance holds the lock).
   - Per job: a job still running at its next occurrence is not relaunched; the occurrence is marked `Skipped` with a warning in the log and the summary.
@@ -156,8 +156,9 @@ For a machine-wide trust install, run from an elevated PowerShell session:
 | Field | Description |
 | --- | --- |
 | `Name` | Unique job name (letters, digits, `.`, `_`, `-`). Used for state, logs and CSV. |
-| `ScriptPath` | Script path relative to the SmartInventory root (the parent folder of `Orchestrator`). |
-| `Arguments` | Extra arguments appended verbatim to the child command line. `-Tenant <tenant>` (and `-Connect` when passed to the orchestrator) are always appended by the orchestrator; do not repeat them here. |
+| `ScriptPath` | Script path relative to the SmartInventory root (the parent folder of `Orchestrator`). This remains the canonical inventory script used for validation and Authenticode checks. |
+| `LauncherPath` | Optional launcher path relative to the SmartInventory root. When present, the orchestrator verifies `ScriptPath` but launches the `.cmd` instead. This is intended for AD/on-prem Exchange jobs that need local cache/unblock/bootstrap behavior. `{{Tenant}}` and `{{TenantKey}}` tokens resolve to the current tenant key. |
+| `Arguments` | Extra arguments appended verbatim to the child command line. For direct `ScriptPath` launches, `-Tenant <tenant>` and `-Connect` are appended by the orchestrator; do not repeat them. For `LauncherPath` launches, the launcher owns tenant/connect handling, so the orchestrator does not append them. |
 | `Enabled` | `false` by default; only enabled jobs are scheduled. |
 | `Group` | Logical group (AD, Exchange, M365, Intune); informational. |
 | `DependsOn` | List of job names that must complete first (cycle-checked at load). |
@@ -165,7 +166,8 @@ For a machine-wide trust install, run from an elevated PowerShell session:
 | `PowerShellEdition` | `PowerShell7` (default, `pwsh`) or `WindowsPowerShell` (`powershell.exe` 5.1, required for Exchange on-premises scripts). |
 | `TimeoutMinutes` | Process-tree kill after this duration (0 disables; may exceed 1440). Default 240. |
 | `MaxRetries` / `RetryDelaySeconds` | Retry policy after Failed/TimedOut/Interrupted. Defaults 0 / 300. |
-| `ContinueOnError` | When `false` and the job finally fails, dependents due at the same occurrence are `Skipped`. Default `true`. |
+| `ContinueOnError` | When `false` and the job finally fails, dependents due at the same occurrence are marked `BlockedDependencyFailed`. Default `true`. |
+| `DependencyWaitTimeoutMinutes` | Optional per-job maximum dependency wait. `0` inherits the orchestrator default. When exceeded, the occurrence is marked `BlockedDependencyTimeout`. |
 | `Schedule.Type` | `Daily` or `Weekly`. |
 | `Schedule.Times` | One or several `"HH:mm"` values (multiple values cover the several-times-per-day case). |
 | `Schedule.DaysOfWeek` | Weekly only: `["Sunday", ...]`. |
@@ -175,7 +177,7 @@ The manifest is hot reloaded at every tick when its file changes; an invalid man
 
 All shipped jobs are `Enabled=false` except `M365-VerifiedDomains-Inventory` (small, read-only, safe daily example). The template contains examples of each schedule type (Weekly, Daily once, Daily multi-time with `Skip`), one long job with `TimeoutMinutes` > 1440 (`Mailboxes-PermissionsByUser-Report`), and the `Exchange2016` group running with `PowerShellEdition = "WindowsPowerShell"`; pin those to the Exchange server through their `AllowedServers` list in the runtime manifest.
 
-Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a nightly full job (for example `EXO-Mailboxes-Inventory` with `-IncludeStats`, `Exchange2016-Local-Mailboxes-Inventory` with `-IncludeADPermission`) plus a midday `-Fast` job running the same script without the expensive switches. The `-Fast` job declares `DependsOn` on the full job so the two never overlap on the same CSVs, and uses `MissedRunPolicy = "Skip"` (a missed midday refresh has no value later). Before enabling a job, make sure its own runtime `.local.json` exists next to the target script (the child runs unattended; app-only auth must be configured).
+Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a nightly full job (for example `EXO-Mailboxes-Inventory` with `-IncludeStats`, `Exchange2016-Local-Mailboxes-Inventory` with `-IncludeADPermission`) plus a midday `-Fast` job running the same script without the expensive switches. The full job can declare `DependsOn` on its fast prerequisite when a quick CSV must be published first; dependent jobs are now marked `BlockedDependencyFailed` or `BlockedDependencyTimeout` instead of silently waiting forever. Fast jobs should use `ContinueOnError=false` when downstream jobs depend on their outputs. Before enabling a job, make sure its own runtime `.local.json` exists next to the target script (the child runs unattended; app-only auth must be configured).
 
 ## State file schema (`Orchestrator-State.json`)
 
@@ -207,7 +209,7 @@ Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a n
 
 Created from the committed template at first run. Keys follow the SmartM365 pattern: `__USE_GLOBAL__` inherits from `SmartM365.global.local.json`, and `{{DataAllRootPath}}`-style tokens are resolved through the tenant context.
 
-Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (default server allowlist, empty = all), `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `DependencyWaitLogIntervalMinutes`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
+Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (default server allowlist, empty = all), `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
 
 ## Parameters
 
@@ -316,7 +318,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "SmartM365\SmartInventory\Orchestr
 - **Exit code 3 / "Another orchestrator instance is already running"**: a live instance holds `Orchestrator.lock`. If no `pwsh` orchestrator is actually running, the lock is stale and the next start recovers it automatically.
 - **A job never starts**: check `Enabled`, the server allowlist (the startup log lists "Jobs not allowed on this server"; `-DryRun` shows the effective allowed list per job), the `-Only`/`-Skip` filters, the dependency chain (a parent pending retry blocks dependents), and the concurrency queue messages in the log.
 - **Job marked `Interrupted`**: the child PID disappeared while the orchestrator was down (reboot, kill, crash). The retry policy applies; check the job log for partial output.
-- **Job marked `Skipped`**: previous run still in progress at the new occurrence (overlap guard), missed occurrence with `MissedRunPolicy=Skip`, or a parent with `ContinueOnError=false` finally failed.
+- **Job marked `Skipped`**: previous run still in progress at the new occurrence (overlap guard), or missed occurrence with `MissedRunPolicy=Skip`.
+- **Job marked `BlockedDependencyFailed` or `BlockedDependencyTimeout`**: a required dependency failed with `ContinueOnError=false`, or dependencies kept blocking longer than the configured wait timeout.
 - **No emails**: verify `SmtpServer`, `From`, `To`/`ErrorMailTo` (global or local values), `JobMailMode`, and DNS/IPv4 reachability of the relay; pin `RelayIp` when DNS is unreliable.
 - **Manifest changes ignored**: the file is reloaded only when its timestamp changes and it validates; an invalid manifest is rejected (error email) and the last valid version stays in effect.
-- **Child exit code could not be read**: logged as a warning and treated as Success; check the job log to confirm the actual result.
+- **Child exit code could not be read**: logged as an error and treated as Failed; check the job log and process history before retrying.
