@@ -1559,33 +1559,28 @@ function Add-SmartM365MailBranding {
         $logoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $branding.ClientLogoPath -MaxKB $branding.ClientLogoMaxKB
         if (-not [string]::IsNullOrWhiteSpace($logoDataUri)) {
             $safeLogoDataUri = ConvertTo-SmartM365EmailHtmlText $logoDataUri
-            $logoHtml = "<td width=`"156`" style=`"width:156px;padding-right:14px;vertical-align:middle;`"><img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"140`" height=`"54`" style=`"display:block;width:140px;height:54px;max-width:140px;max-height:54px;border:0;outline:none;text-decoration:none;object-fit:contain;`" /></td>"
+            $logoHtml = "<td width=`"112`" style=`"width:112px;padding-right:12px;vertical-align:middle;`"><img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"92`" style=`"display:block;width:92px;max-width:92px;height:auto;border:0;outline:none;text-decoration:none;`" /></td>"
         }
     }
 
     $clientLabelHtml = ''
     if ($branding.Enabled -and -not [string]::IsNullOrWhiteSpace($clientName)) {
         $clientLabelHtml = @"
-<td align="right" style="vertical-align:middle;text-align:right;">
-  <div style="font-size:11px;line-height:15px;text-transform:uppercase;letter-spacing:0;color:#64748b;font-weight:700;">Client</div>
-  <div style="font-size:20px;line-height:26px;color:#0f172a;font-weight:700;">$clientName</div>
+<td style="vertical-align:middle;">
+  <div style="font-size:16px;line-height:22px;color:#0f172a;font-weight:700;">$clientName</div>
 </td>
 "@
     }
-    elseif ($branding.Enabled -and -not [string]::IsNullOrWhiteSpace($logoHtml)) {
-        $clientLabelHtml = '<td align="right" style="vertical-align:middle;text-align:right;"><div style="font-size:13px;line-height:18px;color:#64748b;font-weight:600;">SmartM365 report</div></td>'
-    }
-
     $headerHtml = ''
     if ($branding.Enabled -and (-not [string]::IsNullOrWhiteSpace($logoHtml) -or -not [string]::IsNullOrWhiteSpace($clientLabelHtml))) {
         $headerHtml = @"
 <!-- SmartM365MailBranding:v1 -->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:18px 0 0 0;border-collapse:collapse;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:12px 0 6px 0;border-collapse:collapse;">
   <tr>
     <td align="center">
-      <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;background:#ffffff;border:1px solid #d9e2ec;border-radius:6px;border-collapse:separate;">
+      <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;border-collapse:collapse;">
         <tr>
-          <td style="padding:14px 20px;">
+          <td style="padding:0 24px 6px 24px;">
             <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
               <tr>$logoHtml$clientLabelHtml</tr>
             </table>
