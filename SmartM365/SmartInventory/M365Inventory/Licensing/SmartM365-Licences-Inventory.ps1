@@ -4,7 +4,7 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.7
+1.8
 
 
 .REQUIREMENTS
@@ -247,7 +247,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -585,7 +585,7 @@ function Add-GroupAgg {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.8"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $connectedGraphInThisRun = $false
@@ -1070,8 +1070,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZD0HNCxYQCxfN
-# CX0Distp3sEMYDY9YdKxDHYd6hpYVaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpVfd3STPcJ4si
+# XAxPyHqdkWbyh899sXgZt7ChemBF4qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1097,14 +1097,14 @@ $($global:logTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBhPtMdffdaYMtJ7qWd0qG2HThhuno+WJDk6ZMyMbhx3zANBgkqhkiG9w0B
-# AQEFAASCAYBDwW8caxsUzSNxSSspb8tyrtVnpn4Ncqi8yxo3vFQbAyB5VjZLVLC8
-# T4+5bFTHKwto/IVNk9t3uj6X6DBGKikBMAXtjN44oiNhJmw9G6WSwEwi7oN0UVfy
-# eF2dcFM8wMFCRKBLSgCaYMrzSQm/Ys99KiLOyv65pnY74edJspe2cpNPikmEnGQV
-# uPJgJeOPskavzJBwscjKOkDrsZVSQWEIHLFivwwTSX0kJAYjs9wOW5A9CYPJrg2t
-# b7Ga2IOMvr6s5GfY/1DWPX2TWe4fiJRVMzpXecpZq+W1amiS/oZUSJJClbS4vKXX
-# FuKXOdVS6PBSYkKdrGKAKGci+XZ3v/xw2K7yOlsIT7UCo0m/T+72oT0pCMEuShRy
-# VFVPwb3aP9OYmiNH2hxIgwfw3YC7sr5po1biYEsX+mpaQOrI/Py+UthofpgpnPuz
-# xPkmEQ8tO/E8CphQ9OxRPHB7Tjf9DtEFLVZzBbrpLfQ5cg0d3tG+v/wvMc/a6Kkm
-# lAPKE5a0Jvo=
+# BDEiBCA+2tzmE1L7puVULiy8MJshtKnZZoI4kRvhYHCDFOnDmjANBgkqhkiG9w0B
+# AQEFAASCAYAQolfsLycRmfArqtaeZy47TZLU69vnxefv12p/ekh0Y1yk0woPMicm
+# TBMQHOPjlSPx5V91TjaVCc+zr4zxd2M0SAIlVv/qh8UZu3H0YHwFMiU8nCmm6PH5
+# uqokzHL1HMqFz7WhwByMaLdHOWJBObAfWp80R9soSkJMpjgog4r5DT+uA89fbZE/
+# WDOhsUMuPdO13vWTwlXpls6AQJYC0Sh9/tink/R0LUDoUj7BKNAcLAmVKO3G4eBi
+# asNYHf+4k7Ia7iWynt36BMZ4yJFQ1faONOHKg+wLQBMfFZ0WkW0YkdW/tdvY9yff
+# j4MVXweRy8C/eILGMl5tZqZGtZGldSY+U3wGv6PSuTemE0pJ1WI/AbpIGZ8iyZD3
+# z5In5wcbZoFzBSM82wrAEdxMjUxO71+j9X0+9ZOrBxxSRUx3ZK41R5O/3Z7gTbTZ
+# qJ1QAse1cm7UOkmbiNKJerxjGtngyhpn3hrJE9+nA1Lev2KGRFP48Fl1/05OO9cu
+# jsfkeYFyDHI=
 # SIG # End signature block
