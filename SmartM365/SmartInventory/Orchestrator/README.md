@@ -1,6 +1,6 @@
-# SmartM365 Inventory Orchestrator
+﻿# SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.2) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.3) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -31,6 +31,26 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | `<JobName>_<Server>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Inventory-Orchestrator\<Server>\Jobs\<JobName>` | One log per job execution (stdout + stderr of the child process). |
 
 Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle histories remain isolated. Each server still keeps its own scheduler state, so a job allowed on several servers runs on each of them - pin every scheduled job to exactly one server through `AllowedServers` and treat the other servers as manual standby.
+### Authenticode validation
+
+Authenticode validation is optional at engine level, but the shipped local template enables Audit mode with the repo public certificate. It is intended to complement ACL hardening, not replace it: the code folder must still be read-only for the orchestrator service account and ordinary users.
+
+When `AuthenticodeValidationEnabled=true`, the orchestrator checks signatures before each job launch:
+
+- the job `.ps1` file;
+- `SmartM365.Core.psd1` and `SmartM365.Core.psm1` when `AuthenticodeCheckCoreModule=true`;
+- the Windows PowerShell 5 compatibility module files for `PowerShellEdition = "WindowsPowerShell"` jobs when `AuthenticodeCheckWindowsPowerShellModule=true`.
+
+`AuthenticodeValidationMode` supports:
+
+- `Audit`: log warnings for unsigned, invalid or untrusted files, but still launch the job;
+- `Enforce`: reject the launch when validation fails and send a critical orchestrator email.
+
+`AuthenticodeAllowedThumbprints` may stay empty to trust any valid signer trusted by Windows. When populated, only those signer thumbprints are accepted. The orchestrator never signs files; signing is a deployment step after repo updates.
+
+The public self-signed certificate is stored in the repo under `Orchestrator\Certificates`; this is safe because it does not contain the private key. When `AuthenticodeInstallTrustedCertificates=true`, the orchestrator imports only configured certificate files whose thumbprint is allowed into `CurrentUser\Root` and `CurrentUser\TrustedPublisher`, so scheduled-task service accounts can validate signatures without manual certificate-store setup.
+
+Repository signing is handled by `LOCAL_TOOLS\Sign-RepositoryPowerShellScripts.ps1`. The local Git hook path is `.githooks`; the `pre-push` hook runs the signing helper before a push and blocks the push when signatures changed, so the updated signatures must be committed first.
 
 ## Design
 
@@ -38,7 +58,7 @@ Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle
 
 - One resident instance per tenant, bounded lifetime (`MaxLifetimeHours`, default 24), exit code 0 on recycle.
 - 60-second tick: reload the manifest if it changed on disk, supervise running children, compute due occurrences, launch jobs, send the optional daily summary, rewrite the heartbeat, save state.
-- Every job runs in its own detached child process (`-NoProfile -ExecutionPolicy Bypass`), which also isolates module/assembly conflicts between scripts (Graph SDK vs MSAL). The engine is `pwsh` by default; jobs with `PowerShellEdition = "WindowsPowerShell"` run in `powershell.exe` 5.1 instead (required by the Exchange on-premises scripts).
+- Every job runs in its own detached child process (`-NoProfile -ExecutionPolicy Bypass`), which also isolates module/assembly conflicts between scripts (Graph SDK vs MSAL). Before launch, optional Authenticode validation can audit or enforce signatures on the job script and SmartM365 modules. The engine is `pwsh` by default; jobs with `PowerShellEdition = "WindowsPowerShell"` run in `powershell.exe` 5.1 instead (required by the Exchange on-premises scripts).
 
 ### Server allowlist
 
@@ -168,7 +188,7 @@ Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a n
 
 Created from the committed template at first run. Keys follow the SmartM365 pattern: `__USE_GLOBAL__` inherits from `SmartM365.global.local.json`, and `{{DataAllRootPath}}`-style tokens are resolved through the tenant context.
 
-Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (default server allowlist, empty = all), `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
+Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (default server allowlist, empty = all), `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
 
 ## Parameters
 
