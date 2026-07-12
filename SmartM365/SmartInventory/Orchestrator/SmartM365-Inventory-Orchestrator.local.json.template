@@ -22,6 +22,7 @@
   "MaxLifetimeHours": 24,
   "TickSeconds": 60,
   "DependencyWaitLogIntervalMinutes": 30,
+  "OrchestratorHeartbeatLogIntervalMinutes": 30,
   "OrchestratorSharePointUploadIntervalMinutes": 60,
   "AuthenticodeValidationEnabled": true,
   "AuthenticodeValidationMode": "Audit",
