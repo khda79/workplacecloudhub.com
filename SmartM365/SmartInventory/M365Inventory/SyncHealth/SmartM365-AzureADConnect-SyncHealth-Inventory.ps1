@@ -299,7 +299,7 @@ function ConvertTo-SyncHealthRecipientString {
 function Send-SyncHealthMailNotification {
     [CmdletBinding()]
     param(
-        [ValidateSet('SUCCESS','WARNING','ERROR')][string]$Level,
+        [ValidateSet('WARNING','ERROR')][string]$Level,
         [string]$Title,
         [string]$Message,
         [hashtable]$Facts,
@@ -332,7 +332,6 @@ function Send-SyncHealthMailNotification {
         $syncAgeStatus = if ($overallStatus -eq 'ERROR') { 'ERROR' } elseif ($overallStatus -eq 'WARNING') { 'WARNING' } else { 'OK' }
 
         $emailSeverity = switch ($Level) {
-            'SUCCESS' { 'Success' }
             'WARNING' { 'Warning' }
             'ERROR' { 'Error' }
             default { 'Info' }
@@ -558,7 +557,12 @@ try {
 
     $overallStatus = if (@($rows | Where-Object Status -eq 'ERROR').Count -gt 0) { 'ERROR' } elseif (@($rows | Where-Object Status -eq 'WARNING').Count -gt 0) { 'WARNING' } else { 'OK' }
     $message = "Azure AD Connect sync health: $overallStatus. SyncEnabled=$syncEnabled; LastSyncAgeMinutes=$syncAgeMinutes; Threshold=$SyncAgeThresholdMinutes."
-    WriteLog -Message $message -Level $(if ($overallStatus -eq 'OK') { 'SUCCESS' } else { 'WARNING' })
+    $statusLogLevel = switch ($overallStatus) {
+        'ERROR' { 'ERROR' }
+        'WARNING' { 'WARNING' }
+        default { 'SUCCESS' }
+    }
+    WriteLog -Message $message -Level $statusLogLevel
 
     $facts = @{
         Script = $MyInvocation.MyCommand.Name
@@ -574,13 +578,19 @@ try {
         LogFile = $global:LogTextFile
     }
     $CurrentOperation = 'SendNotifications'
-    if ($overallStatus -eq 'OK') {
-        Send-SyncHealthTeamsNotification -Level SUCCESS -Title 'Azure AD Connect sync health success' -Message $message -Facts $facts
-        Send-SyncHealthMailNotification -Level SUCCESS -Title 'Azure AD Connect sync health success' -Message $message -Facts $facts -Attachments @($latestCsvPath)
-    }
-    else {
-        Send-SyncHealthTeamsNotification -Level WARNING -Title 'Azure AD Connect sync health warning' -Message $message -Facts $facts
-        Send-SyncHealthMailNotification -Level WARNING -Title 'Azure AD Connect sync health warning' -Message $message -Facts $facts -Attachments @($latestCsvPath)
+    switch ($overallStatus) {
+        'ERROR' {
+            Send-SyncHealthTeamsNotification -Level ERROR -Title 'Azure AD Connect sync health error' -Message $message -Facts $facts
+            Send-SyncHealthMailNotification -Level ERROR -Title 'Azure AD Connect sync health error' -Message $message -Facts $facts -Attachments @($latestCsvPath)
+        }
+        'WARNING' {
+            Send-SyncHealthTeamsNotification -Level WARNING -Title 'Azure AD Connect sync health warning' -Message $message -Facts $facts
+            Send-SyncHealthMailNotification -Level WARNING -Title 'Azure AD Connect sync health warning' -Message $message -Facts $facts -Attachments @($latestCsvPath)
+        }
+        default {
+            Send-SyncHealthTeamsNotification -Level SUCCESS -Title 'Azure AD Connect sync health success' -Message $message -Facts $facts
+            WriteLog -Message 'Sync Health email notification skipped because overall status is OK.' -Level INFO
+        }
     }
 
     Stop-SmartM365SyncHealthTranscript
