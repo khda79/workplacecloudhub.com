@@ -548,10 +548,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:20",
-          "06:20",
-          "12:20",
-          "18:20"
+          "06:20"
         ],
         "MissedRunPolicy": "RunOnce"
       },
