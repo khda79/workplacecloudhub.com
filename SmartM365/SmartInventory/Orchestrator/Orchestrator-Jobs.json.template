@@ -14,7 +14,9 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["06:00"],
+        "Times": [
+          "06:00"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -32,9 +34,13 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["01:30", "11:30"],
+        "Times": [
+          "01:30",
+          "11:30"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "LauncherPath": "ActiveDirectoryInventory\\Start-SmartM365-ActiveDirectory-Inventory-{{Tenant}}.cmd"
     },
     {
       "Name": "AD-HealthCheck",
@@ -50,9 +56,12 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["05:30"],
+        "Times": [
+          "05:30"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "LauncherPath": "ActiveDirectoryInventory\\Start-SmartM365-ActiveDirectory-HealthCheck-{{Tenant}}.cmd"
     },
     {
       "Name": "M365-ActiveUsers-Inventory",
@@ -68,7 +77,10 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["02:00", "12:00"],
+        "Times": [
+          "02:00",
+          "12:00"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -86,7 +98,10 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["02:30", "12:15"],
+        "Times": [
+          "02:30",
+          "12:15"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -104,7 +119,10 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["03:00", "12:30"],
+        "Times": [
+          "03:00",
+          "12:30"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -122,8 +140,12 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Weekly",
-        "DaysOfWeek": ["Monday"],
-        "Times": ["04:00"],
+        "DaysOfWeek": [
+          "Monday"
+        ],
+        "Times": [
+          "04:00"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -141,8 +163,12 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Weekly",
-        "DaysOfWeek": ["Monday"],
-        "Times": ["04:30"],
+        "DaysOfWeek": [
+          "Monday"
+        ],
+        "Times": [
+          "04:30"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -160,7 +186,10 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["03:30", "12:30"],
+        "Times": [
+          "03:30",
+          "12:30"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -178,7 +207,9 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["03:00"],
+        "Times": [
+          "03:00"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -196,8 +227,12 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Weekly",
-        "DaysOfWeek": ["Monday"],
-        "Times": ["05:00"],
+        "DaysOfWeek": [
+          "Monday"
+        ],
+        "Times": [
+          "05:00"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -207,7 +242,9 @@
       "Arguments": "-IncludeStats",
       "Enabled": false,
       "Group": "Exchange",
-      "DependsOn": ["EXO-Mailboxes-Inventory-Fast"],
+      "DependsOn": [
+        "EXO-Mailboxes-Inventory-Fast"
+      ],
       "AllowedServers": [],
       "TimeoutMinutes": 1200,
       "MaxRetries": 1,
@@ -215,9 +252,12 @@
       "ContinueOnError": false,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["01:00"],
+        "Times": [
+          "01:00"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "DependencyWaitTimeoutMinutes": 1500
     },
     {
       "Name": "EXO-Mailboxes-Permissions",
@@ -225,7 +265,9 @@
       "Arguments": "-PermissionsOnly -ParallelThrottle 4",
       "Enabled": false,
       "Group": "Exchange",
-      "DependsOn": ["EXO-Mailboxes-Inventory"],
+      "DependsOn": [
+        "EXO-Mailboxes-Inventory"
+      ],
       "AllowedServers": [],
       "TimeoutMinutes": 600,
       "MaxRetries": 1,
@@ -233,9 +275,12 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["01:00"],
+        "Times": [
+          "01:00"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "DependencyWaitTimeoutMinutes": 1500
     },
     {
       "Name": "EXO-Mailboxes-Inventory-Fast",
@@ -248,10 +293,12 @@
       "TimeoutMinutes": 240,
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
-      "ContinueOnError": true,
+      "ContinueOnError": false,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["01:00"],
+        "Times": [
+          "01:00"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -261,7 +308,9 @@
       "Arguments": "",
       "Enabled": false,
       "Group": "Exchange",
-      "DependsOn": ["EXO-Mailboxes-Inventory"],
+      "DependsOn": [
+        "EXO-Mailboxes-Inventory"
+      ],
       "AllowedServers": [],
       "TimeoutMinutes": 720,
       "MaxRetries": 1,
@@ -269,9 +318,12 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["01:00"],
+        "Times": [
+          "01:00"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "DependencyWaitTimeoutMinutes": 1500
     },
     {
       "Name": "EXO-AcceptedDomains-Inventory",
@@ -287,7 +339,9 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["04:00"],
+        "Times": [
+          "04:00"
+        ],
         "MissedRunPolicy": "RunOnce"
       }
     },
@@ -305,7 +359,11 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["06:00", "12:00", "18:00"],
+        "Times": [
+          "06:00",
+          "12:00",
+          "18:00"
+        ],
         "MissedRunPolicy": "Skip"
       }
     },
@@ -323,17 +381,21 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["20:00"],
+        "Times": [
+          "20:00"
+        ],
         "MissedRunPolicy": "Skip"
       }
     },
     {
       "Name": "Exchange2016-Local-Mailboxes-Inventory",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
-      "Arguments": "-IncludeADPermission",
+      "Arguments": "",
       "Enabled": false,
       "Group": "Exchange2016",
-      "DependsOn": ["Exchange2016-Local-Mailboxes-Fast"],
+      "DependsOn": [
+        "Exchange2016-Local-Mailboxes-Fast"
+      ],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
       "TimeoutMinutes": 480,
@@ -342,9 +404,13 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["01:00"],
+        "Times": [
+          "01:00"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "DependencyWaitTimeoutMinutes": 600,
+      "LauncherPath": "ExchangeInventory\\OnPremises\\Mailboxes\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions-{{Tenant}}.cmd"
     },
     {
       "Name": "Exchange2016-Local-Mailboxes-Fast",
@@ -358,12 +424,15 @@
       "TimeoutMinutes": 240,
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
-      "ContinueOnError": true,
+      "ContinueOnError": false,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["01:00"],
+        "Times": [
+          "01:00"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "LauncherPath": "ExchangeInventory\\OnPremises\\Mailboxes\\Start-SmartM365-Exchange-Local-Mailboxes-Inventory-{{Tenant}}.cmd"
     },
     {
       "Name": "Exchange2016-ProxyAddresses-Check",
@@ -380,9 +449,12 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Daily",
-        "Times": ["05:00"],
+        "Times": [
+          "05:00"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "LauncherPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly-{{Tenant}}.cmd"
     },
     {
       "Name": "Exchange2016-Infrastructure-Inventory",
@@ -399,10 +471,15 @@
       "ContinueOnError": true,
       "Schedule": {
         "Type": "Weekly",
-        "DaysOfWeek": ["Monday"],
-        "Times": ["06:00"],
+        "DaysOfWeek": [
+          "Monday"
+        ],
+        "Times": [
+          "06:00"
+        ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "LauncherPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory-{{Tenant}}.cmd"
     }
   ]
 }
