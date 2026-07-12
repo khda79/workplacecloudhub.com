@@ -1652,6 +1652,156 @@ function Add-SmartM365MailFilesSection {
 }
 
 
+function ConvertTo-SmartM365Base64Url {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+
+    return ([Convert]::ToBase64String($Bytes).TrimEnd('=') -replace '\+', '-' -replace '/', '_')
+}
+
+function Get-SmartM365CertificateByThumbprint {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Thumbprint)
+
+    $thumb = ([string]$Thumbprint).Replace(' ', '').ToUpperInvariant()
+    if ([string]::IsNullOrWhiteSpace($thumb)) { throw 'Certificate thumbprint is empty.' }
+
+    $cert = @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My') |
+        ForEach-Object { Get-ChildItem -LiteralPath $_ -ErrorAction SilentlyContinue } |
+        Where-Object { $_.Thumbprint -eq $thumb } |
+        Select-Object -First 1
+
+    if (-not $cert) { throw "Certificate not found in CurrentUser\My or LocalMachine\My ($thumb)." }
+    if (-not $cert.HasPrivateKey) { throw "Certificate found but without private key ($thumb)." }
+    return $cert
+}
+
+function New-SmartM365GraphClientAssertion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$ClientId,
+        [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+    )
+
+    $now = [DateTimeOffset]::UtcNow
+    $audience = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+    $header = [ordered]@{
+        alg = 'RS256'
+        typ = 'JWT'
+        x5t = ConvertTo-SmartM365Base64Url -Bytes $Certificate.GetCertHash()
+    }
+    $payload = [ordered]@{
+        aud = $audience
+        iss = $ClientId
+        sub = $ClientId
+        jti = [guid]::NewGuid().Guid
+        nbf = [int64]$now.AddMinutes(-5).ToUnixTimeSeconds()
+        exp = [int64]$now.AddMinutes(10).ToUnixTimeSeconds()
+    }
+
+    $encoding = [System.Text.Encoding]::UTF8
+    $headerPart = ConvertTo-SmartM365Base64Url -Bytes $encoding.GetBytes(($header | ConvertTo-Json -Compress))
+    $payloadPart = ConvertTo-SmartM365Base64Url -Bytes $encoding.GetBytes(($payload | ConvertTo-Json -Compress))
+    $unsignedToken = "$headerPart.$payloadPart"
+    $unsignedBytes = $encoding.GetBytes($unsignedToken)
+
+    $rsa = $null
+    try { $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate) } catch { $rsa = $null }
+    if ($null -eq $rsa) { try { $rsa = $Certificate.PrivateKey } catch { $rsa = $null } }
+    if ($null -eq $rsa) { throw 'Certificate private key is not an RSA key or cannot be opened.' }
+
+    try {
+        $signature = $rsa.SignData($unsignedBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    }
+    catch {
+        $signature = $rsa.SignData($unsignedBytes, 'SHA256')
+    }
+
+    return "$unsignedToken.$(ConvertTo-SmartM365Base64Url -Bytes $signature)"
+}
+
+function Get-SmartM365GraphAccessToken {
+    [CmdletBinding()]
+    param(
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb }),
+        [string]$Purpose = 'Microsoft Graph REST'
+    )
+
+    $moduleLocalConfig = Get-ModuleLocalConfig
+    if (-not (Test-SmartM365ConfiguredValue -Value $AppId)) { $AppId = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'AppId' -DefaultValue '' }
+    if (-not (Test-SmartM365ConfiguredValue -Value $TenantId)) { $TenantId = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'TenantId' -DefaultValue '' }
+    if (-not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) { $Thumbprint = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'Thumbprint' -DefaultValue '' }
+    if (-not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) { $Thumbprint = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'Thumb' -DefaultValue '' }
+
+    if (-not (Test-SmartM365ConfiguredValue -Value $AppId) -or -not (Test-SmartM365ConfiguredValue -Value $TenantId) -or -not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) {
+        throw ("{0}: Graph app-only connection values are missing (AppId, TenantId, Thumb/Thumbprint)." -f $Purpose)
+    }
+
+    if ($null -eq $script:SmartM365GraphRestTokenCache) { $script:SmartM365GraphRestTokenCache = @{} }
+    $cacheKey = '{0}|{1}|{2}' -f $AppId, $TenantId, $Thumbprint
+    $cached = $script:SmartM365GraphRestTokenCache[$cacheKey]
+    if ($cached -and $cached.AccessToken -and $cached.ExpiresOn -gt (Get-Date).ToUniversalTime().AddMinutes(5)) { return [string]$cached.AccessToken }
+
+    $cert = Get-SmartM365CertificateByThumbprint -Thumbprint $Thumbprint
+    $assertion = New-SmartM365GraphClientAssertion -TenantId $TenantId -ClientId $AppId -Certificate $cert
+    $tokenUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+    $body = @{
+        client_id = $AppId
+        scope = 'https://graph.microsoft.com/.default'
+        grant_type = 'client_credentials'
+        client_assertion_type = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
+        client_assertion = $assertion
+    }
+
+    WriteLog -Message ("Acquiring Microsoft Graph REST token for {0}." -f $Purpose) -Level 'INFO'
+    $response = Invoke-RestMethod -Method POST -Uri $tokenUri -Body $body -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
+    if (-not $response.access_token) { throw ("{0}: token endpoint did not return an access token." -f $Purpose) }
+
+    $expiresIn = 3599
+    try { if ($response.expires_in) { $expiresIn = [int]$response.expires_in } } catch {}
+    $script:SmartM365GraphRestTokenCache[$cacheKey] = [pscustomobject]@{
+        AccessToken = [string]$response.access_token
+        ExpiresOn = (Get-Date).ToUniversalTime().AddSeconds([math]::Max(60, $expiresIn - 60))
+    }
+    return [string]$response.access_token
+}
+
+function Invoke-SmartM365GraphFileDownloadWithRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$OutputFilePath,
+        [int]$MaxAttempts = 4,
+        [int]$DefaultRetrySeconds = 15,
+        [int]$MaximumRetrySeconds = 300,
+        [string]$Operation = 'Graph file download'
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $token = Get-SmartM365GraphAccessToken -Purpose $Operation
+            $params = @{ Method = 'GET'; Uri = $Uri; Headers = @{ Authorization = "Bearer $token" }; OutFile = $OutputFilePath; ErrorAction = 'Stop' }
+            $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
+            if ($invokeWebRequestCommand.Parameters.ContainsKey('UseBasicParsing')) { $params.UseBasicParsing = $true }
+            Invoke-WebRequest @params | Out-Null
+            return $true
+        }
+        catch {
+            $statusCode = $null
+            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+            $message = [string]$_.Exception.Message
+            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable'
+            if (-not $isTransient -or $attempt -ge $MaxAttempts) { throw }
+            $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
+            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+            WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusText, $attempt, $MaxAttempts, $delay) -Level 'WARNING'
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
 function ConvertToRecipientArray {
     [CmdletBinding()]
     param(
@@ -1724,8 +1874,11 @@ function Send-SmartM365GraphMail {
         throw "Send-SmartM365GraphMail: missing required parameters (From/To)."
     }
 
-    if (-not (Connect-SmartM365GraphAppOnly -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint -Purpose 'Graph mail')) {
-        throw "Send-SmartM365GraphMail: Microsoft Graph app-only connection failed."
+    try {
+        [void](Get-SmartM365GraphAccessToken -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint -Purpose 'Graph mail')
+    }
+    catch {
+        throw ("Send-SmartM365GraphMail: Microsoft Graph REST app-only connection failed. {0}" -f $_.Exception.Message)
     }
 
     $graphAttachmentPaths = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
@@ -1764,7 +1917,7 @@ function Send-SmartM365GraphMail {
     } | ConvertTo-Json -Depth 12
 
     $encodedFrom = [System.Uri]::EscapeDataString($From)
-    Invoke-MgGraphRequest -Method POST -Uri ("https://graph.microsoft.com/v1.0/users/{0}/sendMail" -f $encodedFrom) -Body $body -ContentType 'application/json' | Out-Null
+    Invoke-SmartM365GraphRestWithRetry -Method POST -Uri ("https://graph.microsoft.com/v1.0/users/{0}/sendMail" -f $encodedFrom) -Body $body -ContentType 'application/json' -Operation 'Send Graph mail' | Out-Null
     WriteLog -Message ("Graph mail sent from {0} to {1}" -f $From, ($toArray -join ';')) -Level "SUCCESS"
 }
 
@@ -2948,30 +3101,21 @@ function Connect-SmartM365GraphForSharePointUpload {
         [string]$Thumbprint
     )
 
-    try {
-        if (-not (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue) -or
-            -not (Get-Command -Name Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
-            Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
-        }
-    }
-    catch {
-        WriteLog -Message ("SharePoint upload skipped: Microsoft.Graph.Authentication could not be loaded: {0}" -f $_.Exception.Message) -Level "WARNING"
-        return $false
-    }
-
     $connectionKey = '{0}|{1}|{2}' -f $AppId, $TenantId, $Thumbprint
-    $currentContext = Get-MgContext -ErrorAction SilentlyContinue
-    if ($script:SmartM365SharePointUploadConnectionKey -eq $connectionKey -and $null -ne $currentContext) {
+    if ($script:SmartM365SharePointUploadConnectionKey -eq $connectionKey) {
         return $true
     }
 
-    $connected = Connect-SmartM365GraphAppOnly -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint -Purpose 'SharePoint upload'
-    if ($connected) {
+    try {
+        [void](Get-SmartM365GraphAccessToken -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint -Purpose 'SharePoint upload')
         $script:SmartM365SharePointUploadConnectionKey = $connectionKey
+        return $true
     }
-    return $connected
+    catch {
+        WriteLog -Message ("SharePoint upload skipped: failed to acquire Microsoft Graph REST token: {0}" -f $_.Exception.Message) -Level "WARNING"
+        return $false
+    }
 }
-
 function Get-SmartM365GraphRetryAfterSeconds {
     [CmdletBinding()]
     param(
@@ -3016,14 +3160,16 @@ function Invoke-SmartM365GraphRestWithRetry {
 
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
+            $token = Get-SmartM365GraphAccessToken -Purpose $Operation
             $params = @{
                 Method      = $Method
                 Uri         = $Uri
+                Headers     = @{ Authorization = "Bearer $token" }
                 ErrorAction = 'Stop'
             }
             if ($null -ne $Body) { $params.Body = $Body }
             if (-not [string]::IsNullOrWhiteSpace($ContentType)) { $params.ContentType = $ContentType }
-            return Invoke-MgGraphRequest @params
+            return Invoke-RestMethod @params
         }
         catch {
             $statusCode = $null
@@ -3036,9 +3182,7 @@ function Invoke-SmartM365GraphRestWithRetry {
                     if ($_.Exception.Response) {
                         $errorResponse = $_.Exception.Response
                         if ($errorResponse -is [System.Net.Http.HttpResponseMessage]) {
-                            if ($errorResponse.Content) {
-                                $responseBody = $errorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                            }
+                            if ($errorResponse.Content) { $responseBody = $errorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult() }
                         }
                         else {
                             $responseStream = $errorResponse.GetResponseStream()
@@ -3068,7 +3212,6 @@ function Invoke-SmartM365GraphRestWithRetry {
         }
     }
 }
-
 function Invoke-SmartM365SharePointLargeFileUpload {
     [CmdletBinding()]
     param(
@@ -3415,7 +3558,7 @@ function Invoke-SmartM365SharePointFileDownload {
         }
 
         $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
-        Invoke-MgGraphRequest -Method GET -Uri $uri -OutputFilePath $LocalFilePath -ErrorAction Stop | Out-Null
+        Invoke-SmartM365GraphFileDownloadWithRetry -Uri $uri -OutputFilePath $LocalFilePath -Operation 'Download SharePoint file' | Out-Null
         if (Test-Path -LiteralPath $LocalFilePath -PathType Leaf) {
             $item = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
             WriteLog -Message ("SharePoint file downloaded: {0} -> {1}" -f $sharePointPath, $item.FullName) -Level "INFO"
@@ -4324,8 +4467,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQXnnMKCli4oI7
-# leb//Ogt0SMiYZ8Lxuot8kk3ysn7qKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfySsxBSL6GBH4
+# hqhtxcw1o7WnV+hxtFJRRBCgQLsS1aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -4351,14 +4494,14 @@ Export-ModuleMember -Function `
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCflPI0d2yHd1ReVdHvQAvd/I2CVwWDk5WzKK0JeerZ6TANBgkqhkiG9w0B
-# AQEFAASCAYDBf6PrKQgf0yo0j99Mm9REZT4N+/5DKx3qLg7Mkl62a8ZhYbqpxwwi
-# +sc7AJozJNIrbXL0c8fv5TLflqcNp1RWfGYWdTya3A3XF5tXOLo9jiUvGK2FyFh8
-# V5mZvM22M21QA759XJ+P/tTpV7Ed76L11dRj+a53xnlmxKvgDxf8m36uapKrKW3U
-# Lp47RbGNLjVSphH7AJWa2zlv9FAjhFOyZstxtKNGT5cto+kx2CvkqcFIdq7MIBg6
-# rtAJ4BBtI1KyofHEpvgupRJYXbOxVHKqQ6wikw7NJYqji8P75hydRExJ2djLef//
-# U7dui2o2l+lXQXR5aif+ObtkwapZjoDUF0OHuZJpIWhjWHuQni4XZBhNyyoWDUcy
-# CiYzMuBoVLpP9pqN+BMi8os7QxP0y2CWKy8ci+0CmLfRQogKalZFr6mgANsPv3rS
-# QbAOsH0m2rvMouF35CzoKV6iiriKe0A+NBqaXAJrny0Ju58IY40jR9vGvAvaWpnu
-# 6yJ2B4jhaq0=
+# BDEiBCDefgKJXwaavECWINonB7xQ8bc19YTsrJ6tO6JyV5ncmjANBgkqhkiG9w0B
+# AQEFAASCAYCT1sK+R3uxfPfvEQ0AMkZtAZ0c9gPMDxO8h5VFbMXpgpGV1uL1sDmh
+# Xvso3DRr6Yjg7xvkZ6raINinLKLU76hX3JHx6rr2RuaO3mM7bv72FA2Tv3uw3jOw
+# ZBlSZFjuFrP9xWXQCQ7L8oJ3xMQ+0qbzy4psIvhc1bOw+nFuqOqb8YDDdczQWlrc
+# C+eVG6ZL6qOYq5G90R+dG+CUfVXgmnVsNy1uA8VXhbjkqpLo1EeFF7Qlfb/bIkFS
+# yyM8jv4+j5fR2TmoQ9CK8c2ye3Ko/x/zzAxQBFQRboRF72Y6unHKj9KB/FiafjVW
+# Gu3HA6yqIyPECTn+VizfXCT4bc5K7O8EVnI3LsGmlKZEhm5TM9QsIOD2EVCX6rPB
+# qZHmK4kcy8ME3HAu2qshRKfapmWVoQc7rBpdFwgCKeh5IOSRCmBCTYpVyCanUBe7
+# Wv6aKjPaDv5JJAmw7Q2m5N42Vv71oYXhAugxKn5GJNDDlVQ2yOS+jCM5GvLdmo+i
+# mlfB8UictDg=
 # SIG # End signature block
