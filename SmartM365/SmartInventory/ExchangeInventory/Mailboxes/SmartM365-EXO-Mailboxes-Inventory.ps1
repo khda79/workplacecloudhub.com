@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.13
+1.14
 
 
 .REQUIREMENTS
@@ -285,7 +285,7 @@ $StatsSnapshotCsvPath  = Join-Path $LatestCsvFolderPath "Exchange_EXO_Mailboxes_
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -395,7 +395,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -2525,8 +2525,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBILnO3w3FtvpsQ
-# A0wYDeuoiF19WuN7U3IIRI2LruCjTaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGkiCVTrfnKdoh
+# 4MMzftjS+Me3bnK8GeiyBjQNry7o6KCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2552,14 +2552,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCC8v2voZKvq/DAHFDR/19GBwwe9X6gaXXFXnM/HK5/27TANBgkqhkiG9w0B
-# AQEFAASCAYCM4jFXaVj/AfMPFXTu468GD7M2iGmMsK1jywyeeDA5ENjyNNUBD1Wa
-# F9jehi8TvKdri5qCBol2Ttpm4xmYFwhCOKIAV/9EbfagImxrfegdfFWWfWU6+3bJ
-# meOZhq5xnB6fho6n49WMYeKgUyLXoJXjvoSeouJHB7IWn3r+HgVI/zdh++yKWfFT
-# 7qp9PNW5dTLGh3k3vuUeEv++QStwxwR78WSZnh1eyDaZShxE5SNc5FyMSWE5nomE
-# 9c5bGycO/3QaqGF4eS/aa/l8nwTcoCv54l2lN5cLQamdljxaGEZb8Q16lUPkTJSm
-# BWRZy340fGn41zCQ1oJ3QD7K7T8QyOI4pSTGIEKgtJGaPOfuQ2ze3y2mRrAU8aXy
-# JQ1yOcVJDcm4fPHEXT1Eo31B4XgQMRMI4pSaYCAVJ8XkHKvGR62Wroqx+VfZYfB+
-# zjAu7iqbv/1Khe1fQH1HeUkB/UeEGTGRVOq3DCWtUn+9Q5X43tVO07AIJWpX+qkm
-# Sp43+CwwS4I=
+# BDEiBCC36VLvRJ/RI7iCvMjWogg4Rcw31D9DpuIT6+lG0aggHTANBgkqhkiG9w0B
+# AQEFAASCAYCsj/P2HpfgESJTY4HAogsO3hIFysUqOPZKvnkdObneuaxMUnuadtbe
+# Is9VOtu2uFrF8KzQjGOFY/5gDHvspBM5EE+WGRhY5i5fBpzSYnwE5OR99O9z5WyN
+# s4IqTCzFjVbokrh65qRPhAS83qSMqyFyedAnprLoIjyzuHFVTuXjakJTwTmZflag
+# IZbrZWmw6LD7sN5bXX80OzK4fejvAmjItGaNuNBA9ur1XVx+wILG3qU8cPgb8POJ
+# XUO89MUa8pZWSe0lyuGnlBuB+j/sEYzZtVuRQZlHboiovDhEMqeqAccHbMvKI9g3
+# HXC8lXEMB0G/Ua3WO1CKxbmT2Qcv7kQRyUa41/UYhG6SJWW6brAZW92KPHlxzZJ6
+# FCKLSOBqPbwn0FvrtyGG2JgUhLNDizxX1HzpKhKi4nAhEQI49ROCDBy1gKOU5ETi
+# 05IaSxPOZCSXlLt5VGd2kA+ZJnzNMh+y9KtS/ex+z1AQYYdKk5WAZ2z2M/LvAYu5
+# UtwHSrV3JyM=
 # SIG # End signature block

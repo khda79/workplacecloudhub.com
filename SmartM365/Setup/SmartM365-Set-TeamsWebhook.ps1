@@ -38,7 +38,7 @@
     .\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos -WebhookUrl "https://prod-00.westeurope.logic.azure.com/workflows/..." -TestOnly
 
 .VERSION
-1.2
+1.3
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -171,7 +171,7 @@ if (-not (Test-Path -LiteralPath $modulePath)) {
     throw "SmartM365.Core module was not found at '$modulePath'."
 }
 
-Import-Module $modulePath -MinimumVersion '1.0.23' -Force -ErrorAction Stop
+Import-Module $modulePath -MinimumVersion '1.0.24' -Force -ErrorAction Stop
 
 if (-not $TestOnly) {
     $config = Read-SmartM365JsonConfig -Path $resolvedConfigPath
@@ -233,8 +233,8 @@ else {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOtJfe3ZJFokOK
-# R4OtrfhGKDy144Kx3WS2LyvQvVX566CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgUc6PC6ASA/9O
+# TW9gDl2zOtXdvs3aDVBP32H3hTnsS6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -260,14 +260,14 @@ else {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCC4AbOKrrblN6hCV4TrZX4OiOpFbJWgyWOq/BHTIrqb9TANBgkqhkiG9w0B
-# AQEFAASCAYCzczVIgDkP7UuHvf4XJDanV9ewloqxcAnSPfdPtwayPRf+3acB7vrC
-# BDUYdUQZdvf4YykgVgmI16FeLsgwJa08DNSom7lbLozGibz9RTO4+MGbgRW9daER
-# 8+GXn4M49an1h8i2zY9ITyBbpm+c6hJbsLPPKirbW61kCRXIYlmXE7Jy98dDlBDr
-# 4vEKo1lgA+fVno2twl9R3rCrWswQnNsslucJ9e9nQVN+JeYHdSOWYmSkmX4+B+Kd
-# tJ9yzKMLHRKj/hpc5RyWHOFsu8jIv2dNczDrWpQ5nPZD46dzr0YBnnUjtgg6vfWj
-# xLRuNxcw28EszERtRLtdnTWiZieUBQuwxrx2AkC7BKJPxO7X51iMbOR5VSttVIfQ
-# nvF4HPuQT79hJEdYW/bfggI/9D26ZBmaGxLw4HR5SY2bjnmfaBd0E1BeDxe8zM7p
-# RbNYQE2E9h0eDlEdnhvLgKRUQjeRVE84ojuYahalkayX73isH3fsKjKzoFVZr03N
-# VyL+Ohs1cRI=
+# BDEiBCBE78ihenTfuohw2PTW/LuCTdmrWMPgarDaGgOpZo34QDANBgkqhkiG9w0B
+# AQEFAASCAYCu8/w2qHS/DZPEBySRnnfD0LzRrJ+aCi4dQ2ASPhwP9hD1lVDq1l1M
+# 7yOA3dA2HXi6qbJ0h9ATIa2OVdgs36qQG6Qw6gokB88a6tUuw1TcQCGjJ577Mjry
+# aPYpowLplIEOjBrKo6qX39OY+6EDgmcWjshZiuwOsJoE2KumZvX8Dt5vvevyrjVm
+# C3ZBtYqdzE2LLYeSb7NPXdKC0REFJ4Xnu/A3oalESx3n1tOAuhr+giab24ZrrHhj
+# ILjHIJjKz1YbSUDKRxYs10hKsfqCvPxUTRG+RHU5i2lprsRWrZIDVwsBXR2m7rJM
+# Nj8WCoqE5cqT2kkT/OT2zvP7Y0DFDA80QwYNJIxH8cIqsmtaPjvvpZdWqgHYI7h8
+# HnrwbPFd4++xNw2pkCI3mJd77JZyYPPvd7TAtG99A11EDIIjrqesiQfzKRemDLdw
+# ORTLG0xNexcD+IIlAImvnSstAO87s1Pc110QjSJv0u559JN0SwQYfSp6hIyLvhuW
+# 9Y2zXI3hLR8=
 # SIG # End signature block
