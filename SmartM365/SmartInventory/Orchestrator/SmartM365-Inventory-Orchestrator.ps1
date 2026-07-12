@@ -91,7 +91,7 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .VERSION
-1.3.12
+1.3.13
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -101,7 +101,7 @@ Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds
     inside its own child process.
 
 .NOTES
-    Version : 1.3.12
+    Version : 1.3.13
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -125,7 +125,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.12'
+$ScriptVersion = '1.3.13'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -2524,7 +2524,7 @@ function Resolve-OrchestratorUniqueFilePath {
 }
 
 function Invoke-OrchestratorJobLogLayoutMigration {
-    $legacyJobsRoot = Join-Path -Path $script:Settings.OrchestratorLogFolderPath -ChildPath 'Jobs'
+    $legacyJobsRoot = $script:Settings.JobLogFolderPath
     if (-not (Test-Path -LiteralPath $legacyJobsRoot)) { return }
 
     $runningLogPaths = @{}
@@ -2539,7 +2539,7 @@ function Invoke-OrchestratorJobLogLayoutMigration {
 
     $movedCount = 0
     $skippedRunningCount = 0
-    $files = @(Get-ChildItem -LiteralPath $legacyJobsRoot -File -Filter '*.log' -Recurse -ErrorAction SilentlyContinue)
+    $files = @(Get-ChildItem -LiteralPath $legacyJobsRoot -File -Filter '*.log' -Recurse -ErrorAction SilentlyContinue | Where-Object { [System.IO.Path]::GetFullPath($_.DirectoryName).TrimEnd('\') -ne [System.IO.Path]::GetFullPath($legacyJobsRoot).TrimEnd('\') })
     foreach ($file in $files) {
         $sourceKey = [System.IO.Path]::GetFullPath($file.FullName).ToLowerInvariant()
         if ($runningLogPaths.ContainsKey($sourceKey)) {
@@ -2568,16 +2568,9 @@ function Invoke-OrchestratorJobLogLayoutMigration {
         }
         catch { }
     }
-    try {
-        if (-not @(Get-ChildItem -LiteralPath $legacyJobsRoot -Force -ErrorAction SilentlyContinue).Count) {
-            Remove-Item -LiteralPath $legacyJobsRoot -Force -ErrorAction Stop
-            Write-OrchestratorLog -Message ("Removed empty legacy job log folder: {0}" -f $legacyJobsRoot)
-        }
-    }
-    catch { }
 
     if ($movedCount -gt 0 -or $skippedRunningCount -gt 0) {
-        Write-OrchestratorLog -Message ("Legacy job log layout migration completed. Moved={0}; skippedRunning={1}; legacyRoot={2}" -f $movedCount, $skippedRunningCount, $legacyJobsRoot)
+        Write-OrchestratorLog -Message ("Legacy job log subfolder migration completed. Moved={0}; skippedRunning={1}; jobsRoot={2}" -f $movedCount, $skippedRunningCount, $legacyJobsRoot)
     }
 }
 # ==========================================================
@@ -2763,7 +2756,7 @@ try {
     $script:Settings = [pscustomobject]@{
         OrchestratorDataFolderPath = $dataFolder
         OrchestratorLogFolderPath = $logFolder
-        JobLogFolderPath = $logFolder
+        JobLogFolderPath = (Join-Path -Path $logFolder -ChildPath 'Jobs')
         JobRunsFolderPath = (Join-Path -Path $dataFolder -ChildPath 'JobRuns')
         OrchestratorRunsCsvPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.csv')
         OrchestratorRunsLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.lock')
@@ -2994,8 +2987,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVEe3oCZPuWEuz
-# yw8EVw+9w3p+wnRcP1rPa9qb/W2g9qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYVpJ7NfuIJaVC
+# 7QOJBafYwH0huXZ1q004CK0RPM/riaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3021,14 +3014,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBCfjfIyvSgdAlvZv7O9sul1ZI7Pzz1F2Sa9xelJLhaZTANBgkqhkiG9w0B
-# AQEFAASCAYBf5gllgdoCvrPeDeY/izlthSjHVL69O4yxBShIqy2DLtydSSnPtl7V
-# TCmKyPyO3FgZP43y57V1iHbSgRntlInOxebDJoQTWY40it7+9u8q0o4lm0oBADEy
-# 7/Lh/+ugUxziX/cwgId1wkkfonFTDIMnRuEFsor+dBnLagHvg72rwyEeifNCzn3e
-# 3llAoUZkdABgmVV1ICt1QCJ/51oh6BJXm0V4Rt/URj46S7wYR2eNSDbRt+OmK+TQ
-# y1a/bgMM4QObE3WqE24CEKDpsXSorZPyo1MdtnWH+z7NQguLI1c8fhSSRxmFeJQK
-# vs8JbCExZGHUHNC0AIbcwJA19yfhiPWCHGEmlGdj9MssE4+EsyrkuPIGHIge5q2d
-# bFKKoHDUMeCGxFNWj3SIH7CCPynNtW2SP/+fgeLtEnv49RzBeAl1Q/MRb/5VFJyX
-# VYgz6CPBSd5ZYOcrNAIix+Lg9TZGfL+jNVw/+WhfSNVt0de3FsuqOTwt45BP8xi1
-# n8jylHRufTY=
+# BDEiBCCIgArwbc5wEW0wNq24tH/62ur6NPoKmvv8wgLHRjj0BTANBgkqhkiG9w0B
+# AQEFAASCAYB1+sMeuNZ6MSDBtjv4L9Yxd+LwSnsC1CroNEBQg4GIVM/lgk6hbyao
+# qDz+Po/U0JqMRiVt066XDvumnP0jCsQAg6uD7Kg4JOkRTW8gX2ia+xzMTwBEk3Zz
+# bQEZ4+9CkQr4gQU0z2nnAi5gdTbo5evfCP5ORI0RGuSK33B1aOB3Bet5NkNBo4Kb
+# VtjvKsa8P6nElVs/zwJXp0gtsleU6l256bvEvKkK9Bod8kF87cdokKtujsJ6GsIi
+# a8LOT+smuZiOh9CbRhF6zucrO4MkJe4gMGemCmfri5cmCRaPMRKm/VYM3Tv/OT4C
+# Bs+UvhXAn3xLT98ObakjQcYitaPEkc6rgoIHGWsBK5sP1eghRuEtU2sQPyg5lPyQ
+# F6LYeuZ20d9aCIQnLEDe48D5n8ogPthMUGqVjCMDOYnDq0EDvI5VErPCRrQK1UCC
+# AMRIdv8s1R2k8CAI9tUcsw2zA4Zdno0kkE9czBjggem5MBd3nF3keCkn+kGdWEbi
+# fnNw2rm/Vuo=
 # SIG # End signature block
