@@ -26,14 +26,14 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.8
+1.9
 
 
 .REQUIREMENTS
     PowerShell 7+.
-    Modules: SmartM365.Core; ExchangeOnlineManagement; Microsoft.Graph.Authentication when Graph enrichment is used.
+    Modules: SmartM365.Core; ExchangeOnlineManagement; Microsoft.Graph.Authentication when Graph enrichment or SmartM365 mail/SharePoint upload is used.
     Minimum permissions: Exchange.ManageAsApp plus Exchange Online app-only RBAC allowing Get-Mailbox and optional mailbox statistics/permission cmdlets; Global Reader is the default read-only service-principal role.
-    Minimum Graph application permissions: User.Read.All for user enrichment.
+    Minimum Graph application permissions: User.Read.All for user enrichment. Not required in -PermissionsOnly mode.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -325,7 +325,7 @@ function Send-FatalErrorEmail {
 }
 
 #region Init
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $IsMaxItemsRun = ($MaxItems -gt 0)
 $IsBoundedMailboxRun = ($IsMaxItemsRun -or $Top100)
 $CsvSuffix = if ($IsMaxItemsRun) { "_MAXITEMS-$MaxItems" } elseif ($Top100) { "_top100" } else { "" }
@@ -557,6 +557,17 @@ function Invoke-ExoSafe {
         }
     }
 
+    $usesSmartM365GraphTransport = [bool]$global:EnableSharePointUpload -or
+        (-not [string]::IsNullOrWhiteSpace($From)) -or
+        (-not [string]::IsNullOrWhiteSpace($ErrorMailTo))
+
+    $preflightModules = @('ExchangeOnlineManagement')
+    if ((-not $PermissionsOnly) -or $usesSmartM365GraphTransport) {
+        $preflightModules += 'Microsoft.Graph.Authentication'
+    }
+
+    Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules $preflightModules -OutputPaths @($OutputPath) | Out-Null
+
     #region Connection management (EXO + Graph via Connect-SmartM365CloudSession)
 
     # --- Exchange Online: detect need for connection ---
@@ -645,7 +656,14 @@ function Invoke-ExoSafe {
 
     #endregion
 
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -ExchangeOnlineProbeCommands @('Get-Mailbox') -RequiredGraphApplicationPermissions @('User.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/users?$top=1') | Out-Null
+    $graphRequiredPermissionsForPreflight = @()
+    $graphProbeUrisForPreflight = @()
+    if (-not $PermissionsOnly) {
+        $graphRequiredPermissionsForPreflight = @('User.Read.All')
+        $graphProbeUrisForPreflight = @('https://graph.microsoft.com/v1.0/users?$top=1')
+    }
+
+    Invoke-SmartM365Preflight -ScriptName $TaskName -ExchangeOnlineProbeCommands @('Get-Mailbox') -RequiredGraphApplicationPermissions $graphRequiredPermissionsForPreflight -GraphProbeUris $graphProbeUrisForPreflight | Out-Null
 
     # --- Retry helper ----------------------------------------------------
     function Invoke-WithRetry {
@@ -2464,8 +2482,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvEJ22C36xxf/P
-# FOsYt1M7qbB4FpEW/2vF35MJkcRq3qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyjfEIognlNn4g
+# v2NAteCdq5JG+Jic8jySM9awmboMGqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2491,14 +2509,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBF/6jctxmPlbXmLAsLWg8I6JTUxtofjljWNr9z7Lo37jANBgkqhkiG9w0B
-# AQEFAASCAYC5+l++aal6ZHxKaup9h2zXe7NfzR1LTHsINrF3rjOC4jiiCCoGqd3s
-# W9clvAuKWlLe/OaTIrCFluy/fWH8CwOiQPRHPVqXmXTNJ/d2566q3DlYPZx8uDWz
-# 8XtA7VATXMciW+vj8YPYvQdey5IbQoIHYden88Ce2jzAJr0spOI/oXOXCPN1o0IO
-# cIzyBqmzgBLWNyhWV9p8EtG46LHrWbJ4S6phCy3CQK5gCZp/ObEhSWPOfk+w4TEp
-# z8iQbnljbh5gs/fyU4DuZ6tzS+J+hDl2bGMKwvrWj1cmIW+AQtoE7ZR9z08FIv+b
-# RrnHaRJDTIYeNeOVJ4woWJcFDGBRBttIzyUSH+ZxGIL51ByGGn38aBvFkJM9Peod
-# AHaaN4cfF/SZXbcGN5Qfn8CWFxknfBBj5zjso5dJaZCDIv9znlfbspFEv7gZkLpp
-# Fn6JKFz6kB86bzT+erlF08v+XUA7RRmF9FsUQfblm75hWzLzbutW/3Fzduy/hHqu
-# TF0CvcC0t0E=
+# BDEiBCAw6WD95KX3uEkOYJF7L2IobnDCYEvvBR4WVTcROINhJTANBgkqhkiG9w0B
+# AQEFAASCAYATszssXVMZ5997I40QgN+acw89nWhj36MXpG1OzDfS9H4Lg7mEz3dL
+# ohBrY3Jc6cMns5GAn3FI2CHmcSJ3DjAXTW2+w7/TksthggKcVBK9mNfclEW8SRDb
+# iXlQlOyJzMSH5jHlfAm9JOjNLR4pw3Agd9IW4zeK5aoutyzsFXYJXth7IiBAfB48
+# 3w3RsnWPKKamPO3LJCT4xYww33StjoqDe4jlQDrilnqYWOmS6aOTJNvwowidxYxh
+# S+TXJxGTdhAbMj75J9mfMXYW8CzdMdEQFtPDUgds6FqoAkdsazzcZgKr102xBr3j
+# B5a95LB+VoRoGZmwqRB2slGrfmRNKjQqVBE9KrXXvcSvxul4AjYb3oljN0a9XGf3
+# kpWa9iqwuhZYTRYu+U1IibP8K1D1gNpIq3z3H95jqlOxfL6tAZwzfLRV97OfQB9M
+# y6BoMhpcEdhTQxymPWFywlwqwieAdlUWxYwq43YoKxSjqLiuFB8+DFWElZ20oaaq
+# spYbSuOjmcA=
 # SIG # End signature block
