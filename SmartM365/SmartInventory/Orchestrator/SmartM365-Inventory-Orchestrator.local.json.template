@@ -1,4 +1,4 @@
-﻿{
+{
   "WorkspaceRootPath": "__USE_GLOBAL__",
   "DataAllRootPath": "__USE_GLOBAL__",
   "LatestCsvFolderPath": "__USE_GLOBAL__",
@@ -21,21 +21,23 @@
   "MaxConcurrency": 2,
   "MaxLifetimeHours": 24,
   "TickSeconds": 60,
+  "DependencyWaitLogIntervalMinutes": 30,
+  "OrchestratorSharePointUploadIntervalMinutes": 60,
   "AuthenticodeValidationEnabled": true,
   "AuthenticodeValidationMode": "Audit",
   "AuthenticodeAllowedThumbprints": [
-    "526459860BED5BA91ED005483C90182852F26FE0"
+    "F01F4A8871B7E349B40564D90F2B2E5BB563720B"
   ],
   "AuthenticodeCheckCoreModule": true,
   "AuthenticodeCheckWindowsPowerShellModule": true,
   "OrchestratorDataFolderPath": "{{DataAllRootPath}}\\Orchestrator",
-  "OrchestratorLogFolderPath": "{{LogAllRootPath}}\\SmartM365-Inventory-Orchestrator",
+  "OrchestratorLogFolderPath": "{{LogAllRootPath}}\\SmartM365-Orchestrator",
   "OrchestratorLogRetentionDays": 30,
   "JobLogRetentionDays": 30,
   "JobRunsCsvRetentionDays": 90,
   "AuthenticodeInstallTrustedCertificates": true,
   "AuthenticodeTrustedCertificatePaths": [
-    "Certificates\\SmartM365-Orchestrator-CodeSigning-526459860BED5BA91ED005483C90182852F26FE0.cer"
+    "..\\..\\..\\Certificates\\workplacecloudhub.com-CodeSigning-F01F4A8871B7E349B40564D90F2B2E5BB563720B.cer"
   ],
   "AuthenticodeInstallTrustedRoot": true,
   "AuthenticodeInstallTrustedPublisher": true
