@@ -242,9 +242,7 @@
       "Arguments": "-IncludeStats",
       "Enabled": false,
       "Group": "Exchange",
-      "DependsOn": [
-        "EXO-Mailboxes-Inventory-Fast"
-      ],
+      "DependsOn": [],
       "AllowedServers": [],
       "TimeoutMinutes": 1200,
       "MaxRetries": 1,
@@ -256,8 +254,7 @@
           "01:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      },
-      "DependencyWaitTimeoutMinutes": 1500
+      }
     },
     {
       "Name": "EXO-Mailboxes-Permissions",
@@ -265,9 +262,7 @@
       "Arguments": "-PermissionsOnly -ParallelThrottle 4",
       "Enabled": false,
       "Group": "Exchange",
-      "DependsOn": [
-        "EXO-Mailboxes-Inventory"
-      ],
+      "DependsOn": [],
       "AllowedServers": [],
       "TimeoutMinutes": 600,
       "MaxRetries": 1,
@@ -279,8 +274,7 @@
           "01:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      },
-      "DependencyWaitTimeoutMinutes": 1500
+      }
     },
     {
       "Name": "EXO-Mailboxes-Inventory-Fast",
@@ -308,9 +302,7 @@
       "Arguments": "",
       "Enabled": false,
       "Group": "Exchange",
-      "DependsOn": [
-        "EXO-Mailboxes-Inventory"
-      ],
+      "DependsOn": [],
       "AllowedServers": [],
       "TimeoutMinutes": 720,
       "MaxRetries": 1,
@@ -322,8 +314,7 @@
           "01:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      },
-      "DependencyWaitTimeoutMinutes": 1500
+      }
     },
     {
       "Name": "EXO-AcceptedDomains-Inventory",
