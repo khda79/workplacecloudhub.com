@@ -30,8 +30,8 @@ Features:
   with the local computer name, so several servers can share the same UNC
   DataAllRootPath/LogAllRootPath without state, lock or log collisions.
 - Global MaxConcurrency with queueing (a due occurrence is never lost while waiting).
-- DependsOn chains executed in topological order; dependents skipped when a parent with
-  ContinueOnError=false finally fails.
+- DependsOn chains executed in topological order; dependents blocked when a parent with
+  ContinueOnError=false finally fails, or when the dependency wait timeout is exceeded.
 - Per-job overlap guard based on the state file (effective across recycles) and a global
   lock file so two orchestrator instances never run together for the same tenant.
 - Timeout with process-tree kill, retry policy (MaxRetries / RetryDelaySeconds).
@@ -41,7 +41,7 @@ Features:
   daily HTML summary email, fatal error email if the orchestrator itself crashes.
   Mail uses the shared SmartM365.Core mail helper, so the orchestrator supports the same
   Graph/SMTP/Both transport selection, branding and HTML copy behavior as inventory scripts.
-- Optional Authenticode validation before job launch, disabled by default and usable
+- Optional Authenticode validation before job launch, configurable and usable
   in Audit mode before switching to Enforce.
 
 .PARAMETER Tenant
@@ -83,7 +83,7 @@ Overrides the state file path. Default: Orchestrator-State.json in the orchestra
 folder ({{DataAllRootPath}}\Orchestrator).
 
 .VERSION
-1.3.4
+1.3.9
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -93,7 +93,7 @@ folder ({{DataAllRootPath}}\Orchestrator).
     inside its own child process.
 
 .NOTES
-    Version : 1.3.5
+    Version : 1.3.9
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -115,7 +115,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.8'
+$ScriptVersion = '1.3.9'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -677,6 +677,8 @@ function ConvertTo-NormalizedJob {
     $scriptPath = ''
     if ($RawJob.PSObject.Properties['ScriptPath'] -and $RawJob.ScriptPath) { $scriptPath = [string]$RawJob.ScriptPath }
     if ([string]::IsNullOrWhiteSpace($scriptPath)) { $Errors.Add("Job '$name': ScriptPath is required.") }
+    $launcherPath = ''
+    if ($RawJob.PSObject.Properties['LauncherPath'] -and $RawJob.LauncherPath) { $launcherPath = [string]$RawJob.LauncherPath }
 
     $arguments = ''
     if ($RawJob.PSObject.Properties['Arguments'] -and $RawJob.Arguments) { $arguments = [string]$RawJob.Arguments }
@@ -705,6 +707,10 @@ function ConvertTo-NormalizedJob {
     $minimumSuccessDurationSeconds = 0
     if ($RawJob.PSObject.Properties['MinimumSuccessDurationSeconds'] -and $null -ne $RawJob.MinimumSuccessDurationSeconds) {
         $minimumSuccessDurationSeconds = [int]$RawJob.MinimumSuccessDurationSeconds
+    }
+    $dependencyWaitTimeoutMinutes = 0
+    if ($RawJob.PSObject.Properties['DependencyWaitTimeoutMinutes'] -and $null -ne $RawJob.DependencyWaitTimeoutMinutes) {
+        $dependencyWaitTimeoutMinutes = [int]$RawJob.DependencyWaitTimeoutMinutes
     }
     $powerShellEdition = 'PowerShell7'
     if ($RawJob.PSObject.Properties['PowerShellEdition'] -and $RawJob.PowerShellEdition) { $powerShellEdition = [string]$RawJob.PowerShellEdition }
@@ -745,6 +751,7 @@ function ConvertTo-NormalizedJob {
     return [pscustomobject]@{
         Name = $name
         ScriptPath = $scriptPath
+        LauncherPath = $launcherPath
         Arguments = $arguments
         Enabled = $enabled
         Group = $group
@@ -756,6 +763,7 @@ function ConvertTo-NormalizedJob {
         AllowedServers = $allowedServers
         RequiredLogPatterns = $requiredLogPatterns
         MinimumSuccessDurationSeconds = $minimumSuccessDurationSeconds
+        DependencyWaitTimeoutMinutes = $dependencyWaitTimeoutMinutes
         PowerShellEdition = $powerShellEdition
         Schedule = [pscustomobject]@{
             Type = $scheduleType
@@ -1078,9 +1086,16 @@ function Invoke-WithOrchestratorRunsCsvLock {
     param(
         [Parameter(Mandatory = $true)][scriptblock]$Action,
         [AllowEmptyCollection()][object[]]$ArgumentList = @(),
-        [int]$TimeoutSeconds = 120,
+        [int]$TimeoutSeconds = 0,
         [int]$RetryDelayMilliseconds = 250
     )
+
+    if ($TimeoutSeconds -le 0) {
+        $TimeoutSeconds = 120
+        if ($script:Settings -and $script:Settings.PSObject.Properties['OrchestratorRunsCsvLockTimeoutSeconds']) {
+            $TimeoutSeconds = [int]$script:Settings.OrchestratorRunsCsvLockTimeoutSeconds
+        }
+    }
 
     $lockStream = $null
     $deadline = (Get-Date).AddSeconds([Math]::Max(1, $TimeoutSeconds))
@@ -1625,6 +1640,14 @@ function Get-JobEngine {
     return [pscustomobject]@{ Path = (Get-PwshPath); ProcessName = 'pwsh' }
 }
 
+function Resolve-OrchestratorJobPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $resolved = [Environment]::ExpandEnvironmentVariables($Path)
+    $resolved = $resolved.Replace('{{Tenant}}', $Tenant).Replace('{{TenantKey}}', $Tenant)
+    if ([System.IO.Path]::IsPathRooted($resolved)) { return $resolved }
+    return (Join-Path -Path $script:SmartInventoryRoot -ChildPath $resolved)
+}
 function Stop-ProcessTree {
     param([Parameter(Mandatory = $true)][int]$TargetPid)
 
@@ -1663,7 +1686,12 @@ function Start-InventoryJob {
     )
 
     $state = Get-JobState -JobName $Job.Name
-    $scriptFullPath = Join-Path -Path $script:SmartInventoryRoot -ChildPath $Job.ScriptPath
+    $scriptFullPath = Resolve-OrchestratorJobPath -Path $Job.ScriptPath
+    $launcherFullPath = ''
+    if ($Job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$Job.LauncherPath)) {
+        $launcherFullPath = Resolve-OrchestratorJobPath -Path ([string]$Job.LauncherPath)
+    }
+    $useLauncher = -not [string]::IsNullOrWhiteSpace($launcherFullPath)
     $startTime = Get-Date
     $logFolder = Join-Path -Path $script:Settings.JobLogFolderPath -ChildPath $Job.Name
     if (-not (Test-Path -LiteralPath $logFolder)) { New-Item -ItemType Directory -Path $logFolder -Force | Out-Null }
@@ -1676,6 +1704,12 @@ function Start-InventoryJob {
         return
     }
 
+    if ($useLauncher -and -not (Test-Path -LiteralPath $launcherFullPath)) {
+        Write-OrchestratorLog -Message ("Job {0}: launcher not found: {1}" -f $Job.Name, $launcherFullPath) -Level ERROR
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
+        Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Launcher not found: {0}" -f $launcherFullPath)
+        return
+    }
     $authenticodeResult = Invoke-OrchestratorAuthenticodeValidation -Job $Job -ScriptFullPath $scriptFullPath
     if (-not $authenticodeResult.Allowed) {
         Write-OrchestratorLog -Message ("Job {0}: launch rejected by Authenticode validation. {1}" -f $Job.Name, $authenticodeResult.Summary) -Level ERROR
@@ -1696,15 +1730,27 @@ function Start-InventoryJob {
     $engine = Get-JobEngine -Job $Job
     # Out-File:Encoding pins the *>> redirection to UTF-8: Windows PowerShell 5.1
     # would otherwise append UTF-16 output to the UTF-8 job log.
-    $command = "`$ErrorActionPreference = 'Continue'; " +
-        "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
-        "& '" + $escapedScript + "'" + $argumentPart + " -Tenant '" + $escapedTenant + "'" + $connectPart + " *>> '" + $escapedLog + "'; " +
-        "if (-not `$?) { exit 1 } elseif (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } else { exit 0 }"
+    if ($useLauncher) {
+        $cmdLine = 'call "' + $launcherFullPath.Replace('"', '""') + '"' + $argumentPart
+        $escapedCmdLine = $cmdLine.Replace("'", "''")
+        $command = "`$ErrorActionPreference = 'Continue'; " +
+            "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
+            "& `$env:ComSpec /d /c '" + $escapedCmdLine + "' *>> '" + $escapedLog + "'; " +
+            "if (-not `$?) { exit 1 } elseif (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } else { exit 0 }"
+    }
+    else {
+        $command = "`$ErrorActionPreference = 'Continue'; " +
+            "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
+            "& '" + $escapedScript + "'" + $argumentPart + " -Tenant '" + $escapedTenant + "'" + $connectPart + " *>> '" + $escapedLog + "'; " +
+            "if (-not `$?) { exit 1 } elseif (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } else { exit 0 }"
+    }
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
 
     $headerLines = @(
         ("[{0}] {1} launching job {2} (attempt {3}, scheduled {4})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm:ss')),
         ("[{0}] Script path verified: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $scriptFullPath),
+        ("[{0}] Launch mode: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $(if ($useLauncher) { 'LauncherPath' } else { 'ScriptPath' })),
+        ("[{0}] Launcher path: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $(if ($useLauncher) { $launcherFullPath } else { 'n/a' })),
         ("[{0}] PowerShell engine: {1} ({2})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $engine.Path, $Job.PowerShellEdition),
         ("[{0}] Child command: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $command),
         ("[{0}] Start-Process arguments: -NoProfile -ExecutionPolicy Bypass -EncodedCommand <encoded; decoded child command logged above>" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'))
@@ -1749,7 +1795,8 @@ function Start-InventoryJob {
     $state.PendingRetry = $null
     Save-OrchestratorState
 
-    Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6}, script {7}; command {8})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath, $scriptFullPath, $command)
+    $launchTarget = if ($useLauncher) { $launcherFullPath } else { $scriptFullPath }
+    Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6}, target {7}; command {8})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath, $launchTarget, $command)
 }
 
 function Test-JobRunSuccessEvidence {
@@ -1823,8 +1870,8 @@ function Complete-JobRun {
         'LaunchFailed' { $status = 'Failed' }
         'Exited' {
             if ($null -eq $ExitCode) {
-                $status = 'Success'
-                Write-OrchestratorLog -Message ("Job {0}: exit code could not be read; the run is treated as Success." -f $JobName) -Level WARN
+                $status = 'Failed'
+                Write-OrchestratorLog -Message ("Job {0}: exit code could not be read; the run is treated as Failed." -f $JobName) -Level ERROR
             }
             elseif ([int]$ExitCode -eq 0) { $status = 'Success' }
             else { $status = 'Failed' }
@@ -2019,6 +2066,23 @@ function Set-OccurrenceSkipped {
     Write-OrchestratorLog -Message ("Job {0}: occurrence {1} skipped ({2})." -f $JobName, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Reason) -Level WARN
 }
 
+function Set-OccurrenceBlocked {
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][datetime]$Occurrence,
+        [Parameter(Mandatory = $true)][ValidateSet('BlockedDependencyFailed', 'BlockedDependencyTimeout')][string]$Status,
+        [Parameter(Mandatory = $true)][string]$Reason
+    )
+
+    $state = Get-JobState -JobName $JobName
+    $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $Occurrence
+    $state.LastStatus = $Status
+    $state.PendingRetry = $null
+    Save-OrchestratorState
+
+    Add-JobRunCsvRow -JobName $JobName -ScheduledTime $Occurrence -StartTime $null -EndTime (Get-Date) -DurationSec 0 -ExitCode $null -Status $Status -RetryCount 0 -LogPath ''
+    Write-OrchestratorLog -Message ("Job {0}: occurrence {1} blocked with status {2} ({3})." -f $JobName, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Status, $Reason) -Level ERROR
+}
 function Initialize-NewJobStates {
     # New jobs (no state yet) start fast-forwarded: an occurrence from before the job
     # existed is not a missed occurrence.
@@ -2113,7 +2177,8 @@ function Invoke-LaunchPhase {
         # running, launched earlier in this tick, pending a retry, or itself due.
         if (-not $isForced) {
             $deferred = $false
-            $skippedByParent = $false
+            $blockedByParent = $false
+            $blockedDependency = ''
             $blockingDependencies = New-Object System.Collections.Generic.List[string]
             foreach ($dep in $job.DependsOn) {
                 $depState = Get-JobState -JobName $dep
@@ -2143,16 +2208,27 @@ function Invoke-LaunchPhase {
                     }
                     if ($depState.LastStatus -in @('Failed', 'TimedOut', 'Interrupted') -and -not $depJob.ContinueOnError) {
                         $depOccurrence = ConvertFrom-StateTime -Text ([string]$depState.LastScheduledOccurrence)
-                        if ($null -ne $depOccurrence -and $depOccurrence -eq $occurrence) { $skippedByParent = $true; break }
+                        if ($null -ne $depOccurrence -and $depOccurrence -eq $occurrence) { $blockedByParent = $true; $blockedDependency = $dep; break }
                     }
                 }
             }
-            if ($skippedByParent) {
-                Set-OccurrenceSkipped -JobName $name -Occurrence $occurrence -Reason 'dependency finally failed with ContinueOnError=false'
+            if ($blockedByParent) {
+                Set-OccurrenceBlocked -JobName $name -Occurrence $occurrence -Status 'BlockedDependencyFailed' -Reason ("dependency '{0}' finally failed with ContinueOnError=false" -f $blockedDependency)
                 Clear-DependencyWaitLog -JobName $name
                 continue
             }
             if ($deferred) {
+                $dependencyWaitTimeout = [int]$job.DependencyWaitTimeoutMinutes
+                if ($dependencyWaitTimeout -le 0) { $dependencyWaitTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
+                if ($dependencyWaitTimeout -gt 0 -and $script:DependencyWaitLogState.ContainsKey($name)) {
+                    $waitState = $script:DependencyWaitLogState[$name]
+                    $waitMinutes = [int]($Now - [datetime]$waitState.FirstSeen).TotalMinutes
+                    if ($waitMinutes -ge $dependencyWaitTimeout) {
+                        Set-OccurrenceBlocked -JobName $name -Occurrence $occurrence -Status 'BlockedDependencyTimeout' -Reason ("dependencies still blocking after {0} min: {1}" -f $waitMinutes, (@($blockingDependencies) -join ', '))
+                        Clear-DependencyWaitLog -JobName $name
+                        continue
+                    }
+                }
                 Write-DependencyWaitLog -JobName $name -BlockingDependencies @($blockingDependencies) -Now $Now
                 continue
             }
@@ -2307,6 +2383,7 @@ function Show-DryRunPlan {
         if (-not (Test-JobSelected -JobName $job.Name)) { $flags += 'filtered out by -Only/-Skip' }
         if ($job.DependsOn.Count -gt 0) { $flags += ('depends on ' + ($job.DependsOn -join ', ')) }
         if ($job.PowerShellEdition -eq 'WindowsPowerShell') { $flags += 'WindowsPowerShell' }
+        if ($job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$job.LauncherPath)) { $flags += ('launcher ' + [string]$job.LauncherPath) }
         if (-not (Test-JobAllowedOnServer -Job $job)) { $flags += ('not allowed on this server; allowed: ' + ((Get-JobEffectiveAllowedServers -Job $job) -join ', ')) }
         $flagText = ''
         if ($flags.Count -gt 0) { $flagText = ' [' + ($flags -join '; ') + ']' }
@@ -2459,6 +2536,8 @@ try {
         MaxLifetimeHours = [math]::Max(1, $effectiveMaxLifetimeHours)
         TickSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'TickSeconds' -DefaultValue 60))
         DependencyWaitLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitLogIntervalMinutes' -DefaultValue 30))
+        DependencyWaitTimeoutMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitTimeoutMinutes' -DefaultValue 1440))
+        OrchestratorRunsCsvLockTimeoutSeconds = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorRunsCsvLockTimeoutSeconds' -DefaultValue 300))
         OrchestratorHeartbeatLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorHeartbeatLogIntervalMinutes' -DefaultValue 30))
         OrchestratorSharePointUploadIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorSharePointUploadIntervalMinutes' -DefaultValue 60))
         SharePointUploadEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'EnableSharePointUpload' -DefaultValue ([bool]$global:EnableSharePointUpload)
@@ -2531,7 +2610,7 @@ try {
     Write-OrchestratorLog -Message ("Paths: scriptRoot={0}; currentDirectory={1}; data={2}; log={3}; jobLogs={4}; state={5}; heartbeat={6}; runCsv={7}." -f $PSScriptRoot, (Get-Location).Path, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.StatePath, $script:Settings.HeartbeatPath, $script:Settings.OrchestratorRunsCsvPath)
     Write-OrchestratorLog -Message ("Mail context: enabled={0}; mode={1}; graphConfigured={2}; smtpConfigured={3}; fromConfigured={4}; recipientConfigured={5}; jobMailMode={6}; dailySummary={7}." -f $script:Settings.MailEnabled, $script:Settings.SendMailMode, $script:Settings.GraphMailConfigured, $script:Settings.SmtpMailConfigured, (-not [string]::IsNullOrWhiteSpace($script:Settings.MailFrom)), (-not [string]::IsNullOrWhiteSpace($script:Settings.MailTo)), $script:Settings.JobMailMode, $script:Settings.SendDailySummaryEmail)
 
-    Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; heartbeatLogIntervalMinutes={4}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes)
+    Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; dependencyWaitTimeoutMinutes={4}; heartbeatLogIntervalMinutes={5}; runsCsvLockTimeoutSeconds={6}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.DependencyWaitTimeoutMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes, $script:Settings.OrchestratorRunsCsvLockTimeoutSeconds)
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
@@ -2664,8 +2743,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBiS9lQuqRuxNCp
-# MOBancSk5shb6wu7INQr7P1GOyT1UqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQ6KLPxVEiiLPN
+# WJyZiZYRZlkhwVtSa4ix1OK/3X575aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2691,14 +2770,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAn6y9uQxRKvUHyym9FBUQFNxd3f3auRLDw+2/2T/WdXDANBgkqhkiG9w0B
-# AQEFAASCAYB2g13YfHWj9TIdjvtA/dTIIZtN2N8Y2Xkk9o7RwHGVdSxLYabzqOOg
-# ECi5nleqsjLPYtQ4CsnQO5kbOlqtyIrjrZ9TIk+1R0oWEzFeYGTvDFmxTJREoGkK
-# A3MS3ghahY3HMNFc/F8kX9I0rKkd6Ni/NZbjylEGOkmd/Q/71+VkYtLLKOxbBR/M
-# RfoGKCFbZ4JyrXjX7AV5LIVpkv7Q98S2efOugb/xumeFJy/EgkkpLTZsPmicUmFL
-# fX8HKSHgx2fLLfzd+5oFHDxurnqL/bHmLr8y8wUa5dfYK4iWWoXdNsiOa02p0wRf
-# FwsgCNV9zRMYxHliN1LTP24NGodmIWj5kd1uaNmkjfVT1pww+S9NsaIF9lu13r9g
-# sM9O/ZPwPblXMXXOSPAdPvVN5HYa4tbB814H5OBwWPuz7A0PX1VyQCvV3IbfDMIC
-# coc7ytzyrPcMZEKtK0DekYq7DCHMcYhD8lq+RaxeubL5wLHU2sfBZ2kTmmsH6Gmq
-# XXqJhw6NmGU=
+# BDEiBCD2mhJrqyHfwNRu5Jl2LblHwZvYWK+Bc+MntKQ3+SdHJDANBgkqhkiG9w0B
+# AQEFAASCAYAa6Oo1BNX8ln8llFaABuy8K1Mt074q4IWbDk1uUI5zxCndxx15A5HI
+# h9HY8ZWKDCfVaRcEO8R2TjQaSActr1b8ujFK8HTCoBUK3TJYK568nlALVAM5NvvR
+# fATX11Bl1grWJr6NQFZBGElqwiVqMHpu/Lb2T+uv8wpRGC2/BVhapZzZZJg6Sv1B
+# EQPyKaLm+nKdbTTYsq3Y5ZajV5O1xsvlGWGXgbGmZ/sWlTQMxEvRXDTHOlYVqlhS
+# pp7iSFQuoWldYCPxpVO7ht0RTJeHfSXdyt70TQx2QmK6G30vZLxB3H0x5uRwzJPB
+# KzjHXIu5y02KrFfyH+WkwxfxO21PO+z1y6cXWMQk+yxcCGLmbkV8vz+wvwaMKQ6A
+# sCXtOEwZCwAD4Vl6oUzw1O8/Ietj13iSIEogh9fVfXuhTaxYqFZZwQxqpg6jnc/T
+# mWYC3JBGcehRxbUwJP3p5OlBdILmVQB52Ynev+TCh2qxbbJRN61f7o6KAuIZfMD9
+# +ozeJFKkOqI=
 # SIG # End signature block
