@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.11
+1.12
 
 
 .REQUIREMENTS
@@ -324,8 +324,80 @@ function Send-FatalErrorEmail {
     }
 }
 
+function ConvertTo-MailboxInventoryHtmlText {
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return '' }
+    return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+function Add-MailboxInventoryHtmlSection {
+    param(
+        [AllowNull()][string]$BodyHtml,
+        [AllowNull()][string]$SectionHtml
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SectionHtml)) { return $BodyHtml }
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { return $SectionHtml }
+    if ($BodyHtml -match '(?is)</body>') {
+        return ([regex]::Replace($BodyHtml, '(?is)</body>', ($SectionHtml + "`n</body>"), 1))
+    }
+    return ([string]$BodyHtml + "`n" + $SectionHtml)
+}
+
+function New-StatsCompletenessIssuesHtml {
+    param(
+        [Parameter(Mandatory)][object[]]$Issues,
+        [int]$MaxRows = 50
+    )
+
+    $rows = New-Object System.Collections.Generic.List[string]
+    foreach ($issue in ($Issues | Select-Object -First $MaxRows)) {
+        $rows.Add(("<tr><td style=`"border-top:1px solid #e2e8f0;padding:6px 8px;font-size:11px;color:#334155;`">{0}</td><td style=`"border-top:1px solid #e2e8f0;padding:6px 8px;font-size:11px;color:#334155;word-break:break-all;`">{1}</td><td style=`"border-top:1px solid #e2e8f0;padding:6px 8px;font-size:11px;color:#334155;word-break:break-all;`">{2}</td><td style=`"border-top:1px solid #e2e8f0;padding:6px 8px;font-size:11px;color:#b45309;font-weight:700;`">{3}</td><td style=`"border-top:1px solid #e2e8f0;padding:6px 8px;font-size:11px;color:#334155;`">{4}</td><td style=`"border-top:1px solid #e2e8f0;padding:6px 8px;font-size:11px;color:#334155;`">{5}</td></tr>" -f `
+            (ConvertTo-MailboxInventoryHtmlText $issue.RowNumber),
+            (ConvertTo-MailboxInventoryHtmlText $issue.UserPrincipalName),
+            (ConvertTo-MailboxInventoryHtmlText $issue.PrimarySmtpAddress),
+            (ConvertTo-MailboxInventoryHtmlText $issue.MissingFields),
+            (ConvertTo-MailboxInventoryHtmlText $issue.StatsSource),
+            (ConvertTo-MailboxInventoryHtmlText $issue.Details))) | Out-Null
+    }
+
+    if ($rows.Count -eq 0) { return '' }
+    $extra = ''
+    if ($Issues.Count -gt $MaxRows) {
+        $extra = "<p style=`"margin:8px 0 0 0;font-size:11px;color:#64748b;`">Only the first $MaxRows issue rows are shown in this mail.</p>"
+    }
+
+    return @"
+<div style=""margin-top:18px;"">
+  <h3 style=""margin:0 0 8px 0;font-size:14px;line-height:20px;color:#0f172a;"">Live mailbox statistics completeness issues</h3>
+  <p style=""margin:0 0 10px 0;font-size:12px;line-height:18px;color:#334155;"">The run was stopped before DATA-LAST publication because live Exchange Online statistics returned incomplete critical fields.</p>
+  <table role=""presentation"" cellpadding=""0"" cellspacing=""0"" style=""width:100%;border-collapse:collapse;border:1px solid #e2e8f0;"">
+    <tr><th align=""left"" style=""background:#f8fafc;padding:6px 8px;font-size:10px;color:#475569;text-transform:uppercase;"">Row</th><th align=""left"" style=""background:#f8fafc;padding:6px 8px;font-size:10px;color:#475569;text-transform:uppercase;"">UPN</th><th align=""left"" style=""background:#f8fafc;padding:6px 8px;font-size:10px;color:#475569;text-transform:uppercase;"">Primary SMTP</th><th align=""left"" style=""background:#f8fafc;padding:6px 8px;font-size:10px;color:#475569;text-transform:uppercase;"">Missing fields</th><th align=""left"" style=""background:#f8fafc;padding:6px 8px;font-size:10px;color:#475569;text-transform:uppercase;"">Stats source</th><th align=""left"" style=""background:#f8fafc;padding:6px 8px;font-size:10px;color:#475569;text-transform:uppercase;"">Details</th></tr>
+    $($rows -join "`n")
+  </table>
+  $extra
+</div>
+"@
+}
+
+function Publish-MailboxInventoryDiagnosticCsv {
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+        $uploadCommand = Get-Command -Name Invoke-SmartM365SharePointCsvUpload -ErrorAction SilentlyContinue
+        if (-not $uploadCommand) { return }
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $Path | Out-Null
+        WriteLog -Message ("Diagnostic CSV uploaded to SharePoint: {0}" -f $Path) "SUCCESS"
+    }
+    catch {
+        WriteLog -Message ("Diagnostic CSV SharePoint upload failed; local diagnostic remains available: {0}. Error: {1}" -f $Path, $_.Exception.Message) "WARNING"
+    }
+}
 #region Init
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
+$script:StatsCompletenessDiagnosticPath = $null
+$script:StatsCompletenessIssueRows = @()
 $IsMaxItemsRun = ($MaxItems -gt 0)
 $IsBoundedMailboxRun = ($IsMaxItemsRun -or $Top100)
 $CsvSuffix = if ($IsMaxItemsRun) { "_MAXITEMS-$MaxItems" } elseif ($Top100) { "_top100" } else { "" }
@@ -1180,13 +1252,11 @@ function Convert-ToMBInteger {
                     PrimarySmtpAddress            = [string]$row.PrimarySmtpAddress
 
                     TotalItemSizeGB               = [string]$row.TotalItemSizeGB
-                    TotalItemSizeMB_Integer       = [string]$row.TotalItemSizeMB_Integer
                     ItemCount                     = [string]$row.ItemCount
                     LastLogonTime                 = [string]$row.LastLogonTime
                     LastUserActionTime            = [string]$row.LastUserActionTime
 
                     Archive_TotalItemSizeGB       = [string]$row.Archive_TotalItemSizeGB
-                    Archive_TotalItemSizeMB_Integer= [string]$row.Archive_TotalItemSizeMB_Integer
                     Archive_ItemCount             = [string]$row.Archive_ItemCount
                     Archive_LastLogonTime         = [string]$row.Archive_LastLogonTime
                 }
@@ -1296,9 +1366,9 @@ return @{
         "ArchiveStatus","ArchiveName","ArchiveQuotaGB","ArchiveWarningQuotaGB",
         "CustomAttribute1","CustomAttribute2","CustomAttribute3","CustomAttribute4","CustomAttribute5","CustomAttribute6","CustomAttribute7","CustomAttribute8","CustomAttribute9","CustomAttribute10",
         "CustomAttribute11","CustomAttribute12","CustomAttribute13","CustomAttribute14","CustomAttribute15","ExternalDirectoryObjectId","MailboxPlan",
-        "Archive_TotalItemSizeMB_Integer","ImmutableId","OnPremisesImmutableId"
+        "ImmutableId","OnPremisesImmutableId"
     )
-    $columnOrderArchive = @('UserPrincipalName','PrimarySmtpAddress','OrganizationalUnit','Archive_TotalItemSizeGB','Archive_ItemCount','Archive_LastLogonTime','Archive_TotalItemSizeMB_Integer','ImmutableId')
+    $columnOrderArchive = @('UserPrincipalName','PrimarySmtpAddress','OrganizationalUnit','Archive_TotalItemSizeGB','Archive_ItemCount','Archive_LastLogonTime','ImmutableId')
     # =====================================================================
 
     #region Get mailboxes
@@ -1679,7 +1749,6 @@ return @{
 
             # -------- Archive (minimal CSV) --------
             $archiveSizeGB = ""; $archiveCount = ""; $archiveLlt = ""
-            $archiveSizeMB = ""
             $hasArchive = ($mb.PSObject.Properties.Name -contains 'ArchiveStatus' -and $mb.ArchiveStatus -and $mb.ArchiveStatus.ToString() -ne 'None')
             if ($PermissionsOnly) {
                 # PermissionsOnly: stats are intentionally blank
@@ -1697,7 +1766,6 @@ return @{
                     $archiveSizeGB = [string]$snapStat.Archive_TotalItemSizeGB
                     $archiveCount  = [string]$snapStat.Archive_ItemCount
                     $archiveLlt    = [string]$snapStat.Archive_LastLogonTime
-                    $archiveSizeMB = [string]$snapStat.Archive_TotalItemSizeMB_Integer
                 }
             }
             else {
@@ -1721,11 +1789,6 @@ return @{
                         if ($exoArch.PSObject.Properties.Name -contains 'TotalItemSize') { $archiveSizeGB = Convert-QuotaToGB $exoArch.TotalItemSize }
                     }
 
-                    if ($exoArch.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $exoArch.TotalItemSizeInBytes) {
-                        $archiveSizeMB = Convert-GBToMBInteger $archiveSizeGB
-                    } elseif ($exoArch.PSObject.Properties.Name -contains 'TotalItemSize' -and $exoArch.TotalItemSize) {
-                        $archiveSizeMB = Convert-GBToMBInteger $archiveSizeGB
-                    }
 
                     if ($exoArch.PSObject.Properties.Name -contains 'ItemCount' -and $exoArch.ItemCount -ne $null) { $archiveCount = $exoArch.ItemCount }
                     if ($exoArch.PSObject.Properties.Name -contains 'LastLogonTime' -and $exoArch.LastLogonTime) {
@@ -1737,13 +1800,6 @@ return @{
                             if ([string]::IsNullOrWhiteSpace($archiveCount) -and $legacyArch -and $legacyArch.PSObject.Properties.Name -contains 'ItemCount') { $archiveCount = $legacyArch.ItemCount }
                             if ([string]::IsNullOrWhiteSpace($archiveSizeGB) -and $legacyArch -and $legacyArch.PSObject.Properties.Name -contains 'TotalItemSize') { $archiveSizeGB = Convert-QuotaToGB $legacyArch.TotalItemSize }
 
-                            if ([string]::IsNullOrWhiteSpace($archiveSizeMB) -and $legacyArch) {
-                                if ($legacyArch.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $legacyArch.TotalItemSizeInBytes) {
-                                    $archiveSizeMB = Convert-GBToMBInteger $archiveSizeGB
-                                } elseif ($legacyArch.PSObject.Properties.Name -contains 'TotalItemSize' -and $legacyArch.TotalItemSize) {
-                                    $archiveSizeMB = Convert-GBToMBInteger $archiveSizeGB
-                                }
-                            }
                         } catch {}
                     }
                 }
@@ -1761,7 +1817,6 @@ return @{
                 Archive_TotalItemSizeGB        = $archiveSizeGB
                 Archive_ItemCount              = $archiveCount
                 Archive_LastLogonTime          = $archiveLlt
-                Archive_TotalItemSizeMB_Integer= $archiveSizeMB
                 ImmutableId                    = if ($mb.ExternalDirectoryObjectId) {
                                                      try { [Convert]::ToBase64String(([GUID]$mb.ExternalDirectoryObjectId).ToByteArray()) } catch { "" }
                                                  } else { "" }
@@ -1773,7 +1828,6 @@ return @{
 
             $lastAction  = ""
             $totalSizeGB = ""
-            $totalSizeMB = ""
             $itemCount   = ""
             $lastLogon   = ""
 
@@ -1792,7 +1846,6 @@ return @{
                 if ($snapStat) {
                     $lastAction  = [string]$snapStat.LastUserActionTime
                     $totalSizeGB = [string]$snapStat.TotalItemSizeGB
-                    $totalSizeMB = [string]$snapStat.TotalItemSizeMB_Integer
                     $itemCount   = [string]$snapStat.ItemCount
                     $lastLogon   = [string]$snapStat.LastLogonTime
                 }
@@ -1802,7 +1855,6 @@ return @{
                             $legacyPri = $null
                             $lastAction  = ""
                             $totalSizeGB = ""
-                            $totalSizeMB = ""
                             $itemCount   = ""
                             $lastLogon   = ""
 
@@ -1836,12 +1888,6 @@ return @{
                                     if ($exoPri.PSObject.Properties.Name -contains 'TotalItemSize') { $totalSizeGB = Convert-QuotaToGB $exoPri.TotalItemSize }
                                 }
 
-                                if ($exoPri.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $exoPri.TotalItemSizeInBytes) {
-                                    $totalSizeMB = Convert-GBToMBInteger $totalSizeGB
-                                } elseif ($exoPri.PSObject.Properties.Name -contains 'TotalItemSize' -and $exoPri.TotalItemSize) {
-                                    $totalSizeMB = Convert-GBToMBInteger $totalSizeGB
-                                }
-
                                 if ($exoPri.PSObject.Properties.Name -contains 'ItemCount' -and $exoPri.ItemCount -ne $null) { $itemCount = $exoPri.ItemCount }
 
                                 if ($exoPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $exoPri.LastLogonTime) {
@@ -1858,14 +1904,6 @@ return @{
                                         if ([string]::IsNullOrWhiteSpace($totalSizeGB) -and $legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'TotalItemSize') {
                                             $totalSizeGB = Convert-QuotaToGB $legacyPri.TotalItemSize
                                         }
-
-                                        if ([string]::IsNullOrWhiteSpace($totalSizeMB) -and $legacyPri) {
-                                            if ($legacyPri.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $legacyPri.TotalItemSizeInBytes) {
-                                                $totalSizeMB = Convert-GBToMBInteger $totalSizeGB
-                                            } elseif ($legacyPri.PSObject.Properties.Name -contains 'TotalItemSize' -and $legacyPri.TotalItemSize) {
-                                                $totalSizeMB = Convert-GBToMBInteger $totalSizeGB
-                                            }
-                                        }
                                     } catch {}
                                 }
                             }
@@ -1877,12 +1915,6 @@ return @{
                                         if ($legacyPri.PSObject.Properties.Name -contains 'ItemCount') { $itemCount = $legacyPri.ItemCount }
                                         if ($legacyPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $legacyPri.LastLogonTime) {
                                             $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss")
-                                        }
-
-                                        if ($legacyPri.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $legacyPri.TotalItemSizeInBytes) {
-                                            $totalSizeMB = Convert-GBToMBInteger $totalSizeGB
-                                        } elseif ($legacyPri.PSObject.Properties.Name -contains 'TotalItemSize' -and $legacyPri.TotalItemSize) {
-                                            $totalSizeMB = Convert-GBToMBInteger $totalSizeGB
                                         }
                                     }
                                 } catch {}
@@ -1904,7 +1936,6 @@ return @{
                     LastLogonTime                   = $lastLogon
                     LastUserActionTime              = $lastAction
                     Archive_TotalItemSizeGB         = $archiveSizeGB
-                    Archive_TotalItemSizeMB_Integer = $archiveSizeMB
                     Archive_ItemCount               = $archiveCount
                     Archive_LastLogonTime           = $archiveLlt
                 }
@@ -2190,7 +2221,6 @@ return @{
                                              }
                                              else { $null }
 
-                Archive_TotalItemSizeMB_Integer  = $archiveSizeMB
                 ImmutableId                      = if ($mb.ExternalDirectoryObjectId) {
                                                        try { [Convert]::ToBase64String(([GUID]$mb.ExternalDirectoryObjectId).ToByteArray()) } catch { "" }
                                                    } else { "" }
@@ -2242,7 +2272,7 @@ return @{
     $columnOrderStats = @(
         'Identity','UserPrincipalName','PrimarySmtpAddress','StatsSource',
         'TotalItemSizeGB','ItemCount','LastLogonTime','LastUserActionTime',
-        'Archive_TotalItemSizeGB','Archive_TotalItemSizeMB_Integer','Archive_ItemCount','Archive_LastLogonTime'
+        'Archive_TotalItemSizeGB','Archive_ItemCount','Archive_LastLogonTime'
     )
     $exportDataStats = @()
     if ($UseLiveStats) {
@@ -2287,6 +2317,10 @@ return @{
             $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
             $statsDiagnosticPath = Join-Path $OutputPath ("Exchange_EXO_Mailboxes_AllDomains_Stats_Incomplete_{0}.csv" -f $timestamp)
             $statsCompletenessIssues | Export-Csv -Path $statsDiagnosticPath -NoTypeInformation -Encoding UTF8
+            $issueRows = foreach ($issue in $statsCompletenessIssues) { $issue }
+            $script:StatsCompletenessDiagnosticPath = $statsDiagnosticPath
+            $script:StatsCompletenessIssueRows = @($issueRows)
+            Publish-MailboxInventoryDiagnosticCsv -Path $statsDiagnosticPath
             WriteLog -Message ("Live stats completeness validation failed for {0} issue row(s). Diagnostic exported to: {1}. DATA-LAST and SharePoint CSV publication are skipped." -f $statsCompletenessIssues.Count, $statsDiagnosticPath) "ERROR"
             throw ("Live mailbox statistics export is incomplete for {0} issue row(s). DATA-LAST CSVs were not updated. Diagnostic: {1}" -f $statsCompletenessIssues.Count, $statsDiagnosticPath)
         }
@@ -2455,10 +2489,16 @@ $($global:LogTextFile)
 "@
 
         $bodyHtml = NewSimpleEmailBody -Title $title -Message $msg
+        if ($script:StatsCompletenessIssueRows -and $script:StatsCompletenessIssueRows.Count -gt 0) {
+            $bodyHtml = Add-MailboxInventoryHtmlSection -BodyHtml $bodyHtml -SectionHtml (New-StatsCompletenessIssuesHtml -Issues $script:StatsCompletenessIssueRows -MaxRows 50)
+        }
 
         $attachments = @()
         if ($global:LogTextFile -and (Test-Path $global:LogTextFile)) {
-            $attachments = @($global:LogTextFile)
+            $attachments += $global:LogTextFile
+        }
+        if ($script:StatsCompletenessDiagnosticPath -and (Test-Path -LiteralPath $script:StatsCompletenessDiagnosticPath -PathType Leaf)) {
+            $attachments += $script:StatsCompletenessDiagnosticPath
         }
 
         Send-FatalErrorEmail -Subject $title -HtmlBody $bodyHtml -Attachments $attachments
@@ -2477,8 +2517,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCBtPVYWzZi860
-# jVTueAS+Z/JWhbksFHuPtXdYh7KVl6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDL66luyaw63eCs
+# klu4CcEnyyzvrhRrC3sYoS+EZ5Q+fKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2504,14 +2544,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCAYvtPVj43XwU8AthGBW0mGarRK9dFSvY78V7rdzVpsjANBgkqhkiG9w0B
-# AQEFAASCAYBNZP1gOo49agGwO1ORvdjJ/fD8n5zJwJfOPANupPnHzqjYFVoNdVYx
-# G5L3HhiBmoNusX8OJJ3LLyX1zskVee0H9Tv+3n3GvKWBEGyDZB866qM9rTqVbnFj
-# ONZsrvuSi6TFUe64uSGTs76WJ72WOQzKCqcKssfRXzTcO5KSmO07YDJfQ+X0uZnF
-# LzR4UWa7FcSXEqI1EMqTUtcOrgTXqSSTjCAHyCnYjSJ/4HcgJxnkw+jWhpK+EqbQ
-# 6yqPSYmRgDynDxtj569/mQl9nfOryQ3EPPUd8s0mHbNpvay0jdPLbwAQNgnxfmNJ
-# OcCdTqfGKfmuFHzmd4hEqwx87df7mNrOLBhEjrz/9MhBtG9wAtZQsyLD9ZNvyT4P
-# fPs12VnvN2KB2Mdhw3snyhU3ItbYyqZmjCZbyEP3s15ModzHqFkw/p3bDRSwgYoi
-# 95f/NwFCXbKzOiGF7/bGwRE8LNFAiv5bn95RgvXRYvviXKmF5MuKRmDo+Ja1mZ0d
-# zsUsGsuCELE=
+# BDEiBCC0cPiKPEvvKmPk5TEubLc/9kvqSAk9qg29UHyVtfxnHDANBgkqhkiG9w0B
+# AQEFAASCAYAQKB+p9vKG8XNm63EDXMw1ZBR2o06MNG2Y8Gycrf+paVmjha1afvXo
+# j+FBCuuq37JOOAmPD1zhUajwISzvkStQJ9JVDTXhuFRoR55ZVjx2rrUKLnwCs7CQ
+# I4aPaLD9PsvQ6zFOc2jgdmOLokfp3I0Cf0Ull+zwgLWh+YH+kv31R6NKudyCVkN5
+# JstX6pM6ZbZiiVncrKL9xFTN421fMqwnokhdIvzjDxoxAVEnOR/akfxFkhPOt+ys
+# ygc5S2diXXtmIQ9wym0wgjetr+KDtXYvjDtvY3TYCoZweE8yC6WZuYrWpbqOQets
+# fficly/KzytE6kIW31PQGHMd3Q/buxza/DRzVcBO17RReqNZK90Rq+uL/29dzBIz
+# 6SviFQMyXsTPgzRDkOziiDzOWKx4QCrDnghS5KoFZQ1DG8KpDtvuAeJxT+Iz8kkY
+# W8YoPsh/zwhP0igWl9d6WRqlIvFH3YcSb0CXCtIq8WkRYlTfrE9781KGGnijgS6w
+# EQEup81NTys=
 # SIG # End signature block
