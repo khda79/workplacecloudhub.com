@@ -588,8 +588,7 @@ try {
             Send-SyncHealthMailNotification -Level WARNING -Title 'Azure AD Connect sync health warning' -Message $message -Facts $facts -Attachments @($latestCsvPath)
         }
         default {
-            Send-SyncHealthTeamsNotification -Level SUCCESS -Title 'Azure AD Connect sync health success' -Message $message -Facts $facts
-            WriteLog -Message 'Sync Health email notification skipped because overall status is OK.' -Level INFO
+            WriteLog -Message 'Sync Health notifications skipped because overall status is OK.' -Level INFO
         }
     }
 
