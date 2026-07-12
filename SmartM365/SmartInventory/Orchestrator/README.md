@@ -19,6 +19,9 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `Start-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: `-Tenant test -Connect`. |
 | `Stop-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: requests a clean stop for the running prod orchestrator instance. |
 | `Stop-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: requests a clean stop for the running test orchestrator instance. |
+| `Restart-SmartM365-Inventory-Orchestrator.ps1` | Stops the orchestrator cleanly, then starts the existing scheduled task. |
+| `Restart-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: clean restart of the prod scheduled task. |
+| `Restart-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: clean restart of the test scheduled task. |
 
 Runtime files are tenant-isolated, created automatically and Git-ignored. State, job-run CSVs and logs use a per-server suffix (for example `{{DataAllRootPath}}\Orchestrator\SRV01`) to prevent collisions. The lifecycle CSV stays one level above the server folders so it provides a single tenant-wide history across all orchestrator servers:
 
@@ -310,6 +313,14 @@ To make the scheduled task pick up a newly deployed orchestrator version, reques
 The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -Stop`. The running instance consumes `Orchestrator-StopRequested.json` on its next tick, stops launching new jobs, saves state, releases the lock, finalizes lifecycle tracking and performs the final SharePoint upload. Detached inventory jobs are not killed; the next orchestrator instance re-adopts them from state.
 
 If no live orchestrator lock is found, the stop command removes any stale stop request, checks for orphaned orchestrator PowerShell processes, and stops the scheduled task when Task Scheduler is still running without a valid orchestrator lock. This clears stuck `Running` task instances that would otherwise refuse the next scheduled start.
+
+To stop the resident instance and immediately start the registered scheduled task again, use:
+
+```text
+.\SmartM365\SmartInventory\Orchestrator\Restart-SmartM365-Inventory-Orchestrator-Prod.cmd
+```
+
+The restart launcher does not start the orchestrator directly. It first calls the same clean stop workflow, verifies that the scheduled task is no longer running, then calls `Start-ScheduledTask` for `\WCH\SmartM365 Inventory Orchestrator - prod`. This keeps the restart under the registered service account, task folder, triggers and task security settings.
 
 ## Testing before scheduling
 
