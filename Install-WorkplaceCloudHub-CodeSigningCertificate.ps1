@@ -1,14 +1,14 @@
-<#
+﻿<#
 .SYNOPSIS
-Installs the SmartM365 Orchestrator public code-signing certificate.
+Installs the workplacecloudhub.com public code-signing certificate.
 
 .DESCRIPTION
 Imports the committed public .cer file into the Windows certificate stores used by
 Authenticode validation. The script never installs a private key and refuses a
-certificate file whose thumbprint does not match the expected SmartM365 signer.
+certificate file whose thumbprint does not match the expected workplacecloudhub.com signer.
 
 Default target stores are CurrentUser\Root and CurrentUser\TrustedPublisher. Run
-the script as the same account that runs the orchestrator scheduled task, or use
+the script as the same account that runs the signed PowerShell scripts, or use
 -StoreLocation LocalMachine from an elevated session to trust the certificate for
 all local users.
 
@@ -28,17 +28,17 @@ Target stores. Defaults to Root and TrustedPublisher.
 Removes the certificate from the target stores instead of installing it.
 
 .EXAMPLE
-.\Install-SmartM365-OrchestratorCodeSigningCertificate.ps1
+.\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1
 
 .EXAMPLE
-.\Install-SmartM365-OrchestratorCodeSigningCertificate.ps1 -StoreLocation LocalMachine
+.\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1 -StoreLocation LocalMachine
 #>
 #requires -Version 5.1
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$CertificatePath = (Join-Path -Path $PSScriptRoot -ChildPath 'Certificates\SmartM365-Orchestrator-CodeSigning-526459860BED5BA91ED005483C90182852F26FE0.cer'),
+    [string]$CertificatePath = (Join-Path -Path $PSScriptRoot -ChildPath 'Certificates\workplacecloudhub.com-CodeSigning-F01F4A8871B7E349B40564D90F2B2E5BB563720B.cer'),
 
-    [string]$Thumbprint = '526459860BED5BA91ED005483C90182852F26FE0',
+    [string]$Thumbprint = 'F01F4A8871B7E349B40564D90F2B2E5BB563720B',
 
     [ValidateSet('CurrentUser', 'LocalMachine')]
     [string]$StoreLocation = 'CurrentUser',
@@ -65,7 +65,7 @@ function Write-InstallMessage {
         default { 'Cyan' }
     }
 
-    Write-Host ("[SmartM365-Cert][{0}] {1}" -f $Level, $Message) -ForegroundColor $color
+    Write-Host ("[WorkplaceCloudHub-Cert][{0}] {1}" -f $Level, $Message) -ForegroundColor $color
 }
 
 function Normalize-Thumbprint {
@@ -159,45 +159,45 @@ foreach ($storeName in $StoreNames) {
 }
 
 $results.ToArray()
+
 # SIG # Begin signature block
-# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvRohd1qq5pgbl
-# 4PmJxkLroDpr+6LncvojUctD8dNahaCCBEgwggREMIICrKADAgECAhBxu0EivlCF
-# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
-# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
-# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
-# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
-# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
-# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
-# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
-# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
-# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
-# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
-# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
-# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
-# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
-# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
-# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
-# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
-# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
-# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
-# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
-# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
-# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
-# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
-# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
-# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
-# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
-# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
-# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAvdTTSLDk494wMjfhn
-# boudP84Kf2a9OPGWdL6cB2QIsDANBgkqhkiG9w0BAQEFAASCAYCPO2hIR6pCKRKo
-# Xqm1AQztHFvuZmqMFGCsFMMQiOxZ+VNytCeV44dfC9VO+z3sMbOdM28fIjq7D+9c
-# 1r4o7WENMjlNyV49CxsO+NSWk2w6w7xOA0cVVVSD4gGw1RhFxkYgGPyC+p4Rxx8p
-# 2x6sX/LhlATLu4KYhtE6ziaFqwj8L+pTzsossLFn/EJ7RD/X4Ut+H1yuWVW9YGxd
-# BZ1JHHudfvQQQscUmmQZtCBm05NhQ8QbxO+wEF0c6qTATWIgUQmSdAQ8Mur4kWCH
-# 4WAYGA3ow41pmpQk/siHp/UEK067STgVTAkrUsmM68UqiVhSdKXPO0aJRKf6SsZB
-# t6pFQrmXjqFEGG2LTy/NnZ1eIY0BARM6vQbY02a+dGADg/mQUyPMMZi4EdT0lxBF
-# Be3uWOsgvrPGe0RrRQG/iLFI3y2bXfdrwWRzEf2inHF+Jsb1Qte5NJu2phz4BFI8
-# f6BiaaGxcik4WYtafEP6pbTw+oAB3WO0Do6fvwGlLgZVsO9bsiI=
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAp+h46y9cSmWAb
+# 6QBYmCQ0hwyqblXxzcuSpYXSHUhfpqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
+# BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
+# ggGPADCCAYoCggGBAMJqEmY4V9VM4HhTovXPXHSWb44jVYMj05xJIZf2f/NxQLR/
+# vfka/0JbdTSRJ03Yy3OIulBP5DqbnfAyzv+9eulPVX/BUFM6b2lENxZpVrvj55TZ
+# levsXyzHuK0xs7/FFpbLQ2Ts3LGPJTLlneOfuEWKRT6xTotD1RnElDCumiOnQHOD
+# 6qtPSRuwoxaVwSDw2QFJ8hp4RGHKsDAMRLgaRBhBM7e9A3/k7bA541DrWt19Cq5d
+# IY1LUII3pVolF3YUtot7wFU2BbfpM0WiDEPXDWBUAvHNF0FDDukwuXUtn9J2n1f/
+# 8EzDznON1GuNhrPP7cWJh6hywJgBzeR7ZHf2tsk76sKqY75u+qWoe4xQJXK7V2N7
+# UJW7i6YC2W+/LrOaUYB9JykD88Jk+OJ2eLDtLSqzYAnJXYTIq7/mju5E8twyNZrN
+# tQHqKUxUKhkeVgezgKoc4t12dgkTryl9efMy3qyxNesN34RR2i6eK8+6UtiW2ae5
+# GESynl96l1E9+UWlRQIDAQABo0YwRDAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAww
+# CgYIKwYBBQUHAwMwHQYDVR0OBBYEFEooM+aK7XCOIsSi0oFRhXyVQqdzMA0GCSqG
+# SIb3DQEBCwUAA4IBgQC08zIpMh0vUuvfMcIUpwX3lABvT3V9Rf6swy8xuWHjJyJz
+# hZVt0hOHeCBWF2RxYeJ2iY4hyH4FSkwwLCHmmM6kV3eLY2uibsYCUdwm1mwbtSws
+# i4YAzGZF0Ueap2TC94d9O/dcpzYILKPdJwqAd3MprkWEbyFSfEkhy5NCmxZ2wQFd
+# LtOU6YHMI9v6P8tIhGXpZbp3QjK9mZif6LZ9ZgXEzi4whxDwQ2RMTUVaf7kamyjc
+# gGmO32gRcNr0qsGwTog7TUTcbTd/RVc0DEUMMrUZVWMcBwrBIFUWqnD4i/oZuHdH
+# pMytQjZQcZBOzrJ/YcWxMNmdf09gq44kFs1QHiG+FFnATyglOs8SR3fJwJdPI+KN
+# qpK0zo9FhCyl37qSpKpyS9QNZdl+isj7YQncfqCmadjY1y6nZhLzaEoDW0oHdv/s
+# NzjZ54ieDALCH69wCbeCYk1lrI3ggu0t22QG1sHN7NmOm3T6SL2w7cF+TpeYXIfv
+# FCGIHWHVGbQtK/TtwJMxggJmMIICYgIBATA0MCAxHjAcBgNVBAMMFXdvcmtwbGFj
+# ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
+# hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
+# AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
+# BDEiBCA5J/SrGbMX2yg+gyPepu42pwJBRSMTKX849TO+aKa7yTANBgkqhkiG9w0B
+# AQEFAASCAYCt87c8MfY/DLwyGxfZczGrYe22fZx1qI4NVHCKIHzCVK3c2A6as2ef
+# 4FabbGcgx25JJf+zGUGvxyOfu8Dh9+B++hzHzGIYSR3DWSwpb+JZaMSEbeE8aYJj
+# YAl3RaLLCfT3C/U6x1wAx8kU4MbKeviup/tVb3I/49US3eAHPjEtVuNtVPnfMl9P
+# y+WPaRmg3Qef+ImCcCZQ2RzkvnF8vl9oXHbZhEYPJ7yLTO3aUBi3qwijX/UezqC5
+# Lkz7LYp8eq9byDaDYU3KzgGwJce5WI/BbmgdJTtSjSIE9ExipvKpNosUI/TnMFkH
+# hqjRur11tBD7Ot61E41Oxznp/tH7r0Lpb+d+K6pwdTCPG+E2IK5G8KzJUQ6SDHeA
+# 7HCkz8wIGQ5ATWXfKmQ/d1PM77JF32SBwA5jXc0wxqGfzTVgs9IPTcPLWboBzFjr
+# 4+4PCo9XUqPpsWG5P8KpLdVgi6cho+N5dpixoLy5Ws67b067ZuDeFlTGfH8HNIru
+# GLPxIa9e7CU=
 # SIG # End signature block
