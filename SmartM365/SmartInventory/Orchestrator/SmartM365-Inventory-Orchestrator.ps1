@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Resident scheduler that runs SmartInventory scripts unattended at their configured times.
 
@@ -93,7 +93,7 @@ folder ({{DataAllRootPath}}\Orchestrator).
     inside its own child process.
 
 .NOTES
-    Version : 1.3.4
+    Version : 1.3.5
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -115,7 +115,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.4'
+$ScriptVersion = '1.3.5'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -215,7 +215,11 @@ function Get-SmartM365ScriptLocalConfig {
         Write-Host ("Created script local configuration from template: {0}" -f $configPath) -ForegroundColor Yellow
         Write-Host "Review the new .local.json values; the orchestrator continues with template defaults." -ForegroundColor Yellow
     }
-    return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if (Get-Command Sync-SmartM365JsonConfigWithTemplate -ErrorAction SilentlyContinue) {
+        return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath)
+    }
+    return $config
 }
 
 function Resolve-SmartM365ScriptValue {
@@ -293,7 +297,8 @@ function Get-SmartM365ScriptConfigBool {
 # Logging (orchestrator log with daily rotation)
 # ==========================================================
 function Get-OrchestratorLogPath {
-    return Join-Path -Path $script:Settings.OrchestratorLogFolderPath -ChildPath ("{0}_{1}_{2}.log" -f $ScriptName, $env:COMPUTERNAME, (Get-Date).ToString('yyyyMMdd'))
+    param([datetime]$Date = (Get-Date))
+    return Join-Path -Path $script:Settings.OrchestratorLogFolderPath -ChildPath ("{0}_{1}_{2}.log" -f $ScriptName, $env:COMPUTERNAME, $Date.ToString('yyyyMMdd'))
 }
 
 function Write-OrchestratorLog {
@@ -316,6 +321,159 @@ function Write-OrchestratorLog {
     }
 }
 
+function Test-OrchestratorSharePointUploadConfigured {
+    if (-not $script:Settings.SharePointUploadEnabled) { return $false }
+
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($name in @('SharePointSiteHostname', 'SharePointSitePath', 'SharePointLibraryDisplayName', 'SharePointTargetFolderPath')) {
+        if ([string]::IsNullOrWhiteSpace([string]$script:Settings.$name)) { $missing.Add($name) }
+    }
+    foreach ($name in @('AppId', 'TenantId', 'Thumbprint')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-Variable -Name $name -Scope Global -ValueOnly -ErrorAction SilentlyContinue))) { $missing.Add($name) }
+    }
+
+    if ($missing.Count -gt 0) {
+        $key = ($missing | Sort-Object) -join ','
+        if ($script:LastSharePointConfigWarningKey -ne $key) {
+            Write-OrchestratorLog -Message ("SharePoint upload enabled but not configured for orchestrator uploads. Missing: {0}" -f ($missing -join ', ')) -Level ERROR
+            $script:LastSharePointConfigWarningKey = $key
+        }
+        return $false
+    }
+    return $true
+}
+
+function Invoke-OrchestratorSharePointUpload {
+    param(
+        [Parameter(Mandatory = $true)][string]$LocalFilePath,
+        [string]$Reason = 'orchestrator artifact',
+        [switch]$Force
+    )
+
+    if (-not (Test-OrchestratorSharePointUploadConfigured)) { return $false }
+    if ([string]::IsNullOrWhiteSpace($LocalFilePath) -or -not (Test-Path -LiteralPath $LocalFilePath)) { return $false }
+
+    $fileInfo = $null
+    try { $fileInfo = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop }
+    catch {
+        Write-OrchestratorLog -Message ("SharePoint upload skipped for {0}: cannot read '{1}'. {2}" -f $Reason, $LocalFilePath, $_.Exception.Message) -Level ERROR
+        return $false
+    }
+
+    $key = $fileInfo.FullName.ToLowerInvariant()
+    $signature = "{0}|{1}" -f $fileInfo.Length, $fileInfo.LastWriteTimeUtc.Ticks
+    if (-not $Force -and $script:SharePointUploadedFileState.ContainsKey($key) -and $script:SharePointUploadedFileState[$key] -eq $signature) {
+        return $true
+    }
+
+    try {
+        $record = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $fileInfo.FullName -Enabled $true -SiteHostname $script:Settings.SharePointSiteHostname -SitePath $script:Settings.SharePointSitePath -LibraryDisplayName $script:Settings.SharePointLibraryDisplayName -TargetFolderPath $script:Settings.SharePointTargetFolderPath -ErrorAction Stop
+        if ($record) {
+            $script:SharePointUploadedFileState[$key] = $signature
+            $target = if (-not [string]::IsNullOrWhiteSpace([string]$record.WebUrl)) { [string]$record.WebUrl } else { [string]$record.SharePointPath }
+            Write-OrchestratorLog -Message ("SharePoint upload OK ({0}): {1}" -f $Reason, $target)
+            return $true
+        }
+        Write-OrchestratorLog -Message ("SharePoint upload failed for {0}: no uploaded item returned for '{1}'." -f $Reason, $fileInfo.FullName) -Level ERROR
+        return $false
+    }
+    catch {
+        Write-OrchestratorLog -Message ("SharePoint upload failed for {0}: {1}" -f $Reason, $_.Exception.Message) -Level ERROR
+        return $false
+    }
+}
+
+function Invoke-OrchestratorMailHtmlUploads {
+    param([int]$PreviousCount = 0)
+
+    if (-not $global:SmartM365MailHtmlFiles) { return }
+    $files = @($global:SmartM365MailHtmlFiles)
+    if ($files.Count -le $PreviousCount) { return }
+    foreach ($file in @($files | Select-Object -Skip $PreviousCount)) {
+        Invoke-OrchestratorSharePointUpload -LocalFilePath ([string]$file) -Reason 'mail HTML copy' -Force | Out-Null
+    }
+}
+
+function Invoke-OrchestratorPeriodicSharePointUpload {
+    param(
+        [Parameter(Mandatory = $true)][datetime]$Now,
+        [switch]$Force
+    )
+
+    if (-not $Force) {
+        $interval = [int]$script:Settings.OrchestratorSharePointUploadIntervalMinutes
+        if ($interval -le 0) { return }
+        if ($script:LastSharePointUploadAttempt -ne [datetime]::MinValue -and ($Now - $script:LastSharePointUploadAttempt).TotalMinutes -lt $interval) { return }
+    }
+    $script:LastSharePointUploadAttempt = $Now
+
+    foreach ($path in @(
+        (Get-OrchestratorLogPath -Date $Now),
+        $script:Settings.OrchestratorRunsCsvPath,
+        (Get-JobRunsCsvPath),
+        $script:Settings.StatePath,
+        $script:Settings.HeartbeatPath
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$path)) {
+            Invoke-OrchestratorSharePointUpload -LocalFilePath ([string]$path) -Reason 'periodic orchestrator upload' -Force:$Force | Out-Null
+        }
+    }
+
+    if ($global:SmartM365MailHtmlFiles) {
+        foreach ($file in @($global:SmartM365MailHtmlFiles)) {
+            Invoke-OrchestratorSharePointUpload -LocalFilePath ([string]$file) -Reason 'mail HTML copy' -Force:$Force | Out-Null
+        }
+    }
+}
+
+function Write-DependencyWaitLog {
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][string[]]$BlockingDependencies,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    $dependencies = @($BlockingDependencies | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    if ($dependencies.Count -eq 0) { $dependencies = @('unknown') }
+    $dependencyKey = $dependencies -join '|'
+    $state = $null
+    if ($script:DependencyWaitLogState.ContainsKey($JobName)) { $state = $script:DependencyWaitLogState[$JobName] }
+
+    $shouldLog = $false
+    $prefix = 'waiting for dependencies'
+    if ($null -eq $state -or $state.DependencyKey -ne $dependencyKey) {
+        $shouldLog = $true
+        $state = [pscustomobject]@{
+            DependencyKey = $dependencyKey
+            FirstSeen = $Now
+            LastLogged = [datetime]::MinValue
+        }
+    }
+    else {
+        $interval = [int]$script:Settings.DependencyWaitLogIntervalMinutes
+        if ($interval -gt 0 -and ($Now - [datetime]$state.LastLogged).TotalMinutes -ge $interval) {
+            $shouldLog = $true
+            $prefix = ("still waiting for dependencies after {0} min" -f [int]($Now - [datetime]$state.FirstSeen).TotalMinutes)
+        }
+    }
+
+    if ($shouldLog) {
+        Write-OrchestratorLog -Message ("Job {0}: {1}: {2}." -f $JobName, $prefix, ($dependencies -join ', '))
+        $state.LastLogged = $Now
+        $script:DependencyWaitLogState[$JobName] = $state
+    }
+}
+
+function Clear-DependencyWaitLog {
+    param([Parameter(Mandatory = $true)][string]$JobName)
+
+    if ($script:DependencyWaitLogState.ContainsKey($JobName)) {
+        $state = $script:DependencyWaitLogState[$JobName]
+        $duration = [int]((Get-Date) - [datetime]$state.FirstSeen).TotalMinutes
+        Write-OrchestratorLog -Message ("Job {0}: dependencies cleared after {1} min; launch can continue." -f $JobName, $duration)
+        $script:DependencyWaitLogState.Remove($JobName)
+    }
+}
 # ==========================================================
 # Atomic file helpers
 # ==========================================================
@@ -432,8 +590,12 @@ function Send-OrchestratorMail {
             Write-OrchestratorLog -Message "Bcc is configured but is not supported by the shared SmartM365 mail helper; Bcc is ignored for orchestrator mail." -Level WARN
         }
 
+        $mailHtmlCountBefore = if ($global:SmartM365MailHtmlFiles) { @($global:SmartM365MailHtmlFiles).Count } else { 0 }
+
         Send-SmartM365Mail -SmtpServer $script:Settings.SmtpServer -SmtpPort $script:Settings.SmtpPort -SendMailMode $script:Settings.SendMailMode -From $script:Settings.MailFrom -To $to -Cc $script:Settings.MailCc -Subject $Subject -BodyHtml $HtmlBody -BodyAsHtml -HighPriority:$IsError -ErrorAction Stop
         Write-OrchestratorLog -Message ("Email sent via {0}: {1}" -f $script:Settings.SendMailMode, $Subject)
+
+        Invoke-OrchestratorMailHtmlUploads -PreviousCount $mailHtmlCountBefore
         return $true
     }
     catch {
@@ -1554,6 +1716,7 @@ function Start-InventoryJob {
     $state.RetryCount = $Attempt
     $state.PendingRetry = $null
     Save-OrchestratorState
+
     Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath)
 }
 
@@ -1606,11 +1769,13 @@ function Complete-JobRun {
     $state.Running = $null
     if ($script:RunningJobs.ContainsKey($JobName)) { $script:RunningJobs.Remove($JobName) }
     Save-OrchestratorState
-
     $csvStatus = $status
     if ($retryScheduled) { $csvStatus = 'Retried' }
     Add-JobRunCsvRow -JobName $JobName -ScheduledTime $RunInfo.Occurrence -StartTime $RunInfo.StartTime -EndTime $EndTime -DurationSec $durationSec -ExitCode $ExitCode -Status $csvStatus -RetryCount $attempt -LogPath ([string]$RunInfo.LogPath)
 
+
+    Invoke-OrchestratorSharePointUpload -LocalFilePath ([string]$RunInfo.LogPath) -Reason ("job {0} log" -f $JobName) -Force | Out-Null
+    Invoke-OrchestratorSharePointUpload -LocalFilePath (Get-JobRunsCsvPath) -Reason 'job-runs CSV' -Force | Out-Null
     $exitText = 'n/a'
     if ($null -ne $ExitCode) { $exitText = [string]$ExitCode }
     $level = 'INFO'
@@ -1757,6 +1922,7 @@ function Set-OccurrenceSkipped {
     $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $Occurrence
     $state.LastStatus = 'Skipped'
     Save-OrchestratorState
+
     Add-JobRunCsvRow -JobName $JobName -ScheduledTime $Occurrence -StartTime $null -EndTime $null -DurationSec $null -ExitCode $null -Status 'Skipped' -RetryCount 0 -LogPath ''
     Write-OrchestratorLog -Message ("Job {0}: occurrence {1} skipped ({2})." -f $JobName, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Reason) -Level WARN
 }
@@ -1773,6 +1939,7 @@ function Initialize-NewJobStates {
         Write-OrchestratorLog -Message ("Job {0}: initialized state (fast-forwarded to {1})." -f $job.Name, $(if ($null -ne $latest) { $latest.ToString('yyyy-MM-dd HH:mm') } else { 'no past occurrence' }))
     }
     Save-OrchestratorState
+
 }
 
 function Invoke-MissedRunCatchUp {
@@ -1855,18 +2022,33 @@ function Invoke-LaunchPhase {
         if (-not $isForced) {
             $deferred = $false
             $skippedByParent = $false
+            $blockingDependencies = New-Object System.Collections.Generic.List[string]
             foreach ($dep in $job.DependsOn) {
-                if ($script:RunningJobs.ContainsKey($dep) -or $launchedThisTick -contains $dep) { $deferred = $true; break }
                 $depState = Get-JobState -JobName $dep
-                if ($null -ne $depState.PendingRetry) { $deferred = $true; break }
                 $depJob = $null
                 if ($script:Manifest.JobsByName.ContainsKey($dep)) { $depJob = $script:Manifest.JobsByName[$dep] }
+
+                if ($script:RunningJobs.ContainsKey($dep) -or $launchedThisTick -contains $dep) {
+                    $deferred = $true
+                    $blockingDependencies.Add($dep)
+                    continue
+                }
+                if ($null -ne $depState.PendingRetry) {
+                    $deferred = $true
+                    $blockingDependencies.Add($dep)
+                    continue
+                }
+
                 # A dependency that is not allowed on this server never runs here and
                 # must not block its dependents.
                 if ($null -ne $depJob -and $depJob.Enabled -and (Test-JobAllowedOnServer -Job $depJob)) {
                     $depLast = ConvertFrom-StateTime -Text ([string]$depState.LastScheduledOccurrence)
                     $depDue = Get-DueOccurrence -Job $depJob -LastOccurrence $depLast -Now $Now
-                    if ($null -ne $depDue) { $deferred = $true; break }
+                    if ($null -ne $depDue) {
+                        $deferred = $true
+                        $blockingDependencies.Add($dep)
+                        continue
+                    }
                     if ($depState.LastStatus -in @('Failed', 'TimedOut', 'Interrupted') -and -not $depJob.ContinueOnError) {
                         $depOccurrence = ConvertFrom-StateTime -Text ([string]$depState.LastScheduledOccurrence)
                         if ($null -ne $depOccurrence -and $depOccurrence -eq $occurrence) { $skippedByParent = $true; break }
@@ -1875,12 +2057,14 @@ function Invoke-LaunchPhase {
             }
             if ($skippedByParent) {
                 Set-OccurrenceSkipped -JobName $name -Occurrence $occurrence -Reason 'dependency finally failed with ContinueOnError=false'
+                Clear-DependencyWaitLog -JobName $name
                 continue
             }
             if ($deferred) {
-                Write-OrchestratorLog -Message ("Job {0}: waiting for dependency completion before launch." -f $name)
+                Write-DependencyWaitLog -JobName $name -BlockingDependencies @($blockingDependencies) -Now $Now
                 continue
             }
+            Clear-DependencyWaitLog -JobName $name
         }
 
         if ($script:RunningJobs.Count -ge $limit) {
@@ -1985,6 +2169,7 @@ $tableRows
     if (Send-OrchestratorMail -Subject $subject -HtmlBody $body) {
         $script:State.LastDailySummaryDate = $today
         Save-OrchestratorState
+
     }
 }
 
@@ -2074,7 +2259,10 @@ $script:ForcedPending = @()
 $script:SmtpEndpoint = ''
 $script:Manifest = $null
 $script:State = $null
-
+$script:DependencyWaitLogState = @{}
+$script:SharePointUploadedFileState = @{}
+$script:LastSharePointUploadAttempt = [datetime]::MinValue
+$script:LastSharePointConfigWarningKey = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
@@ -2177,6 +2365,13 @@ try {
         MaxConcurrency = [math]::Max(1, $effectiveMaxConcurrency)
         MaxLifetimeHours = [math]::Max(1, $effectiveMaxLifetimeHours)
         TickSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'TickSeconds' -DefaultValue 60))
+        DependencyWaitLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitLogIntervalMinutes' -DefaultValue 30))
+        OrchestratorSharePointUploadIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorSharePointUploadIntervalMinutes' -DefaultValue 60))
+        SharePointUploadEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'EnableSharePointUpload' -DefaultValue ([bool]$global:EnableSharePointUpload)
+        SharePointSiteHostname = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SharePointSiteHostname' -DefaultValue $global:SharePointSiteHostname)
+        SharePointSitePath = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SharePointSitePath' -DefaultValue $global:SharePointSitePath)
+        SharePointLibraryDisplayName = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SharePointLibraryDisplayName' -DefaultValue $global:SharePointLibraryDisplayName)
+        SharePointTargetFolderPath = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SharePointTargetFolderPath' -DefaultValue $global:SharePointTargetFolderPath)
         CoreModulePath = $coreModulePath
         AuthenticodeValidationEnabled = $authenticodeValidationEnabled
         AuthenticodeValidationMode = $authenticodeValidationMode
@@ -2241,6 +2436,8 @@ try {
     Write-OrchestratorLog -Message ("Runtime context: server={0}; user={1}; pid={2}; PowerShell={3}; edition={4}; process64bit={5}." -f $env:COMPUTERNAME, (Get-OrchestratorRunUserName), $PID, $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, [Environment]::Is64BitProcess)
     Write-OrchestratorLog -Message ("Paths: scriptRoot={0}; currentDirectory={1}; data={2}; log={3}; jobLogs={4}; state={5}; heartbeat={6}; runCsv={7}." -f $PSScriptRoot, (Get-Location).Path, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.StatePath, $script:Settings.HeartbeatPath, $script:Settings.OrchestratorRunsCsvPath)
     Write-OrchestratorLog -Message ("Mail context: enabled={0}; mode={1}; graphConfigured={2}; smtpConfigured={3}; fromConfigured={4}; recipientConfigured={5}; jobMailMode={6}; dailySummary={7}." -f $script:Settings.MailEnabled, $script:Settings.SendMailMode, $script:Settings.GraphMailConfigured, $script:Settings.SmtpMailConfigured, (-not [string]::IsNullOrWhiteSpace($script:Settings.MailFrom)), (-not [string]::IsNullOrWhiteSpace($script:Settings.MailTo)), $script:Settings.JobMailMode, $script:Settings.SendDailySummaryEmail)
+
+    Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes)
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
@@ -2305,8 +2502,11 @@ try {
         Write-OrchestratorHeartbeat
         Save-OrchestratorState
 
+        Invoke-OrchestratorPeriodicSharePointUpload -Now $now
         if ($now.Date -ne $lastCleanupDate) {
+            $previousLogDate = $lastCleanupDate
             Invoke-RetentionCleanup
+            Invoke-OrchestratorSharePointUpload -LocalFilePath (Get-OrchestratorLogPath -Date $previousLogDate) -Reason 'daily orchestrator log rollover' -Force | Out-Null
             $lastCleanupDate = $now.Date
         }
 
@@ -2355,49 +2555,56 @@ finally {
     catch {
         Write-OrchestratorLog -Message ("Failed to finalize orchestrator lifecycle tracking: {0}" -f $_.Exception.Message) -Level WARN
     }
+    if (-not $DryRun) {
+        try {
+            Invoke-OrchestratorPeriodicSharePointUpload -Now (Get-Date) -Force
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Final orchestrator SharePoint upload failed: {0}" -f $_.Exception.Message) -Level ERROR
+        }
+    }
 }
 
 exit $script:ExitCode
 
 # SIG # Begin signature block
-# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMAR/+eDBQPqDw
-# 0JEHB7LHlse//FWg3LsO+eGbd1Hem6CCBEgwggREMIICrKADAgECAhBxu0EivlCF
-# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
-# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
-# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
-# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
-# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
-# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
-# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
-# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
-# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
-# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
-# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
-# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
-# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
-# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
-# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
-# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
-# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
-# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
-# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
-# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
-# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
-# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
-# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
-# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
-# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
-# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
-# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDyT/8MECBOYfCxFo6d
-# +5puKYOzrGEzkPL6KcqDXLR7iDANBgkqhkiG9w0BAQEFAASCAYCdUOBy3QcJ1Jme
-# maZACR6aEaxq4LrhM9ZlWqr51nYUTRtE21qC8rBDLn1z2Zw0eIHdI7j4ibi/V0A3
-# jxRge+VTXmXXgS7aYP6whyrzCKyA9En9nSIPyNg72s+F0p9PRDWcqD8+gi2s4hIs
-# vGU95GQTaweoC76Jyb0+0/tRNF9lza+29+td+aehY4C56/xWnoYqaQNHRUk5Uj44
-# OgTWnRmf9MDg/8qPqpM9+wm9eo8rt9pWx704HPy9zS7k3LnG3tPJLnYB2PqHAAWm
-# Arjg3psi7yvWcj5QPEfwYeosHAA4kEYITBTDjuVDszm3T9+JSSuXfJkwXlSlplMe
-# Lu6Y67x0gdq+2Acp1x/BoP2RqoFSipaf8Xe1rsY4QvKKuUXDke5Ktun4nX6KQ654
-# PJiJ2p1rnSEx0kgonaMiPrDHCFxGTW2FuIDgAoI5/9J/LT3o7oPWBcRu2S+Ovhf6
-# VBUfKI8f44gsy5JbuLIVrme/BSbmV78BAhvLD7QFKT8NOqzMgZ0=
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJeOpo6H0o4ll4
+# xMX3E+hcKegaatjorVjWJFC+3vDz4qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
+# BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
+# ggGPADCCAYoCggGBAMJqEmY4V9VM4HhTovXPXHSWb44jVYMj05xJIZf2f/NxQLR/
+# vfka/0JbdTSRJ03Yy3OIulBP5DqbnfAyzv+9eulPVX/BUFM6b2lENxZpVrvj55TZ
+# levsXyzHuK0xs7/FFpbLQ2Ts3LGPJTLlneOfuEWKRT6xTotD1RnElDCumiOnQHOD
+# 6qtPSRuwoxaVwSDw2QFJ8hp4RGHKsDAMRLgaRBhBM7e9A3/k7bA541DrWt19Cq5d
+# IY1LUII3pVolF3YUtot7wFU2BbfpM0WiDEPXDWBUAvHNF0FDDukwuXUtn9J2n1f/
+# 8EzDznON1GuNhrPP7cWJh6hywJgBzeR7ZHf2tsk76sKqY75u+qWoe4xQJXK7V2N7
+# UJW7i6YC2W+/LrOaUYB9JykD88Jk+OJ2eLDtLSqzYAnJXYTIq7/mju5E8twyNZrN
+# tQHqKUxUKhkeVgezgKoc4t12dgkTryl9efMy3qyxNesN34RR2i6eK8+6UtiW2ae5
+# GESynl96l1E9+UWlRQIDAQABo0YwRDAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAww
+# CgYIKwYBBQUHAwMwHQYDVR0OBBYEFEooM+aK7XCOIsSi0oFRhXyVQqdzMA0GCSqG
+# SIb3DQEBCwUAA4IBgQC08zIpMh0vUuvfMcIUpwX3lABvT3V9Rf6swy8xuWHjJyJz
+# hZVt0hOHeCBWF2RxYeJ2iY4hyH4FSkwwLCHmmM6kV3eLY2uibsYCUdwm1mwbtSws
+# i4YAzGZF0Ueap2TC94d9O/dcpzYILKPdJwqAd3MprkWEbyFSfEkhy5NCmxZ2wQFd
+# LtOU6YHMI9v6P8tIhGXpZbp3QjK9mZif6LZ9ZgXEzi4whxDwQ2RMTUVaf7kamyjc
+# gGmO32gRcNr0qsGwTog7TUTcbTd/RVc0DEUMMrUZVWMcBwrBIFUWqnD4i/oZuHdH
+# pMytQjZQcZBOzrJ/YcWxMNmdf09gq44kFs1QHiG+FFnATyglOs8SR3fJwJdPI+KN
+# qpK0zo9FhCyl37qSpKpyS9QNZdl+isj7YQncfqCmadjY1y6nZhLzaEoDW0oHdv/s
+# NzjZ54ieDALCH69wCbeCYk1lrI3ggu0t22QG1sHN7NmOm3T6SL2w7cF+TpeYXIfv
+# FCGIHWHVGbQtK/TtwJMxggJmMIICYgIBATA0MCAxHjAcBgNVBAMMFXdvcmtwbGFj
+# ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
+# hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
+# AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
+# BDEiBCBQHLRfP+k+E9nEUMHetQnoxJWcOUWCOkScQ0pHkgXiJDANBgkqhkiG9w0B
+# AQEFAASCAYBf13inC3qmI6AN4QCsMrnPv1RJaaLrRqXt3O4GHtnM2v2LFyk1CZeb
+# YKTuNMENggX8//zjlIetVwpiqcg368w04lHt4hAtcH+Zn3x7Gpew5nTGTsLheadk
+# X68/fVNhYiUSuFrYUao+WlzsJFL+1GRdCVQz4TXyVn8ZPmsNu15oeFiH+76KIl03
+# t3aqihd5dA3ScdBKsmWTVgj8KoFzut+4hre1uU0Iv6e7ggX0IG0xpD9fVcNegGJE
+# 2NBGSTltxxolc9eXguweRGTcGYI81qcbItiiwNJ04jvRiO1IRftymPP0SfU1FRqj
+# D2ctl14viuuE94ScSryYp+wqX5CvYgM49ETrsTf02afHknZinnhmT4HFF3EvU4o9
+# /OrLKqBtDHtg/kEz3q5HfSHKryONGj3sapc5ReAKUnqo6rYlm+RKGrk1GZ9gH3lZ
+# XNzbHccUsXu8rR+qM6isFAhvJG/Truii/4e7DCeKFsszggbWYOEue0Ijgryu+JVp
+# ixhmqEcqyqk=
 # SIG # End signature block

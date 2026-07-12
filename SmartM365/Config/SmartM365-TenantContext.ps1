@@ -62,6 +62,101 @@ function Initialize-SmartM365LocalJsonFromTemplate {
     return $true
 }
 
+function Get-SmartM365JsonTemplatePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ($Path -like '*Config\Tenants\*.local.json') {
+        return (Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template')
+    }
+
+    if ($Path -like '*.local.json') {
+        return ('{0}.template' -f $Path)
+    }
+
+    return ''
+}
+
+function Add-SmartM365MissingJsonTemplateProperties {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Target,
+        [Parameter(Mandatory)]$Template,
+        [string]$PrefixPath = ''
+    )
+
+    $added = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Template) { return @() }
+
+    foreach ($property in $Template.PSObject.Properties) {
+        $name = $property.Name
+        $propertyPath = if ([string]::IsNullOrWhiteSpace($PrefixPath)) { $name } else { '{0}.{1}' -f $PrefixPath, $name }
+        $exists = $false
+        $currentValue = $null
+
+        if ($Target -is [System.Collections.IDictionary]) {
+            $exists = $Target.Contains($name)
+            if ($exists) { $currentValue = $Target[$name] }
+        }
+        else {
+            $currentProperty = $Target.PSObject.Properties[$name]
+            $exists = ($null -ne $currentProperty)
+            if ($exists) { $currentValue = $currentProperty.Value }
+        }
+
+        if (-not $exists) {
+            if ($Target -is [System.Collections.IDictionary]) {
+                $Target[$name] = $property.Value
+            }
+            else {
+                Add-Member -InputObject $Target -MemberType NoteProperty -Name $name -Value $property.Value -Force
+            }
+            $added.Add($propertyPath) | Out-Null
+            continue
+        }
+
+        if ($null -ne $currentValue -and $null -ne $property.Value -and $currentValue -is [pscustomobject] -and $property.Value -is [pscustomobject]) {
+            foreach ($nestedPath in (Add-SmartM365MissingJsonTemplateProperties -Target $currentValue -Template $property.Value -PrefixPath $propertyPath)) {
+                $added.Add($nestedPath) | Out-Null
+            }
+        }
+    }
+
+    return @($added)
+}
+
+function Sync-SmartM365JsonConfigWithTemplate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Path,
+        [string]$TemplatePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath)) {
+        $TemplatePath = Get-SmartM365JsonTemplatePath -Path $Path
+    }
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath) -or -not (Test-Path -LiteralPath $TemplatePath)) {
+        return $Config
+    }
+
+    try {
+        $template = Get-Content -LiteralPath $TemplatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $addedKeys = @(Add-SmartM365MissingJsonTemplateProperties -Target $Config -Template $template)
+        if ($addedKeys.Count -gt 0) {
+            $tempPath = '{0}.tmp' -f $Path
+            $Config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $tempPath -Encoding UTF8 -ErrorAction Stop
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            Write-Host ("Updated local JSON from template: {0}; added keys: {1}" -f $Path, ($addedKeys -join ', ')) -ForegroundColor Yellow
+        }
+        return $Config
+    }
+    catch {
+        $syncErrorMessage = [string]$PSItem.Exception.Message
+        throw ("Failed to synchronize local JSON '{0}' with template '{1}': {2}" -f $Path, $TemplatePath, $syncErrorMessage)
+    }
+}
 function Read-SmartM365JsonConfig {
     [CmdletBinding()]
     param(
@@ -71,7 +166,7 @@ function Read-SmartM365JsonConfig {
 
     if (-not (Test-Path -LiteralPath $Path)) {
         if ($Required) {
-            $templatePath = if ($Path -like '*Config\Tenants\*.local.json') { Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template' } elseif ($Path -like '*.local.json') { '{0}.template' -f $Path } else { '' }
+            $templatePath = Get-SmartM365JsonTemplatePath -Path $Path
             Initialize-SmartM365LocalJsonFromTemplate -Path $Path -TemplatePath $templatePath -ConfigDescription 'required local configuration' | Out-Null
         }
         else {
@@ -80,7 +175,8 @@ function Read-SmartM365JsonConfig {
     }
 
     try {
-        return ConvertTo-SmartM365Hashtable -InputObject (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+        $config = ConvertTo-SmartM365Hashtable -InputObject (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+        return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $Path)
     }
     catch {
         $message = @(
@@ -218,44 +314,43 @@ function Initialize-SmartM365TenantContext {
 }
 
 # SIG # Begin signature block
-# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3PtPi26ROIPTX
-# WqLNgz3qHOO24jz2H4wAQRnHfnUxq6CCBEgwggREMIICrKADAgECAhBxu0EivlCF
-# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
-# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
-# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
-# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
-# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
-# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
-# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
-# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
-# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
-# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
-# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
-# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
-# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
-# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
-# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
-# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
-# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
-# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
-# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
-# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
-# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
-# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
-# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
-# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
-# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
-# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
-# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBBW18sgfkiANK0s7Vx
-# qs2UH/XZC6RLzM4xUJB1qL2myzANBgkqhkiG9w0BAQEFAASCAYAO5tw8sPlZVeEh
-# 59qyDVQOe3SmHDbRmCz2bY8K3nvprFluDr1oU5L71P8Ol9B4tn07s9OGIkC98chk
-# /DuHZmlkEnp4N1OuCYK2UdMMjk2xSw5n9m+bpIlFOVMBr4CMrfSPHm5I5g8UTDBh
-# IGz09GZl4avUI6J4X5x5Py1r17hE4DxPY3tWYvPieJObDC75qmHnQiIWuvUhV1ja
-# Bll0OvgQZCb4k+FN4SYWYoP47CtE8ktxJNPzKvRur1lTj0tWs7GJqpQ+V1rMyjF7
-# ftmfl0lmXlyF6BSsmLjuL9t1+E7PLKbESS4Gi5Xlp91+vTHn8Mxgk1qC/HicR6tQ
-# eSBLQYoYrWTnQxCYrLxPg4d7Ygi7j22PYxgYbde87pkHo7lZsWn1NcRQCqmmRMJv
-# hug2ZnKvAQTd0H4aIv8EHlFSGTOVyvuZ1E3XjszeuvATuUCuX3PJq1Th7e2ZLcIF
-# Pf1kQk2EniR9bn8Z13X6pJYs5WiaSxr2cqFY9L33UBGYP2zM1hU=
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhDfLexvcHKtod
+# MxDlw6s7yLZW2ynnWbONbxptjVbAlaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
+# BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
+# ggGPADCCAYoCggGBAMJqEmY4V9VM4HhTovXPXHSWb44jVYMj05xJIZf2f/NxQLR/
+# vfka/0JbdTSRJ03Yy3OIulBP5DqbnfAyzv+9eulPVX/BUFM6b2lENxZpVrvj55TZ
+# levsXyzHuK0xs7/FFpbLQ2Ts3LGPJTLlneOfuEWKRT6xTotD1RnElDCumiOnQHOD
+# 6qtPSRuwoxaVwSDw2QFJ8hp4RGHKsDAMRLgaRBhBM7e9A3/k7bA541DrWt19Cq5d
+# IY1LUII3pVolF3YUtot7wFU2BbfpM0WiDEPXDWBUAvHNF0FDDukwuXUtn9J2n1f/
+# 8EzDznON1GuNhrPP7cWJh6hywJgBzeR7ZHf2tsk76sKqY75u+qWoe4xQJXK7V2N7
+# UJW7i6YC2W+/LrOaUYB9JykD88Jk+OJ2eLDtLSqzYAnJXYTIq7/mju5E8twyNZrN
+# tQHqKUxUKhkeVgezgKoc4t12dgkTryl9efMy3qyxNesN34RR2i6eK8+6UtiW2ae5
+# GESynl96l1E9+UWlRQIDAQABo0YwRDAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAww
+# CgYIKwYBBQUHAwMwHQYDVR0OBBYEFEooM+aK7XCOIsSi0oFRhXyVQqdzMA0GCSqG
+# SIb3DQEBCwUAA4IBgQC08zIpMh0vUuvfMcIUpwX3lABvT3V9Rf6swy8xuWHjJyJz
+# hZVt0hOHeCBWF2RxYeJ2iY4hyH4FSkwwLCHmmM6kV3eLY2uibsYCUdwm1mwbtSws
+# i4YAzGZF0Ueap2TC94d9O/dcpzYILKPdJwqAd3MprkWEbyFSfEkhy5NCmxZ2wQFd
+# LtOU6YHMI9v6P8tIhGXpZbp3QjK9mZif6LZ9ZgXEzi4whxDwQ2RMTUVaf7kamyjc
+# gGmO32gRcNr0qsGwTog7TUTcbTd/RVc0DEUMMrUZVWMcBwrBIFUWqnD4i/oZuHdH
+# pMytQjZQcZBOzrJ/YcWxMNmdf09gq44kFs1QHiG+FFnATyglOs8SR3fJwJdPI+KN
+# qpK0zo9FhCyl37qSpKpyS9QNZdl+isj7YQncfqCmadjY1y6nZhLzaEoDW0oHdv/s
+# NzjZ54ieDALCH69wCbeCYk1lrI3ggu0t22QG1sHN7NmOm3T6SL2w7cF+TpeYXIfv
+# FCGIHWHVGbQtK/TtwJMxggJmMIICYgIBATA0MCAxHjAcBgNVBAMMFXdvcmtwbGFj
+# ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
+# hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
+# AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
+# BDEiBCBr7xI6cOXmEslAVXv8v8n9ovxpKNNDCfBSyW17J3SMfTANBgkqhkiG9w0B
+# AQEFAASCAYCfz8DIkEtKv07B6lJGb8U0obC6vtqLokVEvo69I/vVQkJLoVHPVM/2
+# FW6SjXOmImHIYuiXuKYH7wpVvTQHF+IBJfyjP8rgHqfICT1ukDRJAfVc3PdtdHWT
+# Rjxct8PaZEkued5Jf2BhsJ6rNFBPgEZpcczySvvP7on5HkyypGsczlWX98RcayZ2
+# Go5VIuWLlrYLwgjZ1uS4GIRQ21mB899/1VeRK+bOA7lqXDI2YSckJSrigO+y2Kot
+# w16c+jqT/cB6i+2JW1UeRp52n8Pe1s45eZ4OPfuPbAtm5LVv6H1py6ad+ttkGA0X
+# EMc1tr/co9pmk9+lUnJHal9DIcu1YP4Id8tJetVTfJi1KqqSbML4nmm0BuG20amq
+# TDFsF+CaMYRm0/7ZSjndc7F1KjFtTYgAP8GCrfPYNj5zlNl2VO07hDFiCfDm0xLC
+# qK2HfX7+ujLCpjS5kXAOFIvIWF5Pyc6A7xm4XLEBZrEW48rCcTLPA3iKA6aLp+ql
+# 1BfK8dBZRNw=
 # SIG # End signature block

@@ -1,15 +1,15 @@
 ﻿<#
 .SYNOPSIS
-Signs repository PowerShell files with the SmartM365 Authenticode code-signing certificate.
+Signs repository PowerShell files with the workplacecloudhub.com Authenticode code-signing certificate.
 
 .DESCRIPTION
-Signs PowerShell scripts/modules/manifests that are tracked by Git, with an option to include
+Signs PowerShell scripts/modules/manifests tracked by Git, with an option to include
 non-ignored untracked files. Intended for manual use and for the repository pre-push hook.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..')).Path,
-    [string]$Thumbprint = '526459860BED5BA91ED005483C90182852F26FE0',
+    [string]$RepoRoot = $PSScriptRoot,
+    [string]$Thumbprint = 'F01F4A8871B7E349B40564D90F2B2E5BB563720B',
     [string[]]$Extensions = @('.ps1', '.psm1', '.psd1', '.ps1xml'),
     [switch]$IncludeUntracked,
     [switch]$Force,
@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "[Sign-SmartM365] $Message"
+    Write-Host "[Sign-WorkplaceCloudHub] $Message"
 }
 
 function Normalize-Thumbprint {
@@ -29,6 +29,17 @@ function Normalize-Thumbprint {
     return ([string]$Value).Replace(' ', '').ToUpperInvariant()
 }
 
+function Test-MicrosoftAuthenticodeSignature {
+    param([AllowNull()]$Signature)
+
+    if (-not $Signature -or [string]$Signature.Status -ne 'Valid' -or -not $Signature.SignerCertificate) {
+        return $false
+    }
+
+    $subject = [string]$Signature.SignerCertificate.Subject
+    $issuer = [string]$Signature.SignerCertificate.Issuer
+    return (($subject -match '(^|,\s*)O=Microsoft Corporation(,|$)' -or $subject -match '(^|,\s*)CN=Microsoft Corporation(,|$)') -and $issuer -match 'Microsoft')
+}
 function Install-CertificateInCurrentUserStore {
     param(
         [Parameter(Mandatory = $true)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
@@ -110,9 +121,11 @@ foreach ($file in $files) {
         $signerThumbprint = ''
         if ($signature.SignerCertificate) { $signerThumbprint = Normalize-Thumbprint $signature.SignerCertificate.Thumbprint }
 
-        if (-not $Force -and [string]$signature.Status -eq 'Valid' -and $signerThumbprint -eq $normalizedThumbprint) {
-            $skipped++
-            continue
+        if (-not $Force -and [string]$signature.Status -eq 'Valid') {
+            if ($signerThumbprint -eq $normalizedThumbprint -or (Test-MicrosoftAuthenticodeSignature -Signature $signature)) {
+                $skipped++
+                continue
+            }
         }
 
         if ($PSCmdlet.ShouldProcess($file, 'Set Authenticode signature')) {
@@ -136,44 +149,43 @@ if ($failed -gt 0) {
 }
 
 # SIG # Begin signature block
-# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAaOnCu7t4OOLS/
-# AqmnoM77Q9tFhf7VXUr6hSbqvfBjqKCCBEgwggREMIICrKADAgECAhBxu0EivlCF
-# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
-# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
-# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
-# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
-# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
-# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
-# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
-# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
-# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
-# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
-# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
-# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
-# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
-# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
-# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
-# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
-# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
-# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
-# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
-# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
-# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
-# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
-# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
-# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
-# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
-# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
-# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBQx7c604KloziKu7Gl
-# dLatNSQw+hzhhk7JSyibtI7pyzANBgkqhkiG9w0BAQEFAASCAYCFvXae2VZTg/hI
-# WpJJG6i57vJVeWu2LKThPYVGHitNT2RdT7ZfSq2L2uRDtmgErboRM7CO08dWOLQ1
-# 1gIyQCztw3Q0EycoTXRMnVtlKZjror3Plw9SkQjGZRLbtBjoA0cHUsxjGK6aHFnr
-# lFAyJkFhNgFAqQDX9pK1J9O0JB4VHqWuQV8lM1Q8PKE9NZ63pyJOXOpKgXUUwveP
-# X2FsTB8dczlg7J9i7GNqM7aoZ+MteEiGytgGbT82He1PMu/p18kU/G3lFv0D/I+X
-# Qs2Z2aRAZvKbDBTEXFH3Xgs5WBQaa6xZAanmgPvNuRsx71QL73wHieYPKs7xW03K
-# 2D9/7NnGVIMTEGMWddHXaULFxQ8UHfoTFr326AEcOpF4WD1+BUdh/fky8bjGXP1B
-# k/nkVgW/jrRCQ02KywKBvRwagBB2eRHIAwX8vdlzp2q8vvEZSUgW9O/ziMksN6ak
-# B7UbUANuRH+/GIj8TOKsNPXv2/R3fqqYGPGQfFDBkFwZ/VJaskU=
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBD+W2gOTlLRf7
+# m7sSQL5n2Iy11VOv/xdQ/53IFhf6rqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
+# BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
+# ggGPADCCAYoCggGBAMJqEmY4V9VM4HhTovXPXHSWb44jVYMj05xJIZf2f/NxQLR/
+# vfka/0JbdTSRJ03Yy3OIulBP5DqbnfAyzv+9eulPVX/BUFM6b2lENxZpVrvj55TZ
+# levsXyzHuK0xs7/FFpbLQ2Ts3LGPJTLlneOfuEWKRT6xTotD1RnElDCumiOnQHOD
+# 6qtPSRuwoxaVwSDw2QFJ8hp4RGHKsDAMRLgaRBhBM7e9A3/k7bA541DrWt19Cq5d
+# IY1LUII3pVolF3YUtot7wFU2BbfpM0WiDEPXDWBUAvHNF0FDDukwuXUtn9J2n1f/
+# 8EzDznON1GuNhrPP7cWJh6hywJgBzeR7ZHf2tsk76sKqY75u+qWoe4xQJXK7V2N7
+# UJW7i6YC2W+/LrOaUYB9JykD88Jk+OJ2eLDtLSqzYAnJXYTIq7/mju5E8twyNZrN
+# tQHqKUxUKhkeVgezgKoc4t12dgkTryl9efMy3qyxNesN34RR2i6eK8+6UtiW2ae5
+# GESynl96l1E9+UWlRQIDAQABo0YwRDAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAww
+# CgYIKwYBBQUHAwMwHQYDVR0OBBYEFEooM+aK7XCOIsSi0oFRhXyVQqdzMA0GCSqG
+# SIb3DQEBCwUAA4IBgQC08zIpMh0vUuvfMcIUpwX3lABvT3V9Rf6swy8xuWHjJyJz
+# hZVt0hOHeCBWF2RxYeJ2iY4hyH4FSkwwLCHmmM6kV3eLY2uibsYCUdwm1mwbtSws
+# i4YAzGZF0Ueap2TC94d9O/dcpzYILKPdJwqAd3MprkWEbyFSfEkhy5NCmxZ2wQFd
+# LtOU6YHMI9v6P8tIhGXpZbp3QjK9mZif6LZ9ZgXEzi4whxDwQ2RMTUVaf7kamyjc
+# gGmO32gRcNr0qsGwTog7TUTcbTd/RVc0DEUMMrUZVWMcBwrBIFUWqnD4i/oZuHdH
+# pMytQjZQcZBOzrJ/YcWxMNmdf09gq44kFs1QHiG+FFnATyglOs8SR3fJwJdPI+KN
+# qpK0zo9FhCyl37qSpKpyS9QNZdl+isj7YQncfqCmadjY1y6nZhLzaEoDW0oHdv/s
+# NzjZ54ieDALCH69wCbeCYk1lrI3ggu0t22QG1sHN7NmOm3T6SL2w7cF+TpeYXIfv
+# FCGIHWHVGbQtK/TtwJMxggJmMIICYgIBATA0MCAxHjAcBgNVBAMMFXdvcmtwbGFj
+# ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
+# hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
+# AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
+# BDEiBCD6DBmytVxFvXN3d97Abq0VaEwj1t8dnWMzEkd4iDo/+DANBgkqhkiG9w0B
+# AQEFAASCAYCTDJmclPS7i/pbXDDK1vpkGJiKlM7Qcb/crnIOZu4cFz73x2rRLzQF
+# HHLm+j65ZiFpWxB5nB++DubDTbrGZuo9KB6/VNVk/g0AJszo0FznpkBSA+l9gad/
+# /2d8GgVe7sstFsgff+WelhdhjGMGD73XcRQEviAYkuv483jT1glhnIvYrMo6ZUb2
+# bYQ6pmd8V3LYu66BN14CF6l+n7/Iv4qL7KaqSVtB0LXPkhnlTgC922mdkIu5HAhy
+# KgnLmDvlKv1NjOY9uzXijk8Lmf1Vd5f5U8pbqfJ/OY9T09uoNY1Qi8vjqH+gGBeo
+# bWNWuBuWf7/GXyqblpM+JvKdGq/Sx9NcskOdy7uW9q6oKPS7SuO4ERIy9Lx2USXu
+# J4NiYd+l94b3G4LRvKqwEgS3QeNlERfmKJ+pqlPxImvuIthM31iI4VukX91ZjMrf
+# niyviZ9bWDXLYbSucDiEpiXwFM0eFrS9vscQP4QRsFpRUFiYlDCg5NOEKaBrkxe1
+# tBMRntysipM=
 # SIG # End signature block

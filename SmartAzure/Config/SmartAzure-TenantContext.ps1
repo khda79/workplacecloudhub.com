@@ -12,6 +12,101 @@ function ConvertTo-SmartAzureHashtable {
     return $hash
 }
 
+function Get-SmartAzureJsonTemplatePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ($Path -like '*Config\Tenants\*.local.json') {
+        return (Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template')
+    }
+
+    if ($Path -like '*.local.json') {
+        return ('{0}.template' -f $Path)
+    }
+
+    return ''
+}
+
+function Add-SmartAzureMissingJsonTemplateProperties {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Target,
+        [Parameter(Mandatory)]$Template,
+        [string]$PrefixPath = ''
+    )
+
+    $added = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Template) { return @() }
+
+    foreach ($property in $Template.PSObject.Properties) {
+        $name = $property.Name
+        $propertyPath = if ([string]::IsNullOrWhiteSpace($PrefixPath)) { $name } else { '{0}.{1}' -f $PrefixPath, $name }
+        $exists = $false
+        $currentValue = $null
+
+        if ($Target -is [System.Collections.IDictionary]) {
+            $exists = $Target.Contains($name)
+            if ($exists) { $currentValue = $Target[$name] }
+        }
+        else {
+            $currentProperty = $Target.PSObject.Properties[$name]
+            $exists = ($null -ne $currentProperty)
+            if ($exists) { $currentValue = $currentProperty.Value }
+        }
+
+        if (-not $exists) {
+            if ($Target -is [System.Collections.IDictionary]) {
+                $Target[$name] = $property.Value
+            }
+            else {
+                Add-Member -InputObject $Target -MemberType NoteProperty -Name $name -Value $property.Value -Force
+            }
+            $added.Add($propertyPath) | Out-Null
+            continue
+        }
+
+        if ($null -ne $currentValue -and $null -ne $property.Value -and $currentValue -is [pscustomobject] -and $property.Value -is [pscustomobject]) {
+            foreach ($nestedPath in (Add-SmartAzureMissingJsonTemplateProperties -Target $currentValue -Template $property.Value -PrefixPath $propertyPath)) {
+                $added.Add($nestedPath) | Out-Null
+            }
+        }
+    }
+
+    return @($added)
+}
+
+function Sync-SmartAzureJsonConfigWithTemplate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Path,
+        [string]$TemplatePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath)) {
+        $TemplatePath = Get-SmartAzureJsonTemplatePath -Path $Path
+    }
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath) -or -not (Test-Path -LiteralPath $TemplatePath)) {
+        return $Config
+    }
+
+    try {
+        $template = Get-Content -LiteralPath $TemplatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $addedKeys = @(Add-SmartAzureMissingJsonTemplateProperties -Target $Config -Template $template)
+        if ($addedKeys.Count -gt 0) {
+            $tempPath = '{0}.tmp' -f $Path
+            $Config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $tempPath -Encoding UTF8 -ErrorAction Stop
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            Write-Host ("Updated local JSON from template: {0}; added keys: {1}" -f $Path, ($addedKeys -join ', ')) -ForegroundColor Yellow
+        }
+        return $Config
+    }
+    catch {
+        $syncErrorMessage = [string]$PSItem.Exception.Message
+        throw ("Failed to synchronize local JSON '{0}' with template '{1}': {2}" -f $Path, $TemplatePath, $syncErrorMessage)
+    }
+}
 function Read-SmartAzureJsonConfig {
     [CmdletBinding()]
     param(
@@ -25,7 +120,8 @@ function Read-SmartAzureJsonConfig {
     }
 
     try {
-        return ConvertTo-SmartAzureHashtable -InputObject (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+        $config = ConvertTo-SmartAzureHashtable -InputObject (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+        return (Sync-SmartAzureJsonConfigWithTemplate -Config $config -Path $Path)
     }
     catch {
         throw ("Failed to read configuration file '{0}': {1}" -f $Path, $_.Exception.Message)
@@ -275,7 +371,8 @@ function Get-SmartAzureScriptLocalConfig {
     }
 
     try {
-        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return (Sync-SmartAzureJsonConfigWithTemplate -Config $config -Path $configPath)
     }
     catch {
         throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
@@ -758,44 +855,43 @@ function Initialize-SmartAzureTenantContext {
 }
 
 # SIG # Begin signature block
-# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsd1OHPS+mYD7n
-# RltESwksEk9Q3f79SAl2AiSQeaRIgaCCBEgwggREMIICrKADAgECAhBxu0EivlCF
-# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
-# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
-# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
-# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
-# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
-# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
-# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
-# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
-# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
-# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
-# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
-# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
-# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
-# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
-# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
-# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
-# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
-# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
-# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
-# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
-# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
-# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
-# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
-# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
-# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
-# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
-# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB9Wb2t2+laknaIlFUM
-# VuQDtpTXldbbaYOlNNC8IVluBjANBgkqhkiG9w0BAQEFAASCAYB1Y2WBkJzzPKve
-# VSgLHGDYKwV7jgb7ud1wpFn6FS53iAT6GvUka4utosKh1iGv5FuszHjT0Da1+I+7
-# qg4Q8krQzt7WkB40JJHIvB8oWOy1vcY92xSgqgRCUGCSWK8ABcbemVlxOS2m3tQR
-# alXtbNxRLns7yzGD6cLovuNRTb/hCSgwNksuZzkFoS8pQcGcOWEIeRtUDNtxtSfX
-# JOdmK8YfY9RaXiWDARWGqLjaEvTbehVjHEbrC0wjn3OtgqVlexwxRIrW5wJzVRqv
-# Ue3HsYdf98mkQE2RMjJZiEgoVOG6fdX8sdnTchGpy6BMHdFEWuth2SpRO+ietQ7f
-# t9HCEwntsGrqW+SfASW9eMLAT95nv7okmIghYLqRnmsJomgVq1MPrk9/HbXt/t0b
-# JD61NuaVx0j31JKGp+Zxe710TVXixNQSw7pbR+HJxPxHXN0HDt+stLpSqkenv5gT
-# 7NzKPWPBw1VPW6lq5yKiH0M5rcLrLpHtVqe1P+RYefUdjPebzEM=
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBsOekj8QNqxsc
+# drhf/T+iZz4x35GYKlermjryfAmIhqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
+# BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
+# ggGPADCCAYoCggGBAMJqEmY4V9VM4HhTovXPXHSWb44jVYMj05xJIZf2f/NxQLR/
+# vfka/0JbdTSRJ03Yy3OIulBP5DqbnfAyzv+9eulPVX/BUFM6b2lENxZpVrvj55TZ
+# levsXyzHuK0xs7/FFpbLQ2Ts3LGPJTLlneOfuEWKRT6xTotD1RnElDCumiOnQHOD
+# 6qtPSRuwoxaVwSDw2QFJ8hp4RGHKsDAMRLgaRBhBM7e9A3/k7bA541DrWt19Cq5d
+# IY1LUII3pVolF3YUtot7wFU2BbfpM0WiDEPXDWBUAvHNF0FDDukwuXUtn9J2n1f/
+# 8EzDznON1GuNhrPP7cWJh6hywJgBzeR7ZHf2tsk76sKqY75u+qWoe4xQJXK7V2N7
+# UJW7i6YC2W+/LrOaUYB9JykD88Jk+OJ2eLDtLSqzYAnJXYTIq7/mju5E8twyNZrN
+# tQHqKUxUKhkeVgezgKoc4t12dgkTryl9efMy3qyxNesN34RR2i6eK8+6UtiW2ae5
+# GESynl96l1E9+UWlRQIDAQABo0YwRDAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAww
+# CgYIKwYBBQUHAwMwHQYDVR0OBBYEFEooM+aK7XCOIsSi0oFRhXyVQqdzMA0GCSqG
+# SIb3DQEBCwUAA4IBgQC08zIpMh0vUuvfMcIUpwX3lABvT3V9Rf6swy8xuWHjJyJz
+# hZVt0hOHeCBWF2RxYeJ2iY4hyH4FSkwwLCHmmM6kV3eLY2uibsYCUdwm1mwbtSws
+# i4YAzGZF0Ueap2TC94d9O/dcpzYILKPdJwqAd3MprkWEbyFSfEkhy5NCmxZ2wQFd
+# LtOU6YHMI9v6P8tIhGXpZbp3QjK9mZif6LZ9ZgXEzi4whxDwQ2RMTUVaf7kamyjc
+# gGmO32gRcNr0qsGwTog7TUTcbTd/RVc0DEUMMrUZVWMcBwrBIFUWqnD4i/oZuHdH
+# pMytQjZQcZBOzrJ/YcWxMNmdf09gq44kFs1QHiG+FFnATyglOs8SR3fJwJdPI+KN
+# qpK0zo9FhCyl37qSpKpyS9QNZdl+isj7YQncfqCmadjY1y6nZhLzaEoDW0oHdv/s
+# NzjZ54ieDALCH69wCbeCYk1lrI3ggu0t22QG1sHN7NmOm3T6SL2w7cF+TpeYXIfv
+# FCGIHWHVGbQtK/TtwJMxggJmMIICYgIBATA0MCAxHjAcBgNVBAMMFXdvcmtwbGFj
+# ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
+# hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
+# AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
+# BDEiBCAct1PiQsIOD+321s2bFZeO45uco0WYUq2WG4p5gQBetjANBgkqhkiG9w0B
+# AQEFAASCAYBeIydFt44WoI00MMfRy0Et++RRMjm0DKHli7a4bIVKIadkLqP4YUsv
+# AQAKs6JYyo/LR8p6sR87QRyIpNlWB2vWG5kMWDNKMTTRuC+JE6MGY2vS02Yo9xTL
+# H+eC8ZXtVORkuYyAN8BLRQy+suMXqGGAJWQ71RELcVrSGKSgQYCQl1Ut5VP53zco
+# tVrmRvWxwLv/utRkbFLBTEPQtWBdDrQxXEyulgfFz2BWPBl3KCYQ8wcXW+DylFps
+# wmcGb2CQHmyTtCWPgXLC8ndh32qHtcbYlC51byH9QtNbWfGvIYIJDjZ+qU8Z6bgf
+# SsmHqnEeDgJBAXtbcJGR8qa30FB6nK5YA9YgBI4nuUhscETg9gYB+28M4NhKiW0E
+# QWvLJdJnv8PYHalX6JoN+d0naCKmFm6D1Q45WW92oINbJm7Cn+wcBSEWgJ/Bc/+C
+# b3BVC7eUcbdPIDL8CwY7lll1+nvM2vIfNqCmMIL2njzqFtJDtVnuAra8/ZoSj9y2
+# 1bB8Zrl7wHA=
 # SIG # End signature block
