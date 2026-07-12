@@ -197,7 +197,7 @@ SmartM365/SmartInventory/Orchestrator/Orchestrator-Jobs.json
 # Secrets / Certificates
 *.pfx
 *.cer
-!SmartM365/SmartInventory/Orchestrator/Certificates/SmartM365-Orchestrator-CodeSigning-526459860BED5BA91ED005483C90182852F26FE0.cer
+!Certificates/workplacecloudhub.com-CodeSigning-F01F4A8871B7E349B40564D90F2B2E5BB563720B.cer
 *.pem
 *.key
 
