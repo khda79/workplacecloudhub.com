@@ -891,6 +891,21 @@ function RemoveOldFiles {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) { return }
+    if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
+        $LogFile = [string]$global:LogTextFile
+    }
+    $writeCleanupLog = {
+        param([Parameter(Mandatory)][string]$Message)
+
+        if ([string]::IsNullOrWhiteSpace($LogFile)) { return }
+        try {
+            Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -ErrorAction Stop
+        }
+        catch {
+            Write-Verbose ("Cleanup log write skipped for '{0}': {1}" -f $LogFile, $_.Exception.Message)
+        }
+    }
+
 
     # Normalize exclusion list to full paths, case-insensitive
     $excludeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
@@ -932,7 +947,7 @@ function RemoveOldFiles {
 
     foreach ($file in $filesToDelete) {
         if (Test-FileLocked -Path $file.FullName) {
-            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [SKIP] Locked file: $($file.Name)" | Tee-Object -FilePath $LogFile -Append | Out-Null
+            & $writeCleanupLog "[SKIP] Locked file: $($file.Name)"
             continue
         }
 
@@ -941,15 +956,15 @@ function RemoveOldFiles {
                 $file.Attributes = $file.Attributes -bxor [IO.FileAttributes]::ReadOnly
             }
         } catch {
-            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [SKIP] Cannot clear ReadOnly on $($file.Name): $($_.Exception.Message)" | Tee-Object -FilePath $LogFile -Append | Out-Null
+            & $writeCleanupLog "[SKIP] Cannot clear ReadOnly on $($file.Name): $($_.Exception.Message)"
             continue
         }
 
         try {
             Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
-            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Deleted old file: $($file.Name)" | Tee-Object -FilePath $LogFile -Append | Out-Null
+            & $writeCleanupLog "Deleted old file: $($file.Name)"
         } catch {
-            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [SKIP] Failed to delete $($file.Name): $($_.Exception.Message)" | Tee-Object -FilePath $LogFile -Append | Out-Null
+            & $writeCleanupLog "[SKIP] Failed to delete $($file.Name): $($_.Exception.Message)"
         }
     }
 }
@@ -3517,10 +3532,10 @@ function Invoke-SmartM365SharePointCsvUpload {
 
         $record = Add-SmartM365SharePointUploadRecord -LocalFilePath $fileInfo.FullName -SharePointPath $sharePointPath -DriveId $driveId -DriveItem $uploadedItem
         if (-not [string]::IsNullOrWhiteSpace($record.WebUrl)) {
-            WriteLog -Message ("SharePoint file uploaded: {0} ({1})" -f $record.SharePointPath, $record.WebUrl)
+            WriteLog -Message ("SharePoint file uploaded: {0} ({1})" -f $record.SharePointPath, $record.WebUrl) -Level "INFO"
         }
         else {
-            WriteLog -Message ("SharePoint file uploaded: {0}" -f $record.SharePointPath)
+            WriteLog -Message ("SharePoint file uploaded: {0}" -f $record.SharePointPath) -Level "INFO"
         }
         return $record
     }
