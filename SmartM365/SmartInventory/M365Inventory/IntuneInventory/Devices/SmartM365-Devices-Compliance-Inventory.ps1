@@ -39,7 +39,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Version : 1.7
 
 .VERSION
-1.8
+1.9
 
 
 .REQUIREMENTS
@@ -296,7 +296,7 @@ $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'L
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -1175,8 +1175,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjA7XNuiuhwdmF
-# LVlCPDmUyar1+z/HT0HKOggxOuajgaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDaxNohc7p4QXcG
+# C+Q++Ev8wUalpXaypen9r0CsVRaUz6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1202,14 +1202,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCj0a/+mmBq/7yT+txH1CR4mQ5sP2YlExF3nJQd04pMUDANBgkqhkiG9w0B
-# AQEFAASCAYBhdB/ImSTUMd+7EI85ZYK85GxAAuWDnrYZ4yAcjdWegf+pfyUZH1rg
-# WHjbbTZ0wSY+gZaZvsCocfskb4uswo5pOa92p6tcqS2nep/uzCSE2Fb+1CozNKa/
-# bLDJxo6tGmP3YwzqnH23RFXV0uuS5yx6tv9nOS1Qh3dU8IUGXdU3UYTvhLCuqgOt
-# IFojjkAuT3yUygQ6I/dnzC6ufSQp+cHzZt87C/eEmXSGQF1YyAyq2W5uPyWOke0e
-# 8313r1ROgaRW0461PByhO/U/ZjM7OeZFS5I6o0vu3JTY6KKAEsKAiiycQ7TJKU6H
-# cNo57iAp8BZNSrtQAPXmNRTiL4fm25cDgntISimGZtn5UY6Cia7rfjlzl0dfWTRp
-# 6a1KYQ4NOSn1gYAtOqO4mh5mR5xgEt7pXy5/EpttyPxValdWW48GBuhOrqJHpCIj
-# xWXcUiq2gbh/PLcPiBSHfhTT4XxeVsEOTzzRNQeCGP5HYoTdnWhJj1xDXmSMnv2A
-# YbPT74yIaF4=
+# BDEiBCAPClwLBdsveJUhhk7POGA/MNYsvF4Fc5vEgJYsOZGoBTANBgkqhkiG9w0B
+# AQEFAASCAYB1Cl20oFQxZGfTXzFztHRcU5TNutTo8WtY4b75ABRdbeokZfeeFWZs
+# FrSphkvC2WiTcJw+rX78XLxvIu+NGS1HjkBF32E4zQOwiFmwr9gVjM9UuMSf/6mz
+# 5NZDexrDV8YylXDZQVmLcmvfP+J/JewITyS0FX/OTpWphxR7ftGA3doWH54fOCiu
+# Zy0gkbuEviZGoVHpx+UlVDo8k9VzI3LgiuE3eqZ8uVZbJof2+0C0AJQUX3HtvpWi
+# 3vPAWad0Uc7ylE6wqaP9G6vxUzvZ6BJtBvltSEBisH6MjCUa2qXneLnaNQTvMF66
+# yvRhYg1sGrExX3EAbWK9EURE77sTEIPnuURSARpZ6SDt1zZsJ5CF/o76oiz2W+4+
+# 9aO5MGSqQ1ppnImYpcude0XhztzYTxF8drjZV6QVv7A/tP3teUjiQff1rk/uYFCi
+# xq2WTtadZiSRjzwMdCa+LM/+ReI3OmogX40jf2k4hJPhWCP6AXUzdmhaLXxmh4+V
+# e43rPipHgjw=
 # SIG # End signature block

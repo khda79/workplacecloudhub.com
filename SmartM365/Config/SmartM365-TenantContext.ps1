@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Loads SmartM365 global and tenant configuration context.
+
+.DESCRIPTION
+Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
+
+.VERSION
+1.0.2
+#>
 function ConvertTo-SmartM365Hashtable {
     [CmdletBinding()]
     param([AllowNull()]$InputObject)
@@ -249,7 +259,14 @@ function Get-SmartM365EffectiveGlobalConfig {
     }
 
     foreach ($key in $tenantConfig.Keys) {
-        $globalConfig[$key] = $tenantConfig[$key]
+        $tenantValue = $tenantConfig[$key]
+        if ($tenantValue -is [string]) {
+            $tenantText = $tenantValue.Trim()
+            if ([string]::IsNullOrWhiteSpace($tenantText) -or $tenantText -in @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+                continue
+            }
+        }
+        $globalConfig[$key] = $tenantValue
     }
 
     $globalConfig['TenantKey'] = $TenantKey
@@ -316,8 +333,8 @@ function Initialize-SmartM365TenantContext {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhDfLexvcHKtod
-# MxDlw6s7yLZW2ynnWbONbxptjVbAlaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDtPCUjjZxSpaJA
+# S8TY/3KPNMmHZ/A34LxJywxNuuEEvaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -343,14 +360,14 @@ function Initialize-SmartM365TenantContext {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBr7xI6cOXmEslAVXv8v8n9ovxpKNNDCfBSyW17J3SMfTANBgkqhkiG9w0B
-# AQEFAASCAYCfz8DIkEtKv07B6lJGb8U0obC6vtqLokVEvo69I/vVQkJLoVHPVM/2
-# FW6SjXOmImHIYuiXuKYH7wpVvTQHF+IBJfyjP8rgHqfICT1ukDRJAfVc3PdtdHWT
-# Rjxct8PaZEkued5Jf2BhsJ6rNFBPgEZpcczySvvP7on5HkyypGsczlWX98RcayZ2
-# Go5VIuWLlrYLwgjZ1uS4GIRQ21mB899/1VeRK+bOA7lqXDI2YSckJSrigO+y2Kot
-# w16c+jqT/cB6i+2JW1UeRp52n8Pe1s45eZ4OPfuPbAtm5LVv6H1py6ad+ttkGA0X
-# EMc1tr/co9pmk9+lUnJHal9DIcu1YP4Id8tJetVTfJi1KqqSbML4nmm0BuG20amq
-# TDFsF+CaMYRm0/7ZSjndc7F1KjFtTYgAP8GCrfPYNj5zlNl2VO07hDFiCfDm0xLC
-# qK2HfX7+ujLCpjS5kXAOFIvIWF5Pyc6A7xm4XLEBZrEW48rCcTLPA3iKA6aLp+ql
-# 1BfK8dBZRNw=
+# BDEiBCAJs6JwqYOusV0KIjGM1UoPxujn48M+Ce5LHfcXZoKUizANBgkqhkiG9w0B
+# AQEFAASCAYBQaId+2dJ04GrQVaXTv/BpYVERRwQZ9H66wk9n46AVBHCQ3qfue3zx
+# ItDQhqz4r2Xz5TKJ2TS75Er/KlmAxotUZSPqPXQ9qNeiMnc/v8nYmWfuzTanhsnD
+# 650tdKBCEeFeLkQypZFlX+SBGTaO0glfbdtOewKQUMz6KnknfVYtEw1oPZT33UpG
+# QrZwGc50+OilyThkZzlt6SrvhzyKGuFDnMnbMbOZnsxoxA4nuKhgZidlk/s0ATaD
+# 1TlUmRwXpPBUS0FdHhsN8r5czO/FHWc2a4umfJ6iWQK4OaWt9fhjzmNzvIPbMIMY
+# SPmgMKnKh9qjkGVfbPaWUnh/77a6cCzruNMka0+Um9huP2O9fUdDfGqqziifaVSc
+# zztiSq19HMgmkwuRPCWvsC21yLfyBkYaBhycieH0xs9kRT+9w2bp7qLxxzXW/EL/
+# mjvLv5fWSRhazVKcuwazFJDLjSBXdaUIlg5KSKBAhK3Eu+W/fr4xjTX0gkGpV+gw
+# UNxe4WWxoUQ=
 # SIG # End signature block

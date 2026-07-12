@@ -17,7 +17,7 @@ Forces a (reconnection) to cloud services when specified, or auto-connects if no
 .PARAMETER InteractiveAuth
 Forces interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.7
+1.8
 
 
 
@@ -243,7 +243,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # Import SmartM365.Core module (psd1). 
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -354,7 +354,7 @@ function Get-AllPreviousCsvPaths {
 #endregion
 
 #region Module Import and Initialization
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.8"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMigrationJobCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -667,8 +667,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9d9CPHrQlpXmZ
-# sevOBLPowFXBPuJ/SKhYc9mnoutDd6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD880ZkA8Z6GbP2
+# X+D8gAogzrPHJGpweHq899i9zZeF/aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -694,14 +694,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAsFPSBXvDIGDECK5G8ikW80X973UfWOrd59vU5zsWlHjANBgkqhkiG9w0B
-# AQEFAASCAYCqTQYCTZtMGZ/sac5T6g81rJmB29gS8lht33fAVsSqg+NMmJTd3Ipf
-# Mr2y/AUB3KRTRBsyNZEP25FNIfeJslDxvsCK6kqqqvenoDT86ubeFDBhNaCFx6qi
-# 0qo/sHdK/VCj94BJlWIKEomcsiRvuD/cjTjf80kgDC043S2YTFTbYUTGTylJXTBK
-# vZqEhONUA/btOUptTjY9olCqM7uRBMREYt+2AbYd2fhXIBioW28MN/YVO/QJulR4
-# gHAu/nVCN1MY/nrZ/cPdYcPgVP1AVZEMLOm+RtacWS11NnbESaz1BBAigEzsmf1J
-# DT+BPOmIIcu7rWiFQEH8a9CBQnXRYzR2SXBQAP3KVX0nayROG61qV9VU/txG21nw
-# a4vkJCngDxRclsPxnQgscHRdP/NagNclVTd9oH8gSLNzOOfEyIBvyzJUYPBSGRd7
-# 52z8B5k6JoP3mkezf9hmJ4fzA6Us0ysDfSeDJJ+wAJOYE4g67EzQ7EzXywZZh/oK
-# O18xlGoADBU=
+# BDEiBCCuRE69UPfGWeiC9s4mrhYujHA2zxmLQxpRsbPXq3gX+zANBgkqhkiG9w0B
+# AQEFAASCAYB6N+gOHL97Ue76GYstf6q+uOv0xChvSHTdRqTjIbWuGEKs0iEx0Com
+# IxGvBddVzap6wgLLBgpXw4kziE6MhbVkOWcmiuGm+ziNn3elLzP7ynFc0l789EY6
+# Dfa1KBEHTgZYA9qd2uekAQ8MPGNBw0dwVhRNFSbKRZP6zHHuH17fNGuUpUPB8K95
+# U0KIkF1ifL+AxOlRrUj7Qu9rvGfLnRiBU/1JTGURDwb+HO8N4yyyIya7aqs4Rq3a
+# mo7BUA+1neDX6hSpq9dSlC6++0qrHyAbDePKikXDTghnC1XftLqHwZR71F1MXqPY
+# zcu4b3ho0yn65Ns9d7rkbXjQCu1vDV4PQod/zDL5r8PnvJyKUnT16mDoWj6c1qGy
+# 9OHGjNTMZxApGqHj4/WPi0GnXi8KGczLmWFzT6Pbpj8xFX4ae103NGTtQwyEMz6p
+# e1ZnRklE5sqiFERwZ/AGektvhFXVMU+uoEjFSTFo4DSSZ7EfgBCtuR87X6Rzc1N4
+# 0tcW9uOolQA=
 # SIG # End signature block

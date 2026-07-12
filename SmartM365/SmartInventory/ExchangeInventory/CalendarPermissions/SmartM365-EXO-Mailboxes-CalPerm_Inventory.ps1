@@ -31,7 +31,7 @@
 .PARAMETER TopMailboxes
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 .VERSION
-1.12
+1.13
 
 .REQUIREMENTS
     PowerShell 7+ for Exchange Online mode; Windows PowerShell 5.1 with Exchange Management Tools for on-premises fallback mode.
@@ -274,7 +274,7 @@ function Join-ModulePath {
 }
 
 # ------------------------- Init & Environment -------------------------
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 if ($Online) {
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
@@ -285,7 +285,7 @@ if ($Online) {
 
 try {
     Write-Host "Loading module SmartM365.Core.psd1..." -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365.Core.psd1') -MinimumVersion '1.0.23' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365.Core.psd1') -MinimumVersion '1.0.24' -ErrorAction Stop
 
     # Standard SmartM365 initialization (logging, paths, transcript, etc.)
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -798,8 +798,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAP4HjfMv8awC4W
-# H8pQ5jtwLeawqsTMtszWjPo9u4KbwqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqkXLWEXlqOH/w
+# 0YnIs9MWpPRFti8O/zZVyJlDElKpWqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -825,14 +825,14 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDdMhwAXGdBj8SKEOlxq94/gxjTTZJYWTQe2SUIse/6CzANBgkqhkiG9w0B
-# AQEFAASCAYAW2BafePHoeN+VxN8QIwsc1bOXPCEqduvsz12KNF+TitUzFMU8XaW3
-# YYZtK4HtPW4PepY5kpdffHUkL7gyx5qQRupBumlE3ngbGWQOiSbMzm1Vxrm49d/G
-# 90D+cH2jCRjtgJ0ERj6ZhUlSQgm0CAuS6gjU2U3E10boMCbR3JRaXcKv1x0toCWp
-# +ApGOo4tU8NZbRhP//8o7OxKBZgDgkGykHReVxjBnmO04wmxAnk90zZvldjf9YHT
-# pl0BFSubbQObFHHAj+pXi4K9hAmwflTfeHwdxissk9pSXIwZR8dIm7Eh9Wmoh0nB
-# D8ru+i1N0AVI/Ww8w8oNYYeRYsW4qZ0US2bxMCMxLTJaX8dZkk8hGf87AvgNfIDn
-# KwHj5JqMg9fQJ06GITwBRFWs7LEVgkc1w94YZb32VTbwxps0QhbeUOXd6IhfrEo2
-# N5fJZ2HTaQsUhNsWvzCuxf3jAzNH42vgLDSt3uF3Lyp5vpvD2fp+0cARmjv7jSo5
-# ov0+B4uTz2M=
+# BDEiBCBgSvPIzj6mhA9OEJVG8+WdfsJ1uo5hALxRVKyseaVxkjANBgkqhkiG9w0B
+# AQEFAASCAYBhh8b5W+rCEUu6oiiuhRAnyrR8Wl9ts1oWvTyJuQMwUik+Y+c+/ynD
+# 19Oesahq26CZAUnqVqOs0jez0rt3QqrmduzaIgb+fsTM6G3kRA/hhUJaPIuwVeAQ
+# v0Y4iS8IOmiXmp1VtPB4G44jy/PLfo7ylp1Jr/a4/RknMJKMsCV0BPDAoqw5i9Xs
+# Z+AnZn+qwZ7qmpAHr60sQO6WziGuZqsGx+5zpeU6UZI64lUOgP07ls5X2zqhEOnW
+# OTXNB8rDwGF0aOYrtQ4GKKAOYjkVo1k1CuwjkPnVAGhPhA+N8qcl5hz8Z2+MezHq
+# JylvgmrhonuHZ0IvmNIERiNqrwLVJ9Qe8wChQhZZIKGVx2OV5o9MXydalWDyk3M1
+# ocvjtju/T1AnlkJyovs8moaDo71LHYwxSMA3QP8U4U3XCS4qnKGYI+DpLKpKkYcz
+# A+FUWNTVhfdiOqh93ckZBwVqOU7T+irPbqAhf6kIdIFMcaE8VAxbIlSAtfJvKy6c
+# 6HocQTQo22s=
 # SIG # End signature block

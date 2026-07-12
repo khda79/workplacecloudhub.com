@@ -26,7 +26,7 @@
     Exchange_OnPrem and Exchange_EXO mailbox permission exports.
 
 .VERSION
-1.8
+1.9
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -68,7 +68,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 
@@ -161,7 +161,7 @@ function Import-SmartM365CoreModule {
         }
         throw 'SmartM365.Core module not found.'
     }
-    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -Force -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -Force -ErrorAction Stop
 }
 
 function Get-CsvPropertyValue {
@@ -399,8 +399,8 @@ catch {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCqs6TtxCPpzqI
-# 90lm+yjkPzaLchu7xKu8+BMJ8j3UPKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA83IwQsrhz+UdX
+# gnvL8SUM3CVSEuk2rdkOuTse8UZwoKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -426,14 +426,14 @@ catch {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDa5LYyWSDNczMeqQWyuBHCifHVdYGaOUHVVfacCR2xQDANBgkqhkiG9w0B
-# AQEFAASCAYCF81faYxfjPQCvSiZPko/GDY/O7hKDfFm/4aWt6tNGb95xKO1JRJVW
-# QC3sGaN5x7LbfwNMD1+oD9p74q1a+/hmbwvkXqdoUH6mjVfPY8VZhi9CiHpKKT0X
-# MM/XzfRaLAOG+6OV0jgDNUrFr2xl41TeLMC+pzofB+gvpjoa6oNZ+pbf4AIaDk0r
-# KCOLPu3sDk7PEW0E06rplpzXwasDVGdLUbQ9W5eUJK/uSQEoFXdRsUOLtOcUYrm7
-# 1DOqK+VQOj9xZhrXY1z/IlgfRf/+vcdU+LoxTce/D18Dx0q87torO/zZvEVE0XnW
-# VTXYDE5vBvJGoaU4FXJa2IJvI4a26wmm5BgNjknQ+GoBdXeCOXSp4NttDboxDFj4
-# +nNkSxovNh2SUKT/Vl6kqQh3jEQldlJRf8gxGI5SbxD1VC+lW48BNuOoQZ2gxDPq
-# 6XoJ9xMrgk3e3n5gUbulMkTo7IIA2P/ttFdLmvFileZclh1xMZQpjTBEuCsfS5vi
-# SQ5yY3SCEoE=
+# BDEiBCABMOWTSZ988OmHr38cP7pQXFo/pMH3tKSsOZPOZv1sGDANBgkqhkiG9w0B
+# AQEFAASCAYBxysMMAOmRcPuIShUiCde/JDd+1SwxtJ7eugYwvmc2sJSpmZnUa90G
+# ce2UOhE65+/svBloWdBvRRJaRAF7BD1k6DQHTz2CMzO5T9ak4z0NTS2EZgK69IIL
+# uAk1akfoi0wnk+PevdN23DUQrpyEmpi9H2pO/JFxw3bjM2snEY5Cjo5vyw5zjOvv
+# HVT0H3146p7jcsoLjdU32HTsUH/G/rr5C02GJ0E6qOg46PV0vnLDtXV/yHjCVMQf
+# ozZDxWpKeFvcj9HOdrtujx6JDdQK2oY6UqXnUg1mvuqh5BAqUM/t7m+ua3z2kNro
+# LEGGrCJ70fO01lswkVaC4YF8By9pfN/StG5tvFpy/expiveg58nM7L39sfmFuS8h
+# Zb5n9e/U/Vkx4LTq1fII7/ku+D9zEQoX8CUKOU9WbIsc+Roja8ru86YfvgmozBWq
+# TvYqf9KjA7TSJ4NioiVjfhau/RsSUrb384MZAIkfu889CDv7m3NHO2jLlwysE6pH
+# Hs7g7pMDSIE=
 # SIG # End signature block
