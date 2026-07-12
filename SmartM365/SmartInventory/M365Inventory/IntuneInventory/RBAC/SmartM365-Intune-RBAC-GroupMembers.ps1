@@ -29,7 +29,7 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.7
+1.8
 
 
 
@@ -403,7 +403,7 @@ $CsvBaseName       = "Intune_RBAC_GroupMembers"
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
 }
 catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
@@ -460,7 +460,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.8"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -1098,8 +1098,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0DfBNuLNC4kln
-# C7BqeXk6/L6r5Q5NTKqTEUw/tON/hqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3uaUH6TIoprvJ
+# rGUA+xOU8Snt1S6ScssvXSXQmvk3BKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1125,14 +1125,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCpETYAWp2zuqclzyYh1OKyGGkewZSFHdm/ns2lUgWQETANBgkqhkiG9w0B
-# AQEFAASCAYBMRQS+UP5emi1PYW0UUZ/t0jnYa/P7FJJxSp5MRNGM1RjjTJG8U6jI
-# O19qYhMalzvou4qq6DabXQZXLt4HFBORnGc61LFCzXLR1lToMB9yPFEFLPnueea2
-# 8e523rEGFKAhMpj+IJIyR/1av0QZFjT746drHXRddCdp+hXcR/UCFnNAlls83/Dp
-# AC7R3bYKARSMrq8QW6D6vpAy3w1nkbtMCOjsn6JxdFaZYQgqqwPqrru9QqJzUIiz
-# A6PNf+O29adhGZXX0ZcOXMhCNERnxzNELjI2tlnd88lTP7zdJQw3dq81f1DKa7Qk
-# 4rdJwtDje1+4gDWL1fbdXolMQYnLM+jWbckZyKt21caYKiZvmPYKt7sbGtVYZPoA
-# MoSqcEqIm2ZCUfyRkeMncD6furRl0J0u+R54fwayshQURL9yVJfuvFGc1w5WeOAA
-# A6zxNvcL29k2eYtGDk+xOGR7dpNifVNkUcUeeMqTEoNuE4uNSQ+RNS58HsTNaTpy
-# 7r8/JcOhCsI=
+# BDEiBCAjeORTlq5SkKhBopJd0Bo6t29BVMPvu6ZTw5cUMo3XiDANBgkqhkiG9w0B
+# AQEFAASCAYA2Puqy86AzPvhgQ3wBlqXgvcsHuajx2erIcErdabOKTOowQrsK3AcB
+# JbBxif9qe25rXHlgPgdSWmBXFeW5rb7LZsUShnb149CyG3wGsWNs/n4mqzXHBNHJ
+# iZ2sFqoQCT59oZ+hu2A9e/o06NUEsXFNJFnXbL3VVXILoHwdCJdehU1Rt+dIcZ2l
+# OnAncBY2JN8CWbHe10bxhBVS3gw8FmL22qW+TaTnfv6NTtRqk33sN+sxwOYvFGVD
+# Bft5uQ/LFHwbPtRWg3y3JY270XQh3cM2hv2bZGLvlMWBM4P453l5cp1lBJuWDA1H
+# SmQ3mVoQR4xlqPOHT5ziFGXZLONGUG4htsgmXXc8emZje9gptsli0pdg+8f6/YyD
+# 8/HaXfAGOYMbBoQYKgbz5TdP2LTWzPOaxisc/IfmaIAOqahkJFA7HUtsXm5ED408
+# s5EeC88DREVJvTvfMBud/tVO3IpiA9RJ/QFgHsMPh9Esb2qtPUetsb4fkpywHgd6
+# uOYmZ1rqThY=
 # SIG # End signature block

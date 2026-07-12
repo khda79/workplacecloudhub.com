@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.11
+1.12
 
 
 
@@ -131,7 +131,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module -Name $modulePath -MinimumVersion '1.0.22' -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.23' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -313,7 +313,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -750,8 +750,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1piikQn3GOvnZ
-# dNRN3wPsWv/MjVoi9eMB9gPL95vCraCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1G13PEZ0HU0UN
+# jqXx1hRcEaH9s22E9512WudBXdI5HaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -777,14 +777,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBvPp2b0FAS+qHbvZbiX06GPVhJShMs+KwiqTqvYShyZTANBgkqhkiG9w0B
-# AQEFAASCAYAwRf4iakhZGCN2aclkfENXP/3bzJv/DROGGxMUV4PwhLIL/69Y3FWC
-# y6cUAPo/umHNBdB6QMg509iypoOm2BvPBbGqW0YiUozV3rJG5oRQaqTfx/PYmuVB
-# TAc2R+AqKivbx7HGlEScfyPOCMNFf9zc1YKZWeTenBsyXOsSYaSolopZjtP/JJyV
-# mTsp6Ty584RrdoswAF+De/4gaWEjMaFjMR8EbejjdcVZmnkdnsyc3aFQ0SYuu9P8
-# kgsBKACs3V3r+qk0S4FEteoBHxZWiHcJka14gjbKrcVp106fVH3lkOn82+rmIL/k
-# MyCPTOMjneRLVAJBZ4Ce6Wji06qs11nFqcgzRXgRS5K96nN2xv/I8AV0m/iYSqyG
-# s9iT4TXhCf9VMNS2tBuqJMxKUv51B97v1qOZG8IDWjjZprrC4IVrjr6TFI7p/Hp1
-# 1DCczaRDbGELkEYoijXf+sEi7P8JzhMHMSK/GlwobnHRoe30S0fU67uGQ/tAQV+Y
-# iI+0RmdvwfQ=
+# BDEiBCCyBEpKcu4ewIaRjUCjHygjiRxB580tOAs5xGnlPUmmWzANBgkqhkiG9w0B
+# AQEFAASCAYBzRrt6C/x94SZuY/WWIo64ureil6tXYleza4wuJ4SOw/l5btA/s8Bj
+# WH1tBhVNkQHOjRE2ovh55xYceTCLHRyTdtHZsRfgjLFG0alFr4FGWUJ+oGBqphLP
+# acUgbK6Jdk56RQEJnTTGahksrdoFuDLFGHjC9xmeGNS/Kipj+52ub0q0czUB5V9f
+# a1JPkqNSJ8IlckoDC/n6jwPiHk76D1oTjJKS+acTIODve6anEMJaFs6yz2dWanZg
+# 5JaG+lO07zMo72FlczhxbKPs4KM6uEY8LuKEeio7NGObffn5/kSkoLnWbiOpu0fw
+# eYahKmQ9x3AE93GWYQspiLQNXflOud1QPvihrpUpjogkXrZ9++HyyvFDt4YipjOp
+# PYyvYPjn3T+DQnUZZW+fMblOtOEsVqQZwj1UhGKAyQtoRTHhyN70f3g073ahEHVL
+# vEeEgSgrhwXL0tpsWhoSwOVMaQeESxI39kF3wZPvaxwOONnWDrZaWCom4HLogkDD
+# SQSv64iGYCs=
 # SIG # End signature block

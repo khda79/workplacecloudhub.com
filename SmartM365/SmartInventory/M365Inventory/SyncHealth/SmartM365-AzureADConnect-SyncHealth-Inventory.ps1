@@ -24,7 +24,7 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .VERSION
-1.11
+1.12
 
 
 .REQUIREMENTS
@@ -83,7 +83,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 
@@ -101,7 +101,7 @@ function Import-SmartM365CoreModule {
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $candidate) {
-            Import-Module -Name $candidate -MinimumVersion '1.0.22' -Force -ErrorAction Stop
+            Import-Module -Name $candidate -MinimumVersion '1.0.23' -Force -ErrorAction Stop
             return
         }
         $parent = Split-Path -Path $searchRoot -Parent
@@ -615,8 +615,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQgDch74EiI8Yx
-# 5o98As9hUMwSJqZLerS8ZA27S1HGx6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1k//8nLL3qSme
+# VAmtwF8pE2hsW5h154UdbqqekWuHD6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -642,14 +642,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCFqWoCtP/i2cNMtCmRpcqnnRz+EbNtnMBPvHxMATMCBjANBgkqhkiG9w0B
-# AQEFAASCAYBbq68s5OQfvf3qqo8ShnVsUpVWf++cOt4xnW0Y6JRcjdz0BEFGvvsw
-# 2y8ZngAzEoWQi9Y93yt1Wdo0b0rFQFd8FtYMj3kGmPCRfjpaHLAfjk6E5nj9Fc6D
-# OL9bsgD3zDvO47Ksm123XZwlM4NdX05zJCauE5CS7DqJgahfhy8yKHw+A05YruHN
-# T4mJGSnGhElNidGWGGG+2v65wX3wHQnsuf3zGLM9IG9R7TFBrUt0cbhqmt+sy8SK
-# WEwvkk9T5RGI36c+zh80cOKJ2IHThRx7iCwmtH3tjt1EUNMjlSnN2f9MBRavDYSS
-# jjlXIu7lmO874QRb55OGpPB7i2kSaA1DeOXw56KBWrVrZNfBBWC6vUgHVAaMqcCJ
-# 69DJ6jghE+zu28L4++hLyZzMe0SKpp4uMNSyDDeOC+EmxBGwfOJ5ZcEaDYrtWNSH
-# gdihXu3ZcDj7uMHx6h03hGVfNQAui0M0C2C6ehhQ4pF5zHCqVn2c79KrhxvsA/Yw
-# OICohuUxMIY=
+# BDEiBCDT9O+qQLxE3f9yNVt1WK2g8OR/Qe6Io8hA7GxUB9g1UzANBgkqhkiG9w0B
+# AQEFAASCAYBMXYs+4TD9JWEaV7wICIXnzoieScxkhqxd+MLCXcFb4YSQGdQRPZeO
+# wPfFYGLdsBHdcboF0u6D7tUytQc1YPlppBemwF/7i7u9352D2+3gX6C6YJy+HgQi
+# Glc5H4kozuWhZvf2sUEAHiQznCCRxRReNhQd3RJohq0rtyc5aayc0N+ZdfKiszCQ
+# YIawQFmwRH4nvx/10HxjJ68gYreoq61RNZCko21PuSxc3qrwBK8LqE3cXPkgZch8
+# +YAqhjPBwN4Wv4IYp7W3MebN0qpZHriHHvX9mMCeVw02RCenIHvmH01LkPffm6DA
+# WhLP2h1G5ouUhhBMwOaah16s55sFknW6IiIRv1sFAG90LbrMlWTzQuOnmLolyzav
+# 1ENmUghZmKcZJOpntA5jdEe6blzMfzR2AQR4mpodCkO8KrGkDaRFXXoN8OKBl8OI
+# 8vAwgqrW/+RhtNOEhkSDY1pZfMFXXhyfF9MjeO8o7n5ugCpLDNzH2+vplEbfDtPg
+# ADNRDLFU7iA=
 # SIG # End signature block

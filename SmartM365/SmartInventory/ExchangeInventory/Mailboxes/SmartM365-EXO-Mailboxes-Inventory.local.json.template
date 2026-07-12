@@ -26,5 +26,7 @@
   "ExoMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\Mailboxes",
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\Mailboxes\\WeeklyHistory",
-  "WeeklyHistoryRetentionWeeks": 52
+  "WeeklyHistoryRetentionWeeks": 52,
+  "StatsCompletenessFailMinRows": 50,
+  "StatsCompletenessFailPercent": 0.5
 }

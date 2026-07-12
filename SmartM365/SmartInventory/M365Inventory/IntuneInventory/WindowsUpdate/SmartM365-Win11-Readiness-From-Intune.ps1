@@ -38,7 +38,7 @@ Logs (timestamped, keep 10):
 {{DataAllRootPath}}\Intune\WindowsUpdate\Win11Readiness\Logs\SmartM365-Win11-Readiness-From-Intune-yyyyMMdd_HHmmss.log
 
 .VERSION
-1.5
+1.6
 #>
 
 param(
@@ -65,7 +65,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 # ==========================================================
 # SmartM365 - Version
 # ==========================================================
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 
 # ==========================================================
 # SmartM365 - App-only authentication parameters
@@ -195,7 +195,7 @@ function Get-SmartM365ScriptConfigValue {
 $SmartM365Root = Find-SmartM365Root
 . (Join-Path -Path $SmartM365Root -ChildPath 'Config\SmartM365-TenantContext.ps1')
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-Import-Module -Name (Join-Path -Path $SmartM365Root -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.22' -Force -ErrorAction Stop
+Import-Module -Name (Join-Path -Path $SmartM365Root -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.23' -Force -ErrorAction Stop
 Initialize-SmartM365DefaultCsvValidationRules
 $ScriptLocalConfig = Get-SmartM365ScriptLocalConfig
 $AppId = Get-SmartM365ScriptConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue ''
@@ -983,8 +983,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+ZuixDJYy3I1K
-# j63/GzDyStMioXUW7X0WerB25/DWn6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgCY1dTI+y/gNL
+# xcJqIlSgE4BTPrWdWHyyk4TYOVmnUqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1010,14 +1010,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCA4HqUqDtlCD7Gkl6C/YEwFwztmL3W0/VY83g5ryWmXGTANBgkqhkiG9w0B
-# AQEFAASCAYBqYzvI8kN7sjMhuEEutQ1gRCZSisAs6+NhxG9W2AI1X3pZSF13Hcam
-# Q6ivUDV3SuI3dVqGxpx62jFV5SHcIVSVBHrkprm0xiVZ/v+OYlXXOQHGSwJ0x5XP
-# nd/o6FMX9KA06NDMmZRfoZaDLTQ0TI/U/LyB/1wY1MmvQh7m1NbbslGIK/fGbuP6
-# 1WcivFWrCjdVt3JPS9OiliZJy7UAnRU1dluJq1QzYRISse3jZyGDgVVfw13zMY1l
-# bkQkephJb/Il2Xpi2G8FCGCUvIkWg53tkHafz3XlbSo4/ZBjzFlngsHu4r0zz7Mj
-# yB6VnHXZKZg4cxlHniuS1aG6URq2dmXS5Cqp8FodPfDtr9PSqeUV6SzhTmv0xMST
-# 3NudG1cO7jwdCL86sfCYqOj3ctPq2msFL6d+4M5f+JcVuOUlqh6DwTfl36JSL1pd
-# AqdjtddwfyX7anwUOS+0BecKHNa5yFKnzoSLEnIn6h7qtk2OugXsUC3XR1H+M9Kz
-# gBS5OlpSpDY=
+# BDEiBCCBPHPgltnXqPyc3TFC40o7YYoqVF+5NleDy1l0WOk7hjANBgkqhkiG9w0B
+# AQEFAASCAYBLWascBzLnyGrDMtPBHViGbsFceJR0ygN2srCZgDJzlsZhKMc+JWRg
+# 9p1yQK9+rANgM7ojr/Y45JjQlFL+rdosMcr77PK9Y5r6eyvgJimMg92UxMRTN4E1
+# xdpXAkDCuggwIEkL9+AOw2eMI0vrhLk0782gVUyOBjGhgYC7RO4NuRaJQmKBRe59
+# /uO3tSZDF30ahtX/e7QeIaZBckccAXWgieCktK8MoMfEm7EFUwQxZI8blRA9F0FE
+# SDhmk9mBzXvMBOWYd+kfsNxRcfTudI3LF6B+GHcqMoCSqR05XpJu0p6SAiX85Mmn
+# 3SFA51cEorD0pc6m/TunI0395XajCNPrRcOlyWR0B0jkRXCa/F85p4Re6735c21D
+# j1zldIP2AVEDeSDFfT/OLkGdIqRVi9mBRh3mRmUDuYDb7GwkuLuF+0I/E2azSiow
+# ral4+fTw/e4xw3pWtrv1xqJp065pPsNxrz73aFTu8e1jODSvYPXA4h4173ECDwLI
+# f3+n4hXp7dk=
 # SIG # End signature block

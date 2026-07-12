@@ -1097,6 +1097,14 @@ function Assert-SmartM365CsvDataCompleteness {
     if ($rule.ContainsKey('ExpectedRowCount') -and $null -ne $rule.ExpectedRowCount -and [string]$rule.ExpectedRowCount -ne '') {
         $expectedRowCount = [int]$rule.ExpectedRowCount
     }
+    $criticalMissingFailMinRows = 50
+    if ($rule.ContainsKey('CriticalMissingFailMinRows') -and $null -ne $rule.CriticalMissingFailMinRows -and [string]$rule.CriticalMissingFailMinRows -ne '') {
+        $criticalMissingFailMinRows = [int]$rule.CriticalMissingFailMinRows
+    }
+    $criticalMissingFailPercent = 0.5
+    if ($rule.ContainsKey('CriticalMissingFailPercent') -and $null -ne $rule.CriticalMissingFailPercent -and [string]$rule.CriticalMissingFailPercent -ne '') {
+        $criticalMissingFailPercent = [double]$rule.CriticalMissingFailPercent
+    }
 
     if ($rows.Count -eq 0 -and -not $allowEmptyDataset) {
         throw ("CSV '{0}' has 0 rows while this dataset is not declared as empty-capable. DATA-LAST publication is blocked." -f $displayName)
@@ -1122,23 +1130,39 @@ function Assert-SmartM365CsvDataCompleteness {
         }
     }
 
-    $missingValues = New-Object System.Collections.Generic.List[string]
+    $missingExamples = New-Object System.Collections.Generic.List[string]
+    $missingCriticalRows = 0
     $rowNumber = 1
+    $thresholdReached = $false
     foreach ($row in $rows) {
+        $rowHasMissingCriticalField = $false
         foreach ($field in $criticalFields) {
             $property = $row.PSObject.Properties[$field]
             $value = if ($null -ne $property) { $property.Value } else { $null }
             if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
-                [void]$missingValues.Add(("row {0}, field {1}" -f $rowNumber, $field))
-                if ($missingValues.Count -ge 10) { break }
+                $rowHasMissingCriticalField = $true
+                if ($missingExamples.Count -lt 10) { [void]$missingExamples.Add(("row {0}, field {1}" -f $rowNumber, $field)) }
             }
         }
-        if ($missingValues.Count -ge 10) { break }
+        if ($rowHasMissingCriticalField) {
+            $missingCriticalRows++
+            $currentPercent = if ($rows.Count -gt 0) { [math]::Round((100.0 * $missingCriticalRows / $rows.Count), 4) } else { 0 }
+            $rowThresholdHit = ($criticalMissingFailMinRows -gt 0 -and $missingCriticalRows -ge $criticalMissingFailMinRows)
+            $percentThresholdHit = ($criticalMissingFailPercent -gt 0 -and $currentPercent -ge $criticalMissingFailPercent)
+            if ($rowThresholdHit -or $percentThresholdHit) { $thresholdReached = $true; break }
+        }
         $rowNumber++
     }
 
-    if ($missingValues.Count -gt 0) {
-        throw ("CSV '{0}' has empty critical business fields: {1}. DATA-LAST publication is blocked." -f $displayName, ($missingValues -join '; '))
+    if ($missingCriticalRows -gt 0) {
+        $missingPercent = if ($rows.Count -gt 0) { [math]::Round((100.0 * $missingCriticalRows / $rows.Count), 4) } else { 0 }
+        $exampleText = ($missingExamples -join '; ')
+        $thresholdText = ("fail thresholds: rows>={0}, percent>={1}%" -f $criticalMissingFailMinRows, $criticalMissingFailPercent)
+        if ($thresholdReached) {
+            throw ("CSV '{0}' has empty critical business fields in at least {1}/{2} row(s), {3}%. {4}. Examples: {5}. DATA-LAST publication is blocked." -f $displayName, $missingCriticalRows, $rows.Count, $missingPercent, $thresholdText, $exampleText)
+        }
+        WriteLog -Message ("CSV validation warning for '{0}': empty critical business fields in {1}/{2} row(s), {3}%. {4}. Examples: {5}. DATA-LAST publication continues." -f $displayName, $missingCriticalRows, $rows.Count, $missingPercent, $thresholdText, $exampleText) -Level 'WARNING'
+        return
     }
 
     WriteLog -Message ("CSV validation passed for '{0}'. Rows: {1}; CriticalFields: {2}" -f $displayName, $rows.Count, ($criticalFields -join ', '))
@@ -1151,18 +1175,21 @@ function Add-SmartM365CsvValidationRule {
         [Parameter(Mandatory)][string[]]$CriticalFields,
         [string[]]$RequiredColumns = @(),
         [switch]$AllowEmptyDataset,
-        [string]$Name = ''
+        [string]$Name = '',
+        [int]$CriticalMissingFailMinRows = 50,
+        [double]$CriticalMissingFailPercent = 0.5
     )
 
     $ruleName = if ([string]::IsNullOrWhiteSpace($Name)) { $BaseFileName } else { $Name }
     $Rules[$BaseFileName] = @{
-        Name              = $ruleName
-        CriticalFields    = @($CriticalFields)
-        RequiredColumns   = @($RequiredColumns)
-        AllowEmptyDataset = [bool]$AllowEmptyDataset
+        Name                       = $ruleName
+        CriticalFields             = @($CriticalFields)
+        RequiredColumns            = @($RequiredColumns)
+        AllowEmptyDataset          = [bool]$AllowEmptyDataset
+        CriticalMissingFailMinRows = [int]$CriticalMissingFailMinRows
+        CriticalMissingFailPercent = [double]$CriticalMissingFailPercent
     }
 }
-
 function Initialize-SmartM365DefaultCsvValidationRules {
     [CmdletBinding()]
     param()
@@ -4467,8 +4494,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfySsxBSL6GBH4
-# hqhtxcw1o7WnV+hxtFJRRBCgQLsS1aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyh0ih4sCB/TQg
+# SKGPOyvyBAUEF7bbEqYCMqbj+gyOYaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -4494,14 +4521,14 @@ Export-ModuleMember -Function `
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDefgKJXwaavECWINonB7xQ8bc19YTsrJ6tO6JyV5ncmjANBgkqhkiG9w0B
-# AQEFAASCAYCT1sK+R3uxfPfvEQ0AMkZtAZ0c9gPMDxO8h5VFbMXpgpGV1uL1sDmh
-# Xvso3DRr6Yjg7xvkZ6raINinLKLU76hX3JHx6rr2RuaO3mM7bv72FA2Tv3uw3jOw
-# ZBlSZFjuFrP9xWXQCQ7L8oJ3xMQ+0qbzy4psIvhc1bOw+nFuqOqb8YDDdczQWlrc
-# C+eVG6ZL6qOYq5G90R+dG+CUfVXgmnVsNy1uA8VXhbjkqpLo1EeFF7Qlfb/bIkFS
-# yyM8jv4+j5fR2TmoQ9CK8c2ye3Ko/x/zzAxQBFQRboRF72Y6unHKj9KB/FiafjVW
-# Gu3HA6yqIyPECTn+VizfXCT4bc5K7O8EVnI3LsGmlKZEhm5TM9QsIOD2EVCX6rPB
-# qZHmK4kcy8ME3HAu2qshRKfapmWVoQc7rBpdFwgCKeh5IOSRCmBCTYpVyCanUBe7
-# Wv6aKjPaDv5JJAmw7Q2m5N42Vv71oYXhAugxKn5GJNDDlVQ2yOS+jCM5GvLdmo+i
-# mlfB8UictDg=
+# BDEiBCAwbYgfRmB71mowccSkWT0gkuQIr2ntu5Poa0fXSaw06jANBgkqhkiG9w0B
+# AQEFAASCAYBP/o3YnWI7yGqpu7xsy7+rmmzWxCvvBdpDFnc5Vhu9bhJgZFaKphbJ
+# R2dz0pTVtOQ16T3N8fL4oLrpD9Jr9GT5W8vFAsEeuA5XkNiqqkua1TZU/3R1CRu3
+# TApbPvwD8HGfy4+fCdJwFIMBCoSoeIB3rlQNcgqO1C4Rt3TAjy26qX2JqA0UKqSD
+# lwQf2m0buCSVmoLkc9X0+5UR+bPDVcPho7Pro3xo8bO964KB9OqHjEa72O+1RE8O
+# BpTYcrcdeW6t52GPCmcN/lrHsNOvkw/3md/HhIypkIk86R/yAg75/nn34xI2wtKZ
+# j1Gs/NlOT6H+KKYJcJ7GKBPoLwV0C2RTS0InaxJisFvDND7ukGtZDjXm6ql/mQbN
+# VY8PTRWSNonFhjThlSA5yiFwFOdzisH0jJS76RPgp3j4ysFPJZZlgJ4jCqEI6LqR
+# AnMgNxrnO1fTTvdN6yHUvJ2re82lcAe4wg+PeML77KnHB+0ct0xA5SSj+p+BM0c7
+# pbRYhNkjWV4=
 # SIG # End signature block
