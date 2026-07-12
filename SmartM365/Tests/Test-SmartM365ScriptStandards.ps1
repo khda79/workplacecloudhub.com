@@ -4,10 +4,11 @@
 
 .DESCRIPTION
     By default, this guard checks only changed SmartM365 scripts so legacy issues do not hide new regressions.
-    Use -Scope All for a wider migration scan.
+    Use -Scope All to scan all SmartM365 scripts, including SmartInventory, Setup, Communications,
+    SharePointMigration, Devices, Intune Remediation, and future SmartM365 folders.
 
 .VERSION
-1.3
+1.4
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -283,8 +284,8 @@ if ($errorCount -gt 0 -or ($WarningsAsErrors -and $warningCount -gt 0)) {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIUkrj/II3kNpm
-# 9XgO+LaTfrjKm7Cr31nCyd4a8OQwm6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJ2lg/jazcOVqi
+# KhDmcitLrBh33QuNA1jUGVMFPUWS/aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -310,14 +311,14 @@ if ($errorCount -gt 0 -or ($WarningsAsErrors -and $warningCount -gt 0)) {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCfLMvmjq0JhdCE4FwUW3gIIWyGqZWHGG99DKfVPh7rhjANBgkqhkiG9w0B
-# AQEFAASCAYChqI+ZmX3M58VLqDv6pb5R/iQBnqJDjLmpASe0YO45tLUI4XHfCcqc
-# I/XiyvW4QdRu5TuqytTPraUEyaDRkv2/5ud+rL13hE9TvC0gAMUFF3TJV1Y8rhV4
-# PtIicT0nEUrTPb7LKUvZOMuyC2ia/yLfvkm6AIcM0vxMPp5JEgYIhRBOPfJee7WE
-# 1c5CKuOSmRVAl3PJFx0TemoVUWvwQhzHZumASN8dapJWrfHFyLmAFHi1IEbqKUrq
-# SJHPsHAvXfBXxr+A9QqOcY7RGtYQlUPRS4RCPT5sYn31Fyl05i0Z724FyXOKKf3G
-# smoZSm/mtkwb6dBjlZ+tkV8IXrEQ/dg5Y34+rq8h1fF4FyzYXiByKvcjizUHfbAc
-# epS36QiRvezD6pQi4y8t+SFQdrtqcN4rtkmw3+rRc8biNtnvEv9dBtLYZ3FKFo32
-# t7DGkiO0lx9TRtZgIoGPrVgE0XOfDtQOPnyGFJ1evre/WiF2p1t4gUHJHRs/mAxM
-# Y6FzF3nuY6Y=
+# BDEiBCBfNroUj4JTYPAOpP1fWqplDeEVa2+4PlFHFMKBalM+GTANBgkqhkiG9w0B
+# AQEFAASCAYAHayH/DNA0KYAQfytyJUw6EkRTBN9V2PBTUZT7Ujrz0JdD8F7doIfu
+# HzuHl4cfyZtZNl1eSfIffGTt6cnCgnqFTJpvlYKfZbF54yxi+nPZDGLj/Q3+ia4C
+# YBQhCLtvtKvxQ79MdGqw5tZysyReEQVGFtRURYyx/BIyLFl7Vq5RbAp/lQVgVFG+
+# XAWxzpld8nU0EovEYjmvEbqM2GiFtCRK/Oifx2OAIqweSAt2nY1++ucBvhL03/vV
+# Tx4SAM7EckMYqzx/qXZbl8Jh+S8JuYTbO19HC3slJerJNexDVq3r+jiC6P30FWM1
+# pcNAJoeKQS44hPO4bDvFkE8Rnl4rQeOAcLqrJtBf7dDKaUkz68rw8BSCAyH057Vw
+# 3o90wPY6phYdr/+rMCwDw1/GQkt9PXURlkQffEiEwkj6Wb4hwaz57GXSkXNyyft/
+# L8ojgB1e+dLupZ4+aP9i3VBksXC/AWNU4gli4p8smRpXHaXrrQAw4kGl7U40BqaJ
+# 9UMrMntLIxc=
 # SIG # End signature block
