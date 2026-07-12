@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.9) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.10) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -17,6 +17,8 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
 | `Start-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: `-Tenant prod -Connect`. |
 | `Start-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: `-Tenant test -Connect`. |
+| `Stop-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: requests a clean stop for the running prod orchestrator instance. |
+| `Stop-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: requests a clean stop for the running test orchestrator instance. |
 
 Runtime files are tenant-isolated, created automatically and Git-ignored. State, job-run CSVs and logs use a per-server suffix (for example `{{DataAllRootPath}}\Orchestrator\SRV01`) to prevent collisions. The lifecycle CSV stays one level above the server folders so it provides a single tenant-wide history across all orchestrator servers:
 
@@ -26,6 +28,7 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | `Orchestrator_Runs.lock` | `{{DataAllRootPath}}\Orchestrator` | Cross-process file lock serializing lifecycle CSV updates from all servers. |
 | `Orchestrator-State.json` | `{{DataAllRootPath}}\Orchestrator` | Per-job state (last occurrence, last run, running PID). Atomic writes. |
 | `Orchestrator-Heartbeat.json` | `{{DataAllRootPath}}\Orchestrator` | Rewritten at every tick: timestamp, PID, running jobs. |
+| `Orchestrator-StopRequested.json` | `{{DataAllRootPath}}\Orchestrator` | Temporary manual stop request written by `-Stop`; consumed and removed by the resident instance. |
 | `Orchestrator.lock` | `{{DataAllRootPath}}\Orchestrator` | Global lock; prevents two instances for the same tenant. Stale locks (dead PID) are recovered with a warning. |
 | `Orchestrator_JobRuns_<yyyyMMdd>.csv` | `{{DataAllRootPath}}\Orchestrator\JobRuns` | Daily job-run tracking CSV (atomic writes). |
 | `SmartM365-Inventory-Orchestrator_<Server>_<yyyyMMdd>.log` | `{{LogAllRootPath}}\SmartM365-Orchestrator\<Server>` | Orchestrator log, daily rotation. |
@@ -223,6 +226,8 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 | `-Only <names>` / `-Skip <names>` | Restrict/exclude jobs from launching. |
 | `-MaxConcurrency <int>` / `-MaxLifetimeHours <int>` | Override the configured values. |
 | `-JobsManifestPath <path>` / `-StatePath <path>` | Override default file locations. |
+| `-Stop` | Writes a manual stop request for the current tenant and waits for the live instance to exit cleanly. Does not kill detached running jobs. |
+| `-StopTimeoutSeconds <int>` | Maximum wait for `-Stop` before returning exit code 1. Default 180 seconds. |
 
 ## Exit codes
 
@@ -294,6 +299,17 @@ Create ONE task per tenant under the `\WCH\` Task Scheduler folder, running the 
   - "Do not start a new instance" (the internal lock file also enforces this).
   - Disable "Stop the task if it runs longer than": the orchestrator bounds its own lifetime with `MaxLifetimeHours`.
 
+## Clean stop and restart
+
+To make the scheduled task pick up a newly deployed orchestrator version, request a clean stop instead of killing `pwsh.exe` directly:
+
+```text
+.\SmartM365\SmartInventory\Orchestrator\Stop-SmartM365-Inventory-Orchestrator-Prod.cmd
+```
+
+The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -Stop`. The running instance consumes `Orchestrator-StopRequested.json` on its next tick, stops launching new jobs, saves state, releases the lock, finalizes lifecycle tracking and performs the final SharePoint upload. Detached inventory jobs are not killed; the next orchestrator instance re-adopts them from state.
+
+If no live orchestrator lock is found, the stop command removes any stale stop request and exits without leaving a pending stop file behind.
 ## Testing before scheduling
 
 One-line commands (run from the repository root; use `-Tenant prod` for production):
