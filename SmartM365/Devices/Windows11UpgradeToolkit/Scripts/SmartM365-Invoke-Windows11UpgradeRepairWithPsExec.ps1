@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.50
+    0.1.51
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -109,7 +109,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.50'
+$script:LauncherVersion = '0.1.51'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -2069,14 +2069,7 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add($logoHtml)
     [void]$html.Add("</div>")
     $optionRows = @($script:LauncherOptionRows | ForEach-Object { $_ })
-    [void]$html.Add("<div class='card'><h2>LOT/run options</h2>")
-    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $optionRows -Columns @("Category", "Option", "Value")))
-    [void]$html.Add("</div>")
     $securityRows = @($script:PsExecSecurityEvidenceRows | ForEach-Object { $_ })
-    [void]$html.Add("<div class='card'><h2>Security evidence</h2>")
-    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $securityRows -Columns @('Field', 'Value')))
-    [void]$html.Add("<div class='footer'>Non-dry-run PsExec execution is blocked unless the binary is Microsoft-signed and named PsExec.exe or PsExec64.exe.</div>")
-    [void]$html.Add("</div>")
     [void]$html.Add("<div class='card'><h2>Cycle progress</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows @($CycleProgress) -Columns @('Cycle','Started','ElapsedMinutes','ComputerListLines','TotalUnique','Queued','CompletedRows','Running','Remaining','DuplicateGroups','DuplicateLines','DuplicateSamples')))
     [void]$html.Add("</div>")
@@ -2120,6 +2113,13 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add("<div class='card'><h2>Run guard / admin share details</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $separatedDetailRows -Columns @($htmlReportColumns)))
     [void]$html.Add("<div class='footer'>Rows excluded from Computer details: ADMIN_SHARE_UNREACHABLE, RUN_GUARD_ACTIVE, and SKIPPED_BY_TECH_RUN_GUARD.</div>")
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>LOT/run options</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $optionRows -Columns @("Category", "Option", "Value")))
+    [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Security evidence</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $securityRows -Columns @('Field', 'Value')))
+    [void]$html.Add("<div class='footer'>Non-dry-run PsExec execution is blocked unless the binary is Microsoft-signed and named PsExec.exe or PsExec64.exe.</div>")
     [void]$html.Add("</div>")
     [void]$html.Add("</body></html>")
 
