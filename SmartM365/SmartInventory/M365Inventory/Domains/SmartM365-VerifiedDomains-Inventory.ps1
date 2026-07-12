@@ -19,7 +19,7 @@
 .PARAMETER OutputFileName
     Base CSV file name (default: M365_Entra_VerifiedDomains.csv)
 .VERSION
-1.6
+1.7
 
 
 .REQUIREMENTS
@@ -253,7 +253,7 @@ $MaximumFunctionCount = 32768
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -402,7 +402,7 @@ function Send-VerifiedDomainsTeamsAlert {
 }
 
 #region Init
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $TaskNameCore  = "Azure AD verified domains inventory"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $currentOperation = 'InitializeScriptEnvironment'
@@ -603,8 +603,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjxowtFwuPx0aX
-# o3Yt1AAFqvAs3k9WodWQmpxwH9Toa6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTfyyfbE9Ie9tG
+# 192KRSibZjgsiA+BHmKwKqFtEPk9R6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -630,14 +630,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCC3XdZJJ8fFmR1GLJZgg4r6yRc83PnzmLDlq/ve7deHFzANBgkqhkiG9w0B
-# AQEFAASCAYC1tAXEp/6D+qtlxnWHvQPDvMt4WGaV0ZN/0q9L0h/NQoWhBDxDiVrZ
-# M/oroKpQ0uvGn1SMS+TOtH/R7dw97hevEfjJxU+GlvC3carLMFNA+D+zWtW6swVy
-# ctTtV2u7sm8XQ9Oyv+iwvskyaCv2NkKVhWr8SPKodmSjhZ0elGrWuphkP0fAlSw/
-# HW0H7VWyHTTXg/718PbidbbqG6sed7ZKm7PLomTuLYQ2h3Cqek6ldI0gRPHs6i92
-# TECAn+mKV9kH87qu+rEJC/aHVjK8Z+t4QWZXVEL5uKdmo8EG6hoc1IHwazDYRqls
-# lMlYq9Cy4XYOrZMsPQnuCR+ggDh00Z6+Kkg0Iw2x1I2GgHQf8pbUO2ZPZ5GVpDiq
-# VfTm1LYsCR2vdpWCUP910OK1EoeS7qbfz1Kmy59m1/4DdZiG9aOAP7i05YCEi/nC
-# ykMwYAcktMg65ntlatEUoDqzpBRIqHAVng4rUh2Au3Zv0Tw1MEe+fjuENK0yzwSj
-# ZfkN+jDWCW4=
+# BDEiBCB8Sf1tRFT0HN7Iu3garyFxVX4CR5xwAQo9Y/qffVdYpjANBgkqhkiG9w0B
+# AQEFAASCAYAYVpVL1oYDG7QhjGkvsllRyLSuenLZ13+Nhnp9l4quZb8Lw51ghnDM
+# uxZGruzq7TyJq19CQiQbw0V/Kv+7k0op7daQMv+a6g+ZKnpSNA5inx6kE7TaUUPD
+# huayf3/F0qIIoNypH2vwm/Hsi8zI+GrCthngzpmCdaneulu9MgF6bOueolWlNkUm
+# AtY7X1yvAqudKqb2FrTUNYVlwvskqknT4wEYPkf8cIwXjTm/S88EyE7V5cgJb2HP
+# /7pB+WPh6lEqAFc3iZGkq0hoLZN4mggp7/XmBfsVjCVPKEvBfHknsJ1Bu8KAgZZU
+# P8HWuSciFWScvSpg6j7Mo1HIw67M7W2rYeck+ggFxPOJnJD0ltkVwINtR+rc9EEv
+# WalGIyg1Ko7l1zb4nWo5TTFW8dinlu45orytX+vwoJYIKZ3Ks/hZPXRnYH13pka9
+# MO7Zw1gwclPsB7UsKD1/WawG7iyY15K3praE7zQ9j1sMFv7mBvxDEU4hQ89QgpVk
+# lysSFkrT9zg=
 # SIG # End signature block

@@ -23,7 +23,7 @@
     Interactive delegated permission for Microsoft Graph PowerShell:
     - DeviceManagementScripts.Read.All
 .VERSION
-1.4
+1.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -70,7 +70,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
 
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -255,7 +255,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module -Name $modulePath -MinimumVersion '1.0.22' -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.23' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -726,8 +726,8 @@ if ($script:SmartM365TranscriptStarted) {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9LBFkbWwYddOW
-# AdNjOVnR3m0P+cQ+7aMkYAEzUi5SK6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDuIDzRrEKiuqfu
+# e3acNJwDD1o+2fNKs76qlR++G5pqHqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -753,14 +753,14 @@ if ($script:SmartM365TranscriptStarted) {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAzkBigE7kks6rNZZAKS44xQVBu88M5Wl+ctygnD5er8TANBgkqhkiG9w0B
-# AQEFAASCAYAUyS23JBwxK5Er9Mdr1UjS27DO0Vf2Wl5NerYMUjGlCTOaqP0VV+Xh
-# QqTpAq0hxsMWAF1X2FMmNTMDd3Jblf/Tvqky4K7ilzKuCcv0J4a2ZTM5RFDX6E2s
-# cTcqCNP1fJipVm4z6mvD7aLdEkKW/CpamLDURY0boArpQvqG/v5lgBmiqCeU4Dtv
-# rRJUF2TC+obX9++JhzjzijEQq9fevKLBL82/XuA2miLpqiayPuPjbzfo77kZX93C
-# F5kxPcjhlcH6ELX9cf7ScyItsN7qkbgMUC4nkRiVmiQdL+QvPd4cDG0xz9KxpN1n
-# YvBW6ki+HuHsaEDKXNpmKLkpIbIckmS94e939/NNSV2qElP4skzmSY4NhkhBzqP9
-# Sqco+G/I/Y9tEoSXT7SPHC1Uvf8JW4dDOemW7D0NiFgcFsoEy5QfuqvV11cNj8bF
-# qyGiCYJxUGbMVwJJU1TP7/olhZ+1U++SrWbVsPKNkWS1IGlDhcG+TfUqDiPphnEl
-# b2AyTQS0p4c=
+# BDEiBCDAG5STPDVdyfc+j32MXXACl3g7YmV7FPJcknnqgTfsODANBgkqhkiG9w0B
+# AQEFAASCAYAWwe/T8n6ZcEXm3MxkhvTXDeZwHTgiGGcAbYrT57hYBF5WoTRefHnL
+# 4yLEM2N7xO2XCdddsjwSFxEp7hU69iu15hUtx8NRMZFEdu+5OGRJN09jOJeZp1DR
+# ReS59T40jsoVhDF1nuhdmnRQxmNSegHnaKsRoeRSnRRQmY8ObsW+Gxt8fYARH5XG
+# kROHI2j0+yiRauvuCCqzGCt4D8QXJmoDmhpEwEuRWwmxRhm1uVAhQEJwWf4iP2Qm
+# eOjmyJImlp759wJ+KmjGhJg8b9J/JrlMhO8nkYZt4CFk8kqmuE4q1ELzkGE+NSet
+# Yo8k5N+JXt45XWq+xoNChE/KIjXDemJ5gVKhHcLqbruuQwwESzlYy0K25rSZ2Xgp
+# Zp09AMaMQNACAH0ceiFXG7zt2juzsyifxB8mwlO7mJC8+IkvMhN2OkBsl3Gz1SYV
+# b3v9uRA5pbJkJ6RPXvoq9QfYnq1pn7hYn1mtecFq9h6lvVSnJqYDc3yiLrliRnNd
+# VQOQv1oT7eU=
 # SIG # End signature block

@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.5
+1.6
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -387,7 +387,7 @@ $logFolder = Join-Path -Path $logAllRoot -ChildPath 'SmartM365-M365UserActivity-
 $logPath = Join-Path -Path $logFolder -ChildPath ("SmartM365-M365UserActivity-Inventory_{0}.log" -f $runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $modulePath -MinimumVersion '1.0.22' -Force -ErrorAction Stop
+Import-Module -Name $modulePath -MinimumVersion '1.0.23' -Force -ErrorAction Stop
 
 $global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -499,8 +499,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/s2fG9jJk+lSS
-# GlOGAZje8ylVxsz74My7qO1H1ZASO6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9NGRdeB0ehUqV
+# UXWnAKPUybvqCHM17YvpiaySNsrpuaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -526,14 +526,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBWeymH4Ie8udV/ZUAqZILLynyiAfOq+AH6SzyXGvGqFzANBgkqhkiG9w0B
-# AQEFAASCAYCQg8kPC7XdmLlBNeth/fRXc+gEfqQ/Q5w/9NdLxsI0j/gv2/lmCR0M
-# qY+BPSaC+3bFHyMsEyxIuNp9rAUa08RB98zMnpkdBZHfGAdIe5LHfLLPhYtatUvM
-# IINDbe2wm0IVlBJv8owW5DCelbHLIe/WZYs3DxZAYqiC7xyxWpCqz9d9JvriFMfr
-# 0gEWjzY2GJRiUaOPh2UxAlUOxbQbTLg5LRlGbP5/MmPwfi73s3mWLPjNKiuSB+Ka
-# ifUJNMZ314WRO0p0g2wWcFTnIP/EBBYtuITWKI2YOvKcZmkt8EBAjqIoyGWaSnTx
-# 6fPkI7Eu9SjSLv3gE71alnI4vY48ULre34yuj6AReTiytluOgONFulMmG2wLVOSH
-# Eorl3/AZjlKj/zAYAAIa/MBMzfeFZU1mQK6BZ8Tq+ui62shYLXWg90+Opa+MQXkM
-# wvMOJkxpjX7q1M6HRZAFWUL56+GMY+v3SEztqWS9BUlwkk9KOuRV72IPWqgF9CWp
-# Fs/QEitxbsY=
+# BDEiBCDr4VtIxNhfsiMyJTUL4Vn0W+IL2CvJdAprLQnSqYmLKjANBgkqhkiG9w0B
+# AQEFAASCAYA2XfRqhSQeAK7xnmqMoL+v5dtxfqZPpBCaLSJbriguxS7kRcXfuEOj
+# 0yOdbVBUlUcMVueNIk9onGeXaDWdRZNDOesJrMHxWn/xetlnkeYTFDHfUvnc5AjA
+# JIh0ZxxI7C6ep/sJC/ObFrXQV8kIYhXNHCcb6iHPh5cO5he5c9lRNmMyNHwJMsAO
+# RfViZHpYJyTOb8AKCmgJsNYADRw+XLyyhfYHw6XcCjbGvrk6G+KLm8C0rj3pS6P2
+# vj+dADELmEj9uYrdaiWoKkUz0U7qFTwOmbgrh3B3Urt/Csou2+1YaU1N+CCS5niC
+# mA2ffwy9Y00wCfI+pEp/ojJWVwSusXFLJZkb1xbFQUYh5U4ttbpZHBr/cTg64DXE
+# YcFpKec2pPDO1kPy+QhRftmjjBPWagliqXHzao+Qmemq1meYuu5dsn2pDQIzNKPX
+# +tK2cbilx7ga9vuzGB3iJq24AOehFtxiQoIBqdplta089cs51bHcNpZO1oJUVTbp
+# 1ZeJ6TsgtwM=
 # SIG # End signature block
