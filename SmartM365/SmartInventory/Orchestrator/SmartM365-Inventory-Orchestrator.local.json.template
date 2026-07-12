@@ -41,5 +41,7 @@
     "..\\..\\..\\Certificates\\workplacecloudhub.com-CodeSigning-F01F4A8871B7E349B40564D90F2B2E5BB563720B.cer"
   ],
   "AuthenticodeInstallTrustedRoot": true,
-  "AuthenticodeInstallTrustedPublisher": true
+  "AuthenticodeInstallTrustedPublisher": true,
+  "DependencyWaitTimeoutMinutes": 1440,
+  "OrchestratorRunsCsvLockTimeoutSeconds": 300
 }
