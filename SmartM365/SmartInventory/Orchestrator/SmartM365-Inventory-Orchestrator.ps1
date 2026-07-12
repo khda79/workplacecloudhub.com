@@ -91,7 +91,7 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .VERSION
-1.3.10
+1.3.11
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -101,7 +101,7 @@ Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds
     inside its own child process.
 
 .NOTES
-    Version : 1.3.10
+    Version : 1.3.11
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -125,7 +125,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.10'
+$ScriptVersion = '1.3.11'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1807,9 +1807,9 @@ function Start-InventoryJob {
     }
     $useLauncher = -not [string]::IsNullOrWhiteSpace($launcherFullPath)
     $startTime = Get-Date
-    $logFolder = Join-Path -Path $script:Settings.JobLogFolderPath -ChildPath $Job.Name
+    $logFolder = $script:Settings.JobLogFolderPath
     if (-not (Test-Path -LiteralPath $logFolder)) { New-Item -ItemType Directory -Path $logFolder -Force | Out-Null }
-    $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}_{2}.log" -f $Job.Name, $env:COMPUTERNAME, $startTime.ToString('yyyyMMdd_HHmmss'))
+    $logPath = Join-Path -Path $logFolder -ChildPath ("Job-{0}_{1}_{2}.log" -f $Job.Name, $env:COMPUTERNAME, $startTime.ToString('yyyyMMdd_HHmmss'))
 
     if (-not (Test-Path -LiteralPath $scriptFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: script not found: {1}" -f $Job.Name, $scriptFullPath) -Level ERROR
@@ -2868,8 +2868,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDPWUZHb0ID+2Jg
-# vITv/O2fLfFux9CGu1mRsIq8IZhg26CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAL0nNM2bGnWLhl
+# mMacZB+NiQNi+DHwMPZhPnl64qIltKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2895,14 +2895,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDTGY7mIS6yoAws2Pm9dK5VLLwNpEWBWDIaiiKzotd4OzANBgkqhkiG9w0B
-# AQEFAASCAYC7WIvn7AlXbK5zYi6VCjKtUDrr9McY0jhZAbp/MvCUVQs9MznmIKyn
-# 7QoC7wesKGxewO1cNHRa1T9HT4Xjf3JNRFces+l9wAo6aXoHuy4gQHLpSvX/2p4z
-# Hq/cf1hKwvq/5Ip6vzG/WUBUUPtwZeQrIi1d7VAp+GhKas1cbAVuA2VUrew64meC
-# DXLdEt87mNZamgM7Yule8ZqjG4+LI9cVLWLkr9G1pk1iGeG7fT57hreUBmVlNFUh
-# IkMgzM26fivbobPxf+Lzt4ZC36mznu7h7gqx5t88TKTeCtQDfXvaw7CqZSmMWrB3
-# wW0HpSssG983uMqK+IiwsIwcVnhXHhZh5bjbF/fV3fi+4dCjUeJLrzEMyqsnYTCc
-# s41knZdm/klG6AcHaKxaLA7lCV1KZ4jnMYaTD99svJa9EjbZgdB/uVQgToMeJ4o3
-# NrNSeW/mCAdHKRN5rUva1a8UJAbI3UkZdVKt79fPPE1ZE+2IYV5DWOZHz5VuKZv9
-# Sy6tFhv8yPA=
+# BDEiBCCpLkMrFTwIgeNqaxri27m8gsRiXxJHIffxoWY6nofNHDANBgkqhkiG9w0B
+# AQEFAASCAYBZTvoA+jHBob4OOI2crfUx4i3X6RX+o9/O376yRTOc+KscL2ZPO5zs
+# nQEf4vyDgVa3mGO06xpeTDQSvV9JeiLZXfTMGaLFRjopaguVioA/Xgwcbqz7wA/V
+# FNjYPBfe5AwD0SxNLoac0J/xVhsR2tY1uWmTQBJXcyq2LcC170Cj+lazyqZE1cxQ
+# p5Ufzg3zz3KbFryvFQMBqoYUfjcxowcK0TA4wRXmAEZc9F8xcM4AOq2N6bbhtLxB
+# h+0p3JkRjBRyyaAZTw/2aITIAMJ2cowz16yvTb2rVu801pifWtRaetml1OD9c53e
+# lrCW+WVnyNYalA/6jzhqNmLf1elIwXf/fE2PRMRIIpfTcsEpjnmEFrjQafaZWn8U
+# 1tYGefSnXrQ0632/ZqXy46FwQePfM5jvBhvxnvDTZNdZ53FVPxNDkcJTIYQdDLLE
+# ZShkUlKMM4qmxQzUl3hD7ZS0TNMuRO8hyhNutCYJPOKy5tKbBBxlJ2knfsCW8Cn+
+# Mlp2jtnNFTw=
 # SIG # End signature block
