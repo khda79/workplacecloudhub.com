@@ -2095,12 +2095,12 @@ function Add-SmartM365MailBranding {
         $logoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $branding.ClientLogoPath -MaxKB $branding.ClientLogoMaxKB
         if (-not [string]::IsNullOrWhiteSpace($logoDataUri)) {
             $safeLogoDataUri = ConvertTo-SmartM365EmailHtmlText $logoDataUri
-            $logoHtml = "<td width=`"112`" style=`"width:112px;padding-right:12px;vertical-align:middle;`"><img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"92`" style=`"display:block;width:92px;max-width:92px;height:auto;border:0;outline:none;text-decoration:none;`" /></td>"
+            $logoHtml = "<td align=`"center`" style=`"padding:0;vertical-align:middle;text-align:center;`"><img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"92`" style=`"display:block;margin:0 auto;width:92px;max-width:92px;height:auto;border:0;outline:none;text-decoration:none;`" /></td>"
         }
     }
 
     $clientLabelHtml = ''
-    if ($branding.Enabled -and -not [string]::IsNullOrWhiteSpace($clientName)) {
+    if ($branding.Enabled -and [string]::IsNullOrWhiteSpace($logoHtml) -and -not [string]::IsNullOrWhiteSpace($clientName)) {
         $clientLabelHtml = @"
 <td style="vertical-align:middle;">
   <div style="font-size:16px;line-height:22px;color:#0f172a;font-weight:700;">$clientName</div>
@@ -2116,8 +2116,8 @@ function Add-SmartM365MailBranding {
     <td align="center">
       <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;border-collapse:collapse;">
         <tr>
-          <td style="padding:0 24px 6px 24px;">
-            <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+          <td align="center" style="padding:0 24px 6px 24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
               <tr>$logoHtml$clientLabelHtml</tr>
             </table>
           </td>
