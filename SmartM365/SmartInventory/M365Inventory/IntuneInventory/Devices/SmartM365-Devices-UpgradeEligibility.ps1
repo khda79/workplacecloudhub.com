@@ -15,7 +15,7 @@
       - OSCheckFailed
 
     The script:
-      - Is aligned with the shared framework (SmartM365.Core.psm1)
+      - Is aligned with the shared framework (SmartM365.Core.psd1)
       - Uses centralized logging (console + log file)
       - Uses app-only certificate authentication by default
       - Supports interactive authentication with -InteractiveAuth (for troubleshooting)
@@ -44,7 +44,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.8
+1.9
 
 
 .REQUIREMENTS
@@ -54,11 +54,11 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.8
+    Version : 1.9
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
-      - SmartM365.Core.psm1 in the same folder or in a Modules subfolder
+      - SmartM365.Core.psd1 in the same folder or in a Modules subfolder
     Minimum application permissions: DeviceManagementManagedDevices.Read.All
 #>
 
@@ -118,7 +118,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -316,7 +316,7 @@ try {
     $coreModulePath = & {
         $d = $scriptDir
         while ($d) {
-            $candidate = Join-Path $d "Modules\SmartM365.Core\SmartM365.Core.psm1"
+            $candidate = Join-Path $d "Modules\SmartM365.Core\SmartM365.Core.psd1"
             if (Test-Path -LiteralPath $candidate) { return $candidate }
             $parent = Split-Path -Path $d -Parent
             if ($parent -eq $d) { break }
@@ -325,14 +325,14 @@ try {
     }
 
     if (-not $coreModulePath) {
-        Write-Host "SmartM365.Core.psm1 module not found in repository Modules\SmartM365.Core." -ForegroundColor Red
+        Write-Host "SmartM365.Core.psd1 module not found in repository Modules\SmartM365.Core." -ForegroundColor Red
         exit 1
     }
 
-    Import-Module -Name $coreModulePath -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.22' -Force -ErrorAction Stop
 
 } catch {
-    Write-Host "Failed to initialize paths or load SmartM365.Core.psm1. $_" -ForegroundColor Red
+    Write-Host "Failed to initialize paths or load SmartM365.Core.psd1. $_" -ForegroundColor Red
     exit 1
 }
 
@@ -795,8 +795,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDShoFE/ZOxAnhA
-# d6VggYM+HA9CrSRAeyTbiJ6qMQck1aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUeD+iUTcJgt47
+# hshocc7id3EOAYhR8TbALTX/AfIJqaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -822,14 +822,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCD6g3snvSMIPyJYqOdKpfyy6y/QEfYP2wi08I67UfISoTANBgkqhkiG9w0B
-# AQEFAASCAYCo7KtXb6r9VK5wqIgoQmadZ9XNMbVnK2XJ5K+G0slaqs9fdb9+Fkeh
-# B+0lwPOdqBOCrxD5DpVgS/4OQVsG69D8HNM9nbN2RCNLz0QV59tcuh6SjPjwg4gb
-# rdnw8x355yaOVkkOowbW/Brdt9+lMD715DWnq/3AJaw7HxxZunxRhEb8/w6vbMYt
-# ywNFWGWhsemLlz/BUZ/A31fNGkcn+gsx+9T1r2EVWpQNw3gdjNUplBwfkcMTqb4D
-# olHxQQmTAngUOCu1CtJrUVg7ZuDmSw7Logjn3e6arA9Vshr/cg6Zac9+NNWpBKVD
-# J0MpjGU9K2gFuRyAU0Uh9bsg2P7CbEI79MXTPUx1phLUSmpEcsVAUzvqvkj2lCvP
-# TA1qB0QiVQKm4BylcMvjvILr92zSpr4I9w1zEa1ESz/ZLp9VxGVec51K2lYdxLky
-# gZc070hBSG/SpzG+iHeBNoCPUjBiOzicknBKyjABPmAGHh1e47WGzveTD2jFDJjI
-# WXAaEXVI2yE=
+# BDEiBCBx1bK31d31fGoHAxXEPbOM2IPRnOQ2saPRWKC9J0UmyTANBgkqhkiG9w0B
+# AQEFAASCAYANSZDmHgRjT9+DDFHS1XMLyF47BMEUrZeiDBVHGMr/yzz+ATG86eku
+# LCNQ4YUlRd1arjcBRDAVtosQSNsyrOs3fCPJIUnO8DIurFjYSewmQvy/VyhYi2mt
+# phJzJP7WGLNlNlGFfndCPXx8OJhV0xwCoyT6mZKq5uvybRHu8K+Uj2lDO++wwWZk
+# IOmZ4XnewcTwc2rYDjkIQoYaVJNeV5jWgQAJsVjE5/AefHOu8F5znr2p2gonACmW
+# i4CFy55QVjfq8do+C3+S/9nENn4UefP4oR6/1X5f4IpaZ8jmSQO3J2+mTqErVpAl
+# zv8qUjUQglrYeHGnIbSkB6XTc9fxJbYxvPy9aNbmFeJYm6jrq+0ZlS35/Fy7cpqB
+# jG6rW8T3hs5V+SxrBmfg6w/E34nfy8c/2xYPyqtZiFQ2f5cxCQDGSUW4VdPXVR/Z
+# 2qBcJsui/9fVCcODsQ94EzSegKg6nFhASUEpehUGIk6Sqi3PxFfR77DVQqwnHQAt
+# jNovJmtwaQg=
 # SIG # End signature block

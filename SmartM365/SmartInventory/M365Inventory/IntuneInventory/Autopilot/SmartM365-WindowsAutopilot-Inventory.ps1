@@ -16,7 +16,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.6
+1.7
 
 
 
@@ -26,7 +26,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Minimum Graph application permissions: DeviceManagementServiceConfig.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.2
+    Version : 1.7
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementServiceConfig.Read.All
@@ -247,7 +247,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -381,7 +381,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AutopilotDevicesCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -662,8 +662,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3TA5VwVFmC3ZR
-# /tgD2YZgr5PLd2iwqkh86Zu4ulYhdKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBWLLfiEN5Fgnj
+# mEodF203J82yyqeeYZ1jv/nga2WkeKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -689,14 +689,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAc6fB3p/UMmEeotXMw6fucv+AbcfGVaRWZ5a+mBcgnjDANBgkqhkiG9w0B
-# AQEFAASCAYCnFmg5eZoB8U3Ivr5r8FPR5/M6oeC1ry7HFHdd3hHLpVt5IObnCo7J
-# IkGwhe9/92mR+9djogzmDxR1f8slTJfZLljN/N4Ccs3r+jte/+LITNMsUhiccnna
-# 1vGbWC/u6y5PZMmIPE38opEOv43SKwWYOMnWnqB0vxH8hRUT3YKs7mUfJM9yGpBf
-# i5lfR1fc47bwRmOyUCu7uCCR8LoUegvXFZ9vqy1JD3eE5z0j6CWHf2e+ZhEbgTRJ
-# ul1moBfVjt481KMg8VfBZgsObcXAwYwczmdf88yRV2YbdhYNZgdaHq8iYqNranQc
-# 3FjA1uYW690P1ZalAqhocGcfaPJWcI7r1Tfyt3BKvC8Z0pDx0UVVNlcoxeBl+Boi
-# 8b6I/fhTJt6hwwXUCS6/y0y3z/EzfjoNmElZ1LvX4KNEGw4L7c763w+6KBxfWDsi
-# UrpJj8higzYBPyKLIN71QWYmzdnN3yyVhihrgrDQbFWiCfe8V/ZtzF8z6MVZzx6n
-# BaZlsxu48TU=
+# BDEiBCBkiC97bpWYDAnhmfyJ5jdUxoufrHETXXM9KYSanKyd5TANBgkqhkiG9w0B
+# AQEFAASCAYBgMCebxUguEGwG9ZYGVeRjSTva2nQv6ZPUgUDkRnUIhMfinOZAcE9w
+# G12W3J//G65B2qiqy5GbJp/yY/W7ReKROj+wu/gImLuilzlYD37TepERxOWk+q65
+# FJ1V9sjv9shoSjHNMa26tP9ouZhkhekuKOu9uCs+awWBrKKgBN/vFF2zH/YpZ2Sl
+# WWsuyPpnyiuYKQsjhQaoqDYAKCtWTHBVeYbfClVRPhrHYl1EGxP/CNNYpeNuLu6s
+# KQu83GGWlsRNt9ta5WjsXmEtUCzo5IXlQzdu4G1yrUFrGfPiumFb75l3PG5po4O2
+# 7R9pQGCRnRiaFIesVp7AK3oPrnkqeaRPmPwWJzeALkxUFkXWde/oXSiOqpFH6DIp
+# 2Z93MY25Qfqi+619H0jlJ2kTdF8B9d6+5lZ7iyQtIs2LLHCIObWvv1YaQfu2xaoO
+# FnMzvLLkS5H1vpbMPed0wZ7Z58nX3FRSv8aJliIvNcLwfzGrsK3rsb7zv/tRSnbi
+# DeSLRrNBcRY=
 # SIG # End signature block

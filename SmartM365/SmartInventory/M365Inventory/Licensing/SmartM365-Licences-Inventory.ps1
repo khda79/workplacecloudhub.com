@@ -4,7 +4,7 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.6
+1.7
 
 
 .REQUIREMENTS
@@ -14,7 +14,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.2
+    Version : 1.7
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -247,7 +247,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -585,7 +585,7 @@ function Add-GroupAgg {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $connectedGraphInThisRun = $false
@@ -1070,8 +1070,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJbD0vEEtGEm+o
-# 7nW5BO9f1pNzMQUZPl//2KPRYHQGg6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZD0HNCxYQCxfN
+# CX0Distp3sEMYDY9YdKxDHYd6hpYVaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1097,14 +1097,14 @@ $($global:logTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCB30+p3cJ9da1CYJ47oiFM4G59BYeXEEmXdKIZfIxfjgjANBgkqhkiG9w0B
-# AQEFAASCAYCpsRfq8pWPny8T+6v+3DvQJBBwbFBo3beScIiRYomn8vK8j1urWsQ1
-# C20Bhm2RHZCDjdgo5g+LIb21zr9ZR3GzcNk1l2wePDM9bKJCosN+EiFmfmYK5+nv
-# XJ+IbG6Fk381EEbwLKveZ4CWUzZPsGjKeu6dtU03nSce29GXowLBBriJmvEDgNEQ
-# 5oNQ1SHjSDTIIIfV8y+gdc7+05Crc5rbBLfefvk0TTkYYX7yvHeQyBAgXdzbMJmp
-# nX/yVH1h0D03HBJnK5gt8mSvxkKbq2buAYjopQXWglkpt1xYTg+G3oO7SVGFsKX1
-# hfk8vWznfG6+W1y+v87cAbMRHvgYIBgU2trE17mTUzAqSszvn3SHKsO0CzGTtqDs
-# 8oyU4hqK3sIZRZEmfFGmJv+A24HL7JcaQCs307AO3Bybj74+wZExnCC4qI1+zz6P
-# 9n5Q4RE5wb/5IDHHJKDZrIqRAzsd3SfMRfP3INLMfWdgFi0s4MQhkGSS6IninNMr
-# ATqUDIg0QR0=
+# BDEiBCBhPtMdffdaYMtJ7qWd0qG2HThhuno+WJDk6ZMyMbhx3zANBgkqhkiG9w0B
+# AQEFAASCAYBDwW8caxsUzSNxSSspb8tyrtVnpn4Ncqi8yxo3vFQbAyB5VjZLVLC8
+# T4+5bFTHKwto/IVNk9t3uj6X6DBGKikBMAXtjN44oiNhJmw9G6WSwEwi7oN0UVfy
+# eF2dcFM8wMFCRKBLSgCaYMrzSQm/Ys99KiLOyv65pnY74edJspe2cpNPikmEnGQV
+# uPJgJeOPskavzJBwscjKOkDrsZVSQWEIHLFivwwTSX0kJAYjs9wOW5A9CYPJrg2t
+# b7Ga2IOMvr6s5GfY/1DWPX2TWe4fiJRVMzpXecpZq+W1amiS/oZUSJJClbS4vKXX
+# FuKXOdVS6PBSYkKdrGKAKGci+XZ3v/xw2K7yOlsIT7UCo0m/T+72oT0pCMEuShRy
+# VFVPwb3aP9OYmiNH2hxIgwfw3YC7sr5po1biYEsX+mpaQOrI/Py+UthofpgpnPuz
+# xPkmEQ8tO/E8CphQ9OxRPHB7Tjf9DtEFLVZzBbrpLfQ5cg0d3tG+v/wvMc/a6Kkm
+# lAPKE5a0Jvo=
 # SIG # End signature block

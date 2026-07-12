@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.10
+0.11
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion='0.10'; $ScriptBaseName=[IO.Path]::GetFileNameWithoutExtension($PSCommandPath); $TaskName="$ScriptBaseName v$ScriptVersion"
+$ScriptVersion="0.11"
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
 $TeamsRows=New-Object 'System.Collections.Generic.List[object]'; $MembersRows=New-Object 'System.Collections.Generic.List[object]'; $ChannelsRows=New-Object 'System.Collections.Generic.List[object]'; $GuestsRows=New-Object 'System.Collections.Generic.List[object]'; $Alerts=New-Object 'System.Collections.Generic.List[object]'; $GeneratedCsvPaths=New-Object 'System.Collections.Generic.List[string]'
 if($PSVersionTable.PSVersion.Major -lt 7){throw 'This script requires PowerShell 7 or later.'}
@@ -54,7 +54,7 @@ $tenantContextPath=&{ $d=$PSScriptRoot; while($d){ foreach($c in @((Join-Path $d
 . $tenantContextPath
 $TenantContext=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 $ctxDir=Split-Path $tenantContextPath -Parent; $SmartM365Root=if((Split-Path $ctxDir -Leaf)-ieq 'Config'){Split-Path $ctxDir -Parent}else{$ctxDir}
-Import-Module (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.22' -Force -ErrorAction Stop
 $LocalConfigPath=Join-Path $PSScriptRoot "$ScriptBaseName.local.json"; $LocalTemplatePath="$LocalConfigPath.template"
 if(-not(Test-Path -LiteralPath $LocalConfigPath)){Initialize-SmartM365LocalJsonFromTemplate -Path $LocalConfigPath -TemplatePath $LocalTemplatePath -ConfigDescription 'script local configuration'|Out-Null}
 $ScriptConfig=Get-Content -LiteralPath $LocalConfigPath -Raw|ConvertFrom-Json
@@ -142,8 +142,8 @@ try{
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAySAyqU7zvryFx
-# I9cnlAcGvfWRSriCoSlQ1qvbNNIfMKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPjV0MTCzZoOfO
+# Ew3WOYZXN0rOE1MNS1yzaYTRG2LFq6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -169,14 +169,14 @@ try{
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAl6eTtvacA91TOAv3ElMa5DlgcUet9mLT32fRi00eZSDANBgkqhkiG9w0B
-# AQEFAASCAYBvzkzw+ewXV0y+3bdqMCxhkY1EYBGgcbeQm8Zeu4EZ8EEJTPuexbcj
-# 51HkO44Co7AK50UBe0nP+IQ+rzDe+axR7TA+D4N0xIYXUUoGuaZSQiMNa4cxf6Uc
-# UBiYho0XGMndLWvq4DeFy2ima1g92rrQKviP8ZYuX/eJeCMoK2Ux26YB1Yc0sOch
-# ZnF23v2P7P8mnbL7aXczjb2Slo5365PDkYyYFDgt4DwM2nMZFQ5HfKCNhfTy2Uyp
-# lIt85EE5Ul7bf2bcup3VhkQSLQaRi19C0vFhOsfrzb7eRrqAzN4OSeyKMx1WLOuT
-# Mny2KnpiBq8fMhJ0Ir1DhS0DM4R5IGuy4tnRV/pkAG6Kmr5DKtFUv+/08DOgr3Mc
-# Dn+B25hzZQVn+dkS7QXi9zzKe+Nj7QOImvDzzMRn5r2XgA58Ys5YtSemAzBZ51ap
-# wkzgGiSpkdlaDp4JkGTt4ynnSswp3/Jlus/ZhrMFs769ugEiug8+9TFqDTJREP/T
-# CvhLWcis52w=
+# BDEiBCCaQTeYiYKkZWeN59RNyrSYIsHX59ixKXCkInrAGp1S9zANBgkqhkiG9w0B
+# AQEFAASCAYAD99JHf3FwaZkKAgI9lXGEKHCzR3y8BYmIi7IncgNYlZqE2GL1RtG5
+# 7c2TvA6JJfBsGh3g+aiSk5U4jOnbkP+pjket7suMqc3EB4CW5f2iSezZXKkltKKD
+# r2NUSbeMfPxlsTCVUqCf6PlkHxXFYa4qeACD4zTRs9v5mVgCcLzXJOvhqPDXQ+uI
+# kMt0z1jE8Ym/gs84pjSNBwPXfqP/ucX985rRK1N8dsNkaHVOpwsqN9PbX9Y4iqSs
+# FNL4ANuvdGhi+ftcLt+qewYkED+p//GZJcaBx+LUzZD+iNBXTtkjWQBFGTekGC0O
+# QRaSINsoTJSaGQe7HzaN2wuuStCn5+cPZAXlNsArwnPZ+XSsvfNpoYOjuXi0Da5T
+# Plescv0dPfXhzA/K+IVln1CyoY/ta9kgAHPad5tikeItWq9CqIWousA5UW/5Hy0N
+# FETIlwaci0dDSv97RLAMN1jbVwCU85vyhx0gf1DivUzsYpf24mEAL+6MCI4CU85B
+# 7OKMXQRPNLI=
 # SIG # End signature block

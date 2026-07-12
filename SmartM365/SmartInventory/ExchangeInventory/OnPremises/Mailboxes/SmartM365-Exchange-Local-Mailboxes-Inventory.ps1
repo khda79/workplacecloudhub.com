@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.35
+1.36
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version: 1.34
+    Version: 1.36
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -251,7 +251,7 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 #region Module Import and Initialization
-$ScriptVersion = "1.35"
+$ScriptVersion = "1.36"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -1156,7 +1156,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
 }
 try {
     Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-    Import-Module (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.18' -ErrorAction Stop
 	$InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
 	Start-Transcript -Path $global:logTranscriptFile -Append
 	WriteLog -Message $MyInvocation.MyCommand.Name
@@ -3042,8 +3042,8 @@ Else
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfgxy2SM4/Qj2q
-# M8w9FO0nCqgaF0HbNNblUTRay8eftqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDPLIpLKW2vkBVk
+# VfXYVS8qLWnc6O5i4eeQ49sW69iobqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3069,14 +3069,14 @@ Else
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAn/P2nymQpdUEHCzMftfZsJZr4nKTzly1TkCUlQyRIBDANBgkqhkiG9w0B
-# AQEFAASCAYAQAX5fEWH0CVFZA5qv4ln4wyaJFzK2xLFAiuGFybdrLA5rZfP1I1Hs
-# AEkmQtuw2mJL2Yu5U+WAZ7iAt7WSZHJJ7ORI8TtZ8vAK51ZhrMShCLT0uujhhmZa
-# R7lSDJmCiuNNwaOZAivWBQfhd977NFIssgm53LSqpT3VLaev8h1uO3p8TQ6m/lPW
-# ysB79REp/SjQWxaNwaq2tD/f69Ahx2FV72BAG44fumD+Oh8mb4yxTeRSYOCQrgBj
-# Z7unh8UfW7Uyf8qKSIvl5Y8vHf6o85LEcFIb0jZv5gluUsBmI72Rhharn363ZIMN
-# /w7DsZHht8fIb3kuGAdFGZ7GobkeC33Z4nnZ34tWtDIA3tv9yjA+caQ90s3frG1e
-# iGEEe1mxWFTVIwvCOy5DV8i24pkfr8Acbz+3tPT8hgOU5lKQXz4aDiiDejVHNXtS
-# zkHBSeL4K/92nR5/7UAYeMuPDcPX+FpYPC9FMnBETU4BcJmHcV1pHS3fIJet6vi3
-# VLCj/y8a+Cg=
+# BDEiBCC/JTWEsAEGVQJlhK5jwnPsTtA1V+GKGbuFsaSDrUtuwjANBgkqhkiG9w0B
+# AQEFAASCAYBHcMd40CUxgJ+WuaudrIMxMP9mL0uQZkwyBrbvaGRjYRgBnYGmV9Gm
+# lM/BJwBJR0erEghp6gsxBHiPocYWA9RvLZC13IyKSjJ5Lj1w7gfMr5IHMIyT6/5y
+# yvJDxVp8pcgyrkgKA4unnPlUGgDb2rTadpPbLZKFXIJpa24YAgPzh+z5LwJlIH5q
+# UxVveu0EYZqYZVKPzl/8QjTlHffZxpDdybRS8eOu89STO3RstILCEgWldXAD6sMp
+# Vguppb9Vfm5th6Syw1t1neYJkuOw73MFBBOOZi5wcCTdO/h++Ox6z1i2IeIYI75l
+# EvppYbvOu9NE7Eu6x6nmUJqzB+K8IU+zMw4X1ZmtCo/7LoFGtvnTTKDJ157Sbapb
+# c9/V0Jpf0dRijxUM2cXwfEw+9QpZ9e1BxMRSxS5IjEcF1i6H21Uw38vqET0i0l5g
+# lz6whpwKqUHTAi93dVAn01qw2pZfU0d3WU8fyB/B4bRgvRPFl8Nsx3zWlR30mDSn
+# LN7+lQpoJrg=
 # SIG # End signature block

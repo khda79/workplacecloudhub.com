@@ -29,7 +29,7 @@
     warning and exports the partial result set. Defaults to 2000.
 
 .VERSION
-1.8
+1.9
 
 
 .REQUIREMENTS
@@ -97,7 +97,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.8'
+$ScriptVersion = "1.9"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -116,7 +116,7 @@ function Import-SmartM365CoreModule {
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $candidate) {
-            Import-Module $candidate -Force -ErrorAction Stop
+            Import-Module -Name $candidate -MinimumVersion '1.0.22' -Force -ErrorAction Stop
             return
         }
         $parent = Split-Path -Path $searchRoot -Parent
@@ -523,8 +523,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQnS4bmTMXdZbN
-# sENJYc+U7dON/KtPlonviOH+2iTOiqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZxuZ30w+cEe61
+# wCQHBnTdXiOYS5s47zW5FJngSo3tpKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -550,14 +550,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAunF2Xuv4o9A37NzMb2loCmD8msPEAhASV3HE1pM+IjTANBgkqhkiG9w0B
-# AQEFAASCAYBzuG3aQUtA7aWrNOCArFYIkhvItLHu01yS+F2bJwgckcdbN/oxuYb3
-# dQHx3P0JmowkAMxt+9zVOR+qXD62NeXjuurovmphS6W7AbweoWecGTp7WNfH9ldp
-# cVqN/Q6z6wbjQjnXPL/Mv1b2CqmwVJnClsC+3UYClTjmu55BqCNY/uaLk/DUTthM
-# KoW9WaGB/bxWMy3hPb/LImNCCB06FN1Iir11qzline6FR63zkEpaleFYs5yo2yiO
-# JGMl+028/67p2zvxgawWXaiYIGWu9y8QcD1btHjXOLLTWC+AtX2S92gQ+luvYHue
-# 7/YTUgvkDHl10osMNNgrwNzj8nTepBE119EAbSNg91oOP9c6LPRtDUuj6/eCFGtT
-# wL/gyu4Tu7NFbAYIcByy/S8hyQE8AhrVTVvltCXJzrjm8A4DQVfjEIkt1HBYIt8b
-# EYAWm47ZN/X4Dyf8pj7U/SE7mLPA0LhWsPNsfaHDHFdlHnqnM+fGtc1Xya0ChS3u
-# bPXTPY703pI=
+# BDEiBCDL/C7jJHeS6V+lOgmiLCBTrN3xVnfLdeG4SGofJrEBFjANBgkqhkiG9w0B
+# AQEFAASCAYCIaiapbho06nqsThaXoaEYXQCn1EVMVwUHG5HmmrWgl3vpbPkS7+DB
+# ZkBE7dOfL8VJoPtHXGjppSOvb4B6PKDRu8CdsH2NkhXVR6m+2Y4D6kP1Py70tprG
+# T34CNtTGg+eLZfGU/ytoakYcwfyIC+xF/Kr1hpbm8MpQghgONenKzKw9b5B5DVbd
+# Z1ifBEUGV3wE4W6l575Zx49CcAz4v8tECWuNfjcYjgx0QnIMgYxu6zde67PlqE10
+# +2crg34rQlLfaulMA3c0Ga9cTFnTxpbCw2mQdJxwFHz7TrO+GiEoo8ak3LCcnWZv
+# p0/aO8pfY8vC8GTfIoRGYOlm0R2GD7WycKZ54IqaArVuxTk4b3GE1ab2uBROble0
+# NQ+jkeN2HilinVITTT7KFjVfcggf4X7UlT+aMx1D8zx4sEYk2eDuVXcz1cHPYRj0
+# qLNE9qg/qJo89Q9qEoP8konv18pXlxXM7V6ShG6r4M8epr9BIgHwTm3UZdR+WXvL
+# Vwyy0NldPYE=
 # SIG # End signature block

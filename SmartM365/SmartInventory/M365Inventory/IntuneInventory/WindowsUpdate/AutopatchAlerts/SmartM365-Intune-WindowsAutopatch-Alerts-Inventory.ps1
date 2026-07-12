@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.10
+1.11
 
 
 
@@ -131,7 +131,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module $modulePath -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.22' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -750,8 +750,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvve9D7n6FLRjy
-# 0VfupiQnq2ZISAzEurZDusxSjFm74KCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1piikQn3GOvnZ
+# dNRN3wPsWv/MjVoi9eMB9gPL95vCraCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -777,14 +777,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDzn1a3QEnBSoVs/lyfUlNf4rzLRz4ItWMIsiM/cXsbeTANBgkqhkiG9w0B
-# AQEFAASCAYCZLqeMYmMpadDGu5QRULC2Cm3Tttt85y39Cvcs7bMVPC2ndsyiYWbW
-# h3FdkizrznNjCQ6V27ifJnYNrbgarP7kCklWoHZYq3Mi3DF6OtdWlUoi01qq5BBQ
-# IgoAQgiNojjdM2wz4XGAoiurH65Ng21C61pNrvgL0/A+CcbSPkini7t4bsigydQt
-# c1fDwGWHBBCHrvu5/AHPF7c512S/USp56jRQwWTPoiFrTN4a68NdglYFVc1RuVsB
-# 4P6Vh2tHRaA4ilyKqsyEYovMMjFXzSf9j6exY5ueIAEsW0bpe4N18lwH7NGp1IaB
-# 9bO58Ts7UL29gUOPU/suyhOGe1jl93LGJljbw3v1Wkd0qtZC9tVmiWUAbItjUCRp
-# 9k7jJFfQC5CSNx30G56egTAaQkPtHYiFvBt6YINkN+yNe9KDs1H16L37DMXA2Enr
-# oQsvUu3/WvtVRzS8TqyJdzZ42+rCWI/RCzjOnqN8ISyB9VVecdpJGIaSXBsypP5J
-# Po0mxf949Ss=
+# BDEiBCBvPp2b0FAS+qHbvZbiX06GPVhJShMs+KwiqTqvYShyZTANBgkqhkiG9w0B
+# AQEFAASCAYAwRf4iakhZGCN2aclkfENXP/3bzJv/DROGGxMUV4PwhLIL/69Y3FWC
+# y6cUAPo/umHNBdB6QMg509iypoOm2BvPBbGqW0YiUozV3rJG5oRQaqTfx/PYmuVB
+# TAc2R+AqKivbx7HGlEScfyPOCMNFf9zc1YKZWeTenBsyXOsSYaSolopZjtP/JJyV
+# mTsp6Ty584RrdoswAF+De/4gaWEjMaFjMR8EbejjdcVZmnkdnsyc3aFQ0SYuu9P8
+# kgsBKACs3V3r+qk0S4FEteoBHxZWiHcJka14gjbKrcVp106fVH3lkOn82+rmIL/k
+# MyCPTOMjneRLVAJBZ4Ce6Wji06qs11nFqcgzRXgRS5K96nN2xv/I8AV0m/iYSqyG
+# s9iT4TXhCf9VMNS2tBuqJMxKUv51B97v1qOZG8IDWjjZprrC4IVrjr6TFI7p/Hp1
+# 1DCczaRDbGELkEYoijXf+sEi7P8JzhMHMSK/GlwobnHRoe30S0fU67uGQ/tAQV+Y
+# iI+0RmdvwfQ=
 # SIG # End signature block

@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.7
+    Version : 1.8
 
 .VERSION
-1.7
+1.8
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.7
+    Version : 1.8
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -292,7 +292,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     exit 1
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.8"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -1164,8 +1164,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSI/ZwF9WBjM7j
-# cV2gdQLHAT3fJsgV4AQE9ar7TSZVn6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5VizqAuisioeL
+# TcqMyowD+CHn5MbmUKmps6hrqz6WQKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1191,14 +1191,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCXylYmIj9cJ/14gP4LbHxt9Ab0631J76YHQphOnlvdbzANBgkqhkiG9w0B
-# AQEFAASCAYCUxDVeIK6xuVk6BY1jhoOxEdVLRVxaff7V/pssSx10A8xeGROUU2XR
-# XX9XfFijNLrsPTYqnQbJOG8zm9hnzkkXG3+mCHr5InZPpMWivqdNLNEEjzyQaT8P
-# wOtQ0Ogh+RLVcaWWjGpp5S7FHqqiGAl0LkbrLJ/JUMzrPBiYiIgHKGY4aklHO6Jd
-# NB4YPxmeddvCuOZPd94bylbha40Ezr3gtaNsnbAFsHfUCfgPZumTb30V6/UddIjV
-# AtNpPSvIYFPIN9G42BAdNGPHhfhFTeiR6JaGm3wB7JKZsvnjLL/g6T4VDgef2XjS
-# /EzH2J3Au2MVHt9Xne0/d0PCjYRlR2e95btoj7XAbzFhVMFiyIINVBezMXHZl1aE
-# p83WKN7BDEbdTyKveQ0ag6jvm6EvvbQNoM413eAWMPbBnT1O2LgGwDYigEKk6zOp
-# OBOgYhQYemSaayT3aX+b628bACrhubCptrSGe/KkxEe3eUAFR3/gx35Vp++952SH
-# uWsGEEGp1Sg=
+# BDEiBCD+fkCGa3dEhO62o0qVjiI0VPfU5Nl3dJ7d8HKh4gsZxDANBgkqhkiG9w0B
+# AQEFAASCAYBYERr1easvYY2sWLVPUTOD8aF2w1DyE13uXCXKNNxtbacEp9pmjzd5
+# UOkEXCY+A6cktAdgxtHANfXE1a8N8XyF/sIv/vDCwfXw0op3AYQ3DOU09GBvskRY
+# Ti+H3DcNNln6ojKsQCwU4iK2GizArfKP7As5XbuuLPmOOozx6C1Ejl7wS4Ac9r+M
+# DVocYBu175U+SAFFhTdO/NeZpDjl5w2uoqPrGwaDHoWCSUP43GQyl6d4d5QmdFIQ
+# J2Qt2myJMARkOdMtPZCbfU/eGrd4zXlEslSaLMIM1MDG864mtYXNFQhUD3p+7MdE
+# VHs/iqc6YFouC8LolZmrtdh90WbibzY7fvELcqcBzWUEEUCWdSVJrYJzFbaB/Q4M
+# ot+IrlVDNqjnXyoOuauxPMPL0sCP4lzWeuoFwW60nRohr8XoRynK4CqSEqUQEzvA
+# /YmyGpF903CTLhoXLb+Tj2geHtQ9/qSMk9eTwjuDSt3igN7lfshjveka6Y4Y59Qj
+# wc/wrgmWe1A=
 # SIG # End signature block
