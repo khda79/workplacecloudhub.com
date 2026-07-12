@@ -12,7 +12,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.2
+1.3
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -42,7 +42,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion='1.2'
+$ScriptVersion="1.3"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){ Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m) }
 function Warn([string]$m){ Write-Warning $m }
@@ -108,7 +108,7 @@ function PublishWeeklyHistory($files){
 }
 try{
   Log "Starting $ScriptName v$ScriptVersion"
-  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -Force; Initialize-SmartM365DefaultCsvValidationRules
+  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.22' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
   if(!$OutputFolder){$OutputFolder=Cfg $lc 'ScriptCsvLogFolderPath' (Join-Path (Cfg $lc 'DataAllRootPath' $PSScriptRoot) 'Exchange\Issues\HybridIdentity')}
@@ -156,8 +156,8 @@ try{
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD03GbGwtuyTXBh
-# PQMPiDii1Yea2ZpiCGa37P1qXrt0jaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCADApuDW1gRVN6Y
+# qVZwB8/5XzUDtYtOSUIZtiJGJo/Cq6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -183,14 +183,14 @@ try{
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAOD3ZS5IcrvTvd7c448eMfbwj35HtMZ58THlz91pbGdjANBgkqhkiG9w0B
-# AQEFAASCAYA532ImuwQ98wzGTIKhi/rVoSDZ4Vg1Ynh8qVB6vBIdxf5mx37h+juv
-# QktZWv8bqNDtIMkKJK7eR8O+BKY8si43LwOmfDwiYL0x83olydAA5ZsoLn2QyDZV
-# uuBqWspRvWC403DOV+o520u7YU3vuAqkGzt6U8WbwndziQv0UsC+3/xCKcVQwbyq
-# Y/HGN+0ae0nRRdLs7oPQrkafuzKy/vmqdTemcrkwcXxlLZECMTSRlA7+P0RkMkSd
-# vnxRcLK/VuqHpIqKYkKRA0RP2faMi5vIdX3EW+zhIwoR+PQUl2aF9IkfSKLCVK2X
-# Ouq9XrxbIws7w86rzUFaM6AMNAF8GAI7f8s/5zXWwd9s7x8EG4J6spThoVEtH/Jm
-# gkk4TaLr71KIJW4ZFj2Baxh65A8TDmT9CCA6kmIQuKWiPX+tJoz2oygp+Q9nLnLx
-# ucIJDQpwzCecgEckQ1NOqnewenJD1CkCi3DK85ZgfWCUjX1RPYMCYKgzXihEm8s0
-# vkgHxOtLqUk=
+# BDEiBCBAS0ciprxpMs5k3pgFkTmWvsV6ZmkTzVIu5dbAVYXAwjANBgkqhkiG9w0B
+# AQEFAASCAYCnE92jS7IT/ULob17fYzK2XzjDHD3acyK2fpdlMxT9Z6+Wg2G8tnmB
+# edOXFLfTAGJRiPyrWJWThYJYhJeMmjNkpctvZp7dTLas2Ko6TwwFmztu6iSpOeSe
+# cTgj6nJVBvi5cWs1riaIxqTVa5/R8SB51JeOuFzC4FP4Ha/tR5g8A2OW81ubjNJ9
+# 6FzSqWdjtvrokCRtaWmzD1VcgMFBhOTMUdsGhx4cxro/VJUq+pT5CwZNjgl7NAvG
+# I3jrXmkKVdypdcdqGkXZPzjKpQss9NKkflERZ4tjvI4KBqPcOVMTnwU6/wAefJAG
+# eQqpEyEhMjhnmOU9RTm5RURm7Ec+19+5tJtMI8ECj63jAUBq2SRY5BSjEK3ZRgvk
+# ZDdb0mQcQWYVrIvd29c2ldf9PmhRfCCGnof0+g5EPkk2fIFIfTojXQSapkIQWcyw
+# 0kQFUQTbekNNCqe7CAIetWvYkpultE3+jTAF+SzxywNDHCGQoe7C7XhAGjuxD950
+# Sd9uNgVF9zM=
 # SIG # End signature block

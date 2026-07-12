@@ -22,7 +22,7 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.5.5
+    1.5.6
 
 
 .REQUIREMENTS
@@ -32,7 +32,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.5.5
+    Version     : 1.5.6
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -169,7 +169,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.5.5"
+$ScriptVersion = "1.5.6"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -363,7 +363,8 @@ function Import-SmartM365CoreModule {
 
         foreach ($modulePath in $moduleCandidates) {
             if (Test-Path -LiteralPath $modulePath) {
-                Import-Module $modulePath -Prefix Core -ErrorAction Stop
+                $minimumVersion = if ($modulePath -like '*WindowsPowerShell5*') { '1.0.18' } else { '1.0.22' }
+                Import-Module -Name $modulePath -MinimumVersion $minimumVersion -Prefix Core -ErrorAction Stop
                 return
             }
         }
@@ -1890,8 +1891,8 @@ catch {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFif/hMZtEiCh6
-# YHX9Y+vOU8R/BFz6plQRa0DiAtifIKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDEH5alcTlQvRLx
+# qrwAFTIq6cbQtcxOU267wYxHKlL9cKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1917,14 +1918,14 @@ catch {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAPMmVHDXjba83XXfSp84L/2siazKg7xcotpIzVzscIajANBgkqhkiG9w0B
-# AQEFAASCAYBcviF7J831G2o7/CMNWwapgyWq0enihxbgjlDhC6YvCgajZL9w6UvH
-# sW4sAf16ogBVpZp8l2tTZvyM4me3zW+DcZ3Z2nfGWjEHyk0nhSlLgKMD+ECDiKBs
-# bMGwme7BNxQlTbJr0+hDltDZbxjdKabMU0sGF05HjIDejW/n07hee7JN3556fAMK
-# 7MjlM89cjFCUgVYdLuNwt5e3Q3NfTJA0lKDlfsrE7hYXVN8UA3+VAaaPF5FqwFfH
-# NDpia/UP/SDatfLkezZSBx8uy+Ar0Qct/Kb2jGfQU9NmYtJhohLMnKL/FX0hrWUb
-# W3EdNk1OlRsoV62uf0jJHjUTA4Jg8Kd1gWX1zKeByITGjbM1zxS69rZnTJkqamea
-# YH2NqO3Eh4ZNgS2e3PfqXQknN4yNZBJI7Dj7RSGHrtCm7krIUMnba3lkOiqjmkyy
-# PdKphwgOwPILG1hCjdxZtowvJtOMe0Gp+fIOSsrbFXoH03N8aCd3KhiK40O9tUiX
-# doDoS6ZvHjM=
+# BDEiBCA5v7wgSYnklh2flY99dN654W4FPSBZk0Wf0dKC6kWOBzANBgkqhkiG9w0B
+# AQEFAASCAYAzlfY6PWTSY0UI5BJ0bMILaNa5IRWKdZnGVpF6O1QEYoPpJg2mup1Y
+# dmjrGMshmMEz4OlWXvz0uMtFHMd/O45Jmfx1dtjQrBfVZ4XLdYW9B7Cgb5ixKxp4
+# kmkddKu15cfzd8m8wuWFeJ5MHjpEvU7k9EoKs7OqGaKIHKGldxS1Z6zJJFtogAFO
+# nvcXR/PTnioagNJXjWuiezt30rfw2aYDvDBwQCi25n60t+t2OplNes03hkFL9whG
+# kOtU+UyYvEL7yTgkPOA+XwMv3af3t3u6vo7u6Mzr5lLPrGU/TiBk0o8k2irx5DWf
+# T0P//oLtTeeTEpijBZ9gf0KpZJx6oW6iKpcQqu2j51CN1gL1hiK7tOZ8bCvJ3Z5N
+# +wJYAwsy85gQizn99oOTyMD7HGXRtrA6SeVKzTI7A+nIzxAsILjgQBNNPdIm7o2n
+# g/uSPvegbcA6fG/hfyPaBv/myGQEphZ3eJBfrwBoj2dHwgG6X6KAeJ/8eM1m22PH
+# KNwDUBoZwlY=
 # SIG # End signature block

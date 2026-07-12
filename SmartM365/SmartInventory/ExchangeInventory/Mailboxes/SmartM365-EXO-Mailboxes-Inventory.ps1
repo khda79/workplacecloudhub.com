@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.10
+1.11
 
 
 .REQUIREMENTS
@@ -285,7 +285,7 @@ $StatsSnapshotCsvPath  = Join-Path $LatestCsvFolderPath "Exchange_EXO_Mailboxes_
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -325,7 +325,7 @@ function Send-FatalErrorEmail {
 }
 
 #region Init
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $IsMaxItemsRun = ($MaxItems -gt 0)
 $IsBoundedMailboxRun = ($IsMaxItemsRun -or $Top100)
 $CsvSuffix = if ($IsMaxItemsRun) { "_MAXITEMS-$MaxItems" } elseif ($Top100) { "_top100" } else { "" }
@@ -2477,8 +2477,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVtwI8b3nFY/1F
-# ABvPo5Bf4mRY0Q8dVp1jFk3WHYgS0aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCBtPVYWzZi860
+# jVTueAS+Z/JWhbksFHuPtXdYh7KVl6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2504,14 +2504,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCA2hq+dTDVYHrl/d2+khHPzRbp69MLQxI0lM6pzAAp1FzANBgkqhkiG9w0B
-# AQEFAASCAYBVhLg0XjStacAsGFSOxUzVF/DfDaYDFAtD0piCnxTshRrssTqdxxaf
-# p4Vj1OC0kMQLpuBcPD/oy6RPGhs5xzjSB0FMzp7cKn+wCcKh+U2qvuRcEaeyVLvW
-# fT6kFHhyGs/0eQUnj7AdeMPg9riEmoyCnhCeo2XTibWXos7UptRyJtdm7voNiMi6
-# qQCZJGSBbxHH8hszHebr6oa/SKbTsrWGEfnBTLpTAcdiTzJhlJ1pTaXeCIBx/wHR
-# 0bvL1h+52OMuSmKmP8zBJYJT5Esc9ybBkUv8xvyS5ATVxAi9ggWrZmF/2Idgy1Ty
-# qe4+Wpg3LneoAwm3fjZfCJfxwRIH+V/0k9jYkHJ6pbEzwfJRIXTgH3+PBXUfoopM
-# EaRUetsEcNDhRbg2RIafkesN9WS8H7PxVLaSDCDAqF8GaIzjywnMwHedTytsp0Re
-# X8oOhL0gLHN0HOQEcwM2guH3ieWkal4yoQM7/tErEmYp1/XrUR7EASO9W9bH8fmd
-# FIibleAuTnE=
+# BDEiBCCAYvtPVj43XwU8AthGBW0mGarRK9dFSvY78V7rdzVpsjANBgkqhkiG9w0B
+# AQEFAASCAYBNZP1gOo49agGwO1ORvdjJ/fD8n5zJwJfOPANupPnHzqjYFVoNdVYx
+# G5L3HhiBmoNusX8OJJ3LLyX1zskVee0H9Tv+3n3GvKWBEGyDZB866qM9rTqVbnFj
+# ONZsrvuSi6TFUe64uSGTs76WJ72WOQzKCqcKssfRXzTcO5KSmO07YDJfQ+X0uZnF
+# LzR4UWa7FcSXEqI1EMqTUtcOrgTXqSSTjCAHyCnYjSJ/4HcgJxnkw+jWhpK+EqbQ
+# 6yqPSYmRgDynDxtj569/mQl9nfOryQ3EPPUd8s0mHbNpvay0jdPLbwAQNgnxfmNJ
+# OcCdTqfGKfmuFHzmd4hEqwx87df7mNrOLBhEjrz/9MhBtG9wAtZQsyLD9ZNvyT4P
+# fPs12VnvN2KB2Mdhw3snyhU3ItbYyqZmjCZbyEP3s15ModzHqFkw/p3bDRSwgYoi
+# 95f/NwFCXbKzOiGF7/bGwRE8LNFAiv5bn95RgvXRYvviXKmF5MuKRmDo+Ja1mZ0d
+# zsUsGsuCELE=
 # SIG # End signature block
