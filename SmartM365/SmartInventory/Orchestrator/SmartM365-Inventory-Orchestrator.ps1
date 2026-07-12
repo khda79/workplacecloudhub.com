@@ -115,7 +115,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.5'
+$ScriptVersion = '1.3.6'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1304,6 +1304,7 @@ function Exit-OrchestratorLock {
 }
 
 function Write-OrchestratorHeartbeat {
+    $now = Get-Date
     $running = @()
     foreach ($name in $script:RunningJobs.Keys) {
         $info = $script:RunningJobs[$name]
@@ -1315,7 +1316,7 @@ function Write-OrchestratorHeartbeat {
         }
     }
     $heartbeat = @{
-        Timestamp = (Get-Date).ToString('o')
+        Timestamp = $now.ToString('o')
         Pid = $PID
         Tenant = $Tenant
         ScriptVersion = $ScriptVersion
@@ -1324,6 +1325,21 @@ function Write-OrchestratorHeartbeat {
     }
     try { Write-FileAtomically -Path $script:Settings.HeartbeatPath -Content ($heartbeat | ConvertTo-Json -Depth 5) }
     catch { Write-OrchestratorLog -Message ("Failed to write heartbeat: {0}" -f $_.Exception.Message) -Level WARN }
+
+    $interval = [int]$script:Settings.OrchestratorHeartbeatLogIntervalMinutes
+    if ($interval -le 0) { return }
+    if ($script:LastHeartbeatLogTime -ne [datetime]::MinValue -and ($now - $script:LastHeartbeatLogTime).TotalMinutes -lt $interval) { return }
+
+    $script:LastHeartbeatLogTime = $now
+    $enabledJobs = 0
+    if ($script:Manifest -and $script:Manifest.OrderedJobs) {
+        $enabledJobs = @($script:Manifest.OrderedJobs | Where-Object { $_.Enabled }).Count
+    }
+    $runningNames = @($running | ForEach-Object { [string]$_.Name } | Sort-Object)
+    $runningText = if ($runningNames.Count -gt 0) { $runningNames -join ', ' } else { 'none' }
+    $remaining = [TimeSpan]::Zero
+    if ($script:LifetimeDeadline -gt $now) { $remaining = $script:LifetimeDeadline - $now }
+    Write-OrchestratorLog -Message ("Heartbeat: alive; runningJobs={0}/{1}; enabledJobs={2}; nextTickSeconds={3}; lifetimeRemaining={4}; running={5}." -f $runningNames.Count, $script:Settings.MaxConcurrency, $enabledJobs, $script:Settings.TickSeconds, $remaining.ToString('hh\:mm\:ss'), $runningText)
 }
 
 # ==========================================================
@@ -2262,6 +2278,7 @@ $script:State = $null
 $script:DependencyWaitLogState = @{}
 $script:SharePointUploadedFileState = @{}
 $script:LastSharePointUploadAttempt = [datetime]::MinValue
+$script:LastHeartbeatLogTime = [datetime]::MinValue
 $script:LastSharePointConfigWarningKey = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
@@ -2366,6 +2383,7 @@ try {
         MaxLifetimeHours = [math]::Max(1, $effectiveMaxLifetimeHours)
         TickSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'TickSeconds' -DefaultValue 60))
         DependencyWaitLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitLogIntervalMinutes' -DefaultValue 30))
+        OrchestratorHeartbeatLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorHeartbeatLogIntervalMinutes' -DefaultValue 30))
         OrchestratorSharePointUploadIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorSharePointUploadIntervalMinutes' -DefaultValue 60))
         SharePointUploadEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'EnableSharePointUpload' -DefaultValue ([bool]$global:EnableSharePointUpload)
         SharePointSiteHostname = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SharePointSiteHostname' -DefaultValue $global:SharePointSiteHostname)
@@ -2437,7 +2455,7 @@ try {
     Write-OrchestratorLog -Message ("Paths: scriptRoot={0}; currentDirectory={1}; data={2}; log={3}; jobLogs={4}; state={5}; heartbeat={6}; runCsv={7}." -f $PSScriptRoot, (Get-Location).Path, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.StatePath, $script:Settings.HeartbeatPath, $script:Settings.OrchestratorRunsCsvPath)
     Write-OrchestratorLog -Message ("Mail context: enabled={0}; mode={1}; graphConfigured={2}; smtpConfigured={3}; fromConfigured={4}; recipientConfigured={5}; jobMailMode={6}; dailySummary={7}." -f $script:Settings.MailEnabled, $script:Settings.SendMailMode, $script:Settings.GraphMailConfigured, $script:Settings.SmtpMailConfigured, (-not [string]::IsNullOrWhiteSpace($script:Settings.MailFrom)), (-not [string]::IsNullOrWhiteSpace($script:Settings.MailTo)), $script:Settings.JobMailMode, $script:Settings.SendDailySummaryEmail)
 
-    Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes)
+    Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; heartbeatLogIntervalMinutes={4}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes)
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
@@ -2570,8 +2588,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJeOpo6H0o4ll4
-# xMX3E+hcKegaatjorVjWJFC+3vDz4qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhUA/uDrau/zY2
+# H5nuJ/GyAq7caEBWKlBQkdalaMhcPqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2597,14 +2615,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBQHLRfP+k+E9nEUMHetQnoxJWcOUWCOkScQ0pHkgXiJDANBgkqhkiG9w0B
-# AQEFAASCAYBf13inC3qmI6AN4QCsMrnPv1RJaaLrRqXt3O4GHtnM2v2LFyk1CZeb
-# YKTuNMENggX8//zjlIetVwpiqcg368w04lHt4hAtcH+Zn3x7Gpew5nTGTsLheadk
-# X68/fVNhYiUSuFrYUao+WlzsJFL+1GRdCVQz4TXyVn8ZPmsNu15oeFiH+76KIl03
-# t3aqihd5dA3ScdBKsmWTVgj8KoFzut+4hre1uU0Iv6e7ggX0IG0xpD9fVcNegGJE
-# 2NBGSTltxxolc9eXguweRGTcGYI81qcbItiiwNJ04jvRiO1IRftymPP0SfU1FRqj
-# D2ctl14viuuE94ScSryYp+wqX5CvYgM49ETrsTf02afHknZinnhmT4HFF3EvU4o9
-# /OrLKqBtDHtg/kEz3q5HfSHKryONGj3sapc5ReAKUnqo6rYlm+RKGrk1GZ9gH3lZ
-# XNzbHccUsXu8rR+qM6isFAhvJG/Truii/4e7DCeKFsszggbWYOEue0Ijgryu+JVp
-# ixhmqEcqyqk=
+# BDEiBCBrn2fA8ydu58+g6RTZD45nan+G9ghY1rVybrBFB25nUzANBgkqhkiG9w0B
+# AQEFAASCAYCgzZ/YtF+6vwuTP+krRwHTX8dKAm88PzwAQerQdnFlfWLEnZepd4qh
+# bM+8Oj/qZ1scLMURrGjr0iuyEcr3aEVr2/m3VjlFTC+AUB5zO85TXqPS7nIbsl+d
+# olvXe1MhgLALQUdn7n5CcK5JCdDBovTnANcKJ9yG/lbzBT8jHIXohzRxpox3LTJd
+# nzh4rj+WgWTLW2WbwK4xRQBJ6nTnanqsb/3O4Fpdp3tsSiLkA2WO3w7NVXBt943v
+# iz/IiVHtm9MLIol1K3nnt4Sq82l4cq3VTIdo5Yga0qIZjbgq3mnATkBe2mdmGiy5
+# bVF4ysR9p5HJhDeUXPluDY4bELyLdng695pQL9nrt62uM6kCloxtkhm3DufTlemH
+# 6h9mC6ou58RSt+E+U83sx1TZBJq+UqNOXQRmUbcRxyX+4J5r5+a3VKNfnwFkPIMr
+# 9BeXZt3n6wXphB3p9Quaa3H2KoM/EF2qNHpNE5dYBa2DxqBcdj3hqQRxZnZpaaer
+# QXOdJPmjSAg=
 # SIG # End signature block
