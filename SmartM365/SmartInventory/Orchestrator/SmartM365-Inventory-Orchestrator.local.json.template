@@ -1,4 +1,4 @@
-{
+﻿{
   "WorkspaceRootPath": "__USE_GLOBAL__",
   "DataAllRootPath": "__USE_GLOBAL__",
   "LatestCsvFolderPath": "__USE_GLOBAL__",
@@ -21,9 +21,22 @@
   "MaxConcurrency": 2,
   "MaxLifetimeHours": 24,
   "TickSeconds": 60,
+  "AuthenticodeValidationEnabled": true,
+  "AuthenticodeValidationMode": "Audit",
+  "AuthenticodeAllowedThumbprints": [
+    "526459860BED5BA91ED005483C90182852F26FE0"
+  ],
+  "AuthenticodeCheckCoreModule": true,
+  "AuthenticodeCheckWindowsPowerShellModule": true,
   "OrchestratorDataFolderPath": "{{DataAllRootPath}}\\Orchestrator",
   "OrchestratorLogFolderPath": "{{LogAllRootPath}}\\SmartM365-Inventory-Orchestrator",
   "OrchestratorLogRetentionDays": 30,
   "JobLogRetentionDays": 30,
-  "JobRunsCsvRetentionDays": 90
+  "JobRunsCsvRetentionDays": 90,
+  "AuthenticodeInstallTrustedCertificates": true,
+  "AuthenticodeTrustedCertificatePaths": [
+    "Certificates\\SmartM365-Orchestrator-CodeSigning-526459860BED5BA91ED005483C90182852F26FE0.cer"
+  ],
+  "AuthenticodeInstallTrustedRoot": true,
+  "AuthenticodeInstallTrustedPublisher": true
 }
