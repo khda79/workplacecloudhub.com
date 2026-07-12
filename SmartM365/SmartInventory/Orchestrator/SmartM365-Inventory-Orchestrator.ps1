@@ -125,7 +125,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.13'
+$ScriptVersion = '1.3.14'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1596,7 +1596,7 @@ function Get-OrchestratorAuthenticodeFileList {
         }
     }
 
-    return @($items)
+    return $items.ToArray()
 }
 
 function Test-OrchestratorAuthenticodeFile {
@@ -2987,8 +2987,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYVpJ7NfuIJaVC
-# 7QOJBafYwH0huXZ1q004CK0RPM/riaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMwX96AaLqQWNr
+# 9SY052tZ+93gCOVEHSYm3qWwNYKf5aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3014,14 +3014,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCIgArwbc5wEW0wNq24tH/62ur6NPoKmvv8wgLHRjj0BTANBgkqhkiG9w0B
-# AQEFAASCAYB1+sMeuNZ6MSDBtjv4L9Yxd+LwSnsC1CroNEBQg4GIVM/lgk6hbyao
-# qDz+Po/U0JqMRiVt066XDvumnP0jCsQAg6uD7Kg4JOkRTW8gX2ia+xzMTwBEk3Zz
-# bQEZ4+9CkQr4gQU0z2nnAi5gdTbo5evfCP5ORI0RGuSK33B1aOB3Bet5NkNBo4Kb
-# VtjvKsa8P6nElVs/zwJXp0gtsleU6l256bvEvKkK9Bod8kF87cdokKtujsJ6GsIi
-# a8LOT+smuZiOh9CbRhF6zucrO4MkJe4gMGemCmfri5cmCRaPMRKm/VYM3Tv/OT4C
-# Bs+UvhXAn3xLT98ObakjQcYitaPEkc6rgoIHGWsBK5sP1eghRuEtU2sQPyg5lPyQ
-# F6LYeuZ20d9aCIQnLEDe48D5n8ogPthMUGqVjCMDOYnDq0EDvI5VErPCRrQK1UCC
-# AMRIdv8s1R2k8CAI9tUcsw2zA4Zdno0kkE9czBjggem5MBd3nF3keCkn+kGdWEbi
-# fnNw2rm/Vuo=
+# BDEiBCCBUymQEmYIwVmkoqW6pu8uBdbolmrQS8toulqr4FBfEjANBgkqhkiG9w0B
+# AQEFAASCAYCAtGFJBrxG8ueCRP6t7ZlZwFQTYb5een1v5s10KiF9tpFP6dueo1ZU
+# NkTFcGHzm7gCMIcKl4rlnEJYaAza6Rvi5s2tFpX3ShkT2m6W0cAZkDbSOPgQB0q/
+# Fe9VIoQXVh/zrBSCGp9iiuFIuyND6HeiBpnXpIcFHKUSFN3TOfAg2qmtmKk0wJRL
+# D6cG9n/A+Gtu4oop1+Z8SIPqeyi0WIt457K+TpgR3gw7+QyR4pyTLutWft3FpJMk
+# 2OTNworUHz7umWYVgBOlRLMuxID2Z2RTDPvX5Yp5IPQ3sVJcrCM+4gtVd7h0SjFb
+# uIZ8JuXaRsUdQJkMQwnqiPiE0cJ0RCFV0QoySBpXPDKpbV2krmNXtrnRq9bjnr40
+# zfpgYjdHZOFM1G1OrsqJ2Ff6eNvgpQL1mSIoGwYLRwZGstprnuyJBkv5YGQdX2Hr
+# DnUxyp0j9dHzZd8uULDJrIuT5jxeYGS7JsFwHlyH24WaiVEOK0esMkd2o7pKjVId
+# wR9qIdcyomQ=
 # SIG # End signature block
