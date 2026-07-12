@@ -46,7 +46,7 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.6
+1.7
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -574,7 +574,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
@@ -689,7 +689,13 @@ try {
         "extensionAttributes"
     )
 
-    $devices = @(Get-MgDevice -All -Property ($deviceProperties -join ','))
+    if ($MaxItems -gt 0) {
+        WriteLog -Message ("MaxItems enabled: retrieving at most {0} Entra devices from Graph." -f $MaxItems) "WARNING"
+        $devices = @(Get-MgDevice -Top $MaxItems -Property ($deviceProperties -join ','))
+    }
+    else {
+        $devices = @(Get-MgDevice -All -Property ($deviceProperties -join ','))
+    }
     $totalDeviceCount = $devices.Count
 
     WriteLog -Message "Azure Entra devices retrieved: $($devices.Count)"
@@ -1323,3 +1329,45 @@ finally {
         exit $script:ExitCode
     }
 }
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoV2JKQAK+lhdU
+# XHtQKzOImuFbXucqyDBeuyVDZ2I0ZKCCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD8UVUP7iJNoGPWJZmU
+# RxhRj9T3rNqcJwJYQngl2KMduTANBgkqhkiG9w0BAQEFAASCAYCg9Qh2GoD6unI+
+# fzO7HhR6pTZNvAKu3oFcBXTqKzu2N4V+LP4IQFra0ToXCJHK1XAqb/LwYzssGaTY
+# zeuvAr1AIh0ZwbPOjkv0bKDv/C5uU1r3+IgeCLFA8f7kLx9trxAVzpkp8hY7hmAv
+# WiGO9Ik9KdhuuK70bnnO4XNI2ewvM8g7FP9dqWOo0HjJxMdEZFU3r0Mkeacym4Ww
+# AP4OcURSizOHpdgwx13A6hsGM4Yt10IxKIkpr/8e2B0PDnL0L3FotdVFPaARigcr
+# HPcpdKLnfxbyG6PufNkMJMPCMIZ0mdocfPqNoV38oahVs4ml5aRL+04DpAOG76na
+# iBAxFgqANf2Z5+yF/E6XhZc1aeujI8oPkRTfg+AYAWsfln3a9aWnEnGOBoDzRpDt
+# u7NS5EfnIUuvuCSWf3o5njoF0OmHCD9cBSDbPdpK2+1fT7bP/rCQTw9caiO7Iq4l
+# m0S2cHMVPUmUrCQqPNAhLYBSdWt50G2e+i/Arajf0Lrq3C/zbuo=
+# SIG # End signature block

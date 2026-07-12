@@ -44,7 +44,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.7
+1.8
 
 
 .REQUIREMENTS
@@ -54,7 +54,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.7
+    Version : 1.8
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -118,7 +118,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.8"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -572,6 +572,9 @@ try {
     $graphBase = "https://graph.microsoft.com/beta"
     $baseUri   = "$graphBase/deviceManagement"
     if (-not $AttemptDeviceDetails) {
+        if ($MaxItems -gt 0) {
+            throw "-MaxItems is not supported in summary-first mode because the supported Graph endpoints return tenant-level counters, not device rows. Use -AttemptDeviceDetails with -MaxItems when the device-level Graph route is available."
+        }
         if (-not [string]::IsNullOrWhiteSpace($Filter)) {
             WriteLogSmartM365 -Message "Filter is ignored in summary mode. Use -AttemptDeviceDetails to apply device-level filtering if the Graph route becomes available." -Level "INFO"
         }
@@ -789,3 +792,46 @@ $($global:LogTextFile)
 }
 
 #endregion Main logic
+
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCe0McdHwMU2dLL
+# PCZwq83hxUHi3fT0tRyVGoZOsKpCxaCCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAR0RWYwvQ6SdMdyGjb
+# 7Lf0WJIwVrnTzrrImnAhgeOStDANBgkqhkiG9w0BAQEFAASCAYBs2ZMt3PD/Micj
+# mNnmW+3boY9/ms44APURUMZlOoWLeNWns/HY9XKrlWBCFXASRSJ9fYfgTAxtCauE
+# bakwKB4Wk/Y/jRgc9iuQvuZ71dJbZe7UB2QSdmmVq56zx1lhkoSwPkuM4NHhHxt0
+# GpTlz4JI+56OM8iBOSpfHrsFets52X02Ve+1C+RMqdYpsauBPjY90VEMAO+Q42ya
+# TvGItutENFXaOsqyTU86HOvXtNIJFqGau+jbENB/+m3k80Ml8s7L3TITG0Ph9u4T
+# SVVp26XC1wBUzAw+VdwewgPf4Zgv9d+Av9J4rwA/D2ZODHOPtQOvVo1G+RuL5EdH
+# fjgFU/7W8ZMnvM0jkpIXETrWq6pm9qkUoMCEq8SwPWeaZ5YJ1s/whb/dLLMnaTns
+# SnGSt6VQnII9Yk9AcmEfo+kF+3F16vq5rjSDZXAJUbLADqs+74xZU1K891t0+NWf
+# wp4TE7NBH7BxtkjUe6gmCsPVgzWzCdiudPDA9zP8qFfJ1NGnEAc=
+# SIG # End signature block

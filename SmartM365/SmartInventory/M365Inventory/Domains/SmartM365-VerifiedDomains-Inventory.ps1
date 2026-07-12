@@ -19,7 +19,7 @@
 .PARAMETER OutputFileName
     Base CSV file name (default: M365_Entra_VerifiedDomains.csv)
 .VERSION
-1.4
+1.5
 
 
 .REQUIREMENTS
@@ -402,7 +402,7 @@ function Send-VerifiedDomainsTeamsAlert {
 }
 
 #region Init
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
 $TaskNameCore  = "Azure AD verified domains inventory"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $currentOperation = 'InitializeScriptEnvironment'
@@ -483,6 +483,11 @@ try {
             SupportedServices  = ($_.SupportedServices -join ";")
             AvailabilityStatus = $_.AvailabilityStatus
         }
+    }
+    $verifiedDomains = @($verifiedDomains | Sort-Object Id)
+    if ($MaxItems -gt 0 -and $verifiedDomains.Count -gt $MaxItems) {
+        WriteLog -Message ("MaxItems enabled: restricted verified domains from {0} to {1}." -f $verifiedDomains.Count, $MaxItems) "WARN"
+        $verifiedDomains = @($verifiedDomains | Select-Object -First $MaxItems)
     }
 
     $countAll      = if ($allDomains) { ($allDomains | Measure-Object).Count } else { 0 }
@@ -595,3 +600,46 @@ $($global:LogTextFile)
     Complete-SmartM365ExecutionContext -Status Auto
     exit 1
 }
+
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4Ol77uMXxaFTh
+# ZEaJwQAuALMUNjccK95AM6G7nRRP1qCCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDFZcEsQ06JkEFV8Bg9
+# YCRI66+R0inPUbydPNX82RmnKDANBgkqhkiG9w0BAQEFAASCAYAlGcH8tUZzRXbN
+# IDDq71EPWMZCrLP/f4SeU9uryhQrZrgYr4xCr3KntTS6kI1eTg3AluCbAHja2wjm
+# 3ZU8/8lXT+Ful9q5gRpqNe+3Jg2uhHdlB+AMnprQGVGyXiel+8nhHwV8QVAduHgy
+# E/JkVHXIYKlwYppMLorggHd4W9Y/J02TeXsydB3m1H1jxmkS6tGBQTGSkro5y5oW
+# RPo3L1DzboWwMQ+I09sniPBWh60w5xVIQxUoKjT2o/q3qMavRbbZUMbbvGTPW0nE
+# 209lJ/x35ehe+LM0Hu181D59jtuJltqcf20eftZkQDsUCuBpTneIILiszCpbvFEy
+# Bmf3k1QkTniBulSg5l7BO3U1R26injQIVw5Em2mGEfpo6nR4DeiOXSxPzXkd/Kjv
+# nCV/J3UEjxuTmv2I00Vyi5gxWnvNHxriUyjkacGb3mQhdmHDHKFDuDliPm0TOhMU
+# +2clg5XCCMwJLDQ3/lFoF1f0h09x7uqAfsxXFgRTuOMtefT9CIE=
+# SIG # End signature block

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.13
+    1.0.14
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -57,6 +57,10 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
         }
     }
 }
+
+if ($MaxItems -gt 0) {
+    throw "-MaxItems is not supported by SmartM365-ActiveDirectory-HealthCheck because it produces a forest/domain health report where partial data would be misleading."
+}
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 [System.Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::InvariantCulture
@@ -67,7 +71,7 @@ $RunId = [guid]::NewGuid().ToString()
 $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.13'
+$ScriptVersion = '1.0.14'
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -407,3 +411,46 @@ try{
     try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'ADHealthCheck' } catch { $null = $_ }
     Write-Error $runErrorDetail;exit 2
 }
+
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMYLiz0kUgvFdc
+# YV78SC0LVPKhb846n2T/8g6Rz+cpwaCCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAn1eYKCGEZlFHCa4uO
+# pf29zzStBQ3QYP9USXM7Z2cZvTANBgkqhkiG9w0BAQEFAASCAYCf6bppVdlaFqaa
+# meqReK7i55W1lo6JE31dpnwW0k0c6BVNUzwmAXNSjQcwy84NamDQ3PoqgZjm4MZY
+# 4lgdX0FTP2yfGFJy6//6BV6ztb/HWUqcorbIf3il04yZo2qMMhFZLyESwCMXw+JW
+# nWmiKZM6Ddp6W6CbkePstzx7nWx8owdbKU1ZAh7BOXJeVHs50QzWKMHyAOFjAFb9
+# 8+A4KZip78PMsEzp4u3QPsNQ89ylgNV01XvlHVoMEs/YPSzWYhXHO/wN9OouUbAV
+# mFRoMjPP5rzrsU/KDa1n9zkJ5zBI/tLQ+B4h2V8c4gsUs7rCueCMl+567Lp0EY0R
+# XOEdKQ2hHCdoHR0U9Pvxi2XXOiZ58aZXigjR0vR0LUu1dNGPw/+mol7q77Ap/WcH
+# Wu/L6RTTkVnKkB6OFLHmBkaHDKQgnlx/Mgucf/8S1F4cBUZWjiGYlynKcEPK0M+r
+# RZ6kgdXc2tCn7rgvtLiwHotzygeTBPq9J6LZkh1mtlkdIZLReeI=
+# SIG # End signature block

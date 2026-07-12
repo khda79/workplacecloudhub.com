@@ -29,7 +29,7 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.5
+1.6
 
 
 
@@ -39,7 +39,7 @@
     Minimum Graph application permissions: Group.Read.All; GroupMember.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.2
+    Version : 1.6
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
 
@@ -75,6 +75,10 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
             Set-Variable -Name $smartM365LimitName -Value ([int]$MaxItems) -Scope Script
         }
     }
+}
+
+if ($MaxItems -gt 0) {
+    throw "-MaxItems is not supported by SmartM365-Intune-RBAC-GroupMembers because the RBAC matrix must include every configured country/role group."
 }
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -456,7 +460,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -1091,3 +1095,46 @@ finally {
 
     #endregion Stop Transcript
 }
+
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCO69ntS7CpElJS
+# +LGEtEa+NYnpZmAY7pr/snyBP69yLqCCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDIWgIyT+O+WyfGoX6G
+# 1e5YqeEgfoNED61gC5BH6Z3m7zANBgkqhkiG9w0BAQEFAASCAYBxxyxB4I2gHI+G
+# fxPnTxcJlGk1PQUXaIh54zs5JEtYpM71Torrec0F+D8d6Ljs7i0237OZZPV/7bId
+# T1TSE4u3QjwHcSZWMRxNQjQGp5U0mOFiOBkYP9fP6B4jF25AokxTwfaJvu4Ox3So
+# T90igURuMbE+2Rx8wkTDTW/okr5VQcUZdlcFY5FOul9rCNIiNaOdZ/r8sWKWQWsz
+# CTdzdWAcx6ygnXsssFr7VRC6T9BnP16z1+msVdpYmdGyWdQE65tAgis+TyqeeSX1
+# WkA3rahx+Thxm2f14fFOUYhySstFrWxqclHDOgZ6ty44YpiXaNOyKBarAeqQ9SED
+# oVIy+70cpUHzErUb9mNOcrKh0Ys4u9r3Gu/V8VT1IKX5mzW0+de9t54bMYkeDjAd
+# vl2kYqBkkw+EkJxmyTtilY9tdiy/8E9laurJivll+s5bXa7fFlsQ8U1CaeO9mICw
+# qAu+jkPlBuP9KtQ6Nh+39xzeq2pghaX8QKbYWSc9IkuivRD2iVg=
+# SIG # End signature block

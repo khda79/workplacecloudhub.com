@@ -16,7 +16,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.5
+1.6
 
 
 
@@ -525,7 +525,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -616,7 +616,13 @@ try {
     # Retrieve Intune managed devices (Windows only)
     # ------------------------
     WriteLog -Message "Retrieving Intune managed Windows devices..."
-    $devices = Get-MgDeviceManagementManagedDevice -All -Filter "operatingSystem eq 'Windows'"
+    if ($MaxItems -gt 0) {
+        WriteLog -Message ("MaxItems enabled: retrieving at most {0} managed Windows devices from Graph." -f $MaxItems) "WARNING"
+        $devices = @(Get-MgDeviceManagementManagedDevice -Top $MaxItems -Filter "operatingSystem eq 'Windows'")
+    }
+    else {
+        $devices = Get-MgDeviceManagementManagedDevice -All -Filter "operatingSystem eq 'Windows'"
+    }
     WriteLog -Message "Managed Windows devices retrieved: $($devices.Count)"
 
     # ------------------------
@@ -828,3 +834,45 @@ finally {
         # ignore
     }
 }
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDncPW7MoHV6WW5
+# D+l9TbZlxfSwAPh/RTEbAP6jFa0fgaCCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAmFVpdo7A04jgriazV
+# tdxxM+f3Bzk3stmg0d/eNxPrMjANBgkqhkiG9w0BAQEFAASCAYBYdjKJaODkhqgF
+# wCtS5o8fPH+KYr0VRgd0Vp3pyZRC4085X5bBBweIuPtd/NSoME3U6zkEv9ZYej8p
+# XPGJ040QAs8yyLQ223ngjd5LS6yuezC5iuPgwMgZpwdYVZ1hf8PDqx581GCsp2DJ
+# By/08Y/40rDFtzwD0b9SQpW/fjjXoj36aYbm1v+MkS34awn6eXU49QOdLhHrdOJS
+# SlqWBr8p2uW6dOB6+tBQsVTDaSTvrRDWLM6Iz3rczltm8QpDGJyht+YbJyJCsi5c
+# TTGx9kmenGeEa19hLDqU2xM83Rdd2IMkFl5Qb3ydnoCtPluntamHv/4xy32sNfIb
+# lk6CSQPz4HTrnB40t1RJcQ51aZ+jYLpxjPf/8SAwDlvU6iLWThZHliI6De8o0UPd
+# knxKxO1NpU97vCSMYY/lx/Qwuvkii5Oz5zPl7eOWHFvCdmJmTsrKnXtBDPhvy0a5
+# xjjfdZiM37iFC99/N7C/GuUcklQD4yG5ongcz2vuiXo5ZK7dgpI=
+# SIG # End signature block

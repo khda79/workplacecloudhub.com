@@ -17,7 +17,7 @@ Forces a (reconnection) to cloud services when specified, or auto-connects if no
 .PARAMETER InteractiveAuth
 Forces interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.4
+1.5
 
 
 
@@ -27,7 +27,7 @@ Forces interactive authentication instead of app-only certificate authentication
     Minimum permissions: Exchange.ManageAsApp plus Exchange Online app-only RBAC allowing Get-MigrationBatch and related migration user/detail reads; Global Reader is the default read-only service-principal role.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.2
+    Version : 1.5
     Author: https://github.com/khda79/workplacecloudhub.com
 Date: October 2025
 Dependencies: SmartM365.Core module
@@ -354,7 +354,7 @@ function Get-AllPreviousCsvPaths {
 #endregion
 
 #region Module Import and Initialization
-$ScriptVersion = "1.4"
+$ScriptVersion = "1.5"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMigrationJobCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -485,6 +485,10 @@ try {
     try {
         $results       = @()
         $migrationJobs = Invoke-WithRetry { Get-MigrationBatch -ErrorAction Stop }
+        $maxItemsReached = $false
+        if ($MaxItems -gt 0) {
+            WriteLog -Message ("MaxItems enabled: migration user export will stop after {0} rows." -f $MaxItems) "WARN"
+        }
 
         foreach ($batch in $migrationJobs) {
             $batchDetails = $batch
@@ -496,6 +500,7 @@ try {
             }
 
             foreach ($user in $users) {
+                if ($MaxItems -gt 0 -and $results.Count -ge $MaxItems) { $maxItemsReached = $true; break }
                 $results += [PSCustomObject]@{
                     Timestamp                   = Get-Date
                     BatchName                   = $batchDetails.Identity
@@ -550,13 +555,21 @@ try {
                     CompleteAfterUser           = $user.CompleteAfter
                     CompleteAfterUTCUser        = $user.CompleteAfterUTC
                 }
+                if ($MaxItems -gt 0 -and $results.Count -ge $MaxItems) { $maxItemsReached = $true; break }
             }
+            if ($maxItemsReached) { WriteLog -Message ("MaxItems reached: stopped after {0} exported migration user rows." -f $results.Count) "WARN"; break }
         }
 
         Write-Host "`n--- Export CSV ---"
 
         $baseName        = "Exchange_EXO_MigrationJobs"
-        $allPrevCsvPaths = Get-AllPreviousCsvPaths -Folder $OutputPath -BaseFileName $baseName
+        $allPrevCsvPaths = @()
+        if ($MaxItems -gt 0) {
+            WriteLog -Message "MaxItems enabled: skipping previous CSV merge so the test export only contains current-run rows." "WARN"
+        }
+        else {
+            $allPrevCsvPaths = Get-AllPreviousCsvPaths -Folder $OutputPath -BaseFileName $baseName
+        }
 
         if ($allPrevCsvPaths.Count -gt 0) {
             # Compact log: only count, no huge list
@@ -651,3 +664,46 @@ finally {
     #endregion
 
 }
+
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDl9x7Fuuum6/mU
+# qAdM2f3dhVcMowyTZ3ZyUEakQlYpA6CCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAxffqKHzw5blECFhYJ
+# 28ehm/22kfdp91w1jk7HhLgRbzANBgkqhkiG9w0BAQEFAASCAYAdCy9m438tAVH5
+# W3kwNgtOHBUusoUfgaaDdfx3LKxHt+vwJYz9+bSbhGougbscbBIqtWJOgMuJLPpp
+# 910xL/dQmx9w5WlJTe+YYztzyZIkSam9xbGr9ukCEwT65JJ98WnzLozd4nPzA7aO
+# BoCUBWxyRfKvhS1/utzqYUkMZ0W+yJy3Vmlzbb+BtfOzOEkKS8HhAfhw++IVxiJ9
+# n0XoevzOGaVw3wOlbpg7UYQsJQCuSFxUxpwWjf8OYBrgSA/xNkKNF8FXpnjIlj08
+# crgPIYMVVCTtManjJzqMWBc3Z12hM5tARQxn6ogtPpMx2xvta3RmUpLaq+7aUSfG
+# 4EOTI1flys7/2UPJLjuVNiyl0UeyN40H/rEWQ3RFf6Ji+8ugfNh5aB62XtTJp357
+# jKg8jX3Sh877TusMz4oK3YRI3Mi9uodWJIo6lGDYR5wSE7ppM+jkS7hJqI45zb1r
+# GR89BZt9Xxwtx5zoJKpSPpK2KbnR/ypVW2PlEDYqXjDHpewImwU=
+# SIG # End signature block
