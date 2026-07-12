@@ -43,7 +43,7 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
 .VERSION
-1.6
+1.7
 
 
 .REQUIREMENTS
@@ -273,7 +273,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $ModulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $ModulePath -MinimumVersion '1.0.22' -ErrorAction Stop
+    Import-Module -Name $ModulePath -MinimumVersion '1.0.23' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$ModulePath' : $_" -ForegroundColor Red
     exit 1
@@ -481,7 +481,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -768,8 +768,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDgMIqhaQ+3nacA
-# FjTPsak0xoDhipXWgNfNLkYryAPo9qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB50E1969EuJRj8
+# MAHlBKvwzUNf/cXALdxVXR9cou/We6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -795,14 +795,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAPXxs43EzCIjJaYKrwn1HJNjGWEsJT4wlaxC2VDwZCUTANBgkqhkiG9w0B
-# AQEFAASCAYB5PHu4yXQoI0rdJsPYiFDHIT4S2LwCoxbRg30EabgoNE2q7ywBFvnd
-# 90y0vt7q5U96QwrElrF6rnzWowEKGyF/MWnvynbEOLFgl/VOWn+mrc/8A+hrC3EE
-# gpKJjiJ5oLVhnldmMCLBhZrLHrxjDAHEB5QC5UovjiUSGMm7NPu91/i2v1pKY+J6
-# 7BZX00+RZztj2lyigTW4sZMZ1xLk0bbqgIDobdAqGKT1Kv3kiPUVAsifrNcixbQq
-# wtF1cY6ORoxE8oBFbS6E+6we4orff6IiSPmp/5bovqj10S2mg51CW5GyXtbgdRkC
-# eAgZ4WQ6IbxB7A4Yv8GM/9sGRBLiuf7AWzTvstJ1re2mn7Aj09o0Yr3Vzddi46xV
-# pJWxfjY6UkKVZd9RqE7Qms35xdQAsb2YZPY/K3enJTpU6Z3LsoSMcaP7kl+rPSte
-# ZFMRdCOvfL/a6Y01tDHhzWz9I6A0AWnb6kduyjPaaKJsQeccoFcmnTPOAyCp9JA5
-# 4+wzybjJPWY=
+# BDEiBCBdPXL6JNwjrEVcmW+ouNjLRdgbu9LR8l4EnS15hc4WWDANBgkqhkiG9w0B
+# AQEFAASCAYCtuAaYd+6zijk0+hgcEyj/tuF3KCLJIYROxKNzvk9yWrZNyPnOZ/k0
+# 4JsP+Mcnf5aPfGH6Ivhelmt1WMqWXIQmYzPePauBHi+Gm6ZQ0Y5iHScwol3XYKhD
+# 8BdHW7DXpaSwMuou9U31S/WUSfR0oAekeBf3jxFX7VsAM6eb0o8pZosPZgpDv6kY
+# nEO5PjGi+eKPedFqCDU5JhtHCk1TtE3SO2+D0W2/PkUbQEWRumiItb5p+OBx3T/y
+# 03N0hKwyiIih+Vkq7/SKDlpdSDSeNv8vEvzwHPjh3HPSTCnTOG36ycanK5Khu2jI
+# jsDKNs9vX/VRTGI+nprQb89/d7G3ayAe+gSM7U2iLmbjHbI+0L4KFNkqT7xp+rfv
+# +frpxLlIULOWeCktaoxB8pwPlu215usC1kUQMr2CU9KVvsxymix8p66Hk9FeGso1
+# eOe+4a47/8DooZu026v2aeL15TT9hqlRetzxjZ1NYUxltMBea2G+olwprgNiHUj5
+# 5WT59iu0UsU=
 # SIG # End signature block

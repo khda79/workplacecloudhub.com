@@ -44,7 +44,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.9
+1.10
 
 
 .REQUIREMENTS
@@ -118,7 +118,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -329,7 +329,7 @@ try {
         exit 1
     }
 
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.22' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.23' -Force -ErrorAction Stop
 
 } catch {
     Write-Host "Failed to initialize paths or load SmartM365.Core.psd1. $_" -ForegroundColor Red
@@ -795,8 +795,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUeD+iUTcJgt47
-# hshocc7id3EOAYhR8TbALTX/AfIJqaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqHYS/WMdH/aAO
+# Mbcw4leUcEtRSR3d4tcc/n6UxkEnE6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -822,14 +822,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBx1bK31d31fGoHAxXEPbOM2IPRnOQ2saPRWKC9J0UmyTANBgkqhkiG9w0B
-# AQEFAASCAYANSZDmHgRjT9+DDFHS1XMLyF47BMEUrZeiDBVHGMr/yzz+ATG86eku
-# LCNQ4YUlRd1arjcBRDAVtosQSNsyrOs3fCPJIUnO8DIurFjYSewmQvy/VyhYi2mt
-# phJzJP7WGLNlNlGFfndCPXx8OJhV0xwCoyT6mZKq5uvybRHu8K+Uj2lDO++wwWZk
-# IOmZ4XnewcTwc2rYDjkIQoYaVJNeV5jWgQAJsVjE5/AefHOu8F5znr2p2gonACmW
-# i4CFy55QVjfq8do+C3+S/9nENn4UefP4oR6/1X5f4IpaZ8jmSQO3J2+mTqErVpAl
-# zv8qUjUQglrYeHGnIbSkB6XTc9fxJbYxvPy9aNbmFeJYm6jrq+0ZlS35/Fy7cpqB
-# jG6rW8T3hs5V+SxrBmfg6w/E34nfy8c/2xYPyqtZiFQ2f5cxCQDGSUW4VdPXVR/Z
-# 2qBcJsui/9fVCcODsQ94EzSegKg6nFhASUEpehUGIk6Sqi3PxFfR77DVQqwnHQAt
-# jNovJmtwaQg=
+# BDEiBCAf5FuR78FFfPhUWV9OFcWYj89GW9N1Z0sgrnjXg6nVPDANBgkqhkiG9w0B
+# AQEFAASCAYBEjbdrOZeGhUGrohV3qFLh5AOhkyGdVZcGk8jrZdY6pq2lMacxOCoY
+# 4EwMeP+aYbHBXK9C9iaH3DqYbCb7BGgRfLHE+iyC7enUmz9zx2a2DHffGh+yTxRv
+# Dq8GE88WUHTYIFIyjAjdKG7ehDsrb7EjcWWIXrrRJ91b0MYwyAIbYrohgsBWwW0Z
+# 8J2Rs2LgT5fHCeJ5ITjcoNUHokfD1Nk15acLC+CVATKnX3Irbu+b+QxOzO9EcV61
+# JsVmzKv2nKq3LhcuyGksTdZO53N9eekwXt6p146fXjNHAQpxGvuDavbD/zDmcuvq
+# OomCIn5CTcZGSz1olmO83MCkMpSGfdcvI8Sw87azebcktWtWTUyjIGQxyT76LpPA
+# Vvt3v2e9limHV+6qveSVqSUcY+/tlukdK/HaZqoGdbMRdW2b16Iin4cXWFRSF8ap
+# 5Tg39AMBUz0YdrUC/w80ZmnUtlqsyVah/EQpn0IAvoxQwQ1OkXZEfEBjACwyJ3pB
+# WdP/DLSey+Q=
 # SIG # End signature block

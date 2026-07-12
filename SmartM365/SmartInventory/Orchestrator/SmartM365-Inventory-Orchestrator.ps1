@@ -91,7 +91,7 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .VERSION
-1.3.17
+1.3.18
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -125,7 +125,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.17"
+$ScriptVersion = "1.3.18"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -2778,7 +2778,7 @@ $script:LastSharePointConfigWarningKey = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.22' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.23' -Force -ErrorAction Stop
     . $tenantContextPath
     $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     $localConfig = Get-SmartM365ScriptLocalConfig
@@ -3097,8 +3097,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAvYzarOTiqZSg
-# A9/jEixSAJaNdgv5+XF2FMwioSa5qaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChJhUH4Rn3oyC8
+# IgZR47h00BcZ8JiagNtTH5QLmlAwaKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3124,14 +3124,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDr88imHWqIH+Gwgn4M7SXVNi4toYAi4ZLpzzTFR3uK8DANBgkqhkiG9w0B
-# AQEFAASCAYCf6Dd5sEOegEbfYPabrR23axvjXuWlFCFKXJaQziltrJJ540ifvlce
-# 0EygLDMlG9yiuIEiz1PXW8I1oNSondwRqlF+fG04JUI7p/TGoLXGIV4dFFQ0jVyC
-# RQdsd4xGTtu2OaT4UV6V7bTXr8t/nTD8012NI2YdyMIJ4BWRdLjtM6IH7kTSshvk
-# X7syn5vKKrFa3LZJjPo+c0sL4JOfTUGpzU/kdjot6uqH9SYm7JE6xyDuYges0IWO
-# NiQHAIgZ1j/1hObgoxSgc6tF7CqMwGL9AQ93aXZLYUmD3tHM4+q/jKJQDUTEpViu
-# UFH2ec72kQJSKzdROPfhnLAVZs7vJCh5saoTHlAD8Yol5w7j3XZEO5VJEz9JumTC
-# XgOTiCbwLk2I+CizuNQ7BMXK4ec2ZqADe8V+ak0Z+nO3Fz4se//oIXSA87xmFRIe
-# 6zJzOL0z1wxPQmbSPapRDEDcw1lTiojAIe8H3JmWyj+fvYl/ifVI0M/K9J0PDzr0
-# 8XOpx6Ky+AY=
+# BDEiBCCrQOJfG1QtdVC2ClKaUWaztTnXPy4V+SZqjabKgr5/NTANBgkqhkiG9w0B
+# AQEFAASCAYC4GYvsUwBbyH6vLysVd5zvH6y97Pnww6W7TOVenbQIg1yWsUsAkwl1
+# Ffd/ZNq4e4n1gT4fB1FbvHJinhk5GsaAeygc5lsqUmOsKHcN8T7n8h2x/0wkcU14
+# in146f7qcK11uapxSMydUm/Fk2rua9grpZxde4P9L9FunrwmBRn9tZuNdUnXpSqD
+# eMYp9ADxBT+YKfJOMbbBS/ruVDPFMENLYwwQqcWf985C/K7jnZ74q8Ewzcc8AaY5
+# 2bgw92igqOLg77VMoiTRMYjYtqanD5eo3Wg22z/THMoSMlxnBbQ/Tw7oA1qIBXzr
+# p1Yby8TFZSUlTCLROkVs4ERzzG89rRitEFcyCdkKUGEV6h5TXjgYwOpq+X9M4B8W
+# cdteFUQrj3VhC8kJqbj+UhJwqo677554NbH12mO1uSIKWjaIRybQ3VwnTqmd0uKR
+# xP2iMiaHEy++/cJblR6MZjdQsII1yDNH0pueCb4AUF098Ujs3y75HWISewlMG8Ka
+# oLPmsSY62Ps=
 # SIG # End signature block

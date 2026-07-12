@@ -47,7 +47,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.9
+0.10
 
 
 .REQUIREMENTS
@@ -102,7 +102,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.9"
+$ScriptVersion = "0.10"
 $CurrentOperation = 'Initialize'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -132,7 +132,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.22' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.23' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -856,8 +856,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjYGDHxL/40qC6
-# oGPW98LKTxrI4mkEuAvt4CmYOrdZAqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCk9ApIV0wN0UFC
+# ky1PpsZxu7zpr8Lw/8OcrCB/H6cI9qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -883,14 +883,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCB84tfI8PAoju0YZsUrWC6f/w0SznWoVwVIXr/pTOJSLzANBgkqhkiG9w0B
-# AQEFAASCAYC/GhF+EWnbC/xQ3ESOy2++kkjmsSeOspIOp79NlLTeW6FJTPoxoJeJ
-# jFdd8Vab7t80tRTHXNU8okwY0hjnU05CkCmIIy5PdFoEO+X1shb1KZhfqY/5v50y
-# NE0+H1UTJbj0eCXuVhFzhL47oOJhelQnxdhGm9uuxOtPzq7ugp3iX2oP94rW7LDM
-# CxRbDF6z4p9tNSqhVXvWWwQJ/nd8loMi3L4KMQQ8TcQZEHiJH/M+0RltouBeYKW3
-# gq+KrEotUQEV6ypY2+juXcFSbxRGKbPLfM4dlAMs03Vwfx5YyYy407JrEQ4o5kGu
-# +4F15CMd7imlUZdU2iR/4VGRZT7ifiqaqcOCyx30jLLQQkWKSjARoYuiDMFzSWPU
-# c+YYIE3UUzK8W1IX12Ew3lpbjTxcAIxzadFV13nWtjoe07QNykDEDAU/GNyVxoVz
-# aF458daeKn4jTd3tH4lxBagzr7EkAk1pP99OxaQ4CPox9y2skXQI1xbg+ciTFL9G
-# 3sucLs/TtNY=
+# BDEiBCAGLN6yLKSBqeacUWge6yug8DMErm7rynuaVBD8mXHoQDANBgkqhkiG9w0B
+# AQEFAASCAYCYU/y+WFCF+uJeVYez/0TWXLPhqs8IwxdiOxG3HP8WzY3/yWjw2/6a
+# x9anhX4qxL+MioMPa4nLneCCCbyk19uz8VNFc4R3Aa2ZvkM0I4tZWDKuzF8qfrx3
+# 0RydF43/PM5ML+0Q6EO3rAyOjIwcJ2tHpbsZI5RMIDAZBEV3XUtM2YvpAM3NsPHc
+# 4+VnnHOvgeaE8TbZffeVXUmtqBUOr4uOG6Bb6AFRajldZkAV4KEkgZsbZXmw6jyT
+# ddqW3IyWElHEmvaTDLYOeEfpT8rGUcCqtGcW1Dsi7T0zHbC3sjtrXObq9Mvuj+oj
+# Ht7UC6GqkZWkFr46PNo2w6eHUUN3ZFKSqi8K3CY+HCz++cx0sCJ2Rz0f7hu9+bFP
+# Tu4GpaGEiGopSaPQt+dOAe1Ijvo8SdCMbGbXDr3MTq46+oOVvVVkUncqieEdpnps
+# C2mC5VMO/oNJUHXE7xij07vUUJcdKvIxR4dIHdYsAv0oR1QfsRUumZ5GjEh/P5b/
+# Tow3e3cnjHo=
 # SIG # End signature block

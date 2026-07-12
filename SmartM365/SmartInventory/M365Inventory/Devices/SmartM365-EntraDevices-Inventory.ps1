@@ -46,7 +46,7 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.8
+1.9
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -276,7 +276,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -574,7 +574,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
@@ -1332,8 +1332,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBRP54I/XFpQsnv
-# 6NjZzY2GAChSdbibc1dJp7kPdEqAYaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4TupmVv9FoxK4
+# OsVXqiB41mreYNANDTDTAPQPLitVxaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1359,14 +1359,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAUFBDDuungHT+VQ/nFLJO4wHzT76S2RM5Q4wpA+MkCmjANBgkqhkiG9w0B
-# AQEFAASCAYBK7avC7P3G0hXAaoUg9eU3PojAgso8NylFhmMlx9C3EIoYzhXC2F81
-# ONeQkWDk3j8qBnS+oSXLtpciUXWyixTxcADtWMcqEA/mtt9d0n2IMG/d9E4ajeeZ
-# TFymPO69yewB2xG2ACUODWnmZEWYZj1cRqsjArwEbtN121TAIjRUQM/EUNs+cZzH
-# oib40SDruN8/vZfync/34aGHALv33UIZeWSO31khhRn5x3iA8CtLl4MokngjpzJS
-# vDNVZtok/JYhdxMsHdf8/H/Mg4sQfuwt3cqz+tdE0REe0OItZK1tQi9GNXBzcBZc
-# voUdle65dPICqZWc+gjBBSstmosDj4mp3r02kfm7aaeItjMNmjLaLTwD072+tj4A
-# KwOA3oMxmPnHFA0ju5hBaizXaz8FCT5tyIqQHdtMhPHUM6O0tzRctg4wNpccQQk1
-# /L+aO/DuVJlhK5s81amfrzNMPAq4bViytsg8YefppKCBO6osAmMTPovqezDtCv34
-# cdu2KXGccuQ=
+# BDEiBCBnChTyRaWpQeJCJFLQ38EcQQ1OujzMHc0zE2plhKj/NTANBgkqhkiG9w0B
+# AQEFAASCAYBYSFzqlK3VyAn/epsgNnBfGAFnQDZvprn+MJrvUkvSMFqp9Ulu8069
+# AGS+rHc8VrNpeXBCB7W4AXfKZxUiA/bKPJJDc0rwviNkql8HLqI9Hj6GEkweLG+i
+# QZcehcIIKCFJvzb49xN8pAZ1OSa6UOwCWUPja3Zd9rCbQ2GO5FKTdQS5/W5w8JMN
+# tKBKg871x2D/NiXHyxGzQIkViqEkhjytPCBLDwkxUpjLGi8SZii/VXSpTSOA3lRk
+# OcuF5EPZHbRkR+cYaREmLwOYB517DqmkBQjCvfziN34s1fVmqo5zyOe4OFiUyNqa
+# h0/QlM++JKNbV0LUAQhNAt+/L/IEmTV6DAF1UtND17OLxCKSe0tdUsXAZqsR4akx
+# H17TtDhcmzItIiE6vBplhNKzwFm1k6dDFeJ0A+ij0LBH+Cr3h4SXz6+4SCdKoj/V
+# T7PJAZW+gD1vlzVscC+8Au2RGBnjta4RNzdlq6VvFvmJiptzKor8OtLgMWsHOQQd
+# UBrbagIpSVo=
 # SIG # End signature block

@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.12
+1.13
 
 
 .REQUIREMENTS
@@ -285,7 +285,7 @@ $StatsSnapshotCsvPath  = Join-Path $LatestCsvFolderPath "Exchange_EXO_Mailboxes_
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.23' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -395,9 +395,11 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
+$StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
+$StatsCompletenessFailPercent = [double](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailPercent' -DefaultValue 0.5)
 $IsMaxItemsRun = ($MaxItems -gt 0)
 $IsBoundedMailboxRun = ($IsMaxItemsRun -or $Top100)
 $CsvSuffix = if ($IsMaxItemsRun) { "_MAXITEMS-$MaxItems" } elseif ($Top100) { "_top100" } else { "" }
@@ -2321,8 +2323,14 @@ return @{
             $script:StatsCompletenessDiagnosticPath = $statsDiagnosticPath
             $script:StatsCompletenessIssueRows = @($issueRows)
             Publish-MailboxInventoryDiagnosticCsv -Path $statsDiagnosticPath
-            WriteLog -Message ("Live stats completeness validation failed for {0} issue row(s). Diagnostic exported to: {1}. DATA-LAST and SharePoint CSV publication are skipped." -f $statsCompletenessIssues.Count, $statsDiagnosticPath) "ERROR"
-            throw ("Live mailbox statistics export is incomplete for {0} issue row(s). DATA-LAST CSVs were not updated. Diagnostic: {1}" -f $statsCompletenessIssues.Count, $statsDiagnosticPath)
+            $issuePercent = if ($expectedStatsRows -gt 0) { [math]::Round((100.0 * $statsCompletenessIssues.Count / $expectedStatsRows), 4) } else { 100 }
+            $isBlockingStatsCompleteness = (($StatsCompletenessFailMinRows -gt 0 -and $statsCompletenessIssues.Count -ge $StatsCompletenessFailMinRows) -or ($StatsCompletenessFailPercent -gt 0 -and $issuePercent -ge $StatsCompletenessFailPercent))
+            $thresholdText = ("fail thresholds: rows>={0}, percent>={1}%" -f $StatsCompletenessFailMinRows, $StatsCompletenessFailPercent)
+            if ($isBlockingStatsCompleteness) {
+                WriteLog -Message ("Live stats completeness validation failed for {0}/{1} issue row(s), {2}%. {3}. Diagnostic exported to: {4}. DATA-LAST and SharePoint CSV publication are skipped." -f $statsCompletenessIssues.Count, $expectedStatsRows, $issuePercent, $thresholdText, $statsDiagnosticPath) "ERROR"
+                throw ("Live mailbox statistics export is incomplete for {0}/{1} issue row(s), {2}%. DATA-LAST CSVs were not updated. Diagnostic: {3}" -f $statsCompletenessIssues.Count, $expectedStatsRows, $issuePercent, $statsDiagnosticPath)
+            }
+            WriteLog -Message ("Live stats completeness warning for {0}/{1} issue row(s), {2}%. {3}. Diagnostic exported to: {4}. DATA-LAST publication continues." -f $statsCompletenessIssues.Count, $expectedStatsRows, $issuePercent, $thresholdText, $statsDiagnosticPath) "WARNING"
         }
     }
 
@@ -2517,8 +2525,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDL66luyaw63eCs
-# klu4CcEnyyzvrhRrC3sYoS+EZ5Q+fKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBILnO3w3FtvpsQ
+# A0wYDeuoiF19WuN7U3IIRI2LruCjTaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2544,14 +2552,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCC0cPiKPEvvKmPk5TEubLc/9kvqSAk9qg29UHyVtfxnHDANBgkqhkiG9w0B
-# AQEFAASCAYAQKB+p9vKG8XNm63EDXMw1ZBR2o06MNG2Y8Gycrf+paVmjha1afvXo
-# j+FBCuuq37JOOAmPD1zhUajwISzvkStQJ9JVDTXhuFRoR55ZVjx2rrUKLnwCs7CQ
-# I4aPaLD9PsvQ6zFOc2jgdmOLokfp3I0Cf0Ull+zwgLWh+YH+kv31R6NKudyCVkN5
-# JstX6pM6ZbZiiVncrKL9xFTN421fMqwnokhdIvzjDxoxAVEnOR/akfxFkhPOt+ys
-# ygc5S2diXXtmIQ9wym0wgjetr+KDtXYvjDtvY3TYCoZweE8yC6WZuYrWpbqOQets
-# fficly/KzytE6kIW31PQGHMd3Q/buxza/DRzVcBO17RReqNZK90Rq+uL/29dzBIz
-# 6SviFQMyXsTPgzRDkOziiDzOWKx4QCrDnghS5KoFZQ1DG8KpDtvuAeJxT+Iz8kkY
-# W8YoPsh/zwhP0igWl9d6WRqlIvFH3YcSb0CXCtIq8WkRYlTfrE9781KGGnijgS6w
-# EQEup81NTys=
+# BDEiBCC8v2voZKvq/DAHFDR/19GBwwe9X6gaXXFXnM/HK5/27TANBgkqhkiG9w0B
+# AQEFAASCAYCM4jFXaVj/AfMPFXTu468GD7M2iGmMsK1jywyeeDA5ENjyNNUBD1Wa
+# F9jehi8TvKdri5qCBol2Ttpm4xmYFwhCOKIAV/9EbfagImxrfegdfFWWfWU6+3bJ
+# meOZhq5xnB6fho6n49WMYeKgUyLXoJXjvoSeouJHB7IWn3r+HgVI/zdh++yKWfFT
+# 7qp9PNW5dTLGh3k3vuUeEv++QStwxwR78WSZnh1eyDaZShxE5SNc5FyMSWE5nomE
+# 9c5bGycO/3QaqGF4eS/aa/l8nwTcoCv54l2lN5cLQamdljxaGEZb8Q16lUPkTJSm
+# BWRZy340fGn41zCQ1oJ3QD7K7T8QyOI4pSTGIEKgtJGaPOfuQ2ze3y2mRrAU8aXy
+# JQ1yOcVJDcm4fPHEXT1Eo31B4XgQMRMI4pSaYCAVJ8XkHKvGR62Wroqx+VfZYfB+
+# zjAu7iqbv/1Khe1fQH1HeUkB/UeEGTGRVOq3DCWtUn+9Q5X43tVO07AIJWpX+qkm
+# Sp43+CwwS4I=
 # SIG # End signature block
