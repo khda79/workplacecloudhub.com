@@ -68,7 +68,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.10
+1.11
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -331,7 +331,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.10"
+    $ScriptVersion = "1.11"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -521,11 +521,13 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
     $preMissing             = 0
     $postMissing            = 0
 
+    $recipientResultSize = if ($MaxItems -gt 0) { $MaxItems } else { 'Unlimited' }
+
     # Recipient retrieval: either all OUs (no filter) or each OU provided
     if ($AllOrganizationalUnit) {
         try {
             Write-Host "Fetching recipients from ALL Organizational Units..."
-            $recipients = Get-Recipient -ResultSize Unlimited `
+            $recipients = Get-Recipient -ResultSize $recipientResultSize `
                                         -RecipientTypeDetails UserMailbox, SharedMailbox `
                                         -ErrorAction Stop
         } catch {
@@ -539,7 +541,7 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
             try {
                 Write-Host "Fetching recipients from OU: $ou"
                 $recs = Get-Recipient -OrganizationalUnit $ou `
-                                      -ResultSize Unlimited `
+                                      -ResultSize $recipientResultSize `
                                       -RecipientTypeDetails UserMailbox, SharedMailbox `
                                       -ErrorAction Stop
                 if ($recs) { $allRecipients += $recs }
@@ -549,6 +551,11 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         }
         # Deduplicate by Guid
         $recipients = $allRecipients | Sort-Object -Property Guid -Unique
+    }
+    if ($MaxItems -gt 0) {
+        $preMaxItemsRecipientCount = @($recipients).Count
+        $recipients = @($recipients | Sort-Object PrimarySmtpAddress,Name | Select-Object -First $MaxItems)
+        WriteLog -Message ("MaxItems enabled: restricted recipients from {0} to {1}." -f $preMaxItemsRecipientCount, @($recipients).Count) -Level 'WARNING'
     }
 
     $total   = $recipients.Count
@@ -879,3 +886,45 @@ try {
     catch {}
     Complete-SmartM365ExecutionContext -Status Success
     #endregion
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoR3nY984WC1rg
+# JKPejKsEC8X+rwwCkYU36NUVe7x5iaCCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBPUt5c8MAfYnxqnhpN
+# EufJaPLKsNFmp1pnPE3VXWsvYDANBgkqhkiG9w0BAQEFAASCAYBrNWPjhsuyj6tD
+# asFi9v2JJg5PsucXrm/x7tfLdDjQJlRRoXdFlsZdmlhH8RKg7ufVDClwV/Wb5msu
+# gKaI0QlZy++JK0D/S/lAAeVmWzIB3YpZPXStxcWRkYsOMsl0RUJl2fr25gwQTdBE
+# kHgLSQIm8cr6r4kL2wJ4c9vrV6gQieS+8Us0grddYwQow7/qXhMTlmA3fnxXsMQ4
+# c+iK7DYr8qwWPQYZ0AvHGaWv1F+dtN95Q2/aCGcnG6orv2e83H6h8EB5TP52hJ2e
+# eMIf0j9lNNQxuzoIac78DpzNAqqAwjabYQiEBl3Mft8ISKqIF3WE+E05BltbomK8
+# 1leIWI4olSOovaaJDz4aQb3pSLlTXrN0WoNdF2W8bz/Vc8KmqX8sa13pgeVWHOHR
+# cLq0TZyCZLWREifERKyyqNFrWgQ4qM8IrOaTI7TtQMexx4YKZQTVNf86Z3FGW5zw
+# dR8SPmFRzkepGiWjr8PSYHdH9tYerTmjU/zInCvL2UvdCkL0ZxE=
+# SIG # End signature block
