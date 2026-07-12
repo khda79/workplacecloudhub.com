@@ -43,7 +43,7 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
 .VERSION
-1.5
+1.6
 
 
 .REQUIREMENTS
@@ -53,7 +53,7 @@ Default: 3.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.2
+    Version : 1.6
     Minimum application permissions: DeviceManagementManagedDevices.Read.All
 #>
 
@@ -273,7 +273,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $ModulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $ModulePath -ErrorAction Stop
+    Import-Module -Name $ModulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$ModulePath' : $_" -ForegroundColor Red
     exit 1
@@ -481,7 +481,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -768,8 +768,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAP90rORg/hbqtn
-# iVLTqKVEUpe1iq4LJxuAS2tQIBofnKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDgMIqhaQ+3nacA
+# FjTPsak0xoDhipXWgNfNLkYryAPo9qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -795,14 +795,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCM1pkepWVE5iZfMKixMboOLEdKMthNoGvE9GDuNnlEwjANBgkqhkiG9w0B
-# AQEFAASCAYBxAQRmLZm9mod5668l10TR9BhuBAbZ6L0W0episJ157MatAhklvbMm
-# 3ejChtGFvDQMqt98W5AL79A7EJMobiop4H+K7U4opFLstaaTouAigl3mzAU6CF4x
-# qMbTVU4OIFk2ziIFjoInxB2hLrEObsr91D1jmya5hT22mnOgHYyWGW0oB4Z8PDC7
-# ZPuK7dJmW2SCMxcyvzZpR0j6XBhpZgmxB+GDPTMgINQF6/HfGua0JCtWUP8tNhTK
-# UthUo/Akj56nQ6IaX3kr3zTr9Gp7F4hdtFbFtgohrqD9abD5V3FZSXZ7+6oGCMBu
-# xU53zX1JdmF7i7g2lDDoz0fpGisbB9vFvHHdtj4Kj6fVAgMcfRMm5M+0FhjKNfM4
-# rq2+1R/b4GfzV7VV1tiDT9WVhuQ92AO4n6aUxXyPV9mSEq3CXJWdxu5iwHBg93M3
-# 3SGmwTI8qWqsMjM6DUVcoDNWL2Z1Tnv+7PySg0vMOz8JHVC/YwTfYSOf3n9r5mPN
-# quWo+n9BXcc=
+# BDEiBCAPXxs43EzCIjJaYKrwn1HJNjGWEsJT4wlaxC2VDwZCUTANBgkqhkiG9w0B
+# AQEFAASCAYB5PHu4yXQoI0rdJsPYiFDHIT4S2LwCoxbRg30EabgoNE2q7ywBFvnd
+# 90y0vt7q5U96QwrElrF6rnzWowEKGyF/MWnvynbEOLFgl/VOWn+mrc/8A+hrC3EE
+# gpKJjiJ5oLVhnldmMCLBhZrLHrxjDAHEB5QC5UovjiUSGMm7NPu91/i2v1pKY+J6
+# 7BZX00+RZztj2lyigTW4sZMZ1xLk0bbqgIDobdAqGKT1Kv3kiPUVAsifrNcixbQq
+# wtF1cY6ORoxE8oBFbS6E+6we4orff6IiSPmp/5bovqj10S2mg51CW5GyXtbgdRkC
+# eAgZ4WQ6IbxB7A4Yv8GM/9sGRBLiuf7AWzTvstJ1re2mn7Aj09o0Yr3Vzddi46xV
+# pJWxfjY6UkKVZd9RqE7Qms35xdQAsb2YZPY/K3enJTpU6Z3LsoSMcaP7kl+rPSte
+# ZFMRdCOvfL/a6Y01tDHhzWz9I6A0AWnb6kduyjPaaKJsQeccoFcmnTPOAyCp9JA5
+# 4+wzybjJPWY=
 # SIG # End signature block

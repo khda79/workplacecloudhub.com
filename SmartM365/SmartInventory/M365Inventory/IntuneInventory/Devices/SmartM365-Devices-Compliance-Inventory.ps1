@@ -36,10 +36,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.6
+    Version : 1.7
 
 .VERSION
-1.6
+1.7
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.6
+    Version : 1.7
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -296,7 +296,7 @@ $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'L
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -1175,8 +1175,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC045PnznRTy0R3
-# dZiXQ8PIWsgvf3PxjvYoJ3403yvjHaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDH4cTrQxsL8ngs
+# D4WJSe55VY8+RfRXul38k0NjXGSS26CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1202,14 +1202,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCAoaOt/VhSrHE/9rk63Dou9w9qdgNQSGALgQFX+RP78+DANBgkqhkiG9w0B
-# AQEFAASCAYCeWLcDIRNkhYTQTxmi4r5UrV0bcTbYQUbeZr51SBwOkvLP1jSzxU1S
-# 5oAW19MCNsjwvGLtbr1T0XPubfkFa1ek/FeKErxe9n6QyXaGA6HSlDhgSAKet80e
-# AxhQBr8WgQbzW08ujaXQ0Q32qVC67HyB6THgtBYrzTI6etXlLwDSrVTrZFaqQK7d
-# R00Qg475tu7pkURcogfZQTlL8zGOMzgKzkNlRLgHf6mZkT/oodl/GM00Ur5pr/qQ
-# HW+ZblfBSbQDivNYJTpngpI5W+fbfLjJSzmcGW18mo4ayZzi1Q1JxKfFv+DbDK6X
-# eCUl8KkHeuNlp/57O+iYq+KaaoxVfyMcc4KgZmRVCW/EeHiP8/TLY99xTOwf3vEW
-# Kv6zFlVmp3Tdp7HYkJl8ehOYO9rcEM9AKmWeof+QXkjKpSpDTzZsg4ZDpgPzm3if
-# IStSqPMVu/SnfqA6yNtbIvCElTJG67Gg30XnPMkqbMUXVWzLH/PQm+7MFYEHmyui
-# IKrYjU19SCI=
+# BDEiBCCds3iVV8Il3UqaG6yaOC8N93BG7wi68TstzQWORj36CzANBgkqhkiG9w0B
+# AQEFAASCAYCVzvqujwV7q16vS1K1iXAZ8i1O4XyGJVOjfZH9ZGfiQaEOFKAS+o1s
+# jNQZDPNMwNTftIRf/5+QUGHHIsJ+Wz98kZxdM2Hz++DXuhAEJPCVO7ocRz/9vXAo
+# iBuwil+qCegs2TGDVn+IT+8eW1voiT+dPR0Lv81Y59OfP4t/6bRVBUVux1YIyPj1
+# H3NeN3FU7NY3E7Ul1yIzxZGipyg44/NUOZ13K978OZI73yY0tAb7muavDwXLhmSI
+# s1gNx5aUXOdAjTE/s9GPZe9bc63qPWlYN3R7IvZXCIkVV5Sr5FihGROTLvNhW1mn
+# iIP13vo12QD4FeB5dprza0YeavMA1VFKSwD73I7DK7PGaCTo+6CKhJtGt0xPryGY
+# bRr0pxao5e+duLEq97KKpY4lH/KHq8bI5Chm5JzAN1tO3zO/6+a14aHxIjMFSkPQ
+# Q1/Rvby3WyGo0D6vtidZvupRoFT06BW22ImduJMs17ZzdpiG19NVH3WvFy1bKObE
+# v5cN+fsxy2M=
 # SIG # End signature block

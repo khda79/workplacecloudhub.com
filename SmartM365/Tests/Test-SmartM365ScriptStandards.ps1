@@ -7,7 +7,7 @@
     Use -Scope All for a wider migration scan.
 
 .VERSION
-1.2
+1.3
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -222,6 +222,14 @@ foreach ($scriptFile in $scriptFiles) {
         Add-StandardResult -Results $results -Severity $severity -Rule 'MissingExecutionSummary' -Path $relativePath -Message 'Script calls InitializeScriptEnvironment but does not call Complete-SmartM365ExecutionContext in its cleanup path.'
     }
 
+    foreach ($line in ($content -split "\r?\n")) {
+        if ($line -notmatch '\bImport-Module\b') { continue }
+        $isSmartM365InternalImport = $line -match 'SmartM365\.Core\.psd1|SmartM365-WindowsPowerShell5\.psd1|\$modulePath|\$ModulePath|\$CoreModulePath|\$coreModulePath|\$candidate|Join-ModulePath'
+        if ($isSmartM365InternalImport -and $line -notmatch '-MinimumVersion') {
+            $severity = if ($Scope -eq 'Changed' -and $isChanged) { 'ERROR' } else { 'WARNING' }
+            Add-StandardResult -Results $results -Severity $severity -Rule 'MissingSmartM365ModuleMinimumVersion' -Path $relativePath -Message 'SmartM365 internal module imports must use -MinimumVersion so copied scripts fail fast with stale modules.'
+        }
+    }
     $expectsScriptLocalJson = ($content -match '\.local\.json') -and ($content -match 'GetFileNameWithoutExtension\(\$PSCommandPath\)')
     if ($expectsScriptLocalJson) {
         $expectedTemplatePath = Join-Path -Path $scriptFile.DirectoryName -ChildPath ("{0}.local.json.template" -f $scriptFile.BaseName)
@@ -275,8 +283,8 @@ if ($errorCount -gt 0 -or ($WarningsAsErrors -and $warningCount -gt 0)) {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4rA4LiXeDN5jD
-# mr9KRUOdB3rKWI4mExFta2yRG4EQ9aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIUkrj/II3kNpm
+# 9XgO+LaTfrjKm7Cr31nCyd4a8OQwm6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -302,14 +310,14 @@ if ($errorCount -gt 0 -or ($WarningsAsErrors -and $warningCount -gt 0)) {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCnnJPafEy/+89WJ6hTLZKR2jC/Zq05z5wZz1KGUq1BxTANBgkqhkiG9w0B
-# AQEFAASCAYAEHyJydnN8t626JOP0mOladCcw5IhQgrkzsW+UwCikHWzLpwicHH9d
-# 3TYDn6PaltVtYr8Gjc0lnwiLka6PGFqnVxe4Wtumv2s7DinbzUXT6EaKDqqopO9W
-# /CO5R0F7D//1Yneb+hfNdg1TI+g9b51jIR5Ia/DayNPgT50xUSVY/9LcHMoV/qJs
-# keURwJb8PMiypkGA9MLTSVMBKbr0a0O6G/WndFbhOzrJdLmB60PQV8mdcf6CmT05
-# p3hLRw762AtT/yWoH4G7pjB5Ia4mwvG6ANmYDSAz0qaLQDr6qSdpP6T++LJN6MC0
-# WyZ6X19CkUay3KgkX+YeCwspGPeApsAI516Hu27MT80uaAdsdUqZ+/Hd7+AkMDVK
-# Qtz5f+4Zy+1PZhfONTqLlHtjm+kOM+gvWTeB9Vfftb7YlYx1sASM17CCtMhwcSz+
-# 1o6a5JQskosnBMnqLUeMqQSuAIGBJYkstRzIdFebspCVejQuj2kxwIxQFHL6EUKQ
-# ugoja3QN63c=
+# BDEiBCCfLMvmjq0JhdCE4FwUW3gIIWyGqZWHGG99DKfVPh7rhjANBgkqhkiG9w0B
+# AQEFAASCAYChqI+ZmX3M58VLqDv6pb5R/iQBnqJDjLmpASe0YO45tLUI4XHfCcqc
+# I/XiyvW4QdRu5TuqytTPraUEyaDRkv2/5ud+rL13hE9TvC0gAMUFF3TJV1Y8rhV4
+# PtIicT0nEUrTPb7LKUvZOMuyC2ia/yLfvkm6AIcM0vxMPp5JEgYIhRBOPfJee7WE
+# 1c5CKuOSmRVAl3PJFx0TemoVUWvwQhzHZumASN8dapJWrfHFyLmAFHi1IEbqKUrq
+# SJHPsHAvXfBXxr+A9QqOcY7RGtYQlUPRS4RCPT5sYn31Fyl05i0Z724FyXOKKf3G
+# smoZSm/mtkwb6dBjlZ+tkV8IXrEQ/dg5Y34+rq8h1fF4FyzYXiByKvcjizUHfbAc
+# epS36QiRvezD6pQi4y8t+SFQdrtqcN4rtkmw3+rRc8biNtnvEv9dBtLYZ3FKFo32
+# t7DGkiO0lx9TRtZgIoGPrVgE0XOfDtQOPnyGFJ1evre/WiF2p1t4gUHJHRs/mAxM
+# Y6FzF3nuY6Y=
 # SIG # End signature block

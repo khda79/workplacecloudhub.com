@@ -23,11 +23,11 @@
     Interactive delegated permission for Microsoft Graph PowerShell:
     - DeviceManagementScripts.Read.All
 .VERSION
-1.3
+1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.2
+    Version : 1.4
     Minimum application permissions: DeviceManagementScripts.Read.All, Group.Read.All
 #>
 
@@ -70,7 +70,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.3"
+$ScriptVersion = "1.4"
 
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -255,7 +255,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module $modulePath -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.22' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -649,7 +649,7 @@ foreach ($remediation in @($remediationList)) {
         DisplayName           = $displayName
         Description           = Get-ObjectValue -InputObject $detail -Name "description"
         Publisher             = Get-ObjectValue -InputObject $detail -Name "publisher"
-        Version               = Get-ObjectValue -InputObject $detail -Name "version"
+        Version               = 1.4
         CreatedDateTime       = Get-ObjectValue -InputObject $detail -Name "createdDateTime"
         LastModifiedDateTime  = Get-ObjectValue -InputObject $detail -Name "lastModifiedDateTime"
         RunAsAccount          = Get-ObjectValue -InputObject $detail -Name "runAsAccount"
@@ -726,8 +726,8 @@ if ($script:SmartM365TranscriptStarted) {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCn597yderi0KgF
-# O09hT11P/dcvfS+zj2trYdkgtV7iX6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9LBFkbWwYddOW
+# AdNjOVnR3m0P+cQ+7aMkYAEzUi5SK6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -753,14 +753,14 @@ if ($script:SmartM365TranscriptStarted) {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCCDuax1P57Bu3mtTIow9djgrzf8Cs7x8Gz2yzp9M3H+jANBgkqhkiG9w0B
-# AQEFAASCAYBPGV0oXs1aRnOlpM0T1NQdEkM49joFv36zfcWjP/i0EAtBmLIfPh2q
-# 7siECvJFEkIe5TDWzow0ZZd9VgNaDjzRcKwKCUF/TQGCJEwOTtFRIym1/JrTEm/x
-# k+bqsdYQ2im5mkix5WIz/YPeE4mDepeBtqi4u127g4px0uuGZvcTn6SX7Yx/CzOJ
-# 9gTA712TjACCY1ysNPvU4BAxT0gsJKeN5XEzw97BZ574ejalqJNeii//UlpbwOAr
-# AXogfWUkwXld30RtTFCOf3Dzhh6Fmq/xFYJUpsoKqJAsymUpfGpypTvqNW1PDjx1
-# 2t0hfNP63Z0K/uQfIZyeFVqzwlGliVaiuo3a+bdOHvurY5AAC3ncqOFMoZdwF7Kh
-# SNfC5KtudxK3f2KVBdrARxzriDondeCOxCm4B2Jg+zH1vi78pnQee34+d4G/dubN
-# 0/LzdGtxvJ9WVZ1D/69Rg3RG0UODxjqvF6GLVPVXYlsfJkBViPtk8CaBavfqC9Rl
-# 4H/edgZ+QUU=
+# BDEiBCAzkBigE7kks6rNZZAKS44xQVBu88M5Wl+ctygnD5er8TANBgkqhkiG9w0B
+# AQEFAASCAYAUyS23JBwxK5Er9Mdr1UjS27DO0Vf2Wl5NerYMUjGlCTOaqP0VV+Xh
+# QqTpAq0hxsMWAF1X2FMmNTMDd3Jblf/Tvqky4K7ilzKuCcv0J4a2ZTM5RFDX6E2s
+# cTcqCNP1fJipVm4z6mvD7aLdEkKW/CpamLDURY0boArpQvqG/v5lgBmiqCeU4Dtv
+# rRJUF2TC+obX9++JhzjzijEQq9fevKLBL82/XuA2miLpqiayPuPjbzfo77kZX93C
+# F5kxPcjhlcH6ELX9cf7ScyItsN7qkbgMUC4nkRiVmiQdL+QvPd4cDG0xz9KxpN1n
+# YvBW6ki+HuHsaEDKXNpmKLkpIbIckmS94e939/NNSV2qElP4skzmSY4NhkhBzqP9
+# Sqco+G/I/Y9tEoSXT7SPHC1Uvf8JW4dDOemW7D0NiFgcFsoEy5QfuqvV11cNj8bF
+# qyGiCYJxUGbMVwJJU1TP7/olhZ+1U++SrWbVsPKNkWS1IGlDhcG+TfUqDiPphnEl
+# b2AyTQS0p4c=
 # SIG # End signature block

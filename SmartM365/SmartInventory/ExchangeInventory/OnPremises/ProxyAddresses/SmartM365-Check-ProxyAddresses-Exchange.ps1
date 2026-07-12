@@ -68,7 +68,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.11
+1.12
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -331,7 +331,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.11"
+    $ScriptVersion = "1.12"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -343,7 +343,7 @@ $ErrorActionPreference = 'Stop'
 
     try {
         Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-        Import-Module (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -ErrorAction Stop
+        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.18' -ErrorAction Stop
         $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
         Start-Transcript -Path $global:logTranscriptFile -Append
         WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -889,8 +889,8 @@ try {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoR3nY984WC1rg
-# JKPejKsEC8X+rwwCkYU36NUVe7x5iaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoePA6UFCEP1A/
+# nwLnNnjJMN/76gukgUipIuvqAz+9d6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -916,14 +916,14 @@ try {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBPUt5c8MAfYnxqnhpNEufJaPLKsNFmp1pnPE3VXWsvYDANBgkqhkiG9w0B
-# AQEFAASCAYCLfnx5OMmkmnffCitNNDyuSN9ru7LJCyPg3JZyvdELDUw1bJBQ3XrY
-# RY6do/YhjtHrVBRdlnYua+MDpNuYu7vxfEz5fowKkqJ2oGIgyl7N9OX5O+ybrlDX
-# aLrtOiZSyxDk2c1CZd4wrEhxiQOsTvXm/Nb5KoYxRbZqOa5QCqzT5z9ssxtKJceT
-# m6dDMZ7gFGuacYMnOp5E2y8Ub5qW11qBms5bfCdP+T88OQpVnkUNbpTQUXRYbgmE
-# wtaD6ipZLDO1rCDnNgnirioMa08eMWBtBVhkEqvnkurkY2KkrbCrz2pGcx0HiQpm
-# D9XS6PxLNMymaUHQfmFiuLe+8gZ54SChiuxLEXgkuvyDvR9UKijqTLXeT01XKCy+
-# pgbdKtPorjCIQdcYjGDVM+UAUM3kJK7rwfI+a4qUOenFOV85W5TYvCRfIAsykKt0
-# E0tHaSk31bSGNXk/v+ehsbUtdgVbhJGxMFw2gyzvzXnZOK33qSUkkiPJkO66OGgj
-# xD4UYPQSid8=
+# BDEiBCDpqR5i7s+7LaqOy2/3Hl6/exa6bdYOe431NqgdlFSbNDANBgkqhkiG9w0B
+# AQEFAASCAYAaVqBCWGeGNz64R8j06F4GXujT1eOC52t9o1PYsyU7xbrPndm3utcr
+# M1ci0SddgpuJJB3xUAmlpW9SwtSbW5bhjSvfYJeB8dP6VF58itk5Qv+5PCzTtGbh
+# RvP2/sZf5APSOYpnqGX7KOhlpMA6NLLvMULljbyH93geehWyugdhIa8dLHItpojk
+# UBthWq6dTYllzu+fsH4E8GvMcCKYFKM52tnP74IAjphHky4RQjNvETGjf8dam10o
+# xAIarvBecsnG6erF0DAoCs6G+z2+u+dENbzroI/lN4qbfrQKh+5gV03OBGeVyt3c
+# ZE8BkSoRXeL3QeuiIhv4dtnOfzyyODZdcEvyDa5FoL2UYHDRwNRWwzGIav5quR04
+# drzIIw7kejUK5ewx4RekoY10KVgQSNd3BW2kgf2Rg6ht8dTMMR/nmwoP1GMIR5XK
+# aCmqmPTDa9l7jFHUGR0mTfO869jV1VRHJwWDUwm3nyc+6w2vTsN9gHmz0AkMx8Cg
+# ONzMA5QXFaM=
 # SIG # End signature block

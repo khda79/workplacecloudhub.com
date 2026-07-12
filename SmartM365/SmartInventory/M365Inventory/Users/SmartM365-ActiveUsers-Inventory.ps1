@@ -16,10 +16,10 @@
 
 .PARAMETER InteractiveAuth
     Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.3
+    Version : 1.6
 
 .VERSION
-1.5
+1.6
 
 
 .REQUIREMENTS
@@ -28,7 +28,7 @@
     Minimum Graph application permissions: User.Read.All; AuditLog.Read.All; Directory.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.3
+    Version : 1.6
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
     Minimum application permissions: User.Read.All, Directory.Read.All, AuditLog.Read.All
@@ -251,7 +251,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 }
 catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
@@ -374,7 +374,7 @@ $csvPathLatest            = ""
 
 try {
     #region Initialization
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
@@ -800,8 +800,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFwzYYBkyqalxv
-# OlmRQ9WkfGdgSNED2vzRsdtZq1EEkaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDgh/qv3NUJJMbo
+# pA8tE2PmO04HX7cv+GY5qHfHPwsnIKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -827,14 +827,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDuJTrcaHmhg8hv/CKzJgmKe7YDqGdajFYgaj6CWR2gdTANBgkqhkiG9w0B
-# AQEFAASCAYBjgAFger6hhOhq+DiKeDvMiC88PuPxyN5Z9mVZDfZBTM1miGM7d7op
-# jF3LhoocHr6lPcwL7M5SvrKwmYZy6qvngqo4hUyGA1e3In8ZWluMIRFWmBh7Q6Ia
-# AMkhU1bF+BWVcTDfbZIpto7w7SIojKGWtOPYEINnbueXaDkXkKj2ThXsN+13GVQu
-# HoduXLmTpDYJPI37Mtv8znUpqNGRMW2rGgyfKgulYOGnWTpaxwkVBMJw+fW9e1vW
-# ZvPNXMBeBl3Z+8xsh2FiBIPC7ruKou1cFRO71GYne8WHQl70rR6fsb3s0Q6/SSPI
-# oJXXkCOXwj2+8+x2veIb2BUmyfrjnFFN/6y7284h8j+vgYF8HlSupehK10wJhSHr
-# v07I1fuTivOHM0tKARmWouvVqZhTxM4GZLZBnV272h2NYOTaxdk8+JGlZbcxDT7s
-# jZRVs1AqgPUtINi/2VD1hUTtn1Dya5XXi+qBCIpyWSLr5Gsgio5XCngjJSCrCkWr
-# Q90lYJn7IfQ=
+# BDEiBCCzlcR2Mz80o+XL5YarADJu77EthgFbc0QrmRtkquPwQzANBgkqhkiG9w0B
+# AQEFAASCAYARdHVoQLZRItQmM0auaNWlwgsNCRDN0K0TB805DGWI17do3ACoU/4s
+# xEKZkiVuwxqcppwsDmax4O/YbOy3ddrF7oeNNFoJZTyLh9oFwMp1KRM6e+yzPc9d
+# ytIhqJpfLWs4dSXsPJSFti0v7DCcVeRwpbmyHmC+JdxbBQwDkJBXfAuY4Zdpljiw
+# HFuo1ZJnt4Ydef9i/kIq7/Bl8pdE8LmJP/YjJSVFLEwvfsWqqTCRmDM/P7qlUfM0
+# iG/Xt+puRFzXoe4aw0D4hAHOTjAkGJm1wRVLkYl3U2lwoooiu80UQWKVeBz9eicD
+# UdZX0E8L/Gf3+AXdBhVMbEVDNPeQ/SALK5Gb9qdwW1IzaVl+6BOVy4davAk45vYJ
+# esOWKMmqdIj7FPy+v1+gov3J7vtL934ZCtXskG7EMJNBMVpk79fmpUyfvW0ZzwqD
+# VK2WGJE6dft/8R1HdXF1gupSnk1dMc3y561oKU5O1ea4xphEPhWBf4d/RpwM2CVH
+# BMBikBmReFA=
 # SIG # End signature block

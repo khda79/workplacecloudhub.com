@@ -22,7 +22,7 @@
 .PARAMETER DefaultOnly
     Exports only the default accepted domain.
 .VERSION
-1.5
+1.6
 
 
 .REQUIREMENTS
@@ -354,7 +354,7 @@ $MaximumFunctionCount = 32768
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -467,7 +467,7 @@ function Send-AcceptedDomainsSuccessNotification {
 }
 
 #region Init
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $TaskNameCore  = "Exchange Online accepted domains inventory"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $currentOperation = "Initialize script environment"
@@ -630,8 +630,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKPdOMOdvNWrAG
-# J+9gQVSanxeXjxEe5tBRXosHr19GL6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDxFdcKkbP2kDw0
+# EPIuD4nJklpGoFZ/UyEXs4ceLuL6vqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -657,14 +657,14 @@ $($global:LogTextFile)
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBXg/LbI40elj39r0t13khUG/0mAdzKwLC0Z0s6yE21FTANBgkqhkiG9w0B
-# AQEFAASCAYClWNpV2wvo2e/ZGyKQnH/hi+PBUNyAuxAtLyLL1dlt/5Razrg2m4cz
-# jb+lb/KIiccnKTYCHTyyLZFc5eOdbej66hhsXVXATnZij5W1lhPSj2YKmvSR0YRM
-# 9ABs9kb0pXDuKv3/X9GAQPLhYu7DvtljfnGDUcSs0o3nmiGuGS6rzAbViCJeDpiE
-# QqqOG0au8wCpsGkiCJ+hVaeHsoX3KNJ8qeJcU6pP/xZNOMXkLYusKyBoSt6JuYsZ
-# RF/G65IAz3uRSDXSlkbmaZ/Qs8GY7/KmxJ1/40h6aWfEtZmXMO/rJxDDBFPAGyjC
-# Hh2yVpsxOONdyvpOPNxtXkqmzYQEaHGLhJTkVcM5wMzmDx8vl894WLW0l6gzXgBu
-# JmHDO+S/XT8YF40k+ldHAs3Hw8VIjK6/rdfWB6+e1rN/eXZqXWDH4t1IE8TavjTM
-# iQRnAo5n6+uZWjMgGYzoyYXASzk5t60xj/LOu3CXoQ5nmgxMrAkAnGhhFZOoQ+mI
-# MvF7oq3QaH4=
+# BDEiBCBw0lp0U5BV7SNVUZzfWYixlh7LV2mAUa2VDcMLcNLatTANBgkqhkiG9w0B
+# AQEFAASCAYAsq+WR1i0HYOuQ+zHmvzV9wcvyrvKEdecEXbKKefhlcom38T0EcSqN
+# W+0+EXiJFFO8CpcJJk14rLHPA2GV+4NCvJ3svwYg5UZ2dhwomZYHhxgbTKbgmxcF
+# kMNmFtkjGobdiVKhpubn4MIcZHkxllSxMd316P/z4KIVbaIMpDmp8loRNWi6MclI
+# iaQjOQ9bnhod/eftGcAQPmRMRE+WMzhSfBJ4FmcZB2zDi6Uwiw300JGW85QqXCds
+# cEoQ9htHokbdvwlitQEDLd4No7HJNOGOxP9y9VGXSKyACX8aqqtw++JftFTUuGYa
+# 8zCsiF0aMyzhTiJlX2FIX15sxW/0X5KZG8YmaRy8u8H+ypKfAB3+lWYrT1fWsgnv
+# QvhzhnW6OZghuWAsFjmHzDy081CYnvn3djZg1WOZH7EDIxml/2YcGezNqu5u6v6u
+# Lj+bsGqEbLX8e0YG3JRp5Eiq2Zs3pFjQ5ipY+gwPZbOn58vRVYfshMl88J9Iri8h
+# pnf2wBdy6ow=
 # SIG # End signature block

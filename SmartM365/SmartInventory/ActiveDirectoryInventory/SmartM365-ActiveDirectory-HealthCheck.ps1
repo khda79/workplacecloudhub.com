@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.14
+    1.0.15
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -71,7 +71,7 @@ $RunId = [guid]::NewGuid().ToString()
 $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = '1.0.14'
+$ScriptVersion = "1.0.15"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -95,7 +95,7 @@ else {
     $TenantContextDirectory
 }
 $CoreModulePath = Join-Path $SmartM365ProjectRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module $CoreModulePath -Force -ErrorAction Stop
+Import-Module -Name $CoreModulePath -MinimumVersion '1.0.22' -Force -ErrorAction Stop
 $LocalConfigPath = Join-Path $PSScriptRoot ("$ScriptBaseName.local.json")
 $LegacyLocalConfigPath = Join-Path $PSScriptRoot 'AD-HealthCheck.local.json'
 $LocalTemplatePath = "$LocalConfigPath.template"
@@ -425,8 +425,8 @@ try{
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDv/oSThH1FlqGe
-# Ig2DBr2FdT1S4219SjedU4IMKTpM7KCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCByN1pJXo0xNsK9
+# ifK+MwBhTV7V4ZwJCPQyZbTqmiel5aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -452,14 +452,14 @@ try{
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDgACuq2oOK/p8IeiHpcUO/X/MeiNLzm3Y0ngiMMNiDSTANBgkqhkiG9w0B
-# AQEFAASCAYBKH5KcEdXwyfzD1q2qXF6NAXmvWuS9qh+wpH0TnyEoPjX9+Sksqkzm
-# cpvuMUqkiTUhRaQ7lyahdxqA5h35V5ltAaEDBZlreCqoxRIRyf+rccOi/f2HD9Qd
-# NeqVjvzcXMVwclco9q12Uxqdd/A97OhKXMNW7X8Qxqzgy2IsQTuO9je/FXJPUzhh
-# E5n88gqzJCzXBuP6xnj/VwNX8MIDU6my/+HTNbCHzKCBJ57dkcm6TonxrpexaZLE
-# TVHO5Bknf+bXek8Nt5r0aHvG0FzjoeLZd9l70Vhg7EBIZtrC22xKKWYlv1+kFvVN
-# epvo0FosIMJmMf1oeKh9f4s74Scr6mIJKrjstiZEBqIrNYF85gPeoMP6+Lyly2OI
-# PWaAdkIE5jYLs68rV9UcAvzVw2/u4Ab3bzeZhw3cBCyfMMiKdpzwJUClyZtO87dA
-# Hz56SA7/jzEHqfAwHJGUb/j4whlmeld6V06uah74gVx42U4lsGCDaTrtmtU5+IYr
-# MbVaLUd2YfE=
+# BDEiBCDw175KeKhM48dD47+FFFLHpjO6hdPBNoDLHCcmbYItqzANBgkqhkiG9w0B
+# AQEFAASCAYAp8ZOfuqAVGW3BrZ53ouUVH2ZbsnROAbZe4Nsw9JMyI/HE0KNGf+Gx
+# BQTn9Nh2kxoiqLN0XBdnuItCmXTLY8cqEZ/bCf2CL+/IrPSqykcNfXqJ1+TD5r6U
+# n5OUANqvpOmiZRq60Xs4fNeWJOAyNsJUsI6iwgNTF0PSvUhOYkP1AvF0fwLtJ9Ng
+# 3robbcMDwavul5DCHdkS5cH6XZhsZsxcgsSrXr5a1F1ZlZSgFWCVYX4Dx5ezkE45
+# 94TlzAxlYBGv93vtYRGkVoL+CsLy11iKbKMCbF2vh4GWWmWdWK0AfWS5aClwGhoO
+# wb1C+0M4zKOQwtJJn98oq00+ehmp4QlYceLZyxUufDDF908/tivQ9WOLmFK2qQqY
+# dxSHstJr6KTITTdFIuT2GoJfvS+e9xnH0fckit9IY77uYvncfVmySKWEP86gEScM
+# 6YSCkkiWQYZSYcIOs3CFaGMR8ox/1A8Zw//GoyR8XUrGkBqwealIkaPGcAfBXv/Q
+# JydpyZmeMfM=
 # SIG # End signature block
