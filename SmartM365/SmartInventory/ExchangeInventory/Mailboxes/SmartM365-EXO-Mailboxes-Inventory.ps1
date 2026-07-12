@@ -15,7 +15,7 @@
       - Permissions live only with -IncludePerm; otherwise via snapshot CSV by UPN (NoPermInDefault)
       - Robust DisplayName (EXO -> Get-User -> Graph -> Get-Recipient -> UPN)
       - Robust RecipientTypeDetails/MailboxType via fallback Get-Recipient/Get-EXOMailbox/Get-Mailbox if null
-      - -Top100 for quick tests
+      - -MaxItems <N> for bounded smoke tests (preferred); -Top100 is kept for legacy quick tests
       - -ResolveManager enables Graph manager resolution (DISABLED by default; column kept, may be empty)
       - SchedulingMailbox added to system types filter
       - AssignedLicenses no longer fetched (column kept empty)
@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.7
+1.8
 
 
 .REQUIREMENTS
@@ -325,8 +325,10 @@ function Send-FatalErrorEmail {
 }
 
 #region Init
-$ScriptVersion = "1.7"
-$CsvSuffix = if ($Top100) { "_top100" } else { "" }
+$ScriptVersion = "1.8"
+$IsMaxItemsRun = ($MaxItems -gt 0)
+$IsBoundedMailboxRun = ($IsMaxItemsRun -or $Top100)
+$CsvSuffix = if ($IsMaxItemsRun) { "_MAXITEMS-$MaxItems" } elseif ($Top100) { "_top100" } else { "" }
 if ($PermissionsOnly -and (-not $IncludePerm)) {
     # PermissionsOnly is meaningful only when permissions are being collected live
     $IncludePerm = $true
@@ -336,7 +338,7 @@ $TaskNameCore = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 if ($IncludePerm) { $TaskNameCore = "$TaskNameCore (DEFAULT + ARCHIVE + PERMISSIONS)" }
 if ($PermissionsOnly) { $TaskNameCore = "$TaskNameCore (PERMISSIONS ONLY)" }
 
-$TaskName = if ($Top100) { "$TaskNameCore [TOP100 MODE] v$ScriptVersion ..." } else { "$TaskNameCore v$ScriptVersion ..." }
+$TaskName = if ($IsMaxItemsRun) { "$TaskNameCore [MAXITEMS-$MaxItems TEST] v$ScriptVersion ..." } elseif ($Top100) { "$TaskNameCore [TOP100 MODE] v$ScriptVersion ..." } else { "$TaskNameCore v$ScriptVersion ..." }
 
 $OutputPath = if ($PermissionsOnly) { Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMailboxPermissionsCsvLogFolderPath' -DefaultValue $OutputPath } else { Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMailboxCsvLogFolderPath' -DefaultValue $OutputPath }
 
@@ -1334,7 +1336,12 @@ return @{
         }
         finally { $InformationPreference = $oldInfo }
 
-        if ($Top100) {
+        if ($IsMaxItemsRun) {
+            $pre = $mailboxes.Count
+            $mailboxes = $mailboxes | Sort-Object UserPrincipalName | Select-Object -First $MaxItems
+            WriteLog "MaxItems enabled: restricted from $pre to $($mailboxes.Count) mailboxes."
+        }
+        elseif ($Top100) {
             $pre = $mailboxes.Count
             $mailboxes = $mailboxes | Sort-Object UserPrincipalName | Select-Object -First 100
             WriteLog "Top100 enabled: restricted from $pre to $($mailboxes.Count) mailboxes."
@@ -1520,7 +1527,7 @@ return @{
     try { foreach ($mb in $mailboxes) {
         $swMailbox = [System.Diagnostics.Stopwatch]::StartNew()
         $counter++
-        if ($counter % 50 -eq 0 -or $Top100) {
+        if ($counter % 50 -eq 0 -or $IsBoundedMailboxRun) {
             Write-Progress -Activity "Processing mailboxes" -Status "$counter of $total" -PercentComplete (($counter/$total)*100)
         }
 
@@ -2454,3 +2461,45 @@ $($global:LogTextFile)
     Complete-SmartM365ExecutionContext -Status Auto
     exit 1
 }
+# SIG # Begin signature block
+# MIIHcgYJKoZIhvcNAQcCoIIHYzCCB18CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvEJ22C36xxf/P
+# FOsYt1M7qbB4FpEW/2vF35MJkcRq3qCCBEgwggREMIICrKADAgECAhBxu0EivlCF
+# tUbJPfe/Va5qMA0GCSqGSIb3DQEBCwUAMDoxODA2BgNVBAMML1NtYXJ0TTM2NSBP
+# cmNoZXN0cmF0b3IgQ29kZSBTaWduaW5nIFNlbGYtU2lnbmVkMB4XDTI2MDcxMTIz
+# MTc1MloXDTI5MDcxMTIzMjc1MVowOjE4MDYGA1UEAwwvU21hcnRNMzY1IE9yY2hl
+# c3RyYXRvciBDb2RlIFNpZ25pbmcgU2VsZi1TaWduZWQwggGiMA0GCSqGSIb3DQEB
+# AQUAA4IBjwAwggGKAoIBgQC4A+QoBzUXkXXMoVrptgMss1BNRwJhNcYop9CKHvJY
+# QnBLkhSI10Z7EBCZsDSAfICechL0e7Lrwaz8/sTRQeITCKMRzxFe9Oq1CxZfRUh0
+# U1T/m8+9q/OR0C6hCSZ9LvpiZExBSmQsQlXyl8smfFK2+gecLOQUPFD7gcpM03gv
+# 6OkX/bLpBQZs52K3RnH+YKje0L6W985qxn1M5nDmC4rc2U90k4evzMMPOjTX7jZA
+# PHOT3g6ByPWI2SNowO1ptXheS4KGjbx3IH+4+r4UwIPc32hauiAfjXr63inQdkII
+# 7tYVI5GBiJB20Gzujm5KuHU9qVXMvAAk7WR9DBGdH4Pq5Or3WD58KV2Mazx0SWhV
+# A4ikEEENTbaWIaFEYgWR2PAtPv7rt/p5ZK05fP7Nt/TfSHzBFQsKS4wFchiWQTVj
+# kdAPuzsipnwiJyOSmQ7FppnuuhUxEq9ZkOigDLett9ZoY5oNcASOnpCWnxnWx/aq
+# xDuJOnKBOGRly1KFUQ+OABUCAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeAMBMGA1Ud
+# JQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBQkjQccxcT1k6xhYBW0XHlelX6nFjAN
+# BgkqhkiG9w0BAQsFAAOCAYEAk3bN0vTJBIFnyLm4zxarRLfr6uEl9Y2Xk4P16AxG
+# DDLN+Zd7T+oblgAIz4/0EHPJ3DsonLsjOnZBOp5iJr1nSxBy9Cs6K1T6k2mtSr93
+# mOT2MSNDlLOFhk37U46yFDJHfX4rQLTmltOoUpeU7V7Cr5EnWJ4xbdmexZUx5vz+
+# qeqqe86VxT00Npb5OXINvs8+gH85J+x4HWmrTDzruME1JLkX388g3AQvVd5Xf0YY
+# 2InRPQ7Y0jrzccH6OSz14DHSnzN5pKzVzvv9aFDuZ+gCkbC8ZIr890I8WXxbYskX
+# 8bTTP0Sa8Jhw22OCOwzDhFxxqivhbqHRybgQ6KdSoDxS51WHp3saGlWfwmFyWkIe
+# L5eEpdz8r2vpTbaJVZnVT/SxpYobgZIn3zbss0JFiltcgguIoc+fNbMEUoqnEARQ
+# dD4+fIPF32CUclDI6JpugYJLSuvJt6gy4k78A1jQaYTbdZ6Twt+Pup+3ocnWmeyV
+# umYxx47CZmI93XUw5yflFPRUMYICgDCCAnwCAQEwTjA6MTgwNgYDVQQDDC9TbWFy
+# dE0zNjUgT3JjaGVzdHJhdG9yIENvZGUgU2lnbmluZyBTZWxmLVNpZ25lZAIQcbtB
+# Ir5QhbVGyT33v1WuajANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQow
+# CKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcC
+# AQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBF/6jctxmPlbXmLAsL
+# Wg8I6JTUxtofjljWNr9z7Lo37jANBgkqhkiG9w0BAQEFAASCAYAWnHeOVSsyNiH4
+# qbycLhD6nHCFmMXB+o1BsV27sXFPkHpLn/OTCnneuXZGVRtbv1LO5rkMX6kjuAf5
+# hx8Rmjf2RfYiQTfJPwU15rW1p9l23g94WGcezKESbDQM9RK9IY9iMzBmSvArEDgN
+# H0u4OB+Msv3r7fIbtJTJL78FAH8KjaTT51jP/GsTPmiiThTEzrG+Gtst++0ZqCyH
+# 6Pl7O33flVsq2awDDrFc7n/Ajs69Crkai49ZwULykzi8wh74OZwtJOaWw1gUY7x0
+# 9gRDEPuRudr65K7OunUbIPt9CNiwaqyuC5XDnqevuel3NSa8E3whWoeTS7MNRrcC
+# HuRpxqooeVN1TrwXAK45OFFmuwIVxxmFi3+xPkwrknD4sHkaPKWHstKsSIZJuIV7
+# JhhNoUUTeqVZowbJ5yXq3BxWl9QG5so7yxTawROPwWKV7P4la+TPVwiexZtqvCxP
+# xGyDEWeQmQMv4r87tGANbwBr0k/TXEiD4jFVnUx0N0ehLAMlmzg=
+# SIG # End signature block
