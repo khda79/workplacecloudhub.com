@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.51
+    0.1.53
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -109,7 +109,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.51'
+$script:LauncherVersion = '0.1.53'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -2488,11 +2488,11 @@ if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
 }
 $cycle = 0
 $mergedHtmlReportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$mergedLiveHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_{1}_live.html" -f $script:LauncherLogSafeLotName,$mergedHtmlReportTimestamp)
 $mergedFinalHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_{1}.html" -f $script:LauncherLogSafeLotName,$mergedHtmlReportTimestamp)
+$mergedLiveHtmlPath = $mergedFinalHtmlPath
 $allCycleResults = New-Object System.Collections.ArrayList
 $allCycleProgressRows = New-Object System.Collections.ArrayList
-Write-Host ("Merged live HTML report: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkCyan
+Write-Host ("Merged HTML report: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkCyan
 do {
     $cycle++
     $computers = @(Get-ComputerList -Path $ComputerListPath)
@@ -2527,7 +2527,7 @@ do {
         $mergedProgressRows = @($allCycleProgressRows.ToArray()) + @($cycleProgress)
         New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows @()
     }
-    catch { Write-Host ("Cycle {0}: failed to initialize live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+    catch { Write-Host ("Cycle {0}: failed to initialize HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
         while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit) {
             $computer = $computers[$nextIndex]
@@ -2632,7 +2632,7 @@ do {
                     New-Windows11UpgradeCycleHtmlReport -Summary $mergedLiveRows -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows $runningJobRows
                     $lastLiveHtmlWrite = Get-Date
                 }
-                catch { Write-Host ("Cycle {0}: failed to update live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+                catch { Write-Host ("Cycle {0}: failed to update HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
             }
             Start-Sleep -Seconds $JobPollSeconds
             continue
@@ -2774,7 +2774,7 @@ do {
                 New-Windows11UpgradeCycleHtmlReport -Summary $mergedLiveRows -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows $runningJobRows
                 $lastLiveHtmlWrite = Get-Date
             }
-            catch { Write-Host ("Cycle {0}: failed to update live report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+            catch { Write-Host ("Cycle {0}: failed to update HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
         }
 
         $runningJobs = $currentRunningJobs
@@ -2792,9 +2792,9 @@ do {
         foreach ($normalizedResult in @($normalizedResults)) { [void]$allCycleResults.Add($normalizedResult) }
         [void]$allCycleProgressRows.Add($finalProgress)
         New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress @($allCycleProgressRows.ToArray()) -RunningJobRows @()
-        Write-Host ("Merged live HTML report updated through cycle {0}: {1}" -f $cycle,$mergedLiveHtmlPath) -ForegroundColor Green
+        Write-Host ("Merged HTML report updated through cycle {0}: {1}" -f $cycle,$mergedLiveHtmlPath) -ForegroundColor Green
     }
-    catch { Write-Host ("Cycle {0}: failed to update merged live HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+    catch { Write-Host ("Cycle {0}: failed to update merged HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
 
     try {
         $moveAlreadyW11Result = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary @($normalizedResults)
@@ -2839,10 +2839,6 @@ while ($true)
 try {
     if ($allCycleResults.Count -gt 0) {
         New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedFinalHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -CycleProgress @($allCycleProgressRows.ToArray()) -RunningJobRows @()
-        if (Test-Path -LiteralPath $mergedLiveHtmlPath -PathType Leaf) {
-            Remove-Item -LiteralPath $mergedLiveHtmlPath -Force -ErrorAction Stop
-            Write-Host ("Removed merged live HTML report after final report creation: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkGray
-        }
         Write-Host ("Merged final HTML report: {0}" -f $mergedFinalHtmlPath) -ForegroundColor Green
     }
 }
