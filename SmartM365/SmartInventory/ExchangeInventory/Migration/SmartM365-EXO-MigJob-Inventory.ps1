@@ -17,7 +17,7 @@ Forces a (reconnection) to cloud services when specified, or auto-connects if no
 .PARAMETER InteractiveAuth
 Forces interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.5
+1.6
 
 
 
@@ -27,7 +27,7 @@ Forces interactive authentication instead of app-only certificate authentication
     Minimum permissions: Exchange.ManageAsApp plus Exchange Online app-only RBAC allowing Get-MigrationBatch and related migration user/detail reads; Global Reader is the default read-only service-principal role.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.5
+    Version : 1.6
     Author: https://github.com/khda79/workplacecloudhub.com
 Date: October 2025
 Dependencies: SmartM365.Core module
@@ -243,7 +243,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # Import SmartM365.Core module (psd1). 
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -354,7 +354,7 @@ function Get-AllPreviousCsvPaths {
 #endregion
 
 #region Module Import and Initialization
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMigrationJobCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -667,8 +667,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsOg4E6x8Ik2Tz
-# Qe13GZ0pw4oFExQRbC55hmx+/TfJZaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBObj76y2wd6Z2C
+# f6AQWEAyY/0Kkxn7pWzh7pnPo20/gqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -694,14 +694,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCABzKRX1TIP8OpLTd4GCTkesI/tu01oUMjAa7O9/6xvMDANBgkqhkiG9w0B
-# AQEFAASCAYCJHMfL9z1/moeD+3WSYpA2S0L6R2fSdQ+bbARp0kZ05OF48A8v5Arr
-# BjwTarElC6G3rVtiP8MRCWJ3RKl9FwiITIcqq3e4rJ+2Yt/YCrzIdtvVskoAffTh
-# skHPTf4Pyh/X0CtOBjNHg7GKnCTkHDy49V1bH9GRbzdQBdmgEdMI/AV3Sm3zDajE
-# uB5HVP7rQFPkasie3wqLKd03iRPVhDELdcsYAgahEt+Fr2QPz6N1yN3eNSN7RHAZ
-# ALbRezt4FKDvORKTcYCFFntZF0kfgNn+zhdCqDHiX0QIZX7JpO+RvZGi8dQ0GMwf
-# ydKkfgty7Xc20InE7a7ff65l4Y1Z0bEuekduJpFhJBUW6HSxw6eB+w4o1Xz9gr50
-# fxC0+ARyd9uSsqE+vlVFDkAn4Br0KGV9nXEiQyFDVx6HeSDvzZ2v37xHEOJtsk5Z
-# N3tlgdDdiThZhtJJY+/v+xXVbX365cJ0A//ay1hPyPzuP0WDLgSJGeRauluuNIXU
-# h1u0IS2/QKo=
+# BDEiBCCHkhroKxCD8g98h6Sir4R8MIph5Zk8Bs0ixTocrijwiDANBgkqhkiG9w0B
+# AQEFAASCAYAKoGXaoKpELkAgV39SCnghEuAL/hOVYgqkFKiUwOfwu7iLdF2U4xI/
+# 7w8OiNCBNmwv7AwU+5zaLj/IzcY5l4wGGUBMUcu3lCemGNnP5Bi/Jm+Gy8mkBMak
+# Du7MVcLyVdfDw5RCvw9tRMtQLQ3LsUEOM8N67N0jb4kpDU8OX7+c7TnKPDXjqyTL
+# 17Ct1hIsdkqtYunc/fv+4wyreuUvguxSD+Z2uJJ5Uj2VXU4qskjSYi4a/phNh2n4
+# w114A06AbxnVLENyRULLJ8vtyOOCZkmTm3oUrzG+E1A0rEYDUWCcF+KV34bA3HJ1
+# ilwiXLgTSRLJR8ZltP7yUukrSqR8MqmUfhvi5MBw9oxZO/fktpFCDCwNN2hY59Ye
+# Q4N9ZPtfNr4mYQMxEtMos6BXUJcMsokStMZOIwERbtrDinUw23O9Ut3WD18x1k93
+# twZLcAb6e1yBsy6VXG8Izv/Hoc7cwm9Pvo3Znj/JaeGLuFJgySo0rVFm5Rq8j/8L
+# PCzDYn7skTQ=
 # SIG # End signature block

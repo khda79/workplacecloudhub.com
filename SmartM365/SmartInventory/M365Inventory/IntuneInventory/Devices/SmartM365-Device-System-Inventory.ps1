@@ -29,7 +29,7 @@
     The GUID of the Intune Platform Script (Detect-DeviceSystemInfo) deployed to devices.
     Required to retrieve SecureBoot/BIOS/FirmwareType results from deviceRunStates.
 .VERSION
-1.6
+1.7
 
 
 
@@ -39,7 +39,7 @@
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.2
+    Version : 1.7
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -361,7 +361,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module $modulePath -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.22' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -527,7 +527,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.6"
+$ScriptVersion = "1.7"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -789,8 +789,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6m2N8VmSB6y66
-# 2CZX+cyWTumXlTX3wxA1bftFXZJVS6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfUL6FOePFGsIG
+# S2MVbmVSbe0E+LcgrimAeZ6r4RZy1aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -816,14 +816,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCmUkashzJOLcPyD3ger9Qba56ZyuPdFxo9f3BLnpuCUzANBgkqhkiG9w0B
-# AQEFAASCAYBKEvtU5lS3TL9usVSSwy14IwOdP3B+0JqGl+HVGsv5bxYUiptDMg/v
-# LZOck9+LlPyumkteBAAfxzqnrYb/fJYTt6a56rfkFkdGjKZ/3JcU1Myo8LVcma7z
-# PZJwsjTd535nsJXDj/bdXFHxsYdyyEX5tQvIVJN02kp0LsSIbYixZ1T5YqJhiQSY
-# QXT1y7viuwrPExdnSLmLktHRDXBlyO1cDdlIXr7m2eTlKh+MfcKWxjMG/TbBMuiS
-# N4abNMRCPGDqJpJKmoDw8fQuqZMJC6FHh4JXZLWkaGDpIPcZGRR9bzIV9Yb3T4vG
-# bgW+wNK9bOgq+ykz5ZPmpJu2qSCcfTyI6FszmL4EvjTSGq9RmiGWxpLrc/Uvg74B
-# s7nMXmXrVZyRdk56zDy2fD3fk+yFje94a76Iqd4OJ5S35KGuE3WtMXt94gHFDgYT
-# eR2w8jY7UXVrOMuOVzGiw/w7XsJS9cTdiOKYOrqKhcrvmB9QiiyAiNGLTls9fsG2
-# h/zYOxs8Ikk=
+# BDEiBCAYi4TcSRWx4u9H1pv7GKXLwLOx2rbFepJF+iQz3qU56jANBgkqhkiG9w0B
+# AQEFAASCAYAJVZMGlFcvfhy/RC6ix5IVpH5k+xiGnJFsjEW3M1/dt4qCUHyakNPa
+# QgtLuwCXvewfsNEy42EnOrL91S7qvpkcVRYqqyJF5ZRJPunBE0WmOXitUstl45m9
+# 3tYo0jTnTTOGu1K5IElj7sIx9ZWhkwe0AwHaIKiXSNhlUCIUCePk5XUjKhEk72J6
+# zrk8y1rRVoTRd+aZ5I5oghqYT87N6HryYcwo8tD5I9+E88t9Qi3ZKwF2pW+bgcjj
+# NXjFxt/cKpT/t6WjSaL8NKLWLc5M7v2kSFmyA3+Txd3R6FdBv+uBbHsOLWE1SXnb
+# P3c2/5BAXpd6EZA8FywwbCNsQdJs5yctNgdXZOhBEU3uIWRtk+pslAIX6xyhrkXM
+# qQ0/H6Fj1YI3PiX0rULgEadflQQr/pzRd6fjZsHaWNOs34+UARUlvfUnXUjI/ZZs
+# +1/bIbR8ayPUX3HBdAWm66ntvbH3trEchiaiAiEVXulslHtMz8E6/GeoSGAk+ZpF
+# lAKl5D4Edks=
 # SIG # End signature block
