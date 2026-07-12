@@ -91,7 +91,7 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .VERSION
-1.3.13
+1.3.15
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -125,7 +125,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.14'
+$ScriptVersion = '1.3.15'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1374,6 +1374,87 @@ function Get-OrchestratorLockOwner {
     }
 }
 
+function Get-OrchestratorScheduledTaskIdentity {
+    return [pscustomobject]@{
+        TaskPath = '\WCH\'
+        TaskName = ('SmartM365 Inventory Orchestrator - {0}' -f $Tenant)
+    }
+}
+
+function Get-OrchestratorProcessCandidate {
+    $tenantPattern = '(?i)(^|\s)-Tenant\s+[''\"]?{0}([''\"]?|\s|$)' -f [regex]::Escape($Tenant)
+    try {
+        $items = Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | Where-Object {
+            $_.CommandLine -and
+            $_.CommandLine -match 'SmartM365-Inventory-Orchestrator\.ps1' -and
+            $_.CommandLine -match $tenantPattern -and
+            $_.ProcessId -ne $PID -and
+            $_.CommandLine -notmatch '(?i)(^|\s)-Stop(\s|$)'
+        }
+        return $items
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Unable to enumerate orchestrator processes for stop diagnostics. {0}" -f $_.Exception.Message) -Level WARN
+        return @()
+    }
+}
+
+function Stop-OrchestratorScheduledTaskIfRunning {
+    param(
+        [string]$Reason = 'manual stop',
+        [int]$WaitSeconds = 30
+    )
+
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) -or -not (Get-Command Stop-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Write-OrchestratorLog -Message "ScheduledTasks module cmdlets are not available; scheduled task stop skipped." -Level WARN
+        return $false
+    }
+
+    $taskIdentity = Get-OrchestratorScheduledTaskIdentity
+    $task = $null
+    try {
+        $task = Get-ScheduledTask -TaskPath $taskIdentity.TaskPath -TaskName $taskIdentity.TaskName -ErrorAction Stop
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Scheduled task not found; stop skipped. TaskPath={0}; TaskName={1}; {2}" -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $_.Exception.Message) -Level WARN
+        return $false
+    }
+
+    if ($task.State -ne 'Running') {
+        Write-OrchestratorLog -Message ("Scheduled task is not running; no Task Scheduler stop needed. TaskPath={0}; TaskName={1}; State={2}." -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $task.State)
+        return $true
+    }
+
+    Write-OrchestratorLog -Message ("Stopping scheduled task after {0}. TaskPath={1}; TaskName={2}; State={3}." -f $Reason, $taskIdentity.TaskPath, $taskIdentity.TaskName, $task.State) -Level WARN
+    Write-Host ("Stopping scheduled task '{0}{1}' after {2}." -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $Reason) -ForegroundColor Yellow
+
+    try {
+        Stop-ScheduledTask -TaskPath $taskIdentity.TaskPath -TaskName $taskIdentity.TaskName -ErrorAction Stop
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Failed to stop scheduled task. TaskPath={0}; TaskName={1}; {2}" -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $_.Exception.Message) -Level ERROR
+        Write-Host ("Failed to stop scheduled task '{0}{1}': {2}" -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $_.Exception.Message) -ForegroundColor Red
+        return $false
+    }
+
+    $deadline = (Get-Date).AddSeconds([math]::Max(1, $WaitSeconds))
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        try {
+            $task = Get-ScheduledTask -TaskPath $taskIdentity.TaskPath -TaskName $taskIdentity.TaskName -ErrorAction Stop
+            if ($task.State -ne 'Running') {
+                Write-OrchestratorLog -Message ("Scheduled task stopped. TaskPath={0}; TaskName={1}; State={2}." -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $task.State)
+                Write-Host ("Scheduled task '{0}{1}' stopped." -f $taskIdentity.TaskPath, $taskIdentity.TaskName) -ForegroundColor Green
+                return $true
+            }
+        }
+        catch { break }
+    }
+
+    Write-OrchestratorLog -Message ("Scheduled task stop was requested but the task is still Running after {0} second(s). TaskPath={1}; TaskName={2}." -f $WaitSeconds, $taskIdentity.TaskPath, $taskIdentity.TaskName) -Level ERROR
+    Write-Host ("Scheduled task '{0}{1}' is still Running after {2} second(s)." -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $WaitSeconds) -ForegroundColor Red
+    return $false
+}
 function Request-OrchestratorStop {
     param([int]$TimeoutSeconds = 180)
 
@@ -1382,9 +1463,22 @@ function Request-OrchestratorStop {
         if (Test-Path -LiteralPath $script:Settings.StopRequestPath) {
             try { Remove-Item -LiteralPath $script:Settings.StopRequestPath -Force -ErrorAction Stop } catch { }
         }
-        Write-OrchestratorLog -Message ("No live orchestrator instance found for tenant {0} on {1}; no stop request was left pending." -f $Tenant, $env:COMPUTERNAME) -Level WARN
-        Write-Host ("No live orchestrator instance found for tenant {0} on {1}." -f $Tenant, $env:COMPUTERNAME) -ForegroundColor Yellow
-        return 0
+
+        $candidates = @(Get-OrchestratorProcessCandidate)
+        if ($candidates.Count -gt 0) {
+            $candidateText = ($candidates | ForEach-Object { "PID={0}; ParentPID={1}; Started={2}; Name={3}" -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate, $_.Name }) -join ' | '
+            Write-OrchestratorLog -Message ("No live orchestrator lock found for tenant {0} on {1}, but orchestrator process candidate(s) exist: {2}. Stopping the scheduled task to clear the orphaned Task Scheduler state." -f $Tenant, $env:COMPUTERNAME, $candidateText) -Level WARN
+            Write-Host ("No live orchestrator lock found, but orchestrator process candidate(s) exist: {0}" -f $candidateText) -ForegroundColor Yellow
+            $taskStopped = Stop-OrchestratorScheduledTaskIfRunning -Reason 'orchestrator process exists without a live lock' -WaitSeconds 30
+            if ($taskStopped) { return 0 }
+            return 1
+        }
+
+        Write-OrchestratorLog -Message ("No live orchestrator instance found for tenant {0} on {1}; no stop request was left pending. Checking the scheduled task state." -f $Tenant, $env:COMPUTERNAME) -Level WARN
+        Write-Host ("No live orchestrator instance found for tenant {0} on {1}; checking scheduled task state." -f $Tenant, $env:COMPUTERNAME) -ForegroundColor Yellow
+        $taskStopped = Stop-OrchestratorScheduledTaskIfRunning -Reason 'no live orchestrator lock found' -WaitSeconds 30
+        if ($taskStopped) { return 0 }
+        return 1
     }
 
     $payload = [pscustomobject]@{
@@ -1409,12 +1503,14 @@ function Request-OrchestratorStop {
         if (-not $stillRunning -or -not (Test-Path -LiteralPath $script:Settings.LockPath)) {
             Write-OrchestratorLog -Message ("Orchestrator PID {0} stopped after manual stop request." -f $owner.Pid)
             Write-Host ("Orchestrator PID {0} stopped." -f $owner.Pid) -ForegroundColor Green
+            Stop-OrchestratorScheduledTaskIfRunning -Reason 'manual stop request completed' -WaitSeconds 30 | Out-Null
             return 0
         }
     }
 
     Write-OrchestratorLog -Message ("Timed out waiting for orchestrator PID {0} to stop after {1} second(s). Stop request remains at {2}." -f $owner.Pid, $TimeoutSeconds, $script:Settings.StopRequestPath) -Level ERROR
     Write-Host ("Timed out waiting for orchestrator PID {0}. Stop request remains at {1}." -f $owner.Pid, $script:Settings.StopRequestPath) -ForegroundColor Red
+    Stop-OrchestratorScheduledTaskIfRunning -Reason 'manual stop request timed out' -WaitSeconds 30 | Out-Null
     return 1
 }
 
@@ -2987,8 +3083,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMwX96AaLqQWNr
-# 9SY052tZ+93gCOVEHSYm3qWwNYKf5aCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWpFvuQRrKfGx8
+# 99E9rZCasXmHe/QN9z8UtCPMKSRpIqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3014,14 +3110,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCBUymQEmYIwVmkoqW6pu8uBdbolmrQS8toulqr4FBfEjANBgkqhkiG9w0B
-# AQEFAASCAYCAtGFJBrxG8ueCRP6t7ZlZwFQTYb5een1v5s10KiF9tpFP6dueo1ZU
-# NkTFcGHzm7gCMIcKl4rlnEJYaAza6Rvi5s2tFpX3ShkT2m6W0cAZkDbSOPgQB0q/
-# Fe9VIoQXVh/zrBSCGp9iiuFIuyND6HeiBpnXpIcFHKUSFN3TOfAg2qmtmKk0wJRL
-# D6cG9n/A+Gtu4oop1+Z8SIPqeyi0WIt457K+TpgR3gw7+QyR4pyTLutWft3FpJMk
-# 2OTNworUHz7umWYVgBOlRLMuxID2Z2RTDPvX5Yp5IPQ3sVJcrCM+4gtVd7h0SjFb
-# uIZ8JuXaRsUdQJkMQwnqiPiE0cJ0RCFV0QoySBpXPDKpbV2krmNXtrnRq9bjnr40
-# zfpgYjdHZOFM1G1OrsqJ2Ff6eNvgpQL1mSIoGwYLRwZGstprnuyJBkv5YGQdX2Hr
-# DnUxyp0j9dHzZd8uULDJrIuT5jxeYGS7JsFwHlyH24WaiVEOK0esMkd2o7pKjVId
-# wR9qIdcyomQ=
+# BDEiBCCByMVGrQiQBLvqbhESUIfqvLUqdpEHcdnRBfgLmXyPQTANBgkqhkiG9w0B
+# AQEFAASCAYAJDZwzmWCA9BZyoJwjL4JkObkcntImTM4Ygc4Dz6mU/prL16GWpAzY
+# R7O2RAW92r21fvk9dM4UMvbJpfLGOiFdcIN6yhmZmOUoXwEKrrLCG0R+zjJ7VuMq
+# t+6Jw0HS0LrGM4A9GnWH7uXEfYpU/h1Au4z+Oeg6DCUENAYN2Jamkvdxf8HrxevM
+# dFhVS3pxS0Aq2KvNde6R2wzjW3q/6ipcwTu1rj0VeG3yq5QAsKcmwMLWxYoTfjeJ
+# Fxgr5BikWswknfL51Wkn26lO7OVjJzmaVO+a7zfj3cIM2vIVH7XlE/sfqZ0Jz7wa
+# ttqCSGrPtlbzVfuuf6Y1X6wS9XymgzKBOKpMS+qw5GbGpYSkTVRt3MAi0Pi6sL2y
+# oq9EFEpD/wBXiKYbt1GZc11zQE65e1Rg/6BxaU0GpqPuCh0i9yrPKLr0Yi4IbF9s
+# moSLSfvNDpSZRpOoWkuylSI50BuexyS/+BEvDib0y6FAEeCgD5sMarkKsvXuMaUS
+# 2Zi3eVAhn7I=
 # SIG # End signature block

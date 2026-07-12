@@ -309,7 +309,8 @@ To make the scheduled task pick up a newly deployed orchestrator version, reques
 
 The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -Stop`. The running instance consumes `Orchestrator-StopRequested.json` on its next tick, stops launching new jobs, saves state, releases the lock, finalizes lifecycle tracking and performs the final SharePoint upload. Detached inventory jobs are not killed; the next orchestrator instance re-adopts them from state.
 
-If no live orchestrator lock is found, the stop command removes any stale stop request and exits without leaving a pending stop file behind.
+If no live orchestrator lock is found, the stop command removes any stale stop request, checks for orphaned orchestrator PowerShell processes, and stops the scheduled task when Task Scheduler is still running without a valid orchestrator lock. This clears stuck `Running` task instances that would otherwise refuse the next scheduled start.
+
 ## Testing before scheduling
 
 One-line commands (run from the repository root; use `-Tenant prod` for production):
