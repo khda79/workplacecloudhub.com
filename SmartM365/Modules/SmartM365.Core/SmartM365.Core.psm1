@@ -2948,6 +2948,17 @@ function Connect-SmartM365GraphForSharePointUpload {
         [string]$Thumbprint
     )
 
+    try {
+        if (-not (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue) -or
+            -not (Get-Command -Name Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
+            Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+        }
+    }
+    catch {
+        WriteLog -Message ("SharePoint upload skipped: Microsoft.Graph.Authentication could not be loaded: {0}" -f $_.Exception.Message) -Level "WARNING"
+        return $false
+    }
+
     $connectionKey = '{0}|{1}|{2}' -f $AppId, $TenantId, $Thumbprint
     $currentContext = Get-MgContext -ErrorAction SilentlyContinue
     if ($script:SmartM365SharePointUploadConnectionKey -eq $connectionKey -and $null -ne $currentContext) {
@@ -4313,8 +4324,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCVQgnpAu6XHJgi
-# Xsyym7ft4I+KJab4KcU9IW2Y9QoVhqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQXnnMKCli4oI7
+# leb//Ogt0SMiYZ8Lxuot8kk3ysn7qKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -4340,14 +4351,14 @@ Export-ModuleMember -Function `
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBXpGnRh5puCApBS4J+AecuY8CRkNCYLQB/FiwuKq69DzANBgkqhkiG9w0B
-# AQEFAASCAYAt+0GHzKiU8Z/PgTE+S5MxGKWkvhxSdZ3Ox+LCd1oxtgTSjzqztj4p
-# MCvDwRLPgPfU1v7FcJspeAdZE4e4Ev/O+tUtC38EmAmisFLtyeXr7kRzv5UlnW8i
-# nnaFTU0KzTCWHVB8k4d1fmF6d3KGkeHN/JGFId25fNFLuYAOx5OyCTARfG4d/rr5
-# X3lczC2qqB5asGxe39vBD70KVw/YJziatLBvYfJ5dhGfLPQDzqZ6z06SvnSmfXef
-# qp1FzE+W59RGkt+J6YsIDTETOIOy3Qfl6ogpfmijEkZGoux0b/+kVzyoL7j0lBWF
-# yTsglCZENeCGlUReybEUe5ID7GzqGApZTBfAh1uqx6b36dH38pETeP/Yix2aDu9c
-# Js5P67CHvGlZPwjy5xKOIujxjh4OQxzEDq3ws1C1QHUtwMOFr8vI9Dn06H+veRSJ
-# tdwZNdkYwulLbaICoFGo2DmvRzhL/Pt3Qy1Sm5oFf50S9K2M5Tzby/s8II5G6MFV
-# XZq5YBhovU8=
+# BDEiBCCflPI0d2yHd1ReVdHvQAvd/I2CVwWDk5WzKK0JeerZ6TANBgkqhkiG9w0B
+# AQEFAASCAYDBf6PrKQgf0yo0j99Mm9REZT4N+/5DKx3qLg7Mkl62a8ZhYbqpxwwi
+# +sc7AJozJNIrbXL0c8fv5TLflqcNp1RWfGYWdTya3A3XF5tXOLo9jiUvGK2FyFh8
+# V5mZvM22M21QA759XJ+P/tTpV7Ed76L11dRj+a53xnlmxKvgDxf8m36uapKrKW3U
+# Lp47RbGNLjVSphH7AJWa2zlv9FAjhFOyZstxtKNGT5cto+kx2CvkqcFIdq7MIBg6
+# rtAJ4BBtI1KyofHEpvgupRJYXbOxVHKqQ6wikw7NJYqji8P75hydRExJ2djLef//
+# U7dui2o2l+lXQXR5aif+ObtkwapZjoDUF0OHuZJpIWhjWHuQni4XZBhNyyoWDUcy
+# CiYzMuBoVLpP9pqN+BMi8os7QxP0y2CWKy8ci+0CmLfRQogKalZFr6mgANsPv3rS
+# QbAOsH0m2rvMouF35CzoKV6iiriKe0A+NBqaXAJrny0Ju58IY40jR9vGvAvaWpnu
+# 6yJ2B4jhaq0=
 # SIG # End signature block
