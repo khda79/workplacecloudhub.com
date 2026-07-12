@@ -91,7 +91,7 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .VERSION
-1.3.15
+1.3.16
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -125,7 +125,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.3.15'
+$ScriptVersion = '1.3.16'
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1399,6 +1399,20 @@ function Get-OrchestratorProcessCandidate {
     }
 }
 
+
+function Test-OrchestratorScheduledTaskRunning {
+    param([Parameter(Mandatory = $true)]$Task)
+
+    $stateText = [string]$Task.State
+    if ($stateText -eq 'Running') { return $true }
+
+    try {
+        return ([int]$Task.State -eq 4)
+    }
+    catch {
+        return $false
+    }
+}
 function Stop-OrchestratorScheduledTaskIfRunning {
     param(
         [string]$Reason = 'manual stop',
@@ -1420,7 +1434,7 @@ function Stop-OrchestratorScheduledTaskIfRunning {
         return $false
     }
 
-    if ($task.State -ne 'Running') {
+    if (-not (Test-OrchestratorScheduledTaskRunning -Task $task)) {
         Write-OrchestratorLog -Message ("Scheduled task is not running; no Task Scheduler stop needed. TaskPath={0}; TaskName={1}; State={2}." -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $task.State)
         return $true
     }
@@ -1442,7 +1456,7 @@ function Stop-OrchestratorScheduledTaskIfRunning {
         Start-Sleep -Seconds 2
         try {
             $task = Get-ScheduledTask -TaskPath $taskIdentity.TaskPath -TaskName $taskIdentity.TaskName -ErrorAction Stop
-            if ($task.State -ne 'Running') {
+            if (-not (Test-OrchestratorScheduledTaskRunning -Task $task)) {
                 Write-OrchestratorLog -Message ("Scheduled task stopped. TaskPath={0}; TaskName={1}; State={2}." -f $taskIdentity.TaskPath, $taskIdentity.TaskName, $task.State)
                 Write-Host ("Scheduled task '{0}{1}' stopped." -f $taskIdentity.TaskPath, $taskIdentity.TaskName) -ForegroundColor Green
                 return $true
@@ -3083,8 +3097,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWpFvuQRrKfGx8
-# 99E9rZCasXmHe/QN9z8UtCPMKSRpIqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPeOfmo5SPmlg8
+# D9OGDL0VyvhiJut9Jjfz+XrqWVK7MKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3110,14 +3124,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCByMVGrQiQBLvqbhESUIfqvLUqdpEHcdnRBfgLmXyPQTANBgkqhkiG9w0B
-# AQEFAASCAYAJDZwzmWCA9BZyoJwjL4JkObkcntImTM4Ygc4Dz6mU/prL16GWpAzY
-# R7O2RAW92r21fvk9dM4UMvbJpfLGOiFdcIN6yhmZmOUoXwEKrrLCG0R+zjJ7VuMq
-# t+6Jw0HS0LrGM4A9GnWH7uXEfYpU/h1Au4z+Oeg6DCUENAYN2Jamkvdxf8HrxevM
-# dFhVS3pxS0Aq2KvNde6R2wzjW3q/6ipcwTu1rj0VeG3yq5QAsKcmwMLWxYoTfjeJ
-# Fxgr5BikWswknfL51Wkn26lO7OVjJzmaVO+a7zfj3cIM2vIVH7XlE/sfqZ0Jz7wa
-# ttqCSGrPtlbzVfuuf6Y1X6wS9XymgzKBOKpMS+qw5GbGpYSkTVRt3MAi0Pi6sL2y
-# oq9EFEpD/wBXiKYbt1GZc11zQE65e1Rg/6BxaU0GpqPuCh0i9yrPKLr0Yi4IbF9s
-# moSLSfvNDpSZRpOoWkuylSI50BuexyS/+BEvDib0y6FAEeCgD5sMarkKsvXuMaUS
-# 2Zi3eVAhn7I=
+# BDEiBCA0EJPNAerxeY700k2LjXL4Z6EqG17NoV2LS+SgoTQZSzANBgkqhkiG9w0B
+# AQEFAASCAYBpnKDimkUuEez9N8T9GEvPMkCFRmwKCsocztxQrKRAlrcu7ljpCUhF
+# E/lZNIEz1bbDUND63mqrCTf3JBymlNMl7zxMTn5I6JZ1k2ZfzB/X6BxG4fCE4otD
+# 5IFvGNqf+QZa7lwiKHjhenrTp/uiJq5gd2VyCtZJhFLSMAAL8f10CQZynr33h5PA
+# +fBQo9X9ro01zMUCMx99/BvHici1uLbM2iJGNIiBwcx2v7aME2IWH8jANvsycb+m
+# MwW80W8fJG6sxonLMMLco65h15kgyo05te49Li/GyZEVl3bXOZnm0npyaLnTXhlo
+# TfV8EbIxRSizbBuHdyod5ZercQVOnIUklIH/Ypa8BuE2loqXq3+GZRD3ssfGniFE
+# UngKJsUL7GyY3oY7DQdtzxr+59zacazOcaKy8gP4iI+K2OJCgWj71lwkLVspOw8b
+# ZCnFM3nM2HuRInJhI8k0kcsuknuR13xj9qAARFsozcCF+E7ZzseI2Vbym5cC0S00
+# KPSwio0FK9k=
 # SIG # End signature block
