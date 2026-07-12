@@ -67,6 +67,9 @@ Builds candidates from the license inventory CSV and performs a dry run using th
 .\SmartM365-ExchangeMigrationMailboxSizeReduction-NotifyUsers.ps1 -Tenant prod -FromList -ListCsvPath .\Recipients\pilot.csv -WhatIf
 
 Performs a dry run for a manually supplied pilot recipient list.
+
+.VERSION
+1.1
 #>
 [CmdletBinding(DefaultParameterSetName = 'Inventory')]
 param(
@@ -455,7 +458,7 @@ $tenantContextPath = Find-UpwardFile -FileName 'Config\SmartM365-TenantContext.p
 $effectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $coreModulePath = Find-UpwardFile -FileName 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module $coreModulePath -Force
+Import-Module $coreModulePath -MinimumVersion '1.0.22' -Force -ErrorAction Stop
 
 $commModulePath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'SmartM365.Communications.psm1'
 Import-Module $commModulePath -Force -DisableNameChecking
@@ -879,8 +882,8 @@ catch {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXRxBw4xEVA2/0
-# GHHn1izOX/JDNrWnlF4ZVS+NTUcIgqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqRS/cDfkrsLW0
+# sLZlFlT7PdUXOJorsEz5bLjAbFzsNaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -906,14 +909,14 @@ catch {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDCF4iAyKgg3IuNzj2n35KxZaD7FOPzEp2EQlcrttAWWTANBgkqhkiG9w0B
-# AQEFAASCAYA8YHKDDo0l8z6weFzSiMDX7GGAML1HNELVtEFyEvX9NcWPfhNMM4rw
-# 4+W37SzJB+DH8WvMTcLe7KmSf1jSVJjh1xtxsrX3wW0Kg+UZJHOZ5Lkymuwm2PLJ
-# RlspEGaD9y/ng9qHs8++6rm7ZC0kxVN1CsYpCyHASnDHbb5ZoCFSCV6Gtvmg60iv
-# t9lvyM9aOXoJo5s8YITfalDG0157stlgHMb/C1c6M+/ANIYzRmOzPGl7wbHorpSr
-# dhvGP5MzoT3Hc7mIn3FEH/3Y0tx7nPDrhLVs1XgWDVsazSKeleK66HC3oU6W0N+i
-# AXQ3G/Z/W1GDqF/1Nfg1sX3F9OqDAFXmnc32Q5NCZQ69hsvHdDRIlSiu92gvBxAg
-# 4a4k0w39PqGJ027jo/4MDSfKHDI2yFGrsI0GufOZ1gT/0sQovLMKFoS1GbcFvhYg
-# GLsjbA6VrrhyFAEKknB/7tjxfDwAFWyuLDumJlo/4pUoHxE/3Xj1N0qvnK6KZmAp
-# COfKQANM45k=
+# BDEiBCB50iqWSCCUTHOEJHUzqVF8dwzQjhQKYHiDx2uUJcsrgDANBgkqhkiG9w0B
+# AQEFAASCAYBAG31NszjzI/6Wbj1Zio4DugolLHFWFGaA4Glrl92bh9onKrIkauMX
+# bx4e+H4xrA0RtrdUdC384bSIbc/Bp3Cn60G8Xs3gqcUc/rUnX/5rHxBANZ8w7HRG
+# oPc8nvg8UHGmCQlpohrbdGmxz9gGA7iq8v33zHrqOrtqqqzsyUBQQvOUckGMS5nB
+# bNHErJHXYeELqEltTfg7JET8biD+fkPMvkqJYOkPG+l8/zrGTPEw7OtPsNT26xYA
+# T71VWKhfLn/ujz6xcqnr58xSsVGukAHqKip2AfCzdbBus3Y1F9gc7Wu1HCQdUmTr
+# moSG2FyyhDhmxprX9CX9BgeXdlHcvmxsjclJZB3EcQjd17VJ6zLUaKY+OBbNWBvs
+# +LJV22UIFyvPjxX1ECGXQ7CZ2HFOQjFMyrKkc73BSJZfYbxWfk6BUZ0DFgy1V7Vf
+# sKvZoqRIG8mFnY5wRPQnDwtsU9wtCTrhDm2AQdXw5FBWlFM1KzQORQKt9nHsaDV2
+# Ym4tkqh0ot8=
 # SIG # End signature block
