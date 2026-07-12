@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.11) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.12) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -32,7 +32,7 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | `Orchestrator.lock` | `{{DataAllRootPath}}\Orchestrator` | Global lock; prevents two instances for the same tenant. Stale locks (dead PID) are recovered with a warning. |
 | `Orchestrator_JobRuns_<yyyyMMdd>.csv` | `{{DataAllRootPath}}\Orchestrator\JobRuns` | Daily job-run tracking CSV (atomic writes). |
 | `SmartM365-Inventory-Orchestrator_<Server>_<yyyyMMdd>.log` | `{{LogAllRootPath}}\SmartM365-Orchestrator\<Server>` | Orchestrator log, daily rotation. |
-| `Job-<JobName>_<Server>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Orchestrator\<Server>\Jobs` | One log per job execution (stdout + stderr of the child process). |
+| `Job-<JobName>_<Server>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Orchestrator\<Server>` | One log per job execution (stdout + stderr of the child process). Legacy files from the removed `Jobs` subfolder are migrated on startup when they are not referenced by a running job. |
 
 Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle histories remain isolated. Each server still keeps its own scheduler state, so a job allowed on several servers runs on each of them - pin every scheduled job to exactly one server through `AllowedServers` and treat the other servers as manual standby.
 
