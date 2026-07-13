@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.14
+1.15
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -43,7 +43,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.14"
+$ScriptVersion="1.15"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
 function Warn([string]$m){Write-Warning $m}
@@ -253,13 +253,13 @@ try{
   }
 
   $adObjectGuid=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
-  $adManagedDeviceId=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $adDeviceIdFromM365Map=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   $adEntraDeviceId=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $ad){
     $key=G(FirstValue $r @('ObjectGUID_Norm','ObjectGUID'))
     if($key -and -not $adObjectGuid.ContainsKey($key)){$adObjectGuid[$key]=$r}
     $key=G(FirstValue $r @('DeviceID_From_M365'))
-    if($key -and -not $adManagedDeviceId.ContainsKey($key)){$adManagedDeviceId[$key]=$r}
+    if($key -and -not $adDeviceIdFromM365Map.ContainsKey($key)){$adDeviceIdFromM365Map[$key]=$r}
     $key=G(FirstValue $r @('ObjectGUID_Norm','entraDeviceId_norm','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm'))
     if($key -and -not $adEntraDeviceId.ContainsKey($key)){$adEntraDeviceId[$key]=$r}
   }
@@ -359,11 +359,11 @@ try{
   $now = Get-Date
   $issues=[Collections.Generic.List[object]]::new()
 
-  if(($adManagedDeviceId.Count -gt 0) -or ($adEntraDeviceId.Count -gt 0)){
+  if(($adDeviceIdFromM365Map.Count -gt 0) -or ($adEntraDeviceId.Count -gt 0)){
     foreach($i in $intune){
       $managedId=G(FirstValue $i @('Device ID','DeviceId','ManagedDeviceId'))
       $aadId=G(FirstValue $i @('Azure AD Device ID','AzureADDeviceId','Entra DeviceId','EntraDeviceId'))
-      $existsInAd = ($managedId -and $adManagedDeviceId.ContainsKey($managedId)) -or ($aadId -and $adEntraDeviceId.ContainsKey($aadId))
+      $existsInAd = ($managedId -and $adDeviceIdFromM365Map.ContainsKey($managedId)) -or ($aadId -and $adEntraDeviceId.ContainsKey($aadId))
       if($existsInAd){continue}
       $orphanId=$aadId; if(!$orphanId){$orphanId=$managedId}
       Add-IssueRow -Target $issues -IssueCode 'ISSUE-002' -Area 'Intune' -ObjectGUID_Norm $orphanId -Potential_Issue 'Device exists in Intune but not found in AD (orphan MDM device)' -IssueCategory '2.High' -PriorityScore 2 -IsBlocking $true -RecommendedAction 'Identify device owner and re-join to AD or retire from Intune' -ImpactMigration 'Orphan MDM device cannot be managed via hybrid join; migration scope unclear'
@@ -384,13 +384,13 @@ try{
     $objectGuidNorm = ([string]$row.ObjectGUID_Norm).Trim(); if(!$objectGuidNorm){$objectGuidNorm=([string]$row.ObjectGUID).Trim()}
     if([string]::IsNullOrWhiteSpace($objectGuidNorm)){continue}
     $name=([string]$row.Name).Trim(); if(!$name){$name=([string]$row.SamAccountName).Trim()}; $name=$name.TrimEnd('$')
-    $adManagedDeviceIdKey=G(FirstValue $row @('DeviceID_From_M365'))
+    $adDeviceIdFromM365Key=G(FirstValue $row @('DeviceID_From_M365'))
     $adEntraDeviceIdKey=G(FirstValue $row @('ObjectGUID_Norm','entraDeviceId_norm','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm'))
     $in=$null
-    if($adManagedDeviceIdKey -and $intuneId.ContainsKey($adManagedDeviceIdKey)){$in=$intuneId[$adManagedDeviceIdKey]}
+    if($adDeviceIdFromM365Key -and $intuneId.ContainsKey($adDeviceIdFromM365Key)){$in=$intuneId[$adDeviceIdFromM365Key]}
     elseif($adEntraDeviceIdKey -and $intuneAad.ContainsKey($adEntraDeviceIdKey)){$in=$intuneAad[$adEntraDeviceIdKey]}
     $aad=G(FirstValue $in @('Azure AD Device ID','AzureADDeviceId','Entra DeviceId','EntraDeviceId')); if(!$aad){$aad=$adEntraDeviceIdKey}
-    $deviceIdFromM365=G(FirstValue $in @('Device ID','DeviceId','ManagedDeviceId')); if(!$deviceIdFromM365){$deviceIdFromM365=$adManagedDeviceIdKey}
+    $deviceIdFromM365=G(FirstValue $in @('Device ID','DeviceId','ManagedDeviceId')); if(!$deviceIdFromM365){$deviceIdFromM365=$adDeviceIdFromM365Key}
     $en=if($aad -and $entraId.ContainsKey($aad)){$entraId[$aad]}else{$null}
     $localSystemRow=if($aad -and $localAad.ContainsKey($aad)){$localAad[$aad]}else{$null}
     $biosRow=if($aad -and $biosAad.ContainsKey($aad)){$biosAad[$aad]}else{$null}
@@ -754,10 +754,10 @@ try{
 }catch{Write-Error $_; throw}
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBtfpR77rOL6MU
-# lWjfFlY/7QY1Og7obK2id6LFVJ5wNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC50SXUKJqJoE0t
+# ad2vjk9kT7+X78zj7qjobKWnO2xC3aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -782,139 +782,19 @@ try{
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIED0khdrMUxI3C5K8J4SnP72VO3tJ/QpxTxwJu2ua4kqMA0GCSqG
-# SIb3DQEBAQUABIIBgCltxCw1RFVyMkpMObVfIJm9z3+iv3i7wo+FVQXtn3hzefoI
-# 5Yk87AFU0BxYxutGKwSn3dbTk+eFTKlGL1maw/fubmu5AMrYex5u6VjF7y7w3t7L
-# AoRkHzebAlX2SPj3Q82BVvXXNvstxgg2YvwKnaXYDYiUjKQQqf7s+0XNSt4NNzmb
-# /PlDO0I6rri1R2ol7VUF8Hus3AxyOVSdqxcqCWJI6Ju3tH3WMmOp0bs4RMAyVOEq
-# tnMm0T0hk7/bB1z72NT1BT4KnPpGkPB9ogKS6tpWK++HGJUPb/XxoOlSSFKagRMH
-# FvKT6K+yT3DxJbNFUmmmLU5dASv5jwvjpsn+jsdFPRqPARHsbMUm7FY2mmofpnJ+
-# e09WWtK0g5pJVs4eTUKsK7NhbSb7slqmwVFbIDU4nO3MPV9T7A/sDt3ZodDDoKQX
-# QYDpL/D8b9b9yBgtj7/RIWZ735Ccad+9iStTAfrl239Z+usCrIJMBH2nd0XlQmOx
-# zrQFfGYWdKpzD9T40qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxODM1
-# NDdaMC8GCSqGSIb3DQEJBDEiBCAmtsYm1Ny7JrmQLMf/w8gMqO9fjeto3JffR3VE
-# AigXDjANBgkqhkiG9w0BAQEFAASCAgCRsqWqRZ1c1pp+L+Z98sNGow6wINyBAldl
-# KPac+gfp8O3QDuvUIW+6Sw+ZMqJKJf+OqB/iQ0Mumyzx3BZWn9GLgcJmeULxmDiW
-# VD6gOE6ioSvuQkLPSzOm3HtuDXZt4r8+c416iXsQVltUKzWkLdlVepj0GP9UaMJI
-# My1gvXaBBBI+ZNFJ3fl0jKT6rXtWcL7hu8vdFibRP/7XBtvW8b+0nDStj5/SW4/2
-# tRn+JhdVz9rhRQ8cy8YwD1jdWQ9YaGIiNQOr1sXuWPi5YymoJp2dC3iyWuFVqoKD
-# XWYeHMJBiFWzKu8zNx6dTwa9zV7CV1ySQqG2Td4jznWloWzCXuqYmdgFd11LkQPr
-# lqxTugFCaGB9O85N7Cj1svAsBef2WrWSwLdP1Rc72IROQYZDvG2Uf1aRxYXcj1eT
-# PScrv/EKAT1MBot0zzAHgk1bu8hvDuR90bxA1cY6MzRWu6dEnh10CmtY15KojZJy
-# Hhv2VrI4XzO+NM8zoXwfPp0SV2JxuJQdp5sdSGTdurPYblmTJrMuS0+B7GzlVzcO
-# mo1UzFmRt8qmFtPvNPdaopOsNMT1OOOwnoab8PsRtY/HZGsfP43XoTgzN63br9PU
-# 2JdPQwqJu0HN2iEFJBnQ/TJT41PpHUPyRR/BFBpb24Dw2qZXBHiZCB+1mf8Ia1Qj
-# tAD+EYd3OA==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC0Yl4LS4C8fVhSJmRjmutn
+# 4OZukjjwsGObzMW2N2GtzjANBgkqhkiG9w0BAQEFAASCAYBwCpfsZT0sdCRwA2fQ
+# PwZvqqfDDBwysL7ebnCQQgiQSAlI2sUQ0SsP1WyJdpuiCSv9NEQIli3mf/529lzx
+# uqnnOlktZ8kV4FssSarHCv/dzW3cv+BytaHVhcZMqVYNG5mRCsYVtZ5osHebH/JW
+# +qKHLz38p3GPaN284l2qMmudpj3LtRjzaG+z90MmOUNjJ5Dsy+XOyuFJSjO37xmJ
+# BHKTMNGWwCMbYeqLq6Qsi66RWqVC4KC7ol1hpNvRn/V7/xQtvCc+UhlR/1aIpGZI
+# x3YQCNq1tTIzVQEgmxIIaElvSYtXkg7tjEFm0rOiLVJYatpobRaFV8pTEHM7XgxX
+# zisVERGPGrBSl01ggaNQG/XyAw7cDeyDnFR0N92ADpDEJbUQnqV8zuaUi/fyYQwL
+# uKuBBTJvlS8IqV6IHUbRom6TfeuGAH2eLf7N/nxt0QyCFzA150pfbsdtyfXmJJzV
+# uxpPxINr/15NF2fyQzsJ1r2B3vU9CMnwHsZSIMWNpRT/v7Q=
 # SIG # End signature block
