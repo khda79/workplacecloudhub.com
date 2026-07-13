@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of top-risk policies shown in email (default: 10)
 
 VERSION
-  1.5
+  1.15
 .VERSION
-1.14
+1.15
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 
 # ==========================================================
 # App-only authentication parameters
@@ -536,10 +536,13 @@ function Send-FatalErrorEmail {
 function Send-SummaryEmail {
     param([Parameter(Mandatory=$true)][string]$Subject,[Parameter(Mandatory=$true)][string]$HtmlBody)
 
-    if (-not $EnableSummaryEmail) { return }
-    if ($DryRun) { Write-Log "DryRun: skipping summary email." "INFO" "DRYRUN"; return }
+    if (-not $EnableSummaryEmail) { return $false }
+    if ($DryRun) { Write-Log "DryRun: skipping summary email." "INFO" "DRYRUN"; return $false }
     $summaryTo = $To
-    if ([string]::IsNullOrWhiteSpace($summaryTo)) { throw "Summary email requires To in local or global configuration." }
+    if ([string]::IsNullOrWhiteSpace($summaryTo)) {
+        Write-Log "Summary email skipped because To is not configured in local or global configuration. Inventory outputs remain valid." "WARN" "MAIL"
+        return $false
+    }
 
     try {
         Import-SmartM365CorePreflight
@@ -548,6 +551,7 @@ function Send-SummaryEmail {
         if (-not [string]::IsNullOrWhiteSpace($Cc)) { $mailParams['Cc'] = $Cc }
         Send-CoreSmartM365Mail @mailParams
         Write-Log "Summary email sent." "INFO" "MAIL"
+        return $true
     }
     catch {
         Write-Log "Failed to send summary email: $($_.Exception.Message)" "ERROR" "MAIL"
@@ -1543,8 +1547,9 @@ $topRiskTable
 </body></html>
 "@
 
-        Send-SummaryEmail -Subject $subject -HtmlBody $html
-        Save-SummaryState -Count $count -StatePath $SummaryStatePath
+        if (Send-SummaryEmail -Subject $subject -HtmlBody $html) {
+            Save-SummaryState -Count $count -StatePath $SummaryStatePath
+        }
     }
     else {
         Write-Log "Summary email skipped (Mode=$SummaryEmailMode)." "INFO" "MAIL"
@@ -1583,8 +1588,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2CM/TIMIZsoD6
-# TcPxpCh7uUb9+w0itb9h3TGUe0VHnKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYMAahQW5/k5HE
+# Bp9LF5zgKY1LVcPH1PM9zwpU8LZpRqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1717,31 +1722,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKi8HHON9zrJ4wINmshSfuASGE6uawe5OgEIyliD/3GEMA0GCSqG
-# SIb3DQEBAQUABIIBgGNVf9907i3KYauDyGcaT+v6+TsE4D4aHLdEC2D5cY6NjpEg
-# TtY+Y3yq1ONGvslt8RAiPzdhkwCG8GKvX5f0JhRlL0Qd6txLP63NV2bgzxIEsJI0
-# 093zeP9teu/eJ/WXQy4YpnHDYL4pEOa2qZz2KA/+BahpnikkVsay/F5AkQW/Y3Ob
-# XjLgqcXaRqs4OyM7I9Q5nF5nf8gj1vhktwjYxRNHI1RChU6Bb6B0MMB8Bh4lsp4e
-# nRqxkck7TUnpvZeK3wXjdu5+6wEBTLPE9geTYyuiw7C3ZRbW9pWNLQWCOTGzD/pP
-# Eh54Vi3KRL2WqnuUE3//Lj7jDcZfSRE1yy26e/2LvZyfSedyGf6QC3a8IPSHQ07c
-# nl2vZsPZQ/2Blxmc4z2+UqEXJP5mkxndE3VuDmu8LjyFLp0zNQR3qN41v8mo6pXU
-# s+8iJ+Q5XHxOwavwbV3ovgO1XCuyXXfvvpj9hxxigB871pfS08jCElzG44c+kzzk
-# LIUOrwysNIrBzEPZLKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN1ajRv+6Z/ZJvXmuqLiOenzXV4LYICRgOG4vVjtW4AfMA0GCSqG
+# SIb3DQEBAQUABIIBgGW4jk+bVpfeeW9aJb8xUtRhgH2F5l/zzZP2eU58tvkjhutC
+# GtPK7eUC3xIbt3cu6WVJqBoF18P805vh4HJJkYgWJymDI/fH6ZSHwfji/P24u/HL
+# aO76WtwCoIER+RMY1YoAUp3u4Ewzs5f1wGSz0QsrjVdhBMEx5LN9kDTGPVQ9jzJS
+# cVSVLT1gVOBRrJKjMYGKp0TeI2Um+llFbkElea3TLHRKaui01wgSrrDkNIdntJa+
+# Ebge5o+U2LGPRAgnwWeY+bvqSfpzWyLBW4tuMQI9wNZdNk+5BCCZeJO8j5S158J6
+# rC1WqVbcqW4wvhhKSiJLK+ubyGHfZYXQzxmJjUTVGTi8S+akQsefSf7+aeLL0Qnu
+# YPZwZMVAN0ZsK4smm8YjbWF0UarIXmOysv16s2JC32PPyR9YYd83rQRu99oIHYce
+# qFAa7QIEej5pK7zzaqdtzLFk88u2q2ZRXMt2ONQMw8AHMpKjsze01ZjNGHuiY5YH
+# 6dqzBxQGk7O61DJhLaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwOTAz
-# MTVaMC8GCSqGSIb3DQEJBDEiBCCz3jzNiEo9RnZY2IDWz9HJ/i41wMDNHARVi4I/
-# vgTD3zANBgkqhkiG9w0BAQEFAASCAgAR4OUVv3PrbGiW8XBf53AO1yVCVpKve47h
-# DmuZtG8m6AIDk6mIxFmmcIDn116YT062sy+7dF3ktsEaIeZzz9c9ryhmBS+q/zKQ
-# b0ai4rPBsZ0i13Ww9s5BLKgkL8oR4gPJmVR1N0Yqz8yUJCx+M+50mkIyE+K9iDMm
-# SDogHZJ6CsdrlZmG2LJIzpTOpqfH4ze3NuOMSRplYS6utsSwUItTglloJQzhq/n3
-# XISyTCuAxRH7Sry5m8bkkj1LjpzP0gBDwtDZJcqC4vkFKxvsJ/37b9bd1OUh1Jno
-# OiL8ULmMdUySazQKCLAdqY6L9TiztFz6e4VcI0tVH9jMEH+coMMfFPlMquI3aaaR
-# dhG8aj24IzvFPmMJyEvc0MAJlaa1jxUemtZtEAs9UTpTo9GlQXFI4eozjvKUzo7V
-# p6njsg4G5UshgX1dSOCHMQ4A3kLRkTbM37c57p7p6tdwpm3czQ8IGBHi10+UNKUV
-# DB53xX18YITV7fhKsNQqV/BmiU3Bw+S3UD5Io1eH+/mSqSnAS/kmnPE05oy83ET7
-# Rh20YGnZPwrHUv2l3bb3q5zOO1ft4WY0OBnEarrQBi8rjkbbG7PvP8kSbmBsBLlw
-# SJqd4hYh4uEoIYvCwZEW2YhlTe9/CdrvyJLT7Ijk7uus4/QdjX0Hve+axzgUSSM4
-# Bz6p/OR0ow==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
+# MzRaMC8GCSqGSIb3DQEJBDEiBCC/oG51rk+eaLREseOO+Na3tzR7eJFEzhe/r+tQ
+# ipU+NjANBgkqhkiG9w0BAQEFAASCAgAbb0ts6tIV16n3HuEyR9mtGdGD0LsFVKli
+# IbkSqi2OagIU5KccYg5PLWAHXkL62P6T3uxz4lwZQaKpZpgmwVuXhx8dug397f0M
+# FVEhFPRMeBJR64tUVf15GMwAzicrt3FYaJZ0++6b/CrKuHropgKXRFX9t6OCVzVa
+# 77Q+cJ8Gm6RVu7wSodqPgWLe1QGa1J0xX1G2BB4XeXxf7dg0YjAm7u8vmM/QOINd
+# qDr1EDi1HQ9XaPzOXA0MgV968RMDTvjDG4Jr7fvcQb+cVtuRAIQB2Ax7MDv8BmaF
+# DMXRPKasmocijC0jCEOISLzp3/E5hD1spU1c61lP2R2OLldZeQiz0syxIBGXCWLB
+# bTDgGRtiNbKtqDGdxJzxuyAQqaoI+gTJH4iBU5T5Y/9YHI9zQUlEeQHMKOASuubs
+# bfrNtK0GUTv4aCc7tFG8qWkE7WTaRhbhjQR6OsMCYwMNhacr6Z0z+abHwK6KvPpO
+# CdjoixHqJSjsNcQTGq58R5nkFcGMB3PUkBfi6EVyJ0Xy5qxIsvCueD5ZIYxvKw5G
+# yKRoD7uF4q8EB2mvnOsss8ZQI6bjhf7GdcPCFyU2I/Gf2tdn2mpu/2cS1WtPo+/p
+# DnI54pDkU95Xi1iYbqqp5F4LojvBgRgvF8vMjhdMPWmLDpYcgQjoDjiauqUByWOk
+# m+Mo9FIKPw==
 # SIG # End signature block
