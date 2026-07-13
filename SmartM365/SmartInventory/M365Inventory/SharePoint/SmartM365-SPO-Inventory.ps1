@@ -26,7 +26,7 @@
     Exports CSVs and writes console/log output only. No email is sent.
 
 .PARAMETER AlwaysSend
-    Sends the HTML email even when no Warning/Critical condition is detected.
+    Retained for launcher compatibility. The HTML summary is sent once per day even when the status is OK.
 
 .PARAMETER AppendHistory
     Appends rows to per-entity history CSV files in addition to the normal timestamped/latest exports.
@@ -47,7 +47,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.14
+0.15
 
 
 .REQUIREMENTS
@@ -102,7 +102,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.14"
+$ScriptVersion = "0.15"
 $CurrentOperation = 'Initialize'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -194,6 +194,48 @@ function Get-SpoPropertyValue { param([AllowNull()]$Object,[Parameter(Mandatory)
 function ConvertTo-SpoText { param([AllowNull()]$Value) if ($null -eq $Value) { return '' }; if ($Value -is [array]) { return (@($Value) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }) -join ';' }; return [string]$Value }
 function ConvertTo-SpoHtml { param([AllowNull()]$Value) if ($null -eq $Value) { return '' }; return [System.Net.WebUtility]::HtmlEncode([string]$Value) }
 
+function Invoke-SpoDailySummaryMail {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$MarkerPath,
+        [Parameter(Mandatory)][scriptblock]$SendAction
+    )
+
+    $today = (Get-Date).ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    $markerParent = Split-Path -Path $MarkerPath -Parent
+    if (-not (Test-Path -LiteralPath $markerParent -PathType Container)) {
+        New-Item -Path $markerParent -ItemType Directory -Force | Out-Null
+    }
+
+    $lockPath = "$MarkerPath.lock"
+    $lockStream = $null
+    try {
+        try {
+            $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        }
+        catch [System.IO.IOException] {
+            Write-SpoLog -Message "Daily SharePoint summary email is already being evaluated by another run: $lockPath" -Level INFO
+            return $false
+        }
+
+        $lastSentDate = if (Test-Path -LiteralPath $MarkerPath -PathType Leaf) {
+            [string](Get-Content -LiteralPath $MarkerPath -Raw -ErrorAction SilentlyContinue)
+        }
+        else { '' }
+        if ($lastSentDate.Trim() -eq $today) {
+            Write-SpoLog -Message "Daily SharePoint summary email already sent for $today; email skipped." -Level INFO
+            return $false
+        }
+
+        $null = & $SendAction
+        [System.IO.File]::WriteAllText($MarkerPath, $today, [System.Text.UTF8Encoding]::new($false))
+        return $true
+    }
+    finally {
+        if ($null -ne $lockStream) { $lockStream.Dispose() }
+    }
+}
+
 function Invoke-SpoWithRetry {
     param([Parameter(Mandatory)][scriptblock]$ScriptBlock,[string]$Operation='operation',[int]$MaxAttempts=8,[int]$BaseDelaySeconds=3,[int]$MaxDelaySeconds=90)
     for($attempt=1;$attempt -le $MaxAttempts;$attempt++){
@@ -257,7 +299,7 @@ function Get-SpoMailAttachmentPaths {
     if ($attachments.Count -gt 0) {
         Write-SpoLog -Message ("Mail attachments selected: {0} file(s), {1:n1} MB total." -f $attachments.Count, ($totalBytes / 1MB)) -Level INFO
     }
-    return @($attachments)
+    return $attachments.ToArray()
 }
 function Connect-SpoGraph {
     [CmdletBinding()]
@@ -816,20 +858,21 @@ try {
     }
 
     $resultSummary = "SPO inventory $worstStatus; mode=$($summary.InventoryMode); sites=$($siteRows.Count); lists=$($listRows.Count); critical=$($summary.CriticalAlerts); warnings=$($summary.WarningAlerts)."
-    $mailShouldSend = (-not $DryRun) -and ($AlwaysSend -or $worstStatus -in @('Critical','Warning'))
-    if ($mailShouldSend) {
+    if (-not $DryRun) {
         $prefix = if ($worstStatus -eq 'Critical') { '[CRITICAL]' } elseif ($worstStatus -eq 'Warning') { '[WARNING]' } else { '[OK]' }
         $subject = "$prefix SmartM365 SharePoint Online inventory - $TenantName"
         $bodyHtml = New-SpoHtmlSummary -Title $subject -WorstStatus $worstStatus -Alerts $alertArray -Summary $summary -TopSites $topSites -LogFilePath $global:LogTextFile -CsvFolderPath $latestFolder
         $mailAttachments = Get-SpoMailAttachmentPaths -LatestFolder $latestFolder
-        Send-SmartM365Mail -Subject $subject -BodyHtml $bodyHtml -Attachments $mailAttachments
-        Write-SpoLog -Message ("Notification email sent: {0}" -f $subject) -Level SUCCESS
-    }
-    elseif ($DryRun) {
-        Write-SpoLog -Message 'DryRun enabled: email notification skipped.'
+        $dailySummaryMarkerPath = Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))-DailySummary-LastSent.txt"
+        $dailySummarySent = Invoke-SpoDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {
+            Send-SmartM365Mail -Subject $subject -BodyHtml $bodyHtml -Attachments $mailAttachments
+        }
+        if ($dailySummarySent) {
+            Write-SpoLog -Message ("Daily SharePoint summary email sent: {0}" -f $subject) -Level SUCCESS
+        }
     }
     else {
-        Write-SpoLog -Message 'No Warning/Critical alert detected and AlwaysSend is not enabled: email notification skipped.'
+        Write-SpoLog -Message 'DryRun enabled: daily summary email skipped.'
     }
     Write-SpoLog -Message $resultSummary -Level SUCCESS
 
