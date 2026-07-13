@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.12
+1.13
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -43,7 +43,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.12"
+$ScriptVersion="1.13"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
 function Warn([string]$m){Write-Warning $m}
@@ -56,6 +56,13 @@ function P($r,[string[]]$names){ if($null -eq $r){return $null}; foreach($n in $
 function T($v){if($null -eq $v){''}else{([string]$v).Trim()}}
 function K($v){(T $v).ToLowerInvariant()}
 function N($v){(T $v).TrimEnd('$').ToUpperInvariant()}
+function G($v){
+  $s=(T $v).Trim('{','}')
+  if(!$s){return ''}
+  $g=[guid]::Empty
+  if([guid]::TryParse($s,[ref]$g)){return $g.ToString('D').ToLowerInvariant()}
+  $s.ToLowerInvariant()
+}
 function B($v){(K $v) -in @('true','1','yes','y','enabled','compliant')}
 function CB($c,$n,[bool]$d){$v=Cfg $c $n $d; if($v -is [bool]){return $v}; if($null -eq $v){return $d}; $s=K $v; if(!$s){return $d}; $s -in @('true','1','yes','y','enabled')}
 function Num($v){$s=(T $v)-replace ',','.'; $o=0.0; if([double]::TryParse($s,[Globalization.NumberStyles]::Any,[Globalization.CultureInfo]::InvariantCulture,[ref]$o)){$o}else{$null}}
@@ -218,12 +225,12 @@ try{
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
   Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LatestFolder) | Out-Null
 
-  $ad=CsvAnyProjected @('AD_Computers_AllDomains_Enriched.csv','AD_Computers_AllDomains.csv') @('ObjectGUID_Norm','ObjectGUID','Name','SamAccountName','OperatingSystem','operatingSystemVersion','OperatingSystemVersion','LastLogonDate','Enabled','OrganizationalUnit','CanonicalName','DistinguishedName','Last Reboot Date','LastRebootDate','LastBootUpTime','Last_Logged_UserDomain','LastLoggedUser','LastLoggedUserDomain') -Req
+  $ad=CsvAnyProjected @('AD_Computers_AllDomains_Enriched.csv','AD_Computers_AllDomains.csv') @('ObjectGUID_Norm','ObjectGUID','DeviceID_From_M365','entraDeviceId_norm','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm','Name','SamAccountName','OperatingSystem','operatingSystemVersion','OperatingSystemVersion','LastLogonDate','Enabled','OrganizationalUnit','CanonicalName','DistinguishedName','Last Reboot Date','LastRebootDate','LastBootUpTime','Last_Logged_UserDomain','LastLoggedUser','LastLoggedUserDomain') -Req
   $users=CsvAnyProjected @('AD_Users_AllDomains.csv') @('SamAccountName','Name','UserPrincipalName','EmailAddress','OrganizationalUnit','CanonicalName','DistinguishedName')
   $licenses=CsvAnyProjected @('M365_Licenses_Users.csv') @('User principal name','UserPrincipalName','primarysmtp')
   $local=CsvAnyProjected @('Intune_Devices_LocalSystem.csv','M365_Inventory_Device_LocalSystem.csv') @('AzureADDeviceId','DeviceId','DeviceName','SecureBootStatus','FirmwareType','BIOSDate','Last Reboot Date','LastRebootDate','LastBootUpTime')
   $wu=CsvAnyProjected @('Intune_WindowsUpdate_Status.csv','M365_WindowsUpdate_Status_From_Intune.csv') @('PolicyId','DeviceId','ReadinessGraphId','NormalizedDeviceName','DeviceName','ExportDateTime','ReadinessExportDateTime','RunId','ReadinessRunId','AggregateState_loc','AggregateState','CurrentDeviceUpdateStatus_loc','CurrentDeviceUpdateStatus','LatestAlertMessage_loc','LatestAlertMessage','BlockingReason','UpgradeEligibilityLabel','UpgradeEligibility','RiskBucket') -Req
-  $ready=CsvAnyProjected @('Intune_Devices_UpgradeEligibility.csv') @('TenantKey','NormalizedDeviceName','DeviceName','GraphId','ExportDateTime','UpgradeEligibilityLabel','UpgradeEligibility')
+  $ready=CsvAnyProjected @('Intune_Devices_UpgradeEligibility.csv') @('TenantKey','NormalizedDeviceName','DeviceName','GraphId','AzureADDeviceId','DeviceId','Device ID','ReadinessGraphId','ExportDateTime','UpgradeEligibilityLabel','UpgradeEligibility')
   $intune=CsvAnyProjected @('Intune_Devices_Inventory.csv','M365_Inventory_Devices.csv') @('Device name','DeviceName','displayName','Azure AD Device ID','AzureADDeviceId','Entra DeviceId','EntraDeviceId','Device ID','DeviceId','ManagedDeviceId','OS version','OSVersion','OperatingSystemVersion','Free storage','FreeStorage','FreeStorageGB','Primary user UPN','Primary user email address','UserPrincipalName','UPN','Compliance','ComplianceState','IsCompliant','Last check-in','LastSyncDateTime','PhysicalMemoryGB','Memory_GB_Number','Memory','Model','Manufacturer') -Req
   $entra=CsvAnyProjected @('M365_Entra_Devices.csv','M365_Inventory_EntraDevices.csv') @('DeviceId','DeviceId_Norm','DisplayName','DeviceName','IsPending','ApproximateLastSignInDateTime','RegistrationDateTime','HardwareId') -Req
   $bios=CsvAnyProjected @('Intune_Devices_BIOS.csv') @('AzureADDeviceId','DeviceName','BIOSReleaseDateTime','BIOSDate')
@@ -242,12 +249,18 @@ try{
     $indexStopwatch.Restart()
   }
 
-  $adName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $adObjectGuid=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $adManagedDeviceId=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $adEntraDeviceId=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $ad){
-    $key=([string]$r.Name).Trim(); if(!$key){$key=([string]$r.SamAccountName).Trim()}; $key=$key.TrimEnd('$')
-    if($key -and -not $adName.ContainsKey($key)){$adName[$key]=$r}
+    $key=G(FirstValue $r @('ObjectGUID_Norm','ObjectGUID'))
+    if($key -and -not $adObjectGuid.ContainsKey($key)){$adObjectGuid[$key]=$r}
+    $key=G(FirstValue $r @('DeviceID_From_M365'))
+    if($key -and -not $adManagedDeviceId.ContainsKey($key)){$adManagedDeviceId[$key]=$r}
+    $key=G(FirstValue $r @('ObjectGUID_Norm','entraDeviceId_norm','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm'))
+    if($key -and -not $adEntraDeviceId.ContainsKey($key)){$adEntraDeviceId[$key]=$r}
   }
-  LogIndexPhase 'AD computers by name'
+  LogIndexPhase 'AD computers by ObjectGUID, managed device ID and Entra device ID'
 
   $usersBySam=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $usersByUpn=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $users){
@@ -262,20 +275,18 @@ try{
   foreach($r in $licenses){$upn=([string]$r.'User principal name').Trim(); if(!$upn){$upn=([string]$r.UserPrincipalName).Trim()}; if(!$upn){$upn=([string]$r.primarysmtp).Trim()}; if($upn){[void]$licensedUpn.Add($upn)}}
   LogIndexPhase 'licensed users'
 
-  $intuneName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $intuneAad=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $intuneId=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $intuneAad=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $intuneId=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $intune){
-    $key=([string]$r.'Device name').Trim(); if(!$key){$key=([string]$r.DeviceName).Trim()}; if(!$key){$key=([string]$r.displayName).Trim()}; $key=$key.TrimEnd('$')
-    if($key -and -not $intuneName.ContainsKey($key)){$intuneName[$key]=$r}
-    $key=([string]$r.'Azure AD Device ID').Trim(); if(!$key){$key=([string]$r.AzureADDeviceId).Trim()}; if(!$key){$key=([string]$r.'Entra DeviceId').Trim()}; if(!$key){$key=([string]$r.EntraDeviceId).Trim()}
+    $key=G(FirstValue $r @('Azure AD Device ID','AzureADDeviceId','Entra DeviceId','EntraDeviceId'))
     if($key -and -not $intuneAad.ContainsKey($key)){$intuneAad[$key]=$r}
-    $key=([string]$r.'Device ID').Trim(); if(!$key){$key=([string]$r.DeviceId).Trim()}; if(!$key){$key=([string]$r.ManagedDeviceId).Trim()}
+    $key=G(FirstValue $r @('Device ID','DeviceId','ManagedDeviceId'))
     if($key -and -not $intuneId.ContainsKey($key)){$intuneId[$key]=$r}
   }
-  LogIndexPhase 'Intune devices by name, Azure AD device ID and managed device ID'
+  LogIndexPhase 'Intune devices by Azure AD device ID and managed device ID'
 
   $entraId=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $entraName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $entraNameAll=[Collections.Generic.Dictionary[string,Collections.Generic.List[object]]]::new([StringComparer]::OrdinalIgnoreCase); $entraHardwareCounts=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $entra){
-    $key=([string]$r.DeviceId).Trim(); if(!$key){$key=([string]$r.DeviceId_Norm).Trim()}
+    $key=G(FirstValue $r @('DeviceId','DeviceId_Norm'))
     if($key -and -not $entraId.ContainsKey($key)){$entraId[$key]=$r}
     $key=([string]$r.DisplayName).Trim(); if(!$key){$key=([string]$r.DeviceName).Trim()}; $key=$key.TrimEnd('$')
     if($key -and -not $entraName.ContainsKey($key)){$entraName[$key]=$r}
@@ -286,41 +297,33 @@ try{
   foreach($r in $hwConflicts){$hid=([string]$r.HardwareId).Trim(); if($hid){$entraHardwareCounts[$hid]=Num($r.DeviceCount)}}
   LogIndexPhase 'Entra hardware conflict counts'
 
-  $localAad=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $localName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $localAad=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $local){
-    $key=([string]$r.AzureADDeviceId).Trim(); if(!$key){$key=([string]$r.DeviceId).Trim()}
+    $key=G(FirstValue $r @('AzureADDeviceId','DeviceId'))
     if($key -and -not $localAad.ContainsKey($key)){$localAad[$key]=$r}
-    $key=([string]$r.DeviceName).Trim().TrimEnd('$')
-    if($key -and -not $localName.ContainsKey($key)){$localName[$key]=$r}
   }
-  LogIndexPhase 'Local system rows by Azure AD device ID and name'
+  LogIndexPhase 'Local system rows by Azure AD device ID'
 
-  $biosAad=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $biosName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $biosAad=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $bios){
-    $key=([string]$r.AzureADDeviceId).Trim()
+    $key=G(FirstValue $r @('AzureADDeviceId'))
     if($key -and -not $biosAad.ContainsKey($key)){$biosAad[$key]=$r}
-    $key=([string]$r.DeviceName).Trim().TrimEnd('$')
-    if($key -and -not $biosName.ContainsKey($key)){$biosName[$key]=$r}
   }
-  LogIndexPhase 'BIOS rows by Azure AD device ID and name'
+  LogIndexPhase 'BIOS rows by Azure AD device ID'
 
-  $compAad=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $compName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $compAad=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $comp){
-    $key=([string]$r.AzureADDeviceId).Trim(); if(!$key){$key=([string]$r.EntraObjectId).Trim()}
+    $key=G(FirstValue $r @('AzureADDeviceId','EntraObjectId'))
     if($key -and -not $compAad.ContainsKey($key)){$compAad[$key]=$r}
-    $key=([string]$r.DeviceName).Trim(); if(!$key){$key=([string]$r.displayName).Trim()}; $key=$key.TrimEnd('$')
-    if($key -and -not $compName.ContainsKey($key)){$compName[$key]=$r}
   }
-  LogIndexPhase 'Compliance rows by Azure AD device ID and name'
+  LogIndexPhase 'Compliance rows by Azure AD device ID'
 
-  $readyNameAll=[Collections.Generic.Dictionary[string,Collections.Generic.List[object]]]::new([StringComparer]::OrdinalIgnoreCase); $readyIdAll=[Collections.Generic.Dictionary[string,Collections.Generic.List[object]]]::new([StringComparer]::OrdinalIgnoreCase)
+  $readyIdAll=[Collections.Generic.Dictionary[string,Collections.Generic.List[object]]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $ready){
-    $key=([string]$r.NormalizedDeviceName).Trim(); if(!$key){$key=([string]$r.DeviceName).Trim()}; if(!$key){$key=([string]$r.'Device name').Trim()}; $key=$key.TrimEnd('$')
-    if($key){if(-not $readyNameAll.ContainsKey($key)){$readyNameAll[$key]=[Collections.Generic.List[object]]::new()}; [void]$readyNameAll[$key].Add($r)}
-    $key=([string]$r.GraphId).Trim(); if(!$key){$key=([string]$r.AzureADDeviceId).Trim()}; if(!$key){$key=([string]$r.DeviceId).Trim()}; if(!$key){$key=([string]$r.'Device ID').Trim()}
+    $key=G(FirstValue $r @('GraphId','AzureADDeviceId','DeviceId','Device ID','ReadinessGraphId'))
     if($key){if(-not $readyIdAll.ContainsKey($key)){$readyIdAll[$key]=[Collections.Generic.List[object]]::new()}; [void]$readyIdAll[$key].Add($r)}
   }
-  LogIndexPhase 'readiness rows by name and ID'
+  LogIndexPhase 'readiness rows by ID'
 
   function SetLatestWuRowFast($map,$dateMap,$runMap,[string]$key,$row,$candidateDate,[double]$candidateRun){
     if(!$key){return}
@@ -329,54 +332,43 @@ try{
     $currentRun=$runMap[$key]
     if(($candidateDate -and (!$currentDate -or $candidateDate -gt $currentDate)) -or ($candidateDate -and $currentDate -and $candidateDate -eq $currentDate -and $candidateRun -gt $currentRun)){$map[$key]=$row; $dateMap[$key]=$candidateDate; $runMap[$key]=$candidateRun}
   }
-  $wuByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24ByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25ByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24ByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25ByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
-  $wuDateByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuDateByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorDateByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24DateByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25DateByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorDateByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24DateByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25DateByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
-  $wuRunByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuRunByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorRunByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24RunByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25RunByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorRunByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24RunByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25RunByName=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $wuByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24ByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25ByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $wuDateByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorDateByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24DateByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25DateByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+  $wuRunByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wuAnchorRunByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu24RunByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase); $wu25RunByDevice=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $wu){
     $policy=([string]$r.PolicyId).Trim()
     if($targetPolicyIds.Count -gt 0 -and $policy -notin $targetPolicyIds){continue}
-    $did=([string]$r.DeviceId).Trim(); if(!$did){$did=([string]$r.ReadinessGraphId).Trim()}
-    $nm=([string]$r.NormalizedDeviceName).Trim(); if(!$nm){$nm=([string]$r.DeviceName).Trim()}; $nm=$nm.TrimEnd('$')
+    $did=G(FirstValue $r @('DeviceId','ReadinessGraphId'))
     $candidateDate=Dt($r.ExportDateTime); if(!$candidateDate){$candidateDate=Dt($r.ReadinessExportDateTime)}
     $candidateRun=Num($r.RunId); if($null -eq $candidateRun){$candidateRun=Num($r.ReadinessRunId)}; if($null -eq $candidateRun){$candidateRun=0}
     SetLatestWuRowFast $wuByDevice $wuDateByDevice $wuRunByDevice $did $r $candidateDate $candidateRun
-    SetLatestWuRowFast $wuByName $wuDateByName $wuRunByName $nm $r $candidateDate $candidateRun
     if($policy -eq $anchorPolicyId){
       SetLatestWuRowFast $wuAnchorByDevice $wuAnchorDateByDevice $wuAnchorRunByDevice $did $r $candidateDate $candidateRun
-      SetLatestWuRowFast $wuAnchorByName $wuAnchorDateByName $wuAnchorRunByName $nm $r $candidateDate $candidateRun
     } elseif($policy -eq $policy24Id){
       SetLatestWuRowFast $wu24ByDevice $wu24DateByDevice $wu24RunByDevice $did $r $candidateDate $candidateRun
-      SetLatestWuRowFast $wu24ByName $wu24DateByName $wu24RunByName $nm $r $candidateDate $candidateRun
     } elseif($policy -eq $policy25Id){
       SetLatestWuRowFast $wu25ByDevice $wu25DateByDevice $wu25RunByDevice $did $r $candidateDate $candidateRun
-      SetLatestWuRowFast $wu25ByName $wu25DateByName $wu25RunByName $nm $r $candidateDate $candidateRun
     }
   }
-  LogIndexPhase 'Windows Update status latest rows by device and name'
+  LogIndexPhase 'Windows Update status latest rows by device ID'
   $unknownUserSet = @('', 'UNKNOWN', 'N/A', 'NA', '-', 'UNDETERMINED', 'SYSTEM', 'LOCAL SYSTEM')
   $today = (Get-Date).Date
   $now = Get-Date
   $issues=[Collections.Generic.List[object]]::new()
 
-  foreach($row in $ad){
-    $objectGuidNorm = ([string]$row.ObjectGUID_Norm).Trim(); if(!$objectGuidNorm){$objectGuidNorm=([string]$row.ObjectGUID).Trim()}
-    if($objectGuidNorm){continue}
-    $name=([string]$row.Name).Trim(); if(!$name){$name=([string]$row.SamAccountName).Trim()}; $name=$name.TrimEnd('$')
-    $existsInIntune = $name -and $intuneName.ContainsKey($name)
-    $enabled = B($row.Enabled)
-    if($existsInIntune -and (-not $enabled)) {
-      Add-IssueRow -Target $issues -IssueCode 'ISSUE-002' -Area 'Intune' -ObjectGUID_Norm '' -Potential_Issue 'Device exists in Intune but not found in AD (orphan MDM device)' -IssueCategory '2.High' -PriorityScore 2 -IsBlocking $true -RecommendedAction 'Identify device owner and re-join to AD or retire from Intune' -ImpactMigration 'Orphan MDM device cannot be managed via hybrid join; migration scope unclear'
-    }
-  }
-  LogIndexPhase 'AD rows without ObjectGUID orphan check'
-  foreach($i in $intune){
-    $name=([string]$i.'Device name').Trim(); if(!$name){$name=([string]$i.DeviceName).Trim()}; if(!$name){$name=([string]$i.displayName).Trim()}; $name=$name.TrimEnd('$')
-    if($name -and -not $adName.ContainsKey($name)){
-      $orphanId=([string]$i.'Azure AD Device ID').Trim(); if(!$orphanId){$orphanId=([string]$i.'Entra DeviceId').Trim()}; if(!$orphanId){$orphanId=([string]$i.'Device ID').Trim()}; if(!$orphanId){$orphanId=([string]$i.DeviceId).Trim()}
+  if(($adManagedDeviceId.Count -gt 0) -or ($adEntraDeviceId.Count -gt 0)){
+    foreach($i in $intune){
+      $managedId=G(FirstValue $i @('Device ID','DeviceId','ManagedDeviceId'))
+      $aadId=G(FirstValue $i @('Azure AD Device ID','AzureADDeviceId','Entra DeviceId','EntraDeviceId'))
+      $existsInAd = ($managedId -and $adManagedDeviceId.ContainsKey($managedId)) -or ($aadId -and $adEntraDeviceId.ContainsKey($aadId))
+      if($existsInAd){continue}
+      $orphanId=$aadId; if(!$orphanId){$orphanId=$managedId}
       Add-IssueRow -Target $issues -IssueCode 'ISSUE-002' -Area 'Intune' -ObjectGUID_Norm $orphanId -Potential_Issue 'Device exists in Intune but not found in AD (orphan MDM device)' -IssueCategory '2.High' -PriorityScore 2 -IsBlocking $true -RecommendedAction 'Identify device owner and re-join to AD or retire from Intune' -ImpactMigration 'Orphan MDM device cannot be managed via hybrid join; migration scope unclear'
     }
+  } else {
+    Warn "Intune orphan check skipped: AD relationship keys DeviceID_From_M365 and entraDeviceId_norm are not available in the input CSV."
   }
-  LogIndexPhase 'Intune orphan check'
+  LogIndexPhase 'Intune orphan check by managed device ID and Entra device ID'
 
   $analysisStopwatch=[Diagnostics.Stopwatch]::StartNew()
   $processedAdRows=0
@@ -389,19 +381,23 @@ try{
     $objectGuidNorm = ([string]$row.ObjectGUID_Norm).Trim(); if(!$objectGuidNorm){$objectGuidNorm=([string]$row.ObjectGUID).Trim()}
     if([string]::IsNullOrWhiteSpace($objectGuidNorm)){continue}
     $name=([string]$row.Name).Trim(); if(!$name){$name=([string]$row.SamAccountName).Trim()}; $name=$name.TrimEnd('$')
-    $in=if($name -and $intuneName.ContainsKey($name)){$intuneName[$name]}else{$null}
-    $aad=([string]$in.'Azure AD Device ID').Trim(); if(!$aad){$aad=([string]$in.AzureADDeviceId).Trim()}; if(!$aad){$aad=([string]$in.'Entra DeviceId').Trim()}; if(!$aad){$aad=([string]$in.EntraDeviceId).Trim()}
-    $deviceIdFromM365=([string]$in.'Device ID').Trim(); if(!$deviceIdFromM365){$deviceIdFromM365=([string]$in.DeviceId).Trim()}; if(!$deviceIdFromM365){$deviceIdFromM365=([string]$in.ManagedDeviceId).Trim()}
-    $en=if($aad -and $entraId.ContainsKey($aad)){$entraId[$aad]}else{$null}; if(!$en -and $name -and $entraName.ContainsKey($name)){$en=$entraName[$name]}
-    $localSystemRow=if($aad -and $localAad.ContainsKey($aad)){$localAad[$aad]}else{$null}; if(!$localSystemRow -and $name -and $localName.ContainsKey($name)){$localSystemRow=$localName[$name]}
-    $biosRow=if($aad -and $biosAad.ContainsKey($aad)){$biosAad[$aad]}else{$null}; if(!$biosRow -and $name -and $biosName.ContainsKey($name)){$biosRow=$biosName[$name]}
-    $compRow=if($aad -and $compAad.ContainsKey($aad)){$compAad[$aad]}else{$null}; if(!$compRow -and $name -and $compName.ContainsKey($name)){$compRow=$compName[$name]}
-    $readyRows=@(); if($name -and $readyNameAll.ContainsKey($name)){$readyRows+=@($readyNameAll[$name])}; if($aad -and $readyIdAll.ContainsKey($aad)){$readyRows+=@($readyIdAll[$aad])}
+    $adManagedDeviceIdKey=G(FirstValue $row @('DeviceID_From_M365'))
+    $adEntraDeviceIdKey=G(FirstValue $row @('ObjectGUID_Norm','entraDeviceId_norm','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm'))
+    $in=$null
+    if($adManagedDeviceIdKey -and $intuneId.ContainsKey($adManagedDeviceIdKey)){$in=$intuneId[$adManagedDeviceIdKey]}
+    elseif($adEntraDeviceIdKey -and $intuneAad.ContainsKey($adEntraDeviceIdKey)){$in=$intuneAad[$adEntraDeviceIdKey]}
+    $aad=G(FirstValue $in @('Azure AD Device ID','AzureADDeviceId','Entra DeviceId','EntraDeviceId')); if(!$aad){$aad=$adEntraDeviceIdKey}
+    $deviceIdFromM365=G(FirstValue $in @('Device ID','DeviceId','ManagedDeviceId')); if(!$deviceIdFromM365){$deviceIdFromM365=$adManagedDeviceIdKey}
+    $en=if($aad -and $entraId.ContainsKey($aad)){$entraId[$aad]}else{$null}
+    $localSystemRow=if($aad -and $localAad.ContainsKey($aad)){$localAad[$aad]}else{$null}
+    $biosRow=if($aad -and $biosAad.ContainsKey($aad)){$biosAad[$aad]}else{$null}
+    $compRow=if($aad -and $compAad.ContainsKey($aad)){$compAad[$aad]}else{$null}
+    $readyRows=@(); if($aad -and $readyIdAll.ContainsKey($aad)){$readyRows+=@($readyIdAll[$aad])}; if($deviceIdFromM365 -and $readyIdAll.ContainsKey($deviceIdFromM365)){$readyRows+=@($readyIdAll[$deviceIdFromM365])}
     $readyRow=LatestByDate $readyRows @('ExportDateTime','ReadinessExportDateTime')
-    $wuAny=if($deviceIdFromM365 -and $wuByDevice.ContainsKey($deviceIdFromM365)){$wuByDevice[$deviceIdFromM365]}else{$null}; if(!$wuAny -and $name -and $wuByName.ContainsKey($name)){$wuAny=$wuByName[$name]}
-    $wuAnchor=if($deviceIdFromM365 -and $wuAnchorByDevice.ContainsKey($deviceIdFromM365)){$wuAnchorByDevice[$deviceIdFromM365]}else{$null}; if(!$wuAnchor -and $name -and $wuAnchorByName.ContainsKey($name)){$wuAnchor=$wuAnchorByName[$name]}
-    $wu24=if($deviceIdFromM365 -and $wu24ByDevice.ContainsKey($deviceIdFromM365)){$wu24ByDevice[$deviceIdFromM365]}else{$null}; if(!$wu24 -and $name -and $wu24ByName.ContainsKey($name)){$wu24=$wu24ByName[$name]}
-    $wu25=if($deviceIdFromM365 -and $wu25ByDevice.ContainsKey($deviceIdFromM365)){$wu25ByDevice[$deviceIdFromM365]}else{$null}; if(!$wu25 -and $name -and $wu25ByName.ContainsKey($name)){$wu25=$wu25ByName[$name]}
+    $wuAny=if($deviceIdFromM365 -and $wuByDevice.ContainsKey($deviceIdFromM365)){$wuByDevice[$deviceIdFromM365]}else{$null}
+    $wuAnchor=if($deviceIdFromM365 -and $wuAnchorByDevice.ContainsKey($deviceIdFromM365)){$wuAnchorByDevice[$deviceIdFromM365]}else{$null}
+    $wu24=if($deviceIdFromM365 -and $wu24ByDevice.ContainsKey($deviceIdFromM365)){$wu24ByDevice[$deviceIdFromM365]}else{$null}
+    $wu25=if($deviceIdFromM365 -and $wu25ByDevice.ContainsKey($deviceIdFromM365)){$wu25ByDevice[$deviceIdFromM365]}else{$null}
 
     $friendlyOs = FriendlyOs $row $in
     $osNameUpper = $friendlyOs.ToUpperInvariant()
@@ -755,10 +751,10 @@ try{
 }catch{Write-Error $_; throw}
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZLGtvhhrzAsNm
-# Yq2vv0VeE/BICsm7dHIO1+PdUcgmRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWB1zYceYN6pmY
+# sLo3yIwN/kpjizpSO1gWUXfX57wVuKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -783,139 +779,19 @@ try{
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPpi6RALcGYfPPwOzJN4s1033Fr4RPIJWWUB6SGISxZUMA0GCSqG
-# SIb3DQEBAQUABIIBgHTTRY9wQqnz64Him/OO6Q4c/GOhNr85PfkXBBgOHnVfGzQg
-# 2fcgijwAGYAqjPvFq/VWlbq8OEuQuaSa1oaPCvvUYIu7AqBbqSehMaT2eL+pzLCK
-# bUz1BgJ8yn+bVMtRcO3qyVBW1ovzLQhdwFlVFFaTZzqVMGBp/sqHuzU19zHORyo4
-# pO2K3jppibNi6udOIpc0sza+GFwmLSXgxq7fHFF8e4nBKCBL/4NiooSN/lskyXQg
-# Yipa/PhSKBeoP65btEg0uXxjI70btE9j+Kinjg13NoU+6SQlBRy7kjH+um4Q6wUN
-# xDKOqY3ZUEQ3uul7co5jTgmJhaX+qcMnIF/dUeyboYG9g1c3Sj4Lxyb1Wx7DulJR
-# +q0t2obBwI7VyqmIZepobfCGwfszW0zAdoPCzH0WPlY/A9RvKJLuY8l5xDoZ7HBo
-# mRPYXEK1BZMqipVUhUJxbZp5D6Wzl/MDYLiAPq99MvTjzAvLVX++ASAI5r4Cfvkb
-# /6YR3ry1jNeaEvJXdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNjQw
-# MTVaMC8GCSqGSIb3DQEJBDEiBCBJhWuebapzq7CPw8HEK/8G9q0djpmkzza7Nkki
-# AHOcNzANBgkqhkiG9w0BAQEFAASCAgB0EoBU1Yet0e25yZg2bY7yWsyfSP6/Q7VN
-# 6MHW9gL9HfeRPXjSSWE7cM/w3XXk2j/EtwRfqaO1xARvP9QtrTO3otAECy2MBPah
-# Ha05W27oBrl36U+PQMpdisi0Fn/rhbg3PKAD1a07tZGZFMTInZE4CALKcUFqeN/H
-# b3sAWMB5+NRP3xMabn9ZKouBI36iO4rX505w7K7hCTnKiVzAal5J8oLttdJeQtjY
-# WEajEuMPqBEygIXHz+Myn60oF+R2hkKQSkYh1FEltuge9qRAFKoQ0vN26z9WZFYZ
-# vwmGDmcordpd65mJYhCJSn5NlzAwPUoHFUFmK8gLOG8Ob8V7cvxxhTGpA+kY82Yk
-# zdqs4y2s7RPghNjnyaWBKKQX+eO2bpVYlIPok0ANfNHMF61VQsCsa69D2LSaPOZB
-# M/VBOPqkAYD17LHe3H4UEUSCblVCmakyeZdx5snIrm6n89DIlxQiwRGdLFQS5pw1
-# Kkt+aCWT0wCMSWv5h73/AFlLNwiTm0bQLpgRxThkuv9VkqPE7sg+vb/CYidUZ34p
-# vBl4/cIluvB6iV9dyPfm797AAq7JOnRVLcBK7yJ2irftcHAUj2cWqm8e2h28pzhO
-# GqL4ZgC5nHr7mqNdijOtIhTXJ47mFDir8mxhMYZJc1HE1CD1V8Pff7EgSmmSROLj
-# hwRsqfJgHQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDopR50Wfbs7lCKfS/JNJ15
+# e90batWilzk9GzXVJPVF8TANBgkqhkiG9w0BAQEFAASCAYCI0tjZEUu5hlmsGh3x
+# NvmizlPFX9YnsQKrhE/49sLdKz61nPUqaMlMhkAlJmADAnMoeSeWJ/j/4gv1HTVP
+# q0ykgj1kzS41mEHyw8ElffJkGhTBOOniTC4LYLgLQH0BBLWYNYjkk2uGkw8iOLNb
+# 0yR2R2esfxsn0+dKlN+YtX6OEdnT5magewK2SIKe6Jt+QQHUqV76xpLC0VpZaPzT
+# Z0O0Jv+dWy0HY4LGmHz1aoVilL0QvsRzwpje5tq1Cp5DFiDm794oR4p4fBSgKFm0
+# cabbDl3qIwcU2qoL+aglaQzH3EfKktolEZPS9FK43NFXjXzgZrU3IU4cYE79ftLI
+# Rgzf+WYPU2FHV4Ymh5jIgT8A/40F94r4rnDRRM+deZvWb6pJo9e+o4sh7BKs37aa
+# Q+dKiDX4wS/CHlwHsvC+c0DFN7SQo0Q/kjGaEVOOJELhainwGNYVEY7642HVy20F
+# 9qjfibgPVAhhohLVdRJrK5bsFy5O/H7U+Gvjb4XW/sVOGvM=
 # SIG # End signature block
