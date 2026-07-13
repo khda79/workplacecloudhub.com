@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of top-risk policies shown in email (default: 10)
 
 VERSION
-  1.16
+  1.17
 .VERSION
-1.16
+1.17
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.16"
+$ScriptVersion = "1.17"
 
 # ==========================================================
 # App-only authentication parameters
@@ -598,6 +598,45 @@ function Get-AppCertificate {
     return $cert
 }
 
+function Ensure-MsalPsModule {
+    param(
+        [string]$ModuleName = "MSAL.PS",
+        [ValidateSet("CurrentUser","AllUsers")]
+        [string]$InstallScope = "AllUsers",
+        [string]$Repository = "PSGallery"
+    )
+
+    $availableModule = Get-Module -ListAvailable -Name $ModuleName | Sort-Object Version -Descending | Select-Object -First 1
+    if ($null -eq $availableModule) {
+        $installCommand = "Install-Module $ModuleName -Scope $InstallScope -Repository $Repository -Force -AllowClobber"
+        Write-Log "$ModuleName module is not installed. Attempting automatic installation: $installCommand" "WARN" "AUTH"
+
+        if (-not (Get-Command -Name Install-Module -ErrorAction SilentlyContinue)) {
+            throw "$ModuleName module is not installed and Install-Module is unavailable. Install PowerShellGet, then run in an elevated PowerShell session: $installCommand"
+        }
+
+        try {
+            Install-Module -Name $ModuleName -Scope $InstallScope -Repository $Repository -Force -AllowClobber -ErrorAction Stop
+            $availableModule = Get-Module -ListAvailable -Name $ModuleName | Sort-Object Version -Descending | Select-Object -First 1
+            if ($null -eq $availableModule) {
+                throw "Install-Module completed but $ModuleName was not found in PSModulePath."
+            }
+            Write-Log "$ModuleName module installed: Version=$($availableModule.Version); Path=$($availableModule.Path)" "INFO" "AUTH"
+        }
+        catch {
+            throw "$ModuleName module is not installed and automatic installation failed. Run PowerShell as administrator and execute: $installCommand. Error: $($_.Exception.Message)"
+        }
+    }
+
+    try {
+        Import-Module -Name $ModuleName -ErrorAction Stop
+        Write-Log "$ModuleName module loaded: Version=$($availableModule.Version); Path=$($availableModule.Path)" "INFO" "AUTH"
+    }
+    catch {
+        throw "$ModuleName module was found but could not be imported. Error: $($_.Exception.Message)"
+    }
+}
+
 function Get-GraphTokenWithCert {
     param(
         [Parameter(Mandatory=$true)][string]$TenantId,
@@ -605,15 +644,11 @@ function Get-GraphTokenWithCert {
         [Parameter(Mandatory=$true)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
     )
 
-    if (-not (Get-Module -ListAvailable -Name "MSAL.PS")) {
-        throw "MSAL.PS module is not installed. Install it with: Install-Module MSAL.PS -Scope AllUsers"
-    }
-    Import-Module MSAL.PS -ErrorAction Stop
+    Ensure-MsalPsModule -InstallScope "AllUsers" -Repository "PSGallery"
     $token = Get-MsalToken -TenantId $TenantId -ClientId $ClientId -ClientCertificate $Certificate -Scopes "https://graph.microsoft.com/.default"
     if (-not $token -or [string]::IsNullOrWhiteSpace($token.AccessToken)) { throw "Failed to acquire access token using MSAL.PS." }
     return $token.AccessToken
 }
-
 # ==========================================================
 # Graph token auto-refresh
 # ==========================================================
@@ -1046,11 +1081,15 @@ try {
 
     if ($ConsolePretty) {
         Write-Host ""
-        Write-Host ("=" * 78) -ForegroundColor DarkGray
+        Write-Host ("=" * 80) -ForegroundColor DarkGray
+        Write-Host " SmartM365 by WorkplaceCloudHub" -ForegroundColor White
+        Write-Host " Website : https://workplacecloudhub.com" -ForegroundColor Gray
+        Write-Host " GitHub  : https://github.com/khda79/workplacecloudhub.com" -ForegroundColor Gray
+        Write-Host ("=" * 80) -ForegroundColor DarkGray
         Write-Host ("{0}  v{1}  {2}" -f $ScriptName, $ScriptVersion, (Get-Date -Format "yyyy-MM-dd HH:mm:ss")) -ForegroundColor White
         Write-Host ("Host: {0}   RunId: {1}" -f $env:COMPUTERNAME, $RunId) -ForegroundColor DarkGray
         if ($DryRun) { Write-Host "*** DRY-RUN MODE: no files written, no emails sent ***" -ForegroundColor Cyan }
-        Write-Host ("=" * 78) -ForegroundColor DarkGray
+        Write-Host ("=" * 80) -ForegroundColor DarkGray
     }
 
     Write-Log "Starting export. Version=$ScriptVersion DryRun=$DryRun MaxPolicies=$MaxPolicies EnableReadinessEnrichment=$EnableReadinessEnrichment" "INFO"
