@@ -4,11 +4,40 @@
   "title": "SmartWorkplaceCMDB Schema",
   "type": "object",
   "required": [
+    "identity",
     "entities",
     "relationships",
     "powerBI"
   ],
   "properties": {
+    "identity": {
+      "type": "object",
+      "required": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey"
+      ],
+      "properties": {
+        "TenantKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*-[a-z0-9][a-z0-9-]*$"
+        },
+        "OrganizationKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "EnvironmentKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "TenantId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "entities": {
       "type": "array",
       "items": {

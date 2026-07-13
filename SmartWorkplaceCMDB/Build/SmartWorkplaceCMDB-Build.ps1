@@ -6,11 +6,16 @@ Initializes and builds the SmartWorkplaceCMDB normalized output model.
 This first build scaffold creates the tenant output folders, initializes empty CMDB and Power BI-ready tables, and writes a build manifest. Source collectors will populate the raw and normalized tables in later phases.
 
 .VERSION
-0.1.2
+0.1.3
 #>
 [CmdletBinding()]
 param(
-    [string]$Tenant = 'Default',
+    [Alias('ProfileKey')]
+    [string]$Tenant = 'default',
+    [string]$OrganizationKey = 'organization',
+    [string]$EnvironmentKey = 'default',
+    [string]$TenantKey,
+    [string]$TenantId,
     [string]$DataRootPath,
     [string]$DataAllRootPath,
     [string]$LatestOutputRootPath,
@@ -18,7 +23,7 @@ param(
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '0.1.2'
+$ScriptVersion = '0.1.3'
 $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -27,13 +32,17 @@ $modulePath = Join-Path -Path $projectRoot -ChildPath 'Modules\SmartWorkplaceCMD
 
 Import-Module $modulePath -Force
 
-$paths = Resolve-SmartWorkplaceCMDBTenantPath -Tenant $Tenant -DataRootPath $DataRootPath -DataAllRootPath $DataAllRootPath -LatestOutputRootPath $LatestOutputRootPath -LogRootPath $LogRootPath
+$paths = Resolve-SmartWorkplaceCMDBTenantPath -Tenant $Tenant -OrganizationKey $OrganizationKey -EnvironmentKey $EnvironmentKey -TenantKey $TenantKey -TenantId $TenantId -DataRootPath $DataRootPath -DataAllRootPath $DataAllRootPath -LatestOutputRootPath $LatestOutputRootPath -LogRootPath $LogRootPath
 
 if ($ValidateOnly) {
     [pscustomobject]@{
         Status               = 'Valid'
         ScriptVersion        = $ScriptVersion
+        ProfileKey           = $paths.ProfileKey
+        OrganizationKey      = $paths.OrganizationKey
+        EnvironmentKey       = $paths.EnvironmentKey
         TenantKey            = $paths.TenantKey
+        TenantId             = $paths.TenantId
         ProjectRootPath      = $paths.ProjectRootPath
         LatestOutputRootPath = $paths.LatestOutputRootPath
         PowerBILatestPath    = $paths.PowerBILatestPath
@@ -46,33 +55,37 @@ Initialize-SmartWorkplaceCMDBTenantFolder -Paths $paths
 $buildTimestamp = (Get-Date).ToString('o')
 
 $tableDefinitions = @(
-    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Users.csv'; Columns = @('TenantKey','CmdbUserId','SourceSystem','SourceUserId','UserPrincipalName','DisplayName','AccountEnabled','UserType','Department','JobTitle','ManagerUserId','CreatedDateTime','LastSignInDateTime','ConfidenceScore','SourceCollectedDateTime') },
-    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Devices.csv'; Columns = @('TenantKey','CmdbDeviceId','SourceSystem','SourceDeviceId','DeviceName','OperatingSystem','OperatingSystemVersion','Ownership','ComplianceState','ManagementState','PrimaryUserId','LastSyncDateTime','ConfidenceScore','SourceCollectedDateTime') },
-    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Groups.csv'; Columns = @('TenantKey','CmdbGroupId','SourceSystem','SourceGroupId','DisplayName','MailEnabled','SecurityEnabled','GroupTypes','MemberCount','OwnerCount','SourceCollectedDateTime') },
-    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Licenses.csv'; Columns = @('TenantKey','CmdbLicenseId','SourceSystem','SkuId','SkuPartNumber','ConsumedUnits','EnabledUnits','SuspendedUnits','WarningUnits','SourceCollectedDateTime') },
-    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Mailboxes.csv'; Columns = @('TenantKey','CmdbMailboxId','SourceSystem','ExternalDirectoryObjectId','UserPrincipalName','DisplayName','RecipientTypeDetails','PrimarySmtpAddress','MailboxPlan','ArchiveStatus','SourceCollectedDateTime') },
-    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_UserDeviceRelationships.csv'; Columns = @('TenantKey','CmdbRelationshipId','CmdbUserId','CmdbDeviceId','RelationshipType','SourceSystem','ConfidenceScore','Evidence','SourceCollectedDateTime') },
-    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Relationships.csv'; Columns = @('TenantKey','CmdbRelationshipId','FromEntityType','FromEntityId','ToEntityType','ToEntityId','RelationshipType','SourceSystem','ConfidenceScore','SourceCollectedDateTime') },
-    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_DataQuality.csv'; Columns = @('TenantKey','FindingId','Severity','EntityType','EntityId','FindingType','Description','SourceSystem','DetectedDateTime','RecommendedAction') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimTenant.csv'; Columns = @('TenantKey','TenantDisplayName','Environment','LastRefreshDateTime') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimUser.csv'; Columns = @('TenantKey','TenantUserKey','CmdbUserId','UserPrincipalName','DisplayName','AccountEnabled','UserType','Department','JobTitle','ConfidenceScore') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimDevice.csv'; Columns = @('TenantKey','TenantDeviceKey','CmdbDeviceId','DeviceName','OperatingSystem','OperatingSystemVersion','Ownership','ComplianceState','ManagementState','ConfidenceScore') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimGroup.csv'; Columns = @('TenantKey','TenantGroupKey','CmdbGroupId','DisplayName','MailEnabled','SecurityEnabled','GroupTypes') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimLicenseSku.csv'; Columns = @('TenantKey','TenantSkuKey','SkuId','SkuPartNumber','ConsumedUnits','EnabledUnits') },
+    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Users.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','CmdbUserId','SourceSystem','SourceUserId','UserPrincipalName','DisplayName','AccountEnabled','UserType','Department','JobTitle','ManagerUserId','CreatedDateTime','LastSignInDateTime','ConfidenceScore','SourceCollectedDateTime') },
+    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Devices.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','CmdbDeviceId','SourceSystem','SourceDeviceId','DeviceName','OperatingSystem','OperatingSystemVersion','Ownership','ComplianceState','ManagementState','PrimaryUserId','LastSyncDateTime','ConfidenceScore','SourceCollectedDateTime') },
+    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Groups.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','CmdbGroupId','SourceSystem','SourceGroupId','DisplayName','MailEnabled','SecurityEnabled','GroupTypes','MemberCount','OwnerCount','SourceCollectedDateTime') },
+    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Licenses.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','CmdbLicenseId','SourceSystem','SkuId','SkuPartNumber','ConsumedUnits','EnabledUnits','SuspendedUnits','WarningUnits','SourceCollectedDateTime') },
+    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Mailboxes.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','CmdbMailboxId','SourceSystem','ExternalDirectoryObjectId','UserPrincipalName','DisplayName','RecipientTypeDetails','PrimarySmtpAddress','MailboxPlan','ArchiveStatus','SourceCollectedDateTime') },
+    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_UserDeviceRelationships.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','CmdbRelationshipId','CmdbUserId','CmdbDeviceId','RelationshipType','SourceSystem','ConfidenceScore','Evidence','SourceCollectedDateTime') },
+    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_Relationships.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','CmdbRelationshipId','FromEntityType','FromEntityId','ToEntityType','ToEntityId','RelationshipType','SourceSystem','ConfidenceScore','SourceCollectedDateTime') },
+    [pscustomobject]@{ Folder = $paths.CmdbLatestPath; Name = 'CMDB_DataQuality.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','FindingId','Severity','EntityType','EntityId','FindingType','Description','SourceSystem','DetectedDateTime','RecommendedAction') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimTenant.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantDisplayName','Environment','LastRefreshDateTime') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimUser.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantUserKey','CmdbUserId','UserPrincipalName','DisplayName','AccountEnabled','UserType','Department','JobTitle','ConfidenceScore') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimDevice.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantDeviceKey','CmdbDeviceId','DeviceName','OperatingSystem','OperatingSystemVersion','Ownership','ComplianceState','ManagementState','ConfidenceScore') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimGroup.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantGroupKey','CmdbGroupId','DisplayName','MailEnabled','SecurityEnabled','GroupTypes') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimLicenseSku.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantSkuKey','SkuId','SkuPartNumber','ConsumedUnits','EnabledUnits') },
     [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'DimDate.csv'; Columns = @('Date','Year','Quarter','Month','MonthName','Day') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactUserLicense.csv'; Columns = @('TenantKey','TenantUserKey','TenantSkuKey','CmdbUserId','SkuId','AssignmentState','AssignedDateTime','SourceSystem') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactDeviceCompliance.csv'; Columns = @('TenantKey','TenantDeviceKey','CmdbDeviceId','ComplianceState','LastSyncDateTime','SourceSystem') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactUserDeviceRelationship.csv'; Columns = @('TenantKey','TenantRelationshipKey','TenantUserKey','TenantDeviceKey','CmdbRelationshipId','CmdbUserId','CmdbDeviceId','RelationshipType','ConfidenceScore','SourceSystem') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactMailbox.csv'; Columns = @('TenantKey','TenantMailboxKey','TenantUserKey','CmdbMailboxId','CmdbUserId','RecipientTypeDetails','ArchiveStatus','SourceSystem') },
-    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactDataQuality.csv'; Columns = @('TenantKey','TenantFindingKey','FindingId','Severity','EntityType','FindingType','DetectedDateTime','SourceSystem') }
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactUserLicense.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantUserKey','TenantSkuKey','CmdbUserId','SkuId','AssignmentState','AssignedDateTime','SourceSystem') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactDeviceCompliance.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantDeviceKey','CmdbDeviceId','ComplianceState','LastSyncDateTime','SourceSystem') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactUserDeviceRelationship.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantRelationshipKey','TenantUserKey','TenantDeviceKey','CmdbRelationshipId','CmdbUserId','CmdbDeviceId','RelationshipType','ConfidenceScore','SourceSystem') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactMailbox.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantMailboxKey','TenantUserKey','CmdbMailboxId','CmdbUserId','RecipientTypeDetails','ArchiveStatus','SourceSystem') },
+    [pscustomobject]@{ Folder = $paths.PowerBILatestPath; Name = 'FactDataQuality.csv'; Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','TenantFindingKey','FindingId','Severity','EntityType','FindingType','DetectedDateTime','SourceSystem') }
 )
 
 foreach ($table in $tableDefinitions) {
-    Export-SmartWorkplaceCMDBCsv -InputObject @() -Path (Join-Path -Path $table.Folder -ChildPath $table.Name) -Columns $table.Columns
+    Export-SmartWorkplaceCMDBCsv -InputObject @() -Path (Join-Path -Path $table.Folder -ChildPath $table.Name) -Columns $table.Columns -TenantKey $paths.TenantKey -OrganizationKey $paths.OrganizationKey -EnvironmentKey $paths.EnvironmentKey -TenantId $paths.TenantId
 }
 
 $manifest = [pscustomobject]@{
     TenantKey            = $paths.TenantKey
+    OrganizationKey      = $paths.OrganizationKey
+    EnvironmentKey       = $paths.EnvironmentKey
+    TenantId             = $paths.TenantId
+    ProfileKey           = $paths.ProfileKey
     ScriptVersion        = $ScriptVersion
     BuildDateTime        = $buildTimestamp
     CmdbTableCount       = ($tableDefinitions | Where-Object { $_.Folder -eq $paths.CmdbLatestPath }).Count
@@ -80,18 +93,16 @@ $manifest = [pscustomobject]@{
     LatestOutputRootPath = $paths.LatestOutputRootPath
 }
 
-Export-SmartWorkplaceCMDBCsv -InputObject @($manifest) -Path (Join-Path -Path $paths.CmdbLatestPath -ChildPath 'CMDB_BuildManifest.csv')
+Export-SmartWorkplaceCMDBCsv -InputObject @($manifest) -Path (Join-Path -Path $paths.CmdbLatestPath -ChildPath 'CMDB_BuildManifest.csv') -TenantKey $paths.TenantKey -OrganizationKey $paths.OrganizationKey -EnvironmentKey $paths.EnvironmentKey -TenantId $paths.TenantId
 
 Write-Information ("SmartWorkplaceCMDB build scaffold completed for tenant '{0}'." -f $paths.TenantKey) -InformationAction Continue
 Write-Information ("Latest output: {0}" -f $paths.LatestOutputRootPath) -InformationAction Continue
 
-
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBA4D8USKqGEf8i
-# hcCGVH5yz/M7ubLAIQ7LNk9Ln54HhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASL8lZy88YeeZZ
+# O9Xi0QH9ILDivaXAL2yiHeu2OMZye6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -224,31 +235,31 @@ Write-Information ("Latest output: {0}" -f $paths.LatestOutputRootPath) -Informa
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJKURTOVbniITC5Aqd5UHazzCzDQCTSuDdAYPsdJRUVGMA0GCSqG
-# SIb3DQEBAQUABIIBgJQBCB1pA1PQLR5u7T3abhuLgSzqCUkBTXO9v70r8iNfD4GT
-# ZL93mDOIXzXzrsdT89alU6p73JBsCOw2qwat/ae7aF5PXaGT0zDp2IlMIMufxIo7
-# /yV4KyamVjogr5cu/a4JfreF5UZV5CM/tpty3r2JlxytGKIFlbmmdGkscyT4VqeO
-# wGXC8XH5sl7y2NP24ZAXpOSzsa/4V9JHlZxmhR5IAvHEDuv9Nb/CEWSxXjzar5mO
-# HkBf6ExM4hFXh3uybhcH2JV8QARImdD1WzAyz9wBGtqR3oz12pcgdzVVt7oOYIM2
-# NzLMCeax7C5mfeENjvwj2aYyQIecgX7lzDfziCotfg5mWI9QeVVmyBAhW7Eckpuq
-# Uzb28sIIbiStQIqfKSt/4YA3sTVo4qfbNPBknmUxEl6nYiHJfJZk3CBBjHlOojO0
-# m6kNRqlgf60IW6E8a8ZGWnFPOCUBhzuTLtm0DW43bUp/84BXIh6P+yfLuwQ6pyae
-# Zzhb1kdVHuDJVtY0kKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAbydctx1/oBrLYgtacN9CHV5/8mcFabeDbFbnXbm5fyMA0GCSqG
+# SIb3DQEBAQUABIIBgHpEdb3LWAsAp0Ks2PhIPCbC6AJH3qReFXQr6yrEXG23qhNu
+# n5Je/FYb5CikHvPLdoJG6yHqkGZZo+UqBwigYi9hRh7eqTAdW7+t3DPXhxt72SwH
+# Op7x0gMkWfEtg8wY5cXQU5pjWreThyjoZ0e6ZMsTuBKfDvdcJMjKFSvu1vqUPz1t
+# 93kDd+oMQTlF8SxJhqz/YvvE1Ktc4bopCXQ6+t/grlzZWomhrD5IEjTw0P3FYwHa
+# SXRWXZeGvU9X64MOZb71hTad8ZTeltWX9VP1aTdJQIM7r/m8tuCMh1LVaQeLeMfH
+# RqxYG5dG+gIu8+HadtHQmmr+XUfKM681AUjGKXiYAyOvLKSYYyAcF+6cWUVqvyfi
+# Y81ptA0ZsgS/d3Pi5o01n9O5366PrB9QglARpkLzUqulOEss4lWELJNVjMuAnukm
+# m9kZppfMSOIPJvVsQqyAMTjugdCDRostT58UfxYDfvTNHsVMtU21MjKee2qyizM4
+# +BjcBc5b9ASnwGcf06GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
-# MjVaMC8GCSqGSIb3DQEJBDEiBCAmy4+NP9TBk13q5cdAgpfEI7IPC3lcX2BLd089
-# +SAR+jANBgkqhkiG9w0BAQEFAASCAgAbt69eXdhvqxpC44YZXBU5KmlwUv9CZpXM
-# wdCsN61J8DkzXGWI+GWdIi1TF3tbPjjaVBHrLzcv72ce6K6T2Ucl2WKWqxkqUmCv
-# uchQzG7Q4uXjVFk/Hip6wXtaTMpJWWLO9amtgzvJwMflMzMe6gn0qUGnQfALo0Uf
-# XdR3tffIuYp8TQ+S8DV3I+HmFBxYp497vJ7d9mlLv/hK/lPmZ6Kw2argL6k38UVm
-# 99fY5APo9YlWNNQV0+FPPmVrq87v8UEjvMco3rVCwp5GecNfEOEIQA1hMUFHxEa7
-# 09ozcvVHjjOKzm26aJFN2o6aysJk3P4NBsmpNaWZGX5DNDwGpYv7OIeVUToSOWjz
-# Wq2N4MjW1J3LZfoYqX1BGnz4yon22e8yS0+TpBLdFjHTFIJIv4UsVqQMaKVlFafK
-# +Li11MS3DWSec+qLn0mWBcsVb41kxDEYwW2bLHRGTP5f78rFLPXAB2+nscAGcyTi
-# S4Tswmt3HAC4mYa4aM2klqBsBjDcEennZi+GwNtFMUsB1h2ioNc7ocKGGBIeVprO
-# ByCpDKyC7FYNU9y0dQxOdrCJu9gwkBw2Xk3jGRs4XYsrd7yvCtmkpIdqxqQQrEQ0
-# WHNaOe57opIQzy/PLJiQI5RGrkOpGDYqaQ+j4pE7lngxg69HtQlu9pRmTevpI8IU
-# EZQTDTEPew==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjAz
+# MjhaMC8GCSqGSIb3DQEJBDEiBCAcs+HyyYXxY+TwQWL44hC5us+0fA6d28Lam5Rp
+# cjAU9TANBgkqhkiG9w0BAQEFAASCAgCR2eMKDzX/q0t2L67UR4YjRn02DZsftyR4
+# 4kIKzstHMVqHOKwIyJ43V9EtxbT7gP1AWhfx3RM1UXqfZYUkRwz+OcdA79Hw/wDB
+# ZR4DIYlEP86BwlXjlM055EtcEXg+tEluUtyLtuv5+c4MQhHzMP1F9y+9kAeWA/Bh
+# mlFQ8sfSV659lE/nwj81+7agaSRRUJKcNqQGxBO3kF6rVbOkWg11rS1gFRGE6pyg
+# eJnhggQ0M94cG+KKGVSGiq292CJ3tT8ShugY8h9+AVOMARxKG9i4cGWbPNwrsAbD
+# QPtYWpC5h5wscDV0gHCBkn7bWWIWpArt8p4NmK3eF4o1T9Hnx+uyuERuBgTmmY7Z
+# IfgDnauFa9fOIyepaF+0S8/qdybHn2GDYvLBOB/SmLLONEFlXK/vFPvyTKeFWMku
+# plqkEJSMnHGfviDp6Tu8UlWGEaBZMPEaggXE1GWdfbzRPMSLv9fuCjrDuy2PiEt4
+# LAJn/2rbCP5GxyxXDbMr++IAb0FlkFmBW7ree322CkyrHlfUp9cTWU0TNdqe6G8E
+# nzG71AYpwqRKRw7hkkZNiTROQe205JNK5tE2vT1cLf5easdHSZe4whJpi8joBXJH
+# j3gaTwqpNXPJBAcevqKgXNbEfg6VXsU8PPXnGWDTR6Kq97jS12GMOeHfXxIxUjgu
+# 7HD4cqxAZQ==
 # SIG # End signature block

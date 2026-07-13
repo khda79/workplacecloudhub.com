@@ -41,10 +41,10 @@ SmartWorkplaceCMDB/
 
 ## Output Layout
 
-Runtime output is tenant-scoped:
+Runtime output is profile-scoped. `ProfileKey` selects the local folder (for example `prod`), while every tenant-scoped CSV starts with `TenantKey`, `OrganizationKey`, `EnvironmentKey`, and `TenantId`. `TenantKey` is the stable analytical key `OrganizationKey-EnvironmentKey`; `TenantId` may be empty for sources that do not expose an Entra tenant ID.
 
 ```text
-SmartWorkplaceCMDB/Data/Tenants/<TenantKey>/
+SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/
   DATA-ALL/
   DATA-LAST/
   LOG-ALL/
@@ -53,7 +53,7 @@ SmartWorkplaceCMDB/Data/Tenants/<TenantKey>/
 Power BI consumes curated tables from:
 
 ```text
-SmartWorkplaceCMDB/Data/Tenants/<TenantKey>/DATA-LAST/PowerBI/
+SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/DATA-LAST/PowerBI/
 ```
 
 ## Power BI Direction
@@ -77,7 +77,7 @@ Detailed inventory pages will add drill-through views for users, devices, relati
 Copy the configuration templates to local files, fill local tenant values, then run the build scaffold:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Build\SmartWorkplaceCMDB-Build.ps1 -Tenant Default
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartWorkplaceCMDB\Build\SmartWorkplaceCMDB-Build.ps1 -Tenant prod -OrganizationKey emeis -EnvironmentKey prod -TenantKey emeis-prod
 ```
 
 The first build creates the tenant output structure and initializes the first CMDB and Power BI table set.
