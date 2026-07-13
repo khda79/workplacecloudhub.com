@@ -1864,6 +1864,28 @@ function Get-JobEngine {
     return [pscustomobject]@{ Path = (Get-PwshPath); ProcessName = 'pwsh' }
 }
 
+function Resolve-OrchestratorJobArguments {
+    param([AllowNull()][string]$Arguments)
+
+    if ([string]::IsNullOrWhiteSpace($Arguments)) { return '' }
+    if ($Arguments -notmatch '\{\{[^}]+\}\}') { return $Arguments }
+
+    $resolved = $Arguments
+    for ($i = 0; $i -lt 10; $i++) {
+        $matches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
+        if ($matches.Count -eq 0) { break }
+        $changed = $false
+        foreach ($match in $matches) {
+            $name = $match.Groups['Name'].Value
+            $value = Get-SmartM365ScriptConfigValue -Config $script:OrchestratorLocalConfig -Name $name -DefaultValue ''
+            if ($null -eq $value) { $value = '' }
+            $resolved = $resolved.Replace($match.Value, [string]$value)
+            $changed = $true
+        }
+        if (-not $changed) { break }
+    }
+    return $resolved
+}
 function Resolve-OrchestratorJobPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -2782,6 +2804,7 @@ try {
     . $tenantContextPath
     $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     $localConfig = Get-SmartM365ScriptLocalConfig
+    $script:OrchestratorLocalConfig = $localConfig
 
     $script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 
@@ -3094,11 +3117,12 @@ finally {
 
 exit $script:ExitCode
 
+
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTYg1X+4JI6Tin
-# TtqgHT9jCD0kK0YZhU3kTIn94FLrTKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaJ5N50JyBcoeZ
+# +461I3xIa/V0dqQ319psemEf3Ra/dqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3124,14 +3148,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDEvBxjoycpo3h7sAjyfrNq9YZdDFC8eb66cx79ZsK/gDANBgkqhkiG9w0B
-# AQEFAASCAYBaKKVvZeAeU4phQjpd1bTLZ20jXr5P1oN6+T5WMCwnwCXb2/0PQE+W
-# rz0iMir2WU6e6RvcTvSJVIWlW+PXPQLAN4SEYcTyXtwD7T8LN8RCMpxjtc0MhIix
-# 6iXzA1s8lhdW6YAVm9+X74QWevCWjgSwA/tYIAsYNFuV/MpBEciAuI7wjZHwE5W8
-# dA5bvFpTQFhkO+vcYg5wrUGWJoW0zPCNW+6eOV7ErOLfi4CUdrJawdpIkYFOkm2c
-# BZRDRxjVvsT5QllD3tyCyUfkB/KkUtMafcozg0DJbe60TEqc1IQYI40Lu9AMsv4L
-# fGYL5C261ijQksri2RcixaH+lKx573IuG8VxcrXRfeFU2fnQDYlJPk9AbF7u/t/p
-# LnQkD3hC+eC7dTaY5Wjz/SBFqCIPZnVzsQ/LEzxwQ8bCCyHuW8pBwFu4AZhzxI0z
-# Spnddhj5bf15MBrTbe4ajAqtO7bh4++SM5+6H/E9PMkOKXDr0fceEOEw/kFcHc9e
-# 2h/d8Nc53lY=
+# BDEiBCDgzBLjwgc4yfiOvV2PEVi3m1wRxY9wDMszlRl8mIDPKzANBgkqhkiG9w0B
+# AQEFAASCAYBtOyQLLAW0g4cXy7Kk5azFDg0B55ET8cz1mybd8HokNSzmmAAQXszs
+# Oek+6bUJYgp7bD3sjZjkzkrp4DPio0Wiqu7orKxAQc+tEPVnEseCLKBT7tPIFWmA
+# dwGiC3V6oHJxmgVa74k/85MUOIHS0M9Fz9H8GGfevcxHVbHCCs8mAf0svRe60WLu
+# Ru2H+FrU7F5qkMpi0vC7IGRvBFCVlqh+5I3IEhy5tBlS1UpzRyvwViQRrFq5nHXn
+# Fb/e/P6yEim68D4omO7wP0KiEZtBif20RkZqt9xrw35V7V85HjoYf6AtXP7sbDEM
+# Vpdx+IF75iEnWGYMSlLsGTuFxNxBw8tbZ/+cV6QwHAEJYPAJjEAmNlpoLtB21N3k
+# 9i7lht+pyirSh7x8cYeA5CGZ9FoIjejATP5A2pA5eU7+L25N2iqzENa/UsdKVlXN
+# ru4oJu5Ppge/Q2zNM++WfBqdmNXY3pvd9kv0/lc3AHIcD4bH8VBsMDU3fS79yr7A
+# AdETAGIVWgc=
 # SIG # End signature block

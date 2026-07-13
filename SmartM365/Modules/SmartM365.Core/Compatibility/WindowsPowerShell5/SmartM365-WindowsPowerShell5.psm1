@@ -1230,22 +1230,8 @@ function New-SmartM365MailFilesHtmlSection {
     foreach ($path in $existingFiles) {
         $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
         if ($null -eq $item) { continue }
-        $uploadRecord = $null
-        if ($global:SmartM365SharePointUploadedFiles) {
-            $uploadRecord = @($global:SmartM365SharePointUploadedFiles | Where-Object { $_.LocalFilePath -eq $item.FullName } | Select-Object -Last 1)
-        }
         $label = ConvertTo-SmartM365EmailHtmlText $item.Name
-        if ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.WebUrl)) {
-            $escapedUrl = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.WebUrl)
-            $escapedPath = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
-            $locationHtml = "<a href=`"$escapedUrl`" style=`"color:#075985;text-decoration:underline;`">$escapedPath</a>"
-        }
-        elseif ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.SharePointPath)) {
-            $locationHtml = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
-        }
-        else {
-            $locationHtml = ConvertTo-SmartM365EmailHtmlText $item.FullName
-        }
+        $locationHtml = (Get-SmartM365MailFileLocationHtml -FilePath $item.FullName).Html
         $sizeKb = [Math]::Round(($item.Length / 1KB), 1)
         $rows += "<tr><td style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;`">$label</td><td style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;word-break:break-all;`">$locationHtml</td><td align=`"right`" style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;white-space:nowrap;`">$sizeKb KB</td></tr>"
     }
@@ -1262,6 +1248,97 @@ function New-SmartM365MailFilesHtmlSection {
 "@
 }
 
+function Get-SmartM365SharePointUploadRecordForLocalFile {
+    [CmdletBinding()]
+    param([string]$FilePath)
+
+    if ([string]::IsNullOrWhiteSpace($FilePath) -or -not $global:SmartM365SharePointUploadedFiles) { return $null }
+
+    $normalizedPath = [string]$FilePath
+    try {
+        $normalizedPath = [System.IO.Path]::GetFullPath($FilePath)
+    }
+    catch {
+        $normalizedPath = [string]$FilePath
+    }
+
+    $matches = @($global:SmartM365SharePointUploadedFiles | Where-Object {
+        $recordPath = [string]$_.LocalFilePath
+        if ([string]::IsNullOrWhiteSpace($recordPath)) { return $false }
+
+        $normalizedRecordPath = $recordPath
+        try {
+            $normalizedRecordPath = [System.IO.Path]::GetFullPath($recordPath)
+        }
+        catch {
+            $normalizedRecordPath = $recordPath
+        }
+
+        $normalizedRecordPath -ieq $normalizedPath
+    })
+
+    if ($matches.Count -eq 0) { return $null }
+    return $matches[-1]
+}
+
+function Get-SmartM365MailFileLocationHtml {
+    [CmdletBinding()]
+    param([string]$FilePath)
+
+    $uploadRecord = Get-SmartM365SharePointUploadRecordForLocalFile -FilePath $FilePath
+    if ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.WebUrl)) {
+        $escapedUrl = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.WebUrl)
+        $displayText = [string]$uploadRecord.SharePointPath
+        if ([string]::IsNullOrWhiteSpace($displayText)) { $displayText = [string]$uploadRecord.WebUrl }
+        $escapedDisplayText = ConvertTo-SmartM365EmailHtmlText $displayText
+        return [pscustomobject]@{
+            Html = "<a href=`"$escapedUrl`" style=`"color:#075985;text-decoration:underline;`">$escapedDisplayText</a>"
+            HasSharePointLocation = $true
+        }
+    }
+    elseif ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.SharePointPath)) {
+        return [pscustomobject]@{
+            Html = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
+            HasSharePointLocation = $true
+        }
+    }
+
+    return [pscustomobject]@{
+        Html = ConvertTo-SmartM365EmailHtmlText ([string]$FilePath)
+        HasSharePointLocation = $false
+    }
+}
+
+function Convert-SmartM365MailBodyLocalPathsToSharePointLinks {
+    [CmdletBinding()]
+    param([AllowNull()][string]$BodyHtml)
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml) -or -not $global:SmartM365SharePointUploadedFiles) { return $BodyHtml }
+
+    $updatedBodyHtml = [string]$BodyHtml
+    foreach ($uploadRecord in @($global:SmartM365SharePointUploadedFiles)) {
+        $localPath = [string]$uploadRecord.LocalFilePath
+        if ([string]::IsNullOrWhiteSpace($localPath)) { continue }
+
+        $location = Get-SmartM365MailFileLocationHtml -FilePath $localPath
+        if (-not $location.HasSharePointLocation) { continue }
+
+        $pathVariants = @(
+            $localPath,
+            (ConvertTo-SmartM365EmailHtmlText $localPath)
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+        foreach ($pathVariant in $pathVariants) {
+            $updatedBodyHtml = [regex]::Replace(
+                $updatedBodyHtml,
+                [regex]::Escape($pathVariant),
+                [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $location.Html }
+            )
+        }
+    }
+
+    return $updatedBodyHtml
+}
 function Add-SmartM365MailFilesSection {
     [CmdletBinding()]
     param(
@@ -1436,6 +1513,7 @@ function Send-SmartM365GraphMail {
         }
     }
 
+    $BodyHtml = Convert-SmartM365MailBodyLocalPathsToSharePointLinks -BodyHtml $BodyHtml
     $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
     if (-not $SkipHtmlCopy) { Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null }
     $message = @{
@@ -2099,6 +2177,7 @@ function SendEmailHtmlReport {
                 $atts = @()
             }
         }
+        $BodyHtml = Convert-SmartM365MailBodyLocalPathsToSharePointLinks -BodyHtml $BodyHtml
         $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
         Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null
         $effectiveSendMailMode = $SendMailMode
@@ -2498,29 +2577,32 @@ function InitializeScriptEnvironment {
     param(
         [string]$OutputPathInit,
         [string]$OutputPath,
-		[string]$LogFileName
+        [string]$LogFileName,
+        [string]$CallerScriptPath
     )
 
-    $callerScriptPath = ''
-    try {
-        foreach ($frame in (Get-PSCallStack)) {
-            if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
-            if ($frame.ScriptName -eq $PSCommandPath) { continue }
-            if ($frame.ScriptName -notlike '*.ps1') { continue }
-            $callerScriptPath = [string]$frame.ScriptName
-            break
+    $CallerScriptPath = [string]$CallerScriptPath
+    $callerScriptPath = if ([string]::IsNullOrWhiteSpace($CallerScriptPath)) { '' } else { $CallerScriptPath }
+    if ([string]::IsNullOrWhiteSpace($callerScriptPath)) {
+        try {
+            foreach ($frame in (Get-PSCallStack)) {
+                if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
+                if ($frame.ScriptName -eq $PSCommandPath) { continue }
+                if ($frame.ScriptName -notlike '*.ps1') { continue }
+                $callerScriptPath = [string]$frame.ScriptName
+                break
+            }
+        }
+        catch {
+            $callerScriptPath = ''
         }
     }
-    catch {
-        $callerScriptPath = ''
-    }
-
     if ([string]::IsNullOrWhiteSpace($OutputPathInit) -and -not [string]::IsNullOrWhiteSpace($OutputPath)) {
         $OutputPathInit = $OutputPath
     }
 
     if ([string]::IsNullOrWhiteSpace($OutputPathInit)) {
-        WriteLog -Message "InitializeScriptEnvironment requires OutputPathInit/OutputPath from the script local.json." -Level "ERROR"
+        Write-Warning "InitializeScriptEnvironment requires OutputPathInit/OutputPath from the script local.json."
         throw "InitializeScriptEnvironment requires OutputPathInit/OutputPath from the script local.json."
     }
 
@@ -2538,7 +2620,7 @@ function InitializeScriptEnvironment {
     $moduleLocalConfig = Get-ModuleLocalConfig
     $logAllRootPath = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
     if ([string]::IsNullOrWhiteSpace($logAllRootPath)) {
-        WriteLog -Message "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json." -Level "ERROR"
+        Write-Warning "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json."
         throw "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json."
     }
     $global:SmartM365ExecutionStartTime = Get-Date
@@ -3756,7 +3838,7 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     & $add 'AD_Computers_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
     & $add 'AD_Groups_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
     & $add 'AD_OUs_AllDomains' @('DomainName','Name','DistinguishedName') $false
-    & $add 'AD_Contacts_AllDomains' @('DomainName','DisplayName') $true
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_Contacts_AllDomains' -CriticalFields @('DomainName','ObjectGUID') -RequiredColumns @('ObjectType','Name','DistinguishedName','DisplayName','ProxyAddresses','Mail') -AllowEmptyDataset
     & $add 'AD_Users_DailyStats' @('Date','DomainName') $false
     & $add 'AD_Computers_DailyStats' @('Date','DomainName') $false
     & $add 'AD_Users_DuplicateUPN' @('UserPrincipalName','SamAccountName','DistinguishedName') $true
@@ -3992,11 +4074,12 @@ function Export-SmartM365Csv {
 
 #endregion
 
+
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5fla+E3MPwmQu
-# //1Ms5IO/T49NGW7sZeRfPxDN2UnxqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBp7DnsFgK1ayjl
+# aZPvMmeheziaIqKmabm67OFBrmyH1qCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -4022,14 +4105,14 @@ function Export-SmartM365Csv {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCD+gmL8kuTOEBmpiQ0FmrIzb+GNf/fhr8Yo+xwPCw3AhjANBgkqhkiG9w0B
-# AQEFAASCAYAF4SlCsZHX6FjnU6NLwuPrGO5uUm5c4nSFNXldNHm/pRfQwlXgX4GQ
-# HgZdlEL68vc9jfpxznLcPNIpUsgZqdjE92OjsGjzsFzcpE8wRy1FZjs+f5UCjwI7
-# fWBqVoZ+bEdfQl9YJy6fqAQ1GjwU6MUxmqzI8ovfKAOzkl+QpAiFMoOJCuI0jgmx
-# mpZ7RsjG+ZyWwTadFa1yVJrAoxR451hxw1YdA6bxpJ9eiRp33A+Yidt2xEmOygLV
-# qjofT6C709hsGggLyyD2pAZvLZM6cNnROrkpHDbGt0F1AMcHdLz5cLEx+HXz7PIg
-# neWBRwHtER6aW1SbIVCC9v6xDL0lbR5sKGQzFeobPMXrEOSqrQpJ5112QiqHeIuq
-# sY2ZG/LAHmqncw61+AwFJ164CxTcEKc1999Cm/bp/Q+mvWTYHjJHvlTfw7geM/7S
-# CS2bZJiAkuxZAL0W13NUGigJoT4ih7lpLaKKk58QpfuB5+774DL1dhRwuuiXvfAQ
-# W2Ugz920j9s=
+# BDEiBCCC4+0KJmNIbgatdpK4wKGlkLg0vxb864LgE+RePp/ctTANBgkqhkiG9w0B
+# AQEFAASCAYB/MygUL0sDYK6Vh6l/Zcxlp7kryWfuitaZyzH8FkbLToZdKXeZJIGV
+# hEnrP+Wo6h7xESDoSVpg/4fjzpsdONga1Xh2FfX/SaOhkJIlOPfrtQhfdjdJcEVy
+# fid4oQ0AaGRxv2JxaelQOMUTjAzdQ0jLUQkb869hyLOFibnElumjieu4MufQTguj
+# jdiWZZRmVMj8RrjkbINlqvsQe38sEwZjxDd/KuS/A9Qgaqwr//mwFUvsQhR1SWES
+# 4YM5zTanw6ECvnF32Gi8Qh37RHqw3GpSnDMaL0ffj5ddVZwHahQdOf5KeszJBxbM
+# 0+dhww/euZ8mcDFqdQmqeoYs21Yzv1O2mD/ka8olmtRRy3dzDtwb7b6DjQlOkbsv
+# vmy/886sPgEupE73CcCp6CICzt/miMlQTKm6cpxaPIudYFyVsH2fj2LSLNZV210u
+# A7/nADTuowIPsZkTJR58h+0YG0ZLwFVUrJfhJ7CAWvzR0dSbO9QAkz/Tg5DUo5U+
+# sOvSTgM4gdA=
 # SIG # End signature block
