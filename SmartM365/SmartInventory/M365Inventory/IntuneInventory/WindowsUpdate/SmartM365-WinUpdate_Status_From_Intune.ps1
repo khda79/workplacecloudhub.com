@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.18
+  1.19
 .VERSION
-1.18
+1.19
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.18"
+$ScriptVersion = "1.19"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1160,12 +1160,6 @@ try {
     }
 
     if ($ConsolePretty) {
-        Write-Host ""
-        Write-Host ("=" * 80) -ForegroundColor DarkGray
-        Write-Host " SmartM365 by WorkplaceCloudHub" -ForegroundColor White
-        Write-Host " Website : https://workplacecloudhub.com" -ForegroundColor Gray
-        Write-Host " GitHub  : https://github.com/khda79/workplacecloudhub.com" -ForegroundColor Gray
-        Write-Host ("=" * 80) -ForegroundColor DarkGray
         Write-Host ("{0}  v{1}  {2}" -f $ScriptName, $ScriptVersion, (Get-Date -Format "yyyy-MM-dd HH:mm:ss")) -ForegroundColor White
         Write-Host ("Host: {0}   RunId: {1}" -f $env:COMPUTERNAME, $RunId) -ForegroundColor DarkGray
         if ($DryRun) { Write-Host "*** DRY-RUN MODE: no files written, no emails sent ***" -ForegroundColor Cyan }
@@ -1509,14 +1503,6 @@ try {
     $should = Should-SendSummaryEmail -CurrentState $summaryState -Mode $SummaryEmailMode -StatePath $SummaryStatePath
     if ($should) {
         $duration = New-TimeSpan -Start $scriptStart -End (Get-Date)
-        $statusDistribution = @(
-            [pscustomobject]@{ State='Completed'; Count=$completedCount; Percentage=$(if($totalUniqueDevices){[math]::Round(100.0*$completedCount/$totalUniqueDevices,2)}else{0}) }
-            [pscustomobject]@{ State='In progress'; Count=$inProgressCount; Percentage=$(if($totalUniqueDevices){[math]::Round(100.0*$inProgressCount/$totalUniqueDevices,2)}else{0}) }
-            [pscustomobject]@{ State='Action required'; Count=$actionRequiredCount; Percentage=$(if($totalUniqueDevices){[math]::Round(100.0*$actionRequiredCount/$totalUniqueDevices,2)}else{0}) }
-            [pscustomobject]@{ State='Unknown / scope review'; Count=$unknownCount; Percentage=$(if($totalUniqueDevices){[math]::Round(100.0*$unknownCount/$totalUniqueDevices,2)}else{0}) }
-        )
-        $statusTable = Convert-ObjectsToHtmlTable -Rows $statusDistribution -Columns @('State','Count','Percentage') -Title 'Operational state distribution'
-
         $policySummary = foreach ($group in ($enrichedRows | Group-Object -Property PolicyId)) {
             $policyDevices = @(Get-WinUpdateDeviceSummaryRows -Rows $group.Group)
             $policyTotal = $policyDevices.Count
@@ -1524,8 +1510,11 @@ try {
             $policyInProgress = @($policyDevices | Where-Object OperationalState -eq 'InProgress').Count
             $policyAction = @($policyDevices | Where-Object OperationalState -eq 'ActionRequired').Count
             $policyUnknown = @($policyDevices | Where-Object OperationalState -eq 'Unknown').Count
+            $policyStatus = if ($policyAction -gt 0) { 'CRITICAL' } elseif ($policyInProgress -gt 0 -or $policyUnknown -gt 0) { 'WARNING' } else { 'OK' }
             [pscustomobject][ordered]@{
+                PolicyId = [string]$group.Name
                 PolicyName = [string]@($group.Group)[0].PolicyName
+                Status = $policyStatus
                 Devices = $policyTotal
                 Completed = $policyCompleted
                 InProgress = $policyInProgress
@@ -1535,7 +1524,29 @@ try {
             }
         }
         $policySummary = @($policySummary | Sort-Object @{Expression='ActionRequired';Descending=$true},@{Expression='InProgress';Descending=$true},PolicyName)
-        $policyTable = Convert-ObjectsToHtmlTable -Rows $policySummary -Columns @('PolicyName','Devices','Completed','InProgress','ActionRequired','Unknown','CompletionPct') -Title 'Feature Update policies'
+        $policyStrips = foreach ($policy in $policySummary) {
+            $policyStatusColor = switch ($policy.Status) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
+            $policyStatusBackground = switch ($policy.Status) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
+            $encodedPolicyName = Html-Encode $policy.PolicyName
+            $encodedPolicyId = Html-Encode $policy.PolicyId
+            @"
+<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 14px 0;border:1px solid #dbe4ee;background:#ffffff;">
+<tr><td colspan="6" style="padding:12px 14px;border-bottom:1px solid #dbe4ee;background:#f8fafc;">
+<span style="display:inline-block;margin-right:8px;padding:4px 9px;border-radius:999px;background:$policyStatusBackground;color:$policyStatusColor;font-size:11px;font-weight:700;">$($policy.Status)</span>
+<strong style="font-size:14px;color:#0f172a;">$encodedPolicyName</strong>
+<div style="margin-top:4px;font-size:11px;color:#64748b;">Policy ID: $encodedPolicyId</div>
+</td></tr>
+<tr>
+<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;"><div style="font-size:10px;color:#64748b;">DEVICES</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Devices)</div></td>
+<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#f0fdf4;"><div style="font-size:10px;color:#166534;">COMPLETED</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Completed)</div></td>
+<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#eff6ff;"><div style="font-size:10px;color:#1d4ed8;">IN PROGRESS</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.InProgress)</div></td>
+<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#fef2f2;"><div style="font-size:10px;color:#b91c1c;">ACTION REQUIRED</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.ActionRequired)</div></td>
+<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#fffbeb;"><div style="font-size:10px;color:#92400e;">UNKNOWN</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Unknown)</div></td>
+<td style="width:16.66%;padding:11px 9px;"><div style="font-size:10px;color:#64748b;">COMPLETION</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.CompletionPct)%</div></td>
+</tr></table>
+"@
+        }
+        $policyStripsHtml = $policyStrips -join "`n"
 
         $actionLimit = [math]::Max(1,$RiskTopN)
         $actionRows = @($deviceSummaryRows | Where-Object OperationalState -eq 'ActionRequired' | Sort-Object ActionPriority,PolicyName,DeviceName | Select-Object -First $actionLimit `
@@ -1556,7 +1567,7 @@ try {
 
         $statusColor = switch ($reportStatus) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
         $statusBackground = switch ($reportStatus) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
-        $subject = "[$reportStatus] WinUpdate Feature Update - $OrgDomain - $completedCount/$totalUniqueDevices completed - $actionRequiredCount action(s)"
+        $subject = "[$reportStatus] WinUpdate Feature Update - All policies - $completedCount/$totalUniqueDevices unique devices completed - $actionRequiredCount action(s)"
         $fileLinkHtml = if (-not [string]::IsNullOrWhiteSpace($spUploadUrl)) {
             $encodedUrl = Html-Encode $spUploadUrl
             $encodedName = Html-Encode ([IO.Path]::GetFileName($CsvLastFinal))
@@ -1564,31 +1575,26 @@ try {
         } else { '' }
 
         $html = @"
-<html><body style="margin:0;background:#f3f6f9;font-family:Segoe UI,Arial;color:#1f2937;">
-<div style="max-width:1100px;margin:0 auto;padding:22px;">
-<div style="background:#0f172a;color:#fff;padding:22px;border-radius:8px 8px 0 0;">
-<div style="font-size:12px;color:#7dd3fc;font-weight:700;text-transform:uppercase;">SmartM365 Windows Update</div>
-<h1 style="font-size:24px;margin:8px 0;">Feature Update operational summary</h1>
-<div>Tenant: $(Html-Encode $OrgDomain) | Host: $(Html-Encode $env:COMPUTERNAME) | Generated: $(Html-Encode $exportTime)</div>
-</div>
-<div style="background:#fff;border:1px solid #dbe4ee;border-top:0;padding:22px;border-radius:0 0 8px 8px;">
+<div style="font-family:Segoe UI,Arial;color:#1f2937;">
+<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Global - all Feature Update policies</h2>
+<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Tenant: $(Html-Encode $OrgDomain) | Policies: $($policies.Count) | Source rows: $count | Duration: $([int]$duration.TotalSeconds) seconds | RunId: $(Html-Encode $RunId)</p>
 <div style="display:inline-block;padding:6px 12px;border-radius:999px;background:$statusBackground;color:$statusColor;font-weight:700;">$reportStatus</div>
-<p style="margin:14px 0 18px;">One device is counted once. When a device appears in several policies, its most severe state is retained.</p>
+<p style="margin:14px 0 18px;">Global scope: each device is counted once across all policies collected during this run. When a device appears in several policies, its most severe state is retained.</p>
 <table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
-<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">DEVICES</div><div style="font-size:24px;font-weight:700;">$totalUniqueDevices</div></td>
+<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">UNIQUE DEVICES</div><div style="font-size:24px;font-weight:700;">$totalUniqueDevices</div></td>
 <td style="padding:14px;background:#dcfce7;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">COMPLETED</div><div style="font-size:24px;font-weight:700;">$completedCount</div></td>
 <td style="padding:14px;background:#dbeafe;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">IN PROGRESS</div><div style="font-size:24px;font-weight:700;">$inProgressCount</div></td>
 <td style="padding:14px;background:#fee2e2;border:1px solid #fecaca;"><div style="font-size:11px;color:#b91c1c;">ACTION REQUIRED</div><div style="font-size:24px;font-weight:700;">$actionRequiredCount</div></td>
 <td style="padding:14px;background:#fef3c7;border:1px solid #fde68a;"><div style="font-size:11px;color:#92400e;">UNKNOWN</div><div style="font-size:24px;font-weight:700;">$unknownCount</div></td>
 <td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">COMPLETION</div><div style="font-size:24px;font-weight:700;">$completionPct%</div></td>
 </tr></table>
-<p style="font-size:12px;color:#64748b;">Policies: $($policies.Count) | Source rows: $count | Duration: $([int]$duration.TotalSeconds) seconds | RunId: $(Html-Encode $RunId)</p>
+<h2 style="margin:24px 0 6px 0;font-size:18px;color:#0f172a;">Feature Update policies</h2>
+<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Each device is counted once within each policy. A device targeted by several policies appears in every relevant policy strip, so policy totals are not additive and may exceed the global unique-device total.</p>
+$policyStripsHtml
 $actionTable
-$statusTable
-$policyTable
 $readinessTable
 $fileLinkHtml
-</div></div></body></html>
+</div>
 "@
 
         if (Send-SummaryEmail -Subject $subject -HtmlBody $html) {
@@ -1631,8 +1637,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2ZhH8//T2pbXY
-# jQiCGtHrFMN95XH3m88J15BPkosytaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzLuoVIT7QW71k
+# BCWPFx7J13LZTQf1+lCkzZjnksapLqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1765,31 +1771,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPSrOZpbKYWq2uZ2XJv0leSW9V5k8tGa6AlWxF4zzG4KMA0GCSqG
-# SIb3DQEBAQUABIIBgHVkhAmd24ZfVjS54itPEKh4+PBsEG8+9H3X5BZvNeF9ZNju
-# zfwCJL/7gQrjrcN8ozbbyrt59Ol65iVFYwYqk/CbJNitwtn8j4SRostA0ntHrJJ8
-# z2G6sBxS3Fd23KM1H0XPkEEryjd/lPLNfzuZjdEodVVyuwnz6rO+t02vEPKsBm6L
-# ODGOCxCa11HJKKLFy+spOs825RuQOcoK7SwnBUT5F2OxH1vBAEDUpJbmgkdCD+/L
-# h+1EvpcX7aSeES5wO3iqcpxnfN0E4hdoLpNrAdg/iZn/xLD3eP72PDQsNOPgpfxa
-# tvBIXFGhaJEHxW2uCgfWVDaOy+FLiIxpjEdO7a2mMichTx8v+4fsFtyE5p5twLwb
-# WE2iVJlR7Ji28JZcLIuFm0+MbqZIZAwvSeTMg3+57FhKg0Jxk1E3e1Pen/1d+wdR
-# ikCKBuZlQ2ZjBMR/5cPloFm8xupU+O7Z/xrOmrdnXDk6RZAfER/lqsbqwt3Dw7RS
-# 8PaH3m9dhRAqthPtbqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHva1q40PCS93fwdgCG0s1ernSKuxu75+fScSmkAQRfTMA0GCSqG
+# SIb3DQEBAQUABIIBgJmfNC9gPDutvMBEq7Ron1ryPdv9X2/6Ci7en40AnYZrL1bS
+# lNk9y/kP+dEL+PaILx5c5Twjnt9GndzYkf+BuhePOFmM6kFRGM/h/G9aEDNvtMpb
+# gd6M4pvbUOVLApQp0m1hB62RdtHshRO7NFv3oqzgNTmUFfXM68MIiTXRROo81g9y
+# EEpFejolHpv/iOsEQlWTj6JKsf9eI3kUI7ET0B+xGNDHqrEe41O2EdAEriKzdaF+
+# 0WavhOfKEr/X7RhViGMI4wDclLYSpPCHQOFQo2QgT6vHGzLE23VlbHdVIlq5SPsc
+# BkAQW97owBh5yxp1whndSYY7ogxw9xyP/NILD5CZBbCGXyMlNos+f9aZqwlhEnY/
+# ziNrPpz4K+rvC2elq0QoDGphskzn5RZLITRHecSqYLvYe3dg1osybjNihpAiIapD
+# YuojLvm3LS3E1HlavxxZIsVYYkOD5ve+CkwCbYxyk3O8D3dbYrfVk0WcWcrTpulJ
+# jh1d3X+3AdwB6EjwzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDE4
-# MjVaMC8GCSqGSIb3DQEJBDEiBCCg903rc8rA8sXY8iSmOgPeFie/KUV7g+9AFM4y
-# Kh8LXDANBgkqhkiG9w0BAQEFAASCAgAKH75Tvh1rGF+rH+iSDI2Yv4ksFUzLQELT
-# iWHRPxmq9tMprDwtWYJEXgXzPPHrDGLrMC9syLsjSRtYYy9TFeJM8SA9fvfaNaiV
-# EYTE3NVgm8QUgcvnR+/zmOJZESUqoEq9A7ANbCNhOBWy/b07MH9thhVZz23zl88K
-# 4MIrpUgC6oDSJHXe7cBCMk5Zg3IotSNjUSBh9uWcbNAukyIFfwtLnDKCBZV/5Zu5
-# GgilQcF/zYZfArZCLQFPcf1kedzHVBdF0mDW4zLREkP9dxyeppq6Wd7flKkEQ1ni
-# a6RZc5x8GErToSEoSFiN14rQ6c61kYppiSKpRa9oBJXuzJcAYbriydJH/p/g03vE
-# GLxpCAlVOLnDlWYIno+xxDntdFe76WTmjfe3Na6WVuIqrYdZXTs6IaksBOsznfCQ
-# enanzPRtL7AXrfidVAXXF0iOUgN06fzuhROe7GypJtDmdyheZe4PgMuEkFBKZrSk
-# mPW+4uhFC3ZiCXyFrv2p8+0BGizLT3EcgNgFWV3TWlo8ZtFSJePKaiafXEumMUvu
-# SOIrvGhMMo9/+fOQFTbowUGZsyljRWJHN+GnNhD8EZeJXfm5p8A564Cja78OGLeU
-# Ivrm/ieQJhmDnmQgQob2OcNYD6BmB39l8c8Rjy+b2AWCv5Rq5thfm/uzdvl/JOcK
-# xXV3JTTihA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMzE5
+# NDRaMC8GCSqGSIb3DQEJBDEiBCD1fbAWTHl9Hwmh6MnEnv4JDS7FN5iKgZa4AkUv
+# hJ2d1zANBgkqhkiG9w0BAQEFAASCAgBewZAgTKphDjl27F5Fo62IOE09jAgtrC2Y
+# XmpvCD5TiMlRup/d6VoxeCLZNej3CCoxSbzLAWMq8p9c42EbT3iE3p31PquckWTa
+# 8s6xTzU3QjehBDGCAOGSmzaCTGP2t0CkEHjA6WI0Zj4zd13z55cffvs/ULN2ahSt
+# E5RSM936rCZ3wTznnO53SXdIT8EvKYob7MIC58ZR1anVPRyn8nXMAGf1K5lOakRr
+# a+Wz9okwGe/F7Qw1MvD1j4WoO2sH7J6nUg0tbXHLJkslWhCwj7Sz28KLt/vWTOh5
+# P0MBc9kUkE4VKT0FpQVUHQryYUKnaQFIr1SBSdTChseECxY3l1P5ar29SIec/Y/7
+# ouS5ftRcIIc8H18Ttz/x08mxW0lGdrbYn3ax9CPq/4QYgpcYt/YsrOUvUYnEanO8
+# 7WwcE43f95u5S42pypcTQnlrjeSyzyVB+x7r4lD8wSb17gRp3eRkK9lDOSJz8h7T
+# x10mgCYdX1v8FOxOcYUCI6JQf+tknQRl7YO3ipDYcz3cgtsXUs1PkVgBqsfng0A0
+# 4BTWB8/kkQM6e9d1pv2oTLrVhmPFvlP9lrzjFfPD5L47es/omsLmfPJqVlkQIcFI
+# YBN0CeAnuVQTrKQd45BtsQyXZ0PgWqM5z16jvuJQZPtJr0nsdD2ZOMwsYiyG47b4
+# I/VFDoM1ZQ==
 # SIG # End signature block
