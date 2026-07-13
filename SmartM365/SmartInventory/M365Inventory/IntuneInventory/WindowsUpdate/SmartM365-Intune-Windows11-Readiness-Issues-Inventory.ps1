@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.11
+1.12
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -43,13 +43,14 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.11"
+$ScriptVersion="1.12"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
 function Warn([string]$m){Write-Warning $m}
 function Root(){ $d=$PSScriptRoot; while($d){ if((Test-Path (Join-Path $d 'Config\SmartM365-TenantContext.ps1')) -and (Test-Path (Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'))){return $d}; $p=Split-Path $d -Parent; if(!$p -or $p -eq $d){break}; $d=$p }; throw 'SmartM365 root not found.' }
 function LocalConfig(){ $p=Join-Path $PSScriptRoot (([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))+'.local.json'); if(!(Test-Path $p)){ $t="$p.template"; if(!(Test-Path $t)){throw "Missing config template: $t"}; Copy-Item $t $p; Log "Created local config: $p" }; Get-Content $p -Raw | ConvertFrom-Json }
-function ResolveToken($v){ if($v -isnot [string] -or [string]::IsNullOrWhiteSpace($v)){return $v}; $r=$v; 0..9|%{ $ms=[regex]::Matches($r,'\{\{(?<n>[A-Za-z0-9_.-]+)\}\}'); if($ms.Count -eq 0){return $r}; foreach($m in $ms){$pr=$script:Cfg.PSObject.Properties[$m.Groups['n'].Value]; if($pr){$r=$r.Replace($m.Value,[string](ResolveToken $pr.Value))}}}; $r }
+function ResolveToken($v){ if($v -isnot [string] -or [string]::IsNullOrWhiteSpace($v)){return $v}; $r=[string]$v; for($iteration=0;$iteration -lt 10;$iteration++){ $ms=[regex]::Matches($r,'\{\{(?<n>[A-Za-z0-9_.-]+)\}\}'); if($ms.Count -eq 0){break}; $changed=$false; foreach($m in $ms){$pr=$script:Cfg.PSObject.Properties[$m.Groups['n'].Value]; if($pr){$replacement=ResolveToken $pr.Value; if($replacement -is [array]){throw "Configuration token '$($m.Value)' resolved to multiple values."}; $next=$r.Replace($m.Value,[string]$replacement); if($next -ne $r){$changed=$true;$r=$next}}}; if(!$changed){break} }; return $r }
+function AssertResolvedPath([string]$Name,[string]$Path){ if([string]::IsNullOrWhiteSpace($Path)){throw "Configuration path '$Name' is empty."}; if($Path -match '\{\{[A-Za-z0-9_.-]+\}\}'){throw "Configuration path '$Name' contains an unresolved token: $Path"}; if(([regex]::Matches($Path,'(?i)(?:[A-Z]:\\|\\\\)').Count) -gt 1){throw "Configuration path '$Name' contains multiple path roots: $Path"} }
 function Cfg($c,$n,$d){ $p=$c.PSObject.Properties[$n]; if($p -and $null -ne $p.Value){ if($p.Value -isnot [string]){return ResolveToken $p.Value}; $txt=$p.Value.Trim(); if($txt -and $txt -notin @('__USE_GLOBAL__','USE_GLOBAL')){return ResolveToken $p.Value} }; $gp=$script:Cfg.PSObject.Properties[$n]; if($gp -and $null -ne $gp.Value){ if($gp.Value -is [string] -and [string]::IsNullOrWhiteSpace($gp.Value)){return $d}; return ResolveToken $gp.Value}; $d }
 function P($r,[string[]]$names){ if($null -eq $r){return $null}; foreach($n in $names){$p=$r.PSObject.Properties[$n]; if($p -and $null -ne $p.Value){return $p.Value}}; $null }
 function T($v){if($null -eq $v){''}else{([string]$v).Trim()}}
@@ -209,6 +210,9 @@ try{
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
   if(!$OutputFolder){$OutputFolder=Cfg $lc 'ScriptCsvLogFolderPath' (Join-Path (Cfg $lc 'DataAllRootPath' $PSScriptRoot) 'Intune\WindowsUpdate\Windows11ReadinessIssues')}
   if(!$LatestFolder){$LatestFolder=Cfg $lc 'LatestCsvFolderPath' $OutputFolder}
+  AssertResolvedPath 'DataLastFolder' $DataLastFolder
+  AssertResolvedPath 'OutputFolder' $OutputFolder
+  AssertResolvedPath 'LatestFolder' $LatestFolder
   $global:EnableSharePointUpload=CB $lc 'EnableSharePointUpload' $false; if($DisableSharePointUpload){$global:EnableSharePointUpload=$false}; if(!(CB $lc 'EmitLegacyPowerBIAlias' $true)){$SkipLegacyAliases=$true}
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
@@ -753,8 +757,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKQKi7+2fdxS1/
-# DvXMXbNfv4HLkc0mOUXg8X/bNrBkeKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZLGtvhhrzAsNm
+# Yq2vv0VeE/BICsm7dHIO1+PdUcgmRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -887,31 +891,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHdFGEvSRKwOGs03tS90X1B9uH2NxMyuWhYXAU8mp7DFMA0GCSqG
-# SIb3DQEBAQUABIIBgH6tbG/vV56QOGP6UJotDDz3YZk4EtDD30KUyJ4j/WJsS2Jw
-# yYwaZ58Pt6KVdeyXoRPOQzOYgVnczPvsJJ0KDdtMKWFIlUYR3z4pTAypDjk5CIDW
-# DeHoMJXBoKlI61S0y62+/3B1CHmCoj1SAQvBLGDqN/X49lwv8UTVjpky7dcB2lvx
-# gzxNYy9l04jh6kb4iJGTUO5xD34XXNKhawdK6No2coOGQ7pMcI3fd1xOxLjmWM7B
-# 6aWS9ZGMDHITab/KG331IKR2rVaWm+GtbDcc55vahSX1hwnnw3LwiaDgEyWNHFrR
-# yQxKn81JdCYxNQ0v2f3g+ZV0AnOtw2EL14JOy5laPyJMCTby62Uxzl4U8r70gzC3
-# VK+FaL0GjaRTpwSFvJvbwxk6ANx1XkZCgmuVRz9K7AakNeXaNsJBieKddBhPThW+
-# 46NgOSB2AgWEZUb1cUE5aKBNptdJwv/3pzwy6RBRnH7z2CyHHLJjdgG5ARqiXWZR
-# epXiRi5xcULiXX+mvqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPpi6RALcGYfPPwOzJN4s1033Fr4RPIJWWUB6SGISxZUMA0GCSqG
+# SIb3DQEBAQUABIIBgHTTRY9wQqnz64Him/OO6Q4c/GOhNr85PfkXBBgOHnVfGzQg
+# 2fcgijwAGYAqjPvFq/VWlbq8OEuQuaSa1oaPCvvUYIu7AqBbqSehMaT2eL+pzLCK
+# bUz1BgJ8yn+bVMtRcO3qyVBW1ovzLQhdwFlVFFaTZzqVMGBp/sqHuzU19zHORyo4
+# pO2K3jppibNi6udOIpc0sza+GFwmLSXgxq7fHFF8e4nBKCBL/4NiooSN/lskyXQg
+# Yipa/PhSKBeoP65btEg0uXxjI70btE9j+Kinjg13NoU+6SQlBRy7kjH+um4Q6wUN
+# xDKOqY3ZUEQ3uul7co5jTgmJhaX+qcMnIF/dUeyboYG9g1c3Sj4Lxyb1Wx7DulJR
+# +q0t2obBwI7VyqmIZepobfCGwfszW0zAdoPCzH0WPlY/A9RvKJLuY8l5xDoZ7HBo
+# mRPYXEK1BZMqipVUhUJxbZp5D6Wzl/MDYLiAPq99MvTjzAvLVX++ASAI5r4Cfvkb
+# /6YR3ry1jNeaEvJXdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
-# MjNaMC8GCSqGSIb3DQEJBDEiBCBiL2NwZGiMoQpa7ERosxjyMRwZgPGFZOki8QM6
-# xKLqkjANBgkqhkiG9w0BAQEFAASCAgDFF5lXQj6usi8HreooIvEpPAdv9bkgrieM
-# 4fxET7+mu8zbtWMIYITSWnDr8OuXy5pSf2MTaBIIu40KEv2xDkSgkO6FbKUunC0l
-# zfiYLVEiYLmqbMMDX/VTeJXjl91vMoC+a3WiH9m62JlEzvDniKvink7F1GOZEbO2
-# 5FcLmgAV2J21sVxPxMf3s2xK1daK2Q8cwYXSZrj7s3b+4DxnAHPVhEIJ41d9TOQA
-# k6QtuxyBXRNYatplxHWBcwhejTT24c9fISAXipEg0uTnzmI+VSYAFlSdcBkzOD8F
-# Hy7AwNT57GpQ0IPekB/sYu4wK19pRetJ/yBnM89DnRljDxW4fcH/GE6nD2JnXZgZ
-# 0Iz9fpwiKSqHrP7Rgp7G8IPr8MHMsQLbwAFR5i1uz7HBFAlC/vSypvAruSp2p6sx
-# G2vM/O54ZqYkew51jyGby/DcMfyk3Kw9seq6DbtOocqf3xk3Ed95z9E7o/3rqBHc
-# Yeilfkv0Ut0YlTUptVXAPbDNupMAOk3VqRtltLqRwhxK0hZvYQGmB3GBDG/Fhm0M
-# lMIX6QnVpnF6C1bc/hMtZChylHf7nKAcModjO/I/kEE9VDZ+1aYZp56bmRlkqdo0
-# q/vtgu31/AGpeTN6+Gxl27K9AEbMTD8t+LnFBHX+eosAtUfCw/dOsoVduAnb+S50
-# dN6QYxr9fg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNjQw
+# MTVaMC8GCSqGSIb3DQEJBDEiBCBJhWuebapzq7CPw8HEK/8G9q0djpmkzza7Nkki
+# AHOcNzANBgkqhkiG9w0BAQEFAASCAgB0EoBU1Yet0e25yZg2bY7yWsyfSP6/Q7VN
+# 6MHW9gL9HfeRPXjSSWE7cM/w3XXk2j/EtwRfqaO1xARvP9QtrTO3otAECy2MBPah
+# Ha05W27oBrl36U+PQMpdisi0Fn/rhbg3PKAD1a07tZGZFMTInZE4CALKcUFqeN/H
+# b3sAWMB5+NRP3xMabn9ZKouBI36iO4rX505w7K7hCTnKiVzAal5J8oLttdJeQtjY
+# WEajEuMPqBEygIXHz+Myn60oF+R2hkKQSkYh1FEltuge9qRAFKoQ0vN26z9WZFYZ
+# vwmGDmcordpd65mJYhCJSn5NlzAwPUoHFUFmK8gLOG8Ob8V7cvxxhTGpA+kY82Yk
+# zdqs4y2s7RPghNjnyaWBKKQX+eO2bpVYlIPok0ANfNHMF61VQsCsa69D2LSaPOZB
+# M/VBOPqkAYD17LHe3H4UEUSCblVCmakyeZdx5snIrm6n89DIlxQiwRGdLFQS5pw1
+# Kkt+aCWT0wCMSWv5h73/AFlLNwiTm0bQLpgRxThkuv9VkqPE7sg+vb/CYidUZ34p
+# vBl4/cIluvB6iV9dyPfm797AAq7JOnRVLcBK7yJ2irftcHAUj2cWqm8e2h28pzhO
+# GqL4ZgC5nHr7mqNdijOtIhTXJ47mFDir8mxhMYZJc1HE1CD1V8Pff7EgSmmSROLj
+# hwRsqfJgHQ==
 # SIG # End signature block
