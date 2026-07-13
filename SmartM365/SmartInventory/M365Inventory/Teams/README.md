@@ -2,6 +2,8 @@
 
 `SmartM365-Teams-Inventory.ps1` inventories Microsoft Teams through Microsoft Graph app-only authentication and exports Power BI-ready CSV files for Teams, Members, Channels, and Guests.
 
+The daily email contains SharePoint links only: the four timestamped CSV files and a timestamped `M365_Teams_Inventory_yyyyMMdd_HHmmss.xlsx` workbook with one worksheet per CSV. Files are not attached and local paths are never shown. If a SharePoint upload does not return a web URL, that file link is omitted.
+
 Latest CSV files:
 
 | Entity | Latest CSV |
@@ -10,6 +12,10 @@ Latest CSV files:
 | Members | `M365_Teams_Members.csv` |
 | Channels | `M365_Teams_Channels.csv` |
 | Guests | `M365_Teams_Guests.csv` |
+
+Runtime dependency:
+
+- `ImportExcel` builds the timestamped workbook. If it is missing, the script installs it automatically from `PSGallery` for the SmartM365 execution account (`CurrentUser`).
 
 Required Microsoft Graph application permissions:
 
