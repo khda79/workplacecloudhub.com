@@ -48,7 +48,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.13
+1.14
 
 
 .REQUIREMENTS
@@ -58,7 +58,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.13
+    Version : 1.14
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -122,7 +122,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -344,20 +344,8 @@ try {
 
 #region Logging helpers
 
-# If SmartM365.Core does not define $global:LogTextFile yet, create one for this script
-if (-not $global:LogTextFile) {
-    $logFileName = "Devices-UpgradeEligibility_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date)
-    $logRoot = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
-        $ScriptCsvLogFolderPath
-    } else {
-        Join-Path -Path $LogAllRootPath -ChildPath "Devices-UpgradeEligibility"
-    }
-    if (-not (Test-Path -LiteralPath $logRoot)) {
-        New-Item -Path $logRoot -ItemType Directory -Force | Out-Null
-    }
-    $global:LogTextFile = Join-Path -Path $logRoot -ChildPath $logFileName
-    Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $global:LogTextFile
-}
+$logFileBaseName = 'SmartM365-Devices-UpgradeEligibility'
+$ScriptCsvLogFolderPath = InitializeScriptEnvironment -OutputPathInit $ScriptCsvLogFolderPath -LogFileName $logFileBaseName
 
 function WriteLogSmartM365 {
     param(
@@ -784,8 +772,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAce94QdaV3y4Xx
-# Yp1JdbXHB3i+8Mm7ivtKPlkOZXyfo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBShALD/x3u2YmI
+# BK1MAnCWyyc6McIudJ5G9fg7DYa7KaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -918,31 +906,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINVFf48ME4Y7dP6Gv76O7MrdMNXLoRB2MXbxnRf22ub5MA0GCSqG
-# SIb3DQEBAQUABIIBgEuOver31aQ6enuhe11V9jS5c/jsnuBZTFK+iK0jV/1+I8c4
-# GNMWoypCFR9EkFPOHiAwXxbNjjte0sFb7xypzRNnhwVthUDP1qXZNpowMbN7S2pP
-# zAmbkQHxRlH51iKMVqCz8LVBSUxu4w8r/Sf6CRNidHH34b9xxiPBolinS72SyLEU
-# w0hJ/x+67VEENw9WtKbKaxSnlbE4U9sWbc3oxqTmrqU6tQrV+VoeXNJz+c9YjUJA
-# dLGIFw/zHOTimgKKTSLZKCx2H4ve6BgL0cFjjJALGjjuLKCIqAD/aOWLPitH5B86
-# YvX1zPd/QFnH1I0auzM1fV2e0W+ZiJ6RQUCsaYwms6lJKN410CID6qJkYKauBnvf
-# CzgXvhjoG91jkMRg3OZjd1zgWd7InTW0JOn6dOiUNsMIvkMwKSjJs0GqEWwRqfla
-# WyBwUDW7oLnd1GWAV7bGrcdTzeDFfrEFyA8G+jeZo08gzcQWDVjVXUcR96gvzKE4
-# WruD05vGWXnAJ2+kPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEcPGROzRB0+GR8iYOhDrccFgdc5VLdq+LYNOyon3dfHMA0GCSqG
+# SIb3DQEBAQUABIIBgB0BrNihGr1R8RZUqxSUZrQ7ZuPB1ZsgkJCgzlviSCPc2lgy
+# +xtOOT4x68ltvGXqJrN7mDx/a2+lLoD40oEL2isYkgFuFYop8+WSZsfD4zn3PsGD
+# 240UmYMxyUA2mlE9CGWYTp4dGK8rzYepxv2/AUx/Imj1RO/oK6NnhtH3bnWoQHB2
+# ngyjlZE4039XReY6Af9h+0L697WPk3pNncoAahh2enslQddl/iaNDU0m3nOGk43a
+# 6OyrpepGod+RodAJeG26jvTlOUzJPcb5jdgdYc6iO0/ojfzr0//0pvFWddnjxrJM
+# DaCmKqfQDjiKPXASy/4Zufzvg/hvMZYAb9Pq8+cnzM3MFfgiOxeaAilH4uto0MZo
+# EOUCJyPwSwanGUkL4p/Dvl45GAC4cpkFBUQPhmBMqijN/tpkLuZGap8iqInwhb5J
+# AEoRo956uO7lRFhUeGORW6xd77ZunEbAw0h3JLJsvBUx7sQbgVlp/n8bn4fuMEDE
+# jOiMiM1oZvN7OXv+GqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDE1
-# NTBaMC8GCSqGSIb3DQEJBDEiBCDRs2PGJ075MkCjVUNFT3OYubGe1cS5CIF7muzl
-# VGgYTDANBgkqhkiG9w0BAQEFAASCAgAFtJ4O3k2pmEO57ZJrKFVdX4QqCwaMICUl
-# 6HMY1mBWxMrStl7uA4GEcYbiDNA/ckCPE6Pli+0H1wryWjc4nEKYjo79FoLYcP6S
-# Z1uM0cVYNCK/yYJI5uuvH3vT7q3p+JWU7K36sIdBKbG9bpP7hwe3DIU9mwwpCJeB
-# mO9fTmOmLMInt8aKfCVvIVA5Pv+CpXlZtEHoy/iA5LZJt/HGXZrRfHLe65APHo7P
-# YMFWz3zOyPRHZFNJgAKg+C/elOj32AMcxdbzExajmTMmDfBb4ReJjZuWPH98sxiV
-# iiGQyP/QEC4JwEtdG6PLT2vGxJzad1hT/Lj73D9XFixG4t098F6NG8WuBBM0ZyI9
-# Yh9YzaKmddKtu4D38paYExPE9IqDe5pTbpCpWP8LEgii+9KNHZaaT7Ta2/ycb/qh
-# 8dcvUCSB+2Z3UoaoA0RrliUVXzjGSnLDGP3dQ7Wsp13zMXgnZqPCsPjnFG2qaHMg
-# NheK1fQGoi41pjSzggf1MKZOID22RjXGGAceDPAs5qIzxVnY2tTKh+tpeDQw0HIb
-# Th67aePI9/1csyNR5gmJuNVNwn3LAqV/S/fV2B7AhoOlFKZu8jJ5+0lwQwi8ReXc
-# GBIQQzfMTulIJbgBBa181lUBqBXStp1WbF2tShTFd8RwnAsr/cUukx+l5+TXZkQw
-# U+N+HherfQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDMy
+# NDNaMC8GCSqGSIb3DQEJBDEiBCCOHvnb7VK40q+iBPloegexT3PoPnMKkiZcxwGC
+# Bw+XsDANBgkqhkiG9w0BAQEFAASCAgB0b2mjxHR+gPYHkaEMhj/7StYgW9NUv9pe
+# xIB9Cl2i2NLYjb+2thvRZAgl4raiMMwxtnCsIFecSw8p//gy0jQ0YUokGSb32YyC
+# vMJtUAVbTN5x9r1vUd4u6Ocay/dotvENDyDyaob8ptZwivkBtZDUfGRP20Z+GFS3
+# YWTm43WiplDkCB0GAs5aIkrm7Ml+vMSgp8IVuzcVB99PuDLXZeZBEMsvCOzx1//F
+# xFxM4cLagRelbcoD06wKylDreOcxYNkgbpBxHopIoQktsvlpPzP+1Kv6NS4hsMJP
+# qCzlujrIrni5esgP6ZSu7w4sg76zwpG61Yp9Fs/VNm2wprZqvm9Ic941wUmMgQ7f
+# w+pYy7R7QIMOAcgARc+Ugzo2vKisl5kgiktU7gCIr92ltKFOLKzcpRnQ8RcnUU6C
+# m68oTNr2PxZYj7eY37dFKl+FgIBQEWzQNkc2e25VbRra/tzfh0FBjJNF/9xN1fIv
+# Zi8Xde52GKFyoGPvGfRFzDBYQW2/1vLCByrY1P5MxPa0uSOd9/KoT7aslzCt1ewt
+# mZap2MA6VrWCj4iweWi22dOU+aOD/O3VvCNJRXq58ScwUltjo0bK9pHmAMsWpyrt
+# omaA1ePHFn11uqvD4zp2/2XPcUKAedrNrx9s1kRTDE8P8CuE/zT3Am5YALHWzO9C
+# WeHNh/FzPw==
 # SIG # End signature block
