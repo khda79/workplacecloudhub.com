@@ -406,6 +406,9 @@ function Send-SyncHealthMailNotification {
         }
 
         $bodyHtml = New-SmartM365EmailBody -Title $Title -Category 'SmartM365 Sync Health' -Severity $emailSeverity -Message $Message -Sections @([pscustomobject]@{ Title = 'Checks'; Html = $testsHtml }) -BodyHtml $technicalFilesHtml
+        if (Get-Command -Name Convert-SmartM365MailBodyLocalPathsToSharePointLinks -ErrorAction SilentlyContinue) {
+            $bodyHtml = Convert-SmartM365MailBodyLocalPathsToSharePointLinks -BodyHtml $bodyHtml
+        }
         $validAttachments = @($Attachments | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
         $sendMailMode = Get-SyncHealthSendMailMode -Config $ScriptLocalConfig
 
@@ -621,11 +624,12 @@ finally {
     try { RemoveOldFiles -Path $ScriptCsvLogFolderPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile } catch {}
     try { Stop-SmartM365SyncHealthTranscript } catch {}
 }
+
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUcLTOEvUKwYZo
-# JVAjuHe0e/GugSOXEQIfyAts698KYKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7ffe57ksTgjL+
+# w9ABplyyZPrE10PUbrTOCS8ojzrqo6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -651,14 +655,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDZgy4p+qlbagNVKhol/DRaEH3dr7hX382160fSa2uTRzANBgkqhkiG9w0B
-# AQEFAASCAYAPXmPyc92puPauLzklto5pC0UOu1fbL9/RlG5Y4ys3VJQEfOFDYCUZ
-# w9XD0ggkarOCcOHaWsi5Cnhye/5tAK3y8Jocvrdo+pECu0MkhiJSeZCFuIirsk9w
-# 20noPop++lhyONkEKeQq6Us4riY0Zaxw3EIcddy++vhxTgBM+bTJezY23o5VKvbJ
-# /fgPeiCJ6hvwqrr9egWTITwAjqZJudy8LYPHykrK4XQKtk82kZ3P1Fmz9Cdgt1HT
-# T+SiEW2wfjpsMBVElGmGYbav9hzy107/JyCeAPsE72Jn2qai1YhYEgJSuyeLQDcO
-# wvUKVbONHO93fRFCoBByL4wk7xuj0VyoV0neA2XnxFRpsMarndijlH3BeLnrtOSm
-# JajL3JhESXdW9txO3yTqfaM2vggb08eUj+Yo8PjgZFFLnTmC9rQ4Eno+1a+CeBnp
-# YWCMSLdy/AyM94BCbLDvVNh+HcG8RNN8FCkDaTxNhfUb4PLzvsaFgsjvWGvjwaQL
-# fEfbF8hc0Y0=
+# BDEiBCDNTyLunRj80gU4boUxn/FURbzkUtdOQgsSF8OHyL0LGjANBgkqhkiG9w0B
+# AQEFAASCAYCLD63FiI7nFXZq+7hU7X0LvZ7qREvScvldiJ38yzR4mwHf13TQE7Sd
+# qPtrw3v+o35okAlEjKow+sN7MfGT/F2lRmw4dNg3BIlnbsBqnHrIQc1pCD69NgfR
+# qSa+XeDSGI+vSz5+Lkts+v2AxbvFzSqw3mTg+CBKj4VjNFRPLpiFNGPpKePdo9tu
+# hNkmv5tuvRdb/4oM1e7R8OseJ5WRMRxBO9RJkWVE8fPijEDXZ0Fu9oqYZ66Rn3jX
+# Nvkku44SlsjBDjahDRcTTYibH+TRVl+GWXf7iQdE9LNtHLUcr5TRC5DPnFHgs4Sq
+# meyJrwDVeFIM1U6R1yr116wmxfJrQSVHCNXgm/KjDE/Kr5poMQLYTxlVZwOKYgWy
+# HgoM3mxWZzt0BdW5FoQHtj0Vj8Rk8wIFvB0XHvGywvJ3zMjiHe7fq63DCodWEAov
+# 5RIa0auJspOL/M5b2eYgO3stpIUyrXAf9vmIR59nmw/1fT19GDE7oyc8DRoTRxpN
+# 0q94dJNh3ew=
 # SIG # End signature block
