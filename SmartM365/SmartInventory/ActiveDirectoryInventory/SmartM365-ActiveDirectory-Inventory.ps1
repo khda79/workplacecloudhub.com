@@ -1121,14 +1121,40 @@ try {
         WriteLog -Message 'Active Directory daily reports generated successfully.'
         return $true
     }
+    function Invoke-SmartM365AdCsvReadWithRetry {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)][string]$Path,
+            [Parameter(Mandatory = $true)][scriptblock]$ReadAction,
+            [int]$MaxAttempts = 6,
+            [int]$InitialDelaySeconds = 2
+        )
+
+        for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+            try {
+                return & $ReadAction
+            }
+            catch {
+                if ($attempt -ge $MaxAttempts) { throw }
+
+                $delaySeconds = [Math]::Min(30, ($InitialDelaySeconds * $attempt))
+                WriteLog -Message ("CSV read retry for '{0}' after transient read failure: attempt {1}/{2}; waiting {3}s. Error: {4}" -f $Path, $attempt, $MaxAttempts, $delaySeconds, $_.Exception.Message) -Level 'INFO'
+                Start-Sleep -Seconds $delaySeconds
+            }
+        }
+    }
+
     function Get-SmartM365AdCsvDataRowCount {
         [CmdletBinding()]
         param([Parameter(Mandatory = $true)][string]$Path)
 
         if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return 0 }
 
-        [int64]$lineCount = 0
-        foreach ($line in [System.IO.File]::ReadLines($Path)) { $lineCount++ }
+        [int64]$lineCount = Invoke-SmartM365AdCsvReadWithRetry -Path $Path -ReadAction {
+            [int64]$count = 0
+            foreach ($line in [System.IO.File]::ReadLines($Path)) { $count++ }
+            return $count
+        }
         if ($lineCount -le 0) { return 0 }
         return [Math]::Max(0, $lineCount - 1)
     }
@@ -1142,20 +1168,21 @@ try {
 
         if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return 0 }
 
-        $values = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-        foreach ($row in @(Import-Csv -LiteralPath $Path -Encoding UTF8)) {
-            $property = $row.PSObject.Properties[$ColumnName]
-            if ($null -eq $property) { continue }
+        Invoke-SmartM365AdCsvReadWithRetry -Path $Path -ReadAction {
+            $values = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($row in @(Import-Csv -LiteralPath $Path -Encoding UTF8)) {
+                $property = $row.PSObject.Properties[$ColumnName]
+                if ($null -eq $property) { continue }
 
-            $value = [string]$property.Value
-            if (-not [string]::IsNullOrWhiteSpace($value)) {
-                [void]$values.Add($value.Trim())
+                $value = [string]$property.Value
+                if (-not [string]::IsNullOrWhiteSpace($value)) {
+                    [void]$values.Add($value.Trim())
+                }
             }
+
+            return $values.Count
         }
-
-        return $values.Count
     }
-
     function ConvertTo-SmartM365AdSummaryInt64 {
         [CmdletBinding()]
         param([AllowNull()]$Value)
@@ -2739,8 +2766,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBd16hcoYoNvB4/
-# IYUOYwp0OxSZyiVd2reHF2kKlnQaRqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi3llniB0wC014
+# 0NwC9gWZgrwIPYDQ461tXswy7PVsQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2873,31 +2900,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAPKt98bPZdR3QZr0BOyUrp1SPBrXEzD3ncHuJteudTDMA0GCSqG
-# SIb3DQEBAQUABIIBgHGi3ufhWOcJyuU4i+DzilUV52Hw3SaJtPh6I78fvhZ2NowL
-# 2Sv5GssKee1rh/uE0jCDwr7sLreviD/k/3P1VmKjsjDXnUQ/o6+EEPiSFeJM8XN8
-# FaPisY5wsB5L1To9IYL6MafPeMkUQmidlODuXksY8K6ryRPzd5qkWe9fX8VK0VgD
-# SfNJkMI9o6Klt1GkIcC8nIYsM8hmG5zW91uE+nyRstXWAVpvdd/+ShNSTOrqyYSU
-# PPKTka0bhGjvjX0jrK3IuAP1istDnw5aB6TlCfYJqW+ZAEQy55WvpyyKpK77KfoT
-# MuBJTlKHcNySVc6/Js3Ka53ZIyDZTgyIqRcmPANLl+j1VmweEnMzhsqtfhGK1NHJ
-# fz0yIjuZIukSofCHFBNVrbnq2dKuGfIvtUk51uNmXTvA+aHyDU88PxIaPzxTUZTX
-# 2vTIDkMZ8ooUXkc9TnLjs5jocopo4TcuCggsedU+gPtWEjLSNWoiQ4vCoFME24ux
-# f1hsiaqL55KTqT2Xn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEpDzAlyyV2lIurfa0FbVLq6XMoPxqMuN2G4p9tyPQJQMA0GCSqG
+# SIb3DQEBAQUABIIBgIittWtxSpR/XPRav8JtyC3/fBemertZVo78UFnmV/hKw/Vw
+# s0L5uGu5bcRzfth8+xOuBlEdWyuV9c6B/ktkzxQvB5qet6g6C6Q9mWgpaFw2g6rQ
+# lF6K8OgVq5wrtpKggtkwo5YnqYT6IwHHU4epgsPIx3r3kG87a+HmPHU9bE+WV/Qz
+# faxTMZvvl68Rxp3haI4m/ysacFgFK4PvA4VLle9Ugxvx27FKc6Sol6UyKoRz+VwT
+# w5RrSZGvk7LG77Sz4OnMULhI7Ejuc5rq7tlqoNFFsqe8i9u6ghg7AWHup8O7cwTl
+# dFvvXgduLFBK9I6CCHU4pYxhqkRs2RdlO/Dzmqzp+nevRxJmAq541SkYktrZesKN
+# 2YuUm5oKyKiXrrCPitF1JIXvDncADkxi3a/oK3OljWQN6SLBv6Vpb+2IQmnpLwqi
+# zxUFVmLPnXcA45u5WJgpQ1LljAIyhUSkqrrY+Y6DxKZTUcGV548deZkCmG9kcK/3
+# tYkU8cMx9kzynB0rI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MjJaMC8GCSqGSIb3DQEJBDEiBCAXGh0zAgTkv29TDesdNYs4exUYGoJVmgJRA7+r
-# l/ZpWjANBgkqhkiG9w0BAQEFAASCAgCQYm5GaMXdw1qBOnDyjyMY8rVKZ3bGDBtQ
-# hA8BjnBGLaDvRaW0vvebcwxlNxbIeuACGw2G/wC+MKBRpNJJYGEtJk7uqPe7ylKf
-# U4OQGbjdcmtY6bvm3AFwZO8uUzXQUISml5WA/Mu/LeIOWO34JfaTjPKtzMG3/7jp
-# L1vLWADYLHRw1Inhd0U6ynQRC5xx0E65/Q8rPDiLV+3WM/7U22iU4VpAPZIFx8tQ
-# v8fMediDJ026ESOoraf51kcTpNSLRL6ys22RM6V0UAvdU/5h1emOfuf3vCydULWQ
-# LUAL22JjD1nutKZF2osbMeUeezqLBmzWFF3+o+kc0ajCOCgNpXdi7L3u+bCeuONL
-# AAPxsW8F1vEdul156puDej/xAei2h8AGGimRf9dWzL0pflCgo04F8c8KTAUtVaa/
-# zPEa2ySnz2bGTFP483UBRFSeKVPnaEZY0gjBTU4yTYcli3NRC8IYmDkepJgexNMj
-# tI4Wbkh2YnQM/IzJwKPaetw94w5L6ZHvOMCd74OxHY6xppllddUYr/W1xpB5zK11
-# 9wkUbchj4bJyHPctPeIUcnGoPX1eAtszHeNtwRf0GoGjW8jAepUXenPdqxo4DtEq
-# TKqtIW+f1avgT9TLIjrcWqmcVVSheF3eRgcNvpuG98T++mf5k3Mq7DltUOPr03zp
-# odWdDv6V3Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwOTQ4
+# MzJaMC8GCSqGSIb3DQEJBDEiBCBDYMS0p+4nEm3QHtajQXn/plZXE4Hk8BTyMdxQ
+# 6Z3krDANBgkqhkiG9w0BAQEFAASCAgCLPFfjF+j0CkBjLwQ6ucp39CN4k4iAiURr
+# KBnhTJK4ErkaMHnyQR1rBN9cLT6qNH/lTvCSuAS6Qw5i1oI4R4VRvdCCntnMBZeP
+# ntAVDYu+AZgi5wrX8iz3QiP324Gg9OhGQ2rcVjXnT+gnct4YbciXMn8bxRKAClNI
+# ai3o8a5YQIC9fgY8/IvApuL47/JOL+LOPnJAAWLUss/bFyAmL04nO5kBeMisdjVf
+# R0dUWhbgEz85z+JDlhW1HoabWaurniMc7PPY7zMYUhvUxDriyDCkHRjGf8X3gE7B
+# vyzPTpDmVqP1/c1AlWdmGGY3SnTfV25jLksrl8aMK7ql8Z6yGLj0U+iNRm2h9ssK
+# d6s7DfiUuv7xcydXprAJQq88v9OhzUx0t5Vi9Pa0nPfkO/s3Tln/dYZD7q6zER+W
+# kNdBC4+ImdOAT3eDSvfw9LMl4I+TeYijWfoKCWvULlUxq1ImnTfWhygl7kKIF8r2
+# roXMw++5E17ku+dYHV3WXxQgCISc5MioX0eBVuDn8ogXVRduO/UZohJFxldZEd4E
+# XL6R1N3eUy8F6ORFXj59yMMovHwFD17gOVbFnUq+2wQNPcadRehY4XJwIQIhuM6s
+# aXqB7R0SlKYUijPjweGm8l6tslNRANmQ7R9GzgLWuaelm6B240RcMwnxyv6SOMs8
+# Wsje/NKYeQ==
 # SIG # End signature block
