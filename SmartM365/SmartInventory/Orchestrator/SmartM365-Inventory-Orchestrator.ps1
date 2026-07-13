@@ -92,11 +92,12 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .PARAMETER SendExecutionSummary
-Sends an execution summary email with one table for the last 24 hours and one table for
-the last 7 days, then exits without acquiring the resident lock or launching inventory jobs.
+Sends an execution summary email with one consolidated row per job followed by detailed
+tables for the last 24 hours and 7 days, then exits without acquiring the resident lock or
+launching inventory jobs.
 
 .VERSION
-1.3.26
+1.3.27
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -106,7 +107,7 @@ the last 7 days, then exits without acquiring the resident lock or launching inv
     inside its own child process.
 
 .NOTES
-    Version : 1.3.26
+    Version : 1.3.27
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -131,7 +132,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.26"
+$ScriptVersion = "1.3.27"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -2773,6 +2774,47 @@ function Get-OrchestratorJobRunStatistics {
     }
 }
 
+function Get-OrchestratorJobSummaryRows {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows24Hours,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows7Days
+    )
+
+    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
+    $warningStatuses = @('Retried', 'Skipped')
+    $summaryRows = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($jobGroup in @($Rows7Days | Group-Object -Property JobName)) {
+        $jobName = [string]$jobGroup.Name
+        $jobRows7Days = @($jobGroup.Group)
+        $jobRows24Hours = @($Rows24Hours | Where-Object { $_.JobName -eq $jobName })
+        $latest = @($jobRows7Days | Sort-Object -Property ReferenceTime -Descending | Select-Object -First 1)[0]
+        $stats24Hours = Get-OrchestratorJobRunStatistics -Rows $jobRows24Hours
+        $stats7Days = Get-OrchestratorJobRunStatistics -Rows $jobRows7Days
+        $healthRank = 3
+        if ($latest.Status -in $failureStatuses) { $healthRank = 0 }
+        elseif ($latest.Status -in $warningStatuses) { $healthRank = 1 }
+        elseif ($latest.Status -eq 'Success') { $healthRank = 2 }
+
+        $summaryRows.Add([pscustomobject]@{
+            JobName = $jobName
+            LastRun = $latest.ReferenceTime.ToString('yyyy-MM-dd HH:mm:ss')
+            LastStatus = [string]$latest.Status
+            Runs24Hours = $stats24Hours.Total
+            Success24Hours = $stats24Hours.Success
+            Warning24Hours = $stats24Hours.Warning
+            Failure24Hours = $stats24Hours.Failure
+            Runs7Days = $stats7Days.Total
+            Success7Days = $stats7Days.Success
+            Warning7Days = $stats7Days.Warning
+            Failure7Days = $stats7Days.Failure
+            HealthRank = $healthRank
+        })
+    }
+
+    return @($summaryRows.ToArray() | Sort-Object -Property HealthRank, JobName)
+}
+
 function New-OrchestratorJobRunsTableHtml {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows,
@@ -2818,6 +2860,65 @@ $tableRows
 "@
 }
 
+function New-OrchestratorJobSummaryTableHtml {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows24Hours,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows7Days
+    )
+
+    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
+    $warningStatuses = @('Retried', 'Skipped')
+    $cellStyle = 'padding:3px 7px;border:1px solid #DDDDDD;'
+    $tableRows = ''
+
+    foreach ($row in @(Get-OrchestratorJobSummaryRows -Rows24Hours $Rows24Hours -Rows7Days $Rows7Days)) {
+        $statusColor = '#1F2937'
+        if ($row.LastStatus -eq 'Success') { $statusColor = '#107C10' }
+        elseif ($row.LastStatus -in $failureStatuses) { $statusColor = '#D13438' }
+        elseif ($row.LastStatus -in $warningStatuses) { $statusColor = '#FF8C00' }
+
+        $tableRows += "<tr>" +
+            "<td style='$cellStyle'>$(ConvertTo-HtmlText -Text $row.JobName)</td>" +
+            "<td style='$cellStyle white-space:nowrap;'>$(ConvertTo-HtmlText -Text $row.LastRun)</td>" +
+            "<td style='$cellStyle color:$statusColor;font-weight:bold;'>$(ConvertTo-HtmlText -Text $row.LastStatus)</td>" +
+            "<td style='$cellStyle text-align:right;'>$($row.Runs24Hours)</td>" +
+            "<td style='$cellStyle text-align:right;color:#107C10;'>$($row.Success24Hours)</td>" +
+            "<td style='$cellStyle text-align:right;color:#FF8C00;'>$($row.Warning24Hours)</td>" +
+            "<td style='$cellStyle text-align:right;color:#D13438;'>$($row.Failure24Hours)</td>" +
+            "<td style='$cellStyle text-align:right;'>$($row.Runs7Days)</td>" +
+            "<td style='$cellStyle text-align:right;color:#107C10;'>$($row.Success7Days)</td>" +
+            "<td style='$cellStyle text-align:right;color:#FF8C00;'>$($row.Warning7Days)</td>" +
+            "<td style='$cellStyle text-align:right;color:#D13438;'>$($row.Failure7Days)</td>" +
+            "</tr>"
+    }
+    if ([string]::IsNullOrEmpty($tableRows)) {
+        $tableRows = "<tr><td colspan='11' style='$cellStyle'>No job execution in the last 7 days.</td></tr>"
+    }
+
+    return @"
+<table style='border-collapse:collapse;width:100%;font-size:11px;'>
+<tr style='background-color:#DDEBF7;'>
+<th rowspan='2' style='$cellStyle text-align:left;'>Job</th>
+<th rowspan='2' style='$cellStyle text-align:left;'>Last run</th>
+<th rowspan='2' style='$cellStyle text-align:left;'>Last status</th>
+<th colspan='4' style='$cellStyle text-align:center;'>Last 24 hours</th>
+<th colspan='4' style='$cellStyle text-align:center;'>Last 7 days</th>
+</tr>
+<tr style='background-color:#E6F4FF;'>
+<th style='$cellStyle text-align:right;'>Runs</th>
+<th style='$cellStyle text-align:right;'>OK</th>
+<th style='$cellStyle text-align:right;'>Warn</th>
+<th style='$cellStyle text-align:right;'>Fail</th>
+<th style='$cellStyle text-align:right;'>Runs</th>
+<th style='$cellStyle text-align:right;'>OK</th>
+<th style='$cellStyle text-align:right;'>Warn</th>
+<th style='$cellStyle text-align:right;'>Fail</th>
+</tr>
+$tableRows
+</table>
+"@
+}
+
 function Send-OrchestratorExecutionSummary {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
@@ -2825,6 +2926,7 @@ function Send-OrchestratorExecutionSummary {
     $rows7Days = @(Get-OrchestratorJobRunsForWindow -Now $Now -Hours 168)
     $stats24Hours = Get-OrchestratorJobRunStatistics -Rows $rows24Hours
     $stats7Days = Get-OrchestratorJobRunStatistics -Rows $rows7Days
+    $summaryTable = New-OrchestratorJobSummaryTableHtml -Rows24Hours $rows24Hours -Rows7Days $rows7Days
     $table24Hours = New-OrchestratorJobRunsTableHtml -Rows $rows24Hours -EmptyText 'No job execution in the last 24 hours.'
     $table7Days = New-OrchestratorJobRunsTableHtml -Rows $rows7Days -EmptyText 'No job execution in the last 7 days.'
 
@@ -2832,6 +2934,9 @@ function Send-OrchestratorExecutionSummary {
 <html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
 <h2>SmartInventory orchestrator execution summary</h2>
 <p>Tenant <b>$(ConvertTo-HtmlText -Text $Tenant)</b> on <b>$(ConvertTo-HtmlText -Text $env:COMPUTERNAME)</b>. Generated $(ConvertTo-HtmlText -Text $Now.ToString('yyyy-MM-dd HH:mm:ss zzz')).</p>
+<h3>Execution overview by job</h3>
+<p>One row per job observed during the last 7 days. Counts include retries and skipped attempts.</p>
+$summaryTable
 <h3>Last 24 hours</h3>
 <p>$($stats24Hours.Total) execution(s): <span style='color:#107C10;font-weight:bold;'>$($stats24Hours.Success) success</span>, <span style='color:#D13438;font-weight:bold;'>$($stats24Hours.Failure) failure</span>, <span style='color:#FF8C00;font-weight:bold;'>$($stats24Hours.Warning) warning/skipped</span>.</p>
 $table24Hours
@@ -3272,7 +3377,6 @@ try {
 
     if ($SendExecutionSummary) {
         Write-OrchestratorLog -Message ("Manual execution summary requested for tenant {0}; reading job-run CSVs without acquiring the resident lock or launching jobs." -f $Tenant)
-        Install-OrchestratorAuthenticodeTrustedCertificates
         if (Send-OrchestratorExecutionSummary -Now (Get-Date)) {
             $script:OrchestratorStopReason = 'ExecutionSummary'
             Write-OrchestratorLog -Message 'Manual execution summary email completed successfully.'
@@ -3436,8 +3540,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANJShH8K44ttfh
-# 4SyoExbl8kSPvH26B18MF0Zi73oCpqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBUfOTTp+HbzgsR
+# fInbWK/lifdraP7jxtCwMPlaIksSXKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3570,31 +3674,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOSS46LGcu0vmKNILNgYp6bzIXC8oPtthZWZ0DQIbONlMA0GCSqG
-# SIb3DQEBAQUABIIBgGjJRFc5gtmkC2Couo1AOpEhFzX9RBi8kTb1ZgSGzxXrS3Q6
-# rxqyCYGXTIOfMyrfOWWz5ykJ9jnqEjH2ncawhuRhCW5dOWSrpxSHN6foFhDq+bFf
-# H0ZVUx7QVA/ved9bLpr30wEyPXNYOfkdhc75tTF4WfCSrGNxG5+mI8hxWq6orEyl
-# e6n9RE4Xk4/IUxBGDoR0LEyEuW0hSXijLHdmz6burNTszQDD7DnEJiPncsfw5sd3
-# EmxhI3q0ar2fS9DrAOryPpUgyVuroOecLetpUpoGFoOZHoSLJBzIDW3/gtS5Vk7Z
-# rs0MZJqmvZTIf5p7ziT1ErpMFODU2G++kc7gRGPv7JNkywBJOiANzElLr5sCXUYC
-# T9y+3xFUA2jN1iaVeNZH1gNMmSMDWYHKDmBetYgh4Df3qrFg4Dh9eLiAwUo4ljMZ
-# iNWqJTEAUJctpz6e3Ds3L0mFOuqt/L2c2bbLATzroStjIbAymiWouEwXN2966dUg
-# 023De9e8ZzFKNkGXlqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOodDH3aThP5ELpjC5CwVhmRItaKFzJ+SkuJ5vXeZIz5MA0GCSqG
+# SIb3DQEBAQUABIIBgHF9vO/YONcMXh9UaoIGVqTy/tMs+f5NEhfePu5BC+HlO4OZ
+# bY+WnKX88kBMzJ4baHbLpDemyDO8v5WTr76/ANa0i6IIXeZ+cZNka6/BUV5XqzCe
+# MJ7Bll9oV47OEjk1fk1/DOWGYf91IuuJWPBgwfSXDxvs7looCfdSkQyQtBteISsl
+# 6awmh4LSMPvf3UQV8YxBGabmokftOxlrgc4JFFvcDsy/68Nalp/MuhPnCPM7+FrB
+# e56A0FRDNargGu9JJaXiImoZomHAT2G3NYc3+FG7P0c5zB2yoZxLEoE2XpIv0DM2
+# Og7qY6cO+PgVFG3n2RgF3f6holFcwTPwo1tVCkI5JPz3o8hqkAz27buYi08iT13q
+# UeMzW/eogBimwnsx7x/L7NkzbgkdTjR/L6QPz3663fJWx/n1mPknS+a7OYBCrGl9
+# bPmAEdnoaR46YZGaOgzCHSo2ugBalcprF4BUZPVv4v4l48Obc08/vHbIIDwhnD/a
+# glK7TXafddOHQ0HOfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxODMy
-# NDZaMC8GCSqGSIb3DQEJBDEiBCDha8VTuEbNK2e4byzJciFJ+KfRlEQSXk5YKbCt
-# t722jjANBgkqhkiG9w0BAQEFAASCAgDHEhUzJc7I+WX2MEmn+K8qrFAFa0riPAKK
-# lRwJ5Txpsbc3KEk6k3CIiwuGmupZQn4qCcV74GxZmXWbzSQ83XNERyeGffPez0rx
-# M1WKHEoAVEUaeKlWfZ6tbDwgsNfSW7uB+op3HivELqiairlkvpA8KdaijUrbY7i1
-# IeLAz0CpumDFRWMdd0yByPbp4h84i0AgcDgA78d9SwJANhlmBORHpDUfDwq+QZWK
-# O2xoHCansvhuBqfSCikRIdOPPSZ02dOEDxzWeXnhyDNQPfTen4GAgSQOhGbxZlZj
-# pQe1nReJshkYMiH5jzY21HURNTMeCotDKLjDKEeBEyZ974Fc6CbVx7b2LODUoTte
-# g6oSLvixQRvM+TnbxhaRxVg98T2yHbUeo5zBpJ2atzUqjkPs8meCS8QSMc9Vh/Pr
-# TJbISEdNmvddjOW/+m/d7AWTP7+w9ee29gc/HlGD79F/6sAk7dfawTSZOR21237+
-# +g1c09Oc1J1NgE1H0yfGob0Lpx+nvcFi/+5n9Q2NuRTObaS2rgTBwAFm8nOobWcv
-# 9MuX59FDwAkDA4egAZxZevEvEoDhLr1UH5YhyN1rRVn4cjpniwfSVW+nx4DPbnAW
-# 4GVmw7DHJFKbF1c8bygioE+wWIzbtemy9MHk3HvW/9cSHZKcutRDH3hGzEkB9O1A
-# zF4MXclP3g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxODU5
+# MzVaMC8GCSqGSIb3DQEJBDEiBCAilQxiwdyDMJxl7r3mkCFDv4eJlTPnODitpzHz
+# 01MXXDANBgkqhkiG9w0BAQEFAASCAgCAmTi4E2NdhHVCqrOJ+sOhCc6CeYXifwcf
+# Rl8mT05v7EmGSPUdklZwFA2ARrGgtb7QJZdMFmfudDzIFhBBSX0ZKNEWx9Bz+wgH
+# C5g4w/RFAlUAt93qtfLoQZ/i4bSm64OeMY5Afx6ZNZCvwxJIzJ1jEjB5ZUadofb9
+# ozIgaTrHduStC/jVwiY9uhBfRG3745ivkPbdi6zfkerZj7aerPCNGzBMXCeTgRm/
+# pQhYzuYVsA7cNnxFK9HLPfCQ0u3PVed3FsKqmTyWMVfzniKk0ZKbppsuMJGPCpSv
+# pNsTGcBJb8fgtESapW44z/wLuXrTofqtbWj4p1hXholgy5HjPrqaUNAGyd1iOaII
+# TtPOR3uZoG6OSNmOhKmgTpJpyF+X/LASFrzOfC0WmBWFkQV710i8Yq7jeH92ASN5
+# ITKBQnliRFVb7Dd1hr0dfxF10fK066xMSDn+GmSBuNvbwmL/7I8Z1jS6HJgV3L38
+# JF8nQ1H8U23Ut3z/CJDpQM6O9EjVrSRSwWRLf38Y/jzRWExCrxPSMzpfCB2/9M1K
+# L+J3+Cj9DVrzZ8MZAXqU9jvG/729yg/OGpdq/4RoTJYLNUPnnoL9lPGSVvYun86a
+# ZYYSdCS5+cNm73MT3MlpESO63SNbwj+o5u59wRzwa0BZSX8o73g3CBoJ5w2RKhrn
+# +3KQOzJm/A==
 # SIG # End signature block
