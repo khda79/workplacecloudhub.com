@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.31
+0.1.32
 #>
 param(
     [switch]$ValidateOnly
@@ -470,7 +470,7 @@ function Start-LotHtmlReportOpenWatcher {
 `$reportRoot = '$escapedReportRoot'
 `$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 while ((Get-Date) -lt `$deadline) {
-    `$report = Get-ChildItem -LiteralPath `$reportRoot -Filter '*_live.html' -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    `$report = Get-ChildItem -LiteralPath `$reportRoot -Filter 'PsExec_Windows11Upgrade_Summary_*.html' -File | Where-Object { `$_.Length -gt 0 } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (`$report) {
         Start-Process -FilePath `$report.FullName | Out-Null
         exit 0
