@@ -136,6 +136,17 @@
         "name": "DimUser",
         "columns": [
           {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantUserKey",
+            "dataType": "string",
+            "sourceColumn": "TenantUserKey",
+            "isHidden": true
+          },
+          {
             "name": "CmdbUserId",
             "dataType": "string",
             "sourceColumn": "CmdbUserId"
@@ -182,7 +193,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"DimUser.csv\"), Output = Table.SelectColumns(Source, {\"CmdbUserId\", \"UserPrincipalName\", \"DisplayName\", \"AccountEnabled\", \"UserType\", \"Department\", \"JobTitle\", \"ConfidenceScore\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"DimUser.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"CmdbUserId\", \"UserPrincipalName\", \"DisplayName\", \"AccountEnabled\", \"UserType\", \"Department\", \"JobTitle\", \"ConfidenceScore\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantUserKey = Table.AddColumn(WithTenant, \"TenantUserKey\", each if [CmdbUserId] = null or Text.Trim(Text.From([CmdbUserId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbUserId]), type text), Output = WithTenantUserKey in Output"
             }
           }
         ]
@@ -190,6 +201,17 @@
       {
         "name": "DimDevice",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantDeviceKey",
+            "dataType": "string",
+            "sourceColumn": "TenantDeviceKey",
+            "isHidden": true
+          },
           {
             "name": "CmdbDeviceId",
             "dataType": "string",
@@ -237,7 +259,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"DimDevice.csv\"), Output = Table.SelectColumns(Source, {\"CmdbDeviceId\", \"DeviceName\", \"OperatingSystem\", \"OperatingSystemVersion\", \"Ownership\", \"ComplianceState\", \"ManagementState\", \"ConfidenceScore\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"DimDevice.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"CmdbDeviceId\", \"DeviceName\", \"OperatingSystem\", \"OperatingSystemVersion\", \"Ownership\", \"ComplianceState\", \"ManagementState\", \"ConfidenceScore\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantDeviceKey = Table.AddColumn(WithTenant, \"TenantDeviceKey\", each if [CmdbDeviceId] = null or Text.Trim(Text.From([CmdbDeviceId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbDeviceId]), type text), Output = WithTenantDeviceKey in Output"
             }
           }
         ]
@@ -245,6 +267,17 @@
       {
         "name": "DimGroup",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantGroupKey",
+            "dataType": "string",
+            "sourceColumn": "TenantGroupKey",
+            "isHidden": true
+          },
           {
             "name": "CmdbGroupId",
             "dataType": "string",
@@ -277,7 +310,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"DimGroup.csv\"), Output = Table.SelectColumns(Source, {\"CmdbGroupId\", \"DisplayName\", \"MailEnabled\", \"SecurityEnabled\", \"GroupTypes\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"DimGroup.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"CmdbGroupId\", \"DisplayName\", \"MailEnabled\", \"SecurityEnabled\", \"GroupTypes\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantGroupKey = Table.AddColumn(WithTenant, \"TenantGroupKey\", each if [CmdbGroupId] = null or Text.Trim(Text.From([CmdbGroupId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbGroupId]), type text), Output = WithTenantGroupKey in Output"
             }
           }
         ]
@@ -285,6 +318,17 @@
       {
         "name": "DimLicenseSku",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantSkuKey",
+            "dataType": "string",
+            "sourceColumn": "TenantSkuKey",
+            "isHidden": true
+          },
           {
             "name": "SkuId",
             "dataType": "string",
@@ -312,7 +356,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"DimLicenseSku.csv\"), Output = Table.SelectColumns(Source, {\"SkuId\", \"SkuPartNumber\", \"ConsumedUnits\", \"EnabledUnits\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"DimLicenseSku.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"SkuId\", \"SkuPartNumber\", \"ConsumedUnits\", \"EnabledUnits\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantSkuKey = Table.AddColumn(WithTenant, \"TenantSkuKey\", each if [SkuId] = null or Text.Trim(Text.From([SkuId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([SkuId]), type text), Output = WithTenantSkuKey in Output"
             }
           }
         ]
@@ -320,6 +364,23 @@
       {
         "name": "FactUserLicense",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantUserKey",
+            "dataType": "string",
+            "sourceColumn": "TenantUserKey",
+            "isHidden": true
+          },
+          {
+            "name": "TenantSkuKey",
+            "dataType": "string",
+            "sourceColumn": "TenantSkuKey",
+            "isHidden": true
+          },
           {
             "name": "CmdbUserId",
             "dataType": "string",
@@ -352,7 +413,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"FactUserLicense.csv\"), Output = Table.SelectColumns(Source, {\"CmdbUserId\", \"SkuId\", \"AssignmentState\", \"AssignedDateTime\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"FactUserLicense.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"CmdbUserId\", \"SkuId\", \"AssignmentState\", \"AssignedDateTime\", \"SourceSystem\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantUserKey = Table.AddColumn(WithTenant, \"TenantUserKey\", each if [CmdbUserId] = null or Text.Trim(Text.From([CmdbUserId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbUserId]), type text), WithTenantSkuKey = Table.AddColumn(WithTenantUserKey, \"TenantSkuKey\", each if [SkuId] = null or Text.Trim(Text.From([SkuId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([SkuId]), type text), Output = WithTenantSkuKey in Output"
             }
           }
         ]
@@ -360,6 +421,17 @@
       {
         "name": "FactDeviceCompliance",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantDeviceKey",
+            "dataType": "string",
+            "sourceColumn": "TenantDeviceKey",
+            "isHidden": true
+          },
           {
             "name": "CmdbDeviceId",
             "dataType": "string",
@@ -387,7 +459,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"FactDeviceCompliance.csv\"), Output = Table.SelectColumns(Source, {\"CmdbDeviceId\", \"ComplianceState\", \"LastSyncDateTime\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"FactDeviceCompliance.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"CmdbDeviceId\", \"ComplianceState\", \"LastSyncDateTime\", \"SourceSystem\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantDeviceKey = Table.AddColumn(WithTenant, \"TenantDeviceKey\", each if [CmdbDeviceId] = null or Text.Trim(Text.From([CmdbDeviceId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbDeviceId]), type text), Output = WithTenantDeviceKey in Output"
             }
           }
         ]
@@ -395,6 +467,23 @@
       {
         "name": "FactMailbox",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantMailboxKey",
+            "dataType": "string",
+            "sourceColumn": "TenantMailboxKey",
+            "isHidden": true
+          },
+          {
+            "name": "TenantUserKey",
+            "dataType": "string",
+            "sourceColumn": "TenantUserKey",
+            "isHidden": true
+          },
           {
             "name": "CmdbMailboxId",
             "dataType": "string",
@@ -427,7 +516,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"FactMailbox.csv\"), Output = Table.SelectColumns(Source, {\"CmdbMailboxId\", \"CmdbUserId\", \"RecipientTypeDetails\", \"ArchiveStatus\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"FactMailbox.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"CmdbMailboxId\", \"CmdbUserId\", \"RecipientTypeDetails\", \"ArchiveStatus\", \"SourceSystem\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantMailboxKey = Table.AddColumn(WithTenant, \"TenantMailboxKey\", each if [CmdbMailboxId] = null or Text.Trim(Text.From([CmdbMailboxId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbMailboxId]), type text), WithTenantUserKey = Table.AddColumn(WithTenantMailboxKey, \"TenantUserKey\", each if [CmdbUserId] = null or Text.Trim(Text.From([CmdbUserId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbUserId]), type text), Output = WithTenantUserKey in Output"
             }
           }
         ]
@@ -435,6 +524,29 @@
       {
         "name": "FactUserDeviceRelationship",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantRelationshipKey",
+            "dataType": "string",
+            "sourceColumn": "TenantRelationshipKey",
+            "isHidden": true
+          },
+          {
+            "name": "TenantUserKey",
+            "dataType": "string",
+            "sourceColumn": "TenantUserKey",
+            "isHidden": true
+          },
+          {
+            "name": "TenantDeviceKey",
+            "dataType": "string",
+            "sourceColumn": "TenantDeviceKey",
+            "isHidden": true
+          },
           {
             "name": "CmdbRelationshipId",
             "dataType": "string",
@@ -472,7 +584,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"FactUserDeviceRelationship.csv\"), Output = Table.SelectColumns(Source, {\"CmdbRelationshipId\", \"CmdbUserId\", \"CmdbDeviceId\", \"RelationshipType\", \"ConfidenceScore\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"FactUserDeviceRelationship.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"CmdbRelationshipId\", \"CmdbUserId\", \"CmdbDeviceId\", \"RelationshipType\", \"ConfidenceScore\", \"SourceSystem\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantRelationshipKey = Table.AddColumn(WithTenant, \"TenantRelationshipKey\", each if [CmdbRelationshipId] = null or Text.Trim(Text.From([CmdbRelationshipId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbRelationshipId]), type text), WithTenantUserKey = Table.AddColumn(WithTenantRelationshipKey, \"TenantUserKey\", each if [CmdbUserId] = null or Text.Trim(Text.From([CmdbUserId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbUserId]), type text), WithTenantDeviceKey = Table.AddColumn(WithTenantUserKey, \"TenantDeviceKey\", each if [CmdbDeviceId] = null or Text.Trim(Text.From([CmdbDeviceId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([CmdbDeviceId]), type text), Output = WithTenantDeviceKey in Output"
             }
           }
         ]
@@ -480,6 +592,17 @@
       {
         "name": "FactDataQuality",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "TenantFindingKey",
+            "dataType": "string",
+            "sourceColumn": "TenantFindingKey",
+            "isHidden": true
+          },
           {
             "name": "FindingId",
             "dataType": "string",
@@ -517,7 +640,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source = fnLoadCmdbTable(\"FactDataQuality.csv\"), Output = Table.SelectColumns(Source, {\"FindingId\", \"Severity\", \"EntityType\", \"FindingType\", \"DetectedDateTime\", \"SourceSystem\"}, MissingField.UseNull) in Output"
+              "expression": "let Source = fnLoadCmdbTable(\"FactDataQuality.csv\"), Selected = Table.SelectColumns(Source, {\"TenantKey\", \"FindingId\", \"Severity\", \"EntityType\", \"FindingType\", \"DetectedDateTime\", \"SourceSystem\"}, MissingField.UseNull), WithTenant = Table.TransformColumns(Selected, {{\"TenantKey\", each if _ = null or Text.Trim(Text.From(_)) = \"\" then TenantKey else Text.From(_), type text}}), WithTenantFindingKey = Table.AddColumn(WithTenant, \"TenantFindingKey\", each if [FindingId] = null or Text.Trim(Text.From([FindingId])) = \"\" then null else [TenantKey] & \"|\" & Text.From([FindingId]), type text), Output = WithTenantFindingKey in Output"
             }
           }
         ]
@@ -525,6 +648,11 @@
       {
         "name": "SourceCatalog",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
           {
             "name": "SourceArea",
             "dataType": "string",
@@ -557,7 +685,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "#table(type table [SourceArea = text, SourceName = text, FileName = text, SourceRoot = text, LoadPriority = number], {{\"CMDB\", \"Tenant\", \"DimTenant.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Users\", \"DimUser.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Devices\", \"DimDevice.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Licenses\", \"DimLicenseSku.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Mailbox fact\", \"FactMailbox.csv\", \"CMDBPowerBIPath\", 1}, {\"SmartInventory\", \"Active users\", \"M365_Users_Active.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Entra devices\", \"M365_Entra_Devices.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Intune devices\", \"Intune_Devices_Inventory.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"EXO mailboxes\", \"Exchange_EXO_Mailboxes_AllDomains.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"On-prem mailboxes\", \"Exchange_OnPrem_Mailboxes_AllDomains.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"License assignments\", \"M365_Licenses_Users.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Backup protected mailboxes\", \"M365_Backup_ProtectedMailboxes.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Sync health\", \"M365_Entra_AzureADConnect_SyncHealth.csv\", \"SmartInventoryLatestPath\", 2}})"
+              "expression": "let Source = #table(type table [SourceArea = text, SourceName = text, FileName = text, SourceRoot = text, LoadPriority = number], {{\"CMDB\", \"Tenant\", \"DimTenant.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Users\", \"DimUser.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Devices\", \"DimDevice.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Licenses\", \"DimLicenseSku.csv\", \"CMDBPowerBIPath\", 1}, {\"CMDB\", \"Mailbox fact\", \"FactMailbox.csv\", \"CMDBPowerBIPath\", 1}, {\"SmartInventory\", \"Active users\", \"M365_Users_Active.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Entra devices\", \"M365_Entra_Devices.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Intune devices\", \"Intune_Devices_Inventory.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Windows 11 readiness\", \"Intune_Devices_UpgradeEligibility.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"EXO mailboxes\", \"Exchange_EXO_Mailboxes_AllDomains.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"On-prem mailboxes\", \"Exchange_OnPrem_Mailboxes_AllDomains.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"License assignments\", \"M365_Licenses_Users.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Backup protected mailboxes\", \"M365_Backup_ProtectedMailboxes.csv\", \"SmartInventoryLatestPath\", 2}, {\"SmartInventory\", \"Sync health\", \"M365_Entra_AzureADConnect_SyncHealth.csv\", \"SmartInventoryLatestPath\", 2}}), Output = Table.AddColumn(Source, \"TenantKey\", each TenantKey, type text) in Output"
             }
           }
         ]
@@ -565,6 +693,11 @@
       {
         "name": "FactSourceFreshness",
         "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
           {
             "name": "SourceName",
             "dataType": "string",
@@ -597,7 +730,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Rows = Table.ToRecords(SourceCatalog), Tables = List.Transform(Rows, each fnSourceFreshness(if [SourceRoot] = \"CMDBPowerBIPath\" then CMDBPowerBIPath else SmartInventoryLatestPath, [FileName], [SourceName])), Output = if List.Count(Tables) = 0 then #table(type table [SourceName = text, FileName = text, Exists = logical, LastModifiedDateTime = nullable datetime, RowCount = nullable number], {}) else Table.Combine(Tables) in Output"
+              "expression": "let Rows = Table.ToRecords(SourceCatalog), Tables = List.Transform(Rows, each fnSourceFreshness(if [SourceRoot] = \"CMDBPowerBIPath\" then CMDBPowerBIPath else SmartInventoryLatestPath, [FileName], [SourceName])), Base = if List.Count(Tables) = 0 then #table(type table [SourceName = text, FileName = text, Exists = logical, LastModifiedDateTime = nullable datetime, RowCount = nullable number], {}) else Table.Combine(Tables), Output = Table.AddColumn(Base, \"TenantKey\", each TenantKey, type text) in Output"
             }
           }
         ]
@@ -625,27 +758,27 @@
         "measures": [
           {
             "name": "Users",
-            "expression": "DISTINCTCOUNT(DimUser[CmdbUserId])",
+            "expression": "DISTINCTCOUNT(DimUser[TenantUserKey])",
             "formatString": "0"
           },
           {
             "name": "Enabled Users",
-            "expression": "CALCULATE(DISTINCTCOUNT(DimUser[CmdbUserId]), DimUser[AccountEnabled] = TRUE())",
+            "expression": "CALCULATE(DISTINCTCOUNT(DimUser[TenantUserKey]), DimUser[AccountEnabled] = TRUE())",
             "formatString": "0"
           },
           {
             "name": "Devices",
-            "expression": "DISTINCTCOUNT(DimDevice[CmdbDeviceId])",
+            "expression": "DISTINCTCOUNT(DimDevice[TenantDeviceKey])",
             "formatString": "0"
           },
           {
             "name": "Compliant Devices",
-            "expression": "CALCULATE(DISTINCTCOUNT(FactDeviceCompliance[CmdbDeviceId]), FactDeviceCompliance[ComplianceState] = \"Compliant\")",
+            "expression": "CALCULATE(DISTINCTCOUNT(FactDeviceCompliance[TenantDeviceKey]), FactDeviceCompliance[ComplianceState] = \"Compliant\")",
             "formatString": "0"
           },
           {
             "name": "Mailboxes",
-            "expression": "DISTINCTCOUNT(FactMailbox[CmdbMailboxId])",
+            "expression": "DISTINCTCOUNT(FactMailbox[TenantMailboxKey])",
             "formatString": "0"
           },
           {
@@ -695,44 +828,44 @@
       {
         "name": "FactUserLicense_DimUser",
         "fromTable": "FactUserLicense",
-        "fromColumn": "CmdbUserId",
+        "fromColumn": "TenantUserKey",
         "toTable": "DimUser",
-        "toColumn": "CmdbUserId"
+        "toColumn": "TenantUserKey"
       },
       {
         "name": "FactUserLicense_DimLicenseSku",
         "fromTable": "FactUserLicense",
-        "fromColumn": "SkuId",
+        "fromColumn": "TenantSkuKey",
         "toTable": "DimLicenseSku",
-        "toColumn": "SkuId"
+        "toColumn": "TenantSkuKey"
       },
       {
         "name": "FactDeviceCompliance_DimDevice",
         "fromTable": "FactDeviceCompliance",
-        "fromColumn": "CmdbDeviceId",
+        "fromColumn": "TenantDeviceKey",
         "toTable": "DimDevice",
-        "toColumn": "CmdbDeviceId"
+        "toColumn": "TenantDeviceKey"
       },
       {
         "name": "FactUserDeviceRelationship_DimUser",
         "fromTable": "FactUserDeviceRelationship",
-        "fromColumn": "CmdbUserId",
+        "fromColumn": "TenantUserKey",
         "toTable": "DimUser",
-        "toColumn": "CmdbUserId"
+        "toColumn": "TenantUserKey"
       },
       {
         "name": "FactUserDeviceRelationship_DimDevice",
         "fromTable": "FactUserDeviceRelationship",
-        "fromColumn": "CmdbDeviceId",
+        "fromColumn": "TenantDeviceKey",
         "toTable": "DimDevice",
-        "toColumn": "CmdbDeviceId"
+        "toColumn": "TenantDeviceKey"
       },
       {
         "name": "FactMailbox_DimUser",
         "fromTable": "FactMailbox",
-        "fromColumn": "CmdbUserId",
+        "fromColumn": "TenantUserKey",
         "toTable": "DimUser",
-        "toColumn": "CmdbUserId"
+        "toColumn": "TenantUserKey"
       }
     ],
     "annotations": [
