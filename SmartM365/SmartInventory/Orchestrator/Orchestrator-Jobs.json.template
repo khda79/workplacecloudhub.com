@@ -811,7 +811,7 @@
     {
       "Name": "Intune-WinUpdate-Status",
       "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\SmartM365-WinUpdate_Status_From_Intune.ps1",
-      "Arguments": "-FeatureUpdatePolicyId \"{{FeatureUpdatePolicyId}}\"",
+      "Arguments": "",
       "Enabled": false,
       "Group": "Intune",
       "DependsOn": [],

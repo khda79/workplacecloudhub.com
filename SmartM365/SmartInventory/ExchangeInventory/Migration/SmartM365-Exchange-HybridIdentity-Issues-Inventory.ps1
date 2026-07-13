@@ -12,7 +12,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.8
+1.9
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -41,13 +41,14 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.8"
+$ScriptVersion="1.9"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){ Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m) }
 function Warn([string]$m){ Write-Warning $m }
 function Root(){ $d=$PSScriptRoot; while($d){ if((Test-Path (Join-Path $d 'Config\SmartM365-TenantContext.ps1')) -and (Test-Path (Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'))){return $d}; $p=Split-Path $d -Parent; if(!$p -or $p -eq $d){break}; $d=$p }; throw 'SmartM365 root not found.' }
 function LocalConfig(){ $p=Join-Path $PSScriptRoot (([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))+'.local.json'); if(!(Test-Path $p)){ $t="$p.template"; if(!(Test-Path $t)){throw "Missing config template: $t"}; Copy-Item $t $p; Log "Created local config: $p" }; Get-Content $p -Raw | ConvertFrom-Json }
-function ResolveToken($v){ if($v -isnot [string] -or [string]::IsNullOrWhiteSpace($v)){return $v}; $r=$v; 0..9|%{ $ms=[regex]::Matches($r,'\{\{(?<n>[A-Za-z0-9_.-]+)\}\}'); if($ms.Count -eq 0){return $r}; foreach($m in $ms){ $pr=$script:Cfg.PSObject.Properties[$m.Groups['n'].Value]; if($pr){$r=$r.Replace($m.Value,[string](ResolveToken $pr.Value))} } }; $r }
+function ResolveToken($v){ if($v -isnot [string] -or [string]::IsNullOrWhiteSpace($v)){return $v}; $r=[string]$v; for($iteration=0;$iteration -lt 10;$iteration++){ $ms=[regex]::Matches($r,'\{\{(?<n>[A-Za-z0-9_.-]+)\}\}'); if($ms.Count -eq 0){break}; $changed=$false; foreach($m in $ms){ $pr=$script:Cfg.PSObject.Properties[$m.Groups['n'].Value]; if($pr){$replacement=ResolveToken $pr.Value; if($replacement -is [array]){throw "Configuration token '$($m.Value)' resolved to multiple values."}; $next=$r.Replace($m.Value,[string]$replacement); if($next -ne $r){$changed=$true;$r=$next}} }; if(!$changed){break} }; return $r }
+function AssertResolvedPath([string]$Name,[string]$Path){ if([string]::IsNullOrWhiteSpace($Path)){throw "Configuration path '$Name' is empty."}; if($Path -match '\{\{[A-Za-z0-9_.-]+\}\}'){throw "Configuration path '$Name' contains an unresolved token: $Path"}; if(([regex]::Matches($Path,'(?i)(?:[A-Z]:\\|\\\\)').Count) -gt 1){throw "Configuration path '$Name' contains multiple path roots: $Path"} }
 function Cfg($c,$n,$d){ $p=$c.PSObject.Properties[$n]; if($p -and $null -ne $p.Value){ if($p.Value -isnot [string]){return ResolveToken $p.Value}; $txt=$p.Value.Trim(); if($txt -and $txt -notin @('__USE_GLOBAL__','USE_GLOBAL')){return ResolveToken $p.Value} }; $gp=$script:Cfg.PSObject.Properties[$n]; if($gp -and $null -ne $gp.Value){ if($gp.Value -is [string] -and [string]::IsNullOrWhiteSpace($gp.Value)){return $d}; return ResolveToken $gp.Value }; $d }
 function P($r,[string[]]$names){ if($null -eq $r){return $null}; foreach($n in $names){$p=$r.PSObject.Properties[$n]; if($p -and $null -ne $p.Value){return $p.Value}}; $null }
 function T($v){ if($null -eq $v){''}else{([string]$v).Trim()} }
@@ -131,6 +132,9 @@ try{
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
   if(!$OutputFolder){$OutputFolder=Cfg $lc 'ScriptCsvLogFolderPath' (Join-Path (Cfg $lc 'DataAllRootPath' $PSScriptRoot) 'Exchange\Issues\HybridIdentity')}
   if(!$LatestFolder){$LatestFolder=Cfg $lc 'LatestCsvFolderPath' $OutputFolder}
+  AssertResolvedPath 'DataLastFolder' $DataLastFolder
+  AssertResolvedPath 'OutputFolder' $OutputFolder
+  AssertResolvedPath 'LatestFolder' $LatestFolder
   $global:EnableSharePointUpload=CB $lc 'EnableSharePointUpload' $false; if($DisableSharePointUpload){$global:EnableSharePointUpload=$false}
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
@@ -228,8 +232,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKdD+DtdrZEglM
-# psEv6JrPErx9R8Wec5KwnXtiwRC8haCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAa1BvQ4P1lIsnD
+# uzkysH2sdIco7w+y0iJd6SCtjlSfA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -362,31 +366,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIsPeADFu3LIfuWx6s5Yk1eCbteJWWUuT1YqfQGhsvnPMA0GCSqG
-# SIb3DQEBAQUABIIBgDsvmwkWCFMzsAsy99EbmZjdVM7Ged1sSkXtK051tq3eqI7f
-# jTQySfrTehqzabma2pUIM0kXJ6In9q0GslNSg42HHjdFsNbGHlmmgZbERg5xrP9V
-# DMB3otjbTaROJgGQN8aEe/bq6I9Ea6eA1OC3alooAbCK0wiqjMsVrwfgd2HgU08X
-# k6Xxp8BvFJbfGA4FNrMfY+Q28QjfjC2iBZvGGiIy9yLacFtKEPqLSeikt6he32lR
-# E42ysDW7QCqR7TiIoFX0/SR2VB4sPsJwEQHmttQ+h62p3WoKOn0OvMH2OpnGQ6l9
-# eN0tVSztpqStn7Z4Z8BsjbFVG2Hu/QSZUe22H7NKkmNtJSkl6sBZ05soJPXmy/4Y
-# sxLe+C2P62clgU0kihkXywkb2eDxlMnRGkZ+slVjnESCPsLWVSMQV0UdEw7/XQBB
-# jeCgkQkV7RIbeYfQ/dIIrkUlac7Mvg/oEX+8itUKGusR1hGFD2r7S++9RJGsUhUU
-# SVEROGrjviotdiofo6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG3I49AJ15h/Lv8tlsFiaRlHBf/8KcWxHJcwqYMyzC8xMA0GCSqG
+# SIb3DQEBAQUABIIBgKhbjh5lc7cINyV5AnLNQbd068PtR94I57Tgpauy1VUjhZR4
+# 0nPtWmFE5dX9YJXq4QJZMh9JPuIalUJP37ZsZHC7r5wbiOPWD/aIfliDKQBQfIEV
+# Vw+Yh/CGBbXlnGAr0NB5BSPz08cA4qFs+govd7M+YQA/WWcxpOBzANb/dEgMiL8a
+# gtXd5Z3OLI1xoh+TTafEyG7f8mMT6pzRVaGDJO4B29wULTagLeCBr49y3tzGBQ4i
+# 2Sj3tE4W7Bn2V+pFLMXhJn3hmyfhq8OWhjeTSJfOKLNjwSK9ZdcglrXAchzMF9Et
+# 7EhVO2RKSXRmVRUgGznek8v0SUAKYRMBYBsNm572imBfD2AbpLLTggyiE5A4NN6H
+# P+un5TKV1i9GEKqiwCuW0VEc38wrNoQSwkUj3Pu+CYR0Fhzr/CCkr4ycnbStOpsD
+# dl4espf6AMe9ejwhc4YevhHW4OQ/WN3iDwgtoxKAanXpO90pNoT3+rmL/LF5Jwzx
+# ZswP4W9UOL/KPtNdd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
-# MjJaMC8GCSqGSIb3DQEJBDEiBCDoPLfGZ+CSOoA3UHcOgsLYnZ4pwBC3NQkW95Bj
-# ryGfazANBgkqhkiG9w0BAQEFAASCAgBrD4Z5ulcnhlEdDCOoa1kVNk25YM2YuHmo
-# 8elWbA1LminfNYfMuhOSJcE40mhwp5YMZWQgbUIU4QnXAPtVHBJWOA7GRuZjC+ww
-# M+9nDCPxFPignZLPSTaTjMbXucTmkeIjMmiL668PtWhrgViOY9CmPErId0l8pRhJ
-# vx4CqEigfI2rzqgdyiffn+xBzwRsnvZ9rF21vywHV4AMvSOR4DgWtotVDt4FlcFz
-# ljcE0Yl6pIj/4667t2M5AlylNJ/4p6WI0i6oTyhIFbT5EvJ+fFBMnx21ympt+d3m
-# DRFrv9G4y0TpiqFUcB9WiXZYDWzAKr6LagsfdYsWD+dCchDwpNeAmxoHzy4pbGUa
-# 5kcHxHjhXVsLvCtypTKuEw/KatnsD8vRxNI4KOOLG0RoOfv7kuLnKMiOxOwDEg5H
-# DIbU7vcYuXooXPg9oIF0I4pfPZZPllyqctNTzkR+WxYApSgNo9ce6/livNvRP5Ft
-# 7/x/pelBs+18Yv1XqP3qty0WdGbLqrg3HfY7qDiKNKsbmmR8I14r6OSjLl60A/w5
-# ktAeTdaLlz16sj6CRPEBXNbd4KVa+pmTaEIapPbUC9JV1G+EjqUXzeSAxuq3tvve
-# 9PTiRAmbcBBW87bdSDMFtlc4f+8BOYR9dKD+ow++1HioESGvRzhcuUezm7nEKqil
-# 1O6Cf2RYLA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNjQw
+# MTRaMC8GCSqGSIb3DQEJBDEiBCD0MMOrsDEz+virKPn62a5SA+GCFiDYCT8D/zFX
+# mRROGjANBgkqhkiG9w0BAQEFAASCAgC+qmXelfu00qPa7zdOp/drHhOKOsi0Ilze
+# o+8ENQbsM046cOz/+UIvCz3ObBjn6AJf48qQYHW6m5+6YBaqwPBGJ3OvGR7Npniy
+# flJfOdJWu8ubhVNcMAxpVJxJFDrSiIJfUMk/SWrcpxImqcgprVSRozl7nPWeP7bp
+# 3u1HJatRprUllH0wJAzdpc9StXghV8PusZ4htblpiU9GVzIXzu+anOEvBIvF+4pJ
+# pf1pLeCeaETJg0QuH/2XyO4cVja2hDmten1XotiGa9fr8tKIHgCNVtc8nWrjuMZp
+# QpcOAZz5HEsfjEh7s1jqnql3GtpcszBRypKT2dKGffp719EmcmqtVbMuUvSEoIGY
+# H7cvR8CjTTjBN1B+ucMiGbbJzg50kXbRbm0HXV9xbqdFrg/2VCrdqtzekb7bEaLj
+# k/eqzsJ1d262EjiQl5fEh0T2QWfacV04NXHTw6VaREkMwvm2D+qr1T93+dJNUosO
+# 8FfvuIMnhl7p0F+EoudwD/7RYm69e3pj+mQpOkm1bfOg8Fi3EbV59r0qkIwUZZKk
+# 3uxmcVrzn05FBMRv+yBI4oGwTg+Z1D9MvQhBQ7yqYEOkQ7+iCDTJ1dLVKzqYeikx
+# Z/ZEXT5kc+3XX0jg1/4Sm/kzvsPgoYuSpUL3eRYrjh2eR4RGKpjYZymV5zVIay8e
+# /KEQ2m0OdA==
 # SIG # End signature block
