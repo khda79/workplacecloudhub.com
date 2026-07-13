@@ -40,7 +40,7 @@ PARAMETERS
 VERSION
   1.5
 .VERSION
-1.11
+1.14
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -87,12 +87,12 @@ $tenantContextPath = & {
     throw 'SmartM365-TenantContext.ps1 not found.'
 }
 . $tenantContextPath
-Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
+$script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.14"
 
 # ==========================================================
 # App-only authentication parameters
@@ -191,6 +191,16 @@ function Resolve-SmartM365ConfigValue {
 
     return $resolved
 }
+function Test-SmartM365UseGlobalConfigValue {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($Value -isnot [string]) { return $false }
+
+    $text = $Value.Trim()
+    return ($text -in @('__USE_GLOBAL__', 'USE_GLOBAL', '**USE_GLOBAL**', '**USE\_GLOBAL**'))
+}
+
 function Get-ScriptLocalConfigValue {
     [CmdletBinding()]
     param(
@@ -203,7 +213,7 @@ function Get-ScriptLocalConfigValue {
     if ($null -ne $property -and $null -ne $property.Value) {
         if ($property.Value -is [string]) {
             $localValue = $property.Value.Trim()
-            if ($localValue -and $localValue -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) {
+            if ($localValue -and -not (Test-SmartM365UseGlobalConfigValue -Value $localValue)) {
                 return Resolve-SmartM365ConfigValue -Value $property.Value
             }
         }
@@ -235,8 +245,11 @@ function Get-ScriptLocalConfigValue {
 
     $globalProperty = $script:SmartM365GlobalConfig.PSObject.Properties[$Name]
     if ($null -ne $globalProperty -and $null -ne $globalProperty.Value) {
-        if ($globalProperty.Value -is [string] -and [string]::IsNullOrWhiteSpace($globalProperty.Value)) {
-            return $DefaultValue
+        if ($globalProperty.Value -is [string]) {
+            $globalValue = $globalProperty.Value.Trim()
+            if ([string]::IsNullOrWhiteSpace($globalValue) -or (Test-SmartM365UseGlobalConfigValue -Value $globalValue)) {
+                return $DefaultValue
+            }
         }
         return Resolve-SmartM365ConfigValue -Value $globalProperty.Value
     }
@@ -300,7 +313,7 @@ $ArchivePath = Join-Path $ScriptCsvLogFolderPath "Archive"
 $LogsPath    = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path $ScriptCsvLogFolderPath "Logs"
 } else {
-    Join-Path $LogAllRootPath "WinUpdate_Status_From_Intune"
+    Join-Path $LogAllRootPath "SmartM365-WinUpdate-Status-Inventory"
 }
 $WorkPath    = Join-Path $ScriptCsvLogFolderPath "Work"
 
@@ -349,7 +362,7 @@ $ConsoleShowRunId = $false
 # ==========================================================
 # Run metadata
 # ==========================================================
-$ScriptName = "WinUpdate_Status_From_Intune"
+$ScriptName = "SmartM365-WinUpdate-Status-Inventory"
 $RunId      = [guid]::NewGuid().ToString()
 $RunStamp   = Get-Date -Format "yyyyMMdd_HHmmss"
 $LogPath    = Join-Path $LogsPath "$ScriptName-$RunStamp.log"
@@ -526,11 +539,7 @@ function Send-SummaryEmail {
     if (-not $EnableSummaryEmail) { return }
     if ($DryRun) { Write-Log "DryRun: skipping summary email." "INFO" "DRYRUN"; return }
     $summaryTo = $To
-    if ([string]::IsNullOrWhiteSpace($summaryTo) -and -not [string]::IsNullOrWhiteSpace($ErrorMailTo)) {
-        $summaryTo = $ErrorMailTo
-        Write-Log "Summary email To is not configured; using ErrorMailTo fallback." "WARN" "MAIL"
-    }
-    if ([string]::IsNullOrWhiteSpace($summaryTo)) { throw "Summary email requires To or ErrorMailTo in configuration." }
+    if ([string]::IsNullOrWhiteSpace($summaryTo)) { throw "Summary email requires To in local or global configuration." }
 
     try {
         Import-SmartM365CorePreflight
@@ -1574,8 +1583,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLMqEp48bNQJ0H
-# FzmM0RKWaADXrpvNTXQvwRhG2cNxQaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2CM/TIMIZsoD6
+# TcPxpCh7uUb9+w0itb9h3TGUe0VHnKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1601,14 +1610,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCC2YUo96SjyML6iQEwNeoy+4sraFCjBKB0FZBa7kgQGCDANBgkqhkiG9w0B
-# AQEFAASCAYB7+4IrBtCgzf9xfHSPXQNJ7oR8aSl7EZc5Gvnl8NjAcgYcOSN2Uc1v
-# LOy+Ey72PcYGQWJjp+ONFlEHFwg2tTOfUX5IACC68d9qPenK4KpM7m5pmYANNiwS
-# IjJb+y5XUV6v0UkocWNyvaiIvILDSdS+nfE4aRucTBgDLY8aZcwx7UFWkckYeUeU
-# 3ZS6W87a5oT/GJM9PEmY8hiKepA1j2UP2PzSaZ0N0rODebO0CD/gcLh1HaIh+A+Q
-# 3ynz4boKImP3ZhTWnAIbrO2AkZGrwYw2qKauncUpkyEoWpUmFv1Xl4CL3ayDe8Et
-# pVN6nUMDgj97QMdXdtTEdrkFf/IcleyJ+cFNBPP4Ayw62CJ9WarH4eXyRQJVIA6I
-# xI+0AIn5rlxNJCNVlEDBxFJeRdpMZIZKG/ZmrlM/Mw+VBu7f0BEKlQapBv2kV6Rv
-# ZWKxx/eMRHIEdLjyRi/BICjPEmbFZwZV/gFzf8NbbCThOOYG1waSNTBxsRDEs6M/
-# Xklr3Ml7n+s=
+# BDEiBCCovBxzjfc6yeMCDZrIUn7gEhhOrmsHuToBCMpYg/9xhDANBgkqhkiG9w0B
+# AQEFAASCAYBQBgMSgaW6+i47v69lN2WxYhnDgAQx5IxlcDabOkSbPFaqMUJ5VoE+
+# 72wMOEA3yitD0AhqhyVF2VPKi+Rq4/NxixE13sk66DfYlqa8hYbKnOkrjRPUMZb4
+# P0xE14VozAdEk8FLh2cnqGLiFy54AfHsj2dNQ9pmFCsu+IcawSvrG2QcwldR/wr2
+# yf2i+odGPw+OlNVQT302Hi+SBMIIeQtCJytlrFEQEEKkn8fguOyUA2SLgSMoauDu
+# 1w5dOO4iS8Bk5Y4BV3eD1wavGN+i++lAQslTRxI1yrh2dZ/aCmXqDf6CMjWy4spp
+# LPaqWWbK4txIhfuAv8bczDJ3BC9MRqF5UBrxMfW4aRww1ZZ9vGYns+cu82oHwnh/
+# wt0ZdoSzPzlOje91EM8ocnGf9jV1uP56//HIBWzI0C/IYIo9tZfqr+5OXn/y5jor
+# KZEK5SK2uXTtRB7bGjFAkCFhugwO3T7PLvo9i57nzEHOfqdiYQltX9Usl2PhmkQU
+# LpvIsyVr5+Y=
 # SIG # End signature block
