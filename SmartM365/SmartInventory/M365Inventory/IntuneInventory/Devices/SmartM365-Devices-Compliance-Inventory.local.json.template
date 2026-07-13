@@ -23,7 +23,7 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\Compliance",
-  "IncludePolicyStates": false,
+  "IncludePolicyStates": true,
   "IncludeComplianceSettings": true,
   "EnableDirectoryEnrichment": false,
   "MaxDevices": 0,
