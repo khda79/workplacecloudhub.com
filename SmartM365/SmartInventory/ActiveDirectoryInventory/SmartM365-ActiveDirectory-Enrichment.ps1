@@ -219,6 +219,185 @@ function Build($AdVersion, $IntuneVersion) {
         $Output[("WU_RiskBucket_loc_Policy_{0}" -f $Suffix)] = V $Row @('RiskBucket')
     }
 
+    function BoolValue($Value) {
+        $text = B $Value
+        if ($text -eq 'True') { return $true }
+        if ($text -eq 'False') { return $false }
+        return $false
+    }
+
+    function GetOsMajor($Value) {
+        $text = ([string]$Value).Trim().ToUpperInvariant()
+        if ($text.Contains('WINDOWS 11')) { return 'Windows 11' }
+        if ($text.Contains('WINDOWS 10')) { return 'Windows 10' }
+        return ''
+    }
+
+    function GetBuildNumber($AdVersion, $IntuneVersion) {
+        $buildText = Build $AdVersion $IntuneVersion
+        $buildNumber = 0
+        if ([int]::TryParse(([string]$buildText), [ref]$buildNumber)) { return $buildNumber }
+        return $null
+    }
+
+    function IsUnknownUser($Value) {
+        $text = ([string]$Value).Trim().ToUpperInvariant()
+        return @('', 'UNKNOWN', 'N/A', 'NA', '-', 'SYSTEM', 'LOCAL SYSTEM') -contains $text
+    }
+
+    function NormalizeDomainSam($Value) {
+        $text = ([string]$Value).Trim().Replace([string][char]160, '').Replace([string][char]9, '').Replace(' ', '')
+        if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+        return $text.ToLowerInvariant()
+    }
+
+    function GetLastOuName($Value) {
+        $text = ([string]$Value).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+        if ($text -like '*,*') {
+            $ouParts = @($text -split ',' | Where-Object { $_ -match '^(?i)OU=' } | ForEach-Object { ($_ -replace '^(?i)OU=', '').Trim() })
+            if ($ouParts.Count -gt 0) { return $ouParts[0] }
+        }
+        $parts = @($text -split '[,/]' | Where-Object { $_ })
+        if ($parts.Count -ge 2) { return $parts[$parts.Count - 2] }
+        return ''
+    }
+
+    function GetOrganizationalUnitCode($Row) {
+        $raw = (V $Row @('OrganizationalUnit','extensionAttribute13')).Trim()
+        if ([string]::IsNullOrWhiteSpace($raw)) { return '999999' }
+        $numVal = 0.0
+        if ([double]::TryParse($raw.Replace(',', '.'), [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$numVal)) {
+            return ([math]::Floor($numVal)).ToString('000000', [System.Globalization.CultureInfo]::InvariantCulture)
+        }
+        return '999998'
+    }
+
+    function GetSubnet($Value) {
+        $text = ([string]$Value).Trim()
+        if ($text -match '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$') { return ('{0}.{1}.{2}.0' -f $Matches[1], $Matches[2], $Matches[3]) }
+        return ''
+    }
+
+    function GetTypeEntityFallback($DomainNameShort, $DistinguishedName) {
+        $domainClean = ([string]$DomainNameShort).Trim().ToUpperInvariant()
+        $dnClean = ([string]$DistinguishedName).Trim().ToUpperInvariant()
+        $countryFromDn = ''
+        if ($domainClean -eq 'GRP' -and $dnClean.Contains(',OU=COUNTRIES')) {
+            $beforeCountries = $dnClean.Substring(0, $dnClean.IndexOf(',OU=COUNTRIES'))
+            if ($beforeCountries.Length -ge 2) { $countryFromDn = $beforeCountries.Substring($beforeCountries.Length - 2, 2) }
+        }
+        if ($domainClean -eq 'ORPEA_01') { return 'CORP' }
+        if ($domainClean -eq 'GRP' -and @('BE','LU') -notcontains $countryFromDn) { return 'NOT-INTEGRATED' }
+        if (@('BE','CH','DE','ES','FR','IT','LU','PL','PT') -contains $domainClean) { return 'INTEGRATED' }
+        if (@('AT','CZ','NL') -contains $domainClean) { return 'NOT-INTEGRATED' }
+        return 'UNKNOWN'
+    }
+
+    function GetAccountToDeleteFromAd($Row) {
+        $sam = V $Row @('SamAccountName')
+        if ($sam -match '(?i)-K-') { return 'NO_CLEAN_DEVICES_EXCLUDED' }
+        $lastLogonUnknown = V $Row @('IsLastLogonUnknown')
+        if (-not $lastLogonUnknown) { $lastLogonUnknown = if (Dt (V $Row @('LastLogonDate'))) { 'Known' } else { 'Unknown' } }
+        $lastLogonDate = Dt (V $Row @('LastLogonDate'))
+        if ($null -eq $lastLogonDate) { $lastLogonDate = [datetime]'1900-01-01' }
+        $whenChangedDate = Dt (V $Row @('WhenChanged'))
+        if ($null -eq $whenChangedDate) { $whenChangedDate = [datetime]'1900-01-01' }
+        $cutoffDate = [datetime]'2025-01-01'
+        if ($lastLogonUnknown -eq 'Unknown' -and $whenChangedDate -lt $cutoffDate) { return 'TOCLEAN_STEP1' }
+        if ($lastLogonUnknown -eq 'Known' -and $lastLogonDate -lt $cutoffDate) { return 'TOCLEAN_STEP1' }
+        return 'NO_CLEAN'
+    }
+
+    function GetMigrationPhase($Eligibility, [bool]$OsMinOk, [bool]$IsLtsc, [bool]$IsEnabled, $ShortOs, $TypeEntity, [bool]$InDisabledOu, $DomainShort, [bool]$IsActiveLast45Days, [bool]$IsInIntune, $ModelName) {
+        $eligibilityText = ([string]$Eligibility).Trim().ToUpperInvariant()
+        if (-not $eligibilityText) { $eligibilityText = 'UNKNOWN' }
+        $shortOsText = ([string]$ShortOs).Trim()
+        $isWindows11Value = $shortOsText -eq 'Windows 11'
+        $isWindows10Value = $shortOsText -eq 'Windows 10'
+        $isSupportedClientOs = $isWindows10Value -or $isWindows11Value
+        $typeEntityText = ([string]$TypeEntity).Trim().ToUpperInvariant()
+        $domainShortText = ([string]$DomainShort).Trim().ToUpperInvariant()
+        $modelText = ([string]$ModelName).Trim().ToUpperInvariant()
+        $isVmValue = $modelText -match 'VMWARE|VIRTUAL|HYPER-V|VIRTUALBOX|KVM|XEN'
+        if (-not $isSupportedClientOs) { return 'OUT OF SCOPE' }
+        if ($isVmValue) { return 'OUT OF SCOPE' }
+        if ($typeEntityText -eq 'NOT-INTEGRATED') { return 'OUT OF SCOPE' }
+        if (-not $IsEnabled) { return 'OUT OF SCOPE' }
+        if ($domainShortText -eq 'ORPEA_01') { return 'OUT OF SCOPE' }
+        if ($InDisabledOu) { return 'OUT OF SCOPE' }
+        if ((-not $IsActiveLast45Days) -and (-not ($isWindows11Value -and $IsInIntune))) { return 'PHASE 2' }
+        if ($IsLtsc -and $isWindows10Value) { return 'PHASE 2' }
+        if ($eligibilityText -eq 'UPGRADED' -and -not $isWindows11Value) { return 'PHASE 1' }
+        if ($isWindows11Value) { return 'PHASE 1' }
+        if ($eligibilityText -eq 'UPGRADED') { return 'PHASE 1' }
+        if (@('UNKNOWN','UNDETERMINED') -contains $eligibilityText) { return 'PHASE 2' }
+        if ($eligibilityText -eq 'CAPABLE' -and $OsMinOk) { return 'PHASE 1' }
+        if ($eligibilityText -eq 'CAPABLE' -and -not $OsMinOk) { return 'PHASE 2' }
+        if ($eligibilityText -eq 'NOT CAPABLE') { return 'PHASE 2' }
+        return 'PHASE 2'
+    }
+
+    function GetMigrationPhaseReason($Eligibility, [bool]$OsMinOk, [bool]$IsLtsc, [bool]$IsEnabled, $ShortOs, $TypeEntity, [bool]$InDisabledOu, $DomainShort, [bool]$IsActiveLast45Days, [bool]$IsInIntune, $FriendlySnapshot, $ModelName) {
+        $eligibilityText = ([string]$Eligibility).Trim().ToUpperInvariant()
+        if (-not $eligibilityText) { $eligibilityText = 'UNKNOWN' }
+        $shortOsText = ([string]$ShortOs).Trim()
+        $isWindows11Value = $shortOsText -eq 'Windows 11'
+        $isWindows10Value = $shortOsText -eq 'Windows 10'
+        $isSupportedClientOs = $isWindows10Value -or $isWindows11Value
+        $typeEntityText = ([string]$TypeEntity).Trim().ToUpperInvariant()
+        $domainShortText = ([string]$DomainShort).Trim().ToUpperInvariant()
+        $snapshotIsW10 = ([string]$FriendlySnapshot).Trim().ToUpperInvariant().StartsWith('WINDOWS 10')
+        $modelText = ([string]$ModelName).Trim().ToUpperInvariant()
+        $isVmValue = $modelText -match 'VMWARE|VIRTUAL|HYPER-V|VIRTUALBOX|KVM|XEN'
+        if (-not $isSupportedClientOs) { return 'OS != Windows 10/11 -> OUT OF SCOPE' }
+        if ($isVmValue) { return 'Virtual machine detected from Model -> OUT OF SCOPE' }
+        if ($typeEntityText -eq 'NOT-INTEGRATED') { return 'TypeEntity = NOT-INTEGRATED -> OUT OF SCOPE' }
+        if ($typeEntityText -eq 'EXCLUDED') { return 'TypeEntity = EXCLUDED -> OUT OF SCOPE' }
+        if (-not $IsEnabled) { return 'Device disabled -> OUT OF SCOPE' }
+        if ($domainShortText -eq 'ORPEA_01') { return 'Domain = ORPEA_01 -> OUT OF SCOPE' }
+        if ($InDisabledOu) { return 'Disabled Objects OU -> OUT OF SCOPE' }
+        if ((@('UNKNOWN','UNDETERMINED','NOT CAPABLE','CAPABLE','UPGRADED') -contains $eligibilityText) -and (-not $IsActiveLast45Days) -and (-not ($isWindows11Value -and $IsInIntune))) { return ('Eligibility = {0} + Inactive (no sign-in last 45 days) -> PHASE 2' -f $eligibilityText) }
+        if ((@('UNKNOWN','UNDETERMINED','NOT CAPABLE','CAPABLE','UPGRADED') -contains $eligibilityText) -and $IsLtsc -and $isWindows10Value) { return ('Eligibility = {0} + Windows 10 LTSC -> PHASE 2' -f $eligibilityText) }
+        if ($isWindows11Value -and $snapshotIsW10) { return 'Migrated from Windows 10 -> PHASE 1' }
+        if ($isWindows11Value -and -not $snapshotIsW10) { return 'Already Windows 11 (pre-existing) -> PHASE 1' }
+        if ($eligibilityText -eq 'UPGRADED' -and -not $isWindows11Value) { return 'Data inconsistency: Eligibility = UPGRADED but OS != Windows 11 -> PHASE 1' }
+        if (@('UNKNOWN','UNDETERMINED') -contains $eligibilityText) { return ('Eligibility = {0} + OS version {1} -> PHASE 2' -f $eligibilityText, $(if ($OsMinOk) { 'supported' } else { 'not supported' })) }
+        if ($eligibilityText -eq 'NOT CAPABLE') { return 'Eligibility = NOT CAPABLE -> PHASE 2' }
+        if ($eligibilityText -eq 'CAPABLE' -and $OsMinOk) { return 'Eligibility = CAPABLE + OS version supported -> PHASE 1' }
+        if ($eligibilityText -eq 'CAPABLE' -and -not $OsMinOk) { return 'Eligibility = CAPABLE + OS version not supported -> PHASE 2' }
+        if ($eligibilityText -eq 'UPGRADED') { return 'Eligibility = UPGRADED -> PHASE 1' }
+        return 'Default logic -> PHASE 2'
+    }
+
+    function GetMigrationAction($Eligibility, [bool]$OsMinOk, [bool]$IsLtsc, [bool]$IsEnabled, $ShortOs, $TypeEntity, [bool]$InDisabledOu, $DomainShort, [bool]$IsActiveLast45Days, [bool]$IsInIntune, $MemoryGb) {
+        $eligibilityText = ([string]$Eligibility).Trim().ToUpperInvariant()
+        if (-not $eligibilityText) { $eligibilityText = 'UNKNOWN' }
+        $shortOsText = ([string]$ShortOs).Trim()
+        $isWindows11Value = $shortOsText -eq 'Windows 11'
+        $isWindows10Value = $shortOsText -eq 'Windows 10'
+        $isSupportedClientOs = $isWindows10Value -or $isWindows11Value
+        $typeEntityText = ([string]$TypeEntity).Trim().ToUpperInvariant()
+        $domainShortText = ([string]$DomainShort).Trim().ToUpperInvariant()
+        $ram = Num $MemoryGb
+        $ramLow = $null -ne $ram -and $ram -lt 8
+        if (-not $isSupportedClientOs) { return '6 - To qualify' }
+        if ($typeEntityText -eq 'NOT-INTEGRATED') { return '6 - To qualify' }
+        if ($typeEntityText -eq 'EXCLUDED') { return '6 - To qualify' }
+        if (-not $IsEnabled) { return '6 - To qualify' }
+        if ($domainShortText -eq 'ORPEA_01') { return '6 - To qualify' }
+        if ($InDisabledOu) { return '6 - To qualify' }
+        if ($isWindows11Value) { return '6 - To qualify' }
+        if ((-not $IsActiveLast45Days) -and (-not ($isWindows11Value -and $IsInIntune))) { return '5 - To check inactivity' }
+        if ($eligibilityText -eq 'NOT CAPABLE') { return '4 - To replace' }
+        if (@('UNKNOWN','UNDETERMINED') -contains $eligibilityText) { return '6 - To qualify' }
+        if ($IsLtsc -and $isWindows10Value) { return '2 - To reinstall (no Intune)' }
+        if ($eligibilityText -eq 'UPGRADED') { return '6 - To qualify' }
+        if ($eligibilityText -eq 'CAPABLE' -and $ramLow) { return '3 - To upgrade RAM + reinstall' }
+        if ($eligibilityText -eq 'CAPABLE' -and $OsMinOk) { return '1 - To update (Intune)' }
+        if ($eligibilityText -eq 'CAPABLE' -and -not $OsMinOk) { return '2 - To reinstall (no Intune)' }
+        return '6 - To qualify'
+    }
     $intuneRows = @(LoadCsv 'Intune_Devices_Inventory.csv')
     $entraRows = @(LoadCsv 'M365_Entra_Devices.csv')
     $hardwareConflictRows = @(LoadCsv 'M365_Entra_Devices_HardwareIdConflicts.csv')
@@ -226,6 +405,13 @@ function Build($AdVersion, $IntuneVersion) {
     $windowsUpdateRows = @(LoadCsv 'Intune_WindowsUpdate_Status.csv')
     $adUserRows = @(LoadCsv 'AD_Users_AllDomains.csv')
     $licenseRows = @(LoadCsv 'M365_Licenses_Users.csv')
+    $exoMailboxRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains.csv')
+    $exoMailboxStatsRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv')
+    $localMailboxRows = @(LoadCsv 'Exchange_OnPrem_Mailboxes_AllDomains.csv')
+    $remoteMailboxRows = @(LoadCsv 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv')
+    $entityRows = @(LoadCsv 'EntityDirectories.csv')
+    $win11IssueRows = @(LoadCsv 'Mig_Win11Migration_Issues_Expanded_ByScript.csv')
+    if ($win11IssueRows.Count -eq 0) { $win11IssueRows = @(LoadCsv 'Intune_Windows11_Readiness_Issues.csv') }
 
     $intuneByAad = @{}
     foreach ($row in $intuneRows) {
@@ -274,6 +460,85 @@ function Build($AdVersion, $IntuneVersion) {
         if ($key) { $licensedUsersByUpn[$key] = $true }
     }
 
+    $entityByCode = @{}
+    foreach ($row in $entityRows) {
+        $entityKey = K (V $row @('Entity code Text 6 digits','EntityCode','OrganizationalUnit'))
+        AddMap $entityByCode $entityKey $row
+    }
+
+    $usersBySam = @{}; $usersByDomainAndSam = @{}
+    foreach ($row in $adUserRows) {
+        $samKey = K (V $row @('SamAccountName'))
+        AddMap $usersBySam $samKey $row
+        $domainSamKey = NormalizeDomainSam (V $row @('DomainAndSam'))
+        if (-not $domainSamKey) {
+            $domain = V $row @('DomainNameShort')
+            $sam = V $row @('SamAccountName')
+            if ($domain -and $sam) { $domainSamKey = NormalizeDomainSam (('{0}\{1}' -f $domain, $sam)) }
+        }
+        AddMap $usersByDomainAndSam $domainSamKey $row
+    }
+
+    $licenseByUpn = @{}; $licenseGroupByUpn = @{}
+    foreach ($row in $licenseRows) {
+        $key = K (V $row @('User principal name','UserPrincipalName','primarysmtp'))
+        if ($key) {
+            $licenseByUpn[$key] = $true
+            $sku = V $row @('SKU name','SkuPartNumber')
+            $groups = V $row @('GroupsAssigningSku')
+            if (-not $licenseGroupByUpn.ContainsKey($key)) { $licenseGroupByUpn[$key] = New-Object System.Collections.Generic.List[string] }
+            if ($groups) { [void]$licenseGroupByUpn[$key].Add($groups) } elseif ($sku) { [void]$licenseGroupByUpn[$key].Add($sku) }
+        }
+    }
+
+    $mailboxByUpn = @{}; $mailboxSizeByUpn = @{}
+    foreach ($row in $exoMailboxRows) {
+        foreach ($candidate in @((V $row @('UserPrincipalName')), (V $row @('PrimarySmtpAddress')))) {
+            $key = K $candidate
+            AddMap $mailboxByUpn $key $row
+            $size = V $row @('TotalItemSizeGB','TotalItemSizeMB_Integer')
+            if ($key -and $size -and -not $mailboxSizeByUpn.ContainsKey($key)) { $mailboxSizeByUpn[$key] = $size }
+        }
+    }
+    foreach ($row in $exoMailboxStatsRows) {
+        foreach ($candidate in @((V $row @('UserPrincipalName')), (V $row @('PrimarySmtpAddress')))) {
+            $key = K $candidate
+            $size = V $row @('TotalItemSizeGB','TotalItemSizeMB_Integer')
+            if ($key -and $size) { $mailboxSizeByUpn[$key] = $size }
+        }
+    }
+    foreach ($row in @($localMailboxRows + $remoteMailboxRows)) {
+        foreach ($candidate in @((V $row @('UserPrincipalName')), (V $row @('PrimarySMTPaddress','PrimarySmtpAddress')), (V $row @('WindowsEmailAddress')))) {
+            $key = K $candidate
+            AddMap $mailboxByUpn $key $row
+            $size = V $row @('TotalItemSize-In-MB','TotalItemSizeGB')
+            if ($key -and $size -and -not $mailboxSizeByUpn.ContainsKey($key)) { $mailboxSizeByUpn[$key] = $size }
+        }
+    }
+
+
+    $issuesByGuid = @{}; $issueScoreByGuid = @{}
+    foreach ($row in $win11IssueRows) {
+        $guidKey = GK (V $row @('ObjectGUID_Norm','ObjectGUID'))
+        if (-not $guidKey) { continue }
+        AddMulti $issuesByGuid $guidKey $row
+        $category = V $row @('IssueCategory','Category')
+        $score = 0
+        if ($category -match '^1') { $score = 3 }
+        elseif ($category -match '^2') { $score = 2 }
+        elseif ($category -match '^3') { $score = 1 }
+        if (-not $issueScoreByGuid.ContainsKey($guidKey)) { $issueScoreByGuid[$guidKey] = 0 }
+        $issueScoreByGuid[$guidKey] = [int]$issueScoreByGuid[$guidKey] + $score
+    }
+
+    $serverAdEntraByName = @{}
+    foreach ($row in $entraRows) {
+        if ((V $row @('TrustType','trustType')) -ne 'ServerAd') { continue }
+        $nameKey = NK (V $row @('DisplayName','DeviceName','Name'))
+        if (-not $nameKey) { continue }
+        $current = V $row @('DeviceId')
+        if (-not $serverAdEntraByName.ContainsKey($nameKey) -or ([string]$current).CompareTo([string](V $serverAdEntraByName[$nameKey] @('DeviceId'))) -gt 0) { $serverAdEntraByName[$nameKey] = $row }
+    }
     $sourceRows = @(Import-Csv -LiteralPath $CombinedComputersCsv -ErrorAction Stop)
     $sourceColumnSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     if ($sourceRows.Count -gt 0) {
@@ -350,16 +615,110 @@ function Build($AdVersion, $IntuneVersion) {
         $manufacturer = V $intune @('Manufacturer')
         $isVirtual = if (("{0} {1}" -f $manufacturer, $model) -match '(?i)vmware|virtualbox|hyper-v|qemu|kvm|virtual machine') { 'True' } else { 'False' }
 
+        $distinguishedName = V $row @('DistinguishedName')
+        $buildNumber = GetBuildNumber (V $row @('operatingSystemVersion','OperatingSystemVersion')) $osVersionM365
+        $operatingSystemMajorCurrent = GetOsMajor (V $row @('OperatingSystem'))
+        $isLtscOs = (([string](V $row @('OperatingSystem'))).Trim().ToLowerInvariant() -match 'ltsc|ltsb')
+        $isLtscBuildFallback = ($operatingSystemMajorCurrent -eq 'Windows 10' -and $null -ne $buildNumber -and @(10240,14393,17763,19044) -contains [int]$buildNumber)
+        $isWindows10Ltsc = $isLtscOs -or $isLtscBuildFallback
+        $osMinToUpdateW11 = ($operatingSystemMajorCurrent -eq 'Windows 11') -or ($operatingSystemMajorCurrent -eq 'Windows 10' -and $null -ne $buildNumber -and [int]$buildNumber -ge 19041)
+        $orgUnit = GetOrganizationalUnitCode $row
+        $domainAndOu = if ((V $row @('DomainNameShort')) -and $orgUnit) { ('{0}-{1}' -f (V $row @('DomainNameShort')), $orgUnit) } else { '' }
+        $entity = GetMap $entityByCode (K $orgUnit)
+        $labelFromEntity = if ($entity) { V $entity @('Entity label','EntityLabel') } else { 'NOTFOUND' }
+        $typeEtablissement = if ($entity) { V $entity @('TypeEtablissement') } else { 'NOTFOUND' }
+        $typeEntity = if ($entity) { V $entity @('Entity Type','EntityType') } else { '' }
+        if (-not $typeEntity) { $typeEntity = GetTypeEntityFallback (V $row @('DomainNameShort')) $distinguishedName }
+        $subnet = GetSubnet (V $row @('IPv4Address'))
+        $isInOrganizationOu = [string]($distinguishedName.ToUpperInvariant().Contains('OU=ORGANIZATION'))
+        $isTargetOuHq = [string](($distinguishedName -match 'OU=020001-MADRID') -or ($distinguishedName -match 'OU=120001-HEAD_QUARTER') -or ($distinguishedName -match 'OU=HEADQUARTER'))
+        $isNotTargetOuHq = [string](((B $isTargetOuHq) -eq 'False') -and ($distinguishedName -notmatch 'OU=DISABLED_OBJECTS'))
+        $serverAdEntra = GetMap $serverAdEntraByName $computerName
+        $serverAdDeviceId = GK (V $serverAdEntra @('DeviceId'))
+        $hasDifferentDeviceId = if (-not $serverAdDeviceId) { 'Not found in Entra' } elseif ($serverAdDeviceId -ne $objectGuid) { 'Different GUID' } else { 'Match' }
+
+        $primaryUserSam = if ($primaryUserRow) { V $primaryUserRow @('SamAccountName') } else { '' }
+        $lastLoggedUserFromM365 = $primaryUserSam
+        $lastLoggedUserFromSentinel = ''
+        $lastLoggedUser = if (-not (IsUnknownUser $lastLoggedUserFromM365)) { (K $lastLoggedUserFromM365) } elseif (-not (IsUnknownUser $lastLoggedUserFromSentinel)) { (K $lastLoggedUserFromSentinel) } else { '' }
+        $samUserRow = GetMap $usersBySam $lastLoggedUser
+        $lastLoggedUserDomain = ''
+        if ($lastLoggedUser) {
+            if ($primaryUserRow) { $lastLoggedUserDomain = NormalizeDomainSam (V $primaryUserRow @('DomainAndSam')) }
+            if (-not $lastLoggedUserDomain -and $samUserRow) { $lastLoggedUserDomain = NormalizeDomainSam (V $samUserRow @('DomainAndSam')) }
+            if (-not $lastLoggedUserDomain) { $lastLoggedUserDomain = NormalizeDomainSam ('{0}\{1}' -f (V $row @('DomainNameShort')), $lastLoggedUser) }
+        }
+        $lastUserRow = GetMap $usersByDomainAndSam $lastLoggedUserDomain
+        if (-not $lastUserRow) { $lastUserRow = $primaryUserRow }
+        $lastUserUpnKey = K (V $lastUserRow @('UserPrincipalName','EmailAddress'))
+        $lastUserMailbox = GetMap $mailboxByUpn $lastUserUpnKey
+        $lastUserMailboxSize = if ($lastUserUpnKey -and $mailboxSizeByUpn.ContainsKey($lastUserUpnKey)) { [string]$mailboxSizeByUpn[$lastUserUpnKey] } else { '' }
+        $lastUserLicenseGroups = if ($lastUserUpnKey -and $licenseGroupByUpn.ContainsKey($lastUserUpnKey)) { (($licenseGroupByUpn[$lastUserUpnKey] | Select-Object -Unique) -join ';') } else { '?' }
+        $lastUserPrimarySmtp = V $lastUserRow @('EmailAddress','UserPrincipalName')
+        $lastUserOuPath = V $lastUserRow @('CanonicalName','DistinguishedName')
+        $lastUserLastOu = GetLastOuName $lastUserOuPath
+
+        $os20250918 = ''
+        $os20251217 = ''
+        $osVersion20250918 = ''
+        $osVersion20251217 = ''
+        $snapshotOsPriority = ''
+        $snapshotVersionPriority = ''
+        $snapshotMajorPriority = ''
+        $friendlySnapshot = ''
+        $osChanged = 'False'
+        $osChangedText = 'No snapshot'
+        $os10To11Changed = 'False'
+        $os10To11ChangedText = 'No snapshot'
+        $snapshotUsed = 'None'
+        $ueMap = @{ '0'='UPGRADED'; '2'='NOT CAPABLE'; '3'='CAPABLE' }
+        $win11GlobalResultOld = if ($isWin11) { 'UPGRADED' } elseif ($ueMap.ContainsKey(([string]$upgradeRaw).Trim())) { $ueMap[([string]$upgradeRaw).Trim()] } else { 'UNKNOWN' }
+        $issueScore = if ($issueScoreByGuid.ContainsKey($objectGuid)) { [string]$issueScoreByGuid[$objectGuid] } else { '' }
+        $issueLevel = 'None'
+        if ($issuesByGuid.ContainsKey($objectGuid)) {
+            $severityCodes = @($issuesByGuid[$objectGuid] | ForEach-Object { $cat = V $_ @('IssueCategory','Category'); if ($cat -match '^([1-4])') { [int]$Matches[1] } })
+            if ($severityCodes.Count -gt 0) {
+                switch (($severityCodes | Measure-Object -Minimum).Minimum) { 1 { $issueLevel = 'Critical' } 2 { $issueLevel = 'High' } 3 { $issueLevel = 'Medium' } default { $issueLevel = 'Low' } }
+            }
+        }
+
+        $shortOsValue = if ($isWin11) { 'Windows 11' } elseif ($isWin10) { 'Windows 10' } else { V $row @('OperatingSystem') }
+        $w11EligibilityValue = if ($isWin11) { 'Upgraded' } else { $upgradeLabel }
+        $lastSignInMergedValue = if ($entraSignIn) { $entraSignIn } else { $adLastLogon }
+        $mergedDaysValue = Days $lastSignInMergedValue
+        $lastSignInActive45Value = ($mergedDaysValue -ne '' -and [int]$mergedDaysValue -le 45)
+        $physicalMemoryGb = V $intune @('PhysicalMemoryGB')
+        $migrationPhase = GetMigrationPhase $w11EligibilityValue $osMinToUpdateW11 $isWindows10Ltsc (BoolValue (V $row @('Enabled'))) $shortOsValue $typeEntity (BoolValue $isDisabledOu) (V $row @('DomainNameShort')) $lastSignInActive45Value ($null -ne $intune) $model
+        $migrationReason = GetMigrationPhaseReason $w11EligibilityValue $osMinToUpdateW11 $isWindows10Ltsc (BoolValue (V $row @('Enabled'))) $shortOsValue $typeEntity (BoolValue $isDisabledOu) (V $row @('DomainNameShort')) $lastSignInActive45Value ($null -ne $intune) $friendlySnapshot $model
+        $migrationAction = GetMigrationAction $w11EligibilityValue $osMinToUpdateW11 $isWindows10Ltsc (BoolValue (V $row @('Enabled'))) $shortOsValue $typeEntity (BoolValue $isDisabledOu) (V $row @('DomainNameShort')) $lastSignInActive45Value ($null -ne $intune) $physicalMemoryGb
         $out['ObjectGUID_Norm'] = $objectGuid
+        $out['BuildNumber'] = if ($null -ne $buildNumber) { [string]$buildNumber } else { '' }
+        $out['IsWindows10LTSC_OS'] = [string]$isLtscOs
+        $out['IsWindows10LTSC_BuildFallback'] = [string]$isLtscBuildFallback
+        $out['IsWindows10LTSC'] = [string]$isWindows10Ltsc
+        $out['OSMinToUpdateW11'] = [string]$osMinToUpdateW11
+        $out['OSMinToUpdateW11_Num'] = if ($osMinToUpdateW11) { '1' } else { '0' }
+        $out['OrganizationalUnit'] = $orgUnit
+        $out['LastLogonDateConverted'] = if ($adLastLogon) { $adLastLogon.Substring(0, 10) } else { '' }
+        $out['DomainAndOrganizationalUnitFromADManage'] = $domainAndOu
+        $out['OperatingSystem_Major_Current'] = $operatingSystemMajorCurrent
+        $out['AccountToDeleteFromAD'] = GetAccountToDeleteFromAd $row
+        $out['LabelFromEntity'] = $labelFromEntity
+        $out['Subnet'] = $subnet
+        $out['TypeEtablissement'] = $typeEtablissement
+        $out['Is_In_OrganizationOU'] = $isInOrganizationOu
+        $out['IsTargetOU_HQ'] = $isTargetOuHq
+        $out['IsNotTargetOU_HQ'] = $isNotTargetOuHq
+        $out['HasDifferentDeviceId'] = $hasDifferentDeviceId
         $out['FriendlyOSVersionName'] = $friendly
-        $out['FriendlyOSVersionName_Snapshot'] = $friendly
-        $out['ShortOSName'] = if ($isWin11) { 'Windows 11' } elseif ($isWin10) { 'Windows 10' } else { V $row @('OperatingSystem') }
+        $out['FriendlyOSVersionName_Snapshot'] = if ($friendlySnapshot) { $friendlySnapshot } else { $friendly }
+        $out['ShortOSName'] = $shortOsValue
         $out['IsWindows11'] = [string]$isWin11
         $out['IsWindows11-Bool'] = [string]$isWin11
         $out['IsWindows1124H2-Bool'] = [string]$is24
         $out['IsWindows1125H2-Bool'] = [string]$is25
         $out['NeedToBeUpgrade'] = [string]($isWin10 -and $upgradeLabel -ne 'Not Capable')
-        $out['W11Eligibilty'] = if ($isWin11) { 'Upgraded' } else { $upgradeLabel }
+        $out['W11Eligibilty'] = $w11EligibilityValue
         $out['WIN11_GLOBALRESULT'] = $out['W11Eligibilty']
         $out['WIN11_GLOBALRESULT_INTUNE_ONLY'] = $out['W11Eligibilty']
         $out['WIN11_GLOBALRESULT_M365_ONLY'] = $out['W11Eligibilty']
@@ -367,8 +726,8 @@ function Build($AdVersion, $IntuneVersion) {
         $out['UpgradeEligibility_From_M365'] = $upgradeRaw
         $out['UpgradeEligibility_Label_From_M365'] = $upgradeLabel
         $out['OS_version_From_M365'] = $osVersionM365
-        $out['OperatingSystem_Snapshot_Priority'] = V $row @('OperatingSystem')
-        $out['OperatingSystemVersion_Snapshot_Priority'] = if ($osVersionM365) { $osVersionM365 } else { V $row @('operatingSystemVersion') }
+        $out['OperatingSystem_Snapshot_Priority'] = $snapshotOsPriority
+        $out['OperatingSystemVersion_Snapshot_Priority'] = $snapshotVersionPriority
 
         $out['ExistsInIntune'] = [string]($null -ne $intune)
         $out['DeviceID_From_M365'] = V $intune @('Device ID','DeviceId')
@@ -384,7 +743,7 @@ function Build($AdVersion, $IntuneVersion) {
         $out['Compliance_From_M365'] = V $intune @('Compliance','IsCompliant')
         $out['Primary_user_email_address_From_M365'] = V $intune @('Primary user email address','Primary user UPN')
         $out['Primary_username_address_From_M365'] = $primaryUser
-        $out['Last_Logged_User_FromM365'] = $primaryUser
+        $out['Last_Logged_User_FromM365'] = $lastLoggedUserFromM365
         $out['PrimarySMTPaddressUser'] = $primaryUser
         $out['PrimarySMTPaddress_From_AD_Or_M365'] = if ($primaryUserRow) { V $primaryUserRow @('EmailAddress','UserPrincipalName') } else { $primaryUser }
         $out['LicenseFromM365_Users_From_AD'] = $licenseValue
@@ -392,7 +751,21 @@ function Build($AdVersion, $IntuneVersion) {
         $out['OU_Path_Users_From_AD'] = V $primaryUserRow @('CanonicalName','DistinguishedName')
         $out['OrganizationalUnit_User_From_AD'] = $out['OU_Path_Users_From_AD']
         $out['OrganizationalUnit_PrimaryUser_From_AD'] = $out['OU_Path_Users_From_AD']
-        $out['Enabled_From_Last_Logged_UserDomain'] = B (V $primaryUserRow @('Enabled'))
+        $out['Enabled_From_Last_Logged_UserDomain'] = B (V $lastUserRow @('Enabled'))
+        $out['Last_Logged_User'] = $lastLoggedUser
+        $out['Last_Logged_User_FromSentinel'] = $lastLoggedUserFromSentinel
+        $out['Last_Logged_User_Source'] = if ($lastLoggedUserFromM365) { 'M365' } else { 'Unknown' }
+        $out['Last_Logged_UserDomain'] = $lastLoggedUserDomain
+        $out['LastOUName_Users_From_AD'] = if ($lastUserLastOu) { $lastUserLastOu } else { '?' }
+        $out['DistinguishedName_Last_Logged_UserDomain'] = V $lastUserRow @('DistinguishedName')
+        $out['OrganizationalUnit_LastUserS1_From_AD'] = V $lastUserRow @('CanonicalName','DistinguishedName')
+        $out['PrimarySMTPaddress_From_S1_Or_M365'] = if ($out['Primary_user_email_address_From_M365']) { $out['Primary_user_email_address_From_M365'] } else { $lastUserPrimarySmtp }
+        $out['LicenseFromM365_Users_From_LastUserS1'] = $lastUserLicenseGroups
+        $out['IsMailBox_From_Last_Logged_UserDomain'] = [string]($null -ne $lastUserMailbox)
+        $out['IsMailBox_From_PrimaryIntuneUser'] = [string]($null -ne $lastUserMailbox)
+        $out['IsMailBoxSize_From_Last_Logged_UserDomain'] = $lastUserMailboxSize
+        $out['IsMailBoxSize_From_PrimaryIntuneUser'] = $lastUserMailboxSize
+        $out['MailboxSize_From_Last_Logged_UserDomain'] = $lastUserMailboxSize
 
         $out['DiskTotalStorage_Go_From_M365'] = $totalGb
         $out['DiskFreeStorage_Go_From_M365'] = $freeGb
@@ -400,9 +773,9 @@ function Build($AdVersion, $IntuneVersion) {
         $out['DiskTotalFreeSpace'] = $freeGb
         $out['DiskFreePercent'] = $freePercent
         $out['IsFreeStorageNotEnoughForWin11Update'] = $freeNotEnough
-        $out['PhysicalMemoryGB_From_M365'] = V $intune @('PhysicalMemoryGB')
-        $out['Memory_GB_Number'] = $out['PhysicalMemoryGB_From_M365']
-        $out['Memory'] = $out['PhysicalMemoryGB_From_M365']
+        $out['PhysicalMemoryGB_From_M365'] = $physicalMemoryGb
+        $out['Memory_GB_Number'] = $physicalMemoryGb
+        $out['Memory'] = $physicalMemoryGb
 
         $out['AzureEntra_ObjectId'] = V $entra @('ObjectId')
         $out['entraDeviceId_norm'] = GK (V $entra @('DeviceId'))
@@ -421,8 +794,8 @@ function Build($AdVersion, $IntuneVersion) {
         $out['AzureEntra_LastSignIn_OlderThan3M'] = if ($out['AzureEntra_DaysSinceLastSignIn'] -eq '') { '' } else { [string]([int]$out['AzureEntra_DaysSinceLastSignIn'] -gt 90) }
         $out['AzureEntra_LastSignIn_Recent_3M'] = if ($out['AzureEntra_DaysSinceLastSignIn'] -eq '') { '' } else { [string]([int]$out['AzureEntra_DaysSinceLastSignIn'] -le 90) }
 
-        $out['LastSignIn_Merged'] = if ($entraSignIn) { $entraSignIn } else { $adLastLogon }
-        $mergedDays = Days $out['LastSignIn_Merged']
+        $out['LastSignIn_Merged'] = $lastSignInMergedValue
+        $mergedDays = $mergedDaysValue
         $out['LastSignIn_Merged_Active_Last90Days'] = if ($mergedDays -eq '') { '' } else { [string]([int]$mergedDays -le 90) }
         $out['LastSignIn_Merged_Active_Last45Days'] = if ($mergedDays -eq '') { '' } else { [string]([int]$mergedDays -le 45) }
         $out['LastSignIn_Merged_Active_Last30Days'] = if ($mergedDays -eq '') { '' } else { [string]([int]$mergedDays -le 30) }
@@ -440,6 +813,26 @@ function Build($AdVersion, $IntuneVersion) {
         $out['LastOUName'] = $lastOu
         $out['IsInDisabledObjectsOU'] = $isDisabledOu
         $out['IsVirtualMachine'] = $isVirtual
+        $out['TypeEntity'] = $typeEntity
+        $out['Mig-MigrationPlanW11-Phase'] = $migrationPhase
+        $out['Mig-MigrationPlanW11-Phase-Reason'] = $migrationReason
+        $out['Mig-MigrationPlanW11-Action'] = $migrationAction
+        $out['Mig-MigrationPlanW11-StartDate'] = ''
+        $out['Mig_Potential_Issues_Score'] = $issueScore
+        $out['Mig_Potential_Issues_Devices_Level2'] = $issueLevel
+        $out['WIN11_GLOBALRESULT_OLD'] = $win11GlobalResultOld
+        $out['OperatingSystem_20250918_170952'] = $os20250918
+        $out['OperatingSystem_20251217_111133'] = $os20251217
+        $out['operatingSystemVersion_20250918_170952'] = $osVersion20250918
+        $out['operatingSystemVersion_20251217_111133'] = $osVersion20251217
+        $out['OperatingSystem_Major_20251217'] = GetOsMajor $os20251217
+        $out['OperatingSystem_Major_Snapshot_Priority'] = $snapshotMajorPriority
+        $out['OperatingSystem_Changed'] = $osChanged
+        $out['OperatingSystem_Changed_Text'] = $osChangedText
+        $out['OperatingSystem_10to11_Changed'] = $os10To11Changed
+        $out['OperatingSystem_10to11_Changed_Text'] = $os10To11ChangedText
+        $out['OperatingSystem_SnapshotUsed'] = $snapshotUsed
+        $out['ModelReleaseDate'] = ''
         $out['IsWindows11AndIntune'] = [string]($isWin11 -and ($null -ne $intune))
         $out['Mig-FlagMatchExistsW1124H2'] = [string]$is24
         $out['Mig-FlagMatchExistsW1124H2-Bool'] = [string]$is24
@@ -477,8 +870,8 @@ function Build($AdVersion, $IntuneVersion) {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIU5Fz2FXGsESr
-# wT134ldMbbhN0omA5q0dx0w7W2PoNaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsGgFJzIwuNhD0
+# FnVAN7JVwkvl9PNzEN+9gWx2C3ai66CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -504,14 +897,14 @@ function Build($AdVersion, $IntuneVersion) {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCB/6+McGSsggtrw92CTjvjZ+nJ1NC+AxxIszg8kFAwnDTANBgkqhkiG9w0B
-# AQEFAASCAYCweYKvxq/5jliFtAC/ujwzrqlmeL4qciUgMo7VSBst0znVLlPAV9zU
-# A0flSi2ndioFTFMW437pBe08gClajQhXrh4asUbDnzmF1S3QUSMlypggvfO3scwZ
-# 7n0hox4MzCPbmgGNaLX51mLk2e4fz89T4spRwtD7D22njyViMydwQ/jiZqgV7Gug
-# l0Ksa7a0G6FZ/qzvJ9H4ppbAUU/c68Wa753vpCX7aNHgvjn+5k2AGCxMfvTcL+Wg
-# Vcl4MId8iCem1LuIOlUT8yyPOfYr8/aXXE6mQDrU8YsvbmBhRegTuutm0TVA9Jph
-# 3dcYTReyIA88tJzCziZyZyu07v8hQxxEm2VVBXtdZil12pWgH3+uav0ZxaCCQrT1
-# C+Hi7/kSTsiXmPTVLbCSShXYLlVgS5BKDERRALD6v14N1zud5+C6inScyyK9/Vxd
-# 6vA9Q6DBqXLkz2hQQB3xTa45etY3XbPx0hpGI8AAxu/mMNsVzHz1ZKJ1Vo8mLnX0
-# hyALc0FhDUE=
+# BDEiBCCHiyeVEq1QWYJkQbVg7mgWU/j+wrJDpIS2ye16FJTMUTANBgkqhkiG9w0B
+# AQEFAASCAYCsUd2aDK+QojwWTnWUA77zIEdqSN6yDz/UwnomuI0ceWDcSLlQwEZi
+# QBxQizLviJpTOnGeb+TctLCfzZo4pHBKNkVj7H2CJyJkyKhLNkDO28Vm7B7YstUg
+# sfGltYbeBQqBkhjMO1aCPjm83Urghzq8i39ONB6VyC5bfKRsZHcu+iP0Rhrbjp16
+# tbvJj/pbeNqe0ZU88IYKOAiJ4A9lpvfM5frQgI5Wp3TUAIGkENQhuX2DGn7d45w+
+# /BkAPtGwSN2X5ZERpIPwjiBMNmHMo1DzVTlBXQhwh9fiPCCkY1P+7CByH3sF7Ec6
+# crY9sW7NfQQDK9p5GUH8zbOTrQqr/GWA8yIVbfQ2xFe3tYefF53r0NKVVPfQgQb8
+# O+xZAhEqrdSw3kVPapfeHit/523RJRCPLOHj9xJn1vUWeOnhEPYZeWKlU9P1DEEx
+# V5dE3uvWo+GTXjNQ7qVlMtnsjA6Df6cKUlHYa6ECvFWmijZ2/Bo5LnBxzNNlN+up
+# ro+nXeYMyLU=
 # SIG # End signature block
