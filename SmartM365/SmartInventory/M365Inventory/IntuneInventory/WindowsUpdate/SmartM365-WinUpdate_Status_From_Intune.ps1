@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of top-risk policies shown in email (default: 10)
 
 VERSION
-  1.15
+  1.16
 .VERSION
-1.15
+1.16
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.15"
+$ScriptVersion = "1.16"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1001,7 +1001,7 @@ function Get-RemediationAction {
         return @{ Priority=0; ActionCode="ELIGIBLE_DEVICE_BLOCKED"; ActionDescription="Windows 11 eligible device blocked during update. Immediate investigation required."; Owner="Workplace" }
     }
 
-    if ($UpgradeEligibilityLabel -and $UpgradeEligibilityLabel -ne "Eligible" -and
+    if ($UpgradeEligibilityLabel -in @("NotEligible","Unknown","NotApplicableOrUnknown") -and
         $BlockingReason -in @("DeploymentInProgress","UpdateAlert")) {
         return @{ Priority=2; ActionCode="FIX_READINESS_FIRST"; ActionDescription="Device not eligible for Windows 11. Fix readiness before continuing update rollout."; Owner="Workplace" }
     }
@@ -1399,7 +1399,7 @@ try {
 
     $eligibleCompleted     = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -eq "Eligible" -and $_.RiskBucket -eq "Low" }).Count
     $eligibleAtRisk        = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -eq "Eligible" -and $_.RiskBucket -in @("High","Medium") }).Count
-    $notEligibleInProgress = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -and $_.UpgradeEligibilityLabel -ne "Eligible" -and $_.RiskBucket -eq "Medium" }).Count
+    $notEligibleInProgress = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -in @("NotEligible","Unknown","NotApplicableOrUnknown") -and $_.RiskBucket -eq "Medium" }).Count
     $notMatchedBlocking    = ($enrichedRows | Where-Object { $_.ReadinessMatch -eq "NotMatched" -and $_.BlockingReason -ne "CompliantOrCompleted" }).Count
     $eligibleBlockedHard   = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -eq "Eligible" -and $_.BlockingReason -like "HardFailure*" }).Count
 
@@ -1584,12 +1584,11 @@ finally {
     Cleanup-TempFiles
 }
 
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYMAahQW5/k5HE
-# Bp9LF5zgKY1LVcPH1PM9zwpU8LZpRqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCB/beYR65Wrb2I
+# d8rP2AgVaGccFbBJpgNpKP2dT/03taCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1722,31 +1721,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN1ajRv+6Z/ZJvXmuqLiOenzXV4LYICRgOG4vVjtW4AfMA0GCSqG
-# SIb3DQEBAQUABIIBgGW4jk+bVpfeeW9aJb8xUtRhgH2F5l/zzZP2eU58tvkjhutC
-# GtPK7eUC3xIbt3cu6WVJqBoF18P805vh4HJJkYgWJymDI/fH6ZSHwfji/P24u/HL
-# aO76WtwCoIER+RMY1YoAUp3u4Ewzs5f1wGSz0QsrjVdhBMEx5LN9kDTGPVQ9jzJS
-# cVSVLT1gVOBRrJKjMYGKp0TeI2Um+llFbkElea3TLHRKaui01wgSrrDkNIdntJa+
-# Ebge5o+U2LGPRAgnwWeY+bvqSfpzWyLBW4tuMQI9wNZdNk+5BCCZeJO8j5S158J6
-# rC1WqVbcqW4wvhhKSiJLK+ubyGHfZYXQzxmJjUTVGTi8S+akQsefSf7+aeLL0Qnu
-# YPZwZMVAN0ZsK4smm8YjbWF0UarIXmOysv16s2JC32PPyR9YYd83rQRu99oIHYce
-# qFAa7QIEej5pK7zzaqdtzLFk88u2q2ZRXMt2ONQMw8AHMpKjsze01ZjNGHuiY5YH
-# 6dqzBxQGk7O61DJhLaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINesYp24z5N3d+k00kgzbkdZLO/qTj2dreb2xo+oNdSXMA0GCSqG
+# SIb3DQEBAQUABIIBgC9VDNupVZWrTwCjTjBn3sZZQlfB7R3TNID+ocxEC3HGvHlg
+# IP6sAIt/foSJdLfQZh7lfQzCY+yT8wi1/fS87uBMT2C4X1GKecn+8pYBAtkUmCCh
+# TITVePvgjcdIKSqZumjK55Fhm+kfUyNitN12Es5VA0y4mIfGy0Q5SkRmszxrXWOu
+# xkJYLNyjR7WcJQUby2EYegB7Oo+ZWtsur/nIlIK3I0nY004q1uUlSYxiVseS+rgn
+# cLZvpu1v0uEFXsnMC7P/YpWe14hEXf/XITMISdo5IDz9YMFy3TVbATLgT88bJiCZ
+# /moFUFBp+8LZBnb7Dzgia1RU8wQDBbwgKxP6MM2W64oh9glrt0UoegotAWqA2PvJ
+# IZ0EsYHbWyl5fUp2RCtdscVqbL87Mj+GFWjSOFDemuSL/p6xlQm8W+MF6H21LfXn
+# DpYI+DqlQuum3IdkQiObUgbdqeoEeYPSkB8p9pVOvThoLuxX2kc16NLauXd5XIzk
+# KZWoOvuRyoD1uefMpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzRaMC8GCSqGSIb3DQEJBDEiBCC/oG51rk+eaLREseOO+Na3tzR7eJFEzhe/r+tQ
-# ipU+NjANBgkqhkiG9w0BAQEFAASCAgAbb0ts6tIV16n3HuEyR9mtGdGD0LsFVKli
-# IbkSqi2OagIU5KccYg5PLWAHXkL62P6T3uxz4lwZQaKpZpgmwVuXhx8dug397f0M
-# FVEhFPRMeBJR64tUVf15GMwAzicrt3FYaJZ0++6b/CrKuHropgKXRFX9t6OCVzVa
-# 77Q+cJ8Gm6RVu7wSodqPgWLe1QGa1J0xX1G2BB4XeXxf7dg0YjAm7u8vmM/QOINd
-# qDr1EDi1HQ9XaPzOXA0MgV968RMDTvjDG4Jr7fvcQb+cVtuRAIQB2Ax7MDv8BmaF
-# DMXRPKasmocijC0jCEOISLzp3/E5hD1spU1c61lP2R2OLldZeQiz0syxIBGXCWLB
-# bTDgGRtiNbKtqDGdxJzxuyAQqaoI+gTJH4iBU5T5Y/9YHI9zQUlEeQHMKOASuubs
-# bfrNtK0GUTv4aCc7tFG8qWkE7WTaRhbhjQR6OsMCYwMNhacr6Z0z+abHwK6KvPpO
-# CdjoixHqJSjsNcQTGq58R5nkFcGMB3PUkBfi6EVyJ0Xy5qxIsvCueD5ZIYxvKw5G
-# yKRoD7uF4q8EB2mvnOsss8ZQI6bjhf7GdcPCFyU2I/Gf2tdn2mpu/2cS1WtPo+/p
-# DnI54pDkU95Xi1iYbqqp5F4LojvBgRgvF8vMjhdMPWmLDpYcgQjoDjiauqUByWOk
-# m+Mo9FIKPw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDE1
+# NTFaMC8GCSqGSIb3DQEJBDEiBCBJpQbOEcKgEJcMDgHQLuA5S/TxDnfB2B2ho3wQ
+# vOrJYTANBgkqhkiG9w0BAQEFAASCAgBtq04vToPVtqmW6hjGX7JxWvF+weijwuk4
+# bBRqdYd0+z0jbmlfabfnRWibkw52BfA5AeDO8qAcXbSMn9WTzwmDkT9Ig7AowSEN
+# M8jFhiiTPzNwfB+2bNTTFGrOO+B2fKsGgVlcaUcJhNMEvxhfFsweAOOxQQa5fBem
+# 7TZg2Oz5GQO8kq6KjPqjqqYNn831eT3umhumP5J65gm0eFFxR8TginC6jRV0VFm/
+# Aw/LNMQmuzDiI7xQ6GhQSuMzm4BvRLC4xkU+mqCUY1TMn/fDaHNL4eoZIqDaXhrX
+# 0OufNQfEGm9oF5/xs2u6g4V75eGF64TA7LMBZXBixShh4NHMfZb8muVQnGebO0Xz
+# MsxyjCAqv+a32rTQZReirbZ6lPSUwG4ZinyiwOk6vlImUYVl8kilghgdikttTvB2
+# 0AWeM3voyWGGslGq8lSaUDGq5DsflbU/jVAFNof1w136VKlTz2rTOWJNAhhEgw1B
+# KOkga0DVFoxQhaLgR7uifzfu96tC948oDdDusnWxUKTm5hxiMnZUE7Vs8CRurX/j
+# aMXezfwNVZ76Z7v0ZUpOxP0sbsxqeO933uwE0hjl8eZJKnfIhpq/BypEuKxLnepF
+# Xqnjbrqe+Nfv2Hop5fJLGVZNU26vXwwi8GHGikzA/03xPfDKi10mgoCK4PuNP65E
+# gDGtsOkV1Q==
 # SIG # End signature block

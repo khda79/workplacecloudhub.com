@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.9
+1.11
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -43,7 +43,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.9"
+$ScriptVersion="1.11"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
 function Warn([string]$m){Write-Warning $m}
@@ -177,9 +177,9 @@ function CopyCsv($s,$d){
 function ExportIssues($rows){
   foreach($f in @($OutputFolder,$LatestFolder,(Join-Path $OutputFolder 'Archive'))){if(!(Test-Path $f)){New-Item -ItemType Directory -Path $f -Force|Out-Null}}
   $main=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues.csv'; $latest=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues.csv'; $archive=Join-Path (Join-Path $OutputFolder 'Archive') "Intune_Windows11_Readiness_Issues_$RunStamp.csv"
-  Assert-SmartM365CsvDataCompleteness -Data $rows -TimestampedPath $main -LatestPath $latest; $rows|Sort-Object PriorityScore,IssueCode,ObjectGUID_Norm|Export-Csv $main -NoTypeInformation -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
+  Assert-SmartM365CsvDataCompleteness -Data $rows -TimestampedPath $main -LatestPath $latest; $rows|Sort-Object PriorityScore,IssueCode,ObjectGUID_Norm|Add-SmartM365TenantKey | Export-Csv $main -NoTypeInformation -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
   $summary=@($rows|Group-Object IssueCode,Area,Potential_Issue,IssueCategory,PriorityScore,IsBlocking|Sort-Object Count -Descending|%{$p=$_.Name -split ', ',6; [pscustomobject]@{IssueCode=$p[0];Area=$p[1];Potential_Issue=$p[2];IssueCategory=$p[3];PriorityScore=[int]$p[4];IsBlocking=[bool]::Parse($p[5]);Count=$_.Count}})
-  $sm=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; $summary|Export-Csv $sm -NoTypeInformation -Encoding UTF8; CopyCsv $sm $sl
+  $sm=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; $summary|Add-SmartM365TenantKey | Export-Csv $sm -NoTypeInformation -Encoding UTF8; CopyCsv $sm $sl
   $files=@($main,$latest,$archive,$sm,$sl)
   if(!$SkipLegacyAliases){$lm=Join-Path $OutputFolder 'Mig_Win11Migration_Issues_Expanded.csv'; $ll=Join-Path $LatestFolder 'Mig_Win11Migration_Issues_Expanded.csv'; CopyCsv $main $lm; CopyCsv $main $ll; $files+=@($lm,$ll)}
   $files
@@ -219,7 +219,7 @@ try{
   $licenses=CsvAnyProjected @('M365_Licenses_Users.csv') @('User principal name','UserPrincipalName','primarysmtp')
   $local=CsvAnyProjected @('Intune_Devices_LocalSystem.csv','M365_Inventory_Device_LocalSystem.csv') @('AzureADDeviceId','DeviceId','DeviceName','SecureBootStatus','FirmwareType','BIOSDate','Last Reboot Date','LastRebootDate','LastBootUpTime')
   $wu=CsvAnyProjected @('Intune_WindowsUpdate_Status.csv','M365_WindowsUpdate_Status_From_Intune.csv') @('PolicyId','DeviceId','ReadinessGraphId','NormalizedDeviceName','DeviceName','ExportDateTime','ReadinessExportDateTime','RunId','ReadinessRunId','AggregateState_loc','AggregateState','CurrentDeviceUpdateStatus_loc','CurrentDeviceUpdateStatus','LatestAlertMessage_loc','LatestAlertMessage','BlockingReason','UpgradeEligibilityLabel','UpgradeEligibility','RiskBucket') -Req
-  $ready=CsvAnyProjected @('Intune_Devices_Win11Readiness.csv','M365_Win11_Readiness_From_Intune.csv','Intune_Devices_UpgradeEligibility.csv') @('NormalizedDeviceName','DeviceName','Device name','GraphId','AzureADDeviceId','DeviceId','Device ID','ExportDateTime','ReadinessExportDateTime','UpgradeEligibilityLabel','UpgradeEligibility','ReadinessStatus')
+  $ready=CsvAnyProjected @('Intune_Devices_UpgradeEligibility.csv') @('TenantKey','NormalizedDeviceName','DeviceName','GraphId','ExportDateTime','UpgradeEligibilityLabel','UpgradeEligibility')
   $intune=CsvAnyProjected @('Intune_Devices_Inventory.csv','M365_Inventory_Devices.csv') @('Device name','DeviceName','displayName','Azure AD Device ID','AzureADDeviceId','Entra DeviceId','EntraDeviceId','Device ID','DeviceId','ManagedDeviceId','OS version','OSVersion','OperatingSystemVersion','Free storage','FreeStorage','FreeStorageGB','Primary user UPN','Primary user email address','UserPrincipalName','UPN','Compliance','ComplianceState','IsCompliant','Last check-in','LastSyncDateTime','PhysicalMemoryGB','Memory_GB_Number','Memory','Model','Manufacturer') -Req
   $entra=CsvAnyProjected @('M365_Entra_Devices.csv','M365_Inventory_EntraDevices.csv') @('DeviceId','DeviceId_Norm','DisplayName','DeviceName','IsPending','ApproximateLastSignInDateTime','RegistrationDateTime','HardwareId') -Req
   $bios=CsvAnyProjected @('Intune_Devices_BIOS.csv') @('AzureADDeviceId','DeviceName','BIOSReleaseDateTime','BIOSDate')
@@ -750,15 +750,11 @@ try{
   Log "$ScriptName completed successfully."
 }catch{Write-Error $_; throw}
 
-
-
-
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbtLurixABvoDB
-# 5S0CZMc+OiS2B/Nw8OmbaIaPPipGP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKQKi7+2fdxS1/
+# DvXMXbNfv4HLkc0mOUXg8X/bNrBkeKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -891,31 +887,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA2KPp3O61/AbCyZM7FktiSMxZNyTmwiIyjlhUODr9y1MA0GCSqG
-# SIb3DQEBAQUABIIBgKgwkO8tu8nrjHLwRtK0WRFR62lIy0pmwsm473Mcm2rzVuoH
-# GKOme8TaqV+A4jdFwYEwhMKLYDmwsiWzRdV3aB/GqvKsVAvZ2wjWXvBuKIgOXWf2
-# a4WAMZt5D40c5FVfte0NhPZ3kNUtjuJRXpUh4koakTXYZaLAlC5hW8VeDxmw2zsY
-# PYgpY4VQZ7q9IyQroI8sPBoOw1CzE4lIrK2eAAxHWfRqlvmY/wqYeyXb9ZHruDk2
-# f7M1TiAj/WMv+Zka8YSC039QdLvfmegPKjnvWGufauiT8o9biw1mYrYmyTkZuRKZ
-# aWaQWeeZd+XHqKr1NBRik9nS88izGevTILYMv7aq/g72OmC1hFHr0rvQ/vvMHwbC
-# TLow3M4yGvSKcui/CGN+GWGWDc7oEnFNd8CBdhmSDakKoKwpPI8aQnXsg6Gnc393
-# CXgFM3jbyJ05vI4Zus5h074mexOU7cFurugCmjTf3nawtHOXZTv/dTDZk4YMEXfI
-# 4KMnpcg9B5xo3x7jk6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHdFGEvSRKwOGs03tS90X1B9uH2NxMyuWhYXAU8mp7DFMA0GCSqG
+# SIb3DQEBAQUABIIBgH6tbG/vV56QOGP6UJotDDz3YZk4EtDD30KUyJ4j/WJsS2Jw
+# yYwaZ58Pt6KVdeyXoRPOQzOYgVnczPvsJJ0KDdtMKWFIlUYR3z4pTAypDjk5CIDW
+# DeHoMJXBoKlI61S0y62+/3B1CHmCoj1SAQvBLGDqN/X49lwv8UTVjpky7dcB2lvx
+# gzxNYy9l04jh6kb4iJGTUO5xD34XXNKhawdK6No2coOGQ7pMcI3fd1xOxLjmWM7B
+# 6aWS9ZGMDHITab/KG331IKR2rVaWm+GtbDcc55vahSX1hwnnw3LwiaDgEyWNHFrR
+# yQxKn81JdCYxNQ0v2f3g+ZV0AnOtw2EL14JOy5laPyJMCTby62Uxzl4U8r70gzC3
+# VK+FaL0GjaRTpwSFvJvbwxk6ANx1XkZCgmuVRz9K7AakNeXaNsJBieKddBhPThW+
+# 46NgOSB2AgWEZUb1cUE5aKBNptdJwv/3pzwy6RBRnH7z2CyHHLJjdgG5ARqiXWZR
+# epXiRi5xcULiXX+mvqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzNaMC8GCSqGSIb3DQEJBDEiBCCK/JS1s58Gf+RNasdrR35C2lVBR64JiGFzQ/i3
-# z3dQLDANBgkqhkiG9w0BAQEFAASCAgBt6+YRSXeWwH51mkEFnitpemGydg7ifdz1
-# Gl2K0YlKniSvRwxlLvsA/5nf1uE+bpDPddgjsPqlpv77YYl9kMt2ga9GKnyZYuUz
-# EsYUv/IifAgu8L5TYRBs6fKktwzeoox2YyLTwNtmO5NCmP4/H7d4T6tfMq/lkV5N
-# bxbwGGZ+fNcjVYbS58wS1+SP5jzk9P/DJRiIasmwvTVqvwvX4hJfv8TP3OziCkwt
-# gUvXbg8vxgadWDQ+dUd0heFtyKgG5TpW/GtatUFCOWOg1xwFe0n8I835zMJLmAAm
-# vXH2xnxubJ2ZVuguMDnLmMKn5i2s1HDGLmtA8ydShuU3lGHHqsQuwf3asppEcMmD
-# BSojVHBwL37mDpLAgQeHG5TSEOSFoCSTmgPVQOjAO29k31ZS6xqrbS6GQTzSe0oF
-# +2qiYl545GlZpeZGExGov/4/lIgdMX06tgNlERgdEKA6SDpyI3sfpwXD1xNaOMbL
-# uDIrFdwmCfb0wGqiYgV+DMGUDE6JpuPNzeDNQQ/0BuFeLUoIUVKQT4sUhLw2g56P
-# 6YnYeDMEGL4Ql8tgrNfNg3d/FEPDuxW8sB4bAbRtc1+P4NQ35GUs2QNQ4yOHilmz
-# Ob0J4thPlkUzta0CdpQi8nYriM3LtKiXl/agl6U6W4mKL6ytfC1iyIZryJ4jkkFC
-# y6R041mfVg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
+# MjNaMC8GCSqGSIb3DQEJBDEiBCBiL2NwZGiMoQpa7ERosxjyMRwZgPGFZOki8QM6
+# xKLqkjANBgkqhkiG9w0BAQEFAASCAgDFF5lXQj6usi8HreooIvEpPAdv9bkgrieM
+# 4fxET7+mu8zbtWMIYITSWnDr8OuXy5pSf2MTaBIIu40KEv2xDkSgkO6FbKUunC0l
+# zfiYLVEiYLmqbMMDX/VTeJXjl91vMoC+a3WiH9m62JlEzvDniKvink7F1GOZEbO2
+# 5FcLmgAV2J21sVxPxMf3s2xK1daK2Q8cwYXSZrj7s3b+4DxnAHPVhEIJ41d9TOQA
+# k6QtuxyBXRNYatplxHWBcwhejTT24c9fISAXipEg0uTnzmI+VSYAFlSdcBkzOD8F
+# Hy7AwNT57GpQ0IPekB/sYu4wK19pRetJ/yBnM89DnRljDxW4fcH/GE6nD2JnXZgZ
+# 0Iz9fpwiKSqHrP7Rgp7G8IPr8MHMsQLbwAFR5i1uz7HBFAlC/vSypvAruSp2p6sx
+# G2vM/O54ZqYkew51jyGby/DcMfyk3Kw9seq6DbtOocqf3xk3Ed95z9E7o/3rqBHc
+# Yeilfkv0Ut0YlTUptVXAPbDNupMAOk3VqRtltLqRwhxK0hZvYQGmB3GBDG/Fhm0M
+# lMIX6QnVpnF6C1bc/hMtZChylHf7nKAcModjO/I/kEE9VDZ+1aYZp56bmRlkqdo0
+# q/vtgu31/AGpeTN6+Gxl27K9AEbMTD8t+LnFBHX+eosAtUfCw/dOsoVduAnb+S50
+# dN6QYxr9fg==
 # SIG # End signature block
