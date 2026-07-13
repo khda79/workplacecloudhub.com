@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.8
+    Version : 1.11
 
 .VERSION
-1.10
+1.11
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.8
+    Version : 1.11
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -525,9 +525,10 @@ function Write-DiscoveredAppsCsvRows {
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
     }
     if (Test-Path -LiteralPath $Path) {
-        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append
+        Repair-SmartM365CsvTenantKeySchema -Path $Path -Delimiter ',' -Encoding UTF8 | Out-Null
+        $Rows | Add-SmartM365TenantKey | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append
     } else {
-        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+        $Rows | Add-SmartM365TenantKey | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
     }
 }
 
@@ -1164,8 +1165,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6EePqHcWu1g+P
-# qaf8IOxlZ4mwsENlmTpTReJfDOZB0KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwo/Oy+Qspyqjq
+# eHaW/k3IZSnqkGLoEABYYM/5wtcQEaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1298,31 +1299,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILajSj5k+FsTDq/5PVQh/ImCQ1dyNOqHSV1Ddk0ZZqejMA0GCSqG
-# SIb3DQEBAQUABIIBgBWJNlSCg4fMA+gBqNc/Pe3aFhhm2hqyaI6QXMMJxQ4+2jtU
-# PcS0ZYaVJzam8OoUbQU9jWJqYGKMJT6DUVGlnhXCZdjD/XBO6RLNcviL7SmH/4RP
-# NKxtFCq9BD1A54v/nJ+GyNHS7xHigduTchUdza7Zp0jgOZwwU7Qo09qNaDCA+PzS
-# wMt1+qQYdkkEdllOcxKcweTsNwSCBx+J/jXNGz8H5zGzyjVNzIUQXD2AaCR+JJf6
-# o9s+tmOk0CvFsbwhTYyLnMtc6i1vB1D4NRCPcaHSySsLclE8fd+K9inPSkFgMUPG
-# kfyjksX7ET2n9dpCauGxNKe7OeFTqYuyOPS/9d4hlhvygd48GIYG2Dfplxq0gUma
-# bArYaZO0ip2Lk7ZF21g34aq0IuoXp1737Vsh3I1hXa8Doe4PQkLU6/LSe6c1kbpm
-# r8rPFBn3Wx6I2/VWxu1U2dLzUyHrEJfnjKsm54J+pqF2oeW9wC5YUf5R3K43ZQ0D
-# Ysq4ZDpr1caa81COiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBDkPWLbrWREC58U4zrurSVECVT72/SelmC1rNIqrwHJMA0GCSqG
+# SIb3DQEBAQUABIIBgEb2aTNf0Yt0tDQTQBLymm+J+H0yF0k3ZfyEOpFPEqAFx7ED
+# HA181cM6liqD2jg3BOzqBs8Ss6Xz9va3U3YOJc0r4+PJYJinbmnSmZgZnDGdOAj+
+# x6r98uLwr0Lc0/q0r4POOemqKnGZWzkpFLOJwId55uKxxsFjrjUSRES45d9+KJe0
+# ckyls58IMS4whq1HAMkqZpN9yD8ti9M9B6APg64Fo6RahOVFChSEg59s3cGxodMQ
+# OBomN99OoGKLwuSsqu2llb8y7L9BpHg2E3yihXD19Zm7lcu+FNGdjFEAy3AyY355
+# 2srg/6JaFD3nEKLq3y1QIKWcdcCMXjxhbFfy5RLQDhvMmya+6F0KCXjLFR2jFXyH
+# +OuvnbHG7JY7dm0Q0LNojVJG6+9dejMNZfH0bfmma6beE+ScfqO+exCCMuGqWWpy
+# 6S7czL2aBp4GPWYxUCLSh1SQ3mvkpLDirGmWmcD7MosPzCKjpKFOVjX8OBdJZ1nF
+# GEQBe793oUerBYoHoqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MjlaMC8GCSqGSIb3DQEJBDEiBCAs3tNTxhEQ7qFwR/E5MKYpBuLn/eqGlox5anha
-# QsWznDANBgkqhkiG9w0BAQEFAASCAgAR9k6zyuY48paTlBa0uTBX6FgZrNgil38c
-# WU+DfCYHoxz69IZDo+pV/G8fD69I2W/u0rcHTnQMdx00CGmWeZc5A7u9Frk2VuHp
-# mkXf4gbxsbqpRxfV95aj3un5kDnwJ6O5aN2xkji4Fje/i+xAO95l2UKnvnFdcqYi
-# rCGIkOY3e3rozts1WgI6dw/hMY1M40vWi5p1cYS3CELG6C5dgAeeleeFf6qhbzeL
-# OGOg3caoN2DfSCfyyGSK1WCvp18jYaZqQ/8I6Kce9k+j/QmA5lWMwlBj3CA+3Ptz
-# mtB/1pPZwvRgTJ4I4UchPXFFo/uN+wtfjTWfxgTUGvc5nrIepfBW8vDdBh4ozeh0
-# IQWO2iNrIOjG7SZ+vcq8dDhgKSrg7RnYNy2+KYr2t0kl2mPddodU/7nJAZoq1lT5
-# hvHzt6ZExdO769+CL4zle3BfXSDOM361QIXPsjJsJpF6k34LARdTXrkD0TXjLLhZ
-# Bg/y4XiEkkL1VocNBCasNsWxvXA5+wxEUOE1IDnRN2pDFlRDfhw0xOB/M2cIcaDH
-# 1W2G5qG7P7k+JGHbpt1Br4WbmyuxHpbg5d0P9ibhH+oIQraK1YYxcvNJEgqkmOuu
-# KcD3f6KiAbhqQ66JSOnICZGZSl+uHgiX09trhD2zEGrZGZWRkDjgAvvuTX41YFJl
-# xclMN+dNrg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
+# MjJaMC8GCSqGSIb3DQEJBDEiBCAd7kLbs9e1bKb5MGnBEld8b+LCpNu5F/vWlNEO
+# j0ezyjANBgkqhkiG9w0BAQEFAASCAgCKSEuHhOokUUigIi1p4NM885Snq6v4IfnY
+# j1/tvAujjzulJg8a1cFWlMoTeQKiq5sGPGzx+peZWBcqOQ389jfj+nHC/w1iBKiE
+# IEc/PcyYLJw0o3LOJ6sXkmn6YJmKO1AA73/i6eQpuw3AHWN1Zf/dwGzNwbTizQ+w
+# 8mth8tiRVufVVRUf8HdO7aJlNibi4XHyZazV5NR8zCrChF8rxIxrhe7u+fyg1HCi
+# CcKvoSOq0olqmoeXpDu0H8qbuE5UGb0MMvpq9js0DYGWtHP6Cttnv46T74k8V5Dj
+# rhIUSvwJxT1/oX2j+Y1pR2iLkaUUYYY7dKVlb4B59hCFm9aGGQDdZJ7F2gQlHLoC
+# eoA+lOBIp1utcAHNjdYLlp9g2kWLbBlYcxI0V0ppTsrxawGCjsVm2fdNSGL6E8wk
+# m2K62Kkqd3L1UG/4Gdz5tEhASSk0QHllMlHdYxL0mR8u2JTW9yemBlsBV7HJQI+I
+# dEEXmdvR2VAfKCOQtMaBNx9uVu/bB1o3CP1Ceku0N5UwCgpGRyMnFsOBrCZATikZ
+# /BW193uD+1cwRrfIR1Q8eVZPsN+ssZE9A4mSVmN9fhakl6G3+Udl8fY4A/CA+5V0
+# CoAUa440RlkMCOH567kQcQocMMkFVASAN22qrsaJ4+T8EAfbHTYchH/E4AjbvH49
+# I9T3kByw3g==
 # SIG # End signature block
