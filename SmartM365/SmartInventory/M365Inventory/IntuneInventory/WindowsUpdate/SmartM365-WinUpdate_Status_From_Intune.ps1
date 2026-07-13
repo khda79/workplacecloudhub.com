@@ -18,7 +18,7 @@ and full remediation columns. Single CSV output for Power BI consumption.
 - SharePoint upload: latest CSV copied to SharePoint Online via SmartM365.Core when enabled
 - Emails:
     - Fatal error HTML email (on failure)
-    - Optional success/summary HTML email with KPI tables
+    - Optional action-oriented HTML summary by unique device and policy
 
 .REQUIREMENTS
 - PowerShell 7+
@@ -35,12 +35,12 @@ PARAMETERS
   -SummaryEmailMode          : Always | OnChange | Never (default: Always)
   -EnableSummaryEmail        : Toggle success email (default: $true)
   -EnableErrorEmail          : Toggle error email (default: $true)
-  -RiskTopN                  : Number of top-risk policies shown in email (default: 10)
+  -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.17
+  1.18
 .VERSION
-1.17
+1.18
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 
 # ==========================================================
 # App-only authentication parameters
@@ -351,7 +351,7 @@ $To          = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' 
 $Cc          = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Cc' -DefaultValue ""
 $ErrorMailTo = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ErrorMailTo' -DefaultValue ""
 
-$SummaryStatePath = Join-Path $ScriptCsvLogFolderPath "Intune_WindowsUpdate_Status.lastcount.txt"
+$SummaryStatePath = Join-Path $ScriptCsvLogFolderPath "Intune_WindowsUpdate_Status.lastsummary.txt"
 
 # ==========================================================
 # Console rendering options
@@ -560,28 +560,24 @@ function Send-SummaryEmail {
 }
 
 function Should-SendSummaryEmail {
-    param([Parameter(Mandatory=$true)][int]$CurrentCount,[Parameter(Mandatory=$true)][string]$Mode,[Parameter(Mandatory=$true)][string]$StatePath)
+    param([Parameter(Mandatory=$true)][string]$CurrentState,[Parameter(Mandatory=$true)][string]$Mode,[Parameter(Mandatory=$true)][string]$StatePath)
 
     if (-not $EnableSummaryEmail) { return $false }
     switch ($Mode) {
         "Never"    { return $false }
         "Always"   { return $true }
         "OnChange" {
-            $previous = $null
-            if (Test-Path $StatePath) { $previous = (Get-Content -Path $StatePath -ErrorAction SilentlyContinue | Select-Object -First 1) }
-            if ([string]::IsNullOrWhiteSpace($previous)) { return $true }
-            $prevInt = 0
-            if (-not [int]::TryParse($previous, [ref]$prevInt)) { return $true }
-            return ($prevInt -ne $CurrentCount)
+            $previous = if (Test-Path -LiteralPath $StatePath) { [string](Get-Content -LiteralPath $StatePath -Raw -ErrorAction SilentlyContinue) } else { '' }
+            return (-not [string]::Equals($previous.Trim(),$CurrentState,[StringComparison]::Ordinal))
         }
         default { return $false }
     }
 }
 
 function Save-SummaryState {
-    param([Parameter(Mandatory=$true)][int]$Count,[Parameter(Mandatory=$true)][string]$StatePath)
+    param([Parameter(Mandatory=$true)][string]$State,[Parameter(Mandatory=$true)][string]$StatePath)
     if ($DryRun) { return }
-    try { Set-Content -Path $StatePath -Value $Count -Encoding UTF8 } catch { }
+    try { Set-Content -LiteralPath $StatePath -Value $State -Encoding UTF8 } catch { }
 }
 
 # ==========================================================
@@ -1054,6 +1050,90 @@ function Get-RemediationAction {
 }
 
 # ==========================================================
+# Operational summary helpers
+# ==========================================================
+function Get-WinUpdateRowValue {
+    param([AllowNull()][object]$Row,[Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Row) { return $null }
+    $property = $Row.PSObject.Properties[$Name]
+    if ($property) { return $property.Value }
+    return $null
+}
+
+function Get-WinUpdateOperationalState {
+    param([Parameter(Mandatory)][object]$Row)
+    $blockingReason = [string](Get-WinUpdateRowValue -Row $Row -Name 'BlockingReason')
+    if ($blockingReason -like 'HardFailure*' -or $blockingReason -eq 'UpdateAlert') { return 'ActionRequired' }
+    if ($blockingReason -eq 'DeploymentInProgress') { return 'InProgress' }
+    if ($blockingReason -eq 'NotApplicableOrUnknown') { return 'Unknown' }
+    if ($blockingReason -eq 'CompliantOrCompleted') { return 'Completed' }
+
+    switch ([string](Get-WinUpdateRowValue -Row $Row -Name 'RiskBucket')) {
+        'High'   { return 'ActionRequired' }
+        'Medium' { return 'InProgress' }
+        'Low'    { return 'Completed' }
+        default  { return 'Unknown' }
+    }
+}
+
+function Get-WinUpdateOperationalRank {
+    param([Parameter(Mandatory)][string]$State)
+    switch ($State) {
+        'ActionRequired' { return 0 }
+        'InProgress'     { return 1 }
+        'Unknown'        { return 2 }
+        'Completed'      { return 3 }
+        default          { return 9 }
+    }
+}
+
+function Get-WinUpdatePriorityRank {
+    param([AllowNull()][object]$Value)
+    $priority = 999
+    if ($null -ne $Value) { [void][int]::TryParse([string]$Value,[ref]$priority) }
+    return $priority
+}
+
+function Get-WinUpdateDeviceSummaryRows {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
+
+    $groups = @{}
+    $rowIndex = 0
+    foreach ($row in $Rows) {
+        $rowIndex++
+        $deviceId = [string](Get-WinUpdateRowValue -Row $row -Name 'DeviceId')
+        $deviceName = [string](Get-WinUpdateRowValue -Row $row -Name 'DeviceName')
+        $normalizedName = Normalize-DeviceName -DeviceName $deviceName
+        $key = if (-not [string]::IsNullOrWhiteSpace($deviceId)) { "id:$($deviceId.ToLowerInvariant())" } elseif ($normalizedName) { "name:$normalizedName" } else { "row:$rowIndex" }
+        if (-not $groups.ContainsKey($key)) { $groups[$key] = New-Object System.Collections.Generic.List[object] }
+        $groups[$key].Add($row) | Out-Null
+    }
+
+    foreach ($key in $groups.Keys) {
+        $selected = @($groups[$key] | Sort-Object `
+            @{Expression={ Get-WinUpdateOperationalRank -State (Get-WinUpdateOperationalState -Row $_) };Ascending=$true}, `
+            @{Expression={ Get-WinUpdatePriorityRank -Value (Get-WinUpdateRowValue -Row $_ -Name 'ActionPriority') };Ascending=$true} | Select-Object -First 1)[0]
+        [pscustomobject][ordered]@{
+            DeviceKey = $key
+            DeviceId = [string](Get-WinUpdateRowValue -Row $selected -Name 'DeviceId')
+            DeviceName = [string](Get-WinUpdateRowValue -Row $selected -Name 'DeviceName')
+            PolicyId = [string](Get-WinUpdateRowValue -Row $selected -Name 'PolicyId')
+            PolicyName = [string](Get-WinUpdateRowValue -Row $selected -Name 'PolicyName')
+            OperationalState = Get-WinUpdateOperationalState -Row $selected
+            AggregateState = [string](Get-WinUpdateRowValue -Row $selected -Name 'AggregateState')
+            CurrentDeviceUpdateStatus = [string](Get-WinUpdateRowValue -Row $selected -Name 'CurrentDeviceUpdateStatus')
+            LatestAlertMessage = [string](Get-WinUpdateRowValue -Row $selected -Name 'LatestAlertMessage')
+            BlockingReason = [string](Get-WinUpdateRowValue -Row $selected -Name 'BlockingReason')
+            UpgradeEligibilityLabel = [string](Get-WinUpdateRowValue -Row $selected -Name 'UpgradeEligibilityLabel')
+            ReadinessMatch = [string](Get-WinUpdateRowValue -Row $selected -Name 'ReadinessMatch')
+            ActionPriority = Get-WinUpdatePriorityRank -Value (Get-WinUpdateRowValue -Row $selected -Name 'ActionPriority')
+            ActionCode = [string](Get-WinUpdateRowValue -Row $selected -Name 'ActionCode')
+            ActionDescription = [string](Get-WinUpdateRowValue -Row $selected -Name 'ActionDescription')
+            ActionOwner = [string](Get-WinUpdateRowValue -Row $selected -Name 'ActionOwner')
+        }
+    }
+}
+# ==========================================================
 # Main
 # ==========================================================
 $ErrorActionPreference  = "Stop"
@@ -1356,6 +1436,7 @@ try {
     $spUploadStatus = "Disabled"
     $spUploadError  = ""
     $spDestPath     = ""
+    $spUploadUrl    = ""
 
     if ($DryRun) {
         Write-Log "DryRun: skipping write of $CsvFinal." "INFO" "DRYRUN"
@@ -1376,7 +1457,7 @@ try {
                 Write-Log "SharePoint upload starting: $SP_SiteHostname$SP_SitePath / $SP_LibraryDisplayName / $SP_TargetFolderPath" "INFO" "SP"
 
                 $thumbprint = if ($global:Thumbprint) { $global:Thumbprint } else { $Thumb }
-                Invoke-CoreSmartM365SharePointCsvUpload `
+                $spUploadRecord = Invoke-CoreSmartM365SharePointCsvUpload `
                     -LocalFilePath $CsvLastFinal `
                     -Enabled $EnableSharePointUpload `
                     -SiteHostname $SP_SiteHostname `
@@ -1387,9 +1468,10 @@ try {
                     -TenantId $TenantId `
                     -Thumbprint $thumbprint
 
-                $spUploadStatus = "Requested"
+                $spUploadStatus = if ($spUploadRecord -and ($spUploadRecord.WebUrl -or $spUploadRecord.ItemId)) { "Success" } else { "Unavailable" }
+                $spUploadUrl    = if ($spUploadRecord) { [string]$spUploadRecord.WebUrl } else { '' }
                 $spDestPath     = (($SP_TargetFolderPath.TrimEnd('/','\')) + "/" + [System.IO.Path]::GetFileName($CsvLastFinal)).TrimStart('/','\')
-                Write-Log "SharePoint upload requested: $spDestPath" "INFO" "SP"
+                Write-Log "SharePoint upload status: $spUploadStatus; destination=$spDestPath" "INFO" "SP"
             }
             catch {
                 $spUploadStatus = "Error"
@@ -1410,191 +1492,114 @@ try {
     Cleanup-WorkFolder -WorkPath $WorkPath -KeepZips $WorkKeepZips -KeepExtracts $WorkKeepExtracts
 
     # ----------------------------------------------------------
-    # KPI calculations (all from $enrichedRows)
+    # Operational summary by unique device
     # ----------------------------------------------------------
-    $deviceKeyCol = "DeviceId"
+    $deviceSummaryRows = @(Get-WinUpdateDeviceSummaryRows -Rows $enrichedRows)
+    $totalUniqueDevices = $deviceSummaryRows.Count
+    $completedCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'Completed').Count
+    $inProgressCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'InProgress').Count
+    $actionRequiredCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'ActionRequired').Count
+    $unknownCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'Unknown').Count
+    $completionPct = if ($totalUniqueDevices -gt 0) { [math]::Round((100.0 * $completedCount / $totalUniqueDevices),2) } else { 0.0 }
+    $reportStatus = if ($actionRequiredCount -gt 0) { 'CRITICAL' } elseif ($inProgressCount -gt 0 -or $unknownCount -gt 0) { 'WARNING' } else { 'OK' }
+    $summaryState = "$totalUniqueDevices|$completedCount|$inProgressCount|$actionRequiredCount|$unknownCount"
 
-    $totalUniqueDevices = 0
-    if ($count -gt 0) {
-        $totalUniqueDevices = ($enrichedRows | Select-Object -ExpandProperty $deviceKeyCol -ErrorAction SilentlyContinue |
-                               Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique).Count
-    }
+    Write-Log "Operational summary: Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount ActionRequired=$actionRequiredCount Unknown=$unknownCount Completion=$completionPct% Status=$reportStatus" "INFO" "KPI"
 
-    $globalLowCount      = 0
-    $globalHighMedCount  = 0
-    $globalCompletionPct = 0.0
-    $globalAtRiskPct     = 0.0
-
-    if ($count -gt 0) {
-        $globalLowCount      = ($enrichedRows | Where-Object { $_.RiskBucket -eq "Low" }).Count
-        $globalHighMedCount  = ($enrichedRows | Where-Object { $_.RiskBucket -in @("High","Medium") }).Count
-        $globalCompletionPct = [math]::Round((100.0 * $globalLowCount     / $count), 2)
-        $globalAtRiskPct     = [math]::Round((100.0 * $globalHighMedCount / $count), 2)
-    }
-
-    $blockingCount    = ($enrichedRows | Where-Object { $_.BlockingReason -ne "CompliantOrCompleted" }).Count
-    $actionableCount  = ($enrichedRows | Where-Object { $_.BlockingReason -like "HardFailure*" -or $_.BlockingReason -eq "UpdateAlert" }).Count
-    $monitoringCount  = ($enrichedRows | Where-Object { $_.BlockingReason -eq "DeploymentInProgress" }).Count
-
-    $eligibleCompleted     = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -eq "Eligible" -and $_.RiskBucket -eq "Low" }).Count
-    $eligibleAtRisk        = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -eq "Eligible" -and $_.RiskBucket -in @("High","Medium") }).Count
-    $notEligibleInProgress = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -in @("NotEligible","Unknown","NotApplicableOrUnknown") -and $_.RiskBucket -eq "Medium" }).Count
-    $notMatchedBlocking    = ($enrichedRows | Where-Object { $_.ReadinessMatch -eq "NotMatched" -and $_.BlockingReason -ne "CompliantOrCompleted" }).Count
-    $eligibleBlockedHard   = ($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -eq "Eligible" -and $_.BlockingReason -like "HardFailure*" }).Count
-
-    $eligibleHardFailureStatus = if ($eligibleBlockedHard -eq 0) { "Good" } else { "Critical" }
-
-    Write-Log "KPIs: Rows=$count UniqueDevices=$totalUniqueDevices Completion=$globalCompletionPct% AtRisk=$globalAtRiskPct% Blocking=$blockingCount Actionable=$actionableCount Monitoring=$monitoringCount EligibleHardFail=$eligibleBlockedHard" "INFO" "KPI"
-
-    # ----------------------------------------------------------
-    # Success email
-    # ----------------------------------------------------------
-    $should = Should-SendSummaryEmail -CurrentCount $count -Mode $SummaryEmailMode -StatePath $SummaryStatePath
+    $should = Should-SendSummaryEmail -CurrentState $summaryState -Mode $SummaryEmailMode -StatePath $SummaryStatePath
     if ($should) {
         $duration = New-TimeSpan -Start $scriptStart -End (Get-Date)
-
-        # KPI table
-        $kpiRows = @(
-            [pscustomobject]@{ Category="Total Rows";                                                           Count=$count }
-            [pscustomobject]@{ Category="Global Unique Devices";                                                Count=$totalUniqueDevices }
-            [pscustomobject]@{ Category="Global Completion Rate (%)";                                           Count=$globalCompletionPct }
-            [pscustomobject]@{ Category="Global At-Risk Rate (%)";                                              Count=$globalAtRiskPct }
-            [pscustomobject]@{ Category="Blocking (All)";                                                       Count=$blockingCount }
-            [pscustomobject]@{ Category="Blocking (Actionable)";                                                Count=$actionableCount }
-            [pscustomobject]@{ Category="Blocking (Monitoring)";                                                Count=$monitoringCount }
-            [pscustomobject]@{ Category="Eligible + Completed/LowRisk";                                         Count=$eligibleCompleted }
-            [pscustomobject]@{ Category="Eligible + AtRisk (High/Medium)";                                      Count=$eligibleAtRisk }
-            [pscustomobject]@{ Category="NotEligible + InProgress/Medium";                                      Count=$notEligibleInProgress }
-            [pscustomobject]@{ Category="Readiness NotMatched + Blocking";                                      Count=$notMatchedBlocking }
-            [pscustomobject]@{ Category=("Eligible + HardFailure (Critical) - " + $eligibleHardFailureStatus); Count=$eligibleBlockedHard }
+        $statusDistribution = @(
+            [pscustomobject]@{ State='Completed'; Count=$completedCount; Percentage=$(if($totalUniqueDevices){[math]::Round(100.0*$completedCount/$totalUniqueDevices,2)}else{0}) }
+            [pscustomobject]@{ State='In progress'; Count=$inProgressCount; Percentage=$(if($totalUniqueDevices){[math]::Round(100.0*$inProgressCount/$totalUniqueDevices,2)}else{0}) }
+            [pscustomobject]@{ State='Action required'; Count=$actionRequiredCount; Percentage=$(if($totalUniqueDevices){[math]::Round(100.0*$actionRequiredCount/$totalUniqueDevices,2)}else{0}) }
+            [pscustomobject]@{ State='Unknown / scope review'; Count=$unknownCount; Percentage=$(if($totalUniqueDevices){[math]::Round(100.0*$unknownCount/$totalUniqueDevices,2)}else{0}) }
         )
-        $kpiTable = Convert-ObjectsToHtmlTable -Rows $kpiRows -Columns @("Category","Count") `
-            -Title "Windows 11 Rollout Readiness vs Update Reality"
+        $statusTable = Convert-ObjectsToHtmlTable -Rows $statusDistribution -Columns @('State','Count','Percentage') -Title 'Operational state distribution'
 
-        # Policy summary (computed inline for email)
-        $policyGroups  = $enrichedRows | Group-Object -Property PolicyId
-        $policySummary = foreach ($g in $policyGroups) {
-            $pPolicyId = $g.Name
-            $pName     = ($g.Group | Select-Object -First 1).PolicyName
-            $uniqueDevices = ($g.Group | Select-Object -ExpandProperty $deviceKeyCol -ErrorAction SilentlyContinue |
-                             Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique).Count
-            $coveragePct = 0.0
-            if ($totalUniqueDevices -gt 0) { $coveragePct = [math]::Round((100.0 * $uniqueDevices / $totalUniqueDevices), 2) }
-            $high = ($g.Group | Where-Object { $_.RiskBucket -eq "High" }).Count
-            $med  = ($g.Group | Where-Object { $_.RiskBucket -eq "Medium" }).Count
-            $low  = ($g.Group | Where-Object { $_.RiskBucket -eq "Low" }).Count
-            $atRisk    = $high + $med
-            $atRiskPct = 0.0
-            if ($g.Count -gt 0) { $atRiskPct = [math]::Round((100.0 * $atRisk / $g.Count), 2) }
-            [pscustomobject]@{
-                PolicyName=    $pName
-                PolicyId=      $pPolicyId
-                Rows=          $g.Count
-                UniqueDevices= $uniqueDevices
-                CoveragePct=   $coveragePct
-                AtRiskRows=    $atRisk
-                AtRiskPct=     $atRiskPct
-                HighRisk=      $high
-                MediumRisk=    $med
-                LowRows=       $low
+        $policySummary = foreach ($group in ($enrichedRows | Group-Object -Property PolicyId)) {
+            $policyDevices = @(Get-WinUpdateDeviceSummaryRows -Rows $group.Group)
+            $policyTotal = $policyDevices.Count
+            $policyCompleted = @($policyDevices | Where-Object OperationalState -eq 'Completed').Count
+            $policyInProgress = @($policyDevices | Where-Object OperationalState -eq 'InProgress').Count
+            $policyAction = @($policyDevices | Where-Object OperationalState -eq 'ActionRequired').Count
+            $policyUnknown = @($policyDevices | Where-Object OperationalState -eq 'Unknown').Count
+            [pscustomobject][ordered]@{
+                PolicyName = [string]@($group.Group)[0].PolicyName
+                Devices = $policyTotal
+                Completed = $policyCompleted
+                InProgress = $policyInProgress
+                ActionRequired = $policyAction
+                Unknown = $policyUnknown
+                CompletionPct = if ($policyTotal) { [math]::Round(100.0*$policyCompleted/$policyTotal,2) } else { 0 }
             }
         }
-        $policySummarySorted = $policySummary | Sort-Object -Property Rows -Descending
+        $policySummary = @($policySummary | Sort-Object @{Expression='ActionRequired';Descending=$true},@{Expression='InProgress';Descending=$true},PolicyName)
+        $policyTable = Convert-ObjectsToHtmlTable -Rows $policySummary -Columns @('PolicyName','Devices','Completed','InProgress','ActionRequired','Unknown','CompletionPct') -Title 'Feature Update policies'
 
-        $policySummaryTable = Convert-ObjectsToHtmlTable `
-            -Rows ($policySummarySorted | Select-Object PolicyName,PolicyId,Rows,UniqueDevices,CoveragePct,AtRiskRows,AtRiskPct,HighRisk,MediumRisk,LowRows) `
-            -Columns @("PolicyName","PolicyId","Rows","UniqueDevices","CoveragePct","AtRiskRows","AtRiskPct","HighRisk","MediumRisk","LowRows") `
-            -Title "Summary by Policy (Coverage + Risk)"
+        $actionLimit = [math]::Max(1,$RiskTopN)
+        $actionRows = @($deviceSummaryRows | Where-Object OperationalState -eq 'ActionRequired' | Sort-Object ActionPriority,PolicyName,DeviceName | Select-Object -First $actionLimit `
+            ActionPriority,DeviceName,PolicyName,AggregateState,CurrentDeviceUpdateStatus,LatestAlertMessage,UpgradeEligibilityLabel,ActionCode,ActionOwner,ActionDescription)
+        $actionTable = Convert-ObjectsToHtmlTable -Rows $actionRows -Columns @('ActionPriority','DeviceName','PolicyName','AggregateState','CurrentDeviceUpdateStatus','LatestAlertMessage','UpgradeEligibilityLabel','ActionCode','ActionOwner','ActionDescription') -Title ("Top {0} devices requiring action" -f $actionLimit)
 
-        $topRiskPolicies = $policySummary |
-            Sort-Object @{Expression="AtRiskRows";Descending=$true},@{Expression="AtRiskPct";Descending=$true} |
-            Select-Object -First $RiskTopN
+        $summaryMatched = @($deviceSummaryRows | Where-Object ReadinessMatch -eq 'Matched').Count
+        $summaryNotMatched = @($deviceSummaryRows | Where-Object ReadinessMatch -eq 'NotMatched').Count
+        $summaryReadinessPct = if (($summaryMatched+$summaryNotMatched) -gt 0) { [math]::Round(100.0*$summaryMatched/($summaryMatched+$summaryNotMatched),2) } else { 0 }
+        $readinessRows = @(
+            [pscustomobject]@{ Metric='Enrichment enabled'; Value=$EnableReadinessEnrichment }
+            [pscustomobject]@{ Metric='Mode'; Value=$readinessMode }
+            [pscustomobject]@{ Metric='Matched devices'; Value=$summaryMatched }
+            [pscustomobject]@{ Metric='Unmatched devices'; Value=$summaryNotMatched }
+            [pscustomobject]@{ Metric='Match percentage'; Value="$summaryReadinessPct%" }
+        )
+        $readinessTable = Convert-ObjectsToHtmlTable -Rows $readinessRows -Columns @('Metric','Value') -Title 'Readiness data quality'
 
-        $topRiskTable = Convert-ObjectsToHtmlTable `
-            -Rows ($topRiskPolicies | Select-Object PolicyName,PolicyId,AtRiskRows,AtRiskPct,HighRisk,MediumRisk,CoveragePct) `
-            -Columns @("PolicyName","PolicyId","AtRiskRows","AtRiskPct","HighRisk","MediumRisk","CoveragePct") `
-            -Title ("Top {0} Policies at Risk" -f $RiskTopN)
-
-        # Top eligible blocked devices
-        $topEligibleBlockedTable = Convert-ObjectsToHtmlTable `
-            -Rows @($enrichedRows | Where-Object { $_.UpgradeEligibilityLabel -eq "Eligible" -and $_.ActionCode -eq "ELIGIBLE_DEVICE_BLOCKED" } |
-                Select-Object -First 20 ActionPriority,PolicyName,DeviceName,AggregateState,CurrentDeviceUpdateStatus,LatestAlertMessage,ActionCode,ActionOwner) `
-            -Columns @("ActionPriority","PolicyName","DeviceName","AggregateState","CurrentDeviceUpdateStatus","LatestAlertMessage","ActionCode","ActionOwner") `
-            -Title "Top Eligible Devices Blocked (Critical)"
-
-        # Top actionable items
-        $topActionsTable = Convert-ObjectsToHtmlTable `
-            -Rows @($enrichedRows | Where-Object { $_.BlockingReason -like "HardFailure*" -or $_.BlockingReason -eq "UpdateAlert" } |
-                Sort-Object ActionPriority,PolicyName,DeviceName | Select-Object -First 20 `
-                ActionPriority,ActionOwner,ActionCode,PolicyName,DeviceName,AggregateState,BlockingReason,UpgradeEligibilityLabel) `
-            -Columns @("ActionPriority","ActionOwner","ActionCode","PolicyName","DeviceName","AggregateState","BlockingReason","UpgradeEligibilityLabel") `
-            -Title "Top Actionable Items"
-
-        $subject = "[SmartM365] WinUpdate Feature Update status - SUCCESS - Rows=$count Completion=$globalCompletionPct% AtRisk=$globalAtRiskPct% Actionable=$actionableCount Monitoring=$monitoringCount EligibleHardFail=$eligibleBlockedHard"
-
-        $spStatusColor = if ($spUploadStatus -eq "Error") { "color:#b00020;" } elseif ($spUploadStatus -eq "Success") { "color:#007700;" } else { "" }
+        $statusColor = switch ($reportStatus) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
+        $statusBackground = switch ($reportStatus) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
+        $subject = "[$reportStatus] WinUpdate Feature Update - $OrgDomain - $completedCount/$totalUniqueDevices completed - $actionRequiredCount action(s)"
+        $fileLinkHtml = if (-not [string]::IsNullOrWhiteSpace($spUploadUrl)) {
+            $encodedUrl = Html-Encode $spUploadUrl
+            $encodedName = Html-Encode ([IO.Path]::GetFileName($CsvLastFinal))
+            "<div style='margin-top:18px;padding:14px;border:1px solid #dbe4ee;background:#f8fafc;'><h3 style='margin:0 0 8px;'>Export</h3><a href='$encodedUrl' style='color:#075985;text-decoration:underline;'>$encodedName</a></div>"
+        } else { '' }
 
         $html = @"
-<html><body style="font-family:Segoe UI,Arial;">
-<h2 style="margin:0 0 10px 0;">Windows Update Feature Update status - SUCCESS</h2>
-<ul>
-<li><b>Script</b>: $(Html-Encode $ScriptName) v$(Html-Encode $ScriptVersion)</li>
-<li><b>RunId</b>: $(Html-Encode $RunId)</li>
-<li><b>Host</b>: $(Html-Encode $env:COMPUTERNAME)</li>
-<li><b>ReportName</b>: $(Html-Encode $ReportName)</li>
-<li><b>Policies</b>: $($policies.Count)</li>
-<li><b>Rows</b>: $count</li>
-<li><b>Global unique devices</b>: $totalUniqueDevices</li>
-<li><b>Global Completion Rate</b>: $globalCompletionPct% ($globalLowCount Low-risk rows)</li>
-<li><b>Global At-Risk Rate</b>: $globalAtRiskPct% ($globalHighMedCount High/Medium rows)</li>
-<li><b>Blocking (All / Actionable / Monitoring)</b>: $blockingCount / $actionableCount / $monitoringCount</li>
-<li><b>Eligible + HardFailure</b>: $eligibleBlockedHard</li>
-<li><b>Execution time</b>: $([int]$duration.TotalSeconds) seconds</li>
-<li><b>ExportDateTime</b>: $(Html-Encode $exportTime)</li>
-$(if ($DryRun) { "<li><b style='color:#b00020;'>DRY-RUN MODE: no files written</b></li>" })
-</ul>
-
-<h3 style="margin:16px 0 8px 0;">Readiness Enrichment</h3>
-<ul>
-<li><b>Enabled</b>: $(Html-Encode $EnableReadinessEnrichment)</li>
-<li><b>Mode</b>: $(Html-Encode $readinessMode)</li>
-<li><b>Readiness rows</b>: $readinessTotal  |  <b>Matched</b>: $readinessMatched  |  <b>NotMatched</b>: $readinessNotMatched  |  <b>MatchPct</b>: $readinessMatchPct%</li>
-<li><b>Eligibility distribution</b>: $(Html-Encode $readinessEligibilityDist)</li>
-<li><b>Summary</b>: $(Html-Encode $readinessSummaryText)</li>
-</ul>
-
-<h3 style="margin:16px 0 8px 0;">Output CSV</h3>
-<ul>
-<li><b>DATA-ALL</b>: $(Html-Encode $CsvFinal)</li>
-<li><b>DATA-LAST</b>: $(Html-Encode $CsvLastFinal)</li>
-</ul>
-
-<h3 style="margin:16px 0 8px 0;">SharePoint Upload</h3>
-<ul>
-<li><b>Status</b>: <span style="$spStatusColor">$(Html-Encode $spUploadStatus)</span></li>
-<li><b>Target</b>: $(Html-Encode "$SP_SiteHostname$SP_SitePath / $SP_LibraryDisplayName / $SP_TargetFolderPath")</li>
-$(if ($spDestPath)     { "<li><b>Destination</b>: $(Html-Encode $spDestPath)</li>" })
-$(if ($spUploadError)  { "<li><b style='color:#b00020;'>Error</b>: $(Html-Encode $spUploadError)</li>" })
-</ul>
-
-$kpiTable
-$topEligibleBlockedTable
-$topActionsTable
-$policySummaryTable
-$topRiskTable
-
-</body></html>
+<html><body style="margin:0;background:#f3f6f9;font-family:Segoe UI,Arial;color:#1f2937;">
+<div style="max-width:1100px;margin:0 auto;padding:22px;">
+<div style="background:#0f172a;color:#fff;padding:22px;border-radius:8px 8px 0 0;">
+<div style="font-size:12px;color:#7dd3fc;font-weight:700;text-transform:uppercase;">SmartM365 Windows Update</div>
+<h1 style="font-size:24px;margin:8px 0;">Feature Update operational summary</h1>
+<div>Tenant: $(Html-Encode $OrgDomain) | Host: $(Html-Encode $env:COMPUTERNAME) | Generated: $(Html-Encode $exportTime)</div>
+</div>
+<div style="background:#fff;border:1px solid #dbe4ee;border-top:0;padding:22px;border-radius:0 0 8px 8px;">
+<div style="display:inline-block;padding:6px 12px;border-radius:999px;background:$statusBackground;color:$statusColor;font-weight:700;">$reportStatus</div>
+<p style="margin:14px 0 18px;">One device is counted once. When a device appears in several policies, its most severe state is retained.</p>
+<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
+<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">DEVICES</div><div style="font-size:24px;font-weight:700;">$totalUniqueDevices</div></td>
+<td style="padding:14px;background:#dcfce7;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">COMPLETED</div><div style="font-size:24px;font-weight:700;">$completedCount</div></td>
+<td style="padding:14px;background:#dbeafe;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">IN PROGRESS</div><div style="font-size:24px;font-weight:700;">$inProgressCount</div></td>
+<td style="padding:14px;background:#fee2e2;border:1px solid #fecaca;"><div style="font-size:11px;color:#b91c1c;">ACTION REQUIRED</div><div style="font-size:24px;font-weight:700;">$actionRequiredCount</div></td>
+<td style="padding:14px;background:#fef3c7;border:1px solid #fde68a;"><div style="font-size:11px;color:#92400e;">UNKNOWN</div><div style="font-size:24px;font-weight:700;">$unknownCount</div></td>
+<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">COMPLETION</div><div style="font-size:24px;font-weight:700;">$completionPct%</div></td>
+</tr></table>
+<p style="font-size:12px;color:#64748b;">Policies: $($policies.Count) | Source rows: $count | Duration: $([int]$duration.TotalSeconds) seconds | RunId: $(Html-Encode $RunId)</p>
+$actionTable
+$statusTable
+$policyTable
+$readinessTable
+$fileLinkHtml
+</div></div></body></html>
 "@
 
         if (Send-SummaryEmail -Subject $subject -HtmlBody $html) {
-            Save-SummaryState -Count $count -StatePath $SummaryStatePath
+            Save-SummaryState -State $summaryState -StatePath $SummaryStatePath
         }
     }
     else {
         Write-Log "Summary email skipped (Mode=$SummaryEmailMode)." "INFO" "MAIL"
     }
 
-    Write-Log "Completed successfully. Version=$ScriptVersion DryRun=$DryRun Rows=$count Completion=$globalCompletionPct% AtRisk=$globalAtRiskPct%" "INFO"
+    Write-Log "Completed successfully. Version=$ScriptVersion DryRun=$DryRun Rows=$count Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount ActionRequired=$actionRequiredCount Unknown=$unknownCount Completion=$completionPct%" "INFO"
 }
 catch {
     $err = $_
@@ -1626,8 +1631,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBosTjhmrJ9JQ0T
-# rjO0H681JsHg74UelOVXui/pKYXhEKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2ZhH8//T2pbXY
+# jQiCGtHrFMN95XH3m88J15BPkosytaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1760,31 +1765,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILb27tDqijRZcSk8lYduG/9NDJVD0QxKOwu5vaBgRB3dMA0GCSqG
-# SIb3DQEBAQUABIIBgFb/1GE75FnDuNxm0WUseYMfVuYi3VZ2pZSNJXNMDj4eQ/AN
-# wCTcHRZrfnEtEqDFhjqOmBTCBlsNXMg6kGup0KJEhABDna/BmGOx898xOkd5ZjzX
-# 35rzHjFKR/lYOK4pOYRGDpqI3zu36p7fKZMC1aYdwWb2Ghjhrw8NXIKVdAef1ruY
-# IUCmtqG6AkrSuMkfC3GIVnBdRKYwhdT+bIx8PIrfcTuJiBb0VMF0pDgWQE2hg4pb
-# 7BxIhISkiwatnd9lcHQM49upNMeaUMVLtH7CkWKpniwjh72Yco8Q0uiV+TGo6Gs9
-# Oggr2/zSjKuBnXob26soShSq940q8Bpwlo/OYzl46tUBkziDGcgDpdFVRUncleAI
-# U1hHGOIkgiKKyD9hPxQydoxCCinJewXFunongJ2/uoLi3wzCmxg6Dfu0UU09LClJ
-# FV4aIItAFPzNOBMGat4MECrktsWQWcFCqZdZKcJhr7+0teLjcigYUoZXPqFew4xy
-# vyG0MV7rghqeQuG1R6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPSrOZpbKYWq2uZ2XJv0leSW9V5k8tGa6AlWxF4zzG4KMA0GCSqG
+# SIb3DQEBAQUABIIBgHVkhAmd24ZfVjS54itPEKh4+PBsEG8+9H3X5BZvNeF9ZNju
+# zfwCJL/7gQrjrcN8ozbbyrt59Ol65iVFYwYqk/CbJNitwtn8j4SRostA0ntHrJJ8
+# z2G6sBxS3Fd23KM1H0XPkEEryjd/lPLNfzuZjdEodVVyuwnz6rO+t02vEPKsBm6L
+# ODGOCxCa11HJKKLFy+spOs825RuQOcoK7SwnBUT5F2OxH1vBAEDUpJbmgkdCD+/L
+# h+1EvpcX7aSeES5wO3iqcpxnfN0E4hdoLpNrAdg/iZn/xLD3eP72PDQsNOPgpfxa
+# tvBIXFGhaJEHxW2uCgfWVDaOy+FLiIxpjEdO7a2mMichTx8v+4fsFtyE5p5twLwb
+# WE2iVJlR7Ji28JZcLIuFm0+MbqZIZAwvSeTMg3+57FhKg0Jxk1E3e1Pen/1d+wdR
+# ikCKBuZlQ2ZjBMR/5cPloFm8xupU+O7Z/xrOmrdnXDk6RZAfER/lqsbqwt3Dw7RS
+# 8PaH3m9dhRAqthPtbqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMzEx
-# NTVaMC8GCSqGSIb3DQEJBDEiBCAGCmP0mLprvyEMliOleQvpuvCWclrOw68hX55W
-# yQKQ3TANBgkqhkiG9w0BAQEFAASCAgBA1roJ6st8WG2pZjNRGGocQKEY+YnjXTeI
-# G/M+9ga+FwvjE9JQtp/+CQi8IynpR3dB70+0n4snmm+dP6TcjWBK7yMW0Mnwuae/
-# fonROKHt+gBl36yto/KNJNPgiHZ8zUNNJ/g8OLEPZBZOx2p3w5ncdNGrgPwud1oo
-# 6T+PywicNZA5FIg+W5Stm41eo7rmnJG7U+HCxUy6Kht9TFGldgeBrQxOtjzwG1nT
-# qvNH6LymbO8GoE6nil/XWpNmNtUogTAmPhIAlDnKQJx3W/HBvBgC/d91Lgi+vpWZ
-# 4wbiVdMECWcqe4tOi9MEmeKPliOcuN9Wxvn4uLCtbJ2ihY690v2EVRIA4yU5CQv+
-# 6Tz/bUf/WakjB0CSp0OWKQ+rnK81fSoDAj3xW/FBkZyloPq+Pd+wrg2bYr/BitJ4
-# NSF6mus2fDYzh+2PfJSQAP065ox2lFjZ9QpDDguFNuqYB5DSCJnGFcLSo01/E3Yf
-# tHKS5Vv0y+pmf9edsq+Mx5K57k1mzgXPuHFX8u7iXqItEjbre5GXUE+knixGbXWX
-# 2CtHVjtVJ3KXmwfnRfjWYGM29zFb8fDyZxm2sKWH7uNsSLEKyiRHquoJ4k8pJgH5
-# q0nLgC4Qf0K1Ca/NVvpRRFNPcwb9yx8Za9upjO3ayyV08kWbHJITopry7ISGJY7p
-# /16CW4le2A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDE4
+# MjVaMC8GCSqGSIb3DQEJBDEiBCCg903rc8rA8sXY8iSmOgPeFie/KUV7g+9AFM4y
+# Kh8LXDANBgkqhkiG9w0BAQEFAASCAgAKH75Tvh1rGF+rH+iSDI2Yv4ksFUzLQELT
+# iWHRPxmq9tMprDwtWYJEXgXzPPHrDGLrMC9syLsjSRtYYy9TFeJM8SA9fvfaNaiV
+# EYTE3NVgm8QUgcvnR+/zmOJZESUqoEq9A7ANbCNhOBWy/b07MH9thhVZz23zl88K
+# 4MIrpUgC6oDSJHXe7cBCMk5Zg3IotSNjUSBh9uWcbNAukyIFfwtLnDKCBZV/5Zu5
+# GgilQcF/zYZfArZCLQFPcf1kedzHVBdF0mDW4zLREkP9dxyeppq6Wd7flKkEQ1ni
+# a6RZc5x8GErToSEoSFiN14rQ6c61kYppiSKpRa9oBJXuzJcAYbriydJH/p/g03vE
+# GLxpCAlVOLnDlWYIno+xxDntdFe76WTmjfe3Na6WVuIqrYdZXTs6IaksBOsznfCQ
+# enanzPRtL7AXrfidVAXXF0iOUgN06fzuhROe7GypJtDmdyheZe4PgMuEkFBKZrSk
+# mPW+4uhFC3ZiCXyFrv2p8+0BGizLT3EcgNgFWV3TWlo8ZtFSJePKaiafXEumMUvu
+# SOIrvGhMMo9/+fOQFTbowUGZsyljRWJHN+GnNhD8EZeJXfm5p8A564Cja78OGLeU
+# Ivrm/ieQJhmDnmQgQob2OcNYD6BmB39l8c8Rjy+b2AWCv5Rq5thfm/uzdvl/JOcK
+# xXV3JTTihA==
 # SIG # End signature block
