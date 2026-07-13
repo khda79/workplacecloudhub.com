@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.26) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.27) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -16,7 +16,7 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `LocalMachine` trust stores by default; `CurrentUser` remains available explicitly. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator.cmd` | Production launcher: `-Tenant prod -Connect`. |
-| `..\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd` | Sends the prod execution-summary email with separate tables for the last 24 hours and 7 days. |
+| `..\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd` | Sends the prod execution-summary email with a consolidated row per job plus separate detailed tables for the last 24 hours and 7 days. |
 
 | `..\Launchers\Orchestrator\Stop-SmartM365-Inventory-Orchestrator.cmd` | Launcher: requests a clean stop for the running prod orchestrator instance. |
 
@@ -232,7 +232,7 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 | `-JobsManifestPath <path>` / `-StatePath <path>` | Override default file locations. |
 | `-Stop` | Writes a manual stop request for the current tenant and waits for the live instance to exit cleanly. Does not kill detached running jobs. |
 | `-StopTimeoutSeconds <int>` | Maximum wait for `-Stop` before returning exit code 1. Default 180 seconds. |
-| `-SendExecutionSummary` | Sends the 24-hour and 7-day execution-summary email, then exits without acquiring the resident lock or launching inventory jobs. |
+| `-SendExecutionSummary` | Sends a consolidated execution overview followed by the 24-hour and 7-day detailed tables, then exits without acquiring the resident lock or launching inventory jobs. |
 
 ## Exit codes
 
@@ -340,7 +340,7 @@ Run the dedicated launcher to send an immediate prod summary without stopping or
 .\SmartM365\SmartInventory\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd
 ```
 
-The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -SendExecutionSummary`. This one-shot mode reads the per-server `Orchestrator_JobRuns_<yyyyMMdd>.csv` files, sends one detailed table for the last 24 hours and a second detailed table for the last 7 days, and exits. It does not load the jobs manifest, acquire the resident lock, launch jobs, stop jobs, or change `LastDailySummaryDate`.
+The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -SendExecutionSummary`. This one-shot mode reads the per-server `Orchestrator_JobRuns_<yyyyMMdd>.csv` files, sends a consolidated table with one row per job observed during the last 7 days, then one detailed table for the last 24 hours and a second detailed table for the last 7 days. The consolidated counts include retries and skipped attempts. It does not load the jobs manifest, acquire the resident lock, launch jobs, stop jobs, install Authenticode trust certificates, or change `LastDailySummaryDate`.
 
 ## Testing before scheduling
 
