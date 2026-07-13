@@ -101,7 +101,7 @@ Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds
     inside its own child process.
 
 .NOTES
-    Version : 1.3.17
+    Version : 1.3.20
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -125,7 +125,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.19"
+$ScriptVersion = "1.3.20"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -2220,7 +2220,15 @@ function Update-RunningJobs {
         if ($timeoutMinutes -gt 0 -and ($Now - [datetime]$info.StartTime).TotalMinutes -gt $timeoutMinutes) {
             Write-OrchestratorLog -Message ("Job {0}: timeout after {1} minutes (limit {2}); killing the process tree of PID {3}." -f $name, [int]($Now - [datetime]$info.StartTime).TotalMinutes, $timeoutMinutes, $process.Id) -Level ERROR
             Stop-ProcessTree -TargetPid $process.Id
-            try { $process.WaitForExit(10000) | Out-Null } catch { }
+            try { $process.WaitForExit(30000) | Out-Null } catch { }
+            $processStillRunning = $false
+            try { $process.Refresh(); $processStillRunning = -not $process.HasExited } catch { $processStillRunning = $false }
+            if ($processStillRunning) {
+                Write-OrchestratorLog -Message ("Job {0}: PID {1} is still running after timeout kill request; child launcher may have detached another process. Review the job log and launcher." -f $name, $process.Id) -Level WARN
+            }
+            else {
+                Write-OrchestratorLog -Message ("Job {0}: timeout kill confirmed for PID {1}." -f $name, $process.Id) -Level WARN
+            }
             Complete-JobRun -JobName $name -RunInfo $info -StatusHint 'TimedOut' -ExitCode $null -EndTime (Get-Date)
         }
     }
@@ -3121,8 +3129,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaJ5N50JyBcoeZ
-# +461I3xIa/V0dqQ319psemEf3Ra/dqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHStMlgNb2+eKe
+# 29tU1ZNFGRTT/KENkYAUMYC1ZtLKX6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3148,14 +3156,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDgzBLjwgc4yfiOvV2PEVi3m1wRxY9wDMszlRl8mIDPKzANBgkqhkiG9w0B
-# AQEFAASCAYBtOyQLLAW0g4cXy7Kk5azFDg0B55ET8cz1mybd8HokNSzmmAAQXszs
-# Oek+6bUJYgp7bD3sjZjkzkrp4DPio0Wiqu7orKxAQc+tEPVnEseCLKBT7tPIFWmA
-# dwGiC3V6oHJxmgVa74k/85MUOIHS0M9Fz9H8GGfevcxHVbHCCs8mAf0svRe60WLu
-# Ru2H+FrU7F5qkMpi0vC7IGRvBFCVlqh+5I3IEhy5tBlS1UpzRyvwViQRrFq5nHXn
-# Fb/e/P6yEim68D4omO7wP0KiEZtBif20RkZqt9xrw35V7V85HjoYf6AtXP7sbDEM
-# Vpdx+IF75iEnWGYMSlLsGTuFxNxBw8tbZ/+cV6QwHAEJYPAJjEAmNlpoLtB21N3k
-# 9i7lht+pyirSh7x8cYeA5CGZ9FoIjejATP5A2pA5eU7+L25N2iqzENa/UsdKVlXN
-# ru4oJu5Ppge/Q2zNM++WfBqdmNXY3pvd9kv0/lc3AHIcD4bH8VBsMDU3fS79yr7A
-# AdETAGIVWgc=
+# BDEiBCCck5xxQyt/RQqX1qIUebZ+SDhqx7M0xphLrNHsjD3bAzANBgkqhkiG9w0B
+# AQEFAASCAYCpQAqraxfZ4ZBg8qnu372uYRGTf0oXo6X4AW1I3zBvObMc7lWqNMGE
+# 3Ym1wNGjFFeXUNHkTyfKnLvwTKpDqML+MYJxrRPfbXNwtE3c7N/B3nxNzxhhRPI7
+# DuJ0ybaLPsu9jxmNGL4WQl2rRpGY/LTLPsNAz1n7xZCuN60Ua1IlLB2qi7GT10pl
+# 9XDUis060vWmOM6eQFVCjq+Z2+e/wgyNmtyMEi3UldaRjsY8sSkCGCIVjbr70GGL
+# Up2RDiS9twykMfQmOJ5LWWfcQ2H1VQKW9coot5jI09HoaPdHKZyENrH7/2T+iCSA
+# Zk5cGvpxEs+JPRXRuE+FVXgQ26aJ7Nq0i4BC269tF1UuagGh2vf9d9/XKfzOm38Q
+# csvxvbTvk6icXoY5rMYhqUFsPh8/IYm2AvzAhWwHuyO2rVK6f1SdxFjBhpC9urlU
+# u5uaYLRjIfAW0OwzliyAL4XL4xF0kz1p5+BAKDgEqcccI7Pk4ameJyH7FgKjkJLq
+# 5Srg3VH/Snc=
 # SIG # End signature block
