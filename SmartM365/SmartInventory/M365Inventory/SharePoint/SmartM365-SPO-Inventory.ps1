@@ -47,18 +47,18 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.15
+0.17
 
 
 .REQUIREMENTS
     PowerShell 7+.
-    Modules: SmartM365.Core; Microsoft.Graph.Authentication; optional PnP.PowerShell only when -UsePnPDeepScan is used.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel; optional PnP.PowerShell only when -UsePnPDeepScan is used.
     Minimum Graph application permissions for default inventory: Reports.Read.All; Sites.Read.All; Directory.Read.All.
     Optional PnP deep sharing scan may require SharePoint site-level access for scanned sites.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Requires: PowerShell 7+, Microsoft.Graph.Authentication, SmartM365.Core.psd1
+    Requires: PowerShell 7+, Microsoft.Graph.Authentication, ImportExcel, SmartM365.Core.psd1
     Optional: PnP.PowerShell only when -UsePnPDeepScan is used.
     Minimum Microsoft Graph application permissions for default inventory:
       - Reports.Read.All for SharePoint and OneDrive usage reports.
@@ -102,7 +102,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.15"
+$ScriptVersion = "0.17"
 $CurrentOperation = 'Initialize'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -252,55 +252,142 @@ function Invoke-SpoWithRetry {
 
 function Ensure-SpoUtf8Bom { param([Parameter(Mandatory)][string]$Path) if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return}; $bytes=[System.IO.File]::ReadAllBytes($Path); if($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF){return}; $bom=[byte[]](0xEF,0xBB,0xBF); $combined=[byte[]]::new($bom.Length+$bytes.Length); [Array]::Copy($bom,0,$combined,0,$bom.Length); [Array]::Copy($bytes,0,$combined,$bom.Length,$bytes.Length); [System.IO.File]::WriteAllBytes($Path,$combined) }
 function Add-SpoHistoryCsv { param([AllowEmptyCollection()][object[]]$Data,[Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string[]]$Columns) $Columns=@('TenantKey','OrganizationKey','EnvironmentKey','TenantId')+@($Columns|Where-Object{$_-inotmatch'^(TenantKey|OrganizationKey|EnvironmentKey|TenantId)$'}); $parent=Split-Path -Path $Path -Parent; if(-not(Test-Path -LiteralPath $parent)){New-Item -Path $parent -ItemType Directory -Force|Out-Null}; $rows=@($Data|Select-Object -Property $Columns); if(-not(Test-Path -LiteralPath $Path)){ $rows|Add-SmartM365TenantKey | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Delimiter ','; Ensure-SpoUtf8Bom -Path $Path; return }; Repair-SmartM365CsvTenantKeySchema -Path $Path -Delimiter ',' -Encoding UTF8|Out-Null; $rows|Add-SmartM365TenantKey | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Delimiter ',' -Append; Ensure-SpoUtf8Bom -Path $Path }
-function Export-SpoEntityCsv { param([Parameter(Mandatory)][string]$BaseFileName,[AllowEmptyCollection()][object[]]$Data,[Parameter(Mandatory)][string[]]$Columns,[Parameter(Mandatory)][string]$TimestampedFolder,[Parameter(Mandatory)][string]$LatestFolder,[switch]$AppendHistoryMode) $Columns=@('TenantKey','OrganizationKey','EnvironmentKey','TenantId')+@($Columns|Where-Object{$_-inotmatch'^(TenantKey|OrganizationKey|EnvironmentKey|TenantId)$'}); $timestamp=Get-Date -Format 'yyyyMMdd_HHmmss'; $timestampedPath=Join-Path -Path $TimestampedFolder -ChildPath ("{0}_{1}.csv" -f $BaseFileName,$timestamp); $latestPath=Join-Path -Path $LatestFolder -ChildPath ("{0}.csv" -f $BaseFileName); if(@($Data).Count -eq 0){$header='"'+($Columns -join '","')+'"'; Set-Content -LiteralPath $timestampedPath -Value $header -Encoding UTF8; Set-Content -LiteralPath $latestPath -Value $header -Encoding UTF8; Ensure-SpoUtf8Bom -Path $timestampedPath; Ensure-SpoUtf8Bom -Path $latestPath; return [pscustomobject]@{TimestampedPath=$timestampedPath;LatestPath=$latestPath}}; $result=Export-SmartM365Csv -Data $Data -TimestampedPath $timestampedPath -LatestPath $latestPath -Columns $Columns; Ensure-SpoUtf8Bom -Path $timestampedPath; Ensure-SpoUtf8Bom -Path $latestPath; if($AppendHistoryMode){$historyPath=Join-Path -Path $TimestampedFolder -ChildPath ("{0}_History.csv" -f $BaseFileName); Add-SpoHistoryCsv -Data $Data -Path $historyPath -Columns $Columns; Write-SpoLog -Message ("History CSV appended: {0}" -f $historyPath)}; return $result }
+function Export-SpoEntityCsv {
+    param(
+        [Parameter(Mandatory)][string]$BaseFileName,
+        [AllowEmptyCollection()][object[]]$Data,
+        [Parameter(Mandatory)][string[]]$Columns,
+        [Parameter(Mandatory)][string]$TimestampedFolder,
+        [Parameter(Mandatory)][string]$LatestFolder,
+        [Parameter(Mandatory)][string]$Timestamp,
+        [switch]$AppendHistoryMode
+    )
+    $Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId') + @($Columns | Where-Object { $_ -inotmatch '^(TenantKey|OrganizationKey|EnvironmentKey|TenantId)$' })
+    $timestampedPath = Join-Path -Path $TimestampedFolder -ChildPath ("{0}_{1}.csv" -f $BaseFileName,$Timestamp)
+    $latestPath = Join-Path -Path $LatestFolder -ChildPath ("{0}.csv" -f $BaseFileName)
+    if (@($Data).Count -eq 0) {
+        $header = '"' + ($Columns -join '","') + '"'
+        Set-Content -LiteralPath $timestampedPath -Value $header -Encoding UTF8
+        Set-Content -LiteralPath $latestPath -Value $header -Encoding UTF8
+        Ensure-SpoUtf8Bom -Path $timestampedPath
+        Ensure-SpoUtf8Bom -Path $latestPath
+        if (-not $DryRun) {
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $timestampedPath | Out-Null
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath | Out-Null
+        }
+        return [pscustomobject]@{ TimestampedPath=$timestampedPath; LatestPath=$latestPath }
+    }
+    $result = Export-SmartM365Csv -Data $Data -TimestampedPath $timestampedPath -LatestPath $latestPath -Columns $Columns
+    Ensure-SpoUtf8Bom -Path $timestampedPath
+    Ensure-SpoUtf8Bom -Path $latestPath
+    if ($AppendHistoryMode) {
+        $historyPath = Join-Path -Path $TimestampedFolder -ChildPath ("{0}_History.csv" -f $BaseFileName)
+        Add-SpoHistoryCsv -Data $Data -Path $historyPath -Columns $Columns
+        Write-SpoLog -Message ("History CSV appended: {0}" -f $historyPath)
+    }
+    return $result
+}
+function Get-SpoCsvColumnNames {
+    param([Parameter(Mandatory)][string]$Path)
+    $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path)
+    try {
+        $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
+        $parser.SetDelimiters(',')
+        $parser.HasFieldsEnclosedInQuotes = $true
+        if ($parser.EndOfData) { return @() }
+        return @($parser.ReadFields())
+    }
+    finally { $parser.Dispose() }
+}
+
+function Ensure-SpoImportExcelModule {
+    [CmdletBinding()]
+    param()
+
+    $module = Get-Module -ListAvailable -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
+    if (-not $module) {
+        $installCommand = 'Install-Module ImportExcel -Scope CurrentUser -Repository PSGallery -Force -AllowClobber'
+        Write-SpoLog -Message ("ImportExcel is not installed. Automatic installation starting: {0}" -f $installCommand) -Level WARNING
+        if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
+            throw "ImportExcel is missing and Install-Module is unavailable. Install PowerShellGet, then run: $installCommand"
+        }
+        try {
+            Install-Module -Name ImportExcel -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
+        }
+        catch {
+            throw "Automatic ImportExcel installation failed. Run '$installCommand' with the SmartM365 execution account. $($_.Exception.Message)"
+        }
+        $module = Get-Module -ListAvailable -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $module) { throw 'ImportExcel installation completed but the module is still unavailable in PSModulePath.' }
+        Write-SpoLog -Message ("ImportExcel installed automatically: version={0}; path={1}" -f $module.Version,$module.Path) -Level SUCCESS
+    }
+    Import-Module -Name $module.Path -Force -ErrorAction Stop
+    Write-SpoLog -Message ("ImportExcel module loaded: version={0}; path={1}" -f $module.Version,$module.Path) -Level INFO
+}
+function New-SpoTimestampedWorkbook {
+    param(
+        [Parameter(Mandatory)][object[]]$CsvFiles,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    Import-Module ImportExcel -ErrorAction Stop
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
+    foreach ($csv in $CsvFiles) {
+        $rows = @(Import-Csv -LiteralPath $csv.Path)
+        $isEmpty = $rows.Count -eq 0
+        if ($isEmpty) {
+            $placeholder = [ordered]@{}
+            foreach ($column in @(Get-SpoCsvColumnNames -Path $csv.Path)) { $placeholder[$column] = '' }
+            $rows = @([pscustomobject]$placeholder)
+        }
+        $rows | Export-Excel -Path $Path -WorksheetName $csv.WorksheetName -TableName $csv.TableName -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter
+        if ($isEmpty) {
+            $package = Open-ExcelPackage -Path $Path
+            try { $package.Workbook.Worksheets[$csv.WorksheetName].DeleteRow(2) }
+            finally { Close-ExcelPackage -ExcelPackage $package }
+        }
+    }
+    return $Path
+}
+
+function Ensure-SpoSharePointUploadRecord {
+    param([Parameter(Mandatory)][string]$Path)
+    $record = Get-SmartM365SharePointUploadRecordForLocalFile -FilePath $Path
+    if (-not $record -and -not $DryRun) {
+        $record = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $Path
+    }
+    return $record
+}
+
+function New-SpoSharePointLinksHtml {
+    param([Parameter(Mandatory)][string[]]$Paths)
+    $links = foreach ($path in $Paths) {
+        $record = Ensure-SpoSharePointUploadRecord -Path $path
+        if (-not $record -or [string]::IsNullOrWhiteSpace([string]$record.WebUrl)) {
+            Write-SpoLog -Message ("Mail link omitted because no SharePoint WebUrl is available for {0}." -f [IO.Path]::GetFileName($path)) -Level WARNING
+            continue
+        }
+        $name = ConvertTo-SpoHtml ([IO.Path]::GetFileName($path))
+        $url = ConvertTo-SpoHtml ([string]$record.WebUrl)
+        "<li style='margin:0 0 6px;'><a href='$url' style='color:#075985;text-decoration:underline;'>$name</a></li>"
+    }
+    if (@($links).Count -eq 0) { return '' }
+    return "<div style='margin-top:18px;padding:14px;border:1px solid #d9e2ec;background:#f8fafc;'><h2 style='font-size:15px;margin:0 0 8px;'>Timestamped exports</h2><p style='margin:0 0 8px;'>SharePoint links for this run:</p><ul style='margin:0;padding-left:20px;'>$($links -join '')</ul></div>"
+}
 function New-SpoAlertRow { param([Parameter(Mandatory)][string]$Severity,[Parameter(Mandatory)][string]$Category,[Parameter(Mandatory)][string]$SiteUrl,[string]$ObjectName='',[string]$Metric='',[AllowNull()]$Value=$null,[string]$Threshold='',[string]$Details='') [pscustomobject]@{Severity=$Severity;Category=$Category;SiteUrl=$SiteUrl;ObjectName=$ObjectName;Metric=$Metric;Value=if($null -eq $Value){''}else{[string]$Value};Threshold=$Threshold;Details=$Details} }
 
 function New-SpoHtmlSummary {
-    param([Parameter(Mandatory)][string]$Title,[Parameter(Mandatory)][string]$WorstStatus,[Parameter(Mandatory)][object[]]$Alerts,[Parameter(Mandatory)][hashtable]$Summary,[Parameter(Mandatory)][object[]]$TopSites,[string]$LogFilePath='',[string]$CsvFolderPath='')
+    param([Parameter(Mandatory)][string]$Title,[Parameter(Mandatory)][string]$WorstStatus,[Parameter(Mandatory)][object[]]$Alerts,[Parameter(Mandatory)][hashtable]$Summary,[Parameter(Mandatory)][object[]]$TopSites,[string]$FileLinksHtml='')
     $statusColor=switch($WorstStatus){'Critical'{'#991b1b'}'Warning'{'#92400e'}default{'#166534'}}; $statusBg=switch($WorstStatus){'Critical'{'#fee2e2'}'Warning'{'#fef3c7'}default{'#dcfce7'}}
     $alertRows=foreach($alert in @($Alerts|Sort-Object @{Expression={if($_.Severity -eq 'Critical'){0}else{1}}},Category,SiteUrl|Select-Object -First 100)){ $rowColor=if($alert.Severity -eq 'Critical'){'#fee2e2'}else{'#fef3c7'}; '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;background:{0};font-weight:700;">{1}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{2}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;word-break:break-all;">{3}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{4}</td><td style="padding:8px;border-bottom:1px solid #e5edf5;">{5}</td></tr>' -f $rowColor,(ConvertTo-SpoHtml $alert.Severity),(ConvertTo-SpoHtml $alert.Category),(ConvertTo-SpoHtml $alert.SiteUrl),(ConvertTo-SpoHtml $alert.Value),(ConvertTo-SpoHtml $alert.Details) }
     if(-not $alertRows){$alertRows=@('<tr><td colspan="5" style="padding:10px;color:#166534;">No Warning or Critical alert detected.</td></tr>')}
     $summaryRows=foreach($key in ($Summary.Keys|Sort-Object)){ '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;color:#475569;">{0}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;font-weight:700;">{1}</td></tr>' -f (ConvertTo-SpoHtml $key),(ConvertTo-SpoHtml $Summary[$key]) }
     $globalRows = @('SharePointSites','OneDriveSites','ListsProcessed','StorageUsedGB','StorageQuotaGB','CriticalAlerts','WarningAlerts','InventoryMode') | ForEach-Object { if ($Summary.Contains($_)) { '<td style="padding:10px 12px;border:1px solid #d9e2ec;background:#f8fafc;min-width:120px;"><div style="font-size:11px;color:#64748b;text-transform:uppercase;">{0}</div><div style="font-size:20px;font-weight:700;color:#0f172a;">{1}</div></td>' -f (ConvertTo-SpoHtml $_),(ConvertTo-SpoHtml $Summary[$_]) } }
     $topRows=foreach($site in @($TopSites|Select-Object -First 20)){ '<tr><td style="padding:8px;border-bottom:1px solid #e5edf5;word-break:break-all;">{0}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;font-weight:700;">{1}</td><td align="right" style="padding:8px;border-bottom:1px solid #e5edf5;">{2}</td></tr>' -f (ConvertTo-SpoHtml $site.SiteUrl),(ConvertTo-SpoHtml $site.StorageUsedGB),(ConvertTo-SpoHtml $site.StorageQuotaPercent) }
-    $technicalHtml="<div style='margin-top:18px;font-size:11px;line-height:16px;color:#64748b;'><div><strong>CSV:</strong> <span style='font-family:Consolas,monospace;word-break:break-all;'>$(ConvertTo-SpoHtml $CsvFolderPath)</span></div><div><strong>Log:</strong> <span style='font-family:Consolas,monospace;word-break:break-all;'>$(ConvertTo-SpoHtml $LogFilePath)</span></div></div>"
-    return "<div style='margin:0 0 16px 0;'><span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:12px;font-weight:700;'>$WorstStatus</span></div><h2 style='font-size:15px;margin:0 0 8px;'>Global summary</h2><table width='100%' style='border-collapse:collapse;margin-bottom:16px;'><tr>$($globalRows -join '')</tr></table><h2 style='font-size:15px;margin:0 0 8px;'>Alerts</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Severity</th><th align='left' style='padding:8px;background:#f8fafc;'>Category</th><th align='left' style='padding:8px;background:#f8fafc;'>Site</th><th align='left' style='padding:8px;background:#f8fafc;'>Value</th><th align='left' style='padding:8px;background:#f8fafc;'>Details</th></tr>$($alertRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Summary</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'>$($summaryRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Top 20 largest sites</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Site URL</th><th align='right' style='padding:8px;background:#f8fafc;'>Used GB</th><th align='right' style='padding:8px;background:#f8fafc;'>Quota %</th></tr>$($topRows -join '')</table>$technicalHtml"
+
+    return "<div style='margin:0 0 16px 0;'><span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:12px;font-weight:700;'>$WorstStatus</span></div><h2 style='font-size:15px;margin:0 0 8px;'>Global summary</h2><table width='100%' style='border-collapse:collapse;margin-bottom:16px;'><tr>$($globalRows -join '')</tr></table><h2 style='font-size:15px;margin:0 0 8px;'>Alerts</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Severity</th><th align='left' style='padding:8px;background:#f8fafc;'>Category</th><th align='left' style='padding:8px;background:#f8fafc;'>Site</th><th align='left' style='padding:8px;background:#f8fafc;'>Value</th><th align='left' style='padding:8px;background:#f8fafc;'>Details</th></tr>$($alertRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Summary</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;margin-bottom:16px;'>$($summaryRows -join '')</table><h2 style='font-size:15px;margin:0 0 8px;'>Top 20 largest sites</h2><table width='100%' style='border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;'><tr><th align='left' style='padding:8px;background:#f8fafc;'>Site URL</th><th align='right' style='padding:8px;background:#f8fafc;'>Used GB</th><th align='right' style='padding:8px;background:#f8fafc;'>Quota %</th></tr>$($topRows -join '')</table>$FileLinksHtml"
 }
 
-function Get-SpoMailAttachmentPaths {
-    param(
-        [Parameter(Mandatory)][string]$LatestFolder,
-        [long]$MaxTotalBytes = 2MB
-    )
-
-    $candidateNames = @(
-        'M365_SPO_Sites.csv',
-        'M365_SPO_ExternalSharing.csv',
-        'M365_SPO_Permissions.csv',
-        'M365_SPO_Lists.csv'
-    )
-    $attachments = New-Object System.Collections.Generic.List[string]
-    [long]$totalBytes = 0
-    foreach ($name in $candidateNames) {
-        $candidate = Join-Path -Path $LatestFolder -ChildPath $name
-        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
-        $sizeBytes = (Get-Item -LiteralPath $candidate).Length
-        if ($sizeBytes -gt 3MB) {
-            Write-SpoLog -Message ("Mail attachment skipped because it exceeds Graph inline attachment limit: {0} ({1:n1} MB)." -f $candidate, ($sizeBytes / 1MB)) -Level WARNING
-            continue
-        }
-        if (($totalBytes + $sizeBytes) -gt $MaxTotalBytes) {
-            Write-SpoLog -Message ("Mail attachment skipped to keep Graph sendMail payload small: {0} ({1:n1} MB); current total {2:n1} MB; limit {3:n1} MB." -f $candidate, ($sizeBytes / 1MB), ($totalBytes / 1MB), ($MaxTotalBytes / 1MB)) -Level WARNING
-            continue
-        }
-        $attachments.Add($candidate) | Out-Null
-        $totalBytes += $sizeBytes
-    }
-    if ($attachments.Count -gt 0) {
-        Write-SpoLog -Message ("Mail attachments selected: {0} file(s), {1:n1} MB total." -f $attachments.Count, ($totalBytes / 1MB)) -Level INFO
-    }
-    return $attachments.ToArray()
-}
 function Connect-SpoGraph {
     [CmdletBinding()]
     param(
@@ -613,12 +700,14 @@ function Convert-SpoReportRowToSiteSeed {
 }
 
 Import-SmartM365CoreModule
-$requiredSpoModules = @('Microsoft.Graph.Authentication')
+Ensure-SpoImportExcelModule
+$requiredSpoModules = @('Microsoft.Graph.Authentication','ImportExcel')
 if ($UsePnPDeepScan) { $requiredSpoModules += 'PnP.PowerShell' }
 Invoke-SmartM365Preflight `
     -ScriptName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) `
     -RequiredModules $requiredSpoModules | Out-Null
 Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+Import-Module ImportExcel -ErrorAction Stop
 if ($UsePnPDeepScan) { Import-Module PnP.PowerShell -ErrorAction Stop }
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
@@ -811,16 +900,25 @@ try {
     $permissionColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','PrincipalType','PrincipalName','PrincipalLoginName','IsSiteAdmin','IsExternal','IsDisabled','Status','NumericValue','TextValue','Threshold','Details')
     $sharingColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ObjectType','ObjectTitle','ObjectUrl','SharingSignal','SharingValue','LinkScope','Principal','IsAnonymous','IsExternal','Status','NumericValue','TextValue','Threshold','Details')
 
+    $exportStamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
+    $timestampedCsvFiles = New-Object System.Collections.Generic.List[object]
     foreach ($export in @(
-        @{ Base = 'M365_SPO_Sites'; Data = $siteRows.ToArray(); Columns = $siteColumns },
-        @{ Base = 'M365_SPO_Lists'; Data = $listRows.ToArray(); Columns = $listColumns },
-        @{ Base = 'M365_SPO_Permissions'; Data = $permissionRows.ToArray(); Columns = $permissionColumns },
-        @{ Base = 'M365_SPO_ExternalSharing'; Data = $sharingRows.ToArray(); Columns = $sharingColumns }
+        @{ Base = 'M365_SPO_Sites'; Data = $siteRows.ToArray(); Columns = $siteColumns; WorksheetName='Sites'; TableName='SpoSites' },
+        @{ Base = 'M365_SPO_Lists'; Data = $listRows.ToArray(); Columns = $listColumns; WorksheetName='Lists'; TableName='SpoLists' },
+        @{ Base = 'M365_SPO_Permissions'; Data = $permissionRows.ToArray(); Columns = $permissionColumns; WorksheetName='Permissions'; TableName='SpoPermissions' },
+        @{ Base = 'M365_SPO_ExternalSharing'; Data = $sharingRows.ToArray(); Columns = $sharingColumns; WorksheetName='External sharing'; TableName='SpoExternalSharing' }
     )) {
-        $exportResult = Export-SpoEntityCsv -BaseFileName $export.Base -Data $export.Data -Columns $export.Columns -TimestampedFolder $initializedOutput -LatestFolder $latestFolder -AppendHistoryMode:$AppendHistory
-        if ($exportResult.TimestampedPath) { $generatedCsvPaths.Add($exportResult.TimestampedPath) | Out-Null }
+        $exportResult = Export-SpoEntityCsv -BaseFileName $export.Base -Data $export.Data -Columns $export.Columns -TimestampedFolder $initializedOutput -LatestFolder $latestFolder -Timestamp $exportStamp -AppendHistoryMode:$AppendHistory
+        if ($exportResult.TimestampedPath) {
+            $generatedCsvPaths.Add($exportResult.TimestampedPath) | Out-Null
+            $timestampedCsvFiles.Add([pscustomobject]@{Path=$exportResult.TimestampedPath;WorksheetName=$export.WorksheetName;TableName=$export.TableName}) | Out-Null
+        }
         if ($exportResult.LatestPath) { $generatedCsvPaths.Add($exportResult.LatestPath) | Out-Null }
     }
+    $workbookPath = Join-Path -Path $initializedOutput -ChildPath ("M365_SPO_Inventory_{0}.xlsx" -f $exportStamp)
+    New-SpoTimestampedWorkbook -CsvFiles $timestampedCsvFiles.ToArray() -Path $workbookPath | Out-Null
+    if ($global:RetentionMaxCSV -gt 0) { RemoveOldFiles -Path $initializedOutput -Filter 'M365_SPO_Inventory_*.xlsx' -KeepCount $global:RetentionMaxCSV }
+    if (-not $DryRun) { Ensure-SpoSharePointUploadRecord -Path $workbookPath | Out-Null }
 
     $CurrentOperation = 'Build and send notification'
     $siteArray = @($siteRows.ToArray())
@@ -861,11 +959,11 @@ try {
     if (-not $DryRun) {
         $prefix = if ($worstStatus -eq 'Critical') { '[CRITICAL]' } elseif ($worstStatus -eq 'Warning') { '[WARNING]' } else { '[OK]' }
         $subject = "$prefix SmartM365 SharePoint Online inventory - $TenantName"
-        $bodyHtml = New-SpoHtmlSummary -Title $subject -WorstStatus $worstStatus -Alerts $alertArray -Summary $summary -TopSites $topSites -LogFilePath $global:LogTextFile -CsvFolderPath $latestFolder
-        $mailAttachments = Get-SpoMailAttachmentPaths -LatestFolder $latestFolder
+        $mailFileLinks = New-SpoSharePointLinksHtml -Paths (@($timestampedCsvFiles.Path) + @($workbookPath))
+        $bodyHtml = New-SpoHtmlSummary -Title $subject -WorstStatus $worstStatus -Alerts $alertArray -Summary $summary -TopSites $topSites -FileLinksHtml $mailFileLinks
         $dailySummaryMarkerPath = Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))-DailySummary-LastSent.txt"
         $dailySummarySent = Invoke-SpoDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {
-            Send-SmartM365Mail -Subject $subject -BodyHtml $bodyHtml -Attachments $mailAttachments
+            Send-SmartM365Mail -Subject $subject -BodyHtml $bodyHtml
         }
         if ($dailySummarySent) {
             Write-SpoLog -Message ("Daily SharePoint summary email sent: {0}" -f $subject) -Level SUCCESS
@@ -899,8 +997,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5aceQbqt5twOu
-# 1bD2lbJ8U9jTeGADvfPNRE/9iXX5bKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIUwL32IvriSbu
+# Z808lykwDcSFCkWM7DX/ehcLCu1WHqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1033,31 +1131,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA0+0vK89kgcsF21ubzcvSEYAPPjrnu6E/Gz89IF9LlkMA0GCSqG
-# SIb3DQEBAQUABIIBgBOkC/F/E7FFpw8GLaPfQ8OtyEWRl6dCxkyajeg6lPTAt5nC
-# x5ILQNJtpQ9ECLwBxx2MLnPzZP0tUqtMW4CjTqrh8fFmudAO3WfoRJG6h5OGSfKK
-# fdHaQWr8kV/tz6MZEmIqcW1LHfhMAO435blS3WNZHHqVVengwgQVY0fwDSE7u6qU
-# 9CKdf1ZWQjgI7WCHzRWoDuZuEzx7YfgnKvQjmsN/oU9CJkdVAVRpG08+HQ3Aso28
-# 6grOtn6YWQx1t2mbbwuGY/d2Xbv2mLSV4Kd9eo+n/eRR0lvD+V5is9PztOJwQlVT
-# pL0R0C5h3kPDn7eext8dHkfHsaQXIBGz8uClgnZDtTNMl0iL05UOgk5IftPfqZNE
-# EA9SnhnKAwAtkyVYK1Xc9D+tcug+8+tw8H2nOYXVtuiYEb7x//xCL6eTNzb+VwMe
-# CeZX09tOCMkXbCMxY6Qeya1kO/qfTeCGChbSbPT3cAhS7VCTvshl6epxIBVl4dgU
-# O2QW3piny1PTONIsmaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID3OIiNZ8oPQ2jN6LeDyxpWCnKS2HD5tJIuTHVO1M5cEMA0GCSqG
+# SIb3DQEBAQUABIIBgGzzGtthqCjb/EHG2bFzHiHFbAdVTt60HVZlDCO2VqGZQW1r
+# JsGOXydprUGJPcOsrQRTIgmn3aIYGD9SlaMZo1+R1SH454z97Sm3gHE3oFaOM/Ns
+# DyQ9ue/Gu9H+lXWQUZSFjPvF1pD5YhAaHXvmRpXazriYz73RqTkGb7JkkpxJ5ItY
+# CpB9RuLyHr+AB45Uo8BSjIPW8BO+v2jh0aqt1o5F7ITs5m2FEvrrdMOoK8sVvtKd
+# CZMLGcu84ufP5Ylp3g4MZ4/eOCkh9OZJ3MAb8f3ZCUKpQ8CFgvcmGt9Ubgv693Jo
+# 4sy21SSjt6BqeWJ13JkkffirFjc3vgvG5LMNtAFN5uE9GgH3m0mSHvmdeBi6tx+J
+# lsFPEA9eO/T2f9y9afVob4x3D4WgzXLE0ih6m4Nbb25QR1/93SmQV1gu1pqsXkX/
+# kViAHt+ZcYIN17w+K3ep2qQNED/Ab/rP0hBNQi+rhdlxD5qjBXrPyok1FACrLeN4
+# HadOlOxe1lLLl6yKn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNDQy
-# NDlaMC8GCSqGSIb3DQEJBDEiBCDVe5XAENiRSB0h/E9DTcFi4xZhvMdXm4+r+yP0
-# GcUmdzANBgkqhkiG9w0BAQEFAASCAgDGKBdv/fsqHtdkBlaTbrrH6gqghtbSlI+/
-# KoxE1/ZQM41PGWize+z/bTF+zbgoT5m5XPXp3WRmJx4/iXup8uq5bm4rxNf7mAcq
-# xvgXZN57uBpeS4iY1kcCxJFE+QL3GOTMTTbUhtCKHw3jvpglHZEW2slCXh99xi+I
-# nAAmBDdnIKP8YMnPB8u6xng4pVSye0jjH48Uoujv5HrAl29K2nWY6yXVgydRXV25
-# ENx9gbWzJCzaFYwxAEppNF47yTdh0MFUV+gBACImlA3bPEq70WSCHw/oDhqtPnzw
-# 257zu7YUIO7Rri4SZ76JdHmTEtgo4VvIDHKYl4xqcbslJQNZc3UQfV/7XCyk2c8+
-# /xQkTvoy5TR7BPXNhPJqJYmS8QdVasMCERuMCf2Lvn7lrP/qXgMvdbuar4LHFfkH
-# qgxNu5TYyOqNN3pECKP4kTdj8TJCV+RI0MPseFATJD2KXMHLU+JD3Do+Pf5xxIBS
-# zQJKaARtjm48xc8Kha8azw7cxUJWp3ZGDVTS+fUntRKMz04HJvHN8gMGflzYT9Bu
-# 4tpomPwByroRiDLQdKPDB+py13jldgKwOFDTP7iHwLBm/ESxeGbzHSVnkHy1VN+0
-# tB2iFhlXp4bhPv08iMP0+HX9axJPp31NbvbQ93VnU/xLLQ9k/GlG2bXt6hUNM292
-# ZDQN+XT8kQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDIy
+# MzBaMC8GCSqGSIb3DQEJBDEiBCB6TuKMXaE1ZYyv+vGV+nyCV7uOpV+2lVGMjTnj
+# /2CzDjANBgkqhkiG9w0BAQEFAASCAgBMzvEOVj6UvdciMS9g9uB+jl/i2yhlV9cN
+# PJtaSkduPFD9rTFKHnbfGduCRUctDda9tL7y7jVtus4mX8eja/ZvAdRc3rN4u/EG
+# 3YCPIKJq+IjA36HIcrmLozCNPn/ZEEe3nC2VEcFODRrZIPqtxQ+boZDJDczzrlzu
+# ToizAC5zC0k6bTLtV+3B8TH6V+s1cfjo/ESYciBM35W89MUaHre2iUNI4nhq7+Vr
+# 3CCLW0kdG+9cN3Wy8iQ7rFYKCeswUsM7VtAGCVoEIMTrk4flG50zD4TD6Hbtn1uh
+# W3XGBvZCrmjL8Jf7x8PFfCUilbHKf914heCdkfEClYHPShGCtyjnqTOIuQ8NkfMy
+# /vJvINSCbudrv4hJYgR10cYzfcxVaJGFXymg7Pxtu9hL83jMBGO4azkOmZHWD7/W
+# h6Ck5XWCSss01u0L997BYD7zmYEQwn3cOBvLK0pheBkAC7lwNdJoRFZr+diJ3RdZ
+# i6inHjU3Uxz5sLOQ7m5hHXbmK24fl1fwQK70HQeU5uesz9BFdCxP37U5qJhT6P/T
+# zEHq1DBdcK2K6Xjv0eCo0+JXovWDlIqifRNJAGpP32xFDaiK7sIdUexBCC8QoGPt
+# Rpi/3DUOL6/2an0SXFOUli714cCzU+93Wp9st6WD2hu89BPXmbfXCq8Br7LLYYtC
+# iQgurAl2XQ==
 # SIG # End signature block
