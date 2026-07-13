@@ -7,6 +7,7 @@
   "Thumb": "0000000000000000000000000000000000000000",
   "Thumbprint": "0000000000000000000000000000000000000000",
   "ErrorMailTo": "admin@example.com",
+  "To": "",
   "SmtpServer": "",
   "SendMailMode": "Graph",
   "From": "smartm365@example.com",

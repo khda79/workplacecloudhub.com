@@ -475,7 +475,7 @@
       "DependsOn": [],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
-      "TimeoutMinutes": 480,
+      "TimeoutMinutes": 720,
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
       "ContinueOnError": true,

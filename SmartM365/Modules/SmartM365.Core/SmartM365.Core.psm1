@@ -1574,7 +1574,13 @@ function Get-SmartM365MailLogFolder {
     param()
 
     $candidates = @()
-    if (-not [string]::IsNullOrWhiteSpace([string]$global:LogPath)) { $candidates += [string]$global:LogPath }
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:LogPath)) {
+        $logPathCandidate = [string]$global:LogPath
+        if ([System.IO.Path]::GetExtension($logPathCandidate) -eq '.log') {
+            try { $logPathCandidate = Split-Path -Path $logPathCandidate -Parent } catch {}
+        }
+        $candidates += $logPathCandidate
+    }
     if (-not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
         try { $candidates += (Split-Path -Path ([string]$global:LogTextFile) -Parent) } catch {}
     }
@@ -3696,7 +3702,7 @@ function Invoke-SmartM365SharePointFileDownload {
         }
     }
     catch {
-        WriteLog -Message ("SharePoint download failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
+        WriteLog -Message ("SharePoint recovery download unavailable; script continues: {0}" -f $_.Exception.Message) -Level "INFO"
     }
 
     return $null
@@ -4598,8 +4604,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbiLY/UobvICk/
-# OisNHB8ozC3wKSxrWT3EvHnKZdAOUaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDV/iXi6D6WwSl0
+# V5mpwEjEoKkHBi951ixF8wcGslBc0KCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -4625,14 +4631,14 @@ Export-ModuleMember -Function `
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCD0cK5/2qATb1hwcDxQrqVSp2/d5GVu9EKKGq+WtVHviDANBgkqhkiG9w0B
-# AQEFAASCAYACqdWtFVwb23U3jNDA3QsStumG9jUZXLdCQ/EiWcXWkl6sjUxFLRBR
-# iVb+sUoBhCb/kMzYg6379rXaznSDvtf6wwjPQ47N+XXwGgz/TRcjwVL+IbE4Q5ul
-# 9xP1xuIMwra6FeJpgMWXEU8bX7sPK8E4fZY0+siTxhTX5FkcjUrOV0EcX3JHUjUd
-# +ahyBvAzbf1N+VW31H3S4jOpcYQ/wbfXaV3cXiB05MHIXeuTNmMl7Y+e8BxXcTDr
-# tAYVcQppnYpLIlDIb2xdehgXqZZjNG6xnO3rVQmp2bF08q87J5NSOpzNxqh0tYBi
-# 5UL0/qyj2W60HLDwY7eYu5fQ9A2zyg46mbskxjZQi3rSdA5xhC1r10qrG9zFAn/M
-# PloPBQrCuGm5hGN0qo3iqRQK/xwyTgqmTR5QNK3ixMLA8KqmfyYHIrh6n0b2kphI
-# MU7QF3WRnf1EwMHDWS74vB2yJsEsu24QHxSSR2+wd59ZYwbOm2EPCiCbWxy3rRWS
-# PAbbLrt8yVA=
+# BDEiBCCx3HJEd5tyHXfbpscEiBKMtVkdblRMWSzE1d95tfWxtzANBgkqhkiG9w0B
+# AQEFAASCAYAfdtf5VFh9gdPV77zfmdVf5+cqVt547IqMOIqgLqNSpNUgCO6bV8Vu
+# BUzhX2DPnz0dnG853oXu2/hmHEXxsy06GQWOOJ3BNNpi1F7TACgu8zTKa/pixocS
+# ccdklVjSkDFtqlR2Hz/5dJ7RkTH1GxKf4j7Skf1xRtiOY18j49HgWPiP7+6wZJJi
+# FoFGwQ9YzxZJi5t27SevwO1GhmwCZdk8kSjDFd+xZN2FACgybiQHn3/n9ou/EUY7
+# I2ikTbEpqSsunLfG2itODzbPLrNqJQx+zzuxKztzlpK1W+3rRajAcDvWrAT4jakZ
+# i7n60yzrtpiYHECQyoa9yYYAi6uSx+tWUqw/EtP/aWriQh3UjIboyjvaKLnxkmdQ
+# fS9aUsTrlAQ42dxGIjKeKIU7w4QVgkispM3klFjq3WA3hkoHb6tUsy5KPgfF8Fgn
+# UeRAOLXNYT2qKhOzQGrYc3TAmswegXlqZ06sENWNCTB6NelE6qMo7g9OQsT5KMJ6
+# ae7QANgPwhA=
 # SIG # End signature block
