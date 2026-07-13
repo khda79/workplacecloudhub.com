@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.19
+1.20
 
 
 .REQUIREMENTS
@@ -423,6 +423,9 @@ $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConf
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
 $DomainFriendlyNames = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DomainFriendlyNames' -DefaultValue ([pscustomobject]@{})
+$AdEnrichmentWindowsUpdateAnchorPolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdateAnchorPolicyId' -DefaultValue '38ad040b-08ca-41cd-bd86-5da5ef0b740e'
+$AdEnrichmentWindowsUpdate24H2PolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdate24H2PolicyId' -DefaultValue '82e1d3e6-bbc0-4ddd-b36d-415979dadec6'
+$AdEnrichmentWindowsUpdate25H2PolicyId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AdEnrichmentWindowsUpdate25H2PolicyId' -DefaultValue '41046c77-bc66-44af-b4cd-7bbf2c7d343e'
 $ConfiguredComputerGroupNamesRaw = @(Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ComputerMembershipGroupNames' -DefaultValue @())
 $ConfiguredComputerGroupNames = for ($groupIndex = 0; $groupIndex -lt 10; $groupIndex++) {
     if ($groupIndex -lt $ConfiguredComputerGroupNamesRaw.Count -and $null -ne $ConfiguredComputerGroupNamesRaw[$groupIndex]) {
@@ -432,7 +435,6 @@ $ConfiguredComputerGroupNames = for ($groupIndex = 0; $groupIndex -lt 10; $group
         ''
     }
 }
-WriteLog -Message ("Configured computer membership group slots: {0}" -f (($ConfiguredComputerGroupNames | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_)) { '<empty>' } else { $_ } }) -join ', '))
 $EnableOuInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableOuInventory' -DefaultValue $true)
 $EnableComputerInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableComputerInventory' -DefaultValue $true)
 $EnableUserInventory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableUserInventory' -DefaultValue $true)
@@ -481,11 +483,12 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.19"
+$ScriptVersion = "1.20"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
-$OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $OutputPath
+$defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
+$OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
 try {
-    $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','') -CallerScriptPath $PSCommandPath
     Start-Transcript -Path $global:LogTranscriptFile -Append
 
     WriteLog -Message ("Script environment initialized at {0}" -f $InitializeOutputPath)
@@ -494,12 +497,21 @@ try {
         $WeeklyHistoryFolderPath = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory'
     }
     WriteLog -Message ("Starting {0}" -f $TaskName)
+    WriteLog -Message ("Configured computer membership group slots: {0}" -f (($ConfiguredComputerGroupNames | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_)) { '<empty>' } else { $_ } }) -join ', '))
 }
 catch {
     Write-Host ("Initialization failed: {0}" -f $_) -ForegroundColor Red
     exit 1
 }
 
+$adEnrichmentHelperPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-ActiveDirectory-Enrichment.ps1'
+if (Test-Path -LiteralPath $adEnrichmentHelperPath) {
+    . $adEnrichmentHelperPath
+    WriteLog -Message ("Active Directory enrichment helper loaded: {0}" -f $adEnrichmentHelperPath)
+}
+else {
+    WriteLog -Message ("WARNING: Active Directory enrichment helper not found. AD_Computers_AllDomains_Enriched.csv will not be generated: {0}" -f $adEnrichmentHelperPath)
+}
 # ==========================================================
 # MAIN TRY / CATCH / FINALLY
 # ==========================================================
@@ -2164,11 +2176,14 @@ try {
             $outputCsvFilePath = Join-Path $tempFolder ("AD_Contacts_{0}.csv" -f $safeDomainFileName)
             [int64]$contactCount = 0
 
-            Get-ADObject -Filter { ObjectClass -eq "contact" } -Server $currentDomainName -Properties DisplayName, ProxyAddresses, Mail |
+            Get-ADObject -Filter { ObjectClass -eq "contact" } -Server $currentDomainName -Properties DisplayName, ProxyAddresses, Mail, Name, DistinguishedName, ObjectGUID |
                 ForEach-Object { [void]($contactCount++); $_ } |
                 Select-Object `
                     @{Name = 'DomainName';      Expression = { $currentDomainName }},
                     @{Name = 'ObjectType';      Expression = { $CurrentObjectType }},
+                    Name,
+                    DistinguishedName,
+                    @{Name = 'ObjectGUID';       Expression = { $_.ObjectGUID.Guid }},
                     DisplayName,
                     @{Name = 'ProxyAddresses'; Expression = { $_.ProxyAddresses -join ";" }},
                     Mail |
@@ -2232,6 +2247,20 @@ try {
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_OUs_*.csv"       -DestinationFile $combinedOusCsv
     Combine-CsvFiles -SourceFolder $tempFolder -Filter "AD_Contacts_*.csv"  -DestinationFile $combinedContactsCsv
 
+    $combinedComputersEnrichedCsv = $null
+    if (Get-Command Invoke-SmartM365AdComputersEnrichedCsv -ErrorAction SilentlyContinue) {
+        $combinedComputersEnrichedCsv = Invoke-SmartM365AdComputersEnrichedCsv `
+            -CombinedComputersCsv $combinedComputersCsv `
+            -OutputFolder $OutputPath `
+            -LatestFolderPath $destinationRootPath `
+            -WindowsUpdateAnchorPolicyId $AdEnrichmentWindowsUpdateAnchorPolicyId `
+            -WindowsUpdate24H2PolicyId $AdEnrichmentWindowsUpdate24H2PolicyId `
+            -WindowsUpdate25H2PolicyId $AdEnrichmentWindowsUpdate25H2PolicyId
+    }
+    else {
+        WriteLog -Message "WARNING: AD computers enrichment function is unavailable. AD_Computers_AllDomains_Enriched.csv will not be generated."
+    }
+
     # ------------------------------------------------------
     # Copy combined CSVs to the latest CSV folder
     # ------------------------------------------------------
@@ -2241,7 +2270,7 @@ try {
                 New-Item -Path $destinationRootPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
                 WriteLog -Message ("Created missing LatestCsvFolderPath directory: {0}" -f $destinationRootPath)
             }
-            foreach ($combinedCsv in @($combinedUsersCsv, $combinedComputersCsv, $combinedGroupsCsv, $combinedOusCsv, $combinedContactsCsv)) {
+            foreach ($combinedCsv in (@($combinedUsersCsv, $combinedComputersCsv, $combinedComputersEnrichedCsv, $combinedGroupsCsv, $combinedOusCsv, $combinedContactsCsv) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
                 if (Test-Path -Path $combinedCsv) {
                     $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($combinedCsv))
                     Copy-Item -LiteralPath $combinedCsv -Destination $destinationFile -Force -ErrorAction Stop
@@ -2571,6 +2600,7 @@ try {
             Save-WeeklyInventoryHistory -SourceFiles @(
                 $combinedUsersCsv,
                 $combinedComputersCsv,
+                $combinedComputersEnrichedCsv,
                 $combinedGroupsCsv,
                 $combinedOusCsv,
                 $combinedContactsCsv,
@@ -2674,11 +2704,12 @@ finally {
         Write-Host ("Failed to write execution summary: {0}" -f $_) -ForegroundColor Yellow
     }
 }
+
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQ1yGVyaz+brmA
-# VooRO2Am+n+iXk0dMkJOSuWQGMMfqqCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCslCQlol4yNCS4
+# IO2lLTyDzjq+j/5oje+lsQuJJOXjsKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2704,14 +2735,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCQ0uiNEyvTh79hX11sQcTt4vrvrIEIYq7cGFA+/NKeVTANBgkqhkiG9w0B
-# AQEFAASCAYBl8q0OfZ5bRDFhgEA3dcP3jtJT7NaGX6wdsp7xpBVCYY2bc8SvUrxW
-# LtUN+CxYpbo9fefo8dDmav8HqJSdAAuYxAoaboVKOkFzx+gf9cuztIiZ+L+EvYeq
-# lseTb4G3HI/bsjdadDrWVrQ98b614RDLlpX784GneROVTLZogpkDM+IOwEbeBFqz
-# sABAFk6cveNKMZmIh+V1zJaEMmPChnomsGm2coDdB3oah6d8YuBLHA31TCSQZvG7
-# dusIpjDvbHK6fFQUsbM6XWqro/QKXrSWdWrR+uDM+skkElpZiqPejh0ttXqxdChl
-# CUxmbRlFofVioZ3kPbxLFPjMT72Es0sd1/1s7R+LEFjC6T2FqXKPFPefGusQlkVl
-# lo8DtG4j15kC2trZF/EhaaYCep59NJuC1HIRUDHQ1rlqCAoKPJJBGFD6tBPMA0QR
-# 23qGpg1FEy356vRpgJ8ToF+6KvM3+i/mxQn4yiygwd/WfqKWjuKLinW6GzuEkBbC
-# ZDUZwFzD/bM=
+# BDEiBCBHNrNGIKTL36I2uL2Xn3WCD7CKq5W3hoJ8JhvK+bcvKzANBgkqhkiG9w0B
+# AQEFAASCAYAs74buVoih2bswfcvVhSY7Nb0eZ76MKBwJmDeiqjDAAUPKLgR/RNDj
+# kM7mbYlrPKiIfcYKo2ZeCdSs7fq3X+XTcMqTPbetkFJoFPK0qBUiM3S8XD8Mesww
+# mV6tf0uEU521QdUgXdEArYlJQ4WZvAm/PO93WB30Y+GuQZx/RxNJ5iC36SDVBiW0
+# CX2f1YEi6ssoSuORduLoGWU810GxK2Ogdq2nKVpEi55L7K6DmAnOC5+ywaUONyjS
+# d2IU4nfklf8iZ5qfDkOOyPRA0tvZ9XIjhPvDT27X7ZpH5bHcAKNpEUhavMAiPHrT
+# zKqX9r0g/V7RymaTb0n4OckFOm755Uj2fTNe9izc+HaUYfstEx+Tx8tVlmTJbQcU
+# yzAk/1KPG6iKFRoz/Vnrwy+RJi6ieANvrzjdjOUwdJgBD/hRQdjipDbzOMk/ErYM
+# WiJOE8DXgNesXyfJk+CesnjLCHQwRH4HSRPR/rRViEudmIaBYgr5JdZqToJ1r896
+# ASS0/Nac7X4=
 # SIG # End signature block
