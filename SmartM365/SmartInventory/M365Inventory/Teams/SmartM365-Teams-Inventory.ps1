@@ -3,16 +3,16 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.17
+0.19
 
 .REQUIREMENTS
     PowerShell 7+.
-    Modules: SmartM365.Core; Microsoft.Graph.Authentication.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel.
     Minimum Graph application permissions: Team.ReadBasic.All; TeamMember.Read.All; Channel.ReadBasic.All; Group.Read.All; Reports.Read.All; Sites.Read.All.
     Optional: ChannelMember.Read.All is required only when private/shared channel member or owner expansion is enabled.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Requires: PowerShell 7+, Microsoft.Graph.Authentication, SmartM365.Core.psd1
+    Requires: PowerShell 7+, Microsoft.Graph.Authentication, ImportExcel, SmartM365.Core.psd1
     Minimum application permissions: Team.ReadBasic.All, TeamMember.Read.All, Channel.ReadBasic.All, Group.Read.All, Reports.Read.All, Sites.Read.All.
     Optional: ChannelMember.Read.All for private/shared channel owners when -IncludeChannelOwners is used.
 #>
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.17"
+$ScriptVersion="0.19"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -115,8 +115,88 @@ function Invoke-Graph{param([string]$Uri,[string]$Operation='Graph request',[str
 function Get-GraphCollection{param([string]$Uri,[string]$Operation) $items=New-Object 'System.Collections.Generic.List[object]'; $next=$Uri; while($next){$r=Invoke-Graph -Uri $next -Operation $Operation; foreach($i in @($r.value)){[void]$items.Add($i)}; $p=$r.PSObject.Properties['@odata.nextLink']; $next=if($p){[string]$p.Value}else{''}}; return $items.ToArray()}
 function Get-ReportRow{param([string]$ReportName,[string]$Period='D180') $tmp=Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-$ReportName-$([guid]::NewGuid().ToString('N')).csv"); try{Invoke-Graph -Uri ("https://graph.microsoft.com/v1.0/reports/{0}(period='{1}')" -f $ReportName,$Period) -Operation $ReportName -OutputFilePath $tmp|Out-Null; if(Test-Path -LiteralPath $tmp){return @(Import-Csv -LiteralPath $tmp)}}catch{WriteLog -Message ("Report $ReportName could not be loaded: $($_.Exception.Message)") -Level WARNING}finally{if(Test-Path -LiteralPath $tmp){Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}}; @()}
 function Export-InventoryCsv{param([object[]]$Rows,[string[]]$Columns,[string]$TimestampedPath,[string]$LatestPath,[string]$HistoryPath) $Columns=@('TenantKey','OrganizationKey','EnvironmentKey','TenantId')+@($Columns|Where-Object{$_-inotmatch'^(TenantKey|OrganizationKey|EnvironmentKey|TenantId)$'}); Assert-SmartM365CsvDataCompleteness -Data $Rows -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath; foreach($folder in @((Split-Path $TimestampedPath -Parent),(Split-Path $LatestPath -Parent))){if(-not(Test-Path -LiteralPath $folder)){New-Item -Path $folder -ItemType Directory -Force|Out-Null}}; if($Rows.Count-eq 0){$h=($Columns|ForEach-Object{'"'+($_-replace'"','""')+'"'})-join','; Set-Content -LiteralPath $TimestampedPath -Value $h -Encoding utf8BOM; Set-Content -LiteralPath $LatestPath -Value $h -Encoding utf8BOM}else{$Rows|Select-Object -Property $Columns|Add-SmartM365TenantKey | Export-Csv -LiteralPath $TimestampedPath -NoTypeInformation -Encoding utf8BOM; $Rows|Select-Object -Property $Columns|Add-SmartM365TenantKey | Export-Csv -LiteralPath $LatestPath -NoTypeInformation -Encoding utf8BOM}; [void]$GeneratedCsvPaths.Add($TimestampedPath); [void]$GeneratedCsvPaths.Add($LatestPath); if(-not$global:csvGeneratedPaths){$global:csvGeneratedPaths=New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)}; [void]$global:csvGeneratedPaths.Add($TimestampedPath); [void]$global:csvGeneratedPaths.Add($LatestPath); if($DryRun){WriteLog -Message 'DryRun enabled: SharePoint CSV upload skipped.' -Level INFO}else{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $TimestampedPath|Out-Null; Invoke-SmartM365SharePointCsvUpload -LocalFilePath $LatestPath|Out-Null}; if($AppendHistory-and$HistoryPath){$hp=Split-Path $HistoryPath -Parent; if(-not(Test-Path -LiteralPath $hp)){New-Item -Path $hp -ItemType Directory -Force|Out-Null}; if($Rows.Count-gt 0){if(Test-Path -LiteralPath $HistoryPath){Repair-SmartM365CsvTenantKeySchema -Path $HistoryPath -Delimiter ',' -Encoding UTF8|Out-Null}; $Rows|Select-Object -Property $Columns|Add-SmartM365TenantKey | Export-Csv -LiteralPath $HistoryPath -NoTypeInformation -Encoding utf8BOM -Append:(Test-Path -LiteralPath $HistoryPath)}}}
+function Get-TeamsCsvColumnNames {
+    param([Parameter(Mandatory)][string]$Path)
+    $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path)
+    try {
+        $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
+        $parser.SetDelimiters(',')
+        $parser.HasFieldsEnclosedInQuotes = $true
+        if ($parser.EndOfData) { return @() }
+        return @($parser.ReadFields())
+    }
+    finally { $parser.Dispose() }
+}
+
+function Ensure-TeamsImportExcelModule {
+    [CmdletBinding()]
+    param()
+
+    $module = Get-Module -ListAvailable -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
+    if (-not $module) {
+        $installCommand = 'Install-Module ImportExcel -Scope CurrentUser -Repository PSGallery -Force -AllowClobber'
+        WriteLog -Message ("ImportExcel is not installed. Automatic installation starting: {0}" -f $installCommand) -Level WARNING
+        if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
+            throw "ImportExcel is missing and Install-Module is unavailable. Install PowerShellGet, then run: $installCommand"
+        }
+        try {
+            Install-Module -Name ImportExcel -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
+        }
+        catch {
+            throw "Automatic ImportExcel installation failed. Run '$installCommand' with the SmartM365 execution account. $($_.Exception.Message)"
+        }
+        $module = Get-Module -ListAvailable -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $module) { throw 'ImportExcel installation completed but the module is still unavailable in PSModulePath.' }
+        WriteLog -Message ("ImportExcel installed automatically: version={0}; path={1}" -f $module.Version,$module.Path) -Level SUCCESS
+    }
+    Import-Module -Name $module.Path -Force -ErrorAction Stop
+    WriteLog -Message ("ImportExcel module loaded: version={0}; path={1}" -f $module.Version,$module.Path) -Level INFO
+}
+function New-TeamsTimestampedWorkbook {
+    param(
+        [Parameter(Mandatory)][object[]]$CsvFiles,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    Import-Module ImportExcel -ErrorAction Stop
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
+
+    foreach ($csv in $CsvFiles) {
+        $rows = @(Import-Csv -LiteralPath $csv.Path)
+        $isEmpty = $rows.Count -eq 0
+        if ($isEmpty) {
+            $placeholder = [ordered]@{}
+            foreach ($column in @(Get-TeamsCsvColumnNames -Path $csv.Path)) { $placeholder[$column] = '' }
+            $rows = @([pscustomobject]$placeholder)
+        }
+        $rows | Export-Excel -Path $Path -WorksheetName $csv.WorksheetName -TableName $csv.TableName -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter
+        if ($isEmpty) {
+            $package = Open-ExcelPackage -Path $Path
+            try { $package.Workbook.Worksheets[$csv.WorksheetName].DeleteRow(2) }
+            finally { Close-ExcelPackage -ExcelPackage $package }
+        }
+    }
+    return $Path
+}
+
+function New-TeamsSharePointLinksHtml {
+    param([Parameter(Mandatory)][string[]]$Paths)
+
+    $links = foreach ($path in $Paths) {
+        $record = Get-SmartM365SharePointUploadRecordForLocalFile -FilePath $path
+        if (-not $record -or [string]::IsNullOrWhiteSpace([string]$record.WebUrl)) {
+            WriteLog -Message ("Mail link omitted because no SharePoint WebUrl is available for {0}." -f [IO.Path]::GetFileName($path)) -Level WARNING
+            continue
+        }
+        $name = [Net.WebUtility]::HtmlEncode([IO.Path]::GetFileName($path))
+        $url = [Net.WebUtility]::HtmlEncode([string]$record.WebUrl)
+        "<li style='margin:0 0 6px;'><a href='$url' style='color:#075985;text-decoration:underline;'>$name</a></li>"
+    }
+    if (@($links).Count -eq 0) { return '' }
+    return "<div class='card'><h2>Timestamped exports</h2><p>SharePoint links for this run:</p><ul>$($links -join '')</ul></div>"
+}
 function ConvertTo-HtmlReport {
-    param([object[]]$AlertRows,[hashtable]$Summary,[string]$Worst,[datetime]$Started,[datetime]$Ended)
+    param([object[]]$AlertRows,[hashtable]$Summary,[string]$Worst,[datetime]$Started,[datetime]$Ended,[string]$FileLinksHtml='')
     $color=@{OK='#107c10';Warning='#ff8c00';Critical='#d13438'}
     $sb=[Text.StringBuilder]::new()
     [void]$sb.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dde7f0;padding:7px;font-size:12px;text-align:left;vertical-align:top}th{background:#eef6fc}.rowWarning{background:#fff7e6}.rowCritical{background:#fde7e9}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}.kpi td{background:#f8fafc}.kpiLabel{font-size:11px;color:#64748b;text-transform:uppercase}.kpiValue{font-size:20px;font-weight:700;color:#0f172a}</style></head><body>')
@@ -129,7 +209,9 @@ function ConvertTo-HtmlReport {
     foreach($a in @($AlertRows|Sort-Object @{Expression={if($_.Status-eq'Critical'){0}else{1}}},TeamDisplayName,Check|Select-Object -First 200)){
         [void]$sb.AppendLine(("<tr class='row{0}'><td>{0}</td><td>{1}</td><td>{2}</td><td>{3} {4}</td><td>{5}</td><td>{6}</td></tr>" -f $a.Status,[Net.WebUtility]::HtmlEncode($a.TeamDisplayName),[Net.WebUtility]::HtmlEncode($a.Check),[Net.WebUtility]::HtmlEncode([string]$a.NumericValue),[Net.WebUtility]::HtmlEncode([string]$a.TextValue),[Net.WebUtility]::HtmlEncode($a.Threshold),[Net.WebUtility]::HtmlEncode($a.Details)))
     }
-    [void]$sb.AppendLine('</table></div></body></html>')
+    [void]$sb.AppendLine('</table></div>')
+    if (-not [string]::IsNullOrWhiteSpace($FileLinksHtml)) { [void]$sb.AppendLine($FileLinksHtml) }
+    [void]$sb.AppendLine('</body></html>')
     $sb.ToString()
 }
 if([string]::IsNullOrWhiteSpace($OutputPath)){$OutputPath=[string](Get-ConfigValue 'TeamsInventoryCsvLogFolderPath' '{{DataAllRootPath}}\M365\Teams\Inventory')}
@@ -146,7 +228,8 @@ $guestColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','Us
 try{
  $CurrentOperation='Initialize script environment'; $OutputPath=InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $ScriptBaseName; Start-Transcript -Path $global:logTranscriptFile -Append|Out-Null; Write-SmartM365LoadedModuleVersions; WriteLog -Message "Starting $TaskName"
  $CurrentOperation='Connect Microsoft Graph'; Disconnect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -VerboseDisconnect:$true; $conn=Connect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -AppId $AppId -Thumbprint $Thumb -TenantId $TenantId -Organization $OrgDomain -GraphScopes @('Team.ReadBasic.All','TeamMember.Read.All','Channel.ReadBasic.All','Group.Read.All','Reports.Read.All'); if(-not$conn.GraphConnected){throw 'Microsoft Graph app-only connection failed.'}
- $CurrentOperation='Run preflight'; Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('Team.ReadBasic.All','TeamMember.Read.All','Channel.ReadBasic.All','Group.Read.All','Reports.Read.All','Sites.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/organization','https://graph.microsoft.com/v1.0/groups?$top=1')|Out-Null
+ $CurrentOperation='Ensure ImportExcel module'; Ensure-TeamsImportExcelModule
+ $CurrentOperation='Run preflight'; Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Authentication','ImportExcel') -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('Team.ReadBasic.All','TeamMember.Read.All','Channel.ReadBasic.All','Group.Read.All','Reports.Read.All','Sites.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/organization','https://graph.microsoft.com/v1.0/groups?$top=1')|Out-Null
  $CurrentOperation='Load tenant metadata'; $org=Invoke-Graph -Uri 'https://graph.microsoft.com/v1.0/organization?$select=displayName' -Operation 'Get organization'; $TenantName=[string]@($org.value)[0].displayName; if([string]::IsNullOrWhiteSpace($TenantName)){$TenantName=$Tenant}
  $activityById=@{}; foreach($r in (Get-ReportRow -ReportName 'getTeamsTeamActivityDetail' -Period 'D180')){$id=[string](Prop $r @('Team Id','TeamId','Team ID')); if($id){$activityById[$id]=$r}}
  $teamFilter=[uri]::EscapeDataString("resourceProvisioningOptions/Any(x:x eq 'Team')"); $teamsUri="https://graph.microsoft.com/v1.0/groups?`$filter=$teamFilter&`$select=id,displayName,description,visibility,createdDateTime,classification,assignedLabels,mail,webUrl&`$top=999"; $teams=@(Get-GraphCollection -Uri $teamsUri -Operation 'Get team groups'); if($MaxTeams-gt 0){$teams=@($teams|Select-Object -First $MaxTeams)}; WriteLog -Message ("Teams discovered: {0}" -f $teams.Count)
@@ -171,23 +254,33 @@ try{
   [void]$TeamsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;Description=[string]$g.description;Visibility=[string]$g.visibility;CreatedDateTimeUtc=(IsoUtc $g.createdDateTime);Classification=[string]$g.classification;SensitivityLabel=$label;IsArchived=[string]$archived;OwnerCount=$owners.Count;MemberCount=$members.Count;GuestCount=$guests.Count;StandardChannelCount=$standard;PrivateChannelCount=$private;SharedChannelCount=$shared;LastActivityDateUtc=$last;InactiveDays=(Num $inactive);StorageUsedGB=(Num $usedGb);StorageQuotaGB=(Num $quotaGb);StorageQuotaPercent=(Num $quotaPct);Status=$status;NumericValue=(Num $members.Count);TextValue="Owners=$($owners.Count); Members=$($members.Count); Guests=$($guests.Count)";Threshold="Owners >= $MinOwners; inactive <= $InactiveDays days; storage <= $QuotaCriticalPercent percent; guests <= $GuestWarningThreshold";Details=(JoinVals $notes)})
  }
  $stamp=(Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
- Export-InventoryCsv -Rows $TeamsRows.ToArray() -Columns $teamColumns -TimestampedPath (Join-Path $OutputPath "M365_Teams_Teams_$stamp.csv") -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Teams.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Teams_History.csv')
- Export-InventoryCsv -Rows $MembersRows.ToArray() -Columns $memberColumns -TimestampedPath (Join-Path $OutputPath "M365_Teams_Members_$stamp.csv") -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Members.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Members_History.csv')
- Export-InventoryCsv -Rows $ChannelsRows.ToArray() -Columns $channelColumns -TimestampedPath (Join-Path $OutputPath "M365_Teams_Channels_$stamp.csv") -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Channels.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Channels_History.csv')
- Export-InventoryCsv -Rows $GuestsRows.ToArray() -Columns $guestColumns -TimestampedPath (Join-Path $OutputPath "M365_Teams_Guests_$stamp.csv") -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Guests.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Guests_History.csv')
+ $teamsTimestampedPath=Join-Path $OutputPath "M365_Teams_Teams_$stamp.csv"; $membersTimestampedPath=Join-Path $OutputPath "M365_Teams_Members_$stamp.csv"; $channelsTimestampedPath=Join-Path $OutputPath "M365_Teams_Channels_$stamp.csv"; $guestsTimestampedPath=Join-Path $OutputPath "M365_Teams_Guests_$stamp.csv"
+ Export-InventoryCsv -Rows $TeamsRows.ToArray() -Columns $teamColumns -TimestampedPath $teamsTimestampedPath -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Teams.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Teams_History.csv')
+ Export-InventoryCsv -Rows $MembersRows.ToArray() -Columns $memberColumns -TimestampedPath $membersTimestampedPath -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Members.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Members_History.csv')
+ Export-InventoryCsv -Rows $ChannelsRows.ToArray() -Columns $channelColumns -TimestampedPath $channelsTimestampedPath -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Channels.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Channels_History.csv')
+ Export-InventoryCsv -Rows $GuestsRows.ToArray() -Columns $guestColumns -TimestampedPath $guestsTimestampedPath -LatestPath (Join-Path $LatestCsvFolderPath 'M365_Teams_Guests.csv') -HistoryPath (Join-Path $OutputPath 'M365_Teams_Guests_History.csv')
+ $timestampedCsvFiles=@(
+  [pscustomobject]@{Path=$teamsTimestampedPath;WorksheetName='Teams';TableName='TeamsInventory'},
+  [pscustomobject]@{Path=$membersTimestampedPath;WorksheetName='Members';TableName='TeamsMembers'},
+  [pscustomobject]@{Path=$channelsTimestampedPath;WorksheetName='Channels';TableName='TeamsChannels'},
+  [pscustomobject]@{Path=$guestsTimestampedPath;WorksheetName='Guests';TableName='TeamsGuests'}
+ )
+ $workbookPath=Join-Path $OutputPath "M365_Teams_Inventory_$stamp.xlsx"; New-TeamsTimestampedWorkbook -CsvFiles $timestampedCsvFiles -Path $workbookPath|Out-Null; if($global:RetentionMaxCSV-gt 0){RemoveOldFiles -Path $OutputPath -Filter 'M365_Teams_Inventory_*.xlsx' -KeepCount $global:RetentionMaxCSV}
+ if(-not$DryRun){Invoke-SmartM365SharePointCsvUpload -LocalFilePath $workbookPath|Out-Null}
  if($EnableWeeklyHistory-and-not$DryRun){Add-SmartM365WeeklyHistory -SourceCsvPaths $GeneratedCsvPaths.ToArray() -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'Microsoft Teams inventory'|Out-Null}elseif($DryRun){WriteLog -Message 'DryRun enabled: WeeklyHistory skipped.' -Level INFO}
- $teamArray=$TeamsRows.ToArray(); $memberArray=$MembersRows.ToArray(); $channelArray=$ChannelsRows.ToArray(); $guestArray=$GuestsRows.ToArray(); $alertArray=$Alerts.ToArray(); $csvArray=$GeneratedCsvPaths.ToArray()
+ $teamArray=$TeamsRows.ToArray(); $memberArray=$MembersRows.ToArray(); $channelArray=$ChannelsRows.ToArray(); $guestArray=$GuestsRows.ToArray(); $alertArray=$Alerts.ToArray()
  $summary=@{TotalTeams=$teamArray.Count;ActiveTeams=@($teamArray|Where-Object{$_.IsArchived-ne'True' -and ([string]::IsNullOrWhiteSpace([string]$_.InactiveDays)-or [double]$_.InactiveDays-le$InactiveDays)}).Count;InactiveTeams=@($teamArray|Where-Object{-not[string]::IsNullOrWhiteSpace([string]$_.InactiveDays)-and [double]$_.InactiveDays-gt$InactiveDays}).Count;ArchivedTeams=@($teamArray|Where-Object{$_.IsArchived-eq'True'}).Count;PublicTeams=@($teamArray|Where-Object{$_.Visibility-eq'Public'}).Count;PrivateTeams=@($teamArray|Where-Object{$_.Visibility-eq'Private'}).Count;TeamsWithGuests=@($teamArray|Where-Object{[int]$_.GuestCount-gt 0}).Count;CriticalCount=@($alertArray|Where-Object Status -eq Critical).Count;WarningCount=@($alertArray|Where-Object Status -eq Warning).Count;MemberRows=$memberArray.Count;ChannelRows=$channelArray.Count;GuestRows=$guestArray.Count}
- $worst=WorstStatus $alertArray; $subject="[$($worst.ToUpperInvariant())] Microsoft Teams Inventory - $TenantName - $RunDateUtc"; $html=ConvertTo-HtmlReport -AlertRows $alertArray -Summary $summary -Worst $worst -Started $RunStarted -Ended (Get-Date)
- if($DryRun){WriteLog -Message 'DryRun enabled: daily summary email skipped.' -Level INFO}else{$dailySummaryMarkerPath=Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$ScriptBaseName-DailySummary-LastSent.txt"; $dailySummarySent=Invoke-TeamsDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {Send-SmartM365Mail -Subject $subject -BodyHtml $html -Attachments @($csvArray|Select-Object -First 4)}; if($dailySummarySent){WriteLog -Message ("Daily Teams summary email sent: {0}" -f $subject) -Level SUCCESS}}
+ $mailFileLinks=New-TeamsSharePointLinksHtml -Paths (@($timestampedCsvFiles.Path)+@($workbookPath))
+ $worst=WorstStatus $alertArray; $subject="[$($worst.ToUpperInvariant())] Microsoft Teams Inventory - $TenantName - $RunDateUtc"; $html=ConvertTo-HtmlReport -AlertRows $alertArray -Summary $summary -Worst $worst -Started $RunStarted -Ended (Get-Date) -FileLinksHtml $mailFileLinks
+ if($DryRun){WriteLog -Message 'DryRun enabled: daily summary email skipped.' -Level INFO}else{$dailySummaryMarkerPath=Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$ScriptBaseName-DailySummary-LastSent.txt"; $dailySummarySent=Invoke-TeamsDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {Send-SmartM365Mail -Subject $subject -BodyHtml $html}; if($dailySummarySent){WriteLog -Message ("Daily Teams summary email sent: {0}" -f $subject) -Level SUCCESS}}
  $result="Teams=$($summary.TotalTeams); Critical=$($summary.CriticalCount); Warnings=$($summary.WarningCount); Members=$($memberArray.Count); Channels=$($channelArray.Count); Guests=$($guestArray.Count)"; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; WriteLog -Message ("Result summary: $result") -Level INFO; Complete-SmartM365ExecutionContext -Status $(if($worst-eq'OK'){'Success'}else{'CompletedWithWarnings'}); Write-Host "Teams inventory completed. Status=$worst; $result"
 }catch{ $err=$_; try{WriteLog -Message ("Teams inventory failed during {0}: {1}" -f $CurrentOperation,$err.Exception.Message) -Level ERROR}catch{$null=$_}; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; try{Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $err -FailureStage $CurrentOperation}catch{$null=$_}; throw }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1fw0QpMhb3yLo
-# q5B0+lXMVqm8b76rkmv4ser3KsLgUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAXqGrUK4dZ67ts
+# b9ILQ8s8IWzDrvvG66I4YTrvIoLF/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -320,31 +413,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICwYLYJoe7O4NFzzvDeGgnbqLyO4L9bm9CrDQGXIuZ68MA0GCSqG
-# SIb3DQEBAQUABIIBgKZ/RXDs6Z96opjud4DYtD5uAxAOVoALeZJ8UaPkGUU+tDqW
-# X/hBmCzxFtY+enLarF0Ulf+yPgc+/aVLmffB0rZXv5V5ENIWyGuLTB6kD5ONvIJT
-# gAaqyswRj4tNCTMf+rV04KrexXYD8Yh0laoyPgq7E8cOJVTyFGjwfaGEDEf++Yme
-# B6d9neYFL6fbul8Jkf2XTnzLt+vaWdhu+jL86ZRyZm9jObRJRKjsVGP2IMLkzuV8
-# eNBzFIHT3sor2fDPJdBbVa/SWjkqxToffEiLoV1ENO4CrP6wUvx5ffqaFdLLvMvB
-# 4uM3gKcxUlfEz/dT/edglqxSnM+PA/FxC/ZzrLW1Ia62/N1wL1gbkfKeNbQypGQ3
-# wGH1rQHPus9Ekegkdxxk4K0VGw+JYvJ+1mO+sriyWZABrh5lSmAF7LHocYt8NoJb
-# bxt3t7KTivC6wQUWSfargp5mEtR19p/k9BD6CyTfLTGTdCuLRjE2X83dwFI+kDDq
-# 6ArQJwvDUNYh5kZjfqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOLgcT9LOkBhQd+qErtPJnPJ9hUbE922VYkf9QtOnOtWMA0GCSqG
+# SIb3DQEBAQUABIIBgJW7JOLBjcuBwXZlvtuq/kDcvLsOc/vJNm1HxXRMH7qRJKso
+# 1iMTwaPoHAA2TjN5Dp4XBF0aze5qToSWhMhUolaLkCXn6NM+oG8Bu3gpP4TUFKhY
+# YmxYtVhx1H+1LfudGy6ipa1K/lDEuFh2mBX/B4/Qm0aVUtCk7MHoEwru17Jplcqm
+# WWbZeZ1gUjX8wvooBEurfK8ic0nQzYyL5hUrSbITbEOAL2bxXJHJl7yAVNLa7Ght
+# ld8ofMoJVumU7UlzO2zy9MDP/2VwfIzmghqvVZc5yKLfxI6/1tP5GUWGynduSbXz
+# IMuTcqLLPh81PoHa46k7YgnUlz2QSkFy0Cg3OY7mbHj8LEEa44M7XxRoxkyDPGba
+# AnV8dIYDaAOpUyJR2CfX1I8ndqcPfdrZDrNWfteWBeSluBF1kfmVQqxI2aSCw0DZ
+# Wna8t4xH+W6LaXxzc1DZWK1bFFB7SGS1qX/g+VPjPCZUF34e/p2HvFIUPs6tMH8R
+# fXft0hcjCwAyGUvCPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNDQy
-# NDlaMC8GCSqGSIb3DQEJBDEiBCAZ9sgGiVkdj/GHR2hgW9aY/+RbMgD7YghxJ/MA
-# 41uNGTANBgkqhkiG9w0BAQEFAASCAgAM/H745f42PLyco4xQ+lU+Mg5o1bNvX2py
-# 3bzyVsbDBBY9TowTK/1JhA5x8PMe56GLYl3RaaBRRvKqwt6KS2C0G4TdZyehNZOj
-# DbAH71OSC/5qa910/fT6tCDWqmZPet6fxFIbA8uahgyCKU07YJaNYT5XWsgRJlZm
-# 3bjHJFiE+L01OaMeNrOCBOsbnxlt8A4QhVbn5XJhYPAeXHRUUumqHl/mg5tdvuhU
-# p9xAQG+vDoBEcF43qc5nG9SykB96VOA1jISP+wghtnN5vU3qke2sTGYwgkEDs9iu
-# LB4PLzI7t9I8EragHL6Fpcx7PODszBVQSbHErDThr4M0q23oMuPglhbHLnR0vaq1
-# YiLHN22hLmP1Zl63MiBziPwyvStsHVygxJZRsa1fT0ssVJ328mhuHh4fsfEQJ+9y
-# XOIt/9pyI8hhFln68jXXs8VvjYsBPcuRKScSnAW9kjWrlm2UrcUzS9uXRHN7mVGq
-# DsgocfktBnv362L1gc7dBnL20OcF9aDthMhyEiGfBOE9YdhLx23jk5lrCMi+IC/p
-# /2awBK/lFFHLUye76iBxwRN+8z7xcaQReGtRBnYFLWcjpOSeuk0KLF62a7JLyfQ6
-# OrGJnOR8wFKzyV+ZtjVEACiVOKWWMuMVcnpWUFn690cjyEvbh+wd3Rp8oTfTEbfN
-# 82VUDIQgnw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDIy
+# MzBaMC8GCSqGSIb3DQEJBDEiBCDSJtjfW1RXSgKppMqhUfqBI0Bm+054NkHvnOJT
+# TxRv2TANBgkqhkiG9w0BAQEFAASCAgB41Bx6Ztwgl0J2renT6ypftccQaAEhIjtF
+# njCgXaM9WZ+ZrHMfgOopAcpxjT6rUK/SAxKgdjNMIMv6trZoaT8auIYOHrI3/Kr3
+# 48hx7SIIfGkOOIwfV108M/exWEKDG9QWo3BGDT+U+H05/WS6nJxpQD/qDKWPBAvi
+# XUBHYI4GcbhJY32pu9VrkVDGSG8D0uq+/q3gRymPXALU4i9w+gB0FIklVwPNDLKD
+# FiOXPQZzq9tQZl6rqNXCfqj2PsKiQET6MA8Apy/Cpi4NLsTssOEsWU1uToSaz4AB
+# bVf8xmsdKzM8vbncYLST5HgYQROEn0GphqGxG+4LdVDkzhFrTwibt5ez7EkL2drT
+# sKCusSbjjyIxmeQeh7fd8/8dHgDe0NL291ecyj6/jPRNBgOvpB0HF+WevmibL77j
+# kLZwWa0GL66aOAyhNseLoSNrrE8cp3cOF45Hy7tmJ2jYf+KuDADpJSbVu5s1WUdo
+# PXmFO/Fw3jSrccTOXGlLPyrmkskokFHLYPkWm0O0VmIAYIh7ti1X0OCE6oE7eX3j
+# NYloy+c7cyRxuA62PQ8uDNFQAHEoYdWyGZB5NdPbhkuADVMdHMvlyIT/6rYzWyNg
+# 0FXUjWYBTc6PoYX8tjG7rZq1ww5xIJzIj9JdVQ3lC0hdbMoK2DO71N1iqSZQfqDS
+# ZyZY3KcoKA==
 # SIG # End signature block
