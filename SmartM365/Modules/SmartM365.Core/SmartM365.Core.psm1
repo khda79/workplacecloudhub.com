@@ -599,14 +599,21 @@ function Write-SmartM365BrandBanner {
         '================================================================================'
     )
 
-    Write-Host $bannerLines[0] -ForegroundColor DarkCyan
-    Write-Host $bannerLines[1] -ForegroundColor Cyan
-    Write-Host $bannerLines[2] -ForegroundColor Yellow
-    Write-Host $bannerLines[3] -ForegroundColor Yellow
-    Write-Host $bannerLines[4] -ForegroundColor DarkCyan
+    $bannerAlreadyShown = Get-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if (-not [bool]$bannerAlreadyShown) {
+        Set-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -Value $true
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[0] -ForegroundColor DarkCyan
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[1] -ForegroundColor Cyan
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[2] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[3] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[4] -ForegroundColor DarkCyan
+    }
 
-    if ($global:LogTextFile) {
-        Add-Content -Path $global:LogTextFile -Value $bannerLines
+    $logTextFile = [string](Get-Variable -Name LogTextFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    $loggedPath = [string](Get-Variable -Name SmartM365BrandBannerLoggedPath -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    if (-not [string]::IsNullOrWhiteSpace($logTextFile) -and $loggedPath -ne $logTextFile) {
+        Add-Content -Path $logTextFile -Value $bannerLines
+        Set-Variable -Name SmartM365BrandBannerLoggedPath -Scope Global -Value $logTextFile
     }
 }
 function Write-SmartM365ExecutionContext {
@@ -4797,8 +4804,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKm7jconfYxxC7
-# XGcLeql9ZXW1n/2eDkdeLjLUNVBLsKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeJ8DTG31vadAx
+# rvAetCsu6pR/Swr1a+spjMfF3HY586CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4931,31 +4938,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOjGP5HWdduZdG7djOC+vOPpMYRFwshwWHoW0CN4VFI8MA0GCSqG
-# SIb3DQEBAQUABIIBgEHtWEQq+8e3rACKVFtt5IpgumByYJGMGF3+r+jM9St9cUa4
-# rKyxMRDX2rIXjUsbyYz1+MFhrd5RzvM19vDLlPSwX2CjY2KF3MyzFD3UPot8gzUB
-# swnz4zOdJMdC5fsliMfVhh5LBqfpBUWpJ20PrTSrRMa04oDrJvDwW6Y2Rz9esppu
-# d8N7q4w6a/YqipPDo8REVgN8x9gr+IbHvvTEW1NpXFtRQAdhveO/BQnB+K3h6AFG
-# UKjVmPjhbBm8GjLnJTX+bpmhnko4zmL5L98Q5FxKAo4byQ/yIrG65Jky85uN2EEY
-# XqyF2lbKtdUyKjrwaKizohVh4muGoK+RsH3smR8chLDUrgUNLSl6fvYNRv2zmo6E
-# jptT0YAgkco+TP18fLEHvTka9+lljs9TlsvuC8KTCO1oXwuuFLAycO6FOS+9Z41K
-# jxzhQtSLGZ3XFt4AI1musiJkv8qTe1MAPledK7Z4aYvxh8TRJ9P5MUGzP0Ae1jIe
-# K9a7TXzOfFb9tTP5CKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJEAC+86FeN6IQAdsLpkMYazl0uSLMJS9b+e4/jUJsC1MA0GCSqG
+# SIb3DQEBAQUABIIBgGOOp3Bdha8/kWGLVa/LJMtBjYTc1UcpwiylN790R+DPSF42
+# IkZWoq+FgPKXwzw25ER/ruF1mxuvYBisb6ESdaXuJkUNjHHxpq1xM8SFMvrwe0wi
+# sT3iIMm+BxxRsevzXq1TZG3F60ksoEFVejblv4bJYLUUNgzFHf80cW4aUrJMuBez
+# daIA7FkpYCPGE8tstiqDnIslt2o+LLinlGsmgMwWObXL/pBlnOhBn+tLcfB8QCTM
+# nYfDS5BhHI08SPEO5lvllUnpHSloXP1lsNUofYEmLaVlzoZrhBVAkigt5wcs4QcW
+# B0qRaMpgwoFOLVec6v8OCkeqh145cKL1sPSBXh/TjdQSgUff6ZU9+52xijP9FLjh
+# Nmlfi/6QqRNAnkPKnLI47baom1L58XAcGKx34XazsQw8vjyidKMwSSpGtJBWQp5M
+# pLkLJd2/Qs+YRE+nrYzixGweBTx4Azq4HjV3IJQQRDnf5gHRzYCPMix7q7InWuT0
+# 1Cs+ihItcjANByAriqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjAz
-# MjBaMC8GCSqGSIb3DQEJBDEiBCBXrYE35FoimcQYLJsnUVtMGXwIfZLhm/kfKtj8
-# 5pj5NjANBgkqhkiG9w0BAQEFAASCAgBc1DVbCCC7L0x6G6/MTSMx0dy6DE2RkkTg
-# uk1EUtQSCpsCgkF+u4PWs9MaHUWRHnfd2TXbkUlxo0UJ/zNnHsP+RrP6GMdt/DHd
-# cjxPwf206+s25wIIxoC5aULS3vcA4JveGiDnpQeDGgfsKMeOcAGVJYS0ZJhQGfCW
-# xGxSqsPtfaGux6Jifyn9y7Tz9cDmuGPTmQrhvgN+9ToGEBATJlexvlihsfxV5mDd
-# rUfX2jOXcIu6w8aRENjqbW1W3hTQTF4jKHqNCibJGqdiRhKRYsqk4TNoOJyyJbqt
-# 0dVWoid7dO2D+opmRE2JVXI1PMynrt0ccF94oFtVH9t56Ce7l2pmJCQUZV6WUXjc
-# 3+BhNeUvMQP7AE1kE1PZp7HNRFzKd3mWb0BF/Z1MqW7wZYpnbqxM38jEa3e6/ewh
-# 2fbpAw7P7oI3fhx+UjVxL3MRpsMPVpZijrVw8uz5K1TdwKe7F6HZLPkNVDKjJbwH
-# PSJCSRJE8pme0mJz2VRr7jNabuB5HfOD82t9RiGuepmNV6eCWjEshIhaJik9578c
-# mcrbZq499dqshtcfsBy+ir/YwFT0UdQx7lVipss7xQSefo9lAs8pPb1qsbgOsZ4y
-# HJ6tlrGNb9nStBFzWkxUxF0WXSDuNvjM0btyfRqmhzW81e8p+iHw8+qZqsa6XKmB
-# beHIwe2HrA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMzA2
+# MTlaMC8GCSqGSIb3DQEJBDEiBCCjuHd1qYzyaeUwkBzN/bL41AsoTapz99oyOFAz
+# oT5RPzANBgkqhkiG9w0BAQEFAASCAgCjG87CJjNbXK4UEmJRn3qWVnGI2Mbb6HAI
+# UEIyuFqY+vEv4yi18C66v6fIwq6l7wZ58IPcIvYNlqN2kXYmR8P6ldoX5Y35EAKz
+# 7jTEwCxqbGOT4xYU4aCSx3ui6yGSynCBCTcM5KmyBUXds/LFsjpImmoRhNLDuvrK
+# o22j9A5wN4EH4g3DusPJrBvWv8TjgCuoI/S4l2IbaU14OG3jOoTWet0IyAnferjx
+# 17BhsUPC4YE6YFV3XFj++1o3JTKQVBFdNHJfqVUrcVfgSIZSOY4w7vfgf3KDAuZ6
+# TaNPdNy7dQqp7FH9z2CLsIbcddUM9neeGizfclPk2VlNnWmQcmAXZ1IOuDaEXwXw
+# RSWvk1UxMW0/EHZYvEdvBp8AXhMkHwokacDc82++JHNfiTuKuUgy9R1tZO4Fnx+T
+# J/DN+SP3A07GwyCOfgp81L9nPUtII26E81zjjdSpCzDv7xXN+E/L16E7Yo6R2b20
+# 9GVg8KBiQ3YM2I5On75Zw+pbtKR/HzLeyUbpFjDzTfbhlIHkd6FJB3Sz3Ty23E6g
+# tD+fXvk6On2O3inkoLD4TD7HBCVXTTyfnz3i6t5mUNfsIvJHdpzlZQdxTl5iSWLh
+# gt85e9So+tCYz/XK3VCZWfazxRvS0sL+DbCxJEavQdWXpEm6s5fgfoO34ml6Bc/U
+# wxVYFSBCoA==
 # SIG # End signature block
