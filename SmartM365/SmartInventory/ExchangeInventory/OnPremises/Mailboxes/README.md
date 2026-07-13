@@ -8,9 +8,9 @@ Exchange 2016 local mailbox inventory script with integrated reporting.
 
 ## Launchers
 
-- `Start-SmartM365-Exchange-Local-Mailboxes-Inventory-Prod.cmd` / `Start-SmartM365-Exchange-Local-Mailboxes-Inventory-Test.cmd`: standard local mailbox inventory.
-- `Start-SmartM365-Exchange-Local-Mailboxes-Inventory-OnlyADPermissions-Prod.cmd` / `Start-SmartM365-Exchange-Local-Mailboxes-ADPermissions-Test.cmd`: AD permission export only (`-OnlyADPermission`).
-- `Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions-Prod.cmd` / `Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions-Test.cmd`: standard inventory with AD permissions (`-IncludeADPermission`).
+- `SmartM365\SmartInventory\Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-Inventory.cmd`: standard production mailbox inventory.
+- `SmartM365\SmartInventory\Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-Inventory-OnlyADPermissions.cmd`: AD permission export only (`-OnlyADPermission`).
+- `SmartM365\SmartInventory\Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd`: standard inventory with AD permissions (`-IncludeADPermission`).
 ## Configuration
 
 SharePoint upload is inherited from the tenant/global configuration by default. If `SmartM365-Exchange-Local-Mailboxes-Inventory.local.json` already exists on an Exchange server from an older template, make sure it contains:

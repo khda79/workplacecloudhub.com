@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.22) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.23) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -14,14 +14,14 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `Orchestrator-Jobs.json` | Runtime jobs manifest, auto-created from the template at first run and Git-ignored: it carries operational values (Enabled flags, schedules, real server names in `AllowedServers`). Hot reloaded on change. |
 | `Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1` | Installs or removes the unattended Windows scheduled task under a dedicated service account. |
 | `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `LocalMachine` trust stores by default; `CurrentUser` remains available explicitly. |
-| `Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
-| `Start-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: `-Tenant prod -Connect`. |
-| `Start-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: `-Tenant test -Connect`. |
-| `Stop-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: requests a clean stop for the running prod orchestrator instance. |
-| `Stop-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: requests a clean stop for the running test orchestrator instance. |
+| `..\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
+| `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator.cmd` | Production launcher: `-Tenant prod -Connect`. |
+
+| `..\Launchers\Orchestrator\Stop-SmartM365-Inventory-Orchestrator.cmd` | Launcher: requests a clean stop for the running prod orchestrator instance. |
+
 | `Restart-SmartM365-Inventory-Orchestrator.ps1` | Stops the orchestrator cleanly, then starts the existing scheduled task. |
-| `Restart-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: clean restart of the prod scheduled task. |
-| `Restart-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: clean restart of the test scheduled task. |
+| `..\Launchers\Orchestrator\Restart-SmartM365-Inventory-Orchestrator.cmd` | Launcher: clean restart of the prod scheduled task. |
+
 
 Runtime files are tenant-isolated, created automatically and Git-ignored. State, job-run CSVs and logs use a per-server suffix (for example `{{DataAllRootPath}}\Orchestrator\SRV01`) to prevent collisions. The lifecycle CSV stays one level above the server folders so it provides a single tenant-wide history across all orchestrator servers:
 
@@ -163,7 +163,7 @@ For an explicit user-scoped install:
 | --- | --- |
 | `Name` | Unique job name (letters, digits, `.`, `_`, `-`). Used for state, logs and CSV. |
 | `ScriptPath` | Script path relative to the SmartInventory root (the parent folder of `Orchestrator`). This remains the canonical inventory script used for validation and Authenticode checks. |
-| `LauncherPath` | Optional launcher path relative to the SmartInventory root. When present, the orchestrator verifies `ScriptPath` but launches the `.cmd` instead. This is intended for AD/on-prem Exchange jobs that need local cache/unblock/bootstrap behavior. `{{Tenant}}` and `{{TenantKey}}` tokens resolve to the current tenant key. |
+| `LauncherPath` | Optional launcher path relative to the SmartInventory root. When present, the orchestrator verifies `ScriptPath` but launches the `.cmd` instead. This is intended for AD/on-prem Exchange jobs that need local cache/unblock/bootstrap behavior. `{{Tenant}}` and `{{TenantKey}}` tokens resolve to the current tenant key. Centralized launchers default to `prod` for manual use; the orchestrator passes its own tenant through an isolated child-process environment variable. |
 | `Arguments` | Extra arguments appended verbatim to the child command line. For direct `ScriptPath` launches, `-Tenant <tenant>` is appended by the orchestrator. `-Connect` is appended only when the target script declares that parameter; do not repeat either argument. For `LauncherPath` launches, the launcher owns tenant/connect handling, so the orchestrator does not append them. |
 | `Enabled` | `false` by default; only enabled jobs are scheduled. |
 | `Group` | Logical group (AD, Exchange, M365, Intune); informational. |
@@ -249,10 +249,10 @@ The installer can be started from a standard PowerShell session and requests UAC
 
 For interactive setup, run or double-click the thin launcher below. The PowerShell installer itself requests UAC elevation, prompts for install/uninstall and prod/test, validates the service account, and asks whether the task should start immediately. The CMD file only invokes the PowerShell workflow.
 
-All CMD launchers in this folder use `pushd` / `popd` so they can start from a UNC share. The installer launcher preserves the original UNC script path, tries the trusted PowerShell 7 executable under Program Files first, and falls back to Windows PowerShell only when PowerShell 7 is unavailable.
+All CMD launchers under `..\Launchers` use `pushd` / `popd` so they can start from a UNC share. The installer launcher preserves the original UNC script path, tries the trusted PowerShell 7 executable under Program Files first, and falls back to Windows PowerShell only when PowerShell 7 is unavailable.
 
 ```text
-.\SmartM365\SmartInventory\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd
+.\SmartM365\SmartInventory\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd
 ```
 
 Running the PowerShell installer directly without parameters opens the same guided workflow. Supplying parameters keeps it suitable for repeatable administration and deployment automation.
@@ -289,7 +289,7 @@ The service account must already have the local/domain rights and file/certifica
 
 ### Manual configuration
 
-Create ONE task per tenant under the `\WCH\` Task Scheduler folder, running the launcher such as `Start-SmartM365-Inventory-Orchestrator-Prod.cmd`:
+Create ONE task per tenant under the `\WCH\` Task Scheduler folder. Configure it to run `pwsh.exe -File SmartM365-Inventory-Orchestrator.ps1 -Tenant <prod|test> -Connect`, matching the action created by the installer:
 
 - General: dedicated service account with "Log on as a batch job", "Run whether user is logged on or not", "Run with highest privileges" if the inventory scripts need it. The account needs write access to the SmartM365 `Data` folders and the certificate/private key used by app-only auth.
 - Triggers:
@@ -307,7 +307,7 @@ Create ONE task per tenant under the `\WCH\` Task Scheduler folder, running the 
 To make the scheduled task pick up a newly deployed orchestrator version, request a clean stop instead of killing `pwsh.exe` directly:
 
 ```text
-.\SmartM365\SmartInventory\Orchestrator\Stop-SmartM365-Inventory-Orchestrator-Prod.cmd
+.\SmartM365\SmartInventory\Launchers\Orchestrator\Stop-SmartM365-Inventory-Orchestrator.cmd
 ```
 
 The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -Stop`. The running instance consumes `Orchestrator-StopRequested.json` on its next tick, stops launching new jobs, saves state, releases the lock, finalizes lifecycle tracking and performs the final SharePoint upload. Detached inventory jobs are not killed; the next orchestrator instance re-adopts them from state.
@@ -317,7 +317,7 @@ If no live orchestrator lock is found, the stop command removes any stale stop r
 To stop the resident instance and immediately start the registered scheduled task again, use:
 
 ```text
-.\SmartM365\SmartInventory\Orchestrator\Restart-SmartM365-Inventory-Orchestrator-Prod.cmd
+.\SmartM365\SmartInventory\Launchers\Orchestrator\Restart-SmartM365-Inventory-Orchestrator.cmd
 ```
 
 The restart launcher does not start the orchestrator directly. It first calls the same clean stop workflow, verifies that the scheduled task is no longer running, then calls `Start-ScheduledTask` for `\WCH\SmartM365 Inventory Orchestrator - prod`. This keeps the restart under the registered service account, task folder, triggers and task security settings.
