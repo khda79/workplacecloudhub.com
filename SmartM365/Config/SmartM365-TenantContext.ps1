@@ -6,7 +6,7 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.2
+1.0.3
 #>
 function ConvertTo-SmartM365Hashtable {
     [CmdletBinding()]
@@ -238,84 +238,100 @@ function Get-SmartM365EffectiveGlobalConfig {
     [CmdletBinding()]
     param(
         [string]$StartPath,
-        [string]$TenantKey = 'test'
+        [Alias('TenantKey')][string]$ProfileKey = 'test'
     )
 
-    if ([string]::IsNullOrWhiteSpace($TenantKey)) { $TenantKey = 'test' }
+    if ([string]::IsNullOrWhiteSpace($ProfileKey)) { $ProfileKey = 'test' }
+    $ProfileKey = $ProfileKey.Trim().ToLowerInvariant()
 
     $rootPath = Find-SmartM365Root -StartPath $StartPath
     $scriptStartPath = if ([string]::IsNullOrWhiteSpace($StartPath)) { $rootPath } else { $StartPath }
     $scriptOutputRootPath = Join-Path -Path $scriptStartPath -ChildPath 'Output'
     $globalConfigPath = Join-Path -Path $rootPath -ChildPath 'Config\SmartM365.global.local.json'
-    $tenantConfigPath = Join-Path -Path $rootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $TenantKey)
+    $tenantConfigPath = Join-Path -Path $rootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $ProfileKey)
 
     $globalConfig = Read-SmartM365JsonConfig -Path $globalConfigPath -Required
     $tenantConfig = Read-SmartM365JsonConfig -Path $tenantConfigPath -Required
 
-    if ($tenantConfig.Contains('TenantKey') -and
-        -not [string]::IsNullOrWhiteSpace([string]$tenantConfig['TenantKey']) -and
-        [string]$tenantConfig['TenantKey'] -ne $TenantKey) {
-        throw "Tenant profile key mismatch. File '$tenantConfigPath' contains TenantKey '$($tenantConfig['TenantKey'])' but requested '$TenantKey'."
+    $configuredProfileKey = if ($tenantConfig.Contains('ProfileKey')) { [string]$tenantConfig['ProfileKey'] } else { '' }
+    $organizationKey = if ($tenantConfig.Contains('OrganizationKey')) { [string]$tenantConfig['OrganizationKey'] } else { '' }
+    $environmentKey = if ($tenantConfig.Contains('EnvironmentKey')) { [string]$tenantConfig['EnvironmentKey'] } else { '' }
+    $configuredTenantKey = if ($tenantConfig.Contains('TenantKey')) { [string]$tenantConfig['TenantKey'] } else { '' }
+
+    $configuredProfileKey = $configuredProfileKey.Trim().ToLowerInvariant()
+    $organizationKey = $organizationKey.Trim().ToLowerInvariant()
+    $environmentKey = $environmentKey.Trim().ToLowerInvariant()
+    $configuredTenantKey = $configuredTenantKey.Trim().ToLowerInvariant()
+
+    if ([string]::IsNullOrWhiteSpace($configuredProfileKey) -or $configuredProfileKey -ne $ProfileKey) {
+        throw "Tenant profile mismatch. File '$tenantConfigPath' must contain ProfileKey '$ProfileKey'."
+    }
+    foreach ($identityValue in @(
+            [pscustomobject]@{ Name = 'OrganizationKey'; Value = $organizationKey },
+            [pscustomobject]@{ Name = 'EnvironmentKey'; Value = $environmentKey }
+        )) {
+        if ([string]::IsNullOrWhiteSpace($identityValue.Value) -or $identityValue.Value -notmatch '^[a-z0-9][a-z0-9-]*$') {
+            throw "Tenant profile '$tenantConfigPath' requires $($identityValue.Name) using lowercase letters, digits, and hyphens."
+        }
+    }
+
+    $expectedTenantKey = ('{0}-{1}' -f $organizationKey, $environmentKey)
+    if ($configuredTenantKey -ne $expectedTenantKey) {
+        throw "Tenant profile '$tenantConfigPath' must contain TenantKey '$expectedTenantKey' (OrganizationKey-EnvironmentKey), found '$configuredTenantKey'."
     }
 
     foreach ($key in $tenantConfig.Keys) {
         $tenantValue = $tenantConfig[$key]
         if ($tenantValue -is [string]) {
             $tenantText = $tenantValue.Trim()
-            if ([string]::IsNullOrWhiteSpace($tenantText) -or $tenantText -in @('__USE_GLOBAL__', 'USE_GLOBAL')) {
-                continue
-            }
+            if ([string]::IsNullOrWhiteSpace($tenantText) -or $tenantText -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { continue }
         }
         $globalConfig[$key] = $tenantValue
     }
 
-    $globalConfig['TenantKey'] = $TenantKey
+    $globalConfig['ProfileKey'] = $ProfileKey
+    $globalConfig['OrganizationKey'] = $organizationKey
+    $globalConfig['EnvironmentKey'] = $environmentKey
+    $globalConfig['TenantKey'] = $expectedTenantKey
     $globalConfig['SmartM365RootPath'] = $rootPath
     $globalConfig['ScriptOutputRootPath'] = $scriptOutputRootPath
 
     $defaultWorkspaceRootPath = $rootPath
-    $defaultDataAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL'
-    $defaultLatestCsvFolderPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST'
-    $defaultLogAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL'
+    $defaultDataAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{ProfileKey}}\DATA-ALL'
+    $defaultLatestCsvFolderPath = '{{WorkspaceRootPath}}\Data\Tenants\{{ProfileKey}}\DATA-LAST'
+    $defaultLogAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{ProfileKey}}\LOG-ALL'
     $useScriptOutputFallback = $false
 
-    if (-not $globalConfig.Contains('WorkspaceRootPath') -or
-        [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or
-        [string]$globalConfig['WorkspaceRootPath'] -eq '{{SmartM365RootPath}}') {
+    if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or [string]$globalConfig['WorkspaceRootPath'] -eq '{{SmartM365RootPath}}') {
         $candidateDataRoot = Join-Path -Path $rootPath -ChildPath 'Data'
         if (Test-SmartM365WritableDirectory -Path $candidateDataRoot) {
             $defaultWorkspaceRootPath = $rootPath
         }
         else {
             $defaultWorkspaceRootPath = $scriptOutputRootPath
-            $defaultDataAllRootPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\DATA-ALL'
-            $defaultLatestCsvFolderPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\DATA-LAST'
-            $defaultLogAllRootPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\LOG-ALL'
+            $defaultDataAllRootPath = '{{WorkspaceRootPath}}\Tenants\{{ProfileKey}}\DATA-ALL'
+            $defaultLatestCsvFolderPath = '{{WorkspaceRootPath}}\Tenants\{{ProfileKey}}\DATA-LAST'
+            $defaultLogAllRootPath = '{{WorkspaceRootPath}}\Tenants\{{ProfileKey}}\LOG-ALL'
             $useScriptOutputFallback = $true
         }
     }
 
-    if (-not $globalConfig.Contains('DataAllRootPath') -or
-        ($useScriptOutputFallback -and [string]$globalConfig['DataAllRootPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL')) {
-        $globalConfig['DataAllRootPath'] = $defaultDataAllRootPath
-    }
-    if (-not $globalConfig.Contains('LatestCsvFolderPath') -or
-        ($useScriptOutputFallback -and [string]$globalConfig['LatestCsvFolderPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST')) {
-        $globalConfig['LatestCsvFolderPath'] = $defaultLatestCsvFolderPath
-    }
-    if (-not $globalConfig.Contains('LogAllRootPath') -or
-        ($useScriptOutputFallback -and [string]$globalConfig['LogAllRootPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL')) {
-        $globalConfig['LogAllRootPath'] = $defaultLogAllRootPath
-    }
-    if (-not $globalConfig.Contains('WorkspaceRootPath') -or
-        [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or
-        [string]$globalConfig['WorkspaceRootPath'] -eq '{{SmartM365RootPath}}') {
-        $globalConfig['WorkspaceRootPath'] = $defaultWorkspaceRootPath
+    $legacyDataAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL'
+    $legacyLatestCsvFolderPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST'
+    $legacyLogAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL'
+    if (-not $globalConfig.Contains('DataAllRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['DataAllRootPath'] -in @($legacyDataAllRootPath, '{{WorkspaceRootPath}}\Data\Tenants\{{ProfileKey}}\DATA-ALL'))) { $globalConfig['DataAllRootPath'] = $defaultDataAllRootPath }
+    if (-not $globalConfig.Contains('LatestCsvFolderPath') -or ($useScriptOutputFallback -and [string]$globalConfig['LatestCsvFolderPath'] -in @($legacyLatestCsvFolderPath, '{{WorkspaceRootPath}}\Data\Tenants\{{ProfileKey}}\DATA-LAST'))) { $globalConfig['LatestCsvFolderPath'] = $defaultLatestCsvFolderPath }
+    if (-not $globalConfig.Contains('LogAllRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['LogAllRootPath'] -in @($legacyLogAllRootPath, '{{WorkspaceRootPath}}\Data\Tenants\{{ProfileKey}}\LOG-ALL'))) { $globalConfig['LogAllRootPath'] = $defaultLogAllRootPath }
+    if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or [string]$globalConfig['WorkspaceRootPath'] -eq '{{SmartM365RootPath}}') { $globalConfig['WorkspaceRootPath'] = $defaultWorkspaceRootPath }
+
+    foreach ($pathKey in @('DataAllRootPath', 'LatestCsvFolderPath', 'LogAllRootPath')) {
+        if ($globalConfig.Contains($pathKey) -and $globalConfig[$pathKey] -is [string]) {
+            $globalConfig[$pathKey] = ([string]$globalConfig[$pathKey]).Replace('{{TenantKey}}', '{{ProfileKey}}')
+        }
     }
 
     return [pscustomobject]$globalConfig
 }
-
 function Initialize-SmartM365TenantContext {
     [CmdletBinding()]
     param(
@@ -324,17 +340,24 @@ function Initialize-SmartM365TenantContext {
     )
 
     if ([string]::IsNullOrWhiteSpace($Tenant)) { $Tenant = 'test' }
+    $profileKey = $Tenant.Trim().ToLowerInvariant()
+    $effectiveConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $StartPath -ProfileKey $profileKey
 
-    $global:SmartM365Tenant = $Tenant
-    $script:SmartM365GlobalConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $StartPath -TenantKey $Tenant
-    return $script:SmartM365GlobalConfig
+    $global:SmartM365Tenant = $profileKey
+    $global:SmartM365ProfileKey = [string]$effectiveConfig.ProfileKey
+    $global:SmartM365OrganizationKey = [string]$effectiveConfig.OrganizationKey
+    $global:SmartM365EnvironmentKey = [string]$effectiveConfig.EnvironmentKey
+    $global:SmartM365TenantKey = [string]$effectiveConfig.TenantKey
+    $global:SmartM365TenantId = [string]$effectiveConfig.TenantId
+    $global:SmartM365GlobalConfig = $effectiveConfig
+    $script:SmartM365GlobalConfig = $effectiveConfig
+    return $effectiveConfig
 }
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/suI2gW9W+mDk
-# TqeDWQo8I9qagperyU8TZN/5iOFaB6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwCa5rwGZ0YXln
+# vE9PWbgEoNp+htoXpoj7Kex6Ry6pXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -467,31 +490,31 @@ function Initialize-SmartM365TenantContext {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICMJqn66IZRtj13SUK2R5/9FrK1cri1x7P4gqLsLSrdTMA0GCSqG
-# SIb3DQEBAQUABIIBgE4dyoncpLHBWoAdKR/QxpqnWSb3kCachWatPik1hpJhA8Jd
-# CaC5yrcRoNjR4NImnWl7uGnCyRp5cu4qPReCoNlSktZqMG9wpDZY6RcuFjt03eRG
-# hIqD5Ms1XKZtJKUxB4Ts03oou7zvuyD5nlui3b8QcCAvUpFj7OFIv7P09UfPpB3t
-# 8GfW4JaVa77cVPJtbkr1UoRS2mBu+2F+gTcDxyuoLPS5qUfH4IznFhMM0HnpHIWr
-# 00vhoy9YIAS+S5WxGfcNGnucS/3Jt6y+jvGuvHXjIOpVn2ykVAqspiRl0yiKKdkK
-# 9QnPtflZUvlYGS67lEpjYcFbK/vcnRR9mHx3uN7K2KrZQ741g9yQXT3pWJ9ly/No
-# QCc2PZAoxF9hoFkw2WbZ+OXCSfD6uD6NKgjuBbDJIBONecz246R/SGgcfATzpig7
-# E0WM+CcSXIk7NDM6Lc8B+obD85hxgYy+bDlfs6R9r4b5RXntP5yu06bbxltH1H/T
-# YTU4+IxtnOD3V2eM46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB9VKafAAVGNxQ2z2GUaWS9Ri/jShh+zpIbm75YsuCsgMA0GCSqG
+# SIb3DQEBAQUABIIBgCPHHiYmTaG0WN1OPe+nAOaLGvaIcy3h+7tDM4VUcZKqXWC6
+# Zai5SkT2Qztjn/R3/j0AsCfCklUk8FDeWN+a4nHXr1NuSRfG9UWHEbE83H9i9LRl
+# Eol8lpzeUaHe/LQXbI/93qwMgFlf+0HViFNXVvwQvA6EqXla2aptGbZWzXhc+arH
+# KoojXNN88/kTrADMpvB5ePMB8tPc69emWlb0/bZUHztbG4AIeI7f8cNYZ+2IhMnH
+# 2QNBspK6LHmqJdkY/Rke/ymKMFTvwSzGHq4mtCZ3IvSqLqvun2gY+2vbCCv5DAnW
+# xWbvcHDmPwfH5dCOU3oex2dPgRKdn+PWmi3jsshttbtqF+lB7lU/g+rUCNoU9UBS
+# XYR+CmMR+6LvI97XiTggG+DEdq49Tgbl/VP/GYt7+eqA6vl/dVIwMyOkxQvH/pmD
+# r07n8eDuADuS0IDgHl6YWgKobTE4BLWfIVHXe4L124lunoo1+vpa/Vvw8wE1a6FN
+# o+mGC9ILsiLJ8ZYUAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MjZaMC8GCSqGSIb3DQEJBDEiBCDggVN9Y9PekFf4D06Morepk+vEfQx6mF6O7IqR
-# qL3wgzANBgkqhkiG9w0BAQEFAASCAgCEfC2vQ96VFVljbAGeoQJYZyyRCkhj2mDD
-# MJtpGShQ4YwjYeFRdh4ezNkwC+jSEgbIsUfJhRz66rJ8BNCnKCCzFOz8DszCFo+D
-# JNyqHIdhtoC0OgUMTXyzlVLBzVDndsnWWQpGSQsSWHF5L4sWeshTAhDSbHrdpj4b
-# 2Z9FDnk1qqCKdJdEIkJIhd//IIAEbuNczXZXHAqSlwoo8H0ktQeYAKEatkc+LiR6
-# vWpklz/lEkZFk0e5+el0nt9thXn8ZlKZXYT/KRxuHe0VBHpHFoJzjncjOIZ3z9XK
-# sWhpzoVq7dyPKzx3lbNXi/dYS58ELYWqu98WUG9Go193lHTj5liBBrW5uIjYXDVv
-# MGeySQNoGkisXXKBn6iaBgFPeVacnO0/MVW/gSDWsnF5U/7A9MmkO2nvon4YxIyc
-# /azLHl1JGJKjHfpTxzcH5IUlWyfVUWqJ/i9MQZemrUQXJVCdWaaqigOIAmyCnpra
-# 1bycFY2L9zAszRG9/q+qMRcjc19Wn7xfFZXCfGD8D48pvvzU72JxDXEvg1KJ2uka
-# 6HPw5PZ7hsQ5APusn5Pl9Mh9BImqjmXUIHOY5EVYjoHxiyQJVfqdHG36LD2s1pFB
-# RET93X42e8BHUpavMnH9lCnjRfuVavyj5RmcShcutUChc6e+mw4EEa5azxf1D8nY
-# NV/obIg4Qw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjA1
+# MTdaMC8GCSqGSIb3DQEJBDEiBCCLn2/pPGPxJGKPaWqShOV2AYrWLbjb1xcegHm4
+# EufY4zANBgkqhkiG9w0BAQEFAASCAgAEC8PlE7N54CSWbNZDziWmGBupM9gZWHax
+# 8xSiOuX+bf2xmBxGbeHgxgSPbqYZ4hcO4ne6p9AtljgPlX8PD4Q1338Dp5LCj+cg
+# ma39DR8a/KrSpDEtz05PaE2ZynFOjM5dt+fULCvMRwDbY1NYqsm5JvMLXOWRGYv0
+# IXp0JoheHGYVcbXp1mAhe26fX1wnkuv87oLiMgD3DC+tWZQJ3PzZo9sjrwjYWmTV
+# Bh0XRFMVptoo3kkrFWVo0RJz7GS4+8MGwKusz5a20KiTQXvIjma1ait1mJ0THAta
+# JJX7dGKRj89qRirBth1U0AAK06295OSvLTnSkB30L+0377b0D+l8NFiSVdilXaUY
+# /wEbzFs4oBadsqaK4bXEukrtOlHCe7zRCewyiOt68fmqETTohW75ytlwMSXIXcp5
+# XZebUeFvQp7N3VPjct0aG0NFaLn+zzr7ua8c8Mn2tPmk/aYo7AKtj0ajpYHBc64Y
+# 8/Cs1zzu0pdH71Fo5zOrO/nHN6nJiMbFvV6WzYV9yyV2LqwdzDp+3LfvtUZat583
+# zwkwFeJ42z5TdXT2ESuSxYpm9evdynQfKPaTqY1ZJR0y9rwjnWd5iydYEE2tKZV6
+# 9Ph6oRI/QP9cMTYTPbZU4deZjKA49hXLk4syIhL+D9bBsb3F/6McdZXB9N/shA8S
+# zeWQNFjCgQ==
 # SIG # End signature block

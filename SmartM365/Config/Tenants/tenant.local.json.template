@@ -1,5 +1,8 @@
 {
-  "TenantKey": "tenant-key",
+  "ProfileKey": "tenant",
+  "OrganizationKey": "contoso",
+  "EnvironmentKey": "test",
+  "TenantKey": "contoso-test",
   "Environment": "Test",
   "AppId": "00000000-0000-0000-0000-000000000000",
   "TenantId": "00000000-0000-0000-0000-000000000000",
