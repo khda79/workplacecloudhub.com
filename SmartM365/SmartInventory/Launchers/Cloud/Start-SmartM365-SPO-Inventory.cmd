@@ -16,6 +16,5 @@ if not exist "%PWSH%" (
 )
 "%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-SPO-Inventory.ps1" -Tenant prod %*
 set "EXITCODE=%ERRORLEVEL%"
-pause
 popd
 exit /b %EXITCODE%
