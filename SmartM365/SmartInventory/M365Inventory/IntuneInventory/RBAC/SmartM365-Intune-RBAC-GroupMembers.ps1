@@ -7,10 +7,8 @@
     the script resolves the group SG-RBAC-Intune-{Country}-{Role} via Microsoft Graph,
     retrieves all members (paginated), and exports a consolidated CSV with member details,
     role type and role description.
-    On completion, sends an HTML summary email including statistics by country, by role,
-    and a diff section listing members added or removed since the previous run.
-    Logging, cleanup, and global error handling (with HTML email notification) are handled
-    via SmartM365.Core.
+    Summary email delivery is disabled; unhandled errors still trigger an HTML notification.
+    Logging, cleanup, and global error handling are handled via SmartM365.Core.
 
 .PARAMETER OutputPath
     Output directory for the timestamped CSV and logs.
@@ -29,7 +27,7 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.10
+1.11
 
 
 
@@ -39,7 +37,7 @@
     Minimum Graph application permissions: Group.Read.All; GroupMember.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.10
+    Version : 1.11
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
 
@@ -460,7 +458,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -988,7 +986,6 @@ $MetaHtml
     foreach ($F in $CountryExcelFiles) { if (Test-Path $F) { $attachments.Add($F) } }
 
     Write-Log "Summary email disabled; error emails only." "INFO"
-    WriteLog -Message "Summary email sent. Subject: $EmailSubject" "INFO"
 
     WriteLog -Message "Script main execution completed successfully." "INFO"
 
@@ -1101,8 +1098,8 @@ if ($global:ScriptFailed) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGzV88D+yDzlK2
-# KI0Fh1Ee8EC+9rb8AtoZH2wiHNomN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBB1Hh7GrM3Mim7
+# keaixf/SGuf7O44UWJHitctJ8bAsNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1235,31 +1232,31 @@ if ($global:ScriptFailed) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIESo0M7jGcbjgR5WL2qqD5qsky1jaQ+W8j64PKioQwRcMA0GCSqG
-# SIb3DQEBAQUABIIBgFflwpYfWxJdMzRUxBHl1H0RiJETVDJ+mke39eZ2OP7q2fdL
-# nxZHuDGh3Et/oqawsrLJ9mxWBX4IlaBD8Jkt9Sr8YBxHMUVA0wOXP1iYyon0fMjM
-# 2QePitUFilOJ9xS7wggDZwtAWJAnALMDyygF3+81/s4RskWmpGqVCDwEHHiv/gqV
-# XqsaB5e0fujgswO5uaZKEi2Sau7RsGk+cwleq9yXQosWyJssKWtPeKtYAUXyoGri
-# CF3K1VWSmo6Ztv6Xk9WvNfSupUQC1BRaXdWIBM4muNQAUjsU7OObEf/CUwuQGz1L
-# WXac+0CCCoh/EDcX5z78QjNjwEFzaegujjcHe6lw8jQe+m0vKO4S888lGA4s95+M
-# LrhWaKZwMpWCdSqOVOAo/AEZRoHMPfXcqgm9hIL4Nb8rflbbXxqsBXSRg26GwjAe
-# /4FiQrYGy49jj/+XNvQjNJokSaykJGQsl4eM3+e/htrLjiuk9MRYbQKrOkCDg7sz
-# hBrsTi+Tz2CjKRTX06GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMsaj9QA4TQKTiOYf//L4HWLptowEbsTSylNYgkZR/4qMA0GCSqG
+# SIb3DQEBAQUABIIBgGBhrgNK3HeOqcQvgS2u0ekaOV9lS+WnRAc0rxZ8ExeD8IZV
+# BD8U2gsG0tBgdP2114BZUzErE2T4K7b76+2eM9zF5SLprXbNlpXZZXVs+wjo5kb8
+# 2oRwiRUCdGtmhIeeghjHSvigcTmTtu4hLTDtoz6EEXR8tjeRdFebGtkKJOwddTFq
+# vDzc6ljHFbPElA/TU1qGkZtOfJQ4mEz1+Er8RTsZDMLYP8dAdDQ7NoLEK6bZ+vUa
+# BcZE2KacclNqOrmcvy6W4d4sw/XNZ7/m2S9YPUluWjinyWewfDR6GDBzbPWWSYAF
+# ld0zjsxwx37yE10o9JJoRVGL01f36QAU1mHcW8sdR1Dc4Nshyk51UwRT1fwDQhkB
+# mrn4oMKrG5mxuVg9jTorKAAHgvbwCuoZK5CnqU6dUQcGTV33ycZ0T4Cg9R4QW0oH
+# 8Q+nRe5/xfV2t4dm6ximZH6/Htk5XS49nOEpStvRgd8PJJDS3puiGuc9tiCIubJo
+# QMqHQ+Y0MmZnLYwL/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzJaMC8GCSqGSIb3DQEJBDEiBCAcT8B7wJJDqapIWxj3YfI35o0AOCmL+MGtwvSh
-# hgs8VTANBgkqhkiG9w0BAQEFAASCAgCrWJkKQJj/9hQ/J2UL3CAnWdX6iollNsTS
-# DbRcEyoDHorMKyR6l2FKqvYCqeu7CuoyFDO85ZggSnwdV2CNaE1erGysOFjRZ4U9
-# F+m+thF7HBwe+HPqsdlAG+XiROzNMkULntYjC/Hg6q2OL/obVxs9DdC/JPCt1+qT
-# 48soXjf3AtDqevCt7WTMf9nga+mlwjT/KUPwz2c8sn3GfsuPrHZHxfJWXhiB3d70
-# 9ZbhpARn8cx1Tk1U8eu+F97DGuqE2g9QNFt0CzayCREkOQvHweP2Ss0nebltewcK
-# ZTZBwwk6zNMTB0k+pvloyq8HfxjdyDBn0qBoY62bZuzgaMLPBPZLpjRmqMoTPFH7
-# t70I1kcctslWic5bTi6U09UodibPD5KyUsRowcqSU7ckNMJDzPzSz2+wo/JN64D3
-# sw71n8gZ4oBNzAjiBz8FB3/adEllaJy+FzvtdHXZmzmEyM6FbLIJ5QBmvGKOojqd
-# Bt1O6JRqmfhYexeW5K06kDd5SO37jejSB4B+jBPMOByC5rshtcS7DtF+eivc33h8
-# rRAUgZTQtWD7eyXuuwV3MbJyYUlnX1vjf6vYQzglxCx3vzaFO2ZY5ye9msaDHLmB
-# CCWXRqv/8hHRJsAlq0AoflWiPBNnl/xhwr08AUUjqB4WyDr27nmrsw+aYr6Q5F+R
-# 1FadCWRNKA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNjQw
+# MTVaMC8GCSqGSIb3DQEJBDEiBCBGcUusZU5Aypq4oujbUZvhx7aSIebyS6zMIud6
+# PwQtHDANBgkqhkiG9w0BAQEFAASCAgB2XDJr1Znwb9sgMcVz8WOX1f5dW9MHHfnm
+# Fh+v38Tm9ioFPhbPSkOzxbAbBK2cw1ZTuuebrDKxQow3O7zDRQiPSvPTM2N1XpCB
+# /FnL9ztdj7OFaUEzgyJjqYXm91rJvG/NJ3fq3GoF+m4hqCDxZIWKIBSiYWMz/Qr/
+# Dl7PcSzjmSQlDOwVGnr2UEeLqK2Pe2jTgX58GdzjyikJwPP/Kjv9I2fV5v+S3c/9
+# SdVm4In0IHOhb25WpxUBHvtq+K4ps2dazsFq0aA9HyJuHx98dKMcwpDuCyuo61Yb
+# 7fFXeMCFmRKfdfetEJ9zFaxU37gSZ/qZilvb9QskRSRq5weudSItJ7lXiH0/5i7j
+# S0A1UUVoBD6r1XDqavrgDY7fygiEiBUq0fndAVRXI+0a2jNzFlGczF3yHxEGjtZz
+# jzWv+qD8as2HQRyTnOmtP1mKTgfczZop2V2SyYJJ1rN6euOjvxrLc3ZxmC6rnQyd
+# 549iD1p6E0q0pK+uDEhtCc3GTapbpknophYCm2shYTe88/5EbPq4chGc6XqaAq2R
+# 13rXv/xj8bYGlyJTEz1ho9uMYb//XSA4/UsW95pHieSwYSab8DAnJTTgfKp+Ckar
+# 9DzFH0yqEHm92mxLBexrmF+/wXdpDtjqZVWaqGVMnDohccg81wQdrkgPO5Q/gIvi
+# 1V/rI5564A==
 # SIG # End signature block
