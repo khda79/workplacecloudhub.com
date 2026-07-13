@@ -8,6 +8,10 @@ The model should consume curated CMDB and Power BI-ready CSV tables from:
 SmartWorkplaceCMDB/Data/Tenants/<TenantKey>/DATA-LAST/PowerBI/
 ```
 
+## Multi-tenant CSV contract
+
+Every curated table except `DimDate.csv` starts with `TenantKey`. Relationship-bearing tables also expose hidden-key inputs such as `TenantUserKey`, `TenantDeviceKey`, and `TenantSkuKey`, built as `TenantKey|SourceIdentifier`. `DimDate.csv` is the explicit tenant-neutral exception.
+
 ## Priority
 
 1. Direction and executive overview.
