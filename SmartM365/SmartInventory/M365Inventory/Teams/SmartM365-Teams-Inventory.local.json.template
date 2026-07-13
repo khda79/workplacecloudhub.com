@@ -26,7 +26,6 @@
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\M365\\Teams\\Inventory\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
-  "AlwaysSend": false,
   "RequireSensitivityLabel": false,
   "IncludeChannelOwners": false
 }
