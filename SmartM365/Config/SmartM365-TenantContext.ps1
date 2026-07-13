@@ -6,8 +6,23 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.3
+1.0.4
 #>
+function Write-SmartM365StartupBanner {
+    [CmdletBinding()]
+    param()
+
+    $bannerAlreadyShown = Get-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ([bool]$bannerAlreadyShown) { return }
+
+    Set-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -Value $true
+    Microsoft.PowerShell.Utility\Write-Host '================================================================================' -ForegroundColor DarkCyan
+    Microsoft.PowerShell.Utility\Write-Host ' SmartM365 by WorkplaceCloudHub' -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ' Website : https://workplacecloudhub.com' -ForegroundColor Yellow
+    Microsoft.PowerShell.Utility\Write-Host ' GitHub  : https://github.com/khda79/workplacecloudhub.com' -ForegroundColor Yellow
+    Microsoft.PowerShell.Utility\Write-Host '================================================================================' -ForegroundColor DarkCyan
+}
+
 function ConvertTo-SmartM365Hashtable {
     [CmdletBinding()]
     param([AllowNull()]$InputObject)
@@ -339,6 +354,8 @@ function Initialize-SmartM365TenantContext {
         [string]$StartPath
     )
 
+    Write-SmartM365StartupBanner
+
     if ([string]::IsNullOrWhiteSpace($Tenant)) { $Tenant = 'test' }
     $profileKey = $Tenant.Trim().ToLowerInvariant()
     $effectiveConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $StartPath -ProfileKey $profileKey
@@ -356,8 +373,8 @@ function Initialize-SmartM365TenantContext {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwCa5rwGZ0YXln
-# vE9PWbgEoNp+htoXpoj7Kex6Ry6pXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4N71gSXkIBy4g
+# f5zfqmWrUBZg2p2g/qzcSy9MNTnWBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -490,31 +507,31 @@ function Initialize-SmartM365TenantContext {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB9VKafAAVGNxQ2z2GUaWS9Ri/jShh+zpIbm75YsuCsgMA0GCSqG
-# SIb3DQEBAQUABIIBgCPHHiYmTaG0WN1OPe+nAOaLGvaIcy3h+7tDM4VUcZKqXWC6
-# Zai5SkT2Qztjn/R3/j0AsCfCklUk8FDeWN+a4nHXr1NuSRfG9UWHEbE83H9i9LRl
-# Eol8lpzeUaHe/LQXbI/93qwMgFlf+0HViFNXVvwQvA6EqXla2aptGbZWzXhc+arH
-# KoojXNN88/kTrADMpvB5ePMB8tPc69emWlb0/bZUHztbG4AIeI7f8cNYZ+2IhMnH
-# 2QNBspK6LHmqJdkY/Rke/ymKMFTvwSzGHq4mtCZ3IvSqLqvun2gY+2vbCCv5DAnW
-# xWbvcHDmPwfH5dCOU3oex2dPgRKdn+PWmi3jsshttbtqF+lB7lU/g+rUCNoU9UBS
-# XYR+CmMR+6LvI97XiTggG+DEdq49Tgbl/VP/GYt7+eqA6vl/dVIwMyOkxQvH/pmD
-# r07n8eDuADuS0IDgHl6YWgKobTE4BLWfIVHXe4L124lunoo1+vpa/Vvw8wE1a6FN
-# o+mGC9ILsiLJ8ZYUAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOVGg5Uh+we02bWt4L6jl5oj/9wEMEnwNnHL2qx/kn9MMA0GCSqG
+# SIb3DQEBAQUABIIBgJy6F1NxJKCYwLNb3SaIKAWJB85BAxUESDlTg+uejaQFQ2LP
+# pR3mimDM09EjSI59UKoMgMJHjJFpPz+isEKu0w8TrTGQsh6N30szgt6QmXvpiVSu
+# U8Por+82vWesxrovx34XLslYbRjnjjtaU2/XvGy6URdT7Dv5HgamuRBRJ+4dlp6a
+# UfSN1I/MkOkzr/MNpvD4tlG58poX29NUG1pUJ/vH7MflMFhuDiNOIGHi4xYvkjSQ
+# gHpSn5Ts8rKoozml7ludgN7A/s+gdoaY9DLBk8myOwmXWeC6BamyN8VxxjszKjyF
+# uwWxDLU6vfJDFwKFmY9oS4pDAn0A/D4hB0IbnltjCJVCXkkxtQmLna7u/Gr/q98j
+# GKGb1gpaar7AkI9cmzFwa7C1vbSC9Gx90xNHSjSZqQm0aUTK0iqgJKAFBe4bv8Nm
+# q7TVR4smik7iz5Mc4fMdAuogF7hxja7lxsS7WSMmZ2g3VyNFzr9z2iw1x8XKWgGL
+# UJNQzMSNMuK/Ws79IaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjA1
-# MTdaMC8GCSqGSIb3DQEJBDEiBCCLn2/pPGPxJGKPaWqShOV2AYrWLbjb1xcegHm4
-# EufY4zANBgkqhkiG9w0BAQEFAASCAgAEC8PlE7N54CSWbNZDziWmGBupM9gZWHax
-# 8xSiOuX+bf2xmBxGbeHgxgSPbqYZ4hcO4ne6p9AtljgPlX8PD4Q1338Dp5LCj+cg
-# ma39DR8a/KrSpDEtz05PaE2ZynFOjM5dt+fULCvMRwDbY1NYqsm5JvMLXOWRGYv0
-# IXp0JoheHGYVcbXp1mAhe26fX1wnkuv87oLiMgD3DC+tWZQJ3PzZo9sjrwjYWmTV
-# Bh0XRFMVptoo3kkrFWVo0RJz7GS4+8MGwKusz5a20KiTQXvIjma1ait1mJ0THAta
-# JJX7dGKRj89qRirBth1U0AAK06295OSvLTnSkB30L+0377b0D+l8NFiSVdilXaUY
-# /wEbzFs4oBadsqaK4bXEukrtOlHCe7zRCewyiOt68fmqETTohW75ytlwMSXIXcp5
-# XZebUeFvQp7N3VPjct0aG0NFaLn+zzr7ua8c8Mn2tPmk/aYo7AKtj0ajpYHBc64Y
-# 8/Cs1zzu0pdH71Fo5zOrO/nHN6nJiMbFvV6WzYV9yyV2LqwdzDp+3LfvtUZat583
-# zwkwFeJ42z5TdXT2ESuSxYpm9evdynQfKPaTqY1ZJR0y9rwjnWd5iydYEE2tKZV6
-# 9Ph6oRI/QP9cMTYTPbZU4deZjKA49hXLk4syIhL+D9bBsb3F/6McdZXB9N/shA8S
-# zeWQNFjCgQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMzA2
+# MTRaMC8GCSqGSIb3DQEJBDEiBCBMKxl1GSjS0eUPkgoELxXlVydQwiILcbKk1m3o
+# LruuoDANBgkqhkiG9w0BAQEFAASCAgCItLcuTI3uxuuKlZ9WtERQZ9AHh6qyv93/
+# WaFhOxdGxio4N6RtFUjDWtkoyAQCEWe6pkqFT2ATrMWZy8JZ40ZT7f/zOMev7wka
+# 9RRGsU6XQEDbDniE9U0GlrjGN7GZrPUvHMUrL6lxe7iKfCFcCvFwmUnTCiJFpF1i
+# vVTNvJU8fWqDPksAVyIdwIthDVuKTNTEvhL2kwdOBRtaunFVMjKP5RIWCHpppYK/
+# qhzF/NbwczYZqeHc7uDtP/SGLrE0vTwz+VB1e9Pbsd/i7GMf+WITLIIv8GWDF1zn
+# a1eH/k44+805cAPi3UVq4+D0QyfIdfEqvAKqI1EIQpsIuPMpvzcPMKZ9zhKSpBo4
+# tkU6g8gthHXqRFVjrid6emsAFzhLxfkBgAR0Spf9kmMs2yh1UMrh+1w3dlJ9k3ch
+# sa6MvbCvMhdl4/KABRLWt9//AE8A1TroXZPmh/AUp2NQvI/6htBiNWebyMo5TC0d
+# /huqGeg4qj1iS+sfjt8dgttvja/hu/tBZQDv0IYO412Kh6u8Lih0apsInKq5bMLP
+# TsigNKaQZ9bX0auonNrZHMrqS0Qc3XULXdavC+IdPCVomVgQSVmdMDAoN7UXZPqH
+# tOZWD5rNaG0AYjMfV1YZbo5lvo3h4nIPsHOCGUJHPEwcEwcqFvc1EU1JfBbIVR/A
+# MmRsb/XXrg==
 # SIG # End signature block
