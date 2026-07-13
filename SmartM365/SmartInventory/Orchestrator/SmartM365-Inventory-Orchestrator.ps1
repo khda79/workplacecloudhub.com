@@ -92,12 +92,12 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .PARAMETER SendExecutionSummary
-Sends an execution summary email with one consolidated row per job followed by detailed
-tables for the last 24 hours and 7 days, then exits without acquiring the resident lock or
-launching inventory jobs.
+Sends an all-server execution summary email with one consolidated row per job followed by
+detailed tables for the last 24 hours and 7 days, then exits without acquiring the resident
+lock or launching inventory jobs.
 
 .VERSION
-1.3.27
+1.3.28
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -107,7 +107,7 @@ launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.3.27
+    Version : 1.3.28
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -132,7 +132,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.27"
+$ScriptVersion = "1.3.28"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -2717,6 +2717,43 @@ function ConvertFrom-OrchestratorJobRunTime {
     catch { return $null }
 }
 
+function Get-OrchestratorJobRunSources {
+    $sources = [System.Collections.Generic.List[object]]::new()
+    $seenPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $sharedRoot = [string]$script:Settings.SharedDataFolderPath
+
+    try {
+        if (Test-Path -LiteralPath $sharedRoot -PathType Container) {
+            foreach ($serverFolder in @(Get-ChildItem -LiteralPath $sharedRoot -Directory -ErrorAction Stop)) {
+                $jobRunsFolder = Join-Path -Path $serverFolder.FullName -ChildPath 'JobRuns'
+                if (-not (Test-Path -LiteralPath $jobRunsFolder -PathType Container)) { continue }
+                $normalizedPath = [System.IO.Path]::GetFullPath($jobRunsFolder)
+                if ($seenPaths.Add($normalizedPath)) {
+                    $sources.Add([pscustomobject]@{
+                        Server = [string]$serverFolder.Name
+                        FolderPath = $normalizedPath
+                    })
+                }
+            }
+        }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Failed to enumerate all orchestrator server folders under '{0}': {1}" -f $sharedRoot, $_.Exception.Message) -Level WARN
+    }
+
+    $localFolder = [System.IO.Path]::GetFullPath([string]$script:Settings.JobRunsFolderPath)
+    if ($seenPaths.Add($localFolder)) {
+        $localServer = Split-Path -Path (Split-Path -Path $localFolder -Parent) -Leaf
+        if ([string]::IsNullOrWhiteSpace($localServer)) { $localServer = [string]$env:COMPUTERNAME }
+        $sources.Add([pscustomobject]@{
+            Server = [string]$localServer
+            FolderPath = $localFolder
+        })
+    }
+
+    return @($sources.ToArray() | Sort-Object -Property Server)
+}
+
 function Get-OrchestratorJobRunsForWindow {
     param(
         [Parameter(Mandatory = $true)][datetime]$Now,
@@ -2725,37 +2762,40 @@ function Get-OrchestratorJobRunsForWindow {
 
     $windowStart = $Now.AddHours(-$Hours)
     $rows = [System.Collections.Generic.List[object]]::new()
-    $day = $windowStart.Date
-    while ($day -le $Now.Date) {
-        $csvPath = Join-Path -Path $script:Settings.JobRunsFolderPath -ChildPath ("Orchestrator_JobRuns_{0}.csv" -f $day.ToString('yyyyMMdd'))
-        if (Test-Path -LiteralPath $csvPath) {
-            try {
-                foreach ($row in @(Import-Csv -LiteralPath $csvPath -ErrorAction Stop)) {
-                    $referenceTime = ConvertFrom-OrchestratorJobRunTime -Value ([string]$row.StartTime)
-                    if ($null -eq $referenceTime) {
-                        $referenceTime = ConvertFrom-OrchestratorJobRunTime -Value ([string]$row.ScheduledTime)
-                    }
-                    if ($null -eq $referenceTime -or $referenceTime -lt $windowStart -or $referenceTime -gt $Now) { continue }
+    foreach ($source in @(Get-OrchestratorJobRunSources)) {
+        $day = $windowStart.Date
+        while ($day -le $Now.Date) {
+            $csvPath = Join-Path -Path $source.FolderPath -ChildPath ("Orchestrator_JobRuns_{0}.csv" -f $day.ToString('yyyyMMdd'))
+            if (Test-Path -LiteralPath $csvPath) {
+                try {
+                    foreach ($row in @(Import-Csv -LiteralPath $csvPath -ErrorAction Stop)) {
+                        $referenceTime = ConvertFrom-OrchestratorJobRunTime -Value ([string]$row.StartTime)
+                        if ($null -eq $referenceTime) {
+                            $referenceTime = ConvertFrom-OrchestratorJobRunTime -Value ([string]$row.ScheduledTime)
+                        }
+                        if ($null -eq $referenceTime -or $referenceTime -lt $windowStart -or $referenceTime -gt $Now) { continue }
 
-                    $rows.Add([pscustomobject]@{
-                        JobName = [string]$row.JobName
-                        ScheduledTime = [string]$row.ScheduledTime
-                        StartTime = [string]$row.StartTime
-                        EndTime = [string]$row.EndTime
-                        DurationSec = [string]$row.DurationSec
-                        ExitCode = [string]$row.ExitCode
-                        Status = [string]$row.Status
-                        RetryCount = [string]$row.RetryCount
-                        LogPath = [string]$row.LogPath
-                        ReferenceTime = $referenceTime
-                    })
+                        $rows.Add([pscustomobject]@{
+                            Server = [string]$source.Server
+                            JobName = [string]$row.JobName
+                            ScheduledTime = [string]$row.ScheduledTime
+                            StartTime = [string]$row.StartTime
+                            EndTime = [string]$row.EndTime
+                            DurationSec = [string]$row.DurationSec
+                            ExitCode = [string]$row.ExitCode
+                            Status = [string]$row.Status
+                            RetryCount = [string]$row.RetryCount
+                            LogPath = [string]$row.LogPath
+                            ReferenceTime = $referenceTime
+                        })
+                    }
+                }
+                catch {
+                    Write-OrchestratorLog -Message ("Failed to read job-runs CSV '{0}': {1}" -f $csvPath, $_.Exception.Message) -Level WARN
                 }
             }
-            catch {
-                Write-OrchestratorLog -Message ("Failed to read job-runs CSV '{0}': {1}" -f $csvPath, $_.Exception.Message) -Level WARN
-            }
+            $day = $day.AddDays(1)
         }
-        $day = $day.AddDays(1)
     }
 
     return @($rows.ToArray() | Sort-Object -Property ReferenceTime -Descending)
@@ -2798,6 +2838,7 @@ function Get-OrchestratorJobSummaryRows {
 
         $summaryRows.Add([pscustomobject]@{
             JobName = $jobName
+            Servers = (@($jobRows7Days | Select-Object -ExpandProperty Server | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique) -join ', ')
             LastRun = $latest.ReferenceTime.ToString('yyyy-MM-dd HH:mm:ss')
             LastStatus = [string]$latest.Status
             Runs24Hours = $stats24Hours.Total
@@ -2830,6 +2871,7 @@ function New-OrchestratorJobRunsTableHtml {
 
         $tableRows += "<tr>" +
             "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.JobName)</td>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.Server)</td>" +
             "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.ScheduledTime)</td>" +
             "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.StartTime)</td>" +
             "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.EndTime)</td>" +
@@ -2840,13 +2882,14 @@ function New-OrchestratorJobRunsTableHtml {
             "</tr>"
     }
     if ([string]::IsNullOrEmpty($tableRows)) {
-        $tableRows = "<tr><td colspan='8' style='padding:6px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $EmptyText)</td></tr>"
+        $tableRows = "<tr><td colspan='9' style='padding:6px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $EmptyText)</td></tr>"
     }
 
     return @"
 <table style='border-collapse:collapse;width:100%;'>
 <tr style='background-color:#E6F4FF;'>
 <th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Job</th>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Server</th>
 <th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Scheduled</th>
 <th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Start</th>
 <th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>End</th>
@@ -2879,6 +2922,7 @@ function New-OrchestratorJobSummaryTableHtml {
 
         $tableRows += "<tr>" +
             "<td style='$cellStyle'>$(ConvertTo-HtmlText -Text $row.JobName)</td>" +
+            "<td style='$cellStyle'>$(ConvertTo-HtmlText -Text $row.Servers)</td>" +
             "<td style='$cellStyle white-space:nowrap;'>$(ConvertTo-HtmlText -Text $row.LastRun)</td>" +
             "<td style='$cellStyle color:$statusColor;font-weight:bold;'>$(ConvertTo-HtmlText -Text $row.LastStatus)</td>" +
             "<td style='$cellStyle text-align:right;'>$($row.Runs24Hours)</td>" +
@@ -2892,13 +2936,14 @@ function New-OrchestratorJobSummaryTableHtml {
             "</tr>"
     }
     if ([string]::IsNullOrEmpty($tableRows)) {
-        $tableRows = "<tr><td colspan='11' style='$cellStyle'>No job execution in the last 7 days.</td></tr>"
+        $tableRows = "<tr><td colspan='12' style='$cellStyle'>No job execution in the last 7 days.</td></tr>"
     }
 
     return @"
 <table style='border-collapse:collapse;width:100%;font-size:11px;'>
 <tr style='background-color:#DDEBF7;'>
 <th rowspan='2' style='$cellStyle text-align:left;'>Job</th>
+<th rowspan='2' style='$cellStyle text-align:left;'>Server(s)</th>
 <th rowspan='2' style='$cellStyle text-align:left;'>Last run</th>
 <th rowspan='2' style='$cellStyle text-align:left;'>Last status</th>
 <th colspan='4' style='$cellStyle text-align:center;'>Last 24 hours</th>
@@ -2935,7 +2980,7 @@ function Send-OrchestratorExecutionSummary {
 <h2>SmartInventory orchestrator execution summary</h2>
 <p>Tenant <b>$(ConvertTo-HtmlText -Text $Tenant)</b> on <b>$(ConvertTo-HtmlText -Text $env:COMPUTERNAME)</b>. Generated $(ConvertTo-HtmlText -Text $Now.ToString('yyyy-MM-dd HH:mm:ss zzz')).</p>
 <h3>Execution overview by job</h3>
-<p>One row per job observed during the last 7 days. Counts include retries and skipped attempts.</p>
+<p>One row per job across all orchestrator servers observed during the last 7 days. Counts include retries and skipped attempts.</p>
 $summaryTable
 <h3>Last 24 hours</h3>
 <p>$($stats24Hours.Total) execution(s): <span style='color:#107C10;font-weight:bold;'>$($stats24Hours.Success) success</span>, <span style='color:#D13438;font-weight:bold;'>$($stats24Hours.Failure) failure</span>, <span style='color:#FF8C00;font-weight:bold;'>$($stats24Hours.Warning) warning/skipped</span>.</p>
@@ -3276,6 +3321,7 @@ try {
     }
 
     $script:Settings = [pscustomobject]@{
+        SharedDataFolderPath = $sharedDataFolder
         OrchestratorDataFolderPath = $dataFolder
         OrchestratorLogFolderPath = $logFolder
         JobLogFolderPath = (Join-Path -Path $logFolder -ChildPath 'Jobs')
@@ -3540,8 +3586,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBUfOTTp+HbzgsR
-# fInbWK/lifdraP7jxtCwMPlaIksSXKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDS+Jev56A9Vbuc
+# Xefs05eFP5oKtK4cqIFr+FY9l40VUaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3674,31 +3720,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOodDH3aThP5ELpjC5CwVhmRItaKFzJ+SkuJ5vXeZIz5MA0GCSqG
-# SIb3DQEBAQUABIIBgHF9vO/YONcMXh9UaoIGVqTy/tMs+f5NEhfePu5BC+HlO4OZ
-# bY+WnKX88kBMzJ4baHbLpDemyDO8v5WTr76/ANa0i6IIXeZ+cZNka6/BUV5XqzCe
-# MJ7Bll9oV47OEjk1fk1/DOWGYf91IuuJWPBgwfSXDxvs7looCfdSkQyQtBteISsl
-# 6awmh4LSMPvf3UQV8YxBGabmokftOxlrgc4JFFvcDsy/68Nalp/MuhPnCPM7+FrB
-# e56A0FRDNargGu9JJaXiImoZomHAT2G3NYc3+FG7P0c5zB2yoZxLEoE2XpIv0DM2
-# Og7qY6cO+PgVFG3n2RgF3f6holFcwTPwo1tVCkI5JPz3o8hqkAz27buYi08iT13q
-# UeMzW/eogBimwnsx7x/L7NkzbgkdTjR/L6QPz3663fJWx/n1mPknS+a7OYBCrGl9
-# bPmAEdnoaR46YZGaOgzCHSo2ugBalcprF4BUZPVv4v4l48Obc08/vHbIIDwhnD/a
-# glK7TXafddOHQ0HOfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICT9b+q0CQxwHcZM0arRZZJknXSa7hOPFiCzXe3jiuMrMA0GCSqG
+# SIb3DQEBAQUABIIBgEQvzLxH1mZtU/zw/sDPuEYK3C0/j8a9kRlgHGQ3/F8T5xQi
+# g2yhwCaPjX6eidMdFXB/g751kjONvY66qBCgRZQLNHAsDXrc872AaICOCeSO0s1h
+# SGB6juYXlEgJAjPTB3IFgyuOudnq73d55y9HIdsNu/eXLZIq7Nff4RqgjMAyk79V
+# CWv7apPGk5x7/UW5BNdVtWIFoRvEtbpf8BJV2UhWjEgkzMUleLxnHAu4/OGH8dGF
+# r0TQu5mjHLS42YqtHmnHvkm6+D/OABY2w8fOlpUKzxDRV9Pp5SRCvF0CBbphtsSK
+# Akk8V0pHKpMGazvWK44ZEz/W6OUZXdinXKN6yL0e/K99PWTeuJR/qzF/KrRDO2Yv
+# F+FwLzNYpcJ7E0MbIdSO0rBw0wXggLF//LVb9o+QwZOxtabgm5TMdgoK0oFKDPYI
+# WKKG4m1FySg2UzkhVTtAvCq3qt+6q04JGqDDs1BO2yW46IhKUcamfVs942llXqtW
+# rnj5RMVm2C0tw8ItaqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxODU5
-# MzVaMC8GCSqGSIb3DQEJBDEiBCAilQxiwdyDMJxl7r3mkCFDv4eJlTPnODitpzHz
-# 01MXXDANBgkqhkiG9w0BAQEFAASCAgCAmTi4E2NdhHVCqrOJ+sOhCc6CeYXifwcf
-# Rl8mT05v7EmGSPUdklZwFA2ARrGgtb7QJZdMFmfudDzIFhBBSX0ZKNEWx9Bz+wgH
-# C5g4w/RFAlUAt93qtfLoQZ/i4bSm64OeMY5Afx6ZNZCvwxJIzJ1jEjB5ZUadofb9
-# ozIgaTrHduStC/jVwiY9uhBfRG3745ivkPbdi6zfkerZj7aerPCNGzBMXCeTgRm/
-# pQhYzuYVsA7cNnxFK9HLPfCQ0u3PVed3FsKqmTyWMVfzniKk0ZKbppsuMJGPCpSv
-# pNsTGcBJb8fgtESapW44z/wLuXrTofqtbWj4p1hXholgy5HjPrqaUNAGyd1iOaII
-# TtPOR3uZoG6OSNmOhKmgTpJpyF+X/LASFrzOfC0WmBWFkQV710i8Yq7jeH92ASN5
-# ITKBQnliRFVb7Dd1hr0dfxF10fK066xMSDn+GmSBuNvbwmL/7I8Z1jS6HJgV3L38
-# JF8nQ1H8U23Ut3z/CJDpQM6O9EjVrSRSwWRLf38Y/jzRWExCrxPSMzpfCB2/9M1K
-# L+J3+Cj9DVrzZ8MZAXqU9jvG/729yg/OGpdq/4RoTJYLNUPnnoL9lPGSVvYun86a
-# ZYYSdCS5+cNm73MT3MlpESO63SNbwj+o5u59wRzwa0BZSX8o73g3CBoJ5w2RKhrn
-# +3KQOzJm/A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxOTQ5
+# MDFaMC8GCSqGSIb3DQEJBDEiBCAP5fCmWKQOmMRTaOILhJdx5G8F2QSObi/ggpak
+# 42pLuDANBgkqhkiG9w0BAQEFAASCAgCwKVs/4Lrh2WYPPgz2E7kx495GFmRivWOk
+# FZTjy25zCeIuyHFV3vf4z1RaDiYSQSR01pI3heJSM66uS9Y3+I+B2DZ+8WWpF4Y9
+# d2tYVPkH62cM80a1gC1RmG49pL0ar4zNXyOYsWkm6xFChK2xNaI5SUTq5jpvzxF6
+# ekfF+KU6EVG9ywbHzvC8e2QKPAqlEqGrncFxNG+G4+UZFtvbSJjMZT3CDpngun7/
+# xte+DHtSbjIv1mbqYGz9rKu5TjTG/bgS5X1QJDPoPRvIB5qoJcWsAi7wre0J3EYx
+# G4bxC5LPkuKhS9uT4CMK2QAIRDlt8xBRr6CK8k6/urG9nPeuo9WSl4DIrP5l/2Sc
+# iFbS00xhJmhatgZ6l/7VnoYZWrOebGFXYsfO0nBPvENKo1ImJ5t3vuc8OftSLksO
+# x1E6K9DSgmkdQ4ZRTf0Z7oYeGZqtH3LJ0It/elDC4tI/sEU+twjRT5ED3uoTW6Gm
+# hq5CaJkrBjsFf3g8pyivPkplHkAvjVGy22faU/r4agCwcHJ6Ykg9mFe9zl0Ta/m3
+# kELyGzgDJidzI5Q9Y0FPEgaTAK0Z8X1Y0mCnMTmFM06XdmX4TnW2Ql1Mwxx6hF56
+# tnTy7nnkOqkEJN42Yhy+WFBndO25dteUQK8VWgt8IeitZD5AVjuH/HXsYndG3S0T
+# cxurA9DDqA==
 # SIG # End signature block
