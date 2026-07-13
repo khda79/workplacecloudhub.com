@@ -31,7 +31,7 @@
     Limits group members and mailbox rows for smoke tests. Generated CSV names include _MAXITEMS.
 
 .VERSION
-1.0
+1.1
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,7 +75,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.0'
+$ScriptVersion = '1.1'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $script:SmartM365GlobalConfig = $null
 $script:LogPath = ''
@@ -207,7 +207,7 @@ function Invoke-GraphGetCollection {
         if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) { break }
     }
     if ($MaxItems -gt 0 -and $items.Count -gt $MaxItems) { return @($items | Select-Object -First $MaxItems) }
-    return @($items)
+    return $items.ToArray()
 }
 
 function Get-ObjectValue {
