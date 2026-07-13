@@ -92,7 +92,7 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .VERSION
-1.3.22
+1.3.24
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -102,7 +102,7 @@ Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds
     inside its own child process.
 
 .NOTES
-    Version : 1.3.22
+    Version : 1.3.24
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -126,7 +126,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.23"
+$ScriptVersion = "1.3.24"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -693,6 +693,14 @@ function ConvertTo-NormalizedJob {
 
     $arguments = ''
     if ($RawJob.PSObject.Properties['Arguments'] -and $RawJob.Arguments) { $arguments = [string]$RawJob.Arguments }
+    if (-not [string]::IsNullOrWhiteSpace($arguments)) {
+        try { $arguments = Resolve-OrchestratorJobArguments -Arguments $arguments }
+        catch {
+            $Errors.Add(("Job '{0}': invalid Arguments value. {1}" -f $name, $_.Exception.Message))
+            $arguments = ''
+        }
+    }
+
     $enabled = $false
     if ($RawJob.PSObject.Properties['Enabled']) { $enabled = [bool]$RawJob.Enabled }
     $group = ''
@@ -1879,12 +1887,15 @@ function Resolve-OrchestratorJobArguments {
         foreach ($match in $matches) {
             $name = $match.Groups['Name'].Value
             $value = Get-SmartM365ScriptConfigValue -Config $script:OrchestratorLocalConfig -Name $name -DefaultValue ''
-            if ($null -eq $value) { $value = '' }
+            if ([string]::IsNullOrWhiteSpace([string]$value)) {
+                throw "Argument token '$($match.Value)' has no configured value. Remove the optional argument or configure the token before enabling the job."
+            }
             $resolved = $resolved.Replace($match.Value, [string]$value)
             $changed = $true
         }
         if (-not $changed) { break }
     }
+    if ($resolved -match '\{\{[^}]+\}\}') { throw "Job arguments still contain an unresolved token: $resolved" }
     return $resolved
 }
 function Resolve-OrchestratorJobPath {
@@ -3158,8 +3169,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0LTpxxm26yJBK
-# 5Mf+zIqUds6bQTM9DyAqW2Bl0fkPPqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/9DO3fybRHBhh
+# XlU8ptCk6fRC73/HaLY5rpXdiJoYdKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3292,31 +3303,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAn+GUUKyMGlTd3DsuB0BHq/yMODjXA8eOz2gHuQHURUMA0GCSqG
-# SIb3DQEBAQUABIIBgBNBnRECWl1xa9YKCtP7mGUKqF+Hij0I+XhElyfuVC2q9FkX
-# jlkKZuzl0cxMglbYf+ng6GcnA/O+sUYl26bPvaA8HPyngO+1tTGm3ZVibcQaxnvl
-# tvAovXoZmLsu5yJjyc4K5mcnx2ac1ZQ/FSL3ADFzj8fpNrYE69aAlod8sv9X3O32
-# B0mKF929W8hyFvdOJVpBNtodJFuh5qUVnjFantxGHtaYbhfJOaZin5ZdTmkyI9Si
-# /4Fb0bwr3eNWV0NscEqXDgb2H67eyEBoy9cZK+80n9UIvqbFGYLhSKJZrIPS6mIl
-# pSiYKxw42dGGp8V84bIWRHXij1QRJqyfuP3AfyzR/Z+UaOMMJ4l1yUIEYqN+8fzC
-# omnUvfMIz3h4459+J5cYU6/mB9X+qEc/u/+0jIrAShX6am6xrc6jq3bFwluDVtqx
-# Q16vCpncrMmi7OHn9pDmOgqHOqLbpwepwfhIJiD6N7mhDX9qQoHMGCNFHa6VzUWB
-# 7sFi7K3tiGkXcfPfW6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILD5yTvqx3dJK52vYfMr1Qm90Lhd2kL7VwIsGgWh3io+MA0GCSqG
+# SIb3DQEBAQUABIIBgLCD3vX1DhALevnLDvlguCC06GM5zDBmJjosq7yA7BiWEnKT
+# LrZe6X8aSj3IDM3xkX8o0ZIgjPGZVtSKNpm+NEXA56DIxE+jy+wedTXYAD7W5hMH
+# jiPKXfyTPb/50+UWfLOvk9rcIcgIOw70LxM5QiUibIKeEUfYJu1er0daI6h0IP6B
+# XuBVquB8fchiiTeEp+Aw7pXHOzPzkhMmWoQVwze60c4J/sKq0205rhHVtW4qyelh
+# X5j4Chh+8rTivVI55b2Jn3bcZ7Ka6VEgI0Fcox0MymDntuF0El8cvf4hn2UZBF8j
+# /q05KqJmuI1lHrpb32RGG0/pPBFt4GYmu4xTcSl2sPaouGS82q4RgGvhJ9AmgS9J
+# c1aF5uvvdDrNt/SsBnk7gRnNRVtJ8bcqdsdBAH//IHuElBCEYvka5VaYk81Qkl9A
+# gbYmdj4H1qd7sKHuyDTbUytkVIH2+PvB1OdSNkByx874m+whLNXVRrBWbqH47enz
+# heDqIP6/OH3P5fVX7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjQy
-# MzJaMC8GCSqGSIb3DQEJBDEiBCCYBDDanEpGShWqHXmIeawFlm0rCsSMoGuSFO9Q
-# gBeJszANBgkqhkiG9w0BAQEFAASCAgBmCZ3XS482FWwtl/K627hwzxiUwhJudAdS
-# S8zdIw/eBfiCJnsBLavR/BXwK2+zR2YDzA5tgqhfQMQIgx5V2o//Tk93mkOjyOdN
-# MM5xIrhbpMaTCW3fphcPlirXvAtW3S3r62sHbPW6lqddlR4rvVkOOTjVVJ3TJJ07
-# XyQflcT6b2HKMiCZBbEM+w1k/SdvfOqpzHVxnjh5lABdsZ12Gv/UGawQXYKENH2f
-# gAM+ijbEBmdvUj5zURfRAR1KwDhjfJxTQrwRdMm31wp5sCsEC/4LhRDKpW8aH+Md
-# cHo8nbGyxp25mbDF35Mv4dtyHfvoukOusa0OiTQSBEtboJ3sgTaGGgsh5zZhi9vM
-# VGKPfh+A/wL7ytesuG7Ny6s+CdKKX/ipHCqjPQK83KmWhZKAt4rCdEKGjLGrt2LF
-# XGxK4k3KU1nAbIbl7kWxL5zjD2aNlFCyabW+aiPOTigaeKDwR+/5PG6zeuoPvD7x
-# AKk544aSnLbmPJNU0HRQ8ATDBKSkjFwY5rHoLcXxgt9O1SnUBjWUn0zmpsP4IlWk
-# gUj2AJC6FlhB5hK7cb3If7HNcCZihJKV4tIo+AavvW2XWid9iUZIw4HiEZgsJ306
-# ZYNJtO3HoOui82RpXC/fdHqOPSJ83gzbgDS1Ne0AyqjmiN8hu7uDfSCcvNP6E32I
-# aft1wxkBAQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNjQw
+# MTZaMC8GCSqGSIb3DQEJBDEiBCBU4nnqAFwwDJtx4LWA+60wNQCCHZ8TyFLJ7yOS
+# HGxwbTANBgkqhkiG9w0BAQEFAASCAgAV2d3FsQgFwQfVpe+CQ9FdrDpj878Nm+Ex
+# KetV8xXwsa57VyDKxxeUhqNtVdiyB/awYs/8pPQIELEDsOTMRVBR/6C8l5272VKL
+# xtEwutOHn63q09GpDJ3uIzS5JgI0nIBUTTZUUmr41nFwX4h9bf9KflnoPnDDx/t3
+# ky7Jyg70g1NGHc7S1FiovYpnhH5nPBqu7ebEAVYpGhbfAUump12d+czVLHQzgxBZ
+# mxtX0hqrgeHHg4WdyZUYD3mMKR2XFb9pvi33t6K4aDRWnCpu8VcZo3QkZrOJHQ9x
+# 7NujouxrSoJI1a2SBK3wAAMimuLWlxpfZJldQ8hrc6ElZrk7zYjvhuxbt18Qmy4L
+# 7q0kuPMBXMTGY8fsoV+PSWH1LPocRcF5meLjjYwM2Q8FhsEzVvw2CgR+CRKHbpex
+# MyD+zdwGvfaKul2Tv04X74tfQbT7OpkwDDsL8b3YfEsdvYmj3KxnsGznGj9keN/o
+# cQGiyDLj76xG9RDzR7jl0JIzAzIpt00VFABMRGhuJmagzBqKCLYWHf0olK9gC3cl
+# 5QwV1MEv4tsnzjFCJalwS4ops4TIlO/gsUP9cIO/hgmQ8M/TLTSWPnxrCGHk49wR
+# FSpj5Ay8J5LYcuDCo1ananbmCwq9rJ7clshSzW9LQ/gIjHFD1m8C/15jNrU4E2v6
+# PNMsXLmJjg==
 # SIG # End signature block
