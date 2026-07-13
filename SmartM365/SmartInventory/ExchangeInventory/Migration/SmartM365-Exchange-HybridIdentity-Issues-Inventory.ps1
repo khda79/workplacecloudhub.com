@@ -12,7 +12,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.5
+1.8
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -41,7 +41,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.7"
+$ScriptVersion="1.8"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){ Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m) }
 function Warn([string]$m){ Write-Warning $m }
@@ -100,9 +100,9 @@ function CopyCsv($s,$d){
 function ExportIssues($rows){
   foreach($f in @($OutputFolder,$LatestFolder,(Join-Path $OutputFolder 'Archive'))){ if(!(Test-Path $f)){New-Item -ItemType Directory -Path $f -Force|Out-Null} }
   $main=Join-Path $OutputFolder 'Exchange_HybridIdentity_Issues.csv'; $latest=Join-Path $LatestFolder 'Exchange_HybridIdentity_Issues.csv'; $archive=Join-Path (Join-Path $OutputFolder 'Archive') "Exchange_HybridIdentity_Issues_$RunStamp.csv"
-  Assert-SmartM365CsvDataCompleteness -Data $rows -TimestampedPath $main -LatestPath $latest; $rows|Sort-Object IssueNumber,ObjectGUID,Potential_Issue|Export-Csv $main -NoTypeInformation -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
+  Assert-SmartM365CsvDataCompleteness -Data $rows -TimestampedPath $main -LatestPath $latest; $rows|Sort-Object IssueNumber,ObjectGUID,Potential_Issue|Add-SmartM365TenantKey | Export-Csv $main -NoTypeInformation -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
   $summary=@($rows|Group-Object IssueNumber,Potential_Issue,IssueCategory|Sort-Object Count -Descending|%{ $p=$_.Name -split ', ',3; [pscustomobject]@{IssueNumber=[int]$p[0];Potential_Issue=$p[1];IssueCategory=$p[2];Count=$_.Count} })
-  $sm=Join-Path $OutputFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; $summary|Export-Csv $sm -NoTypeInformation -Encoding UTF8; CopyCsv $sm $sl
+  $sm=Join-Path $OutputFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; $summary|Add-SmartM365TenantKey | Export-Csv $sm -NoTypeInformation -Encoding UTF8; CopyCsv $sm $sl
   $files=@($main,$latest,$archive,$sm,$sl)
   $files
 }
@@ -228,8 +228,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCV1KnG3taLgkhm
-# or7ubcZcXcHuHJHiUwkWkndmGygmcKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKdD+DtdrZEglM
+# psEv6JrPErx9R8Wec5KwnXtiwRC8haCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -362,31 +362,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAjqYHqZuaNXp4cU3JvzpcKaoX5c391k3WLV21yA7sOiMA0GCSqG
-# SIb3DQEBAQUABIIBgIvGOPWLe27hPSE61PsLA1wEgZRTqOAxrWDB4lUYGPJvQHeJ
-# EWLlJ9n4IzHv+u4MmGR0csyAhCV9DaU1v/1nVzMdtlAtNjIH0kVSqKAIQ2NS+/Le
-# H67/mzTRcgWJBdbNnG2ZBmMzdFzUsHxux6crTQVl9LpXsX69Esq0Suye3Yp/Dz4R
-# RQoZLZNzVapi6kWT6Hdjw4xU5geNIYz90PN0VN44crxY3eLmGsE0da2fD/hNF6nv
-# X26WNRdsIdDd6D53uPpUMwp0hnRjhf3NXEYkZktorMPDgKOdgG17HtOhryOKk3Ql
-# YH7EOrfBr+6+c/akXoNGE11LBtxJ3hAnnv0BN+yD3mCw3G9eGh229Oyz/S9Am7cb
-# Z59XLZ/J3kKMSYceCEfb7qGmX0kn9Av4sfRUT60NS5efjll5o6N4aX92NNBhtuCV
-# MZGf0NBmuImYmmUqMvfxRmLWid2pZREXNQrqHE4e+MB4y4mOhavO+7Y9wVhQE1Hi
-# kpNVbk1zP9Nmad/NqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIsPeADFu3LIfuWx6s5Yk1eCbteJWWUuT1YqfQGhsvnPMA0GCSqG
+# SIb3DQEBAQUABIIBgDsvmwkWCFMzsAsy99EbmZjdVM7Ged1sSkXtK051tq3eqI7f
+# jTQySfrTehqzabma2pUIM0kXJ6In9q0GslNSg42HHjdFsNbGHlmmgZbERg5xrP9V
+# DMB3otjbTaROJgGQN8aEe/bq6I9Ea6eA1OC3alooAbCK0wiqjMsVrwfgd2HgU08X
+# k6Xxp8BvFJbfGA4FNrMfY+Q28QjfjC2iBZvGGiIy9yLacFtKEPqLSeikt6he32lR
+# E42ysDW7QCqR7TiIoFX0/SR2VB4sPsJwEQHmttQ+h62p3WoKOn0OvMH2OpnGQ6l9
+# eN0tVSztpqStn7Z4Z8BsjbFVG2Hu/QSZUe22H7NKkmNtJSkl6sBZ05soJPXmy/4Y
+# sxLe+C2P62clgU0kihkXywkb2eDxlMnRGkZ+slVjnESCPsLWVSMQV0UdEw7/XQBB
+# jeCgkQkV7RIbeYfQ/dIIrkUlac7Mvg/oEX+8itUKGusR1hGFD2r7S++9RJGsUhUU
+# SVEROGrjviotdiofo6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MjVaMC8GCSqGSIb3DQEJBDEiBCCjre+TD+QPtu1Rcnv7fhTvRMzCTJOEew4E+cNl
-# WeOLPTANBgkqhkiG9w0BAQEFAASCAgA+Wihbjxwpbo4KvIorza0D5kfiJVDCp/NU
-# hwvjkpBLLDXK9gZEiIoGSA+m/4Ix7bjkIH8fPSOZvmnl3jy26oISZl1lxcGi6iE8
-# C1gumgcQLMOvcTBuDtpaU8n7uMt+4r7q4C1A8jW0S7sWKkA0YhP6o0ss3ifbFnJw
-# TPk1WxJho/6Qhagv10PW9JjcCEmHDjtdQODp+/SrsNXpu0phT8wZ8AQ/rTamK8ux
-# A1HUUkXwgxqu3RxhKWMSxd+uHYl2x/GWIJoL/iJ2ghxea5Jg1zh/7vx7CkxZzKaX
-# 2jgp1xequEH8ju7gwW1TLz5LEqlNDuhRKKiZHVZPa1WXT5Zpzhi7qJtEugaLnuQi
-# fdFX5/vTawmx6Vka+IM6D+m28BJwsCTivWdCqxdzSbkhr/OEy2LgLqmdFH+TyEoN
-# uU2+Aj+Nuaeob7GzTYvpnFsUAoG8d0ybNkKMEXU2lyY5kWlzaAXafL7VuWbkxyZf
-# 0MW77umQEJojJSYuj7Zj4iy1lNTPUbWqoCOJXeB/NSsRubrkmrvl10qYoowJLdve
-# AWbx2fwNgfSAeTdMznAjJ3v1fGeJJtiZB9/zkhcZVpyMnhtJlycr647HhX3bC+mb
-# XdfWLGlp4G6uwe5ZMZ6Q6HQFvWJ5k+kRlCmsHTIcT8ySlPx9jIuIP3DKMM3V21NL
-# MtjK4FCZJA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
+# MjJaMC8GCSqGSIb3DQEJBDEiBCDoPLfGZ+CSOoA3UHcOgsLYnZ4pwBC3NQkW95Bj
+# ryGfazANBgkqhkiG9w0BAQEFAASCAgBrD4Z5ulcnhlEdDCOoa1kVNk25YM2YuHmo
+# 8elWbA1LminfNYfMuhOSJcE40mhwp5YMZWQgbUIU4QnXAPtVHBJWOA7GRuZjC+ww
+# M+9nDCPxFPignZLPSTaTjMbXucTmkeIjMmiL668PtWhrgViOY9CmPErId0l8pRhJ
+# vx4CqEigfI2rzqgdyiffn+xBzwRsnvZ9rF21vywHV4AMvSOR4DgWtotVDt4FlcFz
+# ljcE0Yl6pIj/4667t2M5AlylNJ/4p6WI0i6oTyhIFbT5EvJ+fFBMnx21ympt+d3m
+# DRFrv9G4y0TpiqFUcB9WiXZYDWzAKr6LagsfdYsWD+dCchDwpNeAmxoHzy4pbGUa
+# 5kcHxHjhXVsLvCtypTKuEw/KatnsD8vRxNI4KOOLG0RoOfv7kuLnKMiOxOwDEg5H
+# DIbU7vcYuXooXPg9oIF0I4pfPZZPllyqctNTzkR+WxYApSgNo9ce6/livNvRP5Ft
+# 7/x/pelBs+18Yv1XqP3qty0WdGbLqrg3HfY7qDiKNKsbmmR8I14r6OSjLl60A/w5
+# ktAeTdaLlz16sj6CRPEBXNbd4KVa+pmTaEIapPbUC9JV1G+EjqUXzeSAxuq3tvve
+# 9PTiRAmbcBBW87bdSDMFtlc4f+8BOYR9dKD+ow++1HioESGvRzhcuUezm7nEKqil
+# 1O6Cf2RYLA==
 # SIG # End signature block

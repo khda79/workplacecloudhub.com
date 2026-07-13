@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.13
+0.14
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.13"
+$ScriptVersion="0.14"
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
 $TeamsRows=New-Object 'System.Collections.Generic.List[object]'; $MembersRows=New-Object 'System.Collections.Generic.List[object]'; $ChannelsRows=New-Object 'System.Collections.Generic.List[object]'; $GuestsRows=New-Object 'System.Collections.Generic.List[object]'; $Alerts=New-Object 'System.Collections.Generic.List[object]'; $GeneratedCsvPaths=New-Object 'System.Collections.Generic.List[string]'
 if($PSVersionTable.PSVersion.Major -lt 7){throw 'This script requires PowerShell 7 or later.'}
@@ -70,7 +70,7 @@ function WorstStatus{param([object[]]$Rows) if(@($Rows|Where-Object Status -eq C
 function Invoke-Graph{param([string]$Uri,[string]$Operation='Graph request',[string]$OutputFilePath='') for($a=1;$a-le 5;$a++){try{$p=@{Method='GET';Uri=$Uri;ErrorAction='Stop'}; if($OutputFilePath){$p.OutputFilePath=$OutputFilePath}; return Invoke-MgGraphRequest @p}catch{$sc=$null; try{if($_.Exception.Response){$sc=[int]$_.Exception.Response.StatusCode}}catch{$null=$_}; $transient=$sc-in@(429,500,502,503,504)-or([string]$_.Exception.Message-match'throttl|TooManyRequests|temporarily|timeout'); if(-not$transient-or$a-ge 5){throw}; $delay=[Math]::Min(300,[Math]::Pow(2,$a)*5); WriteLog -Message ("$Operation transient/throttled. Status=$sc; attempt $a/5; retry in $delay s.") -Level WARNING; Start-Sleep -Seconds $delay}}}
 function Get-GraphCollection{param([string]$Uri,[string]$Operation) $items=New-Object 'System.Collections.Generic.List[object]'; $next=$Uri; while($next){$r=Invoke-Graph -Uri $next -Operation $Operation; foreach($i in @($r.value)){[void]$items.Add($i)}; $p=$r.PSObject.Properties['@odata.nextLink']; $next=if($p){[string]$p.Value}else{''}}; return $items.ToArray()}
 function Get-ReportRow{param([string]$ReportName,[string]$Period='D180') $tmp=Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-$ReportName-$([guid]::NewGuid().ToString('N')).csv"); try{Invoke-Graph -Uri ("https://graph.microsoft.com/v1.0/reports/{0}(period='{1}')" -f $ReportName,$Period) -Operation $ReportName -OutputFilePath $tmp|Out-Null; if(Test-Path -LiteralPath $tmp){return @(Import-Csv -LiteralPath $tmp)}}catch{WriteLog -Message ("Report $ReportName could not be loaded: $($_.Exception.Message)") -Level WARNING}finally{if(Test-Path -LiteralPath $tmp){Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}}; @()}
-function Export-InventoryCsv{param([object[]]$Rows,[string[]]$Columns,[string]$TimestampedPath,[string]$LatestPath,[string]$HistoryPath) Assert-SmartM365CsvDataCompleteness -Data $Rows -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath; foreach($folder in @((Split-Path $TimestampedPath -Parent),(Split-Path $LatestPath -Parent))){if(-not(Test-Path -LiteralPath $folder)){New-Item -Path $folder -ItemType Directory -Force|Out-Null}}; if($Rows.Count-eq 0){$h=($Columns|ForEach-Object{'"'+($_-replace'"','""')+'"'})-join','; Set-Content -LiteralPath $TimestampedPath -Value $h -Encoding utf8BOM; Set-Content -LiteralPath $LatestPath -Value $h -Encoding utf8BOM}else{$Rows|Select-Object -Property $Columns|Export-Csv -LiteralPath $TimestampedPath -NoTypeInformation -Encoding utf8BOM; $Rows|Select-Object -Property $Columns|Export-Csv -LiteralPath $LatestPath -NoTypeInformation -Encoding utf8BOM}; [void]$GeneratedCsvPaths.Add($TimestampedPath); [void]$GeneratedCsvPaths.Add($LatestPath); if(-not$global:csvGeneratedPaths){$global:csvGeneratedPaths=New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)}; [void]$global:csvGeneratedPaths.Add($TimestampedPath); [void]$global:csvGeneratedPaths.Add($LatestPath); if($DryRun){WriteLog -Message 'DryRun enabled: SharePoint CSV upload skipped.' -Level INFO}else{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $TimestampedPath|Out-Null; Invoke-SmartM365SharePointCsvUpload -LocalFilePath $LatestPath|Out-Null}; if($AppendHistory-and$HistoryPath){$hp=Split-Path $HistoryPath -Parent; if(-not(Test-Path -LiteralPath $hp)){New-Item -Path $hp -ItemType Directory -Force|Out-Null}; if($Rows.Count-gt 0){$Rows|Select-Object -Property $Columns|Export-Csv -LiteralPath $HistoryPath -NoTypeInformation -Encoding utf8BOM -Append:(Test-Path -LiteralPath $HistoryPath)}}}
+function Export-InventoryCsv{param([object[]]$Rows,[string[]]$Columns,[string]$TimestampedPath,[string]$LatestPath,[string]$HistoryPath) $Columns=@('TenantKey')+@($Columns|Where-Object{$_-ine'TenantKey'}); Assert-SmartM365CsvDataCompleteness -Data $Rows -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath; foreach($folder in @((Split-Path $TimestampedPath -Parent),(Split-Path $LatestPath -Parent))){if(-not(Test-Path -LiteralPath $folder)){New-Item -Path $folder -ItemType Directory -Force|Out-Null}}; if($Rows.Count-eq 0){$h=($Columns|ForEach-Object{'"'+($_-replace'"','""')+'"'})-join','; Set-Content -LiteralPath $TimestampedPath -Value $h -Encoding utf8BOM; Set-Content -LiteralPath $LatestPath -Value $h -Encoding utf8BOM}else{$Rows|Select-Object -Property $Columns|Add-SmartM365TenantKey | Export-Csv -LiteralPath $TimestampedPath -NoTypeInformation -Encoding utf8BOM; $Rows|Select-Object -Property $Columns|Add-SmartM365TenantKey | Export-Csv -LiteralPath $LatestPath -NoTypeInformation -Encoding utf8BOM}; [void]$GeneratedCsvPaths.Add($TimestampedPath); [void]$GeneratedCsvPaths.Add($LatestPath); if(-not$global:csvGeneratedPaths){$global:csvGeneratedPaths=New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)}; [void]$global:csvGeneratedPaths.Add($TimestampedPath); [void]$global:csvGeneratedPaths.Add($LatestPath); if($DryRun){WriteLog -Message 'DryRun enabled: SharePoint CSV upload skipped.' -Level INFO}else{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $TimestampedPath|Out-Null; Invoke-SmartM365SharePointCsvUpload -LocalFilePath $LatestPath|Out-Null}; if($AppendHistory-and$HistoryPath){$hp=Split-Path $HistoryPath -Parent; if(-not(Test-Path -LiteralPath $hp)){New-Item -Path $hp -ItemType Directory -Force|Out-Null}; if($Rows.Count-gt 0){if(Test-Path -LiteralPath $HistoryPath){Repair-SmartM365CsvTenantKeySchema -Path $HistoryPath -Delimiter ',' -Encoding UTF8|Out-Null}; $Rows|Select-Object -Property $Columns|Add-SmartM365TenantKey | Export-Csv -LiteralPath $HistoryPath -NoTypeInformation -Encoding utf8BOM -Append:(Test-Path -LiteralPath $HistoryPath)}}}
 function ConvertTo-HtmlReport {
     param([object[]]$AlertRows,[hashtable]$Summary,[string]$Worst,[datetime]$Started,[datetime]$Ended)
     $color=@{OK='#107c10';Warning='#ff8c00';Critical='#d13438'}
@@ -142,8 +142,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAF4KQZn2Oy9KpI
-# trncsx+EQheI10OaN/wkIBHfi2gSZ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNH6nWaggQB4pd
+# nTJgUxD42MhdMflTwgsiFumvp9aT2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -276,31 +276,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPDU/DSQ7T3UFwvMuDOBzjhWUAEUJGP6qNBqLa3+FHJsMA0GCSqG
-# SIb3DQEBAQUABIIBgDLtMRVnbO8wH8qbyKosbTcmgbjBDoV4HeYvrMM6ySWtPDaD
-# 5uBGU3B4UK/79xkUxITGeYS20L3syGFhd2kzYnnzqbP2HbwVG7IU34PndrsY8BRM
-# Ey9k1qAYm0u8ADKf5iGhdy4TcZ6dXaXY4lpa8S2nZ46q6XuUlgb50ciw4faqUXNl
-# 1ZRylJSQF0hQvjAaEQqjKaWLDeccVvgBXy9eqnaEHQkZeQbNeX+3RnVYPx4CAm1z
-# BZpjG2uA1VH62pCtwUP1ngiz4ylKGa/qmeUV9/NOR0KmCARsHsvwPAcVKDpZQbf5
-# QO/TwIqiAC1VLSB4g8KBNRzyMnOIb6ai0YvhX2/yRWborir+nvUjE+N4agv5U7Pv
-# em1xsw8PtlTkC1z2WMb5q+4WSScsx4qbTCt0DrsksSKnTqjD1P3Dp09c/NSY5PhY
-# k7j2VYwz5IkPt6o473i1jFQ673sSR9Xcecjn07dSkkYM3D5PzpURuUXbOEusPU4S
-# Kv4EuF75YS7iPJv8sqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOIFr7cD2PLMJLunOmRhNGum4YIR9NOxUPEcTIAGS8G+MA0GCSqG
+# SIb3DQEBAQUABIIBgDHUmblgtV/4qaz+5y/r+uC0BSfwgl1CrV7YHF0gf3jtVgin
+# E9KYFPw8tbopxftPXq6aFwBvKOltoZcjeek1HFElCjeDxqfkPINKYerD2MpxPxuy
+# cReFIS6CAJ44cOrqBtXNSFcbrMFejR+Ef36fYtwqTxZ2IQV3+aOkrGaIcNPiiECr
+# 1PjQ4WD/hHTvCIlVDmaXxxs7B/rOLu2L9G8oyFHLLJbZvxguL7cQc5y8xdFivGeM
+# zyymz4nLBeQLL/Cz5RjaP1dq0IpQSSSMS8BgxGSEO66e3Naq8Wp6Kaw1iO2NhXif
+# 3ZsVmJzQ6W9MmNlOtsrWsRefvBAHI/DGNZ4/gJIfX5aw/icKz2hRiYrRcAmHeT5q
+# 6jhw3ofswdPsGa1c5vte/6qow/saF2ieVSV2FPv7cClIFrHm5hSuDTVWmR9wSFSK
+# 7nGM8i4Fs2yds/Px48oAcBH47Toe7ko3YjLnlDA6/IYdUWCuMg7I/OciKgPAmZLG
+# BIkFViFcnDva98Jy26GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzZaMC8GCSqGSIb3DQEJBDEiBCDUGokJ7sTsTey25NiAt7YIU46efCEmJ59Ckk2X
-# 4yevCDANBgkqhkiG9w0BAQEFAASCAgCZIHINXbNV4XMcocDvd+lGR6P8EElCnk8P
-# bL79zejG9Hjrb43+nDldv0nSWUjvD25JjO42MhI+x9j5bUCYABHCdYOAjp6c+j5y
-# MQlMpNSwopNBpjsR4zF/eQc3KbRDkSlneNLzSiRMLwOlmtCKjn1sD7YLgjsDI3mS
-# +ut+tIGXsGqWQ1PBm50pJY0PtENPbpVq3UgSYpCsAP+FNEOd9hzDgvy/zFctTasb
-# lZn1FuqcD+EdQEF054WY9OX8IbskgtV5wflycn22PkWPGhIvEz83nPBH98D2ZIFC
-# ePedSS1wQTApHdCqr58qM/gdsgW1M/KUv68JfocoRC1JKz8/fjUo+4crVMuZDl0E
-# IZ7pwZSZm19+T+iwLg7Iku7f/5KUaLkjat3bI5rss2dOtl3eePB2XjuKouNTL+vQ
-# Du83/CIiZK7C88pcVIkT7Vdm96t6sT7bJ5gxvQw44OH14/nibduX5wy1Xzo5IroS
-# plFlca8Gww3m63EQjlM1/2xKYjGWXn6QazCYGa5gcvP2nxbMo9E3WdOo59iguxGU
-# vLHClVPm7CO+sCAQU/ITGdthvHJCm7Id9qa/p+5MWQu8QpqymGQI9EZWykvTxlw/
-# vUMj7ez9MO0ex6cXk+Ufjju1InKpQ3OQ6+rlAq/si8FVHrcvNA2whk3+IqHOT+sH
-# +FWjupYihQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
+# MjRaMC8GCSqGSIb3DQEJBDEiBCDR4fvENgPbBylkiy18rbr+KkqlNBbyUKyShFFr
+# ea4sXjANBgkqhkiG9w0BAQEFAASCAgA6FsiKAUlPEPkAliu1AOSL83dfQBCPcutk
+# fBMHJ56I1IqFff0VFEX/ZapzrOsvDFcPih58Kfe2Sdjlr25WgNMJgLAI3KfTOXCs
+# rk+0mZuPZcaXB0fu8GxTt3wi6EtxXRKEZCm6+yT3NYE133z47CEZEOHtBVSGvMIk
+# HRwzHoUxP85hhClqFMglTEKJirJ25T8H8XvBtRvkVB1ghf/7hCKAakuMn7ZfNC4e
+# qZN/ItBrKBL9AOSEhaZwZcvtOrw4hhTOc7MV3CkGBiY1D12ZIPJot0Nn4dbIvqvF
+# zNp2uroF5+XDH1BdVP/zvMTwpdnE69rhyBK2rfDGkhAUAKWheQFliZZ90sA3zb/P
+# npZXbhbUPNlPQWigOkVReEsW9RGTx89JWvSBk+4JrXcLYgpCbmYLIQtnmFPWlwJK
+# +axhMXexYXQ0qF/yVlsGXuwUh0ULFni6iOuYMAdG7y8szwZGhPgDV/ZcyAd5KS4I
+# GnrIltaglMsgVf4j09xmdYpDRO8Exq/K0MIQQQsuCIIEnEdrqFo5zuptuZKUnlYT
+# ogSahZsqVsTB6ONSGKBFbi+2qCKsWWHMoFjSYF34E/gGsB1CiEmhyCIq0MFJfpHk
+# DEQshxvX614OktxYF16fo2yTrZUYdwlTfbeSYGdEVvt1G8BPMt6iSmNlkWwaiPg1
+# Fp5QEIlCnA==
 # SIG # End signature block

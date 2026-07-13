@@ -47,7 +47,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.11
+0.12
 
 
 .REQUIREMENTS
@@ -102,7 +102,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.11"
+$ScriptVersion = "0.12"
 $CurrentOperation = 'Initialize'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -209,8 +209,8 @@ function Invoke-SpoWithRetry {
 }
 
 function Ensure-SpoUtf8Bom { param([Parameter(Mandatory)][string]$Path) if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return}; $bytes=[System.IO.File]::ReadAllBytes($Path); if($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF){return}; $bom=[byte[]](0xEF,0xBB,0xBF); $combined=[byte[]]::new($bom.Length+$bytes.Length); [Array]::Copy($bom,0,$combined,0,$bom.Length); [Array]::Copy($bytes,0,$combined,$bom.Length,$bytes.Length); [System.IO.File]::WriteAllBytes($Path,$combined) }
-function Add-SpoHistoryCsv { param([AllowEmptyCollection()][object[]]$Data,[Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string[]]$Columns) $parent=Split-Path -Path $Path -Parent; if(-not(Test-Path -LiteralPath $parent)){New-Item -Path $parent -ItemType Directory -Force|Out-Null}; $rows=@($Data|Select-Object -Property $Columns); if(-not(Test-Path -LiteralPath $Path)){ $rows|Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Delimiter ','; Ensure-SpoUtf8Bom -Path $Path; return }; $rows|Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Delimiter ',' -Append; Ensure-SpoUtf8Bom -Path $Path }
-function Export-SpoEntityCsv { param([Parameter(Mandatory)][string]$BaseFileName,[AllowEmptyCollection()][object[]]$Data,[Parameter(Mandatory)][string[]]$Columns,[Parameter(Mandatory)][string]$TimestampedFolder,[Parameter(Mandatory)][string]$LatestFolder,[switch]$AppendHistoryMode) $timestamp=Get-Date -Format 'yyyyMMdd_HHmmss'; $timestampedPath=Join-Path -Path $TimestampedFolder -ChildPath ("{0}_{1}.csv" -f $BaseFileName,$timestamp); $latestPath=Join-Path -Path $LatestFolder -ChildPath ("{0}.csv" -f $BaseFileName); if(@($Data).Count -eq 0){$header='"'+($Columns -join '","')+'"'; Set-Content -LiteralPath $timestampedPath -Value $header -Encoding UTF8; Set-Content -LiteralPath $latestPath -Value $header -Encoding UTF8; Ensure-SpoUtf8Bom -Path $timestampedPath; Ensure-SpoUtf8Bom -Path $latestPath; return [pscustomobject]@{TimestampedPath=$timestampedPath;LatestPath=$latestPath}}; $result=Export-SmartM365Csv -Data $Data -TimestampedPath $timestampedPath -LatestPath $latestPath -Columns $Columns; Ensure-SpoUtf8Bom -Path $timestampedPath; Ensure-SpoUtf8Bom -Path $latestPath; if($AppendHistoryMode){$historyPath=Join-Path -Path $TimestampedFolder -ChildPath ("{0}_History.csv" -f $BaseFileName); Add-SpoHistoryCsv -Data $Data -Path $historyPath -Columns $Columns; Write-SpoLog -Message ("History CSV appended: {0}" -f $historyPath)}; return $result }
+function Add-SpoHistoryCsv { param([AllowEmptyCollection()][object[]]$Data,[Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string[]]$Columns) $Columns=@('TenantKey')+@($Columns|Where-Object{$_-ine'TenantKey'}); $parent=Split-Path -Path $Path -Parent; if(-not(Test-Path -LiteralPath $parent)){New-Item -Path $parent -ItemType Directory -Force|Out-Null}; $rows=@($Data|Select-Object -Property $Columns); if(-not(Test-Path -LiteralPath $Path)){ $rows|Add-SmartM365TenantKey | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Delimiter ','; Ensure-SpoUtf8Bom -Path $Path; return }; Repair-SmartM365CsvTenantKeySchema -Path $Path -Delimiter ',' -Encoding UTF8|Out-Null; $rows|Add-SmartM365TenantKey | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Delimiter ',' -Append; Ensure-SpoUtf8Bom -Path $Path }
+function Export-SpoEntityCsv { param([Parameter(Mandatory)][string]$BaseFileName,[AllowEmptyCollection()][object[]]$Data,[Parameter(Mandatory)][string[]]$Columns,[Parameter(Mandatory)][string]$TimestampedFolder,[Parameter(Mandatory)][string]$LatestFolder,[switch]$AppendHistoryMode) $Columns=@('TenantKey')+@($Columns|Where-Object{$_-ine'TenantKey'}); $timestamp=Get-Date -Format 'yyyyMMdd_HHmmss'; $timestampedPath=Join-Path -Path $TimestampedFolder -ChildPath ("{0}_{1}.csv" -f $BaseFileName,$timestamp); $latestPath=Join-Path -Path $LatestFolder -ChildPath ("{0}.csv" -f $BaseFileName); if(@($Data).Count -eq 0){$header='"'+($Columns -join '","')+'"'; Set-Content -LiteralPath $timestampedPath -Value $header -Encoding UTF8; Set-Content -LiteralPath $latestPath -Value $header -Encoding UTF8; Ensure-SpoUtf8Bom -Path $timestampedPath; Ensure-SpoUtf8Bom -Path $latestPath; return [pscustomobject]@{TimestampedPath=$timestampedPath;LatestPath=$latestPath}}; $result=Export-SmartM365Csv -Data $Data -TimestampedPath $timestampedPath -LatestPath $latestPath -Columns $Columns; Ensure-SpoUtf8Bom -Path $timestampedPath; Ensure-SpoUtf8Bom -Path $latestPath; if($AppendHistoryMode){$historyPath=Join-Path -Path $TimestampedFolder -ChildPath ("{0}_History.csv" -f $BaseFileName); Add-SpoHistoryCsv -Data $Data -Path $historyPath -Columns $Columns; Write-SpoLog -Message ("History CSV appended: {0}" -f $historyPath)}; return $result }
 function New-SpoAlertRow { param([Parameter(Mandatory)][string]$Severity,[Parameter(Mandatory)][string]$Category,[Parameter(Mandatory)][string]$SiteUrl,[string]$ObjectName='',[string]$Metric='',[AllowNull()]$Value=$null,[string]$Threshold='',[string]$Details='') [pscustomobject]@{Severity=$Severity;Category=$Category;SiteUrl=$SiteUrl;ObjectName=$ObjectName;Metric=$Metric;Value=if($null -eq $Value){''}else{[string]$Value};Threshold=$Threshold;Details=$Details} }
 
 function New-SpoHtmlSummary {
@@ -856,8 +856,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA98IAbZKZsfaDf
-# MkeXMe6eWcmeIJBXK41FXCgivli0IaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCMAct3GwuS6yFZ
+# FGcd2sRdg1zamchlqyb6LlkX1LZMP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -990,31 +990,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPAmG3e5YNEuxCUrITnuMFSPtmkTefzyxTwRgsLulCxLMA0GCSqG
-# SIb3DQEBAQUABIIBgJ14sXB6EpKGZWWW0IoXzDhXDN48F0iWugIawv/y9UFXZrel
-# fkYTovqNyWjPZUYJUPI9cOWcUoO7F5/uQiARok4FdhO3ypGnfISPnOhHsURyfW7C
-# 1AX9Gc0RnbB1ksfHxAxJ6CXu+OHInvgfpopx426j622Esd5SEwJ8m8UmlBrrrG2t
-# 6kY2N6YlQijnaJB++QJgf2LVfWdTvIYYDKI/5bQkB+rlPgVtuoJuGp3BThbVxuNL
-# qQutetqsuIsEOnDVEqPFN3oovPSaBxUCsXoJNMaMnAIYi3cqnP/NyPGtyX/k88wC
-# vMqfA942n1QRZ+Kz1lXDiwSk1K+DtVYWM6BuZy5a519mWfQVXRiGqWTnFjpGxzVS
-# bQxnfWDz8Zqx9Ms9Q+jHoZx1hHV7Mj3oRj7UItmcUgp4gnWFh1y1lkH3ZxaSPdnJ
-# Yu4gFKiUUKVu00xGJz4ET8fDEhQ7bPJrEwjUTAUSznA18vW491XPLKrV1tSm7Bhc
-# QUVPYSVHG4RpuzycDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBgOuBisiIVIXDFYBSgztLm5kiO4xKjxFx0V+wUTUjdIMA0GCSqG
+# SIb3DQEBAQUABIIBgJWff0beJLG5QewAhScE7yf8VD4SNZLRJpFWF8gaNNU55gyq
+# P8fUPsTo4OufUkh1a8YbKi5F4f78Dsgk3rMkardKJZ5Wrm0OOtP6NrwdyLkyIjzH
+# Td6fUhHZ8LakQlj/BKkWfDBn/2CNbaMKUO4GGRmjYdflzukckOR+SwgDqQlkGKUf
+# I63k6O+9ZIZlnHQRxVJU5NQt3FBKoUSBPB6KPNkYOy+Y7vD0d0l8Vq+YTf13kaMF
+# Nv4jkHqVBKSFuh9Qnm0cckqJPWqEfvL9VrHgTETav7TvJ5AoCvZFQOPwwa7ODFew
+# p18ffaiNj8sjghJ5UD7HEmXUC+JQedNKKVeUyCnyRGndbc+CEFP60G2XV7Gfl01x
+# t4Q5Ljqv9Sd3V9oAkJabIYNtw5zp/FUXdQJcW3sWsvw4HrUm7ZsyZ9+zDEaHeVpk
+# 6eNv7FciawheQ1T4Yoebtv9SWoLtL+qs8MDnBFrPcvEIzIAqp8aZxDSD/Ldo/Xt4
+# Df4TwnaoU0BLAa3sK6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzVaMC8GCSqGSIb3DQEJBDEiBCDfWt6u7/YlqVvkDL2pnkh4Vmmk9ip5mPTyQdxJ
-# Gs7egjANBgkqhkiG9w0BAQEFAASCAgAorUWqrBaZGRiklbzIzU3lJqA+MVnq4vri
-# Kp1Xxq5Ajlf+ksPRRouG954YoJjvBNDORFzqrOzXKGRuEpjZ+EO2JzYavxPvZqo5
-# UHY5Pl0YdFGk6P4o+Kaa1pd4pRdZCBtGRxwYBLRKBQIc5oSGw6bc3kbd+ZpMymhm
-# keB8wXYlCazcKFQ2y+SYXFMQHQPRYONkOh6wJ+ws6yuQUUWAoSCa2rNzpGHd58j/
-# S43r0G31ezA2KE6PAP83ocbiRUWtUaBbR8aUJZrYF4bE8ySO0rYrpt21IFVSOqpv
-# Vt8GIS2Xz+Au/j0ivHAlgHKaGkvIZtc+yAUEmu01filL9Xgu4fB3Z1B4hH8FkH8t
-# iNikIlZ3Df563l7IyDcO3Yqw+/y4pavFPfSIjUckFKNwtU6it0BGX6C+/QiLs3E8
-# udSTHIIUDNWdQdtccJQ0FNyBl4HxfkIsB6SYbXz5veu8wiw0WCMhwkxgzfxt4PKk
-# 00vreWoerQ7W7DqGB1tYcXyvbFn2v401XNk2esaZVk8UeLHnekkWPdQn+puMfgfW
-# 5naHM8xH/KNQRm0fSDTgGlMNDRzofwNOo72LACTkmJSfCkYCAT8lwiF4L4qotSbB
-# kpqretGyzXv/MZaA39jOPZuK1HP0ef4p390fboQ0qMXst8PxFdlfBitZqrxMQd/A
-# fFOz5yBQSg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
+# MjRaMC8GCSqGSIb3DQEJBDEiBCBLRIFnbpfrWXk0xtYwjVym1u3kA+eu8XE3VthJ
+# POR1BzANBgkqhkiG9w0BAQEFAASCAgAOlHuh4tqB1AaFoMoCkNhVK29c6E+loLmQ
+# r6tN9/8MP+v4Q52huKNj1TUPZFcU1Wt++9mlWAj7hBxBEJjeItcfdSIE2kjYX5/+
+# +/5YWeTGIxXOYHsoTzntLtR0EGSvXpeMpD2D795JbyRMdXpmbqEimFJvNEsma+3w
+# SZkxfvM/+FTdUuIaYvC4NMK0v5IlBXKleiyUS7NlE4GXWULzTVMBl6EiHYfriqec
+# qW5ercQ8yf3Yow7M4E2P/DZWMWEhlvPxeUHjxUcP7z7e0dvbC+4W616Cr6D6//Kq
+# 3NdS7ZDNSp3AQCE/7MqYMwJk1M/l/DqMH3yh64etQHTHR+f/9LFx6Z13hNCcPSI9
+# CVeACjRlZa+AnhmDjJlxWwmc4qmeH8VAIvQP7RgWtjTaG+rtWPbwJR0KGb+I0bDr
+# diwp8iCeQyHlbBNLo8mzoyURpah4IOQnnRCyqJfNx7qdELY+2aIzCXLJ5bLCfSEp
+# /Rgf93be122rWICsDGmF+tnqHNWSHIWPnNp5NmB+p0ybe31jNqWnTk+zjsoyuWWf
+# 1U34H4eOuQoa6t/bu0QEk3nUHZR6Px+Fn8aT1gkkz3vsNANTmKksuHV49pNg+jSB
+# p2cszPYdbw9KL8Yn61e/Lh3G/RgLzIdVG5hKZH1vCl85/9IrEn6SX5TpsvJptXB0
+# r69McWPDsg==
 # SIG # End signature block
