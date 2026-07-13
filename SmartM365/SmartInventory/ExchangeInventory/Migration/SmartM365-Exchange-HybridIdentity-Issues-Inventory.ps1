@@ -12,7 +12,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.9
+1.10
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -41,7 +41,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.9"
+$ScriptVersion="1.10"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 function Log([string]$m){ Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m) }
 function Warn([string]$m){ Write-Warning $m }
@@ -75,12 +75,44 @@ function HasSkuLike($licenses,[string]$pattern){foreach($l in @($licenses)){if((
 function IsUserMailbox($lm,$rm,$em){((T(P $lm RecipientTypeDetails,RecipientType))+' '+(T(P $rm RecipientTypeDetails,RecipientType))+' '+(T(P $em RecipientTypeDetails,MailboxType))) -match 'UserMailbox|RemoteUserMailbox'}
 function IsSharedMailbox($lm,$rm,$em){((T(P $lm RecipientTypeDetails,RecipientType))+' '+(T(P $rm RecipientTypeDetails,RecipientType))+' '+(T(P $em RecipientTypeDetails,MailboxType))) -match 'Shared'}
 function IsRoomMailbox($lm,$rm,$em){((T(P $lm RecipientTypeDetails,RecipientType))+' '+(T(P $rm RecipientTypeDetails,RecipientType))+' '+(T(P $em RecipientTypeDetails,MailboxType))) -match 'Room|Equipment'}
-function ContainsInvalidUpnChar($value){(T $value) -match '[\\/\[\]:;\|=,+*?<>]'}
+function ContainsInvalidUpnChar($value){
+  $s=T $value
+  if(!$s){return $false}
+  foreach($charValue in @(' ','#','%','&','~','+','/','=','?','*','{','}','|','<','>','(',')',';',':',',','[',']','"','\','`')){
+    if($s.Contains($charValue)){return $true}
+  }
+  $false
+}
 function ContainsInvalidSmtpLocalChar($value){(LocalPart $value) -match '[\\/\[\]:;\|=,+*?<>\s]'}
 function PrimaryProxyCount($proxyText){ return @((T $proxyText) -split '[;|,]' | Where-Object { $_ -cmatch '^SMTP:' }).Count }
 function ProxyContains($proxyText,$address){$a=(T $address) -replace '^(smtp|SMTP):',''; foreach($p in SplitAddr $proxyText){if($p -ieq $a){return $true}}; $false}
 function IsFalseLike($value){$s=K $value; $s -in @('false','0','no','n','disabled')}
-function LicensesFor($upn){$k=K $upn; if($licUpn.ContainsKey($k)){return @($licUpn[$k])}; @()}
+function LicensesFor($upn,$userId=''){ $id=K $userId; if($id -and $licUserId.ContainsKey($id)){return @($licUserId[$id])}; $k=K $upn; if($k -and $licUpn.ContainsKey($k)){return @($licUpn[$k])}; @() }
+function GetM365User($upn,$immutableId){ $id=K $immutableId; if($id -and $m365Immutable.ContainsKey($id)){return $m365Immutable[$id]}; $u=K $upn; if($u -and $m365Upn.ContainsKey($u)){return $m365Upn[$u]}; $null }
+function GetRecipientTypeFromMailboxes($primary,$lm,$rm,$em){ $smtp=K $primary; if($smtp -and $localSmtp.ContainsKey($smtp)){return T(P $localSmtp[$smtp] RecipientType,RecipientTypeDetails)}; if($smtp -and $remoteSmtp.ContainsKey($smtp)){return T(P $remoteSmtp[$smtp] RecipientTypeDetails,RecipientType)}; if($smtp -and $exoSmtp.ContainsKey($smtp)){return T(P $exoSmtp[$smtp] RecipientTypeDetails,MailboxType)}; $fallback=T(P $lm RecipientType,RecipientTypeDetails); if($fallback){return $fallback}; $fallback=T(P $rm RecipientTypeDetails,RecipientType); if($fallback){return $fallback}; $fallback=T(P $em RecipientTypeDetails,MailboxType); if($fallback){return $fallback}; 'NoMailboxes' }
+function TestAllowedLicenseGroup($licenseGroup){ (T $licenseGroup) -in @('Microsoft 365 E3','Microsoft 365 F3','Microsoft 365 F1') }
+function GetLicenseGroupFromM365($recipientType,$licenses,$inM365){
+  if((T $recipientType) -in @('SharedMailbox','RemoteSharedMailbox')){return 'No License (Shared)'}
+  if((T $recipientType) -in @('RoomMailbox','RemoteRoomMailbox','EquipmentMailbox','RemoteEquipmentMailbox')){return 'No License (Resource Mailbox)'}
+  if(-not $inM365){return 'Not in M365'}
+  $text=((@($licenses)|ForEach-Object{T $_}) -join ';')
+  if([string]::IsNullOrWhiteSpace($text)){return 'No License (Unlicensed)'}
+  if($text -match 'Microsoft 365 E3|ENTERPRISEPACK|SPE_E3'){return 'Microsoft 365 E3'}
+  if($text -match 'Microsoft 365 F3|SPE_F1|SPE_F3|M365_F3|O365_F3'){return 'Microsoft 365 F3'}
+  if($text -match 'Microsoft 365 F1|M365_F1|O365_F1'){return 'Microsoft 365 F1'}
+  'No License (Unlicensed)'
+}
+function ExchangePlanStatus($userId){
+  $id=K $userId
+  if($id -and $planUserId.ContainsKey($id)){
+    foreach($plan in @($planUserId[$id])){
+      if((T(P $plan PlanName)) -in @('EXCHANGE_S_ENTERPRISE','EXCHANGE_S_DESKLESS') -and (B(P $plan IsEnabled))){
+        $display=T(P $plan PlanDisplayName); if($display){return $display}; return T(P $plan PlanName)
+      }
+    }
+  }
+  'Not Exchange Plan Enabled'
+}
 function FlattenPath($value){
   foreach($item in @($value)){
     if($item -is [System.Array]){FlattenPath $item; continue}
@@ -114,9 +146,12 @@ function PublishWeeklyHistory($files){
   $year=[Globalization.ISOWeek]::GetYear((Get-Date)); $week=[Globalization.ISOWeek]::GetWeekOfYear((Get-Date)); $folder=Join-Path $base ('{0}-W{1:00}' -f $year,$week)
   if(!(Test-Path $folder)){New-Item -ItemType Directory -Path $folder -Force|Out-Null}
   $published=[Collections.Generic.List[string]]::new()
+  $publishedNames=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($f in @($files)){
     if(!$f -or !(Test-Path -LiteralPath $f)){continue}
-    $dest=Join-Path $folder (Split-Path $f -Leaf)
+    $leaf=Split-Path $f -Leaf
+    if(-not $publishedNames.Add($leaf)){continue}
+    $dest=Join-Path $folder $leaf
     CopyCsv $f $dest
     [void]$published.Add($dest)
   }
@@ -140,89 +175,99 @@ try{
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
   Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LatestFolder) | Out-Null
   $ad=Csv 'AD_Users_AllDomains.csv' -Req; $dupUpn=Csv 'AD_Users_DuplicateUPN.csv'; $dupSmtp=Csv 'AD_Users_DuplicateSMTP.csv'; $local=Csv 'Exchange_OnPrem_Mailboxes_AllDomains.csv' -Req; $remote=Csv 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' -Req; $exo=Csv 'Exchange_EXO_Mailboxes_AllDomains.csv' -Req; $stats=Csv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv'; $arch=Csv 'Exchange_EXO_Mailboxes_AllDomains_Archive.csv'; $perms=Csv 'Exchange_EXO_Mailboxes_AllDomains_Permissions.csv'; $m365=Csv 'M365_Users_Active.csv' -Req; $lic=Csv 'M365_Licenses_Users.csv'; $plans=Csv 'M365_Licenses_ServicePlans.csv'; $domains=Csv 'Exchange_EXO_AcceptedDomains.csv'; $verified=Csv 'M365_Entra_VerifiedDomains.csv'
-  $localGuid=@{};$localUpn=@{};$localSmtp=@{}; foreach($r in $local){AddMap $localGuid (P $r ObjectGUID) $r; AddMap $localUpn (P $r UserPrincipalName) $r; AddMap $localSmtp (P $r PrimarySMTPaddress,PrimarySmtpAddress) $r}
+  $localGuid=@{};$localUpn=@{};$localSmtp=@{};$localDomainSam=@{}; foreach($r in $local){AddMap $localGuid (P $r ObjectGUID) $r; AddMap $localUpn (P $r UserPrincipalName) $r; AddMap $localSmtp (P $r PrimarySMTPaddress,PrimarySmtpAddress) $r; AddMap $localDomainSam (P $r DomainAndSam) $r}
   $remoteGuid=@{};$remoteUpn=@{};$remoteSmtp=@{}; foreach($r in $remote){AddMap $remoteGuid (P $r ObjectGuid,ObjectGUID) $r; AddMap $remoteUpn (P $r UserPrincipalName) $r; AddMap $remoteSmtp (P $r PrimarySmtpAddress,PrimarySMTPaddress) $r}
-  $exoUpn=@{};$exoSmtp=@{}; foreach($r in $exo){AddMap $exoUpn (P $r UserPrincipalName) $r; AddMap $exoSmtp (P $r PrimarySmtpAddress,PrimarySMTPaddress) $r}
-  $statsUpn=@{}; foreach($r in $stats){AddMap $statsUpn (P $r UserPrincipalName) $r}; $archUpn=@{}; foreach($r in $arch){AddMap $archUpn (P $r UserPrincipalName) $r}; $permsUpn=@{}; foreach($r in $perms){AddMap $permsUpn (P $r UserPrincipalName) $r}; $m365Upn=@{}; foreach($r in $m365){AddMap $m365Upn (P $r 'User principal name',UserPrincipalName) $r}
-  $licUpn=@{}; foreach($r in $lic){$u=K (P $r 'User principal name',UserPrincipalName); if(!$u){continue}; if(!$licUpn.ContainsKey($u)){$licUpn[$u]=[Collections.Generic.List[string]]::new()}; $sku=T (P $r SkuPartNumber,'SKU name'); if($sku){[void]$licUpn[$u].Add($sku)}}
-  $dupUpnSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($r in $dupUpn){[void]$dupUpnSet.Add((T(P $r UserPrincipalName)))}
-  $dupSmtpSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($r in $dupSmtp){[void]$dupSmtpSet.Add((T(P $r SmtpAddress)))}
+  $exoUpn=@{};$exoSmtp=@{};$exoImmutable=@{}; foreach($r in $exo){AddMap $exoUpn (P $r UserPrincipalName) $r; AddMap $exoSmtp (P $r PrimarySmtpAddress,PrimarySMTPaddress) $r; AddMap $exoImmutable (P $r OnPremisesImmutableId,ImmutableId) $r}
+  $statsUpn=@{}; foreach($r in $stats){AddMap $statsUpn (P $r UserPrincipalName) $r}; $archUpn=@{}; foreach($r in $arch){AddMap $archUpn (P $r UserPrincipalName) $r}; $permsUpn=@{}; foreach($r in $perms){AddMap $permsUpn (P $r UserPrincipalName) $r}
+  $m365Upn=@{};$m365Immutable=@{}; foreach($r in $m365){AddMap $m365Upn (P $r 'User principal name',UserPrincipalName) $r; AddMap $m365Immutable (P $r OnPremisesImmutableId) $r}
+  $licUpn=@{};$licUserId=@{}; foreach($r in $lic){$u=K (P $r 'User principal name',UserPrincipalName); $id=K(P $r UserId,'Object Id'); $sku=T (P $r 'SKU name',SkuPartNumber); if(!$sku){continue}; if($u){if(!$licUpn.ContainsKey($u)){$licUpn[$u]=[Collections.Generic.List[string]]::new()}; [void]$licUpn[$u].Add($sku)}; if($id){if(!$licUserId.ContainsKey($id)){$licUserId[$id]=[Collections.Generic.List[string]]::new()}; [void]$licUserId[$id].Add($sku)}}
+  $planUserId=@{}; foreach($r in $plans){$id=K(P $r UserId,'Object Id'); if(!$id){continue}; if(!$planUserId.ContainsKey($id)){$planUserId[$id]=[Collections.Generic.List[object]]::new()}; [void]$planUserId[$id].Add($r)}
+  $dupUpnSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($r in $dupUpn){[void]$dupUpnSet.Add((T(P $r UPN_norm,UserPrincipalName)))}
+  $dupSmtpSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($r in $dupSmtp){[void]$dupSmtpSet.Add((T(P $r PrimarySmtp,SmtpAddress)))}
   $domSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($r in $domains){[void]$domSet.Add((T(P $r DomainName,Name)))}
   $domType=@{}; $domAddressBook=@{}; foreach($r in $domains){$dn=K(P $r DomainName,Name); if(!$dn){continue}; $domType[$dn]=T(P $r DomainType); $domAddressBook[$dn]=B(P $r AddressBookEnabled)}
   $verifiedSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($r in $verified){[void]$verifiedSet.Add((T(P $r Id,Name,DomainName)))}
-  $samGroups=@{}; $displayGroups=@{}; $targetGroups=@{}
-  foreach($r in $ad){$sam=K(P $r SamAccountName); if($sam){if(!$samGroups.ContainsKey($sam)){$samGroups[$sam]=0}; $samGroups[$sam]++}; $dn=K(P $r DisplayName); if($dn){if(!$displayGroups.ContainsKey($dn)){$displayGroups[$dn]=0}; $displayGroups[$dn]++}; $ta=K((T(P $r TargetAddress,targetAddress)) -replace '^smtp:',''); if($ta){if(!$targetGroups.ContainsKey($ta)){$targetGroups[$ta]=0}; $targetGroups[$ta]++}}
+  $samGroups=@{}; $displayGroups=@{}; $targetGroups=@{}; $adUpn=@{}; $adSmtp=@{}; $adImmutableGuid=@{}
+  foreach($r in $ad){$sam=K(P $r SamAccountName); if($sam){if(!$samGroups.ContainsKey($sam)){$samGroups[$sam]=0}; $samGroups[$sam]++}; $dn=K(P $r DisplayName); if($dn){if(!$displayGroups.ContainsKey($dn)){$displayGroups[$dn]=0}; $displayGroups[$dn]++}; $ta=K((T(P $r TargetAddress,targetAddress)) -replace '^smtp:',''); if($ta){if(!$targetGroups.ContainsKey($ta)){$targetGroups[$ta]=0}; $targetGroups[$ta]++}; AddMap $adUpn (P $r UserPrincipalName) $r; AddMap $adSmtp (P $r EmailAddress,PrimarySmtp,PrimarySMTPaddress) $r; $imm=K(P $r ImmutableId_AD); if($imm -and !$adImmutableGuid.ContainsKey($imm)){$adImmutableGuid[$imm]=T(P $r ObjectGUID)}}
   $dupSamSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($k in $samGroups.Keys){if($samGroups[$k] -gt 1){[void]$dupSamSet.Add($k)}}
   $dupDisplaySet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($k in $displayGroups.Keys){if($displayGroups[$k] -gt 1){[void]$dupDisplaySet.Add($k)}}
   $dupTargetSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($k in $targetGroups.Keys){if($targetGroups[$k] -gt 1){[void]$dupTargetSet.Add($k)}}
+  $userMailboxTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('UserMailbox','RemoteUserMailbox')|ForEach-Object{[void]$userMailboxTypes.Add($_)}
+  $remoteMailboxTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('RemoteUserMailbox','RemoteSharedMailbox','RemoteRoomMailbox')|ForEach-Object{[void]$remoteMailboxTypes.Add($_)}
+  $targetRecipientTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('UserMailbox','SharedMailbox','RoomMailbox','RemoteUserMailbox','RemoteSharedMailbox','RemoteRoomMailbox')|ForEach-Object{[void]$targetRecipientTypes.Add($_)}
+  $sharedMailboxTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('SharedMailbox','RemoteSharedMailbox')|ForEach-Object{[void]$sharedMailboxTypes.Add($_)}
+  $roomMailboxTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('RoomMailbox','RemoteRoomMailbox')|ForEach-Object{[void]$roomMailboxTypes.Add($_)}
+  $nonPersonalAccountTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('Service Account','Admin Account','System Account','Generic Account')|ForEach-Object{[void]$nonPersonalAccountTypes.Add($_)}
+  $allowedTargetDomains=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('orpea.mail.onmicrosoft.com','orpea.com')|ForEach-Object{[void]$allowedTargetDomains.Add($_)}
   $issues=[Collections.Generic.List[object]]::new()
   foreach($u in $ad){
-    $guid=T(P $u ObjectGUID); $upn=T(P $u UserPrincipalName); $uk=K $upn; $enabled=B(P $u Enabled); $primary=T(P $u EmailAddress,PrimarySmtp,PrimarySMTPaddress); if(!$primary){$primary=SplitAddr(P $u ProxyAddresses)|?{$_ -match '@'}|select -First 1}; $target=T(P $u TargetAddress)
-    $lm=if($localGuid.ContainsKey((K $guid))){$localGuid[(K $guid)]}elseif($localUpn.ContainsKey($uk)){$localUpn[$uk]}else{$null}; $rm=if($remoteGuid.ContainsKey((K $guid))){$remoteGuid[(K $guid)]}elseif($remoteUpn.ContainsKey($uk)){$remoteUpn[$uk]}else{$null}; $em=if($exoUpn.ContainsKey($uk)){$exoUpn[$uk]}elseif($exoSmtp.ContainsKey((K $primary))){$exoSmtp[(K $primary)]}else{$null}
-    $st=if($statsUpn.ContainsKey($uk)){$statsUpn[$uk]}else{$null}; $ar=if($archUpn.ContainsKey($uk)){$archUpn[$uk]}else{$null}; $pm=if($permsUpn.ContainsKey($uk)){$permsUpn[$uk]}else{$null}; $hasMbx=($lm -or $rm -or $em); $hasLic=$licUpn.ContainsKey($uk)
-    if($hasMbx -and !$m365Upn.ContainsKey($uk)){AddIssue $issues 1 $guid 'User not found in M365 active users' '1.Critical' 'Review Entra ID synchronization and cloud account state.'}
-    if($hasMbx -and !(T(P $u ProxyAddresses))){AddIssue $issues 3 $guid 'Missing proxy address' '1.Critical' 'Add required proxy addresses before coexistence, migration, or daily mail routing decisions.'}
-    $size=[math]::Max((Dbl(P $lm 'TotalItemSize-In-MB')/1024.0),(Dbl(P $st TotalItemSizeGB))); if($size -gt 80){AddIssue $issues 4 $guid 'Mailbox size > 80 GB' '2.High' 'Review archive, retention, cleanup, or target license/quota before migration or operations.'}
-    if($hasMbx -and !$enabled){AddIssue $issues 7 $guid 'Account disabled with mailbox' '4.Low' 'Review whether the mailbox should remain active, be converted, archived, or decommissioned.'}
-    if($hasMbx -and $enabled -and !$hasLic){AddIssue $issues 8 $guid 'No M365 license assigned (enabled mailbox)' '1.Critical' 'Assign or validate the expected license for this enabled mailbox.'}
-    if($dupUpnSet.Contains($upn)){AddIssue $issues 9 $guid 'Duplicate UPN across domains' '1.Critical' 'Resolve UPN duplicates before synchronization, migration, or identity cleanup.'}
-    $arc=[math]::Max((Dbl(P $lm 'ArchiveTotalItemSize-In-MB')/1024.0),(Dbl(P $ar Archive_TotalItemSizeGB))); if($arc -gt 80){AddIssue $issues 13 $guid 'Archive size > 80 GB' '2.High' 'Review archive size and quota before migration or operational quota decisions.'}
-    $pc=(SplitAddr(P $lm FullAccess)).Count+(SplitAddr(P $lm SendAs)).Count+(SplitAddr(P $pm FullAccess)).Count+(SplitAddr(P $pm SendAs)).Count; if($pc -gt 25){AddIssue $issues 14 $guid 'Too many mailbox permissions' '3.Medium' 'Review mailbox delegation and remove obsolete permissions.'}
-    $ll=Dt(P $lm LastLogonTime); if(!$ll){$ll=Dt(P $st LastLogonTime,LastUserActionTime)}; if($hasMbx -and $ll -and ((Get-Date).Date-$ll.Date).Days -gt 180){AddIssue $issues 15 $guid 'Mailbox inactive > 6 months' '4.Low' 'Review mailbox usage and consider cleanup, archive, or decommissioning.'}
-    foreach($a in @((SplitAddr(P $u ProxyAddresses))+@($primary))){ if($dupSmtpSet.Contains($a)){AddIssue $issues 16 $guid 'Duplicate SMTP address' '1.Critical' 'Resolve duplicate SMTP/proxy addresses before synchronization or mail routing changes.'; break} }
-    if($rm -and !(T(P $rm RemoteRoutingAddress))){AddIssue $issues 19 $guid 'Remote mailbox missing remote routing address' '1.Critical' 'Repair RemoteRoutingAddress/targetAddress for this remote mailbox.'}
+    $guid=T(P $u ObjectGUID); $upn=T(P $u UserPrincipalName); $uk=K $upn; $immutableId=T(P $u ImmutableId_AD); $domainAndSam=T(P $u DomainAndSam); $enabled=B(P $u Enabled); $primary=T(P $u EmailAddress,PrimarySmtp,PrimarySMTPaddress); if(!$primary){foreach($addr in SplitAddr(P $u ProxyAddresses)){if($addr -match '@'){$primary=$addr; break}}}; $target=T(P $u TargetAddress); $proxyText=T(P $u ProxyAddresses)
+    $lm=if($domainAndSam -and $localDomainSam.ContainsKey((K $domainAndSam))){$localDomainSam[(K $domainAndSam)]}elseif($localGuid.ContainsKey((K $guid))){$localGuid[(K $guid)]}elseif($localUpn.ContainsKey($uk)){$localUpn[$uk]}elseif($localSmtp.ContainsKey((K $primary))){$localSmtp[(K $primary)]}else{$null}
+    $rm=if($remoteGuid.ContainsKey((K $guid))){$remoteGuid[(K $guid)]}elseif($remoteUpn.ContainsKey($uk)){$remoteUpn[$uk]}elseif($remoteSmtp.ContainsKey((K $primary))){$remoteSmtp[(K $primary)]}else{$null}
+    $em=if($exoImmutable.ContainsKey((K $immutableId))){$exoImmutable[(K $immutableId)]}elseif($exoUpn.ContainsKey($uk)){$exoUpn[$uk]}elseif($exoSmtp.ContainsKey((K $primary))){$exoSmtp[(K $primary)]}else{$null}
+    $st=if($statsUpn.ContainsKey($uk)){$statsUpn[$uk]}else{$null}; $ar=if($archUpn.ContainsKey($uk)){$archUpn[$uk]}else{$null}; $pm=if($permsUpn.ContainsKey($uk)){$permsUpn[$uk]}else{$null}
+    $recipientType=GetRecipientTypeFromMailboxes $primary $lm $rm $em; $isMailbox=($recipientType -ne 'NoMailboxes' -or $lm -or $rm -or $em); $hasSmtp=-not [string]::IsNullOrWhiteSpace($primary); $dontMigrate=B(P $u 'Mig-MigrationPlanExchange-DontMigrate')
+    $m365User=GetM365User $upn $immutableId; $inM365=$null -ne $m365User; $m365UserId=T(P $m365User 'Object Id',Id,UserId)
+    $userLicenses=@(LicensesFor $upn $m365UserId); $licenseText=@($userLicenses) -join ';'; $licenseGroup=GetLicenseGroupFromM365 $recipientType $userLicenses $inM365; $hasAllowedLicense=TestAllowedLicenseGroup $licenseGroup
+    $localSizeMb=Dbl(P $lm 'TotalItemSize-In-MB'); $exoSizeMb=[math]::Max((Dbl(P $em TotalItemSizeGB))*1024.0,(Dbl(P $st TotalItemSizeGB))*1024.0); $sizeMb=[math]::Max($localSizeMb,$exoSizeMb); $size=$sizeMb/1024.0
+    $arc=[math]::Max((Dbl(P $lm 'ArchiveTotalItemSize-In-MB')/1024.0),(Dbl(P $ar Archive_TotalItemSizeGB)))
+    $pc=[int]((Dbl(P $lm FullAccessCount))+(Dbl(P $lm SendAsCount))+(SplitAddr(P $pm FullAccess)).Count+(SplitAddr(P $pm SendAs)).Count)
+    $ll=Dt(P $u LastLogonDate); foreach($candidateDate in @((Dt(P $lm LastLogonTime)),(Dt(P $st LastLogonTime,LastUserActionTime)))){if($candidateDate -and (!$ll -or $candidateDate -gt $ll)){$ll=$candidateDate}}
     $itemCount=[math]::Max((Dbl(P $lm ItemCount,TotalItemCount)),(Dbl(P $st ItemCount,TotalItemCount)))
-    if((B(P $u IsItemCountOver999999)) -or $itemCount -gt 999999){AddIssue $issues 2 $guid 'Item count > 999,999' '2.High' 'Reduce mailbox item count'}
-    $userLicenses=@(LicensesFor $upn)
-    if($hasMbx -and $size -ge 2 -and (HasSkuLike $userLicenses '(^|_)F(1|3)($|_)|SPE_F1|SPE_F3|M365_F1|M365_F3|O365_F1|O365_F3')){AddIssue $issues 6 $guid 'F3/F1 user with mailbox >= 2 GB' '2.High' 'Review F3/F1 license or reduce mailbox size'}
-    $exchangePlanValue=T(P $u LicenseExchangePlanEnabledFromM365,ExchangePlanEnabled,HasExchangePlan)
-    if($hasLic -and $hasMbx -and $exchangePlanValue -and (IsFalseLike $exchangePlanValue)){AddIssue $issues 12 $guid 'No Exchange Plan enabled' '1.Critical' 'Enable Exchange Plan only for user migrated'}
-    $sharedAccessCount=[int][math]::Max((Dbl(P $u SharedAccessCount)), $pc)
-    if($sharedAccessCount -gt 25){AddIssue $issues 17 $guid 'Excessive shared access' '3.Medium' 'Review shared access model'}
-    if($hasMbx -and !(T(P $u DisplayName))){AddIssue $issues 18 $guid 'Missing DisplayName' '4.Low' 'Complete user metadata'}
-    $normTarget=(T $target) -replace '^smtp:',''
-    if($normTarget){
-      if($normTarget -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$'){AddIssue $issues 20 $guid 'Invalid TargetAddress format' '2.High' 'Fix TargetAddress format to a valid SMTP address'}
-      $targetDomain=DomainPart $normTarget
-      $allowedDomains=@('mail.onmicrosoft.com','onmicrosoft.com')
-      if($targetDomain -and $allowedDomains.Count -gt 0 -and -not ($allowedDomains | Where-Object { $targetDomain -like "*$_" })){AddIssue $issues 21 $guid 'Disallowed TargetAddress domain' '1.Critical' 'Update TargetAddress to an allowed routing domain'}
-      if((T(P $u ProxyAddresses)) -and -not (ProxyContains (P $u ProxyAddresses) $normTarget)){AddIssue $issues 22 $guid 'TargetAddress absent from ProxyAddresses' '3.Medium' 'Add TargetAddress as a proxy entry in ProxyAddresses'}
-      if($dupTargetSet.Contains((K $normTarget))){AddIssue $issues 23 $guid 'Duplicate TargetAddress' '1.Critical' 'Resolve duplicate TargetAddress routing'}
+    $baseScope=(-not $dontMigrate) -and $isMailbox -and $hasSmtp
+    if($baseScope){
+      if(-not $inM365){AddIssue $issues 1 $guid 'User not in Azure Entra' '1.Critical' 'Sync user account with Azure Entra'}
+      if($itemCount -gt 999999){AddIssue $issues 2 $guid 'Item count > 999,999' '2.High' 'Reduce mailbox item count'}
+      if($proxyText -notmatch '@orpea\.mail\.onmicrosoft\.com'){AddIssue $issues 3 $guid 'Missing proxy address' '1.Critical' 'Add required proxy address'}
+      if($size -gt 80 -and $recipientType -eq 'UserMailbox'){AddIssue $issues 4 $guid 'Mailbox size > 80 GB' '2.High' 'Archive or clean mailbox'}
+      if(($licenseGroup -in @('Microsoft 365 F3','Microsoft 365 F1')) -and $sizeMb -ge 2000){AddIssue $issues 6 $guid 'F3/F1 user with mailbox >= 2 GB' '2.High' 'Review F3/F1 license or reduce mailbox size'}
+      if(!$enabled -and $userMailboxTypes.Contains($recipientType)){AddIssue $issues 7 $guid 'Account disabled' '4.Low' 'Review account status'}
+      if((!$hasAllowedLicense) -and $enabled -and $userMailboxTypes.Contains($recipientType)){AddIssue $issues 8 $guid 'No M365 license assigned (enabled account)' '1.Critical' 'Assign appropriate M365 license to this enabled account'}
+      if($upn -and $dupUpnSet.Contains($upn)){AddIssue $issues 9 $guid 'Duplicate UPN across domains' '1.Critical' 'Resolve UPN conflict before AAD Connect sync'}
+      $exchangePlanValue=ExchangePlanStatus $m365UserId; if($exchangePlanValue -eq 'Not Exchange Plan Enabled' -and $hasAllowedLicense -and $userMailboxTypes.Contains($recipientType)){AddIssue $issues 12 $guid 'No Exchange Plan enabled' '1.Critical' 'Enable Exchange Plan only for user migrated'}
+      if($arc -gt 80 -and $recipientType -eq 'UserMailbox'){AddIssue $issues 13 $guid 'Archive size > 80 GB' '2.High' 'Review archive mailbox size'}
+      if($pc -gt 10){AddIssue $issues 14 $guid 'Too many mailbox permissions' '3.Medium' 'Review mailbox delegation and permissions'}
+      if(!$ll -or ((Get-Date).Date-$ll.Date).Days -gt 180){AddIssue $issues 15 $guid 'Mailbox inactive > 6 months' '4.Low' 'Review mailbox usage and consider decommissioning'}
+      foreach($a in @((SplitAddr $proxyText)+@($primary))){ if($dupSmtpSet.Contains($a)){AddIssue $issues 16 $guid 'Conflicting proxy address' '1.Critical' 'Resolve proxy address conflicts'; break} }
+      $sharedAccessCount=[int][math]::Max((Dbl(P $u SharedAccessCount)), $pc); if($sharedAccessCount -gt 5){AddIssue $issues 17 $guid 'Excessive shared access' '3.Medium' 'Review shared access model'}
+      if(!(T(P $u DisplayName))){AddIssue $issues 18 $guid 'Missing DisplayName' '4.Low' 'Complete user metadata'}
+      $normTarget=(T $target) -replace '(?i)^smtp:',''; if($remoteMailboxTypes.Contains($recipientType) -and !$normTarget){AddIssue $issues 19 $guid 'Missing TargetAddress for mailbox' '1.Critical' 'Set TargetAddress for mail-enabled user'}
+      if($remoteMailboxTypes.Contains($recipientType) -and $normTarget){$targetDomain=DomainPart $normTarget; if($normTarget -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$'){AddIssue $issues 20 $guid 'Invalid TargetAddress format' '2.High' 'Fix TargetAddress format to a valid SMTP address'}; if($targetDomain -and !$allowedTargetDomains.Contains($targetDomain)){AddIssue $issues 21 $guid 'Disallowed TargetAddress domain' '1.Critical' 'Update TargetAddress to an allowed routing domain'}; if(!$proxyText -or -not (ProxyContains $proxyText $normTarget)){AddIssue $issues 22 $guid 'TargetAddress absent from ProxyAddresses' '3.Medium' 'Add TargetAddress as a proxy entry in ProxyAddresses'}; if($dupTargetSet.Contains((K $normTarget))){AddIssue $issues 23 $guid 'Duplicate TargetAddress' '1.Critical' 'Resolve duplicate TargetAddress routing'}}
+      $primaryProxyCount=PrimaryProxyCount $proxyText; if($targetRecipientTypes.Contains($recipientType) -and $primaryProxyCount -eq 0){AddIssue $issues 24 $guid 'Missing primary SMTP in proxyAddresses' '1.Critical' 'Add a primary SMTP entry (SMTP:) in proxyAddresses'}
+      if($targetRecipientTypes.Contains($recipientType) -and $primaryProxyCount -gt 1){AddIssue $issues 25 $guid 'Multiple primary SMTP in proxyAddresses' '1.Critical' 'Keep only one primary SMTP (SMTP:) in proxyAddresses'}
+      if($targetRecipientTypes.Contains($recipientType) -and $primary -and $proxyText -and -not (ProxyContains $proxyText $primary)){AddIssue $issues 26 $guid 'PrimarySMTP not present in proxyAddresses' '2.High' 'Ensure proxyAddresses contains the PrimarySMTPaddress'}
+      if($sharedMailboxTypes.Contains($recipientType) -and $inM365 -and $hasAllowedLicense -and $size -lt 50){AddIssue $issues 27 $guid 'Shared mailbox with M365 license (< 50 GB)' '2.High' 'Remove M365 license: shared mailboxes under 50 GB do not require a paid license in EXO'}
+      if($roomMailboxTypes.Contains($recipientType) -and $inM365 -and $hasAllowedLicense){AddIssue $issues 28 $guid 'Room mailbox with M365 license' '3.Medium' 'Convert room mailbox to unlicensed or review license assignment'}
+      if(!$targetRecipientTypes.Contains($recipientType)){AddIssue $issues 29 $guid 'Unexpected recipient type in scope' '3.Medium' 'Review mailbox type and migration scope for this recipient'}
+      $primaryDomain=DomainPart $primary; if($primaryDomain -and $domSet.Count -gt 0 -and !$domSet.Contains($primaryDomain)){AddIssue $issues 30 $guid 'Primary SMTP domain not in EXO accepted domains' '1.Critical' 'Fix Primary SMTP domain or add the domain to EXO Accepted Domains'}
+      if($primaryDomain -like '*.onmicrosoft.com' -or $primaryDomain -eq 'onmicrosoft.com'){AddIssue $issues 31 $guid 'Primary SMTP uses onmicrosoft.com domain' '3.Medium' 'Move Primary SMTP from onmicrosoft.com to corporate accepted domain'}
+      if($primaryDomain -and $domType.ContainsKey($primaryDomain) -and $domType[$primaryDomain] -eq 'InternalRelay' -and $userMailboxTypes.Contains($recipientType)){AddIssue $issues 32 $guid 'Primary SMTP domain type is InternalRelay' '4.Low' 'Review why an InternalRelay domain is used as Primary SMTP (routing/coexistence)'}
+      if($primaryDomain -and $domSet.Count -gt 0 -and !$domType.ContainsKey($primaryDomain)){AddIssue $issues 33 $guid 'Primary SMTP domain type is blank in EXO (not found)' '4.Low' 'Validate domain inventory refresh and EXO accepted domains data source'}
+      if($primaryDomain -and $domAddressBook.ContainsKey($primaryDomain) -and -not $domAddressBook[$primaryDomain]){AddIssue $issues 34 $guid 'Domain allowed in EXO but AddressBookEnabled is False' '4.Low' 'Enable AddressBookEnabled on the accepted domain in EXO or move Primary SMTP to an AddressBook-enabled domain'}
+      $upnDomain=DomainPart $upn; if($upnDomain -and $verifiedSet.Count -gt 0 -and !$verifiedSet.Contains($upnDomain)){AddIssue $issues 35 $guid 'UPN domain not verified in Azure AD' '1.Critical' 'Add and verify UPN domain in Azure AD or update user UPN'}
+      if($upnDomain -and $verifiedSet.Contains($upnDomain) -and $domSet.Count -gt 0 -and !$domSet.Contains($upnDomain)){AddIssue $issues 36 $guid 'UPN domain verified but not EXO accepted' '1.Critical' 'Review UPN domain usage; consider aligning with an EXO accepted domain'}
+      if($upnDomain -and $primaryDomain -and $upnDomain -ne $primaryDomain){AddIssue $issues 37 $guid 'UPN domain not aligned with Primary SMTP domain' '4.Low' 'Align UPN domain with Primary SMTP domain'}
+      if($lm -and $em -and $recipientType -eq 'UserMailbox'){AddIssue $issues 38 $guid 'Split-brain mailbox (Local UserMailbox + EXO mailbox)' '1.Critical' 'Remediate split-brain: ensure a single authoritative mailbox'}
+      if($upn -and (ContainsInvalidUpnChar $upn)){AddIssue $issues 39 $guid 'UPN contains invalid Azure AD characters' '1.Critical' 'Remove or replace invalid characters in UPN before AAD Connect sync'}
+      if($primary -and (ContainsInvalidSmtpLocalChar $primary)){AddIssue $issues 40 $guid 'Primary SMTP contains invalid characters' '1.Critical' 'Remove or replace invalid characters in Primary SMTP address'}
+      $sam=T(P $u SamAccountName); if($sam -and $dupSamSet.Contains($sam)){AddIssue $issues 41 $guid 'Duplicate SamAccountName across domains' '4.Low' 'Resolve SAM conflict to avoid GPO and profile collisions'}
+      if((@($userLicenses) -join ';') -match 'Microsoft 365 E3|ENTERPRISEPACK|SPE_E3' -and (@($userLicenses) -join ';') -match 'Microsoft 365 F1|Microsoft 365 F3|SPE_F1|SPE_F3|M365_F1|M365_F3|O365_F1|O365_F3'){AddIssue $issues 47 $guid 'Conflicting M365 licenses (E3 + F3/F1)' '2.High' 'Review license assignment and keep only one SKU per user'}
+      $displayName=K(P $u DisplayName); if($displayName -and $dupDisplaySet.Contains($displayName)){AddIssue $issues 48 $guid 'Duplicate DisplayName across accounts' '4.Low' 'Disambiguate DisplayNames for GAL clarity and migration tooling'}
+      if($userMailboxTypes.Contains($recipientType) -and !$ll -and $size -eq 0){AddIssue $issues 50 $guid 'Ghost mailbox (no logon, zero size)' '4.Low' 'Verify mailbox existence and consider decommissioning'}
+      $proxyLower=$proxyText.ToLowerInvariant(); $addrLower=$primary.ToLowerInvariant().Trim(); if($targetRecipientTypes.Contains($recipientType) -and $proxyLower -and $addrLower -and ([regex]::Matches($proxyLower,[regex]::Escape($addrLower)).Count -gt 1)){AddIssue $issues 51 $guid 'Duplicate address in ProxyAddresses (case conflict)' '2.High' 'Remove duplicate proxy entries keeping only one instance per address'}
+      if($sharedMailboxTypes.Contains($recipientType)){ $noSendAs=((SplitAddr(P $lm SendAs)).Count+(SplitAddr(P $pm SendAs)).Count) -eq 0; $noFullAccess=((SplitAddr(P $lm FullAccess)).Count+(SplitAddr(P $pm FullAccess)).Count) -eq 0; if($noSendAs -and $noFullAccess){AddIssue $issues 53 $guid 'Shared mailbox with no active delegation' '3.Medium' 'Assign at least one FullAccess or SendAs delegate or decommission'}}
+      $accountType=T(P $u AccountType); if(!$enabled -and $hasAllowedLicense -and $accountType -ne 'Shared Mailbox' -and $userMailboxTypes.Contains($recipientType)){AddIssue $issues 55 $guid 'Disabled account with active M365 license' '2.High' 'Review license assignment: disabled accounts should not retain paid M365 licenses'}
+      if($sharedMailboxTypes.Contains($recipientType) -and (!$hasAllowedLicense) -and $size -ge 50){AddIssue $issues 57 $guid 'Large shared mailbox (>= 50 GB) with no M365 license' '2.High' 'Assign an appropriate M365 license to enable archive and avoid EXO quota issues post-migration'}
+      if($accountType -and $nonPersonalAccountTypes.Contains($accountType) -and $hasAllowedLicense){AddIssue $issues 58 $guid 'Non-personal account type with M365 license (E3/F3/F1)' '2.High' 'Review license assignment: service/admin/generic/system accounts should not hold E3 or F3 licenses'}
     }
-    $proxyText=T(P $u ProxyAddresses)
-    $primaryProxyCount=PrimaryProxyCount $proxyText
-    if($hasMbx -and $proxyText -and $primaryProxyCount -eq 0){AddIssue $issues 24 $guid 'Missing primary SMTP in proxyAddresses' '1.Critical' 'Add a primary SMTP entry (SMTP:) in proxyAddresses'}
-    if($primaryProxyCount -gt 1){AddIssue $issues 25 $guid 'Multiple primary SMTP in proxyAddresses' '1.Critical' 'Keep only one primary SMTP (SMTP:) in proxyAddresses'}
-    if($primary -and $proxyText -and -not (ProxyContains $proxyText $primary)){AddIssue $issues 26 $guid 'PrimarySMTP not present in proxyAddresses' '2.High' 'Ensure proxyAddresses contains the PrimarySMTPaddress'}
-    if((IsSharedMailbox $lm $rm $em) -and $size -lt 50 -and $hasLic){AddIssue $issues 27 $guid 'Shared mailbox with M365 license (< 50 GB)' '2.High' 'Remove M365 license: shared mailboxes under 50 GB do not require a paid license in EXO'}
-    if((IsRoomMailbox $lm $rm $em) -and $hasLic){AddIssue $issues 28 $guid 'Room mailbox with M365 license' '3.Medium' 'Convert room mailbox to unlicensed or review license assignment'}
-    if($hasMbx -and -not (IsUserMailbox $lm $rm $em) -and -not (IsSharedMailbox $lm $rm $em) -and -not (IsRoomMailbox $lm $rm $em)){AddIssue $issues 29 $guid 'Unexpected recipient type in scope' '3.Medium' 'Review mailbox type and migration scope for this recipient'}
-    $primaryDomain=DomainPart $primary
-    if($primaryDomain -and $domSet.Count -gt 0 -and !$domSet.Contains($primaryDomain)){AddIssue $issues 30 $guid 'Primary SMTP domain not in EXO accepted domains' '1.Critical' 'Fix Primary SMTP domain or add the domain to EXO Accepted Domains'}
-    if($primaryDomain -like '*.onmicrosoft.com' -or $primaryDomain -eq 'onmicrosoft.com'){AddIssue $issues 31 $guid 'Primary SMTP uses onmicrosoft.com domain' '3.Medium' 'Move Primary SMTP from onmicrosoft.com to corporate accepted domain'}
-    if($primaryDomain -and $domType.ContainsKey($primaryDomain) -and $domType[$primaryDomain] -eq 'InternalRelay'){AddIssue $issues 32 $guid 'Primary SMTP domain type is InternalRelay' '4.Low' 'Review why an InternalRelay domain is used as Primary SMTP (routing/coexistence)'}
-    if($primaryDomain -and $domSet.Count -gt 0 -and !$domType.ContainsKey($primaryDomain)){AddIssue $issues 33 $guid 'Primary SMTP domain type is blank in EXO (not found)' '4.Low' 'Validate domain inventory refresh and EXO accepted domains data source'}
-    if($primaryDomain -and $domAddressBook.ContainsKey($primaryDomain) -and -not $domAddressBook[$primaryDomain]){AddIssue $issues 34 $guid 'Domain allowed in EXO but AddressBookEnabled is False' '4.Low' 'Enable AddressBookEnabled on the accepted domain in EXO or move Primary SMTP to an AddressBook-enabled domain'}
-    $upnDomain=DomainPart $upn
-    if($upnDomain -and $verifiedSet.Count -gt 0 -and !$verifiedSet.Contains($upnDomain)){AddIssue $issues 35 $guid 'UPN domain not verified in Azure AD' '1.Critical' 'Add and verify UPN domain in Azure AD or update user UPN'}
-    if($upnDomain -and $verifiedSet.Contains($upnDomain) -and $domSet.Count -gt 0 -and !$domSet.Contains($upnDomain)){AddIssue $issues 36 $guid 'UPN domain verified but not EXO accepted' '1.Critical' 'Review UPN domain usage; consider aligning with an EXO accepted domain'}
-    if($upnDomain -and $primaryDomain -and $upnDomain -ne $primaryDomain){AddIssue $issues 37 $guid 'UPN domain not aligned with Primary SMTP domain' '4.Low' 'Align UPN domain with Primary SMTP domain'}
-    if($lm -and $em -and (IsUserMailbox $lm $null $em)){AddIssue $issues 38 $guid 'Split-brain mailbox (Local UserMailbox + EXO mailbox)' '1.Critical' 'Remediate split-brain: ensure a single authoritative mailbox'}
-    if($upn -and (ContainsInvalidUpnChar $upn)){AddIssue $issues 39 $guid 'UPN contains invalid Azure AD characters' '1.Critical' 'Remove or replace invalid characters in UPN before AAD Connect sync'}
-    if($primary -and (ContainsInvalidSmtpLocalChar $primary)){AddIssue $issues 40 $guid 'Primary SMTP contains invalid characters' '1.Critical' 'Remove or replace invalid characters in Primary SMTP address'}
-    if($sam -and $dupSamSet.Contains($sam)){AddIssue $issues 41 $guid 'Duplicate SamAccountName across domains' '4.Low' 'Resolve SAM conflict to avoid GPO and profile collisions'}
-    if((HasSkuLike $userLicenses 'E3|ENTERPRISEPACK|SPE_E3') -and (HasSkuLike $userLicenses 'F1|F3|SPE_F1|SPE_F3|M365_F1|M365_F3')){AddIssue $issues 47 $guid 'Conflicting M365 licenses (E3 + F3/F1)' '2.High' 'Review license assignment and keep only one SKU per user'}
-    $displayName=K(P $u DisplayName); if($displayName -and $dupDisplaySet.Contains($displayName)){AddIssue $issues 48 $guid 'Duplicate DisplayName across accounts' '4.Low' 'Disambiguate DisplayNames for GAL clarity and migration tooling'}
-    if($hasMbx -and (!$ll) -and $size -eq 0 -and $itemCount -eq 0){AddIssue $issues 50 $guid 'Ghost mailbox (no logon, zero size)' '4.Low' 'Verify mailbox existence and consider decommissioning'}
-    $seenProxy=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($pa in SplitAddr $proxyText){if($seenProxy.Contains($pa)){AddIssue $issues 51 $guid 'Duplicate address in ProxyAddresses (case conflict)' '2.High' 'Remove duplicate proxy entries keeping only one instance per address'; break}; [void]$seenProxy.Add($pa)}
-    if((IsSharedMailbox $lm $rm $em) -and $pc -eq 0){AddIssue $issues 53 $guid 'Shared mailbox with no active delegation' '3.Medium' 'Assign at least one FullAccess or SendAs delegate or decommission'}
-    if(!$enabled -and $hasLic){AddIssue $issues 55 $guid 'Disabled account with active M365 license' '2.High' 'Review license assignment: disabled accounts should not keep paid licenses unless justified.'}
-    if($hasLic -and !$hasMbx){AddIssue $issues 56 $guid 'M365 license assigned but no mailbox' '3.Medium' 'Review license assignment: user has M365 license but no mailbox is provisioned.'}
-    $rtype=((T(P $lm RecipientType,RecipientTypeDetails))+' '+(T(P $rm RecipientTypeDetails,RecipientType))+' '+(T(P $em RecipientTypeDetails,MailboxType))).ToLowerInvariant(); if($rtype -match 'shared' -and $size -ge 50 -and !$hasLic){AddIssue $issues 57 $guid 'Large shared mailbox (>= 50 GB) with no M365 license' '2.High' 'Review shared mailbox license/quota/archive requirements.'}
-    $sam=T(P $u SamAccountName); if($hasLic -and ($sam -match '^(adm|admin|svc|service|sa_|sys|test)' -or $upn -match 'admin|service|svc|test')){AddIssue $issues 58 $guid 'Non-personal account with M365 license' '2.High' 'Review license assignment on service/admin/generic accounts.'}
-    foreach($d in @(($upn -split '@')[-1],($primary -split '@')[-1],(($target -replace '^smtp:','') -split '@')[-1])){ if($d -and $domSet.Count -gt 0 -and !$domSet.Contains($d)){AddIssue $issues 60 $guid 'Mail domain not found in EXO accepted domains' '2.High' 'Validate UPN, primary SMTP, targetAddress, and accepted domain configuration.'; break} }
+    if((-not $dontMigrate) -and $hasAllowedLicense -and (-not $isMailbox) -and $upn){AddIssue $issues 56 $guid 'M365 license assigned but no mailbox' '3.Medium' 'Review license assignment: user has M365 license but no mailbox is provisioned.'}
   }
-  foreach($e in $exo){$u=T(P $e UserPrincipalName); $s=T(P $e PrimarySmtpAddress,PrimarySMTPaddress); if($localUpn.ContainsKey((K $u)) -or $remoteUpn.ContainsKey((K $u)) -or $localSmtp.ContainsKey((K $s)) -or $remoteSmtp.ContainsKey((K $s))){continue}; AddIssue $issues 54 (T(P $e OnPremisesImmutableId,ImmutableId,ExternalDirectoryObjectId)) 'EXO-only mailbox with no on-premises mailbox counterpart' '1.Critical' 'Verify whether migration is complete or RemoteMailbox/on-premises representation is missing.'}
+  foreach($e in $exo){
+    $u=T(P $e UserPrincipalName); $s=T(P $e PrimarySmtpAddress,PrimarySMTPaddress); $imm=K(P $e OnPremisesImmutableId,ImmutableId)
+    if($localUpn.ContainsKey((K $u)) -or $remoteUpn.ContainsKey((K $u)) -or $localSmtp.ContainsKey((K $s)) -or $remoteSmtp.ContainsKey((K $s))){continue}
+    $adRow=if($imm -and $adImmutableGuid.ContainsKey($imm)){$adImmutableGuid[$imm]}elseif($adUpn.ContainsKey((K $u))){T(P $adUpn[(K $u)] ObjectGUID)}elseif($adSmtp.ContainsKey((K $s))){T(P $adSmtp[(K $s)] ObjectGUID)}else{''}
+    if($adRow){AddIssue $issues 54 $adRow 'EXO-only mailbox with AD account (no local or remote mailbox on-premises)' '1.Critical' 'AD account exists but has no on-premises mailbox counterpart (UserMailbox or RemoteMailbox) - verify if migration is complete or if RemoteMailbox conversion was skipped'}
+  }
   $files=ExportIssues -rows @($issues); $files += PublishWeeklyHistory -files $files; Log "Generated Exchange hybrid identity issues: $($issues.Count) row(s)"
   if($global:EnableSharePointUpload){foreach($f in $files){try{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $f|Out-Null; Log "SharePoint upload completed: $f"}catch{Warn "SharePoint upload failed for $f : $($_.Exception.Message)"}}}
   Log "$ScriptName completed successfully."
@@ -232,8 +277,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAa1BvQ4P1lIsnD
-# uzkysH2sdIco7w+y0iJd6SCtjlSfA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5cjNwLYWAFEOx
+# r+xHRDvlgcLSQWMFsaIfRMoQwBiXX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -366,31 +411,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG3I49AJ15h/Lv8tlsFiaRlHBf/8KcWxHJcwqYMyzC8xMA0GCSqG
-# SIb3DQEBAQUABIIBgKhbjh5lc7cINyV5AnLNQbd068PtR94I57Tgpauy1VUjhZR4
-# 0nPtWmFE5dX9YJXq4QJZMh9JPuIalUJP37ZsZHC7r5wbiOPWD/aIfliDKQBQfIEV
-# Vw+Yh/CGBbXlnGAr0NB5BSPz08cA4qFs+govd7M+YQA/WWcxpOBzANb/dEgMiL8a
-# gtXd5Z3OLI1xoh+TTafEyG7f8mMT6pzRVaGDJO4B29wULTagLeCBr49y3tzGBQ4i
-# 2Sj3tE4W7Bn2V+pFLMXhJn3hmyfhq8OWhjeTSJfOKLNjwSK9ZdcglrXAchzMF9Et
-# 7EhVO2RKSXRmVRUgGznek8v0SUAKYRMBYBsNm572imBfD2AbpLLTggyiE5A4NN6H
-# P+un5TKV1i9GEKqiwCuW0VEc38wrNoQSwkUj3Pu+CYR0Fhzr/CCkr4ycnbStOpsD
-# dl4espf6AMe9ejwhc4YevhHW4OQ/WN3iDwgtoxKAanXpO90pNoT3+rmL/LF5Jwzx
-# ZswP4W9UOL/KPtNdd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEZcxRuD7XZbSgnSAoUABiB8X1iS/tse/sZuvLw1oMXEMA0GCSqG
+# SIb3DQEBAQUABIIBgIJNsvAUxsmDt0Rug9mKNd3IMsqk0Q0uTPlLwOxxrACQLWHl
+# jBDipOuTpdqOJ1IPTqZvNjFTa2wLdre/K6wOhoIXTjeDhzVA/ZvZV6qU0G1vMp4X
+# q9UTUHleUWFhwGBF7TunfVEqO22pj9DAFxv2zkutm2OUyLRvL3TonsF2EvHtUuaJ
+# Gj3eUZ4NRc1zb0O944T/JsNb4tticSQA1tT7DE+JaRf4OJA4fat07LLqWvtBLMFG
+# 49U6PFK9W66YFyRvg/0O8dKp2rVV8EbC/5f4w0gxWZaXcQH5y7FayhW2U05ZZ+E7
+# eOWgWP+gAPHM7v25hntp3I/CKanG6B1/siK/VPwfNUTE9M4HebK7/Ag0medeZUfi
+# 3YOF1uItVjlMQAgpPNH5keKRJAvFy9QOdtZngvbsFo5JR+bj97lawCXVgX+Q4rxq
+# HNyeGv4w2u2eojpL8lWNGe7iSMHttdnztS/soJP4eNGewoB07jHOLvhdUgwreyCe
+# Qc0Np1UrFDaqW3AQaqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNjQw
-# MTRaMC8GCSqGSIb3DQEJBDEiBCD0MMOrsDEz+virKPn62a5SA+GCFiDYCT8D/zFX
-# mRROGjANBgkqhkiG9w0BAQEFAASCAgC+qmXelfu00qPa7zdOp/drHhOKOsi0Ilze
-# o+8ENQbsM046cOz/+UIvCz3ObBjn6AJf48qQYHW6m5+6YBaqwPBGJ3OvGR7Npniy
-# flJfOdJWu8ubhVNcMAxpVJxJFDrSiIJfUMk/SWrcpxImqcgprVSRozl7nPWeP7bp
-# 3u1HJatRprUllH0wJAzdpc9StXghV8PusZ4htblpiU9GVzIXzu+anOEvBIvF+4pJ
-# pf1pLeCeaETJg0QuH/2XyO4cVja2hDmten1XotiGa9fr8tKIHgCNVtc8nWrjuMZp
-# QpcOAZz5HEsfjEh7s1jqnql3GtpcszBRypKT2dKGffp719EmcmqtVbMuUvSEoIGY
-# H7cvR8CjTTjBN1B+ucMiGbbJzg50kXbRbm0HXV9xbqdFrg/2VCrdqtzekb7bEaLj
-# k/eqzsJ1d262EjiQl5fEh0T2QWfacV04NXHTw6VaREkMwvm2D+qr1T93+dJNUosO
-# 8FfvuIMnhl7p0F+EoudwD/7RYm69e3pj+mQpOkm1bfOg8Fi3EbV59r0qkIwUZZKk
-# 3uxmcVrzn05FBMRv+yBI4oGwTg+Z1D9MvQhBQ7yqYEOkQ7+iCDTJ1dLVKzqYeikx
-# Z/ZEXT5kc+3XX0jg1/4Sm/kzvsPgoYuSpUL3eRYrjh2eR4RGKpjYZymV5zVIay8e
-# /KEQ2m0OdA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDAy
+# MjFaMC8GCSqGSIb3DQEJBDEiBCDvXVKDYzpBd8tOODjJSWeozGePHgTeRPRtLd5E
+# q4eYjzANBgkqhkiG9w0BAQEFAASCAgBJ/tyYCnLZPYU4cHNyW2mbGpBTqoH3wn4i
+# 1Dt4zsaN4T59gA+Ks49U8PCKRtU8uURfb6PXbOBj1G1khsbTpyxKj8Rcli8er+MH
+# ifr+PMZQhSm5l82ujTtPndHcbT0ZP/z84fVPQuBWCqZ2+VDZ3NmG0h0LUYwg37FZ
+# 6u3tLajJLtiFb40RP49GZf6LQ358mP5ubap64RUBrii7IdmOkarjKBN1KHm4lrMk
+# hu5d/Cqbgo9oszkNcw42lF+V8cN8zPJ1DHM0ZkIFWyrPb/LS5GnPQy1SpHWfWwxa
+# S7XWaLcToF0iMBatiTSIypctqsucaORiNJAiZc1nsmAxUNSjHiNLIcJaM0TxHGum
+# MxZWtaK5onKBwJ/kWBegrQ+d/ks23igoeMw3hV4KHsDRIy19LUacPz9N1UaZfsvK
+# RlvNFiLScy6aWkl7FdZL3Qea2a1EvZyUe8Vf3iTETsisrF6dZx5rF5kc4PVcDLfC
+# +ALU2OCAmd4Rgs8BaHM+CnTvyg1+hyjS5Qi2m0wWMbPtG9n8d4Wj7ugM+04BXQ+g
+# nwArQ8WL2/fEiS3ZK/cEmvGpLy65ejuJ/zQVfBTKI0w3hXRguAfP3pkhnH4mlM/Q
+# 7rXvibiYehYNllV63HeiksH7wMhH3vf8f6JwQFOEjjaGs9VVSaliUM4FkTCRNNta
+# oOh7ijj43g==
 # SIG # End signature block
