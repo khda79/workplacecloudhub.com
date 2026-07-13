@@ -597,14 +597,21 @@ function Write-SmartM365BrandBanner {
         '================================================================================'
     )
 
-    Write-Host $bannerLines[0] -ForegroundColor DarkCyan
-    Write-Host $bannerLines[1] -ForegroundColor Cyan
-    Write-Host $bannerLines[2] -ForegroundColor Yellow
-    Write-Host $bannerLines[3] -ForegroundColor Yellow
-    Write-Host $bannerLines[4] -ForegroundColor DarkCyan
+    $bannerAlreadyShown = Get-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if (-not [bool]$bannerAlreadyShown) {
+        Set-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -Value $true
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[0] -ForegroundColor DarkCyan
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[1] -ForegroundColor Cyan
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[2] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[3] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[4] -ForegroundColor DarkCyan
+    }
 
-    if ($global:LogTextFile) {
-        Add-Content -Path $global:LogTextFile -Value $bannerLines
+    $logTextFile = [string](Get-Variable -Name LogTextFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    $loggedPath = [string](Get-Variable -Name SmartM365BrandBannerLoggedPath -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    if (-not [string]::IsNullOrWhiteSpace($logTextFile) -and $loggedPath -ne $logTextFile) {
+        Add-Content -Path $logTextFile -Value $bannerLines
+        Set-Variable -Name SmartM365BrandBannerLoggedPath -Scope Global -Value $logTextFile
     }
 }
 function Write-SmartM365ExecutionContext {
@@ -4269,8 +4276,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqVFhbOtQ0q22H
-# gMOu7l+Dxbhxh9XhK6/tVvPZWvHRtKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkeg2NwFZ8Ddlr
+# M/hcq14CbvbcAwTLWN5dOUNVsGhkq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4403,31 +4410,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGJCeV0sQVmvbIAAMTVmmMgYKeguX5aGVEIFlnOE0ZB5MA0GCSqG
-# SIb3DQEBAQUABIIBgCO9e6a7vUJ08aJqTvnVSyVG45Cu8cIKwDYoaUNvghdvmTPS
-# rd/N1deUT2pns8JHd9jeKfGccULhPct5/azfAL/t/QL1jdhnlvc6qG3Gq9tPdAYm
-# XwWLZ7ZYcj58gBK0J4kmJ72H9wirSuBP2hi7v40kvkM+Sa90CrVKYkZS40yGmK5o
-# qKniGbyACmYhsuJxzUWxFJ0DO0kbjKvp6lUQGQKgIfPLRorFAiWoHxJ4YefmlkL5
-# OW/3ilH9QEm7lnUSwGBeeuUa7qR1KRblegKY5PBf4VDvGOcFwTV5ZamTQrGCzeKd
-# xSlVdEmeLPAULWMHMvsfcxgUqHLZo+kWxA+XPd+bm3adNF2FBwcxw3J+LlwoSC+U
-# LBfFmh5q/cglfsWSzh0ctzHQcTaTOeGomYB+87T6J2ifwtiKdAgox2W+nHdUhSdR
-# kXkg8+boeKlDRzL4jZ4eB4DKDkiTqoT79sd2qs+4I84xEfJRnQ7DLU8MLwVFG8Lu
-# ymw32zmLO/Ws1oOmb6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFy6QgxnKgIWbP3lV9IYrfgKMAYaVfy/7AUyivtLT+VnMA0GCSqG
+# SIb3DQEBAQUABIIBgKcdQPD+oo8ePFvxA/GEJswt6wHJ6h2IwpWP0gcFKu4SQqKT
+# yetO6YG4lQjpBIk7FWjh6ukDER6dk8PUK5r/A+wZErWARZp6I1vKsw6TRlxRKIxG
+# HcEFd+0pjJ2xQcrEifHDBp+5xFct7SUzxaBNg0eZ6xPtWSiqouXiuH6Y406FsY7g
+# pVSLHdHbDHUilwA4C1G1HkCjmnpfigm5Wep9jywe5dL0RimCXrvnBnnmFO7I9SI1
+# /dUuTK0qRJE6kMvmQQYWqTLM2dnUElSOa7RijCbCKluF2XzN592SR0sXktheEFok
+# YISauosV7SGErN8bsd69tF5c8MCFTnaBDq1qx5jxuTQIQPR6RtWXJK62wjtKy6r3
+# jsXxwkuYycguaXVVHZ95jVAMvHsd+Lmytfylh8qJtM36cHDnhKbrbbmdfSNRPChJ
+# ekkLCj1OjuduJQj74TXTLS4n5oD6G8GJ+9yy8CNtmvU2+7TuI3Wyr6vvMgFyGEdm
+# Gyu3kf6fLUEEZtBEdKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjAz
-# MTlaMC8GCSqGSIb3DQEJBDEiBCCg5f43DPbH7nJtwR2DwcIPiuxixlvCVC+2vh5s
-# KK/mBjANBgkqhkiG9w0BAQEFAASCAgBj/6xf5UmNERmr4Zzbhqktz8ntww5JqRUL
-# lQyKvZSZvcTiuZ4p//YJdPiRY6E+9gDsWsnleUduyJLusTOP8fTh2Yra7aL/kTG0
-# wRGSSauqSZLZZcH0/3FsKa3mBF9vxRXcuxVSgg3jGm6D+Op++YviQefrPIGrRsBi
-# H+OqalRNnYNJ/zORg4Qf2kQN4tJmzV0bllvGED2kU/GAuT8NgERRS9IiMqBWH4gU
-# 7C/tVeh+t2Jev+0+A6mnpc78QTUCnmYa/QWCWD0yol3+IKIeb7y/SogOiKdu0wHO
-# AbW+Mr8IOhi9hhul3U9FXzyRDwyyDjlT6+dMDqhTWDDr0tAi3isUDepY4HI+3Ubn
-# mlfrmEeV8g5sPnO5xRAlHIqvSkJphcb23wZHnjBtn2lj5vrruslnEeQTpPC6sYPY
-# asODKUIghB4bdNmk4H+wc19o50bg9ryn7xXATylQpW9cTe4dM5g/1Z/5ePvBbKrz
-# PHKUhr7u19y3pUB0CQ8zRymZh8XXtzqxBW32I79+v1YmjkjjSqYjqkahB1yAZavL
-# Avnspvf6tRX0SgP9+wo7MVtx8cgV4TSHy3Exs5YqaPThViMPLEEg1fAGoDPcPBfy
-# 17HuaPCQgMUXJqKcIQx2laEuMjZOrpu5koOQhIEIP1/ezlbNDDIeIn8HVs1cILTy
-# 65kcEiZQbA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMzA2
+# MThaMC8GCSqGSIb3DQEJBDEiBCDrRuUnKlyvhIFxTIMY676PYKPedI4P9IoYZC/c
+# lWW9ZzANBgkqhkiG9w0BAQEFAASCAgA+YhinbpJPuHqPdtpuHVA8tfhnNhEplw8e
+# CDhk37JVWnCiw1JZ0NWNnb5yJ8KrUVtMyztKAhgrZUFrbhM7IG/p32/jPzpfwtxY
+# p9pqoZJx7UcvseDoSnsG0HOM/hm4ETorE5NuyCw6+l8yNZTRU41fJT/8dkAa7gQz
+# JPDWtBOaGhObhpN5YpgU3q7kTBResHkf7N7U6+i7U7uZ8OTqmDjY6qTl2I1RRDLN
+# Lk1aYrr0a7vqsqxjuq/xZvSf9qIhjcoSyyz+l+H8yE1T5vvTIo3+ixKCsS5Tswx7
+# RbHp8jcyNeKWRWq4Lfctn5YYk1l0r2QZbyx7hYX4xGkrZ8+ZKwlxFIu/Vz+DydM9
+# YVtortR8BmvNJhwVS3zF9Jfws8wYFwW1gANkyNuc01iTwjVtBW2jxLTeyZHGM3VM
+# ml4+FVkaTW4IVqYXnFLBh8XMSHHRIa9q+Yrk7Sw1YgImlrUXKdqDbO+W3SPiCDkJ
+# g30zoMkPnGwL4L6q9mgBeWpAu6uet5b7bv+XPiqzoEtnhYZQ37gfnhg7+pwlPgQC
+# Uh7JZY686n2TejU095yTn84C41Zd5f9kXF+10S/76uCKFz32DU8ndrcBa6O9mF4W
+# bdzJ+qaaO31d1Tj3k2AXNFU1SJcjucN6NSfcyigRCwAfNEbvRFFKcb4Wo1wLwzBI
+# bJj4ZT2Xiw==
 # SIG # End signature block

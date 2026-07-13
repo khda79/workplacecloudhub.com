@@ -8,7 +8,7 @@
     SharePointMigration, Devices, Intune Remediation, and future SmartM365 folders.
 
 .VERSION
-1.4
+1.5
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -113,7 +113,10 @@ function Get-HeaderVersion {
     [CmdletBinding()]
     param([string]$Content)
 
-    $match = [regex]::Match($Content, '(?im)^[ \t]*\.VERSION[ \t]*\r?\n[ \t]*(?<Version>[^\r\n]+)')
+    $match = [regex]::Match($Content, '(?im)^[ \t]*\.VERSION(?:[ \t]+(?<InlineVersion>[^\r\n]+)|[ \t]*\r?\n[ \t]*(?<Version>[^\r\n]+))')
+    if ($match.Success -and -not [string]::IsNullOrWhiteSpace($match.Groups['InlineVersion'].Value)) {
+        return $match.Groups['InlineVersion'].Value.Trim()
+    }
     if ($match.Success) { return $match.Groups['Version'].Value.Trim() }
     return ''
 }
@@ -215,6 +218,32 @@ foreach ($scriptFile in $scriptFiles) {
     $usesSharedScriptInitialization = $usesInitializeScriptEnvironment -or $usesCoreInitializeScriptEnvironment -or $usesCoreContextInitialization
     $usesExecutionSummary = $content -match '\bComplete-SmartM365ExecutionContext\b'
     $usesSmartM365Logging = $content -match '\bWriteLog\b|\bWriteLogSmartM365\b|\bStart-Transcript\b|\$global:LogTextFile'
+
+    $normalizedRelativePath = $relativePath.Replace('/', '\').ToLowerInvariant()
+    $isSmartInventoryScript = $normalizedRelativePath.StartsWith('smartm365\smartinventory\')
+    $startupBannerExclusions = @(
+        'smartm365\smartinventory\activedirectoryinventory\smartm365-activedirectory-enrichedcolumns.ps1',
+        'smartm365\smartinventory\activedirectoryinventory\smartm365-activedirectory-enrichment.ps1',
+        'smartm365\smartinventory\activedirectoryinventory\smartm365-activedirectory-usersenrichment.ps1',
+        'smartm365\smartinventory\m365inventory\intuneinventory\devices\smartm365-detect-devicesysteminfo.ps1'
+    )
+    $isStartupBannerExcluded = $normalizedRelativePath -in $startupBannerExclusions
+    if ($isSmartInventoryScript -and -not $isStartupBannerExcluded) {
+        $usesTenantContext = $content -match '\bInitialize-SmartM365TenantContext\b'
+        $usesExplicitStartupBanner = $content -match '\bWrite-SmartM365StartupBanner\b'
+        $allowsEarlyExplicitStartupBanner = $normalizedRelativePath -eq 'smartm365\smartinventory\orchestrator\smartm365-inventory-orchestrator.ps1'
+        $severity = if ($Scope -eq 'Changed' -and $isChanged) { 'ERROR' } else { 'WARNING' }
+
+        if (-not $usesTenantContext -and -not $usesExplicitStartupBanner) {
+            Add-StandardResult -Results $results -Severity $severity -Rule 'MissingStartupBrandBanner' -Path $relativePath -Message 'Human-facing SmartInventory entry scripts must initialize the tenant context or call Write-SmartM365StartupBanner explicitly.'
+        }
+        if ($usesTenantContext -and $usesExplicitStartupBanner -and -not $allowsEarlyExplicitStartupBanner) {
+            Add-StandardResult -Results $results -Severity $severity -Rule 'RedundantStartupBrandBanner' -Path $relativePath -Message 'Initialize-SmartM365TenantContext already displays the startup banner; remove the explicit banner call.'
+        }
+        if ($content -match 'SmartM365 by WorkplaceCloudHub') {
+            Add-StandardResult -Results $results -Severity $severity -Rule 'HardcodedStartupBrandBanner' -Path $relativePath -Message 'Do not hard-code the WorkplaceCloudHub banner in an entry script; use the shared startup banner.'
+        }
+    }
     if ($usesSmartM365Logging -and -not $usesSharedScriptInitialization) {
         Add-StandardResult -Results $results -Severity 'WARNING' -Rule 'LoggingWithoutSharedInitialization' -Path $relativePath -Message 'Script uses SmartM365-style logging but does not call a shared SmartM365 script initialization helper.'
     }
@@ -284,8 +313,8 @@ if ($errorCount -gt 0 -or ($WarningsAsErrors -and $warningCount -gt 0)) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD80qOhFrb8WjkC
-# adzN/ajhd2VynAKGUOoqZvGwc5eFdqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC8Bqn7LHJL2uBE
+# O9/4kbq+JeVtwPnm18qzKdAzT+3ELqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -418,31 +447,31 @@ if ($errorCount -gt 0 -or ($WarningsAsErrors -and $warningCount -gt 0)) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH+BmYPh8aFqDADS3VvsdZLE7NrMuByL6FuV/LnyB/HTMA0GCSqG
-# SIb3DQEBAQUABIIBgFFm2+EAnvWkrB0B+ENXGi1JOVJcswVa10G5993M9Wpw/4FM
-# OKD3wm38SEyA8pDBeWCSWg6vJH4i/BBlADN+GZgyOnQrMn/RIi/XHofuN2tIXA51
-# CaONKx6ZXkEnpygcnVXryapKLrhxwbfvtSF2lBpW5Y+nL4gRkSmywt2lVbOX926Q
-# HHJVoX131YjGk2+avGYhtzAZA5W0aBmSFdlYbJYMRfAED7SprOcwmMry6lvISt2l
-# P++NTI5JmKhnxN78ZsKuCyV2tGu1eKm+H28tiXILJwXc8AsNO0eB6tYxOYmfzUGQ
-# 78QnY+cS/Yt+NdJ4R6oGdtYE0UpuIRYYITJrecIu0eSHXyc12yUvNJPftwA4Eunq
-# ndUr7UouyhjGPBK1nL0lI0APsxpgy3PiCWsjoNdQzU/kd2VF0PtmzVG9TOYqQkOy
-# fO+wntIHfQp1F/JDK9G3x08ielEWBOXUbRZRLw2gCpQNLX1kQy/zFeIehI4gBzmE
-# OEk27gxMgl88Kq3D8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILGfZp/S0FaXH9MdksR07lcWxtR0h8CeHXU7h1LfSrvMMA0GCSqG
+# SIb3DQEBAQUABIIBgAM8/YLfOJrpPPNk2TbmQmDj1LudYW52dnr8vD1SjKDFZzlx
+# lXPUYNiaR7IpchJ/egwoErgFK934r6jsA1LFQlG32f9TCbBDrUTLVaynItlBrN9v
+# OFTAeQqVmruP/90rc3eBNcCuRuFEskvFeqRyarxPHCzCutCtb4pYMeQI2SNlccCF
+# 90D3gHMOiGP68tVlwzyyAbSbvzxFICaIMjkWLFUmTzqe0HDY+63LRcEaSCBsRd8i
+# OIkeDGJZWQY0RFoyXMkjD9nDWZJfkipDdnov5Y9J+dAQTy8ejZLW2u8Ov+xIf26N
+# qEMp4YZBs01A6Auw/vVVOFkjnXpnT9UZa0RBKJd+UbIk6MtUNQGj/xft1v2idWje
+# dFRyvqHjb/AZkjDg0/GcZXPxwQ06iYkqp8SS+ptmHEJBdtA4RZHQqIRY6ccHc7yW
+# N4e3Js/6CLIc6Po9ZAMxZp3hSZI2vvsH5fR5bTvcsUYLQ1+1nowlzu6jeFnx+hyY
+# rYZpv6s1q+PieXHyI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzhaMC8GCSqGSIb3DQEJBDEiBCB25QUba12iYJLOYsJn5FJyIDBIJDlp9xkFlI5E
-# HG4MLDANBgkqhkiG9w0BAQEFAASCAgAL6K/o+W7+MsdXJigDRd6NusXbbdLyFbtw
-# keT9XDjcLI7xsGAn2XnvSFRJVFUjjL46m+ZFAbp12JM28HsP1Kxnmc0hHHKWkT7H
-# ayBF/XiTV0vOK8u3z43317q7OlF2MBIxctYfXSnVbo6gQUOe9qXqly5Djuha6k+m
-# /Y1sRJZq/myyfXqzs+AyMkzKqzQ097rQE7bc+WFvZ06C/fzg46UygjYyBnAP8ADK
-# bKFcmU9NkeOvBCjaS6pUp9fTce/FTvkF+fY38i11dUB0oIgRMqN/ybK9OBJzgzku
-# 9nN5mLlSJN4GkjB3PihF1W8tUCPaCkN4vvNlL/i13kYUpeE9fIlgOvbXoxFgVjv+
-# GVw2X0VlEck4a+qzlVLAyST/wgMTlDru3YlyNUmkO73bHVZqy1VeW2+KDbY1HynT
-# keUcP7cS8Q1fDJfcrWztLux7Bg7n25Ezj+hbz29ne/XY6aXrqEtNUByJDfK/eM6g
-# KZIlrvhBu2b4UVnBWBthsDyW1HxOmv+Lmq8C5AjWdEcWZmc7OhYFvr6gcTXL5RGf
-# 7547VTZoNU1MupUtcE9wWE6UGve4VgJBOoxrCMYchMVa6NgPzneD8KdTa3fRYGHS
-# sJoc2IYZ3uwQYsIZPAxy7hmNqMRY1RqPlqqBhAHkk0zh9NeC0pNK/3V4TLsTUe3S
-# xdzOsNbpWg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMzA2
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCjAu8avDVK6MW8wpQXzzqR+MCkLJGF8EEVz/fe
+# xKb36DANBgkqhkiG9w0BAQEFAASCAgB+7YezxDxq7u9TcpXKBNstv7oKfykWVgq4
+# MXeRRKz/K4ZEBbAo6i5o+Xu3IMDCWVM89ePQQdJ771gqoH1Uyp64DUNeCiTWZ02t
+# jt8zo+nvEc2z7iu6ssDuyMQFKxHBfGMlmXC5zKccEn3PtLFoQBvlwxfQRVBvdNW9
+# qEy6vmFdBu9wZvCqxlbH9R3AxEOSjdeF+oTqZSMTnGlocUHlG5SO5EZSGJGM25CP
+# rcBgBjRTlMk93TBJtKroWlOhx7oPwYnTiB+zP+abw8fhEeL+nY4VJz5+3DK61ytt
+# 5Q8E0QG2T5fHtqyIl2NjkTiVcPEoqss74QibcdLA1i3Tv/IuHJqNj+IPe+mZDZNZ
+# Vz3b/FqkO7xr94NJPCyDqATPcT5Sju1GrFKbksmLb2Uu2vNAsPuRwoLvzTwB5J6F
+# IS2t0IBpfqgL2a68+lBV/xrpgPEBzs4v4tmW1OD9C0s54W5/5l1IHe4mXZAyqtpO
+# 5FrtvBb7eHGM3ufbGUy+aGxoKOaaz+9c7ifBnl3kz/B4DwQZkaaOAuHB0sa+7Ql6
+# Aq2nvPGQUP9cfmLQoss1e6EIta4cmMPi5IvEgegFhIXBpHoTzJJJaHgrDUPzFXHj
+# j8k1GFZJ2dmT/Sz0oKK4x3RMa2SmDssKuCe8UmPBDHIl9jZAzbHDExy6GU58RVej
+# WLeP+uYpZg==
 # SIG # End signature block
