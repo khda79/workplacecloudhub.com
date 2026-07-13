@@ -3,13 +3,13 @@
 Initial measures to implement in the Power BI model:
 
 ```DAX
-Users = DISTINCTCOUNT(DimUser[CmdbUserId])
+Users = DISTINCTCOUNT(DimUser[TenantUserKey])
 
-Devices = DISTINCTCOUNT(DimDevice[CmdbDeviceId])
+Devices = DISTINCTCOUNT(DimDevice[TenantDeviceKey])
 
 Compliant Devices =
 CALCULATE(
-    DISTINCTCOUNT(FactDeviceCompliance[CmdbDeviceId]),
+    DISTINCTCOUNT(FactDeviceCompliance[TenantDeviceKey]),
     FactDeviceCompliance[ComplianceState] = "Compliant"
 )
 
