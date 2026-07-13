@@ -38,7 +38,7 @@ Features:
 - Tenant-wide orchestrator lifecycle CSV, daily job-runs CSV (atomic writes), orchestrator
   log with daily rotation, one log per job execution, retention cleanup and heartbeat.
 - HTML error email on final job failure (JobMailMode Always/OnError/Never), optional
-  daily HTML summary email, fatal error email if the orchestrator itself crashes.
+  daily or manual HTML execution summary (24 hours and 7 days), fatal error email if the orchestrator itself crashes.
   Mail uses the shared SmartM365.Core mail helper, so the orchestrator supports the same
   Graph/SMTP/Both transport selection, branding and HTML copy behavior as inventory scripts.
 - Optional Authenticode validation before job launch, configurable and usable
@@ -91,8 +91,12 @@ detached and are re-adopted by the next orchestrator instance.
 .PARAMETER StopTimeoutSeconds
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
+.PARAMETER SendExecutionSummary
+Sends an execution summary email with one table for the last 24 hours and one table for
+the last 7 days, then exits without acquiring the resident lock or launching inventory jobs.
+
 .VERSION
-1.3.25
+1.3.26
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -102,9 +106,9 @@ Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds
     inside its own child process.
 
 .NOTES
-    Version : 1.3.25
+    Version : 1.3.26
     Author: https://github.com/khda79/workplacecloudhub.com
-    Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
+    Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
 #>
 
@@ -118,6 +122,7 @@ param(
     [string[]]$Skip = @(),
     [switch]$Stop,
     [int]$StopTimeoutSeconds = 180,
+    [switch]$SendExecutionSummary,
     [int]$MaxConcurrency = 0,
     [int]$MaxLifetimeHours = 0,
     [string]$JobsManifestPath = '',
@@ -126,7 +131,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.25"
+$ScriptVersion = "1.3.26"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -2699,8 +2704,147 @@ function Invoke-LaunchPhase {
 }
 
 # ==========================================================
-# Daily summary email
+# Execution summary email
 # ==========================================================
+function ConvertFrom-OrchestratorJobRunTime {
+    param([AllowNull()][AllowEmptyString()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    try {
+        return [datetime]::ParseExact($Value, 'yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    catch { return $null }
+}
+
+function Get-OrchestratorJobRunsForWindow {
+    param(
+        [Parameter(Mandatory = $true)][datetime]$Now,
+        [Parameter(Mandatory = $true)][ValidateRange(1, 8760)][int]$Hours
+    )
+
+    $windowStart = $Now.AddHours(-$Hours)
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $day = $windowStart.Date
+    while ($day -le $Now.Date) {
+        $csvPath = Join-Path -Path $script:Settings.JobRunsFolderPath -ChildPath ("Orchestrator_JobRuns_{0}.csv" -f $day.ToString('yyyyMMdd'))
+        if (Test-Path -LiteralPath $csvPath) {
+            try {
+                foreach ($row in @(Import-Csv -LiteralPath $csvPath -ErrorAction Stop)) {
+                    $referenceTime = ConvertFrom-OrchestratorJobRunTime -Value ([string]$row.StartTime)
+                    if ($null -eq $referenceTime) {
+                        $referenceTime = ConvertFrom-OrchestratorJobRunTime -Value ([string]$row.ScheduledTime)
+                    }
+                    if ($null -eq $referenceTime -or $referenceTime -lt $windowStart -or $referenceTime -gt $Now) { continue }
+
+                    $rows.Add([pscustomobject]@{
+                        JobName = [string]$row.JobName
+                        ScheduledTime = [string]$row.ScheduledTime
+                        StartTime = [string]$row.StartTime
+                        EndTime = [string]$row.EndTime
+                        DurationSec = [string]$row.DurationSec
+                        ExitCode = [string]$row.ExitCode
+                        Status = [string]$row.Status
+                        RetryCount = [string]$row.RetryCount
+                        LogPath = [string]$row.LogPath
+                        ReferenceTime = $referenceTime
+                    })
+                }
+            }
+            catch {
+                Write-OrchestratorLog -Message ("Failed to read job-runs CSV '{0}': {1}" -f $csvPath, $_.Exception.Message) -Level WARN
+            }
+        }
+        $day = $day.AddDays(1)
+    }
+
+    return @($rows.ToArray() | Sort-Object -Property ReferenceTime -Descending)
+}
+
+function Get-OrchestratorJobRunStatistics {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows)
+
+    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
+    $warningStatuses = @('Retried', 'Skipped')
+    return [pscustomobject]@{
+        Total = @($Rows).Count
+        Success = @($Rows | Where-Object { $_.Status -eq 'Success' }).Count
+        Failure = @($Rows | Where-Object { $_.Status -in $failureStatuses }).Count
+        Warning = @($Rows | Where-Object { $_.Status -in $warningStatuses }).Count
+    }
+}
+
+function New-OrchestratorJobRunsTableHtml {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory = $true)][string]$EmptyText
+    )
+
+    $tableRows = ''
+    foreach ($row in $Rows) {
+        $color = '#1F2937'
+        if ($row.Status -eq 'Success') { $color = '#107C10' }
+        elseif ($row.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')) { $color = '#D13438' }
+        elseif ($row.Status -in @('Skipped', 'Retried')) { $color = '#FF8C00' }
+
+        $tableRows += "<tr>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.JobName)</td>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.ScheduledTime)</td>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.StartTime)</td>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.EndTime)</td>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;text-align:right;'>$(ConvertTo-HtmlText -Text $row.DurationSec)</td>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;text-align:right;'>$(ConvertTo-HtmlText -Text $row.ExitCode)</td>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;color:$color;font-weight:bold;'>$(ConvertTo-HtmlText -Text $row.Status)</td>" +
+            "<td style='padding:3px 10px;border:1px solid #DDDDDD;text-align:right;'>$(ConvertTo-HtmlText -Text $row.RetryCount)</td>" +
+            "</tr>"
+    }
+    if ([string]::IsNullOrEmpty($tableRows)) {
+        $tableRows = "<tr><td colspan='8' style='padding:6px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $EmptyText)</td></tr>"
+    }
+
+    return @"
+<table style='border-collapse:collapse;width:100%;'>
+<tr style='background-color:#E6F4FF;'>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Job</th>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Scheduled</th>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Start</th>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>End</th>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Duration (s)</th>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Exit code</th>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Status</th>
+<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Retries</th>
+</tr>
+$tableRows
+</table>
+"@
+}
+
+function Send-OrchestratorExecutionSummary {
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    $rows24Hours = @(Get-OrchestratorJobRunsForWindow -Now $Now -Hours 24)
+    $rows7Days = @(Get-OrchestratorJobRunsForWindow -Now $Now -Hours 168)
+    $stats24Hours = Get-OrchestratorJobRunStatistics -Rows $rows24Hours
+    $stats7Days = Get-OrchestratorJobRunStatistics -Rows $rows7Days
+    $table24Hours = New-OrchestratorJobRunsTableHtml -Rows $rows24Hours -EmptyText 'No job execution in the last 24 hours.'
+    $table7Days = New-OrchestratorJobRunsTableHtml -Rows $rows7Days -EmptyText 'No job execution in the last 7 days.'
+
+    $body = @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2>SmartInventory orchestrator execution summary</h2>
+<p>Tenant <b>$(ConvertTo-HtmlText -Text $Tenant)</b> on <b>$(ConvertTo-HtmlText -Text $env:COMPUTERNAME)</b>. Generated $(ConvertTo-HtmlText -Text $Now.ToString('yyyy-MM-dd HH:mm:ss zzz')).</p>
+<h3>Last 24 hours</h3>
+<p>$($stats24Hours.Total) execution(s): <span style='color:#107C10;font-weight:bold;'>$($stats24Hours.Success) success</span>, <span style='color:#D13438;font-weight:bold;'>$($stats24Hours.Failure) failure</span>, <span style='color:#FF8C00;font-weight:bold;'>$($stats24Hours.Warning) warning/skipped</span>.</p>
+$table24Hours
+<h3 style='margin-top:24px;'>Last 7 days</h3>
+<p>$($stats7Days.Total) execution(s): <span style='color:#107C10;font-weight:bold;'>$($stats7Days.Success) success</span>, <span style='color:#D13438;font-weight:bold;'>$($stats7Days.Failure) failure</span>, <span style='color:#FF8C00;font-weight:bold;'>$($stats7Days.Warning) warning/skipped</span>.</p>
+$table7Days
+<p style='color:#5F6B7A;'>Sent by $ScriptName v$ScriptVersion.</p>
+</body></html>
+"@
+    $subject = "[SmartM365 Orchestrator][$Tenant] Execution summary: 24h $($stats24Hours.Total) run(s)/$($stats24Hours.Failure) failure(s); 7d $($stats7Days.Total) run(s)/$($stats7Days.Failure) failure(s)"
+    return [bool](Send-OrchestratorMail -Subject $subject -HtmlBody $body)
+}
+
 function Send-DailySummaryIfDue {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
@@ -2715,78 +2859,11 @@ function Send-DailySummaryIfDue {
     }
     if ($Now.TimeOfDay -lt $summaryTime) { return }
 
-    $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($day in @($Now.AddDays(-1), $Now)) {
-        $csvPath = Join-Path -Path $script:Settings.JobRunsFolderPath -ChildPath ("Orchestrator_JobRuns_{0}.csv" -f $day.ToString('yyyyMMdd'))
-        if (-not (Test-Path -LiteralPath $csvPath)) { continue }
-        try {
-            foreach ($row in (Import-Csv -LiteralPath $csvPath)) {
-                $reference = $row.StartTime
-                if ([string]::IsNullOrWhiteSpace($reference)) { $reference = $row.ScheduledTime }
-                $parsed = $null
-                if (-not [string]::IsNullOrWhiteSpace($reference)) {
-                    try { $parsed = [datetime]::ParseExact($reference, 'yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture) } catch { }
-                }
-                if ($null -ne $parsed -and $parsed -ge $Now.AddHours(-24)) { $rows.Add($row) }
-            }
-        }
-        catch {
-            Write-OrchestratorLog -Message ("Failed to read job-runs CSV '{0}': {1}" -f $csvPath, $_.Exception.Message) -Level WARN
-        }
-    }
-
-    $failedCount = @($rows | Where-Object { $_.Status -in @('Failed', 'TimedOut', 'Interrupted') }).Count
-    $tableRows = ''
-    foreach ($row in $rows) {
-        $color = '#1F2937'
-        switch ($row.Status) {
-            'Success' { $color = '#107C10' }
-            'Failed' { $color = '#D13438' }
-            'TimedOut' { $color = '#D13438' }
-            'Interrupted' { $color = '#D13438' }
-            'Skipped' { $color = '#FF8C00' }
-            'Retried' { $color = '#FF8C00' }
-        }
-        $tableRows += "<tr>" +
-            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.JobName)</td>" +
-            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.ScheduledTime)</td>" +
-            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.StartTime)</td>" +
-            "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.EndTime)</td>" +
-            "<td style='padding:3px 10px;border:1px solid #DDDDDD;text-align:right;'>$(ConvertTo-HtmlText -Text $row.DurationSec)</td>" +
-            "<td style='padding:3px 10px;border:1px solid #DDDDDD;color:$color;font-weight:bold;'>$(ConvertTo-HtmlText -Text $row.Status)</td>" +
-            "<td style='padding:3px 10px;border:1px solid #DDDDDD;text-align:right;'>$(ConvertTo-HtmlText -Text $row.RetryCount)</td>" +
-            "</tr>"
-    }
-    if ([string]::IsNullOrEmpty($tableRows)) {
-        $tableRows = "<tr><td colspan='7' style='padding:3px 10px;border:1px solid #DDDDDD;'>No job execution in the last 24 hours.</td></tr>"
-    }
-    $body = @"
-<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
-<h2>SmartInventory orchestrator daily summary</h2>
-<p>Tenant $(ConvertTo-HtmlText -Text $Tenant) on $(ConvertTo-HtmlText -Text $env:COMPUTERNAME): $($rows.Count) execution(s) in the last 24 hours, $failedCount failure(s).</p>
-<table style='border-collapse:collapse;'>
-<tr style='background-color:#E6F4FF;'>
-<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Job</th>
-<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Scheduled</th>
-<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Start</th>
-<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>End</th>
-<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Duration (s)</th>
-<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Status</th>
-<th style='padding:3px 10px;border:1px solid #DDDDDD;text-align:left;'>Retries</th>
-</tr>
-$tableRows
-</table>
-<p style='color:#5F6B7A;'>Sent by $ScriptName v$ScriptVersion.</p>
-</body></html>
-"@
-    $subject = "[SmartM365 Orchestrator][$Tenant] Daily summary: $($rows.Count) run(s), $failedCount failure(s)"
-    if (Send-OrchestratorMail -Subject $subject -HtmlBody $body) {
+    if (Send-OrchestratorExecutionSummary -Now $Now) {
         $script:State.LastDailySummaryDate = $today
         Save-OrchestratorState
-
     }
 }
-
 # ==========================================================
 # Legacy job log layout migration
 # ==========================================================
@@ -3193,6 +3270,22 @@ try {
         exit $script:ExitCode
     }
 
+    if ($SendExecutionSummary) {
+        Write-OrchestratorLog -Message ("Manual execution summary requested for tenant {0}; reading job-run CSVs without acquiring the resident lock or launching jobs." -f $Tenant)
+        Install-OrchestratorAuthenticodeTrustedCertificates
+        if (Send-OrchestratorExecutionSummary -Now (Get-Date)) {
+            $script:OrchestratorStopReason = 'ExecutionSummary'
+            Write-OrchestratorLog -Message 'Manual execution summary email completed successfully.'
+        }
+        else {
+            $script:ExitCode = 1
+            $script:OrchestratorStopReason = 'ExecutionSummaryFailed'
+            $script:OrchestratorRunErrorText = 'Execution summary email could not be sent.'
+            Write-OrchestratorLog -Message $script:OrchestratorRunErrorText -Level ERROR
+        }
+        exit $script:ExitCode
+    }
+
     Add-OrchestratorRunTracking
     Write-OrchestratorLog -Message ("{0} v{1} starting (PID {2}, tenant {3}, MaxConcurrency {4}, MaxLifetimeHours {5})." -f $ScriptName, $ScriptVersion, $PID, $Tenant, $script:Settings.MaxConcurrency, $script:Settings.MaxLifetimeHours)
     Write-OrchestratorLog -Message ("Runtime context: server={0}; user={1}; pid={2}; PowerShell={3}; edition={4}; process64bit={5}." -f $env:COMPUTERNAME, (Get-OrchestratorRunUserName), $PID, $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, [Environment]::Is64BitProcess)
@@ -3327,7 +3420,7 @@ finally {
     catch {
         Write-OrchestratorLog -Message ("Failed to finalize orchestrator lifecycle tracking: {0}" -f $_.Exception.Message) -Level WARN
     }
-    if (-not $DryRun -and -not $Stop) {
+    if (-not $DryRun -and -not $Stop -and -not $SendExecutionSummary) {
         try {
             Invoke-OrchestratorPeriodicSharePointUpload -Now (Get-Date) -Force
         }
@@ -3343,8 +3436,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3RE/wrdkCpv+K
-# A5tkj/e8+BuhMi1wPz0xSmemNLxxcKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANJShH8K44ttfh
+# 4SyoExbl8kSPvH26B18MF0Zi73oCpqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3477,31 +3570,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAbsBbHpxEyjVryIod26MD/U727Bmbc7sOW0jceIW2hEMA0GCSqG
-# SIb3DQEBAQUABIIBgETpmZFvCNaC1Xo87mga+euMBaBbTOXJWWW7ILpIyDnSpaBI
-# GUO4aLmf32g1iHCjesUKcMLJ4hIAnt2J/jHIIdzfEMjoUAXTKItsNLjA0Jv4gu9l
-# pplINVIgGsBIKnk3zL0iPy5LA9RyADn0GzUt2J4ZCALFkrS0NXPxPvlbt9xBW4Kz
-# Zxn6SNuKSHa4fvBsS/3+/IMrSdpnAggMyJYn0u2wTQrZYD/NaCCUYMRw9h0hsZh7
-# bOAwbjtT63xjhyvJ3Vt0EuA7A+XJ/XGO18A43O4FL052+I1wKODTH4jNauOI4qPC
-# M2EEKLo3hLCP9D8Fwmyw5gnvt2B4CBSegOQKCnZ6MEYKtXAwc7bD742qsxKKgdXG
-# nXsDl5FAjbBDjovTGygVPHI1jDNpW+0A09cUCYh42Rd+wunuDhjQZ7CXKy1+meV3
-# JW7HKN/sioyiL2bhjFTL+mNyclXzRikK2FULhoUCAm+F9qj8JozaB8qrbHVISKmp
-# Whyvjov4/0uNaTUbxKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOSS46LGcu0vmKNILNgYp6bzIXC8oPtthZWZ0DQIbONlMA0GCSqG
+# SIb3DQEBAQUABIIBgGjJRFc5gtmkC2Couo1AOpEhFzX9RBi8kTb1ZgSGzxXrS3Q6
+# rxqyCYGXTIOfMyrfOWWz5ykJ9jnqEjH2ncawhuRhCW5dOWSrpxSHN6foFhDq+bFf
+# H0ZVUx7QVA/ved9bLpr30wEyPXNYOfkdhc75tTF4WfCSrGNxG5+mI8hxWq6orEyl
+# e6n9RE4Xk4/IUxBGDoR0LEyEuW0hSXijLHdmz6burNTszQDD7DnEJiPncsfw5sd3
+# EmxhI3q0ar2fS9DrAOryPpUgyVuroOecLetpUpoGFoOZHoSLJBzIDW3/gtS5Vk7Z
+# rs0MZJqmvZTIf5p7ziT1ErpMFODU2G++kc7gRGPv7JNkywBJOiANzElLr5sCXUYC
+# T9y+3xFUA2jN1iaVeNZH1gNMmSMDWYHKDmBetYgh4Df3qrFg4Dh9eLiAwUo4ljMZ
+# iNWqJTEAUJctpz6e3Ds3L0mFOuqt/L2c2bbLATzroStjIbAymiWouEwXN2966dUg
+# 023De9e8ZzFKNkGXlqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNzM2
-# MzlaMC8GCSqGSIb3DQEJBDEiBCA+sFn6b6+XspoGr3EJ2TtnSTuXYg7PSzyxflJd
-# ydMCqjANBgkqhkiG9w0BAQEFAASCAgC0zE44C8qU17rAvMreafn2gZV+Y07ptRiS
-# NYxNg18q+97iM+lIyiO35V/4+eLuZBVoMCGsy4txW2vnFRdNvKRVGUYdze8gr4Ds
-# IGKaMQNsqmoAoJTmA2yrQInXbgwGEfWmbPoo5z3waNnP9WBmYPCBXJSviaSGhkxD
-# xMMpkb3p0TfJb4xF1cAnBfhP/SqMQ3tFTNhJUlvvMYzCrGpnJG/cbJysINzT0ewt
-# hPo2fHRGMHFNt+5pxpxtfsLeCSTXfuXPqCaMEgdusDJ54IfEYaW9kc4Hi5mRrDXR
-# Hh14Mi45yrWmWezipBZxkIheFiE4v8p/Z8e08C+VXE/4JDbgxVWIwU2LRayMiPTz
-# cB2cbh4oW51hb+0AOme4noCk4tn3xsZ7BYLiy/aPty+/SRQwNrOzsjP36X/L18Kp
-# HJPAGKKguBIgKIYz4LmIQwMzlQejJbAMxbmAN0MKHi2i/yFB5NTgEJqku4JmzeG0
-# +3llIOLbjFQduY8AJN95tA9bCJyHiHwf3KAhZ/QoPYvZpIAGcXQGTvX5CxjVRmAJ
-# 4BvfAH1/suZ/G/4AAVJq84CC+4cCIrSRoRJjpPJxKawcp+0QOK9Xd4MhTG0Zo1Ou
-# Am1y65PBgZYZRWhEyzYxJLLzj+BXSpDk5w82q7R/OrDxGd0yraebSc747f5BMWkt
-# 6mgx1uT48g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxODMy
+# NDZaMC8GCSqGSIb3DQEJBDEiBCDha8VTuEbNK2e4byzJciFJ+KfRlEQSXk5YKbCt
+# t722jjANBgkqhkiG9w0BAQEFAASCAgDHEhUzJc7I+WX2MEmn+K8qrFAFa0riPAKK
+# lRwJ5Txpsbc3KEk6k3CIiwuGmupZQn4qCcV74GxZmXWbzSQ83XNERyeGffPez0rx
+# M1WKHEoAVEUaeKlWfZ6tbDwgsNfSW7uB+op3HivELqiairlkvpA8KdaijUrbY7i1
+# IeLAz0CpumDFRWMdd0yByPbp4h84i0AgcDgA78d9SwJANhlmBORHpDUfDwq+QZWK
+# O2xoHCansvhuBqfSCikRIdOPPSZ02dOEDxzWeXnhyDNQPfTen4GAgSQOhGbxZlZj
+# pQe1nReJshkYMiH5jzY21HURNTMeCotDKLjDKEeBEyZ974Fc6CbVx7b2LODUoTte
+# g6oSLvixQRvM+TnbxhaRxVg98T2yHbUeo5zBpJ2atzUqjkPs8meCS8QSMc9Vh/Pr
+# TJbISEdNmvddjOW/+m/d7AWTP7+w9ee29gc/HlGD79F/6sAk7dfawTSZOR21237+
+# +g1c09Oc1J1NgE1H0yfGob0Lpx+nvcFi/+5n9Q2NuRTObaS2rgTBwAFm8nOobWcv
+# 9MuX59FDwAkDA4egAZxZevEvEoDhLr1UH5YhyN1rRVn4cjpniwfSVW+nx4DPbnAW
+# 4GVmw7DHJFKbF1c8bygioE+wWIzbtemy9MHk3HvW/9cSHZKcutRDH3hGzEkB9O1A
+# zF4MXclP3g==
 # SIG # End signature block

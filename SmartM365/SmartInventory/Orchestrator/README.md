@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.25) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.26) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -16,6 +16,7 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `LocalMachine` trust stores by default; `CurrentUser` remains available explicitly. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator.cmd` | Production launcher: `-Tenant prod -Connect`. |
+| `..\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd` | Sends the prod execution-summary email with separate tables for the last 24 hours and 7 days. |
 
 | `..\Launchers\Orchestrator\Stop-SmartM365-Inventory-Orchestrator.cmd` | Launcher: requests a clean stop for the running prod orchestrator instance. |
 
@@ -129,7 +130,7 @@ For an explicit user-scoped install:
 - On a later start, an unfinished `Running` row for the same server is changed to `Interrupted` when its recorded PID and start time no longer match a live PowerShell process. The shared CSV is rewritten atomically under `Orchestrator_Runs.lock`; it has no automatic retention.
 - Emails use the shared `SmartM365.Core` mail helper (`Send-SmartM365Mail`), so the orchestrator follows the same `SendMailMode` behavior as inventory scripts: `Graph`, `SMTP`, or `Both`. With an empty `SmtpServer`, Graph is the default. HTML branding and saved mail copies are handled by the shared mail layer.
   - `JobMailMode`: `Always` (email for every final job completion), `OnError` (final failures only, default), `Never` (no job emails). This remains a dedicated notification policy key; `SendMailMode` controls only the transport.
-  - Optional daily HTML summary (`SendDailySummaryEmail` + `DailySummaryTime`) recapping all executions of the last 24 hours with color-coded statuses (inline styles, no external CSS).
+  - Optional daily HTML summary (`SendDailySummaryEmail` + `DailySummaryTime`) with separate color-coded execution tables for the last 24 hours and 7 days (inline styles, no external CSS).
   - A fatal error email is sent if the orchestrator itself crashes (also on an invalid manifest at startup), independent of `JobMailMode`.
   - Mail is disabled only when required values for the selected transport are missing, for example `From`, recipient, Graph app auth for Graph mode, or `SmtpServer` for SMTP mode.
 
@@ -231,13 +232,14 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 | `-JobsManifestPath <path>` / `-StatePath <path>` | Override default file locations. |
 | `-Stop` | Writes a manual stop request for the current tenant and waits for the live instance to exit cleanly. Does not kill detached running jobs. |
 | `-StopTimeoutSeconds <int>` | Maximum wait for `-Stop` before returning exit code 1. Default 180 seconds. |
+| `-SendExecutionSummary` | Sends the 24-hour and 7-day execution-summary email, then exits without acquiring the resident lock or launching inventory jobs. |
 
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Normal end: lifetime recycle, `-DryRun`, `-Once`, or task stop handled cleanly. |
-| 1 | Unexpected fatal error (fatal error email sent when mail is configured). |
+| 0 | Normal end: lifetime recycle, `-DryRun`, `-Once`, task stop, or execution summary sent successfully. |
+| 1 | Unexpected fatal error, or manual execution-summary email could not be sent. |
 | 2 | Configuration or jobs-manifest error at startup. |
 | 3 | Another live orchestrator instance holds the lock. |
 
@@ -329,6 +331,16 @@ To stop the resident instance and immediately start the registered scheduled tas
 ```
 
 The restart launcher does not start the orchestrator directly. It first calls the same clean stop workflow, verifies that the scheduled task is no longer running, then calls `Start-ScheduledTask` for `\WCH\SmartM365 Inventory Orchestrator - prod`. This keeps the restart under the registered service account, task folder, triggers and task security settings.
+
+## Manual execution-summary email
+
+Run the dedicated launcher to send an immediate prod summary without stopping or duplicating the resident orchestrator:
+
+```text
+.\SmartM365\SmartInventory\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd
+```
+
+The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -SendExecutionSummary`. This one-shot mode reads the per-server `Orchestrator_JobRuns_<yyyyMMdd>.csv` files, sends one detailed table for the last 24 hours and a second detailed table for the last 7 days, and exits. It does not load the jobs manifest, acquire the resident lock, launch jobs, stop jobs, or change `LastDailySummaryDate`.
 
 ## Testing before scheduling
 
