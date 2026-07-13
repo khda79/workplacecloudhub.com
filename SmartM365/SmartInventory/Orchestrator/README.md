@@ -271,7 +271,7 @@ The installed task:
 - directly runs `pwsh.exe -File SmartM365-Inventory-Orchestrator.ps1 -Tenant <prod|test> -Connect`;
 - is stored in the `\WCH\` Task Scheduler folder;
 - starts five minutes after server startup;
-- starts daily at midnight and repeats every minute for one day;
+- starts daily at midnight and repeats every five minutes for one day;
 - ignores a new start while an instance is already running;
 - starts as soon as possible after a missed trigger;
 - retries three times, one minute apart, after a failed task start;
@@ -294,7 +294,7 @@ Create ONE task per tenant under the `\WCH\` Task Scheduler folder. Configure it
 - General: dedicated service account with "Log on as a batch job", "Run whether user is logged on or not", "Run with highest privileges" if the inventory scripts need it. The account needs write access to the SmartM365 `Data` folders and the certificate/private key used by app-only auth.
 - Triggers:
   - "At startup" (delay 5 minutes recommended).
-  - Daily at a fixed time (for example 05:55). Recommended: set the daily trigger to "Repeat task every 1 minute for a duration of 1 day". Combined with "Do not start a new instance", the repetition is ignored while the resident instance is alive and simply relaunches the orchestrator shortly after its 24h recycle exit, whatever time the previous instance started.
+  - Daily at a fixed time (for example 05:55). Recommended: set the daily trigger to "Repeat task every 5 minutes for a duration of 1 day". Combined with "Do not start a new instance", the repetition is ignored while the resident instance is alive and simply relaunches the orchestrator shortly after its 24h recycle exit, whatever time the previous instance started.
 - Settings:
   - "Run task as soon as possible after a scheduled start is missed": enabled.
   - "If the task fails, restart every: 1 minute", up to 3 times (covers crashes; a normal recycle exits 0 and is restarted by the trigger repetition).
@@ -306,9 +306,9 @@ Create ONE task per tenant under the `\WCH\` Task Scheduler folder. Configure it
 
 With `AutoRecycleOnRuntimeUpdate=true`, the resident process checks its own script version and, when `MonitorCoreModuleVersion=true`, the `SmartM365.Core` manifest version. The default check interval is 60 seconds. A higher semantic version must remain byte-for-byte stable for two consecutive checks and pass PowerShell parser plus Authenticode signer validation before a recycle is accepted.
 
-A valid update stops the launch phase immediately, saves state, finalizes lifecycle tracking and SharePoint uploads, releases the lock, and exits with code 0 and `StopReason=RuntimeUpdate`. Detached inventory jobs keep running and are re-adopted by the next instance. The one-minute repeating Task Scheduler trigger starts the new version within about one minute; `IgnoreNew` prevents a concurrent instance while the resident process is healthy.
+A valid update stops the launch phase immediately, saves state, finalizes lifecycle tracking and SharePoint uploads, releases the lock, and exits with code 0 and `StopReason=RuntimeUpdate`. Detached inventory jobs keep running and are re-adopted by the next instance. The five-minute repeating Task Scheduler trigger starts the new version within five minutes; `IgnoreNew` prevents a concurrent instance while the resident process is healthy.
 
-A lower version, changed content without a version increase, parser failure, or invalid/unapproved signature is logged as a warning and does not recycle the process. `RuntimeUpdateCooldownMinutes` throttles repeated warnings for the same rejected candidate. Existing scheduled tasks must be re-registered once with installer v1.1.3 or updated manually to use the one-minute repetition interval.
+A lower version, changed content without a version increase, parser failure, or invalid/unapproved signature is logged as a warning and does not recycle the process. `RuntimeUpdateCooldownMinutes` throttles repeated warnings for the same rejected candidate. Existing scheduled tasks must be re-registered once with installer v1.1.4 or updated manually to use the five-minute repetition interval.
 
 ## Clean stop and restart
 
