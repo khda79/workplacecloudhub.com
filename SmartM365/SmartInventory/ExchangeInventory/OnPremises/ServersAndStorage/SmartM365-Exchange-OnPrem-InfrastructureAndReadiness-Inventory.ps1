@@ -22,7 +22,7 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.5.6
+    1.5.8
 
 
 .REQUIREMENTS
@@ -32,7 +32,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.5.7
+    Version     : 1.5.8
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -169,7 +169,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.5.7"
+$ScriptVersion = "1.5.8"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1661,6 +1661,7 @@ try {
     }
     Write-Log "Collection method: WMI/DCOM only"
 
+    Import-SmartM365CoreModule
     Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LogFolder) | Out-Null
 
     Test-ExchangeShell
