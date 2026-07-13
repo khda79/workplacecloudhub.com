@@ -1,11 +1,14 @@
 // Smart Workplace Dashboard - Power Query function library
 // Copy these expressions into the semantic model if Power BI Desktop needs manual repair.
 
-TenantKey = "Default";
+TenantKey = "organization-default";
+OrganizationKey = "organization";
+EnvironmentKey = "default";
+TenantId = "";
 HistoryMonths = 12;
 SmartInventoryLatestPath = "C:\\Temp\\WORKPLACE\\SMART-M365\\DATA-LAST";
 SmartInventoryHistoryPath = "C:\\Temp\\WORKPLACE\\SMART-M365\\DATA-ALL";
-CMDBPowerBIPath = "..\\SmartWorkplaceCMDB\\Data\\Tenants\\Default\\DATA-LAST\\PowerBI";
+CMDBPowerBIPath = "..\\SmartWorkplaceCMDB\\Data\\Tenants\\default\\DATA-LAST\\PowerBI";
 
 fnLoadCsv = (folderPath as text, fileName as text) as table =>
 let

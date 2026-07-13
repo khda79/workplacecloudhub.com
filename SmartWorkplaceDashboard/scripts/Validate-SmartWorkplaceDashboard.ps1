@@ -34,6 +34,15 @@ if (-not $model.model.tables -or $model.model.tables.Count -lt 10) { throw 'mode
 if (-not $model.model.expressions -or $model.model.expressions.Count -lt 5) { throw 'model.bim does not contain the expected Power Query expressions.' }
 if (-not (@($model.model.tables.name) -contains 'FactSourceFreshness')) { throw 'FactSourceFreshness table is missing.' }
 if (-not (@($model.model.tables.name) -contains 'Measures')) { throw 'Measures table is missing.' }
+$requiredIdentityColumns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId')
+foreach ($table in @($model.model.tables | Where-Object name -notin @('DimDate','Measures'))) {
+    foreach ($columnName in $requiredIdentityColumns) {
+        if ($columnName -notin @($table.columns.name)) { throw "Identity column '$columnName' is missing from table '$($table.name)'." }
+    }
+}
+foreach ($expressionName in $requiredIdentityColumns) {
+    if ($expressionName -notin @($model.model.expressions.name)) { throw "Identity expression '$expressionName' is missing." }
+}
 Write-Host ("OK model tables={0} expressions={1}" -f $model.model.tables.Count, $model.model.expressions.Count)
 
 Get-ChildItem -LiteralPath $DashboardRoot -Recurse -File | Where-Object { $_.Extension -in '.md','.pq','.json','.bim','.pbip','.pbir','.pbism','.ps1' } | ForEach-Object {
@@ -57,8 +66,8 @@ Write-Host 'Smart Workplace Dashboard validation completed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi0I6Pmp5I+NRA
-# SyWmPkE7lNWgyIUZ9OUa1L78Vp1+x6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCV2AmSBp15ZqcH
+# 7TC2MuLtUidO+l6OOIjblz/VDTk4taCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -191,31 +200,31 @@ Write-Host 'Smart Workplace Dashboard validation completed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMBIxvHRM9LI0cYKlJ0OWJUO27T8g33Nr17RbAWwHY54MA0GCSqG
-# SIb3DQEBAQUABIIBgGSC9h89JmNvxh6VbPK3+ZRu0M5kTSJdjdgj2xnZW/+a64qB
-# ZPoEzc6PXBaY1YZNxUKp05+DlTDs5v6Pc4r3mNxLlPNfnpOKyIsgmu+2WcP+f1gk
-# vn1Q4O7lYmp9zk9DRvcLPs4jnPye3k0sug3tRgwIK6AmKfXNoH8h0EEDhdhgoVa9
-# 62T5xU2lWrSBmawugfm4tqvyQ9j4rMZnK0WYLdPBkLjwlVJVGerQVe7WB7+vGQMT
-# A+J3hQIbK2l8gLY1pl9q5TDJ2fZWx4KR6opXUePYk8mJ/zYa5y8WDsXC3C+2OeoP
-# OMv2FI9dGhdzM5zDtcgvHX6e3DsKUdzQErYc1pgZeofVzpVd6BrjsetVrPYgN22V
-# 1+dYRIXN990ZPMqL8oUI/AT/Ke8gm5aaTJgpFBiZ7znP74okKvYSsDN+zo/06Yc9
-# fAD09Zsp8sxdrIPNPurjAlgMucI0/3SIpAUA6MF8jK2Gsf3EPWu5n8ScFGCtYUHs
-# Pjiu9H1wGNlq4houtqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKfXa5QuDG6N2LtHr6fXuMs73rwA6136uvV6iPLyk41IMA0GCSqG
+# SIb3DQEBAQUABIIBgCgZkgWPsJUm60Nyaipxv8RhbDaJPPpcTrP8LmZ7tqEKwisG
+# 2sbPoiOVeDP3TI+oU2KqM4Am1ZhyF29HbgtZJCCvUZ2PpKFeFYuQ+khdtypQjMRy
+# 9XPoQwkoQHeU1EnA1u2MPY8FN8+OA2+QIibmBsNv1Zl57Rjy/W5WdcJiQLx4ncz+
+# ioF1nDw+U1lmZgcwRIPCbPAdG/doU/KHKhpKDpQSkKl9uGE1We5jQgNk3+BTVUGH
+# Muc+FhjODyoptBy1BBB20DtuK+jdeURw81RUAWY/Qx7huX8CtqSodbbWgou5Alif
+# eRRB2JFvnQ0o6tVNWw51+w1OmkSdeEkA11La2v7rq56UaGyzNO3YyCdtzNiNy88g
+# O7rgQaAAlqYmxxt4VLcq5x2DOMF7Y5QMCxxnf9JBwx11ZflzWzLoonBEGpTxp9BF
+# liqUQPyRmSNLeKR92D/zQLnI3Q3JJazcWE3KrZXDCLF26D+PLlyX5qa5YkDaCYcS
+# H3WYCGY/JQkU4hLYD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# NDJaMC8GCSqGSIb3DQEJBDEiBCB6TnetFwncnsGHAMWEjNskWQjxzBASETJYxfWo
-# Z/pckzANBgkqhkiG9w0BAQEFAASCAgCq/0wuUc42V7deCP9ZJpYKP7Vq7GXPPsRX
-# TuGMAlP9ipKd7ueH9jBYBDnV600y3OF341cTatIOmVXfFdWKQKyUIrjti9BzFK6e
-# 9ufwD5JVH4R6rxWTU0m+ngvAYeFZ/766VMKftByRDpwih5hafNj1r4odStecigQo
-# HISuKivkZkAyh+R8h5fU7exvvF+70z2ikTXb8rQsqHtPjVfFC40Lwq//3tma2ZGS
-# W1LeqlvmBBwZ4sDuTALPNxgWU/Un//4Cz1RnbAGekw82yP/doIBmSnIQTX8OJZ2Q
-# myPF+jaj1UA7RxWUC5/T1xAu9qBNzfXojawU56KqYPfUSMKcnUcoPIQHoyz2bM43
-# NUqH/2YvUK4gUphNJGYo/rB7A/twP47oKPh5WgETft+ZsP9xm3vsbReE92m3bErF
-# YgQdX1t4If/sqzVFEiBwxCQVF+p8k9WGyIpUgk1EGaeND3o5S0PNW/8FJPrRk1wi
-# yGQGrJK/+GVdupxf1GS1ex6oLi1KJLdHm+1ghUFVLIhPIoqaXtYtBaJYgJsNOtA6
-# UT38PFObYfner8JOeHJ6oNM0OMYL39KGo1EeZMjc+0/NsrQc01vToUQNPlH/omMF
-# XrdVk4w/VmVWemR395UXn2sPL4JcWovec1UvUwSoHEPAQUktHUwBFMeLdvliQ0U/
-# QmYDyQliLw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjAz
+# MzBaMC8GCSqGSIb3DQEJBDEiBCCMAsKQlQap9wKNgsnUOOvLzRMQEbAGof537/cd
+# RBE03DANBgkqhkiG9w0BAQEFAASCAgAEWynOK9ALaHoJ+ziHSqObxow3dmDIqpRf
+# 64+4iR5SDG/Vq6iX6NQ2ufNjHCKeKd90s7T9N37rEni20tJe284YVh0Kng/hr0eV
+# ZPw7cZt2D931DMAivoeylcwCBeIJnZa/OXNvutgE0nxL1Eiqe8cabNFMB8bSHvl2
+# nXLgDtKKdKzEfIecHLb8ro1TwrV/0EcpKIFZFCfxCXmGqxZgSSU2TFGOuPG1T5u+
+# dB2eNHAaEaoSSKBGsvguCaFmue65vsxg34NV3DlCEItBXLWlmz+gnhiIZNbFPlaD
+# cilAIlhuI8qgxcE4P+Ad6fqVFJC8yM0WFiSJrpndrrvZowYuVoFZY+pqeIWqZikA
+# FeFNorFG+J3OVo1cA0k5L+3ZFr+VuldbphFuLFeQtUqfn/8t8Y29ajFbq8I+cyj3
+# XFtjCiqm10p2xSn3AxsBf01C7/gh6LaOa1qj/rKGa8CxCXFqqDY9DtPhIc/Lz+WJ
+# YlPAYl6g+QG/2bMk7jNHLWg1Don6s6v3NRtW+lRoLJs07Wttb3KR7DqxmUYi1rEf
+# jxy3Sn+12vDUuI2oPjPBE014m1Ls3/Ox0RoAM51WgXg3fEHv0kibU5uGfiwzXWaw
+# vO/paymIkcbh7HNgv/bW5R22KWGuecykmp5xBmCGp2EHM0lvAuWTwpcHkSVkq5Qi
+# 0n6tuqrynA==
 # SIG # End signature block
