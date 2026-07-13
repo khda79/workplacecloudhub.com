@@ -32,7 +32,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.5.6
+    Version     : 1.5.7
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -169,7 +169,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.5.6"
+$ScriptVersion = "1.5.7"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1661,10 +1661,10 @@ try {
     }
     Write-Log "Collection method: WMI/DCOM only"
 
-    Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LogFolder) | Out-Null
+    Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LogFolder) | Out-Null
 
     Test-ExchangeShell
-    Invoke-SmartM365Preflight -ScriptName $ScriptName -RequireExchangeOnPrem | Out-Null
+    Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequireExchangeOnPrem | Out-Null
 
     Write-Log "Collecting Exchange servers."
     $exchangeServers = @(Get-ExchangeServer | Sort-Object Name)
@@ -1891,8 +1891,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5xLCokZ9voZyh
-# XGen0UDsNkWXbt39vdgRRkaGepLwDaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDkubTVEPZF0jTb
+# 3VLdEzn9Gi1Fjg0YiIPSQDjkP/CIfqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2025,31 +2025,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE1eojjkNpSShHpiz+wViM773PuZU4l60epu3/Wnur9vMA0GCSqG
-# SIb3DQEBAQUABIIBgGL2+PdESDZRJgqGzy+JonlNgZelYv06l1QujqtrRIxpCSFx
-# KmWrpmyrM1soWxUMwF7bPRu2w3cMUVs8Ao4jc8DXx3i1QepMz9KSzDRsdObriB+Y
-# OFXLG/zqg9bC3VwiiBiycVXFfBFenvXNkxx2vJmCigddQiB8/OWlNj9oJoNBO6vF
-# lBNY8KhxI/dp9XTqj8+aK6srWQZLm8F3XmZFclsX5TSRQ39Y2Z2BsmUkbZjhztCY
-# 5Tan0VQAy52vJlqbTCs418G1xdD0iubNTmrxDxZLp+lxOjjOkqAgF2sOnwSXvJuE
-# mWEwkjc4zkliwBTyoVwHKLYlJmKvZt3ePzpuOoLBmbBLESuCekEmLsx+q/9BduJn
-# GshHONRJxsFvbZuOZV1KerkyUeBiZ8ndXeMZAwXPdATifNFnMiiJrEHKN5n9WrtH
-# qohjRKLFihMtRRGXspyMeK3OqLfcv3nl5AJDoKpQ/EhOMYvv9Gsb0HJho3cX4TId
-# 2OlbETZjw++l3ieCyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDqPwm2fLa5bOMqTNq7nP40O+uAEYtQosiVnRl4b5rReMA0GCSqG
+# SIb3DQEBAQUABIIBgHFcz9TbehZFRaHwarCRjJSudqCvSt3HXY/fkUMV1WjolMCO
+# 8GmBLvMRdj/Q8vfctic4K+8o7Vl0mL4Dobiv31PP8IMy8NEujIcuc5UBhci/UxEu
+# xecHGFwwEHjypOLHEeqC7sn2sMiDctSZI0xil0Vkmb4uP2oJ9x3Na28U8A5eu0Nk
+# ScEoWtw/ODFXul4/oVQtC93LDv9JCazuZ0kLuiuY2fcQBhlQJFqJ6cw8VHlrfxGN
+# +PKMdsyrnGmIHKiqDikl7tP92l4Dpm5dnPvq1TOkI8jAnw4LwuAkgMtlyRJsQ9RM
+# BR44EeKqAsDVrGMCdIP1pb/dcN+LakF+hBpuGkwRsDVV6OhHgx8pGUub8BKVz9WR
+# 3lbI1qU92LPJtI7S/ZrBGBTxOexCYPS4Oeb8HPwjgghzZnY32QC9Xnq4XH5v/H7D
+# PuHxEUvV73dcWG1MB5I4wf6GgP+IoHqyImUfoGVi0JMT8GAgIecRlLHEM0d6ygyc
+# MDVkVFHjpmpLv1V7fKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwOTAz
-# MTRaMC8GCSqGSIb3DQEJBDEiBCDlAGspZz4VDK35IyyOMyvc5aZyo/qJebwxufDk
-# /QqmUzANBgkqhkiG9w0BAQEFAASCAgCtQfCdje9eDwRQseaRMLDDRSnqh+ushgjL
-# 8h0TZIPCTCDaRcdBmwbY6S3PAdE/ZWIOGqcc1xUs38SJyQQd+fDpxOnrU4hkX97D
-# NgFmFROFUGCv7Xzbc/V5UXVGns0onnXNsNrjiKkMN9tD4ocScDOYBv2JOYNxKOOS
-# +MgersZVy0MUa7CP9cmCl21oWurI/udS53OGMy5sr4DrYL6Cr6j5xSmF7FPubF1H
-# 85QQRuyHACz5b6EBkG/jiLgOHQKNS45Fz92wwqgK0SqjwUo0ZIwgkeyJ+Ed3zHLr
-# stXCnpBXuAiAgVRYJrvu4WHbKqTuFlNT5tHkauW2TEsr9cAKpwsDyS10MTFDNJoJ
-# 7JFuEN9O61eJ0MFzBSpURTP6xD0xQBHSElVTZjz0Evb/xxpbsbjSSGkiT38dUtxb
-# pjU4VdxNl11+A+B4ELIfwbLCAMSpVMeu8Z/o34codNcmX3B8akzLYxrZ9cF20jWI
-# dZ/JTxeRr6RfWgcLkBp43dOHUCu/3MGiAZPRm3GBX9VX860GO01B6NVzS47HCwcr
-# iFeXvQG3X6NLc0o3b9E80dn0ASGP8lM6tnugAGvqXwr3z2e+1PDbEKh3EzKPzl5h
-# CHjhQu9ASazGTm+DdLgAzYsiQOd4hLGHu5gTGHkG+oqdl1ASJCIY1kql7UaSIiI8
-# PCP6Qituyw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
+# MjdaMC8GCSqGSIb3DQEJBDEiBCCn3+QzXBN/eB5FAsABQOTOnysIoWnXJ0P0B6QK
+# fshwzDANBgkqhkiG9w0BAQEFAASCAgAgKrt6w0ohGPvurVBX9lIxM5mqTGkAiwNl
+# GjzI9wGI8XN9MDzqMWKIArHMVDje/SixkbCR5dNDaAuVDKV9IM9v3U1Bwfept2y2
+# rP8es6ui6hmmMbt9ZW144U9NvDAXzRsY33m0q+k8R7Q7Tl7PprETr0HcCzsOukbP
+# HxmsN28oZmXJDNoGp1nA3cYq86/A6zW2J1b+fhqiD9+x0BtvMu4kiUrIEM7viLKQ
+# F6NqRLVFuZzMLIqjGJNgechcTpNQOFaud4J9ZaAsP4IQ8EAkWZKpEcmfR/Zp9nse
+# num0El0AFBJFK/tzKARShagM4ZRfl1BKIHVzRoLgwVXSr02FAZQMdMWyDmjVVmfW
+# IMoBbAMppE2DB0Gu7AFo+rk0riCp7vxcSF4P0dA8etO1LFVJ5LFRaQLPkqWVBive
+# ouPZsO89NuaiyyjM3LNWihGcUmoytHIQ1LZIEvYfVK28lkCND2Ctaq4mQnxONWBc
+# IrTaF1pACMUBlVXjNaGClsBV+kgyYl+H6RUjp0OvWhF1wh0RaAhEG6173F4IzDDf
+# An2aFZpa1Moy2rwgZ+skcN8vAWfl84gOG23TgucR8Z9GlN6VAY4/CTKEvYMoZK4x
+# kVWK2XUcELToognc5bs4swoYOS2kyOxC351Vhr4XZ31FYsvDV/DkK//hmxqoj2Gm
+# RwC4Ak1d+Q==
 # SIG # End signature block

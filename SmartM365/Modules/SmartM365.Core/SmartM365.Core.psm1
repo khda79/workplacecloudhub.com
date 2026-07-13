@@ -1928,8 +1928,7 @@ function Invoke-SmartM365GraphFileDownloadWithRetry {
         catch {
             $statusCode = $null
             try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
-            $message = [string]$_.Exception.Message
-            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable'
+            $isTransient = Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode
             if (-not $isTransient -or $attempt -ge $MaxAttempts) { throw }
             $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
             $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
@@ -3281,6 +3280,29 @@ function Get-SmartM365GraphRetryAfterSeconds {
     return [math]::Min([math]::Max(1, $DefaultSeconds), $MaximumSeconds)
 }
 
+function Test-SmartM365GraphTransientError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [AllowNull()][Nullable[int]]$StatusCode
+    )
+
+    if ($StatusCode -in @(429, 500, 502, 503, 504)) { return $true }
+
+    $details = [string]$ErrorRecord.Exception.Message
+    try {
+        if ($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ErrorDetails.Message)) {
+            $details = $details + ' ' + [string]$ErrorRecord.ErrorDetails.Message
+        }
+    }
+    catch {}
+
+    if ($StatusCode -eq 409 -and $details -match '(?i)resourceModified|eTag[^\r\n]*(?:mismatch|changed)|resource[^\r\n]*changed since the caller last read it') {
+        return $true
+    }
+
+    return ($details -match '(?i)TooManyRequests|throttl|timeout|temporarily unavailable')
+}
 function Invoke-SmartM365GraphRestWithRetry {
     [CmdletBinding()]
     param(
@@ -3311,7 +3333,7 @@ function Invoke-SmartM365GraphRestWithRetry {
             $statusCode = $null
             try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
             $message = [string]$_.Exception.Message
-            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable'
+            $isTransient = Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode
             if (-not $isTransient -or $attempt -ge $MaxAttempts) {
                 $responseBody = $null
                 try {
@@ -3452,7 +3474,7 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                             $responseBody = [string]$_.ErrorDetails.Message
                         }
                     } catch {}
-                    $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $_.Exception.Message -match 'timeout|temporarily unavailable|throttl'
+                    $isTransient = Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode
                     if (-not $isTransient -or $attempt -ge 4) {
                         $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
                         $rangeText = "bytes {0}-{1}/{2}" -f $offset, $rangeEnd, $fileSize
@@ -4604,8 +4626,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmvO8BvM4fm5av
-# sLyXt5oxqAYxl0bZfZEoPVgCtsI9hKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZ/MsJYF9oMmKZ
+# IlJAia8c8u1xyuoYvyqfDs2mIm9IKKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4738,31 +4760,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE4aGWliYF4W+z8svrqOmE6+Af9YeqvLwMuPFUBzjyuBMA0GCSqG
-# SIb3DQEBAQUABIIBgHUaOVZbZGQudETbq7fwdnqE9ncvKBVcWgzQx2oCaMyV42Hx
-# T4kWGBSu27sSFBmU1EQDN8wmivF026rnfvqJp1FWEi0geL6QHuGcaJZ+VkVxVh56
-# 9SI2gLTAgWhY1q9AokyXEDxiFAAces+s284LhSrFaljqlJszf2ymn3Vo3aRzenij
-# 9qOZxuHRLaRwLUQmQSnA5VhVBEsojC3IrpI1lWSrAjpEh1B8QDRmOZU/yGGBW3OX
-# C9bxLeeZLggnxYQmKLwsrEK0I2tRERqa7LLj3LIwMT3/w3nL//tm+5Bwdlb23oEN
-# WpRkqJGuAlRopfrRKTQiA1lk79/9c7y+AR2ZNocBL9MA7FFYevkfhrXyOeI8vhFy
-# K/qxuTuUwezqWWrpQXnR0JOXKbcicYSKPPv/bdJxgjSk5iKGOBE+WwpDNYtga9F8
-# PDpye/qDPUiE+jTYsuasp5A/9Oy7PpLbV1Y+motT2uQc6pxMnOWe3rwmxjXCFcId
-# SExBVRlirHocprQpxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEE6sDatJIC1Bzcp2LrTZI+M6KLH7W2SG+GN/rsnRH/BMA0GCSqG
+# SIb3DQEBAQUABIIBgApaDXlWZlgOLX0+zFfSdfhF4sm93GNJlwKgd1d6ROxmgQqk
+# A9Tfinzl4vLzeEE4abBlQE3rCYdvqOyHWTwzaGT/hxWR8r2U4Kppg7WfKQrDxHsP
+# J4MmpdWzZAd5dANtDu+rw7THz6/rbg9pTMzjB+gI68X3d+ZfIE9Eh+YUBolpE7tS
+# 1/8EeCES2notRvjlruozwr5qLjCyOYd/H9qpV9gUeUNSwxSj78kb71CF32aMIdiQ
+# j34Qo8bDuM326HFIDM6pDe6SAMFIRq/T1GVGyppYO677zl6QkhkGgXjKDl1Hc9qO
+# iS23Fi470lw7lJenTGw4i7UaVxW74y/uXNa74uaPuWkql0ksx6RZinv327ZP+o84
+# 4BdaQ+mrMMf+GDOwhKxFh+rmV3fp4AQupE27TRus+KsvbZ5K34lom0kxfUZNFowS
+# 9yxO+gyFJGu21ZUUskbvh6XJEjtmb7cCBPAWwIKiM1EJnHJeMq8WBRlGCeMpfoKU
+# iJqc4PguWumy4Tjgp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwOTAz
-# MTJaMC8GCSqGSIb3DQEJBDEiBCA3xN+/7OkIpGratOpZlh9v0pWAnj5wZBJNVEW4
-# 8ZP1aDANBgkqhkiG9w0BAQEFAASCAgCJgmfkbFbugeZe1IperztQ4qmSBUI8h3Fn
-# 6pXwK2jgmoLUjhFXgz9+Ls8ok24e95yiXKzC41WE8aOx6wopPz1oEFSpq+MNy9yw
-# z3whMW1QTa4loDSs0BLOUa27FGslKjQlcGEMUGneyd5SJ8+E5IOOHQNe0tKfsub5
-# nxP71ikyMET/EHb3y+gN+TyYuVgYVZW1JkdurOMCHsYlr7YMi0OoRTTDvaIgUOmd
-# R4VktHKQzTKp79m98GYaK5dhwoMLlj7oxe9iAIt9gwIDkdb7FBioeCPBvJf0cExg
-# t61cTKwGl+AozDwfrAnxLfAaUY1SF3S62+srS/Fyx3wEiiswXBeI03MQ+K9EJEbC
-# 0xytz+hjkr3DL2tZfkV0OYAeC9uiRhoKjJBQaAvBvOAtVV22cqonDZUPtrdr40pS
-# G782+qdtZeqVKfFfbfuWvkDL71ObTd6HBbAXmTOFn2qMrhbBGqsqJOCbyu1If1TJ
-# CGt9AsKRukzzg5BvJaHAS9gmFZzM97srXFdJl3HfU+rjZb0p0VpiVZQyA8RLKSYc
-# HoeDrk+AhPqHQSdFUO3fPatXh3AFUyGWxfZyBM6QfySecdQcGT+kaY3smaTiYv27
-# mqihGzPULIevRFBwyYLus9CrmIlQdA/GUqkW+OLLGIckxkDgBbaiw7boN6MS1B20
-# 2jG5Qp2/7A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
+# MDhaMC8GCSqGSIb3DQEJBDEiBCCFhj28lZRyNJS3wL7ZTMhPQuIyReTZG4xtuLkD
+# vLbexjANBgkqhkiG9w0BAQEFAASCAgB3/cJZw+UFRSOzXt8GTpPkJYFGpQY12EUB
+# JmHpCfej4TFrELWRyfIXC43Iom6YH0HHc42XqNC4cAYqjea2oNZ6psfCLVHdOhok
+# 6Udy5V6wSAtyjcIHUxGHyzaWBxUcLHaFX8kGMHLyL4V4cKDPd3xvELhzcS5cBNlu
+# a74BD5zQF1BZnYF3t4j3MFpAAaB4LKoC7f+6jWm3Xc7/Bkkvmn8yQgXZ02RPoiAp
+# fwFnsPcV1IwFhdcB4O32cXYhHXWGss2/CTa81leLt3v9QWSpAvvcQDuycBf9pX92
+# yS9ZWZIrvKDMG9jBeVBvhrAqLCxlsT2RCjcvi2JqBpgL1Z/l0aYOSPgq4wbDcFPu
+# QWJDuXPTzslA3fp4ifXEz3sx9T4xrm9OmK82l7FAvRlySP+hEqhQxJUaz9x5Eoa8
+# bs90zfIl/oeuHJOCnSryzTpkgN3AC0ZFEPvsTbgSdVr3fqPgQMUAfLRC7fWOL1r3
+# 6tmBY5hOzuR33XliikGu/dqI3JP5Ajtsk4biJjW/k9T8na52JZV/95CNQbqZLQfp
+# zqeoWWK/meHCwtxAkSdmjRA3eLNI35uoJRegBfn3BLVdfMZhuuYG7fxOox2iga5y
+# bqfopm/ODMiv0HKIVYf2WPcJESB7JEr9Qes/b01IPI6Ltcgfk5ba9C+WuYpDiGbI
+# TdM3IRfm7Q==
 # SIG # End signature block
