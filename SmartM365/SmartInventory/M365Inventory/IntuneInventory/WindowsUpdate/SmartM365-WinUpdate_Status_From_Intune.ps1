@@ -40,7 +40,7 @@ PARAMETERS
 VERSION
   1.5
 .VERSION
-1.10
+1.11
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 
 # ==========================================================
 # App-only authentication parameters
@@ -124,7 +124,11 @@ function Get-ScriptLocalConfig {
     }
 
     try {
-        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (Get-Command Sync-SmartM365JsonConfigWithTemplate -ErrorAction SilentlyContinue) {
+            return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath)
+        }
+        return $config
     }
     catch {
         throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
@@ -521,11 +525,16 @@ function Send-SummaryEmail {
 
     if (-not $EnableSummaryEmail) { return }
     if ($DryRun) { Write-Log "DryRun: skipping summary email." "INFO" "DRYRUN"; return }
-    if ([string]::IsNullOrWhiteSpace($To)) { throw "Summary email requires To in configuration." }
+    $summaryTo = $To
+    if ([string]::IsNullOrWhiteSpace($summaryTo) -and -not [string]::IsNullOrWhiteSpace($ErrorMailTo)) {
+        $summaryTo = $ErrorMailTo
+        Write-Log "Summary email To is not configured; using ErrorMailTo fallback." "WARN" "MAIL"
+    }
+    if ([string]::IsNullOrWhiteSpace($summaryTo)) { throw "Summary email requires To or ErrorMailTo in configuration." }
 
     try {
         Import-SmartM365CorePreflight
-        $mailParams = @{ To = $To; Subject = $Subject; BodyHtml = $HtmlBody }
+        $mailParams = @{ To = $summaryTo; Subject = $Subject; BodyHtml = $HtmlBody }
         if (-not [string]::IsNullOrWhiteSpace($From)) { $mailParams['From'] = $From }
         if (-not [string]::IsNullOrWhiteSpace($Cc)) { $mailParams['Cc'] = $Cc }
         Send-CoreSmartM365Mail @mailParams
@@ -1565,8 +1574,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfkpwgGdzaZWjT
-# fT1xiN1cYiZlMWzZhtyIQ/ZURMjCqaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLMqEp48bNQJ0H
+# FzmM0RKWaADXrpvNTXQvwRhG2cNxQaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1592,14 +1601,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCB96sl0H8+dXwVKzHnpmNUemw50rbZdwLIg8fEgps1muTANBgkqhkiG9w0B
-# AQEFAASCAYBRl3/nx6VMRpyger7B1+ocSLyUNm8MYH2HgioyLEqeWKux9iUOciNE
-# Mh9dOwcduT3uRXok9vHoqRz1hl8D0mbw9zWYSuBhy1IKQtvFmEbTYe086mZ9Bc84
-# aA7+XndPuac6cIvUp0ALmCmR89iA+//Wc4H9mb3CkrMHIqlZJypV7NwmVIh18+KG
-# WNbfP3VESeGUQr5ah/uq/E3K4j5W0jOo4IzRJJbVuiRq+/epB1OBlSc9hstS/e6N
-# mf41x/D6u8Mt/WYBaKZtyc7knamoUaL7Dxw2hSR3jQrYBWpi9tQ3IUIec4KuUysg
-# luRJql20fDg4Dz0wcCZRLWhlDdLTHLjqxEwY4oISM4Y5IYY+CKv/hgmjP5/UglUG
-# Kr4uRKB/4jfHq0bO+m7HmAMjJmKBGA1d469BRDfJMVvYPpmIR/pKpoSYWoE1+rxE
-# 1MadPB3FiV95a1f+heZJD2e2/jpP/yhljLgri1iHlanKfFSrNYOLPz6JOP5b6UK5
-# 7Y0E4oVezY8=
+# BDEiBCC2YUo96SjyML6iQEwNeoy+4sraFCjBKB0FZBa7kgQGCDANBgkqhkiG9w0B
+# AQEFAASCAYB7+4IrBtCgzf9xfHSPXQNJ7oR8aSl7EZc5Gvnl8NjAcgYcOSN2Uc1v
+# LOy+Ey72PcYGQWJjp+ONFlEHFwg2tTOfUX5IACC68d9qPenK4KpM7m5pmYANNiwS
+# IjJb+y5XUV6v0UkocWNyvaiIvILDSdS+nfE4aRucTBgDLY8aZcwx7UFWkckYeUeU
+# 3ZS6W87a5oT/GJM9PEmY8hiKepA1j2UP2PzSaZ0N0rODebO0CD/gcLh1HaIh+A+Q
+# 3ynz4boKImP3ZhTWnAIbrO2AkZGrwYw2qKauncUpkyEoWpUmFv1Xl4CL3ayDe8Et
+# pVN6nUMDgj97QMdXdtTEdrkFf/IcleyJ+cFNBPP4Ayw62CJ9WarH4eXyRQJVIA6I
+# xI+0AIn5rlxNJCNVlEDBxFJeRdpMZIZKG/ZmrlM/Mw+VBu7f0BEKlQapBv2kV6Rv
+# ZWKxx/eMRHIEdLjyRi/BICjPEmbFZwZV/gFzf8NbbCThOOYG1waSNTBxsRDEs6M/
+# Xklr3Ml7n+s=
 # SIG # End signature block
