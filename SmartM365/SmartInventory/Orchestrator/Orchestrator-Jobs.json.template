@@ -809,7 +809,7 @@
     {
       "Name": "Intune-WinUpdate-Status",
       "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\SmartM365-WinUpdate_Status_From_Intune.ps1",
-      "Arguments": "",
+      "Arguments": "-FeatureUpdatePolicyId \"{{FeatureUpdatePolicyId}}\"",
       "Enabled": false,
       "Group": "Intune",
       "DependsOn": [],
@@ -910,6 +910,28 @@
         "Type": "Daily",
         "Times": [
           "08:00"
+        ],
+        "MissedRunPolicy": "Skip"
+      }
+    },
+    {
+      "Name": "M365-BackupPolicyScope-Inventory",
+      "ScriptPath": "ExchangeInventory\\BackupProtection\\SmartM365-M365-BackupPolicyScope-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange",
+      "DependsOn": [
+        "EXO-Mailboxes-Inventory-Fast"
+      ],
+      "AllowedServers": [],
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "08:10"
         ],
         "MissedRunPolicy": "Skip"
       }

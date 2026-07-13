@@ -43,5 +43,6 @@
   "AuthenticodeInstallTrustedRoot": true,
   "AuthenticodeInstallTrustedPublisher": true,
   "DependencyWaitTimeoutMinutes": 1440,
-  "OrchestratorRunsCsvLockTimeoutSeconds": 300
+  "OrchestratorRunsCsvLockTimeoutSeconds": 300,
+  "FeatureUpdatePolicyId": ""
 }
