@@ -1233,7 +1233,7 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     & $add 'AD_Computers_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
     & $add 'AD_Groups_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $false
     & $add 'AD_OUs_AllDomains' @('DomainName','Name','DistinguishedName') $false
-    & $add 'AD_Contacts_AllDomains' @('DomainName','DisplayName') $true
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_Contacts_AllDomains' -CriticalFields @('DomainName','ObjectGUID') -RequiredColumns @('ObjectType','Name','DistinguishedName','DisplayName','ProxyAddresses','Mail') -AllowEmptyDataset
     & $add 'AD_Users_DailyStats' @('Date','DomainName') $false
     & $add 'AD_Computers_DailyStats' @('Date','DomainName') $false
     & $add 'AD_Users_DuplicateUPN' @('UserPrincipalName','SamAccountName','DistinguishedName') $true
@@ -1655,22 +1655,8 @@ function New-SmartM365MailFilesHtmlSection {
     foreach ($path in $existingFiles) {
         $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
         if ($null -eq $item) { continue }
-        $uploadRecord = $null
-        if ($global:SmartM365SharePointUploadedFiles) {
-            $uploadRecord = @($global:SmartM365SharePointUploadedFiles | Where-Object { $_.LocalFilePath -eq $item.FullName } | Select-Object -Last 1)
-        }
         $label = ConvertTo-SmartM365EmailHtmlText $item.Name
-        if ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.WebUrl)) {
-            $escapedUrl = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.WebUrl)
-            $escapedPath = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
-            $locationHtml = "<a href=`"$escapedUrl`" style=`"color:#075985;text-decoration:underline;`">$escapedPath</a>"
-        }
-        elseif ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.SharePointPath)) {
-            $locationHtml = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
-        }
-        else {
-            $locationHtml = ConvertTo-SmartM365EmailHtmlText $item.FullName
-        }
+        $locationHtml = (Get-SmartM365MailFileLocationHtml -FilePath $item.FullName).Html
         $sizeKb = [Math]::Round(($item.Length / 1KB), 1)
         $rows += "<tr><td style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;`">$label</td><td style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;word-break:break-all;`">$locationHtml</td><td align=`"right`" style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;white-space:nowrap;`">$sizeKb KB</td></tr>"
     }
@@ -1687,6 +1673,97 @@ function New-SmartM365MailFilesHtmlSection {
 "@
 }
 
+function Get-SmartM365SharePointUploadRecordForLocalFile {
+    [CmdletBinding()]
+    param([string]$FilePath)
+
+    if ([string]::IsNullOrWhiteSpace($FilePath) -or -not $global:SmartM365SharePointUploadedFiles) { return $null }
+
+    $normalizedPath = [string]$FilePath
+    try {
+        $normalizedPath = [System.IO.Path]::GetFullPath($FilePath)
+    }
+    catch {
+        $normalizedPath = [string]$FilePath
+    }
+
+    $matches = @($global:SmartM365SharePointUploadedFiles | Where-Object {
+        $recordPath = [string]$_.LocalFilePath
+        if ([string]::IsNullOrWhiteSpace($recordPath)) { return $false }
+
+        $normalizedRecordPath = $recordPath
+        try {
+            $normalizedRecordPath = [System.IO.Path]::GetFullPath($recordPath)
+        }
+        catch {
+            $normalizedRecordPath = $recordPath
+        }
+
+        $normalizedRecordPath -ieq $normalizedPath
+    })
+
+    if ($matches.Count -eq 0) { return $null }
+    return $matches[-1]
+}
+
+function Get-SmartM365MailFileLocationHtml {
+    [CmdletBinding()]
+    param([string]$FilePath)
+
+    $uploadRecord = Get-SmartM365SharePointUploadRecordForLocalFile -FilePath $FilePath
+    if ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.WebUrl)) {
+        $escapedUrl = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.WebUrl)
+        $displayText = [string]$uploadRecord.SharePointPath
+        if ([string]::IsNullOrWhiteSpace($displayText)) { $displayText = [string]$uploadRecord.WebUrl }
+        $escapedDisplayText = ConvertTo-SmartM365EmailHtmlText $displayText
+        return [pscustomobject]@{
+            Html = "<a href=`"$escapedUrl`" style=`"color:#075985;text-decoration:underline;`">$escapedDisplayText</a>"
+            HasSharePointLocation = $true
+        }
+    }
+    elseif ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.SharePointPath)) {
+        return [pscustomobject]@{
+            Html = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
+            HasSharePointLocation = $true
+        }
+    }
+
+    return [pscustomobject]@{
+        Html = ConvertTo-SmartM365EmailHtmlText ([string]$FilePath)
+        HasSharePointLocation = $false
+    }
+}
+
+function Convert-SmartM365MailBodyLocalPathsToSharePointLinks {
+    [CmdletBinding()]
+    param([AllowNull()][string]$BodyHtml)
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml) -or -not $global:SmartM365SharePointUploadedFiles) { return $BodyHtml }
+
+    $updatedBodyHtml = [string]$BodyHtml
+    foreach ($uploadRecord in @($global:SmartM365SharePointUploadedFiles)) {
+        $localPath = [string]$uploadRecord.LocalFilePath
+        if ([string]::IsNullOrWhiteSpace($localPath)) { continue }
+
+        $location = Get-SmartM365MailFileLocationHtml -FilePath $localPath
+        if (-not $location.HasSharePointLocation) { continue }
+
+        $pathVariants = @(
+            $localPath,
+            (ConvertTo-SmartM365EmailHtmlText $localPath)
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+        foreach ($pathVariant in $pathVariants) {
+            $updatedBodyHtml = [regex]::Replace(
+                $updatedBodyHtml,
+                [regex]::Escape($pathVariant),
+                [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $location.Html }
+            )
+        }
+    }
+
+    return $updatedBodyHtml
+}
 function Add-SmartM365MailFilesSection {
     [CmdletBinding()]
     param(
@@ -1943,6 +2020,7 @@ function Send-SmartM365GraphMail {
         }
     }
 
+    $BodyHtml = Convert-SmartM365MailBodyLocalPathsToSharePointLinks -BodyHtml $BodyHtml
     $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
     if (-not $SkipHtmlCopy) { Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null }
 
@@ -2612,6 +2690,7 @@ function SendEmailHtmlReport {
                 $atts = @()
             }
         }
+        $BodyHtml = Convert-SmartM365MailBodyLocalPathsToSharePointLinks -BodyHtml $BodyHtml
         $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
         Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null
 
@@ -2936,23 +3015,26 @@ function InitializeScriptEnvironment {
     param(
         [string]$OutputPathInit,
         [string]$OutputPath,
-        [string]$LogFileName
+        [string]$LogFileName,
+        [string]$CallerScriptPath
     )
 
-    $callerScriptPath = ''
-    try {
-        foreach ($frame in (Get-PSCallStack)) {
-            if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
-            if ($frame.ScriptName -eq $PSCommandPath) { continue }
-            if ($frame.ScriptName -notlike '*.ps1') { continue }
-            $callerScriptPath = [string]$frame.ScriptName
-            break
+    $CallerScriptPath = [string]$CallerScriptPath
+    $callerScriptPath = if ([string]::IsNullOrWhiteSpace($CallerScriptPath)) { '' } else { $CallerScriptPath }
+    if ([string]::IsNullOrWhiteSpace($callerScriptPath)) {
+        try {
+            foreach ($frame in (Get-PSCallStack)) {
+                if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
+                if ($frame.ScriptName -eq $PSCommandPath) { continue }
+                if ($frame.ScriptName -notlike '*.ps1') { continue }
+                $callerScriptPath = [string]$frame.ScriptName
+                break
+            }
+        }
+        catch {
+            $callerScriptPath = ''
         }
     }
-    catch {
-        $callerScriptPath = ''
-    }
-
     $expectedLocalConfigPath = ''
     $expectedTemplatePath = ''
     if (-not [string]::IsNullOrWhiteSpace($callerScriptPath)) {
@@ -2982,7 +3064,7 @@ function InitializeScriptEnvironment {
         }
         $messageParts += "You can also pass -OutputPath explicitly when the script supports it."
         $message = $messageParts -join ' '
-        WriteLog -Message $message -Level "ERROR"
+        Write-Warning $message
         throw $message
     }
 
@@ -3001,7 +3083,7 @@ function InitializeScriptEnvironment {
     $logAllRootPath = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
     if ([string]::IsNullOrWhiteSpace($logAllRootPath)) {
         $message = "InitializeScriptEnvironment could not resolve LogAllRootPath. Create Config\SmartM365.global.local.json from Config\SmartM365.global.local.json.template at the SmartM365 root, then set LogAllRootPath or keep the default tokenized value."
-        WriteLog -Message $message -Level "ERROR"
+        Write-Warning $message
         throw $message
     }
     $global:SmartM365ExecutionStartTime = Get-Date
@@ -4505,18 +4587,19 @@ function Disconnect-SmartM365CloudSession {
 Export-ModuleMember -Function `
     Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Write-SmartM365CsvAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
-    ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
+    ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
     TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Invoke-SmartM365SharePointCsvUpload, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession
 
+
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0IRXALM8YdXIF
-# va+8/r9hJUmSzcd3HIRbLQ857SGFraCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbiLY/UobvICk/
+# OisNHB8ozC3wKSxrWT3EvHnKZdAOUaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -4542,14 +4625,14 @@ Export-ModuleMember -Function `
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBNsCPe+qgDj2r1EzvNsSWqTwMGcrrxTxMYiELfc6CUezANBgkqhkiG9w0B
-# AQEFAASCAYDB3RnZfu991ZgsxScxZXeZ7uX0H+TWDvYfafnZjG0zcFiQWvKWk/lJ
-# YdudlSB935wFtyYDaF4pdXCbwzO6Q3rcKo1CsvsljkG3yS4aZFN6cJxe4zOny3wu
-# DtAtPYLchw9Q485OnCju7Jtf1XApEbGUWJonTkYz56jTR3hE05LHZJETn+Z4qpMJ
-# Hcr5XJWbQTi4CG/3fSwgXwy6xcwWU0wDjqOi3UprApuosqND4/VVvKSGwv7j66HB
-# +FnC156p7NDo6/a2vjxbFMVeoVlNcR2qnYKolrzEemYO9o/6OXMT5hgREynRb/PU
-# ayrEulGO0MmycV0BrwQu5/nafxiwnc7ML6KVd2tEHKQmVKlGc9w9cokJXSWUW4ma
-# dNYPZxkaAhzp2Y2m+0HcAjeqI0X4OIDQQHQBTWC1p8+Veq0S7PSmwV5ikjaB0ftB
-# WhjuNH3fbtCAyX0zNJozbXUbiPgdYYqi3MK/hazUV7RcM6TdpHDvz48WJx07X7Ya
-# OYtqtDj3+rk=
+# BDEiBCD0cK5/2qATb1hwcDxQrqVSp2/d5GVu9EKKGq+WtVHviDANBgkqhkiG9w0B
+# AQEFAASCAYACqdWtFVwb23U3jNDA3QsStumG9jUZXLdCQ/EiWcXWkl6sjUxFLRBR
+# iVb+sUoBhCb/kMzYg6379rXaznSDvtf6wwjPQ47N+XXwGgz/TRcjwVL+IbE4Q5ul
+# 9xP1xuIMwra6FeJpgMWXEU8bX7sPK8E4fZY0+siTxhTX5FkcjUrOV0EcX3JHUjUd
+# +ahyBvAzbf1N+VW31H3S4jOpcYQ/wbfXaV3cXiB05MHIXeuTNmMl7Y+e8BxXcTDr
+# tAYVcQppnYpLIlDIb2xdehgXqZZjNG6xnO3rVQmp2bF08q87J5NSOpzNxqh0tYBi
+# 5UL0/qyj2W60HLDwY7eYu5fQ9A2zyg46mbskxjZQi3rSdA5xhC1r10qrG9zFAn/M
+# PloPBQrCuGm5hGN0qo3iqRQK/xwyTgqmTR5QNK3ixMLA8KqmfyYHIrh6n0b2kphI
+# MU7QF3WRnf1EwMHDWS74vB2yJsEsu24QHxSSR2+wd59ZYwbOm2EPCiCbWxy3rRWS
+# PAbbLrt8yVA=
 # SIG # End signature block
