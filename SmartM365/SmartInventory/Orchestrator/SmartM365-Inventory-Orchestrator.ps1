@@ -92,7 +92,7 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .VERSION
-1.3.24
+1.3.25
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -102,7 +102,7 @@ Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds
     inside its own child process.
 
 .NOTES
-    Version : 1.3.24
+    Version : 1.3.25
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -126,7 +126,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.24"
+$ScriptVersion = "1.3.25"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1787,6 +1787,158 @@ function Test-OrchestratorAuthenticodeFile {
     }
 }
 
+function Get-OrchestratorFileFingerprint {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $hash = Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop
+    return [string]$hash.Hash
+}
+
+function Get-OrchestratorRuntimeSnapshot {
+    $scriptPath = [string]$script:Settings.OrchestratorScriptPath
+    $coreManifestPath = [string]$script:Settings.CoreModulePath
+    $coreModulePath = Join-Path -Path (Split-Path -Path $coreManifestPath -Parent) -ChildPath 'SmartM365.Core.psm1'
+
+    $tokens = $null
+    $parseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
+    if (@($parseErrors).Count -gt 0) {
+        $parseSummary = @($parseErrors | ForEach-Object { $_.Message }) -join '; '
+        throw "Orchestrator parser validation failed: $parseSummary"
+    }
+
+    $scriptText = Get-Content -LiteralPath $scriptPath -Raw -ErrorAction Stop
+    $versionMatch = [regex]::Match($scriptText, '(?m)^\s*\$ScriptVersion\s*=\s*["''](?<Version>\d+\.\d+\.\d+)["'']\s*$')
+    if (-not $versionMatch.Success) {
+        throw "Orchestrator ScriptVersion could not be read from $scriptPath"
+    }
+
+    $coreManifest = Import-PowerShellDataFile -LiteralPath $coreManifestPath -ErrorAction Stop
+    if ($null -eq $coreManifest.ModuleVersion) {
+        throw "SmartM365.Core ModuleVersion is missing from $coreManifestPath"
+    }
+
+    $scriptFingerprint = Get-OrchestratorFileFingerprint -Path $scriptPath
+    $coreManifestFingerprint = Get-OrchestratorFileFingerprint -Path $coreManifestPath
+    $coreModuleFingerprint = Get-OrchestratorFileFingerprint -Path $coreModulePath
+    $scriptVersionOnDisk = [version]$versionMatch.Groups['Version'].Value
+    $coreVersionOnDisk = [version][string]$coreManifest.ModuleVersion
+
+    return [pscustomobject]@{
+        ScriptPath = $scriptPath
+        ScriptVersion = $scriptVersionOnDisk
+        ScriptFingerprint = $scriptFingerprint
+        CoreManifestPath = $coreManifestPath
+        CoreModulePath = $coreModulePath
+        CoreVersion = $coreVersionOnDisk
+        CoreFingerprint = ('{0}|{1}' -f $coreManifestFingerprint, $coreModuleFingerprint)
+        Identity = ('script={0}|{1};core={2}|{3}' -f $scriptVersionOnDisk, $scriptFingerprint, $coreVersionOnDisk, $coreManifestFingerprint + '|' + $coreModuleFingerprint)
+    }
+}
+
+function Write-OrchestratorRuntimeUpdateWarning {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [datetime]$Now = (Get-Date)
+    )
+
+    $lastWarning = [datetime]::MinValue
+    if ($script:RuntimeUpdateWarnings.ContainsKey($Key)) {
+        $lastWarning = [datetime]$script:RuntimeUpdateWarnings[$Key]
+    }
+    if ($lastWarning -ne [datetime]::MinValue -and $Now -lt $lastWarning.AddMinutes($script:Settings.RuntimeUpdateCooldownMinutes)) {
+        return
+    }
+
+    $script:RuntimeUpdateWarnings[$Key] = $Now
+    Write-OrchestratorLog -Message $Message -Level WARN
+}
+
+function Test-OrchestratorRuntimeUpdate {
+    param([datetime]$Now = (Get-Date))
+
+    if (-not $script:Settings.AutoRecycleOnRuntimeUpdate) { return $false }
+    if ($script:LastRuntimeUpdateCheckUtc -ne [datetime]::MinValue -and
+        $Now.ToUniversalTime() -lt $script:LastRuntimeUpdateCheckUtc.AddSeconds($script:Settings.RuntimeUpdateCheckIntervalSeconds)) {
+        return $false
+    }
+    $script:LastRuntimeUpdateCheckUtc = $Now.ToUniversalTime()
+
+    try {
+        $candidate = Get-OrchestratorRuntimeSnapshot
+    }
+    catch {
+        $script:RuntimeUpdateCandidateIdentity = ''
+        $script:RuntimeUpdateCandidateStableCount = 0
+        Write-OrchestratorRuntimeUpdateWarning -Key ('snapshot|' + $_.Exception.Message) -Message ("Runtime update ignored because validation could not read a complete runtime: {0}" -f $_.Exception.Message) -Now $Now
+        return $false
+    }
+
+    $scriptVersionComparison = $candidate.ScriptVersion.CompareTo($script:RuntimeUpdateBaseline.ScriptVersion)
+    $scriptHashChanged = $candidate.ScriptFingerprint -ne $script:RuntimeUpdateBaseline.ScriptFingerprint
+    $coreVersionComparison = 0
+    $coreHashChanged = $false
+    if ($script:Settings.MonitorCoreModuleVersion) {
+        $coreVersionComparison = $candidate.CoreVersion.CompareTo($script:RuntimeUpdateBaseline.CoreVersion)
+        $coreHashChanged = $candidate.CoreFingerprint -ne $script:RuntimeUpdateBaseline.CoreFingerprint
+    }
+
+    if ($scriptVersionComparison -lt 0 -or $coreVersionComparison -lt 0) {
+        $script:RuntimeUpdateCandidateIdentity = ''
+        $script:RuntimeUpdateCandidateStableCount = 0
+        Write-OrchestratorRuntimeUpdateWarning -Key ('downgrade|' + $candidate.Identity) -Message ("Runtime update ignored because a lower version was deployed. Running orchestrator={0}, disk orchestrator={1}; running SmartM365.Core={2}, disk SmartM365.Core={3}." -f $script:RuntimeUpdateBaseline.ScriptVersion, $candidate.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion, $candidate.CoreVersion) -Now $Now
+        return $false
+    }
+
+    if (($scriptVersionComparison -eq 0 -and $scriptHashChanged) -or
+        ($script:Settings.MonitorCoreModuleVersion -and $coreVersionComparison -eq 0 -and $coreHashChanged)) {
+        $script:RuntimeUpdateCandidateIdentity = ''
+        $script:RuntimeUpdateCandidateStableCount = 0
+        Write-OrchestratorRuntimeUpdateWarning -Key ('same-version-change|' + $candidate.Identity) -Message ("Runtime update ignored because content changed without a version increase. Running/disk orchestrator={0}; running/disk SmartM365.Core={1}. Increase the modified component version before deployment." -f $candidate.ScriptVersion, $candidate.CoreVersion) -Now $Now
+        return $false
+    }
+
+    $hasHigherVersion = $scriptVersionComparison -gt 0 -or ($script:Settings.MonitorCoreModuleVersion -and $coreVersionComparison -gt 0)
+    if (-not $hasHigherVersion) {
+        $script:RuntimeUpdateCandidateIdentity = ''
+        $script:RuntimeUpdateCandidateStableCount = 0
+        return $false
+    }
+
+    if ($candidate.Identity -eq $script:RuntimeUpdateCandidateIdentity) {
+        $script:RuntimeUpdateCandidateStableCount++
+    }
+    else {
+        $script:RuntimeUpdateCandidateIdentity = $candidate.Identity
+        $script:RuntimeUpdateCandidateStableCount = 1
+    }
+
+    if ($script:RuntimeUpdateCandidateStableCount -lt $script:Settings.RuntimeUpdateStableChecks) {
+        Write-OrchestratorLog -Message ("Runtime update candidate detected; stability check {0}/{1}. Orchestrator {2} -> {3}; SmartM365.Core {4} -> {5}." -f $script:RuntimeUpdateCandidateStableCount, $script:Settings.RuntimeUpdateStableChecks, $script:RuntimeUpdateBaseline.ScriptVersion, $candidate.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion, $candidate.CoreVersion)
+        return $false
+    }
+
+    $signatureResults = @(
+        Test-OrchestratorAuthenticodeFile -Path $candidate.ScriptPath -Role 'Orchestrator runtime update'
+    )
+    if ($script:Settings.MonitorCoreModuleVersion) {
+        $signatureResults += @(
+            Test-OrchestratorAuthenticodeFile -Path $candidate.CoreManifestPath -Role 'SmartM365.Core runtime update manifest'
+            Test-OrchestratorAuthenticodeFile -Path $candidate.CoreModulePath -Role 'SmartM365.Core runtime update module'
+        )
+    }
+    $invalidSignatures = @($signatureResults | Where-Object { -not $_.IsValid })
+    if ($invalidSignatures.Count -gt 0) {
+        $details = @($invalidSignatures | ForEach-Object { '{0}: {1} ({2})' -f $_.Role, $_.Status, $_.Detail }) -join '; '
+        Write-OrchestratorRuntimeUpdateWarning -Key ('signature|' + $candidate.Identity) -Message ("Runtime update ignored because Authenticode validation failed: {0}" -f $details) -Now $Now
+        return $false
+    }
+
+    Write-OrchestratorLog -Message ("Validated runtime update is stable and signed. Recycling cleanly so Task Scheduler can start it. Orchestrator {0} -> {1}; SmartM365.Core {2} -> {3}. No detached inventory job will be stopped." -f $script:RuntimeUpdateBaseline.ScriptVersion, $candidate.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion, $candidate.CoreVersion)
+    return $true
+}
+
 function New-OrchestratorAuthenticodeHtmlReport {
     param(
         [Parameter(Mandatory = $true)][string]$JobName,
@@ -2845,6 +2997,11 @@ $script:SharePointUploadedFileState = @{}
 $script:LastSharePointUploadAttempt = [datetime]::MinValue
 $script:LastHeartbeatLogTime = [datetime]::MinValue
 $script:LastSharePointConfigWarningKey = ''
+$script:LastRuntimeUpdateCheckUtc = [datetime]::MinValue
+$script:RuntimeUpdateCandidateIdentity = ''
+$script:RuntimeUpdateCandidateStableCount = 0
+$script:RuntimeUpdateWarnings = @{}
+$script:RuntimeUpdateBaseline = $null
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
@@ -2915,6 +3072,8 @@ try {
     $authenticodeTrustedCertificatePaths = @(ConvertTo-OrchestratorStringList -Value (Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AuthenticodeTrustedCertificatePaths' -DefaultValue @()))
     $authenticodeInstallTrustedRoot = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeInstallTrustedRoot' -DefaultValue $true
     $authenticodeInstallTrustedPublisher = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeInstallTrustedPublisher' -DefaultValue $true
+    $autoRecycleOnRuntimeUpdate = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AutoRecycleOnRuntimeUpdate' -DefaultValue $true
+    $monitorCoreModuleVersion = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'MonitorCoreModuleVersion' -DefaultValue $true
 
     # AllowedServers: default server allowlist for every job (empty = all servers).
     # Accepts a JSON array or a comma/semicolon separated string.
@@ -2940,6 +3099,7 @@ try {
         JobLogFolderPath = (Join-Path -Path $logFolder -ChildPath 'Jobs')
         JobRunsFolderPath = (Join-Path -Path $dataFolder -ChildPath 'JobRuns')
         OrchestratorRunsCsvPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.csv')
+        OrchestratorScriptPath = [System.IO.Path]::GetFullPath($PSCommandPath)
         OrchestratorRunsLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.lock')
         StatePath = $effectiveStatePath
         LockPath = (Join-Path -Path $dataFolder -ChildPath 'Orchestrator.lock')
@@ -2949,6 +3109,11 @@ try {
         MaxConcurrency = [math]::Max(1, $effectiveMaxConcurrency)
         MaxLifetimeHours = [math]::Max(1, $effectiveMaxLifetimeHours)
         TickSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'TickSeconds' -DefaultValue 60))
+        AutoRecycleOnRuntimeUpdate = $autoRecycleOnRuntimeUpdate
+        RuntimeUpdateCheckIntervalSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'RuntimeUpdateCheckIntervalSeconds' -DefaultValue 60))
+        RuntimeUpdateStableChecks = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'RuntimeUpdateStableChecks' -DefaultValue 2))
+        RuntimeUpdateCooldownMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'RuntimeUpdateCooldownMinutes' -DefaultValue 10))
+        MonitorCoreModuleVersion = $monitorCoreModuleVersion
         DependencyWaitLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitLogIntervalMinutes' -DefaultValue 30))
         DependencyWaitTimeoutMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitTimeoutMinutes' -DefaultValue 1440))
         OrchestratorRunsCsvLockTimeoutSeconds = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorRunsCsvLockTimeoutSeconds' -DefaultValue 300))
@@ -3000,6 +3165,10 @@ try {
     $global:LogTextFile = Get-OrchestratorLogPath
     $global:SmartM365WarningCount = 0
     $global:SmartM365ErrorCount = 0
+    $script:RuntimeUpdateBaseline = Get-OrchestratorRuntimeSnapshot
+    if ($script:RuntimeUpdateBaseline.ScriptVersion -ne [version]$ScriptVersion) {
+        throw "Running ScriptVersion $ScriptVersion does not match the orchestrator file version $($script:RuntimeUpdateBaseline.ScriptVersion)."
+    }
 }
 catch {
     Write-Host ("Configuration error: {0}" -f $_.Exception.Message) -ForegroundColor Red
@@ -3032,6 +3201,7 @@ try {
 
     Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; dependencyWaitTimeoutMinutes={4}; heartbeatLogIntervalMinutes={5}; runsCsvLockTimeoutSeconds={6}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.DependencyWaitTimeoutMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes, $script:Settings.OrchestratorRunsCsvLockTimeoutSeconds)
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
+    Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; baselineOrchestrator={5}; baselineCore={6}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
         Write-OrchestratorLog -Message ("Email notifications are disabled ({0})." -f $script:Settings.MailConfigIssue) -Level WARN
@@ -3095,6 +3265,10 @@ try {
         }
         Update-JobsManifestIfChanged
         Update-RunningJobs -Now $now
+        if (Test-OrchestratorRuntimeUpdate -Now $now) {
+            $script:OrchestratorStopReason = 'RuntimeUpdate'
+            break
+        }
         Invoke-LaunchPhase -Now $now
         Send-DailySummaryIfDue -Now $now
         Write-OrchestratorHeartbeat
@@ -3169,8 +3343,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/9DO3fybRHBhh
-# XlU8ptCk6fRC73/HaLY5rpXdiJoYdKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3RE/wrdkCpv+K
+# A5tkj/e8+BuhMi1wPz0xSmemNLxxcKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3303,31 +3477,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILD5yTvqx3dJK52vYfMr1Qm90Lhd2kL7VwIsGgWh3io+MA0GCSqG
-# SIb3DQEBAQUABIIBgLCD3vX1DhALevnLDvlguCC06GM5zDBmJjosq7yA7BiWEnKT
-# LrZe6X8aSj3IDM3xkX8o0ZIgjPGZVtSKNpm+NEXA56DIxE+jy+wedTXYAD7W5hMH
-# jiPKXfyTPb/50+UWfLOvk9rcIcgIOw70LxM5QiUibIKeEUfYJu1er0daI6h0IP6B
-# XuBVquB8fchiiTeEp+Aw7pXHOzPzkhMmWoQVwze60c4J/sKq0205rhHVtW4qyelh
-# X5j4Chh+8rTivVI55b2Jn3bcZ7Ka6VEgI0Fcox0MymDntuF0El8cvf4hn2UZBF8j
-# /q05KqJmuI1lHrpb32RGG0/pPBFt4GYmu4xTcSl2sPaouGS82q4RgGvhJ9AmgS9J
-# c1aF5uvvdDrNt/SsBnk7gRnNRVtJ8bcqdsdBAH//IHuElBCEYvka5VaYk81Qkl9A
-# gbYmdj4H1qd7sKHuyDTbUytkVIH2+PvB1OdSNkByx874m+whLNXVRrBWbqH47enz
-# heDqIP6/OH3P5fVX7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAbsBbHpxEyjVryIod26MD/U727Bmbc7sOW0jceIW2hEMA0GCSqG
+# SIb3DQEBAQUABIIBgETpmZFvCNaC1Xo87mga+euMBaBbTOXJWWW7ILpIyDnSpaBI
+# GUO4aLmf32g1iHCjesUKcMLJ4hIAnt2J/jHIIdzfEMjoUAXTKItsNLjA0Jv4gu9l
+# pplINVIgGsBIKnk3zL0iPy5LA9RyADn0GzUt2J4ZCALFkrS0NXPxPvlbt9xBW4Kz
+# Zxn6SNuKSHa4fvBsS/3+/IMrSdpnAggMyJYn0u2wTQrZYD/NaCCUYMRw9h0hsZh7
+# bOAwbjtT63xjhyvJ3Vt0EuA7A+XJ/XGO18A43O4FL052+I1wKODTH4jNauOI4qPC
+# M2EEKLo3hLCP9D8Fwmyw5gnvt2B4CBSegOQKCnZ6MEYKtXAwc7bD742qsxKKgdXG
+# nXsDl5FAjbBDjovTGygVPHI1jDNpW+0A09cUCYh42Rd+wunuDhjQZ7CXKy1+meV3
+# JW7HKN/sioyiL2bhjFTL+mNyclXzRikK2FULhoUCAm+F9qj8JozaB8qrbHVISKmp
+# Whyvjov4/0uNaTUbxKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNjQw
-# MTZaMC8GCSqGSIb3DQEJBDEiBCBU4nnqAFwwDJtx4LWA+60wNQCCHZ8TyFLJ7yOS
-# HGxwbTANBgkqhkiG9w0BAQEFAASCAgAV2d3FsQgFwQfVpe+CQ9FdrDpj878Nm+Ex
-# KetV8xXwsa57VyDKxxeUhqNtVdiyB/awYs/8pPQIELEDsOTMRVBR/6C8l5272VKL
-# xtEwutOHn63q09GpDJ3uIzS5JgI0nIBUTTZUUmr41nFwX4h9bf9KflnoPnDDx/t3
-# ky7Jyg70g1NGHc7S1FiovYpnhH5nPBqu7ebEAVYpGhbfAUump12d+czVLHQzgxBZ
-# mxtX0hqrgeHHg4WdyZUYD3mMKR2XFb9pvi33t6K4aDRWnCpu8VcZo3QkZrOJHQ9x
-# 7NujouxrSoJI1a2SBK3wAAMimuLWlxpfZJldQ8hrc6ElZrk7zYjvhuxbt18Qmy4L
-# 7q0kuPMBXMTGY8fsoV+PSWH1LPocRcF5meLjjYwM2Q8FhsEzVvw2CgR+CRKHbpex
-# MyD+zdwGvfaKul2Tv04X74tfQbT7OpkwDDsL8b3YfEsdvYmj3KxnsGznGj9keN/o
-# cQGiyDLj76xG9RDzR7jl0JIzAzIpt00VFABMRGhuJmagzBqKCLYWHf0olK9gC3cl
-# 5QwV1MEv4tsnzjFCJalwS4ops4TIlO/gsUP9cIO/hgmQ8M/TLTSWPnxrCGHk49wR
-# FSpj5Ay8J5LYcuDCo1ananbmCwq9rJ7clshSzW9LQ/gIjHFD1m8C/15jNrU4E2v6
-# PNMsXLmJjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNzM2
+# MzlaMC8GCSqGSIb3DQEJBDEiBCA+sFn6b6+XspoGr3EJ2TtnSTuXYg7PSzyxflJd
+# ydMCqjANBgkqhkiG9w0BAQEFAASCAgC0zE44C8qU17rAvMreafn2gZV+Y07ptRiS
+# NYxNg18q+97iM+lIyiO35V/4+eLuZBVoMCGsy4txW2vnFRdNvKRVGUYdze8gr4Ds
+# IGKaMQNsqmoAoJTmA2yrQInXbgwGEfWmbPoo5z3waNnP9WBmYPCBXJSviaSGhkxD
+# xMMpkb3p0TfJb4xF1cAnBfhP/SqMQ3tFTNhJUlvvMYzCrGpnJG/cbJysINzT0ewt
+# hPo2fHRGMHFNt+5pxpxtfsLeCSTXfuXPqCaMEgdusDJ54IfEYaW9kc4Hi5mRrDXR
+# Hh14Mi45yrWmWezipBZxkIheFiE4v8p/Z8e08C+VXE/4JDbgxVWIwU2LRayMiPTz
+# cB2cbh4oW51hb+0AOme4noCk4tn3xsZ7BYLiy/aPty+/SRQwNrOzsjP36X/L18Kp
+# HJPAGKKguBIgKIYz4LmIQwMzlQejJbAMxbmAN0MKHi2i/yFB5NTgEJqku4JmzeG0
+# +3llIOLbjFQduY8AJN95tA9bCJyHiHwf3KAhZ/QoPYvZpIAGcXQGTvX5CxjVRmAJ
+# 4BvfAH1/suZ/G/4AAVJq84CC+4cCIrSRoRJjpPJxKawcp+0QOK9Xd4MhTG0Zo1Ou
+# Am1y65PBgZYZRWhEyzYxJLLzj+BXSpDk5w82q7R/OrDxGd0yraebSc747f5BMWkt
+# 6mgx1uT48g==
 # SIG # End signature block

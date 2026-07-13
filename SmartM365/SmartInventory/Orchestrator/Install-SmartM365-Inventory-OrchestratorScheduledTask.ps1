@@ -12,7 +12,7 @@ parameter. When launched without parameters, the script requests elevation and g
 user through tenant, action, service-account, and immediate-start choices.
 
 The task starts five minutes after server startup. A daily trigger at midnight repeats
-every 30 minutes for one day so the orchestrator is restarted after its normal lifetime
+every minute for one day so the orchestrator is restarted after its normal lifetime
 recycle. Concurrent instances are ignored, missed starts run as soon as possible, and
 Task Scheduler retries a failed start three times at one-minute intervals.
 
@@ -42,7 +42,7 @@ Forces the guided interactive workflow. This is used by the CMD launcher.
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -Uninstall
 
 .VERSION
-1.1.2
+1.1.3
 
 .REQUIREMENTS
     Windows PowerShell 5.1 or PowerShell 7. The script requests UAC elevation when needed.
@@ -376,7 +376,7 @@ $startupTrigger = New-ScheduledTaskTrigger -AtStartup
 $startupTrigger.Delay = 'PT5M'
 $dailyTrigger = New-ScheduledTaskTrigger -Daily -At ([datetime]::Today)
 $repetitionProperties = @{
-    Interval = 'PT30M'
+    Interval = 'PT1M'
     Duration = 'P1D'
     StopAtDurationEnd = $false
 }
@@ -459,8 +459,8 @@ Wait-InteractiveClose
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTP/LFMO2ixZV6
-# ZrJx1LaLoI/D+L5eqBC0lftIPmonxaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1iHKRe+VyJlGW
+# QblrnpUo/TA1tWvCo6l77T0Vgmao0qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -593,31 +593,31 @@ Wait-InteractiveClose
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKkCLAF+JTbNJFt1aq1vEetPDusB4ujY22SS/wr3A/7lMA0GCSqG
-# SIb3DQEBAQUABIIBgCN/cUEDJ/ysIoHlPgYuBX7lO/aahB+sBYD0cAbtZXa5eCf/
-# cxStva+4raNSnzkknLE8VK22ziejZEzh3ZVPug6Tdcomwgccz7p7kczrUUx9u06c
-# I6vNpso4Ba91UjOv9eJkN/0+SOARrFQlZfyHJVfGO8o2rJlbCYMoBrmr0LRyc70T
-# 3vOwxRN6nShUAr9iC4XPe8EmvE8jc80Z831UzIZkWb7TCBuIYrLxf5oeUrsJpmkm
-# z9BiIWbEP4xQeA+XaM9SQjmX3RycjlgPeoqI8bPQ71ezR6vzDO8fScaJgRuvp1OV
-# AP8y1kQt6UUOi+0MkcY60v8TnYHUgNEaH2+JkHx4fPZDkdbwiFxbDHt7PU62SYOA
-# yZdCxtuNW3o06/rOKq5v+i5nTnGZX03ZLztP3k+OMT6uvVPvQM+Nn8Ir5vvhC1l4
-# 9vE0FrtY3STy/hBrKhKvDZUOSo4UqS7q/q5dkNyUR0nW4YtvEEzCTv3Ql/dd9zZy
-# Few8yGu7zR8X/AGAfqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICinmy3/BR1JyfJgtCO6CuDSDTjMaCcUn2vPwVYPUQzBMA0GCSqG
+# SIb3DQEBAQUABIIBgGJI1aH41viif6Ixi2h//dTvB5bmY5aYKqFzy9zl4mqGy/vh
+# cAFCPKS/LB7QH4jZeQsvxULDsRw9m1JeY9I+FjEfudSbnyc0z0edFIPkg7sw8Gj/
+# XjC+wFbt90lIxQIfi2BVlhuKPVdmJyJBtBz9RnY2Z5Ihz/6tblhFxT3Jp1NFLAif
+# obajefJv1KptLO/qDFkro/yXODPygTj1RaonXlekszeQlguzPzU/gzzb6c7XOoEp
+# CkyugAqK+Kalv3gOik9zYItqcq7FOnHrCyIz2W+ow6At96oaHiW8DjwQcdOpp312
+# p1gm24l7hpiO+gRUZB/J9sqjzliuWm3mYAvvhxnwCvgUtzBiSUQ3NpQi+gLmOg23
+# EZSkOO2E1jb671dVI2o8Xcy+olHNkXjfCvC1WHTGJePnrVTz8wZWimzN2ugye+Wa
+# MkkYm4T64GKI42kcqLNom/1/9nTabMgWE3q57sezwRAwtH2n1QBhcBDqza+bpmAv
+# X+k73K1Pt04SuDjg7qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzdaMC8GCSqGSIb3DQEJBDEiBCAxRYw/pN0hay69XoreIsqJ6uDyS+JiRf12Tdyf
-# +xjfVDANBgkqhkiG9w0BAQEFAASCAgA4PyPif0PnMAXqc0AF7sFE7Qi4otOzyK9F
-# GNCHVvsI/YpRnzPmWFDk9vtjuv8C7ADlO19rh+9CY8Bwmby4WaTyBg51Nh9aFFBj
-# H+lhyBFQCpECTx0cnMQjonAQKGdTMZlyzJXUePS0YXhw0jlXDBc3heLg12ltJbvI
-# 0BtxSamAzYFQq9f7BEYY5Pj0Rqg5l72Hy0FNnuuYDT4GUapeNaql2/X86JMg3oie
-# bjufBw3IR9uHXgcABEOlizrCFxOeu5eZ2q+rXAUhaEwjW0X5r8udcXorP4LNHulE
-# ZvoQHgubq16oIlzz5EUJgOEweYHqMh/FtXj0X0V6CcmBZiRur68nrmAhsPcOf6vd
-# 4kIO+9BMSASux/rOfttsZtaFGippmuaOjQYBzkqnCmyjwN/Jd9viwJx8+ugg3lJU
-# CHMq5MoEUmCiBf4mFtz7Em0HA0v58/B12wnl3kibreEB9PVeGjlXSKyc/CpGO5EG
-# 1nPuXdFGoBqMrKFRjrvUPv5dIq0UJUHcEiFIcA7yVV7r1cGIgarxPhWPYBPenjPv
-# vrk9HxKg+zeTPlS8+3bqw3U7u0SWEBbWSvgiyQSlEnBdIa6iGGhE/SEe2hoMSr0l
-# 9DgpIbDkzD8GPmVAn1Ur+ECyWHG04rGHk5EfLtHiOvY7oM0OoVRi/3FJplATnnPQ
-# q+P+eMFT9A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNzM0
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCT1sgKcW2AClMng83rkv4OkBzBPsQSlnMaM5EU
+# IAdT7zANBgkqhkiG9w0BAQEFAASCAgAbpPUwAovZFe3VXT3Vhxar/vwOUpyqOtSC
+# MpdEWz+NFhTGUFw/WsMUJQhciDtF1b0E9641/okMIXVQ8exzu6xo95gAm/pqsUqF
+# E/zfVujLm4qLjWtYV+hGdjZAYe55yTtkRNprD63r6WW53qvhCYCq6SdVDFV9WZl9
+# DXLfBaMaBKpQg0luR3M2iv1jnA/9A50BHNj+29fRCTsXm7au1A1HpwNDAUKoKprG
+# YQh7HMj4JFDS8banxDHk138BCC/kH0XYswH9VZfiZZej+KzRxrS1S3Dr5Z6pkJ8d
+# W7VW+e/A44kme+TsrHZN8+yY83ci3iNcGGP9VApMNaI8vOjZxXg5EE4mnd/nQ3WC
+# 1oeuYKgG+qv5TvXYZ2s0y3RsKAqh/phAW/jrcwEen36ZsMFqhOCCCcN8dLQ75Sj1
+# hSPxCkXNLjJNbrQb0kyC8LoZ+Z8nk/lfsjjO2SMF+QQ3EcsA8RJ7rigfDR5EBfAB
+# DzrINqyivJV++f8B54fYR64JnwgdOxXlSdiue/8/OzxOHzAMM5wmci+HQNF5hB8x
+# RokPExjQdfubbOwv17chi7Z9zkpD0Jz/Ql5pOcWoyFKPIAVlFGH9cqDB2r/S0xXA
+# pBilJ5MMK05gG8X5pTX4hzjgcdtfVwRPSAqiqnf/r+nKqPXmftub01CCcYikORhZ
+# tigJazPUdQ==
 # SIG # End signature block
