@@ -10,12 +10,13 @@ if not exist "%INSTALL_SCRIPT%" (
     exit /b 1
 )
 
-echo Installing workplacecloudhub.com public code-signing certificate for the current user...
+echo Installing workplacecloudhub.com public code-signing certificate for the local machine...
+echo Run this launcher from an elevated command prompt.
 echo Script:
 echo   %INSTALL_SCRIPT%
 echo.
 
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_SCRIPT%" -StoreLocation CurrentUser
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_SCRIPT%"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" (
