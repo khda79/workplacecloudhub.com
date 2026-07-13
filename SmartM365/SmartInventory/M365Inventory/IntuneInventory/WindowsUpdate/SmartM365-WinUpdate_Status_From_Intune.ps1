@@ -30,6 +30,7 @@ and full remediation columns. Single CSV output for Power BI consumption.
 PARAMETERS
   -DryRun                    : Run all API calls and processing; skip file writes and emails
   -MaxPolicies               : Limit number of policies processed (0 = all; useful for testing)
+  -FeatureUpdatePolicyId     : Optional Intune Feature Update policy id to process
   -EnableReadinessEnrichment : Toggle Win11 Readiness CSV enrichment (default: $true)
   -SummaryEmailMode          : Always | OnChange | Never (default: Always)
   -EnableSummaryEmail        : Toggle success email (default: $true)
@@ -48,8 +49,9 @@ VERSION
 
 param(
     [string]$Tenant = 'test',
-[switch]$DryRun,
+    [switch]$DryRun,
     [int]$MaxPolicies = 0,
+    [string]$FeatureUpdatePolicyId = '',
     [bool]$EnableReadinessEnrichment = $true,
     [ValidateSet("Always","OnChange","Never")][string]$SummaryEmailMode = "Always",
     [bool]$EnableSummaryEmail = $true,
@@ -253,6 +255,9 @@ $TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantI
 $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
 $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDomain' -DefaultValue 'contoso.onmicrosoft.com'
 $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
+if ([string]::IsNullOrWhiteSpace($FeatureUpdatePolicyId)) {
+    $FeatureUpdatePolicyId = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'FeatureUpdatePolicyId' -DefaultValue '')
+}
 
 # ==========================================================
 # Report selection
@@ -1050,6 +1055,15 @@ try {
         throw "No Feature Update policies found (windowsFeatureUpdateProfiles)."
     }
     Write-Log "Feature Update policies discovered: $($policies.Count)" "INFO" "GRAPH"
+    if (-not [string]::IsNullOrWhiteSpace($FeatureUpdatePolicyId)) {
+        $requestedPolicyId = $FeatureUpdatePolicyId.Trim()
+        $matchingPolicies = @($policies | Where-Object { $_.PolicyId -eq $requestedPolicyId })
+        if ($matchingPolicies.Count -eq 0) {
+            throw "Configured FeatureUpdatePolicyId was not found in windowsFeatureUpdateProfiles: $requestedPolicyId"
+        }
+        Write-Log "FeatureUpdatePolicyId configured: processing only policy $requestedPolicyId." "INFO" "GRAPH"
+        $policies = $matchingPolicies
+    }
 
     if ($MaxPolicies -gt 0 -and $policies.Count -gt $MaxPolicies) {
         Write-Log "MaxPolicies=${MaxPolicies}: limiting to first $MaxPolicies policies out of $($policies.Count)." "WARN" "GRAPH"
@@ -1547,11 +1561,12 @@ finally {
     Cleanup-TempFiles
 }
 
+
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBORve2sY4NmqXi
-# hMj5P6eIiXmQznYnHmJPB1qcxnbnHKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfkpwgGdzaZWjT
+# fT1xiN1cYiZlMWzZhtyIQ/ZURMjCqaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -1577,14 +1592,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCC9gqEejMB6/8ZXfBRXQdMaB3wnUbSYeqPFAKDf01pghTANBgkqhkiG9w0B
-# AQEFAASCAYCyQwK/fyet16X33far5iFf2W8Z47xD6d22jA6yrZDvmRXQTB8xGfg7
-# N1O2uMcn3jd2M+S6Wi3sybwWgvW66ZivqrZrCVQ1mZBb4NRiYE1RMzTD35USOQ//
-# xPeZZ5tHL87Jwp81Pv6DJL6cTGPYaQUgy+V5Ii6V3qbin7uSO38YAvJrB5AuuQhD
-# CFo8Qge45HwEOOp8KbKgcQ9V0ox+s/gSG+HNJ/lvpj1gqh2noTB4aZYdW0AY2BF7
-# jIgWU7IrjL5syIn1zTLEVp8r/H1iRq2O2GRkoHuo5RartiRZY3bCnQ+tbiG5I4NQ
-# vexeOd/JqrW9r883X1ffM+HSpRY12zZYQfc+EsckP2bu8dPTXZtwirCxgop60Aas
-# TFB3V2jAOFeddMFHbTL5Fh/mUzLFQlgKvzpzwncwaY3arP8iNlrHbx2WD2mIierj
-# oZr1v5wkY6w3SY8j3QXSgTcmUzQEHZzjHdhRBzl//jKvveM/VDU33EZ8HPOc7/qQ
-# /CAuoqrTSeI=
+# BDEiBCB96sl0H8+dXwVKzHnpmNUemw50rbZdwLIg8fEgps1muTANBgkqhkiG9w0B
+# AQEFAASCAYBRl3/nx6VMRpyger7B1+ocSLyUNm8MYH2HgioyLEqeWKux9iUOciNE
+# Mh9dOwcduT3uRXok9vHoqRz1hl8D0mbw9zWYSuBhy1IKQtvFmEbTYe086mZ9Bc84
+# aA7+XndPuac6cIvUp0ALmCmR89iA+//Wc4H9mb3CkrMHIqlZJypV7NwmVIh18+KG
+# WNbfP3VESeGUQr5ah/uq/E3K4j5W0jOo4IzRJJbVuiRq+/epB1OBlSc9hstS/e6N
+# mf41x/D6u8Mt/WYBaKZtyc7knamoUaL7Dxw2hSR3jQrYBWpi9tQ3IUIec4KuUysg
+# luRJql20fDg4Dz0wcCZRLWhlDdLTHLjqxEwY4oISM4Y5IYY+CKv/hgmjP5/UglUG
+# Kr4uRKB/4jfHq0bO+m7HmAMjJmKBGA1d469BRDfJMVvYPpmIR/pKpoSYWoE1+rxE
+# 1MadPB3FiV95a1f+heZJD2e2/jpP/yhljLgri1iHlanKfFSrNYOLPz6JOP5b6UK5
+# 7Y0E4oVezY8=
 # SIG # End signature block

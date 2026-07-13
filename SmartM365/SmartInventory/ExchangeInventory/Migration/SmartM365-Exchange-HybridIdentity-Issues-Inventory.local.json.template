@@ -26,7 +26,6 @@
   "EnableWeeklyHistory": true,
   "InputDataLastFolder": "{{LatestCsvFolderPath}}",
   "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\Issues\\HybridIdentity",
-  "EmitLegacyPowerBIAlias": true,
   "WeeklyHistoryRetentionWeeks": 52,
   "AllowedTargetDomains": [
     "tenant.mail.onmicrosoft.com",
