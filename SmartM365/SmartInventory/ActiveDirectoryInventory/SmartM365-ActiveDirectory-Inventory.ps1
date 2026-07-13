@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.25
+1.26
 
 
 .REQUIREMENTS
@@ -496,7 +496,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.25"
+$ScriptVersion = "1.26"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -688,6 +688,54 @@ try {
             }
     }
 
+    function Invoke-SmartM365AdFileOperationWithRetry {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)][string]$OperationName,
+            [Parameter(Mandatory = $true)][string]$Path,
+            [Parameter(Mandatory = $true)][scriptblock]$Action,
+            [int]$MaxAttempts = 12,
+            [int]$InitialDelaySeconds = 5,
+            [int]$MaxDelaySeconds = 30
+        )
+
+        for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+            try {
+                return & $Action
+            }
+            catch {
+                if ($attempt -ge $MaxAttempts) { throw }
+
+                $delaySeconds = [Math]::Min($MaxDelaySeconds, ($InitialDelaySeconds * $attempt))
+                WriteLog -Message ("File operation retry: {0} for '{1}' failed on attempt {2}/{3}; waiting {4}s. Error: {5}" -f $OperationName, $Path, $attempt, $MaxAttempts, $delaySeconds, $_.Exception.Message) -Level 'INFO'
+                Start-Sleep -Seconds $delaySeconds
+            }
+        }
+    }
+
+    function Remove-SmartM365AdFileWithRetry {
+        [CmdletBinding()]
+        param([Parameter(Mandatory = $true)][string]$Path)
+
+        if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return }
+
+        Invoke-SmartM365AdFileOperationWithRetry -OperationName 'remove file' -Path $Path -Action {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+        } | Out-Null
+    }
+
+    function Copy-SmartM365AdFileWithRetry {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)][string]$SourcePath,
+            [Parameter(Mandatory = $true)][string]$DestinationPath
+        )
+
+        Invoke-SmartM365AdFileOperationWithRetry -OperationName 'publish file' -Path $DestinationPath -Action {
+            Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force -ErrorAction Stop
+        } | Out-Null
+    }
+
     function Combine-CsvFiles {
         param(
             [Parameter(Mandatory = $true)]
@@ -703,45 +751,70 @@ try {
         $files = Get-ChildItem -Path $SourceFolder -Filter $Filter -File | Sort-Object Name
         if (-not $files) {
             if (Test-Path -LiteralPath $DestinationFile) {
-                Remove-Item -LiteralPath $DestinationFile -Force -ErrorAction Stop
+                Remove-SmartM365AdFileWithRetry -Path $DestinationFile
                 WriteLog -Message ("Removed stale combined CSV because no source files were found for filter '{0}': {1}" -f $Filter, $DestinationFile)
             }
             WriteLog -Message ("No CSV files found for filter '{0}' in '{1}'" -f $Filter, $SourceFolder)
             return
         }
 
+        $destinationFolder = Split-Path -Path $DestinationFile -Parent
+        if (-not [string]::IsNullOrWhiteSpace($destinationFolder) -and -not (Test-Path -LiteralPath $destinationFolder)) {
+            New-Item -Path $destinationFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+
+        $destinationFileName = [System.IO.Path]::GetFileName($DestinationFile)
+        $stagingName = "{0}.{1}.{2}.tmp" -f $destinationFileName, (Get-Date).ToString('yyyyMMddHHmmssfff'), $PID
+        $stagingFile = Join-Path -Path $destinationFolder -ChildPath $stagingName
+
         $isFirstFile = $true
         [int64]$combinedRowCount = 0
 
-        foreach ($file in $files) {
-            $rows = @(Import-Csv -Path $file.FullName -ErrorAction Stop)
-            if ($rows.Count -eq 0) { continue }
+        try {
+            foreach ($file in $files) {
+                $rows = @(Invoke-SmartM365AdCsvReadWithRetry -Path $file.FullName -ReadAction {
+                    Import-Csv -LiteralPath $Path -ErrorAction Stop
+                })
+                if ($rows.Count -eq 0) { continue }
+
+                if ($isFirstFile) {
+                    $rows | Add-SmartM365TenantKey | Export-Csv -LiteralPath $stagingFile -NoTypeInformation -Encoding UTF8
+                    $isFirstFile = $false
+                }
+                else {
+                    $rows | Add-SmartM365TenantKey | Export-Csv -LiteralPath $stagingFile -NoTypeInformation -Encoding UTF8 -Append
+                }
+
+                $combinedRowCount += $rows.Count
+            }
 
             if ($isFirstFile) {
-                $rows | Add-SmartM365TenantKey | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8
-                $isFirstFile = $false
-            }
-            else {
-                $rows | Add-SmartM365TenantKey | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8 -Append
+                Remove-SmartM365AdFileWithRetry -Path $stagingFile
+                if (Test-Path -LiteralPath $DestinationFile) {
+                    Remove-SmartM365AdFileWithRetry -Path $DestinationFile
+                    WriteLog -Message ("Removed stale combined CSV because no data rows were found for filter '{0}': {1}" -f $Filter, $DestinationFile)
+                }
+                WriteLog -Message ("No data rows found while combining filter '{0}' in '{1}'" -f $Filter, $SourceFolder)
+                return
             }
 
-            $combinedRowCount += $rows.Count
+            $combinedRowsForValidation = @(Invoke-SmartM365AdCsvReadWithRetry -Path $stagingFile -ReadAction {
+                Import-Csv -LiteralPath $Path -ErrorAction Stop
+            })
+            Assert-SmartM365CsvDataCompleteness -Data $combinedRowsForValidation -TimestampedPath $stagingFile -LatestPath $DestinationFile
+
+            Copy-SmartM365AdFileWithRetry -SourcePath $stagingFile -DestinationPath $DestinationFile
+            WriteLog -Message ("Combined {0} file(s), {1} row(s), into '{2}'" -f $files.Count, $combinedRowCount, $DestinationFile)
         }
-
-        if ($isFirstFile) {
-            if (Test-Path -LiteralPath $DestinationFile) {
-                Remove-Item -LiteralPath $DestinationFile -Force -ErrorAction Stop
-                WriteLog -Message ("Removed stale combined CSV because no data rows were found for filter '{0}': {1}" -f $Filter, $DestinationFile)
+        finally {
+            try {
+                Remove-SmartM365AdFileWithRetry -Path $stagingFile
             }
-            WriteLog -Message ("No data rows found while combining filter '{0}' in '{1}'" -f $Filter, $SourceFolder)
-            return
+            catch {
+                WriteLog -Message ("Failed to delete temporary combined CSV staging file '{0}': {1}" -f $stagingFile, $_.Exception.Message) -Level 'WARNING'
+            }
         }
-
-        $combinedRowsForValidation = @(Import-Csv -LiteralPath $DestinationFile -ErrorAction Stop)
-        Assert-SmartM365CsvDataCompleteness -Data $combinedRowsForValidation -TimestampedPath $DestinationFile -LatestPath $DestinationFile
-        WriteLog -Message ("Combined {0} file(s), {1} row(s), into '{2}'" -f $files.Count, $combinedRowCount, $DestinationFile)
     }
-
     function Save-WeeklyInventoryHistory {
         param(
             [Parameter(Mandatory = $true)]
