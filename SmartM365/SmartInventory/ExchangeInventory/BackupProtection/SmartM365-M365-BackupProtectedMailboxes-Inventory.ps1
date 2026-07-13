@@ -31,7 +31,7 @@
     warning and exports the partial result set. Defaults to 2000.
 
 .VERSION
-1.12
+1.13
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
     and a supported Microsoft 365 Backup service-app/controller registration.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.12
+    Version : 1.13
     Author: https://github.com/khda79/workplacecloudhub.com
     Required delegated permission by default: BackupRestore-Configuration.Read.All
     Uses the Graph v1.0 Backup Storage API (GA). Note: displayName and email properties of
@@ -102,7 +102,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -439,8 +439,9 @@ $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $csvName = 'M365_Backup_ProtectedMailboxes.csv'
 $timestampedCsvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath ("M365_Backup_ProtectedMailboxes_{0}.csv" -f $timestamp)
 $latestCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath $csvName
-$logRoot = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) { Join-Path $ScriptCsvLogFolderPath 'Logs' } else { Join-Path $LogAllRootPath 'M365-BackupProtectedMailboxes' }
-$logPath = Join-Path -Path $logRoot -ChildPath ("SmartM365-M365-BackupProtectedMailboxes-Inventory_{0}.log" -f $timestamp)
+$logFileBaseName = 'SmartM365-BackupProtectedMailboxes-Inventory'
+$logRoot = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) { Join-Path $ScriptCsvLogFolderPath 'Logs' } else { Join-Path $LogAllRootPath $logFileBaseName }
+$logPath = Join-Path -Path $logRoot -ChildPath ("{0}_{1}.log" -f $logFileBaseName,$timestamp)
 
 foreach ($folder in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logRoot)) {
     if (-not (Test-Path -LiteralPath $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
@@ -450,7 +451,7 @@ $global:LogTextFile = $logPath
 
 try {
     $CurrentOperation = 'InitializeScriptEnvironment'
-    $initializedOutput = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+    $initializedOutput = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $logFileBaseName
     $ScriptCsvLogFolderPath = $initializedOutput
     if ([string]::IsNullOrWhiteSpace($WeeklyHistoryFolderPath)) { $WeeklyHistoryFolderPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath 'WeeklyHistory' }
     $timestampedCsvPath = Join-Path -Path $ScriptCsvLogFolderPath -ChildPath ("M365_Backup_ProtectedMailboxes_{0}.csv" -f $timestamp)
@@ -534,8 +535,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDswNMRwbIslbBE
-# rK5r71lonBX06jdks22lZQWXKsWSMKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUi+q4NXcN/9gR
+# rtHIqUgTfqCFityzumD2kscXrLynLKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -668,31 +669,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDxnW0VJ8pQaCW40Rf5V8w2XDadDL3GHNJHjzTMMsbQxMA0GCSqG
-# SIb3DQEBAQUABIIBgEMtjksVtIE+Rw2j2Cffnd5Po16QRK/gZ6N+r9yuZLXbRWd4
-# sCdjwo90wI3lIk3KRc6r/2hvIRek30cqJDVlVz7MwRN2OyaAHgrOtEiVx8WnPGAq
-# 43n69Rh3aTfssaXtfanOrh5rTWA+OKoroQBa77jlpqjt+U2MkY4lvn9jlJ4nDblw
-# TvOxMG1OuC/9zW4RKoYk3hHsDFjWB7iReohuepDDNK4G+3MTAQclRQVdAkpAbm6F
-# n3Bx9zXsiecH82Wg0W4x3Da2wkFE0HGCJMmp/JG0ffIeY+Mkw7r+PBA5Tc7MhkK8
-# AJi6uV3rxJbKCYRse9x6CyMqxo3Qf9URl7ICMg8k/f8WocMDNel1bZhCjwuaG4xx
-# Pm+mGd7s2r5yvdKY9XAwv78v3lVbjFkWJdz5rQCMcfkT3hcFDKksg4ekNurIkMMN
-# dmE4hWAJbx8f1ZR3WItpV7Y1WYgowCKg8J/JDNcp5ciP/4v0JZ2hBWOkfYKVMHLQ
-# DZgYSi00IxljxOIZTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFe7igeA564faB0LqWp4Q2h84MP21llOiCcGdWtbOTktMA0GCSqG
+# SIb3DQEBAQUABIIBgJSLlOvyLWTC9hvCyUS0lv+lazPqLp2H5BPzVJbaVjdd2b9V
+# VTuuDTyBNDwWrXe00ZIK/IjrP7qN46jBTLMoB4/k7y9+u2IrF73nIE6ZFUCImzvk
+# jW4MYFeLPRPK4M1BOFhwIABdk98WNOgHCvij24DZv9JPBYLzVLWGakfLW76jCIbZ
+# q6r1st+UaZZnGtC3bcl1qvoE2NYvtd3OMXmS4dYF/ya64soXn0nAMvED49n7XqBz
+# o3JiA4t0cn18KXEI7XmYpX1TlYLaA/NF5FcuFvHY+iLkoBEQSnVzpr+e5AJr8yjJ
+# Hy/OBHJdsbj7pVLZqkx5rN9GDxjMr2v55Gvu4y6ztOLEK3a691uPSUnoPKrJsF/9
+# Ul/iiKNtu88J4r5B04wGPD6kaVUN3XGGi1yLIY3gjKT8wthkqjZN3jYC9IRKkIHv
+# qT0K1qiWkJhHlekKaETgNu1Yx5ZkI4hzittwVlYYVvhOa9XFT/BTgN0wOQrc6E8y
+# V/sTo5fbKE+2K1pCsaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNzEz
-# MjdaMC8GCSqGSIb3DQEJBDEiBCDJBgnmzRSIqI4jeMSSYltyPwcKuoST+V8rtoKQ
-# xTr/mjANBgkqhkiG9w0BAQEFAASCAgAP6EjpE9YHK8djyI9A/v8XldeubPNo9nNB
-# SkEVHKroighGYxgmshRNE67zEG+uiJaUJLhQ4tdPMe0JgtO8axgni4FbLYm8VCoZ
-# BE8pXJeI75QIlWGmCMxiEgKjr+yTXf9IqQPhBf+9HtpFOdSKv7E4NS7rEqo/fGLZ
-# 5BTo0liG0TLrZ7NDsCYAlW9k1EvjY+FMUF5yts/mCcYreNCv92Dp9mVWD1/7SZia
-# Khlul/T0FHO5iY4IM9AxPEZPK25BdjG6HqahEYnlBgIROt4E92NuF28CdwIWFrWS
-# AsPqNrx1ozbZkjmjRrDXIzcE8MBYpkJNMhdRCrQHZiQaAn9aTFWHo9JTtjR0/DCm
-# i3xuwLICckYfgTRw6B/q75/Q65tz8sCBPsk87UklhQnY4O+4411FYdJ4zRsAfWd8
-# mvaLiF10UNrzL3cfxsQqg5ll9N9ZmoT3gCFcsPBJ8RcVzugyezchQ1KPlmncywsA
-# fdSUkTPw9ksuoQLH5W+7xztX/yWsTgm7bkNZV2bkuKf/3R1Kf4dZtf1f9y+BJCk4
-# yrgSWvgn+qyu4wjmAoIjyPOXUBunyKrQJZGxVaB5mR954U/JJGX47UK7XgorcuzZ
-# urNepWW4Rx/wpjVWkDwnQQexTAsCFFMKnYQ+f/WKuPwtkrQ7LS76d89uJSfUX+Hc
-# I00tDpRt/A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDMy
+# NDJaMC8GCSqGSIb3DQEJBDEiBCCZJs/dMFaQvhaWu8QUdDGD4i1n+mrpte8XKPru
+# mjlu8DANBgkqhkiG9w0BAQEFAASCAgBQUbHaT3isqEVm35XP7sEth5ljHy1/yV6d
+# xfW6wtzBg1OY84PzxygmFNrASIaK41T2Lr5+yUIZQPbJ6YUpRJ6evjM6UpOyfRrh
+# a+YWKIKNy0nNl6PoTiZkH1UqweyzCbYsZ1G3i32ejScBQ5tYk9WRLaKbQLRQ3V37
+# 2UnmwIiAbfqeeF8fio7RmSZFcLrrzyYS56A6cQjliwe2FAmSRZDkhBPCHrJB/oA9
+# ZY2ZQ11NstvFjbNv91krusxFnJgHnY9Q7TJjyoSOohZdBGY6M+75dNlCe37tQory
+# 5UHao4nMuP9nAnebd9AuR30B/Pn3lq8XvCmlou0opFHifQZi656F6emtZW3fGhTO
+# cqWg7y1X7Tr1+PESY8ii1DpPSenCDruiXkKaWJAktD7Hf7DwNCsWW/3A8THi/1ni
+# Nf+FhTBYx6o+KqNbhTPupUvTsH1LpC+ALj2YcnLzp1NnvNwyE67EEwvtum6rMnLB
+# QTTmBiiVnq0pUIsuAtZe/cY/t7bMXc4TLSXW5knah8e+pPQxQSXE5mFWwu51GMQZ
+# lC9zzN0cifyHk4Ch5vluC2TgOHk5rmc33obx+0WMS+3nn3SHIQIZB7m9A3zIMYRS
+# DjshVsgD1Q5iffywXM2Mh6U3U0sJYGrNkKP7qO7RDkiRASgdJy+jQcA7XfHjakaB
+# ZwU5ulwqIg==
 # SIG # End signature block
