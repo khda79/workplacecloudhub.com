@@ -48,7 +48,8 @@ Features:
 Tenant profile key to load from Config/Tenants. Defaults to test.
 
 .PARAMETER Connect
-Passed through to every launched inventory script (forces a fresh sign-in in the scripts).
+Passed through to launched inventory scripts that declare a Connect parameter (forces a
+fresh sign-in in those scripts). Scripts that do not support Connect are launched without it.
 
 .PARAMETER DryRun
 Prints the planned occurrences for the next 24 hours per job (plus pending catch-up runs),
@@ -91,7 +92,7 @@ detached and are re-adopted by the next orchestrator instance.
 Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds.
 
 .VERSION
-1.3.19
+1.3.22
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -101,7 +102,7 @@ Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds
     inside its own child process.
 
 .NOTES
-    Version : 1.3.21
+    Version : 1.3.22
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -125,7 +126,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.21"
+$ScriptVersion = "1.3.22"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -1972,7 +1973,33 @@ function Start-InventoryJob {
     $argumentPart = ''
     if (-not [string]::IsNullOrWhiteSpace($Job.Arguments)) { $argumentPart = ' ' + $Job.Arguments.Trim() }
     $connectPart = ''
-    if ($Connect) { $connectPart = ' -Connect' }
+    if ($Connect -and -not $useLauncher) {
+        try {
+            $tokens = $null
+            $parseErrors = $null
+            $targetAst = [System.Management.Automation.Language.Parser]::ParseFile($scriptFullPath, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors -and $parseErrors.Count -gt 0) {
+                $details = ($parseErrors | ForEach-Object { $_.Message }) -join '; '
+                throw "Unable to inspect target script parameters: $details"
+            }
+            $targetParameterNames = @()
+            if ($targetAst.ParamBlock) {
+                $targetParameterNames = @($targetAst.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+            }
+            if ($targetParameterNames -contains 'Connect') {
+                $connectPart = ' -Connect'
+            }
+            else {
+                Write-OrchestratorLog -Message ("Job {0}: -Connect not passed because the target script does not declare that parameter." -f $Job.Name) -Level INFO
+            }
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Job {0}: unable to validate supported parameters: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
+            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
+            Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
+            return
+        }
+    }
     $engine = Get-JobEngine -Job $Job
     # Out-File:Encoding pins the *>> redirection to UTF-8: Windows PowerShell 5.1
     # would otherwise append UTF-16 output to the UTF-8 job log.
@@ -3129,8 +3156,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFSae41v3NQ6HK
-# ftkBivr68d318mEWIjIuTQ3yPgQadqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDb5E9n2iLWX9ux
+# 1bT7r0a0PBqgKaRlrO7mqbokzsceo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3263,31 +3290,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGhqd8nrxa8jSvEZSurLWyRA0ju4fDp9wm65v7C8knDUMA0GCSqG
-# SIb3DQEBAQUABIIBgDLZ3bazFAHFfzdW27rAyyMD0ukpC5rW82s4fVr5lx7WtAbO
-# gG4IhxNQ/JOLM/MBqoHnF/Wf39thpeqTx7QSeJgEX4tKfnqGBXgiWqNqX8I3uMZ/
-# F2gFh+cmhEC/JJ0kmXdytlDjk0GBbIpdKo5h6p8zQlsIuekowWH6Bui93sJ1aBE6
-# dnhSEWnNqO3/Nm6FGjw/oflhmPnKMtEnmHD0KfOvUvseDtDjboMtNzeI9cva32jt
-# V2y/KPeRVmLE7sMftxGacnEbvSG25826kSbjwAp4UBb+oRJpef1PLch6P6ta/1qb
-# t9B6X8lOh66bBOYxEV3YqmbCwQtllurNFSMIUuiHDNvaRb6iwz6vLs7CbiPA82dc
-# kbi9cuyFt9mGLWXCwEdGcvnRLSKi6ITQM0yu3w10hSQvC7JQlqzrWawktH/WjR5E
-# wxihTL35f3WvfHsDkEoAU+HK2kAouZZhkKR8jmifAFR2BOsqWx8vXhCM9GZwezDQ
-# S2tEw3nmKWtAVm2MmKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMzUKdkDL+7umn4Cg9z8IHw8Eq2C4UZWmgUu1AEtgyd6MA0GCSqG
+# SIb3DQEBAQUABIIBgDwz+QadINz4iFCL+947077dJj/OsxWwnCecl1pe5KKyp2pd
+# L5uyGkUd2l5gV2jgKXcCrSiXtFPLL45Ki1xrvbQ41Cb2sc/wHigfHD2yMJQX3Iak
+# sU1M8tLDf5igHrQ6RzS1C78AcBcLHriFvzVC2SjW1k2x/nY7MRIBRv3QxcIEjVag
+# eOWwdREPZujcS1T/u0CnOQVrFhJ20ZV4qCFb3O15qG76Xnoc4dJC8FFtwJ9BlXPE
+# 8qY3Ce8J4C4ui5vhOqVT1hE6OP27jVxSAzm2GoEOoxDcvHVUZ6+M0zKv0lQUgc/0
+# H/qUOrFCcCh3rGNlRVGCNay5jdgb3ifq8JUSxEOCY8i5/pdYhqPBYe6b6dX2h9Od
+# 1k3ywexY9UA9QXBVUFGDLsXw1m25aEoLJx+TdW1mRiz8m0kPQkWxmdkgcAssfg8/
+# GqhB+K+VTyNMiJUIZENh04yUwU3xsrel/HnLdA6NonIj9PoSUV/2jLt+yJMMNLIG
+# ExzgbGXADQfk91RTZqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwOTAz
-# MTVaMC8GCSqGSIb3DQEJBDEiBCC9a+iwyU5/jQnlpI7b2EeTdUP4gHD0PW4kgnsQ
-# FVPEMzANBgkqhkiG9w0BAQEFAASCAgAM7OVBxs4PHf9OxN0WsKlp6bqVDQzqbaUU
-# 2Rjz3Fvm06djDUL4nenjpgP3gBBaHJR3jMTPnbFoMYyXfKnX+2X0rdXPzacz1cvh
-# vyvLWUxHaSa34fJHA39FGPnbLmTD1YjgXu5UHg6AICrzMKw68Mzq3cxi4lNX14I5
-# uSPt+1SHpQ777sWb2xqu+F6aBX8+ewmi2fnDlV8r1bSG9NtJZXWz4apALTSRzCPf
-# kKKIKNM32/0tW6hxIc8LgHOpuLpeiJsG7hiGsY3E/FqkX/Op1RkHLOSayFRPKUun
-# IBNofyNAfsi/Qe9WZ4cjqoNPP4o53GxmKp7LybL8iJfK/EjW4gSXb0sm3OUAD4mQ
-# +LE6Kw8XAnP0x/R8054WjV5OXsDhvYA4/KbL3NLgkdEEOwv9OnTxLUUJOVvih5GY
-# nB5oIKkN5JdmFKAtnNQjYJHu9hjFka3YNhy67PiqMULU69nbB2SEjduKuKuCUuWN
-# nAvTQz306wOKCKJZUEFaA4zQ/oXxmJLrcRQytR78HF5BIYhaQ/8Z8IrbfQkwD01e
-# +dNFF3N2EJj4X0YJcw18HuXvPfpfEIxWeLCKVfOAJoJOW49dnXkHF9Awv9KDjUZ0
-# XL5Xvd1tSPb3fsFSrGrxrYNF4bCW20nUJBHZo7jvClBWDskVRP3mXidCJbiFB2Z/
-# On/B8ssOgQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
+# MzhaMC8GCSqGSIb3DQEJBDEiBCBcmSZuKgf9s1d20UoNPfKg+/ExrMH7jKnYfYHY
+# 6NjIhzANBgkqhkiG9w0BAQEFAASCAgB7vKuf1WKT8byfaSu7VFjeHTd1dm4r+eKq
+# nsHuRYNCK5S5M+TLTRB+QQJ2LigotTr0nuobqgif5gIskD6sT/l/CsofEzBCa90w
+# zD1Y9Vz8C/cQWMAWsDCbe+NuSuuKmZJv7cEucQ1cLJSuRiA1X/SzT6z7OqKlNu+/
+# SM6X4d8ZItzpPwf+JicLoH5pCGrrt1oK6z6WGi0avLrpIUnH2Z8DdWWyHknLIWwV
+# 7SA3xDkEV55CV83EEvbAURTPnHDtqjHRIXLwziaaOz9tklkG9hHschhYSb71BleY
+# 8niCAQc+R44DtEiEdVilT6ksnz03eb3YsU3vKPBB2hIW69tnHGNaItvcpkFg3WIu
+# GhOWkAk07jzUoXryy+k7VbD4J4OINu9ujtm65qFEpNFuCqxpqmfNX+c6OvwWAN4e
+# 8cgk2S3uTV9ZWgiJaeJYyrdBha95EeBhVi2vfprdTAxcwPm8yXEilL1OCFYZcOWR
+# 4E0dSZgoM75v/Pyqf1Qce4PQW5B3Jl3ljN50qdAWZexfaZDqvGZwyY0XcJf9B4yU
+# la6jjgclPoyibpetGZ1Qw+ZUHwr30MtxDwsBOMlFLKvg0czw9NJShwT9zpEOCcO3
+# V/3mRsAxKAdXrSvt0DihGBe1sZyHzKd2NAhwV1wP9O1zxaTTSRmAifIhKnMsEFek
+# VTSC6lJLRA==
 # SIG # End signature block

@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.16) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.22) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -13,7 +13,7 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `Orchestrator-Jobs.json.template` | Safe committed jobs-manifest template (all schedules, neutral `AllowedServers`). |
 | `Orchestrator-Jobs.json` | Runtime jobs manifest, auto-created from the template at first run and Git-ignored: it carries operational values (Enabled flags, schedules, real server names in `AllowedServers`). Hot reloaded on change. |
 | `Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1` | Installs or removes the unattended Windows scheduled task under a dedicated service account. |
-| `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `CurrentUser` or `LocalMachine` trust stores. |
+| `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `LocalMachine` trust stores by default; `CurrentUser` remains available explicitly. |
 | `Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
 | `Start-SmartM365-Inventory-Orchestrator-Prod.cmd` | Launcher: `-Tenant prod -Connect`. |
 | `Start-SmartM365-Inventory-Orchestrator-Test.cmd` | Launcher: `-Tenant test -Connect`. |
@@ -63,18 +63,18 @@ When `AuthenticodeValidationEnabled=true`, the orchestrator checks signatures be
 
 The public self-signed certificate is stored in the repo root under `Certificates`; this is safe because it does not contain the private key. When `AuthenticodeInstallTrustedCertificates=true`, the orchestrator imports only configured certificate files whose thumbprint is allowed into `CurrentUser\Root` and `CurrentUser\TrustedPublisher`, so scheduled-task service accounts can validate signatures without manual certificate-store setup.
 
-Repository signing is handled by `Sign-WorkplaceCloudHubRepositoryPowerShellScripts.ps1`. The local Git hook path is `.githooks`; the `pre-push` hook runs the signing helper before a push and blocks the push when signatures changed, so the updated signatures must be committed first.
+Repository signing is handled by `Sign-WorkplaceCloudHubRepositoryPowerShellScripts.ps1`. Before signing, it normalizes PowerShell files to CRLF, validates `contact@workplacecloudhub.com`, and requests a DigiCert timestamp countersignature. The local Git hook path is `.githooks`; the `pre-push` hook runs the signing helper before a push and blocks the push when signatures changed, so the updated signatures must be committed first.
 
-To pre-install the public certificate manually for the current user, run:
+For the default machine-wide trust install, run from an elevated PowerShell session:
 
 ```powershell
 & "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File ".\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1"
 ```
 
-For a machine-wide trust install, run from an elevated PowerShell session:
+For an explicit user-scoped install:
 
 ```powershell
-& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File ".\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1" -StoreLocation LocalMachine
+& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File ".\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1" -StoreLocation CurrentUser
 ```
 
 ## Design
@@ -164,7 +164,7 @@ For a machine-wide trust install, run from an elevated PowerShell session:
 | `Name` | Unique job name (letters, digits, `.`, `_`, `-`). Used for state, logs and CSV. |
 | `ScriptPath` | Script path relative to the SmartInventory root (the parent folder of `Orchestrator`). This remains the canonical inventory script used for validation and Authenticode checks. |
 | `LauncherPath` | Optional launcher path relative to the SmartInventory root. When present, the orchestrator verifies `ScriptPath` but launches the `.cmd` instead. This is intended for AD/on-prem Exchange jobs that need local cache/unblock/bootstrap behavior. `{{Tenant}}` and `{{TenantKey}}` tokens resolve to the current tenant key. |
-| `Arguments` | Extra arguments appended verbatim to the child command line. For direct `ScriptPath` launches, `-Tenant <tenant>` and `-Connect` are appended by the orchestrator; do not repeat them. For `LauncherPath` launches, the launcher owns tenant/connect handling, so the orchestrator does not append them. |
+| `Arguments` | Extra arguments appended verbatim to the child command line. For direct `ScriptPath` launches, `-Tenant <tenant>` is appended by the orchestrator. `-Connect` is appended only when the target script declares that parameter; do not repeat either argument. For `LauncherPath` launches, the launcher owns tenant/connect handling, so the orchestrator does not append them. |
 | `Enabled` | `false` by default; only enabled jobs are scheduled. |
 | `Group` | Logical group (AD, Exchange, M365, Intune); informational. |
 | `DependsOn` | List of job names that must complete first (cycle-checked at load). |
@@ -222,7 +222,7 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 | Parameter | Description |
 | --- | --- |
 | `-Tenant prod\|test` | Tenant profile key (default `test`). Also appended to every job command line. |
-| `-Connect` | Passed through to every launched script. |
+| `-Connect` | Passed through only to direct target scripts that declare a `Connect` parameter; ignored for unsupported scripts and launcher-based jobs. |
 | `-DryRun` | Print the next-24h planning per job (plus pending catch-ups), launch nothing, exit. |
 | `-Once` | Run a single tick then exit (tests). Launched children keep running detached. |
 | `-Force <names>` | Launch the listed jobs immediately even if not due (still honors overlap and concurrency; bypasses schedule and dependency gate; advances the job occurrence pointer to now). |

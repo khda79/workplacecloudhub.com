@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.14
+1.15
 
 
 .REQUIREMENTS
@@ -395,7 +395,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -417,7 +417,9 @@ $TaskName = if ($IsMaxItemsRun) { "$TaskNameCore [MAXITEMS-$MaxItems TEST] v$Scr
 $OutputPath = if ($PermissionsOnly) { Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMailboxPermissionsCsvLogFolderPath' -DefaultValue $OutputPath } else { Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMailboxCsvLogFolderPath' -DefaultValue $OutputPath }
 
 try {
-    $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    $logMode = if ($PermissionsOnly) { 'PermissionsOnly' } elseif ($IncludeStats -and (-not $ExcludeStats)) { 'LiveStats' } else { 'Snapshot' }
+    $logFileName = '{0}-{1}' -f (($MyInvocation.MyCommand.Name) -replace '\.ps1$',''), $logMode
+    $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $logFileName
     Start-Transcript -Path $global:logTranscriptFile -Append
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
     $OutputPath = $InitializeOutputPath
@@ -2365,8 +2367,8 @@ return @{
 
     Write-Host "`n--- Export CSV (STATS) ---"
     if (-not $UseLiveStats) {
-        WriteLog -Message "CSV STATS not exported: -IncludeStats was not specified. Use -IncludeStats to collect and export live mailbox statistics." "WARNING"
-        Write-Host "CSV STATS skipped (no -IncludeStats). See log for details." -ForegroundColor Yellow
+        WriteLog -Message "CSV STATS not exported: -IncludeStats was not specified. Snapshot/default mode completed as configured." "INFO"
+        Write-Host "CSV STATS skipped (no -IncludeStats)." -ForegroundColor DarkGray
     } else {
         ExportAndCopyCsv -BaseFileName "Exchange_EXO_Mailboxes_AllDomains_Stats$CsvSuffix" `
            -OutputPath $OutputPath `
@@ -2525,8 +2527,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGkiCVTrfnKdoh
-# 4MMzftjS+Me3bnK8GeiyBjQNry7o6KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHQ/9W6PQKqZLs
+# fhFbanc70/kI0VArz8T9kaY6BvX3n6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2659,31 +2661,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILfpUu9En9EjuIK8yNaiCDhFzDfUP0Om4hPr6UbRqCAdMA0GCSqG
-# SIb3DQEBAQUABIIBgBiQuo+JffcS3HSFRVrbprCAJotC4IEbumMuirS+AFrTjDne
-# CaqSpDB5PJ/CJ4xvqKYPuUybhN5K+pm0U0i0cjbDhvJbXXHZ9IVB+2rBui2Ro2gT
-# +RGI6rDyH65yLnhOplIX1sPYxdP16W6jjxeloOcL5/DG8JfFw9jej9kDGd3hoGAt
-# 25FEItQED3iUUmQlIsNJLh2ntDDaGtjTMf5m4GJc/2Qu3FIqY/Oub/RRtMsL2J7t
-# 1LcY/wvduvDvPls81VqOLgQLfaEUumSa5Zp2u9YlZSAbaOI9EF6PIwMiq9kskW59
-# O4ANN098vqwBUpDaX9Oqtm1wm7ndezeON91KJUqpi1Gj4wHQnBbBmLENnlshy91w
-# m3/l1PXRUgCnF4A0QViKq8BCNzv+5E0qjaG4RsrIMtspzXetBrHjDFDrRGsb8fds
-# DMSnvnNqFupinF5VzZVzAqO21iGKZGe2UovIwmPdqlL7B8fv8yokYArt7P1AJWrD
-# wGsc9QHklW7LaeMC7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGf4q3QapdRLLWYPBQKC30Xlh9q+d4dvB1WD3KDSNy+HMA0GCSqG
+# SIb3DQEBAQUABIIBgJCHTiQNuM8IfdKhYM+xGkCjyon3LmuAMBedDzfW3yHD2m0r
+# 3Ect/tdZJzsmBMFTI9kNkZyNn2txmaEQ0PwFMP9sAmkAbYQq8u4zRcFBfoEOgUNB
+# zgV0n7wSlnA54UMhDgF8AsDZc8BLnXbU7mSRTmwpHRRF5+LntKIF43RlNOLv6Rzh
+# nwjCndRwHdErqttPRznyUxzM0ln+Sb+P4hjlzKRmKx/FyGkAY0gVtCY7cNifmLUt
+# pHhi9+Xa+6G84+sMS+mkLB4U13RBpC6Lw95HXjLUWzPCXBbfM07n2IRUXoVZLkzU
+# mAqrab13mW4A1bQvJpdPffohlog2F2zgfLw6NKgzlJ4fAYvTPCbTJz7Y1lDkh89R
+# touaWTk5RaWQ6uHrBQK92rx1Ws2PVvYHqJ/IOLOxmxMTtqclb1D43JvVmKoazePc
+# sQlybETAFpmGF8YGbLEgHpP81s+6V5pQVcLkYG6Abb1NPH1O6f/WQl9wgNxETDMM
+# X05QvEDCQnqzf6FS6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwOTAz
-# MTRaMC8GCSqGSIb3DQEJBDEiBCAMhSHhqGwDoFDzbfzZ94C917SncbbDj6iTXh9L
-# F432CzANBgkqhkiG9w0BAQEFAASCAgAiZgycm4YIPagKby3l/bEJZZf4NRNV2+Lt
-# rRtw+3o/E++l4oTy9Ah+yKGGGYFP10bMDx6WEkkJbiK86MxamacQ3mhXR8IQ4JkY
-# CdNF61eagOPbi+Bi3jIPHpPh8l5lnazCkJCQ3t0NQljtTrWoAkPwjZzyuEUTCVOU
-# awyfdJGGkAmD9nKD5h61SqXVaPHHSZ4Mi19MqnwhB2S6A49iiIOp5U6AHueVd9l2
-# z6UolbnRKSPwPzbO4YWgQigRzq8m1DPR16UOioY/D/FKKt4zSJ1kKcqfNkqKqS2l
-# K/YSWJh8urkOVHcMQ1xlpixiyySVyY3iRqslfpjC8npfQtR/eiwXheQijgosqjoL
-# x0pwtcsu6Iodc9F7VZIenJd9sqZPaBst6N6Gd6+5FGn1n+X+BLhwu1nZfEBz9BYT
-# oIzaoMb9K7XWa9ukXCRd4yf6hEYDFkL09dBzoUv35dazw3TUSrZXZYfanzg5p8aU
-# czS3iTLEDJB1aeZC5qN9mabAS5c35fa75SR3cu1sgYjKxCDrlyBAbi2pfoJGmIZu
-# c4k9J4fFAD+HVZunOqn1QdoFTAAT4nXQ8Kjmy8eUAlO4H5Ubi3CqHEBP6r422lPX
-# UtunbTRPsqcgnWQZ6oiuOaPkQhORCtUnunOl6nNZwdBBdSESfvmdN5ot2vJEAoZ6
-# SqhvGRaHLw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
+# MjRaMC8GCSqGSIb3DQEJBDEiBCDklHFyoZDOHzyKrhwdvHC3shTTJ+1tZd393iEy
+# a3fJ3TANBgkqhkiG9w0BAQEFAASCAgArVX+R5WbU4RdTaHUumJ0FyVmc2cRck6QL
+# v1O5k64ePdxQtcatJYBZ/Gg7Qn7h4r6oktHnhAa2tx8zGsTrKwkV4i59Wld+gFwY
+# MPNcLlABPor1Wgdrsk9KRQ/K6P+31NZ8tH3j0eSxCNQobwwyEPGAy2ZshsH4DeQ+
+# pisoO69QYohzjteHhzzgc2q7CEQg41c0+K+HFvnx7bwcL4Z2xY5+saZ4CM8Su+gm
+# ontoa82K03/x4SDYrZZN/I4+0tUsD9lY1uvBGp7b7sal5fwG5LD7rK0qT9KDp3Wj
+# pe2AYC+si64pIy5ix4v1vF4a+i0ZwlebcHMLLRJwv6O1T/jSm+jSGlCczCUis73D
+# oXItuYTXJ+R75mSn3BaOARJ9BOUf6HXzijck52GwajBBsGGeWXguCWTe5W61QVdd
+# SscQpMrSJB8QQ6Ff+RIuKhI+Ro2s6rIplIRhfJNlWG/NuNAGl1/Tn82UU8Lf2yY8
+# iLn4byNuAzX6NzI9SYMl9uBncKR4usayUae3fdiAfMRwIi0OlW0qrj7I6ZR0BETi
+# RSBtaffEaO0kHrm2VR2b4foWDm2AA25hlhMruKtbxfcflpwkZ1xKlDUg7SIt1i5p
+# qVagMeSkEBRCL9ldR+borBibxcEIcamkK4HistlHZl58yk/92G8hgEPKDrQJ6/xC
+# veDZpb9VJQ==
 # SIG # End signature block
