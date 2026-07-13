@@ -36,10 +36,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.7
+    Version : 1.10
 
 .VERSION
-1.9
+1.10
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.7
+    Version : 1.10
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -68,7 +68,7 @@ param(
     [bool]$IncludeComplianceSettings = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$IncludePolicyStates = $false,
+    [bool]$IncludePolicyStates = $true,
 
     [Parameter(Mandatory = $false)]
     [bool]$EnableDirectoryEnrichment = $false,
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -320,7 +320,7 @@ if ($script:ManagedDevicePageSize -lt 1) { $script:ManagedDevicePageSize = 999 }
 if ($script:ManagedDevicePageSize -gt 999) { $script:ManagedDevicePageSize = 999 }
 $script:MaxDevicesEffective = if ($PSBoundParameters.ContainsKey('MaxDevices')) { [int]$MaxDevices } else { [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxDevices' -DefaultValue 0) }
 if ($script:MaxDevicesEffective -lt 0) { $script:MaxDevicesEffective = 0 }
-$script:IncludePolicyStatesEffective = if ($PSBoundParameters.ContainsKey('IncludePolicyStates')) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $false) }
+$script:IncludePolicyStatesEffective = if ($PSBoundParameters.ContainsKey('IncludePolicyStates')) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $true) }
 $script:EnableDirectoryEnrichmentEffective = if ($PSBoundParameters.ContainsKey('EnableDirectoryEnrichment')) { [bool]$EnableDirectoryEnrichment } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDirectoryEnrichment' -DefaultValue $false) }
 $script:MaxPolicyStateFailures = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxPolicyStateFailures' -DefaultValue 100)
 $script:MaxConsecutivePolicyStateFailures = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxConsecutivePolicyStateFailures' -DefaultValue 25)
@@ -1107,7 +1107,7 @@ try {
 
     if (-not $script:IncludePolicyStatesEffective) {
         Write-Host ""
-        Write-Host "Compliance policy detail collection skipped by default. Use -IncludePolicyStates `$true for detailed per-policy CSV." -ForegroundColor Yellow
+        Write-Host "Compliance policy detail collection disabled by configuration or parameter. Set IncludePolicyStates to true to generate the detailed per-policy CSV." -ForegroundColor Yellow
     } elseif ($polAll.Count -gt 0) {
         Write-Host ""
         Write-Host ("Compliance details per policy: {0} row(s)" -f $polAll.Count) -ForegroundColor Cyan
@@ -1175,8 +1175,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDaxNohc7p4QXcG
-# C+Q++Ev8wUalpXaypen9r0CsVRaUz6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCm9A5aqjBXwaln
+# +xT6WP3kXT0yPz7QP6z+jC5sKNXq66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1309,31 +1309,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA8KXAsF2y94lSGGTs84YD8w1iy8XgVzm8SAliw5kagFMA0GCSqG
-# SIb3DQEBAQUABIIBgK/x6TpdRkmq6Zz+J6prpC1jN5cDPAVX3z61cAvaxfj6fud7
-# YRjkiEdY0xBwAukmyBsOgqvQNYZeyU9OLxQ+XVEd/tHpoMksrOFBKS2WnbFMIYLe
-# dModStmfIj5dIWussSv0yBJ/9k/tK8JXYW5D7UQL3WKRuzzJUxvHB0yHMBn3CMaO
-# x+qXrZRsLze1+LBtFm5xGR4NPH+yC4UuvNC9c1ZiGtq8h+FpOKwMoVuDxp7W6f/8
-# VPZmW4vU1Sc1g2GijMO3+SfZ8kVPof1z+czH1MKmzKALv7NNndWAKK56VO/wSCoI
-# OhJViNzyqj500QsOD/Xk1mKxRvri2wJGu6fwZ9OjnPl7Wv3acYfvCV8LNNjNapev
-# vNAfTZ/IIucnVXDd2iLBVFhzlmX6so9YGGiNyh1YxKk/xIe+mcjdaaD3+iBQ9jlX
-# hTgk5wMApPyFI0orcvKQ4xgmnnpCFmSr6ePECcFW48jIZocoY1AoZyFaNelOc6L5
-# NOMFRW82xrTkJwmFp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE9uLC2nNpDSmM/TiC1UAqIFAylEFh6PV1qMTnXuZpXsMA0GCSqG
+# SIb3DQEBAQUABIIBgBCNI5EgwPHn4qhwI3HktS9rmbQHNKG0PYxMH2LPu1X8ExjI
+# AaoLucwCv3TkqvqaIrJ8XNVIJQgCz2RXgmqAhSeHydrIRnIadvkdfbYmd50F5sDT
+# UVl83F3F9EDsVAXbROyxX4OUauBlR6cCRkw3Y+8UJmu0QmSLBKpRuEBxxDRxS+r3
+# JuF05o6sNtUK+tMgZJMHW7hCmV37KTuyhiCA3VWqQ4m1q+8MK+kAgC4WAeKGq0Lm
+# V70UdRSEGA9PwX/EcVUXMYwKZ0+MSQl3/8lbK4iImcAYyZHEmyWGJUmz0CmWBV68
+# Ifv3UETVi6V57wl01gOwWnk2LkEC/cGSTdvG0d5X3S5OIWb6KHj3Eg1/IU4BaWqw
+# ShyVJtpEZGNaewEmHzyLQ+L+MHv1k6AuJ97VNaj0N8juZzJxx4dRSDHOBS7S3FjJ
+# A5f5hNO/oRHbZ/TvYD94R6W7ryIwEG1Wqwbu7Hq0+tx9h+u8dQJdgBv0/QOdybnz
+# Emp4O/VFWfKmJJrgVaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCAgzrXq3/P5nrkfT551R+rwgu6dFQC8omjobvBn
-# JmgjMjANBgkqhkiG9w0BAQEFAASCAgBmiQ/VU5v7HsDTL4+fs/xub/urw0nRknZb
-# uWEe+ZVx3l8A4f868uX9n2/8RFNKT6GqqPy2eA2M1iLDRb3MZE0wZ5Gg9vQHW7We
-# yu/H7i0z7INmrf/zPzfj3ZaYNs+1FoPD+U3iVXrTB2IIpLEIg3Si9K4E7YPBhBeR
-# 9KCozuPBBFs9ttPQrDgOfd8MPz+U8d2dfEQ9y+2NdYa51UmwbAdnERjC9SppOj8b
-# hwcdQBw0AisqBjVSNHhQDU6Z7cnLH+iWpu5iUnEFu208jschJ9gV+m1OeCzRU/X2
-# NsMWDb/CKFKpZUjPXc95/iYDDa+v27x40MyHzANHAghYwVrZI2kOgXLvRmDKhAxU
-# Ao4mL1T49OtQp53ygeaHmL+nd8u/lJuMAx2GQQ4rcQcNYg/JapYZp5irUnTJdplF
-# JrtmtSYc87DBbDl/irjQOzY5D8JYiuQ0SJNE2qNMGypIPu1HHn4NfoBBcnvT2Iaa
-# T9Vj32c5+3bf/8SS0YpNMIO7sxlPKnYldAzu6qyQSeY5vpqF/l+xI6bXIZnc8j/E
-# VJ5rOLKJ1pANOLM1tPk1K+TNBiYopOOPl33wQe8JkI8DhfzT68boxH7fYCiuSnCE
-# 5uSC9j+k936gfZFAwwZmq6fXrMSAsVLgtfQQYiDMUKMoRY9mO6PMSMVWEEHMX7GA
-# h7iFy8bIHw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMzMz
+# MzVaMC8GCSqGSIb3DQEJBDEiBCBxVvAQU5oEmD6akmFp+kyP7svOWzshrh6wzc5G
+# a6eTYDANBgkqhkiG9w0BAQEFAASCAgAIEMlsCXpf+qWO8XqYWVnSKXMUKLFbFHN4
+# u/KAUEDZEu/rVeR31A8K5EpmxQEAU6bD7J04r3IdF4VyQI1Wq5AHf2bKyuXeEoQO
+# USnUQdjSKF/6e61GhIfv42+K+X+TRUY/FLZPPbyvNrJY1WzQx0AramnVa4cLqOlr
+# tiIkNqgZYqZAWBOQbQMbDjjH3VOq/SHQrW3c78LYDycx823olknYEvzqsUOCnv6t
+# R/VAgiwLRsF+nkMJRr+k2d6mw676ZWAbzBVdiGHSkDHm11hW+EPY+yvllSkM/7C8
+# AMIXpphWHfwM3b5BEc9HSPrB9uxceKsYCvfpPR0pZp2NhRtaUz7JLe7H++neq42X
+# /FsBo9JuPR/tXX+ud275yhZzjXH+leNu5bROF/QC8TPUk8DttXlsMxRyHjHH2w7v
+# BhZKbtqLjpakSWi69H/42laQ6KJFj2B1EvsVEu0PCOZjsntEhd06VpIIhLlB3x+/
+# Gd3Vslipv6JKOa4E5RU0Vltd4KnjOWEfK0gNs0RQJXc60taGh8C8z/rImmoLLRdC
+# vdhS9FhbhO5wff9dha/P7sxoZya9ucmnd6N6UVvOj5NLQwWJralnRi2A2qPf4Vw3
+# Vxx8+qhSh2rJOIKXRFTcCwCJ8IN3fCP5XV4WbiGl5BZ3i92hTEp/E0ZXLmdc6g3f
+# ExM414A2Xw==
 # SIG # End signature block
