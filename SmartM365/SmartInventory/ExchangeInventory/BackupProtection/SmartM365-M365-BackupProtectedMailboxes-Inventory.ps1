@@ -15,7 +15,9 @@
     Kept for launcher consistency. The script always disconnects any existing Microsoft Graph session before connecting.
 
 .PARAMETER InteractiveAuth
-    Uses delegated interactive Microsoft Graph authentication for troubleshooting.
+    Uses delegated interactive Microsoft Graph authentication. Enabled by default because Microsoft 365
+    Backup protection-unit inventory requires a delegated session in this SmartM365 workflow. Pass
+    -InteractiveAuth:$false only to explicitly request app-only certificate authentication.
 
 .PARAMETER IncludeNonProtected
     Include non-protected mailbox protection units in the CSV. By default only Status = protected is exported.
@@ -29,17 +31,20 @@
     warning and exports the partial result set. Defaults to 2000.
 
 .VERSION
-1.11
+1.12
 
 
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
-    Minimum Graph application permissions: BackupRestore-Configuration.Read.All.
+    Minimum delegated Graph permission: BackupRestore-Configuration.Read.All.
+    Optional app-only mode requires the application permission BackupRestore-Configuration.Read.All
+    and a supported Microsoft 365 Backup service-app/controller registration.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
+    Version : 1.12
     Author: https://github.com/khda79/workplacecloudhub.com
-    Required application permission: BackupRestore-Configuration.Read.All
+    Required delegated permission by default: BackupRestore-Configuration.Read.All
     Uses the Graph v1.0 Backup Storage API (GA). Note: displayName and email properties of
     mailbox protection units are only returned with delegated permissions, not app-only.
     v1.5 changes:
@@ -52,14 +57,14 @@
       - Added Graph access probe with full error body logging for 403 diagnostics.
       - StrictMode-safe status property access in protected unit filtering.
     - v1.6: Return Graph collection as a flat object array to avoid Generic.List output binding failures after pagination.
-    Minimum application permissions: BackupRestore-Configuration.Read.All
+    Optional app-only permission: BackupRestore-Configuration.Read.All
 #>
 
 [CmdletBinding()]
 param(
     [string]$Tenant = 'test',
     [switch]$Connect,
-    [switch]$InteractiveAuth,
+    [switch]$InteractiveAuth = $true,
     [switch]$IncludeNonProtected,
     [string]$OutputPath,
     [ValidateRange(1, 100000)][int]$MaxPages = 2000,
@@ -97,7 +102,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -457,6 +462,7 @@ try {
     WriteLog -Message "Default WeeklyHistoryFolderPath: $WeeklyHistoryFolderPath" -Level INFO
     WriteLog -Message "IncludeNonProtected: $($IncludeNonProtected.IsPresent)" -Level INFO
     WriteLog -Message "MaxPages: $MaxPages" -Level INFO
+    WriteLog -Message ("Authentication mode: {0}" -f $(if ($InteractiveAuth) { 'Interactive delegated (default)' } else { 'App-only certificate (explicit override)' })) -Level INFO
     if ($Connect) { WriteLog -Message 'Connect switch specified; Graph connection will be established by this script.' -Level INFO }
 
     $CurrentOperation = 'ConnectGraph'
@@ -466,11 +472,16 @@ try {
     Test-SmartM365GraphAccess -Uri "https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?`$top=1"
 
     $CurrentOperation = 'Preflight'
-    Invoke-SmartM365Preflight `
-        -ScriptName $TaskName `
-        -RequiredModules @('Microsoft.Graph.Authentication') `
-        -OutputPaths @($ScriptCsvLogFolderPath, $LatestCsvFolderPath) `
-        -RequiredGraphApplicationPermissions @('BackupRestore-Configuration.Read.All') -GraphProbeUris @("https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?`$top=1") | Out-Null
+    $preflightParameters = @{
+        ScriptName      = $TaskName
+        RequiredModules = @('Microsoft.Graph.Authentication')
+        OutputPaths     = @($ScriptCsvLogFolderPath, $LatestCsvFolderPath)
+        GraphProbeUris  = @('https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.mailboxProtectionUnit?$top=1')
+    }
+    if (-not $InteractiveAuth) {
+        $preflightParameters.RequiredGraphApplicationPermissions = @('BackupRestore-Configuration.Read.All')
+    }
+    Invoke-SmartM365Preflight @preflightParameters | Out-Null
 
     $CurrentOperation = 'RetrieveBackupProtectionUnits'
     $allUnits = @(Get-BackupMailboxProtectionUnits -MaxItems $MaxItems)
@@ -523,8 +534,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZGs9KCfx8MVRx
-# MoaoEwS2YS7ooHpqIBxa9csNg9UUN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDswNMRwbIslbBE
+# rK5r71lonBX06jdks22lZQWXKsWSMKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -657,31 +668,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMjxdIMUYwbMK/pg0+Zx7dnwNs1wjW57ISTw7nbI73dyMA0GCSqG
-# SIb3DQEBAQUABIIBgAes8RjTMv/BHpOuiPX4VAmvq62pp9343QL/8ifri0CrCNo8
-# IIpTpdWPsJSvw2nh+EH9fXzwYzI+EYjsEGJkLyI8FRf77iWG/V/Py9cUIOz1DVTJ
-# U4+olnBCc3OUbXHaI3nuqPAg5cbksvNH3UPpxgVgTNsDcuj2774Ga6GetOxdTjwn
-# EmyaL/6ffvpIAiVZSXvEJC0ysJuJlZpz/JDcRkT82F4wsNoXoTHptFtuX/JcH3Od
-# ZsEkEt0bc9dde2VQfo73ABgu12FWTRBe2IGrPwUClUonfYkluJzIUAO8P0Y9Z5VD
-# Jl/QoFya9Joduqt14wZiTp+ud8Hl2IKIIxKz8W7E9f5YS6H0gR9QUMKjTYKG9rWC
-# GR6i5I/LYbN5PuXQiXeScgRZpYtd4mpwI4sF+dzn8xl2Tox+DO4IYAZ/9bT9aVyI
-# lAUM4+qU0WDqU/dbHelU2FUcH+rh94zU0Mv0F3DsZu9KSVmDC3bWJZcMu2O9fqtK
-# 20T2APHsX+K5KkCHGaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDxnW0VJ8pQaCW40Rf5V8w2XDadDL3GHNJHjzTMMsbQxMA0GCSqG
+# SIb3DQEBAQUABIIBgEMtjksVtIE+Rw2j2Cffnd5Po16QRK/gZ6N+r9yuZLXbRWd4
+# sCdjwo90wI3lIk3KRc6r/2hvIRek30cqJDVlVz7MwRN2OyaAHgrOtEiVx8WnPGAq
+# 43n69Rh3aTfssaXtfanOrh5rTWA+OKoroQBa77jlpqjt+U2MkY4lvn9jlJ4nDblw
+# TvOxMG1OuC/9zW4RKoYk3hHsDFjWB7iReohuepDDNK4G+3MTAQclRQVdAkpAbm6F
+# n3Bx9zXsiecH82Wg0W4x3Da2wkFE0HGCJMmp/JG0ffIeY+Mkw7r+PBA5Tc7MhkK8
+# AJi6uV3rxJbKCYRse9x6CyMqxo3Qf9URl7ICMg8k/f8WocMDNel1bZhCjwuaG4xx
+# Pm+mGd7s2r5yvdKY9XAwv78v3lVbjFkWJdz5rQCMcfkT3hcFDKksg4ekNurIkMMN
+# dmE4hWAJbx8f1ZR3WItpV7Y1WYgowCKg8J/JDNcp5ciP/4v0JZ2hBWOkfYKVMHLQ
+# DZgYSi00IxljxOIZTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MjRaMC8GCSqGSIb3DQEJBDEiBCAEXFHWofmIL4YDo6D4H5TXiobjOkmlwjkHJPxx
-# yB7keTANBgkqhkiG9w0BAQEFAASCAgDMaG6X9ZqK7sXHe97aAFqKTIGetr74ZuA8
-# pi5wFaVViiH7pUkYlaFgvgNiQu/CNho6Yq6rsTCdfde64igE6Cf58x6x6j84iaFQ
-# UBc1lC1/0KckaMMsrWN1QZd9WGTwEhnHzIK1MPB6FKWjmb/MsqWi8rS817PmL+Os
-# j5aHzvInGokndVuPM/wWqwOVWi6PNd0Arl+/gUoBCxFeLZFqSLNezQm6iqp3YwdB
-# lsdks+IoNJmTAfRxyoDl+xdwU7dEJJq1MbyozEUplNxpOXDG9Sy56KdfkixFmMeL
-# 7kcBCXWmRpeMy4th5DkAiuDCeD7tQJJwwfVmh1iifgt6r/472iIxIkZvUHKFexZX
-# 0R5JIWKp/sfAm7ooaD58Rd68m/yiBBz3wEKytyCkDdEWwSEg2mk2/pfHyqIFhMiz
-# iaj0LwsEQxhIa0F663eynkpWuqd8rbcgITsbOjWMqBMfaWttJUrxfDq3ytrdSMl3
-# 46qkGw4FsZ23ppOZ4rvysdehYpunfUOSJ7yUtFS9yfFqIh9d2LyxZL3kHUV8hVXt
-# lZdb7cCNyRax4JAzcF5x/rgjpGsgo7B+fh7uqOlA2VOhE8cUtg9YK/fRnyj2XCb+
-# UoeOOfwnDI0N5JWbTvtS4Dw3voTYXGd4gNsHBrfO2oT6G2qfGri85Q3Qm/eenrry
-# 5GUojb9XGg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNzEz
+# MjdaMC8GCSqGSIb3DQEJBDEiBCDJBgnmzRSIqI4jeMSSYltyPwcKuoST+V8rtoKQ
+# xTr/mjANBgkqhkiG9w0BAQEFAASCAgAP6EjpE9YHK8djyI9A/v8XldeubPNo9nNB
+# SkEVHKroighGYxgmshRNE67zEG+uiJaUJLhQ4tdPMe0JgtO8axgni4FbLYm8VCoZ
+# BE8pXJeI75QIlWGmCMxiEgKjr+yTXf9IqQPhBf+9HtpFOdSKv7E4NS7rEqo/fGLZ
+# 5BTo0liG0TLrZ7NDsCYAlW9k1EvjY+FMUF5yts/mCcYreNCv92Dp9mVWD1/7SZia
+# Khlul/T0FHO5iY4IM9AxPEZPK25BdjG6HqahEYnlBgIROt4E92NuF28CdwIWFrWS
+# AsPqNrx1ozbZkjmjRrDXIzcE8MBYpkJNMhdRCrQHZiQaAn9aTFWHo9JTtjR0/DCm
+# i3xuwLICckYfgTRw6B/q75/Q65tz8sCBPsk87UklhQnY4O+4411FYdJ4zRsAfWd8
+# mvaLiF10UNrzL3cfxsQqg5ll9N9ZmoT3gCFcsPBJ8RcVzugyezchQ1KPlmncywsA
+# fdSUkTPw9ksuoQLH5W+7xztX/yWsTgm7bkNZV2bkuKf/3R1Kf4dZtf1f9y+BJCk4
+# yrgSWvgn+qyu4wjmAoIjyPOXUBunyKrQJZGxVaB5mR954U/JJGX47UK7XgorcuzZ
+# urNepWW4Rx/wpjVWkDwnQQexTAsCFFMKnYQ+f/WKuPwtkrQ7LS76d89uJSfUX+Hc
+# I00tDpRt/A==
 # SIG # End signature block
