@@ -8,7 +8,5 @@ Exchange 2016 proxy address audit and remediation scripts.
 
 ## Launchers
 
-- `Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly-Test.cmd`: test tenant audit launcher, read-only by default.
-- `Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly-Prod.cmd`: production tenant audit launcher, read-only by default.
-- `Start-SmartM365-Check-ProxyAddresses-Exchange-Write-Test.cmd`: test tenant write launcher. Requires typing `WRITE` and runs with `-AddMissingAddress -SkipAllowListCsv`.
-- `Start-SmartM365-Check-ProxyAddresses-Exchange-Write-Prod.cmd`: production tenant write launcher. Requires typing `WRITE` and runs with `-AddMissingAddress -SkipAllowListCsv`.
+- `SmartM365\SmartInventory\Launchers\OnPremises\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly.cmd`: production tenant audit launcher, read-only by default.
+- `SmartM365\SmartInventory\Launchers\OnPremises\Start-SmartM365-Check-ProxyAddresses-Exchange-Write.cmd`: production tenant write launcher. Requires typing `WRITE` and runs with `-AddMissingAddress -SkipAllowListCsv`.

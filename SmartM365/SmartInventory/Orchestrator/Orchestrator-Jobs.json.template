@@ -62,7 +62,7 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "ActiveDirectoryInventory\\Start-SmartM365-ActiveDirectory-Inventory-{{Tenant}}.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-Inventory.cmd"
     },
     {
       "Name": "AD-HealthCheck",
@@ -83,7 +83,7 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "ActiveDirectoryInventory\\Start-SmartM365-ActiveDirectory-HealthCheck-{{Tenant}}.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-HealthCheck.cmd"
     },
     {
       "Name": "M365-ActiveUsers-Inventory",
@@ -486,7 +486,7 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "ExchangeInventory\\OnPremises\\Mailboxes\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions-{{Tenant}}.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd"
     },
     {
       "Name": "Exchange2016-Local-Mailboxes-Fast",
@@ -508,7 +508,7 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "ExchangeInventory\\OnPremises\\Mailboxes\\Start-SmartM365-Exchange-Local-Mailboxes-Inventory-{{Tenant}}.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-Inventory.cmd"
     },
     {
       "Name": "Exchange2016-ProxyAddresses-Check",
@@ -530,7 +530,7 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly-{{Tenant}}.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly.cmd"
     },
     {
       "Name": "Exchange2016-Infrastructure-Inventory",
@@ -552,7 +552,7 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory-{{Tenant}}.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd"
     },
     {
       "Name": "M365-SyncHealth-Inventory",
