@@ -1,7 +1,7 @@
 # SmartWorkplaceCMDB.Core
-# Version: 0.1.1
+# Version: 0.1.2
 
-$script:SmartWorkplaceCMDBCoreVersion = '0.1.1'
+$script:SmartWorkplaceCMDBCoreVersion = '0.1.2'
 
 function Get-SmartWorkplaceCMDBProjectRoot {
     [CmdletBinding()]
@@ -33,7 +33,12 @@ function Read-SmartWorkplaceCMDBJsonFile {
 function Resolve-SmartWorkplaceCMDBTenantPath {
     [CmdletBinding()]
     param(
-        [string]$Tenant = 'Default',
+        [Alias('ProfileKey')]
+        [string]$Tenant = 'default',
+        [string]$OrganizationKey = 'organization',
+        [string]$EnvironmentKey = 'default',
+        [string]$TenantKey,
+        [string]$TenantId,
         [string]$DataRootPath,
         [string]$DataAllRootPath,
         [string]$LatestOutputRootPath,
@@ -41,26 +46,47 @@ function Resolve-SmartWorkplaceCMDBTenantPath {
     )
 
     $projectRoot = Get-SmartWorkplaceCMDBProjectRoot
-    $tenantKey = if ([string]::IsNullOrWhiteSpace($Tenant)) { 'Default' } else { $Tenant }
+    $profileKey = if ([string]::IsNullOrWhiteSpace($Tenant)) { 'default' } else { $Tenant.Trim().ToLowerInvariant() }
+    $organizationKeyValue = $OrganizationKey.Trim().ToLowerInvariant()
+    $environmentKeyValue = $EnvironmentKey.Trim().ToLowerInvariant()
 
-    if ([string]::IsNullOrWhiteSpace($DataRootPath)) {
-        $DataRootPath = Join-Path -Path $projectRoot -ChildPath ("Data\Tenants\{0}" -f $tenantKey)
+    if ([string]::IsNullOrWhiteSpace($organizationKeyValue)) {
+        throw 'OrganizationKey is required.'
+    }
+    if ([string]::IsNullOrWhiteSpace($environmentKeyValue)) {
+        throw 'EnvironmentKey is required.'
     }
 
+    $expectedTenantKey = '{0}-{1}' -f $organizationKeyValue, $environmentKeyValue
+    if ([string]::IsNullOrWhiteSpace($TenantKey)) {
+        $TenantKey = $expectedTenantKey
+    }
+    elseif ($TenantKey.Trim().ToLowerInvariant() -ne $expectedTenantKey) {
+        throw "TenantKey '$TenantKey' must equal OrganizationKey-EnvironmentKey ('$expectedTenantKey')."
+    }
+    else {
+        $TenantKey = $TenantKey.Trim().ToLowerInvariant()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($DataRootPath)) {
+        $DataRootPath = Join-Path -Path $projectRoot -ChildPath ("Data\Tenants\{0}" -f $profileKey)
+    }
     if ([string]::IsNullOrWhiteSpace($DataAllRootPath)) {
         $DataAllRootPath = Join-Path -Path $DataRootPath -ChildPath 'DATA-ALL'
     }
-
     if ([string]::IsNullOrWhiteSpace($LatestOutputRootPath)) {
         $LatestOutputRootPath = Join-Path -Path $DataRootPath -ChildPath 'DATA-LAST'
     }
-
     if ([string]::IsNullOrWhiteSpace($LogRootPath)) {
         $LogRootPath = Join-Path -Path $DataRootPath -ChildPath 'LOG-ALL'
     }
 
     [pscustomobject]@{
-        TenantKey            = $tenantKey
+        ProfileKey           = $profileKey
+        OrganizationKey      = $organizationKeyValue
+        EnvironmentKey       = $environmentKeyValue
+        TenantKey            = $TenantKey
+        TenantId             = $TenantId
         ProjectRootPath      = $projectRoot
         DataRootPath         = $DataRootPath
         DataAllRootPath      = $DataAllRootPath
@@ -102,8 +128,40 @@ function Export-SmartWorkplaceCMDBCsv {
         [Parameter(Mandatory)]
         [string]$Path,
 
-        [string[]]$Columns
+        [string[]]$Columns,
+        [string]$TenantKey,
+        [string]$OrganizationKey,
+        [string]$EnvironmentKey,
+        [string]$TenantId
     )
+
+    $identityColumns = @('TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId')
+    if (-not [string]::IsNullOrWhiteSpace($TenantKey)) {
+        if ([string]::IsNullOrWhiteSpace($OrganizationKey) -or [string]::IsNullOrWhiteSpace($EnvironmentKey)) {
+            throw 'OrganizationKey and EnvironmentKey are required when TenantKey is supplied.'
+        }
+
+        if ($InputObject.Count -gt 0) {
+            $InputObject = @($InputObject | ForEach-Object {
+                $properties = [ordered]@{
+                    TenantKey       = $TenantKey
+                    OrganizationKey = $OrganizationKey
+                    EnvironmentKey  = $EnvironmentKey
+                    TenantId        = $TenantId
+                }
+                foreach ($property in $_.PSObject.Properties) {
+                    if ($property.Name -notin $identityColumns) {
+                        $properties[$property.Name] = $property.Value
+                    }
+                }
+                [pscustomobject]$properties
+            })
+        }
+
+        if ($Columns -and $Columns.Count -gt 0) {
+            $Columns = @($identityColumns + @($Columns | Where-Object { $_ -notin $identityColumns }))
+        }
+    }
 
     $folder = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $folder)) {
@@ -140,13 +198,11 @@ Export-ModuleMember -Function @(
     'Export-SmartWorkplaceCMDBCsv'
 )
 
-
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQeEflJCV6+RHI
-# Lhw/sqnBaVk2Rp3vXIrwfgmBo4S+t6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDb2QYzW9um1i3h
+# W4xtmHA2MRLilv5UbESoerq1W9tke6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -279,31 +335,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHmoX8hwv1Pq0GDKG6D3TVF1Wi9ujZ3OLFRgzRTgS98mMA0GCSqG
-# SIb3DQEBAQUABIIBgJbCkQcIv4SvBooPUIUNcDoA72yWeQqUDki97uvO5bkdIgHz
-# bg6G1xHbi1vVCdPvdtWrOihFuPMM3d9xrTn5Hv5782MjJMrOsAalPshiSkqtBSaC
-# McBcg5OtHcPoWVhlkwui0/dVEcZaxzHfLND6T5pRVpZryVEgAdjVsNl6b3p7N8ok
-# c5IM1YTN0YtxUM8YWvINEs1b5VAom5qP8f8qPeGk6d3LDApovDyS7DZD5pL8ExcS
-# Bp/hCBFb4FZLATSSrfoMqM2rkkwmcgcOOVodaEKZH5pj/PoF5bJJ1Jn9AYNlCKAY
-# Tp7q6bVSmFQkHskTZCOB8EJh0LzjPJ9EUAPoEjw4LvehHJ9MZzU5I2cA8qUzj3VW
-# K6Y6B2ZTzdrIC+qLHBaJeylKIVYvC/kTyyvqG23Xt5GXDwygFS+g4L2ZwRgU5iHR
-# qcSMUrdFcuKjdTjjljy+XG93TkFqkR4wc0QPokwDTaZ7RmMkjBMnKKmepcaKPED7
-# 0nPh43gHhhouvbp896GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJJjHKp2HJq89HWRSnnVNGphDAeO8rPDddP8M0kymYd1MA0GCSqG
+# SIb3DQEBAQUABIIBgI2svalsXRTaOvhTOGLxGV/Sz1Tsz/UHZsBlIuiz8LHh6gpa
+# pJMEJCj77UPJk8hYl7dZPF89oEMQg+dVo6s3hgllulugQ67PsfKZhIy4sX1mpE14
+# AOlt7cEVky3NJ8VF0SG7u4R2gs+Iz6jxOmRFP/HpOUyD5JbeUUaBpJsP7v8h7SYj
+# uPguk9USdupMgHccD+NaL6IRzMTN2LYUHMF6gazcAbTDcArZPkh5ofnKXda8IU2r
+# qlKL5kBq/WiiQkdosoBXE0m4aK1aiSpwad7dUNPn3AhBJSsLH0B6PVepAVCd9Rdv
+# 4cRAvXN+NkIgHhGCzuRVO6coURVKOwwdvcxlXrQLHWlinN+Z5icqxSKr4Mp/v1ja
+# ysSb0oskYbtY2I2lQT0KVK+s0Akz8oi5XDvkAMEQkbesxvPDxM6mowCxlXgywVVH
+# sXaArxiDPwjoW5judaOaWtiyWIiWUgd16oVimwc1oIT9i74lpXul29JKRbgV5aH6
+# 6pAb9NT27foBcFdixqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# NDFaMC8GCSqGSIb3DQEJBDEiBCAOH1BUjzGUe8GJJJ7JNlsSyijRGRpy7UNtynDD
-# Dr/E5zANBgkqhkiG9w0BAQEFAASCAgBLnlyRXUx7NdC1/9xwH0kpqBKg8pukWgmN
-# J1MwiMUb+c9k4vlnYvSzeqQEgrudNQLoyFItYQEePW48ayQREjQ3dKSebqj9Zlg6
-# GHGQlZj5+4IMn4zB1ZvP9oJ49TRRv8znMjsO+C7wFwkMrdWfvwicen3gQdHfLO0d
-# CWLhWESaaJ4TzCZxbBti8rW51Jp1ZDVz+MWGS7QCXl+ltfJggXlVHKk03jN59Pcr
-# m7u3Lb9Zt+e3bZZp04qwCiEdcNZAbj7X2FiCeOyb81O0Z9PKce4RPxe5iiZOqors
-# wXTGOC5yomsd0Ukomn/9BZUO6700AZKxtTLVA6D3PRogV4OesJ0yh7BuLPUsBz36
-# SV1jkYR4RchYH9j/1LghYRlvYCdAVy2n4z7U63XRlXPdd+K4fYzZgw42gDZVDDpl
-# TyXHGuP5sjHV6oJzXn08w/ldP6HiX1ZEiP6sPbOGaAglNfQj8IAYAEpU/NPoQNTl
-# 1EDae/fN7TBwiai5q8n3Sun5CRZRUaYXT1SwZEDtirN0g+3NzlvKOg1CngsnH2GO
-# EFw9INdLIImT1SoEEPlZTtPzCABtBCvO2sBzjKuQIDQLLjyhbEht2ff3WqYt7DIV
-# a+3SXILh7OiGnL67QYRf+AxNBWsTmu5tWs1z9ieDxLNvS81Z7YoYR29XphFLPLww
-# VaUfEHifKg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjAz
+# MjlaMC8GCSqGSIb3DQEJBDEiBCBUpqYJZ/yPFatZ8fbAGJCNrKU3I9RyrQmsjFnW
+# o2iqYzANBgkqhkiG9w0BAQEFAASCAgBJcrew1mCQ2HlNDlv//UTFrAJ7krABnjNb
+# /2Vstt0MEXXoQfkoDdcyFk1JWd/Oqw2pZYS30YLIjF8WbyEeCCHPzmTKKQ5tXMZD
+# hfyXDXH639txJlb543+ohN6vOl0fc2f7r14/BDP9/dy1oK/0hye3TvsGeiKVdMdd
+# 9R6gYyoKEh4XUOqbipzI1qhOhZTLt4wl7nGqDukaleNcndERDDlJbbyd0nOnZasO
+# 8icCNrfNsRZ/ZD2JMJ4rA8FnCQQbi7CmUCeHqOW3AsdjCWjU9PXPT/RPwqVpJwkO
+# m3xdO/QI7bdmRsQ1ttrl++3P5RWiVvXb4wjdXNw/ujSMoHNUjec104JK6r+HbsHt
+# +BPgH1+d56DnhbNCEV49e9ymrqGhYVN2NABR8cubNb8iwA3XM9navOEi11K3itxK
+# ZvT2+Rmk0NVHxFLt25Bfw2U2eDufVet74009X5F41epoctCxdw3Xup1YfBQ/vmFt
+# IUTC8FCKl+9V48U4x7zmPF+rr0mG5kDnr6MMZfm5iYraAuxp5yj2xxDJk4vqV/zx
+# AVswxJy0BZpXcDAOHn3IY2GjEOmk8Rc2uFr5hqBwIX208zIiRExV6KdlH+bBH8TL
+# 1dVfe0kxgy0WT7uinYOfZQ4uqoxYSYyWXuPhlPrajAh3oxpMAiLvkFbSvD10FEX8
+# Yt/hxtuB8Q==
 # SIG # End signature block

@@ -1,7 +1,10 @@
 {
-  "Tenant": "Default",
+  "ProfileKey": "default",
+  "OrganizationKey": "organization",
+  "EnvironmentKey": "default",
+  "TenantKey": "organization-default",
   "Output": {
-    "DataRootPath": "{{ProjectRootPath}}\\Data\\Tenants\\{{Tenant}}",
+    "DataRootPath": "{{ProjectRootPath}}\\Data\\Tenants\\{{ProfileKey}}",
     "DataAllRootPath": "{{DataRootPath}}\\DATA-ALL",
     "LatestOutputRootPath": "{{DataRootPath}}\\DATA-LAST",
     "LogRootPath": "{{DataRootPath}}\\LOG-ALL"

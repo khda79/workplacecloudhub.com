@@ -1,5 +1,8 @@
 {
-  "Tenant": "Default",
+  "ProfileKey": "default",
+  "OrganizationKey": "organization",
+  "EnvironmentKey": "default",
+  "TenantKey": "organization-default",
   "DisplayName": "Example tenant",
   "MicrosoftGraph": {
     "TenantId": "",
