@@ -483,7 +483,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -2184,7 +2184,7 @@ try {
                     Name,
                     DistinguishedName,
                     @{Name = 'ObjectGUID';       Expression = { $_.ObjectGUID.Guid }},
-                    DisplayName,
+                    @{Name = 'DisplayName';      Expression = { $value = Get-ADStringValue $_.DisplayName; if ([string]::IsNullOrWhiteSpace($value)) { $value = Get-ADStringValue $_.Name }; if ([string]::IsNullOrWhiteSpace($value)) { $value = Get-ADStringValue $_.DistinguishedName }; if ([string]::IsNullOrWhiteSpace($value) -and $_.ObjectGUID) { $value = $_.ObjectGUID.Guid }; $value }},
                     @{Name = 'ProxyAddresses'; Expression = { $_.ProxyAddresses -join ";" }},
                     Mail |
                 Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
@@ -2708,8 +2708,8 @@ finally {
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCslCQlol4yNCS4
-# IO2lLTyDzjq+j/5oje+lsQuJJOXjsKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAp9iOcusopwNCW
+# FJiJX97Y0A3Qw5eYCjuDu0VZO06aVaCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -2735,14 +2735,14 @@ finally {
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCBHNrNGIKTL36I2uL2Xn3WCD7CKq5W3hoJ8JhvK+bcvKzANBgkqhkiG9w0B
-# AQEFAASCAYAs74buVoih2bswfcvVhSY7Nb0eZ76MKBwJmDeiqjDAAUPKLgR/RNDj
-# kM7mbYlrPKiIfcYKo2ZeCdSs7fq3X+XTcMqTPbetkFJoFPK0qBUiM3S8XD8Mesww
-# mV6tf0uEU521QdUgXdEArYlJQ4WZvAm/PO93WB30Y+GuQZx/RxNJ5iC36SDVBiW0
-# CX2f1YEi6ssoSuORduLoGWU810GxK2Ogdq2nKVpEi55L7K6DmAnOC5+ywaUONyjS
-# d2IU4nfklf8iZ5qfDkOOyPRA0tvZ9XIjhPvDT27X7ZpH5bHcAKNpEUhavMAiPHrT
-# zKqX9r0g/V7RymaTb0n4OckFOm755Uj2fTNe9izc+HaUYfstEx+Tx8tVlmTJbQcU
-# yzAk/1KPG6iKFRoz/Vnrwy+RJi6ieANvrzjdjOUwdJgBD/hRQdjipDbzOMk/ErYM
-# WiJOE8DXgNesXyfJk+CesnjLCHQwRH4HSRPR/rRViEudmIaBYgr5JdZqToJ1r896
-# ASS0/Nac7X4=
+# BDEiBCCXXPA+QsR74pOSMj3OZoSSUAl2ZbItuSB33p07hSq3dTANBgkqhkiG9w0B
+# AQEFAASCAYAsIH5sVU1IURaAOy3ELYz3LMrXOvMMqK6muMksChbL4F21ObTbINDF
+# ghnUllbbbZMFOLrAstqq8H32Wl248JHOIl1rhBpD612yG5ivGwLMeeLHjL6I2z4y
+# LDteUyACvAQSiuPNg2B93fWKBQIf9zAjvEw59ZlCrXipggZAjv1RGcqFPvprkKeK
+# wYEGlnLV/fVzIT43R4AK2vQpYd7mnZSqcC2+jAalVXm9mT4/ajXNCOcY8HhKdRlN
+# gPZldOkTYlDd51GCTFF0+d2Po4OM3/b1GCNZGDgNIALO7f9uFFB0Mpy8L0bvGkhP
+# KcvuG1QbZIpKCj1wZbD62tP9ctVwXZkRBdBSrSmSZWr9CsQm1W/c1I4HrVGxcrDe
+# N3uHNfyeDFKTpVQgOChGfZpCGw+VSNsS809Q/7iYjWUYVRhQkdiUQLB9FWSJc+UR
+# 5lPRK8CKiEFNjSpJpBW1Gad77fJASLYlJw7zk2Eu5NW4BwVx1hwajqBX2nOXtDlq
+# BLdhzNqFRPU=
 # SIG # End signature block
