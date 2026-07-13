@@ -101,7 +101,7 @@ Maximum time to wait for a -Stop request to be consumed. Defaults to 180 seconds
     inside its own child process.
 
 .NOTES
-    Version : 1.3.20
+    Version : 1.3.21
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once), 1 = unexpected fatal error,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -125,7 +125,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.20"
+$ScriptVersion = "1.3.21"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 # Normalize list parameters: when launched through pwsh -File, a value such as
@@ -710,7 +710,7 @@ function ConvertTo-NormalizedJob {
     if ($RawJob.PSObject.Properties['AllowedServers'] -and $null -ne $RawJob.AllowedServers) {
         $allowedServers = @($RawJob.AllowedServers | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
     }
-    $requiredLogPatterns = @('Execution context:|Environment initialized successfully|Starting .* v')
+    $requiredLogPatterns = @('Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*Success.*Errors:\s*0)')
     if ($RawJob.PSObject.Properties['RequiredLogPatterns']) {
         $requiredLogPatterns = @($RawJob.RequiredLogPatterns | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
     }
@@ -3129,8 +3129,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIHJAYJKoZIhvcNAQcCoIIHFTCCBxECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHStMlgNb2+eKe
-# 29tU1ZNFGRTT/KENkYAUMYC1ZtLKX6CCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhpxPVpJIetFgG
+# qOVfGCu+PCsaCz9K/CAlBBp70gEVGKCCBBQwggQQMIICeKADAgECAhBwIfLVIgJW
 # v0GFVsTsys9PMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTAeFw0yNjA3MTIwNjM5MTZaFw0yOTA3MTIwNjQ5MTZaMCAxHjAc
 # BgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNvbTCCAaIwDQYJKoZIhvcNAQEBBQAD
@@ -3156,14 +3156,14 @@ exit $script:ExitCode
 # ZWNsb3VkaHViLmNvbQIQcCHy1SICVr9BhVbE7MrPTzANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCCck5xxQyt/RQqX1qIUebZ+SDhqx7M0xphLrNHsjD3bAzANBgkqhkiG9w0B
-# AQEFAASCAYCpQAqraxfZ4ZBg8qnu372uYRGTf0oXo6X4AW1I3zBvObMc7lWqNMGE
-# 3Ym1wNGjFFeXUNHkTyfKnLvwTKpDqML+MYJxrRPfbXNwtE3c7N/B3nxNzxhhRPI7
-# DuJ0ybaLPsu9jxmNGL4WQl2rRpGY/LTLPsNAz1n7xZCuN60Ua1IlLB2qi7GT10pl
-# 9XDUis060vWmOM6eQFVCjq+Z2+e/wgyNmtyMEi3UldaRjsY8sSkCGCIVjbr70GGL
-# Up2RDiS9twykMfQmOJ5LWWfcQ2H1VQKW9coot5jI09HoaPdHKZyENrH7/2T+iCSA
-# Zk5cGvpxEs+JPRXRuE+FVXgQ26aJ7Nq0i4BC269tF1UuagGh2vf9d9/XKfzOm38Q
-# csvxvbTvk6icXoY5rMYhqUFsPh8/IYm2AvzAhWwHuyO2rVK6f1SdxFjBhpC9urlU
-# u5uaYLRjIfAW0OwzliyAL4XL4xF0kz1p5+BAKDgEqcccI7Pk4ameJyH7FgKjkJLq
-# 5Srg3VH/Snc=
+# BDEiBCCyhTHXtylQf9sv21YYf4y8ssH5ehfP8fvCGOopO1r+ADANBgkqhkiG9w0B
+# AQEFAASCAYAs5kSHLFAPSK7SuCkC4n8ICf2ZhDVNLnNs3YsLYmyTgdqHfsjfJ5LX
+# MFmZWdbGOLnm7R/6tsrqqD8hXyvCeyyI6x4+VHZLGw67QuUaezlFJbuT7Pme1W58
+# U7zvBpkUFQqWlB7CbAYBoBQZ44rQ/OPVUNXZ/V6hLbfDpzXsot+1NiPB5yF3FPWD
+# N3+kBi8620TWgp7NUfk1BbiYcbTghGi8loeiWYaLwjWafsoBb3HSWthRE80wlVet
+# yS8TNsYMe9PDskdRqrJ8QjCp7ZJljh+TyXBcRw0KwDGf/OYzx+NRr3SHWbLKxXgc
+# pYMckxmSlsYhjCEJMuCw201hCzuX+ObM53wx9/cKNtfcJdWA9HylkNjaICU/vkqO
+# J2Dki0dV7vpriC5iYtigQgsirJVyrdNZsv0bWe02f6eUhI5JK9tvIz1BYgZYiJmi
+# MpIN2YeMTg2l1vL4Ptk5L5DXlyrGtAnoznxvOC7y7KhVEQk2QqULSqaVoibmoiAr
+# /Pp0A/NBr70=
 # SIG # End signature block
