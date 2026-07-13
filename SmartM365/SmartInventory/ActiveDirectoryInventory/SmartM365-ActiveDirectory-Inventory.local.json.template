@@ -23,6 +23,9 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "DomainFriendlyNames": {},
+  "AdEnrichmentWindowsUpdateAnchorPolicyId": "38ad040b-08ca-41cd-bd86-5da5ef0b740e",
+  "AdEnrichmentWindowsUpdate24H2PolicyId": "82e1d3e6-bbc0-4ddd-b36d-415979dadec6",
+  "AdEnrichmentWindowsUpdate25H2PolicyId": "41046c77-bc66-44af-b4cd-7bbf2c7d343e",
   "ActiveDirectoryInventoryCsvLogFolderPath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory",
   "ComputerMembershipGroupNames": [
     "",

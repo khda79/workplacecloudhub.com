@@ -27,5 +27,6 @@
   "ReadinessSummaryCsvPath": "{{LatestCsvFolderPath}}\\Intune_Devices_UpgradeEligibility_Summary.csv",
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\WindowsUpdate\\Status\\WeeklyHistory",
-  "WeeklyHistoryRetentionWeeks": 52
+  "WeeklyHistoryRetentionWeeks": 52,
+  "FeatureUpdatePolicyId": ""
 }
