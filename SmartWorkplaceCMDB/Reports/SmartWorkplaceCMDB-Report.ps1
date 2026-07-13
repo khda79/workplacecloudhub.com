@@ -3,17 +3,22 @@
 Creates a local SmartWorkplaceCMDB HTML overview report.
 
 .VERSION
-0.1.1
+0.1.2
 #>
 [CmdletBinding()]
 param(
-    [string]$Tenant = 'Default',
+    [Alias('ProfileKey')]
+    [string]$Tenant = 'default',
+    [string]$OrganizationKey = 'organization',
+    [string]$EnvironmentKey = 'default',
+    [string]$TenantKey,
+    [string]$TenantId,
     [string]$LatestOutputRootPath,
     [string]$OutputPath,
     [switch]$ValidateOnly
 )
 
-$ScriptVersion = '0.1.1'
+$ScriptVersion = '0.1.2'
 $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -22,7 +27,7 @@ $modulePath = Join-Path -Path $projectRoot -ChildPath 'Modules\SmartWorkplaceCMD
 
 Import-Module $modulePath -Force
 
-$paths = Resolve-SmartWorkplaceCMDBTenantPath -Tenant $Tenant -LatestOutputRootPath $LatestOutputRootPath
+$paths = Resolve-SmartWorkplaceCMDBTenantPath -Tenant $Tenant -OrganizationKey $OrganizationKey -EnvironmentKey $EnvironmentKey -TenantKey $TenantKey -TenantId $TenantId -LatestOutputRootPath $LatestOutputRootPath
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path -Path $paths.LatestOutputRootPath -ChildPath 'SmartWorkplaceCMDB-Overview.html'
@@ -32,7 +37,11 @@ if ($ValidateOnly) {
     [pscustomobject]@{
         Status        = 'Valid'
         ScriptVersion = $ScriptVersion
-        Tenant        = $paths.TenantKey
+        ProfileKey     = $paths.ProfileKey
+        OrganizationKey = $paths.OrganizationKey
+        EnvironmentKey = $paths.EnvironmentKey
+        TenantKey      = $paths.TenantKey
+        TenantId       = $paths.TenantId
         OutputPath    = $OutputPath
     } | Format-List
     return
@@ -67,7 +76,7 @@ $html = @"
   <main>
     <header>
       <h1>SmartWorkplaceCMDB Overview</h1>
-      <div class="muted">Tenant: $($paths.TenantKey) | Generated: $($generatedAt.ToString('yyyy-MM-dd HH:mm:ss')) | Script: $ScriptVersion</div>
+      <div class="muted">Profile: $($paths.ProfileKey) | Tenant: $($paths.TenantKey) | Generated: $($generatedAt.ToString('yyyy-MM-dd HH:mm:ss')) | Script: $ScriptVersion</div>
     </header>
     <section class="grid">
       <div class="metric"><div class="value">$($cmdbTables.Count)</div><div>CMDB tables</div></div>
@@ -91,13 +100,11 @@ if (-not (Test-Path -LiteralPath $folder)) {
 Set-Content -LiteralPath $OutputPath -Value $html -Encoding UTF8 -Force
 Write-Information ("SmartWorkplaceCMDB overview report created: {0}" -f $OutputPath) -InformationAction Continue
 
-
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFW+7QLJbOWZ57
-# 7UmNQaNEBZcT9zgr9KbK6Gr9lQjSraCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4MLXbdfTYTKbc
+# LUasY4i7YdCwGpRFGB3p3WHaLWiMQqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -230,31 +237,31 @@ Write-Information ("SmartWorkplaceCMDB overview report created: {0}" -f $OutputP
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBp1X1umy2vQ/dZ04BfQyRsNUJHibTyy3yBjXiwfr4ZgMA0GCSqG
-# SIb3DQEBAQUABIIBgJKMSL3cpXnMA1ZqMwuz1j1OWph4Yb2xq3ue8aACyWwhPEAk
-# FE0+tO70PA5Msyv3P8SfJgQGiUE1n0HZ2I5puEjK8n1Y8YOPxNtjj7McBLw+Ih1s
-# TDYVkVVwS6hW/UiZCk7qTgRXY08PS5K/geG5YL2FTW+eTl1Dqoz0RKgvF8HEmfsZ
-# lo1xToy6tYttucTFYLUvkTv7MZkaWYKtxH+nCujw3d6kFSzoKdMsAvN7GaQijnng
-# ipCnnv+ZgZBUz3jMAp2QAwKdBkSXS0gYFM1xCMLDBFGvh9BznmNh0bf5Ef8PyWtr
-# 0awdfhIpUqWBnTEug1CaYdDPG4sV9/5U7lPaQyCQ4SR2IB3hAgODg4e+MFbvFMAR
-# g6CJLGAH31d/nU40LjUgzLzbzNJC567WTq1eHLy8Dtodl1+281fIdOyc3JAuNx7L
-# ai4/kF9VedXcJWyo7w4kt6wEcbD3evjEsFAGiO7nCwMh+NeJmrMH8FW5uNTLJ8By
-# rDWgyVTOb50bVFQA+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPClCa2zR2iBmnlHv3IoAEhauwZdST8CgBYO9+6wuc0mMA0GCSqG
+# SIb3DQEBAQUABIIBgB9h1DBvfMgacWs6H28I+8Rf8OoYCnk2jZFET3DdZDsCky7A
+# vj+DhT8bMGjWA91Oizn939NSHrI/4YRmUQXvmWDYXGM9vbXniEP9kCNswPtr/6DD
+# ywdWmSjwKaOW0+Ey7y+qxB4G4/2DRo8duJNmbtJdac/sxSK/TDH1eFafAGy8TG/K
+# s16+9JorLmjO/w+OJq7bnqJbOvWnWQsCVnOc3/Pvkj2TvdscxA0z4ND90QVPShja
+# VAwDOQ+rFh494WoUr5vTo8PFVGx9JQWuxliiDUiCq5KX6vtHrcF+eqZaLPH/ivMx
+# 0ajh0LG9POPWauYVY4ZBjJo0J1UQHp3EEOI/6tAeKZTp6QoEoHva8ZWGjz9pm+gZ
+# JHeXJFuPFFW7lFvtWEEnhcuraHzfScu5N6xckV6zCjqIBevwMJ43fwfSLuoiRFPt
+# FjHQVj/XNtyBOGNfiRhlVB5kKWhhsjjfGVng1nYyko58FppcNfEaM4WUpNBjiN1h
+# 8DNE92bqqg4Z3+UUDqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# NDFaMC8GCSqGSIb3DQEJBDEiBCDG17IrCryi0Dvz3S9md7nXNDI4h6dGugsWc5s4
-# U1ilQjANBgkqhkiG9w0BAQEFAASCAgBA7xnRqAKGuw05ky2wMU7VgJLwBWIdVsi+
-# RnVB08RqVmjCrxJfZcvB+MmJguwHQDhukBkjihrrU822TWdnhUFVemzOO4QwuBKj
-# S8kK30AGnCoC1USnVgZAJjtaklbJ8GL3FyiH2UgDmD7/n9ZULuBCqjMP82qjrFOc
-# fRnrrd51mcJ9NfV1FM50J/uKaYknn4r48f11NOCCQV8ChiJrK6wXcDZNwwMiDctI
-# /nHG+Sn7ck+LHLMgXCyH0JWd7re4RNi+JlbNMRVyWQ14ZhZJx0Wa8EzcJyDbUyfG
-# vsLooSytHiI377jE8JJen7M414WUhO1VL6INDbzo5caSz6J1laP0ccS0o307bNtl
-# fwYTtblwitzZxCzoHChxkEmTg64fgdakAFrI0E2Vk+PNNrb3KLVUMpO/WKIOOtll
-# 11J2pJ2L/l+MrkrJaYWohpgJLyGi1ETG3nEbg3dfbJwJACjxNGWr/NMVKb0MUKh9
-# HiYxBlM5PkxBdfus2duOvjCHs0uMWwN4zuhSkdJDVt+knDujUC+sKYoo8xJSyuNI
-# rhBXN5+6cXj/bX4MtFMzpbDNW7sThAQyZJEbfIPOd3q8upoGe7Ow37YRlG/D3pQc
-# k7CKlCpY0iS18LqY2c+PqEz9cbcV/MZq/vQCXuNHuaMEyG6UxRzXT5MpgOyoGnGi
-# C1Ye5qmU3g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjAz
+# MjlaMC8GCSqGSIb3DQEJBDEiBCCpoXzGVSTU1C48E0AhsLuDYEBPV2AK82lpPWXb
+# mU7YhDANBgkqhkiG9w0BAQEFAASCAgBti6yvL1riqn+8uZf8bdmek1kHcZnIcTi3
+# S4zrjedQPGEVnyePo8GxtE1a+Dssx1QX8xGGgLQavEEq2Vy8wm04o/x+2xG9C1V8
+# 7HTYcSQ23Nss+wmALMOtejtEjncpb05hew49Pb8WCGperJEZ4KagUOb3klPf0g17
+# CclK4ZqdJzj7nchXpF8g8BHOrnEXbnEQ6EKaFQhw+STDtsIh4dFPaJP1SrKSO6z0
+# 7D3ZOmbHwe/w4eRJFQGrqNn78hKD3tYbGyWIA39P0TrAd619Kld3WGB9K6pw70ta
+# TMxHKDxuaauKpj7Jpa6tRIHH4jbrozPik1vzy49AAYlXH+r1DkgRv6uLz98FE08P
+# epLyPtBnB00w+w098gaYynFcbiTF6AajM6GoyO38NieN91ZJF0KITSJBQ+JHElw2
+# pUwl588asgKzWjSHkEIfOFB5sFRr/88woavqT/JHUzWEr8v57aDVbeGNwsWnxSGp
+# o9cIg6p35yp3Q5HPQIhjqBJxpL7F2UfhDX1io2LXQUn/QJRgl9LQbwMILyTwUeYK
+# 0SdGfn221voGX1F14kR+b7/BW6xzlxZsLhgMYAzFoyvCa9/y9Q1sqAoFwuR1utcF
+# AK8k33OeZ5HzodlVWuZSYh5w1BF4/2TwIInLRQeLzj8zij0d/NX09JBDNPoLaJ+x
+# 81tTxqN8Lw==
 # SIG # End signature block

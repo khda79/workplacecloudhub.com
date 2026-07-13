@@ -5,12 +5,12 @@ Power BI is a native deliverable of SmartWorkplaceCMDB.
 The model should consume curated CMDB and Power BI-ready CSV tables from:
 
 ```text
-SmartWorkplaceCMDB/Data/Tenants/<TenantKey>/DATA-LAST/PowerBI/
+SmartWorkplaceCMDB/Data/Tenants/<ProfileKey>/DATA-LAST/PowerBI/
 ```
 
 ## Multi-tenant CSV contract
 
-Every curated table except `DimDate.csv` starts with `TenantKey`. Relationship-bearing tables also expose hidden-key inputs such as `TenantUserKey`, `TenantDeviceKey`, and `TenantSkuKey`, built as `TenantKey|SourceIdentifier`. `DimDate.csv` is the explicit tenant-neutral exception.
+Every curated table except `DimDate.csv` starts with `TenantKey`, `OrganizationKey`, `EnvironmentKey`, and `TenantId`. Relationship-bearing tables also expose hidden-key inputs such as `TenantUserKey`, `TenantDeviceKey`, and `TenantSkuKey`, built as `TenantKey|SourceIdentifier`. `DimDate.csv` is the explicit tenant-neutral exception.
 
 ## Priority
 
