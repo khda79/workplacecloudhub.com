@@ -4,7 +4,7 @@
     with Windows upgrade eligibility, normalized readiness join keys, and hardware check flags.
 
 .DESCRIPTION
-    Uses Microsoft Graph (Endpoint Analytics) to export Windows upgrade readiness summary data
+    Uses Microsoft Graph (Endpoint Analytics) to export device-level Windows upgrade readiness data
     and exports a CSV containing:
       - DeviceName, Manufacturer, Model, OSVersion
       - NormalizedDeviceName, GraphId, AzureAdJoinType, UpgradeEligibility, UpgradeEligibilityLabel
@@ -31,12 +31,16 @@
     Uses interactive authentication instead of app-only authentication when connecting to Microsoft Graph.
 
 .PARAMETER Filter
-    Optional OData filter applied only when -AttemptDeviceDetails is used with the legacy device-level route.
+    Optional OData filter applied to the device-level allDevices metricDevices route.
     Example:
         "contains(deviceName, 'LAPTOP')" or "upgradeEligibility ne 'none'".
 
 .PARAMETER MaxDevices
     Optional local row limit after Graph retrieval. 0 means all rows.
+
+.PARAMETER AttemptDeviceDetails
+    Queries device-level Work From Anywhere readiness data. Enabled by default.
+    Use -AttemptDeviceDetails:$false only to force the tenant-level summary export.
 
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1
@@ -44,7 +48,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.11
+1.13
 
 
 .REQUIREMENTS
@@ -54,7 +58,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.9
+    Version : 1.13
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -82,7 +86,7 @@ param (
     [int]$MaxDevices = 0,
 
     [Parameter(Mandatory = $false)]
-    [switch]$AttemptDeviceDetails,
+    [switch]$AttemptDeviceDetails = $true,
     [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -118,7 +122,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.13"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -454,10 +458,11 @@ function Get-UpgradeEligibilityLabel {
     if ([string]::IsNullOrWhiteSpace($Value)) { return 'Unknown' }
 
     switch -Regex ($Value.Trim()) {
-        '^(0|eligible|capable|ready)$' { return 'Eligible' }
-        '^(1|notEligible|notCapable|notReady)$' { return 'NotEligible' }
-        '^(2|unknown|undetermined|notApplicable)$' { return 'NotApplicableOrUnknown' }
-        default { return $Value }
+        '^(0|upgraded)$' { return 'Upgraded' }
+        '^(1|unknown|undetermined|notApplicable|unknownFutureValue)$' { return 'Unknown' }
+        '^(2|notEligible|notCapable|notReady)$' { return 'NotEligible' }
+        '^(3|eligible|capable|ready)$' { return 'Eligible' }
+        default { return 'Unknown' }
     }
 }
 
@@ -488,6 +493,7 @@ function Export-HardwareReadinessSummary {
     $eligiblePercent = if ([int]$summary.totalDeviceCount -gt 0) { [math]::Round(([double]$summary.upgradeEligibleDeviceCount / [double]$summary.totalDeviceCount) * 100, 2) } else { 0 }
 
     $row = [pscustomobject]@{
+        TenantKey                                 = [string]$Tenant
         ReportType                                = 'HardwareReadinessSummary'
         ReportMode                                = 'Summary'
         GraphId                                   = [string]$summary.id
@@ -587,49 +593,22 @@ try {
         exit 0
     }
 
-    WriteLogSmartM365 -Message "AttemptDeviceDetails specified: trying legacy Work From Anywhere metricDevices route." -Level "INFO"
-
-    # Step 1: get Work From Anywhere metrics (usually one item)
-    $metrics = $null
-    try {
-        $metricsResponse = Invoke-MgGraphRequest -Method GET -Uri "$baseUri/userExperienceAnalyticsWorkFromAnywhereMetrics"
-        $metrics         = $metricsResponse.value
-    }
-    catch {
-        $errText = $_.Exception.Message
-        WriteLogSmartM365 -Message ("Device-level Work From Anywhere metrics route unavailable; exporting supported summary instead: {0}" -f $errText) -Level "INFO"
-        Export-HardwareReadinessSummary -BaseUri $baseUri -Reason ("Device-level Work From Anywhere metrics route unavailable: {0}" -f $errText)
-        WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully =====" -Level "INFO"
-        exit 0
-    }
-    if (-not $metrics -or $metrics.Count -eq 0) {
-        WriteLogSmartM365 -Message "No userExperienceAnalyticsWorkFromAnywhereMetrics found; exporting supported hardware readiness summary instead." -Level "INFO"
-        Export-HardwareReadinessSummary -BaseUri $baseUri -Reason 'No device-level Work From Anywhere metrics returned.'
-        WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully =====" -Level "INFO"
-        exit 0
-    }
-    WriteLogSmartM365 -Message ("Number of Work From Anywhere metrics objects returned: {0}" -f $metrics.Count) -Level "DEBUG"
+    WriteLogSmartM365 -Message "Device detail mode enabled: querying the allDevices Work From Anywhere metricDevices route." -Level "INFO"
 
     $allDevices = @()
+    $relative = "$baseUri/userExperienceAnalyticsWorkFromAnywhereMetrics('allDevices')/metricDevices"
+    $queryParts = @()
 
-    foreach ($metric in $metrics) {
-        $metricId = $metric.id
-        WriteLogSmartM365 -Message ("Processing Work From Anywhere metric id {0}..." -f $metricId) -Level "DEBUG"
+    if (-not [string]::IsNullOrWhiteSpace($Filter)) {
+        WriteLogSmartM365 -Message ("Applying OData filter on metricDevices: {0}" -f $Filter) -Level "INFO"
+        $queryParts += "`$filter=$Filter"
+    }
 
-        $relative = "$baseUri/userExperienceAnalyticsWorkFromAnywhereMetrics/$metricId/metricDevices"
+    $queryParts += "`$select=$($wfaSelectProps -join ',')"
+    $queryString = $queryParts -join "&"
+    $nextLink = "$relative`?$queryString"
 
-        $queryParts = @()
-
-        if (-not [string]::IsNullOrWhiteSpace($Filter)) {
-            WriteLogSmartM365 -Message ("Applying OData filter on metricDevices: {0}" -f $Filter) -Level "INFO"
-            $queryParts += "`$filter=$Filter"
-        }
-
-        $queryParts += "`$select=$($wfaSelectProps -join ',')"
-
-        $queryString = $queryParts -join "&"
-        $nextLink    = "$relative`?$queryString"
-
+    try {
         while ($nextLink) {
             WriteLogSmartM365 -Message ("Calling: {0}" -f $nextLink) -Level "DEBUG"
             $page = Invoke-MgGraphRequest -Method GET -Uri $nextLink
@@ -646,7 +625,13 @@ try {
             }
         }
     }
-
+    catch {
+        $errText = $_.Exception.Message
+        WriteLogSmartM365 -Message ("Device-level allDevices route unavailable; exporting supported summary instead: {0}" -f $errText) -Level "WARNING"
+        Export-HardwareReadinessSummary -BaseUri $baseUri -Reason ("Device-level allDevices route unavailable: {0}" -f $errText)
+        WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully with summary fallback =====" -Level "INFO"
+        exit 0
+    }
     if (-not $allDevices -or $allDevices.Count -eq 0) {
         WriteLogSmartM365 -Message "No devices returned from Work From Anywhere Endpoint Analytics." -Level "WARNING"
         Write-Host "No devices found in Work From Anywhere metrics. Verify that Endpoint Analytics is populated." -ForegroundColor Yellow
@@ -666,6 +651,7 @@ try {
     $projectedRows = @($allDevices | ForEach-Object {
         $deviceName = [string]$_.deviceName
         [pscustomobject]@{
+            TenantKey                     = [string]$Tenant
             DeviceName                    = $deviceName
             NormalizedDeviceName          = Normalize-DeviceName -DeviceName $deviceName
             GraphId                       = [string]$_.id
@@ -745,6 +731,8 @@ try {
     WriteLogSmartM365 -Message ("Report generated successfully: {0}" -f $csvPath) -Level "SUCCESS"
     Write-Host "Report generated successfully: $csvPath" -ForegroundColor Green
 
+    Export-HardwareReadinessSummary -BaseUri $baseUri -Reason 'Companion tenant summary refreshed after the device-level export.'
+
     WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully =====" -Level "INFO"
 }
 catch {
@@ -792,11 +780,12 @@ $($global:LogTextFile)
 }
 
 #endregion Main logic
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGqfOAD0NGez5w
-# FQcbAFa620nyuYfdZJ+j8EuLPz9h4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAce94QdaV3y4Xx
+# Yp1JdbXHB3i+8Mm7ivtKPlkOZXyfo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -929,31 +918,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPLuXAadlv49trkkFmW74GJUWfNmGuIp6u3c/TUKAmO2MA0GCSqG
-# SIb3DQEBAQUABIIBgHFzaOL+f7OFv8OflMhUFMJNgBpCSZAWTDQHm1ZuwAcAiniQ
-# x1l9sSrVNICySyCnjzc6wTbHX3soE1adeWqz3zE7SaZqzg7npFZcmUF+g2MYCv9a
-# 8I5GxTWpNy0jqgj8q0aISlqLPXmV9ksolG/thMBcL4nzNmvGRBZgg42RbmQaggcK
-# j44eY2UYYDljzG22lWVRb6lhBNYCDfc6ev2Sdz31sV4EF9IZduaplECA7Iui3VZ9
-# 3Ko8jfoXtC0MSMmSi3TwdtrKuGquuc1wnjX28tzcyDglpcDIAzBJcLWZS+rctrcI
-# nHzF1gl3G2b0qXq1p7iL6LZOJhSC+mGaiht9vL2e2Z1AuqYiHIL7ht9bEW/ZPwgP
-# ckfB1Q9lmGYFN1eg6IKGZ1e1O6yjpQ3OD4bjAXtcq8rmLKnbd/Auj1lslfky2p3A
-# m2NcezWoNDU2dKaXskx1l7ctI0NfHN8fOWgDDlHT0k05MqK+nv34rf3k/3cq0rQd
-# /S1HPncQz+RedoHKPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINVFf48ME4Y7dP6Gv76O7MrdMNXLoRB2MXbxnRf22ub5MA0GCSqG
+# SIb3DQEBAQUABIIBgEuOver31aQ6enuhe11V9jS5c/jsnuBZTFK+iK0jV/1+I8c4
+# GNMWoypCFR9EkFPOHiAwXxbNjjte0sFb7xypzRNnhwVthUDP1qXZNpowMbN7S2pP
+# zAmbkQHxRlH51iKMVqCz8LVBSUxu4w8r/Sf6CRNidHH34b9xxiPBolinS72SyLEU
+# w0hJ/x+67VEENw9WtKbKaxSnlbE4U9sWbc3oxqTmrqU6tQrV+VoeXNJz+c9YjUJA
+# dLGIFw/zHOTimgKKTSLZKCx2H4ve6BgL0cFjjJALGjjuLKCIqAD/aOWLPitH5B86
+# YvX1zPd/QFnH1I0auzM1fV2e0W+ZiJ6RQUCsaYwms6lJKN410CID6qJkYKauBnvf
+# CzgXvhjoG91jkMRg3OZjd1zgWd7InTW0JOn6dOiUNsMIvkMwKSjJs0GqEWwRqfla
+# WyBwUDW7oLnd1GWAV7bGrcdTzeDFfrEFyA8G+jeZo08gzcQWDVjVXUcR96gvzKE4
+# WruD05vGWXnAJ2+kPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzJaMC8GCSqGSIb3DQEJBDEiBCA4Kw19vpnozLmOOfvoQNQjThdgqhHA8N8j2+9b
-# OJV/zDANBgkqhkiG9w0BAQEFAASCAgA0pThX2ZNvUnvCHuI8ArVvAuWQvO8MYUAt
-# U7P2cHB5JT2hbcmM24UBVO/SY8PXB/pp6hkNOCnriib4Ak7W7rfSKwMbIgUiMy+P
-# ZQlPMU26TTCFab7EnSYqTkIxaWPFzPSPB50Hf0NPvn+dFBU/8eVEFHsQOSOGgdDx
-# p0iJ9F+b07GOn9MMfyimm0DE2T50gU7NvuTWX73BWbSZh5xvZjRBo859urLgHp12
-# sEmSsG7B1OOcUWbq5/mvqBkoZiwshBSSQRlGaqbnk7toP8r/1xKtOYMsyFwP9zbZ
-# AQLDDjdg7vzHebw0fKSkStnwGJpjS5sUWzwWsxakHgUkcpYq+evANrUhWngp5npp
-# SEGG0+Dgl2yfkKGpbNAwGmnaBmWiAwDc9v2+tQs/6RZTkxlTDwgPpOp4QzRO4OZg
-# KZH1IN5RlBu1n7vnzTOdrvPd0nJUFLdF9zohMSL7L+BEWEUH5uFn8CiexUxGIpf6
-# ue5KbBcBG0lHvnpMnclqgcB3AqAmgxqKbRjN8bRTOUadXtVrL4Omj19npYwjpRJU
-# 0NC1w0o3I/Sb6ejUIorKxqiYcKwM2txz1Z1l6nfkB5r8Vzeeed0b0EbX7Vmcii3R
-# VJKHpigMJP1CCQ7TJd+PgEvXA1c5ZRrf0M+J4U2P+I6Eksk6ArLYOWG3fWxjgERX
-# 0MIrfZ/GSQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDE1
+# NTBaMC8GCSqGSIb3DQEJBDEiBCDRs2PGJ075MkCjVUNFT3OYubGe1cS5CIF7muzl
+# VGgYTDANBgkqhkiG9w0BAQEFAASCAgAFtJ4O3k2pmEO57ZJrKFVdX4QqCwaMICUl
+# 6HMY1mBWxMrStl7uA4GEcYbiDNA/ckCPE6Pli+0H1wryWjc4nEKYjo79FoLYcP6S
+# Z1uM0cVYNCK/yYJI5uuvH3vT7q3p+JWU7K36sIdBKbG9bpP7hwe3DIU9mwwpCJeB
+# mO9fTmOmLMInt8aKfCVvIVA5Pv+CpXlZtEHoy/iA5LZJt/HGXZrRfHLe65APHo7P
+# YMFWz3zOyPRHZFNJgAKg+C/elOj32AMcxdbzExajmTMmDfBb4ReJjZuWPH98sxiV
+# iiGQyP/QEC4JwEtdG6PLT2vGxJzad1hT/Lj73D9XFixG4t098F6NG8WuBBM0ZyI9
+# Yh9YzaKmddKtu4D38paYExPE9IqDe5pTbpCpWP8LEgii+9KNHZaaT7Ta2/ycb/qh
+# 8dcvUCSB+2Z3UoaoA0RrliUVXzjGSnLDGP3dQ7Wsp13zMXgnZqPCsPjnFG2qaHMg
+# NheK1fQGoi41pjSzggf1MKZOID22RjXGGAceDPAs5qIzxVnY2tTKh+tpeDQw0HIb
+# Th67aePI9/1csyNR5gmJuNVNwn3LAqV/S/fV2B7AhoOlFKZu8jJ5+0lwQwi8ReXc
+# GBIQQzfMTulIJbgBBa181lUBqBXStp1WbF2tShTFd8RwnAsr/cUukx+l5+TXZkQw
+# U+N+HherfQ==
 # SIG # End signature block

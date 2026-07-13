@@ -2691,7 +2691,10 @@ function ExportAndCopyCsv {
         [string]$Encoding = "UTF8",
 
         [Parameter()]
-        [char]$Delimiter
+        [char]$Delimiter,
+
+        [Parameter()]
+        [switch]$NoTenantKey
     )
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -2700,6 +2703,10 @@ function ExportAndCopyCsv {
     $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
     $global:csvFilePath3 = Join-Path $GlobalPath "$runBaseFileName.csv"
     $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data
+        $Data = @($tenantCsv.Data)
+    }
     if (Test-SmartM365MaxItemsMode) {
         WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
     }
@@ -2808,7 +2815,10 @@ function ExportAndCopyCsvFromConvert {
         [string]$Encoding = "UTF8",
 
         [Parameter()]
-        [string]$Delimiter = ","
+        [string]$Delimiter = ",",
+
+        [Parameter()]
+        [switch]$NoTenantKey
     )
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -2817,6 +2827,10 @@ function ExportAndCopyCsvFromConvert {
     $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
     $global:csvFilePath3 = Join-Path $GlobalPath "$runBaseFileName.csv"
     $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data
+        $Data = @($tenantCsv.Data)
+    }
     if (Test-SmartM365MaxItemsMode) {
         WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
     }
@@ -3651,6 +3665,7 @@ function Set-SmartM365CoreContext {
         [string]$RunOutputRoot,
         [string]$LatestOutputRoot,
         [string]$LogPath,
+        [string]$TenantKey = $global:SmartM365Tenant,
         [int]$RetentionMaxCsv = 30,
         [int]$RetentionMaxLogs = 30
     )
@@ -3659,11 +3674,27 @@ function Set-SmartM365CoreContext {
     $script:SmartM365CoreRunOutputRoot = $RunOutputRoot
     $script:SmartM365CoreLatestOutputRoot = $LatestOutputRoot
     $script:SmartM365CoreLogPath = $LogPath
+    $script:SmartM365CoreTenantKey = $TenantKey
     $script:SmartM365CoreRetentionMaxCsv = $RetentionMaxCsv
     $script:SmartM365CoreRetentionMaxLogs = $RetentionMaxLogs
     if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $global:LogTextFile = $LogPath }
 }
 
+function Get-SmartM365CoreContextValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()]$DefaultValue = $null
+    )
+
+    $variableName = "SmartM365Core$Name"
+    $variable = Get-Variable -Name $variableName -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $variable -and $null -ne $variable.Value) {
+        return $variable.Value
+    }
+
+    return $DefaultValue
+}
 function Get-SmartM365CsvValidationBaseName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
@@ -3926,6 +3957,121 @@ function Initialize-SmartM365DefaultCsvValidationRules {
 
     WriteLog -Message ("SmartM365 CSV validation rules loaded: {0}" -f $rules.Count) -Level 'INFO'
 }
+function Add-SmartM365TenantKeyToCsvData {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [string[]]$Columns = @(),
+        [string]$TenantKey = [string](Get-SmartM365CoreContextValue -Name 'TenantKey' -DefaultValue $global:SmartM365Tenant)
+    )
+
+    $tenantKey = $TenantKey
+    if ([string]::IsNullOrWhiteSpace($tenantKey)) {
+        foreach ($row in @($Data)) {
+            if ($null -eq $row) { continue }
+            $tenantProperty = $row.PSObject.Properties['TenantKey']
+            if ($null -ne $tenantProperty -and -not [string]::IsNullOrWhiteSpace([string]$tenantProperty.Value)) {
+                $tenantKey = [string]$tenantProperty.Value
+                break
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($tenantKey)) {
+        throw 'TenantKey is required for SmartM365 CSV exports. Initialize the tenant context, provide -TenantKey, or use -NoTenantKey for an intentionally tenant-neutral export.'
+    }
+
+    $tenantData = @(
+        foreach ($row in @($Data)) {
+            if ($null -eq $row) { continue }
+
+            $values = [ordered]@{ TenantKey = $tenantKey }
+            if ($row -is [System.Collections.IDictionary]) {
+                foreach ($key in $row.Keys) {
+                    $name = [string]$key
+                    if ($name -ieq 'TenantKey' -or $values.Contains($name)) { continue }
+                    $values[$name] = $row[$key]
+                }
+            }
+            else {
+                foreach ($property in $row.PSObject.Properties) {
+                    if ($property.Name -ieq 'TenantKey' -or $values.Contains($property.Name)) { continue }
+                    $values[$property.Name] = $property.Value
+                }
+            }
+
+            New-Object psobject -Property $values
+        }
+    )
+
+    $tenantColumns = if (@($Columns).Count -gt 0 -or @($tenantData).Count -eq 0) {
+        @('TenantKey') + @($Columns | Where-Object { $_ -ine 'TenantKey' })
+    }
+    else {
+        @()
+    }
+    return New-Object psobject -Property @{
+        Data       = $tenantData
+        Columns    = $tenantColumns
+        TenantKey  = $tenantKey
+        WasApplied = $true
+    }
+}
+function Add-SmartM365TenantKey {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)][AllowNull()]$InputObject,
+        [string]$TenantKey = [string](Get-SmartM365CoreContextValue -Name 'TenantKey' -DefaultValue $global:SmartM365Tenant)
+    )
+
+    process {
+        if ($null -eq $InputObject) { return }
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data @($InputObject) -TenantKey $TenantKey
+        foreach ($row in @($tenantCsv.Data)) { Write-Output $row }
+    }
+}
+function Repair-SmartM365CsvTenantKeySchema {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [char]$Delimiter = ',',
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = 'UTF8'
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $header = [string](Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop)
+    if ([string]::IsNullOrWhiteSpace($header)) { return $false }
+    $tenantHeaderPattern = '^\s*"?TenantKey"?\s*' + [regex]::Escape([string]$Delimiter)
+    if ($header -match $tenantHeaderPattern) { return $false }
+
+    $tenantKey = [string](Get-SmartM365CoreContextValue -Name 'TenantKey' -DefaultValue $global:SmartM365Tenant)
+    if ([string]::IsNullOrWhiteSpace($tenantKey)) {
+        throw "Cannot migrate CSV '$Path' to the TenantKey schema because no active tenant context is available."
+    }
+
+    $rows = @(Import-Csv -LiteralPath $Path -Delimiter $Delimiter)
+    if ($rows.Count -gt 0) {
+        $columns = @($rows[0].PSObject.Properties.Name)
+        Write-SmartM365CsvAtomically -Data $rows -Path $Path -Columns $columns -Encoding $Encoding -Delimiter ([string]$Delimiter)
+    }
+    else {
+        $parent = Split-Path -Path $Path -Parent
+        if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
+        $tempPath = Join-Path -Path $parent -ChildPath ((Split-Path -Path $Path -Leaf) + '.tenantkey.' + [guid]::NewGuid().ToString('N') + '.tmp')
+        try {
+            $newHeader = '"TenantKey"' + [string]$Delimiter + $header
+            Set-Content -LiteralPath $tempPath -Value $newHeader -Encoding $Encoding -ErrorAction Stop
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+        }
+        finally {
+            if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    Write-Verbose ("Migrated CSV to TenantKey-first schema: {0}" -f $Path)
+    return $true
+}
 function Write-SmartM365CsvAtomically {
     [CmdletBinding()]
     param(
@@ -3934,8 +4080,15 @@ function Write-SmartM365CsvAtomically {
         [string[]]$Columns = @(),
         [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
         [string]$Encoding = "UTF8",
-        [string]$Delimiter = ","
+        [string]$Delimiter = ",",
+        [switch]$NoTenantKey
     )
+
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data -Columns $Columns
+        $Data = @($tenantCsv.Data)
+        $Columns = @($tenantCsv.Columns)
+    }
 
     Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $Path -LatestPath $Path
 
@@ -3981,10 +4134,16 @@ function Publish-SmartM365Csv {
         [string]$Encoding = "UTF8",
         [string]$Delimiter = ",",
         [int]$RetentionMaxCsv = -1,
-        [switch]$NoSharePointUpload
+        [switch]$NoSharePointUpload,
+        [switch]$NoTenantKey
     )
 
     $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data -Columns $Columns
+        $Data = @($tenantCsv.Data)
+        $Columns = @($tenantCsv.Columns)
+    }
     if (Test-SmartM365MaxItemsMode) {
         $TimestampedPath = Add-SmartM365MaxItemsSuffixToCsvPath -Path $TimestampedPath
         if (-not [string]::IsNullOrWhiteSpace($LatestPath)) { $LatestPath = Add-SmartM365MaxItemsSuffixToCsvPath -Path $LatestPath }
@@ -3993,7 +4152,7 @@ function Publish-SmartM365Csv {
 
     Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath
 
-    Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
+    Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
     WriteLog -Message ("CSV exported to: {0}" -f $TimestampedPath)
 
     if (-not $global:csvGeneratedPaths) {
@@ -4003,7 +4162,7 @@ function Publish-SmartM365Csv {
 
     $publishedPath = $TimestampedPath
     if (-not [string]::IsNullOrWhiteSpace($LatestPath)) {
-        Write-SmartM365CsvAtomically -Data $Data -Path $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
+        Write-SmartM365CsvAtomically -Data $Data -Path $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
         WriteLog -Message ("CSV latest copy written to: {0}" -f $LatestPath)
         [void]$global:csvGeneratedPaths.Add($LatestPath)
         $publishedPath = $LatestPath
@@ -4066,7 +4225,8 @@ function Export-SmartM365Csv {
         [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
         [string]$Encoding = "UTF8",
         [string]$Delimiter = ",",
-        [switch]$NoSharePointUpload
+        [switch]$NoSharePointUpload,
+        [switch]$NoTenantKey
     )
 
     if ($PSCmdlet.ParameterSetName -eq 'ByBaseName') {
@@ -4075,7 +4235,7 @@ function Export-SmartM365Csv {
         $LatestPath = Join-Path $GlobalPath "$BaseFileName.csv"
     }
 
-    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload
+    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload -NoTenantKey:$NoTenantKey
 }
 
 #endregion
@@ -4084,8 +4244,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXM5Beiaonhdfe
-# 5XqubqljCCcvETQ412Vy6ggJZoMgIKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqOjLQjVTU53yK
+# yaXAMEq947oCHs0eQAHE1SaaCKYqaKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4218,31 +4378,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG8PDRLI+9nf47NTx4B0Bb3iPpe9z9Z1QuW9IQu9tUTaMA0GCSqG
-# SIb3DQEBAQUABIIBgKFCVXCZqfwNZmJx4+nCq2+I5uo+e75b0RDg/HQMy+2pChu7
-# CxxCO305Kn6yoe84MtXC5KoKfI/BHU/+trgQcb4B/azT0MndZjoNvWbIKWE+n0n3
-# v1q4mYOEIi/XlPaTV2P5ohyyfV6Cl8t8fhkpfx1qGDxxmzBk3TmkY9PfPpqKL0WW
-# f1NKQXiUOW5ATvhjFa1c5xKh9DBsP4ri164ZEO2BgmIJ70/LB/pMJ2sfwxABoVQC
-# frPamTZJPN0l3tmHEWa5UEKgLDcbMnIjkMFYNbyZymNBo9h+bus5a987bGUdd7fB
-# BA88gtiM4kD6I7lZa8qbSFewSFoSJVQUAMkgCHFbzowE7zfU9D3Yv8tQBLsSWnH1
-# RqrcgELecDxDT+PtpwUiZ0ROH088R4spnrFmXr7ksZ+2ICxM1nouJTd5Xm3W4o3U
-# DMd8SboMctpd48XfV85tYYagywnJcLP4DBWh92Pl8AnalF+XXvfobf7gpiWDXFT+
-# 8BrtFKz/0qmlUyjjCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINBkI92xe01PphXuDs5a1LXhuYFYM8iMn3+F5v1z7J8XMA0GCSqG
+# SIb3DQEBAQUABIIBgDqSwcQuBb7o4aelVgGbfOoMAlUC09kRaI1Fj+0ErRDBMYcC
+# Kw+Rtd6cxcIfwItxjshsSs38pp9n38NFzbLjHJrV+5J7F0eI6Zb4kQsqdwTkozKY
+# RomF105EAaOaK/8oEQCTjvxx5/UQWII2HWMNIoFQbcf3LjAQeIF9WFa79aMb65sa
+# ATDSuaPuzOc9XYJFECAsG0wh2HmsY3PmDSm4gvkCTJFcdoVjZ6TnHRMnxBIIhPdm
+# 50Xf4V+8q6qDahzZkNEvLeQB4pcPlDRTDH+dd9eZNKSo0+uDXs0NAovmhl1D6NTq
+# nkiq4sKqpl/Dq6bgzxVP60aRYfsqkoTQaB3ibHjc9+sRm7y/FL3+uNb9FXQuECnV
+# 9E58E1xHWYBo8nHpgKM/Oalaes82xanmsbDL1EL0OPtPPqEXYEh/wnD2G0KVftkN
+# 6dbDdJpnBKOHxcN+gQ4A4sQ5Qj2EerW9+yA3SHSa2dCR4gaAMxXSa0Cy5QO7lj71
+# SBPqZUdLVDhBlXZMK6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MDdaMC8GCSqGSIb3DQEJBDEiBCBqXkB0Cbf0BfAto09nEX9+aQEJYurt0fjS9pdb
-# xkEyGTANBgkqhkiG9w0BAQEFAASCAgAd4qY0DYnw4lXuNWIKrgOfWj9WDFbPGt3t
-# sOvX8RLrkK5eRt2F36pE5eU5kLVu1diVO4Hh9s0YLFqwTQ6PJ7+9Hl7VoqP4FMOI
-# rxpqYUYYLhEm9jT3A/e1+lkOoq48ChvJCIhNECqMRwbtYuYfmJaCQK6s3BtOKqdu
-# Db/OeqFezzcc8Fg8RbQab9JLd51BZVS+Eg0zzBycYzATPYAFOj9u+4/SH4s2Y8Lp
-# 90qHH2lg7X7hFn3Q/Eyx7hGgNAHOnpoFwL0NI8UNigEMoljkkldHgQ99CFc1g0fo
-# OHWkzN45dpWUHfWXSuJcmZjRKi6zehqG92XTMJA9ZcYh76z8Q/C9if3niN8ANjAb
-# GrXJNB4a0IzpfBvLycR4oMvZYZJWYqCqkcpGiCa4XsHIIyAj8vi7R2rcDUquPrWI
-# KuZwSiK4AznHYamCjfoDhN85vuir8tCsp1qPa5yXpgDQRg9Lo88lVRv0haEXqZed
-# lYE/LKeSrVdNpYcoiP2aV1ghCmarMp+RQ3MkVv/SstTL8qnCQ2TVlIEvbbQNGSv0
-# vx8UNw6gwslX7F7hJrue82Isc8qwDK/DV2ECmh/9CFoTbn7ZJDGV1VndwESdh7tl
-# m0fawpGV2BQl4m20WIwCMytPYS/qpV//LQrqIa45+ljNBqPEPYv7UtxGYwdIf7cX
-# v0DowTIP+A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDU2
+# MjJaMC8GCSqGSIb3DQEJBDEiBCCSkXpvTNsVRR/6XJUnnxC2wrTIeMEgWgaCm7nu
+# QuexzzANBgkqhkiG9w0BAQEFAASCAgAOS3NBsnPS6MNTGUg81VGVWg9P7JWdpIa6
+# DyArONFpp4F6Bnn26JkkQlD8a27VmNYSi8ErZv1vDzPYMu3V8Wk5pdjzbEawKt8U
+# FRvk6PKjgcI7r8Fou4U6D+rwlxsyyf+RBjeVQRKGpm8wDfuA98qo62ygs4Ma5tMV
+# bLzDk5dy50lFhteocQngkW1q2UDBt30lvaJP3dN+AZVcxG+BCVKVku8A/nXS7Qyl
+# DCGzhZdFythmyYoTeDyr81u0QBu2MOumdmwgvCwGVQI/gyVru9EPfgok15N75BWL
+# hVNa32X55e3qaK7CJIQgeiT6jD8qCYGztYYPI1Mi05k4n6sM6h9+3gOVRTGtw6my
+# LyYT4YeIGazHi4pxqw/wsbL5VgGJqzkrwFyJ2+Cga5f9Rbwyrb0s4trNBKdv0aKn
+# FaGerLBNPKcSVrnyh/VWglY+4YKdsiGhtcPEmiBCqap1FkSVTqjL0JLCfdhJvRhE
+# f9XAz45dLd37Sa33B99YAzmG5Smbnsx1R7WfmNk4hhXqoE84RY9im1B6VmJIaNX2
+# 7s5Xv4561KLAqO/bcZASUiLHK83+xKvRbVf8MY0qkDpm6T+ioMz4O65RU3IF1JrV
+# h46v29VNb0vKXGOa+r0qrlHjernOMVE/B3nDJ5KsGpNCyrEfklHQfSWqkFqRIAnR
+# VG9EMjYcFA==
 # SIG # End signature block

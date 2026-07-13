@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.15
+1.16
 
 
 .REQUIREMENTS
@@ -395,7 +395,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.15"
+$ScriptVersion = "1.16"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -2320,7 +2320,7 @@ return @{
             Add-ErrorBucket "StatsCompleteness"
             $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
             $statsDiagnosticPath = Join-Path $OutputPath ("Exchange_EXO_Mailboxes_AllDomains_Stats_Incomplete_{0}.csv" -f $timestamp)
-            $statsCompletenessIssues | Export-Csv -Path $statsDiagnosticPath -NoTypeInformation -Encoding UTF8
+            $statsCompletenessIssues | Add-SmartM365TenantKey | Export-Csv -Path $statsDiagnosticPath -NoTypeInformation -Encoding UTF8
             $issueRows = foreach ($issue in $statsCompletenessIssues) { $issue }
             $script:StatsCompletenessDiagnosticPath = $statsDiagnosticPath
             $script:StatsCompletenessIssueRows = @($issueRows)
@@ -2394,9 +2394,9 @@ return @{
         $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $errorPath  = Join-Path $OutputPath ("Exchange_EXO_Mailboxes_AllDomains${CsvSuffix}_Errors.csv")
         $errorPath2 = Join-Path $OutputPath ("Exchange_EXO_Mailboxes_AllDomains${CsvSuffix}_Errors_${timestamp}.csv")
-        $errors | Export-Csv -Path $errorPath  -NoTypeInformation -Encoding UTF8
+        $errors | Add-SmartM365TenantKey | Export-Csv -Path $errorPath  -NoTypeInformation -Encoding UTF8
         Write-Host "Error log exported to: $errorPath"
-        $errors | Export-Csv -Path $errorPath2 -NoTypeInformation -Encoding UTF8
+        $errors | Add-SmartM365TenantKey | Export-Csv -Path $errorPath2 -NoTypeInformation -Encoding UTF8
         Write-Host "Error log exported to: $errorPath2"
     }
 
@@ -2527,8 +2527,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHQ/9W6PQKqZLs
-# fhFbanc70/kI0VArz8T9kaY6BvX3n6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBcg7qcBj7Kh3JP
+# /2+8BrSIMR+QJCkjJtOUhJMR0i6nFaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2661,31 +2661,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGf4q3QapdRLLWYPBQKC30Xlh9q+d4dvB1WD3KDSNy+HMA0GCSqG
-# SIb3DQEBAQUABIIBgJCHTiQNuM8IfdKhYM+xGkCjyon3LmuAMBedDzfW3yHD2m0r
-# 3Ect/tdZJzsmBMFTI9kNkZyNn2txmaEQ0PwFMP9sAmkAbYQq8u4zRcFBfoEOgUNB
-# zgV0n7wSlnA54UMhDgF8AsDZc8BLnXbU7mSRTmwpHRRF5+LntKIF43RlNOLv6Rzh
-# nwjCndRwHdErqttPRznyUxzM0ln+Sb+P4hjlzKRmKx/FyGkAY0gVtCY7cNifmLUt
-# pHhi9+Xa+6G84+sMS+mkLB4U13RBpC6Lw95HXjLUWzPCXBbfM07n2IRUXoVZLkzU
-# mAqrab13mW4A1bQvJpdPffohlog2F2zgfLw6NKgzlJ4fAYvTPCbTJz7Y1lDkh89R
-# touaWTk5RaWQ6uHrBQK92rx1Ws2PVvYHqJ/IOLOxmxMTtqclb1D43JvVmKoazePc
-# sQlybETAFpmGF8YGbLEgHpP81s+6V5pQVcLkYG6Abb1NPH1O6f/WQl9wgNxETDMM
-# X05QvEDCQnqzf6FS6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGUKYVKkeZ05rOXp9O59eWd4tMHJlOvwPhLDGtGN1wRzMA0GCSqG
+# SIb3DQEBAQUABIIBgHgP0FExP40bNJYF1UPDrQdwuJn8Zd85iBePX6uveXKfevi+
+# t6+He75Ya6q8TNyXT66PsK+5qn5RTtNQ/s0pWOdamoCpk9Tq41xsxbbDw6QY3ix/
+# WmAz0SPYdAqfpeAlgfk7pD/ktdC2U1iSYyz86Lb/xYE9fqPyJb+MfNijz3fGQvHw
+# ubBjJUPIkP1a5ayFalnatIIdI0u7//iSZTWxIMvn9FMSjoUksjlla0LL15pzEfux
+# OuicGnky8o43+eMDKOPaKs1+L7iXjVhBFqazwNxW1CDLLAZzGzQCUswd8lc/TFUF
+# L4vTTwa/uRlN1l7Pj1vz+n/kn49aWUGEM1ujyy9OJgwC9W5sqfnA0FRIeEjwHbZA
+# ODQft4s/tPz6ynwfyy0Z8RCKJN3myO4lzLO1oUgaua44sF5Y+t5fHZ9h/7vI/9c1
+# ovJ3prhSs6OAqpKsCwQa3XvcfvqcdnGTCuNiI7RsQtmucaIG7c5zKdR/kg/F6epu
+# hvjeSOZ9sL4awJbf9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MjRaMC8GCSqGSIb3DQEJBDEiBCDklHFyoZDOHzyKrhwdvHC3shTTJ+1tZd393iEy
-# a3fJ3TANBgkqhkiG9w0BAQEFAASCAgArVX+R5WbU4RdTaHUumJ0FyVmc2cRck6QL
-# v1O5k64ePdxQtcatJYBZ/Gg7Qn7h4r6oktHnhAa2tx8zGsTrKwkV4i59Wld+gFwY
-# MPNcLlABPor1Wgdrsk9KRQ/K6P+31NZ8tH3j0eSxCNQobwwyEPGAy2ZshsH4DeQ+
-# pisoO69QYohzjteHhzzgc2q7CEQg41c0+K+HFvnx7bwcL4Z2xY5+saZ4CM8Su+gm
-# ontoa82K03/x4SDYrZZN/I4+0tUsD9lY1uvBGp7b7sal5fwG5LD7rK0qT9KDp3Wj
-# pe2AYC+si64pIy5ix4v1vF4a+i0ZwlebcHMLLRJwv6O1T/jSm+jSGlCczCUis73D
-# oXItuYTXJ+R75mSn3BaOARJ9BOUf6HXzijck52GwajBBsGGeWXguCWTe5W61QVdd
-# SscQpMrSJB8QQ6Ff+RIuKhI+Ro2s6rIplIRhfJNlWG/NuNAGl1/Tn82UU8Lf2yY8
-# iLn4byNuAzX6NzI9SYMl9uBncKR4usayUae3fdiAfMRwIi0OlW0qrj7I6ZR0BETi
-# RSBtaffEaO0kHrm2VR2b4foWDm2AA25hlhMruKtbxfcflpwkZ1xKlDUg7SIt1i5p
-# qVagMeSkEBRCL9ldR+borBibxcEIcamkK4HistlHZl58yk/92G8hgEPKDrQJ6/xC
-# veDZpb9VJQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
+# MjFaMC8GCSqGSIb3DQEJBDEiBCAv2s8qdxHF5jCSesWAEG+h7VNdGNyE7G6nkxlk
+# XHP94zANBgkqhkiG9w0BAQEFAASCAgCRdt44k4QzmBNTRe17ffZVzsJxqx8xOd+I
+# mfwRW1Vwe0R5OV7HYLUTgPrWOqDw3BQUwlGRSTtgumV3cr6C+CRiXRBXiiCA1ng3
+# bDj90ghhgr1izRcT/jKvMaU8IOqTUGiaJjfb88zTh3eJYvPaL7OhmG2Hdb8MuoO8
+# dZcc8N865lbhFR5rXJ6RicaWADk2zwwSF3DKsWSxgaXBLzdYu4zlZejhU5Gg8Evx
+# 5+OFev9KUpWjxQa4ugdPiZ659ensxzo3GQbJ1u3eYyT9tZnzQTu3H2/IRUervj6V
+# WREaFAfwbsJOj1YUTTuNXnd5L6Rf1GCjkZZnG0FnXocv15ZBkpASzcANi9xTMB4H
+# 9g/WQXBVDyhzX83l0PJ5d3vfsYCGcojXGSPyDcFt9JIGwWKOhqt1yQKmH7abczbu
+# PtQwBAxw9kCHA6R1JYHZ2hxBR8tdtP7Qsybvo+VHoCq9h3+rYCzW8JNb9DmJtSni
+# ZW7FoSP3rFbJcEf6Qkk9AusGNBsbJGXTyU08J4iIBW5Po+SfC3PjSp69WgJ+PqjP
+# O+R02HUQyEM97++CZsbXBBxVI9z0p4DOCKV5yAQppjNEUoIK79SxG356xcclYBhA
+# XJfldwF60T6FzxfddDSilvhemmvJYAO6j9te4j+VBJjh61BplO7z6Nw7gOlepkL4
+# 7lh3pqtLkQ==
 # SIG # End signature block

@@ -691,7 +691,7 @@
       "TimeoutMinutes": 240,
       "MaxRetries": 1,
       "RetryDelaySeconds": 300,
-      "ContinueOnError": true,
+      "ContinueOnError": false,
       "Schedule": {
         "Type": "Daily",
         "Times": [
@@ -769,7 +769,9 @@
       "Arguments": "",
       "Enabled": false,
       "Group": "Intune",
-      "DependsOn": [],
+      "DependsOn": [
+        "Intune-Devices-UpgradeEligibility"
+      ],
       "AllowedServers": [],
       "TimeoutMinutes": 2880,
       "MaxRetries": 1,
@@ -827,26 +829,6 @@
           "12:40",
           "16:40",
           "20:40"
-        ],
-        "MissedRunPolicy": "RunOnce"
-      }
-    },
-    {
-      "Name": "Intune-Win11-Readiness-From-Intune",
-      "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\SmartM365-Win11-Readiness-From-Intune.ps1",
-      "Arguments": "",
-      "Enabled": false,
-      "Group": "Intune",
-      "DependsOn": [],
-      "AllowedServers": [],
-      "TimeoutMinutes": 240,
-      "MaxRetries": 1,
-      "RetryDelaySeconds": 300,
-      "ContinueOnError": true,
-      "Schedule": {
-        "Type": "Daily",
-        "Times": [
-          "07:50"
         ],
         "MissedRunPolicy": "RunOnce"
       }

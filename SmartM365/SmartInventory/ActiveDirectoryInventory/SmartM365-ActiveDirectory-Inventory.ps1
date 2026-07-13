@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.24
+1.25
 
 
 .REQUIREMENTS
@@ -496,7 +496,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.24"
+$ScriptVersion = "1.25"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -718,11 +718,11 @@ try {
             if ($rows.Count -eq 0) { continue }
 
             if ($isFirstFile) {
-                $rows | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8
+                $rows | Add-SmartM365TenantKey | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8
                 $isFirstFile = $false
             }
             else {
-                $rows | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8 -Append
+                $rows | Add-SmartM365TenantKey | Export-Csv -Path $DestinationFile -NoTypeInformation -Encoding UTF8 -Append
             }
 
             $combinedRowCount += $rows.Count
@@ -988,12 +988,14 @@ try {
             return
         }
 
+        $rowsArray = @($rowsArray | Add-SmartM365TenantKey)
         if (Test-Path -LiteralPath $OutputFilePath) {
+            Repair-SmartM365CsvTenantKeySchema -Path $OutputFilePath -Delimiter ';' -Encoding UTF8 | Out-Null
             $rowsArray | ConvertTo-Csv -NoTypeInformation -Delimiter ';' | Select-Object -Skip 1 | Add-Content -Path $OutputFilePath -Encoding UTF8
             WriteLog -Message ("Daily report rows appended to CSV: {0}" -f $OutputFilePath)
         }
         else {
-            $rowsArray | Export-Csv -Path $OutputFilePath -NoTypeInformation -Delimiter ';' -Encoding UTF8
+            $rowsArray | Add-SmartM365TenantKey | Export-Csv -Path $OutputFilePath -NoTypeInformation -Delimiter ';' -Encoding UTF8
             WriteLog -Message ("Daily report CSV created: {0}" -f $OutputFilePath)
         }
         if (-not $global:csvGeneratedPaths -or -not ($global:csvGeneratedPaths -is [System.Collections.Generic.HashSet[string]])) {
@@ -1377,12 +1379,14 @@ try {
         $summaryCsvPath = Join-Path -Path $SummaryOutputPath -ChildPath 'AD_Inventory_DailySummary.csv'
         $previousSnapshot = Get-SmartM365AdPreviousDailySummarySnapshot -SummaryCsvPath $summaryCsvPath
 
+        $summarySnapshot = @($summarySnapshot | Add-SmartM365TenantKey)
         if (Test-Path -LiteralPath $summaryCsvPath) {
+            Repair-SmartM365CsvTenantKeySchema -Path $summaryCsvPath -Delimiter ',' -Encoding UTF8 | Out-Null
             $summarySnapshot | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip 1 | Add-Content -LiteralPath $summaryCsvPath -Encoding UTF8
             WriteLog -Message ("AD daily summary snapshot appended: {0}" -f $summaryCsvPath)
         }
         else {
-            $summarySnapshot | Export-Csv -LiteralPath $summaryCsvPath -NoTypeInformation -Encoding UTF8
+            $summarySnapshot | Add-SmartM365TenantKey | Export-Csv -LiteralPath $summaryCsvPath -NoTypeInformation -Encoding UTF8
             WriteLog -Message ("AD daily summary snapshot created: {0}" -f $summaryCsvPath)
         }
 
@@ -1861,7 +1865,7 @@ try {
                     DistinguishedName,
                     @{Name = 'Description'; Expression = { $_.Description -replace "`r", " -R " -replace "`n", " -N " }},
                     managedBy |
-                Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
+                Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
             WriteLog -Message ("Exported OUs for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $ouCount)
         }
@@ -2008,7 +2012,7 @@ try {
                     $computerRow['ConfiguredGroupMatches'] = ($configuredGroupMatches -join ';')
                     [PSCustomObject]$computerRow
                 } |
-                Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
+                Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
             WriteLog -Message ("Exported Computers for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $computerCount)
         }
@@ -2143,7 +2147,7 @@ try {
                     @{Name = 'DomainAndSam';            Expression = { Get-NormalizedDomainAndSam -DomainNameShort (Get-DomainNameShort -DomainName $currentDomainName) -SamAccountName $_.SamAccountName }},
                     @{Name = 'ImmutableId_AD';          Expression = { Convert-GuidToImmutableId -ObjectGuid ([string]$_.ObjectGUID) }} |
                 ForEach-Object { [void]($userCount++); $_ } |
-                Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
+                Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
             WriteLog -Message ("Exported Users for domain '{0}' to '{1}'. Count: {2}. Excluded without UPN: {3}" -f $currentDomainName, $outputCsvFilePath, $userCount, $DomainExcludedUsersNoUpn)
         }
@@ -2195,7 +2199,7 @@ try {
                     @{Name = 'whenChanged'; Expression = { $_.whenChanged }},
                     @{Name = 'whenCreated'; Expression = { $_.whenCreated }}
             )
-            $GroupData | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
+            $GroupData | Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
             WriteLog -Message ("Exported Groups for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $GroupData.Count)
         }
         catch {
@@ -2227,7 +2231,7 @@ try {
                     @{Name = 'DisplayName';      Expression = { $value = Get-ADStringValue $_.DisplayName; if ([string]::IsNullOrWhiteSpace($value)) { $value = Get-ADStringValue $_.Name }; if ([string]::IsNullOrWhiteSpace($value)) { $value = Get-ADStringValue $_.DistinguishedName }; if ([string]::IsNullOrWhiteSpace($value) -and $_.ObjectGUID) { $value = $_.ObjectGUID.Guid }; $value }},
                     @{Name = 'ProxyAddresses'; Expression = { $_.ProxyAddresses -join ";" }},
                     Mail |
-                Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
+                Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
 
             WriteLog -Message ("Exported Contacts for domain '{0}' to '{1}'. Count: {2}" -f $currentDomainName, $outputCsvFilePath, $contactCount)
         }
@@ -2433,7 +2437,7 @@ try {
                 )
 
                 Assert-SmartM365CsvDataCompleteness -Data $duplicateUpnRows -TimestampedPath $duplicateUpnCsv -LatestPath $duplicateUpnCsv
-                $duplicateUpnRows | Export-Csv -Path $duplicateUpnCsv -NoTypeInformation -Encoding UTF8
+                $duplicateUpnRows | Add-SmartM365TenantKey | Export-Csv -Path $duplicateUpnCsv -NoTypeInformation -Encoding UTF8
                 $upnDuplicateCount = @($upnMap.Keys | Where-Object { $upnMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate UPN analysis complete. Distinct duplicate UPNs: {0}. Affected accounts: {1}. Output: {2}" -f $upnDuplicateCount, $duplicateUpnRows.Count, $duplicateUpnCsv)
 
@@ -2461,7 +2465,7 @@ try {
                 )
 
                 Assert-SmartM365CsvDataCompleteness -Data $duplicateSmtpRows -TimestampedPath $duplicateSmtpCsv -LatestPath $duplicateSmtpCsv
-                $duplicateSmtpRows | Export-Csv -Path $duplicateSmtpCsv -NoTypeInformation -Encoding UTF8
+                $duplicateSmtpRows | Add-SmartM365TenantKey | Export-Csv -Path $duplicateSmtpCsv -NoTypeInformation -Encoding UTF8
                 $smtpDuplicateCount = @($smtpMap.Keys | Where-Object { $smtpMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate SMTP analysis complete. Distinct duplicate addresses: {0}. Affected entries: {1}. Output: {2}" -f $smtpDuplicateCount, $duplicateSmtpRows.Count, $duplicateSmtpCsv)
 
@@ -2766,8 +2770,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi3llniB0wC014
-# 0NwC9gWZgrwIPYDQ461tXswy7PVsQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMSebtrG1FMYab
+# 2aYN3MsXb9Qia46VQTUco3CG2TZuZaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2900,31 +2904,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEpDzAlyyV2lIurfa0FbVLq6XMoPxqMuN2G4p9tyPQJQMA0GCSqG
-# SIb3DQEBAQUABIIBgIittWtxSpR/XPRav8JtyC3/fBemertZVo78UFnmV/hKw/Vw
-# s0L5uGu5bcRzfth8+xOuBlEdWyuV9c6B/ktkzxQvB5qet6g6C6Q9mWgpaFw2g6rQ
-# lF6K8OgVq5wrtpKggtkwo5YnqYT6IwHHU4epgsPIx3r3kG87a+HmPHU9bE+WV/Qz
-# faxTMZvvl68Rxp3haI4m/ysacFgFK4PvA4VLle9Ugxvx27FKc6Sol6UyKoRz+VwT
-# w5RrSZGvk7LG77Sz4OnMULhI7Ejuc5rq7tlqoNFFsqe8i9u6ghg7AWHup8O7cwTl
-# dFvvXgduLFBK9I6CCHU4pYxhqkRs2RdlO/Dzmqzp+nevRxJmAq541SkYktrZesKN
-# 2YuUm5oKyKiXrrCPitF1JIXvDncADkxi3a/oK3OljWQN6SLBv6Vpb+2IQmnpLwqi
-# zxUFVmLPnXcA45u5WJgpQ1LljAIyhUSkqrrY+Y6DxKZTUcGV548deZkCmG9kcK/3
-# tYkU8cMx9kzynB0rI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGx5+IxcaqH8kIkRCKKVJkPV7lq16bpPlzwKovwC+qDUMA0GCSqG
+# SIb3DQEBAQUABIIBgBCXLnbkXCsKrHXE8YVhxb48AY5Q6/WOSiTtCS6WhphRe5+l
+# atR2Wp8z10UHpmapAWkeqArJeMe5ojW6YSKRMc8qGmSQiL1XwL5DG3uGp4wkTeqG
+# 9zupCbsNFAxjP2l9YgM6u/YGmtViiGVMm7XK/k3RCN8U8u4Jsdq4FCaPrQPPO4oP
+# bLYjyKGJFUxOnQkpASscR0SaGHoFMXSm+UuWybjueRs/atMcDFVf7szgU+EnAEPR
+# vAuF6EU3CFcC/ctMBh7lCotcOc+7JB1zLGiCFqlDz/ODf8E4fT/oYKrdjbpSRROI
+# GnZaPJYHFoxAzl9pvSP8xxxv7JC07/9tUAkWlYotZdG+AhLvQFXzr0EqNAolcat+
+# P9vp9RN+OMs7j7P4JFxAoyzUoXwYMb+KB7DWxyOkkkObvSps8EEi5HevRVo2lJFc
+# IOcNrzFsKI6b5C+gpLGmRB/KmcTYbTEinBXohaT9qM1EXax/ijzj535rrjS+Od1n
+# a4sFfsbsv/QwImWPyqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwOTQ4
-# MzJaMC8GCSqGSIb3DQEJBDEiBCBDYMS0p+4nEm3QHtajQXn/plZXE4Hk8BTyMdxQ
-# 6Z3krDANBgkqhkiG9w0BAQEFAASCAgCLPFfjF+j0CkBjLwQ6ucp39CN4k4iAiURr
-# KBnhTJK4ErkaMHnyQR1rBN9cLT6qNH/lTvCSuAS6Qw5i1oI4R4VRvdCCntnMBZeP
-# ntAVDYu+AZgi5wrX8iz3QiP324Gg9OhGQ2rcVjXnT+gnct4YbciXMn8bxRKAClNI
-# ai3o8a5YQIC9fgY8/IvApuL47/JOL+LOPnJAAWLUss/bFyAmL04nO5kBeMisdjVf
-# R0dUWhbgEz85z+JDlhW1HoabWaurniMc7PPY7zMYUhvUxDriyDCkHRjGf8X3gE7B
-# vyzPTpDmVqP1/c1AlWdmGGY3SnTfV25jLksrl8aMK7ql8Z6yGLj0U+iNRm2h9ssK
-# d6s7DfiUuv7xcydXprAJQq88v9OhzUx0t5Vi9Pa0nPfkO/s3Tln/dYZD7q6zER+W
-# kNdBC4+ImdOAT3eDSvfw9LMl4I+TeYijWfoKCWvULlUxq1ImnTfWhygl7kKIF8r2
-# roXMw++5E17ku+dYHV3WXxQgCISc5MioX0eBVuDn8ogXVRduO/UZohJFxldZEd4E
-# XL6R1N3eUy8F6ORFXj59yMMovHwFD17gOVbFnUq+2wQNPcadRehY4XJwIQIhuM6s
-# aXqB7R0SlKYUijPjweGm8l6tslNRANmQ7R9GzgLWuaelm6B240RcMwnxyv6SOMs8
-# Wsje/NKYeQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
+# MjFaMC8GCSqGSIb3DQEJBDEiBCAWtWV5OvMRB8EyaQdzMHGGUD/49AaY4PxLHu7w
+# QZijOzANBgkqhkiG9w0BAQEFAASCAgAAFEshPibwhrtz5M15X6DBEeQ5nZE1C7nH
+# xgq/t30y3q4B19MQjv1ZRxsKIXloILy2uR5zquPzJ2B9sUje9+3pLfBXLb8MdOjG
+# 0kHrfXDJW3S8rGVhi/AZB8XpWh1axT6iQE8NxO8fN3PuMm1d7dvAf2IO812SBrxF
+# NKNlK+hxHw7dz3DWown4lvDZRXGrv9o1LGPeMu3nrZJOkb3ZePcTe+ct7oiqmVlQ
+# HqLf+UoYFNQBFRCsxtu0i8ZRX/Fvfevyisww7Z9d//YsKFRDcqa9bRz+unUoqJSK
+# ysBErHna8iJHMizzV2/JWQV9zGioB+uNtB0DTqboIkSgz4mxKGiIcszUbbmOwk7X
+# V8+fB3x/YLCfkR3S4bcCi2+XwsvADWfjg7fCN8p253G3M3mgRr4fLREXpk5K/ESD
+# HPTSOCTuXynx9ATS4heqroP9mSCIzvShSBCuuXXWB4TTIss25t+m9TmvXjSEMzST
+# 88i+qTw8p34YbxMXJH1VovIfUlMVGYCJ1Z+N4vOn9UqjKCtNKnaaTbMJI3fkIz7e
+# 0ofRAJ60b+rO1NWT/3ta8qOMZC2T5gQtfLMP1Thu++MjzLs5KvbuSAOHfJLExDeP
+# LhRBU1qakTLMjAP60koiIKj7TFstUwwAOLJWfjDtbRPHkCw1V4dXbRG/r2IllOcR
+# TlElPNuq5Q==
 # SIG # End signature block
