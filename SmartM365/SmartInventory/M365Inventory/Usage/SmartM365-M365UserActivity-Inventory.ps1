@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.7
+1.8
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.7"
+$ScriptVersion = "1.8"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -424,18 +424,6 @@ try {
     }
     Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
 
-    Invoke-SmartM365Preflight `
-        -ScriptName 'SmartM365-M365UserActivity-Inventory' `
-        -RequiredModules @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Reports') `
-        -RequiredCommands $requiredReportCommands `
-        -RequiredGraphApplicationPermissions @('Reports.Read.All') `
-        -OutputPaths @($runOutputRoot, $LatestCsvFolderPath) | Out-Null
-
-    if ($ValidateOnly) {
-        WriteLog "Validation completed. Tenant=$Tenant; Period=$Period; Reports=$(($selectedReports.Name -join ',')); OutputPath=$runOutputRoot; LatestCsvFolderPath=$LatestCsvFolderPath" 'SUCCESS'
-        return
-    }
-
     if ($Connect -or $null -eq (Get-MgContext -ErrorAction SilentlyContinue)) {
         $connectParams = @{
             Graph = $true
@@ -452,6 +440,18 @@ try {
         if (-not $connectResult.GraphConnected) {
             throw 'Microsoft Graph connection failed. Check app-only certificate settings or use -InteractiveAuth.'
         }
+    }
+
+    Invoke-SmartM365Preflight `
+        -ScriptName 'SmartM365-M365UserActivity-Inventory' `
+        -RequiredModules @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Reports') `
+        -RequiredCommands $requiredReportCommands `
+        -RequiredGraphApplicationPermissions @('Reports.Read.All') `
+        -OutputPaths @($runOutputRoot, $LatestCsvFolderPath) | Out-Null
+
+    if ($ValidateOnly) {
+        WriteLog "Validation completed. Tenant=$Tenant; Period=$Period; Reports=$(($selectedReports.Name -join ',')); OutputPath=$runOutputRoot; LatestCsvFolderPath=$LatestCsvFolderPath" 'SUCCESS'
+        return
     }
 
     $reportResults = New-Object System.Collections.Generic.List[object]
