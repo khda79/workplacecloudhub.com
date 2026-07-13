@@ -27,7 +27,7 @@
   "AuthenticodeValidationEnabled": true,
   "AuthenticodeValidationMode": "Audit",
   "AuthenticodeAllowedThumbprints": [
-    "F01F4A8871B7E349B40564D90F2B2E5BB563720B"
+    "D70ECB7B00377EBFB76B304C08DFC6620584E114"
   ],
   "AuthenticodeCheckCoreModule": true,
   "AuthenticodeCheckWindowsPowerShellModule": true,
@@ -38,7 +38,7 @@
   "JobRunsCsvRetentionDays": 90,
   "AuthenticodeInstallTrustedCertificates": true,
   "AuthenticodeTrustedCertificatePaths": [
-    "..\\..\\..\\Certificates\\workplacecloudhub.com-CodeSigning-F01F4A8871B7E349B40564D90F2B2E5BB563720B.cer"
+    "..\\..\\..\\Certificates\\workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer"
   ],
   "AuthenticodeInstallTrustedRoot": true,
   "AuthenticodeInstallTrustedPublisher": true,
