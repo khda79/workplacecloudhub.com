@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.31
+1.32
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
@@ -494,7 +494,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.31"
+$ScriptVersion = "1.32"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -513,6 +513,61 @@ try {
 catch {
     Write-Host ("Initialization failed: {0}" -f $_) -ForegroundColor Red
     exit 1
+}
+
+$script:SmartM365AdReferenceXlsxCache = @{}
+$script:SmartM365AdReferenceXlsxCacheRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("SmartM365\ADReferenceData\{0}" -f $PID)
+
+function Resolve-SmartM365AdReferenceXlsx {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $leafName = [System.IO.Path]::GetFileName($Name)
+    if ([string]::IsNullOrWhiteSpace($leafName) -or $leafName -ne $Name -or -not $leafName.EndsWith('.xlsx', [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ("Invalid AD reference workbook name: {0}" -f $Name)
+    }
+
+    if ($script:SmartM365AdReferenceXlsxCache.ContainsKey($leafName)) {
+        $cachedPath = [string]$script:SmartM365AdReferenceXlsxCache[$leafName]
+        if (Test-Path -LiteralPath $cachedPath -PathType Leaf) { return $cachedPath }
+        $script:SmartM365AdReferenceXlsxCache.Remove($leafName)
+    }
+
+    if (-not (Get-Command Invoke-SmartM365SharePointFileDownload -ErrorAction SilentlyContinue)) {
+        WriteLog -Message ("AD reference workbook cannot be recovered because the SharePoint download helper is unavailable: {0}" -f $leafName) -Level 'WARNING'
+        return ''
+    }
+
+    if (-not (Test-Path -LiteralPath $script:SmartM365AdReferenceXlsxCacheRoot)) {
+        New-Item -Path $script:SmartM365AdReferenceXlsxCacheRoot -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+
+    $cachePath = Join-Path -Path $script:SmartM365AdReferenceXlsxCacheRoot -ChildPath $leafName
+    $sharePointRelativePath = 'DATA-ALL/{0}' -f $leafName
+    WriteLog -Message ("AD reference workbook not found locally; attempting SharePoint recovery: {0}" -f $sharePointRelativePath)
+    $downloaded = Invoke-SmartM365SharePointFileDownload `
+        -LocalFilePath $cachePath `
+        -SharePointRelativePath $sharePointRelativePath `
+        -Enabled $true `
+        -Force
+    if ($downloaded -and (Test-Path -LiteralPath $downloaded.FullName -PathType Leaf)) {
+        $script:SmartM365AdReferenceXlsxCache[$leafName] = $downloaded.FullName
+        return $downloaded.FullName
+    }
+
+    WriteLog -Message ("AD reference workbook not found in SharePoint; related enrichment columns will be blank: {0}" -f $sharePointRelativePath) -Level 'WARNING'
+    return ''
+}
+
+function Clear-SmartM365AdReferenceXlsxCache {
+    [CmdletBinding()]
+    param()
+
+    $script:SmartM365AdReferenceXlsxCache = @{}
+    if (Test-Path -LiteralPath $script:SmartM365AdReferenceXlsxCacheRoot) {
+        Remove-Item -LiteralPath $script:SmartM365AdReferenceXlsxCacheRoot -Recurse -Force -ErrorAction Stop
+        WriteLog -Message ("AD reference workbook cache removed: {0}" -f $script:SmartM365AdReferenceXlsxCacheRoot)
+    }
 }
 
 $adEnrichmentHelperPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-ActiveDirectory-Enrichment.ps1'
@@ -2872,6 +2927,13 @@ catch {
 }
 finally {
     try {
+        Clear-SmartM365AdReferenceXlsxCache
+    }
+    catch {
+        WriteLog -Message ("AD reference workbook cache cleanup failed: {0}" -f $_.Exception.Message) -Level 'WARNING'
+    }
+
+    try {
         WriteLog -Message ("Stopping transcript for script '{0}'" -f $MyInvocation.MyCommand.Name)
         Stop-Transcript | Out-Null
         try {
@@ -2908,8 +2970,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBR0C9mhuScW+sT
-# kouyjMVeznSJ7r62H/vsJgzmC46Lv6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDwyM3IWRYVUxf3
+# CobQki0VPQ8PTwPL9EsruLvYeYQKwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3042,31 +3104,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBcuE/8+Vw80ega3DERYWJjy6vZVdTKhsli+R9qWBqmZMA0GCSqG
-# SIb3DQEBAQUABIIBgGFbPpbhnKd/J9Y4HH0+0GO362zeJqTurv34l2yqYVg5qNJE
-# cmY+cRONg089tZyZzHHHz3Rd40kSfki0s3Tp/QvOn2reLYe2zCjdg6GXIet9/Lhy
-# L5P7owVpohm6IRUrM8K53/0FrKx8aBkkTWiOwbdzRi3kuaewOrhyEgXA3RIL40DW
-# 26jnOsYkiB1BKhviOV+Eh3grmiY405hz5WnYMV9WdM0xXys9NG9DD311ZPMFXmkM
-# Uy1fosq+mtiRA66keh+um3OiFIKk/b4Y/Yp9Gb3pcNkVmt3dXdgFkvsgP/cjYwfg
-# 4zrMUKoKHrpfD/KOea4WjuTjkpmHFAnh6kZpkzRhnLJZotop7zMayPfBS4HeOSSi
-# g50+9HhRdtilykNJ5vkGi73RPV5Bmg/bwM0jtDm0WFdHl2rMvOaW3H+5I/yihyfh
-# iCvYONP0vnTe+WkIxiQ1c/ZS2a/sBHlRWlV8O6dGiiI9ttYTZZBeSqa3tKlN8Xbk
-# nNfmLsHvOoky5JiAY6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH7SS9d03Bty6gKWpqd35jIWMjOFITha1qRgwP0kdJfHMA0GCSqG
+# SIb3DQEBAQUABIIBgCjkUC6qQ56Y9GOeOct5eLWI3DbKj/m0Z2aw+6XyqBMj2Zub
+# nHIUGv+3TLPHDnHiaf2P5W2c56L+ISVC2rwNoDV0tJsfohKBmmR0uXPHQMePFlJx
+# dEpdBc9KPv57J55egIEmgAVwNa3ZkLKD1k9LwMZCCeh6TxUZwOmlFJvuJjiRYs8k
+# wsBSq1vTuPye5P4+HqKLX43CKJ17JkdGE8EKuZEtoxC3i6KByxBGFsmfsKBQGoE1
+# kV1hMUwBOTb3QpflB9mSN8Maokqsxc/75ekoDaAxbZXRCOapBCce0f87uJ12zQUm
+# yQzES6gGJsJVKNQ4iWRva9VPP1xSzdYdxPk4g2HNYPAw/Yonv6/OwZPlPbb1urRd
+# kRzYPHoRkfmtjx17nVtCJR8NNQEkhtLezw1hhGVHnHluT0agwy5YBXOMKBBA76jY
+# mTI+2HJ10Ihwn/FPY6qwLis5wftnoHIKtM76LjSeqUSl0SyJRhjpi8hQt8r2lAv3
+# 8/0BAuI/ESmaXp6Xv6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMDQw
-# MTBaMC8GCSqGSIb3DQEJBDEiBCAeYRj6i8jW83cCICtxoGKODBOE5oG9DegkhMUM
-# c3SZsTANBgkqhkiG9w0BAQEFAASCAgABupBWRJQdYq2JhUybK7LLqkPtsF8nwVmX
-# 93yasVej1MWx0q8dZP/w/r1czXj7ORH7bfR5VPrUaPIY4czYKFERYfIJsGoMzTGP
-# 5x6gjC3wLi/yFS3qvCZBwurmkABCKymMmGycIBx8Eoxk5T5rNyYXYRNzgslDbx7f
-# BHfYjW5K4jrgO3FjeEEl8NfHDVO3d2YRVMeyQ45EwzEn4iAi4UgPdzKBs/UD5n2v
-# 59lllk7Y0tJaEKO0N1s5JcC8t15PcjqA0zUagc8rZQ4jVkKGySUQE0CckVrNfdd5
-# i4FNsT2QCzxtxI0dWxUSP6VTb+XVNUsq0jjVFHhWSd73WJZhb3O2P5P2gkzWus0h
-# ISHvMn9QLNXaBuHFV0BNt75cCMcGz5oyES3gHnzJJJfygJloR336JzPcT6lTUiM2
-# 7XCpPD2YxLn9Bl2SKekyxp8uBUoQ4+EFTRMokL/cvxKLMvati8WP2HBhPjo+6+Ia
-# EKlPDFOWODJmu2ruWpzdD6artrJ2dIy1NDv3TpYLDImZOuQmz5dqDI7zrTlRPPw0
-# C9QwRmW3obDzXlKSH78frmuPUU1D2vdZmVsD6uudIuxBVRMVNegdIBCLjRvLVSJ5
-# MavTcozXP8hXPtdIjRLFTFHU42p/CUB+rUpNOroV+dSDGOKBUjNJWrvlcvfnbGAI
-# njKGnawLjw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMTQx
+# MjZaMC8GCSqGSIb3DQEJBDEiBCB0YUkJKk73Nppn9Ri54VC+up4VTW+TQCzy1XPy
+# wIlFpzANBgkqhkiG9w0BAQEFAASCAgBezoF8cUS97A98HoFlWlFBIUS41WNLQDmL
+# tr3AWolMbslG2em1+VnwrgQ/L/NNxjGjp0pRcLrQRTQRQaraHeP7Y/RavNNex8p5
+# qV4tyZH6zhTWmpTHWDfGN69a7IUbxr6+80HC28EMk/9qe7YjEtwfharzwmziIaJh
+# DNrohptLnLFX1yyS2cR5j5uKLF/3b/PQaVsZmLYfryuGwhTLsbN3z3JuRTFJ+2hP
+# +o1voV+KPOHVoq0SJYr1kmMwnPzshRkmK10zg6XnTVA7nLa7uxYsciTpzZj1QaXB
+# MEcqa8vTrjuUCeZ0lEBWKObH2Ygp2inIisgNReFtheIVsDe9AKvufoXkuDntjql0
+# kfvFvALGdnmnl+I0sIdlJeKRzFpWbud2UNwSvEnztRGvzOxo/erpPBT8DT4LIDM+
+# r6ievuTr8AShygTrRzBjQg+kR+wlayR9yX2f4VAFu4Uz69iFYtsZRAl32SjM/l7R
+# En/I2+Txg2+GRUMGufSDpFMBS01hkdFvNSGO8TrhL6ubxH0RGwrwWdmCRD0HHNQp
+# m75rxP/w+TtM3KijUSz9d0AlTQ+L7INpngrAQ2peBaEyTddl/wBR60LsNS2AlB2a
+# +E9xOAQDNlT0AnvvsiBjqD1GVDlolg+5rBg6AsvkFyK2HjYO/rvYcYw7Lxm4xJm2
+# SgysuODKCA==
 # SIG # End signature block
