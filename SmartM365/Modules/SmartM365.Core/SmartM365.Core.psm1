@@ -3936,6 +3936,7 @@ function Invoke-SmartM365SharePointFileDownload {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$LocalFilePath,
+        [string]$SharePointRelativePath = '',
         [bool]$Enabled = [bool]$global:EnableSharePointUpload,
         [string]$SiteHostname = $global:SharePointSiteHostname,
         [string]$SitePath = $global:SharePointSitePath,
@@ -3986,7 +3987,15 @@ function Invoke-SmartM365SharePointFileDownload {
         }
 
         $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
-        $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $LocalFilePath
+        $relativeFilePath = if ([string]::IsNullOrWhiteSpace($SharePointRelativePath)) {
+            Get-SmartM365SharePointRelativeFilePath -LocalFilePath $LocalFilePath
+        }
+        else {
+            (([string]$SharePointRelativePath -replace '\\', '/').Trim('/'))
+        }
+        if ([string]::IsNullOrWhiteSpace($relativeFilePath) -or $relativeFilePath -match '(^|/)\.\.(/|$)') {
+            throw ("Invalid SharePoint relative file path: {0}" -f $SharePointRelativePath)
+        }
         $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
         $targetPath = ConvertTo-GraphDrivePath $sharePointPath
         $destinationFolder = Split-Path -Path $LocalFilePath -Parent
@@ -4919,8 +4928,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSZEtwqTVE+Oiq
-# 4urmJySRaZFSpkDWrG8z6uQLLnvrdaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvW8NL8aJ7c3o8
+# HW707hVKrwBAbiI8JNL+Og7G6KNuxaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5053,31 +5062,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBUS/1W6zJRUk//ChiiF+1x70thwSmwQTF2LFW1wuyg7MA0GCSqG
-# SIb3DQEBAQUABIIBgA9ihppZJwvXPaZ8YjiL1fePKAiknrE49eloEesVVU6qiPvl
-# 8/gOqQiPf7G40NrBoAUU6diO/tiCGxwW3g755u1VDvQd77eTTLUc/JsQp3RP6c2Y
-# NzpBhAGDFulsObIhhQVGxIwakAVqaQQKSyQWclg+9dqmm1Tt2S1Te9ul6LBg5vEL
-# M7tQtI9Kh22Mc4cKTpqh6CnzgCpy4CCMQa1roLzyATnkRAyxKzMUKDUwr6VIFWcc
-# YtHqbQofPiJrxXE5y6FvaoYFIE5EfTVnziIR2i1Fj6LiugImVQLrW3lrxz/Ohgp7
-# NLHfDygy2on55UF5vNrCkGFwViYUpOjKx6r/b9vu0bs/Jsdhwv+V4Mcg4RFETmLo
-# CR6PMY3fm/EJS0imVKJcZZy6ZImVGDAj6hC8pvrDyABEqa+SrvdpWOiHOys0HHuV
-# yF+fS8oUYhMxWdGFSvaLMBGT/Avm8OTxShbTr+khXuZXWRPZlMcn3LE5mO4Z2cNO
-# wzASmPyqPYfsD2e1DKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMNu6+zknppHB9oH108TW5ToNZnVBy6xzZqeq/9+kMrXMA0GCSqG
+# SIb3DQEBAQUABIIBgCE2SnaJGigCTGVCFxHIawWnDyoi4y5wM1O5VsMsDNtojmJR
+# WajnaKBx+111cuglwH+/dXun3t8U3Tmjfe4+Eii66xOUBagSBO51QFqJieQ6bp5X
+# dAT0SVTxczD8o2y8swRpFuWs4t6boPM0sFqqLdqZ/yWph0SFN7Na2/1ugAO+2ykN
+# 4UJpHNBMW6j1Wv9p1A+zQzM8/lpAGII6I74z6gq+gRll28+8am//Ptjr+1PQcu8h
+# jHFLIXnuyoB73MtXqhsqUByPz2mybBCBBwDl7rHDHHD64tiZZot6J7oi2r0xjxsQ
+# J8lBK1E1zLs6RxlIGS1x+Z9KqZmG+PbP55UjTBgZdxj6/h9CizFx5mSmk4rLFa/O
+# Tb+6XAi7kD2w8dLCuCtJcU60tFt0Os1gQGULySwLuqjmZTwmRvnfrPORScMPQepS
+# w0+Or48X5CFTzaXH5sCxrA6G562Ful8FMp9XMNm2f+BWA3T54QOFVGdofAD6UV/b
+# My8zwY5TBOj76YwpDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MjhaMC8GCSqGSIb3DQEJBDEiBCCdsUctGnwUBG+fwuRCLF6zNP2VWghm4AwoL6Kd
-# X3XAETANBgkqhkiG9w0BAQEFAASCAgAYrzHe5Vjx/d4R7A8DU6mTPzrEN8DDM1rI
-# EZLbhWqX3THuLM6flrd511w/JRCQx09p3EBZt4B9zulWd8o8EQBEjwag30F2So/o
-# qb6ysMZ5TLrqEV085NlP4JWu8q9ip3yzjhsfuir2k+9yEfVrJDm8+scV2Y1mlE14
-# mWhoL1OARewkUyBK59FFq3ucCaxEqm4D5idX1HBhiEZwpNirDO+lDFE9oinW/tJI
-# 0UnrYDYRkz0Q0RKUJ+AKnnfc4uUaJaAZUHgMhrrv6N4NK7RzgOIlZs+Zzf+cZTp/
-# MInyJtmVUbjnfzMWOhms7L6vdc5I3JC19bwtYxClMd0CNkflpObZRrfgn67nnZra
-# QKmb+r9XZkw+uGz7atYDTBia3ma3Q1J8KdNbtUr56qUFGcoY08+1NbV6JeeIkdf4
-# 5FGwXacaKCURCLatoEBJ//UGcJo2afCuDiqFqbWPp2yxYjeDzhrbQZjfjWuoFuB2
-# Husnsjj34OKp0dvoGDrknqLJ2KVm3ieVMDhDMeFUG3EVfmOl2EU555os1omLrKTf
-# Ol164wtnwj0zvMFDBDGFxVR+yQY7Zj/iiINkBco6cCnzO5wL6UW5vK3RhrpF1SV7
-# fhN60ZTBK+wgpcuhTymh22BcQ5CG1geAu2t6aEBKymvCgAxOQm9ZSSeLj2XA+4o7
-# Ym855xFcVA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMTQx
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCvRfDaSm85tbQLhdBOq1uoSHQPkWN5UY6ldqq3
+# 3NeajTANBgkqhkiG9w0BAQEFAASCAgA8Nb2Ako+NJrC1XZNMcIymSOh7NvK6S4/i
+# gsxIQ3whImuU3XB2EnupsKMscedNj+P1yRdz2aDMXTUbnyZr0UU9F/+LSw8k1wss
+# RgekQArwTWB+Lirpx8Yz6z7XLUqVIAByz4AGCtUhKEYhT3ciyu+tkirf2eZVJo25
+# nbIaqesiSC8pz09w+aG4Ur/E2hcM0AfM4CNBzXksOQkexnCNj5aqHdlYHdE0I6Rq
+# 9YeyS00Mfw2dK4U0Uv8qadEg/6y1GpSgvRJuIw2sAyij46cbk8U9fpN05QmGzwvD
+# 0OmSLgObBDv3+0Ne/t9maUti+wvun/UO9cmW2zjp0cPkiJ0DnYdxdo2IwIYyxMJH
+# q9RitrNJUarpW4SRNt/L/hw6yI+nV+RTvnA/+tqtEikNwSzpzWVZCXpCjo8i7X+/
+# pZ8iKT6xyXpzKh4BzdjU1y3uBp1vHQquieOBKLzULil3atuMVMUpp3Zw2Ioj3d6m
+# 0ded5MOs94SGviC9+mzyEVLwauuS61774V90IUlpKitHZRDI2hP1EI7uKg1EpD2K
+# kzoTrbIU3KFpi5crvv3X/NALGt2cShdrjiAdd5tBOuMkhDRlc7PRY4dvjf8umYri
+# acbvl8yCOvOcA7Iulk11MY+5/oPh3OFzoGaUAam/l0fFqioP0uza9ScTaz1Un6yT
+# b4fbCnQBFA==
 # SIG # End signature block
