@@ -16,7 +16,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.9
+1.10
 
 
 
@@ -26,7 +26,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.7
+    Version : 1.10
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementManagedDevices.Read.All
@@ -339,6 +339,7 @@ function Get-ManagedDeviceRamMap {
     $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
     $swTotal = [System.Diagnostics.Stopwatch]::StartNew()
     $batchIdx = 0
+    $maxAttempts = [math]::Max(1, $MaxRetries + 1)
 
     for ($i = 0; $i -lt $total; $i += $BatchSize) {
         $endIdx = [math]::Min($i + $BatchSize - 1, $total - 1)
@@ -346,8 +347,9 @@ function Get-ManagedDeviceRamMap {
         $attempt = 0
         $batchIdx++
 
-        while ($pending.Count -gt 0 -and $attempt -le $MaxRetries) {
+        while ($pending.Count -gt 0 -and $attempt -lt $maxAttempts) {
             $idToDevice = @{}
+            $attempt++
             $requests = New-Object System.Collections.Generic.List[object]
             $j = 1
 
@@ -368,9 +370,13 @@ function Get-ManagedDeviceRamMap {
                 $resp = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType "application/json" -ErrorAction Stop
             }
             catch {
-                $attempt++
-                WriteLog -Message ("Graph batch RAM lookup failed (attempt {0}/{1}): {2}. Waiting 10s..." -f $attempt, $MaxRetries, $_.Exception.Message) "WARNING"
-                Start-Sleep -Seconds 10
+                if ($attempt -lt $maxAttempts) {
+                    WriteLog -Message ("Graph batch RAM lookup transient failure (attempt {0}/{1}): {2}. Waiting 10s..." -f $attempt, $maxAttempts, $_.Exception.Message) "INFO"
+                    Start-Sleep -Seconds 10
+                }
+                else {
+                    WriteLog -Message ("Graph batch RAM lookup retries exhausted after {0} attempt(s): {1}. Trying unit fallback." -f $attempt, $_.Exception.Message) "INFO"
+                }
                 continue
             }
 
@@ -378,9 +384,10 @@ function Get-ManagedDeviceRamMap {
             $retryAfter = 0
 
             foreach ($r in @($resp.responses)) {
+                $responseStatus = [int]$r.status
                 $managedDeviceId = $idToDevice[[string]$r.id]
 
-                if ([int]$r.status -eq 200) {
+                if ($responseStatus -eq 200) {
                     $bytes = 0L
                     if ($r.body -and $r.body.physicalMemoryInBytes) {
                         $bytes = [int64]$r.body.physicalMemoryInBytes
@@ -390,7 +397,7 @@ function Get-ManagedDeviceRamMap {
                         $ramMap[$mapKey] = $bytes
                     }
                 }
-                elseif ([int]$r.status -eq 429 -or [int]$r.status -ge 500) {
+                elseif ($responseStatus -in @(401, 408, 429) -or $responseStatus -ge 500) {
                     $retryIds.Add($managedDeviceId) | Out-Null
                     if ($r.headers -and $r.headers.'Retry-After') {
                         $ra = 0
@@ -400,16 +407,17 @@ function Get-ManagedDeviceRamMap {
                     }
                 }
                 else {
-                    WriteLog -Message ("RAM lookup failed for device {0} - HTTP {1}" -f $managedDeviceId, $r.status) "WARNING"
+                    WriteLog -Message ("RAM lookup failed for device {0} - HTTP {1}" -f $managedDeviceId, $responseStatus) "WARNING"
                 }
             }
 
             $pending = @($retryIds)
             if ($pending.Count -gt 0) {
-                $attempt++
-                $wait = if ($retryAfter -gt 0) { $retryAfter } else { 5 * $attempt }
-                WriteLog -Message ("Throttled/transient RAM lookup errors on {0} sub-request(s). Waiting {1}s before retry (attempt {2}/{3})..." -f $pending.Count, $wait, $attempt, $MaxRetries) "WARNING"
-                Start-Sleep -Seconds $wait
+                if ($attempt -lt $maxAttempts) {
+                    $wait = if ($retryAfter -gt 0) { $retryAfter } else { 5 * $attempt }
+                    WriteLog -Message ("Transient RAM lookup responses on {0} sub-request(s). Waiting {1}s before retry (attempt {2}/{3})..." -f $pending.Count, $wait, $attempt, $maxAttempts) "INFO"
+                    Start-Sleep -Seconds $wait
+                }
             }
         }
 
@@ -525,7 +533,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -837,8 +845,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC18pcyrforxiSg
-# sF2KGeJhxe4Q32d2O9HRkk8uAuPrFaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDM8L8qo/y7QXoC
+# MJg7HJ0XJtm6JgWEM7S8M3/ZKnG86KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -971,31 +979,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOoCtfqAOli4TqUhsWzNCSkTo/JFZoyGnRYybk7Xw0ULMA0GCSqG
-# SIb3DQEBAQUABIIBgChe2cKj+G04HxG3nmqsVIhh7GslyMviGyGB7QL8pe3C4G+X
-# UihvxJhEHGID74nyz6vo5U2zx+VHGRa3cnRWFQc99/+8wE/wwWJUk35pGECn1xUW
-# VSrG549v/jiMQSaRRoaQ9fYkCt1aMyNtmh7+Vxf4MrPpJI01v5lfJYPYaFE6AQQg
-# fmB6ixLOmaGY3Dfr0vwJJJcaI79oZjmB0r4sMHEaaAdsZlIM1xPt2N2jncfJmxTP
-# 1GO7GJbRY32Ic7G/K18qxAZW4c4DzgTd9S8HLslt8Ge3Rvpd1QCxEU2O/wtmRzVR
-# A3o8EATUqhM3osdMN4MTdHD+gaclCKKfQZOm1DdKzy/wv/uGK0+R+Ij08sAzNOPH
-# rgkUxwpp8J6BUPSUg3Q6rBc+IgsDgcBV9+apTdbXZzkx3cdDUBaeGGCvsktsrAJj
-# v5nz2iaqm1Y0SSeFDoDWtaxaGU/hrU2GguczJ8gxSuqemyQXSoaObegGJuIqGJoj
-# 49aRDQ85NHZ6acbVsqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK6UaWV1UVc6ljF1O35FN8AAB639LqqZv+aeox8+tSpsMA0GCSqG
+# SIb3DQEBAQUABIIBgBLTf7PWgR4TzO60DJFoHrJXMbGKq+qqRjbd+Cnv3iBBTWIP
+# eZt4x0cQQsGLnt6XjPBk6kNERY7LEfWbG5eGzwU/egVvS6WdJL2R0pTRdPiZHAaQ
+# ITwcsNDHwTclFrDz/K9jeO4IpzUzO3OnlpaUOBivjs/BCTRFQ2J8RZQI5m0R2HE1
+# /s3RbZN2XvQbnGhc/XsOKjVGuT8dk9t3AsYRu3LNUT/cIIOvysj1Ac/INJFeLBcI
+# NAKIN045bDYgzIFzPtn7ZEk7YdNINOKYan+MYo0bdJTkxKuZV9Y1EDA4oG3L471i
+# s77/UFKUVGP3Hr2mqN5hvt5N7ygR5ae1YjDCPomFrUZQpB3RT9V0fgH6seJITGh7
+# vepcXn7QoREcQqOKccMJYVjZdtQEyp+/jquvL7IVni8wV+dCUiNqRT/kodX9rvVB
+# k1IytELXDxPNDGf6wsOJyeRWFxhahAd5EWocaqQ/6u+3cwWN4YHTQPaliS3ZAh1p
+# 46uAP/DYAJCp7crM9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCB2Ftcy18FwSQtgfE7gtZ1E2XYo8+arjR/YRIsc
-# tNw/RTANBgkqhkiG9w0BAQEFAASCAgC1gky+97IT6f4DCcXfgHS/v7FvD6/NHgcm
-# FPX0lo+NS60tclcdqGYJ5IUw3soTNBtIBJB3MKBjCQTZAxRP7QgP90fIoTjErRZv
-# 0tb+qvF2tvfsLfSrjWlwU3d4yr6d47E/1wzw4XfOq3bcpFb8204mAvW/IDMLjmyT
-# DOIR1MRQOCtXwaCJ1GJIQ2SymKgbD9GVHBjE1je1uVIq8+Vj35EWBIzF4hFqOZRl
-# 1v9dnCiptgCIjM5zzvdv6ZYUWZyhFVXa6hsFVBJo8wiNocBrekhCYUSk6Drc79fZ
-# U3sEfcZpJAsP9VWy44lF2RB6UhsTTmP6EFXjEfZeQrzlSpzJNLY1pTkLVksN9xYJ
-# OsXvgl8T91FxMuUcn3ASSJ2pt9nqJChB/kpHAlhmZXl/5EHDDk04e4iwPIldUaG4
-# wl2I+nMBrnEzLQjGVVsoq3BPGizaixviQS3qiprBF2NpMKQX9TMzfO5u+yhHt36M
-# INjERNNA4jgH48MtPKqWkVBYW9cAviQ6N/GToOjhCe2rK/nYQgAHsPhMI0/jlqOd
-# lL8cbHn013NXsQ1qmfT+0rlMAiVd+fFM+5Nhm4Zx6F8BwndEEYhnpj1R9+HugI5Q
-# BWiQGvIyuny+FpdUP8jALr3n4BfyB1/W4qcVzURYV1soI4EgaypIH7kpaELPI5gk
-# WzQIoj2hxw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMjQ4
+# NDdaMC8GCSqGSIb3DQEJBDEiBCAvpwdngKv4i2PAOsc7yfBOy3EOnjwqi4M2eTGv
+# hmJk+zANBgkqhkiG9w0BAQEFAASCAgC30hKxqNuVs2tF6jzv+3z19X4HaO3+K3Gm
+# 16Rq4BG4tSOt8mHLgIimVL3dpFbo2Q1lqBbmnLIRMq+WyWB6XVprZCZ8K+8+YVm7
+# Em8+FDuXhl9eV46zE9KL6vPZ/IoYmzKKuB57shYfaxpzN7dOP41rsNZb2mekhaxa
+# siqcQni+Tu4MyJGa2tWiJkg4WF+By2mx63VA9miP81kjn4PPxAuuUfq02SevvZk2
+# cyknZjT1lmcJ7qKBNAzQuNNXszyFcqzH6AoIG5wZlSEPdCsZ6FDUN3CEFCg5FFje
+# 0Ai5tyieENa7rES/KUnIcBgPm0MHIT6sXm+F3iFG7DVm+24UNxkohwNpAoUZ5oEF
+# uH3ROSXMOmQPtZp4FfqmYDMUCxjB4b/LzN2bywZi66lFohz3+5aCE7pUwtcU4rwE
+# CCp5i9OdQxVjV5tB+vAjQUc1aLOUT7EVWcgYRLS8A1Ib2+zuFM44npp7rrWzSpm6
+# q2l34HYC4zQeooDhHdQnCLjN59gTVQnVIyUlMVKOKeQ+wp9azWZykXiDtatSaCM7
+# w64ljrUt8qgnJEj6gZckSJVLTIgeT2eijY3iRJAvB270+CeLpadtXimMrO8O8Ush
+# +DbDHXyrFqlaop6Qr4g0CTfaPB6IoKcIe8UKxj//35aIw+m6U67QjWcmDtBU4k5I
+# oTTAEKE58Q==
 # SIG # End signature block
