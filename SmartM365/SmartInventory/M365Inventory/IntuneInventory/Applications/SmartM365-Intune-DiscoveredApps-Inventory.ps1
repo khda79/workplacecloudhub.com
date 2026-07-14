@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -484,6 +484,60 @@ function Stop-DiscoveredAppsTranscript {
             Stop-Transcript | Out-Null
         }
     } catch {}
+}
+
+function Get-DiscoveredAppDeviceRelationBatchMap {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps)
+
+    $result = @{}
+    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
+    for ($offset = 0; $offset -lt $Apps.Count; $offset += 20) {
+        $last = [math]::Min($offset + 19, $Apps.Count - 1)
+        $requests = [System.Collections.Generic.List[object]]::new()
+        $requestAppMap = @{}
+        $requestId = 1
+
+        foreach ($app in @($Apps[$offset..$last])) {
+            $localId = [string]$requestId
+            $appId = [string]$app.id
+            $requestAppMap[$localId] = $appId
+            [void]$requests.Add(@{
+                id = $localId
+                method = 'GET'
+                url = "/deviceManagement/detectedApps/$appId/managedDevices?`$top=999&`$select=id"
+            })
+            $requestId++
+        }
+
+        $body = @{ requests = $requests } | ConvertTo-Json -Depth 6
+        try {
+            $script:Stat_GraphCalls++
+            $batchResponse = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+        }
+        catch {
+            WriteLog -Message ("Discovered Apps relation batch failed at app offset {0}; sequential fallback will be used: {1}" -f $offset, (Get-ShortGraphErrorMessage -ErrorRecord $_)) 'WARNING'
+            continue
+        }
+
+        foreach ($response in @($batchResponse.responses)) {
+            $appId = $requestAppMap[[string]$response.id]
+            if ([int]$response.status -ne 200) {
+                WriteLog -Message ("Discovered Apps relation batch sub-request failed: AppId={0}; HTTP={1}. Sequential fallback will be used." -f $appId, $response.status) 'WARNING'
+                continue
+            }
+
+            $devices = [System.Collections.Generic.List[object]]::new()
+            foreach ($device in @($response.body.value)) { if ($null -ne $device) { [void]$devices.Add($device) } }
+            $nextLink = [string]$response.body.'@odata.nextLink'
+            if (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+                foreach ($device in @(Invoke-GraphPagedRequest -InitialUri $nextLink)) { [void]$devices.Add($device) }
+            }
+            $result[$appId] = @($devices)
+        }
+    }
+
+    return $result
 }
 
 function New-DiscoveredAppsDeviceDetailRecord {
@@ -968,6 +1022,18 @@ try {
             }
         }
 
+        WriteLog -Message 'Preloading the managed-device snapshot once for DeviceDetail enrichment...' 'INFO'
+        $managedDeviceCache = @{}
+        $managedDeviceSnapshotUri = 'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=999&$select=id,deviceName,operatingSystem,osVersion,userPrincipalName,lastSyncDateTime,enrolledDateTime,managedDeviceOwnerType,complianceState,azureADDeviceId'
+        foreach ($managedDevice in @(Invoke-GraphPagedRequest -InitialUri $managedDeviceSnapshotUri)) {
+            if ($managedDevice.id) { $managedDeviceCache[[string]$managedDevice.id] = $managedDevice }
+        }
+        WriteLog -Message ("Managed-device snapshot cached: {0} unique device(s). App relation calls now retrieve IDs only." -f $managedDeviceCache.Count) 'INFO'
+        $seenAppDevicePairs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $appsForRelationBatch = @($detailApps | Where-Object { -not $processedAppIds.Contains([string]$_.id) })
+        $appDeviceRelationMap = Get-DiscoveredAppDeviceRelationBatchMap -Apps $appsForRelationBatch
+        WriteLog -Message ("Discovered Apps relation batches completed: {0}/{1} app(s) prefetched." -f $appDeviceRelationMap.Count, $appsForRelationBatch.Count) 'INFO'
+
         $appIndex = 0
         foreach ($app in $detailApps) {
             $appIndex++
@@ -991,9 +1057,8 @@ try {
             try {
                 if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
                 $devicesUri = 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/' + $app.id + '/managedDevices' +
-                    '?$top=999&$select=id,deviceName,operatingSystem,osVersion,userPrincipalName,' +
-                    'lastSyncDateTime,enrolledDateTime,managedDeviceOwnerType,complianceState,azureADDeviceId'
-                $devices = Invoke-GraphPagedRequest -InitialUri $devicesUri
+                    '?$top=999&$select=id'
+                $devices = if ($appDeviceRelationMap.ContainsKey([string]$app.id)) { @($appDeviceRelationMap[[string]$app.id]) } else { Invoke-GraphPagedRequest -InitialUri $devicesUri }
 
                 $appRows = [System.Collections.Generic.List[psobject]]::new()
                 if (-not $devices -or $devices.Count -eq 0) {
@@ -1001,7 +1066,11 @@ try {
                     $script:Stat_DeviceDetailRows++
                 } else {
                     foreach ($device in $devices) {
-                        $appRows.Add((New-DiscoveredAppsDeviceDetailRecord -App $app -Device $device))
+                        $deviceId = [string]$device.id
+                        $pairKey = '{0}|{1}' -f $app.id, $deviceId
+                        if (-not $seenAppDevicePairs.Add($pairKey)) { continue }
+                        $resolvedDevice = if ($managedDeviceCache.ContainsKey($deviceId)) { $managedDeviceCache[$deviceId] } else { $device }
+                        $appRows.Add((New-DiscoveredAppsDeviceDetailRecord -App $app -Device $resolvedDevice))
                         $script:Stat_DeviceDetailRows++
                     }
                 }
