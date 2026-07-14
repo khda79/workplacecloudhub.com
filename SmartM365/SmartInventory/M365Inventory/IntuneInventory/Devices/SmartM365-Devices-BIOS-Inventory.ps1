@@ -43,7 +43,7 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
 .VERSION
-1.10
+1.11
 
 
 .REQUIREMENTS
@@ -53,7 +53,7 @@ Default: 3.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.10
+    Version : 1.11
     Minimum application permissions: DeviceManagementManagedDevices.Read.All
 #>
 
@@ -480,7 +480,7 @@ function Get-BiosHardwareInfoBatchMap {
                 $deviceId = [string]$requestToDevice[$requestId]
                 $statusCode = [int]$subResponse.status
                 if ($statusCode -lt 200 -or $statusCode -ge 300) { continue }
-                if (-not (Test-UsableBiosHardwareInfo -HardwareInformation $subResponse.body.hardwareInformation)) { continue }
+                $hasUsableBiosData = Test-UsableBiosHardwareInfo -HardwareInformation $subResponse.body.hardwareInformation
 
                 $graphRequestId = $null
                 try {
@@ -491,7 +491,7 @@ function Get-BiosHardwareInfoBatchMap {
                 } catch { }
 
                 $resultMap[$deviceId] = [pscustomobject]@{
-                    Status     = 'OK_BETA_BATCH'
+                    Status     = if ($hasUsableBiosData) { 'OK_BETA_BATCH' } else { 'NO_BIOS_BETA_BATCH' }
                     Response   = $subResponse.body
                     HttpStatus = [string]$statusCode
                     RequestId  = $graphRequestId
@@ -587,7 +587,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -726,7 +726,7 @@ try {
     $devicesNeedingBatch = @($allDevices | Where-Object { -not (Test-UsableBiosHardwareInfo -HardwareInformation $_.hardwareInformation) })
     WriteLog -Message ("Usable BIOS hardwareInformation returned by the bulk list for {0}/{1} devices; {2} device(s) require batched detail retrieval." -f $bulkUsableHardwareInfoCount, $allDevices.Count, $devicesNeedingBatch.Count) "INFO"
     $batchHardwareInfoMap = Get-BiosHardwareInfoBatchMap -Devices $devicesNeedingBatch
-    WriteLog -Message ("Batched BIOS detail retrieval resolved {0}/{1} device(s); only unresolved devices will use per-device fallback calls." -f $batchHardwareInfoMap.Count, $devicesNeedingBatch.Count) "INFO"
+    WriteLog -Message ("Batched BIOS detail retrieval returned successful responses for {0}/{1} device(s); only missing or failed sub-responses will use per-device fallback calls." -f $batchHardwareInfoMap.Count, $devicesNeedingBatch.Count) "INFO"
 
     $script:HwFailCount  = 0
     $script:DebugDumped  = 0
@@ -892,8 +892,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCY41Q7orcgL6Ae
-# ARP00UvF0bGJNCeEKZEPJaM+yuHub6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDT8BaHzz7s90P7
+# O87Ny/fHphNtr8Zi5HYiLZrFdNJsnKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1026,31 +1026,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKdUr+ZTzmYXLy5x3vyBSsp5SkjAGXZL1eDWmhN9d2IiMA0GCSqG
-# SIb3DQEBAQUABIIBgES4bPqjZOh9JwJKqOAUG+RpVvyLR2zgUNiUMxi9YhOAj7w9
-# xPhi76QiGMpidss/kIMvpoxsQKn1OzYOnL11dmjzPd8hnjUyWy61RVmre6o1LwLI
-# ZmfjTHSc9B8aq+ahYKN0EyzCBRw+1MSPUXQacdlcui+LUnsC+l2xLd3XMsvRun24
-# FX+SocUJ+tkrTbn28YJbgxTuhHjZ0psYvK50FJABMWVp1F2r5KKFLtWk1gwbqHDg
-# a/k2Btj3AABoaq89uURW6WjpeqkCxD3JwOQ+ggcuXZaDBVrc3eEJDZhKb3D+kMal
-# b0mbKjlIoguZ2nWqRdyvGA1BMfOKsXt1bjCOTIDtn7MhIMJhrM8Ufd8pG+or3MG6
-# fP8zHn0tOrvNAtaFaaK8w7O+umI3i/BbRmcQcn4q8b6WButRnXsfgYFWAn0dMFTU
-# iQ877HZCztMnY6IsO3YQPoHg1aW6VrG6xJwZ5dhp7ryCbT9NzpNEqt7BQr0jYdf+
-# WbiHtPA/P+1r+Qou8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKy2/uptIgObm5REfR9/T75+fEQ9ChW5eBR1cpSfPs4vMA0GCSqG
+# SIb3DQEBAQUABIIBgLCiWR2UGbyVPN8np4SOLrgRqePjTPzqZh9xN0dbrwpmhKus
+# anOZTXpkPntjOCJD9Wpg4Wsvyc3Gw8gCGNemPrgOdJfg1PpxTObgY1L14AIB59W9
+# xUmaNa/jDJPnwNC8R7maN+ik4uavtDfP8KhwMh10ShE5s+AUZW6SjEJKepkPZy9P
+# xPYpkakVoXkZYUNix478KyQthpT3BrJctIMgc/fZ0qJmWXdNGjwVJBJwXj1jyX5D
+# 0hExexeZcrVMqH3Fj446VrhS0YusDvI4jnUhm143pCaiY2Ip/oIuAgVLv4VC6Gkh
+# ob0M3s1GwgLUCQIEvEQY9Wxs8k+Cqu724rqVM/2sLn5MyNhEWOKSmFI+9nLex84l
+# N0UhV4Y41rBEtYNEiswuKjVF7OLvAacfJJb880OTqrgM6qatxB0lgoF+HKHB7D1R
+# Wy2xrrm09vYtJAzO0fztBHdRS9LRxNszlzCq4jvSQndbKiTn/7FFb3NQdGv/6JhQ
+# fT+ykQlQEZHyo34zyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
-# NDVaMC8GCSqGSIb3DQEJBDEiBCCM42RaHoW5fVIHZrebaOyAIKK9SwN8FOvIRSyp
-# AY/x7TANBgkqhkiG9w0BAQEFAASCAgDNnat3OxAKnY604PyDxFp/CHac7L41FfU9
-# 2ip0Nv8/TkpvwVDans7zUBY5In0KoIzTw6oiln25r3fVMCPNzat7bNqxWQJke/dI
-# rGMO+pwguUhipFsgUZMxpMj+U0nsH1rWxZEVvnnTsv62Uha2ZZjgI+0NvewWw7aT
-# PuXmb/JoScnjDYSr67keNQrk5Kg8ijjD8Ha9PWkSRSXUAHkYhEVTd+JOghSfzAUJ
-# DExZz/r2NzTUgcftSQKfkDvs31gb0ekC9MzEgkmQIHVlmYhhO1rFySORqNGzAYh7
-# wlxYr5BagIeCyS1BFhz/+aUmX2y505ssZyaguOECPgl/22smE9c+L3iVpOEPiVHZ
-# 4CQMmKFhHDXxAKwZF61quYzzpIz/zhvoHgeMXUWiZQz9aDW8DQlJKgsi9tLiD2JL
-# ocLAEU1CQzOouBzQxa6veV9F9dULfwxQoTKrYWg78GFU0gr85ayUmBOVK94/P0d4
-# r84UYTDifGhmNpGIiFWUfR0cioVeCjl8RaHhpmMD0NsCGU6Yk0Upo4YO8Kd4dljf
-# HSRP04Co3+SMe4arJ+sgE0ExakfzfykNoxS5sK/ZTXbbU2dqUBjqng0dnLyjSlJK
-# icU8aKYi45o1E6OekifRHimy50XhMxI4uRr8EJN+bUzqvihNI8XIPjUoVpyBH23v
-# n0Sv6dHNGg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzQw
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAmeGZFP0k2MCxu5qiAyS3NYfBMZRTIFtoBEL3Q
+# Mf/6YDANBgkqhkiG9w0BAQEFAASCAgDFdVRPnWK1NmZCXvIfEpQSW+69coZjfgX8
+# RoPh0bJYe+I6JppweEc5lAQcAl8HZT7OBgfbo4mtx1eFtaMWS2LzAs46LnxB3IA6
+# FMoCldUtt4X7cAfLYKVZSjDGr7i09zbQ9o4rN59NLmeLIhlZa/QdoLD9ycxfgC4O
+# z6bIhIBAx4hJtRjWTveBpC7UVdJq7GtpBxAwPNRe2oGSJtfaFPR8Sdzz7/tLPkV6
+# 3kibG0OKNJ7bicfXFZQIlhD2S9a99x2S7PNBOvTKKqqvaCJgfe2Lfoih7xoimiT3
+# XlUpXPOTGVDBqJ90y72Sj5dI3GQolHDoQT1YLzcuBYAvrLVusStS9reN6tUeSVSz
+# BCdSmDEM/AEyWaEosBdtu+twwuNq/bvQElXnp7HsOoKubo/tZ99g7dg51+KlMtAN
+# 9Vhaj0aGZIgG5+7JTn+xs289yhA0phCSVA3cK4LfmevRz2ETTQCbB6bTAltsDyyw
+# IUI5Kr6uc57Uh1BEkZdWBFqJad3sOPPHbaegrR/RrldViH1x7pbga+mI2qzItdGk
+# Zg4R/v2r2FU78bR/MvrTBYz/thC9CnkTJqNdfvXOzowGcVQF7WgTWggNRb0eSKZS
+# 8cryuK0n2HW6sRNtXfIhz/nUawtSbLkzF8DU7jkji7CT9+HdX/Sq4d18X9TWxmPK
+# 3JWYXUFSwg==
 # SIG # End signature block
