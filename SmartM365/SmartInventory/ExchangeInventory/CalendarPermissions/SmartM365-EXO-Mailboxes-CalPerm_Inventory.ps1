@@ -40,7 +40,7 @@
     Optional on-premises mode requires Exchange Management Shell readiness and Exchange recipient read access.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.11
+    Version : 1.14
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Hybrid (Online & On-Prem)
     Minimum permissions: Exchange Online app-only RBAC must allow Get-Mailbox and mailbox folder permission read cmdlets.
@@ -274,7 +274,7 @@ function Join-ModulePath {
 }
 
 # ------------------------- Init & Environment -------------------------
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 if ($Online) {
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
@@ -470,7 +470,7 @@ else {
 }
 
 # ------------------------- Data Structures -------------------------
-$results   = @()
+$results   = [System.Collections.Generic.List[object]]::new()
 $errors    = @()
 $processed = 0
 
@@ -613,6 +613,15 @@ function Add-NoPermissionRow {
     }
 }
 
+function Add-CalendarResultRows {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Rows)
+
+    foreach ($row in @($Rows)) {
+        if ($null -ne $row) { [void]$results.Add($row) }
+    }
+}
+
 # ------------------------- Processing Loop -------------------------
 $overallActivity = "Calendar permissions inventory"
 $index = 0
@@ -637,9 +646,9 @@ foreach ($mbx in $mailboxes) {
             if ($ok) {
                 WriteLog -Message "Calendar folder found for $primarySMTP (via canonical : $usedIdentity)" "INFO"
                 if ($permissions -and $permissions.Count -gt 0) {
-                    $results += $permissions
+                    Add-CalendarResultRows -Rows $permissions
                 } elseif ($EmitNoPermRow) {
-                    $results += (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder 'Calendar')
+                    Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder 'Calendar')
                 }
             } else {
                 # 2) Stats fallback
@@ -653,9 +662,9 @@ foreach ($mbx in $mailboxes) {
                     if ($ok2) {
                         WriteLog -Message "Calendar folder found for $primarySMTP (via stats : $usedIdentity2)" "INFO"
                         if ($permissions2 -and $permissions2.Count -gt 0) {
-                            $results += $permissions2
+                            Add-CalendarResultRows -Rows $permissions2
                         } elseif ($EmitNoPermRow) {
-                            $results += (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath)
+                            Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath)
                         }
                     } else {
                         # 3) Common localized names
@@ -666,11 +675,11 @@ foreach ($mbx in $mailboxes) {
                         if ($ok3) {
                             WriteLog -Message "Calendar folder found for $primarySMTP (via common localized name : $usedIdentity3)" "INFO"
                             if ($permissions3 -and $permissions3.Count -gt 0) {
-                                $results += $permissions3
+                                Add-CalendarResultRows -Rows $permissions3
                             } elseif ($EmitNoPermRow) {
                                 # extract folder name from identity "mbId:\Name"
                                 $folderName = ($usedIdentity3 -split ':\s*',2)[1]
-                                $results += (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
+                                Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
                             }
                         } else {
                             WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
@@ -685,11 +694,11 @@ foreach ($mbx in $mailboxes) {
                     if ($ok4) {
                         WriteLog -Message "Calendar folder found for $primarySMTP (via common localized name : $usedIdentity4)" "INFO"
                         if ($permissions4 -and $permissions4.Count -gt 0) {
-                            $results += $permissions4
+                            Add-CalendarResultRows -Rows $permissions4
                         }
                         elseif ($EmitNoPermRow) {
                             $folderName = ($usedIdentity4 -split ':\s*',2)[1]
-                            $results += (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
+                            Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
                         }
                     } else {
                         WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
@@ -719,9 +728,9 @@ foreach ($mbx in $mailboxes) {
                                       @{Name = "User";           Expression = { $_.User }},
                                       @{Name = "AccessRights";   Expression = { ($_.AccessRights -join ",") }}
                     if ($permissions -and $permissions.Count -gt 0) {
-                        $results += $permissions
+                        Add-CalendarResultRows -Rows $permissions
                     } elseif ($EmitNoPermRow) {
-                        $results += (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath)
+                        Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath)
                     }
                 } catch {
                     $errMsg = "Permission error for $primarySMTP ($folderPath) : $($_.Exception.Message)"
@@ -744,10 +753,16 @@ $BaseFileName = if ($Online) { "Exchange_EXO_MailboxCalendarPermissions_AllDomai
 
 Write-Host "`n--- Export CSV ---"
 if ($results.Count -gt 0) {
+    $requiredColumns = @('Mailbox','UPN','CalendarFolder','User','AccessRights')
+    $missingColumns = @($requiredColumns | Where-Object { -not $results[0].PSObject.Properties[$_] })
+    if ($missingColumns.Count -gt 0) {
+        throw ("Calendar permissions export schema is incomplete. Missing column(s): {0}" -f ($missingColumns -join ', '))
+    }
+    $exportRows = @($results | Select-Object $requiredColumns)
     ExportAndCopyCsv -BaseFileName $BaseFileName `
         -OutputPath $OutputPath `
         -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
-        -Data $results `
+        -Data $exportRows `
         -Encoding "UTF8" `
         -NoTypeInformation
 } else {

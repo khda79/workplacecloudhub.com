@@ -532,13 +532,13 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['GivenNameClean'] = $givenNameClean
         $out['SurnameClean'] = $surnameClean
         $out['AccountType'] = $accountType
-        $out['EXO_Mapping_Status'] = if ($mailboxSource -ne 'EXO') { 'Not EXO' } elseif (-not [string]::IsNullOrWhiteSpace($aadObjectId)) { 'OK_GUID' } else { 'Missing_AAD_Object' }
+        $out['EXO_Mapping_Status'] = if ($null -eq $exoMailbox) { 'Not EXO' } elseif (-not [string]::IsNullOrWhiteSpace($aadObjectId)) { 'OK_GUID' } else { 'Missing_AAD_Object' }
         $out['IsShared_Status'] = if ($null -eq $localMailbox) { 'NoMailboxes' } else { [string]((Get-Value $localMailbox @('IsShared')) -match '^(?i:true|1)$') }
         $out['IsLargeSharedMailbox'] = [string](($totalSizeMb -gt 40960) -and $recipientType -eq 'SharedMailbox')
         $out['IsInLocalEXODuplicates'] = [string]($mailboxSource -match 'Local' -and $mailboxSource -match 'EXO')
         $out['Is_In_SHAREDMAILBOX'] = [string]($recipientType -match 'SharedMailbox')
         $out['TotalItemSizeNumeric_From_Mailboxes'] = Format-NumberInvariant $localSizeMb
-        $out['TotalItemSizeNumeri_From_RemoteMailboxes'] = Format-NumberInvariant (Get-NumberInvariant (Get-Value $remoteMailbox @('TotalItemSizeGB')))
+        $out['TotalItemSizeNumeri_From_RemoteMailboxes'] = if ($null -ne $remoteMailbox -and $null -ne $exoSizeGb) { Format-NumberInvariant $exoSizeGb } else { '' }
         $out['M365LicenseType_Target1_ByPersona'] = $target1Persona
         $out['M365LicenseType_Target1_ByPersona 2'] = $target1Persona2
         $out['M365LicenseType_Target2_ByPersona'] = $target2Persona
@@ -569,7 +569,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['FullAccess_From_MailboxesEXO_Raw'] = $out['FullAccess_From_MailboxesEXO']
         $out['LocalMailboxPermissionCount_NotInM365'] = '0'
         $out['LogonCountStatus'] = ''
-        $out['ActivityCategory'] = ''
+        $out['ActivityCategory'] = Get-DateCategory -Value $lastLogonMergeAdExchEntra -LimitDays 90
         $out['AccountToCleanExcluded'] = ''
         $out['AccountToCleanStatus1'] = ''
         $out['AccountToCleanStatus2'] = ''

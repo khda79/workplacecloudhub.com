@@ -75,7 +75,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.2'
+$ScriptVersion = '1.3'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $script:SmartM365GlobalConfig = $null
 $script:LogPath = ''
@@ -214,6 +214,11 @@ function Get-ObjectValue {
     param([AllowNull()]$Object, [Parameter(Mandatory = $true)][string[]]$Names)
     if ($null -eq $Object) { return $null }
     foreach ($name in $Names) {
+        if ($Object -is [System.Collections.IDictionary]) {
+            if ($Object.Contains($name)) { return $Object[$name] }
+            $matchingKey = @($Object.Keys | Where-Object { [string]$_ -ieq $name } | Select-Object -First 1)
+            if ($matchingKey.Count -gt 0) { return $Object[$matchingKey[0]] }
+        }
         $property = $Object.PSObject.Properties[$name]
         if ($null -ne $property) { return $property.Value }
     }
@@ -394,8 +399,16 @@ try {
     Write-ScopeLog -Message "Group user members retrieved: $($members.Count)"
 
     $mailboxIndex = Build-MailboxAddressIndex -Mailboxes $mailboxes
+    if ($mailboxIndex.Count -eq 0) {
+        throw 'Exchange Online mailbox address index is empty; backup scope exports cannot be trusted.'
+    }
     $memberRows = @($members | ForEach-Object { ConvertTo-GroupMemberRow -Member $_ -RunId $runId -RunDateUtc $runDateUtc -TenantName $OrgDomain -GroupId $BackupPolicyScopeGroupId -GroupDisplayName $BackupPolicyScopeGroupDisplayName })
     $coverageRows = @(ConvertTo-CoverageRows -Members $members -MailboxIndex $mailboxIndex -RunId $runId -RunDateUtc $runDateUtc -TenantName $OrgDomain -GroupId $BackupPolicyScopeGroupId -GroupDisplayName $BackupPolicyScopeGroupDisplayName)
+    $matchedMailboxCount = @($coverageRows | Where-Object { $_.MailboxFoundInInventory -eq $true }).Count
+    Write-ScopeLog -Message ("Backup scope join quality gate: Members={0}; MailboxIndexKeys={1}; Matched={2}" -f $members.Count, $mailboxIndex.Count, $matchedMailboxCount)
+    if ($members.Count -gt 100 -and $matchedMailboxCount -eq 0) {
+        throw "Backup scope join returned zero mailbox matches for $($members.Count) members; exports are not published."
+    }
     $missingRows = @($coverageRows | Where-Object { $_.MailboxFoundInInventory -ne $true })
     $summaryRows = @(
         [pscustomobject]@{ RunId=$runId; RunDateUtc=$runDateUtc; TenantName=$OrgDomain; GroupId=$BackupPolicyScopeGroupId; GroupDisplayName=$BackupPolicyScopeGroupDisplayName; Metric='GroupUserMembers'; NumericValue=$members.Count; TextValue=[string]$members.Count; Threshold=''; Status='OK'; Details='Transitive user members in expected backup policy scope group.' },
