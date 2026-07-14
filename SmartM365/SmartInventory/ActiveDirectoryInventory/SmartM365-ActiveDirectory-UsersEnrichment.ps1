@@ -289,6 +289,17 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
                 $currentRoot = Split-Path -Path $currentRoot -Parent
             }
         }
+        foreach ($rootForTenantLookup in @($LatestFolderPath, $OutputFolder, (Split-Path -Path $CombinedUsersCsv -Parent))) {
+            $currentRoot = [string]$rootForTenantLookup
+            for ($i = 0; $i -lt 8 -and -not [string]::IsNullOrWhiteSpace($currentRoot); $i++) {
+                if ([System.IO.Path]::GetFileName($currentRoot).Equals("Tenants", [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $dataRoot = Split-Path -Path $currentRoot -Parent
+                    if (-not [string]::IsNullOrWhiteSpace($dataRoot)) { [void]$roots.Add((Join-Path -Path $dataRoot -ChildPath "DATA-ALL")) }
+                    break
+                }
+                $currentRoot = Split-Path -Path $currentRoot -Parent
+            }
+        }
         $candidates = New-Object System.Collections.Generic.List[string]
         $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($root in $roots) { if ([string]::IsNullOrWhiteSpace([string]$root)) { continue }; foreach ($name in $Names) { $candidate = Join-Path -Path $root -ChildPath $name; if ($seen.Add($candidate)) { [void]$candidates.Add($candidate) } } }
@@ -709,8 +720,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDzhaHh/+gPL/S
-# 3NOexI2gx+TQ2hC/YiNuvKvs8gGCbaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUrYq2LNDxBkoK
+# dPI2GtUIETocBkD3RL1nSGJs8K2R+aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -843,31 +854,31 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPmEU2RIp+thh3H5rXHTxpM3IU8GcmvcqqrEYIXq1u1FMA0GCSqG
-# SIb3DQEBAQUABIIBgCgbn72Bf2HmIs8TmxVjtZ74JmhH+eBMaRi/eltT+RVEoQcZ
-# kWAHDarmU/JS12vmkerOx9zTSP1CgeAye8ancHgC5zPZJQh8J5/CxuvzEed7HzHO
-# 5kRelHaabJpNpkldbGSn5zZTEEgh8Hwrm6qmz3e6HC3IeBL65jVYg7L1VdrXFHNb
-# rj3vuvhd9Hfz04u7rxY6Zgx+fTEahHaDoJ0UkpROL6YcPhxklU1Q5tnNqf5z/FhC
-# fX56FgUvan0Evl14uoXuQE3J9oLnhlCyKKALNCeH360Lxd0Ws7iFsXk4P9kmPzXT
-# GeH8dmSHIhrSjwC1tRHKuX5WXA2zdkXPyDY7AlBCz+APdnvytCxk938LKSppteRh
-# d78aEvIKzfYsFUmoXimRCtaRuAOokkc+QSb1nmbobOc0D0VqVOk2qLzMyawKY9Rj
-# HMtJszk1RPI1Vh8pGhyH5EHJ7j6GSyUMM/0pJiXs7E4J4QjUuvrMseQ0U25RiVIL
-# bYizZimMxvJZxSzVhqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMQW8empj6g+l5DT1qSpi/04yNyEansG/q1J0U13mB6kMA0GCSqG
+# SIb3DQEBAQUABIIBgAQr8wySMI2i8KAK4i32oP9NAIXmDTkNV6Y3XLJn3V+byAPL
+# t+At31LzmXS8TkOBALQYWNx3mH9VbOFURXhvdc4MoZBFDT2Og9XopVWwrvnBIRo2
+# U67SVOzdWX47KWRWSFs7eefsVDQ7n59yXAX6Dmm4XcO3xWXUkO24ss1E2D8mjH/0
+# hKqOtThE86iAakeyBN0rUmG8XZB8oNfbl8zhm2i1jfDqHgSg+pZmCuXBdVygkDtg
+# mzsA47AjucpyPPZTxQ0WGbVnqlXMx59PUJ6wYgowzb9tqseGPuOjA5DMJ09UwVpY
+# eHPk+Fvnl/l5N4eZG3IQmN0E2Sn6FqwtJ3kzN9wPytMOw9+AQcPvTA/l9kcHRnFW
+# eJIzTbTbR2XhREdEeWHo4dD0dycWadG0EtRvwSaaFpd4zNNf3BDII5CHC+FFbcht
+# KllTkEBAOFCSSbfsy8aZ6tJRmbVKY2K2rBiZZmJbvIkvlqlbY9T8DvNNR7+d1jPJ
+# s/nRKr0RO2IqLnRW4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMDA3
-# MzhaMC8GCSqGSIb3DQEJBDEiBCBI2Ui0x2DfAly936XrUCTnvf5VlkRx4eyqwT3+
-# VdKAnzANBgkqhkiG9w0BAQEFAASCAgCU+oW+Br1ZF7nFjzzNo5rt5X4e7ymQcUW2
-# IOlL4GJnNN0I+FRxIy3Z3MTNpy2GKT4gcpBHtVKW8+jG4ycQauyNtpNp7VcTtqOl
-# y4eWsWr3qun5OG3vVPPGY+tKoXSIQPva7lhB6W9SR1iVq9HOjo1XCQGAuM5tDs0j
-# Wa85hXZwRrYtZ0nmld/UQWAXOCuGxoCVc+CXgWL2nqYjNS3eidfju/T8M7qtnE8c
-# D/WaVqxWYmnxzAiOUXsOV/MGGhird/uxlLYgJR7hwWXeV6osE9WANe5sAwsW/4Le
-# Ais7jPSs0w10i89NyKeUBK4LBNxTxDISgychctmVPyWxqKde+moW8RTypD9Xl6kN
-# SCWIbnoqCQK9S2xpucw7nXONkddhrvoBElg0bTl/UNEcmq5YJn1xuYfrILiGPp9M
-# i8q52f2ToJRvCmKK8SvLOv/0wetjJ3aKyuGfsaYvnEix9zLYCqzZ9DZUTg/oYHSL
-# 3qseGb8O5EUnDx1kQjPo+QUCeb0cMyJyUJn9eefHqMwSCeLhKjGN83qfI6QlfK8X
-# pO8+cxypsUCtDbz5f4jc4YkeoEJ7SXWozOwYlgqtjhUL2TRLdeTExv/VBux148Sk
-# UBrzHjt6eZI/+FxAQSVneVMtofhfAu3IO/7k0rTkRGGq8Bo6rdNCXJYagJZzENd1
-# 0ahVtJ372Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwNjI1
+# MzZaMC8GCSqGSIb3DQEJBDEiBCBb/hQvnYGXCBN48fmIBK9YGZEd4auMinhX6eAI
+# 4wvh0zANBgkqhkiG9w0BAQEFAASCAgBbAiLm2uHAzaB0nUOyD5mC/aUaOda14Hvy
+# 7XjolLjDzuFAUZJYcJONMu3Dgl8t+OuIUrNIaths4ttMOMGl59pHWrg8pCPfZQtH
+# zVWsxAbO7Xt4baibwo7lqXB77MbLgOnotSSEfyJ2lQuSveAptwGUQAqCNbopX/1O
+# Wrn4NRq1KMhigSeR3g9UBaF9tnZsFfVRiGQCBA1Y2sN3vSBy76jpAcAD3dz89baW
+# M8AngE1Y98rMaAyWbbrm/jHdTO0yvca5Hcjh8vpGGkglFn1tf56XaEo1GFBX4mac
+# n63iD9VKUqOiWbo+zT00ZC3fYm8pZ7PBYLzpTsoM4NfX7ieSkAZM0AEMpWp5HPdu
+# mzkw06WZDVDl1apDMptImVRYncAsb2MOVoswJfNmFWGofjtHQ03r7U2D52p/9ChZ
+# 8RKbCAyPszfR2S494gJGo04mlbWiYwa55K9g/IPifwLwDIkG2e9C1y83wc1a2IvG
+# xmZYDgVrnVUclv1NTUYyDgqe4Xkq+JcuK5K9Hd4nHHVrVkSeYqnNjv2dr29ZLNo5
+# 6nsvvpW5CRWQuwSSs6ei9qU7/+VxfLadKe9clxv8XFV5lZbFGL3Zb8kmdR4Bsz+K
+# TQpB8Gid7JHYD6jJaGWDhBoBdrPClgaiTa3FDXvFinZgFPWGnR9xCaCKKPhiq4bE
+# pzSsr6PcaA==
 # SIG # End signature block
