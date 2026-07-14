@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.53
+    0.1.54
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -109,7 +109,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.53'
+$script:LauncherVersion = '0.1.54'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -1201,6 +1201,183 @@ function Get-AlreadyWindows11RowsFromIntuneInventory {
             IntuneManagementState = if ($intuneRow.PSObject.Properties['ManagementState']) { [string]$intuneRow.ManagementState } else { '' }
             IntuneInventoryCsv = $IntuneInventoryCsv
         }
+    }
+}
+
+function Set-CycleNumberOnRows {
+    param(
+        [AllowNull()][object[]]$Rows,
+        [Parameter(Mandatory = $true)][int]$CycleNumber
+    )
+
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row) { continue }
+        $row | Add-Member -NotePropertyName CycleNumber -NotePropertyValue $CycleNumber -Force
+    }
+
+    return @($Rows)
+}
+
+function Invoke-Windows11InventoryPreCycleRefresh {
+    param([Parameter(Mandatory = $true)][int]$CycleNumber)
+
+    $movedFromIntune = 0
+    $movedFromAd = 0
+    $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
+    if ($currentComputers.Count -eq 0) {
+        return [pscustomobject]@{ RemainingComputers = 0; MovedFromIntune = 0; MovedFromAd = 0 }
+    }
+
+    $script:IntuneInventoryMap = @{}
+    if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) {
+        try {
+            if ($DryRun) {
+                Write-Host ("Cycle {0}: DryRun: skipping automatic Intune scoped refresh." -f $CycleNumber) -ForegroundColor Yellow
+                if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
+                    $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
+                }
+            }
+            elseif ($SkipIntuneInventoryRefresh) {
+                Write-Host ("Cycle {0}: Intune inventory refresh skipped by option. Using existing CSV when available: {1}" -f $CycleNumber,$IntuneInventoryCsv) -ForegroundColor Yellow
+                if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
+                    $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
+                }
+            }
+            else {
+                $cycleIntuneInventoryLogPath = Join-Path $ReportRoot ("DevicesIntune_Cycle{0}Refresh_{1}.log" -f $CycleNumber,(Get-Date -Format 'yyyyMMdd_HHmmss'))
+                Write-Host ("Cycle {0}: refreshing Intune inventory scoped to current Computers.txt ({1} computer(s))..." -f $CycleNumber,$currentComputers.Count) -ForegroundColor Yellow
+                $cycleIntuneInventory = Invoke-FullIntuneInventoryExport `
+                    -ExportScriptPath $script:ExportIntuneScriptPath `
+                    -OutputPath $IntuneInventoryCsv `
+                    -LogPath $cycleIntuneInventoryLogPath `
+                    -ComputerListPath $ComputerListPath `
+                    -PageSize $IntuneInventoryPageSize `
+                    -TenantId $IntuneTenantId
+                if ($cycleIntuneInventory.Success) {
+                    $script:IntuneInventoryMap = $cycleIntuneInventory.InventoryMap
+                    Write-Host ("Cycle {0}: Intune inventory refreshed. Devices={1}; CSV={2}" -f $CycleNumber,$script:IntuneInventoryMap.Count,$cycleIntuneInventory.CsvPath) -ForegroundColor Green
+                }
+                else {
+                    Write-Host ("WARNING: Cycle {0}: Intune inventory refresh failed: {1}" -f $CycleNumber,$cycleIntuneInventory.Error) -ForegroundColor Yellow
+                    if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
+                        Write-Host ("Cycle {0}: using existing Intune inventory CSV despite refresh failure: {1}" -f $CycleNumber,$IntuneInventoryCsv) -ForegroundColor Yellow
+                        $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
+                    }
+                }
+            }
+
+            if ($script:IntuneInventoryMap.Count -gt 0) {
+                $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
+                $alreadyWindows11FromIntune = @(Get-AlreadyWindows11RowsFromIntuneInventory -ComputerNames $currentComputers -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv)
+                $alreadyWindows11FromIntune = @(Set-CycleNumberOnRows -Rows $alreadyWindows11FromIntune -CycleNumber $CycleNumber)
+                if ($alreadyWindows11FromIntune.Count -gt 0) {
+                    $intuneAlreadyPath = Join-Path $ReportRoot ("DevicesIntune_AlreadyWindows11_cycle{0}_{1}.csv" -f $CycleNumber,(Get-Date -Format 'yyyyMMdd_HHmmss'))
+                    @($alreadyWindows11FromIntune) | Export-Csv -LiteralPath $intuneAlreadyPath -NoTypeInformation -Encoding UTF8
+                    if ($DryRun) {
+                        Write-Host ("Cycle {0}: DryRun: Intune inventory detected {1} already-Windows11 computer(s). No Computers.txt change. CSV={2}" -f $CycleNumber,$alreadyWindows11FromIntune.Count,$intuneAlreadyPath) -ForegroundColor Yellow
+                    }
+                    else {
+                        $preMoveResult = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary $alreadyWindows11FromIntune
+                        $movedFromIntune = [int]$preMoveResult.Moved
+                        if ($preMoveResult.Moved -gt 0) {
+                            Write-Host ("Cycle {0}: Intune inventory moved {1} already-Windows11 computer(s) from Computers.txt to {2}. Evidence={3}" -f $CycleNumber,$preMoveResult.Moved,$preMoveResult.AlreadyWindows11Path,$intuneAlreadyPath) -ForegroundColor Green
+                        }
+                        else {
+                            Write-Host ("Cycle {0}: Intune inventory detected already-Windows11 computer(s), but none were still present in Computers.txt. Evidence={1}" -f $CycleNumber,$intuneAlreadyPath) -ForegroundColor DarkGray
+                        }
+                    }
+                }
+                else {
+                    Write-Host ("Cycle {0}: Intune inventory precheck found no Windows 11 computer in current Computers.txt. CSV={1}" -f $CycleNumber,$IntuneInventoryCsv) -ForegroundColor DarkGray
+                }
+            }
+            else {
+                Write-Host ("Cycle {0}: Intune inventory precheck skipped: no Intune rows loaded. CSV={1}" -f $CycleNumber,$IntuneInventoryCsv) -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host ("WARN: Cycle {0}: Intune inventory precheck failed: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
+        }
+    }
+
+    $script:AdInventoryMap = @{}
+    $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
+    if ($currentComputers.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
+        try {
+            if ($DryRun) {
+                Write-Host ("Cycle {0}: DryRun: skipping automatic AD scoped refresh." -f $CycleNumber) -ForegroundColor Yellow
+                if (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf) {
+                    $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+                }
+            }
+            elseif ($SkipAdInventoryRefresh) {
+                Write-Host ("Cycle {0}: AD inventory refresh skipped by option. Using existing CSV when available: {1}" -f $CycleNumber,$AdInventoryCsv) -ForegroundColor Yellow
+                if (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf) {
+                    $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+                }
+            }
+            else {
+                $cycleAdInventoryLogPath = Join-Path $ReportRoot ("DevicesAD_Cycle{0}Refresh_{1}.log" -f $CycleNumber,(Get-Date -Format 'yyyyMMdd_HHmmss'))
+                $cycleAdScope = if ([string]::IsNullOrWhiteSpace($AdDomain)) { 'Current AD forest, limited to current Computers.txt' } else { "Domain=$AdDomain, limited to current Computers.txt" }
+                Write-Host ("Cycle {0}: refreshing AD inventory scoped to current Computers.txt ({1} computer(s)). Scope={2}..." -f $CycleNumber,$currentComputers.Count,$cycleAdScope) -ForegroundColor Yellow
+                $cycleAdInventory = Invoke-FullAdInventoryExport `
+                    -ExportScriptPath $script:ExportAdScriptPath `
+                    -OutputPath $AdInventoryCsv `
+                    -LogPath $cycleAdInventoryLogPath `
+                    -ComputerListPath $ComputerListPath `
+                    -Domain $AdDomain
+                if ($cycleAdInventory.Success) {
+                    $script:AdInventoryMap = $cycleAdInventory.InventoryMap
+                    Write-Host ("Cycle {0}: AD inventory refreshed. Devices={1}; CSV={2}" -f $CycleNumber,$script:AdInventoryMap.Count,$cycleAdInventory.CsvPath) -ForegroundColor Green
+                }
+                else {
+                    Write-Host ("WARNING: Cycle {0}: AD inventory refresh failed: {1}" -f $CycleNumber,$cycleAdInventory.Error) -ForegroundColor Yellow
+                    if (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf) {
+                        Write-Host ("Cycle {0}: using existing AD inventory CSV despite refresh failure: {1}" -f $CycleNumber,$AdInventoryCsv) -ForegroundColor Yellow
+                        $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+                    }
+                }
+            }
+
+            if ($script:AdInventoryMap.Count -gt 0) {
+                $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
+                $alreadyWindows11FromAd = @(Get-AlreadyWindows11RowsFromAdInventory -ComputerNames $currentComputers -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv)
+                $alreadyWindows11FromAd = @(Set-CycleNumberOnRows -Rows $alreadyWindows11FromAd -CycleNumber $CycleNumber)
+                if ($alreadyWindows11FromAd.Count -gt 0) {
+                    $adAlreadyPath = Join-Path $ReportRoot ("DevicesAD_AlreadyWindows11_cycle{0}_{1}.csv" -f $CycleNumber,(Get-Date -Format 'yyyyMMdd_HHmmss'))
+                    @($alreadyWindows11FromAd) | Export-Csv -LiteralPath $adAlreadyPath -NoTypeInformation -Encoding UTF8
+                    if ($DryRun) {
+                        Write-Host ("Cycle {0}: DryRun: AD inventory detected {1} already-Windows11 computer(s). No Computers.txt change. CSV={2}" -f $CycleNumber,$alreadyWindows11FromAd.Count,$adAlreadyPath) -ForegroundColor Yellow
+                    }
+                    else {
+                        $preMoveResult = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary $alreadyWindows11FromAd
+                        $movedFromAd = [int]$preMoveResult.Moved
+                        if ($preMoveResult.Moved -gt 0) {
+                            Write-Host ("Cycle {0}: AD inventory moved {1} already-Windows11 computer(s) from Computers.txt to {2}. Evidence={3}" -f $CycleNumber,$preMoveResult.Moved,$preMoveResult.AlreadyWindows11Path,$adAlreadyPath) -ForegroundColor Green
+                        }
+                        else {
+                            Write-Host ("Cycle {0}: AD inventory detected already-Windows11 computer(s), but none were still present in Computers.txt. Evidence={1}" -f $CycleNumber,$adAlreadyPath) -ForegroundColor DarkGray
+                        }
+                    }
+                }
+                else {
+                    Write-Host ("Cycle {0}: AD inventory precheck found no Windows 11 computer in current Computers.txt. CSV={1}" -f $CycleNumber,$AdInventoryCsv) -ForegroundColor DarkGray
+                }
+            }
+            else {
+                Write-Host ("Cycle {0}: AD inventory precheck skipped: no AD rows loaded. CSV={1}" -f $CycleNumber,$AdInventoryCsv) -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host ("WARN: Cycle {0}: AD inventory precheck failed: {1}" -f $CycleNumber,$_.Exception.Message) -ForegroundColor Yellow
+        }
+    }
+
+    $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
+    return [pscustomobject]@{
+        RemainingComputers = $currentComputers.Count
+        MovedFromIntune = $movedFromIntune
+        MovedFromAd = $movedFromAd
     }
 }
 
@@ -2316,176 +2493,7 @@ function Release-GlobalLease {
 }
 
 $script:IntuneInventoryMap = @{}
-if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) {
-    try {
-        $refreshInitialIntuneInventory = $false
-        $initialIntuneInventoryReason = ''
-        $intuneInventoryItem = Get-Item -LiteralPath $IntuneInventoryCsv -ErrorAction SilentlyContinue
-        if (-not $intuneInventoryItem) {
-            $refreshInitialIntuneInventory = $true
-            $initialIntuneInventoryReason = 'missing'
-        }
-        elseif (-not $IntuneInventoryUsesRecentRootCsv) {
-            $intuneInventoryAge = (Get-Date) - $intuneInventoryItem.LastWriteTime
-            if ($intuneInventoryAge.TotalHours -gt $script:IntuneInventoryFreshnessHours) {
-                $refreshInitialIntuneInventory = $true
-                $initialIntuneInventoryReason = ('older than {0} hour(s); LastWriteTime={1}; Age={2:N1} hour(s)' -f $script:IntuneInventoryFreshnessHours,$intuneInventoryItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'),$intuneInventoryAge.TotalHours)
-            }
-        }
-
-        if ($IntuneInventoryUsesRecentRootCsv) {
-            Write-Host ("Intune inventory CSV is recent. Using root CSV in priority: {0}" -f $IntuneInventoryCsv) -ForegroundColor Green
-            $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
-        }
-        elseif ($refreshInitialIntuneInventory -and $DryRun) {
-            Write-Host ("DryRun: Intune inventory CSV is {0}; skipping automatic Intune managed device export." -f $initialIntuneInventoryReason) -ForegroundColor Yellow
-            if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
-                $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
-            }
-        }
-        elseif ($refreshInitialIntuneInventory -and -not $SkipIntuneInventoryRefresh) {
-            $initialIntuneInventoryLogPath = Join-Path $ReportRoot ("DevicesIntune_InitialRefresh_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
-            Write-Host ("Intune inventory CSV is {0}. Running Intune managed device export before starting the lot..." -f $initialIntuneInventoryReason) -ForegroundColor Yellow
-            $initialIntuneInventory = Invoke-FullIntuneInventoryExport `
-                -ExportScriptPath $script:ExportIntuneScriptPath `
-                -OutputPath $IntuneInventoryCsv `
-                -LogPath $initialIntuneInventoryLogPath `
-                -ComputerListPath $ComputerListPath `
-                -PageSize $IntuneInventoryPageSize `
-                -TenantId $IntuneTenantId
-            if ($initialIntuneInventory.Success) {
-                $script:IntuneInventoryMap = $initialIntuneInventory.InventoryMap
-                Write-Host ("Initial Intune inventory refreshed. Devices={0}; CSV={1}" -f $script:IntuneInventoryMap.Count,$initialIntuneInventory.CsvPath) -ForegroundColor Green
-            }
-            else {
-                Write-Host ("WARNING: Initial Intune inventory refresh failed: {0}" -f $initialIntuneInventory.Error) -ForegroundColor Yellow
-                if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
-                    Write-Host ("Using existing Intune inventory CSV despite refresh failure: {0}" -f $IntuneInventoryCsv) -ForegroundColor Yellow
-                    $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
-                }
-            }
-        }
-        elseif (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
-            $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
-        }
-
-        if ($script:IntuneInventoryMap.Count -gt 0) {
-            $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
-            $alreadyWindows11FromIntune = @(Get-AlreadyWindows11RowsFromIntuneInventory -ComputerNames $currentComputers -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv)
-            if ($alreadyWindows11FromIntune.Count -gt 0) {
-                $intuneAlreadyPath = Join-Path $ReportRoot ("DevicesIntune_AlreadyWindows11_{0}.csv" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
-                @($alreadyWindows11FromIntune) | Export-Csv -LiteralPath $intuneAlreadyPath -NoTypeInformation -Encoding UTF8
-                if ($DryRun) {
-                    Write-Host ("DryRun: Intune inventory detected {0} already-Windows11 computer(s). No Computers.txt change. CSV={1}" -f $alreadyWindows11FromIntune.Count,$intuneAlreadyPath) -ForegroundColor Yellow
-                }
-                else {
-                    $preMoveResult = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary $alreadyWindows11FromIntune
-                    if ($preMoveResult.Moved -gt 0) {
-                        Write-Host ("Intune inventory moved {0} already-Windows11 computer(s) from Computers.txt to {1}. Evidence={2}" -f $preMoveResult.Moved,$preMoveResult.AlreadyWindows11Path,$intuneAlreadyPath) -ForegroundColor Green
-                    }
-                    else {
-                        Write-Host ("Intune inventory detected already-Windows11 computer(s), but none were still present in Computers.txt. Evidence={0}" -f $intuneAlreadyPath) -ForegroundColor DarkGray
-                    }
-                }
-            }
-            else {
-                Write-Host ("Intune inventory precheck found no Windows 11 computer in current Computers.txt. CSV={0}" -f $IntuneInventoryCsv) -ForegroundColor DarkGray
-            }
-        }
-        else {
-            Write-Host ("Intune inventory precheck skipped: no Intune rows loaded. CSV={0}" -f $IntuneInventoryCsv) -ForegroundColor Yellow
-        }
-    }
-    catch {
-        Write-Host ("WARN: Intune inventory precheck failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
-    }
-}
-
 $script:AdInventoryMap = @{}
-if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
-    try {
-        $refreshInitialAdInventory = $false
-        $initialAdInventoryReason = ''
-        $adInventoryItem = Get-Item -LiteralPath $AdInventoryCsv -ErrorAction SilentlyContinue
-        if (-not $adInventoryItem) {
-            $refreshInitialAdInventory = $true
-            $initialAdInventoryReason = 'missing'
-        }
-        elseif (-not $AdInventoryUsesRecentRootCsv) {
-            $adInventoryAge = (Get-Date) - $adInventoryItem.LastWriteTime
-            if ($adInventoryAge.TotalHours -gt $script:AdInventoryFreshnessHours) {
-                $refreshInitialAdInventory = $true
-                $initialAdInventoryReason = ('older than {0} hour(s); LastWriteTime={1}; Age={2:N1} hour(s)' -f $script:AdInventoryFreshnessHours,$adInventoryItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'),$adInventoryAge.TotalHours)
-            }
-        }
-
-        if ($AdInventoryUsesRecentRootCsv) {
-            Write-Host ("AD forest inventory CSV is recent. Using root CSV in priority: {0}" -f $AdInventoryCsv) -ForegroundColor Green
-            $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
-        }
-        elseif ($refreshInitialAdInventory -and $DryRun) {
-            Write-Host ("DryRun: AD inventory CSV is {0}; skipping automatic AD computer export." -f $initialAdInventoryReason) -ForegroundColor Yellow
-            if (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf) {
-                $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
-            }
-        }
-        elseif ($refreshInitialAdInventory -and -not $SkipAdInventoryRefresh) {
-            $initialAdInventoryLogPath = Join-Path $ReportRoot ("DevicesAD_InitialRefresh_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
-            $initialAdScope = if ([string]::IsNullOrWhiteSpace($AdDomain)) { 'Current AD forest, limited to Computers.txt' } else { "Domain=$AdDomain, limited to Computers.txt" }
-            Write-Host ("AD inventory CSV is {0}. Running AD computer export before starting the lot. Scope={1}..." -f $initialAdInventoryReason,$initialAdScope) -ForegroundColor Yellow
-            $initialAdInventory = Invoke-FullAdInventoryExport `
-                -ExportScriptPath $script:ExportAdScriptPath `
-                -OutputPath $AdInventoryCsv `
-                -LogPath $initialAdInventoryLogPath `
-                -ComputerListPath $ComputerListPath `
-                -Domain $AdDomain
-            if ($initialAdInventory.Success) {
-                $script:AdInventoryMap = $initialAdInventory.InventoryMap
-                Write-Host ("Initial AD inventory refreshed. Devices={0}; CSV={1}" -f $script:AdInventoryMap.Count,$initialAdInventory.CsvPath) -ForegroundColor Green
-            }
-            else {
-                Write-Host ("WARNING: Initial AD inventory refresh failed: {0}" -f $initialAdInventory.Error) -ForegroundColor Yellow
-                if (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf) {
-                    Write-Host ("Using existing AD inventory CSV despite refresh failure: {0}" -f $AdInventoryCsv) -ForegroundColor Yellow
-                    $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
-                }
-            }
-        }
-        elseif (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf) {
-            $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
-        }
-
-        if ($script:AdInventoryMap.Count -gt 0) {
-            $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
-            $alreadyWindows11FromAd = @(Get-AlreadyWindows11RowsFromAdInventory -ComputerNames $currentComputers -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv)
-            if ($alreadyWindows11FromAd.Count -gt 0) {
-                $adAlreadyPath = Join-Path $ReportRoot ("DevicesAD_AlreadyWindows11_{0}.csv" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
-                @($alreadyWindows11FromAd) | Export-Csv -LiteralPath $adAlreadyPath -NoTypeInformation -Encoding UTF8
-                if ($DryRun) {
-                    Write-Host ("DryRun: AD inventory detected {0} already-Windows11 computer(s). No Computers.txt change. CSV={1}" -f $alreadyWindows11FromAd.Count,$adAlreadyPath) -ForegroundColor Yellow
-                }
-                else {
-                    $preMoveResult = Move-AlreadyWindows11ComputersFromList -ComputerListPath $ComputerListPath -CycleSummary $alreadyWindows11FromAd
-                    if ($preMoveResult.Moved -gt 0) {
-                        Write-Host ("AD inventory moved {0} already-Windows11 computer(s) from Computers.txt to {1}. Evidence={2}" -f $preMoveResult.Moved,$preMoveResult.AlreadyWindows11Path,$adAlreadyPath) -ForegroundColor Green
-                    }
-                    else {
-                        Write-Host ("AD inventory detected already-Windows11 computer(s), but none were still present in Computers.txt. Evidence={0}" -f $adAlreadyPath) -ForegroundColor DarkGray
-                    }
-                }
-            }
-            else {
-                Write-Host ("AD inventory precheck found no Windows 11 computer in current Computers.txt. CSV={0}" -f $AdInventoryCsv) -ForegroundColor DarkGray
-            }
-        }
-        else {
-            Write-Host ("AD inventory precheck skipped: no AD rows loaded. CSV={0}" -f $AdInventoryCsv) -ForegroundColor Yellow
-        }
-    }
-    catch {
-        Write-Host ("WARN: AD inventory precheck failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
-    }
-}
 $cycle = 0
 $mergedHtmlReportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $mergedFinalHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_{1}.html" -f $script:LauncherLogSafeLotName,$mergedHtmlReportTimestamp)
@@ -2495,6 +2503,10 @@ $allCycleProgressRows = New-Object System.Collections.ArrayList
 Write-Host ("Merged HTML report: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkCyan
 do {
     $cycle++
+    $preCycleInventory = Invoke-Windows11InventoryPreCycleRefresh -CycleNumber $cycle
+    if ($preCycleInventory.MovedFromIntune -gt 0 -or $preCycleInventory.MovedFromAd -gt 0) {
+        Write-Host ("Cycle {0}: inventory precheck removed {1} already-Windows11 computer(s); Remaining={2}" -f $cycle,($preCycleInventory.MovedFromIntune + $preCycleInventory.MovedFromAd),$preCycleInventory.RemainingComputers) -ForegroundColor Green
+    }
     $computers = @(Get-ComputerList -Path $ComputerListPath)
     $computerListStats = Get-ComputerListStats -Path $ComputerListPath
     if ($computerListStats.DuplicateGroups -gt 0) {
