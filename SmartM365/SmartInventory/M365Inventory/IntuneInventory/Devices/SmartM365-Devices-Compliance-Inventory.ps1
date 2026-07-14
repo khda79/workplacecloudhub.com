@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -349,6 +349,8 @@ foreach ($dir in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logDir)) {
 $global:LogPath = $logDir
 $global:LogTextFile = Join-Path $logDir ("{0}-{1}.log" -f $ScriptName, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'))
 $global:logTranscriptFile = Join-Path $logDir ("{0}-{1}_Transcript.log" -f $ScriptName, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'))
+$global:SmartM365ExecutionStartTime = Get-Date
+$global:SmartM365ExecutionSummaryWritten = $false
 Set-SmartM365CoreContext -RunId $ts -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $global:LogTextFile
 
 try {
@@ -369,6 +371,11 @@ function Get-SafeProperty {
     )
 
     if ($null -eq $Object) { return $null }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
+        $matchingKey = @($Object.Keys | Where-Object { [string]$_ -ieq $Name } | Select-Object -First 1)
+        if ($matchingKey.Count -gt 0) { return $Object[$matchingKey[0]] }
+    }
 
     $prop = $Object.PSObject.Properties[$Name]
     if ($prop) { return $prop.Value }
@@ -536,6 +543,121 @@ function Get-ManagedWindowsDevicesFast {
 
     $uri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$filter=operatingSystem eq 'Windows'&`$select=$select&`$top=$pageSize"
     return @(Invoke-GraphPagedCollection -Uri $uri -Operation 'Get Intune managedDevices page' -MaxItems $MaxItems)
+}
+
+function Get-CompliancePolicyStateBatchMap {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][object[]]$Devices)
+
+    $result = @{}
+    $eligibleDevices = @($Devices | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Id) })
+    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
+
+    for ($offset = 0; $offset -lt $eligibleDevices.Count; $offset += 20) {
+        $last = [math]::Min($offset + 19, $eligibleDevices.Count - 1)
+        $slice = @($eligibleDevices[$offset..$last])
+        $requestDeviceMap = @{}
+        $requests = [System.Collections.Generic.List[object]]::new()
+        $requestId = 1
+
+        foreach ($device in $slice) {
+            $localId = [string]$requestId
+            $deviceId = [string]$device.Id
+            $requestDeviceMap[$localId] = $deviceId
+            [void]$requests.Add(@{
+                id = $localId
+                method = 'GET'
+                url = "/deviceManagement/managedDevices/$deviceId/deviceCompliancePolicyStates?`$top=200"
+            })
+            $requestId++
+        }
+
+        $body = @{ requests = $requests } | ConvertTo-Json -Depth 6
+        $batchResponse = Invoke-WithRetry -Operation 'Get Intune compliance policy states batch' -Script {
+            Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
+        }
+
+        foreach ($response in @($batchResponse.responses)) {
+            $deviceId = $requestDeviceMap[[string]$response.id]
+            if ([int]$response.status -ne 200) {
+                Write-Warning ("Compliance policy-state batch sub-request failed for managed device {0}: HTTP {1}. Sequential fallback will be used." -f $deviceId, $response.status)
+                continue
+            }
+
+            $values = [System.Collections.Generic.List[object]]::new()
+            foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
+            $nextLink = [string]$response.body.'@odata.nextLink'
+            while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+                $page = Invoke-WithRetry -Operation 'Get Intune compliance policy-state continuation page' -Script {
+                    Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
+                }
+                foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
+                $nextLink = [string]$page.'@odata.nextLink'
+            }
+            $result[$deviceId] = @($values)
+        }
+    }
+
+    return $result
+}
+
+function Get-ComplianceSettingStateBatchMap {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ManagedDeviceId,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Policies
+    )
+
+    $result = @{}
+    $targets = @($Policies | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.id) })
+    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
+
+    for ($offset = 0; $offset -lt $targets.Count; $offset += 20) {
+        $last = [math]::Min($offset + 19, $targets.Count - 1)
+        $requests = [System.Collections.Generic.List[object]]::new()
+        $requestPolicyMap = @{}
+        $requestId = 1
+
+        foreach ($policy in @($targets[$offset..$last])) {
+            $localId = [string]$requestId
+            $policyId = [string]$policy.id
+            $escapedPolicyId = [uri]::EscapeDataString($policyId)
+            $requestPolicyMap[$localId] = $policyId
+            [void]$requests.Add(@{
+                id = $localId
+                method = 'GET'
+                url = "/deviceManagement/managedDevices/$ManagedDeviceId/deviceCompliancePolicyStates/$escapedPolicyId/settingStates?`$select=setting,state&`$top=200"
+            })
+            $requestId++
+        }
+
+        $body = @{ requests = $requests } | ConvertTo-Json -Depth 6
+        $batchResponse = Invoke-WithRetry -Operation 'Get Intune compliance setting states batch' -Script {
+            Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
+        }
+
+        foreach ($response in @($batchResponse.responses)) {
+            $policyId = $requestPolicyMap[[string]$response.id]
+            if ([int]$response.status -ne 200) {
+                Write-Warning ("Compliance setting-state batch sub-request failed for policy {0} on managed device {1}: HTTP {2}. Sequential fallback will be used." -f $policyId, $ManagedDeviceId, $response.status)
+                continue
+            }
+
+            $values = [System.Collections.Generic.List[object]]::new()
+            foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
+            $nextLink = [string]$response.body.'@odata.nextLink'
+            while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+                $page = Invoke-WithRetry -Operation 'Get Intune compliance setting-state continuation page' -Script {
+                    Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
+                }
+                foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
+                $nextLink = [string]$page.'@odata.nextLink'
+            }
+            $result[$policyId] = @($values)
+        }
+    }
+
+    return $result
 }
 
 function Get-ADPartsFromDN {
@@ -866,6 +988,18 @@ try {
     $rows     = New-Object System.Collections.Generic.List[object]
     $polAll   = New-Object System.Collections.Generic.List[object]
 
+    $policyStateBatchMap = @{}
+    if (-not $script:PolicyStateCollectionDisabled) {
+        try {
+            $policyStateBatchMap = Get-CompliancePolicyStateBatchMap -Devices @($devices)
+            Write-Host ("Compliance policy-state batches completed: {0}/{1} devices prefetched." -f $policyStateBatchMap.Count, @($devices).Count) -ForegroundColor Cyan
+        }
+        catch {
+            Write-Warning ("Compliance policy-state batching failed; sequential retrieval will be used: {0}" -f $_.Exception.Message)
+            $policyStateBatchMap = @{}
+        }
+    }
+
     $total = ($devices | Measure-Object).Count
     $i     = 0
 
@@ -928,7 +1062,11 @@ try {
 
         $policyStates = $null
         try {
-            $cmd = Get-Command -Name Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ErrorAction SilentlyContinue
+            if ($policyStateBatchMap.ContainsKey([string]$dev.Id)) {
+                $policyStates = @($policyStateBatchMap[[string]$dev.Id])
+            }
+            else {
+                $cmd = Get-Command -Name Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ErrorAction SilentlyContinue
             if ($cmd) {
                 $policyStates = Invoke-WithRetry -Script {
                     Get-MgDeviceManagementManagedDeviceDeviceCompliancePolicyState -ManagedDeviceId $dev.Id -All -ErrorAction Stop
@@ -942,6 +1080,7 @@ try {
                     $uri = if ($resp.'@odata.nextLink') { $resp.'@odata.nextLink' } else { $null }
                 }
                 if ($vals.Count -gt 0) { $policyStates = $vals }
+            }
             }
             $script:ConsecutivePolicyStateFailures = 0
         } catch {
@@ -970,6 +1109,16 @@ try {
 
                 $pIdx = 0
                 $pTot = ($targets | Measure-Object).Count
+                $settingStateBatchMap = @{}
+                if ($pTot -gt 0) {
+                    try {
+                        $settingStateBatchMap = Get-ComplianceSettingStateBatchMap -ManagedDeviceId ([string]$dev.Id) -Policies @($targets)
+                    }
+                    catch {
+                        Write-Warning ("Compliance setting-state batching failed for device '{0}'; sequential retrieval will be used: {1}" -f $dev.DeviceName, $_.Exception.Message)
+                        $settingStateBatchMap = @{}
+                    }
+                }
 
                 foreach ($p in $targets) {
                     $pIdx++
@@ -981,12 +1130,17 @@ try {
                     }
 
                     try {
-                        $u = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$($dev.Id)/deviceCompliancePolicyStates/$([uri]::EscapeDataString($p.id))/settingStates`?$select=setting,state&`$top=200"
                         $s = @()
+                        if ($settingStateBatchMap.ContainsKey([string]$p.id)) {
+                            $s = @($settingStateBatchMap[[string]$p.id])
+                        }
+                        else {
+                            $u = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/$($dev.Id)/deviceCompliancePolicyStates/$([uri]::EscapeDataString($p.id))/settingStates`?$select=setting,state&`$top=200"
                         while ($u) {
                             $page = Invoke-WithRetry -Operation "Get Intune compliance setting states" -Script { Invoke-MgGraphRequest -Method GET -Uri $u -ErrorAction Stop }
                             if ($page -and $page.value) { $s += $page.value }
                             $u = if ($page.'@odata.nextLink') { $page.'@odata.nextLink' } else { $null }
+                        }
                         }
 
                         foreach ($v in ($s | Where-Object { $_.state -eq 'nonCompliant' })) {
