@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.26"
+$ScriptVersion = "1.27"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1642,17 +1642,45 @@ try {
     $should = Should-SendSummaryEmail -CurrentState $summaryState -Mode $SummaryEmailMode -StatePath $SummaryStatePath
     if ($should) {
         $duration = New-TimeSpan -Start $scriptStart -End (Get-Date)
+        # Rows are already canonical per policy/device, so a second device deduplication is unnecessary here.
         $policySummary = foreach ($group in ($enrichedRows | Group-Object -Property PolicyId)) {
-            $policyDevices = @(Get-WinUpdateDeviceSummaryRows -Rows $group.Group)
-            $policyTotal = $policyDevices.Count
-            $policyCompleted = @($policyDevices | Where-Object OperationalState -eq 'Completed').Count
-            $policyInProgress = @($policyDevices | Where-Object OperationalState -eq 'InProgress').Count
-            $policyAction = @($policyDevices | Where-Object OperationalState -eq 'ActionRequired').Count
-            $policyUnknown = @($policyDevices | Where-Object OperationalState -eq 'Unknown').Count
+            $policyRows = @($group.Group)
+            $policyTotal = $policyRows.Count
+            $policyCompleted = 0
+            $policyInProgress = 0
+            $policyAction = 0
+            $policyUnknown = 0
+            foreach ($policyRow in $policyRows) {
+                $policyBlockingReason = [string]$policyRow.BlockingReason
+                $policyOperationalState = if ($policyBlockingReason -like 'HardFailure*' -or $policyBlockingReason -eq 'UpdateAlert') {
+                    'ActionRequired'
+                } elseif ($policyBlockingReason -eq 'DeploymentInProgress') {
+                    'InProgress'
+                } elseif ($policyBlockingReason -eq 'NotApplicableOrUnknown') {
+                    'Unknown'
+                } elseif ($policyBlockingReason -eq 'CompliantOrCompleted') {
+                    'Completed'
+                } else {
+                    switch ([string]$policyRow.RiskBucket) {
+                        'High'   { 'ActionRequired'; break }
+                        'Medium' { 'InProgress'; break }
+                        'Low'    { 'Completed'; break }
+                        default  { 'Unknown' }
+                    }
+                }
+
+                switch ($policyOperationalState) {
+                    'Completed'      { $policyCompleted++; break }
+                    'InProgress'     { $policyInProgress++; break }
+                    'ActionRequired' { $policyAction++; break }
+                    default          { $policyUnknown++ }
+                }
+            }
+
             $policyStatus = if ($policyAction -gt 0) { 'CRITICAL' } elseif ($policyInProgress -gt 0 -or $policyUnknown -gt 0) { 'WARNING' } else { 'OK' }
             [pscustomobject][ordered]@{
                 PolicyId = [string]$group.Name
-                PolicyName = [string]@($group.Group)[0].PolicyName
+                PolicyName = [string]$policyRows[0].PolicyName
                 Status = $policyStatus
                 Devices = $policyTotal
                 Completed = $policyCompleted
@@ -1778,8 +1806,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+9WOzwc0RAAe/
-# BHqvfzelTpK6ZPLEsiA8S9OQSJyb36CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDz9tfBY40EQ/wG
+# eMQj4UxiY78370mVhvMwmlc8HyX0FqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1912,31 +1940,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJLLUgJs8dwXIqp6B4SKS9fkNnvF5ymKxyUveEPrTlVEMA0GCSqG
-# SIb3DQEBAQUABIIBgAHtrSUqFVBlov85rDNwKGhHxDX/ImnePOhWHfI/92HQFDmQ
-# V95E150qhA93pOAzvQyTpWXAtCVQkZ6wx+R90KXNfBscVNsEqia7v5wpW9nN2CNf
-# 23lgG0hU6PrPCRSpA8Bj7JcvehEJ8mqFKiqCeJoXSDHAhJyXNEDOg9BIDMWJQHsA
-# PamPdbqRnWoVInjlGZ2aMnxLanOrQTU5eN4aGtOuc4BxyhciN2j4AHXXKsjJZRAO
-# g4Tecsgbp7y9WfMKxEr1o5YCRdV0Hotd+LK8jyVfCTJaEKqq3eHvD0RF+oR5H6WF
-# zaGIsVTEm7Zw+jsn0sbaPTd1nZUbTqBbN23wo8J9iggyPqUHbybtHH0088JFful2
-# DZezmunLixaEMfUICCCYh9Y6i8UYDQ9uWNWWJg3dQaQu3iWO+IIvfj6tulskoyW5
-# wRtSogeRYqXZenDZTKQtSxO4ClmL0QNSzn0AQIR91iSPekpMty7nP9bftWKWovcZ
-# PhGFc6+paCqbWd0tJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOrwsvs1Hs83Lq2ZXSD+O1iDS/BgkGW1/OBlpkrAfY5NMA0GCSqG
+# SIb3DQEBAQUABIIBgJUPchJSubalQ67BasrTfEN7B2JQvh56EVRy3Fz+kecXlT6t
+# PDcbEhOJ+UJn3LHGhnbU6EBSSUbSld/fT5oFyPampOuh/oNMooQpGVRn6AXXjL6s
+# Bh7PgFa/Mhz+fJuZuldFns0L+v6HbO/JyzW5Uxz21e7BGayqZfokTOESX4HK8vWu
+# DRtJnpxHJVSAcUoC0BbYA8J/7hOvVlPmfjMvp5Pqsnm6i10bTfOj8LRQq8chN6cV
+# +l90ZsBWuIJHWN39QmDfrUdqygfuJPGDZswz4XlGAma4J0kUmSltWx5ICwOcf7bP
+# X/Hc9sip660tu4CGWKvD0Dx8L9fWwDz04/IH5aZ0MS/PqlzhKixDKhQSNi5S8Qi4
+# nI7woz8Q2mxXXlFlYD9uZpXPpKnRfBXM1C3mlrUxoW+MhMlE8Gaszp0nDeZHGsFY
+# W27bU98yIv2mVRq6wlIMe0vwRVL/wK2iM3ouHfvm3CJ5LceMTBNNCD+YUPkc4zDp
+# sWiro7BZ8cWNlcSt5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxODM5
-# MzZaMC8GCSqGSIb3DQEJBDEiBCBAo0bstGPhjZZkTcOiQ6Li4jo6exVMyoII1Xuu
-# Z9zEDDANBgkqhkiG9w0BAQEFAASCAgAsT+hLI2OG6Llz+zrFWGCSL0CT6YXxLcda
-# MzCO9yAR9b9bBpPEfKM2gZR98ZWeYNv9k0xiHBLmICz/2AVLfJPezlvfjiPv5U9O
-# O17CVj0qe1nKR7apP1mx0Gg9SsBjm4eQpH8o7aMDg8FkvWx3+WD95u9ZyjJXPMWg
-# lSlK38Ygh/eVqTjMDbe/ZjO7QY9dg9OtkwTO43TjoOXjHTsnw8jqFnPeppTnqFeb
-# rEPZk1J8+ctqMx/MhNFffMV6l1nNtdiV+yo429Eaq+MWo8CemvzW+nXhzpY0xUD5
-# iogsyVwTlHMy9UO+Mnsnk5bZJt+jsTKCUp0aNQShd3PJsG1HSSrJRbTPcymceYCW
-# v/zggH0klWBqfhWhF1cEcd6KWSEM+vnyYf54iSAVNCJaEAH13PbJy6J2dNZLoJBk
-# RvmBQqGzxNpznKT//p8i6uCo1qwYKW6HMtptOUNBuqnpRoVgLWvzG2PWwE+PSytI
-# CnEK3oU04/cpcymyKoTO3XJYiOxezacIv80BV6vi+PNLgIFPtteUP/4D/U2YGfFC
-# ADT/bcRFImRUdsYOPRtSl5R2uY93/mauQ9eeqw6NtKpZrAN24CRptPELSxk3Iz1W
-# Lod8s5T4HzxQCLiakeMZTUpueaB+vFMau3Hp+DyK0SD56+XdsBA9gtCKeIiY3nwG
-# HU4e2aJVKQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxODUx
+# MzJaMC8GCSqGSIb3DQEJBDEiBCCjpp7QTKz9Latz4YPFXMV+X+rVFPjabc6APgL2
+# aPm63jANBgkqhkiG9w0BAQEFAASCAgAXqyK6HdXsBCdecpougAN3FBC1g+/lwfLU
+# XtKWz2C+JSGmQ89IrjYFnZM+ZU+DDOH6JfvUi+IVaD1d38UJr4p7Zf+Ks9ca3vnR
+# NN0FEHbiS4lLUMbxANl1XmH52GoumdS5rInm4hFxW9z0lyOO7N0J8zHdX5cq/fkQ
+# +HC7BncQk/hTCuJUfhuKxwN/0gW7GxFIqIxfNVUIN+J0qpfygLarT0IeHw3Z1D23
+# Ik6twoDXASVQt5Z008V9teQvpMtJcG0gBc1YroBfkuBtwh+gYbU09WW8bZ9VTuTL
+# n3dgh2LrobjwVY11Ig6DFsF0YgUmT5pSAj1sSMny7VjiXUOf9tHmPmbdQlaQgxUh
+# dI/Wy7c1CjYrPcjD/WgO/sDm9SHmyZnmWFY/V4BbpVMySYVZpdGpssbumN5ltOpJ
+# /meS4pR2ggyo1rRX+PeFrYUM2Nr7AeBhKFHuA+ONKGIxPT29+cxFMyo/gTXquk/r
+# JGf+cHAJpcI0gdm74+IBjQI7YtIGxK5SAPFQx9r6X9v90UEJn3e/P97R/bjtphF8
+# waF+zwNK5CpmRU8caSfRvL1bohKdS4RyF9f2kSkagEXcsBFqajdP6I4a4EcemK0x
+# prF3EsJ7J/mHRFAirpe23Iz0Y/2hQGQHO0usTu6BQ7qcaDIduMO46fFjJPcHrRyw
+# 4JrjmSUSRw==
 # SIG # End signature block
