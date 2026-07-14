@@ -3565,6 +3565,17 @@ function Test-SmartM365GraphTransientError {
     }
     catch {}
 
+    try {
+        $response = $ErrorRecord.Exception.Response
+        if ($response -is [System.Net.Http.HttpResponseMessage] -and $null -ne $response.Content) {
+            $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                $details = $details + ' ' + $responseBody
+            }
+        }
+    }
+    catch {}
+
     if ($StatusCode -eq 409 -and $details -match '(?i)resourceModified|eTag[^\r\n]*(?:mismatch|changed)|resource[^\r\n]*changed since the caller last read it') {
         return $true
     }
