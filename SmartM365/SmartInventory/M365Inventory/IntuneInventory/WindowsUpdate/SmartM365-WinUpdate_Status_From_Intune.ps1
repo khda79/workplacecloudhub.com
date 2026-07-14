@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.23
+  1.24
 .VERSION
-1.23
+1.24
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.23"
+$ScriptVersion = "1.24"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1137,37 +1137,73 @@ function Get-WinUpdateDeviceSummaryRows {
 function Select-WinUpdateCanonicalRows {
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
 
-    $groups = @{}
-    $groupOrder = New-Object System.Collections.Generic.List[string]
+    $selectedByKey = @{}
+    $keyOrder = New-Object System.Collections.Generic.List[string]
     $rowIndex = 0
     foreach ($row in $Rows) {
         $rowIndex++
-        $policyId = [string](Get-WinUpdateRowValue -Row $row -Name 'PolicyId')
-        $policyName = [string](Get-WinUpdateRowValue -Row $row -Name 'PolicyName')
-        $deviceId = [string](Get-WinUpdateRowValue -Row $row -Name 'DeviceId')
-        $deviceName = [string](Get-WinUpdateRowValue -Row $row -Name 'DeviceName')
-        $normalizedName = Normalize-DeviceName -DeviceName $deviceName
+        $policyId = [string]$row.PolicyId
+        $deviceId = [string]$row.DeviceId
 
-        $policyKey = if (-not [string]::IsNullOrWhiteSpace($policyId)) { "id:$($policyId.ToLowerInvariant())" } elseif (-not [string]::IsNullOrWhiteSpace($policyName)) { "name:$($policyName.Trim().ToLowerInvariant())" } else { 'none' }
-        $deviceKey = if (-not [string]::IsNullOrWhiteSpace($deviceId)) { "id:$($deviceId.ToLowerInvariant())" } elseif ($normalizedName) { "name:$normalizedName" } else { "row:$rowIndex" }
-        $key = "policy:$policyKey|device:$deviceKey"
-
-        if (-not $groups.ContainsKey($key)) {
-            $groups[$key] = New-Object System.Collections.Generic.List[object]
-            $groupOrder.Add($key) | Out-Null
+        if (-not [string]::IsNullOrWhiteSpace($policyId)) {
+            $policyKey = "id:$($policyId.ToLowerInvariant())"
+        } else {
+            $policyName = [string]$row.PolicyName
+            $policyKey = if (-not [string]::IsNullOrWhiteSpace($policyName)) { "name:$($policyName.Trim().ToLowerInvariant())" } else { 'none' }
         }
-        $groups[$key].Add([pscustomobject]@{ Row = $row; Index = $rowIndex }) | Out-Null
+
+        if (-not [string]::IsNullOrWhiteSpace($deviceId)) {
+            $deviceKey = "id:$($deviceId.ToLowerInvariant())"
+        } else {
+            $normalizedName = Normalize-DeviceName -DeviceName ([string]$row.DeviceName)
+            $deviceKey = if ($normalizedName) { "name:$normalizedName" } else { "row:$rowIndex" }
+        }
+
+        $key = "policy:$policyKey|device:$deviceKey"
+        $blockingReason = [string]$row.BlockingReason
+        $operationalRank = if ($blockingReason -like 'HardFailure*' -or $blockingReason -eq 'UpdateAlert') {
+            0
+        } elseif ($blockingReason -eq 'DeploymentInProgress') {
+            1
+        } elseif ($blockingReason -eq 'NotApplicableOrUnknown') {
+            2
+        } elseif ($blockingReason -eq 'CompliantOrCompleted') {
+            3
+        } else {
+            switch ([string]$row.RiskBucket) {
+                'High'   { 0; break }
+                'Medium' { 1; break }
+                'Low'    { 3; break }
+                default  { 2 }
+            }
+        }
+        $priorityRank = 999
+        if ($null -ne $row.ActionPriority) { [void][int]::TryParse([string]$row.ActionPriority, [ref]$priorityRank) }
+
+        if (-not $selectedByKey.ContainsKey($key)) {
+            $selectedByKey[$key] = [pscustomobject]@{
+                Row = $row
+                OperationalRank = $operationalRank
+                PriorityRank = $priorityRank
+            }
+            $keyOrder.Add($key) | Out-Null
+            continue
+        }
+
+        $current = $selectedByKey[$key]
+        if ($operationalRank -lt $current.OperationalRank -or ($operationalRank -eq $current.OperationalRank -and $priorityRank -lt $current.PriorityRank)) {
+            $selectedByKey[$key] = [pscustomobject]@{
+                Row = $row
+                OperationalRank = $operationalRank
+                PriorityRank = $priorityRank
+            }
+        }
     }
 
-    foreach ($key in $groupOrder) {
-        $selected = @($groups[$key] | Sort-Object `
-            @{Expression={ Get-WinUpdateOperationalRank -State (Get-WinUpdateOperationalState -Row $_.Row) };Ascending=$true}, `
-            @{Expression={ Get-WinUpdatePriorityRank -Value (Get-WinUpdateRowValue -Row $_.Row -Name 'ActionPriority') };Ascending=$true}, `
-            @{Expression={ $_.Index };Ascending=$true} | Select-Object -First 1)[0]
-        $selected.Row
+    foreach ($key in $keyOrder) {
+        $selectedByKey[$key].Row
     }
-}
-# Main
+}# Main
 # ==========================================================
 $ErrorActionPreference  = "Stop"
 $script:TokenAcquiredAt = [datetime]::MinValue
@@ -1696,8 +1732,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDuC6P0RbE7lEhY
-# lk2N7mbeirbeYbe3MdGGUy7ZzLCRVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDtOXHjWvf5CEeU
+# w4FVkMJUtNuBpP8wT5pSq8BRJ4ebYqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1830,31 +1866,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMWxEK5aaUIPzLo+byN9S7ZAk+cScpNay4UqByku3RO8MA0GCSqG
-# SIb3DQEBAQUABIIBgBX/FVBNYIr3EyQuw0OqT9H2T5Tm9FmJFnxvUSEhfGpUhM1o
-# 25lDVknJdZhm/7pS3g7fymCoQWPuQjOqC2Gymp7150jyERbWIrCIucLbl7luNJbh
-# FI4x3OselPviNvIpndNLYcQTJWMQ1tnBisbjh8OBSSVC14lhILj+FNiEjfENXeQ/
-# p3NZPvYbnWPNBmgXddUhETWMt5KCMLXo3drxEvcOUKzpbpQckYVIE2mvp+ehRZTM
-# 0w2It0CVTHCEabo5N67hRItx9lEstE1LNf2fuL9+EupCRJiGoA64QQ6Hk7CEo6AF
-# C0fVA3ab9Yi7qGbr2/Ir9p3oO2tZpTR59c2pExafg3Ln5ij+h+UAVQ300n3fa3V8
-# YhD8fbZCPkA98eqWq9EMIpFWyCLUJhrEZStRXhEn9awOA4AjD8zhmO7FfgHr6hdP
-# FvjJqdZ4F12IBCfJMlX8RbrKnuaFEaHneC1on5TdfQjRyZWcdzfrDJWVG+Lc7p/q
-# if72/on1oN0t187yKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGxZoKBez3p6kN7hyai6wqmNfYqAPI1dSOYyZLXDFyxeMA0GCSqG
+# SIb3DQEBAQUABIIBgAw9/D1XkGzmvvSmJl+QPGAjfGmUx4IFYeAhehdoOOdVk5Gp
+# muxb0ps7unIU2LYEK+sYUgA6ormAV5ATQJBrU5Y8ATfqF011dOCzesVmmEuVn3CP
+# A7foqMYEcMCx+sHocvVHEmsKBWuCy4/ppa1ojOFrBE0czTiYqbEQwToOpDBzWrky
+# lWyoFsaH5m9x67z1fisRk/2pZPcsXnv76C8u/N0Uuf1ZHvVrDs/vJCMRrBzCCZgQ
+# Extr0b3Tvo4SCGBDDsV9s8k+UlaEkAI8CfC9H7PSZZI7pcw/CeeC0gRU7sCUvEo3
+# aoGEB8FAl805Hb2uhPv1Ox4tgJYygebGCD3BeA1n5dRsUj+8tmKl7ExSInV4RHa3
+# KoIgF/TyX5kB049n20Ra5cydZ4x2df7FOWFo36i0d7geNsRIqHAwJ6vJGzDnEa6S
+# 6praU9tlU9eOL5PP43LmyL4aP8GgTxYp+bcN7g/fxpUk4upOgahy9gFOAsp58CpD
+# X/u4m61K7exUh+4slaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzUz
-# MTRaMC8GCSqGSIb3DQEJBDEiBCARApcZAMQEO6d7G1gDTHQ5qmKFnBqLQeh6vtf3
-# 4EiWajANBgkqhkiG9w0BAQEFAASCAgCsgUrAx7gGOUBhUotuFzM6+iUz4Zjz8qGA
-# lAimvr5IVmF/R8DgNAysQ1yfcuPgh2+j0LT4S3um/LxP/eZSlTuMSPlO2wEBqJp3
-# BvZHYuDnRXmAk0y5KDJjtUxRcGOpOeGdiPUPRVXDCMTVOIEaxK15YSfVQl7XMlWD
-# cj9uTYASJA9a5HlBlesIJkRrzbp2jwk2TYAZzDZTVjw+PoQ2xdXgDtzUEPzcy3/A
-# ScYQluw5yvhIDSytKHhaMJW2rD5oRApFwJ2+BC/o44gquOO4m9HT2NUtu7W88EYK
-# pXPG0xuRLs67KX3pdcVOe6k9SaeucLQ53ijLZthWDC8FSzI+5vOqPEUx8CpAtwQc
-# hIQ3LoS1PzdAZFH5oGOzdxNHzgzEGO5Db27NuBlJ1QBMfMFM/gjhw45A5w+qUdsV
-# RQrdBFZ4SLfnr2efttAM5TXJ5rK+Vj9DSMgJEy8jxoeu0o8iY9ZeELLdJoUT0vVk
-# R3DfOU/oMLZojaNxaYDcWHEBGq9KIadp2OKnnOEFX6frDpr6xnSImRvmXSHusHuG
-# AeIBrIu4iL0TCmsjmI466bSDAKKmKZUl3UHuLa3MBERaexnjJleO7LhKGf5cO/UX
-# T3pWoWMR2YKPVwRNrO5IjqRctqwqe+cFmFnBWHDthPH9qvKBU7xggbhlolGPksX0
-# +PcLV4/Qnw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxODA5
+# NTVaMC8GCSqGSIb3DQEJBDEiBCAx+wgDUzDW5TUPn4WncTIzTjRq95r7xFv+nvl8
+# 5lwdejANBgkqhkiG9w0BAQEFAASCAgCvwafQooG8+jewybaq7YA3XAQH/Xk/e3oh
+# yXyqmSw91/eLw3TlprwyXcQHA53pCECQ697HcjMmNHWoPFlVcRev1FPB5jyp9WI/
+# +qjIK29lIATQxKUHYLm4Hz0/gZw/C9IxRbal7EowkeSgyRLylcZl2KRWeiktBxRG
+# iJOVRX62LqRvFR/L2JKO9K9uzhq5D39c3Xbq+EkZG0fqTGU0/22Py5UYqM1kBpR0
+# xN2UE57LGeqCxk5Qt0gCgWcVZd2+5dGHrvX8eOP9KFZk0tQwSLW7+TiA6konItyE
+# z7c6lXKyHILko14A7fBJ6TcNQ9UxyyLpdgcYxOwf+WVX1amiWt9RGJNkdAo8Ev4h
+# 1zLIjJKtaDv9dRnWCepMYDFreLTitGpAIyk7Df8xlweKw7n2OdbXAHa6N42gNoGM
+# OnEepPaibN9kdLKfaGAe/rNM4yH/b2YPH7Cbwd+x1Bu0FkUyxKCpI7DrDU3lr3QI
+# 5q7DLfdehe+7WphOAp/YapVoRDKVx7/nka3c5rA1JfOLPIStOIHMv+lKVhYjIBic
+# 7uwVg0pPs/jQXRj57Qlov2EivNqvXN/HrAO7gfgo52jMShEymNlcvoYRELPAyVJI
+# 0MmRYy8x1CPS3YPWlUTCmDnpqghLE0IREnTBDfAqxuM63y/3yryMMokXRuGjvxBz
+# 8XcFS9Wiag==
 # SIG # End signature block
