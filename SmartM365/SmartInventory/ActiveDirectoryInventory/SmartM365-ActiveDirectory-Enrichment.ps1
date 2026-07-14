@@ -1,6 +1,8 @@
 <#
 .SYNOPSIS
     Builds enriched Active Directory computer CSV columns required by the SmartWorkplace Power BI model.
+.VERSION
+1.0
 #>
 
 function Invoke-SmartM365AdComputersEnrichedCsv {
@@ -236,28 +238,37 @@ function Build($AdVersion, $IntuneVersion) {
     }
 
     function LoadXlsx($Name, [string[]]$WorksheetNames) {
+        $resolvedPath = ''
         foreach ($candidate in (Get-SourceCandidatePaths $Name)) {
-            if (-not (Test-Path -LiteralPath $candidate)) { continue }
-            try { Import-Module ImportExcel -ErrorAction Stop }
-            catch {
-                WriteLog -Message ("AD enrichment Excel source skipped because ImportExcel module is not available: {0}" -f $candidate)
-                return @()
-            }
-            $rowsOut = New-Object System.Collections.Generic.List[object]
-            foreach ($worksheetName in @($WorksheetNames)) {
-                if ([string]::IsNullOrWhiteSpace($worksheetName)) { continue }
-                try {
-                    foreach ($row in @(Import-Excel -Path $candidate -WorksheetName $worksheetName -ErrorAction Stop)) { [void]$rowsOut.Add($row) }
-                }
-                catch {
-                    WriteLog -Message ("AD enrichment Excel worksheet skipped: {0} [{1}] ({2})" -f $candidate, $worksheetName, $PSItem.Exception.Message)
-                }
-            }
-            WriteLog -Message ("AD enrichment Excel source loaded: {0} ({1} row(s))" -f $candidate, $rowsOut.Count)
-            return $rowsOut.ToArray()
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $resolvedPath = $candidate; break }
         }
-        WriteLog -Message ("AD enrichment optional Excel source missing; related columns will be blank: {0}" -f $Name)
-        return @()
+        if ([string]::IsNullOrWhiteSpace($resolvedPath) -and (Get-Command Resolve-SmartM365AdReferenceXlsx -ErrorAction SilentlyContinue)) {
+            $sharePointPath = Resolve-SmartM365AdReferenceXlsx -Name $Name
+            if (-not [string]::IsNullOrWhiteSpace($sharePointPath) -and (Test-Path -LiteralPath $sharePointPath -PathType Leaf)) {
+                $resolvedPath = $sharePointPath
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
+            WriteLog -Message ("AD enrichment optional Excel source missing; related columns will be blank: {0}" -f $Name)
+            return @()
+        }
+        try { Import-Module ImportExcel -ErrorAction Stop }
+        catch {
+            WriteLog -Message ("AD enrichment Excel source skipped because ImportExcel module is not available: {0}" -f $resolvedPath)
+            return @()
+        }
+        $rowsOut = New-Object System.Collections.Generic.List[object]
+        foreach ($worksheetName in @($WorksheetNames)) {
+            if ([string]::IsNullOrWhiteSpace($worksheetName)) { continue }
+            try {
+                foreach ($row in @(Import-Excel -Path $resolvedPath -WorksheetName $worksheetName -ErrorAction Stop)) { [void]$rowsOut.Add($row) }
+            }
+            catch {
+                WriteLog -Message ("AD enrichment Excel worksheet skipped: {0} [{1}] ({2})" -f $resolvedPath, $worksheetName, $PSItem.Exception.Message)
+            }
+        }
+        WriteLog -Message ("AD enrichment Excel source loaded: {0} ({1} row(s))" -f $resolvedPath, $rowsOut.Count)
+        return $rowsOut.ToArray()
     }
 
     function AddMap($Map, $Key, $Row) { if (-not [string]::IsNullOrWhiteSpace($Key) -and -not $Map.ContainsKey($Key)) { $Map[$Key] = $Row } }
@@ -955,8 +966,8 @@ function Build($AdVersion, $IntuneVersion) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQar4LkoOfzxgw
-# rLrTZ/U9Wl0mtatMRWG/1OC+s1cSRaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfnTiUiQDtDiSY
+# PguSosEjYmoCHZ+T3x1RlPF+KDI1KKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1089,31 +1100,31 @@ function Build($AdVersion, $IntuneVersion) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINLGj6ofCiaXQaaTU3iilryZRZI6AybKUj0ghiBNbcVTMA0GCSqG
-# SIb3DQEBAQUABIIBgFXPgoN621v0vWESJ9zHCEoUP+TtqkjAhOJ3Nl7NU+Qbb65n
-# zzkj5RHreF5eJECCpdEqjS1NkpWRk20kzH6uJGkoaV0G8Up5pLVJQoKGxCffzNyZ
-# a9x9fZk+m9IMaHb3SpupnWJ/8EuiLgZfywynMs+jnhuo5RHvvLfobJu8kwBaHYyk
-# jdbUeVGA/xrwkEu2NloSF2sH7y0q3wi5qiEMR3bbUKxWPzHYT0ZPvHFNf8jzMn+/
-# ALFdB/Tf7oPcVb/1c9GQ/s0mvjyN7VsLmXhYEdOKzvG841d9AGpEUAXrwLyZYanD
-# YmGYgKO/kIGI+48pHrQBqBVy+JpOxVZ76Zy8OJalrMfzYJVuYXMX/3Bm6kxEJhOx
-# WLBpVyhgicDPLIeg6Acn1VYDF3Uy/+ESY1mwcnj5QPP7f9La2ActMwrj+5ZmVmw4
-# IsYN2dbYY+EPbK403fdDPoqiqyPPYmvPTMxYawjOGlxjaUsLJZ3Wz1dj5BzA5TxU
-# dcyVr99I9SeY3lsJnaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOsCZ6CpzuZ+M2dEaCxcOxukbSENTCGP2JyOVuTi6c5dMA0GCSqG
+# SIb3DQEBAQUABIIBgJXsDZswKwEUNuEWigQViaOlRn21V/fY+V3uqVE8b4RtV4aN
+# v7SEWrhzktpxw2wEzvo2rMK+UohRmZvwzZDQWS2xbiMOpfJfXRosiJSKJkSaV9/P
+# s6mhZQChGVkc5pci+mHD0QjC/Ao68NGZKycTZhv2sXdXHna3vkyq2KvkwOcA+h98
+# 10mJYM23+7/V9o6Nt5DS9EbDbzlBNdhIickjzA7W5vGH8QpXAe6mdAwk3AX9oMVe
+# Eh1a+sKjQmM3SxR+M7o3wrE6HLhWyrEotxAn0OSFfty7WVFyIdzvPHV7o5kkWA2R
+# qSzcy3e6RSz957jb56MHMATbb0+TyoLUBas8PX+HJbN7eqHJEyK2QHZTY1VAqWZX
+# 2Gbkb9bShtXxO/p+cpBTiY5Nfuux+zE6UNbIrsNnWYLdcxlYbAAvXO9qptQ2u+UD
+# 2yWxkQ0V/N07kRdRxEe8MFUxzAOqY1vjRlpq/iNPcr54dnO84Z03m3K1vem+bzjZ
+# CBweUg2udYUMq1TvhKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
-# NDFaMC8GCSqGSIb3DQEJBDEiBCBP162wPidjQOwRhocRQ0WGfBEuEH7wkRyZsQnq
-# fAz4pzANBgkqhkiG9w0BAQEFAASCAgCCc0puyh7cM7nnhATSWvxRxZzCDqFuPb7Q
-# PcW67+NZAZN+kpHa4CgR3uIASzlMHbRosOIO8s0er/SMSAMpwFbhW1MuyMiRp2MX
-# yTOWq2ZI2NA33On8Secf+z6SG+RYW5pIu7uqpY9B44qrEqdXSdHvRN2YEQpjmzDj
-# jbZrDblOXW1OYYCQnFYBOBbAzTYl3xlS3zcCQcV14YTI4USVKe5x2WNglCciLy93
-# tQZuHUFEMZ5FwO5wlvhIyB2htSok/cLNmDhbheE7SpkteKcZ8QHdfMdccOCnWnzP
-# r1uT8Fmpk+xLCSDZBYBh9DNuul4LXrDd/FaWivR1KCjF9bwAfIjrHqO2ct5XKe1o
-# 7osEG+vCWJHrP3gibKxa3qfDU2TDhO61YPBuVgbYwgxjyUUeGCQn6ZHqhJ73oeYA
-# bQrZsToGmA+1VvRkH48WSX7f0A3TLSw+tmFHXKEtsG3lSS/hci8zozKwGmjVwzVr
-# 42rrs0WbHM67b5IA/Psxpcz/qWsIlxrkHaoZhwILb5giTXnDYNJArS4+1VdY2f5p
-# 3EsrSHyoTxvHwDL6z8byPpDNxurnRgZAd12dmbXGpdk1yCIRVaR+ZihPeGvcVeDv
-# WNt7KAnoji2XxQw5Vz7lNX0n2L9oguBi66cLwfONQBh0/DlFdp5+MA1i9H9/YuXT
-# KUUGf0UqGA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMTQx
+# MjZaMC8GCSqGSIb3DQEJBDEiBCCf+zoDlfjPw62U4CKY/wvH9bfw5ltZAa35PJ3j
+# CgASqzANBgkqhkiG9w0BAQEFAASCAgBixJIlJ0umGpzb69kA2xgps1tN+k1fy3ZQ
+# HxkD85/lWIW4gvrZPLGBmHJ3jGQVfOpnZlv9wN3Hb4oiAHGeT97E4hekVZ/bCoSI
+# hMvuBoYeOgC/PKDzOBLWu9DtuJ6qoU/H7fvbFNGPW1dVrR+E1J9ootEazPorT8ns
+# vg73T36xbIBfmaj4nmAXbFXluve9zag4QJqXdsqGVWhxz4m18ZXMwbncfOBvNSf4
+# 3qgFqP1AzNOZ+0pZwP4e9jmHhy7pJKBDV0fQTCTt0H87vHylXEZB0xwDJOD6K4xy
+# ypZ940opjb3FjXv1uwaty25/TcKwssfSIiqZqwDmSuAQmba0MZXcF/3xIOJ9ZwUP
+# GgzC1vuFxVtgpO+iY/iwK7ENwMWf+WIGuBvWAxULp7kq3wCebitmPbsLDrr2hyTv
+# 1HwSlqeKHgw5ELi2CG89l/iZmAgKL6csihc2gHyqbJKDc3dk2emDcxCkhRy+v9cQ
+# XZCIRRfhJBJcqtEXXpeWulfhoieMhIVFl4KCIwaJHTRgS8snV0zbKSOHZASaDlId
+# rvbCF5ecuoCwR/QZMIzNiB2XOX/MsVWP0h0dYaXTckssDPGa+lCTpbuaGgZbaDQd
+# LsYNzWKbqb8dFd7feq8CLyhuhZxkNM5F1/3xOBCgIXfpG8de87dsbJHi1wkswVWw
+# XMt1DlX0Pg==
 # SIG # End signature block
