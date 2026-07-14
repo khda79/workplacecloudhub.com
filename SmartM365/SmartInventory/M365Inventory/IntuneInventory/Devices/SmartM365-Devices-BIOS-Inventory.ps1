@@ -481,7 +481,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -573,7 +573,7 @@ try {
     # ------------------------
     WriteLog -Message "Retrieving Intune managed Windows devices (LIST)..." "INFO"
 
-    $listUri = "https://graph.microsoft.com/beta/deviceManagement/managedDevices?`$filter=operatingSystem eq 'Windows'&`$select=id,deviceName,azureADDeviceId,userPrincipalName,operatingSystem,osVersion,manufacturer,model,serialNumber&`$top=999"
+    $listUri = "https://graph.microsoft.com/beta/deviceManagement/managedDevices?`$filter=operatingSystem eq 'Windows'&`$select=id,deviceName,azureADDeviceId,userPrincipalName,operatingSystem,osVersion,manufacturer,model,serialNumber,hardwareInformation&`$top=999"
 
     $allDevices = New-Object System.Collections.Generic.List[object]
     $nextLink = $listUri
@@ -596,6 +596,8 @@ try {
     }
 
     WriteLog -Message "Managed Windows devices retrieved: $($allDevices.Count)" "INFO"
+    $bulkHardwareInfoCount = @($allDevices | Where-Object { $null -ne $_.hardwareInformation }).Count
+    WriteLog -Message ("hardwareInformation returned by the bulk list for {0}/{1} devices; only missing entries will use per-device fallback calls." -f $bulkHardwareInfoCount, $allDevices.Count) "INFO"
 
     if ($DeviceNameContains) {
         $needle = $DeviceNameContains.Trim()
@@ -638,7 +640,17 @@ try {
         $reqId      = $null
         $rawErr     = $null
 
-        $hw = Try-GetHardwareInfo -ManagedDeviceId $mdId
+        $hw = if ($null -ne $d.hardwareInformation) {
+            [pscustomobject]@{
+                Status     = 'OK_BETA_LIST'
+                Response   = $d
+                HttpStatus = 200
+                RequestId  = $null
+                RawError   = $null
+            }
+        } else {
+            Try-GetHardwareInfo -ManagedDeviceId $mdId
+        }
 
         $hwStatus   = $hw.Status
         $httpStatus = $hw.HttpStatus
