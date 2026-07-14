@@ -214,8 +214,17 @@ function Build($AdVersion, $IntuneVersion) {
         return @($candidates)
     }
 
-    function LoadCsv($Name) {
+    function LoadCsv($Name, [string]$PreferredPath = '') {
+        $candidatePaths = New-Object System.Collections.Generic.List[string]
+        $seenPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        if (-not [string]::IsNullOrWhiteSpace($PreferredPath) -and $seenPaths.Add($PreferredPath)) {
+            [void]$candidatePaths.Add($PreferredPath)
+        }
         foreach ($candidate in (Get-SourceCandidatePaths $Name)) {
+            if ($seenPaths.Add($candidate)) { [void]$candidatePaths.Add($candidate) }
+        }
+
+        foreach ($candidate in $candidatePaths) {
             if (Test-Path -LiteralPath $candidate) {
                 $rows = @(Import-Csv -LiteralPath $candidate -ErrorAction Stop)
                 WriteLog -Message ("AD enrichment source loaded: {0} ({1} row(s))" -f $candidate, $rows.Count)
@@ -472,7 +481,8 @@ function Build($AdVersion, $IntuneVersion) {
     $hardwareConflictRows = @(LoadCsv 'M365_Entra_Devices_HardwareIdConflicts.csv')
     $localSystemRows = @(LoadCsv 'Intune_Devices_LocalSystem.csv')
     $windowsUpdateRows = @(LoadCsv 'Intune_WindowsUpdate_Status.csv')
-    $adUserRows = @(LoadCsv 'AD_Users_AllDomains.csv')
+    $currentRunAdUsersCsv = Join-Path -Path $OutputFolder -ChildPath 'AD_Users_AllDomains.csv'
+    $adUserRows = @(LoadCsv -Name 'AD_Users_AllDomains.csv' -PreferredPath $currentRunAdUsersCsv)
     $licenseRows = @(LoadCsv 'M365_Licenses_Users.csv')
     $exoMailboxRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains.csv')
     $exoMailboxStatsRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv')
@@ -945,8 +955,8 @@ function Build($AdVersion, $IntuneVersion) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAiP4nctrqmlJy1
-# CSgB/nRHCySTXwbXPk6lMgkgie3pXKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQar4LkoOfzxgw
+# rLrTZ/U9Wl0mtatMRWG/1OC+s1cSRaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1079,31 +1089,31 @@ function Build($AdVersion, $IntuneVersion) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIzAFvetjGnTLlYPWXKDaljIGZhQoqGFxn5c9h460+ECMA0GCSqG
-# SIb3DQEBAQUABIIBgHkKwqLnzvxT6Uyb9fFohfPiaE3ksa1hIQSoLPOT4X4goWbC
-# ot6xmqik6YUNgtlwFxf64nZowbHG6X4yhZH/AErznT/0zuslm7vytEL9kFBWXMuL
-# h6WX/u3vys2itDWuHf/L1foHBK/AVmIIgYf9EA26NOIyKWGqnvW0aJ/w/Ehqh0cM
-# aNN+vD3IeORcwXm4jkf+TNcIwSEMc9emy6r8OC72UBqyFDYSMCCOv0ZLYpXDP53h
-# 0PAsh5YmUPxjyXZzq4J3lS/ldkz7mT6EUnKHcumaY0Np5HihcuiMPBXHZcYBPUNA
-# vVtWzTR5XtALNOhcvrM/NW4W6T0KHXcxzHJZ0IjP5HhDqVHt4HUYFU2v09G8X//M
-# 4JBMwdgXnOI3fqbEbYypMg6dA1wxndHEEnqJjpw+W0cL4h48LRIQEWB1oqpbf+FV
-# Gb8Quwwd1QcKifYHaxlDAY52+wAb0miLA9Ei2wkLQtKpUIN+1FGvK838oUvbPDj2
-# fZWbRRT8HlieZklJoKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINLGj6ofCiaXQaaTU3iilryZRZI6AybKUj0ghiBNbcVTMA0GCSqG
+# SIb3DQEBAQUABIIBgFXPgoN621v0vWESJ9zHCEoUP+TtqkjAhOJ3Nl7NU+Qbb65n
+# zzkj5RHreF5eJECCpdEqjS1NkpWRk20kzH6uJGkoaV0G8Up5pLVJQoKGxCffzNyZ
+# a9x9fZk+m9IMaHb3SpupnWJ/8EuiLgZfywynMs+jnhuo5RHvvLfobJu8kwBaHYyk
+# jdbUeVGA/xrwkEu2NloSF2sH7y0q3wi5qiEMR3bbUKxWPzHYT0ZPvHFNf8jzMn+/
+# ALFdB/Tf7oPcVb/1c9GQ/s0mvjyN7VsLmXhYEdOKzvG841d9AGpEUAXrwLyZYanD
+# YmGYgKO/kIGI+48pHrQBqBVy+JpOxVZ76Zy8OJalrMfzYJVuYXMX/3Bm6kxEJhOx
+# WLBpVyhgicDPLIeg6Acn1VYDF3Uy/+ESY1mwcnj5QPP7f9La2ActMwrj+5ZmVmw4
+# IsYN2dbYY+EPbK403fdDPoqiqyPPYmvPTMxYawjOGlxjaUsLJZ3Wz1dj5BzA5TxU
+# dcyVr99I9SeY3lsJnaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwNjI1
-# MzVaMC8GCSqGSIb3DQEJBDEiBCAmwqfQ6eqjCDdVVd5WsuiZfa6z/JS+yJJY35eJ
-# qw9jRTANBgkqhkiG9w0BAQEFAASCAgCr6qAldYzzOZUagbWRU1BQ2uE1t4lnh2Ro
-# pQPTSY8wZ7yAHaKKQ+ZTQ7f7F6JDW7+3/I1BDK3jeZeFIByeEmXuyvrwWKsWXBgX
-# n4K4FbkU7SoXofw2WyhOSoQmyxuCym+AWxtr+eEcZLOPvT54Yh7JxByAJlMN2cx3
-# aB2p3ThqkqW+FoSH+jM9YXLCE/Jo+uSHauOWbJRDKVg0rotmd6jXypjr7qPwmefU
-# oAzS051fMYCxOLSuALLaaj6mZjOW7X8YRzYuN2VDy4pgaWBXS/RpKvzOkEoPZ0Ie
-# wvrm5gXkDf9JJiY0xscKP1I5CfRNUrOBxfLlqn7fzJZqS5oHbwlpqGnwajm1zfMV
-# SgBYWkbzxjtK6N+pp0gGUvjN8TMWw1WlAmm0lS5aV0AXe258ET8gVrI+KlzOeVni
-# Eb9+QlmngEyG5Q8dm9lXQo64pZGSr8yIzN8qYp+J8C7Xml2Or7q2eAMLvez4JeZ5
-# m30kisssyUWrnoVa7CCcQ+h0yz4pZSkyK7AMfFhE5iY2RTUcmFRW/Em00z8zSTcj
-# 7PMWRoO3KLRqqlq+7Sn3cR6kWehGMdYtll3di8+iipD168oR4Z1QAp8gr7920yrX
-# mp/KEkXqty9e3lG7itMDj+KzQYS8qqJTLzGJ7oTJMoev8YeFjCoJ2P9ssVBCNiL5
-# V86gGcGnrA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
+# NDFaMC8GCSqGSIb3DQEJBDEiBCBP162wPidjQOwRhocRQ0WGfBEuEH7wkRyZsQnq
+# fAz4pzANBgkqhkiG9w0BAQEFAASCAgCCc0puyh7cM7nnhATSWvxRxZzCDqFuPb7Q
+# PcW67+NZAZN+kpHa4CgR3uIASzlMHbRosOIO8s0er/SMSAMpwFbhW1MuyMiRp2MX
+# yTOWq2ZI2NA33On8Secf+z6SG+RYW5pIu7uqpY9B44qrEqdXSdHvRN2YEQpjmzDj
+# jbZrDblOXW1OYYCQnFYBOBbAzTYl3xlS3zcCQcV14YTI4USVKe5x2WNglCciLy93
+# tQZuHUFEMZ5FwO5wlvhIyB2htSok/cLNmDhbheE7SpkteKcZ8QHdfMdccOCnWnzP
+# r1uT8Fmpk+xLCSDZBYBh9DNuul4LXrDd/FaWivR1KCjF9bwAfIjrHqO2ct5XKe1o
+# 7osEG+vCWJHrP3gibKxa3qfDU2TDhO61YPBuVgbYwgxjyUUeGCQn6ZHqhJ73oeYA
+# bQrZsToGmA+1VvRkH48WSX7f0A3TLSw+tmFHXKEtsG3lSS/hci8zozKwGmjVwzVr
+# 42rrs0WbHM67b5IA/Psxpcz/qWsIlxrkHaoZhwILb5giTXnDYNJArS4+1VdY2f5p
+# 3EsrSHyoTxvHwDL6z8byPpDNxurnRgZAd12dmbXGpdk1yCIRVaR+ZihPeGvcVeDv
+# WNt7KAnoji2XxQw5Vz7lNX0n2L9oguBi66cLwfONQBh0/DlFdp5+MA1i9H9/YuXT
+# KUUGf0UqGA==
 # SIG # End signature block

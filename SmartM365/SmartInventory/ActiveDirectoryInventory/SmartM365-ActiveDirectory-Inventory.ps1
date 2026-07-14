@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.28
+1.30
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
@@ -494,7 +494,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.29"
+$ScriptVersion = "1.30"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -2884,8 +2884,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDb5zEBft8lzpu7
-# QO3H9ww3owwmJSZaKEwfCwcMYyxQg6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDPPaRXJC03acV
+# sBuTcZNbO5IFJhQs9+g9ZWiBDdCZdqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3018,31 +3018,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPW/1WFj5ZrdNBl8DMMoah5rj6bcBojY7YoVP8F6o8G6MA0GCSqG
-# SIb3DQEBAQUABIIBgIFOEFShqN5F8rxVZ9lQx6A5DLSQPchy6EnT/JIEROP0E+HG
-# w8lnl98HEannyVvBmuycI8hmxmjfHifYxhq/XL5fDiDTb5agTJNifqDK4/bq1I9p
-# wEFF0VU1mhLnZHegAIeg00JJYoD/jJk/EQAdEkMj9tInPzl0fEdB/N6fAQuRN0ni
-# +wrD1EDSj3vL5UTAdRf4ttffUJi3gKgFDEogKFV10w9zmF5invJobLXz/KHDt4QW
-# O33UoZ+EWwUb1XuSgp9KUfRbjUVxfxCvw1Z8+oVqhaXgd8NetjjAHk6mZlP3b+LX
-# a2/VcuQnkuiAia4TxQjPByyBNEtexrvaikHPYNOt7frEVKrDzGwkSk0GCm64sdXA
-# 5mHKQeeQJG3KyJpg/wwvnHZVbyM3veN3on+dsCYXvnPg91bdMktkGvVEf/hCXDx/
-# hiE8vCD1rafuEwBrCgFILF3G5498HJd3IUh4vEkpejANBH0YdvIEjQMhGXYuWfjF
-# 2Ff35iT1v5CeQ3H3lqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEsX0WJ8hKuBLFCAvTerRcXCAXL7tJeVJ0+dNmA6u7mqMA0GCSqG
+# SIb3DQEBAQUABIIBgEUc1uJ1yptbnNiweh+/EjTmYxMf22Y16jrO1sL4Ms/1JfpK
+# knkWhIQaf5ZBKQdwQSL433yN/FNdktBl0y1Tt38GfpOD2DM3fsiRnFGej39lSCpe
+# Wu6Ak4vlP+aFic3YzewKmIFulpSvMvCFl1gglTmOux97IC1WSKfY371gqMtuAtl2
+# 38Dyv03IhxS+cw8o65E8Wur2XmFkq4bA7h2po1J0LujDLLlUAKX9mxiSbzF1px6n
+# ph/Dzlj4Yv3PRE2BVrDC8lLJHIq3oZWvSc/r2dejhB/lcC25GI2z7Ofxwutu/QC2
+# PYvqkiHR+2mFdGWqNpjvB/jx09m1JpP3nOUjKmshyFqaUO91WI48pC5aSbPUFZxZ
+# NmdYaDr5V2+vLGlxJc0p6TXBCaeO9Cim5z/AUgGxpkIz8bf0G+lSW2bFf5tNSZX+
+# JfyJdaeBKWuESxSYgK4E3L7wTIOsu04DcfdsooI4KjjO97gx8eJpam1BCUJu/4Wk
+# RiYXVBbRBi/nrwHbfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzBaMC8GCSqGSIb3DQEJBDEiBCDXlPTnwagqTMl/9/NU5HaIYQQTjHp1onNDp5IM
-# MK5wgzANBgkqhkiG9w0BAQEFAASCAgBtFGk2R6lAnHyNjf0B1Nz6odb2e7pu/+1m
-# OW4ywg6Je+rpKDogPwYQILl+JFIeEXhvgqhumwifMqGAoroBMUUbqSva/MM23yCK
-# R5O9cmGBryRSK/kW0ZS9W0YxqtwdoziW8/QxI7WCv/uNfKakCxblyK4Plul9S6zu
-# vs85p/RevaFYzpzgr475/0safN162n6NgdS9rasZTEIpakRkfTom5wc6aoCT0uVE
-# dwBBwDPQODVLzabUpqwFrFcPHMhYBKvJcOHZ58sijxPMQBOZOcEoDZ/6rlRQgcod
-# 4GjJTosVJceAeY/PYXUYNUtUgUKKGYXPORTmlCRqhlMvJVdKf8kxJNCmCRg9PAGU
-# I/2yTs5fmxcpH08wbJaBFiFLCvXlfzrzabe21sYipEqn73fjYZY48q7hmAcam0v0
-# Z+W/Pb1P5QH/6WUvxKzDq8PBSmJfCaSNRhqtlFFwMHPP9zv6IKMdTolmkqDse1l+
-# 9u+IQhmrz+BtHnKP//XnAipL6qKl+0huyVgm6FhyK8aivaXALVTXwPoVlyh98024
-# veZAv64Xt5yYqVUrMcA5nw49K5YQYF1qmYE5VF7rPFDXk1dVQXPBV6NtfDs8xEa5
-# HRMjCj/ESGO6G4C85enhvQC1//zH8jwLxlBmMemUtknOsxu6TFrZqLS7fF/AprOr
-# R8gjlFGfxA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
+# NDFaMC8GCSqGSIb3DQEJBDEiBCDBixGV4eWWZwo6f+UjhOBfPuJ1Z7YUWt5K+P6m
+# orqE9jANBgkqhkiG9w0BAQEFAASCAgAMcRvHQ62X6fcQrxcBWsU1xRXm6YB29trI
+# E6ch6oM+hb8GoSjgfFBtVVJrJt0UVsBhAwM6zaKHTjx2nVee4ggFykphlSv+eFCQ
+# Wkt4t0QtsKm84aLd8eXAK2PEA6Ps7T4G/2GNNdhZjnzPUuN4kQFI46hejazdKAsc
+# NbTSbX7Mt4b7EtgMkTGTWk0YY1Kwu56MFLD3Lr3+RyG5e8JlrdXcByHCJmXHgd35
+# GS75ql6TIlW7ZTHJq7I5kqIOc4Sw3YSMQMBluOxWzidtdZD5jT8wmpbrPyRla0Q4
+# TCUaZAh0bfzZ6MbwyymG2oa1hD0vmndmMo98j12DEk2GNJf3tHDUmMScA2iWcj6Q
+# SkjRpOB4PNX2FHnuAhET6t9rNI4zXxGXO9Z720KDdFlSz75nKSa08W6/6w+B2wg8
+# OENA69AkyN5hn7hDKSnMzZP8BVglNmeKvOvRF87wDfgpj4Qbfk3gyJFcRlwV7MrF
+# kNvc5KbWRVXnkutG2Ci8ZkEVtLtOwIMos76pxeR3o0OdPy1L/OqSGSbdk1ZrcScS
+# 7Z4SxwTL4n4O7+vysCQiadEqrAdR079klnwn1pnTbQOEA7rfxvPNzzm3z92E2DVm
+# g3UKeWnWAfPECv1CsoJmh8apSMUcv6TQGcUMnIxxhKx7v4bm1a08AQ/R89ybDXFN
+# cfTBulu7AA==
 # SIG # End signature block
