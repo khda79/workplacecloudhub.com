@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.19
+  1.22
 .VERSION
-1.20
+1.22
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.21"
+$ScriptVersion = "1.22"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1134,6 +1134,39 @@ function Get-WinUpdateDeviceSummaryRows {
     }
 }
 # ==========================================================
+function Select-WinUpdateCanonicalRows {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
+
+    $groups = @{}
+    $groupOrder = New-Object System.Collections.Generic.List[string]
+    $rowIndex = 0
+    foreach ($row in $Rows) {
+        $rowIndex++
+        $policyId = [string](Get-WinUpdateRowValue -Row $row -Name 'PolicyId')
+        $policyName = [string](Get-WinUpdateRowValue -Row $row -Name 'PolicyName')
+        $deviceId = [string](Get-WinUpdateRowValue -Row $row -Name 'DeviceId')
+        $deviceName = [string](Get-WinUpdateRowValue -Row $row -Name 'DeviceName')
+        $normalizedName = Normalize-DeviceName -DeviceName $deviceName
+
+        $policyKey = if (-not [string]::IsNullOrWhiteSpace($policyId)) { "id:$($policyId.ToLowerInvariant())" } elseif (-not [string]::IsNullOrWhiteSpace($policyName)) { "name:$($policyName.Trim().ToLowerInvariant())" } else { 'none' }
+        $deviceKey = if (-not [string]::IsNullOrWhiteSpace($deviceId)) { "id:$($deviceId.ToLowerInvariant())" } elseif ($normalizedName) { "name:$normalizedName" } else { "row:$rowIndex" }
+        $key = "policy:$policyKey|device:$deviceKey"
+
+        if (-not $groups.ContainsKey($key)) {
+            $groups[$key] = New-Object System.Collections.Generic.List[object]
+            $groupOrder.Add($key) | Out-Null
+        }
+        $groups[$key].Add([pscustomobject]@{ Row = $row; Index = $rowIndex }) | Out-Null
+    }
+
+    foreach ($key in $groupOrder) {
+        $selected = @($groups[$key] | Sort-Object `
+            @{Expression={ Get-WinUpdateOperationalRank -State (Get-WinUpdateOperationalState -Row $_.Row) };Ascending=$true}, `
+            @{Expression={ Get-WinUpdatePriorityRank -Value (Get-WinUpdateRowValue -Row $_.Row -Name 'ActionPriority') };Ascending=$true}, `
+            @{Expression={ $_.Index };Ascending=$true} | Select-Object -First 1)[0]
+        $selected.Row
+    }
+}
 # Main
 # ==========================================================
 $ErrorActionPreference  = "Stop"
@@ -1438,10 +1471,15 @@ try {
 
         $computedRows.Add([pscustomobject]$o) | Out-Null
     }
-    $enrichedRows = $computedRows
+    $computedRowCount = $computedRows.Count
+    $enrichedRows = @(Select-WinUpdateCanonicalRows -Rows @($computedRows))
+    $duplicateRowsRemoved = $computedRowCount - $enrichedRows.Count
+    if ($duplicateRowsRemoved -gt 0) {
+        Write-Log ("Removed {0} duplicate policy/device row(s) using operational severity and action priority; canonical rows: {1}." -f $duplicateRowsRemoved, $enrichedRows.Count) "WARNING" "DATA"
+    }
 
     $count = $enrichedRows.Count
-    Write-Log "Total consolidated rows (enriched + computed): $count" "INFO" "DATA"
+    Write-Log "Total consolidated canonical rows (enriched + computed): $count" "INFO" "DATA"
 
     # ----------------------------------------------------------
     # CSV export - DATA-ALL (atomic), DATA-LAST (atomic), Archive
@@ -1658,8 +1696,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOnpJOidYD8xX5
-# s0SHZnYxkFWXyAOvw/pqzGnhbnIxJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBN8C6RoUX8kAFg
+# lC3huZT8GwR4sFgch4VRyjMAE9KKIKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1792,31 +1830,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMAzkL/iMj3cHnzCBZ2YODaG+F0jgaAiNQWXjZhgclY4MA0GCSqG
-# SIb3DQEBAQUABIIBgF5VWAZuVZPzrZaxNIClDTvO6ltq4xKHecarkI/VipF2gdev
-# HZupZFW40NlSxE+V/s8VqgYbIQjjXhW9rZMXk8Hu1PJxADpdUgESEdEqiD+2iLWb
-# 0iLOBgyfKyURTivs3gH87gLl6EAackSrPWSgFaEQ2tlGQ5UmoHon5X9713m8RZM4
-# SplVKEz2qykJ2tH+SQIsNba9a1Qoqd02K+GfzCEsMn9mf8Hf+YT4qbD2JD0JEzWQ
-# c0PmJnQzdCSKXiDG1Pd3mXOICTMirIKIbBcN5kPV8UDyPJAsUO5nkIpfaaZIlK8t
-# mfkoypIrNLtuoCTEBh1OLtannLD8ZSiXqvQ1j/D5ZVp2a68YGiaVbJUnNoDCNrKy
-# 4BLapAE7qCqDG93RE86bvbNgSlIXzNjwWf7P5MxiP1QGS2wb9vI28YLq2lzXyhUB
-# Qy0A8RoniwhZNeRJwXEz7Y+Z8p7mKfk8QUt2YtgbdWSB4avuiF4M+tO1fY4N8UrN
-# IIIcr5t5sb91R5gw3KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK7E2eLJ8I2cyoJZ10fGus4/sbb5kxpP7oHx8UWeKRmOMA0GCSqG
+# SIb3DQEBAQUABIIBgJ6OXGk8nCoDffBgjTG0jehHJBlTLHo8GQ/8QhB+LHsKSNyI
+# xuwCCiLqz+8pZ1IcsVxEm5h+u8d6Jpx8x8OXFEvbPZdHDzxG8/8Pf5q7nQMHtd2k
+# fRJ+PwrH5kTNH0r95ITSyvdti5pJ4SAcjAamyNztEA/jDxf3BahE6OXNYzgfxtNo
+# jRV75Ns5XwHPQd/yTpxwV4LyvnOupDcw/vgeUZk09se+6lRkAG8rKvoLGNNaLi5b
+# VORv5TRpCWKSMGlnnh+K8PFGhPm5tCa9zDOhI68f7EmBQXlimCgPzMpQwOSE18dw
+# FhBQ2AvRgn+BcN7z/QGWs6hapK9PJqD0CXGYi91vYGy2GNvbtopepm6vjAeVdBO+
+# TS7SleuYAwpg13Unqy06U4MFxUC/bat4aY/rpKftpG/+hAtN8jmR6g4DcaBOcITC
+# SwXzGVtUjHvTHxXKrV//Py+c0KBSIZAQkuVYYVe4Hd0uWB7huHop5EDzUx21iIuh
+# UqF/wkyLNkScCq5K96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzZaMC8GCSqGSIb3DQEJBDEiBCB/skrKsuoSRW9Zo7IqXdA5Z1h4TM0oY2ru6Gp3
-# rVe8xTANBgkqhkiG9w0BAQEFAASCAgA+XcvEWIEkoH7SY0lYmbgMUFB8XJBiikmI
-# 6+ycmUxnBQ9tNIJixPAkdoQ7favQxEYWol21Pdob28iPxV7bfOoujavP6xKf0aWr
-# p1IKLhZkVRi2P7jaZehNcyHD6kPjDuNYxgKiYX/bEjsfxG+z7LyB4WlJhhJqEMnb
-# 4MvdSq6OLCLMww33nsRvGjtxxWaCVjW7NQ2eVz2e/as3MPRH/lh/2ClYpRJ85+PU
-# GfiXoIDSruX/9XfBB+kU5+K/mKUX5bJSqPQi5BWLcpW8FOU7vijYx0UAzE7S8fzk
-# yRXPankGZGJuDmOzNb6RuTaTMOQQ3azg3HPZfHAcN0w8aDhlaRtTWi9/EiK26ylz
-# FpvEchOpQ/JdWYwHhAoQoQGK+8tE6cUx/sHrUQ5rSQAWUtbwo0wTKpkAoV1/pl1p
-# 6wyrLcsMYdhKHdblA5oygbKhaaflklZmG8va9bgLGrAm2+HXSVdQSp86TQPrLqPO
-# +NrNGQJXTXqDcW+Mr7KVRSI2BUkm2n2fOtNYHaOqrVYY+aotKCUJNF5Tq0wfh52d
-# IHRqOgDjZyKDWpa/ay+joPVBqEKYla7D8F8p72V9iN/4+Qv7if+/dzKDBQFYrNTy
-# 0bL8MkNcaoK+VKf1J797Ymqw7hyUHPEkEfX+Lv0515QnWt1Z1O7yBW+jaG9Oq6cz
-# StQAiHddBQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
+# NDZaMC8GCSqGSIb3DQEJBDEiBCDlZyZnVZlPdfFMtHAgN5j0Ul7kIo2SrXaOBxBr
+# 5XPizTANBgkqhkiG9w0BAQEFAASCAgC9TB4WZTQUM4BcVbG89/5xpgEZmmJ+Jt5E
+# +MkvIuuAy5Lt/JXeJpiPwVYLOIIvwXMwqyLMm7Fx07s2aeiZLS4NYCD1eNFnvhgU
+# hkkIsQAEpXlmYK8Iomrv1eYOb+hBj++kO3UsyztdokmWAknq9nvBhTtFHwYhVdam
+# aqFROlIhwN8u2gH2hLUrocfqVlUkGC2Z9O1/PIKlNQuxWU8iRff/r7zPfRXvTerT
+# cPP1r6R4Pe6BUrXejhfAH7EsPIpEpygGLny4+jcUULNyX7xXM3JHCmmnJB4Femxd
+# xqXCrfjUVRqj1UDyoZFtpbXKdpuQTh8yRAqnzhXvNWZNZb8CpUt8fgzXZ8sRBQ9c
+# cdjLOMPvwaHwLVBoH+uheSBmmUTYATfqZx29I0pqeF0CqwDTQqE/K58x/jQG3SZP
+# xsYEn4hWv2Fo9lQFb4BoMZ3g57upomOoC/3WuBJrFm7sCJ3C6VpS5C28TWTmtCE4
+# tF3S6ST3n9zr5A5zDxaavRgqKw7Wxmi4xvng/OmWZKC+40rOfOCh2pHgHJjYiG3/
+# dD3z35m8LiszA75WSLJm4vi3wct0ns1+VQ7Z/pdfPs2Mi8eiGsbaUOlYVqpvGEnm
+# bopXS9eb2sRIw5ZURAPGct2gUPPAdT4kgaKfOH/expF6fGcqpfth4HkpPgnel64g
+# QGzFD/TAgg==
 # SIG # End signature block
