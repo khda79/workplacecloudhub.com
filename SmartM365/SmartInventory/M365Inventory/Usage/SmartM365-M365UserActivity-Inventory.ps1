@@ -49,7 +49,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -398,6 +398,8 @@ $global:SharePointSitePath = Get-SmartM365ConfigValue -Name 'SharePointSitePath'
 $global:SharePointLibraryDisplayName = Get-SmartM365ConfigValue -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-SmartM365ConfigValue -Name 'SharePointTargetFolderPath' -DefaultValue ''
 
+$global:SmartM365ExecutionStartTime = Get-Date
+$global:SmartM365ExecutionSummaryWritten = $false
 Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $runOutputRoot -LatestOutputRoot $LatestCsvFolderPath -LogPath $logPath
 $global:LogTextFile = $logPath
 $global:logTextFile = $logPath

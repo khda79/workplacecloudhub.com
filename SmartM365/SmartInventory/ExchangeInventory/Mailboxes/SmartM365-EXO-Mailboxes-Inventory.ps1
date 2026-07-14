@@ -56,6 +56,8 @@ param(
     [switch]$IncludeLastUserActionTime = $false,
     # Include live mailbox statistics collection via Get-EXOMailboxStatistics (default: use Stats snapshot)
     [switch]$IncludeStats,
+    # Explicit override for very large live-statistics runs.
+    [switch]$ForceLiveStats,
     # Exclude live mailbox statistics collection (use Stats snapshot CSV instead) [DEPRECATED: kept for backward compatibility]
     [switch]$ExcludeStats,
     # Use Graph interactive auth instead of app-only certificate auth
@@ -395,7 +397,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -1462,6 +1464,10 @@ return @{
     $StatsSnapshotPath = $StatsSnapshotCsvPath
 
     $UseLiveStats = ($IncludeStats -and (-not $ExcludeStats) -and (-not $PermissionsOnly))
+
+    if ($UseLiveStats -and $mailboxes.Count -gt 5000 -and -not $ForceLiveStats) {
+        throw ("Live mailbox statistics are blocked for {0} mailboxes. Use the snapshot mode or rerun with -ForceLiveStats to acknowledge the expected runtime and throttling risk." -f $mailboxes.Count)
+    }
 
     # Compute stats source label (written to every row in the Stats CSV, only when -IncludeStats)
     $statsSourceLabel = if ($UseLiveStats) { "Live:" + (Get-Date -Format "yyyy-MM-dd HH:mm:ss") } else { "" }

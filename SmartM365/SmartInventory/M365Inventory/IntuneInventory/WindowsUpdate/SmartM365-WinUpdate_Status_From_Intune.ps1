@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1370,6 +1370,24 @@ try {
     #   RiskBucket, BlockingReason, DaysSinceLastStatus,
     #   ActionPriority, ActionCode, ActionDescription, ActionOwner
     # ----------------------------------------------------------
+    $effectiveLastStatusDateColumn = $LastStatusDateColumn
+    if ($enrichedRows.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($effectiveLastStatusDateColumn)) {
+        $availableHeaders = @($enrichedRows[0].PSObject.Properties.Name)
+        if ($availableHeaders -notcontains $effectiveLastStatusDateColumn) {
+            Write-Log "Configured LastStatusDateColumn '$effectiveLastStatusDateColumn' is absent from the Graph report." "WARN" "ENRICH"
+            $effectiveLastStatusDateColumn = @(
+                'LastUpdateStatusTime',
+                'LastUpdateStatusDateTime',
+                'PolicyLastModifiedTime'
+            ) | Where-Object { $availableHeaders -contains $_ } | Select-Object -First 1
+            if ([string]::IsNullOrWhiteSpace($effectiveLastStatusDateColumn)) {
+                Write-Log "No supported last-status date column is available; DaysSinceLastStatus will remain empty by design." "WARN" "ENRICH"
+            }
+            else {
+                Write-Log "DaysSinceLastStatus will use detected column '$effectiveLastStatusDateColumn'." "INFO" "ENRICH"
+            }
+        }
+    }
     Write-Log "Computing derived columns (RiskBucket, BlockingReason, DaysSinceLastStatus, Action*)..." "INFO" "ENRICH"
 
     $computedRows = New-Object System.Collections.Generic.List[object]
@@ -1386,8 +1404,8 @@ try {
         $o["BlockingReason"] = $blockingReason
 
         $daysSince = ""
-        if (-not [string]::IsNullOrWhiteSpace($LastStatusDateColumn)) {
-            $lastStatusRaw = "$($row.$LastStatusDateColumn)"
+        if (-not [string]::IsNullOrWhiteSpace($effectiveLastStatusDateColumn)) {
+            $lastStatusRaw = "$($row.$effectiveLastStatusDateColumn)"
             if (-not [string]::IsNullOrWhiteSpace($lastStatusRaw)) {
                 $parsedDate = [datetime]::MinValue
                 if ([datetime]::TryParse($lastStatusRaw, [ref]$parsedDate) -and $parsedDate -ne [datetime]::MinValue) {
