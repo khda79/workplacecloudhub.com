@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.32
+0.1.33
 #>
 param(
     [switch]$ValidateOnly
@@ -826,7 +826,7 @@ $script:ToolkitDefaultEnvironment = @{
     W11UT_GLOBAL_CONCURRENCY_LIMIT = '15'
     W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = '0'
     W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS = '0'
-    W11UT_DELAY_BETWEEN_CYCLES_MINUTES = '5'
+    W11UT_DELAY_BETWEEN_CYCLES_MINUTES = '10'
     W11UT_PSEXEC_TIMEOUT_MINUTES = '360'
     W11UT_GUI_DRY_RUN = '0'
     W11UT_GUI_KEEP_CENTRAL_LOG_HISTORY = '0'
@@ -1557,7 +1557,7 @@ function Register-NumericSteppers {
     Register-NumericStepper -TextBoxName 'SetupSubnetLeaseText' -DownButtonName 'SetupSubnetLeaseDownButton' -UpButtonName 'SetupSubnetLeaseUpButton' -Default 90 -Minimum 1 -Step 5
     Register-NumericStepper -TextBoxName 'ThrottleText' -DownButtonName 'ThrottleDownButton' -UpButtonName 'ThrottleUpButton' -Default 10 -Minimum 1
     Register-NumericStepper -TextBoxName 'ComputerDelayText' -DownButtonName 'ComputerDelayDownButton' -UpButtonName 'ComputerDelayUpButton' -Default 0 -Minimum 0 -Step 5
-    Register-NumericStepper -TextBoxName 'CycleDelayText' -DownButtonName 'CycleDelayDownButton' -UpButtonName 'CycleDelayUpButton' -Default 5 -Minimum 0
+    Register-NumericStepper -TextBoxName 'CycleDelayText' -DownButtonName 'CycleDelayDownButton' -UpButtonName 'CycleDelayUpButton' -Default 10 -Minimum 0
     Register-NumericStepper -TextBoxName 'MaxCyclesText' -DownButtonName 'MaxCyclesDownButton' -UpButtonName 'MaxCyclesUpButton' -Default 0 -Minimum 0
     Register-NumericStepper -TextBoxName 'PsExecTimeoutText' -DownButtonName 'PsExecTimeoutDownButton' -UpButtonName 'PsExecTimeoutUpButton' -Default 360 -Minimum 1 -Step 5
     Register-NumericStepper -TextBoxName 'GlobalLimitOptionText' -DownButtonName 'GlobalLimitOptionDownButton' -UpButtonName 'GlobalLimitOptionUpButton' -Default 15 -Minimum 1
@@ -1788,7 +1788,7 @@ function Get-ToolkitOptionEnvironment {
         W11UT_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES = Get-IntText -TextBox $controls.GlobalLeaseText -Default 0 -Minimum 0
         W11UT_THROTTLE                                 = Get-IntText -TextBox $controls.ThrottleText -Default 10 -Minimum 1
         W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS          = Get-IntText -TextBox $controls.ComputerDelayText -Default 0 -Minimum 0
-        W11UT_DELAY_BETWEEN_CYCLES_MINUTES             = Get-IntText -TextBox $controls.CycleDelayText -Default 5 -Minimum 0
+        W11UT_DELAY_BETWEEN_CYCLES_MINUTES             = Get-IntText -TextBox $controls.CycleDelayText -Default 10 -Minimum 0
         W11UT_PSEXEC_TIMEOUT_MINUTES                   = Get-IntText -TextBox $controls.PsExecTimeoutText -Default 360 -Minimum 1
         W11UT_SETUP_EXECUTION_MODE                     = [string]$controls.SetupModeCombo.Text
         W11UT_SETUP_LANGUAGE                           = [string]$controls.SetupLanguageCombo.Text
@@ -2122,8 +2122,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDGo3YA5BBvSjF
-# c7UB4oMxoWempe8KdHy5VuMzCFssVaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4as88VQsSfyd3
+# 9/ZpdqZcoMm+r7sETMou5q+qFj187KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2256,31 +2256,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINChWNOz40q/IIge3EpjgvjG2eyUSw4eiW6fbM8VaMz9MA0GCSqG
-# SIb3DQEBAQUABIIBgEg1j0UmI17N6j66nM+wUKpPHU5wNpn8LqSAJVeyl7/iabS0
-# HzcBmxaAAPNZCTy6AAf6dqbLoZn2qPbUJNxczcpNxtv6jf0fuhSLiZMBp0LvT2ZQ
-# uR2ovFi6EB+Ifq23NkNePFV+Ty2hFZY6NxUkMHiKlYL3fNz+8x16WvNLMLu8Rj60
-# bPMgjDTlNvM1ZbiSsm3qHC88tJQ0LFVRgHyL+gsbLt0+zUGscxWQHAlUFCsHxTo7
-# /dbh7BCI1Ef6LaHfGqFN0uXVYnDFP8YCQJ0eRqo4roqYJgRx4zUuHmxqRnJAe/QY
-# IRWI+tpImo44iT5pxE9al4B+xBoSlajaP7n5tbKUQKlV7fkyi7jpd3a95pMhK5ku
-# bnw/8Nzp6d4JxTe6NZPEPK+BpKMW5kq2DQrG6ujxwSxEcM2Zt7LvTR5M5VuPW4FS
-# AnEu3KlChv5lh+vVvZ6A3zGcYln1tYf7e4cHCtuYxc5RxJs2OlVv3IYCNMy1cn0L
-# 7BoSHBqPq5mLS6K306GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOuzcYryrEIELQuu87YQWsuMT+6fA/pCIZBk/Da9189lMA0GCSqG
+# SIb3DQEBAQUABIIBgC942WFzqM7kNx8MJzb8eV5/A7uVWGYsrKp60VnGonkl8rKd
+# I4tT0EjtsJLFveUMQbCKGq7uYplsT/eL15h2aEdLxtrm38sTAey+itRYfDojK6nH
+# 1q2ruN+V56I19lniaHnL1yitp8Yv6jV94vJFnuaEIE+ZOy8Ww6+GgZfJ0Psa509m
+# g4qXZQDrqqjZaiihqKYjt18K3EhmFPjSSnSzruRAZeiwSNAus2Z54R0ZtX+nGHv3
+# GqMog1NqUscvTboLidSREWginLSdKL1dWrFZEkgHLzhNdMiOnuJdCz45e0JDce9t
+# 19vB7U1v2jrb9IGdmTJ/92ySTcQWIJVl3Yp33wHNDpuTLgeHHgwQ2XypHZQOMCit
+# QPWCMhf5T+TR7l2imSz2nrFzNlKToVILeal1TrYFM8UBS9YHw6RkKkumvj8hf0qo
+# EPq8ZE5BXqd1tOQsb2wF5usYuH+hnEQhWncrLugfPlOy1NY1e/fAnEtOWohZWNjo
+# 2osEz0V7TcquLljWHaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# NDNaMC8GCSqGSIb3DQEJBDEiBCCZtXUjlwMwxi8tir+YNnm4XqaLRJAYR1/Wd95V
-# O5jVcDANBgkqhkiG9w0BAQEFAASCAgC1ZIKSTKj+R/aLkftEdwcx1QvJ3sULB+Ed
-# uM7nZrV/FMESi+YTO2ihCPVy1dPqi/g8zdM+BNI6uCWnWHl39+t5zdXoeoTeBSix
-# we1IK1hwf/acryYCjbeIOgujb2IoGteYRjfn+cYPLxh7OlUvZSe/hrvbmJv5ATh5
-# Gwnfy/BS5inNlR+KNq5ZyF1lvOmPCL/5AnF8MdzXLsG2Fi1tj+413SySupn9yk1Y
-# wQBmcvJrYRNjmSIeK92urTGYxl3wFvi9LESyV7yuqiA2yNrqVjeb3VIM1TqhwKtb
-# NCJ2Fs6KFGICqh5bWwdj+bICinIi54mIlj2SzTA0birNenW7ROkRL4S/ZaDBUTgh
-# prRvvVtc6aL/i503kq9MoRDcSuWwmjDrZYUzRau/fYFV0dHzEk0A0Gw4yD8uWNKG
-# 2rTV50WYCandHoMcYpqsqg4Zy+8g5Yn+oq29Gpvg0LIpuHnaGNsxCFs9j4w6Buhr
-# KmnUzZMP9Of1kKy+gweIjVPZStI3vAp8nzY9S772wRWVbmWXxg4rzPzkPmCzSFqB
-# M0tR+C+v9EAFCzClHU5W2fmLNzCA09cOixaL0g8mKkbl9CfSwSSL/BhEI4oHdscg
-# R1WKL2QxjMCB9H/9yIQMPDjiHl0M87DBgXsOA3Nb/LlZ7A5KJ+yXaHpY3xaLm8ai
-# PE5qIqcBvg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxODA5
+# NDdaMC8GCSqGSIb3DQEJBDEiBCDimPXQBOG9sCRUItTK4HHM60W0TOFhVEBf0zlv
+# md4wYTANBgkqhkiG9w0BAQEFAASCAgCOBWlsPuX+Id88JYpzy19wnTRt3ysjYy9G
+# +UpJBrsUEZCmXk68xYleNiSaAoHmmqhG/5SNBxm7gn9w9htQae88CLbk6T5yodg7
+# d4kIAb8SPjqf0lXHcZVTJmmJwaYrgoS2LYbrqAoSzsogvI85RaHJwI6iHqUx8w+I
+# +YQpxWM7UzLAOLEtzX53idfaL8CLy4gWhK0Me3bGo9YEfLPRnnXKRkt75/9/mqn+
+# t5jjQ5DmfCJVFbJ2tRiSsgtWmhYzORC3IA77S1MplHcnHpgOan/868aMsktAfexP
+# Co9aItmKUtLzwqHnSepo7WtaZNMEMWWHZcRYf4t/rVWfCehycFIeVfulR6RwlIkc
+# J8FnHm50TIqMbEy38QA3nsD7a2NZRqdtJOpiiiZS/EyAj+js5yJI9R+zEvcgZSEJ
+# RWO6SmdGwYArvAaCrwrXiOU3R0WgeWuuE0Vanh88oWLDpU479h5YMHgMbnmfXN4V
+# WX4nEHacnwUT547c4uhdSYKwRpemlkGAOyhl80cPUQAfMNeW9czByGwAUR22Gd2V
+# Cqdj9jb8VGOjWav/i1UACwuTJUq1Hnt8NHo2avHmgFxNG7JcJbduNtke0YvYerb8
+# zWUuALHRgKFvowsM6vzmejvAlAaNPo+pPyWx1KyJtmIUnubC2sz0tb7/iI2GKFM5
+# 8zaNJ8suwA==
 # SIG # End signature block

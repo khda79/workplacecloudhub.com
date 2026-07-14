@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.54
+    0.1.55
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -94,7 +94,7 @@ param(
     [ValidateRange(0, 1440)][int]$GlobalConcurrencyLeaseTimeoutMinutes = 0,
     [ValidateRange(0, 3600)][int]$DelayBetweenComputersSeconds = 0,
     [ValidateRange(1, 60)][int]$JobPollSeconds = 2,
-    [ValidateRange(0, 1440)][int]$DelayBetweenCyclesMinutes = 5,
+    [ValidateRange(0, 1440)][int]$DelayBetweenCyclesMinutes = 10,
     [ValidateRange(0, 1000)][int]$MaxCycles = 0,
     [ValidateRange(0, 1440)][int]$PsExecTimeoutMinutes = 360,
 
@@ -109,7 +109,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.54'
+$script:LauncherVersion = '0.1.55'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -601,17 +601,20 @@ function New-TechnicianRunGuardSkippedResult {
     $expiresUtc = [datetime]::MinValue
     if ($HistoryEntry.PSObject.Properties['ExpiresUtc']) { [void](ConvertTo-TechnicianRunGuardUtcDateTime -Value $HistoryEntry.ExpiresUtc -Result ([ref]$expiresUtc)) }
     $expiresText = if ($expiresUtc -gt [datetime]::MinValue) { $expiresUtc.ToUniversalTime().ToString('o') } else { [string]$HistoryEntry.ExpiresUtc }
+    $historyState = if ($HistoryEntry.PSObject.Properties['State']) { [string]$HistoryEntry.State } else { '' }
+    $historyJobId = if ($HistoryEntry.PSObject.Properties['JobId']) { [string]$HistoryEntry.JobId } else { '' }
     $lastStatus = @([string]$HistoryEntry.RemoteStatus, [string]$HistoryEntry.LauncherStatus) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+    $launcherStatus = if ($historyState -ne 'Result' -and [string]::IsNullOrWhiteSpace($lastStatus)) { 'SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT' } else { 'SKIPPED_BY_TECH_RUN_GUARD' }
 
     return [pscustomobject]@{
         Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         ComputerName = $ComputerName
         CycleNumber = $CycleNumber
-        LauncherStatus = 'SKIPPED_BY_TECH_RUN_GUARD'
+        LauncherStatus = $launcherStatus
         RemoteStatus = ''
         RemoteNextAction = 'WAIT_RUN_GUARD_EXPIRY'
         ExitCode = 0
-        Detail = ("Technician run guard history skipped launch. FQDN={0}; LastStartedUtc={1}; AgeHours={2:N1}; GuardHours={3}; ExpiresUtc={4}; LastStatus={5}" -f $HistoryEntry.ComputerFqdn,$startedText,$ageHours,$RunGuardHours,$expiresText,$lastStatus)
+        Detail = ("Technician run guard history skipped launch. FQDN={0}; LastStartedUtc={1}; AgeHours={2:N1}; GuardHours={3}; ExpiresUtc={4}; HistoryState={5}; JobId={6}; LastStatus={7}" -f $HistoryEntry.ComputerFqdn,$startedText,$ageHours,$RunGuardHours,$expiresText,$historyState,$historyJobId,$lastStatus)
         SetupCacheAction = ''
         DiskCleanupAction = ''
         DiskCleanupFreedGB = ''
@@ -2153,7 +2156,7 @@ function New-Windows11UpgradeCycleHtmlReport {
     $rows = @(Get-Windows11ReportRows -Items @($Summary | ForEach-Object { $_ }))
     $latestRows = @(Get-Windows11LatestRowsByComputer -Rows $rows)
 
-    $separatedDetailStatuses = @('ADMIN_SHARE_UNREACHABLE', 'RUN_GUARD_ACTIVE', 'SKIPPED_BY_TECH_RUN_GUARD')
+    $separatedDetailStatuses = @('ADMIN_SHARE_UNREACHABLE', 'RUN_GUARD_ACTIVE', 'SKIPPED_BY_TECH_RUN_GUARD', 'SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT')
     $mainRows = @($rows | Where-Object { $separatedDetailStatuses -notcontains (Get-Windows11HtmlEffectiveStatus -Row $_) })
     $separatedDetailRows = @($rows | Where-Object { $separatedDetailStatuses -contains (Get-Windows11HtmlEffectiveStatus -Row $_) })
 
@@ -2289,7 +2292,7 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add("</div>")
     [void]$html.Add("<div class='card'><h2>Run guard / admin share details</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $separatedDetailRows -Columns @($htmlReportColumns)))
-    [void]$html.Add("<div class='footer'>Rows excluded from Computer details: ADMIN_SHARE_UNREACHABLE, RUN_GUARD_ACTIVE, and SKIPPED_BY_TECH_RUN_GUARD.</div>")
+    [void]$html.Add("<div class='footer'>Rows excluded from Computer details: ADMIN_SHARE_UNREACHABLE, RUN_GUARD_ACTIVE, SKIPPED_BY_TECH_RUN_GUARD, and SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT.</div>")
     [void]$html.Add("</div>")
     [void]$html.Add("<div class='card'><h2>LOT/run options</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $optionRows -Columns @("Category", "Option", "Value")))
@@ -2553,7 +2556,7 @@ do {
                     $skipResult = Add-AdInventoryFieldsToResult -Result $skipResult -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
                     $skipResult = Add-IntuneInventoryFieldsToResult -Result $skipResult -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv
                     [void]$results.Add($skipResult)
-                    Write-Host ("  [SKIPPED_BY_TECH_RUN_GUARD] {0}: {1}" -f $computer,$skipResult.Detail) -ForegroundColor DarkYellow
+                    Write-Host ("  [{0}] {1}: {2}" -f $skipResult.LauncherStatus,$computer,$skipResult.Detail) -ForegroundColor DarkYellow
                     continue
                 }
             }
@@ -2866,8 +2869,8 @@ if ($null -ne $script:globalGateMutex) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBi7sPVXDCoo2EF
-# sNeX3ambRmFONHQNxUfXbqWj6Zfi46CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCOHjimPv7ov1O9
+# MqkeN1dYbeJTWVY9eurgHiJoNW48dKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3000,31 +3003,31 @@ if ($null -ne $script:globalGateMutex) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINhgAtdpvY2V4FfGo12AYoAcZ/n5Y97LBBoDl2MRxN7AMA0GCSqG
-# SIb3DQEBAQUABIIBgAQGwF9Qfe6yvaFi367qi3Ud/7GYV9JFu47OnAeFmMft1pYG
-# 55p8+ZmTLXRP26oB/Kw1JMnCzIBqx2VvIrAsJtDClpMcHGTeP/MclDyAtmjK9Lh7
-# GxNMExhEX6s/l0mjKoYtIrjfRocv6iRi4rnjcR3/ucOfu4HV2O7/kmQ8oQRiln+/
-# TJLIA1+f5OZVQTMBdQ0C1NpZPXc3Z/oNwvDswsm1qeESEbAqrS/li4gHNo/dBOCR
-# hcwXvRMN26CUsqwq1IsNPtT5t20W8HBJ/ZB2iOMpcHpPFXfIKH3ETauPkbtvV9ci
-# SZmXdLZJMx22vsvgI4wXUaOzBkgaMohJl2uhYsaArCw9nKvnzcmhYE2DyXDS8yWS
-# nZFEXCqU2eNw3A9hCkF66rc2ArEptKFdNfLKg0YVSEyljvF1Islt+Z29VtK+tCnu
-# ldFG7oMMpr+/7T2FkwxlfTc3URWHF/hAjLhwCN3xeOQ+O/nVrxNnpgYhXtnDb+Tj
-# v4vKjhaTONmfP+Jmx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJKwf8lVv37ZBqlCyXLcd3amv51Dw7aq/Hh+2kbcliwXMA0GCSqG
+# SIb3DQEBAQUABIIBgKzKjSg4QsMRD4pB+13U/ZMdVIadQHSi5LSYj5uinVzyjlA/
+# Bpq5/YyNZvQMj2LdBt3/v5W024sEl0tgC8g6G0N5ZuhOZqlPN++XFKfuCJtYTKIP
+# EDXKjPv3eTKwG1wNAW1p3zHJi7ugdE0aWgzS9/EkWCcOmb3X7tJCXZTV5hgmt9F2
+# mY0vfcZBOnl/QFVaInZo9kgs9NY/EE5MtUPR/OlKhT9hJLYcgprlG1Nt9BKE2GoH
+# LJZ592bc5ecCOoUQ0D3KxN2cveE5Zu+TFilRxY+aJxXjlPQzVpWJ/CW15Bb81kMW
+# FhLTT55+vfEaDgjPWCNqr6H9rHOW+EqqBu6lkOFhWnuuLPmpgxhVB2a4QzHrQHNA
+# b7oIh1QbLK9RDSeTuiOo226cL5bD9rq1vVU/V4vUb1vn81BpGf3V3xK4qRbdgqxa
+# jGWNrK9ZrHkCnYamAz8XW6FI/I0e9e0QbiYG11ysFdfYtZv5abgxtlGOMPf9FrT0
+# T3xSPDIyO0SmCuKK96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODU4
-# MTFaMC8GCSqGSIb3DQEJBDEiBCBkazixNIMQ38TCaureBYHz8IOBFt71Auq1iVd1
-# nl14wTANBgkqhkiG9w0BAQEFAASCAgAa2hKLabbwgLTPRHp3J98F3jNhtVC+jJLa
-# asa5dGHb6Q1F6c3+2ctTuEUXeYDlCOVVag8TSApF2YwIhwD9ETypHQ7AzXTcufq1
-# 6/RPlGAmbhZT9JjaFl1XHVV+8HtBU9bRvzEWO9FImnYFpojo5PDaQq6cpJBhjluA
-# gdjm3+DyD5ZXFdQzFv9ehpsr2YkvW9RFar2IHm9LuH9BYagVZ50VkUu66NIilPJq
-# +RxxIFeJNO/mw7QlPgQVpfDdmeN8nd2Qtc5lBHYW0MaKwAkH4vB30LsjPv8gXJ3a
-# WApD9RpWQ5WfA8+NMYs158UcrFNoKdTKz0WJzft2tI/YG1SX8YY8eRPSEdbRwQ/z
-# zaqQmoK8KH7elHGVS2ppNnHrolmeSCFjBJ3I1Fa3l47KSOlh6p6KbBtIIzyjU4ks
-# jN/WVVtfuYLy3u/6/QxRRtjIrPiO27Xz8dHi6SnXFc3Vx+w/wOaNTBhl7rutuHEJ
-# fHJwi+G8GhSA+XCA9vBdbTB9RErr4anytv1TK3aoTy8mv9n16vTXabeUQnxmckMk
-# 3hKCQMA3s6nNHIpG51kBwzqhmpEs3Yf6/+CoISLNTdGIjOJNh1/YT3Emgk5JA8YP
-# fV9CRFHg964J6LA8hkQAUOn0rHmrhHoY3gtZ84VnUUcRuBrqtg56RTleour6cyBE
-# WMyXDHBzvQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxODA5
+# NDdaMC8GCSqGSIb3DQEJBDEiBCBel0w5155tp3LTNYN/LLBtIOiyGmeJ2ZYdzrRm
+# KoPIhTANBgkqhkiG9w0BAQEFAASCAgB8Oq3HRxbNRQrxOGvE9a3yu1dgYTJcwTNr
+# /ewK2bV4t77r6AOcSFRbHTlcPHi02V/XGx3Wh4xCTTXeoWl0G9oUNduIuSNGW246
+# /RHSQWmsOPw3zpS1fdNSuoyaBNejQE5ZMYfGsCWKp0gfe4KCZBE7J7okWdzzA8X4
+# yUxzGX7mjoPK/G0CaLv0P2QTfpS9M4ojEqAIynAOTuOxOImCMM7TR7b7XHx548+f
+# 5tZUNnsYw+IsL12Y7voVY1LXj7vsRMJb5ug4q3pcY1MtODzSSZAx35rG432Dbr+z
+# NgyK0af5cQpz1A5svmIy2d9e6R3gKiLFOgzxPiw7EgFKxfC9rCtowZg2U5KzMzoF
+# 0GO2QeRzV5Wfgw1gooW21FfwxNmYCZAgEbKXVBMnnV9Tlxm4DYjiq+HVdv6CwgHn
+# IHqNi4bE7M5HHWmsmywJhg9xuqdSV3EEa8S2HtrUPST+3pYSRPTmmsiACZSrkhFi
+# nD+usY35615irK6zp6JoM3oBuOHBXwalBVmbGG1mwCAt1Ef+pl61NtF24TWjfpIg
+# Gux0SPY1VEUwUbbAelXBUtMxcquxhyXDBXpFQqMrUT7dMk/1zMRIUWXzyxNUtqhj
+# Acs4fHeNAhcQgFW6DJXLzkHSr437ncBOb4iU0/8vaxCoHkyVXSXRg9IbZu4PaOMH
+# 52zIQXnjXA==
 # SIG # End signature block

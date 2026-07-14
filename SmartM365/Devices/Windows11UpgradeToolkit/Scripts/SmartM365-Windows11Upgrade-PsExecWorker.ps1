@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.25
+0.1.26
 #>
 
 #requires -Version 5.1
@@ -407,7 +407,7 @@ function Get-CentralLogBucket {
     if ($launcherStatus -eq 'PSEXEC_COMMUNICATION_LOST') {
         return 'PsExecCommunicationLost'
     }
-    if ($launcherStatus -eq 'REMOTE_LOG_COLLECTION_FAILED' -or $launcherStatus -eq 'STALE_LASTRUN_IGNORED') {
+    if ($launcherStatus -eq 'REMOTE_LOG_COLLECTION_FAILED' -or $launcherStatus -eq 'REMOTE_RESULT_STALE' -or $launcherStatus -eq 'STALE_LASTRUN_IGNORED') {
         return 'RemoteLogCollectionFailed'
     }
 
@@ -425,7 +425,7 @@ function Get-CentralLogBucket {
         if ($statusValue -eq 'PSEXEC_COMMUNICATION_LOST') {
             return 'PsExecCommunicationLost'
         }
-        if ($statusValue -eq 'REMOTE_LOG_COLLECTION_FAILED' -or $statusValue -eq 'STALE_LASTRUN_IGNORED') {
+        if ($statusValue -eq 'REMOTE_LOG_COLLECTION_FAILED' -or $statusValue -eq 'REMOTE_RESULT_STALE' -or $statusValue -eq 'STALE_LASTRUN_IGNORED') {
             return 'RemoteLogCollectionFailed'
         }
         if ($statusValue -eq 'SETUP_PROCESS_TIMEOUT') {
@@ -1035,7 +1035,8 @@ try {
         }
         else {
             $previousStatus = $result.LauncherStatus
-            $result.LauncherStatus = 'STALE_LASTRUN_IGNORED'
+            $result.LauncherStatus = 'REMOTE_RESULT_STALE'
+            $result.RemoteNextAction = 'CHECK_REMOTE_RESULT_COLLECTION'
             $result.Detail = ("{0} PreviousLauncherStatus={1}" -f $lastRunFreshness.Detail,$previousStatus)
             Add-Content -LiteralPath $logPath -Value ("[{0}] WARN {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$result.Detail) -Encoding UTF8
         }
@@ -1101,8 +1102,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXmPWqsd9ZdRJP
-# uMzkewjNuP077zLtYgoUzRr63M7MF6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNEyJshQ7y8HQ/
+# psXuyPba/XbveSTSzcVbLtgQUop7M6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1235,31 +1236,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKIH/dpPyqCTfFoGj71/86k/7eg0Y7BHrgCR5C2LrrwpMA0GCSqG
-# SIb3DQEBAQUABIIBgIkipJ9laR//iqUfR6JKla4mhSUNoxqnG3y7/IqrgIrWIaG+
-# JAifQVX2OjyXHF8sgn91b5RDZXet+WtdLhSxQxERTX2N5U60pjEJchKw8vpvgaOR
-# EN6WRmGK7ePbc65GZ3uPot9DIGhZukSg/tU7lEBCyuwyxMbSq9HPQUs9uc1ysL9m
-# z3tnuVHx4a/2w461G6tqv5caeL17egEPY/AnxA8/EWXlKpqaFjoXMIjuqPTEvAKm
-# nCWcPOyyBa1kdetZzlvSxN7oa5ZWRJy7G8/Ysxy5S/HicmJBNXdFuHDb7zD1TSoX
-# MVJciFPtx9sTI+XpaOXLb+MvOxUZSq/zSP9F68XhZxJSJeW7EwZI5NfPa1Bl7Ds+
-# B6cFafAvLTQnqGTWAZDl+UiRVMcMoyfVJeNR/a6UmRGp991SVUouideicA2PoixI
-# bE2neykV/j72zWdR4RXdi+DuwcBnFxVxcz+ijqhaaV53kbZx4nIjH4jOA/BzEyvt
-# CWAxQA3k9m/6wGL0HKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAjNnFx2ZAWKBiHMNaZjoyRMgn7u+IDt3/xuNOUVzZHoMA0GCSqG
+# SIb3DQEBAQUABIIBgDi3+BojRaxAHDCmNwFE0pJxf86avMWfEHBY1ZpZHwavJb48
+# Qr7v8C/lenSXfXuhGG2x77KXH9f4lX/204N0DfIlWNKKhHev0pgB3LTwzeuZbUdN
+# /jaS5tfXK4URXYttOXKxEI2Ui8jsVlmr30DP0tLopKxv0RNeE28TrNBc8QwymZ5i
+# RpU+eb8dBJwCuFxDrUfgBpfYWRuQRkNi8zSLuSrKKn5zySzNxptwvqWo/jccyfDN
+# EqF74ji9K3r5TPyoiVQuIiQrLD2eIidkNA0Ew3hwaE8qxJKiDGqC3COpdIjiRSRZ
+# H4wA42xeTH2SvUJG9WbK/j1EfuS4fXWoSR5/DYVv7iy+Aqo4P/j+LV7b93THz0K1
+# uMhwdDuf7lux5LmzJeqSLnL7V6PJh4NPRcVYgHFbSgpZMGnf/y9sdn4bnWahC/Lu
+# ONRJjGykJKUv1kykJA2AOCSIBqBi8ovM1R+fIH2UdThtq+u1AMycM78s1GYBx9Qc
+# XQs1mRJWN8OohnbBeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# NDNaMC8GCSqGSIb3DQEJBDEiBCA8Nq+3Ch9/OZfP+12wEvslcNek9TH70mz8A+67
-# zqm4ZTANBgkqhkiG9w0BAQEFAASCAgBVB8xiDvl/w2cSzkC3BlLFSiXpHCsDEdLL
-# F66ApYocyzEh/xnoFahaVTd2t7lYrNcrjGlYRuHqb4D+6VDWlX5pRGTDww0q+aqn
-# 9bHKgPQmdHMXtwDO879JK19tHKdpN0gR/6BZXD5zjO7z85zSOX+/0rgg9v/JVS50
-# pK26j+BIWwua4hL4dN4bSzjlzi7oTnxIx2ofUv7NOuaCSeuZjbUzG71PyrdEEOfR
-# YhoY+JobILiLxXHkM/pqr17//ri1kajI8kwz6Ls24Gr9mh/GPbH7JL8dimVP8MVt
-# Pnr5QnfHmsc8ShNxPP08Q9bHThFs009D0+ckejBXF3CwrYCrSieodisz6o2rXlNK
-# +OfP/oyLvFQtwDI8Fb7+y9YBY6Asf5DAmGEbKK1JRaVk7cb+xvzbye+xGpzmGyEa
-# PDpOSFxTuYqEAd0mKzQ1XpabiKGRik7vZXEuyZr4Vjv6iqdrVoHFn7IaiitE0qAm
-# Msa/fDvhKhMuVyTTQGQTDGWy1VRlzqZfn4KPxulSUnOmsNlyhLmkgsVncczZK0zS
-# OxQVNCV//hWq6DAIYUr8KOyfnP8LUsr6DZzkojIzJUK6FecsXRZt7F5JOqDQwps/
-# 81fNM46WAVhFRAw3OkytXF7qT4ahTHr0q+x0lNLnOA6uZrZ71X1X8bioAELtKWWQ
-# Ls5IIN32rA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxODA5
+# NDhaMC8GCSqGSIb3DQEJBDEiBCBNwVbExhVFOiqDc9OSgabNtMAmU87dIr8qicV0
+# hCuJmzANBgkqhkiG9w0BAQEFAASCAgB+1UjRpOXNkZMyHTH2Tk/dniT7nRfWKb4S
+# CG0TslCS+mAe7nIqpJncjUQ28MM6xdf8OZybziDis2HPlGEOY4LCIWUhOx03y75R
+# 8n8IOo7/eyAu4vDLgl+YMgwFllFAa4pzCzAEAfuOlaDHxueZk2/Bsl07kPHw21H0
+# PPyh21XVWt0qiz6acfWOIz9HF1KInH/6OTpyyxxC/6tIczyN9AHgeceCwgtFW6F4
+# dIPsPeL9U8JjPqga3XnKYDtlHt3jldx0ierHwDqH496RE1O8iSVA50chtrsQ7zg8
+# otHUdqm4KdQKhK/t8r/mmSmLO9NK8iDe3rHR5oJ2WSjtaTY2tBoZ2v/seRJkro+P
+# ZhiXZWIN0qZewX/EhtcUvC9LySaHsM1BsQ57tzlBm8V5iZOU7qVXxDVyCxAZtQ/r
+# Pte5js7TG3K9tl5A1pnJvTN7uS8I1TS5aiAYMXjIUPFnEvqqSz9lrZsU8CF/Bf57
+# CjbrY+7WPx3UfLLeBBOcKLGSR9A/cjkkJJQNR9FEc9v141jW27Ubf9ByoPI9YDbn
+# dUCcgXGRwfyKdWyk42jcyNl3MwM2br60cR1aQnBqjoFeJWM5rt5kpTNv2i7FrOxh
+# GKiRxz94RvIwfmMzHqoBBz8sdeF9IxU7upgOWGAWYHGh+7AM/bpep7rTNb5RDod7
+# 5DeAwl7FeQ==
 # SIG # End signature block
