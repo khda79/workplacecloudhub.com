@@ -22,7 +22,7 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-    1.5.9
+    1.6.0
 
 
 .REQUIREMENTS
@@ -32,7 +32,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.5.8
+    Version     : 1.6.0
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -169,7 +169,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.5.9"
+$ScriptVersion = "1.6.0"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1192,13 +1192,20 @@ function Get-ExchangeReadinessInventory {
             @{ Name = "Autodiscover"; Cmdlet = "Get-AutodiscoverVirtualDirectory" }
         )
         foreach ($definition in $virtualDirectoryCmdlets) {
-            if (-not (Get-Command $definition.Cmdlet -ErrorAction SilentlyContinue)) {
+            $virtualDirectoryCommand = Get-Command $definition.Cmdlet -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $virtualDirectoryCommand) {
                 Write-Log ("Skipping virtual directory collector because cmdlet is unavailable: {0}" -f $definition.Cmdlet)
                 continue
             }
 
-            Write-Log ("Collecting virtual directories with {0}" -f $definition.Cmdlet)
-            foreach ($item in @(& $definition.Cmdlet -ErrorAction Stop | Sort-Object Identity)) {
+            $virtualDirectoryParameters = @{ ErrorAction = 'Stop' }
+            if ($virtualDirectoryCommand.Parameters.ContainsKey('ADPropertiesOnly')) {
+                $virtualDirectoryParameters.ADPropertiesOnly = $true
+                Write-Log ("Collecting virtual directories with {0} -ADPropertiesOnly" -f $definition.Cmdlet)
+            } else {
+                Write-Log ("Collecting virtual directories with {0}; ADPropertiesOnly is not supported by this cmdlet." -f $definition.Cmdlet)
+            }
+            foreach ($item in @(& $definition.Cmdlet @virtualDirectoryParameters | Sort-Object Identity)) {
                 Add-ExchangeReadinessProperties -Rows $rows -Category ("VirtualDirectory:{0}" -f $definition.Name) -InputObject $item -ObjectName $item.Identity -Properties @("Server", "InternalUrl", "ExternalUrl", "InternalAuthenticationMethods", "ExternalAuthenticationMethods", "BasicAuthentication", "WindowsAuthentication", "OAuthAuthentication", "ClientCertAuth") -MigrationFocus "Namespace, URL and authentication inventory for Exchange SE coexistence, load balancer, certificate, and client access planning." -Importance "Review"
             }
         }
@@ -1897,8 +1904,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCodWSyeaOCsKlW
-# 1/S2Uwuhxv/e3dDxdFO32c282bm1eaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKZKExaG47pj1k
+# /iifICnVwf4RYJX7ymFnY3JA7NOTUaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2031,31 +2038,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDTfo4Rzm5IVLubtSw8n7G5UXVKJ7jRYoNQg/Z9PPn1jMA0GCSqG
-# SIb3DQEBAQUABIIBgFY0tAOcQYrPN8hPEi7SNTOW0r+a3fofFYX7oTd3pxE4eQmT
-# XEiHG+0+zf6zYm5GTnxd5IseYe56XQhX9kgV+yIssfIIW9u1uHshyTMo7Kl9/pbx
-# x0nM0cEvpK4HLlHDiBZQFcbL5YM8dmRPu/naIFI3JmpbEAnGlJ+shs48LFLii/BJ
-# 0IMZHtoPrPkA1XoieEEBoMg9pqhGBuQps/fMMg3DiTKC6zWt/tpblxLhp89TLVZm
-# 8BNFhc0a9cfUMdP75e6YqRn9F1b4MxDFxcZekYxlqk3uordbubRYcECfiVjwcMuO
-# sGXMtcSW0E44rVIouFeE2nC1smXg6PT0IZs3Id8oF0hC9JxLI5SmuVMGza3W44AU
-# dozIkj6MnBMDnCyBEJ664XIxabkbVSvWTqLc/LhyUVPxXPE6NaTfWVWiQ8Z+C83P
-# 53WivmR/0D0PZyOf/XfxHrrTHjyRGPauicbnd1TaIRNOKPC43KQ5zaFJ+4QQYWGk
-# mZ/ZtS7biOOfN8a+iqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHg+LrH8+Bq/xVySoh5YOaxidPvU+qCHu556S9xCCgYQMA0GCSqG
+# SIb3DQEBAQUABIIBgImPJFrpi8MevALuA2j4atzFelIXGq/4hGVDlehTJPbfoagn
+# mx/KhZYEfTNwz8GJQmdCCnsYN6OA+lezevSgn0buTn635fPTZJoC1QnGUJOPpsPb
+# c5tddvmHLfNKnhwbnT0gFJ1BJthQeaMJbp+z++F7admpkKw6xwmw9Cu4Sgiw9gdm
+# ZilTWA/N9O5ePY+2RBZ2nYP2S4MlcC4jimXCrDLFl9PqGIsXARbDAJgRL5tOz3iz
+# 1g1Ipd/X/g49TQTakHrfr8Ut9zGXJpqaGDEu5Knr1Mjvq3cHU0EP5oiKeR3teSij
+# E6Ma3jwhHD8l2c4gXshTRLbLPDvK0wJ+KsgXXzsLKztGKkfyX1brw7IwUJS41jek
+# uA40PrgPYnBr2LYIJHQJb5gOSicH8uz4jsbefx6KLEp/KZ0KN+4N1zDD2AHNbR43
+# 9GbixTzZe8BkSeO3bfhnK4VVCEO4i/l9cgaa6LakpfscYE/qMWCuwerLAaRezFQx
+# KBhL6prFme5fgKslH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
-# NTVaMC8GCSqGSIb3DQEJBDEiBCAOwVVSn4DynD6XXTXZo6kQeD8r7rAats9Va1W4
-# y0UTCzANBgkqhkiG9w0BAQEFAASCAgAJ4Rr7IcRSLNltWvaTbg75paIXJ3OnFQLp
-# 754LxslCNPqGO/wNGtK2+qlk1JBgezDxxMasq/oF6WnChBpb3Jj4PZYul5UrrFFh
-# B/7DH9qaWF9Oe3u/qqSp91nvpMej8vF/ASfYpjtZQSxpHWrqTiSL3g9z991Cvo70
-# dTzK26U++oY5wN8rPJ7IzZVjShaVkHR3co8PEoFIAK6MCZNrAI9imYfMa7zInQPg
-# gPCjxqWIP72P44RfjJ45c/JIFiEM0Nv9r3I1Y2cDM7xye77LV8vZ8gCT2GS3eETA
-# ScOtgMKlnDsHL4yVuHRGIaseXmy5HGFwa0sCe683pLpM1aVh65LevR2ESEk0Fka0
-# F4hQ1QX9/sggsxpDBp5L/oiVsoq6PoIIVJFYwPpFu3R8vMB1pzGPQ1xgGBANbDwR
-# A3CwupIm+PdOUSLii03Vbog32ub9O29JWrDE4CSFJ5dN7op3XuslIZw5vDv+RBCl
-# Fvv4m8vSpQrESLZoBdTbTFx3L4aOOmyJymiiTg26wmiuP+rgDhvRckgfFCakiRKH
-# QCq4endzPHUt9yBE/WP8mHk1iXCDJy5wZM0uBUy7izFkt/LbCFnU7qNZZbcAS8pO
-# bxsK2eTBUxMJHl8nM9NwjiJptdk16f2AmsYIPaFfEjxUpFNPUToGtMJJkQ7mBd+c
-# MPZybUjMIQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
+# NDRaMC8GCSqGSIb3DQEJBDEiBCBn+k9A+swStqcY0xfTn8dy/nc1dlKLadwF5KyX
+# KnRxBTANBgkqhkiG9w0BAQEFAASCAgBU5xUb1i8r6+9cU8BTnvpHpZkTaPKiIAc0
+# wrAFbmQQ7NJMMXT2Cr/F7SJlgftfngFjLW7jOb1P193f4Hm4STlPKVlI9TEkk93m
+# O0C2bsyfgoR+pPqFxQ/oLTPlGGXGNQyMQlVkkeehpeTTGF+V6oE5xD6YYm1jhxEE
+# gchsEiAXCIjbYZKRAByDJxP5/DIjCtrg7SFBDXSobg/cIqP67GQFCtdhxeBjwcYN
+# 16eADn6Yp5SwMPReso7Hvhsw0e3Oli2Nfm80wEWf80zd4WwxCIbhHBM79MoxnrjK
+# qlvJl/vb5KzJCwykjROLXPEpk/GPULdGcMel8UVf11lK0yz8rVE9jM+PXwbtDAEI
+# MreTIO6vMDfbJpYlvBoL2O5KAj95USBAY3LZhyVUUknJZ+X7wW6V67gitKNfk+v6
+# MbzAYYN6nA+mkxvfvJxjc/8rexUcw9z/DecZvwcM06rzdP+hE3Ge7eyOH/ZuWmC0
+# qkY4bXsrWArWRFKvFpYHBNaomR1S2lrRqGQrX+czSfLnHnQXC+CsYM5M9BNlFKkT
+# 3LFMutf4XQ6mfgYJcStyGj5+80m3qyCwU/FH9AQm8/SXOh9KYrMAZ1ycZ8bTG4qK
+# 6fs+UR+/F4M7xzvW2VQt3ZJtnHCvD3wtxlJpqu3eqXzcP5/pafoR1kWuCnCSS/MN
+# PZ5Dk0Ruow==
 # SIG # End signature block
