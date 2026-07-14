@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.22
+  1.23
 .VERSION
-1.22
+1.23
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.22"
+$ScriptVersion = "1.23"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1472,7 +1472,7 @@ try {
         $computedRows.Add([pscustomobject]$o) | Out-Null
     }
     $computedRowCount = $computedRows.Count
-    $enrichedRows = @(Select-WinUpdateCanonicalRows -Rows @($computedRows))
+    $enrichedRows = @(Select-WinUpdateCanonicalRows -Rows $computedRows.ToArray())
     $duplicateRowsRemoved = $computedRowCount - $enrichedRows.Count
     if ($duplicateRowsRemoved -gt 0) {
         Write-Log ("Removed {0} duplicate policy/device row(s) using operational severity and action priority; canonical rows: {1}." -f $duplicateRowsRemoved, $enrichedRows.Count) "WARNING" "DATA"
@@ -1696,8 +1696,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBN8C6RoUX8kAFg
-# lC3huZT8GwR4sFgch4VRyjMAE9KKIKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDuC6P0RbE7lEhY
+# lk2N7mbeirbeYbe3MdGGUy7ZzLCRVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1830,31 +1830,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK7E2eLJ8I2cyoJZ10fGus4/sbb5kxpP7oHx8UWeKRmOMA0GCSqG
-# SIb3DQEBAQUABIIBgJ6OXGk8nCoDffBgjTG0jehHJBlTLHo8GQ/8QhB+LHsKSNyI
-# xuwCCiLqz+8pZ1IcsVxEm5h+u8d6Jpx8x8OXFEvbPZdHDzxG8/8Pf5q7nQMHtd2k
-# fRJ+PwrH5kTNH0r95ITSyvdti5pJ4SAcjAamyNztEA/jDxf3BahE6OXNYzgfxtNo
-# jRV75Ns5XwHPQd/yTpxwV4LyvnOupDcw/vgeUZk09se+6lRkAG8rKvoLGNNaLi5b
-# VORv5TRpCWKSMGlnnh+K8PFGhPm5tCa9zDOhI68f7EmBQXlimCgPzMpQwOSE18dw
-# FhBQ2AvRgn+BcN7z/QGWs6hapK9PJqD0CXGYi91vYGy2GNvbtopepm6vjAeVdBO+
-# TS7SleuYAwpg13Unqy06U4MFxUC/bat4aY/rpKftpG/+hAtN8jmR6g4DcaBOcITC
-# SwXzGVtUjHvTHxXKrV//Py+c0KBSIZAQkuVYYVe4Hd0uWB7huHop5EDzUx21iIuh
-# UqF/wkyLNkScCq5K96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMWxEK5aaUIPzLo+byN9S7ZAk+cScpNay4UqByku3RO8MA0GCSqG
+# SIb3DQEBAQUABIIBgBX/FVBNYIr3EyQuw0OqT9H2T5Tm9FmJFnxvUSEhfGpUhM1o
+# 25lDVknJdZhm/7pS3g7fymCoQWPuQjOqC2Gymp7150jyERbWIrCIucLbl7luNJbh
+# FI4x3OselPviNvIpndNLYcQTJWMQ1tnBisbjh8OBSSVC14lhILj+FNiEjfENXeQ/
+# p3NZPvYbnWPNBmgXddUhETWMt5KCMLXo3drxEvcOUKzpbpQckYVIE2mvp+ehRZTM
+# 0w2It0CVTHCEabo5N67hRItx9lEstE1LNf2fuL9+EupCRJiGoA64QQ6Hk7CEo6AF
+# C0fVA3ab9Yi7qGbr2/Ir9p3oO2tZpTR59c2pExafg3Ln5ij+h+UAVQ300n3fa3V8
+# YhD8fbZCPkA98eqWq9EMIpFWyCLUJhrEZStRXhEn9awOA4AjD8zhmO7FfgHr6hdP
+# FvjJqdZ4F12IBCfJMlX8RbrKnuaFEaHneC1on5TdfQjRyZWcdzfrDJWVG+Lc7p/q
+# if72/on1oN0t187yKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
-# NDZaMC8GCSqGSIb3DQEJBDEiBCDlZyZnVZlPdfFMtHAgN5j0Ul7kIo2SrXaOBxBr
-# 5XPizTANBgkqhkiG9w0BAQEFAASCAgC9TB4WZTQUM4BcVbG89/5xpgEZmmJ+Jt5E
-# +MkvIuuAy5Lt/JXeJpiPwVYLOIIvwXMwqyLMm7Fx07s2aeiZLS4NYCD1eNFnvhgU
-# hkkIsQAEpXlmYK8Iomrv1eYOb+hBj++kO3UsyztdokmWAknq9nvBhTtFHwYhVdam
-# aqFROlIhwN8u2gH2hLUrocfqVlUkGC2Z9O1/PIKlNQuxWU8iRff/r7zPfRXvTerT
-# cPP1r6R4Pe6BUrXejhfAH7EsPIpEpygGLny4+jcUULNyX7xXM3JHCmmnJB4Femxd
-# xqXCrfjUVRqj1UDyoZFtpbXKdpuQTh8yRAqnzhXvNWZNZb8CpUt8fgzXZ8sRBQ9c
-# cdjLOMPvwaHwLVBoH+uheSBmmUTYATfqZx29I0pqeF0CqwDTQqE/K58x/jQG3SZP
-# xsYEn4hWv2Fo9lQFb4BoMZ3g57upomOoC/3WuBJrFm7sCJ3C6VpS5C28TWTmtCE4
-# tF3S6ST3n9zr5A5zDxaavRgqKw7Wxmi4xvng/OmWZKC+40rOfOCh2pHgHJjYiG3/
-# dD3z35m8LiszA75WSLJm4vi3wct0ns1+VQ7Z/pdfPs2Mi8eiGsbaUOlYVqpvGEnm
-# bopXS9eb2sRIw5ZURAPGct2gUPPAdT4kgaKfOH/expF6fGcqpfth4HkpPgnel64g
-# QGzFD/TAgg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzUz
+# MTRaMC8GCSqGSIb3DQEJBDEiBCARApcZAMQEO6d7G1gDTHQ5qmKFnBqLQeh6vtf3
+# 4EiWajANBgkqhkiG9w0BAQEFAASCAgCsgUrAx7gGOUBhUotuFzM6+iUz4Zjz8qGA
+# lAimvr5IVmF/R8DgNAysQ1yfcuPgh2+j0LT4S3um/LxP/eZSlTuMSPlO2wEBqJp3
+# BvZHYuDnRXmAk0y5KDJjtUxRcGOpOeGdiPUPRVXDCMTVOIEaxK15YSfVQl7XMlWD
+# cj9uTYASJA9a5HlBlesIJkRrzbp2jwk2TYAZzDZTVjw+PoQ2xdXgDtzUEPzcy3/A
+# ScYQluw5yvhIDSytKHhaMJW2rD5oRApFwJ2+BC/o44gquOO4m9HT2NUtu7W88EYK
+# pXPG0xuRLs67KX3pdcVOe6k9SaeucLQ53ijLZthWDC8FSzI+5vOqPEUx8CpAtwQc
+# hIQ3LoS1PzdAZFH5oGOzdxNHzgzEGO5Db27NuBlJ1QBMfMFM/gjhw45A5w+qUdsV
+# RQrdBFZ4SLfnr2efttAM5TXJ5rK+Vj9DSMgJEy8jxoeu0o8iY9ZeELLdJoUT0vVk
+# R3DfOU/oMLZojaNxaYDcWHEBGq9KIadp2OKnnOEFX6frDpr6xnSImRvmXSHusHuG
+# AeIBrIu4iL0TCmsjmI466bSDAKKmKZUl3UHuLa3MBERaexnjJleO7LhKGf5cO/UX
+# T3pWoWMR2YKPVwRNrO5IjqRctqwqe+cFmFnBWHDthPH9qvKBU7xggbhlolGPksX0
+# +PcLV4/Qnw==
 # SIG # End signature block
