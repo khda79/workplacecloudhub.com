@@ -132,7 +132,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.30"
+$ScriptVersion = "1.3.31"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -699,6 +699,14 @@ function ConvertTo-NormalizedJob {
     if ([string]::IsNullOrWhiteSpace($name)) { $Errors.Add('A job has an empty Name.'); return $null }
     if ($name -notmatch '^[A-Za-z0-9._-]+$') { $Errors.Add("Job '$name': Name may only contain letters, digits, dot, underscore and dash."); return $null }
 
+    $concurrencyKey = $name
+    if ($RawJob.PSObject.Properties['ConcurrencyKey'] -and $RawJob.ConcurrencyKey) {
+        $concurrencyKey = [string]$RawJob.ConcurrencyKey
+    }
+    if ($concurrencyKey -notmatch '^[A-Za-z0-9._-]+$') {
+        $Errors.Add("Job '$name': ConcurrencyKey may only contain letters, digits, dot, underscore and dash.")
+    }
+
     $scriptPath = ''
     if ($RawJob.PSObject.Properties['ScriptPath'] -and $RawJob.ScriptPath) { $scriptPath = [string]$RawJob.ScriptPath }
     if ([string]::IsNullOrWhiteSpace($scriptPath)) { $Errors.Add("Job '$name': ScriptPath is required.") }
@@ -783,6 +791,7 @@ function ConvertTo-NormalizedJob {
 
     return [pscustomobject]@{
         Name = $name
+        ConcurrencyKey = $concurrencyKey
         ScriptPath = $scriptPath
         LauncherPath = $launcherPath
         Arguments = $arguments
@@ -1857,11 +1866,7 @@ function Write-OrchestratorRuntimeUpdateWarning {
         [datetime]$Now = (Get-Date)
     )
 
-    $lastWarning = [datetime]::MinValue
     if ($script:RuntimeUpdateWarnings.ContainsKey($Key)) {
-        $lastWarning = [datetime]$script:RuntimeUpdateWarnings[$Key]
-    }
-    if ($lastWarning -ne [datetime]::MinValue -and $Now -lt $lastWarning.AddMinutes($script:Settings.RuntimeUpdateCooldownMinutes)) {
         return
     }
 
@@ -2632,6 +2637,27 @@ function Invoke-LaunchPhase {
             $reason = 'due'
         }
         if ($null -eq $occurrence) { continue }
+
+        # Cross-job overlap guard. Jobs sharing a ConcurrencyKey are serialized,
+        # including jobs launched earlier in the same scheduler tick.
+        $blockingConcurrencyJobs = @(
+            foreach ($runningName in $script:RunningJobs.Keys) {
+                if ($runningName -eq $name -or -not $script:Manifest.JobsByName.ContainsKey($runningName)) { continue }
+                $runningJob = $script:Manifest.JobsByName[$runningName]
+                if ($runningJob.ConcurrencyKey -eq $job.ConcurrencyKey) { $runningName }
+            }
+            foreach ($launchedName in $launchedThisTick) {
+                if ($launchedName -eq $name -or -not $script:Manifest.JobsByName.ContainsKey($launchedName)) { continue }
+                $launchedJob = $script:Manifest.JobsByName[$launchedName]
+                if ($launchedJob.ConcurrencyKey -eq $job.ConcurrencyKey) { $launchedName }
+            }
+        ) | Sort-Object -Unique
+        if ($blockingConcurrencyJobs.Count -gt 0) {
+            if ($isForced) {
+                Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency:{0}:{1}" -f $name, ($blockingConcurrencyJobs -join ',')) -Message ("Job {0}: forced launch deferred because ConcurrencyKey '{1}' is already held by {2}." -f $name, $job.ConcurrencyKey, ($blockingConcurrencyJobs -join ', ')) -Now $Now
+            }
+            continue
+        }
 
         # Dependency gate (not applied to forced runs): wait while a dependency is
         # running, launched earlier in this tick, pending a retry, or itself due.

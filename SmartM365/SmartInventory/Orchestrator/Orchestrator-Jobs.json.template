@@ -468,6 +468,7 @@
     },
     {
       "Name": "Exchange2016-Local-Mailboxes-Inventory",
+      "ConcurrencyKey": "ExchangeLocalMailboxes",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "",
       "Enabled": false,
@@ -490,6 +491,7 @@
     },
     {
       "Name": "Exchange2016-Local-Mailboxes-Fast",
+      "ConcurrencyKey": "ExchangeLocalMailboxes",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "",
       "Enabled": false,
