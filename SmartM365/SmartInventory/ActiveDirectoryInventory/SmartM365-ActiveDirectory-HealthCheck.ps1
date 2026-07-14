@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.18
+    1.0.19
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -71,7 +71,7 @@ $RunId = [guid]::NewGuid().ToString()
 $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.18"
+$ScriptVersion = "1.0.19"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -402,8 +402,8 @@ try{
     $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
     $global:csvGeneratedPaths = @($csv, $latestCsv)
-    Complete-SmartM365ExecutionContext -Status $summaryStatus
     Write-Host "AD Health Check completed. Status=$worst; Rows=$($all.Count); Csv=$csv; Latest=$latestCsv"
+    Complete-SmartM365ExecutionContext -Status $summaryStatus
     if($worst -eq 'Critical'){exit 2};if($worst -eq 'Warning'){exit 1};exit 0
 }catch{
     $runError = $_
@@ -419,14 +419,14 @@ try{
     try{$html=ConvertTo-ReportHtml -r $failedRows -status 'Critical' -started $RunStarted -ended (Get-Date) -csv $csv;Send-ReportMail "[CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
     try { Stop-Transcript | Out-Null } catch { $null = $_ }
     $global:csvGeneratedPaths = @($csv)
-    try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'ADHealthCheck' } catch { $null = $_ }
-    Write-Error $runErrorDetail;exit 2
+    Write-Error $runErrorDetail
+    try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'ADHealthCheck' } catch { $null = $_ };exit 2
 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZAxGoQGBKVIEO
-# yR7xm0nRB9vtPTygQzTvN1qTON4zY6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhV+zTqDJ70Doz
+# 8KiIkg9cQwvtffuJOEwtYg+y9e3Jt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -559,31 +559,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKM4+fepkTiCkGoiIfiCh+AYM64IIgLvyA19mA1csCHgMA0GCSqG
-# SIb3DQEBAQUABIIBgGE7kyTUr85Jb9olqHqETx0yZ5GN8F80O0oBlIdz3D3ODZsZ
-# n7zWjf/P0nCF9CKUzSLYKwk63yIlwOnx6cs+itCx675eccCpoQ0dSuH78rpIP675
-# wzbe//AhwFIVRfBD8IbXhQM3tvgzXeWJctULRzB24xehxPCiYc+vJQlLnq6rebP0
-# 6hsobt3vGuL29wOUB9rYhrAh9PNWStkFCde2TkJ3HzyRPCaj57C/UHtcXCu9cPax
-# jVf/eLPq/x79e78sn/pFUHF5PCJfJSDMDtJElYOQDPVOTLsojAAGdH17hsbihVu6
-# v+dn4zrMMlUgNNzAX0Vrc2doRgNLsFXPTvZI8NsxDCeMWwrm7YJW7f3kmVT/FXJ/
-# C57g87FfR6sxJjqz4vk95GiQEKNQa/+Q0oHLatBzvay7NetIc8xhd/R2iGb4z5Re
-# Z7q5P6HOqqD0p+jMZRVf3ibOT1d7vzBLU52ZJyBv2DQIdhrQ8FPbNy/GE5H9NBKs
-# U49yCZcUttXHkltsC6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJZUd/Wt1SYADqzZT36fVO0b9itPbU/nFKdtowyzlJcsMA0GCSqG
+# SIb3DQEBAQUABIIBgFexZT77nRKATXL4X9Jk3gLbtzfSEFLbCZxvsR2uG6XhyF8k
+# c5lRmt+yznhP5odra4OtLtdLluoD34cbIV2tjO6hLqijXOGz10JKc6VteS+Dvg3k
+# VtdLTG1oh5kg5NKvkXslEbNIdoCUwRjDFc5uuzf2jk/mCioZkjktgtTT56mHxBhS
+# QbVps+bf1x27kGPDoPsdCbhpdL9AaszdfRGhysHdZ+NePQDo+anlPkvb/sKWYYIi
+# 0AIJmBI+WOrsZrbRt0SvWO8dy9G2j8UrBtdbRy0PBUgdj/6W9Z2d5pe3wIlzqCCj
+# zRblOD1eU5T/YumQQpcdRt2d0PXioCqcWfedZKRIV0ahi7UpYt3zFZAtBfCt+Bq0
+# IvnTSmKqOFRlIQ6qdgUysZavBDdM5zSmHkfILY/Edk1DzcazIOE/YoABLAIsyJRZ
+# IgdioNqittHS10H7R07sk0yyIpxk7MF5CVwaX2H/sE8PV9dAa+9/OzaHKqULF6oc
+# ewtj2sGJg/Egq9N4raGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
-# MjBaMC8GCSqGSIb3DQEJBDEiBCDg2plUSdBbF5HU2MOlrhlhCfQgDM5UNNunaZgP
-# y+UoEDANBgkqhkiG9w0BAQEFAASCAgCEMkFNpy4BjQM6VQcRxWK1OrN3jCL2zKMi
-# S8qfjwUXBmMYQ1az+LYy2+CGQ1srQYpkCMH9/vpa+5IFUocTjGqewSYdYtuE5SRi
-# 5f9am8WOIBNmBZrH1xJ36XjjClQYCcfELDtZV4A0RDU3W1KAff+S6ePq0S3qrGrx
-# 8qT3CZOqlkyO/S2oAvI3yQiEUKdUjrD6h+wwBR/11nP9wOnKrEBQ1D6W9ooscWiG
-# MpVzlrIV7xlrN0jSGqQU4dv9HFnEugB8qQZ3saDzu5neOOhiwokblctaQp1J5s2q
-# QGuRuMDRj5Vxj1A2Ea5+I2LvfuycFPQzYS8Ilz9w9aZfou2Zv5xkV1g4RjAJgp0M
-# qmmX5nNSofcgTzVKB42fr9DOTd+HHoXIpQEugziyHJ1Oab2lq9ngpFjgu3lKlkF5
-# db7Fzdoq343Akb8sBQrj6AvnhnkG5qNnEIJ6eCqZIotDkEbvxln2yzbvRAf33mls
-# 7MkV2DQCNak+QhQ0VuOq9Fu3Jmof1M+rShjzebj/nzn5xn5QR0AkngKmA5r7wzuZ
-# NG7z16+V/pbT5gzh6yBD08fX8SjerxLs4/ElbTzC+Y4cvSgtTFMH6iuWuBWmWm8p
-# IV0/Ti3v4XYOEqVamjPkTjQNzRk+LCyPXCUCW0k7FYAurHao9rHhzy6cJREZ3tjb
-# r1cihs92ug==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBOVu9Gl7OnPg0KJQOex20/XgQLHdvWdu8JRi70
+# Yw/KQzANBgkqhkiG9w0BAQEFAASCAgBvumqAcNDPtLOrKtQ5Sm11n9yG437E4bRo
+# 5HTjib30bqXXh18sxMwxlA7gVyPzS565gvhS0/H2lEiiEAHKiqS5av9s/fAVU4Bv
+# LY9zTKOVMd0qmmjVl3NXtMkV/qV9LuONYErmmmr5hP5wvuvVnkBWnsgiYZN3gmUg
+# tm3RAiB/uFcW8vOx3boQy4zL1BTdDklJouUFIKkASZYLhIA04WOSMzeGGV5qR0N/
+# C2hX9O6Cb+TkgBP9lLudS2nrvf0R5xdiaNIjaWvjf45TyIejV54ueUKHhXM+plgm
+# 7QC2n4+OdpnbOsctNW9aQGCdkBH/tB1+rqabjhNoRxLReKNwBFz7whMjWuOWqOeV
+# W1Nqnse5js1cFR29wKhg1xUPfubA+a2dPMNDS9sZrac6msaYp3LD8TaxtFnDnCsr
+# OVQ2ygIOTfj58twvdDuKybH4SVkKxwzGx3WLVnpu0AluloNfIXjPatG6CYB21UmL
+# jin9TWxzlTi/C3Ebn2f2PA0gZQPPAxUx9KkAkbv+cNYEpIUNUFsCVp6hXcHW4KYZ
+# 9BlLw/VdekAN3SUUHu+X9pUbGHi0cwxlpqc2e+eltFQzN1QaEs2ae3SAOEy5Er+i
+# WwIUjabimrVaBv0tHzL8PTlhkoFrhwFd/BOIMk2+bobIuCNXFtZXZ8nYvsGkKZwB
+# NmvWLaCuwQ==
 # SIG # End signature block
