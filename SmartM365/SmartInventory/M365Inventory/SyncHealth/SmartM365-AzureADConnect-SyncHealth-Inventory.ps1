@@ -24,7 +24,7 @@
     Optional output directory override. If omitted, ScriptCsvLogFolderPath from local JSON is used.
 
 .VERSION
-1.13
+1.14
 
 
 .REQUIREMENTS
@@ -83,7 +83,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 
@@ -494,6 +494,7 @@ function Stop-SmartM365SyncHealthTranscript {
     catch {}
 }
 
+$script:CompletionStatus = 'Auto'
 try {
     $CurrentOperation = 'InitializeScriptEnvironment'
     $initializedOutput = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
@@ -596,10 +597,10 @@ try {
     }
 
     Stop-SmartM365SyncHealthTranscript
-    try { Complete-SmartM365ExecutionContext -Status Auto } catch {}
     Disconnect-GraphSafe
 }
 catch {
+    $script:CompletionStatus = 'Failed'
     $globalError = $_
     WriteLog -Message ("Global error during {0}: {1}" -f $CurrentOperation, $globalError.Exception.Message) -Level ERROR
     $errorFacts = @{
@@ -616,20 +617,20 @@ catch {
         WriteLog -Message ("Failed to send Sync Health error email notification: {0}" -f $_.Exception.Message) -Level ERROR
     }
     Stop-SmartM365SyncHealthTranscript
-    try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage $CurrentOperation } catch {}
     Disconnect-GraphSafe
     throw
 }
 finally {
     try { RemoveOldFiles -Path $ScriptCsvLogFolderPath -Filter '*.csv' -KeepCount $global:RetentionMaxCSV -LogFile $global:LogTextFile } catch {}
     try { Stop-SmartM365SyncHealthTranscript } catch {}
+    try { Complete-SmartM365ExecutionContext -Status $script:CompletionStatus -FailureStage $(if ($script:CompletionStatus -eq 'Failed') { $CurrentOperation } else { '' }) } catch {}
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7ffe57ksTgjL+
-# w9ABplyyZPrE10PUbrTOCS8ojzrqo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKyJYlOScJWU+x
+# GVFII1pXSevsEFFF9xVb9v8WFtuAOKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -762,31 +763,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM1PIu6dGPzSBThuhTGf8VRFvORS105CCxIXw4fIvQsaMA0GCSqG
-# SIb3DQEBAQUABIIBgKTvARubS74cXOMRKP+rHLF88yQchtFkS2G1nKN87CkA0FgR
-# fvpuBEfHm8p0bpRI6ke4oQVcZWUj2G1pX1gy7ynVcodqWQd4R7XcIcd8EZ5Jne0R
-# TjI+19lSlh3bNzgaYgzM5zXLtBYBVB4vB5GfBLovSlSw4io0M7wwkbB+/+La/nsv
-# lbiQHOjaEqFdvIGyzFC+dpDButlKSH44bxDKMVl2Jwgfz7+ryMbS6TiVhSVKLAcy
-# Yv5l+95uo3KHQ7aXW/UFtOVVmHesvJvU5XXSCf2/B/jsFgQNzsTAG64/u/A+9YDm
-# YmlqWIXZM4V24+1AgIt9kqPXz5Nnut7MnIQcIIBBM2d59Rb9FXB1IAk1+5jb3Rdr
-# VHsvoPxub6yD1UIoJ9MkHYODIio+d/sQP5kQUinDycG9Vci7VYI7MPCsW0kNZ1zp
-# vRol9C5HvVBEwOm5AfwL5bA7tSSwIx3k+pofUbbVCyInmv/sJPhmJfZ/3yqI71ms
-# LZyq4SnxcK2Sm0c3PaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMxVUwaWBgRsu3dnYM6TFxZ01CJzeYsnVJ7Ioy9Yo2PkMA0GCSqG
+# SIb3DQEBAQUABIIBgHZUu9TIAmCIPdEviy7o1WGQUHDUxxHd2jog+BbestiGngHk
+# icYy0Jjy4gHAmys6/bVtoYAFvnDf/YxwQVEj6XNZU0PkJaIlM5vFRtcu99KxV20u
+# ZwnMBr4aIBLVn8AeqsJ91DXIra1cTFeMCVUZDSaIGalVGTY18Tc/d5BWnDiZN2aE
+# ZynInRafEVyCKVxSIJoOTmKNH0S0cH2IbZ+DtCUhi+wi/i9eCgAmevqvZ11orwTh
+# fN4RXjodu9ln8NtzpYGOGuzojFvMLldGjPpmQeN2gEszkORecKFKCSP0V7bjbOQX
+# P2d3mYT4w4NslRnzUKRIhxWTwvLrn5XdYudw4izLqOe9sYnETvEA0Qoe10AmeH2M
+# xS4j992OKWsdCxqaEWUsTYwn/fn4/Fbb/TMQW0nOXtAY4r7x1DplWEGiJZVwEpxS
+# 90NWPgE/Rj1fBkKHfKehbAEGIJ1TGnxfSTC9jkhsq9qfyQmiFOpiSD3+bTyIGiFg
+# EvERISrrUqLhkpn7B6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzVaMC8GCSqGSIb3DQEJBDEiBCCZMmeg2y8b4HYequO16SHqiT95rObdO6Agqzew
-# oQuiLjANBgkqhkiG9w0BAQEFAASCAgATtJnRNrIQhntZa6Vd4QEskLqSIMr7AAzz
-# e2uYrwsIr6EJ1jf9ZyzV+UU+7ifVYXTmb6JEsinuMXF12XHwGovVFOfQ6gND+rt2
-# aNX9rHo9nxtTq+jpuYyzSJ6cS0Qs9DcWXI5jcpgEtKvIQM+5spMOt/xxvs7ep6Yv
-# Gkkejzbxl5fU6XPDcgmh0PKAakpy4vkZlQG5W1bPk6wCyeeTe2hCZGeDIvlX+h38
-# ym8CfwQo2TxpWqnm+8FNKnH9pk0kuFAlMhNpGya6CWfTtCdqC/znjejSgeVM/TQq
-# ZQg/yyfv+VJlWqLDGLHJGLx3ZCQWgzXhHdiIxY0e/+oQ3ieLPJXSHZd7i0Rh9bUb
-# mVneAYaGFWkwJudHsKXUVriO9agLxrZwGscplD2jdbS2aJ66eLH9lmpkzOOmSas/
-# eG+/jaeAJbje7LPZX9vdfwcDL38W/HD1Kh1F0FYUen3uL3TlvuudUzo1aypwlY6i
-# iLRD2psSpycafyAEsRQZYjJCPDthMK/Ui8EG4Und9en9efprGbWKDrNyZd7Kttti
-# wsD/XVKTo8ourkpp81Pxruy7rxZYcK8D6O8jdas3NZfbuz8CJ5JmbnCF2xsSRAAf
-# Rzb7R79nA1By7Mn8qMNTQ51TzR/P4qmB1XjKD7rw+CD4v6TtZaVx7b/Olrs+67HT
-# bLSVLeaaKg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
+# NTdaMC8GCSqGSIb3DQEJBDEiBCBG3zQt3Y8Io+c/g6ixc6jNK+kQBY0ZJzTqCFZq
+# tx1bSTANBgkqhkiG9w0BAQEFAASCAgAjkGURCgeZweW4oB3r416oRfzNiVE6bdmM
+# UD61aSPp7ltztlqnKZl4RFFBllKrQ8kvnjLaRcDRACXuM1K7PTGkFC3ZPcSk4E/5
+# MQAmCm/zaRpCENrz6Tb9JKIW+dR9oCQp7sIGwE/LzSLkenMowZTjOjGMxmCP2APU
+# 48RedBK84xy53itoLf7zV6Vh2SbFsBVqhT+Ut1XJU2PY3H4HkuXKKf0Td1QnWXR0
+# HTYGy/5udH/ILvACv4KQyPgSFKfRrraK7qwFWTMFoiCRf9mjzMHrlulku3f3jsU0
+# d1EtZjI+//7zUm13jliCEXfWTPw3WlFAaSqB8n9qr+Hko4Ep7bN3OEyi5EdM7CiB
+# /9YiaUuPcvhfKiU3rfX8FnrKopa+7TA6+k6mu4k8ZBge6/qRTsB6zufTS7t1mlmL
+# Sb/SWV65900zO62faw3ga0UV3Nnq6eAVBPC0b+UvOUjXs63JjaDbL+1Mu0YMDmOZ
+# jOXdiuU4opCeNmDCf1gVVcHyQCw6azu5MRyo5zclVp8oUd335FkFT7fu8mFm70pJ
+# pa3ZEVOBYualE0UNq/1vm8PyRNah4vvy2/YwNtrmEk4MnxJvrzSS4XQQSWTbHaJu
+# 2s4s67W7Cak3ij4TjQZy5f+CzL2aaMfz/I0M1rXRLSs0+Ap9sKCTWKEDIsE60feE
+# Ar/uqQnBMg==
 # SIG # End signature block
