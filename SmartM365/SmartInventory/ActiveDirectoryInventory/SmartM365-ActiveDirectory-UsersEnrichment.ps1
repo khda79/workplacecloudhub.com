@@ -1,6 +1,8 @@
 <#
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
+.VERSION
+1.0
 #>
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
@@ -321,21 +323,33 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 
     function Import-SourceXlsx {
         param([string[]]$Names, [string[]]$WorksheetNames)
+        $resolvedPath = ''
         foreach ($candidate in (Get-SourceCandidatePaths -Names $Names)) {
-            if (-not (Test-Path -LiteralPath $candidate)) { continue }
-            try { Import-Module ImportExcel -ErrorAction Stop }
-            catch { WriteLog -Message ("AD users enrichment Excel source skipped because ImportExcel module is not available: {0}" -f $candidate); return @() }
-            $rowsOut = New-Object System.Collections.Generic.List[object]
-            foreach ($worksheetName in @($WorksheetNames)) {
-                if ([string]::IsNullOrWhiteSpace($worksheetName)) { continue }
-                try { foreach ($row in @(Import-Excel -Path $candidate -WorksheetName $worksheetName -ErrorAction Stop)) { [void]$rowsOut.Add($row) } }
-                catch { WriteLog -Message ("AD users enrichment Excel worksheet skipped: {0} [{1}] ({2})" -f $candidate, $worksheetName, $PSItem.Exception.Message) }
-            }
-            WriteLog -Message ("AD users enrichment Excel source loaded: {0} ({1} row(s))" -f $candidate, $rowsOut.Count)
-            return $rowsOut.ToArray()
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $resolvedPath = $candidate; break }
         }
-        WriteLog -Message ("AD users enrichment optional Excel source missing; related columns will be blank: {0}" -f ($Names -join ', '))
-        return @()
+        if ([string]::IsNullOrWhiteSpace($resolvedPath) -and (Get-Command Resolve-SmartM365AdReferenceXlsx -ErrorAction SilentlyContinue)) {
+            foreach ($name in $Names) {
+                $sharePointPath = Resolve-SmartM365AdReferenceXlsx -Name $name
+                if (-not [string]::IsNullOrWhiteSpace($sharePointPath) -and (Test-Path -LiteralPath $sharePointPath -PathType Leaf)) {
+                    $resolvedPath = $sharePointPath
+                    break
+                }
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
+            WriteLog -Message ("AD users enrichment optional Excel source missing; related columns will be blank: {0}" -f ($Names -join ', '))
+            return @()
+        }
+        try { Import-Module ImportExcel -ErrorAction Stop }
+        catch { WriteLog -Message ("AD users enrichment Excel source skipped because ImportExcel module is not available: {0}" -f $resolvedPath); return @() }
+        $rowsOut = New-Object System.Collections.Generic.List[object]
+        foreach ($worksheetName in @($WorksheetNames)) {
+            if ([string]::IsNullOrWhiteSpace($worksheetName)) { continue }
+            try { foreach ($row in @(Import-Excel -Path $resolvedPath -WorksheetName $worksheetName -ErrorAction Stop)) { [void]$rowsOut.Add($row) } }
+            catch { WriteLog -Message ("AD users enrichment Excel worksheet skipped: {0} [{1}] ({2})" -f $resolvedPath, $worksheetName, $PSItem.Exception.Message) }
+        }
+        WriteLog -Message ("AD users enrichment Excel source loaded: {0} ({1} row(s))" -f $resolvedPath, $rowsOut.Count)
+        return $rowsOut.ToArray()
     }
     function Add-SmartM365MapValue {
         param([hashtable]$Map, [string]$Key, $Row)
@@ -720,8 +734,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBczHewDDk1+33j
-# iLOebK5neNR7c3TznhCpHKe9hBQ6OqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCi7GfhltCcxP1/
+# Gd7w2+RwBJ5o81uqi04HQO2y34H3j6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -854,31 +868,31 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGfYyaAd+JLcQqWmE5/zepo3JcaUV/BETLQON2g6MeQxMA0GCSqG
-# SIb3DQEBAQUABIIBgDkY7QoCD1/7dDmTM904ykipvCzKhOFGL9r24DCGkhluwrld
-# PDAMlSsoatODyBdgD8WxjlxHLtH2RQo+/reXcA8rLPurhBFQTnEEKiL3ZcTP+skY
-# 6fY3NWmQKgriG9uTK61WmcwVf59XYKlZRjOFincs6q3QIYNlSigoPPa6F0dNOJIa
-# tFotK7mdPHRoVwuoxonrNanQOp1R3tzLpFgYO/kgl55IbKYXaaeKqOdwsOnrZFZt
-# OUDe33jXBc1ounfmfYY3fxk9c2OcbUk2Lp78RLiNfrs4Gn1XPKpJGvRNoDO4p2gB
-# pcvQHtMKVsqAT0D92qo9Bn278YiyOLjQ0BTWAU/F2X1Fei/h/RJuNoC0V6AYJB+3
-# MyoV8HdKZksHN2osW0T8ChttA3KtiePGDX447KCbIV/EFY+fg/363Bn1w9/pMCNG
-# 80czfjWGerOWi/t4AhqSiQjqFuRubp7PEZz6gmW4IaBFzDPTvGS/av+DTqQyR+yj
-# SI8Vmdjg/N02E7rwzKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAEXYqMLcKjbRgzkUrNAKZu2Kf7cD0XGlWsHVclrtx8zMA0GCSqG
+# SIb3DQEBAQUABIIBgJDIFfS92fUhIlHpx/PfXY8CyBr4EQ+qg7ax369ZvCwrVrWh
+# ZJ2rRgn2Jzkh4pc4g7nB58H1Bbj6Ii3vVaruyBO4rCgnCBj8wVHZSQp0B99fHqZ7
+# O5AGesckCJD7MRxCD7O03IMHqkQWA9wSYhw/XqCZk298CFkTopds3PkjxAyLZKnc
+# NRmSSkTIMv/BgQuZE0wnjwXo6rYWQ+PL8jv3Mj4cw+JIr4MMi31JKHkiQFNatJ8h
+# i5GXOPWgb1vlfixqNoGCI3ZmjddxqrYtwwPYtSduzv2VdfKqkhgvcCL6qV0LgKFS
+# mdACFj7dI5nY/E3wjG/1bzyLeSpwzubJYFylsi4zUzWpkSV1lf2vegffSyZaFvUS
+# oUK3924c46vaHanEEnIpiSRu/5a/2shkznnQNg48+gEA6twfYqtDdGraIG4EcJ+m
+# nr1ggo3K2f5S98gXUHZa91+3QYD1vNpvzyay4ILSMI4IhfJGwzfAjzY7UOOYj9qR
+# TMeBBLcZrZ2TVYUD/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCD8ph0AhY5Em4q73ElRwsCYB6yAMjS+HcXyxV5h
-# n3HcuzANBgkqhkiG9w0BAQEFAASCAgA6ku9FHNznZXZFg4DE6CIzRAPA10VclI5k
-# fkMCrhsM8Kjbwtvwoe5ekW2HzJJcbf01+UZQiRCAIk4BxFA52qA5j6hkrKDGV/Be
-# 5dM8R7AhvvIaEQuImbIUBJizOnFQrLDFCuhI0PiDgac3AoWiPoYxcLpg0hJfEfCL
-# qk3LA2ECRRCdrGfjETh9+v3B3Ox3ZK0bvMk/gG5n2Xyk60UkqyCl1Gv0+4uxRc0B
-# fYP+zNqkOWa9vvSfYozkf0yEMwnJu/B/xNz9ThQgk+u9gCO+lYPck6zKFo29d624
-# WYBJZxrDoQS/4gd8ALAeUSicXMEXWmxxEfD1LSEELZr4x3xBA/pVdIO2aEUxFcmY
-# 4iVkYREpbWzoyaPAyUQqV9jqgKhJrLP2tfW4Y66UiuMXZks5J52mBYp6C/gSgx2V
-# lzT1KGi2URE/7sSCOXhO+WsxdmQ1yDXmfXEoD7ZotwPHz+zESKz3n03ea5S2/CrB
-# YlO+D597m6Bmv4NN5SaN069QGL6bcX7tEagKUowfDliPIeSTvG2ZOMKKfI1lt6Eo
-# XEZGGQBctn8gu+gj2tkma0kys5onSCyiwPEHOiCZRa4HCW+BYqtSuihA/VWbfitk
-# JhVzeEQmI//2C4EvOxzIM3HtMSpFlXTWsILbAklzxnJroRLMMGuqgCTKWMcshD59
-# axjx6cSHPw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMTQx
+# MjdaMC8GCSqGSIb3DQEJBDEiBCA4Cicw0uYqmJYX7/yfS1lh54OnGrIRkTm1uF4J
+# H73+iTANBgkqhkiG9w0BAQEFAASCAgCZfMGtPMHzg27y8FauJpMTndGvT71n5/u8
+# rd7WAcW+4+xSNp6D58LX36Ctcz6o0IU7Tijvy+NdKoqi+S+IrMA/2/9XZcJMUcD+
+# qNcMkX0LDqk8aAAcytKdUaw235APO0R0tdCXyP/WcILyx7Dacv+ttK1c4SFwzl4i
+# 7J4uh1tscY2zp4XwRqECRQyFjox8Ad4GcIBxIBBatwOclfmGJEjE2dCejbUx8X+K
+# N2gmYhy7pefZ1/4pwVx3rE8JuxrxsDxr0cy9NMzhQI8ZDNMhv70Z470G5M/defpm
+# +hLrAciBilIw87gxytO527lbfgFp86DghGiyqZJzDWoEkM5q4UNs533iUx/EtKO9
+# 0Wjf6fq8d9ICEt9objZvS7G2NkK/d8/hhHrQT1cg5SDa2hgXlPiCrIpNvxpKPfJD
+# 9ge8AcwHkp3GJsTg9FDS9lWH57eQuZek1HJd4FtlCt6KDFAbSDbOYxMf0kJiVlEv
+# oi2yppqil4MmTd5UdRQxvyHhrPfUx6aS4c4YVU2IjqqAjIUr3+ovPpF7Qv2a+0RF
+# RJqWn2EHTWlWpPzU15y7Ah720m5euc6Vf4XdXhl1svJ6RGgqaP3w3e/t5bjysgtQ
+# fY6jMgu9SdBEGEQxacMI0K2wyR+42QL8ZYT19jLY3Yn4Yy/daibMMxPJ6xhgXLLC
+# xJLC6AVfFQ==
 # SIG # End signature block
