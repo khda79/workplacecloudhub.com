@@ -43,7 +43,7 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
 .VERSION
-1.8
+1.10
 
 
 .REQUIREMENTS
@@ -53,7 +53,7 @@ Default: 3.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.6
+    Version : 1.10
     Minimum application permissions: DeviceManagementManagedDevices.Read.All
 #>
 
@@ -337,6 +337,7 @@ function Invoke-GraphRequestWithRetry {
     param(
         [Parameter(Mandatory)][ValidateSet("GET","POST","PATCH","PUT","DELETE")][string]$Method,
         [Parameter(Mandatory)][string]$Uri,
+        [AllowNull()][object]$Body,
         [int]$MaxRetries = 6
     )
 
@@ -346,8 +347,19 @@ function Invoke-GraphRequestWithRetry {
             $rh = $null
             $sc = $null
 
-            $body = Invoke-MgGraphRequest -Method $Method -Uri $Uri -ErrorAction Stop `
-                -ResponseHeadersVariable rh -StatusCodeVariable sc
+            $invokeParams = @{
+                Method                  = $Method
+                Uri                     = $Uri
+                ErrorAction             = 'Stop'
+                ResponseHeadersVariable = 'rh'
+                StatusCodeVariable      = 'sc'
+            }
+            if ($PSBoundParameters.ContainsKey('Body')) {
+                $invokeParams.Body = $Body
+                $invokeParams.ContentType = 'application/json'
+            }
+
+            $responseBody = Invoke-MgGraphRequest @invokeParams
 
             $requestId = $null
             try {
@@ -358,7 +370,7 @@ function Invoke-GraphRequestWithRetry {
             } catch { }
 
             return [pscustomobject]@{
-                Body       = $body
+                Body       = $responseBody
                 StatusCode = [string]$sc
                 Headers    = $rh
                 RequestId  = $requestId
@@ -392,6 +404,108 @@ function Invoke-GraphRequestWithRetry {
     }
 }
 
+function Test-UsableBiosHardwareInfo {
+    param([AllowNull()][object]$HardwareInformation)
+
+    if ($null -eq $HardwareInformation) { return $false }
+
+    foreach ($propertyName in @('systemManagementBIOSVersion', 'biosVersion', 'biosReleaseDateTime')) {
+        $value = $null
+        if ($HardwareInformation -is [System.Collections.IDictionary]) {
+            if (-not $HardwareInformation.Contains($propertyName)) { continue }
+            $value = $HardwareInformation[$propertyName]
+        } else {
+            $property = $HardwareInformation.PSObject.Properties[$propertyName]
+            if (-not $property) { continue }
+            $value = $property.Value
+        }
+
+        foreach ($item in @($value)) {
+            if ($null -ne $item -and -not [string]::IsNullOrWhiteSpace([string]$item)) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function Get-BiosHardwareInfoBatchMap {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Devices,
+        [ValidateRange(1, 20)][int]$BatchSize = 20
+    )
+
+    $resultMap = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::OrdinalIgnoreCase)
+    if ($Devices.Count -eq 0) { return $resultMap }
+
+    $batchUri = 'https://graph.microsoft.com/beta/$batch'
+    $select = 'id,deviceName,azureADDeviceId,userPrincipalName,operatingSystem,osVersion,manufacturer,model,serialNumber,hardwareInformation'
+    $batchCount = [int][Math]::Ceiling($Devices.Count / [double]$BatchSize)
+
+    for ($offset = 0; $offset -lt $Devices.Count; $offset += $BatchSize) {
+        $lastIndex = [Math]::Min($offset + $BatchSize - 1, $Devices.Count - 1)
+        $chunk = @($Devices[$offset..$lastIndex])
+        $requestToDevice = @{}
+        $requests = New-Object System.Collections.Generic.List[object]
+
+        for ($index = 0; $index -lt $chunk.Count; $index++) {
+            $deviceId = [string]$chunk[$index].id
+            if ([string]::IsNullOrWhiteSpace($deviceId)) { continue }
+
+            $requestId = [string]($index + 1)
+            $requestToDevice[$requestId] = $deviceId
+            $escapedDeviceId = [System.Uri]::EscapeDataString($deviceId)
+            $requests.Add([ordered]@{
+                id     = $requestId
+                method = 'GET'
+                url    = "/deviceManagement/managedDevices/${escapedDeviceId}?`$select=$select"
+            }) | Out-Null
+        }
+
+        if ($requests.Count -eq 0) { continue }
+
+        $batchNumber = [int]($offset / $BatchSize) + 1
+        if ($batchNumber -eq 1 -or $batchNumber -eq $batchCount -or ($batchNumber % 50 -eq 0)) {
+            WriteLog -Message ("BIOS hardwareInformation batch progress: {0}/{1}." -f $batchNumber, $batchCount) 'INFO'
+        }
+
+        try {
+            $payload = @{ requests = $requests.ToArray() } | ConvertTo-Json -Depth 8 -Compress
+            $wrap = Invoke-GraphRequestWithRetry -Method POST -Uri $batchUri -Body $payload
+            foreach ($subResponse in @($wrap.Body.responses)) {
+                $requestId = [string]$subResponse.id
+                if (-not $requestToDevice.ContainsKey($requestId)) { continue }
+
+                $deviceId = [string]$requestToDevice[$requestId]
+                $statusCode = [int]$subResponse.status
+                if ($statusCode -lt 200 -or $statusCode -ge 300) { continue }
+                if (-not (Test-UsableBiosHardwareInfo -HardwareInformation $subResponse.body.hardwareInformation)) { continue }
+
+                $graphRequestId = $null
+                try {
+                    $graphRequestId = [string]$subResponse.headers.'request-id'
+                    if ([string]::IsNullOrWhiteSpace($graphRequestId)) {
+                        $graphRequestId = [string]$subResponse.headers.'client-request-id'
+                    }
+                } catch { }
+
+                $resultMap[$deviceId] = [pscustomobject]@{
+                    Status     = 'OK_BETA_BATCH'
+                    Response   = $subResponse.body
+                    HttpStatus = [string]$statusCode
+                    RequestId  = $graphRequestId
+                    RawError   = $null
+                }
+            }
+        } catch {
+            $details = Get-GraphErrorDetails -ErrorRecord $_
+            WriteLog -Message ("BIOS batch {0}/{1} failed; {2} device(s) will use the per-device fallback. HttpStatus={3}; RequestId={4}; Error={5}" -f $batchNumber, $batchCount, $chunk.Count, $details.HttpStatus, $details.RequestId, $details.RawError) 'WARNING'
+        }
+    }
+
+    return $resultMap
+}
 function Get-InventoryColumns {
     [string[]]@(
         "ManagedDeviceId",
@@ -430,17 +544,9 @@ function Try-GetHardwareInfo {
             $wrap = Invoke-GraphRequestWithRetry -Method GET -Uri $a.Uri
             $r = $wrap.Body
 
-            if ($r -and $r.hardwareInformation) {
+            if ($r -and (Test-UsableBiosHardwareInfo -HardwareInformation $r.hardwareInformation)) {
                 return [pscustomobject]@{
                     Status     = "OK_$($a.Name)"
-                    Response   = $r
-                    HttpStatus = $wrap.StatusCode
-                    RequestId  = $wrap.RequestId
-                    RawError   = $null
-                }
-            } else {
-                return [pscustomobject]@{
-                    Status     = "NO_HWINFO_$($a.Name)"
                     Response   = $r
                     HttpStatus = $wrap.StatusCode
                     RequestId  = $wrap.RequestId
@@ -481,7 +587,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.9"
+$ScriptVersion = "1.10"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -596,8 +702,6 @@ try {
     }
 
     WriteLog -Message "Managed Windows devices retrieved: $($allDevices.Count)" "INFO"
-    $bulkHardwareInfoCount = @($allDevices | Where-Object { $null -ne $_.hardwareInformation }).Count
-    WriteLog -Message ("hardwareInformation returned by the bulk list for {0}/{1} devices; only missing entries will use per-device fallback calls." -f $bulkHardwareInfoCount, $allDevices.Count) "INFO"
 
     if ($DeviceNameContains) {
         $needle = $DeviceNameContains.Trim()
@@ -617,6 +721,12 @@ try {
     }
 
     $columns = Get-InventoryColumns
+
+    $bulkUsableHardwareInfoCount = @($allDevices | Where-Object { Test-UsableBiosHardwareInfo -HardwareInformation $_.hardwareInformation }).Count
+    $devicesNeedingBatch = @($allDevices | Where-Object { -not (Test-UsableBiosHardwareInfo -HardwareInformation $_.hardwareInformation) })
+    WriteLog -Message ("Usable BIOS hardwareInformation returned by the bulk list for {0}/{1} devices; {2} device(s) require batched detail retrieval." -f $bulkUsableHardwareInfoCount, $allDevices.Count, $devicesNeedingBatch.Count) "INFO"
+    $batchHardwareInfoMap = Get-BiosHardwareInfoBatchMap -Devices $devicesNeedingBatch
+    WriteLog -Message ("Batched BIOS detail retrieval resolved {0}/{1} device(s); only unresolved devices will use per-device fallback calls." -f $batchHardwareInfoMap.Count, $devicesNeedingBatch.Count) "INFO"
 
     $script:HwFailCount  = 0
     $script:DebugDumped  = 0
@@ -640,7 +750,7 @@ try {
         $reqId      = $null
         $rawErr     = $null
 
-        $hw = if ($null -ne $d.hardwareInformation) {
+        $hw = if (Test-UsableBiosHardwareInfo -HardwareInformation $d.hardwareInformation) {
             [pscustomobject]@{
                 Status     = 'OK_BETA_LIST'
                 Response   = $d
@@ -648,6 +758,8 @@ try {
                 RequestId  = $null
                 RawError   = $null
             }
+        } elseif (-not [string]::IsNullOrWhiteSpace($mdId) -and $batchHardwareInfoMap.ContainsKey($mdId)) {
+            $batchHardwareInfoMap[$mdId]
         } else {
             Try-GetHardwareInfo -ManagedDeviceId $mdId
         }
@@ -780,8 +892,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3BlD0BHl03nrJ
-# 6xO53RpIcGdJbYebjL3IZrfZ8WsPEKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCY41Q7orcgL6Ae
+# ARP00UvF0bGJNCeEKZEPJaM+yuHub6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -914,31 +1026,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIdAdtVQ3CBjT1CHpnZam/YLV/kf4wqKPe1EClYWxDnfMA0GCSqG
-# SIb3DQEBAQUABIIBgEkUntf91YarF5ED6wIg6Panf1DROZZ8QdxID6msqoWl53Rz
-# h3MIr6VmQEyY/3X6mdfhWCa4Px03hmIY9Mlg9H2bNg/S2/NJbxWgAtkJAS+dZ93e
-# NTi7EmWu6feA2z/7uxo0YQJ+jxhk+yktSMnniB3Rw89O228vXvoENa2g6cqiUXMm
-# LalQ5L7PwTUZtYqn2OpdpRq8kPZpp27+b+ZR+qSAcuyXgg5oa7aQHJBVmhj5bs5M
-# sCcv8rQuLDPhj63tlvHNpReKYhv5GhTNldt23GQVLHJ8ASQcq4H8o1tP3rQ5UyRf
-# oO8Ra/8thyl5japPDwiV7ln7MulcloFGJAPGfLm1Zu884xw3AJ1WY7Tpg5kUEWBl
-# HZ99aaYfMYYWj6D0rUrCkrsrqDhYafgOINot6QKO5wwHGnh8LLT8LqkaYtAQcRNl
-# 9f3L5O5QZFtuTGPQdf6bNs6ahPp7h3tLybLXzT30yG/YFW4gEtH4RMrexRaZlJzk
-# YMvimP7pYh+GtIFhCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKdUr+ZTzmYXLy5x3vyBSsp5SkjAGXZL1eDWmhN9d2IiMA0GCSqG
+# SIb3DQEBAQUABIIBgES4bPqjZOh9JwJKqOAUG+RpVvyLR2zgUNiUMxi9YhOAj7w9
+# xPhi76QiGMpidss/kIMvpoxsQKn1OzYOnL11dmjzPd8hnjUyWy61RVmre6o1LwLI
+# ZmfjTHSc9B8aq+ahYKN0EyzCBRw+1MSPUXQacdlcui+LUnsC+l2xLd3XMsvRun24
+# FX+SocUJ+tkrTbn28YJbgxTuhHjZ0psYvK50FJABMWVp1F2r5KKFLtWk1gwbqHDg
+# a/k2Btj3AABoaq89uURW6WjpeqkCxD3JwOQ+ggcuXZaDBVrc3eEJDZhKb3D+kMal
+# b0mbKjlIoguZ2nWqRdyvGA1BMfOKsXt1bjCOTIDtn7MhIMJhrM8Ufd8pG+or3MG6
+# fP8zHn0tOrvNAtaFaaK8w7O+umI3i/BbRmcQcn4q8b6WButRnXsfgYFWAn0dMFTU
+# iQ877HZCztMnY6IsO3YQPoHg1aW6VrG6xJwZ5dhp7ryCbT9NzpNEqt7BQr0jYdf+
+# WbiHtPA/P+1r+Qou8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzRaMC8GCSqGSIb3DQEJBDEiBCCA9XVYj4wgZYf4dn3Y/GDatxte+yAko3d9aq/5
-# w2YPdTANBgkqhkiG9w0BAQEFAASCAgCjHzAQ6L3ouIm4ECMiXzP67XA0rOYPsxgo
-# 62ZGiLNyxlra7NHSOjGBP/H0D5axEfiFdbkyJ8SMsSuVmYjN6udd/MoEh3rECf/y
-# 3S5rCOSH4PhhEaI92VoW7SXC1p2x+RWOMAc+uMjsyfeeJMQM101FXa7mDe1M8d4q
-# MbPtt1qw/j38dkrArr1xXJ+U9YbRk+OkKwkJDffu61Vsa+h4yEjY2+G2hvO8mOay
-# vcd8Exoir2Ly5un06BQAl8rxYHwDNb8TQBekETDdjffg+/xpbjUYh0Ktq08Sfntd
-# 3+S/2hfM/cZtDTHeyS4nFfMPWWvHVEbUkLSwKIbNHSW0gTiBFrk3+cnh4pNpEI9L
-# KWxRIMZj8hDs70q+IdYIVrHLeorvQpun51EqHeRhtZvSgRdkN3Y8vtGM5FYZ6Rgh
-# OxkeacD2HfVh3/XNAG8xZYkvCH9jnVZr1ib2XqupuEFBJeyNT/eePNPFdVeyJqNp
-# JvdyeXSaluoruQ9iTJbCzPt7bOrlpt3MMAHOSe4SsYrmVVi0XzbgexgPwuYZ1Cx9
-# bgYZ86K5gKV4w6GWRyU8cHfzGBK3Ia/VokJhLuShlwJdArJYay6Sb1GUDcmo7uQY
-# l1Erns9ivQDhK6wIy1EddKa2PFTpVApTz4NwHcUOpln9c/9QDHqxIKjtFkDGwzHi
-# hVKawnJApw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCM42RaHoW5fVIHZrebaOyAIKK9SwN8FOvIRSyp
+# AY/x7TANBgkqhkiG9w0BAQEFAASCAgDNnat3OxAKnY604PyDxFp/CHac7L41FfU9
+# 2ip0Nv8/TkpvwVDans7zUBY5In0KoIzTw6oiln25r3fVMCPNzat7bNqxWQJke/dI
+# rGMO+pwguUhipFsgUZMxpMj+U0nsH1rWxZEVvnnTsv62Uha2ZZjgI+0NvewWw7aT
+# PuXmb/JoScnjDYSr67keNQrk5Kg8ijjD8Ha9PWkSRSXUAHkYhEVTd+JOghSfzAUJ
+# DExZz/r2NzTUgcftSQKfkDvs31gb0ekC9MzEgkmQIHVlmYhhO1rFySORqNGzAYh7
+# wlxYr5BagIeCyS1BFhz/+aUmX2y505ssZyaguOECPgl/22smE9c+L3iVpOEPiVHZ
+# 4CQMmKFhHDXxAKwZF61quYzzpIz/zhvoHgeMXUWiZQz9aDW8DQlJKgsi9tLiD2JL
+# ocLAEU1CQzOouBzQxa6veV9F9dULfwxQoTKrYWg78GFU0gr85ayUmBOVK94/P0d4
+# r84UYTDifGhmNpGIiFWUfR0cioVeCjl8RaHhpmMD0NsCGU6Yk0Upo4YO8Kd4dljf
+# HSRP04Co3+SMe4arJ+sgE0ExakfzfykNoxS5sK/ZTXbbU2dqUBjqng0dnLyjSlJK
+# icU8aKYi45o1E6OekifRHimy50XhMxI4uRr8EJN+bUzqvihNI8XIPjUoVpyBH23v
+# n0Sv6dHNGg==
 # SIG # End signature block
