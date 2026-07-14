@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.17
+1.19
 
 
 .REQUIREMENTS
@@ -397,11 +397,12 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.18"
+$ScriptVersion = "1.19"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
 $StatsCompletenessFailPercent = [double](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailPercent' -DefaultValue 0.5)
+$PermissionWorkerConnectRetries = [math]::Min(10, [math]::Max(1, [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PermissionWorkerConnectRetries' -DefaultValue 3)))
 $IsMaxItemsRun = ($MaxItems -gt 0)
 $IsBoundedMailboxRun = ($IsMaxItemsRun -or $Top100)
 $CsvSuffix = if ($IsMaxItemsRun) { "_MAXITEMS-$MaxItems" } elseif ($Top100) { "_top100" } else { "" }
@@ -1528,7 +1529,8 @@ return @{
 
     # -----------------------------------------------------------------------
     # -PermissionsOnly + ParallelThrottle > 1 : parallel permission collection
-    # Each thread opens its own EXO session (app-only cert) to avoid throttling.
+    # Partition mailboxes into persistent workers. Each worker opens one EXO session
+    # for its whole chunk instead of reconnecting once per mailbox.
     # -----------------------------------------------------------------------
     if ($PermissionsOnly -and $ParallelThrottle -gt 1 -and (-not $InteractiveAuth)) {
         WriteLog ("Starting parallel permission collection - ThrottleLimit={0}." -f $ParallelThrottle) "INFO"
@@ -1541,77 +1543,131 @@ return @{
         }
         WriteLog ("Parallel: {0} mailboxes dispatched to {1} threads (filtered from {2} total)." -f $mailboxesForPerm.Count, $ParallelThrottle, $mailboxes.Count) "INFO"
 
-        # Thread-safe result bag
-        $permBag = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
-        $permCounter = [System.Threading.Interlocked]::Exchange([ref]$counter, 0)
-
-        # Capture variables needed inside parallel scope
-        $p_AppId     = $AppId
-        $p_Thumb     = $Thumb
-        $p_TenantId  = $TenantId
-        $p_OrgDomain = $OrgDomain
-        $p_Total     = $mailboxesForPerm.Count
-        $p_Bag       = $permBag
-
-        $mailboxesForPerm | ForEach-Object -ThrottleLimit $ParallelThrottle -Parallel {
-            $mb       = $_
-            $bag      = $using:p_Bag
-            $appId    = $using:p_AppId
-            $thumb    = $using:p_Thumb
-            $tenantId = $using:p_TenantId
-            $org      = $using:p_OrgDomain
-
-            # Each thread establishes its own EXO session
-            $connected = $false
-            try {
-                Import-Module ExchangeOnlineManagement -ErrorAction Stop
-                Connect-ExchangeOnline -AppId $appId -CertificateThumbprint $thumb `
-                    -Organization $org -ShowBanner:$false -ErrorAction Stop
-                $connected = $true
-            } catch {
-                # Thread cannot connect - skip this mailbox silently
-                return
-            }
-
-            try {
-                $sendAsVals    = @()
-                $fullAccessVals = @()
-                $delegationVals = @()
-
-                try {
-                    $sendAsVals = Get-EXORecipientPermission -Identity $mb.Identity -ErrorAction SilentlyContinue 2>$null |
-                                  Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" -and $_.AccessRights -contains "SendAs" } |
-                                  Select-Object -ExpandProperty Trustee
-                } catch {}
-                try {
-                    $fullAccessVals = Get-EXOMailboxPermission -Identity $mb.Identity -ErrorAction SilentlyContinue 2>$null |
-                                      Where-Object { $_.User -ne "NT AUTHORITY\SELF" -and $_.AccessRights -contains "FullAccess" -and -not $_.IsInherited } |
-                                      Select-Object -ExpandProperty User
-                } catch {}
-                try {
-                    if ($mb.GrantSendOnBehalfTo) {
-                        $delegationVals = $mb.GrantSendOnBehalfTo | ForEach-Object { $_.ToString() } | Where-Object { $_ } | Sort-Object -Unique
-                    }
-                } catch {}
-
-                $bag.Add([PSCustomObject]@{
-                    UserPrincipalName   = $mb.UserPrincipalName
-                    PrimarySmtpAddress  = $mb.PrimarySmtpAddress
-                    OrganizationalUnit  = $null
-                    SendAs              = ($sendAsVals -join ";")
-                    FullAccess          = ($fullAccessVals -join ";")
-                    GrantSendOnBehalfTo = ($delegationVals -join ";")
-                })
-            } finally {
-                if ($connected) {
-                    try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+        $workerCount = [math]::Min($ParallelThrottle, [math]::Max(1, $mailboxesForPerm.Count))
+        $permissionWorkItems = @()
+        if ($mailboxesForPerm.Count -gt 0) {
+            $chunkSize = [int][math]::Ceiling($mailboxesForPerm.Count / [double]$workerCount)
+            for ($workerIndex = 0; $workerIndex -lt $workerCount; $workerIndex++) {
+                $startIndex = $workerIndex * $chunkSize
+                if ($startIndex -ge $mailboxesForPerm.Count) { break }
+                $endIndex = [math]::Min($startIndex + $chunkSize - 1, $mailboxesForPerm.Count - 1)
+                $permissionWorkItems += [PSCustomObject]@{
+                    WorkerId = $workerIndex + 1
+                    Mailboxes = @($mailboxesForPerm[$startIndex..$endIndex])
                 }
             }
         }
 
-        $resultsPerm = $permBag.ToArray()
-        $counter     = $resultsPerm.Count
-        WriteLog ("Parallel permission collection completed: {0} results collected." -f $counter) "INFO"
+        WriteLog ("Parallel permission workers: {0} persistent session(s), connect retries={1}." -f $permissionWorkItems.Count, $PermissionWorkerConnectRetries) "INFO"
+
+        $p_AppId = $AppId
+        $p_Thumb = $Thumb
+        $p_OrgDomain = $OrgDomain
+        $p_ConnectRetries = $PermissionWorkerConnectRetries
+
+        $parallelPermissionOutput = @($permissionWorkItems | ForEach-Object -ThrottleLimit $workerCount -Parallel {
+            $workItem = $_
+            $workerId = [int]$workItem.WorkerId
+            $workerMailboxes = @($workItem.Mailboxes)
+            $connected = $false
+            $connectionError = ''
+
+            try {
+                Import-Module ExchangeOnlineManagement -ErrorAction Stop
+                for ($connectAttempt = 1; $connectAttempt -le $using:p_ConnectRetries -and -not $connected; $connectAttempt++) {
+                    try {
+                        Connect-ExchangeOnline -AppId $using:p_AppId -CertificateThumbprint $using:p_Thumb `
+                            -Organization $using:p_OrgDomain -ShowBanner:$false -ErrorAction Stop | Out-Null
+                        $connected = $true
+                    }
+                    catch {
+                        $connectionError = $_.Exception.Message
+                        if ($connectAttempt -lt $using:p_ConnectRetries) {
+                            Start-Sleep -Seconds ([math]::Min(30, 5 * $connectAttempt))
+                        }
+                    }
+                }
+
+                foreach ($mb in $workerMailboxes) {
+                    $sendAsVals = @()
+                    $fullAccessVals = @()
+                    $delegationVals = @()
+                    $mailboxErrors = [System.Collections.Generic.List[string]]::new()
+
+                    if (-not $connected) {
+                        $mailboxErrors.Add(("Worker {0} EXO connection failed after {1} attempt(s): {2}" -f $workerId, $using:p_ConnectRetries, $connectionError))
+                    }
+                    else {
+                        try {
+                            $sendAsVals = Get-EXORecipientPermission -Identity $mb.Identity -ErrorAction Stop 2>$null |
+                                Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" -and $_.AccessRights -contains "SendAs" } |
+                                Select-Object -ExpandProperty Trustee
+                        }
+                        catch {
+                            $mailboxErrors.Add(("SendAs: {0}" -f $_.Exception.Message))
+                        }
+                        try {
+                            $fullAccessVals = Get-EXOMailboxPermission -Identity $mb.Identity -ErrorAction Stop 2>$null |
+                                Where-Object { $_.User -ne "NT AUTHORITY\SELF" -and $_.AccessRights -contains "FullAccess" -and -not $_.IsInherited } |
+                                Select-Object -ExpandProperty User
+                        }
+                        catch {
+                            $mailboxErrors.Add(("FullAccess: {0}" -f $_.Exception.Message))
+                        }
+                    }
+
+                    try {
+                        if ($mb.GrantSendOnBehalfTo) {
+                            $delegationVals = $mb.GrantSendOnBehalfTo | ForEach-Object { $_.ToString() } | Where-Object { $_ } | Sort-Object -Unique
+                        }
+                    }
+                    catch {
+                        $mailboxErrors.Add(("GrantSendOnBehalfTo: {0}" -f $_.Exception.Message))
+                    }
+
+                    [PSCustomObject]@{
+                        WorkerId = $workerId
+                        UserPrincipalName = $mb.UserPrincipalName
+                        PrimarySmtpAddress = $mb.PrimarySmtpAddress
+                        OrganizationalUnit = $null
+                        SendAs = ($sendAsVals -join ";")
+                        FullAccess = ($fullAccessVals -join ";")
+                        GrantSendOnBehalfTo = ($delegationVals -join ";")
+                        CollectionError = ($mailboxErrors -join " | ")
+                    }
+                }
+            }
+            finally {
+                if ($connected) {
+                    try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+                }
+            }
+        })
+
+        $resultsPerm = @($parallelPermissionOutput | Select-Object UserPrincipalName,PrimarySmtpAddress,OrganizationalUnit,SendAs,FullAccess,GrantSendOnBehalfTo)
+        $parallelPermissionErrors = @($parallelPermissionOutput | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.CollectionError) })
+        foreach ($permissionError in $parallelPermissionErrors) {
+            $errors += [PSCustomObject]@{
+                UserPrincipalName = $permissionError.UserPrincipalName
+                Error = $permissionError.CollectionError
+            }
+        }
+
+        $connectionFailureCount = @($parallelPermissionErrors | Where-Object { $_.CollectionError -match 'EXO connection failed' }).Count
+        if ($connectionFailureCount -gt 0) {
+            throw ("Parallel permission collection failed to establish a worker session for {0} mailbox row(s); refusing to publish blank permission data." -f $connectionFailureCount)
+        }
+
+        $counter = $resultsPerm.Count
+        if ($counter -ne $mailboxesForPerm.Count) {
+            throw ("Parallel permission collection row-count mismatch: dispatched={0}, collected={1}." -f $mailboxesForPerm.Count, $counter)
+        }
+        if ($parallelPermissionErrors.Count -gt 0) {
+            WriteLog ("Parallel permission collection retained all {0} row(s) with {1} mailbox-level permission warning(s)." -f $counter, $parallelPermissionErrors.Count) "WARNING"
+        }
+        else {
+            WriteLog ("Parallel permission collection completed with exact row parity: {0}/{1}." -f $counter, $mailboxesForPerm.Count) "INFO"
+        }
 
     } else {
     # -----------------------------------------------------------------------
@@ -2533,8 +2589,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBF3m1pcHHwfbSh
-# ZUjOf96ddV7f6+nR2FRdv4uv67hNc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDy6hAL6EmyE7/A
+# dh6CKa2Af1eyjvBwGua66tMTOcjGZ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2667,31 +2723,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG1eGEXzOsAZOq06AYdZOky2BTMiVsPOG9g57DB3OcOcMA0GCSqG
-# SIb3DQEBAQUABIIBgA7zCto8RSIR+0Y89Dc+3apFL8fCNxuS1iGrnDNixKMWr84Y
-# 10GUaeiWUlRaq+ncfCMqsG/yVjls9q19DnqfOWiQpYdKQnTs68PdisaB7+1BNE83
-# ps3UR8nhgZg7dSLm0Dh+QdxaZaew3Fgc1fiFoOrp/k3P33qOKZTc6cbkbrVm21gg
-# 2+iOG+ld+87WohtulYd31Fp2W6dYyk1UoVKSEY3+DTJCNchh82oFUGsuh43SfxYA
-# kjxetGkMqJDKuXeqma0JpmQpry+qpE08ndGc19pcVphvtw8pC78wxhq9P0o41qkW
-# zgkoYGiQbc8ywAtgxnD9K8mX0mBt/hTMELmxdecjsoRxOzJQTQYVmrwKyGehxeyo
-# I2S2MyjpmYmuEBEfXEAYekc0EIq97WYNEnyZ9U492EnURQau/Aj4RcpRl9AGuwoM
-# An0U0pSplw1od1y4MFzK9c6ouG5Y2vBCeiSgcAUnBKWEB8Ga21b3rVWAqx/7sk1M
-# v+DLsqzhYzVqB1eIr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBE/iDCo8Cc7CVCeo/MJX2M7xeQZwdaqiP9ZnOaRy3FyMA0GCSqG
+# SIb3DQEBAQUABIIBgDFfNLVGxajrHnhtypLOSVP86+IEuWC7kEKHaI2SpSSnyQ2b
+# re6GoC+pQnnD2pBEj6Gl8Hzjdh7DyOkO6n/4Jmo6gH9NTxyJzt+AYPzd1uQ9KYDB
+# L9EPlAYZVBUz1YHnyjIgPqs2tCsLfESbkWKRnTt4mJ1bXIkmTxrQZ/VKrj3HUvGa
+# 7NwhTfmbo/eXbEnjKHy6t2mxkQ+yp7G0TGZ2KSCNdTpS8PpQB5yL0wfV9e2B6S1w
+# OZd0Dgrlimq7S4ah/j7qU7BwOBYxvHfhwZesiHtVEXA416Ec0p2NjdDFkPVeNVnn
+# +LJL1j8rBa1WCxr90Cmaa7MlfPgyYAJ/i4o5zrvE2rxKn6nQIloXWe/ACEtGCdjZ
+# YvPChJUqXvdsjBrcCJqePJlVBHBe7FYCLyYdFMCD3B8eJ2S1gA2kVDPEqzcSAyBx
+# 2XVcSzBA21YhzYXVu/7Z2FRbdgaIR+xUwpgouYYpCNf9BlEDcI47+Y0D3J7EHSW1
+# UB/jBxjUrD+PR9nWL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzJaMC8GCSqGSIb3DQEJBDEiBCBJmbSg1mUeGR9BSL7RlOTPc5eo/Um1zn2MBDO2
-# iekYtTANBgkqhkiG9w0BAQEFAASCAgAko7eEzqaQqHfFyG8JHL+YtS4CGidRWYUu
-# yLou+dHB0u42dLppbsbPgQmupew/DZoqLOIVREMImW1CvX+ADjsaPtDgkmV6CDmP
-# MFYawbhXfk5gX1dqCTD9a6HO6rGjuURgEAXT6bWucdHt+jI7B0/n7EpYU3jaNcdC
-# 6vkbKfyOx01NUya8wpj+yAH9DrBUh7H2tz1rNvijXSyCnMjnICEy0XevmChnH//V
-# 3S/i2OLlKxku7Vk+mA5sjHJRalbf4HrK7eLxELyqH17qpbcCIM/zYMR6xh6vViP/
-# YUDoWKmkJgAHIR/DzoInBvUZPcV2lFlqqPhmiKw3q0wVMdOvfUCcGytYCpUDcebs
-# vuF2mTGRb0nHYVYfXyXHNMzgyoRCW73fOptyz8ME7blj8hj2+xP4KeuIugOAuJto
-# V24EpDVR+xFsuK61x4OTgxmgXdFIz56qKA+dZ1xBrdsZ3ifouJteg2BjD7BeNr85
-# 9w6eWCGmKpMNN/H1qrVIl4wCD/k2SzJeUCjhnkvqEEYUBe4qtT5x9TUhAw1W20Hq
-# UHQ0nEAhMc0IY4lySsvz45X3B/tumjRzvvqyeIq4hHZtdZE5wMYSAYRDOFfie9ao
-# sKaYO+Ik8g378F8kUFGviPwjrOFFm39z1kdfydnqe5FWw/H9Y6KDGTM889qe5rCF
-# GZv5aeg9mA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMzQy
+# MTdaMC8GCSqGSIb3DQEJBDEiBCCJInB/wJE/0KgvMx/ia8/hw1EZkTKmMsyGiViD
+# SJEk9zANBgkqhkiG9w0BAQEFAASCAgCkYPgWZzSl/HnjR8DG21dU8r2jpKvi+azu
+# XsAwGZ6zGkitp1Br5h4XaF0y1J6hbZ7kVA7STwuGYRk4c7AVuC6RRwri0KxINqrg
+# 2SUcZoM1N2Y/B1fhF8JKxjtCZafKdsYSNYKs7vLWuWNtvAKeZZ/BgnACYCBPxY2q
+# 1jR1Te4wuT1XnUlmhdpzJt6QnBu4ceHdeVmt8uzi//Ge75GQ3c9+pE3XVxzgqbCu
+# kr2WTXuFOTK3SxQF2jXNPJUbuqj69QurUQemhPhJUzJ8ty2JxTporpy74mbbdkrc
+# NhPUrIXqQqiSguv9C7uIGN3mN280aH80KwDdPNB592Y2+0Wze/6sj/3EXUzzXiLo
+# ObOqDNebwEuR1CEdpowcqWn2R5n2vR6D5BMK8j7sX2ApSI6cDgngIHZOpHBDvkB0
+# /E4J5jQStcjc+YjVJACOgd+yw6qOLZEsG0QDD88QI9gr+BzqNPLcYxkNYc1oMAkF
+# j1ExOs+W3lFzvtxGJdbaSP72Z9QcPteU5gCcfJLUudt1VNWQWQiQP8q+wpxi7zpi
+# ZO1i4p63pkbd5vY6zlQpHr8Wo9UhFAeVejCBv8A0LK66EP1wIH18CbqMEJoJDQEE
+# s9jlIXfDPJ5MrXLfx6oPoQnxRVru6gb7Rtw2HlLJcw+DWRXrKs65Tmg1F1pYB1wA
+# oDfEcmPuFg==
 # SIG # End signature block
