@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.30
+1.31
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
@@ -494,7 +494,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.30"
+$ScriptVersion = "1.31"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -617,6 +617,26 @@ try {
         }
 
         return $domainNameLower.ToUpperInvariant()
+    }
+
+    function Get-AdServerForDistinguishedName {
+        param(
+            [AllowNull()][string]$DistinguishedName,
+            [Parameter(Mandatory = $true)][string]$FallbackServer
+        )
+
+        if ([string]::IsNullOrWhiteSpace($DistinguishedName)) {
+            return $FallbackServer
+        }
+
+        $domainComponents = @([regex]::Matches($DistinguishedName, '(?i)(?:^|,)DC=([^,]+)') | ForEach-Object {
+            $_.Groups[1].Value
+        })
+        if ($domainComponents.Count -eq 0) {
+            return $FallbackServer
+        }
+
+        return ($domainComponents -join '.')
     }
 
     function Get-NormalizedDomainAndSam {
@@ -1755,7 +1775,8 @@ try {
             }
             else {
                 try {
-                    $gObj = Get-ADGroup -Identity $gdn -Server $Server -Properties Name, MemberOf
+                    $groupServer = Get-AdServerForDistinguishedName -DistinguishedName $gdn -FallbackServer $Server
+                    $gObj = Get-ADGroup -Identity $gdn -Server $groupServer -Properties Name, MemberOf -ErrorAction Stop
                     if ($gObj) {
                         $gName    = $gObj.Name
                         $gParents = @($gObj.MemberOf)
@@ -1764,7 +1785,10 @@ try {
                     }
                 }
                 catch {
+                    $GroupNameByDNCache[$gdn] = ''
+                    $GroupParentsByDNCache[$gdn] = @()
                     $gParents = @()
+                    WriteLog -Message ("Computer group resolution failed once and was cached. Group='{0}'; Server='{1}'; Error='{2}'" -f $gdn, $groupServer, $_.Exception.Message) -Level 'WARNING'
                 }
             }
 
@@ -2884,8 +2908,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDPPaRXJC03acV
-# sBuTcZNbO5IFJhQs9+g9ZWiBDdCZdqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBR0C9mhuScW+sT
+# kouyjMVeznSJ7r62H/vsJgzmC46Lv6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3018,31 +3042,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEsX0WJ8hKuBLFCAvTerRcXCAXL7tJeVJ0+dNmA6u7mqMA0GCSqG
-# SIb3DQEBAQUABIIBgEUc1uJ1yptbnNiweh+/EjTmYxMf22Y16jrO1sL4Ms/1JfpK
-# knkWhIQaf5ZBKQdwQSL433yN/FNdktBl0y1Tt38GfpOD2DM3fsiRnFGej39lSCpe
-# Wu6Ak4vlP+aFic3YzewKmIFulpSvMvCFl1gglTmOux97IC1WSKfY371gqMtuAtl2
-# 38Dyv03IhxS+cw8o65E8Wur2XmFkq4bA7h2po1J0LujDLLlUAKX9mxiSbzF1px6n
-# ph/Dzlj4Yv3PRE2BVrDC8lLJHIq3oZWvSc/r2dejhB/lcC25GI2z7Ofxwutu/QC2
-# PYvqkiHR+2mFdGWqNpjvB/jx09m1JpP3nOUjKmshyFqaUO91WI48pC5aSbPUFZxZ
-# NmdYaDr5V2+vLGlxJc0p6TXBCaeO9Cim5z/AUgGxpkIz8bf0G+lSW2bFf5tNSZX+
-# JfyJdaeBKWuESxSYgK4E3L7wTIOsu04DcfdsooI4KjjO97gx8eJpam1BCUJu/4Wk
-# RiYXVBbRBi/nrwHbfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBcuE/8+Vw80ega3DERYWJjy6vZVdTKhsli+R9qWBqmZMA0GCSqG
+# SIb3DQEBAQUABIIBgGFbPpbhnKd/J9Y4HH0+0GO362zeJqTurv34l2yqYVg5qNJE
+# cmY+cRONg089tZyZzHHHz3Rd40kSfki0s3Tp/QvOn2reLYe2zCjdg6GXIet9/Lhy
+# L5P7owVpohm6IRUrM8K53/0FrKx8aBkkTWiOwbdzRi3kuaewOrhyEgXA3RIL40DW
+# 26jnOsYkiB1BKhviOV+Eh3grmiY405hz5WnYMV9WdM0xXys9NG9DD311ZPMFXmkM
+# Uy1fosq+mtiRA66keh+um3OiFIKk/b4Y/Yp9Gb3pcNkVmt3dXdgFkvsgP/cjYwfg
+# 4zrMUKoKHrpfD/KOea4WjuTjkpmHFAnh6kZpkzRhnLJZotop7zMayPfBS4HeOSSi
+# g50+9HhRdtilykNJ5vkGi73RPV5Bmg/bwM0jtDm0WFdHl2rMvOaW3H+5I/yihyfh
+# iCvYONP0vnTe+WkIxiQ1c/ZS2a/sBHlRWlV8O6dGiiI9ttYTZZBeSqa3tKlN8Xbk
+# nNfmLsHvOoky5JiAY6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxNzE0
-# NDFaMC8GCSqGSIb3DQEJBDEiBCDBixGV4eWWZwo6f+UjhOBfPuJ1Z7YUWt5K+P6m
-# orqE9jANBgkqhkiG9w0BAQEFAASCAgAMcRvHQ62X6fcQrxcBWsU1xRXm6YB29trI
-# E6ch6oM+hb8GoSjgfFBtVVJrJt0UVsBhAwM6zaKHTjx2nVee4ggFykphlSv+eFCQ
-# Wkt4t0QtsKm84aLd8eXAK2PEA6Ps7T4G/2GNNdhZjnzPUuN4kQFI46hejazdKAsc
-# NbTSbX7Mt4b7EtgMkTGTWk0YY1Kwu56MFLD3Lr3+RyG5e8JlrdXcByHCJmXHgd35
-# GS75ql6TIlW7ZTHJq7I5kqIOc4Sw3YSMQMBluOxWzidtdZD5jT8wmpbrPyRla0Q4
-# TCUaZAh0bfzZ6MbwyymG2oa1hD0vmndmMo98j12DEk2GNJf3tHDUmMScA2iWcj6Q
-# SkjRpOB4PNX2FHnuAhET6t9rNI4zXxGXO9Z720KDdFlSz75nKSa08W6/6w+B2wg8
-# OENA69AkyN5hn7hDKSnMzZP8BVglNmeKvOvRF87wDfgpj4Qbfk3gyJFcRlwV7MrF
-# kNvc5KbWRVXnkutG2Ci8ZkEVtLtOwIMos76pxeR3o0OdPy1L/OqSGSbdk1ZrcScS
-# 7Z4SxwTL4n4O7+vysCQiadEqrAdR079klnwn1pnTbQOEA7rfxvPNzzm3z92E2DVm
-# g3UKeWnWAfPECv1CsoJmh8apSMUcv6TQGcUMnIxxhKx7v4bm1a08AQ/R89ybDXFN
-# cfTBulu7AA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMDQw
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAeYRj6i8jW83cCICtxoGKODBOE5oG9DegkhMUM
+# c3SZsTANBgkqhkiG9w0BAQEFAASCAgABupBWRJQdYq2JhUybK7LLqkPtsF8nwVmX
+# 93yasVej1MWx0q8dZP/w/r1czXj7ORH7bfR5VPrUaPIY4czYKFERYfIJsGoMzTGP
+# 5x6gjC3wLi/yFS3qvCZBwurmkABCKymMmGycIBx8Eoxk5T5rNyYXYRNzgslDbx7f
+# BHfYjW5K4jrgO3FjeEEl8NfHDVO3d2YRVMeyQ45EwzEn4iAi4UgPdzKBs/UD5n2v
+# 59lllk7Y0tJaEKO0N1s5JcC8t15PcjqA0zUagc8rZQ4jVkKGySUQE0CckVrNfdd5
+# i4FNsT2QCzxtxI0dWxUSP6VTb+XVNUsq0jjVFHhWSd73WJZhb3O2P5P2gkzWus0h
+# ISHvMn9QLNXaBuHFV0BNt75cCMcGz5oyES3gHnzJJJfygJloR336JzPcT6lTUiM2
+# 7XCpPD2YxLn9Bl2SKekyxp8uBUoQ4+EFTRMokL/cvxKLMvati8WP2HBhPjo+6+Ia
+# EKlPDFOWODJmu2ruWpzdD6artrJ2dIy1NDv3TpYLDImZOuQmz5dqDI7zrTlRPPw0
+# C9QwRmW3obDzXlKSH78frmuPUU1D2vdZmVsD6uudIuxBVRMVNegdIBCLjRvLVSJ5
+# MavTcozXP8hXPtdIjRLFTFHU42p/CUB+rUpNOroV+dSDGOKBUjNJWrvlcvfnbGAI
+# njKGnawLjw==
 # SIG # End signature block
