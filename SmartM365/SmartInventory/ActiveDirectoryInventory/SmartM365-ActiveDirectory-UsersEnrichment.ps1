@@ -146,6 +146,119 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         return ([double]$Value).ToString('0.########', [System.Globalization.CultureInfo]::InvariantCulture)
     }
 
+    function Normalize-SmartM365PersonaeText {
+        param([string]$Value)
+        $text = ([string]$Value).Trim().ToLowerInvariant()
+        foreach ($pair in @(@('é','e'),@('è','e'),@('ê','e'),@('ë','e'),@('à','a'),@('â','a'),@('î','i'),@('ï','i'),@('ô','o'),@('û','u'),@('ù','u'),@('ä','a'),@('ö','o'),@('ü','u'),@('ú','u'),@('ó','o'),@('á','a'),@('í','i'),@('ñ','n'),@('ç','c'),@('ß','ss'),@('œ','oe'),@('æ','ae'))) { $text = $text.Replace($pair[0], $pair[1]) }
+        return $text
+    }
+
+    function Normalize-SmartM365JobTitleText {
+        param([string]$ManagedTitle, [string]$DescriptionTitle)
+        $managed = ([string]$ManagedTitle).Trim()
+        $description = ([string]$DescriptionTitle).Trim()
+        if ($description.ToLowerInvariant().Contains('deprovision')) { $description = '' }
+        if (-not [string]::IsNullOrWhiteSpace($description) -and $managed.ToLowerInvariant() -eq $description.ToLowerInvariant()) { $text = $managed.ToLowerInvariant() }
+        else { $text = ($managed + $(if ([string]::IsNullOrWhiteSpace($description)) { '' } else { ' ' + $description })).Trim().ToLowerInvariant() }
+        foreach ($separator in @('(',')','/','-',',',';',':','.',"'",'&','+','|','_',[string][char]160)) { $text = $text.Replace($separator, ' ') }
+        $text = $text.Replace([string][char]0x2013, ' ').Replace([string][char]0x2014, ' ')
+        $text = Normalize-SmartM365PersonaeText -Value $text
+        while ($text.Contains('  ')) { $text = $text.Replace('  ', ' ') }
+        return $text.Trim()
+    }
+
+    function Get-SmartM365JobTitleFromDescription {
+        param([string]$Description)
+        $text = ([string]$Description)
+        $position = $text.IndexOf('-')
+        if ($position -lt 0) { return '' }
+        return $text.Substring($position + 1).Trim()
+    }
+
+    function New-SmartM365PersonaeKeywordRows {
+        param([object[]]$Rows, [bool]$StrictCategory)
+        $result = New-Object System.Collections.Generic.List[object]
+        foreach ($row in $Rows) {
+            $keyword = Normalize-SmartM365PersonaeText -Value (Get-Value $row @('Keyword'))
+            $category = [string](Get-Value $row @('Category'))
+            if ([string]::IsNullOrWhiteSpace($keyword) -or [string]::IsNullOrWhiteSpace($category)) { continue }
+            [void]$result.Add([pscustomobject]@{ Keyword = $keyword; KeywordPadded = (' {0} ' -f $keyword); KeywordLength = $keyword.Length; Category = $category; StrictCategory = $StrictCategory })
+        }
+        return @($result | Sort-Object -Property @{ Expression = 'KeywordLength'; Descending = $true }, Keyword)
+    }
+
+    function Get-SmartM365JobFamilyFromKeywords {
+        param([string]$PaddedTitle, [object[]]$KeywordRows, [bool]$StrictCategory)
+        if ([string]::IsNullOrWhiteSpace($PaddedTitle) -or @($KeywordRows).Count -eq 0) { return 'Unclassified' }
+        foreach ($keywordRow in $KeywordRows) {
+            if ($PaddedTitle.Contains([string]$keywordRow.KeywordPadded)) {
+                $category = [string]$keywordRow.Category
+                if (-not $StrictCategory) { return $category }
+                switch ($category) {
+                    'Healthcare staff' { return 'Healthcare staff' }
+                    'Management and Administrative staff' { return 'Management and Administrative staff' }
+                    'Non-IT staff' { return 'Non-IT staff' }
+                    'Service staff' { return 'Service staff' }
+                    default { return 'Unclassified' }
+                }
+            }
+        }
+        return 'Unclassified'
+    }
+
+    function Get-SmartM365OrganizationalUnitCode {
+        param($Row)
+        $raw = (Get-Value $Row @('OrganizationalUnit','extensionAttribute13')).Trim()
+        if ([string]::IsNullOrWhiteSpace($raw)) { return '999999' }
+        $numVal = 0.0
+        if ([double]::TryParse($raw.Replace(',', '.'), [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$numVal)) { return ([math]::Floor($numVal)).ToString('000000', [System.Globalization.CultureInfo]::InvariantCulture) }
+        return '999998'
+    }
+
+    function Get-SmartM365TypeEtablissement {
+        param($EntityRow)
+        if ($null -eq $EntityRow) { return 'NOTFOUND' }
+        $hqText = ([string](Get-Value $EntityRow @('HQ'))).Trim().ToLowerInvariant()
+        if (@('1','true','vrai','oui') -contains $hqText) { return 'HQ' }
+        $service = ([string](Get-Value $EntityRow @('Entity (Service)'))).ToUpperInvariant()
+        if ($service.Contains('RESIDENCE')) { return 'RESIDENCE' }
+        if ($service.Contains('CLINIQUE')) { return 'CLINIC' }
+        if ($service.Contains('UNKNOWN')) { return 'UNKNOWN' }
+        return 'OTHER'
+    }
+
+    function Get-SmartM365CombinedJobFamily {
+        param([string]$AccountType, [string]$TypeEtablissement, [string]$TypeEntity, [string]$UserPrincipalName, [bool]$NoLastLogonInOnComputer, [string]$KeywordCategory)
+        $accountTypeText = ([string]$AccountType).Trim()
+        $typeEtablissementText = ([string]$TypeEtablissement).Trim()
+        $typeEntityText = ([string]$TypeEntity).Trim()
+        $upnLower = ([string]$UserPrincipalName).ToLowerInvariant()
+        $notIntegrated = if ($typeEntityText -eq 'NOT-INTEGRATED') { 'Not Integrated BUs' } else { '' }
+        $immediate = ''
+        if ([string]::IsNullOrWhiteSpace($notIntegrated)) {
+            switch ($accountTypeText) {
+                'Ext Account' { $immediate = 'Ext staff' }
+                'Service Account' { $immediate = 'Non-IT staff' }
+                'Admin Account' { $immediate = 'Non-IT staff' }
+                'System Account' { $immediate = 'Non-IT staff' }
+                'MDM Account' { $immediate = 'Non-IT staff' }
+                'Shared Mailbox' { $immediate = 'Non-IT staff' }
+                'Room Mailbox' { $immediate = 'Non-IT staff' }
+                'Test Account' { $immediate = 'Non-IT staff' }
+            }
+        }
+        $extDetected = ''
+        if ([string]::IsNullOrWhiteSpace($notIntegrated) -and ($upnLower.Contains('.ext') -or $upnLower.Contains('#ext#') -or $upnLower.Contains('-ext'))) { $extDetected = 'Ext staff' }
+        $extFinal = if ($extDetected) { if ($NoLastLogonInOnComputer) { 'Ext staff without device' } else { 'Ext staff with device' } } else { '' }
+        $hqStaff = if ([string]::IsNullOrWhiteSpace($notIntegrated) -and [string]::IsNullOrWhiteSpace($extDetected) -and $typeEtablissementText -eq 'HQ') { 'Headquarters staff' } else { '' }
+        $keyword = if ([string]::IsNullOrWhiteSpace($notIntegrated) -and [string]::IsNullOrWhiteSpace($extDetected) -and [string]::IsNullOrWhiteSpace($hqStaff)) { $KeywordCategory } else { '' }
+        if ($notIntegrated) { return $notIntegrated }
+        if ($extFinal) { return $extFinal }
+        if ($immediate) { return $immediate }
+        if ($hqStaff) { return $hqStaff }
+        if ($keyword) { return $keyword }
+        return 'Unclassified'
+    }
 
     function Get-Value {
         param($Row, [string[]]$Names)
@@ -164,15 +277,27 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         return $text.ToUpperInvariant()
     }
 
-    function Find-SourceCsv {
+    function Get-SourceCandidatePaths {
         param([string[]]$Names)
-        foreach ($root in @($LatestFolderPath, $OutputFolder, (Split-Path -Path $CombinedUsersCsv -Parent))) {
-            if ([string]::IsNullOrWhiteSpace([string]$root) -or -not (Test-Path -LiteralPath $root)) { continue }
-            foreach ($name in $Names) {
-                $candidate = Join-Path -Path $root -ChildPath $name
-                if (Test-Path -LiteralPath $candidate) { return $candidate }
+        $roots = New-Object System.Collections.Generic.List[string]
+        foreach ($root in @($LatestFolderPath, $OutputFolder, (Split-Path -Path $CombinedUsersCsv -Parent))) { if (-not [string]::IsNullOrWhiteSpace([string]$root)) { [void]$roots.Add([string]$root) } }
+        if (-not [string]::IsNullOrWhiteSpace($LatestFolderPath)) { $latestParent = Split-Path -Path $LatestFolderPath -Parent; if (-not [string]::IsNullOrWhiteSpace($latestParent)) { [void]$roots.Add((Join-Path -Path $latestParent -ChildPath 'DATA-ALL')) } }
+        if (-not [string]::IsNullOrWhiteSpace($OutputFolder)) {
+            $currentRoot = $OutputFolder
+            for ($i = 0; $i -lt 6 -and -not [string]::IsNullOrWhiteSpace($currentRoot); $i++) {
+                if ([System.IO.Path]::GetFileName($currentRoot).Equals('DATA-ALL', [System.StringComparison]::OrdinalIgnoreCase)) { [void]$roots.Add($currentRoot); break }
+                $currentRoot = Split-Path -Path $currentRoot -Parent
             }
         }
+        $candidates = New-Object System.Collections.Generic.List[string]
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($root in $roots) { if ([string]::IsNullOrWhiteSpace([string]$root)) { continue }; foreach ($name in $Names) { $candidate = Join-Path -Path $root -ChildPath $name; if ($seen.Add($candidate)) { [void]$candidates.Add($candidate) } } }
+        return @($candidates)
+    }
+
+    function Find-SourceCsv {
+        param([string[]]$Names)
+        foreach ($candidate in (Get-SourceCandidatePaths -Names $Names)) { if (Test-Path -LiteralPath $candidate) { return $candidate } }
         return ''
     }
 
@@ -183,6 +308,24 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         return @(Import-Csv -LiteralPath $csvPath -Encoding UTF8)
     }
 
+    function Import-SourceXlsx {
+        param([string[]]$Names, [string[]]$WorksheetNames)
+        foreach ($candidate in (Get-SourceCandidatePaths -Names $Names)) {
+            if (-not (Test-Path -LiteralPath $candidate)) { continue }
+            try { Import-Module ImportExcel -ErrorAction Stop }
+            catch { WriteLog -Message ("AD users enrichment Excel source skipped because ImportExcel module is not available: {0}" -f $candidate); return @() }
+            $rowsOut = New-Object System.Collections.Generic.List[object]
+            foreach ($worksheetName in @($WorksheetNames)) {
+                if ([string]::IsNullOrWhiteSpace($worksheetName)) { continue }
+                try { foreach ($row in @(Import-Excel -Path $candidate -WorksheetName $worksheetName -ErrorAction Stop)) { [void]$rowsOut.Add($row) } }
+                catch { WriteLog -Message ("AD users enrichment Excel worksheet skipped: {0} [{1}] ({2})" -f $candidate, $worksheetName, $PSItem.Exception.Message) }
+            }
+            WriteLog -Message ("AD users enrichment Excel source loaded: {0} ({1} row(s))" -f $candidate, $rowsOut.Count)
+            return $rowsOut.ToArray()
+        }
+        WriteLog -Message ("AD users enrichment optional Excel source missing; related columns will be blank: {0}" -f ($Names -join ', '))
+        return @()
+    }
     function Add-SmartM365MapValue {
         param([hashtable]$Map, [string]$Key, $Row)
         if ([string]::IsNullOrWhiteSpace($Key)) { return }
@@ -235,6 +378,10 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $backupCoverage = Import-SourceCsv @('M365_BackupPolicyScope_MailboxCoverage.csv')
     $migrationJobs = Import-SourceCsv @('Exchange_EXO_MigrationJobs.csv')
     $hybridIdentityIssues = Import-SourceCsv @('Exchange_HybridIdentity_Issues.csv')
+    $personaeKeywordRowsRaw = Import-SourceXlsx @('Personae-Keywords.xlsx') @('PersonaeKeywords')
+    $entityRowsRaw = Import-SourceXlsx @('EntityDirectories.xlsx') @('Entities','Entities (2)')
+    $personaeKeywordRows1 = @(New-SmartM365PersonaeKeywordRows -Rows $personaeKeywordRowsRaw -StrictCategory:$true)
+    $personaeKeywordRows2 = @(New-SmartM365PersonaeKeywordRows -Rows $personaeKeywordRowsRaw -StrictCategory:$false)
 
     $localByDomainSam = @{}; $localBySmtp = @{}
     foreach ($row in $localMailboxes) { Add-SmartM365MapValue $localByDomainSam (Get-Key (Get-Value $row @('DomainAndSam'))) $row; Add-SmartM365MapValue $localBySmtp (Get-Key (Get-Value $row @('PrimarySMTPaddress','PrimarySmtpAddress'))) $row }
@@ -260,6 +407,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $backupBySmtp = @{}; foreach ($row in $backupCoverage) { Add-SmartM365MapValue $backupBySmtp (Get-Key (Get-Value $row @('PrimarySmtpAddress','MailboxUserPrincipalName','MemberUserPrincipalName'))) $row }
     $migrationBySmtp = @{}; foreach ($row in $migrationJobs) { Add-SmartM365MapValue $migrationBySmtp (Get-Key (Get-Value $row @('MigrationUser','EmailAddress'))) $row }
     $hybridIssuesByObjectGuid = @{}; foreach ($row in $hybridIdentityIssues) { Add-SmartM365MapListValue $hybridIssuesByObjectGuid (Get-Key (Get-Value $row @('ObjectGUID'))) $row }
+    $entityByCode = @{}; foreach ($row in $entityRowsRaw) { foreach ($entityKeyCandidate in @((Get-Value $row @('Entity code Text')),(Get-Value $row @('Entity code Text 6 digits')),(Get-Value $row @('Entity code')),(Get-Value $row @('EntityCode')),(Get-Value $row @('OrganizationalUnit')))) { Add-SmartM365MapValue $entityByCode (Get-Key $entityKeyCandidate) $row; $entityNumber = 0.0; if ([double]::TryParse(([string]$entityKeyCandidate).Trim().Replace(',', '.'), [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$entityNumber)) { Add-SmartM365MapValue $entityByCode (([math]::Floor($entityNumber)).ToString('000000', [System.Globalization.CultureInfo]::InvariantCulture)) $row } } }
     $enrichedRows = New-Object System.Collections.Generic.List[object]
 
     foreach ($user in $users) {
@@ -333,15 +481,31 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $userPrincipalName = [string]$user.UserPrincipalName
         $enabledText = ([string]$user.Enabled).Trim()
         $isEnabled = $enabledText -match '^(?i:true|1)$'
-        $typeEtablissement = Get-Value $user @('TypeEtablissement')
+        $orgUnit = Get-SmartM365OrganizationalUnitCode -Row $user
+        $entity = if ($entityByCode.ContainsKey((Get-Key $orgUnit))) { $entityByCode[(Get-Key $orgUnit)] } else { $null }
+        $typeEtablissement = Get-SmartM365TypeEtablissement -EntityRow $entity
         $typeEtablissementUpper = $typeEtablissement.Trim().ToUpperInvariant()
+        $typeEntityValue = if ($null -ne $entity) { Get-Value $entity @('Entity Type','EntityType') } else { '' }
+        if ([string]::IsNullOrWhiteSpace($typeEntityValue)) { $typeEntityValue = Get-TypeEntityFallback -DomainNameShort (Get-Value $user @('DomainNameShort')) -Country (Get-Value $user @('Country')) }
+        $labelFromEntity = if ($null -ne $entity) { Get-Value $entity @('Entity label','EntityLabel') } else { 'NOTFOUND' }
         $inTargetHqOu = $distinguishedNameUpper.Contains('OU=020001-MADRID') -or $distinguishedNameUpper.Contains('OU=120001-HEAD_QUARTER') -or $distinguishedNameUpper.Contains('OU=HEADQUARTER')
         $inDisabledObjectsOu = $distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')
         $givenNameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('GivenName'))
         $surnameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('Surname'))
         $accountType = Get-SmartM365AccountType -UPN $userPrincipalName -SAM $samAccountName -DN $distinguishedName -RecipientType $recipientType -GivenName (Get-Value $user @('GivenName')) -Surname (Get-Value $user @('Surname')) -GivenNameClean $givenNameClean -SurnameClean $surnameClean
-        $jobFamilyCombined = Get-Value $user @('Job Family Combined')
+        $jobTitleFromDesc = Get-SmartM365JobTitleFromDescription -Description (Get-Value $user @('Description'))
+        $jobTitleFromDesc2 = $jobTitleFromDesc
+        $jobTitleNormalized = Normalize-SmartM365JobTitleText -ManagedTitle '' -DescriptionTitle $jobTitleFromDesc
+        $jobTitleNormalized2 = Normalize-SmartM365JobTitleText -ManagedTitle '' -DescriptionTitle $jobTitleFromDesc2
+        $jobTitlePadded = if ([string]::IsNullOrWhiteSpace($jobTitleNormalized)) { '' } else { ' ' + $jobTitleNormalized + ' ' }
+        $jobTitlePadded2 = if ([string]::IsNullOrWhiteSpace($jobTitleNormalized2)) { '' } else { ' ' + $jobTitleNormalized2 + ' ' }
+        $jobFamilyFromKeywords = Get-SmartM365JobFamilyFromKeywords -PaddedTitle $jobTitlePadded -KeywordRows $personaeKeywordRows1 -StrictCategory:$true
+        $jobFamilyFromKeywords2 = Get-SmartM365JobFamilyFromKeywords -PaddedTitle $jobTitlePadded2 -KeywordRows $personaeKeywordRows2 -StrictCategory:$false
+        $noLastLogonInOnComputer = [string]::IsNullOrWhiteSpace([string]$out['LastLoggedInOnComputer'])
+        $jobFamilyCombined = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEtablissement $typeEtablissement -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -KeywordCategory $jobFamilyFromKeywords
+        $jobFamilyCombined2 = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEtablissement $typeEtablissement -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -KeywordCategory $jobFamilyFromKeywords2
         $target1Persona = if (@('UserMailbox','RemoteUserMailbox') -contains $recipientType) { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined } else { 'None' }
+        $target1Persona2 = if (@('UserMailbox','RemoteUserMailbox') -contains $recipientType) { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined2 } else { 'None' }
         $target2Persona = if ($target1Persona -eq 'M365F3') { if ($totalSizeMb -ge 50000) { 'M365F3+EXCHPLAN2' } elseif ($totalSizeMb -gt 2000) { 'M365F3+EXCHPLAN1' } else { 'M365F3' } } else { $target1Persona }
         $target3Persona = if ($target1Persona -eq 'M365F3') { if ($totalSizeMb -gt 2000) { 'M365F3 > 2G' } else { 'M365F3 < 2G' } } else { $target1Persona }
         $licenseGroupNorm = $licenseGroup.Trim().ToUpperInvariant()
@@ -353,7 +517,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['OU_Path'] = Get-OuPathFromDistinguishedName -DistinguishedName $distinguishedName
         $out['OU_Category'] = if ($distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')) { 'DISABLED OBJECTS' } elseif ($distinguishedNameUpper.Contains('OU=ORGANIZATION')) { 'ORGANIZATION' } elseif ($distinguishedNameUpper.Contains('OU=ADMIN')) { 'ADMIN' } elseif ($distinguishedNameUpper.Contains('OU=FAX')) { 'FAX' } else { 'OTHER' }
         $out['TypeEtablissement'] = $typeEtablissement
-        $out['TypeEntity'] = Get-TypeEntityFallback -DomainNameShort (Get-Value $user @('DomainNameShort')) -Country (Get-Value $user @('Country'))
+        $out['TypeEntity'] = $typeEntityValue
         $out['GivenNameClean'] = $givenNameClean
         $out['SurnameClean'] = $surnameClean
         $out['AccountType'] = $accountType
@@ -365,7 +529,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['TotalItemSizeNumeric_From_Mailboxes'] = Format-NumberInvariant $localSizeMb
         $out['TotalItemSizeNumeri_From_RemoteMailboxes'] = Format-NumberInvariant (Get-NumberInvariant (Get-Value $remoteMailbox @('TotalItemSizeGB')))
         $out['M365LicenseType_Target1_ByPersona'] = $target1Persona
-        $out['M365LicenseType_Target1_ByPersona 2'] = $target1Persona
+        $out['M365LicenseType_Target1_ByPersona 2'] = $target1Persona2
         $out['M365LicenseType_Target2_ByPersona'] = $target2Persona
         $out['M365LicenseType_Target3_ByPersona'] = $target3Persona
         $out['M365LicenseType_ByPersonae'] = $target1Persona
@@ -398,19 +562,19 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['AccountToCleanExcluded'] = ''
         $out['AccountToCleanStatus1'] = ''
         $out['AccountToCleanStatus2'] = ''
-        $out['IsJobTitleValid'] = ''
+        $out['IsJobTitleValid'] = [string](-not [string]::IsNullOrWhiteSpace($jobTitleNormalized))
         $out['Job Family Combined'] = $jobFamilyCombined
-        $out['Job Family Combined 2'] = $jobFamilyCombined
-        $out['Job Family from Keywords'] = ''
-        $out['Job Family from Keywords 2'] = ''
-        $out['Job Title Combined'] = ''
-        $out['Job Title From Desc'] = ''
-        $out['Job Title From Desc 2'] = ''
-        $out['Job Title Normalized'] = ''
-        $out['Job Title Normalized 2'] = ''
-        $out['Job Title Padded'] = ''
-        $out['Job Title Padded 2'] = ''
-        $out['LabelFromEntity'] = ''
+        $out['Job Family Combined 2'] = $jobFamilyCombined2
+        $out['Job Family from Keywords'] = $jobFamilyFromKeywords
+        $out['Job Family from Keywords 2'] = $jobFamilyFromKeywords2
+        $out['Job Title Combined'] = $jobTitleFromDesc
+        $out['Job Title From Desc'] = $jobTitleFromDesc
+        $out['Job Title From Desc 2'] = $jobTitleFromDesc2
+        $out['Job Title Normalized'] = $jobTitleNormalized
+        $out['Job Title Normalized 2'] = $jobTitleNormalized2
+        $out['Job Title Padded'] = $jobTitlePadded
+        $out['Job Title Padded 2'] = $jobTitlePadded2
+        $out['LabelFromEntity'] = $labelFromEntity
         $out['LastLoggedComputerSamAccountNames'] = ''
         $out['LastLoggedInOnALLComputers'] = ''
         $out['LastLoggedInOnComputer'] = ''
@@ -543,10 +707,10 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 }
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCOIQMBv5v5m3qN
-# CH2BJZTPtyDbevhVyQvo7k1OKfaNOaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDW7y1EXmiaSFRm
+# NiG3RYvAA+MelMrE3E8+T+4tyrzTrKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -571,139 +735,19 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGfdbkqf1SzaGUQc2a/e0vdsLPz6KgHCs7sRrZyYF6dFMA0GCSqG
-# SIb3DQEBAQUABIIBgDnR46jIYF4ZrhJKXPMjI0uxE7/QnaqOKv1maMZb7F/bVZlt
-# NWi/0MGJrboUSQ5pvrxxDrMurwM7XMUc3Fe4gHOYau/zSt2CQqg0QmFVIZk81Lt9
-# ve2F+VfLkfPCbAZFxwQt7Ag7ZzT5vXNuWtnD429q7VyfTOx9RldhNU334Xh+h/fi
-# MuHdSZ2wxOw5rQvrDHwZHLsfaJMCRffI9Jufq1mcPjX2p5WcUFe/M+4uuQp0uGQu
-# bx3JQOpb8R5Yxi9tT63w6HBgFTuQJa64+CXfz71B5aqaqKampNmzCZiQGNeLg49H
-# nleLmpP8ViUdRatTFf8MogCdLBWAUNJGYnk+yTFxLAEsIABNEGtxoXMnYPUtaGrT
-# Se8Mf3WOiVCQYonO6MEJo4aKwDIGmq4+b4nIn/hJAC7O3yfQSAu3JlDuOvVJFgMj
-# TwqO5Upaq57F3fSkBNeFS2G7wbBwsOSOCo3ywjQ0M1qPSSOGtJwn1EAW1cCj0MZN
-# 5xLJfQpR4+nbXHy6q6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMjI3
-# NDRaMC8GCSqGSIb3DQEJBDEiBCC5Lhjts79E3xVgzJ+neNgc4hq86WJCBq1DyyQv
-# jpHlwzANBgkqhkiG9w0BAQEFAASCAgAGeAP/nFxkJrFxrM1ETBaZRazP4IUbgLBb
-# FXokRnJVe13SkKQe4RinmRAnT+vd1CDHWsrQ2V3E3WCVFZ7oqsHk43Sbghgk3btO
-# UVsyvmpD0zRF19r+jL19frfLlP4BE51mAE9vYV7JX5WLIfX9lkfiS82cHyse7o4I
-# MP7zxoNIeP6ReJlV9Shmio7TTWGp4oSEEgHpvrAK+pal8C4NQhq0CidJypymGCnN
-# 3RKNTksqZhw5WO/PSxeYgjZmp1g0PQIRx9r2Q+W/bxw6ia0JNR9EhIkyfLu7VlRk
-# T3BhXSixrXyEweMceyeHbNkQNEdlkNTKxSPkuvO5LtgTPp3Nkwb245w3ZAq+5HNR
-# Gt0WYJAmfY+unU6aUQcv0MIehnp5Xwm9yn6H+qpwiVc7um+K3evtGMwMC8H0nDyu
-# xSLzhQd/cNE/T/lUFy5YJ31MEKS/B2ZeS9JZH+xxH6GhkqU0LTvBzbjl2XUyH9a0
-# xXRAYKLZgGgIUzHd5ikGNdvNFn8rD7oFqHSPb2iUYjr8sGf9kew9+XzS+8m9MmL9
-# MFzSZ4sGBdPIoreZafXzBZ0qQOWopWX1H+g7raLxP8h0uAmCxeapwkHZJqbN1UG3
-# c5ccVY/hC7aXmrMXRCFEmZpXdLStpc3J0qsevaunSJQkRtA8N90emB0CzviNJCN6
-# qzfkGPfvxg==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBKSdbqCrSijcHVkFm2u0wr
+# QjuT0wKOFXSLzRaC/I6uUDANBgkqhkiG9w0BAQEFAASCAYCdFralABO9SuD1Nz44
+# vq0RDGsu+DjtuFFlZ3KJ5b7a719K00k0FwqZunNkpqfzuSa5amLmkGJxx1leNOpj
+# xMzrn1eMPLajXXl11KXLMjSqntXZXdwdg0nRJwEOQ+xzlgqNZRpywLSQ4dqNbRwi
+# oEI3zO2AOHZZJ/osBLgEsjfWbgzr98SM/AQd4TohOkaKEqRf9+VrW166WMxXrW6T
+# Wj/z5IxrBefqqtWvSDMICiin/CZh6WzouyIZ3XDAUCWtYBwFEgGfQEYowwJv9cBs
+# pzw6RkjY25jt0SmdH6sv2WupGBSz2+ZCi29toEtWrqtPbs1s7iTb8kPSMHMAaLb1
+# Yl41C2AV1DwD47LenoeG5h5zfcrGu4+gQu4HBRB8Il2Uf2v6yL81kg0DNKCTmlvd
+# pZ7Am9+9YwhLBAFL4mTuu67wkxfW7v5VCVd6f55VQXjJhFNVFG6Zn0T+tukpOdOh
+# orRkHumC6b4WGc4AvcfnHNyOnooqRRU46eF+QLWZlwAyk0E=
 # SIG # End signature block

@@ -177,11 +177,34 @@ function Build($AdVersion, $IntuneVersion) {
         return ("Within last {0} days" -f $LimitDays)
     }
 
-    function LoadCsv($Name) {
+    function Get-SourceCandidatePaths($Name) {
         $candidates = New-Object System.Collections.Generic.List[string]
-        if (-not [string]::IsNullOrWhiteSpace($LatestFolderPath)) { [void]$candidates.Add((Join-Path $LatestFolderPath $Name)) }
-        if (-not [string]::IsNullOrWhiteSpace($OutputFolder)) { [void]$candidates.Add((Join-Path $OutputFolder $Name)) }
-        foreach ($candidate in $candidates) {
+        $roots = New-Object System.Collections.Generic.List[string]
+        foreach ($root in @($LatestFolderPath, $OutputFolder)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$root)) { [void]$roots.Add([string]$root) }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($LatestFolderPath)) {
+            $latestParent = Split-Path -Path $LatestFolderPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($latestParent)) { [void]$roots.Add((Join-Path -Path $latestParent -ChildPath 'DATA-ALL')) }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($OutputFolder)) {
+            $currentRoot = $OutputFolder
+            for ($i = 0; $i -lt 6 -and -not [string]::IsNullOrWhiteSpace($currentRoot); $i++) {
+                if ([System.IO.Path]::GetFileName($currentRoot).Equals('DATA-ALL', [System.StringComparison]::OrdinalIgnoreCase)) { [void]$roots.Add($currentRoot); break }
+                $currentRoot = Split-Path -Path $currentRoot -Parent
+            }
+        }
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($root in $roots) {
+            if ([string]::IsNullOrWhiteSpace([string]$root)) { continue }
+            $candidate = Join-Path -Path $root -ChildPath $Name
+            if ($seen.Add($candidate)) { [void]$candidates.Add($candidate) }
+        }
+        return @($candidates)
+    }
+
+    function LoadCsv($Name) {
+        foreach ($candidate in (Get-SourceCandidatePaths $Name)) {
             if (Test-Path -LiteralPath $candidate) {
                 $rows = @(Import-Csv -LiteralPath $candidate -ErrorAction Stop)
                 WriteLog -Message ("AD enrichment source loaded: {0} ({1} row(s))" -f $candidate, $rows.Count)
@@ -189,6 +212,31 @@ function Build($AdVersion, $IntuneVersion) {
             }
         }
         WriteLog -Message ("AD enrichment optional source missing; related columns will be blank: {0}" -f $Name)
+        return @()
+    }
+
+    function LoadXlsx($Name, [string[]]$WorksheetNames) {
+        foreach ($candidate in (Get-SourceCandidatePaths $Name)) {
+            if (-not (Test-Path -LiteralPath $candidate)) { continue }
+            try { Import-Module ImportExcel -ErrorAction Stop }
+            catch {
+                WriteLog -Message ("AD enrichment Excel source skipped because ImportExcel module is not available: {0}" -f $candidate)
+                return @()
+            }
+            $rowsOut = New-Object System.Collections.Generic.List[object]
+            foreach ($worksheetName in @($WorksheetNames)) {
+                if ([string]::IsNullOrWhiteSpace($worksheetName)) { continue }
+                try {
+                    foreach ($row in @(Import-Excel -Path $candidate -WorksheetName $worksheetName -ErrorAction Stop)) { [void]$rowsOut.Add($row) }
+                }
+                catch {
+                    WriteLog -Message ("AD enrichment Excel worksheet skipped: {0} [{1}] ({2})" -f $candidate, $worksheetName, $PSItem.Exception.Message)
+                }
+            }
+            WriteLog -Message ("AD enrichment Excel source loaded: {0} ({1} row(s))" -f $candidate, $rowsOut.Count)
+            return $rowsOut.ToArray()
+        }
+        WriteLog -Message ("AD enrichment optional Excel source missing; related columns will be blank: {0}" -f $Name)
         return @()
     }
 
@@ -294,6 +342,16 @@ function Build($AdVersion, $IntuneVersion) {
         return 'UNKNOWN'
     }
 
+    function GetTypeEtablissement($EntityRow) {
+        if ($null -eq $EntityRow) { return 'NOTFOUND' }
+        $hqText = ([string](V $EntityRow @('HQ'))).Trim().ToLowerInvariant()
+        if (@('1','true','vrai','oui') -contains $hqText) { return 'HQ' }
+        $service = ([string](V $EntityRow @('Entity (Service)'))).ToUpperInvariant()
+        if ($service.Contains('RESIDENCE')) { return 'RESIDENCE' }
+        if ($service.Contains('CLINIQUE')) { return 'CLINIC' }
+        if ($service.Contains('UNKNOWN')) { return 'UNKNOWN' }
+        return 'OTHER'
+    }
     function GetAccountToDeleteFromAd($Row) {
         $sam = V $Row @('SamAccountName')
         if ($sam -match '(?i)-K-') { return 'NO_CLEAN_DEVICES_EXCLUDED' }
@@ -409,9 +467,8 @@ function Build($AdVersion, $IntuneVersion) {
     $exoMailboxStatsRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv')
     $localMailboxRows = @(LoadCsv 'Exchange_OnPrem_Mailboxes_AllDomains.csv')
     $remoteMailboxRows = @(LoadCsv 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv')
-    $entityRows = @(LoadCsv 'EntityDirectories.csv')
-    $win11IssueRows = @(LoadCsv 'Mig_Win11Migration_Issues_Expanded_ByScript.csv')
-    if ($win11IssueRows.Count -eq 0) { $win11IssueRows = @(LoadCsv 'Intune_Windows11_Readiness_Issues.csv') }
+    $entityRows = @(LoadXlsx 'EntityDirectories.xlsx' @('Entities','Entities (2)'))
+    $win11IssueRows = @(LoadCsv 'Intune_Windows11_Readiness_Issues.csv')
 
     $intuneByAad = @{}
     foreach ($row in $intuneRows) {
@@ -462,8 +519,14 @@ function Build($AdVersion, $IntuneVersion) {
 
     $entityByCode = @{}
     foreach ($row in $entityRows) {
-        $entityKey = K (V $row @('Entity code Text 6 digits','EntityCode','OrganizationalUnit'))
-        AddMap $entityByCode $entityKey $row
+        foreach ($entityKeyCandidate in @((V $row @('Entity code Text')),(V $row @('Entity code Text 6 digits')),(V $row @('Entity code')),(V $row @('EntityCode')),(V $row @('OrganizationalUnit')))) {
+            $entityKey = K $entityKeyCandidate
+            AddMap $entityByCode $entityKey $row
+            $entityNumber = 0.0
+            if ([double]::TryParse(([string]$entityKeyCandidate).Trim().Replace(',', '.'), [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$entityNumber)) {
+                AddMap $entityByCode (([math]::Floor($entityNumber)).ToString('000000', [System.Globalization.CultureInfo]::InvariantCulture)) $row
+            }
+        }
     }
 
     $usersBySam = @{}; $usersByDomainAndSam = @{}
@@ -626,13 +689,14 @@ function Build($AdVersion, $IntuneVersion) {
         $domainAndOu = if ((V $row @('DomainNameShort')) -and $orgUnit) { ('{0}-{1}' -f (V $row @('DomainNameShort')), $orgUnit) } else { '' }
         $entity = GetMap $entityByCode (K $orgUnit)
         $labelFromEntity = if ($entity) { V $entity @('Entity label','EntityLabel') } else { 'NOTFOUND' }
-        $typeEtablissement = if ($entity) { V $entity @('TypeEtablissement') } else { 'NOTFOUND' }
+        $typeEtablissement = GetTypeEtablissement $entity
         $typeEntity = if ($entity) { V $entity @('Entity Type','EntityType') } else { '' }
         if (-not $typeEntity) { $typeEntity = GetTypeEntityFallback (V $row @('DomainNameShort')) $distinguishedName }
         $subnet = GetSubnet (V $row @('IPv4Address'))
         $isInOrganizationOu = [string]($distinguishedName.ToUpperInvariant().Contains('OU=ORGANIZATION'))
-        $isTargetOuHq = [string](($distinguishedName -match 'OU=020001-MADRID') -or ($distinguishedName -match 'OU=120001-HEAD_QUARTER') -or ($distinguishedName -match 'OU=HEADQUARTER'))
-        $isNotTargetOuHq = [string](((B $isTargetOuHq) -eq 'False') -and ($distinguishedName -notmatch 'OU=DISABLED_OBJECTS'))
+        $typeEtablissementUpper = $typeEtablissement.Trim().ToUpperInvariant()
+        $isTargetOuHq = [string](($typeEtablissementUpper -eq 'HQ') -or ($distinguishedName -match 'OU=020001-MADRID') -or ($distinguishedName -match 'OU=120001-HEAD_QUARTER') -or ($distinguishedName -match 'OU=HEADQUARTER'))
+        $isNotTargetOuHq = [string](($typeEtablissementUpper -ne 'HQ') -and ((B $isTargetOuHq) -eq 'False') -and ($distinguishedName -notmatch 'OU=DISABLED_OBJECTS'))
         $serverAdEntra = GetMap $serverAdEntraByName $computerName
         $serverAdDeviceId = GK (V $serverAdEntra @('DeviceId'))
         $hasDifferentDeviceId = if (-not $serverAdDeviceId) { 'Not found in Entra' } elseif ($serverAdDeviceId -ne $objectGuid) { 'Different GUID' } else { 'Match' }
@@ -870,8 +934,8 @@ function Build($AdVersion, $IntuneVersion) {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrr+xpX4kiOEW0
-# 4aP3tSqKasC+7PBkbP1zqzHpVzqvZqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpAg5kl9oVSi5j
+# GKHsq35q4PSAPbuYaf3uzNNSMC1LfKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -901,14 +965,14 @@ function Build($AdVersion, $IntuneVersion) {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC8sxGN2YmlcamWRDZulKqf
-# U9NXL1lCkza7q4AZPOerRTANBgkqhkiG9w0BAQEFAASCAYBjDav7BK/GgfLk8BwV
-# 7iOtcBAoOqwV6kFwAjB3cKwu/a/sFORWkXIE0JQH06K90PUAeHUgFg9jp2Ji97Xv
-# 2a+DwI1oIjDOjyqSiN/jtf1zilOikhc7IWwVeFp5anKE6qrqWdMa65+8RLMhlhxv
-# f6GxEr6n5ehrKAoGla8DXaD0tlbm+MGsBZ5B31nKctA8hmcYwpr0KYZIZ7SzZtBh
-# yxFfDAx9MkjGnqWbbxstgBjVceTog4n3uIeG3YG+9mFDnFsjg2gQIwzMmJlyBxB8
-# D/TXAtwu0AUsu1YvKgM51mMg7NaL1Seun8AAQqwd3LXLqTGbVautb7Rk8YFDA7hl
-# Lo19McOlbGlfNjPuwJpLKRxC0iL+/XFZUO8WhwdmvA87bRU7wqVFIDy0diXDV0Qo
-# F7uYTFr6xFd7tD/GQHfrL8Cl0kgDo0mS+IYVAUwd80EkdOyJSHQd29pyclvkU5Hq
-# VIpm4oik1F7Zwd2l4/prCQKwaMIlPoVhGA9+VMowkLJFZUw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAgbZVpG4loJnBbxw1OIKyj
+# 9y0i2qVO7QEAXcOpgjwHfzANBgkqhkiG9w0BAQEFAASCAYBH8R9WVSvDteQ0OWPR
+# YvSkCLPpBbi1KsFV+zsDR5XKI9+96iI8YCxel06OCLWfuzZ3er5b9zxjYaq7O3E2
+# M4FMuK8OkPsIk6kr3K7YU7NEzhuKJeljuTM5g5gFwaXWV+z4ekf3XwYKb7ZD43Ac
+# ng4k3goZaBjLvi7Obps2px5JC3/m1oYCEPQxppXE8d7seN1CYbuXhre8Ml6zp1VX
+# ePicNeIpSyTGQk4PKr5zgXiJo4f25hqB/I/N0aQcXyMdxLwVPiDh+N2dgovzs1+b
+# VPRjTc/1hGWTfl8hpacSdYP3TcJH+Rn94dW4mSsTgmDLhcsZOxiTTWJhDyRXMgG8
+# lli+SciHL6NnSdo6x/1t41K+0YpLR1ItOgBvv1EG5+qzb/QLqGB0p/jLM/cTVKoF
+# PGamlykRyntUh2jdRhEg5fBmmRl9CFCNOKsf6pIWlTatEpX9IxVUYsTIpKPq1yOT
+# sgPlL3RgeY8rg/PNS551XiJbQ6I/S3/XFgwSDrCMFHW+ZBo=
 # SIG # End signature block
