@@ -48,7 +48,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.14
+1.15
 
 
 .REQUIREMENTS
@@ -122,7 +122,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -527,6 +527,7 @@ function Export-HardwareReadinessSummary {
 }
 #region Main logic
 
+$script:CompletionStatus = 'Auto'
 try {
     WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory started =====" -Level "INFO"
     WriteLogSmartM365 -Message ("Output directory: {0}" -f $ScriptCsvLogFolderPath) -Level "INFO"
@@ -724,6 +725,7 @@ try {
     WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully =====" -Level "INFO"
 }
 catch {
+    $script:CompletionStatus = 'Failed'
     $globalError = $_
     WriteLogSmartM365 -Message ("Global error in Devices Upgrade Eligibility inventory: {0}" -f $globalError) -Level "ERROR"
     Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
@@ -766,14 +768,18 @@ $($global:LogTextFile)
 
     exit 1
 }
+finally {
+    Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName
+}
 
 #endregion Main logic
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBShALD/x3u2YmI
-# BK1MAnCWyyc6McIudJ5G9fg7DYa7KaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCDOL7dIi174zs
+# 1ZZmqitMjvqZw+S0NdK82NCO39+Y6KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -906,31 +912,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEcPGROzRB0+GR8iYOhDrccFgdc5VLdq+LYNOyon3dfHMA0GCSqG
-# SIb3DQEBAQUABIIBgB0BrNihGr1R8RZUqxSUZrQ7ZuPB1ZsgkJCgzlviSCPc2lgy
-# +xtOOT4x68ltvGXqJrN7mDx/a2+lLoD40oEL2isYkgFuFYop8+WSZsfD4zn3PsGD
-# 240UmYMxyUA2mlE9CGWYTp4dGK8rzYepxv2/AUx/Imj1RO/oK6NnhtH3bnWoQHB2
-# ngyjlZE4039XReY6Af9h+0L697WPk3pNncoAahh2enslQddl/iaNDU0m3nOGk43a
-# 6OyrpepGod+RodAJeG26jvTlOUzJPcb5jdgdYc6iO0/ojfzr0//0pvFWddnjxrJM
-# DaCmKqfQDjiKPXASy/4Zufzvg/hvMZYAb9Pq8+cnzM3MFfgiOxeaAilH4uto0MZo
-# EOUCJyPwSwanGUkL4p/Dvl45GAC4cpkFBUQPhmBMqijN/tpkLuZGap8iqInwhb5J
-# AEoRo956uO7lRFhUeGORW6xd77ZunEbAw0h3JLJsvBUx7sQbgVlp/n8bn4fuMEDE
-# jOiMiM1oZvN7OXv+GqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIrIm+S3mqdiDNeJB04apVJLLpSp6uEeUSASHMQEbka1MA0GCSqG
+# SIb3DQEBAQUABIIBgBjxdLJDxK6Gin3vX12KkMdweBKm+jJEeXNR68EOAFNPq/4j
+# p2XZJrT2KaIPD4RHWo2c+9qrdL+TCoPRZtlw9e1410M5lnb3KVCdQqYfrL+0QdKl
+# 151gVQpPqqkSla0WKR5YBNETQV+kHME6zkUJ5HowWGcCfphLzj5aTlNPA/R8baVx
+# lHUzPRTyVc5hTWwoaunOSulYbXdGBQaogr5iR36CIeeTI1CMZafbGLvh9Cm2sDLt
+# aJ1ISMlRZNDaiFa7ZUc6Duux7QUwu9W6KPGYeIh0VbA7f9zKPkbD+Q5ZtQxWbUUf
+# nkIp1L4Ph44lKeSzzAbfn82IrqfqcDT3ZKyWTHbUO6WvtJ+ZAiy2dH4Aj1nkg8xw
+# CWfPLAXne/VnxYW4RdE8WTEG0OnF6oECgY4ny0ZLp8uBlMfz0+LlptxWr1m64oFT
+# LHXyzvvGy6NoZ1Rt/yFeGwvS5SbVeYELA0tKORsdkAy3cqRaQ3K8KCi1TFcOW35h
+# gb9iC7A7GTRgN4ILFaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDMy
-# NDNaMC8GCSqGSIb3DQEJBDEiBCCOHvnb7VK40q+iBPloegexT3PoPnMKkiZcxwGC
-# Bw+XsDANBgkqhkiG9w0BAQEFAASCAgB0b2mjxHR+gPYHkaEMhj/7StYgW9NUv9pe
-# xIB9Cl2i2NLYjb+2thvRZAgl4raiMMwxtnCsIFecSw8p//gy0jQ0YUokGSb32YyC
-# vMJtUAVbTN5x9r1vUd4u6Ocay/dotvENDyDyaob8ptZwivkBtZDUfGRP20Z+GFS3
-# YWTm43WiplDkCB0GAs5aIkrm7Ml+vMSgp8IVuzcVB99PuDLXZeZBEMsvCOzx1//F
-# xFxM4cLagRelbcoD06wKylDreOcxYNkgbpBxHopIoQktsvlpPzP+1Kv6NS4hsMJP
-# qCzlujrIrni5esgP6ZSu7w4sg76zwpG61Yp9Fs/VNm2wprZqvm9Ic941wUmMgQ7f
-# w+pYy7R7QIMOAcgARc+Ugzo2vKisl5kgiktU7gCIr92ltKFOLKzcpRnQ8RcnUU6C
-# m68oTNr2PxZYj7eY37dFKl+FgIBQEWzQNkc2e25VbRra/tzfh0FBjJNF/9xN1fIv
-# Zi8Xde52GKFyoGPvGfRFzDBYQW2/1vLCByrY1P5MxPa0uSOd9/KoT7aslzCt1ewt
-# mZap2MA6VrWCj4iweWi22dOU+aOD/O3VvCNJRXq58ScwUltjo0bK9pHmAMsWpyrt
-# omaA1ePHFn11uqvD4zp2/2XPcUKAedrNrx9s1kRTDE8P8CuE/zT3Am5YALHWzO9C
-# WeHNh/FzPw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEz
+# NTBaMC8GCSqGSIb3DQEJBDEiBCAlW4Ha0sNpF+N1hL9g7KXlz0/JSPcPBSFtcadf
+# oE31hzANBgkqhkiG9w0BAQEFAASCAgAGrb9YaX32sNGscQHIdFm/4CmvK/4B6dzx
+# FxWVq4MSvDvbUAvfDUpj2I365DqCI5d3LZ0Q/+QsbgSZcvWisUw0s1MRgSe+qs0S
+# /RVpBcOgCW5OM6hBRIDlkJVrsquxN9Blmu8dcoawp8t68ijwcthtZUZ3x/jOkFRR
+# hkivHtoFlejQKCz/w8KsGg4Wi47DEX8Mi3bIqryRJZNb0zjqDsih/GG5Bv23nepl
+# bYiX/C1iGOYtlGz91Alnq+PiuYqusNi79sSgcR6x/9a7Pb2YDGXwVEetT4/nlIUa
+# NoMmDVHGixcdB9TfLQx7lJeCy1OJspe9Lhc6G1d08roJ1RaHTPJOlQ20riOVOTBE
+# az+5UjnTGqmCY2FdQgkSbJPpcK3TbrMRx4Vk2WaNtrkHmqzjisc/ODWHEv3DgevF
+# 8VHd2aJhdsqvgsnLISig7VNMWi7IDegCrtqEUzLHXymyr2CoHQFpmVwwGzsenOU0
+# 5Z8/Qq6FqK3IKIrlwCUbQlSg4qzWARhxa8jHPBiTAIITf95dPebB/EwjjV1vWxqq
+# Atu6/YxNXOZ82ZJIvz7HI+s4G3H45+j7zqyQfjeZjXJ+TPKq4tNXKLZHWk5CTF7z
+# v1y8C4aNN4tYZoLcIh7mJKAlwQ00Q0ivTGa3cRfgH6EzYY3ZVj0yq/CJE2gG+u/I
+# DOVuuPWkxQ==
 # SIG # End signature block

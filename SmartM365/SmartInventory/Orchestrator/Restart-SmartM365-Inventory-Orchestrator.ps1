@@ -1,5 +1,5 @@
 <#PSScriptInfo
-.VERSION 1.0.1
+.VERSION 1.0.2
 .GUID 7b0b7843-4544-4a5e-9c5d-8f22b499fbf7
 .AUTHOR https://github.com/khda79/workplacecloudhub.com
 .COMPANYNAME WorkplaceCloudHub
@@ -71,6 +71,14 @@ if (-not (Test-Path -LiteralPath $tenantContextPath -PathType Leaf)) {
     throw "SmartM365 tenant context not found: $tenantContextPath"
 }
 . $tenantContextPath
+$script:RestartStartedAt = Get-Date
+$global:SmartM365ScriptName = [IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
+$global:SmartM365ExecutionStartTime = $script:RestartStartedAt
+$restartLogFolder = Join-Path -Path ([IO.Path]::GetTempPath()) -ChildPath 'SmartM365\Logs\Orchestrator'
+if (-not (Test-Path -LiteralPath $restartLogFolder)) { New-Item -ItemType Directory -Path $restartLogFolder -Force | Out-Null }
+$global:LogTextFile = Join-Path -Path $restartLogFolder -ChildPath ('{0}_{1}.log' -f $global:SmartM365ScriptName, $script:RestartStartedAt.ToString('yyyyMMdd_HHmmss'))
+$script:RestartCompletionStatus = 'Auto'
+
 Write-SmartM365StartupBanner
 
 function Write-RestartLog {
@@ -89,7 +97,9 @@ function Write-RestartLog {
         'ERROR' { 'Red' }
         default { 'Cyan' }
     }
-    Write-Host ("[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message) -ForegroundColor $color
+    $line = "[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
+    Write-Host $line -ForegroundColor $color
+    Add-Content -LiteralPath $global:LogTextFile -Value $line -Encoding UTF8
 }
 
 function Get-CurrentPowerShellExecutable {
@@ -146,6 +156,13 @@ function Get-OrchestratorTask {
     catch {
         throw ("Scheduled task not found. TaskPath={0}; TaskName={1}; {2}" -f $Path, $Name, $_.Exception.Message)
     }
+trap {
+    $script:RestartCompletionStatus = 'Failed'
+    try { Write-RestartLog -Level ERROR -Message $_.Exception.Message } catch {}
+    Write-SmartM365CompletionBanner -Status 'Failed' -ScriptName $global:SmartM365ScriptName -StartedAt $script:RestartStartedAt -ErrorCount 1 -LogPath $global:LogTextFile
+    exit 1
+}
+
 }
 
 if ([string]::IsNullOrWhiteSpace($TaskName)) {
@@ -192,6 +209,8 @@ do {
     $task = Get-OrchestratorTask -Path $TaskPath -Name $TaskName
     if (Test-ScheduledTaskRunning -Task $task) {
         Write-RestartLog -Level SUCCESS -Message ("Scheduled task restarted and is Running. TaskPath={0}; TaskName={1}" -f $TaskPath, $TaskName)
+        $script:RestartCompletionStatus = 'Auto'
+        Write-SmartM365CompletionBanner -Status $script:RestartCompletionStatus -ScriptName $global:SmartM365ScriptName -StartedAt $script:RestartStartedAt -LogPath $global:LogTextFile
         exit 0
     }
 } while ((Get-Date) -lt $deadline)
@@ -213,8 +232,8 @@ throw ("Scheduled task did not enter Running state within {0} second(s). State={
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVd9CNhnOulK8E
-# RX21gnEe45QjuRRUtrS7Drk7KKLoy6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHCviZR1aYUfWH
+# uZIyKXguqMG+1qQUixHpyEWZnVztTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -347,31 +366,31 @@ throw ("Scheduled task did not enter Running state within {0} second(s). State={
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB28v0JeGVzbXo+uACJORDv4ZHDlyynE1s6BBTXSrmvJMA0GCSqG
-# SIb3DQEBAQUABIIBgJnwm4VgZcupzKe351aForoFcr25yQaTL7GEdSBV2pg+IIua
-# ln2TAeRLBSBAVhi1/jtqERVs+8uIrdywSVucXqKgu3dMUwhl+ZZV2pf5OpoJhzSW
-# NSgz1mOg8ACb7mG9EknKzXFanhfmIR8iRev6GZGoh/77ovWGrHqa748yYNgMlX0/
-# eofgJK+PHwfCSQs0tGEA61BJ/i5s+v4fbF3TXpakHE2pr7kscZ6Iy6UCFayZF5KY
-# TbOv9z0MZ2zxn87N378VW2h7h1SK8gq0vvOIXgINtkUgdZpwT/5TizqQLNX7F88L
-# CwymIP99YispR61jFp8K1ipDSRBYbpw1IlfE2mswQYUuIsk4NKiINnufC0am0cjh
-# lJ+0FpEkhws4z1fIi1OOq+CJGDFfywkcudnIt5mxwr87mUAFyv79xTR50ou5Rf5X
-# Eyqh0cnLhLiHHyXPFv5QwhNNR/FerrFCQd9Zc753uSO51FAXY+Ozt92dwPOYEFxk
-# 9rMT+wY8mJJjj1p1z6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGVgjILy6v6ZbTJlafKXFrSb2FLNnZ6227xzKfpccWwjMA0GCSqG
+# SIb3DQEBAQUABIIBgEVqplvPCOk9xzl3Vg71/v9wWb7o39Hw0ksXy1nFLswzQmTC
+# zGTt0sxFoGMJiru6KnPE0nUSspDVZQc+DeGWnuGpQtapwFVyXwrkfzwutc7PeJuj
+# 7+TkvZHEMOqGK3bsHki/WbMq4MoAxfu9r1PZmAzja9asywejKgpG+d1O49Gby9er
+# DKaxaf9yqG+/8JYi2tKVJPQ+wCmLVJX3WgGDbXM+Wt6mLKulqV881ryfNr0/NIw8
+# GdnrlZZrLemNX2KRMknEL0MKT+hZL0ZhG5nGILSuujG+NmU7OctTo2NIr8Z4Vrw6
+# bgzPCLDyno9KHFaEmVllPoZvAmSNt2KUiECNGPc6GnkWkmfAIVJlqqL0bU7dcuLC
+# byDn54dDc7FUt7FzPvZ2RPHGsQcX9VVwbfsYi8lcohb2KZ0FDimD5Y151E88Yf8O
+# yxebrsSdu5d+UlCfgALbu6S/C2EJApKprJ6swJISG3eBeglG2Fqg9APCz5BTS4hk
+# V4WweytObJjV6zV556GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMzA2
-# MjNaMC8GCSqGSIb3DQEJBDEiBCAF1U/t28N5eI2HMZAW99nHjm4yUDSQfoYZcvm/
-# MgrjhzANBgkqhkiG9w0BAQEFAASCAgBcr0mrHvNjoLXIz5eboKNVcHRA40qQYobx
-# a3Q/ToyBS/d2REjHYVHlyji2pJAf1v3jEM1Ib3GVSfnuttWdHORI3SbdHaxcCyqx
-# Eworv89taaJy8MYgXB48vepucuEckSu3gTgCyq5r9AgsyfcCM8iS2hPi4+Rtvm1H
-# RqHzA+3Z2eiV+yKkK4KEmBjCUYztd+MQ9nVejfyCm5ikpP5jR0Mf3ttuSruGtg5H
-# bB0tFBijhin5wOF9QMbDuITjU6TG83jDVq81vR+8XmjTVrQdKVYEhgLFV3wtmWGq
-# UErtOudH9yd9UdRuxxhWK2KwqKP7+4mbZppgxDMoO6eiZPVu5+Ulzu7JTHKCNB86
-# ZZwgDJ+KJg0h5302ASpJhQRKkMTQ1mULXL0/XRB1tKVnUOYovFL67ChUE3IBdlbe
-# /s8kkidAAKBp0UNesChezuRkP+CET94m711EJ/vYDkSpSAtYcX36FlouI9GPkdZi
-# YIR48Bn3JhvMCpH/ajfLvXIK/WS0VnchDtPCGCnCXNJqo4Nck9OZEX+Pro1nLRfO
-# Pz+vwG48rW3gWnIDgsU3xi0FBCIYxFhT8Z7hvHIktP5OkAbc5Ms2wQwk5jjbpSoq
-# woWo8yrW0OaiDReHxU2UYOe2sura8Y05eYwcOw1kbGpeWJIaelf2yOjsqiRPYT1l
-# DzfHxyhXQA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
+# NThaMC8GCSqGSIb3DQEJBDEiBCDbrZLBaFQGxsti9/IN1B7CbMZ9jtzOnwP/1GRu
+# DRIxNzANBgkqhkiG9w0BAQEFAASCAgCkrp7ueRbZZ/f05Pe+VplRxSUu4hKgPSpi
+# 0oVisfIjZrcx6cwM71H3dPZlTJdyuwxmAyRbSMUVblRNMyUujVpu6W/fdCdUHV2p
+# x1RnIwhfwH06DpLX3AF2zT761806/Nubmj+P7kd7txh7aQgbbQq+Tu7op9gH6yQk
+# PAO2qqcYu7xTWcPvMaCvGX+2nsNA8zl6rSqIJflQnyf7PhgVjSTSyvEZkAIqfX6d
+# SvTSkQIa8OG/F3Kftb0LXGzdSMp3b3w52ikSp338sAFXMhzJkL4MskynAMJ22hLu
+# nBu9F69qTKxOVox0J6cFyRSwonx0hKaNlJscuxNU5ZLb2lv6TRHKJI9I+e4ZzyDq
+# /kOneXxxcQTfPiF6nb/sOODAi32Di6jaE4j96312mqHU/HjHuJq4DZbkbiqUKAa8
+# CGKG/Hn6KE1yq5M+uqkGR3Bc6PjxaiVMEENlNInEg+QQUBL24YnEWvcrvx+n7tPk
+# Dfjt/3qfDPXzprz1HzXid5e0tda+WD1fyjCZaIwzdyw3875O6maZ/eZWnbmcUwSe
+# jV7DiRrYFbmy3ZPeLfmlLqgBob4pIiLoWFyaSrmkuV8cGejV5S/CJQlzE5hhk2Vr
+# InHdG0YQtHjINKUxyjoYp3ov5HhhNSRJ5kWoUmbd2i44LaIDYOpHVKuDW6Bo/06B
+# 8lqTaKt9tw==
 # SIG # End signature block

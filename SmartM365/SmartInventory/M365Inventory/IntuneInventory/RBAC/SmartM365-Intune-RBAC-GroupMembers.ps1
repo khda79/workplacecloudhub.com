@@ -27,7 +27,7 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.11
+1.12
 
 
 
@@ -458,7 +458,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -1071,7 +1071,6 @@ finally {
     #region Stop Transcript
 
     try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
-    Complete-SmartM365ExecutionContext -Status Auto
 
     if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
         if ($global:ScriptFailed) {
@@ -1089,6 +1088,7 @@ finally {
             Write-Host "SCRIPT COMPLETED SUCCESSFULLY" -ForegroundColor Green
         }
     }
+    Complete-SmartM365ExecutionContext -Status Auto
 
     #endregion Stop Transcript
 }
@@ -1098,8 +1098,8 @@ if ($global:ScriptFailed) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBB1Hh7GrM3Mim7
-# keaixf/SGuf7O44UWJHitctJ8bAsNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCH1AGvbrx51Lz+
+# zh91nZhace5E8Ik7X5UH2ktISTWclaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1232,31 +1232,31 @@ if ($global:ScriptFailed) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMsaj9QA4TQKTiOYf//L4HWLptowEbsTSylNYgkZR/4qMA0GCSqG
-# SIb3DQEBAQUABIIBgGBhrgNK3HeOqcQvgS2u0ekaOV9lS+WnRAc0rxZ8ExeD8IZV
-# BD8U2gsG0tBgdP2114BZUzErE2T4K7b76+2eM9zF5SLprXbNlpXZZXVs+wjo5kb8
-# 2oRwiRUCdGtmhIeeghjHSvigcTmTtu4hLTDtoz6EEXR8tjeRdFebGtkKJOwddTFq
-# vDzc6ljHFbPElA/TU1qGkZtOfJQ4mEz1+Er8RTsZDMLYP8dAdDQ7NoLEK6bZ+vUa
-# BcZE2KacclNqOrmcvy6W4d4sw/XNZ7/m2S9YPUluWjinyWewfDR6GDBzbPWWSYAF
-# ld0zjsxwx37yE10o9JJoRVGL01f36QAU1mHcW8sdR1Dc4Nshyk51UwRT1fwDQhkB
-# mrn4oMKrG5mxuVg9jTorKAAHgvbwCuoZK5CnqU6dUQcGTV33ycZ0T4Cg9R4QW0oH
-# 8Q+nRe5/xfV2t4dm6ximZH6/Htk5XS49nOEpStvRgd8PJJDS3puiGuc9tiCIubJo
-# QMqHQ+Y0MmZnLYwL/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILqqkps0wTNpFBfawWjpPic4J4sLftni29zxj4BJKGQGMA0GCSqG
+# SIb3DQEBAQUABIIBgE9lSE0HPY0Euh2uvPIvsAy3M5sxS/0wYopXRthMnB7nbgtm
+# aeEbz9fGBrO98sLGJ6L5XspcwABK43bfb6NaUVt90MfpeiU0NwI5GUcQDZm00yYV
+# usv5gYKNyLnO3eZY4ic/d9xseG/frpGYZS566NdL8GBnBFewrxl6sO0O3RbuV8zK
+# 58j5Buq49gDYz3AJ6n/2cJx5Ib0IMY3vBLYZhc4+/wzHeV2df4/Ha9x5ZmMbYN9H
+# mfrh3ayd5T2DzW7NRwaNa/JLSYw59BY7idGrYzahrb2WB+3Ng6pETopqBqJJVFQN
+# /aeHK1cwYYQpJCi9y9oXnScKkO4mQl6vIJGL5EKK6/UeruKb91eAZCCGGxrJvbKl
+# DUo/BXb76yP/APnjyTDuhajKpQsfUpzt+tARAHvyRjZi+8TUGarpJ50MkPOUSS0G
+# Pjp26B5YEFoQeeK4VN4z2Aqf+XxVH7i19IdzEGD8q0wt7VRg1AEQ3OsdE6aHK/04
+# agXJImNuGf+/PIGjMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxNjQw
-# MTVaMC8GCSqGSIb3DQEJBDEiBCBGcUusZU5Aypq4oujbUZvhx7aSIebyS6zMIud6
-# PwQtHDANBgkqhkiG9w0BAQEFAASCAgB2XDJr1Znwb9sgMcVz8WOX1f5dW9MHHfnm
-# Fh+v38Tm9ioFPhbPSkOzxbAbBK2cw1ZTuuebrDKxQow3O7zDRQiPSvPTM2N1XpCB
-# /FnL9ztdj7OFaUEzgyJjqYXm91rJvG/NJ3fq3GoF+m4hqCDxZIWKIBSiYWMz/Qr/
-# Dl7PcSzjmSQlDOwVGnr2UEeLqK2Pe2jTgX58GdzjyikJwPP/Kjv9I2fV5v+S3c/9
-# SdVm4In0IHOhb25WpxUBHvtq+K4ps2dazsFq0aA9HyJuHx98dKMcwpDuCyuo61Yb
-# 7fFXeMCFmRKfdfetEJ9zFaxU37gSZ/qZilvb9QskRSRq5weudSItJ7lXiH0/5i7j
-# S0A1UUVoBD6r1XDqavrgDY7fygiEiBUq0fndAVRXI+0a2jNzFlGczF3yHxEGjtZz
-# jzWv+qD8as2HQRyTnOmtP1mKTgfczZop2V2SyYJJ1rN6euOjvxrLc3ZxmC6rnQyd
-# 549iD1p6E0q0pK+uDEhtCc3GTapbpknophYCm2shYTe88/5EbPq4chGc6XqaAq2R
-# 13rXv/xj8bYGlyJTEz1ho9uMYb//XSA4/UsW95pHieSwYSab8DAnJTTgfKp+Ckar
-# 9DzFH0yqEHm92mxLBexrmF+/wXdpDtjqZVWaqGVMnDohccg81wQdrkgPO5Q/gIvi
-# 1V/rI5564A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
+# NTZaMC8GCSqGSIb3DQEJBDEiBCB1BYQ4YJG5eKp8Ds5RAWGvAC6FGGlERDD108OP
+# IA32YDANBgkqhkiG9w0BAQEFAASCAgAydNNg8pSyPK8BQrAADQPRoAegmbgwSv5I
+# l1fpXfTzMLVA+7a5Z5qiACHVWxUXLFPFbnWXjIL3vrt29p4+n9uSPyaw29yY+7K8
+# PWsMxryCjuf2ZFJoRj95ryEtfLYt6c4HzZ0F63Vmg25QuJpjmcFzLTfP7GpLhxRZ
+# 9k/biXhuVAEuxxCj6Z411XNuuh4Abye4S1ezruQIiv4ELRBl8/KPXBQNr+ljQvIo
+# PugYV/8CEocMtBV5b6G5ETkf5spUH/OZwW0aTli4+14q8JdJUkIRkfwuuASk3qfu
+# t9DgN9WATUtu+10dvhWuHxWIs28mxM7gR+FT62kVnAnta+IaEKI+gInvjC+dpxsy
+# BaA7mQDs+mV4Fi5dzxZqwUzDFVoPXfwkvZkySL0CO4HRnJwhyIiLhnBx33X59SrV
+# dtBrhWw/UE6lS9XMDDWgb9ugXf37aDnCTzbrnGebu98RsLiUkhmCDFv978schetR
+# tWxzn9UfCl2JDPKyWyK+wIELz4k6XGw2YEfCYWy4vG//SFGYzrNH3PmEsmXq9tp4
+# mvie7RZlg57du5u7maccLip8uOw/2XTT8CV9W+XLO70KoPKqWxuWGTPnAMst0BW1
+# RS0IsMLpW66Zb/Uiz8kaKhZiuVgp56g3AhMLplbc3DZKK9bRE9kqXBZIcAhX4we3
+# Bx56nIzUNQ==
 # SIG # End signature block
