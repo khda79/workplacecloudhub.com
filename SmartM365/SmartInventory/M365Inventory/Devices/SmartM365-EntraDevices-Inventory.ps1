@@ -574,7 +574,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
@@ -686,6 +686,7 @@ try {
         "systemLabels",
         "physicalIds",
         "hostnames",
+        "alternativeSecurityIds",
         "extensionAttributes"
     )
 
@@ -699,6 +700,15 @@ try {
     $totalDeviceCount = $devices.Count
 
     WriteLog -Message "Azure Entra devices retrieved: $($devices.Count)"
+    $serverAdDeviceCount = @($devices | Where-Object { (Get-SafeProperty $_ 'TrustType') -eq 'ServerAd' }).Count
+    $alternativeSecurityIdDeviceCount = @($devices | Where-Object {
+        $alternativeSecurityIds = @(Get-SafeProperty $_ 'AlternativeSecurityIds')
+        @($alternativeSecurityIds | Where-Object { $null -ne $_ }).Count -gt 0
+    }).Count
+    WriteLog -Message ("AlternativeSecurityIds quality gate: ServerAd={0}; WithAlternativeSecurityIds={1}" -f $serverAdDeviceCount, $alternativeSecurityIdDeviceCount)
+    if ($serverAdDeviceCount -gt 0 -and $alternativeSecurityIdDeviceCount -eq 0) {
+        throw "Microsoft Graph returned ServerAd devices but no AlternativeSecurityIds. Registered-pending exports would be invalid, so publication is stopped."
+    }
 
     if (-not $devices -or $devices.Count -eq 0) {
         WriteLog -Message "No Azure Entra devices found. Exiting." "WARNING"

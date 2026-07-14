@@ -250,8 +250,10 @@ $global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocal
 $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
+$script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
+$script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.36"
+$ScriptVersion = "1.37"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -356,6 +358,29 @@ function Register-SmartM365GeneratedCsv {
     [void]$global:csvGeneratedPaths.Add($Path)
 }
 
+function Invoke-SmartM365ExchangeLocalSharePointUpload {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$LocalFilePath)
+
+    if ($script:SharePointUploadDisabledForRun) { return $null }
+
+    try {
+        $uploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $LocalFilePath
+        if ($null -eq $uploadRecord) {
+            throw 'The SharePoint upload returned no result.'
+        }
+        return $uploadRecord
+    }
+    catch {
+        $script:SharePointUploadDisabledForRun = $true
+        if (-not $script:SharePointUploadDisableLogged) {
+            $script:SharePointUploadDisableLogged = $true
+            WriteLog -Message ("SharePoint upload disabled for the remainder of this run after failure on '{0}': {1}" -f $LocalFilePath, $_.Exception.Message) -Level 'WARNING'
+        }
+        return $null
+    }
+}
+
 function Publish-SmartM365ExchangeLocalMailboxCsv {
     [CmdletBinding()]
     param(
@@ -369,7 +394,7 @@ function Publish-SmartM365ExchangeLocalMailboxCsv {
     Register-SmartM365GeneratedCsv -Path $SourcePath
     $sourceUpload = $null
     try {
-        $sourceUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $SourcePath
+        $sourceUpload = Invoke-SmartM365ExchangeLocalSharePointUpload -LocalFilePath $SourcePath
     } catch {
         WriteLog -Message ("Failed to upload source CSV to SharePoint for '{0}': {1}" -f $SourcePath, $_.Exception.Message) -Level 'WARNING'
     }
@@ -385,7 +410,7 @@ function Publish-SmartM365ExchangeLocalMailboxCsv {
             Copy-Item -LiteralPath $SourcePath -Destination $latestPath -Force -ErrorAction Stop
             Register-SmartM365GeneratedCsv -Path $latestPath
             WriteLog -Message ("CSV latest copy written to: {0}" -f $latestPath)
-            $latestUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath
+            $latestUpload = Invoke-SmartM365ExchangeLocalSharePointUpload -LocalFilePath $latestPath
             $publishedPath = $latestPath
         } catch {
             WriteLog -Message ("Failed to publish latest CSV copy for '{0}': {1}" -f $SourcePath, $_.Exception.Message) -Level 'WARNING'
@@ -1106,7 +1131,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
         if (-not (Test-Path -LiteralPath $latestDir)) { New-Item -ItemType Directory -Path $latestDir -Force | Out-Null }
         Copy-Item -LiteralPath $dailyCsv -Destination $latestDailyCsv -Force
         try {
-            $latestDailyUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestDailyCsv
+            $latestDailyUpload = Invoke-SmartM365ExchangeLocalSharePointUpload -LocalFilePath $latestDailyCsv
         }
         catch {
             WriteLog -Message ('Failed to upload latest daily stats CSV to SharePoint: {0}' -f $_.Exception.Message) 'WARN'
@@ -1118,7 +1143,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
         if (-not (Test-Path -LiteralPath $latestSummaryDir)) { New-Item -ItemType Directory -Path $latestSummaryDir -Force | Out-Null }
         Copy-Item -LiteralPath $summaryCsv -Destination $latestSummaryCsv -Force
         try {
-            $summaryUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestSummaryCsv
+            $summaryUpload = Invoke-SmartM365ExchangeLocalSharePointUpload -LocalFilePath $latestSummaryCsv
         }
         catch {
             WriteLog -Message ('Failed to upload latest mailbox summary CSV to SharePoint: {0}' -f $_.Exception.Message) 'WARN'
@@ -1126,7 +1151,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     }
     if (-not $summaryUpload) {
         try {
-            $summaryUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsv
+            $summaryUpload = Invoke-SmartM365ExchangeLocalSharePointUpload -LocalFilePath $summaryCsv
         }
         catch {
             WriteLog -Message ('Failed to upload mailbox summary CSV to SharePoint: {0}' -f $_.Exception.Message) 'WARN'

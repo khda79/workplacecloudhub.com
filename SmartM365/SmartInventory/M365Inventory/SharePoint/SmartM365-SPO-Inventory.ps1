@@ -102,7 +102,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.18"
+$ScriptVersion = "0.19"
 $CurrentOperation = 'Initialize'
 
 $tenantContextPath = & {
@@ -555,6 +555,7 @@ function Get-SpoListInventoryGraph {
             ListId = ''; ListTitle = ''; ListUrl = ''; BaseTemplate = ''; BaseType = ''; Hidden = ''
             ItemCount = ''; SizeMB = ''; VersioningEnabled = ''; MajorVersionLimit = ''
             Status = 'OK'; NumericValue = 0; TextValue = 'NotAvailableGraphOnly'; Threshold = $WarningThreshold
+            UnavailableFields = 'BaseType;ItemCount;SizeMB;VersioningEnabled;MajorVersionLimit'
             Details = 'List inventory unavailable because the site could not be resolved through Graph.'
         })
     }
@@ -571,6 +572,7 @@ function Get-SpoListInventoryGraph {
             ListId = ''; ListTitle = ''; ListUrl = ''; BaseTemplate = ''; BaseType = ''; Hidden = ''
             ItemCount = ''; SizeMB = ''; VersioningEnabled = ''; MajorVersionLimit = ''
             Status = 'OK'; NumericValue = 0; TextValue = 'NotAvailableGraphOnly'; Threshold = $WarningThreshold
+            UnavailableFields = 'BaseType;ItemCount;SizeMB;VersioningEnabled;MajorVersionLimit'
             Details = 'List inventory unavailable through Graph for this site.'
         })
     }
@@ -599,6 +601,7 @@ function Get-SpoListInventoryGraph {
             NumericValue = $numericValue
             TextValue = ConvertTo-SpoText (Get-SpoPropertyValue -Object $list -Names @('displayName','name'))
             Threshold = $WarningThreshold
+            UnavailableFields = 'BaseType;SizeMB;VersioningEnabled;MajorVersionLimit'
             Details = if ($status -eq 'Warning') { "List exceeds $WarningThreshold items." } else { 'Versioning and list size are not exposed by Graph list inventory.' }
         }
     }
@@ -630,6 +633,7 @@ function Get-SpoPermissionInventoryGraph {
         NumericValue = if ($isOrphaned) { 0 } else { 1 }
         TextValue = if ([string]::IsNullOrWhiteSpace($Owner)) { 'No owner reported' } else { $Owner }
         Threshold = 'Valid owner required'
+        UnavailableFields = 'IsSiteAdmin;IsDisabled'
         Details = if ($isOrphaned) { 'No valid owner was reported by Graph usage data.' } else { 'Owner reported by Graph usage data. Site collection admin enumeration requires optional deep mode or SPO admin APIs.' }
     }
 }
@@ -873,6 +877,7 @@ try {
             NumericValue = $siteNumeric
             TextValue = $siteText
             Threshold = "$QuotaCriticalPercent%; $InactiveDays days"
+            UnavailableFields = 'ExternalSharingEnabled;IsHubSite;RelatedGroupId'
             Details = $siteDetails
         }) | Out-Null
 
@@ -895,9 +900,9 @@ try {
     }
 
     $CurrentOperation = 'Export CSV files'
-    $siteColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','Title','Template','CreatedUtc','LastActivityUtc','DaysSinceLastActivity','Owner','LockState','SharingCapability','ExternalSharingEnabled','StorageQuotaMB','StorageUsedMB','StorageQuotaPercent','StorageQuotaGB','StorageUsedGB','IsOneDrive','IsHubSite','HubSiteId','RelatedGroupId','IsInactive','IsOrphaned','Status','NumericValue','TextValue','Threshold','Details')
-    $listColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ListId','ListTitle','ListUrl','BaseTemplate','BaseType','Hidden','ItemCount','SizeMB','VersioningEnabled','MajorVersionLimit','Status','NumericValue','TextValue','Threshold','Details')
-    $permissionColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','PrincipalType','PrincipalName','PrincipalLoginName','IsSiteAdmin','IsExternal','IsDisabled','Status','NumericValue','TextValue','Threshold','Details')
+    $siteColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','Title','Template','CreatedUtc','LastActivityUtc','DaysSinceLastActivity','Owner','LockState','SharingCapability','ExternalSharingEnabled','StorageQuotaMB','StorageUsedMB','StorageQuotaPercent','StorageQuotaGB','StorageUsedGB','IsOneDrive','IsHubSite','HubSiteId','RelatedGroupId','IsInactive','IsOrphaned','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
+    $listColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ListId','ListTitle','ListUrl','BaseTemplate','BaseType','Hidden','ItemCount','SizeMB','VersioningEnabled','MajorVersionLimit','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
+    $permissionColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','PrincipalType','PrincipalName','PrincipalLoginName','IsSiteAdmin','IsExternal','IsDisabled','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
     $sharingColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ObjectType','ObjectTitle','ObjectUrl','SharingSignal','SharingValue','LinkScope','Principal','IsAnonymous','IsExternal','Status','NumericValue','TextValue','Threshold','Details')
 
     $exportStamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
