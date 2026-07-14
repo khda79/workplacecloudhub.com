@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.16
+1.17
 
 
 .REQUIREMENTS
@@ -395,7 +395,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.16"
+$ScriptVersion = "1.17"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -2474,10 +2474,10 @@ return @{
     Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $true
     WriteLog -Message "$TaskName completed."
     try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
-    Complete-SmartM365ExecutionContext -Status Auto
     RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
     RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
     $swStageCleanup.Stop(); Add-PerfSeconds -Key "Stage_DisconnectCleanup_Seconds" -Seconds $swStageCleanup.Elapsed.TotalSeconds
+    Complete-SmartM365ExecutionContext -Status Auto
     #endregion
 }
 catch {
@@ -2521,14 +2521,14 @@ $($global:LogTextFile)
     } catch {}
 
     try { Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {} } catch {}
-    Complete-SmartM365ExecutionContext -Status Auto
+    Complete-SmartM365ExecutionContext -Status Failed
     exit 1
 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBcg7qcBj7Kh3JP
-# /2+8BrSIMR+QJCkjJtOUhJMR0i6nFaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/7cTdKtOxN0sC
+# TZq8locNbocRenyVdywnWMYHMOhKQ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2661,31 +2661,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGUKYVKkeZ05rOXp9O59eWd4tMHJlOvwPhLDGtGN1wRzMA0GCSqG
-# SIb3DQEBAQUABIIBgHgP0FExP40bNJYF1UPDrQdwuJn8Zd85iBePX6uveXKfevi+
-# t6+He75Ya6q8TNyXT66PsK+5qn5RTtNQ/s0pWOdamoCpk9Tq41xsxbbDw6QY3ix/
-# WmAz0SPYdAqfpeAlgfk7pD/ktdC2U1iSYyz86Lb/xYE9fqPyJb+MfNijz3fGQvHw
-# ubBjJUPIkP1a5ayFalnatIIdI0u7//iSZTWxIMvn9FMSjoUksjlla0LL15pzEfux
-# OuicGnky8o43+eMDKOPaKs1+L7iXjVhBFqazwNxW1CDLLAZzGzQCUswd8lc/TFUF
-# L4vTTwa/uRlN1l7Pj1vz+n/kn49aWUGEM1ujyy9OJgwC9W5sqfnA0FRIeEjwHbZA
-# ODQft4s/tPz6ynwfyy0Z8RCKJN3myO4lzLO1oUgaua44sF5Y+t5fHZ9h/7vI/9c1
-# ovJ3prhSs6OAqpKsCwQa3XvcfvqcdnGTCuNiI7RsQtmucaIG7c5zKdR/kg/F6epu
-# hvjeSOZ9sL4awJbf9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILrLokOZFdpEEsOBiVeUR6JSXO41tvaP5mmJE4R9OMslMA0GCSqG
+# SIb3DQEBAQUABIIBgK3YmZsdMYc93/La5TuHtYEixEBs7oTjcJg25BnHL+qTItGK
+# mNdZdnvUI1TYyMMXH+FySzn4nfXueLFSYeedy0pngSFNsEFFfqXRM3BPuGf10O30
+# 2DOZ6W5aUuXKOjnpQwI7lnNLkCPPAEnO8eYBDtJT1VCC8RFkkC06EI+tinKdkEdZ
+# /VFD07Gwdo240AuchzQBXfd2ZpZ52J3RIKmacVRLqV9gD2y6l9Zd1keSI/XgdFLq
+# Ah1ZqJ6N3LDyK1Qn/j3MZOTRh6u9oBK3vPCCtXeYNxV4PiIRi+a7fJGfGqLASEYT
+# EhT/j+StVp/Qafg9F8RG1LQzcv0DFK+wRRMl1yP0Tn2O/NcxaV7chSXFkC3EKdwE
+# 3Llsj/g/x2BvoZUrgMeLFA5lYhRFRo8wqzgpPoDG+7zYSyYTnm3glyFfZIs/mVqN
+# VMWY2UCTHJjh9US5j2fbqu8Hwt76e7fzNUhg6t3Of62V5sY7RSK3mjCMegEFilsL
+# DpcXOdc+sVHcdUNkaaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMDUy
-# MjFaMC8GCSqGSIb3DQEJBDEiBCAv2s8qdxHF5jCSesWAEG+h7VNdGNyE7G6nkxlk
-# XHP94zANBgkqhkiG9w0BAQEFAASCAgCRdt44k4QzmBNTRe17ffZVzsJxqx8xOd+I
-# mfwRW1Vwe0R5OV7HYLUTgPrWOqDw3BQUwlGRSTtgumV3cr6C+CRiXRBXiiCA1ng3
-# bDj90ghhgr1izRcT/jKvMaU8IOqTUGiaJjfb88zTh3eJYvPaL7OhmG2Hdb8MuoO8
-# dZcc8N865lbhFR5rXJ6RicaWADk2zwwSF3DKsWSxgaXBLzdYu4zlZejhU5Gg8Evx
-# 5+OFev9KUpWjxQa4ugdPiZ659ensxzo3GQbJ1u3eYyT9tZnzQTu3H2/IRUervj6V
-# WREaFAfwbsJOj1YUTTuNXnd5L6Rf1GCjkZZnG0FnXocv15ZBkpASzcANi9xTMB4H
-# 9g/WQXBVDyhzX83l0PJ5d3vfsYCGcojXGSPyDcFt9JIGwWKOhqt1yQKmH7abczbu
-# PtQwBAxw9kCHA6R1JYHZ2hxBR8tdtP7Qsybvo+VHoCq9h3+rYCzW8JNb9DmJtSni
-# ZW7FoSP3rFbJcEf6Qkk9AusGNBsbJGXTyU08J4iIBW5Po+SfC3PjSp69WgJ+PqjP
-# O+R02HUQyEM97++CZsbXBBxVI9z0p4DOCKV5yAQppjNEUoIK79SxG356xcclYBhA
-# XJfldwF60T6FzxfddDSilvhemmvJYAO6j9te4j+VBJjh61BplO7z6Nw7gOlepkL4
-# 7lh3pqtLkQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
+# NTRaMC8GCSqGSIb3DQEJBDEiBCB9F2rBOgGIdXtkevo8y/53X0Ez67AR+XM6Zax8
+# tyuqBTANBgkqhkiG9w0BAQEFAASCAgCA7RuzGANRoMZ6vPa20lo/1TyxJtpOT8Kp
+# FXwndUnQsUrH2kKPajajAEN/myAcf5bH8dFZqEa26eyrzh8rGLh8HkgIotWzdsYQ
+# OKQ+bvrd6Kut79fHiQfw9l/t1Tr25N5ec82UNFtMd935X/AJXlKnK+VE591WVn31
+# 8GTaURjJX0D80V3jOEBd+DYyMf45RsBiBw949HynCCiAih/AY6Lxg3pAp/VaID2q
+# WYBeVZWcXcXvjMAZ0SEWe+ctsznEpIme8pXT8posu9cP6OfAAcUUb+Z9yNEE+CtT
+# kjENgSxwgP99KoeGiZy88pT3/onJF7KGC9ziji/BqH1/e+nyJsZPkF3lT6oeEAMO
+# cQPWsoXKCPtthmHP+qwx9tIbUPyJ1DfW6qCTGZMqlweb+UsPOAg0128qkJbIl8QS
+# Af9TXR0i9oXttZfKgkuv0WWGhBOGrVVOyBeE4hDc5Q3IV1ow+5Er+d+mjIyxF5rq
+# 2nANy6jryHB4AruGv5RcbsT+yIN9FXlyi9uabg1Pq4JVlEeMhtsOsm705Yg418/g
+# k1/SzF5XbF2zVvjj94d6zcjB0Re+XtPlPmuWLfuMQdKkRzTskp57hhYCppmMLGY4
+# 7fn96Hl/LLlAio0oJA4bbEXDHxoFvZ1CziWZpWdTBogZMhwNORHfe6F/hG7K40IK
+# OpcolEH21A==
 # SIG # End signature block

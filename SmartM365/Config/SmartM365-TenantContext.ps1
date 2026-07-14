@@ -6,7 +6,7 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.4
+1.0.5
 #>
 function Write-SmartM365StartupBanner {
     [CmdletBinding()]
@@ -21,6 +21,101 @@ function Write-SmartM365StartupBanner {
     Microsoft.PowerShell.Utility\Write-Host ' Website : https://workplacecloudhub.com' -ForegroundColor Yellow
     Microsoft.PowerShell.Utility\Write-Host ' GitHub  : https://github.com/khda79/workplacecloudhub.com' -ForegroundColor Yellow
     Microsoft.PowerShell.Utility\Write-Host '================================================================================' -ForegroundColor DarkCyan
+}
+
+function Write-SmartM365CompletionBanner {
+    [CmdletBinding()]
+    param(
+        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings')]
+        [string]$Status = 'Auto',
+        [string]$ScriptName = '',
+        [AllowNull()][Nullable[datetime]]$StartedAt = $null,
+        [AllowNull()][Nullable[datetime]]$EndedAt = $null,
+        [int]$WarningCount = -1,
+        [int]$ErrorCount = -1,
+        [int]$GeneratedCsvFiles = -1,
+        [string]$LogPath = ''
+    )
+    $scriptNameVariable = Get-Variable -Name SmartM365ScriptName -Scope Global -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($ScriptName) -and $scriptNameVariable) { $ScriptName = [string]$scriptNameVariable.Value }
+    $startedAtVariable = Get-Variable -Name SmartM365ExecutionStartTime -Scope Global -ErrorAction SilentlyContinue
+    if (($null -eq $StartedAt -or $StartedAt -eq [datetime]::MinValue) -and $startedAtVariable) { $StartedAt = [datetime]$startedAtVariable.Value }
+    $warningVariable = Get-Variable -Name SmartM365WarningCount -Scope Global -ErrorAction SilentlyContinue
+    if ($WarningCount -lt 0) { $WarningCount = if ($warningVariable) { [int]$warningVariable.Value } else { 0 } }
+    $errorVariable = Get-Variable -Name SmartM365ErrorCount -Scope Global -ErrorAction SilentlyContinue
+    if ($ErrorCount -lt 0) { $ErrorCount = if ($errorVariable) { [int]$errorVariable.Value } else { 0 } }
+    $csvVariable = Get-Variable -Name csvGeneratedPaths -Scope Global -ErrorAction SilentlyContinue
+    if ($GeneratedCsvFiles -lt 0) { $GeneratedCsvFiles = if ($csvVariable -and $csvVariable.Value) { @($csvVariable.Value).Count } else { 0 } }
+    $logVariable = Get-Variable -Name LogTextFile -Scope Global -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($LogPath) -and $logVariable) { $LogPath = [string]$logVariable.Value }
+
+
+    if ($null -eq $EndedAt -or $EndedAt -eq [datetime]::MinValue) { $EndedAt = Get-Date }
+    if ($null -eq $StartedAt -or $StartedAt -eq [datetime]::MinValue) { $StartedAt = $EndedAt }
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) { $ScriptName = 'SmartM365' }
+
+    if ($Status -eq 'Auto') {
+        $Status = if ($ErrorCount -gt 0) { 'Failed' } elseif ($WarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+    }
+
+    $statusLabel = switch ($Status) {
+        'Failed' { 'FAILED' }
+        'CompletedWithWarnings' { 'COMPLETED WITH WARNINGS' }
+        default { 'SUCCESS' }
+    }
+    $title = switch ($Status) {
+        'Failed' { 'Execution failed' }
+        'CompletedWithWarnings' { 'Execution completed with warnings' }
+        default { 'Execution completed' }
+    }
+    $statusColor = switch ($Status) {
+        'Failed' { 'Red' }
+        'CompletedWithWarnings' { 'Yellow' }
+        default { 'Green' }
+    }
+    $duration = $EndedAt - $StartedAt
+    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
+    $effectiveLogPath = if ([string]::IsNullOrWhiteSpace($LogPath)) { '' } else { [string]$LogPath }
+    $runKey = '{0}|{1}|{2}' -f $ScriptName, $StartedAt.Ticks, $effectiveLogPath
+    $existingRunKey = [string](Get-Variable -Name SmartM365CompletionBannerRunKey -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    if ($existingRunKey -eq $runKey) { return }
+
+    $lines = @(
+        '================================================================================',
+        (' SmartM365 by WorkplaceCloudHub - {0}' -f $title),
+        (' Script    : {0}' -f $ScriptName),
+        (' Status    : {0}' -f $statusLabel),
+        (' Duration  : {0}' -f $durationText),
+        (' Warnings  : {0}' -f $WarningCount),
+        (' Errors    : {0}' -f $ErrorCount),
+        (' CSV files : {0}' -f $GeneratedCsvFiles)
+    )
+    if (-not [string]::IsNullOrWhiteSpace($effectiveLogPath)) {
+        $lines += (' Log       : {0}' -f $effectiveLogPath)
+    }
+    $lines += '================================================================================'
+
+    Set-Variable -Name SmartM365CompletionBannerRunKey -Scope Global -Value $runKey
+    Microsoft.PowerShell.Utility\Write-Host $lines[0] -ForegroundColor DarkCyan
+    Microsoft.PowerShell.Utility\Write-Host $lines[1] -ForegroundColor Cyan
+    for ($i = 2; $i -lt ($lines.Count - 1); $i++) {
+        $color = if ($lines[$i] -like ' Status*') { $statusColor } else { 'Gray' }
+        Microsoft.PowerShell.Utility\Write-Host $lines[$i] -ForegroundColor $color
+    }
+    Microsoft.PowerShell.Utility\Write-Host $lines[-1] -ForegroundColor DarkCyan
+
+    if (-not [string]::IsNullOrWhiteSpace($effectiveLogPath)) {
+        try {
+            $logFolder = Split-Path -Path $effectiveLogPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($logFolder) -and -not (Test-Path -LiteralPath $logFolder)) {
+                New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
+            }
+            Add-Content -LiteralPath $effectiveLogPath -Value $lines -Encoding UTF8
+        }
+        catch {
+            Microsoft.PowerShell.Utility\Write-Warning ("SmartM365 completion banner could not be written to '{0}': {1}" -f $effectiveLogPath, $_.Exception.Message)
+        }
+    }
 }
 
 function ConvertTo-SmartM365Hashtable {
@@ -373,8 +468,8 @@ function Initialize-SmartM365TenantContext {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4N71gSXkIBy4g
-# f5zfqmWrUBZg2p2g/qzcSy9MNTnWBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAIdriYfrDdTHnj
+# p3RTN3kObsaJ/2Fbpo5jRWdoFuyss6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -507,31 +602,31 @@ function Initialize-SmartM365TenantContext {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOVGg5Uh+we02bWt4L6jl5oj/9wEMEnwNnHL2qx/kn9MMA0GCSqG
-# SIb3DQEBAQUABIIBgJy6F1NxJKCYwLNb3SaIKAWJB85BAxUESDlTg+uejaQFQ2LP
-# pR3mimDM09EjSI59UKoMgMJHjJFpPz+isEKu0w8TrTGQsh6N30szgt6QmXvpiVSu
-# U8Por+82vWesxrovx34XLslYbRjnjjtaU2/XvGy6URdT7Dv5HgamuRBRJ+4dlp6a
-# UfSN1I/MkOkzr/MNpvD4tlG58poX29NUG1pUJ/vH7MflMFhuDiNOIGHi4xYvkjSQ
-# gHpSn5Ts8rKoozml7ludgN7A/s+gdoaY9DLBk8myOwmXWeC6BamyN8VxxjszKjyF
-# uwWxDLU6vfJDFwKFmY9oS4pDAn0A/D4hB0IbnltjCJVCXkkxtQmLna7u/Gr/q98j
-# GKGb1gpaar7AkI9cmzFwa7C1vbSC9Gx90xNHSjSZqQm0aUTK0iqgJKAFBe4bv8Nm
-# q7TVR4smik7iz5Mc4fMdAuogF7hxja7lxsS7WSMmZ2g3VyNFzr9z2iw1x8XKWgGL
-# UJNQzMSNMuK/Ws79IaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAPfsQCj0vkYjnexBzF2oz3MrFCNRlloV68K5JQMUlfaMA0GCSqG
+# SIb3DQEBAQUABIIBgCjINNnMNYGYCo8GgilMYbsPJ3p/9sBLWN533qUv42H3vMcs
+# R9LCLYRGFFWJmGxi5ibGbORIAZ6koDrH2wUdoYxEaEcKL8YJtpJZqq2N6olx2Wwq
+# q3UbR/OhydkaHrIGiY2bkwIriRlqAh/y2A8or7ah6T7yNrYvsBuYT4Z1eBiX0wGo
+# dHokg4krdr8Ln3Ld2kjq40MtCTBUI6EEQ0PikrKAoAYjVQA/LeQ+lJ2nrnom2iNG
+# itOHYX2AD1FBBqaqCjSB1I0d7MT6o933wW1FwWqRCQ+Dweh8X8OQbSkWhtOogBrF
+# 4qMfoY2NtYcv90XyPcaHmweomIKQwXloDyJB1DRfg85o9Fj6uRlHioO2wwF2BSeC
+# BGn1r7/bGvvlAB6/QpSfEcuqmjrihFx3yBiKxggLs3LPCZnQ3h9FAMboCpMW2njI
+# 1Wn+HhVomtHTpLRh8xe9bY6lpp3VJI205AxfR2n0jNF5Su+tQBzbMOTzSrnbe6Y+
+# 5ujMtVRx+/wE+3cYnaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMzA2
-# MTRaMC8GCSqGSIb3DQEJBDEiBCBMKxl1GSjS0eUPkgoELxXlVydQwiILcbKk1m3o
-# LruuoDANBgkqhkiG9w0BAQEFAASCAgCItLcuTI3uxuuKlZ9WtERQZ9AHh6qyv93/
-# WaFhOxdGxio4N6RtFUjDWtkoyAQCEWe6pkqFT2ATrMWZy8JZ40ZT7f/zOMev7wka
-# 9RRGsU6XQEDbDniE9U0GlrjGN7GZrPUvHMUrL6lxe7iKfCFcCvFwmUnTCiJFpF1i
-# vVTNvJU8fWqDPksAVyIdwIthDVuKTNTEvhL2kwdOBRtaunFVMjKP5RIWCHpppYK/
-# qhzF/NbwczYZqeHc7uDtP/SGLrE0vTwz+VB1e9Pbsd/i7GMf+WITLIIv8GWDF1zn
-# a1eH/k44+805cAPi3UVq4+D0QyfIdfEqvAKqI1EIQpsIuPMpvzcPMKZ9zhKSpBo4
-# tkU6g8gthHXqRFVjrid6emsAFzhLxfkBgAR0Spf9kmMs2yh1UMrh+1w3dlJ9k3ch
-# sa6MvbCvMhdl4/KABRLWt9//AE8A1TroXZPmh/AUp2NQvI/6htBiNWebyMo5TC0d
-# /huqGeg4qj1iS+sfjt8dgttvja/hu/tBZQDv0IYO412Kh6u8Lih0apsInKq5bMLP
-# TsigNKaQZ9bX0auonNrZHMrqS0Qc3XULXdavC+IdPCVomVgQSVmdMDAoN7UXZPqH
-# tOZWD5rNaG0AYjMfV1YZbo5lvo3h4nIPsHOCGUJHPEwcEwcqFvc1EU1JfBbIVR/A
-# MmRsb/XXrg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
+# NTJaMC8GCSqGSIb3DQEJBDEiBCBdJ/yOgTDCuGT9/bp2nHHf7XP6sBrCj2iBlONK
+# wdrupTANBgkqhkiG9w0BAQEFAASCAgArytpyxsQ9qp2PO8r98W2cBt3UU9CXsdCb
+# 7DSPmQQ0xdE0zvR4VAoX9dET649qpIqXQ2/BURGWux6jwaBK/Y9OFbwgjv3x7988
+# GHGs4QCl6AhbGuOtfcPZlb1DzeirBKv5HpEmndnV1aJNUDr15CtrtfLbiad1Vsdl
+# gq8C3W5rnpyuECLIQYr0ZvJUMPYPaiTf5EOaco4pyD+S1PkGadOCxpQRbGWek+uV
+# Z9wTiIMw8WOyRpes8pYcsEzWJPARLb1DTWFohf7puszbfxh9vyaHlLjmuDjPvXol
+# Bp26xcRaKmqJ5GeS/xIdiB5mO5YpSz1Kjk4sKnPZnMWVECjVVH40pq4X0RA23JiW
+# Ob61WnsJlfEzDankVnn+VS8+EdrtQWPY7zeTKjyhVkmbgZlBpdeTpc1WsPl7IXeJ
+# DoTmdZj6Am//AJ/DuUZGI8ELFpz3bb90LV8PstjADLY9j6AYRY3FdffSMhpWTU2x
+# ghtnb/mG+ivNdU7IyHWNV7IAKzIyUmnDjWX3RDhBnRqf8ad2mcg+HsA3crwnuDWV
+# oj0Dvf78z/q/1Ro8kvEwjjJSg+Y6Z8QD2YwQxCBLkUyYfsMniL9RrhWqdnBigx2I
+# uJQO77TPEVaQuNV2z4wA3rEZlEl/Z7NtFNvudf21z4y/DLpyDdYxr9yYsewKqWLI
+# hZnhtdNSmQ==
 # SIG # End signature block

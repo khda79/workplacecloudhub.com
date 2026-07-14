@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.19
+0.20
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.19"
+$ScriptVersion="0.20"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -273,14 +273,14 @@ try{
  $mailFileLinks=New-TeamsSharePointLinksHtml -Paths (@($timestampedCsvFiles.Path)+@($workbookPath))
  $worst=WorstStatus $alertArray; $subject="[$($worst.ToUpperInvariant())] Microsoft Teams Inventory - $TenantName - $RunDateUtc"; $html=ConvertTo-HtmlReport -AlertRows $alertArray -Summary $summary -Worst $worst -Started $RunStarted -Ended (Get-Date) -FileLinksHtml $mailFileLinks
  if($DryRun){WriteLog -Message 'DryRun enabled: daily summary email skipped.' -Level INFO}else{$dailySummaryMarkerPath=Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$ScriptBaseName-DailySummary-LastSent.txt"; $dailySummarySent=Invoke-TeamsDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {Send-SmartM365Mail -Subject $subject -BodyHtml $html}; if($dailySummarySent){WriteLog -Message ("Daily Teams summary email sent: {0}" -f $subject) -Level SUCCESS}}
- $result="Teams=$($summary.TotalTeams); Critical=$($summary.CriticalCount); Warnings=$($summary.WarningCount); Members=$($memberArray.Count); Channels=$($channelArray.Count); Guests=$($guestArray.Count)"; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; WriteLog -Message ("Result summary: $result") -Level INFO; Complete-SmartM365ExecutionContext -Status $(if($worst-eq'OK'){'Success'}else{'CompletedWithWarnings'}); Write-Host "Teams inventory completed. Status=$worst; $result"
+ $result="Teams=$($summary.TotalTeams); Critical=$($summary.CriticalCount); Warnings=$($summary.WarningCount); Members=$($memberArray.Count); Channels=$($channelArray.Count); Guests=$($guestArray.Count)"; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; WriteLog -Message ("Result summary: $result") -Level INFO; Write-Host "Teams inventory completed. Status=$worst; $result"; Complete-SmartM365ExecutionContext -Status $(if($worst-eq'OK'){'Success'}else{'CompletedWithWarnings'})
 }catch{ $err=$_; try{WriteLog -Message ("Teams inventory failed during {0}: {1}" -f $CurrentOperation,$err.Exception.Message) -Level ERROR}catch{$null=$_}; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; try{Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $err -FailureStage $CurrentOperation}catch{$null=$_}; throw }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAXqGrUK4dZ67ts
-# b9ILQ8s8IWzDrvvG66I4YTrvIoLF/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0zziQ5EkHEwZr
+# zp6LOV95hdRv1ERbNp7N0+CSwt+ir6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -413,31 +413,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOLgcT9LOkBhQd+qErtPJnPJ9hUbE922VYkf9QtOnOtWMA0GCSqG
-# SIb3DQEBAQUABIIBgJW7JOLBjcuBwXZlvtuq/kDcvLsOc/vJNm1HxXRMH7qRJKso
-# 1iMTwaPoHAA2TjN5Dp4XBF0aze5qToSWhMhUolaLkCXn6NM+oG8Bu3gpP4TUFKhY
-# YmxYtVhx1H+1LfudGy6ipa1K/lDEuFh2mBX/B4/Qm0aVUtCk7MHoEwru17Jplcqm
-# WWbZeZ1gUjX8wvooBEurfK8ic0nQzYyL5hUrSbITbEOAL2bxXJHJl7yAVNLa7Ght
-# ld8ofMoJVumU7UlzO2zy9MDP/2VwfIzmghqvVZc5yKLfxI6/1tP5GUWGynduSbXz
-# IMuTcqLLPh81PoHa46k7YgnUlz2QSkFy0Cg3OY7mbHj8LEEa44M7XxRoxkyDPGba
-# AnV8dIYDaAOpUyJR2CfX1I8ndqcPfdrZDrNWfteWBeSluBF1kfmVQqxI2aSCw0DZ
-# Wna8t4xH+W6LaXxzc1DZWK1bFFB7SGS1qX/g+VPjPCZUF34e/p2HvFIUPs6tMH8R
-# fXft0hcjCwAyGUvCPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA3A3h99ptYKBwolS1Uw7xkgcOa0l4+UPQQbGAVCEKQkMA0GCSqG
+# SIb3DQEBAQUABIIBgJdVGXX/pVIQgLi1DriK5A853LB81LLyeTsXT/21K47P/y2F
+# kIMLWyitvMDDLtIPVjyFZ8JundRa5pKzi8kacNNb+HAetxqm3ESRRry6tiTWt6rz
+# VauCay/1eJVR6fGKSSmhHyG5UFeAhALxw3xUmXsoG4VrUcUphv6pqCir2e7ZwIba
+# ZTFItnPYGIHnQXoAH+HWxSciyron+bhkNGChljKTqmQ+wN2MFfFpSQVmJoDaAC8c
+# 4jJsAgR8LSi9ZdVWRP91iyj7NtqM2dTw7hTUtNBsvnwWEEy/ERuU4CCx7UbCQH8F
+# J2NbasdL+t5n+xkBmaUeFbQEExrNHu8OSFjtYjBLFOXDCPH9VpEMcDPa9l/nm9vg
+# 7+Tl9FoZc1YPsTfi1si7GDnQux+bQQ0fibtA/Q4cDgF7Vkgk2Zp8tgp3Mh1WoNbq
+# wCINoD2TpKLcuPxY1Y7aOXv+kdR0uyRBy+2FJLHsgM78tLrZWhhNWXl53AXr5uLD
+# jnibt2cQ2csOxjG6BqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMDIy
-# MzBaMC8GCSqGSIb3DQEJBDEiBCDSJtjfW1RXSgKppMqhUfqBI0Bm+054NkHvnOJT
-# TxRv2TANBgkqhkiG9w0BAQEFAASCAgB41Bx6Ztwgl0J2renT6ypftccQaAEhIjtF
-# njCgXaM9WZ+ZrHMfgOopAcpxjT6rUK/SAxKgdjNMIMv6trZoaT8auIYOHrI3/Kr3
-# 48hx7SIIfGkOOIwfV108M/exWEKDG9QWo3BGDT+U+H05/WS6nJxpQD/qDKWPBAvi
-# XUBHYI4GcbhJY32pu9VrkVDGSG8D0uq+/q3gRymPXALU4i9w+gB0FIklVwPNDLKD
-# FiOXPQZzq9tQZl6rqNXCfqj2PsKiQET6MA8Apy/Cpi4NLsTssOEsWU1uToSaz4AB
-# bVf8xmsdKzM8vbncYLST5HgYQROEn0GphqGxG+4LdVDkzhFrTwibt5ez7EkL2drT
-# sKCusSbjjyIxmeQeh7fd8/8dHgDe0NL291ecyj6/jPRNBgOvpB0HF+WevmibL77j
-# kLZwWa0GL66aOAyhNseLoSNrrE8cp3cOF45Hy7tmJ2jYf+KuDADpJSbVu5s1WUdo
-# PXmFO/Fw3jSrccTOXGlLPyrmkskokFHLYPkWm0O0VmIAYIh7ti1X0OCE6oE7eX3j
-# NYloy+c7cyRxuA62PQ8uDNFQAHEoYdWyGZB5NdPbhkuADVMdHMvlyIT/6rYzWyNg
-# 0FXUjWYBTc6PoYX8tjG7rZq1ww5xIJzIj9JdVQ3lC0hdbMoK2DO71N1iqSZQfqDS
-# ZyZY3KcoKA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
+# NTdaMC8GCSqGSIb3DQEJBDEiBCBxETJMd0HN9Me4oSMsE4TnhSokr8vFEqPrznrK
+# T4S4rjANBgkqhkiG9w0BAQEFAASCAgB/n4RLh+cAP5swM6MXzouzIhZYTW9h80na
+# idL36OyGpM76sRbQtKdbMoxbT6jVQOpaiWI2O4w090UwZzgBYH1AhVrCtgP9wDCv
+# 5lAWXAcIDuS90iTG11HZPUh60hjjWDfPNGKo6Odmn1zWE+laOgxyZ/2PWONpLHpf
+# hHJ/kVu854bG5IeBwQe/O8N0uk6EpHiVHEk4LG5NCBsCHz9wdTC6vqAn9SLT0G37
+# zJq17zJnGJPlxeXtzBa5hkFiobPsYrz7B7NWBXZM8h3JLul4UNQ6w+b8JyDJif2W
+# tiuvV3nBCLsiahf9rdGdPWxouIlsP0VHnAivEkRCLN92r4Dn+a+wPL31FE+PFvcW
+# KxudG3sBsN8G/8wdBB635Je196JnBb2NuYvBqwvZBgvin4b8RCxanPDHVED2Oow7
+# +vqIvLE3tN0Eh25ryUI3Ms6/4yJmHKb3RJ1r25R5Zi+32poKgVrAgG6WGUwK9N/s
+# Nv6J23U4Kp0+CSeZtc4ZpBICRJgsCwnUwmxTMtLlJlCdCBhBNVEdEPZDJjaogc8l
+# 5fekQHEhLAM21g4yo0mIET+lj0gnkiqOYSyoNG6yGvuZG7f5Ynnhm5vCbwXtp4mj
+# u+pb+LzRtMm+H3yVJkTErTyReMJbZqek5X39rie2xMpaigJIw+PzoLtK93eFpYLV
+# a0aEVMFYNA==
 # SIG # End signature block

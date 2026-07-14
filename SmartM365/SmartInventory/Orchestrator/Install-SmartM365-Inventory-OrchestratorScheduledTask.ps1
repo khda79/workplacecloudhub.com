@@ -42,7 +42,7 @@ Forces the guided interactive workflow. This is used by the CMD launcher.
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -Uninstall
 
 .VERSION
-1.1.5
+1.1.6
 
 .REQUIREMENTS
     Windows PowerShell 5.1 or PowerShell 7. The script requests UAC elevation when needed.
@@ -76,11 +76,21 @@ if (-not (Test-Path -LiteralPath $tenantContextPath -PathType Leaf)) {
     throw "SmartM365 tenant context not found: $tenantContextPath"
 }
 . $tenantContextPath
+$script:InstallerStartedAt = Get-Date
+$global:SmartM365ScriptName = [IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
+$global:SmartM365ExecutionStartTime = $script:InstallerStartedAt
+$installerLogFolder = Join-Path -Path ([IO.Path]::GetTempPath()) -ChildPath 'SmartM365\Logs\Orchestrator'
+if (-not (Test-Path -LiteralPath $installerLogFolder)) { New-Item -ItemType Directory -Path $installerLogFolder -Force | Out-Null }
+$global:LogTextFile = Join-Path -Path $installerLogFolder -ChildPath ('{0}_{1}.log' -f $global:SmartM365ScriptName, $script:InstallerStartedAt.ToString('yyyyMMdd_HHmmss'))
+$script:InstallerCompletionStatus = 'Auto'
+
 Write-SmartM365StartupBanner
 
 function Write-InstallerMessage {
     param([Parameter(Mandatory = $true)][string]$Message)
-    Microsoft.PowerShell.Utility\Write-Host ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message)
+    $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
+    Microsoft.PowerShell.Utility\Write-Host $line
+    Add-Content -LiteralPath $global:LogTextFile -Value $line -Encoding UTF8
 }
 
 function Test-IsAdministrator {
@@ -191,11 +201,21 @@ function Initialize-WchScheduledTaskFolder {
         }
     }
 }
+function Complete-InstallerExecution {
+    param(
+        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings')]
+        [string]$Status = $script:InstallerCompletionStatus
+    )
+    Write-SmartM365CompletionBanner -Status $Status -ScriptName $global:SmartM365ScriptName -StartedAt $script:InstallerStartedAt -LogPath $global:LogTextFile
+}
+
 $script:InteractiveMode = $Interactive -or $PSBoundParameters.Count -eq 0
 
 trap {
     Write-InstallerMessage ('ERROR: {0}' -f $_.Exception.Message)
+    $script:InstallerCompletionStatus = 'Failed'
     Wait-InteractiveClose
+    Complete-InstallerExecution -Status 'Failed'
     exit 1
 }
 
@@ -255,6 +275,8 @@ if (-not (Test-IsAdministrator)) {
         -Verb RunAs `
         -Wait `
         -PassThru
+    $script:InstallerCompletionStatus = if ($elevationProcess.ExitCode -eq 0) { 'Auto' } else { 'Failed' }
+    Complete-InstallerExecution
     exit $elevationProcess.ExitCode
 }
 
@@ -274,6 +296,7 @@ if ($script:InteractiveMode) {
         if (-not (Read-InstallerYesNo -Prompt "Remove SmartM365 Inventory Orchestrator - $Tenant?")) {
             Write-InstallerMessage 'Uninstall cancelled.'
             Wait-InteractiveClose
+            Complete-InstallerExecution -Status 'CompletedWithWarnings'
             return
         }
         $StartNow = $false
@@ -326,6 +349,7 @@ if ($Uninstall) {
         Write-InstallerMessage "Scheduled task does not exist in $taskPath or the legacy root folder: $TaskName"
     }
     Wait-InteractiveClose
+    Complete-InstallerExecution
     return
 }
 
@@ -404,6 +428,7 @@ $plainTextPassword = $null
 try {
     if (-not $PSCmdlet.ShouldProcess("$taskPath$TaskName", "Register scheduled task as $ServiceAccount")) {
         Wait-InteractiveClose
+        Complete-InstallerExecution -Status 'CompletedWithWarnings'
         return
     }
     $credentialParameters = @{
@@ -461,11 +486,12 @@ finally {
 
 Wait-InteractiveClose
 
+Complete-InstallerExecution
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjAKpWwflgbveV
-# LECRCGqEyWOKgD6AWhc2qRO/zqd5W6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJmb9BxPSHeybo
+# CGFHNICvZGdv/FJrZpLrgCEO74W/uqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -598,31 +624,31 @@ Wait-InteractiveClose
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINRqF8C3nGa9l9jq2ss5gEmAxyGDt9ngArY0ltwrnUntMA0GCSqG
-# SIb3DQEBAQUABIIBgEsH9cMaJTQflnPn1HgBvmpQq2sWN3vQys9olJ3FMIA6grFO
-# ujics9I5q7gFjJglrkV9MM9K1Xvj7/B48A3CBgELT1pe6wft6SUApRrPFGR77FcC
-# tbEkPFGxFdzRSMYkLZlK0k/+xULWI3GXkYvIgkn7zIPRlDT2HY3Jml+bBFB+WQwm
-# BLAwvf9CJkao9nxMPkhxDxxFN7IsWYHZB0zo+aLE/kXDVhhKsHX1kH26TzRfCRqs
-# +8KoR2qOgKDGJSFEts+oumHbHoGD43kp6KoZMAG5gY6u5XCn/xmEd2HdfolY7jJx
-# xzJ7cazIRlBIKRlnAhL49Gz953O5l18u4DqL422Gm8rHkmHeNXchopjAwEPARYp2
-# Gy5Q+Vl2nnpKJrORCt8ISsJbVe2Y5guodllrII5U0L6G24yGwHDeYoNlmhA4SQw0
-# Cl+z0nShZznMSO1Pfm6Gu3CgXm4KG1ocfF+hGNF+qfUJ8dbSqxKi2FsKwqst5lCU
-# Il/hrnZM2W6lgJk26aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK1Eh6goGDUg2YAp3gSOBGlCEyKyNXkVkuZYSSEOVFG3MA0GCSqG
+# SIb3DQEBAQUABIIBgIcLYI4X2e3QT2Mnj3wANxPoG0qQhIgir1JqFavKJxJC1rcQ
+# 5bRme8oXA0+PWOPl9bu+NSrZQIMtk1Bwl/Owlaziiw3kDoNMvJPf4nNe7hrE11Ml
+# QaWI8M9IJbFX3fI6Ep83WmqZrwahlY0pChWcRXhMzlgxJXthlLKtoNeRzG7/EPiA
+# 0D41U7PHworrce6l6tc6ir6Wo7L7tGzB0aogyi+iuSkHAbsPjs2RAS8IQuac9P86
+# DPjZcXVcFgq9pmvQxe9NwvtulUEqF9KIgTYhUODJegHHT3p+ntwkxK9PkAHHWe70
+# 8MHhZR1+MetyuRbc47wYiw0Afr8lh4VYLS6jWqu6Qq6ZWigy3YyoUh3qHrCaEEWL
+# vOx27NI/cI5nYhtpdMxpsrBeaFpQuxt30egPLcQ+UCSgPizUYLX5IQFKamx3kFE/
+# Yqb4jdV58nxOGuExVdJqkDmLCmuba5iuC5mgFA1coh3fnUGiRNZTLrzRLPJZyV/L
+# NA9AXw+RlbD7Wq4T+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMyMzA2
-# MjJaMC8GCSqGSIb3DQEJBDEiBCAtliXHkYZc3Gn8LeRbRkky+jr9aQ9PRzb56aP0
-# haURAzANBgkqhkiG9w0BAQEFAASCAgBIBlWrEX1W+mR3vXeLQgxuXGuTpqMI6dUh
-# WBm4qR/x3SG7QT7VRh7wK1GfhpGKaUofaoYkpC/iric/SUVI8RXWHTcNEWIuZEBz
-# moDnboE5+m/e2JW1wUGuewkdFcRzqzR4+cPwCyDx1Fft9pgrY6WqwPCRflNJegUd
-# 9Ot54++Mj04dMid1I7AImWBwNYbnhXJ5k5hUJFQt68ft0nqhn7gwB4kb6RRQm5iY
-# k5jydbax2s7s3rwWQUl3c4uDc6a/SYmguLMva/jFqoweu0VIt8F4V+VPBREd/0+i
-# e6SMomPz+2MH+m7X2PUOouDsPMYObuSpiCdCMOGCpVindA8TmtU3CW5vkGXSNqev
-# zAYiE0lquuhngEJL0LLs/FYl41/4Gd+fAJg16Y9clRs1rCTW0m33cpvyeOzlZCii
-# WVTZGbG7lO3/2JWmhaP5pfhxQOU4a3DXVGhHHjfwdcTC2pe2CwaIR6Fk6JfH3fA7
-# LXokG42zBWkvrxDdHWNv63pfCzJ3IaQvkIFxYTD5x8wrR8d4R2FoAmvois5/zxU3
-# dOqKkcMxJm14z1jGpzmAS8vKKA1fECBOEugmJ2U2qRYkT2wO/oaUlDD9mv7/PGrj
-# tDd+GaOpZHvN9G4+JrdZhJBwOCh7eK83ANJz10cGQlk2czQUXCdbEUdRo5AAe7l0
-# A4PofDC5PA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
+# NThaMC8GCSqGSIb3DQEJBDEiBCArOv8SqM2EHo+32y+fG9oKCKAG1KqvfoHhpLZz
+# CrLdRDANBgkqhkiG9w0BAQEFAASCAgCeH3UGx1KQYKj6oVmhtyR6OyYNAGCu3o7r
+# BKOroO3DLTzCmoJ3JX9KYPmyYiplmFlnIXj7hpNgm8vYDu8Xu+kl9pHCyo1h0QI0
+# gjwP5wCY/HplAmjZVkrWPw6DIZrbL+KW8Ln1k/uwdmhgRdBRb1LxIRnMxkSGusBL
+# dQIrArohDcwlwjpN4gA3FzU+HwStiPH3ZxbFCT0CP+MFkD62t06we1Ggg8X/1d3K
+# yg352HSXjOVxYk2hgvDrV0B5WoQ1hSdwfSwX+wPvA3LNYxkk6sHLTUyPT4+v8i0O
+# 8RQ+h9KlGoEqA4dJ2rr1onn7v0KkDNRaYhncggo/YV/fMBUJ58B6qMbjxcnCL+R3
+# 0XsAJX4LjM9nzGPfJj20uxNIB8ruDo9ebiRM+/vUoyIpOKA4/8s07J9m7W5cWhv0
+# IDhd5AHfyy2m3iz255yZqGgzwm2rSh+Su5mLjSkl0+9B0su52TpYzbQpMhPKLV/D
+# x9LszRhKUEz7BZbT2GGiGej8N92aU62vv6q+eZUpi7flsvu3fo3wcNIe16L0hJuK
+# oE9AjRbuZO916Cs+ZXK5RQviTL7+oIkXWUsvGNaFNyPkq6vXtA2RaIZSr/eUeqQI
+# XjKosuLO4Wl4T6I6LWtFaeSZ1b3iPqoajskhyrmJJ4jGKQ9BXbYA8lFOBd4qPadG
+# EkY6gkP3tQ==
 # SIG # End signature block
