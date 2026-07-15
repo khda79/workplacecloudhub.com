@@ -179,7 +179,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic LOT-scoped inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.74
+2.10.75
 #>
 
 #requires -Version 5.1
@@ -250,7 +250,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.74"
+$LauncherVersion = "2.10.75"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -694,9 +694,11 @@ function Get-ScriptHeaderVersionQuick {
 
 function Write-LauncherStartupInfo {
     $repairScriptVersion = Get-ScriptHeaderVersionQuick -Path $LocalScriptPath
+    $powerShellProcessPath = try { [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
     Write-Host ""
     Write-Host "Remote repair launcher startup" -ForegroundColor Cyan
     Write-LauncherStartupLine ("Launcher ver : {0}" -f $LauncherVersion)
+    Write-LauncherStartupLine ("PowerShell   : Edition={0}; Version={1}; Process={2}" -f $PSVersionTable.PSEdition,$PSVersionTable.PSVersion,$powerShellProcessPath)
     Write-LauncherStartupLine ("Started      : {0:yyyy-MM-dd HH:mm:ss}; Host={1}; User={2}; PID={3}" -f (Get-Date),$env:COMPUTERNAME,$env:USERNAME,$PID)
     Write-LauncherStartupLine ("LOT root     : {0}" -f $LotRoot)
     Write-LauncherStartupLine ("Script       : {0}" -f $LocalScriptPath)
@@ -5019,8 +5021,8 @@ Complete-LotCancellationSupport
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0E3ldrOyPJBcj
-# Zt7um6i2EPNpwILZomGVMWxXHM6RqqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/KhwrrLi4jfDR
+# 0qRQiXamoWbKmA+VWwR4VMm608jTAaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5050,14 +5052,14 @@ Complete-LotCancellationSupport
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCZ6ttCx1SWxLEwvhVNH2R5
-# QiNL4twac5iy/DMuO6NsXDANBgkqhkiG9w0BAQEFAASCAYBjDTGZf6aRhKq3KIvw
-# QS7Zdif1A3SZVJCQfjpg/2vnxZvLtCLfTx9XnWp9hs6VabOon77dFVpEkQ89q24v
-# mGx89AaTqbCPRsmvah/gDnHzh2Yiu72+CdaL5lxzy0LZbXqwI5qW+3+aFQ0Ec2Tn
-# RAdOJy1XVPbdSfJluhEu88sgvfFk/ngLadF5t22+hmLiqjAnX8R/HMaISMRzEXv1
-# 4bZkgNJu60HkRmXlNjr7AHA+lyRBrwS9B8BsR+zhSdWtea1jGH4eR2uDYbEVZdYc
-# lHCHWkMHLrmn/qfVscXp+fLFb44IZ6P4Rll/Uq/HCLci+euZtOXA8bwewahOnjnk
-# ZeRjvbzRluxWBrD49S/G70SggCYwOZOrvxXS33WcMPKlNxL/iCI54OxmAM36kC1f
-# X5HnqaXmCOuRhs5LBBRMnQUpjHcMf4nJkQ0DUb6/cfpE75iEUVFjO8rR0xiQpSQN
-# VnHvCkDzTr6hodTl02O8LM+lG9x6iVmXDWsekvTIfHntMu8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBhefxmURgYfUefkxWdrOPg
+# +Kymks/Jb5wuEbuOwocRNTANBgkqhkiG9w0BAQEFAASCAYBDpjH96kbdSDU2yN6c
+# 7f2rtYoTHrRKVb160m0xBkk3U1ubW0ZSZntC1NcCPHjtxURpZOwNd17YNrNadsxO
+# K34oF5NZMEb8gjSDh9om/bug5d6okYABFX8CWiNG8JLSDtyJOgfni4CzAq9LhMAa
+# LAC971B21mO3yjWfyO0TPJFFeuyD5PneyD2vwb+O/Nb5yr/wN6DvHITJLekdy6G7
+# jNSrC/jM2M/9FgAHT7qi8kSWdT5/39y2wKQ8kkQUtWAZwfOJyN64Ipi9PuIi5/3n
+# tvtuBAYmhSpn4stFhBnoaBDrMN/rvoMljRSQbdCMTyAv8dAW3IhsYgjb3r/c6thv
+# z7DR+4a0bL7yTKApk8EtYxuTm/kNBsuYS0SYaQ/Ur+2ppMteXikCJlNvDyC9+BS6
+# cXgiP0+DYDRtRKOJ+KYJ4yw5h9ZdwrJrSj2Oe4mnbO4/lVH2C7Tlx9gnrlcSw1k9
+# XgUZnSerPlsSFvqhVjEqqWx4iUPDrgD1BxDgoc4GIZJSVi4=
 # SIG # End signature block

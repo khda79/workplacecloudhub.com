@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.34
+0.1.35
 #>
 param(
     [switch]$ValidateOnly
@@ -656,6 +656,19 @@ function Start-ToolkitLot {
     Start-LotHtmlReportOpenWatcher -ReportRoot $run.ReportRoot
 }
 
+function Resolve-OrchestratorPowerShellPath {
+    $powerShell7 = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (Test-Path -LiteralPath $powerShell7 -PathType Leaf) { return $powerShell7 }
+    $command = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { return $command.Source }
+
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf) { return $windowsPowerShell }
+    $command = Get-Command -Name 'powershell.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { return $command.Source }
+    throw 'Windows PowerShell or PowerShell 7 was not found.'
+}
+
 function Start-ToolkitSingleComputer {
     param(
         [string]$ToolkitRoot,
@@ -673,10 +686,11 @@ function Start-ToolkitSingleComputer {
     $run = New-SingleComputerRunContext -ToolkitRoot $ToolkitRoot -ComputerName $ComputerName
     $isDryRun = @($AdditionalArguments) -contains '-DryRun'
     $psExecPath = if ($isDryRun) { $null } else { Resolve-GuiPsExecPath -ToolkitRoot $ToolkitRoot }
+    $powerShellPath = Resolve-OrchestratorPowerShellPath
 
     $commandParts = New-Object System.Collections.Generic.List[string]
     foreach ($item in @(
-        'powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File', $scriptPath,
+        $powerShellPath,'-NoProfile','-ExecutionPolicy','Bypass','-File', $scriptPath,
         '-ComputerListPath', $run.ComputersPath,
         '-LogRoot', $run.LogRoot,
         '-ReportRoot', $run.ReportRoot,
@@ -2215,8 +2229,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDG64BCiWPLc/kr
-# LcvW+qQebL/dySgHOUmA/SMCRAk9daCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCPv/tAjXGKiXTF
+# WpK3U247P0Lss83BXuJVhNAmGJxE4aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2246,14 +2260,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCsDufn1SRmpfyvlxwDjbtH
-# VuhO3huUJVXt0rncxa0/CTANBgkqhkiG9w0BAQEFAASCAYB9qVIAUQsHL3dK6apZ
-# UJJUvOIBmBwXalOU+GHHJ937JJY5vGkQNBUFbqXfm5EgOnLR4bI7aWxdPLo6QK0L
-# seEcyY5/xArxjl0ezs6S82Z65HeYbtMTZ1MCHKp3liCf0Hdz7v6ONy520QGDhwU5
-# R/b/9uZ/TM1pG5IcXDdB4DMwhCNkeGgKdq2EAyRXZOnjO3kEJwhHk2uZQ2XmVkw3
-# 5rVsGm8G7whusq9so7PXRIKb3YnYfpOzUppfxLghFoUFBHvGhtgePXInuo/0N2Vj
-# eJ4zwCYa1tkc38zFHQlPSLP3fWvZBr7SrAHiH5rVQIlaSRMXWmzSmEhUslbLqvvK
-# TQOK/zQVbiCFkFo8CM3PSdZ4HW5775fGmKz9/hkv+FX/GC5ecB2D267M27Hso/UW
-# XGMWJwcoNKl1Nq7RT4uaWYHf0Dl5OzaVpmz4WY22jkHqO5mGJI6ipzUIG5P7PbAy
-# qhVpy0aXKM9Zn+5NjzJ5V1EixYJGOiHyDvOSSHIaY6I4e0M=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDe0U2iIxbvyCqKBZmZo1Wn
+# qeE8QxGIq3XMyIOtOCEG8TANBgkqhkiG9w0BAQEFAASCAYCLfxBgrvX9+9VcR4iR
+# 5+qiZ79crIUbhvyc7LqtSUwP6JW3evhc3+lAvOTWUfTOeV1Tl1RCRWZC6A7p/LCt
+# 5ho3izbQMU14o7piNCUUbx4xLrSgcD5D5okdgQO+QExqPqIH1GrMxdnfpmsvwXSs
+# R5BldzPeR106BLPCJNvO+Eu6c5DTvUGEkAi3a2qUxu7wLgLtJXJmHmzGVNoS0Qr6
+# hurDIlPwme9wfe3Pf4BCS/b9USlixgG7k5zKpC+vr1v/tzVuaZ5KpsTn/PozumQs
+# mULeBpKq7S8sk1AphGeQLCs5XLdP/pCcmbHDqjp1cLbXt87HyhhV/Ye/Zxr4fwpi
+# Mprwsx6xq74XhtoeTXtiUDju0lcG0NoA3YZufd1Gb9O8KgKEGHU3ZbAdc53bG33s
+# zkpYy1DdsOZzp7mvE0XPgYtvgLqt3i9rTuSx0pFGvs30mzY4gFMqv6h18snE9xH7
+# jYT78iwQaI3NYh+apidnDZ33ev4I7P/jvsfxFFAkkEstHFg=
 # SIG # End signature block
