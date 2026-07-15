@@ -14,7 +14,7 @@
   "To": "__USE_GLOBAL__",
   "EnableTeamsNotifications": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
-  "SendMailMode": "__USE_GLOBAL__",
+  "SendMailMode": "SMTP",
   "From": "__USE_GLOBAL__",
   "Cc": "__USE_GLOBAL__",
   "EnableSharePointUpload": "__USE_GLOBAL__",
@@ -22,8 +22,8 @@
   "SharePointSitePath": "__USE_GLOBAL__",
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
-  "ExoCalendarPermissionsCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\CalendarPermissions",
+  "LocalCalendarPermissionsCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\CalendarPermissions",
   "EnableWeeklyHistory": true,
-  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\CalendarPermissions\\WeeklyHistory",
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\CalendarPermissions\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
 }

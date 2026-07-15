@@ -1,15 +1,12 @@
 <#
 .SYNOPSIS
-    Inventories Exchange Online mailbox calendar permissions.
+    Inventories Exchange on-premises mailbox calendar permissions.
 
 .DESCRIPTION
-    Retrieves calendar folder permissions for Exchange Online user, shared, room, and equipment mailboxes.
-    Primary-calendar mode uses persistent parallel Exchange Online worker sessions; full-folder mode remains sequential.
-    The script tries the canonical Calendar name, folder statistics, then common localized names.
+    Retrieves calendar folder permissions for Exchange 2016 user, shared, room, and equipment mailboxes.
+    The script runs sequentially in Windows PowerShell 5.1 with the Exchange Management Shell.
+    It tries the canonical Calendar name, folder statistics, then common localized names.
     It exports the stable Mailbox, UPN, CalendarFolder, User, and AccessRights schema.
-
-.PARAMETER Connect
-    Disconnects any existing Exchange Online session before establishing the app-only connection.
 
 .PARAMETER PrimaryOnly
     Scans only the main Calendar folder by default. Disable it to scan every Calendar folder.
@@ -21,29 +18,26 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-2.0
+1.0
 
 .REQUIREMENTS
-    PowerShell 7+.
-    Modules: SmartM365.Core; ExchangeOnlineManagement.
-    Minimum permissions: Exchange.ManageAsApp plus Exchange Online app-only RBAC allowing mailbox and calendar-folder permission reads; Global Reader is the default read-only service-principal role.
+    Windows PowerShell 5.1 on an Exchange 2016 management host.
+    Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
+    Minimum permissions: Exchange on-premises recipient and mailbox-folder permission read access.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 2.0
+    Version : 1.0
     Author: https://github.com/khda79/workplacecloudhub.com
-    Environment : Exchange Online
+    Environment : Exchange 2016 On-Premises
 #>
 
 [CmdletBinding()]
 param(
     [string]$Tenant = 'test',
-    [switch]$Connect,
     [switch]$PrimaryOnly = $true,
     [switch]$EmitNoPermRow = $true,
     [int]$TopMailboxes = 0,
-    [ValidateRange(1,20)][int]$ParallelThrottle = 4,
-    [ValidateRange(1,10)][int]$PermissionWorkerConnectRetries = 3,
     [string]$OutputPath,
     [int]$MaxItems = 0
 )
@@ -78,18 +72,12 @@ $tenantContextPath = & {
 . $tenantContextPath
 Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 # ==========================================================
-# PowerShell 7 minimum
-# ==========================================================
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    Write-Host "This script requires PowerShell 7 or later." -ForegroundColor Red
-    Write-Host "Current PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
+if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
+    Write-Host 'This script requires Windows PowerShell 5.1.' -ForegroundColor Red
+    Write-Host "Current PowerShell version: $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))" -ForegroundColor Yellow
     exit 1
 }
-
-# Avoid PS function-capacity issues
 $MaximumFunctionCount = 32768
-
-# ==========================================================
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
@@ -242,32 +230,30 @@ $global:SharePointSiteHostname = Get-ScriptLocalConfigValue -Config $ScriptLocal
 $global:SharePointSitePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointSitePath' -DefaultValue ''
 $global:SharePointLibraryDisplayName = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointLibraryDisplayName' -DefaultValue 'Documents'
 $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'SharePointTargetFolderPath' -DefaultValue ''
-$AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -DefaultValue '00000000-0000-0000-0000-000000000000'
-$Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
-$OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDomain' -DefaultValue 'contoso.onmicrosoft.com'
 function Join-ModulePath {
     param([Parameter(Mandatory)][string]$FileName)
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
-        $candidate = Join-Path -Path (Join-Path -Path (Join-Path -Path $searchRoot -ChildPath 'Modules') -ChildPath 'SmartM365.Core') -ChildPath $FileName
+        $coreRoot = Join-Path -Path (Join-Path -Path $searchRoot -ChildPath 'Modules') -ChildPath 'SmartM365.Core'
+        $candidate = Join-Path -Path (Join-Path -Path $coreRoot -ChildPath 'Compatibility\WindowsPowerShell5') -ChildPath $FileName
         if (Test-Path -LiteralPath $candidate) { return $candidate }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
     }
-    throw "SmartM365.Core module file not found: $FileName"
+    throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '2.0'
-$OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
+$ScriptVersion = '1.0'
+$OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
 try {
-    Write-Host 'Loading module SmartM365.Core.psd1...' -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365.Core.psd1') -MinimumVersion '1.0.24' -ErrorAction Stop
+    Write-Host 'Loading module SmartM365-WindowsPowerShell5.psd1...' -ForegroundColor Cyan
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.27' -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-Transcript -Path $global:logTranscriptFile -Append
-    $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-EXO-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
+    $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-OnPrem-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
     $OutputPath = $InitializeOutputPath
     WriteLog -Message "Starting $TaskName..."
@@ -302,49 +288,39 @@ function Invoke-Quiet {
         $ProgressPreference    = $oldProgress
     }
 }
-
-function Ensure-ExchangeOnlineModule {
-    $m = Get-Module -ListAvailable -Name "ExchangeOnlineManagement" | Sort-Object Version -Descending | Select-Object -First 1
-    if (-not $m) {
-        throw "Required module 'ExchangeOnlineManagement' is not installed. Install it with: Install-Module ExchangeOnlineManagement"
-    }
-    Import-Module ExchangeOnlineManagement -ErrorAction Stop
-}
+$snapinName = 'Microsoft.Exchange.Management.PowerShell.SnapIn'
 try {
-    Ensure-ExchangeOnlineModule
-    if ($Connect) {
-        Write-Host 'Connect switch specified: existing Exchange Online session will be disconnected and reconnected...' -ForegroundColor Cyan
+    if (-not (Get-PSSnapin $snapinName -Registered -ErrorAction SilentlyContinue)) {
+        throw "Exchange Management PSSnapin '$snapinName' is not registered on this server."
     }
-    Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$true
-    WriteLog -Message 'Connecting to Exchange Online with app-only certificate authentication.' 'INFO'
-    Connect-ExchangeOnline -AppId $AppId -CertificateThumbprint $Thumb -Organization $OrgDomain -ShowBanner:$false -ErrorAction Stop | Out-Null
-    WriteLog -Message 'Connected to Exchange Online.'
+    if (-not (Get-PSSnapin $snapinName -ErrorAction SilentlyContinue)) {
+        Add-PSSnapin $snapinName -ErrorAction Stop
+        WriteLog -Message 'Exchange On-Prem PSSnapin loaded.'
+    }
+    else {
+        WriteLog -Message 'Exchange On-Prem PSSnapin detected.'
+    }
+    Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
+    WriteLog -Message 'Set-ADServerSettings -ViewEntireForest True applied.'
 }
 catch {
-    WriteLog -Message ("Failed to connect to Exchange Online: {0}" -f $_.Exception.Message) 'ERROR'
+    WriteLog -Message ("Unable to initialize Exchange Management Shell: {0}" -f $_.Exception.Message) 'ERROR'
     Stop-Transcript | Out-Null
     try { if ($global:logTranscriptFile) { Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } } catch {}
     Complete-SmartM365ExecutionContext -Status Auto
     exit 1
 }
 
-Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -ExchangeOnlineProbeCommands @('Get-Mailbox') | Out-Null
-$results = [System.Collections.Generic.List[object]]::new()
+Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequireExchangeOnPrem | Out-Null
+$results = New-Object 'System.Collections.Generic.List[object]'
 $errors = @()
 $processed = 0
 
 try {
     $recipientTypes = @('UserMailbox','SharedMailbox','RoomMailbox','EquipmentMailbox')
-    if (Test-HasCommand -Name 'Get-EXOMailbox') {
-        $mailboxes = Invoke-Quiet {
-            Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails $recipientTypes -ErrorAction Stop
-        } | Select-Object DisplayName, PrimarySmtpAddress, UserPrincipalName, Identity, ExchangeGuid
-    }
-    else {
-        $mailboxes = Invoke-Quiet {
-            Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails $recipientTypes -ErrorAction Stop
-        } | Select-Object DisplayName, PrimarySmtpAddress, UserPrincipalName, Identity, ExchangeGuid
-    }
+    $mailboxes = Invoke-Quiet {
+        Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails $recipientTypes -ErrorAction Stop
+    } | Select-Object DisplayName, PrimarySmtpAddress, UserPrincipalName, Identity, Guid
 }
 catch {
     WriteLog -Message "Mailbox enumeration failed : $($_.Exception.Message)" 'ERROR'
@@ -374,16 +350,11 @@ function Get-CalendarFoldersSafe {
         [Parameter(Mandatory = $true)]$Mbx,
         [Parameter(Mandatory = $true)][bool]$PrimaryOnly
     )
-    $id = $Mbx.ExchangeGuid
+    $id = $Mbx.Guid
     if (-not $id -or $id -eq [guid]::Empty) { $id = $Mbx.UserPrincipalName }
     if (-not $id) { $id = $Mbx.PrimarySmtpAddress }
     $folders = Invoke-Quiet {
-        if (Test-HasCommand -Name 'Get-EXOMailboxFolderStatistics') {
-            Get-EXOMailboxFolderStatistics -Identity $id -FolderScope Calendar -ErrorAction Stop
-        }
-        else {
-            Get-MailboxFolderStatistics -Identity $id -FolderScope Calendar -ErrorAction Stop
-        }
+        Get-MailboxFolderStatistics -Identity $id -FolderScope Calendar -ErrorAction Stop
     }
     if (-not $folders) { return @() }
     if (-not $PrimaryOnly) { return $folders | Where-Object { $_.FolderType -eq 'Calendar' } }
@@ -459,194 +430,6 @@ function Add-CalendarResultRows {
 $overallActivity = "Calendar permissions inventory"
 $index = 0
 
-if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
-    WriteLog -Message ("Starting parallel primary-calendar permission collection with {0} persistent worker(s)." -f $ParallelThrottle) "INFO"
-
-    $workerCount = [math]::Min($ParallelThrottle, [math]::Max(1, $mailboxes.Count))
-    $calendarWorkItems = @()
-    if ($mailboxes.Count -gt 0) {
-        $chunkSize = [int][math]::Ceiling($mailboxes.Count / [double]$workerCount)
-        for ($workerIndex = 0; $workerIndex -lt $workerCount; $workerIndex++) {
-            $startIndex = $workerIndex * $chunkSize
-            if ($startIndex -ge $mailboxes.Count) { break }
-            $endIndex = [math]::Min($startIndex + $chunkSize - 1, $mailboxes.Count - 1)
-            $calendarWorkItems += [pscustomobject]@{
-                WorkerId  = $workerIndex + 1
-                Mailboxes = @($mailboxes[$startIndex..$endIndex])
-            }
-        }
-    }
-
-    $p_AppId = $AppId
-    $p_Thumb = $Thumb
-    $p_OrgDomain = $OrgDomain
-    $p_ConnectRetries = $PermissionWorkerConnectRetries
-    $p_EmitNoPermRow = [bool]$EmitNoPermRow
-
-    $parallelCalendarOutput = @($calendarWorkItems | ForEach-Object -ThrottleLimit $workerCount -Parallel {
-        $workItem = $_
-        $workerId = [int]$workItem.WorkerId
-        $workerMailboxes = @($workItem.Mailboxes)
-        $connected = $false
-        $connectionError = ''
-
-        Import-Module ExchangeOnlineManagement -ErrorAction Stop
-        for ($connectAttempt = 1; $connectAttempt -le $using:p_ConnectRetries -and -not $connected; $connectAttempt++) {
-            try {
-                $workerConnectParams = @{
-                    AppId                 = $using:p_AppId
-                    CertificateThumbprint = $using:p_Thumb
-                    Organization          = $using:p_OrgDomain
-                    ShowBanner            = $false
-                    ShowProgress          = $false
-                    ErrorAction           = 'Stop'
-                }
-                Connect-ExchangeOnline @workerConnectParams | Out-Null
-                $connected = $true
-            }
-            catch {
-                $connectionError = $_.Exception.Message
-                if ($connectAttempt -lt $using:p_ConnectRetries) {
-                    Start-Sleep -Seconds ([math]::Min(30, 5 * $connectAttempt))
-                }
-            }
-        }
-
-        function Invoke-WorkerFolderPermissionQuery {
-            param(
-                [string[]]$MailboxIds,
-                [string[]]$FolderNames,
-                [string]$PrimarySmtp,
-                [string]$UserPrincipalName
-            )
-
-            foreach ($mailboxId in @($MailboxIds | Where-Object { $_ } | Select-Object -Unique)) {
-                foreach ($folderName in @($FolderNames | Where-Object { $_ } | Select-Object -Unique)) {
-                    $identity = '{0}:\{1}' -f $mailboxId, $folderName
-                    try {
-                        $permissionRows = @(Get-MailboxFolderPermission -Identity $identity -ErrorAction Stop -WarningAction SilentlyContinue 6>$null |
-                            Where-Object { [string]$_.User -notin @('Default','Anonymous') } |
-                            ForEach-Object {
-                                [pscustomobject]@{
-                                    Mailbox        = $PrimarySmtp
-                                    UPN            = $UserPrincipalName
-                                    CalendarFolder = $folderName
-                                    User           = [string]$_.User
-                                    AccessRights   = ($_.AccessRights -join ',')
-                                }
-                            })
-                        return [pscustomobject]@{ Found = $true; FolderName = $folderName; Rows = $permissionRows }
-                    }
-                    catch {}
-                }
-            }
-            return [pscustomobject]@{ Found = $false; FolderName = ''; Rows = @() }
-        }
-
-        foreach ($mbx in $workerMailboxes) {
-            $primarySmtp = [string]$mbx.PrimarySmtpAddress
-            $upn = [string]$mbx.UserPrincipalName
-
-            if (-not $connected) {
-                [pscustomobject]@{
-                    WorkerId = $workerId
-                    Mailbox = $primarySmtp
-                    Rows = @()
-                    Warning = ''
-                    Error = ("Worker {0} EXO connection failed after {1} attempt(s): {2}" -f $workerId, $using:p_ConnectRetries, $connectionError)
-                    ConnectionFailure = $true
-                }
-                continue
-            }
-
-            try {
-                $mailboxIds = @($upn, $primarySmtp)
-                $query = Invoke-WorkerFolderPermissionQuery -MailboxIds $mailboxIds -FolderNames @('Calendar') -PrimarySmtp $primarySmtp -UserPrincipalName $upn
-
-                if (-not $query.Found) {
-                    try {
-                        $statsIdentity = [string]$mbx.ExchangeGuid
-                        if ([string]::IsNullOrWhiteSpace($statsIdentity) -or $statsIdentity -eq [guid]::Empty.ToString()) { $statsIdentity = $upn }
-                        if ([string]::IsNullOrWhiteSpace($statsIdentity)) { $statsIdentity = $primarySmtp }
-                        $calendarFolders = @(Get-EXOMailboxFolderStatistics -Identity $statsIdentity -FolderScope Calendar -ErrorAction Stop -WarningAction SilentlyContinue 6>$null |
-                            Where-Object { $_.FolderType -eq 'Calendar' })
-                        $calendarFolder = $calendarFolders | Where-Object { $_.FolderPath -match '^/[^/]+$' } |
-                            Sort-Object ItemsInFolder -Descending | Select-Object -First 1
-                        if (-not $calendarFolder) { $calendarFolder = $calendarFolders | Select-Object -First 1 }
-                        if ($calendarFolder) {
-                            $folderPath = ([string]$calendarFolder.FolderPath).TrimStart('/')
-                            $query = Invoke-WorkerFolderPermissionQuery -MailboxIds $mailboxIds -FolderNames @($folderPath) -PrimarySmtp $primarySmtp -UserPrincipalName $upn
-                        }
-                    }
-                    catch {}
-                }
-
-                if (-not $query.Found) {
-                    $query = Invoke-WorkerFolderPermissionQuery -MailboxIds $mailboxIds -FolderNames @('Calendrier','Kalender','Calendario') -PrimarySmtp $primarySmtp -UserPrincipalName $upn
-                }
-
-                $rows = @($query.Rows)
-                $warning = ''
-                if ($query.Found -and $rows.Count -eq 0 -and $using:p_EmitNoPermRow) {
-                    $rows = @([pscustomobject]@{
-                        Mailbox = $primarySmtp
-                        UPN = $upn
-                        CalendarFolder = [string]$query.FolderName
-                        User = '(none)'
-                        AccessRights = '(none)'
-                    })
-                }
-                elseif (-not $query.Found) {
-                    $warning = "No calendar folder found for $primarySmtp"
-                }
-
-                [pscustomobject]@{
-                    WorkerId = $workerId
-                    Mailbox = $primarySmtp
-                    Rows = $rows
-                    Warning = $warning
-                    Error = ''
-                    ConnectionFailure = $false
-                }
-            }
-            catch {
-                [pscustomobject]@{
-                    WorkerId = $workerId
-                    Mailbox = $primarySmtp
-                    Rows = @()
-                    Warning = ''
-                    Error = ("Error for {0}: {1}" -f $primarySmtp, $_.Exception.Message)
-                    ConnectionFailure = $false
-                }
-            }
-        }
-        # Worker disconnects are intentionally omitted; one parent cleanup closes every EXO session.
-    })
-
-    $connectionFailures = @($parallelCalendarOutput | Where-Object { $_.ConnectionFailure })
-    if ($connectionFailures.Count -gt 0) {
-        Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$false
-        throw ("Parallel calendar permission collection lost {0} mailbox row(s) to worker connection failures; publication refused." -f $connectionFailures.Count)
-    }
-    if ($parallelCalendarOutput.Count -ne $mailboxes.Count) {
-        Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$false
-        throw ("Parallel calendar permission mailbox-count mismatch: dispatched={0}, collected={1}." -f $mailboxes.Count, $parallelCalendarOutput.Count)
-    }
-
-    foreach ($calendarOutput in $parallelCalendarOutput) {
-        Add-CalendarResultRows -Rows @($calendarOutput.Rows)
-        if (-not [string]::IsNullOrWhiteSpace([string]$calendarOutput.Warning)) {
-            WriteLog -Message ([string]$calendarOutput.Warning) "WARNING"
-        }
-        if (-not [string]::IsNullOrWhiteSpace([string]$calendarOutput.Error)) {
-            WriteLog -Message ([string]$calendarOutput.Error) "WARNING"
-            $errors += [string]$calendarOutput.Error
-        }
-    }
-    $processed = $parallelCalendarOutput.Count
-    WriteLog -Message ("Parallel calendar permission collection completed with exact mailbox parity: {0}/{1}; permission rows={2}." -f $processed, $mailboxes.Count, $results.Count) "INFO"
-}
-else {
 foreach ($mbx in $mailboxes) {
     $index++; $processed++
     $primarySMTP = $mbx.PrimarySmtpAddress.ToString()
@@ -657,7 +440,7 @@ foreach ($mbx in $mailboxes) {
 
     try {
         if ($PrimaryOnly) {
-            $mailboxIds = @($upn, $primarySMTP)
+            $mailboxIds = @($mbx.Identity, $primarySMTP)
 
             # 1) Canonical "Calendar"
             $permissionResult = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendar') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
@@ -737,7 +520,7 @@ foreach ($mbx in $mailboxes) {
                 $folderPath = $folder.FolderPath.TrimStart("/")
                 WriteLog -Message "Calendar folder found for $primarySMTP ($folderPath)" "INFO"
                 try {
-                    $permMailboxId = $upn
+                    $permMailboxId = $mbx.Identity
                     $permIdentity  = ("{0}:\{1}" -f $permMailboxId, $folderPath)
                     $permissions = Invoke-Quiet {
                         Get-MailboxFolderPermission -Identity $permIdentity -ErrorAction Stop
@@ -766,11 +549,10 @@ foreach ($mbx in $mailboxes) {
         $errors += $errMsg
     }
 }
-}
 Write-Progress -Id 0 -Activity $overallActivity -Completed
 
 # ------------------------- Export & Cleanup -------------------------
-$BaseFileName = "Exchange_EXO_MailboxCalendarPermissions_AllDomains"
+$BaseFileName = "Exchange_OnPrem_MailboxCalendarPermissions_AllDomains"
 
 Write-Host "`n--- Export CSV ---"
 if ($results.Count -gt 0) {
@@ -802,7 +584,7 @@ if ($errors.Count -gt 0) {
         }
     }
 
-    $errorBaseFileName = "Exchange_EXO_MailboxCalendarPermissions_Errors"
+    $errorBaseFileName = "Exchange_OnPrem_MailboxCalendarPermissions_Errors"
     ExportAndCopyCsv -BaseFileName $errorBaseFileName `
         -OutputPath $OutputPath `
         -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
@@ -827,7 +609,6 @@ Write-Host "- Log              : $global:logTextFile"
 RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
 RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 WriteLog -Message "$TaskName completed."
-Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$false
 Stop-Transcript | Out-Null
 try { if ($global:logTranscriptFile) { Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } } catch {}
 $finalStatus = if ($errors.Count -gt 0) { 'CompletedWithWarnings' } else { 'Auto' }
@@ -836,8 +617,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBnDKeapnuiStWZ
-# 1NZcz3LmPQ7Sf5GUvSnIxgJ0F6o0eaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2MbLGuSrUI8f5
+# ZXQ4NC43sfNTDUwL0OLTk/VAFUyCe6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -970,31 +751,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICsmuqpwY5nRdfQvvcA/dxTkUkhDxXgsBZmU2cSaDsP6MA0GCSqG
-# SIb3DQEBAQUABIIBgABbR78i42dCiaqyMY4T23G0EVi8lyO+W/cgMnhxbFl28ehw
-# W7J6RbiBppoqlvReWXiMo8ov01pnZcR4bs7p1QMkGM1knM7OfU3eM99JbOXtManq
-# 86vx92JZ7chF0bCICaktTQiQTGVkumciBbDq0qiyefGA2AzdXD9fF5vYAASEetSm
-# FrbafkQLsrcZCl6wyZhO15XpOLDEi0GFBsZ+ptskLcR7cbxv2Ixaso5foMdj8pM5
-# CqjYz4Ni4mHUOYiK0mrzDFR4jcan6GHB/aMejyD8t9BlXuhDwVaxeDtnn1E6wxOB
-# w1pBOx35ZmkFXD4QuvOckZm9zXNPOz/57GLFejeTI648Q8EIowCjftrmJ4v9fUUM
-# Ok5GgUwh/a7vq5mpX4CYd77eBN5J8ANovsn5hGetpkjIBuU3BN6NKmzF8qowWO2Y
-# WZIdURN+cIfPOUholEcq6PcXqyYtCXIP8dvmqczGkdcqhQpnMUXTemMW5rjRDXLv
-# Kn72MlOpR57SKsBD6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGD9oRu5kBQGMgeY7q8r4M1bBAp+NAQ1A+Aj7PC+ZM/wMA0GCSqG
+# SIb3DQEBAQUABIIBgBGABTjiD95im90QsX91+m4o3akhVXmhDTx/VNDHp2FaNoui
+# nGzH+erqxo0cD6/CnQQjybUXu8AeNCt6bMzY1lIrtGx3X+jQyCqxAY3N971YtP+V
+# BynYqgNB7QkSMMie5VLu2n6uQObO8gQwCU+fExupSS0huo55Z6RWN/hSNkRpVzWm
+# 6zJ1ZKPJH3B9O7xlNyChmYqEmM5PfYCkMZ5MDADyBcEzyBFs4RCrAbNjaHcfk8qG
+# mljQcNAomPw7R9cpsBBf9eJ1eMZcmRCYZjMFwyScHkWl59436E9WWhPKtygAoi1j
+# 3Ez2Sp74d26g2yJjNq6lEz+RTNhlIFk6vbA6DKxxEjj03KizLKmALjWiKGZmDAlB
+# hs62gYQfy6QIyt2kFGvVTlo/IITtDLcovQJAElXNmP1mS8x+tOkWpbMWl+VhSi68
+# oyd5uUPhcmmISHKrTqELoKPTzD5GZGLsv7boLNPiI82R5sT0bcFjCqR79BrmaIYx
+# 1od1tHb3BESHw/fHAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMTIy
-# MzFaMC8GCSqGSIb3DQEJBDEiBCBm0krhRfqGE+M8BmAWWTWG08U0Bq1V1kBCaCEl
-# y1DOwjANBgkqhkiG9w0BAQEFAASCAgDBdyjMQwKe9FNvYgK+Rn+cIJMwihP5tNbj
-# gx7Vd5Ran2ZjKrWKyxizTAkOOHQ40U68VYjL2Albkw21Or/peeOnHRLBI9Yy+h9s
-# fV2JiJDR9OD+qUTmm/W0I+qbNdH7anxyymIxXuiq4EHCduS/579AvB5svc9cebuK
-# 0E4+l6UvKyuPltLM848Fhc5eeHp4+R7T+TJlNLaY05MntQ6TQLRFbPfjtpLPu6Gt
-# eAhNParf0vb+6h1RUumyJRh3Km+DpmQniLWAvDrwA0lxWF3J9tCWAjPv6iqWjPqR
-# 10U5VDfmEKES2JyRi5YZQ3ygiy648NRessGgofjGn297ECrMJYCu0IZ/iB7bEQsY
-# fI7TU/GdHDo4SDP1p7loE38RHexZS4ePoBSOJ+x9og96zwUYRmsyG7HDRoNsGqhz
-# b+rMlN0tOvkMr17bxFGxBJc5rI+Bf4lmmFffn+BiKrDysnqx6Iy9fqTHnMuPGxiW
-# UwIL3znpxgQFiOfk45eM9+MSMy95DReTieHxzE3UICZHjwe47Qteec3XfeWKMxga
-# cRS73WOYhvl3VPVAudjs+2MXuuUNdEDg2bOU6sjjwifKYuTVKZDcWgzoucpJwNkT
-# MEta+7OKYPzSE5HelAC2RecvgGbnq/ZH+BYgwESy0EAzxRfsssHa4Z00+8+p818P
-# 34a2kfdiAw==
+# MzFaMC8GCSqGSIb3DQEJBDEiBCBs5L6WDNAOpfTrMiB/IE0IV5ke1RtoBrEqDrqW
+# ZgcSBzANBgkqhkiG9w0BAQEFAASCAgApp8/vfijFQXFADP7zVeKfQ+nwrfMELSZC
+# 5h3FNvT2k5zarIu4xWVumFUt4MWBatNwxxKjilbZsaa5nDSFZbRbYA2aD614GfKy
+# 35VBTE4WVU5rIhzPbTtgTstceXrK+/aGGTRb7zZU6+sMqn5zjY3xDzbOfY9wxP1X
+# KCMNeeu30MxksMYq3TnuFHpCAi1V1OBR5j7TTR+AI2aF6OCOdKpZ0WurPjvms5XS
+# VfGUjP6TGjG95CVOeKMsI32muIfXKJHG1rFo91zeFZLePXBWLHWTwVRLCpqYKfMz
+# LM/h4JFEPbrzYFDpPo5dY5MFC1C48cF45P4VbXdR5s8u5K3Zx3xu2T+4LIHKSWAx
+# pJqQnYFCtYxsvEu1tkoQoE4Gq+qSfPwUr1e3aT1nBcyMFZcnoWJ077krjABUvNo/
+# 9SyLC06OKDnQW+SyEOwu16QuFGi1LT+Gdv0CJ6qAutIdWcy5KIThgMB/tYKZLmiW
+# yyxMRDE5eUs0Fq8MIqHTfwUMb8d3zmb42cxVdAmi1+W386590j5IgOTF6ZGTnWMp
+# vizh2qxgsh+MjXcsQQhwDMnKcRwP89A29NifQg/oM/gDeaPwOvDC2Un/WWI3wxey
+# CY3QVVBiKvYcnuX+5x1ZrdmNEo9Wm95tGip9e3myU+YDFNi2j8Ia04R9ZtaEBWwH
+# kqnakbszHA==
 # SIG # End signature block
