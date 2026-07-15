@@ -159,6 +159,10 @@ Maximum endpoint startup-task resume attempts before cleanup. Defaults to 3.
 Maximum time to wait for one PsExec execution before marking the computer as PSEXEC_TIMEOUT.
 Use 0 to disable the timeout. Defaults to 120.
 
+.PARAMETER CancellationDrainTimeoutMinutes
+Maximum time to let active jobs finish after the first controlled stop request. A second stop request
+forces the remaining local workers to stop. Use 0 to force immediately. Defaults to 15.
+
 .PARAMETER CommunicationLostEvidenceWaitMinutes
 Maximum minutes to wait before collecting remote evidence when PsExec lost communication with
 PSEXESVC after starting remote PowerShell. Defaults to 65 so long local retry loops can write
@@ -175,7 +179,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic LOT-scoped inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.73
+2.10.74
 #>
 
 #requires -Version 5.1
@@ -236,6 +240,7 @@ param(
     [ValidateRange(0,3600)][int]$RetryAfterRebootDelaySeconds = 300,
     [ValidateRange(1,30)][int]$RetryAfterRebootMaxAttempts = 3,
     [int]$PsExecTimeoutMinutes = 120,
+    [ValidateRange(0,1440)][int]$CancellationDrainTimeoutMinutes = 15,
     [int]$CommunicationLostEvidenceWaitMinutes = 65,
     [int]$CommunicationLostEvidencePollMinutes = 10,
     [switch]$SkipPostCycleIntuneInventory,
@@ -245,7 +250,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.73"
+$LauncherVersion = "2.10.74"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -534,6 +539,137 @@ function Write-Host {
         }
         catch {}
     }
+}
+
+function Initialize-LotCancellationSupport {
+    if (-not ('SmartM365LotCancellation' -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Threading;
+
+public static class SmartM365LotCancellation
+{
+    private static ConsoleCancelEventHandler handler;
+    private static int requestCount;
+
+    public static int RequestCount { get { return requestCount; } }
+
+    public static void Register()
+    {
+        Unregister();
+        requestCount = 0;
+        handler = new ConsoleCancelEventHandler(OnCancelKeyPress);
+        Console.CancelKeyPress += handler;
+    }
+
+    public static void Unregister()
+    {
+        if (handler != null)
+        {
+            Console.CancelKeyPress -= handler;
+            handler = null;
+        }
+    }
+
+    private static void OnCancelKeyPress(object sender, ConsoleCancelEventArgs e)
+    {
+        e.Cancel = true;
+        Interlocked.Increment(ref requestCount);
+    }
+}
+"@
+    }
+
+    [SmartM365LotCancellation]::Register()
+}
+
+function Get-LotCancellationState {
+    $requestCount = 0
+    try { $requestCount = [SmartM365LotCancellation]::RequestCount } catch { }
+    $requested = ($requestCount -gt 0)
+    $force = ($requestCount -gt 1)
+    $source = if ($requested) { 'Ctrl+C' } else { '' }
+
+    if (-not [string]::IsNullOrWhiteSpace($script:CancellationSignalPath) -and (Test-Path -LiteralPath $script:CancellationSignalPath -PathType Leaf)) {
+        $requested = $true
+        $source = 'GUI_OR_FILE_SIGNAL'
+        try {
+            $signal = Get-Content -LiteralPath $script:CancellationSignalPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ($signal.PSObject.Properties['Force'] -and [bool]$signal.Force) { $force = $true }
+            if ($signal.PSObject.Properties['Source'] -and -not [string]::IsNullOrWhiteSpace([string]$signal.Source)) { $source = [string]$signal.Source }
+        }
+        catch { }
+    }
+
+    return [pscustomobject]@{ Requested = $requested; Force = $force; Source = $source; RequestCount = $requestCount }
+}
+
+function Wait-LotCancellationAware {
+    param([ValidateRange(0,86400)][int]$Seconds)
+
+    $remaining = $Seconds
+    while ($remaining -gt 0) {
+        if ((Get-LotCancellationState).Requested) { return $false }
+        $slice = [Math]::Min(2, $remaining)
+        Start-Sleep -Seconds $slice
+        $remaining -= $slice
+    }
+    return $true
+}
+
+function Set-ActiveLotRunState {
+    param([Parameter(Mandatory=$true)][string]$Status,[string]$ReportPath = '')
+
+    if ([string]::IsNullOrWhiteSpace($script:ActiveLotRunStatePath)) { return }
+    [pscustomobject]@{
+        Version = 1
+        Toolkit = 'IntuneHybridJoinToolkit'
+        Status = $Status
+        ProcessId = $PID
+        LotName = (Split-Path -Leaf $LotRoot)
+        ComputerListPath = $ComputerListPath
+        SignalPath = $script:CancellationSignalPath
+        ReportPath = $ReportPath
+        StartedUtc = $script:CancellationRunStartedUtc.ToString('o')
+        UpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:ActiveLotRunStatePath -Encoding UTF8 -Force
+}
+
+function Complete-LotCancellationSupport {
+    try { [SmartM365LotCancellation]::Unregister() } catch { }
+    if (-not [string]::IsNullOrWhiteSpace($script:ActiveLotRunStatePath)) {
+        Remove-Item -LiteralPath $script:ActiveLotRunStatePath -Force -ErrorAction SilentlyContinue
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:CancellationSignalPath)) {
+        Remove-Item -LiteralPath $script:CancellationSignalPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function New-HybridJoinCancellationResult {
+    param(
+        [Parameter(Mandatory=$true)][string]$ComputerName,
+        [Parameter(Mandatory=$true)][int]$CycleNumber,
+        [Parameter(Mandatory=$true)][string]$Status,
+        [Parameter(Mandatory=$true)][string]$Detail,
+        [string]$NextAction = 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'
+    )
+
+    $row = [ordered]@{}
+    foreach ($column in @(Get-LauncherReportColumns)) { $row[$column] = '' }
+    $row['LauncherVersion'] = $LauncherVersion
+    $row['Cycle'] = $CycleNumber
+    $row['Computer'] = $ComputerName
+    $row['Timestamp'] = Get-Date
+    $row['DryRun'] = [bool]$DryRun
+    $row['Status'] = $Status
+    $row['EffectiveStatus'] = $Status
+    $row['NextAction'] = $NextAction
+    $row['EffectiveNextAction'] = $NextAction
+    $row['RemoteNextAction'] = $NextAction
+    $row['RemoteDetail'] = $Detail
+    $row['LogPath'] = $script:LauncherLogPath
+    $row['ErrorMessage'] = ''
+    return [pscustomobject]$row
 }
 
 function Get-ScriptHeaderVersionQuick {
@@ -845,6 +981,16 @@ if (-not (Test-Path -LiteralPath $LogRoot)) {
 if (-not (Test-Path -LiteralPath $ReportRoot)) {
     New-Item -ItemType Directory -Path $ReportRoot -Force | Out-Null
 }
+$script:CancellationRunStartedUtc = (Get-Date).ToUniversalTime()
+$script:CancellationStateRoot = Join-Path (Split-Path -Parent $ReportRoot) 'State'
+New-Item -ItemType Directory -Path $script:CancellationStateRoot -Force | Out-Null
+$script:CancellationSignalPath = Join-Path $script:CancellationStateRoot ("StopRequested_{0}.json" -f $PID)
+$script:ActiveLotRunStatePath = Join-Path $script:CancellationStateRoot ("ActiveLotRun_{0}.json" -f $PID)
+Remove-Item -LiteralPath $script:CancellationSignalPath -Force -ErrorAction SilentlyContinue
+Initialize-LotCancellationSupport
+Set-ActiveLotRunState -Status 'Starting'
+Write-Host ("Controlled stop: first Ctrl+C stops new starts and drains active jobs for up to {0} minute(s); second Ctrl+C forces local job stop." -f $CancellationDrainTimeoutMinutes) -ForegroundColor DarkCyan
+
 
 if ($CollectRemoteLogs -and -not (Test-Path -LiteralPath $CentralLogRoot)) {
     New-Item -ItemType Directory -Path $CentralLogRoot -Force | Out-Null
@@ -1121,7 +1267,8 @@ function Wait-OutsideNightPauseWindow {
         Write-Host ("Night cycle pause active. Next cycle {0} will start after {1}. Press Ctrl+C to stop." -f $NextCycleNumber,$resumeAt.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor Yellow
         while ($secondsRemaining -gt 0) {
             $sleepSeconds = [Math]::Min($secondsRemaining, 300)
-            Start-Sleep -Seconds $sleepSeconds
+            [void](Wait-LotCancellationAware -Seconds $sleepSeconds)
+            if ((Get-LotCancellationState).Requested) { return }
             $secondsRemaining -= $sleepSeconds
         }
     }
@@ -2821,6 +2968,7 @@ function Acquire-GlobalWorkerLease {
     $waitWasLogged = $false
 
     while ($true) {
+        if ((Get-LotCancellationState).Requested) { return '' }
         $leasePath = Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock {
             Remove-StaleGlobalWorkerLeases -GatePath $globalConcurrencyGatePath -LeaseTimeoutMinutes $GlobalConcurrencyLeaseTimeoutMinutes
             $leases = @(Get-ChildItem -LiteralPath $globalConcurrencyGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)
@@ -4172,12 +4320,44 @@ function Invoke-IntuneHybridJoinRepairCycle {
     $globalLeaseByJobId = @{}
     $jobStartedAtById = @{}
     $techRunGuardFqdnByJobId = @{}
+    $forcedCancelledJobIds = @{}
+    $cancellationObservedAt = $null
     $nextIndex = 0
     $completed = 0
     $lastProgressLog = Get-Date
 
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
-        while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit) {
+        $cancelState = Get-LotCancellationState
+        if ($cancelState.Requested) {
+            if ($null -eq $cancellationObservedAt) {
+                $cancellationObservedAt = Get-Date
+                Set-ActiveLotRunState -Status 'StopRequested' -ReportPath $script:MergedHtmlReportPath
+                Write-Host ("Controlled stop requested by {0}: no additional computers will start. Active jobs will drain for up to {1} minute(s). Press Ctrl+C again to force their local stop." -f $cancelState.Source,$CancellationDrainTimeoutMinutes) -ForegroundColor Yellow
+            }
+
+            while ($nextIndex -lt $computers.Count) {
+                $cancelledComputer = $computers[$nextIndex]
+                $nextIndex++
+                $cancelledResult = New-HybridJoinCancellationResult -ComputerName $cancelledComputer -CycleNumber $CycleNumber -Status 'CANCELLED_NOT_STARTED' -Detail 'The operator requested a controlled stop before this computer was queued.' -NextAction 'SAFE_TO_RELAUNCH'
+                $summary.Add($cancelledResult)
+                Add-LiveCycleReportRow -Path $liveSummaryPath -Columns $reportColumns -Row $cancelledResult
+                $completed++
+            }
+
+            $drainExpired = ($CancellationDrainTimeoutMinutes -eq 0 -or ((Get-Date) - $cancellationObservedAt).TotalMinutes -ge $CancellationDrainTimeoutMinutes)
+            if ($runningJobs.Count -gt 0 -and ($cancelState.Force -or $drainExpired)) {
+                foreach ($runningJob in @($runningJobs | Where-Object { $_.State -eq 'Running' })) {
+                    $runningJobId = [string]$runningJob.Id
+                    if (-not $forcedCancelledJobIds.ContainsKey($runningJobId)) {
+                        $forcedCancelledJobIds[$runningJobId] = $true
+                        Write-Host ("Forcing local worker stop for {0}. The remote endpoint may already be running and must be verified before relaunch." -f ($runningJob.Name -replace '^EHJIR_C\d+_','')) -ForegroundColor Red
+                    }
+                    Stop-Job -Job $runningJob -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit -and -not (Get-LotCancellationState).Requested) {
             $computer = $computers[$nextIndex]
             $connectionTargetInfo = Resolve-ComputerConnectionTarget -ComputerName $computer -DomainSuffix $AdDomain
             $connectionTarget = $connectionTargetInfo.ConnectionTarget
@@ -4197,6 +4377,12 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
 
             $globalLeasePath = Acquire-GlobalWorkerLease -Computer $computer -CycleNumber $CycleNumber
+            if ((Get-LotCancellationState).Requested) {
+                Release-GlobalWorkerLease -LeasePath $globalLeasePath
+                $nextIndex--
+                break
+            }
+
 
             try {
                 $cycleScriptArgsJson = ([pscustomobject]@{ Args = @($CycleScriptArgs) } | ConvertTo-Json -Compress)
@@ -4250,7 +4436,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             Write-Host ("Queued {0} ({1}/{2}); running={3}" -f $computer,$nextIndex,$computers.Count,$runningJobs.Count) -ForegroundColor DarkCyan
 
             if ($DelayBetweenComputersSeconds -gt 0 -and $nextIndex -lt $computers.Count) {
-                Start-Sleep -Seconds $DelayBetweenComputersSeconds
+                [void](Wait-LotCancellationAware -Seconds $DelayBetweenComputersSeconds)
             }
         }
 
@@ -4323,6 +4509,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
 
             if (-not $received) {
+            $forcedCancellation = $forcedCancelledJobIds.ContainsKey([string]$job.Id)
                 $received = [PSCustomObject]@{
                     LauncherVersion = $LauncherVersion
                     Cycle = $CycleNumber
@@ -4339,11 +4526,11 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     PsExecExitCode = ""
                     RemoteStatus = ""
                     RemoteExitCode = ""
-                    RemoteNextAction = ""
-                    RemoteDetail = ""
-                    NextAction = "CHECK_JOB_ERROR"
-                    EffectiveStatus = ""
-                    EffectiveNextAction = ""
+                    RemoteNextAction = if ($forcedCancellation) { "VERIFY_REMOTE_STATE_BEFORE_RELAUNCH" } else { "" }
+                    RemoteDetail = if ($forcedCancellation) { "The operator forced the local worker to stop. The remote endpoint may already be running; verify target evidence before relaunch." } else { "" }
+                    NextAction = if ($forcedCancellation) { "VERIFY_REMOTE_STATE_BEFORE_RELAUNCH" } else { "CHECK_JOB_ERROR" }
+                    EffectiveStatus = if ($forcedCancellation) { "CANCELLED_BY_OPERATOR" } else { "" }
+                    EffectiveNextAction = if ($forcedCancellation) { "VERIFY_REMOTE_STATE_BEFORE_RELAUNCH" } else { "" }
                     InteractiveUserName = ""
                     InteractiveUserDomain = ""
                     InteractiveUserAccountName = ""
@@ -4395,9 +4582,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     RemoteLogsPath = ""
                     RemoteCurrentRunLogsPath = ""
                     RemoteLogsError = ""
-                    Status = "JOB_ERROR"
-                    LogPath = ""
-                    ErrorMessage = ($jobErrors -join " | ")
+                    Status = if ($forcedCancellation) { "CANCELLED_BY_OPERATOR" } else { "JOB_ERROR" }
+                    LogPath = $script:LauncherLogPath
+                    ErrorMessage = if ($forcedCancellation) { "" } else { ($jobErrors -join " | ") }
                 }
             }
 
@@ -4495,7 +4682,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
         $computers | Set-Content -LiteralPath $postCycleScopePath -Encoding ASCII
     }
 
-    if (-not $DryRun -and -not $SkipPostCycleIntuneInventory) {
+    if (-not $DryRun -and -not $SkipPostCycleIntuneInventory -and -not (Get-LotCancellationState).Requested) {
         Write-Host ("Cycle {0}: refreshing LOT-scoped post-cycle Intune inventory..." -f $CycleNumber) -ForegroundColor Cyan
         $postInventoryStamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $postInventoryOutputPath = Join-Path $ReportRoot ("DevicesIntune_Cycle{0}Refresh_{1}.csv" -f $CycleNumber,$postInventoryStamp)
@@ -4558,7 +4745,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
     }
 
-    if (-not $DryRun -and -not [string]::IsNullOrWhiteSpace($EntraInventoryCsv)) {
+    if (-not $DryRun -and -not [string]::IsNullOrWhiteSpace($EntraInventoryCsv) -and -not (Get-LotCancellationState).Requested) {
         Write-Host ("Cycle {0}: refreshing LOT-scoped post-cycle Entra device inventory..." -f $CycleNumber) -ForegroundColor Cyan
         $postEntraInventoryStamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $postEntraInventoryOutputPath = Join-Path $ReportRoot ("DevicesEntra_Cycle{0}Refresh_{1}.csv" -f $CycleNumber,$postEntraInventoryStamp)
@@ -4630,7 +4817,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
     }
 
-    if (-not $DryRun -and -not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
+    if (-not $DryRun -and -not $AdInventoryUsesRecentRootCsv -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and -not (Get-LotCancellationState).Requested) {
         $postAdScope = if ([string]::IsNullOrWhiteSpace($AdDomain)) { "forest" } else { "domain '$AdDomain'" }
         Write-Host ("Cycle {0}: refreshing LOT-scoped post-cycle AD computer inventory. Scope={1}..." -f $CycleNumber,$postAdScope) -ForegroundColor Cyan
         $postAdInventoryStamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -4774,9 +4961,15 @@ $script:MergedHtmlReportPath = Join-Path $ReportRoot ("PsExec_IntuneHybridJoinRe
 $script:AllCycleResults = New-Object System.Collections.ArrayList
 $script:AllCycleProgressRows = New-Object System.Collections.ArrayList
 Write-Host ("Merged HTML report: {0}" -f $script:MergedHtmlReportPath) -ForegroundColor DarkCyan
+Set-ActiveLotRunState -Status 'Running' -ReportPath $script:MergedHtmlReportPath
 
 $cycle = 0
 do {
+    $preCycleCancellation = Get-LotCancellationState
+    if ($preCycleCancellation.Requested) {
+        Write-Host ("Cancellation requested before cycle {0}; no new cycle will start." -f ($cycle + 1)) -ForegroundColor Yellow
+        break
+    }
     Wait-OutsideNightPauseWindow -NextCycleNumber ($cycle + 1)
     $cycle++
     $cycleArgs = @($scriptArgsBase)
@@ -4786,12 +4979,13 @@ do {
 
     $null = Invoke-IntuneHybridJoinRepairCycle -CycleNumber $cycle -CycleScriptArgs $cycleArgs
 
+    if ((Get-LotCancellationState).Requested) { break }
     if ($RunOnce) { break }
     if ($MaxCycles -gt 0 -and $cycle -ge $MaxCycles) { break }
 
     if ($DelayBetweenCyclesMinutes -gt 0) {
         Write-Host ("Waiting {0} minute(s) before next cycle. Press Ctrl+C to stop." -f $DelayBetweenCyclesMinutes) -ForegroundColor DarkGray
-        Start-Sleep -Seconds ($DelayBetweenCyclesMinutes * 60)
+        [void](Wait-LotCancellationAware -Seconds ($DelayBetweenCyclesMinutes * 60))
     }
 } while ($true)
 
@@ -4819,11 +5013,14 @@ if ($script:LotRunMutex -ne $null) {
     $script:LotRunMutex = $null
 }
 
+Set-ActiveLotRunState -Status 'Finished' -ReportPath $script:MergedHtmlReportPath
+Complete-LotCancellationSupport
+
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTauOAK/lOrNKC
-# IjwrCsKQDSmDEniixt4eNYzQjwAOJqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0E3ldrOyPJBcj
+# Zt7um6i2EPNpwILZomGVMWxXHM6RqqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4853,14 +5050,14 @@ if ($script:LotRunMutex -ne $null) {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDEMIWLKayEU+JalMsTLVyr
-# SqvdFYdWPaG6++g7VSHZvTANBgkqhkiG9w0BAQEFAASCAYA2hgcttg7EutMWP5WH
-# u494OfG3NLSlLNpzLoyl/2Xp7AQOPWCv1CCObyhGbBVLxvIhkcC1XA/PCIW8nj9h
-# 2NqejU3Qwc9x7gAINvGsp1c88YUsNFFzLf8ZthztLg0tWvcteSMoQ9QbkO8XYfbU
-# TnBIv2mf67G0I9Q4mVHID5i7L9jVayvABv9RcT747j6FbWefp/8t/EqGmpTEy+Gr
-# pe0R4PnhUeTGnP8mvAOvBY9iHq/dd9YbXczWUx2HkbNQIhCd1AILJioTrwY6UhaX
-# ExPc63Gdl53b/tRcqCvAUO6/trC4UzKyqGtSdSxjr2qtlkmj2R4b1VoDiHa/IDED
-# jqE1NKdCi+eKbqA5hGipTLZrTFVbfUisxG48Q0NrVUPzc8GUK3AMzfxHqgP/Rwar
-# GesZiIziHZwIB9E5H0x8XuK6dHj+9FsH+Xi78BhY6NPnXCdUwfZNDG2FDThpXNVb
-# g6VDtyN3qm081N5dDmYPWJSF14T8H77mPc+AP/SCJKyKZQY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCZ6ttCx1SWxLEwvhVNH2R5
+# QiNL4twac5iy/DMuO6NsXDANBgkqhkiG9w0BAQEFAASCAYBjDTGZf6aRhKq3KIvw
+# QS7Zdif1A3SZVJCQfjpg/2vnxZvLtCLfTx9XnWp9hs6VabOon77dFVpEkQ89q24v
+# mGx89AaTqbCPRsmvah/gDnHzh2Yiu72+CdaL5lxzy0LZbXqwI5qW+3+aFQ0Ec2Tn
+# RAdOJy1XVPbdSfJluhEu88sgvfFk/ngLadF5t22+hmLiqjAnX8R/HMaISMRzEXv1
+# 4bZkgNJu60HkRmXlNjr7AHA+lyRBrwS9B8BsR+zhSdWtea1jGH4eR2uDYbEVZdYc
+# lHCHWkMHLrmn/qfVscXp+fLFb44IZ6P4Rll/Uq/HCLci+euZtOXA8bwewahOnjnk
+# ZeRjvbzRluxWBrD49S/G70SggCYwOZOrvxXS33WcMPKlNxL/iCI54OxmAM36kC1f
+# X5HnqaXmCOuRhs5LBBRMnQUpjHcMf4nJkQ0DUb6/cfpE75iEUVFjO8rR0xiQpSQN
+# VnHvCkDzTr6hodTl02O8LM+lG9x6iVmXDWsekvTIfHntMu8=
 # SIG # End signature block
