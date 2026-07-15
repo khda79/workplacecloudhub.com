@@ -1648,6 +1648,7 @@ function Publish-SmartM365Csv {
         [string]$Delimiter = ",",
         [int]$RetentionMaxCsv = -1,
         [switch]$NoSharePointUpload,
+        [switch]$NoWeeklyHistory,
         [switch]$NoTenantKey
     )
 
@@ -1707,7 +1708,7 @@ function Publish-SmartM365Csv {
     if (Test-SmartM365MaxItemsMode) {
         WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
     }
-    else {
+    elseif (-not $NoWeeklyHistory) {
         Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($publishedPath) -TimestampedPath $TimestampedPath
     }
 
@@ -1746,6 +1747,7 @@ function Export-SmartM365Csv {
         [string]$Delimiter = ",",
         [switch]$NoTypeInformation = $true,
         [switch]$NoSharePointUpload,
+        [switch]$NoWeeklyHistory,
         [switch]$NoTenantKey
     )
 
@@ -1755,7 +1757,7 @@ function Export-SmartM365Csv {
         $LatestPath = Join-Path $GlobalPath "$BaseFileName.csv"
     }
 
-    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload -NoTenantKey:$NoTenantKey
+    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload -NoWeeklyHistory:$NoWeeklyHistory -NoTenantKey:$NoTenantKey
 }
 
 function Export-SmartM365CsvFromConvert {
@@ -5010,8 +5012,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpJTyA4jyxkaBg
-# VpPdrGco7wVqPRpBQei/V5sS3bc6saCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFObr93mO6mMv3
+# qCy1XJKX9x+6t9ENWwZkDE5fhELIOaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5144,31 +5146,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIXeLWxCxyJ267KYCcFo52H0ublS45+HWMF59tqlGw1+MA0GCSqG
-# SIb3DQEBAQUABIIBgCbXqzU6TBPQv9/A58RszK4EJDCM88V7BGU0JNIEEM7Wq+Lg
-# m5rol7PTJXLn/vLrs83LXSygz/q9wUei29YBFNEWo9wRRJzRN72dd+BR2VoXl6e9
-# OLTtRYM+zWYjw3oTwG91tPz29CZ8SfavYsk24dxvmGAKsrSMtaH9fZnax08+vi7b
-# Mk+e5GRDAvb9PtQIfYPes1G1vLAmkaMmpwjC+n+My2gaVFG5FPCdOePA/JVYfqZy
-# qM8Al/Yg9bSderSQGrCt7STDm+iqjmpAz+i7f+lDXCNa1WRDOF1Lo6HJS6MaTLrZ
-# N/kjpG99yFrQvAL+nvU37h45lQ/8nh10EnJySKsTFyLAHf8NFTGmQQORx1RJFntF
-# jOpOtvjcO9YrIKb8gsIZkt4chnbYmXv3e8gIv8KHAYPXBhEjMF97cRfXvWWrArYP
-# k9RXaVJ/9E/OEwCgd7joo0OJHAKTuqYFgbtSYz10HQgH3k+y8ajdRWTsKsfOI4qw
-# 1G4a1T9xGVl86jNokaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDkIxJ+HNUr9GfuebLaxrCPvB8246Fvx/aoKcbqd+F2UMA0GCSqG
+# SIb3DQEBAQUABIIBgKwUz5evWWXXa/Ku80iItd5NENvpfq1bEpN+diI5s3JTG6DZ
+# nwmsij0yP/EQnh+J9v6GdQwC0y2xrWXo34GFXt+ap5Js7gc+puMj/9m5ifN91YM8
+# Z+FS5TzDB6018meOLlii6qrcfehGiKacCXmfSukVpot9iRShsKDEZNq5AqV5pypg
+# XBtxxXZ2jsYKCSxwP79pybo9HoMv4Ej7G1RO7lmk8WiOyCJNFphdmjr9pM3E18YT
+# REGahfIHlfRGN9olLwazz+emAlfUbMGUo/Td3T5mBa5h/cujBaVL1umOzptHA5b3
+# 6PDfj3tIkZ363y1pS110iyrS9uqDYAiCNbCFMMSTpyp/5VW6iz07fP+M2YlAhrKa
+# soGcHjntYeh8LbpiRuZ1yFmcoEho4BtcnhcxD/K2irlpY3XXaLq1S4Lz9/WXlM8N
+# FPqHQ1j/mWibz5yE4UdRJ0NxM87ITi3HwE4+pcFUb7FfCJfIeSaSYRxEPKRLhHCT
+# nyF1z2IP1qXvP1DkWaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxODM1
-# NDVaMC8GCSqGSIb3DQEJBDEiBCDM3Pl2cKN3d+pdRVSXuXbLWKpANV0YvytBGTmX
-# g/yNazANBgkqhkiG9w0BAQEFAASCAgA034s7a370Umfo4y0afl/A1kAPQSvy0qr5
-# /c/2gCFP4hTpy1ku8lMeSnEA3LjAjWJUqZzgP2O1sEumNjNUHrwnSXBXONrPYRkn
-# M4r8rsrHAh0Tu5AdMNoGLPdA0s/6gqUXmUBN5IsmnQebbt+AGyN6LuU7q0f8O26R
-# HmhbLhF6S0EpxbTJoeFygT0kDRakaC059zz78qj0ctof8DIeu7+yjJej+vgzpstc
-# JjIb2YUJX2L6+NGuvB1Ph/6V/nsKROvIPmzKgdKAkwY1NV/UMoMlXIw1hRRBRq9K
-# t8KxmV5Sc8fCCmBfevJv3eHvU/drdZfL5OFS+DtrGj6jaH1MG4Xj2is5lt+mXDTu
-# Ms8vExOaXQfZ4/s9l6viam+qmZfTMMQpP7Og2/z4rhCF2J8i4iEcKWy0lLqmKQG1
-# JV8RrTV7FaiIty6lmexY1of7OAIr/kUUtXOHOTO4/YPgcNvid8deQzBJbupCGsf5
-# uDB1Ilm7OHulw1jTk5oQc1i6Rk7yqwilGGDJBYDGNAfZc2kT9dCuxlOrZeHM81ZG
-# gP1fWjkG32XLViCvXmZpELUHctwQ5FmC/GQZb275F7snwgvsaENJwDj9dgp1Lb5Y
-# DzU5HFOQq8pu1O5opCdg8RtrWCwIXXAz7UhgWDp96/wc6i6VGzfj7oVFmZ4l0MF1
-# e2rnw1vqZQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMDAz
+# MTFaMC8GCSqGSIb3DQEJBDEiBCBcyVOVWf9HPLMzfwGcQy6W7JalheA3LmyFM09K
+# mvmZGDANBgkqhkiG9w0BAQEFAASCAgBQOdEXmvNNltVqXQSt/X8r1S0SD+GJ+KMN
+# wOlKgMEZxYI0KWz5VjkJbU725BSLib4UpiIE6/fh6DJVjrDga4SjCfdeGRSlHesT
+# O/csjnZo7z0n6nNWw4xT6ThLvqwk2EgcsrYE6r1i9VvNGgX+OiUT8848DjOkpAU+
+# HQWG1mDDY4e3VjJ1TEuxyZ+V1rkmoLdF32EDk++1Yb872cjFCJ4si/j1pXvP/6pH
+# O8a2/Nkpl8kCClgqqPmMoAz2OxotH6kC0R8WIasa3EUE89mGnEQRVWVVPgwflxIs
+# NPMQkqcGn5KQ+y4BufD6am3OciubYA+dP/idtGbJ2rSAmka7bVLgc0jGmjTI5IVy
+# VBEAcWk+Zk3D+dJ2DApIPBJyG3IJYY/yka25dH4QRKXjCh0xRritmSCerKpHUsSG
+# qedeRpj1MvsjLkp0YSv8TwnZP5KCaGogvlp6dLMmRqflJxtLQqocA04+twWh3Rm/
+# 1paeodpWV7wieNz+ru/5PVioUMMB0NxnL2stBLNH85s4oKOyLz3W0qbgaqYDGtIp
+# vy38o6E8/bY7kb2pmUfPdFaU6CqZSdqSIeO09i7e+LG8KUKIntWxlXhXVEgtGn5f
+# mk/ttV/ehdsFIBUTBgYdNyD6UqvRXn8v7IV1foJGYuAkRYFIZns0gWNMGbI/4tWD
+# h7lstHclTw==
 # SIG # End signature block
