@@ -27,7 +27,7 @@ if not defined PWSH (
     popd
     exit /b 1
 )
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-EXO-Mailboxes-CalPerm_Inventory.ps1" -Tenant prod -Connect
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-EXO-Mailboxes-CalPerm_Inventory.ps1" -Tenant prod -Connect %*
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 exit /b %EXIT_CODE%
