@@ -6,7 +6,8 @@ Exchange Online inventory and comparison scripts.
 
 - `AcceptedDomains/`: accepted domain export.
 - `BackupProtection/`: Microsoft 365 Backup protected mailbox inventory through Microsoft Graph Backup Restore APIs.
-- `CalendarPermissions/`: mailbox calendar permission inventory.
+- `CalendarPermissions/`: Exchange Online mailbox calendar permission inventory.
+- `OnPremises/CalendarPermissions/`: Exchange 2016 mailbox calendar permission inventory.
 - `Mailboxes/`: Exchange Online mailbox inventory.
 - `Migration/`: mailbox migration job inventory.
 - `Permissions/`: mailbox permission report grouped by delegated user across on-premises and EXO sources.
