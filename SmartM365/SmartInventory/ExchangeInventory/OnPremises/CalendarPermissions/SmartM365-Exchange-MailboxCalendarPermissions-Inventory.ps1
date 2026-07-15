@@ -18,7 +18,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-1.2
+1.3
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
@@ -27,7 +27,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 1.2
+    Version : 1.3
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange 2016 On-Premises
 #>
@@ -244,13 +244,13 @@ function Join-ModulePath {
     throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '1.2'
+$ScriptVersion = '1.3'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
 try {
     Write-Host 'Loading module SmartM365-WindowsPowerShell5.psd1...' -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.28' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.29' -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-Transcript -Path $global:logTranscriptFile -Append
     $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-OnPrem-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
@@ -596,6 +596,13 @@ else {
             }
         }
     }
+    $sharePointStaleErrorPath = if (-not [string]::IsNullOrWhiteSpace($errorLatestCsvFolderPath)) {
+        Join-Path -Path $errorLatestCsvFolderPath -ChildPath "$errorRunBaseFileName.csv"
+    }
+    else {
+        Join-Path -Path $OutputPath -ChildPath "$errorRunBaseFileName.csv"
+    }
+    Remove-SmartM365SharePointFile -LocalFilePath $sharePointStaleErrorPath | Out-Null
 }
 
 Write-Host "`n=== SUMMARY ===" -ForegroundColor Cyan
@@ -620,8 +627,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSfcRQrEBr2FKK
-# 83cn6EitKZSVk7OwGCa7wBUl6XqOrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJsObZcOe0H3HW
+# Oz2PNga0bL1b3ptoIALTzWYv1j35U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -754,31 +761,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJAldp6t3p/hBvIzKtw9MoI6/xRoBQ3IOl+mXtpha56SMA0GCSqG
-# SIb3DQEBAQUABIIBgBy2AzcyJzVjEPBuUEmFL74g6fb+93RitXATOUDzI5/QVsZm
-# /YgaD/Wb0PiJDuGK3RJkXOcemGo1HcEriH1avbvbP4g4dSwKdFP8RLCHj2BMPOBM
-# p3DuDwZgy3iaAixiwZvWb7LnPs6jDSS5xud/NIeoDdxIgQFNXVzy4a0tMbsS5bHI
-# uY8bR9tnonIVP+V4HTBhDDHp9GTkH0v0thb7EEJF2jm0EHrQYHZAJbwY1RYhWKo8
-# VInFTMu/zLp+1yAWMzrLce7/iLhzyZ3yMLaKrBZKOhT35exsW0/yZl7rauUgqdyC
-# vUoripKPa/ELMtf862Kgq+AfAKSJYRVvttKisVMMvE/BaMLMDUpCq/YeSI2vJNjX
-# uADlPdxqiiu5pXTt67RREJhZGoymNqHWQXH7Gk6bm46bmNtGcN3BNWCN3Xnljt1U
-# 6tA6t92EIZ7uxrCXKglDAs2xo7HdLhfE17OUXrxIAdzaOT+jcpusv9RxvNd9nuI4
-# E/Hxo4/VPF8z/DLzcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDDMxyjrY7NbxryRjK31oyTn+06xVe9GKDjopFf0NgSuMA0GCSqG
+# SIb3DQEBAQUABIIBgIQBNImt5q4kSFNLyWQnv70BAHJJ9WzxQ1M7+DBCYfROvdmu
+# jbLLpQdpdWHehdxKWvJZIPDtIxe6nlakIsQQGnuLiP2GOZxhs61U1gy45oD1EkDn
+# 1te8AeI0zty04fzUuDZZjBNcB/e26HCV2fDORF7kXsK9Xw7PdI8mJQzU3TNNfoJk
+# JXP9mp1bnknAcP1XDX4l2ICFjVzAS2cz4tHle0PJ22HJrQxF+MGlX4ae5moS0uuF
+# WbxVBDZ1xPjHUKhjd/71SCc2QpC1tVMAKd/8743tmZDvwlxXXkOWbZXg0iyiTblO
+# Vqgfyy5L3d9D84r6rbp7pblJDjrIe+b8qSAilxnSY4D4qe9SY+VKS+2FB4rqwLIA
+# XTHl2kwMcghR9btYZqGtALUxzosZdqIpU+QXal/fbVoftOJZbZf/NZkwoSg1WcmM
+# kB2Clma9nR6xGFst5euC1XpbUzc201il/BAwLX4vfWdcBn4ksSarEr5rgsIzAKe0
+# 8fPhuqy2Z+Y8cjLLKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMzA0
-# MzJaMC8GCSqGSIb3DQEJBDEiBCDfwnZC5Qjau+nS/nMw88Q3lcmTVFyAGRTXPEBM
-# 5ToQizANBgkqhkiG9w0BAQEFAASCAgAjyMDXDAM/vfdEclO62Bxf1zX3fn4Nh1Of
-# mfAxrjY3SwOhqSd47dhIQngajGaUOBdxRkguSWHKg6NpG/doQ0JRvJtGBqUyE+Qn
-# 33W7elg4DPdeH7SocvSG/fHSjD1BTqxodByRlEJvKMujbJh5lNm8FBTZk8T0pCVA
-# u2HDiE3j9diGWrqIP5hB/4Hv9Tb8d5iaIZEpGFP5iKeT2kzKWitWJuBg8gd6BGgM
-# mtQBhVR4rSGGA6IhU6hjUvXfOJLKJuUYRv/s2SFq3RR1HQgNB6tOmNrMkbFs8rhN
-# gLmYc7GQrjrJ5y2OnX9rGjUFXCH4auQGTuWtAMmr0AQuumYd/aQf/fU1yljGWoii
-# yCOUzYr6s9QvMo1wrDaIxfJ7QkHbQ/lBD+ekfe1c4n23OMHb7wK5sCPBQTn+auZd
-# BR2Hs/PfV6Fb3nFMXWznjTa9ujfS4JECeQ2ob4ScZQKPSmZZkjM5xLfkP4zPWL33
-# FTuddndJuYhUmp9Rvm6ZmMQEHw7ju0gTB8cw1y7YVz4uYNWNsb+2QDNk2HfpcYf2
-# QqLbEnjaQyZEyiYwulUfOKawBPqPG++qf8X24Xui3atkVW3U1D8Zoc9yuYoHAqLW
-# PsAfqhDnTa5wPxmMwjyKmQL8toq+KK5rXsPcJ5RyHjA8QMO1sqGejxq9S2Uj9QVk
-# S5xfCsT0ow==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMzM2
+# MDBaMC8GCSqGSIb3DQEJBDEiBCC5loXqLOKO4M0pY2t5Jlvi2nc1mEIsH7VfSJMF
+# w5ENNTANBgkqhkiG9w0BAQEFAASCAgCXoQMmbe2k87gSJD0SBJgJzqnRCfb8Cq1R
+# ZZTtIvhTNx7QoEzKWe1p5SGa3PzOL/LkMmXu3gL0wTNJEq+MbUavOEqIBvuq6urA
+# 4VDPpl1iILZtkkGeOSXz8zS0GCE3EHkMKoHzwbHeiYUf6KfPk17COvZ9fxGdNFy+
+# jWs2DfuwGttijBnmwcDW86O36ZyU+JwS/nh0sJ9fga8YSLAEYsCZ9EXrk8OQDV9V
+# ji10N63y6jhz+Zc7oD50kSaCW69TYdzMTYb97qTg/a50nikZYgsv/F8qwdcgvi6F
+# qBMPTezgAasI8huTtL3vmrqY1rNbeJcDpNvxtKsVtI6m1zYPo0+FIuMflUnXN2vJ
+# 8LqZO//kPHJ+32EIFcoYXMTPC7oz/zua3gysQrrlr7CU/o+6k2p8lXK1I9myPE7u
+# Z1NAZ+hO9Nfi0hcw0kn6+eCGA9+6pX0dNObnR0U9a6xoifvdgmVIe51dNwx71Spf
+# Jib29nP3IIDhgiTTqLKwEhSnTp0v9FurFdT/1MRvySqZVHzDZNMeypIowrVrhEAY
+# Npg5N0YxAPIrSXYtyryF5mqZxlfYFCtOcIMW7LDYpLW2zMP4kZJNS2duj1jKj/HQ
+# QpWjHRzVjkv3bVsMyBQ0FJoWitwmL16VkPANVIfSB+GvA4QjGKfIW0ttBZorql9v
+# ED1MXNx8fg==
 # SIG # End signature block
