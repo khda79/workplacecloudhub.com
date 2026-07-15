@@ -47,7 +47,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.20
+0.21
 
 
 .REQUIREMENTS
@@ -102,7 +102,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.20"
+$ScriptVersion = "0.21"
 $CurrentOperation = 'Initialize'
 
 $tenantContextPath = & {
@@ -132,7 +132,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.37' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.38' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -260,7 +260,8 @@ function Export-SpoEntityCsv {
         [Parameter(Mandatory)][string]$TimestampedFolder,
         [Parameter(Mandatory)][string]$LatestFolder,
         [Parameter(Mandatory)][string]$Timestamp,
-        [switch]$AppendHistoryMode
+        [switch]$AppendHistoryMode,
+        [switch]$NoWeeklyHistory
     )
     $Columns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId') + @($Columns | Where-Object { $_ -inotmatch '^(TenantKey|OrganizationKey|EnvironmentKey|TenantId)$' })
     $timestampedPath = Join-Path -Path $TimestampedFolder -ChildPath ("{0}_{1}.csv" -f $BaseFileName,$Timestamp)
@@ -277,7 +278,7 @@ function Export-SpoEntityCsv {
         }
         return [pscustomobject]@{ TimestampedPath=$timestampedPath; LatestPath=$latestPath }
     }
-    $result = Export-SmartM365Csv -Data $Data -TimestampedPath $timestampedPath -LatestPath $latestPath -Columns $Columns
+    $result = Export-SmartM365Csv -Data $Data -TimestampedPath $timestampedPath -LatestPath $latestPath -Columns $Columns -NoWeeklyHistory:$NoWeeklyHistory
     Ensure-SpoUtf8Bom -Path $timestampedPath
     Ensure-SpoUtf8Bom -Path $latestPath
     if ($AppendHistoryMode) {
@@ -907,18 +908,25 @@ try {
 
     $exportStamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
     $timestampedCsvFiles = New-Object System.Collections.Generic.List[object]
+    $weeklyHistorySourcePaths = New-Object System.Collections.Generic.List[string]
     foreach ($export in @(
         @{ Base = 'M365_SPO_Sites'; Data = $siteRows.ToArray(); Columns = $siteColumns; WorksheetName='Sites'; TableName='SpoSites' },
         @{ Base = 'M365_SPO_Lists'; Data = $listRows.ToArray(); Columns = $listColumns; WorksheetName='Lists'; TableName='SpoLists' },
         @{ Base = 'M365_SPO_Permissions'; Data = $permissionRows.ToArray(); Columns = $permissionColumns; WorksheetName='Permissions'; TableName='SpoPermissions' },
         @{ Base = 'M365_SPO_ExternalSharing'; Data = $sharingRows.ToArray(); Columns = $sharingColumns; WorksheetName='External sharing'; TableName='SpoExternalSharing' }
     )) {
-        $exportResult = Export-SpoEntityCsv -BaseFileName $export.Base -Data $export.Data -Columns $export.Columns -TimestampedFolder $initializedOutput -LatestFolder $latestFolder -Timestamp $exportStamp -AppendHistoryMode:$AppendHistory
+        $exportResult = Export-SpoEntityCsv -BaseFileName $export.Base -Data $export.Data -Columns $export.Columns -TimestampedFolder $initializedOutput -LatestFolder $latestFolder -Timestamp $exportStamp -AppendHistoryMode:$AppendHistory -NoWeeklyHistory:$global:EnableWeeklyHistory
         if ($exportResult.TimestampedPath) {
             $generatedCsvPaths.Add($exportResult.TimestampedPath) | Out-Null
             $timestampedCsvFiles.Add([pscustomobject]@{Path=$exportResult.TimestampedPath;WorksheetName=$export.WorksheetName;TableName=$export.TableName}) | Out-Null
         }
-        if ($exportResult.LatestPath) { $generatedCsvPaths.Add($exportResult.LatestPath) | Out-Null }
+        if ($exportResult.LatestPath) {
+            $generatedCsvPaths.Add($exportResult.LatestPath) | Out-Null
+            $weeklyHistorySourcePaths.Add($exportResult.LatestPath) | Out-Null
+        }
+    }
+    if ($global:EnableWeeklyHistory -and -not (Test-SmartM365MaxItemsMode)) {
+        Add-SmartM365WeeklyHistory -SourceCsvPaths $weeklyHistorySourcePaths.ToArray() -HistoryRootPath $global:WeeklyHistoryFolderPath -RetentionWeeks $global:WeeklyHistoryRetentionWeeks -HistoryLabel 'SmartM365 SharePoint Online inventory'
     }
     $workbookPath = Join-Path -Path $initializedOutput -ChildPath ("M365_SPO_Inventory_{0}.xlsx" -f $exportStamp)
     New-SpoTimestampedWorkbook -CsvFiles $timestampedCsvFiles.ToArray() -Path $workbookPath | Out-Null
@@ -1002,8 +1010,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNZpi+vPq/WmZX
-# cAdaT9Vk+SVbv5gjGcbf4TYuaIRxFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5sp8KD1JkIfMh
+# 5i/43phky2vVWtJHQIyGx3/bzJOtxaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1136,31 +1144,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPyXfwYk42dxldUZzrdqippYVP+X0hsmpbMJbz0WaiGXMA0GCSqG
-# SIb3DQEBAQUABIIBgE4Tz8qVYReYne5ZlaV9TAn2yCd/8u87xL0Mpi/2VnhaCSrs
-# CN+6prj6Gz6dRED/xOjIO9wzU0Zfg3PE4FZR8dNuYs2JAPx9gWrbPixq5uX7Owlq
-# me/tFH++i+zA7MhaGywotT3BoomWlO0bmJ/uarDDC2PUX+4RX25FtDiLf8Me9dJs
-# FCYBtsZyYh1y+gXV3EXUWvOYepkbfkWWrDxPwu8WyLRuwvn7iK3jR5QAybXPVBeA
-# yr0jA3aidUYnI/nmKsNk6V4GpL11GKUPmvciYTtUc+LJXhWQYlOYNNTDMiwK0jtw
-# ZzzFb2dKww+msp35TqJj625cq0gF6jBZufrr4m27LgBW5ZIQ1eYyecMxxaZ13/Eo
-# 3aK6ffHp760lNEAl+HatZt5wBtYSxf4dH6PlifNmUcViSjl6E8xY7Z5bcd0ZKyfl
-# fW5gZrc3G72f9krnvLJqj1sDyyDcclv1OZmIYJY77QmR9WpLxYWAlv+TQ6QZI91E
-# fq/tm3zEoHp62YJnzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHzP9kh11JxwciKFLQ5ZyLSHGNUdQUaHQDuCLdRgjr6eMA0GCSqG
+# SIb3DQEBAQUABIIBgGn4nOxw5JLfTrk1TvFk4eZQ4i2kLdAuoyn2w9M+3zi7OKK1
+# kj3eq3kn7z9A5HOh/j6x+04BjbkfQgtizsFyGzKitAw7LbLIfDCDZM6zC7h/o9bc
+# BXPcGKz8xX4BRKwU5gQxciwCmVAcfVsTY8N1hvQGd4eklraRheEmivQR5oVVwBX5
+# n+BE9DPgfFCEEXjI2CCbziskJlhXuMbwI4NowNnSIpiLCpb+yNg/CSDfo64eB9Ol
+# c/BomqeyZVHYSQhxi1l5UEiC5G12HSbzGYbWnQpMo3clk9E1+/6RwivhsbNdwAjU
+# TUA8AQDtziaz3ARhinwBx8j2SzJtSjZ2nw3sQzKUuSJt+HSvZGGT1MkuGWgfr6A/
+# MWp6qefUjjy98aYUTu9fig8+q8nr8P8646lpxeXhAm6P+tDuPp5gb8kcqDIjartf
+# wWBo547jNodlPhBETd9gsFkT02ozdsf6WXlKqQ4IP0Kc0IFjQumAxddThbZYrioi
+# txF/mkQsaMI95tGqOKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxODM1
-# NDhaMC8GCSqGSIb3DQEJBDEiBCAlRtinAjbFreymkvy9MJS3ICg/SZzDpfwR8J6c
-# kxuMnjANBgkqhkiG9w0BAQEFAASCAgBW7XswD4aRRyC3BY6p8zHsCerwXhZpZPx+
-# Q+o9YYQGx4Xo/vhAd5rkb3J3HQJP4cCB/I12uHpH1H2c/19OlpeniJ5bicdjld00
-# 0e9JZ/vt/3BLG1Qi+3jRHz5pSd057Si+NXJANGX/3+cjgEJ1nHZSj4gbwj2gEqCY
-# jrta0LzPmpcRXOy+6axGFqODpK5Jy0selH8XwtQa6O2erL3z2UxGN9uqpwhTnXSn
-# /KOseldVJtK67svvSfXHo0cJ0pE556BbGYzuB3mDYyuGXFvX6NeDHBB0YS4L+oJ8
-# EKdt243TYspDurk4o9gFZkrukkzxN2b5AnK04hh2aXVJ5Voc1KNE7O/v3kM6blfC
-# PVXR3y8cn+KRY4nrmv1R3Pq0+e1BynSNJk8X8cYMkHPVFRFHGKYiX1fWJPab5Dbm
-# CHuAnSOUAsio+kbBKXL5nynGpEwwAxaUUDwiilVU8owPDMPZT2JhVhfz7nfX5SoI
-# CW2qtvsT2z2Kj7su3b9VdQnI+dIh6JRRMbhCo6JSIGfj8uyYoqZUSjUuWQVjZopo
-# BBprZfQmr997ygPmHNEDp0rBmZAH5VWWPKaeSPCJaTTcFK9tMCp6w1hwJY0jkTbU
-# 1rYW1I2VJ+XlcA10udkUaptz+VCuoPFdqIhxK4rIRYF57hW3fahtBHgYmBIE9DTW
-# DTsvniYGKg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMDAz
+# MTRaMC8GCSqGSIb3DQEJBDEiBCAmYrUtPLKrddvCm3DzsPsC7NqC1vSpc6X471Q9
+# 4YtHWjANBgkqhkiG9w0BAQEFAASCAgAlglwHKZbOZYY9LDZ/red6ZcC0G5c/hG+N
+# +6kpgVmplgJiia8M4mGtvhhIjy2CgYspfsr6quwwrEFR6x7stn7DbR8+DNzFXDei
+# PYWuUcCXN2MSHFv/KGUl4HPl/YqYti16rlonRvJLudAKMnLySW1DvdErrg4crZ6p
+# MZKMf4GlZuzwdNAVPBb01wNE6amt2zYh16OtD1XWDSr07GMqBGCASEcdoxAx69MI
+# 3C1l6yPfocNeZG5Q93xIA86WrjeF/YBTc6SSY9f+tI6Hi4ypQUb1zCLhafQaQ0D8
+# dKCunT+aXELZMdG0XvOYm0XLEe0wmTIW61O0H9/BEuZ3dkeJwWC2wT+5unJWGDL2
+# 8o9Gz5/5UAqdR2Cl3u79at7jiRRaquBCKY8U/VcK4nDlNSRVuhJBMBYPZzM9x4E8
+# XeR6Tk4/3eiGa3eyk/26N1UC+uPm/GvbgZ+Vn1DT1ba6P9yylU4d3C2RhFv3dlae
+# TTRIjJzYGmEaTb4IzxeNzXepPJ88q5mxygGQdYY83HJK/IJYnLYcoObsbi1XvIcs
+# VO4tV+WMovTLMMxcILAusLnRMXb1Xu57gZQ+ledu6GOd0zqmIIBtgUiQVZVAqZNf
+# 5B50BcR10bOvVNo6153Fn/397hGxJdkh0tX9etGF6kcJe5dzeGl7sjfDKufaOlsD
+# CZp80UuksQ==
 # SIG # End signature block
