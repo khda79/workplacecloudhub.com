@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.20
+0.22
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.21"
+$ScriptVersion="0.22"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -111,14 +111,75 @@ function Invoke-TeamsDailySummaryMail {
 
 function Add-Alert{param([string]$TeamId,[string]$TeamDisplayName,[ValidateSet('Warning','Critical')][string]$Status,[string]$Check,[AllowNull()][object]$NumericValue,[string]$TextValue,[string]$Threshold,[string]$Details) [void]$Alerts.Add([pscustomobject]@{TeamId=$TeamId;TeamDisplayName=$TeamDisplayName;Status=$Status;Check=$Check;NumericValue=(Num $NumericValue);TextValue=$TextValue;Threshold=$Threshold;Details=$Details})}
 function WorstStatus{param([object[]]$Rows) if(@($Rows|Where-Object Status -eq Critical).Count){'Critical'}elseif(@($Rows|Where-Object Status -eq Warning).Count){'Warning'}else{'OK'}}
-function Invoke-Graph{param([string]$Uri,[string]$Operation='Graph request',[string]$OutputFilePath='') for($a=1;$a-le 5;$a++){try{$p=@{Method='GET';Uri=$Uri;ErrorAction='Stop'}; if($OutputFilePath){$p.OutputFilePath=$OutputFilePath}; return Invoke-MgGraphRequest @p}catch{$sc=$null; try{if($_.Exception.Response){$sc=[int]$_.Exception.Response.StatusCode}}catch{$null=$_}; $transient=$sc-in@(429,500,502,503,504)-or([string]$_.Exception.Message-match'throttl|TooManyRequests|temporarily|timeout'); if(-not$transient-or$a-ge 5){throw}; $delay=[Math]::Min(300,[Math]::Pow(2,$a)*5); WriteLog -Message ("$Operation transient/throttled. Status=$sc; attempt $a/5; retry in $delay s.") -Level WARNING; Start-Sleep -Seconds $delay}}}
-function Get-GraphCollection{param([string]$Uri,[string]$Operation) $items=New-Object 'System.Collections.Generic.List[object]'; $next=$Uri; while($next){$r=Invoke-Graph -Uri $next -Operation $Operation; foreach($i in @($r.value)){[void]$items.Add($i)}; $p=$r.PSObject.Properties['@odata.nextLink']; $next=if($p){[string]$p.Value}else{''}}; return $items.ToArray()}
+$TeamsChannelRequestHeaders=@{Prefer='include-unknown-enum-members'}
+function Invoke-Graph{param([string]$Uri,[string]$Operation='Graph request',[string]$OutputFilePath='',[hashtable]$Headers=@{}) for($a=1;$a-le 5;$a++){try{$p=@{Method='GET';Uri=$Uri;ErrorAction='Stop'}; if($OutputFilePath){$p.OutputFilePath=$OutputFilePath}; if($Headers.Count-gt 0){$p.Headers=$Headers}; return Invoke-MgGraphRequest @p}catch{$sc=$null; try{if($_.Exception.Response){$sc=[int]$_.Exception.Response.StatusCode}}catch{$null=$_}; $transient=$sc-in@(429,500,502,503,504)-or([string]$_.Exception.Message-match'throttl|TooManyRequests|temporarily|timeout'); if(-not$transient-or$a-ge 5){throw}; $delay=[Math]::Min(300,[Math]::Pow(2,$a)*5); WriteLog -Message ("$Operation transient/throttled. Status=$sc; attempt $a/5; retry in $delay s.") -Level WARNING; Start-Sleep -Seconds $delay}}}
+function Get-GraphCollection{param([string]$Uri,[string]$Operation,[hashtable]$Headers=@{}) $items=New-Object 'System.Collections.Generic.List[object]'; $next=$Uri; while($next){$r=Invoke-Graph -Uri $next -Operation $Operation -Headers $Headers; foreach($i in @($r.value)){[void]$items.Add($i)}; $p=$r.PSObject.Properties['@odata.nextLink']; $next=if($p){[string]$p.Value}else{''}}; return $items.ToArray()}
+function Get-TeamsRetryDelay {
+    param([AllowNull()][object]$Headers,[int]$DefaultSeconds)
+    foreach($name in @('Retry-After','retry-after')){
+        $value=$null
+        if($Headers -is [Collections.IDictionary] -and $Headers.Contains($name)){$value=$Headers[$name]}
+        elseif($null-ne$Headers){$property=$Headers.PSObject.Properties[$name];if($property){$value=$property.Value}}
+        $seconds=0
+        if($null-ne$value-and[int]::TryParse([string]$value,[ref]$seconds)-and$seconds-gt 0){return $seconds}
+    }
+    return $DefaultSeconds
+}
+
+function Invoke-TeamsGraphBatch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Requests,
+        [ValidateRange(1,10)][int]$MaxAttempts=5
+    )
+
+    if($Requests.Count-eq 0){return @()}
+    $batchUri="https://graph.microsoft.com/v1.0/"+'$batch'
+    $requestById=@{}
+    foreach($request in $Requests){$requestById[[string]$request.id]=$request}
+    $pending=@($Requests)
+    $completed=[System.Collections.Generic.List[object]]::new()
+
+    for($attempt=1;$attempt-le$MaxAttempts-and$pending.Count-gt 0;$attempt++){
+        $body=@{requests=$pending}|ConvertTo-Json -Depth 8
+        try{
+            $batchResponse=Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
+        }catch{
+            if($attempt-ge$MaxAttempts){throw}
+            $delay=[Math]::Min(60,[Math]::Pow(2,$attempt)*5)
+            WriteLog -Message ("Teams Graph batch transport failed; attempt {0}/{1}; retry in {2} s: {3}" -f $attempt,$MaxAttempts,$delay,$_.Exception.Message) -Level INFO
+            Start-Sleep -Seconds $delay
+            continue
+        }
+
+        $retry=[System.Collections.Generic.List[object]]::new()
+        $retryAfter=0
+        foreach($response in @($batchResponse.responses)){
+            $status=[int]$response.status
+            if($status-in@(429,500,502,503,504)-and$attempt-lt$MaxAttempts){
+                $original=$requestById[[string]$response.id]
+                if($null-ne$original){[void]$retry.Add($original)}
+                $fallbackDelay=[Math]::Min(60,[Math]::Pow(2,$attempt)*5)
+                $retryAfter=[Math]::Max($retryAfter,(Get-TeamsRetryDelay -Headers $response.headers -DefaultSeconds $fallbackDelay))
+            }else{
+                [void]$completed.Add($response)
+            }
+        }
+
+        $pending=@($retry)
+        if($pending.Count-gt 0){
+            WriteLog -Message ("Teams Graph batch has {0} transient sub-request(s); attempt {1}/{2}; retry in {3} s." -f $pending.Count,$attempt,$MaxAttempts,$retryAfter) -Level INFO
+            Start-Sleep -Seconds $retryAfter
+        }
+    }
+
+    return $completed.ToArray()
+}
 function Get-TeamsBatchSeed {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Teams)
 
     $result = @{}
-    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
     for ($offset = 0; $offset -lt $Teams.Count; $offset += 4) {
         $last = [math]::Min($offset + 3, $Teams.Count - 1)
         $requests = [System.Collections.Generic.List[object]]::new()
@@ -132,27 +193,28 @@ function Get-TeamsBatchSeed {
                 @{ Kind='Details'; Url="/teams/$teamId?`$select=id,isArchived" },
                 @{ Kind='Owners'; Url="/groups/$teamId/owners/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" },
                 @{ Kind='Members'; Url="/groups/$teamId/members/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" },
-                @{ Kind='Channels'; Url="/teams/$teamId/channels?`$top=999" },
+                @{ Kind='Channels'; Headers=$TeamsChannelRequestHeaders; Url="/teams/$teamId/channels?`$top=999" },
                 @{ Kind='Drive'; Url="/groups/$teamId/sites/root/drive?`$select=quota,webUrl" }
             )
             foreach ($spec in $specs) {
                 $localId = [string]$requestId
                 $requestMap[$localId] = [pscustomobject]@{ TeamId=$teamId; Kind=$spec.Kind }
-                [void]$requests.Add(@{ id=$localId; method='GET'; url=$spec.Url })
+                $batchRequest=@{id=$localId;method='GET';url=$spec.Url}
+                if($spec.Headers){$batchRequest.headers=$spec.Headers}
+                [void]$requests.Add($batchRequest)
                 $requestId++
             }
         }
 
-        $body = @{ requests=$requests } | ConvertTo-Json -Depth 6
         try {
-            $batchResponse = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
+            $batchResponses = @(Invoke-TeamsGraphBatch -Requests $requests.ToArray())
         }
         catch {
             WriteLog -Message ("Teams Graph batch failed for team offset {0}; sequential fallback will be used: {1}" -f $offset,$_.Exception.Message) -Level WARNING
             continue
         }
 
-        foreach ($response in @($batchResponse.responses)) {
+        foreach ($response in $batchResponses) {
             $meta = $requestMap[[string]$response.id]
             if ([int]$response.status -ne 200) {
                 WriteLog -Message ("Teams Graph batch sub-request failed: TeamId={0}; Kind={1}; HTTP={2}. Sequential fallback will be used." -f $meta.TeamId,$meta.Kind,$response.status) -Level WARNING
@@ -163,7 +225,8 @@ function Get-TeamsBatchSeed {
                 foreach ($item in @($response.body.value)) { if ($null -ne $item) { [void]$items.Add($item) } }
                 $nextLink = [string]$response.body.'@odata.nextLink'
                 if (-not [string]::IsNullOrWhiteSpace($nextLink)) {
-                    foreach ($item in @(Get-GraphCollection -Uri $nextLink -Operation ("Get Teams {0} continuation" -f $meta.Kind))) { [void]$items.Add($item) }
+                    $continuationHeaders=if($meta.Kind-eq'Channels'){$TeamsChannelRequestHeaders}else{@{}}
+                    foreach ($item in @(Get-GraphCollection -Uri $nextLink -Operation ("Get Teams {0} continuation" -f $meta.Kind) -Headers $continuationHeaders)) { [void]$items.Add($item) }
                 }
                 $result[$meta.TeamId].($meta.Kind) = @($items)
             }
@@ -303,7 +366,8 @@ try{
   $ownerIds=@{}; foreach($o in $owners){$ownerIds[[string]$o.id]=$true}; $guests=@($members|Where-Object{[string]$_.userType-eq'Guest'})
   foreach($m in $members){$role=if($ownerIds.ContainsKey([string]$m.id)){'Owner'}else{'Member'}; [void]$MembersRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;UserId=[string]$m.id;DisplayName=[string]$m.displayName;UserPrincipalName=[string]$m.userPrincipalName;Mail=[string]$m.mail;UserType=[string]$m.userType;Role=$role;Status='OK';NumericValue='';TextValue=$role;Threshold='Inventory only';Details=''})}
   foreach($guest in $guests){[void]$GuestsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;UserId=[string]$guest.id;DisplayName=[string]$guest.displayName;UserPrincipalName=[string]$guest.userPrincipalName;Mail=[string]$guest.mail;Status='Warning';NumericValue='1';TextValue='Guest';Threshold="Guests <= $GuestWarningThreshold";Details='External guest member'})}
-  $channels=if($seed-and$null-ne$seed.Channels){@($seed.Channels)}else{@()}; if($null-eq$seed-or$null-eq$seed.Channels){try{$channels=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/teams/{0}/channels" -f $teamId) -Operation 'Get channels')}catch{WriteLog -Message ("Channels unavailable for {0}: {1}" -f $teamName,$_.Exception.Message) -Level WARNING}}
+  $channels=if($seed-and$null-ne$seed.Channels){@($seed.Channels)}else{@()}; if($null-eq$seed-or$null-eq$seed.Channels){try{$channels=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/teams/{0}/channels" -f $teamId) -Operation 'Get channels' -Headers $TeamsChannelRequestHeaders)}catch{WriteLog -Message ("Channels unavailable for {0}: {1}" -f $teamName,$_.Exception.Message) -Level WARNING}}
+  $unknownChannels=@($channels|Where-Object{[string]$_.membershipType-eq'unknownFutureValue'}); if($unknownChannels.Count-gt 0){WriteLog -Message ("Team {0} still returned {1} channel(s) with membershipType=unknownFutureValue despite the evolvable-enum request header; channel category totals exclude them." -f $teamName,$unknownChannels.Count) -Level WARNING}
   $standard=@($channels|Where-Object{[string]$_.membershipType-in@('','standard')}).Count; $private=@($channels|Where-Object{[string]$_.membershipType-eq'private'}).Count; $shared=@($channels|Where-Object{[string]$_.membershipType-eq'shared'}).Count
   foreach($ch in $channels){$chOwners=@(); if($IncludeChannelOwners-and [string]$ch.membershipType-in@('private','shared')){try{$cm=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/teams/{0}/channels/{1}/members?`$top=200" -f $teamId,$ch.id) -Operation 'Get channel members'); $chOwners=@($cm|Where-Object{@($_.roles)-contains'owner'}|ForEach-Object{$_.displayName})}catch{$chOwners=@('NotMeasured: ChannelMember.Read.All may be required')}}; [void]$ChannelsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;ChannelId=[string]$ch.id;ChannelDisplayName=[string]$ch.displayName;MembershipType=[string]$ch.membershipType;CreatedDateTimeUtc=(IsoUtc $ch.createdDateTime);PrivateChannelOwners=(JoinVals $chOwners);Status='OK';NumericValue='1';TextValue=[string]$ch.membershipType;Threshold='Inventory only';Details=''})}
   $last=''; $inactive=''; $act=$activityById[$teamId]; if($act){$la=Prop $act @('Last Activity Date','LastActivityDate'); $last=IsoUtc $la; if($last){$inactive=[math]::Round(((Get-Date).ToUniversalTime()-([datetime]$la).ToUniversalTime()).TotalDays,0)}}
@@ -342,8 +406,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZArbBQRITLei4
-# 1nUrqUmeix+NMKswSY0wN/EfQDWVh6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBaG5aXcYR0DMyK
+# CESBJqL0OXXsUQikj0zE7CpjpzBi76CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -476,31 +540,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINIsQGqnHOosJH7wwq9d9bNLgH+E6g9aR2lGskjVh8qAMA0GCSqG
-# SIb3DQEBAQUABIIBgEqC0cJJpsJE74C5Jxu5Wap/KmuLKT2fxonghPjuHvd/L3Pz
-# GL4+67jE+NDYOL1QyM5Ee1NaT6E8mHFNVaoXGLaEDBHB0lTcNa6EVDZugiu5PgaM
-# R/PKSBW+xoRgLd1wjH3zt/4knitT3KFrH9Z2qEjWmyw59XzF3ffUss5UN/9/Ujfd
-# 0jjAAWr13VgMGt/x0WwW72yAIDeTHTD6XvhyS44nwgzUcl/yh23PkyBy6Z5O0xwA
-# jrjmQtKd0ZsnnQ80C72ePimQEPCO8zCZdUvdPLXXj86Ol4qk1TdpaIqqVbNWUWr4
-# StLvuPLY7oH8Gy9pGw5XbCtAsSPH6e1yjamt/y4bvDX1SubDoh2bTB/kBLlnJsZa
-# yfx0P7sdF/eT7KRDhlFstceNoGCto5di9LIiVnSs/wJ3+qI3lsOsCpVX/4YE23uF
-# mJNl3cJ2qitEtNZX7jXmqhk5P9hpGKCEsCZlb/IxLYJV6ZDTgSp3nYkC1tzjB+JK
-# MMzxLfvwxZdZ403gtqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID+Lr5R+ICwl08aeDbnTE28wQeSJX0eJw20oOmEh5hsMMA0GCSqG
+# SIb3DQEBAQUABIIBgCI9SCbFc8VUzPn6nPMvvUjwZzp6EdqB4xp6oZnOPOOKM9MN
+# jICeZPapBlNfK9l84x0R83zn0YBcflLE9I6r+a/yGJsSTFY8zg3WkCYs/sqfpA3O
+# rc0cpq3Z/eSCB+mVAgHmhWiop1Qin1XL91b0t8HT8kbYZ8V272Wiy2ytpcrOupx2
+# VHLGpcJxpde9nNft3fdc6/c+cYFtb+NtJiIrEDc8DA4RDjZuE3uFjlq5+3/f2RfE
+# ZbwYXlGFKZi6odC+Q5vFwNzXtS+NwlGBW/oZYD/IoGZjQXU2WHJ/Kr2j9d4z9kW/
+# hGZy2ci9ZQubWRLKfbHZvkuLpIWuZ4bu5c0eMt4UcGlkMBFine5oWFORlisDTDRm
+# ZoYTK8br/W7YSZG2gwY6ngtbqW0P45uJZO1M7LAvwiShOriBv9/AKVmrKAuMHjc7
+# svr+KklhkSeivSgHxJp/Lzyb/Zfzi5jLRoi6ZLEs3HzUstU8ObdbxeonmHfhVfh4
+# m838Y2HGk/cpGNan26GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzZaMC8GCSqGSIb3DQEJBDEiBCB2WFa1P6vxXv5R4cK+eEbFEquyvgf6nq3/Bm6i
-# 9Wv3jzANBgkqhkiG9w0BAQEFAASCAgCNmP/Uftw8iGmVzrKFG7S/bv3NRxpwf2hE
-# Zoehf7yIG2wdAtQzjzfVAlNCEYTW1jvJcgQr8fWGWZkgjT1rANoTnRW/NM5Y34Bc
-# iQi9qA9nikq3FGHxri5fUO7tQD/Q/BlchfGegQgBIWRIVRnUAOPncXhg9572Tlh8
-# hr2dRbOS29GKMcBLh2ZVqv7oan/Cuw0uiUgI/3uH5wolor8P4eYrMONltfKriqaN
-# 6rwmg34KDYRbTzGuZja613jS52Z8ru/LXMXJfExcZhQxkfWdSc1srAscQQILNpKa
-# Vs44M2J7pXvpDiI0YiirImdv73cFXoeVRQCuCbxMw84QFDdfhQkIaPRk/LPdVI1Y
-# NNy5iU8dXk7rW8DRomFw3JpRXiWXlpmvNVsOYRyh/H4PZ1jUZENrF43t0MZI1Qwq
-# Kufl+Ya5TvxfjU45QB/vE2tz9ZxBRgDvBv9P8GkasbRdYrhw9BqYpdAJ7ojWAkwQ
-# FgShOchmjWQwqf8wKyAnwMCg/xy9UXjUjHVv37VxBdR0of224uU52aOW5t0tpsxk
-# VakoW2ghcoeqI/MbO7p38yF5cN0851FtTzQKPhvJ5DItzJoFqQrVa6cIfc6i9uzZ
-# j9my4tugBwPN1Pah/mDVfDUefxAILUBZAPjwJ1YgMfHK6WRqZsvkmifz2HMg0Mfh
-# kM8dFEmWVQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNjU0
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAy2rn9XyypDLhszXpuvmg5RUqRIGC21yM5Si3M
+# 54EWZTANBgkqhkiG9w0BAQEFAASCAgBah0V6x3FgFt3S1iwZyR131MJ01sjGRHtk
+# GM5j5IBxr6NjXW07bxxjrKmsLkYgvY656xysT7ErK4P178nqzCYX9fw2vxfBJoh+
+# Btw5YqlxMaOs65lnJvpeh0Zg9FbZuKPOHvndpFNqEBVY8qrQkb3fMCFfOJjdYIY2
+# 7EZ/+Ln+VfkONNFbkGmUln+rbn+x4M8L/ZiLFhqYshrW0JFCrlmivDJNhaQ8Cog3
+# iWv4/KW/W0iGMJegaGd0FtXSZsY4ure9aGTttSQG0a5YAkuYKLGqGKFwFWMUSiIZ
+# gdFPE14TKqW3xDG0h2MobII/fpkhWhWLJcweKXBDcwFBFgi1UYjKeUZAeQaEr+Be
+# tYgIOfRdXAAHOeFZuQkYJ5e0NnbQY7NMhXX2ubiXnuOnlt6I6Ey4aBeviKLgD1iJ
+# ZL5PGg/rrYQMmWDvtcK6nkx86eu+xKnIecgnRr99Cz0bqYKcscwyuG/qTbOGCx/4
+# cBHrV/Xy0LYtNNuUIXIxikvfyCmrcDylXm62IgvjwUvowuWisBj/7P3OjuU0n2ZS
+# lB0k0nH7sVi0WzOjmjY8k7Z/KJAcK+zF7sKwdWOz3w6RAdR8SlAMutNCn+P7d+Ez
+# Q0mu5m8n21v/xTXuCWSkqH6ai4WcxLtw1lnlDNm15p4uk5/eA85cXniY3WeSK6B+
+# cJzSV2W6FQ==
 # SIG # End signature block
