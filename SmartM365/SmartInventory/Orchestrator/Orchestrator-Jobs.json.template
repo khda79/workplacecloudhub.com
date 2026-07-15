@@ -405,6 +405,28 @@
       }
     },
     {
+      "Name": "Exchange2016-Mailboxes-CalendarPermissions",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\CalendarPermissions\\SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": false,
+      "Group": "Exchange2016",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "PowerShellEdition": "WindowsPowerShell",
+      "TimeoutMinutes": 1440,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "01:00"
+        ],
+        "MissedRunPolicy": "RunOnce"
+      },
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-MailboxCalendarPermissions-Inventory.cmd"
+    },
+    {
       "Name": "EXO-AcceptedDomains-Inventory",
       "ScriptPath": "ExchangeInventory\\AcceptedDomains\\SmartM365-EXO-AcceptedDomains-Inventory.ps1",
       "Arguments": "",
