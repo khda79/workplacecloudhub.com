@@ -4999,7 +4999,7 @@ function Disconnect-SmartM365CloudSession {
 Export-ModuleMember -Function `
     Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Write-SmartM365CompletionBanner, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Add-SmartM365TenantKey, Repair-SmartM365CsvTenantKeySchema, Write-SmartM365CsvAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
-    ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
+    ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
     TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Invoke-SmartM365SharePointCsvUpload, Remove-SmartM365SharePointFile, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
@@ -5010,8 +5010,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDG0dOy9NH0io2D
-# 6HWLP/vhQ9NA0uuHnLQ/5tXLFF35L6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpJTyA4jyxkaBg
+# VpPdrGco7wVqPRpBQei/V5sS3bc6saCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5144,31 +5144,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEOj9XlahwceBMCvZkVeGn+dxXL/CIZ8nJR1yUd9ypy8MA0GCSqG
-# SIb3DQEBAQUABIIBgJkcPhkMvpQumCcZ9vPFpft6Q0plGwDyWppW4UK2alfbk4t9
-# nwHlZRzrZtKRRqMlL+Ip0IBh7dmfNazeFaWgnhmhv/8LACwo4zVEUAcnAzPjZLPp
-# +sAC3kdEPxkfn7l+HYNAtaHeXsHUn041fT8pO4fhWwrNCAyxnpUhvFUEr1qwOMhE
-# 4xx5H4ol4m9t95UKohWu0NPydkGXXkyujloWi4e6YtlFOXP0VLCjqBVhOAePvdvT
-# DLWp6sim2oqzYhtypZ1N9Oe4DmhIsoY8u87tLQsKuomNgAzUNAI7P13B0ifHVjLc
-# sKemS5lgzbBM+SU9QWu9OJMclQghuXJXNuFwB3u6ztFplOOrbsusIBEEQ4NeCvoe
-# vE9WswnlMgLmIsnBEJBV+KD6PibodhRlLG9eTdKEF9MUWBL7g1b/87mGdH5fTQXv
-# odPCAjpPnfsCHhh5z/4OEjalVJeNILkKZXppOgIwNEcBNdwP003lklYkLAf/C1eM
-# gd00WLCm0HsMUwC6EaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIXeLWxCxyJ267KYCcFo52H0ublS45+HWMF59tqlGw1+MA0GCSqG
+# SIb3DQEBAQUABIIBgCbXqzU6TBPQv9/A58RszK4EJDCM88V7BGU0JNIEEM7Wq+Lg
+# m5rol7PTJXLn/vLrs83LXSygz/q9wUei29YBFNEWo9wRRJzRN72dd+BR2VoXl6e9
+# OLTtRYM+zWYjw3oTwG91tPz29CZ8SfavYsk24dxvmGAKsrSMtaH9fZnax08+vi7b
+# Mk+e5GRDAvb9PtQIfYPes1G1vLAmkaMmpwjC+n+My2gaVFG5FPCdOePA/JVYfqZy
+# qM8Al/Yg9bSderSQGrCt7STDm+iqjmpAz+i7f+lDXCNa1WRDOF1Lo6HJS6MaTLrZ
+# N/kjpG99yFrQvAL+nvU37h45lQ/8nh10EnJySKsTFyLAHf8NFTGmQQORx1RJFntF
+# jOpOtvjcO9YrIKb8gsIZkt4chnbYmXv3e8gIv8KHAYPXBhEjMF97cRfXvWWrArYP
+# k9RXaVJ/9E/OEwCgd7joo0OJHAKTuqYFgbtSYz10HQgH3k+y8ajdRWTsKsfOI4qw
+# 1G4a1T9xGVl86jNokaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMzM1
-# NTZaMC8GCSqGSIb3DQEJBDEiBCCsJGfG2juaFzjJnUEWs7HWAcrXXE9nCTK7UTeo
-# /QmMuDANBgkqhkiG9w0BAQEFAASCAgCrNzoj1kjBJ4MnXtLELzQ2J1TS6Rx6AOrs
-# uiDciwVuqShuFVD9iaCPPG9W4ZlcEauWPVCs6kxxmattJAJ4nFgk8Z4HuVsaxzsS
-# vCbsZrnn1Nf8FKhgN/f3zCkRH/h7DKL9NJpMLijd7TD6j5B0a5pJ9ps4dE+4ezji
-# 47+xjWIPHYHb1bVtTvRZ0qkgssbIm4Z7ZIQY2X4aPWbhmEvDCHRxISrbnsLdX/yD
-# JrM32LYa6TyD7RtHwPMlLT9bQFyuOBEsWchl8oddftnLIoU4YXIGzxGlEWSVOMqs
-# 2tlqscuTTUA0Sh9WscKKrefeF/F/ZWVFVd4/rpeUYg+2xj7WymIgoVwAvtpQJB97
-# 6Bw6VyV6Rs+fWiFW0tGzG2LnFEo2xXZb6f4Ant2HDrSXIhU3y9sjBCpgGJKzUz40
-# 0Odl1sNFi+h3G0bJw4ZsqfuYgHDLxlI6gpziIwG0Cg3KPdwCirKVqPMv1FOqr54K
-# qBcx+sLMzYP2Cedllk+qpPAsaOjOHin00Ni5WeOpmNgiG2OLzAn1GIjt5lPuRs//
-# iDFGidx7JPokhM0Ht9lcnTaDf+/xBqQFhGZMvOs7vDnr/ov0/32Jgm0TB9VAk/Xr
-# PF5TvRBHQlFaS/hE3ED6YnSCUMivYbaG3BPiheszDvtLOQ2NYIF+pxAm3wK+8hxv
-# bO5Zw0MSGw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxODM1
+# NDVaMC8GCSqGSIb3DQEJBDEiBCDM3Pl2cKN3d+pdRVSXuXbLWKpANV0YvytBGTmX
+# g/yNazANBgkqhkiG9w0BAQEFAASCAgA034s7a370Umfo4y0afl/A1kAPQSvy0qr5
+# /c/2gCFP4hTpy1ku8lMeSnEA3LjAjWJUqZzgP2O1sEumNjNUHrwnSXBXONrPYRkn
+# M4r8rsrHAh0Tu5AdMNoGLPdA0s/6gqUXmUBN5IsmnQebbt+AGyN6LuU7q0f8O26R
+# HmhbLhF6S0EpxbTJoeFygT0kDRakaC059zz78qj0ctof8DIeu7+yjJej+vgzpstc
+# JjIb2YUJX2L6+NGuvB1Ph/6V/nsKROvIPmzKgdKAkwY1NV/UMoMlXIw1hRRBRq9K
+# t8KxmV5Sc8fCCmBfevJv3eHvU/drdZfL5OFS+DtrGj6jaH1MG4Xj2is5lt+mXDTu
+# Ms8vExOaXQfZ4/s9l6viam+qmZfTMMQpP7Og2/z4rhCF2J8i4iEcKWy0lLqmKQG1
+# JV8RrTV7FaiIty6lmexY1of7OAIr/kUUtXOHOTO4/YPgcNvid8deQzBJbupCGsf5
+# uDB1Ilm7OHulw1jTk5oQc1i6Rk7yqwilGGDJBYDGNAfZc2kT9dCuxlOrZeHM81ZG
+# gP1fWjkG32XLViCvXmZpELUHctwQ5FmC/GQZb275F7snwgvsaENJwDj9dgp1Lb5Y
+# DzU5HFOQq8pu1O5opCdg8RtrWCwIXXAz7UhgWDp96/wc6i6VGzfj7oVFmZ4l0MF1
+# e2rnw1vqZQ==
 # SIG # End signature block
