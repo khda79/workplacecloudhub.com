@@ -5,7 +5,7 @@
 .DESCRIPTION
     Retrieves calendar folder permissions for Exchange 2016 user, shared, room, and equipment mailboxes.
     The script runs sequentially in Windows PowerShell 5.1 with the Exchange Management Shell.
-    It tries the canonical Calendar name, folder statistics, then common localized names.
+    Primary-calendar mode resolves the localized folder from mailbox statistics before querying permissions.
     It exports the stable Mailbox, UPN, CalendarFolder, User, and AccessRights schema.
 
 .PARAMETER PrimaryOnly
@@ -18,7 +18,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-1.1
+1.2
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
@@ -27,7 +27,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 1.1
+    Version : 1.2
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange 2016 On-Premises
 #>
@@ -244,13 +244,13 @@ function Join-ModulePath {
     throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '1.1'
+$ScriptVersion = '1.2'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
 try {
     Write-Host 'Loading module SmartM365-WindowsPowerShell5.psd1...' -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.27' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.28' -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-Transcript -Path $global:logTranscriptFile -Append
     $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-OnPrem-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
@@ -463,73 +463,32 @@ foreach ($mbx in $mailboxes) {
     try {
         if ($PrimaryOnly) {
             $mailboxIds = @($mbx.Identity, $primarySMTP)
+            $calendarFolders = @(Get-CalendarFoldersSafe -Mbx $mbx -PrimaryOnly:$true)
+            $folderNames = @('Calendar','Calendrier','Kalender','Calendario')
+            $lookupSource = 'common name fallback'
+            if ($calendarFolders.Count -gt 0) {
+                $folderNames = @($calendarFolders[0].FolderPath.TrimStart('/'))
+                $lookupSource = 'folder statistics'
+            }
 
-            # 1) Canonical "Calendar"
-            $permissionResult = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendar') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
-            $ok = [bool]$permissionResult.Ok
-            $permissions = @($permissionResult.Permissions)
-            $usedIdentity = $permissionResult.Identity
-            if ($ok) {
-                WriteLog -Message "Calendar folder found for $primarySMTP (via canonical : $usedIdentity)" "INFO"
-                if ($permissions -and $permissions.Count -gt 0) {
+            $permissionResult = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames $folderNames -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
+            if ($permissionResult.Ok) {
+                $permissions = @($permissionResult.Permissions)
+                $usedIdentity = [string]$permissionResult.Identity
+                $calendarFolder = [string]$folderNames[0]
+                if ($usedIdentity -match ':\\(.+)$') {
+                    $calendarFolder = $Matches[1]
+                }
+                WriteLog -Message "Calendar folder found for $primarySMTP (via $lookupSource : $usedIdentity)" "INFO"
+                if ($permissions.Count -gt 0) {
                     Add-CalendarResultRows -Rows $permissions
-                } elseif ($EmitNoPermRow) {
-                    Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder 'Calendar')
                 }
-            } else {
-                # 2) Stats fallback
-                $calendarFolders = Get-CalendarFoldersSafe -Mbx $mbx -PrimaryOnly:$true
-                if ($calendarFolders -and $calendarFolders.Count -gt 0) {
-                    $folderPath = $calendarFolders[0].FolderPath.TrimStart("/")
-                    $permissionResult2 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @($folderPath) -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
-                    $ok2 = [bool]$permissionResult2.Ok
-                    $permissions2 = @($permissionResult2.Permissions)
-                    $usedIdentity2 = $permissionResult2.Identity
-                    if ($ok2) {
-                        WriteLog -Message "Calendar folder found for $primarySMTP (via stats : $usedIdentity2)" "INFO"
-                        if ($permissions2 -and $permissions2.Count -gt 0) {
-                            Add-CalendarResultRows -Rows $permissions2
-                        } elseif ($EmitNoPermRow) {
-                            Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderPath)
-                        }
-                    } else {
-                        # 3) Common localized names
-                        $permissionResult3 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendrier','Kalender','Calendario') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
-                        $ok3 = [bool]$permissionResult3.Ok
-                        $permissions3 = @($permissionResult3.Permissions)
-                        $usedIdentity3 = $permissionResult3.Identity
-                        if ($ok3) {
-                            WriteLog -Message "Calendar folder found for $primarySMTP (via common localized name : $usedIdentity3)" "INFO"
-                            if ($permissions3 -and $permissions3.Count -gt 0) {
-                                Add-CalendarResultRows -Rows $permissions3
-                            } elseif ($EmitNoPermRow) {
-                                # extract folder name from identity "mbId:\Name"
-                                $folderName = ($usedIdentity3 -split ':\s*',2)[1]
-                                Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
-                            }
-                        } else {
-                            WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
-                        }
-                    }
-                } else {
-                    # Last try with localized names if stats empty
-                    $permissionResult4 = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames @('Calendrier','Kalender','Calendario') -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
-                    $ok4 = [bool]$permissionResult4.Ok
-                    $permissions4 = @($permissionResult4.Permissions)
-                    $usedIdentity4 = $permissionResult4.Identity
-                    if ($ok4) {
-                        WriteLog -Message "Calendar folder found for $primarySMTP (via common localized name : $usedIdentity4)" "INFO"
-                        if ($permissions4 -and $permissions4.Count -gt 0) {
-                            Add-CalendarResultRows -Rows $permissions4
-                        }
-                        elseif ($EmitNoPermRow) {
-                            $folderName = ($usedIdentity4 -split ':\s*',2)[1]
-                            Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $folderName)
-                        }
-                    } else {
-                        WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
-                    }
+                elseif ($EmitNoPermRow) {
+                    Add-CalendarResultRows -Rows (Add-NoPermissionRow -Mailbox $primarySMTP -UPN $upn -CalendarFolder $calendarFolder)
                 }
+            }
+            else {
+                WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
             }
         } else {
             # Full mode
@@ -589,12 +548,15 @@ if ($results.Count -gt 0) {
         -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
         -Data $exportRows `
         -Encoding "UTF8" `
-        -NoTypeInformation
+        -NoTypeInformation `
+        -NoMaxItemsRowLimit
 } else {
     WriteLog -Message "No data to export (no calendars found or all skipped). Export step skipped." "INFO"
     Write-Host "No data to export. Skipping."
 }
 
+$errorBaseFileName = "Exchange_OnPrem_MailboxCalendarPermissions_Errors"
+$errorLatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
 if ($errors.Count -gt 0) {
     Add-Content -Path $logTextFile -Value "`n=== MAILBOX-LEVEL ERRORS ==="
     $errors | ForEach-Object { Add-Content -Path $logTextFile -Value $_ }
@@ -606,15 +568,34 @@ if ($errors.Count -gt 0) {
         }
     }
 
-    $errorBaseFileName = "Exchange_OnPrem_MailboxCalendarPermissions_Errors"
     ExportAndCopyCsv -BaseFileName $errorBaseFileName `
         -OutputPath $OutputPath `
-        -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
+        -GlobalPath $errorLatestCsvFolderPath `
         -Data $errorRows `
         -Encoding "UTF8" `
         -NoTypeInformation
 
     WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced, but final status must be CompletedWithWarnings." -f $errors.Count) "WARNING"
+}
+else {
+    $errorRunBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $errorBaseFileName
+    $staleErrorLatestPaths = @(
+        Join-Path -Path $OutputPath -ChildPath "$errorRunBaseFileName.csv"
+        if (-not [string]::IsNullOrWhiteSpace($errorLatestCsvFolderPath)) {
+            Join-Path -Path $errorLatestCsvFolderPath -ChildPath "$errorRunBaseFileName.csv"
+        }
+    ) | Select-Object -Unique
+    foreach ($staleErrorLatestPath in $staleErrorLatestPaths) {
+        if (Test-Path -LiteralPath $staleErrorLatestPath -PathType Leaf) {
+            try {
+                Remove-Item -LiteralPath $staleErrorLatestPath -Force -ErrorAction Stop
+                WriteLog -Message "Removed stale error CSV after successful run: $staleErrorLatestPath" "INFO"
+            }
+            catch {
+                WriteLog -Message "Unable to remove stale error CSV '$staleErrorLatestPath': $($_.Exception.Message)" "WARNING"
+            }
+        }
+    }
 }
 
 Write-Host "`n=== SUMMARY ===" -ForegroundColor Cyan
@@ -639,8 +620,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+KsMHBayKEm5q
-# 7GAWDfHgUtXETDS/shF84G/qDRvYhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSfcRQrEBr2FKK
+# 83cn6EitKZSVk7OwGCa7wBUl6XqOrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -773,31 +754,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDVYepUEM95MAmIqRg7kkLaT7O9b3oIe+yxPbnF3sTMFMA0GCSqG
-# SIb3DQEBAQUABIIBgEeMRl4DGY6JLu10PGUPlDT4knpdJrddNUU4rUQEV1qM8MZ8
-# 0d0GhUnyB2uweliL6iylEidfd98ICFyEKp2KH+/5V67S5A47VrKqi1ZvpsK9H8EK
-# nvSXjpdbirvsDlEZxlL+K8YShl801pcZniqVOhW9yAjGxezjdNbPM5cwLgDdgGQy
-# mDXNIr/b+5HH7TPAS1t4S3WuX62b4G3lmy1txynWMhrG0efdp7kcAFxOmQuRJHUv
-# uMURQ/1yXjTH2MZ3/QW0yY9raFRI2VN2N9HDo428BR0+1Dx+AnFoHFnwvhXuu5+6
-# BCUbMCqWfmZy1Sw+51lrFh1s0wFTqeLxsOdB9SP12FVeIGTUyys3wSRJGMvsTzsH
-# gSq+g//zAZWiHr0ETJV8zF9Y1HYCGOjYudOrk86gEAxnJ0Dx7VlA4V9/S0+acQPE
-# XAKKLlLRs4vkSyJpflX4hre8M6hzFQxM164oYqsZ6a/FZycRTpry42osUf5+7z2t
-# Bd9d8gv9T0w9uilsL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJAldp6t3p/hBvIzKtw9MoI6/xRoBQ3IOl+mXtpha56SMA0GCSqG
+# SIb3DQEBAQUABIIBgBy2AzcyJzVjEPBuUEmFL74g6fb+93RitXATOUDzI5/QVsZm
+# /YgaD/Wb0PiJDuGK3RJkXOcemGo1HcEriH1avbvbP4g4dSwKdFP8RLCHj2BMPOBM
+# p3DuDwZgy3iaAixiwZvWb7LnPs6jDSS5xud/NIeoDdxIgQFNXVzy4a0tMbsS5bHI
+# uY8bR9tnonIVP+V4HTBhDDHp9GTkH0v0thb7EEJF2jm0EHrQYHZAJbwY1RYhWKo8
+# VInFTMu/zLp+1yAWMzrLce7/iLhzyZ3yMLaKrBZKOhT35exsW0/yZl7rauUgqdyC
+# vUoripKPa/ELMtf862Kgq+AfAKSJYRVvttKisVMMvE/BaMLMDUpCq/YeSI2vJNjX
+# uADlPdxqiiu5pXTt67RREJhZGoymNqHWQXH7Gk6bm46bmNtGcN3BNWCN3Xnljt1U
+# 6tA6t92EIZ7uxrCXKglDAs2xo7HdLhfE17OUXrxIAdzaOT+jcpusv9RxvNd9nuI4
+# E/Hxo4/VPF8z/DLzcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMTQ5
-# MDRaMC8GCSqGSIb3DQEJBDEiBCCmfQnPEYp1mJ5+tWh3iz9rjodkKn8RyYZl9Zqv
-# odATkjANBgkqhkiG9w0BAQEFAASCAgAXP3dq6V/9xNXZVc+maNeOkzlQzzUAOSBy
-# rj6KZzFtkG1HJOf4D7Omp6KQqM0m2hCJ3o0MEK6N1Ko2uoC9ulUHBoXZfw+sxVc4
-# YcVAtqJY62Q7JrCX0WF498GJ9p2GJ0CFMORUL6/cvB5njwFtuqT3n/e43rDE7KKY
-# 0VIj7YS2vrW1rO9P2B1om9ycGDnqhgmOYsORKy5Ya5Zt7yK0Qn+zts8no1bNuHZo
-# wGr9436g/Ij2wqvjJtdk2DfuLjftM5QckxdWoTolKRcqLTsMOLwyMuTMuGgMsczB
-# gaIPRI+S49QoKtRmPZvVZBvPwecL0IWCER28wxJipo+gO4KLWlZnXFJtR70RtgLy
-# A/PGWBT1WuEqthTqzE3iE5AcEugAK/bvT2n3lXmvA+DV/1cME531reh0ZVn21muk
-# YikphqX1GOJqQdPcuPuo3XoOOsIupMtq47R9W9HqcgEfoLxjVx/45HNglP1WCRpx
-# GYXHhvbnbHfm7rVnTW3iHnKc3vNCZeYkGVaB+a6cQdNtPTwM0l+6RT1oa0MI2pW2
-# WmHXHB1S1ggpO74eBAONF55Lhk4buSG0qBPIKCEdovbW/DbJ+rmqbNpAWlQaAuhr
-# OQSg57BOh1vtyeKYZSEd3PPChm2/1JPnUJ4STIox4adhhM8aeN0rgn1oH6xumXOp
-# D1Drng4tHw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMzA0
+# MzJaMC8GCSqGSIb3DQEJBDEiBCDfwnZC5Qjau+nS/nMw88Q3lcmTVFyAGRTXPEBM
+# 5ToQizANBgkqhkiG9w0BAQEFAASCAgAjyMDXDAM/vfdEclO62Bxf1zX3fn4Nh1Of
+# mfAxrjY3SwOhqSd47dhIQngajGaUOBdxRkguSWHKg6NpG/doQ0JRvJtGBqUyE+Qn
+# 33W7elg4DPdeH7SocvSG/fHSjD1BTqxodByRlEJvKMujbJh5lNm8FBTZk8T0pCVA
+# u2HDiE3j9diGWrqIP5hB/4Hv9Tb8d5iaIZEpGFP5iKeT2kzKWitWJuBg8gd6BGgM
+# mtQBhVR4rSGGA6IhU6hjUvXfOJLKJuUYRv/s2SFq3RR1HQgNB6tOmNrMkbFs8rhN
+# gLmYc7GQrjrJ5y2OnX9rGjUFXCH4auQGTuWtAMmr0AQuumYd/aQf/fU1yljGWoii
+# yCOUzYr6s9QvMo1wrDaIxfJ7QkHbQ/lBD+ekfe1c4n23OMHb7wK5sCPBQTn+auZd
+# BR2Hs/PfV6Fb3nFMXWznjTa9ujfS4JECeQ2ob4ScZQKPSmZZkjM5xLfkP4zPWL33
+# FTuddndJuYhUmp9Rvm6ZmMQEHw7ju0gTB8cw1y7YVz4uYNWNsb+2QDNk2HfpcYf2
+# QqLbEnjaQyZEyiYwulUfOKawBPqPG++qf8X24Xui3atkVW3U1D8Zoc9yuYoHAqLW
+# PsAfqhDnTa5wPxmMwjyKmQL8toq+KK5rXsPcJ5RyHjA8QMO1sqGejxq9S2Uj9QVk
+# S5xfCsT0ow==
 # SIG # End signature block
