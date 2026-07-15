@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.9
+1.12
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.9'
+$GuiVersion = '1.12'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -321,7 +321,7 @@ function Invoke-LotWrapperRefresh {
         throw "Wrapper refresh script not found: $script"
     }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -RootPath $ToolkitRoot | Out-Null
+    & (Resolve-GuiPowerShellPath) -NoProfile -ExecutionPolicy Bypass -File $script -RootPath $ToolkitRoot | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "LOT wrapper refresh failed with exit code $LASTEXITCODE."
     }
@@ -430,6 +430,31 @@ function Start-GuiLaunchCommandFile {
     Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', (ConvertTo-CmdArgument -Value $LaunchCommandPath)) -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
 }
 
+function Start-LotHtmlReportOpenWatcher {
+    param(
+        [Parameter(Mandatory = $true)][string]$ReportRoot,
+        [int]$TimeoutSeconds = 3600
+    )
+
+    $resolvedReportRoot = [System.IO.Path]::GetFullPath($ReportRoot)
+    $escapedReportRoot = $resolvedReportRoot.Replace("'", "''")
+    $watcherScript = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+`$reportRoot = '$escapedReportRoot'
+`$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+while ((Get-Date) -lt `$deadline) {
+    `$report = Get-ChildItem -LiteralPath `$reportRoot -Filter 'PsExec_IntuneHybridJoinRepair_Summary_*.html' -File | Where-Object { `$_.Length -gt 0 } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (`$report) {
+        Start-Process -FilePath `$report.FullName | Out-Null
+        exit 0
+    }
+    Start-Sleep -Seconds 2
+}
+"@
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($watcherScript))
+    Start-Process -FilePath (Resolve-GuiPowerShellPath) -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encodedCommand) -WindowStyle Hidden | Out-Null
+}
+
 function Resolve-GuiPsExecPath {
     param([string]$ToolkitRoot)
 
@@ -449,6 +474,16 @@ function Resolve-GuiPsExecPath {
     }
 
     return $null
+}
+
+function Resolve-GuiPowerShellPath {
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf) { return $windowsPowerShell }
+    foreach ($name in @('powershell.exe','pwsh.exe')) {
+        $command = Get-Command -Name $name -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command) { return $command.Source }
+    }
+    throw 'Windows PowerShell or PowerShell 7 was not found.'
 }
 
 function Start-ToolkitLot {
@@ -501,6 +536,7 @@ function Start-ToolkitLot {
     $launchTitle = "{0} - started {1}" -f $Lot.Name,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $run.RunPath -Commands @($commands) -NamePrefix ($Lot.Name + '-' + $Mode) -WindowTitle $launchTitle
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $run.RunPath
+    Start-LotHtmlReportOpenWatcher -ReportRoot $run.ReportRoot
 }
 
 function New-SingleComputerRunContext {
@@ -584,6 +620,9 @@ function Start-ToolkitSingleComputer {
     if ($psExecPath) {
         $arguments += @('-PsExecPath', $psExecPath)
     }
+    $arguments += @('-TechnicianRunGuardHours',[string]$Environment.EHJIR_TECHNICIAN_RUN_GUARD_HOURS,'-CentralLogCollectionMode',[string]$Environment.EHJIR_CENTRAL_LOG_COLLECTION_MODE)
+    if ([string]$Environment.EHJIR_USE_TECHNICIAN_RUN_GUARD_HISTORY -eq '1') { $arguments += '-UseTechnicianRunGuardHistory' }
+    if ([string]$Environment.EHJIR_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY -eq '1') { $arguments += '-IgnoreTechnicianRunGuardHistory' }
     if ($Mode -like 'Once*') {
         $arguments += '-RunOnce'
     }
@@ -597,8 +636,8 @@ function Start-ToolkitSingleComputer {
         }
     }
 
-    $commands.Add(('pwsh.exe {0}' -f (($arguments | ForEach-Object { ConvertTo-CmdArgument -Value $_ }) -join ' ')))
-    $launchTitle = "Single {0} - started {1}" -f $context.Name,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    $commands.Add(('{0} {1}' -f (ConvertTo-CmdArgument -Value (Resolve-GuiPowerShellPath)),(($arguments | ForEach-Object { ConvertTo-CmdArgument -Value $_ }) -join ' ')))
+    $launchTitle = "Single {0} [{1}] - started {2}" -f $context.Name,$Mode,(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     $launchCommandPath = New-GuiLaunchCommandFile -WorkingDirectory $context.Root -Commands @($commands) -NamePrefix ('Single-' + $context.Name) -WindowTitle $launchTitle -PauseWhenDone
     Start-GuiLaunchCommandFile -LaunchCommandPath $launchCommandPath -WorkingDirectory $context.Root
     return $context
@@ -674,6 +713,8 @@ $script:ToolkitDefaultEnvironment = @{
     EHJIR_NIGHT_PAUSE_END_HOUR = '7'
     EHJIR_INTUNE_RETRY_SLEEP_MINUTES = '3'
     EHJIR_INTUNE_RETRY_MAX_RETRIES = '5'
+    EHJIR_RETRY_AFTER_REBOOT_DELAY_SECONDS = '300'
+    EHJIR_RETRY_AFTER_REBOOT_MAX_ATTEMPTS = '3'
     EHJIR_STALE_CLEANUP_DELAY_SECONDS = '30'
     EHJIR_REBOOT_DELAY_SECONDS = '300'
     EHJIR_PSEXEC_TIMEOUT_MINUTES = '60'
@@ -691,6 +732,10 @@ $script:ToolkitDefaultEnvironment = @{
     EHJIR_GUI_NO_CENTRAL_LOG_COLLECTION = '0'
     EHJIR_GUI_SKIP_POST_CYCLE_INTUNE_INVENTORY = '0'
     EHJIR_GUI_MAX_CYCLES = '0'
+    EHJIR_USE_TECHNICIAN_RUN_GUARD_HISTORY = '1'
+    EHJIR_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY = '0'
+    EHJIR_TECHNICIAN_RUN_GUARD_HOURS = '3'
+    EHJIR_CENTRAL_LOG_COLLECTION_MODE = 'Standard'
 }
 $script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
 Write-GuiStartupLog -Message ('GUI launcher startup; GuiVersion={0}; PsExecLauncherVersion={1}; Root={2}; Script={3}; PID={4}; User={5}' -f $GuiVersion,$script:PsExecLauncherVersion,$toolkitRoot,$PSCommandPath,$PID,[Environment]::UserName)
@@ -1487,6 +1532,10 @@ function Get-LauncherOptionEnvironment {
         EHJIR_GUI_NO_CENTRAL_LOG_COLLECTION            = Get-BooleanText -CheckBox $controls.NoCentralCollectionCheck
         EHJIR_GUI_SKIP_POST_CYCLE_INTUNE_INVENTORY     = Get-BooleanText -CheckBox $controls.SkipPostCycleInventoryCheck
         EHJIR_GUI_MAX_CYCLES                           = Get-IntText -TextBox $controls.MaxCyclesText -Default 0 -Minimum 0
+        EHJIR_USE_TECHNICIAN_RUN_GUARD_HISTORY         = Get-ConfiguredValue -Name 'EHJIR_USE_TECHNICIAN_RUN_GUARD_HISTORY'
+        EHJIR_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY      = Get-ConfiguredValue -Name 'EHJIR_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY'
+        EHJIR_TECHNICIAN_RUN_GUARD_HOURS               = Get-ConfiguredValue -Name 'EHJIR_TECHNICIAN_RUN_GUARD_HOURS'
+        EHJIR_CENTRAL_LOG_COLLECTION_MODE              = Get-ConfiguredValue -Name 'EHJIR_CENTRAL_LOG_COLLECTION_MODE'
     }
 
     if (-not [string]::IsNullOrWhiteSpace($controls.AdDomainOverrideText.Text)) {
@@ -1707,10 +1756,10 @@ try {
 [void]$window.ShowDialog()
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2emzCpDXxW8Kh
-# /RJ+kZqB0j2XvQ055N2c0+O7bqrSXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDABf6AaabNFokd
+# 32s2q11UxpYjJK/6vB0jzGf/JgmuI6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1735,139 +1784,19 @@ try {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEStlBva5OsTL5GNKTqgpCSzzR7/PD0/B05m0lzJ+212MA0GCSqG
-# SIb3DQEBAQUABIIBgE+OoIN+j4EiJA0Ai9iJ1P39a6/nQ7JG6B4/3WwoItuT+SP7
-# Hz8fTva4zd63G9zFATEr77uQtxs0R0Z4QVYrPQ1oSFjHCmHGAp2ZeQZvN8TlS9HO
-# n5oSekyrtw9L60hFchXaV5VS8qB4gUzeVxszVRMgic0Z24g8hE9G0yo9S6uBnxe4
-# lmn+ZJ5Cn7S3JJg8uhblFoyWOawDHEsrU9T9Mae2NOJM7zz0Sxi1trvDEBVuywVN
-# XeGIJASuspL5AN3YUzsNWQbbIZZRGoD60Gfr5YsJ4Hnq20Bwhix0NkV97n4x2+Mw
-# 1uGeU/HDOOVLYw+1fO+g5DOOqVllktOPziRcOOHtbucoO+2magKWp1c/iy7DJLl1
-# Vr1uXurRUqeZAatnjgM87a4geZ8X43YUQYWG+3GpoYjZOOAAZ1Fw1qfLEdN7RPgL
-# Dbfc9K594Gh/KWgrfPtSrWKrCxGTR3/bJfgmuqWkjP+7ffkXZ2xjyqz+byehX/n3
-# 8ZyIqcgFFhx+mdmCrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MzVaMC8GCSqGSIb3DQEJBDEiBCCisRg2vmRdwKyo4/b0zsgc5rZRZEDgUj6AfLI3
-# jN9O5DANBgkqhkiG9w0BAQEFAASCAgCW/tccxbQIhtRl9dg0qER6MN72S2+wccSl
-# NvW7qHUCBMlg13ospBUCVj1YpLI68gRgW9864fCKN+9phQP0LvR4CSdF1woGrfXj
-# KLF1NLRa1wH4OKEIMfrsrW7BmcTMe6pKY9aBJj5PLcqjhKWyieGo0jN6oKw2jHmG
-# fvEQ5dx9w0jesIfCrLu8x6VURX1zqah18sEp0A4zruj3/hgDJ0Mdx0KgHBs7LBh6
-# YKFFj2ahFS7KOyaMqVLYaJ1+uB5KaidvmMUefHzfYM8sWnHf6o15b1wzD2J6qa7x
-# fksM2PmY5DNtCJ0h6MqlvtZlz1UfequuBrC1EngmMUT9tJNVwqvokLS+kSXS11Pt
-# FjGVrbZTj5j/COu82y5ZXmTFsQQ5HQZTmi6j+cKbLYddNzp5T0Qq5A95M/InjWWf
-# DFtJfqTzMZ9Xddepwx+glusyjFjttuqAjguDfY4Z3rIe2hZS2VgWVXTZ6aLnL1A9
-# TOBCWHFy8rMI14qhR60ulne52H/N7OXYdrjF7k0M5MGk46GIBi4ajXHryleuNLzE
-# mL7WfGYnwXt8n/Mtr8v66dg1bL5cOlA3fZzqJDb7actaxE9dqRfP0njEhxQBH/mH
-# qgeoKWUUX2XGYlxXXhomkZz2TLQHjmfMz1e8YAwW/7T59JXQ8N9lCIuK5Pr1ZrQC
-# CHPb/l8yfQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBxvEuFmnMj6dIF3UwCXF/U
+# PnNzAcYb3J0sj1sbn/Bi9zANBgkqhkiG9w0BAQEFAASCAYCDssuzUA1+NhHpj828
+# 3bthG0cJwvoE8Otx4Ms+bRuE+KBoAGFrAxwCxmKuxgdlgvT9egXSkWlzmXxC5uyJ
+# KcdPKoRUky/TMKe5dsok0Bit9/hxi2NU46xZApXJ6HMA6+8q7nvzAe7HjYMK1Be9
+# Geg+Lq0vr91aqM2fdVO68bey4ay+EXb6RVPRibGwFV8E5HZSwIEppKAI6tJ1R8hg
+# 6OPbgvFoyPL1k3vtpmAOL8/wUReZnznirLqnvE9XebNbIabs8PGQEuI9Raz3aXXi
+# QVD+F/xBs402wt4LdywRcfrwMv3vWYiwmWQPMG6BK/pVvilfDJ5f096D6Rhjpo9S
+# TPw7cy/NP3rYqWCIvz8u6YKdnkNhB4NKdfv4QsoqdpeH3HEgeEgLbWT5cXeDrw0Z
+# q7IfGp1ygmcOywParJQlR0Cb2FqyMuyLcgF8Eqo0jcEpyufPa1tAxAD/rn4sdF2O
+# zKcl0PE17ZnuXJZtIezEQt9so8SlHrj73HFdB90cNztR5wQ=
 # SIG # End signature block
