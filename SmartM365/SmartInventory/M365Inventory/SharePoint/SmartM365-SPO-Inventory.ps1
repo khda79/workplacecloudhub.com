@@ -47,7 +47,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.18
+0.20
 
 
 .REQUIREMENTS
@@ -102,7 +102,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.19"
+$ScriptVersion = "0.20"
 $CurrentOperation = 'Initialize'
 
 $tenantContextPath = & {
@@ -132,7 +132,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.24' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.37' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -1002,8 +1002,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBs5C7fkroaSNb3
-# vgHQ3mn+DvwgGQ36vtQ/foxUOsDOfKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNZpi+vPq/WmZX
+# cAdaT9Vk+SVbv5gjGcbf4TYuaIRxFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1136,31 +1136,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJOu4UjWQz6YRm0TjtH25ClizEDlBJ+ZIEJbPsoUhAv6MA0GCSqG
-# SIb3DQEBAQUABIIBgFcFAktNhEqJ1OOohtAwUIjeTMR3fcOWLLrlAaaaINTHgzZ9
-# TKODAdQ76+/qd6crcAYVU5ddIzvclcxr+wEdkyO6PY9q64vfy4ixU7+k7sAPRh4E
-# 9w+ReRCDiVglSte7ZZJMQPtVbc+nTHbnOdneDMCs171rIndOcvygtbdbpNP/v6ra
-# kKIUfywerMPJdHShAAWpwE/XW8n5wZQbHigq7c7haekTBt5MvuLuPRIMUNID9drj
-# /fdPH1qzJdJB6s3d+/HvicckmQuzX/MMB++M+x70a8v/Bk8WfGClQW3rojKW6uUy
-# wyny/rBMb0rKdUtfxpVLYnhehQYjlPm2n+FZJLjcYhe2zSFu/bindv0heqmrcKgL
-# PiM3dOxRla5Zag+ASPLJf1v7EPePAdTTiP/IQRCpNN203agqSsOYrHq/Y4IN9oz7
-# 6jaZ6eBN2kbIPvX4Pirlyql5D0nPpLK1n4DYIPT1pqAlIQLOPeftQewNyuRBr/ve
-# 0hlzkzT5kn5nzTuWhqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPyXfwYk42dxldUZzrdqippYVP+X0hsmpbMJbz0WaiGXMA0GCSqG
+# SIb3DQEBAQUABIIBgE4Tz8qVYReYne5ZlaV9TAn2yCd/8u87xL0Mpi/2VnhaCSrs
+# CN+6prj6Gz6dRED/xOjIO9wzU0Zfg3PE4FZR8dNuYs2JAPx9gWrbPixq5uX7Owlq
+# me/tFH++i+zA7MhaGywotT3BoomWlO0bmJ/uarDDC2PUX+4RX25FtDiLf8Me9dJs
+# FCYBtsZyYh1y+gXV3EXUWvOYepkbfkWWrDxPwu8WyLRuwvn7iK3jR5QAybXPVBeA
+# yr0jA3aidUYnI/nmKsNk6V4GpL11GKUPmvciYTtUc+LJXhWQYlOYNNTDMiwK0jtw
+# ZzzFb2dKww+msp35TqJj625cq0gF6jBZufrr4m27LgBW5ZIQ1eYyecMxxaZ13/Eo
+# 3aK6ffHp760lNEAl+HatZt5wBtYSxf4dH6PlifNmUcViSjl6E8xY7Z5bcd0ZKyfl
+# fW5gZrc3G72f9krnvLJqj1sDyyDcclv1OZmIYJY77QmR9WpLxYWAlv+TQ6QZI91E
+# fq/tm3zEoHp62YJnzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzZaMC8GCSqGSIb3DQEJBDEiBCCZb0RWmsa6so/K15RNoKig4oY6+yN7dm24yHPR
-# 3oAM4DANBgkqhkiG9w0BAQEFAASCAgBeArLwAlu2N2LbP4xza1Fniazmk3QKNBdI
-# g5sr/j7yVhJM7ASSNuihaNhdPudIfuhVUw+I/2nswVazgF/qvzOVXq/qyyF8LtTe
-# a9PwK927uvcOLDSUYvHH7B0hIJY9G3GSUB830msnmpVV5SRAPNQyNTcIACIQBXLv
-# gKpUkYAdck4S4eJ+yhsKa9BJ+oNU4YU3z3Jj0ZO1vhBb2ArSdjCBmnTRdRO+POKq
-# WCBFGL76alimzMAQnPBLl/+qxlywIHQnIEiisf/CJ0IVDVMPyA8n7HKt5P2ckPMx
-# HzUFFs1IrO4bqlycPGI8ufLka7xTjqnHYMz4bjl6+l9yMFTkg1X89hGtuqYtdB6O
-# GT225/m3WB0uTt92oLkWjXZaX8w4ZRtUOg8VbvOxnjjmjhNFDK0eCYcdd9ZEuL1S
-# +iSDEECLkZkratb86kaJ03YiThSR9AEGnf595jTNdEx5kVlEZ96+ITtJzDSlqxaN
-# ackw7bkElfoBrbKR2yfXDJwPU5ttNcVWeC9oQ4SMdtcf3LJnSUy7ozvRYDELqWjW
-# v7YFlaJ7Vog40U2+2WiGNYgZE6KJp6W0yYDvKvSYt5ESuj+1oiTxOTuoxiyOeefH
-# SdWNBuVaA676zzo686d4aYeZgjyLemLFNIGEGod4t9z9MY531ma3L7QK5FI772cO
-# 61jhs833vA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxODM1
+# NDhaMC8GCSqGSIb3DQEJBDEiBCAlRtinAjbFreymkvy9MJS3ICg/SZzDpfwR8J6c
+# kxuMnjANBgkqhkiG9w0BAQEFAASCAgBW7XswD4aRRyC3BY6p8zHsCerwXhZpZPx+
+# Q+o9YYQGx4Xo/vhAd5rkb3J3HQJP4cCB/I12uHpH1H2c/19OlpeniJ5bicdjld00
+# 0e9JZ/vt/3BLG1Qi+3jRHz5pSd057Si+NXJANGX/3+cjgEJ1nHZSj4gbwj2gEqCY
+# jrta0LzPmpcRXOy+6axGFqODpK5Jy0selH8XwtQa6O2erL3z2UxGN9uqpwhTnXSn
+# /KOseldVJtK67svvSfXHo0cJ0pE556BbGYzuB3mDYyuGXFvX6NeDHBB0YS4L+oJ8
+# EKdt243TYspDurk4o9gFZkrukkzxN2b5AnK04hh2aXVJ5Voc1KNE7O/v3kM6blfC
+# PVXR3y8cn+KRY4nrmv1R3Pq0+e1BynSNJk8X8cYMkHPVFRFHGKYiX1fWJPab5Dbm
+# CHuAnSOUAsio+kbBKXL5nynGpEwwAxaUUDwiilVU8owPDMPZT2JhVhfz7nfX5SoI
+# CW2qtvsT2z2Kj7su3b9VdQnI+dIh6JRRMbhCo6JSIGfj8uyYoqZUSjUuWQVjZopo
+# BBprZfQmr997ygPmHNEDp0rBmZAH5VWWPKaeSPCJaTTcFK9tMCp6w1hwJY0jkTbU
+# 1rYW1I2VJ+XlcA10udkUaptz+VCuoPFdqIhxK4rIRYF57hW3fahtBHgYmBIE9DTW
+# DTsvniYGKg==
 # SIG # End signature block
