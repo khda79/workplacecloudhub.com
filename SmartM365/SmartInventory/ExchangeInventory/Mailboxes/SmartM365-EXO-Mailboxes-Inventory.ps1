@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.19
+1.20
 
 
 .REQUIREMENTS
@@ -397,7 +397,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.19"
+$ScriptVersion = "1.20"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -1572,8 +1572,7 @@ return @{
             $connected = $false
             $connectionError = ''
 
-            try {
-                Import-Module ExchangeOnlineManagement -ErrorAction Stop
+            Import-Module ExchangeOnlineManagement -ErrorAction Stop
                 for ($connectAttempt = 1; $connectAttempt -le $using:p_ConnectRetries -and -not $connected; $connectAttempt++) {
                     try {
                         Connect-ExchangeOnline -AppId $using:p_AppId -CertificateThumbprint $using:p_Thumb `
@@ -1594,12 +1593,24 @@ return @{
                     $delegationVals = @()
                     $mailboxErrors = [System.Collections.Generic.List[string]]::new()
 
+                    $mailboxIdentity = if ($mb.ExternalDirectoryObjectId) {
+                        [string]$mb.ExternalDirectoryObjectId
+                    }
+                    elseif ($mb.UserPrincipalName) {
+                        [string]$mb.UserPrincipalName
+                    }
+                    elseif ($mb.PrimarySmtpAddress) {
+                        [string]$mb.PrimarySmtpAddress
+                    }
+                    else {
+                        [string]$mb.Identity
+                    }
                     if (-not $connected) {
                         $mailboxErrors.Add(("Worker {0} EXO connection failed after {1} attempt(s): {2}" -f $workerId, $using:p_ConnectRetries, $connectionError))
                     }
                     else {
                         try {
-                            $sendAsVals = Get-EXORecipientPermission -Identity $mb.Identity -ErrorAction Stop 2>$null |
+                            $sendAsVals = Get-EXORecipientPermission -Identity $mailboxIdentity -ErrorAction Stop 2>$null |
                                 Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" -and $_.AccessRights -contains "SendAs" } |
                                 Select-Object -ExpandProperty Trustee
                         }
@@ -1607,7 +1618,7 @@ return @{
                             $mailboxErrors.Add(("SendAs: {0}" -f $_.Exception.Message))
                         }
                         try {
-                            $fullAccessVals = Get-EXOMailboxPermission -Identity $mb.Identity -ErrorAction Stop 2>$null |
+                            $fullAccessVals = Get-EXOMailboxPermission -Identity $mailboxIdentity -ErrorAction Stop 2>$null |
                                 Where-Object { $_.User -ne "NT AUTHORITY\SELF" -and $_.AccessRights -contains "FullAccess" -and -not $_.IsInherited } |
                                 Select-Object -ExpandProperty User
                         }
@@ -1636,12 +1647,7 @@ return @{
                         CollectionError = ($mailboxErrors -join " | ")
                     }
                 }
-            }
-            finally {
-                if ($connected) {
-                    try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
-                }
-            }
+            # Disconnect only once in the parent cleanup; worker disconnects clear sibling EXO connections.
         })
 
         $resultsPerm = @($parallelPermissionOutput | Select-Object UserPrincipalName,PrimarySmtpAddress,OrganizationalUnit,SendAs,FullAccess,GrantSendOnBehalfTo)
@@ -2589,8 +2595,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDy6hAL6EmyE7/A
-# dh6CKa2Af1eyjvBwGua66tMTOcjGZ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApH6biA0zIw2kT
+# X7udc12c3jjTOEjkz0q5I0FGnFbvSaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2723,31 +2729,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBE/iDCo8Cc7CVCeo/MJX2M7xeQZwdaqiP9ZnOaRy3FyMA0GCSqG
-# SIb3DQEBAQUABIIBgDFfNLVGxajrHnhtypLOSVP86+IEuWC7kEKHaI2SpSSnyQ2b
-# re6GoC+pQnnD2pBEj6Gl8Hzjdh7DyOkO6n/4Jmo6gH9NTxyJzt+AYPzd1uQ9KYDB
-# L9EPlAYZVBUz1YHnyjIgPqs2tCsLfESbkWKRnTt4mJ1bXIkmTxrQZ/VKrj3HUvGa
-# 7NwhTfmbo/eXbEnjKHy6t2mxkQ+yp7G0TGZ2KSCNdTpS8PpQB5yL0wfV9e2B6S1w
-# OZd0Dgrlimq7S4ah/j7qU7BwOBYxvHfhwZesiHtVEXA416Ec0p2NjdDFkPVeNVnn
-# +LJL1j8rBa1WCxr90Cmaa7MlfPgyYAJ/i4o5zrvE2rxKn6nQIloXWe/ACEtGCdjZ
-# YvPChJUqXvdsjBrcCJqePJlVBHBe7FYCLyYdFMCD3B8eJ2S1gA2kVDPEqzcSAyBx
-# 2XVcSzBA21YhzYXVu/7Z2FRbdgaIR+xUwpgouYYpCNf9BlEDcI47+Y0D3J7EHSW1
-# UB/jBxjUrD+PR9nWL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA8u1IFFPXtP30LXRsMgC+AwKI0QVbrCSCIbWgaJEpO9MA0GCSqG
+# SIb3DQEBAQUABIIBgGh9Vw2gxn51gNRb+4m6MT/CHNE5xy3sYlE8cWe4JvHT70U1
+# h2DVONBTbRXq07G2FFKRIjMA7hYbOXEaplJRgiyokPW9NYM8S1+v7Q2F3mMBr+GC
+# ePOUS4nLwDqtZx1s2qIOHFjZjWOSdftw9t/IkfPrw+ZYf9ukxIneHJfAEKTAvWDu
+# oYZHaOoJoRZoaWSnPUiVExeTnAPQQxoQDrqUCfWnVV61XVG7V+8vD+0pTZuhSf56
+# b9HiNX2KeEkqa16Z0ivTmatgWYfPg9ZQSZre9sadQCjmSZ+a9GBfKnlpj4OxGYsE
+# ejGyS+gJnkGYiqeuSkUYyadE/vi10zrSvTavOW6kGTDamhj0paqyfpTzeeTHxC1H
+# FSq468b+PWRmeQC0HGFASgM2eMoJXYZRZsMaPdeS4YZg16mLrpRVwuTq+SOoZTin
+# cxBKUuQsCVLjGGeF0SOleTrKM6u1Tbihli2V/7+EMYxiBqj/IQXcOikvlLJ4J4HD
+# ToL8LcM3qEQz1I+spqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQyMzQy
-# MTdaMC8GCSqGSIb3DQEJBDEiBCCJInB/wJE/0KgvMx/ia8/hw1EZkTKmMsyGiViD
-# SJEk9zANBgkqhkiG9w0BAQEFAASCAgCkYPgWZzSl/HnjR8DG21dU8r2jpKvi+azu
-# XsAwGZ6zGkitp1Br5h4XaF0y1J6hbZ7kVA7STwuGYRk4c7AVuC6RRwri0KxINqrg
-# 2SUcZoM1N2Y/B1fhF8JKxjtCZafKdsYSNYKs7vLWuWNtvAKeZZ/BgnACYCBPxY2q
-# 1jR1Te4wuT1XnUlmhdpzJt6QnBu4ceHdeVmt8uzi//Ge75GQ3c9+pE3XVxzgqbCu
-# kr2WTXuFOTK3SxQF2jXNPJUbuqj69QurUQemhPhJUzJ8ty2JxTporpy74mbbdkrc
-# NhPUrIXqQqiSguv9C7uIGN3mN280aH80KwDdPNB592Y2+0Wze/6sj/3EXUzzXiLo
-# ObOqDNebwEuR1CEdpowcqWn2R5n2vR6D5BMK8j7sX2ApSI6cDgngIHZOpHBDvkB0
-# /E4J5jQStcjc+YjVJACOgd+yw6qOLZEsG0QDD88QI9gr+BzqNPLcYxkNYc1oMAkF
-# j1ExOs+W3lFzvtxGJdbaSP72Z9QcPteU5gCcfJLUudt1VNWQWQiQP8q+wpxi7zpi
-# ZO1i4p63pkbd5vY6zlQpHr8Wo9UhFAeVejCBv8A0LK66EP1wIH18CbqMEJoJDQEE
-# s9jlIXfDPJ5MrXLfx6oPoQnxRVru6gb7Rtw2HlLJcw+DWRXrKs65Tmg1F1pYB1wA
-# oDfEcmPuFg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUwNzA1
+# MjRaMC8GCSqGSIb3DQEJBDEiBCAsv7bvgTDjAwLJTU3qhLPIUzP3Amnxx+uCGXy1
+# stPyiDANBgkqhkiG9w0BAQEFAASCAgCm4XueAy8JKsHNZ8Q/mYKQ8m8jaNOV3wy+
+# DzWPBs2qosOQB0p50qF5M5RIHXfW0XI9DI1ipy7gBV2DYjcVV6r+C6KNmJjhX8gP
+# PUz6JACqPqj/8kORk5uYGDxvBVedLBS1mAoG7mBQG6LVjVzQEQgb8t5hm3graX9p
+# fD0PSanCuiZFvoBm4CBXLcojfraSIZetHsIfi14Prae1CkMWvJOIlonG+225BCg9
+# sLXcI2WrkwD7BIWflbYm7n8GZeehtJ8a6YfFK1oUsQ6+Jhi2vGQyxiYIghiGLTSt
+# 9ENQhODJ9jd6MoplFRA/twD3xp8OD+GoSpPwJ1pCV8AtolsLN0gOOqksg0inMeAP
+# gM7+J9GtrYL0dhho1WOKfb2XN/o4W0mjf3a31AnGea/ROC1K+FD1JwaZCHbhgOht
+# +V+NNvtnTu3+NWcddyAO0niGrTC0uXCwXyuiM+px8QbXQccf+Pc0MY3iso2pA/ua
+# Ar1MieMrDNcCxNiXNZHAPqWRjBLbLpQSXeKmF/xMrCBDEkhML3cKS8U4o2SVhV6f
+# tSo8sBUMqX1W/C6RrGXCTq50tDwcIH8uVQw1glWVc+mYyvi+S/gprHbN13OQSIk9
+# U+8RqkdqbHnyCZ9k1RaZyvVrBzZHODqR+N3zTflwP/e/lDMSTdnMpbSwNK/9F7DH
+# vjX1v59p3w==
 # SIG # End signature block
