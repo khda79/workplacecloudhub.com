@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.12
+1.13
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.12'
+$GuiVersion = '1.13'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -381,6 +381,61 @@ function ConvertTo-CmdWindowTitle {
     return $title
 }
 
+
+function Get-ActiveToolkitLotRuns {
+    param([Parameter(Mandatory = $true)][string]$ToolkitRoot)
+
+    $runsRoot = Join-Path $ToolkitRoot 'Runs'
+    if (-not (Test-Path -LiteralPath $runsRoot -PathType Container)) { return @() }
+
+    $active = New-Object System.Collections.Generic.List[object]
+    foreach ($stateFile in @(Get-ChildItem -LiteralPath $runsRoot -Filter 'ActiveLotRun_*.json' -File -Recurse -ErrorAction SilentlyContinue)) {
+        try {
+            $state = Get-Content -LiteralPath $stateFile.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ([string]$state.Toolkit -ne 'IntuneHybridJoinToolkit') { continue }
+            $processId = [int]$state.ProcessId
+            if ($processId -lt 1 -or -not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) { continue }
+            if ([string]::IsNullOrWhiteSpace([string]$state.SignalPath)) { continue }
+            $active.Add([pscustomobject]@{ State = $state; StatePath = $stateFile.FullName; SignalPath = [string]$state.SignalPath })
+        }
+        catch { }
+    }
+    return @($active)
+}
+
+function Request-ToolkitLotStops {
+    param(
+        [Parameter(Mandatory = $true)][string]$ToolkitRoot,
+        [switch]$DoNotForceExisting
+    )
+
+    $activeRuns = @(Get-ActiveToolkitLotRuns -ToolkitRoot $ToolkitRoot)
+    $requested = 0
+    $forced = 0
+    $alreadyRequested = 0
+    foreach ($activeRun in $activeRuns) {
+        $signalExists = Test-Path -LiteralPath $activeRun.SignalPath -PathType Leaf
+        if ($DoNotForceExisting -and $signalExists) {
+            $alreadyRequested++
+            continue
+        }
+        $force = $signalExists
+        $signalParent = Split-Path -Parent $activeRun.SignalPath
+        if (-not (Test-Path -LiteralPath $signalParent -PathType Container)) {
+            New-Item -ItemType Directory -Path $signalParent -Force | Out-Null
+        }
+        [pscustomobject]@{
+            Version = 1
+            RequestedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            RequestedBy = [Environment]::UserName
+            Source = 'GUI'
+            Force = [bool]$force
+        } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $activeRun.SignalPath -Encoding UTF8 -Force
+        if ($force) { $forced++ } else { $requested++ }
+    }
+
+    return [pscustomobject]@{ Active = $activeRuns.Count; Requested = $requested; Forced = $forced; AlreadyRequested = $alreadyRequested }
+}
 function New-GuiLaunchCommandFile {
     param(
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
@@ -718,6 +773,7 @@ $script:ToolkitDefaultEnvironment = @{
     EHJIR_STALE_CLEANUP_DELAY_SECONDS = '30'
     EHJIR_REBOOT_DELAY_SECONDS = '300'
     EHJIR_PSEXEC_TIMEOUT_MINUTES = '60'
+    EHJIR_CANCELLATION_DRAIN_TIMEOUT_MINUTES = '15'
     EHJIR_ALLOW_DSREG_LEAVE = '1'
     EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT = '1'
     EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER = '1'
@@ -889,6 +945,7 @@ $xaml = @'
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <Button x:Name="RefreshButton" Content="Refresh"/>
+                    <Button x:Name="StopAllButton" Content="Stop running LOTs" Background="#FFF4E5" Foreground="#9A3412" BorderBrush="#FDBA74" MinWidth="145"/>
                     <Button x:Name="LaunchAllButton" Content="Launch all ready LOTs" Background="#0078D4" Foreground="White" BorderBrush="#0078D4" MinWidth="160"/>
                 </StackPanel>
             </Grid>
@@ -1233,7 +1290,7 @@ function Find-Control {
 
 $controls = @{}
 @(
-    'HeaderLogoLink','HeaderLogoImage','StatusTitle','StatusText','RefreshButton','LaunchAllButton','LotCombo','LotDeviceCountText',
+    'HeaderLogoLink','HeaderLogoImage','StatusTitle','StatusText','RefreshButton','StopAllButton','LaunchAllButton','LotCombo','LotDeviceCountText',
     'LotAdDomainText','LotWrappersText','LotModeCombo','GlobalLimitText','GlobalLimitDownButton','GlobalLimitUpButton','OpenLotFolderButton',
     'OpenLotComputersButton','OpenLotAdDomainButton','RefreshWrappersButton','LaunchLotButton',
     'ActivityText','SingleComputerText','SingleModeCombo','LaunchSingleButton','SingleRunFolderText',
@@ -1614,6 +1671,16 @@ function Refresh-LotList {
 
 $controls.LotCombo.Add_SelectionChanged({ Update-SelectedLotView })
 $controls.RefreshButton.Add_Click({ try { Refresh-LotList } catch { Show-GuiError $_.Exception.Message } })
+$controls.StopAllButton.Add_Click({
+    try {
+        $stopResult = Request-ToolkitLotStops -ToolkitRoot $toolkitRoot
+        if ($stopResult.Active -eq 0) { Add-Status -Title 'Stop' -Message 'No active LOT launcher was found.' }
+        elseif ($stopResult.Forced -gt 0) { Add-Status -Title 'Forced stop' -Message ("Forced local stop requested for {0} active LOT(s). Verify remote targets before relaunch." -f $stopResult.Forced) }
+        else { Add-Status -Title 'Controlled stop' -Message ("Stop requested for {0} active LOT(s). Click Stop again to force local workers if needed." -f $stopResult.Requested) }
+    } catch {
+        Show-GuiError $_.Exception.Message
+    }
+})
 $controls.OpenLotFolderButton.Add_Click({ if ($script:SelectedLot) { Open-FolderPath -Path $script:SelectedLot.Path } })
 $controls.OpenLotComputersButton.Add_Click({ if ($script:SelectedLot) { Open-TextFile -Path $script:SelectedLot.ComputersPath } })
 $controls.OpenLotAdDomainButton.Add_Click({ if ($script:SelectedLot) { Open-TextFile -Path (Join-Path $script:SelectedLot.Path 'AdDomain.txt') } })
@@ -1727,7 +1794,33 @@ $controls.GlobalLimitOptionText.Add_TextChanged({ try { Sync-GlobalLimitText -So
 $controls.GlobalLimitText.Add_TextChanged({ try { Sync-GlobalLimitText -SourceTextBox $controls.GlobalLimitText -TargetTextBox $controls.GlobalLimitOptionText } catch { Show-GuiError ("Unable to synchronize worker limit fields: {0}" -f $_.Exception.Message) } }.GetNewClosure())
 $controls.ResetDefaultsButton.Add_Click({ Reset-GuiOptionsToDefaults })
 
-$window.Add_Closing({ Save-GuiOptions -Quiet })
+$window.Add_Closing({
+    param($sender, $eventArgs)
+
+    Save-GuiOptions -Quiet
+    $activeRuns = @(Get-ActiveToolkitLotRuns -ToolkitRoot $toolkitRoot)
+    if ($activeRuns.Count -eq 0) { return }
+
+    $choice = [System.Windows.MessageBox]::Show(
+        ("{0} LOT launcher(s) are still running.`n`nYes: request a controlled stop, then close this GUI.`nNo: close this GUI and leave the LOTs running.`nCancel: keep this GUI open." -f $activeRuns.Count),
+        'Running LOTs',
+        [System.Windows.MessageBoxButton]::YesNoCancel,
+        [System.Windows.MessageBoxImage]::Warning
+    )
+
+    if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) {
+        $eventArgs.Cancel = $true
+        return
+    }
+
+    if ($choice -eq [System.Windows.MessageBoxResult]::Yes) {
+        try {
+            $stopResult = Request-ToolkitLotStops -ToolkitRoot $toolkitRoot -DoNotForceExisting
+            Add-Status -Title 'Controlled stop' -Message ("Stop requested for {0} active LOT(s)." -f $stopResult.Requested)
+        }
+        catch { Show-GuiError $_.Exception.Message }
+    }
+})
 $window.Add_Closed({
     if ($splash) {
         Close-SmartM365GuiSplash -Splash $splash
@@ -1758,8 +1851,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDABf6AaabNFokd
-# 32s2q11UxpYjJK/6vB0jzGf/JgmuI6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAwG7bZPnObU8z
+# 9lnrR/FbMipqsDhFCCh+50sSm+5lDKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1789,14 +1882,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBxvEuFmnMj6dIF3UwCXF/U
-# PnNzAcYb3J0sj1sbn/Bi9zANBgkqhkiG9w0BAQEFAASCAYCDssuzUA1+NhHpj828
-# 3bthG0cJwvoE8Otx4Ms+bRuE+KBoAGFrAxwCxmKuxgdlgvT9egXSkWlzmXxC5uyJ
-# KcdPKoRUky/TMKe5dsok0Bit9/hxi2NU46xZApXJ6HMA6+8q7nvzAe7HjYMK1Be9
-# Geg+Lq0vr91aqM2fdVO68bey4ay+EXb6RVPRibGwFV8E5HZSwIEppKAI6tJ1R8hg
-# 6OPbgvFoyPL1k3vtpmAOL8/wUReZnznirLqnvE9XebNbIabs8PGQEuI9Raz3aXXi
-# QVD+F/xBs402wt4LdywRcfrwMv3vWYiwmWQPMG6BK/pVvilfDJ5f096D6Rhjpo9S
-# TPw7cy/NP3rYqWCIvz8u6YKdnkNhB4NKdfv4QsoqdpeH3HEgeEgLbWT5cXeDrw0Z
-# q7IfGp1ygmcOywParJQlR0Cb2FqyMuyLcgF8Eqo0jcEpyufPa1tAxAD/rn4sdF2O
-# zKcl0PE17ZnuXJZtIezEQt9so8SlHrj73HFdB90cNztR5wQ=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDOv1cyICcDQyZ5ZKAm0M80
+# 758GhK91Wr3gm+uB5YgyZTANBgkqhkiG9w0BAQEFAASCAYBLxfZFKqhi/NuiaYXX
+# wps4D3w17Kxtv2YKM/aRq7CQk3wIKZzI+mguCP/PL/uFqcovdRFHEuU4KL5f7amL
+# oOg7axwn5I1Rd06FfoQt8JfS3QOx1qLzWnrN1PPbRgX2rZMYpZ3H/YyErA3PUdx4
+# rKb8+Qa+3Fpici0w0DetDGs2B4spt9WDNFLjWmNPBLP31dF3MWYKlHDYH308pSnh
+# Vp87e9WiDO7/x6DslaNsAnkkAiaF34M/gTaQeJv2TbQa+oMrmU/4pjPm2R1hM+z8
+# IpC/RlMmDq6bS+vIyYB48UvHynNMmNyRCqoiMnzHjJQoMa5KVqwA6MlQBRA11E7C
+# 3LYI+TKPl4PMrB8nyulxi+uyYtDz7M73n/OXj1J6zLaMtygxKatysYzjGVu6p/P5
+# v1pnK5nlYEKPLrwwUuIg1UqSLxSw9Z47iGQUl8u8k6WTIMwRmwOYhUtAgVMqVhyP
+# d3ehQpboqqqyjsbU55gJBp1ovIfVe9Hlt0bZiQLF2xlYfb8=
 # SIG # End signature block
