@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.28
+  1.29
 .VERSION
-1.28
+1.29
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.28"
+$ScriptVersion = "1.29"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1803,21 +1803,28 @@ finally {
     Cleanup-TempFiles
     Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $scriptStart -LogPath $LogPath
 
-    if ($EnableSharePointUpload -and (Test-Path -LiteralPath $LogPath -PathType Leaf) -and (Get-Command Invoke-SmartM365SharePointCsvUpload -ErrorAction SilentlyContinue)) {
-        try {
-            Invoke-SmartM365SharePointCsvUpload `
-                -LocalFilePath $LogPath `
-                -Enabled $true `
-                -SiteHostname $SP_SiteHostname `
-                -SitePath $SP_SitePath `
-                -LibraryDisplayName $SP_LibraryDisplayName `
-                -TargetFolderPath $SP_TargetFolderPath `
-                -AppId $AppId `
-                -TenantId $TenantId `
-                -Thumbprint $Thumb | Out-Null
+    if ($EnableSharePointUpload -and (Get-Command Invoke-CoreSmartM365SharePointCsvUpload -ErrorAction SilentlyContinue)) {
+        $runArtifacts = @($LogPath)
+        if ($global:SmartM365MailHtmlFiles) {
+            $runArtifacts += @($global:SmartM365MailHtmlFiles)
         }
-        catch {
-            Write-Log "Run log SharePoint upload failed: $($_.Exception.Message)" "WARN" "SP"
+
+        foreach ($runArtifact in @($runArtifacts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Sort-Object -Unique)) {
+            try {
+                Invoke-CoreSmartM365SharePointCsvUpload `
+                    -LocalFilePath $runArtifact `
+                    -Enabled $true `
+                    -SiteHostname $SP_SiteHostname `
+                    -SitePath $SP_SitePath `
+                    -LibraryDisplayName $SP_LibraryDisplayName `
+                    -TargetFolderPath $SP_TargetFolderPath `
+                    -AppId $AppId `
+                    -TenantId $TenantId `
+                    -Thumbprint $Thumb | Out-Null
+            }
+            catch {
+                Write-Log "Run artifact SharePoint upload failed for '$runArtifact': $($_.Exception.Message)" "WARN" "SP"
+            }
         }
     }
 }
@@ -1825,8 +1832,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDYfJEcZfIsw2eF
-# 1KAGe74OKzNjsVFjobYlehb6dzZ4PKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAHKNS2s+DGBzj
+# 0BRzWUMuu78cjiWj8sLnF9d0V6942qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1959,31 +1966,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHI1B4a2P1hKjrbvJo/KZ08wNKBzH2+B1zJ/m0vsV8qTMA0GCSqG
-# SIb3DQEBAQUABIIBgA8UhL+yE0tatN8P5yovcYhiiAYc8hb86+E3934Ckwt2sSJN
-# bCNisLyxuWbBo54bkABsIwDgWhwtSlwY5bq6KvrzfYKSUDthqcdsTsSOg7d0NYZI
-# zX2UWXESo23NQPcXmA9iMLMW12YDw777bPzEg9whHwaSd+2S91Hjem91s5x8rvIA
-# O3Xm7yAT9UiaoZQFMHJy52bv3sD9sHyTPJ6Y5pZyboOo3P5LQCZSuXoqIE2c4X+8
-# qnWaYBWr4BqTfle2RXbItH8+z3NFi2LZY7rJpy4fC3/70oO7uPgNlvwJPAD+zjRr
-# 4mJ/fJJ2B5d8I0bUbSvHz+krb6uaItFC2dwTmdlkET2OGO2ju5WLtB7wLEL+F0HU
-# hkOjCPRh5qTweOpdXxY7tlmKRQSPlIhiG4I11bnhOHtAysVtzt0wK/VYk6JypSL9
-# +jNC39ZXAFDlQmpW2b6h7n6VdeaiAzFYwMhos3pF88ShXJYFqTarsLr+WkdaxbL6
-# D78QwVHsbnVrqNtJxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIChB6Pom2eqh5bWlto7Jul+th7JXw4eqsoVFpXAit7bMA0GCSqG
+# SIb3DQEBAQUABIIBgKDMRYvtcWwolTIhkl4kRasp8gYtTaG9GMDgK1v9Y56AJXC4
+# AwuCVzMZ8GVILjUUTxz8HGlHltKs7VttJTijbMv5oPhELV5wtszjC8ZitIG9r8lq
+# 1OXoYGP50MZ4Ibano5bjyoQqbWmTER+gLzq8ZiS4Kk7vclfcYwI8PwElBtlaRYf2
+# fQnxOFFBx2u0qbAfnMydxHHOSh8rLquqelLUGJU8GTMzIdhHmPIv9tXK005QX2Xx
+# zipgpVyVqvt31dsnsHZtLIHIqrgTtmMvprsPHC4MlHVlHIvK3K2HieWEaptoEX26
+# h7exfJPLDecDxGIgkFMyLP08MiswzoYxCTvrn0joUg533peXmZYnRpCeWr2t8jCT
+# f6orpwlppDfkfnAnpmeIjPwDEo/lVeLx4az4PPfOLn4K5Ccjz+25O6kDB6b4uWr0
+# QoeEkbOMtmTLTRMGUGDJJJGVISM3rR4tTMtACr3omb6Pn0naee/BeS/EjYFVGY3s
+# r7GLYy2PUxTlbB8I+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMjM0
-# MTRaMC8GCSqGSIb3DQEJBDEiBCAO1qM8MtK7PPXBYBdxHJ/Z2p8zpQi/K1Xvdk2m
-# ox9tNDANBgkqhkiG9w0BAQEFAASCAgCG2oVFZ7cJGLyFooByAAXzXKCHN+tXV3By
-# AUOixQKt1ub04AO56V+DDoj+16UzED5R5lWMqL7KTrYiLxip25HWwUp0xWAt/0vz
-# ONZjbMPr//44k/8eG46gF9xM8gdhLzvTf1DG89r8vt1P1UF0CU+T/bfhhwiNy8dI
-# XurBUl6vLlHNJcuhXco6td6MLHyQ7wf6axQELynszx72YO430DS5ZCQE+mQcVKtG
-# Sy1eTWLEoQ6e8OPw3IdoIDa5+7kNEv7a6ttaduZFNhBJw/9BVgjBA04VWvjmhAW8
-# NQu826KDT+/LjuRRtZlNdw1ULCAHhB0brdDxJ8z6yDhCnvfvi6pmzTfdGafRb9Tg
-# s8476Kf5YAXxxbKeo8S7gM/pvSzv8Y2jW32zKP8VFaH6RAgjwQiwi7t7OWbzQNm4
-# ikH4aYWG+Z03gR2gM9IVKULOia0H8wGYDuKmE8VKw1UbrR85nIj92UOGQHbahMdp
-# YOj/4+szNYw5ffFajeFZv5L3KY6Nq4KQ+2GzlPoYjtuDT4nrun4fTB2/esPnRW/P
-# rB40SYbWy9lQxVo4nJQbiOxVMYcuLusUxn/vS7wyh8ORgPcRe8ShVKUUkhzv6Qel
-# eirVgNjBqnJbvz4oD6ew1eBWBhc42mEvxCxZ3nFTyBHlMttsyO5JGLJGdYBZ10L4
-# P5GKtZAb7Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMzQy
+# NDZaMC8GCSqGSIb3DQEJBDEiBCBBJvM2NQdA4V3YEpU3v3ZiVTkE4oCJBPSAWggU
+# QcTCazANBgkqhkiG9w0BAQEFAASCAgAFWVogqbAT3inAZafkEtV9tz9zWixHXiFX
+# w3CM9lv3SHa4sh47PgzVYMH4ZYlQ/V2ngycmBM1+2ZqN0pPOOh+fDNpmOZRpCVK7
+# pzVVn3nNxy+xPQjntAaacTkuV7fVBoHO09K7F550KVLqX8W8KonoBbLOtgEflNFo
+# aZuoTWSCO3j2wF88Zrp9Cn8IaKdAayxU2FfG9IFKHk2ulQao8yYXKdzgwfgitwTO
+# LqHprsQIEaX++tJzgAC406WwuYMnNfUsfGD6WVhkwsFe50Hs65yKOWIqJVT6Iau6
+# 0MoA9ne55pmBPTVE7UXW3GP7rl0frWjIKPjfrX5l33+CJWgsgREMa0O8P/aAT2FY
+# srHLbCmapKivk9ArhChHpYC8FjGsR9pSM8rtZ4c51VJNVRwM0B6d360+zrO814gr
+# WWFHnFQvpDQ20dKOMQ7L42JFka9Uhjjsbw/rTGUlS7X4hHMvVPGPLe6Jgea7j5+Z
+# BGj9wO5+P87PMqTm5nTSjFQJu3j4p3fhMjwLRnz711xHe6nDintaqEQHpO8h3Hs/
+# mdwyQFgGBtjgBoPyJVPLTfbjulcj2960C/PXCC9t3MgoKeIRYOXAA1AWCwx6t6uS
+# Us2oXI8hCVya5rpTT+bHPsjJcWDRsVib9t342lX5Wxz9KywOIeBKjL1mfKnpoddv
+# bmeV6dZD9w==
 # SIG # End signature block
