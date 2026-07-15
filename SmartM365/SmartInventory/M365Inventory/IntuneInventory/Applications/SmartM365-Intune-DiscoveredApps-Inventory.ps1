@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.13
+    Version : 1.14
 
 .VERSION
-1.13
+1.14
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.13
+    Version : 1.14
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -345,6 +345,7 @@ $script:DeviceDetailCompleted = $false
 $script:Stat_DetailAppsTargeted = 0
 $script:Stat_GraphCalls       = 0
 $script:Stat_ThrottleRetries  = 0
+$script:DeviceDetailResumeContractVersion = 2
 
 # ==========================================================
 # Initialize script environment
@@ -424,6 +425,40 @@ function Get-GraphRetryDelaySeconds {
     return [int]($backoff + (Get-Random -Minimum 0 -Maximum 5))
 }
 
+function Get-GraphBatchResponseRetryDelaySeconds {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Response,
+        [int]$Attempt,
+        [int]$DefaultSeconds = 30,
+        [int]$MaximumSeconds = 300
+    )
+
+    $retryAfter = $null
+    try {
+        $headers = $Response.headers
+        if ($headers -is [System.Collections.IDictionary]) {
+            foreach ($key in $headers.Keys) {
+                if ([string]$key -ieq 'Retry-After') {
+                    $retryAfter = $headers[$key]
+                    break
+                }
+            }
+        }
+        elseif ($headers) {
+            $headerProperty = $headers.PSObject.Properties['Retry-After']
+            if ($headerProperty) { $retryAfter = $headerProperty.Value }
+        }
+    } catch {}
+
+    $seconds = 0
+    if ($retryAfter -and [int]::TryParse([string]$retryAfter, [ref]$seconds) -and $seconds -gt 0) {
+        return [math]::Min($seconds, $MaximumSeconds)
+    }
+
+    $backoff = [math]::Min($MaximumSeconds, $DefaultSeconds * [math]::Pow(2, [math]::Max(0, $Attempt - 1)))
+    return [int]($backoff + (Get-Random -Minimum 0 -Maximum 5))
+}
 function Invoke-GraphPagedRequest {
     param(
         [Parameter(Mandatory = $true)] [string]$InitialUri,
@@ -466,7 +501,7 @@ function Invoke-GraphPagedRequest {
                 $retryAfter = Get-GraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt -DefaultSeconds $DefaultRetrySeconds -MaximumSeconds $script:GraphRetryMaxSeconds
                 $script:Stat_ThrottleRetries++
                 $statusRetryText = if ($statusCode) { $statusCode } else { 'unknown' }
-                WriteLog -Message ("Graph transient failure on [$currentUri]. Status={0}; attempt {1}/{2}; waiting {3}s." -f $statusRetryText, $attempt, $MaxRetries, $retryAfter) "WARNING"
+                WriteLog -Message ("Graph transient failure on [$currentUri]. Status={0}; attempt {1}/{2}; waiting {3}s." -f $statusRetryText, $attempt, $MaxRetries, $retryAfter) "INFO"
                 Start-Sleep -Seconds $retryAfter
             }
         }
@@ -490,9 +525,11 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps,
-        [ValidateRange(0, 5000)][int]$DelayMs = 0
+        [ValidateRange(0, 5000)][int]$DelayMs = 0,
+        [int]$MaxRetries = $script:GraphMaxRetryAttempts
     )
 
+    if ($MaxRetries -lt 1) { $MaxRetries = 1 }
     $result = @{}
     $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
     for ($offset = 0; $offset -lt $Apps.Count; $offset += 20) {
@@ -500,52 +537,108 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
             Start-Sleep -Milliseconds $DelayMs
         }
         $last = [math]::Min($offset + 19, $Apps.Count - 1)
-        $requests = [System.Collections.Generic.List[object]]::new()
-        $requestAppMap = @{}
-        $requestId = 1
+        $pendingApps = @($Apps[$offset..$last])
 
-        foreach ($app in @($Apps[$offset..$last])) {
-            $localId = [string]$requestId
-            $appId = [string]$app.id
-            $requestAppMap[$localId] = $appId
-            [void]$requests.Add(@{
-                id = $localId
-                method = 'GET'
-                url = "/deviceManagement/detectedApps/$appId/managedDevices?`$top=999&`$select=id"
-            })
-            $requestId++
-        }
+        for ($attempt = 1; $pendingApps.Count -gt 0 -and $attempt -le $MaxRetries; $attempt++) {
+            $requests = [System.Collections.Generic.List[object]]::new()
+            $requestAppMap = @{}
+            $requestId = 1
 
-        $body = @{ requests = $requests } | ConvertTo-Json -Depth 6
-        try {
-            $script:Stat_GraphCalls++
-            $batchResponse = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
-        }
-        catch {
-            WriteLog -Message ("Discovered Apps relation batch failed at app offset {0}; sequential fallback will be used: {1}" -f $offset, (Get-ShortGraphErrorMessage -ErrorRecord $_)) 'WARNING'
-            continue
-        }
-
-        foreach ($response in @($batchResponse.responses)) {
-            $appId = $requestAppMap[[string]$response.id]
-            if ([int]$response.status -ne 200) {
-                WriteLog -Message ("Discovered Apps relation batch sub-request failed: AppId={0}; HTTP={1}. Sequential fallback will be used." -f $appId, $response.status) 'WARNING'
-                continue
+            foreach ($app in $pendingApps) {
+                $localId = [string]$requestId
+                $appId = [string]$app.id
+                $requestAppMap[$localId] = $app
+                [void]$requests.Add(@{
+                    id = $localId
+                    method = 'GET'
+                    url = "/deviceManagement/detectedApps/$appId/managedDevices?`$top=999&`$select=id"
+                })
+                $requestId++
             }
 
-            $devices = [System.Collections.Generic.List[object]]::new()
-            foreach ($device in @($response.body.value)) { if ($null -ne $device) { [void]$devices.Add($device) } }
-            $nextLink = [string]$response.body.'@odata.nextLink'
-            if (-not [string]::IsNullOrWhiteSpace($nextLink)) {
-                foreach ($device in @(Invoke-GraphPagedRequest -InitialUri $nextLink)) { [void]$devices.Add($device) }
+            $body = @{ requests = $requests } | ConvertTo-Json -Depth 6
+            try {
+                $script:Stat_GraphCalls++
+                $batchResponse = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
             }
-            $result[$appId] = @($devices)
+            catch {
+                $statusCode = $null
+                try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+                $message = Get-ShortGraphErrorMessage -ErrorRecord $_
+                $isTransient = $statusCode -in @(408, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+                if ($isTransient -and $attempt -lt $MaxRetries) {
+                    $retryAfter = Get-GraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt -DefaultSeconds $script:GraphRetryDefaultSeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+                    $script:Stat_ThrottleRetries++
+                    WriteLog -Message ("Discovered Apps relation batch transient failure at app offset {0}; attempt {1}/{2}; retrying {3} app(s) in {4}s." -f $offset, $attempt, $MaxRetries, $pendingApps.Count, $retryAfter) 'INFO'
+                    Start-Sleep -Seconds $retryAfter
+                    continue
+                }
+
+                WriteLog -Message ("Discovered Apps relation batch failed at app offset {0} after {1} attempt(s); sequential fallback will be used for {2} app(s): {3}" -f $offset, $attempt, $pendingApps.Count, $message) 'WARNING'
+                break
+            }
+
+            $responsesById = @{}
+            foreach ($response in @($batchResponse.responses)) {
+                $responsesById[[string]$response.id] = $response
+            }
+
+            $retryApps = @()
+            $retryDelay = 0
+            foreach ($requestIdKey in @($requestAppMap.Keys)) {
+                $app = $requestAppMap[$requestIdKey]
+                $appId = [string]$app.id
+                $response = $responsesById[$requestIdKey]
+
+                if (-not $response) {
+                    if ($attempt -lt $MaxRetries) {
+                        $retryApps += $app
+                        $candidateDelay = Get-GraphBatchResponseRetryDelaySeconds -Response $null -Attempt $attempt -DefaultSeconds $script:GraphRetryDefaultSeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+                        $retryDelay = [math]::Max($retryDelay, $candidateDelay)
+                    }
+                    else {
+                        WriteLog -Message ("Discovered Apps relation batch returned no sub-response: AppId={0}. Sequential fallback will be used." -f $appId) 'WARNING'
+                    }
+                    continue
+                }
+
+                $statusCode = [int]$response.status
+                if ($statusCode -eq 200) {
+                    $devices = [System.Collections.Generic.List[object]]::new()
+                    foreach ($device in @($response.body.value)) { if ($null -ne $device) { [void]$devices.Add($device) } }
+                    $nextLink = [string]$response.body.'@odata.nextLink'
+                    if (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+                        foreach ($device in @(Invoke-GraphPagedRequest -InitialUri $nextLink)) { [void]$devices.Add($device) }
+                    }
+                    $result[$appId] = @($devices)
+                    continue
+                }
+
+                $isTransient = $statusCode -in @(408, 429, 500, 502, 503, 504)
+                if ($isTransient -and $attempt -lt $MaxRetries) {
+                    $retryApps += $app
+                    $candidateDelay = Get-GraphBatchResponseRetryDelaySeconds -Response $response -Attempt $attempt -DefaultSeconds $script:GraphRetryDefaultSeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+                    $retryDelay = [math]::Max($retryDelay, $candidateDelay)
+                    continue
+                }
+
+                WriteLog -Message ("Discovered Apps relation batch sub-request failed: AppId={0}; HTTP={1}; Attempts={2}. Sequential fallback will be used." -f $appId, $statusCode, $attempt) 'WARNING'
+            }
+
+            if ($retryApps.Count -gt 0) {
+                $script:Stat_ThrottleRetries++
+                WriteLog -Message ("Discovered Apps relation batch transient sub-request(s): Apps={0}; attempt {1}/{2}; retrying in {3}s." -f $retryApps.Count, $attempt, $MaxRetries, $retryDelay) 'INFO'
+                if ($retryDelay -gt 0) { Start-Sleep -Seconds $retryDelay }
+                $pendingApps = @($retryApps)
+            }
+            else {
+                $pendingApps = @()
+            }
         }
     }
 
     return $result
 }
-
 function New-DiscoveredAppsDeviceDetailRecord {
     [CmdletBinding()]
     param(
@@ -606,6 +699,23 @@ function Get-DiscoveredAppsAppDeviceCount {
     return 0
 }
 
+function Get-DiscoveredAppsTargetAppIdsHash {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$AppIds)
+
+    $normalizedIds = @($AppIds |
+        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+        ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } |
+        Sort-Object -Unique)
+    $payload = [System.Text.Encoding]::UTF8.GetBytes(($normalizedIds -join "`n"))
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($payload))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
 function Test-DiscoveredAppsDeviceDetailCacheRowEnrichment {
     [CmdletBinding()]
     param([AllowNull()]$Row)
@@ -797,6 +907,40 @@ function Get-DiscoveredAppsResumeState {
     }
 }
 
+function Test-DiscoveredAppsResumeStateCompatible {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$State,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][int]$TargetCount,
+        [Parameter(Mandatory = $true)][string]$TargetAppIdsHash,
+        [Parameter(Mandatory = $true)][int]$ResumeContractVersion
+    )
+
+    if (-not $State) { return $false }
+    $propertyNames = @($State.PSObject.Properties.Name)
+    foreach ($requiredProperty in @('ResumeContractVersion','TargetAppIdsHash','TargetCount','DeviceDetailMode','PartialPath','TimestampedPath','ProcessedAppIds','ProcessedCount','SkippedCount')) {
+        if ($propertyNames -notcontains $requiredProperty) { return $false }
+    }
+
+    if ([int]$State.ResumeContractVersion -ne $ResumeContractVersion -or
+        [string]$State.TargetAppIdsHash -ne $TargetAppIdsHash -or
+        [int]$State.TargetCount -ne $TargetCount -or
+        [string]$State.DeviceDetailMode -ne $Mode -or
+        [string]::IsNullOrWhiteSpace([string]$State.PartialPath) -or
+        [string]::IsNullOrWhiteSpace([string]$State.TimestampedPath) -or
+        -not (Test-Path -LiteralPath ([string]$State.PartialPath))) {
+        return $false
+    }
+
+    $processedIds = @($State.ProcessedAppIds | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $expectedProcessedIds = [int]$State.ProcessedCount + [int]$State.SkippedCount
+    if ($processedIds.Count -ne $expectedProcessedIds -or @($processedIds | Sort-Object -Unique).Count -ne $processedIds.Count) {
+        return $false
+    }
+
+    return $true
+}
 function Save-DiscoveredAppsResumeState {
     [CmdletBinding()]
     param(
@@ -805,6 +949,8 @@ function Save-DiscoveredAppsResumeState {
         [Parameter(Mandatory = $true)][string]$TimestampedPath,
         [Parameter(Mandatory = $true)][string]$Mode,
         [Parameter(Mandatory = $true)][int]$TargetCount,
+        [Parameter(Mandatory = $true)][int]$ResumeContractVersion,
+        [Parameter(Mandatory = $true)][string]$TargetAppIdsHash,
         [Parameter(Mandatory = $true)][string[]]$ProcessedAppIds,
         [Parameter(Mandatory = $true)][int]$ProcessedCount,
         [Parameter(Mandatory = $true)][int]$SkippedCount,
@@ -815,6 +961,8 @@ function Save-DiscoveredAppsResumeState {
         Script           = $TaskName
         DeviceDetailMode = $Mode
         TargetCount      = $TargetCount
+        ResumeContractVersion = $ResumeContractVersion
+        TargetAppIdsHash = $TargetAppIdsHash
         PartialPath      = $PartialPath
         TimestampedPath  = $TimestampedPath
         ProcessedAppIds  = @($ProcessedAppIds)
@@ -1004,7 +1152,8 @@ try {
     } else {
         WriteLog -Message "Building DeviceDetail records for $($detailApps.Count) applications (mode=$DeviceDetailMode)..." "INFO"
 
-        $detailBaseFileName = 'Intune_DiscoveredApps_DeviceDetail'
+        $detailBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DiscoveredApps_DeviceDetail'
+        $detailTargetAppIdsHash = Get-DiscoveredAppsTargetAppIdsHash -AppIds @($detailApps | ForEach-Object { [string]$_.id })
         $detailTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $script:DeviceDetailResumePath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName.resume.json"
         $processedAppIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1020,7 +1169,8 @@ try {
         }
 
         $resumeState = if ($streamingEnabled) { Get-DiscoveredAppsResumeState -Path $script:DeviceDetailResumePath } else { $null }
-        if ($resumeState -and $resumeState.DeviceDetailMode -eq $DeviceDetailMode -and $resumeState.PartialPath -and (Test-Path -LiteralPath ([string]$resumeState.PartialPath))) {
+        $resumeStateCompatible = Test-DiscoveredAppsResumeStateCompatible -State $resumeState -Mode $DeviceDetailMode -TargetCount $script:Stat_DetailAppsTargeted -TargetAppIdsHash $detailTargetAppIdsHash -ResumeContractVersion $script:DeviceDetailResumeContractVersion
+        if ($resumeStateCompatible) {
             $script:DeviceDetailPartialPath = [string]$resumeState.PartialPath
             $script:DeviceDetailTimestampedPath = [string]$resumeState.TimestampedPath
             foreach ($id in @($resumeState.ProcessedAppIds)) {
@@ -1031,7 +1181,10 @@ try {
             $script:Stat_DeviceDetailRows = [int]$resumeState.DeviceDetailRows
             WriteLog -Message "Resuming DeviceDetail export from $($processedAppIds.Count) processed app ids; partial CSV: $script:DeviceDetailPartialPath" "INFO"
         } else {
-            if ($resumeState) { WriteLog -Message "Existing DeviceDetail resume state is incompatible or partial CSV is missing; starting a new DeviceDetail export." "WARNING" }
+            if ($resumeState) {
+                WriteLog -Message "Existing DeviceDetail resume state is incompatible with the current contract or target app set; starting a new DeviceDetail export." "WARNING"
+                if ($resumeState.PartialPath) { Remove-Item -LiteralPath ([string]$resumeState.PartialPath) -Force -ErrorAction SilentlyContinue }
+            }
             $script:DeviceDetailPartialPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.partial.csv"
             $script:DeviceDetailTimestampedPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.csv"
             Remove-Item -LiteralPath $script:DeviceDetailPartialPath -Force -ErrorAction SilentlyContinue
@@ -1148,6 +1301,8 @@ try {
                         -TimestampedPath $script:DeviceDetailTimestampedPath `
                         -Mode $DeviceDetailMode `
                         -TargetCount $script:Stat_DetailAppsTargeted `
+                        -ResumeContractVersion $script:DeviceDetailResumeContractVersion `
+                        -TargetAppIdsHash $detailTargetAppIdsHash `
                         -ProcessedAppIds @($processedAppIds) `
                         -ProcessedCount $script:Stat_AppsProcessed `
                         -SkippedCount $script:Stat_AppsSkipped `
@@ -1164,6 +1319,8 @@ try {
                         -TimestampedPath $script:DeviceDetailTimestampedPath `
                         -Mode $DeviceDetailMode `
                         -TargetCount $script:Stat_DetailAppsTargeted `
+                        -ResumeContractVersion $script:DeviceDetailResumeContractVersion `
+                        -TargetAppIdsHash $detailTargetAppIdsHash `
                         -ProcessedAppIds @($processedAppIds) `
                         -ProcessedCount $script:Stat_AppsProcessed `
                         -SkippedCount $script:Stat_AppsSkipped `
@@ -1181,6 +1338,8 @@ try {
                 -TimestampedPath $script:DeviceDetailTimestampedPath `
                 -Mode $DeviceDetailMode `
                 -TargetCount $script:Stat_DetailAppsTargeted `
+                -ResumeContractVersion $script:DeviceDetailResumeContractVersion `
+                -TargetAppIdsHash $detailTargetAppIdsHash `
                 -ProcessedAppIds @($processedAppIds) `
                 -ProcessedCount $script:Stat_AppsProcessed `
                 -SkippedCount $script:Stat_AppsSkipped `
@@ -1291,8 +1450,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCtEFhlDmi5Ptmf
-# dxIYZoH2/JZa4G4A8Zh61tfFO4Fhw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCb43p2/s0ZkCYo
+# sbB4DNC08cFe5IAZFCTY3Lb3z4HSuqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1425,31 +1584,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ+5pv5e+OXKctJlrkQWT48RqKfxcfrSal73AcflrRaHMA0GCSqG
-# SIb3DQEBAQUABIIBgHAN5n3c4H2saQo0bIHVIOEYDa08JTaRKMogXXX/Q7CdjfiT
-# CSSfs2VB7rdYU1RYW/Beb1aw+dP3oc/e8clSYSlpmG9zPE8jKcIJEFIt8u4W7Rgn
-# HCz0F2sqWHvSOcSCL/I6NjTgTl3/RjcN/IyqVEr7FcSdU4OCZayCclVUXQe/yrHX
-# Qr1Xsrm1P/PpHzFitUqrc7xmrg6V5rRt1fFarWxwXNKryZdUVznX1xqUDjx2ciwM
-# MtvoJUGWwS+sECR2EKnSvLqrkArIkXuq7x67q7HafwZKIkvBwJ1mlRjkKaLbycYA
-# KfxXJY/sRevf7wkWAnRwY1zXFr6zpRAvaatMBtUsDF64Nf2QZ6+5La0qI5z3ic/C
-# TRpCK29uzsWFWHAerpfkj8KRSRDPWaGWwYdy9rFLViiR4gVLFXsza1U0zcgS/3mH
-# Or7aGxxfld4l87Z9ZYcmhvcdUTgAswQlfsi7pZVSacsyR7Hk+gKle3ztG/61Q2Wa
-# 0wQD3frwcezxWIdmX6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE4eeVW6Oetrc3epl7aO18Etv5C8R0JNzlVPF2bGz5ogMA0GCSqG
+# SIb3DQEBAQUABIIBgHohJlihJpEhJefG5EpW0fp07D1dQLfgfe1iYEab2UL4qNAS
+# T+OLLLVkakA8GMBDA1kUid+UX3XP+WVMIDygiqdnROQ8MF9ykF91skxvucsFI9vz
+# 9NZMg1uNTDFZAtxDpgXHUFqP/nNsCCrcksn00kLuTVevsUJ3TQz/sYOkqDem2Zcc
+# Natz+XLii1mmRT3riFTUqiHxUJv2s5vEuq8VZpQQawKMzYOM0WFsggl0Eg0nqnwB
+# sJisWnRe8uWty2JtyOPmDTvzn2b78mj4WmwrKo0v9EBZzpqcNDLCcRRb8jxn2BSn
+# IsX+cTMn4UZP6tk1YHzN0ih8WFQYMQnEAlOdm1Db53tHY671pFZQ0F9kgdRUmQ/d
+# BB88+nAtrmiJrY5ySiHUg59ekXDAOAIML9f8l2Ctu47/1G3CMY896/lRTd0iKsNP
+# 9JExcL+zLvuil/VmcVZ/YjvSnYTMv5NkHbK6Zm6BcfoBwcBPh6IBjl/eJegiNZWn
+# EcAyAb7eb2XSMKkewqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNDMz
-# MjNaMC8GCSqGSIb3DQEJBDEiBCBtVzTjF4FhgqJtR0zz893MNRqel3KkEYrE2b9b
-# hmc5HTANBgkqhkiG9w0BAQEFAASCAgAgigaa7URw68Wiy2RHTMVWIwtPFUeZYvaB
-# FkPLtDf5mySrOMdO6PsAzyuYfrKHtlMOAjKX9fa9wD0zuZdmY+DkKRZs4U7C58kW
-# JyaUZcgxIf/9kLrM6OjNuc7Ry/VoMMICmfi+MEHUXeRSUGlwJQv89llw8+2T/vcB
-# nUhZLjW2BLZ887vHni6r1yshOLB79cqHjVlE7URqctzMtEjRFy3dXazsrZKy9AAz
-# atuISAWel6aPNLnyI1MfAgVnPBOti5Ej3BheEmqzWek/LBpR92hXOf0oyz3gQ2g8
-# UWgVS4Qh64MB7l8EMPjCEfKMLPWPBxaF5SBaVICe56zaxZ3VnO/SrMrc5cwYlxMZ
-# Gdi1jI7QtWK8TDT27ofNxnaJjYhYjU98BESwliPDcWhn7ZY8rz63MyHiJzZTVVF0
-# UgHBOSKpV+n7HqA7c9cXgXMMw/QCcgCvD3DABxmHxG0pXC4rTEal1/c80UcKjaqA
-# gHeCUd+u9bZf7PxDMnTIWgw9VFZ3o/hwfA3aPIUDU862kBNmp+OljBVZkG7kuSit
-# Q1WDUZM/4eCkRkmqBfHX9pADYMRbbgVsGIv1V8TC2CKADtNfzD6+IYxNzWLSFNNj
-# rIAsYXsLCda7a92vWogxOSEmTHxW5pLJ0vT+rX6eARLt/Oi8PqU0aEO8aq4Gz26i
-# SIsnSdinDg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNTQy
+# NDNaMC8GCSqGSIb3DQEJBDEiBCDSu3WCfV4l/S1te4duPM6TgJ2u27gT8mUbAo+j
+# fyGqYjANBgkqhkiG9w0BAQEFAASCAgAS7aXyfKNaJT22gLEuk3M1VCLtdfPLBXfT
+# cO4NyK7oTkHipdhZ/ha31vC5uTbrmYyHiRGpxe1dIWKoDuVYLgpJhn+1TsB4PhXZ
+# Oe8UUTRk+QY50HLRIW2iNDm2iJl9LyW1JYMWvBjs5wmEveoABQtapUVMHSuk3wbA
+# /8NswxMwXFuiwyAX3ZwCuMYjNp5KDs/o/B95zhTpHrATcvXoczuA05XFmuVXiWO/
+# zoVN7q3nNP78RvNPQuHnlhZdWOAkJZJ/u8Y4gpgVhX9yjvs7mhXvFflscalBgxCh
+# r40Y+TPqClq2l2wtpcFXBH+zAAnFDYKj/MMmTe76wI6zYZo9FSB1dYRMiMXeOOFe
+# Eb9rhvFB4hb4vEf7jGwzhmmCvqvWRSdRz9xJ2Zz7BcVBdeYmihWnbX1iaSleZ+LJ
+# Z/wmQmjG+6DInxIEJqvk3K1LfUhPZ+We5TxMHM2A2uGAVhIVuzZeyWAvB+WZ/GXh
+# oV3lwYn0LpkN/y0+9qHix0/aTtM4G++dLwid05i8fIvXEMEpOdKSoNbY54oynQsu
+# 2At2sByXHzqxh2mEGgQuspv37zWdxWC3tbDufKEIrUZG6E3zDSnzQ4B0s0YCQh1a
+# n3SKy+IzvyvGbfuxkZd05EkDsT4VyX+uHi1imVBLf0cnxQxiX/QqswSeKRV2++86
+# uYT3trboXQ==
 # SIG # End signature block
