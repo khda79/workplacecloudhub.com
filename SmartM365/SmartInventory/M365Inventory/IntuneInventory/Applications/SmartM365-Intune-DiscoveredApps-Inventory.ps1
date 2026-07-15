@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.11
+    Version : 1.13
 
 .VERSION
-1.11
+1.13
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.11
+    Version : 1.13
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -488,11 +488,17 @@ function Stop-DiscoveredAppsTranscript {
 
 function Get-DiscoveredAppDeviceRelationBatchMap {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps)
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps,
+        [ValidateRange(0, 5000)][int]$DelayMs = 0
+    )
 
     $result = @{}
     $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
     for ($offset = 0; $offset -lt $Apps.Count; $offset += 20) {
+        if ($offset -gt 0 -and $DelayMs -gt 0) {
+            Start-Sleep -Milliseconds $DelayMs
+        }
         $last = [math]::Min($offset + 19, $Apps.Count - 1)
         $requests = [System.Collections.Generic.List[object]]::new()
         $requestAppMap = @{}
@@ -600,6 +606,37 @@ function Get-DiscoveredAppsAppDeviceCount {
     return 0
 }
 
+function Test-DiscoveredAppsDeviceDetailCacheRowEnrichment {
+    [CmdletBinding()]
+    param([AllowNull()]$Row)
+
+    if (-not $Row -or [string]::IsNullOrWhiteSpace([string]$Row.DeviceId)) {
+        return $true
+    }
+
+    foreach ($propertyName in @('UserPrincipalName', 'AzureADDeviceId')) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$Row.$propertyName)) {
+            return $true
+        }
+    }
+
+    foreach ($propertyName in @('LastSyncDateTime', 'EnrolledDateTime')) {
+        $parsedDate = [datetime]::MinValue
+        if ([datetime]::TryParse([string]$Row.$propertyName, [ref]$parsedDate) -and $parsedDate.Year -gt 2000) {
+            return $true
+        }
+    }
+
+    foreach ($propertyName in @('ManagedDeviceOwnerType', 'ComplianceState')) {
+        $value = [string]$Row.$propertyName
+        if (-not [string]::IsNullOrWhiteSpace($value) -and $value -ine 'unknown') {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Use-DiscoveredAppsDeviceDetailCache {
     [CmdletBinding()]
     param(
@@ -616,6 +653,7 @@ function Use-DiscoveredAppsDeviceDetailCache {
         Used      = $false
         Apps      = 0
         Rows      = 0
+        RejectedEnrichmentApps = 0
         Reason    = ''
     }
 
@@ -657,12 +695,18 @@ function Use-DiscoveredAppsDeviceDetailCache {
                     Rows       = 0
                     DeviceRows = 0
                     MetadataOk = $true
+                    EnrichmentOk = $true
                 }
             }
 
             $stat = $statsById[$id]
             $stat.Rows++
-            if (-not [string]::IsNullOrWhiteSpace([string]$_.DeviceId)) { $stat.DeviceRows++ }
+            if (-not [string]::IsNullOrWhiteSpace([string]$_.DeviceId)) {
+                $stat.DeviceRows++
+                if ($stat.EnrichmentOk -and -not (Test-DiscoveredAppsDeviceDetailCacheRowEnrichment -Row $_)) {
+                    $stat.EnrichmentOk = $false
+                }
+            }
 
             $app = $targetById[$id]
             if ([string]$_.AppName -ne [string]$app.displayName -or
@@ -689,13 +733,21 @@ function Use-DiscoveredAppsDeviceDetailCache {
             $stat.DeviceRows -eq $expectedDeviceCount
         }
 
-        if ($stat.MetadataOk -and $deviceCountOk) {
+        if ($stat.MetadataOk -and $deviceCountOk -and $stat.EnrichmentOk) {
             [void]$cacheable.Add($id)
+        }
+        elseif ($stat.MetadataOk -and $deviceCountOk -and -not $stat.EnrichmentOk) {
+            $result.RejectedEnrichmentApps++
         }
     }
 
     if ($cacheable.Count -eq 0) {
-        $result.Reason = 'no cache rows match current app metadata/device counts'
+        $result.Reason = if ($result.RejectedEnrichmentApps -gt 0) {
+            "no cache rows meet the current DeviceDetail enrichment contract; rejected apps: $($result.RejectedEnrichmentApps)"
+        }
+        else {
+            'no cache rows match current app metadata/device counts'
+        }
         return [pscustomobject]$result
     }
 
@@ -1010,7 +1062,7 @@ try {
                         $script:Stat_DeviceDetailRowsFromCache = [int]$cacheResult.Rows
                         $script:Stat_AppsProcessed += [int]$cacheResult.Apps
                         $script:Stat_DeviceDetailRows += [int]$cacheResult.Rows
-                        WriteLog -Message ("Previous DeviceDetail cache reused: Apps={0}; Rows={1}; Cache={2}" -f $cacheResult.Apps, $cacheResult.Rows, $cacheResult.CachePath) "INFO"
+                        WriteLog -Message ("Previous DeviceDetail cache reused: Apps={0}; Rows={1}; EnrichmentRejectedApps={2}; Cache={3}" -f $cacheResult.Apps, $cacheResult.Rows, $cacheResult.RejectedEnrichmentApps, $cacheResult.CachePath) "INFO"
                     } else {
                         WriteLog -Message ("Previous DeviceDetail cache not reused: {0}" -f $cacheResult.Reason) "INFO"
                     }
@@ -1031,7 +1083,7 @@ try {
         WriteLog -Message ("Managed-device snapshot cached: {0} unique device(s). App relation calls now retrieve IDs only." -f $managedDeviceCache.Count) 'INFO'
         $seenAppDevicePairs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $appsForRelationBatch = @($detailApps | Where-Object { -not $processedAppIds.Contains([string]$_.id) })
-        $appDeviceRelationMap = Get-DiscoveredAppDeviceRelationBatchMap -Apps $appsForRelationBatch
+        $appDeviceRelationMap = Get-DiscoveredAppDeviceRelationBatchMap -Apps $appsForRelationBatch -DelayMs $DelayMs
         WriteLog -Message ("Discovered Apps relation batches completed: {0}/{1} app(s) prefetched." -f $appDeviceRelationMap.Count, $appsForRelationBatch.Count) 'INFO'
 
         $appIndex = 0
@@ -1055,10 +1107,15 @@ try {
             }
 
             try {
-                if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
                 $devicesUri = 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/' + $app.id + '/managedDevices' +
                     '?$top=999&$select=id'
-                $devices = if ($appDeviceRelationMap.ContainsKey([string]$app.id)) { @($appDeviceRelationMap[[string]$app.id]) } else { Invoke-GraphPagedRequest -InitialUri $devicesUri }
+                $devices = if ($appDeviceRelationMap.ContainsKey([string]$app.id)) {
+                    @($appDeviceRelationMap[[string]$app.id])
+                }
+                else {
+                    if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+                    Invoke-GraphPagedRequest -InitialUri $devicesUri
+                }
 
                 $appRows = [System.Collections.Generic.List[psobject]]::new()
                 if (-not $devices -or $devices.Count -eq 0) {
@@ -1234,8 +1291,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAwLmvIZgKnWnR
-# d2M1vNHKWBGs+Zv7ltDhB0V+wwDm+6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCtEFhlDmi5Ptmf
+# dxIYZoH2/JZa4G4A8Zh61tfFO4Fhw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1368,31 +1425,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC/NT2MO3yOO61wcJPXAaPA0ywSEHZzgBDNVdkFQuiAiMA0GCSqG
-# SIb3DQEBAQUABIIBgDISUJcmT9LdtOssR8IlMW9BJ79CVGH6bBlCpCL/3Sbxg9mR
-# n1nTpaajdpYhxAYMaPHeGKTw0jAO7htevFo7JTLMweFuYgiMwev1QrtnH/GQ05FG
-# DUOesbScUOOv0kQZ9p+rNCSX/MRrtytoaBv1ywdPM+I/ql/5xKbj8MOGK0iMi4nh
-# 8EQKEaV1bqs6JLpJOLmLbzfbaAyw2ouY2C9Ze24yd4XA+uuGjhVynYs5tRn2bOyE
-# DRGWZ6N+BckorHvkoQ3NpMGiQGMuUZ8fucCBArXVJpFjx7PuTw55BVSGxpMxgSAa
-# XSdUrIhyl5sKbnNyxc/ZWo6ICADBBffIMTQ8kwVQSPBcRKdrd0UzVJh/Rsj0Elc4
-# 3FIYVojIxI3irV+q2xMo59DN8sMoiz1KKUd3UANyaFLenEzEojN+udyZtWoY+fZ1
-# qgJXl5qtH03/Ws4/u16hgj+Znr001OVxuugoJP0AO4Ux79EO1oknvD3SgDjPNgQK
-# SKMOyN8xaoZ/r3Gqy6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ+5pv5e+OXKctJlrkQWT48RqKfxcfrSal73AcflrRaHMA0GCSqG
+# SIb3DQEBAQUABIIBgHAN5n3c4H2saQo0bIHVIOEYDa08JTaRKMogXXX/Q7CdjfiT
+# CSSfs2VB7rdYU1RYW/Beb1aw+dP3oc/e8clSYSlpmG9zPE8jKcIJEFIt8u4W7Rgn
+# HCz0F2sqWHvSOcSCL/I6NjTgTl3/RjcN/IyqVEr7FcSdU4OCZayCclVUXQe/yrHX
+# Qr1Xsrm1P/PpHzFitUqrc7xmrg6V5rRt1fFarWxwXNKryZdUVznX1xqUDjx2ciwM
+# MtvoJUGWwS+sECR2EKnSvLqrkArIkXuq7x67q7HafwZKIkvBwJ1mlRjkKaLbycYA
+# KfxXJY/sRevf7wkWAnRwY1zXFr6zpRAvaatMBtUsDF64Nf2QZ6+5La0qI5z3ic/C
+# TRpCK29uzsWFWHAerpfkj8KRSRDPWaGWwYdy9rFLViiR4gVLFXsza1U0zcgS/3mH
+# Or7aGxxfld4l87Z9ZYcmhvcdUTgAswQlfsi7pZVSacsyR7Hk+gKle3ztG/61Q2Wa
+# 0wQD3frwcezxWIdmX6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzRaMC8GCSqGSIb3DQEJBDEiBCBZDDHyKI1OA2ofyQmmAGz/GiPy6OvydSxlJkEG
-# PQg4VjANBgkqhkiG9w0BAQEFAASCAgBRxFCgJCWSlCbF7tS9J5QFq+vghAyFLxdu
-# HnF9Rsh0vcrDytJFOZqFZAnw+nCibEeiEcL+XUltARFcZd8ypj90LWfZG5tePuGP
-# mZylKZ75ThSJrfdIEwWCdPbGlsncqC3s/MPOV4tg31+jv9KYUEIT0iZJ7gpTIc7W
-# 9Gv7kWBmn02ixEJRTuqBXw/6DWmmCK8HA2rSdetbVy1WmdShHiSPxdhLkPvqIetK
-# gGx1gNFeumGt2Uy0VrZgzUiBkmMUfE6zv1XumMlY/m1WlC2cinPc6oojfg7RScra
-# I3nb1FN2kroDjXx1XPPyMUBTdUNJGhGLaRN5XSAiSWpO1MG8WphywPJT2B2zZBsN
-# ReNiozm6JQ5xUMNKOkK4jes+hJGGwWfwo/bYvjzE6ht99DEcvdvhXk50h3MOA4/r
-# gi4sVkTHWAPM2kygdzWFGye+EqKy1jLct3ZCKnV3/vDtzllcIIOA/n8VTRMvdpab
-# MqiN6eANZLDB6qiJCH8vQpgfpIYEgJPEm7Ch6FL/neVudtPS6c3UiHLSUN/VkMct
-# Fo4wqKr9srD1HJoeClE2xCcDh+Hw8GYvjVFjuJ++ALW5J+SrM29tU6Pfh5twqPmA
-# LbFtweD4rHdWI8VquMOzGHkJdIkG+aLNt3I3JhHbLsc2ALYbPWdjxS888Lf6DIMd
-# b/g8wFfdJg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNDMz
+# MjNaMC8GCSqGSIb3DQEJBDEiBCBtVzTjF4FhgqJtR0zz893MNRqel3KkEYrE2b9b
+# hmc5HTANBgkqhkiG9w0BAQEFAASCAgAgigaa7URw68Wiy2RHTMVWIwtPFUeZYvaB
+# FkPLtDf5mySrOMdO6PsAzyuYfrKHtlMOAjKX9fa9wD0zuZdmY+DkKRZs4U7C58kW
+# JyaUZcgxIf/9kLrM6OjNuc7Ry/VoMMICmfi+MEHUXeRSUGlwJQv89llw8+2T/vcB
+# nUhZLjW2BLZ887vHni6r1yshOLB79cqHjVlE7URqctzMtEjRFy3dXazsrZKy9AAz
+# atuISAWel6aPNLnyI1MfAgVnPBOti5Ej3BheEmqzWek/LBpR92hXOf0oyz3gQ2g8
+# UWgVS4Qh64MB7l8EMPjCEfKMLPWPBxaF5SBaVICe56zaxZ3VnO/SrMrc5cwYlxMZ
+# Gdi1jI7QtWK8TDT27ofNxnaJjYhYjU98BESwliPDcWhn7ZY8rz63MyHiJzZTVVF0
+# UgHBOSKpV+n7HqA7c9cXgXMMw/QCcgCvD3DABxmHxG0pXC4rTEal1/c80UcKjaqA
+# gHeCUd+u9bZf7PxDMnTIWgw9VFZ3o/hwfA3aPIUDU862kBNmp+OljBVZkG7kuSit
+# Q1WDUZM/4eCkRkmqBfHX9pADYMRbbgVsGIv1V8TC2CKADtNfzD6+IYxNzWLSFNNj
+# rIAsYXsLCda7a92vWogxOSEmTHxW5pLJ0vT+rX6eARLt/Oi8PqU0aEO8aq4Gz26i
+# SIsnSdinDg==
 # SIG # End signature block
