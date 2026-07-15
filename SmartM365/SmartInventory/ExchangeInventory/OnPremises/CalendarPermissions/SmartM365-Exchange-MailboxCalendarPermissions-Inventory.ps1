@@ -18,7 +18,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-1.0
+1.1
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
@@ -27,7 +27,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 1.0
+    Version : 1.1
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange 2016 On-Premises
 #>
@@ -244,7 +244,7 @@ function Join-ModulePath {
     throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '1.0'
+$ScriptVersion = '1.1'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
@@ -350,11 +350,33 @@ function Get-CalendarFoldersSafe {
         [Parameter(Mandatory = $true)]$Mbx,
         [Parameter(Mandatory = $true)][bool]$PrimaryOnly
     )
-    $id = $Mbx.Guid
-    if (-not $id -or $id -eq [guid]::Empty) { $id = $Mbx.UserPrincipalName }
-    if (-not $id) { $id = $Mbx.PrimarySmtpAddress }
-    $folders = Invoke-Quiet {
-        Get-MailboxFolderStatistics -Identity $id -FolderScope Calendar -ErrorAction Stop
+
+    $identityCandidates = @(
+        [string]$Mbx.Identity
+        [string]$Mbx.UserPrincipalName
+        [string]$Mbx.PrimarySmtpAddress
+        if ($Mbx.Guid -and $Mbx.Guid -ne [guid]::Empty) { [string]$Mbx.Guid }
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    $folders = @()
+    $statisticsQuerySucceeded = $false
+    $lastStatisticsError = $null
+    foreach ($id in $identityCandidates) {
+        try {
+            $folders = @(Invoke-Quiet {
+                Get-MailboxFolderStatistics -Identity $id -FolderScope Calendar -ErrorAction Stop
+            })
+            $statisticsQuerySucceeded = $true
+            break
+        }
+        catch {
+            $lastStatisticsError = $_
+        }
+    }
+
+    if (-not $statisticsQuerySucceeded) {
+        if ($lastStatisticsError) { throw $lastStatisticsError }
+        return @()
     }
     if (-not $folders) { return @() }
     if (-not $PrimaryOnly) { return $folders | Where-Object { $_.FolderType -eq 'Calendar' } }
@@ -617,8 +639,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2MbLGuSrUI8f5
-# ZXQ4NC43sfNTDUwL0OLTk/VAFUyCe6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+KsMHBayKEm5q
+# 7GAWDfHgUtXETDS/shF84G/qDRvYhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -751,31 +773,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGD9oRu5kBQGMgeY7q8r4M1bBAp+NAQ1A+Aj7PC+ZM/wMA0GCSqG
-# SIb3DQEBAQUABIIBgBGABTjiD95im90QsX91+m4o3akhVXmhDTx/VNDHp2FaNoui
-# nGzH+erqxo0cD6/CnQQjybUXu8AeNCt6bMzY1lIrtGx3X+jQyCqxAY3N971YtP+V
-# BynYqgNB7QkSMMie5VLu2n6uQObO8gQwCU+fExupSS0huo55Z6RWN/hSNkRpVzWm
-# 6zJ1ZKPJH3B9O7xlNyChmYqEmM5PfYCkMZ5MDADyBcEzyBFs4RCrAbNjaHcfk8qG
-# mljQcNAomPw7R9cpsBBf9eJ1eMZcmRCYZjMFwyScHkWl59436E9WWhPKtygAoi1j
-# 3Ez2Sp74d26g2yJjNq6lEz+RTNhlIFk6vbA6DKxxEjj03KizLKmALjWiKGZmDAlB
-# hs62gYQfy6QIyt2kFGvVTlo/IITtDLcovQJAElXNmP1mS8x+tOkWpbMWl+VhSi68
-# oyd5uUPhcmmISHKrTqELoKPTzD5GZGLsv7boLNPiI82R5sT0bcFjCqR79BrmaIYx
-# 1od1tHb3BESHw/fHAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDVYepUEM95MAmIqRg7kkLaT7O9b3oIe+yxPbnF3sTMFMA0GCSqG
+# SIb3DQEBAQUABIIBgEeMRl4DGY6JLu10PGUPlDT4knpdJrddNUU4rUQEV1qM8MZ8
+# 0d0GhUnyB2uweliL6iylEidfd98ICFyEKp2KH+/5V67S5A47VrKqi1ZvpsK9H8EK
+# nvSXjpdbirvsDlEZxlL+K8YShl801pcZniqVOhW9yAjGxezjdNbPM5cwLgDdgGQy
+# mDXNIr/b+5HH7TPAS1t4S3WuX62b4G3lmy1txynWMhrG0efdp7kcAFxOmQuRJHUv
+# uMURQ/1yXjTH2MZ3/QW0yY9raFRI2VN2N9HDo428BR0+1Dx+AnFoHFnwvhXuu5+6
+# BCUbMCqWfmZy1Sw+51lrFh1s0wFTqeLxsOdB9SP12FVeIGTUyys3wSRJGMvsTzsH
+# gSq+g//zAZWiHr0ETJV8zF9Y1HYCGOjYudOrk86gEAxnJ0Dx7VlA4V9/S0+acQPE
+# XAKKLlLRs4vkSyJpflX4hre8M6hzFQxM164oYqsZ6a/FZycRTpry42osUf5+7z2t
+# Bd9d8gv9T0w9uilsL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMTIy
-# MzFaMC8GCSqGSIb3DQEJBDEiBCBs5L6WDNAOpfTrMiB/IE0IV5ke1RtoBrEqDrqW
-# ZgcSBzANBgkqhkiG9w0BAQEFAASCAgApp8/vfijFQXFADP7zVeKfQ+nwrfMELSZC
-# 5h3FNvT2k5zarIu4xWVumFUt4MWBatNwxxKjilbZsaa5nDSFZbRbYA2aD614GfKy
-# 35VBTE4WVU5rIhzPbTtgTstceXrK+/aGGTRb7zZU6+sMqn5zjY3xDzbOfY9wxP1X
-# KCMNeeu30MxksMYq3TnuFHpCAi1V1OBR5j7TTR+AI2aF6OCOdKpZ0WurPjvms5XS
-# VfGUjP6TGjG95CVOeKMsI32muIfXKJHG1rFo91zeFZLePXBWLHWTwVRLCpqYKfMz
-# LM/h4JFEPbrzYFDpPo5dY5MFC1C48cF45P4VbXdR5s8u5K3Zx3xu2T+4LIHKSWAx
-# pJqQnYFCtYxsvEu1tkoQoE4Gq+qSfPwUr1e3aT1nBcyMFZcnoWJ077krjABUvNo/
-# 9SyLC06OKDnQW+SyEOwu16QuFGi1LT+Gdv0CJ6qAutIdWcy5KIThgMB/tYKZLmiW
-# yyxMRDE5eUs0Fq8MIqHTfwUMb8d3zmb42cxVdAmi1+W386590j5IgOTF6ZGTnWMp
-# vizh2qxgsh+MjXcsQQhwDMnKcRwP89A29NifQg/oM/gDeaPwOvDC2Un/WWI3wxey
-# CY3QVVBiKvYcnuX+5x1ZrdmNEo9Wm95tGip9e3myU+YDFNi2j8Ia04R9ZtaEBWwH
-# kqnakbszHA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMTQ5
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCmfQnPEYp1mJ5+tWh3iz9rjodkKn8RyYZl9Zqv
+# odATkjANBgkqhkiG9w0BAQEFAASCAgAXP3dq6V/9xNXZVc+maNeOkzlQzzUAOSBy
+# rj6KZzFtkG1HJOf4D7Omp6KQqM0m2hCJ3o0MEK6N1Ko2uoC9ulUHBoXZfw+sxVc4
+# YcVAtqJY62Q7JrCX0WF498GJ9p2GJ0CFMORUL6/cvB5njwFtuqT3n/e43rDE7KKY
+# 0VIj7YS2vrW1rO9P2B1om9ycGDnqhgmOYsORKy5Ya5Zt7yK0Qn+zts8no1bNuHZo
+# wGr9436g/Ij2wqvjJtdk2DfuLjftM5QckxdWoTolKRcqLTsMOLwyMuTMuGgMsczB
+# gaIPRI+S49QoKtRmPZvVZBvPwecL0IWCER28wxJipo+gO4KLWlZnXFJtR70RtgLy
+# A/PGWBT1WuEqthTqzE3iE5AcEugAK/bvT2n3lXmvA+DV/1cME531reh0ZVn21muk
+# YikphqX1GOJqQdPcuPuo3XoOOsIupMtq47R9W9HqcgEfoLxjVx/45HNglP1WCRpx
+# GYXHhvbnbHfm7rVnTW3iHnKc3vNCZeYkGVaB+a6cQdNtPTwM0l+6RT1oa0MI2pW2
+# WmHXHB1S1ggpO74eBAONF55Lhk4buSG0qBPIKCEdovbW/DbJ+rmqbNpAWlQaAuhr
+# OQSg57BOh1vtyeKYZSEd3PPChm2/1JPnUJ4STIox4adhhM8aeN0rgn1oH6xumXOp
+# D1Drng4tHw==
 # SIG # End signature block
