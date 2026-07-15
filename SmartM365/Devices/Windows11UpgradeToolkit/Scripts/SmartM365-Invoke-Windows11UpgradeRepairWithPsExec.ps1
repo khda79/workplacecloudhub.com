@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.55
+    0.1.56
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -96,6 +96,7 @@ param(
     [ValidateRange(1, 60)][int]$JobPollSeconds = 2,
     [ValidateRange(0, 1440)][int]$DelayBetweenCyclesMinutes = 10,
     [ValidateRange(0, 1000)][int]$MaxCycles = 0,
+    [ValidateRange(0, 1440)][int]$CancellationDrainTimeoutMinutes = 15,
     [ValidateRange(0, 1440)][int]$PsExecTimeoutMinutes = 360,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -109,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.55'
+$script:LauncherVersion = '0.1.56'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -256,6 +257,133 @@ function New-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         New-Item -ItemType Directory -Path $Path -Force -ErrorAction Stop | Out-Null
+    }
+}
+
+function Initialize-LotCancellationSupport {
+    if (-not ('SmartM365LotCancellation' -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Threading;
+
+public static class SmartM365LotCancellation
+{
+    private static ConsoleCancelEventHandler handler;
+    private static int requestCount;
+
+    public static int RequestCount { get { return requestCount; } }
+
+    public static void Register()
+    {
+        Unregister();
+        requestCount = 0;
+        handler = new ConsoleCancelEventHandler(OnCancelKeyPress);
+        Console.CancelKeyPress += handler;
+    }
+
+    public static void Unregister()
+    {
+        if (handler != null)
+        {
+            Console.CancelKeyPress -= handler;
+            handler = null;
+        }
+    }
+
+    private static void OnCancelKeyPress(object sender, ConsoleCancelEventArgs e)
+    {
+        e.Cancel = true;
+        Interlocked.Increment(ref requestCount);
+    }
+}
+"@
+    }
+
+    [SmartM365LotCancellation]::Register()
+}
+
+function Get-LotCancellationState {
+    $requestCount = 0
+    try { $requestCount = [SmartM365LotCancellation]::RequestCount } catch { }
+    $requested = ($requestCount -gt 0)
+    $force = ($requestCount -gt 1)
+    $source = if ($requested) { 'Ctrl+C' } else { '' }
+
+    if (-not [string]::IsNullOrWhiteSpace($script:CancellationSignalPath) -and (Test-Path -LiteralPath $script:CancellationSignalPath -PathType Leaf)) {
+        $requested = $true
+        $source = 'GUI_OR_FILE_SIGNAL'
+        try {
+            $signal = Get-Content -LiteralPath $script:CancellationSignalPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ($signal.PSObject.Properties['Force'] -and [bool]$signal.Force) { $force = $true }
+            if ($signal.PSObject.Properties['Source'] -and -not [string]::IsNullOrWhiteSpace([string]$signal.Source)) { $source = [string]$signal.Source }
+        }
+        catch { }
+    }
+
+    return [pscustomobject]@{ Requested = $requested; Force = $force; Source = $source; RequestCount = $requestCount }
+}
+
+function Wait-LotCancellationAware {
+    param([ValidateRange(0, 86400)][int]$Seconds)
+
+    $remaining = $Seconds
+    while ($remaining -gt 0) {
+        if ((Get-LotCancellationState).Requested) { return $false }
+        $slice = [Math]::Min(2, $remaining)
+        Start-Sleep -Seconds $slice
+        $remaining -= $slice
+    }
+    return $true
+}
+
+function Set-ActiveLotRunState {
+    param([Parameter(Mandatory = $true)][string]$Status,[string]$ReportPath = '')
+
+    if ([string]::IsNullOrWhiteSpace($script:ActiveLotRunStatePath)) { return }
+    [pscustomobject]@{
+        Version = 1
+        Toolkit = 'Windows11UpgradeToolkit'
+        Status = $Status
+        ProcessId = $PID
+        LotName = $script:LauncherLotName
+        ComputerListPath = $ComputerListPath
+        SignalPath = $script:CancellationSignalPath
+        ReportPath = $ReportPath
+        StartedUtc = $script:CancellationRunStartedUtc.ToString('o')
+        UpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:ActiveLotRunStatePath -Encoding UTF8 -Force
+}
+
+function Complete-LotCancellationSupport {
+    try { [SmartM365LotCancellation]::Unregister() } catch { }
+    if (-not [string]::IsNullOrWhiteSpace($script:ActiveLotRunStatePath)) {
+        Remove-Item -LiteralPath $script:ActiveLotRunStatePath -Force -ErrorAction SilentlyContinue
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:CancellationSignalPath)) {
+        Remove-Item -LiteralPath $script:CancellationSignalPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function New-Windows11CancellationResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][int]$CycleNumber,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][string]$Detail
+    )
+
+    return [pscustomobject]@{
+        Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        ComputerName = $ComputerName
+        CycleNumber = $CycleNumber
+        LauncherStatus = $Status
+        RemoteStatus = ''
+        RemoteNextAction = 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'
+        ExitCode = ''
+        Detail = $Detail
+        JobErrorMessage = ''
+        RemoteLogsPath = ''
+        PsExecLogPath = $script:LauncherLogPath
     }
 }
 
@@ -1639,6 +1767,16 @@ New-Directory -Path $LogRoot
 New-Directory -Path $ReportRoot
 New-Directory -Path $CentralLogRoot
 New-Directory -Path $script:LauncherLogRoot
+$script:CancellationRunStartedUtc = (Get-Date).ToUniversalTime()
+$script:CancellationStateRoot = Join-Path $runDataRoot 'State'
+New-Directory -Path $script:CancellationStateRoot
+$script:CancellationSignalPath = Join-Path $script:CancellationStateRoot ("StopRequested_{0}.json" -f $PID)
+$script:ActiveLotRunStatePath = Join-Path $script:CancellationStateRoot ("ActiveLotRun_{0}.json" -f $PID)
+Remove-Item -LiteralPath $script:CancellationSignalPath -Force -ErrorAction SilentlyContinue
+Initialize-LotCancellationSupport
+Set-ActiveLotRunState -Status 'Starting'
+Write-Host ("Controlled stop: first Ctrl+C stops new starts and drains active jobs for up to {0} minute(s); second Ctrl+C forces local job stop." -f $CancellationDrainTimeoutMinutes) -ForegroundColor DarkCyan
+
 $launcherLogHeader = "[{0}] ===== SmartM365 Windows 11 Upgrade Toolkit launcher v{1} started. Lot={2}; ComputerList={3}; Technician={4}; TechComputer={5} =====" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$script:LauncherVersion,(Split-Path -Leaf $script:LotRoot),$ComputerListPath,$script:TechnicianIdentity.Account,$script:TechnicianIdentity.ComputerName
 Set-Content -LiteralPath $script:LauncherLogPath -Value $launcherLogHeader -Encoding UTF8 -Force
 Set-Content -LiteralPath $script:LauncherLatestLogPath -Value $launcherLogHeader -Encoding UTF8 -Force
@@ -2417,6 +2555,7 @@ function Acquire-GlobalLease {
     $waitLogIntervalSeconds = 300
     $waitWasLogged = $false
     while ($true) {
+        if ((Get-LotCancellationState).Requested) { return '' }
         $leasePath = Invoke-WithGlobalGateMutex -ScriptBlock {
             Remove-StaleGlobalLeases
             $leases = @(Get-ChildItem -LiteralPath $globalGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)
@@ -2504,7 +2643,13 @@ $mergedLiveHtmlPath = $mergedFinalHtmlPath
 $allCycleResults = New-Object System.Collections.ArrayList
 $allCycleProgressRows = New-Object System.Collections.ArrayList
 Write-Host ("Merged HTML report: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkCyan
+Set-ActiveLotRunState -Status 'Running' -ReportPath $mergedLiveHtmlPath
 do {
+    $preCycleCancellation = Get-LotCancellationState
+    if ($preCycleCancellation.Requested) {
+        Write-Host ("Cancellation requested before cycle {0}; no new cycle will start." -f ($cycle + 1)) -ForegroundColor Yellow
+        break
+    }
     $cycle++
     $preCycleInventory = Invoke-Windows11InventoryPreCycleRefresh -CycleNumber $cycle
     if ($preCycleInventory.MovedFromIntune -gt 0 -or $preCycleInventory.MovedFromAd -gt 0) {
@@ -2534,6 +2679,8 @@ do {
     $techRunGuardFqdnByJobId = @{}
     $jobStartedAtById = @{}
     $nextIndex = 0
+    $forcedCancelledJobIds = @{}
+    $cancellationObservedAt = $null
     $lastLiveHtmlWrite = [datetime]::MinValue
     $cycleStart = Get-Date
     $lastProgressLog = Get-Date
@@ -2544,7 +2691,37 @@ do {
     }
     catch { Write-Host ("Cycle {0}: failed to initialize HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
-        while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit) {
+        $cancelState = Get-LotCancellationState
+        if ($cancelState.Requested) {
+            if ($null -eq $cancellationObservedAt) {
+                $cancellationObservedAt = Get-Date
+                Set-ActiveLotRunState -Status 'StopRequested' -ReportPath $mergedLiveHtmlPath
+                Write-Host ("Controlled stop requested by {0}: no additional computers will start. Active jobs will drain for up to {1} minute(s). Press Ctrl+C again to force their local stop." -f $cancelState.Source,$CancellationDrainTimeoutMinutes) -ForegroundColor Yellow
+            }
+
+            while ($nextIndex -lt $computers.Count) {
+                $cancelledComputer = $computers[$nextIndex]
+                $nextIndex++
+                $cancelledResult = New-Windows11CancellationResult -ComputerName $cancelledComputer -CycleNumber $cycle -Status 'CANCELLED_NOT_STARTED' -Detail 'The operator requested a controlled stop before this computer was queued.'
+                $cancelledResult = Add-AdInventoryFieldsToResult -Result $cancelledResult -AdInventoryMap $script:AdInventoryMap -AdInventoryCsv $AdInventoryCsv
+                $cancelledResult = Add-IntuneInventoryFieldsToResult -Result $cancelledResult -IntuneInventoryMap $script:IntuneInventoryMap -IntuneInventoryCsv $IntuneInventoryCsv
+                [void]$results.Add($cancelledResult)
+            }
+
+            $drainExpired = ($CancellationDrainTimeoutMinutes -eq 0 -or ((Get-Date) - $cancellationObservedAt).TotalMinutes -ge $CancellationDrainTimeoutMinutes)
+            if ($runningJobs.Count -gt 0 -and ($cancelState.Force -or $drainExpired)) {
+                foreach ($runningJob in @($runningJobs | Where-Object { $_.State -eq 'Running' })) {
+                    $runningJobId = [string]$runningJob.Id
+                    if (-not $forcedCancelledJobIds.ContainsKey($runningJobId)) {
+                        $forcedCancelledJobIds[$runningJobId] = $true
+                        Write-Host ("Forcing local worker stop for {0}. The remote endpoint may already be running and must be verified before relaunch." -f ($runningJob.Name -replace '^W11UT_C\d+_','')) -ForegroundColor Red
+                    }
+                    Stop-Job -Job $runningJob -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        while ($nextIndex -lt $computers.Count -and $runningJobs.Count -lt $ThrottleLimit -and -not (Get-LotCancellationState).Requested) {
             $computer = $computers[$nextIndex]
             $nextIndex++
 
@@ -2562,6 +2739,12 @@ do {
             }
 
             $globalLeasePath = Acquire-GlobalLease -Computer $computer -CycleNumber $cycle
+            if ((Get-LotCancellationState).Requested) {
+                Release-GlobalLease -LeasePath $globalLeasePath
+                $nextIndex--
+                break
+            }
+
 
             try {
                 $remoteArgsJson = ([pscustomobject]@{ Args = @($remoteArgs.ToArray()) } | ConvertTo-Json -Compress)
@@ -2616,7 +2799,7 @@ do {
             Write-Host ("Queued {0} ({1}/{2}); running={3}" -f $computer,$nextIndex,$computers.Count,$runningJobs.Count) -ForegroundColor DarkCyan
 
             if ($DelayBetweenComputersSeconds -gt 0 -and $nextIndex -lt $computers.Count) {
-                Start-Sleep -Seconds $DelayBetweenComputersSeconds
+                [void](Wait-LotCancellationAware -Seconds $DelayBetweenComputersSeconds)
             }
         }
 
@@ -2687,15 +2870,16 @@ do {
             }
 
             if (-not $received -or $received.Count -eq 0) {
+            $forcedCancellation = $forcedCancelledJobIds.ContainsKey([string]$job.Id)
                 $received = @([pscustomobject]@{
                     Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
                     ComputerName = ($job.Name -replace '^W11UT_C\d+_','')
                     CycleNumber = $cycle
-                    LauncherStatus = if (@($jobErrors | Where-Object { $_ -match 'RUNSPACE_BROKEN' }).Count -gt 0) { 'RUNSPACE_BROKEN' } else { 'JOB_ERROR' }
+                    LauncherStatus = if ($forcedCancellation) { 'CANCELLED_BY_OPERATOR' } elseif (@($jobErrors | Where-Object { $_ -match 'RUNSPACE_BROKEN' }).Count -gt 0) { 'RUNSPACE_BROKEN' } else { 'JOB_ERROR' }
                     RemoteStatus = ''
-                    RemoteNextAction = ''
+                    RemoteNextAction = if ($forcedCancellation) { 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH' } else { '' }
                     ExitCode = ''
-                    Detail = ($jobErrors -join ' | ')
+                    Detail = if ($forcedCancellation) { 'The operator forced the local worker to stop. The remote endpoint may already be running; verify target evidence before relaunch.' } else { ($jobErrors -join ' | ') }
                     SetupCacheAction = ''
                     DiskCleanupAction = ''
                     DiskCleanupFreedGB = ''
@@ -2841,12 +3025,13 @@ do {
             Write-Host ("  {0}: {1}" -f $sourceGroup.SelectedSetupSourcePath,$sourceGroup.ComputerCount) -ForegroundColor DarkGreen
         }
     }
+    if ((Get-LotCancellationState).Requested) { break }
 
     if ($RunOnce) { break }
     if ($MaxCycles -gt 0 -and $cycle -ge $MaxCycles) { break }
     if ($DelayBetweenCyclesMinutes -gt 0) {
         Write-Host ("Waiting {0} minute(s) before next cycle." -f $DelayBetweenCyclesMinutes) -ForegroundColor DarkYellow
-        Start-Sleep -Seconds ($DelayBetweenCyclesMinutes * 60)
+        [void](Wait-LotCancellationAware -Seconds ($DelayBetweenCyclesMinutes * 60))
     }
 }
 while ($true)
@@ -2866,11 +3051,14 @@ if ($null -ne $script:globalGateMutex) {
     $script:globalGateMutex = $null
 }
 
+Set-ActiveLotRunState -Status 'Finished' -ReportPath $mergedFinalHtmlPath
+Complete-LotCancellationSupport
+
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCOHjimPv7ov1O9
-# MqkeN1dYbeJTWVY9eurgHiJoNW48dKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAXscSCh8IOrsxp
+# xe413UYV+ZG92ONVqB4KI5jG/qE5zKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2895,139 +3083,19 @@ if ($null -ne $script:globalGateMutex) {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJKwf8lVv37ZBqlCyXLcd3amv51Dw7aq/Hh+2kbcliwXMA0GCSqG
-# SIb3DQEBAQUABIIBgKzKjSg4QsMRD4pB+13U/ZMdVIadQHSi5LSYj5uinVzyjlA/
-# Bpq5/YyNZvQMj2LdBt3/v5W024sEl0tgC8g6G0N5ZuhOZqlPN++XFKfuCJtYTKIP
-# EDXKjPv3eTKwG1wNAW1p3zHJi7ugdE0aWgzS9/EkWCcOmb3X7tJCXZTV5hgmt9F2
-# mY0vfcZBOnl/QFVaInZo9kgs9NY/EE5MtUPR/OlKhT9hJLYcgprlG1Nt9BKE2GoH
-# LJZ592bc5ecCOoUQ0D3KxN2cveE5Zu+TFilRxY+aJxXjlPQzVpWJ/CW15Bb81kMW
-# FhLTT55+vfEaDgjPWCNqr6H9rHOW+EqqBu6lkOFhWnuuLPmpgxhVB2a4QzHrQHNA
-# b7oIh1QbLK9RDSeTuiOo226cL5bD9rq1vVU/V4vUb1vn81BpGf3V3xK4qRbdgqxa
-# jGWNrK9ZrHkCnYamAz8XW6FI/I0e9e0QbiYG11ysFdfYtZv5abgxtlGOMPf9FrT0
-# T3xSPDIyO0SmCuKK96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQxODA5
-# NDdaMC8GCSqGSIb3DQEJBDEiBCBel0w5155tp3LTNYN/LLBtIOiyGmeJ2ZYdzrRm
-# KoPIhTANBgkqhkiG9w0BAQEFAASCAgB8Oq3HRxbNRQrxOGvE9a3yu1dgYTJcwTNr
-# /ewK2bV4t77r6AOcSFRbHTlcPHi02V/XGx3Wh4xCTTXeoWl0G9oUNduIuSNGW246
-# /RHSQWmsOPw3zpS1fdNSuoyaBNejQE5ZMYfGsCWKp0gfe4KCZBE7J7okWdzzA8X4
-# yUxzGX7mjoPK/G0CaLv0P2QTfpS9M4ojEqAIynAOTuOxOImCMM7TR7b7XHx548+f
-# 5tZUNnsYw+IsL12Y7voVY1LXj7vsRMJb5ug4q3pcY1MtODzSSZAx35rG432Dbr+z
-# NgyK0af5cQpz1A5svmIy2d9e6R3gKiLFOgzxPiw7EgFKxfC9rCtowZg2U5KzMzoF
-# 0GO2QeRzV5Wfgw1gooW21FfwxNmYCZAgEbKXVBMnnV9Tlxm4DYjiq+HVdv6CwgHn
-# IHqNi4bE7M5HHWmsmywJhg9xuqdSV3EEa8S2HtrUPST+3pYSRPTmmsiACZSrkhFi
-# nD+usY35615irK6zp6JoM3oBuOHBXwalBVmbGG1mwCAt1Ef+pl61NtF24TWjfpIg
-# Gux0SPY1VEUwUbbAelXBUtMxcquxhyXDBXpFQqMrUT7dMk/1zMRIUWXzyxNUtqhj
-# Acs4fHeNAhcQgFW6DJXLzkHSr437ncBOb4iU0/8vaxCoHkyVXSXRg9IbZu4PaOMH
-# 52zIQXnjXA==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB2N0Fml9wu8m+q7JVwxc5P
+# ldQcS/LNpYwo3iUa10YjfjANBgkqhkiG9w0BAQEFAASCAYCCLJhzmH9xUeL7Xbtz
+# yoWLh87GnN55otRnhntz18KzEpGpm2/9JOoSkfP3/cRIxSqfBjadkulpDL5Njfme
+# HkEWFiYf/v70eylYDPvdbEcsxEilTaICqlXOk/pMhjzt5X73KsCtEkvFqvxGgoiW
+# BCUX07/jciq7HQFgYBx9/2432dXqfp5YqhkSc+9K7mmMUZILZmsoQg4rnx9dvDL3
+# GLR65TJEOqMrAUBFDY+gsh4bzzyblSqqA86yWzrWdkFCwAuroC3L5AWxI84v70mw
+# WXg2hWAsFtsPpRejePF49ltpvnW51HrgEPmeWTmKt7q8Hgn8Rj0D62i64cMli968
+# JXJEQ6KnhOK+k5SZ0kc875M5jdy3cCMtyhU4HJ32fl+QrgQ5ue5mzq8ab6qu1T06
+# Po5TagXjIsqcdIPewO5bm0DHGyl+NAAZ/7W8rpzntrKIPjgiWN4e+YsBe1j5CjUf
+# bvqAZnwjWmSPCJwQfWGo7tYxMRyYGjTIFycAA0JbKvHg0RQ=
 # SIG # End signature block
