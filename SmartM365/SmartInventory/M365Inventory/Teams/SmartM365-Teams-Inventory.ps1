@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.23
+0.24
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.23"
+$ScriptVersion="0.24"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -193,7 +193,7 @@ function Get-TeamsBatchSeed {
                 @{ Kind='Details'; Url="/teams/${teamId}?`$select=id,isArchived" },
                 @{ Kind='Owners'; Url="/groups/$teamId/owners/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" },
                 @{ Kind='Members'; Url="/groups/$teamId/members/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" },
-                @{ Kind='Channels'; Headers=$TeamsChannelRequestHeaders; Url="/teams/$teamId/channels?`$top=999" },
+                @{ Kind='Channels'; Headers=$TeamsChannelRequestHeaders; Url="/teams/$teamId/channels" },
                 @{ Kind='Drive'; Url="/groups/$teamId/sites/root/drive?`$select=quota,webUrl" }
             )
             foreach ($spec in $specs) {
@@ -363,11 +363,11 @@ try{
  $i=0; foreach($g in $teams){$i++; $teamId=[string]$g.id; $teamName=[string]$g.displayName; WriteLog -Message ("Processing team {0}/{1}: {2}" -f $i,$teams.Count,$teamName); $CurrentOperation="Process team $teamName"
   $seed=if($teamBatchSeed.ContainsKey($teamId)){$teamBatchSeed[$teamId]}else{$null}; $details=if($seed-and$null-ne$seed.Details){$seed.Details}else{$null}; if($null-eq$details){try{$details=Invoke-Graph -Uri ("https://graph.microsoft.com/v1.0/teams/{0}" -f $teamId) -Operation 'Get team details'}catch{WriteLog -Message ("Team details unavailable for {0}: {1}" -f $teamName,$_.Exception.Message) -Level WARNING}}; $archived=if($details-and$details.PSObject.Properties['isArchived']){[bool]$details.isArchived}else{$false}
   $labels=@(); foreach($l in @($g.assignedLabels)){$labels += [string](if($l.displayName){$l.displayName}else{$l.labelId})}; $label=JoinVals $labels
-  $owners=if($seed-and$null-ne$seed.Owners){@($seed.Owners)}else{@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/groups/{0}/owners/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" -f $teamId) -Operation 'Get owners')}; $members=if($seed-and$null-ne$seed.Members){@($seed.Members)}else{@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/groups/{0}/members/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" -f $teamId) -Operation 'Get members')}
+  if($seed-and$null-ne$seed.Owners){$owners=@($seed.Owners)}else{$owners=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/groups/{0}/owners/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" -f $teamId) -Operation 'Get owners')}; if($seed-and$null-ne$seed.Members){$members=@($seed.Members)}else{$members=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/groups/{0}/members/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" -f $teamId) -Operation 'Get members')}
   $ownerIds=@{}; foreach($o in $owners){$ownerIds[[string]$o.id]=$true}; $guests=@($members|Where-Object{[string]$_.userType-eq'Guest'})
   foreach($m in $members){$role=if($ownerIds.ContainsKey([string]$m.id)){'Owner'}else{'Member'}; [void]$MembersRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;UserId=[string]$m.id;DisplayName=[string]$m.displayName;UserPrincipalName=[string]$m.userPrincipalName;Mail=[string]$m.mail;UserType=[string]$m.userType;Role=$role;Status='OK';NumericValue='';TextValue=$role;Threshold='Inventory only';Details=''})}
   foreach($guest in $guests){[void]$GuestsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;UserId=[string]$guest.id;DisplayName=[string]$guest.displayName;UserPrincipalName=[string]$guest.userPrincipalName;Mail=[string]$guest.mail;Status='Warning';NumericValue='1';TextValue='Guest';Threshold="Guests <= $GuestWarningThreshold";Details='External guest member'})}
-  $channels=if($seed-and$null-ne$seed.Channels){@($seed.Channels)}else{@()}; if($null-eq$seed-or$null-eq$seed.Channels){try{$channels=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/teams/{0}/channels" -f $teamId) -Operation 'Get channels' -Headers $TeamsChannelRequestHeaders)}catch{WriteLog -Message ("Channels unavailable for {0}: {1}" -f $teamName,$_.Exception.Message) -Level WARNING}}
+  if($seed-and$null-ne$seed.Channels){$channels=@($seed.Channels)}else{$channels=@()}; if($null-eq$seed-or$null-eq$seed.Channels){try{$channels=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/teams/{0}/channels" -f $teamId) -Operation 'Get channels' -Headers $TeamsChannelRequestHeaders)}catch{WriteLog -Message ("Channels unavailable for {0}: {1}" -f $teamName,$_.Exception.Message) -Level WARNING}}
   $unknownChannels=@($channels|Where-Object{[string]$_.membershipType-eq'unknownFutureValue'}); if($unknownChannels.Count-gt 0){WriteLog -Message ("Team {0} still returned {1} channel(s) with membershipType=unknownFutureValue despite the evolvable-enum request header; channel category totals exclude them." -f $teamName,$unknownChannels.Count) -Level WARNING}
   $standard=@($channels|Where-Object{[string]$_.membershipType-in@('','standard')}).Count; $private=@($channels|Where-Object{[string]$_.membershipType-eq'private'}).Count; $shared=@($channels|Where-Object{[string]$_.membershipType-eq'shared'}).Count
   foreach($ch in $channels){$chOwners=@(); if($IncludeChannelOwners-and [string]$ch.membershipType-in@('private','shared')){try{$cm=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/teams/{0}/channels/{1}/members?`$top=200" -f $teamId,$ch.id) -Operation 'Get channel members'); $chOwners=@($cm|Where-Object{@($_.roles)-contains'owner'}|ForEach-Object{$_.displayName})}catch{$chOwners=@('NotMeasured: ChannelMember.Read.All may be required')}}; [void]$ChannelsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;ChannelId=[string]$ch.id;ChannelDisplayName=[string]$ch.displayName;MembershipType=[string]$ch.membershipType;CreatedDateTimeUtc=(IsoUtc $ch.createdDateTime);PrivateChannelOwners=(JoinVals $chOwners);Status='OK';NumericValue='1';TextValue=[string]$ch.membershipType;Threshold='Inventory only';Details=''})}
@@ -407,8 +407,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwYzQbib+EXGJO
-# 1shBJBpVPiX308ywtnWd2nQ/P7sb/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQq3MN6Hv+69O3
+# wF/Vivi6ZZUgKGwUCEtBYND2Yk0iaKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -541,31 +541,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM7jr3Ytj5Nmq++FV18nSD59vYGPWWOqc7tE8uI350lDMA0GCSqG
-# SIb3DQEBAQUABIIBgG+ka7LTHvwJFyEclsw9Feo35HtapW4fX7upUhFimuUzlSNK
-# vsUaiaGX8QZ7U8oW3YEslQbyW2+2KJudkDsBGvq8N/qoRx/2CIj3J7RveDrJkuqP
-# h9xlrWHJpLCOTsbWrKxHRiDrkgD2Qx+agodUymMSQ36kmoW9sJlfMF6O9PrH31yK
-# fJpyBUQsJrgQmxChiNDwNJh9NwoPqJG+JAg6G7spVfe10ACaVvp52ISbLLo0eNJO
-# 9rw8fCzmfvSzmePSvPYxkL+5cHXl0FE3hVzLFg/KGnxU56XWuF/r8SfA+dNJXa1/
-# KCU10pv5I3eMOJLVTtVb8LdtbVz2i2arSNBVZxSgGIajPd+vV4n4aonevNSQsLmF
-# PpRbA5eElJN4hhALoy36D+P1nJf9yG8Brrem6uWWjPtfOgmmlUcbcsS1hwdcK5cH
-# TxTzsl+fb8Mu22DpD5/gqsq+EK324AIgQYp6IZPYprCU92DBQwAzYEoqylwx6su0
-# EptIEHWH+UMPvUcwnKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICbSOICTGm5Z5/rb2g5gA/DWtBHsJyr/TsaOkSoHG7FEMA0GCSqG
+# SIb3DQEBAQUABIIBgBQgRm0dAOtme8etKar/qnHNS1ReMVUg/dKILEOLrJx0Cfof
+# e3GxJaDMfMeVfP/X2qSJGW+JR+xi/b4kp8AKhoV4h/JQZvS6QNe/s/w1WCh8qCAB
+# 6PMRDuHyqLG6J8cKbJGH5ZiEesoP8oBzw1HTrbKyGXzpBJnmeXzN1sg4fzETt826
+# E17z7hgwt2clYTkaT1QONB6U51nPUGmBR5IYPc4PsQ6cohCMagQA2ZIucsErJzhY
+# hROwF8eFehQSkdjIR+37wiXCZ8qKTCIz3zRA3c2lGkKbWbOA2D3b+GYZ6Te/HLg9
+# tRirW9jTUtqnpyg8b1LZ8fzDZ0vb/g/kvgP/pCl5jykdAc3K76ovsFdZSM4O64lT
+# eARrMLvOlXKrpTiUfiYf5/H3W8ngC/CW9AFZ0m4En31ct5eJmDKy5KTlN6pQ+9h0
+# aENxS7TTYtuIpTrO+gbN8QqKhztGXIekRSHcaqU/tHCzjpddHC9Cd5P2ODSIkMOP
+# UcKovLXQ6vlBhdS8JqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNzM5
-# MThaMC8GCSqGSIb3DQEJBDEiBCDqDHstrKzm6is3pqKWb2n278XIE4k7/AesYkEx
-# iSGaozANBgkqhkiG9w0BAQEFAASCAgCi4mluS51NaDWroNzo15969YS47CqPf6Tp
-# pjmSk/e90RvzwmgRMmCKx0tjDhMh/1THdfZsF2vSViZpFGRJpOP7EIn5kwXWLlIa
-# oYnhQGIobb8fZBoBKPwFg5BHsHLWO2I7qBHOsYLedL7FurLbf/O4tsx/ZR3uvnTQ
-# 5hjEaOTuEWVlh9T72DiCfNBNrFZpCD0cXQukAaJ1sYLwfqHHdHdzZ+kq3erg8H/o
-# fj3yFFoxmWm4AQ5qLThD566EK/kF+pEeeWr7cEpctdRJHLDJ4Aml/qi+0t6M13Lj
-# mM+SZ8XCzBf2mpOrTYDI/fUjRzN5rqjykqNErj1xo4/XZ+7Ze3FRzFuhH9FeVkPJ
-# Nfc16nfGSWJ6PszVypaEOiCFUSGMLHiDqOof7VziksTglNTz1uC9mC6xjO6D2+Sp
-# VuLPP2ptChIOF1GWEaoQigu5SDp6cyOLcZbnPAV0iKOmftE5JItTux5AGB4vLFax
-# jnabaXwip72JJv1834aspFYtWCjymajRkEhQ+jf51ZZQkBvYic9yUjklsIySO76u
-# y8O7LN7FUWcHwZmwpQlDNh6H3UUhT5G8Gr6l7l/5VTQ3zXWnbV0XZIuB2tjGIovL
-# JEG4OlWwPdqBN4Vqfx7RMXUxmGMjShkdqdKt5fswpHZpIgHZkA7SDicDMHU25H/x
-# SxxhWB+9ZA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxODA2
+# MTFaMC8GCSqGSIb3DQEJBDEiBCCbfF4keILQC1NshyRh7EJW6c9iTpmqtrMYXdIr
+# elNbmDANBgkqhkiG9w0BAQEFAASCAgABYzLXNBv+IkiwYslbh7atIVx4dNKLjUvB
+# 1JhXNI2XOx7+HMOAQ55mLMW6J4Zo87fHz5ylwJYqC5/+gvcRmQOGuTSNRL326N9I
+# AaKRCo/A1D7jsa+QLWjw6nISaYAw9QHHAhVmIJsVJ3WUzE8OiGGB5HiVLHUUezZd
+# Gl9Ui1/5CJB/YZ8WV//a+X5HddB0i1+eSACvi3xk5Xg5p2fJ7QQ9TnC8LncYb5lQ
+# QBE4Ep8WQwzxrSjPO68Pj49LocvtLcV4zvBcp3qAS4ydZ6g3oGg+XBZcP5gmVFzW
+# Oo4rMbUAvgSlLL1ubhJCsU8YfPChCg3LyMNPBCYscQhnUwA102zcHn1JboV38S2Y
+# rIdWPsbdX9J/uFoM8SqvvMmcQ9kpZG7m6GzrCbfctT2Fm6/C/CYozOYUB3f/9XCl
+# 4bH3ie/Qz7ouNt9MT1Gx9N4BAeMMobIKLdXTguI/kbZqAccV+0lrVCDnpuIxQqsb
+# 6J5db+hBU+AHhds3QnYt4dwm5OWdSZqPp/9BwMDUpQXqMyHJB/cK2BwX0aaIW6Js
+# JYIzCwh2SfWZ6r8cJB5BiR4umTN75lMEWleD2ewX8YtK3yla1WBX4VC5OcYvQzIJ
+# llkVLdQKeMDqq1tZsTh38uOx5rHv4hp4DqEELc74e4wCgXAGMg/xBWRiF85nlvj1
+# D9+2vDbfig==
 # SIG # End signature block
