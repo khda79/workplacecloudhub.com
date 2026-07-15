@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.22
+0.23
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -46,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.22"
+$ScriptVersion="0.23"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -190,7 +190,7 @@ function Get-TeamsBatchSeed {
             $teamId = [string]$team.id
             $result[$teamId] = [pscustomobject]@{ Details=$null; Owners=$null; Members=$null; Channels=$null; Drive=$null }
             $specs = @(
-                @{ Kind='Details'; Url="/teams/$teamId?`$select=id,isArchived" },
+                @{ Kind='Details'; Url="/teams/${teamId}?`$select=id,isArchived" },
                 @{ Kind='Owners'; Url="/groups/$teamId/owners/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" },
                 @{ Kind='Members'; Url="/groups/$teamId/members/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" },
                 @{ Kind='Channels'; Headers=$TeamsChannelRequestHeaders; Url="/teams/$teamId/channels?`$top=999" },
@@ -200,7 +200,7 @@ function Get-TeamsBatchSeed {
                 $localId = [string]$requestId
                 $requestMap[$localId] = [pscustomobject]@{ TeamId=$teamId; Kind=$spec.Kind }
                 $batchRequest=@{id=$localId;method='GET';url=$spec.Url}
-                if($spec.Headers){$batchRequest.headers=$spec.Headers}
+                if($spec.ContainsKey('Headers') -and $spec.Headers){$batchRequest.headers=$spec.Headers}
                 [void]$requests.Add($batchRequest)
                 $requestId++
             }
@@ -223,7 +223,8 @@ function Get-TeamsBatchSeed {
             if ($meta.Kind -in @('Owners','Members','Channels')) {
                 $items = [System.Collections.Generic.List[object]]::new()
                 foreach ($item in @($response.body.value)) { if ($null -ne $item) { [void]$items.Add($item) } }
-                $nextLink = [string]$response.body.'@odata.nextLink'
+                $nextLinkProperty=$response.body.PSObject.Properties['@odata.nextLink']
+                $nextLink=if($nextLinkProperty){[string]$nextLinkProperty.Value}else{''}
                 if (-not [string]::IsNullOrWhiteSpace($nextLink)) {
                     $continuationHeaders=if($meta.Kind-eq'Channels'){$TeamsChannelRequestHeaders}else{@{}}
                     foreach ($item in @(Get-GraphCollection -Uri $nextLink -Operation ("Get Teams {0} continuation" -f $meta.Kind) -Headers $continuationHeaders)) { [void]$items.Add($item) }
@@ -406,8 +407,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBaG5aXcYR0DMyK
-# CESBJqL0OXXsUQikj0zE7CpjpzBi76CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwYzQbib+EXGJO
+# 1shBJBpVPiX308ywtnWd2nQ/P7sb/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -540,31 +541,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID+Lr5R+ICwl08aeDbnTE28wQeSJX0eJw20oOmEh5hsMMA0GCSqG
-# SIb3DQEBAQUABIIBgCI9SCbFc8VUzPn6nPMvvUjwZzp6EdqB4xp6oZnOPOOKM9MN
-# jICeZPapBlNfK9l84x0R83zn0YBcflLE9I6r+a/yGJsSTFY8zg3WkCYs/sqfpA3O
-# rc0cpq3Z/eSCB+mVAgHmhWiop1Qin1XL91b0t8HT8kbYZ8V272Wiy2ytpcrOupx2
-# VHLGpcJxpde9nNft3fdc6/c+cYFtb+NtJiIrEDc8DA4RDjZuE3uFjlq5+3/f2RfE
-# ZbwYXlGFKZi6odC+Q5vFwNzXtS+NwlGBW/oZYD/IoGZjQXU2WHJ/Kr2j9d4z9kW/
-# hGZy2ci9ZQubWRLKfbHZvkuLpIWuZ4bu5c0eMt4UcGlkMBFine5oWFORlisDTDRm
-# ZoYTK8br/W7YSZG2gwY6ngtbqW0P45uJZO1M7LAvwiShOriBv9/AKVmrKAuMHjc7
-# svr+KklhkSeivSgHxJp/Lzyb/Zfzi5jLRoi6ZLEs3HzUstU8ObdbxeonmHfhVfh4
-# m838Y2HGk/cpGNan26GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM7jr3Ytj5Nmq++FV18nSD59vYGPWWOqc7tE8uI350lDMA0GCSqG
+# SIb3DQEBAQUABIIBgG+ka7LTHvwJFyEclsw9Feo35HtapW4fX7upUhFimuUzlSNK
+# vsUaiaGX8QZ7U8oW3YEslQbyW2+2KJudkDsBGvq8N/qoRx/2CIj3J7RveDrJkuqP
+# h9xlrWHJpLCOTsbWrKxHRiDrkgD2Qx+agodUymMSQ36kmoW9sJlfMF6O9PrH31yK
+# fJpyBUQsJrgQmxChiNDwNJh9NwoPqJG+JAg6G7spVfe10ACaVvp52ISbLLo0eNJO
+# 9rw8fCzmfvSzmePSvPYxkL+5cHXl0FE3hVzLFg/KGnxU56XWuF/r8SfA+dNJXa1/
+# KCU10pv5I3eMOJLVTtVb8LdtbVz2i2arSNBVZxSgGIajPd+vV4n4aonevNSQsLmF
+# PpRbA5eElJN4hhALoy36D+P1nJf9yG8Brrem6uWWjPtfOgmmlUcbcsS1hwdcK5cH
+# TxTzsl+fb8Mu22DpD5/gqsq+EK324AIgQYp6IZPYprCU92DBQwAzYEoqylwx6su0
+# EptIEHWH+UMPvUcwnKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNjU0
-# NTFaMC8GCSqGSIb3DQEJBDEiBCAy2rn9XyypDLhszXpuvmg5RUqRIGC21yM5Si3M
-# 54EWZTANBgkqhkiG9w0BAQEFAASCAgBah0V6x3FgFt3S1iwZyR131MJ01sjGRHtk
-# GM5j5IBxr6NjXW07bxxjrKmsLkYgvY656xysT7ErK4P178nqzCYX9fw2vxfBJoh+
-# Btw5YqlxMaOs65lnJvpeh0Zg9FbZuKPOHvndpFNqEBVY8qrQkb3fMCFfOJjdYIY2
-# 7EZ/+Ln+VfkONNFbkGmUln+rbn+x4M8L/ZiLFhqYshrW0JFCrlmivDJNhaQ8Cog3
-# iWv4/KW/W0iGMJegaGd0FtXSZsY4ure9aGTttSQG0a5YAkuYKLGqGKFwFWMUSiIZ
-# gdFPE14TKqW3xDG0h2MobII/fpkhWhWLJcweKXBDcwFBFgi1UYjKeUZAeQaEr+Be
-# tYgIOfRdXAAHOeFZuQkYJ5e0NnbQY7NMhXX2ubiXnuOnlt6I6Ey4aBeviKLgD1iJ
-# ZL5PGg/rrYQMmWDvtcK6nkx86eu+xKnIecgnRr99Cz0bqYKcscwyuG/qTbOGCx/4
-# cBHrV/Xy0LYtNNuUIXIxikvfyCmrcDylXm62IgvjwUvowuWisBj/7P3OjuU0n2ZS
-# lB0k0nH7sVi0WzOjmjY8k7Z/KJAcK+zF7sKwdWOz3w6RAdR8SlAMutNCn+P7d+Ez
-# Q0mu5m8n21v/xTXuCWSkqH6ai4WcxLtw1lnlDNm15p4uk5/eA85cXniY3WeSK6B+
-# cJzSV2W6FQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNzM5
+# MThaMC8GCSqGSIb3DQEJBDEiBCDqDHstrKzm6is3pqKWb2n278XIE4k7/AesYkEx
+# iSGaozANBgkqhkiG9w0BAQEFAASCAgCi4mluS51NaDWroNzo15969YS47CqPf6Tp
+# pjmSk/e90RvzwmgRMmCKx0tjDhMh/1THdfZsF2vSViZpFGRJpOP7EIn5kwXWLlIa
+# oYnhQGIobb8fZBoBKPwFg5BHsHLWO2I7qBHOsYLedL7FurLbf/O4tsx/ZR3uvnTQ
+# 5hjEaOTuEWVlh9T72DiCfNBNrFZpCD0cXQukAaJ1sYLwfqHHdHdzZ+kq3erg8H/o
+# fj3yFFoxmWm4AQ5qLThD566EK/kF+pEeeWr7cEpctdRJHLDJ4Aml/qi+0t6M13Lj
+# mM+SZ8XCzBf2mpOrTYDI/fUjRzN5rqjykqNErj1xo4/XZ+7Ze3FRzFuhH9FeVkPJ
+# Nfc16nfGSWJ6PszVypaEOiCFUSGMLHiDqOof7VziksTglNTz1uC9mC6xjO6D2+Sp
+# VuLPP2ptChIOF1GWEaoQigu5SDp6cyOLcZbnPAV0iKOmftE5JItTux5AGB4vLFax
+# jnabaXwip72JJv1834aspFYtWCjymajRkEhQ+jf51ZZQkBvYic9yUjklsIySO76u
+# y8O7LN7FUWcHwZmwpQlDNh6H3UUhT5G8Gr6l7l/5VTQ3zXWnbV0XZIuB2tjGIovL
+# JEG4OlWwPdqBN4Vqfx7RMXUxmGMjShkdqdKt5fswpHZpIgHZkA7SDicDMHU25H/x
+# SxxhWB+9ZA==
 # SIG # End signature block
