@@ -18,7 +18,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-1.3
+1.4
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
@@ -27,7 +27,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 1.3
+    Version : 1.4
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange 2016 On-Premises
 #>
@@ -391,7 +391,7 @@ function Try-GetFolderPermission {
         [Parameter(Mandatory)][string[]]$MailboxIds,   # e.g. @($upn, $primarySMTP, $mbx.Identity)
         [Parameter(Mandatory)][string[]]$FolderNames,  # e.g. @('Calendar','Calendrier', $fromStats)
         [Parameter(Mandatory)][string]$PrimarySmtpForLog,
-        [Parameter(Mandatory)][string]$UpnForLog
+        [Parameter(Mandatory)][AllowEmptyString()][string]$UpnForLog
     )
     foreach ($mbId in $MailboxIds) {
         foreach ($fname in $FolderNames) {
@@ -427,7 +427,7 @@ function Try-GetFolderPermission {
 function Add-NoPermissionRow {
     param(
         [Parameter(Mandatory)][string]$Mailbox,
-        [Parameter(Mandatory)][string]$UPN,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$UPN,
         [Parameter(Mandatory)][string]$CalendarFolder
     )
     return [pscustomobject]@{
@@ -454,8 +454,11 @@ $index = 0
 
 foreach ($mbx in $mailboxes) {
     $index++; $processed++
-    $primarySMTP = $mbx.PrimarySmtpAddress.ToString()
-    $upn         = $mbx.UserPrincipalName
+    $primarySMTP = [string]$mbx.PrimarySmtpAddress
+    if ([string]::IsNullOrWhiteSpace($primarySMTP)) {
+        $primarySMTP = [string]$mbx.Identity
+    }
+    $upn = [string]$mbx.UserPrincipalName
     $percent     = [int](($index / $total) * 100)
 
     Write-Progress -Id 0 -Activity $overallActivity -Status ("[{0}/{1}] {2}" -f $index, $total, $primarySMTP) -PercentComplete $percent
@@ -627,8 +630,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJsObZcOe0H3HW
-# Oz2PNga0bL1b3ptoIALTzWYv1j35U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYSnA1R7g1dVHv
+# TUbfmPBsCO4WO847/eb9p9U5BUEtWKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -761,31 +764,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDDMxyjrY7NbxryRjK31oyTn+06xVe9GKDjopFf0NgSuMA0GCSqG
-# SIb3DQEBAQUABIIBgIQBNImt5q4kSFNLyWQnv70BAHJJ9WzxQ1M7+DBCYfROvdmu
-# jbLLpQdpdWHehdxKWvJZIPDtIxe6nlakIsQQGnuLiP2GOZxhs61U1gy45oD1EkDn
-# 1te8AeI0zty04fzUuDZZjBNcB/e26HCV2fDORF7kXsK9Xw7PdI8mJQzU3TNNfoJk
-# JXP9mp1bnknAcP1XDX4l2ICFjVzAS2cz4tHle0PJ22HJrQxF+MGlX4ae5moS0uuF
-# WbxVBDZ1xPjHUKhjd/71SCc2QpC1tVMAKd/8743tmZDvwlxXXkOWbZXg0iyiTblO
-# Vqgfyy5L3d9D84r6rbp7pblJDjrIe+b8qSAilxnSY4D4qe9SY+VKS+2FB4rqwLIA
-# XTHl2kwMcghR9btYZqGtALUxzosZdqIpU+QXal/fbVoftOJZbZf/NZkwoSg1WcmM
-# kB2Clma9nR6xGFst5euC1XpbUzc201il/BAwLX4vfWdcBn4ksSarEr5rgsIzAKe0
-# 8fPhuqy2Z+Y8cjLLKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKLx9z2WZHnDc+em7wHUw/VooSadIo88mUkybvwT1KU3MA0GCSqG
+# SIb3DQEBAQUABIIBgHgEqqwa+yNAwqwyN/cZX3PcwAGr9QATNAikySyWb+7ukcYI
+# jNChzVenLd2lrDGhvUjhqTzm3As5yYyYDuSjntZOeoBeQn3iI2bh+LuZCbeBgE2x
+# gniiS953okYM8w9wAiIVpsWWjjS2F+yIs+xhr+CzAdT6pMrQNVi0MSrgQbuS0mx/
+# MVJxaVKbeviwJcOpkRelJ6EHAyIOWfjpWFnGSbNvXmlYPSlw7MF7w20Y87tPI1KC
+# 4Ro7/TQF6AtewUy2t8gdufpuK0s1izKg2VQmSRNl1OORZ3gS+0NUO1Kf7CxVn2oX
+# qdCPjvIotg74H7BAsr4m8WgtpRgwvh2OTXSZkIxKsuE7LawRvICcTKJjH56s3i8J
+# 9Uk9fI0Cjg+rbC4BpfNLCkR6lEIZct4ZI7uhSsSnEqX2/7oDQFzGpt8fPeCutTJ2
+# ifzBl8quk2z500r1dP/by9g6saMwXxL7XKUtMElgm34HmQAQ9Zu/aUrGZDUZkEZ2
+# JEVCwPTM1oL4kTD7u6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMzM2
-# MDBaMC8GCSqGSIb3DQEJBDEiBCC5loXqLOKO4M0pY2t5Jlvi2nc1mEIsH7VfSJMF
-# w5ENNTANBgkqhkiG9w0BAQEFAASCAgCXoQMmbe2k87gSJD0SBJgJzqnRCfb8Cq1R
-# ZZTtIvhTNx7QoEzKWe1p5SGa3PzOL/LkMmXu3gL0wTNJEq+MbUavOEqIBvuq6urA
-# 4VDPpl1iILZtkkGeOSXz8zS0GCE3EHkMKoHzwbHeiYUf6KfPk17COvZ9fxGdNFy+
-# jWs2DfuwGttijBnmwcDW86O36ZyU+JwS/nh0sJ9fga8YSLAEYsCZ9EXrk8OQDV9V
-# ji10N63y6jhz+Zc7oD50kSaCW69TYdzMTYb97qTg/a50nikZYgsv/F8qwdcgvi6F
-# qBMPTezgAasI8huTtL3vmrqY1rNbeJcDpNvxtKsVtI6m1zYPo0+FIuMflUnXN2vJ
-# 8LqZO//kPHJ+32EIFcoYXMTPC7oz/zua3gysQrrlr7CU/o+6k2p8lXK1I9myPE7u
-# Z1NAZ+hO9Nfi0hcw0kn6+eCGA9+6pX0dNObnR0U9a6xoifvdgmVIe51dNwx71Spf
-# Jib29nP3IIDhgiTTqLKwEhSnTp0v9FurFdT/1MRvySqZVHzDZNMeypIowrVrhEAY
-# Npg5N0YxAPIrSXYtyryF5mqZxlfYFCtOcIMW7LDYpLW2zMP4kZJNS2duj1jKj/HQ
-# QpWjHRzVjkv3bVsMyBQ0FJoWitwmL16VkPANVIfSB+GvA4QjGKfIW0ttBZorql9v
-# ED1MXNx8fg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMTEw
+# MjZaMC8GCSqGSIb3DQEJBDEiBCCajxmYU6+YhU/WMPYqoz3W9tuTQNER1a9EA4JR
+# NfdU9TANBgkqhkiG9w0BAQEFAASCAgA8u/F/0uQ4vJIl71SkdHOxfpwqdJgHvGPs
+# aYby0iEdxNvq1H2lAxp60stGuplZV3PQOeF0VMnuCNHZenUCAjDHGB41cEHfG9Tv
+# Mt3tcEiU8zurOp7JQzwJroluiX5lJHWh9oYXRb3GoJO1YjElOXp+r1pAEadaBX6P
+# pN/Y3jvU0+z0iPN6FJSLmGHGQXGPLZ/YAnVMXNdDlN8OBXd1CDJqURZQNOTaTI7F
+# PKz2ZxReOX4M+3OUx/6OJjsyMx4mzlRk4+haB+bQMJxrDh9hRFxbx/YcDIK/s/R1
+# ro9kWPAM9wj2RT+82cRcEcZDtBloUi9Vs/ViXFLHX+zNfvGMPgMfT4DjK21/6bUn
+# xcNlfGN0nv3sHRyF+xfibe4HqwxVDH9JSMLrnyL652RbDDZ5YXqR4km9WbxzTtUj
+# u950HZxZYBASvh/YFjli8et6gEA+9YwBBcz2UgEN5G7QBQWuWjlJzBl1f+aIHE88
+# PwEHWZ42RbrteLjfXS9/DPRorIYLmwi6sHb1XKda++hxhiWhKIxC4vky4xgtS1Gq
+# cv9OanGs3URwTOM4jnVAUHohD2B3bqkYTSXKYc8qfqHhjVcZowABVx9O0NCCqO4C
+# LJE4PaeFSn1ICamT409D1h8YuNCCLzlzBkz59aCozV/zHmDH29TRVDZYbDKBFXGD
+# ujG3BwxjfA==
 # SIG # End signature block
