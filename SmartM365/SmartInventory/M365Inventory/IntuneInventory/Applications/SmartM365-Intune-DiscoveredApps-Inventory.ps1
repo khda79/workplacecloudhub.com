@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.14
+    Version : 1.15
 
 .VERSION
-1.14
+1.15
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.14
+    Version : 1.15
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -1041,8 +1041,15 @@ try {
     $needConnect = $false
 
     if ($Connect) {
-        WriteLog -Message "Connect switch specified: disconnecting any existing Graph session and reconnecting." "INFO"
-        try { Disconnect-MgGraph | Out-Null } catch {}
+        if ($graphContext) {
+            WriteLog -Message "Connect switch specified: disconnecting the existing Graph session before reconnecting." "INFO"
+            try { Disconnect-MgGraph -ErrorAction Stop | Out-Null } catch {
+                WriteLog -Message ("Existing Graph session could not be disconnected cleanly before reconnecting: {0}" -f $_) "WARNING"
+            }
+        }
+        else {
+            WriteLog -Message "Connect switch specified: no existing Graph session to disconnect; establishing a new connection." "INFO"
+        }
         $needConnect = $true
     } elseif ($graphContext -and (Test-GraphConnection)) {
         WriteLog -Message "Existing Microsoft Graph session detected. Reusing current connection." "INFO"
@@ -1450,8 +1457,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCb43p2/s0ZkCYo
-# sbB4DNC08cFe5IAZFCTY3Lb3z4HSuqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1AjyDslDgSIJv
+# eTSSgJHtSr8rrC6hYd2ly4iyx9IUDqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1584,31 +1591,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE4eeVW6Oetrc3epl7aO18Etv5C8R0JNzlVPF2bGz5ogMA0GCSqG
-# SIb3DQEBAQUABIIBgHohJlihJpEhJefG5EpW0fp07D1dQLfgfe1iYEab2UL4qNAS
-# T+OLLLVkakA8GMBDA1kUid+UX3XP+WVMIDygiqdnROQ8MF9ykF91skxvucsFI9vz
-# 9NZMg1uNTDFZAtxDpgXHUFqP/nNsCCrcksn00kLuTVevsUJ3TQz/sYOkqDem2Zcc
-# Natz+XLii1mmRT3riFTUqiHxUJv2s5vEuq8VZpQQawKMzYOM0WFsggl0Eg0nqnwB
-# sJisWnRe8uWty2JtyOPmDTvzn2b78mj4WmwrKo0v9EBZzpqcNDLCcRRb8jxn2BSn
-# IsX+cTMn4UZP6tk1YHzN0ih8WFQYMQnEAlOdm1Db53tHY671pFZQ0F9kgdRUmQ/d
-# BB88+nAtrmiJrY5ySiHUg59ekXDAOAIML9f8l2Ctu47/1G3CMY896/lRTd0iKsNP
-# 9JExcL+zLvuil/VmcVZ/YjvSnYTMv5NkHbK6Zm6BcfoBwcBPh6IBjl/eJegiNZWn
-# EcAyAb7eb2XSMKkewqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINDwmACVqUueWlxHnR5LGzgoe2tft50NWjL6T2ReeKPCMA0GCSqG
+# SIb3DQEBAQUABIIBgD8829WXYWeww/y7+lH8JJjWvQTolqhQaoX0EyT4h4m+jMwM
+# m6CcEXKa4WfknlphioEvCfKtrAvfcVPD69dthCHCtsNJkUvslSJ4bxCKBuU+woZx
+# m2j9h+oNlaKG82JceXQifNsoEBtz//6d8WQqc3UO5wmNvcuY4clrFiKSqKT/QGBX
+# ALSvV5XZcAd8C7vbdWHZyOpvB3GO04nvKJ7rA+w6FlIKfaas+U0eZ+VBX6bowNxa
+# p8xRNk6E7JvdxIvUv9s1/09BPgR7KR3mnVFpdVW/+Dc4+flWUKxRYWPElrLfRNR1
+# WukxqzMO1UZOZNOJmCnEZmiLNAgmWjMKzL2sr1d9wOiVCckz0EDMQo0XTyBSDSOz
+# 5qSBZpiXfwa+ImKE000l74APG8nV0qqBNneUYrT57aXUucQmpPRc0LXnxMhrAACS
+# n9Uu9GtvHzOxlfNc6G1v6fJAnLw5JHsiYygx1wwueTz3ICtrglq7FSKWCZ4Nsx70
+# r211YwsjjoLSR5f5X6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNTQy
-# NDNaMC8GCSqGSIb3DQEJBDEiBCDSu3WCfV4l/S1te4duPM6TgJ2u27gT8mUbAo+j
-# fyGqYjANBgkqhkiG9w0BAQEFAASCAgAS7aXyfKNaJT22gLEuk3M1VCLtdfPLBXfT
-# cO4NyK7oTkHipdhZ/ha31vC5uTbrmYyHiRGpxe1dIWKoDuVYLgpJhn+1TsB4PhXZ
-# Oe8UUTRk+QY50HLRIW2iNDm2iJl9LyW1JYMWvBjs5wmEveoABQtapUVMHSuk3wbA
-# /8NswxMwXFuiwyAX3ZwCuMYjNp5KDs/o/B95zhTpHrATcvXoczuA05XFmuVXiWO/
-# zoVN7q3nNP78RvNPQuHnlhZdWOAkJZJ/u8Y4gpgVhX9yjvs7mhXvFflscalBgxCh
-# r40Y+TPqClq2l2wtpcFXBH+zAAnFDYKj/MMmTe76wI6zYZo9FSB1dYRMiMXeOOFe
-# Eb9rhvFB4hb4vEf7jGwzhmmCvqvWRSdRz9xJ2Zz7BcVBdeYmihWnbX1iaSleZ+LJ
-# Z/wmQmjG+6DInxIEJqvk3K1LfUhPZ+We5TxMHM2A2uGAVhIVuzZeyWAvB+WZ/GXh
-# oV3lwYn0LpkN/y0+9qHix0/aTtM4G++dLwid05i8fIvXEMEpOdKSoNbY54oynQsu
-# 2At2sByXHzqxh2mEGgQuspv37zWdxWC3tbDufKEIrUZG6E3zDSnzQ4B0s0YCQh1a
-# n3SKy+IzvyvGbfuxkZd05EkDsT4VyX+uHi1imVBLf0cnxQxiX/QqswSeKRV2++86
-# uYT3trboXQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNjA1
+# MTVaMC8GCSqGSIb3DQEJBDEiBCARditA2DYn6I3mATOuu7dv2gPExhPAFikNspGZ
+# UqkYDDANBgkqhkiG9w0BAQEFAASCAgCDFRlmUIujnlTL4qJ/RItTugKm3H+iODt2
+# 6DXO/yGMEivG/SuQQ4l8tF//ID5rRbqOPvpsWZXv0J5vZp9cGXYqSMAZ5jyLi5E9
+# 6+1KabYKlT6iX5zL84bv3S3r2sJ/p8ptYlI1RDQxPl4VNj5/glg+fO7x9QqbdCZB
+# dPwJNTcJJPDokR4ztdpC49Ob0PpesRmr+6Xpy7qtJ40/f/G0gzNcm58DrpJriDXz
+# rjbb5IGd/sOiNWasz+bblYbOWo1mIWw9WBkd5O2oL43H4pOtoj41ZtwTv9zLE++Z
+# 3ho0NQq3I2PnLvQfhcngvTqtejrhr5HgXg3L744iRL0J9KJiiWyBLXGp19+YfBiP
+# Uvt5uWVnP/mVL/OJn877FWaXsFH5sNb2iPiNtGJHvFGzOtw58mMqZu+ndAmf/+O+
+# mZO2AMPI3WOZ03Hd+1RPu5SGkfRIR2Yrr25MIz+WueeqI9d8iPNiLuG8Qy4B7aw/
+# wDrFQ5dNKHTgVPYTD5NMbjQ/L/cSXZfTSESOi4kmaFd9npClR6x/Xoy4ntl1gd/v
+# VjjnMOUsyFJ9ehR1Pchd3L8faUVjbGWo0Yg/0qOXsXjlDFspPfpzSIaOo6rq1rnc
+# dd8bsMv8AQj3bneNyuQZfx9MhtU4oUmnp0dofACZCruiIivB/ViKrfEqnrWHZSCt
+# ClrJTl6IfA==
 # SIG # End signature block
