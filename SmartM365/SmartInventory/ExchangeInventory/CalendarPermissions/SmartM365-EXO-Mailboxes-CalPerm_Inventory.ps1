@@ -31,7 +31,7 @@
 .PARAMETER TopMailboxes
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 .VERSION
-1.13
+1.15
 
 .REQUIREMENTS
     PowerShell 7+ for Exchange Online mode; Windows PowerShell 5.1 with Exchange Management Tools for on-premises fallback mode.
@@ -40,7 +40,7 @@
     Optional on-premises mode requires Exchange Management Shell readiness and Exchange recipient read access.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.14
+    Version : 1.15
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Hybrid (Online & On-Prem)
     Minimum permissions: Exchange Online app-only RBAC must allow Get-Mailbox and mailbox folder permission read cmdlets.
@@ -54,6 +54,8 @@ param(
     [switch]$EmitNoPermRow = $true,
     [switch]$InteractiveAuth,
     [int]$TopMailboxes = 0,
+    [ValidateRange(1,20)][int]$ParallelThrottle = 4,
+    [ValidateRange(1,10)][int]$PermissionWorkerConnectRetries = 3,
     [string]$OutputPath,
     [int]$MaxItems = 0
 )
@@ -274,7 +276,7 @@ function Join-ModulePath {
 }
 
 # ------------------------- Init & Environment -------------------------
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 if ($Online) {
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
@@ -626,6 +628,194 @@ function Add-CalendarResultRows {
 $overallActivity = "Calendar permissions inventory"
 $index = 0
 
+if ($Online -and $PrimaryOnly -and (-not $InteractiveAuth) -and $ParallelThrottle -gt 1) {
+    WriteLog -Message ("Starting parallel primary-calendar permission collection with {0} persistent worker(s)." -f $ParallelThrottle) "INFO"
+
+    $workerCount = [math]::Min($ParallelThrottle, [math]::Max(1, $mailboxes.Count))
+    $calendarWorkItems = @()
+    if ($mailboxes.Count -gt 0) {
+        $chunkSize = [int][math]::Ceiling($mailboxes.Count / [double]$workerCount)
+        for ($workerIndex = 0; $workerIndex -lt $workerCount; $workerIndex++) {
+            $startIndex = $workerIndex * $chunkSize
+            if ($startIndex -ge $mailboxes.Count) { break }
+            $endIndex = [math]::Min($startIndex + $chunkSize - 1, $mailboxes.Count - 1)
+            $calendarWorkItems += [pscustomobject]@{
+                WorkerId  = $workerIndex + 1
+                Mailboxes = @($mailboxes[$startIndex..$endIndex])
+            }
+        }
+    }
+
+    $p_AppId = $AppId
+    $p_Thumb = $Thumb
+    $p_OrgDomain = $OrgDomain
+    $p_ConnectRetries = $PermissionWorkerConnectRetries
+    $p_EmitNoPermRow = [bool]$EmitNoPermRow
+
+    $parallelCalendarOutput = @($calendarWorkItems | ForEach-Object -ThrottleLimit $workerCount -Parallel {
+        $workItem = $_
+        $workerId = [int]$workItem.WorkerId
+        $workerMailboxes = @($workItem.Mailboxes)
+        $connected = $false
+        $connectionError = ''
+
+        Import-Module ExchangeOnlineManagement -ErrorAction Stop
+        for ($connectAttempt = 1; $connectAttempt -le $using:p_ConnectRetries -and -not $connected; $connectAttempt++) {
+            try {
+                $workerConnectParams = @{
+                    AppId                 = $using:p_AppId
+                    CertificateThumbprint = $using:p_Thumb
+                    Organization          = $using:p_OrgDomain
+                    ShowBanner            = $false
+                    ShowProgress          = $false
+                    ErrorAction           = 'Stop'
+                }
+                Connect-ExchangeOnline @workerConnectParams | Out-Null
+                $connected = $true
+            }
+            catch {
+                $connectionError = $_.Exception.Message
+                if ($connectAttempt -lt $using:p_ConnectRetries) {
+                    Start-Sleep -Seconds ([math]::Min(30, 5 * $connectAttempt))
+                }
+            }
+        }
+
+        function Invoke-WorkerFolderPermissionQuery {
+            param(
+                [string[]]$MailboxIds,
+                [string[]]$FolderNames,
+                [string]$PrimarySmtp,
+                [string]$UserPrincipalName
+            )
+
+            foreach ($mailboxId in @($MailboxIds | Where-Object { $_ } | Select-Object -Unique)) {
+                foreach ($folderName in @($FolderNames | Where-Object { $_ } | Select-Object -Unique)) {
+                    $identity = '{0}:\{1}' -f $mailboxId, $folderName
+                    try {
+                        $permissionRows = @(Get-MailboxFolderPermission -Identity $identity -ErrorAction Stop -WarningAction SilentlyContinue 6>$null |
+                            Where-Object { [string]$_.User -notin @('Default','Anonymous') } |
+                            ForEach-Object {
+                                [pscustomobject]@{
+                                    Mailbox        = $PrimarySmtp
+                                    UPN            = $UserPrincipalName
+                                    CalendarFolder = $folderName
+                                    User           = [string]$_.User
+                                    AccessRights   = ($_.AccessRights -join ',')
+                                }
+                            })
+                        return [pscustomobject]@{ Found = $true; FolderName = $folderName; Rows = $permissionRows }
+                    }
+                    catch {}
+                }
+            }
+            return [pscustomobject]@{ Found = $false; FolderName = ''; Rows = @() }
+        }
+
+        foreach ($mbx in $workerMailboxes) {
+            $primarySmtp = [string]$mbx.PrimarySmtpAddress
+            $upn = [string]$mbx.UserPrincipalName
+
+            if (-not $connected) {
+                [pscustomobject]@{
+                    WorkerId = $workerId
+                    Mailbox = $primarySmtp
+                    Rows = @()
+                    Warning = ''
+                    Error = ("Worker {0} EXO connection failed after {1} attempt(s): {2}" -f $workerId, $using:p_ConnectRetries, $connectionError)
+                    ConnectionFailure = $true
+                }
+                continue
+            }
+
+            try {
+                $mailboxIds = @($upn, $primarySmtp)
+                $query = Invoke-WorkerFolderPermissionQuery -MailboxIds $mailboxIds -FolderNames @('Calendar') -PrimarySmtp $primarySmtp -UserPrincipalName $upn
+
+                if (-not $query.Found) {
+                    try {
+                        $statsIdentity = [string]$mbx.ExchangeGuid
+                        if ([string]::IsNullOrWhiteSpace($statsIdentity) -or $statsIdentity -eq [guid]::Empty.ToString()) { $statsIdentity = $upn }
+                        if ([string]::IsNullOrWhiteSpace($statsIdentity)) { $statsIdentity = $primarySmtp }
+                        $calendarFolders = @(Get-EXOMailboxFolderStatistics -Identity $statsIdentity -FolderScope Calendar -ErrorAction Stop -WarningAction SilentlyContinue 6>$null |
+                            Where-Object { $_.FolderType -eq 'Calendar' })
+                        $calendarFolder = $calendarFolders | Where-Object { $_.FolderPath -match '^/[^/]+$' } |
+                            Sort-Object ItemsInFolder -Descending | Select-Object -First 1
+                        if (-not $calendarFolder) { $calendarFolder = $calendarFolders | Select-Object -First 1 }
+                        if ($calendarFolder) {
+                            $folderPath = ([string]$calendarFolder.FolderPath).TrimStart('/')
+                            $query = Invoke-WorkerFolderPermissionQuery -MailboxIds $mailboxIds -FolderNames @($folderPath) -PrimarySmtp $primarySmtp -UserPrincipalName $upn
+                        }
+                    }
+                    catch {}
+                }
+
+                if (-not $query.Found) {
+                    $query = Invoke-WorkerFolderPermissionQuery -MailboxIds $mailboxIds -FolderNames @('Calendrier','Kalender','Calendario') -PrimarySmtp $primarySmtp -UserPrincipalName $upn
+                }
+
+                $rows = @($query.Rows)
+                $warning = ''
+                if ($query.Found -and $rows.Count -eq 0 -and $using:p_EmitNoPermRow) {
+                    $rows = @([pscustomobject]@{
+                        Mailbox = $primarySmtp
+                        UPN = $upn
+                        CalendarFolder = [string]$query.FolderName
+                        User = '(none)'
+                        AccessRights = '(none)'
+                    })
+                }
+                elseif (-not $query.Found) {
+                    $warning = "No calendar folder found for $primarySmtp"
+                }
+
+                [pscustomobject]@{
+                    WorkerId = $workerId
+                    Mailbox = $primarySmtp
+                    Rows = $rows
+                    Warning = $warning
+                    Error = ''
+                    ConnectionFailure = $false
+                }
+            }
+            catch {
+                [pscustomobject]@{
+                    WorkerId = $workerId
+                    Mailbox = $primarySmtp
+                    Rows = @()
+                    Warning = ''
+                    Error = ("Error for {0}: {1}" -f $primarySmtp, $_.Exception.Message)
+                    ConnectionFailure = $false
+                }
+            }
+        }
+        # Worker disconnects are intentionally omitted; one parent cleanup closes every EXO session.
+    })
+
+    $connectionFailures = @($parallelCalendarOutput | Where-Object { $_.ConnectionFailure })
+    if ($connectionFailures.Count -gt 0) {
+        Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$false
+        throw ("Parallel calendar permission collection lost {0} mailbox row(s) to worker connection failures; publication refused." -f $connectionFailures.Count)
+    }
+    if ($parallelCalendarOutput.Count -ne $mailboxes.Count) {
+        Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $false -VerboseDisconnect:$false
+        throw ("Parallel calendar permission mailbox-count mismatch: dispatched={0}, collected={1}." -f $mailboxes.Count, $parallelCalendarOutput.Count)
+    }
+
+    foreach ($calendarOutput in $parallelCalendarOutput) {
+        Add-CalendarResultRows -Rows @($calendarOutput.Rows)
+        if (-not [string]::IsNullOrWhiteSpace([string]$calendarOutput.Warning)) {
+            WriteLog -Message ([string]$calendarOutput.Warning) "WARNING"
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$calendarOutput.Error)) {
+            WriteLog -Message ([string]$calendarOutput.Error) "WARNING"
+            $errors += [string]$calendarOutput.Error
+        }
+    }
+    $processed = $parallelCalendarOutput.Count
+    WriteLog -Message ("Parallel calendar permission collection completed with exact mailbox parity: {0}/{1}; permission rows={2}." -f $processed, $mailboxes.Count, $results.Count) "INFO"
+}
+else {
 foreach ($mbx in $mailboxes) {
     $index++; $processed++
     $primarySMTP = $mbx.PrimarySmtpAddress.ToString()
@@ -745,6 +935,7 @@ foreach ($mbx in $mailboxes) {
         $errors += $errMsg
     }
 }
+}
 
 Write-Progress -Id 0 -Activity $overallActivity -Completed
 
@@ -806,6 +997,7 @@ Write-Host "- Log              : $global:logTextFile"
 RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
 RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 WriteLog -Message "$TaskName completed."
+if ($Online) { Disconnect-SmartM365CloudSession -ExchangeOnline $true -Graph $true -VerboseDisconnect:$false }
 Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
 $finalStatus = if ($errors.Count -gt 0) { 'CompletedWithWarnings' } else { 'Auto' }
 Complete-SmartM365ExecutionContext -Status $finalStatus
@@ -813,8 +1005,8 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmXU1EXYxNWXMb
-# owHYRxPSUIb/uzqy9fz+E1ZbZOY1CKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBERwtAAWBZp3Vo
+# usX3fcGDKtB9qVxTUh60xrKXBoQ02aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -947,31 +1139,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILznBRQY0i7zP0sJIkVayGoKYLJmtszEKgbrs8jdOBUmMA0GCSqG
-# SIb3DQEBAQUABIIBgISkIPNydtC4zkpWJql1gXVtVSViEFuFNn7wQtNss2YswCMt
-# TaY9EehkZQRs99m0sgtm8Ew8QpH2hiI43kt3BS8ktw1C+kO2q0S6fC6y+lHOEH1x
-# G0TaByuuuj1W0RPrJpVIlj4Pt9G+8yzKvpyyi/RaX7VuFZxDCo80Xa52FijoE3yc
-# nkGzqQbtnQPbBk87yhxt24aZh3e2GVKA08cshx0rgI8yYHzvQnTzM36MjABCZ+Ci
-# Z3I3SzGhVa4XeRRavL1Ih+OqR4IpPVdvQEPpKqejqLwX4C1RNcjHWEfJk1d3Pqwa
-# 9kXwYmNOC70AMnzHy5/kAuovUuhgGKBBIpPI2CuzZfLZ24zgyMBP6aqY1Qqa0o/Z
-# yN0fPRE79ozJXCJIe6VTNCg+9lWQSLoYNy64941PrDG2NpSfIJO9tMmOiTjTF5GP
-# rq6vOKLNv+AQNPOk40xiVlgLK9GUyRLsRzobUTIA9oe/Sqh8iNd63zdUydSTh/pw
-# ZtLcGUNGzDddKSkszKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBNqlSN85lqzUbnmo+Nez521gOfDddqjLIe2vMUPtX9xMA0GCSqG
+# SIb3DQEBAQUABIIBgCS8EZNhWG2/tOlQjzvOGd/dSgaus3JZeWFjgORd4Eci0JRc
+# 1H3fnQaHtz9nD4lnB1UNR99JAVXXgQNa2TkpWaT7jEVlW1Ax+9wHgMg11tYzDEkv
+# aakX002He4JPwUEnslDAhubewxXwLLChpPPaZqfgvnl7ycoDjMIxGkKt0RlyWHF5
+# tmW/GQrSjSLBda2A6icR2BzyUUrsnBS0j0ViwKYdfuV73lonpg6iD226aoPGmu3n
+# 5QNBodOD+UeF+KJkzCSym85bd9MkoVCfRk6yuGIpN5d2H404Y5+GJE7R4PN1MEX2
+# d94ZE5MXTx598YhbjnDeeqniwOra3GiWaMo/Q27b4AAoH7f1w5slw1VR1lPOf6NI
+# /aO6hWr8YWuxNlzFJDw/ZzpgV15r3Hj7eg9rCwxq83guLO1Mse1fnNdklTiOMK7+
+# FhQT2ddhMjmKqfW9pPSylWmZVQ3ho7z0FZlfKpZaAwSxkXnWz69wKkmG4xNd3fm+
+# Si5p7dbyovdFmWFmd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCBqGgSp5dvozosk2R6fp8w58eI2tH+yFsmBpVrc
-# xRZb7zANBgkqhkiG9w0BAQEFAASCAgBEFC9ywNz2EGsvVH+c/LHczcsZCAwbGyBK
-# y1VGOK/GneFSIrMYrrbu2QyyM2ork65589fRSzYYiShlhsv4KHuMLgfXtR4YYbkz
-# cUJJ3Wh3JjV2Ru5yKb76TlvECKP8aEEojTTCm0uiT3hz0zRRzpZMb4JaxZ9tQbhk
-# AjHLUEU/fy5NUktLTIVw9oJY7fLCIopdm79AFqL5D/ElNUqBJndv5km359rFNn1O
-# 4gX0X5yVfQ8tRLA8F/UEz8SP4MOaTzZU87mCYHXg2+l0cYfJybVByvNAm4cnmtBv
-# MqB0gnTvMfyB/zDtEZzD9IgMrMzGKVvpR73tU7ra64T9DQjmLdF4h/ayPjinU4Qs
-# ULrgQIm/flcJl61xA85qxYE+gv2h6XH6wfibxnF5036kyWwtdJGsK1FbLBHM/Bpa
-# P4hekC3OdiaWGRBuG90dy1UuxBQkXA8bQn2h63sSYYpJkuo9n3AnTuYa2wMNzBRX
-# C1fA12/UpjM9Y68vQ3JScj9d/ySm2PQSj0ScsrbKA5OufEFTLh+nWK/4JxO9uCJD
-# N12SyEOcIrx0TeBwyRE4FFmJHJ8WS0soYIjH/9puD9i/8vzsYiRtM/qzED9o83Im
-# wWPtUoYxUQvMcjRACilK32u+r/ZLP3RvhKQ+NPjkdzqdwcbAoykHyFGLZ8dapdGN
-# AezOd3JkiA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMDU4
+# MzhaMC8GCSqGSIb3DQEJBDEiBCCaZywwZmE6UIQbAG8WwKupN3H1X/juKYIaCdIL
+# BQSYKTANBgkqhkiG9w0BAQEFAASCAgBV47ieofHrXwhAgO+RUhMHUq+I56pfH0Hn
+# HzbO+bqbbWWvqaRj5BnFJdgsCYZHZdrHimrSxUC+AxIVil2lbBUcWpQ301LoAF0F
+# xANl9LTrMjlCVZL128TBgf/tp7npLf/jM1hhyS2XmPA5CjXYBG1WjSc02TsxKbK1
+# 8dxUd65xK8aJnCkYD5JA5xUBLhf/bXBG1fqfcp5N+Q2M4Pyh6N66vHKbryv7Gkty
+# SApvs4st9dgEOvRssdxyT1yovcH9MDl/c+NVi6ppAfs1emZfl9XI3WDH4zwF3Eor
+# tuG5rKTGnt+XWsw/51DsHf2kKgwlUxNmEDwT/D7aap+HA9C8OzztOjOaac8yQaSb
+# DO9/8lpu+uG0DwrUo4Mnb+v45Oib9++PYwGAp9dvrAw7h+ItKFRcYXfsEY7y73KC
+# vUAu0NfETKtRtBqszLHpRQHNEm9kP4tx6UrzYyU0g89FsR76/QuEw36zzVmf8Xyz
+# tIukTL7Femsna2sPh+uYq4r2MSuVSQsiNznpgAaliMKiHnt0y2HykFz1xOoL3kPy
+# m2lc1oc5FpneygQUTFDJeCVCtvZuBRS0KJ1PxU0Q/twSaU1aUzSsgYQkTslchYEn
+# auUltSLyKKL9s90cViRESSdHSSMfM18lr+8L/J6FyVTqSf4aa3x8JH+ncctIUoD5
+# BB8Om+px4w==
 # SIG # End signature block
