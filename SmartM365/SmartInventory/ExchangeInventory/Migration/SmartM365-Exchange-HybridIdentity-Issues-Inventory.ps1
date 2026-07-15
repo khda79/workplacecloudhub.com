@@ -13,7 +13,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.12
+1.13
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -42,10 +42,14 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.12"
+$ScriptVersion="1.13"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
+$RunStartedAt=Get-Date
+$script:WarningCount=0
+$script:ErrorCount=0
+$script:GeneratedFileCount=0
 function Log([string]$m){ Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m) }
-function Warn([string]$m){ Write-Warning $m }
+function Warn([string]$m){ $script:WarningCount++; Write-Warning $m }
 function Root(){ $d=$PSScriptRoot; while($d){ if((Test-Path (Join-Path $d 'Config\SmartM365-TenantContext.ps1')) -and (Test-Path (Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'))){return $d}; $p=Split-Path $d -Parent; if(!$p -or $p -eq $d){break}; $d=$p }; throw 'SmartM365 root not found.' }
 function LocalConfig(){ $p=Join-Path $PSScriptRoot (([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))+'.local.json'); if(!(Test-Path $p)){ $t="$p.template"; if(!(Test-Path $t)){throw "Missing config template: $t"}; Copy-Item $t $p; Log "Created local config: $p" }; Get-Content $p -Raw | ConvertFrom-Json }
 function ResolveToken($v){ if($v -isnot [string] -or [string]::IsNullOrWhiteSpace($v)){return $v}; $r=[string]$v; for($iteration=0;$iteration -lt 10;$iteration++){ $ms=[regex]::Matches($r,'\{\{(?<n>[A-Za-z0-9_.-]+)\}\}'); if($ms.Count -eq 0){break}; $changed=$false; foreach($m in $ms){ $pr=$script:Cfg.PSObject.Properties[$m.Groups['n'].Value]; if($pr){$replacement=ResolveToken $pr.Value; if($replacement -is [array]){throw "Configuration token '$($m.Value)' resolved to multiple values."}; $next=$r.Replace($m.Value,[string]$replacement); if($next -ne $r){$changed=$true;$r=$next}} }; if(!$changed){break} }; return $r }
@@ -144,20 +148,39 @@ function PublishWeeklyHistory($files){
   if(!(CB $lc 'EnableWeeklyHistory' $true)){return @()}
   $base=Cfg $lc 'WeeklyHistoryFolderPath' (Join-Path $OutputFolder 'WeeklyHistory')
   if([string]::IsNullOrWhiteSpace($base)){return @()}
-  $year=[Globalization.ISOWeek]::GetYear((Get-Date)); $week=[Globalization.ISOWeek]::GetWeekOfYear((Get-Date)); $folder=Join-Path $base ('{0}-W{1:00}' -f $year,$week)
+  $year=[Globalization.ISOWeek]::GetYear((Get-Date)); $week=[Globalization.ISOWeek]::GetWeekOfYear((Get-Date)); $weekName=('{0}-W{1:00}' -f $year,$week); $folder=Join-Path $base $weekName
   if(!(Test-Path $folder)){New-Item -ItemType Directory -Path $folder -Force|Out-Null}
-  $published=[Collections.Generic.List[string]]::new()
-  $publishedNames=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+  $outputRoot=[IO.Path]::GetFullPath($OutputFolder).TrimEnd('\')
+  $sourceByLeaf=[ordered]@{}
   foreach($f in @($files)){
     if(!$f -or !(Test-Path -LiteralPath $f)){continue}
+    $parent=[IO.Path]::GetFullPath((Split-Path $f -Parent)).TrimEnd('\')
+    if(-not [string]::Equals($parent,$outputRoot,[StringComparison]::OrdinalIgnoreCase)){continue}
     $leaf=Split-Path $f -Leaf
-    if(-not $publishedNames.Add($leaf)){continue}
+    if(-not $sourceByLeaf.Contains($leaf)){$sourceByLeaf[$leaf]=$f}
+  }
+  if($sourceByLeaf.Count -eq 0){return @()}
+
+  $manifest=Join-Path $folder 'manifest.json'
+  $snapshotComplete=(Test-Path -LiteralPath $manifest)
+  if($snapshotComplete){
+    foreach($leaf in $sourceByLeaf.Keys){
+      if(!(Test-Path -LiteralPath (Join-Path $folder $leaf))){$snapshotComplete=$false;break}
+    }
+  }
+  if($snapshotComplete){
+    Log "Weekly history already complete for $weekName. Snapshot and SharePoint republication skipped."
+    return @()
+  }
+
+  $published=[Collections.Generic.List[string]]::new()
+  foreach($leaf in $sourceByLeaf.Keys){
     $dest=Join-Path $folder $leaf
-    CopyCsv $f $dest
+    CopyCsv $sourceByLeaf[$leaf] $dest
     [void]$published.Add($dest)
   }
-  $manifest=Join-Path $folder 'manifest.json'
-  [pscustomobject]@{ScriptName=$ScriptName;ScriptVersion=$ScriptVersion;Tenant=$Tenant;GeneratedOn=(Get-Date).ToString('o');Week=('{0}-W{1:00}' -f $year,$week);Files=@($published|ForEach-Object{Split-Path $_ -Leaf})} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifest -Encoding UTF8
+  [pscustomobject]@{ScriptName=$ScriptName;ScriptVersion=$ScriptVersion;Tenant=$Tenant;GeneratedOn=(Get-Date).ToString('o');Week=$weekName;Files=@($published|ForEach-Object{Split-Path $_ -Leaf})} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifest -Encoding UTF8
   [void]$published.Add($manifest)
   @($published)
 }
@@ -270,25 +293,29 @@ try{
     $adRow=if($imm -and $adImmutableGuid.ContainsKey($imm)){$adImmutableGuid[$imm]}elseif($adUpn.ContainsKey((K $u))){T(P $adUpn[(K $u)] ObjectGUID)}elseif($adSmtp.ContainsKey((K $s))){T(P $adSmtp[(K $s)] ObjectGUID)}else{''}
     if($adRow){AddIssue $issues 54 $adRow 'EXO-only mailbox with AD account (no local or remote mailbox on-premises)' '1.Critical' 'AD account exists but has no on-premises mailbox counterpart (UserMailbox or RemoteMailbox) - verify if migration is complete or if RemoteMailbox conversion was skipped'}
   }
-  $files=ExportIssues -rows @($issues); $files += PublishWeeklyHistory -files $files; Log "Generated Exchange hybrid identity issues: $($issues.Count) row(s)"
+  $files=ExportIssues -rows @($issues)
+  $files += PublishWeeklyHistory -files $files
+  $script:GeneratedFileCount=@($files).Count
+  Log "Generated Exchange hybrid identity issues: $($issues.Count) row(s)"
   if($global:EnableSharePointUpload){foreach($f in $files){try{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $f|Out-Null; Log "SharePoint upload completed: $f"}catch{Warn "SharePoint upload failed for $f : $($_.Exception.Message)"}}}
   Log "$ScriptName completed successfully."
 }
 catch {
+  $script:ErrorCount++
   $script:CompletionStatus = 'Failed'
   Write-Error $_
   throw
 }
 finally {
-  Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName
+  Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $RunStartedAt -WarningCount $script:WarningCount -ErrorCount $script:ErrorCount -GeneratedCsvFiles $script:GeneratedFileCount
 }
 
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC55SXv4lNlod2F
-# ffwJmOBMzZuSbGNXPeMlOo48lLvh3KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwDiALsuljfE0G
+# ernr7M4UBfNArG5pbFNCMxcCKohhvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -421,31 +448,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBpl8szI7zTtp3fL6m4bB06CyBW1lesJSPqY9e7H7npUMA0GCSqG
-# SIb3DQEBAQUABIIBgB8tTSnPRrLGA45PIDPB1DRyYxOyZB8MlTvr827bXZKd7fep
-# 7qrcHz/w6XwObgnrx8UimxY68qnEjCyq8NPCIZWAwK9H05gypfhub/FhAx66IdjO
-# L+nvbmjKyapznnWhCKuxLR/v1pThMtejbAQD+crQwbbqnvwtOn53w65nqm5OVN+H
-# KR7l/niiuO4aWS8Cyvh4i5qBVf+NlB6+3tCVz4JDV2OMteKYo5KTODqg9cQxe03/
-# CDE64FGUNsS+a8Xmn5n+YgvEyjj+ToIKARj2xdzTpRWEeEj81Qpm9AI2Zwofgbx9
-# Zi0VowBEUSzrq3jC5hiZlmmD0NQbTJUMFvrwUkvw8Ii/o5kLF3LMQ2LwkcCif5TL
-# x5K+ZntZsMqeth0HW6vCi6xS4jJLnCYtVB9n2OM/+MGwUF3oA3WFxWYtXXyiuZ+q
-# 7IPEqw0gFurXbQ15xoQjeNeNAqW2GDGDWQv8BazY4gIckT/pONOGHTgUqXoo3mXl
-# sjXqOA5lsh87HqDuKKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINWJ4cgCLxiWLzmzuY0+g1yWvMvQ4Mw4xk7w61cu5nRkMA0GCSqG
+# SIb3DQEBAQUABIIBgDcUGEk5zXL0k5ivT7HFsU5h4w8FgYIvj9Ps/xLNltAGNYUa
+# DFJQS+CdS+k3xj3rH7KFHXUPA6kVFnkciWSkYH8HGE4cHecoKLjKbA9Ond5exyA8
+# fDO29xQZS/JuoT5WHAImaAc1w8mZ92IGihjRV6Rp3e8hu/Bf3EiFlR9cb+EfYTEb
+# SvhERTNcYYarWMU/0A+Q6PjiJ6wBQwiBGHcp5pSDimYzW/YK2OXYbUESDSVO5TCe
+# mveraHT5a+RpPkcl99iF/Iy8W12fUJwP2A1T2MoYDLUd1IU/BZ9sDUcmWvHMEjsj
+# n6Uly0zebrj5MsaKLKOh4p1SyDVmYfxCCBV0XennX6JvmNg4f2Omb1u52x2QQNYC
+# pzfR4E75INndrDI6skcHT9HbiKf0g52qouPExutAW8gRHxOUuTIFByXTlilysOqJ
+# v2PdbAA1SxW6JCw0bdctkFA4eZ2IuJkJo/Ybs/CtQ2SHm/V2uNMtDcwoS6hrm7OK
+# 2kTySOJ0aUo+b3odNKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
-# NTRaMC8GCSqGSIb3DQEJBDEiBCDwrCuBwgDMvFszjEjHmc8SuIMPMHlJDH3j5zuO
-# aSRHhzANBgkqhkiG9w0BAQEFAASCAgABDSXrHFRJnNMEh9bH1bNMowXkujNOC2Ly
-# lsKt3zFCRnX2VgraBmODcUomkAA2KLCBEs+gqmtY/FH/scSRweIn8M3gBgVQPXdk
-# 8yx6/+R3gderV7vO5UwFib4cTpB4stGaV8kHE3XlzMqo6pb6VTtAON+clb9gbRxI
-# JrRMmmzklPmZuz/mBeMP1lvpDq/PG11tM57xNn2Wc5EudzE6XhU7ifnaKZLYaEZL
-# 0m8VwmKjs8cg58tSNxVJNx7gbAfTbjz1Ih3WMmLJdsu/B3McfnZps7pbwI40aepv
-# amknFEFC///N2lWtlCXNrI5jIFD7BB349XJqkiJU8X3EwQ4BdJ3fRQGDfg4Q7Je2
-# jk7xrYskyT3qWgTGtdY2ZIV+/M8uL72Mvj9IptMz6JQCGTL4u5ZKZOsQqlJuMluw
-# XopRECVW3d4ERmYe/ev4AcehhHGvj9RPNhuJH9MeLYEVX7/M3ntoU9Pkr6leXsyI
-# ytlAUmda5qDsxIEp5CkBOEJsbVgFN35uogaZru7R4Ru6Gh2caQ0qIK17xK76xpIW
-# 9JcD7wLTseKskFWOYwMOzAiU1hvsVnxpLuEwhGy+esfnmQbciov0lBhkLlBkJMPE
-# 2fDmbC//GB8oD6+SV2vVk/0ySYZUvFd9pyRspTfebbxu3gtHe/qPSbcQbT03Woxo
-# vWXbHy4ftQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMTEw
+# MjZaMC8GCSqGSIb3DQEJBDEiBCAat6AyJMXpr61pbI/t87+ALZvc8Ad7WUHtELjp
+# RGiJ3jANBgkqhkiG9w0BAQEFAASCAgA+VgdEkFBFcZevoOCcqDNOeYBmM1B1iACL
+# UbSidB0k0hlaFqupWbf6dwvnBgwFRAL0YEEyv5YT74Ng2p9pwr2ga62zSvSMXN/V
+# A1JV+uwSQ5R0iw+4mXKvjbRKvYD1CAMRC1k5sJkIOXKQGMiQSpeV8MQFB71lvMRT
+# Ufo8T9ardEf/530vesDNI7peZa2sKYSFcHBhfbs4/ApZf+9LvMvAD5HRxWa2yJ49
+# Wp4OWdJGJzayQbQgL/3jhl0Ka2N7gDMkXD8T9uI1R1e5tKCLa+qYk1u1O57FeVsJ
+# 4dAfYzs4sb/6vUTF9xrZMUFDF5A7WcBgG8kuv502x4hwq6ERRcJ5hifKWaqX0/Pz
+# bbuYGBxm88ij5MuLZUm5eEeac3TyxvnyGeUXY9q/3XKKB5m/IfI94A9E0PXJbnq/
+# 5U2266zFk1eLOXnP3idCaU2GsquK6HWxPYuePQHyjbD+B6y/mhj6MGBKFtPewwmg
+# V/Y4Y1Y7WqU+Gw1RIR55++30XC3WPhum2xwh8/+TVhTqA722hOqI8pRzZiBHcbUX
+# sI7iC5CC99GCERn6E80qikEVyFwnoInu4q82RIzChmLsf70qb/WfvJuQ8NaETAKD
+# Vg9LbdPcdnJZPAvYDOMLH68+Q5zeTYYsYF4/5zN2OZ8K/Wggzpm0wiIOOR1iL8hV
+# vD7fPPXBqQ==
 # SIG # End signature block
