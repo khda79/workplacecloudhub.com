@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.13
+1.14
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.13'
+$GuiVersion = '1.14'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -532,12 +532,15 @@ function Resolve-GuiPsExecPath {
 }
 
 function Resolve-GuiPowerShellPath {
+    $powerShell7 = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (Test-Path -LiteralPath $powerShell7 -PathType Leaf) { return $powerShell7 }
+    $command = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { return $command.Source }
+
     $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     if (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf) { return $windowsPowerShell }
-    foreach ($name in @('powershell.exe','pwsh.exe')) {
-        $command = Get-Command -Name $name -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($command) { return $command.Source }
-    }
+    $command = Get-Command -Name 'powershell.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { return $command.Source }
     throw 'Windows PowerShell or PowerShell 7 was not found.'
 }
 
@@ -1851,8 +1854,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAwG7bZPnObU8z
-# 9lnrR/FbMipqsDhFCCh+50sSm+5lDKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1rRZVQ+9EGhsc
+# HPGPK2lDq/ie+oxDyL5GP+jm3CAoNqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1882,14 +1885,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDOv1cyICcDQyZ5ZKAm0M80
-# 758GhK91Wr3gm+uB5YgyZTANBgkqhkiG9w0BAQEFAASCAYBLxfZFKqhi/NuiaYXX
-# wps4D3w17Kxtv2YKM/aRq7CQk3wIKZzI+mguCP/PL/uFqcovdRFHEuU4KL5f7amL
-# oOg7axwn5I1Rd06FfoQt8JfS3QOx1qLzWnrN1PPbRgX2rZMYpZ3H/YyErA3PUdx4
-# rKb8+Qa+3Fpici0w0DetDGs2B4spt9WDNFLjWmNPBLP31dF3MWYKlHDYH308pSnh
-# Vp87e9WiDO7/x6DslaNsAnkkAiaF34M/gTaQeJv2TbQa+oMrmU/4pjPm2R1hM+z8
-# IpC/RlMmDq6bS+vIyYB48UvHynNMmNyRCqoiMnzHjJQoMa5KVqwA6MlQBRA11E7C
-# 3LYI+TKPl4PMrB8nyulxi+uyYtDz7M73n/OXj1J6zLaMtygxKatysYzjGVu6p/P5
-# v1pnK5nlYEKPLrwwUuIg1UqSLxSw9Z47iGQUl8u8k6WTIMwRmwOYhUtAgVMqVhyP
-# d3ehQpboqqqyjsbU55gJBp1ovIfVe9Hlt0bZiQLF2xlYfb8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDG5Yr9zbtcPkXOm5pbCWL5
+# D/lqdbctlZH+CDWl6/eiNjANBgkqhkiG9w0BAQEFAASCAYCJkgkKWv9zRYrzyvB9
+# alQJaMHiKFLYL4fwVskAm3f5PtP4qKs99bZZYT1o8wv7boy32hCCGWYPQDUHEuad
+# nZfd+jcpPT/xvQOU9KHxcwynhsEFYfw8OcbjlfabuCiOgtWbPv1fbVQkdBGMmhJr
+# ZUX3fRy+CyKotsYyyolgJbSV4FzdwNMnQdla9b0a44gcuwewt9etRHXy61Fl8Cp3
+# 9zBYcpajAAvBq+OOqa5mHQczmvjO5QygTSepNTjhB8eWj/5eIoR/AUQKwTUd+YrI
+# Ead1YgjAmrTnLebnYvuLOuxwDT4ZNOKpB1higsXrPSxQb7C6b7wG7yfTAyBPuCA2
+# 20gyYWQTJUcVfkXeA0gc1sXxd7STsMQWTNKVjiU28VTDgg3ZA7uejxoPV3PLEoMi
+# aZ0IKRBK3sfd7TRZW/lN3TqP7pIbnDdkUY9J9m6lXY+2ziLcCt4HAximVTUXQ2X9
+# Zky0Orm0G7mHAYVXIU9wkhglcjsvFlr5BHXOXUYZZFt7S3U=
 # SIG # End signature block

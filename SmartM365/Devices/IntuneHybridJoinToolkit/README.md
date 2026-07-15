@@ -68,7 +68,7 @@ Lots\LOT-A\Run-IntuneHybridJoinRepairWithPsExec-Loop.cmd
 ```
 
 Before launching a LOT, the CMD and PowerShell launchers verify that `PsExec.exe` is available
-in `Scripts\PsExec.exe`, `%WINDIR%\System32\PsExec.exe`, or in `PATH`. Direct PowerShell runs can also pass `-PsExecPath`. The shared CMD and GUI resolve Windows PowerShell first, with PowerShell 7 as a fallback, instead of assuming `pwsh.exe` is installed.
+in `Scripts\PsExec.exe`, `%WINDIR%\System32\PsExec.exe`, or in `PATH`. Direct PowerShell runs can also pass `-PsExecPath`. The shared LOT CMD and single-computer launcher prefer PowerShell 7 when available, with Windows PowerShell 5.1 as fallback. The WPF GUI itself remains on Windows PowerShell 5.1/STA.
 The LOT Launcher GUI only checks `Scripts\PsExec.exe` and `%WINDIR%\System32\PsExec.exe` during window startup to keep the UI responsive;
 if the local files are missing, `PATH` is checked when the operator launches the LOT.
 
@@ -176,6 +176,7 @@ Each LOT launcher publishes an active-run control file in its run `State` folder
 - Press Ctrl+C once, or click **Stop running LOTs** once in the GUI, to stop queueing new computers. Computers that have not started are reported as `CANCELLED_NOT_STARTED`, while active jobs are allowed to finish for up to 15 minutes by default.
 - Press Ctrl+C a second time, or click the GUI stop button a second time, to stop the remaining local workers. In-flight computers are reported as `CANCELLED_BY_OPERATOR`; the remote endpoint may already be continuing, so verify its logs and state before relaunching.
 - Change the drain window with `EHJIR_CANCELLATION_DRAIN_TIMEOUT_MINUTES` or `-CancellationDrainTimeoutMinutes` (0 to 1440 minutes).
+- If PowerShell terminates natively with `0xC0000005`, the CMD writes `PowerShellCrash_<timestamp>.txt` in the run `Logs` folder with recent Application events 1000, 1001, and 1023.
 - When the GUI closes while LOTs are active, it asks whether to request a controlled stop, leave the LOTs running, or cancel the close.
 
 Disconnecting an RDP session does not normally stop the launcher. Signing out of Windows, closing its console host, ending the PowerShell process, or shutting down the operator computer is abrupt: final CSV/HTML cleanup cannot be guaranteed, and remote endpoint work may continue. Request a controlled stop and wait for the final report before signing out.
