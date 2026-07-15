@@ -62,8 +62,14 @@ Minutes to wait between local Intune enrollment re-checks after auto-enrollment 
 .PARAMETER IntuneRetryMaxRetries
 Number of local Intune enrollment re-checks after auto-enrollment is triggered. Defaults to 5.
 
+.PARAMETER RetryAfterRebootDelaySeconds
+Seconds to wait after startup before the SYSTEM retry task resumes the repair. Defaults to 300.
+
+.PARAMETER RetryAfterRebootMaxAttempts
+Maximum number of startup-task resume attempts before the retry state is removed. Defaults to 3.
+
 .VERSION
-2.10.35
+2.10.36
 
 .EXITCODES
 0 = Success (AzureAdJoined=YES, device auth is healthy, and Intune enrollment is present or was restored)
@@ -89,10 +95,13 @@ param(
     [int]$StaleCleanupDelaySeconds = 60,
     [int]$RebootDelaySeconds = 180,
     [int]$IntuneRetrySleepMinutes = 5,
-    [int]$IntuneRetryMaxRetries = 5
+    [int]$IntuneRetryMaxRetries = 5,
+    [ValidateRange(0,3600)][int]$RetryAfterRebootDelaySeconds = 300,
+    [ValidateRange(1,30)][int]$RetryAfterRebootMaxAttempts = 3,
+    [switch]$RetryAfterRebootTaskRun
 )
 
-$ScriptVersion = "2.10.35"
+$ScriptVersion = "2.10.36"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
@@ -133,6 +142,11 @@ try {
             $argList += $IntuneRetrySleepMinutes
             $argList += "-IntuneRetryMaxRetries"
             $argList += $IntuneRetryMaxRetries
+            $argList += "-RetryAfterRebootDelaySeconds"
+            $argList += $RetryAfterRebootDelaySeconds
+            $argList += "-RetryAfterRebootMaxAttempts"
+            $argList += $RetryAfterRebootMaxAttempts
+            if ($RetryAfterRebootTaskRun) { $argList += "-RetryAfterRebootTaskRun" }
 
             $p = Start-Process -FilePath $sysNativePS -ArgumentList $argList -Wait -PassThru
             exit $p.ExitCode
@@ -150,8 +164,9 @@ $DataRoot      = "C:\ProgramData\SmartM365\IntuneHybridJoinToolkit"
 $OutputDir     = Join-Path $DataRoot "Output"
 $TranscriptDir = Join-Path $DataRoot "Transcripts"
 $LogsDir       = Join-Path $DataRoot "Logs"
+$StateDir      = Join-Path $DataRoot "State"
 
-foreach ($d in @($DataRoot, $OutputDir, $TranscriptDir, $LogsDir)) {
+foreach ($d in @($DataRoot, $OutputDir, $TranscriptDir, $LogsDir, $StateDir)) {
     if (-not (Test-Path $d)) {
         New-Item -ItemType Directory -Path $d -Force | Out-Null
     }
@@ -165,6 +180,15 @@ $RunGuardHours = 12
 $CleanupRetentionDays = 7
 $RunGuardPath = Join-Path $DataRoot "LastRun.json"
 $PreviousRunInfo = $null
+$script:RetryAfterRebootTaskName = "SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot"
+$script:RetryAfterRebootStatePath = Join-Path $StateDir "RetryAfterReboot.json"
+$script:RetryAfterRebootRunnerPath = Join-Path $StateDir "RetryAfterRebootRunner.ps1"
+$script:EndpointScriptPath = if (-not [string]::IsNullOrWhiteSpace([string]$PSCommandPath)) { [string]$PSCommandPath } else { [string]$MyInvocation.MyCommand.Path }
+$script:RetryAfterRebootAction = ""
+$script:RetryAfterRebootDetail = ""
+$script:RetryAfterRebootAttempt = ""
+$script:RetryAfterRebootMaxAttemptsResult = ""
+$script:RetryAfterRebootTaskNameResult = ""
 
 # Run log file
 $RunLogPath = Join-Path $LogsDir ("IntuneHybridJoinToolkit_{0}_{1}.log" -f $ComputerName, $RunId)
@@ -346,15 +370,16 @@ function Invoke-OldEvidenceCleanup {
 }
 
 Write-Host "IntuneHybridJoinToolkit version $ScriptVersion"
-Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard)."
+Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
 Invoke-OldEvidenceCleanup -Paths @($LogsDir, $OutputDir, $TranscriptDir) -RetentionDays $CleanupRetentionDays
 
 # ============================
 # 12-hour local run guard
 # ============================
 try {
-    if ($IgnoreRunGuard) {
-        Write-RunLog "$RunGuardHours-hour run guard bypassed by -IgnoreRunGuard."
+    if ($IgnoreRunGuard -or $RetryAfterRebootTaskRun) {
+        $guardBypassReason = if ($RetryAfterRebootTaskRun) { "-RetryAfterRebootTaskRun" } else { "-IgnoreRunGuard" }
+        Write-RunLog "$RunGuardHours-hour run guard bypassed by $guardBypassReason."
     }
     elseif (Test-Path -LiteralPath $RunGuardPath) {
         $guardRaw = Get-Content -LiteralPath $RunGuardPath -Raw -ErrorAction Stop
@@ -384,6 +409,7 @@ try {
         AllowDsregLeave    = [bool]$AllowDsregLeave
         AuditOnly    = [bool]$AuditOnly
         EntraHybridPending = [bool]$EntraHybridPending
+        RetryAfterRebootTaskRun = [bool]$RetryAfterRebootTaskRun
         Status      = "RUNNING"
     } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $RunGuardPath -Encoding UTF8 -Force
 }
@@ -2333,6 +2359,12 @@ function Get-NextActionForStatus {
         "KEY_SIGN_TEST_FAILED" { return "REPAIR_HYBRID_JOIN_KEY_OR_ALLOW_LEAVE" }
         "LEAVE_NOT_APPLICABLE" { return "FIX_HYBRID_JOIN" }
         "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
+        "RETRY_AFTER_REBOOT_EXHAUSTED" { return "CHECK_REBOOT_STATE_OR_RELAUNCH_LOT" }
+        "RETRY_AFTER_REBOOT_STATE_MISSING" { return "RELAUNCH_LOT" }
+        "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE" { return "CHECK_SCHEDULED_TASK_AND_RELAUNCH" }
+        "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_WAITING_FOR_USER_LOGON" { return "CHECK_SCHEDULED_TASK_AND_RELAUNCH" }
+        "REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE" { return "CHECK_REBOOT_COMMAND_AND_RELAUNCH" }
+        "REBOOT_SCHEDULE_FAILED_WAITING_FOR_USER_LOGON" { return "CHECK_REBOOT_COMMAND_AND_RELAUNCH" }
         "SKIPPED_VIRTUAL_MACHINE" { return "NO_ACTION_VIRTUAL_MACHINE" }
         "COMPUTER_SYSTEM_QUERY_FAILED" { return "FIX_WMI_CIM_OR_RETRY" }
         "DOMAIN_CONTROLLER_UNREACHABLE" { return "FIX_DOMAIN_CONNECTIVITY_OR_VPN" }
@@ -2609,6 +2641,232 @@ function Invoke-BoundedRetryUntilSuccess {
     return [PSCustomObject]@{ Success=$false; Parsed=$null; Attempts=$MaxRetries }
 }
 
+function Protect-RetryAfterRebootPathAcl {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [switch]$Directory
+    )
+
+    $grants = if ($Directory) {
+        @("*S-1-5-18:(OI)(CI)(F)","*S-1-5-32-544:(OI)(CI)(F)")
+    }
+    else {
+        @("*S-1-5-18:(F)","*S-1-5-32-544:(F)")
+    }
+
+    $output = & icacls.exe $Path /inheritance:r /grant:r $grants 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ("icacls.exe failed for '{0}' with exit code {1}: {2}" -f $Path,$LASTEXITCODE,(@($output) -join " "))
+    }
+}
+
+function Set-RetryAfterRebootStateProperty {
+    param(
+        [Parameter(Mandatory=$true)]$State,
+        [Parameter(Mandatory=$true)][string]$Name,
+        $Value
+    )
+
+    if ($State.PSObject.Properties[$Name]) {
+        $State.$Name = $Value
+    }
+    else {
+        Add-Member -InputObject $State -NotePropertyName $Name -NotePropertyValue $Value -Force
+    }
+}
+
+function Read-RetryAfterRebootState {
+    if (-not (Test-Path -LiteralPath $script:RetryAfterRebootStatePath -PathType Leaf)) { return $null }
+    return Get-Content -LiteralPath $script:RetryAfterRebootStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+}
+
+function Write-RetryAfterRebootState {
+    param([Parameter(Mandatory=$true)]$State)
+
+    if (-not (Test-Path -LiteralPath $StateDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
+    }
+
+    $temporaryPath = "{0}.{1}.tmp" -f $script:RetryAfterRebootStatePath,[guid]::NewGuid().ToString("N")
+    try {
+        $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8 -Force
+        Move-Item -LiteralPath $temporaryPath -Destination $script:RetryAfterRebootStatePath -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function New-RetryAfterRebootArgumentList {
+    $arguments = New-Object System.Collections.Generic.List[string]
+
+    foreach ($switchName in @(
+        "AllowDsregLeave",
+        "IgnoreRunGuard",
+        "AllowRebootWhenNoInteractiveUser",
+        "AllowRebootAfterDsregLeave",
+        "AllowRemoveNonIntuneMdmEnrollment",
+        "AllowRemoveStaleIntuneEnrollment",
+        "SkipVirtualMachines",
+        "AuditOnly",
+        "EntraHybridPending"
+    )) {
+        $value = Get-Variable -Name $switchName -ValueOnly -ErrorAction SilentlyContinue
+        if ($value) { [void]$arguments.Add("-$switchName") }
+    }
+
+    $valueParameters = [ordered]@{
+        StaleCleanupDelaySeconds = $StaleCleanupDelaySeconds
+        RebootDelaySeconds = $RebootDelaySeconds
+        IntuneRetrySleepMinutes = $IntuneRetrySleepMinutes
+        IntuneRetryMaxRetries = $IntuneRetryMaxRetries
+        RetryAfterRebootDelaySeconds = $RetryAfterRebootDelaySeconds
+        RetryAfterRebootMaxAttempts = $RetryAfterRebootMaxAttempts
+    }
+
+    foreach ($entry in $valueParameters.GetEnumerator()) {
+        [void]$arguments.Add("-$($entry.Key)")
+        [void]$arguments.Add([string]$entry.Value)
+    }
+
+    return @($arguments)
+}
+
+function Write-RetryAfterRebootRunner {
+    $escapedStatePath = $script:RetryAfterRebootStatePath.Replace("'","''")
+    $runnerContent = @"
+`$ErrorActionPreference = 'Stop'
+`$statePath = '$escapedStatePath'
+`$state = Get-Content -LiteralPath `$statePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+`$delaySeconds = 0
+if (`$state.PSObject.Properties['DelaySeconds']) { `$delaySeconds = [int]`$state.DelaySeconds }
+if (`$delaySeconds -gt 0) { Start-Sleep -Seconds `$delaySeconds }
+`$arguments = @()
+if (`$state.PSObject.Properties['Arguments']) { `$arguments = @(`$state.Arguments | ForEach-Object { [string]`$_ }) }
+`$arguments += '-RetryAfterRebootTaskRun'
+& ([string]`$state.ScriptPath) @arguments
+`$exitCode = if (`$global:LASTEXITCODE -is [int]) { [int]`$global:LASTEXITCODE } else { 0 }
+exit `$exitCode
+"@
+    $runnerContent | Set-Content -LiteralPath $script:RetryAfterRebootRunnerPath -Encoding UTF8 -Force
+}
+
+function Register-RetryAfterRebootTask {
+    param([Parameter(Mandatory=$true)][string]$Reason)
+
+    $script:RetryAfterRebootAction = "ScheduleRequested"
+    if (-not (Test-Path -LiteralPath $StateDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
+    }
+    Protect-RetryAfterRebootPathAcl -Path $StateDir -Directory
+
+    $previousAttempts = 0
+    try {
+        $existingState = Read-RetryAfterRebootState
+        if ($existingState -and $existingState.PSObject.Properties["Attempts"]) {
+            $previousAttempts = [int]$existingState.Attempts
+        }
+    }
+    catch {
+        Write-RunLog ("Existing retry-after-reboot state could not be read and will be replaced. Error={0}" -f $_.Exception.Message)
+    }
+
+    $state = [PSCustomObject]@{
+        TaskName = $script:RetryAfterRebootTaskName
+        ScriptPath = $script:EndpointScriptPath
+        Arguments = @(New-RetryAfterRebootArgumentList)
+        Attempts = $previousAttempts
+        MaxAttempts = $RetryAfterRebootMaxAttempts
+        DelaySeconds = $RetryAfterRebootDelaySeconds
+        Reason = $Reason
+        ComputerName = $ComputerName
+        CreatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+        LastScheduledUtc = (Get-Date).ToUniversalTime().ToString("o")
+    }
+
+    Write-RetryAfterRebootState -State $state
+    Write-RetryAfterRebootRunner
+    Protect-RetryAfterRebootPathAcl -Path $script:RetryAfterRebootStatePath
+    Protect-RetryAfterRebootPathAcl -Path $script:RetryAfterRebootRunnerPath
+
+    $taskPowerShell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $taskCommand = '"{0}" -NoProfile -ExecutionPolicy Bypass -File "{1}"' -f $taskPowerShell,$script:RetryAfterRebootRunnerPath
+    $createOutput = & schtasks.exe /Create /TN $script:RetryAfterRebootTaskName /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $taskCommand /F 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ("schtasks.exe failed with exit code {0}: {1}" -f $LASTEXITCODE,(@($createOutput) -join " "))
+    }
+
+    $script:RetryAfterRebootAction = "Scheduled"
+    $script:RetryAfterRebootAttempt = [string]$previousAttempts
+    $script:RetryAfterRebootMaxAttemptsResult = [string]$RetryAfterRebootMaxAttempts
+    $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+    $script:RetryAfterRebootDetail = "Task=$($script:RetryAfterRebootTaskName); DelaySeconds=$RetryAfterRebootDelaySeconds; MaxAttempts=$RetryAfterRebootMaxAttempts; Reason=$Reason"
+    Write-RunLog ("Retry-after-reboot task scheduled. {0}" -f $script:RetryAfterRebootDetail)
+}
+
+function Start-RetryAfterRebootTaskRun {
+    $script:RetryAfterRebootAction = "TaskRun"
+    $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+
+    $state = Read-RetryAfterRebootState
+    if (-not $state) {
+        $script:RetryAfterRebootDetail = "Retry-after-reboot task run started but state file is missing."
+        return [PSCustomObject]@{ Exhausted=$true; StateMissing=$true; Attempts=0; MaxAttempts=$RetryAfterRebootMaxAttempts }
+    }
+
+    $attempts = 0
+    if ($state.PSObject.Properties["Attempts"]) { $attempts = [int]$state.Attempts }
+    $attempts++
+
+    $maxAttempts = $RetryAfterRebootMaxAttempts
+    if ($state.PSObject.Properties["MaxAttempts"]) { $maxAttempts = [int]$state.MaxAttempts }
+
+    Set-RetryAfterRebootStateProperty -State $state -Name "Attempts" -Value $attempts
+    Set-RetryAfterRebootStateProperty -State $state -Name "LastAttemptUtc" -Value ((Get-Date).ToUniversalTime().ToString("o"))
+    Write-RetryAfterRebootState -State $state
+    Protect-RetryAfterRebootPathAcl -Path $script:RetryAfterRebootStatePath
+
+    $script:RetryAfterRebootAttempt = [string]$attempts
+    $script:RetryAfterRebootMaxAttemptsResult = [string]$maxAttempts
+    $script:RetryAfterRebootDetail = "Task=$($script:RetryAfterRebootTaskName); Attempt=$attempts; MaxAttempts=$maxAttempts"
+    Write-RunLog ("Retry-after-reboot task run started. {0}" -f $script:RetryAfterRebootDetail)
+
+    return [PSCustomObject]@{ Exhausted=($attempts -gt $maxAttempts); StateMissing=$false; Attempts=$attempts; MaxAttempts=$maxAttempts }
+}
+
+function Unregister-RetryAfterRebootTask {
+    param([string]$Reason = "")
+
+    $messages = New-Object System.Collections.Generic.List[string]
+    $queryOutput = & schtasks.exe /Query /TN $script:RetryAfterRebootTaskName 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $deleteOutput = & schtasks.exe /Delete /TN $script:RetryAfterRebootTaskName /F 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            [void]$messages.Add(("Task delete failed: {0}" -f (@($deleteOutput) -join " ")))
+        }
+    }
+
+    foreach ($path in @($script:RetryAfterRebootRunnerPath,$script:RetryAfterRebootStatePath)) {
+        try {
+            if (Test-Path -LiteralPath $path) {
+                Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+            }
+        }
+        catch {
+            [void]$messages.Add(("Remove failed for {0}: {1}" -f $path,$_.Exception.Message))
+        }
+    }
+
+    if ($messages.Count -gt 0) {
+        Write-RunLog ("Retry-after-reboot cleanup completed with warnings. Reason={0}; Detail={1}" -f $Reason,($messages -join "; "))
+    }
+    else {
+        Write-RunLog ("Retry-after-reboot task and state cleaned up. Reason={0}" -f $Reason)
+    }
+}
+
 # ============================
 # Main
 # ============================
@@ -2772,6 +3030,22 @@ $adComputerInDefaultComputersContainer = ""
 $adComputerLocationDetail = ""
 
 try {
+    if ($RetryAfterRebootTaskRun) {
+        $retryTaskRun = Start-RetryAfterRebootTaskRun
+        if ($retryTaskRun.Exhausted) {
+            $status = if ($retryTaskRun.StateMissing) { "RETRY_AFTER_REBOOT_STATE_MISSING" } else { "RETRY_AFTER_REBOOT_EXHAUSTED" }
+            $ExitCode = 3
+            $dsregStatusErrorMessage = if ($retryTaskRun.StateMissing) {
+                "Retry-after-reboot task started without its state file. The task was removed; relaunch the LOT."
+            }
+            else {
+                "Retry-after-reboot exceeded max attempts. Attempt=$($retryTaskRun.Attempts); MaxAttempts=$($retryTaskRun.MaxAttempts); TaskName=$($script:RetryAfterRebootTaskName)."
+            }
+            Unregister-RetryAfterRebootTask -Reason $status
+            throw [System.OperationCanceledException]::new($dsregStatusErrorMessage)
+        }
+    }
+
     Write-Host "Running in LOCAL mode on computer: $ComputerName" -ForegroundColor Cyan
     Write-RunLog "Running LOCAL mode."
 
@@ -3531,11 +3805,33 @@ try {
                     Write-RunLog $dsregStatusErrorMessage
 
                     if ($AllowRebootAfterDsregLeave) {
-                        $rebootAttempted = $true
                         $rebootReason = "Post-leave Hybrid Join retry exhausted."
-                        $rebootResult = Start-ControlledReboot -Reason $rebootReason -DelaySeconds $RebootDelaySeconds
-                        $rebootExitCode = $rebootResult.ExitCode
-                        $status = "REBOOT_TRIGGERED_POST_DSREG_LEAVE"
+                        try {
+                            Register-RetryAfterRebootTask -Reason $rebootReason
+                        }
+                        catch {
+                            $script:RetryAfterRebootAction = "ScheduleFailed"
+                            $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+                            $script:RetryAfterRebootDetail = $_.Exception.Message
+                            $status = "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE"
+                            $dsregStatusErrorMessage = "Post-leave reboot was not triggered because the retry-after-reboot task could not be scheduled. Error=$($_.Exception.Message)"
+                            $ExitCode = 3
+                            Write-RunLog $dsregStatusErrorMessage
+                        }
+
+                        if ($script:RetryAfterRebootAction -eq "Scheduled") {
+                            $rebootAttempted = $true
+                            $rebootResult = Start-ControlledReboot -Reason $rebootReason -DelaySeconds $RebootDelaySeconds
+                            $rebootExitCode = $rebootResult.ExitCode
+                            if ($rebootExitCode -eq 0) {
+                                $status = "REBOOT_TRIGGERED_POST_DSREG_LEAVE"
+                            }
+                            else {
+                                $status = "REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE"
+                                $dsregStatusErrorMessage = "shutdown.exe failed with exit code $rebootExitCode. The retry-after-reboot task will be removed."
+                                $ExitCode = 3
+                            }
+                        }
                     }
                 }
             }
@@ -3814,12 +4110,34 @@ try {
                             Write-RunLog $dsregStatusErrorMessage
                         }
                         else {
-                            $rebootAttempted = $true
                             $rebootReason = "Hybrid Join is healthy and Intune enrollment is missing. Auto-enrollment uses User Credential; reboot resets local state, but enrollment still requires a valid interactive user logon with PRT."
-                            $rebootResult = Start-ControlledReboot -Reason $rebootReason -DelaySeconds $RebootDelaySeconds
-                            $rebootExitCode = $rebootResult.ExitCode
-                            $status = "REBOOT_TRIGGERED_WAITING_FOR_USER_LOGON"
-                            $dsregStatusErrorMessage = $rebootReason
+                            try {
+                                Register-RetryAfterRebootTask -Reason $rebootReason
+                            }
+                            catch {
+                                $script:RetryAfterRebootAction = "ScheduleFailed"
+                                $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+                                $script:RetryAfterRebootDetail = $_.Exception.Message
+                                $status = "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_WAITING_FOR_USER_LOGON"
+                                $dsregStatusErrorMessage = "Reboot was not triggered because the retry-after-reboot task could not be scheduled. Error=$($_.Exception.Message)"
+                                $ExitCode = 3
+                                Write-RunLog $dsregStatusErrorMessage
+                            }
+
+                            if ($script:RetryAfterRebootAction -eq "Scheduled") {
+                                $rebootAttempted = $true
+                                $rebootResult = Start-ControlledReboot -Reason $rebootReason -DelaySeconds $RebootDelaySeconds
+                                $rebootExitCode = $rebootResult.ExitCode
+                                if ($rebootExitCode -eq 0) {
+                                    $status = "REBOOT_TRIGGERED_WAITING_FOR_USER_LOGON"
+                                    $dsregStatusErrorMessage = $rebootReason
+                                }
+                                else {
+                                    $status = "REBOOT_SCHEDULE_FAILED_WAITING_FOR_USER_LOGON"
+                                    $dsregStatusErrorMessage = "shutdown.exe failed with exit code $rebootExitCode. The retry-after-reboot task will be removed."
+                                    $ExitCode = 3
+                                }
+                            }
                         }
                     }
                 }
@@ -3863,7 +4181,7 @@ try {
         $userStatusAttempted -and
         [string]::IsNullOrWhiteSpace($userStatusErrorMessage) -and
         $userPrtRefreshStillNeeded -and
-        $status -notin @("WAITING_FOR_AAD_CONNECT_LOCAL_RETRY","WAITING_FOR_AAD_CONNECT_LOCAL_RETRY_EXHAUSTED","LEAVE_EXECUTED_WAITING_FOR_REJOIN","WAITING_POST_LEAVE_LOCAL_RETRY_EXHAUSTED","REBOOT_TRIGGERED_POST_DSREG_LEAVE","ENTRA_HYBRID_PENDING_RETRY_EXHAUSTED","USER_PRT_REFRESH_FAILED")
+        $status -notin @("WAITING_FOR_AAD_CONNECT_LOCAL_RETRY","WAITING_FOR_AAD_CONNECT_LOCAL_RETRY_EXHAUSTED","LEAVE_EXECUTED_WAITING_FOR_REJOIN","WAITING_POST_LEAVE_LOCAL_RETRY_EXHAUSTED","REBOOT_TRIGGERED_POST_DSREG_LEAVE","RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE","REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE","ENTRA_HYBRID_PENDING_RETRY_EXHAUSTED","USER_PRT_REFRESH_FAILED")
     ) {
         if ($userIsUserAzureAD -eq "NO") {
             $status = "USER_NOT_AZUREAD"
@@ -4072,6 +4390,11 @@ try {
         NextLogonTaskRegistered = $nextLogonTaskRegistered
         NextLogonTaskName       = $nextLogonTaskName
         NextLogonTaskDetail     = $nextLogonTaskDetail
+        RetryAfterRebootAction  = $script:RetryAfterRebootAction
+        RetryAfterRebootDetail  = $script:RetryAfterRebootDetail
+        RetryAfterRebootAttempt = $script:RetryAfterRebootAttempt
+        RetryAfterRebootMaxAttempts = $script:RetryAfterRebootMaxAttemptsResult
+        RetryAfterRebootTaskName = $script:RetryAfterRebootTaskNameResult
     }
 
     Write-AtomicCsvAppend -Path $logPath -RowObject $logEntryFinal -RunIdValue $RunId
@@ -4088,6 +4411,12 @@ try {
             Status       = $status
             ExitCode     = $ExitCode
             NextAction   = $nextAction
+            Detail       = $dsregStatusErrorMessage
+            RetryAfterRebootAction = $script:RetryAfterRebootAction
+            RetryAfterRebootDetail = $script:RetryAfterRebootDetail
+            RetryAfterRebootAttempt = $script:RetryAfterRebootAttempt
+            RetryAfterRebootMaxAttempts = $script:RetryAfterRebootMaxAttemptsResult
+            RetryAfterRebootTaskName = $script:RetryAfterRebootTaskNameResult
         } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $RunGuardPath -Encoding UTF8 -Force
     }
     catch {
@@ -4100,13 +4429,24 @@ try {
     Write-RunLog ("Script end. Status={0}; ExitCode={1}" -f $status,$ExitCode)
 }
 catch {
-    $status = "ERROR"
+    $controlledRetryStop = $status -in @("RETRY_AFTER_REBOOT_EXHAUSTED","RETRY_AFTER_REBOOT_STATE_MISSING")
     $errorMessage = $_.Exception.Message
+    if (-not $controlledRetryStop) {
+        $status = "ERROR"
+        $ExitCode = 1
+    }
     $nextAction = Get-NextActionForStatus -Status $status -IntuneEnrolled ([bool]$intuneEnrolled)
-    Write-Host "FATAL ERROR: $errorMessage" -ForegroundColor Red
-    Write-FinalStatusLine -Status "ERROR" -ExitCode 1 -Detail $errorMessage -NextAction $nextAction
-    Write-RunLog ("FATAL ERROR: {0}" -f $errorMessage)
-    $ExitCode = 1
+
+    if ($controlledRetryStop) {
+        Write-Host $errorMessage -ForegroundColor Yellow
+        Write-FinalStatusLine -Status $status -ExitCode $ExitCode -Detail $errorMessage -NextAction $nextAction
+        Write-RunLog ("Controlled retry stop. Status={0}; Detail={1}" -f $status,$errorMessage)
+    }
+    else {
+        Write-Host "FATAL ERROR: $errorMessage" -ForegroundColor Red
+        Write-FinalStatusLine -Status "ERROR" -ExitCode 1 -Detail $errorMessage -NextAction $nextAction
+        Write-RunLog ("FATAL ERROR: {0}" -f $errorMessage)
+    }
 
     try {
         $logEntryFinal = [PSCustomObject]@{
@@ -4263,6 +4603,11 @@ catch {
             NextLogonTaskRegistered = $nextLogonTaskRegistered
             NextLogonTaskName       = $nextLogonTaskName
             NextLogonTaskDetail     = $nextLogonTaskDetail
+            RetryAfterRebootAction  = $script:RetryAfterRebootAction
+            RetryAfterRebootDetail  = $script:RetryAfterRebootDetail
+            RetryAfterRebootAttempt = $script:RetryAfterRebootAttempt
+            RetryAfterRebootMaxAttempts = $script:RetryAfterRebootMaxAttemptsResult
+            RetryAfterRebootTaskName = $script:RetryAfterRebootTaskNameResult
         }
 
         Write-AtomicCsvAppend -Path $logPath -RowObject $logEntryFinal -RunIdValue $RunId
@@ -4281,12 +4626,30 @@ catch {
             Status       = $status
             ExitCode     = $ExitCode
             NextAction   = $nextAction
+            Detail       = $(if (-not [string]::IsNullOrWhiteSpace($dsregStatusErrorMessage)) { $dsregStatusErrorMessage } else { $errorMessage })
+            RetryAfterRebootAction = $script:RetryAfterRebootAction
+            RetryAfterRebootDetail = $script:RetryAfterRebootDetail
+            RetryAfterRebootAttempt = $script:RetryAfterRebootAttempt
+            RetryAfterRebootMaxAttempts = $script:RetryAfterRebootMaxAttemptsResult
+            RetryAfterRebootTaskName = $script:RetryAfterRebootTaskNameResult
             ErrorMessage = $errorMessage
         } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $RunGuardPath -Encoding UTF8 -Force
     }
     catch { }
 }
 finally {
+    try {
+        if (
+            ($RetryAfterRebootTaskRun -or (Test-Path -LiteralPath $script:RetryAfterRebootStatePath -PathType Leaf)) -and
+            $status -notlike "REBOOT_TRIGGERED*"
+        ) {
+            Unregister-RetryAfterRebootTask -Reason $status
+        }
+    }
+    catch {
+        Write-RunLog ("Retry-after-reboot final cleanup failed. Error={0}" -f $_.Exception.Message)
+    }
+
     try {
         if ($TranscriptStarted) {
             Stop-Transcript | Out-Null
@@ -4302,10 +4665,10 @@ finally {
 exit $ExitCode
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhh8YYRUSrDv1P
-# D++T49hQhN+2MQBvDbAAg2e5MngVgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8my6ffV2Wink3
+# 6gV2blIq00op9815iXAVFxon5eOKM6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4330,139 +4693,19 @@ exit $ExitCode
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILns2shmUFsi3TUhRV2zVJs2yCnXh/IT3VQdkkeyWr5IMA0GCSqG
-# SIb3DQEBAQUABIIBgAJ65IOrT8XyAref3fxNT+d3PTiCJFIqB9YvM2DA+ollZfN5
-# Jtr+ZhAuRHPYLrK14ITwB2EQT+OCVe2nrPdTPKu1GxU8e0ce+wbs6Gwsj46/g5il
-# 8cJLMJkA1aiMTXHeOVDNy9ljmL/rokIrmdQTp7KUFtEMRzKXn8qSqirg7eE2pOJ8
-# dbDLfzn74J+9T+VlpKqZpF9309WW0n83OkoM5VNicutHOYEF0cp4Vd8HhOfNJIpL
-# sRMvwCwsf5Yj/7s6H9nZzTA1dW95fyUGoo4zQk854ufqtdb4GMe18DkKUbjpS1UL
-# fgG9NTeKmpQBgUWqws+2UlMO+YGebLnpUmxi2Khtoy47BT5Ja1pKzbgxr2U6zxVi
-# jvqPYvYgqe6vi6KO1gWMrIcjo5QgM8Zk7A+FcF8S1sOKebC2YJa5obXcp/7P9Egh
-# eJMsG9woY/R3+1RYWo6O5nKkOcOsHi0ADC5BrsMSmjMzhHqqAVBPse0AyvwTbeJA
-# 8kcWKk2FTzpZPt3GfKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MzVaMC8GCSqGSIb3DQEJBDEiBCALNGvFHDm4gGbEyYtvFTxnowKom3zU5/r+H5Ev
-# 6ylPUTANBgkqhkiG9w0BAQEFAASCAgChesCUU1Iprfs95RIZfw5hZyp9rVQiHmZn
-# a8It9DwM7mVK5pP6gM1R6RjiRe9KcVIoFNHRb3pZ0zGwIT7CW0erZsFIixOQHUcl
-# HbZ/5KMyHw7rajjeaYa/9Tw/PQhnvyoDKYa7NXsLNer3FEGQQZ8bskNavHmnLxhb
-# lBiocPkGsj8OIFlBWuel+FJQKWY8Z+CqWIDSr5ymyEIpLtdHsPRQD/Hz+IER5aOI
-# +yB9m/SZbbOg3UZlpwVSWg+JrkmUqXElT1Xtyik8tVqWs29z+hzADKp/6Ee+/hlZ
-# haYm3T+5Hhjz8sZO2CI2XpbDfmQ2WeJGWLsM5+GduVHaMFXx7z4vjn5nT0443eIY
-# /dXuupzMJjPsNcETAUZS0e8M4BeVk425WbQBn3HVVmRAM+cBezTysjYDC0lQX3i8
-# SFT+NBwi7NBJkuFkYT3YqoLgd/iU6oJmdjfEsNoFsuAjit3vXNG8VLBRcrWnr3qm
-# Jl2HV8LgXGuS0i7MZ1+cVbub8TPV1xuvTKhN3yLRWjIpzyh5ctKnYbZA8z5vsv02
-# 4oNi/O6Ei/n4G3SVN+KGBH581m5R2KlLSOjo/U9TLgFyR+7KGxNAKYePSxZ3T5QW
-# nCX+KsyogPFxmNl6AcqwAltUCvpH8Tj26m1nLkzRCEVe7mfBevFnwbwQCyfkqMWU
-# ZVvA4g7dEQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAglpjf1yf8KiaGRXCLrnS2
+# C+j998LeE8IAoeXQnEvFkTANBgkqhkiG9w0BAQEFAASCAYA5yLgWxbMgJGoKBf5Q
+# OoMYlgDDbsHPZZzTIS//YBiKzyZtPT/YXEslVQU353k80nmVVBrX1LvDkM0bkpj9
+# hVIVTLnyg1An++LgfCMAoALvXybpMInVKCfO21hcdRF44o/lvEfEePsna73YO5Yd
+# pXl6osH+SrjZGPfAOrvfpvkPFawyrck8aFtB20joFtUoWPwpyuCHH5XG2DHifNGQ
+# eHGj4Ob18ew30Ecj2H4bdh/bGn9ECH/wQkuxyQbkubs52H4yOn7rqOQGX7EAG+ik
+# SrH1sPhC8AKR5kOd/mn0yL9NkorwYMgQgTkdB16xupNeb3kLrXeDP+IrvgVz9nmT
+# NQr+W74ZBTttcoPO2MB/n1R7Oq7g6g67ifnTAUq/uSUDyZeyklPAnQO/isZbopPO
+# V6kcmNlQXhwkbLw9VwRHcYf1bgiAItU7PkRrg4uV6ywLQBZ2xoTLGcn07lrJSQjM
+# sg8goPy8g1hoMPg8lTY1Wrh/1e3ZiitbyT1FJp9JXj26T/w=
 # SIG # End signature block
