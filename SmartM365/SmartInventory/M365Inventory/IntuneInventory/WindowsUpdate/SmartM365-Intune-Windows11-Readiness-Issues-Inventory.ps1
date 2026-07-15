@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.16
+1.17
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -43,10 +43,14 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.16"
+$ScriptVersion="1.17"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
+$RunStartedAt=Get-Date
+$script:WarningCount=0
+$script:ErrorCount=0
+$script:GeneratedFileCount=0
 function Log([string]$m){Write-Host ("{0} [INFO] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$m)}
-function Warn([string]$m){Write-Warning $m}
+function Warn([string]$m){$script:WarningCount++;Write-Warning $m}
 function Root(){ $d=$PSScriptRoot; while($d){ if((Test-Path (Join-Path $d 'Config\SmartM365-TenantContext.ps1')) -and (Test-Path (Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'))){return $d}; $p=Split-Path $d -Parent; if(!$p -or $p -eq $d){break}; $d=$p }; throw 'SmartM365 root not found.' }
 function LocalConfig(){ $p=Join-Path $PSScriptRoot (([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))+'.local.json'); if(!(Test-Path $p)){ $t="$p.template"; if(!(Test-Path $t)){throw "Missing config template: $t"}; Copy-Item $t $p; Log "Created local config: $p" }; Get-Content $p -Raw | ConvertFrom-Json }
 function ResolveToken($v){ if($v -isnot [string] -or [string]::IsNullOrWhiteSpace($v)){return $v}; $r=[string]$v; for($iteration=0;$iteration -lt 10;$iteration++){ $ms=[regex]::Matches($r,'\{\{(?<n>[A-Za-z0-9_.-]+)\}\}'); if($ms.Count -eq 0){break}; $changed=$false; foreach($m in $ms){$pr=$script:Cfg.PSObject.Properties[$m.Groups['n'].Value]; if($pr){$replacement=ResolveToken $pr.Value; if($replacement -is [array]){throw "Configuration token '$($m.Value)' resolved to multiple values."}; $next=$r.Replace($m.Value,[string]$replacement); if($next -ne $r){$changed=$true;$r=$next}}}; if(!$changed){break} }; return $r }
@@ -196,20 +200,39 @@ function PublishWeeklyHistory($files){
   if(!(CB $lc 'EnableWeeklyHistory' $true)){return @()}
   $base=Cfg $lc 'WeeklyHistoryFolderPath' (Join-Path $OutputFolder 'WeeklyHistory')
   if([string]::IsNullOrWhiteSpace($base)){return @()}
-  $year=[Globalization.ISOWeek]::GetYear((Get-Date)); $week=[Globalization.ISOWeek]::GetWeekOfYear((Get-Date)); $folder=Join-Path $base ('{0}-W{1:00}' -f $year,$week)
+  $year=[Globalization.ISOWeek]::GetYear((Get-Date)); $week=[Globalization.ISOWeek]::GetWeekOfYear((Get-Date)); $weekName=('{0}-W{1:00}' -f $year,$week); $folder=Join-Path $base $weekName
   if(!(Test-Path $folder)){New-Item -ItemType Directory -Path $folder -Force|Out-Null}
-  $published=[Collections.Generic.List[string]]::new()
-  $publishedNames=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+  $outputRoot=[IO.Path]::GetFullPath($OutputFolder).TrimEnd('\')
+  $sourceByLeaf=[ordered]@{}
   foreach($f in @($files)){
     if(!$f -or !(Test-Path -LiteralPath $f)){continue}
+    $parent=[IO.Path]::GetFullPath((Split-Path $f -Parent)).TrimEnd('\')
+    if(-not [string]::Equals($parent,$outputRoot,[StringComparison]::OrdinalIgnoreCase)){continue}
     $leaf=Split-Path $f -Leaf
-    if(!$publishedNames.Add($leaf)){continue}
+    if(-not $sourceByLeaf.Contains($leaf)){$sourceByLeaf[$leaf]=$f}
+  }
+  if($sourceByLeaf.Count -eq 0){return @()}
+
+  $manifest=Join-Path $folder 'manifest.json'
+  $snapshotComplete=(Test-Path -LiteralPath $manifest)
+  if($snapshotComplete){
+    foreach($leaf in $sourceByLeaf.Keys){
+      if(!(Test-Path -LiteralPath (Join-Path $folder $leaf))){$snapshotComplete=$false;break}
+    }
+  }
+  if($snapshotComplete){
+    Log "Weekly history already complete for $weekName. Snapshot and SharePoint republication skipped."
+    return @()
+  }
+
+  $published=[Collections.Generic.List[string]]::new()
+  foreach($leaf in $sourceByLeaf.Keys){
     $dest=Join-Path $folder $leaf
-    CopyCsv $f $dest
+    CopyCsv $sourceByLeaf[$leaf] $dest
     [void]$published.Add($dest)
   }
-  $manifest=Join-Path $folder 'manifest.json'
-  [pscustomobject]@{ScriptName=$ScriptName;ScriptVersion=$ScriptVersion;Tenant=$Tenant;GeneratedOn=(Get-Date).ToString('o');Week=('{0}-W{1:00}' -f $year,$week);Files=@($published|ForEach-Object{Split-Path $_ -Leaf})} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifest -Encoding UTF8
+  [pscustomobject]@{ScriptName=$ScriptName;ScriptVersion=$ScriptVersion;Tenant=$Tenant;GeneratedOn=(Get-Date).ToString('o');Week=$weekName;Files=@($published|ForEach-Object{Split-Path $_ -Leaf})} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifest -Encoding UTF8
   [void]$published.Add($manifest)
   @($published)
 }
@@ -749,24 +772,27 @@ try{
 
   Log ("Windows 11 issue analysis completed: {0}/{1} AD rows; issues={2}; elapsed={3:n1}s" -f $processedAdRows,$totalAdRows,$issues.Count,$analysisStopwatch.Elapsed.TotalSeconds)
   $files=ExportIssues -rows @($issues)
-; $files += PublishWeeklyHistory -files $files; Log "Generated Windows 11 readiness issues: $($issues.Count) row(s)"
+  $files += PublishWeeklyHistory -files $files
+  $script:GeneratedFileCount=@($files).Count
+  Log "Generated Windows 11 readiness issues: $($issues.Count) row(s)"
   if($global:EnableSharePointUpload){foreach($f in $files){try{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $f|Out-Null; Log "SharePoint upload completed: $f"}catch{Warn "SharePoint upload failed for $f : $($_.Exception.Message)"}}}
   Log "$ScriptName completed successfully."
 }
 catch {
+  $script:ErrorCount++
   $script:CompletionStatus = 'Failed'
   Write-Error $_
   throw
 }
 finally {
-  Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName
+  Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $RunStartedAt -WarningCount $script:WarningCount -ErrorCount $script:ErrorCount -GeneratedCsvFiles $script:GeneratedFileCount
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJuE16kHg61lhQ
-# nZlz+lpg2jgh3ueTmjrCmDC7gT2ruaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmGQuUB8IkCt0h
+# qGbYy1G7VwbMapQM/n6bgM9lz6AbUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -899,31 +925,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGa8bgL/mCVAsyQDAQsJRtwHDSA10qrA/Eaqw+cXRrXDMA0GCSqG
-# SIb3DQEBAQUABIIBgEX9j1J+qMsf3i2ws7g/PD0h4JxYUbGHSIKDlxSJzM8xIUuV
-# zoYA7hR7ZzalwAb42mozZau1zZJJAGLpk0Xfn+rthaT23jijvNVbBiguZt2by6zw
-# 9VXKYkmCG69xC6TCNj2QFrijA3bsaLYCsnxO7J2fQZYNLGnXGiRbEkAWbvbiDY48
-# uxWJnd3bpX7n1KkoAckSFPSaHt4E2NVqDE1wbh2NjWya+l8n+vLnz7WxALoAL3mX
-# tyZ26hucH/diozvTa7HSYm49xdqi0ppxcpJm6nH/JrghIS/x3qaXjKM/mYEV+pmd
-# wPHeuzCB3q/ewfdkgEG+1DKsk0ZXJ2ddsHjYhLW1YOHOklAKtZMIQ32cV66Q5pmJ
-# XsqidHoALWNzKMCmrx1bjpi8RHuVKvpuovv/A7s1s52JjNfzlIInh4FXjJK6tV/V
-# vD68PxSQ+lEEse6f7UUSqiEj1bS/9ReTWAebV+z4MBdoCI2UAnxSfl4dkqcwxCkp
-# xC3XxqyD9xRjwBmM86GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFU+S7tOt6zm+vvYrZm/cjUjBjwafiM3A7u0cvTCwLJlMA0GCSqG
+# SIb3DQEBAQUABIIBgKIDXBgH4yiRJntXE21GzizW6ecKXDTV3PI/OXrgw3KbHZVe
+# rTugYLYDLq7zZm4bI4PjHVnps0OPkfm93DjAmxaCuaBqb2NutYe3epN3PTfo4ikI
+# EENtC1NlUHgFptqzCgEZgQDywwpWC/nbXBo9yrbO1xoHQUvzhwg+ElrdHqyK2qx4
+# 4HLiqqGIxC+V8fz0iW4067KF2vuLuAd3fiuZfYlmItVQH7kkj4fIMZ3z99spnwYT
+# qZzerCjzvq5E5V3TjYYo+NTpwzHy4EimX0HXW04FuY6jtft0PZqZPjfBnTiRtiHf
+# +8kW7B7yS10u+ww9W01h5GJIaEv7ZmHiNmh4xpn5r/kS94FSe9d+ReYSCe+68luN
+# QPihRGWXGja0A5qlqjwDl2bSBwDz8IwbnI+bFZxZQyEQjHQbsAnpQv6SDfN+C4em
+# P5kheUmZqqAfO7dhImxapkTP0ybnzo4c8i/V3CjwwW0NZlUanlTcNh52IHcfaPRO
+# wpBcCUQoPiEKLT4nLKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
-# NTZaMC8GCSqGSIb3DQEJBDEiBCDMJLGeOJHbd9KL6nJdBDU4JDajWuV131cp1cup
-# uHtgTTANBgkqhkiG9w0BAQEFAASCAgAa+tWdPh+1q7kW0C/799fZ797mf0U9/p7v
-# X4NoUs96hvpKNSESy3BB5uyDgKegMTMgs+B81PzBzSKVQ/egqPSzEgPv2mhZWivj
-# YAQkh7gODDcGFYCqmfDXIg75ubZp8TGQ751Q3iulcvvNoKPR6khIt8wUyOSLfh6m
-# 6tQq2FcRRgF58A0YCvAwc2yK1YmR+YlcXd+ieWJAgxL8lM0oRUc8X6QtiE+l/vMw
-# 8DCLzD3OpKXpPvru7nNNd5og1oTOqhrRu9HTDluiY/VNULor1OtMjEWpqwHu+V9C
-# 8MYioz48lpGpvtbnJTzMu2Ft285RnBUO5igCovQNJr/PCqxHCft5OBdxK27Ps6V9
-# lzaWE426Cf5R7YLIuu9bNd0M1JWmwqwDvPhv4WG3JA3MwFRtG9awGuz8xZZ+UopK
-# +XifiAqbtagnz9tNKUXR3imFniO9x5PIP0W0kamdNSaYjI5swnCflBzB7+ipzYwN
-# 1rfGgz72vgcqVYQC/Lu6NdPYbgK0u2kZj3t+p06IDPsDJEgl8BG1tR/YjZnr4QD8
-# gSyANbRNkQMJ4ebjEATl51/jhJBkQc50rqKnQy6FNDhiIzDSM9QwUsVpzgET483M
-# COwsgCWynTnaKaAGJlPksAJLNPbHBARtvIHQG5PpTMADJzJQ0AtROU8CpwlLV4lt
-# s/FB5gqNgw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMTEw
+# MjdaMC8GCSqGSIb3DQEJBDEiBCDuumt6eIaHLR71uOM0tcymZHjo08YQn0fHetPr
+# bVqObjANBgkqhkiG9w0BAQEFAASCAgA6Tz2PJWp4UGQVSXZYa9LlLNPesD+k1c2K
+# jeE3EIcXvnuu9hhRie94Q4k56aTMDielk/DiSUSX3Vq4Dx2eEvYYdgjJyWxBOUFk
+# lwbAHb3P1jqdDKHyv6iKR3NM689PNAIhVv2iZBNQCjBP1sqIhb8UQ/AGK8sLShHs
+# 3qYkUY5sDWTGJzFfIdmyu19nDcIC4/kGTBLz9btAO2QxUO4RZixy57Eb80U+2O7f
+# Y2assgIYWjfQLM4tueu2JJzxBT58cduCDGjkHdlejG8+OW/TAKrpf/2FuvnCoOgv
+# ecWIo5/snR5zK99iH5LyJcFAWsm8xMFoEjLjvvqrI0H15pOkqvnJpC5oO77BQYZo
+# 8JSSYmxBTfaggix76y3f9VEvNdKVQPmo2WzRXjD6ftXR+xZ2UI0IG/v6ktSQ5sHf
+# 1tEUrbh3qz3MrEDKNR0GZu+IVJhkNIGkbipsqJj/p7/EMlb+ma4+p2H8aY/FmEtP
+# 7fpiAWw2GQXeGu64pVUO8n4KJa7dHNWbi9NZiIfi7ASrmQ+XeiprYdt+rDSEsS8D
+# odGDpQec6V7c5+MTEQw3TcEtNfSEVLpMkt+5ouAw6CMM4OboeDmv1DSPuR3515JO
+# gjz5NN51e2xa2q0Gp4deJgFQRKJOgB1jWW5blwKcmuG/T6OO4gmbUtvjCV37nKFw
+# x0Q6c7xRNA==
 # SIG # End signature block
