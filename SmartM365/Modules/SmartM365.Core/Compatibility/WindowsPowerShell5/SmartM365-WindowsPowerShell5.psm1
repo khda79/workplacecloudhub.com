@@ -3749,6 +3749,78 @@ function Invoke-SmartM365SharePointCsvUpload {
         WriteLog -Message ("SharePoint upload failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
     }
 }
+function Remove-SmartM365SharePointFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LocalFilePath,
+        [bool]$Enabled = [bool]$global:EnableSharePointUpload,
+        [string]$SiteHostname = $global:SharePointSiteHostname,
+        [string]$SitePath = $global:SharePointSitePath,
+        [string]$LibraryDisplayName = $global:SharePointLibraryDisplayName,
+        [string]$TargetFolderPath = $global:SharePointTargetFolderPath,
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb })
+    )
+
+    if (-not $Enabled) { return $false }
+    if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) {
+        WriteLog -Message "SharePoint deletion skipped: SharePointSiteHostname, SharePointSitePath, SharePointLibraryDisplayName or SharePointTargetFolderPath is missing." -Level "WARNING"
+        return $false
+    }
+    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) {
+        return $false
+    }
+
+    try {
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) { $script:SmartM365SharePointDriveIdCache = @{} }
+
+        $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
+        if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
+            $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
+        }
+        else {
+            $site = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath) -Operation 'Resolve SharePoint site for deletion'
+            $drives = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id) -Operation 'Resolve SharePoint document libraries for deletion'
+            $driveList = @($drives.value)
+            $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
+            $drive = @($driveList | Where-Object { $_.name -ieq $LibraryDisplayName } | Select-Object -First 1)[0]
+            if (-not $drive) {
+                $targetNorm = & $normalize $LibraryDisplayName
+                $drive = @($driveList | Where-Object { (& $normalize $_.name) -ieq $targetNorm } | Select-Object -First 1)[0]
+            }
+            if (-not $drive) {
+                $available = ($driveList | ForEach-Object { $_.name }) -join ' | '
+                throw "Document library '$LibraryDisplayName' not found. Available drives: $available"
+            }
+            $driveId = $drive.id
+            $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
+        }
+
+        $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
+        $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $LocalFilePath
+        $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
+        $targetPath = ConvertTo-GraphDrivePath $sharePointPath
+        $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}" -f $driveId, $targetPath
+
+        try {
+            Invoke-SmartM365GraphRestWithRetry -Method DELETE -Uri $uri -ContentType '' -Operation 'Delete stale SharePoint file' | Out-Null
+            WriteLog -Message ("SharePoint file deleted: {0}" -f $sharePointPath) -Level "INFO"
+            return $true
+        }
+        catch {
+            if ([string]$_.Exception.Message -match 'Status=404') {
+                WriteLog -Message ("SharePoint file already absent: {0}" -f $sharePointPath) -Level "INFO"
+                return $true
+            }
+            throw
+        }
+    }
+    catch {
+        WriteLog -Message ("SharePoint deletion failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
+        return $false
+    }
+}
 #endregion
 
 #region SmartM365 cleanup compatibility
@@ -4390,8 +4462,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApA7klOPM1yOOB
-# M/9KLBb20I4kO3D23omb4sr03MUqbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0eiorLT77ZLvT
+# Vo9ih8XZDgullZaM0rSi0SofqaRZEaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4524,31 +4596,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB8W94aQKbyCAOkRxyvuYm9HE1Ip+R2ZIUNhcIP6fBUlMA0GCSqG
-# SIb3DQEBAQUABIIBgIGMhmOkgaHmv9EULQOK1HZb2KAqIXuvCDYr13oE5ornPzwH
-# ZRfAzFAp3Ob7SFSnMxVarw/L4sTrY4JdHS1yiieymqqUD9dlusufolIqjcg69f1Y
-# GHMAHFvbhY2iAnB08hOUanVTUnwI0zqY3QUC8jAjZ5EOTCPoIFrSc7NHxhbMKuuK
-# Sgs8q9h/FRh/PSlnhr9OR/N4r+S0AVNsEwsHx84tAb9x10spqiWtjgZK6uRcs0/W
-# aDZqVIgQI86PlA1V5gk71AisJmTABwesT7aSeMjyvStt0smnHQep5nJyNqps+G1i
-# 2OTWe9FWQlxmR0D6VGex8QE8Z0YJsEDpCQCnoWxCBpuwVeDadJgFSiCeuLYnbzau
-# elQvQMxpXCPQ/VIFpcxLtj+A/ldxobozI9OxEwmnGsDxHjc97jaj9xDN4yXa539p
-# Cs6Cj1TuskkZQGu/dRB7xd4ioadxJz5rBPnL43YPcKJDfcjF3veYl2RBdVatp3kq
-# qgvlnNkjL+8alGlptKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ7Pd6sUQlYXRFxsCj4u2TI9Tx6xlMKuVlfiAKJzjr3aMA0GCSqG
+# SIb3DQEBAQUABIIBgEZBT2YpqF4NSs6bomEdFOA2ZP16tak387lqqc4OdynODamq
+# +sDdE32J3nhF0t2RFDjy9fjsYutv/gFrBoKtlpV9IoEfG5ySwTcksAXpEIoK8X4u
+# Rm7t7az6OVAjzn+jlQ3iZj16Ajh4dohvOmoEP3qeiRkahsyF9QuE+pd3Nm+wLBhD
+# TRClrfYzaL/Sd9enbs//4iSok3vhkzwcx0atmG7BD82Fl6J6KC/eE3IFgk3nMqiG
+# yXBWpQfOv/7aC/q8qaDX1pNsFRC41KvxUg4mFHnGraAkLE248a/hmynjTwMfs9c+
+# e9mLIlAtKD5VVhrqG2Zoaf1UHgSArCdRmNBfj4PRBhwS4xbimGZ1K6JLrhGAnyXc
+# bRVDDDpMKS1Qm8JcONMwRk8TwQj5oNWACP2VcknzMWJxdrW13dJxAVBPNbqVNEGh
+# mXAKfKr8EfJbCyxfSjsHo2YQ3qUaLR+E84LBxXFM03t+uy1UYfhfEVIoL2OIMrNQ
+# KJMN7no44cam7lzu36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMzA0
-# MjhaMC8GCSqGSIb3DQEJBDEiBCC9yB7AbmrYIWDjYCdtK35iGr83gJBALdVYih+G
-# UNs9zjANBgkqhkiG9w0BAQEFAASCAgBA/asS/64FWAdF4oXhYnM8Nqm4+2/JdcUB
-# +0seGvV6FrLMJr2c54E3pQK8uNO3sImT8KNk5lN3/HpXyCBHh+0vtWaAuw54RuRq
-# 1soB7mU+ZqqN6dki0vvQYmagipAGVAtDaOWQCt+fj7vy4A6BRICXJmmPLkUzncRA
-# ifssHuW6TZA5pVtud1SDfCI6C2p7pNvJv8pftM9UZu4GMaqJATZhXGjPY5kIJV/A
-# BNY3M+ZyTBSNn1wgH+0Hgyc1SAbBj7q8VyPpA3lNDbild2qk0X1eESDVZ2UFPs4I
-# xmYxFO4b1kxzFpvWgtlWuzRBed7/tMptLr4bBn9EOLd7t1dgpbpn7TP6g9Jqluaj
-# t68aHvb8XO5HU+1oX77d4HannugsnX9kKlw2n6x3UtKDosTPlxRdT+4IF+i6g9OX
-# pyyI9AqSqWMT/Ucye+gtvl2ouooQ4esi1begq25FTIP6+SbvGaZlID+AnRkzsMmM
-# Rt58jtLB4B60s4hPPuQhmKlfQyguRAcvuze7KfAjz6Uu69I1xzz8QIv1P5RhncCR
-# ehon3f67WiEbJRaePeAjTkANJ8NkBt23JraFyYRnb0776r6qSO5OSQp7acx2/Wje
-# 4/7Maj3nVGw6ftyUnmkmVLnWgEVD2OAkYQRONGN/Or9gjjDV1+9eDgz6twyxRYIl
-# IccOd9j8SQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxMzM1
+# NTVaMC8GCSqGSIb3DQEJBDEiBCBSmJVk/Naqs894TiH/R6Qr11ra5ZyEJTDm7GZR
+# 3rZq/jANBgkqhkiG9w0BAQEFAASCAgC9y9N14mnFb1Vqki/Hg3UQ5EBTrETSR/n5
+# IlxMEIdEbryFrYuLTBWdzsRDXNkuKlSFMmbahgH2wBIMEz/MxcAV2miV/22PxSFP
+# Q9QUI/Rp6t+0+M40I2+edJsPhCsYTKu+9voV7oJHqr6EL9BfqoYOXk7GgS2wI7qM
+# XU2ugR5VVUF6rITsymTW6Rib9UGGGqw6ZrTQMbQ6ahUsytBFDPOtsjA16fh9m09e
+# dR/kBKVgUzgEJDE9SsZw+suuawsM+6ZEOvYBWwH/iCr1EYW/bwnpEVSW/W+0fZm9
+# 4cEpXguCcp0p1vSGjc1SQcKCXHLVe61kVFPcI+7vjyjvu6UOVhY2T8HcDGeeYnyF
+# I/tpvifWjd+DCM2J+OoQgnmwRgMFW4vR8VP1+CvquqCrp/AybXERNsmtJlDom67W
+# toAagqknU986EeHnV8aS2x0+h/TGFyXniXJmUsPmax1m92byWrC+9WTZliFMhPTi
+# /OTK01+7bJ5bnlJGWahZph/Ig8D/P0H1dtp3hIuve9oc3oq6sC+e6tx+U10lcItO
+# 865MAUkpH9Kea9Y9ivO2ID11hzopGKgfBzta+fkxZuh6El+THTa79N/uQ4EGP47F
+# w5Fg9zlgFR8wBZ+OqAFBiZDyxvSoQPeNuDcEng2/vY0uIHlLrD6GPHLJdYDdh5QF
+# dm03nF4iTw==
 # SIG # End signature block
