@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.56
+    0.1.57
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.56'
+$script:LauncherVersion = '0.1.57'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -1780,6 +1780,10 @@ Write-Host ("Controlled stop: first Ctrl+C stops new starts and drains active jo
 $launcherLogHeader = "[{0}] ===== SmartM365 Windows 11 Upgrade Toolkit launcher v{1} started. Lot={2}; ComputerList={3}; Technician={4}; TechComputer={5} =====" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$script:LauncherVersion,(Split-Path -Leaf $script:LotRoot),$ComputerListPath,$script:TechnicianIdentity.Account,$script:TechnicianIdentity.ComputerName
 Set-Content -LiteralPath $script:LauncherLogPath -Value $launcherLogHeader -Encoding UTF8 -Force
 Set-Content -LiteralPath $script:LauncherLatestLogPath -Value $launcherLogHeader -Encoding UTF8 -Force
+$powerShellProcessPath = try { [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
+$powerShellRuntimeText = "Edition={0}; Version={1}; Process={2}" -f $PSVersionTable.PSEdition,$PSVersionTable.PSVersion,$powerShellProcessPath
+Add-Content -LiteralPath $script:LauncherLogPath -Value ("[{0}] PowerShell: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$powerShellRuntimeText) -Encoding UTF8
+Add-Content -LiteralPath $script:LauncherLatestLogPath -Value ("[{0}] PowerShell: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$powerShellRuntimeText) -Encoding UTF8
 
 $script:TechnicianRunGuardHistoryPath = Get-TechnicianRunGuardHistoryPath
 $script:UseEffectiveTechnicianRunGuardHistory = ($UseTechnicianRunGuardHistory -and -not $IgnoreTechnicianRunGuardHistory -and -not $IgnoreRunGuard -and -not $DryRun -and $RunGuardHours -gt 0)
@@ -1936,6 +1940,7 @@ $script:LauncherOptionRows = @(
 )
 
 Write-Host "SmartM365 Windows 11 Upgrade Toolkit launcher v$script:LauncherVersion"
+Write-Host "PowerShell    : $powerShellRuntimeText"
 Write-Host "LOT root      : $script:LotRoot"
 Write-Host "Launcher log  : $script:LauncherLogPath"
 Write-Host "Computer list : $ComputerListPath"
@@ -3057,8 +3062,8 @@ Complete-LotCancellationSupport
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAXscSCh8IOrsxp
-# xe413UYV+ZG92ONVqB4KI5jG/qE5zKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxDzVkWQoQpO1n
+# qlNNs4kbBgOOl6uYHNEbZK9fh1cPCaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3088,14 +3093,14 @@ Complete-LotCancellationSupport
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB2N0Fml9wu8m+q7JVwxc5P
-# ldQcS/LNpYwo3iUa10YjfjANBgkqhkiG9w0BAQEFAASCAYCCLJhzmH9xUeL7Xbtz
-# yoWLh87GnN55otRnhntz18KzEpGpm2/9JOoSkfP3/cRIxSqfBjadkulpDL5Njfme
-# HkEWFiYf/v70eylYDPvdbEcsxEilTaICqlXOk/pMhjzt5X73KsCtEkvFqvxGgoiW
-# BCUX07/jciq7HQFgYBx9/2432dXqfp5YqhkSc+9K7mmMUZILZmsoQg4rnx9dvDL3
-# GLR65TJEOqMrAUBFDY+gsh4bzzyblSqqA86yWzrWdkFCwAuroC3L5AWxI84v70mw
-# WXg2hWAsFtsPpRejePF49ltpvnW51HrgEPmeWTmKt7q8Hgn8Rj0D62i64cMli968
-# JXJEQ6KnhOK+k5SZ0kc875M5jdy3cCMtyhU4HJ32fl+QrgQ5ue5mzq8ab6qu1T06
-# Po5TagXjIsqcdIPewO5bm0DHGyl+NAAZ/7W8rpzntrKIPjgiWN4e+YsBe1j5CjUf
-# bvqAZnwjWmSPCJwQfWGo7tYxMRyYGjTIFycAA0JbKvHg0RQ=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBdvaq5mupHsOvGm+q5CcYl
+# ePh+ECLfX7ZNpefYa+HUfjANBgkqhkiG9w0BAQEFAASCAYBVrEWV928SeMY0V1BL
+# k04Y2iKRS0GRn7YxIxv0Ox1A5r63NifTvDunkyxaDFpnDGO5gW9wrfL+XU5+DI+C
+# kdaoRugFQEEhB20AEy77vLoeW7EnBV7Digxuz418xnt/usOfoji6E98l5EAg/8/9
+# zH+OkDWm4K4oDk+WMV45PtPC1pJbM7Vv522jyMoA+7bapVyENbo7uNLwW2cvCuGg
+# 08/GNprIoQfxr33Kmk3Rapbhn+elz0Vc2nRQWyWupOcVOElg5YXnr/MfJLYRib7A
+# KtDJHj8fb2sv2I4D+AqzstkJLJHfhiqz2y7/kMoJ0GMblLlVs9TWOsSA4bNl0Bwr
+# OgSDN4MUA0IdFhZpzsIgEcjVcV8TEOWSRWeAYPAU18FM+24mVEDISkcqdMQPFs7l
+# 6HRYmWdtjSEFgYegcHBB308LoYOL4GmPwg6LezBFuctxYxMY9KeCfbr9kE9JAvu/
+# PUpbJpEegIHuRa3Q+cjnXZHXsmLN+msLzZR+cKb8RfEd+V0=
 # SIG # End signature block

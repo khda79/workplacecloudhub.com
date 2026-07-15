@@ -39,13 +39,14 @@ if /I not "%LOTS_NAME%"=="Lots" (
     goto :END
 )
 
-set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-if not exist "%POWERSHELL_EXE%" (
-    set "POWERSHELL_EXE="
-    for /f "delims=" %%P in ('where powershell.exe 2^>nul') do if not defined POWERSHELL_EXE set "POWERSHELL_EXE=%%P"
-)
+set "POWERSHELL_EXE="
+if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "POWERSHELL_EXE=%ProgramFiles%\PowerShell\7\pwsh.exe"
 if not defined POWERSHELL_EXE (
     for /f "delims=" %%P in ('where pwsh.exe 2^>nul') do if not defined POWERSHELL_EXE set "POWERSHELL_EXE=%%P"
+)
+if not defined POWERSHELL_EXE if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if not defined POWERSHELL_EXE (
+    for /f "delims=" %%P in ('where powershell.exe 2^>nul') do if not defined POWERSHELL_EXE set "POWERSHELL_EXE=%%P"
 )
 if not defined POWERSHELL_EXE (
     echo ERROR: Windows PowerShell or PowerShell 7 was not found.
@@ -53,10 +54,8 @@ if not defined POWERSHELL_EXE (
     goto :END
 )
 
-if "%EHJIR_RUN_DIR%"=="" (
-    for /f "delims=" %%T in ('""%POWERSHELL_EXE%" -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss""') do set "RUN_STAMP=%%T"
-    set "EHJIR_RUN_DIR=%ROOT_DIR%\Runs\%LOT_NAME%\!RUN_STAMP!"
-)
+for /f "delims=" %%T in ('""%POWERSHELL_EXE%" -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss""') do set "RUN_STAMP=%%T"
+if "%EHJIR_RUN_DIR%"=="" set "EHJIR_RUN_DIR=%ROOT_DIR%\Runs\%LOT_NAME%\!RUN_STAMP!"
 for %%I in ("%EHJIR_RUN_DIR%") do set "RUN_DIR=%%~fI"
 
 set "SCRIPT=%ROOT_DIR%\Scripts\SmartM365-Invoke-IntuneHybridJoinRepairWithPsExec.ps1"
@@ -250,6 +249,8 @@ if not "%EHJIR_AD_DOMAIN%"=="" (
   -PsExecTimeoutMinutes %EHJIR_PSEXEC_TIMEOUT_MINUTES% -CancellationDrainTimeoutMinutes %EHJIR_CANCELLATION_DRAIN_TIMEOUT_MINUTES% %*
 
 set "EXITCODE=%ERRORLEVEL%"
+if "%EXITCODE%"=="-1073741819" call :CapturePowerShellCrash
+if "%EXITCODE%"=="3221225477" call :CapturePowerShellCrash
 
 :END
 echo.
@@ -273,11 +274,13 @@ if not defined EHJIR_TECHNICIAN_RUN_GUARD_HOURS set "EHJIR_TECHNICIAN_RUN_GUARD_
 if not defined EHJIR_CENTRAL_LOG_COLLECTION_MODE set "EHJIR_CENTRAL_LOG_COLLECTION_MODE=Standard"
 if not defined EHJIR_RETRY_AFTER_REBOOT_DELAY_SECONDS set "EHJIR_RETRY_AFTER_REBOOT_DELAY_SECONDS=300"
 if not defined EHJIR_RETRY_AFTER_REBOOT_MAX_ATTEMPTS set "EHJIR_RETRY_AFTER_REBOOT_MAX_ATTEMPTS=3"
+if not defined EHJIR_CANCELLATION_DRAIN_TIMEOUT_MINUTES set "EHJIR_CANCELLATION_DRAIN_TIMEOUT_MINUTES=15"
 echo.
 echo SmartM365 Intune Hybrid Join Toolkit - LOT PsExec launcher
 echo Started       : %DATE% %TIME%
 echo LOT           : %LOT_DIR%
 echo Root          : %ROOT_DIR%
+echo PowerShell    : %POWERSHELL_EXE%
 echo Script        : %SCRIPT%
 echo Computers     : %COMPUTERS%
 echo PsExec logs   : %PSEXEC_LOGS%
@@ -295,6 +298,18 @@ if /I "%EHJIR_DISABLE_NIGHT_PAUSE%"=="1" (echo Night pause   : Disabled) else (e
 if /I "%EHJIR_SKIP_PRE_RUN_ARCHIVE%"=="1" (echo Pre-run archive: Disabled) else (echo Pre-run archive: Enabled)
 if not "%EHJIR_AD_DOMAIN%"=="" echo AD domain     : %EHJIR_AD_DOMAIN%
 echo.
+exit /b 0
+
+:CapturePowerShellCrash
+set "CRASH_LOG=%RUN_DIR%\Logs\PowerShellCrash_%RUN_STAMP%.txt"
+> "%CRASH_LOG%" echo SmartM365 launcher detected a native PowerShell crash.
+>> "%CRASH_LOG%" echo Exit code      : %EXITCODE% ^(0xC0000005^)
+>> "%CRASH_LOG%" echo PowerShell     : %POWERSHELL_EXE%
+>> "%CRASH_LOG%" echo Captured       : %DATE% %TIME%
+>> "%CRASH_LOG%" echo.
+>> "%CRASH_LOG%" echo Recent Application events 1000, 1001, and 1023:
+wevtutil qe Application /q:"*[System[(EventID=1000 or EventID=1001 or EventID=1023)]]" /rd:true /f:text /c:30 >> "%CRASH_LOG%" 2>&1
+echo ERROR: PowerShell crashed with 0xC0000005. Diagnostic events: %CRASH_LOG%
 exit /b 0
 
 :NormalizeInt

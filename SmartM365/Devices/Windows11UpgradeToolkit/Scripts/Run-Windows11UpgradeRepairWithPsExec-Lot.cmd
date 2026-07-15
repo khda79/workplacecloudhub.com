@@ -8,15 +8,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-if not exist "%POWERSHELL_EXE%" (
-    where powershell.exe >nul 2>&1
-    if errorlevel 1 (
-        echo ERROR: powershell.exe not found.
-        set "EXITCODE=9009"
-        goto :END
-    )
-    set "POWERSHELL_EXE=powershell.exe"
+set "POWERSHELL_EXE="
+if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "POWERSHELL_EXE=%ProgramFiles%\PowerShell\7\pwsh.exe"
+if not defined POWERSHELL_EXE (
+    for /f "delims=" %%P in ('where pwsh.exe 2^>nul') do if not defined POWERSHELL_EXE set "POWERSHELL_EXE=%%P"
+)
+if not defined POWERSHELL_EXE if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if not defined POWERSHELL_EXE (
+    for /f "delims=" %%P in ('where powershell.exe 2^>nul') do if not defined POWERSHELL_EXE set "POWERSHELL_EXE=%%P"
+)
+if not defined POWERSHELL_EXE (
+    echo ERROR: Windows PowerShell or PowerShell 7 was not found.
+    set "EXITCODE=9009"
+    goto :END
 )
 
 rem Shared LOT launcher. LOT definitions live under %ROOT_DIR%\Lots and run data under %ROOT_DIR%\Runs.
@@ -38,10 +42,8 @@ if /I not "%LOTS_DIR:~-4%"=="Lots" (
     goto :END
 )
 
-if "%W11UT_RUN_DIR%"=="" (
-    for /f "delims=" %%T in ('"%POWERSHELL_EXE%" -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN_STAMP=%%T"
-    set "W11UT_RUN_DIR=%ROOT_DIR%\Runs\%LOT_NAME%\!RUN_STAMP!"
-)
+for /f "delims=" %%T in ('""%POWERSHELL_EXE%" -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss""') do set "RUN_STAMP=%%T"
+if "%W11UT_RUN_DIR%"=="" set "W11UT_RUN_DIR=%ROOT_DIR%\Runs\%LOT_NAME%\!RUN_STAMP!"
 for %%I in ("%W11UT_RUN_DIR%") do set "RUN_DIR=%%~fI"
 
 set "SCRIPT=%ROOT_DIR%\Scripts\SmartM365-Invoke-Windows11UpgradeRepairWithPsExec.ps1"
@@ -281,12 +283,15 @@ if exist "%PARENT_INTUNE_CSV%" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneRootInvento
 if not "%W11UT_INTUNE_TENANT_ID%"=="" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneTenantId ""%W11UT_INTUNE_TENANT_ID%"""
 if not "%W11UT_INTUNE_INVENTORY_PAGE_SIZE%"=="" set "INTUNE_ARGS=%INTUNE_ARGS% -IntuneInventoryPageSize %W11UT_INTUNE_INVENTORY_PAGE_SIZE%"
 if /I "%W11UT_SKIP_INTUNE_INVENTORY_REFRESH%"=="1" set "INTUNE_ARGS=%INTUNE_ARGS% -SkipIntuneInventoryRefresh"
+echo PowerShell    : %POWERSHELL_EXE%
 "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" -ComputerListPath "%COMPUTERS%" -LogRoot "%PSEXEC_LOGS%" -ReportRoot "%REPORTS%" -CentralLogRoot "%CENTRAL_LOGS%" -LauncherLogRoot "%RUN_DIR%\Logs" -CentralLogCollectionMode "%W11UT_CENTRAL_LOG_COLLECTION_MODE%" %RUN_ONCE_ARG% %IGNORE_RUN_GUARD_ARG% %ACTION_ARGS% %SETUP_ARGS% %PSEXEC_ARG% %THROTTLE_ARG% %GLOBAL_CONCURRENCY_ARG% %AD_ARGS% %INTUNE_ARGS% %TECH_RUN_GUARD_ARGS% -DelayBetweenComputersSeconds %W11UT_DELAY_BETWEEN_COMPUTERS_SECONDS% -DelayBetweenCyclesMinutes %W11UT_DELAY_BETWEEN_CYCLES_MINUTES% -PsExecTimeoutMinutes %W11UT_PSEXEC_TIMEOUT_MINUTES% -CancellationDrainTimeoutMinutes %W11UT_CANCELLATION_DRAIN_TIMEOUT_MINUTES% %*
 
 set "EXITCODE=%ERRORLEVEL%"
+if "%EXITCODE%"=="-1073741819" call :CapturePowerShellCrash
+if "%EXITCODE%"=="3221225477" call :CapturePowerShellCrash
 if "%EXITCODE%"=="9009" (
     echo ERROR: Command not found while launching the Windows 11 Upgrade Toolkit.
-    echo        Check powershell.exe, PsExec.exe, the LOT wrapper arguments, and any custom command line suffix.
+    echo        Check PowerShell, PsExec.exe, the LOT wrapper arguments, and any custom command line suffix.
 )
 
 :END
@@ -295,6 +300,18 @@ echo Finished with exit code %EXITCODE%.
 pause
 popd
 exit /b %EXITCODE%
+
+:CapturePowerShellCrash
+set "CRASH_LOG=%RUN_DIR%\Logs\PowerShellCrash_%RUN_STAMP%.txt"
+> "%CRASH_LOG%" echo SmartM365 launcher detected a native PowerShell crash.
+>> "%CRASH_LOG%" echo Exit code      : %EXITCODE% ^(0xC0000005^)
+>> "%CRASH_LOG%" echo PowerShell     : %POWERSHELL_EXE%
+>> "%CRASH_LOG%" echo Captured       : %DATE% %TIME%
+>> "%CRASH_LOG%" echo.
+>> "%CRASH_LOG%" echo Recent Application events 1000, 1001, and 1023:
+wevtutil qe Application /q:"*[System[(EventID=1000 or EventID=1001 or EventID=1023)]]" /rd:true /f:text /c:30 >> "%CRASH_LOG%" 2>&1
+echo ERROR: PowerShell crashed with 0xC0000005. Diagnostic events: %CRASH_LOG%
+exit /b 0
 
 :LOAD_CONFIG
 set "CONFIG_FILE=%~1"
