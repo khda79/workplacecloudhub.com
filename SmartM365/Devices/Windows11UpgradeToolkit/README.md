@@ -383,8 +383,19 @@ Runs\<LOT>\<yyyyMMdd-HHmmss>\CentralLogs\Errors\<Computer>\Latest
 
 By default, the orchestrator uses `W11UT_CENTRAL_LOG_COLLECTION_MODE=Standard` / `-CentralLogCollectionMode Standard`: it copies `LastRun.json`, launcher evidence, the main SmartM365 logs, small setup evidence, and `Output` files while skipping large files such as Panther/setup logs. Skipped files are listed in `CentralLogCollection.skipped.txt`; full target logs remain available through `\\<Computer>\C$\ProgramData\SmartM365\Windows11UpgradeToolkit\Logs`. Use `W11UT_CENTRAL_LOG_COLLECTION_MODE=Full` or `-CentralLogCollectionMode Full` to restore the previous full mirror of remote `Logs`, `Output`, and `LastRun.json`. Successful endpoint runs go to `Success`, administrative-share failures go to `ADMIN_SHARE_UNREACHABLE`, disk failures go to `InsufficientDisk`, compatibility failures go to `Compatibility`, missing setup languages go to `SetupSourceLanguageUnavailable`, duplicate profile setup failures go to `SetupMigrationProfileFailure`, successful duplicate profile repairs go to `SetupMigrationProfileRepaired`, migration plugin failures such as `0x8007007F`/`CscMig.dll`/`WSManMigrationPlugin.dll` go to `SetupMigrationPluginFailure`, setup media manifest validation failures go to `SetupMediaManifestFailure`, remote result collection failures such as `REMOTE_RESULT_STALE` go to `RemoteLogCollectionFailed`, and uncategorized failures go to `Errors`. When central log history is enabled, `Latest` is replaced by a timestamped `CycleN_yyyyMMdd-HHmmss` folder.
 
-## Multi-LOT Concurrency
+## Controlled LOT Stop
 
+Each LOT launcher publishes an active-run control file in its run `State` folder.
+
+- Press Ctrl+C once, or click **Stop running LOTs** once in the GUI, to stop queueing new computers. Computers that have not started are reported as `CANCELLED_NOT_STARTED`, while active jobs are allowed to finish for up to 15 minutes by default.
+- Press Ctrl+C a second time, or click the GUI stop button a second time, to stop the remaining local workers. In-flight computers are reported as `CANCELLED_BY_OPERATOR`; the remote endpoint may already be continuing, so verify its logs and state before relaunching.
+- Change the drain window with `W11UT_CANCELLATION_DRAIN_TIMEOUT_MINUTES` or `-CancellationDrainTimeoutMinutes` (0 to 1440 minutes).
+- When the GUI closes while LOTs are active, it asks whether to request a controlled stop, leave the LOTs running, or cancel the close.
+
+Disconnecting an RDP session does not normally stop the launcher. Signing out of Windows, closing its console host, ending the PowerShell process, or shutting down the operator computer is abrupt: final CSV/HTML cleanup cannot be guaranteed, and remote endpoint work may continue. Request a controlled stop and wait for the final report before signing out.
+
+
+## Multi-LOT Concurrency
 The PsExec orchestrator runs computer workers in parallel. `-ThrottleLimit` controls parallelism inside one LOT window, while `W11UT_GLOBAL_CONCURRENCY_LIMIT` and `-GlobalConcurrencyLimit` default to `15` and share this recoverable worker gate across LOT windows:
 
 ```text
