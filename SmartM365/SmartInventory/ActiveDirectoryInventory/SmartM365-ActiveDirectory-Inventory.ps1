@@ -14,7 +14,7 @@
     - Discovers all domains in the forest or uses a subset passed via -TargetDomains
     - Exports detailed CSVs per domain in a "Not-CSV-Combined" folder
     - Combines all per-domain CSVs into global "AllDomains" CSVs
-    - Analyzes duplicate UserPrincipalNames and SMTP proxy addresses across all domains
+    - Analyzes duplicate UserPrincipalNames, SMTP proxy addresses, and remote mailbox routing consistency across all domains
     - Uses the shared framework (SmartM365.Core / InitializeScriptEnvironment)
     - Logs to text + transcript
     - Copies combined CSVs to a local configuration path (LatestCsvFolderPath)
@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.34
+1.36
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
@@ -259,6 +259,39 @@ function Get-ScriptLocalConfigValue {
     }
     return $DefaultValue
 }
+function Get-SmartM365RemoteRoutingDomain {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $remoteRoutingDomain = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'RemoteRoutingDomain' -DefaultValue '')
+    $sourceName = 'RemoteRoutingDomain'
+    if ([string]::IsNullOrWhiteSpace($remoteRoutingDomain)) {
+        $orgDomain = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'OrgDomain' -DefaultValue '')
+        $orgDomain = $orgDomain.Trim().TrimStart('@').ToLowerInvariant()
+        $sourceName = 'OrgDomain fallback'
+
+        if ($orgDomain.EndsWith('.mail.onmicrosoft.com', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $remoteRoutingDomain = $orgDomain
+        }
+        elseif ($orgDomain.EndsWith('.onmicrosoft.com', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $remoteRoutingDomain = $orgDomain.Substring(0, $orgDomain.Length - '.onmicrosoft.com'.Length) + '.mail.onmicrosoft.com'
+        }
+        else {
+            throw 'RemoteRoutingDomain is not configured and OrgDomain cannot be converted to a tenant mail.onmicrosoft.com routing domain.'
+        }
+    }
+
+    $remoteRoutingDomain = $remoteRoutingDomain.Trim().TrimStart('@').ToLowerInvariant()
+    if ($remoteRoutingDomain -notmatch '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+mail\.onmicrosoft\.com$') {
+        throw ("Invalid RemoteRoutingDomain '{0}'. Expected a tenant-specific domain such as contoso.mail.onmicrosoft.com." -f $remoteRoutingDomain)
+    }
+
+    return [pscustomobject]@{
+        Domain = $remoteRoutingDomain
+        Source = $sourceName
+    }
+}
+
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
 
@@ -328,7 +361,7 @@ function New-SmartM365AdDuplicatePreviewSection {
     param(
         [array]$Rows,
         [Parameter(Mandatory = $true)]
-        [ValidateSet('UPN','SMTP')]
+        [ValidateSet('UPN','SMTP','REMOTE')]
         [string]$DuplicateType,
         [int]$Limit = 50
     )
@@ -336,9 +369,21 @@ function New-SmartM365AdDuplicatePreviewSection {
     $items = @($Rows | Where-Object { $_ })
     if ($items.Count -eq 0) { return $null }
 
-    $valueProperty = if ($DuplicateType -eq 'UPN') { 'UserPrincipalName' } else { 'SmtpAddress' }
-    $label = if ($DuplicateType -eq 'UPN') { 'duplicate UPN' } else { 'duplicate SMTP address' }
-    $title = if ($DuplicateType -eq 'UPN') { 'Top 50 duplicate UPN accounts' } else { 'Top 50 duplicate SMTP entries' }
+    $valueProperty = switch ($DuplicateType) {
+        'UPN' { 'UserPrincipalName' }
+        'SMTP' { 'SmtpAddress' }
+        'REMOTE' { 'NormalizedRemoteRoutingAddress' }
+    }
+    $label = switch ($DuplicateType) {
+        'UPN' { 'duplicate UPN' }
+        'SMTP' { 'duplicate SMTP address' }
+        'REMOTE' { 'duplicate remote routing address' }
+    }
+    $title = switch ($DuplicateType) {
+        'UPN' { 'Top 50 duplicate UPN accounts' }
+        'SMTP' { 'Top 50 duplicate SMTP entries' }
+        'REMOTE' { 'Top 50 duplicate remote routing addresses' }
+    }
 
     $groups = @(
         $items |
@@ -402,6 +447,49 @@ function New-SmartM365AdDuplicatePreviewSection {
 
     return [pscustomobject]@{ Title = $title; Html = $html }
 }
+function New-SmartM365AdRemoteRoutingIssuePreviewSection {
+    [CmdletBinding()]
+    param(
+        [array]$Rows,
+        [int]$Limit = 50
+    )
+
+    $items = @($Rows | Where-Object { $_ } | Sort-Object Severity, IssueType, DomainName, SamAccountName | Select-Object -First $Limit)
+    if ($items.Count -eq 0) { return $null }
+
+    $tableRows = foreach ($row in $items) {
+        $accountText = if (-not [string]::IsNullOrWhiteSpace([string]$row.DomainNameShort) -and -not [string]::IsNullOrWhiteSpace([string]$row.SamAccountName)) {
+            '{0}\{1}' -f $row.DomainNameShort, $row.SamAccountName
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace([string]$row.UserPrincipalName)) { [string]$row.UserPrincipalName }
+        else { [string]$row.DistinguishedName }
+
+        $issueHtml = ConvertTo-SmartM365EmailHtmlText $row.IssueType
+        $severityHtml = ConvertTo-SmartM365EmailHtmlText $row.Severity
+        $accountHtml = ConvertTo-SmartM365EmailHtmlText $accountText
+        $targetAddressHtml = ConvertTo-SmartM365EmailHtmlText $row.TargetAddress
+        $expectedDomainHtml = ConvertTo-SmartM365EmailHtmlText $row.ExpectedRemoteRoutingDomain
+        "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$issueHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#334155;`">$severityHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$accountHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$targetAddressHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$expectedDomainHtml</td></tr>"
+    }
+
+    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing {0} of {1} remote routing issue row(s). Full details are available in the CSV file.' -f $items.Count, @($Rows).Count)
+    $html = @"
+<div style="font-size:13px;color:#64748b;margin-bottom:8px;">$caption</div>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Issue</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Severity</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Account</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">targetAddress</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Expected domain</th>
+  </tr>
+  $($tableRows -join "`n")
+</table>
+"@
+
+    return [pscustomobject]@{ Title = 'Top 50 remote routing issues'; Html = $html }
+}
+
 function Send-SmartM365AdInventoryEmailHtmlReport {
     [CmdletBinding()]
     param(
@@ -486,7 +574,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.40' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     exit 1
@@ -495,7 +583,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.34"
+$ScriptVersion = "1.36"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -606,6 +694,13 @@ try {
             WriteLog -Message "ReportOnly mode enabled. Live Active Directory inventory collection will be skipped."
         }
     }
+    $RemoteRoutingDomain = ''
+    if (-not $ReportOnly -and -not $DomainWorker) {
+        $remoteRoutingDomainResolution = Get-SmartM365RemoteRoutingDomain -Config $ScriptLocalConfig
+        $RemoteRoutingDomain = [string]$remoteRoutingDomainResolution.Domain
+        WriteLog -Message ("Remote routing domain resolved to '{0}' from {1}." -f $RemoteRoutingDomain, $remoteRoutingDomainResolution.Source)
+    }
+
 
     # ----------------------------------------------------------
     # RETRY CONFIGURATION
@@ -2029,6 +2124,8 @@ try {
     $combinedContactsCsv  = Join-Path $OutputPath "AD_Contacts_AllDomains.csv"
     $duplicateUpnCsv      = Join-Path $OutputPath "AD_Users_DuplicateUPN.csv"
     $duplicateSmtpCsv     = Join-Path $OutputPath "AD_Users_DuplicateSMTP.csv"
+    $duplicateRemoteRoutingCsv = Join-Path $OutputPath "AD_Users_DuplicateRemoteRoutingAddress.csv"
+    $remoteRoutingIssuesCsv    = Join-Path $OutputPath "AD_Users_RemoteRoutingIssues.csv"
 
     if (-not $DuplicateAnalysisOnly) {
 
@@ -2325,7 +2422,7 @@ try {
             }
             WriteLog -Message ("Users excluded because of missing UPN for domain '{0}': {1}" -f $currentDomainName, $DomainExcludedUsersNoUpn)
 
-            Get-ADUser -LDAPFilter "(&(objectCategory=person)(objectClass=user)(userPrincipalName=*))" -Server $currentDomainName -ResultSetSize $null -Properties SamAccountName, sAMAccountType, Name, DistinguishedName, UserPrincipalName, Enabled, manager, LastLogonTimestamp, DisplayName, GivenName, Surname, Description, Department, Title, Company, Office, TelephoneNumber, MobilePhone, EmailAddress, StreetAddress, City, PostalCode, Country, WhenCreated, WhenChanged, AccountExpirationDate, pwdLastSet, badPwdCount, badPasswordTime, LogonCount, userAccountControl, msDS-ManagedPassword, ProxyAddresses, MemberOf, CanonicalName, ObjectGUID, targetAddress, ObjectSID, SIDHistory, extensionAttribute1, extensionAttribute2, extensionAttribute3, extensionAttribute4, extensionAttribute5, extensionAttribute6, extensionAttribute7, extensionAttribute8, extensionAttribute9, extensionAttribute10, extensionAttribute11, extensionAttribute12, extensionAttribute13, extensionAttribute14, extensionAttribute15 |
+            Get-ADUser -LDAPFilter "(&(objectCategory=person)(objectClass=user)(userPrincipalName=*))" -Server $currentDomainName -ResultSetSize $null -Properties SamAccountName, sAMAccountType, Name, DistinguishedName, UserPrincipalName, Enabled, manager, LastLogonTimestamp, DisplayName, GivenName, Surname, Description, Department, Title, Company, Office, TelephoneNumber, MobilePhone, EmailAddress, StreetAddress, City, PostalCode, Country, WhenCreated, WhenChanged, AccountExpirationDate, pwdLastSet, badPwdCount, badPasswordTime, LogonCount, userAccountControl, msDS-ManagedPassword, ProxyAddresses, MemberOf, CanonicalName, ObjectGUID, targetAddress, msExchRemoteRecipientType, msExchRecipientTypeDetails, ObjectSID, SIDHistory, extensionAttribute1, extensionAttribute2, extensionAttribute3, extensionAttribute4, extensionAttribute5, extensionAttribute6, extensionAttribute7, extensionAttribute8, extensionAttribute9, extensionAttribute10, extensionAttribute11, extensionAttribute12, extensionAttribute13, extensionAttribute14, extensionAttribute15 |
                 Select-Object `
                     @{Name = 'DomainName';           Expression = { $currentDomainName }},
                     @{Name = 'ObjectType';           Expression = { $CurrentObjectType }},
@@ -2399,6 +2496,8 @@ try {
                     @{Name = 'CanonicalName';           Expression = { $_.CanonicalName -replace "`r", " -R " -replace "`n", " -N " }},
                     @{Name = 'ObjectGUID';              Expression = { $_.ObjectGUID }},
                     @{Name = 'TargetAddress';           Expression = { $_.targetAddress }},
+                    msExchRemoteRecipientType,
+                    msExchRecipientTypeDetails,
                     @{Name = 'ObjectSID';               Expression = { $_.ObjectSID.Value }},
                     @{Name = 'ObjectSIDHistory';        Expression = {
                         if ($_.SIDHistory) {
@@ -2577,7 +2676,8 @@ try {
         $combinedUsersEnrichedCsv = Invoke-SmartM365AdUsersEnrichedCsv `
             -CombinedUsersCsv $combinedUsersCsv `
             -OutputFolder $OutputPath `
-            -LatestFolderPath $destinationRootPath
+            -LatestFolderPath $destinationRootPath `
+            -RemoteRoutingDomain $RemoteRoutingDomain
     }
     else {
         WriteLog -Message "WARNING: AD users enrichment function is unavailable. AD_Users_AllDomains.csv will not be generated."
@@ -2661,7 +2761,7 @@ try {
     # ------------------------------------------------------
     if ($EnableDuplicateAnalysis) {
         try {
-            WriteLog -Message "Starting duplicate UPN and SMTP proxy address analysis..."
+            WriteLog -Message "Starting duplicate UPN, SMTP proxy address, and remote routing analysis..."
 
             if (-not (Test-Path -Path $combinedUsersCsv)) {
                 WriteLog -Message ("WARNING: Combined users CSV not found, skipping duplicate analysis: {0}" -f $combinedUsersCsv)
@@ -2672,6 +2772,45 @@ try {
 
                 $upnMap = @{}
                 $smtpMap = @{}
+                $remoteRoutingMap = @{}
+                $remoteRoutingIssueRows = [System.Collections.Generic.List[object]]::new()
+                $hasRemoteRecipientTypeColumn = ($allUsers.Count -eq 0) -or ($null -ne $allUsers[0].PSObject.Properties['msExchRemoteRecipientType'])
+                if (-not $hasRemoteRecipientTypeColumn) {
+                    WriteLog -Message 'The source users CSV does not contain msExchRemoteRecipientType. Missing targetAddress checks cannot run; remote routing checks will be limited to rows with a non-empty TargetAddress.' -Level 'WARNING'
+                }
+
+                $addRemoteRoutingIssue = {
+                    param(
+                        $User,
+                        [string]$IssueType,
+                        [string]$Severity,
+                        [string]$TargetAddress,
+                        [string]$NormalizedTargetAddress,
+                        [bool]$HasMatchingProxyAddress,
+                        [bool]$HasExpectedRoutingDomainProxyAddress
+                    )
+
+                    [void]$remoteRoutingIssueRows.Add([PSCustomObject][ordered]@{
+                        IssueType                               = $IssueType
+                        Severity                                = $Severity
+                        TargetAddress                           = $TargetAddress
+                        NormalizedTargetAddress                 = $NormalizedTargetAddress
+                        ExpectedRemoteRoutingDomain             = $RemoteRoutingDomain
+                        HasMatchingProxyAddress                 = $HasMatchingProxyAddress
+                        HasExpectedRoutingDomainProxyAddress    = $HasExpectedRoutingDomainProxyAddress
+                        msExchRemoteRecipientType               = $User.msExchRemoteRecipientType
+                        msExchRecipientTypeDetails              = $User.msExchRecipientTypeDetails
+                        UserPrincipalName                       = $User.UserPrincipalName
+                        DomainName                              = $User.DomainName
+                        DomainNameShort                         = $User.DomainNameShort
+                        SamAccountName                          = $User.SamAccountName
+                        DisplayName                             = $User.DisplayName
+                        Enabled                                 = $User.Enabled
+                        LastLogonDate                           = $User.LastLogonDate
+                        DistinguishedName                       = $User.DistinguishedName
+                    })
+                }
+
 
                 foreach ($u in $allUsers) {
                     $upnKey = ([string]$u.UserPrincipalName).Trim().ToLowerInvariant()
@@ -2682,31 +2821,82 @@ try {
                         [void]$upnMap[$upnKey].Add($u)
                     }
 
-                    if ([string]::IsNullOrWhiteSpace($u.ProxyAddresses)) { continue }
-                    foreach ($entry in ([string]$u.ProxyAddresses -split ';')) {
-                        $entry = $entry.Trim()
-                        if ($entry -notmatch '^smtp:(.+)$') { continue }
+                    $proxyAddressSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    $hasExpectedRoutingDomainProxyAddress = $false
+                    if (-not [string]::IsNullOrWhiteSpace([string]$u.ProxyAddresses)) {
+                        foreach ($entry in ([string]$u.ProxyAddresses -split ';')) {
+                            $entry = $entry.Trim()
+                            if ($entry -notmatch '^(?i:smtp):(.+)$') { continue }
 
-                        $smtpAddress = $Matches[1].Trim()
-                        if ([string]::IsNullOrWhiteSpace($smtpAddress)) { continue }
+                            $smtpAddress = $Matches[1].Trim()
+                            if ([string]::IsNullOrWhiteSpace($smtpAddress)) { continue }
 
-                        $smtpKey = $smtpAddress.ToLowerInvariant()
-                        if (-not $smtpMap.ContainsKey($smtpKey)) {
-                            $smtpMap[$smtpKey] = [System.Collections.Generic.List[object]]::new()
+                            $smtpKey = $smtpAddress.ToLowerInvariant()
+                            [void]$proxyAddressSet.Add($smtpKey)
+                            if ($smtpKey.EndsWith('@' + $RemoteRoutingDomain, [System.StringComparison]::OrdinalIgnoreCase)) {
+                                $hasExpectedRoutingDomainProxyAddress = $true
+                            }
+                            if (-not $smtpMap.ContainsKey($smtpKey)) {
+                                $smtpMap[$smtpKey] = [System.Collections.Generic.List[object]]::new()
+                            }
+
+                            [void]$smtpMap[$smtpKey].Add([PSCustomObject]@{
+                                SmtpAddress       = $smtpAddress
+                                IsUppercaseSMTP   = $entry.StartsWith('SMTP:', [System.StringComparison]::Ordinal)
+                                UserPrincipalName = $u.UserPrincipalName
+                                DomainName        = $u.DomainName
+                                DomainNameShort   = $u.DomainNameShort
+                                SamAccountName    = $u.SamAccountName
+                                DisplayName       = $u.DisplayName
+                                Enabled           = $u.Enabled
+                                LastLogonDate     = $u.LastLogonDate
+                                DistinguishedName = $u.DistinguishedName
+                            })
                         }
+                    }
 
-                        [void]$smtpMap[$smtpKey].Add([PSCustomObject]@{
-                            SmtpAddress       = $smtpAddress
-                            IsUppercaseSMTP   = $entry.StartsWith('SMTP:', [System.StringComparison]::Ordinal)
-                            UserPrincipalName = $u.UserPrincipalName
-                            DomainName        = $u.DomainName
-                            DomainNameShort   = $u.DomainNameShort
-                            SamAccountName    = $u.SamAccountName
-                            DisplayName       = $u.DisplayName
-                            Enabled           = $u.Enabled
-                            LastLogonDate     = $u.LastLogonDate
-                            DistinguishedName = $u.DistinguishedName
-                        })
+                    $targetAddress = ([string]$u.TargetAddress).Trim()
+                    $normalizedTargetAddress = $targetAddress
+                    if ($normalizedTargetAddress -match '^(?i:smtp):(?<Address>.+)$') {
+                        $normalizedTargetAddress = $Matches['Address'].Trim()
+                    }
+                    $normalizedTargetAddress = $normalizedTargetAddress.ToLowerInvariant()
+
+                    [long]$remoteRecipientTypeValue = 0
+                    $hasRemoteRecipientTypeValue = [long]::TryParse(([string]$u.msExchRemoteRecipientType).Trim(), [ref]$remoteRecipientTypeValue)
+                    $isRemoteMailbox = ($hasRemoteRecipientTypeColumn -and $hasRemoteRecipientTypeValue -and $remoteRecipientTypeValue -ne 0) -or
+                        (-not $hasRemoteRecipientTypeColumn -and -not [string]::IsNullOrWhiteSpace($normalizedTargetAddress))
+                    if (-not $isRemoteMailbox) { continue }
+
+                    if (-not [string]::IsNullOrWhiteSpace($normalizedTargetAddress)) {
+                        if (-not $remoteRoutingMap.ContainsKey($normalizedTargetAddress)) {
+                            $remoteRoutingMap[$normalizedTargetAddress] = [System.Collections.Generic.List[object]]::new()
+                        }
+                        [void]$remoteRoutingMap[$normalizedTargetAddress].Add($u)
+                    }
+
+                    $hasMatchingProxyAddress = -not [string]::IsNullOrWhiteSpace($normalizedTargetAddress) -and $proxyAddressSet.Contains($normalizedTargetAddress)
+                    if ([string]::IsNullOrWhiteSpace($normalizedTargetAddress)) {
+                        & $addRemoteRoutingIssue $u 'MissingRemoteRoutingAddress' 'Critical' $targetAddress $normalizedTargetAddress $false $hasExpectedRoutingDomainProxyAddress
+                    }
+                    else {
+                        $isValidTargetAddress = $normalizedTargetAddress -match '^[^@\s]+@[^@\s]+$'
+                        if (-not $isValidTargetAddress) {
+                            & $addRemoteRoutingIssue $u 'InvalidRemoteRoutingAddress' 'Critical' $targetAddress $normalizedTargetAddress $hasMatchingProxyAddress $hasExpectedRoutingDomainProxyAddress
+                        }
+                        else {
+                            $targetAddressDomain = $normalizedTargetAddress.Substring($normalizedTargetAddress.LastIndexOf('@') + 1)
+                            if (-not $targetAddressDomain.Equals($RemoteRoutingDomain, [System.StringComparison]::OrdinalIgnoreCase)) {
+                                & $addRemoteRoutingIssue $u 'UnexpectedRemoteRoutingDomain' 'Critical' $targetAddress $normalizedTargetAddress $hasMatchingProxyAddress $hasExpectedRoutingDomainProxyAddress
+                            }
+                            if (-not $hasMatchingProxyAddress) {
+                                & $addRemoteRoutingIssue $u 'RemoteRoutingAddressMissingFromProxyAddresses' 'Warning' $targetAddress $normalizedTargetAddress $false $hasExpectedRoutingDomainProxyAddress
+                            }
+                        }
+                    }
+
+                    if (-not $hasExpectedRoutingDomainProxyAddress) {
+                        & $addRemoteRoutingIssue $u 'MissingMailOnMicrosoftProxyAddress' 'Critical' $targetAddress $normalizedTargetAddress $hasMatchingProxyAddress $false
                     }
                 }
 
@@ -2766,10 +2956,60 @@ try {
                 $smtpDuplicateCount = @($smtpMap.Keys | Where-Object { $smtpMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate SMTP analysis complete. Distinct duplicate addresses: {0}. Affected entries: {1}. Output: {2}" -f $smtpDuplicateCount, $duplicateSmtpRows.Count, $duplicateSmtpCsv)
 
+                $duplicateRemoteRoutingRows = @(
+                    foreach ($remoteRoutingKey in @($remoteRoutingMap.Keys | Sort-Object)) {
+                        $users = $remoteRoutingMap[$remoteRoutingKey]
+                        if ($users.Count -le 1) { continue }
+
+                        foreach ($u in @($users | Sort-Object DomainName, SamAccountName)) {
+                            [PSCustomObject][ordered]@{
+                                TargetAddress                         = $u.TargetAddress
+                                NormalizedRemoteRoutingAddress        = $remoteRoutingKey
+                                RemoteRoutingAddressOccurrenceCount   = $users.Count
+                                ExpectedRemoteRoutingDomain           = $RemoteRoutingDomain
+                                msExchRemoteRecipientType             = $u.msExchRemoteRecipientType
+                                msExchRecipientTypeDetails            = $u.msExchRecipientTypeDetails
+                                UserPrincipalName                     = $u.UserPrincipalName
+                                DomainName                            = $u.DomainName
+                                DomainNameShort                       = $u.DomainNameShort
+                                SamAccountName                        = $u.SamAccountName
+                                DisplayName                           = $u.DisplayName
+                                Enabled                               = $u.Enabled
+                                LastLogonDate                         = $u.LastLogonDate
+                                DistinguishedName                     = $u.DistinguishedName
+                            }
+                        }
+                    }
+                )
+
+                Assert-SmartM365CsvDataCompleteness -Data $duplicateRemoteRoutingRows -TimestampedPath $duplicateRemoteRoutingCsv -LatestPath $duplicateRemoteRoutingCsv
+                $duplicateRemoteRoutingRows | Add-SmartM365TenantKey | Export-Csv -Path $duplicateRemoteRoutingCsv -NoTypeInformation -Encoding UTF8
+                Add-SmartM365AdGeneratedCsvPath -Path $duplicateRemoteRoutingCsv
+                $remoteRoutingDuplicateCount = @($remoteRoutingMap.Keys | Where-Object { $remoteRoutingMap[$_].Count -gt 1 }).Count
+                WriteLog -Message ("Duplicate remote routing address analysis complete. Distinct duplicate addresses: {0}. Affected accounts: {1}. Output: {2}" -f $remoteRoutingDuplicateCount, $duplicateRemoteRoutingRows.Count, $duplicateRemoteRoutingCsv)
+
+                $remoteRoutingIssueRowsArray = @($remoteRoutingIssueRows.ToArray())
+                Assert-SmartM365CsvDataCompleteness -Data $remoteRoutingIssueRowsArray -TimestampedPath $remoteRoutingIssuesCsv -LatestPath $remoteRoutingIssuesCsv
+                $remoteRoutingIssueRowsArray | Add-SmartM365TenantKey | Export-Csv -Path $remoteRoutingIssuesCsv -NoTypeInformation -Encoding UTF8
+                Add-SmartM365AdGeneratedCsvPath -Path $remoteRoutingIssuesCsv
+                $remoteRoutingIssueAccountCount = @($remoteRoutingIssueRowsArray | Select-Object -ExpandProperty DistinguishedName -Unique).Count
+                $missingRemoteRoutingAddressCount = @($remoteRoutingIssueRowsArray | Where-Object IssueType -eq 'MissingRemoteRoutingAddress').Count
+                $invalidRemoteRoutingAddressCount = @($remoteRoutingIssueRowsArray | Where-Object IssueType -eq 'InvalidRemoteRoutingAddress').Count
+                $unexpectedRemoteRoutingDomainCount = @($remoteRoutingIssueRowsArray | Where-Object IssueType -eq 'UnexpectedRemoteRoutingDomain').Count
+                $remoteRoutingAddressMissingFromProxyCount = @($remoteRoutingIssueRowsArray | Where-Object IssueType -eq 'RemoteRoutingAddressMissingFromProxyAddresses').Count
+                $missingMailOnMicrosoftProxyCount = @($remoteRoutingIssueRowsArray | Where-Object IssueType -eq 'MissingMailOnMicrosoftProxyAddress').Count
+                WriteLog -Message ("Remote routing validation complete. Issue rows: {0}. Affected accounts: {1}. Output: {2}" -f $remoteRoutingIssueRowsArray.Count, $remoteRoutingIssueAccountCount, $remoteRoutingIssuesCsv)
+
                 $duplicateSharePointUploads = @()
-                foreach ($duplicateCsv in @($duplicateUpnCsv, $duplicateSmtpCsv)) {
+                foreach ($duplicateCsv in @($duplicateUpnCsv, $duplicateSmtpCsv, $duplicateRemoteRoutingCsv, $remoteRoutingIssuesCsv)) {
                     if ($destinationRootPath -and (Test-Path -Path $duplicateCsv)) {
-                        $duplicateLabel = if ($duplicateCsv -eq $duplicateUpnCsv) { 'Duplicate UPN' } else { 'Duplicate SMTP' }
+                        $duplicateLabel = switch ($duplicateCsv) {
+                            $duplicateUpnCsv { 'Duplicate UPN'; break }
+                            $duplicateSmtpCsv { 'Duplicate SMTP'; break }
+                            $duplicateRemoteRoutingCsv { 'Duplicate remote routing address'; break }
+                            $remoteRoutingIssuesCsv { 'Remote routing issues'; break }
+                            default { [System.IO.Path]::GetFileNameWithoutExtension($duplicateCsv) }
+                        }
                         $sourceUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $duplicateCsv
                         $sourceUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $sourceUpload -Label ("{0} (DATA-ALL)" -f $duplicateLabel)
                         if ($sourceUpload) { $duplicateSharePointUploads += $sourceUpload }
@@ -2783,7 +3023,7 @@ try {
                     }
                 }
 
-                $hasDuplicateIdentities = (($upnDuplicateCount -gt 0) -or ($smtpDuplicateCount -gt 0))
+                $hasDuplicateIdentities = (($upnDuplicateCount -gt 0) -or ($smtpDuplicateCount -gt 0) -or ($remoteRoutingDuplicateCount -gt 0) -or ($remoteRoutingIssueRowsArray.Count -gt 0))
                 if ($EnableDuplicateNotification -and $hasDuplicateIdentities) {
                     if ([string]::IsNullOrWhiteSpace($DuplicateNotificationLastSentFilePath)) {
                         $DuplicateNotificationLastSentFilePath = Join-Path $OutputPath 'AD_DuplicateNotification_LastSent.txt'
@@ -2804,35 +3044,49 @@ try {
                             New-Item -Path $notificationFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
                         }
 
-                        $emailSubject = "SmartM365 Active Directory duplicate identities detected"
+                        $emailSubject = "SmartM365 Active Directory identity and mail routing issues detected"
                         $duplicateSummaryRows = @(
                             [pscustomobject]@{ Label = 'Distinct duplicate UPNs'; Value = $upnDuplicateCount }
                             [pscustomobject]@{ Label = 'Affected UPN accounts'; Value = $duplicateUpnRows.Count }
                             [pscustomobject]@{ Label = 'Distinct duplicate SMTP addresses'; Value = $smtpDuplicateCount }
                             [pscustomobject]@{ Label = 'Affected SMTP entries'; Value = $duplicateSmtpRows.Count }
+                            [pscustomobject]@{ Label = 'Distinct duplicate remote routing addresses'; Value = $remoteRoutingDuplicateCount }
+                            [pscustomobject]@{ Label = 'Affected remote routing accounts'; Value = $duplicateRemoteRoutingRows.Count }
+                            [pscustomobject]@{ Label = 'Remote routing issue accounts'; Value = $remoteRoutingIssueAccountCount }
+                            [pscustomobject]@{ Label = 'Missing targetAddress'; Value = $missingRemoteRoutingAddressCount }
+                            [pscustomobject]@{ Label = 'Invalid targetAddress'; Value = $invalidRemoteRoutingAddressCount }
+                            [pscustomobject]@{ Label = 'Unexpected targetAddress domain'; Value = $unexpectedRemoteRoutingDomainCount }
+                            [pscustomobject]@{ Label = 'targetAddress absent from proxyAddresses'; Value = $remoteRoutingAddressMissingFromProxyCount }
+                            [pscustomobject]@{ Label = 'Missing tenant mail.onmicrosoft.com proxy'; Value = $missingMailOnMicrosoftProxyCount }
                         )
                         $duplicatePathRows = @(
                             [pscustomobject]@{ Label = 'Source users'; Path = $combinedUsersCsv }
                             [pscustomobject]@{ Label = 'Duplicate UPN'; Path = $duplicateUpnCsv }
                             [pscustomobject]@{ Label = 'Duplicate SMTP'; Path = $duplicateSmtpCsv }
+                            [pscustomobject]@{ Label = 'Duplicate remote routing address'; Path = $duplicateRemoteRoutingCsv }
+                            [pscustomobject]@{ Label = 'Remote routing issues'; Path = $remoteRoutingIssuesCsv }
                         )
                         $duplicateUpnPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateUpnRows -DuplicateType 'UPN' -Limit 50
                         $duplicateSmtpPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateSmtpRows -DuplicateType 'SMTP' -Limit 50
                         $duplicateSharePointSection = New-SmartM365SharePointLinksSection -UploadRecords $duplicateSharePointUploads
+                        $duplicateRemoteRoutingPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateRemoteRoutingRows -DuplicateType 'REMOTE' -Limit 50
+                        $remoteRoutingIssuePreviewSection = New-SmartM365AdRemoteRoutingIssuePreviewSection -Rows $remoteRoutingIssueRowsArray -Limit 50
                         $duplicateSections = @()
                         if ($duplicateUpnPreviewSection) { $duplicateSections += $duplicateUpnPreviewSection }
                         if ($duplicateSmtpPreviewSection) { $duplicateSections += $duplicateSmtpPreviewSection }
                         if ($duplicateSharePointSection) { $duplicateSections += $duplicateSharePointSection }
 
+                        if ($duplicateRemoteRoutingPreviewSection) { $duplicateSections += $duplicateRemoteRoutingPreviewSection }
+                        if ($remoteRoutingIssuePreviewSection) { $duplicateSections += $remoteRoutingIssuePreviewSection }
                         $emailBody = New-SmartM365EmailBody `
                             -Title 'Duplicate identities detected' `
                             -Category 'SmartM365 Active Directory' `
                             -Severity Warning `
                             -Tenant $Tenant `
                             -HostName $env:COMPUTERNAME `
-                            -Message 'Duplicate identity analysis found conflicts in Active Directory user data.' `
+                            -Message ("Duplicate identity and remote routing analysis found conflicts in Active Directory user data. Expected remote routing domain: {0}." -f $RemoteRoutingDomain) `
                             -ActionTitle 'Action required' `
-                            -ActionHtml 'Review the duplicate UPN and SMTP CSV files before identity cleanup, migration, or synchronization decisions.' `
+                            -ActionHtml 'Review the duplicate UPN, SMTP, remote routing address, and remote routing issue CSV files before identity cleanup, migration, or synchronization decisions.' `
                             -SummaryRows $duplicateSummaryRows `
                             -PathRows $duplicatePathRows `
                             -Sections $duplicateSections `
@@ -2981,6 +3235,8 @@ try {
             if ($EnableDuplicateAnalysis -and $EnableUserInventory) {
                 [void]$weeklySourceFiles.Add($duplicateUpnCsv)
                 [void]$weeklySourceFiles.Add($duplicateSmtpCsv)
+                [void]$weeklySourceFiles.Add($duplicateRemoteRoutingCsv)
+                [void]$weeklySourceFiles.Add($remoteRoutingIssuesCsv)
             }
 
             $weeklyHistoryParameters = @{

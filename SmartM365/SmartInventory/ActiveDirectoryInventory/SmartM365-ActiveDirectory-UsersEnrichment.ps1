@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.2
+1.3
 #>
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
@@ -10,8 +10,14 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     param(
         [Parameter(Mandatory = $true)][string]$CombinedUsersCsv,
         [Parameter(Mandatory = $true)][string]$OutputFolder,
-        [Parameter(Mandatory = $false)][string]$LatestFolderPath
+        [Parameter(Mandatory = $false)][string]$LatestFolderPath,
+        [Parameter(Mandatory = $true)][string]$RemoteRoutingDomain
     )
+
+    $RemoteRoutingDomain = $RemoteRoutingDomain.Trim().TrimStart('@').ToLowerInvariant()
+    if ($RemoteRoutingDomain -notmatch '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+mail\.onmicrosoft\.com$') {
+        throw ("Invalid RemoteRoutingDomain passed to AD user enrichment: {0}" -f $RemoteRoutingDomain)
+    }
 
     if (-not (Test-Path -LiteralPath $CombinedUsersCsv)) {
         WriteLog -Message ("WARNING: AD users enrichment source CSV not found: {0}" -f $CombinedUsersCsv)
@@ -748,7 +754,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['PrimarySmtpAddress'] = $primarySmtp
         $out['PrimarySmtpAddressNormalized'] = $primarySmtp
         $out['PrimarySmtpDomain'] = $primaryDomain
-        $out['HasLegacyRoutingDomainProxyAddress'] = if (([string]$user.ProxyAddresses).ToLowerInvariant().Contains('@orpea.mail.onmicrosoft.com')) { 'Yes' } else { 'No' }
+        $out['HasLegacyRoutingDomainProxyAddress'] = if (([string]$user.ProxyAddresses).ToLowerInvariant().Contains('@' + $RemoteRoutingDomain)) { 'Yes' } else { 'No' }
         $out['ExistsInM365Users'] = if ($m365Users.Count -gt 0) { [string]($null -ne $m365User) } else { '' }
         $out['MailboxRecipientType'] = $recipientType
         $out['HasRemoteMailbox'] = [string](@('RemoteUserMailbox','RemoteSharedMailbox','RemoteRoomMailbox') -contains $recipientType)

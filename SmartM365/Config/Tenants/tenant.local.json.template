@@ -7,6 +7,7 @@
   "AppId": "00000000-0000-0000-0000-000000000000",
   "TenantId": "00000000-0000-0000-0000-000000000000",
   "OrgDomain": "contoso.onmicrosoft.com",
+  "RemoteRoutingDomain": "",
   "Thumb": "0000000000000000000000000000000000000000",
   "Thumbprint": "0000000000000000000000000000000000000000",
   "ErrorMailTo": "admin@example.com",
