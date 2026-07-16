@@ -6,6 +6,7 @@
   "AppId": "__USE_GLOBAL__",
   "TenantId": "__USE_GLOBAL__",
   "OrgDomain": "__USE_GLOBAL__",
+  "RemoteRoutingDomain": "__USE_GLOBAL__",
   "Thumb": "__USE_GLOBAL__",
   "Thumbprint": "__USE_GLOBAL__",
   "RetentionMaxCSV": "__USE_GLOBAL__",
