@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.29
+  1.30
 .VERSION
-1.29
+1.30
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.29"
+$ScriptVersion = "1.30"
 
 # ==========================================================
 # App-only authentication parameters
@@ -410,6 +410,14 @@ function Write-Log {
         [ValidateSet("INFO","WARN","ERROR")][string]$Level = "INFO",
         [Parameter()][string]$Stage = ""
     )
+
+    $normalizedLevel = $Level.ToUpperInvariant()
+    if ($normalizedLevel -eq "WARN") {
+        $global:SmartM365WarningCount = [int]$global:SmartM365WarningCount + 1
+    }
+    elseif ($normalizedLevel -eq "ERROR") {
+        $global:SmartM365ErrorCount = [int]$global:SmartM365ErrorCount + 1
+    }
 
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     $fileLine = @([regex]::Split(([string]$Message), '\r?\n') | ForEach-Object { "$ts [$Level][$ScriptName][$RunId] $_" })
@@ -773,6 +781,97 @@ function Invoke-GraphGetAllPages {
         $next = $resp.'@odata.nextLink'
     }
     return $all
+}
+function Resolve-WinUpdateMissingDeviceNames {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory)][hashtable]$Headers
+    )
+
+    $missingRows = @($Rows | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.DeviceName) })
+    if ($missingRows.Count -eq 0) { return }
+
+    Write-Log "Graph report contains $($missingRows.Count) row(s) with an empty DeviceName; resolving unique managed devices by DeviceId." "INFO" "DATA"
+    $resolvedRows = 0
+    $fallbackRows = 0
+    $missingByDeviceId = @($missingRows | Group-Object -Property { [string]$_.DeviceId })
+
+    foreach ($deviceGroup in $missingByDeviceId) {
+        $deviceId = [string]$deviceGroup.Name
+        $resolvedName = ''
+        $resolvedUpn = ''
+        $lookupError = ''
+
+        if (-not [string]::IsNullOrWhiteSpace($deviceId)) {
+            try {
+                $escapedDeviceId = [uri]::EscapeDataString($deviceId)
+                $managedDevice = Invoke-GraphRestMethodWithRetry `
+                    -Method GET `
+                    -Uri "https://graph.microsoft.com/beta/deviceManagement/managedDevices/$escapedDeviceId`?`$select=id,deviceName,userPrincipalName" `
+                    -Headers $Headers `
+                    -Operation "Resolve managed device name"
+                $resolvedName = [string]$managedDevice.deviceName
+                $resolvedUpn = [string]$managedDevice.userPrincipalName
+            }
+            catch {
+                $lookupError = $_.Exception.Message
+            }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($resolvedName)) {
+            foreach ($row in $deviceGroup.Group) {
+                $row.DeviceName = $resolvedName
+                if ($row.PSObject.Properties['UPN'] -and [string]::IsNullOrWhiteSpace([string]$row.UPN) -and -not [string]::IsNullOrWhiteSpace($resolvedUpn)) {
+                    $row.UPN = $resolvedUpn
+                }
+                $resolvedRows++
+            }
+            continue
+        }
+
+        foreach ($row in $deviceGroup.Group) {
+            if (-not [string]::IsNullOrWhiteSpace($deviceId)) {
+                $row.DeviceName = "UnknownDevice-$deviceId"
+            }
+            $fallbackRows++
+        }
+        $failureDetail = if ([string]::IsNullOrWhiteSpace($lookupError)) { 'Graph returned no deviceName.' } else { $lookupError }
+        Write-Log "Managed device name could not be resolved for DeviceId '$deviceId'; using a deterministic fallback where possible. Error: $failureDetail" "WARN" "DATA"
+    }
+
+    Write-Log "Missing DeviceName resolution completed: ResolvedRows=$resolvedRows FallbackRows=$fallbackRows." "INFO" "DATA"
+}
+
+function Assert-WinUpdateOutputQuality {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
+
+    if ($Rows.Count -eq 0) { throw 'Windows Update output quality gate failed: the canonical dataset is empty.' }
+
+    $blankPolicyId = 0
+    $blankDeviceId = 0
+    $blankDeviceName = 0
+    $duplicatePolicyDevice = 0
+    $keys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($row in $Rows) {
+        $policyId = [string]$row.PolicyId
+        $deviceId = [string]$row.DeviceId
+        $deviceName = [string]$row.DeviceName
+        if ([string]::IsNullOrWhiteSpace($policyId)) { $blankPolicyId++ }
+        if ([string]::IsNullOrWhiteSpace($deviceId)) { $blankDeviceId++ }
+        if ([string]::IsNullOrWhiteSpace($deviceName)) { $blankDeviceName++ }
+        if (-not [string]::IsNullOrWhiteSpace($policyId) -and -not [string]::IsNullOrWhiteSpace($deviceId)) {
+            if (-not $keys.Add("$($policyId.Trim())|$($deviceId.Trim())")) { $duplicatePolicyDevice++ }
+        }
+    }
+
+    if ($blankPolicyId -gt 0 -or $blankDeviceId -gt 0 -or $blankDeviceName -gt 0 -or $duplicatePolicyDevice -gt 0) {
+        throw "Windows Update output quality gate failed: BlankPolicyId=$blankPolicyId BlankDeviceId=$blankDeviceId BlankDeviceName=$blankDeviceName DuplicatePolicyDeviceRows=$duplicatePolicyDevice."
+    }
+
+    Write-Log "Output quality gate passed: Rows=$($Rows.Count) BlankPolicyId=0 BlankDeviceId=0 BlankDeviceName=0 DuplicatePolicyDeviceRows=0." "INFO" "DATA"
 }
 
 # ==========================================================
@@ -1255,6 +1354,8 @@ function Select-WinUpdateCanonicalRows {
 $ErrorActionPreference  = "Stop"
 $script:TokenAcquiredAt = [datetime]::MinValue
 $scriptStart = Get-Date
+$global:SmartM365WarningCount = 0
+$global:SmartM365ErrorCount = 0
 
 $script:CompletionStatus = 'Auto'
 try {
@@ -1379,6 +1480,8 @@ try {
     }
 
     Write-Log "Total consolidated rows (raw): $($rawRows.Count)" "INFO" "DATA"
+    Refresh-GraphTokenIfNeeded -TenantId $TenantId -ClientId $AppId -Certificate $cert -Headers ([ref]$headers)
+    Resolve-WinUpdateMissingDeviceNames -Rows $rawRows.ToArray() -Headers $headers
 
     # ----------------------------------------------------------
     # Readiness enrichment
@@ -1563,6 +1666,7 @@ try {
 
     $count = $enrichedRows.Count
     Write-Log "Total consolidated canonical rows (enriched + computed): $count" "INFO" "DATA"
+    Assert-WinUpdateOutputQuality -Rows $enrichedRows
 
     # ----------------------------------------------------------
     # CSV export - DATA-ALL (atomic), DATA-LAST (atomic), Archive
@@ -1832,8 +1936,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAHKNS2s+DGBzj
-# 0BRzWUMuu78cjiWj8sLnF9d0V6942qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6raPfG1uVGAfy
+# hSvOqgrfqoTTV4d+eOdE0gRFIkPyqaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1966,31 +2070,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIChB6Pom2eqh5bWlto7Jul+th7JXw4eqsoVFpXAit7bMA0GCSqG
-# SIb3DQEBAQUABIIBgKDMRYvtcWwolTIhkl4kRasp8gYtTaG9GMDgK1v9Y56AJXC4
-# AwuCVzMZ8GVILjUUTxz8HGlHltKs7VttJTijbMv5oPhELV5wtszjC8ZitIG9r8lq
-# 1OXoYGP50MZ4Ibano5bjyoQqbWmTER+gLzq8ZiS4Kk7vclfcYwI8PwElBtlaRYf2
-# fQnxOFFBx2u0qbAfnMydxHHOSh8rLquqelLUGJU8GTMzIdhHmPIv9tXK005QX2Xx
-# zipgpVyVqvt31dsnsHZtLIHIqrgTtmMvprsPHC4MlHVlHIvK3K2HieWEaptoEX26
-# h7exfJPLDecDxGIgkFMyLP08MiswzoYxCTvrn0joUg533peXmZYnRpCeWr2t8jCT
-# f6orpwlppDfkfnAnpmeIjPwDEo/lVeLx4az4PPfOLn4K5Ccjz+25O6kDB6b4uWr0
-# QoeEkbOMtmTLTRMGUGDJJJGVISM3rR4tTMtACr3omb6Pn0naee/BeS/EjYFVGY3s
-# r7GLYy2PUxTlbB8I+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOd3zgmM9F9Gd+d6fc9HyC5to3C8uQ7kyFOhia616EoeMA0GCSqG
+# SIb3DQEBAQUABIIBgIUpWVCa4KGTmxX/ErTPs99Jv+d86cuhH/UtKHWZnenArXEN
+# D2iufNn2Hv9umk974drc8hWXEqe9mmT83tMDvc6QaftYZ17vpEbq1cOY7pSoSGO8
+# qqASoE8w1di1bcTLDqv/GW0YjDsmKQg+ZmKzAegcm9AyWiCqwEt+07G3fiFtjK4B
+# ACRFFboqRz75xta3585x76dik/tALQifgJuc0k2XIKHSXVniW2r95GR52MchvF/9
+# zvBr0hwShJm+MHa6GJcGs3tJzQZ2WHpQ2YJOSreMez1lR3dmTWJKEyNU+Z4TxItM
+# p5GpT0uEUp60OZCwrrvfrV7fUJJwUWrH79Jelwzx0CJ3zS/UA+cWAODVmJ9KMHpT
+# JwKsEI0PZ3jsnPmBvnGEVx7ZyDJtqzi05rR0OpEH/WpKtSK5QLogCp3PEKKPXjiu
+# g0SBTLcEQnSz2+p/by++sBBwClPhf0Ex5IIBBP6ilIbOSNgrLJjZGQMLT325CL7l
+# C/QGGlQgtqGyFnTBDqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUyMzQy
-# NDZaMC8GCSqGSIb3DQEJBDEiBCBBJvM2NQdA4V3YEpU3v3ZiVTkE4oCJBPSAWggU
-# QcTCazANBgkqhkiG9w0BAQEFAASCAgAFWVogqbAT3inAZafkEtV9tz9zWixHXiFX
-# w3CM9lv3SHa4sh47PgzVYMH4ZYlQ/V2ngycmBM1+2ZqN0pPOOh+fDNpmOZRpCVK7
-# pzVVn3nNxy+xPQjntAaacTkuV7fVBoHO09K7F550KVLqX8W8KonoBbLOtgEflNFo
-# aZuoTWSCO3j2wF88Zrp9Cn8IaKdAayxU2FfG9IFKHk2ulQao8yYXKdzgwfgitwTO
-# LqHprsQIEaX++tJzgAC406WwuYMnNfUsfGD6WVhkwsFe50Hs65yKOWIqJVT6Iau6
-# 0MoA9ne55pmBPTVE7UXW3GP7rl0frWjIKPjfrX5l33+CJWgsgREMa0O8P/aAT2FY
-# srHLbCmapKivk9ArhChHpYC8FjGsR9pSM8rtZ4c51VJNVRwM0B6d360+zrO814gr
-# WWFHnFQvpDQ20dKOMQ7L42JFka9Uhjjsbw/rTGUlS7X4hHMvVPGPLe6Jgea7j5+Z
-# BGj9wO5+P87PMqTm5nTSjFQJu3j4p3fhMjwLRnz711xHe6nDintaqEQHpO8h3Hs/
-# mdwyQFgGBtjgBoPyJVPLTfbjulcj2960C/PXCC9t3MgoKeIRYOXAA1AWCwx6t6uS
-# Us2oXI8hCVya5rpTT+bHPsjJcWDRsVib9t342lX5Wxz9KywOIeBKjL1mfKnpoddv
-# bmeV6dZD9w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYwNzE2
+# MTlaMC8GCSqGSIb3DQEJBDEiBCB/rLDakj/lXk8zJb6UmkQBNBtZK6Rz1wcP3IJe
+# 4BGWJDANBgkqhkiG9w0BAQEFAASCAgB4Glp1Vxc6/TZg/NSiVg1Ket82mFwaNdpX
+# kyTNahMqBrWXjqFzmF5BjGKAG7RCKbclbhzXULbX19GBYNADC766A1zhjXUka23W
+# SqjlaKovz48S1P+bgtWbiCNitTndb8qGxxRGaLAuoHW/3oXP1RvDbY7YozdXlJO9
+# 7Dd6jL4BTZaQfZhpQGG9x6UJ7wwfOgMMXmfqmhsCk9h99uVshGBke2GSApK0OycR
+# pW+6/ezAYdQooDEibhKhN3zodXWPFNt3QcDSVE4kpnS9aPCHb+j/yv+HaBbZj4Su
+# IVgPu+Lq6E+z/hBXx2o0RBes1AJ3UbQVyN0/tEujIUagRJfScf6fTcyF7pG8LbNl
+# NvrPVOjzx8um5gEJAngx4HWJ/7iBdpptfXmaIvBbw8L38Wt7onf186JSVyyHItur
+# /W5YekERTqrCu1aif8C9VR6CYx9Ev51qS6d7jRJ2UzY+l3i6PfLc2OU0Ct6hGj/f
+# Bow7lWzxeCIXm8kKY8Fl77KOa4ww1iS1ebaE4imrocpZqOCcRKjxMhsNBkBzu3ar
+# Yx4+RXK09mqidMGshw5lahj/RV6gyxkdkCjnmlB3L+SPHA/q1ip42zi+URV1W9Bb
+# GkFne5OujLAbOgpxAAljvX/p35j8VHJiwcogfQ4brjbyBOBIUDupbrj27setwPz2
+# FRqjhrBe5A==
 # SIG # End signature block
