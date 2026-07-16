@@ -46,7 +46,7 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.10
+1.11
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -54,7 +54,7 @@ Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" t
     Minimum Graph application permissions: Directory.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.8
+    Version : 1.11
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
 Minimum application permissions: Directory.Read.All, Device.Read.All
