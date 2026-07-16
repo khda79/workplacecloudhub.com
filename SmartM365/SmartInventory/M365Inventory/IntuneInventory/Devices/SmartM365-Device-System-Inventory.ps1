@@ -31,8 +31,11 @@
 
 .PARAMETER RunStatePageSize
     Number of deviceRunStates requested per Graph page. Default: 500. Allowed range: 1-1000.
+
+.PARAMETER RunStatePagePauseMilliseconds
+    Delay between Graph pages in milliseconds. Default: 250. Retry/backoff still handles throttling.
 .VERSION
-2.1
+2.2
 
 
 
@@ -42,7 +45,7 @@
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.1
+    Version : 2.2
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -60,6 +63,9 @@ param(
 
     [ValidateRange(1, 1000)]
     [int]$RunStatePageSize = 500,
+
+    [ValidateRange(0, 5000)]
+    [int]$RunStatePagePauseMilliseconds = 250,
 
     [int]$MaxItems = 0
 )
@@ -381,8 +387,6 @@ try {
 # Throttle-aware retry settings
 $MaxRetries        = 5
 $BaseDelaySeconds  = 2
-$BatchSize         = 50
-$BatchPauseSeconds = 2
 
 # Graph API settings - hardwareInformation fields that are actually populated
 $BulkEndpoint = '/beta/deviceManagement/managedDevices?$select=id,deviceName,azureADDeviceId,userPrincipalName,managementState,complianceState,lastSyncDateTime,hardwareInformation&$top=999'
@@ -457,7 +461,7 @@ function Get-PlatformScriptRunStates {
         [Parameter(Mandatory)][string]$ScriptId
     )
 
-    WriteLog -Message ("Retrieving Platform Script deviceRunStates for script {0}..." -f $ScriptId) "INFO"
+    WriteLog -Message ("Retrieving Platform Script deviceRunStates for script {0}. RequestedPageSize={1}; PagePauseMs={2}" -f $ScriptId, $RunStatePageSize, $RunStatePagePauseMilliseconds) "INFO"
 
     $map = @{}
     $pageCount = 0
@@ -485,8 +489,12 @@ function Get-PlatformScriptRunStates {
 
         $uri = $response.'@odata.nextLink'
         if ($uri) {
-            WriteLog -Message ("Paging deviceRunStates... Total so far: {0}" -f $map.Count) "INFO"
-            Start-Sleep -Seconds $BatchPauseSeconds
+            if (($pageCount % 25) -eq 0) {
+                WriteLog -Message ("Paging deviceRunStates... Pages={0}; devices={1}" -f $pageCount, $map.Count) "INFO"
+            }
+            if ($RunStatePagePauseMilliseconds -gt 0) {
+                Start-Sleep -Milliseconds $RunStatePagePauseMilliseconds
+            }
         }
     }
 
@@ -537,7 +545,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.1"
+$ScriptVersion = "2.2"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
