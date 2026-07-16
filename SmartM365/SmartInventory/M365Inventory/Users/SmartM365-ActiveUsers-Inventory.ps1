@@ -16,10 +16,9 @@
 
 .PARAMETER InteractiveAuth
     Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.6
 
 .VERSION
-1.8
+1.9
 
 
 .REQUIREMENTS
@@ -28,7 +27,7 @@
     Minimum Graph application permissions: User.Read.All; AuditLog.Read.All; Directory.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.6
+    Version : 1.9
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
     Minimum application permissions: User.Read.All, Directory.Read.All, AuditLog.Read.All
@@ -374,7 +373,7 @@ $csvPathLatest            = ""
 
 try {
     #region Initialization
-$ScriptVersion = "1.8"
+$ScriptVersion = "1.9"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
@@ -789,7 +788,8 @@ finally {
     try {
         $summaryStatus = if ($global:ScriptFailed) { 'Failed' } else { 'Auto' }
         $summaryError = if ($global:ScriptFailed) { $globalError } else { $null }
-        Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $summaryError -FailureStage $currentOperation
+        $summaryFailureStage = if ($global:ScriptFailed) { $currentOperation } else { $null }
+        Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $summaryError -FailureStage $summaryFailureStage
     }
     catch {
         WriteLog -Message ("Failed to write execution summary: {0}" -f $_) "WARNING"
