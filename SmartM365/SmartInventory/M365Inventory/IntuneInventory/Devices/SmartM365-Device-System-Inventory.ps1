@@ -28,8 +28,11 @@
 .PARAMETER PlatformScriptId
     The GUID of the Intune Platform Script (SmartM365-Detect-DeviceSystemInfo) deployed to devices.
     Required to retrieve SecureBoot/BIOS/FirmwareType/LastBootUpTime results from deviceRunStates.
+
+.PARAMETER RunStatePageSize
+    Number of deviceRunStates requested per Graph page. Default: 500. Allowed range: 1-1000.
 .VERSION
-2.0
+2.1
 
 
 
@@ -39,7 +42,7 @@
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.0
+    Version : 2.1
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -54,6 +57,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$PlatformScriptId = "0d121c5c-65cc-480f-b07a-9ae79d2d928d",
+
+    [ValidateRange(1, 1000)]
+    [int]$RunStatePageSize = 500,
+
     [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -453,10 +460,12 @@ function Get-PlatformScriptRunStates {
     WriteLog -Message ("Retrieving Platform Script deviceRunStates for script {0}..." -f $ScriptId) "INFO"
 
     $map = @{}
-    $uri = "/beta/deviceManagement/deviceManagementScripts/$ScriptId/deviceRunStates?`$expand=managedDevice(`$select=id)&`$select=resultMessage,lastStateUpdateDateTime&`$top=40"
+    $pageCount = 0
+    $uri = "/beta/deviceManagement/deviceManagementScripts/$ScriptId/deviceRunStates?`$expand=managedDevice(`$select=id)&`$select=resultMessage,lastStateUpdateDateTime&`$top=$RunStatePageSize"
 
     while ($uri) {
         $response = Invoke-GraphSafe -Uri $uri -MaxRetries $MaxRetries -BaseDelaySeconds $BaseDelaySeconds
+        $pageCount++
 
         if ($response.value) {
             foreach ($runState in $response.value) {
@@ -481,7 +490,7 @@ function Get-PlatformScriptRunStates {
         }
     }
 
-    WriteLog -Message ("Platform Script deviceRunStates retrieved: {0} devices" -f $map.Count) "INFO"
+    WriteLog -Message ("Platform Script deviceRunStates retrieved: {0} devices in {1} page(s), requested page size {2}" -f $map.Count, $pageCount, $RunStatePageSize) "INFO"
     return $map
 }
 
@@ -528,7 +537,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.0"
+$ScriptVersion = "2.1"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
