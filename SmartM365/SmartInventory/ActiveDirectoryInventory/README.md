@@ -59,4 +59,7 @@ The inventory script can keep one weekly snapshot of the consolidated AD invento
 - `EnableWeeklyHistory`: defaults to `true`.
 - `WeeklyHistoryFolderPath`: defaults to `{{DataAllRootPath}}\ActiveDirectory\Inventory\WeeklyHistory`.
 - `WeeklyHistoryRetentionWeeks`: defaults to `52`.
-- `DeleteTemporaryPerDomainCsv`: defaults to `true`; per-domain temporary CSV files are deleted after consolidation.
+- Weekly history keeps the canonical enriched `AD_Users_AllDomains.csv` and `AD_Computers_AllDomains.csv`; raw `_Brut.csv` files remain available only in the current inventory and `DATA-LAST`.
+- A weekly snapshot is marked complete only after every enabled canonical inventory CSV is present. An incomplete week is rebuilt by the next successful run.
+- `DeleteTemporaryPerDomainCsv`: defaults to `true`; the current per-domain temporary folder is deleted after consolidation.
+- `TemporaryPerDomainRetentionDays`: defaults to `2`; abandoned timestamped folders under `Not-CSV-Combined` older than this value are deleted at the start of a normal inventory run.
