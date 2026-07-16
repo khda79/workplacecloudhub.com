@@ -46,7 +46,7 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.11
+1.12
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -54,7 +54,7 @@ Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" t
     Minimum Graph application permissions: Directory.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.11
+    Version : 1.12
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
 Minimum application permissions: Directory.Read.All, Device.Read.All
@@ -574,7 +574,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
@@ -1012,10 +1012,26 @@ try {
             }
         }
 
+        $BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPending"
+        $hwPendingColumns = @(
+            "HardwareId",
+            "ObjectId",
+            "DeviceId",
+            "DisplayName",
+            "OperatingSystem",
+            "OperatingSystemVersion",
+            "TrustType",
+            "OnPremisesSyncEnabled",
+            "OnPremisesLastSyncDateTime",
+            "RegistrationDateTime",
+            "ApproximateLastSignInDateTime",
+            "AutopilotZTDID",
+            "HasAlternativeSecurityIds",
+            "IsPending"
+        )
+
         if ($hwPending.Count -gt 0) {
             WriteLog -Message "Pending devices inside HardwareId conflicts: $($hwPending.Count)"
-
-            $BaseFileNameHwPending = "M365_Entra_Devices_HardwareIdConflicts_RegisteredPending"
 
             ExportAndCopyCsv -BaseFileName $BaseFileNameHwPending `
                 -OutputPath $OutputPath `
@@ -1027,7 +1043,23 @@ try {
             WriteLog -Message "Pending devices in HardwareId conflict report exported."
         }
         else {
-            WriteLog -Message "No pending devices found inside HardwareId conflicts." "INFO"
+            $latestCsvFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+            $emptyPendingExport = Export-SmartM365Csv `
+                -BaseFileName $BaseFileNameHwPending `
+                -OutputPath $OutputPath `
+                -GlobalPath $latestCsvFolder `
+                -Data $null `
+                -Columns $hwPendingColumns `
+                -Encoding "UTF8"
+
+            $currentBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileNameHwPending
+            $currentPendingPath = Join-Path $OutputPath ("{0}.csv" -f $currentBaseFileName)
+            Copy-Item -LiteralPath $emptyPendingExport.TimestampedPath -Destination $currentPendingPath -Force -ErrorAction Stop
+            if (-not $global:csvGeneratedPaths) {
+                $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            }
+            [void]$global:csvGeneratedPaths.Add($currentPendingPath)
+            WriteLog -Message "No pending devices found inside HardwareId conflicts. Header-only CSV published to replace stale snapshots." "INFO"
         }
     }
     else {
