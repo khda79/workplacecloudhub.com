@@ -36,10 +36,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.10
+    Version : 1.12
 
 .VERSION
-1.10
+1.12
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.10
+    Version : 1.12
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -424,6 +424,122 @@ function Get-GraphRetryDelaySeconds {
 
     $backoff = [math]::Min($MaximumSeconds, [math]::Pow(2, [math]::Min($Attempt, 8)) * 5)
     return [int]($backoff + (Get-Random -Minimum 0 -Maximum 5))
+}
+
+function Get-GraphBatchRetryDelaySeconds {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][object[]]$Responses,
+        [int]$Attempt,
+        [int]$MaximumSeconds = 180
+    )
+
+    $maximumRetryAfter = 0
+    foreach ($response in @($Responses)) {
+        $retryAfter = $null
+        $headers = $response.headers
+        if ($headers -is [System.Collections.IDictionary]) {
+            foreach ($key in @($headers.Keys)) {
+                if ([string]::Equals([string]$key, 'Retry-After', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $retryAfter = @($headers[$key] | Select-Object -First 1)[0]
+                    break
+                }
+            }
+        } elseif ($headers) {
+            $property = $headers.PSObject.Properties |
+                Where-Object { [string]::Equals($_.Name, 'Retry-After', [System.StringComparison]::OrdinalIgnoreCase) } |
+                Select-Object -First 1
+            if ($property) { $retryAfter = @($property.Value | Select-Object -First 1)[0] }
+        }
+
+        $seconds = 0
+        if ($retryAfter -and [int]::TryParse([string]$retryAfter, [ref]$seconds) -and $seconds -gt $maximumRetryAfter) {
+            $maximumRetryAfter = $seconds
+        }
+    }
+
+    if ($maximumRetryAfter -gt 0) {
+        return [math]::Min($maximumRetryAfter, $MaximumSeconds)
+    }
+
+    return [int][math]::Min($MaximumSeconds, [math]::Pow(2, [math]::Min($Attempt, 8)))
+}
+
+function Invoke-GraphBatchWithSubRequestRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Requests,
+        [Parameter(Mandatory = $true)][string]$Operation,
+        [Parameter(Mandatory = $false)][int]$ServerErrorMaxAttempts = 2
+    )
+
+    $responseMap = @{}
+    $pending = @($Requests)
+    $maxAttempts = [math]::Max(1, $script:GraphMaxRetryAttempts)
+    $serverErrorMaxAttempts = [math]::Max(1, [math]::Min($ServerErrorMaxAttempts, $maxAttempts))
+    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
+
+    for ($attempt = 1; $attempt -le $maxAttempts -and $pending.Count -gt 0; $attempt++) {
+        $nextPending = [System.Collections.Generic.List[object]]::new()
+        $retryResponses = [System.Collections.Generic.List[object]]::new()
+        $batchSize = [math]::Max(1, [int][math]::Floor(20 / [math]::Pow(2, $attempt - 1)))
+
+        for ($offset = 0; $offset -lt $pending.Count; $offset += $batchSize) {
+            $last = [math]::Min($offset + $batchSize - 1, $pending.Count - 1)
+            $slice = @($pending[$offset..$last])
+            $requestById = @{}
+            foreach ($request in $slice) { $requestById[[string]$request.id] = $request }
+
+            $body = @{ requests = $slice } | ConvertTo-Json -Depth 6
+            $batchResponse = Invoke-WithRetry -Operation $Operation -Script {
+                Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
+            }
+
+            $receivedIds = @{}
+            foreach ($response in @($batchResponse.responses)) {
+                $requestId = [string]$response.id
+                $receivedIds[$requestId] = $true
+                $status = [int]$response.status
+                $isThrottle = $status -eq 429
+                $isServerError = $status -in @(500, 502, 503, 504)
+                $canRetry = ($isThrottle -and $attempt -lt $maxAttempts) -or
+                    ($isServerError -and $attempt -lt $serverErrorMaxAttempts)
+
+                if ($status -eq 200 -or -not $canRetry) {
+                    $responseMap[$requestId] = $response
+                    continue
+                }
+
+                [void]$nextPending.Add($requestById[$requestId])
+                [void]$retryResponses.Add($response)
+            }
+
+            foreach ($request in $slice) {
+                $requestId = [string]$request.id
+                if ($receivedIds.ContainsKey($requestId)) { continue }
+                if ($attempt -lt $maxAttempts) {
+                    [void]$nextPending.Add($request)
+                } else {
+                    $responseMap[$requestId] = [pscustomobject]@{
+                        id = $requestId
+                        status = 0
+                        body = $null
+                        headers = $null
+                    }
+                }
+            }
+        }
+
+        if ($nextPending.Count -gt 0) {
+            $delay = Get-GraphBatchRetryDelaySeconds -Responses @($retryResponses) -Attempt $attempt -MaximumSeconds $script:GraphRetryMaxSeconds
+            Start-Sleep -Seconds $delay
+            $pending = @($nextPending)
+        } else {
+            $pending = @()
+        }
+    }
+
+    return $responseMap
 }
 
 function Invoke-WithRetry {
@@ -551,51 +667,49 @@ function Get-CompliancePolicyStateBatchMap {
 
     $result = @{}
     $eligibleDevices = @($Devices | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Id) })
-    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
+    $requests = [System.Collections.Generic.List[object]]::new()
+    foreach ($device in $eligibleDevices) {
+        $deviceId = [string]$device.Id
+        [void]$requests.Add(@{
+            id = $deviceId
+            method = 'GET'
+            url = "/deviceManagement/managedDevices/$deviceId/deviceCompliancePolicyStates?`$top=200"
+        })
+    }
 
-    for ($offset = 0; $offset -lt $eligibleDevices.Count; $offset += 20) {
-        $last = [math]::Min($offset + 19, $eligibleDevices.Count - 1)
-        $slice = @($eligibleDevices[$offset..$last])
-        $requestDeviceMap = @{}
-        $requests = [System.Collections.Generic.List[object]]::new()
-        $requestId = 1
+    $responseMap = Invoke-GraphBatchWithSubRequestRetry -Requests @($requests) -Operation 'Get Intune compliance policy states batch'
+    $failureCounts = @{}
+    $failureExamples = [System.Collections.Generic.List[string]]::new()
 
-        foreach ($device in $slice) {
-            $localId = [string]$requestId
-            $deviceId = [string]$device.Id
-            $requestDeviceMap[$localId] = $deviceId
-            [void]$requests.Add(@{
-                id = $localId
-                method = 'GET'
-                url = "/deviceManagement/managedDevices/$deviceId/deviceCompliancePolicyStates?`$top=200"
-            })
-            $requestId++
+    foreach ($request in $requests) {
+        $deviceId = [string]$request.id
+        $response = $responseMap[$deviceId]
+        $status = if ($response) { [int]$response.status } else { 0 }
+        if ($status -ne 200) {
+            $statusKey = [string]$status
+            if (-not $failureCounts.ContainsKey($statusKey)) { $failureCounts[$statusKey] = 0 }
+            $failureCounts[$statusKey]++
+            if ($failureExamples.Count -lt 5) { [void]$failureExamples.Add($deviceId) }
+            continue
         }
 
-        $body = @{ requests = $requests } | ConvertTo-Json -Depth 6
-        $batchResponse = Invoke-WithRetry -Operation 'Get Intune compliance policy states batch' -Script {
-            Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
-        }
-
-        foreach ($response in @($batchResponse.responses)) {
-            $deviceId = $requestDeviceMap[[string]$response.id]
-            if ([int]$response.status -ne 200) {
-                Write-Warning ("Compliance policy-state batch sub-request failed for managed device {0}: HTTP {1}. Sequential fallback will be used." -f $deviceId, $response.status)
-                continue
+        $values = [System.Collections.Generic.List[object]]::new()
+        foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
+        $nextLink = [string]$response.body.'@odata.nextLink'
+        while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+            $page = Invoke-WithRetry -Operation 'Get Intune compliance policy-state continuation page' -Script {
+                Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
             }
-
-            $values = [System.Collections.Generic.List[object]]::new()
-            foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
-            $nextLink = [string]$response.body.'@odata.nextLink'
-            while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
-                $page = Invoke-WithRetry -Operation 'Get Intune compliance policy-state continuation page' -Script {
-                    Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
-                }
-                foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
-                $nextLink = [string]$page.'@odata.nextLink'
-            }
-            $result[$deviceId] = @($values)
+            foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
+            $nextLink = [string]$page.'@odata.nextLink'
         }
+        $result[$deviceId] = @($values)
+    }
+
+    if ($failureCounts.Count -gt 0) {
+        $failureTotal = ($failureCounts.Values | Measure-Object -Sum).Sum
+        $statusSummary = (@($failureCounts.GetEnumerator() | Sort-Object Name | ForEach-Object { "HTTP $($_.Name)=$($_.Value)" }) -join ', ')
+        Write-Warning ("{0} compliance policy-state batch sub-request(s) still failed after targeted retries ({1}). Sequential fallback will be used. Sample managed device IDs: {2}" -f $failureTotal, $statusSummary, ($failureExamples -join ', '))
     }
 
     return $result
@@ -610,51 +724,52 @@ function Get-ComplianceSettingStateBatchMap {
 
     $result = @{}
     $targets = @($Policies | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.id) })
-    $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
+    $requests = [System.Collections.Generic.List[object]]::new()
+    foreach ($policy in $targets) {
+        $policyId = [string]$policy.id
+        $escapedPolicyId = [uri]::EscapeDataString($policyId)
+        [void]$requests.Add(@{
+            id = $policyId
+            method = 'GET'
+            url = "/deviceManagement/managedDevices/$ManagedDeviceId/deviceCompliancePolicyStates/$escapedPolicyId/settingStates?`$select=setting,state&`$top=200"
+        })
+    }
 
-    for ($offset = 0; $offset -lt $targets.Count; $offset += 20) {
-        $last = [math]::Min($offset + 19, $targets.Count - 1)
-        $requests = [System.Collections.Generic.List[object]]::new()
-        $requestPolicyMap = @{}
-        $requestId = 1
+    # A 5xx returned only inside the batch commonly succeeds through the existing direct fallback.
+    # Retry throttles here, but do not multiply per-device delays for a batch-only server error.
+    $responseMap = Invoke-GraphBatchWithSubRequestRetry -Requests @($requests) -Operation 'Get Intune compliance setting states batch' -ServerErrorMaxAttempts 1
+    $failureCounts = @{}
+    $failureExamples = [System.Collections.Generic.List[string]]::new()
 
-        foreach ($policy in @($targets[$offset..$last])) {
-            $localId = [string]$requestId
-            $policyId = [string]$policy.id
-            $escapedPolicyId = [uri]::EscapeDataString($policyId)
-            $requestPolicyMap[$localId] = $policyId
-            [void]$requests.Add(@{
-                id = $localId
-                method = 'GET'
-                url = "/deviceManagement/managedDevices/$ManagedDeviceId/deviceCompliancePolicyStates/$escapedPolicyId/settingStates?`$select=setting,state&`$top=200"
-            })
-            $requestId++
+    foreach ($request in $requests) {
+        $policyId = [string]$request.id
+        $response = $responseMap[$policyId]
+        $status = if ($response) { [int]$response.status } else { 0 }
+        if ($status -ne 200) {
+            $statusKey = [string]$status
+            if (-not $failureCounts.ContainsKey($statusKey)) { $failureCounts[$statusKey] = 0 }
+            $failureCounts[$statusKey]++
+            if ($failureExamples.Count -lt 5) { [void]$failureExamples.Add($policyId) }
+            continue
         }
 
-        $body = @{ requests = $requests } | ConvertTo-Json -Depth 6
-        $batchResponse = Invoke-WithRetry -Operation 'Get Intune compliance setting states batch' -Script {
-            Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
-        }
-
-        foreach ($response in @($batchResponse.responses)) {
-            $policyId = $requestPolicyMap[[string]$response.id]
-            if ([int]$response.status -ne 200) {
-                Write-Warning ("Compliance setting-state batch sub-request failed for policy {0} on managed device {1}: HTTP {2}. Sequential fallback will be used." -f $policyId, $ManagedDeviceId, $response.status)
-                continue
+        $values = [System.Collections.Generic.List[object]]::new()
+        foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
+        $nextLink = [string]$response.body.'@odata.nextLink'
+        while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
+            $page = Invoke-WithRetry -Operation 'Get Intune compliance setting-state continuation page' -Script {
+                Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
             }
-
-            $values = [System.Collections.Generic.List[object]]::new()
-            foreach ($value in @($response.body.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
-            $nextLink = [string]$response.body.'@odata.nextLink'
-            while (-not [string]::IsNullOrWhiteSpace($nextLink)) {
-                $page = Invoke-WithRetry -Operation 'Get Intune compliance setting-state continuation page' -Script {
-                    Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
-                }
-                foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
-                $nextLink = [string]$page.'@odata.nextLink'
-            }
-            $result[$policyId] = @($values)
+            foreach ($value in @($page.value)) { if ($null -ne $value) { [void]$values.Add($value) } }
+            $nextLink = [string]$page.'@odata.nextLink'
         }
+        $result[$policyId] = @($values)
+    }
+
+    if ($failureCounts.Count -gt 0) {
+        $failureTotal = ($failureCounts.Values | Measure-Object -Sum).Sum
+        $statusSummary = (@($failureCounts.GetEnumerator() | Sort-Object Name | ForEach-Object { "HTTP $($_.Name)=$($_.Value)" }) -join ', ')
+        Write-Warning ("{0} compliance setting-state batch sub-request(s) failed for managed device {1} ({2}). Sequential fallback will be used. Sample policy IDs: {3}" -f $failureTotal, $ManagedDeviceId, $statusSummary, ($failureExamples -join ', '))
     }
 
     return $result
@@ -1329,8 +1444,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA+FZBGfFLGNlAg
-# OEe8W0MH8OqaMkefRb2+4YkywZgauaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6+c6o3w24FRc6
+# 8Zrydb8bhyrREVikvKyGPOpc5H5tR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1463,31 +1578,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAbXT8ktFN9i88acqEdXt823rdNK+e32OrrJ0WnWsQrlMA0GCSqG
-# SIb3DQEBAQUABIIBgIecZsoPJOG3hyHr1e3IRXN9ZXABuavtXwMkMoNmgVw/uCNH
-# DbffQqKd/05NFHpob3C+YMu/r+1qVth72rppWrxvo5tCh/MQ35y8JBEWGr50vTrF
-# GJpu+AaC8oI+mRopf/Jn3mArxhN0yD16zDJhP3DyosHEbFxdRHUsT3Ov4zhG7Xqz
-# vz9SSiwmyn31/7+2/CG8V6zbVln5zF9IuArtb1N+b7AH+YarNeDDaERF7cJYdvCp
-# jb5iUrnMxwAjd/9S4XyuJ3/D1oOIQI3J52AYEMP2bzPR8p/fhv9bG1a2Uz945Fyk
-# rKG/sjKMVD0kfOA9zuvMUoGdUlRS1BT/bRGneL3AxTkgbJE90uf4VX8IPvgMVYos
-# hh2gJ0VPnFFZu2djh/9L+Etm3fVZyf8EPLjFL7CgJd6MXPawpOe3QsUdXnn/8ZOg
-# A74QeFSurT9yMUEOj66uQAizAUbvABuOdszRuxHOK+zVN3Wx/wfIkGwaWhYFnfCI
-# dudK4wrAbsR9BlDY86GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMHvBxp5jMVmjEX7/z3L3tyFi6hN/W+o3aZbyW8DfOaTMA0GCSqG
+# SIb3DQEBAQUABIIBgBS7qhm6Y1pJVsFFUZXW0TToZ6U5mb5WssESmFrKbp23IyDS
+# 1HmSberRLFUHK+h8ehXQEItrKj9jMj/L6GWEVnUuWqiKk2CtTIHf5c10Ldj9L00V
+# EyJj89Luy96f1bcvASyWdCeBbq6IbLSX4A1zqF7lLkxMtnycumvLqTUsj5IwGPiu
+# yI5KQiK7Fvb7QyjmORefoVAimdynA35An+AoIUSyXhO9FB3AaVmqQXUyhrkCtqob
+# hYD+iEflIR5gAVytrBXixNZODu1aImQfGuA5paolk4ggWCIwfgLzHEUTz99t3xj5
+# e6BgQY3agF5IfKrESNiXHBPEGf0j1fW1oL6lY53rFrZAajMGz5RO29hsnoik1H27
+# Cy4HLs5XZDsvYu5Zu3jhsyGBRTC4rkR9UdBY1aYW0XVFWL0VqTBB0WoPuTnsZMFB
+# 1hi69FndesK2+fsSV0PmhUsAmdKG6pwKwZ4HV9y2y1g8rq9MVDYVeXE8tTNEynkn
+# B0hNUHKrElyPtJsyM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzVaMC8GCSqGSIb3DQEJBDEiBCCmdmsrd2nQ7zN6qMOee/oZKOrdYaeGo3GY1qig
-# j6F+SjANBgkqhkiG9w0BAQEFAASCAgCogmzFj1+e7FWIzedoLPrSA6BhgDSPPQR6
-# GCe94Zjl1Qvw0/E8jpbsabRJ7vkeIpeTtzKj7QUC92sQk1MHZsLjS3WY2ELl8ik4
-# qXWEzyDDyq4hTiY2LXacK9v7eAT20DzYnKT9dswFr4wlT3mZTR867RDmPMI8PCjM
-# RTaFyvA68bOzGqxLmXaVrfjWAo8TCAJpr70/eDOdhL5dfjeNLRksrv7hE+tEwtrx
-# +jULMLPYyf5w8xaMG1opp+gPAw3kwrlcp7tf3Dir7FzRzPxDTzosFSfzQ8cfPqWE
-# ZlkCTGLuOPhqU2+xE8hu6RWNG405BoKehgS5SNXGH1HGFdODKG+TaIA2Ikp4krPX
-# jQSZvupNru2Qyd5yrAHMNHyN/SsR9GEav1DH2nlVSbkWSY840iEc+08jIVYWU2G9
-# ELRI12QeRaRXJHnLttA0pcUceXnKHAg3C1UhvVmPEe3+g/vLZyedh5mgzvTQzpPO
-# 6FwmYZGUycT9Z/l/T+6mcvCRvRFxZmnJ1JviLEbtrjLiLceopDg9MDN/BD4o7CWf
-# TIJeBqmgMG3h2kQ0atCFdeH/nlSSKtJb9a8XkmosW3eeQhBgr5XyecesNsUp6JIT
-# mCosFcFCJW3PSHVJ99BcygjEfaEPfdamks9VQBYYcN9U79SWbTscvsnThScHvwwq
-# EWZkRMt3aw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYxMjQ2
+# MjRaMC8GCSqGSIb3DQEJBDEiBCBmuSAnUDM5K3KeUGEDY6CvB02n/CHlnVDczOgR
+# s8wUWDANBgkqhkiG9w0BAQEFAASCAgAIAozAc1NLS9s3cqIPc4QJT7E6YrVY5A4R
+# 1UYp249tUb8o5fukBD/HOmETQHsMBCHug7/lB/2+J0+VEquH9wW5WabzPjnmqiKa
+# o1ppuTl47xO+n2uWa1Yssv29GMbgIY/60Dr7aEUzS3D62sHuJsnVhAe4U9rAn5q5
+# qgxNZdoZDy6yCDxBE1q/VqO0HF8MoEZBwYLbD84yVqR2k/xK3wDJdyTeru51TWjj
+# 8cBRNiLVainorHHQUZcokkC4JdfksMWBFkCiGXpvtDdUJOjrcR9WJ3YGy1zxt7zp
+# SQrNjFlKLmn+CgfD2KE4wOOuZstpP2qDtWDkPggDnlvRIWCTZUuZFL4GIL661doS
+# EqsusR2wCfs1V0SyvIzG1e0aBIoFgllLxgfHt3IGYYelXZJ7zH0xjNOrO9LrJsHi
+# w+8uaAvzpp+EnnylRKC7VOIo8SQHekG2nydjkewSlY4rZiqKZhdqvzgrpPGIwX0a
+# pTBPLZuXMzENHUC5bnxgV7Ss4tagxCLa8G3Sldzoyg40XWohdqD5ZuoTCkO8AaNn
+# qexyRX0xyCFZW/CzanSCNEyCBshMi4lgmwQs9eLbJ5tKcmcFCf421KLrlDZH4HRe
+# XZdCnvNtI2rCIzGGfItbEwFZs0wQRX8mRgMzI3lo34ojLaN3VHeQvSnzd9V1qWT8
+# oC69+9ulDQ==
 # SIG # End signature block
