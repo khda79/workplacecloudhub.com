@@ -36,10 +36,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.12
+    Version : 1.13
 
 .VERSION
-1.12
+1.13
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.12
+    Version : 1.13
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -328,6 +328,8 @@ $script:PolicyStateFailureCount = 0
 $script:ConsecutivePolicyStateFailures = 0
 $script:PolicyStateCollectionDisabled = -not $script:IncludePolicyStatesEffective
 $script:ComplianceFatalError = $null
+$script:SettingBatchFallbackCounts = @{}
+$script:SettingBatchFallbackExamples = [System.Collections.Generic.List[string]]::new()
 
 $logDir = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) {
     Join-Path $ScriptCsvLogFolderPath "Log"
@@ -353,11 +355,19 @@ $global:SmartM365ExecutionStartTime = Get-Date
 $global:SmartM365ExecutionSummaryWritten = $false
 Set-SmartM365CoreContext -RunId $ts -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $global:LogTextFile
 
+function Write-ComplianceWarning {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    $global:SmartM365WarningCount = [int]$global:SmartM365WarningCount + 1
+    Write-Warning $Message
+}
+
 try {
     $transcriptPath = $global:logTranscriptFile
     Start-Transcript -Path $transcriptPath -Force | Out-Null
 } catch {
-    Write-Warning "Failed to start transcript. $_"
+    Write-ComplianceWarning -Message "Failed to start transcript. $_"
 }
 
 # ==========================================================
@@ -474,74 +484,80 @@ function Invoke-GraphBatchWithSubRequestRetry {
     )
 
     $responseMap = @{}
-    $pending = @($Requests)
     $maxAttempts = [math]::Max(1, $script:GraphMaxRetryAttempts)
     $serverErrorMaxAttempts = [math]::Max(1, [math]::Min($ServerErrorMaxAttempts, $maxAttempts))
     $batchUri = "https://graph.microsoft.com/v1.0/" + '$batch'
 
-    for ($attempt = 1; $attempt -le $maxAttempts -and $pending.Count -gt 0; $attempt++) {
-        $nextPending = [System.Collections.Generic.List[object]]::new()
-        $retryResponses = [System.Collections.Generic.List[object]]::new()
-        $batchSize = [math]::Max(1, [int][math]::Floor(20 / [math]::Pow(2, $attempt - 1)))
+    # Retry each throttled slice before sending the rest of the collection. The former
+    # whole-collection retry kept submitting thousands of requests after Graph had
+    # started returning 429, then waited only after the throttle storm was complete.
+    for ($initialOffset = 0; $initialOffset -lt $Requests.Count; $initialOffset += 20) {
+        $initialLast = [math]::Min($initialOffset + 19, $Requests.Count - 1)
+        $pending = @($Requests[$initialOffset..$initialLast])
 
-        for ($offset = 0; $offset -lt $pending.Count; $offset += $batchSize) {
-            $last = [math]::Min($offset + $batchSize - 1, $pending.Count - 1)
-            $slice = @($pending[$offset..$last])
-            $requestById = @{}
-            foreach ($request in $slice) { $requestById[[string]$request.id] = $request }
+        for ($attempt = 1; $attempt -le $maxAttempts -and $pending.Count -gt 0; $attempt++) {
+            $nextPending = [System.Collections.Generic.List[object]]::new()
+            $retryResponses = [System.Collections.Generic.List[object]]::new()
+            $batchSize = [math]::Max(1, [int][math]::Floor(20 / [math]::Pow(2, $attempt - 1)))
 
-            $body = @{ requests = $slice } | ConvertTo-Json -Depth 6
-            $batchResponse = Invoke-WithRetry -Operation $Operation -Script {
-                Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
-            }
+            for ($offset = 0; $offset -lt $pending.Count; $offset += $batchSize) {
+                $last = [math]::Min($offset + $batchSize - 1, $pending.Count - 1)
+                $slice = @($pending[$offset..$last])
+                $requestById = @{}
+                foreach ($request in $slice) { $requestById[[string]$request.id] = $request }
 
-            $receivedIds = @{}
-            foreach ($response in @($batchResponse.responses)) {
-                $requestId = [string]$response.id
-                $receivedIds[$requestId] = $true
-                $status = [int]$response.status
-                $isThrottle = $status -eq 429
-                $isServerError = $status -in @(500, 502, 503, 504)
-                $canRetry = ($isThrottle -and $attempt -lt $maxAttempts) -or
-                    ($isServerError -and $attempt -lt $serverErrorMaxAttempts)
-
-                if ($status -eq 200 -or -not $canRetry) {
-                    $responseMap[$requestId] = $response
-                    continue
+                $body = @{ requests = $slice } | ConvertTo-Json -Depth 6
+                $batchResponse = Invoke-WithRetry -Operation $Operation -Script {
+                    Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
                 }
 
-                [void]$nextPending.Add($requestById[$requestId])
-                [void]$retryResponses.Add($response)
-            }
+                $receivedIds = @{}
+                foreach ($response in @($batchResponse.responses)) {
+                    $requestId = [string]$response.id
+                    $receivedIds[$requestId] = $true
+                    $status = [int]$response.status
+                    $isThrottle = $status -eq 429
+                    $isServerError = $status -in @(500, 502, 503, 504)
+                    $canRetry = ($isThrottle -and $attempt -lt $maxAttempts) -or
+                        ($isServerError -and $attempt -lt $serverErrorMaxAttempts)
 
-            foreach ($request in $slice) {
-                $requestId = [string]$request.id
-                if ($receivedIds.ContainsKey($requestId)) { continue }
-                if ($attempt -lt $maxAttempts) {
-                    [void]$nextPending.Add($request)
-                } else {
-                    $responseMap[$requestId] = [pscustomobject]@{
-                        id = $requestId
-                        status = 0
-                        body = $null
-                        headers = $null
+                    if ($status -eq 200 -or -not $canRetry) {
+                        $responseMap[$requestId] = $response
+                        continue
+                    }
+
+                    [void]$nextPending.Add($requestById[$requestId])
+                    [void]$retryResponses.Add($response)
+                }
+
+                foreach ($request in $slice) {
+                    $requestId = [string]$request.id
+                    if ($receivedIds.ContainsKey($requestId)) { continue }
+                    if ($attempt -lt $maxAttempts) {
+                        [void]$nextPending.Add($request)
+                    } else {
+                        $responseMap[$requestId] = [pscustomobject]@{
+                            id = $requestId
+                            status = 0
+                            body = $null
+                            headers = $null
+                        }
                     }
                 }
             }
-        }
 
-        if ($nextPending.Count -gt 0) {
-            $delay = Get-GraphBatchRetryDelaySeconds -Responses @($retryResponses) -Attempt $attempt -MaximumSeconds $script:GraphRetryMaxSeconds
-            Start-Sleep -Seconds $delay
-            $pending = @($nextPending)
-        } else {
-            $pending = @()
+            if ($nextPending.Count -gt 0) {
+                $delay = Get-GraphBatchRetryDelaySeconds -Responses @($retryResponses) -Attempt $attempt -MaximumSeconds $script:GraphRetryMaxSeconds
+                Start-Sleep -Seconds $delay
+                $pending = @($nextPending)
+            } else {
+                $pending = @()
+            }
         }
     }
 
     return $responseMap
 }
-
 function Invoke-WithRetry {
     [CmdletBinding()]
     param(
@@ -574,7 +590,7 @@ function Invoke-WithRetry {
 
             $delay = Get-GraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt -MaximumSeconds $script:GraphRetryMaxSeconds
             $statusRetryText = if ($statusCode) { $statusCode } else { 'unknown' }
-            Write-Warning ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusRetryText, $attempt, $MaxAttempts, $delay)
+            Write-ComplianceWarning -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusRetryText, $attempt, $MaxAttempts, $delay)
             Start-Sleep -Seconds $delay
         }
     }
@@ -709,7 +725,7 @@ function Get-CompliancePolicyStateBatchMap {
     if ($failureCounts.Count -gt 0) {
         $failureTotal = ($failureCounts.Values | Measure-Object -Sum).Sum
         $statusSummary = (@($failureCounts.GetEnumerator() | Sort-Object Name | ForEach-Object { "HTTP $($_.Name)=$($_.Value)" }) -join ', ')
-        Write-Warning ("{0} compliance policy-state batch sub-request(s) still failed after targeted retries ({1}). Sequential fallback will be used. Sample managed device IDs: {2}" -f $failureTotal, $statusSummary, ($failureExamples -join ', '))
+        Write-ComplianceWarning -Message ("{0} compliance policy-state batch sub-request(s) still failed after targeted retries ({1}). Sequential fallback will be used. Sample managed device IDs: {2}" -f $failureTotal, $statusSummary, ($failureExamples -join ', '))
     }
 
     return $result
@@ -769,7 +785,17 @@ function Get-ComplianceSettingStateBatchMap {
     if ($failureCounts.Count -gt 0) {
         $failureTotal = ($failureCounts.Values | Measure-Object -Sum).Sum
         $statusSummary = (@($failureCounts.GetEnumerator() | Sort-Object Name | ForEach-Object { "HTTP $($_.Name)=$($_.Value)" }) -join ', ')
-        Write-Warning ("{0} compliance setting-state batch sub-request(s) failed for managed device {1} ({2}). Sequential fallback will be used. Sample policy IDs: {3}" -f $failureTotal, $ManagedDeviceId, $statusSummary, ($failureExamples -join ', '))
+        foreach ($failure in $failureCounts.GetEnumerator()) {
+            $statusKey = [string]$failure.Key
+            if (-not $script:SettingBatchFallbackCounts.ContainsKey($statusKey)) {
+                $script:SettingBatchFallbackCounts[$statusKey] = 0
+            }
+            $script:SettingBatchFallbackCounts[$statusKey] += [int]$failure.Value
+        }
+        foreach ($policyId in $failureExamples) {
+            if ($script:SettingBatchFallbackExamples.Count -ge 5) { break }
+            [void]$script:SettingBatchFallbackExamples.Add(("{0}/{1}" -f $ManagedDeviceId, $policyId))
+        }
     }
 
     return $result
@@ -959,7 +985,7 @@ function Get-PolicyConfiguredCategories {
             }
         }
     } catch {
-        Write-Warning ("Failed to retrieve policy definition for '{0}': {1}" -f $PolicyId, $_.Exception.Message)
+        Write-ComplianceWarning -Message ("Failed to retrieve policy definition for '{0}': {1}" -f $PolicyId, $_.Exception.Message)
     }
 
     $script:policyDefCache[$PolicyId] = $configured
@@ -1110,7 +1136,7 @@ try {
             Write-Host ("Compliance policy-state batches completed: {0}/{1} devices prefetched." -f $policyStateBatchMap.Count, @($devices).Count) -ForegroundColor Cyan
         }
         catch {
-            Write-Warning ("Compliance policy-state batching failed; sequential retrieval will be used: {0}" -f $_.Exception.Message)
+            Write-ComplianceWarning -Message ("Compliance policy-state batching failed; sequential retrieval will be used: {0}" -f $_.Exception.Message)
             $policyStateBatchMap = @{}
         }
     }
@@ -1202,11 +1228,11 @@ try {
             $script:PolicyStateFailureCount++
             $script:ConsecutivePolicyStateFailures++
             $shortPolicyStateError = Get-ShortGraphErrorMessage -ErrorRecord $_
-            Write-Warning ("Failed to retrieve policy states for device {0}: {1}" -f $dev.DeviceName, $shortPolicyStateError)
+            Write-ComplianceWarning -Message ("Failed to retrieve policy states for device {0}: {1}" -f $dev.DeviceName, $shortPolicyStateError)
             if (($script:MaxPolicyStateFailures -gt 0 -and $script:PolicyStateFailureCount -ge $script:MaxPolicyStateFailures) -or
                 ($script:MaxConsecutivePolicyStateFailures -gt 0 -and $script:ConsecutivePolicyStateFailures -ge $script:MaxConsecutivePolicyStateFailures)) {
                 $script:PolicyStateCollectionDisabled = $true
-                Write-Warning ("Policy state collection disabled for this run after {0} total failure(s), {1} consecutive. Device summary processing will continue." -f $script:PolicyStateFailureCount, $script:ConsecutivePolicyStateFailures)
+                Write-ComplianceWarning -Message ("Policy state collection disabled for this run after {0} total failure(s), {1} consecutive. Device summary processing will continue." -f $script:PolicyStateFailureCount, $script:ConsecutivePolicyStateFailures)
             }
         }
         if ($policyStates) {
@@ -1230,7 +1256,7 @@ try {
                         $settingStateBatchMap = Get-ComplianceSettingStateBatchMap -ManagedDeviceId ([string]$dev.Id) -Policies @($targets)
                     }
                     catch {
-                        Write-Warning ("Compliance setting-state batching failed for device '{0}'; sequential retrieval will be used: {1}" -f $dev.DeviceName, $_.Exception.Message)
+                        Write-ComplianceWarning -Message ("Compliance setting-state batching failed for device '{0}'; sequential retrieval will be used: {1}" -f $dev.DeviceName, $_.Exception.Message)
                         $settingStateBatchMap = @{}
                     }
                 }
@@ -1266,7 +1292,7 @@ try {
                             $policyCategoryRollup[$p.displayName][$cat] = 'Fail'
                         }
                     } catch {
-                        Write-Warning ("Failed to retrieve setting states for '{0}' on device '{1}': {2}" -f $p.displayName, $dev.DeviceName, $_.Exception.Message)
+                        Write-ComplianceWarning -Message ("Failed to retrieve setting states for '{0}' on device '{1}': {2}" -f $p.displayName, $dev.DeviceName, $_.Exception.Message)
                     }
                 }
 
@@ -1342,6 +1368,15 @@ try {
 
     Write-Progress -Id 1 -Activity "Processing devices" -Completed
 
+    if ($script:SettingBatchFallbackCounts.Count -gt 0) {
+        $fallbackTotal = ($script:SettingBatchFallbackCounts.Values | Measure-Object -Sum).Sum
+        $fallbackSummary = (@($script:SettingBatchFallbackCounts.GetEnumerator() |
+            Sort-Object Name |
+            ForEach-Object { "HTTP $($_.Name)=$($_.Value)" }) -join ', ')
+        Write-ComplianceWarning -Message ("{0} compliance setting-state batch sub-request(s) required sequential fallback ({1}). Sample managed-device/policy IDs: {2}" -f
+            $fallbackTotal, $fallbackSummary, ($script:SettingBatchFallbackExamples -join ', '))
+    }
+
     # 3) Output
     if ($rows.Count -gt 0) {
         Write-Host ""
@@ -1367,7 +1402,7 @@ try {
             Write-Host "Compliance summary CSV timestamped: $tsCsv"
             Write-Host "Compliance summary CSV (last): $lastCsv"
         } catch {
-            Write-Warning "Failed to export compliance summary CSVs: $_"
+            Write-ComplianceWarning -Message "Failed to export compliance summary CSVs: $_"
         }
     } else {
         Write-Host ""
@@ -1403,7 +1438,7 @@ try {
             Write-Host "Compliance policy CSV timestamped: $policyTsCsv"
             Write-Host "Compliance policy CSV (last): $policyLastCsv"
         } catch {
-            Write-Warning "Failed to export compliance policy CSVs: $_"
+            Write-ComplianceWarning -Message "Failed to export compliance policy CSVs: $_"
         }
     } else {
         Write-Host ""
