@@ -24,7 +24,23 @@ Active Directory attribute names remain unchanged. Calculated columns use the sa
 
 ## Duplicate Identity Notification
 
-When duplicate UPN or SMTP proxy address conflicts are detected, the notification email includes the summary counters, SharePoint links to the full CSV files, and inline top 50 account previews for duplicate UPNs and duplicate SMTP addresses, including account enabled state and last logon when available.
+The inventory sends a single notification with the subject `SmartM365 Active Directory identity and mail routing issues detected` when it finds duplicate UPNs, duplicate SMTP proxy addresses, duplicate remote routing addresses, or remote mailbox routing inconsistencies.
+
+Remote mailbox detection uses the exact Active Directory attributes `msExchRemoteRecipientType` and `msExchRecipientTypeDetails`. Validation compares `targetAddress` and `proxyAddresses` with `RemoteRoutingDomain` from the selected local profile, for example `Config/Tenants/prod.local.json`. The profile name only selects the configuration file; it is never used to construct the routing domain. If `RemoteRoutingDomain` is empty, the script derives `<tenant>.mail.onmicrosoft.com` from `OrgDomain` in that profile.
+
+The notification includes summary counters, SharePoint links, and inline top 50 previews. Full details are exported to:
+
+- `AD_Users_DuplicateUPN.csv`
+- `AD_Users_DuplicateSMTP.csv`
+- `AD_Users_DuplicateRemoteRoutingAddress.csv`
+- `AD_Users_RemoteRoutingIssues.csv`
+
+Remote routing issues cover:
+
+- missing or invalid `targetAddress`;
+- a `targetAddress` outside the configured tenant routing domain;
+- a `targetAddress` missing from `proxyAddresses`;
+- no proxy address in the configured `<tenant>.mail.onmicrosoft.com` domain.
 
 ## Daily Reports
 

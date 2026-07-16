@@ -4075,6 +4075,8 @@ function Initialize-SmartM365DefaultCsvValidationRules {
     & $add 'AD_Computers_DailyStats' @('Date','DomainName') $false
     & $add 'AD_Users_DuplicateUPN' @('UserPrincipalName','SamAccountName','DistinguishedName') $true
     & $add 'AD_Users_DuplicateSMTP' @('SmtpAddress','UserPrincipalName','SamAccountName','DistinguishedName') $true
+    & $add 'AD_Users_DuplicateRemoteRoutingAddress' @('NormalizedRemoteRoutingAddress','UserPrincipalName','SamAccountName','DistinguishedName') $true
+    & $add 'AD_Users_RemoteRoutingIssues' @('IssueType','ExpectedRemoteRoutingDomain','UserPrincipalName','SamAccountName','DistinguishedName') $true
 
     & $add 'Exchange_EXO_AcceptedDomains' @('Name','DomainName','DomainType') $false
     & $add 'Exchange_EXO_Mailboxes_AllDomains' @('UserPrincipalName','PrimarySmtpAddress','MailboxGuid') $false
