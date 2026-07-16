@@ -7,13 +7,13 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
 - SmartM365.Core module
 - Read access to DATA-LAST SmartInventory CSV exports
 - Write access to the configured DATA-ALL, DATA-LAST, and WeeklyHistory output folders
-- Required input CSV files: AD_Users_AllDomains_Enriched.csv when available, otherwise AD_Users_AllDomains.csv,
+- Required input CSV files: AD_Users_AllDomains.csv when available, otherwise AD_Users_AllDomains_Brut.csv,
   Exchange_OnPrem_Mailboxes_AllDomains.csv, Exchange_OnPrem_RemoteMailboxes_AllDomains.csv,
   Exchange_EXO_Mailboxes_AllDomains.csv,
   M365_Users_Active.csv
 
 .VERSION
-1.13
+1.15
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -42,7 +42,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.13"
+$ScriptVersion="1.15"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -199,7 +199,7 @@ try{
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
   Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LatestFolder) | Out-Null
-  $ad=Csv 'AD_Users_AllDomains_Enriched.csv'; if($ad.Count -eq 0){$ad=Csv 'AD_Users_AllDomains.csv' -Req}; $dupUpn=Csv 'AD_Users_DuplicateUPN.csv'; $dupSmtp=Csv 'AD_Users_DuplicateSMTP.csv'; $local=Csv 'Exchange_OnPrem_Mailboxes_AllDomains.csv' -Req; $remote=Csv 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' -Req; $exo=Csv 'Exchange_EXO_Mailboxes_AllDomains.csv' -Req; $stats=Csv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv'; $arch=Csv 'Exchange_EXO_Mailboxes_AllDomains_Archive.csv'; $perms=Csv 'Exchange_EXO_Mailboxes_AllDomains_Permissions.csv'; $m365=Csv 'M365_Users_Active.csv' -Req; $lic=Csv 'M365_Licenses_Users.csv'; $plans=Csv 'M365_Licenses_ServicePlans.csv'; $domains=Csv 'Exchange_EXO_AcceptedDomains.csv'; $verified=Csv 'M365_Entra_VerifiedDomains.csv'
+  $ad=Csv 'AD_Users_AllDomains.csv'; if($ad.Count -eq 0){$ad=Csv 'AD_Users_AllDomains_Brut.csv' -Req}; $dupUpn=Csv 'AD_Users_DuplicateUPN.csv'; $dupSmtp=Csv 'AD_Users_DuplicateSMTP.csv'; $local=Csv 'Exchange_OnPrem_Mailboxes_AllDomains.csv' -Req; $remote=Csv 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' -Req; $exo=Csv 'Exchange_EXO_Mailboxes_AllDomains.csv' -Req; $stats=Csv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv'; $arch=Csv 'Exchange_EXO_Mailboxes_AllDomains_Archive.csv'; $perms=Csv 'Exchange_EXO_Mailboxes_AllDomains_Permissions.csv'; $m365=Csv 'M365_Users_Active.csv' -Req; $lic=Csv 'M365_Licenses_Users.csv'; $plans=Csv 'M365_Licenses_ServicePlans.csv'; $domains=Csv 'Exchange_EXO_AcceptedDomains.csv'; $verified=Csv 'M365_Entra_VerifiedDomains.csv'
   $localGuid=@{};$localUpn=@{};$localSmtp=@{};$localDomainSam=@{}; foreach($r in $local){AddMap $localGuid (P $r ObjectGUID) $r; AddMap $localUpn (P $r UserPrincipalName) $r; AddMap $localSmtp (P $r PrimarySMTPaddress,PrimarySmtpAddress) $r; AddMap $localDomainSam (P $r DomainAndSam) $r}
   $remoteGuid=@{};$remoteUpn=@{};$remoteSmtp=@{}; foreach($r in $remote){AddMap $remoteGuid (P $r ObjectGuid,ObjectGUID) $r; AddMap $remoteUpn (P $r UserPrincipalName) $r; AddMap $remoteSmtp (P $r PrimarySmtpAddress,PrimarySMTPaddress) $r}
   $exoUpn=@{};$exoSmtp=@{};$exoImmutable=@{}; foreach($r in $exo){AddMap $exoUpn (P $r UserPrincipalName) $r; AddMap $exoSmtp (P $r PrimarySmtpAddress,PrimarySMTPaddress) $r; AddMap $exoImmutable (P $r OnPremisesImmutableId,ImmutableId) $r}
@@ -213,7 +213,7 @@ try{
   $domType=@{}; $domAddressBook=@{}; foreach($r in $domains){$dn=K(P $r DomainName,Name); if(!$dn){continue}; $domType[$dn]=T(P $r DomainType); $domAddressBook[$dn]=B(P $r AddressBookEnabled)}
   $verifiedSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($r in $verified){[void]$verifiedSet.Add((T(P $r Id,Name,DomainName)))}
   $samGroups=@{}; $displayGroups=@{}; $targetGroups=@{}; $adUpn=@{}; $adSmtp=@{}; $adImmutableGuid=@{}
-  foreach($r in $ad){$sam=K(P $r SamAccountName); if($sam){if(!$samGroups.ContainsKey($sam)){$samGroups[$sam]=0}; $samGroups[$sam]++}; $dn=K(P $r DisplayName); if($dn){if(!$displayGroups.ContainsKey($dn)){$displayGroups[$dn]=0}; $displayGroups[$dn]++}; $ta=K((T(P $r TargetAddress,targetAddress)) -replace '^smtp:',''); if($ta){if(!$targetGroups.ContainsKey($ta)){$targetGroups[$ta]=0}; $targetGroups[$ta]++}; AddMap $adUpn (P $r UserPrincipalName) $r; AddMap $adSmtp (P $r EmailAddress,PrimarySmtp,PrimarySMTPaddress) $r; $imm=K(P $r ImmutableId_AD); if($imm -and !$adImmutableGuid.ContainsKey($imm)){$adImmutableGuid[$imm]=T(P $r ObjectGUID)}}
+  foreach($r in $ad){$sam=K(P $r SamAccountName); if($sam){if(!$samGroups.ContainsKey($sam)){$samGroups[$sam]=0}; $samGroups[$sam]++}; $dn=K(P $r DisplayName); if($dn){if(!$displayGroups.ContainsKey($dn)){$displayGroups[$dn]=0}; $displayGroups[$dn]++}; $ta=K((T(P $r TargetAddress,targetAddress)) -replace '^smtp:',''); if($ta){if(!$targetGroups.ContainsKey($ta)){$targetGroups[$ta]=0}; $targetGroups[$ta]++}; AddMap $adUpn (P $r UserPrincipalName) $r; AddMap $adSmtp (P $r EmailAddress,PrimarySmtpAddress,PrimarySMTPaddress) $r; $imm=K(P $r ImmutableId_AD); if($imm -and !$adImmutableGuid.ContainsKey($imm)){$adImmutableGuid[$imm]=T(P $r ObjectGUID)}}
   $dupSamSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($k in $samGroups.Keys){if($samGroups[$k] -gt 1){[void]$dupSamSet.Add($k)}}
   $dupDisplaySet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($k in $displayGroups.Keys){if($displayGroups[$k] -gt 1){[void]$dupDisplaySet.Add($k)}}
   $dupTargetSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($k in $targetGroups.Keys){if($targetGroups[$k] -gt 1){[void]$dupTargetSet.Add($k)}}
@@ -226,7 +226,7 @@ try{
   $allowedTargetDomains=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('orpea.mail.onmicrosoft.com','orpea.com')|ForEach-Object{[void]$allowedTargetDomains.Add($_)}
   $issues=[Collections.Generic.List[object]]::new()
   foreach($u in $ad){
-    $guid=T(P $u ObjectGUID); $upn=T(P $u UserPrincipalName); $uk=K $upn; $immutableId=T(P $u ImmutableId_AD); $domainAndSam=T(P $u DomainAndSam); $enabled=B(P $u Enabled); $primary=T(P $u EmailAddress,PrimarySmtp,PrimarySMTPaddress); if(!$primary){foreach($addr in SplitAddr(P $u ProxyAddresses)){if($addr -match '@'){$primary=$addr; break}}}; $target=T(P $u TargetAddress); $proxyText=T(P $u ProxyAddresses)
+    $guid=T(P $u ObjectGUID); $upn=T(P $u UserPrincipalName); $uk=K $upn; $immutableId=T(P $u ImmutableId_AD); $domainAndSam=T(P $u DomainAndSam); $enabled=B(P $u Enabled); $primary=T(P $u EmailAddress,PrimarySmtpAddress,PrimarySMTPaddress); if(!$primary){foreach($addr in SplitAddr(P $u ProxyAddresses)){if($addr -match '@'){$primary=$addr; break}}}; $target=T(P $u TargetAddress); $proxyText=T(P $u ProxyAddresses)
     $lm=if($domainAndSam -and $localDomainSam.ContainsKey((K $domainAndSam))){$localDomainSam[(K $domainAndSam)]}elseif($localGuid.ContainsKey((K $guid))){$localGuid[(K $guid)]}elseif($localUpn.ContainsKey($uk)){$localUpn[$uk]}elseif($localSmtp.ContainsKey((K $primary))){$localSmtp[(K $primary)]}else{$null}
     $rm=if($remoteGuid.ContainsKey((K $guid))){$remoteGuid[(K $guid)]}elseif($remoteUpn.ContainsKey($uk)){$remoteUpn[$uk]}elseif($remoteSmtp.ContainsKey((K $primary))){$remoteSmtp[(K $primary)]}else{$null}
     $em=if($exoImmutable.ContainsKey((K $immutableId))){$exoImmutable[(K $immutableId)]}elseif($exoUpn.ContainsKey($uk)){$exoUpn[$uk]}elseif($exoSmtp.ContainsKey((K $primary))){$exoSmtp[(K $primary)]}else{$null}
@@ -254,7 +254,7 @@ try{
       if($pc -gt 10){AddIssue $issues 14 $guid 'Too many mailbox permissions' '3.Medium' 'Review mailbox delegation and permissions'}
       if(!$ll -or ((Get-Date).Date-$ll.Date).Days -gt 180){AddIssue $issues 15 $guid 'Mailbox inactive > 6 months' '4.Low' 'Review mailbox usage and consider decommissioning'}
       foreach($a in @((SplitAddr $proxyText)+@($primary))){ if($dupSmtpSet.Contains($a)){AddIssue $issues 16 $guid 'Conflicting proxy address' '1.Critical' 'Resolve proxy address conflicts'; break} }
-      $sharedAccessCount=[int][math]::Max((Dbl(P $u SharedAccessCount)), $pc); if($sharedAccessCount -gt 5){AddIssue $issues 17 $guid 'Excessive shared access' '3.Medium' 'Review shared access model'}
+      $sharedAccessCount=[int][math]::Max((Dbl(P $u SendAsMailboxCount)), $pc); if($sharedAccessCount -gt 5){AddIssue $issues 17 $guid 'Excessive shared access' '3.Medium' 'Review shared access model'}
       if(!(T(P $u DisplayName))){AddIssue $issues 18 $guid 'Missing DisplayName' '4.Low' 'Complete user metadata'}
       $normTarget=(T $target) -replace '(?i)^smtp:',''; if($remoteMailboxTypes.Contains($recipientType) -and !$normTarget){AddIssue $issues 19 $guid 'Missing TargetAddress for mailbox' '1.Critical' 'Set TargetAddress for mail-enabled user'}
       if($remoteMailboxTypes.Contains($recipientType) -and $normTarget){$targetDomain=DomainPart $normTarget; if($normTarget -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$'){AddIssue $issues 20 $guid 'Invalid TargetAddress format' '2.High' 'Fix TargetAddress format to a valid SMTP address'}; if($targetDomain -and !$allowedTargetDomains.Contains($targetDomain)){AddIssue $issues 21 $guid 'Disallowed TargetAddress domain' '1.Critical' 'Update TargetAddress to an allowed routing domain'}; if(!$proxyText -or -not (ProxyContains $proxyText $normTarget)){AddIssue $issues 22 $guid 'TargetAddress absent from ProxyAddresses' '3.Medium' 'Add TargetAddress as a proxy entry in ProxyAddresses'}; if($dupTargetSet.Contains((K $normTarget))){AddIssue $issues 23 $guid 'Duplicate TargetAddress' '1.Critical' 'Resolve duplicate TargetAddress routing'}}

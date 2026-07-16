@@ -7,13 +7,13 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
 - SmartM365.Core module
 - Read access to DATA-LAST SmartInventory CSV exports
 - Write access to the configured DATA-ALL, DATA-LAST, and WeeklyHistory output folders
-- Required input CSV files: AD_Computers_AllDomains_Enriched.csv or AD_Computers_AllDomains.csv, Intune_Devices_Inventory.csv, M365_Entra_Devices.csv,
+- Required input CSV files: AD_Computers_AllDomains.csv or AD_Computers_AllDomains_Brut.csv, Intune_Devices_Inventory.csv, M365_Entra_Devices.csv,
   Intune_WindowsUpdate_Status.csv. Optional enrichment CSV files: AD_Users_AllDomains.csv,
   M365_Licenses_Users.csv, Intune_Devices_LocalSystem.csv, Intune_Devices_BIOS.csv,
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.17
+1.19
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -43,7 +43,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.17"
+$ScriptVersion="1.19"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -252,8 +252,8 @@ try{
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
   Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LatestFolder) | Out-Null
 
-  $ad=CsvAnyProjected @('AD_Computers_AllDomains_Enriched.csv','AD_Computers_AllDomains.csv') @('ObjectGUID_Norm','ObjectGUID','DeviceID_From_M365','entraDeviceId_norm','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm','Name','SamAccountName','OperatingSystem','operatingSystemVersion','OperatingSystemVersion','LastLogonDate','Enabled','OrganizationalUnit','CanonicalName','DistinguishedName','Last Reboot Date','LastRebootDate','LastBootUpTime','Last_Logged_UserDomain','LastLoggedUser','LastLoggedUserDomain') -Req
-  $users=CsvAnyProjected @('AD_Users_AllDomains.csv') @('SamAccountName','Name','UserPrincipalName','EmailAddress','OrganizationalUnit','CanonicalName','DistinguishedName')
+  $ad=CsvAnyProjected @('AD_Computers_AllDomains.csv','AD_Computers_AllDomains_Brut.csv') @('ObjectGuidNormalized','ObjectGUID','IntuneDeviceId','EntraDeviceIdNormalized','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm','Name','SamAccountName','OperatingSystem','operatingSystemVersion','OperatingSystemVersion','LastLogonDate','Enabled','OrganizationalUnit','CanonicalName','DistinguishedName','LastRebootDateTime','LastRebootDate','LastBootUpTime','LastLoggedUser','LastLoggedUserDomain') -Req
+  $users=CsvAnyProjected @('AD_Users_AllDomains.csv','AD_Users_AllDomains_Brut.csv') @('SamAccountName','Name','UserPrincipalName','EmailAddress','OrganizationalUnit','CanonicalName','DistinguishedName')
   $licenses=CsvAnyProjected @('M365_Licenses_Users.csv') @('User principal name','UserPrincipalName','primarysmtp')
   $local=CsvAnyProjected @('Intune_Devices_LocalSystem.csv','M365_Inventory_Device_LocalSystem.csv') @('AzureADDeviceId','DeviceId','DeviceName','SecureBootStatus','FirmwareType','BIOSDate','Last Reboot Date','LastRebootDate','LastBootUpTime')
   $wu=CsvAnyProjected @('Intune_WindowsUpdate_Status.csv','M365_WindowsUpdate_Status_From_Intune.csv') @('PolicyId','DeviceId','ReadinessGraphId','NormalizedDeviceName','DeviceName','ExportDateTime','ReadinessExportDateTime','RunId','ReadinessRunId','AggregateState_loc','AggregateState','CurrentDeviceUpdateStatus_loc','CurrentDeviceUpdateStatus','LatestAlertMessage_loc','LatestAlertMessage','BlockingReason','UpgradeEligibilityLabel','UpgradeEligibility','RiskBucket') -Req
@@ -280,11 +280,11 @@ try{
   $adDeviceIdFromM365Map=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   $adEntraDeviceId=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($r in $ad){
-    $key=G(FirstValue $r @('ObjectGUID_Norm','ObjectGUID'))
+    $key=G(FirstValue $r @('ObjectGuidNormalized','ObjectGUID'))
     if($key -and -not $adObjectGuid.ContainsKey($key)){$adObjectGuid[$key]=$r}
-    $key=G(FirstValue $r @('DeviceID_From_M365'))
+    $key=G(FirstValue $r @('IntuneDeviceId'))
     if($key -and -not $adDeviceIdFromM365Map.ContainsKey($key)){$adDeviceIdFromM365Map[$key]=$r}
-    $key=G(FirstValue $r @('ObjectGUID_Norm','entraDeviceId_norm','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm'))
+    $key=G(FirstValue $r @('ObjectGuidNormalized','EntraDeviceIdNormalized','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm'))
     if($key -and -not $adEntraDeviceId.ContainsKey($key)){$adEntraDeviceId[$key]=$r}
   }
   LogIndexPhase 'AD computers by ObjectGUID, managed device ID and Entra device ID'
@@ -393,7 +393,7 @@ try{
       Add-IssueRow -Target $issues -IssueCode 'ISSUE-002' -Area 'Intune' -ObjectGUID_Norm $orphanId -Potential_Issue 'Device exists in Intune but not found in AD (orphan MDM device)' -IssueCategory '2.High' -PriorityScore 2 -IsBlocking $true -RecommendedAction 'Identify device owner and re-join to AD or retire from Intune' -ImpactMigration 'Orphan MDM device cannot be managed via hybrid join; migration scope unclear'
     }
   } else {
-    Warn "Intune orphan check skipped: AD relationship keys DeviceID_From_M365 and entraDeviceId_norm are not available in the input CSV."
+    Warn "Intune orphan check skipped: AD relationship keys IntuneDeviceId and EntraDeviceIdNormalized are not available in the input CSV."
   }
   LogIndexPhase 'Intune orphan check by managed device ID and Entra device ID'
 
@@ -405,11 +405,11 @@ try{
   foreach($row in $ad){
     $processedAdRows++
     if(($processedAdRows % 1000) -eq 0){Log ("Windows 11 issue analysis progress: {0}/{1} AD rows; issues={2}; elapsed={3:n1}s" -f $processedAdRows,$totalAdRows,$issues.Count,$analysisStopwatch.Elapsed.TotalSeconds)}
-    $objectGuidNorm = ([string]$row.ObjectGUID_Norm).Trim(); if(!$objectGuidNorm){$objectGuidNorm=([string]$row.ObjectGUID).Trim()}
+    $objectGuidNorm = ([string]$row.ObjectGuidNormalized).Trim(); if(!$objectGuidNorm){$objectGuidNorm=([string]$row.ObjectGUID).Trim()}
     if([string]::IsNullOrWhiteSpace($objectGuidNorm)){continue}
     $name=([string]$row.Name).Trim(); if(!$name){$name=([string]$row.SamAccountName).Trim()}; $name=$name.TrimEnd('$')
-    $adDeviceIdFromM365Key=G(FirstValue $row @('DeviceID_From_M365'))
-    $adEntraDeviceIdKey=G(FirstValue $row @('ObjectGUID_Norm','entraDeviceId_norm','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm'))
+    $adDeviceIdFromM365Key=G(FirstValue $row @('IntuneDeviceId'))
+    $adEntraDeviceIdKey=G(FirstValue $row @('ObjectGuidNormalized','EntraDeviceIdNormalized','AzureADDeviceId','AzureADDeviceId_Norm','DeviceId_Norm'))
     $in=$null
     if($adDeviceIdFromM365Key -and $intuneId.ContainsKey($adDeviceIdFromM365Key)){$in=$intuneId[$adDeviceIdFromM365Key]}
     elseif($adEntraDeviceIdKey -and $intuneAad.ContainsKey($adEntraDeviceIdKey)){$in=$intuneAad[$adEntraDeviceIdKey]}
@@ -451,7 +451,7 @@ try{
     $isStorageUnknown=[string]::IsNullOrWhiteSpace($storageRaw)
     $isFreeStorageNotEnough=($null -ne $freeGb -and $freeGb -lt 40)
 
-    $lastLoggedUserAdNorm = Get-UpperTrimmedString $row.Last_Logged_UserDomain; if(!$lastLoggedUserAdNorm){$lastLoggedUserAdNorm=Get-UpperTrimmedString $row.LastLoggedUser}; if(!$lastLoggedUserAdNorm){$lastLoggedUserAdNorm=Get-UpperTrimmedString $row.LastLoggedUserDomain}
+    $lastLoggedUserAdNorm = Get-UpperTrimmedString $row.LastLoggedUser; if(!$lastLoggedUserAdNorm){$lastLoggedUserAdNorm=Get-UpperTrimmedString $row.LastLoggedUserDomain}
     $primaryUser = ([string]$in.'Primary user UPN').Trim(); if(!$primaryUser){$primaryUser=([string]$in.'Primary user email address').Trim()}; if(!$primaryUser){$primaryUser=([string]$in.UserPrincipalName).Trim()}; if(!$primaryUser){$primaryUser=([string]$in.UPN).Trim()}
     if(!$lastLoggedUserAdNorm -and $primaryUser){$lastLoggedUserAdNorm=$primaryUser.ToUpperInvariant()}
     if(!$lastLoggedUserAdNorm){$lastLoggedUserAdNorm='UNKNOWN'}
@@ -510,7 +510,7 @@ try{
     $isWindows10Ltsc = (([string]$row.OperatingSystem).ToUpperInvariant() -match 'LTSC|LTSB') -or ($osNameUpper -match 'LTSC|LTSB')
     $lastLogonDate = Dt($row.LastLogonDate)
     if($lastLogonDate){$lastLogonDate=$lastLogonDate.Date}
-    $lastRebootRaw = $row.'Last Reboot Date'; if(!$lastRebootRaw){$lastRebootRaw=$row.LastRebootDate}; if(!$lastRebootRaw){$lastRebootRaw=$row.LastBootUpTime}
+    $lastRebootRaw = $row.LastRebootDateTime; if(!$lastRebootRaw){$lastRebootRaw=$row.LastRebootDate}; if(!$lastRebootRaw){$lastRebootRaw=$row.LastBootUpTime}
     if([string]::IsNullOrWhiteSpace(([string]$lastRebootRaw).Trim())){$lastRebootRaw = $localSystemRow.'Last Reboot Date'; if(!$lastRebootRaw){$lastRebootRaw=$localSystemRow.LastRebootDate}; if(!$lastRebootRaw){$lastRebootRaw=$localSystemRow.LastBootUpTime}}
     $lastRebootDateNorm = Dt($lastRebootRaw)
     if($lastRebootDateNorm){$lastRebootDateNorm=$lastRebootDateNorm.Date}
