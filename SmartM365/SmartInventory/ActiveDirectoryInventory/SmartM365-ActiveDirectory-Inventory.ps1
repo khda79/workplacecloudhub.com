@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.33
+1.34
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
@@ -455,6 +455,7 @@ $EnableDuplicateAnalysis = [bool](Get-ScriptLocalConfigValue -Config $ScriptLoca
 $EnableDuplicateNotification = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDuplicateNotification' -DefaultValue $true)
 $DuplicateNotificationLastSentFilePath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DuplicateNotificationLastSentFilePath' -DefaultValue ''
 $DeleteTemporaryPerDomainCsv = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeleteTemporaryPerDomainCsv' -DefaultValue $true)
+$TemporaryPerDomainRetentionDays = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TemporaryPerDomainRetentionDays' -DefaultValue 2)
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
 $WeeklyHistoryRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
@@ -494,7 +495,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.33"
+$ScriptVersion = "1.34"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -924,6 +925,10 @@ try {
             [string[]]$SourceFiles,
 
             [Parameter(Mandatory = $true)]
+            [AllowEmptyCollection()]
+            [string[]]$RequiredSourceFiles,
+
+            [Parameter(Mandatory = $true)]
             [string]$HistoryRootPath,
 
             [Parameter(Mandatory = $false)]
@@ -935,7 +940,17 @@ try {
             return
         }
 
-        $existingSourceFiles = @($SourceFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) })
+        $missingRequiredFiles = @($RequiredSourceFiles | Where-Object {
+            [string]::IsNullOrWhiteSpace($_) -or -not (Test-Path -LiteralPath $_)
+        })
+        if ($missingRequiredFiles.Count -gt 0) {
+            WriteLog -Message ("Weekly AD inventory history postponed because required canonical CSV files are missing: {0}" -f ($missingRequiredFiles -join ', ')) -Level 'WARNING'
+            return
+        }
+
+        $existingSourceFiles = @($SourceFiles |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) } |
+            Select-Object -Unique)
         if ($existingSourceFiles.Count -eq 0) {
             WriteLog -Message "Weekly AD inventory history skipped: no source CSV file found."
             return
@@ -946,18 +961,43 @@ try {
         $isoWeek = [System.Globalization.ISOWeek]::GetWeekOfYear($now)
         $weekName = "{0}-W{1:00}" -f $isoYear, $isoWeek
         $weekFolder = Join-Path -Path $HistoryRootPath -ChildPath $weekName
+        $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
+        $requiredFileNames = @($RequiredSourceFiles | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Select-Object -Unique)
 
         if (Test-Path -LiteralPath $weekFolder) {
-            $existingCsv = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue)
-            if ($existingCsv.Count -gt 0) {
+            $manifest = $null
+            if (Test-Path -LiteralPath $manifestPath) {
+                try {
+                    $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                }
+                catch {
+                    WriteLog -Message ("Existing weekly manifest is unreadable and will be rebuilt: {0}" -f $manifestPath) -Level 'WARNING'
+                }
+            }
+
+            $requiredHistoryFilesExist = @($requiredFileNames | Where-Object {
+                -not (Test-Path -LiteralPath (Join-Path -Path $weekFolder -ChildPath $_))
+            }).Count -eq 0
+            if ($null -ne $manifest -and $manifest.Status -eq 'Complete' -and $requiredHistoryFilesExist) {
                 WriteLog -Message ("Weekly AD inventory history already exists for {0}. Snapshot skipped: {1}" -f $weekName, $weekFolder)
                 return
+            }
+
+            WriteLog -Message ("Weekly AD inventory history for {0} is incomplete and will be rebuilt: {1}" -f $weekName, $weekFolder) -Level 'WARNING'
+            if (Test-Path -LiteralPath $manifestPath) {
+                Remove-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
             }
         }
 
         New-Item -Path $weekFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
-        $copiedFiles = New-Object System.Collections.Generic.List[string]
+        foreach ($rawHistoryName in @('AD_Users_AllDomains_Brut.csv', 'AD_Computers_AllDomains_Brut.csv')) {
+            $rawHistoryPath = Join-Path -Path $weekFolder -ChildPath $rawHistoryName
+            if (Test-Path -LiteralPath $rawHistoryPath) {
+                Remove-Item -LiteralPath $rawHistoryPath -Force -ErrorAction Stop
+            }
+        }
 
+        $copiedFiles = New-Object System.Collections.Generic.List[string]
         foreach ($sourceFile in $existingSourceFiles) {
             $destinationFile = Join-Path -Path $weekFolder -ChildPath ([System.IO.Path]::GetFileName($sourceFile))
             Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force -ErrorAction Stop
@@ -965,12 +1005,13 @@ try {
         }
 
         $manifest = [PSCustomObject][ordered]@{
-            CreatedAt       = (Get-Date).ToString('o')
-            Week            = $weekName
+            Status           = 'Complete'
+            CreatedAt        = (Get-Date).ToString('o')
+            Week             = $weekName
             SourceOutputPath = $OutputPath
-            Files           = @($copiedFiles | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+            RequiredFiles    = $requiredFileNames
+            Files            = @($copiedFiles | ForEach-Object { [System.IO.Path]::GetFileName($_) })
         }
-        $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
         $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
         WriteLog -Message ("Weekly AD inventory history saved for {0}: {1} file(s) in {2}" -f $weekName, $copiedFiles.Count, $weekFolder)
@@ -1027,6 +1068,62 @@ try {
         catch {
             WriteLog -Message ("Failed to delete temporary per-domain CSV folder '{0}': {1}" -f $TempFolder, $_) -Level "WARNING"
         }
+    }
+
+    function Remove-StaleTemporaryInventoryFolders {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$BaseFolder,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [string]$CurrentTempFolder,
+
+            [Parameter(Mandatory = $false)]
+            [int]$RetentionDays = 2
+        )
+
+        if (-not $DeleteTemporaryPerDomainCsv) {
+            WriteLog -Message "Stale temporary per-domain cleanup skipped because DeleteTemporaryPerDomainCsv is disabled."
+            return
+        }
+        if ($RetentionDays -le 0) {
+            WriteLog -Message "Stale temporary per-domain cleanup disabled because TemporaryPerDomainRetentionDays is 0 or less."
+            return
+        }
+        if ([string]::IsNullOrWhiteSpace($BaseFolder) -or -not (Test-Path -LiteralPath $BaseFolder)) {
+            return
+        }
+
+        $resolvedBase = (Resolve-Path -LiteralPath $BaseFolder -ErrorAction Stop).Path.TrimEnd('\')
+        $basePrefix = $resolvedBase + '\'
+        $resolvedCurrent = $null
+        if (-not [string]::IsNullOrWhiteSpace($CurrentTempFolder) -and (Test-Path -LiteralPath $CurrentTempFolder)) {
+            $resolvedCurrent = (Resolve-Path -LiteralPath $CurrentTempFolder -ErrorAction Stop).Path.TrimEnd('\')
+        }
+        $cutoffUtc = (Get-Date).ToUniversalTime().AddDays(-$RetentionDays)
+
+        foreach ($folder in @(Get-ChildItem -LiteralPath $resolvedBase -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d{8}T\d{6}Z$' -and $_.LastWriteTimeUtc -lt $cutoffUtc })) {
+            $resolvedFolder = $folder.FullName.TrimEnd('\')
+            if ($resolvedFolder -eq $resolvedCurrent) { continue }
+            if (-not $resolvedFolder.StartsWith($basePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                WriteLog -Message ("Stale temporary folder cleanup skipped outside the expected base folder: {0}" -f $resolvedFolder) -Level 'WARNING'
+                continue
+            }
+
+            try {
+                Remove-Item -LiteralPath $resolvedFolder -Recurse -Force -ErrorAction Stop
+                WriteLog -Message ("Deleted abandoned temporary per-domain folder older than {0} day(s): {1}" -f $RetentionDays, $resolvedFolder)
+            }
+            catch {
+                WriteLog -Message ("Failed to delete abandoned temporary per-domain folder '{0}': {1}" -f $resolvedFolder, $_) -Level 'WARNING'
+            }
+        }
+    }
+
+    if (-not $DomainWorker -and -not $DuplicateAnalysisOnly) {
+        Remove-StaleTemporaryInventoryFolders -BaseFolder $baseFolder -CurrentTempFolder $tempFolder -RetentionDays $TemporaryPerDomainRetentionDays
     }
 
     function ConvertTo-DailyReportBoolean {
@@ -2859,17 +2956,40 @@ try {
     # ------------------------------------------------------
     if ($EnableWeeklyHistory) {
         try {
-            Save-WeeklyInventoryHistory -SourceFiles @(
-                $combinedUsersCsv,
-                $combinedUsersEnrichedCsv,
-                $combinedComputersCsv,
-                $combinedComputersEnrichedCsv,
-                $combinedGroupsCsv,
-                $combinedOusCsv,
-                $combinedContactsCsv,
-                $duplicateUpnCsv,
-                $duplicateSmtpCsv
-            ) -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks
+            $weeklySourceFiles = New-Object System.Collections.Generic.List[string]
+            $weeklyRequiredSourceFiles = New-Object System.Collections.Generic.List[string]
+
+            if ($EnableUserInventory) {
+                $weeklyUsersCsv = if ([string]::IsNullOrWhiteSpace($combinedUsersEnrichedCsv)) { Join-Path $OutputPath 'AD_Users_AllDomains.csv' } else { $combinedUsersEnrichedCsv }
+                [void]$weeklySourceFiles.Add($weeklyUsersCsv)
+                [void]$weeklyRequiredSourceFiles.Add($weeklyUsersCsv)
+            }
+            if ($EnableComputerInventory) {
+                $weeklyComputersCsv = if ([string]::IsNullOrWhiteSpace($combinedComputersEnrichedCsv)) { Join-Path $OutputPath 'AD_Computers_AllDomains.csv' } else { $combinedComputersEnrichedCsv }
+                [void]$weeklySourceFiles.Add($weeklyComputersCsv)
+                [void]$weeklyRequiredSourceFiles.Add($weeklyComputersCsv)
+            }
+            foreach ($weeklyInventory in @(
+                [pscustomobject]@{ Enabled = $EnableGroupInventory; Path = $combinedGroupsCsv },
+                [pscustomobject]@{ Enabled = $EnableOuInventory; Path = $combinedOusCsv },
+                [pscustomobject]@{ Enabled = $EnableContactInventory; Path = $combinedContactsCsv }
+            )) {
+                if (-not $weeklyInventory.Enabled) { continue }
+                [void]$weeklySourceFiles.Add($weeklyInventory.Path)
+                [void]$weeklyRequiredSourceFiles.Add($weeklyInventory.Path)
+            }
+            if ($EnableDuplicateAnalysis -and $EnableUserInventory) {
+                [void]$weeklySourceFiles.Add($duplicateUpnCsv)
+                [void]$weeklySourceFiles.Add($duplicateSmtpCsv)
+            }
+
+            $weeklyHistoryParameters = @{
+                SourceFiles         = $weeklySourceFiles.ToArray()
+                RequiredSourceFiles = $weeklyRequiredSourceFiles.ToArray()
+                HistoryRootPath     = $WeeklyHistoryFolderPath
+                RetentionWeeks      = $WeeklyHistoryRetentionWeeks
+            }
+            Save-WeeklyInventoryHistory @weeklyHistoryParameters
         }
         catch {
             WriteLog -Message ("Weekly AD inventory history failed: {0}" -f $_) -Level "WARNING"

@@ -49,6 +49,7 @@
   "DuplicateNotificationLastSentFilePath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory\\AD_DuplicateNotification_LastSent.txt",
   "DomainParallelThrottleLimit": 1,
   "DeleteTemporaryPerDomainCsv": true,
+  "TemporaryPerDomainRetentionDays": 2,
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\ActiveDirectory\\Inventory\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
