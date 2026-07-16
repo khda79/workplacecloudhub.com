@@ -33,9 +33,9 @@
     Number of deviceRunStates requested per Graph page. Default: 500. Allowed range: 1-1000.
 
 .PARAMETER RunStatePagePauseMilliseconds
-    Delay between Graph pages in milliseconds. Default: 250. Retry/backoff still handles throttling.
+    Delay between Graph pages in milliseconds. Default: 500. Retry/backoff still handles throttling.
 .VERSION
-2.2
+2.3
 
 
 
@@ -45,7 +45,7 @@
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.2
+    Version : 2.3
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -65,7 +65,7 @@ param(
     [int]$RunStatePageSize = 500,
 
     [ValidateRange(0, 5000)]
-    [int]$RunStatePagePauseMilliseconds = 250,
+    [int]$RunStatePagePauseMilliseconds = 500,
 
     [int]$MaxItems = 0
 )
@@ -545,7 +545,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.2"
+$ScriptVersion = "2.3"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
