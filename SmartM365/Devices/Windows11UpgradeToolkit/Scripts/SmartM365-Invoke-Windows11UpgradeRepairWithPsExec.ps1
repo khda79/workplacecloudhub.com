@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.57
+    0.1.58
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.57'
+$script:LauncherVersion = '0.1.58'
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -2460,6 +2460,7 @@ if ($GlobalConcurrencyLimit -gt 0) {
     Write-Host ("Global lease gate: Limit={0}; Path={1}; LeaseTimeout={2} minute(s)" -f $GlobalConcurrencyLimit,$globalGatePath,$GlobalConcurrencyLeaseTimeoutMinutes) -ForegroundColor Green
 }
 $script:globalGateMutex = $null
+$script:GlobalGateMutexWaitSeconds = 300
 if ($GlobalConcurrencyLimit -gt 0) {
     $script:globalGateMutex = New-Object System.Threading.Mutex($false, $globalGateMutexName)
 }
@@ -2474,9 +2475,9 @@ function Invoke-WithGlobalGateMutex {
     $ownMutex = ($null -eq $sharedMutex)
     $acquired = $false
     try {
-        try { $acquired = $mutex.WaitOne(30000) }
+        try { $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds($script:GlobalGateMutexWaitSeconds)) }
         catch [System.Threading.AbandonedMutexException] { $acquired = $true }
-        if (-not $acquired) { throw "Could not acquire global gate mutex within 30 seconds: $globalGateMutexName" }
+        if (-not $acquired) { throw ("Could not acquire global gate mutex within {0} seconds: {1}" -f $script:GlobalGateMutexWaitSeconds,$globalGateMutexName) }
         & $ScriptBlock @ArgumentList
     }
     finally {
