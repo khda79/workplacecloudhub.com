@@ -26,6 +26,7 @@
   "BackupPolicyScopeGroupId": "",
   "BackupPolicyScopeGroupDisplayName": "",
   "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\M365\\Backup\\PolicyScope",
+  "MinimumMailboxMatchPercent": 90,
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\M365\\Backup\\PolicyScope\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52
