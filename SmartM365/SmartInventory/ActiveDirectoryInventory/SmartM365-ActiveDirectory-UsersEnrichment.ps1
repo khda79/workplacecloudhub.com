@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.0
+1.2
 #>
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
@@ -374,18 +374,136 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         return @($set | Sort-Object) -join $Separator
     }
     $calculatedColumns = @(
-        'OU_Path','OU_Category','TypeEtablissement','TypeEntity','IsServiceAccountOrSimilar','IsSpecificAdminOrService','IsTargetOU_HQ','IsNotTargetOU_HQ','NoLastLogonAD','EnabledAndNoLastLogonMerge',
-        'GivenNameClean','SurnameClean','AccountType','EXO_Mapping_Status','IsShared_Status','IsLargeSharedMailbox','IsInLocalEXODuplicates','Is_In_SHAREDMAILBOX','TotalItemSizeNumeric_From_Mailboxes','TotalItemSizeNumeri_From_RemoteMailboxes','M365LicenseType','M365LicenseType_ByPersonae','M365LicenseType_ByPersonae2','M365LicenseType_Target1_ByPersona','M365LicenseType_Target1_ByPersona 2','M365LicenseType_Target2_ByPersona','M365LicenseType_Target3_ByPersona','HeavyMailboxF3User','M365License_F3_E3_SizeBucket','M365License_F3_E3_SizeBucket_Sort','M365License_F3_NonCompliant_Size_Remaining_Flag',
-        'AccountToCleanExcluded','AccountToCleanStatus1','AccountToCleanStatus2','ActivityCategory','FullAccess_From_Mailboxes_UPN','FullAccess_From_MailboxesEXO','FullAccess_From_MailboxesEXO_Raw','GrantSendOnBehalfTo_UPN','IsJobTitleValid','Job Family Combined','Job Family Combined 2','Job Family from Keywords','Job Family from Keywords 2','Job Title Combined','Job Title From Desc','Job Title From Desc 2','Job Title Normalized','Job Title Normalized 2','Job Title Padded','Job Title Padded 2','LabelFromEntity','LastLoggedComputerSamAccountNames','LastLoggedInOnALLComputers','LastLoggedInOnComputer','LastLogonEntra','LastLogonEntra_Category','LastLogonEntraNonInteractive','LastLogonMergeADExchEntra','LocalMailboxPermissionCount_NotInM365','LogonCountStatus','M365License_E3Persona_MissingE3_Flag','M365License_F3_AllOversized_SizeBucket','M365License_F3_AllOversized_SizeBucket_Sort','M365License_NoLicenseF3_EnabledMailbox_BlockingMigration_Flag','Mig_Potential_Issues_Mailbox_Level2','Mig_Potential_Issues_Score','NoLastLogonEntra','NoLastLogonEntraNonInteractive','NoLastLogonExch','NoLastLogonInOnComputer','SendAs_From_Mailboxes_UPN',
-        'PrimarySmtp','PrimarySmtp_Lower','PrimarySMTP_Domain','Containsorpeamailonmicrosoft','ExistsInM365ActiveUsers',
-        'RecipientType_From_Mailboxes','RecipientTypeDetails_From_Mailboxes','ExistsInRemoteMailboxes','IsMailBox','MailboxSource','MailboxLocation','MailboxSourceHealthStatus',
-        'ItemCount_From_Mailboxes','IsItemCountOver999999','TotalItemSizeNumeric','TotalItemSize_GB','TotalItemSize_TB','TotalArchiveItemSizeNumeric','TotalArchiveItemSize_GB','TotalItemSizeAndArchiveNumeric','TotalItemSizeAndArchive_GB','IsLargerThan2GB','IsLargerThan100GB','IsSmallerThan2GB','MailboxSize_From_Mailboxes',
-        'LastLogonDateFromExch','LastLogonDateFromExchDate','LastLogonMerge','IsLastLogonMerge','NoLastLogonMerge','LastLogonDateFromExchDate_Category','LastLogonDate_Category','LastLogonFromExch_OlderThan_3M','LastLogonFromExch_OlderThan_6M',
-        'LicenseFromM365','LicenseGroupFromM365','LicenseExchangePlanEnabledFromM365','LicenseGroupCount','LicenseGroupFound','LicenseFromM365_GroupsAssigningSku','LicenseFromM365_HasDirect','LicenseFromM365_HasGroupOnly','LicenseFromM365_HasDirectAndGroup','LicenseGroupHasDoubleAssignment',
-        'DomainAllowed_EXO','DomainNotAllowed_EXO','DomainType_EXO','DomainIsOnMicrosoft_EXO','DomainNonCompliant_EXO','DomainUsersNotAllowed_EXO','DomainUsersNonCompliant_EXO','UPNDomainVerified_AAD','UPNEqualsPrimarySMTPDomain',
-        'RemoteRoutingAddress_From_MailboxesRemote','WhenRemoteMailboxCreated','DaysSinceRemoteMailboxCreated','WhenMailboxCreated_From_Mailboxes','WhenMailboxCreated_From_EXO','WhenMailboxCreated_From_EXO_Date',
-        'FullAccessOn_From_Mailboxes','SendAsOn_From_Mailboxes','SendOnBehalfOn_From_Mailboxes','FullAccess_From_Mailboxes_Raw','FullAccess_From_Mailboxes','SendAs_From_Mailboxes_Raw','SendAs_From_Mailboxes','GrantSendOnBehalfTo_From_Mailboxes_Raw','GrantSendOnBehalfTo_From_Mailboxes','PermissionsSummary','PermissionsCount','SharedAccessCount','HasFullAccess','HasSendAsBehalf','HasSendOnBehalf','HasAnyDelegPerm','HasCrossPremisesPermissions',
-        'MigrationUserStatus_From_MigrationJobs','MigrationUserBatchName_From_MigrationJobs','MigrationUserCompleteAfter_From_MigrationJobs','MigrationUserCompleteAfterUTC_From_MigrationJobs','ProtectedMailboxes_From_EXO_BackupProtection'
+        'AdOrganizationalUnitPath'
+        'AdOrganizationalUnitCategory'
+        'EntitySiteType'
+        'EntityIntegrationType'
+        'IsLikelyServiceAccount'
+        'IsLikelyPrivilegedOrServiceAccount'
+        'IsInTargetHeadquartersOU'
+        'IsOutsideTargetHeadquartersOU'
+        'HasNoAdLastLogon'
+        'IsEnabledWithNoResolvedLastLogon'
+        'GivenNameNormalized'
+        'SurnameNormalized'
+        'AccountType'
+        'ExchangeOnlineMappingStatus'
+        'SharedMailboxStatus'
+        'IsLargeSharedMailbox'
+        'IsInLocalExchangeOnlineDuplicateSet'
+        'IsSharedMailbox'
+        'OnPremMailboxSizeMB'
+        'RemoteMailboxSizeGB'
+        'M365LicenseType'
+        'M365LicenseTypeByPersona'
+        'M365LicenseTargetPersona'
+        'M365LicenseTargetPersonaRelaxed'
+        'M365LicenseTargetPersona2'
+        'M365LicenseTargetPersona3'
+        'IsF3UserWithLargeMailbox'
+        'F3E3MailboxSizeBucket'
+        'F3E3MailboxSizeBucketSortOrder'
+        'HasRemainingF3MailboxSizeNonCompliance'
+        'ActivityCategory'
+        'IsJobTitleValid'
+        'JobFamily'
+        'JobFamilyRelaxed'
+        'JobFamilyFromKeywords'
+        'JobFamilyFromKeywordsRelaxed'
+        'JobTitle'
+        'JobTitleFromDescription'
+        'JobTitleFromDescriptionRelaxed'
+        'JobTitleNormalized'
+        'JobTitleNormalizedRelaxed'
+        'JobTitlePadded'
+        'JobTitlePaddedRelaxed'
+        'EntityLabel'
+        'EntraLastSignInDateTime'
+        'EntraLastSignInCategory'
+        'EntraLastNonInteractiveSignInDateTime'
+        'ResolvedLastActivityDateTime'
+        'OnPremMailboxPermissionCountNotInM365'
+        'IsE3PersonaMissingE3License'
+        'F3OversizedMailboxBucket'
+        'F3OversizedMailboxBucketSortOrder'
+        'IsUnlicensedEnabledF3MailboxBlockingMigration'
+        'MailboxMigrationIssueSeverity'
+        'MigrationIssueScore'
+        'HasNoEntraLastSignIn'
+        'HasNoEntraNonInteractiveLastSignIn'
+        'HasNoExchangeLastLogon'
+        'PrimarySmtpAddress'
+        'PrimarySmtpAddressNormalized'
+        'PrimarySmtpDomain'
+        'HasLegacyRoutingDomainProxyAddress'
+        'ExistsInM365Users'
+        'MailboxRecipientType'
+        'HasRemoteMailbox'
+        'HasMailbox'
+        'MailboxSource'
+        'MailboxSourceHealthStatus'
+        'MailboxItemCount'
+        'HasMailboxItemCountOver999999'
+        'MailboxSizeMB'
+        'MailboxSizeGB'
+        'MailboxSizeTB'
+        'ArchiveMailboxSizeMB'
+        'ArchiveMailboxSizeGB'
+        'MailboxAndArchiveSizeMB'
+        'MailboxAndArchiveSizeGB'
+        'IsMailboxLargerThan2GB'
+        'IsMailboxLargerThan100GB'
+        'IsMailboxSmallerThan2GB'
+        'ExchangeLastLogonDateTime'
+        'ExchangeLastLogonDate'
+        'ResolvedLastLogonDateTime'
+        'ResolvedLastLogonStatus'
+        'HasNoResolvedLastLogon'
+        'ExchangeLastLogonCategory'
+        'AdLastLogonCategory'
+        'IsExchangeLastLogonOlderThan90Days'
+        'IsExchangeLastLogonOlderThan180Days'
+        'M365LicenseName'
+        'M365LicenseAssignmentGroup'
+        'ExchangeServicePlanName'
+        'M365LicenseAssignmentGroupCount'
+        'M365LicenseAssignmentGroups'
+        'M365LicenseAssigningGroups'
+        'HasDirectM365License'
+        'HasGroupOnlyM365License'
+        'HasDirectAndGroupM365License'
+        'HasDuplicateM365LicenseAssignment'
+        'IsPrimarySmtpDomainAcceptedInExchangeOnline'
+        'IsExchangeOnlineDomainNotAllowed'
+        'ExchangeOnlineDomainType'
+        'IsExchangeOnlineOnMicrosoftDomain'
+        'IsExchangeOnlineDomainNonCompliant'
+        'AreExchangeOnlineUserDomainsNotAllowed'
+        'AreExchangeOnlineUserDomainsNonCompliant'
+        'IsUserPrincipalNameDomainVerifiedInEntra'
+        'DoesUpnDomainMatchPrimarySmtpDomain'
+        'RemoteMailboxRoutingAddress'
+        'RemoteMailboxCreatedDateTime'
+        'DaysSinceRemoteMailboxCreated'
+        'OnPremMailboxCreatedDateTime'
+        'ExchangeOnlineMailboxCreatedDateTime'
+        'ExchangeOnlineMailboxCreatedDate'
+        'FullAccessOnMailboxes'
+        'SendAsOnMailboxes'
+        'SendOnBehalfOnMailboxes'
+        'MailboxDelegatedPermissionSummary'
+        'MailboxDelegatedPermissionCount'
+        'SendAsMailboxCount'
+        'HasFullAccess'
+        'HasSendAs'
+        'HasSendOnBehalf'
+        'HasAnyDelegatedPermission'
+        'HasCrossPremisesPermissions'
+        'ExchangeMigrationUserStatus'
+        'ExchangeMigrationBatchName'
+        'ExchangeMigrationCompleteAfterDateTime'
+        'ExchangeMigrationCompleteAfterUtcDateTime'
+        'IsProtectedByMicrosoft365Backup'
     )
 
     WriteLog -Message ("AD users enrichment loading source CSV: {0}" -f $CombinedUsersCsv)
@@ -526,7 +644,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $jobTitlePadded2 = if ([string]::IsNullOrWhiteSpace($jobTitleNormalized2)) { '' } else { ' ' + $jobTitleNormalized2 + ' ' }
         $jobFamilyFromKeywords = Get-SmartM365JobFamilyFromKeywords -PaddedTitle $jobTitlePadded -KeywordRows $personaeKeywordRows1 -StrictCategory:$true
         $jobFamilyFromKeywords2 = Get-SmartM365JobFamilyFromKeywords -PaddedTitle $jobTitlePadded2 -KeywordRows $personaeKeywordRows2 -StrictCategory:$false
-        $noLastLogonInOnComputer = [string]::IsNullOrWhiteSpace([string]$out['LastLoggedInOnComputer'])
+        $noLastLogonInOnComputer = $true
         $jobFamilyCombined = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEtablissement $typeEtablissement -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -KeywordCategory $jobFamilyFromKeywords
         $jobFamilyCombined2 = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEtablissement $typeEtablissement -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -KeywordCategory $jobFamilyFromKeywords2
         $target1Persona = if (@('UserMailbox','RemoteUserMailbox') -contains $recipientType) { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined } else { 'None' }
@@ -538,74 +656,60 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $m365LicenseType = if ($licenseGroupNorm.Contains('MICROSOFT 365 E3')) { 'M365E3' } elseif ($licenseGroupNorm.Contains('MICROSOFT 365 F3')) { 'M365F3' } elseif (-not $allowedAccountType) { 'None' } else { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined }
         $lastLogonEntra = Get-Value $m365User @('LastSignInDateTime')
         $lastLogonEntraNonInteractive = Get-Value $m365User @('LastNonInteractiveSignInDateTime')
-        $lastLogonMergeAdExchEntra = Get-SmartM365LatestDateText -Values @([string]$user.LastLogonDate, $out['LastLogonDateFromExch'], $lastLogonEntra, $lastLogonEntraNonInteractive)
-        $out['OU_Path'] = Get-OuPathFromDistinguishedName -DistinguishedName $distinguishedName
-        $out['OU_Category'] = if ($distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')) { 'DISABLED OBJECTS' } elseif ($distinguishedNameUpper.Contains('OU=ORGANIZATION')) { 'ORGANIZATION' } elseif ($distinguishedNameUpper.Contains('OU=ADMIN')) { 'ADMIN' } elseif ($distinguishedNameUpper.Contains('OU=FAX')) { 'FAX' } else { 'OTHER' }
-        $out['TypeEtablissement'] = $typeEtablissement
-        $out['TypeEntity'] = $typeEntityValue
-        $out['GivenNameClean'] = $givenNameClean
-        $out['SurnameClean'] = $surnameClean
+        $lastLogonMergeAdExchEntra = Get-SmartM365LatestDateText -Values @([string]$user.LastLogonDate, $out['ExchangeLastLogonDateTime'], $lastLogonEntra, $lastLogonEntraNonInteractive)
+        $out['AdOrganizationalUnitPath'] = Get-OuPathFromDistinguishedName -DistinguishedName $distinguishedName
+        $out['AdOrganizationalUnitCategory'] = if ($distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')) { 'DISABLED OBJECTS' } elseif ($distinguishedNameUpper.Contains('OU=ORGANIZATION')) { 'ORGANIZATION' } elseif ($distinguishedNameUpper.Contains('OU=ADMIN')) { 'ADMIN' } elseif ($distinguishedNameUpper.Contains('OU=FAX')) { 'FAX' } else { 'OTHER' }
+        $out['EntitySiteType'] = $typeEtablissement
+        $out['EntityIntegrationType'] = $typeEntityValue
+        $out['GivenNameNormalized'] = $givenNameClean
+        $out['SurnameNormalized'] = $surnameClean
         $out['AccountType'] = $accountType
-        $out['EXO_Mapping_Status'] = if ($null -eq $exoMailbox) { 'Not EXO' } elseif (-not [string]::IsNullOrWhiteSpace($aadObjectId)) { 'OK_GUID' } else { 'Missing_AAD_Object' }
-        $out['IsShared_Status'] = if ($null -eq $localMailbox) { 'NoMailboxes' } else { [string]((Get-Value $localMailbox @('IsShared')) -match '^(?i:true|1)$') }
+        $out['ExchangeOnlineMappingStatus'] = if ($null -eq $exoMailbox) { 'Not EXO' } elseif (-not [string]::IsNullOrWhiteSpace($aadObjectId)) { 'OK_GUID' } else { 'Missing_AAD_Object' }
+        $out['SharedMailboxStatus'] = if ($null -eq $localMailbox) { 'NoMailboxes' } else { [string]((Get-Value $localMailbox @('IsShared')) -match '^(?i:true|1)$') }
         $out['IsLargeSharedMailbox'] = [string](($totalSizeMb -gt 40960) -and $recipientType -eq 'SharedMailbox')
-        $out['IsInLocalEXODuplicates'] = [string]($mailboxSource -match 'Local' -and $mailboxSource -match 'EXO')
-        $out['Is_In_SHAREDMAILBOX'] = [string]($recipientType -match 'SharedMailbox')
-        $out['TotalItemSizeNumeric_From_Mailboxes'] = Format-NumberInvariant $localSizeMb
-        $out['TotalItemSizeNumeri_From_RemoteMailboxes'] = if ($null -ne $remoteMailbox -and $null -ne $exoSizeGb) { Format-NumberInvariant $exoSizeGb } else { '' }
-        $out['M365LicenseType_Target1_ByPersona'] = $target1Persona
-        $out['M365LicenseType_Target1_ByPersona 2'] = $target1Persona2
-        $out['M365LicenseType_Target2_ByPersona'] = $target2Persona
-        $out['M365LicenseType_Target3_ByPersona'] = $target3Persona
-        $out['M365LicenseType_ByPersonae'] = $target1Persona
-        $out['M365LicenseType_ByPersonae2'] = $target2Persona
+        $out['IsInLocalExchangeOnlineDuplicateSet'] = [string]($mailboxSource -match 'Local' -and $mailboxSource -match 'EXO')
+        $out['IsSharedMailbox'] = [string]($recipientType -match 'SharedMailbox')
+        $out['OnPremMailboxSizeMB'] = Format-NumberInvariant $localSizeMb
+        $out['RemoteMailboxSizeGB'] = if ($null -ne $remoteMailbox -and $null -ne $exoSizeGb) { Format-NumberInvariant $exoSizeGb } else { '' }
+        $out['M365LicenseTargetPersona'] = $target1Persona
+        $out['M365LicenseTargetPersonaRelaxed'] = $target1Persona2
+        $out['M365LicenseTargetPersona2'] = $target2Persona
+        $out['M365LicenseTargetPersona3'] = $target3Persona
+        $out['M365LicenseTypeByPersona'] = $target1Persona
         $out['M365LicenseType'] = $m365LicenseType
-        $out['HeavyMailboxF3User'] = if ((($licenseGroup -eq 'Microsoft 365 F3') -or ($m365LicenseType -eq 'M365F3')) -and $totalSizeMb -ge 2000) { 'Yes' } else { 'No' }
-        $out['M365License_F3_E3_SizeBucket'] = if ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 2000 -and $totalSizeMb -le 2500) { '2-2.5 GB' } elseif ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 2500 -and $totalSizeMb -le 5000) { '2.5-5 GB' } elseif ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 5000 -and $totalSizeMb -le 10000) { '5-10 GB' } elseif ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 10000) { '>10 GB' } else { '' }
-        $out['M365License_F3_E3_SizeBucket_Sort'] = switch ($out['M365License_F3_E3_SizeBucket']) { '2-2.5 GB' { '1' } '2.5-5 GB' { '2' } '5-10 GB' { '3' } '>10 GB' { '4' } default { '99' } }
-        $out['M365License_F3_NonCompliant_Size_Remaining_Flag'] = if ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $recipientType -eq 'UserMailbox' -and $out['ExistsInRemoteMailboxes'] -eq 'False' -and $totalSizeMb -gt 2000 -and $licenseGroup -ne 'Microsoft 365 E3') { '1' } else { '0' }
-        $out['M365License_F3_AllOversized_SizeBucket'] = if ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 2000 -and $totalSizeMb -le 2500) { '2-2.5 GB' } elseif ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 2500 -and $totalSizeMb -le 5000) { '2.5-5 GB' } elseif ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 5000 -and $totalSizeMb -le 10000) { '5-10 GB' } elseif ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 10000) { '>10 GB' } else { '' }
-        $out['M365License_F3_AllOversized_SizeBucket_Sort'] = switch ($out['M365License_F3_AllOversized_SizeBucket']) { '2-2.5 GB' { '1' } '2.5-5 GB' { '2' } '5-10 GB' { '3' } '>10 GB' { '4' } default { '99' } }
-        $out['M365License_NoLicenseF3_EnabledMailbox_BlockingMigration_Flag'] = if ($out['IsMailBox'] -eq 'True' -and $isEnabled -and $recipientType -eq 'UserMailbox' -and $out['ExistsInRemoteMailboxes'] -eq 'False' -and $target1Persona -eq 'M365F3' -and @('No License (Unlicensed)','Not in M365') -contains $licenseGroup) { '1' } else { '0' }
-        $out['M365License_E3Persona_MissingE3_Flag'] = if ($out['IsMailBox'] -eq 'True' -and $target1Persona -eq 'M365E3' -and @('UserMailbox','RemoteUserMailbox') -contains $recipientType -and $out['ExistsInRemoteMailboxes'] -eq 'False' -and @('Microsoft 365 F3','No License (Unlicensed)') -contains $licenseGroup) { '1' } else { '0' }
-        $out['LastLogonEntra'] = $lastLogonEntra
-        $out['LastLogonEntraNonInteractive'] = $lastLogonEntraNonInteractive
-        $out['LastLogonEntra_Category'] = Get-DateCategory -Value $lastLogonEntra -LimitDays 90
-        $out['LastLogonMergeADExchEntra'] = $lastLogonMergeAdExchEntra
-        $out['NoLastLogonEntra'] = [string][string]::IsNullOrWhiteSpace($lastLogonEntra)
-        $out['NoLastLogonEntraNonInteractive'] = [string][string]::IsNullOrWhiteSpace($lastLogonEntraNonInteractive)
-        $out['NoLastLogonExch'] = [string][string]::IsNullOrWhiteSpace([string]$out['LastLogonDateFromExch'])
-        $out['NoLastLogonInOnComputer'] = [string][string]::IsNullOrWhiteSpace([string]$out['LastLoggedInOnComputer'])
-        $out['FullAccess_From_Mailboxes_UPN'] = $out['FullAccess_From_Mailboxes']
-        $out['SendAs_From_Mailboxes_UPN'] = $out['SendAs_From_Mailboxes']
-        $out['GrantSendOnBehalfTo_UPN'] = $out['GrantSendOnBehalfTo_From_Mailboxes']
-        $out['FullAccess_From_MailboxesEXO'] = Get-Value $perms @('FullAccessEXO','FullAccess_From_MailboxesEXO')
-        $out['FullAccess_From_MailboxesEXO_Raw'] = $out['FullAccess_From_MailboxesEXO']
-        $out['LocalMailboxPermissionCount_NotInM365'] = '0'
-        $out['LogonCountStatus'] = ''
+        $out['IsF3UserWithLargeMailbox'] = if ((($licenseGroup -eq 'Microsoft 365 F3') -or ($m365LicenseType -eq 'M365F3')) -and $totalSizeMb -ge 2000) { 'Yes' } else { 'No' }
+        $out['F3E3MailboxSizeBucket'] = if ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 2000 -and $totalSizeMb -le 2500) { '2-2.5 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 2500 -and $totalSizeMb -le 5000) { '2.5-5 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 5000 -and $totalSizeMb -le 10000) { '5-10 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 10000) { '>10 GB' } else { '' }
+        $out['F3E3MailboxSizeBucketSortOrder'] = switch ($out['F3E3MailboxSizeBucket']) { '2-2.5 GB' { '1' } '2.5-5 GB' { '2' } '5-10 GB' { '3' } '>10 GB' { '4' } default { '99' } }
+        $out['HasRemainingF3MailboxSizeNonCompliance'] = if ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $recipientType -eq 'UserMailbox' -and $out['HasRemoteMailbox'] -eq 'False' -and $totalSizeMb -gt 2000 -and $licenseGroup -ne 'Microsoft 365 E3') { '1' } else { '0' }
+        $out['F3OversizedMailboxBucket'] = if ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 2000 -and $totalSizeMb -le 2500) { '2-2.5 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 2500 -and $totalSizeMb -le 5000) { '2.5-5 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 5000 -and $totalSizeMb -le 10000) { '5-10 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 10000) { '>10 GB' } else { '' }
+        $out['F3OversizedMailboxBucketSortOrder'] = switch ($out['F3OversizedMailboxBucket']) { '2-2.5 GB' { '1' } '2.5-5 GB' { '2' } '5-10 GB' { '3' } '>10 GB' { '4' } default { '99' } }
+        $out['IsUnlicensedEnabledF3MailboxBlockingMigration'] = if ($out['HasMailbox'] -eq 'True' -and $isEnabled -and $recipientType -eq 'UserMailbox' -and $out['HasRemoteMailbox'] -eq 'False' -and $target1Persona -eq 'M365F3' -and @('No License (Unlicensed)','Not in M365') -contains $licenseGroup) { '1' } else { '0' }
+        $out['IsE3PersonaMissingE3License'] = if ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365E3' -and @('UserMailbox','RemoteUserMailbox') -contains $recipientType -and $out['HasRemoteMailbox'] -eq 'False' -and @('Microsoft 365 F3','No License (Unlicensed)') -contains $licenseGroup) { '1' } else { '0' }
+        $out['EntraLastSignInDateTime'] = $lastLogonEntra
+        $out['EntraLastNonInteractiveSignInDateTime'] = $lastLogonEntraNonInteractive
+        $out['EntraLastSignInCategory'] = Get-DateCategory -Value $lastLogonEntra -LimitDays 90
+        $out['ResolvedLastActivityDateTime'] = $lastLogonMergeAdExchEntra
+        $out['HasNoEntraLastSignIn'] = [string][string]::IsNullOrWhiteSpace($lastLogonEntra)
+        $out['HasNoEntraNonInteractiveLastSignIn'] = [string][string]::IsNullOrWhiteSpace($lastLogonEntraNonInteractive)
+        $out['HasNoExchangeLastLogon'] = [string][string]::IsNullOrWhiteSpace([string]$out['ExchangeLastLogonDateTime'])
+        $out['OnPremMailboxPermissionCountNotInM365'] = '0'
         $out['ActivityCategory'] = Get-DateCategory -Value $lastLogonMergeAdExchEntra -LimitDays 90
-        $out['AccountToCleanExcluded'] = ''
-        $out['AccountToCleanStatus1'] = ''
-        $out['AccountToCleanStatus2'] = ''
         $out['IsJobTitleValid'] = [string](-not [string]::IsNullOrWhiteSpace($jobTitleNormalized))
-        $out['Job Family Combined'] = $jobFamilyCombined
-        $out['Job Family Combined 2'] = $jobFamilyCombined2
-        $out['Job Family from Keywords'] = $jobFamilyFromKeywords
-        $out['Job Family from Keywords 2'] = $jobFamilyFromKeywords2
-        $out['Job Title Combined'] = $jobTitleFromDesc
-        $out['Job Title From Desc'] = $jobTitleFromDesc
-        $out['Job Title From Desc 2'] = $jobTitleFromDesc2
-        $out['Job Title Normalized'] = $jobTitleNormalized
-        $out['Job Title Normalized 2'] = $jobTitleNormalized2
-        $out['Job Title Padded'] = $jobTitlePadded
-        $out['Job Title Padded 2'] = $jobTitlePadded2
-        $out['LabelFromEntity'] = $labelFromEntity
-        $out['LastLoggedComputerSamAccountNames'] = ''
-        $out['LastLoggedInOnALLComputers'] = ''
-        $out['LastLoggedInOnComputer'] = ''
+        $out['JobFamily'] = $jobFamilyCombined
+        $out['JobFamilyRelaxed'] = $jobFamilyCombined2
+        $out['JobFamilyFromKeywords'] = $jobFamilyFromKeywords
+        $out['JobFamilyFromKeywordsRelaxed'] = $jobFamilyFromKeywords2
+        $out['JobTitle'] = $jobTitleFromDesc
+        $out['JobTitleFromDescription'] = $jobTitleFromDesc
+        $out['JobTitleFromDescriptionRelaxed'] = $jobTitleFromDesc2
+        $out['JobTitleNormalized'] = $jobTitleNormalized
+        $out['JobTitleNormalizedRelaxed'] = $jobTitleNormalized2
+        $out['JobTitlePadded'] = $jobTitlePadded
+        $out['JobTitlePaddedRelaxed'] = $jobTitlePadded2
+        $out['EntityLabel'] = $labelFromEntity
         if ($hybridIdentityIssues.Count -eq 0 -or [string]::IsNullOrWhiteSpace($primarySmtp)) {
-            $out['Mig_Potential_Issues_Mailbox_Level2'] = ''
-            $out['Mig_Potential_Issues_Score'] = ''
+            $out['MailboxMigrationIssueSeverity'] = ''
+            $out['MigrationIssueScore'] = ''
         }
         else {
             $severityCodes = @()
@@ -624,100 +728,91 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
                 }
             }
             if ($severityCodes.Count -eq 0) {
-                $out['Mig_Potential_Issues_Mailbox_Level2'] = 'None'
+                $out['MailboxMigrationIssueSeverity'] = 'None'
             }
             else {
                 switch (($severityCodes | Measure-Object -Minimum).Minimum) {
-                    1 { $out['Mig_Potential_Issues_Mailbox_Level2'] = 'Critical' }
-                    2 { $out['Mig_Potential_Issues_Mailbox_Level2'] = 'High' }
-                    3 { $out['Mig_Potential_Issues_Mailbox_Level2'] = 'Medium' }
-                    default { $out['Mig_Potential_Issues_Mailbox_Level2'] = 'Low' }
+                    1 { $out['MailboxMigrationIssueSeverity'] = 'Critical' }
+                    2 { $out['MailboxMigrationIssueSeverity'] = 'High' }
+                    3 { $out['MailboxMigrationIssueSeverity'] = 'Medium' }
+                    default { $out['MailboxMigrationIssueSeverity'] = 'Low' }
                 }
             }
-            $out['Mig_Potential_Issues_Score'] = [string]$issueScore
+            $out['MigrationIssueScore'] = [string]$issueScore
         }
-        $out['IsServiceAccountOrSimilar'] = [string]([string]::IsNullOrWhiteSpace($userPrincipalName) -or $distinguishedName.Contains('Service_Accounts') -or $samAccountName.Contains('s_') -or $samAccountNameLower.Contains('svc') -or $samAccountName.Contains('HealthMailbox'))
-        $out['IsSpecificAdminOrService'] = [string]($samAccountNameLower.StartsWith('a_') -or $samAccountNameLower.Contains('s_') -or $samAccountNameLower.Contains('administrateur') -or $samAccountNameLower.Contains('administrator'))
-        $out['IsTargetOU_HQ'] = [string](($typeEtablissementUpper -eq 'HQ') -or $inTargetHqOu)
-        $out['IsNotTargetOU_HQ'] = [string](($typeEtablissementUpper -ne 'HQ') -and -not $inTargetHqOu -and -not $inDisabledObjectsOu)
-        $out['NoLastLogonAD'] = [string]([string]::IsNullOrWhiteSpace([string]$user.LastLogonDate))
-        $out['PrimarySmtp'] = $primarySmtp
-        $out['PrimarySmtp_Lower'] = $primarySmtp
-        $out['PrimarySMTP_Domain'] = $primaryDomain
-        $out['Containsorpeamailonmicrosoft'] = if (([string]$user.ProxyAddresses).ToLowerInvariant().Contains('@orpea.mail.onmicrosoft.com')) { 'Yes' } else { 'No' }
-        $out['ExistsInM365ActiveUsers'] = if ($m365Users.Count -gt 0) { [string]($null -ne $m365User) } else { '' }
-        $out['RecipientType_From_Mailboxes'] = $recipientType
-        $out['RecipientTypeDetails_From_Mailboxes'] = $recipientType
-        $out['ExistsInRemoteMailboxes'] = [string](@('RemoteUserMailbox','RemoteSharedMailbox','RemoteRoomMailbox') -contains $recipientType)
-        $out['IsMailBox'] = [string]($recipientType -ne 'NoMailboxes')
+        $out['IsLikelyServiceAccount'] = [string]([string]::IsNullOrWhiteSpace($userPrincipalName) -or $distinguishedName.Contains('Service_Accounts') -or $samAccountName.Contains('s_') -or $samAccountNameLower.Contains('svc') -or $samAccountName.Contains('HealthMailbox'))
+        $out['IsLikelyPrivilegedOrServiceAccount'] = [string]($samAccountNameLower.StartsWith('a_') -or $samAccountNameLower.Contains('s_') -or $samAccountNameLower.Contains('administrateur') -or $samAccountNameLower.Contains('administrator'))
+        $out['IsInTargetHeadquartersOU'] = [string](($typeEtablissementUpper -eq 'HQ') -or $inTargetHqOu)
+        $out['IsOutsideTargetHeadquartersOU'] = [string](($typeEtablissementUpper -ne 'HQ') -and -not $inTargetHqOu -and -not $inDisabledObjectsOu)
+        $out['HasNoAdLastLogon'] = [string]([string]::IsNullOrWhiteSpace([string]$user.LastLogonDate))
+        $out['PrimarySmtpAddress'] = $primarySmtp
+        $out['PrimarySmtpAddressNormalized'] = $primarySmtp
+        $out['PrimarySmtpDomain'] = $primaryDomain
+        $out['HasLegacyRoutingDomainProxyAddress'] = if (([string]$user.ProxyAddresses).ToLowerInvariant().Contains('@orpea.mail.onmicrosoft.com')) { 'Yes' } else { 'No' }
+        $out['ExistsInM365Users'] = if ($m365Users.Count -gt 0) { [string]($null -ne $m365User) } else { '' }
+        $out['MailboxRecipientType'] = $recipientType
+        $out['HasRemoteMailbox'] = [string](@('RemoteUserMailbox','RemoteSharedMailbox','RemoteRoomMailbox') -contains $recipientType)
+        $out['HasMailbox'] = [string]($recipientType -ne 'NoMailboxes')
         $out['MailboxSource'] = $mailboxSource
-        $out['MailboxLocation'] = $mailboxSource
         $out['MailboxSourceHealthStatus'] = if ($mailboxSource -eq 'None') { 'No mailbox' } elseif ($mailboxSource -eq 'Local+Remote+EXO') { 'Hybrid duplicate' } else { 'OK' }
-        $out['ItemCount_From_Mailboxes'] = $itemCount.ToString('0.########',[System.Globalization.CultureInfo]::InvariantCulture)
-        $out['IsItemCountOver999999'] = [string]($itemCount -gt 999999)
-        $out['TotalItemSizeNumeric'] = Format-NumberInvariant $totalSizeMb
-        $out['TotalItemSize_GB'] = if ($null -ne $totalSizeMb) { Format-NumberInvariant ($totalSizeMb / 1024) } else { '' }
-        $out['TotalItemSize_TB'] = if ($null -ne $totalSizeMb) { Format-NumberInvariant ($totalSizeMb / 1048576) } else { '' }
-        $out['TotalArchiveItemSizeNumeric'] = Format-NumberInvariant $archiveMb
-        $out['TotalArchiveItemSize_GB'] = if ($null -ne $archiveMb) { Format-NumberInvariant ($archiveMb / 1024) } else { '' }
-        $out['TotalItemSizeAndArchiveNumeric'] = Format-NumberInvariant $totalAndArchiveMb
-        $out['TotalItemSizeAndArchive_GB'] = if ($null -ne $totalAndArchiveMb) { Format-NumberInvariant ($totalAndArchiveMb / 1024) } else { '' }
-        $out['IsLargerThan2GB'] = if ($null -ne $totalSizeMb) { [string]($totalSizeMb -gt 2048) } else { 'False' }
-        $out['IsLargerThan100GB'] = if ($null -ne $totalSizeMb) { [string]($totalSizeMb -gt 102400) } else { 'False' }
-        $out['IsSmallerThan2GB'] = if ($null -ne $totalSizeMb) { [string]($totalSizeMb -lt 2048) } else { 'False' }
-        $out['MailboxSize_From_Mailboxes'] = $out['TotalItemSize_GB']
-        $out['LicenseFromM365'] = $licenseFromM365
-        $out['LicenseGroupFromM365'] = $licenseGroup
-        $out['LicenseExchangePlanEnabledFromM365'] = $exchangePlan
-        $out['LicenseGroupCount'] = [string]$licenseGroups.Count
-        $out['LicenseGroupFound'] = $licenseGroups -join ' + '
-        $out['LicenseFromM365_GroupsAssigningSku'] = Join-UniqueText -Values @($licenseRows | ForEach-Object { Get-Value $_ @('GroupsAssigningSku') }) -Separator ','
-        $out['LicenseFromM365_HasDirect'] = if ([string]::IsNullOrWhiteSpace($licenseKey)) { '' } else { [string]$hasDirectLicense }
-        $out['LicenseFromM365_HasGroupOnly'] = if ([string]::IsNullOrWhiteSpace($licenseKey)) { '' } else { [string]($hasGroupLicense -and -not $hasDirectLicense) }
-        $out['LicenseFromM365_HasDirectAndGroup'] = [string](@($licenseRows | Where-Object { (Get-Value $_ @('HasDirectAndGroup')) -match '^(?i:true|1)$' }).Count -gt 0)
-        $out['LicenseGroupHasDoubleAssignment'] = if ($out['LicenseFromM365_HasDirectAndGroup'] -eq 'True') { 'Yes' } else { 'No' }
-        $out['DomainAllowed_EXO'] = if ($acceptedDomains.Count -gt 0) { [string]($null -ne $acceptedDomain) } else { '' }
-        $out['DomainNotAllowed_EXO'] = if ($out['DomainAllowed_EXO'] -eq '') { '' } else { [string]($out['DomainAllowed_EXO'] -eq 'False') }
-        $out['DomainType_EXO'] = Get-Value $acceptedDomain @('DomainType')
-        $out['DomainIsOnMicrosoft_EXO'] = if ([string]::IsNullOrWhiteSpace($primaryDomain)) { '' } else { [string]($primaryDomain -like '*.onmicrosoft.com') }
-        $out['DomainNonCompliant_EXO'] = if ($out['DomainAllowed_EXO'] -eq '') { '' } elseif ($out['DomainAllowed_EXO'] -eq 'False' -or $out['DomainIsOnMicrosoft_EXO'] -eq 'True') { 'True' } else { 'False' }
-        $out['DomainUsersNotAllowed_EXO'] = $out['DomainNotAllowed_EXO']
-        $out['DomainUsersNonCompliant_EXO'] = $out['DomainNonCompliant_EXO']
-        $out['UPNDomainVerified_AAD'] = if ([string]::IsNullOrWhiteSpace($upnDomain) -or $verifiedDomains.Count -eq 0) { '' } else { [string]$verifiedDomainSet.Contains((Get-Key $upnDomain)) }
-        $out['UPNEqualsPrimarySMTPDomain'] = if ([string]::IsNullOrWhiteSpace($upnDomain) -or [string]::IsNullOrWhiteSpace($primaryDomain)) { '' } else { [string]($upnDomain -eq $primaryDomain) }
-        $out['RemoteRoutingAddress_From_MailboxesRemote'] = Get-Value $remoteMailbox @('RemoteRoutingAddress')
-        $out['FullAccessOn_From_Mailboxes'] = $fullAccess
-        $out['SendAsOn_From_Mailboxes'] = $sendAs
-        $out['SendOnBehalfOn_From_Mailboxes'] = $sendOnBehalf
-        $out['FullAccess_From_Mailboxes_Raw'] = $fullAccess
-        $out['FullAccess_From_Mailboxes'] = $fullAccess
-        $out['SendAs_From_Mailboxes_Raw'] = $sendAs
-        $out['SendAs_From_Mailboxes'] = $sendAs
-        $out['GrantSendOnBehalfTo_From_Mailboxes_Raw'] = $sendOnBehalf
-        $out['GrantSendOnBehalfTo_From_Mailboxes'] = $sendOnBehalf
-        $out['PermissionsSummary'] = $permissionsSummary
-        $out['PermissionsCount'] = if ([string]::IsNullOrWhiteSpace($permissionsSummary)) { '0' } else { [string](([string]$permissionsSummary).Split(';').Count) }
-        $out['SharedAccessCount'] = if ([string]::IsNullOrWhiteSpace($sendAs)) { '0' } else { [string](([string]$sendAs).Split(';').Count) }
+        $out['MailboxItemCount'] = $itemCount.ToString('0.########',[System.Globalization.CultureInfo]::InvariantCulture)
+        $out['HasMailboxItemCountOver999999'] = [string]($itemCount -gt 999999)
+        $out['MailboxSizeMB'] = Format-NumberInvariant $totalSizeMb
+        $out['MailboxSizeGB'] = if ($null -ne $totalSizeMb) { Format-NumberInvariant ($totalSizeMb / 1024) } else { '' }
+        $out['MailboxSizeTB'] = if ($null -ne $totalSizeMb) { Format-NumberInvariant ($totalSizeMb / 1048576) } else { '' }
+        $out['ArchiveMailboxSizeMB'] = Format-NumberInvariant $archiveMb
+        $out['ArchiveMailboxSizeGB'] = if ($null -ne $archiveMb) { Format-NumberInvariant ($archiveMb / 1024) } else { '' }
+        $out['MailboxAndArchiveSizeMB'] = Format-NumberInvariant $totalAndArchiveMb
+        $out['MailboxAndArchiveSizeGB'] = if ($null -ne $totalAndArchiveMb) { Format-NumberInvariant ($totalAndArchiveMb / 1024) } else { '' }
+        $out['IsMailboxLargerThan2GB'] = if ($null -ne $totalSizeMb) { [string]($totalSizeMb -gt 2048) } else { 'False' }
+        $out['IsMailboxLargerThan100GB'] = if ($null -ne $totalSizeMb) { [string]($totalSizeMb -gt 102400) } else { 'False' }
+        $out['IsMailboxSmallerThan2GB'] = if ($null -ne $totalSizeMb) { [string]($totalSizeMb -lt 2048) } else { 'False' }
+        $out['M365LicenseName'] = $licenseFromM365
+        $out['M365LicenseAssignmentGroup'] = $licenseGroup
+        $out['ExchangeServicePlanName'] = $exchangePlan
+        $out['M365LicenseAssignmentGroupCount'] = [string]$licenseGroups.Count
+        $out['M365LicenseAssignmentGroups'] = $licenseGroups -join ' + '
+        $out['M365LicenseAssigningGroups'] = Join-UniqueText -Values @($licenseRows | ForEach-Object { Get-Value $_ @('GroupsAssigningSku') }) -Separator ','
+        $out['HasDirectM365License'] = if ([string]::IsNullOrWhiteSpace($licenseKey)) { '' } else { [string]$hasDirectLicense }
+        $out['HasGroupOnlyM365License'] = if ([string]::IsNullOrWhiteSpace($licenseKey)) { '' } else { [string]($hasGroupLicense -and -not $hasDirectLicense) }
+        $out['HasDirectAndGroupM365License'] = [string](@($licenseRows | Where-Object { (Get-Value $_ @('HasDirectAndGroup')) -match '^(?i:true|1)$' }).Count -gt 0)
+        $out['HasDuplicateM365LicenseAssignment'] = if ($out['HasDirectAndGroupM365License'] -eq 'True') { 'Yes' } else { 'No' }
+        $out['IsPrimarySmtpDomainAcceptedInExchangeOnline'] = if ($acceptedDomains.Count -gt 0) { [string]($null -ne $acceptedDomain) } else { '' }
+        $out['IsExchangeOnlineDomainNotAllowed'] = if ($out['IsPrimarySmtpDomainAcceptedInExchangeOnline'] -eq '') { '' } else { [string]($out['IsPrimarySmtpDomainAcceptedInExchangeOnline'] -eq 'False') }
+        $out['ExchangeOnlineDomainType'] = Get-Value $acceptedDomain @('DomainType')
+        $out['IsExchangeOnlineOnMicrosoftDomain'] = if ([string]::IsNullOrWhiteSpace($primaryDomain)) { '' } else { [string]($primaryDomain -like '*.onmicrosoft.com') }
+        $out['IsExchangeOnlineDomainNonCompliant'] = if ($out['IsPrimarySmtpDomainAcceptedInExchangeOnline'] -eq '') { '' } elseif ($out['IsPrimarySmtpDomainAcceptedInExchangeOnline'] -eq 'False' -or $out['IsExchangeOnlineOnMicrosoftDomain'] -eq 'True') { 'True' } else { 'False' }
+        $out['AreExchangeOnlineUserDomainsNotAllowed'] = $out['IsExchangeOnlineDomainNotAllowed']
+        $out['AreExchangeOnlineUserDomainsNonCompliant'] = $out['IsExchangeOnlineDomainNonCompliant']
+        $out['IsUserPrincipalNameDomainVerifiedInEntra'] = if ([string]::IsNullOrWhiteSpace($upnDomain) -or $verifiedDomains.Count -eq 0) { '' } else { [string]$verifiedDomainSet.Contains((Get-Key $upnDomain)) }
+        $out['DoesUpnDomainMatchPrimarySmtpDomain'] = if ([string]::IsNullOrWhiteSpace($upnDomain) -or [string]::IsNullOrWhiteSpace($primaryDomain)) { '' } else { [string]($upnDomain -eq $primaryDomain) }
+        $out['RemoteMailboxRoutingAddress'] = Get-Value $remoteMailbox @('RemoteRoutingAddress')
+        $out['FullAccessOnMailboxes'] = $fullAccess
+        $out['SendAsOnMailboxes'] = $sendAs
+        $out['SendOnBehalfOnMailboxes'] = $sendOnBehalf
+        $out['MailboxDelegatedPermissionSummary'] = $permissionsSummary
+        $out['MailboxDelegatedPermissionCount'] = if ([string]::IsNullOrWhiteSpace($permissionsSummary)) { '0' } else { [string](([string]$permissionsSummary).Split(';').Count) }
+        $out['SendAsMailboxCount'] = if ([string]::IsNullOrWhiteSpace($sendAs)) { '0' } else { [string](([string]$sendAs).Split(';').Count) }
         $out['HasFullAccess'] = [string](-not [string]::IsNullOrWhiteSpace($fullAccess))
-        $out['HasSendAsBehalf'] = [string](-not [string]::IsNullOrWhiteSpace($sendAs))
+        $out['HasSendAs'] = [string](-not [string]::IsNullOrWhiteSpace($sendAs))
         $out['HasSendOnBehalf'] = [string](-not [string]::IsNullOrWhiteSpace($sendOnBehalf))
-        $out['HasAnyDelegPerm'] = [string]((-not [string]::IsNullOrWhiteSpace($fullAccess)) -or (-not [string]::IsNullOrWhiteSpace($sendAs)) -or (-not [string]::IsNullOrWhiteSpace($sendOnBehalf)))
+        $out['HasAnyDelegatedPermission'] = [string]((-not [string]::IsNullOrWhiteSpace($fullAccess)) -or (-not [string]::IsNullOrWhiteSpace($sendAs)) -or (-not [string]::IsNullOrWhiteSpace($sendOnBehalf)))
         $out['HasCrossPremisesPermissions'] = Get-Value $perms @('HasCrossPremisesPermissions')
-        $out['MigrationUserStatus_From_MigrationJobs'] = if ($recipientType -like '*Remote*') { 'Completed' } else { Get-Value $migrationRow @('UserStatus') }
-        $out['MigrationUserBatchName_From_MigrationJobs'] = Get-Value $migrationRow @('BatchName')
-        $out['MigrationUserCompleteAfter_From_MigrationJobs'] = Get-Value $migrationRow @('CompleteAfterUser','CompleteAfter')
-        $out['MigrationUserCompleteAfterUTC_From_MigrationJobs'] = Get-Value $migrationRow @('CompleteAfterUTCUser','CompleteAfterUTC')
-        $out['ProtectedMailboxes_From_EXO_BackupProtection'] = if ($backupCoverage.Count -gt 0) { [string]($null -ne $backupRow) } else { '' }
-        $out['LastLogonDate_Category'] = Get-DateCategory -Value ([string]$user.LastLogonDate) -LimitDays 90
-        $out['IsLastLogonMerge'] = if ($hasLastLogon) { 'Known' } else { 'Unknown' }
-        $out['NoLastLogonMerge'] = [string](-not $hasLastLogon)
-        $out['LastLogonMerge'] = if ($hasLastLogon) { [string]$user.LastLogonDate } else { '' }
-        $out['EnabledAndNoLastLogonMerge'] = [string]($isEnabled -and [string]::IsNullOrWhiteSpace([string]$out['LastLogonMerge']))
+        $out['ExchangeMigrationUserStatus'] = if ($recipientType -like '*Remote*') { 'Completed' } else { Get-Value $migrationRow @('UserStatus') }
+        $out['ExchangeMigrationBatchName'] = Get-Value $migrationRow @('BatchName')
+        $out['ExchangeMigrationCompleteAfterDateTime'] = Get-Value $migrationRow @('CompleteAfterUser','CompleteAfter')
+        $out['ExchangeMigrationCompleteAfterUtcDateTime'] = Get-Value $migrationRow @('CompleteAfterUTCUser','CompleteAfterUTC')
+        $out['IsProtectedByMicrosoft365Backup'] = if ($backupCoverage.Count -gt 0) { [string]($null -ne $backupRow) } else { '' }
+        $out['AdLastLogonCategory'] = Get-DateCategory -Value ([string]$user.LastLogonDate) -LimitDays 90
+        $out['ResolvedLastLogonStatus'] = if ($hasLastLogon) { 'Known' } else { 'Unknown' }
+        $out['HasNoResolvedLastLogon'] = [string](-not $hasLastLogon)
+        $out['ResolvedLastLogonDateTime'] = if ($hasLastLogon) { [string]$user.LastLogonDate } else { '' }
+        $out['IsEnabledWithNoResolvedLastLogon'] = [string]($isEnabled -and [string]::IsNullOrWhiteSpace([string]$out['ResolvedLastLogonDateTime']))
 
         [void]$enrichedRows.Add([pscustomobject]$out)
     }
 
-    $enrichedCsv = Join-Path -Path $OutputFolder -ChildPath 'AD_Users_AllDomains_Enriched.csv'
+    $enrichedCsv = Join-Path -Path $OutputFolder -ChildPath 'AD_Users_AllDomains.csv'
     $enrichedRows | Add-SmartM365TenantKey | Export-Csv -LiteralPath $enrichedCsv -NoTypeInformation -Encoding UTF8
     if (-not $global:csvGeneratedPaths -or -not ($global:csvGeneratedPaths -is [System.Collections.Generic.HashSet[string]])) {
         $existingCsvGeneratedPaths = @($global:csvGeneratedPaths)

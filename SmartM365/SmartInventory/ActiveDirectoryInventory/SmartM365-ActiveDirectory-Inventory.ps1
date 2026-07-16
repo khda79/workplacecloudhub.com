@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.32
+1.33
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
@@ -494,7 +494,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.32"
+$ScriptVersion = "1.33"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -576,7 +576,7 @@ if (Test-Path -LiteralPath $adEnrichmentHelperPath) {
     WriteLog -Message ("Active Directory enrichment helper loaded: {0}" -f $adEnrichmentHelperPath)
 }
 else {
-    WriteLog -Message ("WARNING: Active Directory enrichment helper not found. AD_Computers_AllDomains_Enriched.csv will not be generated: {0}" -f $adEnrichmentHelperPath)
+    WriteLog -Message ("WARNING: Active Directory enrichment helper not found. AD_Computers_AllDomains.csv will not be generated: {0}" -f $adEnrichmentHelperPath)
 }
 
 $adUsersEnrichmentHelperPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-ActiveDirectory-UsersEnrichment.ps1'
@@ -585,7 +585,7 @@ if (Test-Path -LiteralPath $adUsersEnrichmentHelperPath) {
     WriteLog -Message ("Active Directory users enrichment helper loaded: {0}" -f $adUsersEnrichmentHelperPath)
 }
 else {
-    WriteLog -Message ("WARNING: Active Directory users enrichment helper not found. AD_Users_AllDomains_Enriched.csv will not be generated: {0}" -f $adUsersEnrichmentHelperPath)
+    WriteLog -Message ("WARNING: Active Directory users enrichment helper not found. AD_Users_AllDomains.csv will not be generated: {0}" -f $adUsersEnrichmentHelperPath)
 }
 # ==========================================================
 # MAIN TRY / CATCH / FINALLY
@@ -1090,7 +1090,9 @@ try {
         }
 
         $computersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Computers_AllDomains.csv'
+        if (-not (Test-Path -LiteralPath $computersCsv)) { $computersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Computers_AllDomains_Brut.csv' }
         $usersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_AllDomains.csv'
+        if (-not (Test-Path -LiteralPath $usersCsv)) { $usersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_AllDomains_Brut.csv' }
 
         foreach ($sourceCsv in @($computersCsv, $usersCsv)) {
             if (-not (Test-Path -LiteralPath $sourceCsv)) {
@@ -1405,7 +1407,9 @@ try {
         }
 
         $usersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_AllDomains.csv'
+        if (-not (Test-Path -LiteralPath $usersCsv)) { $usersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Users_AllDomains_Brut.csv' }
         $computersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Computers_AllDomains.csv'
+        if (-not (Test-Path -LiteralPath $computersCsv)) { $computersCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Computers_AllDomains_Brut.csv' }
         $groupsCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Groups_AllDomains.csv'
         $ousCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_OUs_AllDomains.csv'
         $contactsCsv = Join-Path -Path $SourceFolder -ChildPath 'AD_Contacts_AllDomains.csv'
@@ -1921,8 +1925,8 @@ try {
         return
     }
 
-    $combinedUsersCsv     = Join-Path $OutputPath "AD_Users_AllDomains.csv"
-    $combinedComputersCsv = Join-Path $OutputPath "AD_Computers_AllDomains.csv"
+    $combinedUsersCsv     = Join-Path $OutputPath "AD_Users_AllDomains_Brut.csv"
+    $combinedComputersCsv = Join-Path $OutputPath "AD_Computers_AllDomains_Brut.csv"
     $combinedGroupsCsv    = Join-Path $OutputPath "AD_Groups_AllDomains.csv"
     $combinedOusCsv       = Join-Path $OutputPath "AD_OUs_AllDomains.csv"
     $combinedContactsCsv  = Join-Path $OutputPath "AD_Contacts_AllDomains.csv"
@@ -2187,9 +2191,9 @@ try {
                         ImmutableId_AD          = Convert-GuidToImmutableId -ObjectGuid ([string]$computer.ObjectGUID)
                     }
                     for ($configuredGroupIndex = 0; $configuredGroupIndex -lt 10; $configuredGroupIndex++) {
-                        $computerRow[("Has_ConfiguredGroup{0:D2}" -f ($configuredGroupIndex + 1))] = [bool]$configuredGroupFlags[$configuredGroupIndex]
+                        $computerRow[("IsMemberOfConfiguredGroup{0:D2}" -f ($configuredGroupIndex + 1))] = [bool]$configuredGroupFlags[$configuredGroupIndex]
                     }
-                    $computerRow['ConfiguredGroupMatches'] = ($configuredGroupMatches -join ';')
+                    $computerRow['MatchedConfiguredGroups'] = ($configuredGroupMatches -join ';')
                     [PSCustomObject]$computerRow
                 } |
                 Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
@@ -2459,8 +2463,8 @@ try {
     # ------------------------------------------------------
     # COMBINE PER-DOMAIN CSV FILES
     # ------------------------------------------------------
-    $combinedUsersCsv     = Join-Path $OutputPath "AD_Users_AllDomains.csv"
-    $combinedComputersCsv = Join-Path $OutputPath "AD_Computers_AllDomains.csv"
+    $combinedUsersCsv     = Join-Path $OutputPath "AD_Users_AllDomains_Brut.csv"
+    $combinedComputersCsv = Join-Path $OutputPath "AD_Computers_AllDomains_Brut.csv"
     $combinedGroupsCsv    = Join-Path $OutputPath "AD_Groups_AllDomains.csv"
     $combinedOusCsv       = Join-Path $OutputPath "AD_OUs_AllDomains.csv"
     $combinedContactsCsv  = Join-Path $OutputPath "AD_Contacts_AllDomains.csv"
@@ -2479,7 +2483,7 @@ try {
             -LatestFolderPath $destinationRootPath
     }
     else {
-        WriteLog -Message "WARNING: AD users enrichment function is unavailable. AD_Users_AllDomains_Enriched.csv will not be generated."
+        WriteLog -Message "WARNING: AD users enrichment function is unavailable. AD_Users_AllDomains.csv will not be generated."
     }
     $combinedComputersEnrichedCsv = $null
     if (Get-Command Invoke-SmartM365AdComputersEnrichedCsv -ErrorAction SilentlyContinue) {
@@ -2492,7 +2496,7 @@ try {
             -WindowsUpdate25H2PolicyId $AdEnrichmentWindowsUpdate25H2PolicyId
     }
     else {
-        WriteLog -Message "WARNING: AD computers enrichment function is unavailable. AD_Computers_AllDomains_Enriched.csv will not be generated."
+        WriteLog -Message "WARNING: AD computers enrichment function is unavailable. AD_Computers_AllDomains.csv will not be generated."
     }
 
     # ------------------------------------------------------
@@ -2530,6 +2534,7 @@ try {
         WriteLog -Message "DuplicateAnalysisOnly mode: using existing combined users CSV for duplicate analysis."
         if ($destinationRootPath) {
             $latestUsersCsv = Join-Path $destinationRootPath "AD_Users_AllDomains.csv"
+            if (-not (Test-Path -LiteralPath $latestUsersCsv)) { $latestUsersCsv = Join-Path $destinationRootPath "AD_Users_AllDomains_Brut.csv" }
             if (Test-Path -LiteralPath $latestUsersCsv) {
                 $combinedUsersCsv = $latestUsersCsv
                 WriteLog -Message ("DuplicateAnalysisOnly source CSV: {0}" -f $combinedUsersCsv)
@@ -2538,11 +2543,14 @@ try {
                 WriteLog -Message ("Latest AD users CSV not found, falling back to OutputPath: {0}" -f $latestUsersCsv) -Level "WARNING"
             }
 
-            foreach ($latestName in @('AD_Computers_AllDomains.csv', 'AD_Groups_AllDomains.csv', 'AD_OUs_AllDomains.csv', 'AD_Contacts_AllDomains.csv')) {
+            $latestComputersCsv = Join-Path $destinationRootPath 'AD_Computers_AllDomains.csv'
+            if (-not (Test-Path -LiteralPath $latestComputersCsv)) { $latestComputersCsv = Join-Path $destinationRootPath 'AD_Computers_AllDomains_Brut.csv' }
+            if (Test-Path -LiteralPath $latestComputersCsv) { $combinedComputersCsv = $latestComputersCsv }
+
+            foreach ($latestName in @('AD_Groups_AllDomains.csv', 'AD_OUs_AllDomains.csv', 'AD_Contacts_AllDomains.csv')) {
                 $candidatePath = Join-Path $destinationRootPath $latestName
                 if (-not (Test-Path -LiteralPath $candidatePath)) { continue }
                 switch ($latestName) {
-                    'AD_Computers_AllDomains.csv' { $combinedComputersCsv = $candidatePath }
                     'AD_Groups_AllDomains.csv'    { $combinedGroupsCsv = $candidatePath }
                     'AD_OUs_AllDomains.csv'       { $combinedOusCsv = $candidatePath }
                     'AD_Contacts_AllDomains.csv'  { $combinedContactsCsv = $candidatePath }
