@@ -28,10 +28,11 @@
     Skips SharePoint upload for generated latest CSV files.
 
 .PARAMETER MaxItems
-    Limits group members and mailbox rows for smoke tests. Generated CSV names include _MAXITEMS.
+    Limits Graph group members for smoke tests. The complete mailbox snapshot remains loaded so
+    the coverage join is representative. Generated CSV names include _MAXITEMS.
 
 .VERSION
-1.2
+1.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,7 +76,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.3'
+$ScriptVersion = '1.4'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $script:SmartM365GlobalConfig = $null
 $script:LogPath = ''
@@ -285,9 +286,9 @@ function ConvertTo-CoverageRows {
     )
     foreach ($member in $Members) {
         $keys = @(
-            Normalize-MailAddress ([string](Get-ObjectValue -Object $member -Names @('userPrincipalName'))),
-            Normalize-MailAddress ([string](Get-ObjectValue -Object $member -Names @('mail'))),
-            Normalize-MailAddress ([string](Get-ObjectValue -Object $member -Names @('id')))
+            (Normalize-MailAddress ([string](Get-ObjectValue -Object $member -Names @('userPrincipalName'))))
+            (Normalize-MailAddress ([string](Get-ObjectValue -Object $member -Names @('mail'))))
+            (Normalize-MailAddress ([string](Get-ObjectValue -Object $member -Names @('id'))))
         ) | Where-Object { $_ }
         $mailbox = $null
         foreach ($key in $keys) {
@@ -320,6 +321,32 @@ function ConvertTo-CoverageRows {
     }
 }
 
+function Confirm-MailboxCoverageQuality {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][int]$MemberCount,
+        [Parameter(Mandatory = $true)][int]$MatchedMailboxCount,
+        [Parameter(Mandatory = $true)][double]$MinimumMatchPercent
+    )
+
+    if ($MemberCount -le 0) {
+        throw 'Backup policy scope group returned no user member; exports are not published.'
+    }
+    if ($MatchedMailboxCount -lt 0 -or $MatchedMailboxCount -gt $MemberCount) {
+        throw "Invalid backup scope join counters. Members=$MemberCount; Matched=$MatchedMailboxCount."
+    }
+    if ($MinimumMatchPercent -lt 0 -or $MinimumMatchPercent -gt 100) {
+        throw "MinimumMailboxMatchPercent must be between 0 and 100. Current value: $MinimumMatchPercent."
+    }
+
+    $matchPercent = [math]::Round((100.0 * $MatchedMailboxCount) / $MemberCount, 4)
+    if ($matchPercent -lt $MinimumMatchPercent) {
+        throw ("Backup scope mailbox match rate is {0}% ({1}/{2}), below the required {3}%; exports are not published." -f $matchPercent, $MatchedMailboxCount, $MemberCount, $MinimumMatchPercent)
+    }
+
+    return $matchPercent
+}
+
 function Export-InventoryCsv {
     param(
         [Parameter(Mandatory = $true)][string]$BaseName,
@@ -349,6 +376,7 @@ $ScriptCsvLogFolderPath = [string](Get-ScriptLocalConfigValue -Config $ScriptLoc
 $LatestCsvFolderPath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
 $LogAllRootPath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LogAllRootPath' -DefaultValue '')
 $InputDataLastFolder = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'InputDataLastFolder' -DefaultValue $LatestCsvFolderPath)
+$MinimumMailboxMatchPercent = [double](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MinimumMailboxMatchPercent' -DefaultValue 90)
 
 if ([string]::IsNullOrWhiteSpace($BackupPolicyScopeGroupId)) { $BackupPolicyScopeGroupId = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'BackupPolicyScopeGroupId' -DefaultValue '') }
 if ([string]::IsNullOrWhiteSpace($BackupPolicyScopeGroupDisplayName)) { $BackupPolicyScopeGroupDisplayName = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'BackupPolicyScopeGroupDisplayName' -DefaultValue '') }
@@ -380,7 +408,7 @@ try {
     $resolvedMailboxCsvPath = Resolve-SmartM365CsvPathWithSharePointFallback -Path $mailboxCsvPath -Description 'Exchange Online mailbox inventory' -Required
     Write-ScopeLog -Message "Loading mailbox inventory: $resolvedMailboxCsvPath"
     $mailboxes = @(Import-Csv -LiteralPath $resolvedMailboxCsvPath -ErrorAction Stop)
-    if ($MaxItems -gt 0) { $mailboxes = @($mailboxes | Select-Object -First $MaxItems) }
+    if ($MaxItems -gt 0) { Write-ScopeLog -Message 'MaxItems limits group members only; the complete mailbox snapshot is retained for a representative join.' }
     Write-ScopeLog -Message "Mailbox inventory rows loaded: $($mailboxes.Count)"
 
     Connect-GraphAppOnly -AppId $AppId -TenantId $TenantId -Thumbprint $Thumb
@@ -405,10 +433,8 @@ try {
     $memberRows = @($members | ForEach-Object { ConvertTo-GroupMemberRow -Member $_ -RunId $runId -RunDateUtc $runDateUtc -TenantName $OrgDomain -GroupId $BackupPolicyScopeGroupId -GroupDisplayName $BackupPolicyScopeGroupDisplayName })
     $coverageRows = @(ConvertTo-CoverageRows -Members $members -MailboxIndex $mailboxIndex -RunId $runId -RunDateUtc $runDateUtc -TenantName $OrgDomain -GroupId $BackupPolicyScopeGroupId -GroupDisplayName $BackupPolicyScopeGroupDisplayName)
     $matchedMailboxCount = @($coverageRows | Where-Object { $_.MailboxFoundInInventory -eq $true }).Count
-    Write-ScopeLog -Message ("Backup scope join quality gate: Members={0}; MailboxIndexKeys={1}; Matched={2}" -f $members.Count, $mailboxIndex.Count, $matchedMailboxCount)
-    if ($members.Count -gt 100 -and $matchedMailboxCount -eq 0) {
-        throw "Backup scope join returned zero mailbox matches for $($members.Count) members; exports are not published."
-    }
+    $matchedMailboxPercent = Confirm-MailboxCoverageQuality -MemberCount $members.Count -MatchedMailboxCount $matchedMailboxCount -MinimumMatchPercent $MinimumMailboxMatchPercent
+    Write-ScopeLog -Message ("Backup scope join quality gate passed: Members={0}; MailboxIndexKeys={1}; Matched={2}; MatchPercent={3}; MinimumPercent={4}" -f $members.Count, $mailboxIndex.Count, $matchedMailboxCount, $matchedMailboxPercent, $MinimumMailboxMatchPercent) -Level SUCCESS
     $missingRows = @($coverageRows | Where-Object { $_.MailboxFoundInInventory -ne $true })
     $summaryRows = @(
         [pscustomobject]@{ RunId=$runId; RunDateUtc=$runDateUtc; TenantName=$OrgDomain; GroupId=$BackupPolicyScopeGroupId; GroupDisplayName=$BackupPolicyScopeGroupDisplayName; Metric='GroupUserMembers'; NumericValue=$members.Count; TextValue=[string]$members.Count; Threshold=''; Status='OK'; Details='Transitive user members in expected backup policy scope group.' },
@@ -438,8 +464,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCL5iMAMpy/mN9G
-# ig9wlqoqMF+osinr3RZ2xSFkuTYNj6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdhcb6PiA6c69x
+# JvE4g4SRrD3ox3m98fXDDUvOPaT0kqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -572,31 +598,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJI1V2WdKvoqnhDqGQ2O8ZoknLD4/qhmRw2XaK9Wgp6AMA0GCSqG
-# SIb3DQEBAQUABIIBgD5hr73XwtOQWbn40OcP/C2mt9vw/FeQHskA2eonjeP5TaOW
-# 3CJZ4TjZ3AhdeTgBiJ/1WnUgd3hATpaHPRymoF8ABRxLE+XrDcrgrMIGoPdhprk3
-# C/rqYAK7IfIj4rJ6lHfmWSuCR2zWlok7Olmz4VtNZfXklpyVbOLnK5Snz3yFErBH
-# 2fubb/q6SdDnQVKU/FPylij+1Gi5ky87Z16JjTAuf/0BTsxQgdWWyQRFIAAabLhY
-# jC4L+BzrAujRbV582vmpH2Ty/0+Ngw6abMXz8joKeUcgtgoT3DuZPjJpIzkSPPu0
-# Q52QbDrYf4j/GY9gq5rKbFFdvHgd2WlKObVrWkoH4Pa1Y7N92/y4WYTBrq2fw4qo
-# dEyEPkvqCh/ktP4RTC9MoHyEycDmO/AkVjMpBJC+rjl8NShCzYjcrEibpaEO8u/I
-# oX7u8zlNd/qtrhpq7Cl70T4PSxd8UU43YGZ8jmjUyLgLoLb738BBuTKPe52tSODx
-# lBMVOLZ1+bG7ILKhzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGMo0kSUmSvhyfUt4z7Crrl4D15pkCPes1eltgGYt5X+MA0GCSqG
+# SIb3DQEBAQUABIIBgFRjq9L6wkqD8YUL6kxgJS6o4egJkqamwQ2auksFuaznCmiP
+# zsP2XADX+jlUHEbZiaunHTgmgia0I3Cs/8/pWq0R1LgBF7Ubfrn2lPjZ9F7bYMfx
+# CbvC708IPrm1q4nIOj4pbP9A2z84x+gSetqiytaJyAR/CMbyRbhnLFquzcUe8PH4
+# 15CXKsoG46noOQfp2bssekWWBB8jkrgFo1eIlabNEuY4JlGwhR68dgY9Rv/m6nyh
+# fbcA+b7rm3Sdv0m7qHlEnMbB9q5jZcgd3gHODoWUwjPkdyRSCVfc2m8LgfS3amkZ
+# kVlyoBLu06hvweaNwijS+KfdlryTfjMsdY0kHiBjUZTUK5I0OqvlOq4BB1qDMy7g
+# r2KQF1h92oKIGUYN/ToeA5y3tmeVHd7IfXPDkb2yKm3OcVPkesd1oPfKkqY6XT7D
+# KkQQ/QirNZvsL5YrNenCO9cYeBeGMa/qZ0ThGjOmumhtOKbTGFO9/2QuaBxrh12J
+# R5ulZmmIyuCv8ZO5MqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCDSWwhXMIYHqL4+Ht1P1c740wTHfT17evnS51uM
-# m7mJbzANBgkqhkiG9w0BAQEFAASCAgB50RsSUR23kqNZNatH3OMzygdqv6w+UrNU
-# Dset+MDkJzWsNshqWsM99DsS6e2NubjcTXp4xQIlKUyWz/NjtYTStKvYnvndhrzI
-# m+LSZFjVxWXBl0+aJJ3tlfL9YOKkrJObVgptkNTakeVhaj/Xtd+C06sUowuFPgqK
-# Av64L5o04ZrlHPx7qomNBE7LMnKHdhaj7GxpQ83j2nEQnTOR6LQlbzZRuUqDfECH
-# xtyXkqEzyQhcgm9PmnviBSlS5IrV4oX8PXT2RiIMKSSv05FJC2FGqD0Pj5fGDG6o
-# t7pUZcNFWvBcSImGngzWemKSEmtZo8Nm1nk7xXLEwMsX/TZH2xSUMaxuGVVlq4xj
-# LLfOBcymILQfLCSaiIJELkZStkFp5pkFqK0AJ8DBtHXR944jNBwADNCNEfl0ZglC
-# 81J83Z0IxWFkBklMKJ+BgoAM9JSBNzrEbdbWFJbjdnCpJpMMUXkpPih97/OMXL6+
-# 0CSqsjsKl/MKm1phz+Wgoq1/Z9csyNJb51NHMmEJidUzzL8UCKsbcvy+Jqdn8JhD
-# r0FHnZkFFLylw2rVvOEvLzWWXUAFX9iGda/uYlNnhfrt+BRgm0EBMpAIo4g0rupV
-# H/h7RsOWQpZHAooKUTLEtr46cxBH1lSc2zk0CNT4EdhqLdzf1gJXSXNSsK+dFadV
-# +1maeIplYg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYxNDE0
+# NTVaMC8GCSqGSIb3DQEJBDEiBCDFgVlYrUezETasnUT3sBp7SVUYIUyUD4LbwwIc
+# byV02TANBgkqhkiG9w0BAQEFAASCAgBj1gkKvot0FKHJ3ElAPZfVuehVAaOxZIBP
+# 9EosPNOtISS0FpUtWFzA4sUu1cI8a5Y8sL/1hjFuQL6W5jpQToD3bIs731wAmRpY
+# 6n7/SFgbMS9xWDf/KMGIx00HGgu/IUU/2q13/A9tKed5CZAdDV40trAQR4sJaITQ
+# uXFAQnxjcbVsrlec2IBu8FBQBP1/y2cR3Obktp7MEaXowoG7F0gjczcRMrGZoLos
+# eMhi1kwZdsxLC/b2x1c4r5Zb7hHULjoa4dT4+4H80GD/XMqgP2HXSReaD+K/kC08
+# tZ3klxGriv2V44XXH2cP9CQlfsD20Ni7ziObScR+8KQrCzzj68nnX66cNQmxnmas
+# UmfTfE9tAb2PP0+rbNd4X6LrgZEYqBRNRFktjbNf6ROBW4Zg8tbF3uCG+SWWqb7L
+# rdhP2tps72iG5vJy1C3OXvmZ7RWUweSsY1u3vrw239EsVBkVheYZHA7YmBqhJwa5
+# hDosjUeiRRpwh6ItequBWO3owqh4f4caYBU62RdeBGqb3kWMUuY3KUnCVl41+L7o
+# 30iPqtBG6UCNMNntr2CluWoiggo9vQ4fPAp4UzHOpIdpIN+7mZpJIvoK/QOJOqnY
+# /+AFSRtedNcZ4iKpMl3Po2TIAvOG+oyb32GHAXTLvvlsQrPbBe5qS5O7swHPv/hD
+# Ymu+BjY33A==
 # SIG # End signature block
