@@ -32,7 +32,7 @@
     the coverage join is representative. Generated CSV names include _MAXITEMS.
 
 .VERSION
-1.4
+1.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -76,10 +76,17 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.4'
+$ScriptVersion = '1.5'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $script:SmartM365GlobalConfig = $null
 $script:LogPath = ''
+$script:StartedAt = Get-Date
+$script:CompletionStatus = 'Auto'
+$script:ExitCode = 0
+$global:SmartM365ExecutionStartTime = $script:StartedAt
+$global:SmartM365WarningCount = 0
+$global:SmartM365ErrorCount = 0
+$global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
 function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
@@ -170,6 +177,9 @@ function Write-ScopeLog {
         [Parameter(Mandatory = $true)][string]$Message,
         [ValidateSet('INFO','WARN','ERROR','SUCCESS')][string]$Level = 'INFO'
     )
+    if ($Level -eq 'WARN') { $global:SmartM365WarningCount = [int]$global:SmartM365WarningCount + 1 }
+    elseif ($Level -eq 'ERROR') { $global:SmartM365ErrorCount = [int]$global:SmartM365ErrorCount + 1 }
+
     $line = '{0} [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
     Write-Host $line
     if (-not [string]::IsNullOrWhiteSpace($script:LogPath)) {
@@ -350,11 +360,31 @@ function Confirm-MailboxCoverageQuality {
 function Export-InventoryCsv {
     param(
         [Parameter(Mandatory = $true)][string]$BaseName,
-        [Parameter(Mandatory = $true)][object[]]$Rows,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows,
         [string[]]$Columns = @()
     )
-    $name = if ($MaxItems -gt 0) { '{0}_MAXITEMS' -f $BaseName } else { $BaseName }
-    Export-SmartM365Csv -BaseFileName $name -OutputPath $ScriptCsvLogFolderPath -GlobalPath $LatestCsvFolderPath -Data $Rows -Columns $Columns -Encoding UTF8 -Delimiter ',' -NoSharePointUpload:($DisableSharePointUpload.IsPresent) | Out-Null
+    $exportData = if ($Rows.Count -eq 0) { $null } else { $Rows }
+    return Export-SmartM365Csv -BaseFileName $BaseName -OutputPath $ScriptCsvLogFolderPath -GlobalPath $LatestCsvFolderPath -Data $exportData -Columns $Columns -Encoding UTF8 -Delimiter ',' -NoSharePointUpload:($DisableSharePointUpload.IsPresent) -NoWeeklyHistory
+}
+
+function Publish-InventoryWeeklyHistory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][object[]]$ExportResults)
+
+    if ($MaxItems -gt 0 -or -not $EnableWeeklyHistory) { return }
+
+    $sourceCsvPaths = @(
+        $ExportResults |
+            ForEach-Object { [string]$_.PublishedPath } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+    if ($sourceCsvPaths.Count -eq 0) {
+        Write-ScopeLog -Message 'WeeklyHistory publication skipped because no published CSV path was returned.' -Level WARN
+        return
+    }
+
+    Add-SmartM365WeeklyHistory -SourceCsvPaths $sourceCsvPaths -HistoryRootPath $WeeklyHistoryFolderPath -RetentionWeeks $WeeklyHistoryRetentionWeeks -HistoryLabel 'M365 Backup policy scope inventory' -OverwriteExisting
 }
 
 Import-SmartM365CoreModule
@@ -377,6 +407,9 @@ $LatestCsvFolderPath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalC
 $LogAllRootPath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LogAllRootPath' -DefaultValue '')
 $InputDataLastFolder = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'InputDataLastFolder' -DefaultValue $LatestCsvFolderPath)
 $MinimumMailboxMatchPercent = [double](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MinimumMailboxMatchPercent' -DefaultValue 90)
+$EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
+$WeeklyHistoryFolderPath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue '')
+$WeeklyHistoryRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
 
 if ([string]::IsNullOrWhiteSpace($BackupPolicyScopeGroupId)) { $BackupPolicyScopeGroupId = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'BackupPolicyScopeGroupId' -DefaultValue '') }
 if ([string]::IsNullOrWhiteSpace($BackupPolicyScopeGroupDisplayName)) { $BackupPolicyScopeGroupDisplayName = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'BackupPolicyScopeGroupDisplayName' -DefaultValue '') }
@@ -397,7 +430,6 @@ foreach ($folder in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logRoot)) 
 }
 Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $script:LogPath
 $global:LogTextFile = $script:LogPath
-$script:CompletionStatus = 'Auto'
 
 try {
     Write-ScopeLog -Message "Starting $TaskName. Tenant=$Tenant RunId=$runId"
@@ -436,36 +468,52 @@ try {
     $matchedMailboxPercent = Confirm-MailboxCoverageQuality -MemberCount $members.Count -MatchedMailboxCount $matchedMailboxCount -MinimumMatchPercent $MinimumMailboxMatchPercent
     Write-ScopeLog -Message ("Backup scope join quality gate passed: Members={0}; MailboxIndexKeys={1}; Matched={2}; MatchPercent={3}; MinimumPercent={4}" -f $members.Count, $mailboxIndex.Count, $matchedMailboxCount, $matchedMailboxPercent, $MinimumMailboxMatchPercent) -Level SUCCESS
     $missingRows = @($coverageRows | Where-Object { $_.MailboxFoundInInventory -ne $true })
+    $coverageColumns = @(
+        'RunId','RunDateUtc','TenantName','GroupId','GroupDisplayName','MemberId','MemberDisplayName',
+        'MemberUserPrincipalName','MemberMail','MailboxFoundInInventory','MailboxDisplayName',
+        'MailboxUserPrincipalName','PrimarySmtpAddress','RecipientTypeDetails','ExpectedPolicyScopeStatus',
+        'ProtectionEvidenceStatus','Status','NumericValue','TextValue','Threshold','Details'
+    )
     $summaryRows = @(
         [pscustomobject]@{ RunId=$runId; RunDateUtc=$runDateUtc; TenantName=$OrgDomain; GroupId=$BackupPolicyScopeGroupId; GroupDisplayName=$BackupPolicyScopeGroupDisplayName; Metric='GroupUserMembers'; NumericValue=$members.Count; TextValue=[string]$members.Count; Threshold=''; Status='OK'; Details='Transitive user members in expected backup policy scope group.' },
         [pscustomobject]@{ RunId=$runId; RunDateUtc=$runDateUtc; TenantName=$OrgDomain; GroupId=$BackupPolicyScopeGroupId; GroupDisplayName=$BackupPolicyScopeGroupDisplayName; Metric='MatchedMailboxes'; NumericValue=(@($coverageRows | Where-Object { $_.MailboxFoundInInventory -eq $true })).Count; TextValue=[string](@($coverageRows | Where-Object { $_.MailboxFoundInInventory -eq $true })).Count; Threshold=''; Status='OK'; Details='Group users matched to Exchange Online mailbox inventory.' },
         [pscustomobject]@{ RunId=$runId; RunDateUtc=$runDateUtc; TenantName=$OrgDomain; GroupId=$BackupPolicyScopeGroupId; GroupDisplayName=$BackupPolicyScopeGroupDisplayName; Metric='MembersWithoutMailboxInInventory'; NumericValue=$missingRows.Count; TextValue=[string]$missingRows.Count; Threshold='0'; Status=$(if ($missingRows.Count -gt 0) { 'Warning' } else { 'OK' }); Details='Group users not matched to Exchange Online mailbox inventory.' }
     )
 
-    Export-InventoryCsv -BaseName 'M365_BackupPolicyScope_GroupMembers' -Rows $memberRows
-    Export-InventoryCsv -BaseName 'M365_BackupPolicyScope_MailboxCoverage' -Rows $coverageRows
-    Export-InventoryCsv -BaseName 'M365_BackupPolicyScope_GroupMembersWithoutMailbox' -Rows $missingRows
-    Export-InventoryCsv -BaseName 'M365_BackupPolicyScope_Summary' -Rows $summaryRows
+    $exportResults = @(
+        Export-InventoryCsv -BaseName 'M365_BackupPolicyScope_GroupMembers' -Rows $memberRows
+        Export-InventoryCsv -BaseName 'M365_BackupPolicyScope_MailboxCoverage' -Rows $coverageRows -Columns $coverageColumns
+        Export-InventoryCsv -BaseName 'M365_BackupPolicyScope_GroupMembersWithoutMailbox' -Rows $missingRows -Columns $coverageColumns
+        Export-InventoryCsv -BaseName 'M365_BackupPolicyScope_Summary' -Rows $summaryRows
+    )
+    Publish-InventoryWeeklyHistory -ExportResults $exportResults
 
     Write-ScopeLog -Message ("Backup policy scope inventory complete. Members={0}; MatchedMailboxes={1}; MissingMailbox={2}" -f $members.Count, (@($coverageRows | Where-Object { $_.MailboxFoundInInventory -eq $true })).Count, $missingRows.Count) -Level SUCCESS
-    exit 0
 }
 catch {
     $script:CompletionStatus = 'Failed'
+    $script:ExitCode = 1
     Write-ScopeLog -Message $_.Exception.Message -Level ERROR
-    exit 1
 }
 finally {
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-    Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $TaskName -StartedAt $global:SmartM365ExecutionStartTime -LogPath $script:LogPath
+    if (Get-MgContext -ErrorAction SilentlyContinue) {
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    }
+    Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $TaskName -StartedAt $script:StartedAt -WarningCount $global:SmartM365WarningCount -ErrorCount $global:SmartM365ErrorCount -GeneratedCsvFiles $global:csvGeneratedPaths.Count -LogPath $script:LogPath
+    if ($global:EnableSharePointUpload -and -not $DisableSharePointUpload.IsPresent -and (Test-Path -LiteralPath $script:LogPath)) {
+        try { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $script:LogPath | Out-Null }
+        catch { Write-Warning ("Completed log upload failed: {0}" -f $_.Exception.Message) }
+    }
 }
+
+exit $script:ExitCode
 
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdhcb6PiA6c69x
-# JvE4g4SRrD3ox3m98fXDDUvOPaT0kqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNgkeyMLmHYdKE
+# VDwpNFizyQfLaeqyw+wDwpPCiLzPS6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -598,31 +646,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGMo0kSUmSvhyfUt4z7Crrl4D15pkCPes1eltgGYt5X+MA0GCSqG
-# SIb3DQEBAQUABIIBgFRjq9L6wkqD8YUL6kxgJS6o4egJkqamwQ2auksFuaznCmiP
-# zsP2XADX+jlUHEbZiaunHTgmgia0I3Cs/8/pWq0R1LgBF7Ubfrn2lPjZ9F7bYMfx
-# CbvC708IPrm1q4nIOj4pbP9A2z84x+gSetqiytaJyAR/CMbyRbhnLFquzcUe8PH4
-# 15CXKsoG46noOQfp2bssekWWBB8jkrgFo1eIlabNEuY4JlGwhR68dgY9Rv/m6nyh
-# fbcA+b7rm3Sdv0m7qHlEnMbB9q5jZcgd3gHODoWUwjPkdyRSCVfc2m8LgfS3amkZ
-# kVlyoBLu06hvweaNwijS+KfdlryTfjMsdY0kHiBjUZTUK5I0OqvlOq4BB1qDMy7g
-# r2KQF1h92oKIGUYN/ToeA5y3tmeVHd7IfXPDkb2yKm3OcVPkesd1oPfKkqY6XT7D
-# KkQQ/QirNZvsL5YrNenCO9cYeBeGMa/qZ0ThGjOmumhtOKbTGFO9/2QuaBxrh12J
-# R5ulZmmIyuCv8ZO5MqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILW2sOeA7fwkS7yWXUivVyy7dX50XgG9pPI59geWPZ3hMA0GCSqG
+# SIb3DQEBAQUABIIBgJncKots5CHpJo7Cb8T5QA8mJDmqX99WE9cpngC9Gvl3u0dH
+# c2M5RhpFaPk07ZQ1CBOWNEf6SQddgxNZDqZQBSQn2GTex7PnHKjfAwWD5zQxVnSv
+# C4RMBGhQ5pJSQHkxW3GowE11r/R/MyF697Cg8wprozA6tDvsQ9/xowtRgiXrNYmK
+# UrRLeBCyHTiuBX3QzVNKZ/Q09x63G56BMgA8SOWbaqSc0g+BUQSOZhKXvETU2q1C
+# FzxVuZa7f/keH1n2MitQgMjnIyT/bCA15AsqRjPEqB7f8ZAaSpzQcAm2O+avjOE9
+# LN8a3bV4h5EVSlkuXs/mACdI3M9W8SKtlOj/URVWrRAJ0WMe7bn3+H7Tkc20ZZfe
+# uCpk6+SGuFLLVTTswqx43+zvq+XYM63fmf4SaWXevgDLEn/Y8mG93m0/55g2sQM3
+# a8KLfP0b6FeRGKKNNgBHAnwmlk91r5GN8LYEQ2MWtOpzWmCTXIcgsos5/eeBTlSb
+# PlNcaWvWYdT6WwCkiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYxNDE0
-# NTVaMC8GCSqGSIb3DQEJBDEiBCDFgVlYrUezETasnUT3sBp7SVUYIUyUD4LbwwIc
-# byV02TANBgkqhkiG9w0BAQEFAASCAgBj1gkKvot0FKHJ3ElAPZfVuehVAaOxZIBP
-# 9EosPNOtISS0FpUtWFzA4sUu1cI8a5Y8sL/1hjFuQL6W5jpQToD3bIs731wAmRpY
-# 6n7/SFgbMS9xWDf/KMGIx00HGgu/IUU/2q13/A9tKed5CZAdDV40trAQR4sJaITQ
-# uXFAQnxjcbVsrlec2IBu8FBQBP1/y2cR3Obktp7MEaXowoG7F0gjczcRMrGZoLos
-# eMhi1kwZdsxLC/b2x1c4r5Zb7hHULjoa4dT4+4H80GD/XMqgP2HXSReaD+K/kC08
-# tZ3klxGriv2V44XXH2cP9CQlfsD20Ni7ziObScR+8KQrCzzj68nnX66cNQmxnmas
-# UmfTfE9tAb2PP0+rbNd4X6LrgZEYqBRNRFktjbNf6ROBW4Zg8tbF3uCG+SWWqb7L
-# rdhP2tps72iG5vJy1C3OXvmZ7RWUweSsY1u3vrw239EsVBkVheYZHA7YmBqhJwa5
-# hDosjUeiRRpwh6ItequBWO3owqh4f4caYBU62RdeBGqb3kWMUuY3KUnCVl41+L7o
-# 30iPqtBG6UCNMNntr2CluWoiggo9vQ4fPAp4UzHOpIdpIN+7mZpJIvoK/QOJOqnY
-# /+AFSRtedNcZ4iKpMl3Po2TIAvOG+oyb32GHAXTLvvlsQrPbBe5qS5O7swHPv/hD
-# Ymu+BjY33A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYxNDUy
+# NTdaMC8GCSqGSIb3DQEJBDEiBCAoQDgmOfWSM3KHw0RLXo/f0y2K+MegSNVIc6+x
+# AjjWcDANBgkqhkiG9w0BAQEFAASCAgC2CWFkD4E0FEdDSLYd/yxqp7jISedC+u1I
+# Yjqnh+QQ8PwB8By109uHS8s8eYcPklK9PHxeskPQLMau80BmBb3F3r2Ljvvj/N7C
+# R4VN/kk7o042IQ0ug07bmb96nnrg4wyNUtR8px8hEgs6ere0EKL2b1EbNXjxuCb0
+# M8bLdBs3mN8v7faM4ZrBM05x6iMylDrxpsyvQu3Y9j2tV52gSORYjnC726RQt83Y
+# zZ0+CNrNfuAb7/NYAPFA8bzuUQvGMusNfRIsz3XwAc6OmHcrd5iWjVcL4Dpe+ucV
+# 7XF0WQy7ME0v5Jly3jox+aLeVekgeDlQhF5o/Mgcj9eO97FPVESyXt0J0jQ9dLIR
+# 7jBS4ZQ/X3BtO8uXlsuquUBeRK1da7CxwLEtcQt7RKnHRkO1WcRD68MtcqvXsIaw
+# yFrzxEzBMgCMbWPPwM3wGg3dZfuVvmhbOT4OzPTEa9lPqHL+CeM2Ct1XEEl+70S8
+# hdIDcpTnMsjmbdRuxwu6unx/++q3kyypB5aF5pUhWAIuoAwcE4GMaxHgdC/pEBUF
+# ONRA5kFoJsYBO8WW5t9ph0J700Xzn8WUzScdJENU+W8cZ2iVUWbYTvLyN1FvxHYs
+# x7w5rp4WnC1eWmmHDyivUlzl3eZP52R9CpbyCnI0KA77UiEg7NUnFBhYwQThXSiV
+# FwdtFWhqHA==
 # SIG # End signature block
