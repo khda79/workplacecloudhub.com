@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.15
+    Version : 1.16
 
 .VERSION
-1.15
+1.16
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.15
+    Version : 1.16
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.15"
+$ScriptVersion = "1.16"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -1103,7 +1103,7 @@ try {
     }
 
     # ----------------------------------------------------------
-    # Build and export Summary records before long DeviceDetail calls
+    # Build Summary records, but publish only after DeviceDetail is complete
     # ----------------------------------------------------------
     WriteLog -Message "Building Summary records..." "INFO"
     $summaryRecords = [System.Collections.Generic.List[psobject]]::new()
@@ -1120,19 +1120,7 @@ try {
     WriteLog -Message "Summary records built: $($summaryRecords.Count) rows." "INFO"
 
     $globalPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
-    if ($DryRun) {
-        WriteLog -Message "DryRun enabled - Summary CSV export skipped." "INFO"
-    } else {
-        WriteLog -Message "Exporting Summary CSV ($($summaryRecords.Count) rows)..." "INFO"
-        ExportAndCopyCsv `
-            -BaseFileName "Intune_DiscoveredApps_Summary" `
-            -OutputPath $OutputPath `
-            -GlobalPath $globalPath `
-            -Data $summaryRecords `
-            -Encoding "UTF8" `
-            -NoTypeInformation
-        WriteLog -Message "Summary export completed: $global:csvFilePath1" "INFO"
-    }
+    WriteLog -Message "Summary publication deferred until the DeviceDetail dataset is complete and finalized." "INFO"
 
     # ----------------------------------------------------------
     # Build DeviceDetail records with streaming export and resume support
@@ -1243,8 +1231,11 @@ try {
         WriteLog -Message ("Managed-device snapshot cached: {0} unique device(s). App relation calls now retrieve IDs only." -f $managedDeviceCache.Count) 'INFO'
         $seenAppDevicePairs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $appsForRelationBatch = @($detailApps | Where-Object { -not $processedAppIds.Contains([string]$_.id) })
-        $appDeviceRelationMap = Get-DiscoveredAppDeviceRelationBatchMap -Apps $appsForRelationBatch -DelayMs $DelayMs
-        WriteLog -Message ("Discovered Apps relation batches completed: {0}/{1} app(s) prefetched." -f $appDeviceRelationMap.Count, $appsForRelationBatch.Count) 'INFO'
+        $relationPrefetchAppCount = 200
+        $relationChunkOffset = 0
+        $appDeviceRelationMap = @{}
+        $relationChunkAppIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        WriteLog -Message ("Device relation prefetch will stream {0} remaining app(s) in chunks of at most {1}." -f $appsForRelationBatch.Count, $relationPrefetchAppCount) 'INFO'
 
         $appIndex = 0
         foreach ($app in $detailApps) {
@@ -1254,6 +1245,19 @@ try {
                     $script:Stat_DetailAppsSkippedByResume++
                 }
                 continue
+            }
+            if (-not $relationChunkAppIds.Contains([string]$app.id)) {
+                if ($relationChunkOffset -ge $appsForRelationBatch.Count) {
+                    throw "Internal DeviceDetail relation prefetch state is exhausted before AppId '$($app.id)'."
+                }
+
+                $relationChunkLast = [math]::Min($relationChunkOffset + $relationPrefetchAppCount - 1, $appsForRelationBatch.Count - 1)
+                $relationChunkApps = @($appsForRelationBatch[$relationChunkOffset..$relationChunkLast])
+                $relationChunkAppIds.Clear()
+                foreach ($relationApp in $relationChunkApps) { [void]$relationChunkAppIds.Add([string]$relationApp.id) }
+                $appDeviceRelationMap = Get-DiscoveredAppDeviceRelationBatchMap -Apps $relationChunkApps -DelayMs $DelayMs
+                WriteLog -Message ("Device relation chunk completed: Apps={0}-{1}/{2}; BatchResults={3}. Rows will now be streamed and checkpointed." -f ($relationChunkOffset + 1), ($relationChunkLast + 1), $appsForRelationBatch.Count, $appDeviceRelationMap.Count) 'INFO'
+                $relationChunkOffset = $relationChunkLast + 1
             }
 
             $pctComplete = [math]::Round(($appIndex / $detailApps.Count) * 100, 1)
@@ -1318,7 +1322,6 @@ try {
             } catch {
                 WriteLog -Message "Failed to retrieve devices for app '$($app.displayName)' (Id=$($app.id)): $_" "WARNING"
                 $script:Stat_AppsSkipped++
-                [void]$processedAppIds.Add([string]$app.id)
                 if ($streamingEnabled) {
                     Save-DiscoveredAppsResumeState `
                         -Path $script:DeviceDetailResumePath `
@@ -1352,7 +1355,7 @@ try {
                 -SkippedCount $script:Stat_AppsSkipped `
                 -DetailRows $script:Stat_DeviceDetailRows
 
-            if (($script:Stat_AppsProcessed + $script:Stat_AppsSkipped) -eq $script:Stat_DetailAppsTargeted) {
+            if ($script:Stat_AppsProcessed -eq $script:Stat_DetailAppsTargeted) {
                 $completedPath = Complete-DiscoveredAppsStreamExport `
                     -PartialPath $script:DeviceDetailPartialPath `
                     -TimestampedPath $script:DeviceDetailTimestampedPath `
@@ -1367,6 +1370,37 @@ try {
                 WriteLog -Message "DeviceDetail export incomplete; partial CSV and resume state kept: $script:DeviceDetailPartialPath" "WARNING"
             }
         }
+    }
+    if ($DeviceDetailMode -eq 'All' -and $script:Stat_DetailAppsTargeted -ne $summaryRecords.Count) {
+        throw "Discovered Apps publication gate failed: SummaryRows=$($summaryRecords.Count) DetailTargetApps=$($script:Stat_DetailAppsTargeted)."
+    }
+    if (-not $DryRun -and $script:Stat_DetailAppsTargeted -gt 0 -and -not $script:DeviceDetailCompleted) {
+        throw "Discovered Apps publication gate failed: DeviceDetail is incomplete, so the newer Summary will not replace DATA-LAST. Resume state: $($script:DeviceDetailResumePath)"
+    }
+
+    if ($DryRun) {
+        WriteLog -Message "DryRun enabled - Summary CSV export skipped." "INFO"
+    } else {
+        WriteLog -Message "DeviceDetail publication gate passed. Publishing the matching Summary generation ($($summaryRecords.Count) rows)..." "INFO"
+        ExportAndCopyCsv `
+            -BaseFileName "Intune_DiscoveredApps_Summary" `
+            -OutputPath $OutputPath `
+            -GlobalPath $globalPath `
+            -Data $summaryRecords `
+            -Encoding "UTF8" `
+            -NoTypeInformation
+
+        $summaryBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DiscoveredApps_Summary'
+        $summaryLatestRoot = if ([string]::IsNullOrWhiteSpace($globalPath)) { $OutputPath } else { $globalPath }
+        $summaryLatestPath = Join-Path -Path $summaryLatestRoot -ChildPath "$summaryBaseFileName.csv"
+        if (-not (Test-Path -LiteralPath $summaryLatestPath -PathType Leaf)) {
+            throw "Discovered Apps publication gate failed: Summary latest CSV was not created: $summaryLatestPath"
+        }
+        $publishedSummaryRows = @(Import-Csv -LiteralPath $summaryLatestPath).Count
+        if ($publishedSummaryRows -ne $summaryRecords.Count) {
+            throw "Discovered Apps publication gate failed: Summary latest row count is $publishedSummaryRows; expected $($summaryRecords.Count). Path: $summaryLatestPath"
+        }
+        WriteLog -Message "Summary publication completed and validated: Rows=$publishedSummaryRows Path=$summaryLatestPath" "INFO"
     }
 
     WriteLog -Message ("DeviceDetail completed. TargetApps={0}; Processed={1}; Skipped={2}; CacheApps={3}; ResumedSkipped={4}; Rows={5}; CacheRows={6}" -f $script:Stat_DetailAppsTargeted, $script:Stat_AppsProcessed, $script:Stat_AppsSkipped, $script:Stat_DetailAppsFromCache, $script:Stat_DetailAppsSkippedByResume, $script:Stat_DeviceDetailRows, $script:Stat_DeviceDetailRowsFromCache) "INFO"
@@ -1419,9 +1453,9 @@ $($global:LogTextFile)
     $elapsed    = $stopwatch.Elapsed
     $elapsedStr = '{0:D2}h {1:D2}m {2:D2}s' -f $elapsed.Hours, $elapsed.Minutes, $elapsed.Seconds
 
-    $detailCompletionCount = $script:Stat_AppsProcessed + $script:Stat_AppsSkipped
+    $detailCompletionCount = $script:Stat_AppsProcessed
     if ($script:Stat_DetailAppsTargeted -gt 0 -and $detailCompletionCount -lt $script:Stat_DetailAppsTargeted -and -not $script:RunError) {
-        $incompleteMessage = "DeviceDetail run incomplete: processed/skipped $detailCompletionCount of $($script:Stat_DetailAppsTargeted) targeted apps. Resume state: $($script:DeviceDetailResumePath)"
+        $incompleteMessage = "DeviceDetail run incomplete: successfully processed $detailCompletionCount of $($script:Stat_DetailAppsTargeted) targeted apps; failed attempts remain eligible for resume. Resume state: $($script:DeviceDetailResumePath)"
         WriteLog -Message $incompleteMessage "ERROR"
         $exception = [System.Exception]::new($incompleteMessage)
         $script:RunError = [System.Management.Automation.ErrorRecord]::new($exception, 'DiscoveredAppsIncomplete', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
@@ -1457,8 +1491,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1AjyDslDgSIJv
-# eTSSgJHtSr8rrC6hYd2ly4iyx9IUDqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzWyxq+CAQQoif
+# c6JMH3ahkB99ipBWcH0ppvRupxgU/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1591,31 +1625,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINDwmACVqUueWlxHnR5LGzgoe2tft50NWjL6T2ReeKPCMA0GCSqG
-# SIb3DQEBAQUABIIBgD8829WXYWeww/y7+lH8JJjWvQTolqhQaoX0EyT4h4m+jMwM
-# m6CcEXKa4WfknlphioEvCfKtrAvfcVPD69dthCHCtsNJkUvslSJ4bxCKBuU+woZx
-# m2j9h+oNlaKG82JceXQifNsoEBtz//6d8WQqc3UO5wmNvcuY4clrFiKSqKT/QGBX
-# ALSvV5XZcAd8C7vbdWHZyOpvB3GO04nvKJ7rA+w6FlIKfaas+U0eZ+VBX6bowNxa
-# p8xRNk6E7JvdxIvUv9s1/09BPgR7KR3mnVFpdVW/+Dc4+flWUKxRYWPElrLfRNR1
-# WukxqzMO1UZOZNOJmCnEZmiLNAgmWjMKzL2sr1d9wOiVCckz0EDMQo0XTyBSDSOz
-# 5qSBZpiXfwa+ImKE000l74APG8nV0qqBNneUYrT57aXUucQmpPRc0LXnxMhrAACS
-# n9Uu9GtvHzOxlfNc6G1v6fJAnLw5JHsiYygx1wwueTz3ICtrglq7FSKWCZ4Nsx70
-# r211YwsjjoLSR5f5X6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOCoSv2K2iZpAIFBQs1G3R6xsgq7zXlxajIN0F64BruWMA0GCSqG
+# SIb3DQEBAQUABIIBgGhuKKM6bxPYTktsPIfXT5mkiZIIKDsAt+/MY88AQtYcPjj9
+# BlRriqhArgzZzCkQs4WoSRJdT/Y0w8a3SFO3uyiCqLRbIbk1QEmau+sFAYACZ7ew
+# C4IhuvgInvhuHiKCOCeIi1W+fWqdNaRzz0YBat7LYJeCf1Zlt8RXNHrb3Y8wRjtk
+# bqiPOMrGjDNeONMicWwpW+nJsvsj+ZmHglFyAfMJ/ruNnsnIm40kG03ypRXtZSId
+# j0QScr/4OK1M2Ahs2jxbbIVW9G2/MWtoLM3qbLd4lrLYK7yIiFWY+uW4zPtpSeHE
+# hnQoP5r89239OHEvHUbyjWeDmC3vGJWEkKXJyZzQ14HP6jjlRaEOMhW00JGwd6A6
+# ayBqO5CXj4yvrH8K47ksJ87WlBMg6MtxNABOGHnI+x8XEly5U3p0dguVW0Zf5mol
+# pMLarE12JaAO47genuv+6Ybrx1pOlm5zg5aEVAtBqVTYHtsHpjUWGzBeP365EVY7
+# ACiXseYYJj4C5ZlE+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTUxNjA1
-# MTVaMC8GCSqGSIb3DQEJBDEiBCARditA2DYn6I3mATOuu7dv2gPExhPAFikNspGZ
-# UqkYDDANBgkqhkiG9w0BAQEFAASCAgCDFRlmUIujnlTL4qJ/RItTugKm3H+iODt2
-# 6DXO/yGMEivG/SuQQ4l8tF//ID5rRbqOPvpsWZXv0J5vZp9cGXYqSMAZ5jyLi5E9
-# 6+1KabYKlT6iX5zL84bv3S3r2sJ/p8ptYlI1RDQxPl4VNj5/glg+fO7x9QqbdCZB
-# dPwJNTcJJPDokR4ztdpC49Ob0PpesRmr+6Xpy7qtJ40/f/G0gzNcm58DrpJriDXz
-# rjbb5IGd/sOiNWasz+bblYbOWo1mIWw9WBkd5O2oL43H4pOtoj41ZtwTv9zLE++Z
-# 3ho0NQq3I2PnLvQfhcngvTqtejrhr5HgXg3L744iRL0J9KJiiWyBLXGp19+YfBiP
-# Uvt5uWVnP/mVL/OJn877FWaXsFH5sNb2iPiNtGJHvFGzOtw58mMqZu+ndAmf/+O+
-# mZO2AMPI3WOZ03Hd+1RPu5SGkfRIR2Yrr25MIz+WueeqI9d8iPNiLuG8Qy4B7aw/
-# wDrFQ5dNKHTgVPYTD5NMbjQ/L/cSXZfTSESOi4kmaFd9npClR6x/Xoy4ntl1gd/v
-# VjjnMOUsyFJ9ehR1Pchd3L8faUVjbGWo0Yg/0qOXsXjlDFspPfpzSIaOo6rq1rnc
-# dd8bsMv8AQj3bneNyuQZfx9MhtU4oUmnp0dofACZCruiIivB/ViKrfEqnrWHZSCt
-# ClrJTl6IfA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYwOTM4
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAz2gDuocjRgESXMOLYdkT/mKtG7hNrVRAqYsDc
+# So9VBzANBgkqhkiG9w0BAQEFAASCAgADtIfBSwk1xLi0bOYAOe0/YpyIHqexBSdT
+# nnsFnxx4HsXC1G9P7qCykqjiTN26eayrgJ8ULde3sXA83rr9uVSS2/sIbtFxw3+4
+# vjzVjDGBrv92viPBA/zBafzgA3Q2QS/1w6G406/QDNSoewli7Gn9ESgHmu0b1nzY
+# Gp75My8AP82PwX4r3WZrdGKR/I03jK4+mBJtZEM/mKsdw/uk0n6q+8AV8UWsZBQP
+# 4eAqXLzYRaNwVY031/myBrrBC2tX4l/N7Ab6P8/ubDCLkhe5NGqLqwyq7EKXtPkd
+# LUaaRogXm6NfFAipXyK7XTjrEEZvjIqM1bsjmyb+pE9Gcnj6GliYW961XSb6EItL
+# fYayvcY7SLmqw+PEPgFy2713KkO9wDVHF0zIm6h0wJPCGH5jeNL5qNu9qn9vgqAo
+# IHN36UQMAJJlZkSw37aqgVpUUskyKXqC6SwJtHODBS8qdhfcgemoOxB1ggIRXJ+i
+# BuAtE5n9o6L+gyZAvTHPXtC2yhZt0dWhIGkjqo7ajY1BlYE7pF7XNIABl5VB6uz1
+# qslCuCqICE3da/eRIU58OpVMxmMCIp1Hju/5UCoIj00TD0yYqdTIdobTEDSI4/9D
+# U5Y3ayZriiJHj1RJ20nhzYuwO68vZsXStg/nN6fXsOpFF5nXfIbVXr7YGIf/a4oC
+# qs0vMvg5EA==
 # SIG # End signature block
