@@ -36,10 +36,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.13
+    Version : 1.14
 
 .VERSION
-1.13
+1.14
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.13
+    Version : 1.14
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -343,6 +343,14 @@ $lastCsv = Join-Path $LatestCsvFolderPath "Intune_Devices_Compliance.csv"
 $policyMainCsv = Join-Path $ScriptCsvLogFolderPath "Intune_Devices_Compliance_Policies.csv"
 $policyTsCsv = Join-Path $ScriptCsvLogFolderPath ("Intune_Devices_Compliance_Policies_{0}.csv" -f $ts)
 $policyLastCsv = Join-Path $LatestCsvFolderPath "Intune_Devices_Compliance_Policies.csv"
+
+# These two canonical DATA-ALL files are written directly before the shared export
+# helper runs. Suffix them explicitly in bounded mode so a smoke test cannot replace
+# either production snapshot; timestamped and DATA-LAST paths are handled by Core.
+if (Test-SmartM365MaxItemsMode) {
+    $mainCsv = Add-SmartM365MaxItemsSuffixToCsvPath -Path $mainCsv
+    $policyMainCsv = Add-SmartM365MaxItemsSuffixToCsvPath -Path $policyMainCsv
+}
 
 foreach ($dir in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logDir)) {
     try { New-Item -ItemType Directory -Force -Path $dir | Out-Null } catch { }
