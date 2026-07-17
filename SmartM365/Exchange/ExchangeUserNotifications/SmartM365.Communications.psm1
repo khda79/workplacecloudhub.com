@@ -225,38 +225,21 @@ function Initialize-SmartM365CommunicationExchangeOnline {
         }
     }
 
-    if (-not (Get-Command -Name Connect-SmartM365CloudSession -ErrorAction SilentlyContinue)) {
-        return [pscustomobject]@{
-            Enabled = $true
-            Available = $false
-            Source = 'ExchangeOnline'
-            Status = 'CloudSessionFunctionUnavailable'
-            ErrorMessage = 'Connect-SmartM365CloudSession is not available. Import SmartM365.Core first.'
-            ViewEntireForestRequested = $false
-            ViewEntireForestApplied = $false
-            ForestErrorMessage = ''
-        }
-    }
-
     try {
-        $connectResult = Connect-SmartM365CloudSession `
-            -AppId $AppId `
-            -TenantId $TenantId `
-            -Thumbprint $Thumbprint `
-            -Organization $Organization `
-            -ExchangeOnline $true `
-            -Graph $false
+        if (-not (Get-Command -Name Connect-ExchangeOnline -ErrorAction SilentlyContinue)) {
+            Import-Module ExchangeOnlineManagement -ErrorAction Stop
+        }
+        if (Get-Command -Name Disconnect-ExchangeOnline -ErrorAction SilentlyContinue) {
+            Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
+        }
 
-        if (-not [bool]$connectResult.ExchangeOnlineConnected) {
-            return [pscustomobject]@{
-                Enabled = $true
-                Available = $false
-                Source = 'ExchangeOnline'
-                Status = 'Unavailable'
-                ErrorMessage = 'Exchange Online connection failed.'
-                ViewEntireForestRequested = $false
-                ViewEntireForestApplied = $false
-                ForestErrorMessage = ''
+        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+        if (-not [string]::IsNullOrWhiteSpace($TenantId) -and (Get-Command -Name Get-ConnectionInformation -ErrorAction SilentlyContinue)) {
+            $connection = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1)
+            $connectedTenantId = if ($connection.Count -eq 1) { [string]$connection[0].TenantID } else { '' }
+            if (-not [string]::IsNullOrWhiteSpace($connectedTenantId) -and $connectedTenantId -ne $TenantId) {
+                Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
+                throw "Exchange Online connected to tenant '$connectedTenantId' instead of configured tenant '$TenantId'."
             }
         }
 
@@ -298,7 +281,6 @@ function Initialize-SmartM365CommunicationExchangeOnline {
         }
     }
 }
-
 function Initialize-SmartM365CommunicationExchangeManagement {
     [CmdletBinding()]
     param(
@@ -1089,11 +1071,8 @@ function Send-SmartM365CommunicationMail {
     if ($effectiveMailMode -eq 'Disabled') { return [pscustomobject]@{ Sent = $false; Mode = 'Disabled' } }
 
     if ($effectiveMailMode -eq 'Graph') {
-        if (-not (Get-Command -Name Connect-SmartM365GraphAppOnly -ErrorAction SilentlyContinue)) {
-            throw 'Connect-SmartM365GraphAppOnly is not available. Import SmartM365.Core first.'
-        }
-        if (-not (Connect-SmartM365GraphAppOnly -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint -Purpose 'Communications mail')) {
-            throw 'Microsoft Graph app-only connection failed.'
+        if (-not (Connect-SmartM365CommunicationTeamsUserGraph -TenantId $TenantId -Scopes @('User.Read', 'Mail.Send'))) {
+            throw 'Microsoft Graph delegated interactive connection failed.'
         }
 
         $message = @{
@@ -1238,27 +1217,36 @@ function Connect-SmartM365CommunicationTeamsUserGraph {
     }
 
     $context = Get-MgContext -ErrorAction SilentlyContinue
+    $connectScopes = @($Scopes)
     if ($context -and $context.AuthType -eq 'Delegated') {
+        $tenantMatches = [string]::IsNullOrWhiteSpace($TenantId) -or $TenantId -in @('__USE_GLOBAL__', 'USE_GLOBAL') -or [string]$context.TenantId -eq $TenantId
         $scopeMap = @{}
         foreach ($scope in @($context.Scopes)) { $scopeMap[[string]$scope] = $true }
         $missingScope = $false
         foreach ($scope in $Scopes) {
             if (-not $scopeMap.ContainsKey($scope)) { $missingScope = $true; break }
         }
-        if (-not $missingScope) { return $true }
+        if ($tenantMatches -and -not $missingScope) { return $true }
+        if ($tenantMatches) {
+            $connectScopes = @(@($context.Scopes) + @($Scopes) | Sort-Object -Unique)
+        }
     }
 
-    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { Write-Verbose ("Microsoft Graph disconnect before Teams delegated connection failed: {0}" -f $_.Exception.Message) }
+    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { Write-Verbose ("Microsoft Graph disconnect before delegated connection failed: {0}" -f $_.Exception.Message) }
     if ([string]::IsNullOrWhiteSpace($TenantId) -or $TenantId -in @('__USE_GLOBAL__', 'USE_GLOBAL')) {
-        Connect-MgGraph -Scopes $Scopes -NoWelcome -ErrorAction Stop | Out-Null
+        Connect-MgGraph -Scopes $connectScopes -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
     }
     else {
-        Connect-MgGraph -TenantId $TenantId -Scopes $Scopes -NoWelcome -ErrorAction Stop | Out-Null
+        Connect-MgGraph -TenantId $TenantId -Scopes $connectScopes -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
     }
 
+    $newContext = Get-MgContext -ErrorAction Stop
+    if (-not [string]::IsNullOrWhiteSpace($TenantId) -and $TenantId -notin @('__USE_GLOBAL__', 'USE_GLOBAL') -and [string]$newContext.TenantId -ne $TenantId) {
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        throw "Microsoft Graph connected to tenant '$($newContext.TenantId)' instead of configured tenant '$TenantId'."
+    }
     return $true
 }
-
 function Resolve-SmartM365CommunicationGraphUserId {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$User)
@@ -1410,7 +1398,7 @@ Export-ModuleMember -Function `
     Assert-SmartM365CommunicationNoUnresolvedToken, Load-SmartM365CommunicationSentRegistry, Save-SmartM365CommunicationSentRegistry, `
     Register-SmartM365CommunicationSentItem, Resolve-SmartM365CommunicationLanguageTag, Get-SmartM365CommunicationSubject, `
     Get-SmartM365CommunicationHotline, Add-SmartM365CommunicationLogRow, Get-SmartM365CommunicationMailMode, Send-SmartM365CommunicationMail, `
-    Get-SmartM365CommunicationTeamsUserMode, Send-SmartM365CommunicationTeamsUserMessage, `
+    Get-SmartM365CommunicationTeamsUserMode, Connect-SmartM365CommunicationTeamsUserGraph, Send-SmartM365CommunicationTeamsUserMessage, `
     Initialize-SmartM365CommunicationExchangeSnapIn, Initialize-SmartM365CommunicationExchangeOnline, Initialize-SmartM365CommunicationExchangeManagement, ConvertTo-SmartM365CommunicationLdapFilterSafe, `
     Resolve-SmartM365CommunicationAdUserInfo, Test-SmartM365CommunicationExchangeMailboxState, `
     ConvertTo-SmartM365CommunicationBytes, Get-SmartM365CommunicationMailboxUsageInfo, Resolve-SmartM365CommunicationExchangeLanguageTag, `
@@ -1419,8 +1407,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNeIdgYvNYv+yM
-# XIGNkkfsh8LMm/igXBhVwF5bkPuDr6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBkoO91HJz673zq
+# ydUPjsBMU5NU2T9CL5MoXRm4jh9uwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1553,31 +1541,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIke1kQ/SAZgC/N42G8D3WLLMT3L+cEausL9mf7PWgSqMA0GCSqG
-# SIb3DQEBAQUABIIBgIICmu1WhMxOLV1GNOvUrE0y/Nx8VkGo638/U3Nf9zHa+jvs
-# jbLTK9KPhsE8aBjQcwLdzcfkr0BE90SZ++48gJK+3cjqrgUQJjvTRPXHjat2aPLt
-# iq8AsXnwJPu4+EZgO3bfT5uENzXG+1cgSdqsfXlsmdWFcYwFAh2VcB1DjxbBp8xT
-# tmeIFXPt/TEoQF9aBk140JNQsAe/9mUceh1eEtE+b1rxtbBMaEs41JbMVUNBE34G
-# 6K0Wjef6/kqzxv8WpNUX9BncG62nOT46vRLJjf9LVJKqjccj99jrPSr0PXpwQU1m
-# q7TbYSSTUZZiRfI3D/9OQyDf1p8g9fvaSkdoByZgC1Gnoysa8uENNbsuJRRjiSJC
-# JtetWET0YSjPsJhXy7kV2easRupAxOd5+LcPawKXCj20QxCfO7+XSi2RougHfZCE
-# nxa2Ry4KOJ+VwMIaLLuYVHQjr8ZZfyB0wakz378O45MY4naumpjiKqtcbqEEKIEM
-# +MF2s2LIupLJ68tCuKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILvq9lY3N2FVy/LTC+GV99krj36Qe2WVDKByun0vfr7QMA0GCSqG
+# SIb3DQEBAQUABIIBgIRmouJ6yhvNrYsIm8SM/7DE3JcIvd9qCC0I6P0JWZGXDZ+b
+# kBF1RNmKJqn/27UPNRp1otKcoPGPKEjA0CVEPtqFlXOnKeUpmdzDr6edZmCSTUmc
+# jCMc0eIm1HPyvroffqVd2vCRVDhTTzn2+izBSxJ7G3cAlUlEsX8dCBAQMcGC4CyW
+# T0+eGrziBnAOS+G/ct3x9ei4uAmlBPiznJg5Vt8N4H64u/t08CwsQ7ClUBcvU8Cy
+# Jr7j58/wfH2nHSxX4SSc/c8VuDjggpPEGTUV9MkkpWTLs3c7XJMRLvuKvShrutmm
+# Yw82P5LdlZugM7+DAvRKHjDr3jP+lhTOdzqWT7w4N/kMEG38xxND5+mmfhUSG0Md
+# ejPqWzRIo5aqdxPGwpaWtNHJZVRWzsfDd+uiz9kImkgFCuJZCEnKxyVjgm9hxxLA
+# KSRvgoCMsSraj8HxIfwOfjIl26KcH5PV2sx0tiUC2cw0SNiSK7wRWZfAH3E85+cL
+# g6wFdPswgUitnRNb8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MjVaMC8GCSqGSIb3DQEJBDEiBCBvbdo3pCvFkyPx4LjOJX8GZY45znxgNHIg+Zy7
-# 3NqmADANBgkqhkiG9w0BAQEFAASCAgBsxaJoLuCq5kEHWXdCkKrbwqnuo4jikjkH
-# TARFGNiwdQDrRREpRMZkXoG9nRlpuImaxqUEBkBRg93kf8+rfQuvnZytCY6z3DQP
-# FsuLsMYtY3BKRnXwGG1l5Ro8DyI0IffyGrwIUqXdDsbD2KL8MbnTNcb/yzWkdRCO
-# 8JmZg8yX92pHAV9TKZJuIDwvDDIqI/9MSrYo2beL0gOA8oX1x7JQB0sgGXi2k5Ls
-# Cp7Dv63UBcx4PtcI3ahz6ODAq61eTX0XY+oPL7mbjRTAIi8/QzoUbk3w+10sa0Nm
-# AaSnOIO9KBw8J3sQ4Wi1CAqwEBsmGE4YnVj93A1EHXabqx5E64MRhum5oY6H0/Nq
-# PvTW3s7VOQsf55/xBaRZjh3N9mY9IbziVffuKpzQK3ohzlBtDmQxmthQqV5vAbJr
-# ohoPCUvMwf9aSpFyTeC/kgI1Nfk4VxPi7UjA8kLX7LArj813lnWrRvu1HGVnfib7
-# p78FN01WQKEv/zx0QHXt+VTyACG63gCoLpopSIbJYsV/vZI1ieUB8svulQmS6U07
-# 3u8t9Y4ZaHnAJowdxfIReK8PZ314scqMu/U5bJCG6ptR4WyI85TJxGSlhs9UetnX
-# hA7J95Qa+pV5Jq/CmamWeP7x/9H+tE+bkHu0nD+hyhG20VY1VyMb8p/2OddZgc5m
-# oTx0fqjedw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjAw
+# MjdaMC8GCSqGSIb3DQEJBDEiBCBMECi5906DQnRsC1f6ZQWD0cw9Ap+Vqj/HPlqM
+# PkH84TANBgkqhkiG9w0BAQEFAASCAgBcznenC/3Zcupo92UKfH/h05Y1w34sU5fz
+# JGPdUUFfOQDRl6vy+a0LBXzeSFOvodSdJDqmjic+GU8jb7u721PooRnGfV+jU+/P
+# mX5BFQv9p3lo9t6hpckEnaNotYzrvS1UBpS9qN5X2ZOsZAuZ2vdwduXZQjOjpgcT
+# b3OAaki0hK95Wz2CFVYwHYaPj1yX0uYCcXlgB0jfgVsHjmdoXRVEDNJzQT2Pa9CT
+# wJn2XYuhH5n2I3C68GzWzdnARKbCWR99tyeijsrXNggoepnw+O3dxuskgJotAOqH
+# 1ocUPa7G+VsGQnBlrprkahTwDilN0y+E0W043/Xi91QScEOooacJCjBvNEnHJgVI
+# q0NtKgILBmy+XncFKDTpPXBxnMC1O4iu2N37kJywIJLzDy3519uuNIEAhSjdTFq3
+# SgUBIEXrZW1ICfdKOsnxFSGBre410KkcsN7+bnzQuTMgYV3Sy29G6BYMmJ1R3ChJ
+# 6nAxZStu2qKVWMZFh0fD3MHmIiTQL3KUMkMotYO8eIBz3guz6xyUtBnICsg0oO/m
+# zQQFxe6/Aax4C9+Pnf2M2aXEnZinfd7jSQr2tPwTxxYECh0gAetKUpGnTRLSGXwN
+# WKhp4An+tgEkGT+wwggcEF/Xis7o0/zPQLRvYgYNVRlUs8WmVXO3aAQAu21E9Hbt
+# pvDZcdwr7Q==
 # SIG # End signature block
