@@ -1,14 +1,7 @@
 @echo off
 setlocal
 
-pushd "%~dp0" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    pause
-    exit /b 1
-)
-
-set "SCRIPT_DIR=%CD%\"
+set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_PATH=%SCRIPT_DIR%SmartM365-DeviceRegistration-Tool.ps1"
 set "POWERSHELL5=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
@@ -17,5 +10,4 @@ start "SmartM365 Device Registration Admin" "%POWERSHELL5%" -STA -NoProfile -Win
 ) else (
 start "SmartM365 Device Registration Admin" powershell.exe -STA -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%SCRIPT_PATH%" -Mode Admin %*
 )
-popd
 exit /b 0

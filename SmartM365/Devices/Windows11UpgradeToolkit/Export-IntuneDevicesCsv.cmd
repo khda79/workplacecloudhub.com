@@ -1,18 +1,13 @@
 @echo off
 setlocal EnableExtensions
 
-pushd "%~dp0" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    pause
-    exit /b 1
-)
+set "UNC_WORK_DIR=%~dp0."
 
 rem Root launcher.
 rem Uses Scripts\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1 and stores DevicesIntune.csv in the root folder.
 rem Exports Intune managed devices through Microsoft Graph. Missing devices do not block AD fallback in LOT runs.
 rem Set W11UT_INTUNE_TENANT_ID before launching to target a specific tenant.
-set "ROOT_DIR=%CD%\"
+set "ROOT_DIR=%UNC_WORK_DIR%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1"
 set "OUTPUT=%ROOT_DIR%DevicesIntune.csv"
 call :PrintStartupInfo
@@ -46,7 +41,6 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 echo Finished with exit code %EXITCODE%.
 pause
-popd
 exit /b %EXITCODE%
 
 :PrintStartupInfo
