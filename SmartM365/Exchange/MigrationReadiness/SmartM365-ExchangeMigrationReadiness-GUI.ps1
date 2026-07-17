@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.1.2
+1.1.3
 #>
 #requires -Version 7.0
 
@@ -16,7 +16,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.1.2'
+trap {
+    $message = $_.Exception.Message
+    try {
+        Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
+        [void][System.Windows.MessageBox]::Show($message, 'Smart Exchange Migration Readiness - startup error', 'OK', 'Error')
+    }
+    catch {}
+    exit 1
+}
+$script:AppVersion = '1.1.3'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -27,8 +36,8 @@ Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName WindowsBase
 
-$modulePath = Join-Path $PSScriptRoot 'SmartM365.ExchangeMigrationReadiness.psm1'
-Import-Module -Name $modulePath -Force -ErrorAction Stop
+$readinessModulePath = Join-Path $PSScriptRoot 'SmartM365.ExchangeMigrationReadiness.psm1'
+Import-Module -Name $readinessModulePath -Force -ErrorAction Stop
 
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -343,7 +352,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.1.2" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.1.3" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -755,8 +764,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcQlhFcOy6Lw7b
-# zuo4FSivSismTkH+gO9nZ2VAbKruX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1pqK+gQg0Dc6N
+# Q+znDrSRHupxBkQfowtHu1U2WUjLGKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -889,31 +898,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILUkOlGTYbADmggMmflUVI+9x8sY8Pc5exvkKmjAmPEiMA0GCSqG
-# SIb3DQEBAQUABIIBgDXL8R/onSLau+tVArjESTo6jn4kabqouWz7G/0JljQ5aPKB
-# 9l3AHDxVab6E7UIrq4Gd92GTvYzLxEnTSkDcGrwo8d1eiaLfFaq9xZCrZwCr/dbc
-# ivo0qer+9ST/44LPCtPT3CeFhRNBfZJ/K13iaV/IBakEabp0Q3VKQ/5Aw15XajVC
-# TC1rgC3xon7VJETUw+w8/zTgyJoG/vcLRRdwi0VMe8OW9SVlelcrFh0mxVtgFdji
-# /R5vvSNA/AP/2L/A4gwidj94V8Eid1kIvK5gEkm5idVJSoJW070W1XoJt9CrpK5S
-# +jWPQwO2j1JJBE39NTtOlOoMi0jieop38towNo67fHbwTlTP0v+oefhFdMQx4ddX
-# 5lJ9FI4nviXvr2rPSkirWt/eUw83XHZmE0ylxtCBuBXFk4uFOUA7xkEvO3aLke1N
-# qGHij89z86P1PGGv0rbalnDfNCbx1G6nH2HdNWPjSmA5TNa//KQ1p3bW/uqRiq00
-# IVgeJ7PaDCEWWG7fNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINP8q2dZB+BkkSBcnqyp19ygkS0ekDepPheEz9V/KxjYMA0GCSqG
+# SIb3DQEBAQUABIIBgKnojnnP4Xspva+fWM6I+Q1nguCAD3n4b11ZriJ/zcWJP+j5
+# U4nJIgaFdOkhaibP+MUujG/Xr5FvPSWVbeF3oEpezcnUGKrm/BGdd/G0mUEUdNcQ
+# /EZEHhB7YZbMzIdFn5gO6tsNVSgHziRqzvdW/9tpzqlv4STuyLjuCCbMcT6C2oMa
+# ur+cRrvXnHDtU9oT+BeRml49WqmPydU1VFEAMJAb0x8xD4o75Rd/BUljD224NGnE
+# wDlHKbQjc9nY6lteY92YhnmuzfGC5OxCLwSzjC1T13P7J2WpWKS/cv1NtG4D4khZ
+# 6a/h4SUaKTqIr6OAZ/LRc86m1kPvwOoT3pc2A0cCOPpluWAi1EPDmsxY4RHKAZHM
+# yPcZPak9WBhLlz4kZSJoy2HHFM94OmTnmdjawjm1HWySDLZPUouz54Qhk6QTND6r
+# xNh6+jf/K3SSDYrD37EDi/hfUy66afZ0Q4K11I/28w0UGji7EcVPWrTmd3lhm8gG
+# H3oWFeGYRJ60nZVEo6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMDIy
-# MzVaMC8GCSqGSIb3DQEJBDEiBCCtmM/slhYpiNg1+3g6K4zB/kr9bl5VX0GvyQZ1
-# 0UaXiTANBgkqhkiG9w0BAQEFAASCAgBzp4Vw5ZNmHSpfyVX6DPixDVKK2gny9oSg
-# Z9q8vyA2pEYbWvqRUltbR702M2i2u+iVmNYkxng3xkhZynySfJ/ECIiCoDI8o+YW
-# atmJ17bWR7Zu3EcdCavM9DxtkhKaySj3AmQscS0tw+snus775+xzCTgkBItvQ7LH
-# 26GyPC52A+m0dKTLHQb3FoN76HHs0m4cE8RX1emynDG57yFU7Tpl2PIcgDGMsMlb
-# 66ngo1svsGrurTCgQ1t/P8C1VyqHJkJbN+qc4eEICp6SpbSQ0z6Te59m105tt5ht
-# 1MQ8C32XbEDJMNwSYdYZMecGzf7TKgDl3VvtbJzUxAq3FOo4f5iBHgGmm04ZIxT+
-# X5JC48DJNY7ZH+fmI2ezYj/uLBW6Iw1GbdzmCFeIcAcYdIGIeJ/uoln4ja1ZFmWj
-# NkvE6xJ5lyWRtUFk6Quv/scJaWWGI3LLbhr7DO7cnRyRus0ulrpVmF1WajbHKVSc
-# Pl6IJF7PW9WhKhWwzWEqTn7C7vYjdN+geZa3yhD6gKZo6HByL8O+wV+Azla6kJfR
-# Jkuo8zvO26akILm6PJCLSrGRCMtHsF1rdMik4HnopfnHknepdFO2cOi+814QjXfv
-# OxHXtoXjxah0BBtug5wUMrVhGARpv+63uV1VqHGDj0ezBY0aJ1XxbA0axUEk3lCe
-# rq71DqGVeA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjAy
+# MTZaMC8GCSqGSIb3DQEJBDEiBCAKnfQ70DlbO+dvcN0Gpo4uSm1ojIPJhJinS/yw
+# txyGNzANBgkqhkiG9w0BAQEFAASCAgB9gO+Is2wD4Z4Pbh4MWUIYVzDxstanRmC2
+# xq4kg37thjoZ49iNPXT/xdYggBeSAB/kVlLC/F3s43gyiOsYgF6ymFPUeZrZBHmu
+# /dvnyqcfnU1k+XhDGBA3KiocgnmOXRgl48vs5HYM2KzYeSQhfFx3ZKa8kzEkbgRZ
+# e9sRjOWMVkE2g4w9T3LFXI0F1mLflbzKMHdxjjIUTZkRYykn9oYXh3Wk+ZKmWnFW
+# 2KQ9MHdHiu8YlfONgcFUMsWrfpHEx7yyLvI3LKvHPE2mvHb5EwYBjmzHohWzwlCF
+# oE/nQpNA56iudGqkkpfYsEwozBai2P6eVp+OsBgSB2/caqRCkHIPLlIytx8yuIF/
+# uiErvB0j5XioasOnJxcXkfzF3P7QYaBtR4Jwd8KcibD8k4O59LdlBDuq24BqSFY3
+# JCCxZ7+xXxxq+vhz9D4EDviWWLP9j7rDtRHVLYFE9FH1t9UpzIzZrd+jp1H8B2gw
+# iAfpRF6aT+jsn03/Mf2U3ydNQu/85ImCDu2b4/xvlPMbBzDuffPp8mFfpLw9QQU6
+# 9r2Q+5/7d/ojIFgksHrSXQBjDUqfyTZmZ6qlgFaTXMRALkNjfQ+qXXZ6ikxQp2UA
+# Evy6V+vzRbg8eaYDKDmb3aa67LFhkSC9g07aaDmrlTRctoazPVokXYMvRxRyU2/A
+# V9C4hdxt4g==
 # SIG # End signature block
