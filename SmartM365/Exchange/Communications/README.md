@@ -1,4 +1,4 @@
-# SmartM365 Communications
+# SmartM365 Exchange Communications
 
 Operational user communication scripts for Microsoft 365 scenarios.
 
@@ -20,8 +20,8 @@ Config/Tenants/<TenantKey>.local.json
 Communication-specific values live under this area and must remain local:
 
 ```text
-Communications/ExchangeUserNotifications/Config/Communications.local.json
-Communications/ExchangeUserNotifications/Config/Campaigns/<Campaign>.local.json
+Exchange/Communications/ExchangeUserNotifications/Config/Communications.local.json
+Exchange/Communications/ExchangeUserNotifications/Config/Campaigns/<Campaign>.local.json
 ```
 
 Only `*.template` files are committed. Real `*.local.json` files are ignored by Git.
