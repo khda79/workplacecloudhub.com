@@ -7,7 +7,7 @@
     The expected proxy address local part is derived from the recipient SamAccountName.
     If the expected address is missing and the -AddMissingAddress switch is specified, the script can add the address.
     The script can target multiple OUs via -OrganizationalUnit (string array) or all OUs with -AllOrganizationalUnit.
-    It generates detailed, summary, and remediation CSV reports and maintains logs.
+    It generates detailed, summary, and remediation CSV reports, groups them into a single Excel workbook, and maintains logs.
     Designed to run on an Exchange 2016 server with the Management Tools installed.
 
 .PARAMETER OrganizationalUnit
@@ -21,7 +21,7 @@
     The expected domain suffix for proxy addresses (default: "tenant.mail.onmicrosoft.com").
 
 .PARAMETER AddMissingAddress
-    If specified, missing proxy addresses will be added.
+    If specified, missing proxy addresses will be added. Recipients managed by an email address policy are reported but never modified.
 
 .PARAMETER OutputPath
     Path to the output directory for reports and logs.
@@ -50,16 +50,16 @@
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
-    Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module.
+    Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module; ImportExcel module.
     Minimum permissions: Exchange on-premises recipient read access and AD read access for proxyAddresses, primary SMTP, UPN and related recipient attributes.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     - Requires Exchange 2016 Management Tools.
-    - Generates detailed, summary, and added addresses CSV reports.
+    - Generates detailed, summary, and added addresses CSV reports plus an Excel workbook with Check, Summary, and Added worksheets.
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.13
+1.15
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -279,6 +279,61 @@ function Get-ScriptLocalConfigValue {
     return $DefaultValue
 }
 
+function New-ProxyAddressesWorkbook {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$CsvFiles,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    Import-Module -Name ImportExcel -ErrorAction Stop
+
+    $parentPath = Split-Path -Path $Path -Parent
+    if (-not (Test-Path -LiteralPath $parentPath)) {
+        New-Item -Path $parentPath -ItemType Directory -Force | Out-Null
+    }
+    if (Test-Path -LiteralPath $Path) {
+        Remove-Item -LiteralPath $Path -Force
+    }
+
+    foreach ($csv in $CsvFiles) {
+        $rows = @()
+        if (-not [string]::IsNullOrWhiteSpace([string]$csv.Path) -and (Test-Path -LiteralPath $csv.Path)) {
+            $rows = @(Import-Csv -LiteralPath $csv.Path)
+        }
+
+        $isEmpty = $rows.Count -eq 0
+        if ($isEmpty) {
+            $placeholder = [ordered]@{}
+            foreach ($column in @($csv.EmptyColumns)) {
+                $placeholder[[string]$column] = ''
+            }
+            $rows = @([pscustomobject]$placeholder)
+        }
+
+        $rows | Export-Excel `
+            -Path $Path `
+            -WorksheetName ([string]$csv.WorksheetName) `
+            -TableName ([string]$csv.TableName) `
+            -AutoSize `
+            -FreezeTopRow `
+            -BoldTopRow `
+            -AutoFilter
+
+        if ($isEmpty) {
+            $package = Open-ExcelPackage -Path $Path
+            try {
+                $package.Workbook.Worksheets[[string]$csv.WorksheetName].DeleteRow(2)
+            }
+            finally {
+                Close-ExcelPackage -ExcelPackage $package
+            }
+        }
+    }
+
+    return (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName
+}
+
 $ScriptLocalConfig = Get-ScriptLocalConfig
 
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
@@ -312,7 +367,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.13"
+    $ScriptVersion = "1.15"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -347,13 +402,25 @@ $ErrorActionPreference = 'Stop'
         throw $scopeError
     }
 
-    $timestamp       = Get-Date -Format 'yyyyMMdd-HHmm'
-$outDetail       = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Check_{0}.csv" -f $timestamp)
-$outSummary      = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Summary_{0}.csv" -f $timestamp)
-$outAdded        = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Added_{0}.csv" -f $timestamp)
-$latestDetail       = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Check.csv' } else { $null }
-$latestSummary      = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Summary.csv' } else { $null }
-$latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Added.csv' } else { $null }
+    $timestamp      = Get-Date -Format 'yyyyMMdd-HHmm'
+    $outDetail      = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Check_{0}.csv" -f $timestamp)
+    $outSummary     = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Summary_{0}.csv" -f $timestamp)
+    $outAdded       = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Added_{0}.csv" -f $timestamp)
+    $outWorkbook    = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_{0}.xlsx" -f $timestamp)
+    $latestDetail   = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Check.csv' } else { $null }
+    $latestSummary  = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Summary.csv' } else { $null }
+    $latestAdded    = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Added.csv' } else { $null }
+    $latestWorkbook = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses.xlsx' } else { $null }
+    if (Test-SmartM365MaxItemsMode) {
+        $outDetail = Add-SmartM365MaxItemsSuffixToCsvPath -Path $outDetail
+        $outSummary = Add-SmartM365MaxItemsSuffixToCsvPath -Path $outSummary
+        $outAdded = Add-SmartM365MaxItemsSuffixToCsvPath -Path $outAdded
+        $outWorkbook = Add-SmartM365MaxItemsSuffixToCsvPath -Path $outWorkbook
+        if ($latestDetail) { $latestDetail = Add-SmartM365MaxItemsSuffixToCsvPath -Path $latestDetail }
+        if ($latestSummary) { $latestSummary = Add-SmartM365MaxItemsSuffixToCsvPath -Path $latestSummary }
+        if ($latestAdded) { $latestAdded = Add-SmartM365MaxItemsSuffixToCsvPath -Path $latestAdded }
+        if ($latestWorkbook) { $latestWorkbook = Add-SmartM365MaxItemsSuffixToCsvPath -Path $latestWorkbook }
+    }
 
     Write-Host "=== Start $(Get-Date) ==="
     if ($AllOrganizationalUnit) {
@@ -369,6 +436,7 @@ $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
     Write-Host "Detail CSV  : $outDetail"
     Write-Host "Summary CSV : $outSummary"
     Write-Host "Added CSV   : $outAdded"
+    Write-Host "Excel       : $outWorkbook"
 
     # -------------------------------
     # Exchange PSSnapin availability
@@ -397,7 +465,10 @@ $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         Write-Host "The Exchange PSSnapin '$snapinName' is already loaded."
     }
 
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ImportExcel') -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
+    Import-Module -Name ImportExcel -ErrorAction Stop
+    $importExcelModule = Get-Module -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
+    WriteLog -Message ("ImportExcel module loaded: version={0}; path={1}" -f $importExcelModule.Version, $importExcelModule.Path)
 
     if (-not (Get-Command Get-Mailbox -ErrorAction SilentlyContinue)) {
         Write-Error "The Get-Mailbox cmdlet is still not available after attempting to load the snap-in.`nThis could indicate an issue with the Exchange Management Tools installation."
@@ -438,7 +509,8 @@ $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
     $noSamAccountNameCount  = 0
     $addedCount             = 0
     $addFailedCount         = 0
-    $policyEnabledCount    = 0
+    $policyEnabledCount     = 0
+    $policySkippedCount     = 0
 
     # Pre/post remediation counters
     $preMissing             = 0
@@ -524,7 +596,11 @@ $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
                     $preMissing++
                     $missingCount++
 
-                    if ($AddMissingAddress) {
+                    if ($AddMissingAddress -and $rec.EmailAddressPolicyEnabled -eq $true) {
+                        $status = "Missing -> SkippedPolicyEnabled"
+                        $policySkippedCount++
+                    }
+                    elseif ($AddMissingAddress) {
                         $status = "Missing -> WillAdd"
                         try {
                             $params = @{
@@ -591,6 +667,7 @@ $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
     }
 
     $publishResults = @()
+    $addedPublish = $null
     $detailPublish = Publish-SmartM365Csv -Data @($results | Sort-Object Status, Identity) -TimestampedPath $outDetail -LatestPath $latestDetail
     if ($detailPublish) { $publishResults += $detailPublish }
     if ($addedOperations.Count -gt 0) {
@@ -607,11 +684,53 @@ $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         [PSCustomObject]@{ Summary = "With no primary address";               Count = $noPrimaryCount },
         [PSCustomObject]@{ Summary = "With no SamAccountName";                Count = $noSamAccountNameCount },
         [PSCustomObject]@{ Summary = "With email address policy enabled";     Count = $policyEnabledCount },
+        [PSCustomObject]@{ Summary = "Additions skipped by email policy";     Count = $policySkippedCount },
         [PSCustomObject]@{ Summary = "Addresses successfully added";          Count = $addedCount },
         [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount }
     )
     $summaryPublish = Publish-SmartM365Csv -Data @($summary) -TimestampedPath $outSummary -LatestPath $latestSummary
     if ($summaryPublish) { $publishResults += $summaryPublish }
+
+    $workbookCsvFiles = @(
+        [pscustomobject]@{
+            Path          = $detailPublish.TimestampedPath
+            WorksheetName = 'Check'
+            TableName     = 'ProxyAddressesCheck'
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','PrimaryAddress','ExpectedAddress','Status','EmailAddressPolicyEnabled','PolicyWarning')
+        }
+        [pscustomobject]@{
+            Path          = $summaryPublish.TimestampedPath
+            WorksheetName = 'Summary'
+            TableName     = 'ProxyAddressesSummary'
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Summary','Count')
+        }
+        [pscustomobject]@{
+            Path          = if ($addedPublish) { $addedPublish.TimestampedPath } else { $null }
+            WorksheetName = 'Added'
+            TableName     = 'ProxyAddressesAdded'
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','AddedProxy','PrimarySmtp','When')
+        }
+    )
+    New-ProxyAddressesWorkbook -CsvFiles $workbookCsvFiles -Path $outWorkbook | Out-Null
+    WriteLog -Message "Excel workbook exported to: $outWorkbook"
+
+    if ($latestWorkbook) {
+        $latestWorkbookFolder = Split-Path -Path $latestWorkbook -Parent
+        if (-not (Test-Path -LiteralPath $latestWorkbookFolder)) {
+            New-Item -Path $latestWorkbookFolder -ItemType Directory -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $outWorkbook -Destination $latestWorkbook -Force
+        WriteLog -Message "Excel latest copy written to: $latestWorkbook"
+    }
+
+    $workbookSharePointUploads = @()
+    foreach ($workbookUploadPath in @($outWorkbook, $latestWorkbook) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique) {
+        $workbookUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $workbookUploadPath
+        if ($workbookUpload) { $workbookSharePointUploads += $workbookUpload }
+    }
+    if ($workbookSharePointUploads.Count -gt 0) {
+        $publishResults += [pscustomobject]@{ SharePointUploads = @($workbookSharePointUploads) }
+    }
 
     Write-Host "`n===== Summary ====="
     foreach ($item in $summary) {
@@ -625,6 +744,7 @@ $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
     Write-Host "Detail: $outDetail"
     if (Test-Path $outAdded)        { Write-Host "Added: $outAdded" }
     Write-Host "Summary: $outSummary"
+    Write-Host "Excel: $outWorkbook"
 
 # ===========================
 # === Email notification ====
@@ -642,6 +762,7 @@ try {
     if (Test-Path $outDetail)        { $attachments += $outDetail }
     if (Test-Path $outSummary)       { $attachments += $outSummary }
     if (Test-Path $outAdded)         { $attachments += $outAdded }
+    if (Test-Path $outWorkbook)      { $attachments += $outWorkbook }
 
     if ([string]::IsNullOrWhiteSpace($MailFrom) -or -not $MailTo) {
         Write-Host "Email skipped: incomplete email parameters (From/To)."
@@ -653,6 +774,7 @@ try {
         $noSamAccountNameCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no SamAccountName' } | Select-Object -First 1).Count)
         $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
         $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
+        $policySkippedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Additions skipped by email policy' } | Select-Object -First 1).Count)
         $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SendMailMode)) { if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' } } else { $SendMailMode.Trim() }
 
         $summaryRowsForEmail = @(
@@ -661,12 +783,14 @@ try {
             [pscustomobject]@{ Label = 'With expected address missing'; Value = $missingCount }
             [pscustomobject]@{ Label = 'With no SamAccountName'; Value = $noSamAccountNameCountForMail }
             [pscustomobject]@{ Label = 'Email address policy enabled'; Value = $policyEnabledCountForMail }
+            [pscustomobject]@{ Label = 'Additions skipped by email policy'; Value = $policySkippedCountForMail }
             [pscustomobject]@{ Label = 'Addresses added'; Value = $addedCount }
         )
 
         $pathRows = @(
             [pscustomobject]@{ Label = 'Detail CSV'; Path = $outDetail }
             [pscustomobject]@{ Label = 'Summary CSV'; Path = $outSummary }
+            [pscustomobject]@{ Label = 'Excel workbook'; Path = $outWorkbook }
         )
         if (Test-Path $outAdded) { $pathRows += [pscustomobject]@{ Label = 'Added CSV'; Path = $outAdded } }
 
@@ -719,7 +843,7 @@ try {
 
         $severity = if ($AddMissingAddress -and $addedCount -gt 0) { 'Success' } elseif ($missingCount -gt 0) { 'Warning' } else { 'Success' }
         $actionTitle = if ($missingCount -gt 0) { 'Review required' } else { '' }
-        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Use write mode only after validating the scope.' } else { '' }
+        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Recipients managed by an email address policy are always skipped in write mode.' } else { '' }
         $message = if ($missingCount -gt 0) { 'Exchange on-premises proxy address audit found missing expected proxy addresses.' } else { 'Exchange on-premises proxy address audit completed without missing expected proxy addresses.' }
 
         $body = New-SmartM365EmailBody `
@@ -734,7 +858,7 @@ try {
             -SummaryRows $summaryRowsForEmail `
             -PathRows $pathRows `
             -Sections $sections `
-            -Footer 'This automated message was generated by SmartM365. Use the exported CSV files and SharePoint links as the source of truth.'
+            -Footer 'This automated message was generated by SmartM365. Use the exported CSV files, Excel workbook, and SharePoint links as the source of truth.'
 
         SendEmailHtmlReport -SendMailMode $effectiveSendMailMode -SmtpServer $SmtpServer -SmtpPort $SmtpPort -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments
         Write-Host "Email sent to '$($MailTo -join ';')' via $effectiveSendMailMode."
@@ -754,9 +878,10 @@ try {
     }
 
     #region Cleanup
-	# Clean up old CSV files + old log files
-	# Automatically excludes all generated CSVs via global:csvGeneratedPaths + current transcript and log files via global variables
+	# Clean up old CSV, Excel, and log files.
+	# Automatically excludes all generated CSVs via global:csvGeneratedPaths + current transcript and log files via global variables.
 	RemoveOldFiles -Path $OutputPath -Filter "*.csv" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
+	RemoveOldFiles -Path $OutputPath -Filter "Exchange_OnPrem_ProxyAddresses_*.xlsx" -KeepCount $global:RetentionMaxCSV -LogFile $global:logTextFile
 	RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
     WriteLog -Message "$TaskName completed."
     try {
