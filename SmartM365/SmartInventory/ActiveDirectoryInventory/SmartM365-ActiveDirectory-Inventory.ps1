@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.36
+1.37
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
@@ -583,7 +583,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.36"
+$ScriptVersion = "1.37"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -1190,11 +1190,13 @@ try {
             return
         }
 
-        $resolvedBase = (Resolve-Path -LiteralPath $BaseFolder -ErrorAction Stop).Path.TrimEnd('\')
+        $resolvedBasePath = Resolve-Path -LiteralPath $BaseFolder -ErrorAction Stop
+        $resolvedBase = $resolvedBasePath.ProviderPath.TrimEnd('\')
         $basePrefix = $resolvedBase + '\'
         $resolvedCurrent = $null
         if (-not [string]::IsNullOrWhiteSpace($CurrentTempFolder) -and (Test-Path -LiteralPath $CurrentTempFolder)) {
-            $resolvedCurrent = (Resolve-Path -LiteralPath $CurrentTempFolder -ErrorAction Stop).Path.TrimEnd('\')
+            $resolvedCurrentPath = Resolve-Path -LiteralPath $CurrentTempFolder -ErrorAction Stop
+            $resolvedCurrent = $resolvedCurrentPath.ProviderPath.TrimEnd('\')
         }
         $cutoffUtc = (Get-Date).ToUniversalTime().AddDays(-$RetentionDays)
 
@@ -2921,8 +2923,18 @@ try {
                     }
                 )
 
-                Assert-SmartM365CsvDataCompleteness -Data $duplicateUpnRows -TimestampedPath $duplicateUpnCsv -LatestPath $duplicateUpnCsv
-                $duplicateUpnRows | Add-SmartM365TenantKey | Export-Csv -Path $duplicateUpnCsv -NoTypeInformation -Encoding UTF8
+                $duplicateUpnColumns = @(
+                    'UserPrincipalName',
+                    'UPN_OccurrenceCount',
+                    'DomainName',
+                    'DomainNameShort',
+                    'SamAccountName',
+                    'DisplayName',
+                    'Enabled',
+                    'LastLogonDate',
+                    'DistinguishedName'
+                )
+                Write-SmartM365CsvAtomically -Data $duplicateUpnRows -Path $duplicateUpnCsv -Columns $duplicateUpnColumns -Encoding UTF8
                 Add-SmartM365AdGeneratedCsvPath -Path $duplicateUpnCsv
                 $upnDuplicateCount = @($upnMap.Keys | Where-Object { $upnMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate UPN analysis complete. Distinct duplicate UPNs: {0}. Affected accounts: {1}. Output: {2}" -f $upnDuplicateCount, $duplicateUpnRows.Count, $duplicateUpnCsv)
@@ -2950,8 +2962,20 @@ try {
                     }
                 )
 
-                Assert-SmartM365CsvDataCompleteness -Data $duplicateSmtpRows -TimestampedPath $duplicateSmtpCsv -LatestPath $duplicateSmtpCsv
-                $duplicateSmtpRows | Add-SmartM365TenantKey | Export-Csv -Path $duplicateSmtpCsv -NoTypeInformation -Encoding UTF8
+                $duplicateSmtpColumns = @(
+                    'SmtpAddress',
+                    'SMTP_OccurrenceCount',
+                    'IsUppercaseSMTP',
+                    'UserPrincipalName',
+                    'DomainName',
+                    'DomainNameShort',
+                    'SamAccountName',
+                    'DisplayName',
+                    'Enabled',
+                    'LastLogonDate',
+                    'DistinguishedName'
+                )
+                Write-SmartM365CsvAtomically -Data $duplicateSmtpRows -Path $duplicateSmtpCsv -Columns $duplicateSmtpColumns -Encoding UTF8
                 Add-SmartM365AdGeneratedCsvPath -Path $duplicateSmtpCsv
                 $smtpDuplicateCount = @($smtpMap.Keys | Where-Object { $smtpMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate SMTP analysis complete. Distinct duplicate addresses: {0}. Affected entries: {1}. Output: {2}" -f $smtpDuplicateCount, $duplicateSmtpRows.Count, $duplicateSmtpCsv)
@@ -2982,15 +3006,48 @@ try {
                     }
                 )
 
-                Assert-SmartM365CsvDataCompleteness -Data $duplicateRemoteRoutingRows -TimestampedPath $duplicateRemoteRoutingCsv -LatestPath $duplicateRemoteRoutingCsv
-                $duplicateRemoteRoutingRows | Add-SmartM365TenantKey | Export-Csv -Path $duplicateRemoteRoutingCsv -NoTypeInformation -Encoding UTF8
+                $duplicateRemoteRoutingColumns = @(
+                    'TargetAddress',
+                    'NormalizedRemoteRoutingAddress',
+                    'RemoteRoutingAddressOccurrenceCount',
+                    'ExpectedRemoteRoutingDomain',
+                    'msExchRemoteRecipientType',
+                    'msExchRecipientTypeDetails',
+                    'UserPrincipalName',
+                    'DomainName',
+                    'DomainNameShort',
+                    'SamAccountName',
+                    'DisplayName',
+                    'Enabled',
+                    'LastLogonDate',
+                    'DistinguishedName'
+                )
+                Write-SmartM365CsvAtomically -Data $duplicateRemoteRoutingRows -Path $duplicateRemoteRoutingCsv -Columns $duplicateRemoteRoutingColumns -Encoding UTF8
                 Add-SmartM365AdGeneratedCsvPath -Path $duplicateRemoteRoutingCsv
                 $remoteRoutingDuplicateCount = @($remoteRoutingMap.Keys | Where-Object { $remoteRoutingMap[$_].Count -gt 1 }).Count
                 WriteLog -Message ("Duplicate remote routing address analysis complete. Distinct duplicate addresses: {0}. Affected accounts: {1}. Output: {2}" -f $remoteRoutingDuplicateCount, $duplicateRemoteRoutingRows.Count, $duplicateRemoteRoutingCsv)
 
                 $remoteRoutingIssueRowsArray = @($remoteRoutingIssueRows.ToArray())
-                Assert-SmartM365CsvDataCompleteness -Data $remoteRoutingIssueRowsArray -TimestampedPath $remoteRoutingIssuesCsv -LatestPath $remoteRoutingIssuesCsv
-                $remoteRoutingIssueRowsArray | Add-SmartM365TenantKey | Export-Csv -Path $remoteRoutingIssuesCsv -NoTypeInformation -Encoding UTF8
+                $remoteRoutingIssueColumns = @(
+                    'IssueType',
+                    'Severity',
+                    'TargetAddress',
+                    'NormalizedTargetAddress',
+                    'ExpectedRemoteRoutingDomain',
+                    'HasMatchingProxyAddress',
+                    'HasExpectedRoutingDomainProxyAddress',
+                    'msExchRemoteRecipientType',
+                    'msExchRecipientTypeDetails',
+                    'UserPrincipalName',
+                    'DomainName',
+                    'DomainNameShort',
+                    'SamAccountName',
+                    'DisplayName',
+                    'Enabled',
+                    'LastLogonDate',
+                    'DistinguishedName'
+                )
+                Write-SmartM365CsvAtomically -Data $remoteRoutingIssueRowsArray -Path $remoteRoutingIssuesCsv -Columns $remoteRoutingIssueColumns -Encoding UTF8
                 Add-SmartM365AdGeneratedCsvPath -Path $remoteRoutingIssuesCsv
                 $remoteRoutingIssueAccountCount = @($remoteRoutingIssueRowsArray | Select-Object -ExpandProperty DistinguishedName -Unique).Count
                 $missingRemoteRoutingAddressCount = @($remoteRoutingIssueRowsArray | Where-Object IssueType -eq 'MissingRemoteRoutingAddress').Count
@@ -3233,10 +3290,15 @@ try {
                 [void]$weeklyRequiredSourceFiles.Add($weeklyInventory.Path)
             }
             if ($EnableDuplicateAnalysis -and $EnableUserInventory) {
-                [void]$weeklySourceFiles.Add($duplicateUpnCsv)
-                [void]$weeklySourceFiles.Add($duplicateSmtpCsv)
-                [void]$weeklySourceFiles.Add($duplicateRemoteRoutingCsv)
-                [void]$weeklySourceFiles.Add($remoteRoutingIssuesCsv)
+                foreach ($weeklyDiagnosticCsv in @(
+                    $duplicateUpnCsv,
+                    $duplicateSmtpCsv,
+                    $duplicateRemoteRoutingCsv,
+                    $remoteRoutingIssuesCsv
+                )) {
+                    [void]$weeklySourceFiles.Add($weeklyDiagnosticCsv)
+                    [void]$weeklyRequiredSourceFiles.Add($weeklyDiagnosticCsv)
+                }
             }
 
             $weeklyHistoryParameters = @{
@@ -3271,7 +3333,12 @@ try {
     Remove-OldFiles -Path $OutputPath -Filter "*.csv" -OlderThanDays 30
     Remove-OldFiles -Path $OutputPath -Filter "*.log" -OlderThanDays 30
 
-    WriteLog -Message ("{0} completed successfully." -f $TaskName)
+    if ([int]$global:SmartM365ErrorCount -gt 0) {
+        WriteLog -Message ("{0} processing completed, but {1} error(s) were recorded. See the execution summary and log for details." -f $TaskName, [int]$global:SmartM365ErrorCount) -Level 'WARNING'
+    }
+    else {
+        WriteLog -Message ("{0} completed successfully." -f $TaskName)
+    }
 }
 catch {
     $globalError = $_

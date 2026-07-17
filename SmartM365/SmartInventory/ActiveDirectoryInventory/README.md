@@ -35,6 +35,8 @@ The notification includes summary counters, SharePoint links, and inline top 50 
 - `AD_Users_DuplicateRemoteRoutingAddress.csv`
 - `AD_Users_RemoteRoutingIssues.csv`
 
+These four diagnostic files are always generated with their canonical header, including when the result contains zero rows. When duplicate analysis is enabled, all four files are required before the weekly snapshot can be marked complete.
+
 Remote routing issues cover:
 
 - missing or invalid `targetAddress`;
