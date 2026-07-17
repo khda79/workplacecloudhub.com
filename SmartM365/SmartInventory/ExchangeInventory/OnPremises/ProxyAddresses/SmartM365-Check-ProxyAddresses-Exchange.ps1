@@ -3,7 +3,7 @@
     Audits and optionally remediates proxy addresses for on-premises Exchange **User & Shared** mailboxes in specified Organizational Units (OUs), or all OUs.
 
 .DESCRIPTION
-    This script checks whether each **UserMailbox** and **SharedMailbox** has a proxy address with the expected domain suffix (e.g., tenant.mail.onmicrosoft.com).
+    This script checks whether each local or remote **UserMailbox** and **SharedMailbox** has a proxy address with the expected domain suffix (e.g., tenant.mail.onmicrosoft.com).
     The expected proxy address local part is derived from the recipient SamAccountName.
     If the expected address is missing and the -AddMissingAddress switch is specified, the script can add the address.
     The script can target multiple OUs via -OrganizationalUnit (string array) or all OUs with -AllOrganizationalUnit.
@@ -59,7 +59,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.15
+1.16
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -367,7 +367,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.15"
+    $ScriptVersion = "1.16"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -465,7 +465,9 @@ $ErrorActionPreference = 'Stop'
         Write-Host "The Exchange PSSnapin '$snapinName' is already loaded."
     }
 
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ImportExcel') -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
+    $requiredExchangeCommands = @('Get-Recipient')
+    if ($AddMissingAddress) { $requiredExchangeCommands += @('Set-Mailbox', 'Set-RemoteMailbox') }
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ImportExcel') -RequiredCommands $requiredExchangeCommands -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
     Import-Module -Name ImportExcel -ErrorAction Stop
     $importExcelModule = Get-Module -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
     WriteLog -Message ("ImportExcel module loaded: version={0}; path={1}" -f $importExcelModule.Version, $importExcelModule.Path)
@@ -476,8 +478,8 @@ $ErrorActionPreference = 'Stop'
         exit 1
     }
 
-    if (-not (Get-Command Get-RemoteMailbox -ErrorAction SilentlyContinue) -and -not (Get-Command Get-Recipient -ErrorAction SilentlyContinue)) {
-        Write-Error "Neither Get-RemoteMailbox nor Get-Recipient are available. Ensure the Exchange Management Tools are installed, or run from the Exchange Management Shell."
+    if (-not (Get-Command Get-Recipient -ErrorAction SilentlyContinue)) {
+        Write-Error "Get-Recipient is unavailable. Ensure the Exchange Management Tools are installed, or run from the Exchange Management Shell."
         Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
         exit 1
     }
@@ -511,19 +513,24 @@ $ErrorActionPreference = 'Stop'
     $addFailedCount         = 0
     $policyEnabledCount     = 0
     $policySkippedCount     = 0
+    $localMailboxCount      = 0
+    $remoteMailboxCount     = 0
 
     # Pre/post remediation counters
     $preMissing             = 0
     $postMissing            = 0
 
     $recipientResultSize = if ($MaxItems -gt 0) { $MaxItems } else { 'Unlimited' }
+    $localRecipientTypes = @('UserMailbox', 'SharedMailbox')
+    $remoteRecipientTypes = @('RemoteUserMailbox', 'RemoteSharedMailbox')
+    $recipientTypes = @($localRecipientTypes + $remoteRecipientTypes)
 
     # Recipient retrieval: either all OUs (no filter) or each OU provided
     if ($AllOrganizationalUnit) {
         try {
             Write-Host "Fetching recipients from ALL Organizational Units..."
             $recipients = Get-Recipient -ResultSize $recipientResultSize `
-                                        -RecipientTypeDetails UserMailbox, SharedMailbox `
+                                        -RecipientTypeDetails $recipientTypes `
                                         -ErrorAction Stop
         } catch {
             Write-Error "Failed to Get-Recipient for ALL OU: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
@@ -537,7 +544,7 @@ $ErrorActionPreference = 'Stop'
                 Write-Host "Fetching recipients from OU: $ou"
                 $recs = Get-Recipient -OrganizationalUnit $ou `
                                       -ResultSize $recipientResultSize `
-                                      -RecipientTypeDetails UserMailbox, SharedMailbox `
+                                      -RecipientTypeDetails $recipientTypes `
                                       -ErrorAction Stop
                 if ($recs) { $allRecipients += $recs }
             } catch {
@@ -569,6 +576,9 @@ $ErrorActionPreference = 'Stop'
         $expectedAddress = ""
         $status          = ""
         $policyWarning   = $false
+        $isRemoteMailbox = ([string]$rec.RecipientTypeDetails) -in $remoteRecipientTypes
+        $mailboxLocation = if ($isRemoteMailbox) { 'Remote' } else { 'OnPremises' }
+        if ($isRemoteMailbox) { $remoteMailboxCount++ } else { $localMailboxCount++ }
 
         # Track Email Address Policy status without flooding the console.
         if ($rec.EmailAddressPolicyEnabled -eq $true) {
@@ -610,7 +620,12 @@ $ErrorActionPreference = 'Stop'
                             }
 
                             if ($PSCmdlet.ShouldProcess($rec.Identity, "Add proxy address $expectedAddress")) {
-                                Set-Mailbox @params
+                                if ($isRemoteMailbox) {
+                                    Set-RemoteMailbox @params
+                                }
+                                else {
+                                    Set-Mailbox @params
+                                }
                                 Write-Host "apply $expectedAddress for $email"
                                 $addedCount++
                                 $status = "Added"
@@ -619,7 +634,8 @@ $ErrorActionPreference = 'Stop'
                                     Identity       = $rec.Identity
                                     SamAccountName = $samAccountName
                                     DisplayName    = $rec.DisplayName
-                                    RecipientType  = $rec.RecipientTypeDetails
+                                    RecipientType   = $rec.RecipientTypeDetails
+                                    MailboxLocation = $mailboxLocation
                                     AddedProxy     = $expectedAddress
                                     PrimarySmtp    = $email
                                     When           = (Get-Date)
@@ -655,6 +671,7 @@ $ErrorActionPreference = 'Stop'
             SamAccountName            = $samAccountName
             DisplayName               = $rec.DisplayName
             RecipientType             = $rec.RecipientTypeDetails
+            MailboxLocation            = $mailboxLocation
             PrimaryAddress            = $email
             ExpectedAddress           = $expectedAddress
             Status                    = $status
@@ -677,6 +694,8 @@ $ErrorActionPreference = 'Stop'
 
     $summary = @(
         [PSCustomObject]@{ Summary = "Total recipients processed";            Count = $results.Count },
+        [PSCustomObject]@{ Summary = "On-premises mailboxes processed";        Count = $localMailboxCount },
+        [PSCustomObject]@{ Summary = "Remote mailboxes processed";             Count = $remoteMailboxCount },
         [PSCustomObject]@{ Summary = "With expected address present";         Count = $okCount },
         [PSCustomObject]@{ Summary = "With expected address missing";         Count = $missingCount },
         [PSCustomObject]@{ Summary = "Pre-remediation missing";               Count = $preMissing },
@@ -696,7 +715,7 @@ $ErrorActionPreference = 'Stop'
             Path          = $detailPublish.TimestampedPath
             WorksheetName = 'Check'
             TableName     = 'ProxyAddressesCheck'
-            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','PrimaryAddress','ExpectedAddress','Status','EmailAddressPolicyEnabled','PolicyWarning')
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','ExpectedAddress','Status','EmailAddressPolicyEnabled','PolicyWarning')
         }
         [pscustomobject]@{
             Path          = $summaryPublish.TimestampedPath
@@ -708,7 +727,7 @@ $ErrorActionPreference = 'Stop'
             Path          = if ($addedPublish) { $addedPublish.TimestampedPath } else { $null }
             WorksheetName = 'Added'
             TableName     = 'ProxyAddressesAdded'
-            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','AddedProxy','PrimarySmtp','When')
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','MailboxLocation','AddedProxy','PrimarySmtp','When')
         }
     )
     New-ProxyAddressesWorkbook -CsvFiles $workbookCsvFiles -Path $outWorkbook | Out-Null
@@ -771,6 +790,8 @@ try {
         $totalCount = [int](($summary | Where-Object { $_.Summary -eq 'Total recipients processed' } | Select-Object -First 1).Count)
         $presentCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address present' } | Select-Object -First 1).Count)
         $missingCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address missing' } | Select-Object -First 1).Count)
+        $localMailboxCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'On-premises mailboxes processed' } | Select-Object -First 1).Count)
+        $remoteMailboxCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote mailboxes processed' } | Select-Object -First 1).Count)
         $noSamAccountNameCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no SamAccountName' } | Select-Object -First 1).Count)
         $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
         $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
@@ -779,6 +800,8 @@ try {
 
         $summaryRowsForEmail = @(
             [pscustomobject]@{ Label = 'Total recipients processed'; Value = $totalCount }
+            [pscustomobject]@{ Label = 'On-premises mailboxes'; Value = $localMailboxCountForMail }
+            [pscustomobject]@{ Label = 'Remote mailboxes'; Value = $remoteMailboxCountForMail }
             [pscustomobject]@{ Label = 'With expected address present'; Value = $presentCount }
             [pscustomobject]@{ Label = 'With expected address missing'; Value = $missingCount }
             [pscustomobject]@{ Label = 'With no SamAccountName'; Value = $noSamAccountNameCountForMail }
