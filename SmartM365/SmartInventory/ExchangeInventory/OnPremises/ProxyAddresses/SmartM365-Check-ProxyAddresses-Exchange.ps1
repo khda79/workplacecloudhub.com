@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.21
+1.22
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -325,10 +325,11 @@ function New-ProxyAddressesWorkbook {
         $exportParameters = @{
             Path          = $Path
             WorksheetName = [string]$csv.WorksheetName
-            AutoSize      = $true
-            FreezeTopRow  = $true
-            BoldTopRow    = $true
-            AutoFilter    = $true
+            AutoSize              = $true
+            FreezeTopRow          = $true
+            BoldTopRow            = $true
+            AutoFilter            = $true
+            NoHyperLinkConversion = '*'
         }
 
         if (-not $isEmpty) {
@@ -486,7 +487,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.21"
+    $ScriptVersion = "1.22"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
