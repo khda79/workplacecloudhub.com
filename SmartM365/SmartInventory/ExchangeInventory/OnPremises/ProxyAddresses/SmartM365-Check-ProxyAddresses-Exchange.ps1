@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-    Audits and optionally remediates proxy addresses for on-premises Exchange **User & Shared** mailboxes in specified Organizational Units (OUs), or all OUs.
+    Audits and optionally remediates proxy addresses for local and remote Exchange user/shared mailboxes in specified Organizational Units (OUs), or all OUs.
 
 .DESCRIPTION
-    This script checks whether each local or remote **UserMailbox** and **SharedMailbox** has a proxy address with the expected domain suffix (e.g., tenant.mail.onmicrosoft.com).
-    The expected proxy address local part is derived from the recipient SamAccountName.
+    This script checks whether each local or remote UserMailbox and SharedMailbox has its expected proxy address.
+    Local mailbox addresses are derived from the Exchange Alias. Remote mailboxes use their existing RemoteRoutingAddress first and fall back to Alias plus ExpectedSuffix only when no usable routing address exists.
+    Before remediation, the expected address is checked against every mail-enabled Exchange recipient in the forest.
     If the expected address is missing and the -AddMissingAddress switch is specified, the script can add the address.
     The script can target multiple OUs via -OrganizationalUnit (string array) or all OUs with -AllOrganizationalUnit.
     It generates detailed, summary, and remediation CSV reports, groups them into a single Excel workbook, and maintains logs.
@@ -18,7 +19,7 @@
     If specified, the script ignores OU filtering and fetches all User/Shared mailboxes in the forest.
 
 .PARAMETER ExpectedSuffix
-    The expected domain suffix for proxy addresses (default: "tenant.mail.onmicrosoft.com").
+    The expected domain suffix used with Alias for local mailboxes and as the remote mailbox fallback (default: "tenant.mail.onmicrosoft.com").
 
 .PARAMETER AddMissingAddress
     If specified, missing proxy addresses will be added. Recipients managed by an email address policy are reported but never modified.
@@ -59,7 +60,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.17
+1.18
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -334,6 +335,53 @@ function New-ProxyAddressesWorkbook {
     return (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName
 }
 
+function Get-RecipientObjectKey {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory = $true)]$Recipient)
+
+    $guid = ([string]$Recipient.Guid).Trim()
+    if ($guid -and $guid -ne [guid]::Empty.ToString()) {
+        return ('guid:{0}' -f $guid.ToLowerInvariant())
+    }
+
+    $distinguishedName = ([string]$Recipient.DistinguishedName).Trim()
+    if ($distinguishedName) {
+        return ('dn:{0}' -f $distinguishedName.ToLowerInvariant())
+    }
+
+    return ('identity:{0}' -f ([string]$Recipient.Identity).Trim().ToLowerInvariant())
+}
+
+function ConvertTo-SmtpProxyAddress {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return '' }
+    $address = ([string]$Value).Trim() -replace '(?i)^smtp:', ''
+    if ($address -notmatch '^[^@\s]+@[^@\s]+$') { return '' }
+    return ('smtp:{0}' -f $address.ToLowerInvariant())
+}
+
+function Test-SmtpAddressSuffix {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [AllowEmptyString()][string]$ProxyAddress,
+        [AllowEmptyString()][string]$Suffix
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ProxyAddress) -or [string]::IsNullOrWhiteSpace($Suffix)) {
+        return $false
+    }
+
+    $address = $ProxyAddress -replace '(?i)^smtp:', ''
+    $atIndex = $address.LastIndexOf('@')
+    if ($atIndex -lt 1 -or $atIndex -eq ($address.Length - 1)) { return $false }
+    return $address.Substring($atIndex + 1).TrimEnd('.') -ieq $Suffix.Trim().TrimStart('@').TrimEnd('.')
+}
+
 $ScriptLocalConfig = Get-ScriptLocalConfig
 
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
@@ -367,7 +415,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.17"
+    $ScriptVersion = "1.18"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -465,7 +513,7 @@ $ErrorActionPreference = 'Stop'
         Write-Host "The Exchange PSSnapin '$snapinName' is already loaded."
     }
 
-    $requiredExchangeCommands = @('Get-Recipient')
+    $requiredExchangeCommands = @('Get-Recipient', 'Get-RemoteMailbox')
     if ($AddMissingAddress) { $requiredExchangeCommands += @('Set-Mailbox', 'Set-RemoteMailbox') }
     Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ImportExcel') -RequiredCommands $requiredExchangeCommands -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
     Import-Module -Name ImportExcel -ErrorAction Stop
@@ -508,14 +556,20 @@ $ErrorActionPreference = 'Stop'
     $okCount                = 0
     $missingCount           = 0
     $noPrimaryCount         = 0
-    $noSamAccountNameCount  = 0
+    $noAliasCount           = 0
+    $noExpectedAddressCount = 0
     $addedCount             = 0
     $addFailedCount         = 0
     $policyEnabledCount     = 0
     $policySkippedCount     = 0
     $localMailboxCount      = 0
     $remoteMailboxCount     = 0
+    $remoteRoutingAddressCount = 0
+    $remoteAliasFallbackCount = 0
+    $remoteRoutingSuffixMismatchCount = 0
+    $remoteMailboxLookupMissCount = 0
     $duplicateExpectedMissingCount = 0
+    $addressAlreadyAssignedMissingCount = 0
 
     # Pre/post remediation counters
     $preMissing             = 0
@@ -525,21 +579,24 @@ $ErrorActionPreference = 'Stop'
     $localRecipientTypes = @('UserMailbox', 'SharedMailbox')
     $remoteRecipientTypes = @('RemoteUserMailbox', 'RemoteSharedMailbox')
     $recipientTypes = @($localRecipientTypes + $remoteRecipientTypes)
+    $allMailEnabledRecipients = @()
 
-    # Recipient retrieval: either all OUs (no filter) or each OU provided
+    # Retrieve the forest-wide recipient set once when possible. It is also used to
+    # detect an expected SMTP address already assigned to any mail-enabled object.
     if ($AllOrganizationalUnit) {
         try {
-            Write-Host "Fetching recipients from ALL Organizational Units..."
-            $recipients = Get-Recipient -ResultSize $recipientResultSize `
-                                        -RecipientTypeDetails $recipientTypes `
-                                        -ErrorAction Stop
-        } catch {
+            Write-Host "Fetching all mail-enabled recipients from the entire forest..."
+            $allMailEnabledRecipients = @(Get-Recipient -ResultSize Unlimited -ErrorAction Stop)
+            $recipients = @($allMailEnabledRecipients | Where-Object { ([string]$_.RecipientTypeDetails) -in $recipientTypes })
+        }
+        catch {
             Write-Error "Failed to Get-Recipient for ALL OU: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
             Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
             throw
         }
-    } else {
-        $allRecipients = @()
+    }
+    else {
+        $scopedRecipients = @()
         foreach ($ou in $OrganizationalUnit) {
             try {
                 Write-Host "Fetching recipients from OU: $ou"
@@ -547,34 +604,167 @@ $ErrorActionPreference = 'Stop'
                                       -ResultSize $recipientResultSize `
                                       -RecipientTypeDetails $recipientTypes `
                                       -ErrorAction Stop
-                if ($recs) { $allRecipients += $recs }
-            } catch {
+                if ($recs) { $scopedRecipients += $recs }
+            }
+            catch {
                 Write-Warning "Get-Recipient failed for OU '$ou' : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
             }
         }
-        # Deduplicate by Guid
-        $recipients = $allRecipients | Sort-Object -Property Guid -Unique
+        $recipients = @($scopedRecipients | Sort-Object -Property Guid -Unique)
+
+        try {
+            Write-Host "Fetching all mail-enabled recipients for forest-wide SMTP uniqueness checks..."
+            $allMailEnabledRecipients = @(Get-Recipient -ResultSize Unlimited -ErrorAction Stop)
+        }
+        catch {
+            Write-Error "Failed to retrieve forest-wide recipients for SMTP uniqueness checks: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+            throw
+        }
     }
+
     if ($MaxItems -gt 0) {
         $preMaxItemsRecipientCount = @($recipients).Count
         $recipients = @($recipients | Sort-Object PrimarySmtpAddress,Name | Select-Object -First $MaxItems)
-        WriteLog -Message ("MaxItems enabled: restricted recipients from {0} to {1}." -f $preMaxItemsRecipientCount, @($recipients).Count) -Level 'WARNING'
+        WriteLog -Message ("MaxItems enabled: restricted recipients from {0} to {1}; forest-wide conflict checks remain unlimited." -f $preMaxItemsRecipientCount, @($recipients).Count) -Level 'WARNING'
     }
 
-    $total   = $recipients.Count
+    $total   = @($recipients).Count
     $counter = 0
     Write-Host "User/Shared mailboxes retrieved: $total"
+    Write-Host "Mail-enabled recipients indexed for SMTP conflicts: $(@($allMailEnabledRecipients).Count)"
+
+    # Build one forest-wide SMTP owner index. The nested owner map deduplicates
+    # differently-cased copies of the same proxy on the same recipient.
+    $smtpAddressOwners = @{}
+    foreach ($recipientForAddressIndex in $allMailEnabledRecipients) {
+        $ownerKey = Get-RecipientObjectKey -Recipient $recipientForAddressIndex
+        $ownerDescription = '{0}:{1}' -f ([string]$recipientForAddressIndex.RecipientTypeDetails), ([string]$recipientForAddressIndex.Identity)
+        foreach ($proxyAddress in @($recipientForAddressIndex.EmailAddresses)) {
+            $normalizedProxyAddress = ConvertTo-SmtpProxyAddress -Value $proxyAddress
+            if (-not $normalizedProxyAddress) { continue }
+            if (-not $smtpAddressOwners.ContainsKey($normalizedProxyAddress)) {
+                $smtpAddressOwners[$normalizedProxyAddress] = @{}
+            }
+            $smtpAddressOwners[$normalizedProxyAddress][$ownerKey] = $ownerDescription
+        }
+    }
+
+    # Retrieve all remote mailbox routing attributes in one Exchange call, then
+    # resolve target objects locally by GUID, DN, or Alias.
+    $remoteMailboxByGuid = @{}
+    $remoteMailboxByDistinguishedName = @{}
+    $remoteMailboxByAlias = @{}
+    if (@($recipients | Where-Object { ([string]$_.RecipientTypeDetails) -in $remoteRecipientTypes }).Count -gt 0) {
+        Write-Host "Fetching RemoteMailbox routing attributes in one batch..."
+        $remoteMailboxes = @(Get-RemoteMailbox -ResultSize Unlimited -ErrorAction Stop)
+        foreach ($remoteMailbox in $remoteMailboxes) {
+            $remoteGuid = ([string]$remoteMailbox.Guid).Trim().ToLowerInvariant()
+            if ($remoteGuid -and $remoteGuid -ne [guid]::Empty.ToString()) { $remoteMailboxByGuid[$remoteGuid] = $remoteMailbox }
+            $remoteDn = ([string]$remoteMailbox.DistinguishedName).Trim().ToLowerInvariant()
+            if ($remoteDn) { $remoteMailboxByDistinguishedName[$remoteDn] = $remoteMailbox }
+            $remoteAlias = ([string]$remoteMailbox.Alias).Trim().ToLowerInvariant()
+            if ($remoteAlias) { $remoteMailboxByAlias[$remoteAlias] = $remoteMailbox }
+        }
+        Write-Host "RemoteMailbox routing objects retrieved: $($remoteMailboxes.Count)"
+    }
+
+    # Resolve the expected address once per target. RemoteRoutingAddress is the
+    # authoritative value for remote mailboxes; Alias@ExpectedSuffix is fallback.
+    $recipientPlans = New-Object System.Collections.Generic.List[object]
+    foreach ($rec in $recipients) {
+        $isRemoteMailbox = ([string]$rec.RecipientTypeDetails) -in $remoteRecipientTypes
+        $alias = ([string]$rec.Alias).Trim()
+        $samAccountName = ([string]$rec.SamAccountName).Trim()
+        $recipientKey = Get-RecipientObjectKey -Recipient $rec
+        $remoteMailbox = $null
+        $remoteRoutingAddressRaw = ''
+        $remoteRoutingAddress = ''
+        $expectedAddress = ''
+        $expectedAddressSource = ''
+        $routingWarning = ''
+        $remoteRoutingAddressSuffixMatchesExpected = $null
+
+        if ([string]::IsNullOrWhiteSpace($alias)) { $noAliasCount++ }
+
+        if ($isRemoteMailbox) {
+            $remoteGuid = ([string]$rec.Guid).Trim().ToLowerInvariant()
+            $remoteDn = ([string]$rec.DistinguishedName).Trim().ToLowerInvariant()
+            $remoteAliasKey = $alias.ToLowerInvariant()
+            if ($remoteGuid -and $remoteMailboxByGuid.ContainsKey($remoteGuid)) {
+                $remoteMailbox = $remoteMailboxByGuid[$remoteGuid]
+            }
+            elseif ($remoteDn -and $remoteMailboxByDistinguishedName.ContainsKey($remoteDn)) {
+                $remoteMailbox = $remoteMailboxByDistinguishedName[$remoteDn]
+            }
+            elseif ($remoteAliasKey -and $remoteMailboxByAlias.ContainsKey($remoteAliasKey)) {
+                $remoteMailbox = $remoteMailboxByAlias[$remoteAliasKey]
+            }
+
+            if ($null -ne $remoteMailbox) {
+                $remoteRoutingAddressRaw = ([string]$remoteMailbox.RemoteRoutingAddress).Trim()
+                $remoteRoutingAddress = ConvertTo-SmtpProxyAddress -Value $remoteMailbox.RemoteRoutingAddress
+            }
+            else {
+                $remoteMailboxLookupMissCount++
+                $routingWarning = 'RemoteMailbox lookup failed; Alias fallback used when available.'
+            }
+
+            if ($remoteRoutingAddress) {
+                $expectedAddress = $remoteRoutingAddress
+                $expectedAddressSource = 'RemoteRoutingAddress'
+                $remoteRoutingAddressCount++
+                $remoteRoutingAddressSuffixMatchesExpected = Test-SmtpAddressSuffix -ProxyAddress $remoteRoutingAddress -Suffix $ExpectedSuffix
+                if (-not $remoteRoutingAddressSuffixMatchesExpected) {
+                    $remoteRoutingSuffixMismatchCount++
+                    $routingWarning = 'RemoteRoutingAddress suffix differs from ExpectedSuffix.'
+                }
+            }
+            elseif ($alias) {
+                $expectedAddress = ConvertTo-SmtpProxyAddress -Value ("{0}@{1}" -f $alias, $ExpectedSuffix)
+                $expectedAddressSource = 'AliasFallback'
+                $remoteAliasFallbackCount++
+                if ($remoteRoutingAddressRaw) {
+                    $routingWarning = 'RemoteRoutingAddress is invalid; Alias fallback used.'
+                }
+                elseif (-not $routingWarning) {
+                    $routingWarning = 'RemoteRoutingAddress is empty; Alias fallback used.'
+                }
+            }
+        }
+        elseif ($alias) {
+            $expectedAddress = ConvertTo-SmtpProxyAddress -Value ("{0}@{1}" -f $alias, $ExpectedSuffix)
+            $expectedAddressSource = 'Alias'
+        }
+
+        if (-not $expectedAddress) {
+            $expectedAddressSource = 'Unavailable'
+            $noExpectedAddressCount++
+        }
+
+        $recipientPlans.Add([pscustomobject]@{
+            Recipient                                = $rec
+            RecipientKey                             = $recipientKey
+            Alias                                    = $alias
+            SamAccountName                           = $samAccountName
+            IsRemoteMailbox                          = $isRemoteMailbox
+            MailboxLocation                          = if ($isRemoteMailbox) { 'Remote' } else { 'OnPremises' }
+            RemoteRoutingAddress                     = $remoteRoutingAddress
+            RemoteRoutingAddressRaw                  = $remoteRoutingAddressRaw
+            RemoteRoutingAddressSuffixMatchesExpected = $remoteRoutingAddressSuffixMatchesExpected
+            ExpectedAddress                          = $expectedAddress
+            ExpectedAddressSource                    = $expectedAddressSource
+            RoutingWarning                           = $routingWarning
+        })
+    }
 
     $expectedAddressCounts = @{}
-    foreach ($recipientForConflictCheck in $recipients) {
-        $conflictSamAccountName = ([string]$recipientForConflictCheck.SamAccountName).Trim()
-        if ([string]::IsNullOrWhiteSpace($conflictSamAccountName)) { continue }
-        $conflictExpectedAddress = "smtp:{0}@{1}" -f $conflictSamAccountName, $ExpectedSuffix
-        if ($expectedAddressCounts.ContainsKey($conflictExpectedAddress)) {
-            $expectedAddressCounts[$conflictExpectedAddress]++
+    foreach ($plan in $recipientPlans) {
+        if (-not $plan.ExpectedAddress) { continue }
+        if ($expectedAddressCounts.ContainsKey($plan.ExpectedAddress)) {
+            $expectedAddressCounts[$plan.ExpectedAddress]++
         }
         else {
-            $expectedAddressCounts[$conflictExpectedAddress] = 1
+            $expectedAddressCounts[$plan.ExpectedAddress] = 1
         }
     }
 
@@ -590,22 +780,38 @@ $ErrorActionPreference = 'Stop'
         WriteLog -Message ("Duplicate expected proxy addresses detected: groups={0}; recipients={1}. Conflicting addresses are blocked from remediation." -f $duplicateExpectedAddressGroupCount, $duplicateExpectedRecipientCount) -Level 'WARNING'
     }
 
-    foreach ($rec in $recipients) {
+    $addressAlreadyAssignedConflictAddresses = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($plan in $recipientPlans) {
         $counter++
-        Write-Progress -Activity "Checking EmailAddresses..." -Status "$counter / $total" -PercentComplete (($counter / $total) * 100)
+        Write-Progress -Activity "Checking EmailAddresses..." -Status "$counter / $total" -PercentComplete (($counter / [Math]::Max($total, 1)) * 100)
 
+        $rec = $plan.Recipient
         $primary = $null
         try { $primary = $rec.PrimarySmtpAddress } catch { $primary = $null }
 
-        $email           = ""
-        $samAccountName  = ([string]$rec.SamAccountName).Trim()
-        $expectedAddress = ""
-        $status          = ""
-        $policyWarning   = $false
-        $isExpectedAddressConflict = $false
-        $isRemoteMailbox = ([string]$rec.RecipientTypeDetails) -in $remoteRecipientTypes
-        $mailboxLocation = if ($isRemoteMailbox) { 'Remote' } else { 'OnPremises' }
-        if ($isRemoteMailbox) { $remoteMailboxCount++ } else { $localMailboxCount++ }
+        $email = ''
+        $status = ''
+        $policyWarning = $false
+        $expectedAddress = [string]$plan.ExpectedAddress
+        $isDuplicateExpectedAddress = $expectedAddress -and $duplicateExpectedAddresses.Contains($expectedAddress)
+        $conflictOwners = @()
+        if ($expectedAddress -and $smtpAddressOwners.ContainsKey($expectedAddress)) {
+            foreach ($ownerEntry in $smtpAddressOwners[$expectedAddress].GetEnumerator()) {
+                if ([string]$ownerEntry.Key -ne [string]$plan.RecipientKey) {
+                    $conflictOwners += [string]$ownerEntry.Value
+                }
+            }
+        }
+        $isAddressAlreadyAssigned = $conflictOwners.Count -gt 0
+        $isExpectedAddressConflict = $isDuplicateExpectedAddress -or $isAddressAlreadyAssigned
+        $conflictReason = @()
+        if ($isDuplicateExpectedAddress) { $conflictReason += 'DuplicateExpectedAddress' }
+        if ($isAddressAlreadyAssigned) {
+            $conflictReason += 'AddressAlreadyAssigned'
+            [void]$addressAlreadyAssignedConflictAddresses.Add($expectedAddress)
+        }
+
+        if ($plan.IsRemoteMailbox) { $remoteMailboxCount++ } else { $localMailboxCount++ }
 
         # Track Email Address Policy status without flooding the console.
         if ($rec.EmailAddressPolicyEnabled -eq $true) {
@@ -616,18 +822,15 @@ $ErrorActionPreference = 'Stop'
         if ($primary -and $primary.ToString() -match '.+@.+') {
             $email = $primary.ToString()
 
-            if ([string]::IsNullOrWhiteSpace($samAccountName)) {
-                $status = "No SamAccountName"
-                $noSamAccountNameCount++
+            if (-not $expectedAddress) {
+                $status = 'No expected address'
             }
             else {
-                $expectedAddress = "smtp:{0}@{1}" -f $samAccountName, $ExpectedSuffix
-                $isExpectedAddressConflict = $duplicateExpectedAddresses.Contains($expectedAddress)
-                $addresses = @($rec.EmailAddresses) | ForEach-Object { $_.ToString() }
+                $addresses = @($rec.EmailAddresses) | ForEach-Object { ConvertTo-SmtpProxyAddress -Value $_ }
                 $exists = $addresses | Where-Object { $_ -ieq $expectedAddress }
 
                 if ($exists) {
-                    $status = "OK"
+                    $status = 'OK'
                     $okCount++
                 }
                 else {
@@ -635,15 +838,24 @@ $ErrorActionPreference = 'Stop'
                     $missingCount++
 
                     if ($isExpectedAddressConflict) {
-                        $status = "Missing -> DuplicateExpectedAddress"
-                        $duplicateExpectedMissingCount++
+                        if ($isDuplicateExpectedAddress) { $duplicateExpectedMissingCount++ }
+                        if ($isAddressAlreadyAssigned) { $addressAlreadyAssignedMissingCount++ }
+                        if ($isDuplicateExpectedAddress -and $isAddressAlreadyAssigned) {
+                            $status = 'Missing -> AddressConflict'
+                        }
+                        elseif ($isDuplicateExpectedAddress) {
+                            $status = 'Missing -> DuplicateExpectedAddress'
+                        }
+                        else {
+                            $status = 'Missing -> AddressAlreadyAssigned'
+                        }
                     }
                     elseif ($AddMissingAddress -and $rec.EmailAddressPolicyEnabled -eq $true) {
-                        $status = "Missing -> SkippedPolicyEnabled"
+                        $status = 'Missing -> SkippedPolicyEnabled'
                         $policySkippedCount++
                     }
                     elseif ($AddMissingAddress) {
-                        $status = "Missing -> WillAdd"
+                        $status = 'Missing -> WillAdd'
                         try {
                             $params = @{
                                 Identity       = $rec.Identity
@@ -652,7 +864,7 @@ $ErrorActionPreference = 'Stop'
                             }
 
                             if ($PSCmdlet.ShouldProcess($rec.Identity, "Add proxy address $expectedAddress")) {
-                                if ($isRemoteMailbox) {
+                                if ($plan.IsRemoteMailbox) {
                                     Set-RemoteMailbox @params
                                 }
                                 else {
@@ -660,31 +872,34 @@ $ErrorActionPreference = 'Stop'
                                 }
                                 Write-Host "apply $expectedAddress for $email"
                                 $addedCount++
-                                $status = "Added"
+                                $status = 'Added'
 
                                 $addedOperations.Add([PSCustomObject]@{
-                                    Identity       = $rec.Identity
-                                    SamAccountName = $samAccountName
-                                    DisplayName    = $rec.DisplayName
-                                    RecipientType   = $rec.RecipientTypeDetails
-                                    MailboxLocation = $mailboxLocation
-                                    AddedProxy     = $expectedAddress
-                                    PrimarySmtp    = $email
-                                    When           = (Get-Date)
+                                    Identity             = $rec.Identity
+                                    Alias                = $plan.Alias
+                                    SamAccountName       = $plan.SamAccountName
+                                    DisplayName          = $rec.DisplayName
+                                    RecipientType        = $rec.RecipientTypeDetails
+                                    MailboxLocation      = $plan.MailboxLocation
+                                    RemoteRoutingAddress = $plan.RemoteRoutingAddress
+                                    ExpectedAddressSource = $plan.ExpectedAddressSource
+                                    AddedProxy           = $expectedAddress
+                                    PrimarySmtp          = $email
+                                    When                 = (Get-Date)
                                 })
                             }
                             else {
-                                $status = "Missing -> Skipped by WhatIf"
+                                $status = 'Missing -> Skipped by WhatIf'
                             }
                         }
                         catch {
                             $addFailedCount++
-                            $status = "Missing -> AddFailed"
+                            $status = 'Missing -> AddFailed'
                             Write-Warning "[$($rec.Identity)] Failed to add $expectedAddress : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
                         }
                     }
                     else {
-                        $status = "Missing"
+                        $status = 'Missing'
                     }
 
                     if ($status -like 'Missing*') {
@@ -694,22 +909,29 @@ $ErrorActionPreference = 'Stop'
             }
         }
         else {
-            $status = "No primary address"
+            $status = 'No primary address'
             $noPrimaryCount++
         }
 
         $results.Add([PSCustomObject]@{
-            Identity                  = $rec.Identity
-            SamAccountName            = $samAccountName
-            DisplayName               = $rec.DisplayName
-            RecipientType             = $rec.RecipientTypeDetails
-            MailboxLocation            = $mailboxLocation
-            PrimaryAddress            = $email
-            ExpectedAddress           = $expectedAddress
-            ExpectedAddressConflict   = $isExpectedAddressConflict
-            Status                    = $status
-            EmailAddressPolicyEnabled = $rec.EmailAddressPolicyEnabled
-            PolicyWarning             = $policyWarning
+            Identity                                  = $rec.Identity
+            Alias                                     = $plan.Alias
+            SamAccountName                            = $plan.SamAccountName
+            DisplayName                               = $rec.DisplayName
+            RecipientType                             = $rec.RecipientTypeDetails
+            MailboxLocation                           = $plan.MailboxLocation
+            PrimaryAddress                            = $email
+            RemoteRoutingAddress                      = $plan.RemoteRoutingAddress
+            RemoteRoutingAddressSuffixMatchesExpected = $plan.RemoteRoutingAddressSuffixMatchesExpected
+            ExpectedAddress                           = $expectedAddress
+            ExpectedAddressSource                     = $plan.ExpectedAddressSource
+            ExpectedAddressConflict                   = $isExpectedAddressConflict
+            ExpectedAddressConflictReason             = ($conflictReason -join ';')
+            ExpectedAddressConflictOwners             = ($conflictOwners -join '; ')
+            RoutingWarning                            = $plan.RoutingWarning
+            Status                                    = $status
+            EmailAddressPolicyEnabled                 = $rec.EmailAddressPolicyEnabled
+            PolicyWarning                             = $policyWarning
         })
     }
     if ($policyEnabledCount -gt 0) {
@@ -717,6 +939,12 @@ $ErrorActionPreference = 'Stop'
     }
     if ($duplicateExpectedAddressGroupCount -gt 0) {
         Write-Host "Duplicate expected proxy addresses: $duplicateExpectedAddressGroupCount group(s), $duplicateExpectedRecipientCount recipient(s), $duplicateExpectedMissingCount missing address(es) blocked." -ForegroundColor Yellow
+    }
+    if ($addressAlreadyAssignedConflictAddresses.Count -gt 0) {
+        Write-Host "Expected addresses already assigned to another Exchange recipient: $($addressAlreadyAssignedConflictAddresses.Count) address(es), $addressAlreadyAssignedMissingCount missing address(es) blocked." -ForegroundColor Yellow
+    }
+    if ($remoteRoutingSuffixMismatchCount -gt 0) {
+        Write-Host "RemoteRoutingAddress suffix mismatches: $remoteRoutingSuffixMismatchCount. Review RoutingWarning in the detail CSV." -ForegroundColor Yellow
     }
 
     $publishResults = @()
@@ -729,22 +957,29 @@ $ErrorActionPreference = 'Stop'
     }
 
     $summary = @(
-        [PSCustomObject]@{ Summary = "Total recipients processed";            Count = $results.Count },
-        [PSCustomObject]@{ Summary = "On-premises mailboxes processed";        Count = $localMailboxCount },
-        [PSCustomObject]@{ Summary = "Remote mailboxes processed";             Count = $remoteMailboxCount },
-        [PSCustomObject]@{ Summary = "With expected address present";         Count = $okCount },
-        [PSCustomObject]@{ Summary = "With expected address missing";         Count = $missingCount },
-        [PSCustomObject]@{ Summary = "Pre-remediation missing";               Count = $preMissing },
-        [PSCustomObject]@{ Summary = "Post-remediation still missing";        Count = $postMissing },
-        [PSCustomObject]@{ Summary = "With no primary address";               Count = $noPrimaryCount },
-        [PSCustomObject]@{ Summary = "With no SamAccountName";                Count = $noSamAccountNameCount },
-        [PSCustomObject]@{ Summary = "With email address policy enabled";     Count = $policyEnabledCount },
-        [PSCustomObject]@{ Summary = "Additions skipped by email policy";     Count = $policySkippedCount },
-        [PSCustomObject]@{ Summary = "Duplicate expected address groups";       Count = $duplicateExpectedAddressGroupCount },
-        [PSCustomObject]@{ Summary = "Recipients sharing expected address";     Count = $duplicateExpectedRecipientCount },
-        [PSCustomObject]@{ Summary = "Missing addresses blocked by duplicate"; Count = $duplicateExpectedMissingCount },
-        [PSCustomObject]@{ Summary = "Addresses successfully added";          Count = $addedCount },
-        [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount }
+        [PSCustomObject]@{ Summary = "Total recipients processed";                         Count = $results.Count },
+        [PSCustomObject]@{ Summary = "On-premises mailboxes processed";                    Count = $localMailboxCount },
+        [PSCustomObject]@{ Summary = "Remote mailboxes processed";                         Count = $remoteMailboxCount },
+        [PSCustomObject]@{ Summary = "With expected address present";                      Count = $okCount },
+        [PSCustomObject]@{ Summary = "With expected address missing";                      Count = $missingCount },
+        [PSCustomObject]@{ Summary = "Pre-remediation missing";                            Count = $preMissing },
+        [PSCustomObject]@{ Summary = "Post-remediation still missing";                     Count = $postMissing },
+        [PSCustomObject]@{ Summary = "With no primary address";                            Count = $noPrimaryCount },
+        [PSCustomObject]@{ Summary = "With no Alias";                                      Count = $noAliasCount },
+        [PSCustomObject]@{ Summary = "With no resolvable expected address";                Count = $noExpectedAddressCount },
+        [PSCustomObject]@{ Summary = "RemoteRoutingAddress used";                          Count = $remoteRoutingAddressCount },
+        [PSCustomObject]@{ Summary = "Remote mailboxes using Alias fallback";              Count = $remoteAliasFallbackCount },
+        [PSCustomObject]@{ Summary = "RemoteRoutingAddress suffix mismatches";             Count = $remoteRoutingSuffixMismatchCount },
+        [PSCustomObject]@{ Summary = "RemoteMailbox lookup misses";                        Count = $remoteMailboxLookupMissCount },
+        [PSCustomObject]@{ Summary = "With email address policy enabled";                  Count = $policyEnabledCount },
+        [PSCustomObject]@{ Summary = "Additions skipped by email policy";                  Count = $policySkippedCount },
+        [PSCustomObject]@{ Summary = "Duplicate expected address groups";                  Count = $duplicateExpectedAddressGroupCount },
+        [PSCustomObject]@{ Summary = "Recipients sharing expected address";                Count = $duplicateExpectedRecipientCount },
+        [PSCustomObject]@{ Summary = "Missing addresses blocked by duplicate";             Count = $duplicateExpectedMissingCount },
+        [PSCustomObject]@{ Summary = "Expected addresses assigned to another recipient";   Count = $addressAlreadyAssignedConflictAddresses.Count },
+        [PSCustomObject]@{ Summary = "Missing addresses blocked because already assigned"; Count = $addressAlreadyAssignedMissingCount },
+        [PSCustomObject]@{ Summary = "Addresses successfully added";                       Count = $addedCount },
+        [PSCustomObject]@{ Summary = "Address additions failed";                           Count = $addFailedCount }
     )
     $summaryPublish = Publish-SmartM365Csv -Data @($summary) -TimestampedPath $outSummary -LatestPath $latestSummary
     if ($summaryPublish) { $publishResults += $summaryPublish }
@@ -754,7 +989,7 @@ $ErrorActionPreference = 'Stop'
             Path          = $detailPublish.TimestampedPath
             WorksheetName = 'Check'
             TableName     = 'ProxyAddressesCheck'
-            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','ExpectedAddress','ExpectedAddressConflict','Status','EmailAddressPolicyEnabled','PolicyWarning')
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','Alias','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','RemoteRoutingAddress','RemoteRoutingAddressSuffixMatchesExpected','ExpectedAddress','ExpectedAddressSource','ExpectedAddressConflict','ExpectedAddressConflictReason','ExpectedAddressConflictOwners','RoutingWarning','Status','EmailAddressPolicyEnabled','PolicyWarning')
         }
         [pscustomobject]@{
             Path          = $summaryPublish.TimestampedPath
@@ -766,7 +1001,7 @@ $ErrorActionPreference = 'Stop'
             Path          = if ($addedPublish) { $addedPublish.TimestampedPath } else { $null }
             WorksheetName = 'Added'
             TableName     = 'ProxyAddressesAdded'
-            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','MailboxLocation','AddedProxy','PrimarySmtp','When')
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','Alias','SamAccountName','DisplayName','RecipientType','MailboxLocation','RemoteRoutingAddress','ExpectedAddressSource','AddedProxy','PrimarySmtp','When')
         }
     )
     New-ProxyAddressesWorkbook -CsvFiles $workbookCsvFiles -Path $outWorkbook | Out-Null
@@ -831,13 +1066,20 @@ try {
         $missingCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address missing' } | Select-Object -First 1).Count)
         $localMailboxCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'On-premises mailboxes processed' } | Select-Object -First 1).Count)
         $remoteMailboxCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote mailboxes processed' } | Select-Object -First 1).Count)
-        $noSamAccountNameCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no SamAccountName' } | Select-Object -First 1).Count)
+        $noAliasCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no Alias' } | Select-Object -First 1).Count)
+        $noExpectedAddressCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no resolvable expected address' } | Select-Object -First 1).Count)
+        $remoteRoutingAddressCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteRoutingAddress used' } | Select-Object -First 1).Count)
+        $remoteAliasFallbackCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote mailboxes using Alias fallback' } | Select-Object -First 1).Count)
+        $remoteRoutingSuffixMismatchCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteRoutingAddress suffix mismatches' } | Select-Object -First 1).Count)
+        $remoteMailboxLookupMissCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteMailbox lookup misses' } | Select-Object -First 1).Count)
         $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
         $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
         $policySkippedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Additions skipped by email policy' } | Select-Object -First 1).Count)
         $duplicateExpectedAddressGroupCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Duplicate expected address groups' } | Select-Object -First 1).Count)
         $duplicateExpectedRecipientCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Recipients sharing expected address' } | Select-Object -First 1).Count)
         $duplicateExpectedMissingCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Missing addresses blocked by duplicate' } | Select-Object -First 1).Count)
+        $addressAlreadyAssignedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Expected addresses assigned to another recipient' } | Select-Object -First 1).Count)
+        $addressAlreadyAssignedMissingCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Missing addresses blocked because already assigned' } | Select-Object -First 1).Count)
         $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SendMailMode)) { if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' } } else { $SendMailMode.Trim() }
 
         $summaryRowsForEmail = @(
@@ -846,12 +1088,19 @@ try {
             [pscustomobject]@{ Label = 'Remote mailboxes'; Value = $remoteMailboxCountForMail }
             [pscustomobject]@{ Label = 'With expected address present'; Value = $presentCount }
             [pscustomobject]@{ Label = 'With expected address missing'; Value = $missingCount }
-            [pscustomobject]@{ Label = 'With no SamAccountName'; Value = $noSamAccountNameCountForMail }
+            [pscustomobject]@{ Label = 'With no Alias'; Value = $noAliasCountForMail }
+            [pscustomobject]@{ Label = 'With no resolvable expected address'; Value = $noExpectedAddressCountForMail }
+            [pscustomobject]@{ Label = 'RemoteRoutingAddress used'; Value = $remoteRoutingAddressCountForMail }
+            [pscustomobject]@{ Label = 'Remote mailboxes using Alias fallback'; Value = $remoteAliasFallbackCountForMail }
+            [pscustomobject]@{ Label = 'RemoteRoutingAddress suffix mismatches'; Value = $remoteRoutingSuffixMismatchCountForMail }
+            [pscustomobject]@{ Label = 'RemoteMailbox lookup misses'; Value = $remoteMailboxLookupMissCountForMail }
             [pscustomobject]@{ Label = 'Email address policy enabled'; Value = $policyEnabledCountForMail }
             [pscustomobject]@{ Label = 'Additions skipped by email policy'; Value = $policySkippedCountForMail }
             [pscustomobject]@{ Label = 'Duplicate expected address groups'; Value = $duplicateExpectedAddressGroupCountForMail }
             [pscustomobject]@{ Label = 'Recipients sharing expected address'; Value = $duplicateExpectedRecipientCountForMail }
             [pscustomobject]@{ Label = 'Missing addresses blocked by duplicate'; Value = $duplicateExpectedMissingCountForMail }
+            [pscustomobject]@{ Label = 'Expected addresses assigned elsewhere'; Value = $addressAlreadyAssignedCountForMail }
+            [pscustomobject]@{ Label = 'Missing addresses blocked because assigned'; Value = $addressAlreadyAssignedMissingCountForMail }
             [pscustomobject]@{ Label = 'Addresses added'; Value = $addedCount }
         )
 
@@ -877,13 +1126,13 @@ try {
         $missingPreviewRows = @($results | Where-Object { $_.Status -like 'Missing*' } | Sort-Object Status, DisplayName | Select-Object -First 50)
         if ($missingPreviewRows.Count -gt 0) {
             $missingRowsHtml = foreach ($row in $missingPreviewRows) {
-                "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.DisplayName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.SamAccountName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.PrimaryAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.ExpectedAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(Encode $row.Status)</td></tr>"
+                "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.DisplayName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.Alias)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.PrimaryAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.ExpectedAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(Encode $row.Status)</td></tr>"
             }
             $missingSectionHtml = @"
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
   <tr>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Display name</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">SamAccountName</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Alias</th>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Primary SMTP</th>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Expected proxy</th>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Status</th>
@@ -911,7 +1160,7 @@ try {
 
         $severity = if ($AddMissingAddress -and $addedCount -gt 0) { 'Success' } elseif ($missingCount -gt 0) { 'Warning' } else { 'Success' }
         $actionTitle = if ($missingCount -gt 0) { 'Review required' } else { '' }
-        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Recipients managed by an email address policy and recipients sharing a duplicate expected address are always skipped in write mode.' } else { '' }
+        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Recipients managed by an email address policy, duplicate expected addresses, and addresses already assigned to another mail-enabled recipient are always skipped in write mode.' } else { '' }
         $message = if ($missingCount -gt 0) { 'Exchange on-premises proxy address audit found missing expected proxy addresses.' } else { 'Exchange on-premises proxy address audit completed without missing expected proxy addresses.' }
 
         $body = New-SmartM365EmailBody `
