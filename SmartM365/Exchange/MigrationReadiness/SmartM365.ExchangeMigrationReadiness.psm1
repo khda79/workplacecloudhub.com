@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.1.3'
+$script:SemrVersion = '1.1.4'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ConnectionState = [ordered]@{
@@ -254,6 +254,46 @@ function Connect-SemrOnPremisesExchange {
     return Get-SemrConnectionState
 }
 
+function Initialize-SemrCloudAuthenticationCompatibility {
+    [CmdletBinding()]
+    param()
+
+    if ($PSVersionTable.PSEdition -ne 'Core') {
+        return
+    }
+
+    $graphAuthenticationModule = Get-Module -ListAvailable Microsoft.Graph.Authentication |
+        Sort-Object Version -Descending |
+        Select-Object -First 1
+    if (-not $graphAuthenticationModule) {
+        throw 'Microsoft.Graph.Authentication is required for Live mode.'
+    }
+
+    $dependencyPaths = @(
+        (Join-Path $graphAuthenticationModule.ModuleBase 'Dependencies\Microsoft.IdentityModel.Abstractions.dll'),
+        (Join-Path $graphAuthenticationModule.ModuleBase 'Dependencies\Core\Microsoft.Identity.Client.dll')
+    )
+    foreach ($dependencyPath in $dependencyPaths) {
+        if (-not (Test-Path -LiteralPath $dependencyPath -PathType Leaf)) {
+            throw "Microsoft Graph authentication dependency is missing: $dependencyPath"
+        }
+
+        $requiredAssembly = [System.Reflection.AssemblyName]::GetAssemblyName($dependencyPath)
+        $loadedAssembly = [AppDomain]::CurrentDomain.GetAssemblies() |
+            Where-Object { $_.GetName().Name -eq $requiredAssembly.Name } |
+            Select-Object -First 1
+        if ($loadedAssembly) {
+            $loadedVersion = $loadedAssembly.GetName().Version
+            if ($loadedVersion -lt $requiredAssembly.Version) {
+                throw "Microsoft cloud authentication assembly conflict: $($requiredAssembly.Name) $loadedVersion is already loaded, but Microsoft Graph requires $($requiredAssembly.Version). Restart the application after updating ExchangeOnlineManagement and Microsoft.Graph."
+            }
+            continue
+        }
+
+        Add-Type -Path $dependencyPath -ErrorAction Stop
+    }
+}
+
 function Connect-SemrExchangeOnline {
     [CmdletBinding()]
     param(
@@ -262,6 +302,7 @@ function Connect-SemrExchangeOnline {
         [string]$TenantId = ''
     )
 
+    Initialize-SemrCloudAuthenticationCompatibility
     Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop
     if (Test-SemrCommand -Name 'Disconnect-ExchangeOnline') {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
@@ -2045,8 +2086,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHBfpkcAl7S5Ru
-# 3ckB6Yz35U5PKhxplw7Wq0k09Nvw96CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOOPwqE98+vn5J
+# 9OV1xtyQ+/13K2iYp+cW0n+Ldj8D8KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2179,31 +2220,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFTf6fVi0bnidseT5SkUA9ejPuCRHtmZluYwQDn1iVsaMA0GCSqG
-# SIb3DQEBAQUABIIBgByLPp9wNDdV2xFk3ecC51NBHOSCYm0sXELdGMrq3n87lfXp
-# v0ETR1AY/UIKgTBPdnTcpko+8l11zTCWTeEQSw9mNdSsQhfNahtow0OtpdClkCpA
-# pmoDciijLllI7EHQzVAHyjzBgj/H6OYoKqX0PnzBKkooE8Ix1Y0XoztDxM0J/MpV
-# wE0ws/6hoS1P1df0TOcA/zGhAJLlNZQ3tMamLluh6iJGsiI44AfnsmKwCyABGl1j
-# tBE105V6QqUfQ/v7LE0Y2Vt0AGU9A7ilelDmJtXoMkbNIF157lYwpxMIAczNZrjo
-# DGVvpPX8D1G7sdP0OWd5JQzS18QVpCNuHxFg1WG8VGlfQe6nmexDzTdOv6GzAyKo
-# ZIqLIk5DAITM5GuhoxvlErkRkpgVVGBmA7dawJ26P/AWHW9dPJxY0Zrh9d/szx0O
-# i5MkPq/BeHjEPOQ4qVy5j3kzAG54FIQksfTusn86ksJ5/Mm9n4a0Jg7O0E9UO18n
-# xvEjt00P8LP9OlK2jqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL+Tc5BCGU6uj5iJxVs4t8XeSP8H1kDt86eV8sITbGsjMA0GCSqG
+# SIb3DQEBAQUABIIBgHyJsW8cjb/9w3KqKLAtxP8C6Aq3Y/T3WHB+jTwedzvifN36
+# QtLPOwt7t05zvl/DbDTOdPAwea9xOxCBjrcLvGYUnZkd1+q937NSq4CPxfya5Zq7
+# frHIMnhNK/yk2iTsh3jVIg4rYwjru9njJzXf1M2Ftf4Phz00r+kLFVZ9+U7IW00j
+# R+HRH4XWOYiva4DZ3lNrX526SnZEtc7KcgMgiaZLWHXbCKLJ6MF+UiLPzffbP6iC
+# 8yc2/dzu67MEswNjuWyCF4+lOK/B9bdqv2Hy4wblK9B2UpGnGigePGWtcCQs/iMF
+# VscOcFwe0EMWUSRGAcHDPAUEdKd0bLSiqoRekhGiSKCqNcZOElxariIHpHQo0VXK
+# pNUwmI6Fllkw4IqD7qMrjW4hrP6jQsk4rfCohpONvPQMU2ud6UR8H5QhulkmAbTq
+# TC7201vfu3sh4hawwZWF5UIUKIPHX6dX5NZaRZHXfzUwxXYjxvlFl/MjEh/d0k6l
+# wW5ZOvgF3mF1Psp/PqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjAw
-# MjlaMC8GCSqGSIb3DQEJBDEiBCAY8pImrqa2qED7xG2CEZov5aQuyZTTPiq/IAo7
-# 1gMW+jANBgkqhkiG9w0BAQEFAASCAgAJ87pGudLvwp7rTBIqEL3LwaJL2VoFkmaM
-# FUPkuz1l3rPns8wL5dNQDpmDPTDGFC7i1faOZZb++Om9rtoHTpZp2JEdU1JSejqO
-# uYMzCIfi0Td31Btyclle9S9FYgahLzqhyRBHvVZ19Fuu3Td/kWHV2O63jDo6Vu46
-# 3xmBIpc+XRhjPJ/kuL7yGeznicefFzpokSZQkf8E+rG8MUuLurZEmMJvp/k7Wipm
-# RDw2+1yOBPJpXZ70XYb7ifyfAh74LwdLsfQ5KQrfSZugwaj6PXGOeMW2tCHQd9qu
-# T7jcdIYKKvLnfsPUp2wsDooidmaHlHo1dCLY4fVg9Altfu8mv/xMmYcShYHYmjZ/
-# cU4C/NaPsHXIoNjaDwjPYj9arlfWcs62dYkjl7w5s0bY4srhjGKK2sYaBq86gN4K
-# wsiEv60Tu0sJc/rqUb4ivmb5Sb8bHsPh/vuH3Z68y71WgWaFthKtpyQSr0XcT86R
-# 47gVIQw+rtDcAd+EIIlz9/sO1BnwwKWvuEyHyyghtFmg166TDQVbR5qVA61rpqEy
-# LW7FR43YdgnTAwXWpPF1ru0zsW8j0yMcBoAb9s2i4oBJGZamafulfpLZZPeJH2G7
-# hFGer/D9vE04kZz0ZW0OWH9dD2doDL5O2VF0Y+TVGIVjARo98Q4DcEFwepxHhV9w
-# HUkoW0UR/g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMzE1
+# MDhaMC8GCSqGSIb3DQEJBDEiBCCb1z3ngL7poo6pnbgdav5CbNgs+gra43pxpmCs
+# zmxYYTANBgkqhkiG9w0BAQEFAASCAgBnDgDPi0ofEzmlPo8N8EGxprW4eSI109+K
+# m91kE71FbfR+pCOtPoHeQy/yXujDsGHoLWKGjy1an41R4SXd3TB91JzDNoJVXhrR
+# d5k2J9Y+X7LgTre6TFixymmH/ZGj8w29PH6xv4w6OPBgR38NS+UdudmZi2Wfs1J4
+# PcC2A5zUZS3QeKRP4tzpDS8HexTwZwkDQeQwYHSSEEHV0TPjP2RQww2mOsR6mjhu
+# DrO8mWsrkrTzLagva9s9Vn4G9CxvkSzKyu1zLtbkLjxe4E/WY0Nd/QMg3/JKqson
+# ZOjpU1F91TtjMev598i4Ekqr5odVZtlztSBYdbh8dN1pNYCHZ6eYdLPlw5bJBqnw
+# 938UbjV0H045HLQ2/nIadp3wsFAnptDv8xn7OyOJWMWj/iPkjlaSkd/1cNz1v9Jt
+# 3V/cnQYDdyJ7eDSKbUxeO0Fvb6iN1Ubvt/WW+5WSu6bPqr0EGvsGqFGKRcLm1aId
+# LtgOrW7B0f6pl2ZQSySQI2jzXh4BmzcBtdNjEIJPioHX1YjnW3ogxO4MIe8M2uWM
+# 0OEoq4fCAU1xfjJ83nL6TOK8mGC/UOxetETNllhpUnGa7+80lnzG/3YP6vRHpaK0
+# bmX2pFFupOCAv9F50RJ0hTY6/kWKOZphVsZhV0UxKO7K0jRT5OXUmzkynmDSP4qT
+# 9GCK0DDlZA==
 # SIG # End signature block
