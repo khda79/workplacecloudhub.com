@@ -4,7 +4,7 @@ Exchange 2016 proxy address audit and remediation scripts.
 
 ## Scripts
 
-- `SmartM365-Check-ProxyAddresses-Exchange.ps1`: audits user/shared mailbox proxy addresses by OU or forest-wide scope. The expected proxy uses the recipient `SamAccountName` and the configured suffix. It is read-only by default; remediation only runs when `-AddMissingAddress` is explicitly passed. Recipients with `EmailAddressPolicyEnabled=True` are always skipped during remediation. Each run also creates `Exchange_OnPrem_ProxyAddresses_<timestamp>.xlsx`, which groups the CSV outputs into the `Check`, `Summary`, and `Added` worksheets; the `Added` worksheet remains present with headers when no address was added.
+- `SmartM365-Check-ProxyAddresses-Exchange.ps1`: audits local and remote user/shared mailboxes by OU or forest-wide scope (`UserMailbox`, `SharedMailbox`, `RemoteUserMailbox`, and `RemoteSharedMailbox`). The expected proxy uses the recipient `SamAccountName` and the configured suffix. It is read-only by default; remediation only runs when `-AddMissingAddress` is explicitly passed. Local recipients are updated with `Set-Mailbox`, remote recipients with `Set-RemoteMailbox`, and recipients with `EmailAddressPolicyEnabled=True` are always skipped. Each run also creates `Exchange_OnPrem_ProxyAddresses_<timestamp>.xlsx`, which groups the CSV outputs into the `Check`, `Summary`, and `Added` worksheets; the `Added` worksheet remains present with headers when no address was added.
 
 ## Excel dependency
 
