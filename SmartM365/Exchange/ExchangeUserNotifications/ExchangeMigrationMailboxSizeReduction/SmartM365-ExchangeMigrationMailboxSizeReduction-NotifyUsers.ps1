@@ -3,7 +3,7 @@
 Notifies selected Exchange mailbox users that they must reduce mailbox size before migration.
 
 .DESCRIPTION
-Loads SmartM365 tenant context, the shared Communications configuration, and the
+Loads SmartM365 tenant context, the shared ExchangeUserNotifications configuration, and the
 ExchangeMigrationMailboxSizeReduction campaign configuration, then sends localized HTML notification
 emails to users whose Exchange mailbox size is above the quota associated with their target
 migration license.
@@ -69,7 +69,7 @@ Builds candidates from the license inventory CSV and performs a dry run using th
 Performs a dry run for a manually supplied pilot recipient list.
 
 .VERSION
-1.4
+1.5
 #>
 [CmdletBinding(DefaultParameterSetName = 'Inventory')]
 param(
@@ -468,8 +468,8 @@ $pathTokens.LatestCsvFolderPath = Resolve-SmartM365CommunicationTokenizedValue -
 $pathTokens.LogAllRootPath = Resolve-SmartM365CommunicationTokenizedValue -Value $pathTokens.LogAllRootPath -Tokens $pathTokens
 
 $commRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
-$baseConfig = Read-SmartM365CommunicationJson -Path (Join-Path $commRoot 'ExchangeUserNotifications\Config\Communications.local.json.template')
-$baseConfig = Merge-SmartM365CommunicationConfig -BaseConfig $baseConfig -OverlayConfig (Read-SmartM365CommunicationJson -Path (Join-Path $commRoot 'ExchangeUserNotifications\Config\Communications.local.json'))
+$baseConfig = Read-SmartM365CommunicationJson -Path (Join-Path $commRoot 'ExchangeUserNotifications\Config\ExchangeUserNotifications.local.json.template')
+$baseConfig = Merge-SmartM365CommunicationConfig -BaseConfig $baseConfig -OverlayConfig (Read-SmartM365CommunicationJson -Path (Join-Path $commRoot 'ExchangeUserNotifications\Config\ExchangeUserNotifications.local.json'))
 
 $campaignTemplatePath = Join-Path $commRoot 'ExchangeUserNotifications\Config\Campaigns\ExchangeMigrationMailboxSizeReduction.local.json.template'
 if ([string]::IsNullOrWhiteSpace($CampaignConfigPath)) {
@@ -866,8 +866,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDW6/2ez0wMMRDY
-# oHQKfOUrl++FHA1LU5p+ZNjq/A/4m6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA82V/fsCzhPBRn
+# zr1NGVwkqBo0Un7XFTDkX/bZxflnYqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1000,31 +1000,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOKiK7Jtevmwj2JLdUkqV0b8VsD5ABf9kh0cV3GlXXFrMA0GCSqG
-# SIb3DQEBAQUABIIBgDdrADKbCdxRhO+tjQWcaOQCwiSCN5cwLLBXOrOzIRA1/+9h
-# WNiyBZbUFfi/thB3hyIGIWx3ncpwQSn5SH1bqN5tsgo2XiV64p2L3fbR92Cv4kcg
-# VsKgFnuwbIKVh5+UzHpm/FfMBAEvYV7TkwdLQhzZuYYfndmpBlCXb4tR9ZkG3hHF
-# NZYjInJUEn6KO4LCrxNzp1H8f66O3tcwH1TGnmzJ45v+vd2ylCDU2GumxR9WiQfF
-# sbQ9H0K40mKxIkbXx/vQ1C7KeWP96Zl3Qth0s+IesINf8Tx4sPp83yzS/7nI5FGo
-# zGkAnVpg0Q0diAJShvRNxl+hIV5w4lGf1GxYuBe15jT7fVUbRjwoZ9LIt55wTima
-# c4ADLCvC6bCTvcvV9WyWCMYqEGL18aahMdyDML1UM2ioEeLOtdQm2RdPVX1TxQH9
-# empOuUXxjEBkfocpiJExFz2xqvbu8lpmhU1cAS5TvkCuPUuSoeZBw7eUl3tEb9Lb
-# 3Sa51fxHG68PGM+nrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIASzDpw/33MzFdRqUODXXO+XtPdMLu8D6cNONm2ctkZmMA0GCSqG
+# SIb3DQEBAQUABIIBgBcVKCLBEEY8aql+InBsMqrnAd/5LXniafzgy2TlDrptiaVd
+# LiR+z/9Rs7oNFFBqH6LmyFF4fbJ361hUClW5BvNB40Ofgs3QeT5vG6zMTUv4n5Du
+# cqHi7AgjuBVh8v7XrkXqPAyi5sQmtf8s4Y02HhwXFKF4d+/BDEVrzKBWW1fR5cF9
+# qQCXrfm8h9uG8KBIjjAg0hCXEOpTCB1CFwedADuXGrljcJN2iYQVhrYVLFifadHY
+# jlyVTkfIUViRbViN2sqmCSxYNhEkReJPesxE0PHtUiTWnapiRB1jR1M2OUVEkbWj
+# zQjgYxNm3xhYqtN5xP5MLQ6K5GZiay5mA1WgMRMvyBmmAA6azs7I9oKuBWAj8zHH
+# z2aIKxtdajLO4tIM09LJt/rcILLNu5m0T1zNW5I4+31eW0vxpecAFpXTpIJhlWh6
+# YxPFhhMyhJys5NqHJq80AEVb/DYG1AVERaOKffkBaxUgJMMp/GFzirjP7LgJhoHU
+# TBSJ2J8cZ5/0GwSgMKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjAw
-# MjVaMC8GCSqGSIb3DQEJBDEiBCBG76GszcvsA+HWHSq3TGGBeokCJ6AAPCB9ckjZ
-# /HDH3zANBgkqhkiG9w0BAQEFAASCAgALNfKycMNDppPXHXWUpRwSCA7VMl8988Sx
-# hfoVfVdzOLybe5yGJBPLiQCmAavIYvti3YAkWVrtu+jS1k+4OdieEYJhTFoQnHOi
-# YETJRQNMaCEzbgiGoeoXrUHL5I58OLcoBgwRI3RTWSw55XAhbw7UQpZo9bFZyNk9
-# g4WBJFRo6HGDHpsEWcV2Ruw/R+7YSpw0En8/KGA554eQBXLMyil/u0zoWuX7p+dT
-# wMjtCX4WTRki6yXzfA/xpinzV9G+fPfUvz/HrIiWz7Oq5UJmn0QIzmDkW0oAmEWJ
-# dplWA1/6+iyXJni+Hp6ScEuoA6mKiM2Uu/qiT2A1mFKPeWQdWr5/sEnHNSvSt1s4
-# PP9pacBP08Cs1MYa75xLanxOli46gHgJU0aq1ndCcfCtI+HkReJfhEICndoo+Y8E
-# sH7SsqgmM7UULgV94S2BRKeCIjkT8jcy/jGd6qAsGodnTIkmRsfyl8lNsfFo+oof
-# JwuPRjkLiUNNbTwQKuGa+/f29DCf9tMmw+34gNQpl3SHX4lURIpbjtc11F9wCIC7
-# fKNHq6hlDeGbj8+tQsNHOG6UH1DACxlg0Qhx9JycEs0t6/eP7ggOAZ3irw1Oj+1/
-# VNio4fQFD+p7MGufn9n1nIYTtH1Cb9/Z71TZ7r73+VWY/+RiKAKeBkM1blutQeDy
-# QOmR8sP1/g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjMy
+# MjBaMC8GCSqGSIb3DQEJBDEiBCBotC4lUXkQDd7Ue6Up0g0LHvyj2Vfg0roW51kd
+# eUYukzANBgkqhkiG9w0BAQEFAASCAgBiQdgjZQX0QC9TPX2LlZw1aX8YevKcruF8
+# EmHsBm9QfoqWIlF5SUbH9XUvhNX90TNZMBxGEmKdVL50Wdu5PmiA5oRtBSfEW+IQ
+# Vu7GlN7kMIY9BwAD4i+gkc88PQPJ6NqIXakl1pJLdsj9z4p0r38qIuP2JVX4RjP6
+# BFlqEF3ONviUnu980XbZsNcoZWyQEEsivzMB3QtzzkKNKLsnHKFkamY6hViReAPL
+# CK4hoib3kEnX7UTwex4+DLWZRvj/2SNOYoDn8vIkxvP8PEyAnqhsTTaRETfNtEDv
+# 2oKfZciHW0tejdohIfLyIVHGEEpkWIu+P+L1smvL2iRzWw8OrJZVHETwj56cqVTk
+# fwhQEgNJW8v/qNop1Jb4z6RTf3aZvoM/rPMQ1s7cTbluIW/Ccpq2gx69IPEIs/Xq
+# 5Z0UciRTh+HEGrh/+JvcdJvGRq34BWUli5CCouwdrhkpBKmklFDHXyHOqAOqYo/r
+# AmioFnNsL68N47xlL4X7sVBX4s4elxm12rrHEcjW1j5CdG9cqECzyBpv4Q/5gJfH
+# 8yCwWkUZkXmXTcFEci34Iu5+rAqip7YlKqqbB9nf1IX0dmDMF3Wf9mnWXJljy92O
+# Wg+0f4U7xuZVSC+3E5h/eDueW0c8u/MM9f8BnA6MfC4HzMk/ZYBFBJBb5gGhEntL
+# iMhO5EHmdw==
 # SIG # End signature block

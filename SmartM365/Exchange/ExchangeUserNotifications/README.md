@@ -35,7 +35,7 @@ Individual campaign `.cmd` launchers are intentionally not shipped; use the comm
 Create local copies from the committed templates:
 
 ```text
-Config/Communications.local.json.template
+Config/ExchangeUserNotifications.local.json.template
 Config/Campaigns/ExchangeMigration.local.json.template
 Config/Campaigns/ExchangeArchive.local.json.template
 Config/Campaigns/ExchangeMigrationMailboxSizeReduction.local.json.template
@@ -43,7 +43,7 @@ Config/Campaigns/ExchangeMigrationMailboxSizeReduction.local.json.template
 
 Real files must use `.local.json` and remain ignored by Git.
 
-`Config/Communications.local.json` controls the shared mail transport:
+`Config/ExchangeUserNotifications.local.json` controls the shared mail transport:
 
 - `MailSendMode = Graph` sends through Microsoft Graph `/sendMail` after a standard delegated interactive sign-in.
 - `MailSendMode = SmtpRelay` forces SMTP relay mode and requires `SmtpServer`.
@@ -86,7 +86,7 @@ Exchange Online and Microsoft Graph use standard interactive authentication. The
 Campaign data is tenant-isolated by default:
 
 ```text
-SmartM365/Data/Tenants/<TenantKey>/DATA-ALL/Communications/ExchangeUserNotifications/<Campaign>
+SmartM365/Data/Tenants/<TenantKey>/DATA-ALL/Exchange/ExchangeUserNotifications/<Campaign>
 SmartM365/Data/Tenants/<TenantKey>/DATA-LAST
 SmartM365/Data/Tenants/<TenantKey>/LOG-ALL/Exchange/ExchangeUserNotifications/<Campaign>
 ```
