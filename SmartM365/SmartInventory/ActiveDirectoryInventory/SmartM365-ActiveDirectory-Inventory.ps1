@@ -22,10 +22,10 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.37
+1.38
 .REQUIREMENTS
     PowerShell 7+.
-    Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module.
+    Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
     Minimum permissions: read access to all target AD domains and user/computer/group attributes collected by Get-AD* cmdlets.
     Conditional: Mail.Send is required only when Graph mail notifications are enabled; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
@@ -429,7 +429,7 @@ function New-SmartM365AdDuplicatePreviewSection {
         }
     }
 
-    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing accounts for top {0} of {1} {2} value(s). Full details are available in the CSV files.' -f $topGroups.Count, $groups.Count, $label)
+    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing accounts for top {0} of {1} {2} value(s). Full details are available in the attached Excel workbook.' -f $topGroups.Count, $groups.Count, $label)
     $html = @"
 <div style="font-size:13px;color:#64748b;margin-bottom:8px;">$caption</div>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
@@ -472,7 +472,7 @@ function New-SmartM365AdRemoteRoutingIssuePreviewSection {
         "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$issueHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#334155;`">$severityHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$accountHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$targetAddressHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$expectedDomainHtml</td></tr>"
     }
 
-    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing {0} of {1} remote routing issue row(s). Full details are available in the CSV file.' -f $items.Count, @($Rows).Count)
+    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing {0} of {1} remote routing issue row(s). Full details are available in the attached Excel workbook.' -f $items.Count, @($Rows).Count)
     $html = @"
 <div style="font-size:13px;color:#64748b;margin-bottom:8px;">$caption</div>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
@@ -495,7 +495,8 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
     param(
         [Parameter(Mandatory = $true)][string]$Subject,
         [Parameter(Mandatory = $true)][string]$BodyHtml,
-        [string]$To = ''
+        [string]$To = '',
+        [string[]]$Attachments
     )
 
     $effectiveSendMailMode = Get-SmartM365AdInventorySendMailMode -Config $ScriptLocalConfig
@@ -507,8 +508,105 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
     if (-not [string]::IsNullOrWhiteSpace($To)) {
         $mailParams['To'] = $To
     }
+    $attachmentPaths = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($attachmentPaths.Count -gt 0) {
+        $mailParams['Attachments'] = $attachmentPaths
+        $mailParams['AllowAttachments'] = $true
+    }
 
     SendEmailHtmlReport @mailParams
+}
+
+function Export-SmartM365AdDiagnosticsWorkbook {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][array]$Sources,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    Import-Module ImportExcel -ErrorAction Stop
+
+    $parentPath = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parentPath) -and -not (Test-Path -LiteralPath $parentPath)) {
+        New-Item -Path $parentPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+    if (Test-Path -LiteralPath $Path) {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+    }
+
+    $excelPackage = $null
+    try {
+        $excelPackage = Open-ExcelPackage -Path $Path -Create
+        foreach ($source in @($Sources)) {
+            $csvPath = [string]$source.CsvPath
+            $worksheetName = [string]$source.WorksheetName
+            $tableName = [string]$source.TableName
+            if (-not (Test-Path -LiteralPath $csvPath -PathType Leaf)) {
+                throw ("Diagnostic CSV not found: {0}" -f $csvPath)
+            }
+
+            $rows = @(Import-Csv -LiteralPath $csvPath)
+            if ($rows.Count -gt 0) {
+                $columns = @($rows[0].PSObject.Properties.Name)
+            }
+            else {
+                $header = [string](Get-Content -LiteralPath $csvPath -TotalCount 1 -ErrorAction Stop)
+                if ([string]::IsNullOrWhiteSpace($header)) {
+                    throw ("Diagnostic CSV has no header: {0}" -f $csvPath)
+                }
+                $separatorCount = ([regex]::Matches($header, ',')).Count
+                $fakeRow = (@('x') * ($separatorCount + 1)) -join ','
+                $probe = @(@($header, $fakeRow) | ConvertFrom-Csv)
+                $columns = if ($probe.Count -gt 0) { @($probe[0].PSObject.Properties.Name) } else { @() }
+            }
+            if ($columns.Count -eq 0) {
+                throw ("Diagnostic CSV columns could not be resolved: {0}" -f $csvPath)
+            }
+
+            $worksheet = $excelPackage.Workbook.Worksheets.Add($worksheetName)
+            $matrix = [System.Collections.Generic.List[object[]]]::new()
+            $matrix.Add([object[]]$columns)
+            foreach ($row in $rows) {
+                $values = foreach ($column in $columns) {
+                    $property = $row.PSObject.Properties[$column]
+                    if ($null -eq $property -or $null -eq $property.Value) { '' } else { [string]$property.Value }
+                }
+                $matrix.Add([object[]]$values)
+            }
+            $worksheet.Cells['A1'].LoadFromArrays($matrix)
+            $worksheet.View.FreezePanes(2, 1)
+            $worksheet.Cells.AutoFitColumns(10, 60)
+
+            $headerAddress = [OfficeOpenXml.ExcelCellBase]::GetAddress(1, 1, 1, $columns.Count)
+            $headerRange = $worksheet.Cells[$headerAddress]
+            $headerRange.Style.Font.Bold = $true
+            $headerRange.Style.Font.Color.SetColor([System.Drawing.Color]::White)
+            $headerRange.Style.Fill.PatternType = [OfficeOpenXml.Style.ExcelFillStyle]::Solid
+            $headerRange.Style.Fill.BackgroundColor.SetColor([System.Drawing.Color]::FromArgb(31, 78, 121))
+
+            if ($rows.Count -gt 0) {
+                $tableAddress = [OfficeOpenXml.ExcelCellBase]::GetAddress(1, 1, $rows.Count + 1, $columns.Count)
+                $tableRange = $worksheet.Cells[$tableAddress]
+                $table = $worksheet.Tables.Add($tableRange, $tableName)
+                $table.TableStyle = [OfficeOpenXml.Table.TableStyles]::Medium2
+            }
+            else {
+                $headerRange.AutoFilter = $true
+            }
+        }
+
+        Close-ExcelPackage -ExcelPackage $excelPackage
+        $excelPackage = $null
+    }
+    finally {
+        if ($null -ne $excelPackage) {
+            Close-ExcelPackage -ExcelPackage $excelPackage -NoSave
+        }
+    }
+
+    $workbookFile = Get-Item -LiteralPath $Path -ErrorAction Stop
+    WriteLog -Message ("AD identity and mail routing workbook created: {0} ({1:N0} bytes)" -f $workbookFile.FullName, $workbookFile.Length)
+    return $workbookFile.FullName
 }
 
 
@@ -583,7 +681,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.37"
+$ScriptVersion = "1.38"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -3116,12 +3214,15 @@ try {
                             [pscustomobject]@{ Label = 'targetAddress absent from proxyAddresses'; Value = $remoteRoutingAddressMissingFromProxyCount }
                             [pscustomobject]@{ Label = 'Missing tenant mail.onmicrosoft.com proxy'; Value = $missingMailOnMicrosoftProxyCount }
                         )
+                        $diagnosticWorkbookPath = Export-SmartM365AdDiagnosticsWorkbook -Path (Join-Path $OutputPath 'AD_Users_IdentityAndMailRoutingIssues.xlsx') -Sources @(
+                            [pscustomobject]@{ CsvPath = $duplicateUpnCsv; WorksheetName = 'Duplicate UPN'; TableName = 'DuplicateUPN' }
+                            [pscustomobject]@{ CsvPath = $duplicateSmtpCsv; WorksheetName = 'Duplicate SMTP'; TableName = 'DuplicateSMTP' }
+                            [pscustomobject]@{ CsvPath = $duplicateRemoteRoutingCsv; WorksheetName = 'Duplicate RemoteRouting'; TableName = 'DuplicateRemoteRouting' }
+                            [pscustomobject]@{ CsvPath = $remoteRoutingIssuesCsv; WorksheetName = 'RemoteRouting Issues'; TableName = 'RemoteRoutingIssues' }
+                        )
                         $duplicatePathRows = @(
                             [pscustomobject]@{ Label = 'Source users'; Path = $combinedUsersCsv }
-                            [pscustomobject]@{ Label = 'Duplicate UPN'; Path = $duplicateUpnCsv }
-                            [pscustomobject]@{ Label = 'Duplicate SMTP'; Path = $duplicateSmtpCsv }
-                            [pscustomobject]@{ Label = 'Duplicate remote routing address'; Path = $duplicateRemoteRoutingCsv }
-                            [pscustomobject]@{ Label = 'Remote routing issues'; Path = $remoteRoutingIssuesCsv }
+                            [pscustomobject]@{ Label = 'Diagnostic workbook'; Path = $diagnosticWorkbookPath }
                         )
                         $duplicateUpnPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateUpnRows -DuplicateType 'UPN' -Limit 50
                         $duplicateSmtpPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateSmtpRows -DuplicateType 'SMTP' -Limit 50
@@ -3136,24 +3237,24 @@ try {
                         if ($duplicateRemoteRoutingPreviewSection) { $duplicateSections += $duplicateRemoteRoutingPreviewSection }
                         if ($remoteRoutingIssuePreviewSection) { $duplicateSections += $remoteRoutingIssuePreviewSection }
                         $emailBody = New-SmartM365EmailBody `
-                            -Title 'Duplicate identities detected' `
+                            -Title 'Identity and mail routing issues detected' `
                             -Category 'SmartM365 Active Directory' `
                             -Severity Warning `
                             -Tenant $Tenant `
                             -HostName $env:COMPUTERNAME `
                             -Message ("Duplicate identity and remote routing analysis found conflicts in Active Directory user data. Expected remote routing domain: {0}." -f $RemoteRoutingDomain) `
                             -ActionTitle 'Action required' `
-                            -ActionHtml 'Review the duplicate UPN, SMTP, remote routing address, and remote routing issue CSV files before identity cleanup, migration, or synchronization decisions.' `
+                            -ActionHtml 'Review the attached Excel workbook, which contains the duplicate UPN, SMTP, remote routing address, and remote routing issue details, before identity cleanup, migration, or synchronization decisions.' `
                             -SummaryRows $duplicateSummaryRows `
                             -PathRows $duplicatePathRows `
                             -Sections $duplicateSections `
-                            -Footer 'This automated message was generated by SmartM365. Use the exported CSV paths and SharePoint links above as the source of truth for remediation.'
+                            -Footer 'This automated message was generated by SmartM365. Use the attached Excel workbook and SharePoint links above as the source of truth for remediation.'
                         $duplicateNotificationTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
                         if ([string]::IsNullOrWhiteSpace($duplicateNotificationTo)) {
                             WriteLog -Message 'Duplicate identity notification skipped because To is not configured in local or global configuration. Duplicate CSV exports remain valid.' -Level 'WARNING'
                         }
                         else {
-                            Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody -To $duplicateNotificationTo
+                            Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody -To $duplicateNotificationTo -Attachments @($diagnosticWorkbookPath)
                             Set-Content -LiteralPath $DuplicateNotificationLastSentFilePath -Value $todayStamp -Encoding UTF8
                             WriteLog -Message ("Duplicate identity notification sent. Last-sent marker updated: {0}" -f $DuplicateNotificationLastSentFilePath)
                         }
