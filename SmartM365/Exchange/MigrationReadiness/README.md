@@ -33,20 +33,20 @@ Les contrôles qui nécessitent obligatoirement une interrogation live, notammen
 
 ## Autonomie
 
-L’application possède son propre fichier de configuration, son moteur de contrôles et ses exports. Elle ne charge aucun script ni fichier de configuration du projet SmartM365.
+L’application possède son propre fichier de configuration, son moteur de contrôles et ses exports. Elle ne charge aucun script SmartM365. Si son `TenantProfile.TenantId` est vide, elle lit uniquement le profil tenant central SmartM365 afin de reprendre en mémoire le même tenant.
 
 Les CSV du cache peuvent être produits par SmartM365, mais l’application les consomme directement et reste exécutable indépendamment.
 
 Le profil opérationnel est défini dans le JSON local ignoré par Git avec :
 
-- `TenantProfile.TenantId` : garde-fou pour empêcher une authentification live dans le mauvais tenant ; ce paramètre est nécessaire.
+- `TenantProfile.TenantId` : garde-fou pour empêcher une authentification live dans le mauvais tenant ; s’il est vide, le profil `DefaultTenant` de SmartM365 est utilisé en mémoire.
 - `TenantProfile.RemoteRoutingDomain` : domaine de routage hybride attendu.
 - `Cache.RootPath` : racine des inventaires CSV.
 - `Cache.MaximumAgeHours` : âge maximal accepté pour les données.
 
 Il n’existe plus de bloc générique `Tenant`, de paramètre `MicrosoftGraph.UseDeviceCode`, de bloc `OnPremises`, ni de paramètre `EntraConnect.Server`.
 
-Graph utilise `Connect-MgGraph` en authentification interactive standard avec le `TenantId` configuré. Aucun flux device code n’est demandé.
+Exchange Online et Graph utilisent une authentification interactive standard avec le `TenantId` effectif. Aucun flux device code n’est demandé.
 
 ## Sécurité
 
