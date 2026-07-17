@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-    1.0.19
+    1.0.20
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -70,8 +70,9 @@ $RunDateUtc = $RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Glo
 $RunId = [guid]::NewGuid().ToString()
 $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
+$script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.19"
+$ScriptVersion = "1.0.20"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -238,6 +239,42 @@ function Get-ADGroupMembersBySid([string]$Sid,[string]$Server){
     if (-not $group) { return @() }
     @(Get-ADGroupMember -Identity $group.DistinguishedName -Recursive -Server $Server -ErrorAction SilentlyContinue)
 }
+function Get-DomainDnsNameFromDistinguishedName([string]$DistinguishedName){
+    $domainComponents = @(
+        [regex]::Matches($DistinguishedName, '(?i)(?:^|,)\s*DC=([^,]+)') |
+            ForEach-Object { $_.Groups[1].Value.Trim() }
+    )
+    if ($domainComponents.Count -eq 0) { return '' }
+    $domainComponents -join '.'
+}
+function Get-PrivilegedUserPasswordNeverExpires([string]$DistinguishedName,[string]$DefaultServer){
+    $cacheKey = $DistinguishedName.Trim().ToLowerInvariant()
+    if ($script:PrivilegedUserPasswordNeverExpiresCache.ContainsKey($cacheKey)) {
+        return $script:PrivilegedUserPasswordNeverExpiresCache[$cacheKey]
+    }
+
+    $owningDomain = Get-DomainDnsNameFromDistinguishedName -DistinguishedName $DistinguishedName
+    $targetServer = if ([string]::IsNullOrWhiteSpace($owningDomain)) { $DefaultServer } else { $owningDomain }
+    try {
+        $user = Invoke-Retry { Get-ADUser -Identity $DistinguishedName -Server $targetServer -Properties PasswordNeverExpires -ErrorAction Stop }
+        $result = [pscustomobject]@{
+            Resolved = $true
+            PasswordNeverExpires = [bool]$user.PasswordNeverExpires
+            Server = $targetServer
+            Error = ''
+        }
+    }
+    catch {
+        $result = [pscustomobject]@{
+            Resolved = $false
+            PasswordNeverExpires = $false
+            Server = $targetServer
+            Error = $_.Exception.Message
+        }
+    }
+    $script:PrivilegedUserPasswordNeverExpiresCache[$cacheKey] = $result
+    $result
+}
 function Get-ADDbVolume([string]$DC){
     try{ $v=Invoke-Command -ComputerName $DC -ScriptBlock { $o=& ntdsutil.exe 'activate instance ntds' 'files' 'info' 'quit' 'quit' 2>&1; $l=$o|Where-Object{[string]$_ -match 'Database directory|DB Path|Database path'}|Select-Object -First 1; if($l -and [string]$l -match '([A-Za-z]:)'){$matches[1]}else{$env:SystemDrive} } -ErrorAction Stop; if($v){return ([string]$v).TrimEnd('\')} }catch{ $null = $_ }
     $os=Get-CimInstance Win32_OperatingSystem -ComputerName $DC -ErrorAction Stop; ([string]$os.SystemDrive).TrimEnd('\')
@@ -358,8 +395,18 @@ function Invoke-DomainCheck($ForestName,[string]$DomainName,$ForestInfo){
         $builtinAdmins=@(Get-ADGroupMembersBySid -Sid 'S-1-5-32-544' -Server $DomainName)
         foreach($m in $builtinAdmins){if($m.objectClass -eq 'user'){[void]$dns.Add($m.DistinguishedName)}}
         if($DomainName -ieq $ForestInfo.RootDomain){foreach($rid in '518','519'){foreach($m in @(Get-ADGroupMembersBySid -Sid ($domain.DomainSID.Value+'-'+$rid) -Server $DomainName)){if($m.objectClass -eq 'user'){[void]$dns.Add($m.DistinguishedName)}}}}
-        $never=0;foreach($dn in $dns){try{$u=Get-ADUser -Identity $dn -Server $DomainName -Properties PasswordNeverExpires -ErrorAction Stop;if($u.PasswordNeverExpires){$never++}}catch{ $null = $_ }}
-        Add-Row $ForestName $DomainName '' DomainStats PrivilegedPasswordNeverExpires $(if($never -gt 0){'Warning'}else{'OK'}) $never "PrivilegedUsers=$($dns.Count)" '0 preferred' 'Domain Admins, Builtin Administrators when resolvable, Enterprise Admins, Schema Admins when applicable' (Ms $s)
+        $never=0
+        $unresolvedPrivilegedUsers=0
+        foreach($dn in $dns){
+            $passwordState = Get-PrivilegedUserPasswordNeverExpires -DistinguishedName $dn -DefaultServer $DomainName
+            if(-not $passwordState.Resolved){$unresolvedPrivilegedUsers++;continue}
+            if($passwordState.PasswordNeverExpires){$never++}
+        }
+        if($unresolvedPrivilegedUsers -gt 0){
+            WriteLog -Message ("Unable to resolve {0} privileged user(s) for domain '{1}' while checking PasswordNeverExpires." -f $unresolvedPrivilegedUsers,$DomainName) -Level 'WARNING'
+        }
+        $privilegedStatus=if($never -gt 0 -or $unresolvedPrivilegedUsers -gt 0){'Warning'}else{'OK'}
+        Add-Row $ForestName $DomainName '' DomainStats PrivilegedPasswordNeverExpires $privilegedStatus $never "PrivilegedUsers=$($dns.Count); Unresolved=$unresolvedPrivilegedUsers" '0 preferred; 0 unresolved' 'Domain Admins, Builtin Administrators when resolvable, Enterprise Admins, Schema Admins when applicable' (Ms $s)
     }catch{Add-Row $ForestName $DomainName '' DomainStats PrivilegedAccountStats Warning '' Error 'Inventory succeeds' $_.Exception.Message (Ms $s)}
 }
 try{
