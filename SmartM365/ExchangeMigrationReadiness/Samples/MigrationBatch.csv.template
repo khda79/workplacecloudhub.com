@@ -1,0 +1,3 @@
+EmailAddress,MailboxType,TargetSku,BadItemLimit,LargeItemLimit
+user1@example.com,PrimaryAndArchive,SPE_E3,0,0
+user2@example.com,PrimaryOnly,SPE_F3,0,0
