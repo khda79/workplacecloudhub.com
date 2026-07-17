@@ -299,7 +299,10 @@ function New-ProxyAddressesWorkbook {
 
     foreach ($csv in $CsvFiles) {
         $rows = @()
-        if (-not [string]::IsNullOrWhiteSpace([string]$csv.Path) -and (Test-Path -LiteralPath $csv.Path)) {
+        if ($csv.PSObject.Properties.Name -contains 'Rows') {
+            $rows = @($csv.Rows)
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace([string]$csv.Path) -and (Test-Path -LiteralPath $csv.Path)) {
             $rows = @(Import-Csv -LiteralPath $csv.Path)
         }
 
@@ -312,14 +315,20 @@ function New-ProxyAddressesWorkbook {
             $rows = @([pscustomobject]$placeholder)
         }
 
-        $rows | Export-Excel `
-            -Path $Path `
-            -WorksheetName ([string]$csv.WorksheetName) `
-            -TableName ([string]$csv.TableName) `
-            -AutoSize `
-            -FreezeTopRow `
-            -BoldTopRow `
-            -AutoFilter
+        $exportParameters = @{
+            Path          = $Path
+            WorksheetName = [string]$csv.WorksheetName
+            AutoSize      = $true
+            FreezeTopRow  = $true
+            BoldTopRow    = $true
+            AutoFilter    = $true
+        }
+
+        if (-not $isEmpty) {
+            $exportParameters.TableName = [string]$csv.TableName
+        }
+
+        $rows | Export-Excel @exportParameters
 
         if ($isEmpty) {
             $package = Open-ExcelPackage -Path $Path
@@ -362,6 +371,61 @@ function ConvertTo-SmtpProxyAddress {
     $address = ([string]$Value).Trim() -replace '(?i)^smtp:', ''
     if ($address -notmatch '^[^@\s]+@[^@\s]+$') { return '' }
     return ('smtp:{0}' -f $address.ToLowerInvariant())
+}
+
+function ConvertTo-ProxyAddressParts {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([AllowNull()]$Value)
+
+    $raw = ([string]$Value).Trim()
+    $prefix = ''
+    $addressValue = $raw
+    $separatorIndex = $raw.IndexOf(':')
+    if ($separatorIndex -gt 0) {
+        $prefix = $raw.Substring(0, $separatorIndex)
+        $addressValue = $raw.Substring($separatorIndex + 1)
+    }
+
+    $normalizedSmtpAddress = ''
+    if ([string]::IsNullOrWhiteSpace($prefix) -or $prefix -ieq 'smtp') {
+        $normalizedSmtpAddress = ConvertTo-SmtpProxyAddress -Value $raw
+    }
+
+    [pscustomobject]@{
+        ProxyAddressType     = $prefix
+        ProxyAddressValue    = $addressValue
+        NormalizedSmtpAddress = $normalizedSmtpAddress
+        IsPrimarySmtp        = ($prefix -ceq 'SMTP')
+    }
+}
+
+function New-UniqueSuggestedSmtpAddress {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyString()][string]$Alias,
+        [AllowEmptyString()][string]$ExpectedSuffix,
+        [Parameter(Mandatory = $true)][System.Collections.Generic.HashSet[string]]$ReservedAddresses
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Alias) -or [string]::IsNullOrWhiteSpace($ExpectedSuffix)) { return '' }
+
+    $suffix = $ExpectedSuffix.Trim().TrimStart('@').TrimEnd('.').ToLowerInvariant()
+    $localPart = $Alias.Trim().ToLowerInvariant() -replace '[^a-z0-9._+-]', '-'
+    $localPart = $localPart.Trim('.-'.ToCharArray())
+    if ([string]::IsNullOrWhiteSpace($localPart)) { return '' }
+
+    for ($candidateIndex = 2; $candidateIndex -le 999; $candidateIndex++) {
+        $candidate = ConvertTo-SmtpProxyAddress -Value ('{0}-{1}@{2}' -f $localPart, $candidateIndex, $suffix)
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        if (-not $ReservedAddresses.Contains($candidate)) {
+            [void]$ReservedAddresses.Add($candidate)
+            return $candidate
+        }
+    }
+
+    return ''
 }
 
 function Test-SmtpAddressSuffix {
@@ -415,7 +479,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.19"
+    $ScriptVersion = "1.20"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -552,6 +616,8 @@ $ErrorActionPreference = 'Stop'
     # Collections & counters
     $results                = New-Object System.Collections.Generic.List[object]
     $addedOperations        = New-Object System.Collections.Generic.List[object]
+    $existingProxyAddressRows = New-Object System.Collections.Generic.List[object]
+    $duplicateAliasRows = New-Object System.Collections.Generic.List[object]
 
     $okCount                = 0
     $missingCount           = 0
@@ -759,8 +825,13 @@ $ErrorActionPreference = 'Stop'
     }
 
     $expectedAddressCounts = @{}
+    $expectedAddressPlanOwners = @{}
     foreach ($plan in $recipientPlans) {
         if (-not $plan.ExpectedAddress) { continue }
+        if (-not $expectedAddressPlanOwners.ContainsKey($plan.ExpectedAddress)) {
+            $expectedAddressPlanOwners[$plan.ExpectedAddress] = @{}
+        }
+        $expectedAddressPlanOwners[$plan.ExpectedAddress][$plan.RecipientKey] = '{0}:{1}' -f ([string]$plan.Recipient.RecipientTypeDetails), ([string]$plan.Recipient.Identity)
         if ($expectedAddressCounts.ContainsKey($plan.ExpectedAddress)) {
             $expectedAddressCounts[$plan.ExpectedAddress]++
         }
@@ -782,6 +853,9 @@ $ErrorActionPreference = 'Stop'
     }
 
     $addressAlreadyAssignedConflictAddresses = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $suggestedAddressReservations = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($existingSmtpAddress in @($smtpAddressOwners.Keys)) { [void]$suggestedAddressReservations.Add([string]$existingSmtpAddress) }
+    foreach ($plannedExpectedAddress in @($expectedAddressCounts.Keys)) { [void]$suggestedAddressReservations.Add([string]$plannedExpectedAddress) }
     foreach ($plan in $recipientPlans) {
         $counter++
         if ($counter -eq 1 -or ($counter % 250) -eq 0 -or $counter -eq $total) {
@@ -793,15 +867,24 @@ $ErrorActionPreference = 'Stop'
         try { $primary = $rec.PrimarySmtpAddress } catch { $primary = $null }
 
         $email = ''
+        if ($primary -and $primary.ToString() -match '.+@.+') { $email = $primary.ToString() }
         $status = ''
         $policyWarning = $false
         $expectedAddress = [string]$plan.ExpectedAddress
         $isDuplicateExpectedAddress = $expectedAddress -and $duplicateExpectedAddresses.Contains($expectedAddress)
         $conflictOwners = @()
+        $duplicateExpectedPeers = @()
         if ($expectedAddress -and $smtpAddressOwners.ContainsKey($expectedAddress)) {
             foreach ($ownerEntry in $smtpAddressOwners[$expectedAddress].GetEnumerator()) {
                 if ([string]$ownerEntry.Key -ne [string]$plan.RecipientKey) {
                     $conflictOwners += [string]$ownerEntry.Value
+                }
+            }
+        }
+        if ($isDuplicateExpectedAddress -and $expectedAddressPlanOwners.ContainsKey($expectedAddress)) {
+            foreach ($peerEntry in $expectedAddressPlanOwners[$expectedAddress].GetEnumerator()) {
+                if ([string]$peerEntry.Key -ne [string]$plan.RecipientKey) {
+                    $duplicateExpectedPeers += [string]$peerEntry.Value
                 }
             }
         }
@@ -814,7 +897,59 @@ $ErrorActionPreference = 'Stop'
             [void]$addressAlreadyAssignedConflictAddresses.Add($expectedAddress)
         }
 
+        $suggestedUniqueAddress = ''
+        $suggestedUniqueAddressReason = ''
+        if ($isExpectedAddressConflict) {
+            if ($plan.ExpectedAddressSource -eq 'Alias' -and -not [string]::IsNullOrWhiteSpace($plan.Alias)) {
+                $suggestedUniqueAddress = New-UniqueSuggestedSmtpAddress -Alias $plan.Alias -ExpectedSuffix $ExpectedSuffix -ReservedAddresses $suggestedAddressReservations
+                if (-not [string]::IsNullOrWhiteSpace($suggestedUniqueAddress)) {
+                    if ($isDuplicateExpectedAddress -and $isAddressAlreadyAssigned) {
+                        $suggestedUniqueAddressReason = 'AliasDuplicateAndAddressAssignedCandidate'
+                    }
+                    elseif ($isDuplicateExpectedAddress) {
+                        $suggestedUniqueAddressReason = 'AliasDuplicateCandidate'
+                    }
+                    elseif ($isAddressAlreadyAssigned) {
+                        $suggestedUniqueAddressReason = 'AddressAlreadyAssignedCandidate'
+                    }
+                }
+            }
+            elseif ($plan.ExpectedAddressSource -eq 'RemoteRoutingAddress') {
+                $suggestedUniqueAddressReason = 'RemoteRoutingAddressConflict-NoSuggestion'
+            }
+            elseif ($plan.ExpectedAddressSource -eq 'AliasFallback') {
+                $suggestedUniqueAddressReason = 'RemoteRoutingAddressUnavailable-NoSuggestion'
+            }
+        }
+
         if ($plan.IsRemoteMailbox) { $remoteMailboxCount++ } else { $localMailboxCount++ }
+
+        $proxyAddressIndex = 0
+        foreach ($recipientProxyAddress in @($rec.EmailAddresses)) {
+            $proxyAddressRaw = ([string]$recipientProxyAddress).Trim()
+            if ([string]::IsNullOrWhiteSpace($proxyAddressRaw)) { continue }
+
+            $proxyAddressIndex++
+            $proxyAddressParts = ConvertTo-ProxyAddressParts -Value $proxyAddressRaw
+            $existingProxyAddressRows.Add([PSCustomObject]@{
+                Identity               = $rec.Identity
+                Alias                  = $plan.Alias
+                SamAccountName         = $plan.SamAccountName
+                DisplayName            = $rec.DisplayName
+                RecipientType          = $rec.RecipientTypeDetails
+                MailboxLocation        = $plan.MailboxLocation
+                PrimaryAddress         = $email
+                RemoteRoutingAddress   = $plan.RemoteRoutingAddress
+                AddressIndex           = $proxyAddressIndex
+                ProxyAddress           = $proxyAddressRaw
+                ProxyAddressType       = $proxyAddressParts.ProxyAddressType
+                ProxyAddressValue      = $proxyAddressParts.ProxyAddressValue
+                NormalizedSmtpAddress  = $proxyAddressParts.NormalizedSmtpAddress
+                IsPrimarySmtp          = $proxyAddressParts.IsPrimarySmtp
+                IsExpectedAddress      = (-not [string]::IsNullOrWhiteSpace($expectedAddress) -and $proxyAddressParts.NormalizedSmtpAddress -ieq $expectedAddress)
+                EmailAddressPolicyEnabled = $rec.EmailAddressPolicyEnabled
+            })
+        }
 
         # Track Email Address Policy status without flooding the console.
         if ($rec.EmailAddressPolicyEnabled -eq $true) {
@@ -926,6 +1061,11 @@ $ErrorActionPreference = 'Stop'
             $noPrimaryCount++
         }
 
+        if ($status -notlike 'Missing*') {
+            $suggestedUniqueAddress = ''
+            $suggestedUniqueAddressReason = ''
+        }
+
         $results.Add([PSCustomObject]@{
             Identity                                  = $rec.Identity
             Alias                                     = $plan.Alias
@@ -941,12 +1081,39 @@ $ErrorActionPreference = 'Stop'
             ExpectedAddressConflict                   = $isExpectedAddressConflict
             ExpectedAddressConflictReason             = ($conflictReason -join ';')
             ExpectedAddressConflictOwners             = ($conflictOwners -join '; ')
+            ExpectedAddressDuplicatePeers             = ($duplicateExpectedPeers -join '; ')
+            SuggestedUniqueAddress                    = $suggestedUniqueAddress
+            SuggestedUniqueAddressReason              = $suggestedUniqueAddressReason
             RoutingWarning                            = $plan.RoutingWarning
             Status                                    = $status
             EmailAddressPolicyEnabled                 = $rec.EmailAddressPolicyEnabled
             PolicyWarning                             = $policyWarning
         })
     }
+    $duplicateAliasGroups = @($results | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Alias) } | Group-Object Alias | Where-Object { $_.Count -gt 1 } | Sort-Object @{Expression='Count';Descending=$true}, Name)
+    foreach ($duplicateAliasGroup in $duplicateAliasGroups) {
+        foreach ($duplicateAliasRecipient in @($duplicateAliasGroup.Group | Sort-Object DisplayName, Identity)) {
+            $duplicateAliasRows.Add([PSCustomObject]@{
+                Alias                         = $duplicateAliasGroup.Name
+                DuplicateAliasCount           = $duplicateAliasGroup.Count
+                Identity                      = $duplicateAliasRecipient.Identity
+                SamAccountName                = $duplicateAliasRecipient.SamAccountName
+                DisplayName                   = $duplicateAliasRecipient.DisplayName
+                RecipientType                 = $duplicateAliasRecipient.RecipientType
+                MailboxLocation               = $duplicateAliasRecipient.MailboxLocation
+                PrimaryAddress                = $duplicateAliasRecipient.PrimaryAddress
+                RemoteRoutingAddress          = $duplicateAliasRecipient.RemoteRoutingAddress
+                ExpectedAddress               = $duplicateAliasRecipient.ExpectedAddress
+                ExpectedAddressSource         = $duplicateAliasRecipient.ExpectedAddressSource
+                ExpectedAddressDuplicatePeers = $duplicateAliasRecipient.ExpectedAddressDuplicatePeers
+                SuggestedUniqueAddress        = $duplicateAliasRecipient.SuggestedUniqueAddress
+                SuggestedUniqueAddressReason  = $duplicateAliasRecipient.SuggestedUniqueAddressReason
+                Status                        = $duplicateAliasRecipient.Status
+                EmailAddressPolicyEnabled     = $duplicateAliasRecipient.EmailAddressPolicyEnabled
+            })
+        }
+    }
+
     Write-Progress -Activity "Checking EmailAddresses..." -Completed
     if ($policyEnabledCount -gt 0) {
         Write-Host "Email address policy enabled recipients: $policyEnabledCount. Details are available in the detail CSV."
@@ -975,6 +1142,9 @@ $ErrorActionPreference = 'Stop'
 
     $summary = @(
         [PSCustomObject]@{ Summary = "Total recipients processed";                         Count = $results.Count },
+        [PSCustomObject]@{ Summary = "Existing proxy addresses listed";                  Count = $existingProxyAddressRows.Count },
+        [PSCustomObject]@{ Summary = "Duplicate alias groups";                            Count = $duplicateAliasGroups.Count },
+        [PSCustomObject]@{ Summary = "Recipients sharing duplicate alias";                Count = $duplicateAliasRows.Count },
         [PSCustomObject]@{ Summary = "On-premises mailboxes processed";                    Count = $localMailboxCount },
         [PSCustomObject]@{ Summary = "Remote mailboxes processed";                         Count = $remoteMailboxCount },
         [PSCustomObject]@{ Summary = "With expected address present";                      Count = $okCount },
@@ -1007,7 +1177,19 @@ $ErrorActionPreference = 'Stop'
             Path          = $detailPublish.TimestampedPath
             WorksheetName = 'Check'
             TableName     = 'ProxyAddressesCheck'
-            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','Alias','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','RemoteRoutingAddress','RemoteRoutingAddressSuffixMatchesExpected','ExpectedAddress','ExpectedAddressSource','ExpectedAddressConflict','ExpectedAddressConflictReason','ExpectedAddressConflictOwners','RoutingWarning','Status','EmailAddressPolicyEnabled','PolicyWarning')
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','Alias','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','RemoteRoutingAddress','RemoteRoutingAddressSuffixMatchesExpected','ExpectedAddress','ExpectedAddressSource','ExpectedAddressConflict','ExpectedAddressConflictReason','ExpectedAddressConflictOwners','ExpectedAddressDuplicatePeers','SuggestedUniqueAddress','SuggestedUniqueAddressReason','RoutingWarning','Status','EmailAddressPolicyEnabled','PolicyWarning')
+        }
+        [pscustomobject]@{
+            Rows          = @($existingProxyAddressRows | Sort-Object Identity, AddressIndex)
+            WorksheetName = 'ExistingProxyAddresses'
+            TableName     = 'ProxyAddressesExisting'
+            EmptyColumns  = @('Identity','Alias','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','RemoteRoutingAddress','AddressIndex','ProxyAddress','ProxyAddressType','ProxyAddressValue','NormalizedSmtpAddress','IsPrimarySmtp','IsExpectedAddress','EmailAddressPolicyEnabled')
+        }
+        [pscustomobject]@{
+            Rows          = @($duplicateAliasRows | Sort-Object @{Expression='DuplicateAliasCount';Descending=$true}, Alias, DisplayName)
+            WorksheetName = 'DuplicateAliases'
+            TableName     = 'ProxyAddressesDuplicateAliases'
+            EmptyColumns  = @('Alias','DuplicateAliasCount','Identity','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','RemoteRoutingAddress','ExpectedAddress','ExpectedAddressSource','ExpectedAddressDuplicatePeers','SuggestedUniqueAddress','SuggestedUniqueAddressReason','Status','EmailAddressPolicyEnabled')
         }
         [pscustomobject]@{
             Path          = $summaryPublish.TimestampedPath
@@ -1091,6 +1273,8 @@ try {
         $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
         $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
         $policySkippedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Additions skipped by email policy' } | Select-Object -First 1).Count)
+        $duplicateAliasGroupCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Duplicate alias groups' } | Select-Object -First 1).Count)
+        $duplicateAliasRecipientCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Recipients sharing duplicate alias' } | Select-Object -First 1).Count)
         $duplicateExpectedAddressGroupCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Duplicate expected address groups' } | Select-Object -First 1).Count)
         $duplicateExpectedRecipientCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Recipients sharing expected address' } | Select-Object -First 1).Count)
         $duplicateExpectedMissingCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Missing addresses blocked by duplicate' } | Select-Object -First 1).Count)
@@ -1113,6 +1297,8 @@ try {
             [pscustomobject]@{ Label = 'RemoteMailbox lookup misses'; Value = $remoteMailboxLookupMissCountForMail }
             [pscustomobject]@{ Label = 'Email address policy enabled'; Value = $policyEnabledCountForMail }
             [pscustomobject]@{ Label = 'Additions skipped by email policy'; Value = $policySkippedCountForMail }
+            [pscustomobject]@{ Label = 'Duplicate alias groups'; Value = $duplicateAliasGroupCountForMail }
+            [pscustomobject]@{ Label = 'Recipients sharing duplicate alias'; Value = $duplicateAliasRecipientCountForMail }
             [pscustomobject]@{ Label = 'Duplicate expected address groups'; Value = $duplicateExpectedAddressGroupCountForMail }
             [pscustomobject]@{ Label = 'Recipients sharing expected address'; Value = $duplicateExpectedRecipientCountForMail }
             [pscustomobject]@{ Label = 'Missing addresses blocked by duplicate'; Value = $duplicateExpectedMissingCountForMail }
@@ -1139,6 +1325,28 @@ try {
 "@
 
         $sections = @([pscustomobject]@{ Title = 'Scope'; Html = $scopeSectionHtml })
+
+        $duplicateAliasPreviewRows = @($duplicateAliasRows | Sort-Object @{Expression='DuplicateAliasCount';Descending=$true}, Alias, DisplayName | Select-Object -First 50)
+        if ($duplicateAliasPreviewRows.Count -gt 0) {
+            $duplicateAliasRowsHtml = foreach ($row in $duplicateAliasPreviewRows) {
+                "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.Alias)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode ([string]$row.DuplicateAliasCount))</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.DisplayName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.PrimaryAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.ExpectedAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.SuggestedUniqueAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(Encode $row.Status)</td></tr>"
+            }
+            $duplicateAliasSectionHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Alias</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Count</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Display name</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Primary SMTP</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Expected proxy</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Suggested proxy</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Status</th>
+  </tr>
+  $($duplicateAliasRowsHtml -join "`n")
+</table>
+"@
+            $sections += [pscustomobject]@{ Title = 'Top 50 duplicate aliases'; Html = $duplicateAliasSectionHtml }
+        }
 
         $missingPreviewRows = @($results | Where-Object { $_.Status -like 'Missing*' } | Sort-Object Status, DisplayName | Select-Object -First 50)
         if ($missingPreviewRows.Count -gt 0) {
