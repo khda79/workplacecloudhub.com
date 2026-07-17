@@ -25,7 +25,7 @@ if not exist "%POWERSHELL5%" (
 )
 
 echo WARNING: this launcher can modify Exchange proxy addresses.
-echo It runs SmartM365-Check-ProxyAddresses-Exchange.ps1 with -AddMissingAddress -SkipAllowListCsv.
+echo It runs SmartM365-Check-ProxyAddresses-Exchange.ps1 with -AllOrganizationalUnit -AddMissingAddress.
 set /p CONFIRM_WRITE=Type WRITE to continue: 
 if /i not "%CONFIRM_WRITE%"=="WRITE" (
     echo Write mode cancelled.
@@ -121,7 +121,7 @@ if %ROBOCOPY_EXIT% GEQ 8 (
 )
 
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%LOCAL_SCRIPT_DIR%','%LOCAL_SMARTM365_ROOT%\Config','%LOCAL_SMARTM365_ROOT%\Modules\SmartM365.Core' -Include *.ps1,*.psm1,*.psd1 -File -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
-"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -File "%LOCAL_SCRIPT_DIR%\SmartM365-Check-ProxyAddresses-Exchange.ps1" -Tenant prod -AddMissingAddress -SkipAllowListCsv
+"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -File "%LOCAL_SCRIPT_DIR%\SmartM365-Check-ProxyAddresses-Exchange.ps1" -Tenant prod -AllOrganizationalUnit -AddMissingAddress
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 exit /b %EXIT_CODE%
