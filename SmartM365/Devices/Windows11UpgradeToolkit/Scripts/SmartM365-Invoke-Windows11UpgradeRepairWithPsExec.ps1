@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.61
+    0.1.62
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.61'
+$script:LauncherVersion = '0.1.62'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -212,7 +212,7 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) {
         if ($intuneRootInventoryAge.TotalHours -le $script:IntuneInventoryFreshnessHours) {
             $IntuneRootInventoryCsv = $intuneRootFullName
             $requestedIntuneItem = if (-not [string]::IsNullOrWhiteSpace($requestedIntuneFullName)) { Get-Item -LiteralPath $requestedIntuneFullName -ErrorAction SilentlyContinue } else { $null }
-            $shouldUseRootIntuneCsv = $SkipIntuneInventoryRefresh -and ([string]::IsNullOrWhiteSpace($requestedIntuneFullName) -or (($requestedIntuneFullName -eq $defaultLotIntuneFullName) -and (-not $requestedIntuneItem)))
+            $shouldUseRootIntuneCsv = [string]::IsNullOrWhiteSpace($requestedIntuneFullName) -or (($requestedIntuneFullName -eq $defaultLotIntuneFullName) -and (-not $requestedIntuneItem))
             if ($shouldUseRootIntuneCsv) {
                 $IntuneInventoryCsv = $intuneRootFullName
                 $IntuneInventoryUsesRecentRootCsv = $true
@@ -222,6 +222,7 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) { $IntuneInventoryCsv = [System.IO.Path]::GetFullPath($IntuneInventoryCsv) }
 if (-not [string]::IsNullOrWhiteSpace($IntuneRootInventoryCsv)) { $IntuneRootInventoryCsv = [System.IO.Path]::GetFullPath($IntuneRootInventoryCsv) }
+$EffectiveSkipIntuneInventoryRefresh = [bool]$SkipIntuneInventoryRefresh -or $IntuneInventoryUsesRecentRootCsv
 $script:RemoteBaseDir = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
 $script:RemoteScriptPath = Join-Path $script:RemoteBaseDir 'SmartM365-Invoke-Windows11UpgradeRepair.ps1'
 $script:RemoteSetupCacheRoot = Join-Path $script:RemoteBaseDir 'SetupMedia'
@@ -1411,8 +1412,9 @@ function Invoke-Windows11InventoryPreCycleRefresh {
                     $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
                 }
             }
-            elseif ($SkipIntuneInventoryRefresh) {
-                Write-Host ("Cycle {0}: Intune inventory refresh skipped by option. Using existing CSV when available: {1}" -f $CycleNumber,$IntuneInventoryCsv) -ForegroundColor Yellow
+            elseif ($EffectiveSkipIntuneInventoryRefresh) {
+                $skipReason = if ($IntuneInventoryUsesRecentRootCsv) { "recent root cache (maximum age: $($script:IntuneInventoryFreshnessHours) hour(s))" } else { 'requested option' }
+                Write-Host ("Cycle {0}: Intune inventory refresh skipped because of {1}. Using existing CSV when available: {2}" -f $CycleNumber,$skipReason,$IntuneInventoryCsv) -ForegroundColor Yellow
                 if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
                     $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
                 }
@@ -1963,6 +1965,8 @@ $script:LauncherOptionRows = @(
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneInventoryPageSize'; Value = [string]$IntuneInventoryPageSize }
     [pscustomobject]@{ Category = 'Intune'; Option = 'IntuneTenantId'; Value = [string]$IntuneTenantId }
     [pscustomobject]@{ Category = 'Intune'; Option = 'SkipIntuneInventoryRefresh'; Value = [string][bool]$SkipIntuneInventoryRefresh }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'EffectiveSkipIntuneInventoryRefresh'; Value = [string][bool]$EffectiveSkipIntuneInventoryRefresh }
+    [pscustomobject]@{ Category = 'Intune'; Option = 'UsesRecentRootInventory'; Value = [string][bool]$IntuneInventoryUsesRecentRootCsv }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'ThrottleLimit'; Value = [string]$ThrottleLimit }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLimit'; Value = [string]$GlobalConcurrencyLimit }
     [pscustomobject]@{ Category = 'Parallelism'; Option = 'GlobalConcurrencyLeaseTimeoutMinutes'; Value = [string]$GlobalConcurrencyLeaseTimeoutMinutes }
@@ -1995,7 +1999,7 @@ Write-Host ("Technician     : Account={0}; UPN={1}; SID={2}; Auth={3}; Computer=
 Write-Host "Mode          : DryRun=$DryRun; AuditOnly=$AuditOnly; RunOnce=$RunOnce; SkipVirtualMachines=$SkipVirtualMachines; DiskCleanup=$AllowDiskCleanup; AdvancedCleanup=$($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup); DirectSetup=$DirectSetupUpgrade; SetupCompletionRebootWhenNoUser=$AllowSetupCompletionRebootWhenNoUser; SetupProfileRepair=$AllowSetupProfileRepair; ForceRequiredRebootWhenUptimeOverDays=$ForceRequiredRebootWhenUptimeOverDays"
 Write-Host "Setup         : AllowSetupUpgrade=$AllowSetupUpgrade; DirectSetup=$DirectSetupUpgrade; Effective=$([bool]($AllowSetupUpgrade -or $DirectSetupUpgrade)); Mode=$SetupExecutionMode; MediaId=$SetupMediaId; Language=$SetupLanguage; DynamicUpdate=$SetupDynamicUpdate; PreCopy=$(-not $SkipSetupMediaPreCopy)"
 Write-Host "AD inventory  : Csv=$AdInventoryCsv; RootCsv=$AdRootInventoryCsv; Domain=$AdDomain; Refresh=$(-not $SkipAdInventoryRefresh); RecentRoot=$AdInventoryUsesRecentRootCsv"
-Write-Host "Intune invent.: Csv=$IntuneInventoryCsv; RootCsv=$IntuneRootInventoryCsv; Tenant=$IntuneTenantId; Refresh=$(-not $SkipIntuneInventoryRefresh); RecentRoot=$IntuneInventoryUsesRecentRootCsv"
+Write-Host "Intune invent.: Csv=$IntuneInventoryCsv; RootCsv=$IntuneRootInventoryCsv; Tenant=$IntuneTenantId; Refresh=$(-not $EffectiveSkipIntuneInventoryRefresh); RequestedSkip=$([bool]$SkipIntuneInventoryRefresh); RecentRoot=$IntuneInventoryUsesRecentRootCsv"
 Write-Host "Tech run guard: Use=$script:UseEffectiveTechnicianRunGuardHistory; Requested=$UseTechnicianRunGuardHistory; Ignore=$IgnoreTechnicianRunGuardHistory; Hours=$RunGuardHours; Path=$script:TechnicianRunGuardHistoryPath"
 Write-Host "Parallelism   : ThrottleLimit=$ThrottleLimit; GlobalConcurrencyLimit=$GlobalConcurrencyLimit; GlobalLeaseTimeout=$GlobalConcurrencyLeaseTimeoutMinutes minute(s)"
 Write-Host "LOT/run options:"
@@ -3106,8 +3110,8 @@ Complete-LotCancellationSupport
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3SI32S/tXEwqm
-# 1FVlqqfT6HCu+jVgc+YvN2MKtbZ+raCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdfGaD1Fb8an5o
+# hxHPGrl85UKRVnbmsVdJsoljKPhTC6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3240,31 +3244,31 @@ Complete-LotCancellationSupport
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMBrwOUz5+XNHYzfkawIDBnPrfL85vgawzqwMgdJXMPyMA0GCSqG
-# SIb3DQEBAQUABIIBgJlkpPwV7B2oP+gRw/AA0i128idULLnnXel0ERdLmZ5ZnYoz
-# MLidXT0iilLZh5kdfdGCPmcCWLGGX1tzQba5jvJUwNDf8z3NG5wqNTb1zMCBROyk
-# ad4SDe0lgle+kN6L4k4x3HL2MMGRi87pFQqLZ0hKWN30vk1GHhNdaXNxN1qH9TJX
-# Lw8GM9Wv9/lI5dHH1JfGbOG5dsF+RkbZ72fHkq8htDAPTksrUT1XHMCJVd1oLKK3
-# h3ARz4e2qHxLZ0TRCzXbHxwIdDnhYvUTOEauQLwsKW6p3t+ODkqi7Af/te6yOTXY
-# 5fDKs7R2tWt4N5cXOHnCy+8dUv24OEYZhskYTxgrxJIPo8SYQuv2paTiurxuXLpt
-# sY7+Oewrg25pNLDx+hRHTFo7GDYFP7fpN4QQacBw8X/zCBj+LYWzJP80N2GYTeRA
-# 5Ap3TMCY0ctleTLRPP3mcadAjan2tv7RARd28/BnBzyEpMX4PdqQKHlkK8Oy2JgM
-# hvT7+c4U+ctXcKmQbaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOGOZHUp2/JnyEhiofOV9c5RJHgIjQejW1hD1PPE0ef1MA0GCSqG
+# SIb3DQEBAQUABIIBgAvTl88CtOPqJ6ECQtCE1vHaZURO+YcHYT+HCU64QBEF8Ljy
+# E/ZztzuTBh8RjpYEYLZx9AIObIJKya/znJ9gyQk9AitYwPsfoZMtZhQ4VhdEJNG0
+# HnNEsVv4IrbshSCTFY/fu7M+FqTudK1USp6Y3stg54DoGsexWa+BkMG0Yo6ex2PC
+# W5UQf9VRtoLtPY5rbOGpqhiw2VK+/sd/GJH8HBbDRlF6SXN3NPRuA9HW9QxcJZCo
+# 2DQ178t0GY+qYTQwt3KsM7jdKoDhIp+5lHThbfk4mumZnol+cxNIYy2Vg4chO/Rl
+# CRDUvxGoV7syRtLHHQGtsezb9KiZzpzUuxyVXfu50DC+hGL9IndVEHPl4rm8Ek34
+# P9gG94u74W8WLkdip5k2MAx3jRmFnOIZHmyoCrUeQRixUGbod0kwfLtohTJmhHKy
+# NUuXdF+sHLXJ92bgMZwZ9KhTuvLNGjZ0KZGQbDAhhIR49evyEyYY8jlLKpthijQO
+# F+TUTI6kAqSA/dG/lqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMzMx
-# MTRaMC8GCSqGSIb3DQEJBDEiBCAswFbGAaSUy9tK+nZdipsnS2S/ng342f/HvaVK
-# OuubuTANBgkqhkiG9w0BAQEFAASCAgDPuVyUTvHQzBcJ+RQvlixyKC7hUoZNDkoa
-# RrlMYXBuFkIVgxtgipVqyXKHTePlr162N37cdU29J8XHKAz2ofDj5NT81jrkrEZ9
-# jJ1+b5rkonBZzc3iU4Js3Lu7MRl9pHUZfApoYJ7mEYoBZkYp+tKP8TmHwH2Y6PrS
-# jGe9TTjGnfdtLryR86I6BqTB0G9oYcgK7u12BjcOa8feSAnAS7FaJ5D8OcORpOS1
-# okkkfzDGNxoxGInJ63I0Bu/h4Gm8ms0wE838zrJUwzBFA8hlEqg1t59XMGW7iWlR
-# dEx2Wima9kQOi6lOkurzOZJ6ewgBVg4b+Duui6TqMdqQAAt8FFk/V8DmE2U74ZZj
-# pDFGTRXka7eLXqOFlpSFy1NLa86zr8JkiOi1GGbjitnKsfRdR/wXJXyEMHG/xaes
-# 8J5O3+plZXBoaOKuIXzY51X8wPM4eDJeYq3X2K2G2uDJRDhrFsyjRqcILxi20mOi
-# yLqCA/9sL2sHuE8yzSWRPS0H7VH8ETceaW8m1sp7EJt3H2P0P2eTLfhOjTbkayZF
-# znCERmhzgOJ0LN5JDSp1MHqdtj8R8CyZSC46e6XMUbzqpjH4S1ytjAvUhChY7F9U
-# 0Fp4iCbKAgS7yD9vmHX9csQhEIK01VwxqtdXPa17GEh7jxiyFL747crcfXipcOjA
-# DO6yCkDnRw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMzUx
+# NDZaMC8GCSqGSIb3DQEJBDEiBCATurVg0IwO/YU+kMVgJ4d6Mh2jHCP3eRtJJNcF
+# tvAOwTANBgkqhkiG9w0BAQEFAASCAgBmFilxpW8Ck+ULyAdp1jZ0TCdygqLtvdH0
+# YKS1pcAt2InvpT/6+3rbGPtWXU90qAUoJC5GjDZIC1aIuKINKLB14eHIXJqBFKYO
+# qYLdOqbIkj61/KEA+s4lAhskjQqCbVxtAkVkl99ihJbDjVYOY8ftu0WdjL0mq4VO
+# 8wwpW2XHzNLGuH87cGeAU0rDFOqcMH7QdQu0+4FcJjEf0Dcr/gTl82LdPZTkjWKF
+# rgSTieMJ2TWV3FmQ9GTeS/JXHGdiB+bV63pKM6s8tR7lt+l8FlfenSoaFhCh2wYH
+# iO2Obx2MsKdAL1Wa6QzR+XBaPjgAQ0KGcslxKs24JO5OAIzynOo3XuYi7njpFqlg
+# iuSSsmxonaZ3QQ4gmfzWi9+/nG5tL2Wtd8qpvY1pMb8jL0SOAsPftsVaFkEcNCbq
+# Som2V/oy/zgCXn4+Uxu7jSJEkcGAku3rbuaiuc0g5pinKUm8gz9uHMjYW+qXkXmC
+# Jf/kAYFqJiu1xRhxeqnivlhh51m31G9SWpCyfYcVn9VWI48zQ7r0BHt12aUgKomj
+# OirFceS9jlyEtJyYK/hsfFS9rJQz5f3J8QvVs2CWGv+0eknvZ7M754Sht8pxcDYI
+# PoigBlHKeEyI1FM9rjegljqUhaYwSYGpXo3yxrdGgK0Qrwb1CZWm2hau8SM4EM46
+# gFcq2Ebesw==
 # SIG # End signature block
