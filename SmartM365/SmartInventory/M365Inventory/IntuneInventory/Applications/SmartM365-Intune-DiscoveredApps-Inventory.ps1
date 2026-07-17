@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.17
+    Version : 1.18
 
 .VERSION
-1.17
+1.18
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.17
+    Version : 1.18
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -716,6 +716,135 @@ function Get-DiscoveredAppsTargetAppIdsHash {
         $sha256.Dispose()
     }
 }
+function Get-DiscoveredAppsDeviceDetailCacheManifestPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory = $true)][string]$CsvPath)
+
+    $directory = Split-Path -Path $CsvPath -Parent
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($CsvPath)
+    return (Join-Path -Path $directory -ChildPath ("{0}.cache.json" -f $baseName))
+}
+
+function ConvertTo-DiscoveredAppsCacheStatsMap {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([AllowNull()]$Stats)
+
+    $map = @{}
+    foreach ($entry in @($Stats)) {
+        $id = ([string]$entry.AppId).Trim()
+        if ([string]::IsNullOrWhiteSpace($id) -or $map.ContainsKey($id)) { continue }
+
+        $map[$id] = [pscustomobject]@{
+            AppId        = $id
+            AppName      = [string]$entry.AppName
+            AppVersion   = [string]$entry.AppVersion
+            Publisher    = [string]$entry.Publisher
+            Platform     = [string]$entry.Platform
+            Rows         = [int]$entry.Rows
+            DeviceRows   = [int]$entry.DeviceRows
+            MetadataOk   = [bool]$entry.MetadataOk
+            EnrichmentOk = [bool]$entry.EnrichmentOk
+        }
+    }
+    return $map
+}
+
+function Read-DiscoveredAppsDeviceDetailCacheManifest {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory = $true)][string]$CachePath)
+
+    $manifestPath = Get-DiscoveredAppsDeviceDetailCacheManifestPath -CsvPath $CachePath
+    $result = [ordered]@{
+        Used   = $false
+        Path   = $manifestPath
+        Stats  = @{}
+        Reason = ''
+    }
+
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        $result.Reason = 'manifest not found'
+        return [pscustomobject]$result
+    }
+
+    try {
+        $cacheItem = Get-Item -LiteralPath $CachePath -ErrorAction Stop
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([int]$manifest.CacheManifestVersion -ne 1) {
+            $result.Reason = "unsupported manifest version: $($manifest.CacheManifestVersion)"
+            return [pscustomobject]$result
+        }
+        if ([int64]$manifest.SourceCsvLength -ne [int64]$cacheItem.Length) {
+            $result.Reason = "manifest source length mismatch: manifest=$($manifest.SourceCsvLength); csv=$($cacheItem.Length)"
+            return [pscustomobject]$result
+        }
+
+        $statsMap = ConvertTo-DiscoveredAppsCacheStatsMap -Stats $manifest.Stats
+        if ($statsMap.Count -eq 0) {
+            $result.Reason = 'manifest contains no stats'
+            return [pscustomobject]$result
+        }
+
+        $result.Used = $true
+        $result.Stats = $statsMap
+        $result.Reason = 'manifest stats loaded'
+        return [pscustomobject]$result
+    }
+    catch {
+        $result.Reason = "failed to read manifest: $_"
+        return [pscustomobject]$result
+    }
+}
+
+function Write-DiscoveredAppsDeviceDetailCacheManifest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CsvPath,
+        [Parameter(Mandatory = $true)][hashtable]$StatsById
+    )
+
+    if (-not (Test-Path -LiteralPath $CsvPath -PathType Leaf)) {
+        WriteLog -Message "DeviceDetail cache manifest skipped; CSV not found: $CsvPath" 'WARNING'
+        return $null
+    }
+
+    $csvItem = Get-Item -LiteralPath $CsvPath -ErrorAction Stop
+    $manifestPath = Get-DiscoveredAppsDeviceDetailCacheManifestPath -CsvPath $CsvPath
+    $manifestFolder = Split-Path -Path $manifestPath -Parent
+    if (-not (Test-Path -LiteralPath $manifestFolder)) { New-Item -ItemType Directory -Path $manifestFolder -Force | Out-Null }
+
+    $stats = @($StatsById.Values | Sort-Object AppId | ForEach-Object {
+        [pscustomobject]@{
+            AppId        = [string]$_.AppId
+            AppName      = [string]$_.AppName
+            AppVersion   = [string]$_.AppVersion
+            Publisher    = [string]$_.Publisher
+            Platform     = [string]$_.Platform
+            Rows         = [int]$_.Rows
+            DeviceRows   = [int]$_.DeviceRows
+            MetadataOk   = [bool]$_.MetadataOk
+            EnrichmentOk = [bool]$_.EnrichmentOk
+        }
+    })
+
+    $manifest = [ordered]@{
+        CacheManifestVersion    = 1
+        GeneratedAtUtc          = (Get-Date).ToUniversalTime().ToString('o')
+        SourceCsvFileName       = $csvItem.Name
+        SourceCsvLength         = [int64]$csvItem.Length
+        SourceCsvLastWriteTimeUtc = $csvItem.LastWriteTimeUtc.ToString('o')
+        AppCount                = $stats.Count
+        TotalRows               = [int64](@($stats | Measure-Object -Property Rows -Sum).Sum)
+        TotalDeviceRows         = [int64](@($stats | Measure-Object -Property DeviceRows -Sum).Sum)
+        Stats                   = $stats
+    }
+
+    $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+    WriteLog -Message ("DeviceDetail cache manifest written: {0}; Apps={1}; Rows={2}" -f $manifestPath, $manifest.AppCount, $manifest.TotalRows) 'INFO'
+    return $manifestPath
+}
 function Test-DiscoveredAppsDeviceDetailCacheRowEnrichment {
     [CmdletBinding()]
     param([AllowNull()]$Row)
@@ -765,6 +894,9 @@ function Use-DiscoveredAppsDeviceDetailCache {
         Apps      = 0
         Rows      = 0
         RejectedEnrichmentApps = 0
+        ManifestUsed = $false
+        ManifestPath = ''
+        ManifestStats = @{}
         Reason    = ''
     }
 
@@ -792,51 +924,73 @@ function Use-DiscoveredAppsDeviceDetailCache {
     }
 
     $statsById = @{}
-    try {
-        Import-Csv -LiteralPath $CachePath | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AppId) -and $targetById.ContainsKey([string]$_.AppId) } | ForEach-Object {
-            $id = [string]$_.AppId
-
-            if (-not $statsById.ContainsKey($id)) {
-                $statsById[$id] = [pscustomobject]@{
-                    AppId      = $id
-                    AppName    = [string]$_.AppName
-                    AppVersion = [string]$_.AppVersion
-                    Publisher  = [string]$_.AppPublisher
-                    Platform   = [string]$_.Platform
-                    Rows       = 0
-                    DeviceRows = 0
-                    MetadataOk = $true
-                    EnrichmentOk = $true
-                }
-            }
-
-            $stat = $statsById[$id]
-            $stat.Rows++
-            if (-not [string]::IsNullOrWhiteSpace([string]$_.DeviceId)) {
-                $stat.DeviceRows++
-                if ($stat.EnrichmentOk -and -not (Test-DiscoveredAppsDeviceDetailCacheRowEnrichment -Row $_)) {
-                    $stat.EnrichmentOk = $false
-                }
-            }
-
-            $app = $targetById[$id]
-            if ([string]$_.AppName -ne [string]$app.displayName -or
-                [string]$_.AppVersion -ne [string]$app.version -or
-                [string]$_.AppPublisher -ne [string]$app.publisher -or
-                [string]$_.Platform -ne [string]$app.platform) {
-                $stat.MetadataOk = $false
+    $manifestResult = Read-DiscoveredAppsDeviceDetailCacheManifest -CachePath $CachePath
+    if ($manifestResult.Used) {
+        foreach ($manifestStatEntry in @($manifestResult.Stats.GetEnumerator())) {
+            $manifestAppId = [string]$manifestStatEntry.Key
+            if ($targetById.ContainsKey($manifestAppId)) {
+                $statsById[$manifestAppId] = $manifestStatEntry.Value
             }
         }
+        $result.ManifestUsed = $true
+        $result.ManifestPath = $manifestResult.Path
+        WriteLog -Message ("DeviceDetail cache manifest loaded: {0}; StatsApps={1}; TargetStatsApps={2}. Legacy cache stats scan skipped." -f $manifestResult.Path, $manifestResult.Stats.Count, $statsById.Count) 'INFO'
     }
-    catch {
-        $result.Reason = "failed to read cache stats: $_"
-        return [pscustomobject]$result
+    else {
+        if (-not [string]::IsNullOrWhiteSpace([string]$manifestResult.Reason)) {
+            WriteLog -Message ("DeviceDetail cache manifest not used: {0}; falling back to legacy cache stats scan." -f $manifestResult.Reason) 'INFO'
+        }
+        try {
+            Import-Csv -LiteralPath $CachePath | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AppId) -and $targetById.ContainsKey([string]$_.AppId) } | ForEach-Object {
+                $id = [string]$_.AppId
+
+                if (-not $statsById.ContainsKey($id)) {
+                    $statsById[$id] = [pscustomobject]@{
+                        AppId        = $id
+                        AppName      = [string]$_.AppName
+                        AppVersion   = [string]$_.AppVersion
+                        Publisher    = [string]$_.AppPublisher
+                        Platform     = [string]$_.Platform
+                        Rows         = 0
+                        DeviceRows   = 0
+                        MetadataOk   = $true
+                        EnrichmentOk = $true
+                    }
+                }
+
+                $stat = $statsById[$id]
+                $stat.Rows++
+                if (-not [string]::IsNullOrWhiteSpace([string]$_.DeviceId)) {
+                    $stat.DeviceRows++
+                    if ($stat.EnrichmentOk -and -not (Test-DiscoveredAppsDeviceDetailCacheRowEnrichment -Row $_)) {
+                        $stat.EnrichmentOk = $false
+                    }
+                }
+
+                $app = $targetById[$id]
+                if ([string]$_.AppName -ne [string]$app.displayName -or
+                    [string]$_.AppVersion -ne [string]$app.version -or
+                    [string]$_.AppPublisher -ne [string]$app.publisher -or
+                    [string]$_.Platform -ne [string]$app.platform) {
+                    $stat.MetadataOk = $false
+                }
+            }
+        }
+        catch {
+            $result.Reason = "failed to read cache stats: $_"
+            return [pscustomobject]$result
+        }
     }
 
     $cacheable = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($id in @($statsById.Keys)) {
         $stat = $statsById[$id]
         $app = $targetById[$id]
+        $metadataMatchesCurrent = ([string]$stat.AppName -eq [string]$app.displayName -and
+            [string]$stat.AppVersion -eq [string]$app.version -and
+            [string]$stat.Publisher -eq [string]$app.publisher -and
+            [string]$stat.Platform -eq [string]$app.platform)
+        if (-not $metadataMatchesCurrent) { $stat.MetadataOk = $false }
         $expectedDeviceCount = Get-DiscoveredAppsAppDeviceCount -App $app
         $deviceCountOk = if ($expectedDeviceCount -eq 0) {
             $stat.Rows -gt 0 -and $stat.DeviceRows -eq 0
@@ -892,6 +1046,7 @@ function Use-DiscoveredAppsDeviceDetailCache {
 
     $result.Used = $true
     $result.Apps = $cacheable.Count
+    $result.ManifestStats = $statsById
     $result.Reason = 'cache rows reused'
     return [pscustomobject]$result
 }
@@ -1174,6 +1329,7 @@ try {
     # ----------------------------------------------------------
     $detailRecords = [System.Collections.Generic.List[psobject]]::new()
     $actualDeviceCountsByAppId = @{}
+    $deviceDetailManifestStatsById = @{}
     $detailApps = switch ($DeviceDetailMode) {
         'None' { @() }
         'NonZero' { @($windowsApps | Where-Object { [int]($_.deviceCount) -gt 0 }) }
@@ -1262,7 +1418,13 @@ try {
                         $script:Stat_DeviceDetailRowsFromCache = [int]$cacheResult.Rows
                         $script:Stat_AppsProcessed += [int]$cacheResult.Apps
                         $script:Stat_DeviceDetailRows += [int]$cacheResult.Rows
-                        WriteLog -Message ("Previous DeviceDetail cache reused: Apps={0}; Rows={1}; EnrichmentRejectedApps={2}; Cache={3}" -f $cacheResult.Apps, $cacheResult.Rows, $cacheResult.RejectedEnrichmentApps, $cacheResult.CachePath) "INFO"
+                        foreach ($cacheStatEntry in @($cacheResult.ManifestStats.GetEnumerator())) {
+                            $cacheStat = $cacheStatEntry.Value
+                            if ($cacheStat -and -not [string]::IsNullOrWhiteSpace([string]$cacheStat.AppId)) {
+                                $deviceDetailManifestStatsById[[string]$cacheStat.AppId] = $cacheStat
+                            }
+                        }
+                        WriteLog -Message ("Previous DeviceDetail cache reused: Apps={0}; Rows={1}; EnrichmentRejectedApps={2}; ManifestUsed={3}; Cache={4}" -f $cacheResult.Apps, $cacheResult.Rows, $cacheResult.RejectedEnrichmentApps, $cacheResult.ManifestUsed, $cacheResult.CachePath) "INFO"
                     } else {
                         WriteLog -Message ("Previous DeviceDetail cache not reused: {0}" -f $cacheResult.Reason) "INFO"
                     }
@@ -1348,6 +1510,27 @@ try {
                     }
                 }
                 $actualDeviceCountsByAppId[[string]$app.id] = if (-not $devices -or $devices.Count -eq 0) { 0 } else { $appRows.Count }
+                $appManifestDeviceRows = 0
+                $appManifestEnrichmentOk = $true
+                foreach ($appManifestRow in @($appRows)) {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$appManifestRow.DeviceId)) {
+                        $appManifestDeviceRows++
+                        if ($appManifestEnrichmentOk -and -not (Test-DiscoveredAppsDeviceDetailCacheRowEnrichment -Row $appManifestRow)) {
+                            $appManifestEnrichmentOk = $false
+                        }
+                    }
+                }
+                $deviceDetailManifestStatsById[[string]$app.id] = [pscustomobject]@{
+                    AppId        = [string]$app.id
+                    AppName      = [string]$app.displayName
+                    AppVersion   = [string]$app.version
+                    Publisher    = [string]$app.publisher
+                    Platform     = [string]$app.platform
+                    Rows         = [int]$appRows.Count
+                    DeviceRows   = [int]$appManifestDeviceRows
+                    MetadataOk   = $true
+                    EnrichmentOk = [bool]$appManifestEnrichmentOk
+                }
 
                 if ($streamingEnabled) {
                     Write-DiscoveredAppsCsvRows -Path $script:DeviceDetailPartialPath -Rows @($appRows)
@@ -1420,6 +1603,11 @@ try {
                     -BaseFileName $detailBaseFileName
                 if ($completedPath) {
                     $script:DeviceDetailCompleted = $true
+                    $deviceDetailManifestRoots = @($OutputPath, $(if ([string]::IsNullOrWhiteSpace($globalPath)) { $OutputPath } else { $globalPath })) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique
+                    foreach ($deviceDetailManifestRoot in $deviceDetailManifestRoots) {
+                        $deviceDetailLatestForManifest = Join-Path -Path $deviceDetailManifestRoot -ChildPath ("$detailBaseFileName.csv")
+                        Write-DiscoveredAppsDeviceDetailCacheManifest -CsvPath $deviceDetailLatestForManifest -StatsById $deviceDetailManifestStatsById | Out-Null
+                    }
                     Remove-Item -LiteralPath $script:DeviceDetailResumePath -Force -ErrorAction SilentlyContinue
                 }
             } else {
