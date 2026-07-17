@@ -2,22 +2,22 @@
     AppId = 'ExchangeMigrationReadiness'
     ProductName = 'Smart Exchange Migration Readiness'
     RepositoryUrl = 'https://github.com/khda79/workplacecloudhub.com'
-    GitHubPathUrl = 'https://github.com/khda79/workplacecloudhub.com/tree/main/SmartM365/ExchangeMigrationReadiness'
+    GitHubPathUrl = 'https://github.com/khda79/workplacecloudhub.com/tree/main/SmartM365/Exchange/MigrationReadiness'
     Branch = 'main'
     DisableEnvironmentVariable = 'SEMR_GUI_UPDATE_CHECK'
     TimeoutSeconds = 4
-    CacheRoot = 'C:\ProgramData\SmartM365\ExchangeMigrationReadiness\GuiUpdateCheck'
+    CacheRoot = 'C:\ProgramData\SmartM365\Exchange\MigrationReadiness\GuiUpdateCheck'
     Components = @(
         @{
             Name = 'Readiness GUI'
             LocalPath = 'SmartM365-ExchangeMigrationReadiness-GUI.ps1'
-            RemotePath = 'SmartM365/ExchangeMigrationReadiness/SmartM365-ExchangeMigrationReadiness-GUI.ps1'
+            RemotePath = 'SmartM365/Exchange/MigrationReadiness/SmartM365-ExchangeMigrationReadiness-GUI.ps1'
             VersionSource = 'Header'
         }
         @{
             Name = 'Readiness engine'
             LocalPath = 'SmartM365.ExchangeMigrationReadiness.psm1'
-            RemotePath = 'SmartM365/ExchangeMigrationReadiness/SmartM365.ExchangeMigrationReadiness.psm1'
+            RemotePath = 'SmartM365/Exchange/MigrationReadiness/SmartM365.ExchangeMigrationReadiness.psm1'
             VersionSource = 'Variable'
             VersionVariable = 'script:SemrVersion'
         }
@@ -26,8 +26,8 @@
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAD2349vwc7Owza
-# 7pP7fsNOizbPmUQ87FCwpluhHvjba6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCafv7KquIYJy56
+# GEYinDVAZ4Y0m9R8tda429A0tRYnDaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -160,31 +160,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICezqvVXJ8nFptVZP9zqKDL9hnlfLk0bPV0mxTjAq1ocMA0GCSqG
-# SIb3DQEBAQUABIIBgHuQIJETav/SovSCUhbxQCy6w8iteqiFDGl5F+bRUUsYonSZ
-# 6eU2N2WswgSL6s2g89ttcXutU7V3t0qo92j3uIHSk7fNrkPFqcq8pgJXeWWqQ7eY
-# fcdfT2fOuTycYtWLmlK4JkIz+7PRreQ4A5OaVGdBCGnBPJxCZQRS2YLvZMbJdmub
-# H/1AP0+voHjG75rkhhJsJaQsL8GEBTQRmw12p5fHg1H4tTYm6yER8zKiL4GxQ8U9
-# nsDyi9bYWh0bxRdDKpfxjFvWeo5JllJGnQxwMyIMB1XLKOor7tWSeNyCJEOGjOXD
-# FkxG0tTiZcKaZumcWLphGV2lSkE1PqqukAsBqXLz9UnM0uuSi/6C/BxLs5LczNoo
-# btGb4vZk78NJ8sDjNi5ni+GyCTfLKxPT3RngG8m8OUSZLgZr5b7qslTt4Qw1qwRk
-# w8I5e99wjBbyIvhEtYDzfdCoKg1o09iX1amh54dg2f+mT7VFKcPM2rHxbPYmuBx+
-# CLW9lSPv87fHAf8SQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILt3ZPKpoZvEZhvVUnongkBYfE4o86BoRRkeOLFP8q+xMA0GCSqG
+# SIb3DQEBAQUABIIBgFFTdS655I6QsUqXwt6/BPyTmHo2ubQzuJiYnOGApqSqHLqI
+# pVB69EAhrWdgIV+FEG6ZhDLa3qLTRl3qBP7SP0G+b+kmw3hY7ssva37LJn91jSSM
+# cdRqWVedycha+miDkqMTEsIVdCCZVF6teowmAz1gbDqclYd72uXu+baajSDgGnXB
+# aBlFpvtGEOhhYP6Csagml18XmLJHlymmCqZPjaTIcUHLdgZto0Y2qlvo3TOM2e0O
+# 2Et3Z3UWkXw0Ymbhfswofuzvfo/58WUKlckKCuqk6kd/L0uMwzZg9UcQxoPzJE+L
+# Pv5PDqkKCIFAASNRk8uw57T/kTPypY/7Q887mZuBgEkyrJu4/LGx7KwiOjRd2oJR
+# 0yGk3IdrOKRXvjIso7SncDvdJTAj1pXwYKnIZwY11Mz7aNNCnMVmWiPmspveRwml
+# tH4iFmBosmoYfm3KwWpjoGjr0exh7HaNr+wWkMuhK3P9jZgBVDUNygBes2BLBqD8
+# y96+1/QTKvvqf4JiD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcxNjQy
-# NThaMC8GCSqGSIb3DQEJBDEiBCD8xPgqXGrpNg2sm1OXDiadOOKQP2F37K2qXxGQ
-# kKQGyjANBgkqhkiG9w0BAQEFAASCAgCiYFftoDFFkEcsygZVrYJaAIf09wubTKFY
-# oJaJjsWtd4GujYV+Ge0CmrvAyIh+0CtZ6i9OftQn2YQRFVe7jxPCN9SpX6loGj7b
-# zq9678fs7nUvfkku89jQMwoF8Tl2Qwv3PtxvC2Vxpp29BZUZkfIp7fwAeZUBhIfl
-# BEq/7U6OL7KI02RiaOBLzhlw9Mmk6wX7FtMY8Kz7l1FI8vA4N+nbpgLtf4Pw515u
-# Yr5s/4HyCI+Z5podqjAztl4Y+Zl4wlI8lXlzouvzhktx+A1kdh+3TcleBXTGMFjF
-# bqT0+BN4yUJWHYdxl3KfMJTbpsWpWKPU6IltAx24UeqpfOarXlyPcv2a96HC3p+0
-# esM2je6rl8SC0TP221n5j3BO6manqdMFLiWs1LmmOuoO8oxdzCpG/EZqEFQyGi4O
-# J1OfUUdpNaHDCPmxIE065E1Hzw1hA7c7qR1yYNO0A+SZ9e1QUnF3UpNWVGps1ydS
-# ZLcGW419A5JdkfKHPov5CtrKql5RtPWiQsUEHUxiFKJOPuzAgauTrDavKv0EgZ+e
-# qX+nYAKXKNvralroqTdz8jAVbgX5f9gQ+r1WB/O1n9PBuJ/AcdMIbAWGRNwP0Zxd
-# cvl4YjCh1RI4Ds/CfVE+59wZmiOo2sTBYFPWE0Ul5YY+YA6dRlDxQ1ov3P3+xzy1
-# sX6CN8syqQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMDQw
+# NDhaMC8GCSqGSIb3DQEJBDEiBCAf8dD9m02Lt+rBDGzfPL4148O2ZyYgZ4VX8f59
+# 7d9jODANBgkqhkiG9w0BAQEFAASCAgAu4MMPwjH+MhiXoLdhdh39mrOkyDrp0T21
+# MjlA8Ond5LbNTajN9zKQzUIoutxTVtkwOiAqQDEVHRsLmYnt2gBIS39xE54+9+ZB
+# 9Au0I0Un7AJ/DrG5qtDWEpK0V5mmysvEtn8yfedo2mFxLnf8B4WNM+Ukkf9L1yr0
+# ZgDtRRuV8+iGd/haj6fqgDsUO7uREB5qPt17oB2DJOps2AL2AoQ2+DfEoi9R9Y43
+# vGW1umVEb5cdNcTi+XP4gMRxqleHUk0mnw22N1wZC1tBarOVDFfusz9mQxeqYDdA
+# FeP5YA+WVN79P16HWPVsqlEj+JAa4AjFRBatMXOEVA39w7eKCKiWwpjpckp+nsqk
+# 9RvrskDuzISv9nO2QVUsnI1BaTNDOqBGOslT1GMzuCGjFqWlB7wxaTrcIVeR+RYy
+# fxVc5SLyX+odzNWWfbPltyS6axyiIQ1911b/uJ/F3RspZb4pwOkzlap6EBu46JaA
+# NAJPsQY9LYJXRshWplBDT3fGtPQIcurnN7vV7NM3a7025DHFpaE4O5AxGvQgnrOB
+# vjqY2wVMZikTuJjfKl+qfGAOO9lSr1qCNwAeqo3PbJk8M2KOWNIHp9c8RzxnB8aV
+# r5Fdz+Rz089b2hmgUFsf+LQlWuiJpVJqRdjHqhVtfkTv87dGrrCBjRK5KHHoDYsV
+# kxmflYFQPg==
 # SIG # End signature block

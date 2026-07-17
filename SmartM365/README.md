@@ -9,16 +9,18 @@ SmartM365 is organized as a set of independent but consistent projects. Some scr
 - Use `Setup/` when you need the SmartM365 app registration, Graph application permissions, SharePoint upload target, Teams notification channels, or tenant profile templates.
 - Use `SmartInventory/` when you need repeatable CSV exports for reporting, Power BI, audit, or operational review.
 - Use `SharePointMigration/` when you need to validate SharePoint source-to-destination migrations with inventories, comparisons, Excel exports, and guarded cleanup helpers.
+- Use `Exchange/MigrationReadiness/` when you need a read-only GUI preflight for Exchange hybrid mailbox migration batches, including identity, quota, licensing, permission, endpoint, and synchronization checks.
 - Use `Devices/` when you need local endpoint tools such as reboot governance, Intune enrollment diagnostics, endpoint diagnostic analysis, Intune remediation management, Hybrid Join repair orchestration, or Windows 11 upgrade orchestration.
-- Use `Communications/` when you need user-facing notification campaigns driven by Microsoft 365 data.
+- Use `Exchange/Communications/` when you need user-facing notification campaigns driven by Microsoft 365 data.
 
 Local tenant configuration files are not committed. Use the committed templates to create local profiles before running tenant-based inventory or setup scripts.
 
 ## Content
 
 - Smart Inventory scripts under `SmartInventory/` for Active Directory, Exchange, Microsoft 365, Entra, and Intune data collection. These exports can feed Power BI datasets and other reporting or operational consumers.
+- Smart Exchange Migration Readiness under `Exchange/MigrationReadiness/` for read-only GO / NO-GO assessment of Exchange hybrid migration batches.
 - Smart SharePoint Migration Toolkit under `SharePointMigration/` for SharePoint source-to-destination migration validation, reconciliation exports, and guarded post-migration cleanup operations.
-- User-facing operational notification scripts under `Communications/`, including Exchange migration, archive mailbox, and mailbox reduction campaigns.
+- User-facing operational notification scripts under `Exchange/Communications/`, including Exchange migration, archive mailbox, and mailbox reduction campaigns.
 - Device and endpoint tooling under `Devices/`, including reboot governance, device registration diagnostics, endpoint diagnostics, Intune remediation management, Hybrid Join repair tooling, and Windows 11 upgrade tooling.
 
 ## Requirements At A Glance
@@ -59,7 +61,7 @@ If the project-level `Data` folder is not writable, scripts fall back to a local
 
 ## Communications
 
-`Communications/` contains scripts that can send user-facing emails. Campaign-specific values are kept in local configuration files under `Communications/.../Config`, while shared tenant values such as Graph mail sender, Teams webhooks, and output roots continue to come from the standard SmartM365 tenant profiles.
+`Exchange/Communications/` contains scripts that can send user-facing emails. Campaign-specific values are kept in local configuration files under `Exchange/Communications/.../Config`, while shared tenant values such as Graph mail sender, Teams webhooks, and output roots continue to come from the standard SmartM365 tenant profiles.
 
 Use `-WhatIf` before live campaign runs. The provided launchers default to dry-run mode.
 

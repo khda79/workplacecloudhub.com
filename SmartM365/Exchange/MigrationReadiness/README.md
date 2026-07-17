@@ -10,14 +10,14 @@ Le mode est sélectionnable directement dans l’interface.
 
 ### Live — mode par défaut
 
-- Exchange Online : connexion interactive déléguée obligatoire pour les contrôles EXO.
-- Microsoft Graph : connexion interactive déléguée standard dans le navigateur.
+- Exchange Online : connexion interactive déléguée lancée automatiquement par Run assessment.
+- Microsoft Graph : connexion interactive déléguée standard lancée automatiquement après Exchange Online.
 - Active Directory : tentative live automatique ; fallback sur `AD_Users_AllDomains.csv` si AD est indisponible.
 - Exchange on-premises / Exchange 2016 : utilisation des cmdlets live lorsqu’elles sont disponibles ; fallback sur `Exchange_OnPrem_Mailboxes_AllDomains.csv` sinon.
 - Santé Microsoft Entra Connect : lecture live des cmdlets ADSync locales lorsqu’elles sont disponibles ; fallback sur `M365_Entra_AzureADConnect_SyncHealth.csv` sinon.
-- Endpoint de migration : test live via Exchange Online.
+- Endpoint de migration et santé Entra Connect : contrôlés automatiquement pendant l’évaluation.
 
-Les inventaires AD, Exchange 2016 et Entra Connect sont préchargés comme sources de secours. Sur une machine sans accès on-premises, la bascule CSV est automatique et la source réellement utilisée apparaît dans les findings et dans l’onglet Activity.
+Les inventaires AD, Exchange 2016 et Entra Connect sont préchargés comme sources de secours. Sur une machine sans accès on-premises, la bascule CSV est automatique et la source réellement utilisée apparaît dans les findings et dans l’onglet Activity. L’onglet Sources est informatif : il n’expose plus de boutons de connexion séparés.
 
 ### CacheOnly
 
@@ -81,6 +81,8 @@ Scopes Graph par défaut :
 Start-SmartM365-ExchangeMigrationReadiness-GUI.cmd
 ```
 
+Le lanceur CMD démarre PowerShell 7 dans un processus détaché et masqué, puis se ferme immédiatement.
+
 Validation statique sans afficher l’interface :
 
 ```powershell
@@ -131,7 +133,7 @@ L’application vérifie la présence et l’âge des fichiers avant de les cons
 
 ## CSV de migration
 
-La colonne canonique est `EmailAddress`. Sont également acceptées : `PrimarySmtp`, `PrimarySmtpAddress`, `UserPrincipalName`, `UPN` ou `Mailbox`.
+La colonne canonique est `EmailAddress`. Sont également acceptées : `PrimarySmtp`, `PrimarySmtpAddress`, `UserPrincipalName`, `UPN` ou `Mailbox`. Le fichier est chargé et validé immédiatement après sa sélection avec Browse.
 
 Colonnes optionnelles interprétées :
 
