@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.59
+    0.1.61
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,8 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.59'
+$script:LauncherVersion = '0.1.61'
+$script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
 if ([string]::IsNullOrWhiteSpace($LocalScriptPath)) {
@@ -406,9 +407,11 @@ function Invoke-TechnicianRunGuardHistoryLock {
     $mutex = $null
     $acquired = $false
     try {
-        $mutex = New-Object System.Threading.Mutex($false, 'Local\SmartM365_Windows11UpgradeToolkit_TechnicianRunGuardHistory')
-        $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds(15))
-        if (-not $acquired) { throw 'Timed out waiting for technician run guard history lock.' }
+        $mutexName = 'Global\SmartM365_Windows11UpgradeToolkit_TechnicianRunGuardHistory'
+        try { $mutex = New-Object System.Threading.Mutex($false, $mutexName) }
+        catch { $mutex = New-Object System.Threading.Mutex($false, 'Local\SmartM365_Windows11UpgradeToolkit_TechnicianRunGuardHistory') }
+        try { $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds(60)) } catch [System.Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) { throw 'Timed out waiting for technician run guard history lock after 60 seconds.' }
         & $ScriptBlock @ArgumentList
     }
     finally {
@@ -504,17 +507,47 @@ function Save-TechnicianRunGuardHistory {
         [Parameter(Mandatory = $true)]$History
     )
 
-    New-Directory -Path (Split-Path -Parent $Path)
+    $parent = Split-Path -Parent $Path
+    New-Directory -Path $parent
     $History.UpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
-    $History | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding UTF8
-}
+    $json = $History | ConvertTo-Json -Depth 8
+    $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
+    $lastError = $null
 
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+            Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            return
+        }
+        catch [System.IO.IOException] {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(2000, 150 * $attempt))
+        }
+        catch [System.UnauthorizedAccessException] {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(2000, 150 * $attempt))
+        }
+    }
+
+    if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+    if ($lastError) { throw $lastError }
+    throw ("Failed to save technician run guard history: {0}" -f $Path)
+}
 function Test-TechnicianRunGuardEntryShouldBlock {
-    param([AllowNull()]$Entry)
+    param(
+        [AllowNull()]$Entry,
+        [ValidateRange(0, 168)][int]$RunGuardHours
+    )
 
     if (-not $Entry) { return $false }
     $state = if ($Entry.PSObject.Properties['State']) { [string]$Entry.State } else { '' }
-    if ($state -ne 'Result') { return $true }
+    if ($state -ne 'Result') {
+        $startedUtc = [datetime]::MinValue
+        if (-not (ConvertTo-TechnicianRunGuardUtcDateTime -Value $Entry.LastStartedUtc -Result ([ref]$startedUtc))) { return $false }
+        $startedNoResultGuardHours = [math]::Min([double]$RunGuardHours, [double]$script:TechnicianRunGuardStartedNoResultHours)
+        return (((Get-Date).ToUniversalTime() - $startedUtc.ToUniversalTime()).TotalHours -lt $startedNoResultGuardHours)
+    }
 
     $launcherStatus = if ($Entry.PSObject.Properties['LauncherStatus']) { [string]$Entry.LauncherStatus } else { '' }
     $remoteStatus = if ($Entry.PSObject.Properties['RemoteStatus']) { [string]$Entry.RemoteStatus } else { '' }
@@ -608,7 +641,7 @@ function Get-ActiveTechnicianRunGuardEntry {
             if ([string]$entry.ComputerFqdn -eq $LockedComputerFqdn) { $FoundRef.Value = $entry; break }
         }
     }
-    if ($found.ContainsKey('Value') -and (Test-TechnicianRunGuardEntryShouldBlock -Entry $found.Value)) { return $found.Value }
+    if ($found.ContainsKey('Value') -and (Test-TechnicianRunGuardEntryShouldBlock -Entry $found.Value -RunGuardHours $RunGuardHours)) { return $found.Value }
     return $null
 }
 
@@ -737,7 +770,12 @@ function New-TechnicianRunGuardSkippedResult {
     $historyState = if ($HistoryEntry.PSObject.Properties['State']) { [string]$HistoryEntry.State } else { '' }
     $historyJobId = if ($HistoryEntry.PSObject.Properties['JobId']) { [string]$HistoryEntry.JobId } else { '' }
     $lastStatus = @([string]$HistoryEntry.RemoteStatus, [string]$HistoryEntry.LauncherStatus) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
-    $launcherStatus = if ($historyState -ne 'Result' -and [string]::IsNullOrWhiteSpace($lastStatus)) { 'SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT' } else { 'SKIPPED_BY_TECH_RUN_GUARD' }
+    $isStartedWithoutResult = ($historyState -ne 'Result' -and [string]::IsNullOrWhiteSpace($lastStatus))
+    $startedNoResultGuardHours = [math]::Min([double]$RunGuardHours, [double]$script:TechnicianRunGuardStartedNoResultHours)
+    $effectiveGuardHours = if ($isStartedWithoutResult) { $startedNoResultGuardHours } else { [double]$RunGuardHours }
+    $effectiveExpiresText = $expiresText
+    if ($isStartedWithoutResult -and $startedUtc -gt [datetime]::MinValue) { $effectiveExpiresText = $startedUtc.ToUniversalTime().AddHours($startedNoResultGuardHours).ToString('o') }
+    $launcherStatus = if ($isStartedWithoutResult) { 'SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT' } else { 'SKIPPED_BY_TECH_RUN_GUARD' }
 
     return [pscustomobject]@{
         Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -747,7 +785,7 @@ function New-TechnicianRunGuardSkippedResult {
         RemoteStatus = ''
         RemoteNextAction = 'WAIT_RUN_GUARD_EXPIRY'
         ExitCode = 0
-        Detail = ("Technician run guard history skipped launch. FQDN={0}; LastStartedUtc={1}; AgeHours={2:N1}; GuardHours={3}; ExpiresUtc={4}; HistoryState={5}; JobId={6}; LastStatus={7}" -f $HistoryEntry.ComputerFqdn,$startedText,$ageHours,$RunGuardHours,$expiresText,$historyState,$historyJobId,$lastStatus)
+        Detail = ("Technician run guard history skipped launch. FQDN={0}; LastStartedUtc={1}; AgeHours={2:N1}; GuardHours={3}; EffectiveGuardHours={4:N1}; ExpiresUtc={5}; HistoryState={6}; JobId={7}; LastStatus={8}" -f $HistoryEntry.ComputerFqdn,$startedText,$ageHours,$RunGuardHours,$effectiveGuardHours,$effectiveExpiresText,$historyState,$historyJobId,$lastStatus)
         SetupCacheAction = ''
         DiskCleanupAction = ''
         DiskCleanupFreedGB = ''
