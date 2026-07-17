@@ -69,7 +69,7 @@ Builds candidates from the license inventory CSV and performs a dry run using th
 Performs a dry run for a manually supplied pilot recipient list.
 
 .VERSION
-1.3
+1.4
 #>
 [CmdletBinding(DefaultParameterSetName = 'Inventory')]
 param(
@@ -264,25 +264,9 @@ function ConvertTo-GraphODataStringLiteral {
 function Ensure-GraphLicenseLookup {
     param([hashtable]$TenantConfig)
 
-    if (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue) {
-        try {
-            $context = Get-MgContext -ErrorAction SilentlyContinue
-            if ($context) { return }
-        }
-        catch {}
-    }
-
-    $connectResult = Connect-SmartM365CloudSession `
-        -AppId ([string](Get-SmartM365CommunicationConfigValue -Config $TenantConfig -Name 'AppId' -DefaultValue '')) `
-        -TenantId ([string](Get-SmartM365CommunicationConfigValue -Config $TenantConfig -Name 'TenantId' -DefaultValue '')) `
-        -Thumbprint ([string](Get-SmartM365CommunicationConfigValue -Config $TenantConfig -Name 'Thumbprint' -DefaultValue (Get-SmartM365CommunicationConfigValue -Config $TenantConfig -Name 'Thumb' -DefaultValue ''))) `
-        -Organization ([string](Get-SmartM365CommunicationConfigValue -Config $TenantConfig -Name 'OrgDomain' -DefaultValue '')) `
-        -ExchangeOnline:$false `
-        -Graph:$true `
-        -GraphScopes @('User.Read.All', 'Directory.Read.All')
-
-    if (-not $connectResult.GraphConnected) {
-        throw 'Microsoft Graph live license lookup failed to connect.'
+    $tenantId = [string](Get-SmartM365CommunicationConfigValue -Config $TenantConfig -Name 'TenantId' -DefaultValue '')
+    if (-not (Connect-SmartM365CommunicationTeamsUserGraph -TenantId $tenantId -Scopes @('User.Read.All', 'Directory.Read.All'))) {
+        throw 'Microsoft Graph delegated interactive license lookup failed to connect.'
     }
 }
 
@@ -882,8 +866,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAfV2+iBLus91QE
-# YDY7bsyZJP6SZsd62zVAiu21eoXyaKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDW6/2ez0wMMRDY
+# oHQKfOUrl++FHA1LU5p+ZNjq/A/4m6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1016,31 +1000,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDP45+VI4DVz1Dp/91ddqE5gsFh7iCL3gSDs/5iMqz+lMA0GCSqG
-# SIb3DQEBAQUABIIBgG0pOp5n9quB+NFIHyWNLqXTk/kC8UI27M0Hx/4tFwL9VRy5
-# OX4ezY2ifJLNw+tyslwJOpTUXRXQjt+uAo73L6l3iCG/goRlDaz3A2aECzSsZGDo
-# mSJhp7uQU2eZV5zM+Uu3yORJnyNg7rZ0lrCPC1v9WHmPzy3C+noChOMbybAqCsFM
-# whFgvexOtwDl462s4NuTV2UEQM3G95fqWVKZQAGu+N5qI3ua3ndh48VKH/DzSKeQ
-# ZK1dsJVbQIWOAwbhQFPRC9baumriX7SOFDKPFgfViDPC4Us28Qrtb1FMuSNBVcOG
-# ZLIolxXd9L+D22Mu3M7CbCGqgK+T/zKfWZE19YureNh0iWt1Ix3k6eK2gwCyr9Tt
-# ULz6VgI/c5YzbOWOKN6NAsjsrHNoxuGJt3q8wBDfvbWyEWMgbf8ewIKNXjOvtQ0+
-# NngRQI7Mhy3kbbzj6/1WRnQgGixI7NMjPlRWDETueXebKgWRNtRdGw05q7gxfRT8
-# 2Ahe9aQBimoqfx3g9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOKiK7Jtevmwj2JLdUkqV0b8VsD5ABf9kh0cV3GlXXFrMA0GCSqG
+# SIb3DQEBAQUABIIBgDdrADKbCdxRhO+tjQWcaOQCwiSCN5cwLLBXOrOzIRA1/+9h
+# WNiyBZbUFfi/thB3hyIGIWx3ncpwQSn5SH1bqN5tsgo2XiV64p2L3fbR92Cv4kcg
+# VsKgFnuwbIKVh5+UzHpm/FfMBAEvYV7TkwdLQhzZuYYfndmpBlCXb4tR9ZkG3hHF
+# NZYjInJUEn6KO4LCrxNzp1H8f66O3tcwH1TGnmzJ45v+vd2ylCDU2GumxR9WiQfF
+# sbQ9H0K40mKxIkbXx/vQ1C7KeWP96Zl3Qth0s+IesINf8Tx4sPp83yzS/7nI5FGo
+# zGkAnVpg0Q0diAJShvRNxl+hIV5w4lGf1GxYuBe15jT7fVUbRjwoZ9LIt55wTima
+# c4ADLCvC6bCTvcvV9WyWCMYqEGL18aahMdyDML1UM2ioEeLOtdQm2RdPVX1TxQH9
+# empOuUXxjEBkfocpiJExFz2xqvbu8lpmhU1cAS5TvkCuPUuSoeZBw7eUl3tEb9Lb
+# 3Sa51fxHG68PGM+nrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MjNaMC8GCSqGSIb3DQEJBDEiBCAAV6TmoSJMnb1El5lyTpgZY83B6qs0NJxd3gZO
-# PN53ijANBgkqhkiG9w0BAQEFAASCAgCOhUsuKsAZS+HnYyXPeKBMd0NoEWhN5QTT
-# TWEAI63nS07/QecZMOFnjy5x+YDtM+Uj5dz2d950WL3PmzcSa2AMnlUkwG+at5G6
-# wRCxStzQxIOKtFlZAQtVPYNqRTSrFeJxhh/jwLcJdOhyJDx9zo+jIxdlL5Sk3RQl
-# GWBxCkk77roz19ggdzh2JSH8++0DTCXhEfk1kAgt6/5lf5IeUf+79MlsTqo877XC
-# W+otLDeLZRMSxIaIQjcyHF2KZ9oOPnpgcKercFyutmS2dnrOzSwYuUBvYoF4lQJw
-# nTFtzOqzoozsBBPKcIspCNUeUkkNriboBrGeRX+IAxn/AvQOYQDAQIgeAyJe6QAt
-# sEJ6CiPgovCApfeemb6/jVxIORufOMdW4qm+mrbvdgB4GP/VKh4ql/Q36C2VLERd
-# wtYhdfCkmCEYAzT/pZUfoQ7SwpXtWKwBW5w6FwsqmG93HJsCYnrdwThGHen+SBev
-# 8XGPFDYrxI3knYmvp9nfWlkq3QKRxTvBo/Yk2haNHjO47PeLpdJPI3vOGz5BgFkN
-# apFBQGUdIAErakRqzxtTK+edv/n3T8M7A1yzMAuIDQlFkMEzK3g5GCUNEikiOb13
-# OV62sznKNKcBdytApHDxbrhrLv8qDGxmyqGhFz5FHpd8xx77sJdiBP2OIWdvxNBP
-# BMG0VppO8g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjAw
+# MjVaMC8GCSqGSIb3DQEJBDEiBCBG76GszcvsA+HWHSq3TGGBeokCJ6AAPCB9ckjZ
+# /HDH3zANBgkqhkiG9w0BAQEFAASCAgALNfKycMNDppPXHXWUpRwSCA7VMl8988Sx
+# hfoVfVdzOLybe5yGJBPLiQCmAavIYvti3YAkWVrtu+jS1k+4OdieEYJhTFoQnHOi
+# YETJRQNMaCEzbgiGoeoXrUHL5I58OLcoBgwRI3RTWSw55XAhbw7UQpZo9bFZyNk9
+# g4WBJFRo6HGDHpsEWcV2Ruw/R+7YSpw0En8/KGA554eQBXLMyil/u0zoWuX7p+dT
+# wMjtCX4WTRki6yXzfA/xpinzV9G+fPfUvz/HrIiWz7Oq5UJmn0QIzmDkW0oAmEWJ
+# dplWA1/6+iyXJni+Hp6ScEuoA6mKiM2Uu/qiT2A1mFKPeWQdWr5/sEnHNSvSt1s4
+# PP9pacBP08Cs1MYa75xLanxOli46gHgJU0aq1ndCcfCtI+HkReJfhEICndoo+Y8E
+# sH7SsqgmM7UULgV94S2BRKeCIjkT8jcy/jGd6qAsGodnTIkmRsfyl8lNsfFo+oof
+# JwuPRjkLiUNNbTwQKuGa+/f29DCf9tMmw+34gNQpl3SHX4lURIpbjtc11F9wCIC7
+# fKNHq6hlDeGbj8+tQsNHOG6UH1DACxlg0Qhx9JycEs0t6/eP7ggOAZ3irw1Oj+1/
+# VNio4fQFD+p7MGufn9n1nIYTtH1Cb9/Z71TZ7r73+VWY/+RiKAKeBkM1blutQeDy
+# QOmR8sP1/g==
 # SIG # End signature block

@@ -4,7 +4,7 @@
   "TemplateRootPath": "{{CampaignRootPath}}\\Templates",
   "RecipientsPath": "{{CampaignRootPath}}\\Recipients",
   "RunOutputPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeArchive",
-  "LogOutputPath": "{{LogAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeArchive",
+  "LogOutputPath": "{{LogAllRootPath}}\\Exchange\\ExchangeUserNotifications\\ExchangeArchive",
   "SentRegistryPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeArchive\\Data\\SentRegistry.csv",
   "DefaultLanguageTag": "__USE_GLOBAL__",
   "DefaultEffectiveDate": "",

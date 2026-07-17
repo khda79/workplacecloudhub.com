@@ -7,12 +7,24 @@ Provides a SmartM365-styled launcher for Exchange user notification campaigns.
 The GUI keeps campaign logic inside the campaign scripts. It validates files,
 builds the PowerShell command line, launches the selected campaign, and streams
 output back to the operator.
+
+.VERSION
+1.0.1
 #>
 [CmdletBinding()]
 param()
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+trap {
+    $message = $_.Exception.Message
+    try {
+        Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
+        [void][System.Windows.MessageBox]::Show($message, 'SmartM365 Exchange User Notifications - startup error', 'OK', 'Error')
+    }
+    catch {}
+    exit 1
+}
 
 if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
     $pwsh = (Get-Process -Id $PID).Path
@@ -259,9 +271,11 @@ function Initialize-GuiLocalJsonFilesFromTemplates {
     param([array]$Campaigns)
 
     $root = Get-ExchangeUserNotificationsRoot
+    $legacyRoot = Join-Path -Path (Split-Path -Path $root -Parent) -ChildPath 'Communications\ExchangeUserNotifications'
     $pairs = New-Object System.Collections.ArrayList
     [void]$pairs.Add([pscustomobject]@{
         LocalPath = (Join-Path -Path $root -ChildPath 'Config\Communications.local.json')
+        LegacyPath = (Join-Path -Path $legacyRoot -ChildPath 'Config\Communications.local.json')
         TemplatePath = (Join-Path -Path $root -ChildPath 'Config\Communications.local.json.template')
         Description = 'shared communication local configuration'
     })
@@ -269,35 +283,48 @@ function Initialize-GuiLocalJsonFilesFromTemplates {
     foreach ($campaign in $Campaigns) {
         [void]$pairs.Add([pscustomobject]@{
             LocalPath = $campaign.LocalConfigPath
+            LegacyPath = (Join-Path -Path $legacyRoot -ChildPath ("Config\Campaigns\{0}" -f [IO.Path]::GetFileName($campaign.LocalConfigPath)))
             TemplatePath = $campaign.TemplateConfigPath
             Description = ("{0} campaign local configuration" -f $campaign.Name)
         })
     }
 
-    $created = New-Object System.Collections.ArrayList
+    $prepared = New-Object System.Collections.ArrayList
     foreach ($pair in $pairs) {
         if ([string]::IsNullOrWhiteSpace([string]$pair.LocalPath)) { continue }
-        if (Test-Path -LiteralPath $pair.LocalPath) { continue }
-        if (-not (Test-Path -LiteralPath $pair.TemplatePath)) {
-            Write-Warning ("Local JSON not found and template is missing. Local JSON: {0}; Template: {1}" -f $pair.LocalPath, $pair.TemplatePath)
-            continue
+        if (-not (Test-Path -LiteralPath $pair.LocalPath)) {
+            $sourcePath = if (Test-Path -LiteralPath $pair.LegacyPath -PathType Leaf) { $pair.LegacyPath } else { $pair.TemplatePath }
+            $sourceLabel = if ($sourcePath -eq $pair.LegacyPath) { 'previous application path' } else { 'template' }
+            if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+                Write-Warning ("Local JSON not found and no source is available. Local JSON: {0}" -f $pair.LocalPath)
+                continue
+            }
+
+            $folder = Split-Path -Path $pair.LocalPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
+                New-Item -Path $folder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            }
+            Copy-Item -LiteralPath $sourcePath -Destination $pair.LocalPath -Force -ErrorAction Stop
+            [void]$prepared.Add([pscustomobject]@{ Description = $pair.Description; LocalPath = $pair.LocalPath; SourceLabel = $sourceLabel })
         }
 
-        $folder = Split-Path -Path $pair.LocalPath -Parent
-        if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
-            New-Item -Path $folder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        if (Test-Path -LiteralPath $pair.LocalPath -PathType Leaf) {
+            $jsonText = Get-Content -LiteralPath $pair.LocalPath -Raw -ErrorAction Stop
+            $oldLogPrefix = '{{LogAllRootPath}}\\Communications\\ExchangeUserNotifications\\'
+            $newLogPrefix = '{{LogAllRootPath}}\\Exchange\\ExchangeUserNotifications\\'
+            if ($jsonText.Contains($oldLogPrefix)) {
+                Set-Content -LiteralPath $pair.LocalPath -Value $jsonText.Replace($oldLogPrefix, $newLogPrefix) -Encoding utf8 -NoNewline
+            }
         }
-        Copy-Item -LiteralPath $pair.TemplatePath -Destination $pair.LocalPath -Force -ErrorAction Stop
-        [void]$created.Add($pair)
     }
 
-    if ($created.Count -eq 0) { return }
+    if ($prepared.Count -eq 0) { return }
 
-    Write-Host 'Created missing Exchange notification local JSON file(s) from template:' -ForegroundColor Yellow
-    foreach ($pair in $created) {
-        Write-Host ("- {0}: {1}" -f $pair.Description, $pair.LocalPath) -ForegroundColor Yellow
+    Write-Host 'Prepared Exchange notification local JSON file(s):' -ForegroundColor Yellow
+    foreach ($item in $prepared) {
+        Write-Host ("- {0}: {1} (source: {2})" -f $item.Description, $item.LocalPath, $item.SourceLabel) -ForegroundColor Yellow
     }
-    Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
+    Write-Host 'Review the local JSON values before a live campaign.' -ForegroundColor Yellow
 }
 function Get-ConfigPropertyValue {
     param(
@@ -2054,8 +2081,8 @@ else { Close-LoadingWindow }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbGnjSXFH2VqY1
-# tRHalVcJmJ8W/EhqsGnZtsLI0Z18VKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3ar2wRUXMPbDf
+# 1Rq+exW2VeNJgsnrLmpHfyc2lZSnyaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2188,31 +2215,31 @@ else { Close-LoadingWindow }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINIc1G7JVC1YsxRdqGfmsFFnQiE3ejaPL87dy+FXoZL5MA0GCSqG
-# SIb3DQEBAQUABIIBgIr5YUPH3adiAfcpidjrEHf6AiKeFtbeCzDJxuuwFWMxYNg9
-# ldAaS6SzSvOslons4eofICumuV4XB8LQZgSQq5hLLV4oUQTfeMGWQwi2MNfqDOEh
-# WhRTZy3M1Fz4tLvTc22SuDBWRrtleaVaA1g0D/80RvD/NZaqT10vAQjCCmgobv0V
-# c5Z5bsduAk+WromRlsKsZxp8b/D+Z+CUHXag+WJKL4I/HR6WEvdrqHS2JvSdar/+
-# /cPUijKOzz0rELnTDOJMxwREtR1ADxbLa2nq1r81SwQQo8bpyL3OjTC6i3mYzse9
-# tSP0SvPiBvqxZziBpu0udT3T2thH3r9bGvRCZO42BeJldps0qKEC17k3SjdTZ0kU
-# W9sFcqX7MPEOruNn+QgVwwyWPHAjdKeqgCz3euKEVt4xOzmdc/THScTC0TJU72eB
-# 944Dq8FFEEQGEoUFI+35eXNeKRQ6Np2dPg8ruEWhrWpWA9hGfPpTTNEhYMhqWIqN
-# ZMBq7iHBWnqMPMCrFqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPJf4SIDXeWfMNOQ/775zxcTLx4vjKEAWf/NmJN3RSGRMA0GCSqG
+# SIb3DQEBAQUABIIBgBdwS995HU03WbJ9s2dSMDTz0LApVTUV/9blH1Cv2mgr3I35
+# 2UXntnc9gQRREDG1sBURD0NwBRq6QlSM818hZIJlESHIYvgLG8nSb2Pzz0ahu8z3
+# hk68nuKLe3dmXnsnONn07qydHy042q1HiDfJpRQhOyj1IHOksww6OvEshzm5+qNB
+# dx/dsfl7+rRViapsB+rmLXQz1LYltErza9/TXhZWTsCgctwjv/zEpksev1wWNBV5
+# oSj2pwQZJ5ijOlTQugMMcbRPOeIE/HIcxtb+7AK0oiPhtXzbPgAXrf//jMRLcHhf
+# dAJN3TenIOvNPxRLKsgFX/HoSmD3DROz3liNdrY07ggihZHwK2tEdWQUXwzM1MAW
+# s+YlubfZmYt9Z35LfGvxHtdsvhjgvHiDuLXD9sswM33gLbHitZ12BWlpuX3qYwRz
+# fYLJMJ04ZvFFIOYYnAD/T3O4/BcqN2WDoOzTeeCLcpQiEVVeCBN3YUb3SdSOA9Vn
+# Uw35G5swoUafp8lJ/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMDM5
-# MjdaMC8GCSqGSIb3DQEJBDEiBCCX7to6Xnzn1MtuCRm1czXedXgZBM1I5wHmw6Eg
-# oKFS3zANBgkqhkiG9w0BAQEFAASCAgBrXhUFL5P9BGCLHgp3npo3HD54kvOMJq0x
-# 94iAzIJ7CUyEX/yGPkuA+GxBw+mQdvr9CR/i7rENpws7QI7FtHWaQfxb9gu/S6+m
-# H0mD+9aAiqfEHm8X3QSOHO5+75anS62oZPe3jUFQ9ZnpiCtOM699hYQMn7KngMl+
-# FTKfvwj9biVBxijWQQwKaZ5QiQ1u/Qh5Vv+rxexnRAtbCc36heJH8BQjG47VIsX0
-# 5qhqPDAzFquMr42RQX27ADJYFq0qvSsAr7sRKfO9+Av76wTXB3I5RJMJaaaTnlaz
-# 8Dzeko48lY4gqSmrZe2QqFG7a0ThS4RdOltLu0+xO1d02dhPjq7GEYeDiC9S55k4
-# WFWC/5ww0o9x0ecvIVc8a2pyhBzca9MWTLej3cCXDd4WHSB7H812K3Z47baWo8+l
-# ufMc8SlMcWRVVEa1weBFofyKH7/BFUE40G2wtIJ1Fb2phaA5ASgrxFxArg0O1nHC
-# SMDiVk6SbSvLz7oBBMicsSCM71zdwzKZMr4AfsEjCr3DXQ03PPW5ekZCMBG+FOws
-# rsYohuzX0eicUdnhL95k7WOMFBGVTYFM16B6KddP1tr+8TnsVIgFh30GMrKR6XUD
-# SGKRBLIG0hShkb4I1XAYWiEzzxrnRu7GSideE8/gh0Qmgx0hb7MU5lPaYDhfSGsn
-# NYkydtZUsQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjA1
+# NThaMC8GCSqGSIb3DQEJBDEiBCAaPq/z6qZ0zAdh+AvQ1MSDugFBZQpTTyh59cWr
+# rG+uxzANBgkqhkiG9w0BAQEFAASCAgCIaVREiC59RzelC68yflLzu0Q/ATmIEDxD
+# T3xBY3RgcJgVTFLJhp7YByzLN/Chn9snD+ea5sGc71ozFZ7fUQZMO3qI912rWLlK
+# 0PfuvPNdj0sW052h79Tkw4xwqQTPFMI25D3q0RN9a+8S+xMaH3mSk2OkOsaNrii5
+# JpguEW/wdaMAS1FT8PHjMhEYTRPI2bQWP/mowlQ+VR6jIs6rYXVnDOPn3SUMDSaX
+# coB7jNIYM8t9d6gavhwL31GT/syeUD3EwwEZrbir+olBkV8ijPZ8ZC7utukkKIb/
+# 56OLc65Tdvs3lZrdVBy1yeTeU8jHLbcGkf6bKLy8R38K/OuhVL9EB4WIXe/IzNG7
+# qf94mNwhW2A++k4fWG3Wip9udSV2GsmfFkA63vK5oex2RhpLI2r5w8h5wgVH7EdD
+# h6ulSVPey08iuYzcc7UivcGN+9z8WH0YO0AroiwFvwuyydcUqoQ7276lxbnJjofM
+# X2U21dBr6qXT3ADaec6SkKi2YV1/5N8JRS52GursrlrW6A09P4ZKhOjfABzqK5nH
+# KQNYWp1pIzcOdABAfGfRBW2E6fB+X3ceQVHyS/A5pd1oRI9JTQjU1mqAV2Pmur3c
+# RiY3nutMKoELXeNXJoj5LnwY7zcyaHXlwiiBxIpVlgTzOleSB8FXU3pzR5St3XvA
+# Y4wFhoEelg==
 # SIG # End signature block

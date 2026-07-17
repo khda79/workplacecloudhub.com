@@ -45,12 +45,12 @@ Real files must use `.local.json` and remain ignored by Git.
 
 `Config/Communications.local.json` controls the shared mail transport:
 
-- `MailSendMode = Graph` sends through Microsoft Graph `/sendMail` using the configured SmartM365 app identity.
+- `MailSendMode = Graph` sends through Microsoft Graph `/sendMail` after a standard delegated interactive sign-in.
 - `MailSendMode = SmtpRelay` forces SMTP relay mode and requires `SmtpServer`.
 - `MailSendMode = Auto` keeps compatibility: Graph is used when `SmtpServer` is empty, otherwise SMTP relay is used.
 - `MailSendMode = Disabled` skips mail sends while keeping campaign processing/logging behavior.
 
-For Graph sending, the app needs the Microsoft Graph **application** permission `Mail.Send`. The sending mailbox is resolved from `From` in the tenant profile or communications config. Keep Graph mail sending scoped with the Exchange Online Application Access Policy created by the SmartM365 setup so the app can send only as mailboxes in `MailSendAccessPolicyGroup`; do not leave `Mail.Send` unrestricted tenant-wide.
+For Graph sending, the signed-in account needs the Microsoft Graph delegated permission `Mail.Send`. The sending mailbox is resolved from `From` in the tenant profile or communications config. If it differs from the signed-in account, that account must also have the required Exchange Send As permission.
 
 SMTP relay mode does not use Microsoft Graph mail permissions. It requires `SmtpServer` or `RelayIp`, `SmtpPort`, and any relay allow-listing needed by the local mail infrastructure.
 
@@ -79,7 +79,7 @@ Campaign templates are shipped in each campaign `Templates` folder. Do not edit 
 
 The scripts look in `TemplateRootPath` first and fall back to the shipped `Templates` folder, so a partial local override can coexist with new templates delivered by Git.
 
-For EXO app-only connection, the tenant context should provide `AppId`, `TenantId`, `Thumbprint`/`Thumb`, and `OrgDomain`; otherwise the script falls back to the interactive `Connect-ExchangeOnline` flow exposed by `ExchangeOnlineManagement`.
+Exchange Online and Microsoft Graph use standard interactive authentication. The tenant profile `TenantId` is used to validate or constrain the selected tenant; certificate and app-only authentication is not used by this application.
 
 ## Output
 
@@ -88,7 +88,7 @@ Campaign data is tenant-isolated by default:
 ```text
 SmartM365/Data/Tenants/<TenantKey>/DATA-ALL/Communications/ExchangeUserNotifications/<Campaign>
 SmartM365/Data/Tenants/<TenantKey>/DATA-LAST
-SmartM365/Data/Tenants/<TenantKey>/LOG-ALL/Communications/ExchangeUserNotifications/<Campaign>
+SmartM365/Data/Tenants/<TenantKey>/LOG-ALL/Exchange/ExchangeUserNotifications/<Campaign>
 ```
 
 Each campaign writes a timestamped run log CSV and a local sent registry CSV.

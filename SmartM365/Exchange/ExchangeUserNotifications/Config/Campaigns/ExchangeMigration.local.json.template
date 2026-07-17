@@ -4,7 +4,7 @@
   "TemplateRootPath": "{{CampaignRootPath}}\\Templates",
   "RecipientsPath": "{{CampaignRootPath}}\\Recipients",
   "RunOutputPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigration",
-  "LogOutputPath": "{{LogAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigration",
+  "LogOutputPath": "{{LogAllRootPath}}\\Exchange\\ExchangeUserNotifications\\ExchangeMigration",
   "SentRegistryPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigration\\Data\\SentRegistry.csv",
   "DefaultLanguageTag": "__USE_GLOBAL__",
   "OldWebmailUrl": "https://old-webmail.example.com",
