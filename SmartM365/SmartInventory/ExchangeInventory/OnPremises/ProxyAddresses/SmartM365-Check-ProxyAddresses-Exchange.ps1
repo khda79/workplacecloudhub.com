@@ -60,7 +60,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.18
+1.19
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -415,7 +415,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.18"
+    $ScriptVersion = "1.19"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -566,6 +566,7 @@ $ErrorActionPreference = 'Stop'
     $remoteMailboxCount     = 0
     $remoteRoutingAddressCount = 0
     $remoteAliasFallbackCount = 0
+    $remoteAliasFallbackMissingBlockedCount = 0
     $remoteRoutingSuffixMismatchCount = 0
     $remoteMailboxLookupMissCount = 0
     $duplicateExpectedMissingCount = 0
@@ -783,7 +784,9 @@ $ErrorActionPreference = 'Stop'
     $addressAlreadyAssignedConflictAddresses = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($plan in $recipientPlans) {
         $counter++
-        Write-Progress -Activity "Checking EmailAddresses..." -Status "$counter / $total" -PercentComplete (($counter / [Math]::Max($total, 1)) * 100)
+        if ($counter -eq 1 -or ($counter % 250) -eq 0 -or $counter -eq $total) {
+            Write-Progress -Activity "Checking EmailAddresses..." -Status "$counter / $total" -PercentComplete (($counter / [Math]::Max($total, 1)) * 100)
+        }
 
         $rec = $plan.Recipient
         $primary = $null
@@ -826,8 +829,14 @@ $ErrorActionPreference = 'Stop'
                 $status = 'No expected address'
             }
             else {
-                $addresses = @($rec.EmailAddresses) | ForEach-Object { ConvertTo-SmtpProxyAddress -Value $_ }
-                $exists = $addresses | Where-Object { $_ -ieq $expectedAddress }
+                $exists = $false
+                foreach ($recipientProxyAddress in @($rec.EmailAddresses)) {
+                    $normalizedRecipientProxyAddress = ConvertTo-SmtpProxyAddress -Value $recipientProxyAddress
+                    if ($normalizedRecipientProxyAddress -ieq $expectedAddress) {
+                        $exists = $true
+                        break
+                    }
+                }
 
                 if ($exists) {
                     $status = 'OK'
@@ -849,6 +858,10 @@ $ErrorActionPreference = 'Stop'
                         else {
                             $status = 'Missing -> AddressAlreadyAssigned'
                         }
+                    }
+                    elseif ($plan.IsRemoteMailbox -and $plan.ExpectedAddressSource -eq 'AliasFallback') {
+                        $remoteAliasFallbackMissingBlockedCount++
+                        $status = 'Missing -> RemoteRoutingAddressUnavailable'
                     }
                     elseif ($AddMissingAddress -and $rec.EmailAddressPolicyEnabled -eq $true) {
                         $status = 'Missing -> SkippedPolicyEnabled'
@@ -934,6 +947,7 @@ $ErrorActionPreference = 'Stop'
             PolicyWarning                             = $policyWarning
         })
     }
+    Write-Progress -Activity "Checking EmailAddresses..." -Completed
     if ($policyEnabledCount -gt 0) {
         Write-Host "Email address policy enabled recipients: $policyEnabledCount. Details are available in the detail CSV."
     }
@@ -942,6 +956,9 @@ $ErrorActionPreference = 'Stop'
     }
     if ($addressAlreadyAssignedConflictAddresses.Count -gt 0) {
         Write-Host "Expected addresses already assigned to another Exchange recipient: $($addressAlreadyAssignedConflictAddresses.Count) address(es), $addressAlreadyAssignedMissingCount missing address(es) blocked." -ForegroundColor Yellow
+    }
+    if ($remoteAliasFallbackMissingBlockedCount -gt 0) {
+        Write-Host "Remote mailboxes missing RemoteRoutingAddress: $remoteAliasFallbackMissingBlockedCount address(es) blocked from remediation." -ForegroundColor Yellow
     }
     if ($remoteRoutingSuffixMismatchCount -gt 0) {
         Write-Host "RemoteRoutingAddress suffix mismatches: $remoteRoutingSuffixMismatchCount. Review RoutingWarning in the detail CSV." -ForegroundColor Yellow
@@ -970,6 +987,7 @@ $ErrorActionPreference = 'Stop'
         [PSCustomObject]@{ Summary = "RemoteRoutingAddress used";                          Count = $remoteRoutingAddressCount },
         [PSCustomObject]@{ Summary = "Remote mailboxes using Alias fallback";              Count = $remoteAliasFallbackCount },
         [PSCustomObject]@{ Summary = "RemoteRoutingAddress suffix mismatches";             Count = $remoteRoutingSuffixMismatchCount },
+        [PSCustomObject]@{ Summary = "Remote Alias fallback missing addresses blocked";     Count = $remoteAliasFallbackMissingBlockedCount },
         [PSCustomObject]@{ Summary = "RemoteMailbox lookup misses";                        Count = $remoteMailboxLookupMissCount },
         [PSCustomObject]@{ Summary = "With email address policy enabled";                  Count = $policyEnabledCount },
         [PSCustomObject]@{ Summary = "Additions skipped by email policy";                  Count = $policySkippedCount },
@@ -1051,11 +1069,8 @@ try {
     $MailFrom    = $From
     $MailSubject = $Subject
 
-    $attachments = @()
-    if (Test-Path $outDetail)        { $attachments += $outDetail }
-    if (Test-Path $outSummary)       { $attachments += $outSummary }
-    if (Test-Path $outAdded)         { $attachments += $outAdded }
-    if (Test-Path $outWorkbook)      { $attachments += $outWorkbook }
+    # Attach only the consolidated workbook; CSV files remain available through the body links.
+    $attachments = @(if (Test-Path -LiteralPath $outWorkbook -PathType Leaf) { $outWorkbook })
 
     if ([string]::IsNullOrWhiteSpace($MailFrom) -or -not $MailTo) {
         Write-Host "Email skipped: incomplete email parameters (From/To)."
@@ -1071,6 +1086,7 @@ try {
         $remoteRoutingAddressCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteRoutingAddress used' } | Select-Object -First 1).Count)
         $remoteAliasFallbackCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote mailboxes using Alias fallback' } | Select-Object -First 1).Count)
         $remoteRoutingSuffixMismatchCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteRoutingAddress suffix mismatches' } | Select-Object -First 1).Count)
+        $remoteAliasFallbackMissingBlockedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote Alias fallback missing addresses blocked' } | Select-Object -First 1).Count)
         $remoteMailboxLookupMissCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'RemoteMailbox lookup misses' } | Select-Object -First 1).Count)
         $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
         $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
@@ -1093,6 +1109,7 @@ try {
             [pscustomobject]@{ Label = 'RemoteRoutingAddress used'; Value = $remoteRoutingAddressCountForMail }
             [pscustomobject]@{ Label = 'Remote mailboxes using Alias fallback'; Value = $remoteAliasFallbackCountForMail }
             [pscustomobject]@{ Label = 'RemoteRoutingAddress suffix mismatches'; Value = $remoteRoutingSuffixMismatchCountForMail }
+            [pscustomobject]@{ Label = 'Remote Alias fallback missing addresses blocked'; Value = $remoteAliasFallbackMissingBlockedCountForMail }
             [pscustomobject]@{ Label = 'RemoteMailbox lookup misses'; Value = $remoteMailboxLookupMissCountForMail }
             [pscustomobject]@{ Label = 'Email address policy enabled'; Value = $policyEnabledCountForMail }
             [pscustomobject]@{ Label = 'Additions skipped by email policy'; Value = $policySkippedCountForMail }
@@ -1160,7 +1177,7 @@ try {
 
         $severity = if ($AddMissingAddress -and $addedCount -gt 0) { 'Success' } elseif ($missingCount -gt 0) { 'Warning' } else { 'Success' }
         $actionTitle = if ($missingCount -gt 0) { 'Review required' } else { '' }
-        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Recipients managed by an email address policy, duplicate expected addresses, and addresses already assigned to another mail-enabled recipient are always skipped in write mode.' } else { '' }
+        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Recipients managed by an email address policy, duplicate expected addresses, addresses already assigned to another mail-enabled recipient, and remote mailboxes without a usable RemoteRoutingAddress are always skipped in write mode.' } else { '' }
         $message = if ($missingCount -gt 0) { 'Exchange on-premises proxy address audit found missing expected proxy addresses.' } else { 'Exchange on-premises proxy address audit completed without missing expected proxy addresses.' }
 
         $body = New-SmartM365EmailBody `
@@ -1177,7 +1194,7 @@ try {
             -Sections $sections `
             -Footer 'This automated message was generated by SmartM365. Use the exported CSV files, Excel workbook, and SharePoint links as the source of truth.'
 
-        SendEmailHtmlReport -SendMailMode $effectiveSendMailMode -SmtpServer $SmtpServer -SmtpPort $SmtpPort -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments
+        SendEmailHtmlReport -SendMailMode $effectiveSendMailMode -SmtpServer $SmtpServer -SmtpPort $SmtpPort -From $MailFrom -To ($MailTo -join ';') -Cc ($MailCc -join ';') -Subject $MailSubject -BodyHtml $body -Attachments $attachments -AllowAttachments
         Write-Host "Email sent to '$($MailTo -join ';')' via $effectiveSendMailMode."
     }
 } catch {
@@ -1220,8 +1237,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAquSB4qoYtGPNo
-# fqIxL4nNIKgkhhLCOeYj9mNlBIc8m6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRtPFHoIIfFEfi
+# UrKCbGlg4ka76TyEc/dwLh4PJjkc+KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1354,31 +1371,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJyUaG5bn3oRQBOqmhPogBZ1p+mLZAVXc8I2iCzmdJb0MA0GCSqG
-# SIb3DQEBAQUABIIBgEYE5OzEQuT3MxwpuOvJWXEMG+A2trgsPgDnHkYW1lU151gI
-# GsRtxFZJHZTV5HiK3MH1lruBHuR2ds/TI0mML4Izat3Dw305Kuoc4HZTf9za35vL
-# GRCk1C7FXwfF4jCoXWHyBSVYz/11B1tg9ZHsI//oDx6PPOAtY8urYzr/k0/ccPD7
-# 1hW5wSJXExKaqMVnnwp1Hio3ltoNGkthrP/U4AFVOaDsLWNHEUWdxuWJrlBflm2y
-# ujhNqbhEHMs77UPKvUor0Av7CcLGgH6WCu8x0HzF3Q54mrtOWZtc1mgI/ZsuyjCU
-# iNViQOLqdvCtF6+peku4mxz0rdtT8lrBF5Q0maaDufxI1fmeq+F0paRb9tzRptls
-# jwIN9ScznW2JJz0pDsqRanGXUDJk1RE4oOKLchIbW+cvzqKTGBpLPNhr52y4seCR
-# lE/IUpswEhPHgmTirPU4ls1pPUEChiWNneIY4yravc/In0vgWSvxsjjB4AYmBd93
-# U6JJrXZuaIys3RjSxKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIFLm7gJCpKDW/DRqwEoTv5Qf25mxDaM73tTjVpNSOONMA0GCSqG
+# SIb3DQEBAQUABIIBgEHUT7eM1U7mxiB99nOWB0r1wL9ghOOAIsutE7b2O5w7ubY8
+# BGFoYKnD93weBH8LuLjH8Osc6jEk5Rni/H1juwU1g7rT8SIm5xQoA0/RQm54kBJD
+# DKK61slq/VPXcTUZdGV2rgXWmEdHEfEBtgzECreE1EzClu2xL0ZX1ncWV0PClT6k
+# go5l5UslDnVRmWdYcRonYp6JysxSjXuNwM6ysltHnI9LH75NVePn9q+tO1mte4Gq
+# 8Z5M2ZAkM7U+8EbwnRiudp2yy8svWPAYxZUywqrYF5m2QQFGl3pD5cR5YlSp2ixr
+# 7qGURbszuM1YesH6UcCXcqsq8GwIKQu3q4eZjaEC9eW2dPIPFCHBY0nkDZdkjiWG
+# t7YDT3FTNp+FiZxCjw2mxR0Qr0cRUvaCs1yuwTMJEZWeUZq9YKAZO5Sh3CCMTDN7
+# vI8zc2sHXVlIc2RSlwWAlpx9bwvoEGv/5B0/D9Eus8TMZvCgjMRun2I4t7eeBIel
+# VHZXmw9C+fLuYhwYQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcxNTI1
-# NTBaMC8GCSqGSIb3DQEJBDEiBCCHu7ok6QuC9p5qQG8uexNGlQl8uUGm8bYgbc1T
-# lOJjgTANBgkqhkiG9w0BAQEFAASCAgDHqwnyZ6XuIFVAYdB+cRvdO9RvO2DSEM57
-# A7N3YPpxrY6O/o5AHdr3wsOEbJX7PYpHvX1aIUQAOp/m3GDfXTlAnxwPb1Bq29PQ
-# WsYx7Su7KNtd4PD3z2gVtGastaL2TcO7H327LH2BTUlQHo9GeLfXr41gRqpNCyEm
-# xIwHIOyH7ggqx5SLKVzdA554d3wt2/rJcHq2eoiYkKhGoEkuuffNchY3U8D9u8sS
-# ss715xFiCNNNsVkjN7ZM/rvIFbUBHrdIcTj8RvxbyRQCJcjitZDW2FKZNJYOKFdf
-# XuCKKCiNRqNhcxepPaILWuYMauG2V9fHwYmL72f8wDGzfSnVzPupZH749npkOQw0
-# oBuYSD0qi0uE6OIswad0z4KwDk/Gbh0ShyNHGXsp5/rT3+oN+ej5J4Z2c8rpqjXo
-# aBkKBdW0/EW2yCQfj07BtaAxNUAIwyVa3aVJAqUpdvWePSQFBfw2Ox2eYex5jjBY
-# UVCJQfdDcE8RG0c2vQfng1aHLZQvGboXHHTwOCVCeoQlxJOdke+NmJX0snWdWOKB
-# COngON87ae4jrwf0Qe/l9skYN07G2bzeo7R32NxZiz7UewUHYr1WTQie1kZYDbsh
-# pIZDwsdwYp8h8D6TMHUz5aGrZUygsSK/r7nDrBsqz2+rll8PVVwBnMFoAyWJfnFM
-# eKbdbHE8kQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcxNjAy
+# NDBaMC8GCSqGSIb3DQEJBDEiBCCmu4PHRzIX0PJkIHwE0XJ3WbDnIVKx7fdxxl9+
+# Gf3AFjANBgkqhkiG9w0BAQEFAASCAgDBxlVIi+PRqjrdP9mHJgA+P48BKNq0sQ5n
+# u+TtorSU7SyR707k5zTSwvsyLYGXk4bIB2WlBktrhaRX4Zl0CjTNqZma31m6x19g
+# BFKArpHBGdOpx6/+uQsijiinkX5sRojEYrP5Q0TeLcBiZj8wCwUHlHwsml+TqKLQ
+# AZfir7WKIzeKow7wZ0hwZ1rMQumJoOPkXkOmVqA+RLX2rU1l3WLbyTKZ4BWXi35n
+# I0g6I7jl5/8UCRWBXDjU+lPLGskMKljfZhKASCIJmHca7YBqJlM/oOyOzNWZvxVz
+# Uf9QGEPYQC0n1uMAlrsogOlOWiVauXsaMcG9bRldyvROmLScu8fUs33Csxx1581y
+# +xVRPm1hVm+DvHpzNY5EwuL2ZnOhhoHLU4hdO7mFhMaJsaTbpmR2KDboP/H1E9IV
+# fBXluAJ4iQUsdUeCBvn0c13gVUiNWtZxx+kDJQXmq5jlrZsfd4BR1VpHLoZEVal7
+# rmq5T36MMjMqGS5LIAfwKn1iTM2prcI6BsPRuZyI287OSoycKeL1CwwgF9cdLQTw
+# h6zP8T4S+vwWat/HhC/RzeAmc13PcOAjuwRwnAmA+kgYwFxXqAzMAOZmvqWbq0bg
+# KKsO0WO0mDIKZxa0WUBa3zcExW02KI9O22oBQ46Sp5CS9HCeeaNWeWC1HKYAJQF2
+# aHWuz7CAtg==
 # SIG # End signature block
