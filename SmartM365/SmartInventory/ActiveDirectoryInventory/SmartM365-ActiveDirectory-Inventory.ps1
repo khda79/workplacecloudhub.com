@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.38
+1.39
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -573,7 +573,7 @@ function Export-SmartM365AdDiagnosticsWorkbook {
                 }
                 $matrix.Add([object[]]$values)
             }
-            $worksheet.Cells['A1'].LoadFromArrays($matrix)
+            $null = $worksheet.Cells['A1'].LoadFromArrays($matrix)
             $worksheet.View.FreezePanes(2, 1)
             $worksheet.Cells.AutoFitColumns(10, 60)
 
@@ -681,7 +681,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.38"
+$ScriptVersion = "1.39"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
