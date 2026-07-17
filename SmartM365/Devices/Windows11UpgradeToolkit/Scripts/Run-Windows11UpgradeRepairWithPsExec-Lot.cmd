@@ -1,12 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-pushd "%~dp0" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    pause
-    exit /b 1
-)
 
 set "POWERSHELL_EXE="
 if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "POWERSHELL_EXE=%ProgramFiles%\PowerShell\7\pwsh.exe"
@@ -298,7 +292,6 @@ if "%EXITCODE%"=="9009" (
 echo.
 echo Finished with exit code %EXITCODE%.
 pause
-popd
 exit /b %EXITCODE%
 
 :CapturePowerShellCrash

@@ -6,11 +6,6 @@ set "SOURCE_DIRECTORY=%~dp0..\..\Orchestrator\"
 set "INSTALLER_PATH=%SOURCE_DIRECTORY%Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1"
 set "WINDOWS_POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
-pushd "%SOURCE_DIRECTORY%" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to access the launcher directory: %SOURCE_DIRECTORY%
-    exit /b 1
-)
 
 set "PS_ENGINE="
 set "PWSH_X64=%ProgramFiles%\PowerShell\7\pwsh.exe"
@@ -22,6 +17,4 @@ if not defined PS_ENGINE set "PS_ENGINE=%WINDOWS_POWERSHELL%"
 
 "%PS_ENGINE%" -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER_PATH%" -Interactive
 set "EXIT_CODE=%ERRORLEVEL%"
-
-popd
 exit /b %EXIT_CODE%

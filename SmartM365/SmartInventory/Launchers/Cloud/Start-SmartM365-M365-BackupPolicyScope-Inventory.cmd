@@ -1,13 +1,9 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-pushd "%~dp0..\..\ExchangeInventory\BackupProtection\" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    exit /b 1
-)
+set "UNC_WORK_DIR=%~dp0..\..\ExchangeInventory\BackupProtection\."
 
-set "SCRIPT_DIR=%CD%\"
+set "SCRIPT_DIR=%UNC_WORK_DIR%\"
 set "PWSH="
 set "PWSH_X64=%ProgramFiles%\PowerShell\7\pwsh.exe"
 set "PWSH_X86="
@@ -22,10 +18,8 @@ if not defined PWSH (
     echo   !PWSH_X64!
     if defined PWSH_X86 echo   !PWSH_X86!
     echo   PATH
-    popd
     exit /b 1
 )
 "%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-M365-BackupPolicyScope-Inventory.ps1" -Tenant prod
 set "EXIT_CODE=%ERRORLEVEL%"
-popd
 exit /b %EXIT_CODE%

@@ -3,16 +3,9 @@ setlocal EnableExtensions
 set "SMARTM365_LAUNCHER_TENANT=prod"
 if defined SMARTM365_ORCHESTRATOR_TENANT set "SMARTM365_LAUNCHER_TENANT=%SMARTM365_ORCHESTRATOR_TENANT%"
 
-pushd "%~dp0..\..\ExchangeInventory\OnPremises\Mailboxes\" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    echo Launcher path:
-    echo   %~dp0..\..\ExchangeInventory\OnPremises\Mailboxes\
-    pause
-    exit /b 1
-)
+set "UNC_WORK_DIR=%~dp0..\..\ExchangeInventory\OnPremises\Mailboxes\."
 
-set "SCRIPT_DIR=%CD%"
+set "SCRIPT_DIR=%UNC_WORK_DIR%"
 set "POWERSHELL5=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if exist "%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe" set "POWERSHELL5=%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%POWERSHELL5%" (
@@ -22,7 +15,6 @@ if not exist "%POWERSHELL5%" (
     echo   %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe
     echo   %SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe
     pause
-    popd
     exit /b 1
 )
 
@@ -42,7 +34,6 @@ if not defined CACHE_BASE (
     echo   C:\Temp\SmartM365LauncherCache\ExchangeLocalMailboxes\WithADPermissions
     echo   %TEMP%\SmartM365LauncherCache\ExchangeLocalMailboxes\WithADPermissions
     pause
-    popd
     exit /b 1
 )
 goto :CacheBaseReady
@@ -83,7 +74,6 @@ if %ROBOCOPY_EXIT% GEQ 8 (
     echo Robocopy log:
     echo   %CACHE_LOG%
     pause
-    popd
     exit /b 1
 )
 
@@ -96,7 +86,6 @@ if %ROBOCOPY_EXIT% GEQ 8 (
     echo Robocopy log:
     echo   %CACHE_LOG%
     pause
-    popd
     exit /b 1
 )
 
@@ -109,12 +98,10 @@ if %ROBOCOPY_EXIT% GEQ 8 (
     echo Robocopy log:
     echo   %CACHE_LOG%
     pause
-    popd
     exit /b 1
 )
 
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%LOCAL_SCRIPT_DIR%','%LOCAL_SMARTM365_ROOT%\Config','%LOCAL_SMARTM365_ROOT%\Modules\SmartM365.Core' -Include *.ps1,*.psm1,*.psd1 -File -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -File "%LOCAL_SCRIPT_DIR%\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1" -Tenant "%SMARTM365_LAUNCHER_TENANT%" -IncludeADPermission
 set "EXIT_CODE=%ERRORLEVEL%"
-popd
 exit /b %EXIT_CODE%

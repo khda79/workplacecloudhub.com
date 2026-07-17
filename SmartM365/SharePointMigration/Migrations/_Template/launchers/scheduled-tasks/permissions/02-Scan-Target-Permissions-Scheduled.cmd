@@ -4,12 +4,9 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..\..") do set "MIGRATION_NAME=%%~nxI"
 
-pushd "%SCRIPT_DIR%..\..\..\..\.." || (
-    echo Failed to access project root from: %SCRIPT_DIR%
-    exit /b 1
-)
+set "UNC_WORK_DIR=%SCRIPT_DIR%..\..\..\..\..\."
 
-set "PS_SCRIPT=%CD%\Scripts\Launchers\Generic\SmartM365-SharePointMigration-Launcher.ps1"
+set "PS_SCRIPT=%UNC_WORK_DIR%\Scripts\Launchers\Generic\SmartM365-SharePointMigration-Launcher.ps1"
 set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
 
 if exist "%PWSH%" (
@@ -19,5 +16,4 @@ if exist "%PWSH%" (
 )
 
 set "EXIT_CODE=%ERRORLEVEL%"
-popd
 exit /b %EXIT_CODE%
