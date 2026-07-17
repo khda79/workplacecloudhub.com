@@ -3,7 +3,7 @@
   "TemplateBaseName": "SmartM365-ExchangeMigrationMailboxSizeReduction-NotifyUsers-Template",
   "TemplateRootPath": "{{CampaignRootPath}}\\Templates",
   "RunOutputPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigrationMailboxSizeReduction",
-  "LogOutputPath": "{{LogAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigrationMailboxSizeReduction",
+  "LogOutputPath": "{{LogAllRootPath}}\\Exchange\\ExchangeUserNotifications\\ExchangeMigrationMailboxSizeReduction",
   "SentRegistryPath": "{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\ExchangeMigrationMailboxSizeReduction\\Data\\SentRegistry.csv",
   "ListCsvPath": "{{CampaignRootPath}}\\Recipients\\ExchangeMigrationMailboxSizeReduction-List.csv",
   "LatestCsvFolderPath": "{{LatestCsvFolderPath}}",
