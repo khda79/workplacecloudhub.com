@@ -56,11 +56,11 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     - Requires Exchange 2016 Management Tools.
-    - Generates detailed, summary, and added addresses CSV reports plus an Excel workbook with Check, Summary, and Added worksheets.
+    - Generates detailed, summary, and added addresses CSV reports plus an Excel workbook with Check, ExistingProxyAddresses, DuplicateAliases, Summary, and Added worksheets.
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.19
+1.20
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
