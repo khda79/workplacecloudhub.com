@@ -350,7 +350,7 @@ Before each cycle, including cycle 1, the PsExec launcher can load or refresh In
 - Use `Export-ADDevicesCsv.cmd` from the toolkit root to generate a forest-wide `DevicesAD.csv` cache.
 - Add `AdDomain.txt` in a LOT folder, or set `W11UT_AD_DOMAIN`, to restrict the automatic AD export to one domain.
 - Automatic cycle refreshes are limited to the current `Computers.txt` and write inventory CSV/log evidence inside the current run folder under `Runs` with cycle numbers in their file names.
-- Root `DevicesIntune.csv` and `DevicesAD.csv` files are read as broad caches only when they already exist and are recent. Automatic LOT-scoped refreshes always write to the current run folder under `Runs`; root caches are used as read-only fallbacks only when refresh is skipped and no scoped CSV exists.
+- Root `DevicesIntune.csv` and `DevicesAD.csv` files are broad read-only caches. A root `DevicesIntune.csv` younger than 2 hours is reused automatically when no explicit existing scoped CSV was supplied, and the Intune refresh is skipped for that run. When refresh is required, automatic LOT-scoped exports always write to the current run folder under `Runs` and never overwrite a root cache.
 
 ## Reports And Logs
 
