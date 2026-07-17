@@ -58,11 +58,11 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     - Requires Exchange 2016 Management Tools.
-    - Generates detailed, summary, and added addresses CSV reports plus an Excel workbook with Check, ExistingProxyAddresses, DuplicateAliases, Summary, and Added worksheets.
+    - Generates detailed, summary, and added addresses CSV reports plus an Excel workbook with Check, ExistingProxyAddresses, DuplicateAliases, PlannedChanges, Summary, and Added worksheets.
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.22
+1.23
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -487,7 +487,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.22"
+    $ScriptVersion = "1.23"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -624,6 +624,7 @@ $ErrorActionPreference = 'Stop'
     # Collections & counters
     $results                = New-Object System.Collections.Generic.List[object]
     $addedOperations        = New-Object System.Collections.Generic.List[object]
+    $plannedChangeRows     = New-Object System.Collections.Generic.List[object]
     $existingProxyAddressRows = New-Object System.Collections.Generic.List[object]
     $duplicateAliasRows = New-Object System.Collections.Generic.List[object]
 
@@ -989,6 +990,35 @@ $ErrorActionPreference = 'Stop'
                     $preMissing++
                     $missingCount++
 
+                    $isSafeWriteCandidate = (-not $isExpectedAddressConflict) -and (-not ($plan.IsRemoteMailbox -and $plan.ExpectedAddressSource -eq 'AliasFallback')) -and ($rec.EmailAddressPolicyEnabled -ne $true)
+                    if ($isSafeWriteCandidate) {
+                        $plannedCmdlet = if ($plan.IsRemoteMailbox) { 'Set-RemoteMailbox' } else { 'Set-Mailbox' }
+                        $plannedExecutionMode = if ($AddMissingAddress) { 'WriteRun' } else { 'ReadOnlyPreview' }
+                        $plannedCurrentStatus = if ($AddMissingAddress) { 'Missing -> WillAdd' } else { 'Missing' }
+                        $identityForCommand = ([string]$rec.Identity).Replace("'", "''")
+                        $addressForCommand = ([string]$expectedAddress).Replace("'", "''")
+                        $plannedChangeRows.Add([PSCustomObject]@{
+                            Action                    = 'AddProxyAddress'
+                            ExecutionMode             = $plannedExecutionMode
+                            WouldRunInWriteMode       = $true
+                            Identity                  = $rec.Identity
+                            Alias                     = $plan.Alias
+                            SamAccountName            = $plan.SamAccountName
+                            DisplayName               = $rec.DisplayName
+                            RecipientType             = $rec.RecipientTypeDetails
+                            MailboxLocation           = $plan.MailboxLocation
+                            PrimarySmtp               = $email
+                            RemoteRoutingAddress      = $plan.RemoteRoutingAddress
+                            ExpectedAddressSource     = $plan.ExpectedAddressSource
+                            PlannedProxy              = $expectedAddress
+                            CurrentStatus             = $plannedCurrentStatus
+                            Reason                    = 'SafeMissingExpectedProxyAddress'
+                            EmailAddressPolicyEnabled = $rec.EmailAddressPolicyEnabled
+                            Cmdlet                    = $plannedCmdlet
+                            CommandPreview            = ("{0} -Identity '{1}' -EmailAddresses @{{ add = '{2}' }}" -f $plannedCmdlet, $identityForCommand, $addressForCommand)
+                        })
+                    }
+
                     if ($isExpectedAddressConflict) {
                         if ($isDuplicateExpectedAddress) { $duplicateExpectedMissingCount++ }
                         if ($isAddressAlreadyAssigned) { $addressAlreadyAssignedMissingCount++ }
@@ -1157,6 +1187,7 @@ $ErrorActionPreference = 'Stop'
         [PSCustomObject]@{ Summary = "Remote mailboxes processed";                         Count = $remoteMailboxCount },
         [PSCustomObject]@{ Summary = "With expected address present";                      Count = $okCount },
         [PSCustomObject]@{ Summary = "With expected address missing";                      Count = $missingCount },
+        [PSCustomObject]@{ Summary = "Planned address additions if Write is enabled";       Count = $plannedChangeRows.Count },
         [PSCustomObject]@{ Summary = "Pre-remediation missing";                            Count = $preMissing },
         [PSCustomObject]@{ Summary = "Post-remediation still missing";                     Count = $postMissing },
         [PSCustomObject]@{ Summary = "With no primary address";                            Count = $noPrimaryCount },
@@ -1198,6 +1229,12 @@ $ErrorActionPreference = 'Stop'
             WorksheetName = 'DuplicateAliases'
             TableName     = 'ProxyAddressesDuplicateAliases'
             EmptyColumns  = @('Alias','DuplicateAliasCount','Identity','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','RemoteRoutingAddress','ExpectedAddress','ExpectedAddressSource','ExpectedAddressDuplicatePeers','SuggestedUniqueAddress','SuggestedUniqueAddressReason','Status','EmailAddressPolicyEnabled')
+        }
+        [pscustomobject]@{
+            Rows          = @($plannedChangeRows | Sort-Object MailboxLocation, DisplayName, Identity)
+            WorksheetName = 'PlannedChanges'
+            TableName     = 'ProxyAddressesPlannedChanges'
+            EmptyColumns  = @('Action','ExecutionMode','WouldRunInWriteMode','Identity','Alias','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimarySmtp','RemoteRoutingAddress','ExpectedAddressSource','PlannedProxy','CurrentStatus','Reason','EmailAddressPolicyEnabled','Cmdlet','CommandPreview')
         }
         [pscustomobject]@{
             Path          = $summaryPublish.TimestampedPath
@@ -1288,6 +1325,7 @@ try {
         $totalCount = [int](($summary | Where-Object { $_.Summary -eq 'Total recipients processed' } | Select-Object -First 1).Count)
         $presentCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address present' } | Select-Object -First 1).Count)
         $missingCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address missing' } | Select-Object -First 1).Count)
+        $plannedAddressAdditionCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Planned address additions if Write is enabled' } | Select-Object -First 1).Count)
         $localMailboxCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'On-premises mailboxes processed' } | Select-Object -First 1).Count)
         $remoteMailboxCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Remote mailboxes processed' } | Select-Object -First 1).Count)
         $noAliasCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no Alias' } | Select-Object -First 1).Count)
@@ -1315,6 +1353,7 @@ try {
             [pscustomobject]@{ Label = 'Remote mailboxes'; Value = $remoteMailboxCountForMail }
             [pscustomobject]@{ Label = 'With expected address present'; Value = $presentCount }
             [pscustomobject]@{ Label = 'With expected address missing'; Value = $missingCount }
+            [pscustomobject]@{ Label = 'Planned address additions if Write is enabled'; Value = $plannedAddressAdditionCountForMail }
             [pscustomobject]@{ Label = 'With no Alias'; Value = $noAliasCountForMail }
             [pscustomobject]@{ Label = 'With no resolvable expected address'; Value = $noExpectedAddressCountForMail }
             [pscustomobject]@{ Label = 'RemoteRoutingAddress used'; Value = $remoteRoutingAddressCountForMail }
