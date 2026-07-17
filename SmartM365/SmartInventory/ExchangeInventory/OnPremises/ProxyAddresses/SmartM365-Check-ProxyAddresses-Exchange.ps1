@@ -4,14 +4,15 @@
 
 .DESCRIPTION
     This script checks whether each **UserMailbox** and **SharedMailbox** has a proxy address with the expected domain suffix (e.g., tenant.mail.onmicrosoft.com).
-    If the expected address is missing and the -AddMissingAddress switch is specified, the script can add the address (either restricted by an allowlist CSV, or for all mailboxes when -SkipAllowListCsv is used).
+    The expected proxy address local part is derived from the recipient SamAccountName.
+    If the expected address is missing and the -AddMissingAddress switch is specified, the script can add the address.
     The script can target multiple OUs via -OrganizationalUnit (string array) or all OUs with -AllOrganizationalUnit.
     It generates detailed, summary, and remediation CSV reports and maintains logs.
     Designed to run on an Exchange 2016 server with the Management Tools installed.
 
 .PARAMETER OrganizationalUnit
     Distinguished names of the target OU(s). Accepts multiple OUs.
-    Default: @("DC=example,DC=com")
+    No default scope is assumed. Configure at least one OU or use -AllOrganizationalUnit.
 
 .PARAMETER AllOrganizationalUnit
     If specified, the script ignores OU filtering and fetches all User/Shared mailboxes in the forest.
@@ -20,17 +21,7 @@
     The expected domain suffix for proxy addresses (default: "tenant.mail.onmicrosoft.com").
 
 .PARAMETER AddMissingAddress
-    If specified, missing proxy addresses will be added depending on allowlist logic.
-
-.PARAMETER SkipAllowListCsv
-    If specified, the allowlist CSV is ignored. When used with -AddMissingAddress, the script will add the expected address for ALL mailboxes that are missing it.
-    This switch also works without -AddMissingAddress (auditing only) to ignore allowlist evaluation in the reports.
-
-.PARAMETER AllowListCsv
-    Path to the CSV file containing the allowlist of mailboxes eligible for address addition (used unless -SkipAllowListCsv is present).
-
-.PARAMETER CsvEmailColumn
-    The column name in the allowlist CSV containing the primary SMTP addresses (default: "PrimarySmtpAddress").
+    If specified, missing proxy addresses will be added.
 
 .PARAMETER OutputPath
     Path to the output directory for reports and logs.
@@ -68,7 +59,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.12
+1.13
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -79,26 +70,16 @@
 param(
     [string]$Tenant = 'test',
 [Parameter(Mandatory=$false)]
-    [string[]]$OrganizationalUnit = @("DC=example,DC=com"),
+    [string[]]$OrganizationalUnit = @(),
 
     [Parameter(Mandatory=$false)]
-    [switch]$AllOrganizationalUnit = $true,
+    [switch]$AllOrganizationalUnit,
 
     [Parameter(Mandatory=$false)]
     [string]$ExpectedSuffix = "tenant.mail.onmicrosoft.com",
 
     [Parameter(Mandatory=$false)]
-    [switch]$AddMissingAddress = $false,
-
-    # Skip allowlist usage; active with or without -AddMissingAddress
-    [Parameter(Mandatory=$false)]
-    [switch]$SkipAllowListCsv = $True,
-
-    [Parameter(Mandatory=$false)]
-    [string]$AllowListCsv,
-
-    [Parameter(Mandatory=$false)]
-    [string]$CsvEmailColumn = "PrimarySmtpAddress",
+    [switch]$AddMissingAddress,
 
     [Parameter(Mandatory=$false)]
     [string]$OutputPath,
@@ -331,7 +312,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.12"
+    $ScriptVersion = "1.13"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -355,20 +336,24 @@ $ErrorActionPreference = 'Stop'
     }
     #endregion
 
-    if (-not $AllowListCsv) {
-        $ScriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Definition
-        $AllowListCsv = Join-Path $ScriptDirectory "Check-ProxyAddresses-Exchange-AllowListCsv.csv"
+    $OrganizationalUnit = @(
+        $OrganizationalUnit |
+            ForEach-Object { if ($null -ne $_) { ([string]$_).Trim() } } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if (-not $AllOrganizationalUnit -and $OrganizationalUnit.Count -eq 0) {
+        $scopeError = 'No OrganizationalUnit is configured. Set OrganizationalUnit in the local JSON or specify -AllOrganizationalUnit.'
+        WriteLog -Message $scopeError -Level 'ERROR'
+        throw $scopeError
     }
 
     $timestamp       = Get-Date -Format 'yyyyMMdd-HHmm'
 $outDetail       = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Check_{0}.csv" -f $timestamp)
 $outSummary      = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Summary_{0}.csv" -f $timestamp)
 $outAdded        = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_Added_{0}.csv" -f $timestamp)
-$outAllowMissing = Join-Path -Path $OutputPath -ChildPath ("Exchange_OnPrem_ProxyAddresses_MissingInAllowList_{0}.csv" -f $timestamp)
 $latestDetail       = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Check.csv' } else { $null }
 $latestSummary      = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Summary.csv' } else { $null }
 $latestAdded        = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_Added.csv' } else { $null }
-$latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'Exchange_OnPrem_ProxyAddresses_MissingInAllowList.csv' } else { $null }
 
     Write-Host "=== Start $(Get-Date) ==="
     if ($AllOrganizationalUnit) {
@@ -381,15 +366,9 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
     }
     Write-Host "Expected suffix: $ExpectedSuffix"
     Write-Host "AddMissing   : $AddMissingAddress"
-    Write-Host "SkipAllowLst : $SkipAllowListCsv"
-    if ($PSBoundParameters.ContainsKey('AllowListCsv')) {
-        Write-Host "AllowListCsv : $AllowListCsv"
-        Write-Host "CsvEmailCol  : $CsvEmailColumn"
-    }
     Write-Host "Detail CSV  : $outDetail"
     Write-Host "Summary CSV : $outSummary"
     Write-Host "Added CSV   : $outAdded"
-    Write-Host "Allowlist missing CSV: $outAllowMissing"
 
     # -------------------------------
     # Exchange PSSnapin availability
@@ -449,70 +428,14 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         Write-Warning "Unable to read/set ViewEntireForest : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
     }
 
-    # --- Allowlist CSV ---
-    if ($AddMissingAddress -and -not $SkipAllowListCsv) {
-        if ([string]::IsNullOrWhiteSpace($AllowListCsv)) {
-            Write-Error "The parameter -AllowListCsv is required when -AddMissingAddress is specified (unless -SkipAllowListCsv is used)."
-            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-            exit 1
-        }
-    }
-
-    $script:AllowSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    $script:AllowListLoaded = $false
-    $script:AllowListRowCount = 0
-
-    if (-not $SkipAllowListCsv -and -not [string]::IsNullOrWhiteSpace($AllowListCsv)) {
-        if (-not (Test-Path -LiteralPath $AllowListCsv)) {
-            Write-Error "CSV file not found: $AllowListCsv"
-            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-            exit 1
-        }
-        try {
-            $rows = Import-Csv -LiteralPath $AllowListCsv
-            if (-not $rows) {
-                Write-Warning "The CSV is empty: $AllowListCsv - allowlist will not be applied."
-            } else {
-                foreach ($row in $rows) {
-                    if ($null -ne $row.$CsvEmailColumn -and ($row.$CsvEmailColumn).ToString().Trim() -ne "") {
-                        [void]$script:AllowSet.Add(($row.$CsvEmailColumn).ToString().Trim())
-                        $script:AllowListRowCount++
-                    }
-                }
-                $script:AllowListLoaded = $true
-                Write-Host "Allowlist loaded: $script:AllowListRowCount entries (column '$CsvEmailColumn')."
-            }
-        } catch {
-            Write-Error "Failed to load CSV: $AllowListCsv - $($_.Exception.Message)`n$($_.ScriptStackTrace)"
-            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-            exit 1
-        }
-    } elseif ($SkipAllowListCsv) {
-        Write-Host "SkipAllowListCsv: allowlist CSV will be ignored; additions (if any) will not be restricted by CSV."
-    }
-
-    # Confirmation only when using allowlist CSV (not when skipping)
-    if ($AddMissingAddress -and -not $SkipAllowListCsv) {
-        Write-Host "You have specified -AddMissingAddress and provided -AllowListCsv: $AllowListCsv"
-        $confirmation = Read-Host "Do you want to continue using this AllowListCsv file? (Y/N)"
-        if ($confirmation -match '^[Yy]$') {
-            Write-Host "Continuing script execution with AllowListCsv: $AllowListCsv"
-        } else {
-            Write-Error "Script stopped by user: confirmation to use AllowListCsv was denied."
-            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-            exit 1
-        }
-    }
-
     # Collections & counters
     $results                = New-Object System.Collections.Generic.List[object]
     $addedOperations        = New-Object System.Collections.Generic.List[object]
 
     $okCount                = 0
     $missingCount           = 0
-    $missingInAllowCount    = 0
-    $missingNotInAllowCount = 0
     $noPrimaryCount         = 0
+    $noSamAccountNameCount  = 0
     $addedCount             = 0
     $addFailedCount         = 0
     $policyEnabledCount    = 0
@@ -570,9 +493,9 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         try { $primary = $rec.PrimarySmtpAddress } catch { $primary = $null }
 
         $email           = ""
+        $samAccountName  = ([string]$rec.SamAccountName).Trim()
         $expectedAddress = ""
         $status          = ""
-        $allowListed     = $false
         $policyWarning   = $false
 
         # Track Email Address Policy status without flooding the console.
@@ -583,80 +506,66 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
 
         if ($primary -and $primary.ToString() -match '.+@.+') {
             $email = $primary.ToString()
-            $localPart = $email.Split('@')[0]
-            $expectedAddress = "smtp:{0}@{1}" -f $localPart, $ExpectedSuffix
 
-            $addresses = @($rec.EmailAddresses) | ForEach-Object { $_.ToString() }
-            $exists    = $addresses | Where-Object { $_ -ieq $expectedAddress }
-
-            if ($script:AllowListLoaded -and -not [string]::IsNullOrWhiteSpace($email)) {
-                $allowListed = $script:AllowSet.Contains($email)
+            if ([string]::IsNullOrWhiteSpace($samAccountName)) {
+                $status = "No SamAccountName"
+                $noSamAccountNameCount++
             }
+            else {
+                $expectedAddress = "smtp:{0}@{1}" -f $samAccountName, $ExpectedSuffix
+                $addresses = @($rec.EmailAddresses) | ForEach-Object { $_.ToString() }
+                $exists = $addresses | Where-Object { $_ -ieq $expectedAddress }
 
-            if ($exists) {
-                $status = "OK"
-                $okCount++
-            } else {
-                # missing before remediation
-                $preMissing++
-                $missingCount++
-
-                # Decide if we may add
-                $mayAdd = $AddMissingAddress -and ( $SkipAllowListCsv -or ($script:AllowListLoaded -and $allowListed) )
-
-                if ($mayAdd) {
-                    if (-not $SkipAllowListCsv -and $allowListed) { $missingInAllowCount++ }
-                    if ($SkipAllowListCsv) { $status = "Missing -> WillAdd (SkipAllowList)" } else { $status = "Missing -> WillAdd" }
-
-                    try {
-                        $params = @{
-                            Identity       = $rec.Identity
-                            EmailAddresses = @{ add = $expectedAddress }
-                            ErrorAction    = 'Stop'
-                        }
-
-                        if ($PSCmdlet.ShouldProcess($rec.Identity, "Add proxy address $expectedAddress")) {
-                            Set-Mailbox @params
-                            Write-Host "apply $expectedAddress for $email"
-                            $addedCount++
-                            $status = "Added"
-
-                            $addedOperations.Add([PSCustomObject]@{
-                                Identity      = $rec.Identity
-                                DisplayName   = $rec.DisplayName
-                                RecipientType = $rec.RecipientTypeDetails
-                                AddedProxy    = $expectedAddress
-                                PrimarySmtp   = $email
-                                When          = (Get-Date)
-                            })
-                        } else {
-                            $status = "Missing -> Skipped by WhatIf"
-                        }
-                    } catch {
-                        $addFailedCount++
-                        $status = "Missing -> AddFailed"
-                        Write-Warning "[$($rec.Identity)] Failed to add $expectedAddress : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
-                    }
-                } else {
-                    # No add attempt
-                    if ($script:AllowListLoaded) {
-                        if ($allowListed) {
-                            $missingInAllowCount++
-                            $status = "Missing (InAllowList)"
-                        } else {
-                            $missingNotInAllowCount++
-                            $status = "Missing (NotInAllowList)"
-                        }
-                    } else {
-                        # No allowlist in use, count as not-in-allowlist for reporting symmetry
-                        $missingNotInAllowCount++
-                        $status = "Missing (NotInAllowList)"
-                    }
+                if ($exists) {
+                    $status = "OK"
+                    $okCount++
                 }
+                else {
+                    $preMissing++
+                    $missingCount++
 
-                # post-remediation still missing?
-                if ($status -like 'Missing*' -or $status -eq 'Missing -> AddFailed' -or $status -eq 'Missing -> Skipped by WhatIf') {
-                    $postMissing++
+                    if ($AddMissingAddress) {
+                        $status = "Missing -> WillAdd"
+                        try {
+                            $params = @{
+                                Identity       = $rec.Identity
+                                EmailAddresses = @{ add = $expectedAddress }
+                                ErrorAction    = 'Stop'
+                            }
+
+                            if ($PSCmdlet.ShouldProcess($rec.Identity, "Add proxy address $expectedAddress")) {
+                                Set-Mailbox @params
+                                Write-Host "apply $expectedAddress for $email"
+                                $addedCount++
+                                $status = "Added"
+
+                                $addedOperations.Add([PSCustomObject]@{
+                                    Identity       = $rec.Identity
+                                    SamAccountName = $samAccountName
+                                    DisplayName    = $rec.DisplayName
+                                    RecipientType  = $rec.RecipientTypeDetails
+                                    AddedProxy     = $expectedAddress
+                                    PrimarySmtp    = $email
+                                    When           = (Get-Date)
+                                })
+                            }
+                            else {
+                                $status = "Missing -> Skipped by WhatIf"
+                            }
+                        }
+                        catch {
+                            $addFailedCount++
+                            $status = "Missing -> AddFailed"
+                            Write-Warning "[$($rec.Identity)] Failed to add $expectedAddress : $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+                        }
+                    }
+                    else {
+                        $status = "Missing"
+                    }
+
+                    if ($status -like 'Missing*') {
+                        $postMissing++
+                    }
                 }
             }
         }
@@ -667,17 +576,16 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
 
         $results.Add([PSCustomObject]@{
             Identity                  = $rec.Identity
+            SamAccountName            = $samAccountName
             DisplayName               = $rec.DisplayName
             RecipientType             = $rec.RecipientTypeDetails
             PrimaryAddress            = $email
             ExpectedAddress           = $expectedAddress
             Status                    = $status
-            AllowListMatch            = $allowListed
             EmailAddressPolicyEnabled = $rec.EmailAddressPolicyEnabled
             PolicyWarning             = $policyWarning
         })
     }
-
     if ($policyEnabledCount -gt 0) {
         Write-Host "Email address policy enabled recipients: $policyEnabledCount. Details are available in the detail CSV."
     }
@@ -690,28 +598,17 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         if ($addedPublish) { $publishResults += $addedPublish }
     }
 
-    # Dedicated CSV for "missing but in allowlist" (exclude Added)
-    $allowMissing = $results | Where-Object {
-        $_.AllowListMatch -and $_.Status -like 'Missing*' -and $_.Status -notlike '*NotInAllowList*' -and $_.Status -ne 'Added'
-    }
-    if ($allowMissing.Count -gt 0) {
-        $allowMissingPublish = Publish-SmartM365Csv -Data @($allowMissing | Select-Object Identity, DisplayName, PrimaryAddress, ExpectedAddress, Status, EmailAddressPolicyEnabled, PolicyWarning) -TimestampedPath $outAllowMissing -LatestPath $latestAllowMissing
-        if ($allowMissingPublish) { $publishResults += $allowMissingPublish }
-    }
-
     $summary = @(
         [PSCustomObject]@{ Summary = "Total recipients processed";            Count = $results.Count },
         [PSCustomObject]@{ Summary = "With expected address present";         Count = $okCount },
         [PSCustomObject]@{ Summary = "With expected address missing";         Count = $missingCount },
         [PSCustomObject]@{ Summary = "Pre-remediation missing";               Count = $preMissing },
         [PSCustomObject]@{ Summary = "Post-remediation still missing";        Count = $postMissing },
-        [PSCustomObject]@{ Summary = "With missing but in allowlist";         Count = $missingInAllowCount },
-        [PSCustomObject]@{ Summary = "With missing but NOT in allowlist";     Count = $missingNotInAllowCount },
         [PSCustomObject]@{ Summary = "With no primary address";               Count = $noPrimaryCount },
+        [PSCustomObject]@{ Summary = "With no SamAccountName";                Count = $noSamAccountNameCount },
         [PSCustomObject]@{ Summary = "With email address policy enabled";     Count = $policyEnabledCount },
         [PSCustomObject]@{ Summary = "Addresses successfully added";          Count = $addedCount },
-        [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount },
-        [PSCustomObject]@{ Summary = "Allowlist entries loaded";              Count = $script:AllowListRowCount }
+        [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount }
     )
     $summaryPublish = Publish-SmartM365Csv -Data @($summary) -TimestampedPath $outSummary -LatestPath $latestSummary
     if ($summaryPublish) { $publishResults += $summaryPublish }
@@ -721,15 +618,12 @@ $latestAllowMissing = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFold
         switch ($item.Summary) {
             "With expected address missing"       { Write-Host "$($item.Summary): $($item.Count)" -ForegroundColor Yellow }
             "With expected address present"       { Write-Host "$($item.Summary): $($item.Count)" -ForegroundColor Green }
-            "With missing but in allowlist"       { Write-Host "$($item.Summary): $($item.Count)" -ForegroundColor Cyan }
-            "With missing but NOT in allowlist"   { Write-Host "$($item.Summary): $($item.Count)" -ForegroundColor Magenta }
             default                               { Write-Host "$($item.Summary): $($item.Count)" }
         }
     }
 
     Write-Host "Detail: $outDetail"
     if (Test-Path $outAdded)        { Write-Host "Added: $outAdded" }
-    if (Test-Path $outAllowMissing) { Write-Host "Missing (in allowlist) : $outAllowMissing" }
     Write-Host "Summary: $outSummary"
 
 # ===========================
@@ -748,7 +642,6 @@ try {
     if (Test-Path $outDetail)        { $attachments += $outDetail }
     if (Test-Path $outSummary)       { $attachments += $outSummary }
     if (Test-Path $outAdded)         { $attachments += $outAdded }
-    if (Test-Path $outAllowMissing)  { $attachments += $outAllowMissing }
 
     if ([string]::IsNullOrWhiteSpace($MailFrom) -or -not $MailTo) {
         Write-Host "Email skipped: incomplete email parameters (From/To)."
@@ -757,8 +650,7 @@ try {
         $totalCount = [int](($summary | Where-Object { $_.Summary -eq 'Total recipients processed' } | Select-Object -First 1).Count)
         $presentCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address present' } | Select-Object -First 1).Count)
         $missingCount = [int](($summary | Where-Object { $_.Summary -eq 'With expected address missing' } | Select-Object -First 1).Count)
-        $allowMissingCount = [int](($summary | Where-Object { $_.Summary -eq 'With missing but in allowlist' } | Select-Object -First 1).Count)
-        $notAllowMissingCount = [int](($summary | Where-Object { $_.Summary -eq 'With missing but NOT in allowlist' } | Select-Object -First 1).Count)
+        $noSamAccountNameCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With no SamAccountName' } | Select-Object -First 1).Count)
         $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
         $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
         $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SendMailMode)) { if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' } } else { $SendMailMode.Trim() }
@@ -767,8 +659,7 @@ try {
             [pscustomobject]@{ Label = 'Total recipients processed'; Value = $totalCount }
             [pscustomobject]@{ Label = 'With expected address present'; Value = $presentCount }
             [pscustomobject]@{ Label = 'With expected address missing'; Value = $missingCount }
-            [pscustomobject]@{ Label = 'Missing but in allowlist'; Value = $allowMissingCount }
-            [pscustomobject]@{ Label = 'Missing but not in allowlist'; Value = $notAllowMissingCount }
+            [pscustomobject]@{ Label = 'With no SamAccountName'; Value = $noSamAccountNameCountForMail }
             [pscustomobject]@{ Label = 'Email address policy enabled'; Value = $policyEnabledCountForMail }
             [pscustomobject]@{ Label = 'Addresses added'; Value = $addedCount }
         )
@@ -778,15 +669,12 @@ try {
             [pscustomobject]@{ Label = 'Summary CSV'; Path = $outSummary }
         )
         if (Test-Path $outAdded) { $pathRows += [pscustomobject]@{ Label = 'Added CSV'; Path = $outAdded } }
-        if (Test-Path $outAllowMissing) { $pathRows += [pscustomobject]@{ Label = 'Allowlist missing CSV'; Path = $outAllowMissing } }
 
         $scopeHtml = if ($AllOrganizationalUnit) { 'ALL (entire forest)' } else { ($OrganizationalUnit | ForEach-Object { Encode $_ }) -join '<br/>' }
         $modeLabel = if ($AddMissingAddress) { 'Write mode' } else { 'Read-only mode' }
-        $allowListMode = if ($SkipAllowListCsv) { 'Allowlist skipped' } else { 'Allowlist enforced' }
         $scopeSectionHtml = @"
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
   <tr><td style="width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Mode</td><td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(Encode $modeLabel)</td></tr>
-  <tr><td style="width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Allowlist</td><td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(Encode $allowListMode)</td></tr>
   <tr><td style="width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Expected suffix</td><td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(Encode $ExpectedSuffix)</td></tr>
   <tr><td style="width:180px;background:#f8fafc;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">Scope</td><td style="padding:10px 12px;font-size:13px;color:#334155;word-break:break-all;">$scopeHtml</td></tr>
 </table>
@@ -797,12 +685,13 @@ try {
         $missingPreviewRows = @($results | Where-Object { $_.Status -like 'Missing*' } | Sort-Object Status, DisplayName | Select-Object -First 50)
         if ($missingPreviewRows.Count -gt 0) {
             $missingRowsHtml = foreach ($row in $missingPreviewRows) {
-                "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.DisplayName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.PrimaryAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.ExpectedAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(Encode $row.Status)</td></tr>"
+                "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.DisplayName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$(Encode $row.SamAccountName)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.PrimaryAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$(Encode $row.ExpectedAddress)</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#92400e;`">$(Encode $row.Status)</td></tr>"
             }
             $missingSectionHtml = @"
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
   <tr>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Display name</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">SamAccountName</th>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Primary SMTP</th>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Expected proxy</th>
     <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Status</th>
@@ -830,7 +719,7 @@ try {
 
         $severity = if ($AddMissingAddress -and $addedCount -gt 0) { 'Success' } elseif ($missingCount -gt 0) { 'Warning' } else { 'Success' }
         $actionTitle = if ($missingCount -gt 0) { 'Review required' } else { '' }
-        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Use write mode only after validating the scope and allowlist decision.' } else { '' }
+        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Use write mode only after validating the scope.' } else { '' }
         $message = if ($missingCount -gt 0) { 'Exchange on-premises proxy address audit found missing expected proxy addresses.' } else { 'Exchange on-premises proxy address audit completed without missing expected proxy addresses.' }
 
         $body = New-SmartM365EmailBody `
