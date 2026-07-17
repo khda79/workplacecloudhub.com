@@ -1,8 +1,11 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.1.4'
+$script:SemrVersion = '1.1.5'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
+$script:GraphEvidenceByEmail = @{}
+$script:GraphSubscribedSkus = @()
+$script:GraphSubscribedSkuError = ''
 $script:ConnectionState = [ordered]@{
     ActiveDirectory = $false
     OnPremisesExchange = $false
@@ -254,46 +257,6 @@ function Connect-SemrOnPremisesExchange {
     return Get-SemrConnectionState
 }
 
-function Initialize-SemrCloudAuthenticationCompatibility {
-    [CmdletBinding()]
-    param()
-
-    if ($PSVersionTable.PSEdition -ne 'Core') {
-        return
-    }
-
-    $graphAuthenticationModule = Get-Module -ListAvailable Microsoft.Graph.Authentication |
-        Sort-Object Version -Descending |
-        Select-Object -First 1
-    if (-not $graphAuthenticationModule) {
-        throw 'Microsoft.Graph.Authentication is required for Live mode.'
-    }
-
-    $dependencyPaths = @(
-        (Join-Path $graphAuthenticationModule.ModuleBase 'Dependencies\Microsoft.IdentityModel.Abstractions.dll'),
-        (Join-Path $graphAuthenticationModule.ModuleBase 'Dependencies\Core\Microsoft.Identity.Client.dll')
-    )
-    foreach ($dependencyPath in $dependencyPaths) {
-        if (-not (Test-Path -LiteralPath $dependencyPath -PathType Leaf)) {
-            throw "Microsoft Graph authentication dependency is missing: $dependencyPath"
-        }
-
-        $requiredAssembly = [System.Reflection.AssemblyName]::GetAssemblyName($dependencyPath)
-        $loadedAssembly = [AppDomain]::CurrentDomain.GetAssemblies() |
-            Where-Object { $_.GetName().Name -eq $requiredAssembly.Name } |
-            Select-Object -First 1
-        if ($loadedAssembly) {
-            $loadedVersion = $loadedAssembly.GetName().Version
-            if ($loadedVersion -lt $requiredAssembly.Version) {
-                throw "Microsoft cloud authentication assembly conflict: $($requiredAssembly.Name) $loadedVersion is already loaded, but Microsoft Graph requires $($requiredAssembly.Version). Restart the application after updating ExchangeOnlineManagement and Microsoft.Graph."
-            }
-            continue
-        }
-
-        Add-Type -Path $dependencyPath -ErrorAction Stop
-    }
-}
-
 function Connect-SemrExchangeOnline {
     [CmdletBinding()]
     param(
@@ -302,7 +265,6 @@ function Connect-SemrExchangeOnline {
         [string]$TenantId = ''
     )
 
-    Initialize-SemrCloudAuthenticationCompatibility
     Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop
     if (Test-SemrCommand -Name 'Disconnect-ExchangeOnline') {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
@@ -335,36 +297,91 @@ function Connect-SemrMicrosoftGraph {
     [CmdletBinding()]
     param(
         [string[]]$Scopes = @('User.Read.All', 'Directory.Read.All', 'Organization.Read.All'),
-        [string]$TenantId = ''
+        [string]$TenantId = '',
+        [string[]]$EmailAddresses = @(),
+        [scriptblock]$ProgressCallback
     )
 
-    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
-    Import-Module Microsoft.Graph.Users -ErrorAction Stop
-    Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
-    if (Test-SemrCommand -Name 'Disconnect-MgGraph') {
-        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    $workerPath = Join-Path $PSScriptRoot 'SmartM365-ExchangeMigrationReadiness-GraphWorker.ps1'
+    if (-not (Test-Path -LiteralPath $workerPath -PathType Leaf)) {
+        throw "Microsoft Graph worker is missing: $workerPath"
+    }
+    $pwshCommand = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue
+    if (-not $pwshCommand) {
+        throw 'PowerShell 7 (pwsh.exe) is required for the isolated Microsoft Graph connection.'
     }
 
-    $parameters = @{
-        Scopes = $Scopes
-        ContextScope = 'Process'
-        NoWelcome = $true
-        ErrorAction = 'Stop'
+    $runtimeRoot = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-ExchangeMigrationReadiness\Graph-{0}" -f [guid]::NewGuid().ToString('N'))
+    $scopesPath = Join-Path $runtimeRoot 'scopes.clixml'
+    $inputPath = Join-Path $runtimeRoot 'mailboxes.clixml'
+    $outputPath = Join-Path $runtimeRoot 'evidence.clixml'
+    $errorPath = Join-Path $runtimeRoot 'error.txt'
+    $progressPath = Join-Path $runtimeRoot 'progress.txt'
+    $process = $null
+    try {
+        [void](New-Item -ItemType Directory -Path $runtimeRoot -Force)
+        @($Scopes | Where-Object { $_ } | Sort-Object -Unique) | Export-Clixml -LiteralPath $scopesPath -Force
+        @($EmailAddresses | Where-Object { $_ } | Sort-Object -Unique) | Export-Clixml -LiteralPath $inputPath -Force
+
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $pwshCommand.Source
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        foreach ($argument in @(
+            '-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $workerPath,
+            '-TenantId', $TenantId, '-ScopesPath', $scopesPath, '-InputPath', $inputPath,
+            '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath
+        )) {
+            [void]$startInfo.ArgumentList.Add([string]$argument)
+        }
+
+        $process = [Diagnostics.Process]::Start($startInfo)
+        if (-not $process) {
+            throw 'The isolated Microsoft Graph process could not be started.'
+        }
+        $lastProgress = ''
+        while (-not $process.WaitForExit(250)) {
+            if ($ProgressCallback -and (Test-Path -LiteralPath $progressPath -PathType Leaf)) {
+                try {
+                    $progress = [IO.File]::ReadAllText($progressPath)
+                    if ($progress -and $progress -ne $lastProgress) {
+                        $lastProgress = $progress
+                        $parts = @($progress.Split('|', 3))
+                        $message = if ($parts.Count -eq 3) { "Microsoft Graph [$($parts[0])/$($parts[1])] - $($parts[2])" } else { 'Collecting Microsoft Graph evidence...' }
+                        & $ProgressCallback $message
+                    }
+                }
+                catch { $null = $_ }
+            }
+        }
+        if ($process.ExitCode -ne 0) {
+            $workerError = if (Test-Path -LiteralPath $errorPath -PathType Leaf) { [IO.File]::ReadAllText($errorPath) } else { "Worker exit code $($process.ExitCode)." }
+            throw "Microsoft Graph isolated authentication or collection failed: $workerError"
+        }
+        if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
+            throw 'Microsoft Graph worker completed without returning evidence.'
+        }
+
+        $workerResult = Import-Clixml -LiteralPath $outputPath
+        if ($TenantId -and [string]$workerResult.TenantId -ne $TenantId) {
+            throw "Microsoft Graph connected to tenant '$($workerResult.TenantId)' instead of configured tenant '$TenantId'."
+        }
+        $script:GraphEvidenceByEmail = @{}
+        foreach ($entry in @($workerResult.Evidence)) {
+            $key = ([string]$entry.EmailAddress).Trim().ToLowerInvariant()
+            if ($key) { $script:GraphEvidenceByEmail[$key] = $entry }
+        }
+        $script:GraphSubscribedSkus = @($workerResult.SubscribedSkus)
+        $script:GraphSubscribedSkuError = [string]$workerResult.SubscribedSkuError
+        $script:ConnectionState.MicrosoftGraph = $true
+        return Get-SemrConnectionState
     }
-    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
-        $parameters.TenantId = $TenantId
+    finally {
+        if ($process) { $process.Dispose() }
+        if (Test-Path -LiteralPath $runtimeRoot) {
+            Remove-Item -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
-    Connect-MgGraph @parameters | Out-Null
-    $context = Get-MgContext
-    if (-not $context) {
-        throw 'Microsoft Graph authentication did not return a context.'
-    }
-    if ($TenantId -and [string]$context.TenantId -ne $TenantId) {
-        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-        throw "Microsoft Graph connected to tenant '$($context.TenantId)' instead of configured tenant '$TenantId'."
-    }
-    $script:ConnectionState.MicrosoftGraph = $true
-    return Get-SemrConnectionState
 }
 function Disconnect-SemrSession {
     [CmdletBinding()]
@@ -383,6 +400,9 @@ function Disconnect-SemrSession {
     foreach ($key in $script:ConnectionState.Keys) {
         $script:ConnectionState[$key] = $false
     }
+    $script:GraphEvidenceByEmail = @{}
+    $script:GraphSubscribedSkus = @()
+    $script:GraphSubscribedSkuError = ''
 }
 
 function Initialize-SemrLiveSourceConnections {
@@ -1224,33 +1244,28 @@ function Get-SemrGraphEvidence {
         return [pscustomobject]@{ Available = $false; Users = @(); LicenseDetails = @() }
     }
 
-    $escaped = $EmailAddress.Replace("'", "''")
-    $users = @()
-    try {
-        $users = @(Get-MgUser -Filter "userPrincipalName eq '$escaped' or mail eq '$escaped'" -Property @(
-            'id', 'displayName', 'userPrincipalName', 'mail', 'proxyAddresses', 'accountEnabled',
-            'onPremisesSyncEnabled', 'onPremisesImmutableId', 'onPremisesLastSyncDateTime',
-            'usageLocation', 'assignedLicenses', 'assignedPlans'
-        ) -All -ErrorAction Stop)
-    }
-    catch { $null = $_ }
-
-    $licenseDetails = @()
-    if ($users.Count -eq 1 -and (Test-SemrCommand -Name 'Get-MgUserLicenseDetail')) {
-        try {
-            $licenseDetails = @(Get-MgUserLicenseDetail -UserId $users[0].Id -ErrorAction Stop)
+    $key = $EmailAddress.Trim().ToLowerInvariant()
+    if (-not $script:GraphEvidenceByEmail.ContainsKey($key)) {
+        return [pscustomobject]@{
+            Available = $true
+            Source = 'Live Microsoft Graph (isolated process)'
+            SourceTimestamp = Get-Date
+            Users = @()
+            LicenseDetails = @()
+            QueryError = ''
         }
-        catch { $null = $_ }
     }
+
+    $entry = $script:GraphEvidenceByEmail[$key]
     return [pscustomobject]@{
         Available = $true
-        Source = 'Live Microsoft Graph'
-        SourceTimestamp = Get-Date
-        Users = $users
-        LicenseDetails = $licenseDetails
+        Source = 'Live Microsoft Graph (isolated process)'
+        SourceTimestamp = $entry.SourceTimestamp
+        Users = @($entry.Users)
+        LicenseDetails = @($entry.LicenseDetails)
+        QueryError = [string]$entry.QueryError
     }
 }
-
 function Get-SemrTenantLicenseEvidence {
     param(
         [string]$TargetSku,
@@ -1285,28 +1300,29 @@ function Get-SemrTenantLicenseEvidence {
         return [pscustomobject]$result
     }
 
-    if (-not $script:ConnectionState.MicrosoftGraph -or -not (Test-SemrCommand -Name 'Get-MgSubscribedSku')) {
+    if (-not $script:ConnectionState.MicrosoftGraph) {
         $result.Message = 'Microsoft Graph subscribed SKU data is unavailable.'
         return [pscustomobject]$result
     }
+    if ($script:GraphSubscribedSkuError) {
+        $result.Message = $script:GraphSubscribedSkuError
+        return [pscustomobject]$result
+    }
+
     $result.Available = $true
-    try {
-        $sku = @(Get-MgSubscribedSku -All -ErrorAction Stop | Where-Object { $_.SkuPartNumber -ieq $TargetSku } | Select-Object -First 1)
-        if ($sku.Count -eq 0) {
-            $result.Message = "Target SKU '$TargetSku' was not found in subscribed SKUs."
-            return [pscustomobject]$result
-        }
-        $result.Found = $true
-        $result.Enabled = [int]$sku[0].PrepaidUnits.Enabled
-        $result.Consumed = [int]$sku[0].ConsumedUnits
-        $result.AvailableUnits = [math]::Max(0, $result.Enabled - $result.Consumed)
-        $result.Message = "Enabled=$($result.Enabled); Consumed=$($result.Consumed); Available=$($result.AvailableUnits)"
+    $sku = @($script:GraphSubscribedSkus | Where-Object { $_.SkuPartNumber -ieq $TargetSku } | Select-Object -First 1)
+    if ($sku.Count -eq 0) {
+        $result.Message = "Target SKU '$TargetSku' was not found in subscribed SKUs."
+        return [pscustomobject]$result
     }
-    catch {
-        $result.Message = $_.Exception.Message
-    }
+    $result.Found = $true
+    $result.Enabled = [int]$sku[0].Enabled
+    $result.Consumed = [int]$sku[0].Consumed
+    $result.AvailableUnits = [math]::Max(0, $result.Enabled - $result.Consumed)
+    $result.Message = "Enabled=$($result.Enabled); Consumed=$($result.Consumed); Available=$($result.AvailableUnits)"
     return [pscustomobject]$result
 }
+
 function Get-SemrExchangeOnlinePermission {
     param([Parameter(Mandatory)][string]$EmailAddress)
 
@@ -2086,8 +2102,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOOPwqE98+vn5J
-# 9OV1xtyQ+/13K2iYp+cW0n+Ldj8D8KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCJmccCPvPcPbG
+# 1haNFtaDDnfwyjK5AQh0v3SiRsQHb6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2220,31 +2236,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL+Tc5BCGU6uj5iJxVs4t8XeSP8H1kDt86eV8sITbGsjMA0GCSqG
-# SIb3DQEBAQUABIIBgHyJsW8cjb/9w3KqKLAtxP8C6Aq3Y/T3WHB+jTwedzvifN36
-# QtLPOwt7t05zvl/DbDTOdPAwea9xOxCBjrcLvGYUnZkd1+q937NSq4CPxfya5Zq7
-# frHIMnhNK/yk2iTsh3jVIg4rYwjru9njJzXf1M2Ftf4Phz00r+kLFVZ9+U7IW00j
-# R+HRH4XWOYiva4DZ3lNrX526SnZEtc7KcgMgiaZLWHXbCKLJ6MF+UiLPzffbP6iC
-# 8yc2/dzu67MEswNjuWyCF4+lOK/B9bdqv2Hy4wblK9B2UpGnGigePGWtcCQs/iMF
-# VscOcFwe0EMWUSRGAcHDPAUEdKd0bLSiqoRekhGiSKCqNcZOElxariIHpHQo0VXK
-# pNUwmI6Fllkw4IqD7qMrjW4hrP6jQsk4rfCohpONvPQMU2ud6UR8H5QhulkmAbTq
-# TC7201vfu3sh4hawwZWF5UIUKIPHX6dX5NZaRZHXfzUwxXYjxvlFl/MjEh/d0k6l
-# wW5ZOvgF3mF1Psp/PqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMIHPW2N2+/tNhiUt/dRHdWF175NfcZtc5hPFdq9vIIiMA0GCSqG
+# SIb3DQEBAQUABIIBgBVsKxuVwo6y3rM5HkfDRNLD8JIG3/6GP++PnDfiAP+r6T1L
+# j9hBNTtfwMA5nDbdbRM7prje/BQo+AihiWb4tgrhFRp9pjakVcbbHm8qginL+UMY
+# L0AnNUd5+FRYAudmEeZYHK7dm6QUKK9u7/XQfWWqA+wexHszdBjIUqoMKSRUlA+W
+# ziV1WEe2cx5ci+x+iA7xbElG5gfX5uvnCF61ykc6aaMk2+c9Lhkh+3VyBFS9gZGk
+# XS7cuZj/wxQQ60J5kYeCFB8cknXS/VDXEWopLbSf+wDWtlppBipsNMEUQuq23owG
+# wHah/KwDxDlIwn8tphODAUe+X2oJGsijdcp2+ZVM5E7Uh2DRg8wpL6/sJPIEJXWM
+# JBQAYaIs09dD+gh7NnpYGWsPmxoz9KNozwXg4D0xBG0F9XE8XeQndyRtZWr77twA
+# GtvCDfADekA5mxx8R5Gh7hW4I5VBCKOeriC1ygl1eCIvwLegL8vU0IWaXHBJ/EDC
+# QICVKHduzd6wrTOP/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMzE1
-# MDhaMC8GCSqGSIb3DQEJBDEiBCCb1z3ngL7poo6pnbgdav5CbNgs+gra43pxpmCs
-# zmxYYTANBgkqhkiG9w0BAQEFAASCAgBnDgDPi0ofEzmlPo8N8EGxprW4eSI109+K
-# m91kE71FbfR+pCOtPoHeQy/yXujDsGHoLWKGjy1an41R4SXd3TB91JzDNoJVXhrR
-# d5k2J9Y+X7LgTre6TFixymmH/ZGj8w29PH6xv4w6OPBgR38NS+UdudmZi2Wfs1J4
-# PcC2A5zUZS3QeKRP4tzpDS8HexTwZwkDQeQwYHSSEEHV0TPjP2RQww2mOsR6mjhu
-# DrO8mWsrkrTzLagva9s9Vn4G9CxvkSzKyu1zLtbkLjxe4E/WY0Nd/QMg3/JKqson
-# ZOjpU1F91TtjMev598i4Ekqr5odVZtlztSBYdbh8dN1pNYCHZ6eYdLPlw5bJBqnw
-# 938UbjV0H045HLQ2/nIadp3wsFAnptDv8xn7OyOJWMWj/iPkjlaSkd/1cNz1v9Jt
-# 3V/cnQYDdyJ7eDSKbUxeO0Fvb6iN1Ubvt/WW+5WSu6bPqr0EGvsGqFGKRcLm1aId
-# LtgOrW7B0f6pl2ZQSySQI2jzXh4BmzcBtdNjEIJPioHX1YjnW3ogxO4MIe8M2uWM
-# 0OEoq4fCAU1xfjJ83nL6TOK8mGC/UOxetETNllhpUnGa7+80lnzG/3YP6vRHpaK0
-# bmX2pFFupOCAv9F50RJ0hTY6/kWKOZphVsZhV0UxKO7K0jRT5OXUmzkynmDSP4qT
-# 9GCK0DDlZA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMzQz
+# NDJaMC8GCSqGSIb3DQEJBDEiBCBoNXroWqQAlBfrxm4GNYLNqEzKwl4LiuGl2+Ir
+# SyMqLzANBgkqhkiG9w0BAQEFAASCAgAYC05qXZO9/210yAkMVAvxUtORJUq8kxJ7
+# ymK0UpX76T70BB6PnLrT9L4JpTRPLtnTX4Z/iAZHPh82wgZ3d4mP+1GtHF8e7ToH
+# nwnEJcAABUbxqZ52eDjDeUjaYXQ9/Ts680/yeEG/N76kqMK9jaPfYdg4cujZutwN
+# oKome7Oqatp6JPNU57FsY3uxigxzcqObGIgVmad5ClxrBmhz9oBJ7KRwDBXVyoCa
+# claAEi/PYPKQO1wdbhRZ0s75HStbAPmv3fEQCd5V+pvzJ5f+/P8ACvWvEYwywxSh
+# Ea+37wXu8i6tW8fmyQ3hqeSTCDNO2cGqoqJf336JgC/Umc2W7KlT0bulBGrMkVuW
+# nz622KbMphLKSn6q64KggffxIVyfJxATNmfsVDno///vVl2AigXU1nj0QgwL/mHf
+# I7iM6lW6+SHc+OmCQxDm5Q4xkDZDZ6Q28iBB+ONiW6ljNXcH1kDd6/mIwdXrm8YU
+# WMIF1SKg0oBuHt6ev4Ip09XQM2vGp1yjfKZt+ybH8HfiJz19KgKbxEblqGw284BL
+# eFkg/dmkQ25hJXwaNeZZBRQu7ppjaYf12obS0QHKOHkjTUNSqpsZq0+255DRwCPa
+# mEa6kzkUbbp3h0JtSOZ4M42Jr6keOP+NX89PNuUIT9QfuVDE8KDESHy/NztglHuu
+# lcJTx+DYrg==
 # SIG # End signature block
