@@ -22,7 +22,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.39
+1.40
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -681,7 +681,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.39"
+$ScriptVersion = "1.40"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $defaultActiveDirectoryInventoryOutputPath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } else { Resolve-SmartM365ConfigValue -Value '{{DataAllRootPath}}\ActiveDirectory\Inventory' }
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveDirectoryInventoryCsvLogFolderPath' -DefaultValue $defaultActiveDirectoryInventoryOutputPath
@@ -1112,6 +1112,96 @@ try {
             }
         }
     }
+    function Publish-WeeklyInventoryHistoryToSharePoint {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$WeekName,
+
+            [Parameter(Mandatory = $true)]
+            [string]$WeekFolder,
+
+            [Parameter(Mandatory = $true)]
+            [string]$ManifestPath,
+
+            [Parameter(Mandatory = $true)]
+            [object]$Manifest,
+
+            [Parameter(Mandatory = $true)]
+            [AllowEmptyCollection()]
+            [string[]]$RequiredFileNames
+        )
+
+        if (-not $global:EnableSharePointUpload) {
+            return $false
+        }
+        if (-not (Get-Command Invoke-SmartM365SharePointCsvUpload -ErrorAction SilentlyContinue)) {
+            WriteLog -Message "Weekly AD inventory history SharePoint publication skipped: upload helper is unavailable." -Level 'WARNING'
+            return $false
+        }
+        if ([string]$Manifest.SharePointStatus -eq 'Complete') {
+            WriteLog -Message ("Weekly AD inventory history SharePoint publication already complete for {0}. Upload skipped." -f $WeekName)
+            return $true
+        }
+
+        $fileNames = @(
+            @($Manifest.Files)
+            @($Manifest.RequiredFiles)
+            @($RequiredFileNames)
+        ) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            ForEach-Object { [System.IO.Path]::GetFileName([string]$_) } |
+            Select-Object -Unique
+
+        $missingFiles = @($fileNames | Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path -Path $WeekFolder -ChildPath $_))
+        })
+        if ($missingFiles.Count -gt 0) {
+            $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
+            $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
+            $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue $missingFiles -Force
+            $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+            WriteLog -Message ("Weekly AD inventory history SharePoint publication postponed because snapshot files are missing for {0}: {1}" -f $WeekName, ($missingFiles -join ', ')) -Level 'WARNING'
+            return $false
+        }
+
+        WriteLog -Message ("Weekly AD inventory history SharePoint publication started for {0}: {1} data file(s) plus manifest." -f $WeekName, $fileNames.Count)
+        $failedFiles = New-Object System.Collections.Generic.List[string]
+        foreach ($fileName in $fileNames) {
+            $filePath = Join-Path -Path $WeekFolder -ChildPath $fileName
+            $uploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $filePath
+            if (-not $uploadRecord) {
+                [void]$failedFiles.Add($fileName)
+            }
+        }
+
+        if ($failedFiles.Count -gt 0) {
+            $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
+            $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
+            $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue $failedFiles.ToArray() -Force
+            $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+            WriteLog -Message ("Weekly AD inventory history SharePoint publication incomplete for {0}. Failed files: {1}" -f $WeekName, ($failedFiles -join ', ')) -Level 'WARNING'
+            return $false
+        }
+
+        $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Complete' -Force
+        $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue (Get-Date).ToString('o') -Force
+        $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue @() -Force
+        $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+
+        $manifestUploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $ManifestPath
+        if (-not $manifestUploadRecord) {
+            $Manifest | Add-Member -NotePropertyName SharePointStatus -NotePropertyValue 'Incomplete' -Force
+            $Manifest | Add-Member -NotePropertyName SharePointPublishedAt -NotePropertyValue $null -Force
+            $Manifest | Add-Member -NotePropertyName SharePointFailedFiles -NotePropertyValue @('manifest.json') -Force
+            $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+            WriteLog -Message ("Weekly AD inventory history data files were published for {0}, but manifest.json upload failed. Publication will be retried." -f $WeekName) -Level 'WARNING'
+            return $false
+        }
+
+        WriteLog -Message ("Weekly AD inventory history SharePoint publication completed for {0}: {1} file(s)." -f $WeekName, ($fileNames.Count + 1))
+        return $true
+    }
+
     function Save-WeeklyInventoryHistory {
         param(
             [Parameter(Mandatory = $true)]
@@ -1173,6 +1263,12 @@ try {
             }).Count -eq 0
             if ($null -ne $manifest -and $manifest.Status -eq 'Complete' -and $requiredHistoryFilesExist) {
                 WriteLog -Message ("Weekly AD inventory history already exists for {0}. Snapshot skipped: {1}" -f $weekName, $weekFolder)
+                Publish-WeeklyInventoryHistoryToSharePoint `
+                    -WeekName $weekName `
+                    -WeekFolder $weekFolder `
+                    -ManifestPath $manifestPath `
+                    -Manifest $manifest `
+                    -RequiredFileNames $requiredFileNames | Out-Null
                 return
             }
 
@@ -1202,12 +1298,21 @@ try {
             CreatedAt        = (Get-Date).ToString('o')
             Week             = $weekName
             SourceOutputPath = $OutputPath
-            RequiredFiles    = $requiredFileNames
-            Files            = @($copiedFiles | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+            RequiredFiles         = $requiredFileNames
+            Files                 = @($copiedFiles | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+            SharePointStatus      = if ($global:EnableSharePointUpload) { 'Pending' } else { 'NotEnabled' }
+            SharePointPublishedAt = $null
+            SharePointFailedFiles = @()
         }
         $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
         WriteLog -Message ("Weekly AD inventory history saved for {0}: {1} file(s) in {2}" -f $weekName, $copiedFiles.Count, $weekFolder)
+        Publish-WeeklyInventoryHistoryToSharePoint `
+            -WeekName $weekName `
+            -WeekFolder $weekFolder `
+            -ManifestPath $manifestPath `
+            -Manifest $manifest `
+            -RequiredFileNames $requiredFileNames | Out-Null
 
         if ($RetentionWeeks -gt 0) {
             $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue |
@@ -3522,8 +3627,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2bp4Y8Jd1kAJq
-# iGCPAkP1Y6j3Ip0bsI1q1xayaMKRz6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAldcUocAUw/l6g
+# dkiysDUdvdYk31Xi+h68s2KGWOPW8aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3656,31 +3761,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHnVBYfW79kkiH1xqqe5iOgQEeuoVhG0KfNvWiGLpN2cMA0GCSqG
-# SIb3DQEBAQUABIIBgE/CNq+T3ziAHXhUAhAbFT3RlCygReHCEJCUO7xU+Hgd0SPb
-# wH3k+EpW7N7jEb4+Zru/BrLLieyuLu2S8H9LjNQS7ry7JCJokU7fja41fWARGUvJ
-# Fid9fLStTF5pHoLXQvg89tMJpJFNK45DCssObX3hb6XscU31BRDr0DPS6BmhIlk+
-# 9vSPQae3DzzGp9ye82qtPJVMMRgnRVmxpQkx1Rg/BsHSq5NzOM/F6etN3/d9inJw
-# M+IED0ExSjz2qIMuI4sqlJf+SpZx+TFc6stbnbz1NYfRq87D1uoN8EvTfCh0kIQF
-# 4nfoIhKECR/o/q0X/CNIILbKKTYGsYd+N8xRAG9BwMcpPoF6JxQgufWMCwrDGC6M
-# BuXdoGPGz1Wmu4lzk9XEVqi9Mllk3o6SDfmE0pCuOL+9X8+ksSlVkAjoT2iKyGd1
-# JB4PE3m2Ikkxe1C5q03/Tg48erhnEl7BxvOfvERLMImGsIdOmnQ0+ZfCu3TCUHId
-# 0WCUyPJbFVoYRdqQy6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFcPk30lVcd7fDjZrxbVOhjCzmZQ7hCevCTjvDizdZgYMA0GCSqG
+# SIb3DQEBAQUABIIBgBUEAVGaoQwSONdIs//JuPMAateWNxjfGThjfmtVKPIorUck
+# LLKNMIoDnH47iyM89KckmgTFQvx/TIRFG1Qy1rwQYhCUrbhal5k8QFngBRmwP2HI
+# fA7mMWCxqRCCShm9WWIu4hsW2CtzjWgbHsCbRo2xmdtHy6Q8wWdW6XcFE0trZbKL
+# LMYclQZy4TBhKLsvaLQ4c3oItQZtsK+bJkugIJGjH0vjxwuzSAe2fklzVoH2pGxt
+# EvA8Ru6M6bcIninvQvTsaOVdSaC3Zf/SmfI4NKt4DMdPutHjuauKsnXMsiX4vnRu
+# Bja94/YS+hEsAJnA0zCoqusLaC/Sp7Wou3+4JoF2to6hyPHyjUBVD3rO6pyC57Qa
+# kg18fSGeVIAsli/vSDh26sWjPU0EeRX7z9YNXLkYVEpkTk1v8E2Ur7/7VV4HjV/r
+# lC4lPZLHPZRBbfRwmxz3u4VEJT1JmCxNrpAxLvDunvxG/j1arRbcR9suKbBJjrML
+# kfkMRYEEY6OB5Da6pqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcwNjUy
-# NDNaMC8GCSqGSIb3DQEJBDEiBCBanG7Oz7Z5KM8580bpA6vvGnDY/OLp4AxI44U4
-# dGiFBzANBgkqhkiG9w0BAQEFAASCAgBD42xe+Ot5/60iGFFgw00GqcKn0Jme9oKH
-# 2UJffr0IvPlGSd5rkEJNuvmxcca7V6ayg0wbzkP7GB2TvoAM4mgxFYM6BHwYVxgV
-# Pb5qONhUnBtlLMY+l5UHvjpcUlIUMQwTfYNctiV/8UxwMnMMS7u3xQjrK1DtXMtH
-# 9x3bGx/jd4rRqhlQMvUAhY6WxVZ0xUu6U/fCs6BpyFFzs6QOKhI7Q2W2xkc7ix9c
-# VNU1J1iw62mM57TLCzbVir4P9l2EkyfzRAP3YkQ2yCCNGAPIFhxXXyU72dWqmAFL
-# 9qHt4AKpkohBIsaLdZ+HEXH1e25t/58HOgxYGRamQ25Zd2AYHTFJu4BPNIxe7TY+
-# /Bn9Bb5o+13seT8bwFaBAC5yZMzB9ew4Lkli/HclQcNrUX57X4n+X+hpDQWIbJIx
-# 1QlLkV18qPDhWeXldGxjQU1Oc7TwgPVC2KeNUoWmyvTxSDY5MUy0dmWdRPpaYLPB
-# Fgg62f4Wa8+/Iu0aFJ4BZnMzIp6k/xyZ3owt3oKBxYLnH/ETEO4/N3/v93DqU8Zy
-# gGq+R7MOCc+2rTf7CWUaewNYYZmWAIpXezW2dbWaCZNZW4gIhGey3xGTzjA1t4ey
-# jBfYC/4SVVj9zfGsRNAfWOIAGeKjCzrZzQjO4GGPWMC1Z2oR6sTgUuNwYzzc4ePq
-# SB99A9ZcrA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcxMDEz
+# MjNaMC8GCSqGSIb3DQEJBDEiBCBieuYRgG0xSO4uTofbrDThE+zSsq9zDOpG5cnw
+# OoJyWTANBgkqhkiG9w0BAQEFAASCAgC/HnXG/xVnkIDHDQBp6nS9EjxviHpfEeTY
+# ll1732Lizf5ODRQaoFpcBQGFfFSynCbz1ah/euTM35lC5Se1N48jOpHRXSrHF2+9
+# rMFVyDOW7hTKdMKGc5pow6ExGAUbHFNBdCuFxx350cn39nr8p+yM5ANY0Cj0qQtX
+# G+O6bQ7Lp0YVuo9WGNfNdK3klFQ2CsO4pBntumo4WWkagxtEhRRbbj87u7wVW+at
+# ScZyYL2Owx7gIYwGb6fDcTqw3UGqYfUTgtp0zgXNamFbY03RS4gmnej8C/3lFIMm
+# ItVTWcm0N+8wwP49c45H9LTip3niUzr4SUZUIzP90jkcrbBh18cO2yFwgbGF1siP
+# ads1x48wL8kMZ9+abWHFo9ZxXJL4+ePsRH0Ei4eaMtIFP9Cu5vfyVS18lZoszG6X
+# I4PZ9s8KSsb0DY/fbQUqqGX2ElhT5IGs6eTmP9UrP9DVJCpSVa5g6sM/cEWKclnK
+# gG0NEHxzE8AHC9+x5QIx8VcnJQ8teMN+QHHTzHwysVqF6VtSgeOgOuCAhsNomBHW
+# X+PI5DJxGv45ksNtLGkoLvL5IwctVUJcFWUIaNOQ4x+xudWWxZlOdRqwxi9Itnfs
+# aOovl5gwiLa/O8rlA1xVmdG8R/3dIk4trPuDN3VbVqPxYtzHmzMQbzshEkQlb2FX
+# 8CmIUwic3w==
 # SIG # End signature block
