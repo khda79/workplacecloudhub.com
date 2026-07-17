@@ -9,7 +9,7 @@ builds the PowerShell command line, launches the selected campaign, and streams
 output back to the operator.
 
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -274,16 +274,19 @@ function Initialize-GuiLocalJsonFilesFromTemplates {
     $legacyRoot = Join-Path -Path (Split-Path -Path $root -Parent) -ChildPath 'Communications\ExchangeUserNotifications'
     $pairs = New-Object System.Collections.ArrayList
     [void]$pairs.Add([pscustomobject]@{
-        LocalPath = (Join-Path -Path $root -ChildPath 'Config\Communications.local.json')
-        LegacyPath = (Join-Path -Path $legacyRoot -ChildPath 'Config\Communications.local.json')
-        TemplatePath = (Join-Path -Path $root -ChildPath 'Config\Communications.local.json.template')
-        Description = 'shared communication local configuration'
+        LocalPath = (Join-Path -Path $root -ChildPath 'Config\ExchangeUserNotifications.local.json')
+        LegacyPaths = @(
+            (Join-Path -Path $root -ChildPath 'Config\Communications.local.json'),
+            (Join-Path -Path $legacyRoot -ChildPath 'Config\Communications.local.json')
+        )
+        TemplatePath = (Join-Path -Path $root -ChildPath 'Config\ExchangeUserNotifications.local.json.template')
+        Description = 'shared Exchange user notifications local configuration'
     })
 
     foreach ($campaign in $Campaigns) {
         [void]$pairs.Add([pscustomobject]@{
             LocalPath = $campaign.LocalConfigPath
-            LegacyPath = (Join-Path -Path $legacyRoot -ChildPath ("Config\Campaigns\{0}" -f [IO.Path]::GetFileName($campaign.LocalConfigPath)))
+            LegacyPaths = @((Join-Path -Path $legacyRoot -ChildPath ("Config\Campaigns\{0}" -f [IO.Path]::GetFileName($campaign.LocalConfigPath))))
             TemplatePath = $campaign.TemplateConfigPath
             Description = ("{0} campaign local configuration" -f $campaign.Name)
         })
@@ -293,8 +296,9 @@ function Initialize-GuiLocalJsonFilesFromTemplates {
     foreach ($pair in $pairs) {
         if ([string]::IsNullOrWhiteSpace([string]$pair.LocalPath)) { continue }
         if (-not (Test-Path -LiteralPath $pair.LocalPath)) {
-            $sourcePath = if (Test-Path -LiteralPath $pair.LegacyPath -PathType Leaf) { $pair.LegacyPath } else { $pair.TemplatePath }
-            $sourceLabel = if ($sourcePath -eq $pair.LegacyPath) { 'previous application path' } else { 'template' }
+            $legacyPath = @($pair.LegacyPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)
+            $sourcePath = if ($legacyPath.Count -eq 1) { [string]$legacyPath[0] } else { $pair.TemplatePath }
+            $sourceLabel = if ($legacyPath.Count -eq 1) { 'previous local configuration' } else { 'template' }
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
                 Write-Warning ("Local JSON not found and no source is available. Local JSON: {0}" -f $pair.LocalPath)
                 continue
@@ -314,6 +318,12 @@ function Initialize-GuiLocalJsonFilesFromTemplates {
             $newLogPrefix = '{{LogAllRootPath}}\\Exchange\\ExchangeUserNotifications\\'
             if ($jsonText.Contains($oldLogPrefix)) {
                 Set-Content -LiteralPath $pair.LocalPath -Value $jsonText.Replace($oldLogPrefix, $newLogPrefix) -Encoding utf8 -NoNewline
+            }
+            $jsonText = Get-Content -LiteralPath $pair.LocalPath -Raw -ErrorAction Stop
+            $oldDataPrefix = '{{DataAllRootPath}}\\Communications\\ExchangeUserNotifications\\'
+            $newDataPrefix = '{{DataAllRootPath}}\\Exchange\\ExchangeUserNotifications\\'
+            if ($jsonText.Contains($oldDataPrefix)) {
+                Set-Content -LiteralPath $pair.LocalPath -Value $jsonText.Replace($oldDataPrefix, $newDataPrefix) -Encoding utf8 -NoNewline
             }
         }
     }
@@ -375,8 +385,8 @@ function Get-SharedConfigValue {
     )
 
     $root = Get-ExchangeUserNotificationsRoot
-    $templatePath = Join-Path -Path $root -ChildPath 'Config\Communications.local.json.template'
-    $localPath = Join-Path -Path $root -ChildPath 'Config\Communications.local.json'
+    $templatePath = Join-Path -Path $root -ChildPath 'Config\ExchangeUserNotifications.local.json.template'
+    $localPath = Join-Path -Path $root -ChildPath 'Config\ExchangeUserNotifications.local.json'
     $value = $DefaultValue
     foreach ($path in @($templatePath, $localPath)) {
         if (-not (Test-Path -LiteralPath $path)) { continue }
@@ -401,7 +411,7 @@ function Get-LocalSharedConfigValue {
     )
 
     $root = Get-ExchangeUserNotificationsRoot
-    $localPath = Join-Path -Path $root -ChildPath 'Config\Communications.local.json'
+    $localPath = Join-Path -Path $root -ChildPath 'Config\ExchangeUserNotifications.local.json'
     if (-not (Test-Path -LiteralPath $localPath)) { return $DefaultValue }
     try {
         $config = Read-JsonFile -Path $localPath
@@ -2081,8 +2091,8 @@ else { Close-LoadingWindow }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3ar2wRUXMPbDf
-# 1Rq+exW2VeNJgsnrLmpHfyc2lZSnyaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBD8sAoiGUQQGdF
+# R+4gN7kgbARd66sA8NsCCVxZoxIwl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2215,31 +2225,31 @@ else { Close-LoadingWindow }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPJf4SIDXeWfMNOQ/775zxcTLx4vjKEAWf/NmJN3RSGRMA0GCSqG
-# SIb3DQEBAQUABIIBgBdwS995HU03WbJ9s2dSMDTz0LApVTUV/9blH1Cv2mgr3I35
-# 2UXntnc9gQRREDG1sBURD0NwBRq6QlSM818hZIJlESHIYvgLG8nSb2Pzz0ahu8z3
-# hk68nuKLe3dmXnsnONn07qydHy042q1HiDfJpRQhOyj1IHOksww6OvEshzm5+qNB
-# dx/dsfl7+rRViapsB+rmLXQz1LYltErza9/TXhZWTsCgctwjv/zEpksev1wWNBV5
-# oSj2pwQZJ5ijOlTQugMMcbRPOeIE/HIcxtb+7AK0oiPhtXzbPgAXrf//jMRLcHhf
-# dAJN3TenIOvNPxRLKsgFX/HoSmD3DROz3liNdrY07ggihZHwK2tEdWQUXwzM1MAW
-# s+YlubfZmYt9Z35LfGvxHtdsvhjgvHiDuLXD9sswM33gLbHitZ12BWlpuX3qYwRz
-# fYLJMJ04ZvFFIOYYnAD/T3O4/BcqN2WDoOzTeeCLcpQiEVVeCBN3YUb3SdSOA9Vn
-# Uw35G5swoUafp8lJ/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAw3VhzdZhzAWg/WXnpP048reMc5dJk1eifiYnv+EcXsMA0GCSqG
+# SIb3DQEBAQUABIIBgESrPfCWchhFkMT0Nl/sLgfOSgZGRf8eROnQFTfBVlrQ6IOi
+# HOqS7ERlCPjbPe/gHVx20y8Wkd5w8u/lhxwGy8QjajqlOOHpOACjH7wHXM7sAB/B
+# 9zF+gvO+NmJUx8obc2AHEWpNPv31eTJk7u6kjY/oq3F8gk1VU1JERhCtsqOY+tIP
+# W2CLQ3pi6Y5n+N4jUugfsamv1cqXxQXIvgqCAJSAy4SFQFgn4gQLdhKasxlZ6umR
+# tQj8dtKWfBZfbA14F3NW+2pwAE5Uv8733pI1+pzU1JO7bzvFkcoV/v01YjEw+iPk
+# tSrQB6QuODymGN2n/HbiP133QF5KReCZIrdG2fcpfM1ilEFLaA28Ld+U4P5l43Wt
+# 5Epeh9nO7CsZgmfHbyHQvUXHY8MsZ/psyb2V6whqwI9q6x6XygZ6c66+M6oDtYM5
+# TDVoO3SkBEriiwoWYCtQIRSP0SlFuyeP9WKJa+ejzp/R8LiJULh2pcmQB1jEVkDU
+# 6tYaA8irA+SkpU6Gn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjA1
-# NThaMC8GCSqGSIb3DQEJBDEiBCAaPq/z6qZ0zAdh+AvQ1MSDugFBZQpTTyh59cWr
-# rG+uxzANBgkqhkiG9w0BAQEFAASCAgCIaVREiC59RzelC68yflLzu0Q/ATmIEDxD
-# T3xBY3RgcJgVTFLJhp7YByzLN/Chn9snD+ea5sGc71ozFZ7fUQZMO3qI912rWLlK
-# 0PfuvPNdj0sW052h79Tkw4xwqQTPFMI25D3q0RN9a+8S+xMaH3mSk2OkOsaNrii5
-# JpguEW/wdaMAS1FT8PHjMhEYTRPI2bQWP/mowlQ+VR6jIs6rYXVnDOPn3SUMDSaX
-# coB7jNIYM8t9d6gavhwL31GT/syeUD3EwwEZrbir+olBkV8ijPZ8ZC7utukkKIb/
-# 56OLc65Tdvs3lZrdVBy1yeTeU8jHLbcGkf6bKLy8R38K/OuhVL9EB4WIXe/IzNG7
-# qf94mNwhW2A++k4fWG3Wip9udSV2GsmfFkA63vK5oex2RhpLI2r5w8h5wgVH7EdD
-# h6ulSVPey08iuYzcc7UivcGN+9z8WH0YO0AroiwFvwuyydcUqoQ7276lxbnJjofM
-# X2U21dBr6qXT3ADaec6SkKi2YV1/5N8JRS52GursrlrW6A09P4ZKhOjfABzqK5nH
-# KQNYWp1pIzcOdABAfGfRBW2E6fB+X3ceQVHyS/A5pd1oRI9JTQjU1mqAV2Pmur3c
-# RiY3nutMKoELXeNXJoj5LnwY7zcyaHXlwiiBxIpVlgTzOleSB8FXU3pzR5St3XvA
-# Y4wFhoEelg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjMy
+# MjBaMC8GCSqGSIb3DQEJBDEiBCBsKjfDiq5sERha+kBPQmi7qHQfYHpWhSMGi8Uc
+# 13AkCTANBgkqhkiG9w0BAQEFAASCAgDAQK84JIRDxo/yfIpS6L/6//ajixtoz59h
+# YVDcuKuGHESnVF2T0Ek4vaDUICVMuChniyCgpwKEhwS/daeKELn+ZZtmXDH28Xe2
+# jv8+/yPaIwiObmrQFX3jWCSnONKLpxs6J7jq7KxQylf0D801O8xZKCztuUX+4MkB
+# UNF0TtGkmZIqfBE9xi99oxjKJBBJN2GaIyaNzpbQUiTnD5C8ExZic/mk3Ak2PCfv
+# RvUZePvltZfE79N6ajum0quWGSJePw2XFZvICOQIK+54zVm/PWnt0bk/adRGCRbt
+# +aR4nVbC0H+0ErLT88R3ZBDjWebS+TZEtaIAgnO4qvZYlgEUDCdfAg6o5SOf7ZHT
+# dpfgnfNDUrakMLDgUWXgD4DlM01QRP4ONI01CsO89x11I3o+gBnmJGLvbaq5WyK4
+# myZPa91BNlPhxxGUTufmq9mL2eTiTG6lASAxklbL+MylSMFP5U9TLCPUfZWeIDjO
+# bvg2DEgm/7aTpWQtKL3GP5h2ItXgt3MfPbb6oWQR9DQZKZWo/ct0U10OV44Y0h0g
+# au0rVpBxz99/3VR3sqPgWofcXBdf+4pHiE1Uz6Jteao/dQrFddZk8mGkmIMj8+KA
+# OF7QJQKpbn7mE+P9NmnnpQSRvtEMnR+4Is6Bq8dKvPPmcJGJLVHg66o/6YFW3ynk
+# wHSYBNSCZw==
 # SIG # End signature block
