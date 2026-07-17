@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.1.2'
+$script:SemrVersion = '1.1.3'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ConnectionState = [ordered]@{
@@ -77,6 +77,52 @@ function Resolve-SemrConfigPath {
     return [IO.Path]::GetFullPath((Join-Path $BasePath $Path))
 }
 
+function Find-SemrUpwardFile {
+    param(
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)][string]$StartPath
+    )
+
+    $current = $StartPath
+    while ($current) {
+        $candidate = Join-Path -Path $current -ChildPath $RelativePath
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+    return ''
+}
+
+function Import-SemrSmartM365TenantProfile {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Runtime)
+
+    $globalPath = Find-SemrUpwardFile -RelativePath 'Config\SmartM365.global.local.json' -StartPath $PSScriptRoot
+    if ([string]::IsNullOrWhiteSpace($globalPath)) { return $false }
+
+    $globalConfig = ConvertTo-SemrHashtable -InputObject (Get-Content -LiteralPath $globalPath -Raw | ConvertFrom-Json)
+    $tenantProfile = $Runtime['TenantProfile']
+    $profileKey = [string]$tenantProfile['ProfileKey']
+    if ([string]::IsNullOrWhiteSpace($profileKey) -or $profileKey -eq 'tenant') {
+        $profileKey = [string]$globalConfig['DefaultTenant']
+    }
+    if ([string]::IsNullOrWhiteSpace($profileKey) -or $profileKey -notmatch '^[a-zA-Z0-9-]+$') { return $false }
+
+    $tenantPath = Join-Path -Path (Split-Path -Path $globalPath -Parent) -ChildPath ("Tenants\{0}.local.json" -f $profileKey)
+    if (-not (Test-Path -LiteralPath $tenantPath -PathType Leaf)) { return $false }
+
+    $smartM365Profile = ConvertTo-SemrHashtable -InputObject (Get-Content -LiteralPath $tenantPath -Raw | ConvertFrom-Json)
+    $tenantId = [string]$smartM365Profile['TenantId']
+    if ([string]::IsNullOrWhiteSpace($tenantId)) { return $false }
+
+    $tenantProfile['ProfileKey'] = $profileKey
+    $tenantProfile['TenantId'] = $tenantId
+    $remoteRoutingDomain = [string]$smartM365Profile['RemoteRoutingDomain']
+    if (-not [string]::IsNullOrWhiteSpace($remoteRoutingDomain)) {
+        $tenantProfile['RemoteRoutingDomain'] = $remoteRoutingDomain
+    }
+    return $true
+}
 function Get-SemrConfig {
     [CmdletBinding()]
     param(
@@ -119,9 +165,13 @@ function Get-SemrConfig {
     }
     $tenantProfile = $runtime['TenantProfile']
     if ([string]::IsNullOrWhiteSpace([string]$tenantProfile['TenantId'])) {
-        throw 'TenantProfile.TenantId is required to keep authentication in the intended tenant.'
+        [void](Import-SemrSmartM365TenantProfile -Runtime $runtime)
     }
-    if ([string]::IsNullOrWhiteSpace([string]$runtime['Hybrid']['TargetDeliveryDomain'])) {
+    if ([string]::IsNullOrWhiteSpace([string]$tenantProfile['TenantId'])) {
+        throw 'TenantProfile.TenantId is required. Configure it in the application JSON or provide the SmartM365 default tenant profile under Config\Tenants.'
+    }
+    $targetDeliveryDomain = [string]$runtime['Hybrid']['TargetDeliveryDomain']
+    if ([string]::IsNullOrWhiteSpace($targetDeliveryDomain) -or $targetDeliveryDomain -eq 'tenant.mail.onmicrosoft.com') {
         $runtime['Hybrid']['TargetDeliveryDomain'] = [string]$tenantProfile['RemoteRoutingDomain']
     }
     $cacheRootPath = Resolve-SemrConfigPath -Path ([string]$runtime['Cache']['RootPath']) -BasePath $PSScriptRoot
@@ -1995,8 +2045,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbuuzctn9ljo2B
-# zRALHgWDomc3l3j+DgOrYoLNbDZU7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHBfpkcAl7S5Ru
+# 3ckB6Yz35U5PKhxplw7Wq0k09Nvw96CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2129,31 +2179,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBTZXnZ3XIIl0vUdzI4jDMkNUVIjwBrw+dgWnta/8E56MA0GCSqG
-# SIb3DQEBAQUABIIBgG8MBm1rAEe8/xB5KeeLCONHv0PuicqxRGyl8a7ME8QXGf1O
-# 0JTi5XTX+8bKGvjAaVXjQVzJ12NbqxQBIjriufqC9qIRvjV0xO5tO2FUUMIupiVB
-# J1TFDK84RR24s/c630X+QZmEBkFhAtzFUAaJfHMLnrTXxjRyPiedcB7hSrmYAU0e
-# +U3I6YnmKtkXgfUTHbbKEnByc/f5ZSkLgjPutrhcobc+tJWABlIvusezQgSgNDR1
-# RKUeiilDyD8vknTGGLdVRw2mdPZWpmy4xavmVXYK01ioBuQkuzFfakNucjZnBK5U
-# cbgoVGnL8IJDlb6J08QtlzWn/Mn11KvQp2zRtlJKgG4cM2Au23xXcNloZpmWSDsV
-# DGxMKEwGZlVdcoSog0egRn98PUHAIyWQLGAF+VQ3tMA3wDoqeMXE+CqspfcA6YY7
-# c81ZFJuVUxJyt2a8sVnXjcmhhxRDYTCYUwdMmUUCwusqsG4u9U4Oa/GlWsz6p4e4
-# W7ZEGPDk1fZXYIXqtKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFTf6fVi0bnidseT5SkUA9ejPuCRHtmZluYwQDn1iVsaMA0GCSqG
+# SIb3DQEBAQUABIIBgByLPp9wNDdV2xFk3ecC51NBHOSCYm0sXELdGMrq3n87lfXp
+# v0ETR1AY/UIKgTBPdnTcpko+8l11zTCWTeEQSw9mNdSsQhfNahtow0OtpdClkCpA
+# pmoDciijLllI7EHQzVAHyjzBgj/H6OYoKqX0PnzBKkooE8Ix1Y0XoztDxM0J/MpV
+# wE0ws/6hoS1P1df0TOcA/zGhAJLlNZQ3tMamLluh6iJGsiI44AfnsmKwCyABGl1j
+# tBE105V6QqUfQ/v7LE0Y2Vt0AGU9A7ilelDmJtXoMkbNIF157lYwpxMIAczNZrjo
+# DGVvpPX8D1G7sdP0OWd5JQzS18QVpCNuHxFg1WG8VGlfQe6nmexDzTdOv6GzAyKo
+# ZIqLIk5DAITM5GuhoxvlErkRkpgVVGBmA7dawJ26P/AWHW9dPJxY0Zrh9d/szx0O
+# i5MkPq/BeHjEPOQ4qVy5j3kzAG54FIQksfTusn86ksJ5/Mm9n4a0Jg7O0E9UO18n
+# xvEjt00P8LP9OlK2jqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMDIy
-# MzVaMC8GCSqGSIb3DQEJBDEiBCA11/mn/+q8KSqQq6ICRgY6m79I1gNfRLfN6EnS
-# zPCYTDANBgkqhkiG9w0BAQEFAASCAgCw7qqGp9W1LM7C76Wa8Ku6cbhvif9LXbvE
-# DMCXMKymUBOVFLXJH8vSwulC29yAzdMmK8UNMuQit5PKwUdjjJXtQUg9wXib1A2H
-# tBxmyzpAHon4CNnUIxZ5g3VWtKbN9tqwoJugFC9qPS/j637t0IuBUXDiCYiJYCE8
-# aNcRw3YiJZtgHnKEFleIK9K6o5xWQwKZx/th48Wwe4uc1giorhb+E6/1jt+tsGeT
-# zeCxkGbN3TY5cRkNhhGxwbaY2kwZoWKRmN8Qa2s4gq2SWvcpoULQ5AXF0SI42+PV
-# b/fAqWO7zPLdOv7myyNimy1DOHumAGkxysQzd/Lh2VjISJ17SuzVf8+BxcNwsohZ
-# WNWkqbv6qDHRRYaQM072boAYeGjFknmVgeR82yS//7LwFoG/07Qwe84dhrlvT9HO
-# ITwdqfikV55E/iova3TsUIqhGwGEgM4CKBtIeg364eWbBXEvuSwjKePHSo4S0wFR
-# SpQLrXcMhBNLIZYQJwVsTIqx6qXQJZw1nbxdW9NIkDC01kIk6+itWMgvUKI/Nv88
-# DKH/mezbZAcU9/Q/L5AitZCOkdtryXFhLNW2VbuiRT6EJxXlP4Nl4OsH6OoUd75m
-# V4Efl00CFwPOmZb1+eOFRnaU35FU+ipjTpPFLzffirQimiueq21iztgL2XhAOgv0
-# TTBA+6lPuw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjAw
+# MjlaMC8GCSqGSIb3DQEJBDEiBCAY8pImrqa2qED7xG2CEZov5aQuyZTTPiq/IAo7
+# 1gMW+jANBgkqhkiG9w0BAQEFAASCAgAJ87pGudLvwp7rTBIqEL3LwaJL2VoFkmaM
+# FUPkuz1l3rPns8wL5dNQDpmDPTDGFC7i1faOZZb++Om9rtoHTpZp2JEdU1JSejqO
+# uYMzCIfi0Td31Btyclle9S9FYgahLzqhyRBHvVZ19Fuu3Td/kWHV2O63jDo6Vu46
+# 3xmBIpc+XRhjPJ/kuL7yGeznicefFzpokSZQkf8E+rG8MUuLurZEmMJvp/k7Wipm
+# RDw2+1yOBPJpXZ70XYb7ifyfAh74LwdLsfQ5KQrfSZugwaj6PXGOeMW2tCHQd9qu
+# T7jcdIYKKvLnfsPUp2wsDooidmaHlHo1dCLY4fVg9Altfu8mv/xMmYcShYHYmjZ/
+# cU4C/NaPsHXIoNjaDwjPYj9arlfWcs62dYkjl7w5s0bY4srhjGKK2sYaBq86gN4K
+# wsiEv60Tu0sJc/rqUb4ivmb5Sb8bHsPh/vuH3Z68y71WgWaFthKtpyQSr0XcT86R
+# 47gVIQw+rtDcAd+EIIlz9/sO1BnwwKWvuEyHyyghtFmg166TDQVbR5qVA61rpqEy
+# LW7FR43YdgnTAwXWpPF1ru0zsW8j0yMcBoAb9s2i4oBJGZamafulfpLZZPeJH2G7
+# hFGer/D9vE04kZz0ZW0OWH9dD2doDL5O2VF0Y+TVGIVjARo98Q4DcEFwepxHhV9w
+# HUkoW0UR/g==
 # SIG # End signature block
