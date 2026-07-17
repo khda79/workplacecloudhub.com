@@ -1,14 +1,9 @@
 @echo off
 setlocal EnableExtensions
 
-pushd "%~dp0" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    pause
-    exit /b 1
-)
+set "UNC_WORK_DIR=%~dp0."
 
-set "ROOT_DIR=%CD%\"
+set "ROOT_DIR=%UNC_WORK_DIR%\"
 set "SCRIPT=%ROOT_DIR%Scripts\New-SmartM365SetupMediaManifest.ps1"
 set "DEFAULT_SETUP_SOURCE=%ROOT_DIR%SetupSource"
 call :PrintStartupInfo
@@ -32,7 +27,6 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 echo Finished with exit code %EXITCODE%.
 pause
-popd
 exit /b %EXITCODE%
 
 :PrintStartupInfo

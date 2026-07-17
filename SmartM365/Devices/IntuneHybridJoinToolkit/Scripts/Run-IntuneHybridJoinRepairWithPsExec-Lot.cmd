@@ -1,12 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-pushd "%~dp0" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    pause
-    exit /b 1
-)
 
 
 rem Shared LOT launcher. LOT definitions live under %ROOT_DIR%\Lots and run data under %ROOT_DIR%\Runs.
@@ -256,7 +250,6 @@ if "%EXITCODE%"=="3221225477" call :CapturePowerShellCrash
 echo.
 echo Finished with exit code %EXITCODE%.
 pause
-popd
 exit /b %EXITCODE%
 
 :PrintStartupInfo

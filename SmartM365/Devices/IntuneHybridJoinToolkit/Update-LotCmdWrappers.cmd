@@ -1,17 +1,12 @@
 @echo off
 setlocal EnableExtensions
 
-pushd "%~dp0" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    pause
-    exit /b 1
-)
+set "UNC_WORK_DIR=%~dp0."
 
 
 rem Root launcher.
 rem Refreshes the tiny CMD wrappers in all Lots\LOT-* folders.
-set "ROOT_DIR=%CD%\"
+set "ROOT_DIR=%UNC_WORK_DIR%\"
 set "SCRIPT=%ROOT_DIR%Scripts\SmartM365-IntuneHybridJoinRepair-Update-LotCmdWrappers.ps1"
 call :PrintStartupInfo
 
@@ -41,7 +36,6 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 echo Finished with exit code %EXITCODE%.
 pause
-popd
 exit /b %EXITCODE%
 :PrintStartupInfo
 echo.
