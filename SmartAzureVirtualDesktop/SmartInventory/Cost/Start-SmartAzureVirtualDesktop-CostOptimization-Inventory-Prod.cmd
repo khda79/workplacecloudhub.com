@@ -1,14 +1,9 @@
 @echo off
 setlocal
 
-pushd "%~dp0" >nul 2>&1
-if errorlevel 1 (
-    echo Failed to switch to the launcher directory.
-    pause
-    exit /b 1
-)
+set "UNC_WORK_DIR=%~dp0."
 
-set "SCRIPT_DIR=%CD%\"
+set "SCRIPT_DIR=%UNC_WORK_DIR%\"
 where pwsh.exe >nul 2>nul
 if %ERRORLEVEL%==0 (
   pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartAzureVirtualDesktop-CostOptimization-Inventory.ps1" -Tenant prod -Connect %*
@@ -16,5 +11,4 @@ if %ERRORLEVEL%==0 (
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartAzureVirtualDesktop-CostOptimization-Inventory.ps1" -Tenant prod -Connect %*
 )
 set "EXIT_CODE=%ERRORLEVEL%"
-popd
 exit /b %EXIT_CODE%
