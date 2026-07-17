@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.4
+1.5
 #>
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
@@ -558,6 +558,9 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $hybridIssuesByObjectGuid = @{}; foreach ($row in $hybridIdentityIssues) { Add-SmartM365MapListValue $hybridIssuesByObjectGuid (Get-Key (Get-Value $row @('ObjectGUID'))) $row }
     $entityByCode = @{}; foreach ($row in $entityRowsRaw) { foreach ($entityKeyCandidate in @((Get-Value $row @('Entity code Text')),(Get-Value $row @('Entity code Text 6 digits')),(Get-Value $row @('Entity code')),(Get-Value $row @('EntityCode')),(Get-Value $row @('OrganizationalUnit')))) { Add-SmartM365MapValue $entityByCode (Get-Key $entityKeyCandidate) $row; $entityNumber = 0.0; if ([double]::TryParse(([string]$entityKeyCandidate).Trim().Replace(',', '.'), [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$entityNumber)) { Add-SmartM365MapValue $entityByCode (([math]::Floor($entityNumber)).ToString('000000', [System.Globalization.CultureInfo]::InvariantCulture)) $row } } }
     $enrichedRows = New-Object System.Collections.Generic.List[object]
+    $currentUtcDate = [datetime]::UtcNow.Date
+    $exchangeLastLogon90DayCutoff = $currentUtcDate.AddDays(-90)
+    $exchangeLastLogon180DayCutoff = $currentUtcDate.AddDays(-180)
 
     foreach ($user in $users) {
         $out = [ordered]@{}
@@ -664,6 +667,30 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $m365LicenseType = if ($licenseGroupNorm.Contains('MICROSOFT 365 E3')) { 'M365E3' } elseif ($licenseGroupNorm.Contains('MICROSOFT 365 F3')) { 'M365F3' } elseif (-not $allowedAccountType) { 'None' } else { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined }
         $lastLogonEntra = Get-Value $m365User @('LastSignInDateTime')
         $lastLogonEntraNonInteractive = Get-Value $m365User @('LastNonInteractiveSignInDateTime')
+        $exchangeLastLogonDateTime = Get-SmartM365LatestDateText -Values @(
+            (Get-Value $localMailbox @('LastLogonTime')),
+            (Get-Value $exoMailbox @('LastLogonTime','LastUserActionTime')),
+            (Get-Value $exoStat @('LastLogonTime','LastUserActionTime'))
+        )
+        $exchangeLastLogonUtc = if ([string]::IsNullOrWhiteSpace($exchangeLastLogonDateTime)) { $null } else { [datetime]::ParseExact($exchangeLastLogonDateTime, 'yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal) }
+        $remoteMailboxCreatedRaw = Get-Value $remoteMailbox @('WhenMailboxCreated')
+        if ([string]::IsNullOrWhiteSpace($remoteMailboxCreatedRaw)) { $remoteMailboxCreatedRaw = Get-Value $remoteMailbox @('WhenCreated') }
+        $remoteMailboxCreatedDateTime = Get-SmartM365LatestDateText -Values @($remoteMailboxCreatedRaw)
+        $remoteMailboxCreatedUtc = if ([string]::IsNullOrWhiteSpace($remoteMailboxCreatedDateTime)) { $null } else { [datetime]::ParseExact($remoteMailboxCreatedDateTime, 'yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal) }
+        $onPremMailboxCreatedRaw = Get-Value $localMailbox @('WhenMailboxCreated')
+        if ([string]::IsNullOrWhiteSpace($onPremMailboxCreatedRaw)) { $onPremMailboxCreatedRaw = Get-Value $localMailbox @('WhenCreated') }
+        $onPremMailboxCreatedDateTime = Get-SmartM365LatestDateText -Values @($onPremMailboxCreatedRaw)
+        $exchangeOnlineMailboxCreatedDateTime = Get-SmartM365LatestDateText -Values @((Get-Value $exoMailbox @('WhenMailboxCreated')))
+        $out['ExchangeLastLogonDateTime'] = $exchangeLastLogonDateTime
+        $out['ExchangeLastLogonDate'] = if ($null -ne $exchangeLastLogonUtc) { $exchangeLastLogonUtc.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture) } else { '' }
+        $out['ExchangeLastLogonCategory'] = if ($null -eq $exchangeLastLogonUtc) { 'Unknown / Never logged in' } elseif ($exchangeLastLogonUtc.Date -lt $exchangeLastLogon90DayCutoff) { 'Older than 90 days' } else { 'Within last 90 days' }
+        $out['IsExchangeLastLogonOlderThan90Days'] = if ($null -ne $exchangeLastLogonUtc) { [string]($exchangeLastLogonUtc.Date -lt $exchangeLastLogon90DayCutoff) } else { '' }
+        $out['IsExchangeLastLogonOlderThan180Days'] = if ($null -ne $exchangeLastLogonUtc) { [string]($exchangeLastLogonUtc.Date -lt $exchangeLastLogon180DayCutoff) } else { '' }
+        $out['RemoteMailboxCreatedDateTime'] = $remoteMailboxCreatedDateTime
+        $out['DaysSinceRemoteMailboxCreated'] = if ($null -ne $remoteMailboxCreatedUtc) { ($currentUtcDate - $remoteMailboxCreatedUtc.Date).Days.ToString([System.Globalization.CultureInfo]::InvariantCulture) } else { '' }
+        $out['OnPremMailboxCreatedDateTime'] = $onPremMailboxCreatedDateTime
+        $out['ExchangeOnlineMailboxCreatedDateTime'] = $exchangeOnlineMailboxCreatedDateTime
+        $out['ExchangeOnlineMailboxCreatedDate'] = if ([string]::IsNullOrWhiteSpace($exchangeOnlineMailboxCreatedDateTime)) { '' } else { $exchangeOnlineMailboxCreatedDateTime.Substring(0, 10) }
         $lastLogonMergeAdExchEntra = Get-SmartM365LatestDateText -Values @([string]$user.LastLogonDate, $out['ExchangeLastLogonDateTime'], $lastLogonEntra, $lastLogonEntraNonInteractive)
         $out['AdOrganizationalUnitPath'] = Get-OuPathFromDistinguishedName -DistinguishedName $distinguishedName
         $out['AdOrganizationalUnitCategory'] = if ($distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')) { 'DISABLED OBJECTS' } elseif ($distinguishedNameUpper.Contains('OU=ORGANIZATION')) { 'ORGANIZATION' } elseif ($distinguishedNameUpper.Contains('OU=ADMIN')) { 'ADMIN' } elseif ($distinguishedNameUpper.Contains('OU=FAX')) { 'FAX' } else { 'OTHER' }
