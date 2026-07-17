@@ -59,7 +59,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.16
+1.17
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -367,7 +367,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.16"
+    $ScriptVersion = "1.17"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -515,6 +515,7 @@ $ErrorActionPreference = 'Stop'
     $policySkippedCount     = 0
     $localMailboxCount      = 0
     $remoteMailboxCount     = 0
+    $duplicateExpectedMissingCount = 0
 
     # Pre/post remediation counters
     $preMissing             = 0
@@ -564,6 +565,31 @@ $ErrorActionPreference = 'Stop'
     $counter = 0
     Write-Host "User/Shared mailboxes retrieved: $total"
 
+    $expectedAddressCounts = @{}
+    foreach ($recipientForConflictCheck in $recipients) {
+        $conflictSamAccountName = ([string]$recipientForConflictCheck.SamAccountName).Trim()
+        if ([string]::IsNullOrWhiteSpace($conflictSamAccountName)) { continue }
+        $conflictExpectedAddress = "smtp:{0}@{1}" -f $conflictSamAccountName, $ExpectedSuffix
+        if ($expectedAddressCounts.ContainsKey($conflictExpectedAddress)) {
+            $expectedAddressCounts[$conflictExpectedAddress]++
+        }
+        else {
+            $expectedAddressCounts[$conflictExpectedAddress] = 1
+        }
+    }
+
+    $duplicateExpectedAddresses = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $duplicateExpectedRecipientCount = 0
+    foreach ($expectedAddressCountEntry in $expectedAddressCounts.GetEnumerator()) {
+        if ([int]$expectedAddressCountEntry.Value -le 1) { continue }
+        [void]$duplicateExpectedAddresses.Add([string]$expectedAddressCountEntry.Key)
+        $duplicateExpectedRecipientCount += [int]$expectedAddressCountEntry.Value
+    }
+    $duplicateExpectedAddressGroupCount = $duplicateExpectedAddresses.Count
+    if ($duplicateExpectedAddressGroupCount -gt 0) {
+        WriteLog -Message ("Duplicate expected proxy addresses detected: groups={0}; recipients={1}. Conflicting addresses are blocked from remediation." -f $duplicateExpectedAddressGroupCount, $duplicateExpectedRecipientCount) -Level 'WARNING'
+    }
+
     foreach ($rec in $recipients) {
         $counter++
         Write-Progress -Activity "Checking EmailAddresses..." -Status "$counter / $total" -PercentComplete (($counter / $total) * 100)
@@ -576,6 +602,7 @@ $ErrorActionPreference = 'Stop'
         $expectedAddress = ""
         $status          = ""
         $policyWarning   = $false
+        $isExpectedAddressConflict = $false
         $isRemoteMailbox = ([string]$rec.RecipientTypeDetails) -in $remoteRecipientTypes
         $mailboxLocation = if ($isRemoteMailbox) { 'Remote' } else { 'OnPremises' }
         if ($isRemoteMailbox) { $remoteMailboxCount++ } else { $localMailboxCount++ }
@@ -595,6 +622,7 @@ $ErrorActionPreference = 'Stop'
             }
             else {
                 $expectedAddress = "smtp:{0}@{1}" -f $samAccountName, $ExpectedSuffix
+                $isExpectedAddressConflict = $duplicateExpectedAddresses.Contains($expectedAddress)
                 $addresses = @($rec.EmailAddresses) | ForEach-Object { $_.ToString() }
                 $exists = $addresses | Where-Object { $_ -ieq $expectedAddress }
 
@@ -606,7 +634,11 @@ $ErrorActionPreference = 'Stop'
                     $preMissing++
                     $missingCount++
 
-                    if ($AddMissingAddress -and $rec.EmailAddressPolicyEnabled -eq $true) {
+                    if ($isExpectedAddressConflict) {
+                        $status = "Missing -> DuplicateExpectedAddress"
+                        $duplicateExpectedMissingCount++
+                    }
+                    elseif ($AddMissingAddress -and $rec.EmailAddressPolicyEnabled -eq $true) {
                         $status = "Missing -> SkippedPolicyEnabled"
                         $policySkippedCount++
                     }
@@ -674,6 +706,7 @@ $ErrorActionPreference = 'Stop'
             MailboxLocation            = $mailboxLocation
             PrimaryAddress            = $email
             ExpectedAddress           = $expectedAddress
+            ExpectedAddressConflict   = $isExpectedAddressConflict
             Status                    = $status
             EmailAddressPolicyEnabled = $rec.EmailAddressPolicyEnabled
             PolicyWarning             = $policyWarning
@@ -681,6 +714,9 @@ $ErrorActionPreference = 'Stop'
     }
     if ($policyEnabledCount -gt 0) {
         Write-Host "Email address policy enabled recipients: $policyEnabledCount. Details are available in the detail CSV."
+    }
+    if ($duplicateExpectedAddressGroupCount -gt 0) {
+        Write-Host "Duplicate expected proxy addresses: $duplicateExpectedAddressGroupCount group(s), $duplicateExpectedRecipientCount recipient(s), $duplicateExpectedMissingCount missing address(es) blocked." -ForegroundColor Yellow
     }
 
     $publishResults = @()
@@ -704,6 +740,9 @@ $ErrorActionPreference = 'Stop'
         [PSCustomObject]@{ Summary = "With no SamAccountName";                Count = $noSamAccountNameCount },
         [PSCustomObject]@{ Summary = "With email address policy enabled";     Count = $policyEnabledCount },
         [PSCustomObject]@{ Summary = "Additions skipped by email policy";     Count = $policySkippedCount },
+        [PSCustomObject]@{ Summary = "Duplicate expected address groups";       Count = $duplicateExpectedAddressGroupCount },
+        [PSCustomObject]@{ Summary = "Recipients sharing expected address";     Count = $duplicateExpectedRecipientCount },
+        [PSCustomObject]@{ Summary = "Missing addresses blocked by duplicate"; Count = $duplicateExpectedMissingCount },
         [PSCustomObject]@{ Summary = "Addresses successfully added";          Count = $addedCount },
         [PSCustomObject]@{ Summary = "Address additions failed";              Count = $addFailedCount }
     )
@@ -715,7 +754,7 @@ $ErrorActionPreference = 'Stop'
             Path          = $detailPublish.TimestampedPath
             WorksheetName = 'Check'
             TableName     = 'ProxyAddressesCheck'
-            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','ExpectedAddress','Status','EmailAddressPolicyEnabled','PolicyWarning')
+            EmptyColumns  = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Identity','SamAccountName','DisplayName','RecipientType','MailboxLocation','PrimaryAddress','ExpectedAddress','ExpectedAddressConflict','Status','EmailAddressPolicyEnabled','PolicyWarning')
         }
         [pscustomobject]@{
             Path          = $summaryPublish.TimestampedPath
@@ -796,6 +835,9 @@ try {
         $addedCount = [int](($summary | Where-Object { $_.Summary -eq 'Addresses successfully added' } | Select-Object -First 1).Count)
         $policyEnabledCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'With email address policy enabled' } | Select-Object -First 1).Count)
         $policySkippedCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Additions skipped by email policy' } | Select-Object -First 1).Count)
+        $duplicateExpectedAddressGroupCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Duplicate expected address groups' } | Select-Object -First 1).Count)
+        $duplicateExpectedRecipientCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Recipients sharing expected address' } | Select-Object -First 1).Count)
+        $duplicateExpectedMissingCountForMail = [int](($summary | Where-Object { $_.Summary -eq 'Missing addresses blocked by duplicate' } | Select-Object -First 1).Count)
         $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SendMailMode)) { if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' } } else { $SendMailMode.Trim() }
 
         $summaryRowsForEmail = @(
@@ -807,6 +849,9 @@ try {
             [pscustomobject]@{ Label = 'With no SamAccountName'; Value = $noSamAccountNameCountForMail }
             [pscustomobject]@{ Label = 'Email address policy enabled'; Value = $policyEnabledCountForMail }
             [pscustomobject]@{ Label = 'Additions skipped by email policy'; Value = $policySkippedCountForMail }
+            [pscustomobject]@{ Label = 'Duplicate expected address groups'; Value = $duplicateExpectedAddressGroupCountForMail }
+            [pscustomobject]@{ Label = 'Recipients sharing expected address'; Value = $duplicateExpectedRecipientCountForMail }
+            [pscustomobject]@{ Label = 'Missing addresses blocked by duplicate'; Value = $duplicateExpectedMissingCountForMail }
             [pscustomobject]@{ Label = 'Addresses added'; Value = $addedCount }
         )
 
@@ -866,7 +911,7 @@ try {
 
         $severity = if ($AddMissingAddress -and $addedCount -gt 0) { 'Success' } elseif ($missingCount -gt 0) { 'Warning' } else { 'Success' }
         $actionTitle = if ($missingCount -gt 0) { 'Review required' } else { '' }
-        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Recipients managed by an email address policy are always skipped in write mode.' } else { '' }
+        $actionHtml = if ($missingCount -gt 0) { 'Review missing proxy addresses before remediation. Recipients managed by an email address policy and recipients sharing a duplicate expected address are always skipped in write mode.' } else { '' }
         $message = if ($missingCount -gt 0) { 'Exchange on-premises proxy address audit found missing expected proxy addresses.' } else { 'Exchange on-premises proxy address audit completed without missing expected proxy addresses.' }
 
         $body = New-SmartM365EmailBody `
