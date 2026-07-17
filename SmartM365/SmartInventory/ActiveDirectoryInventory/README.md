@@ -28,7 +28,9 @@ The inventory sends a single notification with the subject `SmartM365 Active Dir
 
 Remote mailbox detection uses the exact Active Directory attributes `msExchRemoteRecipientType` and `msExchRecipientTypeDetails`. Validation compares `targetAddress` and `proxyAddresses` with `RemoteRoutingDomain` from the selected local profile, for example `Config/Tenants/prod.local.json`. The profile name only selects the configuration file; it is never used to construct the routing domain. If `RemoteRoutingDomain` is empty, the script derives `<tenant>.mail.onmicrosoft.com` from `OrgDomain` in that profile.
 
-The notification includes summary counters, SharePoint links, and inline top 50 previews. Full details are exported to:
+The notification banner is `Identity and mail routing issues detected`. The mail includes summary counters, SharePoint links, inline top 50 previews, and one attached `AD_Users_IdentityAndMailRoutingIssues.xlsx` workbook with a worksheet for each diagnostic dataset.
+
+The canonical CSV files remain published separately to DATA-ALL, DATA-LAST, SharePoint, and weekly history when applicable:
 
 - `AD_Users_DuplicateUPN.csv`
 - `AD_Users_DuplicateSMTP.csv`
