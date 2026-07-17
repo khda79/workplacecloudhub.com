@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.3
+1.4
 #>
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
@@ -600,6 +600,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         if ([string]::IsNullOrWhiteSpace($recipientType)) { $recipientType = Get-Value $remoteMailbox @('RecipientTypeDetails') }
         if ([string]::IsNullOrWhiteSpace($recipientType)) { $recipientType = Get-Value $exoMailbox @('RecipientTypeDetails') }
         if ([string]::IsNullOrWhiteSpace($recipientType)) { $recipientType = 'NoMailboxes' }
+        $hasRemoteMailbox = @('RemoteUserMailbox','RemoteSharedMailbox','RemoteRoomMailbox') -contains $recipientType
+        $hasMailbox = $recipientType -ne 'NoMailboxes'
         $mailboxSourceParts = @()
         if ($null -ne $localMailbox) { $mailboxSourceParts += 'Local' }
         if ($null -ne $remoteMailbox) { $mailboxSourceParts += 'Remote' }
@@ -684,13 +686,13 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['M365LicenseTypeByPersona'] = $target1Persona
         $out['M365LicenseType'] = $m365LicenseType
         $out['IsF3UserWithLargeMailbox'] = if ((($licenseGroup -eq 'Microsoft 365 F3') -or ($m365LicenseType -eq 'M365F3')) -and $totalSizeMb -ge 2000) { 'Yes' } else { 'No' }
-        $out['F3E3MailboxSizeBucket'] = if ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 2000 -and $totalSizeMb -le 2500) { '2-2.5 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 2500 -and $totalSizeMb -le 5000) { '2.5-5 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 5000 -and $totalSizeMb -le 10000) { '5-10 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 10000) { '>10 GB' } else { '' }
+        $out['F3E3MailboxSizeBucket'] = if ($hasMailbox -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 2000 -and $totalSizeMb -le 2500) { '2-2.5 GB' } elseif ($hasMailbox -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 2500 -and $totalSizeMb -le 5000) { '2.5-5 GB' } elseif ($hasMailbox -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 5000 -and $totalSizeMb -le 10000) { '5-10 GB' } elseif ($hasMailbox -and $target1Persona -eq 'M365F3' -and $licenseGroup -eq 'Microsoft 365 E3' -and $totalSizeMb -gt 10000) { '>10 GB' } else { '' }
         $out['F3E3MailboxSizeBucketSortOrder'] = switch ($out['F3E3MailboxSizeBucket']) { '2-2.5 GB' { '1' } '2.5-5 GB' { '2' } '5-10 GB' { '3' } '>10 GB' { '4' } default { '99' } }
-        $out['HasRemainingF3MailboxSizeNonCompliance'] = if ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $recipientType -eq 'UserMailbox' -and $out['HasRemoteMailbox'] -eq 'False' -and $totalSizeMb -gt 2000 -and $licenseGroup -ne 'Microsoft 365 E3') { '1' } else { '0' }
-        $out['F3OversizedMailboxBucket'] = if ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 2000 -and $totalSizeMb -le 2500) { '2-2.5 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 2500 -and $totalSizeMb -le 5000) { '2.5-5 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 5000 -and $totalSizeMb -le 10000) { '5-10 GB' } elseif ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 10000) { '>10 GB' } else { '' }
+        $out['HasRemainingF3MailboxSizeNonCompliance'] = if ($hasMailbox -and $target1Persona -eq 'M365F3' -and $recipientType -eq 'UserMailbox' -and -not $hasRemoteMailbox -and $totalSizeMb -gt 2000 -and $licenseGroup -ne 'Microsoft 365 E3') { '1' } else { '0' }
+        $out['F3OversizedMailboxBucket'] = if ($hasMailbox -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 2000 -and $totalSizeMb -le 2500) { '2-2.5 GB' } elseif ($hasMailbox -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 2500 -and $totalSizeMb -le 5000) { '2.5-5 GB' } elseif ($hasMailbox -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 5000 -and $totalSizeMb -le 10000) { '5-10 GB' } elseif ($hasMailbox -and $target1Persona -eq 'M365F3' -and $totalSizeMb -gt 10000) { '>10 GB' } else { '' }
         $out['F3OversizedMailboxBucketSortOrder'] = switch ($out['F3OversizedMailboxBucket']) { '2-2.5 GB' { '1' } '2.5-5 GB' { '2' } '5-10 GB' { '3' } '>10 GB' { '4' } default { '99' } }
-        $out['IsUnlicensedEnabledF3MailboxBlockingMigration'] = if ($out['HasMailbox'] -eq 'True' -and $isEnabled -and $recipientType -eq 'UserMailbox' -and $out['HasRemoteMailbox'] -eq 'False' -and $target1Persona -eq 'M365F3' -and @('No License (Unlicensed)','Not in M365') -contains $licenseGroup) { '1' } else { '0' }
-        $out['IsE3PersonaMissingE3License'] = if ($out['HasMailbox'] -eq 'True' -and $target1Persona -eq 'M365E3' -and @('UserMailbox','RemoteUserMailbox') -contains $recipientType -and $out['HasRemoteMailbox'] -eq 'False' -and @('Microsoft 365 F3','No License (Unlicensed)') -contains $licenseGroup) { '1' } else { '0' }
+        $out['IsUnlicensedEnabledF3MailboxBlockingMigration'] = if ($hasMailbox -and $isEnabled -and $recipientType -eq 'UserMailbox' -and -not $hasRemoteMailbox -and $target1Persona -eq 'M365F3' -and @('No License (Unlicensed)','Not in M365') -contains $licenseGroup) { '1' } else { '0' }
+        $out['IsE3PersonaMissingE3License'] = if ($hasMailbox -and $target1Persona -eq 'M365E3' -and @('UserMailbox','RemoteUserMailbox') -contains $recipientType -and -not $hasRemoteMailbox -and @('Microsoft 365 F3','No License (Unlicensed)') -contains $licenseGroup) { '1' } else { '0' }
         $out['EntraLastSignInDateTime'] = $lastLogonEntra
         $out['EntraLastNonInteractiveSignInDateTime'] = $lastLogonEntraNonInteractive
         $out['EntraLastSignInCategory'] = Get-DateCategory -Value $lastLogonEntra -LimitDays 90
@@ -757,8 +759,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['HasLegacyRoutingDomainProxyAddress'] = if (([string]$user.ProxyAddresses).ToLowerInvariant().Contains('@' + $RemoteRoutingDomain)) { 'Yes' } else { 'No' }
         $out['ExistsInM365Users'] = if ($m365Users.Count -gt 0) { [string]($null -ne $m365User) } else { '' }
         $out['MailboxRecipientType'] = $recipientType
-        $out['HasRemoteMailbox'] = [string](@('RemoteUserMailbox','RemoteSharedMailbox','RemoteRoomMailbox') -contains $recipientType)
-        $out['HasMailbox'] = [string]($recipientType -ne 'NoMailboxes')
+        $out['HasRemoteMailbox'] = [string]$hasRemoteMailbox
+        $out['HasMailbox'] = [string]$hasMailbox
         $out['MailboxSource'] = $mailboxSource
         $out['MailboxSourceHealthStatus'] = if ($mailboxSource -eq 'None') { 'No mailbox' } elseif ($mailboxSource -eq 'Local+Remote+EXO') { 'Hybrid duplicate' } else { 'OK' }
         $out['MailboxItemCount'] = $itemCount.ToString('0.########',[System.Globalization.CultureInfo]::InvariantCulture)
