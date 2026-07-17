@@ -66,16 +66,16 @@ SmartWorkplaceCMDB/**
 !/SmartM365/Devices/Windows11UpgradeToolkit/Windows11UpgradeToolkit-Procedure-EN.pptx
 !/SmartM365/Intune/Remediation/GUI/WorkplaceCloudHub.ico
 !/SmartM365/Intune/Remediation/GUI/WorkplaceCloudHub-lockup-WPF.png
-!/SmartM365/Communications/ExchangeUserNotifications/WorkplaceCloudHub.ico
-!/SmartM365/Communications/ExchangeUserNotifications/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Exchange/Communications/ExchangeUserNotifications/WorkplaceCloudHub.ico
+!/SmartM365/Exchange/Communications/ExchangeUserNotifications/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/SharePointMigration/WorkplaceCloudHub.ico
 !/SmartM365/SharePointMigration/WorkplaceCloudHub-lockup-WPF.png
-!/SmartM365/ExchangeMigrationReadiness/WorkplaceCloudHub.ico
-!/SmartM365/ExchangeMigrationReadiness/WorkplaceCloudHub-lockup-WPF.png
-!/SmartM365/ExchangeMigrationReadiness/Samples/MigrationBatch.csv.template
-SmartM365/ExchangeMigrationReadiness/Input/**
-!/SmartM365/Communications/ExchangeUserNotifications/**/Recipients/
-!/SmartM365/Communications/ExchangeUserNotifications/**/Recipients/*.csv.template
+!/SmartM365/Exchange/MigrationReadiness/WorkplaceCloudHub.ico
+!/SmartM365/Exchange/MigrationReadiness/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Exchange/MigrationReadiness/Samples/MigrationBatch.csv.template
+SmartM365/Exchange/MigrationReadiness/Input/**
+!/SmartM365/Exchange/Communications/ExchangeUserNotifications/**/Recipients/
+!/SmartM365/Exchange/Communications/ExchangeUserNotifications/**/Recipients/*.csv.template
 !/SmartM365/Modules/SmartM365.UI/WorkplaceCloudHub.ico
 !/SmartM365/Modules/SmartM365.UI/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/**/Product names and service plan identifiers for licensing.csv
@@ -196,7 +196,7 @@ SmartM365/Devices/Windows11UpgradeToolkit/**/SetupMedia/
 
 # Local configuration
 *.local.json
-SmartM365/Communications/ExchangeUserNotifications/**/Templates.local/**
+SmartM365/Exchange/Communications/ExchangeUserNotifications/**/Templates.local/**
 SmartM365/**/SmartM365-IntuneRemediation-GUI.config.json
 SmartM365/SmartInventory/Orchestrator/Orchestrator-Jobs.json
 

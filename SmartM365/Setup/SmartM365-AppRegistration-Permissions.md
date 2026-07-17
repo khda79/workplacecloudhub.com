@@ -67,7 +67,7 @@ The startup preflight for each script must log its required PowerShell modules a
 | `ChannelMember.Read.All` | Reads private/shared channel members and owners when `-IncludeChannelOwners` is enabled. | `SmartInventory/M365Inventory/Teams/SmartM365-Teams-Inventory.ps1` when `-IncludeChannelOwners` is used. |
 | `Sites.Selected` | Uploads and replaces CSV files only on the SmartM365 SharePoint site. The bootstrap then grants the app the `write` role on the created/reused site, and removes old broad grants `Files.ReadWrite.All` and `Sites.ReadWrite.All` when they exist. | `Modules/SmartM365.Core/SmartM365.Core.psm1`; `Modules/SmartM365.SharePoint/SmartM365.SharePoint.psm1`; all inventory/export scripts that call SharePoint upload when `EnableSharePointUpload` is enabled. |
 
-Exchange user notification campaigns under `Communications/ExchangeUserNotifications` also use `Mail.Send` when `MailSendMode = Graph` or when `MailSendMode = Auto` resolves to Graph because no SMTP relay is configured. If `MailSendMode = SmtpRelay`, mail delivery uses the configured relay instead of Microsoft Graph.
+Exchange user notification campaigns under `Exchange/Communications/ExchangeUserNotifications` also use `Mail.Send` when `MailSendMode = Graph` or when `MailSendMode = Auto` resolves to Graph because no SMTP relay is configured. If `MailSendMode = SmtpRelay`, mail delivery uses the configured relay instead of Microsoft Graph.
 
 ## Intune ReadWrite Permissions Included By Default
 

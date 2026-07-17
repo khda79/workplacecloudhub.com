@@ -34,6 +34,7 @@ cd workplacecloudhub.com
 Recommended entry points:
 
 - Microsoft 365 and Windows endpoint tools: `SmartM365/README.md`
+- Exchange hybrid migration batch readiness GUI: `SmartM365/Exchange/MigrationReadiness/README.md`
 - SharePoint migration validation toolkit: `SmartM365/SharePointMigration/README.md`
 - Azure inventory and governance scripts: `SmartAzure/README.md`
 - Azure Virtual Desktop inventory scripts: `SmartAzureVirtualDesktop/README.md`

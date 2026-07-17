@@ -71,6 +71,22 @@ function Find-UpwardPath {
     return ''
 }
 
+function Get-SmartM365RootPath {
+    $templatePath = Find-UpwardPath -RelativePath 'Config\SmartM365.global.local.json.template'
+    if (-not [string]::IsNullOrWhiteSpace($templatePath)) {
+        return Split-Path -Path (Split-Path -Path $templatePath -Parent) -Parent
+    }
+
+    $current = Get-ExchangeUserNotificationsRoot
+    while ($current) {
+        if ((Split-Path -Path $current -Leaf) -eq 'SmartM365') { return $current }
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+    throw 'SmartM365 root not found.'
+}
+
 function Show-LoadingWindow {
     param([string]$Message = 'Loading SmartM365...')
 
@@ -546,7 +562,7 @@ function Get-DefaultTenantProfile {
 
 function Get-TenantProfileNames {
     $root = Get-ExchangeUserNotificationsRoot
-    $smartM365Root = Split-Path -Path (Split-Path -Path $root -Parent) -Parent
+    $smartM365Root = Get-SmartM365RootPath
     $tenantFolder = Join-Path -Path $smartM365Root -ChildPath 'Config\Tenants'
     $names = New-Object System.Collections.Generic.List[string]
 
@@ -659,15 +675,8 @@ function Resolve-GuiTokenizedPath {
     try {
         $globalTemplatePath = Find-UpwardPath -RelativePath 'Config\SmartM365.global.local.json.template'
         $globalLocalPath = Find-UpwardPath -RelativePath 'Config\SmartM365.global.local.json'
-        $smartM365Root = if (-not [string]::IsNullOrWhiteSpace($globalLocalPath)) {
-            Split-Path -Path $globalLocalPath -Parent
-        }
-        elseif (-not [string]::IsNullOrWhiteSpace($globalTemplatePath)) {
-            Split-Path -Path $globalTemplatePath -Parent
-        }
-        else {
-            Split-Path -Path (Get-ExchangeUserNotificationsRoot) -Parent
-        }
+        $smartM365Root = Get-SmartM365RootPath
+
         $selectedCampaign = if ($Campaign) { $Campaign } else { Get-SelectedCampaign }
         $campaignRootPath = if ($selectedCampaign -and -not [string]::IsNullOrWhiteSpace([string]$selectedCampaign.ScriptPath)) {
             Split-Path -Path ([string]$selectedCampaign.ScriptPath) -Parent
@@ -2045,8 +2054,8 @@ else { Close-LoadingWindow }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBVO/EYKs7l+6h
-# qrk4oOfj/L7WZN7fQ/KNVQB+KMiWoKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbGnjSXFH2VqY1
+# tRHalVcJmJ8W/EhqsGnZtsLI0Z18VKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2179,31 +2188,31 @@ else { Close-LoadingWindow }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINNKbGC3g/uPNRs1VJ43enhnPR772N+BO3YdlrTVDgcdMA0GCSqG
-# SIb3DQEBAQUABIIBgJCD6SXDlY7dXjWPgm+Ad+oV33o9BIBPnPoDuFV1EdjTODHl
-# SfDAYEfiHbdpWxbQeCEGZ/A2GAT7H6Uu7WyI41NhBxIu4G7zpD8lFL4lY2xgKMgm
-# oRAKszIDZRqYKXWKjvCIHBdk7oNmmozkh+rPH8RfQTo5Lva3M5TCqmyy0uEciTq4
-# jUcikJ93P5kBRcuQsuOCZCjGxlNwbUTo1LgFLRmWmpHzCGwpijeBpFLolQyOBUGb
-# 0E1a54Uqs2b+D7bs8bqxZ7Wv1F9wa14pFUtnQmk5kZuwPiI4rxzKq19rRsSVDsod
-# Vph5hXsf2yAhekQU+Za4xVLOWsjBaBsXdpug9W06P6UuC/99044TMv4AEwaYfiZx
-# jS7vqDWIL/lPMrKw92OP8wycx/AvAdioviVU+zJtoTOE3BiswdPOsX8QShdVMSqj
-# TQyuOhjoT1Yaxdc2KpwEx9HnlcDuoJQ6gBqBkBQuAoDMihJ/S8onn/p3Ndm/KhXA
-# 3uJ6EgrpuL6ZgNVhmaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINIc1G7JVC1YsxRdqGfmsFFnQiE3ejaPL87dy+FXoZL5MA0GCSqG
+# SIb3DQEBAQUABIIBgIr5YUPH3adiAfcpidjrEHf6AiKeFtbeCzDJxuuwFWMxYNg9
+# ldAaS6SzSvOslons4eofICumuV4XB8LQZgSQq5hLLV4oUQTfeMGWQwi2MNfqDOEh
+# WhRTZy3M1Fz4tLvTc22SuDBWRrtleaVaA1g0D/80RvD/NZaqT10vAQjCCmgobv0V
+# c5Z5bsduAk+WromRlsKsZxp8b/D+Z+CUHXag+WJKL4I/HR6WEvdrqHS2JvSdar/+
+# /cPUijKOzz0rELnTDOJMxwREtR1ADxbLa2nq1r81SwQQo8bpyL3OjTC6i3mYzse9
+# tSP0SvPiBvqxZziBpu0udT3T2thH3r9bGvRCZO42BeJldps0qKEC17k3SjdTZ0kU
+# W9sFcqX7MPEOruNn+QgVwwyWPHAjdKeqgCz3euKEVt4xOzmdc/THScTC0TJU72eB
+# 944Dq8FFEEQGEoUFI+35eXNeKRQ6Np2dPg8ruEWhrWpWA9hGfPpTTNEhYMhqWIqN
+# ZMBq7iHBWnqMPMCrFqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MjRaMC8GCSqGSIb3DQEJBDEiBCASpt4mcFj+CiKYuKJWurZN9WIxau1VFyl7Jjkh
-# I8vaHzANBgkqhkiG9w0BAQEFAASCAgAZb5f90biX/1jSWdXrUPN2kuDKN4ZZynaO
-# 7Ea8LkeNPnh4M4Q5HD21OEWJYXlAIksjXQaCcqVNbZfmRtyfi2IZdpzgL3IO76lK
-# AOcFkp1rqqZGWwjlLJyzR2LjApC3AvnbMzXxpWjSQ9mbDiwTNBeiq9imPSXzx2UV
-# HOZLPAjik5qT1UmgA+ezOC3TcXzOySz9tH09sypGJHLIhgY7UgvlV/DBOHisLwM3
-# +obShu1N7//EItZomv2Dmmh4D4C1F+6VDNPSCR9vz9up6lbXw4eqTCrFoBCc6OJe
-# p2VEGDXdwUPjPNoy1+jNBuS9eF1yVtKdtz2tjbymwp6FTX7/bYRQXlNoUtgiCQ1P
-# ZHW98CePz0CwBPgFUqVB6FFE90enu8L5okDWWhHdSxXux8shkUB7PCc4nRDtRNbK
-# 5CD8bYSYT6p4qO/4hQruznpZv1qxhZ6I2lEU2oiJMRkSTrJ2venDjEbL6u10TPIV
-# ySaMWt0kDRQMnQBnKzEkumWHHg9hQ+mOylyQpj+qnIl/3HnZq9lVjK/7A0FH09c+
-# 6KazPkLScYhMLV+WZpe6epsD7bfr7betIpX/SEKrjpfIPfszpCPJfIsOamgQZcnr
-# QL2gl7MVAAtlOEGgD8OCw+RAxn+BV2ntnOW4E5zzg9JnyHK0g2E6mc6wBCAWZoe9
-# 0A2x4u7ffQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMDM5
+# MjdaMC8GCSqGSIb3DQEJBDEiBCCX7to6Xnzn1MtuCRm1czXedXgZBM1I5wHmw6Eg
+# oKFS3zANBgkqhkiG9w0BAQEFAASCAgBrXhUFL5P9BGCLHgp3npo3HD54kvOMJq0x
+# 94iAzIJ7CUyEX/yGPkuA+GxBw+mQdvr9CR/i7rENpws7QI7FtHWaQfxb9gu/S6+m
+# H0mD+9aAiqfEHm8X3QSOHO5+75anS62oZPe3jUFQ9ZnpiCtOM699hYQMn7KngMl+
+# FTKfvwj9biVBxijWQQwKaZ5QiQ1u/Qh5Vv+rxexnRAtbCc36heJH8BQjG47VIsX0
+# 5qhqPDAzFquMr42RQX27ADJYFq0qvSsAr7sRKfO9+Av76wTXB3I5RJMJaaaTnlaz
+# 8Dzeko48lY4gqSmrZe2QqFG7a0ThS4RdOltLu0+xO1d02dhPjq7GEYeDiC9S55k4
+# WFWC/5ww0o9x0ecvIVc8a2pyhBzca9MWTLej3cCXDd4WHSB7H812K3Z47baWo8+l
+# ufMc8SlMcWRVVEa1weBFofyKH7/BFUE40G2wtIJ1Fb2phaA5ASgrxFxArg0O1nHC
+# SMDiVk6SbSvLz7oBBMicsSCM71zdwzKZMr4AfsEjCr3DXQ03PPW5ekZCMBG+FOws
+# rsYohuzX0eicUdnhL95k7WOMFBGVTYFM16B6KddP1tr+8TnsVIgFh30GMrKR6XUD
+# SGKRBLIG0hShkb4I1XAYWiEzzxrnRu7GSideE8/gh0Qmgx0hb7MU5lPaYDhfSGsn
+# NYkydtZUsQ==
 # SIG # End signature block

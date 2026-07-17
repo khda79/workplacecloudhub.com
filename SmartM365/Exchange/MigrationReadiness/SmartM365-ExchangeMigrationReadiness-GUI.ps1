@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.1.1
+1.1.2
 #>
 #requires -Version 7.0
 
@@ -16,7 +16,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.1.1'
+$script:AppVersion = '1.1.2'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -179,7 +179,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Border Width="10" Height="10" CornerRadius="5" Background="{StaticResource AccentBrush}" Margin="0,0,10,0"/>
-                    <TextBlock x:Name="StatusText" Text="Select and load a migration batch CSV." FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="StatusText" Text="Select a migration batch CSV." FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <TextBlock Text="Mode" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0"/>
@@ -213,8 +213,7 @@ $xaml = @'
                                 <TextBlock x:Name="CsvMetadataText" Text="No CSV loaded." Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="12,0,0,22">
-                                <Button x:Name="BrowseCsvButton" Content="Browse"/>
-                                <Button x:Name="LoadCsvButton" Content="Load CSV" Style="{StaticResource PrimaryButton}"/>
+                                <Button x:Name="BrowseCsvButton" Content="Browse" Style="{StaticResource PrimaryButton}"/>
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -222,7 +221,7 @@ $xaml = @'
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Connections">
+            <TabItem Header="Sources">
                 <Grid Margin="0,12,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -236,43 +235,33 @@ $xaml = @'
                     <Border Grid.Row="0" Grid.Column="0" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,0,6,8">
                         <StackPanel>
                             <TextBlock Text="Active Directory" FontWeight="SemiBold" FontSize="15"/>
-                            <TextBlock x:Name="AdStateText" Text="Not connected" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,10"/>
-                            <Button x:Name="ConnectAdButton" Content="Connect AD" HorizontalAlignment="Left"/>
+                            <TextBlock x:Name="AdStateText" Text="Checked automatically during assessment" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Grid.Row="0" Grid.Column="1" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="6,0,0,8">
                         <StackPanel>
                             <TextBlock Text="Exchange on-premises" FontWeight="SemiBold" FontSize="15"/>
-                            <TextBlock x:Name="OnPremStateText" Text="Not connected" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,10"/>
-                            <Button x:Name="ConnectOnPremButton" Content="Connect Exchange on-prem" HorizontalAlignment="Left"/>
+                            <TextBlock x:Name="OnPremStateText" Text="Checked automatically during assessment" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Grid.Row="1" Grid.Column="0" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,8,6,8">
                         <StackPanel>
                             <TextBlock Text="Exchange Online" FontWeight="SemiBold" FontSize="15"/>
-                            <TextBlock x:Name="ExoStateText" Text="Not connected" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,10"/>
-                            <Button x:Name="ConnectExoButton" Content="Connect Exchange Online" HorizontalAlignment="Left"/>
+                            <TextBlock x:Name="ExoStateText" Text="Interactive connection starts with the assessment" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Grid.Row="1" Grid.Column="1" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="6,8,0,8">
                         <StackPanel>
                             <TextBlock Text="Microsoft Graph" FontWeight="SemiBold" FontSize="15"/>
-                            <TextBlock x:Name="GraphStateText" Text="Not connected" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,10"/>
-                            <Button x:Name="ConnectGraphButton" Content="Connect Microsoft Graph" HorizontalAlignment="Left"/>
+                            <TextBlock x:Name="GraphStateText" Text="Interactive connection starts with the assessment" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Grid.Row="2" Grid.ColumnSpan="2" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,8,0,0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="Hybrid and Microsoft Entra Connect validation" FontWeight="SemiBold" FontSize="15"/>
-                                <TextBlock x:Name="HybridStateText" Text="Not tested" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <Button x:Name="TestHybridButton" Grid.Column="1" Content="Test hybrid readiness" VerticalAlignment="Center"/>
-                        </Grid>
+                        <StackPanel>
+                            <TextBlock Text="Hybrid migration and Microsoft Entra Connect" FontWeight="SemiBold" FontSize="15"/>
+                            <TextBlock Text="Checks the Exchange Online migration endpoint and Entra Connect synchronization health automatically during the assessment." Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="HybridStateText" Text="Pending assessment" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
                     </Border>
                 </Grid>
             </TabItem>
@@ -354,7 +343,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.1.1" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.1.2" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -370,7 +359,7 @@ function ConvertFrom-SemrXaml {
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-SemrXaml -Text $xaml
     $requiredControls = @(
-        'CsvPathBox', 'LoadCsvButton', 'ModeCombo', 'RunButton', 'SummaryGrid',
+        'CsvPathBox', 'BrowseCsvButton', 'ModeCombo', 'RunButton', 'SummaryGrid',
         'FindingsGrid', 'PermissionsGrid', 'ActivityBox'
     )
     foreach ($controlName in $requiredControls) {
@@ -406,9 +395,8 @@ $window = ConvertFrom-SemrXaml -Text $xaml
 $controls = @{}
 foreach ($name in @(
     'HeaderLogoLink', 'HeaderLogo', 'StatusText', 'ModeCombo', 'RunButton', 'CancelButton', 'OpenOutputButton',
-    'CsvPathBox', 'CsvMetadataText', 'BrowseCsvButton', 'LoadCsvButton', 'BatchGrid',
+    'CsvPathBox', 'CsvMetadataText', 'BrowseCsvButton', 'BatchGrid',
     'AdStateText', 'OnPremStateText', 'ExoStateText', 'GraphStateText', 'HybridStateText',
-    'ConnectAdButton', 'ConnectOnPremButton', 'ConnectExoButton', 'ConnectGraphButton', 'TestHybridButton',
     'GoCountText', 'WarningCountText', 'NoGoCountText', 'UnknownCountText', 'SummaryGrid',
     'MailboxFilterBox', 'ClearFilterButton', 'FindingsGrid', 'PermissionsGrid', 'ComparePermissionsButton',
     'ActivityBox', 'FooterText', 'RunProgress', 'VersionText', 'MainTabs'
@@ -493,35 +481,30 @@ function Sync-SemrConnectionDisplay {
         $controls.OnPremStateText.Text = 'CacheOnly (CSV inventory)'
         $controls.ExoStateText.Text = 'CacheOnly (CSV inventories)'
         $controls.GraphStateText.Text = 'CacheOnly (CSV inventories)'
-        $controls.ConnectAdButton.Content = 'Cache only'
-        $controls.ConnectOnPremButton.Content = 'Cache only'
         foreach ($control in @($controls.AdStateText, $controls.OnPremStateText, $controls.ExoStateText, $controls.GraphStateText)) {
             $control.Foreground = '#146C43'
         }
-        $controls.ConnectAdButton.IsEnabled = $false
-        $controls.ConnectOnPremButton.IsEnabled = $false
-        $controls.ConnectExoButton.IsEnabled = $false
-        $controls.ConnectGraphButton.IsEnabled = $false
+        if (-not $script:Assessment) {
+            $controls.HybridStateText.Text = 'CacheOnly: migration endpoint test skipped; Entra Connect health will be read from CSV.'
+            $controls.HybridStateText.Foreground = '#5F6B7A'
+        }
     }
     else {
-        $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live)' } else { 'Live automatic; CSV fallback if unavailable' }
-        $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (Live)' } else { 'Live automatic; CSV fallback if unavailable' }
-        $controls.ExoStateText.Text = if ($state.ExchangeOnline) { 'Connected (Live)' } else { 'Not connected (Live)' }
-        $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Connected (Live)' } else { 'Not connected (Live)' }
-        $controls.ConnectAdButton.Content = 'Try live AD'
-        $controls.ConnectOnPremButton.Content = 'Try live Exchange on-prem'
+        $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live)' } else { 'Automatic live check; CSV fallback if unavailable' }
+        $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (Live)' } else { 'Automatic live check; CSV fallback if unavailable' }
+        $controls.ExoStateText.Text = if ($state.ExchangeOnline) { 'Connected (Live)' } else { 'Interactive connection starts automatically with Run assessment' }
+        $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Connected (Live)' } else { 'Interactive connection starts automatically after Exchange Online' }
         $controls.AdStateText.Foreground = if ($state.ActiveDirectory) { '#146C43' } else { '#8A5A00' }
         $controls.OnPremStateText.Foreground = if ($state.OnPremisesExchange) { '#146C43' } else { '#8A5A00' }
         $controls.ExoStateText.Foreground = if ($state.ExchangeOnline) { '#146C43' } else { '#5F6B7A' }
         $controls.GraphStateText.Foreground = if ($state.MicrosoftGraph) { '#146C43' } else { '#5F6B7A' }
-        $controls.ConnectAdButton.IsEnabled = -not $script:IsBusy
-        $controls.ConnectOnPremButton.IsEnabled = -not $script:IsBusy
-        $controls.ConnectExoButton.IsEnabled = -not $script:IsBusy
-        $controls.ConnectGraphButton.IsEnabled = -not $script:IsBusy
+        if (-not $script:Assessment) {
+            $controls.HybridStateText.Text = 'Automatic: Exchange Online migration endpoint and Entra Connect synchronization health.'
+            $controls.HybridStateText.Foreground = '#5F6B7A'
+        }
     }
 
     $controls.ModeCombo.IsEnabled = -not $script:IsBusy
-    $controls.TestHybridButton.IsEnabled = -not $script:IsBusy
     $controls.RunButton.IsEnabled = (-not $script:IsBusy -and $null -ne $script:Batch)
     $controls.FooterText.Text = "Read-only | Mode: $mode | Tenant: $($script:Config._TenantProfileKey) | Cache: $cachePath"
 }
@@ -531,15 +514,15 @@ function Switch-SemrBusyState {
         [string]$Message = ''
     )
     $script:IsBusy = $Busy
-    foreach ($button in @($controls.BrowseCsvButton, $controls.LoadCsvButton, $controls.TestHybridButton, $controls.RunButton)) {
+    foreach ($button in @($controls.BrowseCsvButton, $controls.RunButton)) {
         $button.IsEnabled = -not $Busy
     }
+    $controls.CsvPathBox.IsEnabled = -not $Busy
     $controls.CancelButton.IsEnabled = $Busy
     Sync-SemrConnectionDisplay
     if ($Message) { $controls.StatusText.Text = $Message }
     Invoke-SemrDoEvent
 }
-
 function Resolve-SemrOutputRoot {
     $configured = [string]$script:Config.OutputRoot
     if ([string]::IsNullOrWhiteSpace($configured)) { $configured = 'Output' }
@@ -589,9 +572,9 @@ $controls.BrowseCsvButton.Add_Click({
     $dialog.Filter = 'CSV files (*.csv)|*.csv|All files (*.*)|*.*'
     if ($dialog.ShowDialog($window)) {
         $controls.CsvPathBox.Text = $dialog.FileName
+        Import-SemrCsvToGui
     }
 })
-$controls.LoadCsvButton.Add_Click({ Import-SemrCsvToGui })
 
 $controls.ModeCombo.Add_SelectionChanged({
     if ($script:IsBusy) { return }
@@ -604,81 +587,6 @@ $controls.ModeCombo.Add_SelectionChanged({
     Write-SemrActivity -Message "Execution mode changed to $mode. Cache root: $($script:Config._CacheRootPath)"
 })
 
-$controls.ConnectAdButton.Add_Click({
-    if ((Get-SemrSelectedMode) -ne 'Live') { return }
-    try {
-        Switch-SemrBusyState -Busy $true -Message 'Trying live Active Directory...'
-        Connect-SemrActiveDirectory | Out-Null
-        Write-SemrActivity -Message 'Live Active Directory connection succeeded.' -Level SUCCESS
-    }
-    catch {
-        Write-SemrActivity -Message "Live Active Directory unavailable; the assessment will use CSV fallback. $($_.Exception.Message)" -Level WARN
-    }
-    finally {
-        Switch-SemrBusyState -Busy $false -Message 'AD source test completed.'
-        Sync-SemrConnectionDisplay
-    }
-})
-
-$controls.ConnectOnPremButton.Add_Click({
-    if ((Get-SemrSelectedMode) -ne 'Live') { return }
-    try {
-        Switch-SemrBusyState -Busy $true -Message 'Trying live Exchange on-premises...'
-        Connect-SemrOnPremisesExchange | Out-Null
-        Write-SemrActivity -Message 'Live Exchange on-premises connection succeeded.' -Level SUCCESS
-    }
-    catch {
-        Write-SemrActivity -Message "Live Exchange on-premises unavailable; the assessment will use CSV fallback. $($_.Exception.Message)" -Level WARN
-    }
-    finally {
-        Switch-SemrBusyState -Busy $false -Message 'Exchange on-premises source test completed.'
-        Sync-SemrConnectionDisplay
-    }
-})
-$controls.ConnectExoButton.Add_Click({
-    try {
-        Switch-SemrBusyState -Busy $true -Message 'Connecting to Exchange Online...'
-        $exoConfig = $script:Config.ExchangeOnline
-        Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) | Out-Null
-        Write-SemrActivity -Message 'Exchange Online connected with delegated interactive authentication.' -Level SUCCESS
-    }
-    catch { Show-SemrError -Title 'Exchange Online connection failed' -ErrorRecord $_ }
-    finally {
-        Switch-SemrBusyState -Busy $false -Message 'Connection task completed.'
-        Sync-SemrConnectionDisplay
-    }
-})
-
-$controls.ConnectGraphButton.Add_Click({
-    try {
-        Switch-SemrBusyState -Busy $true -Message 'Connecting to Microsoft Graph...'
-        $graphConfig = $script:Config.MicrosoftGraph
-        Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) | Out-Null
-        Write-SemrActivity -Message 'Microsoft Graph connected with delegated interactive authentication.' -Level SUCCESS
-    }
-    catch { Show-SemrError -Title 'Microsoft Graph connection failed' -ErrorRecord $_ }
-    finally {
-        Switch-SemrBusyState -Busy $false -Message 'Connection task completed.'
-        Sync-SemrConnectionDisplay
-    }
-})
-
-$controls.TestHybridButton.Add_Click({
-    try {
-        Switch-SemrBusyState -Busy $true -Message 'Testing migration endpoint and Entra Connect...'
-        $hybrid = Test-SemrHybridReadiness -Config $script:Config
-        $entra = Test-SemrEntraConnect -Config $script:Config
-        $controls.HybridStateText.Text = "Endpoint: $($hybrid.EndpointName) | Success: $($hybrid.ConnectivitySuccess) | $($hybrid.Message)`nEntra Connect: $($entra.Message)"
-        $controls.HybridStateText.Foreground = if ($entra.Available -and ($hybrid.ConnectivitySuccess -or [string]$script:Config.Mode -eq 'CacheOnly')) { '#146C43' } else { '#B42318' }
-        Write-SemrActivity -Message "Hybrid test completed. EndpointSuccess=$($hybrid.ConnectivitySuccess); EntraConnectAvailable=$($entra.Available)." -Level INFO
-    }
-    catch { Show-SemrError -Title 'Hybrid readiness test failed' -ErrorRecord $_ }
-    finally {
-        Switch-SemrBusyState -Busy $false -Message 'Hybrid readiness test completed.'
-        Sync-SemrConnectionDisplay
-    }
-})
-
 $controls.RunButton.Add_Click({
     if (-not $script:Batch) { return }
     try {
@@ -686,6 +594,29 @@ $controls.RunButton.Add_Click({
         Switch-SemrBusyState -Busy $true -Message 'Assessment running...'
         $controls.RunProgress.Value = 0
         Write-SemrActivity -Message "Starting read-only assessment in $($script:Config.Mode) mode for $($script:Batch.Rows.Count) mailbox row(s)."
+        if ((Get-SemrSelectedMode) -eq 'Live') {
+            $connectionState = Get-SemrConnectionState
+            if (-not $connectionState.ExchangeOnline) {
+                $controls.StatusText.Text = 'Connecting interactively to Exchange Online...'
+                Write-SemrActivity -Message 'Starting automatic delegated Exchange Online connection.'
+                Invoke-SemrDoEvent
+                $exoConfig = $script:Config.ExchangeOnline
+                Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) | Out-Null
+                Write-SemrActivity -Message 'Exchange Online connected.' -Level SUCCESS
+                Sync-SemrConnectionDisplay
+            }
+
+            $connectionState = Get-SemrConnectionState
+            if (-not $connectionState.MicrosoftGraph) {
+                $controls.StatusText.Text = 'Connecting interactively to Microsoft Graph...'
+                Write-SemrActivity -Message 'Starting automatic delegated Microsoft Graph connection.'
+                Invoke-SemrDoEvent
+                $graphConfig = $script:Config.MicrosoftGraph
+                Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) | Out-Null
+                Write-SemrActivity -Message 'Microsoft Graph connected.' -Level SUCCESS
+                Sync-SemrConnectionDisplay
+            }
+        }
         $progressAction = {
             param($Current, $Total, $Mailbox, $Phase)
             $percent = if ($Total -gt 0) { [math]::Round(($Current / $Total) * 100, 0) } else { 0 }
@@ -704,6 +635,9 @@ $controls.RunButton.Add_Click({
             Write-SemrActivity -Message ([string]$sourceState.ExchangeOnPremisesMessage) -Level $(if ($sourceState.ExchangeOnPremisesLive -or $script:Config.Mode -eq 'CacheOnly') { 'INFO' } else { 'WARN' })
         }
         Write-SemrActivity -Message "Entra Connect evidence source: $($script:Assessment.EntraConnect.Source). $($script:Assessment.EntraConnect.Message)" -Level $(if ($script:Assessment.EntraConnect.Available) { 'INFO' } else { 'WARN' })
+        $endpointName = if ([string]::IsNullOrWhiteSpace([string]$script:Assessment.Hybrid.EndpointName)) { 'not available' } else { [string]$script:Assessment.Hybrid.EndpointName }
+        $controls.HybridStateText.Text = "Migration endpoint: $endpointName | $($script:Assessment.Hybrid.Message)`nEntra Connect: $($script:Assessment.EntraConnect.Message)"
+        $controls.HybridStateText.Foreground = if ($script:Assessment.EntraConnect.Available -and ($script:Assessment.Hybrid.ConnectivitySuccess -or (Get-SemrSelectedMode) -eq 'CacheOnly')) { '#146C43' } else { '#8A5A00' }
         $script:Export = Export-SemrAssessment -Assessment $script:Assessment -OutputRoot (Resolve-SemrOutputRoot)
         $controls.SummaryGrid.ItemsSource = @($script:Assessment.Summary)
         $controls.FindingsGrid.ItemsSource = @($script:Assessment.Findings)
@@ -821,8 +755,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBkcH4GeY5IzbNS
-# nMVpnLCKHP8PkWJrd8JqXoZyfOiKpKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcQlhFcOy6Lw7b
+# zuo4FSivSismTkH+gO9nZ2VAbKruX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -955,31 +889,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKTulaJeyg5ep0gRxn4JMsJ2cmMnBYkaQRCJyufiZHVvMA0GCSqG
-# SIb3DQEBAQUABIIBgDbne3A8qF6DpccBEfLM5N+hYaxLdq/fe5Ala6+MfWStKuP6
-# 7ohLYOfDlUhCxIS3Dse8c4z9S+Hz9/gTo4ppAj6XKwb5VcMbnjuwrGME0BqyMJIa
-# zxsHfUXOcP3WKZPEDRvb4YN9ygBb2n+zeHhcNI9X5fn2nJzXeFsYvqGPAvG40HE7
-# lSwCXLn9/xwF8DnyYaKiT4PShdw5XYMeH2trrxi0Shdq6cpIuw4JGtqCfUWC3r74
-# UcPsepxr4QyOXXhvpPf/aj9V1FRAFDDHgERyetSHwGOp6ODlPn/yQVD1RzVbZu/1
-# +c3lInG3Vku5UjeCavitokD20+Hudn9hhcl0DLFW6iOBq3iBZwd/WekZcfOnvE2z
-# LWqbVEadDsbqqX5k+JKuR0RfI1ggX8L1CSSJd3rilqsVuKew53Jyi+OsEJrVDmca
-# BI7GJt7Vx+IILCym+4PDB87lBKii2Rm8T9UFWnJ8ODA0hGLL+k6/M0J2Zo8oMHDn
-# xLIEQcxlgiM8ifMygqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILUkOlGTYbADmggMmflUVI+9x8sY8Pc5exvkKmjAmPEiMA0GCSqG
+# SIb3DQEBAQUABIIBgDXL8R/onSLau+tVArjESTo6jn4kabqouWz7G/0JljQ5aPKB
+# 9l3AHDxVab6E7UIrq4Gd92GTvYzLxEnTSkDcGrwo8d1eiaLfFaq9xZCrZwCr/dbc
+# ivo0qer+9ST/44LPCtPT3CeFhRNBfZJ/K13iaV/IBakEabp0Q3VKQ/5Aw15XajVC
+# TC1rgC3xon7VJETUw+w8/zTgyJoG/vcLRRdwi0VMe8OW9SVlelcrFh0mxVtgFdji
+# /R5vvSNA/AP/2L/A4gwidj94V8Eid1kIvK5gEkm5idVJSoJW070W1XoJt9CrpK5S
+# +jWPQwO2j1JJBE39NTtOlOoMi0jieop38towNo67fHbwTlTP0v+oefhFdMQx4ddX
+# 5lJ9FI4nviXvr2rPSkirWt/eUw83XHZmE0ylxtCBuBXFk4uFOUA7xkEvO3aLke1N
+# qGHij89z86P1PGGv0rbalnDfNCbx1G6nH2HdNWPjSmA5TNa//KQ1p3bW/uqRiq00
+# IVgeJ7PaDCEWWG7fNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMDAz
-# MzNaMC8GCSqGSIb3DQEJBDEiBCA71zyGJW6Btn3dPmuQGdOtHj5RKkCaP/unLza/
-# FPXYdTANBgkqhkiG9w0BAQEFAASCAgCauCQGWbOuF9GQAfj1DlFaROyq4bioNzAY
-# 9PX/nV9si1YtRenXiap5oBLIKPM0nTwZcqO2kOHYIcRCMbuKsv8pW9LoI3iYwVg3
-# /boSUpZ9E8AFmMQCSNoVcwnG3trOnUW2hMi7L6BgNaQBe14j55HKB3OlcmrCghqZ
-# dfyuZafWIW08abPjSiZv0Sa7nZxZmOo45BO3lQ0I2t8SUBTPX3GTZtS8D/vY+jtd
-# lEvSsjSemkeZadmHt6fF9ZzRS3zsxCWjYcr/W5IZhFLfEFEeeWq826A89zs34rw5
-# PVywA69bjcQ1yj6fHm3ShriWObEPdiHLtOGn/E0QTWWlYS5AKdivRYQpbYyJf4PD
-# 836WZRIHTkHM7kWI0Ez2u4H7arYZF3gULRRaGaI1p9MRtWoehL5FPO2ZwD89i3vA
-# xafOTox0kbivOZ9cquyyADYQ+3aSVYOwaLTdEgi/ZElUVa93yg8n2pw9ATik9Lwn
-# jrMlMLSgqm5eftpNUZZtTrqm88QHxsbqb1TjJqH2hoQFubr9WuHVtYCRqx0zaVeP
-# N6n9mBRAJXpRLN6/KNXsrCqRqNxGzkpKW7b4Nzj1EngOokCaIcCQvcPzr5IV/qjx
-# hH0cN2golDYiZd1Tcqmq6Hjq7uSkGmxwdYQbJxMkjKsjBFz//e6qi+05vpJdGswn
-# pNf/CK3A8w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMDIy
+# MzVaMC8GCSqGSIb3DQEJBDEiBCCtmM/slhYpiNg1+3g6K4zB/kr9bl5VX0GvyQZ1
+# 0UaXiTANBgkqhkiG9w0BAQEFAASCAgBzp4Vw5ZNmHSpfyVX6DPixDVKK2gny9oSg
+# Z9q8vyA2pEYbWvqRUltbR702M2i2u+iVmNYkxng3xkhZynySfJ/ECIiCoDI8o+YW
+# atmJ17bWR7Zu3EcdCavM9DxtkhKaySj3AmQscS0tw+snus775+xzCTgkBItvQ7LH
+# 26GyPC52A+m0dKTLHQb3FoN76HHs0m4cE8RX1emynDG57yFU7Tpl2PIcgDGMsMlb
+# 66ngo1svsGrurTCgQ1t/P8C1VyqHJkJbN+qc4eEICp6SpbSQ0z6Te59m105tt5ht
+# 1MQ8C32XbEDJMNwSYdYZMecGzf7TKgDl3VvtbJzUxAq3FOo4f5iBHgGmm04ZIxT+
+# X5JC48DJNY7ZH+fmI2ezYj/uLBW6Iw1GbdzmCFeIcAcYdIGIeJ/uoln4ja1ZFmWj
+# NkvE6xJ5lyWRtUFk6Quv/scJaWWGI3LLbhr7DO7cnRyRus0ulrpVmF1WajbHKVSc
+# Pl6IJF7PW9WhKhWwzWEqTn7C7vYjdN+geZa3yhD6gKZo6HByL8O+wV+Azla6kJfR
+# Jkuo8zvO26akILm6PJCLSrGRCMtHsF1rdMik4HnopfnHknepdFO2cOi+814QjXfv
+# OxHXtoXjxah0BBtug5wUMrVhGARpv+63uV1VqHGDj0ezBY0aJ1XxbA0axUEk3lCe
+# rq71DqGVeA==
 # SIG # End signature block
