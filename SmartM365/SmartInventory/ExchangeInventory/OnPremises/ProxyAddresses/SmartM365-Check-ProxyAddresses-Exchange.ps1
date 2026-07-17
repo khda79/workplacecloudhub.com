@@ -48,6 +48,8 @@
 .PARAMETER Subject
     Subject for notification email.
 
+.PARAMETER MaxMailAttachmentMB
+    Maximum workbook attachment size in MB. Larger workbooks are referenced in the email body but not attached.
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
@@ -60,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.20
+1.21
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -106,6 +108,11 @@ param(
 
     [Parameter(Mandatory=$false)]
     [string]$Subject = "Check ProxyAddresses Report",
+
+    [Parameter(Mandatory=$false)]
+    [ValidateRange(0, 100)]
+    [int]$MaxMailAttachmentMB = 5,
+
     [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -479,7 +486,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.20"
+    $ScriptVersion = "1.21"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -1251,8 +1258,27 @@ try {
     $MailFrom    = $From
     $MailSubject = $Subject
 
-    # Attach only the consolidated workbook; CSV files remain available through the body links.
-    $attachments = @(if (Test-Path -LiteralPath $outWorkbook -PathType Leaf) { $outWorkbook })
+    # Attach only the consolidated workbook when it is small enough for mail transport.
+    # CSV files and the workbook always remain available through the body paths/SharePoint links.
+    $attachments = @()
+    $workbookAttachmentNote = $null
+    if (Test-Path -LiteralPath $outWorkbook -PathType Leaf) {
+        $workbookItem = Get-Item -LiteralPath $outWorkbook -ErrorAction SilentlyContinue
+        if ($workbookItem) {
+            $workbookSizeMB = [Math]::Round(($workbookItem.Length / 1MB), 2)
+            if ($MaxMailAttachmentMB -le 0) {
+                $workbookAttachmentNote = "Excel workbook attachment disabled by MaxMailAttachmentMB=0. Workbook size: $workbookSizeMB MB."
+                WriteLog -Message $workbookAttachmentNote -Level 'WARNING'
+            }
+            elseif ($workbookItem.Length -le ($MaxMailAttachmentMB * 1MB)) {
+                $attachments += $outWorkbook
+            }
+            else {
+                $workbookAttachmentNote = "Excel workbook not attached because size $workbookSizeMB MB exceeds MaxMailAttachmentMB=$MaxMailAttachmentMB MB. Use the body path or SharePoint link instead."
+                WriteLog -Message $workbookAttachmentNote -Level 'WARNING'
+            }
+        }
+    }
 
     if ([string]::IsNullOrWhiteSpace($MailFrom) -or -not $MailTo) {
         Write-Host "Email skipped: incomplete email parameters (From/To)."
@@ -1325,6 +1351,14 @@ try {
 "@
 
         $sections = @([pscustomobject]@{ Title = 'Scope'; Html = $scopeSectionHtml })
+        if (-not [string]::IsNullOrWhiteSpace($workbookAttachmentNote)) {
+            $attachmentSectionHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #fde68a;background:#fffbeb;">
+  <tr><td style="padding:12px 14px;font-size:13px;color:#92400e;word-break:break-word;">$(Encode $workbookAttachmentNote)</td></tr>
+</table>
+"@
+            $sections += [pscustomobject]@{ Title = 'Email attachment notice'; Html = $attachmentSectionHtml }
+        }
 
         $duplicateAliasPreviewRows = @($duplicateAliasRows | Sort-Object @{Expression='DuplicateAliasCount';Descending=$true}, Alias, DisplayName | Select-Object -First 50)
         if ($duplicateAliasPreviewRows.Count -gt 0) {
