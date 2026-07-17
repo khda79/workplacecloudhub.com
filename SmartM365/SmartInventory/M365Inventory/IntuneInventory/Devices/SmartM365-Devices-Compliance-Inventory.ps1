@@ -36,10 +36,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.14
+    Version : 1.15
 
 .VERSION
-1.14
+1.15
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.14
+    Version : 1.15
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, Directory.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -305,7 +305,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -318,7 +318,13 @@ $script:GraphRetryMaxSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptL
 $script:ManagedDevicePageSize = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ManagedDevicePageSize' -DefaultValue 999)
 if ($script:ManagedDevicePageSize -lt 1) { $script:ManagedDevicePageSize = 999 }
 if ($script:ManagedDevicePageSize -gt 999) { $script:ManagedDevicePageSize = 999 }
-$script:MaxDevicesEffective = if ($PSBoundParameters.ContainsKey('MaxDevices')) { [int]$MaxDevices } else { [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxDevices' -DefaultValue 0) }
+$script:MaxDevicesEffective = if ($PSBoundParameters.ContainsKey('MaxDevices')) {
+    [int]$MaxDevices
+} elseif ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
+    [int]$MaxItems
+} else {
+    [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'MaxDevices' -DefaultValue 0)
+}
 if ($script:MaxDevicesEffective -lt 0) { $script:MaxDevicesEffective = 0 }
 $script:IncludePolicyStatesEffective = if ($PSBoundParameters.ContainsKey('IncludePolicyStates')) { [bool]$IncludePolicyStates } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludePolicyStates' -DefaultValue $true) }
 $script:EnableDirectoryEnrichmentEffective = if ($PSBoundParameters.ContainsKey('EnableDirectoryEnrichment')) { [bool]$EnableDirectoryEnrichment } else { [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableDirectoryEnrichment' -DefaultValue $false) }
@@ -1407,8 +1413,6 @@ try {
             Export-SmartM365Csv -Data @($summaryOut) -TimestampedPath $tsCsv -LatestPath $lastCsv | Out-Null
 
             Write-Host "Compliance summary CSV saved: $mainCsv"
-            Write-Host "Compliance summary CSV timestamped: $tsCsv"
-            Write-Host "Compliance summary CSV (last): $lastCsv"
         } catch {
             Write-ComplianceWarning -Message "Failed to export compliance summary CSVs: $_"
         }
@@ -1443,8 +1447,6 @@ try {
             Export-SmartM365Csv -Data @($polOut) -TimestampedPath $policyTsCsv -LatestPath $policyLastCsv | Out-Null
 
             Write-Host "Compliance policy CSV saved: $policyMainCsv"
-            Write-Host "Compliance policy CSV timestamped: $policyTsCsv"
-            Write-Host "Compliance policy CSV (last): $policyLastCsv"
         } catch {
             Write-ComplianceWarning -Message "Failed to export compliance policy CSVs: $_"
         }
