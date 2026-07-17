@@ -11,7 +11,7 @@ Le mode est sélectionnable directement dans l’interface.
 ### Live — mode par défaut
 
 - Exchange Online : connexion interactive déléguée lancée automatiquement par Run assessment.
-- Microsoft Graph : connexion interactive déléguée standard lancée automatiquement après Exchange Online.
+- Microsoft Graph : connexion interactive déléguée standard lancée automatiquement après Exchange Online dans un processus PowerShell 7 isolé, afin d'éviter les conflits de bibliothèques MSAL avec ExchangeOnlineManagement.
 - Active Directory : tentative live automatique ; fallback sur `AD_Users_AllDomains.csv` si AD est indisponible.
 - Exchange on-premises / Exchange 2016 : utilisation des cmdlets live lorsqu’elles sont disponibles ; fallback sur `Exchange_OnPrem_Mailboxes_AllDomains.csv` sinon.
 - Santé Microsoft Entra Connect : lecture live des cmdlets ADSync locales lorsqu’elles sont disponibles ; fallback sur `M365_Entra_AzureADConnect_SyncHealth.csv` sinon.

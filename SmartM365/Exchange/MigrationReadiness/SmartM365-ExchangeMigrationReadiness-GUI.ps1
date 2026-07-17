@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.1.4
+1.1.5
 #>
 #requires -Version 7.0
 
@@ -25,7 +25,7 @@ trap {
     catch {}
     exit 1
 }
-$script:AppVersion = '1.1.4'
+$script:AppVersion = '1.1.5'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -352,7 +352,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.1.4" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.1.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -502,7 +502,7 @@ function Sync-SemrConnectionDisplay {
         $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live)' } else { 'Automatic live check; CSV fallback if unavailable' }
         $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (Live)' } else { 'Automatic live check; CSV fallback if unavailable' }
         $controls.ExoStateText.Text = if ($state.ExchangeOnline) { 'Connected (Live)' } else { 'Interactive connection starts automatically with Run assessment' }
-        $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Connected (Live)' } else { 'Interactive connection starts automatically after Exchange Online' }
+        $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Live evidence loaded (isolated process)' } else { 'Interactive collection starts automatically after Exchange Online' }
         $controls.AdStateText.Foreground = if ($state.ActiveDirectory) { '#146C43' } else { '#8A5A00' }
         $controls.OnPremStateText.Foreground = if ($state.OnPremisesExchange) { '#146C43' } else { '#8A5A00' }
         $controls.ExoStateText.Foreground = if ($state.ExchangeOnline) { '#146C43' } else { '#5F6B7A' }
@@ -621,8 +621,14 @@ $controls.RunButton.Add_Click({
                 Write-SemrActivity -Message 'Starting automatic delegated Microsoft Graph connection.'
                 Invoke-SemrDoEvent
                 $graphConfig = $script:Config.MicrosoftGraph
-                Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) | Out-Null
-                Write-SemrActivity -Message 'Microsoft Graph connected.' -Level SUCCESS
+                $graphProgressAction = {
+                    param($Message)
+                    $controls.StatusText.Text = $Message
+                    Invoke-SemrDoEvent
+                }
+                $emailAddresses = @($script:Batch.Rows | ForEach-Object { [string]$_.EmailAddress })
+                Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction | Out-Null
+                Write-SemrActivity -Message 'Microsoft Graph evidence collected in an isolated PowerShell process.' -Level SUCCESS
                 Sync-SemrConnectionDisplay
             }
         }
@@ -764,8 +770,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmhM9SE5o50dUy
-# glh01d4F30E8XWdkT/PLzBneaWu6LKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4jw4wtapaLNkY
+# xBecFS3KZc86/HIGy11Lq86o0ygiE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -898,31 +904,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICD06JGtuOEl2w5So7g7OhrABy6ggwWk3DOBhb9g0AKaMA0GCSqG
-# SIb3DQEBAQUABIIBgCnsa/YLCCefobzHNPXQhZbxcZlzdoruLd8LNHItXKL/yes9
-# CG/c7wN2Fm72Flr+aI9qwjTmLNY89lQbGNgSvnxeq5IkFAyX/bxeWbdFUSFxwtX8
-# 3yrDULVFgHs9xzjUwnMAwlw3VbFcsLDmlLwzNeoHg+r5thDcBbrpJgCtf2JLi/Uq
-# +Zeu3pwB3AH45Vg9XoyE3HTsu5IBeDF2lBpYHKe/XNkjBwuwZuYvQ16ARFnuUGEq
-# hL61tJDV1w4NL4lDDCEhuKipcNYk/OKbWbv/zPkVyFNZgH8RJuXqGh5ApWOfIZTV
-# a304i+k34QvWi5U2WDntHI5wMm667opebqYzGeWGp9A9XbxaEbI4gzYibXwP1hJE
-# dbvMwxSMLbquD8S+QG0IjzE/PL4pXZcebyRdoaFlERkhGMohw3/4mablf2etCeql
-# Qm8j6ZP5ca/bNdA6D3b+EhW3UubhRZFcHI6tDgHsUWPAGagFv+A84vUf72S8Ybi9
-# 0HfWoVQ/S7W1oBEOqKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAmy1weE0LGYeY1UwS4mPVtELzOxq2AZP6Am/nRiditzMA0GCSqG
+# SIb3DQEBAQUABIIBgFAiDttLv4KMYVBB/WiD6odgnuLczSifjy1n9X9Kvk/AMnm+
+# eUUdjVqOBaXObMq1i4exaww82DzGAjOfqrCS4IktmR4Dr7GLn8r6pTzLLugGaAEA
+# DYFSS6bsBIoFYBCh1kke9bA/Gl0RaC20ZIqtoapnDl6k7QanjqzLlJBfddTRm/qt
+# Wcv9k0wpayxTUmAOD5boyfjEcHLzQrusTK4IQ5y584LJ45UTftfCkFHAT8oNl2+W
+# E+/amRHlcBPH4X/pXfnu1sTanUOlPZmrXuYZPsODUNXU2rGt9y67B3SDbxGt840E
+# 4h43OhN0jJNF0dXJmBtGOIAFY71CZ4QYJnl/Ui1sB3ZMEG/C/bYXz9uekrN21qhD
+# dhpMDRnL5Mv6JI6wbwOPBOCJw+dRvZG6Pejs8cYOMEtyv18XK/rvD/AXigr76bnq
+# XAof7F9BpBT0Z+Br64KtKvZ7TWFTNNCBw65kc33TVUMWcpQ5ADr8ZRFlWdO3QYAg
+# b/Y2qWkgmTUH45oz36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMzE1
-# MDlaMC8GCSqGSIb3DQEJBDEiBCBVUw4PuGKwbBcKJDkglG/DPLUk4//l+je/SPX7
-# XJmyvDANBgkqhkiG9w0BAQEFAASCAgAi0CIsAYVI29VAQNvQFbbctLW9WiwolVOX
-# g3c2L4yA+KxzQOpLd7ijkV25NG0gBgQvxLeKAK0w0l2p+umYywxp/a/ygbSVFPyR
-# ae1qou1vEfGPPe6n92yVNpC7GMZsYnIWTCOKvLziE/tutzdjk8DNM1RlCc9A/fS9
-# 5r5N9tXfJ8aoiQVrP7f2+pwcEuZ257WE5UqhnAqMmyg8QcdccAXyAJlV/sojnP5r
-# NRYgn2SrPMQRDysCuZma/BGS7frwad90iuJzyG+hAhOe1paWmEIwSrH9Sk6ILDpc
-# Z6aeJJuUz80QPtfyX5+BmjqS+OxeLrogCsKGYh0vr8Mx1r4sosQRlin1DpfB3ZsB
-# lAUjXf4kGr6F9uMoxPeqXXJqjdF9aLY2oZzYmvnt0vLBI0ar7tx2xo+uvScJPxzV
-# ogjJ0fNYsx14Xs2CJtLArgPxY4ZLRhso0XCAyJPGwGY3LRHdu/+oDyq7EyC6sJ9+
-# dqdOo4SJ7XZbO4BYgIV39EcqwYM2Nu9M6r5gGUe0PkBrvJyD/GHIHo9ZLAk2tn5O
-# NnzvsV85aLNieISTeBR++0niGO1dncalaLfo4GeIiQRzY1HpmYqbiC996hbar0js
-# cWknl/J7OC0hESWzvVzFsUj+4nP0LIPJXN2nitUPn6ridvyjF+Ks+SXi/oLn5hLG
-# WiCmWndxSg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMzQz
+# NDNaMC8GCSqGSIb3DQEJBDEiBCCMyDdhudgIjb7QMBh62iWjwYtbx+hBCsHN5nlA
+# 20XPKDANBgkqhkiG9w0BAQEFAASCAgClRqIAFEIwi98br7MwA2LDXYoJr3bXHgD/
+# Q/TzdW13o/eBv0SEbQWYctXNk7fXwmZnPC0K6DkPHL/z9RdqTuaTMSV+gn3hu7tR
+# 89KOYei/2RPIlrwfPxtKpag3WkcNJcE1tLKBMpP+LVusLFG7VyTk+iyERmAwWK+l
+# 4wZnXPxLhhptc5MxUadVUpbZtmeaJ4iJTx0YyZ0hoBjyb0Qugn/c+8LJysAByJ6q
+# LQTVw/S0GtF+v0eegOOi//zggNyJ6FEbLLJK/6Ute5dosFZKRfnj5gHqPtVrmp7J
+# JUZLw4atoEexX8cXJeVrCsEpLLFtZCbSbjNJAsiDDtbePxwru+mQ1k95UA49w4A1
+# s97s5tDRvs1x/roA2HnIiI8MY9itz4pv1LDJnnUCDOILlQV5ImU4hPSV5pSDVKeF
+# 4CuvKV+uLhfQ78tkRP0KPQHBpUog6s98NCBoFxa0mQO11dQzPBp58/zf+EIfyiDD
+# nw0Q3i+ftGcIHbhjBtmmex8D4TFtwPSQjtOvQHQyU7Ppdmpw9JZPBRyx0uguaG0m
+# IEtry+Poh16VdVUXcsXkKPXRQOiUT+XCV/RhsDNzjhCdW6R8paEZxXJ7w5KEtEnr
+# f+Pvt8vClGXNh5e6TBP9jdbaLzZbBFJPW1SLlnGKqyG4Zz9MGGIyU2qt4MlgcpgB
+# YTTY75h5Fw==
 # SIG # End signature block
