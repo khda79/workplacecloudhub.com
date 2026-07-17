@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.26
+0.1.27
 #>
 
 #requires -Version 5.1
@@ -1036,7 +1036,7 @@ try {
         else {
             $previousStatus = $result.LauncherStatus
             $result.LauncherStatus = 'REMOTE_RESULT_STALE'
-            $result.RemoteNextAction = 'CHECK_REMOTE_RESULT_COLLECTION'
+            $result.RemoteNextAction = 'CHECK_REMOTE_EXECUTION_AND_LASTRUN'
             $result.Detail = ("{0} PreviousLauncherStatus={1}" -f $lastRunFreshness.Detail,$previousStatus)
             Add-Content -LiteralPath $logPath -Value ("[{0}] WARN {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$result.Detail) -Encoding UTF8
         }
