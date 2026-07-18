@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.1.5'
+$script:SemrVersion = '1.1.6'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:GraphEvidenceByEmail = @{}
@@ -20,6 +20,10 @@ function Get-SemrVersion {
 
 function ConvertTo-SemrHashtable {
     param([Parameter(Mandatory)]$InputObject)
+
+    if ($InputObject -is [string] -or $InputObject -is [ValueType]) {
+        return $InputObject
+    }
 
     if ($InputObject -is [System.Collections.IDictionary]) {
         $result = [ordered]@{}
@@ -302,6 +306,11 @@ function Connect-SemrMicrosoftGraph {
         [scriptblock]$ProgressCallback
     )
 
+    $normalizedScopes = @($Scopes | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    $invalidScopes = @($normalizedScopes | Where-Object { $_ -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]+$' })
+    if ($normalizedScopes.Count -eq 0 -or $invalidScopes.Count -gt 0) {
+        throw "Microsoft Graph scopes are invalid: $($normalizedScopes -join ', ')"
+    }
     $workerPath = Join-Path $PSScriptRoot 'SmartM365-ExchangeMigrationReadiness-GraphWorker.ps1'
     if (-not (Test-Path -LiteralPath $workerPath -PathType Leaf)) {
         throw "Microsoft Graph worker is missing: $workerPath"
@@ -320,7 +329,7 @@ function Connect-SemrMicrosoftGraph {
     $process = $null
     try {
         [void](New-Item -ItemType Directory -Path $runtimeRoot -Force)
-        @($Scopes | Where-Object { $_ } | Sort-Object -Unique) | Export-Clixml -LiteralPath $scopesPath -Force
+        $normalizedScopes | Export-Clixml -LiteralPath $scopesPath -Force
         @($EmailAddresses | Where-Object { $_ } | Sort-Object -Unique) | Export-Clixml -LiteralPath $inputPath -Force
 
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -2102,8 +2111,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCJmccCPvPcPbG
-# 1haNFtaDDnfwyjK5AQh0v3SiRsQHb6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6z/ZYvtjrd/Wt
+# qvQoepIaIIA8ER5HLxP0SNFj6QufGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2236,31 +2245,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMIHPW2N2+/tNhiUt/dRHdWF175NfcZtc5hPFdq9vIIiMA0GCSqG
-# SIb3DQEBAQUABIIBgBVsKxuVwo6y3rM5HkfDRNLD8JIG3/6GP++PnDfiAP+r6T1L
-# j9hBNTtfwMA5nDbdbRM7prje/BQo+AihiWb4tgrhFRp9pjakVcbbHm8qginL+UMY
-# L0AnNUd5+FRYAudmEeZYHK7dm6QUKK9u7/XQfWWqA+wexHszdBjIUqoMKSRUlA+W
-# ziV1WEe2cx5ci+x+iA7xbElG5gfX5uvnCF61ykc6aaMk2+c9Lhkh+3VyBFS9gZGk
-# XS7cuZj/wxQQ60J5kYeCFB8cknXS/VDXEWopLbSf+wDWtlppBipsNMEUQuq23owG
-# wHah/KwDxDlIwn8tphODAUe+X2oJGsijdcp2+ZVM5E7Uh2DRg8wpL6/sJPIEJXWM
-# JBQAYaIs09dD+gh7NnpYGWsPmxoz9KNozwXg4D0xBG0F9XE8XeQndyRtZWr77twA
-# GtvCDfADekA5mxx8R5Gh7hW4I5VBCKOeriC1ygl1eCIvwLegL8vU0IWaXHBJ/EDC
-# QICVKHduzd6wrTOP/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIATwgf3xZ0CjOra/BIdvguIYwFO0S2ZxxHsv76zufqE+MA0GCSqG
+# SIb3DQEBAQUABIIBgElXy0yen+1z1Wza1/ZGrJ3YDDG2QG2NuoIX1QjABEbYdJwr
+# lnCZafHBtVzGsLPKr7CmutypBwA0rO7oJHqO/KjkFLK4LHsfYqbrZ10jL2+L2HeZ
+# uAc8W7pz/bvNztV30k/l0N/x50ngsHugIFxf/Zt/6D4G8uemEuKtOyasqg/cTXX+
+# h8G4LZKLw7wpwJbkIdCbS9WqTy5dc9orVGkXAKTKQgWS/zqqIgwZdbpvUiUUf73S
+# E381lK5QCUA3KvE+8QYvjiceuGTGfzeazjKNvNkbQQI3O13WmcQBLOuavAUvrQQ2
+# coS3gprI8KUpELspcQz2OcoJ/MuNTK4Pq3FA360e5KbVGvka+ZzkHGM91+D7ygFt
+# 6dNXtt6uCv6bu4gBR0oem5R3WyukcsJEHfC/0PNtthB+aadNr+cgXpbXP1GWmBY1
+# jRBb+dCy2C5b3XXgJOaSAuIZmxxWsDfnJjSlTBENaTNtZSoePuJmUkFCSYpgGoRi
+# WaAncJBaXjtZ72oFLqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMzQz
-# NDJaMC8GCSqGSIb3DQEJBDEiBCBoNXroWqQAlBfrxm4GNYLNqEzKwl4LiuGl2+Ir
-# SyMqLzANBgkqhkiG9w0BAQEFAASCAgAYC05qXZO9/210yAkMVAvxUtORJUq8kxJ7
-# ymK0UpX76T70BB6PnLrT9L4JpTRPLtnTX4Z/iAZHPh82wgZ3d4mP+1GtHF8e7ToH
-# nwnEJcAABUbxqZ52eDjDeUjaYXQ9/Ts680/yeEG/N76kqMK9jaPfYdg4cujZutwN
-# oKome7Oqatp6JPNU57FsY3uxigxzcqObGIgVmad5ClxrBmhz9oBJ7KRwDBXVyoCa
-# claAEi/PYPKQO1wdbhRZ0s75HStbAPmv3fEQCd5V+pvzJ5f+/P8ACvWvEYwywxSh
-# Ea+37wXu8i6tW8fmyQ3hqeSTCDNO2cGqoqJf336JgC/Umc2W7KlT0bulBGrMkVuW
-# nz622KbMphLKSn6q64KggffxIVyfJxATNmfsVDno///vVl2AigXU1nj0QgwL/mHf
-# I7iM6lW6+SHc+OmCQxDm5Q4xkDZDZ6Q28iBB+ONiW6ljNXcH1kDd6/mIwdXrm8YU
-# WMIF1SKg0oBuHt6ev4Ip09XQM2vGp1yjfKZt+ybH8HfiJz19KgKbxEblqGw284BL
-# eFkg/dmkQ25hJXwaNeZZBRQu7ppjaYf12obS0QHKOHkjTUNSqpsZq0+255DRwCPa
-# mEa6kzkUbbp3h0JtSOZ4M42Jr6keOP+NX89PNuUIT9QfuVDE8KDESHy/NztglHuu
-# lcJTx+DYrg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgwNzIy
+# MTFaMC8GCSqGSIb3DQEJBDEiBCBfvttrrXbSA7uUHwrnC6VXwAE91RWJRN94GHY6
+# HLFOgDANBgkqhkiG9w0BAQEFAASCAgCBSgyk3K1RDAaThTte0/HwPcRDH1b7fbnf
+# 0Iwk/krQop0jVEsEfz+IoxoDwPtRCbOEuYbXrgK/7uJclZeBWrhLgq6jzqkEL39s
+# kKaNoOzmU4IYircf/Mgb/td00hwD5s56Hut+FB1zPc3TQm6mDtuVbJtzpppyJqHn
+# t095gyNZih08d5nV7Z288yhdpkB9wvrCexWuYHx4gJ13t0lCAPy4+nMj2bNgR4OF
+# TU0U1t6jPiPW5AWzDOp48g0jh7zkBfViFm+d0DoLtOsZmeYcAg/wa7g2mbc4TvgT
+# /EkdGJDh6d2hZgW6D9QMhvaPPJGCPLjoOrpvQf+cfWHikYzw15ZxPCg/HfKPnG8q
+# O2JA2SzS15PdrQOW6OHOLMDgxf4FBU++u8Bw13vUMEIEK1Bzwro4tKnaPRN0evTF
+# c7QDma0LWVS+msjnhQNYSsEL9mySd6Rnk9/UAJCgwzc+SxUGKLJt4RVMep44zm5v
+# wcN9xmsvewFYjZKvBs4GL9dcZfTvFEF88hPcsNC5xkCtWtLnP4U+gsWAXYUI4l4a
+# w6V+A3/gz6lrqGRhLjZGdjYNPE3/U5PTGsylTGl+yUYV2WXxf5/SJb9R2zYrSnox
+# zaJH2uKyyBv2t6br965yYdQdKXL7bBD8nGRZyPKrAqlfClQczuZoM+Z2fFGIp5AG
+# nYSM4p0aFg==
 # SIG # End signature block
