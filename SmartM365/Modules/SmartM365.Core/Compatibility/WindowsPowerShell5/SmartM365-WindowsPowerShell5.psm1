@@ -2806,7 +2806,10 @@ function ExportAndCopyCsv {
         [switch]$NoTenantKey,
 
         [Parameter()]
-        [switch]$NoMaxItemsRowLimit
+        [switch]$NoMaxItemsRowLimit,
+
+        [Parameter()]
+        [switch]$SkipWeeklyHistory
     )
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -2898,7 +2901,10 @@ function ExportAndCopyCsv {
     }
 
     $historySourcePath = if (Test-Path -LiteralPath $csvFilePath3 -PathType Leaf) { $csvFilePath3 } else { $csvFilePath2 }
-    if (Test-SmartM365MaxItemsMode) {
+    if ($SkipWeeklyHistory) {
+        WriteLog -Message 'Automatic WeeklyHistory publication skipped for this CSV; the caller will publish the validated dataset group.' -Level 'INFO'
+    }
+    elseif (Test-SmartM365MaxItemsMode) {
         WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
     }
     else {

@@ -1,6 +1,6 @@
 @{
     RootModule = "SmartM365-WindowsPowerShell5.psm1"
-    ModuleVersion = "1.0.30"
+    ModuleVersion = "1.0.31"
     GUID = "dde15961-7933-412f-8d09-e1dd8a889b65"
     Author = "Internal automation team"
     CompanyName = "Internal"
