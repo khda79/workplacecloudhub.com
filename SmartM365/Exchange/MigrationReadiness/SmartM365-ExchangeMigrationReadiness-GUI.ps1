@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.4.0
+1.5.0
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.4.0'
+$script:AppVersion = '1.5.0'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -203,11 +203,6 @@ $xaml = @'
                     <ComboBox x:Name="ModeCombo" Width="118" Margin="0,0,10,0" ToolTip="Live prefers live sources and falls back to CSV for AD, Exchange on-premises, and Entra Connect. CacheOnly uses CSV inventories only.">
                         <ComboBoxItem Content="Live" IsSelected="True"/>
                         <ComboBoxItem Content="CacheOnly"/>
-                    </ComboBox>
-                    <TextBlock Text="Auth" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0"/>
-                    <ComboBox x:Name="AuthenticationModeCombo" Width="122" Margin="0,0,10,0" ToolTip="Interactive opens the standard sign-in windows. Application uses the configured app registration and certificate.">
-                        <ComboBoxItem Content="Interactive" IsSelected="True"/>
-                        <ComboBoxItem Content="Application"/>
                     </ComboBox>
                     <TextBlock Text="Endpoint" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0"/>
                     <ComboBox x:Name="MigrationEndpointCombo" Width="180" Margin="0,0,10,0" IsEditable="True" IsReadOnly="True" IsEnabled="False" ToolTip="ExchangeRemoteMove endpoints are loaded automatically after Exchange Online authentication."/>
@@ -421,7 +416,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.4.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.5.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -437,7 +432,7 @@ function ConvertFrom-SemrXaml {
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-SemrXaml -Text $xaml
     $requiredControls = @(
-        'CsvPathBox', 'BrowseCsvButton', 'ModeCombo', 'AuthenticationModeCombo', 'MigrationEndpointCombo', 'RunButton', 'SummaryGrid',
+        'CsvPathBox', 'BrowseCsvButton', 'ModeCombo', 'MigrationEndpointCombo', 'RunButton', 'SummaryGrid',
         'FindingsGrid', 'PermissionsGrid', 'CsvSourcesGrid', 'OptionsItemsControl', 'ResultsTab', 'ActivityBox'
     )
     foreach ($controlName in $requiredControls) {
@@ -484,7 +479,7 @@ if (-not $NoSplash) {
 $window = ConvertFrom-SemrXaml -Text $xaml
 $controls = @{}
 foreach ($name in @(
-    'HeaderLogoLink', 'HeaderLogo', 'StatusText', 'ModeCombo', 'AuthenticationModeCombo', 'MigrationEndpointCombo', 'RunButton', 'CancelButton', 'OpenOutputButton',
+    'HeaderLogoLink', 'HeaderLogo', 'StatusText', 'ModeCombo', 'MigrationEndpointCombo', 'RunButton', 'CancelButton', 'OpenOutputButton',
     'CsvPathBox', 'CsvMetadataText', 'BrowseCsvButton', 'BatchGrid',
     'AdStateText', 'OnPremStateText', 'ExoStateText', 'GraphStateText', 'HybridStateText',
     'GoCountText', 'WarningCountText', 'NoGoCountText', 'UnknownCountText', 'SummaryGrid',
@@ -512,7 +507,6 @@ if (Test-Path -LiteralPath $logoPath) {
 $controls.VersionText.Text = "v$script:AppVersion"
 $controls.OptionsItemsControl.ItemsSource = $script:CheckOptions
 $controls.ModeCombo.SelectedIndex = if ([string]$script:Config.Mode -eq 'CacheOnly') { 1 } else { 0 }
-$controls.AuthenticationModeCombo.SelectedIndex = if ([string]$script:Config._AuthenticationMode -eq 'Application') { 1 } else { 0 }
 $configuredEndpointName = [string]$script:Config.Hybrid.MigrationEndpointName
 $controls.MigrationEndpointCombo.Text = if ($configuredEndpointName) { $configuredEndpointName } else { 'Loaded after EXO connection' }
 if ($CsvPath) { $controls.CsvPathBox.Text = $CsvPath }
@@ -700,12 +694,6 @@ function Get-SemrSelectedMode {
     return 'Live'
 }
 
-function Get-SemrSelectedAuthenticationMode {
-    $selected = $controls.AuthenticationModeCombo.SelectedItem
-    if ($selected -and $selected.Content) { return [string]$selected.Content }
-    return 'Interactive'
-}
-
 function Show-SemrMigrationEndpointSelection {
     param(
         [Parameter(Mandatory)][object[]]$Endpoints,
@@ -837,9 +825,7 @@ function Initialize-SemrMigrationEndpointSelection {
 
 function Sync-SemrConnectionDisplay {
     $mode = Get-SemrSelectedMode
-    $authenticationMode = Get-SemrSelectedAuthenticationMode
     $script:Config['Mode'] = $mode
-    $script:Config.Authentication['Mode'] = $authenticationMode
     $state = Get-SemrConnectionState
     $cachePath = [string]$script:Config._CacheRootPath
 
@@ -859,8 +845,8 @@ function Sync-SemrConnectionDisplay {
     else {
         $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live)' } else { 'Automatic live check; CSV fallback if unavailable' }
         $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (Live)' } else { 'Automatic live check; CSV fallback if unavailable' }
-        $controls.ExoStateText.Text = if ($state.ExchangeOnline) { "Connected (Live, $authenticationMode)" } elseif ($authenticationMode -eq 'Application') { 'Application certificate connection starts automatically with Run assessment' } else { 'Interactive connection starts automatically with Run assessment' }
-        $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { "Live evidence loaded (isolated process, $authenticationMode)" } elseif ($authenticationMode -eq 'Application') { 'Application certificate collection starts automatically after Exchange Online' } else { 'Interactive collection starts automatically after Exchange Online' }
+        $controls.ExoStateText.Text = if ($state.ExchangeOnline) { 'Connected (Live, Interactive)' } else { 'Interactive connection starts automatically with Run assessment' }
+        $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Live evidence loaded (isolated process, Interactive)' } else { 'Interactive collection starts automatically after Exchange Online' }
         $controls.AdStateText.Foreground = if ($state.ActiveDirectory) { '#146C43' } else { '#8A5A00' }
         $controls.OnPremStateText.Foreground = if ($state.OnPremisesExchange) { '#146C43' } else { '#8A5A00' }
         $controls.ExoStateText.Foreground = if ($state.ExchangeOnline) { '#146C43' } else { '#5F6B7A' }
@@ -872,11 +858,11 @@ function Sync-SemrConnectionDisplay {
     }
 
     $controls.ModeCombo.IsEnabled = -not $script:IsBusy
-    $controls.AuthenticationModeCombo.IsEnabled = (-not $script:IsBusy -and $mode -eq 'Live')
     $controls.MigrationEndpointCombo.IsEnabled = (-not $script:IsBusy -and $mode -eq 'Live' -and $script:MigrationEndpointsLoaded)
     $controls.RunButton.IsEnabled = (-not $script:IsBusy -and $null -ne $script:Batch)
     $alternativeCachePath = [string]$script:Config._AlternativeCacheRootPath
-    $controls.FooterText.Text = "Read-only | Mode: $mode | Auth: $authenticationMode | Tenant: $($script:Config._TenantProfileKey) | Cache: $cachePath | Alternative: $alternativeCachePath"
+    $authenticationLabel = if ($mode -eq 'CacheOnly') { 'None' } else { 'Interactive' }
+    $controls.FooterText.Text = "Read-only | Mode: $mode | Auth: $authenticationLabel | Tenant: $($script:Config._TenantProfileKey) | Cache: $cachePath | Alternative: $alternativeCachePath"
 }
 function Switch-SemrBusyState {
     param(
@@ -970,8 +956,7 @@ $controls.ModeCombo.Add_SelectionChanged({
     if ($script:IsBusy) { return }
     $mode = Get-SemrSelectedMode
     $script:Config['Mode'] = $mode
-    $authenticationMode = Get-SemrSelectedAuthenticationMode
-    $controls.HybridStateText.Text = if ($mode -eq 'CacheOnly') { 'CacheOnly: live endpoint test skipped; Entra sync health is read from CSV cache.' } else { "Live: EXO/Graph authentication mode is $authenticationMode; AD, Exchange on-premises and Entra Connect use live data when available, otherwise CSV fallback." }
+    $controls.HybridStateText.Text = if ($mode -eq 'CacheOnly') { 'CacheOnly: live endpoint test skipped; Entra sync health is read from CSV cache.' } else { 'Live: EXO and Graph use interactive authentication; AD, Exchange on-premises and Entra Connect use live data when available, otherwise CSV fallback.' }
     $controls.HybridStateText.Foreground = '#5F6B7A'
     $controls.StatusText.Text = "Mode selected: $mode"
     Sync-SemrConnectionDisplay
@@ -979,35 +964,6 @@ $controls.ModeCombo.Add_SelectionChanged({
     Update-SemrCsvSourcesDisplay
     $controls.StatusText.Text = "Mode selected: $mode"
     Write-SemrActivity -Message "Execution mode changed to $mode. Cache root: $($script:Config._CacheRootPath)"
-})
-
-$controls.AuthenticationModeCombo.Add_SelectionChanged({
-    if ($script:IsBusy) { return }
-    $authenticationMode = Get-SemrSelectedAuthenticationMode
-    $previousMode = [string]$script:Config.Authentication.Mode
-    $script:Config.Authentication['Mode'] = $authenticationMode
-    if ($previousMode -ne $authenticationMode) {
-        $state = Get-SemrConnectionState
-        if ($state.ExchangeOnline -or $state.MicrosoftGraph) {
-            Disconnect-SemrSession
-            $script:MigrationEndpointsLoaded = $false
-            $script:MigrationEndpointSelectionConfirmed = $false
-            $script:UpdatingMigrationEndpointCombo = $true
-            try {
-                $controls.MigrationEndpointCombo.ItemsSource = $null
-                $controls.MigrationEndpointCombo.SelectedIndex = -1
-                $configuredEndpointName = [string]$script:Config.Hybrid.MigrationEndpointName
-                $controls.MigrationEndpointCombo.Text = if ($configuredEndpointName) { $configuredEndpointName } else { 'Loaded after EXO connection' }
-            }
-            finally {
-                $script:UpdatingMigrationEndpointCombo = $false
-            }
-            Write-SemrActivity -Message 'Existing live connections were closed because the authentication mode changed.' -Level INFO
-        }
-        Write-SemrActivity -Message "Cloud authentication mode changed to $authenticationMode."
-    }
-    $controls.StatusText.Text = "Authentication selected: $authenticationMode"
-    Sync-SemrConnectionDisplay
 })
 
 $controls.MigrationEndpointCombo.Add_SelectionChanged({
@@ -1050,16 +1006,13 @@ $controls.RunButton.Add_Click({
         $controls.RunProgress.Value = 0
         Write-SemrActivity -Message "Starting read-only assessment in $($script:Config.Mode) mode for $($script:Batch.Rows.Count) mailbox row(s)."
         if ((Get-SemrSelectedMode) -eq 'Live') {
-            $authenticationMode = Get-SemrSelectedAuthenticationMode
-            $script:Config.Authentication['Mode'] = $authenticationMode
             if (-not (Confirm-SemrMicrosoftGraphModule)) { return }
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.ExchangeOnline) {
-                $exoStatus = if ($authenticationMode -eq 'Application') { 'Connecting to Exchange Online with the configured application certificate; please wait...' } else { 'Connecting interactively to Exchange Online. Complete authentication, then please wait...' }
-                Set-SemrProcessingStatus -Message $exoStatus
+                Set-SemrProcessingStatus -Message 'Connecting interactively to Exchange Online. Complete authentication, then please wait...'
                 $exoConfig = $script:Config.ExchangeOnline
-                Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) -AuthenticationMode $authenticationMode -AppId ([string]$script:Config._AppId) -Organization ([string]$script:Config._OrgDomain) -CertificateThumbprint ([string]$script:Config._CertificateThumbprint) | Out-Null
-                Write-SemrActivity -Message "Exchange Online connected using $authenticationMode authentication." -Level SUCCESS
+                Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) | Out-Null
+                Write-SemrActivity -Message 'Exchange Online connected using interactive authentication.' -Level SUCCESS
                 Sync-SemrConnectionDisplay
             }
 
@@ -1070,16 +1023,15 @@ $controls.RunButton.Add_Click({
 
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.MicrosoftGraph) {
-                $graphStatus = if ($authenticationMode -eq 'Application') { 'Connecting to Microsoft Graph with the configured application certificate; please wait...' } else { 'Connecting interactively to Microsoft Graph. Complete authentication, then please wait...' }
-                Set-SemrProcessingStatus -Message $graphStatus
+                Set-SemrProcessingStatus -Message 'Connecting interactively to Microsoft Graph. Complete authentication, then please wait...'
                 $graphConfig = $script:Config.MicrosoftGraph
                 $graphProgressAction = {
                     param($Message)
                     Set-SemrProcessingStatus -Message "$Message Please wait..." -SkipActivity
                 }
                 $emailAddresses = @($script:Batch.Rows | ForEach-Object { [string]$_.EmailAddress })
-                Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -AuthenticationMode $authenticationMode -AppId ([string]$script:Config._AppId) -CertificateThumbprint ([string]$script:Config._CertificateThumbprint) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction | Out-Null
-                Write-SemrActivity -Message "Microsoft Graph evidence collected in an isolated PowerShell process using $authenticationMode authentication." -Level SUCCESS
+                Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction | Out-Null
+                Write-SemrActivity -Message 'Microsoft Graph evidence collected in an isolated PowerShell process using interactive authentication.' -Level SUCCESS
                 Sync-SemrConnectionDisplay
             }
         }
@@ -1193,7 +1145,7 @@ $window.Add_ContentRendered({
     Update-SemrOptionsSummary
     Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
     Update-SemrCsvSourcesDisplay
-    Write-SemrActivity -Message "Smart Exchange Migration Readiness v$script:AppVersion started in $($script:Config.Mode) mode with $($script:Config._AuthenticationMode) cloud authentication. Tenant profile: $($script:Config._TenantProfileKey). Cache root: $($script:Config._CacheRootPath). Alternative cache: $($script:Config._AlternativeCacheRootPath)"
+    Write-SemrActivity -Message "Smart Exchange Migration Readiness v$script:AppVersion started in $($script:Config.Mode) mode with interactive cloud authentication. Tenant profile: $($script:Config._TenantProfileKey). Cache root: $($script:Config._CacheRootPath). Alternative cache: $($script:Config._AlternativeCacheRootPath)"
     Write-SemrActivity -Message 'Some live operations can take several minutes and may temporarily delay UI response. Follow the current-operation status and please wait before closing the application.'
     if ($script:SessionLogPath) {
         Write-SemrActivity -Message "Session log: $script:SessionLogPath"

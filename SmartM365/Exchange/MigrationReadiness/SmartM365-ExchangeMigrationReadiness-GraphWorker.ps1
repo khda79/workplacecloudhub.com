@@ -3,15 +3,12 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.4.0
+1.5.0
 #>
 #requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$TenantId = '',
-    [ValidateSet('Interactive', 'Application')][string]$AuthenticationMode = 'Interactive',
-    [string]$ClientId = '',
-    [string]$CertificateThumbprint = '',
     [string]$ScopesPath = '',
     [string]$InputPath = '',
     [string]$OutputPath = '',
@@ -33,25 +30,6 @@ function Write-WorkerTextFile {
     [IO.File]::WriteAllText($Path, $Value, [Text.UTF8Encoding]::new($false))
 }
 
-function Get-WorkerApplicationCertificate {
-    param([Parameter(Mandatory)][string]$Thumbprint)
-
-    $normalizedThumbprint = $Thumbprint.Replace(' ', '').Trim().ToUpperInvariant()
-    foreach ($storePath in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')) {
-        $certificate = Get-Item -LiteralPath (Join-Path $storePath $normalizedThumbprint) -ErrorAction SilentlyContinue
-        if (-not $certificate) { continue }
-        if (-not $certificate.HasPrivateKey) {
-            throw "Certificate '$normalizedThumbprint' in '$storePath' does not have an accessible private key."
-        }
-        $now = Get-Date
-        if ($certificate.NotBefore -gt $now -or $certificate.NotAfter -le $now) {
-            throw "Certificate '$normalizedThumbprint' in '$storePath' is not currently valid (valid from $($certificate.NotBefore) to $($certificate.NotAfter))."
-        }
-        return $certificate
-    }
-    throw "Certificate '$normalizedThumbprint' was not found in Cert:\CurrentUser\My or Cert:\LocalMachine\My."
-}
-
 try {
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     Import-Module Microsoft.Graph.Users -ErrorAction Stop
@@ -63,7 +41,7 @@ try {
                 throw "Required Microsoft Graph command is unavailable: $commandName"
             }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.4.0'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.5.0'
         exit 0
     }
 
@@ -84,26 +62,9 @@ try {
         NoWelcome = $true
         ErrorAction = 'Stop'
     }
-    if ($AuthenticationMode -eq 'Application') {
-        $requiredApplicationValues = [ordered]@{
-            TenantId = $TenantId
-            ClientId = $ClientId
-            CertificateThumbprint = $CertificateThumbprint
-        }
-        foreach ($key in $requiredApplicationValues.Keys) {
-            if ([string]::IsNullOrWhiteSpace([string]$requiredApplicationValues[$key])) {
-                throw "$key is required for Microsoft Graph application authentication."
-            }
-        }
+    $connectParameters.Scopes = $scopes
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
         $connectParameters.TenantId = $TenantId
-        $connectParameters.ClientId = $ClientId
-        $connectParameters.Certificate = Get-WorkerApplicationCertificate -Thumbprint $CertificateThumbprint
-    }
-    else {
-        $connectParameters.Scopes = $scopes
-        if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
-            $connectParameters.TenantId = $TenantId
-        }
     }
     Connect-MgGraph @connectParameters | Out-Null
 
@@ -196,7 +157,6 @@ try {
 
     [pscustomobject][ordered]@{
         TenantId = [string]$context.TenantId
-        AuthenticationMode = $AuthenticationMode
         CollectedAt = Get-Date
         Evidence = @($evidence)
         SubscribedSkus = $subscribedSkus
