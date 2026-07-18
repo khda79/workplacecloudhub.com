@@ -1,0 +1,56 @@
+{
+  "Name": "Indicative France average baseline",
+  "AsOfDate": "2026-07-18",
+  "Currency": "EUR",
+  "TaxBasis": "Excluding VAT",
+  "CommitmentBasis": "Annual payment",
+  "Method": "Simple average of public France prices with and without Teams when both are available; otherwise the available public France price. Contractual prices take precedence.",
+  "MonthlyUnitPriceBySkuPartNumber": {
+    "SPE_E3": 31.20,
+    "SPE_F1": 6.45,
+    "POWER_BI_PRO": 12.10,
+    "PBI_PREMIUM_PER_USER": 20.80,
+    "Microsoft_365_Copilot": 26.00,
+    "PROJECT_P1": 8.70,
+    "PROJECTPROFESSIONAL": 26.00,
+    "PROJECT_PLAN3_DEPT": 26.00,
+    "POWERAPPS_PER_USER": 13.85,
+    "DYN365_FINANCE": 182.00,
+    "Microsoft_Entra_Suite": 10.40,
+    "FLOW_FREE": 0.00,
+    "POWER_BI_STANDARD": 0.00,
+    "POWERAPPS_DEV": 0.00,
+    "POWERAPPS_VIRAL": 0.00,
+    "STREAM": 0.00
+  },
+  "Sources": [
+    {
+      "Products": "Microsoft 365 E3, E5, and F3",
+      "Url": "https://www.microsoft.com/fr-fr/microsoft-365/compare-microsoft-365-enterprise-plans"
+    },
+    {
+      "Products": "Power BI Pro and Premium Per User",
+      "Url": "https://www.microsoft.com/fr-fr/power-platform/products/power-bi/pricing"
+    },
+    {
+      "Products": "Microsoft 365 Copilot",
+      "Url": "https://www.microsoft.com/fr-fr/microsoft-365-copilot/pricing/enterprise"
+    },
+    {
+      "Products": "Planner Plan 1 and Project Plan 3",
+      "Url": "https://www.microsoft.com/fr-fr/microsoft-365/planner/microsoft-planner-plans-and-pricing"
+    },
+    {
+      "Products": "Power Apps Premium",
+      "Url": "https://www.microsoft.com/fr-fr/power-platform/products/power-apps/pricing"
+    },
+    {
+      "Products": "Dynamics 365 Finance",
+      "Url": "https://www.microsoft.com/fr-fr/dynamics-365/products/finance/pricing"
+    },
+    {
+      "Products": "Microsoft Entra Suite",
+      "Url": "https://www.microsoft.com/fr-fr/security/business/microsoft-entra-suite"
+    }
+  ]
+}
