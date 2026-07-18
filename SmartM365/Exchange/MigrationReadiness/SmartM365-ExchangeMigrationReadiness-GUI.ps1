@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.2.0
+1.3.0
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.2.0'
+$script:AppVersion = '1.3.0'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -235,6 +235,47 @@ $xaml = @'
                 </Grid>
             </TabItem>
 
+            <TabItem Header="Options">
+                <Grid Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Readiness checks" FontWeight="SemiBold" FontSize="15"/>
+                                <TextBlock x:Name="OptionsSummaryText" Text="All optional checks are enabled." Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
+                                <TextBlock Text="Mandatory source and CSV-integrity checks cannot be disabled. Changes apply to the next run only." Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="EnableAllOptionsButton" Content="Enable all"/>
+                                <Button x:Name="ResetOptionsButton" Content="Reset defaults" Margin="0"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="OptionsItemsControl">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,6">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="35"/><ColumnDefinition Width="155"/><ColumnDefinition Width="280"/><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions>
+                                            <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanDisable}" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Category}" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap" Margin="8,0"/>
+                                            <TextBlock Grid.Column="3" Text="{Binding Description}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="8,0"/>
+                                            <TextBlock Grid.Column="4" Text="{Binding CheckId}" VerticalAlignment="Center" FontFamily="Consolas" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
             <TabItem Header="Sources">
                 <Grid Margin="0,12,0,0">
                     <Grid.ColumnDefinitions>
@@ -370,7 +411,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.2.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.3.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -387,7 +428,7 @@ if ($ValidateOnly) {
     $validationWindow = ConvertFrom-SemrXaml -Text $xaml
     $requiredControls = @(
         'CsvPathBox', 'BrowseCsvButton', 'ModeCombo', 'RunButton', 'SummaryGrid',
-        'FindingsGrid', 'PermissionsGrid', 'CsvSourcesGrid', 'ResultsTab', 'ActivityBox'
+        'FindingsGrid', 'PermissionsGrid', 'CsvSourcesGrid', 'OptionsItemsControl', 'ResultsTab', 'ActivityBox'
     )
     foreach ($controlName in $requiredControls) {
         if (-not $validationWindow.FindName($controlName)) {
@@ -404,6 +445,18 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $PSScriptRoot 'Config\SmartM365-ExchangeMigrationReadiness.local.json'
 }
 $script:Config = Get-SemrConfig -Path $ConfigPath
+$script:ConfiguredDisabledChecks = if ($script:Config.Contains('DisabledChecks')) { @($script:Config.DisabledChecks) } else { @() }
+$script:CheckOptions = @(Get-SemrCheckCatalog | ForEach-Object {
+    [pscustomobject][ordered]@{
+        Enabled = [bool]($_.Mandatory -or $script:ConfiguredDisabledChecks -notcontains $_.CheckId)
+        CanDisable = [bool]$_.CanDisable
+        Mandatory = [bool]$_.Mandatory
+        Category = [string]$_.Category
+        Name = [string]$_.Name
+        Description = [string]$_.Description
+        CheckId = [string]$_.CheckId
+    }
+})
 
 $script:GuiSplash = $null
 if (-not $NoSplash) {
@@ -426,7 +479,8 @@ foreach ($name in @(
     'AdStateText', 'OnPremStateText', 'ExoStateText', 'GraphStateText', 'HybridStateText',
     'GoCountText', 'WarningCountText', 'NoGoCountText', 'UnknownCountText', 'SummaryGrid',
     'MailboxFilterBox', 'ClearFilterButton', 'FindingsGrid', 'PermissionsGrid', 'ComparePermissionsButton',
-    'CsvSourcesGrid', 'CsvSourcesTab', 'ResultsTab', 'ActivityBox', 'FooterText', 'RunProgress', 'VersionText', 'MainTabs'
+    'CsvSourcesGrid', 'CsvSourcesTab', 'OptionsItemsControl', 'OptionsSummaryText', 'EnableAllOptionsButton', 'ResetOptionsButton',
+    'ResultsTab', 'ActivityBox', 'FooterText', 'RunProgress', 'VersionText', 'MainTabs'
 )) {
     $controls[$name] = $window.FindName($name)
 }
@@ -446,6 +500,7 @@ if (Test-Path -LiteralPath $logoPath) {
     $controls.HeaderLogo.Source = $bitmap
 }
 $controls.VersionText.Text = "v$script:AppVersion"
+$controls.OptionsItemsControl.ItemsSource = $script:CheckOptions
 $controls.ModeCombo.SelectedIndex = if ([string]$script:Config.Mode -eq 'CacheOnly') { 1 } else { 0 }
 if ($CsvPath) { $controls.CsvPathBox.Text = $CsvPath }
 
@@ -460,6 +515,24 @@ function Write-SemrActivity {
     if ($script:SessionLogPath) {
         try { [IO.File]::AppendAllText($script:SessionLogPath, "$line`r`n", [Text.UTF8Encoding]::new($false)) } catch {}
     }
+}
+
+function Update-SemrOptionsSummary {
+    $disabled = @($script:CheckOptions | Where-Object { $_.CanDisable -and -not $_.Enabled })
+    $enabledCount = @($script:CheckOptions | Where-Object Enabled).Count
+    $controls.OptionsSummaryText.Text = "$enabledCount enabled; $($disabled.Count) optional check(s) disabled."
+}
+
+function Sync-SemrCheckOptionsToConfig {
+    foreach ($option in $script:CheckOptions) { if ($option.Mandatory) { $option.Enabled = $true } }
+    $script:Config['DisabledChecks'] = @($script:CheckOptions | Where-Object { $_.CanDisable -and -not $_.Enabled } | ForEach-Object CheckId)
+    Update-SemrOptionsSummary
+}
+
+function Refresh-SemrOptionsDisplay {
+    $controls.OptionsItemsControl.ItemsSource = $null
+    $controls.OptionsItemsControl.ItemsSource = $script:CheckOptions
+    Update-SemrOptionsSummary
 }
 
 function Update-SemrCsvSourcesDisplay {
@@ -481,7 +554,7 @@ function Confirm-SemrStaleCsvUsage {
     $sources = @(Get-SemrCsvSourceInventory -Config $script:Config -Batch $script:Batch)
     $mode = Get-SemrSelectedMode
     $staleSources = @($sources | Where-Object {
-        $_.Present -and -not $_.Fresh -and (
+        $_.Present -and -not $_.Fresh -and $_.Status -ne 'Not used - related checks disabled' -and (
             $mode -eq 'CacheOnly' -or $_.ExpectedUse -eq 'Live fallback / CacheOnly'
         )
     })
@@ -510,6 +583,58 @@ Do you want to continue and explicitly accept these stale files for this run?
     $controls.StatusText.Text = 'Assessment cancelled: stale CSV files were not accepted.'
     Write-SemrActivity -Message 'Assessment cancelled because stale CSV files were not accepted.' -Level WARN
     return $false
+}
+
+function Confirm-SemrMicrosoftGraphModule {
+    try {
+        $moduleState = Get-SemrMicrosoftGraphModuleState
+    }
+    catch {
+        Show-SemrError -Title 'Microsoft Graph module check failed' -ErrorRecord $_
+        return $false
+    }
+    if ($moduleState.Available) { return $true }
+
+    $missingList = (@($moduleState.MissingModules) | ForEach-Object { "- $_" }) -join "`n"
+    $message = @"
+The following Microsoft Graph module(s) are missing from PowerShell 7:
+
+$missingList
+
+Do you want to install them from PowerShell Gallery for the current user?
+
+This installation does not change the tenant and does not require administrator rights.
+"@
+    $answer = [System.Windows.MessageBox]::Show(
+        $window,
+        $message,
+        'Install Microsoft Graph modules',
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Question
+    )
+    if ($answer -ne [System.Windows.MessageBoxResult]::Yes) {
+        $controls.StatusText.Text = 'Assessment cancelled: required Microsoft Graph modules are missing.'
+        Write-SemrActivity -Message "Operator declined installation of missing Microsoft Graph modules: $(@($moduleState.MissingModules) -join ', ')." -Level WARN
+        return $false
+    }
+
+    try {
+        Write-SemrActivity -Message "Installing missing Microsoft Graph modules for CurrentUser: $(@($moduleState.MissingModules) -join ', ')."
+        Set-SemrProcessingStatus -Message 'Installing Microsoft Graph modules for the current user; please wait...'
+        $installProgress = {
+            Set-SemrProcessingStatus -Message 'Installing Microsoft Graph modules for the current user; please wait...' -SkipActivity
+        }
+        $installedState = Install-SemrMicrosoftGraphModule -ModuleNames @($moduleState.MissingModules) -ProgressCallback $installProgress
+        if (-not $installedState.Available) {
+            throw "Modules are still unavailable after installation: $(@($installedState.MissingModules) -join ', ')."
+        }
+        Write-SemrActivity -Message 'Required Microsoft Graph modules are available in PowerShell 7.' -Level SUCCESS
+        return $true
+    }
+    catch {
+        Show-SemrError -Title 'Microsoft Graph module installation failed' -ErrorRecord $_
+        return $false
+    }
 }
 
 function Set-SemrProcessingStatus {
@@ -703,16 +828,36 @@ $controls.ModeCombo.Add_SelectionChanged({
     Write-SemrActivity -Message "Execution mode changed to $mode. Cache root: $($script:Config._CacheRootPath)"
 })
 
+$controls.OptionsItemsControl.AddHandler(
+    [System.Windows.Controls.Primitives.ToggleButton]::CheckedEvent,
+    [System.Windows.RoutedEventHandler]{ param($sender,$eventArgs) Update-SemrOptionsSummary }
+)
+$controls.OptionsItemsControl.AddHandler(
+    [System.Windows.Controls.Primitives.ToggleButton]::UncheckedEvent,
+    [System.Windows.RoutedEventHandler]{ param($sender,$eventArgs) Update-SemrOptionsSummary }
+)
+$controls.EnableAllOptionsButton.Add_Click({
+    foreach ($option in $script:CheckOptions) { $option.Enabled = $true }
+    Refresh-SemrOptionsDisplay
+})
+$controls.ResetOptionsButton.Add_Click({
+    foreach ($option in $script:CheckOptions) { $option.Enabled = [bool]($option.Mandatory -or $script:ConfiguredDisabledChecks -notcontains $option.CheckId) }
+    Refresh-SemrOptionsDisplay
+})
+
 $controls.RunButton.Add_Click({
     if (-not $script:Batch) { return }
     try {
         $script:CancelRequested = $false
+        Sync-SemrCheckOptionsToConfig
+        Write-SemrActivity -Message "$(@($script:CheckOptions | Where-Object Enabled).Count) checks enabled; $(@($script:Config.DisabledChecks).Count) optional checks disabled for this run."
         Set-SemrProcessingStatus -Message 'Checking CSV cache freshness; please wait...'
         if (-not (Confirm-SemrStaleCsvUsage)) { return }
         Switch-SemrBusyState -Busy $true -Message 'Assessment running - please wait...'
         $controls.RunProgress.Value = 0
         Write-SemrActivity -Message "Starting read-only assessment in $($script:Config.Mode) mode for $($script:Batch.Rows.Count) mailbox row(s)."
         if ((Get-SemrSelectedMode) -eq 'Live') {
+            if (-not (Confirm-SemrMicrosoftGraphModule)) { return }
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.ExchangeOnline) {
                 Set-SemrProcessingStatus -Message 'Connecting interactively to Exchange Online. Complete authentication, then please wait...'
@@ -843,6 +988,7 @@ $window.Add_ContentRendered({
         Hide-SmartM365GuiSplash -Splash $script:GuiSplash
     }
     Sync-SemrConnectionDisplay
+    Update-SemrOptionsSummary
     Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
     Update-SemrCsvSourcesDisplay
     Write-SemrActivity -Message "Smart Exchange Migration Readiness v$script:AppVersion started in $($script:Config.Mode) mode. Tenant profile: $($script:Config._TenantProfileKey). Cache root: $($script:Config._CacheRootPath). Alternative cache: $($script:Config._AlternativeCacheRootPath)"
@@ -893,8 +1039,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhMmWXNcVglJz+
-# WUrH6VTsUPYDuwmHH3dKtVPNkDBTJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXW44ffru1Qf/X
+# w/Eepjsd8RL2+7GSwGrMaoNupGhTOqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1027,31 +1173,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMZP9TW1Q4JrV1bG6epEnSTaGY/JKuXFqe25wHqZDUMqMA0GCSqG
-# SIb3DQEBAQUABIIBgJbujW59svEiFlt+8YAKgyPCIMrBR1sE3rT9WY65hZJX+4b7
-# 6YmqqlvhcfPzgqE8stvPsUFoJXu2GeOMpI122st4FRITSPpXLaShInH791hb2gSV
-# zJoHGcGNd486zjPS7Hp0ABlFuNU5h8ia8QkRhAfMqexfsVRcEii8m0Yh88IOQSok
-# EFzkGV3n/j9su9pISgi6fA6ad2YgJFAxUmGXyf22L2qugvdXCgnoVYUAzQMmMmlD
-# /11Us/Wr5qaZZaDV/Kc9LXz+KqpeSKahjGmWDnhJ52fGIUxdh+K4Mtur/4KHG3V1
-# kaLv68kbyqY3//lKRXwGp0/4a8kuV+am6hXtvB0+7cpwRfmVo95UZyVpkgG/Gxz1
-# panjW/wq0c5Gg7BKSD0ySuB9hEpCzV6aZbTBKS+5B1nWLoT4a7fpkycf56Q/bYtj
-# JF3gdP7YAOsUdWU6gpwXBQNtcUKiWp9EJqdUmK4ulrrzhuJzUKP5nXvAVC0a0T+3
-# bfW480U2wnxmvk0PaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAwhwJOMoF8xMQzaRM/oe03pxD1IeKYzomKBPuFI1ZhYMA0GCSqG
+# SIb3DQEBAQUABIIBgA/rSzqXnNCs51ggtflcOcf7U6F2UBx59x85xUkJm8dVnUBi
+# e69Q4H+Z7oLnvsEUsceAAUcDOXRq/U7rFjd86NJxcw5YizZJDB5JeRKfNGM+UxQ7
+# xXtm/ZDC+4lmm3NHjI4Da97LGKeJpYCTFi9k5PWEtciCRrw5JEVNgD/1eAewUdvW
+# bQ/nyneVJeo4iIkgIoaO8ospzuBtnDGRqMcqlg5hf4Qo4ZrFnwr1M+X3y1cJ/adX
+# 5IXqdfZ939qs6ipk5sX4al6AeUyflzb6JAQYTlt1H1AUhzz0YlGyANLENmWYEB/T
+# bnE50KydW+W/2XhkfiwdRIx6yU9tIhZ0XyT1U94VUZTdVHmCH/QLP2PrAYnEhXa1
+# /rMlELpcG7tkQNpIRMaYymtr9DOokDalZQ7DMWojU7GXYov8uxe1AOfvOMdV77Za
+# hlLhKoCEtT725fZexz7WX8e+msJ/sTxual/VaJuxU0Op2TDMkyoJ6fVsTTDA14fq
+# LgZ4YpuJoY/26iu/W6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgwODUz
-# NDlaMC8GCSqGSIb3DQEJBDEiBCAgh4jGqAMkH3pdA8OJkSHxznWNC1s3jt26fSz9
-# lEVMCTANBgkqhkiG9w0BAQEFAASCAgC5/JrKdx5gECh7MnmlwzLrXudCQWw1/l5k
-# 2K/X/5V6QMBGd9BLC4Wstjnrz9a7i+gyTdHpp2lxUS1JMYwEthP+tqNydjmoFm/L
-# g7pBjh8l6jUzlsS7WzoXUxYwjgv9RTq6ZGFgeFPUw+eVv8gvqhn+LvyHJb56jeZU
-# IVGhMHuxDUrKfk6QB37mvAgC0VmVh5Z/ieMnMowZHmhQYlP6Sh4ki5tsrC8e6+mS
-# XzRgkRxYZXaIG2CztHJsiCiIePnmR8Ts/KSB6JPPAQMQcW8HsVbXiu+l1SFpjgj8
-# TJxC2Vtkn67GJ+MV+5nsQ7Tyuge0+tW5ca6ZNFeI712m8z0V72UEAneINF5rkAZo
-# nD8K0gqxvmODrmBBYG0zVVINeKDtJSuNxf82NL05MCsubZ+9GKwuXZJiLEdaE5sT
-# teACPcJfRhwMhrzaohtLKiVYm8s8Na0oP0YkZIIL0QaNK55vnSGEheeTy8BUDtEb
-# or0tayxjLDbU7sTBGp0d3QsPzmxwaTQpfu9aeulx0i7nSEpYJDqW0oXyEENO09OA
-# nrrBa343/LLI4VqaQsmVbUqX5xrWQDqMdztCC7mwp/0Zjb3Na/tjDvL2fGzjkytB
-# it5vsppzswhbGf5IshI+cLY8b7KTUzEQx6FRC5OThxu9prqC/iJ4nBuSIaIkrR50
-# SO4XIj3uCA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMDIx
+# MzhaMC8GCSqGSIb3DQEJBDEiBCB2Jhi+duLW+HZX1Bm4AnOrEQPIddciDEv3NiCM
+# 9hQEWTANBgkqhkiG9w0BAQEFAASCAgAg5FxiLqax+8ZS0GPW5RzqJxBanzYnOrjI
+# G3OwN6IjfRlz0jZF43N6RkI0oy+/Xhf+2w0ZR/UFHTK4BidGOMbpztX+Lfi0KbsL
+# +/CtuECdcgi8yLiRGVZPqcTmkLiL5PV0s2Xw7SWqT1jBVcPrJOBX16umLxCpHiSz
+# 2xMwSUSuBrVkkbH6nLHhSR21ALscb/qlrdKF7OimcaioRyJg9rScgEt8vm6OEF4F
+# cR001vSvXMkv9bYD/LWYwDD56rid9M7N2DB2nQv9Yu+Vm/TPP6RENdRpCNi3yIW8
+# Xw/HTFRfD3wU6RDv2Wo8OtyAXCcfR1ZUYgAeWyY8j/Pmun7k+Xlkjih6kaaO6Moz
+# l2APO1nC9hbAZ+o4x/rnWeluQOBbg5aWLV4lUNULEXbsVch1umwvdio5a2O++jBf
+# stn92jbciit2MTA6MvnHrJUaWQLePzNMZBHpkjjGgFUGjXsvCkSB4meagnef0F4k
+# o39PbrfztX8u9tptLsl1wUszPF8hCtP4yh3aRgIBz3TsffMkYYtGazwcYtlakd5q
+# wJSn7TuHA22ihPUzCnZFUkRrEUaaP/F6SjgkHqMpUSP3OU7LgNkW1vmtsiWd3Jfr
+# MZkixv5KnEKs1EtHYGvCUQm4Pm1QmXNccHSZ+L+Y/mRvsSvvtEWVOfMAsO0lZtck
+# d0+t788CnQ==
 # SIG # End signature block

@@ -13,7 +13,7 @@ Le mode est sélectionnable directement dans l’interface.
 - Exchange Online : connexion interactive déléguée lancée automatiquement par Run assessment.
 - Microsoft Graph : connexion interactive déléguée standard lancée automatiquement après Exchange Online dans un processus PowerShell 7 isolé, afin d'éviter les conflits de bibliothèques MSAL avec ExchangeOnlineManagement.
 - Active Directory : tentative live automatique ; fallback sur `AD_Users_AllDomains.csv` si AD est indisponible.
-- Exchange on-premises / Exchange 2016 : utilisation des cmdlets live lorsqu’elles sont disponibles ; fallback sur `Exchange_OnPrem_Mailboxes_AllDomains.csv` sinon.
+- Exchange on-premises / Exchange 2016 : utilisation des cmdlets live lorsqu’elles sont disponibles ; la session applique `Set-ADServerSettings -ViewEntireForest $true` (ou `Set-OnPremADServerSettings` avec la session préfixée) avant toute collecte, puis utilise `Exchange_OnPrem_Mailboxes_AllDomains.csv` en fallback si cette portée forêt ne peut pas être activée.
 - Santé Microsoft Entra Connect : lecture live des cmdlets ADSync locales lorsqu’elles sont disponibles ; fallback sur `M365_Entra_AzureADConnect_SyncHealth.csv` sinon.
 - Endpoint de migration et santé Entra Connect : contrôlés automatiquement pendant l’évaluation.
 
@@ -30,6 +30,8 @@ Aucune connexion EXO, Graph, AD, Exchange on-premises ou Entra Connect n’est u
 Le chargeur accepte les CSV directement dans ce dossier ou dans son sous-dossier `DATA-LAST`. `Cache.AlternativeRootPath` permet de déclarer un second emplacement, par exemple une copie SharePoint synchronisée. Il sélectionne, fichier par fichier, la copie existante la plus récente parmi la racine, `DATA-LAST` et le chemin alternatif.
 
 L'onglet `CSV sources` indique pour chaque fichier attendu son chemin sélectionné, sa présence, sa fraîcheur et son utilisation effective (`Used`, fallback disponible, non utilisé, absent ou périmé).
+
+L'onglet `Options` permet de désactiver, pour l'exécution suivante, les contrôles optionnels. Les contrôles d'intégrité minimale du CSV et de disponibilité des quatre sources principales restent obligatoires. Les contrôles décochés ne produisent pas de finding et leurs collectes coûteuses sont évitées lorsqu'elles ne servent à aucun autre contrôle. La sélection appliquée est exportée dans `Check-Options.csv`.
 
 Lorsqu'un fichier requis ou susceptible de servir de fallback dépasse `Cache.MaximumAgeHours`, le GUI demande explicitement si l'opérateur souhaite continuer. Une réponse positive accepte les CSV périmés uniquement pour l'exécution courante ; le JSON n'est pas modifié. Une réponse négative annule l'assessment avant les connexions et les collectes.
 
@@ -70,7 +72,7 @@ Pour tous les modes :
 Uniquement pour le mode Live :
 
 - module `ExchangeOnlineManagement` 3.0 ou ultérieur ;
-- modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` ;
+- modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` ; lorsqu’un module manque dans PowerShell 7, le GUI propose de l’installer depuis PowerShell Gallery avec `-Scope CurrentUser` avant l’authentification ;
 - compte disposant des droits de lecture nécessaires dans Exchange Online et Microsoft Graph ;
 - pour les sources on-premises live, modules/cmdlets `ActiveDirectory`, Exchange Management Shell et/ou `ADSync` disponibles sur la machine d’exécution. Leur absence n’est pas bloquante si les CSV de fallback sont accessibles et suffisamment récents.
 
@@ -113,12 +115,15 @@ Le modèle contient uniquement des valeurs neutres. Renseignez les valeurs du te
 Clés principales :
 
 - `Mode` : `Live` par défaut ou `CacheOnly` ; le sélecteur GUI s’applique à l’exécution courante.
+- `DisabledChecks` : liste optionnelle d'identifiants de contrôles désactivés par défaut ; le GUI ne modifie pas automatiquement le JSON.
 - `TenantProfile` : profil tenant autonome de l’application.
 - `Cache.RootPath` et `Cache.MaximumAgeHours` : emplacement et fraîcheur des inventaires.
 - `ExchangeOnline.UserPrincipalName` : UPN administrateur optionnel.
 - `ExchangeOnline.DisableWam` : conserve le flux interactif EXO sans WAM lorsque requis sur ce poste.
-- `Hybrid.MigrationEndpointName` : endpoint `ExchangeRemoteMove` explicite ; il peut rester vide uniquement lorsqu’un seul endpoint Remote Move existe. Plusieurs endpoints sans nom configuré produisent un NO-GO.
+- `Hybrid.MigrationEndpointName` : endpoint `ExchangeRemoteMove` explicite à renseigner dans le JSON local. Le modèle reste vide et plusieurs endpoints sans nom configuré produisent un NO-GO.
+- En mode Live, Active Directory est interrogé dans chaque domaine retourné par `Get-ADForest`. Si un domaine ne peut pas être interrogé, la couverture Live est considérée incomplète et l’application utilise le CSV AD de fallback au lieu de conclure à tort que l’identité est absente.
 - `Hybrid.TargetDeliveryDomain` : domaine `tenant.mail.onmicrosoft.com` attendu.
+- `Hybrid.ActiveMigrationWarningThreshold` : seuil consultatif du nombre de migrations actives/non terminales, `100` par défaut.
 - `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` : politique explicite du SKU et du quota cible. Un SKU absent de la table reste `UNKNOWN` bloquant ; aucun quota générique de 100 Go n’est supposé.
 - `OutputRoot` : dossier d’export, absolu ou relatif à l’application.
 
@@ -134,6 +139,12 @@ Selon le mode et les contrôles disponibles :
 - `Exchange_EXO_MigrationJobs.csv`
 - `M365_Licenses_Tenant.csv`
 - `M365_Licenses_ServicePlans.csv`
+- `AD_Users_DuplicateSMTP.csv`
+- `AD_Users_DuplicateRemoteRoutingAddress.csv`
+- `Exchange_OnPrem_ProxyAddresses_Check.csv`
+- `Exchange_EXO_AcceptedDomains.csv`
+- `Exchange_EXO_Mailboxes_AllDomains_Archive.csv`
+- `Exchange_OnPrem_MigrationReadiness_Config.csv`
 
 L’application vérifie la présence et l’âge des fichiers avant de les considérer utilisables.
 
@@ -156,16 +167,24 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - existence/unicité du compte AD et statut du compte ;
 - état UserMailbox / RemoteMailbox / MailUser ;
 - cohérence Primary SMTP, proxyAddresses et targetAddress ;
+- unicité globale des proxy SMTP et adresses de routage, doublons internes, domaines acceptés et préservation X500/LegacyExchangeDN ;
+- cohérence ExchangeGuid/ArchiveGuid et type de destinataire pris en charge ;
 - taille de mailbox contre quota explicite du SKU cible avec marge de sécurité ; les shared mailboxes sans SKU explicite utilisent la limite non licenciée de 50 Go ;
+- préparation de l'archive, saturation Recoverable Items, limites de dossiers, gros éléments et quotas source personnalisés ;
 - Litigation Hold et In-Place Hold quand les propriétés sont disponibles ;
 - baseline Full Access, Send As et Send on Behalf ;
+- dépendances de délégation hors batch, forwarding mailbox, règles Inbox de transfert, modération et restrictions de remise ;
+- santé de la base Exchange source ;
 - état MailUser/mailbox Exchange Online et détection split-brain ;
 - conflits soft-deleted/inactive ;
 - migration user ou move request existant ;
+- historique de moves échoués, suspendus ou arrêtés ;
 - unicité et synchronisation de l’utilisateur Entra ;
+- erreurs de provisioning, identity anchor et ancienneté de la dernière synchronisation de l'objet Entra ;
 - licence actuelle, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; `SPE_F1` est non éligible ;
 - santé de synchronisation Entra Connect depuis le cache ;
 - endpoint `ExchangeRemoteMove` en Live ;
+- MRSProxy, certificat hybride, charge active des migrations et cohérence Autodiscover/OAuth ;
 - avertissement documenté pour `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException`.
 
 Une source obligatoire absente reste bloquante. Une propriété non disponible dans le cache devient `UNKNOWN`, jamais un faux `PASS`.
@@ -181,6 +200,7 @@ Output\SEMR-yyyyMMdd-HHmmss\
   Permissions-Baseline.csv
   Evidence.csv
   Csv-Sources.csv
+  Check-Options.csv
 ```
 
 `Summary.csv` contient un verdict par mailbox. `Findings.csv` contient le détail de chaque contrôle : sévérité, résultat, caractère bloquant, valeur observée, valeur attendue, source, message et action recommandée.
