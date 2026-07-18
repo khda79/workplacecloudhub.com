@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.8.0'
+$script:SemrVersion = '1.8.2'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ActiveDirectoryDomains = @()
@@ -74,6 +74,7 @@ function Get-SemrCheckCatalog {
         @('ENTRA-UPN-VERIFIED-DOMAIN','Microsoft Graph','Verified UPN domain','Verify the Entra user UPN domain is verified in the tenant.'),
         @('ENTRA-OBJECT-SYNC-ERROR','Microsoft Graph','Object synchronization errors','Detect stale synchronization and identity anchor issues.'),
         @('LICENSE-PRE-MIGRATION','Licensing','Pre-migration licenses','Report licenses already assigned before migration.'),
+        @('LICENSE-ASSIGNED-MAILBOX-QUOTA','Licensing','Assigned license mailbox quota','Compare mailbox size with the quota of the currently assigned mailbox license.'),
         @('LICENSE-USAGE-LOCATION','Licensing','Usage location','Verify UsageLocation is populated.'),
         @('LICENSE-CAPACITY','Licensing','Target SKU capacity','Require available target SKU capacity.'),
         @('LICENSE-EXCHANGE-SERVICE-PLAN','Licensing','Exchange service plan','Require a mailbox-bearing Exchange service plan.'),
@@ -1231,6 +1232,7 @@ function Initialize-SemrInventoryContext {
         AcceptedDomainRows = @()
         ArchiveRowsByEmail = @{}
         HybridConfigRows = @()
+        DatabaseHealthByName = @{}
         CloudTimestamp = $null
         ExoTimestamp = $null
         MigrationTimestamp = $null
@@ -1357,6 +1359,33 @@ function Initialize-SemrInventoryContext {
             $script:InventoryContext.HybridConfigRows = @(Import-SemrFlexibleCsv -Path $hybridConfigPath)
             $script:InventoryContext.HybridConfigDataAvailable = $true
             $script:InventoryContext.HybridConfigTimestamp = $hybridConfigState.Timestamp
+            $databaseRows = @($script:InventoryContext.HybridConfigRows | Where-Object { [string]$_.Category -ieq 'MailboxDatabase' })
+            foreach ($databaseGroup in @($databaseRows | Group-Object { [string]$_.ObjectName })) {
+                $databaseName = ([string]$databaseGroup.Name).Trim()
+                if ([string]::IsNullOrWhiteSpace($databaseName)) { continue }
+                $mountedRows = @($databaseGroup.Group | Where-Object { [string]$_.Setting -ieq 'Mounted' } | Select-Object -First 1)
+                if ($mountedRows.Count -ne 1) { continue }
+                $collectionStatus = [string](Get-SemrPropertyValue -InputObject $mountedRows[0] -Names @('CollectionStatus') -Default '')
+                if ($collectionStatus -and $collectionStatus -ine 'OK') { continue }
+                $mountedValue = ([string]$mountedRows[0].Value).Trim()
+                if ($mountedValue -notmatch '^(?i:true|false|1|0|yes|no)$') { continue }
+                $settings = @{}
+                foreach ($databaseRow in $databaseGroup.Group) {
+                    $settingName = ([string]$databaseRow.Setting).Trim()
+                    if ($settingName -and -not $settings.ContainsKey($settingName)) {
+                        $settings[$settingName] = [string]$databaseRow.Value
+                    }
+                }
+                $script:InventoryContext.DatabaseHealthByName[$databaseName] = [pscustomobject]@{
+                    Identity = $databaseName
+                    Name = $databaseName
+                    Mounted = ConvertTo-SemrBoolean -Value $mountedValue
+                    Server = [string]$settings['Server']
+                    Recovery = [string]$settings['Recovery']
+                    ReplicationType = [string]$settings['ReplicationType']
+                    CollectionStatus = if ($collectionStatus) { $collectionStatus } else { 'OK' }
+                }
+            }
         }
     }
 
@@ -1547,6 +1576,12 @@ function Get-SemrInventoryOnPremisesEvidence {
         })
     }
 
+    $databaseHealth = @()
+    $databaseName = if ($mailboxes.Count -gt 0) { [string](Get-SemrPropertyValue -InputObject $mailboxes[0] -Names @('Database') -Default '') } else { '' }
+    if ($databaseName -and $script:InventoryContext.DatabaseHealthByName.ContainsKey($databaseName)) {
+        $databaseHealth = @($script:InventoryContext.DatabaseHealthByName[$databaseName])
+    }
+    $databaseHealthAvailable = $databaseHealth.Count -eq 1
     return [pscustomobject]@{
         Available = [bool]$script:InventoryContext.ExchangeOnPremisesAvailable
         Source = 'Tenant CSV cache inventories'
@@ -1564,8 +1599,10 @@ function Get-SemrInventoryOnPremisesEvidence {
         FolderStatisticsAvailable = $false
         InboxRules = @()
         InboxRulesAvailable = $false
-        DatabaseHealth = @()
-        DatabaseHealthAvailable = $false
+        DatabaseHealth = $databaseHealth
+        DatabaseHealthAvailable = $databaseHealthAvailable
+        DatabaseHealthSource = 'Tenant CSV cache hybrid configuration'
+        DatabaseHealthSourceTimestamp = $script:InventoryContext.HybridConfigTimestamp
         DeliveryRestrictionsAvailable = $false
     }
 }
@@ -1679,6 +1716,8 @@ function Get-SemrOnPremisesEvidence {
         InboxRules = $inboxRules
         InboxRulesAvailable = $inboxRulesAvailable
         DatabaseHealth = $databaseHealth
+        DatabaseHealthSource = 'Live Exchange on-premises mailbox database'
+        DatabaseHealthSourceTimestamp = Get-Date
         DatabaseHealthAvailable = $databaseHealthAvailable
         DeliveryRestrictionsAvailable = $true
     }
@@ -1744,7 +1783,7 @@ function Get-SemrActiveDirectoryEvidence {
             $queryParameters = @{
                 Server = $domain
                 Filter = "UserPrincipalName -eq '$escaped' -or mail -eq '$escaped' -or proxyAddresses -eq 'smtp:$escaped'"
-                Properties = @('Enabled','UserPrincipalName','mail','proxyAddresses','targetAddress','msDS-ConsistencyGuid','ObjectGuid','whenChanged')
+                Properties = @('Enabled','UserPrincipalName','mail','proxyAddresses','targetAddress','mS-DS-ConsistencyGuid','ObjectGuid','whenChanged')
                 ErrorAction = 'Stop'
             }
             $domainUsers = @(Get-ADUser @queryParameters)
@@ -2329,9 +2368,10 @@ function Get-SemrProxyConflictEvidence {
     param([Parameter(Mandatory)][string]$EmailAddress, [Parameter(Mandatory)][string[]]$Addresses)
 
     $conflicts = [System.Collections.Generic.List[string]]::new()
+    $plannedWarnings = [System.Collections.Generic.List[string]]::new()
     $available = $false
     $source = 'Unavailable'
-    if (-not (Test-SemrCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE')) { return [pscustomobject]@{ Available=$false; Source='Disabled'; Conflicts=@() } }
+    if (-not (Test-SemrCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE')) { return [pscustomobject]@{ Available=$false; Source='Disabled'; Conflicts=@(); PlannedWarnings=@() } }
     if ($script:InventoryContext -and $script:InventoryContext.DuplicateSmtpDataAvailable) {
         $available = $true
         $source = 'AD duplicate SMTP CSV cache'
@@ -2344,14 +2384,29 @@ function Get-SemrProxyConflictEvidence {
     if ($script:InventoryContext -and $script:InventoryContext.ProxyCheckDataAvailable) {
         $available = $true
         if ($source -eq 'Unavailable') { $source = 'Exchange proxy-address CSV cache' }
+        elseif ($source -notmatch 'proxy-address') { $source = "$source + Exchange proxy-address CSV cache" }
         $key = $EmailAddress.ToLowerInvariant()
         $proxyRows = if ($script:InventoryContext.ProxyCheckRowsByEmail.ContainsKey($key)) { @($script:InventoryContext.ProxyCheckRowsByEmail[$key]) } else { @() }
         foreach ($row in $proxyRows) {
-            if (ConvertTo-SemrBoolean -Value (Get-SemrPropertyValue -InputObject $row -Names @('ExpectedAddressConflict') -Default $false)) {
-                $address = [string](Get-SemrPropertyValue -InputObject $row -Names @('ExpectedAddress') -Default '')
-                $owners = [string](Get-SemrPropertyValue -InputObject $row -Names @('ExpectedAddressConflictOwners','ExpectedAddressDuplicatePeers') -Default '')
-                [void]$conflicts.Add("$address -> $owners")
+            $expectedConflict = ConvertTo-SemrBoolean -Value (Get-SemrPropertyValue -InputObject $row -Names @('ExpectedAddressConflict') -Default $false)
+            if (-not $expectedConflict) { continue }
+            $address = [string](Get-SemrPropertyValue -InputObject $row -Names @('ExpectedAddress') -Default '')
+            $reason = [string](Get-SemrPropertyValue -InputObject $row -Names @('ExpectedAddressConflictReason') -Default '')
+            $owners = [string](Get-SemrPropertyValue -InputObject $row -Names @('ExpectedAddressConflictOwners') -Default '')
+            $peers = [string](Get-SemrPropertyValue -InputObject $row -Names @('ExpectedAddressDuplicatePeers') -Default '')
+            $suggested = [string](Get-SemrPropertyValue -InputObject $row -Names @('SuggestedUniqueAddress') -Default '')
+            $actualConflict = $reason -match '(?i)(^|;)AddressAlreadyAssigned($|;)' -or -not [string]::IsNullOrWhiteSpace($owners)
+            if ($actualConflict) {
+                $ownerDetail = if ($owners) { $owners } else { 'reported owner unavailable' }
+                [void]$conflicts.Add("$address -> $ownerDetail")
+                continue
             }
+            $details = [System.Collections.Generic.List[string]]::new()
+            if ($reason) { [void]$details.Add("Reason=$reason") }
+            if ($peers) { [void]$details.Add("ExpectedPeers=$peers") }
+            if ($suggested) { [void]$details.Add("Suggested=$suggested") }
+            $detailText = if ($details.Count) { '; ' + ($details -join '; ') } else { '' }
+            [void]$plannedWarnings.Add("$address$detailText")
         }
     }
     if (-not $available -and $script:ConnectionState.OnPremisesExchange) {
@@ -2368,7 +2423,7 @@ function Get-SemrProxyConflictEvidence {
             }
         }
     }
-    return [pscustomobject]@{ Available = $available; Source = $source; Conflicts = @($conflicts | Sort-Object -Unique) }
+    return [pscustomobject]@{ Available = $available; Source = $source; Conflicts = @($conflicts | Sort-Object -Unique); PlannedWarnings = @($plannedWarnings | Sort-Object -Unique) }
 }
 
 function Add-SemrIdentityAdvancedFindings {
@@ -2390,7 +2445,19 @@ function Add-SemrIdentityAdvancedFindings {
     $conflict = Get-SemrProxyConflictEvidence -EmailAddress $email -Addresses $smtp
     if ($conflict.Source -and $script:InventoryContext -and $script:InventoryContext.AdvancedIdentityTimestamp) { $script:CurrentSourceTimestamps[[string]$conflict.Source] = $script:InventoryContext.AdvancedIdentityTimestamp }
     $conflicts = @($conflict.Conflicts)
-    Add-SemrFinding $Findings ($Base + @{CheckId='PROXY-SMTP-GLOBAL-UNIQUE';Category='HybridIdentity';Severity=if(-not $conflict.Available){'Warning'}elseif($conflicts.Count){'Critical'}else{'Information'};Result=if(-not $conflict.Available){'UNKNOWN'}elseif($conflicts.Count){'FAIL'}else{'PASS'};IsBlocking=$conflict.Available -and $conflicts.Count -gt 0;ObservedValue=if($conflict.Available){if($conflicts.Count){$conflicts -join ' | '}else{'No conflicting owner'}}else{'Global recipient index unavailable'};ExpectedValue='One owner per SMTP proxy';EvidenceSource=$conflict.Source;Message=if(-not $conflict.Available){'Global SMTP ownership could not be evaluated.'}elseif($conflicts.Count){'At least one SMTP proxy is owned by another recipient.'}else{'No conflicting SMTP owner was found.'};RecommendedAction=if(-not $conflict.Available){'Refresh duplicate/proxy inventories or validate against live Exchange.'}elseif($conflicts.Count){'Resolve every duplicate SMTP ownership conflict.'}else{''}})
+    $plannedWarnings = @($conflict.PlannedWarnings)
+    $proxyResult = if (-not $conflict.Available) { 'UNKNOWN' } elseif ($conflicts.Count) { 'FAIL' } elseif ($plannedWarnings.Count) { 'WARN' } else { 'PASS' }
+    Add-SemrFinding $Findings ($Base + @{
+        CheckId = 'PROXY-SMTP-GLOBAL-UNIQUE'; Category = 'HybridIdentity'
+        Severity = if ($proxyResult -eq 'FAIL') { 'Critical' } elseif ($proxyResult -in @('UNKNOWN','WARN')) { 'Warning' } else { 'Information' }
+        Result = $proxyResult
+        IsBlocking = $proxyResult -eq 'FAIL'
+        ObservedValue = if (-not $conflict.Available) { 'Global recipient index unavailable' } elseif ($conflicts.Count) { $conflicts -join ' | ' } elseif ($plannedWarnings.Count) { 'Planned address warning: ' + ($plannedWarnings -join ' | ') } else { 'No conflicting owner' }
+        ExpectedValue = 'No current SMTP owner conflict; planned remote routing addresses remain unique'
+        EvidenceSource = $conflict.Source
+        Message = if (-not $conflict.Available) { 'Global SMTP ownership could not be evaluated.' } elseif ($conflicts.Count) { 'At least one SMTP proxy is currently owned by another recipient.' } elseif ($plannedWarnings.Count) { 'A future expected routing address is duplicated, but no current SMTP owner conflict was reported.' } else { 'No current or planned SMTP conflict was found.' }
+        RecommendedAction = if (-not $conflict.Available) { 'Refresh duplicate/proxy inventories or validate against live Exchange.' } elseif ($conflicts.Count) { 'Resolve every current SMTP ownership conflict.' } elseif ($plannedWarnings.Count) { 'Review the planned remote routing address and coordinate a unique value before onboarding the affected recipients.' } else { '' }
+    })
 
     $target = ([string](Get-SemrPropertyValue $mailbox[0] @('ExternalEmailAddress','WindowsEmailAddress') '') -replace '^(?i:smtp:)','').Trim().ToLowerInvariant()
     $targetEvidence = -not $target -or ($script:InventoryContext -and ($script:InventoryContext.DuplicateRoutingDataAvailable -or $script:InventoryContext.ProxyCheckDataAvailable))
@@ -2516,10 +2583,23 @@ function Add-SemrFlowAndSyncFindings {
         $restricted=$moderated -or $restrictionCount -gt 0
         Add-SemrFinding $Findings ($Base+@{CheckId='DELIVERY-RESTRICTIONS';Category='MailFlow';Severity=if(-not $deliveryAvailable -or $restricted){'Warning'}else{'Information'};Result=if(-not $deliveryAvailable){'UNKNOWN'}elseif($restricted){'WARN'}else{'PASS'};IsBlocking=$false;ObservedValue=if($deliveryAvailable){"Moderation=$moderated; RestrictionTypes=$restrictionCount"}else{'Delivery restriction evidence unavailable'};ExpectedValue='Delivery restrictions documented';EvidenceSource=$source;Message=if(-not $deliveryAvailable){'Delivery restrictions could not be evaluated from the selected cache.'}elseif($restricted){'Moderation or delivery restrictions are configured.'}else{'No moderation or explicit delivery restriction was detected.'};RecommendedAction=if(-not $deliveryAvailable){'Run the final validation against live Exchange on-premises.'}elseif($restricted){'Capture and validate restriction owners and membership after migration.'}else{''}})
 
-        $dbAvailable=[bool](Get-SemrPropertyValue $OnPrem @('DatabaseHealthAvailable') $false)
-        $db=@($OnPrem.DatabaseHealth | Select-Object -First 1)
-        $mounted=$dbAvailable -and $db.Count -eq 1 -and (ConvertTo-SemrBoolean (Get-SemrPropertyValue $db[0] @('Mounted') $false))
-        Add-SemrFinding $Findings ($Base+@{CheckId='EXCHANGE-DATABASE-HEALTH';Category='ExchangeInfrastructure';Severity=if(-not $dbAvailable){'Warning'}elseif($mounted){'Information'}else{'Critical'};Result=if(-not $dbAvailable){'UNKNOWN'}elseif($mounted){'PASS'}else{'FAIL'};IsBlocking=$dbAvailable -and -not $mounted;ObservedValue=if($dbAvailable){"Database=$([string](Get-SemrPropertyValue $mailbox[0] @('Database') '')); Mounted=$mounted"}else{'Database health unavailable'};ExpectedValue='Source mailbox database mounted';EvidenceSource=$source;Message=if(-not $dbAvailable){'Database health could not be evaluated.'}elseif($mounted){'The source mailbox database is mounted.'}else{'The source mailbox database is not mounted.'};RecommendedAction=if(-not $dbAvailable){'Validate database health immediately before the batch.'}elseif(-not $mounted){'Restore database availability before migration.'}else{''}})
+        $dbAvailable = [bool](Get-SemrPropertyValue $OnPrem @('DatabaseHealthAvailable') $false)
+        $db = @($OnPrem.DatabaseHealth | Select-Object -First 1)
+        $databaseName = [string](Get-SemrPropertyValue $mailbox[0] @('Database') '')
+        $mounted = $dbAvailable -and $db.Count -eq 1 -and (ConvertTo-SemrBoolean (Get-SemrPropertyValue $db[0] @('Mounted') $false))
+        $dbSource = [string](Get-SemrPropertyValue $OnPrem @('DatabaseHealthSource') $source)
+        $dbSourceTimestamp = Get-SemrPropertyValue $OnPrem @('DatabaseHealthSourceTimestamp') $null
+        Add-SemrFinding $Findings ($Base + @{
+            CheckId = 'EXCHANGE-DATABASE-HEALTH'; Category = 'ExchangeInfrastructure'
+            Severity = if (-not $dbAvailable) { 'Warning' } elseif ($mounted) { 'Information' } else { 'Critical' }
+            Result = if (-not $dbAvailable) { 'UNKNOWN' } elseif ($mounted) { 'PASS' } else { 'FAIL' }
+            IsBlocking = $dbAvailable -and -not $mounted
+            ObservedValue = if ($dbAvailable) { "Database=$databaseName; Mounted=$mounted; Server=$([string](Get-SemrPropertyValue $db[0] @('Server') '')); ReplicationType=$([string](Get-SemrPropertyValue $db[0] @('ReplicationType') ''))" } else { "Database=$databaseName; health unavailable" }
+            ExpectedValue = 'Source mailbox database mounted'
+            EvidenceSource = $dbSource; SourceTimestamp = $dbSourceTimestamp
+            Message = if (-not $dbAvailable) { 'Database health could not be evaluated.' } elseif ($mounted) { 'The source mailbox database is mounted.' } else { 'The source mailbox database is not mounted.' }
+            RecommendedAction = if (-not $dbAvailable) { 'Validate database health immediately before the batch.' } elseif (-not $mounted) { 'Restore database availability before migration.' } else { '' }
+        })
     }
 
     $moveAvailable=[bool](Get-SemrPropertyValue $Exo @('MoveDataAvailable') $false)
@@ -3197,6 +3277,103 @@ function Invoke-SemrAssessment {
                     EvidenceSource = $graphSource; Message = if ($existingBatchPhase -and $licenseCount -gt 0) { 'The assigned license is expected for the existing migration batch.' } elseif ($existingBatchPhase) { 'No assigned license was returned for the existing migration batch.' } elseif ($licenseCount -gt 0) { 'One or more licenses are already assigned before migration.' } else { 'No assigned license was returned before migration.' }
                     RecommendedAction = if ($existingBatchPhase -and $licenseCount -eq 0) { 'Confirm the target licensing plan and assignment timing for this active migration.' } elseif (-not $existingBatchPhase -and $licenseCount -gt 0) { 'Verify that an Exchange service plan has not provisioned an unintended cloud mailbox.' } elseif (-not $existingBatchPhase) { 'Assign the approved Exchange Online license after migration completion and within the operational deadline.' } else { '' }
                 })
+
+                $assignedQuotaCandidates = @()
+                $quotaMap = $Config['TargetQuotaGbBySku']
+                if ($quotaMap -is [System.Collections.IDictionary]) {
+                    $assignedQuotaCandidates = @(
+                        foreach ($licenseName in $licenseNames) {
+                            foreach ($quotaKey in $quotaMap.Keys) {
+                                if ([string]$quotaKey -ieq $licenseName) {
+                                    [pscustomobject]@{
+                                        SkuPartNumber = $licenseName
+                                        QuotaGb = [double]$quotaMap[$quotaKey]
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                    )
+                }
+                $assignedQuotaKnown = $assignedQuotaCandidates.Count -gt 0
+                $assignedQuotaGb = if ($assignedQuotaKnown) {
+                    [double](@($assignedQuotaCandidates | Sort-Object QuotaGb -Descending | Select-Object -First 1)[0].QuotaGb)
+                }
+                else {
+                    0.0
+                }
+                $assignedQuotaSkus = if ($assignedQuotaKnown) {
+                    @($assignedQuotaCandidates | Where-Object { [double]$_.QuotaGb -eq $assignedQuotaGb } | ForEach-Object { [string]$_.SkuPartNumber } | Sort-Object -Unique)
+                }
+                else {
+                    @()
+                }
+                $assignedSafeQuotaGb = $assignedQuotaGb * (1.0 - ([double]$Config['QuotaSafetyBufferPercent'] / 100.0))
+                $assignedQuotaPass = $assignedQuotaKnown -and $null -ne $mailboxSizeGb -and [double]$mailboxSizeGb -lt $assignedSafeQuotaGb
+                $assignedQuotaResult = if ($licenseCount -eq 0) {
+                    'PASS'
+                }
+                elseif ($null -eq $mailboxSizeGb -or -not $assignedQuotaKnown) {
+                    'UNKNOWN'
+                }
+                elseif ($assignedQuotaPass) {
+                    'PASS'
+                }
+                else {
+                    'FAIL'
+                }
+                $assignedQuotaBlocking = $assignedQuotaResult -eq 'FAIL'
+                Add-SemrFinding -List $findings -Parameters ($base + @{
+                    CheckId = 'LICENSE-ASSIGNED-MAILBOX-QUOTA'; Category = 'Licensing'
+                    Severity = if ($assignedQuotaBlocking) { 'Critical' } elseif ($assignedQuotaResult -eq 'UNKNOWN') { 'Warning' } else { 'Information' }
+                    Result = $assignedQuotaResult; IsBlocking = $assignedQuotaBlocking
+                    ObservedValue = if ($licenseCount -eq 0) {
+                        'No currently assigned license'
+                    }
+                    elseif (-not $assignedQuotaKnown) {
+                        "AssignedLicenses=$($licenseNames -join '; '); mapped mailbox quota unavailable"
+                    }
+                    elseif ($null -eq $mailboxSizeGb) {
+                        "AssignedLicenses=$($licenseNames -join '; '); mailbox size unavailable"
+                    }
+                    else {
+                        "Mailbox=$mailboxSizeGb GB; AssignedLicenses=$($licenseNames -join '; '); EffectiveQuota=$assignedQuotaGb GB; SafeQuota=$([math]::Round($assignedSafeQuotaGb, 2)) GB"
+                    }
+                    ExpectedValue = if ($assignedQuotaKnown) {
+                        "Mailbox below $([math]::Round($assignedSafeQuotaGb, 2)) GB for assigned mailbox license $($assignedQuotaSkus -join '; ')"
+                    }
+                    else {
+                        'Assigned mailbox license represented in TargetQuotaGbBySku'
+                    }
+                    EvidenceSource = "$graphSource assigned licenses + $onPremSource mailbox statistics"
+                    Message = if ($licenseCount -eq 0) {
+                        'No current mailbox-license quota applies; the planned target-license checks remain authoritative.'
+                    }
+                    elseif (-not $assignedQuotaKnown) {
+                        'The quota of the currently assigned licenses could not be determined.'
+                    }
+                    elseif ($null -eq $mailboxSizeGb) {
+                        'Mailbox size is unavailable, so the currently assigned license quota could not be validated.'
+                    }
+                    elseif ($assignedQuotaPass) {
+                        'Mailbox size fits the quota of the currently assigned mailbox license.'
+                    }
+                    else {
+                        'Mailbox size exceeds the safe quota of the currently assigned mailbox license.'
+                    }
+                    RecommendedAction = if ($assignedQuotaBlocking) {
+                        "Assign the approved target license '$targetLicense' before starting the migration, or reduce the mailbox below $([math]::Round($assignedSafeQuotaGb, 2)) GB, then rerun the assessment."
+                    }
+                    elseif ($licenseCount -gt 0 -and -not $assignedQuotaKnown) {
+                        'Add the mailbox-bearing assigned SKU and its quota to TargetQuotaGbBySku, then rerun the assessment.'
+                    }
+                    elseif ($null -eq $mailboxSizeGb) {
+                        'Collect mailbox statistics and rerun the assessment.'
+                    }
+                    else {
+                        ''
+                    }
+                })
                 $usageLocationMissing = [string]::IsNullOrWhiteSpace([string]$user.UsageLocation)
                 Add-SemrFinding -List $findings -Parameters ($base + @{
                     CheckId = 'LICENSE-USAGE-LOCATION'; Category = 'Licensing'; Severity = if ($usageLocationMissing) { 'Warning' } else { 'Information' }
@@ -3372,6 +3549,22 @@ function Invoke-SemrAssessment {
             CheckedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         })
     }
+
+    $summary = @(
+        $summary | Sort-Object `
+            @{ Expression = {
+                switch ([string]$_.Decision) {
+                    'NO-GO' { 0 }
+                    'GO-WARNING' { 1 }
+                    'UNKNOWN' { 2 }
+                    'GO' { 3 }
+                    default { 4 }
+                }
+            } },
+            @{ Expression = { [int]$_.BlockingCount }; Descending = $true },
+            @{ Expression = { [int]$_.WarningCount }; Descending = $true },
+            @{ Expression = { [string]$_.EmailAddress } }
+    )
 
     return [pscustomobject]@{
         Mode = [string]$Config['Mode']
@@ -3591,7 +3784,21 @@ function New-SemrHtmlReport {
         [Parameter(Mandatory)]$Assessment,
         [Parameter(Mandatory)][string]$Path
     )
-    $summary = @($Assessment.Summary)
+    $summary = @(
+        $Assessment.Summary | Sort-Object `
+            @{ Expression = {
+                switch ([string]$_.Decision) {
+                    'NO-GO' { 0 }
+                    'GO-WARNING' { 1 }
+                    'UNKNOWN' { 2 }
+                    'GO' { 3 }
+                    default { 4 }
+                }
+            } },
+            @{ Expression = { [int]$_.BlockingCount }; Descending = $true },
+            @{ Expression = { [int]$_.WarningCount }; Descending = $true },
+            @{ Expression = { [string]$_.EmailAddress } }
+    )
     $globalFindings = @($Assessment.GlobalFindings)
     $go = @($summary | Where-Object Decision -EQ 'GO').Count
     $warning = @($summary | Where-Object Decision -EQ 'GO-WARNING').Count
@@ -3604,7 +3811,14 @@ function New-SemrHtmlReport {
         $decisionClass = ([string]$row.Decision).ToLowerInvariant().Replace('-','')
         $sizeDisplay = if ($row.PSObject.Properties['MailboxSizeGb'] -and $null -ne $row.MailboxSizeGb -and [string]$row.MailboxSizeGb -ne '') { ([double]$row.MailboxSizeGb).ToString('0.##', [Globalization.CultureInfo]::InvariantCulture) + ' GB' } else { 'Not available' }
         $searchText = "$($row.EmailAddress) $($row.UserPrincipalName) $sizeDisplay $($row.TargetLicense) $($row.AssignedLicenses) $($row.Decision) $($row.BlockingCodes) $($row.RecommendedAction)"
-        '<tr data-search="'+(ConvertTo-SemrHtmlText $searchText)+'"><td>'+(ConvertTo-SemrHtmlText $row.EmailAddress)+'</td><td>'+(ConvertTo-SemrHtmlText $row.UserPrincipalName)+'</td><td class="number">'+(ConvertTo-SemrHtmlText $sizeDisplay)+'</td><td>'+(ConvertTo-SemrHtmlText $row.TargetLicense)+'</td><td>'+(ConvertTo-SemrHtmlText $row.AssignedLicenses)+'</td><td><span class="badge '+$decisionClass+'">'+(ConvertTo-SemrHtmlText $row.Decision)+'</span></td><td>'+$row.BlockingCount+'</td><td>'+$row.WarningCount+'</td><td>'+$row.UnknownCount+'</td><td>'+(ConvertTo-SemrHtmlText $row.DataCoverage)+'</td><td>'+(ConvertTo-SemrHtmlText $row.BlockingCodes)+'</td><td>'+(ConvertTo-SemrHtmlText $row.RecommendedAction)+'</td></tr>'
+        $actionItems = @(([string]$row.RecommendedAction -split '\s*\|\s*') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $actionHtml = if ($actionItems.Count -gt 0) {
+            '<ul class="actions"><li>' + (($actionItems | ForEach-Object { ConvertTo-SemrHtmlText $_ }) -join '</li><li>') + '</li></ul>'
+        }
+        else {
+            ''
+        }
+        '<tr data-search="'+(ConvertTo-SemrHtmlText $searchText)+'"><td class="mailbox-col">'+(ConvertTo-SemrHtmlText $row.EmailAddress)+'</td><td class="mailbox-col">'+(ConvertTo-SemrHtmlText $row.UserPrincipalName)+'</td><td class="number">'+(ConvertTo-SemrHtmlText $sizeDisplay)+'</td><td class="license-col">'+(ConvertTo-SemrHtmlText $row.TargetLicense)+'</td><td class="license-col">'+(ConvertTo-SemrHtmlText $row.AssignedLicenses)+'</td><td><span class="badge '+$decisionClass+'">'+(ConvertTo-SemrHtmlText $row.Decision)+'</span></td><td>'+$row.BlockingCount+'</td><td>'+$row.WarningCount+'</td><td>'+$row.UnknownCount+'</td><td>'+(ConvertTo-SemrHtmlText $row.DataCoverage)+'</td><td class="codes-col">'+(ConvertTo-SemrHtmlText $row.BlockingCodes)+'</td><td class="action-col">'+$actionHtml+'</td></tr>'
     }
     $tenantRows = foreach ($row in $globalFindings) {
         $resultClass = ([string]$row.Result).ToLowerInvariant().Replace('-','')
@@ -3618,9 +3832,9 @@ function New-SemrHtmlReport {
     }
     $html = @"
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Smart Exchange Migration Readiness - $($Assessment.RunId)</title><style>
-:root{--blue:#0078d4;--navy:#18324a;--muted:#5f6b7a;--line:#d9e2ec;--bg:#f4f8fb;--green:#146c43;--amber:#8a5a00;--red:#b42318}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#1f2937;font:14px Segoe UI,Arial,sans-serif}.wrap{max-width:1500px;margin:auto;padding:24px}.hero,.panel{background:white;border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}.hero h1{margin:0 0 6px;font-size:28px}.sub{color:var(--muted)}.overview{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.overview .card{flex:1 1 110px;min-width:105px;border:1px solid var(--line);border-radius:9px;padding:11px 12px;background:#f9fbfd}.overview .card strong{display:block;font-size:24px}.go{color:var(--green)}.gowarning,.warn,.warning{color:var(--amber)}.nogo,.fail{color:var(--red)}.unknown{color:#586477}.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-weight:700;background:#e8edf3}.badge.go,.badge.pass{background:#dff3e4;color:var(--green)}.badge.gowarning,.badge.warn{background:#fff1cc;color:var(--amber)}.badge.nogo,.badge.fail{background:#fde2e1;color:var(--red)}h2{margin:0 0 14px}input{width:100%;max-width:620px;padding:10px;border:1px solid #b8c5d1;border-radius:7px;margin-bottom:12px}table{border-collapse:collapse;width:100%;font-size:13px;min-width:1280px}th{position:sticky;top:0;background:var(--blue);color:white;text-align:left;padding:9px;white-space:nowrap}td{border-bottom:1px solid #e5ebf1;padding:8px;vertical-align:top}.number{text-align:right;white-space:nowrap}tbody tr:hover{background:#f4f9fd}.scroll{overflow:auto;max-height:620px}details{background:white;border:1px solid var(--line);border-radius:12px;margin-bottom:16px;padding:14px}summary{cursor:pointer;font-size:18px;font-weight:600}.note{padding:12px;background:#eef6fc;border-left:4px solid var(--blue);margin-top:12px}@media(max-width:900px){.overview .card{flex-basis:145px}}@media print{body{background:white}.wrap{max-width:none;padding:0}.scroll{max-height:none;overflow:visible}th{position:static}}
+:root{--blue:#0078d4;--navy:#18324a;--muted:#5f6b7a;--line:#d9e2ec;--bg:#f4f8fb;--green:#146c43;--amber:#8a5a00;--red:#b42318}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#1f2937;font:14px Segoe UI,Arial,sans-serif}.wrap{max-width:1500px;margin:auto;padding:24px}.hero,.panel{background:white;border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}.hero h1{margin:0 0 6px;font-size:28px}.sub{color:var(--muted)}.overview{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.overview .card{flex:1 1 110px;min-width:105px;border:1px solid var(--line);border-radius:9px;padding:11px 12px;background:#f9fbfd}.overview .card strong{display:block;font-size:24px}.go{color:var(--green)}.gowarning,.warn,.warning{color:var(--amber)}.nogo,.fail{color:var(--red)}.unknown{color:#586477}.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-weight:700;background:#e8edf3}.badge.go,.badge.pass{background:#dff3e4;color:var(--green)}.badge.gowarning,.badge.warn{background:#fff1cc;color:var(--amber)}.badge.nogo,.badge.fail{background:#fde2e1;color:var(--red)}h2{margin:0 0 14px}input{width:100%;max-width:620px;padding:10px;border:1px solid #b8c5d1;border-radius:7px;margin-bottom:12px}table{border-collapse:collapse;width:100%;font-size:13px;min-width:1280px}th{position:sticky;top:0;background:var(--blue);color:white;text-align:left;padding:9px;white-space:nowrap}td{border-bottom:1px solid #e5ebf1;padding:8px;vertical-align:top}.mailbox-table{min-width:1900px}.mailbox-col{min-width:245px}.license-col{min-width:125px;white-space:nowrap}.codes-col{min-width:220px}.action-col{min-width:420px;max-width:540px;line-height:1.5;white-space:normal}.actions{margin:0;padding-left:19px}.actions li{margin:0 0 8px}.actions li:last-child{margin-bottom:0}.number{text-align:right;white-space:nowrap}tbody tr:hover{background:#f4f9fd}.scroll{overflow:auto;max-height:620px}details{background:white;border:1px solid var(--line);border-radius:12px;margin-bottom:16px;padding:14px}summary{cursor:pointer;font-size:18px;font-weight:600}.note{padding:12px;background:#eef6fc;border-left:4px solid var(--blue);margin-top:12px}@media(max-width:900px){.overview .card{flex-basis:145px}}@media print{body{background:white}.wrap{max-width:none;padding:0}.scroll{max-height:none;overflow:visible}th{position:static}}
 </style></head><body><main class="wrap"><section class="hero"><h1>Smart Exchange Migration Readiness</h1><div class="sub">Read-only assessment $($Assessment.RunId)</div><div class="overview"><div class="card"><b>Mode</b><div>$(ConvertTo-SemrHtmlText $Assessment.Mode)</div></div><div class="card"><b>Phase</b><div>$(ConvertTo-SemrHtmlText $Assessment.AssessmentPhase)</div></div><div class="card"><b>Endpoint</b><div>$(ConvertTo-SemrHtmlText $endpoint)</div></div><div class="card"><b>Duration</b><div>$duration s</div></div><div class="card go"><b>GO</b><strong>$go</strong></div><div class="card gowarning"><b>GO-WARNING</b><strong>$warning</strong></div><div class="card nogo"><b>NO-GO</b><strong>$noGo</strong></div><div class="card unknown"><b>UNKNOWN</b><strong>$unknown</strong></div></div><div class="note"><b>Tenant synchronization:</b> $(ConvertTo-SemrHtmlText $entra)</div></section>
-<section class="panel"><h2>Mailbox decisions</h2><input id="mailFilter" placeholder="Filter by mailbox, UPN, size, license, decision, code or action"><div class="scroll"><table id="mailTable"><thead><tr><th>Mailbox</th><th>UPN</th><th>Size</th><th>Target license</th><th>Assigned licenses</th><th>Decision</th><th>Blocking</th><th>Warnings</th><th>Unknown</th><th>Coverage</th><th>Blocking codes</th><th>Recommended action</th></tr></thead><tbody>$($summaryRows -join '')</tbody></table></div></section>
+<section class="panel"><h2>Mailbox decisions</h2><input id="mailFilter" placeholder="Filter by mailbox, UPN, size, license, decision, code or action"><div class="scroll"><table id="mailTable" class="mailbox-table"><thead><tr><th class="mailbox-col">Mailbox</th><th class="mailbox-col">UPN</th><th>Size</th><th class="license-col">Target license</th><th class="license-col">Assigned licenses</th><th>Decision</th><th>Blocking</th><th>Warnings</th><th>Unknown</th><th>Coverage</th><th class="codes-col">Blocking codes</th><th class="action-col">Recommended action</th></tr></thead><tbody>$($summaryRows -join '')</tbody></table></div></section>
 <details open><summary>Tenant checks</summary><div class="scroll"><table><thead><tr><th>Check</th><th>Category</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($tenantRows -join '')</tbody></table></div></details>
 <details><summary>Blocking and warning details</summary><div class="scroll"><table><thead><tr><th>Mailbox</th><th>Check</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($findingRows -join '')</tbody></table></div></details>
 <details><summary>CSV source inventory</summary><div class="scroll"><table><thead><tr><th>File</th><th>Status</th><th>Present</th><th>Fresh</th><th>Used</th><th>Age hours</th><th>Path</th></tr></thead><tbody>$($sourceRows -join '')</tbody></table></div></details>
@@ -3741,8 +3955,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjPgKBKiqXs3uy
-# bcp45+imJdou7/RHurqbijw4fx9B9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBojr5fI7rGsk2Y
+# HlO4tlNVcLRGA/YIrdWL4y7ZbdgwjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3875,31 +4089,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICpizhmcIxd2zU71nFHvbxOOi4NpIbWRqIqw8+QvuRVcMA0GCSqG
-# SIb3DQEBAQUABIIBgEGI9yOGdEfFl0Zwy3+aUaxsIrKbXRegcw9jq+bLZdYGCZzo
-# ERXpwfMbSN70tcY9KSW7Uf0g3RS1ahfZwqFHFRGgabvVIqiJvVU33NcB1jGEjUeU
-# l40Cf/JJtCVwAWV9NfeqfnWGj22hofFi/VC6Me1rLzWfN5nNqXrgGzGn96PYox+g
-# CBZKBRLTkoFCtPJ+xIBxjiFdAQIGgmRXupSk45ZFboMu0EQSxy7ZHFm6GUOS1dvn
-# XAy9Aq7IG5O2DtsPM5FmgH3RWFbq4ceMZx8yZJuA5y+5wy9aPSEq+b4gIzijIWLa
-# kHlwUn9DlfOkSxkM/XVAUm2ClvKlYejOHd/W+Bo/a0BqAjs/QmsHAa5bgQ5b61GX
-# tOTzVD70XEoiJhdi3HdJ+S+LQ7gyxWBML8SBUOwah7nKfNIJh8nE1K2Tc6J5oYSD
-# Y7EPci+nczbmkfe6J7ZKTSxkAx9nEwOlvDUyCEg7w8FfgENVYuDdAGc7Lxk6TDFt
-# RtZbxiYsnEZs6gQ/u6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILg25XQikrL+mEQNbS18KT5huGmDwJE8VTo+BVolBjDKMA0GCSqG
+# SIb3DQEBAQUABIIBgBeutRKEYaB+jCZ4kpckQe12UKOB9FQejzciHfQICDzefevg
+# pfauTzR8vGD4fxSV07pI9yJbeCUutKX7x56co5ykg/Lm6yp5IXm9IZLclk6GhRhq
+# B5porLb9bhJ8Hy395tQYRk5U1EdjIybDGsvpgvDGEFR9zPJhdWtwK2ljUk35Q8df
+# RJP2jK2tuanDs7MMpIeJiwteTPGZUuaOs1AhhicPoC0E6unmPnIc0SZbMJ5qL1tD
+# klCcgmklXUQJ9M6V8/Pkn8qanbpqfca8tdmlbh2ynZ/QBeHAQvBIp5jzd1+q5vA5
+# jTdJcupVgaZbqaaBuxtBKRxFK5T0zAbbnHQHuFtodgDS/6I5VwfjNE+w2SwnKBoe
+# jQfmnfdGBPSfW72jDaUHOYZD0rx4XnDQx+QDY1rRLcNNQyebylEEm+YbM3aY1WEl
+# BarkRJD7OgsUmW9KfjAD19BJpOnwP1cSNxsmVbYgzuLK4QRZJhHhhQQErJPfdOQq
+# R4YHjjxaBBEsQedC0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxOTQ1
-# MzhaMC8GCSqGSIb3DQEJBDEiBCApJJPXQxXakGGieryzA5ZV1Rs7JNktnNXO6dZ6
-# /Q5EzDANBgkqhkiG9w0BAQEFAASCAgBTp8Vfl43phryfu1jTLknjnUPGv++BGCOT
-# xxNTei981pqMNU3hgZ9BaP20uC3vPSQBqXHhB7ZOS/sJH5MN3W3jZiA8OZfwXkAk
-# biwP97LT7W9PmUn4Xe3Q0PFNWTuxzYWHE5U/gtmcc40CokWq43/msSbcAt9xbHe8
-# ymWhHHAT9A2z9/DPBoT0w0r49GWYX8rCz8yS6sEQBJAEqQSjbWfPmT+Zno+P2wAK
-# GtzxAxh6o2NUmcerHVgJn8uPItXBfCq3iTQ9CKXD/sLn6+e2BoRIE6ujH49uzW60
-# QNLqthuuEIaC/UhjKUdGc1NRfzxquj2a9tG/SWGuxhMg+GGBGbs1MI8vy+RqgVJ8
-# Np4X3q2zW2V/ovuhbaPZCm5dJ/cuILiTVws/aHPn/rWwPLdWaPF/yOK5TKn1OxbY
-# YiRf01lPfYyL6FbFYPL0s+iP3xjEL/2Z4/lgtD04567OCq+LNSbjxW9CroynkxR+
-# 7VPwlhRl6X36b2pC7AKBqOn22YtSFgYAxkuZPEMnNR2XguVg0Xdhb5lM3CkXpC6Y
-# 51Z2FQcgcOAH6nYHnqbwxrCF7+KMEcVhKB/ZeQfFVSO+8InW57qy2BAaLk3oIxcc
-# h3VUP4/ffdJaJlaJMeCJf6oqZabmriNb8nCV81D2KBj9figApnrRVo8YVgJITMEG
-# 9HGPBZcVIw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMDU2
+# NDZaMC8GCSqGSIb3DQEJBDEiBCAOMlhVUJaRv7H0V/7LcEXpUojGJ6BjHXj8wBIE
+# Xz/7gDANBgkqhkiG9w0BAQEFAASCAgCvGz+Xe9apqHxXoFanvOIEkE1uPdtjqu/j
+# Fvu9+nkIQva0jQZIKmFgT092AnWMY9icqdZkZ+z6HnJBZWA8sZLIHQu66VkZioJU
+# MU2xsBpck6ya1iLJh3EEMs6RlDOYQ9xEMr3qT8Nwpqm7tfCwUO8zzoVaTZ9+91j+
+# yw6grUoUdL4PhdRUEBR7gln0Izjf9pUqfRC8dkEPspiORfHTXDDTIzvszp6i+raq
+# 5g4DqyNZE51oDz1HqZNpY8PXzyn6pZZ5NMKe/g+SgG1z9s/JzXe0k295JFja/1XU
+# hYSyPeqKbhJuOMebgQZXg5L7vZr2VxHNdEYdiwM6/B0dU0oG7bp3JLR7HisQDojv
+# G+Wv2iX3+V3MH+bdPclXULGo2+OStt9UegGE1mQ+8/8X8eHI+FqFNxbQFlS8tToV
+# OskRknia4azF5s89rrtRZ3aNozu1f5SasXDCzghIVCfBdBWTiZsbNEpxIuigB3QS
+# 0th4y1aZ78v6IXjwYpnCsV1ekwvf59efYkgDgD/+yLZCrHO/CG8FPHx8Qs0qCScF
+# Dou4wOY5QR5+TIZCz8b1y7D4b/i4TuT1F0v92f8diMd8RdrIRblRbIiafE5wNXZ7
+# WLcKG6ITtqCPC01Havm1s32nW3Sm2bOpt7G6jWGWuan9vIkJx5zWWk3qD9XGvBQy
+# gFaqTfez0w==
 # SIG # End signature block
