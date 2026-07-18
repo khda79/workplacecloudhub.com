@@ -30,8 +30,10 @@ Supported report selections:
 | `MailboxUsageDetail` | `M365_Mailbox_Usage.csv` | Graph usage view: storage, quotas, deleted items, archive flag, last activity. Complements the EXO mailbox inventory. |
 | `OneDriveUsageAccountDetail` | `M365_OneDrive_Usage.csv` | OneDrive storage, file counts, active files, owner, last activity. |
 | `SharePointSiteUsageDetail` | `M365_SharePoint_SiteUsage.csv` | SharePoint site storage, file/page activity, owner/site metadata from Graph reports. |
+| `SharePointActivityUserDetail` | `M365_SharePoint_UserActivity.csv` | SharePoint file viewing/editing, sync, internal/external sharing, and page visits by user. |
 | `Office365ActivationUserDetail` | `M365_Apps_Activations.csv` | Microsoft 365 Apps / Office activations by user and platform; no period parameter. |
 | `TeamsUserActivityUserDetail` | `M365_Teams_UserActivity.csv` | Detailed Teams user activity. |
+| `TeamsDeviceUsageUserDetail` | `M365_Teams_DeviceUsage.csv` | Teams client device and operating system usage by user. |
 | `EmailActivityUserDetail` | `M365_Email_Activity.csv` | Exchange email send/read/receive activity. |
 
 Examples:
@@ -44,6 +46,10 @@ Examples:
 ```
 
 Required Microsoft Graph permission: `Reports.Read.All`.
+
+`SharePointActivityUserDetail` and `TeamsDeviceUsageUserDetail` use the same existing
+`Reports.Read.All` permission. They do not require another app registration,
+permission, or local configuration value.
 
 `SmartM365-EXO-Mailboxes-Inventory.ps1` remains useful and is not replaced by `MailboxUsageDetail`: EXO gives mailbox object/stat/archive details from Exchange Online, while Graph Reports gives a period-based usage and quota report suitable for FinOps joins.
 
