@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.6.1
+1.7.0
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.6.1'
+$script:AppVersion = '1.7.0'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -38,6 +38,7 @@ $script:SessionLogPath = ''
 $script:SessionLogError = ''
 $script:MigrationEndpointsLoaded = $false
 $script:MigrationEndpointSelectionConfirmed = $false
+$script:ProgressWindow = $null
 $script:UpdatingMigrationEndpointCombo = $false
 
 Add-Type -AssemblyName PresentationCore
@@ -200,7 +201,7 @@ $xaml = @'
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <TextBlock Text="Mode" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0"/>
-                    <ComboBox x:Name="ModeCombo" Width="118" Margin="0,0,10,0" ToolTip="Live prefers live sources and falls back to CSV for AD, Exchange on-premises, and Entra Connect. CacheOnly uses CSV inventories only.">
+                    <ComboBox x:Name="ModeCombo" Width="118" Margin="0,0,10,0" ToolTip="Live uses EXO and Graph tenant data, with CSV fallback for AD and Exchange on-premises. CacheOnly uses CSV inventories only.">
                         <ComboBoxItem Content="Live" IsSelected="True"/>
                         <ComboBoxItem Content="CacheOnly"/>
                     </ComboBox>
@@ -323,8 +324,8 @@ $xaml = @'
                     </Border>
                     <Border Grid.Row="2" Grid.ColumnSpan="2" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,8,0,0">
                         <StackPanel>
-                            <TextBlock Text="Hybrid migration and Microsoft Entra Connect" FontWeight="SemiBold" FontSize="15"/>
-                            <TextBlock Text="Checks the Exchange Online migration endpoint and Entra Connect synchronization health automatically during the assessment." Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                            <TextBlock Text="Hybrid migration and Microsoft Entra synchronization" FontWeight="SemiBold" FontSize="15"/>
+                            <TextBlock Text="Checks the Exchange Online migration endpoint and the latest tenant synchronization directly through Microsoft Graph." Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
                             <TextBlock x:Name="HybridStateText" Text="Pending assessment" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
@@ -372,7 +373,7 @@ $xaml = @'
                 <Grid Margin="0,12,0,0">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-                        <TextBlock Text="Tenant-wide hybrid, migration-capacity and Entra Connect checks. Blocking global failures are reflected in every mailbox summary without duplicating the detailed finding per mailbox." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                        <TextBlock Text="Tenant-wide hybrid, migration-capacity and Entra synchronization checks. Blocking global failures are reflected in every mailbox summary without duplicating the detailed finding per mailbox." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                     </Border>
                     <DataGrid x:Name="GlobalFindingsGrid" Grid.Row="1"/>
                 </Grid>
@@ -431,7 +432,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.6.1" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.7.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -704,6 +705,69 @@ function Invoke-SemrDoEvent {
     [System.Windows.Threading.Dispatcher]::PushFrame($frame)
 }
 
+function Stop-SemrProgressWindow {
+    param([switch]$Force)
+    if (-not $script:ProgressWindow) { return }
+    try {
+        $script:ProgressWindow.State.CloseRequested = $true
+        if ($Force -and $script:ProgressWindow.PowerShell) { $script:ProgressWindow.PowerShell.Stop() }
+        if ($script:ProgressWindow.AsyncResult -and $script:ProgressWindow.AsyncResult.AsyncWaitHandle.WaitOne(1500)) {
+            try { $script:ProgressWindow.PowerShell.EndInvoke($script:ProgressWindow.AsyncResult) | Out-Null } catch {}
+        }
+    }
+    catch {}
+    finally {
+        try { $script:ProgressWindow.PowerShell.Dispose() } catch {}
+        try { $script:ProgressWindow.Runspace.Dispose() } catch {}
+        $script:ProgressWindow = $null
+    }
+}
+
+function Start-SemrProgressWindow {
+    param([Parameter(Mandatory)][string]$Title,[Parameter(Mandatory)][string]$Stage,[string]$Detail='')
+    Stop-SemrProgressWindow
+    $state = [hashtable]::Synchronized(@{Title=$Title;Stage=$Stage;Detail=$Detail;Current=0;Total=0;Indeterminate=$true;StartedAt=Get-Date;Completed=$false;Failed=$false;CancelRequested=$false;CloseRequested=$false;WindowClosed=$false;Summary='';OutputPath='';HtmlPath='';ExcelPath='';LogPath=$script:SessionLogPath})
+    $runspace=[RunspaceFactory]::CreateRunspace();$runspace.ApartmentState=[Threading.ApartmentState]::STA;$runspace.ThreadOptions=[Management.Automation.Runspaces.PSThreadOptions]::ReuseThread;$runspace.Open()
+    $powerShell=[PowerShell]::Create();$powerShell.Runspace=$runspace
+    $uiScript={
+        param($State)
+        Add-Type -AssemblyName PresentationFramework;Add-Type -AssemblyName PresentationCore;Add-Type -AssemblyName WindowsBase
+        [xml]$progressXaml=@"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Processing" Width="560" Height="310" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#F5F8FB" ShowInTaskbar="True">
+ <Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <TextBlock x:Name="TitleText" FontSize="21" FontWeight="SemiBold" Foreground="#1F2937"/><TextBlock x:Name="StageText" Grid.Row="1" Margin="0,16,0,4" FontSize="15" FontWeight="SemiBold" Foreground="#0078D4" TextWrapping="Wrap"/><TextBlock x:Name="DetailText" Grid.Row="2" Foreground="#5F6B7A" TextWrapping="Wrap" MinHeight="38"/><ProgressBar x:Name="Progress" Grid.Row="3" Height="12" Margin="0,14,0,8" Minimum="0" Maximum="100"/><TextBlock x:Name="ElapsedText" Grid.Row="4" Foreground="#5F6B7A" Margin="0,4,0,0"/>
+  <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0"><Button x:Name="OpenHtmlButton" Content="Open HTML" MinWidth="90" Height="32" Margin="0,0,8,0" Visibility="Collapsed"/><Button x:Name="OpenExcelButton" Content="Open Excel" MinWidth="90" Height="32" Margin="0,0,8,0" Visibility="Collapsed"/><Button x:Name="OpenFolderButton" Content="Open output" MinWidth="96" Height="32" Margin="0,0,8,0" Visibility="Collapsed"/><Button x:Name="OpenLogButton" Content="Open log" MinWidth="86" Height="32" Margin="0,0,8,0" Visibility="Collapsed"/><Button x:Name="CancelButton" Content="Cancel" MinWidth="82" Height="32"/><Button x:Name="CloseButton" Content="Close" MinWidth="82" Height="32" Visibility="Collapsed"/></StackPanel>
+ </Grid>
+</Window>
+"@
+        $reader=[Xml.XmlNodeReader]::new($progressXaml);$progressWindow=[Windows.Markup.XamlReader]::Load($reader)
+        $titleText=$progressWindow.FindName('TitleText');$stageText=$progressWindow.FindName('StageText');$detailText=$progressWindow.FindName('DetailText');$progress=$progressWindow.FindName('Progress');$elapsedText=$progressWindow.FindName('ElapsedText');$cancelButton=$progressWindow.FindName('CancelButton');$closeButton=$progressWindow.FindName('CloseButton');$openHtml=$progressWindow.FindName('OpenHtmlButton');$openExcel=$progressWindow.FindName('OpenExcelButton');$openFolder=$progressWindow.FindName('OpenFolderButton');$openLog=$progressWindow.FindName('OpenLogButton')
+        $cancelButton.Add_Click({$State.CancelRequested=$true;$cancelButton.IsEnabled=$false;$stageText.Text='Cancellation requested';$detailText.Text='The current safe operation will finish, then processing will stop.'})
+        $closeButton.Add_Click({$State.CloseRequested=$true;$progressWindow.Close()})
+        $openHtml.Add_Click({if($State.HtmlPath -and (Test-Path -LiteralPath $State.HtmlPath)){Start-Process $State.HtmlPath}});$openExcel.Add_Click({if($State.ExcelPath -and (Test-Path -LiteralPath $State.ExcelPath)){Start-Process $State.ExcelPath}});$openFolder.Add_Click({if($State.OutputPath -and (Test-Path -LiteralPath $State.OutputPath)){Start-Process explorer.exe -ArgumentList @($State.OutputPath)}});$openLog.Add_Click({if($State.LogPath -and (Test-Path -LiteralPath $State.LogPath)){Start-Process notepad.exe -ArgumentList @($State.LogPath)}})
+        $progressWindow.Add_Closing({param($sender,$eventArgs)if(-not $State.Completed -and -not $State.CloseRequested){$State.CancelRequested=$true;$eventArgs.Cancel=$true;$cancelButton.IsEnabled=$false;$stageText.Text='Cancellation requested';$detailText.Text='Please wait for the current safe operation to finish.'}})
+        $timer=[Windows.Threading.DispatcherTimer]::new();$timer.Interval=[TimeSpan]::FromMilliseconds(250)
+        $timer.Add_Tick({
+            if($State.CloseRequested){$timer.Stop();$progressWindow.Close();return}
+            $progressWindow.Title=[string]$State.Title;$titleText.Text=[string]$State.Title;$stageText.Text=[string]$State.Stage;$detailText.Text=[string]$State.Detail;$elapsed=(Get-Date)-[datetime]$State.StartedAt;$elapsedText.Text=('Elapsed: {0:mm\:ss}' -f $elapsed);$progress.IsIndeterminate=[bool]$State.Indeterminate
+            if(-not $progress.IsIndeterminate){$progress.Value=if([int]$State.Total -gt 0){[math]::Min(100,[math]::Round(([double]$State.Current/[double]$State.Total)*100,0))}else{0}}
+            if($State.Completed){$progress.IsIndeterminate=$false;$progress.Value=100;$cancelButton.Visibility='Collapsed';$closeButton.Visibility='Visible';if($State.Summary){$detailText.Text=[string]$State.Summary};if($State.Failed){$stageText.Foreground='#B42318';$openLog.Visibility=if($State.LogPath){'Visible'}else{'Collapsed'}}else{$stageText.Foreground='#146C43'};$openHtml.Visibility=if($State.HtmlPath){'Visible'}else{'Collapsed'};$openExcel.Visibility=if($State.ExcelPath){'Visible'}else{'Collapsed'};$openFolder.Visibility=if($State.OutputPath){'Visible'}else{'Collapsed'}}
+        });$timer.Start();try{[void]$progressWindow.ShowDialog()}finally{$timer.Stop();$State.WindowClosed=$true}
+    }
+    [void]$powerShell.AddScript($uiScript).AddArgument($state);$asyncResult=$powerShell.BeginInvoke();$script:ProgressWindow=[pscustomobject]@{State=$state;Runspace=$runspace;PowerShell=$powerShell;AsyncResult=$asyncResult};return $script:ProgressWindow
+}
+
+function Update-SemrProgressWindow {
+    param([Parameter(Mandatory)][string]$Stage,[string]$Detail='',[int]$Current=0,[int]$Total=0,[switch]$Indeterminate)
+    if(-not $script:ProgressWindow){return};$state=$script:ProgressWindow.State;$state.Stage=$Stage;$state.Detail=$Detail;$state.Current=$Current;$state.Total=$Total;$state.Indeterminate=[bool]($Indeterminate -or $Total -le 0)
+}
+
+function Complete-SemrProgressWindow {
+    param([Parameter(Mandatory)][string]$Stage,[Parameter(Mandatory)][string]$Summary,[switch]$Failed,[string]$OutputPath='',[string]$HtmlPath='',[string]$ExcelPath='')
+    if(-not $script:ProgressWindow){return};$state=$script:ProgressWindow.State;$state.Stage=$Stage;$state.Summary=$Summary;$state.Failed=[bool]$Failed;$state.OutputPath=$OutputPath;$state.HtmlPath=$HtmlPath;$state.ExcelPath=$ExcelPath;$state.Indeterminate=$false;$state.Completed=$true
+}
+
+function Test-SemrProgressCancellation { return $script:CancelRequested -or ($script:ProgressWindow -and [bool]$script:ProgressWindow.State.CancelRequested) }
 function Get-SemrSelectedMode {
     $selected = $controls.ModeCombo.SelectedItem
     if ($selected -and $selected.Content) { return [string]$selected.Content }
@@ -860,7 +924,7 @@ function Sync-SemrConnectionDisplay {
             $control.Foreground = '#146C43'
         }
         if (-not $script:Assessment) {
-            $controls.HybridStateText.Text = 'CacheOnly: migration endpoint test skipped; Entra Connect health will be read from CSV.'
+            $controls.HybridStateText.Text = 'CacheOnly: migration endpoint test skipped; tenant synchronization health is read from CSV.'
             $controls.HybridStateText.Foreground = '#5F6B7A'
         }
     }
@@ -874,7 +938,7 @@ function Sync-SemrConnectionDisplay {
         $controls.ExoStateText.Foreground = if ($state.ExchangeOnline) { '#146C43' } else { '#5F6B7A' }
         $controls.GraphStateText.Foreground = if ($state.MicrosoftGraph) { '#146C43' } else { '#5F6B7A' }
         if (-not $script:Assessment) {
-            $controls.HybridStateText.Text = 'Automatic: Exchange Online migration endpoint and Entra Connect synchronization health.'
+            $controls.HybridStateText.Text = 'Automatic: Exchange Online migration endpoint and tenant synchronization health from Microsoft Graph.'
             $controls.HybridStateText.Foreground = '#5F6B7A'
         }
     }
@@ -929,22 +993,26 @@ Initialize-SemrSessionLog
 
 function Import-SemrCsvToGui {
     try {
+        if (-not $script:ProgressWindow -or $script:ProgressWindow.State.Completed) { [void](Start-SemrProgressWindow -Title 'Loading migration batch' -Stage 'Preparing CSV import' -Detail 'Please wait while the file is analyzed.') }
+        Update-SemrProgressWindow -Stage 'Detecting encoding and delimiter' -Detail $controls.CsvPathBox.Text.Trim() -Indeterminate
         $path = $controls.CsvPathBox.Text.Trim()
         $script:Batch = Import-SemrBatchCsv -Path $path
+        Update-SemrProgressWindow -Stage 'Validating mailbox rows' -Detail "$($script:Batch.Rows.Count) row(s) parsed; validating and rendering the batch." -Current 3 -Total 5
         $controls.BatchGrid.ItemsSource = @($script:Batch.Rows)
-        $controls.CsvMetadataText.Text = "{0} row(s) | Encoding: {1} | Delimiter: {2} | Identity: {3}" -f @(
-            $script:Batch.Rows.Count, $script:Batch.Encoding, $script:Batch.Delimiter, $script:Batch.IdentityColumn
-        )
+        $controls.CsvMetadataText.Text = "{0} row(s) | Encoding: {1} | Delimiter: {2} | Identity: {3}" -f @($script:Batch.Rows.Count, $script:Batch.Encoding, $script:Batch.Delimiter, $script:Batch.IdentityColumn)
         $controls.StatusText.Text = "Batch loaded: $($script:Batch.Rows.Count) mailbox row(s)."
         $controls.RunButton.IsEnabled = $true
         Write-SemrActivity -Message "Loaded CSV '$($script:Batch.Path)' with $($script:Batch.Rows.Count) row(s)." -Level SUCCESS
         Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
+        Update-SemrProgressWindow -Stage 'Checking CSV evidence sources' -Detail 'Checking primary and alternative cache locations.' -Current 4 -Total 5
         Update-SemrCsvSourcesDisplay
         $controls.StatusText.Text = "Batch loaded: $($script:Batch.Rows.Count) mailbox row(s)."
+        Complete-SemrProgressWindow -Stage 'Batch loaded' -Summary "$($script:Batch.Rows.Count) mailbox row(s) loaded and validated."
     }
     catch {
         $script:Batch = $null
         $controls.RunButton.IsEnabled = $false
+        Complete-SemrProgressWindow -Stage 'CSV load failed' -Summary $_.Exception.Message -Failed
         Show-SemrError -Title 'CSV validation failed' -ErrorRecord $_
     }
 }
@@ -972,6 +1040,7 @@ $controls.BrowseCsvButton.Add_Click({
     $dialog.Filter = 'CSV files (*.csv)|*.csv|All files (*.*)|*.*'
     if ($dialog.ShowDialog($window)) {
         $controls.CsvPathBox.Text = $dialog.FileName
+        [void](Start-SemrProgressWindow -Title 'Loading migration batch' -Stage 'Opening selected CSV' -Detail $dialog.FileName)
         Import-SemrCsvToGui
     }
 })
@@ -980,7 +1049,7 @@ $controls.ModeCombo.Add_SelectionChanged({
     if ($script:IsBusy) { return }
     $mode = Get-SemrSelectedMode
     $script:Config['Mode'] = $mode
-    $controls.HybridStateText.Text = if ($mode -eq 'CacheOnly') { 'CacheOnly: live endpoint test skipped; Entra sync health is read from CSV cache.' } else { 'Live: EXO and Graph use interactive authentication; AD, Exchange on-premises and Entra Connect use live data when available, otherwise CSV fallback.' }
+    $controls.HybridStateText.Text = if ($mode -eq 'CacheOnly') { 'CacheOnly: live endpoint test skipped; tenant synchronization health is read from CSV cache.' } else { 'Live: EXO, user/licensing evidence and tenant synchronization use interactive cloud data; AD and Exchange on-premises use live data with CSV fallback.' }
     $controls.HybridStateText.Foreground = '#5F6B7A'
     $controls.StatusText.Text = "Mode selected: $mode"
     Sync-SemrConnectionDisplay
@@ -1031,41 +1100,55 @@ $controls.RunButton.Add_Click({
     if (-not $script:Batch) { return }
     try {
         $script:CancelRequested = $false
+        [void](Start-SemrProgressWindow -Title 'Exchange migration readiness assessment' -Stage 'Preparing assessment' -Detail 'Validating options and CSV evidence freshness.')
         Sync-SemrCheckOptionsToConfig
         $script:Config['AssessmentPhase'] = Get-SemrSelectedAssessmentPhase
         Write-SemrActivity -Message "$(@($script:CheckOptions | Where-Object Enabled).Count) checks enabled; $(@($script:Config.DisabledChecks).Count) optional checks disabled for this run."
+        Update-SemrProgressWindow -Stage 'Validating cache freshness' -Detail 'Checking primary and alternative CSV sources.' -Current 1 -Total 9
         Set-SemrProcessingStatus -Message 'Checking CSV cache freshness; please wait...'
-        if (-not (Confirm-SemrStaleCsvUsage)) { return }
+        if (-not (Confirm-SemrStaleCsvUsage)) {
+            Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'The operator declined use of stale CSV evidence.'
+            return
+        }
         Switch-SemrBusyState -Busy $true -Message 'Assessment running - please wait...'
         $controls.RunProgress.Value = 0
         Write-SemrActivity -Message "Starting read-only assessment in $($script:Config.Mode) mode and $($script:Config.AssessmentPhase) phase for $($script:Batch.Rows.Count) mailbox row(s)."
         if ((Get-SemrSelectedMode) -eq 'Live') {
-            if (-not (Confirm-SemrMicrosoftGraphModule)) { return }
+            Update-SemrProgressWindow -Stage 'Checking Microsoft Graph modules' -Detail 'Verifying required delegated Graph cmdlets.' -Current 2 -Total 9
+            if (-not (Confirm-SemrMicrosoftGraphModule)) {
+                Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Required Microsoft Graph modules are unavailable.'
+                return
+            }
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.ExchangeOnline) {
+                Update-SemrProgressWindow -Stage 'Exchange Online authentication' -Detail 'Complete the interactive browser sign-in, then keep waiting.' -Current 3 -Total 9
                 Set-SemrProcessingStatus -Message 'Connecting interactively to Exchange Online. Complete authentication, then please wait...'
                 $exoConfig = $script:Config.ExchangeOnline
                 Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) | Out-Null
                 Write-SemrActivity -Message 'Exchange Online connected using interactive authentication.' -Level SUCCESS
                 Sync-SemrConnectionDisplay
             }
-
             $endpointCheck = @($script:CheckOptions | Where-Object CheckId -EQ 'HYBRID-ENDPOINT' | Select-Object -First 1)
             if ($endpointCheck.Count -eq 1 -and $endpointCheck[0].Enabled) {
-                if (-not (Initialize-SemrMigrationEndpointSelection)) { return }
+                Update-SemrProgressWindow -Stage 'Migration endpoint selection' -Detail 'Loading ExchangeRemoteMove endpoints from Exchange Online.' -Current 4 -Total 9
+                if (-not (Initialize-SemrMigrationEndpointSelection)) {
+                    Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'No migration endpoint was selected.'
+                    return
+                }
             }
-
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.MicrosoftGraph) {
+                Update-SemrProgressWindow -Stage 'Microsoft Graph authentication' -Detail 'Complete the interactive browser sign-in. User, licensing and tenant sync evidence will then be collected.' -Current 5 -Total 9
                 Set-SemrProcessingStatus -Message 'Connecting interactively to Microsoft Graph. Complete authentication, then please wait...'
                 $graphConfig = $script:Config.MicrosoftGraph
                 $graphProgressAction = {
                     param($Message)
+                    Update-SemrProgressWindow -Stage 'Collecting Microsoft Graph evidence' -Detail "$Message Please wait..." -Indeterminate
                     Set-SemrProcessingStatus -Message "$Message Please wait..." -SkipActivity
                 }
                 $emailAddresses = @($script:Batch.Rows | ForEach-Object { [string]$_.EmailAddress })
                 Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction | Out-Null
-                Write-SemrActivity -Message 'Microsoft Graph evidence collected in an isolated PowerShell process using interactive authentication.' -Level SUCCESS
+                Write-SemrActivity -Message 'Microsoft Graph user, licensing and tenant synchronization evidence collected using interactive authentication.' -Level SUCCESS
                 Sync-SemrConnectionDisplay
             }
         }
@@ -1076,53 +1159,53 @@ $controls.RunButton.Add_Click({
             $mailboxText = if ([string]::IsNullOrWhiteSpace([string]$Mailbox)) { '' } else { " - $Mailbox" }
             $statusLine = "[$Current/$Total] $Phase$mailboxText. Please wait..."
             $controls.StatusText.Text = $statusLine
+            Update-SemrProgressWindow -Stage $Phase -Detail $(if ($Mailbox) { $Mailbox } else { 'Collecting tenant and directory evidence.' }) -Current $Current -Total $Total
             Write-SemrActivity -Message $statusLine
             Invoke-SemrDoEvent
         }
-        $cancellationCheck = {
-            Invoke-SemrDoEvent
-            return $script:CancelRequested
-        }
+        $cancellationCheck = { Invoke-SemrDoEvent; return (Test-SemrProgressCancellation) }
+        Update-SemrProgressWindow -Stage 'Collecting tenant and mailbox evidence' -Detail 'AD and Exchange on-premises are queried live when available; CSV fallback is automatic.' -Current 6 -Total 9
         $script:Assessment = Invoke-SemrAssessment -Batch $script:Batch -Config $script:Config -ProgressCallback $progressAction -CancellationCheck $cancellationCheck
         if ($script:Assessment.SourceInitialization) {
             $sourceState = $script:Assessment.SourceInitialization
             Write-SemrActivity -Message ([string]$sourceState.ActiveDirectoryMessage) -Level $(if ($sourceState.ActiveDirectoryLive -or $script:Config.Mode -eq 'CacheOnly') { 'INFO' } else { 'WARN' })
             Write-SemrActivity -Message ([string]$sourceState.ExchangeOnPremisesMessage) -Level $(if ($sourceState.ExchangeOnPremisesLive -or $script:Config.Mode -eq 'CacheOnly') { 'INFO' } else { 'WARN' })
+            foreach ($fallbackReason in @($sourceState.ActiveDirectoryFallbackReasons)) { Write-SemrActivity -Message "Active Directory live forest fallback reason: $fallbackReason" -Level WARN }
         }
-            foreach ($fallbackReason in @($sourceState.ActiveDirectoryFallbackReasons)) {
-                Write-SemrActivity -Message "Active Directory live forest fallback reason: $fallbackReason" -Level WARN
-            }
-        Write-SemrActivity -Message "Entra Connect evidence source: $($script:Assessment.EntraConnect.Source). $($script:Assessment.EntraConnect.Message)" -Level $(if ($script:Assessment.EntraConnect.Available) { 'INFO' } else { 'WARN' })
+        Write-SemrActivity -Message "Tenant synchronization evidence source: $($script:Assessment.EntraConnect.Source). $($script:Assessment.EntraConnect.Message)" -Level $(if ($script:Assessment.EntraConnect.Available) { 'INFO' } else { 'WARN' })
         $endpointName = if ([string]::IsNullOrWhiteSpace([string]$script:Assessment.Hybrid.EndpointName)) { 'not available' } else { [string]$script:Assessment.Hybrid.EndpointName }
-        $controls.HybridStateText.Text = "Migration endpoint: $endpointName | $($script:Assessment.Hybrid.Message)`nEntra Connect: $($script:Assessment.EntraConnect.Message)"
-        $controls.HybridStateText.Foreground = if ($script:Assessment.EntraConnect.Available -and ($script:Assessment.Hybrid.ConnectivitySuccess -or (Get-SemrSelectedMode) -eq 'CacheOnly')) { '#146C43' } else { '#8A5A00' }
-        Set-SemrProcessingStatus -Message 'Generating CSV reports and finalizing the assessment; please wait...'
-        $script:Export = Export-SemrAssessment -Assessment $script:Assessment -OutputRoot (Resolve-SemrOutputRoot)
-        $controls.SummaryGrid.ItemsSource = @($script:Assessment.Summary)
-        $controls.FindingsGrid.ItemsSource = @($script:Assessment.Findings)
-        $controls.GlobalFindingsGrid.ItemsSource = @($script:Assessment.GlobalFindings)
-        $controls.PermissionsGrid.ItemsSource = @($script:Assessment.PermissionsBaseline)
-        $controls.CsvSourcesGrid.ItemsSource = @($script:Assessment.CsvSources)
+        $controls.HybridStateText.Text = "Migration endpoint: $endpointName | $($script:Assessment.Hybrid.Message)`nTenant synchronization: $($script:Assessment.EntraConnect.Message)"
+        $controls.HybridStateText.Foreground = if ($script:Assessment.EntraConnect.Available -and $script:Assessment.EntraConnect.LastSyncFresh -and ($script:Assessment.Hybrid.ConnectivitySuccess -or (Get-SemrSelectedMode) -eq 'CacheOnly')) { '#146C43' } else { '#8A5A00' }
+        Set-SemrProcessingStatus -Message 'Generating CSV, Excel and HTML reports; please wait...'
+        $exportProgress = {
+            param($Stage,$Detail,$Current,$Total)
+            Update-SemrProgressWindow -Stage $Stage -Detail $Detail -Current $Current -Total $Total
+            Set-SemrProcessingStatus -Message "$Stage - $Detail. Please wait..." -SkipActivity
+        }
+        $script:Export = Export-SemrAssessment -Assessment $script:Assessment -OutputRoot (Resolve-SemrOutputRoot) -ProgressCallback $exportProgress
+        $controls.SummaryGrid.ItemsSource = @($script:Assessment.Summary);$controls.FindingsGrid.ItemsSource = @($script:Assessment.Findings);$controls.GlobalFindingsGrid.ItemsSource = @($script:Assessment.GlobalFindings);$controls.PermissionsGrid.ItemsSource = @($script:Assessment.PermissionsBaseline);$controls.CsvSourcesGrid.ItemsSource = @($script:Assessment.CsvSources)
         $controls.OpenOutputButton.IsEnabled = $true
         $controls.ComparePermissionsButton.IsEnabled = (Test-Path -LiteralPath $script:Export.PermissionsPath)
         Sync-SemrResultCount
         $controls.RunProgress.Value = 100
         $controls.StatusText.Text = if ($script:Assessment.Cancelled) { 'Assessment cancelled; partial results exported.' } else { "Assessment complete: $($script:Assessment.RunId)" }
-        Write-SemrActivity -Message "Assessment exported to '$($script:Export.RunFolder)'." -Level SUCCESS
+        Write-SemrActivity -Message "Assessment exported to '$($script:Export.RunFolder)'. Excel: '$($script:Export.ExcelPath)'. HTML: '$($script:Export.HtmlPath)'." -Level SUCCESS
+        $summaryText = "GO: $($controls.GoCountText.Text) | GO-WARNING: $($controls.WarningCountText.Text) | NO-GO: $($controls.NoGoCountText.Text) | UNKNOWN: $($controls.UnknownCountText.Text)"
+        Complete-SemrProgressWindow -Stage $(if ($script:Assessment.Cancelled) { 'Assessment cancelled - partial reports created' } else { 'Assessment complete' }) -Summary $summaryText -OutputPath $script:Export.RunFolder -HtmlPath $script:Export.HtmlPath -ExcelPath $script:Export.ExcelPath
         $controls.MainTabs.SelectedItem = $controls.ResultsTab
     }
     catch {
         Update-SemrCsvSourcesDisplay -AssessmentCompleted
+        Complete-SemrProgressWindow -Stage 'Assessment failed' -Summary $_.Exception.Message -Failed
         Show-SemrError -Title 'Assessment failed' -ErrorRecord $_
         $controls.StatusText.Text = 'Assessment failed. Review Activity.'
     }
-    finally {
-        Switch-SemrBusyState -Busy $false
-    }
+    finally { Switch-SemrBusyState -Busy $false }
 })
 
 $controls.CancelButton.Add_Click({
     $script:CancelRequested = $true
+    if ($script:ProgressWindow) { $script:ProgressWindow.State.CancelRequested = $true }
     $controls.StatusText.Text = 'Cancellation requested...'
     Write-SemrActivity -Message 'Cancellation requested by the operator.' -Level WARN
 })
@@ -1214,6 +1297,7 @@ $window.Add_Closing({
         $script:CancelRequested = $true
     }
     Disconnect-SemrSession
+    Stop-SemrProgressWindow -Force
 })
 
 try {
