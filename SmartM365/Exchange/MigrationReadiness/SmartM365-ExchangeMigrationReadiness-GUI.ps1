@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.3.0
+1.3.1
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.3.0'
+$script:AppVersion = '1.3.1'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -36,6 +36,9 @@ $script:CancelRequested = $false
 $script:IsBusy = $false
 $script:SessionLogPath = ''
 $script:SessionLogError = ''
+$script:MigrationEndpointsLoaded = $false
+$script:MigrationEndpointSelectionConfirmed = $false
+$script:UpdatingMigrationEndpointCombo = $false
 
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName PresentationFramework
@@ -201,6 +204,8 @@ $xaml = @'
                         <ComboBoxItem Content="Live" IsSelected="True"/>
                         <ComboBoxItem Content="CacheOnly"/>
                     </ComboBox>
+                    <TextBlock Text="Endpoint" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="MigrationEndpointCombo" Width="180" Margin="0,0,10,0" IsEditable="True" IsReadOnly="True" IsEnabled="False" ToolTip="ExchangeRemoteMove endpoints are loaded automatically after Exchange Online authentication."/>
                     <Button x:Name="RunButton" Content="Run assessment" Style="{StaticResource PrimaryButton}" IsEnabled="False"/>
                     <Button x:Name="CancelButton" Content="Cancel" IsEnabled="False"/>
                     <Button x:Name="OpenOutputButton" Content="Open output" IsEnabled="False"/>
@@ -411,7 +416,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.3.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.3.1" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -427,7 +432,7 @@ function ConvertFrom-SemrXaml {
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-SemrXaml -Text $xaml
     $requiredControls = @(
-        'CsvPathBox', 'BrowseCsvButton', 'ModeCombo', 'RunButton', 'SummaryGrid',
+        'CsvPathBox', 'BrowseCsvButton', 'ModeCombo', 'MigrationEndpointCombo', 'RunButton', 'SummaryGrid',
         'FindingsGrid', 'PermissionsGrid', 'CsvSourcesGrid', 'OptionsItemsControl', 'ResultsTab', 'ActivityBox'
     )
     foreach ($controlName in $requiredControls) {
@@ -474,7 +479,7 @@ if (-not $NoSplash) {
 $window = ConvertFrom-SemrXaml -Text $xaml
 $controls = @{}
 foreach ($name in @(
-    'HeaderLogoLink', 'HeaderLogo', 'StatusText', 'ModeCombo', 'RunButton', 'CancelButton', 'OpenOutputButton',
+    'HeaderLogoLink', 'HeaderLogo', 'StatusText', 'ModeCombo', 'MigrationEndpointCombo', 'RunButton', 'CancelButton', 'OpenOutputButton',
     'CsvPathBox', 'CsvMetadataText', 'BrowseCsvButton', 'BatchGrid',
     'AdStateText', 'OnPremStateText', 'ExoStateText', 'GraphStateText', 'HybridStateText',
     'GoCountText', 'WarningCountText', 'NoGoCountText', 'UnknownCountText', 'SummaryGrid',
@@ -502,6 +507,8 @@ if (Test-Path -LiteralPath $logoPath) {
 $controls.VersionText.Text = "v$script:AppVersion"
 $controls.OptionsItemsControl.ItemsSource = $script:CheckOptions
 $controls.ModeCombo.SelectedIndex = if ([string]$script:Config.Mode -eq 'CacheOnly') { 1 } else { 0 }
+$configuredEndpointName = [string]$script:Config.Hybrid.MigrationEndpointName
+$controls.MigrationEndpointCombo.Text = if ($configuredEndpointName) { $configuredEndpointName } else { 'Loaded after EXO connection' }
 if ($CsvPath) { $controls.CsvPathBox.Text = $CsvPath }
 
 function Write-SemrActivity {
@@ -687,6 +694,135 @@ function Get-SemrSelectedMode {
     return 'Live'
 }
 
+function Show-SemrMigrationEndpointSelection {
+    param(
+        [Parameter(Mandatory)][object[]]$Endpoints,
+        [string]$PreferredName = ''
+    )
+
+    $dialog = [System.Windows.Window]::new()
+    $dialog.Title = 'Select migration endpoint'
+    $dialog.Owner = $window
+    $dialog.Width = 540
+    $dialog.SizeToContent = [System.Windows.SizeToContent]::Height
+    $dialog.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
+    $dialog.ResizeMode = [System.Windows.ResizeMode]::NoResize
+    $dialog.ShowInTaskbar = $false
+    $dialog.Background = [System.Windows.Media.Brushes]::White
+
+    $panel = [System.Windows.Controls.StackPanel]::new()
+    $panel.Margin = [System.Windows.Thickness]::new(20)
+    $title = [System.Windows.Controls.TextBlock]::new()
+    $title.Text = 'Several ExchangeRemoteMove endpoints are available.'
+    $title.FontSize = 16
+    $title.FontWeight = [System.Windows.FontWeights]::SemiBold
+    $title.Margin = [System.Windows.Thickness]::new(0,0,0,8)
+    [void]$panel.Children.Add($title)
+    $description = [System.Windows.Controls.TextBlock]::new()
+    $description.Text = 'Select the endpoint to validate for this assessment. The choice applies only to the current application session and does not modify the JSON file.'
+    $description.TextWrapping = [System.Windows.TextWrapping]::Wrap
+    $description.Margin = [System.Windows.Thickness]::new(0,0,0,14)
+    [void]$panel.Children.Add($description)
+
+    $combo = [System.Windows.Controls.ComboBox]::new()
+    $combo.Height = 36
+    $combo.DisplayMemberPath = 'Name'
+    $combo.ItemsSource = @($Endpoints)
+    $preferred = @($Endpoints | Where-Object Name -EQ $PreferredName | Select-Object -First 1)
+    if ($preferred.Count -eq 1) { $combo.SelectedItem = $preferred[0] }
+    $combo.Margin = [System.Windows.Thickness]::new(0,0,0,18)
+    [void]$panel.Children.Add($combo)
+
+    $buttonPanel = [System.Windows.Controls.StackPanel]::new()
+    $buttonPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+    $buttonPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    $continueButton = [System.Windows.Controls.Button]::new()
+    $continueButton.Content = 'Continue'
+    $continueButton.MinWidth = 100
+    $continueButton.Height = 34
+    $continueButton.Margin = [System.Windows.Thickness]::new(0,0,8,0)
+    $continueButton.IsEnabled = $null -ne $combo.SelectedItem
+    $cancelButton = [System.Windows.Controls.Button]::new()
+    $cancelButton.Content = 'Cancel'
+    $cancelButton.MinWidth = 90
+    $cancelButton.Height = 34
+    [void]$buttonPanel.Children.Add($continueButton)
+    [void]$buttonPanel.Children.Add($cancelButton)
+    [void]$panel.Children.Add($buttonPanel)
+
+    $combo.Add_SelectionChanged({ $continueButton.IsEnabled = $null -ne $combo.SelectedItem })
+    $continueButton.Add_Click({
+        $dialog.Tag = $combo.SelectedItem
+        $dialog.DialogResult = $true
+        $dialog.Close()
+    })
+    $cancelButton.Add_Click({
+        $dialog.DialogResult = $false
+        $dialog.Close()
+    })
+    $dialog.Content = $panel
+    $accepted = $dialog.ShowDialog()
+    if ($accepted -and $dialog.Tag) { return $dialog.Tag }
+    return $null
+}
+
+function Initialize-SemrMigrationEndpointSelection {
+    Set-SemrProcessingStatus -Message 'Loading ExchangeRemoteMove migration endpoints; please wait...'
+    $endpointOptions = @(Get-SemrMigrationEndpointOption)
+    $currentSelection = $controls.MigrationEndpointCombo.SelectedItem
+    $currentName = if ($currentSelection -and $currentSelection.PSObject.Properties['Name']) { [string]$currentSelection.Name } else { '' }
+    $configuredName = [string]$script:Config.Hybrid.MigrationEndpointName
+    $preferredName = if ($currentName) { $currentName } else { $configuredName }
+    $preferred = @($endpointOptions | Where-Object Name -EQ $preferredName | Select-Object -First 1)
+
+    $script:UpdatingMigrationEndpointCombo = $true
+    try {
+        $controls.MigrationEndpointCombo.ItemsSource = @($endpointOptions)
+        $controls.MigrationEndpointCombo.DisplayMemberPath = 'Name'
+        $controls.MigrationEndpointCombo.SelectedIndex = -1
+        if ($preferred.Count -eq 1) { $controls.MigrationEndpointCombo.SelectedItem = $preferred[0] }
+    }
+    finally {
+        $script:UpdatingMigrationEndpointCombo = $false
+    }
+    $script:MigrationEndpointsLoaded = $true
+
+    if ($endpointOptions.Count -eq 0) {
+        $script:Config.Hybrid['MigrationEndpointName'] = ''
+        $controls.MigrationEndpointCombo.Text = 'No ExchangeRemoteMove endpoint found'
+        $script:MigrationEndpointSelectionConfirmed = $false
+        Write-SemrActivity -Message 'No ExchangeRemoteMove migration endpoint was returned by Exchange Online.' -Level WARN
+        return $true
+    }
+    if ($endpointOptions.Count -eq 1) {
+        $controls.MigrationEndpointCombo.SelectedItem = $endpointOptions[0]
+        $script:Config.Hybrid['MigrationEndpointName'] = [string]$endpointOptions[0].Name
+        $script:MigrationEndpointSelectionConfirmed = $true
+        Write-SemrActivity -Message "Migration endpoint selected automatically: $($endpointOptions[0].Name)." -Level SUCCESS
+        return $true
+    }
+
+    if ($script:MigrationEndpointSelectionConfirmed -and $preferred.Count -eq 1) {
+        $script:Config.Hybrid['MigrationEndpointName'] = [string]$preferred[0].Name
+        Write-SemrActivity -Message "Migration endpoint retained for this session: $($preferred[0].Name)."
+        return $true
+    }
+
+    $selectedEndpoint = Show-SemrMigrationEndpointSelection -Endpoints $endpointOptions -PreferredName $preferredName
+    if (-not $selectedEndpoint) {
+        $controls.StatusText.Text = 'Assessment cancelled: no migration endpoint was selected.'
+        Write-SemrActivity -Message 'Assessment cancelled because no migration endpoint was selected.' -Level WARN
+        return $false
+    }
+    $script:UpdatingMigrationEndpointCombo = $true
+    try { $controls.MigrationEndpointCombo.SelectedItem = $selectedEndpoint }
+    finally { $script:UpdatingMigrationEndpointCombo = $false }
+    $script:Config.Hybrid['MigrationEndpointName'] = [string]$selectedEndpoint.Name
+    $script:MigrationEndpointSelectionConfirmed = $true
+    Write-SemrActivity -Message "Migration endpoint selected for this session: $($selectedEndpoint.Name)." -Level SUCCESS
+    return $true
+}
+
 function Sync-SemrConnectionDisplay {
     $mode = Get-SemrSelectedMode
     $script:Config['Mode'] = $mode
@@ -722,6 +858,7 @@ function Sync-SemrConnectionDisplay {
     }
 
     $controls.ModeCombo.IsEnabled = -not $script:IsBusy
+    $controls.MigrationEndpointCombo.IsEnabled = (-not $script:IsBusy -and $mode -eq 'Live' -and $script:MigrationEndpointsLoaded)
     $controls.RunButton.IsEnabled = (-not $script:IsBusy -and $null -ne $script:Batch)
     $alternativeCachePath = [string]$script:Config._AlternativeCacheRootPath
     $controls.FooterText.Text = "Read-only | Mode: $mode | Tenant: $($script:Config._TenantProfileKey) | Cache: $cachePath | Alternative: $alternativeCachePath"
@@ -828,6 +965,17 @@ $controls.ModeCombo.Add_SelectionChanged({
     Write-SemrActivity -Message "Execution mode changed to $mode. Cache root: $($script:Config._CacheRootPath)"
 })
 
+$controls.MigrationEndpointCombo.Add_SelectionChanged({
+    if ($script:UpdatingMigrationEndpointCombo -or -not $script:MigrationEndpointsLoaded) { return }
+    $selectedEndpoint = $controls.MigrationEndpointCombo.SelectedItem
+    if (-not $selectedEndpoint -or -not $selectedEndpoint.PSObject.Properties['Name']) { return }
+    $script:Config.Hybrid['MigrationEndpointName'] = [string]$selectedEndpoint.Name
+    $script:MigrationEndpointSelectionConfirmed = $true
+    $controls.HybridStateText.Text = "Migration endpoint selected for the next assessment: $($selectedEndpoint.Name)."
+    $controls.HybridStateText.Foreground = '#5F6B7A'
+    Write-SemrActivity -Message "Migration endpoint changed for this application session: $($selectedEndpoint.Name)."
+})
+
 $controls.OptionsItemsControl.AddHandler(
     [System.Windows.Controls.Primitives.ToggleButton]::CheckedEvent,
     [System.Windows.RoutedEventHandler]{ param($sender,$eventArgs) Update-SemrOptionsSummary }
@@ -865,6 +1013,11 @@ $controls.RunButton.Add_Click({
                 Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) | Out-Null
                 Write-SemrActivity -Message 'Exchange Online connected.' -Level SUCCESS
                 Sync-SemrConnectionDisplay
+            }
+
+            $endpointCheck = @($script:CheckOptions | Where-Object CheckId -EQ 'HYBRID-ENDPOINT' | Select-Object -First 1)
+            if ($endpointCheck.Count -eq 1 -and $endpointCheck[0].Enabled) {
+                if (-not (Initialize-SemrMigrationEndpointSelection)) { return }
             }
 
             $connectionState = Get-SemrConnectionState
@@ -1039,8 +1192,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDs03PvMyhjW44G
-# 3EbpV85PW0Tb3RULWbgHsVvelZ7ZgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3iD1fJASqrWHN
+# NKjLcguBgnHg5gRiemoT64lEK9tvH6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1173,31 +1326,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMtg7NPxIOnZ6YNxqBfoxRq2ozBrFWw5IVKeCAGAy4g4MA0GCSqG
-# SIb3DQEBAQUABIIBgEyjzzmt9AJ4q0YiCt1prmKveEDng2qYAtYreXthwhzkvqNk
-# fs/QPagfaveadioH6YnlU4Xefn5ij4Xait7FDkVQu6fHJ2Lgtn8M5Fh6TqqBK6Er
-# RyiVbg4lytMMR9CmPEWvxjv2xht6XkU7zs2qqJ63Z20DKoR7pVeLCLYwPfNx1KGy
-# FssQcbe4g43FEAw5duleHK8NHz/sm+HS89hkP2fV1Bpr/oDxr/IvC0NVkVWr6gdS
-# TwcGU/90RKuxKnOmCDmd95T16iq9Tu9tPx2Mq0Mof4FdF0pV7O7p8YY1aLTt1kz/
-# U+WWSywHRwFpglceUcpQzDr2t+UQUioKPFrCq5/3bfMJkKtJoXIVVk1aSj4rZQBa
-# dvoHcVqkHsss5ktpXnB3b6hmAYA35bWSFmmolmkKgwo0w5x6RaLR2+vynIff4V4L
-# CEX0Cd5GlmOdlJXBxR03/Hj5SIHDcuZceqOREtIKTj+gX0N6Pr5qhG7oJB5FZimq
-# Xmlt/hOhu/gV7A+P/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFbH3ARKUzGxE+KnO7E1Px8L8FfUIL8AbDcudnDLPdoVMA0GCSqG
+# SIb3DQEBAQUABIIBgExTwinXH3kwW4sO/hh0vKJqk5y6fpJxBTsQZ1YYPo/FgLmk
+# 5ZPjRPBYGlpzhJHoppujKasCM7sz18vRWA6qrH0VhR3zS3RMkvL9EnFqLn9QtXvS
+# UVY/CfruL6k6ctSYuSus9f5PXH+CefhiUeQkxSx+WWJsaNXA/p4l1zdIE9dnngog
+# YMRJz2XPf6I3RjeeZmttFr3UY8iBBD7J8W7IwtkZ0KxvnRQyIoG9sGFlkT/yvHi/
+# 2a6UtaZuiwoOMT/U5E9mrIkLUP9mAcc4EmlJvw8PldQdONv/sMsnuhwfXJpCFcwS
+# WvBqsDgzKJRSzDd2F+jTzoVRsD8ttk56OtfrxFo2IsP8yCAFSDJSwnr6a9KY90q3
+# 9xunfAGD2ZRzfB5qOmG4IOQ4ilVNdpXw//RcUdCqcOLaPiGZ9qwbllVGT6tSbt9x
+# Yie56ZgY8ZtHJkGghJmHnL8lMqQgNLf3EmdJaiDAp8UvVfJJlmAvs7dNFl31lafq
+# R0T/0DEEInZo6CXH66GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMDI3
-# NTNaMC8GCSqGSIb3DQEJBDEiBCAQx+Ni71DZ3ecc7xjXnjBjSXRIHovbVVJum6kr
-# OzIh0DANBgkqhkiG9w0BAQEFAASCAgCyne09/TcP6B1rhaVMyZJ6J/UHP+ljAVCZ
-# ggb/UVUxqutUlxgiGbGC7wX/jqOxU4sQvINuI7ZXC80lScEBFghSBxkeI99WVIxH
-# cODkwhxcaLjsKtS14nLpLjcbV3LE4XMGEiNqSD0jLrEW/fT75R+xJviz89dpaGCx
-# GissDQwgpH4v1BdRNwaw9dQXng+OY6+7CK04WYId1DdZXIzz7BDap8fhNQdL/mkQ
-# 6A2VvQhp2+YW/jJQHBIbYSnnLP7y23gSn5/20Akl5e0tey2047goxFdXyldDmPbX
-# 2BKk2D7GzRh1N6uhgiLrwEjVmECPpMQ3O4v5poe164wtrQtjhbXCWULNrPUiXXX4
-# pgd7afcxh4+jNIZA83Vgo8PCh5tRIiojp4LvN6qC1CLHJedfj/ML8U+uXPm8khSd
-# QVxVt3bI2v+EniPiDrH+VE+mYM0pO3lgcrURXVGA4hkbKpXmPyLfUT3oTu105mGp
-# Sk3kv/USVkBcCfIv+agQX3/brf5oVJsv3hZZBvo7B3hGwPtDE0kxG4UV30nMwCMC
-# YfcOHvHwOVAP+weNnTyQx+zg3vPM6vGha+wyxeSWuTltuNl13ibvvJQ20XOHrm5P
-# LhzeYjACzisD4dzDz/f+6+9RS9GPuvaQe1de5YTbQ0VeuTi6a7a5VUxjF1RgOY7Q
-# x6fUj66qlQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMDQy
+# MjBaMC8GCSqGSIb3DQEJBDEiBCDKKvq1UCQx+SJtXWCpjhpiHFnO/qzTYKOAS+R0
+# r2gPIDANBgkqhkiG9w0BAQEFAASCAgB0lR1lqZYPDq0q/z6ybf5Cx2b3EzxPx5Xw
+# Hz5dYh7EaawwsG4KTLsfWVMAK7TktqacyWx5De7JiVv5MJ1rDGxD2yLisYc4sUzR
+# wWQG7Us6cWbqZ77G7WT+BACnYc9wAgLzx8X6EoIYxwoqn5c5xZqQYNqkeTHMphO7
+# dG7Cr8dBfijW1iSRWpAL/QrQBXx3aDPXaB8X5mwpmKYmq3Qt+LF4W+MCsDv8XJoG
+# 2sLdQP4xNcsA0wCm9++EdFunDybskWwqbABrMMprtB/hdu6zOxwL+CQHItHpG/sB
+# AKwJY3IgK+K/DPfaY+O2juccDPhtwRgTCt7zLWRdVfH4BWxFmElq2uqHohhgCdWU
+# 2iUVxV711GPkRLOXaqqc5w70sOYmKsMd/r4RhyOnxRYFpYUCPdDEyW598sffSqNn
+# vB0zBSk+EScIS/zAVBa0dRKYSpNnKTg2jR/GTLNx6/RzLSdpeJ+iDPJqDtlfRVa7
+# /3KvyfsCxVSHAR7Izouemtx4V3p5YWUgvC5hEQlqYUO16Gj51kpDkVHLWoC/VPKp
+# OzYYzFV8YtFHsJ0F32SK0W5X38o3qa+v3ZQ/ygI4s0yQ3DIGRdGPxBsDZ38dgmL2
+# EQVjKJI4+v3/ugUZUKQjADQDdPF4YN1LtVyrKU3CX8vTnn6rXDj3s99cNRF5V9wc
+# DphwCe195g==
 # SIG # End signature block
