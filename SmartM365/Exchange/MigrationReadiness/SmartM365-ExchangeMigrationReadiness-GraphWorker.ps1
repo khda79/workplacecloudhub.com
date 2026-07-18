@@ -3,12 +3,15 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.3.1
+1.4.0
 #>
 #requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$TenantId = '',
+    [ValidateSet('Interactive', 'Application')][string]$AuthenticationMode = 'Interactive',
+    [string]$ClientId = '',
+    [string]$CertificateThumbprint = '',
     [string]$ScopesPath = '',
     [string]$InputPath = '',
     [string]$OutputPath = '',
@@ -30,6 +33,25 @@ function Write-WorkerTextFile {
     [IO.File]::WriteAllText($Path, $Value, [Text.UTF8Encoding]::new($false))
 }
 
+function Get-WorkerApplicationCertificate {
+    param([Parameter(Mandatory)][string]$Thumbprint)
+
+    $normalizedThumbprint = $Thumbprint.Replace(' ', '').Trim().ToUpperInvariant()
+    foreach ($storePath in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')) {
+        $certificate = Get-Item -LiteralPath (Join-Path $storePath $normalizedThumbprint) -ErrorAction SilentlyContinue
+        if (-not $certificate) { continue }
+        if (-not $certificate.HasPrivateKey) {
+            throw "Certificate '$normalizedThumbprint' in '$storePath' does not have an accessible private key."
+        }
+        $now = Get-Date
+        if ($certificate.NotBefore -gt $now -or $certificate.NotAfter -le $now) {
+            throw "Certificate '$normalizedThumbprint' in '$storePath' is not currently valid (valid from $($certificate.NotBefore) to $($certificate.NotAfter))."
+        }
+        return $certificate
+    }
+    throw "Certificate '$normalizedThumbprint' was not found in Cert:\CurrentUser\My or Cert:\LocalMachine\My."
+}
+
 try {
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     Import-Module Microsoft.Graph.Users -ErrorAction Stop
@@ -41,7 +63,7 @@ try {
                 throw "Required Microsoft Graph command is unavailable: $commandName"
             }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.3.1'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.4.0'
         exit 0
     }
 
@@ -58,13 +80,30 @@ try {
     }
 
     $connectParameters = @{
-        Scopes = $scopes
         ContextScope = 'Process'
         NoWelcome = $true
         ErrorAction = 'Stop'
     }
-    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+    if ($AuthenticationMode -eq 'Application') {
+        $requiredApplicationValues = [ordered]@{
+            TenantId = $TenantId
+            ClientId = $ClientId
+            CertificateThumbprint = $CertificateThumbprint
+        }
+        foreach ($key in $requiredApplicationValues.Keys) {
+            if ([string]::IsNullOrWhiteSpace([string]$requiredApplicationValues[$key])) {
+                throw "$key is required for Microsoft Graph application authentication."
+            }
+        }
         $connectParameters.TenantId = $TenantId
+        $connectParameters.ClientId = $ClientId
+        $connectParameters.Certificate = Get-WorkerApplicationCertificate -Thumbprint $CertificateThumbprint
+    }
+    else {
+        $connectParameters.Scopes = $scopes
+        if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+            $connectParameters.TenantId = $TenantId
+        }
     }
     Connect-MgGraph @connectParameters | Out-Null
 
@@ -157,6 +196,7 @@ try {
 
     [pscustomobject][ordered]@{
         TenantId = [string]$context.TenantId
+        AuthenticationMode = $AuthenticationMode
         CollectedAt = Get-Date
         Evidence = @($evidence)
         SubscribedSkus = $subscribedSkus
@@ -179,8 +219,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmyju9oxO7Qap6
-# imFawGqcwnFsLApjVlAc6YJ8lk8mAqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCuDKiMyc7MzcAz
+# wILtppzjDOISRIawGRpzne6y+tK+G6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -313,31 +353,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILltPfLimahZx/A1LBcnfA/7r9sJ6DhbW16lGPMXjVE8MA0GCSqG
-# SIb3DQEBAQUABIIBgCI3ZvC7AoPgEg/RGgJ2ET7z7BjG2WURkhJQRqBWAzKHSkiI
-# I3rDCGOcWGAHuYC1ZzDNxtGA/rKdCeBe7awL1zgYcolyDhA7a42PTmVUSB81JfJP
-# UkwdW8InEVqJhjuopLCn8J1OI9vCbZREQ5+7WODKlPUQFkgGMkWtmAEj20AKU/4N
-# kYTEdPt0tf+OH5L6v+b36KPCipnrmGafCw9D9VPi2aYJUj095r0f0NqXgmwV5rix
-# tefmWkysdpqWa3QXvvDXIjMH/iPywZFYkVesiQhbwzT5b/hq1+fMSvu/MIaG6LLR
-# jRs8lw3TreYWeoXMNz3uvf0Ljja3uhgrOn3JFeKvbOYTV+lTEOc2vkjXueNkEDnt
-# KwCdnmSnh+YabwAm1NS3SfkKXFWdtnJBTIyPlfFx4dmkw8akPb/Zqw6tWioBfNGA
-# IVV7GxowadxoGe5yBGHdXrwEV+rd3rhC2AGS7RFXbBg8wub71jp0WUb21uW/0iHv
-# yHDhBcbNT+7XEyr0gaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFsOAbu8QWk1HzWwZRDtnax7jve/fi3OIe7qGoXJo1uKMA0GCSqG
+# SIb3DQEBAQUABIIBgBOE+Bj2sEg1hgemDzbwjWrZ4yTUrimkT42/5birzUiL6oA1
+# QZQronw04je6T+dqqGkjTU0bBg6TUERPBHzlkZnPk8lsS03ewbxmbO5hT8HJXIks
+# is+Dp1ZkN7Fd8JiGHUYPFc5FbMK4bewETZCHBeJ4MsblwPhBcxy526Ed+pjcCnDu
+# zBgjZ+H+v2CsujHIL/RM08ESXB7AQ9H5upVn2uV6SyThzbk7zewKosHjpefBE3IP
+# FtnBMqYlRAVEHvSSUPJpOboDqOAW2+wQ45/jKESMRGR06opcyUUdQm0wz5+CnozE
+# i3Cs+ZjLB6sv4jtHWkPpGoe6Sq3J+rxk02oHAqEV43ozbelUuAbgok9nm1S6Ywc/
+# H/ytKZ0SdLA4pvy5kFg93iu7uPkgSC2JCx40JiykG3k3C39ou4OWwumMSTpewGxy
+# 6lQX0qkDRkX9F8B81HGRX0bcjZ4Dy4FLxBVUAy+hs+YSSvGgqNhLzNOq8cFjEqIF
+# YGWKSwVR4ZiyGgks2aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMDQ1
-# MzhaMC8GCSqGSIb3DQEJBDEiBCA2bQ2B6UOr9DauDUVQlR9tsG+JPQGjwrIuLDNK
-# 0yqepzANBgkqhkiG9w0BAQEFAASCAgAXE2GkRjVcWcbXBDhs63DNGO1Ps/2raWiT
-# fymzpfKiXkgAZyMIXu3X78b4E2ydPS3PeOqsKwWUMOC9Hqf3BEKkWmP81+0f0GdZ
-# VVDhVJIRuHUk5W8gMhxbxJWsHh6k+agtsjNKzkDnqT+wKgH3f5bPjMCHITiEnZCS
-# ZRjH0pY6GkxA7f9QOdtr1OGoJrQ8wQe0PvWlS0RlhlP0imsHHwMvfHd/3KYGOBMQ
-# yl55Bvi2n1TpRFtMFR4sSwz8gSdqZWUW40ybfYqsvihb5IQ5Jq/5oI8IXAPUZx9L
-# fQTr9b4FS0rMld/kizVuAP4XKm8chMpdKXRTHWzIoqpT3YC58c0eDjz1ffHZwthW
-# xeoon6s/4jkNv5CZ107b0WxBoKlb13RHW3FLYAZnqDqWdecNVF7tD/b0Ah0TEx/9
-# MmMuQKjcDNfqjd/Rvqv0eCDPjd5e3m8+ZrYyB68EBHZA/rgLUoU+sDpWrVR2uulz
-# 4gQ+I+ESgvh3oKe1e6UsoBMqU46DQbqkrUUV6XWHjiRuP8uXR7cVuXYpoEP713+m
-# ouaNe5D7CxAw8KPpdzCgDoJ8PqLWPlZ4IoBp/B3QMbSqf8dhxPOB4VyEaegLney5
-# UIHVgJRV2gO8dF7XQwTvJVsycAyJRuAljsR1R48tm8y1zOOH78XuVPEXvLkId2oo
-# Y1O/nFsL7g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMTM4
+# MjVaMC8GCSqGSIb3DQEJBDEiBCC3aFBoJ9Fl14jFqV5d4X2NuuKiZXBft+b2IOyJ
+# D2abPjANBgkqhkiG9w0BAQEFAASCAgCvlSIWc173GnXUHLF3gvfm3hU7vs+n7Tlm
+# K72OUXQVJXzW2Gay2ggAN/uil3JV/2iXNHtzd2FLXLA2C1XyONON3+cYh052Hlh8
+# ACb//CaTDQZJhkObKW0+zp6dPSaDdGQr9Vrp8IdM6lZ5ODtQFJtE8vIIt93hriEX
+# YhzYo1LVe+9zwn3Yr5JWQ/OCr8bMHRmvXmvTYfOzcaUQsoG9rdrTdkU5M3vX5SNk
+# FOEwpeS3mHMSDa4hABx5j6fXBGEITjWQbycJ45hwn+hjSbbA2DDNB04JAG+djQg/
+# dGrxJoNC38pRS7LXUIdE9jIFzGXrHh2Wg7KrjgWJABtwAeSbQhiwkCO8IzSg8By3
+# 2jlNunOWUIOqOG1sF81neqbH1Wu8rYZDaYcCiVmIou25T6UgbAf8V8GnIFpHn2yS
+# xfrAH8X/XoEbmQNeDZfj8YMAYVhxbXMdgbm8lLiWL0WeACTA+yV2Mh4PTgpSkXYU
+# 9JtCWuYU2/8Oqm/UsXkbq5avTXzQACfACl4i/w0crvqrLlD3Gw1orQca7GddOaBN
+# f1qK0Kjt0HZ2HD+0GKthiiNHymQhhoXJoy89nBsfqquQXL0mimWU0b5BwMfuZWwx
+# JuGEZXzcBpP1tE3VZc1iQyj3ymGlAIisosojBOlOXwzoOUqftODnnF1D9RCrEI6V
+# YskebsCXRg==
 # SIG # End signature block
