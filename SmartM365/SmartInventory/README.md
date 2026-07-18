@@ -6,8 +6,9 @@ Inventory scripts that can feed Power BI datasets, operational reports, CSV expo
 
 - `ActiveDirectoryInventory/`: Active Directory inventory and reporting.
 - `ExchangeInventory/`: Exchange Online and Exchange on-premises inventory.
-- `M365Inventory/`: Microsoft 365 and Entra inventory.
+- `M365Inventory/`: Microsoft 365, Entra, Power BI, and Microsoft Fabric inventory.
 - `M365Inventory/IntuneInventory/`: Intune inventory, Windows Update reporting, Autopilot, RBAC, applications, and remediation export utilities.
+- `M365Inventory/IntuneInventory/EndpointAnalytics/`: standard Endpoint Analytics score, startup, app reliability, and work-from-anywhere exports without Advanced Analytics.
 - `Launchers/Cloud/`: production launchers for cloud inventory scripts.
 - `Launchers/OnPremises/`: production launchers for Active Directory and Exchange on-premises inventory scripts.
 - `Launchers/Orchestrator/`: production launchers for orchestrator installation, start, stop, and restart operations.
