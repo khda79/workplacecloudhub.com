@@ -6,13 +6,6 @@
     "TenantId": "",
     "RemoteRoutingDomain": "tenant.mail.onmicrosoft.com"
   },
-  "Authentication": {
-    "Mode": "Interactive",
-    "AppId": "",
-    "OrgDomain": "",
-    "Thumb": "",
-    "Thumbprint": ""
-  },
   "Cache": {
     "RootPath": "\\\\server\\share\\WORKPLACE\\DATA\\Tenants\\tenant",
     "AlternativeRootPath": "",
