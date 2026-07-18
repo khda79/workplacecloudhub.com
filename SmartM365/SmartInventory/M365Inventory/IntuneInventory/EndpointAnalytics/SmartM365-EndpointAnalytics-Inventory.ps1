@@ -52,7 +52,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.4
+1.0.5
 
 .REQUIREMENTS
 PowerShell 7+.
@@ -89,7 +89,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.4'
+$script:ScriptVersion = '1.0.5'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -255,7 +255,10 @@ function Resolve-EAReportSelection {
     foreach ($name in $requested) {
         $reportMatches = @($Catalog | Where-Object { $_.Name -ieq $name -or $_.Group -ieq $name -or $_.Aliases -icontains $name })
         if ($reportMatches.Count -eq 0) { throw "Unsupported Endpoint Analytics report or group: $name" }
-        foreach ($reportMatch in $reportMatches) { if (-not ($selected.Name -contains $reportMatch.Name)) { $selected.Add($reportMatch) } }
+        foreach ($reportMatch in $reportMatches) {
+            $selectedNames = @($selected | ForEach-Object { $_.Name })
+            if ($selectedNames -notcontains $reportMatch.Name) { $selected.Add($reportMatch) }
+        }
     }
     return @($selected.ToArray() | Sort-Object Name -Unique)
 }
@@ -554,6 +557,10 @@ function Invoke-EASelfTest {
     $schemas = Get-EAOutputSchemas
     Test-EAStaticContract $catalog $schemas | Out-Null
 
+    $workFromAnywhereReports = @(Resolve-EAReportSelection $catalog @('WorkFromAnywhere'))
+    if ($workFromAnywhereReports.Count -ne 3 -or $workFromAnywhereReports.Name -notcontains 'EAWFAPerDevicePerformance') {
+        throw 'Report-group selection simulation failed.'
+    }
     $completedSequence = @(
         [pscustomobject]@{status='notStarted'},
         [pscustomobject]@{status='inProgress'},
@@ -593,7 +600,7 @@ function Invoke-EASelfTest {
     if ('EAResourcePerfAggByDevice' -notmatch $script:AdvancedReportPattern) { throw 'Advanced Analytics guard failed.' }
     if ((@('TenantKey') + $schemas.DevicePerformance)[0] -ne 'TenantKey') { throw 'TenantKey simulation failed.' }
     if ($MaxItems -gt 0 -and "x_MAXITEMS_$MaxItems.csv" -notmatch '_MAXITEMS_\d+\.csv$') { throw 'MAXITEMS simulation failed.' }
-    Write-EALog 'Self-test passed: completed, failed, throttled, schemas, TenantKey, MAXITEMS, normalization, output-list materialization, permission, and Advanced Analytics guard.' SUCCESS
+    Write-EALog 'Self-test passed: completed, failed, throttled, schemas, report-group selection, TenantKey, MAXITEMS, normalization, output-list materialization, permission, and Advanced Analytics guard.' SUCCESS
 }
 
 if ($SelfTest) { Invoke-EASelfTest; return }
