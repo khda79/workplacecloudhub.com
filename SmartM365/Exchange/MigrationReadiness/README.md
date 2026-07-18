@@ -48,18 +48,20 @@ Le profil opérationnel est défini dans le JSON local ignoré par Git avec :
 - `TenantProfile.TenantId` : garde-fou pour empêcher une authentification live dans le mauvais tenant ; s’il est vide, le profil `DefaultTenant` de SmartM365 est utilisé en mémoire.
 - `TenantProfile.ProfileKey` : clé explicite du profil tenant, par exemple `prod` ; la valeur générique `tenant` reprend seulement le `DefaultTenant` central.
 - `TenantProfile.RemoteRoutingDomain` : domaine de routage hybride attendu.
+- `Authentication.Mode` : `Interactive` ou `Application`. Le GUI permet de changer ce choix pour la session sans réécrire le JSON.
+- `Authentication.AppId`, `Authentication.OrgDomain`, `Authentication.Thumb` et `Authentication.Thumbprint` : paramètres de l’application Entra et du certificat utilisés en mode `Application`. Le TenantId unique reste `TenantProfile.TenantId`. `Thumb` et `Thumbprint` sont acceptés pour rester compatibles avec les profils SmartM365 et doivent être identiques lorsqu’ils sont tous les deux renseignés.
 - `Cache.RootPath` : racine des inventaires CSV.
 - `Cache.MaximumAgeHours` : âge maximal accepté pour les données.
 
 Il n’existe plus de bloc générique `Tenant`, de paramètre `MicrosoftGraph.UseDeviceCode`, de bloc `OnPremises`, ni de paramètre `EntraConnect.Server`.
 
-Exchange Online et Graph utilisent une authentification interactive standard avec le `TenantId` effectif. Aucun flux device code n’est demandé.
+Exchange Online et Graph peuvent utiliser une authentification interactive standard ou une authentification applicative par certificat. Aucun flux device code n’est demandé. Le modèle partagé reste en mode `Interactive` avec des valeurs applicatives vides ; les identifiants tenant et certificat restent exclusivement dans le JSON local ignoré par Git.
 
 ## Sécurité
 
 L’application est strictement diagnostique. Elle ne crée pas de batch, ne modifie aucun destinataire, attribut AD, licence, hold, permission ou objet de migration.
 
-Les identifiants et jetons ne sont pas enregistrés. Le fichier JSON local, les CSV d’entrée et les rapports opérationnels sont exclus de Git.
+Les jetons et les clés privées ne sont pas enregistrés. En mode `Application`, la clé privée reste dans le magasin de certificats Windows ; l’application recherche le certificat dans `Cert:\CurrentUser\My`, puis `Cert:\LocalMachine\My`, et vérifie sa période de validité ainsi que la présence d’une clé privée. Le fichier JSON local, les CSV d’entrée et les rapports opérationnels sont exclus de Git.
 
 ## Prérequis
 
@@ -73,7 +75,8 @@ Uniquement pour le mode Live :
 
 - module `ExchangeOnlineManagement` 3.0 ou ultérieur ;
 - modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` ; lorsqu’un module manque dans PowerShell 7, le GUI propose de l’installer depuis PowerShell Gallery avec `-Scope CurrentUser` avant l’authentification ;
-- compte disposant des droits de lecture nécessaires dans Exchange Online et Microsoft Graph ;
+- en mode `Interactive`, compte disposant des droits de lecture nécessaires dans Exchange Online et Microsoft Graph ;
+- en mode `Application`, certificat installé avec clé privée accessible, permission applicative Microsoft Graph correspondant aux lectures demandées (`User.Read.All`, `Directory.Read.All`, `Organization.Read.All`) avec consentement administrateur, permission `Exchange.ManageAsApp` et rôle Exchange compatible avec les cmdlets de lecture utilisées ;
 - pour les sources on-premises live, modules/cmdlets `ActiveDirectory`, Exchange Management Shell et/ou `ADSync` disponibles sur la machine d’exécution. Leur absence n’est pas bloquante si les CSV de fallback sont accessibles et suffisamment récents.
 
 Scopes Graph par défaut :
