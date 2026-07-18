@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.38
+1.39
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version: 1.38
+    Version: 1.39
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -253,7 +253,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.38"
+$ScriptVersion = "1.39"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -1681,6 +1681,19 @@ try { # Main try block for script execution and interruption handling
                     $userObj | Add-Member NoteProperty -Name "RecipientOU" -Value $Mbx.OrganizationalUnit
                     $userObj | Add-Member NoteProperty -Name "PrimarySMTPaddress" -Value $(if($null -ne $Mbx.PrimarySmtpAddress){$Mbx.PrimarySmtpAddress.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "EmailAddresses" -Value (($Mbx.EmailAddresses | Where-Object {$_.PrefixString -eq 'smtp'} | ForEach-Object {$_.SmtpAddress}) -join ";")
+                    $userObj | Add-Member NoteProperty -Name "EmailAddressesAll" -Value (($Mbx.EmailAddresses | ForEach-Object {if($null -ne $_){$_.ToString()}else{""}}) -join ";")
+                    $userObj | Add-Member NoteProperty -Name "ExchangeGuid" -Value $(if($null -ne $Mbx.ExchangeGuid){$Mbx.ExchangeGuid.ToString()}else{""})
+                    $userObj | Add-Member NoteProperty -Name "ArchiveGuid" -Value $(if($null -ne $Mbx.ArchiveGuid){$Mbx.ArchiveGuid.ToString()}else{""})
+                    $userObj | Add-Member NoteProperty -Name "LegacyExchangeDN" -Value $(if($null -ne $Mbx.LegacyExchangeDN){$Mbx.LegacyExchangeDN.ToString()}else{""})
+                    $userObj | Add-Member NoteProperty -Name "LitigationHoldEnabled" -Value $Mbx.LitigationHoldEnabled
+                    $userObj | Add-Member NoteProperty -Name "InPlaceHolds" -Value (($Mbx.InPlaceHolds | ForEach-Object {if($null -ne $_){$_.ToString()}else{""}}) -join ";")
+                    $userObj | Add-Member NoteProperty -Name "RetentionHoldEnabled" -Value $Mbx.RetentionHoldEnabled
+                    $userObj | Add-Member NoteProperty -Name "ModerationEnabled" -Value $Mbx.ModerationEnabled
+                    $userObj | Add-Member NoteProperty -Name "AcceptMessagesOnlyFrom" -Value (($Mbx.AcceptMessagesOnlyFrom | ForEach-Object {if($null -ne $_){$_.ToString()}else{""}}) -join ";")
+                    $userObj | Add-Member NoteProperty -Name "AcceptMessagesOnlyFromDLMembers" -Value (($Mbx.AcceptMessagesOnlyFromDLMembers | ForEach-Object {if($null -ne $_){$_.ToString()}else{""}}) -join ";")
+                    $userObj | Add-Member NoteProperty -Name "RejectMessagesFrom" -Value (($Mbx.RejectMessagesFrom | ForEach-Object {if($null -ne $_){$_.ToString()}else{""}}) -join ";")
+                    $userObj | Add-Member NoteProperty -Name "RejectMessagesFromDLMembers" -Value (($Mbx.RejectMessagesFromDLMembers | ForEach-Object {if($null -ne $_){$_.ToString()}else{""}}) -join ";")
+                    $userObj | Add-Member NoteProperty -Name "RequireSenderAuthenticationEnabled" -Value $Mbx.RequireSenderAuthenticationEnabled
                     $userObj | Add-Member NoteProperty -Name "Database" -Value $(if($null -ne $Mbx.Database){$Mbx.Database.ToString()}else{""})
                     $userObj | Add-Member NoteProperty -Name "ServerName" -Value $Mbx.ServerName
                     $userObj | Add-Member NoteProperty -Name "UseDatabaseQuotaDefaults" -Value $Mbx.UseDatabaseQuotaDefaults

@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.8.2
+1.9.0
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.8.2'
+$script:AppVersion = '1.9.0'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -432,7 +432,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.8.2" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.9.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -1201,8 +1201,8 @@ $controls.RunButton.Add_Click({
                 $graphConfig = $script:Config.MicrosoftGraph
                 $graphProgressAction = {
                     param($Message)
-                    Update-SemrProgressWindow -Stage 'Collecting Microsoft Graph evidence' -Detail "$Message Please wait..." -Indeterminate
-                    Set-SemrProcessingStatus -Message "$Message Please wait..." -SkipActivity
+                    Update-SemrProgressWindow -Stage 'Collecting Microsoft Graph evidence' -Detail $Message -Indeterminate
+                    Set-SemrProcessingStatus -Message $Message -SkipActivity
                 }
                 $emailAddresses = @($script:Batch.Rows | ForEach-Object { [string]$_.EmailAddress })
                 Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction | Out-Null
@@ -1215,7 +1215,7 @@ $controls.RunButton.Add_Click({
             $percent = if ($Total -gt 0) { [math]::Round(($Current / $Total) * 100, 0) } else { 0 }
             $controls.RunProgress.Value = $percent
             $mailboxText = if ([string]::IsNullOrWhiteSpace([string]$Mailbox)) { '' } else { " - $Mailbox" }
-            $statusLine = "[$Current/$Total] $Phase$mailboxText. Please wait..."
+            $statusLine = "[$Current/$Total] $Phase$mailboxText"
             $controls.StatusText.Text = $statusLine
             Update-SemrProgressWindow -Stage $Phase -Detail $(if ($Mailbox) { $Mailbox } else { 'Collecting tenant and directory evidence.' }) -Current $Current -Total $Total
             Write-SemrActivity -Message $statusLine
@@ -1238,7 +1238,7 @@ $controls.RunButton.Add_Click({
         $exportProgress = {
             param($Stage,$Detail,$Current,$Total)
             Update-SemrProgressWindow -Stage $Stage -Detail $Detail -Current $Current -Total $Total
-            Set-SemrProcessingStatus -Message "$Stage - $Detail. Please wait..." -SkipActivity
+            Set-SemrProcessingStatus -Message "$Stage - $Detail" -SkipActivity
         }
         $script:Export = Export-SemrAssessment -Assessment $script:Assessment -OutputRoot (Resolve-SemrOutputRoot) -ProgressCallback $exportProgress
         $controls.SummaryGrid.ItemsSource = @($script:Assessment.Summary);$controls.FindingsGrid.ItemsSource = @($script:Assessment.Findings);$controls.GlobalFindingsGrid.ItemsSource = @($script:Assessment.GlobalFindings);$controls.PermissionsGrid.ItemsSource = @($script:Assessment.PermissionsBaseline);$controls.CsvSourcesGrid.ItemsSource = @($script:Assessment.CsvSources)

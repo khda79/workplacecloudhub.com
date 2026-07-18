@@ -3,7 +3,7 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.8.2
+1.9.0
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -41,7 +41,7 @@ try {
                 throw "Required Microsoft Graph command is unavailable: $commandName"
             }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.8.2'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.9.0'
         exit 0
     }
 
@@ -114,6 +114,13 @@ try {
                     [pscustomobject][ordered]@{
                         SkuId = [string]$_.SkuId
                         SkuPartNumber = [string]$_.SkuPartNumber
+                        ServicePlans = @($_.ServicePlans | ForEach-Object {
+                            [pscustomobject][ordered]@{
+                                ServicePlanName = [string]$_.ServicePlanName
+                                ProvisioningStatus = [string]$_.ProvisioningStatus
+                                AppliesTo = [string]$_.AppliesTo
+                            }
+                        })
                     }
                 })
             }
