@@ -107,6 +107,7 @@ This scope is not a SmartM365 runtime application permission. It is requested fr
 | `Microsoft.Graph.Beta.DeviceManagement` | Beta Intune and Endpoint Analytics cmdlets/endpoints used by inventories that target Graph beta. | PSGallery |
 | `Microsoft.Graph.Beta.Reports` | Beta report export helpers when Graph beta reporting cmdlets are used. | PSGallery |
 | `Microsoft.Graph.Reports` | Microsoft 365 usage report cmdlets/endpoints. | PSGallery |
+| `MicrosoftTeams` | Optional Teams Phone number and assignment inventory through the supported `Get-CsPhoneNumberAssignment` cmdlet. Version 4.7.1 or later is required for app-only authentication. | PSGallery |
 | `ExchangeOnlineManagement` | Exchange Online app-only and delegated PowerShell inventories. | PSGallery |
 | `PnP.PowerShell` | Optional SharePoint deep scan mode only; not required for the default SPO Graph inventory. | PSGallery |
 | `MSAL.PS` | Legacy/raw-token Intune report scripts that call Graph export jobs directly. | PSGallery |

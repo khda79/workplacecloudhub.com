@@ -10,7 +10,7 @@ SmartFinOps output aggregates usage by user without calculating license cost or
 performing any financial allocation.
 
 .VERSION
-1.3
+1.4
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -54,7 +54,7 @@ if ($MaxItems -gt 0) {
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$ScriptVersion = '1.3'
+$ScriptVersion = '1.4'
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $RunId = [guid]::NewGuid().Guid
@@ -925,10 +925,16 @@ try {
     }
 
     $CurrentOperation = 'Run preflight'
+    $requiredModules = @('Microsoft.Graph.Authentication')
+    $requiredCommands = @('Invoke-MgGraphRequest')
+    if ($IncludePhoneAssignments) {
+        $requiredModules += 'MicrosoftTeams'
+        $requiredCommands += @('Connect-MicrosoftTeams', 'Get-CsPhoneNumberAssignment')
+    }
     Invoke-SmartM365Preflight `
         -ScriptName $TaskName `
-        -RequiredModules @('Microsoft.Graph.Authentication') `
-        -RequiredCommands @('Invoke-MgGraphRequest') `
+        -RequiredModules $requiredModules `
+        -RequiredCommands $requiredCommands `
         -OutputPaths @($OutputPath, $LatestCsvFolderPath) | Out-Null
     WriteLog -Message 'Required Microsoft Graph application permission: CallRecords.Read.All. Live authorization is verified by the selected call-record endpoint before CSV publication.' -Level 'INFO'
 

@@ -37,7 +37,7 @@ Shows what would be installed without installing modules.
 Skips Import-Module validation after installation.
 
 .NOTES
-Version: 1.3
+Version: 1.4
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -82,6 +82,7 @@ $requiredModules += @(
     'Microsoft.Graph.Beta.Reports',
     'Microsoft.Graph.Policies',
     'Microsoft.Graph.Reports',
+    'MicrosoftTeams',
     'MicrosoftPowerBIMgmt.Profile',
     'ExchangeOnlineManagement',
     'PnP.PowerShell',
