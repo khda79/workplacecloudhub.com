@@ -699,7 +699,7 @@ function Get-PowerBIActivityAuthorizationHeaders {
 function Get-PowerBIRateLimitDelaySeconds {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][datetime[]]$RequestTimesUtc,
+        [Parameter(Mandatory)][AllowEmptyCollection()][datetime[]]$RequestTimesUtc,
         [datetime]$UtcNow = [datetime]::UtcNow,
         [int]$RequestLimit = 200
     )
@@ -862,6 +862,7 @@ function Assert-PowerBIActivityValidation {
     if ((Get-PowerBIRateLimitDelaySeconds -RequestTimesUtc $twoHundredRequests -UtcNow $now) -le 0) { throw 'The 200 requests-per-hour limiter validation failed.' }
     $oneHundredNinetyNineRequests = @(1..199 | ForEach-Object { $now.AddMinutes(-10) })
     if ((Get-PowerBIRateLimitDelaySeconds -RequestTimesUtc $oneHundredNinetyNineRequests -UtcNow $now) -ne 0) { throw 'The request limiter blocked before 200 requests.' }
+    if ((Get-PowerBIRateLimitDelaySeconds -RequestTimesUtc @() -UtcNow $now) -ne 0) { throw 'The request limiter rejected an empty initial request ledger.' }
 
     if (($detailColumns | Select-Object -Unique).Count -ne $detailColumns.Count) { throw 'Detailed CSV schema contains duplicate columns.' }
     if (($userActivityColumns | Select-Object -Unique).Count -ne $userActivityColumns.Count) { throw 'User activity CSV schema contains duplicate columns.' }
@@ -1019,8 +1020,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9bFsjEEJdIMjy
-# 0y5u6jSHJAb6KeBz8224TTcv2ow5vaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCugqB/lIdYWZ0Y
+# QBovWYzVwaAXcv6pdWYFmb3/t8mWFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1153,31 +1154,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOYwXq0F2tJQdVGKZ8erCkS1AayMsnq67IctrMwmVlRZMA0GCSqG
-# SIb3DQEBAQUABIIBgLDtKAu2CFbtArW4Y9PS6crylIsnjWW/c8kMaDaaEXKSyKQD
-# SLVQi5R/zkpqMGQ1HOV9zShJmiNQrLbtWnEU+YbMuJhXHsC6q06sz0x6tQpq6d+e
-# axQMkCs4ld1mx0Ixugcdr2gZOpwSL7DcUEy92CYW9gr9p/TsMsGIrypsVvrbwM7A
-# ITTNwWmMncag7no041xSGnfbNRm+pUEjaDcHpU2froke3EoaqGS2kXsRzRUemHGV
-# hzi1LjABU6tUbQqR13zPZZY5gVHPESmUhNQgoZGDD4k+zDT2QTOh974DQjFs98sZ
-# xWIRKGkZD+fVE8RsF3Ds1t+qZBiwH0ZMsQAipRMaMl5ihSq4WE8ornEhLaUdz1en
-# DrbkXezZ0nqD1xgEqkYKYpY1RvxtorAZt3zr+uCrnU+Egs+zMaUk+Ie8bdoV76nc
-# y1R+VEKlinLSLQusAswIz/F/9IC9qcIJc9mYD+gM16BnhuqGxiuRZ8On8Dxbw4Do
-# TCiaTmPvjeIeGVE8b6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDPTp8dBrQcTdUNhY7a1WwfRqNIyjlrpnpnhcVeoKetHMA0GCSqG
+# SIb3DQEBAQUABIIBgHIbzMKfXFxbEVs9+R3vA/RNes5KnkX4ZqK1pck2wyAQJZdv
+# z2H83CJumcvTM+Zj5CQB/VZItR/PqFkO3FArqMZ6Kpc/+dctKMdU/l8QVSpc1Shq
+# 0hdnp7tGmHhK83Xli+Ybv8FRyuC265w46gudgxF/PIXRH41P8CGYTKCg2DCNYI8U
+# ifZWSdL2asYYJfot3pxo140R7ohjmQMqftrWlIwB2lQNOg6CNkicGsGQ+njEqGGc
+# g1Cmlz/2dAh1/MvIIC2M4T3MNB0vqMXsJ1a1fj9poktuytS5UzzM5auuGYjkKqkH
+# XOjcwluog+CL/3zWaBHoMsKhyOZcQ0BPChc+XAAWjGqJOTjL78KqZZKi77giOVYn
+# E3w7ipfWpdt3Lm8v6vP1r+QBfRk+F2U58KtCukdfgEM8Sgo89YdkD4G0WLH2UgQq
+# j1oyq1uQinOo0SpHQvbtR3REGyoNy5qlMKYgV1uO7YQsBTryYbMiyD1p9lPWvYQu
+# ahGao/7pOSbyK3KS7aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMTI4
-# MzVaMC8GCSqGSIb3DQEJBDEiBCAh6WDj0xBnvoEHLHoJ6C7nX0HcekUv2/gj4yv1
-# 2r58CzANBgkqhkiG9w0BAQEFAASCAgAeazvxoMrhAlHz4Rc35vMV7BrzX8/3tXQh
-# GdCj6kvPsJsr9qojJs0fxC3i0r6qrD0bPIHgDYkhIkMrCmaCytBfVBYPJsSn6J58
-# fPjyn95JFNGctGAK103hNSU5jjvBDaBPyte9PpMgl6hqp65M/Muyy3+PKvMnpkp/
-# w0emRi/HRK9ZQxBnGFWn9pJ9/hhv1Fv62GiJFmRwsRZ8tsCL90UOmN78KtxpltCP
-# mdRonSGCQsLrCwspQwXJWp/XWih5wpXQ7tAH5UUc6tHnk+1VOrqmrGLn025M25Cv
-# 3NfHNCs5xhfJ/dE0U6zi5+7sHDbYL+6xnofIkBLxXY8+hPO88xCz/X+XD90I39UA
-# s6SP8kN5gZ9/mDrPoF8CDifl+XpJC/gbAN4hrTajUecgmpnSHmrxrgyTHqMvVNUl
-# HoPOJD9xI+h0LYg+faY+PIhhf8tF8Mse7OOR9L5N5aPeQInyWycqgwOXYpZ1psVV
-# gFqPsDvjL+xCXea7VJxCsJIm3MlmrNbgNXN9i52PWYtQnEK90kGiyigSTVlGkhHQ
-# KLwiCYQNB44gnDUZxwUc+STGEv2pYPXf/326nGbmeUqhjECMWS5oelZWP+XsKeLe
-# EqRdDdrHnaVBr2wRgDv1S0+aqI15G8J1eMhsHNTh0MtEVppKvjRbkjptS9BQSTbz
-# kcJCTBnXUg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMTMx
+# NTBaMC8GCSqGSIb3DQEJBDEiBCCzw8euepBCBOUW1n83ol1ht0MnAaVJYM6MN1PP
+# 1lZaZjANBgkqhkiG9w0BAQEFAASCAgCeuMDAFoLRQfM75L7RmR6GrNzcrYT9fH6I
+# XUjWLEx1euypHKvHHxUlUXe97zv56i/j8/EwPGV86mnMuZPqedspsWAg5DZx1+6g
+# IWSdU1X+l/K8eYw4iwsNWStScWC+YTssvo3BUW2LSBOhar9bcaru/VQFQkXb+aDU
+# yx+XMvtodIlKJzWdgkUCvfEEO1GdlklSNJfA/hD6nAuGhpodn887B6Ak84PerXsv
+# wVy0LXEpZKrsytunL+hgTHsn6uxSEeY5BuQOkKUPofb2wZoWGlo3IV0YTraCRrfN
+# S/9QWdHbXLvy6akTg8WBK+PG0bYmUHLsAQf4cYbpA0FmcA5RmiWf5wXzKEKhmuJR
+# +ulSspklAfgoHA0tOtSCWIk9rIrwic3B6wIZVWg9gU6obxznyt7/GBZM5Tl3O79w
+# 6NaBDlvTbjt/NiYuinZA55TRkQvgkkY8XUrNvacTtAPd8nZHBLmaeKCRqHSYtdk9
+# oZrFlLn8zlrs9h2gO+tBazXgfci0br4dbQpRrzF4i9qXQQV8GfpkSnW3KR+AhC3b
+# BmT+ekw/gLHvz5wosmSkvg5UQqR+kag+QBTU6i/Fwd/1tODpKNFoCDGpOdzlqw8d
+# YCHQbDYiOOkVn4f83dRo3DiGUGhSCN7RQrVfRFxvZP8vYqjqwFYZhOc+jJq5Q/n2
+# auE12z7k4g==
 # SIG # End signature block
