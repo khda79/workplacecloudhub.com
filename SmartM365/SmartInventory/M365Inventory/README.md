@@ -75,7 +75,7 @@ The aggregate contains only principals for which an event was returned. After Sm
 
 `Usage/SmartM365-CopilotUsage-Inventory.ps1` is a read-only collector for the official Microsoft Graph v1.0 endpoint `GET /copilot/reports/getMicrosoft365CopilotUsageUserDetail`.
 
-It publishes `M365_Copilot_UserUsage.csv` to the tenant `DATA-LAST` folder and keeps timestamped DATA-ALL plus weekly history copies. Report version `v2` is the default because it adds active usage days, prompt counters for all apps and Copilot Chat work/web, and the Microsoft 365 app, Edge, agent, and Copilot Chat work/web last-activity dates. The script falls back to `v1` only when `v2` is unavailable or when `D30` is explicitly requested, because Microsoft documents `D30` for `v1` and `D28` for `v2`.
+It publishes `M365_Copilot_UserUsage.csv` to the tenant `DATA-LAST` folder and keeps timestamped DATA-ALL plus weekly history copies. Report version `v2` is the default because it adds active usage days, prompt counters for all apps and Copilot Chat work/web, and the Microsoft 365 app, Edge, agent, and Copilot Chat work/web last-activity dates. The script falls back to `v1` only when `v2` is unavailable or when `D30` is explicitly requested, because Microsoft documents `D30` for `v1` and `D28` for `v2`. For compatibility with tenants where the versioned route is not yet recognized, the v1 fallback omits the optional `version` function parameter and therefore uses the documented v1 default.
 
 The API returns only users who have a Microsoft 365 Copilot license. The collector never requests or exports prompt text. Version `v1` does not expose prompt counters or active usage days, so the stable v2-oriented CSV columns remain empty after a v1 fallback.
 
