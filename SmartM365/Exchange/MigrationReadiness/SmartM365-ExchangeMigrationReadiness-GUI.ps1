@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.1.6
+1.2.0
 #>
 #requires -Version 7.0
 
@@ -23,14 +23,19 @@ trap {
         [void][System.Windows.MessageBox]::Show($message, 'Smart Exchange Migration Readiness - startup error', 'OK', 'Error')
     }
     catch {}
+    if ($script:SessionLogPath) {
+        try { [IO.File]::AppendAllText($script:SessionLogPath, "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [ERROR] Startup failure: $message`r`n", [Text.UTF8Encoding]::new($false)) } catch {}
+    }
     exit 1
 }
-$script:AppVersion = '1.1.6'
+$script:AppVersion = '1.2.0'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
 $script:CancelRequested = $false
 $script:IsBusy = $false
+$script:SessionLogPath = ''
+$script:SessionLogError = ''
 
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName PresentationFramework
@@ -275,7 +280,20 @@ $xaml = @'
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Results">
+            <TabItem x:Name="CsvSourcesTab" Header="CSV sources">
+                <Grid Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                        <TextBlock Text="CSV files expected by the selected mode. Used identifies the effective source; Present and Fresh describe the selected file from DATA-LAST or the tenant cache root." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                    </Border>
+                    <DataGrid x:Name="CsvSourcesGrid" Grid.Row="1"/>
+                </Grid>
+            </TabItem>
+
+            <TabItem x:Name="ResultsTab" Header="Results">
                 <Grid Margin="0,12,0,0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -338,7 +356,7 @@ $xaml = @'
 
             <TabItem Header="Activity">
                 <Grid Margin="0,12,0,0">
-                    <TextBox x:Name="ActivityBox" FontFamily="Consolas" FontSize="12" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                    <TextBox x:Name="ActivityBox" Height="Auto" VerticalAlignment="Stretch" VerticalContentAlignment="Top" FontFamily="Consolas" FontSize="12" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                 </Grid>
             </TabItem>
         </TabControl>
@@ -352,7 +370,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.1.6" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.2.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -369,7 +387,7 @@ if ($ValidateOnly) {
     $validationWindow = ConvertFrom-SemrXaml -Text $xaml
     $requiredControls = @(
         'CsvPathBox', 'BrowseCsvButton', 'ModeCombo', 'RunButton', 'SummaryGrid',
-        'FindingsGrid', 'PermissionsGrid', 'ActivityBox'
+        'FindingsGrid', 'PermissionsGrid', 'CsvSourcesGrid', 'ResultsTab', 'ActivityBox'
     )
     foreach ($controlName in $requiredControls) {
         if (-not $validationWindow.FindName($controlName)) {
@@ -408,7 +426,7 @@ foreach ($name in @(
     'AdStateText', 'OnPremStateText', 'ExoStateText', 'GraphStateText', 'HybridStateText',
     'GoCountText', 'WarningCountText', 'NoGoCountText', 'UnknownCountText', 'SummaryGrid',
     'MailboxFilterBox', 'ClearFilterButton', 'FindingsGrid', 'PermissionsGrid', 'ComparePermissionsButton',
-    'ActivityBox', 'FooterText', 'RunProgress', 'VersionText', 'MainTabs'
+    'CsvSourcesGrid', 'CsvSourcesTab', 'ResultsTab', 'ActivityBox', 'FooterText', 'RunProgress', 'VersionText', 'MainTabs'
 )) {
     $controls[$name] = $window.FindName($name)
 }
@@ -439,6 +457,71 @@ function Write-SemrActivity {
     $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
     $controls.ActivityBox.AppendText("$line`r`n")
     $controls.ActivityBox.ScrollToEnd()
+    if ($script:SessionLogPath) {
+        try { [IO.File]::AppendAllText($script:SessionLogPath, "$line`r`n", [Text.UTF8Encoding]::new($false)) } catch {}
+    }
+}
+
+function Update-SemrCsvSourcesDisplay {
+    param(
+        [switch]$AssessmentCompleted,
+        [AllowNull()]$EntraConnect = $null
+    )
+
+    try {
+        $controls.CsvSourcesGrid.ItemsSource = @(Get-SemrCsvSourceInventory -Config $script:Config -Batch $script:Batch -EntraConnect $EntraConnect -AssessmentCompleted:$AssessmentCompleted)
+    }
+    catch {
+        Write-SemrActivity -Message "CSV source inventory could not be refreshed: $($_.Exception.Message)" -Level WARN
+    }
+}
+
+function Confirm-SemrStaleCsvUsage {
+    $script:Config['_AllowStaleCache'] = $false
+    $sources = @(Get-SemrCsvSourceInventory -Config $script:Config -Batch $script:Batch)
+    $mode = Get-SemrSelectedMode
+    $staleSources = @($sources | Where-Object {
+        $_.Present -and -not $_.Fresh -and (
+            $mode -eq 'CacheOnly' -or $_.ExpectedUse -eq 'Live fallback / CacheOnly'
+        )
+    })
+    if ($staleSources.Count -eq 0) { return $true }
+
+    $maximumAgeHours = [double]$script:Config.Cache.MaximumAgeHours
+    $fileList = ($staleSources | ForEach-Object { "- $($_.FileName): $($_.AgeHours) hour(s) old`n  $($_.Path)" }) -join "`n"
+    $modeExplanation = if ($mode -eq 'Live') { 'These files may be needed if a live on-premises source is unavailable.' } else { 'CacheOnly requires these files for the assessment.' }
+    $message = @"
+The following CSV file(s) exceed MaximumAgeHours ($maximumAgeHours):
+
+$fileList
+
+$modeExplanation
+
+Do you want to continue and explicitly accept these stale files for this run?
+"@
+    $answer = [System.Windows.MessageBox]::Show($window, $message, 'Stale CSV cache detected', 'YesNo', 'Warning')
+    if ($answer -eq [System.Windows.MessageBoxResult]::Yes) {
+        $script:Config['_AllowStaleCache'] = $true
+        Write-SemrActivity -Message "Operator accepted $($staleSources.Count) stale CSV file(s) for this run." -Level WARN
+        Update-SemrCsvSourcesDisplay
+        return $true
+    }
+
+    $controls.StatusText.Text = 'Assessment cancelled: stale CSV files were not accepted.'
+    Write-SemrActivity -Message 'Assessment cancelled because stale CSV files were not accepted.' -Level WARN
+    return $false
+}
+
+function Set-SemrProcessingStatus {
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [ValidateSet('INFO','WARN','ERROR','SUCCESS')][string]$Level = 'INFO',
+        [switch]$SkipActivity
+    )
+
+    $controls.StatusText.Text = $Message
+    if (-not $SkipActivity) { Write-SemrActivity -Message $Message -Level $Level }
+    Invoke-SemrDoEvent
 }
 
 function Show-SemrError {
@@ -515,7 +598,8 @@ function Sync-SemrConnectionDisplay {
 
     $controls.ModeCombo.IsEnabled = -not $script:IsBusy
     $controls.RunButton.IsEnabled = (-not $script:IsBusy -and $null -ne $script:Batch)
-    $controls.FooterText.Text = "Read-only | Mode: $mode | Tenant: $($script:Config._TenantProfileKey) | Cache: $cachePath"
+    $alternativeCachePath = [string]$script:Config._AlternativeCacheRootPath
+    $controls.FooterText.Text = "Read-only | Mode: $mode | Tenant: $($script:Config._TenantProfileKey) | Cache: $cachePath | Alternative: $alternativeCachePath"
 }
 function Switch-SemrBusyState {
     param(
@@ -528,6 +612,7 @@ function Switch-SemrBusyState {
     }
     $controls.CsvPathBox.IsEnabled = -not $Busy
     $controls.CancelButton.IsEnabled = $Busy
+    $window.Cursor = if ($Busy) { [System.Windows.Input.Cursors]::Wait } else { [System.Windows.Input.Cursors]::Arrow }
     Sync-SemrConnectionDisplay
     if ($Message) { $controls.StatusText.Text = $Message }
     Invoke-SemrDoEvent
@@ -538,6 +623,22 @@ function Resolve-SemrOutputRoot {
     if ([System.IO.Path]::IsPathRooted($configured)) { return $configured }
     return Join-Path $PSScriptRoot $configured
 }
+
+function Initialize-SemrSessionLog {
+    try {
+        $logFolder = Join-Path (Resolve-SemrOutputRoot) 'Logs'
+        New-Item -Path $logFolder -ItemType Directory -Force | Out-Null
+        $script:SessionLogPath = Join-Path $logFolder ("SmartM365-ExchangeMigrationReadiness-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        $line = "{0} [INFO] Smart Exchange Migration Readiness v{1} session log created." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $script:AppVersion
+        [IO.File]::WriteAllText($script:SessionLogPath, "$line`r`n", [Text.UTF8Encoding]::new($false))
+    }
+    catch {
+        $script:SessionLogPath = ''
+        $script:SessionLogError = $_.Exception.Message
+    }
+}
+
+Initialize-SemrSessionLog
 
 function Import-SemrCsvToGui {
     try {
@@ -550,6 +651,9 @@ function Import-SemrCsvToGui {
         $controls.StatusText.Text = "Batch loaded: $($script:Batch.Rows.Count) mailbox row(s)."
         $controls.RunButton.IsEnabled = $true
         Write-SemrActivity -Message "Loaded CSV '$($script:Batch.Path)' with $($script:Batch.Rows.Count) row(s)." -Level SUCCESS
+        Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
+        Update-SemrCsvSourcesDisplay
+        $controls.StatusText.Text = "Batch loaded: $($script:Batch.Rows.Count) mailbox row(s)."
     }
     catch {
         $script:Batch = $null
@@ -593,6 +697,9 @@ $controls.ModeCombo.Add_SelectionChanged({
     $controls.HybridStateText.Foreground = '#5F6B7A'
     $controls.StatusText.Text = "Mode selected: $mode"
     Sync-SemrConnectionDisplay
+    Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
+    Update-SemrCsvSourcesDisplay
+    $controls.StatusText.Text = "Mode selected: $mode"
     Write-SemrActivity -Message "Execution mode changed to $mode. Cache root: $($script:Config._CacheRootPath)"
 })
 
@@ -600,15 +707,15 @@ $controls.RunButton.Add_Click({
     if (-not $script:Batch) { return }
     try {
         $script:CancelRequested = $false
-        Switch-SemrBusyState -Busy $true -Message 'Assessment running...'
+        Set-SemrProcessingStatus -Message 'Checking CSV cache freshness; please wait...'
+        if (-not (Confirm-SemrStaleCsvUsage)) { return }
+        Switch-SemrBusyState -Busy $true -Message 'Assessment running - please wait...'
         $controls.RunProgress.Value = 0
         Write-SemrActivity -Message "Starting read-only assessment in $($script:Config.Mode) mode for $($script:Batch.Rows.Count) mailbox row(s)."
         if ((Get-SemrSelectedMode) -eq 'Live') {
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.ExchangeOnline) {
-                $controls.StatusText.Text = 'Connecting interactively to Exchange Online...'
-                Write-SemrActivity -Message 'Starting automatic delegated Exchange Online connection.'
-                Invoke-SemrDoEvent
+                Set-SemrProcessingStatus -Message 'Connecting interactively to Exchange Online. Complete authentication, then please wait...'
                 $exoConfig = $script:Config.ExchangeOnline
                 Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) | Out-Null
                 Write-SemrActivity -Message 'Exchange Online connected.' -Level SUCCESS
@@ -617,14 +724,11 @@ $controls.RunButton.Add_Click({
 
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.MicrosoftGraph) {
-                $controls.StatusText.Text = 'Connecting interactively to Microsoft Graph...'
-                Write-SemrActivity -Message 'Starting automatic delegated Microsoft Graph connection.'
-                Invoke-SemrDoEvent
+                Set-SemrProcessingStatus -Message 'Connecting interactively to Microsoft Graph. Complete authentication, then please wait...'
                 $graphConfig = $script:Config.MicrosoftGraph
                 $graphProgressAction = {
                     param($Message)
-                    $controls.StatusText.Text = $Message
-                    Invoke-SemrDoEvent
+                    Set-SemrProcessingStatus -Message "$Message Please wait..." -SkipActivity
                 }
                 $emailAddresses = @($script:Batch.Rows | ForEach-Object { [string]$_.EmailAddress })
                 Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction | Out-Null
@@ -636,7 +740,10 @@ $controls.RunButton.Add_Click({
             param($Current, $Total, $Mailbox, $Phase)
             $percent = if ($Total -gt 0) { [math]::Round(($Current / $Total) * 100, 0) } else { 0 }
             $controls.RunProgress.Value = $percent
-            $controls.StatusText.Text = "[$Current/$Total] $Phase - $Mailbox"
+            $mailboxText = if ([string]::IsNullOrWhiteSpace([string]$Mailbox)) { '' } else { " - $Mailbox" }
+            $statusLine = "[$Current/$Total] $Phase$mailboxText. Please wait..."
+            $controls.StatusText.Text = $statusLine
+            Write-SemrActivity -Message $statusLine
             Invoke-SemrDoEvent
         }
         $cancellationCheck = {
@@ -653,19 +760,22 @@ $controls.RunButton.Add_Click({
         $endpointName = if ([string]::IsNullOrWhiteSpace([string]$script:Assessment.Hybrid.EndpointName)) { 'not available' } else { [string]$script:Assessment.Hybrid.EndpointName }
         $controls.HybridStateText.Text = "Migration endpoint: $endpointName | $($script:Assessment.Hybrid.Message)`nEntra Connect: $($script:Assessment.EntraConnect.Message)"
         $controls.HybridStateText.Foreground = if ($script:Assessment.EntraConnect.Available -and ($script:Assessment.Hybrid.ConnectivitySuccess -or (Get-SemrSelectedMode) -eq 'CacheOnly')) { '#146C43' } else { '#8A5A00' }
+        Set-SemrProcessingStatus -Message 'Generating CSV reports and finalizing the assessment; please wait...'
         $script:Export = Export-SemrAssessment -Assessment $script:Assessment -OutputRoot (Resolve-SemrOutputRoot)
         $controls.SummaryGrid.ItemsSource = @($script:Assessment.Summary)
         $controls.FindingsGrid.ItemsSource = @($script:Assessment.Findings)
         $controls.PermissionsGrid.ItemsSource = @($script:Assessment.PermissionsBaseline)
+        $controls.CsvSourcesGrid.ItemsSource = @($script:Assessment.CsvSources)
         $controls.OpenOutputButton.IsEnabled = $true
         $controls.ComparePermissionsButton.IsEnabled = (Test-Path -LiteralPath $script:Export.PermissionsPath)
         Sync-SemrResultCount
         $controls.RunProgress.Value = 100
         $controls.StatusText.Text = if ($script:Assessment.Cancelled) { 'Assessment cancelled; partial results exported.' } else { "Assessment complete: $($script:Assessment.RunId)" }
         Write-SemrActivity -Message "Assessment exported to '$($script:Export.RunFolder)'." -Level SUCCESS
-        $controls.MainTabs.SelectedIndex = 2
+        $controls.MainTabs.SelectedItem = $controls.ResultsTab
     }
     catch {
+        Update-SemrCsvSourcesDisplay -AssessmentCompleted
         Show-SemrError -Title 'Assessment failed' -ErrorRecord $_
         $controls.StatusText.Text = 'Assessment failed. Review Activity.'
     }
@@ -733,7 +843,17 @@ $window.Add_ContentRendered({
         Hide-SmartM365GuiSplash -Splash $script:GuiSplash
     }
     Sync-SemrConnectionDisplay
-    Write-SemrActivity -Message "Smart Exchange Migration Readiness v$script:AppVersion started in $($script:Config.Mode) mode. Tenant profile: $($script:Config._TenantProfileKey). Cache root: $($script:Config._CacheRootPath)"
+    Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
+    Update-SemrCsvSourcesDisplay
+    Write-SemrActivity -Message "Smart Exchange Migration Readiness v$script:AppVersion started in $($script:Config.Mode) mode. Tenant profile: $($script:Config._TenantProfileKey). Cache root: $($script:Config._CacheRootPath). Alternative cache: $($script:Config._AlternativeCacheRootPath)"
+    Write-SemrActivity -Message 'Some live operations can take several minutes and may temporarily delay UI response. Follow the current-operation status and please wait before closing the application.'
+    if ($script:SessionLogPath) {
+        Write-SemrActivity -Message "Session log: $script:SessionLogPath"
+    }
+    elseif ($script:SessionLogError) {
+        Write-SemrActivity -Message "Session log could not be created: $script:SessionLogError" -Level WARN
+    }
+    $controls.StatusText.Text = if ($script:Batch) { "Batch loaded: $($script:Batch.Rows.Count) mailbox row(s)." } else { 'Ready. Select a migration batch CSV.' }
     foreach ($key in @($script:Config._AddedKeys)) {
         Write-SemrActivity -Message "Configuration key added from template: $key" -Level INFO
     }
@@ -762,6 +882,9 @@ try {
     [void]$window.ShowDialog()
 }
 finally {
+    if ($script:SessionLogPath) {
+        try { [IO.File]::AppendAllText($script:SessionLogPath, "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [INFO] Application closed.`r`n", [Text.UTF8Encoding]::new($false)) } catch {}
+    }
     if ($script:GuiSplash) {
         Close-SmartM365GuiSplash -Splash $script:GuiSplash
     }
@@ -770,8 +893,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKcF4Plupszczi
-# UQHNHXPYhsDmwECGhbHR9lPpYOXoGKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhMmWXNcVglJz+
+# WUrH6VTsUPYDuwmHH3dKtVPNkDBTJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -904,31 +1027,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEHa5rTnGCvXwhqjGNrGpB1qSrQ3QsWGbVmKlxIpX81ZMA0GCSqG
-# SIb3DQEBAQUABIIBgA3WYFhDHdAgY+946Oa3FbIgZnNf50Sr8xDVtAp2K4ebSm/6
-# royNn7MRXVBbBG4gMPfZ9rkdisW+yUfRY6GuzELWvbOgE+ZJIHA5I14jrezZNqxD
-# TZdPjMv25VOmcjlcu1j3jDfnkxj1gjC0zg5sdXbLABqHksQORUHaRulbtFMyPnuR
-# +II9ImpvafL02n2mzBWhjX9QzvY1QaWuxVoxWNzpZiO89qgUcnQcEjEoQe1Yu1hF
-# aYcuYOYi7P5QweVwnYxrJteS6IqiPHcTYB/5Srxe1IX2Ab//bIaGQNNUQ3B9dY00
-# guw8jfMfe1XhzRHtk0MujUeOYVibdW9aWQH5GYtWd2zzxMDGJm1mlOqzRXifc2Hb
-# wKWi+GPtwzqRPGAtqd+cvUamnn5Ju5V2hOufGTe0+w7QWLqMwFOsryswezOFU9UY
-# /Ke01OFemCQ3uhF11vDkMwbmbk8mSEUw6Kc9m4lyiG7IjaP6qho9Q1eNGbSHUV3m
-# Dm7ttHey/ZRUKiAkO6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMZP9TW1Q4JrV1bG6epEnSTaGY/JKuXFqe25wHqZDUMqMA0GCSqG
+# SIb3DQEBAQUABIIBgJbujW59svEiFlt+8YAKgyPCIMrBR1sE3rT9WY65hZJX+4b7
+# 6YmqqlvhcfPzgqE8stvPsUFoJXu2GeOMpI122st4FRITSPpXLaShInH791hb2gSV
+# zJoHGcGNd486zjPS7Hp0ABlFuNU5h8ia8QkRhAfMqexfsVRcEii8m0Yh88IOQSok
+# EFzkGV3n/j9su9pISgi6fA6ad2YgJFAxUmGXyf22L2qugvdXCgnoVYUAzQMmMmlD
+# /11Us/Wr5qaZZaDV/Kc9LXz+KqpeSKahjGmWDnhJ52fGIUxdh+K4Mtur/4KHG3V1
+# kaLv68kbyqY3//lKRXwGp0/4a8kuV+am6hXtvB0+7cpwRfmVo95UZyVpkgG/Gxz1
+# panjW/wq0c5Gg7BKSD0ySuB9hEpCzV6aZbTBKS+5B1nWLoT4a7fpkycf56Q/bYtj
+# JF3gdP7YAOsUdWU6gpwXBQNtcUKiWp9EJqdUmK4ulrrzhuJzUKP5nXvAVC0a0T+3
+# bfW480U2wnxmvk0PaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgwNzIy
-# MTFaMC8GCSqGSIb3DQEJBDEiBCCNO+eB13R/LAku3K6bNZPgcLFEu2VSgBQXv4jy
-# GL6bqjANBgkqhkiG9w0BAQEFAASCAgDPMG2DW5Uc+MtjIm3XME4aoMrDCXihK1of
-# wiXkkUO7n15wZKJ5NPoSDmxS31f9OM0YlAE7nyjtLQP5CNj1jxn/fsiwamnWF/dQ
-# bBpZKjX0gfpEydEJW1of0eEj16MHEliS3vDCoFqkCTIVBkPSl0ToleBZiRwZbssk
-# rC1aZAouKg+hrhlv9KimvVCAa3rziBUsMNBajlzHeIbeFoXNehOg1xuyGvyTcGKZ
-# qtqmVooZfGZ80iJ37AAkDaW9i22Ion7KVtoydRup4uBDLkM4nJcwvzgnZPMPWfMu
-# KrBjwFtL/33RZVrtCAPT0FD3XJESsuTL3AmAm/1+Klz1tR+NV2dOC2qRfdpKwvG3
-# jTWDvXHws3eOC3O+eJyq68HWm/pJVm/m5cqqGBvOZDBlxRi9TvXML8NnPgrMjWoi
-# 2NfKixbtdUuOfLyDjbJNnEP58zZl1pGdEkY0hHWwDh3Ox3cInu/bWkzk49DFlbP6
-# hBFER02sVOZYirAwGXlgJjBZbOEJwEagV+Tj/j14A9qtQM2REf5uUZ6APD+wb9Jd
-# dHBF5FB8gD3dFMv9MDmHgJqxFP6UoE7KWkm/NC65AbfHYYRMy6hJNf9QWvfRo9W3
-# HJBkn6w/845NgK8m4OM02HmR+jEI9dtu6OCWt6aRJldnvFP53RRk85GLR7PuSeox
-# +OkY08byjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgwODUz
+# NDlaMC8GCSqGSIb3DQEJBDEiBCAgh4jGqAMkH3pdA8OJkSHxznWNC1s3jt26fSz9
+# lEVMCTANBgkqhkiG9w0BAQEFAASCAgC5/JrKdx5gECh7MnmlwzLrXudCQWw1/l5k
+# 2K/X/5V6QMBGd9BLC4Wstjnrz9a7i+gyTdHpp2lxUS1JMYwEthP+tqNydjmoFm/L
+# g7pBjh8l6jUzlsS7WzoXUxYwjgv9RTq6ZGFgeFPUw+eVv8gvqhn+LvyHJb56jeZU
+# IVGhMHuxDUrKfk6QB37mvAgC0VmVh5Z/ieMnMowZHmhQYlP6Sh4ki5tsrC8e6+mS
+# XzRgkRxYZXaIG2CztHJsiCiIePnmR8Ts/KSB6JPPAQMQcW8HsVbXiu+l1SFpjgj8
+# TJxC2Vtkn67GJ+MV+5nsQ7Tyuge0+tW5ca6ZNFeI712m8z0V72UEAneINF5rkAZo
+# nD8K0gqxvmODrmBBYG0zVVINeKDtJSuNxf82NL05MCsubZ+9GKwuXZJiLEdaE5sT
+# teACPcJfRhwMhrzaohtLKiVYm8s8Na0oP0YkZIIL0QaNK55vnSGEheeTy8BUDtEb
+# or0tayxjLDbU7sTBGp0d3QsPzmxwaTQpfu9aeulx0i7nSEpYJDqW0oXyEENO09OA
+# nrrBa343/LLI4VqaQsmVbUqX5xrWQDqMdztCC7mwp/0Zjb3Na/tjDvL2fGzjkytB
+# it5vsppzswhbGf5IshI+cLY8b7KTUzEQx6FRC5OThxu9prqC/iJ4nBuSIaIkrR50
+# SO4XIj3uCA==
 # SIG # End signature block

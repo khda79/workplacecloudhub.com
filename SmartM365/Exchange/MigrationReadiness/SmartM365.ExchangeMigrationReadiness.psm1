@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.1.6'
+$script:SemrVersion = '1.2.0'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:GraphEvidenceByEmail = @{}
@@ -182,6 +182,9 @@ function Get-SemrConfig {
         $runtime['Hybrid']['TargetDeliveryDomain'] = [string]$tenantProfile['RemoteRoutingDomain']
     }
     $cacheRootPath = Resolve-SemrConfigPath -Path ([string]$runtime['Cache']['RootPath']) -BasePath $PSScriptRoot
+    $alternativeCacheRootPath = Resolve-SemrConfigPath -Path ([string]$runtime['Cache']['AlternativeRootPath']) -BasePath $PSScriptRoot
+    $cacheDataLastPath = if ($cacheRootPath -and [IO.Path]::GetFileName($cacheRootPath.TrimEnd('\')) -ieq 'DATA-LAST') { $cacheRootPath } elseif ($cacheRootPath) { Join-Path $cacheRootPath 'DATA-LAST' } else { '' }
+    $alternativeDataLastPath = if ($alternativeCacheRootPath -and [IO.Path]::GetFileName($alternativeCacheRootPath.TrimEnd('\')) -ieq 'DATA-LAST') { $alternativeCacheRootPath } elseif ($alternativeCacheRootPath) { Join-Path $alternativeCacheRootPath 'DATA-LAST' } else { '' }
 
     $runtime['_RuntimePath'] = $Path
     $runtime['_AddedKeys'] = $added
@@ -189,7 +192,10 @@ function Get-SemrConfig {
     $runtime['_TenantId'] = [string]$tenantProfile['TenantId']
     $runtime['_RemoteRoutingDomain'] = [string]$tenantProfile['RemoteRoutingDomain']
     $runtime['_CacheRootPath'] = $cacheRootPath
-    $runtime['_InventoryDataLastPath'] = if ($cacheRootPath) { Join-Path $cacheRootPath 'DATA-LAST' } else { '' }
+    $runtime['_InventoryDataLastPath'] = $cacheDataLastPath
+    $runtime['_AlternativeCacheRootPath'] = $alternativeCacheRootPath
+    $runtime['_AlternativeInventoryDataLastPath'] = $alternativeDataLastPath
+    $runtime['_AllowStaleCache'] = $false
     return $runtime
 }
 function Get-SemrConnectionState {
@@ -698,22 +704,153 @@ function Get-SemrEvidenceSourceMode {
 function Get-SemrInventoryFileState {
     param(
         [Parameter(Mandatory)][string]$Path,
-        [double]$MaximumAgeHours = 48
+        [double]$MaximumAgeHours = 48,
+        [switch]$AllowStale
     )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return [pscustomobject]@{ Available = $false; Path = $Path; Timestamp = $null; AgeHours = $null; Message = "Inventory file not found: $Path" }
+        return [pscustomobject]@{ Available = $false; Present = $false; Fresh = $false; AcceptedStale = $false; Path = $Path; Timestamp = $null; AgeHours = $null; Message = "Inventory file not found: $Path" }
     }
     $item = Get-Item -LiteralPath $Path
     $ageHours = ((Get-Date) - $item.LastWriteTime).TotalHours
     $fresh = $MaximumAgeHours -le 0 -or $ageHours -le $MaximumAgeHours
+    $acceptedStale = -not $fresh -and $AllowStale
     return [pscustomobject]@{
-        Available = $fresh
+        Available = $fresh -or $acceptedStale
+        Present = $true
+        Fresh = $fresh
+        AcceptedStale = $acceptedStale
         Path = $item.FullName
         Timestamp = $item.LastWriteTime
         AgeHours = [math]::Round($ageHours, 2)
-        Message = if ($fresh) { "Inventory available; age $([math]::Round($ageHours, 2)) hour(s)." } else { "Inventory is stale; age $([math]::Round($ageHours, 2)) hour(s), maximum $MaximumAgeHours." }
+        Message = if ($fresh) { "Inventory available; age $([math]::Round($ageHours, 2)) hour(s)." } elseif ($acceptedStale) { "Inventory is stale but accepted for this run; age $([math]::Round($ageHours, 2)) hour(s), maximum $MaximumAgeHours." } else { "Inventory is stale; age $([math]::Round($ageHours, 2)) hour(s), maximum $MaximumAgeHours." }
     }
+}
+
+function Get-SemrInventoryFolders {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Config)
+
+    $folders = [System.Collections.Generic.List[string]]::new()
+    foreach ($folder in @(
+        [string]$Config['_InventoryDataLastPath'],
+        [string]$Config['_CacheRootPath'],
+        [string]$Config['_AlternativeInventoryDataLastPath'],
+        [string]$Config['_AlternativeCacheRootPath']
+    )) {
+        if ([string]::IsNullOrWhiteSpace($folder)) { continue }
+        if (-not $folders.Contains($folder)) { [void]$folders.Add($folder) }
+    }
+    return @($folders)
+}
+
+function Resolve-SemrInventoryFilePath {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Config,
+        [Parameter(Mandatory)][string]$FileName
+    )
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($folder in @(Get-SemrInventoryFolders -Config $Config)) {
+        $candidate = Join-Path $folder $FileName
+        if (-not $candidates.Contains($candidate)) { [void]$candidates.Add($candidate) }
+    }
+    $existing = @($candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object { Get-Item -LiteralPath $_ } | Sort-Object LastWriteTime -Descending)
+    if ($existing.Count -gt 0) { return $existing[0].FullName }
+    if ($candidates.Count -gt 0) { return $candidates[0] }
+    return $FileName
+}
+
+function Get-SemrCsvSourceInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Config,
+        [AllowNull()]$Batch,
+        [AllowNull()]$EntraConnect,
+        [switch]$AssessmentCompleted
+    )
+
+    $maximumAgeHours = [double]$Config['Cache']['MaximumAgeHours']
+    $allowStale = [bool]$Config['_AllowStaleCache']
+    $mode = [string]$Config['Mode']
+    $connectionState = Get-SemrConnectionState
+    $results = [System.Collections.Generic.List[object]]::new()
+
+    if ($Batch -and -not [string]::IsNullOrWhiteSpace([string]$Batch.Path)) {
+        $batchState = Get-SemrInventoryFileState -Path ([string]$Batch.Path) -MaximumAgeHours 0
+        [void]$results.Add([pscustomobject][ordered]@{
+            FileName = [IO.Path]::GetFileName([string]$Batch.Path)
+            Category = 'Migration batch'
+            ExpectedUse = 'Required input'
+            Path = [string]$batchState.Path
+            Present = [bool]$batchState.Present
+            Fresh = [bool]$batchState.Present
+            Used = [bool]$batchState.Present
+            Status = if ($batchState.Present) { 'Used' } else { 'Missing' }
+            LastWriteTime = if ($batchState.Timestamp) { ([datetime]$batchState.Timestamp).ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+            AgeHours = $batchState.AgeHours
+            Details = 'Mailbox identities selected for this assessment.'
+        })
+    }
+
+    $definitions = @(
+        [pscustomobject]@{ FileName = 'AD_Users_AllDomains.csv'; Category = 'Active Directory'; ExpectedUse = 'Live fallback / CacheOnly'; SourceName = 'ActiveDirectory' },
+        [pscustomobject]@{ FileName = 'Exchange_OnPrem_Mailboxes_AllDomains.csv'; Category = 'Exchange on-premises'; ExpectedUse = 'Live fallback / CacheOnly'; SourceName = 'ExchangeOnPremises' },
+        [pscustomobject]@{ FileName = 'M365_Entra_AzureADConnect_SyncHealth.csv'; Category = 'Microsoft Entra Connect'; ExpectedUse = 'Live fallback / CacheOnly'; SourceName = 'EntraConnect' },
+        [pscustomobject]@{ FileName = 'M365_Users_Active.csv'; Category = 'Microsoft Graph users'; ExpectedUse = 'CacheOnly'; SourceName = 'CloudCacheOnly' },
+        [pscustomobject]@{ FileName = 'Exchange_EXO_Mailboxes_AllDomains.csv'; Category = 'Exchange Online recipients'; ExpectedUse = 'CacheOnly'; SourceName = 'CloudCacheOnly' },
+        [pscustomobject]@{ FileName = 'Exchange_EXO_MigrationJobs.csv'; Category = 'Exchange Online migration jobs'; ExpectedUse = 'CacheOnly'; SourceName = 'CloudCacheOnly' },
+        [pscustomobject]@{ FileName = 'M365_Licenses_Tenant.csv'; Category = 'Microsoft 365 licensing'; ExpectedUse = 'CacheOnly'; SourceName = 'CloudCacheOnly' },
+        [pscustomobject]@{ FileName = 'M365_Licenses_ServicePlans.csv'; Category = 'Exchange license service plans'; ExpectedUse = 'CacheOnly'; SourceName = 'CloudCacheOnly' }
+    )
+
+    foreach ($definition in $definitions) {
+        $filePath = Resolve-SemrInventoryFilePath -Config $Config -FileName $definition.FileName
+        $state = Get-SemrInventoryFileState -Path $filePath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
+        $used = $false
+        $status = ''
+
+        if ($mode -eq 'CacheOnly') {
+            $used = [bool]$state.Available
+            $status = if (-not $state.Present) { 'Required - Missing' } elseif ($state.AcceptedStale) { 'Used - Stale accepted' } elseif (-not $state.Fresh) { 'Required - Stale' } else { 'Used' }
+        }
+        elseif ($definition.SourceName -eq 'CloudCacheOnly') {
+            $status = 'Not used - Live EXO/Graph source'
+        }
+        elseif (-not $AssessmentCompleted) {
+            $status = if (-not $state.Present) { 'Fallback missing' } elseif (-not $state.Fresh) { 'Fallback stale' } else { 'Fallback available' }
+        }
+        else {
+            $liveSourceUsed = switch ($definition.SourceName) {
+                'ActiveDirectory' { [bool]$connectionState.ActiveDirectory }
+                'ExchangeOnPremises' { [bool]$connectionState.OnPremisesExchange }
+                'EntraConnect' { if ($EntraConnect) { [string]$EntraConnect.Source -notmatch 'CSV' } else { [bool]$connectionState.EntraConnect } }
+                default { $true }
+            }
+            if ($liveSourceUsed) {
+                $status = 'Not used - Live source succeeded'
+            }
+            else {
+                $used = [bool]$state.Available
+                $status = if (-not $state.Present) { 'Fallback required - Missing' } elseif ($state.AcceptedStale) { 'Used - Stale CSV fallback accepted' } elseif (-not $state.Fresh) { 'Fallback required - Stale' } else { 'Used - CSV fallback' }
+            }
+        }
+
+        [void]$results.Add([pscustomobject][ordered]@{
+            FileName = $definition.FileName
+            Category = $definition.Category
+            ExpectedUse = $definition.ExpectedUse
+            Path = [string]$state.Path
+            Present = [bool]$state.Present
+            Fresh = [bool]$state.Fresh
+            Used = $used
+            Status = $status
+            LastWriteTime = if ($state.Timestamp) { ([datetime]$state.Timestamp).ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+            AgeHours = $state.AgeHours
+            Details = [string]$state.Message
+        })
+    }
+
+    return @($results)
 }
 
 function Import-SemrInventoryMatches {
@@ -776,14 +913,17 @@ function Initialize-SemrInventoryContext {
         ExchangeOnlineAvailable = $false
         MigrationDataAvailable = $false
         LicenseDataAvailable = $false
+        LicenseServicePlanDataAvailable = $false
         CloudUserRowsByEmail = @{}
         ExoMailboxRowsByEmail = @{}
         MigrationRowsByEmail = @{}
         LicenseRows = @()
+        LicenseServicePlanRows = @()
         CloudTimestamp = $null
         ExoTimestamp = $null
         MigrationTimestamp = $null
         LicenseTimestamp = $null
+        LicenseServicePlanTimestamp = $null
     }
 
     # Always preload these inventories: they are mandatory in CacheOnly and automatic fallbacks in Live.
@@ -791,14 +931,13 @@ function Initialize-SemrInventoryContext {
     $usesExchangeInventory = $true
     $usesEntraInventory = $true
 
-    $dataLastPath = [string]$Config['_InventoryDataLastPath']
-    $cacheRootPath = [string]$Config['_CacheRootPath']
-    if (-not (Test-Path -LiteralPath $dataLastPath -PathType Container) -and (Test-Path -LiteralPath $cacheRootPath -PathType Container)) {
-        $dataLastPath = $cacheRootPath
-        $script:InventoryContext.DataLastPath = $dataLastPath
+    $availableCacheFolders = @(Get-SemrInventoryFolders -Config $Config | Where-Object { Test-Path -LiteralPath $_ -PathType Container })
+    if ($availableCacheFolders.Count -gt 0) {
+        $script:InventoryContext.DataLastPath = $availableCacheFolders[0]
     }
-    if ([string]::IsNullOrWhiteSpace($dataLastPath) -or -not (Test-Path -LiteralPath $dataLastPath -PathType Container)) {
-        $message = "Tenant CSV cache folder not found: $dataLastPath"
+    if ($availableCacheFolders.Count -eq 0) {
+        $configuredFolders = @(Get-SemrInventoryFolders -Config $Config)
+        $message = "No configured CSV cache folder is accessible: $($configuredFolders -join '; ')"
         $script:InventoryContext.ActiveDirectoryMessage = $message
         $script:InventoryContext.ExchangeOnPremisesMessage = $message
         $script:InventoryContext.EntraConnectMessage = $message
@@ -806,13 +945,14 @@ function Initialize-SemrInventoryContext {
     }
 
     $maximumAgeHours = [double]$Config['Cache']['MaximumAgeHours']
+    $allowStale = [bool]$Config['_AllowStaleCache']
     $emails = @($BatchRows | ForEach-Object { [string]$_.EmailAddress } | Where-Object { $_ })
-    $adPath = Join-Path $dataLastPath 'AD_Users_AllDomains.csv'
-    $mailboxPath = Join-Path $dataLastPath 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
-    $entraPath = Join-Path $dataLastPath 'M365_Entra_AzureADConnect_SyncHealth.csv'
-    $adState = Get-SemrInventoryFileState -Path $adPath -MaximumAgeHours $maximumAgeHours
-    $mailboxState = Get-SemrInventoryFileState -Path $mailboxPath -MaximumAgeHours $maximumAgeHours
-    $entraState = Get-SemrInventoryFileState -Path $entraPath -MaximumAgeHours $maximumAgeHours
+    $adPath = Resolve-SemrInventoryFilePath -Config $Config -FileName 'AD_Users_AllDomains.csv'
+    $mailboxPath = Resolve-SemrInventoryFilePath -Config $Config -FileName 'Exchange_OnPrem_Mailboxes_AllDomains.csv'
+    $entraPath = Resolve-SemrInventoryFilePath -Config $Config -FileName 'M365_Entra_AzureADConnect_SyncHealth.csv'
+    $adState = Get-SemrInventoryFileState -Path $adPath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
+    $mailboxState = Get-SemrInventoryFileState -Path $mailboxPath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
+    $entraState = Get-SemrInventoryFileState -Path $entraPath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
 
     if ($usesAdInventory -and $adState.Available) {
         $script:InventoryContext.AdRowsByEmail = Import-SemrInventoryMatches -Path $adPath -EmailAddresses $emails -IdentityColumns @('EmailAddress', 'UserPrincipalName', 'PrimarySmtpAddress', 'ProxyAddresses')
@@ -849,14 +989,16 @@ function Initialize-SemrInventoryContext {
     }
 
     if ([string]$Config['Mode'] -eq 'CacheOnly') {
-        $cloudUserPath = Join-Path $dataLastPath 'M365_Users_Active.csv'
-        $exoMailboxPath = Join-Path $dataLastPath 'Exchange_EXO_Mailboxes_AllDomains.csv'
-        $migrationPath = Join-Path $dataLastPath 'Exchange_EXO_MigrationJobs.csv'
-        $licensePath = Join-Path $dataLastPath 'M365_Licenses_Tenant.csv'
-        $cloudState = Get-SemrInventoryFileState -Path $cloudUserPath -MaximumAgeHours $maximumAgeHours
-        $exoState = Get-SemrInventoryFileState -Path $exoMailboxPath -MaximumAgeHours $maximumAgeHours
-        $migrationState = Get-SemrInventoryFileState -Path $migrationPath -MaximumAgeHours $maximumAgeHours
-        $licenseState = Get-SemrInventoryFileState -Path $licensePath -MaximumAgeHours $maximumAgeHours
+        $cloudUserPath = Resolve-SemrInventoryFilePath -Config $Config -FileName 'M365_Users_Active.csv'
+        $exoMailboxPath = Resolve-SemrInventoryFilePath -Config $Config -FileName 'Exchange_EXO_Mailboxes_AllDomains.csv'
+        $migrationPath = Resolve-SemrInventoryFilePath -Config $Config -FileName 'Exchange_EXO_MigrationJobs.csv'
+        $licensePath = Resolve-SemrInventoryFilePath -Config $Config -FileName 'M365_Licenses_Tenant.csv'
+        $licenseServicePlanPath = Resolve-SemrInventoryFilePath -Config $Config -FileName 'M365_Licenses_ServicePlans.csv'
+        $cloudState = Get-SemrInventoryFileState -Path $cloudUserPath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
+        $exoState = Get-SemrInventoryFileState -Path $exoMailboxPath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
+        $migrationState = Get-SemrInventoryFileState -Path $migrationPath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
+        $licenseState = Get-SemrInventoryFileState -Path $licensePath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
+        $licenseServicePlanState = Get-SemrInventoryFileState -Path $licenseServicePlanPath -MaximumAgeHours $maximumAgeHours -AllowStale:$allowStale
 
         if ($cloudState.Available) {
             $script:InventoryContext.CloudUserRowsByEmail = Import-SemrInventoryMatches -Path $cloudUserPath -EmailAddresses $emails -IdentityColumns @('User principal name', 'Proxy addresses')
@@ -877,6 +1019,33 @@ function Initialize-SemrInventoryContext {
             $script:InventoryContext.LicenseRows = @(Import-Csv -LiteralPath $licensePath)
             $script:InventoryContext.LicenseDataAvailable = $script:InventoryContext.LicenseRows.Count -gt 0
             $script:InventoryContext.LicenseTimestamp = $licenseState.Timestamp
+        }
+        if ($licenseServicePlanState.Available) {
+            $configuredQuotaSkus = @($Config['TargetQuotaGbBySku'].Keys | ForEach-Object { ([string]$_).ToUpperInvariant() })
+            $targetSkus = @(
+                @($BatchRows | ForEach-Object { [string]$_.TargetSku }) + @([string]$Config['DefaultTargetSku']) |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                    ForEach-Object { $_.Trim().ToUpperInvariant() } |
+                    Where-Object { $_ -in $configuredQuotaSkus } |
+                    Sort-Object -Unique
+            )
+            $servicePlanRows = [System.Collections.Generic.List[object]]::new()
+            foreach ($targetSku in $targetSkus) {
+                $exchangePlan = @(
+                    Import-Csv -LiteralPath $licenseServicePlanPath |
+                        Where-Object {
+                            ([string]$_.SkuPartNumber).Trim().ToUpperInvariant() -eq $targetSku -and
+                            (Test-SemrMailboxServicePlanName -Name ([string]$_.PlanName)) -and
+                            (ConvertTo-SemrBoolean -Value $_.IsEnabled) -and
+                            ([string]::IsNullOrWhiteSpace([string]$_.PlanStatus) -or [string]$_.PlanStatus -ieq 'Success')
+                        } |
+                        Select-Object -First 1
+                )
+                if ($exchangePlan.Count -eq 1) { [void]$servicePlanRows.Add($exchangePlan[0]) }
+            }
+            $script:InventoryContext.LicenseServicePlanRows = @($servicePlanRows)
+            $script:InventoryContext.LicenseServicePlanDataAvailable = $true
+            $script:InventoryContext.LicenseServicePlanTimestamp = $licenseServicePlanState.Timestamp
         }
     }
 
@@ -1192,13 +1361,13 @@ function Get-SemrExchangeOnlineEvidence {
         }
     }
 
-    $recipients = if (Test-SemrCommand -Name 'Get-EXORecipient') {
+    $recipients = @(if (Test-SemrCommand -Name 'Get-EXORecipient') {
         Invoke-SemrCommandSafe -CommandName 'Get-EXORecipient' -Parameters @{
             Identity = $EmailAddress
             Properties = @('RecipientType', 'RecipientTypeDetails', 'EmailAddresses', 'ExternalEmailAddress')
         }
-    } else { @() }
-    $mailboxes = if (Test-SemrCommand -Name 'Get-EXOMailbox') {
+    })
+    $mailboxes = @(if (Test-SemrCommand -Name 'Get-EXOMailbox') {
         Invoke-SemrCommandSafe -CommandName 'Get-EXOMailbox' -Parameters @{
             Identity = $EmailAddress
             Properties = @(
@@ -1207,13 +1376,13 @@ function Get-SemrExchangeOnlineEvidence {
                 'DelayReleaseHoldApplied', 'ProhibitSendReceiveQuota', 'GrantSendOnBehalfTo'
             )
         }
-    } else { @() }
-    $statistics = if ($mailboxes.Count -eq 1 -and (Test-SemrCommand -Name 'Get-EXOMailboxStatistics')) {
+    })
+    $statistics = @(if ($mailboxes.Count -eq 1 -and (Test-SemrCommand -Name 'Get-EXOMailboxStatistics')) {
         Invoke-SemrCommandSafe -CommandName 'Get-EXOMailboxStatistics' -Parameters @{
             Identity = $EmailAddress
             Properties = @('TotalItemSize', 'ItemCount', 'TotalDeletedItemSize', 'StorageLimitStatus')
         }
-    } else { @() }
+    })
     $softDeleted = @()
     if (Test-SemrCommand -Name 'Get-Mailbox') {
         try {
@@ -1221,12 +1390,12 @@ function Get-SemrExchangeOnlineEvidence {
         }
         catch { $null = $_ }
     }
-    $migrationUsers = if (Test-SemrCommand -Name 'Get-MigrationUser') {
+    $migrationUsers = @(if (Test-SemrCommand -Name 'Get-MigrationUser') {
         Invoke-SemrCommandSafe -CommandName 'Get-MigrationUser' -Parameters @{ Identity = $EmailAddress }
-    } else { @() }
-    $moveRequests = if (Test-SemrCommand -Name 'Get-MoveRequest') {
+    })
+    $moveRequests = @(if (Test-SemrCommand -Name 'Get-MoveRequest') {
         Invoke-SemrCommandSafe -CommandName 'Get-MoveRequest' -Parameters @{ Identity = $EmailAddress }
-    } else { @() }
+    })
 
     return [pscustomobject]@{
         Available = $true
@@ -1275,6 +1444,12 @@ function Get-SemrGraphEvidence {
         QueryError = [string]$entry.QueryError
     }
 }
+function Test-SemrMailboxServicePlanName {
+    param([string]$Name)
+
+    return -not [string]::IsNullOrWhiteSpace($Name) -and $Name -match '^(?i:EXCHANGE_S_(ENTERPRISE|STANDARD|DESKLESS)|EXCHANGE_(ENTERPRISE|STANDARD|DESKLESS))$'
+}
+
 function Get-SemrTenantLicenseEvidence {
     param(
         [string]$TargetSku,
@@ -1288,6 +1463,10 @@ function Get-SemrTenantLicenseEvidence {
         Enabled = 0
         Consumed = 0
         AvailableUnits = 0
+        ServicePlanDataAvailable = $false
+        ExchangeServicePlanFound = $false
+        ExchangeServicePlanName = ''
+        ExchangeServicePlanStatus = ''
         Message = ''
     }
     if ($Config -and [string]$Config['Mode'] -eq 'CacheOnly') {
@@ -1305,6 +1484,24 @@ function Get-SemrTenantLicenseEvidence {
         $result.Enabled = [int]$sku[0].TenantPrepaidEnabled
         $result.Consumed = [int]$sku[0].TenantConsumedUnits
         $result.AvailableUnits = [math]::Max(0, $result.Enabled - $result.Consumed)
+        if ($script:InventoryContext.LicenseServicePlanDataAvailable) {
+            $result.ServicePlanDataAvailable = $true
+            $exchangePlan = @(
+                $script:InventoryContext.LicenseServicePlanRows |
+                    Where-Object {
+                        [string]$_.SkuPartNumber -ieq $TargetSku -and
+                        (Test-SemrMailboxServicePlanName -Name ([string]$_.PlanName)) -and
+                        (ConvertTo-SemrBoolean -Value $_.IsEnabled) -and
+                        ([string]::IsNullOrWhiteSpace([string]$_.PlanStatus) -or [string]$_.PlanStatus -ieq 'Success')
+                    } |
+                    Select-Object -First 1
+            )
+            if ($exchangePlan.Count -eq 1) {
+                $result.ExchangeServicePlanFound = $true
+                $result.ExchangeServicePlanName = [string]$exchangePlan[0].PlanName
+                $result.ExchangeServicePlanStatus = [string]$exchangePlan[0].PlanStatus
+            }
+        }
         $result.Message = "Cached: Enabled=$($result.Enabled); Consumed=$($result.Consumed); Available=$($result.AvailableUnits)"
         return [pscustomobject]$result
     }
@@ -1328,6 +1525,22 @@ function Get-SemrTenantLicenseEvidence {
     $result.Enabled = [int]$sku[0].Enabled
     $result.Consumed = [int]$sku[0].Consumed
     $result.AvailableUnits = [math]::Max(0, $result.Enabled - $result.Consumed)
+    if ($sku[0].PSObject.Properties['ServicePlans']) {
+        $result.ServicePlanDataAvailable = $true
+        $exchangePlan = @(
+            @($sku[0].ServicePlans) |
+                Where-Object {
+                    (Test-SemrMailboxServicePlanName -Name ([string]$_.ServicePlanName)) -and
+                    ([string]::IsNullOrWhiteSpace([string]$_.ProvisioningStatus) -or [string]$_.ProvisioningStatus -ieq 'Success')
+                } |
+                Select-Object -First 1
+        )
+        if ($exchangePlan.Count -eq 1) {
+            $result.ExchangeServicePlanFound = $true
+            $result.ExchangeServicePlanName = [string]$exchangePlan[0].ServicePlanName
+            $result.ExchangeServicePlanStatus = [string]$exchangePlan[0].ProvisioningStatus
+        }
+    }
     $result.Message = "Enabled=$($result.Enabled); Consumed=$($result.Consumed); Available=$($result.AvailableUnits)"
     return [pscustomobject]$result
 }
@@ -1419,24 +1632,57 @@ function ConvertFrom-SemrByteSize {
     return 0.0
 }
 
-function Get-SemrTargetQuotaGb {
+function Get-SemrTargetQuotaEvidence {
     param(
         [string]$TargetSku,
         [System.Collections.IDictionary]$Config,
-        [string]$MailboxType
+        [string]$MailboxType,
+        [switch]$TargetSkuExplicit
     )
-    if ($MailboxType -match 'Shared' -and [string]::IsNullOrWhiteSpace($TargetSku)) {
-        return 50.0
+
+    $result = [ordered]@{
+        TargetSku = $TargetSku
+        Known = $false
+        Eligible = $false
+        RequiresLicense = $true
+        QuotaGb = 0.0
+        Message = ''
     }
+    if ($MailboxType -match 'Shared' -and -not $TargetSkuExplicit) {
+        $result.TargetSku = 'UNLICENSED_SHARED_MAILBOX'
+        $result.Known = $true
+        $result.Eligible = $true
+        $result.RequiresLicense = $false
+        $result.QuotaGb = 50.0
+        $result.Message = 'Unlicensed shared mailbox policy: 50 GB maximum.'
+        return [pscustomobject]$result
+    }
+    if ([string]::IsNullOrWhiteSpace($TargetSku)) {
+        $result.Message = 'No target SKU is configured for this mailbox.'
+        return [pscustomobject]$result
+    }
+
+    $ineligibleSkus = @($Config['MailboxIneligibleTargetSkus'] | ForEach-Object { [string]$_ })
+    if (@($ineligibleSkus | Where-Object { $_ -ieq $TargetSku }).Count -gt 0) {
+        $result.Known = $true
+        $result.Message = "Target SKU '$TargetSku' does not grant an Exchange Online user mailbox."
+        return [pscustomobject]$result
+    }
+
     $map = $Config['TargetQuotaGbBySku']
     if ($map -is [System.Collections.IDictionary] -and $TargetSku) {
         foreach ($key in $map.Keys) {
             if ([string]$key -ieq $TargetSku) {
-                return [double]$map[$key]
+                $result.Known = $true
+                $result.Eligible = $true
+                $result.QuotaGb = [double]$map[$key]
+                $result.Message = "Configured primary mailbox quota for '$TargetSku': $($result.QuotaGb) GB."
+                return [pscustomobject]$result
             }
         }
     }
-    return [double]$Config['DefaultTargetQuotaGb']
+    $result.Message = "Target SKU '$TargetSku' is not present in TargetQuotaGbBySku; quota eligibility cannot be assumed."
+    return [pscustomobject]$result
 }
 
 function Test-SemrHybridReadiness {
@@ -1484,6 +1730,11 @@ function Test-SemrHybridReadiness {
 
     if ($endpoints.Count -eq 0) {
         $result.Message = 'No ExchangeRemoteMove migration endpoint was found.'
+        return [pscustomobject]$result
+    }
+    if (-not $configuredName -and $endpoints.Count -gt 1) {
+        $endpointNames = @($endpoints | ForEach-Object { [string]$_.Identity } | Where-Object { $_ })
+        $result.Message = "Multiple ExchangeRemoteMove endpoints were found ($($endpointNames -join ', ')). Configure Hybrid.MigrationEndpointName explicitly."
         return [pscustomobject]$result
     }
     $endpoint = $endpoints[0]
@@ -1621,8 +1872,11 @@ function Invoke-SemrAssessment {
         & $ProgressCallback 0 $rows.Count '' 'Trying live AD and Exchange on-premises sources'
     }
     $sourceInitialization = Initialize-SemrLiveSourceConnections -Config $Config
+    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Testing hybrid migration endpoint; please wait' }
     $hybrid = Test-SemrHybridReadiness -Config $Config
+    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Checking Microsoft Entra Connect health; please wait' }
     $entraConnect = Test-SemrEntraConnect -Config $Config
+    $csvSources = @(Get-SemrCsvSourceInventory -Config $Config -Batch $Batch -EntraConnect $entraConnect -AssessmentCompleted)
     $licenseCapacityCache = @{}
     $index = 0
 
@@ -1634,6 +1888,8 @@ function Invoke-SemrAssessment {
         }
 
         $email = [string]$row.EmailAddress
+        $resolvedRecipientType = ''
+        $mailboxTargetPolicy = $null
         $base = @{
             RunId = $runId
             EmailAddress = $email
@@ -1750,6 +2006,7 @@ function Invoke-SemrAssessment {
 
             if ($mailboxCount -eq 1) {
                 $mailbox = $onPrem.Mailboxes[0]
+                $resolvedRecipientType = [string]$mailbox.RecipientTypeDetails
                 $targetAddress = [string](Get-SemrPropertyValue -InputObject $mailbox -Names @('ExternalEmailAddress', 'WindowsEmailAddress') -Default '')
                 $addresses = @(ConvertTo-SemrAddressList -Value (Get-SemrPropertyValue -InputObject $mailbox -Names @('EmailAddresses') -Default @()))
                 $targetDomain = [string]$Config['Hybrid']['TargetDeliveryDomain']
@@ -1780,16 +2037,18 @@ function Invoke-SemrAssessment {
                 $statistics = @($onPrem.Statistics | Select-Object -First 1)
                 $sizeGb = if ($statistics.Count -eq 1) { ConvertFrom-SemrByteSize -Value $statistics[0].TotalItemSize } else { 0.0 }
                 $targetSku = if ($row.TargetSku) { $row.TargetSku } else { [string]$Config['DefaultTargetSku'] }
-                $quotaGb = Get-SemrTargetQuotaGb -TargetSku $targetSku -Config $Config -MailboxType ([string]$mailbox.RecipientTypeDetails)
+                $targetSkuExplicit = -not [string]::IsNullOrWhiteSpace([string]$row.TargetSku)
+                $mailboxTargetPolicy = Get-SemrTargetQuotaEvidence -TargetSku $targetSku -Config $Config -MailboxType $resolvedRecipientType -TargetSkuExplicit:$targetSkuExplicit
                 $bufferPercent = [double]$Config['QuotaSafetyBufferPercent']
-                $safeQuota = $quotaGb * (1.0 - ($bufferPercent / 100.0))
-                $sizePass = $statistics.Count -eq 1 -and $sizeGb -lt $safeQuota
+                $safeQuota = if ($mailboxTargetPolicy.Known -and $mailboxTargetPolicy.Eligible) { $mailboxTargetPolicy.QuotaGb * (1.0 - ($bufferPercent / 100.0)) } else { 0.0 }
+                $sizePass = $mailboxTargetPolicy.Known -and $mailboxTargetPolicy.Eligible -and $statistics.Count -eq 1 -and $sizeGb -lt $safeQuota
+                $quotaResult = if (-not $mailboxTargetPolicy.Known) { 'UNKNOWN' } elseif (-not $mailboxTargetPolicy.Eligible) { 'FAIL' } elseif ($statistics.Count -eq 0) { 'UNKNOWN' } elseif ($sizePass) { 'PASS' } else { 'FAIL' }
                 Add-SemrFinding -List $findings -Parameters ($base + @{
                     CheckId = 'MAILBOX-TARGET-QUOTA'; Category = 'Mailbox'; Severity = if ($sizePass) { 'Information' } else { 'Critical' }
-                    Result = if ($statistics.Count -eq 0) { 'UNKNOWN' } elseif ($sizePass) { 'PASS' } else { 'FAIL' }
-                    IsBlocking = -not $sizePass; ObservedValue = "$sizeGb GB"; ExpectedValue = "< $([math]::Round($safeQuota, 2)) GB ($targetSku / $quotaGb GB less $bufferPercent% buffer)"
-                    EvidenceSource = "$onPremSource mailbox statistics"; Message = if ($sizePass) { 'Mailbox size fits the target quota with the configured safety buffer.' } elseif ($statistics.Count -eq 0) { 'Mailbox statistics could not be collected.' } else { 'Mailbox size exceeds the safe target quota.' }
-                    RecommendedAction = if ($sizePass) { '' } else { 'Reduce mailbox size, enable/archive content, or select a target SKU with sufficient quota.' }
+                    Result = $quotaResult
+                    IsBlocking = -not $sizePass; ObservedValue = "$sizeGb GB"; ExpectedValue = if ($mailboxTargetPolicy.Known -and $mailboxTargetPolicy.Eligible) { "< $([math]::Round($safeQuota, 2)) GB ($($mailboxTargetPolicy.TargetSku) / $($mailboxTargetPolicy.QuotaGb) GB less $bufferPercent% buffer)" } else { 'A mailbox-eligible target SKU with an explicitly configured quota' }
+                    EvidenceSource = "$onPremSource mailbox statistics + configured target SKU policy"; Message = if (-not $mailboxTargetPolicy.Known) { $mailboxTargetPolicy.Message } elseif (-not $mailboxTargetPolicy.Eligible) { $mailboxTargetPolicy.Message } elseif ($sizePass) { 'Mailbox size fits the target quota with the configured safety buffer.' } elseif ($statistics.Count -eq 0) { 'Mailbox statistics could not be collected.' } else { 'Mailbox size exceeds the safe target quota.' }
+                    RecommendedAction = if ($sizePass) { '' } elseif (-not $mailboxTargetPolicy.Known) { 'Add the approved SKU and its mailbox quota to TargetQuotaGbBySku, or set TargetSku correctly in the batch.' } elseif (-not $mailboxTargetPolicy.Eligible) { 'Select a target SKU that grants an Exchange Online mailbox.' } else { 'Reduce mailbox size, enable/archive content, or select a target SKU with sufficient quota.' }
                 })
 
                 $holdDataAvailable = [bool](Get-SemrPropertyValue -InputObject $onPrem -Names @('HoldDataAvailable') -Default $false)
@@ -1915,17 +2174,37 @@ function Invoke-SemrAssessment {
                 })
 
                 $targetSku = if ($row.TargetSku) { $row.TargetSku } else { [string]$Config['DefaultTargetSku'] }
-                if (-not $licenseCapacityCache.ContainsKey($targetSku.ToUpperInvariant())) {
-                    $licenseCapacityCache[$targetSku.ToUpperInvariant()] = Get-SemrTenantLicenseEvidence -TargetSku $targetSku -Config $Config
+                if (-not $mailboxTargetPolicy) {
+                    $mailboxTargetPolicy = Get-SemrTargetQuotaEvidence -TargetSku $targetSku -Config $Config -MailboxType $resolvedRecipientType -TargetSkuExplicit:($null -ne $row.TargetSku -and -not [string]::IsNullOrWhiteSpace([string]$row.TargetSku))
                 }
-                $licenseCapacity = $licenseCapacityCache[$targetSku.ToUpperInvariant()]
-                $capacityPass = $licenseCapacity.Found -and $licenseCapacity.AvailableUnits -gt 0
+                $licenseCapacity = $null
+                if ($mailboxTargetPolicy.RequiresLicense -and $mailboxTargetPolicy.Known -and $mailboxTargetPolicy.Eligible) {
+                    $licenseKey = ([string]$mailboxTargetPolicy.TargetSku).ToUpperInvariant()
+                    if (-not $licenseCapacityCache.ContainsKey($licenseKey)) {
+                        $licenseCapacityCache[$licenseKey] = Get-SemrTenantLicenseEvidence -TargetSku $mailboxTargetPolicy.TargetSku -Config $Config
+                    }
+                    $licenseCapacity = $licenseCapacityCache[$licenseKey]
+                }
+                $capacityPass = -not $mailboxTargetPolicy.RequiresLicense -or ($licenseCapacity -and $licenseCapacity.Found -and $licenseCapacity.AvailableUnits -gt 0)
+                $capacityResult = if (-not $mailboxTargetPolicy.RequiresLicense) { 'PASS' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { 'FAIL' } elseif (-not $licenseCapacity.Available) { 'UNKNOWN' } elseif ($capacityPass) { 'PASS' } else { 'FAIL' }
                 Add-SemrFinding -List $findings -Parameters ($base + @{
                     CheckId = 'LICENSE-CAPACITY'; Category = 'Licensing'; Severity = if ($capacityPass) { 'Information' } else { 'Critical' }
-                    Result = if (-not $licenseCapacity.Available) { 'UNKNOWN' } elseif ($capacityPass) { 'PASS' } else { 'FAIL' }
-                    IsBlocking = -not $capacityPass; ObservedValue = $licenseCapacity.Message; ExpectedValue = "At least one available $targetSku license"
-                    EvidenceSource = "$graphSource subscribedSkus"; Message = if ($capacityPass) { 'The target license SKU has available capacity.' } else { 'The target license SKU is missing or has no available capacity.' }
-                    RecommendedAction = if ($capacityPass) { '' } else { 'Add license capacity or select an approved target SKU before the migration wave.' }
+                    Result = $capacityResult
+                    IsBlocking = -not $capacityPass; ObservedValue = if (-not $mailboxTargetPolicy.RequiresLicense) { $mailboxTargetPolicy.Message } elseif ($licenseCapacity) { $licenseCapacity.Message } else { $mailboxTargetPolicy.Message }; ExpectedValue = if ($mailboxTargetPolicy.RequiresLicense) { "At least one available $($mailboxTargetPolicy.TargetSku) license" } else { 'No direct license required below the shared mailbox quota' }
+                    EvidenceSource = if ($mailboxTargetPolicy.RequiresLicense) { "$graphSource subscribedSkus" } else { 'Configured shared mailbox policy' }; Message = if (-not $mailboxTargetPolicy.RequiresLicense) { 'This shared mailbox does not require a direct license while it stays within the 50 GB limit and uses no licensed-only feature.' } elseif ($capacityPass) { 'The target license SKU has available capacity.' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { $mailboxTargetPolicy.Message } else { 'The target license SKU is missing or has no available capacity.' }
+                    RecommendedAction = if ($capacityPass) { '' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { 'Select an approved mailbox-eligible target SKU.' } else { 'Add license capacity or select an approved target SKU before the migration wave.' }
+                })
+
+                $servicePlanPass = -not $mailboxTargetPolicy.RequiresLicense -or ($licenseCapacity -and $licenseCapacity.ExchangeServicePlanFound)
+                $servicePlanResult = if (-not $mailboxTargetPolicy.RequiresLicense) { 'PASS' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { 'FAIL' } elseif (-not $licenseCapacity.ServicePlanDataAvailable) { 'UNKNOWN' } elseif ($servicePlanPass) { 'PASS' } else { 'FAIL' }
+                Add-SemrFinding -List $findings -Parameters ($base + @{
+                    CheckId = 'LICENSE-EXCHANGE-SERVICE-PLAN'; Category = 'Licensing'; Severity = if ($servicePlanPass) { 'Information' } else { 'Critical' }
+                    Result = $servicePlanResult; IsBlocking = -not $servicePlanPass
+                    ObservedValue = if (-not $mailboxTargetPolicy.RequiresLicense) { 'Not required for an unlicensed shared mailbox within policy' } elseif ($licenseCapacity -and $licenseCapacity.ExchangeServicePlanFound) { "$($licenseCapacity.ExchangeServicePlanName): $($licenseCapacity.ExchangeServicePlanStatus)" } elseif ($licenseCapacity -and -not $licenseCapacity.ServicePlanDataAvailable) { 'Exchange service plan evidence is unavailable' } else { 'No enabled mailbox-bearing Exchange service plan found' }
+                    ExpectedValue = if ($mailboxTargetPolicy.RequiresLicense) { 'Enabled Exchange Online mailbox service plan in the target SKU' } else { 'Not required' }
+                    EvidenceSource = if ($mailboxTargetPolicy.RequiresLicense) { "$graphSource target SKU service plans" } else { 'Configured shared mailbox policy' }
+                    Message = if (-not $mailboxTargetPolicy.RequiresLicense) { 'No Exchange service plan is required for this unlicensed shared mailbox scenario.' } elseif ($servicePlanPass) { 'The target SKU contains an enabled Exchange Online mailbox service plan.' } elseif (-not $mailboxTargetPolicy.Known -or -not $mailboxTargetPolicy.Eligible) { $mailboxTargetPolicy.Message } elseif ($licenseCapacity -and -not $licenseCapacity.ServicePlanDataAvailable) { 'The target SKU service plans could not be verified.' } else { 'The target SKU does not expose an enabled Exchange Online mailbox service plan.' }
+                    RecommendedAction = if ($servicePlanPass) { '' } elseif ($licenseCapacity -and -not $licenseCapacity.ServicePlanDataAvailable) { 'Refresh M365_Licenses_ServicePlans.csv or rerun in Live mode.' } else { 'Select a mailbox-eligible SKU with an enabled Exchange Online service plan.' }
                 })
             }
         }
@@ -2005,6 +2284,7 @@ function Invoke-SemrAssessment {
         Evidence = @($evidenceRows)
         Hybrid = $hybrid
         EntraConnect = $entraConnect
+        CsvSources = @($csvSources)
         SourceInitialization = $sourceInitialization
         Cancelled = ($CancellationCheck -and (& $CancellationCheck))
     }
@@ -2037,11 +2317,13 @@ function Export-SemrAssessment {
     $findingsPath = Join-Path $runFolder 'Findings.csv'
     $permissionsPath = Join-Path $runFolder 'Permissions-Baseline.csv'
     $evidencePath = Join-Path $runFolder 'Evidence.csv'
+    $csvSourcesPath = Join-Path $runFolder 'Csv-Sources.csv'
 
     Export-SemrCsvFile -Data @($Assessment.Summary) -Path $summaryPath -Columns @('RunId','BatchName','EmailAddress','Decision','BlockingCount','WarningCount','UnknownCount','DataCoverage','BlockingCodes','RecommendedAction','CheckedAt')
     Export-SemrCsvFile -Data @($Assessment.Findings) -Path $findingsPath -Columns @('RunId','EmailAddress','CheckId','Category','Severity','Result','IsBlocking','ObservedValue','ExpectedValue','EvidenceSource','SourceTimestamp','Message','RecommendedAction')
     Export-SemrCsvFile -Data @($Assessment.PermissionsBaseline) -Path $permissionsPath -Columns @('RunId','EmailAddress','PermissionType','Delegate','IsInherited','Source','CapturedAt')
     Export-SemrCsvFile -Data @($Assessment.Evidence) -Path $evidencePath -Columns @('RunId','EmailAddress','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt')
+    Export-SemrCsvFile -Data @($Assessment.CsvSources) -Path $csvSourcesPath -Columns @('FileName','Category','ExpectedUse','Path','Present','Fresh','Used','Status','LastWriteTime','AgeHours','Details')
 
     return [pscustomobject]@{
         RunFolder = $runFolder
@@ -2049,6 +2331,7 @@ function Export-SemrAssessment {
         FindingsPath = $findingsPath
         PermissionsPath = $permissionsPath
         EvidencePath = $evidencePath
+        CsvSourcesPath = $csvSourcesPath
     }
 }
 
@@ -2100,6 +2383,7 @@ Export-ModuleMember -Function @(
     'Connect-SemrMicrosoftGraph',
     'Disconnect-SemrSession',
     'Import-SemrBatchCsv',
+    'Get-SemrCsvSourceInventory',
     'Test-SemrHybridReadiness',
     'Test-SemrEntraConnect',
     'Invoke-SemrAssessment',
@@ -2111,8 +2395,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6z/ZYvtjrd/Wt
-# qvQoepIaIIA8ER5HLxP0SNFj6QufGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTMzR0u5I9jhrJ
+# HoxagTl5tgmxFujE69os1we6WWIpPqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2245,31 +2529,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIATwgf3xZ0CjOra/BIdvguIYwFO0S2ZxxHsv76zufqE+MA0GCSqG
-# SIb3DQEBAQUABIIBgElXy0yen+1z1Wza1/ZGrJ3YDDG2QG2NuoIX1QjABEbYdJwr
-# lnCZafHBtVzGsLPKr7CmutypBwA0rO7oJHqO/KjkFLK4LHsfYqbrZ10jL2+L2HeZ
-# uAc8W7pz/bvNztV30k/l0N/x50ngsHugIFxf/Zt/6D4G8uemEuKtOyasqg/cTXX+
-# h8G4LZKLw7wpwJbkIdCbS9WqTy5dc9orVGkXAKTKQgWS/zqqIgwZdbpvUiUUf73S
-# E381lK5QCUA3KvE+8QYvjiceuGTGfzeazjKNvNkbQQI3O13WmcQBLOuavAUvrQQ2
-# coS3gprI8KUpELspcQz2OcoJ/MuNTK4Pq3FA360e5KbVGvka+ZzkHGM91+D7ygFt
-# 6dNXtt6uCv6bu4gBR0oem5R3WyukcsJEHfC/0PNtthB+aadNr+cgXpbXP1GWmBY1
-# jRBb+dCy2C5b3XXgJOaSAuIZmxxWsDfnJjSlTBENaTNtZSoePuJmUkFCSYpgGoRi
-# WaAncJBaXjtZ72oFLqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPHdUuxUtXBXgQArVgJpktNuViZtLghTdCwN3on5XqxhMA0GCSqG
+# SIb3DQEBAQUABIIBgHnIuTYL1x3QadNoMHe+Jd8brRx3hpxhWcDgxTYXCP+c01BK
+# EipFKg2ZjRQP4czGPsifjkr25QOGy5DzLdrK241xGJP2/2ZzDh/I+JnA2YxgfRbS
+# 3IQJCgzdfnVBUIQpHaVHEQX71D9a5JSTLszYutLfNMmVLszIIIgMZMuHLUKl5UD1
+# +bEcjZjzuTZZODyaZEOHY+e3sp90YEP5wSaqdVoz56Ww3QHCNI49JmJhgDsGKuE+
+# 5vsN5WNDThRDifG+JE0fD9gzoEYiyRkQWytCzSl7vupa67Rw0/HD7+1BroswhUCe
+# p/YkznGZ1srDVOjyoY+68F4kijeIFHRrsTspKYA8GCMUqYc8OpKCsleEVXwZmGbA
+# 2A0cIYhyyxTRsGtHfiL2Srf1TuVmLZHXH/dmOdNSb9H1jV8GCLSJYpTLs3gNYlNL
+# OxA5xo25UWdfgVMC65LLHQn2w8lOwevXK81U4YLuY0zCmm+uD8nf3Nckxiu4NmMZ
+# iHzXUFq6oC4FoxP1eqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgwNzIy
-# MTFaMC8GCSqGSIb3DQEJBDEiBCBfvttrrXbSA7uUHwrnC6VXwAE91RWJRN94GHY6
-# HLFOgDANBgkqhkiG9w0BAQEFAASCAgCBSgyk3K1RDAaThTte0/HwPcRDH1b7fbnf
-# 0Iwk/krQop0jVEsEfz+IoxoDwPtRCbOEuYbXrgK/7uJclZeBWrhLgq6jzqkEL39s
-# kKaNoOzmU4IYircf/Mgb/td00hwD5s56Hut+FB1zPc3TQm6mDtuVbJtzpppyJqHn
-# t095gyNZih08d5nV7Z288yhdpkB9wvrCexWuYHx4gJ13t0lCAPy4+nMj2bNgR4OF
-# TU0U1t6jPiPW5AWzDOp48g0jh7zkBfViFm+d0DoLtOsZmeYcAg/wa7g2mbc4TvgT
-# /EkdGJDh6d2hZgW6D9QMhvaPPJGCPLjoOrpvQf+cfWHikYzw15ZxPCg/HfKPnG8q
-# O2JA2SzS15PdrQOW6OHOLMDgxf4FBU++u8Bw13vUMEIEK1Bzwro4tKnaPRN0evTF
-# c7QDma0LWVS+msjnhQNYSsEL9mySd6Rnk9/UAJCgwzc+SxUGKLJt4RVMep44zm5v
-# wcN9xmsvewFYjZKvBs4GL9dcZfTvFEF88hPcsNC5xkCtWtLnP4U+gsWAXYUI4l4a
-# w6V+A3/gz6lrqGRhLjZGdjYNPE3/U5PTGsylTGl+yUYV2WXxf5/SJb9R2zYrSnox
-# zaJH2uKyyBv2t6br965yYdQdKXL7bBD8nGRZyPKrAqlfClQczuZoM+Z2fFGIp5AG
-# nYSM4p0aFg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgwODUz
+# NDlaMC8GCSqGSIb3DQEJBDEiBCDiUy17wwkn+zWD9u6cLNnEn9/8w3tN6AgQKyLM
+# IFjV0DANBgkqhkiG9w0BAQEFAASCAgBk12eOp9RSOHphPARKDtogKw2IifZ5DTKI
+# WToaTrA1+Er0amLzU55XuZvUbVC2Bf08Qi2iBlWo3h0BVYrf3tPj959JvpIEt4oR
+# tNzGKqt0xEb573+mBn4GW8WbJjxFMHCxIcIOmNmTj//S4iJ8S056h1rQHg7hIbmK
+# lD8y0uKOduVd/we6LY+5UegAtfbEwCURGsALI98gws7iOabsbsZYxNJ4sXe2bq9I
+# 3bGjlDMAad+uhJNCKhmqEtk+W4qmdkKqJVoW4woqbApoZW4JZXxvOnQoCI/Noamh
+# WFHlaT47qC1et1/dX3dwPn2YU5HbQNybVH+ixcVk6/HpwFD99MiL57+odoT9rrvd
+# LlfH+woy5QoZBo/jnJcGirXTBI6gK8t8h4FBb8lhbyLwgmt/ZysgWwB7hRh/+bum
+# ebmmciQEfqNtxoCl+tYR16aELRJUA1SsIhZt7K6tQgpG4lqtrydJ4zzg+Vd0Tz4L
+# VQQcxXxzVvV+4kqM6BFZf3x0U/FARgVV0t2qT7/ifcVBGAyIPyxJuHCb9PgujmU4
+# EtHnxflqrncctDhgzwdj5duoH0VFmRbT7zJJBi48tUx1UTYEgGPT5q7vinnHaY80
+# jXS/2zZQfiXz8bdQa/tR9QoI6sediF6OLvy8RQ/wnhI2EXtkV9oJIQgT/lAxC0dD
+# ki0sxoV8zw==
 # SIG # End signature block

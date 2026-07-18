@@ -7,16 +7,18 @@
   },
   "Cache": {
     "RootPath": "\\\\server\\share\\WORKPLACE\\DATA\\Tenants\\tenant",
+    "AlternativeRootPath": "",
     "MaximumAgeHours": 48
   },
   "DefaultTargetSku": "SPE_E3",
-  "DefaultTargetQuotaGb": 100,
   "QuotaSafetyBufferPercent": 10,
+  "MailboxIneligibleTargetSkus": [
+    "SPE_F1"
+  ],
   "TargetQuotaGbBySku": {
     "SPE_E3": 100,
     "ENTERPRISEPACK": 100,
     "EXCHANGEENTERPRISE": 100,
-    "SPE_F1": 2,
     "SPE_F3": 2,
     "O365_F3": 2,
     "EXCHANGEDESKLESS": 2,
