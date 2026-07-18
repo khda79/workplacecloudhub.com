@@ -52,7 +52,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.3
+1.0.4
 
 .REQUIREMENTS
 PowerShell 7+.
@@ -89,7 +89,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.3'
+$script:ScriptVersion = '1.0.4'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -544,7 +544,7 @@ function Publish-EAOutputs {
         $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileNames[$key])
         $timestampedPath = Join-Path $script:OutputPath ("{0}_{1}.csv" -f $baseName,$stamp)
         $latestPath = Join-Path $script:LatestCsvFolderPath $fileNames[$key]
-        $rows = if ($OutputRows.Contains($key)) { @($OutputRows[$key]) } else { @() }
+        $rows = if ($OutputRows.Contains($key)) { @($OutputRows[$key] | ForEach-Object { $_ }) } else { @() }
         Publish-CoreSmartM365Csv -Data $rows -TimestampedPath $timestampedPath -LatestPath $latestPath -Columns @($Schemas[$key]) | Out-Null
     }
 }
@@ -585,11 +585,15 @@ function Invoke-EASelfTest {
 
     $sample = New-EANormalizedRow EADeviceScoresV2 ([pscustomobject]@{DeviceId='device-1';DeviceName='device';Manufacturer='vendor';Model='model';EndpointAnalyticsScore=75;StartupPerformanceScore=70;AppReliabilityScore=80;WorkFromAnywhereScore=76})
     if ($sample.DeviceId -ne 'device-1') { throw 'Normalization simulation failed.' }
+    $genericOutputRows = New-Object System.Collections.Generic.List[object]
+    $genericOutputRows.Add($sample)
+    $materializedOutputRows = @($genericOutputRows | ForEach-Object { $_ })
+    if ($materializedOutputRows.Count -ne 1 -or $materializedOutputRows[0].DeviceId -ne 'device-1') { throw 'Generic output-list materialization failed.' }
     if ($schemas.DataQuality[0] -ne 'RunId') { throw 'Schema simulation failed.' }
     if ('EAResourcePerfAggByDevice' -notmatch $script:AdvancedReportPattern) { throw 'Advanced Analytics guard failed.' }
     if ((@('TenantKey') + $schemas.DevicePerformance)[0] -ne 'TenantKey') { throw 'TenantKey simulation failed.' }
     if ($MaxItems -gt 0 -and "x_MAXITEMS_$MaxItems.csv" -notmatch '_MAXITEMS_\d+\.csv$') { throw 'MAXITEMS simulation failed.' }
-    Write-EALog 'Self-test passed: completed, failed, throttled, schemas, TenantKey, MAXITEMS, normalization, permission, and Advanced Analytics guard.' SUCCESS
+    Write-EALog 'Self-test passed: completed, failed, throttled, schemas, TenantKey, MAXITEMS, normalization, output-list materialization, permission, and Advanced Analytics guard.' SUCCESS
 }
 
 if ($SelfTest) { Invoke-EASelfTest; return }
