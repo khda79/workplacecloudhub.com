@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.3.0'
+$script:SemrVersion = '1.3.1'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ActiveDirectoryDomains = @()
@@ -2434,6 +2434,31 @@ function Get-SemrHybridAdvancedEvidence {
     return [pscustomobject]$result
 }
 
+function Get-SemrMigrationEndpointOption {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:ConnectionState.ExchangeOnline) {
+        throw 'Exchange Online is not connected.'
+    }
+    if (-not (Test-SemrCommand -Name 'Get-MigrationEndpoint')) {
+        throw 'Get-MigrationEndpoint is unavailable in the Exchange Online session.'
+    }
+    return @(
+        Get-MigrationEndpoint -ErrorAction Stop |
+            Where-Object { [string]$_.EndpointType -match '^ExchangeRemoteMove$' } |
+            ForEach-Object {
+                [pscustomobject][ordered]@{
+                    Name = [string]$_.Identity
+                    EndpointType = [string]$_.EndpointType
+                    RemoteServer = [string](Get-SemrPropertyValue -InputObject $_ -Names @('RemoteServer','RemoteServerName') -Default '')
+                }
+            } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.Name) } |
+            Sort-Object Name -Unique
+    )
+}
+
 function Test-SemrHybridReadiness {
     [CmdletBinding()]
     param([System.Collections.IDictionary]$Config)
@@ -3190,6 +3215,7 @@ Export-ModuleMember -Function @(
     'Disconnect-SemrSession',
     'Import-SemrBatchCsv',
     'Get-SemrCsvSourceInventory',
+    'Get-SemrMigrationEndpointOption',
     'Test-SemrHybridReadiness',
     'Test-SemrEntraConnect',
     'Invoke-SemrAssessment',
@@ -3201,8 +3227,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBB6+x/qP62TOVb
-# B0MdrCjsv+r4VmfIUImdwvraD2VOgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5QphcG8HbQI9U
+# 41XzaeJBdduFfk+5H2CBpzswt3a2PaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3335,31 +3361,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA1PlF52NA9n4oV+P2W3Eh/XvYmetN/JSpeqyTscT+9BMA0GCSqG
-# SIb3DQEBAQUABIIBgDytLdUuY3DJevCFqIsMSUMbJyqPOOmUIYWmc2cNRNVrMhYw
-# y4h4XYqIPWKFTjjAOwGs1wN7Fbee7yTiomkcCpAYw5GP6wGphJAzK/PBiHFuW/rl
-# rhicndCQSKJMP8qDNQHjIQ2FDa7/DxNMUj2nxOxGBztKRrZbnxF9TSbY5D3tDcph
-# gQhAVisUzx+dBWRAfQPPO2pI85yBW7qzRVZ/zCfl6V6j5nk429/gmB5D57zDqBwh
-# bmk4opyFh28cfhdF/VEyf+HnO93YxItuvtBZPNFapZFrYj/ceYGtysAxPhhb4Wvn
-# uyPm4Exs9c4+Ay5MsLCeZ+C5v/zCsya1+LrRAVL+qHUJT6nLbiYpUDwenETNBrU+
-# onxji8mbX4KTZUAVWHk66kr0JwpXFWPOAkmpBSuM6tgz4JWAt291ffXkqOliO69H
-# 7qz1K2O8meBfOKr600tUuuY8K9lbr7LvG/GVN8Xhk0Gw7U20OCcmhvgZeyayAKqM
-# R8nVcsZawTwvsgYS0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMv8recqhwTYL2W5FuTd26S3TFqzp2E54EKvCS/bkCG4MA0GCSqG
+# SIb3DQEBAQUABIIBgIt4LHQ56UmoJ1/qmsX0vEEHt9Apra2L6q5seS/ivnsqbMUS
+# RT8Rn1I/53HiOQzwBHCPcwpBrOUty4d6OxEqZQfsk/Q6IvdShsX2q/eUHZmw4GF/
+# Q06urPGRvFKI9gSRW29lHtI8UhStspllJ3/YTEY94oinaS875EUCKMapU3xREDd/
+# CirmK1l9uvvddfS6UrqLlKqiU2RfcXof7RZi7WZUcesJ1SnOOqyOQem2zDZZXIxD
+# H++01ECjU89wE//2CgfCvnsAWJwXzGGhYOv8pIX6JHBmtJ/3vpd6dX7QixyAY0pJ
+# poK9K2I5PYHIrZ3HIUv34TgGI0rRUbtDN9iFaq89yeaj0vhT4+oDmFIzc7jNHg7A
+# 6whVB+oWfkDD/90tbKJN5sx0GYBQANAuQHxvsUiJHR1XlIA7guxFTGNHyVzqQ2Xm
+# 2svD5bAbh3RDqnKB44DjDRfXLDK15k1q14aPu1DJn+OAy/tbwQWf/bjPS98ffDNQ
+# MIG3ko+11z6jqezTG6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMDI3
-# NTNaMC8GCSqGSIb3DQEJBDEiBCC4R0xQ6c4UiiVWlwGiqDc5Phb5gzvIaVdAk7+T
-# khzOZTANBgkqhkiG9w0BAQEFAASCAgAPOQSFoo89xn0iEtJx0kIXFsBf7d9dYhSD
-# f2mVyNMbSu5bXsGvBEEd6GBs5K28xQ7q5tHN6Ogo0QebyB9ManXsy0A3gzkdvS//
-# FcXdMPd1RI5KST96oij10rrjlWUvjS9C9MXWm+dkBO7SXXq8DWQMKUU+VIikkbYM
-# 5ZCXUuGz4wABaDPBcdVvYIHViqqn1aSk0ev8iHKwqwOqHs8xyd5KNkOUVv6lu+62
-# 0EmuDjP30FGCzCWpAT8NkbSL63EMk7AX6dUiSooT0QarQgKWqt9MByEczIBK8Z/y
-# +XJ9U3s+VPKtstV1N2Upox6R3KWTSttH6FunfGaUchQhXJwTIdf6/Cq5ePmY/kLq
-# r804STBulO9oeYuuAr3dlMYZAP5WYxwN95oBuUAtSSv9WdZT0XZgHsOE2q/iSu/9
-# UwkfFNvFsgMpUrS/ntwoat5AyQKeWfHXrcgMdwUfAOeJwXCUxuxcqg1t5ys07KgB
-# yZH4DmnWvOf3X7QmG/APRnNUG/IPXC3Cj9M0at7ASD1d4ByKtwrb1rLd0pZf+Onx
-# HODaF+J7pAQC5NQbSf2Wmt632b6cnzjG1Oy3tl/0FEPhxijD2+D6E+ry7fK2FJar
-# 15C+btX1zhmP9xa7bbR3OTf/6crHvEGaiw0dUcyT8Nf/D/5Y/JKp/KpMDlCW+nXm
-# mh7kOkVLyQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMDQy
+# MTlaMC8GCSqGSIb3DQEJBDEiBCCiS9b29OqZTPS5XYaz2zteyMVbJa9oWzvBCFYC
+# PNZfBDANBgkqhkiG9w0BAQEFAASCAgB3KbxKDrgNzYkN9jarthvZBLy6R02lNpLm
+# z9ofZv/LX63mPb4NAOU+L1rxobSemICzsetiStHOMx7cSS0k3X5JDBsYhR1O3Lyc
+# JRrfUgqEeGp3VR/qGCIkOmX97wMJp40lhp+8SaJKMEFRw6lTjdstShaxYBNN2cWi
+# 1/XB1m+Fm2OY4fDXnQ+Rc/JLUCrukYHieux1XmpwG5og62wY+7rCljPxtVorYFnz
+# SzlxrCDrR4l1i8FSH0pMOgzegnYCNrqDE+GZLPJabchMMMPDec8wQ38ruEGtVKsw
+# PoR2YWb2KFRfaQu3Pp62/h9cX6c9YLqD23SOHv2+oltLnmRq8ZUbjQ2952LUxk2C
+# kKMP0tsxMgigCrGBk6hHJva/IMxBSCziSQlucuybtxHJOXcdmHHXcacI7lA4HNVH
+# Qe9qH60PHz6IEGsiCmI8phnUqzEAAD3rUWxjTWA5GfZYC6xobXj09IyAIeij0s3f
+# JYcaLOQUmMjSAZJDiTmnx3eU7KY3elE2jB+7gqc6Xn9axesWTgnI+oOhUzCLuSiq
+# hM+5/ub6Tgrtyrhupj6g48qWsToh2nx6u6d9CONbymZIr/5QuAYltAtJ82euOIWq
+# vM3aFTfb3wQo3HZBqcRXWapwmc+OHNuVdrZe/J5sbHRCZwLItfbUvHCB7C/AFeLw
+# etl0uA8nEg==
 # SIG # End signature block

@@ -120,7 +120,7 @@ Clés principales :
 - `Cache.RootPath` et `Cache.MaximumAgeHours` : emplacement et fraîcheur des inventaires.
 - `ExchangeOnline.UserPrincipalName` : UPN administrateur optionnel.
 - `ExchangeOnline.DisableWam` : conserve le flux interactif EXO sans WAM lorsque requis sur ce poste.
-- `Hybrid.MigrationEndpointName` : endpoint `ExchangeRemoteMove` explicite à renseigner dans le JSON local. Le modèle reste vide et plusieurs endpoints sans nom configuré produisent un NO-GO.
+- `Hybrid.MigrationEndpointName` : présélection facultative d’un endpoint `ExchangeRemoteMove` dans le JSON local ; le modèle reste vide. En mode Live, le GUI charge automatiquement les endpoints après l’authentification EXO, sélectionne l’unique endpoint ou demande explicitement lequel utiliser lorsqu’il y en a plusieurs. Le choix reste limité à la session et le JSON n’est jamais réécrit. En CacheOnly, la liste est désactivée et aucun test Live n’est exécuté.
 - En mode Live, Active Directory est interrogé dans chaque domaine retourné par `Get-ADForest`. Si un domaine ne peut pas être interrogé, la couverture Live est considérée incomplète et l’application utilise le CSV AD de fallback au lieu de conclure à tort que l’identité est absente.
 - `Hybrid.TargetDeliveryDomain` : domaine `tenant.mail.onmicrosoft.com` attendu.
 - `Hybrid.ActiveMigrationWarningThreshold` : seuil consultatif du nombre de migrations actives/non terminales, `100` par défaut.
