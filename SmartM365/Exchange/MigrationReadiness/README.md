@@ -24,7 +24,7 @@ La phase sélectionnée est inscrite dans `Summary.csv` afin que le verdict rest
 - Santé de synchronisation Microsoft Entra : en Live, lecture autoritaire de `onPremisesSyncEnabled` et `onPremisesLastSyncDateTime` directement sur l’objet tenant Microsoft Graph. Le CSV `M365_Entra_AzureADConnect_SyncHealth.csv` reste contextuel uniquement et ne peut pas produire un faux PASS si Graph échoue.
 - Endpoint de migration et fraîcheur de la synchronisation tenant : contrôlés automatiquement pendant l’évaluation.
 
-Les inventaires AD et Exchange 2016 sont préchargés comme sources de secours. L’inventaire de santé Entra est préchargé pour le mode CacheOnly et comme contexte en Live. Sur une machine sans accès on-premises, la bascule CSV AD/Exchange est automatique et la source réellement utilisée apparaît dans les findings et dans l’onglet Activity. L’onglet Sources est informatif : il n’expose plus de boutons de connexion séparés.
+Les connexions AD et Exchange 2016 sont testées avant le chargement des fallbacks. Lorsque l’AD Live est disponible, les objets du batch sont préchargés une seule fois et le volumineux `AD_Users_AllDomains.csv` n’est pas relu. L’inventaire Exchange 2016 reste disponible comme fallback automatique, et l’inventaire de santé Entra est chargé pour CacheOnly ou comme contexte en Live. La source réellement utilisée apparaît dans les findings et dans l’onglet Activity. L’onglet Sources est informatif : il n’expose plus de boutons de connexion séparés.
 
 ### CacheOnly
 
@@ -177,11 +177,11 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - état UserMailbox / RemoteMailbox / MailUser ;
 - cohérence Primary SMTP, proxyAddresses et targetAddress ;
 - unicité globale des proxy SMTP et adresses de routage, doublons internes, domaines acceptés et préservation X500/LegacyExchangeDN ; un propriétaire SMTP actuel produit un `NO-GO`, tandis qu’une collision entre futures adresses attendues sans propriétaire actuel produit un avertissement de planification ;
-- cohérence ExchangeGuid/ArchiveGuid et type de destinataire pris en charge ;
+- cohérence ExchangeGuid/ArchiveGuid et type de destinataire pris en charge ; avec les anciens exports, l’ExchangeGuid est récupéré depuis `MailboxLocations`, et `ArchiveStatus=None` est interprété comme une absence normale d’archive ;
 - taille de mailbox contre quota explicite du SKU cible avec marge de sécurité ; les shared mailboxes sans SKU explicite utilisent la limite non licenciée de 50 Go ;
 - préparation de l'archive, saturation Recoverable Items, limites de dossiers, gros éléments et quotas source personnalisés ;
 - Litigation Hold et In-Place Hold quand les propriétés sont disponibles ;
-- baseline Full Access, Send As et Send on Behalf ;
+- baseline Full Access, Send As et Send on Behalf ; les délégations connues restent affichées même lorsque le cache ne couvre pas les trois types de permissions ;
 - dépendances de délégation hors batch, forwarding mailbox, règles Inbox de transfert, modération et restrictions de remise ;
 - santé de la base Exchange source ; en fallback CSV, l’application rapproche la base de chaque mailbox des lignes `MailboxDatabase` / `Mounted` de `Exchange_OnPrem_MigrationReadiness_Config.csv` au lieu de retourner systématiquement `UNKNOWN` ;
 - état MailUser/mailbox Exchange Online et détection split-brain ;
@@ -192,11 +192,11 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - erreurs de provisioning et identity anchor Entra ; l’ancienneté de synchronisation par objet reste informative et ne remplace pas la date de dernière synchronisation tenant collectée sur l’objet `organization` ;
 - licence actuelle, quota mailbox de la licence actuellement attribuée, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; une mailbox dépassant la limite F3/SPE_F1 est `NO-GO` tant que la licence cible effective n’est pas attribuée ou que sa taille n’est pas réduite ;
 - santé et fraîcheur de la dernière synchronisation tenant en Live directement via Microsoft Graph ; le cache reste contextuel, et CacheOnly utilise exclusivement le CSV ;
-- endpoint `ExchangeRemoteMove` en Live ; l’absence de `Test-MigrationServerAvailability` produit `UNKNOWN`, pas un faux échec de l’endpoint ;
+- endpoint `ExchangeRemoteMove` en Live ; l’absence de `Test-MigrationServerAvailability` produit `UNKNOWN`, pas un faux échec de l’endpoint, tandis qu’un test réussi constitue une preuve fonctionnelle de la publication MRSProxy ;
 - MRSProxy, certificat hybride, charge active des migrations et cohérence Autodiscover/OAuth ; le contrôle OAuth est consultatif pour un move distant et ne bloque plus à lui seul la migration ;
 - avertissement documenté pour `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException`.
 
-Une source obligatoire absente reste bloquante. Une propriété non disponible dans le cache devient `UNKNOWN`, jamais un faux `PASS`. Chaque contrôle obligatoire produit désormais explicitement un finding `PASS` ou `UNKNOWN`, et `SourceTimestamp` correspond à l’horodatage réel de la source utilisée plutôt qu’à l’heure de l’évaluation.
+Une source obligatoire absente reste bloquante. Un blocage confirmé (`FAIL`) produit `NO-GO`, tandis qu’une preuve bloquante indisponible produit le verdict distinct `UNKNOWN`. Une propriété non disponible dans le cache ne devient jamais un faux `PASS`. Chaque contrôle obligatoire produit explicitement un finding et `SourceTimestamp` correspond à l’horodatage réel de la source utilisée plutôt qu’à l’heure de l’évaluation.
 
 Les contrôles tenant (endpoint, MRSProxy, certificat, capacité, OAuth et synchronisation Microsoft Entra) sont évalués une seule fois. Ils apparaissent dans l’onglet `Tenant checks` et dans `Global-Findings.csv`. Seuls leurs vrais blocages sont répercutés dans le verdict de chaque mailbox, sans dupliquer les findings.
 
