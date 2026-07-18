@@ -27,7 +27,11 @@ Aucune connexion EXO, Graph, AD, Exchange on-premises ou Entra Connect n’est u
 \\server\share\WORKPLACE\DATA\Tenants\<TenantKey>
 ```
 
-Le chargeur accepte les CSV directement dans ce dossier ou dans son sous-dossier `DATA-LAST`.
+Le chargeur accepte les CSV directement dans ce dossier ou dans son sous-dossier `DATA-LAST`. `Cache.AlternativeRootPath` permet de déclarer un second emplacement, par exemple une copie SharePoint synchronisée. Il sélectionne, fichier par fichier, la copie existante la plus récente parmi la racine, `DATA-LAST` et le chemin alternatif.
+
+L'onglet `CSV sources` indique pour chaque fichier attendu son chemin sélectionné, sa présence, sa fraîcheur et son utilisation effective (`Used`, fallback disponible, non utilisé, absent ou périmé).
+
+Lorsqu'un fichier requis ou susceptible de servir de fallback dépasse `Cache.MaximumAgeHours`, le GUI demande explicitement si l'opérateur souhaite continuer. Une réponse positive accepte les CSV périmés uniquement pour l'exécution courante ; le JSON n'est pas modifié. Une réponse négative annule l'assessment avant les connexions et les collectes.
 
 Les contrôles qui nécessitent obligatoirement une interrogation live, notamment le test d’endpoint et la recherche des mailboxes soft-deleted/inactive si le cache ne les expose pas, sont signalés `UNKNOWN` avec une recommandation de validation finale en mode Live. Ils ne sont jamais convertis silencieusement en `PASS`.
 
@@ -40,6 +44,7 @@ Les CSV du cache peuvent être produits par SmartM365, mais l’application les 
 Le profil opérationnel est défini dans le JSON local ignoré par Git avec :
 
 - `TenantProfile.TenantId` : garde-fou pour empêcher une authentification live dans le mauvais tenant ; s’il est vide, le profil `DefaultTenant` de SmartM365 est utilisé en mémoire.
+- `TenantProfile.ProfileKey` : clé explicite du profil tenant, par exemple `prod` ; la valeur générique `tenant` reprend seulement le `DefaultTenant` central.
 - `TenantProfile.RemoteRoutingDomain` : domaine de routage hybride attendu.
 - `Cache.RootPath` : racine des inventaires CSV.
 - `Cache.MaximumAgeHours` : âge maximal accepté pour les données.
@@ -112,9 +117,9 @@ Clés principales :
 - `Cache.RootPath` et `Cache.MaximumAgeHours` : emplacement et fraîcheur des inventaires.
 - `ExchangeOnline.UserPrincipalName` : UPN administrateur optionnel.
 - `ExchangeOnline.DisableWam` : conserve le flux interactif EXO sans WAM lorsque requis sur ce poste.
-- `Hybrid.MigrationEndpointName` : endpoint `ExchangeRemoteMove` explicite optionnel.
+- `Hybrid.MigrationEndpointName` : endpoint `ExchangeRemoteMove` explicite ; il peut rester vide uniquement lorsqu’un seul endpoint Remote Move existe. Plusieurs endpoints sans nom configuré produisent un NO-GO.
 - `Hybrid.TargetDeliveryDomain` : domaine `tenant.mail.onmicrosoft.com` attendu.
-- `DefaultTargetSku`, `TargetQuotaGbBySku` et `QuotaSafetyBufferPercent` : politique de quota cible.
+- `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` : politique explicite du SKU et du quota cible. Un SKU absent de la table reste `UNKNOWN` bloquant ; aucun quota générique de 100 Go n’est supposé.
 - `OutputRoot` : dossier d’export, absolu ou relatif à l’application.
 
 ## Inventaires CSV attendus
@@ -128,6 +133,7 @@ Selon le mode et les contrôles disponibles :
 - `Exchange_EXO_Mailboxes_AllDomains.csv`
 - `Exchange_EXO_MigrationJobs.csv`
 - `M365_Licenses_Tenant.csv`
+- `M365_Licenses_ServicePlans.csv`
 
 L’application vérifie la présence et l’âge des fichiers avant de les considérer utilisables.
 
@@ -150,14 +156,14 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - existence/unicité du compte AD et statut du compte ;
 - état UserMailbox / RemoteMailbox / MailUser ;
 - cohérence Primary SMTP, proxyAddresses et targetAddress ;
-- taille de mailbox contre quota cible avec marge de sécurité ;
+- taille de mailbox contre quota explicite du SKU cible avec marge de sécurité ; les shared mailboxes sans SKU explicite utilisent la limite non licenciée de 50 Go ;
 - Litigation Hold et In-Place Hold quand les propriétés sont disponibles ;
 - baseline Full Access, Send As et Send on Behalf ;
 - état MailUser/mailbox Exchange Online et détection split-brain ;
 - conflits soft-deleted/inactive ;
 - migration user ou move request existant ;
 - unicité et synchronisation de l’utilisateur Entra ;
-- licence actuelle, UsageLocation et capacité du SKU cible ;
+- licence actuelle, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; `SPE_F1` est non éligible ;
 - santé de synchronisation Entra Connect depuis le cache ;
 - endpoint `ExchangeRemoteMove` en Live ;
 - avertissement documenté pour `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException`.
@@ -174,9 +180,12 @@ Output\SEMR-yyyyMMdd-HHmmss\
   Findings.csv
   Permissions-Baseline.csv
   Evidence.csv
+  Csv-Sources.csv
 ```
 
 `Summary.csv` contient un verdict par mailbox. `Findings.csv` contient le détail de chaque contrôle : sévérité, résultat, caractère bloquant, valeur observée, valeur attendue, source, message et action recommandée.
+
+Chaque lancement GUI crée également un journal de session horodaté sous `Output\Logs`. Le statut supérieur et l'onglet `Activity` décrivent les phases longues et indiquent quand l'opérateur doit patienter.
 
 Après migration, la comparaison de permissions en mode Live peut aussi générer :
 
