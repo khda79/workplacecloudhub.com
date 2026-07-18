@@ -38,3 +38,44 @@ Examples:
 .\SmartM365-Teams-Inventory.ps1 -Tenant prod -InactiveDays 180 -AlwaysSend
 .\SmartM365-Teams-Inventory.ps1 -Tenant prod -AppendHistory -IncludeChannelOwners
 ```
+
+## Teams Phone PSTN usage
+
+`SmartM365-TeamsPhonePstnUsage-Inventory.ps1` is a read-only app-only collector for Teams Phone Calling Plans, Operator Connect, and Direct Routing usage. It uses the official Microsoft Graph v1.0 functions:
+
+- `GET /communications/callRecords/getPstnCalls`
+- `GET /communications/callRecords/getDirectRoutingCalls`
+
+The Graph functions do not support delegated authentication. The minimum required Microsoft Graph application permission is `CallRecords.Read.All`.
+
+Latest CSV files:
+
+| Entity | Latest CSV | Notes |
+| --- | --- | --- |
+| SmartFinOps user aggregate | `M365_Teams_PhoneUserUsage.csv` | Primary user-level usage file. No license price, allocation, or savings calculation is performed. |
+| PSTN and Operator Connect calls | `M365_Teams_PSTNCalls.csv` | Detailed Graph rows with caller and callee numbers masked. |
+| Direct Routing calls | `M365_Teams_DirectRoutingCalls.csv` | Detailed Graph rows with caller and callee numbers masked. |
+| Phone assignments | `M365_Teams_PhoneAssignments.csv` | Created only when `-IncludePhoneAssignments` is requested and the supported Teams PowerShell prerequisites are available. |
+
+Dates are normalized to UTC. Ranges longer than the Graph PSTN maximum request window are split into windows of at most 90 days. Every page in `@odata.nextLink` is followed, including result sets larger than 1,000 rows. Transient failures and throttling honor `Retry-After` when available.
+
+Examples:
+
+```powershell
+.\SmartM365-TeamsPhonePstnUsage-Inventory.ps1 -Tenant test -ValidateOnly
+.\SmartM365-TeamsPhonePstnUsage-Inventory.ps1 -Tenant test -LookbackDays 90 -MaxItems 100
+.\SmartM365-TeamsPhonePstnUsage-Inventory.ps1 -Tenant prod -FromDate '2026-04-01T00:00:00Z' -ToDate '2026-07-01T00:00:00Z'
+.\SmartM365-TeamsPhonePstnUsage-Inventory.ps1 -Tenant prod -IncludePhoneAssignments
+```
+
+`-IncludePstn` and `-IncludeDirectRouting` default to true. Pass `-IncludePstn:$false` or `-IncludeDirectRouting:$false` to disable one source. `-MaxItems` produces `MAXITEMS-<n>` test filenames and does not replace the canonical DATA-LAST files or WeeklyHistory.
+
+Phone assignment inventory is optional because it uses the officially supported `Get-CsPhoneNumberAssignment` cmdlet rather than Microsoft Graph call-record APIs. Its prerequisites are:
+
+- MicrosoftTeams PowerShell module 4.7.1 or later for app-only authentication.
+- Microsoft Graph application permission `Organization.Read.All` for Teams PowerShell app authentication.
+- A supported Microsoft Entra Teams role assigned to the service principal. `Teams Telephony Administrator` is the most voice-focused documented role; `Teams Communications Administrator` and `Teams Administrator` also cover phone number inventory.
+
+The Teams role can perform more than read operations, but this collector calls only `Get-CsPhoneNumberAssignment`. If any prerequisite is missing, the optional assignment phase fails explicitly and no assignment CSV is simulated.
+
+The Graph PSTN endpoint does not return Telstra calling-plan detail. Microsoft also applies country-specific call-detail retention and phone-number obfuscation rules. This collector applies an additional local mask to caller, callee, and assignment numbers and never collects communication content.
