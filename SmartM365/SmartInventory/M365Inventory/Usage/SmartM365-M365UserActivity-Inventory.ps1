@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.11
+1.12
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@ param(
     [string]$Tenant = 'test',
     [ValidateSet('D7', 'D30', 'D90', 'D180')]
     [string]$Period = 'D180',
-    [ValidateSet('All', 'Office365ActiveUserDetail', 'MailboxUsageDetail', 'OneDriveUsageAccountDetail', 'SharePointSiteUsageDetail', 'Office365ActivationUserDetail', 'TeamsUserActivityUserDetail', 'EmailActivityUserDetail')]
+    [ValidateSet('All', 'Office365ActiveUserDetail', 'MailboxUsageDetail', 'OneDriveUsageAccountDetail', 'SharePointSiteUsageDetail', 'SharePointActivityUserDetail', 'Office365ActivationUserDetail', 'TeamsUserActivityUserDetail', 'TeamsDeviceUsageUserDetail', 'EmailActivityUserDetail')]
     [string[]]$Reports = @('Office365ActiveUserDetail'),
     [string]$OutputPath,
     [string]$LatestCsvFolderPath,
@@ -49,7 +49,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -249,6 +249,21 @@ function Get-M365UsageReportDefinition {
             Normalize = 'Generic'
             Description = 'SharePoint site usage, storage, file counts, and activity.'
         }
+        SharePointActivityUserDetail = [pscustomobject]@{
+            Name = 'SharePointActivityUserDetail'
+            Command = 'Get-MgReportSharePointActivityUserDetail'
+            Endpoint = 'getSharePointActivityUserDetail'
+            BaseFileName = 'M365_SharePoint_UserActivity'
+            SupportsPeriod = $true
+            Normalize = 'Generic'
+            Columns = @(
+                'RunId', 'ReportName', 'ReportPeriodRequested',
+                'Report Refresh Date', 'User Principal Name', 'Is Deleted', 'Deleted Date', 'Last Activity Date',
+                'Viewed Or Edited File Count', 'Synced File Count', 'Shared Internally File Count',
+                'Shared Externally File Count', 'Visited Page Count', 'Assigned Products', 'Report Period'
+            )
+            Description = 'SharePoint file, sharing, sync, and page activity by user.'
+        }
         Office365ActivationUserDetail = [pscustomobject]@{
             Name = 'Office365ActivationUserDetail'
             Command = 'Get-MgReportOffice365ActivationUserDetail'
@@ -266,6 +281,21 @@ function Get-M365UsageReportDefinition {
             SupportsPeriod = $true
             Normalize = 'Generic'
             Description = 'Teams user activity detail.'
+        }
+        TeamsDeviceUsageUserDetail = [pscustomobject]@{
+            Name = 'TeamsDeviceUsageUserDetail'
+            Command = 'Get-MgReportTeamDeviceUsageUserDetail'
+            Endpoint = 'getTeamsDeviceUsageUserDetail'
+            BaseFileName = 'M365_Teams_DeviceUsage'
+            SupportsPeriod = $true
+            Normalize = 'Generic'
+            Columns = @(
+                'RunId', 'ReportName', 'ReportPeriodRequested',
+                'Report Refresh Date', 'User Id', 'User Principal Name', 'Last Activity Date', 'Is Deleted',
+                'Deleted Date', 'Used Web', 'Used Windows Phone', 'Used iOS', 'Used Mac',
+                'Used Android Phone', 'Used Windows', 'Used Chrome OS', 'Used Linux', 'Is Licensed', 'Report Period'
+            )
+            Description = 'Teams device and operating system usage by user.'
         }
         EmailActivityUserDetail = [pscustomobject]@{
             Name = 'EmailActivityUserDetail'
@@ -357,14 +387,15 @@ function Export-M365UsageReport {
     }
     else {
         $normalizedRows = @(ConvertFrom-M365GenericReport -Rows $rawRows -ReportName $ReportDefinition.Name)
-        $columns = @()
+        $columns = if ($ReportDefinition.PSObject.Properties['Columns']) { @($ReportDefinition.Columns) } else { @() }
     }
 
+    $exportData = if ($normalizedRows.Count -eq 0 -and $columns.Count -gt 0) { @($null) } else { $normalizedRows }
     $exportResult = Export-SmartM365Csv `
         -BaseFileName $ReportDefinition.BaseFileName `
         -OutputPath $runOutputRoot `
         -GlobalPath $LatestCsvFolderPath `
-        -Data $normalizedRows `
+        -Data $exportData `
         -Columns $columns
 
     [pscustomobject]@{
