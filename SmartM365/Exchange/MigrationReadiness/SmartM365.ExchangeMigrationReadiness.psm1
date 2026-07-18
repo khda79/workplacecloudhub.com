@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.4.0'
+$script:SemrVersion = '1.5.0'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ActiveDirectoryDomains = @()
@@ -8,6 +8,7 @@ $script:ActiveDirectoryFallbackUsed = $false
 $script:GraphEvidenceByEmail = @{}
 $script:GraphSubscribedSkus = @()
 $script:GraphSubscribedSkuError = ''
+$script:CurrentSourceTimestamps = @{}
 $script:DisabledChecks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $script:ConnectionState = [ordered]@{
     ActiveDirectory = $false
@@ -221,14 +222,6 @@ function Import-SemrSmartM365TenantProfile {
     if (([string]::IsNullOrWhiteSpace([string]$tenantProfile['RemoteRoutingDomain']) -or [string]$tenantProfile['RemoteRoutingDomain'] -eq 'tenant.mail.onmicrosoft.com') -and -not [string]::IsNullOrWhiteSpace($remoteRoutingDomain)) {
         $tenantProfile['RemoteRoutingDomain'] = $remoteRoutingDomain
     }
-    if ($Runtime.Contains('Authentication') -and $Runtime['Authentication'] -is [System.Collections.IDictionary]) {
-        $authentication = $Runtime['Authentication']
-        foreach ($key in @('AppId', 'OrgDomain', 'Thumb', 'Thumbprint')) {
-            if ([string]::IsNullOrWhiteSpace([string]$authentication[$key]) -and -not [string]::IsNullOrWhiteSpace([string]$smartM365Profile[$key])) {
-                $authentication[$key] = [string]$smartM365Profile[$key]
-            }
-        }
-    }
     return $true
 }
 function Get-SemrConfig {
@@ -253,7 +246,7 @@ function Get-SemrConfig {
     $runtime = ConvertTo-SemrHashtable -InputObject (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
     $added = @(Merge-SemrConfigDefault -Runtime $runtime -Template $template)
     $configurationChanged = $added.Count -gt 0
-    foreach ($deprecatedKey in @('Tenant', 'OnPremises', 'EntraConnect', 'SmartM365', 'EvidenceSources')) {
+    foreach ($deprecatedKey in @('Tenant', 'OnPremises', 'EntraConnect', 'SmartM365', 'EvidenceSources', 'Authentication')) {
         if ($runtime.Contains($deprecatedKey)) {
             $runtime.Remove($deprecatedKey)
             $configurationChanged = $true
@@ -261,18 +254,6 @@ function Get-SemrConfig {
     }
     if ($runtime.Contains('MicrosoftGraph') -and $runtime['MicrosoftGraph'] -is [System.Collections.IDictionary] -and $runtime['MicrosoftGraph'].Contains('UseDeviceCode')) {
         $runtime['MicrosoftGraph'].Remove('UseDeviceCode')
-        $configurationChanged = $true
-    }
-    if ($runtime.Contains('Authentication') -and $runtime['Authentication'] -is [System.Collections.IDictionary] -and $runtime['Authentication'].Contains('TenantId')) {
-        $legacyAuthenticationTenantId = ([string]$runtime['Authentication']['TenantId']).Trim()
-        $configuredTenantId = ([string]$runtime['TenantProfile']['TenantId']).Trim()
-        if ($legacyAuthenticationTenantId -and $configuredTenantId -and $legacyAuthenticationTenantId -ne $configuredTenantId) {
-            throw "Authentication.TenantId '$legacyAuthenticationTenantId' does not match TenantProfile.TenantId '$configuredTenantId'. Keep only TenantProfile.TenantId."
-        }
-        if (-not $configuredTenantId -and $legacyAuthenticationTenantId) {
-            $runtime['TenantProfile']['TenantId'] = $legacyAuthenticationTenantId
-        }
-        $runtime['Authentication'].Remove('TenantId')
         $configurationChanged = $true
     }
     if ($configurationChanged) {
@@ -284,48 +265,13 @@ function Get-SemrConfig {
         throw "Invalid Mode '$mode'. Expected Live or CacheOnly."
     }
     $tenantProfile = $runtime['TenantProfile']
-    $authentication = $runtime['Authentication']
-    $configuredAuthenticationMode = [string]$authentication['Mode']
-    $authenticationMode = if ($configuredAuthenticationMode -ieq 'Interactive') { 'Interactive' } elseif ($configuredAuthenticationMode -ieq 'Application') { 'Application' } else { '' }
-    if (-not $authenticationMode) {
-        throw "Invalid Authentication.Mode '$configuredAuthenticationMode'. Expected Interactive or Application."
-    }
-    $authentication['Mode'] = $authenticationMode
     [void](Import-SemrSmartM365TenantProfile -Runtime $runtime)
     if ([string]::IsNullOrWhiteSpace([string]$tenantProfile['TenantId'])) {
         throw 'TenantProfile.TenantId is required. Configure it in the application JSON or provide the SmartM365 default tenant profile under Config\Tenants.'
     }
     $tenantId = ([string]$tenantProfile['TenantId']).Trim()
     $tenantProfile['TenantId'] = $tenantId
-    $appId = ([string]$authentication['AppId']).Trim()
-    $orgDomain = ([string]$authentication['OrgDomain']).Trim()
-    $thumb = ([string]$authentication['Thumb']).Replace(' ', '').Trim()
-    $thumbprint = ([string]$authentication['Thumbprint']).Replace(' ', '').Trim()
-    if ($thumb -and $thumbprint -and $thumb -ine $thumbprint) {
-        throw 'Authentication.Thumb and Authentication.Thumbprint must contain the same certificate thumbprint.'
-    }
-    $certificateThumbprint = if ($thumbprint) { $thumbprint } else { $thumb }
-    if ($authenticationMode -eq 'Application') {
-        $requiredAuthenticationValues = [ordered]@{
-            AppId = $appId
-            TenantId = $tenantId
-            OrgDomain = $orgDomain
-            Thumbprint = $certificateThumbprint
-        }
-        foreach ($key in $requiredAuthenticationValues.Keys) {
-            if ([string]::IsNullOrWhiteSpace([string]$requiredAuthenticationValues[$key])) {
-                throw "Authentication.$key is required when Authentication.Mode is Application."
-            }
-        }
-        try { [void][guid]::Parse($appId) } catch { throw "Authentication.AppId '$appId' is not a valid GUID." }
-        try { [void][guid]::Parse($tenantId) } catch { throw "TenantProfile.TenantId '$tenantId' is not a valid GUID." }
-        if ($orgDomain -notmatch '^[A-Za-z0-9][A-Za-z0-9.-]+\.[A-Za-z]{2,}$') {
-            throw "Authentication.OrgDomain '$orgDomain' is not a valid tenant organization domain."
-        }
-        if ($certificateThumbprint -notmatch '^[A-Fa-f0-9]{40}$') {
-            throw 'Authentication.Thumbprint must be a 40-character hexadecimal certificate thumbprint.'
-        }
-    }
+    try { [void][guid]::Parse($tenantId) } catch { throw "TenantProfile.TenantId '$tenantId' is not a valid GUID." }
     $targetDeliveryDomain = [string]$runtime['Hybrid']['TargetDeliveryDomain']
     if ([string]::IsNullOrWhiteSpace($targetDeliveryDomain) -or $targetDeliveryDomain -eq 'tenant.mail.onmicrosoft.com') {
         $runtime['Hybrid']['TargetDeliveryDomain'] = [string]$tenantProfile['RemoteRoutingDomain']
@@ -340,10 +286,6 @@ function Get-SemrConfig {
     $runtime['_TenantProfileKey'] = [string]$tenantProfile['ProfileKey']
     $runtime['_TenantId'] = $tenantId
     $runtime['_RemoteRoutingDomain'] = [string]$tenantProfile['RemoteRoutingDomain']
-    $runtime['_AuthenticationMode'] = $authenticationMode
-    $runtime['_AppId'] = $appId
-    $runtime['_OrgDomain'] = $orgDomain
-    $runtime['_CertificateThumbprint'] = $certificateThumbprint.ToUpperInvariant()
     $runtime['_CacheRootPath'] = $cacheRootPath
     $runtime['_InventoryDataLastPath'] = $cacheDataLastPath
     $runtime['_AlternativeCacheRootPath'] = $alternativeCacheRootPath
@@ -365,26 +307,6 @@ function Get-SemrConnectionState {
 function Test-SemrCommand {
     param([Parameter(Mandatory)][string]$Name)
     return [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
-}
-
-function Get-SemrApplicationCertificate {
-    param([Parameter(Mandatory)][string]$Thumbprint)
-
-    $normalizedThumbprint = $Thumbprint.Replace(' ', '').Trim().ToUpperInvariant()
-    foreach ($storePath in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')) {
-        $certificatePath = Join-Path $storePath $normalizedThumbprint
-        $certificate = Get-Item -LiteralPath $certificatePath -ErrorAction SilentlyContinue
-        if (-not $certificate) { continue }
-        if (-not $certificate.HasPrivateKey) {
-            throw "Certificate '$normalizedThumbprint' in '$storePath' does not have an accessible private key."
-        }
-        $now = Get-Date
-        if ($certificate.NotBefore -gt $now -or $certificate.NotAfter -le $now) {
-            throw "Certificate '$normalizedThumbprint' in '$storePath' is not currently valid (valid from $($certificate.NotBefore) to $($certificate.NotAfter))."
-        }
-        return $certificate
-    }
-    throw "Certificate '$normalizedThumbprint' was not found in Cert:\CurrentUser\My or Cert:\LocalMachine\My."
 }
 
 function Invoke-SemrIsolatedPowerShell {
@@ -578,11 +500,7 @@ function Connect-SemrExchangeOnline {
     param(
         [string]$UserPrincipalName = '',
         [bool]$DisableWam = $true,
-        [string]$TenantId = '',
-        [ValidateSet('Interactive', 'Application')][string]$AuthenticationMode = 'Interactive',
-        [string]$AppId = '',
-        [string]$Organization = '',
-        [string]$CertificateThumbprint = ''
+        [string]$TenantId = ''
     )
 
     Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop
@@ -594,28 +512,11 @@ function Connect-SemrExchangeOnline {
         ShowBanner = $false
         ErrorAction = 'Stop'
     }
-    if ($AuthenticationMode -eq 'Application') {
-        $requiredApplicationValues = [ordered]@{
-            AppId = $AppId
-            Organization = $Organization
-            CertificateThumbprint = $CertificateThumbprint
-        }
-        foreach ($key in $requiredApplicationValues.Keys) {
-            if ([string]::IsNullOrWhiteSpace([string]$requiredApplicationValues[$key])) {
-                throw "$key is required for Exchange Online application authentication."
-            }
-        }
-        $parameters.AppId = $AppId
-        $parameters.Organization = $Organization
-        $parameters.Certificate = Get-SemrApplicationCertificate -Thumbprint $CertificateThumbprint
+    if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+        $parameters.UserPrincipalName = $UserPrincipalName
     }
-    else {
-        if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
-            $parameters.UserPrincipalName = $UserPrincipalName
-        }
-        if ($DisableWam) {
-            $parameters.DisableWAM = $true
-        }
+    if ($DisableWam) {
+        $parameters.DisableWAM = $true
     }
     Connect-ExchangeOnline @parameters
     if ($TenantId -and (Test-SemrCommand -Name 'Get-ConnectionInformation')) {
@@ -635,9 +536,6 @@ function Connect-SemrMicrosoftGraph {
     param(
         [string[]]$Scopes = @('User.Read.All', 'Directory.Read.All', 'Organization.Read.All'),
         [string]$TenantId = '',
-        [ValidateSet('Interactive', 'Application')][string]$AuthenticationMode = 'Interactive',
-        [string]$AppId = '',
-        [string]$CertificateThumbprint = '',
         [string[]]$EmailAddresses = @(),
         [scriptblock]$ProgressCallback
     )
@@ -674,8 +572,7 @@ function Connect-SemrMicrosoftGraph {
         $startInfo.CreateNoWindow = $true
         foreach ($argument in @(
             '-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $workerPath,
-            '-TenantId', $TenantId, '-AuthenticationMode', $AuthenticationMode,
-            '-ClientId', $AppId, '-CertificateThumbprint', $CertificateThumbprint,
+            '-TenantId', $TenantId,
             '-ScopesPath', $scopesPath, '-InputPath', $inputPath,
             '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath
         )) {
@@ -935,6 +832,7 @@ function Import-SemrBatchCsv {
         IdentityColumn = $identityColumn
         Headers = $headers
         UnknownHeaders = $unknownHeaders
+        SourceTimestamp = (Get-Item -LiteralPath $Path).LastWriteTime
         Rows = @($normalized)
     }
 }
@@ -951,9 +849,16 @@ function ConvertTo-SemrFinding {
         [string]$ObservedValue = '',
         [string]$ExpectedValue = '',
         [string]$EvidenceSource = '',
+        $SourceTimestamp = $null,
         [string]$Message = '',
         [string]$RecommendedAction = ''
     )
+
+    $sourceTimestampText = ''
+    if ($null -ne $SourceTimestamp -and -not [string]::IsNullOrWhiteSpace([string]$SourceTimestamp)) {
+        try { $sourceTimestampText = ([datetime]$SourceTimestamp).ToString('yyyy-MM-dd HH:mm:ss') }
+        catch { $sourceTimestampText = [string]$SourceTimestamp }
+    }
 
     return [pscustomobject][ordered]@{
         RunId = $RunId
@@ -966,7 +871,7 @@ function ConvertTo-SemrFinding {
         ObservedValue = $ObservedValue
         ExpectedValue = $ExpectedValue
         EvidenceSource = $EvidenceSource
-        SourceTimestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        SourceTimestamp = $sourceTimestampText
         Message = $Message
         RecommendedAction = $RecommendedAction
     }
@@ -978,6 +883,19 @@ function Add-SemrFinding {
         [Parameter(Mandatory)][hashtable]$Parameters
     )
     if (-not (Test-SemrCheckEnabled -CheckId ([string]$Parameters.CheckId))) { return }
+    if (-not $Parameters.ContainsKey('SourceTimestamp')) {
+        $resolvedTimestamp = $null
+        $evidenceSource = ([string]$Parameters.EvidenceSource).Trim().ToLowerInvariant()
+        if ($evidenceSource -and $script:CurrentSourceTimestamps) {
+            foreach ($sourceKey in @($script:CurrentSourceTimestamps.Keys | Sort-Object Length -Descending)) {
+                if ($evidenceSource.Contains(([string]$sourceKey).ToLowerInvariant())) {
+                    $resolvedTimestamp = $script:CurrentSourceTimestamps[$sourceKey]
+                    break
+                }
+            }
+        }
+        $Parameters.SourceTimestamp = $resolvedTimestamp
+    }
     [void]$List.Add((ConvertTo-SemrFinding @Parameters))
 }
 
@@ -1867,6 +1785,10 @@ function Get-SemrInventoryExchangeOnlineEvidence {
         Source = 'CacheOnly CSV inventories'
         SourceTimestamp = $script:InventoryContext.ExoTimestamp
         Recipients = @($recipients)
+        RecipientDataAvailable = [bool]$script:InventoryContext.CloudUsersAvailable
+        RecipientLookupMethods = @('CacheOnly CSV inventories')
+        RecipientLookupErrors = @()
+        MailboxDataAvailable = [bool]$script:InventoryContext.ExchangeOnlineAvailable
         Mailboxes = $mailboxes
         Statistics = $statistics
         SoftDeleted = @()
@@ -1919,66 +1841,134 @@ function Get-SemrExchangeOnlineEvidence {
     }
     if (-not $script:ConnectionState.ExchangeOnline) {
         return [pscustomobject]@{
-            Available = $false
-            Recipients = @()
-            Mailboxes = @()
-            Statistics = @()
-            SoftDeleted = @()
-            MigrationUsers = @()
-            MoveRequests = @()
+            Available = $false; Source = 'Exchange Online unavailable'; SourceTimestamp = $null
+            Recipients = @(); RecipientDataAvailable = $false; RecipientLookupMethods = @(); RecipientLookupErrors = @()
+            Mailboxes = @(); MailboxDataAvailable = $false; Statistics = @()
+            SoftDeleted = @(); SoftDeletedAvailable = $false
+            MigrationUsers = @(); MoveRequests = @(); MoveDataAvailable = $false
         }
     }
 
-    $recipients = @(if (Test-SemrCommand -Name 'Get-EXORecipient') {
-        Invoke-SemrCommandSafe -CommandName 'Get-EXORecipient' -Parameters @{
-            Identity = $EmailAddress
-            Properties = @('RecipientType', 'RecipientTypeDetails', 'EmailAddresses', 'ExternalEmailAddress', 'ExchangeGuid', 'ArchiveGuid', 'LegacyExchangeDN', 'ExternalDirectoryObjectId')
+    $collectedAt = Get-Date
+    $lookupErrors = [Collections.Generic.List[string]]::new()
+    $lookupMethods = [Collections.Generic.List[string]]::new()
+    $recipientList = [Collections.Generic.List[object]]::new()
+    $recipientKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $addRecipients = {
+        param([object[]]$Items, [string]$Method)
+        if (-not $lookupMethods.Contains($Method)) { [void]$lookupMethods.Add($Method) }
+        foreach ($item in @($Items)) {
+            $key = [string](Get-SemrPropertyValue -InputObject $item -Names @('ExternalDirectoryObjectId','Guid','Identity','PrimarySmtpAddress') -Default '')
+            if (-not $key) { $key = [string]$item }
+            if ($recipientKeys.Add($key)) { [void]$recipientList.Add($item) }
         }
-    })
-    $mailboxes = @(if (Test-SemrCommand -Name 'Get-EXOMailbox') {
-        Invoke-SemrCommandSafe -CommandName 'Get-EXOMailbox' -Parameters @{
-            Identity = $EmailAddress
-            Properties = @(
-                'RecipientTypeDetails', 'EmailAddresses', 'ExchangeGuid', 'ArchiveGuid',
-                'LitigationHoldEnabled', 'InPlaceHolds', 'DelayHoldApplied',
-                'DelayReleaseHoldApplied', 'ProhibitSendReceiveQuota', 'GrantSendOnBehalfTo',
-                'ArchiveStatus', 'ArchiveQuota', 'ForwardingAddress', 'ForwardingSmtpAddress',
-                'DeliverToMailboxAndForward', 'ModerationEnabled', 'LegacyExchangeDN'
-            )
-        }
-    })
-    $statistics = @(if ($mailboxes.Count -eq 1 -and (Test-SemrCommand -Name 'Get-EXOMailboxStatistics')) {
-        Invoke-SemrCommandSafe -CommandName 'Get-EXOMailboxStatistics' -Parameters @{
-            Identity = $EmailAddress
-            Properties = @('TotalItemSize', 'ItemCount', 'TotalDeletedItemSize', 'StorageLimitStatus')
-        }
-    })
-    $softDeleted = @()
-    if (Test-SemrCommand -Name 'Get-Mailbox') {
-        try {
-            $softDeleted = @(Get-Mailbox -Identity $EmailAddress -SoftDeletedMailbox -IncludeInactiveMailbox -ErrorAction Stop)
-        }
-        catch { $null = $_ }
     }
-    $migrationUsers = @(if (Test-SemrCommand -Name 'Get-MigrationUser') {
-        Invoke-SemrCommandSafe -CommandName 'Get-MigrationUser' -Parameters @{ Identity = $EmailAddress }
+    $escapedAddress = $EmailAddress.Replace("'", "''")
+    $recipientProperties = @('RecipientType','RecipientTypeDetails','EmailAddresses','ExternalEmailAddress','ExchangeGuid','ArchiveGuid','LegacyExchangeDN','ExternalDirectoryObjectId')
+    $recipientDataAvailable = $false
+
+    if (Test-SemrCommand -Name 'Get-EXORecipient') {
+        try {
+            $items = @(Get-EXORecipient -Filter "EmailAddresses -eq 'smtp:$escapedAddress'" -ResultSize Unlimited -Properties $recipientProperties -ErrorAction Stop)
+            $recipientDataAvailable = $true
+            & $addRecipients $items 'Get-EXORecipient -Filter'
+        }
+        catch { [void]$lookupErrors.Add("Get-EXORecipient filter: $($_.Exception.Message)") }
+        if ($recipientList.Count -eq 0) {
+            try {
+                $items = @(Get-EXORecipient -Identity $EmailAddress -Properties $recipientProperties -ErrorAction Stop)
+                $recipientDataAvailable = $true
+                & $addRecipients $items 'Get-EXORecipient -Identity'
+            }
+            catch {
+                if ($_.Exception.Message -match '(?i)not found|couldn''t be found|could not be found|does not exist') { $recipientDataAvailable = $true }
+                else { [void]$lookupErrors.Add("Get-EXORecipient identity: $($_.Exception.Message)") }
+            }
+        }
+    }
+    if ($recipientList.Count -eq 0 -and (Test-SemrCommand -Name 'Get-Recipient')) {
+        try {
+            $items = @(Get-Recipient -Identity $EmailAddress -ErrorAction Stop)
+            $recipientDataAvailable = $true
+            & $addRecipients $items 'Get-Recipient -Identity'
+        }
+        catch {
+            if ($_.Exception.Message -match '(?i)not found|couldn''t be found|could not be found|does not exist') { $recipientDataAvailable = $true }
+            else { [void]$lookupErrors.Add("Get-Recipient identity: $($_.Exception.Message)") }
+        }
+    }
+    if ($recipientList.Count -eq 0 -and (Test-SemrCommand -Name 'Get-MailUser')) {
+        try {
+            $items = @(Get-MailUser -Identity $EmailAddress -ErrorAction Stop)
+            $recipientDataAvailable = $true
+            & $addRecipients $items 'Get-MailUser -Identity'
+        }
+        catch {
+            if ($_.Exception.Message -match '(?i)not found|couldn''t be found|could not be found|does not exist') { $recipientDataAvailable = $true }
+            else { [void]$lookupErrors.Add("Get-MailUser identity: $($_.Exception.Message)") }
+        }
+    }
+
+    $mailboxes = @()
+    $mailboxDataAvailable = $false
+    if (Test-SemrCommand -Name 'Get-EXOMailbox') {
+        try {
+            $mailboxes = @(Get-EXOMailbox -Identity $EmailAddress -Properties @('RecipientTypeDetails','EmailAddresses','ExchangeGuid','ArchiveGuid','LitigationHoldEnabled','InPlaceHolds','DelayHoldApplied','DelayReleaseHoldApplied','ProhibitSendReceiveQuota','GrantSendOnBehalfTo','ArchiveStatus','ArchiveQuota','ForwardingAddress','ForwardingSmtpAddress','DeliverToMailboxAndForward','ModerationEnabled','LegacyExchangeDN') -ErrorAction Stop)
+            $mailboxDataAvailable = $true
+        }
+        catch {
+            if ($_.Exception.Message -match '(?i)not found|couldn''t be found|could not be found|does not exist') { $mailboxDataAvailable = $true }
+            else { [void]$lookupErrors.Add("Get-EXOMailbox identity: $($_.Exception.Message)") }
+        }
+    }
+    if (-not $mailboxDataAvailable -and (Test-SemrCommand -Name 'Get-Mailbox')) {
+        try { $mailboxes = @(Get-Mailbox -Identity $EmailAddress -ErrorAction Stop); $mailboxDataAvailable = $true }
+        catch {
+            if ($_.Exception.Message -match '(?i)not found|couldn''t be found|could not be found|does not exist') { $mailboxDataAvailable = $true }
+            else { [void]$lookupErrors.Add("Get-Mailbox identity: $($_.Exception.Message)") }
+        }
+    }
+    if (-not $mailboxDataAvailable -and $recipientList.Count -eq 1) {
+        $recipientType = [string](Get-SemrPropertyValue -InputObject $recipientList[0] -Names @('RecipientTypeDetails','RecipientType') -Default '')
+        if ($recipientType -match 'MailUser|RemoteUserMailbox') { $mailboxDataAvailable = $true }
+    }
+
+    $statistics = @(if ($mailboxes.Count -eq 1 -and (Test-SemrCommand -Name 'Get-EXOMailboxStatistics')) {
+        Invoke-SemrCommandSafe -CommandName 'Get-EXOMailboxStatistics' -Parameters @{ Identity = $EmailAddress; Properties = @('TotalItemSize','ItemCount','TotalDeletedItemSize','StorageLimitStatus') }
     })
-    $moveRequests = @(if (Test-SemrCommand -Name 'Get-MoveRequest') {
-        Invoke-SemrCommandSafe -CommandName 'Get-MoveRequest' -Parameters @{ Identity = $EmailAddress }
-    })
+    $softDeleted = @(); $softDeletedAvailable = $false
+    if (Test-SemrCommand -Name 'Get-Mailbox') {
+        try { $softDeleted = @(Get-Mailbox -Identity $EmailAddress -SoftDeletedMailbox -IncludeInactiveMailbox -ErrorAction Stop); $softDeletedAvailable = $true }
+        catch {
+            if ($_.Exception.Message -match '(?i)not found|couldn''t be found|could not be found|does not exist') { $softDeletedAvailable = $true }
+            else { [void]$lookupErrors.Add("Soft-deleted mailbox lookup: $($_.Exception.Message)") }
+        }
+    }
+
+    $migrationUsers = @(); $moveRequests = @(); $migrationLookupAvailable = $false; $moveRequestLookupAvailable = $false
+    if (Test-SemrCommand -Name 'Get-MigrationUser') {
+        try { $migrationUsers = @(Get-MigrationUser -Identity $EmailAddress -ErrorAction Stop); $migrationLookupAvailable = $true }
+        catch {
+            if ($_.Exception.Message -match '(?i)not found|couldn''t be found|could not be found|does not exist') { $migrationLookupAvailable = $true }
+            else { [void]$lookupErrors.Add("Get-MigrationUser identity: $($_.Exception.Message)") }
+        }
+    }
+    if (Test-SemrCommand -Name 'Get-MoveRequest') {
+        try { $moveRequests = @(Get-MoveRequest -Identity $EmailAddress -ErrorAction Stop); $moveRequestLookupAvailable = $true }
+        catch {
+            if ($_.Exception.Message -match '(?i)not found|couldn''t be found|could not be found|does not exist') { $moveRequestLookupAvailable = $true }
+            else { [void]$lookupErrors.Add("Get-MoveRequest identity: $($_.Exception.Message)") }
+        }
+    }
 
     return [pscustomobject]@{
-        Available = $true
-        Source = 'Live Exchange Online'
-        SourceTimestamp = Get-Date
-        Recipients = $recipients
-        Mailboxes = $mailboxes
-        Statistics = $statistics
-        SoftDeleted = $softDeleted
-        SoftDeletedAvailable = $true
-        MigrationUsers = $migrationUsers
-        MoveRequests = $moveRequests
-        MoveDataAvailable = $true
+        Available = $true; Source = 'Live Exchange Online'; SourceTimestamp = $collectedAt
+        Recipients = @($recipientList); RecipientDataAvailable = $recipientDataAvailable
+        RecipientLookupMethods = @($lookupMethods); RecipientLookupErrors = @($lookupErrors)
+        Mailboxes = $mailboxes; MailboxDataAvailable = $mailboxDataAvailable; Statistics = $statistics
+        SoftDeleted = $softDeleted; SoftDeletedAvailable = $softDeletedAvailable
+        MigrationUsers = $migrationUsers; MoveRequests = $moveRequests
+        MoveDataAvailable = $migrationLookupAvailable -and $moveRequestLookupAvailable
     }
 }
 
@@ -2256,13 +2246,14 @@ function Get-SemrTargetQuotaEvidence {
 }
 
 function Get-SemrAcceptedDomainEvidence {
-    $result = [ordered]@{ Available = $false; Source = 'Unavailable'; Domains = @(); Message = 'Accepted-domain evidence is unavailable.' }
+    $result = [ordered]@{ Available = $false; Source = 'Unavailable'; SourceTimestamp = $null; Domains = @(); Message = 'Accepted-domain evidence is unavailable.' }
     if (-not (Test-SemrCheckEnabled -CheckId 'SMTP-ACCEPTED-DOMAIN')) { return [pscustomobject]$result }
     if ($script:ConnectionState.ExchangeOnline -and (Test-SemrCommand -Name 'Get-AcceptedDomain')) {
         try {
             $rows = @(Get-AcceptedDomain -ErrorAction Stop)
             $result.Available = $true
             $result.Source = 'Live Exchange Online accepted domains'
+            $result.SourceTimestamp = Get-Date
             $result.Domains = @($rows | ForEach-Object { [string](Get-SemrPropertyValue -InputObject $_ -Names @('DomainName','Name') -Default '') } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
             $result.Message = "$($result.Domains.Count) accepted domain(s) collected live."
             return [pscustomobject]$result
@@ -2272,6 +2263,7 @@ function Get-SemrAcceptedDomainEvidence {
     if ($script:InventoryContext -and $script:InventoryContext.AcceptedDomainDataAvailable) {
         $result.Available = $true
         $result.Source = 'Tenant CSV cache accepted domains'
+        $result.SourceTimestamp = $script:InventoryContext.AcceptedDomainTimestamp
         $result.Domains = @($script:InventoryContext.AcceptedDomainRows | ForEach-Object { [string](Get-SemrPropertyValue -InputObject $_ -Names @('DomainName','Name') -Default '') } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
         $result.Message = "$($result.Domains.Count) accepted domain(s) collected from CSV cache."
     }
@@ -2417,6 +2409,29 @@ function Add-SemrMailboxRiskFindings {
     Add-SemrFinding $Findings ($Base+@{CheckId='CUSTOM-SOURCE-QUOTA';Category='Mailbox';Severity=if(-not $quotaKnown -or $custom){'Warning'}else{'Information'};Result=if(-not $quotaKnown){'UNKNOWN'}elseif($custom){'WARN'}else{'PASS'};IsBlocking=$false;ObservedValue=if($quotaKnown){"UseDatabaseQuotaDefaults=$quotaDefaults; ProhibitSendReceiveQuota=$([string](Get-SemrPropertyValue $mailbox[0] @('ProhibitSendReceiveQuota') ''))"}else{'Source quota evidence unavailable'};ExpectedValue='Source quota documented';EvidenceSource=$source;Message=if(-not $quotaKnown){'Source quota customization could not be evaluated.'}elseif($custom){'The mailbox uses a custom source quota.'}else{'The mailbox uses database quota defaults.'};RecommendedAction=if($custom){'Confirm the target SKU quota independently of the custom source quota.'}elseif(-not $quotaKnown){'Enrich the cache or validate live.'}else{''}})
 }
 
+function Get-SemrMoveState {
+    param([Parameter(Mandatory)]$Exo)
+
+    $states = [Collections.Generic.List[object]]::new()
+    foreach ($entry in @($Exo.MigrationUsers)) {
+        [void]$states.Add([pscustomobject]@{ Source = 'MigrationUser'; Status = [string](Get-SemrPropertyValue -InputObject $entry -Names @('Status','StatusSummary') -Default 'Unknown') })
+    }
+    foreach ($entry in @($Exo.MoveRequests)) {
+        [void]$states.Add([pscustomobject]@{ Source = 'MoveRequest'; Status = [string](Get-SemrPropertyValue -InputObject $entry -Names @('Status','StatusSummary') -Default 'Unknown') })
+    }
+    $activeStates = @($states | Where-Object { $_.Status -notmatch '^(?i:Completed|CompletedWithWarning|Removed)$' })
+    $badStates = @($states | Where-Object { $_.Status -match '(?i)Failed|Suspended|Stopped|Corrupt|Error' })
+    return [pscustomobject]@{
+        ObjectCount = $states.Count
+        ActiveOperationCount = if ($activeStates.Count -gt 0) { 1 } else { 0 }
+        ActiveStatuses = @($activeStates | ForEach-Object { [string]$_.Status } | Sort-Object -Unique)
+        ActiveSources = @($activeStates | ForEach-Object { [string]$_.Source } | Sort-Object -Unique)
+        BadStatuses = @($badStates | ForEach-Object { [string]$_.Status } | Sort-Object -Unique)
+        TerminalStatuses = @($states | Where-Object { $_.Status -match '^(?i:Completed|CompletedWithWarning|Removed)$' } | ForEach-Object Status | Sort-Object -Unique)
+    }
+}
+
+
 function Add-SemrFlowAndSyncFindings {
     param([System.Collections.Generic.List[object]]$Findings,[hashtable]$Base,[object[]]$BatchRows,$OnPrem,$Exo,$Graph)
     $source=[string](Get-SemrPropertyValue $OnPrem @('Source') 'Exchange on-premises')
@@ -2451,10 +2466,9 @@ function Add-SemrFlowAndSyncFindings {
     }
 
     $moveAvailable=[bool](Get-SemrPropertyValue $Exo @('MoveDataAvailable') $false)
-    $moveObjects=@($Exo.MigrationUsers)+@($Exo.MoveRequests)
-    $badMoves=@($moveObjects | Where-Object {[string](Get-SemrPropertyValue $_ @('Status','StatusSummary') '') -match 'Failed|Suspended|Stopped|Corrupt|Error'})
-    $badStatuses=@($badMoves | ForEach-Object {[string](Get-SemrPropertyValue $_ @('Status','StatusSummary') 'Unknown')})
-    Add-SemrFinding $Findings ($Base+@{CheckId='MOVE-HISTORY';Category='Migration';Severity=if(-not $moveAvailable){'Warning'}elseif($badMoves.Count){'Critical'}else{'Information'};Result=if(-not $moveAvailable){'UNKNOWN'}elseif($badMoves.Count){'FAIL'}else{'PASS'};IsBlocking=$moveAvailable -and $badMoves.Count -gt 0;ObservedValue=if($moveAvailable){if($badMoves.Count){$badStatuses -join ';'}else{'No failed or suspended prior move'}}else{'Move history unavailable'};ExpectedValue='No unresolved failed or suspended move';EvidenceSource=$exoSource;Message=if(-not $moveAvailable){'Previous move history could not be evaluated.'}elseif($badMoves.Count){'An unresolved failed or suspended migration object was detected.'}else{'No unresolved failed move was returned.'};RecommendedAction=if($badMoves.Count){'Review the migration report and resolve or clean up the failed move deliberately.'}elseif(-not $moveAvailable){'Refresh migration-jobs inventory or validate live.'}else{''}})
+    $moveState=Get-SemrMoveState -Exo $Exo
+    $badStatuses=@($moveState.BadStatuses)
+    Add-SemrFinding $Findings ($Base+@{CheckId='MOVE-HISTORY';Category='Migration';Severity=if(-not $moveAvailable){'Warning'}elseif($badStatuses.Count){'Critical'}else{'Information'};Result=if(-not $moveAvailable){'UNKNOWN'}elseif($badStatuses.Count){'FAIL'}else{'PASS'};IsBlocking=$moveAvailable -and $badStatuses.Count -gt 0;ObservedValue=if($moveAvailable){if($badStatuses.Count){$badStatuses -join ';'}else{'No failed or suspended prior move'}}else{'Move history unavailable'};ExpectedValue='No unresolved failed or suspended move';EvidenceSource=$exoSource;Message=if(-not $moveAvailable){'Previous move history could not be evaluated.'}elseif($badStatuses.Count){'An unresolved failed or suspended migration object was detected.'}else{'No unresolved failed move was returned.'};RecommendedAction=if($badStatuses.Count){'Review the migration report and resolve or clean up the failed move deliberately.'}elseif(-not $moveAvailable){'Refresh migration-jobs inventory or validate live.'}else{''}})
 
     $user=@($Graph.Users | Select-Object -First 1)
     if($user.Count -eq 1){
@@ -2462,9 +2476,10 @@ function Add-SemrFlowAndSyncFindings {
         $anchor=[string](Get-SemrPropertyValue $user[0] @('OnPremisesImmutableId') '')
         $lastSyncText=[string](Get-SemrPropertyValue $user[0] @('OnPremisesLastSyncDateTime') '')
         $lastSync=$null;if($lastSyncText){try{$lastSync=[datetime]$lastSyncText}catch{}}
-        $stale=$lastSync -and $lastSync -lt (Get-Date).AddHours(-24)
-        $syncError=$errors.Count -gt 0 -or [string]::IsNullOrWhiteSpace($anchor)
-        Add-SemrFinding $Findings ($Base+@{CheckId='ENTRA-OBJECT-SYNC-ERROR';Category='MicrosoftGraph';Severity=if($syncError){'Critical'}elseif($stale){'Warning'}else{'Information'};Result=if($syncError){'FAIL'}elseif($stale){'WARN'}else{'PASS'};IsBlocking=$syncError;ObservedValue="ProvisioningErrors=$($errors.Count); ImmutableIdPresent=$(-not [string]::IsNullOrWhiteSpace($anchor)); LastSync=$lastSyncText";ExpectedValue='No errors, identity anchor present, recent sync';EvidenceSource=$graphSource;Message=if($errors.Count){'Microsoft Entra reports provisioning errors.'}elseif(-not $anchor){'The synchronized identity anchor is missing.'}elseif($stale){'The user synchronization timestamp is older than 24 hours.'}else{'No object-level synchronization issue was detected.'};RecommendedAction=if($syncError){'Resolve Entra Connect export errors and identity anchoring.'}elseif($stale){'Run or validate a successful synchronization cycle.'}else{''}})
+        $timestampOld=$lastSync -and $lastSync -lt (Get-Date).AddHours(-24)
+        $syncEnabled=ConvertTo-SemrBoolean (Get-SemrPropertyValue $user[0] @('OnPremisesSyncEnabled') $false)
+        $syncError=$errors.Count -gt 0 -or ($syncEnabled -and [string]::IsNullOrWhiteSpace($anchor))
+        Add-SemrFinding $Findings ($Base+@{CheckId='ENTRA-OBJECT-SYNC-ERROR';Category='MicrosoftGraph';Severity=if($syncError){'Critical'}else{'Information'};Result=if($syncError){'FAIL'}else{'PASS'};IsBlocking=$syncError;ObservedValue="ProvisioningErrors=$($errors.Count); SyncEnabled=$syncEnabled; ImmutableIdPresent=$(-not [string]::IsNullOrWhiteSpace($anchor)); ObjectLastSync=$lastSyncText";ExpectedValue='No provisioning errors and an identity anchor for synchronized users';EvidenceSource=$graphSource;Message=if($errors.Count){'Microsoft Entra reports provisioning errors.'}elseif($syncEnabled -and -not $anchor){'The synchronized identity anchor is missing.'}elseif($timestampOld){'The per-object synchronization timestamp is older than 24 hours; it is informational and is not used as a proxy for global Entra Connect scheduler health.'}else{'No object-level synchronization issue was detected.'};RecommendedAction=if($syncError){'Resolve Entra Connect export errors and identity anchoring.'}elseif($timestampOld){'Use the ENTRA-CONNECT-SCHEDULER result to assess current synchronization service health.'}else{''}})
     }
 }
 
@@ -2579,6 +2594,8 @@ function Test-SemrHybridReadiness {
         EndpointFound = $false
         EndpointName = ''
         ConnectivitySuccess = $false
+        ConnectivityTestAvailable = $false
+        SourceTimestamp = if ($mode -eq 'Live') { Get-Date } else { $null }
         Source = if ($mode -eq 'CacheOnly') { 'CacheOnly' } else { 'Live Exchange Online' }
         Message = ''
         MrsProxyAvailable = $advanced.MrsProxyAvailable
@@ -2625,6 +2642,7 @@ function Test-SemrHybridReadiness {
         }
     }
     catch {
+        $result.Available = $false
         $result.Message = $_.Exception.Message
         return [pscustomobject]$result
     }
@@ -2642,6 +2660,7 @@ function Test-SemrHybridReadiness {
     $result.EndpointFound = $true
     $result.EndpointName = [string]$endpoint.Identity
     if (Test-SemrCommand -Name 'Test-MigrationServerAvailability') {
+        $result.ConnectivityTestAvailable = $true
         try {
             $test = Test-MigrationServerAvailability -Endpoint $endpoint.Identity -ErrorAction Stop
             $result.ConnectivitySuccess = [bool](Get-SemrPropertyValue -InputObject $test -Names @('Result', 'Success') -Default $false)
@@ -2737,9 +2756,15 @@ function Test-SemrEntraConnect {
     $result.SourceTimestamp = $script:InventoryContext.EntraTimestamp
     $result.SyncCycleEnabled = ConvertTo-SemrBoolean -Value $syncEnabledRow[0].Value
     $result.SchedulerSuspended = -not $healthOk
-    $result.NextSyncCycleStartTimeInUTC = $syncEnabledRow[0].LastSyncDateTimeUtc
+    $result.NextSyncCycleStartTimeInUTC = Get-SemrPropertyValue -InputObject $lastSyncAgeRow[0] -Names @('LastSyncDateTimeUtc','LastSyncDateTime') -Default $null
     $result.ConnectorRunStatus = ($rows | Select-Object CheckName, Status, Value, Detail | ConvertTo-Json -Compress)
-    $cacheSummary = "CSV cache: SyncEnabled=$($result.SyncCycleEnabled); SyncHealthOK=$healthOk; $($lastSyncAgeRow[0].Detail)"
+    $lastSyncDescription = [string](Get-SemrPropertyValue -InputObject $lastSyncAgeRow[0] -Names @('Detail') -Default 'Last synchronization timestamp unavailable.')
+    $lastSyncValue = Get-SemrPropertyValue -InputObject $lastSyncAgeRow[0] -Names @('LastSyncDateTimeUtc','LastSyncDateTime') -Default $null
+    if ($lastSyncValue) {
+        try { $lastSyncDescription = "Last sync age $([math]::Round(((Get-Date).ToUniversalTime() - ([datetime]$lastSyncValue).ToUniversalTime()).TotalMinutes, 1)) minute(s), calculated from $lastSyncValue." } catch { $null = $_ }
+    }
+    $snapshotAgeHours = if ($script:InventoryContext.EntraTimestamp) { [math]::Round(((Get-Date) - [datetime]$script:InventoryContext.EntraTimestamp).TotalHours, 2) } else { $null }
+    $cacheSummary = "CSV cache age=$snapshotAgeHours hour(s); SyncEnabled=$($result.SyncCycleEnabled); SyncHealthOK=$healthOk; $lastSyncDescription"
     $result.Message = if ($mode -eq 'Live' -and $liveFailure) { "Live Entra Connect unavailable ($liveFailure). $cacheSummary" } else { $cacheSummary }
     return [pscustomobject]$result
 }
@@ -2799,6 +2824,11 @@ function Invoke-SemrAssessment {
             RunId = $runId
             EmailAddress = $email
         }
+        $script:CurrentSourceTimestamps = @{}
+        if ($Batch.SourceTimestamp) { $script:CurrentSourceTimestamps['Batch CSV'] = $Batch.SourceTimestamp }
+        if ($hybrid.Source -and $hybrid.SourceTimestamp) { $script:CurrentSourceTimestamps[[string]$hybrid.Source] = $hybrid.SourceTimestamp }
+        if ($entraConnect.Source -and $entraConnect.SourceTimestamp) { $script:CurrentSourceTimestamps[[string]$entraConnect.Source] = $entraConnect.SourceTimestamp }
+        if ($acceptedDomains.Source -and $acceptedDomains.SourceTimestamp) { $script:CurrentSourceTimestamps[[string]$acceptedDomains.Source] = $acceptedDomains.SourceTimestamp }
 
         if ([string]::IsNullOrWhiteSpace($email)) {
             Add-SemrFinding -List $findings -Parameters ($base + @{
@@ -2807,6 +2837,12 @@ function Invoke-SemrAssessment {
             })
             continue
         }
+
+        Add-SemrFinding -List $findings -Parameters ($base + @{
+            CheckId = 'CSV-EMPTY-IDENTITY'; Category = 'CSV'; Severity = 'Information'; Result = 'PASS'; IsBlocking = $false
+            ObservedValue = $email; ExpectedValue = 'Non-empty mailbox identity'; EvidenceSource = 'Batch CSV'
+            Message = 'The CSV row contains a mailbox identity.'; RecommendedAction = ''
+        })
 
         Add-SemrFinding -List $findings -Parameters ($base + @{
             CheckId = 'CSV-SMTP-FORMAT'; Category = 'CSV'; Severity = if (Test-SemrSmtpAddress $email) { 'Information' } else { 'Critical' }
@@ -2858,15 +2894,17 @@ function Invoke-SemrAssessment {
         $graph = Get-SemrGraphEvidence -EmailAddress $email
         $adSource = [string](Get-SemrPropertyValue -InputObject $ad -Names @('Source') -Default 'Active Directory')
         $onPremSource = [string](Get-SemrPropertyValue -InputObject $onPrem -Names @('Source') -Default 'Exchange on-premises')
+        if ($ad.SourceTimestamp) { $script:CurrentSourceTimestamps[$adSource] = $ad.SourceTimestamp }
+        if ($onPrem.SourceTimestamp) { $script:CurrentSourceTimestamps[$onPremSource] = $onPrem.SourceTimestamp }
 
-        if (-not $ad.Available) {
-            Add-SemrFinding -List $findings -Parameters ($base + @{
-                CheckId = 'AD-SOURCE'; Category = 'ActiveDirectory'; Severity = 'Critical'; Result = 'UNKNOWN'; IsBlocking = $true
-                ObservedValue = [string]$ad.Message; EvidenceSource = $adSource
-                Message = 'Active Directory cache evidence is unavailable.'; RecommendedAction = 'Refresh or restore the configured AD inventory CSV, then rerun.'
-            })
-        }
-        else {
+        Add-SemrFinding -List $findings -Parameters ($base + @{
+            CheckId = 'AD-SOURCE'; Category = 'ActiveDirectory'; Severity = if ($ad.Available) { 'Information' } else { 'Critical' }
+            Result = if ($ad.Available) { 'PASS' } else { 'UNKNOWN' }; IsBlocking = -not $ad.Available
+            ObservedValue = if ($ad.Available) { 'Available' } else { [string]$ad.Message }; ExpectedValue = 'Available AD evidence'; EvidenceSource = $adSource
+            Message = if ($ad.Available) { 'Active Directory evidence is available.' } else { 'Active Directory evidence is unavailable.' }
+            RecommendedAction = if ($ad.Available) { '' } else { 'Restore live AD access or refresh the configured AD inventory CSV, then rerun.' }
+        })
+        if ($ad.Available) {
             $adCount = @($ad.Users).Count
             $adValid = $adCount -eq 1
             Add-SemrFinding -List $findings -Parameters ($base + @{
@@ -2888,14 +2926,14 @@ function Invoke-SemrAssessment {
             }
         }
 
-        if (-not $onPrem.Available) {
-            Add-SemrFinding -List $findings -Parameters ($base + @{
-                CheckId = 'ONPREM-SOURCE'; Category = 'ExchangeOnPrem'; Severity = 'Critical'; Result = 'UNKNOWN'; IsBlocking = $true
-                ObservedValue = [string]$onPrem.Message; EvidenceSource = $onPremSource
-                Message = 'Exchange on-premises cache evidence is unavailable.'; RecommendedAction = 'Refresh or restore the configured Exchange on-premises inventory CSV, then rerun.'
-            })
-        }
-        else {
+        Add-SemrFinding -List $findings -Parameters ($base + @{
+            CheckId = 'ONPREM-SOURCE'; Category = 'ExchangeOnPrem'; Severity = if ($onPrem.Available) { 'Information' } else { 'Critical' }
+            Result = if ($onPrem.Available) { 'PASS' } else { 'UNKNOWN' }; IsBlocking = -not $onPrem.Available
+            ObservedValue = if ($onPrem.Available) { 'Available' } else { [string]$onPrem.Message }; ExpectedValue = 'Available Exchange on-premises evidence'; EvidenceSource = $onPremSource
+            Message = if ($onPrem.Available) { 'Exchange on-premises evidence is available.' } else { 'Exchange on-premises evidence is unavailable.' }
+            RecommendedAction = if ($onPrem.Available) { '' } else { 'Restore live Exchange on-premises access or refresh the configured inventory CSV, then rerun.' }
+        })
+        if ($onPrem.Available) {
             $mailboxCount = @($onPrem.Mailboxes).Count
             $remoteCount = @($onPrem.RemoteMailboxes).Count
             $mailUserCount = @($onPrem.MailUsers).Count
@@ -2995,23 +3033,30 @@ function Invoke-SemrAssessment {
 
         $exoSource = [string](Get-SemrPropertyValue -InputObject $exo -Names @('Source') -Default 'Exchange Online')
         $graphSource = [string](Get-SemrPropertyValue -InputObject $graph -Names @('Source') -Default 'Microsoft Graph')
-        if (-not $exo.Available) {
-            Add-SemrFinding -List $findings -Parameters ($base + @{
-                CheckId = 'EXO-SOURCE'; Category = 'ExchangeOnline'; Severity = 'Critical'; Result = 'UNKNOWN'; IsBlocking = $true
-                EvidenceSource = $exoSource; Message = if ([string]$Config['Mode'] -eq 'CacheOnly') { 'The cached Exchange Online inventories are unavailable.' } else { 'Exchange Online is not connected.' }
-                RecommendedAction = if ([string]$Config['Mode'] -eq 'CacheOnly') { 'Refresh or restore the tenant CSV cache, then run the assessment again.' } else { 'Connect Exchange Online and run the assessment again.' }
-            })
-        }
-        else {
+        if ($exo.SourceTimestamp) { $script:CurrentSourceTimestamps[$exoSource] = $exo.SourceTimestamp }
+        if ($graph.SourceTimestamp) { $script:CurrentSourceTimestamps[$graphSource] = $graph.SourceTimestamp }
+        Add-SemrFinding -List $findings -Parameters ($base + @{
+            CheckId = 'EXO-SOURCE'; Category = 'ExchangeOnline'; Severity = if ($exo.Available) { 'Information' } else { 'Critical' }
+            Result = if ($exo.Available) { 'PASS' } else { 'UNKNOWN' }; IsBlocking = -not $exo.Available
+            ObservedValue = if ($exo.Available) { 'Available' } else { 'Unavailable' }; ExpectedValue = 'Available Exchange Online evidence'; EvidenceSource = $exoSource
+            Message = if ($exo.Available) { 'Exchange Online evidence is available.' } elseif ([string]$Config['Mode'] -eq 'CacheOnly') { 'The cached Exchange Online inventories are unavailable.' } else { 'Exchange Online is not connected.' }
+            RecommendedAction = if ($exo.Available) { '' } elseif ([string]$Config['Mode'] -eq 'CacheOnly') { 'Refresh or restore the tenant CSV cache, then run the assessment again.' } else { 'Connect Exchange Online interactively and run the assessment again.' }
+        })
+        if ($exo.Available) {
             $cloudRecipientCount = @($exo.Recipients).Count
             $cloudMailboxCount = @($exo.Mailboxes).Count
-            $cloudStateValid = $cloudRecipientCount -eq 1 -and $cloudMailboxCount -eq 0
+            $recipientDataAvailable = [bool](Get-SemrPropertyValue -InputObject $exo -Names @('RecipientDataAvailable') -Default $false)
+            $mailboxDataAvailable = [bool](Get-SemrPropertyValue -InputObject $exo -Names @('MailboxDataAvailable') -Default $false)
+            $cloudStateEvidenceAvailable = $recipientDataAvailable -and $mailboxDataAvailable
+            $cloudStateValid = $cloudStateEvidenceAvailable -and $cloudRecipientCount -eq 1 -and $cloudMailboxCount -eq 0
+            $lookupMethods = @((Get-SemrPropertyValue -InputObject $exo -Names @('RecipientLookupMethods') -Default @())) -join ','
+            $lookupErrors = @((Get-SemrPropertyValue -InputObject $exo -Names @('RecipientLookupErrors') -Default @())) -join ' | '
             Add-SemrFinding -List $findings -Parameters ($base + @{
                 CheckId = 'EXO-RECIPIENT-STATE'; Category = 'ExchangeOnline'; Severity = if ($cloudStateValid) { 'Information' } else { 'Critical' }
-                Result = if ($cloudStateValid) { 'PASS' } else { 'FAIL' }; IsBlocking = -not $cloudStateValid
-                ObservedValue = "Recipients=$cloudRecipientCount; ActiveMailboxes=$cloudMailboxCount"; ExpectedValue = 'One synchronized MailUser and no active EXO mailbox'
-                EvidenceSource = $exoSource; Message = if ($cloudStateValid) { 'The cloud recipient state is consistent with hybrid pre-onboarding.' } else { 'The cloud recipient is missing, ambiguous, or already has an active mailbox.' }
-                RecommendedAction = if ($cloudStateValid) { '' } else { 'Resolve synchronization, duplicate recipient, or split-brain mailbox state before migration.' }
+                Result = if (-not $cloudStateEvidenceAvailable) { 'UNKNOWN' } elseif ($cloudStateValid) { 'PASS' } else { 'FAIL' }; IsBlocking = -not $cloudStateValid
+                ObservedValue = "Recipients=$cloudRecipientCount; ActiveMailboxes=$cloudMailboxCount; Methods=$lookupMethods; Errors=$lookupErrors"; ExpectedValue = 'One synchronized MailUser and no active EXO mailbox'
+                EvidenceSource = $exoSource; Message = if (-not $cloudStateEvidenceAvailable) { 'The Exchange Online recipient or mailbox lookup did not complete reliably.' } elseif ($cloudStateValid) { 'The cloud recipient state is consistent with hybrid pre-onboarding.' } else { 'The cloud recipient is missing, ambiguous, or already has an active mailbox.' }
+                RecommendedAction = if (-not $cloudStateEvidenceAvailable) { 'Verify delegated Exchange Online RBAC and cmdlet availability, then rerun.' } elseif ($cloudStateValid) { '' } else { 'Resolve synchronization, duplicate recipient, or split-brain mailbox state before migration.' }
             })
             $softDeletedAvailable = [bool](Get-SemrPropertyValue -InputObject $exo -Names @('SoftDeletedAvailable') -Default $false)
             $softDeletedCount = @($exo.SoftDeleted).Count
@@ -3023,32 +3068,36 @@ function Invoke-SemrAssessment {
                 RecommendedAction = if (-not $softDeletedAvailable) { 'Run the final validation in Live mode before creating the migration batch.' } elseif ($softDeletedCount -gt 0) { 'Investigate the soft-deleted/inactive object and GUID ownership before creating the batch.' } else { '' }
             })
             $moveDataAvailable = [bool](Get-SemrPropertyValue -InputObject $exo -Names @('MoveDataAvailable') -Default $false)
-            $activeMoveCount = @($exo.MigrationUsers).Count + @($exo.MoveRequests).Count
+            $moveState = Get-SemrMoveState -Exo $exo
+            $activeMoveCount = [int]$moveState.ActiveOperationCount
+            $activeMoveDescription = if ($activeMoveCount -gt 0) { "ActiveOperation=1; Sources=$($moveState.ActiveSources -join ','); Statuses=$($moveState.ActiveStatuses -join ',')" } elseif ($moveState.TerminalStatuses.Count -gt 0) { "No active operation; terminal history=$($moveState.TerminalStatuses -join ',')" } else { 'No migration object' }
             Add-SemrFinding -List $findings -Parameters ($base + @{
                 CheckId = 'EXO-EXISTING-MOVE'; Category = 'Migration'; Severity = if (-not $moveDataAvailable) { 'Warning' } elseif ($activeMoveCount -gt 0) { 'Critical' } else { 'Information' }
                 Result = if (-not $moveDataAvailable) { 'UNKNOWN' } elseif ($activeMoveCount -gt 0) { 'FAIL' } else { 'PASS' }; IsBlocking = $moveDataAvailable -and $activeMoveCount -gt 0
-                ObservedValue = if ($moveDataAvailable) { "$activeMoveCount migration object(s)" } else { 'Migration job data is not present in the cache.' }; ExpectedValue = '0'
-                EvidenceSource = $exoSource; Message = if (-not $moveDataAvailable) { 'Existing move state could not be evaluated from the cache.' } elseif ($activeMoveCount -gt 0) { 'An existing migration user or move request already exists.' } else { 'No existing migration user or move request was returned.' }
-                RecommendedAction = if (-not $moveDataAvailable) { 'Refresh the migration-jobs inventory or run the final validation in Live mode.' } elseif ($activeMoveCount -gt 0) { 'Review and clean up the previous migration object only after confirming its state and history.' } else { '' }
+                ObservedValue = if ($moveDataAvailable) { $activeMoveDescription } else { 'Migration job data is unavailable.' }; ExpectedValue = 'No active or unresolved migration operation'
+                EvidenceSource = $exoSource; Message = if (-not $moveDataAvailable) { 'Existing move state could not be evaluated.' } elseif ($activeMoveCount -gt 0) { 'An active or unresolved migration operation exists. MigrationUser and MoveRequest representations were deduplicated.' } else { 'No active migration operation was returned; terminal history is not treated as an active move.' }
+                RecommendedAction = if (-not $moveDataAvailable) { 'Refresh the migration-jobs inventory or run the final validation in Live mode.' } elseif ($activeMoveCount -gt 0) { 'Review the active operation and clean it up only after confirming its state and history.' } else { '' }
             })
         }
 
-        if (-not $graph.Available) {
-            Add-SemrFinding -List $findings -Parameters ($base + @{
-                CheckId = 'GRAPH-SOURCE'; Category = 'MicrosoftGraph'; Severity = 'Critical'; Result = 'UNKNOWN'; IsBlocking = $true
-                EvidenceSource = $graphSource; Message = if ([string]$Config['Mode'] -eq 'CacheOnly') { 'The cached Microsoft 365 user inventory is unavailable.' } else { 'Microsoft Graph is not connected.' }
-                RecommendedAction = if ([string]$Config['Mode'] -eq 'CacheOnly') { 'Refresh or restore the tenant CSV cache, then run the assessment again.' } else { 'Connect Microsoft Graph and run the assessment again.' }
-            })
-        }
-        else {
+        Add-SemrFinding -List $findings -Parameters ($base + @{
+            CheckId = 'GRAPH-SOURCE'; Category = 'MicrosoftGraph'; Severity = if ($graph.Available) { 'Information' } else { 'Critical' }
+            Result = if ($graph.Available) { 'PASS' } else { 'UNKNOWN' }; IsBlocking = -not $graph.Available
+            ObservedValue = if ($graph.Available) { 'Available' } else { 'Unavailable' }; ExpectedValue = 'Available Microsoft Graph evidence'; EvidenceSource = $graphSource
+            Message = if ($graph.Available) { 'Microsoft Graph evidence is available.' } elseif ([string]$Config['Mode'] -eq 'CacheOnly') { 'The cached Microsoft 365 user inventory is unavailable.' } else { 'Microsoft Graph is not connected.' }
+            RecommendedAction = if ($graph.Available) { '' } elseif ([string]$Config['Mode'] -eq 'CacheOnly') { 'Refresh or restore the tenant CSV cache, then run the assessment again.' } else { 'Connect Microsoft Graph interactively and run the assessment again.' }
+        })
+        if ($graph.Available) {
             $graphCount = @($graph.Users).Count
-            $graphValid = $graphCount -eq 1
+            $graphQueryError = [string](Get-SemrPropertyValue -InputObject $graph -Names @('QueryError') -Default '')
+            $graphEvidenceAvailable = [string]::IsNullOrWhiteSpace($graphQueryError)
+            $graphValid = $graphEvidenceAvailable -and $graphCount -eq 1
             Add-SemrFinding -List $findings -Parameters ($base + @{
                 CheckId = 'GRAPH-USER-STATE'; Category = 'MicrosoftGraph'; Severity = if ($graphValid) { 'Information' } else { 'Critical' }
-                Result = if ($graphValid) { 'PASS' } else { 'FAIL' }; IsBlocking = -not $graphValid
-                ObservedValue = "$graphCount matching user(s)"; ExpectedValue = '1'
-                EvidenceSource = $graphSource; Message = if ($graphValid) { 'Exactly one Microsoft Entra user was resolved.' } else { 'The Microsoft Entra user is missing or ambiguous.' }
-                RecommendedAction = if ($graphValid) { '' } else { 'Resolve Microsoft Entra synchronization and identity uniqueness.' }
+                Result = if (-not $graphEvidenceAvailable) { 'UNKNOWN' } elseif ($graphValid) { 'PASS' } else { 'FAIL' }; IsBlocking = -not $graphValid
+                ObservedValue = if ($graphEvidenceAvailable) { "$graphCount matching user(s)" } else { "QueryError=$graphQueryError" }; ExpectedValue = '1'
+                EvidenceSource = $graphSource; Message = if (-not $graphEvidenceAvailable) { 'The Microsoft Graph user query did not complete reliably.' } elseif ($graphValid) { 'Exactly one Microsoft Entra user was resolved.' } else { 'The Microsoft Entra user is missing or ambiguous.' }
+                RecommendedAction = if (-not $graphEvidenceAvailable) { 'Verify delegated Graph permissions and rerun the assessment.' } elseif ($graphValid) { '' } else { 'Resolve Microsoft Entra synchronization and identity uniqueness.' }
             })
             if ($graphValid) {
                 $user = $graph.Users[0]
@@ -3118,14 +3167,15 @@ function Invoke-SemrAssessment {
         Add-SemrMailboxRiskFindings -Findings $findings -Base $base -Row $row -OnPrem $onPrem -Config $Config
         Add-SemrFlowAndSyncFindings -Findings $findings -Base $base -BatchRows $rows -OnPrem $onPrem -Exo $exo -Graph $graph
 
-        $hybridRequiredLive = [string]$Config['Mode'] -eq 'Live'
+        $hybridEndpointResult = if (-not $hybrid.Available) { 'UNKNOWN' } elseif (-not $hybrid.EndpointFound) { 'FAIL' } elseif (-not $hybrid.ConnectivityTestAvailable) { 'UNKNOWN' } elseif ($hybrid.ConnectivitySuccess) { 'PASS' } else { 'FAIL' }
+        $hybridEndpointBlocking = $hybridEndpointResult -eq 'FAIL'
         Add-SemrFinding -List $findings -Parameters ($base + @{
-            CheckId = 'HYBRID-ENDPOINT'; Category = 'HybridConnectivity'; Severity = if ($hybrid.ConnectivitySuccess) { 'Information' } elseif ($hybridRequiredLive) { 'Critical' } else { 'Warning' }
-            Result = if (-not $hybrid.Available) { 'UNKNOWN' } elseif ($hybrid.ConnectivitySuccess) { 'PASS' } else { 'FAIL' }
-            IsBlocking = $hybridRequiredLive -and -not $hybrid.ConnectivitySuccess; ObservedValue = "$($hybrid.EndpointName): $($hybrid.Message)"
-            ExpectedValue = 'ExchangeRemoteMove endpoint test succeeds'; EvidenceSource = [string]$hybrid.Source
-            Message = if ($hybrid.ConnectivitySuccess) { 'The migration endpoint connectivity test succeeded.' } elseif ($hybridRequiredLive) { 'The migration endpoint could not be validated.' } else { 'CacheOnly mode does not execute a live migration endpoint test.' }
-            RecommendedAction = if ($hybrid.ConnectivitySuccess) { '' } elseif ($hybridRequiredLive) { 'Validate the endpoint, MRSProxy, WSSecurity, certificate, DNS and HTTPS connectivity.' } else { 'Run the final validation in Live mode before creating the migration batch.' }
+            CheckId = 'HYBRID-ENDPOINT'; Category = 'HybridConnectivity'; Severity = if ($hybridEndpointResult -eq 'FAIL') { 'Critical' } elseif ($hybridEndpointResult -eq 'UNKNOWN') { 'Warning' } else { 'Information' }
+            Result = $hybridEndpointResult
+            IsBlocking = $hybridEndpointBlocking; ObservedValue = "$($hybrid.EndpointName): $($hybrid.Message)"
+            ExpectedValue = 'ExchangeRemoteMove endpoint exists and its connectivity test succeeds'; EvidenceSource = [string]$hybrid.Source
+            Message = if ($hybridEndpointResult -eq 'PASS') { 'The migration endpoint connectivity test succeeded.' } elseif (-not $hybrid.Available) { 'Migration endpoint evidence is unavailable.' } elseif (-not $hybrid.EndpointFound) { 'No unique configured ExchangeRemoteMove endpoint could be resolved.' } elseif (-not $hybrid.ConnectivityTestAvailable) { 'The endpoint exists, but the connectivity cmdlet is unavailable; this is not treated as a failed endpoint.' } else { 'The migration endpoint connectivity test failed.' }
+            RecommendedAction = if ($hybridEndpointResult -eq 'PASS') { '' } elseif (-not $hybrid.Available) { 'Restore Exchange Online endpoint cmdlets or run the final validation in Live mode.' } elseif (-not $hybrid.EndpointFound) { 'Select or repair the intended ExchangeRemoteMove endpoint.' } elseif (-not $hybrid.ConnectivityTestAvailable) { 'Run Test-MigrationServerAvailability from a supported delegated Exchange Online session before creating the batch.' } else { 'Validate the endpoint, MRSProxy, WSSecurity, certificate, DNS and HTTPS connectivity.' }
         })
         Add-SemrFinding -List $findings -Parameters ($base + @{
             CheckId='HYBRID-MRSPROXY';Category='HybridConnectivity';Severity=if(-not $hybrid.MrsProxyAvailable){'Warning'}elseif($hybrid.MrsProxyEnabled){'Information'}else{'Critical'};Result=if(-not $hybrid.MrsProxyAvailable){'UNKNOWN'}elseif($hybrid.MrsProxyEnabled){'PASS'}else{'FAIL'};IsBlocking=$hybrid.MrsProxyAvailable -and -not $hybrid.MrsProxyEnabled
