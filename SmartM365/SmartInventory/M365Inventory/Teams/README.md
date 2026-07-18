@@ -72,7 +72,7 @@ Examples:
 
 Phone assignment inventory is optional because it uses the officially supported `Get-CsPhoneNumberAssignment` cmdlet rather than Microsoft Graph call-record APIs. Its prerequisites are:
 
-- MicrosoftTeams PowerShell module 4.7.1 or later for app-only authentication.
+- MicrosoftTeams PowerShell module 4.7.1 or later for app-only authentication. When it is missing, the SmartM365 preflight installs the current PSGallery version with `Scope=CurrentUser`.
 - Microsoft Graph application permission `Organization.Read.All` for Teams PowerShell app authentication.
 - A supported Microsoft Entra Teams role assigned to the service principal. `Teams Telephony Administrator` is the most voice-focused documented role; `Teams Communications Administrator` and `Teams Administrator` also cover phone number inventory.
 
