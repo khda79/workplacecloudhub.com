@@ -106,7 +106,7 @@
     Runtime app permissions created: see SmartM365-AppRegistration-Permissions.md and Get-RequiredApiResource.
 
 .VERSION
-1.1
+1.2
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -545,6 +545,7 @@ function Get-SmartM365RequiredApiResource {
         'Group.Read.All',
         'GroupMember.Read.All',
         'Reports.Read.All',
+        'CallRecords.Read.All',
         'Sites.Read.All',
         'Team.ReadBasic.All',
         'TeamMember.Read.All',

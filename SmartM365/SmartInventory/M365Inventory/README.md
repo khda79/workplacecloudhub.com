@@ -7,7 +7,10 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 - `Devices/`: Entra device inventory.
 - `Domains/`: verified domain inventory.
 - `IntuneInventory/`: Intune inventory, Windows Update reporting, Autopilot, RBAC, applications, and remediation export utilities.
+- `IntuneInventory/EndpointAnalytics/`: standard Microsoft Intune Endpoint Analytics inventory; Advanced Analytics report families are excluded.
 - `Licensing/`: license and service plan inventory.
+- `PowerBI/`: tenant-wide Power BI and Microsoft Fabric activity-event inventory.
+- `Teams/`: Teams collaboration inventory plus Teams Phone PSTN, Operator Connect, and Direct Routing usage.
 - `SharePoint/`: SharePoint Online site, storage, list/library, permission, and external sharing inventory.
 - `SyncHealth/`: Azure AD Connect synchronization freshness checks and stale hybrid data alerts.
 - `Usage/`: Microsoft 365 user and workload usage reports for FinOps and usage analysis.
@@ -43,6 +46,29 @@ Examples:
 Required Microsoft Graph permission: `Reports.Read.All`.
 
 `SmartM365-EXO-Mailboxes-Inventory.ps1` remains useful and is not replaced by `MailboxUsageDetail`: EXO gives mailbox object/stat/archive details from Exchange Online, while Graph Reports gives a period-based usage and quota report suitable for FinOps joins.
+
+## Power BI And Microsoft Fabric Activity Events
+
+`PowerBI/SmartM365-PowerBIFabricActivity-Inventory.ps1` retrieves tenant-wide activity events from the official Power BI admin Activity Events API. Requests are split into one UTC day, limited to the last 28 days, paged with `continuationUri` or `continuationToken`, and kept below 200 requests per hour.
+
+Exports:
+
+| Entity | Latest CSV | Notes |
+| --- | --- | --- |
+| Detailed events | `M365_PowerBI_Fabric_ActivityEvents.csv` | Useful activity, workload, identity classification, workspace, item, report, semantic model/dataset, dataflow, and capacity fields. Client IP, user agent, and unrelated audit properties are excluded. |
+| Per-principal activity | `M365_PowerBI_Fabric_UserActivity.csv` | Aggregates recent activity, active UTC days, view/create/refresh/export counters, and distinct artifact counts by user/application identity. |
+
+Examples:
+
+```powershell
+.\PowerBI\SmartM365-PowerBIFabricActivity-Inventory.ps1 -Tenant test -ValidateOnly
+.\PowerBI\SmartM365-PowerBIFabricActivity-Inventory.ps1 -Tenant test -LookbackDays 28
+.\PowerBI\SmartM365-PowerBIFabricActivity-Inventory.ps1 -Tenant test -FromDate 2026-07-01 -ToDate 2026-07-07 -InteractiveAuth
+```
+
+Interactive mode requires a Fabric Administrator and delegated `Tenant.Read.All` or `Tenant.ReadWrite.All`. App-only mode uses the configured certificate and requires the Fabric tenant setting **Service principals can access read-only admin APIs** for a security group containing the service principal. The Entra application must not have admin-consent-required Power BI permissions assigned.
+
+The aggregate contains only principals for which an event was returned. After SmartFinOps left-joins the complete license/user population, a missing activity row is a review signal and never automatic proof of non-use.
 
 ## Microsoft 365 Copilot Usage
 

@@ -25,4 +25,4 @@ Audit without installing:
 .\Setup\Install-SmartM365-SmartInventoryPrerequisites.ps1 -WhatIf -SkipImportValidation
 ```
 
-The installer covers the Microsoft Graph rollup module, the Graph submodules used by SmartInventory and setup scripts, `ExchangeOnlineManagement`, and `MSAL.PS`. Organization cmdlets are covered by `Microsoft.Graph.Identity.DirectoryManagement`; there is no separate `Microsoft.Graph.Organization` module to install.
+The installer covers the Microsoft Graph rollup module, the Graph submodules used by SmartInventory and setup scripts, `MicrosoftPowerBIMgmt.Profile` for Power BI admin API authentication, `ExchangeOnlineManagement`, and `MSAL.PS`. Organization cmdlets are covered by `Microsoft.Graph.Identity.DirectoryManagement`; there is no separate `Microsoft.Graph.Organization` module to install.
