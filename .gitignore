@@ -131,6 +131,8 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartFinOps/**/*.md
 !/SmartFinOps/**/*.html
 !/SmartFinOps/**/*.json.template
+!/SmartFinOps/Config/SmartFinOps-Workplace-SourceContracts.json
+!/SmartFinOps/Config/SmartFinOps-Workplace-FrancePriceBaseline.json
 !/SmartFinOps/SmartFinOps.global.local.json.template
 !/SmartWorkplaceCMDB/README.md
 !/SmartWorkplaceCMDB/**/*.ps1

@@ -1,0 +1,314 @@
+{
+  "Version": 2,
+  "ExcludedFileNamePatterns": [
+    "MAXITEMS"
+  ],
+  "Lineage": [
+    {
+      "Entity": "Active Directory users",
+      "CanonicalEnrichedFile": "AD_Users_AllDomains.csv",
+      "RawFile": "AD_Users_AllDomains_Brut.csv",
+      "UsageRule": "Use the canonical enriched file for SmartFinOps KPIs; use the raw file only for validation and fallback."
+    },
+    {
+      "Entity": "Active Directory computers",
+      "CanonicalEnrichedFile": "AD_Computers_AllDomains.csv",
+      "RawFile": "AD_Computers_AllDomains_Brut.csv",
+      "UsageRule": "Use the canonical enriched file for SmartFinOps KPIs; use the raw file only for validation and fallback."
+    }
+  ],
+  "Sources": [
+    {
+      "Key": "M365ActiveUsers",
+      "DisplayName": "M365 active users",
+      "SemanticRole": "M365 user directory and sign-in state",
+      "FileNames": [
+        "M365_Users_Active.csv"
+      ],
+      "RequiredColumns": [
+        "User principal name"
+      ]
+    },
+    {
+      "Key": "M365UserActivity",
+      "DisplayName": "M365 user activity",
+      "SemanticRole": "Latest workload activity by user",
+      "FileNames": [
+        "M365_Users_Activity.csv"
+      ],
+      "RequiredColumns": [
+        "UserPrincipalName"
+      ]
+    },
+    {
+      "Key": "M365MailboxUsage",
+      "DisplayName": "M365 mailbox usage",
+      "SemanticRole": "Exchange mailbox activity, storage and archive requirement by user",
+      "FileNames": [
+        "M365_Mailbox_Usage.csv"
+      ],
+      "RequiredColumns": [
+        "User Principal Name",
+        "Last Activity Date",
+        "Storage Used (Byte)",
+        "Has Archive"
+      ]
+    },
+    {
+      "Key": "M365OneDriveUsage",
+      "DisplayName": "M365 OneDrive usage",
+      "SemanticRole": "OneDrive activity and storage requirement by owner",
+      "FileNames": [
+        "M365_OneDrive_Usage.csv"
+      ],
+      "RequiredColumns": [
+        "Owner Principal Name",
+        "Last Activity Date",
+        "Storage Used (Byte)"
+      ]
+    },
+    {
+      "Key": "M365AppsActivations",
+      "DisplayName": "M365 Apps activations",
+      "SemanticRole": "Desktop, mobile and shared-computer application activation evidence by user",
+      "FileNames": [
+        "M365_Apps_Activations.csv"
+      ],
+      "RequiredColumns": [
+        "User Principal Name",
+        "Product Type",
+        "Last Activated Date",
+        "Windows",
+        "Mac"
+      ]
+    },
+    {
+      "Key": "M365TeamsUserActivity",
+      "DisplayName": "M365 Teams user activity",
+      "SemanticRole": "Detailed Teams collaboration activity by user",
+      "FileNames": [
+        "M365_Teams_UserActivity.csv"
+      ],
+      "RequiredColumns": [
+        "User Principal Name",
+        "Last Activity Date"
+      ]
+    },
+    {
+      "Key": "M365EmailActivity",
+      "DisplayName": "M365 email activity",
+      "SemanticRole": "Detailed send, receive, read and meeting activity by user",
+      "FileNames": [
+        "M365_Email_Activity.csv"
+      ],
+      "RequiredColumns": [
+        "User Principal Name",
+        "Last Activity Date"
+      ]
+    },    {
+      "Key": "M365LicenseUsers",
+      "DisplayName": "M365 license user assignments",
+      "SemanticRole": "User by SKU license assignment",
+      "FileNames": [
+        "M365_Licenses_Users.csv"
+      ],
+      "RequiredColumns": [
+        "User principal name",
+        "SkuPartNumber",
+        "Source"
+      ]
+    },
+    {
+      "Key": "M365LicenseTenant",
+      "DisplayName": "M365 tenant licenses",
+      "SemanticRole": "Enabled and consumed capacity by SKU",
+      "FileNames": [
+        "M365_Licenses_Tenant.csv"
+      ],
+      "RequiredColumns": [
+        "TenantSkuPartNumber",
+        "TenantPrepaidEnabled",
+        "TenantConsumedUnits"
+      ]
+    },
+    {
+      "Key": "IntuneDevices",
+      "DisplayName": "Intune devices",
+      "SemanticRole": "Managed device inventory",
+      "FileNames": [
+        "Intune_Devices_Inventory.csv"
+      ],
+      "RequiredColumns": [
+        "Device ID",
+        "Device name",
+        "Last check-in"
+      ]
+    },
+    {
+      "Key": "IntuneCompliance",
+      "DisplayName": "Intune device compliance",
+      "SemanticRole": "Compliance state joined through AzureADDeviceId",
+      "FileNames": [
+        "Intune_Devices_Compliance.csv"
+      ],
+      "RequiredColumns": [
+        "DeviceName",
+        "AzureADDeviceId",
+        "ComplianceState"
+      ]
+    },
+    {
+      "Key": "EntraDevices",
+      "DisplayName": "Entra devices",
+      "SemanticRole": "Entra device identity and activity",
+      "FileNames": [
+        "M365_Entra_Devices.csv"
+      ],
+      "RequiredColumns": [
+        "ObjectId",
+        "DeviceId",
+        "DisplayName"
+      ]
+    },
+    {
+      "Key": "ADUsersCanonical",
+      "DisplayName": "Active Directory users - canonical enriched",
+      "SemanticRole": "Canonical enriched user table used by SmartFinOps KPIs",
+      "FileNames": [
+        "AD_Users_AllDomains.csv"
+      ],
+      "RequiredColumns": [
+        "UserPrincipalName",
+        "Enabled",
+        "M365LicenseType",
+        "M365LicenseTargetPersona",
+        "IsE3PersonaMissingE3License",
+        "HasRemainingF3MailboxSizeNonCompliance",
+        "IsUnlicensedEnabledF3MailboxBlockingMigration"
+      ]
+    },
+    {
+      "Key": "ADUsersRaw",
+      "DisplayName": "Active Directory users - raw",
+      "SemanticRole": "Raw user export retained for lineage and fallback only",
+      "FileNames": [
+        "AD_Users_AllDomains_Brut.csv"
+      ],
+      "RequiredColumns": [
+        "UserPrincipalName",
+        "Enabled"
+      ],
+      "ValidationOnly": true
+    },
+    {
+      "Key": "ADComputersCanonical",
+      "DisplayName": "Active Directory computers - canonical enriched",
+      "SemanticRole": "Canonical enriched computer table used by SmartFinOps KPIs",
+      "FileNames": [
+        "AD_Computers_AllDomains.csv"
+      ],
+      "RequiredColumns": [
+        "Name",
+        "Enabled",
+        "Windows11UpgradeEligibility",
+        "NeedsWindows11Upgrade",
+        "ExistsInIntune"
+      ]
+    },
+    {
+      "Key": "ADComputersRaw",
+      "DisplayName": "Active Directory computers - raw",
+      "SemanticRole": "Raw computer export retained for lineage and fallback only",
+      "FileNames": [
+        "AD_Computers_AllDomains_Brut.csv"
+      ],
+      "RequiredColumns": [
+        "Name",
+        "Enabled"
+      ],
+      "ValidationOnly": true
+    },
+    {
+      "Key": "EXOMailboxes",
+      "DisplayName": "Exchange Online mailboxes",
+      "SemanticRole": "Canonical Exchange Online mailbox inventory used for mailbox type, account state, size, archive and hold decisions",
+      "FileNames": ["Exchange_EXO_Mailboxes_AllDomains.csv"],
+      "RequiredColumns": ["UserPrincipalName", "PrimarySmtpAddress", "RecipientTypeDetails", "AccountEnabled", "TotalItemSizeGB", "ArchiveStatus", "LitigationHoldEnabled", "RetentionHoldEnabled"]
+    },
+    {
+      "Key": "EXOMailboxStats",
+      "DisplayName": "Exchange Online mailbox statistics",
+      "SemanticRole": "Mailbox and archive size fallback for shared-mailbox conversion decisions",
+      "FileNames": ["Exchange_EXO_Mailboxes_AllDomains_Stats.csv"],
+      "RequiredColumns": ["UserPrincipalName", "TotalItemSizeGB", "Archive_TotalItemSizeGB"]
+    },
+    {
+      "Key": "EXOMailboxArchive",
+      "DisplayName": "Exchange Online mailbox archive statistics",
+      "SemanticRole": "Independent archive evidence used to prevent unsupported license removal",
+      "FileNames": ["Exchange_EXO_Mailboxes_AllDomains_Archive.csv"],
+      "RequiredColumns": ["UserPrincipalName", "Archive_TotalItemSizeGB"]
+    },
+    {
+      "Key": "EXOMailboxPermissions",
+      "DisplayName": "Exchange Online mailbox permissions",
+      "SemanticRole": "Configured mailbox delegation evidence for former-user mailbox review",
+      "FileNames": ["Exchange_EXO_Mailboxes_AllDomains_Permissions.csv"],
+      "RequiredColumns": ["UserPrincipalName", "SendAs", "FullAccess", "GrantSendOnBehalfTo"]
+    },
+    {
+      "Key": "RemoteRoutingIssues",
+      "DisplayName": "AD remote routing issues",
+      "SemanticRole": "Exchange hybrid routing anomaly backlog",
+      "FileNames": [
+        "AD_Users_RemoteRoutingIssues.csv"
+      ],
+      "RequiredColumns": [
+        "IssueType",
+        "Severity",
+        "UserPrincipalName",
+        "Enabled"
+      ]
+    },
+    {
+      "Key": "ProxyAddressControl",
+      "DisplayName": "Exchange proxy address control",
+      "SemanticRole": "Complete proxy-address control population; non-OK rows are findings",
+      "FileNames": [
+        "Exchange_OnPrem_ProxyAddresses_Check.csv"
+      ],
+      "RequiredColumns": [
+        "Identity",
+        "MailboxLocation",
+        "Status",
+        "ExpectedAddressConflict"
+      ]
+    },
+    {
+      "Key": "BackupProtectedMailboxes",
+      "DisplayName": "M365 Backup protected mailboxes",
+      "SemanticRole": "Observed Microsoft 365 Backup protection units",
+      "FileNames": [
+        "M365_Backup_ProtectedMailboxes.csv"
+      ],
+      "RequiredColumns": [
+        "ProtectionUnitId",
+        "Status",
+        "UserPrincipalName"
+      ]
+    },
+    {
+      "Key": "BackupPolicyScope",
+      "DisplayName": "M365 Backup policy scope",
+      "SemanticRole": "Expected mailbox protection scope and reconciliation status",
+      "FileNames": [
+        "M365_BackupPolicyScope_MailboxCoverage.csv"
+      ],
+      "RequiredColumns": [
+        "MemberUserPrincipalName",
+        "MailboxFoundInInventory",
+        "ExpectedPolicyScopeStatus"
+      ]
+    }
+  ]
+}
