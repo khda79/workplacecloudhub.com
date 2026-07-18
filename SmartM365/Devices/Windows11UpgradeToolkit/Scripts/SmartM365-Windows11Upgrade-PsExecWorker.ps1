@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.27
+0.1.28
 #>
 
 #requires -Version 5.1
@@ -92,6 +92,52 @@ function Invoke-WithWorkerLeaseMutex {
     }
 }
 
+function Read-WorkerLeaseData {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+        }
+        catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(1000, 100 * $attempt))
+        }
+    }
+
+    if ($lastError) { throw $lastError }
+    throw ("Failed to read global worker lease: {0}" -f $Path)
+}
+
+function Save-WorkerLeaseData {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Data,
+        [ValidateRange(1, 20)][int]$Depth = 4
+    )
+
+    $parent = Split-Path -Parent $Path
+    $json = $Data | ConvertTo-Json -Depth $Depth
+    $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(1000, 100 * $attempt))
+        }
+    }
+
+    if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+    if ($lastError) { throw $lastError }
+    throw ("Failed to save global worker lease: {0}" -f $Path)
+}
+
 function Update-WorkerLease {
     param(
         [AllowNull()][string]$LeasePath,
@@ -103,14 +149,14 @@ function Update-WorkerLease {
     try {
         Invoke-WithWorkerLeaseMutex -MutexName $MutexName -ScriptBlock {
             if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
-            $data = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $data = Read-WorkerLeaseData -Path $LeasePath
             $processName = ''
             try { $processName = (Get-Process -Id $PID -ErrorAction Stop).ProcessName } catch { }
             $data | Add-Member -NotePropertyName WorkerProcessId -NotePropertyValue $PID -Force
             $data | Add-Member -NotePropertyName WorkerProcessName -NotePropertyValue $processName -Force
             $data | Add-Member -NotePropertyName WorkerStartedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
             $data | Add-Member -NotePropertyName LastUpdatedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
-            $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeasePath -Encoding UTF8 -Force
+            Save-WorkerLeaseData -Path $LeasePath -Data $data -Depth 4
         }
     }
     catch { }

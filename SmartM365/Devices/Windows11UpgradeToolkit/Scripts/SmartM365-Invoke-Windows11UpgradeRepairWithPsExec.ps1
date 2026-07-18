@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.63
+    0.1.64
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.63'
+$script:LauncherVersion = '0.1.64'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -2542,6 +2542,53 @@ function Test-GateProcessAlive {
     try { $null = Get-Process -Id $ProcessId -ErrorAction Stop; return $true } catch { return $false }
 }
 
+function Read-GlobalLeaseData {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+        }
+        catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(1000, 100 * $attempt))
+        }
+    }
+
+    if ($lastError) { throw $lastError }
+    throw ("Failed to read global worker lease: {0}" -f $Path)
+}
+
+function Save-GlobalLeaseData {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Data,
+        [ValidateRange(1, 20)][int]$Depth = 4
+    )
+
+    $parent = Split-Path -Parent $Path
+    New-Directory -Path $parent
+    $json = $Data | ConvertTo-Json -Depth $Depth
+    $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString('N'))
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(1000, 100 * $attempt))
+        }
+    }
+
+    if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+    if ($lastError) { throw $lastError }
+    throw ("Failed to save global worker lease: {0}" -f $Path)
+}
+
 function Remove-StaleGlobalLeases {
     $nowUtc = (Get-Date).ToUniversalTime()
     $removed = New-Object System.Collections.Generic.List[pscustomobject]
@@ -2552,7 +2599,7 @@ function Remove-StaleGlobalLeases {
         $launcherPid = 0
         $workerPid = 0
         try {
-            $data = Get-Content -LiteralPath $lease.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $data = Read-GlobalLeaseData -Path $lease.FullName
             $computerName = [string]$data.Computer
             $launcherPid = if ($data.PSObject.Properties['LauncherProcessId']) { [int]$data.LauncherProcessId } else { [int]$data.ProcessId }
             $workerPid = if ($data.PSObject.Properties['WorkerProcessId']) { [int]$data.WorkerProcessId } else { 0 }
@@ -2591,12 +2638,12 @@ function Update-GlobalLease {
     if ([string]::IsNullOrWhiteSpace($LeasePath) -or -not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
     Invoke-WithGlobalGateMutex -ScriptBlock {
         if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
-        $data = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $data = Read-GlobalLeaseData -Path $LeasePath
         foreach ($key in @($Properties.Keys)) {
             $data | Add-Member -NotePropertyName $key -NotePropertyValue $Properties[$key] -Force
         }
         $data | Add-Member -NotePropertyName LastUpdatedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
-        $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeasePath -Encoding UTF8 -Force
+        Save-GlobalLeaseData -Path $LeasePath -Data $data -Depth 4
     }
 }
 
@@ -2618,7 +2665,7 @@ function Acquire-GlobalLease {
             $leases = @(Get-ChildItem -LiteralPath $globalGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)
             if ($leases.Count -lt $GlobalConcurrencyLimit) {
                 $path = Join-Path $globalGatePath ("lease_{0}_{1}.json" -f $PID,([guid]::NewGuid().ToString('N')))
-                [pscustomobject]@{
+                $leaseData = [pscustomobject]@{
                     LauncherInstanceId = $launcherInstanceId
                     ProcessId = $PID
                     LauncherProcessId = $PID
@@ -2632,7 +2679,8 @@ function Acquire-GlobalLease {
                     CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
                     LastUpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
                     Host = $env:COMPUTERNAME
-                } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $path -Encoding UTF8 -Force
+                }
+                Save-GlobalLeaseData -Path $path -Data $leaseData -Depth 3
                 return $path
             }
             return ''
