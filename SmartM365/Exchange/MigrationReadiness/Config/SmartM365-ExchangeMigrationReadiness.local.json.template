@@ -1,5 +1,6 @@
 {
   "Mode": "Live",
+  "DisabledChecks": [],
   "TenantProfile": {
     "ProfileKey": "tenant",
     "TenantId": "",
@@ -38,6 +39,7 @@
   },
   "Hybrid": {
     "MigrationEndpointName": "",
-    "TargetDeliveryDomain": "tenant.mail.onmicrosoft.com"
+    "TargetDeliveryDomain": "tenant.mail.onmicrosoft.com",
+    "ActiveMigrationWarningThreshold": 100
   }
 }
