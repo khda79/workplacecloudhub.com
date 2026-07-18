@@ -3,7 +3,7 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.6.1
+1.7.0
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -36,12 +36,12 @@ try {
     Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
 
     if ($ValidateOnly) {
-        foreach ($commandName in @('Connect-MgGraph', 'Get-MgUser', 'Get-MgUserLicenseDetail', 'Get-MgSubscribedSku')) {
+        foreach ($commandName in @('Connect-MgGraph', 'Get-MgUser', 'Get-MgUserLicenseDetail', 'Get-MgSubscribedSku', 'Get-MgOrganization')) {
             if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
                 throw "Required Microsoft Graph command is unavailable: $commandName"
             }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.6.1'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.7.0'
         exit 0
     }
 
@@ -132,6 +132,26 @@ try {
     }
 
     $subscribedSkus = @()
+    Write-WorkerTextFile -Path $ProgressPath -Value '0|0|Tenant synchronization health'
+    $organization = $null
+    $organizationError = ''
+    try {
+        $organizationRow = @(Get-MgOrganization -Property @(
+            'id', 'displayName', 'onPremisesSyncEnabled', 'onPremisesLastSyncDateTime'
+        ) -ErrorAction Stop | Select-Object -First 1)
+        if ($organizationRow.Count -eq 1) {
+            $organization = [pscustomobject][ordered]@{
+                Id = [string]$organizationRow[0].Id
+                DisplayName = [string]$organizationRow[0].DisplayName
+                OnPremisesSyncEnabled = $organizationRow[0].OnPremisesSyncEnabled
+                OnPremisesLastSyncDateTime = [string]$organizationRow[0].OnPremisesLastSyncDateTime
+                CollectedAt = Get-Date
+            }
+        }
+        else { $organizationError = 'Microsoft Graph returned no organization object.' }
+    }
+    catch { $organizationError = $_.Exception.Message }
+
     $subscribedSkuError = ''
     try {
         $subscribedSkus = @(Get-MgSubscribedSku -All -ErrorAction Stop | ForEach-Object {
@@ -160,6 +180,8 @@ try {
         CollectedAt = Get-Date
         Evidence = @($evidence)
         SubscribedSkus = $subscribedSkus
+        Organization = $organization
+        OrganizationError = $organizationError
         SubscribedSkuError = $subscribedSkuError
     } | Export-Clixml -LiteralPath $OutputPath -Depth 8 -Force
 }
