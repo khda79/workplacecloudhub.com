@@ -52,7 +52,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.2
+1.0.3
 
 .REQUIREMENTS
 PowerShell 7+.
@@ -89,7 +89,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.2'
+$script:ScriptVersion = '1.0.3'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -636,7 +636,7 @@ try {
             }
         }
         $script:FailureStage='Preflight'
-        Invoke-CoreSmartM365Preflight -ScriptName $script:ScriptName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($script:OutputPath,$script:LatestCsvFolderPath) -RequiredGraphApplicationPermissions @($script:RequiredPermission) -GraphProbeUris @("$($script:GraphApiBase)/beta/deviceManagement/reports/exportJobs?`$top=1") | Out-Null
+        Invoke-CoreSmartM365Preflight -ScriptName $script:ScriptName -RequiredModules @('Microsoft.Graph.Authentication') -OutputPaths @($script:OutputPath,$script:LatestCsvFolderPath) -RequiredGraphApplicationPermissions @($script:RequiredPermission) | Out-Null
     }
 
     if ($ValidateOnly -and -not $shouldConnectForValidation) {
