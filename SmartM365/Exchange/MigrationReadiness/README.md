@@ -129,10 +129,10 @@ Clés principales :
 - `ExchangeOnline.UserPrincipalName` : UPN administrateur optionnel.
 - `ExchangeOnline.DisableWam` : conserve le flux interactif EXO sans WAM lorsque requis sur ce poste.
 - `Hybrid.MigrationEndpointName` : présélection facultative d’un endpoint `ExchangeRemoteMove` dans le JSON local ; le modèle reste vide. En mode Live, le GUI charge automatiquement les endpoints après l’authentification EXO, sélectionne l’unique endpoint ou demande explicitement lequel utiliser lorsqu’il y en a plusieurs. Le choix reste limité à la session et le JSON n’est jamais réécrit. En CacheOnly, la liste est désactivée et aucun test Live n’est exécuté.
-- En mode Live, Active Directory est interrogé dans chaque domaine retourné par `Get-ADForest`. Si un domaine ne peut pas être interrogé, la couverture Live est considérée incomplète et l’application utilise le CSV AD de fallback au lieu de conclure à tort que l’identité est absente.
+- En mode Live, Active Directory est interrogé dans chaque domaine retourné par `Get-ADForest`, avec le nom LDAP exact `mS-DS-ConsistencyGuid`. Si un domaine ne peut pas être interrogé, la couverture Live est considérée incomplète et l’application utilise le CSV AD de fallback au lieu de conclure à tort que l’identité est absente.
 - `Hybrid.TargetDeliveryDomain` : domaine `tenant.mail.onmicrosoft.com` attendu.
 - `Hybrid.ActiveMigrationWarningThreshold` : seuil consultatif du nombre de migrations actives/non terminales, `100` par défaut.
-- `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` : politique explicite du SKU et du quota cible. Un SKU absent de la table reste `UNKNOWN` bloquant ; aucun quota générique de 100 Go n’est supposé.
+- `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` : politique explicite des SKU et quotas mailbox. Un SKU absent de la table reste `UNKNOWN` bloquant ; aucun quota générique de 100 Go n’est supposé. `SPE_F1` est le SKU technique Microsoft 365 F3 et sa limite mailbox est définie à 2 Go.
 - `EntraConnectHealth.MaximumLastSyncAgeMinutes` : ancienneté maximale de la dernière synchronisation tenant ; `120` minutes par défaut. En Live, un état désactivé, une date absente, une collecte Graph indisponible ou une synchronisation trop ancienne produit un résultat bloquant.
 - `OutputRoot` : dossier d’export, absolu ou relatif à l’application.
 
@@ -176,21 +176,21 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - existence/unicité du compte AD et statut du compte ;
 - état UserMailbox / RemoteMailbox / MailUser ;
 - cohérence Primary SMTP, proxyAddresses et targetAddress ;
-- unicité globale des proxy SMTP et adresses de routage, doublons internes, domaines acceptés et préservation X500/LegacyExchangeDN ;
+- unicité globale des proxy SMTP et adresses de routage, doublons internes, domaines acceptés et préservation X500/LegacyExchangeDN ; un propriétaire SMTP actuel produit un `NO-GO`, tandis qu’une collision entre futures adresses attendues sans propriétaire actuel produit un avertissement de planification ;
 - cohérence ExchangeGuid/ArchiveGuid et type de destinataire pris en charge ;
 - taille de mailbox contre quota explicite du SKU cible avec marge de sécurité ; les shared mailboxes sans SKU explicite utilisent la limite non licenciée de 50 Go ;
 - préparation de l'archive, saturation Recoverable Items, limites de dossiers, gros éléments et quotas source personnalisés ;
 - Litigation Hold et In-Place Hold quand les propriétés sont disponibles ;
 - baseline Full Access, Send As et Send on Behalf ;
 - dépendances de délégation hors batch, forwarding mailbox, règles Inbox de transfert, modération et restrictions de remise ;
-- santé de la base Exchange source ;
+- santé de la base Exchange source ; en fallback CSV, l’application rapproche la base de chaque mailbox des lignes `MailboxDatabase` / `Mounted` de `Exchange_OnPrem_MigrationReadiness_Config.csv` au lieu de retourner systématiquement `UNKNOWN` ;
 - état MailUser/mailbox Exchange Online et détection split-brain ;
 - conflits soft-deleted/inactive ;
 - migration user ou move request actif/non terminal, avec déduplication des deux représentations d’une même opération et interprétation adaptée à la phase `PreCreation` ou `ExistingBatch` ; l’erreur Exchange Online `No such request exists in specified index` est interprétée comme une absence de move, pas comme une collecte inconnue ;
 - historique de moves échoués, suspendus ou arrêtés ;
 - unicité et synchronisation de l’utilisateur Entra, avec vérification que le domaine de son UPN figure dans `organization.verifiedDomains` ;
 - erreurs de provisioning et identity anchor Entra ; l’ancienneté de synchronisation par objet reste informative et ne remplace pas la date de dernière synchronisation tenant collectée sur l’objet `organization` ;
-- licence actuelle, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; l’attente de licence dépend de la phase et `SPE_F1` est non éligible ;
+- licence actuelle, quota mailbox de la licence actuellement attribuée, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; une mailbox dépassant la limite F3/SPE_F1 est `NO-GO` tant que la licence cible effective n’est pas attribuée ou que sa taille n’est pas réduite ;
 - santé et fraîcheur de la dernière synchronisation tenant en Live directement via Microsoft Graph ; le cache reste contextuel, et CacheOnly utilise exclusivement le CSV ;
 - endpoint `ExchangeRemoteMove` en Live ; l’absence de `Test-MigrationServerAvailability` produit `UNKNOWN`, pas un faux échec de l’endpoint ;
 - MRSProxy, certificat hybride, charge active des migrations et cohérence Autodiscover/OAuth ; le contrôle OAuth est consultatif pour un move distant et ne bloque plus à lui seul la migration ;
@@ -221,7 +221,7 @@ Output\SEMR-yyyyMMdd-HHmmss\
 
 Le classeur Excel autonome regroupe tous les CSV générés dans des onglets formatés — les sept exports actuels et tout futur CSV du même dossier — avec filtres, première ligne figée et couleurs de verdict. Il ne nécessite ni Microsoft Excel ni le module ImportExcel.
 
-Le rapport HTML UTF-8 est autonome et contient un bandeau horizontal de synthèse GO / NO-GO, un tableau mailbox enrichi avec UPN, taille, SKU cible et licences attribuées, les contrôles tenant, la fraîcheur des sources CSV, les détails bloquants et un filtre mailbox. Il n’utilise aucune ressource externe.
+Le rapport HTML UTF-8 est autonome et contient un bandeau horizontal de synthèse GO / NO-GO, un tableau mailbox enrichi avec UPN, taille, SKU cible et licences attribuées, les contrôles tenant, la fraîcheur des sources CSV, les détails bloquants et un filtre mailbox. Les lignes `NO-GO` apparaissent en premier ; les codes bloquants et actions recommandées disposent de colonnes élargies, et les actions multiples sont présentées sous forme de liste. Il n’utilise aucune ressource externe.
 
 Chaque lancement GUI crée également un journal de session horodaté sous `Output\Logs`. Le statut supérieur et l'onglet `Activity` décrivent les phases longues et indiquent quand l'opérateur doit patienter.
 
