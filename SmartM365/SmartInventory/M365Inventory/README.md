@@ -44,6 +44,32 @@ Required Microsoft Graph permission: `Reports.Read.All`.
 
 `SmartM365-EXO-Mailboxes-Inventory.ps1` remains useful and is not replaced by `MailboxUsageDetail`: EXO gives mailbox object/stat/archive details from Exchange Online, while Graph Reports gives a period-based usage and quota report suitable for FinOps joins.
 
+## Microsoft 365 Copilot Usage
+
+`Usage/SmartM365-CopilotUsage-Inventory.ps1` is a read-only collector for the official Microsoft Graph v1.0 endpoint `GET /copilot/reports/getMicrosoft365CopilotUsageUserDetail`.
+
+It publishes `M365_Copilot_UserUsage.csv` to the tenant `DATA-LAST` folder and keeps timestamped DATA-ALL plus weekly history copies. Report version `v2` is the default because it adds active usage days, prompt counters for all apps and Copilot Chat work/web, and the Microsoft 365 app, Edge, agent, and Copilot Chat work/web last-activity dates. The script falls back to `v1` only when `v2` is unavailable or when `D30` is explicitly requested, because Microsoft documents `D30` for `v1` and `D28` for `v2`.
+
+The API returns only users who have a Microsoft 365 Copilot license. The collector never requests or exports prompt text. Version `v1` does not expose prompt counters or active usage days, so the stable v2-oriented CSV columns remain empty after a v1 fallback.
+
+Examples:
+
+```powershell
+.\Usage\SmartM365-CopilotUsage-Inventory.ps1 -Tenant test -ValidateOnly
+.\Usage\SmartM365-CopilotUsage-Inventory.ps1 -Tenant prod -Period D180 -ReportVersion v2 -Connect
+.\Usage\SmartM365-CopilotUsage-Inventory.ps1 -Tenant test -Period D7 -ReportVersion v2 -InteractiveAuth
+.\Usage\SmartM365-CopilotUsage-Inventory.ps1 -Tenant test -Period D180 -ReportVersion v2 -Connect -MaxItems 10
+```
+
+`-MaxItems` produces suffixed `MAXITEMS` CSV files and does not replace the canonical Power BI file or weekly history. `-ValidateOnly` validates modules, parameters, paths, URI construction, and the empty CSV schema without calling Microsoft Graph.
+
+Required Microsoft Graph permission: `Reports.Read.All`.
+
+Official documentation:
+
+- [Microsoft 365 Copilot usage user detail API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/api/admin-settings/reports/copilotreportroot-getmicrosoft365copilotusageuserdetail)
+- [Microsoft 365 Copilot usage report](https://learn.microsoft.com/microsoft-365/admin/activity-reports/microsoft-365-copilot-usage)
+
 ## SharePoint Online Inventory
 
 `SharePoint/SmartM365-SPO-Inventory.ps1` uses Microsoft Graph app-only by default. It relies on Graph usage reports plus Graph site/list reads so the inventory does not require SharePoint Administrator or `Sites.FullControl.All`. Fields that are not exposed in this least-privilege mode, such as exact lock state, site sharing capability, hub association, site collection admins, and anonymous link discovery, are exported as `NotAvailableGraphOnly` instead of failing the run.
