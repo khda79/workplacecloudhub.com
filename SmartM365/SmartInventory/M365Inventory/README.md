@@ -64,6 +64,7 @@ Examples:
 .\PowerBI\SmartM365-PowerBIFabricActivity-Inventory.ps1 -Tenant test -ValidateOnly
 .\PowerBI\SmartM365-PowerBIFabricActivity-Inventory.ps1 -Tenant test -LookbackDays 28
 .\PowerBI\SmartM365-PowerBIFabricActivity-Inventory.ps1 -Tenant test -FromDate 2026-07-01 -ToDate 2026-07-07 -InteractiveAuth
+..\Launchers\Cloud\Start-SmartM365-PowerBIFabricActivity-Inventory.cmd
 ```
 
 Interactive mode requires a Fabric Administrator and delegated `Tenant.Read.All` or `Tenant.ReadWrite.All`. App-only mode uses the configured certificate and requires the Fabric tenant setting **Service principals can access read-only admin APIs** for a security group containing the service principal. The Entra application must not have admin-consent-required Power BI permissions assigned.
