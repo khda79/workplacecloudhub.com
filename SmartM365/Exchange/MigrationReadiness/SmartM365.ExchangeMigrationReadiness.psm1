@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.8.2'
+$script:SemrVersion = '1.9.0'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ActiveDirectoryDomains = @()
@@ -11,6 +11,9 @@ $script:GraphSubscribedSkuError = ''
 $script:GraphOrganization = $null
 $script:GraphOrganizationError = ''
 $script:CurrentSourceTimestamps = @{}
+$script:BatchActiveDirectoryEvidenceByEmail = @{}
+$script:BatchDelegateIdentityToEmail = @{}
+$script:BatchEmailSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $script:ActiveDirectoryFallbackReasons = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $script:DisabledChecks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $script:ConnectionState = [ordered]@{
@@ -670,6 +673,9 @@ function Disconnect-SemrSession {
     $script:GraphEvidenceByEmail = @{}
     $script:GraphSubscribedSkus = @()
     $script:GraphSubscribedSkuError = ''
+    $script:BatchActiveDirectoryEvidenceByEmail = @{}
+    $script:BatchDelegateIdentityToEmail = @{}
+    $script:BatchEmailSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $script:GraphOrganization = $null
     $script:GraphOrganizationError = ''
 }
@@ -922,6 +928,25 @@ function Add-SemrFinding {
     [void]$List.Add((ConvertTo-SemrFinding @Parameters))
 }
 
+function Get-SemrMailboxDecision {
+    param(
+        [object[]]$MailboxFindings = @(),
+        [object[]]$GlobalFindings = @()
+    )
+
+    $allFindings = @($MailboxFindings) + @($GlobalFindings)
+    if (@($allFindings | Where-Object { $_.IsBlocking -and $_.Result -eq 'FAIL' }).Count -gt 0) {
+        return 'NO-GO'
+    }
+    if (@($allFindings | Where-Object { $_.IsBlocking -and $_.Result -eq 'UNKNOWN' }).Count -gt 0) {
+        return 'UNKNOWN'
+    }
+    if (@($allFindings | Where-Object { $_.Result -in @('WARN','UNKNOWN') }).Count -gt 0) {
+        return 'GO-WARNING'
+    }
+    return 'GO'
+}
+
 function Get-SemrOnPremCommandName {
     param([Parameter(Mandatory)][string]$Name)
     $prefixed = $Name -replace '^Get-', 'Get-OnPrem'
@@ -941,6 +966,31 @@ function Invoke-SemrCommandSafe {
     }
     catch {
         return @()
+    }
+}
+
+function Invoke-SemrCommandResult {
+    param(
+        [string]$CommandName,
+        [hashtable]$Parameters = @{}
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CommandName)) {
+        return [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = 'Required command is unavailable.' }
+    }
+    try {
+        return [pscustomobject]@{
+            Success = $true
+            Rows = @(& $CommandName @Parameters -ErrorAction Stop)
+            ErrorMessage = ''
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Success = $false
+            Rows = @()
+            ErrorMessage = $_.Exception.Message
+        }
     }
 }
 
@@ -1218,6 +1268,9 @@ function Initialize-SemrInventoryContext {
         DuplicateSmtpDataAvailable = $false
         DuplicateRoutingDataAvailable = $false
         ProxyCheckDataAvailable = $false
+        DuplicateSmtpTimestamp = $null
+        DuplicateRoutingTimestamp = $null
+        ProxyCheckTimestamp = $null
         AcceptedDomainDataAvailable = $false
         ArchiveDataAvailable = $false
         HybridConfigDataAvailable = $false
@@ -1244,8 +1297,8 @@ function Initialize-SemrInventoryContext {
         HybridConfigTimestamp = $null
     }
 
-    # Always preload these inventories: they are mandatory in CacheOnly and automatic fallbacks in Live.
-    $usesAdInventory = $true
+    # Cache AD is mandatory in CacheOnly and only a fallback when the live forest is unavailable.
+    $usesAdInventory = ([string]$Config['Mode'] -eq 'CacheOnly' -or -not [bool]$script:ConnectionState.ActiveDirectory)
     $usesExchangeInventory = $true
     $usesEntraInventory = $true
 
@@ -1282,14 +1335,14 @@ function Initialize-SemrInventoryContext {
         $script:InventoryContext.ActiveDirectoryMessage = $adState.Message
     }
 
-    if ($usesExchangeInventory -and $adState.Available -and $mailboxState.Available) {
-        if (-not $script:InventoryContext.ActiveDirectoryAvailable) {
+    if ($usesExchangeInventory -and $mailboxState.Available -and ($adState.Available -or $script:ConnectionState.ActiveDirectory)) {
+        if (-not $script:InventoryContext.ActiveDirectoryAvailable -and $adState.Available) {
             $script:InventoryContext.AdRowsByEmail = Import-SemrInventoryMatches -Path $adPath -EmailAddresses $emails -IdentityColumns @('EmailAddress', 'UserPrincipalName', 'PrimarySmtpAddress', 'ProxyAddresses')
             $script:InventoryContext.AdTimestamp = $adState.Timestamp
         }
         $script:InventoryContext.MailboxRowsByEmail = Import-SemrInventoryMatches -Path $mailboxPath -EmailAddresses $emails -IdentityColumns @('PrimarySMTPaddress', 'UserPrincipalName', 'EmailAddresses')
         $script:InventoryContext.ExchangeOnPremisesAvailable = $true
-        $script:InventoryContext.ExchangeOnPremisesMessage = "$($adState.Message) $($mailboxState.Message)"
+        $script:InventoryContext.ExchangeOnPremisesMessage = if ($script:ConnectionState.ActiveDirectory) { "Live AD + $($mailboxState.Message)" } else { "$($adState.Message) $($mailboxState.Message)" }
         $script:InventoryContext.MailboxTimestamp = $mailboxState.Timestamp
     }
     elseif ($usesExchangeInventory) {
@@ -1317,16 +1370,19 @@ function Initialize-SemrInventoryContext {
         if ($duplicateSmtpState.Available) {
             $script:InventoryContext.DuplicateSmtpRows = @(Import-Csv -LiteralPath $duplicateSmtpPath)
             $script:InventoryContext.DuplicateSmtpDataAvailable = $true
+            $script:InventoryContext.DuplicateSmtpTimestamp = $duplicateSmtpState.Timestamp
             $script:InventoryContext.AdvancedIdentityTimestamp = $duplicateSmtpState.Timestamp
         }
         if ($duplicateRoutingState.Available) {
             $script:InventoryContext.DuplicateRoutingRows = @(Import-SemrFlexibleCsv -Path $duplicateRoutingPath)
             $script:InventoryContext.DuplicateRoutingDataAvailable = $true
+            $script:InventoryContext.DuplicateRoutingTimestamp = $duplicateRoutingState.Timestamp
             if (-not $script:InventoryContext.AdvancedIdentityTimestamp) { $script:InventoryContext.AdvancedIdentityTimestamp = $duplicateRoutingState.Timestamp }
         }
         if ($proxyCheckState.Available) {
             $script:InventoryContext.ProxyCheckRowsByEmail = Import-SemrInventoryMatches -Path $proxyCheckPath -EmailAddresses $emails -IdentityColumns @('PrimaryAddress')
             $script:InventoryContext.ProxyCheckDataAvailable = $true
+            $script:InventoryContext.ProxyCheckTimestamp = $proxyCheckState.Timestamp
             if (-not $script:InventoryContext.AdvancedIdentityTimestamp) { $script:InventoryContext.AdvancedIdentityTimestamp = $proxyCheckState.Timestamp }
         }
     }
@@ -1473,8 +1529,33 @@ function Get-SemrInventoryOnPremisesEvidence {
 
     foreach ($mailboxRow in $mailboxRows) {
         $relatedAdRow = if ($adRow.Count -eq 1) { $adRow[0] } else { $null }
-        $proxyAddresses = if ($relatedAdRow) { @(Split-SemrInventoryValue -Value $relatedAdRow.ProxyAddresses) } else { @() }
+        if (-not $relatedAdRow -and $script:BatchActiveDirectoryEvidenceByEmail.ContainsKey($key)) {
+            $liveAdEvidence = $script:BatchActiveDirectoryEvidenceByEmail[$key]
+            $liveAdUsers = @($liveAdEvidence.Users)
+            if ($liveAdUsers.Count -eq 1) { $relatedAdRow = $liveAdUsers[0] }
+        }
+        $mailboxProxyRaw = Get-SemrPropertyValue -InputObject $mailboxRow -Names @('EmailAddressesAll','EmailAddresses') -Default ''
+        $proxyAddresses = if ($relatedAdRow) { @(Split-SemrInventoryValue -Value $relatedAdRow.ProxyAddresses) } else { @(Split-SemrInventoryValue -Value $mailboxProxyRaw) }
         $primarySmtp = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('PrimarySMTPaddress', 'UserPrincipalName') -Default $EmailAddress)
+        if (-not $relatedAdRow) {
+            $proxyAddresses = @($proxyAddresses | ForEach-Object {
+                $proxyText = ([string]$_).Trim()
+                if ($proxyText -match '^[A-Za-z0-9]+:') { $proxyText }
+                elseif (Test-SemrSmtpAddress -Value $proxyText) { "smtp:$proxyText" }
+            } | Where-Object { $_ })
+            $primaryProxyIndex = -1
+            for ($proxyIndex = 0; $proxyIndex -lt $proxyAddresses.Count; $proxyIndex++) { if (($proxyAddresses[$proxyIndex] -replace '^(?i:smtp:)','') -ieq $primarySmtp) { $primaryProxyIndex = $proxyIndex; break } }
+            if ($primaryProxyIndex -ge 0) { $proxyAddresses[$primaryProxyIndex] = "SMTP:$primarySmtp" } elseif ($primarySmtp) { $proxyAddresses += "SMTP:$primarySmtp" }
+        }
+        $exchangeGuid = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('ExchangeGuid') -Default '')
+        if ([string]::IsNullOrWhiteSpace($exchangeGuid)) {
+            foreach ($locationPart in @(([string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('MailboxLocations') -Default '')) -split '[;|]')) {
+                $parsedGuid = [guid]::Empty
+                if ([guid]::TryParse($locationPart.Trim(), [ref]$parsedGuid)) { $exchangeGuid = $parsedGuid.ToString(); break }
+            }
+        }
+        $archiveSizeRaw = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('ArchiveTotalItemSize','ArchiveTotalItemSize-In-MB') -Default '')
+        if ($archiveSizeRaw -and $archiveSizeRaw -notmatch '(?i)(KB|MB|GB|TB|bytes?)') { $archiveSizeRaw = "$archiveSizeRaw MB" }
         [void]$mailboxes.Add([pscustomobject]@{
             Identity = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('Identity', 'DistinguishedName') -Default $primarySmtp)
             DistinguishedName = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('DistinguishedName') -Default '')
@@ -1484,15 +1565,18 @@ function Get-SemrInventoryOnPremisesEvidence {
             ExternalEmailAddress = if ($relatedAdRow) { [string]$relatedAdRow.TargetAddress } else { '' }
             WindowsEmailAddress = if ($relatedAdRow) { [string]$relatedAdRow.TargetAddress } else { '' }
             GrantSendOnBehalfTo = @(Split-SemrInventoryValue -Value $mailboxRow.GrantSendOnBehalfTo)
-            LitigationHoldEnabled = $null
-            InPlaceHolds = @()
-            LegacyExchangeDN = ''
-            ExchangeGuid = ''
-            ArchiveGuid = ''
+            LitigationHoldEnabled = $(
+                $holdRaw = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('LitigationHoldEnabled') -Default '')
+                if ([string]::IsNullOrWhiteSpace($holdRaw)) { $null } else { ConvertTo-SemrBoolean -Value $holdRaw }
+            )
+            InPlaceHolds = @(Split-SemrInventoryValue -Value (Get-SemrPropertyValue -InputObject $mailboxRow -Names @('InPlaceHolds') -Default ''))
+            LegacyExchangeDN = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('LegacyExchangeDN') -Default '')
+            ExchangeGuid = $exchangeGuid
+            ArchiveGuid = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('ArchiveGuid') -Default '')
             ArchiveStatus = [string]$mailboxRow.ArchiveStatus
             ArchiveState = [string]$mailboxRow.ArchiveState
             ArchiveQuota = [string]$mailboxRow.ArchiveQuota
-            ArchiveTotalItemSize = [string]$mailboxRow.'ArchiveTotalItemSize-In-MB'
+            ArchiveTotalItemSize = $archiveSizeRaw
             ForwardingAddress = [string]$mailboxRow.ForwardingAddress
             ForwardingSmtpAddress = [string]$mailboxRow.ForwardingSmtpAddress
             DeliverToMailboxAndForward = ConvertTo-SemrBoolean -Value $mailboxRow.DeliverToMailboxAndForward
@@ -1504,7 +1588,15 @@ function Get-SemrInventoryOnPremisesEvidence {
             Database = [string]$mailboxRow.Database
             ServerName = [string]$mailboxRow.ServerName
             LargeItemCount = [string]$mailboxRow.'LargeItemCount-Over-35MB'
-            ModerationEnabled = $null
+            ModerationEnabled = $(
+                $moderationRaw = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('ModerationEnabled') -Default '')
+                if ([string]::IsNullOrWhiteSpace($moderationRaw)) { $null } else { ConvertTo-SemrBoolean -Value $moderationRaw }
+            )
+            AcceptMessagesOnlyFrom = @(Split-SemrInventoryValue -Value (Get-SemrPropertyValue $mailboxRow @('AcceptMessagesOnlyFrom') ''))
+            AcceptMessagesOnlyFromDLMembers = @(Split-SemrInventoryValue -Value (Get-SemrPropertyValue $mailboxRow @('AcceptMessagesOnlyFromDLMembers') ''))
+            RejectMessagesFrom = @(Split-SemrInventoryValue -Value (Get-SemrPropertyValue $mailboxRow @('RejectMessagesFrom') ''))
+            RejectMessagesFromDLMembers = @(Split-SemrInventoryValue -Value (Get-SemrPropertyValue $mailboxRow @('RejectMessagesFromDLMembers') ''))
+            RequireSenderAuthenticationEnabled = Get-SemrPropertyValue $mailboxRow @('RequireSenderAuthenticationEnabled') $null
         })
         $sizeMb = [string](Get-SemrPropertyValue -InputObject $mailboxRow -Names @('TotalItemSize-In-MB') -Default '')
         if ($sizeMb) {
@@ -1591,10 +1683,12 @@ function Get-SemrInventoryOnPremisesEvidence {
         RemoteMailboxes = @($remoteMailboxes)
         MailUsers = @()
         Recipients = @($mailboxes) + @($remoteMailboxes)
+        RecipientLookupAvailable = [bool]$script:InventoryContext.ExchangeOnPremisesAvailable
         Statistics = @($statistics)
+        StatisticsAvailable = $statistics.Count -gt 0
         Permissions = @($permissions)
         PermissionsAvailable = $permissionsAvailable
-        HoldDataAvailable = $false
+        HoldDataAvailable = $mailboxRows.Count -gt 0 -and $mailboxRows[0].PSObject.Properties['LitigationHoldEnabled']
         FolderStatistics = @()
         FolderStatisticsAvailable = $false
         InboxRules = @()
@@ -1603,7 +1697,7 @@ function Get-SemrInventoryOnPremisesEvidence {
         DatabaseHealthAvailable = $databaseHealthAvailable
         DatabaseHealthSource = 'Tenant CSV cache hybrid configuration'
         DatabaseHealthSourceTimestamp = $script:InventoryContext.HybridConfigTimestamp
-        DeliveryRestrictionsAvailable = $false
+        DeliveryRestrictionsAvailable = $mailboxRows.Count -gt 0 -and $mailboxRows[0].PSObject.Properties['ModerationEnabled']
     }
 }
 function Get-SemrOnPremisesEvidence {
@@ -1624,14 +1718,21 @@ function Get-SemrOnPremisesEvidence {
     $inboxRuleCommand = Get-SemrOnPremCommandName -Name 'Get-InboxRule'
     $databaseCommand = Get-SemrOnPremCommandName -Name 'Get-MailboxDatabase'
 
-    $mailboxes = @(Invoke-SemrCommandSafe -CommandName $mailboxCommand -Parameters @{ Identity = $EmailAddress })
-    $remoteMailboxes = @(Invoke-SemrCommandSafe -CommandName $remoteMailboxCommand -Parameters @{ Identity = $EmailAddress })
-    $mailUsers = @(Invoke-SemrCommandSafe -CommandName $mailUserCommand -Parameters @{ Identity = $EmailAddress })
-    $recipients = @(Invoke-SemrCommandSafe -CommandName $recipientCommand -Parameters @{ Identity = $EmailAddress })
+    $mailboxResult = Invoke-SemrCommandResult -CommandName $mailboxCommand -Parameters @{ Identity = $EmailAddress }
+    $remoteMailboxResult = Invoke-SemrCommandResult -CommandName $remoteMailboxCommand -Parameters @{ Identity = $EmailAddress }
+    $mailUserResult = Invoke-SemrCommandResult -CommandName $mailUserCommand -Parameters @{ Identity = $EmailAddress }
+    $recipientResult = Invoke-SemrCommandResult -CommandName $recipientCommand -Parameters @{ Identity = $EmailAddress }
+    $mailboxes = @($mailboxResult.Rows)
+    $remoteMailboxes = @($remoteMailboxResult.Rows)
+    $mailUsers = @($mailUserResult.Rows)
+    $recipients = @($recipientResult.Rows)
 
     $statistics = @()
+    $statisticsAvailable = $false
     if ($mailboxes.Count -eq 1 -and $statisticsCommand) {
-        $statistics = @(Invoke-SemrCommandSafe -CommandName $statisticsCommand -Parameters @{ Identity = $mailboxes[0].Identity })
+        $statisticsResult = Invoke-SemrCommandResult -CommandName $statisticsCommand -Parameters @{ Identity = $mailboxes[0].Identity }
+        $statistics = @($statisticsResult.Rows)
+        $statisticsAvailable = [bool]$statisticsResult.Success
     }
 
     $folderStatistics = @()
@@ -1640,15 +1741,17 @@ function Get-SemrOnPremisesEvidence {
         (Test-SemrCheckEnabled -CheckId 'MAILBOX-RECOVERABLE-ITEMS-QUOTA') -or
         (Test-SemrCheckEnabled -CheckId 'MAILBOX-FOLDER-LIMITS')
     )) {
-        $folderStatistics = @(Invoke-SemrCommandSafe -CommandName $folderStatisticsCommand -Parameters @{ Identity = $mailboxes[0].Identity })
-        $folderStatisticsAvailable = $folderStatistics.Count -gt 0
+        $folderStatisticsResult = Invoke-SemrCommandResult -CommandName $folderStatisticsCommand -Parameters @{ Identity = $mailboxes[0].Identity }
+        $folderStatistics = @($folderStatisticsResult.Rows)
+        $folderStatisticsAvailable = [bool]$folderStatisticsResult.Success
     }
 
     $inboxRules = @()
     $inboxRulesAvailable = $false
     if ($mailboxes.Count -eq 1 -and $inboxRuleCommand -and (Test-SemrCheckEnabled -CheckId 'INBOX-FORWARDING-RULES')) {
-        $inboxRules = @(Invoke-SemrCommandSafe -CommandName $inboxRuleCommand -Parameters @{ Mailbox = $mailboxes[0].Identity; IncludeHidden = $true })
-        $inboxRulesAvailable = $true
+        $inboxRuleResult = Invoke-SemrCommandResult -CommandName $inboxRuleCommand -Parameters @{ Mailbox = $mailboxes[0].Identity; IncludeHidden = $true }
+        $inboxRules = @($inboxRuleResult.Rows)
+        $inboxRulesAvailable = [bool]$inboxRuleResult.Success
     }
 
     $databaseHealth = @()
@@ -1656,14 +1759,18 @@ function Get-SemrOnPremisesEvidence {
     if ($mailboxes.Count -eq 1 -and $databaseCommand -and (Test-SemrCheckEnabled -CheckId 'EXCHANGE-DATABASE-HEALTH')) {
         $databaseIdentity = [string](Get-SemrPropertyValue -InputObject $mailboxes[0] -Names @('Database') -Default '')
         if ($databaseIdentity) {
-            $databaseHealth = @(Invoke-SemrCommandSafe -CommandName $databaseCommand -Parameters @{ Identity = $databaseIdentity; Status = $true })
-            $databaseHealthAvailable = $databaseHealth.Count -gt 0
+            $databaseResult = Invoke-SemrCommandResult -CommandName $databaseCommand -Parameters @{ Identity = $databaseIdentity; Status = $true }
+            $databaseHealth = @($databaseResult.Rows)
+            $databaseHealthAvailable = [bool]$databaseResult.Success
         }
     }
 
     $permissions = [System.Collections.Generic.List[object]]::new()
+    $mailboxPermissionResult = [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = 'Mailbox permission lookup was not applicable.' }
+    $sendAsPermissionResult = [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = 'Send As permission lookup was not applicable.' }
     if ($mailboxes.Count -eq 1 -and $permissionCommand) {
-        foreach ($permission in @(Invoke-SemrCommandSafe -CommandName $permissionCommand -Parameters @{ Identity = $mailboxes[0].Identity })) {
+        $mailboxPermissionResult = Invoke-SemrCommandResult -CommandName $permissionCommand -Parameters @{ Identity = $mailboxes[0].Identity }
+        foreach ($permission in @($mailboxPermissionResult.Rows)) {
             $rights = @($permission.AccessRights | ForEach-Object { [string]$_ })
             if ($permission.IsInherited -or $rights -notcontains 'FullAccess') { continue }
             $delegate = [string]$permission.User
@@ -1677,7 +1784,8 @@ function Get-SemrOnPremisesEvidence {
         }
     }
     if ($mailboxes.Count -eq 1 -and $adPermissionCommand) {
-        foreach ($permission in @(Invoke-SemrCommandSafe -CommandName $adPermissionCommand -Parameters @{ Identity = $mailboxes[0].DistinguishedName })) {
+        $sendAsPermissionResult = Invoke-SemrCommandResult -CommandName $adPermissionCommand -Parameters @{ Identity = $mailboxes[0].DistinguishedName }
+        foreach ($permission in @($sendAsPermissionResult.Rows)) {
             if ($permission.IsInherited -or @($permission.ExtendedRights) -notcontains 'Send-As' -or $permission.Deny) { continue }
             [void]$permissions.Add([pscustomobject]@{
                 PermissionType = 'SendAs'
@@ -1698,19 +1806,24 @@ function Get-SemrOnPremisesEvidence {
         }
     }
 
+    $coreLookupAvailable = [bool]($mailboxResult.Success -or $remoteMailboxResult.Success -or $mailUserResult.Success -or $recipientResult.Success)
+    $lookupResults = @($mailboxResult,$remoteMailboxResult,$mailUserResult,$recipientResult)
+    $lookupErrors = @($lookupResults | Where-Object { -not $_.Success -and $_.ErrorMessage } | ForEach-Object ErrorMessage | Sort-Object -Unique)
     return [pscustomobject]@{
-        Available = [bool]$script:ConnectionState.OnPremisesExchange
+        Available = $coreLookupAvailable
         Source = 'Live Exchange on-premises'
         SourceTimestamp = Get-Date
-        Message = 'Live Exchange on-premises evidence collected.'
+        Message = if ($coreLookupAvailable) { 'Live Exchange on-premises evidence collected.' } else { 'Live Exchange on-premises lookup failed: ' + ($lookupErrors -join ' | ') }
         Mailboxes = $mailboxes
         RemoteMailboxes = $remoteMailboxes
         MailUsers = $mailUsers
         Recipients = $recipients
+        RecipientLookupAvailable = [bool]$recipientResult.Success
         Statistics = $statistics
+        StatisticsAvailable = $statisticsAvailable
         Permissions = @($permissions)
-        PermissionsAvailable = $true
-        HoldDataAvailable = $true
+        PermissionsAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxPermissionResult.Success -and $sendAsPermissionResult.Success)
+        HoldDataAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxResult.Success)
         FolderStatistics = $folderStatistics
         FolderStatisticsAvailable = $folderStatisticsAvailable
         InboxRules = $inboxRules
@@ -1719,12 +1832,17 @@ function Get-SemrOnPremisesEvidence {
         DatabaseHealthSource = 'Live Exchange on-premises mailbox database'
         DatabaseHealthSourceTimestamp = Get-Date
         DatabaseHealthAvailable = $databaseHealthAvailable
-        DeliveryRestrictionsAvailable = $true
+        DeliveryRestrictionsAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxResult.Success)
     }
 }
 
 function Get-SemrActiveDirectoryEvidence {
     param([Parameter(Mandatory)][string]$EmailAddress)
+
+    $evidenceKey = $EmailAddress.Trim().ToLowerInvariant()
+    if ($script:BatchActiveDirectoryEvidenceByEmail.ContainsKey($evidenceKey)) {
+        return $script:BatchActiveDirectoryEvidenceByEmail[$evidenceKey]
+    }
 
     $getCachedEvidence = {
         param([string]$FallbackReason = '')
@@ -2365,16 +2483,18 @@ function Get-SemrUpnVerifiedDomainEvidence {
 }
 
 function Get-SemrProxyConflictEvidence {
-    param([Parameter(Mandatory)][string]$EmailAddress, [Parameter(Mandatory)][string[]]$Addresses)
+    param([Parameter(Mandatory)][string]$EmailAddress, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Addresses)
 
     $conflicts = [System.Collections.Generic.List[string]]::new()
     $plannedWarnings = [System.Collections.Generic.List[string]]::new()
     $available = $false
     $source = 'Unavailable'
-    if (-not (Test-SemrCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE')) { return [pscustomobject]@{ Available=$false; Source='Disabled'; Conflicts=@(); PlannedWarnings=@() } }
+    $sourceTimestamps = [System.Collections.Generic.List[datetime]]::new()
+    if (-not (Test-SemrCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE')) { return [pscustomobject]@{ Available=$false; Source='Disabled'; SourceTimestamp=$null; Conflicts=@(); PlannedWarnings=@() } }
     if ($script:InventoryContext -and $script:InventoryContext.DuplicateSmtpDataAvailable) {
         $available = $true
         $source = 'AD duplicate SMTP CSV cache'
+        if ($script:InventoryContext.DuplicateSmtpTimestamp) { [void]$sourceTimestamps.Add([datetime]$script:InventoryContext.DuplicateSmtpTimestamp) }
         $normalized = @($Addresses | ForEach-Object { ([string]$_ -replace '^(?i:smtp:)','').Trim().ToLowerInvariant() } | Where-Object { $_ })
         foreach ($row in @($script:InventoryContext.DuplicateSmtpRows | Where-Object { $normalized -contains ([string]$_.SmtpAddress).ToLowerInvariant() })) {
             $owner = [string](Get-SemrPropertyValue -InputObject $row -Names @('UserPrincipalName','DistinguishedName') -Default 'unknown owner')
@@ -2383,6 +2503,7 @@ function Get-SemrProxyConflictEvidence {
     }
     if ($script:InventoryContext -and $script:InventoryContext.ProxyCheckDataAvailable) {
         $available = $true
+        if ($script:InventoryContext.ProxyCheckTimestamp) { [void]$sourceTimestamps.Add([datetime]$script:InventoryContext.ProxyCheckTimestamp) }
         if ($source -eq 'Unavailable') { $source = 'Exchange proxy-address CSV cache' }
         elseif ($source -notmatch 'proxy-address') { $source = "$source + Exchange proxy-address CSV cache" }
         $key = $EmailAddress.ToLowerInvariant()
@@ -2423,7 +2544,8 @@ function Get-SemrProxyConflictEvidence {
             }
         }
     }
-    return [pscustomobject]@{ Available = $available; Source = $source; Conflicts = @($conflicts | Sort-Object -Unique); PlannedWarnings = @($plannedWarnings | Sort-Object -Unique) }
+    $oldestSourceTimestamp = @($sourceTimestamps | Sort-Object | Select-Object -First 1)
+    return [pscustomobject]@{ Available = $available; Source = $source; SourceTimestamp = if ($oldestSourceTimestamp.Count) { $oldestSourceTimestamp[0] } else { $null }; Conflicts = @($conflicts | Sort-Object -Unique); PlannedWarnings = @($plannedWarnings | Sort-Object -Unique) }
 }
 
 function Add-SemrIdentityAdvancedFindings {
@@ -2443,7 +2565,7 @@ function Add-SemrIdentityAdvancedFindings {
     Add-SemrFinding $Findings ($Base + @{CheckId='PROXY-INTERNAL-DUPLICATE';Category='HybridIdentity';Severity=if($pass){'Information'}else{'Critical'};Result=if($pass){'PASS'}else{'FAIL'};IsBlocking=-not $pass;ObservedValue=if($pass){"$($normalized.Count) unique SMTP proxy address(es)"}else{"Invalid=$($invalid -join ';'); Duplicate=$($duplicates -join ';')"};ExpectedValue='Unique, valid SMTP proxy addresses';EvidenceSource=$source;Message=if($pass){'No internal SMTP proxy duplicate or malformed address was found.'}else{'A malformed or duplicated SMTP proxy address was found.'};RecommendedAction=if($pass){''}else{'Correct proxyAddresses with supported Exchange tools before migration.'}})
 
     $conflict = Get-SemrProxyConflictEvidence -EmailAddress $email -Addresses $smtp
-    if ($conflict.Source -and $script:InventoryContext -and $script:InventoryContext.AdvancedIdentityTimestamp) { $script:CurrentSourceTimestamps[[string]$conflict.Source] = $script:InventoryContext.AdvancedIdentityTimestamp }
+    if ($conflict.Source -and $conflict.SourceTimestamp) { $script:CurrentSourceTimestamps[[string]$conflict.Source] = $conflict.SourceTimestamp }
     $conflicts = @($conflict.Conflicts)
     $plannedWarnings = @($conflict.PlannedWarnings)
     $proxyResult = if (-not $conflict.Available) { 'UNKNOWN' } elseif ($conflicts.Count) { 'FAIL' } elseif ($plannedWarnings.Count) { 'WARN' } else { 'PASS' }
@@ -2454,7 +2576,7 @@ function Add-SemrIdentityAdvancedFindings {
         IsBlocking = $proxyResult -eq 'FAIL'
         ObservedValue = if (-not $conflict.Available) { 'Global recipient index unavailable' } elseif ($conflicts.Count) { $conflicts -join ' | ' } elseif ($plannedWarnings.Count) { 'Planned address warning: ' + ($plannedWarnings -join ' | ') } else { 'No conflicting owner' }
         ExpectedValue = 'No current SMTP owner conflict; planned remote routing addresses remain unique'
-        EvidenceSource = $conflict.Source
+        EvidenceSource = $conflict.Source; SourceTimestamp = $conflict.SourceTimestamp
         Message = if (-not $conflict.Available) { 'Global SMTP ownership could not be evaluated.' } elseif ($conflicts.Count) { 'At least one SMTP proxy is currently owned by another recipient.' } elseif ($plannedWarnings.Count) { 'A future expected routing address is duplicated, but no current SMTP owner conflict was reported.' } else { 'No current or planned SMTP conflict was found.' }
         RecommendedAction = if (-not $conflict.Available) { 'Refresh duplicate/proxy inventories or validate against live Exchange.' } elseif ($conflicts.Count) { 'Resolve every current SMTP ownership conflict.' } elseif ($plannedWarnings.Count) { 'Review the planned remote routing address and coordinate a unique value before onboarding the affected recipients.' } else { '' }
     })
@@ -2484,7 +2606,8 @@ function Add-SemrIdentityAdvancedFindings {
         $checkId=$definition[0];$property=$definition[1];$label=$definition[2]
         $sourceGuid=[string](Get-SemrPropertyValue $mailbox[0] @($property) '')
         $cloudGuid=if($cloudRecipient.Count){[string](Get-SemrPropertyValue $cloudRecipient[0] @($property) '')}else{''}
-        $archiveNotRequired=$checkId -eq 'ARCHIVE-GUID-CONSISTENCY' -and [string]::IsNullOrWhiteSpace([string](Get-SemrPropertyValue $mailbox[0] @('ArchiveStatus','ArchiveState') '')) -and -not $sourceGuid
+        $archiveStateText = [string](Get-SemrPropertyValue $mailbox[0] @('ArchiveStatus','ArchiveState') '')
+        $archiveNotRequired=$checkId -eq 'ARCHIVE-GUID-CONSISTENCY' -and ([string]::IsNullOrWhiteSpace($archiveStateText) -or $archiveStateText -match '^(?i:None|NotPresent|Disabled)$') -and -not $sourceGuid
         $available=$archiveNotRequired -or ($sourceGuid -and $cloudGuid);$guidPass=$archiveNotRequired -or ($available -and $sourceGuid -ieq $cloudGuid)
         Add-SemrFinding $Findings ($Base + @{CheckId=$checkId;Category='ExchangeIdentity';Severity=if(-not $available){'Warning'}elseif($guidPass){'Information'}else{'Critical'};Result=if(-not $available){'UNKNOWN'}elseif($guidPass){'PASS'}else{'FAIL'};IsBlocking=$available -and -not $guidPass;ObservedValue=if($archiveNotRequired){'No active source archive'}else{"Source=$sourceGuid; Cloud=$cloudGuid"};ExpectedValue="Matching $label";EvidenceSource="$source + $cloudSource";Message=if(-not $available){"$label comparison evidence is incomplete."}elseif($guidPass){"$label state is consistent."}else{"Source and cloud $label values differ."};RecommendedAction=if(-not $available){'Run live validation or enrich GUID inventories.'}elseif(-not $guidPass){'Resolve GUID ownership and soft-deleted conflicts.'}else{''}})
     }
@@ -2499,7 +2622,7 @@ function Add-SemrMailboxRiskFindings {
 
     $archiveStatus=[string](Get-SemrPropertyValue $mailbox[0] @('ArchiveStatus','ArchiveState') '')
     $archiveGuid=[string](Get-SemrPropertyValue $mailbox[0] @('ArchiveGuid') '')
-    $hasArchive=$archiveStatus -match 'Active|Local|Hosted' -or ($archiveGuid -and $archiveGuid -notmatch '^0{8}-')
+    $hasArchive=$archiveStatus -match '^(?i:Active|HostedPending|Local)$' -or ($archiveGuid -and $archiveGuid -notmatch '^0{8}-')
     $archiveSize=ConvertFrom-SemrByteSize (Get-SemrPropertyValue $mailbox[0] @('ArchiveTotalItemSize') '')
     if($archiveSize -eq 0 -and $script:InventoryContext -and $script:InventoryContext.ArchiveDataAvailable -and $script:InventoryContext.ArchiveRowsByEmail.ContainsKey($email.ToLowerInvariant())){
         $archiveRow=@($script:InventoryContext.ArchiveRowsByEmail[$email.ToLowerInvariant()] | Select-Object -First 1)
@@ -2566,8 +2689,15 @@ function Add-SemrFlowAndSyncFindings {
         $batchEmails=@($BatchRows | ForEach-Object {([string]$_.EmailAddress).ToLowerInvariant()})
         $permissionsAvailable=[bool](Get-SemrPropertyValue $OnPrem @('PermissionsAvailable') $false)
         $delegates=@($OnPrem.Permissions | ForEach-Object {[string]$_.Delegate} | Where-Object {$_} | Sort-Object -Unique)
-        $external=@($delegates | Where-Object {$batchEmails -notcontains $_.ToLowerInvariant()})
-        Add-SemrFinding $Findings ($Base+@{CheckId='DELEGATE-MIGRATION-DEPENDENCY';Category='Permissions';Severity=if(-not $permissionsAvailable -or $external.Count){'Warning'}else{'Information'};Result=if(-not $permissionsAvailable){'UNKNOWN'}elseif($external.Count){'WARN'}else{'PASS'};IsBlocking=$false;ObservedValue=if(-not $permissionsAvailable){'Complete permission evidence unavailable'}elseif($external.Count){$external -join ';'}else{'All resolvable delegates are in the batch or none exist'};ExpectedValue='Delegates coordinated or documented';EvidenceSource=$source;Message=if(-not $permissionsAvailable){'Delegate migration dependencies could not be evaluated completely.'}elseif($external.Count){'One or more delegates are outside this migration batch.'}else{'No cross-wave delegate dependency was identified.'};RecommendedAction=if(-not $permissionsAvailable){'Refresh the permission inventory before final approval.'}elseif($external.Count){'Coordinate these delegates or document temporary cross-premises limitations.'}else{''}})
+        $resolvedDelegates=@($delegates | ForEach-Object {$delegateKey=$_.Trim().ToLowerInvariant();if($script:BatchDelegateIdentityToEmail.ContainsKey($delegateKey)){$script:BatchDelegateIdentityToEmail[$delegateKey]}else{$_}} | Sort-Object -Unique)
+        $external=@($resolvedDelegates | Where-Object {$batchEmails -notcontains $_.ToLowerInvariant()})
+        $knownText=if($resolvedDelegates.Count){$resolvedDelegates -join ';'}else{'None observed'}
+        $dependencyObserved=if(-not $permissionsAvailable){"Partial baseline: $($resolvedDelegates.Count) known delegate(s): $knownText"}elseif($external.Count){$external -join ';'}else{'All resolvable delegates are in the batch or none exist'}
+        $dependencyMessage=if(-not $permissionsAvailable -and $external.Count){'Permission evidence is incomplete, but known delegates outside this migration batch were identified.'}elseif(-not $permissionsAvailable){'Delegate migration dependencies could not be evaluated completely; known grants are still listed.'}elseif($external.Count){'One or more delegates are outside this migration batch.'}else{'No cross-wave delegate dependency was identified.'}
+        $dependencyAction=@()
+        if(-not $permissionsAvailable){$dependencyAction+='Refresh the on-premises permission inventory before final approval.'}
+        if($external.Count){$dependencyAction+='Coordinate these delegates or document temporary cross-premises limitations.'}
+        Add-SemrFinding $Findings ($Base+@{CheckId='DELEGATE-MIGRATION-DEPENDENCY';Category='Permissions';Severity=if(-not $permissionsAvailable -or $external.Count){'Warning'}else{'Information'};Result=if(-not $permissionsAvailable){'UNKNOWN'}elseif($external.Count){'WARN'}else{'PASS'};IsBlocking=$false;ObservedValue=$dependencyObserved;ExpectedValue='Delegates coordinated or documented';EvidenceSource=$source;Message=$dependencyMessage;RecommendedAction=$dependencyAction -join ' | '})
 
         $forwarding=[string](Get-SemrPropertyValue $mailbox[0] @('ForwardingSmtpAddress','ForwardingAddress') '')
         Add-SemrFinding $Findings ($Base+@{CheckId='MAIL-FORWARDING';Category='MailFlow';Severity=if($forwarding){'Warning'}else{'Information'};Result=if($forwarding){'WARN'}else{'PASS'};IsBlocking=$false;ObservedValue=if($forwarding){$forwarding}else{'No mailbox forwarding'};ExpectedValue='Forwarding documented';EvidenceSource=$source;Message=if($forwarding){'Mailbox-level forwarding is configured.'}else{'No mailbox-level forwarding was detected.'};RecommendedAction=if($forwarding){'Confirm the forwarding target and post-migration behavior.'}else{''}})
@@ -2816,6 +2946,13 @@ function Test-SemrHybridReadiness {
             if ($result.ConnectivitySuccess -and [string]::IsNullOrWhiteSpace($result.Message)) {
                 $result.Message = 'Connectivity test succeeded.'
             }
+            if ($result.ConnectivitySuccess) {
+                $result.MrsProxyAvailable = $true
+                $result.MrsProxyEnabled = $true
+                $result.MrsProxyMessage = 'The successful ExchangeRemoteMove endpoint test functionally validates published MRSProxy connectivity.'
+                $result.MrsProxySource = 'Live Exchange Online migration endpoint connectivity test'
+                $result.MrsProxySourceTimestamp = Get-Date
+            }
         }
         catch {
             $result.Message = $_.Exception.Message
@@ -2932,19 +3069,41 @@ function Invoke-SemrAssessment {
             ForEach-Object Name
     )
 
-    if ($ProgressCallback) {
-        & $ProgressCallback 0 $rows.Count '' 'Loading tenant CSV fallback inventories'
+    $script:InventoryContext = $null
+    $script:BatchActiveDirectoryEvidenceByEmail = @{}
+    $script:BatchDelegateIdentityToEmail = @{}
+    $script:BatchEmailSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($batchRow in $rows) {
+        if ($batchRow.EmailAddress) { [void]$script:BatchEmailSet.Add(([string]$batchRow.EmailAddress).Trim()) }
     }
-    [void](Initialize-SemrInventoryContext -Config $Config -BatchRows $rows)
     if ($ProgressCallback -and [string]$Config['Mode'] -eq 'Live') {
         & $ProgressCallback 0 $rows.Count '' 'Trying live AD and Exchange on-premises sources'
     }
     $sourceInitialization = Initialize-SemrLiveSourceConnections -Config $Config
-    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Testing hybrid migration endpoint; please wait' }
+    if ([string]$Config['Mode'] -eq 'Live' -and $script:ConnectionState.ActiveDirectory) {
+        if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Prefetching Active Directory evidence for the batch' }
+        foreach ($batchRow in $rows) {
+            $batchEmail = ([string]$batchRow.EmailAddress).Trim().ToLowerInvariant()
+            if (-not $batchEmail) { continue }
+            $adEvidence = Get-SemrActiveDirectoryEvidence -EmailAddress $batchEmail
+            if (-not $adEvidence.Available) { continue }
+            $script:BatchActiveDirectoryEvidenceByEmail[$batchEmail] = $adEvidence
+            foreach ($adUser in @($adEvidence.Users)) {
+                foreach ($identity in @($batchEmail,[string](Get-SemrPropertyValue $adUser @('SamAccountName') ''),[string](Get-SemrPropertyValue $adUser @('UserPrincipalName') ''),[string](Get-SemrPropertyValue $adUser @('Mail','PrimarySmtpAddress') ''),[string](Get-SemrPropertyValue $adUser @('DistinguishedName') ''))) {
+                    if (-not [string]::IsNullOrWhiteSpace($identity)) { $script:BatchDelegateIdentityToEmail[$identity.Trim().ToLowerInvariant()] = $batchEmail }
+                }
+            }
+        }
+    }
+    if ($ProgressCallback) {
+        & $ProgressCallback 0 $rows.Count '' 'Loading tenant CSV fallback inventories'
+    }
+    [void](Initialize-SemrInventoryContext -Config $Config -BatchRows $rows)
+    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Testing hybrid migration endpoint' }
     $hybrid = Test-SemrHybridReadiness -Config $Config
-    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting accepted domains and advanced identity evidence; please wait' }
+    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting accepted domains and advanced identity evidence' }
     $acceptedDomains = Get-SemrAcceptedDomainEvidence
-    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Checking latest tenant synchronization through Microsoft Graph; please wait' }
+    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Checking latest tenant synchronization through Microsoft Graph' }
     $entraConnect = Test-SemrEntraConnect -Config $Config
     $csvSources = @()
     $licenseCapacityCache = @{}
@@ -3164,12 +3323,13 @@ function Invoke-SemrAssessment {
                 }
                 $permissionCount = @($onPrem.Permissions).Count
                 $permissionsAvailable = [bool](Get-SemrPropertyValue -InputObject $onPrem -Names @('PermissionsAvailable') -Default $false)
+                $knownPermissionText = @($onPrem.Permissions | ForEach-Object { "$($_.PermissionType):$($_.Delegate)" } | Sort-Object -Unique) -join '; '
                 Add-SemrFinding -List $findings -Parameters ($base + @{
                     CheckId = 'PERMISSIONS-BASELINE'; Category = 'Permissions'; Severity = if (-not $permissionsAvailable -or $permissionCount -gt 0) { 'Warning' } else { 'Information' }
                     Result = if (-not $permissionsAvailable) { 'UNKNOWN' } elseif ($permissionCount -gt 0) { 'WARN' } else { 'PASS' }; IsBlocking = $false
-                    ObservedValue = "$permissionCount explicit permission grant(s)"; ExpectedValue = 'Baseline captured'
+                    ObservedValue = if ($knownPermissionText) { "$permissionCount known explicit permission grant(s): $knownPermissionText" } else { "$permissionCount explicit permission grant(s)" }; ExpectedValue = 'Baseline captured'
                     EvidenceSource = $onPremSource
-                    Message = if ($permissionsAvailable) { 'Explicit Full Access, Send As, and Send on Behalf permissions were captured.' } else { 'The cache does not contain a complete delegated-permission baseline.' }
+                    Message = if ($permissionsAvailable) { 'Explicit Full Access, Send As, and Send on Behalf permissions were captured.' } elseif ($permissionCount -gt 0) { 'The baseline is incomplete, but the known delegated permissions are preserved in the report.' } else { 'The cache does not contain a complete delegated-permission baseline.' }
                     RecommendedAction = if (-not $permissionsAvailable) { 'Refresh the on-premises permission inventory before final approval.' } elseif ($permissionCount -gt 0) { 'Migrate dependent delegates in a coordinated wave and compare permissions after migration.' } else { '' }
                 })
             }
@@ -3269,20 +3429,33 @@ function Invoke-SemrAssessment {
                 $licenseNames = @($graph.LicenseDetails | ForEach-Object { [string]$_.SkuPartNumber } | Where-Object { $_ } | Sort-Object -Unique)
                 $licenseCount = $licenseNames.Count
                 $existingBatchPhase = [string]$Config['AssessmentPhase'] -eq 'ExistingBatch'
-                $licenseResult = if ($existingBatchPhase) { if ($licenseCount -gt 0) { 'PASS' } else { 'WARN' } } else { if ($licenseCount -gt 0) { 'WARN' } else { 'PASS' } }
+                $targetLicenseAssigned = $licenseNames -contains $targetLicense
+                $activeCloudMailboxCount = @($exo.Mailboxes).Count
+                $stagedTargetLicense = -not $existingBatchPhase -and $targetLicenseAssigned -and $activeCloudMailboxCount -eq 0
+                $licenseResult = if ($existingBatchPhase) { if ($licenseCount -gt 0) { 'PASS' } else { 'WARN' } } elseif ($licenseCount -eq 0 -or $stagedTargetLicense) { 'PASS' } else { 'WARN' }
                 Add-SemrFinding -List $findings -Parameters ($base + @{
                     CheckId = 'LICENSE-PRE-MIGRATION'; Category = 'Licensing'; Severity = if ($licenseResult -eq 'WARN') { 'Warning' } else { 'Information' }
                     Result = $licenseResult; IsBlocking = $false
-                    ObservedValue = if ($licenseCount -gt 0) { "$licenseCount assigned license(s): $($licenseNames -join '; ')" } else { '0 assigned licenses' }; ExpectedValue = if ($existingBatchPhase) { 'Approved target license assigned for the existing migration batch' } else { 'License available; Exchange license assigned after migration' }
-                    EvidenceSource = $graphSource; Message = if ($existingBatchPhase -and $licenseCount -gt 0) { 'The assigned license is expected for the existing migration batch.' } elseif ($existingBatchPhase) { 'No assigned license was returned for the existing migration batch.' } elseif ($licenseCount -gt 0) { 'One or more licenses are already assigned before migration.' } else { 'No assigned license was returned before migration.' }
-                    RecommendedAction = if ($existingBatchPhase -and $licenseCount -eq 0) { 'Confirm the target licensing plan and assignment timing for this active migration.' } elseif (-not $existingBatchPhase -and $licenseCount -gt 0) { 'Verify that an Exchange service plan has not provisioned an unintended cloud mailbox.' } elseif (-not $existingBatchPhase) { 'Assign the approved Exchange Online license after migration completion and within the operational deadline.' } else { '' }
+                    ObservedValue = if ($licenseCount -gt 0) { "$licenseCount assigned license(s): $($licenseNames -join '; '); Target=$targetLicense; ActiveCloudMailbox=$activeCloudMailboxCount" } else { '0 assigned licenses' }; ExpectedValue = if ($existingBatchPhase) { 'Approved target license assigned for the existing migration batch' } else { 'No license, or the approved target license staged without an active cloud mailbox' }
+                    EvidenceSource = $graphSource; Message = if ($existingBatchPhase -and $licenseCount -gt 0) { 'The assigned license is expected for the existing migration batch.' } elseif ($existingBatchPhase) { 'No assigned license was returned for the existing migration batch.' } elseif ($stagedTargetLicense) { 'The approved target license is staged and no active cloud mailbox was returned.' } elseif ($licenseCount -gt 0) { 'Assigned licenses differ from the planned target or require review before migration.' } else { 'No license is assigned before migration; this is valid during pre-creation.' }
+                    RecommendedAction = if ($existingBatchPhase -and $licenseCount -eq 0) { 'Confirm the target licensing plan and assignment timing for this active migration.' } elseif (-not $existingBatchPhase -and $licenseCount -gt 0 -and -not $targetLicenseAssigned) { "Align the assigned mailbox license with the approved target '$targetLicense', then rerun the assessment." } elseif (-not $existingBatchPhase -and $licenseCount -gt 0 -and $activeCloudMailboxCount -gt 0) { 'Resolve the active cloud mailbox state before migration.' } else { '' }
                 })
 
                 $assignedQuotaCandidates = @()
+                $licensePlanEvidenceAvailable = @($graph.LicenseDetails | Where-Object { $_.PSObject.Properties['ServicePlans'] }).Count -gt 0
+                $mailboxBearingLicenseNames = if ($licensePlanEvidenceAvailable) {
+                    @($graph.LicenseDetails | Where-Object {
+                        $_.PSObject.Properties['ServicePlans'] -and @($_.ServicePlans | Where-Object {
+                            (Test-SemrMailboxServicePlanName -Name ([string]$_.ServicePlanName)) -and
+                            ([string]::IsNullOrWhiteSpace([string]$_.ProvisioningStatus) -or [string]$_.ProvisioningStatus -ieq 'Success')
+                        }).Count -gt 0
+                    } | ForEach-Object { [string]$_.SkuPartNumber } | Sort-Object -Unique)
+                } else { @() }
+                $assignedQuotaLicenseNames = if ($licensePlanEvidenceAvailable) { $mailboxBearingLicenseNames } else { $licenseNames }
                 $quotaMap = $Config['TargetQuotaGbBySku']
                 if ($quotaMap -is [System.Collections.IDictionary]) {
                     $assignedQuotaCandidates = @(
-                        foreach ($licenseName in $licenseNames) {
+                        foreach ($licenseName in $assignedQuotaLicenseNames) {
                             foreach ($quotaKey in $quotaMap.Keys) {
                                 if ([string]$quotaKey -ieq $licenseName) {
                                     [pscustomobject]@{
@@ -3362,7 +3535,8 @@ function Invoke-SemrAssessment {
                         'Mailbox size exceeds the safe quota of the currently assigned mailbox license.'
                     }
                     RecommendedAction = if ($assignedQuotaBlocking) {
-                        "Assign the approved target license '$targetLicense' before starting the migration, or reduce the mailbox below $([math]::Round($assignedSafeQuotaGb, 2)) GB, then rerun the assessment."
+                        if ($targetLicenseAssigned) { "Select a mailbox license with sufficient quota, or reduce the mailbox below $([math]::Round($assignedSafeQuotaGb, 2)) GB, then rerun the assessment." }
+                        else { "Assign the approved target license '$targetLicense' before starting the migration, or reduce the mailbox below $([math]::Round($assignedSafeQuotaGb, 2)) GB, then rerun the assessment." }
                     }
                     elseif ($licenseCount -gt 0 -and -not $assignedQuotaKnown) {
                         'Add the mailbox-bearing assigned SKU and its quota to TargetQuotaGbBySku, then rerun the assessment.'
@@ -3503,10 +3677,18 @@ function Invoke-SemrAssessment {
     $csvSources = @(Get-SemrCsvSourceInventory -Config $Config -Batch $Batch -EntraConnect $entraConnect -AssessmentCompleted)
     $summary = [System.Collections.Generic.List[object]]::new()
     $summaryRows = @($rows | Group-Object { ([string]$_.EmailAddress).ToLowerInvariant() } | ForEach-Object { $_.Group[0] })
-    $globalBlocking = @($globalFindings | Where-Object { $_.IsBlocking -and $_.Result -in @('FAIL','UNKNOWN') })
+    $globalBlockingFailed = @($globalFindings | Where-Object { $_.IsBlocking -and $_.Result -eq 'FAIL' })
+    $globalBlockingUnknown = @($globalFindings | Where-Object { $_.IsBlocking -and $_.Result -eq 'UNKNOWN' })
+    $globalBlocking = @($globalBlockingFailed) + @($globalBlockingUnknown)
     $globalWarnings = @($globalFindings | Where-Object Result -EQ 'WARN')
     $globalUnknown = @($globalFindings | Where-Object Result -EQ 'UNKNOWN')
     $evidenceByEmail = @{}
+    $findingsByEmail = @{}
+    foreach ($finding in @($findings)) {
+        $findingKey = ([string]$finding.EmailAddress).ToLowerInvariant()
+        if (-not $findingsByEmail.ContainsKey($findingKey)) { $findingsByEmail[$findingKey] = [System.Collections.Generic.List[object]]::new() }
+        [void]$findingsByEmail[$findingKey].Add($finding)
+    }
     foreach ($evidenceRow in @($evidenceRows)) {
         $evidenceKey = ([string]$evidenceRow.EmailAddress).ToLowerInvariant()
         if (-not $evidenceByEmail.ContainsKey($evidenceKey)) { $evidenceByEmail[$evidenceKey] = $evidenceRow }
@@ -3515,15 +3697,17 @@ function Invoke-SemrAssessment {
         $email = [string]$row.EmailAddress
         $emailKey = $email.ToLowerInvariant()
         $mailboxReport = if ($evidenceByEmail.ContainsKey($emailKey)) { $evidenceByEmail[$emailKey] } else { $null }
-        $mailFindings = @($findings | Where-Object EmailAddress -EQ $email)
-        $mailboxBlocking = @($mailFindings | Where-Object { $_.IsBlocking -and $_.Result -in @('FAIL', 'UNKNOWN') })
+        $mailFindings = if ($findingsByEmail.ContainsKey($emailKey)) { @($findingsByEmail[$emailKey]) } else { @() }
+        $mailboxBlockingFailed = @($mailFindings | Where-Object { $_.IsBlocking -and $_.Result -eq 'FAIL' })
+        $mailboxBlockingUnknown = @($mailFindings | Where-Object { $_.IsBlocking -and $_.Result -eq 'UNKNOWN' })
+        $mailboxBlocking = @($mailboxBlockingFailed) + @($mailboxBlockingUnknown)
         $blocking = @($mailboxBlocking) + @($globalBlocking)
         $warnings = @($mailFindings | Where-Object Result -EQ 'WARN')
         $unknown = @($mailFindings | Where-Object Result -EQ 'UNKNOWN')
-        $decision = if ($blocking.Count -gt 0) { 'NO-GO' } elseif ($unknown.Count -gt 0 -or $warnings.Count -gt 0 -or $globalUnknown.Count -gt 0 -or $globalWarnings.Count -gt 0) { 'GO-WARNING' } else { 'GO' }
+        $decision = Get-SemrMailboxDecision -MailboxFindings $mailFindings -GlobalFindings @($globalFindings)
         $blockingCodes = @($blocking | ForEach-Object { $_.CheckId } | Sort-Object -Unique)
-        $actionableFindings = if ($blocking.Count -gt 0) { @($blocking) } else { @($unknown) + @($warnings) + @($globalUnknown) + @($globalWarnings) }
-        $recommended = @($actionableFindings | ForEach-Object { $_.RecommendedAction } | Where-Object { $_ } | Sort-Object -Unique)
+        $actionableFindings = @($mailboxBlockingFailed) + @($globalBlockingFailed) + @($mailboxBlockingUnknown) + @($globalBlockingUnknown) + @($warnings) + @($globalWarnings) + @($unknown | Where-Object { -not $_.IsBlocking }) + @($globalUnknown | Where-Object { -not $_.IsBlocking })
+        $recommended = @($actionableFindings | ForEach-Object { $_.RecommendedAction } | Where-Object { $_ } | Select-Object -Unique)
         [void]$summary.Add([pscustomobject][ordered]@{
             RunId = $runId
             BatchName = [System.IO.Path]::GetFileNameWithoutExtension($Batch.Path)
@@ -3555,8 +3739,8 @@ function Invoke-SemrAssessment {
             @{ Expression = {
                 switch ([string]$_.Decision) {
                     'NO-GO' { 0 }
-                    'GO-WARNING' { 1 }
-                    'UNKNOWN' { 2 }
+                    'UNKNOWN' { 1 }
+                    'GO-WARNING' { 2 }
                     'GO' { 3 }
                     default { 4 }
                 }
@@ -3789,8 +3973,8 @@ function New-SemrHtmlReport {
             @{ Expression = {
                 switch ([string]$_.Decision) {
                     'NO-GO' { 0 }
-                    'GO-WARNING' { 1 }
-                    'UNKNOWN' { 2 }
+                    'UNKNOWN' { 1 }
+                    'GO-WARNING' { 2 }
                     'GO' { 3 }
                     default { 4 }
                 }
@@ -3836,7 +4020,7 @@ function New-SemrHtmlReport {
 </style></head><body><main class="wrap"><section class="hero"><h1>Smart Exchange Migration Readiness</h1><div class="sub">Read-only assessment $($Assessment.RunId)</div><div class="overview"><div class="card"><b>Mode</b><div>$(ConvertTo-SemrHtmlText $Assessment.Mode)</div></div><div class="card"><b>Phase</b><div>$(ConvertTo-SemrHtmlText $Assessment.AssessmentPhase)</div></div><div class="card"><b>Endpoint</b><div>$(ConvertTo-SemrHtmlText $endpoint)</div></div><div class="card"><b>Duration</b><div>$duration s</div></div><div class="card go"><b>GO</b><strong>$go</strong></div><div class="card gowarning"><b>GO-WARNING</b><strong>$warning</strong></div><div class="card nogo"><b>NO-GO</b><strong>$noGo</strong></div><div class="card unknown"><b>UNKNOWN</b><strong>$unknown</strong></div></div><div class="note"><b>Tenant synchronization:</b> $(ConvertTo-SemrHtmlText $entra)</div></section>
 <section class="panel"><h2>Mailbox decisions</h2><input id="mailFilter" placeholder="Filter by mailbox, UPN, size, license, decision, code or action"><div class="scroll"><table id="mailTable" class="mailbox-table"><thead><tr><th class="mailbox-col">Mailbox</th><th class="mailbox-col">UPN</th><th>Size</th><th class="license-col">Target license</th><th class="license-col">Assigned licenses</th><th>Decision</th><th>Blocking</th><th>Warnings</th><th>Unknown</th><th>Coverage</th><th class="codes-col">Blocking codes</th><th class="action-col">Recommended action</th></tr></thead><tbody>$($summaryRows -join '')</tbody></table></div></section>
 <details open><summary>Tenant checks</summary><div class="scroll"><table><thead><tr><th>Check</th><th>Category</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($tenantRows -join '')</tbody></table></div></details>
-<details><summary>Blocking and warning details</summary><div class="scroll"><table><thead><tr><th>Mailbox</th><th>Check</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($findingRows -join '')</tbody></table></div></details>
+<details><summary>Blocking, warning and unknown details</summary><div class="scroll"><table><thead><tr><th>Mailbox</th><th>Check</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($findingRows -join '')</tbody></table></div></details>
 <details><summary>CSV source inventory</summary><div class="scroll"><table><thead><tr><th>File</th><th>Status</th><th>Present</th><th>Fresh</th><th>Used</th><th>Age hours</th><th>Path</th></tr></thead><tbody>$($sourceRows -join '')</tbody></table></div></details>
 </main><script>document.getElementById('mailFilter').addEventListener('input',function(){var q=this.value.toLowerCase();document.querySelectorAll('#mailTable tbody tr').forEach(function(r){r.style.display=(r.getAttribute('data-search')||'').toLowerCase().includes(q)?'':'none';});});</script></body></html>
 "@
@@ -3955,8 +4139,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBojr5fI7rGsk2Y
-# HlO4tlNVcLRGA/YIrdWL4y7ZbdgwjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsK5I4CpJuFfie
+# EzKxs+8k4wxXqzlFfughxCVHuSHPy6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4089,31 +4273,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILg25XQikrL+mEQNbS18KT5huGmDwJE8VTo+BVolBjDKMA0GCSqG
-# SIb3DQEBAQUABIIBgBeutRKEYaB+jCZ4kpckQe12UKOB9FQejzciHfQICDzefevg
-# pfauTzR8vGD4fxSV07pI9yJbeCUutKX7x56co5ykg/Lm6yp5IXm9IZLclk6GhRhq
-# B5porLb9bhJ8Hy395tQYRk5U1EdjIybDGsvpgvDGEFR9zPJhdWtwK2ljUk35Q8df
-# RJP2jK2tuanDs7MMpIeJiwteTPGZUuaOs1AhhicPoC0E6unmPnIc0SZbMJ5qL1tD
-# klCcgmklXUQJ9M6V8/Pkn8qanbpqfca8tdmlbh2ynZ/QBeHAQvBIp5jzd1+q5vA5
-# jTdJcupVgaZbqaaBuxtBKRxFK5T0zAbbnHQHuFtodgDS/6I5VwfjNE+w2SwnKBoe
-# jQfmnfdGBPSfW72jDaUHOYZD0rx4XnDQx+QDY1rRLcNNQyebylEEm+YbM3aY1WEl
-# BarkRJD7OgsUmW9KfjAD19BJpOnwP1cSNxsmVbYgzuLK4QRZJhHhhQQErJPfdOQq
-# R4YHjjxaBBEsQedC0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBSt7AKu9TuRUH4HK0X19S8FGmuThz78sxI6nwniX1a4MA0GCSqG
+# SIb3DQEBAQUABIIBgCuVj2Q4lH19RKujU7YcA1B7j9Ebw71xz4tjkuBt4xzNczPi
+# mWUcaDKPRM5IPvg7YSO6dKkdKvilHrJkFLcUXVFhNxrbpjJdiKsYVd8hOWMsekRH
+# 9yFwS6k6eNkJHFAqEA4JWHlpXsLV8I3WonzDbR9N/JAGFXGej7gmBHaHdPiv2JWn
+# NVZKmp62D77TqZ3o05SLfEAIz2tCwkl8w3bQZZFVBmEwF8QIPFy4JMogbpDixhHV
+# +9wuQJveTI9NNAUapTJ/iAuT6jnwvbTjQCQMDjlZp4GPJt065Hei/aQfbVOt8OXu
+# wu5wdqTzk88SIdtca0BcbUVB6gWznp8IHsTx282zLMeK/vPtNO9s/llgsnYVNpKl
+# NYWAdIcvJTPbefn2FfmBtcNIEBaLBuJz7wiHkosKSVF7duBTSeHkwj1NaUxjsr/Z
+# 303TpeTKsynB3Erwwc2srBcLUexkk7ejj91V01PkEQXExPZ4Ee0wexQkN5P/yZB1
+# m2pkNR4tvCW5oJedk6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMDU2
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAOMlhVUJaRv7H0V/7LcEXpUojGJ6BjHXj8wBIE
-# Xz/7gDANBgkqhkiG9w0BAQEFAASCAgCvGz+Xe9apqHxXoFanvOIEkE1uPdtjqu/j
-# Fvu9+nkIQva0jQZIKmFgT092AnWMY9icqdZkZ+z6HnJBZWA8sZLIHQu66VkZioJU
-# MU2xsBpck6ya1iLJh3EEMs6RlDOYQ9xEMr3qT8Nwpqm7tfCwUO8zzoVaTZ9+91j+
-# yw6grUoUdL4PhdRUEBR7gln0Izjf9pUqfRC8dkEPspiORfHTXDDTIzvszp6i+raq
-# 5g4DqyNZE51oDz1HqZNpY8PXzyn6pZZ5NMKe/g+SgG1z9s/JzXe0k295JFja/1XU
-# hYSyPeqKbhJuOMebgQZXg5L7vZr2VxHNdEYdiwM6/B0dU0oG7bp3JLR7HisQDojv
-# G+Wv2iX3+V3MH+bdPclXULGo2+OStt9UegGE1mQ+8/8X8eHI+FqFNxbQFlS8tToV
-# OskRknia4azF5s89rrtRZ3aNozu1f5SasXDCzghIVCfBdBWTiZsbNEpxIuigB3QS
-# 0th4y1aZ78v6IXjwYpnCsV1ekwvf59efYkgDgD/+yLZCrHO/CG8FPHx8Qs0qCScF
-# Dou4wOY5QR5+TIZCz8b1y7D4b/i4TuT1F0v92f8diMd8RdrIRblRbIiafE5wNXZ7
-# WLcKG6ITtqCPC01Havm1s32nW3Sm2bOpt7G6jWGWuan9vIkJx5zWWk3qD9XGvBQy
-# gFaqTfez0w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMjU5
+# NDFaMC8GCSqGSIb3DQEJBDEiBCD5+AvdHy4NN9QjfCelA+CKlnn8rrygMgvvXfTS
+# LDYW+jANBgkqhkiG9w0BAQEFAASCAgCqZON17cleqB2vUzZY/02qwKOxu/VNpcI1
+# idJ+nK3BR0WG/wH4abhJBjbBJyk8Pq+IwadwuVkvH3OCkcIaQ7B+6zV0/UW0LPnb
+# 4LZkOYxFIJO7id8XGoLd0Ybe0jtKiI7c2BZxQvKAcu/XqqoyBhXwpLznFFcxmeSu
+# 2aLSsItz6VQMSDJt4fN7h90XEntHEvmB2Bu9YfBg2ApAGxgSD1DOhuCcf+R90WrS
+# 3V2JnVUXTx/VbGI4/EZW9W8q15XK3l9UzVOWslmVQoi52KEkTaIiXPfKiBf2X2jy
+# mcSZBj0t+FDikN/gV7E9uibUhnpy3JbnjmnpZukSAdknEMMEm5e+EunvMz2pd9dM
+# nGHP6UfgQj/BlgYektwAQvWhMFEkEOCyUU8MmnlLhF2hpnJZ0sUHwLpE1NEFDQaY
+# hYlAAFQP0h8C5jiGEfROJOD28wxBispZxqQ8gN65xDikIHUtPhNCiGYb7kRpxvq2
+# i1Ss0FTR+SjinQivj8opMGlDa7ddYpfY8LBQzwVCeoJ9dQsDsbCalF1hdhtdpFWU
+# gmvhDuzWjk0jFjnsJYX4604aEdyaipxBZFY2j6fFJ10C1IICbQNydGWFw1ilBybn
+# 1KXqyAO5+SMj+7tUMg/GWo5GdPNs9+Rg8GzUE8PDW3XrpCfVC3o1gXkzsImjRj9u
+# X9kfiCDt6w==
 # SIG # End signature block
