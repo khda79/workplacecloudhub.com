@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.6.1'
+$script:SemrVersion = '1.7.0'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ActiveDirectoryDomains = @()
@@ -8,6 +8,8 @@ $script:ActiveDirectoryFallbackUsed = $false
 $script:GraphEvidenceByEmail = @{}
 $script:GraphSubscribedSkus = @()
 $script:GraphSubscribedSkuError = ''
+$script:GraphOrganization = $null
+$script:GraphOrganizationError = ''
 $script:CurrentSourceTimestamps = @{}
 $script:ActiveDirectoryFallbackReasons = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $script:DisabledChecks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -79,7 +81,7 @@ function Get-SemrCheckCatalog {
         @('HYBRID-CERTIFICATE-EXPIRY','Hybrid connectivity','Hybrid certificate expiry','Detect missing or expiring hybrid certificates.'),
         @('HYBRID-ENDPOINT-CAPACITY','Hybrid connectivity','Endpoint capacity','Report active migration load and endpoint limits.'),
         @('HYBRID-AUTODISCOVER-OAUTH','Hybrid connectivity','Autodiscover and OAuth','Validate hybrid organization relationship and OAuth configuration.'),
-        @('ENTRA-CONNECT-SCHEDULER','Entra Connect','Entra Connect health','Require enabled and healthy synchronization.'),
+        @('ENTRA-CONNECT-SCHEDULER','Microsoft Entra','Tenant synchronization health','Require enabled and recent tenant synchronization.'),
         @('KNOWN-ENHANCED-RESTORE','Known errors','Enhanced Restore risk','Document the known Enhanced Restore cross-organization move risk.')
     )
     return @($definitions | ForEach-Object {
@@ -630,6 +632,9 @@ function Connect-SemrMicrosoftGraph {
             if ($key) { $script:GraphEvidenceByEmail[$key] = $entry }
         }
         $script:GraphSubscribedSkus = @($workerResult.SubscribedSkus)
+        $script:GraphOrganization = $workerResult.Organization
+        $script:GraphOrganizationError = [string]$workerResult.OrganizationError
+        $script:ConnectionState.EntraConnect = $null -ne $script:GraphOrganization
         $script:GraphSubscribedSkuError = [string]$workerResult.SubscribedSkuError
         $script:ConnectionState.MicrosoftGraph = $true
         return Get-SemrConnectionState
@@ -663,6 +668,8 @@ function Disconnect-SemrSession {
     $script:GraphEvidenceByEmail = @{}
     $script:GraphSubscribedSkus = @()
     $script:GraphSubscribedSkuError = ''
+    $script:GraphOrganization = $null
+    $script:GraphOrganizationError = ''
 }
 
 function Initialize-SemrLiveSourceConnections {
@@ -1063,7 +1070,7 @@ function Get-SemrCsvSourceInventory {
     $definitions = @(
         [pscustomobject]@{ FileName = 'AD_Users_AllDomains.csv'; Category = 'Active Directory'; ExpectedUse = 'Live fallback / CacheOnly'; SourceName = 'ActiveDirectory' },
         [pscustomobject]@{ FileName = 'Exchange_OnPrem_Mailboxes_AllDomains.csv'; Category = 'Exchange on-premises'; ExpectedUse = 'Live fallback / CacheOnly'; SourceName = 'ExchangeOnPremises' },
-        [pscustomobject]@{ FileName = 'M365_Entra_AzureADConnect_SyncHealth.csv'; Category = 'Microsoft Entra Connect'; ExpectedUse = 'Live fallback / CacheOnly'; SourceName = 'EntraConnect' },
+        [pscustomobject]@{ FileName = 'M365_Entra_AzureADConnect_SyncHealth.csv'; Category = 'Microsoft Entra synchronization'; ExpectedUse = 'Live context only / CacheOnly evidence'; SourceName = 'EntraConnect' },
         [pscustomobject]@{ FileName = 'M365_Users_Active.csv'; Category = 'Microsoft Graph users'; ExpectedUse = 'CacheOnly'; SourceName = 'CloudCacheOnly' },
         [pscustomobject]@{ FileName = 'Exchange_EXO_Mailboxes_AllDomains.csv'; Category = 'Exchange Online recipients'; ExpectedUse = 'CacheOnly'; SourceName = 'CloudCacheOnly' },
         [pscustomobject]@{ FileName = 'Exchange_EXO_MigrationJobs.csv'; Category = 'Exchange Online migration jobs'; ExpectedUse = 'CacheOnly'; SourceName = 'CloudCacheOnly'; CheckIds = @('EXO-EXISTING-MOVE','MOVE-HISTORY') },
@@ -1094,6 +1101,10 @@ function Get-SemrCsvSourceInventory {
         }
         elseif ($definition.SourceName -eq 'CloudCacheOnly') {
             $status = 'Not used - Live EXO/Graph source'
+        }
+        elseif ($definition.SourceName -eq 'EntraConnect') {
+            $graphAuthoritative = $AssessmentCompleted -and $EntraConnect -and [string]$EntraConnect.Source -notmatch 'CSV'
+            $status = if ($graphAuthoritative) { 'Not used - Live Graph authoritative' } elseif (-not $state.Present) { 'Context only - Missing' } elseif (-not $state.Fresh) { 'Context only - Stale' } else { 'Context only - Available' }
         }
         elseif (-not $AssessmentCompleted) {
             $status = if (-not $state.Present) { 'Fallback missing' } elseif (-not $state.Fresh) { 'Fallback stale' } else { 'Fallback available' }
@@ -2496,7 +2507,7 @@ function Add-SemrFlowAndSyncFindings {
         $timestampOld=$lastSync -and $lastSync -lt (Get-Date).AddHours(-24)
         $syncEnabled=ConvertTo-SemrBoolean (Get-SemrPropertyValue $user[0] @('OnPremisesSyncEnabled') $false)
         $syncError=$errors.Count -gt 0 -or ($syncEnabled -and [string]::IsNullOrWhiteSpace($anchor))
-        Add-SemrFinding $Findings ($Base+@{CheckId='ENTRA-OBJECT-SYNC-ERROR';Category='MicrosoftGraph';Severity=if($syncError){'Critical'}else{'Information'};Result=if($syncError){'FAIL'}else{'PASS'};IsBlocking=$syncError;ObservedValue="ProvisioningErrors=$($errors.Count); SyncEnabled=$syncEnabled; ImmutableIdPresent=$(-not [string]::IsNullOrWhiteSpace($anchor)); ObjectLastSync=$lastSyncText";ExpectedValue='No provisioning errors and an identity anchor for synchronized users';EvidenceSource=$graphSource;Message=if($errors.Count){'Microsoft Entra reports provisioning errors.'}elseif($syncEnabled -and -not $anchor){'The synchronized identity anchor is missing.'}elseif($timestampOld){'The per-object synchronization timestamp is older than 24 hours; it is informational and is not used as a proxy for global Entra Connect scheduler health.'}else{'No object-level synchronization issue was detected.'};RecommendedAction=if($syncError){'Resolve Entra Connect export errors and identity anchoring.'}elseif($timestampOld){'Use the ENTRA-CONNECT-SCHEDULER result to assess current synchronization service health.'}else{''}})
+        Add-SemrFinding $Findings ($Base+@{CheckId='ENTRA-OBJECT-SYNC-ERROR';Category='MicrosoftGraph';Severity=if($syncError){'Critical'}else{'Information'};Result=if($syncError){'FAIL'}else{'PASS'};IsBlocking=$syncError;ObservedValue="ProvisioningErrors=$($errors.Count); SyncEnabled=$syncEnabled; ImmutableIdPresent=$(-not [string]::IsNullOrWhiteSpace($anchor)); ObjectLastSync=$lastSyncText";ExpectedValue='No provisioning errors and an identity anchor for synchronized users';EvidenceSource=$graphSource;Message=if($errors.Count){'Microsoft Entra reports provisioning errors.'}elseif($syncEnabled -and -not $anchor){'The synchronized identity anchor is missing.'}elseif($timestampOld){'The per-object synchronization timestamp is older than 24 hours; it is informational and is not used as a proxy for tenant-wide synchronization freshness.'}else{'No object-level synchronization issue was detected.'};RecommendedAction=if($syncError){'Resolve Entra Connect export errors and identity anchoring.'}elseif($timestampOld){'Use the ENTRA-CONNECT-SCHEDULER result to assess current synchronization service health.'}else{''}})
     }
 }
 
@@ -2712,117 +2723,78 @@ function Test-SemrEntraConnect {
     param([System.Collections.IDictionary]$Config)
 
     $mode = if ($Config -and $Config.Contains('Mode')) { [string]$Config['Mode'] } else { 'Live' }
-    $liveFailure = ''
     $maximumLastSyncAgeMinutes = if ($Config -and $Config.Contains('EntraConnectHealth')) { [double]$Config['EntraConnectHealth']['MaximumLastSyncAgeMinutes'] } else { 120.0 }
-    if ($mode -eq 'Live') {
-        if (-not (Test-SemrCommand -Name 'Get-ADSyncScheduler')) {
-            try {
-                Import-Module ADSync -ErrorAction Stop
-            }
-            catch {
-                if ($PSVersionTable.PSEdition -eq 'Core') {
-                    try { Import-Module ADSync -UseWindowsPowerShell -ErrorAction Stop } catch { $liveFailure = $_.Exception.Message }
-                }
-                else { $liveFailure = $_.Exception.Message }
-            }
-        }
-
-        if (Test-SemrCommand -Name 'Get-ADSyncScheduler') {
-            try {
-                $scheduler = Get-ADSyncScheduler -ErrorAction Stop
-                $runStatus = if (Test-SemrCommand -Name 'Get-ADSyncConnectorRunStatus') {
-                    @(Get-ADSyncConnectorRunStatus -ErrorAction Stop | Select-Object ConnectorName, RunState)
-                }
-                else { @() }
-                $lastSyncValue = Get-SemrPropertyValue -InputObject $scheduler -Names @('LastSyncCycleEndTimeInUTC','LastSyncCycleStartTimeInUTC') -Default $null
-                $lastSyncDateTimeUtc = if ($lastSyncValue) {
+    $cacheResult = [ordered]@{
+        Available = $false; Authoritative = $mode -eq 'CacheOnly'; ContextualCacheAvailable = $false
+        Server = 'Tenant CSV cache'; Source = if ($mode -eq 'CacheOnly') { 'Tenant CSV cache' } else { 'Tenant CSV cache (context only)' }; SourceTimestamp = $null
+        SyncCycleEnabled = $null; SchedulerSuspended = $null; StagingModeEnabled = $null; NextSyncCycleStartTimeInUTC = $null; ConnectorRunStatus = ''
+        LastSyncDateTimeUtc = $null; LastSyncAgeMinutes = $null; LastSyncKnown = $false; LastSyncFresh = $false; Message = ''
+    }
+    if ($script:InventoryContext -and $script:InventoryContext.EntraConnectAvailable) {
+        $rows = @($script:InventoryContext.EntraRows)
+        $syncEnabledRow = @($rows | Where-Object CheckName -EQ 'SyncEnabled' | Select-Object -First 1)
+        $lastSyncAgeRow = @($rows | Where-Object CheckName -EQ 'LastSyncAge' | Select-Object -First 1)
+        if ($syncEnabledRow.Count -eq 1 -and $lastSyncAgeRow.Count -eq 1) {
+            $healthOk = @($rows | Where-Object { [string]$_.Status -ne 'OK' }).Count -eq 0
+            $cacheResult.Available = $true; $cacheResult.ContextualCacheAvailable = $true
+            $cacheResult.SourceTimestamp = $script:InventoryContext.EntraTimestamp
+            $cacheResult.SyncCycleEnabled = ConvertTo-SemrBoolean -Value $syncEnabledRow[0].Value
+            $cacheResult.SchedulerSuspended = -not $healthOk
+            $cacheResult.NextSyncCycleStartTimeInUTC = Get-SemrPropertyValue -InputObject $lastSyncAgeRow[0] -Names @('NextSyncCycleStartTimeInUTC') -Default $null
+            $cacheResult.ConnectorRunStatus = ($rows | Select-Object CheckName, Status, Value, Detail | ConvertTo-Json -Compress)
+            $lastSyncValue = Get-SemrPropertyValue -InputObject $lastSyncAgeRow[0] -Names @('LastSyncDateTimeUtc','LastSyncDateTime') -Default $null
+            if ($lastSyncValue) {
+                try {
                     $parsedLastSync = [datetime]$lastSyncValue
-                    if ($parsedLastSync.Kind -eq [DateTimeKind]::Unspecified) {
-                        [datetime]::SpecifyKind($parsedLastSync, [DateTimeKind]::Utc)
-                    }
-                    else { $parsedLastSync.ToUniversalTime() }
+                    $cacheResult.LastSyncDateTimeUtc = if ($parsedLastSync.Kind -eq [DateTimeKind]::Unspecified) { [datetime]::SpecifyKind($parsedLastSync, [DateTimeKind]::Utc) } else { $parsedLastSync.ToUniversalTime() }
+                    $cacheResult.LastSyncAgeMinutes = [math]::Round(((Get-Date).ToUniversalTime() - $cacheResult.LastSyncDateTimeUtc).TotalMinutes, 1)
+                    $cacheResult.LastSyncKnown = $true
+                    $cacheResult.LastSyncFresh = $maximumLastSyncAgeMinutes -le 0 -or $cacheResult.LastSyncAgeMinutes -le $maximumLastSyncAgeMinutes
                 }
-                else { $null }
-                $lastSyncAgeMinutes = if ($lastSyncDateTimeUtc) { [math]::Round(((Get-Date).ToUniversalTime() - $lastSyncDateTimeUtc).TotalMinutes, 1) } else { $null }
-                $lastSyncFresh = $null -ne $lastSyncAgeMinutes -and ($maximumLastSyncAgeMinutes -le 0 -or $lastSyncAgeMinutes -le $maximumLastSyncAgeMinutes)
-                $script:ConnectionState.EntraConnect = $true
-                return [pscustomobject][ordered]@{
-                    Available = $true
-                    Server = $env:COMPUTERNAME
-                    Source = 'Live Microsoft Entra Connect (local ADSync)'
-                    SourceTimestamp = Get-Date
-                    SyncCycleEnabled = [bool]$scheduler.SyncCycleEnabled
-                    SchedulerSuspended = [bool]$scheduler.SchedulerSuspended
-                    StagingModeEnabled = [bool]$scheduler.StagingModeEnabled
-                    NextSyncCycleStartTimeInUTC = $scheduler.NextSyncCycleStartTimeInUTC
-                    LastSyncDateTimeUtc = $lastSyncDateTimeUtc
-                    LastSyncAgeMinutes = $lastSyncAgeMinutes
-                    LastSyncFresh = $lastSyncFresh
-                    ConnectorRunStatus = ($runStatus | ConvertTo-Json -Compress)
-                    Message = "Live Microsoft Entra Connect scheduler state collected from local ADSync cmdlets; last sync age=$lastSyncAgeMinutes minute(s), maximum=$maximumLastSyncAgeMinutes."
-                }
+                catch { $null = $_ }
             }
-            catch { $liveFailure = $_.Exception.Message }
+            $snapshotAgeHours = if ($script:InventoryContext.EntraTimestamp) { [math]::Round(((Get-Date) - [datetime]$script:InventoryContext.EntraTimestamp).TotalHours, 2) } else { $null }
+            $cacheResult.Message = "CSV snapshot age=$snapshotAgeHours hour(s); SyncEnabled=$($cacheResult.SyncCycleEnabled); SyncHealthOK=$healthOk; last sync age=$($cacheResult.LastSyncAgeMinutes) minute(s)."
         }
-        elseif (-not $liveFailure) {
-            $liveFailure = 'ADSync cmdlets are not available on this computer.'
+        else { $cacheResult.Message = 'Tenant sync-health CSV is missing SyncEnabled or LastSyncAge.' }
+    }
+    else { $cacheResult.Message = if ($script:InventoryContext) { [string]$script:InventoryContext.EntraConnectMessage } else { 'Tenant CSV cache context is not initialized.' } }
+    if ($mode -eq 'CacheOnly') { return [pscustomobject]$cacheResult }
+
+    $graphSource = 'Live Microsoft Graph organization'
+    if (-not $script:ConnectionState.MicrosoftGraph -or -not $script:GraphOrganization) {
+        $graphError = if ($script:GraphOrganizationError) { $script:GraphOrganizationError } elseif (-not $script:ConnectionState.MicrosoftGraph) { 'Microsoft Graph evidence has not been collected.' } else { 'Microsoft Graph returned no organization object.' }
+        return [pscustomobject][ordered]@{
+            Available = $false; Authoritative = $true; ContextualCacheAvailable = [bool]$cacheResult.ContextualCacheAvailable
+            Server = 'Microsoft Graph'; Source = $graphSource; SourceTimestamp = $null
+            SyncCycleEnabled = $null; SchedulerSuspended = $null; StagingModeEnabled = $null; NextSyncCycleStartTimeInUTC = $null; ConnectorRunStatus = $cacheResult.ConnectorRunStatus
+            LastSyncDateTimeUtc = $null; LastSyncAgeMinutes = $null; LastSyncKnown = $false; LastSyncFresh = $false
+            Message = "Authoritative tenant synchronization health is unavailable from Microsoft Graph: $graphError Contextual CSV evidence: $($cacheResult.Message)"
         }
     }
-
-    $result = [ordered]@{
-        Available = $false
-        Server = 'CSV cache'
-        Source = if ($mode -eq 'CacheOnly') { 'Tenant CSV cache' } else { 'Tenant CSV cache fallback' }
-        SourceTimestamp = $null
-        SyncCycleEnabled = $null
-        SchedulerSuspended = $null
-        StagingModeEnabled = $null
-        NextSyncCycleStartTimeInUTC = $null
-        ConnectorRunStatus = ''
-        LastSyncDateTimeUtc = $null
-        LastSyncAgeMinutes = $null
-        LastSyncFresh = $false
-        Message = ''
-    }
-    if (-not $script:InventoryContext -or -not $script:InventoryContext.EntraConnectAvailable) {
-        $cacheMessage = if ($script:InventoryContext) { [string]$script:InventoryContext.EntraConnectMessage } else { 'Tenant CSV cache context is not initialized.' }
-        $result.Message = if ($mode -eq 'Live' -and $liveFailure) { "Live Entra Connect unavailable ($liveFailure). CSV fallback unavailable: $cacheMessage" } else { $cacheMessage }
-        return [pscustomobject]$result
-    }
-
-    $rows = @($script:InventoryContext.EntraRows)
-    $syncEnabledRow = @($rows | Where-Object CheckName -EQ 'SyncEnabled' | Select-Object -First 1)
-    $lastSyncAgeRow = @($rows | Where-Object CheckName -EQ 'LastSyncAge' | Select-Object -First 1)
-    if ($syncEnabledRow.Count -ne 1 -or $lastSyncAgeRow.Count -ne 1) {
-        $result.Message = 'Tenant Entra sync-health cache is missing SyncEnabled or LastSyncAge.'
-        return [pscustomobject]$result
-    }
-    $healthOk = @($rows | Where-Object { [string]$_.Status -ne 'OK' }).Count -eq 0
-    $result.Available = $true
-    $result.SourceTimestamp = $script:InventoryContext.EntraTimestamp
-    $result.SyncCycleEnabled = ConvertTo-SemrBoolean -Value $syncEnabledRow[0].Value
-    $result.SchedulerSuspended = -not $healthOk
-    $result.NextSyncCycleStartTimeInUTC = Get-SemrPropertyValue -InputObject $lastSyncAgeRow[0] -Names @('NextSyncCycleStartTimeInUTC') -Default $null
-    $result.ConnectorRunStatus = ($rows | Select-Object CheckName, Status, Value, Detail | ConvertTo-Json -Compress)
-    $lastSyncDescription = [string](Get-SemrPropertyValue -InputObject $lastSyncAgeRow[0] -Names @('Detail') -Default 'Last synchronization timestamp unavailable.')
-    $lastSyncValue = Get-SemrPropertyValue -InputObject $lastSyncAgeRow[0] -Names @('LastSyncDateTimeUtc','LastSyncDateTime') -Default $null
+    $organization = $script:GraphOrganization
+    $syncEnabledValue = Get-SemrPropertyValue -InputObject $organization -Names @('OnPremisesSyncEnabled') -Default $null
+    $syncEnabled = if ($null -eq $syncEnabledValue) { $null } else { [bool]$syncEnabledValue }
+    $lastSyncValue = Get-SemrPropertyValue -InputObject $organization -Names @('OnPremisesLastSyncDateTime') -Default $null
+    $lastSyncDateTimeUtc = $null
     if ($lastSyncValue) {
         try {
             $parsedLastSync = [datetime]$lastSyncValue
-            $result.LastSyncDateTimeUtc = if ($parsedLastSync.Kind -eq [DateTimeKind]::Unspecified) {
-                [datetime]::SpecifyKind($parsedLastSync, [DateTimeKind]::Utc)
-            }
-            else { $parsedLastSync.ToUniversalTime() }
-            $result.LastSyncAgeMinutes = [math]::Round(((Get-Date).ToUniversalTime() - $result.LastSyncDateTimeUtc).TotalMinutes, 1)
-            $result.LastSyncFresh = $maximumLastSyncAgeMinutes -le 0 -or $result.LastSyncAgeMinutes -le $maximumLastSyncAgeMinutes
-            $lastSyncDescription = "Last sync age $($result.LastSyncAgeMinutes) minute(s), maximum $maximumLastSyncAgeMinutes, calculated from $lastSyncValue."
+            $lastSyncDateTimeUtc = if ($parsedLastSync.Kind -eq [DateTimeKind]::Unspecified) { [datetime]::SpecifyKind($parsedLastSync, [DateTimeKind]::Utc) } else { $parsedLastSync.ToUniversalTime() }
         }
-        catch { $null = $_ }
+        catch { $lastSyncDateTimeUtc = $null }
     }
-    $snapshotAgeHours = if ($script:InventoryContext.EntraTimestamp) { [math]::Round(((Get-Date) - [datetime]$script:InventoryContext.EntraTimestamp).TotalHours, 2) } else { $null }
-    $cacheSummary = "CSV cache age=$snapshotAgeHours hour(s); SyncEnabled=$($result.SyncCycleEnabled); SyncHealthOK=$healthOk; $lastSyncDescription"
-    $result.Message = if ($mode -eq 'Live' -and $liveFailure) { "Live Entra Connect unavailable ($liveFailure). $cacheSummary" } else { $cacheSummary }
-    return [pscustomobject]$result
+    $lastSyncAgeMinutes = if ($lastSyncDateTimeUtc) { [math]::Round(((Get-Date).ToUniversalTime() - $lastSyncDateTimeUtc).TotalMinutes, 1) } else { $null }
+    $lastSyncFresh = $null -ne $lastSyncAgeMinutes -and ($maximumLastSyncAgeMinutes -le 0 -or $lastSyncAgeMinutes -le $maximumLastSyncAgeMinutes)
+    $sourceTimestamp = Get-SemrPropertyValue -InputObject $organization -Names @('CollectedAt') -Default (Get-Date)
+    $script:ConnectionState.EntraConnect = $true
+    return [pscustomobject][ordered]@{
+        Available = $true; Authoritative = $true; ContextualCacheAvailable = [bool]$cacheResult.ContextualCacheAvailable
+        Server = 'Microsoft Graph'; Source = $graphSource; SourceTimestamp = $sourceTimestamp
+        SyncCycleEnabled = $syncEnabled; SchedulerSuspended = $null; StagingModeEnabled = $null; NextSyncCycleStartTimeInUTC = $null; ConnectorRunStatus = ''
+        LastSyncDateTimeUtc = $lastSyncDateTimeUtc; LastSyncAgeMinutes = $lastSyncAgeMinutes; LastSyncKnown = $null -ne $lastSyncDateTimeUtc; LastSyncFresh = $lastSyncFresh
+        Message = "Tenant organization synchronization state collected from Microsoft Graph; OnPremisesSyncEnabled=$syncEnabled; last sync UTC=$lastSyncDateTimeUtc; age=$lastSyncAgeMinutes minute(s); maximum=$maximumLastSyncAgeMinutes."
+    }
 }
 function Invoke-SemrAssessment {
     [CmdletBinding()]
@@ -2836,6 +2808,7 @@ function Invoke-SemrAssessment {
     Set-SemrAssessmentCheckOptions -Config $Config
     $script:ActiveDirectoryFallbackReasons.Clear()
     $script:ActiveDirectoryFallbackUsed = $false
+    $startedAt = Get-Date
     $runId = "SEMR-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
     $findings = [System.Collections.Generic.List[object]]::new()
     $globalFindings = [System.Collections.Generic.List[object]]::new()
@@ -2862,7 +2835,7 @@ function Invoke-SemrAssessment {
     $hybrid = Test-SemrHybridReadiness -Config $Config
     if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting accepted domains and advanced identity evidence; please wait' }
     $acceptedDomains = Get-SemrAcceptedDomainEvidence
-    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Checking Microsoft Entra Connect health; please wait' }
+    if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Checking latest tenant synchronization through Microsoft Graph; please wait' }
     $entraConnect = Test-SemrEntraConnect -Config $Config
     $csvSources = @()
     $licenseCapacityCache = @{}
@@ -3258,15 +3231,21 @@ function Invoke-SemrAssessment {
             CheckId='HYBRID-AUTODISCOVER-OAUTH';Category='HybridConnectivity';Severity=if($hybrid.OAuthHealthy){'Information'}else{'Warning'};Result=if(-not $hybrid.OAuthAvailable){'UNKNOWN'}elseif($hybrid.OAuthHealthy){'PASS'}else{'WARN'};IsBlocking=$false
             ObservedValue=$hybrid.OAuthMessage;ExpectedValue='OAuth enabled and an enabled intra-organization connector for hybrid collaboration features';EvidenceSource=$hybrid.OAuthSource;SourceTimestamp=$hybrid.OAuthSourceTimestamp;Message=if($hybrid.OAuthHealthy){$hybrid.OAuthMessage}else{"$($hybrid.OAuthMessage) This does not block ExchangeRemoteMove migrations."};RecommendedAction=if(-not $hybrid.OAuthAvailable){'Validate hybrid OAuth and Autodiscover for free/busy and other hybrid collaboration features.'}elseif(-not $hybrid.OAuthHealthy){'Repair hybrid OAuth and the intra-organization connector for hybrid collaboration features; migration readiness remains non-blocking.'}else{''}
         })
-        $entraCoreHealthy = $entraConnect.Available -and $entraConnect.SyncCycleEnabled -and -not $entraConnect.SchedulerSuspended
-        $entraLastSyncStale = $entraCoreHealthy -and -not [bool]$entraConnect.LastSyncFresh
-        $entraResult = if (-not $entraConnect.Available) { 'UNKNOWN' } elseif (-not $entraCoreHealthy) { 'FAIL' } elseif ($entraLastSyncStale) { 'WARN' } else { 'PASS' }
+        $entraSyncEnabledKnown = $null -ne $entraConnect.SyncCycleEnabled
+        $entraLastSyncKnown = $entraConnect.PSObject.Properties['LastSyncKnown'] -and [bool]$entraConnect.LastSyncKnown
+        $entraResult = if (-not $entraConnect.Available) { 'UNKNOWN' }
+            elseif (-not $entraSyncEnabledKnown) { 'UNKNOWN' }
+            elseif (-not [bool]$entraConnect.SyncCycleEnabled) { 'FAIL' }
+            elseif ($entraConnect.SchedulerSuspended -eq $true) { 'FAIL' }
+            elseif (-not $entraLastSyncKnown) { 'UNKNOWN' }
+            elseif (-not [bool]$entraConnect.LastSyncFresh) { 'FAIL' }
+            else { 'PASS' }
         Add-SemrFinding -List $globalFindings -Parameters ($globalBase + @{
-            CheckId = 'ENTRA-CONNECT-SCHEDULER'; Category = 'EntraConnect'; Severity = if ($entraResult -eq 'FAIL' -or $entraResult -eq 'UNKNOWN') { 'Critical' } elseif ($entraResult -eq 'WARN') { 'Warning' } else { 'Information' }
-            Result = $entraResult; IsBlocking = $entraResult -in @('FAIL','UNKNOWN')
-            ObservedValue = $entraConnect.Message; ExpectedValue = "Synchronization enabled and healthy; last sync no older than $([double]$Config['EntraConnectHealth']['MaximumLastSyncAgeMinutes']) minutes"; EvidenceSource = [string]$entraConnect.Source; SourceTimestamp = $entraConnect.SourceTimestamp
-            Message = if (-not $entraConnect.Available) { 'Microsoft Entra Connect sync health could not be collected live or from the tenant cache.' } elseif ($entraLastSyncStale) { "The Entra Connect scheduler is enabled, but the last synchronization is $($entraConnect.LastSyncAgeMinutes) minutes old." } elseif ($entraCoreHealthy) { "Microsoft Entra Connect scheduler and last-sync freshness are healthy from $($entraConnect.Source)." } else { 'Microsoft Entra Connect synchronization is disabled or suspended.' }
-            RecommendedAction = if (-not $entraConnect.Available) { 'Run on an Entra Connect server with ADSync cmdlets or refresh M365_Entra_AzureADConnect_SyncHealth.csv, then rerun.' } elseif ($entraLastSyncStale) { 'Investigate the synchronization backlog or scheduler history before starting another migration wave.' } elseif (-not $entraCoreHealthy) { 'Restore the Entra Connect scheduler and resolve synchronization health failures before migration.' } else { '' }
+            CheckId = 'ENTRA-CONNECT-SCHEDULER'; Category = 'MicrosoftEntra'; Severity = if ($entraResult -in @('FAIL','UNKNOWN')) { 'Critical' } else { 'Information' }
+            Result = $entraResult; IsBlocking = $entraResult -ne 'PASS'
+            ObservedValue = $entraConnect.Message; ExpectedValue = "Tenant synchronization enabled; last sync no older than $([double]$Config['EntraConnectHealth']['MaximumLastSyncAgeMinutes']) minutes"; EvidenceSource = [string]$entraConnect.Source; SourceTimestamp = $entraConnect.SourceTimestamp
+            Message = if (-not $entraConnect.Available) { 'Authoritative tenant synchronization health could not be collected from Microsoft Graph.' } elseif (-not $entraSyncEnabledKnown) { 'Microsoft Graph did not return the tenant synchronization-enabled state.' } elseif (-not [bool]$entraConnect.SyncCycleEnabled) { 'On-premises directory synchronization is disabled for the tenant.' } elseif ($entraConnect.SchedulerSuspended -eq $true) { 'The cached synchronization-health snapshot reports a suspended or unhealthy scheduler.' } elseif (-not $entraLastSyncKnown) { 'The last tenant synchronization timestamp is unavailable.' } elseif (-not [bool]$entraConnect.LastSyncFresh) { "The last tenant synchronization is $($entraConnect.LastSyncAgeMinutes) minutes old, beyond the configured threshold." } else { "Tenant synchronization is enabled and recent according to $($entraConnect.Source)." }
+            RecommendedAction = if (-not $entraConnect.Available) { 'Restore Microsoft Graph organization read access and rerun in Live mode; cached evidence is contextual only.' } elseif (-not $entraSyncEnabledKnown -or -not $entraLastSyncKnown) { 'Verify the tenant synchronization state in Microsoft Entra and rerun after the next successful synchronization.' } elseif (-not [bool]$entraConnect.SyncCycleEnabled -or $entraConnect.SchedulerSuspended -eq $true) { 'Restore tenant directory synchronization before migration.' } elseif (-not [bool]$entraConnect.LastSyncFresh) { 'Investigate the synchronization backlog or connector health before starting the migration wave.' } else { '' }
         })
         }
         Add-SemrFinding -List $findings -Parameters ($base + @{
@@ -3334,6 +3313,10 @@ function Invoke-SemrAssessment {
     }
 
     return [pscustomobject]@{
+        Mode = [string]$Config['Mode']
+        AssessmentPhase = [string]$Config['AssessmentPhase']
+        StartedAt = $startedAt
+        CompletedAt = Get-Date
         RunId = $runId
         Batch = $Batch
         Summary = @($summary)
@@ -3370,11 +3353,218 @@ function Export-SemrCsvFile {
     $header = ($Columns | ForEach-Object { '"{0}"' -f ($_ -replace '"', '""') }) -join ','
     Set-Content -LiteralPath $Path -Value $header -Encoding utf8
 }
+function ConvertTo-SemrXmlText {
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return '' }
+    $text = ([string]$Value) -replace '[^\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD]', ''
+    return [System.Security.SecurityElement]::Escape($text)
+}
+
+function ConvertTo-SemrHtmlText {
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return '' }
+    return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+function Get-SemrExcelColumnName {
+    param([Parameter(Mandatory)][int]$Index)
+    $name = ''
+    $value = $Index
+    while ($value -gt 0) {
+        $value--
+        $name = [char](65 + ($value % 26)) + $name
+        $value = [math]::Floor($value / 26)
+    }
+    return $name
+}
+
+function Write-SemrZipEntry {
+    param(
+        [Parameter(Mandatory)][System.IO.Compression.ZipArchive]$Archive,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content
+    )
+    $entry = $Archive.CreateEntry($Name, [System.IO.Compression.CompressionLevel]::Optimal)
+    $stream = $entry.Open()
+    $writer = [IO.StreamWriter]::new($stream, [Text.UTF8Encoding]::new($false))
+    try { $writer.Write($Content) }
+    finally { $writer.Dispose(); $stream.Dispose() }
+}
+
+function ConvertTo-SemrWorksheetXml {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Data,
+        [Parameter(Mandatory)][string[]]$Columns
+    )
+    $rows = @($Data)
+    $lastColumn = Get-SemrExcelColumnName -Index ([math]::Max(1, $Columns.Count))
+    $lastRow = [math]::Max(1, $rows.Count + 1)
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
+    [void]$builder.Append('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:')
+    [void]$builder.Append($lastColumn).Append($lastRow).Append('"/><sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>')
+    for ($columnIndex = 0; $columnIndex -lt $Columns.Count; $columnIndex++) {
+        $width = [math]::Min(52, [math]::Max(11, ([string]$Columns[$columnIndex]).Length + 2))
+        foreach ($row in $rows | Select-Object -First 250) {
+            $property = $row.PSObject.Properties[$Columns[$columnIndex]]
+            $length = if ($property -and $null -ne $property.Value) { ([string]$property.Value).Length + 2 } else { 0 }
+            if ($length -gt $width) { $width = [math]::Min(52, $length) }
+        }
+        $position = $columnIndex + 1
+        [void]$builder.Append('<col min="').Append($position).Append('" max="').Append($position).Append('" width="').Append($width.ToString('0.##',[Globalization.CultureInfo]::InvariantCulture)).Append('" customWidth="1"/>')
+    }
+    [void]$builder.Append('</cols><sheetData><row r="1" ht="24" customHeight="1">')
+    for ($columnIndex = 0; $columnIndex -lt $Columns.Count; $columnIndex++) {
+        $cellReference = "$(Get-SemrExcelColumnName -Index ($columnIndex + 1))1"
+        [void]$builder.Append('<c r="').Append($cellReference).Append('" t="inlineStr" s="1"><is><t xml:space="preserve">').Append((ConvertTo-SemrXmlText $Columns[$columnIndex])).Append('</t></is></c>')
+    }
+    [void]$builder.Append('</row>')
+    for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
+        $excelRow = $rowIndex + 2
+        [void]$builder.Append('<row r="').Append($excelRow).Append('">')
+        for ($columnIndex = 0; $columnIndex -lt $Columns.Count; $columnIndex++) {
+            $columnName = $Columns[$columnIndex]
+            $property = $rows[$rowIndex].PSObject.Properties[$columnName]
+            $value = if ($property) { $property.Value } else { $null }
+            $cellReference = "$(Get-SemrExcelColumnName -Index ($columnIndex + 1))$excelRow"
+            $textValue = if ($null -eq $value) { '' } else { [string]$value }
+            $style = switch -Regex ($textValue.ToUpperInvariant()) {
+                '^(GO|PASS|SUCCESS|TRUE)$' { 2; break }
+                '^(GO-WARNING|WARN|WARNING)$' { 3; break }
+                '^(NO-GO|FAIL|FAILED|FALSE)$' { 4; break }
+                '^UNKNOWN$' { 5; break }
+                default { if ($textValue.Length -gt 60) { 6 } else { 0 } }
+            }
+            $numericTypes = @([byte],[sbyte],[int16],[uint16],[int32],[uint32],[int64],[uint64],[single],[double],[decimal])
+            $isNumeric = $false
+            foreach ($numericType in $numericTypes) { if ($value -is $numericType) { $isNumeric = $true; break } }
+            if ($isNumeric) {
+                $number = [Convert]::ToString($value, [Globalization.CultureInfo]::InvariantCulture)
+                [void]$builder.Append('<c r="').Append($cellReference).Append('" s="').Append($style).Append('"><v>').Append($number).Append('</v></c>')
+            }
+            elseif ($value -is [bool]) {
+                [void]$builder.Append('<c r="').Append($cellReference).Append('" t="inlineStr" s="').Append($style).Append('"><is><t>').Append($(if ($value) { 'TRUE' } else { 'FALSE' })).Append('</t></is></c>')
+            }
+            else {
+                [void]$builder.Append('<c r="').Append($cellReference).Append('" t="inlineStr" s="').Append($style).Append('"><is><t xml:space="preserve">').Append((ConvertTo-SemrXmlText $textValue)).Append('</t></is></c>')
+            }
+        }
+        [void]$builder.Append('</row>')
+    }
+    [void]$builder.Append('</sheetData><autoFilter ref="A1:').Append($lastColumn).Append($lastRow).Append('"/><pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>')
+    return $builder.ToString()
+}
+
+function New-SemrExcelReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Assessment,
+        [Parameter(Mandatory)][string]$Path,
+        [string]$RunFolder = ''
+    )
+    Add-Type -AssemblyName System.IO.Compression -ErrorAction SilentlyContinue
+    $sheets = @(
+        [pscustomobject]@{ Name='Summary'; Data=@($Assessment.Summary); Columns=@('RunId','BatchName','AssessmentPhase','EmailAddress','Decision','BlockingCount','MailboxBlockingCount','GlobalBlockingCount','WarningCount','MailboxWarningCount','GlobalWarningCount','UnknownCount','MailboxUnknownCount','GlobalUnknownCount','DataCoverage','BlockingCodes','RecommendedAction','CheckedAt') },
+        [pscustomobject]@{ Name='Mailbox Findings'; Data=@($Assessment.Findings); Columns=@('RunId','EmailAddress','CheckId','Category','Severity','Result','IsBlocking','ObservedValue','ExpectedValue','EvidenceSource','SourceTimestamp','Message','RecommendedAction') },
+        [pscustomobject]@{ Name='Tenant Checks'; Data=@($Assessment.GlobalFindings); Columns=@('RunId','EmailAddress','CheckId','Category','Severity','Result','IsBlocking','ObservedValue','ExpectedValue','EvidenceSource','SourceTimestamp','Message','RecommendedAction') },
+        [pscustomobject]@{ Name='Permissions'; Data=@($Assessment.PermissionsBaseline); Columns=@('RunId','EmailAddress','PermissionType','Delegate','IsInherited','Source','CapturedAt') },
+        [pscustomobject]@{ Name='Evidence'; Data=@($Assessment.Evidence); Columns=@('RunId','EmailAddress','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt') },
+        [pscustomobject]@{ Name='CSV Sources'; Data=@($Assessment.CsvSources); Columns=@('FileName','Category','ExpectedUse','Path','Present','Fresh','Used','Status','LastWriteTime','AgeHours','Details') },
+        [pscustomobject]@{ Name='Check Options'; Data=@($Assessment.CheckOptions); Columns=@('CheckId','Category','Name','Mandatory','Enabled','Description') }
+    )
+    if ($RunFolder -and (Test-Path -LiteralPath $RunFolder -PathType Container)) {
+        $knownCsvFiles = @('Summary.csv','Findings.csv','Global-Findings.csv','Permissions-Baseline.csv','Evidence.csv','Csv-Sources.csv','Check-Options.csv')
+        $usedSheetNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($sheet in $sheets) { [void]$usedSheetNames.Add([string]$sheet.Name) }
+        foreach ($csvFile in @(Get-ChildItem -LiteralPath $RunFolder -Filter '*.csv' -File | Where-Object Name -NotIn $knownCsvFiles | Sort-Object Name)) {
+            $csvRows = @(Import-Csv -LiteralPath $csvFile.FullName)
+            if ($csvRows.Count -gt 0) { $csvColumns = @($csvRows[0].PSObject.Properties.Name) }
+            else {
+                $headerLine = @(Get-Content -LiteralPath $csvFile.FullName -TotalCount 1)
+                $delimiter = if ($headerLine.Count -eq 1) { Get-SemrDelimiter -Header $headerLine[0] } else { ',' }
+                $csvColumns = if ($headerLine.Count -eq 1) { @($headerLine[0].Split($delimiter) | ForEach-Object { $_.Trim().Trim('"') }) } else { @('Value') }
+            }
+            $sheetName = ([IO.Path]::GetFileNameWithoutExtension($csvFile.Name) -replace '[\[\]:*?/\\]', ' ').Trim()
+            if ([string]::IsNullOrWhiteSpace($sheetName)) { $sheetName = 'Additional CSV' }
+            if ($sheetName.Length -gt 31) { $sheetName = $sheetName.Substring(0,31) }
+            $baseName = $sheetName; $suffix = 2
+            while (-not $usedSheetNames.Add($sheetName)) {
+                $suffixText = " $suffix"; $maximumBaseLength = 31 - $suffixText.Length
+                $sheetName = $baseName.Substring(0,[math]::Min($baseName.Length,$maximumBaseLength)) + $suffixText
+                $suffix++
+            }
+            $sheets += [pscustomobject]@{ Name=$sheetName; Data=$csvRows; Columns=$csvColumns }
+        }
+    }
+    $fileStream = [IO.File]::Open($Path, [IO.FileMode]::Create, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $archive = [IO.Compression.ZipArchive]::new($fileStream, [IO.Compression.ZipArchiveMode]::Create, $false)
+    try {
+        $overrides = for ($index = 1; $index -le $sheets.Count; $index++) { '<Override PartName="/xl/worksheets/sheet'+$index+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' }
+        Write-SemrZipEntry $archive '[Content_Types].xml' ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+($overrides -join '')+'</Types>')
+        Write-SemrZipEntry $archive '_rels/.rels' '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
+        $sheetNodes = for ($index = 0; $index -lt $sheets.Count; $index++) { '<sheet name="'+(ConvertTo-SemrXmlText $sheets[$index].Name)+'" sheetId="'+($index+1)+'" r:id="rId'+($index+1)+'"/>' }
+        Write-SemrZipEntry $archive 'xl/workbook.xml' ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets>'+($sheetNodes -join '')+'</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>')
+        $relationships = for ($index = 0; $index -lt $sheets.Count; $index++) { '<Relationship Id="rId'+($index+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+($index+1)+'.xml"/>' }
+        $relationships += '<Relationship Id="rId'+($sheets.Count+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        Write-SemrZipEntry $archive 'xl/_rels/workbook.xml.rels' ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+($relationships -join '')+'</Relationships>')
+        $styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="3"><font><sz val="10"/><name val="Segoe UI"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Segoe UI"/></font><font><b/><sz val="10"/><name val="Segoe UI"/></font></fonts><fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0078D4"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDFF3E4"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF1CC"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFDE2E1"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8EDF3"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFD9E2EC"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center"/></xf><xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="2" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="2" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="2" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
+        Write-SemrZipEntry $archive 'xl/styles.xml' $styles
+        for ($index = 0; $index -lt $sheets.Count; $index++) {
+            Write-SemrZipEntry $archive ("xl/worksheets/sheet$($index+1).xml") (ConvertTo-SemrWorksheetXml -Data @($sheets[$index].Data) -Columns @($sheets[$index].Columns))
+        }
+    }
+    finally { $archive.Dispose(); $fileStream.Dispose() }
+    return $Path
+}
+
+function New-SemrHtmlReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Assessment,
+        [Parameter(Mandatory)][string]$Path
+    )
+    $summary = @($Assessment.Summary)
+    $globalFindings = @($Assessment.GlobalFindings)
+    $go = @($summary | Where-Object Decision -EQ 'GO').Count
+    $warning = @($summary | Where-Object Decision -EQ 'GO-WARNING').Count
+    $noGo = @($summary | Where-Object Decision -EQ 'NO-GO').Count
+    $unknown = @($summary | Where-Object Decision -EQ 'UNKNOWN').Count
+    $duration = if ($Assessment.StartedAt -and $Assessment.CompletedAt) { [math]::Round(([datetime]$Assessment.CompletedAt - [datetime]$Assessment.StartedAt).TotalSeconds,1) } else { $null }
+    $endpoint = if ($Assessment.Hybrid -and $Assessment.Hybrid.EndpointName) { [string]$Assessment.Hybrid.EndpointName } else { 'Not available' }
+    $entra = if ($Assessment.EntraConnect) { [string]$Assessment.EntraConnect.Message } else { 'Not available' }
+    $summaryRows = foreach ($row in $summary) {
+        $decisionClass = ([string]$row.Decision).ToLowerInvariant().Replace('-','')
+        '<tr data-search="'+(ConvertTo-SemrHtmlText ("$($row.EmailAddress) $($row.Decision) $($row.BlockingCodes) $($row.RecommendedAction)"))+'"><td>'+(ConvertTo-SemrHtmlText $row.EmailAddress)+'</td><td><span class="badge '+$decisionClass+'">'+(ConvertTo-SemrHtmlText $row.Decision)+'</span></td><td>'+$row.BlockingCount+'</td><td>'+$row.WarningCount+'</td><td>'+$row.UnknownCount+'</td><td>'+(ConvertTo-SemrHtmlText $row.DataCoverage)+'</td><td>'+(ConvertTo-SemrHtmlText $row.BlockingCodes)+'</td><td>'+(ConvertTo-SemrHtmlText $row.RecommendedAction)+'</td></tr>'
+    }
+    $tenantRows = foreach ($row in $globalFindings) {
+        $resultClass = ([string]$row.Result).ToLowerInvariant().Replace('-','')
+        '<tr><td>'+(ConvertTo-SemrHtmlText $row.CheckId)+'</td><td>'+(ConvertTo-SemrHtmlText $row.Category)+'</td><td><span class="badge '+$resultClass+'">'+(ConvertTo-SemrHtmlText $row.Result)+'</span></td><td>'+(ConvertTo-SemrHtmlText $row.Message)+'</td><td>'+(ConvertTo-SemrHtmlText $row.RecommendedAction)+'</td></tr>'
+    }
+    $sourceRows = foreach ($row in @($Assessment.CsvSources)) {
+        '<tr><td>'+(ConvertTo-SemrHtmlText $row.FileName)+'</td><td>'+(ConvertTo-SemrHtmlText $row.Status)+'</td><td>'+(ConvertTo-SemrHtmlText $row.Present)+'</td><td>'+(ConvertTo-SemrHtmlText $row.Fresh)+'</td><td>'+(ConvertTo-SemrHtmlText $row.Used)+'</td><td>'+(ConvertTo-SemrHtmlText $row.AgeHours)+'</td><td>'+(ConvertTo-SemrHtmlText $row.Path)+'</td></tr>'
+    }
+    $findingRows = foreach ($row in @($Assessment.Findings | Where-Object { $_.Result -in @('FAIL','UNKNOWN','WARN') })) {
+        '<tr><td>'+(ConvertTo-SemrHtmlText $row.EmailAddress)+'</td><td>'+(ConvertTo-SemrHtmlText $row.CheckId)+'</td><td>'+(ConvertTo-SemrHtmlText $row.Result)+'</td><td>'+(ConvertTo-SemrHtmlText $row.Message)+'</td><td>'+(ConvertTo-SemrHtmlText $row.RecommendedAction)+'</td></tr>'
+    }
+    $html = @"
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Smart Exchange Migration Readiness - $($Assessment.RunId)</title><style>
+:root{--blue:#0078d4;--navy:#18324a;--muted:#5f6b7a;--line:#d9e2ec;--bg:#f4f8fb;--green:#146c43;--amber:#8a5a00;--red:#b42318}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#1f2937;font:14px Segoe UI,Arial,sans-serif}.wrap{max-width:1500px;margin:auto;padding:24px}.hero,.panel{background:white;border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}.hero h1{margin:0 0 6px;font-size:28px}.sub{color:var(--muted)}.meta,.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:16px}.card{border:1px solid var(--line);border-radius:9px;padding:14px}.card strong{display:block;font-size:25px}.go{color:var(--green)}.gowarning,.warn,.warning{color:var(--amber)}.nogo,.fail{color:var(--red)}.unknown{color:#586477}.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-weight:700;background:#e8edf3}.badge.go,.badge.pass{background:#dff3e4;color:var(--green)}.badge.gowarning,.badge.warn{background:#fff1cc;color:var(--amber)}.badge.nogo,.badge.fail{background:#fde2e1;color:var(--red)}h2{margin:0 0 14px}input{width:100%;max-width:520px;padding:10px;border:1px solid #b8c5d1;border-radius:7px;margin-bottom:12px}table{border-collapse:collapse;width:100%;font-size:13px}th{position:sticky;top:0;background:var(--blue);color:white;text-align:left;padding:9px}td{border-bottom:1px solid #e5ebf1;padding:8px;vertical-align:top}tbody tr:hover{background:#f4f9fd}.scroll{overflow:auto;max-height:620px}details{background:white;border:1px solid var(--line);border-radius:12px;margin-bottom:16px;padding:14px}summary{cursor:pointer;font-size:18px;font-weight:600}.note{padding:12px;background:#eef6fc;border-left:4px solid var(--blue);margin-top:12px}@media print{body{background:white}.wrap{max-width:none;padding:0}.scroll{max-height:none;overflow:visible}th{position:static}}
+</style></head><body><main class="wrap"><section class="hero"><h1>Smart Exchange Migration Readiness</h1><div class="sub">Read-only assessment $($Assessment.RunId)</div><div class="meta"><div class="card"><b>Mode</b><div>$(ConvertTo-SemrHtmlText $Assessment.Mode)</div></div><div class="card"><b>Phase</b><div>$(ConvertTo-SemrHtmlText $Assessment.AssessmentPhase)</div></div><div class="card"><b>Endpoint</b><div>$(ConvertTo-SemrHtmlText $endpoint)</div></div><div class="card"><b>Duration</b><div>$duration s</div></div></div><div class="cards"><div class="card go"><b>GO</b><strong>$go</strong></div><div class="card gowarning"><b>GO-WARNING</b><strong>$warning</strong></div><div class="card nogo"><b>NO-GO</b><strong>$noGo</strong></div><div class="card unknown"><b>UNKNOWN</b><strong>$unknown</strong></div></div><div class="note"><b>Tenant synchronization:</b> $(ConvertTo-SemrHtmlText $entra)</div></section>
+<section class="panel"><h2>Mailbox decisions</h2><input id="mailFilter" placeholder="Filter by mailbox, decision, code or action"><div class="scroll"><table id="mailTable"><thead><tr><th>Mailbox</th><th>Decision</th><th>Blocking</th><th>Warnings</th><th>Unknown</th><th>Coverage</th><th>Blocking codes</th><th>Recommended action</th></tr></thead><tbody>$($summaryRows -join '')</tbody></table></div></section>
+<details open><summary>Tenant checks</summary><div class="scroll"><table><thead><tr><th>Check</th><th>Category</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($tenantRows -join '')</tbody></table></div></details>
+<details><summary>Blocking and warning details</summary><div class="scroll"><table><thead><tr><th>Mailbox</th><th>Check</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($findingRows -join '')</tbody></table></div></details>
+<details><summary>CSV source inventory</summary><div class="scroll"><table><thead><tr><th>File</th><th>Status</th><th>Present</th><th>Fresh</th><th>Used</th><th>Age hours</th><th>Path</th></tr></thead><tbody>$($sourceRows -join '')</tbody></table></div></details>
+</main><script>document.getElementById('mailFilter').addEventListener('input',function(){var q=this.value.toLowerCase();document.querySelectorAll('#mailTable tbody tr').forEach(function(r){r.style.display=(r.getAttribute('data-search')||'').toLowerCase().includes(q)?'':'none';});});</script></body></html>
+"@
+    [IO.File]::WriteAllText($Path, $html, [Text.UTF8Encoding]::new($false))
+    return $Path
+}
 function Export-SemrAssessment {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Assessment,
-        [Parameter(Mandatory)][string]$OutputRoot
+        [Parameter(Mandatory)][string]$OutputRoot,
+        [scriptblock]$ProgressCallback
     )
 
     $runFolder = Join-Path $OutputRoot $Assessment.RunId
@@ -3386,6 +3576,9 @@ function Export-SemrAssessment {
     $evidencePath = Join-Path $runFolder 'Evidence.csv'
     $csvSourcesPath = Join-Path $runFolder 'Csv-Sources.csv'
     $checkOptionsPath = Join-Path $runFolder 'Check-Options.csv'
+    $excelPath = Join-Path $runFolder ("SmartM365-ExchangeMigrationReadiness-$($Assessment.RunId).xlsx")
+    $htmlPath = Join-Path $runFolder ("SmartM365-ExchangeMigrationReadiness-$($Assessment.RunId).html")
+    if ($ProgressCallback) { & $ProgressCallback 'CSV reports' 'Writing detailed CSV files' 1 3 }
 
     Export-SemrCsvFile -Data @($Assessment.Summary) -Path $summaryPath -Columns @('RunId','BatchName','AssessmentPhase','EmailAddress','Decision','BlockingCount','MailboxBlockingCount','GlobalBlockingCount','WarningCount','MailboxWarningCount','GlobalWarningCount','UnknownCount','MailboxUnknownCount','GlobalUnknownCount','DataCoverage','BlockingCodes','RecommendedAction','CheckedAt')
     Export-SemrCsvFile -Data @($Assessment.Findings) -Path $findingsPath -Columns @('RunId','EmailAddress','CheckId','Category','Severity','Result','IsBlocking','ObservedValue','ExpectedValue','EvidenceSource','SourceTimestamp','Message','RecommendedAction')
@@ -3394,6 +3587,11 @@ function Export-SemrAssessment {
     Export-SemrCsvFile -Data @($Assessment.Evidence) -Path $evidencePath -Columns @('RunId','EmailAddress','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt')
     Export-SemrCsvFile -Data @($Assessment.CsvSources) -Path $csvSourcesPath -Columns @('FileName','Category','ExpectedUse','Path','Present','Fresh','Used','Status','LastWriteTime','AgeHours','Details')
     Export-SemrCsvFile -Data @($Assessment.CheckOptions) -Path $checkOptionsPath -Columns @('CheckId','Category','Name','Mandatory','Enabled','Description')
+
+    if ($ProgressCallback) { & $ProgressCallback 'Excel report' 'Building the autonomous OpenXML workbook' 2 3 }
+    [void](New-SemrExcelReport -Assessment $Assessment -Path $excelPath -RunFolder $runFolder)
+    if ($ProgressCallback) { & $ProgressCallback 'HTML report' 'Building the self-contained interactive report' 3 3 }
+    [void](New-SemrHtmlReport -Assessment $Assessment -Path $htmlPath)
 
     return [pscustomobject]@{
         RunFolder = $runFolder
@@ -3404,8 +3602,10 @@ function Export-SemrAssessment {
         EvidencePath = $evidencePath
         CsvSourcesPath = $csvSourcesPath
         CheckOptionsPath = $checkOptionsPath
-    }
+        ExcelPath = $excelPath
+        HtmlPath = $htmlPath
 }
+    }
 
 function Compare-SemrPermissionsBaseline {
     [CmdletBinding()]

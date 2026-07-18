@@ -21,10 +21,10 @@ La phase sélectionnée est inscrite dans `Summary.csv` afin que le verdict rest
 - Microsoft Graph : connexion interactive déléguée standard lancée automatiquement après Exchange Online dans un processus PowerShell 7 isolé, afin d'éviter les conflits de bibliothèques MSAL avec ExchangeOnlineManagement.
 - Active Directory : tentative live automatique ; fallback sur `AD_Users_AllDomains.csv` si AD est indisponible.
 - Exchange on-premises / Exchange 2016 : utilisation des cmdlets live lorsqu’elles sont disponibles ; la session applique `Set-ADServerSettings -ViewEntireForest $true` (ou `Set-OnPremADServerSettings` avec la session préfixée) avant toute collecte, puis utilise `Exchange_OnPrem_Mailboxes_AllDomains.csv` en fallback si cette portée forêt ne peut pas être activée.
-- Santé Microsoft Entra Connect : lecture live des cmdlets ADSync locales lorsqu’elles sont disponibles ; fallback sur `M365_Entra_AzureADConnect_SyncHealth.csv` sinon.
-- Endpoint de migration et santé Entra Connect : contrôlés automatiquement pendant l’évaluation.
+- Santé de synchronisation Microsoft Entra : en Live, lecture autoritaire de `onPremisesSyncEnabled` et `onPremisesLastSyncDateTime` directement sur l’objet tenant Microsoft Graph. Le CSV `M365_Entra_AzureADConnect_SyncHealth.csv` reste contextuel uniquement et ne peut pas produire un faux PASS si Graph échoue.
+- Endpoint de migration et fraîcheur de la synchronisation tenant : contrôlés automatiquement pendant l’évaluation.
 
-Les inventaires AD, Exchange 2016 et Entra Connect sont préchargés comme sources de secours. Sur une machine sans accès on-premises, la bascule CSV est automatique et la source réellement utilisée apparaît dans les findings et dans l’onglet Activity. L’onglet Sources est informatif : il n’expose plus de boutons de connexion séparés.
+Les inventaires AD et Exchange 2016 sont préchargés comme sources de secours. L’inventaire de santé Entra est préchargé pour le mode CacheOnly et comme contexte en Live. Sur une machine sans accès on-premises, la bascule CSV AD/Exchange est automatique et la source réellement utilisée apparaît dans les findings et dans l’onglet Activity. L’onglet Sources est informatif : il n’expose plus de boutons de connexion séparés.
 
 ### CacheOnly
 
@@ -81,7 +81,7 @@ Uniquement pour le mode Live :
 - module `ExchangeOnlineManagement` 3.0 ou ultérieur ;
 - modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` ; lorsqu’un module manque dans PowerShell 7, le GUI propose de l’installer depuis PowerShell Gallery avec `-Scope CurrentUser` avant l’authentification ;
 - compte interactif disposant des droits de lecture nécessaires dans Exchange Online et Microsoft Graph ;
-- pour les sources on-premises live, modules/cmdlets `ActiveDirectory`, Exchange Management Shell et/ou `ADSync` disponibles sur la machine d’exécution. Leur absence n’est pas bloquante si les CSV de fallback sont accessibles et suffisamment récents.
+- pour les sources on-premises live, module `ActiveDirectory` et Exchange Management Shell disponibles sur la machine d’exécution. Leur absence n’est pas bloquante si les CSV de fallback sont accessibles et suffisamment récents. Le module ADSync n’est ni utilisé ni requis.
 
 Scopes Graph par défaut :
 
@@ -133,7 +133,7 @@ Clés principales :
 - `Hybrid.TargetDeliveryDomain` : domaine `tenant.mail.onmicrosoft.com` attendu.
 - `Hybrid.ActiveMigrationWarningThreshold` : seuil consultatif du nombre de migrations actives/non terminales, `100` par défaut.
 - `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` : politique explicite du SKU et du quota cible. Un SKU absent de la table reste `UNKNOWN` bloquant ; aucun quota générique de 100 Go n’est supposé.
-- `EntraConnectHealth.MaximumLastSyncAgeMinutes` : ancienneté maximale de la dernière synchronisation Entra Connect ; `120` minutes par défaut. Un scheduler désactivé, suspendu ou indisponible reste bloquant ; une dernière synchronisation trop ancienne produit un avertissement global.
+- `EntraConnectHealth.MaximumLastSyncAgeMinutes` : ancienneté maximale de la dernière synchronisation tenant ; `120` minutes par défaut. En Live, un état désactivé, une date absente, une collecte Graph indisponible ou une synchronisation trop ancienne produit un résultat bloquant.
 - `OutputRoot` : dossier d’export, absolu ou relatif à l’application.
 
 ## Inventaires CSV attendus
@@ -189,16 +189,16 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - migration user ou move request actif/non terminal, avec déduplication des deux représentations d’une même opération et interprétation adaptée à la phase `PreCreation` ou `ExistingBatch` ; l’erreur Exchange Online `No such request exists in specified index` est interprétée comme une absence de move, pas comme une collecte inconnue ;
 - historique de moves échoués, suspendus ou arrêtés ;
 - unicité et synchronisation de l’utilisateur Entra ;
-- erreurs de provisioning et identity anchor Entra ; l’ancienneté de synchronisation par objet reste informative et ne remplace pas la santé globale du scheduler Entra Connect ;
+- erreurs de provisioning et identity anchor Entra ; l’ancienneté de synchronisation par objet reste informative et ne remplace pas la date de dernière synchronisation tenant collectée sur l’objet `organization` ;
 - licence actuelle, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; l’attente de licence dépend de la phase et `SPE_F1` est non éligible ;
-- santé et fraîcheur de la dernière synchronisation Entra Connect en Live, avec fallback cache ;
+- santé et fraîcheur de la dernière synchronisation tenant en Live directement via Microsoft Graph ; le cache reste contextuel, et CacheOnly utilise exclusivement le CSV ;
 - endpoint `ExchangeRemoteMove` en Live ; l’absence de `Test-MigrationServerAvailability` produit `UNKNOWN`, pas un faux échec de l’endpoint ;
 - MRSProxy, certificat hybride, charge active des migrations et cohérence Autodiscover/OAuth ; le contrôle OAuth est consultatif pour un move distant et ne bloque plus à lui seul la migration ;
 - avertissement documenté pour `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException`.
 
 Une source obligatoire absente reste bloquante. Une propriété non disponible dans le cache devient `UNKNOWN`, jamais un faux `PASS`. Chaque contrôle obligatoire produit désormais explicitement un finding `PASS` ou `UNKNOWN`, et `SourceTimestamp` correspond à l’horodatage réel de la source utilisée plutôt qu’à l’heure de l’évaluation.
 
-Les contrôles tenant (endpoint, MRSProxy, certificat, capacité, OAuth et Entra Connect) sont évalués une seule fois. Ils apparaissent dans l’onglet `Tenant checks` et dans `Global-Findings.csv`. Seuls leurs vrais blocages sont répercutés dans le verdict de chaque mailbox, sans dupliquer les findings.
+Les contrôles tenant (endpoint, MRSProxy, certificat, capacité, OAuth et synchronisation Microsoft Entra) sont évalués une seule fois. Ils apparaissent dans l’onglet `Tenant checks` et dans `Global-Findings.csv`. Seuls leurs vrais blocages sont répercutés dans le verdict de chaque mailbox, sans dupliquer les findings.
 
 ## Rapports
 
@@ -213,11 +213,19 @@ Output\SEMR-yyyyMMdd-HHmmss\
   Evidence.csv
   Csv-Sources.csv
   Check-Options.csv
+  SmartM365-ExchangeMigrationReadiness-SEMR-yyyyMMdd-HHmmss.xlsx
+  SmartM365-ExchangeMigrationReadiness-SEMR-yyyyMMdd-HHmmss.html
 ```
 
 `Summary.csv` contient un verdict par mailbox avec les compteurs mailbox et tenant séparés. `Findings.csv` contient les contrôles propres aux mailboxes. `Global-Findings.csv` contient les contrôles tenant exécutés une seule fois. Chaque finding précise la sévérité, le résultat, le caractère bloquant, la valeur observée, la valeur attendue, la source, son horodatage, le message et l’action recommandée.
 
+Le classeur Excel autonome regroupe tous les CSV générés dans des onglets formatés — les sept exports actuels et tout futur CSV du même dossier — avec filtres, première ligne figée et couleurs de verdict. Il ne nécessite ni Microsoft Excel ni le module ImportExcel.
+
+Le rapport HTML UTF-8 est autonome et contient la synthèse GO / NO-GO, les contrôles tenant, la fraîcheur des sources CSV, les détails bloquants et un filtre mailbox. Il n’utilise aucune ressource externe.
+
 Chaque lancement GUI crée également un journal de session horodaté sous `Output\Logs`. Le statut supérieur et l'onglet `Activity` décrivent les phases longues et indiquent quand l'opérateur doit patienter.
+
+Browse et Run assessment ouvrent une petite fenêtre WPF sur un thread dédié. Elle reste réactive pendant les appels longs, affiche l’étape, le détail, la progression et le temps écoulé. À la fin d’un assessment, elle propose d’ouvrir directement le HTML, l’Excel ou le dossier de sortie ; en cas d’échec, elle propose le journal.
 
 Après migration, la comparaison de permissions en mode Live peut aussi générer :
 
