@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.6.0'
+$script:SemrVersion = '1.6.1'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ActiveDirectoryDomains = @()
@@ -854,7 +854,7 @@ function Import-SemrBatchCsv {
 function ConvertTo-SemrFinding {
     param(
         [Parameter(Mandatory)][string]$RunId,
-        [Parameter(Mandatory)][string]$EmailAddress,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$EmailAddress,
         [Parameter(Mandatory)][string]$CheckId,
         [Parameter(Mandatory)][string]$Category,
         [ValidateSet('Critical', 'Warning', 'Information')][string]$Severity,
