@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.12
+1.13
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -363,7 +363,41 @@ function Invoke-M365UsageReportDownload {
         $uri = "https://graph.microsoft.com/v1.0/reports/$endpoint"
     }
 
-    Invoke-MgGraphRequest -Method GET -Uri $uri -OutputFilePath $RawPath -ProgressAction SilentlyContinue -ErrorAction Stop | Out-Null
+    try {
+        Invoke-MgGraphRequest -Method GET -Uri $uri -OutputFilePath $RawPath -ProgressAction SilentlyContinue -ErrorAction Stop | Out-Null
+    }
+    catch {
+        $restError = $_.Exception.Message
+        $commandName = [string]$ReportDefinition.Command
+        if ([string]::IsNullOrWhiteSpace($commandName)) {
+            throw
+        }
+
+        WriteLog ("Graph REST download failed for {0}; retrying with {1}. Error={2}" -f $ReportDefinition.Name, $commandName, $restError) 'WARNING'
+        if (Test-Path -LiteralPath $RawPath) {
+            Remove-Item -LiteralPath $RawPath -Force -ErrorAction SilentlyContinue
+        }
+
+        $commandParameters = @{
+            OutFile = $RawPath
+            ProgressAction = 'SilentlyContinue'
+            ErrorAction = 'Stop'
+        }
+        if ($ReportDefinition.SupportsPeriod) {
+            $commandParameters.Period = $Period
+        }
+
+        try {
+            & $commandName @commandParameters | Out-Null
+        }
+        catch {
+            throw "Report download failed via Graph REST ($restError) and $commandName ($($_.Exception.Message))."
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $RawPath) -or (Get-Item -LiteralPath $RawPath).Length -le 0) {
+        throw "Graph report download produced no file content for $($ReportDefinition.Name)."
+    }
 }
 
 function Export-M365UsageReport {
