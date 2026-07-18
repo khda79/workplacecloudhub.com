@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.23
+1.24
 
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
@@ -287,6 +287,117 @@ function Get-ScriptLocalConfigValue {
     return $DefaultValue
 }
 
+function Ensure-ProxyAddressesImportExcelAllUsers {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    $moduleName = 'ImportExcel'
+    $requiredCommands = @('Export-Excel', 'Open-ExcelPackage', 'Close-ExcelPackage')
+    $allUsersModuleRoot = Join-Path -Path $env:ProgramFiles -ChildPath 'WindowsPowerShell\Modules\ImportExcel'
+
+    $getValidatedManifest = {
+        param([string[]]$SearchRoots)
+
+        $validatedManifests = @()
+        foreach ($searchRoot in @($SearchRoots | Select-Object -Unique)) {
+            if ([string]::IsNullOrWhiteSpace($searchRoot) -or -not (Test-Path -LiteralPath $searchRoot)) {
+                continue
+            }
+
+            foreach ($manifestFile in @(Get-ChildItem -LiteralPath $searchRoot -Filter 'ImportExcel.psd1' -File -Recurse -ErrorAction SilentlyContinue)) {
+                try {
+                    $manifest = Test-ModuleManifest -Path $manifestFile.FullName -ErrorAction Stop
+                    if ($manifest.Name -ne $moduleName) { continue }
+                    $validatedManifests += [pscustomobject]@{
+                        Path       = $manifestFile.FullName
+                        ModuleBase = $manifestFile.DirectoryName
+                        Version    = [version]$manifest.Version
+                    }
+                }
+                catch {
+                    WriteLog -Message ("Ignoring invalid ImportExcel manifest '{0}': {1}" -f $manifestFile.FullName, $_.Exception.Message) -Level 'WARNING'
+                }
+            }
+        }
+
+        return @($validatedManifests | Sort-Object Version -Descending)
+    }
+
+    $importValidatedModule = {
+        param([Parameter(Mandatory = $true)][string]$ManifestPath)
+
+        Get-Module -Name $moduleName | Remove-Module -Force -ErrorAction SilentlyContinue
+        Import-Module -Name $ManifestPath -Force -ErrorAction Stop
+
+        $expectedModuleBase = Split-Path -Path $ManifestPath -Parent
+        $loadedModule = Get-Module -Name $moduleName |
+            Where-Object { $_.ModuleBase -ieq $expectedModuleBase } |
+            Select-Object -First 1
+        if ($null -eq $loadedModule) {
+            throw ("ImportExcel was not loaded from the expected AllUsers manifest: {0}" -f $ManifestPath)
+        }
+
+        foreach ($requiredCommand in $requiredCommands) {
+            $command = Get-Command -Name $requiredCommand -Module $moduleName -ErrorAction SilentlyContinue
+            if ($null -eq $command) {
+                throw ("ImportExcel command is unavailable after the AllUsers import: {0}" -f $requiredCommand)
+            }
+        }
+
+        return $loadedModule
+    }
+
+    $allUsersCandidates = @(& $getValidatedManifest @($allUsersModuleRoot))
+    if ($allUsersCandidates.Count -gt 0) {
+        $selectedAllUsersManifest = $allUsersCandidates[0]
+        $loadedAllUsersModule = & $importValidatedModule $selectedAllUsersManifest.Path
+        WriteLog -Message ("ImportExcel AllUsers module ready: version={0}; path={1}" -f $loadedAllUsersModule.Version, $loadedAllUsersModule.Path)
+        return $selectedAllUsersManifest.Path
+    }
+
+    $currentUserSearchRoots = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        [void]$currentUserSearchRoots.Add((Join-Path -Path $env:USERPROFILE -ChildPath 'Documents\WindowsPowerShell\Modules\ImportExcel'))
+        [void]$currentUserSearchRoots.Add((Join-Path -Path $env:USERPROFILE -ChildPath 'Documents\PowerShell\Modules\ImportExcel'))
+    }
+    $myDocuments = [Environment]::GetFolderPath('MyDocuments')
+    if (-not [string]::IsNullOrWhiteSpace($myDocuments)) {
+        [void]$currentUserSearchRoots.Add((Join-Path -Path $myDocuments -ChildPath 'WindowsPowerShell\Modules\ImportExcel'))
+        [void]$currentUserSearchRoots.Add((Join-Path -Path $myDocuments -ChildPath 'PowerShell\Modules\ImportExcel'))
+    }
+
+    $currentUserCandidates = @(& $getValidatedManifest @($currentUserSearchRoots))
+    if ($currentUserCandidates.Count -eq 0) {
+        WriteLog -Message 'No valid current-user ImportExcel installation was found to promote. The preflight will attempt an AllUsers installation when Install-Module is available.' -Level 'WARNING'
+        return $null
+    }
+
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw ("ImportExcel is only installed for the current user. Run the launcher as administrator once so the script can copy it to the AllUsers module path: {0}" -f $allUsersModuleRoot)
+    }
+
+    $selectedCurrentUserManifest = $currentUserCandidates[0]
+    $destinationModuleBase = Join-Path -Path $allUsersModuleRoot -ChildPath $selectedCurrentUserManifest.Version.ToString()
+    $destinationManifestPath = Join-Path -Path $destinationModuleBase -ChildPath 'ImportExcel.psd1'
+
+    WriteLog -Message ("Promoting ImportExcel {0} from current-user path '{1}' to AllUsers path '{2}'." -f $selectedCurrentUserManifest.Version, $selectedCurrentUserManifest.ModuleBase, $destinationModuleBase)
+    New-Item -Path $destinationModuleBase -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    Get-ChildItem -LiteralPath $selectedCurrentUserManifest.ModuleBase -Force -ErrorAction Stop |
+        Copy-Item -Destination $destinationModuleBase -Recurse -Force -ErrorAction Stop
+
+    $destinationManifest = Test-ModuleManifest -Path $destinationManifestPath -ErrorAction Stop
+    if ($destinationManifest.Name -ne $moduleName -or [version]$destinationManifest.Version -ne $selectedCurrentUserManifest.Version) {
+        throw ("The promoted ImportExcel manifest failed validation: {0}" -f $destinationManifestPath)
+    }
+
+    $loadedPromotedModule = & $importValidatedModule $destinationManifestPath
+    WriteLog -Message ("ImportExcel promoted successfully for all users: version={0}; path={1}" -f $loadedPromotedModule.Version, $loadedPromotedModule.Path) -Level 'SUCCESS'
+    return $destinationManifestPath
+}
+
 function New-ProxyAddressesWorkbook {
     [CmdletBinding()]
     param(
@@ -294,7 +405,10 @@ function New-ProxyAddressesWorkbook {
         [Parameter(Mandatory = $true)][string]$Path
     )
 
-    Import-Module -Name ImportExcel -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($script:ImportExcelManifestPath)) {
+        throw 'The validated AllUsers ImportExcel manifest path is unavailable.'
+    }
+    Import-Module -Name $script:ImportExcelManifestPath -Force -ErrorAction Stop
 
     $parentPath = Split-Path -Path $Path -Parent
     if (-not (Test-Path -LiteralPath $parentPath)) {
@@ -487,7 +601,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-    $ScriptVersion = "1.23"
+    $ScriptVersion = "1.24"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -587,8 +701,16 @@ $ErrorActionPreference = 'Stop'
 
     $requiredExchangeCommands = @('Get-Recipient', 'Get-RemoteMailbox')
     if ($AddMissingAddress) { $requiredExchangeCommands += @('Set-Mailbox', 'Set-RemoteMailbox') }
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ImportExcel') -RequiredCommands $requiredExchangeCommands -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
-    Import-Module -Name ImportExcel -ErrorAction Stop
+    $script:ImportExcelManifestPath = Ensure-ProxyAddressesImportExcelAllUsers
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ImportExcel') -RequiredCommands $requiredExchangeCommands -RequireExchangeOnPrem -RequireActiveDirectoryRead -InstallModuleScope AllUsers | Out-Null
+    if ([string]::IsNullOrWhiteSpace($script:ImportExcelManifestPath)) {
+        $script:ImportExcelManifestPath = Ensure-ProxyAddressesImportExcelAllUsers
+    }
+    if ([string]::IsNullOrWhiteSpace($script:ImportExcelManifestPath)) {
+        throw 'ImportExcel is not installed in the AllUsers Windows PowerShell module path after preflight.'
+    }
+    Get-Module -Name ImportExcel | Remove-Module -Force -ErrorAction SilentlyContinue
+    Import-Module -Name $script:ImportExcelManifestPath -Force -ErrorAction Stop
     $importExcelModule = Get-Module -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
     WriteLog -Message ("ImportExcel module loaded: version={0}; path={1}" -f $importExcelModule.Version, $importExcelModule.Path)
 
