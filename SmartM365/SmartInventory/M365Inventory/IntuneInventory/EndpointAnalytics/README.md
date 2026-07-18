@@ -27,9 +27,11 @@ Microsoft documents both v1.0 and beta `deviceManagement/reports/exportJobs` end
 https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs
 ```
 
-Version 1.0.3 therefore uses beta for all Endpoint Analytics export jobs. Review this choice when Microsoft publishes the report-name catalogue for v1.0.
+Version 1.0.4 therefore uses beta for all Endpoint Analytics export jobs. Review this choice when Microsoft publishes the report-name catalogue for v1.0.
 
 The preflight validates the application-permission claim without issuing an unsupported `GET` against the `exportJobs` collection. The first real `POST` export job validates Endpoint Analytics API access during collection.
+
+CSV publication enumerates generic row lists through the PowerShell pipeline before passing them to SmartM365.Core. This avoids the PowerShell `Argument types do not match` failure produced by applying an array subexpression directly to `List[object]`.
 
 The operation is functionally read-only: the only POST creates a temporary export-job resource. Microsoft currently documents these least-privileged permission choices for that POST:
 
