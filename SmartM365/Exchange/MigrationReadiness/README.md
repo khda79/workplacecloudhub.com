@@ -188,7 +188,7 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - conflits soft-deleted/inactive ;
 - migration user ou move request actif/non terminal, avec déduplication des deux représentations d’une même opération et interprétation adaptée à la phase `PreCreation` ou `ExistingBatch` ; l’erreur Exchange Online `No such request exists in specified index` est interprétée comme une absence de move, pas comme une collecte inconnue ;
 - historique de moves échoués, suspendus ou arrêtés ;
-- unicité et synchronisation de l’utilisateur Entra ;
+- unicité et synchronisation de l’utilisateur Entra, avec vérification que le domaine de son UPN figure dans `organization.verifiedDomains` ;
 - erreurs de provisioning et identity anchor Entra ; l’ancienneté de synchronisation par objet reste informative et ne remplace pas la date de dernière synchronisation tenant collectée sur l’objet `organization` ;
 - licence actuelle, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; l’attente de licence dépend de la phase et `SPE_F1` est non éligible ;
 - santé et fraîcheur de la dernière synchronisation tenant en Live directement via Microsoft Graph ; le cache reste contextuel, et CacheOnly utilise exclusivement le CSV ;
@@ -217,15 +217,17 @@ Output\SEMR-yyyyMMdd-HHmmss\
   SmartM365-ExchangeMigrationReadiness-SEMR-yyyyMMdd-HHmmss.html
 ```
 
-`Summary.csv` contient un verdict par mailbox avec les compteurs mailbox et tenant séparés. `Findings.csv` contient les contrôles propres aux mailboxes. `Global-Findings.csv` contient les contrôles tenant exécutés une seule fois. Chaque finding précise la sévérité, le résultat, le caractère bloquant, la valeur observée, la valeur attendue, la source, son horodatage, le message et l’action recommandée.
+`Summary.csv` contient un verdict par mailbox avec les compteurs mailbox et tenant séparés, le véritable UPN Entra, la taille de la mailbox en Go, le SKU cible et les licences actuellement attribuées. `Findings.csv` contient les contrôles propres aux mailboxes. `Global-Findings.csv` contient les contrôles tenant exécutés une seule fois. Chaque finding précise la sévérité, le résultat, le caractère bloquant, la valeur observée, la valeur attendue, la source, son horodatage, le message et l’action recommandée.
 
 Le classeur Excel autonome regroupe tous les CSV générés dans des onglets formatés — les sept exports actuels et tout futur CSV du même dossier — avec filtres, première ligne figée et couleurs de verdict. Il ne nécessite ni Microsoft Excel ni le module ImportExcel.
 
-Le rapport HTML UTF-8 est autonome et contient la synthèse GO / NO-GO, les contrôles tenant, la fraîcheur des sources CSV, les détails bloquants et un filtre mailbox. Il n’utilise aucune ressource externe.
+Le rapport HTML UTF-8 est autonome et contient un bandeau horizontal de synthèse GO / NO-GO, un tableau mailbox enrichi avec UPN, taille, SKU cible et licences attribuées, les contrôles tenant, la fraîcheur des sources CSV, les détails bloquants et un filtre mailbox. Il n’utilise aucune ressource externe.
 
 Chaque lancement GUI crée également un journal de session horodaté sous `Output\Logs`. Le statut supérieur et l'onglet `Activity` décrivent les phases longues et indiquent quand l'opérateur doit patienter.
 
 Browse et Run assessment ouvrent une petite fenêtre WPF sur un thread dédié. Elle reste réactive pendant les appels longs, affiche l’étape, le détail, la progression et le temps écoulé. À la fin d’un assessment, elle propose d’ouvrir directement le HTML, l’Excel ou le dossier de sortie ; en cas d’échec, elle propose le journal.
+
+Lorsqu’une réponse de l’opérateur est nécessaire, la fenêtre de progression est temporairement réduite et retirée de la barre des tâches. Le dialogue de confirmation ou de sélection est activé au premier plan, puis la progression est automatiquement restaurée après la réponse.
 
 Après migration, la comparaison de permissions en mode Live peut aussi générer :
 
