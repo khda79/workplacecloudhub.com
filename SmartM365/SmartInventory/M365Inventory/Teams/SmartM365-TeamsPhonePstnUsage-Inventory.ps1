@@ -10,7 +10,7 @@ SmartFinOps output aggregates usage by user without calculating license cost or
 performing any financial allocation.
 
 .VERSION
-1.2
+1.3
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -54,7 +54,7 @@ if ($MaxItems -gt 0) {
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$ScriptVersion = '1.2'
+$ScriptVersion = '1.3'
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $RunId = [guid]::NewGuid().Guid
@@ -960,30 +960,36 @@ try {
     }
 
     $CurrentOperation = 'Publish CSV files'
+    # Export-SmartM365Csv accepts $null for an empty schema but its mandatory
+    # object[] parameter rejects an explicitly empty array during binding.
+    $pstnExportData = if ($pstnRows.Count -gt 0) { $pstnRows } else { $null }
+    $directRoutingExportData = if ($directRoutingRows.Count -gt 0) { $directRoutingRows } else { $null }
+    $userUsageExportData = if ($userUsageRows.Count -gt 0) { $userUsageRows } else { $null }
     $null = Export-SmartM365Csv `
         -BaseFileName 'M365_Teams_PSTNCalls' `
         -OutputPath $OutputPath `
         -GlobalPath $LatestCsvFolderPath `
-        -Data $pstnRows `
+        -Data $pstnExportData `
         -Columns $PstnColumns
     $null = Export-SmartM365Csv `
         -BaseFileName 'M365_Teams_DirectRoutingCalls' `
         -OutputPath $OutputPath `
         -GlobalPath $LatestCsvFolderPath `
-        -Data $directRoutingRows `
+        -Data $directRoutingExportData `
         -Columns $DirectRoutingColumns
     $usageResult = Export-SmartM365Csv `
         -BaseFileName 'M365_Teams_PhoneUserUsage' `
         -OutputPath $OutputPath `
         -GlobalPath $LatestCsvFolderPath `
-        -Data $userUsageRows `
+        -Data $userUsageExportData `
         -Columns $UserUsageColumns
     if ($IncludePhoneAssignments) {
+        $assignmentExportData = if ($assignmentRows.Count -gt 0) { $assignmentRows } else { $null }
         $null = Export-SmartM365Csv `
             -BaseFileName 'M365_Teams_PhoneAssignments' `
             -OutputPath $OutputPath `
             -GlobalPath $LatestCsvFolderPath `
-            -Data $assignmentRows `
+            -Data $assignmentExportData `
             -Columns $PhoneAssignmentColumns
     }
 
