@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.7.0
+1.8.0
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.7.0'
+$script:AppVersion = '1.8.0'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -432,7 +432,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.7.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.8.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -596,7 +596,9 @@ $modeExplanation
 
 Do you want to continue and explicitly accept these stale files for this run?
 "@
-    $answer = [System.Windows.MessageBox]::Show($window, $message, 'Stale CSV cache detected', 'YesNo', 'Warning')
+    $answer = Invoke-SemrForegroundPrompt -Action {
+        [System.Windows.MessageBox]::Show($window, $message, 'Stale CSV cache detected', 'YesNo', 'Warning')
+    }
     if ($answer -eq [System.Windows.MessageBoxResult]::Yes) {
         $script:Config['_AllowStaleCache'] = $true
         Write-SemrActivity -Message "Operator accepted $($staleSources.Count) stale CSV file(s) for this run." -Level WARN
@@ -629,13 +631,15 @@ Do you want to install them from PowerShell Gallery for the current user?
 
 This installation does not change the tenant and does not require administrator rights.
 "@
-    $answer = [System.Windows.MessageBox]::Show(
-        $window,
-        $message,
-        'Install Microsoft Graph modules',
-        [System.Windows.MessageBoxButton]::YesNo,
-        [System.Windows.MessageBoxImage]::Question
-    )
+    $answer = Invoke-SemrForegroundPrompt -Action {
+        [System.Windows.MessageBox]::Show(
+            $window,
+            $message,
+            'Install Microsoft Graph modules',
+            [System.Windows.MessageBoxButton]::YesNo,
+            [System.Windows.MessageBoxImage]::Question
+        )
+    }
     if ($answer -ne [System.Windows.MessageBoxResult]::Yes) {
         $controls.StatusText.Text = 'Assessment cancelled: required Microsoft Graph modules are missing.'
         Write-SemrActivity -Message "Operator declined installation of missing Microsoft Graph modules: $(@($moduleState.MissingModules) -join ', ')." -Level WARN
@@ -688,7 +692,9 @@ function Show-SemrError {
         [string]$ErrorRecord
     }
     Write-SemrActivity -Message "$Title - $message" -Level ERROR
-    [System.Windows.MessageBox]::Show($window, $message, $Title, 'OK', 'Error') | Out-Null
+    Invoke-SemrForegroundPrompt -Action {
+        [System.Windows.MessageBox]::Show($window, $message, $Title, 'OK', 'Error')
+    } | Out-Null
 }
 
 function Invoke-SemrDoEvent {
@@ -703,6 +709,35 @@ function Invoke-SemrDoEvent {
         $frame
     ) | Out-Null
     [System.Windows.Threading.Dispatcher]::PushFrame($frame)
+}
+
+function Invoke-SemrForegroundPrompt {
+    param([Parameter(Mandatory)][scriptblock]$Action)
+
+    $progressState = if ($script:ProgressWindow) { $script:ProgressWindow.State } else { $null }
+    $suspendProgress = $null -ne $progressState -and -not [bool]$progressState.WindowClosed
+    if ($suspendProgress) {
+        $progressState.PromptActive = $true
+        $deadline = [DateTime]::UtcNow.AddSeconds(2)
+        while (-not [bool]$progressState.PromptSuspended -and [DateTime]::UtcNow -lt $deadline) {
+            Invoke-SemrDoEvent
+            [Threading.Thread]::Sleep(25)
+        }
+    }
+
+    try {
+        return & $Action
+    }
+    finally {
+        if ($suspendProgress) {
+            $progressState.PromptActive = $false
+            $deadline = [DateTime]::UtcNow.AddSeconds(2)
+            while ([bool]$progressState.PromptSuspended -and [DateTime]::UtcNow -lt $deadline) {
+                Invoke-SemrDoEvent
+                [Threading.Thread]::Sleep(25)
+            }
+        }
+    }
 }
 
 function Stop-SemrProgressWindow {
@@ -726,7 +761,7 @@ function Stop-SemrProgressWindow {
 function Start-SemrProgressWindow {
     param([Parameter(Mandatory)][string]$Title,[Parameter(Mandatory)][string]$Stage,[string]$Detail='')
     Stop-SemrProgressWindow
-    $state = [hashtable]::Synchronized(@{Title=$Title;Stage=$Stage;Detail=$Detail;Current=0;Total=0;Indeterminate=$true;StartedAt=Get-Date;Completed=$false;Failed=$false;CancelRequested=$false;CloseRequested=$false;WindowClosed=$false;Summary='';OutputPath='';HtmlPath='';ExcelPath='';LogPath=$script:SessionLogPath})
+    $state = [hashtable]::Synchronized(@{Title=$Title;Stage=$Stage;Detail=$Detail;Current=0;Total=0;Indeterminate=$true;StartedAt=Get-Date;Completed=$false;Failed=$false;CancelRequested=$false;CloseRequested=$false;WindowClosed=$false;PromptActive=$false;PromptSuspended=$false;Summary='';OutputPath='';HtmlPath='';ExcelPath='';LogPath=$script:SessionLogPath})
     $runspace=[RunspaceFactory]::CreateRunspace();$runspace.ApartmentState=[Threading.ApartmentState]::STA;$runspace.ThreadOptions=[Management.Automation.Runspaces.PSThreadOptions]::ReuseThread;$runspace.Open()
     $powerShell=[PowerShell]::Create();$powerShell.Runspace=$runspace
     $uiScript={
@@ -749,6 +784,20 @@ function Start-SemrProgressWindow {
         $timer=[Windows.Threading.DispatcherTimer]::new();$timer.Interval=[TimeSpan]::FromMilliseconds(250)
         $timer.Add_Tick({
             if($State.CloseRequested){$timer.Stop();$progressWindow.Close();return}
+            if([bool]$State.PromptActive){
+                if(-not [bool]$State.PromptSuspended){
+                    $progressWindow.ShowInTaskbar=$false
+                    $progressWindow.WindowState=[System.Windows.WindowState]::Minimized
+                    $State.PromptSuspended=$true
+                }
+                return
+            }
+            if([bool]$State.PromptSuspended){
+                $progressWindow.ShowInTaskbar=$true
+                $progressWindow.WindowState=[System.Windows.WindowState]::Normal
+                [void]$progressWindow.Activate()
+                $State.PromptSuspended=$false
+            }
             $progressWindow.Title=[string]$State.Title;$titleText.Text=[string]$State.Title;$stageText.Text=[string]$State.Stage;$detailText.Text=[string]$State.Detail;$elapsed=(Get-Date)-[datetime]$State.StartedAt;$elapsedText.Text=('Elapsed: {0:mm\:ss}' -f $elapsed);$progress.IsIndeterminate=[bool]$State.Indeterminate
             if(-not $progress.IsIndeterminate){$progress.Value=if([int]$State.Total -gt 0){[math]::Min(100,[math]::Round(([double]$State.Current/[double]$State.Total)*100,0))}else{0}}
             if($State.Completed){$progress.IsIndeterminate=$false;$progress.Value=100;$cancelButton.Visibility='Collapsed';$closeButton.Visibility='Visible';if($State.Summary){$detailText.Text=[string]$State.Summary};if($State.Failed){$stageText.Foreground='#B42318';$openLog.Visibility=if($State.LogPath){'Visible'}else{'Collapsed'}}else{$stageText.Foreground='#146C43'};$openHtml.Visibility=if($State.HtmlPath){'Visible'}else{'Collapsed'};$openExcel.Visibility=if($State.ExcelPath){'Visible'}else{'Collapsed'};$openFolder.Visibility=if($State.OutputPath){'Visible'}else{'Collapsed'}}
@@ -847,7 +896,16 @@ function Show-SemrMigrationEndpointSelection {
         $dialog.Close()
     })
     $dialog.Content = $panel
-    $accepted = $dialog.ShowDialog()
+    $accepted = Invoke-SemrForegroundPrompt -Action {
+        $dialog.ShowActivated = $true
+        $dialog.Topmost = $true
+        try {
+            $dialog.ShowDialog()
+        }
+        finally {
+            $dialog.Topmost = $false
+        }
+    }
     if ($accepted -and $dialog.Tag) { return $dialog.Tag }
     return $null
 }
