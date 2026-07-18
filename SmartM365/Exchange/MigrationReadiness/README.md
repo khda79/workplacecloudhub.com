@@ -8,6 +8,13 @@ Elle charge un CSV de boîtes aux lettres, exécute les contrôles de préparati
 
 Le mode est sélectionnable directement dans l’interface.
 
+La phase d’évaluation est également sélectionnable dans l’interface :
+
+- `PreCreation` — phase par défaut, avant création du batch : un move actif est bloquant et l’absence de licence cible est attendue.
+- `ExistingBatch` — contrôle d’un batch déjà créé ou démarré : un move actif est attendu, son absence devient un avertissement, et une licence Exchange déjà attribuée est attendue.
+
+La phase sélectionnée est inscrite dans `Summary.csv` afin que le verdict reste interprétable après l’exécution.
+
 ### Live — mode par défaut
 
 - Exchange Online : connexion interactive déléguée lancée automatiquement par Run assessment.
@@ -115,6 +122,7 @@ Le modèle contient uniquement des valeurs neutres. Renseignez les valeurs du te
 Clés principales :
 
 - `Mode` : `Live` par défaut ou `CacheOnly` ; le sélecteur GUI s’applique à l’exécution courante.
+- `AssessmentPhase` : `PreCreation` par défaut ou `ExistingBatch` ; le sélecteur GUI s’applique à l’exécution courante.
 - `DisabledChecks` : liste optionnelle d'identifiants de contrôles désactivés par défaut ; le GUI ne modifie pas automatiquement le JSON.
 - `TenantProfile` : profil tenant autonome de l’application.
 - `Cache.RootPath` et `Cache.MaximumAgeHours` : emplacement et fraîcheur des inventaires.
@@ -125,6 +133,7 @@ Clés principales :
 - `Hybrid.TargetDeliveryDomain` : domaine `tenant.mail.onmicrosoft.com` attendu.
 - `Hybrid.ActiveMigrationWarningThreshold` : seuil consultatif du nombre de migrations actives/non terminales, `100` par défaut.
 - `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` : politique explicite du SKU et du quota cible. Un SKU absent de la table reste `UNKNOWN` bloquant ; aucun quota générique de 100 Go n’est supposé.
+- `EntraConnectHealth.MaximumLastSyncAgeMinutes` : ancienneté maximale de la dernière synchronisation Entra Connect ; `120` minutes par défaut. Un scheduler désactivé, suspendu ou indisponible reste bloquant ; une dernière synchronisation trop ancienne produit un avertissement global.
 - `OutputRoot` : dossier d’export, absolu ou relatif à l’application.
 
 ## Inventaires CSV attendus
@@ -177,17 +186,19 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - santé de la base Exchange source ;
 - état MailUser/mailbox Exchange Online et détection split-brain ;
 - conflits soft-deleted/inactive ;
-- migration user ou move request actif/non terminal, avec déduplication des deux représentations d’une même opération ;
+- migration user ou move request actif/non terminal, avec déduplication des deux représentations d’une même opération et interprétation adaptée à la phase `PreCreation` ou `ExistingBatch` ; l’erreur Exchange Online `No such request exists in specified index` est interprétée comme une absence de move, pas comme une collecte inconnue ;
 - historique de moves échoués, suspendus ou arrêtés ;
 - unicité et synchronisation de l’utilisateur Entra ;
 - erreurs de provisioning et identity anchor Entra ; l’ancienneté de synchronisation par objet reste informative et ne remplace pas la santé globale du scheduler Entra Connect ;
-- licence actuelle, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; `SPE_F1` est non éligible ;
-- santé de synchronisation Entra Connect depuis le cache ;
+- licence actuelle, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; l’attente de licence dépend de la phase et `SPE_F1` est non éligible ;
+- santé et fraîcheur de la dernière synchronisation Entra Connect en Live, avec fallback cache ;
 - endpoint `ExchangeRemoteMove` en Live ; l’absence de `Test-MigrationServerAvailability` produit `UNKNOWN`, pas un faux échec de l’endpoint ;
-- MRSProxy, certificat hybride, charge active des migrations et cohérence Autodiscover/OAuth ;
+- MRSProxy, certificat hybride, charge active des migrations et cohérence Autodiscover/OAuth ; le contrôle OAuth est consultatif pour un move distant et ne bloque plus à lui seul la migration ;
 - avertissement documenté pour `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException`.
 
 Une source obligatoire absente reste bloquante. Une propriété non disponible dans le cache devient `UNKNOWN`, jamais un faux `PASS`. Chaque contrôle obligatoire produit désormais explicitement un finding `PASS` ou `UNKNOWN`, et `SourceTimestamp` correspond à l’horodatage réel de la source utilisée plutôt qu’à l’heure de l’évaluation.
+
+Les contrôles tenant (endpoint, MRSProxy, certificat, capacité, OAuth et Entra Connect) sont évalués une seule fois. Ils apparaissent dans l’onglet `Tenant checks` et dans `Global-Findings.csv`. Seuls leurs vrais blocages sont répercutés dans le verdict de chaque mailbox, sans dupliquer les findings.
 
 ## Rapports
 
@@ -197,13 +208,14 @@ Chaque exécution crée :
 Output\SEMR-yyyyMMdd-HHmmss\
   Summary.csv
   Findings.csv
+  Global-Findings.csv
   Permissions-Baseline.csv
   Evidence.csv
   Csv-Sources.csv
   Check-Options.csv
 ```
 
-`Summary.csv` contient un verdict par mailbox. `Findings.csv` contient le détail de chaque contrôle : sévérité, résultat, caractère bloquant, valeur observée, valeur attendue, source, message et action recommandée.
+`Summary.csv` contient un verdict par mailbox avec les compteurs mailbox et tenant séparés. `Findings.csv` contient les contrôles propres aux mailboxes. `Global-Findings.csv` contient les contrôles tenant exécutés une seule fois. Chaque finding précise la sévérité, le résultat, le caractère bloquant, la valeur observée, la valeur attendue, la source, son horodatage, le message et l’action recommandée.
 
 Chaque lancement GUI crée également un journal de session horodaté sous `Output\Logs`. Le statut supérieur et l'onglet `Activity` décrivent les phases longues et indiquent quand l'opérateur doit patienter.
 

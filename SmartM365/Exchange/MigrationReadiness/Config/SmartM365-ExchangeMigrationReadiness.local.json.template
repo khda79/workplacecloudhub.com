@@ -1,5 +1,6 @@
 {
   "Mode": "Live",
+  "AssessmentPhase": "PreCreation",
   "DisabledChecks": [],
   "TenantProfile": {
     "ProfileKey": "tenant",
@@ -10,6 +11,9 @@
     "RootPath": "\\\\server\\share\\WORKPLACE\\DATA\\Tenants\\tenant",
     "AlternativeRootPath": "",
     "MaximumAgeHours": 48
+  },
+  "EntraConnectHealth": {
+    "MaximumLastSyncAgeMinutes": 120
   },
   "DefaultTargetSku": "SPE_E3",
   "QuotaSafetyBufferPercent": 10,
