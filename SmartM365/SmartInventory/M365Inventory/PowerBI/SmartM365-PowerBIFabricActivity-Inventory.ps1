@@ -903,7 +903,8 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 }
 
 $logFolder = Join-Path -Path $logAllRoot -ChildPath 'SmartM365-PowerBIFabricActivity-Inventory'
-$logPath = Join-Path -Path $logFolder -ChildPath ("SmartM365-PowerBIFabricActivity-Inventory_{0}.log" -f $runId)
+# Keep the file variable distinct from global:LogPath; PowerShell variable names are case-insensitive.
+$logFilePath = Join-Path -Path $logFolder -ChildPath ("SmartM365-PowerBIFabricActivity-Inventory_{0}.log" -f $runId)
 $transcriptPath = Join-Path -Path $logFolder -ChildPath ("SmartM365-PowerBIFabricActivity-Inventory_{0}_Transcript.log" -f $runId)
 
 Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $OutputPath -LatestOutputRoot $LatestCsvFolderPath
@@ -928,11 +929,11 @@ if ($ValidateOnly) {
     }
 }
 
-$global:LogTextFile = $logPath
-$global:logTextFile = $logPath
+$global:LogTextFile = $logFilePath
+$global:logTextFile = $logFilePath
 $global:LogPath = $logFolder
 $global:logTranscriptFile = $transcriptPath
-Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $OutputPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $logPath
+Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $OutputPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $logFilePath
 
 function Stop-PowerBIActivityTranscript {
     [CmdletBinding()]
@@ -989,7 +990,7 @@ catch {
             Tenant = $Tenant
             UtcRange = "$($dateRange.FromDate.ToString('yyyy-MM-dd'))..$($dateRange.ToDate.ToString('yyyy-MM-dd'))"
             RunId = $runId
-            LogPath = $logPath
+            LogPath = $logFilePath
             TranscriptPath = $transcriptPath
             OutputPath = $OutputPath
         } | Out-Null
@@ -1012,8 +1013,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDwMxUNbDHXjvsz
-# 8FuouY0xtMFEbqzUWQWdKZItNTLNa6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOnWLtDN8Y/OxN
+# z5XU0fX5wm6gMHDwNBRnY+lhFKt++KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1146,31 +1147,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIENQGCG1uZo+PxlUUFHnbIVRIZs8s1A5750nUV+maOZ6MA0GCSqG
-# SIb3DQEBAQUABIIBgEXVMzC9HjFnNhfTW+EP6S9Ww/6rMff0cMMR52KYOWyIR8M5
-# ylOhKpFyVPFgZv3P8jyp8ju9AdFRUYddmS/AxnlJs99BvJt7Hk0Wo3brB/uCB9er
-# PVi65fVzz/PpB5nkY31kemp6v+JluiDBw9+oYvot7eXqpbX0pYrb7QOovz+CWmkA
-# Vz3ekuGUMF+NFpTImoc7KCpqKpQYFr65PULQV7GJuvxPqzMLnrn5StG4Dg3G7HWR
-# 9VQel51x+uMaOFeedLBkhvfPfnAafR3+447juj3qjeHDlPP8RBkJHM+6Tle5nT7I
-# Q7oe8OlYYDPT/kCTUm5Kz2SWQtIWmBji+0H2Fc8sDDPfBkGDZMotM7RCJIL2Tj85
-# p2MqjZkrcJjgpCvQkp6gXSTsf0OkWmEQyK2JhkXT7lBuKdySy8KCzn9guWFmyeXr
-# cyTgpeNaWStwUAEm/kikckUVsAlrSbbDHWMFvwfzi5crn9Daav8O7AGuS6TmThQd
-# zcbD0Y9or31VGgrFZaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIObTNb+yrkZ0bzPnnvpc/Zy31IN4XyKT4QMwvs3wxVMAMA0GCSqG
+# SIb3DQEBAQUABIIBgJWkQoR7SQKquBhMhwoiNI3PTJtZQWe17nowpovZQdDbFUNO
+# 768m84pcwMeNzCo34dZUV7hA/FpnGxx5FdSwfy870nswsCNxJ58cCIPZflyhdPJY
+# bVepyGMq5+ho1abx4d8RsXd8gVF7Io3HafAxUJcealHus13gzHfdp7AuhvoSGuRz
+# e8f+ZOX+IBDiFq9GTZgf46g8RjZziMKorRMYjnCQzV0D+medsu28lcTBUrDlwgfy
+# Ha86OqIvVwzN/Dfb3CslmYyRxfRDExeIX3QxI6S+/aSqYOvScYFNSfXARDVhRzCX
+# Drf8cUeyfa0fOvjj6IM5MBVgNdFdhAyW6ulvvUz2ZB4/i8dnGB3oWapxP+JU49Iz
+# 2gD1bfCHSlPTrVXPVUjtCrvv2spgN82WAmH26bZ+DGLS+Br4gfbufNuLkEucRz+c
+# wZvx21wGDZ0qx4otn9Zy14H3VLt6dfTC6EtortZKFk83RgRnBEbFM5Ls+z+4WCEt
+# 0jdBjOvwg6rfAKnxD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMDMw
-# NTZaMC8GCSqGSIb3DQEJBDEiBCBPddA+4bJaJ43um7ZozARbjDh4jEa8rxjn/7g9
-# f3+hxDANBgkqhkiG9w0BAQEFAASCAgC23kL70kXubOT7SG3vK7EWe+CHozCO77rA
-# mJvSats9JtkmHvm4ttQ7IPN6gzGsji0O+zJnTPb3XKNpSbyWs9yTln19IHgi7WyI
-# zKKi4wqkj7G/y5eni7ENcCK7C+ApzxIUOwBpnYTr6kS9mMasKzD7c33SRMmbZJio
-# noA0FO6nU4hdJZERJXy2TvkFoO1teojdRHih+ni+CLfqZV0FZ9VM45OrOYpf/+LN
-# wnLWGryWpxGJuWc+bkpUW0y6ZvE2hoZ86+/S1fSJMkcfpUD32JRYXaGXeoHE23my
-# Vr7cZCbv6dVAgkNWNZdy3n6f682OVrKNaj+clP7Usowb7Qup80EWl0FIuMoAq9Q6
-# K29DI5rDlwv4yUdoj5mZvUdA6lCXTbrcUHTa8IOhVmhkDkMSwFLqlydfXspOZauh
-# RVQPznWPp/NeS6F+Wq0KTlmeSvfG/Jrf3w87mypc4t+SAoWJK44DgBZiwS2aXlFm
-# kUEk2rTq4Cof6FwRJUA7JYawtTZclcU/tLgVPBmcS/zO1BOsdPJZRFO5m6TaN37D
-# avsbKQN7PNoEnFbiiVCja8DhNENShK3obK0jlxhPNj5LvjJKhQHnxS/LvHYAPWir
-# xdodfj6C5BqjoHvABeKRgrw1rABZV2nM7SykHDb7TVW5kqSOueHCV63ptaBWqmFX
-# pGj9PoO39A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMTA5
+# NDBaMC8GCSqGSIb3DQEJBDEiBCACXIP+U/3QzN3e2hNeYdS2FY1cuDDf4y8QTVt/
+# 845njTANBgkqhkiG9w0BAQEFAASCAgBC7zV2LGJBX1U8Rc2FphC+xRz0vKZuk95z
+# S/4WEPm7hHymp55oLJZ1m4Fr8mE4YEIADqxWQ2oEEkT4u3uujsv3Hb9kgZcAOirl
+# OC8euookKnU61RYqmsyE7+bh22/0XWY/Re6fiVOKWZaDuzVS9hdxdccAB3IWB8RJ
+# vlMFeLdn0xU40sbkWJA5PQcx0Hf+4+w26gPAC7prhxnYxaMOq/I4TIgCHiQRx/MQ
+# 9a4cS5VANvBpbfgWII3pAE0qtYvE+TZSAYgH6gkS/8IABZcGFy51aMwfWUMq4Xyu
+# 0X3ar7JYBVUGQ4DGDmIiJLKTV20OowvVv6MREUM270LQoZe34X0KaceFMITUSUwY
+# zyHpuwqivY8qXXAYx0h3Huf2giJ3HCxya3wdbUmS8ycTWqM+ItBfrhq9dgxSDauO
+# gwdXRfXZearum6ZY/DdR6Lkp1VkDH9ALczzT0GWgPFuqLg9KxsGGviDDc32ldqOM
+# qFAn0LA+JOJ6Xl1pqZFrio8KJUBDy+iATvzZBds6f+QcOn8T7oPPtOOSOGRuY1MD
+# q3y+/y1aBJH3RP6bijCpwIZCRe05QLr04CUQWxyRh/wo687PO5dpwGgL1/fusPfv
+# pusHH0LuKK2kI5/qhIvAcIojy1b5WcmOxDkAnK7v2xMhd0tQMjuFTXwMlngWm6RT
+# 82yQQBlCJQ==
 # SIG # End signature block
