@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.18
+    Version : 1.19
 
 .VERSION
-1.18
+1.19
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.18
+    Version : 1.19
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.18"
+$ScriptVersion = "1.19"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -327,6 +327,7 @@ if (-not $PSBoundParameters.ContainsKey('DeviceDetailCacheMaxAgeDays')) {
 }
 $script:UsePreviousDeviceDetailCache = -not $RefreshDeviceDetailCache
 $script:GraphMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphMaxRetryAttempts' -DefaultValue 8)
+$script:GraphBatchMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphBatchMaxRetryAttempts' -DefaultValue 3)
 $script:GraphRetryDefaultSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryDefaultSeconds' -DefaultValue 30)
 $script:GraphRetryMaxSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphRetryMaxSeconds' -DefaultValue 300)
 # Statistics
@@ -345,6 +346,7 @@ $script:DeviceDetailCompleted = $false
 $script:Stat_DetailAppsTargeted = 0
 $script:Stat_GraphCalls       = 0
 $script:Stat_ThrottleRetries  = 0
+$script:Stat_BatchFallbackApps = 0
 $script:DeviceDetailResumeContractVersion = 3
 
 # ==========================================================
@@ -367,6 +369,7 @@ try {
     WriteLog -Message "ProgressEveryApps  : $ProgressEveryApps"
     WriteLog -Message "Use previous DeviceDetail cache: $script:UsePreviousDeviceDetailCache"
     WriteLog -Message "DeviceDetail cache max age days: $DeviceDetailCacheMaxAgeDays"
+    WriteLog -Message "Graph batch max retry attempts: $script:GraphBatchMaxRetryAttempts"
     WriteLog -Message "RefreshDeviceDetailCache: $RefreshDeviceDetailCache"
     WriteLog -Message "ResetResume        : $ResetResume"
 } catch {
@@ -526,7 +529,7 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps,
         [ValidateRange(0, 5000)][int]$DelayMs = 0,
-        [int]$MaxRetries = $script:GraphMaxRetryAttempts
+        [int]$MaxRetries = $script:GraphBatchMaxRetryAttempts
     )
 
     if ($MaxRetries -lt 1) { $MaxRetries = 1 }
@@ -574,7 +577,8 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
                     continue
                 }
 
-                WriteLog -Message ("Discovered Apps relation batch failed at app offset {0} after {1} attempt(s); sequential fallback will be used for {2} app(s): {3}" -f $offset, $attempt, $pendingApps.Count, $message) 'WARNING'
+                $script:Stat_BatchFallbackApps += $pendingApps.Count
+                WriteLog -Message ("Discovered Apps relation batch path exhausted at app offset {0} after {1} attempt(s); sequential fallback will be used for {2} app(s): {3}" -f $offset, $attempt, $pendingApps.Count, $message) 'INFO'
                 break
             }
 
@@ -597,7 +601,8 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
                         $retryDelay = [math]::Max($retryDelay, $candidateDelay)
                     }
                     else {
-                        WriteLog -Message ("Discovered Apps relation batch returned no sub-response: AppId={0}. Sequential fallback will be used." -f $appId) 'WARNING'
+                        $script:Stat_BatchFallbackApps++
+                        WriteLog -Message ("Discovered Apps relation batch returned no sub-response after {0} attempt(s): AppId={1}. Sequential fallback will be used." -f $attempt, $appId) 'INFO'
                     }
                     continue
                 }
@@ -622,7 +627,8 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
                     continue
                 }
 
-                WriteLog -Message ("Discovered Apps relation batch sub-request failed: AppId={0}; HTTP={1}; Attempts={2}. Sequential fallback will be used." -f $appId, $statusCode, $attempt) 'WARNING'
+                $script:Stat_BatchFallbackApps++
+                WriteLog -Message ("Discovered Apps relation batch path exhausted: AppId={0}; HTTP={1}; Attempts={2}. Sequential fallback will be used." -f $appId, $statusCode, $attempt) 'INFO'
             }
 
             if ($retryApps.Count -gt 0) {
@@ -1637,7 +1643,8 @@ try {
             -GlobalPath $globalPath `
             -Data $summaryRecords `
             -Encoding "UTF8" `
-            -NoTypeInformation
+            -NoTypeInformation `
+            -SkipWeeklyHistory
 
         $summaryBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DiscoveredApps_Summary'
         $summaryLatestRoot = if ([string]::IsNullOrWhiteSpace($globalPath)) { $OutputPath } else { $globalPath }
@@ -1670,8 +1677,8 @@ try {
             }
 
             $weeklyHistoryRoot = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory'
-            Add-SmartM365WeeklyHistory -SourceCsvPaths @($deviceDetailLatestPath) -HistoryRootPath $weeklyHistoryRoot | Out-Null
-            WriteLog -Message "DeviceDetail WeeklyHistory publication completed: $deviceDetailLatestPath" "INFO"
+            Add-SmartM365WeeklyHistory -SourceCsvPaths @($summaryLatestPath, $deviceDetailLatestPath) -HistoryRootPath $weeklyHistoryRoot | Out-Null
+            WriteLog -Message "Summary and DeviceDetail WeeklyHistory publication completed in one batch: $weeklyHistoryRoot" "INFO"
         }
 
     }
@@ -1749,6 +1756,7 @@ $($global:LogTextFile)
     WriteLog -Message "  Device detail rows from cache        : $($script:Stat_DeviceDetailRowsFromCache)"
     WriteLog -Message "  Graph API calls                      : $($script:Stat_GraphCalls)"
     WriteLog -Message "  Throttle retries (429)               : $($script:Stat_ThrottleRetries)"
+    WriteLog -Message "  Apps sent to sequential fallback     : $($script:Stat_BatchFallbackApps)"
     WriteLog -Message "  Elapsed time                         : $elapsedStr"
     WriteLog -Message "$TaskName completed."
 
