@@ -953,10 +953,16 @@ try {
     WriteLog -Message ("Starting {0}. Tenant={1}; FromDate={2}; ToDate={3}; UtcDays={4}; InteractiveAuth={5}; MaxItems={6}" -f $TaskName, $Tenant, $dateRange.FromDate.ToString('yyyy-MM-dd'), $dateRange.ToDate.ToString('yyyy-MM-dd'), $dateRange.DayCount, [bool]$InteractiveAuth, $MaxItems) -Level 'INFO'
 
     Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('MicrosoftPowerBIMgmt.Profile') -RequiredCommands @('Connect-PowerBIServiceAccount', 'Get-PowerBIAccessToken', 'Disconnect-PowerBIServiceAccount') -OutputPaths @($OutputPath, $LatestCsvFolderPath, $logFolder) | Out-Null
-    $loadedPowerBIModule = Get-Module -Name 'MicrosoftPowerBIMgmt.Profile' | Sort-Object Version -Descending | Select-Object -First 1
-    if ($null -eq $loadedPowerBIModule -or $loadedPowerBIModule.Version -lt [version]'1.2.1111') {
-        throw 'MicrosoftPowerBIMgmt.Profile 1.2.1111 or later is required.'
+    $requiredPowerBIModuleVersion = [version]'1.2.1111'
+    $availablePowerBIModule = Get-Module -ListAvailable -Name 'MicrosoftPowerBIMgmt.Profile' | Sort-Object Version -Descending | Select-Object -First 1
+    if ($null -eq $availablePowerBIModule) {
+        throw 'MicrosoftPowerBIMgmt.Profile was not found after the successful preflight.'
     }
+    $availablePowerBIModuleVersion = [version]$availablePowerBIModule.Version
+    if ($availablePowerBIModuleVersion.CompareTo($requiredPowerBIModuleVersion) -lt 0) {
+        throw "MicrosoftPowerBIMgmt.Profile $requiredPowerBIModuleVersion or later is required. Detected version: $availablePowerBIModuleVersion."
+    }
+    WriteLog -Message ("Power BI module version validated. Required={0}; Detected={1}; Path={2}" -f $requiredPowerBIModuleVersion, $availablePowerBIModuleVersion, $availablePowerBIModule.Path) -Level 'SUCCESS'
 
     Connect-PowerBIActivitySession
     $collection = Invoke-PowerBIActivityCollection -DailyWindows $dailyWindows -MaximumItems $MaxItems
