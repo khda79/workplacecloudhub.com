@@ -8,7 +8,7 @@ and a standalone HTML report. The script is read-only and does not connect to Mi
 Graph, Azure, Citrix, or Azure Virtual Desktop.
 
 .NOTES
-Version: 1.0
+Version: 1.1
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -20,6 +20,10 @@ param(
     [string]$LatestOutputRoot,
     [int]$StaleUserDays = 0,
     [int]$StaleDeviceDays = 0,
+    [int]$MaxSourceAgeHours = 0,
+    [int]$LicenseCapacityWarningPercent = 0,
+    [string]$SourceContractPath,
+    [string]$PriceBaselinePath,
     [string]$ReportTitle,
     [switch]$ValidateOnly
 )
@@ -48,21 +52,32 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Get-SmartFinOpsSc
 if ([string]::IsNullOrWhiteSpace($LatestOutputRoot)) { $LatestOutputRoot = Get-SmartFinOpsScriptConfigValue -Config $ScriptLocalConfig -Name 'LatestOutputRoot' -DefaultValue '' }
 if ($StaleUserDays -le 0) { $StaleUserDays = [int](Get-SmartFinOpsScriptConfigValue -Config $ScriptLocalConfig -Name 'StaleUserDays' -DefaultValue 90) }
 if ($StaleDeviceDays -le 0) { $StaleDeviceDays = [int](Get-SmartFinOpsScriptConfigValue -Config $ScriptLocalConfig -Name 'StaleDeviceDays' -DefaultValue 60) }
-if ([string]::IsNullOrWhiteSpace($ReportTitle)) { $ReportTitle = [string](Get-SmartFinOpsScriptConfigValue -Config $ScriptLocalConfig -Name 'ReportTitle' -DefaultValue 'SmartFinOps Workplace Report') }
+if ($MaxSourceAgeHours -le 0) { $MaxSourceAgeHours = [int](Get-SmartFinOpsScriptConfigValue -Config $ScriptLocalConfig -Name 'MaxSourceAgeHours' -DefaultValue 72) }
+if ($LicenseCapacityWarningPercent -le 0) { $LicenseCapacityWarningPercent = [int](Get-SmartFinOpsScriptConfigValue -Config $ScriptLocalConfig -Name 'LicenseCapacityWarningPercent' -DefaultValue 95) }
+if ([string]::IsNullOrWhiteSpace($SourceContractPath)) { $SourceContractPath = Join-Path -Path $PSScriptRoot -ChildPath 'Config\SmartFinOps-Workplace-SourceContracts.json' }
+if ([string]::IsNullOrWhiteSpace($PriceBaselinePath)) { $PriceBaselinePath = [string](Get-SmartFinOpsScriptConfigValue -Config $ScriptLocalConfig -Name 'PriceBaselinePath' -DefaultValue (Join-Path -Path $PSScriptRoot -ChildPath 'Config\SmartFinOps-Workplace-FrancePriceBaseline.json')) }
+if ([string]::IsNullOrWhiteSpace($ReportTitle)) { $ReportTitle = [string](Get-SmartFinOpsScriptConfigValue -Config $ScriptLocalConfig -Name 'ReportTitle' -DefaultValue 'SmartFinOps Workplace - Value and Decisions') }
+if ($LicenseCapacityWarningPercent -lt 1 -or $LicenseCapacityWarningPercent -gt 100) { throw 'LicenseCapacityWarningPercent must be between 1 and 100.' }
+if (-not (Test-Path -LiteralPath $SourceContractPath -PathType Leaf)) { throw "Source contract not found: $SourceContractPath" }
+if (-not (Test-Path -LiteralPath $PriceBaselinePath -PathType Leaf)) { throw "Price baseline not found: $PriceBaselinePath" }
+$sourceContract = Get-Content -LiteralPath $SourceContractPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
 
 $resolvedOutputRoots = Resolve-SmartFinOpsOutputRoots -OutputRoot $OutputRoot -LatestOutputRoot $LatestOutputRoot -AreaPath 'Workplace'
 $OutputRoot = $resolvedOutputRoots.OutputRoot
 $LatestOutputRoot = $resolvedOutputRoots.LatestOutputRoot
 $runOutputRoot = Join-Path -Path $OutputRoot -ChildPath $runId
-$logRoot = Resolve-SmartFinOpsConfigTokenValue -Value '{{LogAllRootPath}}'
-$logFolder = Join-Path -Path $logRoot -ChildPath 'Workplace'
-$logPath = Join-Path -Path $logFolder -ChildPath ("SmartFinOps-Workplace-Analyze_{0}.log" -f $runId)
+$logPath = Join-Path -Path $runOutputRoot -ChildPath 'SmartFinOps-Workplace-Analyze.log'
 
 $script:RunId = $runId
 $script:RunOutputRoot = $runOutputRoot
 $script:LatestOutputRoot = $LatestOutputRoot
 $script:LogPath = $logPath
 $script:SmartM365LatestCsvFolderPath = $SmartM365LatestCsvFolderPath
+$script:SmartFinOpsMaxSourceAgeHours = $MaxSourceAgeHours
+$script:SmartFinOpsSourceContract = $sourceContract
+$script:SmartFinOpsPriceBaselinePath = $PriceBaselinePath
+$script:SmartFinOpsExcludedFileNamePatterns = @($sourceContract.ExcludedFileNamePatterns)
+if ($script:SmartFinOpsExcludedFileNamePatterns.Count -eq 0) { $script:SmartFinOpsExcludedFileNamePatterns = @('MAXITEMS') }
 
 function Write-SmartFinOpsLog {
     [CmdletBinding()]
@@ -94,7 +109,17 @@ function ConvertTo-DateTimeOrNull {
     if ($null -eq $Value) { return $null }
     $text = ([string]$Value).Trim()
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
-    try { return [datetime]$text } catch { return $null }
+
+try { return [datetime]$text } catch { return $null }
+}
+
+function ConvertTo-DecimalOrZero {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return [decimal]0 }
+
+try { return [decimal]::Parse(([string]$Value).Trim(), [System.Globalization.CultureInfo]::InvariantCulture) }
+    catch { return [decimal]0 }
 }
 
 function ConvertTo-BoolOrNull {
@@ -130,7 +155,8 @@ function Import-SmartFinOpsSourceCsv {
         $DataQualityRows.Add([pscustomobject]@{ RunId = $script:RunId; SourceName = $SourceName; Status = 'Missing'; Path = ($FileNames -join ' | '); RowCount = 0; LastWriteTime = ''; Notes = 'Source CSV not found in SmartM365 DATA-LAST.' }) | Out-Null
         return @()
     }
-    try {
+
+try {
         $rows = @(Import-Csv -LiteralPath $path)
         $item = Get-Item -LiteralPath $path
         $DataQualityRows.Add([pscustomobject]@{ RunId = $script:RunId; SourceName = $SourceName; Status = 'Loaded'; Path = $path; RowCount = $rows.Count; LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'); Notes = '' }) | Out-Null
@@ -153,7 +179,7 @@ function Get-SmartFinOpsSummaryRow {
 function Export-SmartFinOpsCsv {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
-    $historyPath = Join-Path -Path $script:RunOutputRoot -ChildPath ("{0}_{1}.csv" -f $Name, $script:RunId)
+    $historyPath = Join-Path -Path $script:RunOutputRoot -ChildPath ("{0}.csv" -f $Name)
     $latestPath = Join-Path -Path $script:LatestOutputRoot -ChildPath ("{0}.csv" -f $Name)
     foreach ($folder in @((Split-Path -Path $historyPath -Parent), (Split-Path -Path $latestPath -Parent))) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
@@ -180,7 +206,8 @@ function Get-MonthlySkuPrice {
     if ($null -eq $mapProperty -or $null -eq $mapProperty.Value) { return $null }
     $priceProperty = $mapProperty.Value.PSObject.Properties[$SkuPartNumber]
     if ($null -eq $priceProperty -or $null -eq $priceProperty.Value) { return $null }
-    try { return [decimal]$priceProperty.Value } catch { return $null }
+
+try { return [decimal]$priceProperty.Value } catch { return $null }
 }
 
 function ConvertTo-HtmlEncoded {
@@ -217,7 +244,9 @@ function Write-SmartFinOpsHtmlReport {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SummaryRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LicenseRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LicenseCapacityRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$DeviceRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ExchangeRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$DataQualityRows
     )
     $loadedSources = @($DataQualityRows | Where-Object { $_.Status -eq 'Loaded' }).Count
@@ -267,7 +296,9 @@ function Write-SmartFinOpsHtmlReport {
   <main>
     <section><h2>Summary</h2>$(Convert-RowsToHtmlTable -Rows $SummaryRows -MaxRows 80)</section>
     <section><h2>License Optimization</h2>$(Convert-RowsToHtmlTable -Rows $LicenseRows -MaxRows 40)</section>
+    <section><h2>License Capacity by SKU</h2>$(Convert-RowsToHtmlTable -Rows $LicenseCapacityRows -MaxRows 80)</section>
     <section><h2>Device Optimization</h2>$(Convert-RowsToHtmlTable -Rows $DeviceRows -MaxRows 40)</section>
+    <section><h2>Exchange Optimization</h2>$(Convert-RowsToHtmlTable -Rows $ExchangeRows -MaxRows 80)</section>
     <section><h2>Data Quality</h2>$(Convert-RowsToHtmlTable -Rows $DataQualityRows -MaxRows 80)</section>
   </main>
 </body>
@@ -278,43 +309,66 @@ function Write-SmartFinOpsHtmlReport {
     Set-Content -LiteralPath $Path -Value $html -Encoding UTF8
 }
 
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Config\SmartFinOps-Workplace-DataContract.ps1')
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Config\SmartFinOps-Workplace-InventoryValidation.ps1')
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Config\SmartFinOps-Workplace-LicenseDecision.ps1')
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Config\SmartFinOps-Workplace-ExchangeDecision.ps1')
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Config\SmartFinOps-Workplace-ValueModel.ps1')
+
 try {
     New-Item -Path $runOutputRoot -ItemType Directory -Force | Out-Null
     New-Item -Path $LatestOutputRoot -ItemType Directory -Force | Out-Null
-    New-Item -Path $logFolder -ItemType Directory -Force | Out-Null
 
     Write-SmartFinOpsLog -Message "Starting SmartFinOps Workplace analysis. RunId=$runId"
     Write-SmartFinOpsLog -Message ("SmartM365 latest CSV folder: {0}" -f $SmartM365LatestCsvFolderPath)
 
     if ($ValidateOnly) {
-        Write-SmartFinOpsLog -Level SUCCESS -Message 'Validation completed.'
-        return
+        Write-SmartFinOpsLog -Message 'ValidateOnly enabled: source rows will not be imported; contracts and freshness will be checked.'
     }
 
     $dataQualityRows = New-Object System.Collections.Generic.List[object]
     $summaryRows = New-Object System.Collections.Generic.List[object]
     $licenseOptimizationRows = New-Object System.Collections.Generic.List[object]
+    $licenseCapacityRows = New-Object System.Collections.Generic.List[object]
     $deviceOptimizationRows = New-Object System.Collections.Generic.List[object]
+    $exchangeOptimizationRows = New-Object System.Collections.Generic.List[object]
 
-    $m365Users = Import-SmartFinOpsSourceCsv -SourceName 'M365 active users' -FileNames @('M365_Users_Active.csv') -DataQualityRows $dataQualityRows
-    $m365UserActivity = Import-SmartFinOpsSourceCsv -SourceName 'M365 user activity' -FileNames @('M365_Users_Activity.csv') -DataQualityRows $dataQualityRows
-    $m365MailboxUsage = Import-SmartFinOpsSourceCsv -SourceName 'M365 mailbox usage' -FileNames @('M365_Mailbox_Usage.csv') -DataQualityRows $dataQualityRows
-    $m365OneDriveUsage = Import-SmartFinOpsSourceCsv -SourceName 'M365 OneDrive usage' -FileNames @('M365_OneDrive_Usage.csv') -DataQualityRows $dataQualityRows
-    $m365SharePointSiteUsage = Import-SmartFinOpsSourceCsv -SourceName 'M365 SharePoint site usage' -FileNames @('M365_SharePoint_SiteUsage.csv') -DataQualityRows $dataQualityRows
-    $m365AppsActivations = Import-SmartFinOpsSourceCsv -SourceName 'M365 Apps activations' -FileNames @('M365_Apps_Activations.csv') -DataQualityRows $dataQualityRows
-    $m365TeamsUserActivity = Import-SmartFinOpsSourceCsv -SourceName 'M365 Teams user activity' -FileNames @('M365_Teams_UserActivity.csv') -DataQualityRows $dataQualityRows
-    $m365EmailActivity = Import-SmartFinOpsSourceCsv -SourceName 'M365 email activity' -FileNames @('M365_Email_Activity.csv') -DataQualityRows $dataQualityRows
-    $m365LicenseUsers = Import-SmartFinOpsSourceCsv -SourceName 'M365 license user assignments' -FileNames @('M365_Licenses_Users.csv') -DataQualityRows $dataQualityRows
-    $m365LicenseTenant = Import-SmartFinOpsSourceCsv -SourceName 'M365 tenant licenses' -FileNames @('M365_Licenses_Tenant.csv') -DataQualityRows $dataQualityRows
-    $intuneDevices = Import-SmartFinOpsSourceCsv -SourceName 'Intune devices' -FileNames @('Intune_Devices_Inventory.csv') -DataQualityRows $dataQualityRows
-    $intuneCompliance = Import-SmartFinOpsSourceCsv -SourceName 'Intune device compliance' -FileNames @('Intune_Devices_Compliance.csv') -DataQualityRows $dataQualityRows
-    $entraDevices = Import-SmartFinOpsSourceCsv -SourceName 'Entra devices' -FileNames @('M365_Entra_Devices.csv') -DataQualityRows $dataQualityRows
-    $adUsers = Import-SmartFinOpsSourceCsv -SourceName 'Active Directory users' -FileNames @('AD_Users_AllDomains.csv') -DataQualityRows $dataQualityRows
-    $adComputers = Import-SmartFinOpsSourceCsv -SourceName 'Active Directory computers' -FileNames @('AD_Computers_AllDomains.csv') -DataQualityRows $dataQualityRows
-    $autopilotDevices = Import-SmartFinOpsSourceCsv -SourceName 'Windows Autopilot devices' -FileNames @('Intune_Autopilot_Devices.csv') -DataQualityRows $dataQualityRows
-    $upgradeEligibility = Import-SmartFinOpsSourceCsv -SourceName 'Windows upgrade eligibility' -FileNames @('Intune_Devices_UpgradeEligibility.csv', 'Intune_Devices_Windows11UpgradeEligibility.csv') -DataQualityRows $dataQualityRows
-    $exoMailboxes = Import-SmartFinOpsSourceCsv -SourceName 'Exchange Online mailboxes' -FileNames @('Exchange_EXO_Mailboxes_AllDomains.csv', 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv') -DataQualityRows $dataQualityRows
-    $backupUnprotected = Import-SmartFinOpsSourceCsv -SourceName 'Exchange backup unprotected mailboxes' -FileNames @('Exchange_EXO_BackupProtection_UnprotectedMailboxes.csv') -DataQualityRows $dataQualityRows
+    $m365Users = Import-SmartFinOpsContractSource -Key 'M365ActiveUsers' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365UserActivity = Import-SmartFinOpsContractSource -Key 'M365UserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365MailboxUsage = Import-SmartFinOpsContractSource -Key 'M365MailboxUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365OneDriveUsage = Import-SmartFinOpsContractSource -Key 'M365OneDriveUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365SharePointSiteUsage = Import-SmartFinOpsSourceCsv -SourceName 'M365 SharePoint site usage' -FileNames @('M365_SharePoint_SiteUsage.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365AppsActivations = Import-SmartFinOpsContractSource -Key 'M365AppsActivations' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365TeamsUserActivity = Import-SmartFinOpsContractSource -Key 'M365TeamsUserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365EmailActivity = Import-SmartFinOpsContractSource -Key 'M365EmailActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365LicenseUsers = Import-SmartFinOpsContractSource -Key 'M365LicenseUsers' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365LicenseTenant = Import-SmartFinOpsContractSource -Key 'M365LicenseTenant' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $intuneDevices = Import-SmartFinOpsContractSource -Key 'IntuneDevices' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $intuneCompliance = Import-SmartFinOpsContractSource -Key 'IntuneCompliance' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $entraDevices = Import-SmartFinOpsContractSource -Key 'EntraDevices' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $adUsers = Import-SmartFinOpsContractSource -Key 'ADUsersCanonical' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $adComputers = Import-SmartFinOpsContractSource -Key 'ADComputersCanonical' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $null = Import-SmartFinOpsContractSource -Key 'ADUsersRaw' -ValidationOnly -DataQualityRows $dataQualityRows
+    $null = Import-SmartFinOpsContractSource -Key 'ADComputersRaw' -ValidationOnly -DataQualityRows $dataQualityRows
+    $autopilotDevices = Import-SmartFinOpsSourceCsv -SourceName 'Windows Autopilot devices' -FileNames @('Intune_Autopilot_Devices.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $upgradeEligibility = Import-SmartFinOpsSourceCsv -SourceName 'Windows upgrade eligibility' -FileNames @('Intune_Devices_UpgradeEligibility.csv', 'Intune_Devices_Windows11UpgradeEligibility.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $exoMailboxes = Import-SmartFinOpsContractSource -Key 'EXOMailboxes' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $exoMailboxStats = Import-SmartFinOpsContractSource -Key 'EXOMailboxStats' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $exoMailboxArchive = Import-SmartFinOpsContractSource -Key 'EXOMailboxArchive' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $exoMailboxPermissions = Import-SmartFinOpsContractSource -Key 'EXOMailboxPermissions' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $backupProtected = Import-SmartFinOpsContractSource -Key 'BackupProtectedMailboxes' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $backupPolicyScope = Import-SmartFinOpsContractSource -Key 'BackupPolicyScope' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $remoteRoutingIssues = Import-SmartFinOpsContractSource -Key 'RemoteRoutingIssues' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $proxyAddressControl = Import-SmartFinOpsContractSource -Key 'ProxyAddressControl' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    Add-SmartFinOpsUnreferencedCsvQualityRows -DataQualityRows $dataQualityRows
+
+    if ($ValidateOnly) {
+        $validationPath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_DataQuality' -Rows $dataQualityRows.ToArray()
+        $invalidContracts = @($dataQualityRows | Where-Object { $_.ContractStatus -eq 'Invalid' }).Count
+        $staleSources = @($dataQualityRows | Where-Object { $_.FreshnessStatus -eq 'Stale' }).Count
+        Write-SmartFinOpsLog -Level SUCCESS -Message ("Validation completed. InvalidContracts={0}; StaleSources={1}; Output={2}" -f $invalidContracts, $staleSources, $validationPath)
+        return
+    }
 
     $now = Get-Date
     $staleUserCutoff = $now.AddDays(-1 * [math]::Abs($StaleUserDays))
@@ -323,7 +377,10 @@ try {
     $currency = if ($priceModel -and $priceModel.PSObject.Properties['Currency']) { [string]$priceModel.Currency } else { '' }
 
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Loaded source files' -Value @($dataQualityRows | Where-Object { $_.Status -eq 'Loaded' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Catalogued non-imported source files' -Value @($dataQualityRows | Where-Object { $_.Status -eq 'Catalogued' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Missing source files' -Value @($dataQualityRows | Where-Object { $_.Status -eq 'Missing' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Stale source files' -Value @($dataQualityRows | Where-Object { $_.FreshnessStatus -eq 'Stale' }).Count -Interpretation ("Age exceeds {0} hours; MAXITEMS files are excluded." -f $MaxSourceAgeHours))) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Invalid source contracts' -Value @($dataQualityRows | Where-Object { $_.ContractStatus -eq 'Invalid' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Users' -Metric 'M365 active users rows' -Value $m365Users.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Users' -Metric 'M365 user activity rows' -Value $m365UserActivity.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Mailbox usage rows' -Value $m365MailboxUsage.Count)) | Out-Null
@@ -339,7 +396,13 @@ try {
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'License assignment rows' -Value $m365LicenseUsers.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Tenant SKU rows' -Value $m365LicenseTenant.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Mailbox rows' -Value $exoMailboxes.Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Unprotected mailbox rows' -Value $backupUnprotected.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Mailbox statistics rows' -Value $exoMailboxStats.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Mailbox archive rows' -Value $exoMailboxArchive.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Mailbox permission rows' -Value $exoMailboxPermissions.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Backup protected mailbox rows' -Value $backupProtected.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Backup policy scope rows' -Value $backupPolicyScope.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Remote routing issue rows' -Value $remoteRoutingIssues.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Proxy address control rows' -Value $proxyAddressControl.Count -Interpretation 'Control population; non-OK rows are findings.')) | Out-Null
 
     $m365UserByUpn = @{}
     foreach ($user in $m365Users) {
@@ -357,6 +420,17 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($upn)) { $adUserByUpn[$upn.ToLowerInvariant()] = $user }
     }
 
+    Write-SmartFinOpsLog -Message 'Building consolidated user activity evidence from detailed M365 and Intune sources.'
+    $userEvidenceMap = New-SmartFinOpsUserEvidenceMap `
+        -UserActivityRows $m365UserActivity `
+        -MailboxUsageRows $m365MailboxUsage `
+        -OneDriveUsageRows $m365OneDriveUsage `
+        -AppsActivationRows $m365AppsActivations `
+        -TeamsActivityRows $m365TeamsUserActivity `
+        -EmailActivityRows $m365EmailActivity `
+        -IntuneDeviceRows $intuneDevices `
+        -RecentCutoff $staleUserCutoff
+    Write-SmartFinOpsLog -Message ("Built consolidated activity evidence for {0} user(s)." -f $userEvidenceMap.Count)
     $uniqueLicensedUserKeys = New-Object System.Collections.Generic.HashSet[string]
     foreach ($licenseRow in $m365LicenseUsers) {
         $upn = [string](Get-RowPropertyValue -Row $licenseRow -Names @('User principal name', 'UserPrincipalName'))
@@ -371,8 +445,15 @@ try {
         $adUser = if ($adUserByUpn.ContainsKey($userKey)) { $adUserByUpn[$userKey] } else { $null }
         $lastM365Activity = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $m365Activity -Names @('LastActivityDate'))
         $lastM365ActivityWorkload = [string](Get-RowPropertyValue -Row $m365Activity -Names @('LastActivityWorkload'))
+        $userEvidence = if ($userEvidenceMap.ContainsKey($userKey)) { $userEvidenceMap[$userKey] } else { Get-SmartFinOpsEvidenceRecord -Map $userEvidenceMap -UserKey $userKey }
+        $lastDetailedActivity = $userEvidence.LatestDetailedActivity
+        $workloadEvidence = (@($userEvidence.RecentWorkloads) | Sort-Object) -join ' | '
         $lastSignIn = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $m365User -Names @('LastSignInDateTime', 'Last sign-in time'))
         $lastAdLogon = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $adUser -Names @('LastLogonDate', 'Last logon date'))
+        $activityCandidates = @($lastM365Activity, $lastDetailedActivity, $lastSignIn, $lastAdLogon)
+        $latestKnownActivityRows = @($activityCandidates | Where-Object { $null -ne $_ } | Sort-Object -Descending | Select-Object -First 1)
+        $latestKnownActivity = if ($latestKnownActivityRows.Count -gt 0) { [datetime]$latestKnownActivityRows[0] } else { $null }
+        $hasUsageGuardrail = $userEvidence.HasDesktopAppsActivation -or $userEvidence.HasRecentManagedDevice
         $accountEnabled = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $m365User -Names @('AccountEnabled'))
         if ($null -eq $accountEnabled) {
             $blockCredential = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $m365User -Names @('Block credential'))
@@ -383,15 +464,15 @@ try {
         $reason = ''
         if ($null -ne $accountEnabled -and -not $accountEnabled) { $reason = 'Licensed M365 user is disabled or blocked.' }
         elseif ($null -ne $adEnabled -and -not $adEnabled) { $reason = 'Licensed user is disabled in Active Directory.' }
-        elseif ($lastM365Activity -and $lastM365Activity -lt $staleUserCutoff) { $reason = "Licensed user has no recent M365 workload activity within $StaleUserDays days." }
-        elseif ($lastSignIn -and $lastSignIn -lt $staleUserCutoff) { $reason = "Licensed user has no recent M365 sign-in within $StaleUserDays days." }
-        elseif ($lastAdLogon -and $lastAdLogon -lt $staleUserCutoff) { $reason = "Licensed user has no recent AD logon within $StaleUserDays days." }
+        elseif ($latestKnownActivity -and $latestKnownActivity -lt $staleUserCutoff -and -not $hasUsageGuardrail) { $reason = "Licensed user has no recent activity across aggregate and detailed M365 workloads, M365 sign-in, AD logon, or Intune device evidence within $StaleUserDays days." }
+        elseif (-not $latestKnownActivity -and -not $hasUsageGuardrail -and ($m365User -or $adUser)) { $reason = 'Licensed user has no observed activity date in aggregate or detailed sources; business need must be confirmed.' }
         elseif (-not $m365User -and -not $adUser) { $reason = 'Licensed user was not found in M365 active users or AD user exports.' }
 
         if (-not [string]::IsNullOrWhiteSpace($reason)) {
             $monthlyPrice = Get-MonthlySkuPrice -PriceModel $priceModel -SkuPartNumber $skuPartNumber
             $licenseOptimizationRows.Add([pscustomobject]@{
                 RunId = $runId
+                FindingType = 'License inactivity or account state'
                 UserPrincipalName = $upn
                 SkuPartNumber = $skuPartNumber
                 SkuName = $skuName
@@ -399,6 +480,10 @@ try {
                 Reason = $reason
                 LastM365Activity = if ($lastM365Activity) { $lastM365Activity.ToString('yyyy-MM-dd') } else { '' }
                 LastM365ActivityWorkload = $lastM365ActivityWorkload
+                LastDetailedActivity = if ($lastDetailedActivity) { $lastDetailedActivity.ToString('yyyy-MM-dd') } else { '' }
+                WorkloadEvidence = $workloadEvidence
+                HasDesktopAppsActivation = $userEvidence.HasDesktopAppsActivation
+                HasRecentManagedDevice = $userEvidence.HasRecentManagedDevice
                 LastM365SignIn = if ($lastSignIn) { $lastSignIn.ToString('yyyy-MM-dd') } else { '' }
                 LastADLogon = if ($lastAdLogon) { $lastAdLogon.ToString('yyyy-MM-dd') } else { '' }
                 AccountEnabled = $accountEnabled
@@ -408,8 +493,141 @@ try {
             }) | Out-Null
         }
     }
+    Write-SmartFinOpsLog -Message 'Building E3, F3, or no-license decision matrix.'
+    $userLicenseDecisionRows = New-SmartFinOpsUserLicenseDecisionRows `
+        -LicenseRows $m365LicenseUsers `
+        -M365Users $m365Users `
+        -ADUsers $adUsers `
+        -EvidenceMap $userEvidenceMap `
+        -RecentCutoff $staleUserCutoff `
+        -PriceModel $priceModel
+    Write-SmartFinOpsLog -Message ("Built {0} user license decision(s)." -f $userLicenseDecisionRows.Count)
+    Write-SmartFinOpsLog -Message 'Building disabled user-mailbox conversion decisions.'
+    $sharedMailboxConversionRows = New-SmartFinOpsSharedMailboxConversionRows `
+        -MailboxRows $exoMailboxes `
+        -MailboxStatsRows $exoMailboxStats `
+        -MailboxArchiveRows $exoMailboxArchive `
+        -MailboxPermissionRows $exoMailboxPermissions `
+        -MailboxUsageRows $m365MailboxUsage `
+        -M365Users $m365Users `
+        -ADUsers $adUsers `
+        -UserDecisionRows $userLicenseDecisionRows `
+        -Currency $currency
+    foreach ($row in $sharedMailboxConversionRows) { $exchangeOptimizationRows.Add($row) | Out-Null }
+    Write-SmartFinOpsLog -Message ("Built {0} disabled user-mailbox conversion decision(s)." -f $sharedMailboxConversionRows.Count)
+    $personaSignalDefinitions = @(
+        [pscustomobject]@{ Property = 'IsE3PersonaMissingE3License'; FindingType = 'Persona-license mismatch'; Reason = 'E3 target persona does not currently have an E3 license.' },
+        [pscustomobject]@{ Property = 'HasRemainingF3MailboxSizeNonCompliance'; FindingType = 'F3 mailbox non-compliance'; Reason = 'F3 persona retains a mailbox-size non-compliance signal.' },
+        [pscustomobject]@{ Property = 'IsUnlicensedEnabledF3MailboxBlockingMigration'; FindingType = 'F3 migration blocker'; Reason = 'Enabled unlicensed F3 mailbox is marked as blocking migration.' },
+        [pscustomobject]@{ Property = 'HasDuplicateM365LicenseAssignment'; FindingType = 'Direct and group duplicate'; Reason = 'User has a duplicate direct and group M365 license assignment signal.' }
+    )
+    $personaSignalCounts = @{}
+    foreach ($definition in $personaSignalDefinitions) { $personaSignalCounts[$definition.Property] = 0 }
+    foreach ($adUser in $adUsers) {
+        $upn = [string](Get-RowPropertyValue -Row $adUser -Names @('UserPrincipalName', 'User principal name'))
+        foreach ($definition in $personaSignalDefinitions) {
+            $signal = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $adUser -Names @($definition.Property))
+            if ($signal -ne $true) { continue }
+            $personaSignalCounts[$definition.Property]++
+            $licenseOptimizationRows.Add([pscustomobject]@{
+                RunId = $runId
+                FindingType = $definition.FindingType
+                UserPrincipalName = $upn
+                SkuPartNumber = ''
+                SkuName = ''
+                Source = 'AD_Users_AllDomains.csv enriched canonical'
+                Reason = $definition.Reason
+                LastM365Activity = [string](Get-RowPropertyValue -Row $adUser -Names @('M365LastActivityDate', 'LastM365ActivityDate'))
+                LastM365ActivityWorkload = [string](Get-RowPropertyValue -Row $adUser -Names @('M365LastActivityWorkload'))
+                LastM365SignIn = [string](Get-RowPropertyValue -Row $adUser -Names @('LastSignInDateTime'))
+                LastADLogon = [string](Get-RowPropertyValue -Row $adUser -Names @('LastLogonDate'))
+                AccountEnabled = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $adUser -Names @('M365AccountEnabled'))
+                ADEnabled = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $adUser -Names @('Enabled'))
+                Currency = $currency
+                EstimatedMonthlyWaste = ''
+            }) | Out-Null
+        }
+    }
+
+    foreach ($tenantSku in $m365LicenseTenant) {
+        $skuPartNumber = [string](Get-RowPropertyValue -Row $tenantSku -Names @('TenantSkuPartNumber', 'SkuPartNumber'))
+        $skuDisplayName = [string](Get-RowPropertyValue -Row $tenantSku -Names @('TenantSkuDisplayName', 'SkuName'))
+        $enabledUnits = ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $tenantSku -Names @('TenantPrepaidEnabled'))
+        $consumedUnits = ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $tenantSku -Names @('TenantConsumedUnits'))
+        $availableUnits = $enabledUnits - $consumedUnits
+        $utilization = if ($enabledUnits -gt 0) { [math]::Round(([double]$consumedUnits / [double]$enabledUnits) * 100, 2) } else { $null }
+        $capacityStatus = if ($enabledUnits -le 0) { 'NoFiniteCapacity' }
+            elseif ($availableUnits -lt 0) { 'OverConsumed' }
+            elseif ($availableUnits -eq 0) { 'AtCapacity' }
+            elseif ($utilization -ge $LicenseCapacityWarningPercent) { 'Warning' }
+            else { 'Available' }
+        $licenseCapacityRows.Add([pscustomobject]@{
+            RunId = $runId
+            SkuPartNumber = $skuPartNumber
+            SkuDisplayName = $skuDisplayName
+            EnabledUnits = $enabledUnits
+            ConsumedUnits = $consumedUnits
+            AvailableUnits = $availableUnits
+            UtilizationPercent = $utilization
+            WarningThresholdPercent = $LicenseCapacityWarningPercent
+            CapacityStatus = $capacityStatus
+        }) | Out-Null
+    }
+
+    $remoteRoutingUserKeys = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($issue in $remoteRoutingIssues) {
+        $identity = [string](Get-RowPropertyValue -Row $issue -Names @('UserPrincipalName', 'SamAccountName'))
+        if (-not [string]::IsNullOrWhiteSpace($identity)) { [void]$remoteRoutingUserKeys.Add($identity.ToLowerInvariant()) }
+        $exchangeOptimizationRows.Add((New-SmartFinOpsExchangeOptimizationRow `
+            -FindingType 'RemoteRouting' -Identity $identity `
+            -Severity ([string](Get-RowPropertyValue -Row $issue -Names @('Severity'))) `
+            -IssueType ([string](Get-RowPropertyValue -Row $issue -Names @('IssueType'))) `
+            -Status '' -MailboxLocation '' `
+            -Enabled ([string](Get-RowPropertyValue -Row $issue -Names @('Enabled'))) `
+            -Details ([string](Get-RowPropertyValue -Row $issue -Names @('TargetAddress', 'NormalizedTargetAddress')))
+        )) | Out-Null
+    }
+    foreach ($proxyRow in $proxyAddressControl) {
+        $status = [string](Get-RowPropertyValue -Row $proxyRow -Names @('Status'))
+        if ([string]::IsNullOrWhiteSpace($status) -or $status -match '^OK$') { continue }
+        $detailParts = New-Object System.Collections.Generic.List[string]
+        foreach ($field in @('ExpectedAddressConflictReason', 'RoutingWarning')) {
+            $value = [string](Get-RowPropertyValue -Row $proxyRow -Names @($field))
+            if (-not [string]::IsNullOrWhiteSpace($value)) { $detailParts.Add($value) | Out-Null }
+        }
+        if ((ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $proxyRow -Names @('PolicyWarning'))) -eq $true) { $detailParts.Add('PolicyWarning=True') | Out-Null }
+        $severity = if ($status -match 'Conflict|AlreadyAssigned') { 'Critical' } else { 'Warning' }
+        $exchangeOptimizationRows.Add((New-SmartFinOpsExchangeOptimizationRow `
+            -FindingType 'ProxyAddresses' -Identity ([string](Get-RowPropertyValue -Row $proxyRow -Names @('Identity', 'UserPrincipalName'))) `
+            -Severity $severity -IssueType $status -Status $status `
+            -MailboxLocation ([string](Get-RowPropertyValue -Row $proxyRow -Names @('MailboxLocation'))) `
+            -Enabled '' -Details ($detailParts -join ' | ')
+        )) | Out-Null
+    }
+
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unique licensed users' -Value $uniqueLicensedUserKeys.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'License optimization findings' -Value $licenseOptimizationRows.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'User license decisions' -Value $userLicenseDecisionRows.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 recommended users' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 recommended users' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 F3' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No-license high-confidence candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - candidate' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No-license review candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - review' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 to F3 downgrade candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.CurrentBaseLicense -eq 'M365 E3' -and $_.RecommendedLicense -eq 'M365 F3' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 technical limit reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3 or remediate F3' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Special-account license reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -match '^Review (shared mailbox|special account)$' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 personas missing E3' -Value $personaSignalCounts['IsE3PersonaMissingE3License'])) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 mailbox size non-compliance' -Value $personaSignalCounts['HasRemainingF3MailboxSizeNonCompliance'])) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unlicensed F3 migration blockers' -Value $personaSignalCounts['IsUnlicensedEnabledF3MailboxBlockingMigration'])) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Duplicate direct and group license signals' -Value $personaSignalCounts['HasDuplicateM365LicenseAssignment'])) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'SKUs at capacity' -Value @($licenseCapacityRows | Where-Object { $_.CapacityStatus -eq 'AtCapacity' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'SKUs over-consumed' -Value @($licenseCapacityRows | Where-Object { $_.CapacityStatus -eq 'OverConsumed' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Remote routing distinct users' -Value $remoteRoutingUserKeys.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Proxy address non-OK findings' -Value @($exchangeOptimizationRows | Where-Object { $_.FindingType -eq 'ProxyAddresses' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Backup scope identities not found in inventory' -Value @($backupPolicyScope | Where-Object { (ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $_ -Names @('MailboxFoundInInventory'))) -eq $false }).Count -Interpretation 'Reconciliation gap; not proof of non-protection.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Strong shared mailbox conversion candidates' -Value @($sharedMailboxConversionRows | Where-Object { $_.Status -eq 'Strong candidate' }).Count -Interpretation 'Disabled licensed user mailboxes below 45 GB, with delegates and no observed archive, hold, service-account signal, or state conflict.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Capacity-review shared mailbox conversion candidates' -Value @($sharedMailboxConversionRows | Where-Object { $_.Status -eq 'Capacity review' }).Count -Interpretation 'Candidates between 45 GB and below 50 GB that require a growth and capacity review.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Excluded shared mailbox conversion cases' -Value @($sharedMailboxConversionRows | Where-Object { $_.Status -eq 'Excluded' }).Count -Interpretation 'Excluded because of size, archive, hold, service-account evidence, missing data, or conflicting account state.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Indicative monthly value within existing no-license potential' -Value ([decimal](($sharedMailboxConversionRows | Where-Object { $_.Status -in @('Strong candidate', 'Capacity review') } | Measure-Object -Property IndicativeMonthlyValueEUR -Sum).Sum)) -Unit 'EUR/month' -Interpretation 'Supporting realization path only; this value is already included in the no-license potential and is not added again.')) | Out-Null
 
     foreach ($device in $intuneDevices) {
         $name = [string](Get-RowPropertyValue -Row $device -Names @('Device name', 'DeviceName', 'Name'))
@@ -418,11 +636,11 @@ try {
         $owner = [string](Get-RowPropertyValue -Row $device -Names @('Primary user UPN', 'UserPrincipalName'))
         $os = [string](Get-RowPropertyValue -Row $device -Names @('OS', 'OperatingSystem'))
         $osVersion = [string](Get-RowPropertyValue -Row $device -Names @('OS version', 'OsVersion'))
-        $reason = ''
-        if ($lastCheckIn -and $lastCheckIn -lt $staleDeviceCutoff) { $reason = "Intune device has no recent check-in within $StaleDeviceDays days." }
-        elseif ($compliance -and $compliance -notmatch '^(compliant|true)$') { $reason = 'Intune device is not compliant.' }
-        elseif ([string]::IsNullOrWhiteSpace($owner)) { $reason = 'Intune device has no primary user in the export.' }
-        if (-not [string]::IsNullOrWhiteSpace($reason)) {
+        $reasons = New-Object System.Collections.Generic.List[string]
+        if ($lastCheckIn -and $lastCheckIn -lt $staleDeviceCutoff) { $reasons.Add("Intune device has no recent check-in within $StaleDeviceDays days.") | Out-Null }
+        if ($compliance -and $compliance -notmatch '^(compliant|true)$') { $reasons.Add('Intune device is not compliant.') | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($owner)) { $reasons.Add('Intune device has no primary user in the export.') | Out-Null }
+        foreach ($reason in $reasons) {
             $deviceOptimizationRows.Add([pscustomobject]@{ RunId = $runId; Source = 'Intune'; DeviceName = $name; Owner = $owner; OperatingSystem = $os; OperatingSystemVersion = $osVersion; LastActivity = if ($lastCheckIn) { $lastCheckIn.ToString('yyyy-MM-dd') } else { '' }; State = $compliance; Reason = $reason }) | Out-Null
         }
     }
@@ -444,9 +662,13 @@ try {
         $name = [string](Get-RowPropertyValue -Row $computer -Names @('Name', 'SamAccountName', 'ComputerName'))
         $lastLogon = ConvertTo-DateTimeOrNull (Get-RowPropertyValue -Row $computer -Names @('LastLogonDate', 'Last logon date'))
         $enabled = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $computer -Names @('Enabled'))
+        $needsWindows11Upgrade = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $computer -Names @('NeedsWindows11Upgrade'))
+        $entraRegistrationPending = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $computer -Names @('IsEntraRegistrationPending'))
         $reason = ''
         if ($null -ne $enabled -and -not $enabled) { $reason = 'AD computer account is disabled.' }
         elseif ($lastLogon -and $lastLogon -lt $staleDeviceCutoff) { $reason = "AD computer has no recent logon within $StaleDeviceDays days." }
+        elseif ($needsWindows11Upgrade -eq $true) { $reason = 'Canonical enriched AD inventory indicates that Windows 11 upgrade is required.' }
+        elseif ($entraRegistrationPending -eq $true) { $reason = 'Canonical enriched AD inventory indicates that Entra registration is pending.' }
         if (-not [string]::IsNullOrWhiteSpace($reason)) {
             $deviceOptimizationRows.Add([pscustomobject]@{ RunId = $runId; Source = 'Active Directory'; DeviceName = $name; Owner = ''; OperatingSystem = [string](Get-RowPropertyValue -Row $computer -Names @('OperatingSystem')); OperatingSystemVersion = [string](Get-RowPropertyValue -Row $computer -Names @('operatingSystemVersion', 'OperatingSystemVersion')); LastActivity = if ($lastLogon) { $lastLogon.ToString('yyyy-MM-dd') } else { '' }; State = if ($null -eq $enabled) { '' } else { "Enabled=$enabled" }; Reason = $reason }) | Out-Null
         }
@@ -458,21 +680,37 @@ try {
     })
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Device optimization findings' -Value $deviceOptimizationRows.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Non-compliant rows from compliance export' -Value $nonCompliantComplianceRows.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Compliance rows missing AzureADDeviceId' -Value @($intuneCompliance | Where-Object { [string]::IsNullOrWhiteSpace([string](Get-RowPropertyValue -Row $_ -Names @('AzureADDeviceId'))) }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Compliance rows missing EntraObjectId' -Value @($intuneCompliance | Where-Object { [string]::IsNullOrWhiteSpace([string](Get-RowPropertyValue -Row $_ -Names @('EntraObjectId'))) }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'AD computers requiring Windows 11 upgrade' -Value @($adComputers | Where-Object { (ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $_ -Names @('NeedsWindows11Upgrade'))) -eq $true }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'AD computers pending Entra registration' -Value @($adComputers | Where-Object { (ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $_ -Names @('IsEntraRegistrationPending'))) -eq $true }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Autopilot device rows' -Value $autopilotDevices.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Upgrade eligibility rows' -Value $upgradeEligibility.Count)) | Out-Null
 
+    $valueOpportunityRows = New-SmartFinOpsValueOpportunityRows -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -PriceModel $priceModel
+    $potentialMonthlyValue = [decimal](($valueOpportunityRows | Where-Object ValuePillar -eq 'Potential savings' | Measure-Object -Property MonthlyValueEUR -Sum).Sum)
+    $potentialAnnualValue = [decimal](($valueOpportunityRows | Where-Object ValuePillar -eq 'Potential savings' | Measure-Object -Property AnnualValueEUR -Sum).Sum)
+    $costAvoidanceMonthlyValue = [decimal](($valueOpportunityRows | Where-Object ValuePillar -eq 'Cost avoidance' | Measure-Object -Property MonthlyValueEUR -Sum).Sum)
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Indicative monthly optimization potential' -Value $potentialMonthlyValue -Unit 'EUR/month' -Interpretation 'Potential only; validate usage, ownership, contract and renewal before action.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Indicative annual optimization potential' -Value $potentialAnnualValue -Unit 'EUR/year' -Interpretation 'Annualized French indicative baseline; not a committed saving.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Indicative monthly reusable capacity value' -Value $costAvoidanceMonthlyValue -Unit 'EUR/month' -Interpretation 'Cost-avoidance equivalent; kept separate from potential savings to prevent double counting.')) | Out-Null
+
     $summaryPath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_Summary' -Rows $summaryRows.ToArray()
     $licensePath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_LicenseOptimization' -Rows $licenseOptimizationRows.ToArray()
+    $licenseDecisionPath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_UserLicenseDecision' -Rows $userLicenseDecisionRows
+    $licenseCapacityPath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_LicenseCapacity' -Rows $licenseCapacityRows.ToArray()
+    $valuePath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_ValueOpportunities' -Rows $valueOpportunityRows
     $devicePath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_DeviceOptimization' -Rows $deviceOptimizationRows.ToArray()
+    $exchangePath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_ExchangeOptimization' -Rows $exchangeOptimizationRows.ToArray()
     $dataQualityPath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_DataQuality' -Rows $dataQualityRows.ToArray()
 
-    $historyHtmlPath = Join-Path -Path $runOutputRoot -ChildPath ("SmartFinOps_Workplace_Report_{0}.html" -f $runId)
+    $historyHtmlPath = Join-Path -Path $runOutputRoot -ChildPath 'SmartFinOps_Workplace_Report.html'
     $latestHtmlPath = Join-Path -Path $LatestOutputRoot -ChildPath 'SmartFinOps_Workplace_Report.html'
-    Write-SmartFinOpsHtmlReport -Path $historyHtmlPath -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -DeviceRows $deviceOptimizationRows.ToArray() -DataQualityRows $dataQualityRows.ToArray()
+    Write-SmartFinOpsHtmlReport -Path $historyHtmlPath -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -DeviceRows $deviceOptimizationRows.ToArray() -ExchangeRows $exchangeOptimizationRows.ToArray() -DataQualityRows $dataQualityRows.ToArray() -ValueRows $valueOpportunityRows -PriceModel $priceModel
     Copy-Item -LiteralPath $historyHtmlPath -Destination $latestHtmlPath -Force
 
     Write-SmartFinOpsLog -Level SUCCESS -Message ("SmartFinOps Workplace analysis completed. Report={0}" -f $latestHtmlPath)
-    Write-SmartFinOpsLog -Message ("CSV outputs: {0}; {1}; {2}; {3}" -f $summaryPath, $licensePath, $devicePath, $dataQualityPath)
+    Write-SmartFinOpsLog -Message ("CSV outputs: {0}; {1}; {2}; {3}; {4}; {5}; {6}; {7}" -f $summaryPath, $licensePath, $licenseDecisionPath, $licenseCapacityPath, $valuePath, $devicePath, $exchangePath, $dataQualityPath)
 }
 catch {
     Write-SmartFinOpsLog -Level ERROR -Message $_.Exception.Message
@@ -482,8 +720,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOhUwbcexV/8nK
-# Z02G5N8xgNELNcLjewFfFRJWLqVfhqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7IJMkq1YtH/Q9
+# FJ5J0owHlnfRnI9N55sb0B6RtS+YIKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -616,31 +854,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGj8ScMqjkH4395F9gIhvuLpTI7ZAbuFlTYTXzJ2TFfIMA0GCSqG
-# SIb3DQEBAQUABIIBgHeNtupNBc6QHh0oIOvmHX5E4oDxNUIkx3I26iLIk6n8hfoo
-# 8vLZnpZ5GMSB9Xu+TybD6Ld1Y2/MJnMAJbcd0fW/ZZzw6VPO3VLweZHLFqfbsnza
-# B13eZXUyzICccdrnzt8y2J9hP6aMpzS4ghLacaTYz0bR34YGnPizz+mAiRJbbMwM
-# C4r/aGsk15IpT0WKaRxC2cBb1HLSoIVgZOXE6QFSOakWCaMfCwSXiCdxB+v0idNV
-# zAV0Kpg+I8Qf4k2SvKR7gQK3kqvaonLn0/iwTTWD+VDjmbWCIv+ufLR55JNJ+slw
-# FYPNJjV5RoYrM7NLjhtrmBxu9FKDjpAAFPr3kY6LdFSw7v3bHIQO2X/GMTjWwc10
-# h53VpwnMdTs5yr/O1P7BMLCYUG4NCaIlB+Pfil/Jn05W7MglJpFU/dy0TPnMV/lU
-# T3CLLQddhn1xvDRGv7Sbm7N6a33vOTd3CbNuQRWSorJck4xs3vmqiWG51afYzqru
-# sIynIfMs1heB2soiNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK9Cu/0LUIB4XeCcuLNI8DEgQkgs9M7mcoSqn8iECvsHMA0GCSqG
+# SIb3DQEBAQUABIIBgCCvsI/6rVs3okdMp31wzk9EB8R2gKH7x3Dg7Wr3FZ0jVXTa
+# kCulaPAuEQXQ4UdBMwz+uHJ17bHl13ghsjLUB2VurV1UKczN/RApMloqZfIJZceq
+# 3Ausl8bPMjyOyT0M+5D+Htm4v/g1TLRPnrfg3CGJiZjB03VdCFLnY6xiXxII9dGK
+# uwYfLWeOYuFeor9tiR0YZz30qtCx/rrt4xNpNdQtyMBRYzdRns6EtJGP31CkIKvN
+# FTITwkrbd1Z92m3AVndNhPyZbmlh54F4c5r4cEnZ6Loc3A5BuvIFUxh5hhM6FV+S
+# RLo7v5ELrG+1dOBeq7rEajkFlNWno1TF+ISeq5C4ZeImVo6kUUaNfUmDxJQ3tVQH
+# ZlRWCz8OoLX973OAJQ2u0Mlks0TEJdIu/ekm9MboMo8gjAhNGHV90fZQcM0n5K+U
+# IBIra9xrnQtS8l/ruO6IcSAxJpx5wFYVTtv6ywxQ0SJAYG9AYxtOP1hHlCjkouid
+# a696hSCLnC4plrNdN6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MjJaMC8GCSqGSIb3DQEJBDEiBCCUXSW1omx4mvKLqlG+HlJAChFBDsihul759tF1
-# gbmISzANBgkqhkiG9w0BAQEFAASCAgBnOmga3/EWqPjln4lUIc6lQwRb05suU5VF
-# q/ie6CGO9a9Xmo107mkwa88XQi2AuZR/haIEU+JuauFZQb066mirJd1aEa0DULe1
-# LkHum5sDF2gq9peetOy2sHdaLOiauipiBG6HdJm3OYoRYoN06hnMGCkAkRJdialm
-# Zh9x5KWMY7y9V/W6Yg+WM6oz//uMqoJU+ydOsYkfA61JuiQy9lN6a7QdPV9dojQT
-# PdW/qCZ9tdLIi0Dku01MBeFufNoXSBMUHwyZ3L5gwna8dsoFKl93IEJkso7xcxRr
-# 86yh4wouOhgCgLj+KgVIC4gj6cJnn3UVBzAZDBIdTDPiZnmCLC7C4UUxDAm2PUvI
-# LRi0kfKiUWL9fLxxSGNl1m+oWqOaSJfuXFd0IlSCfAzW7mxdueT7F6bYV2bbDvza
-# cpV3i3lgxPxliVdKdaSzwcd4x7CtCZp0Dz5VV+KcVTpSq2Xiyqz9iCMEteC2Lxsd
-# mt/tIHhSMiA1LM4oD987wK/37An3TaLXTpbhsLSlUP9MnLaJ42mbqvziIHGtV5eK
-# +O6aUAF5aAG4a79fm05UQH4BTbwue+Q0zxi5p7UwVgqlqF/wM8dgk7L+KbIE6jUu
-# 9Uqytb10Vxznr6VnSgMZscnJpqVBEe1arkNaNphQBR6z2DcycLLHBx1nbmBto1Bj
-# LCWhbDzKHg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxOTQ1
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCOeex0rSJPYrScOcWA6E/M2bR+4IFuDl/OQIxB
+# EXAQDTANBgkqhkiG9w0BAQEFAASCAgAriN+9qhZtl9V3Yzl/S/wqH5UhJgRfBHMX
+# K9G0LLBSKT2GEyhC0ZWpKLwuw4L8Av6QpGZWfQMmGH++rt0vMWimoPiDHrZgoxu1
+# zC484XfMsuoZcEfW2PfnCoJn/a/FhNOsPnOTZrugvrcWDQJTWwZN4bXOp9DBJkdo
+# fQOAlkUnUB0c44K1K56rGtTYZowvYiCGc3VQW1rku9Z0rr1lszoK9VkXzuS9vPjF
+# 3QfeZi9skg5LPyvCfWeAMf0P1E28qdYKcACgN7r0/wNIfKwtQuiwNHGgFT+BkTZW
+# Ih0jBNaH2sKBjNrH883QtL6+klJCOpZ2bJOapmmDJLXumKHke7IX04yKW/vwSFmt
+# vHgmM14SXbxMjtKR3eaJUslw2zdBlSxol+4ftQbsMI4sHWNzANgoifOa2ZQ7T3xZ
+# mB4CrargYzZ82joEtjgrUXrIln2j4CytvTi28w0DkoDIw5PKd/bx1WtDUdduP/yW
+# aR5CjxY4Rc48igtUrgHqV+Bm/FgmLjCMYuuHllNmTXw3ne4IIWWAkD4Uv88J8yeN
+# 8pUG4Q4pVk7+CgqwYne0Coi2XjIDSUckGey4Onzg+kNz193//bD3hYHh4nuCctBa
+# R+in6MQu5OxHP1lLd2+Si93F6hQB50cZoUPoitic9QSLioNeE2XDEBy7Qk8VrL31
+# Z6/2HYDZjw==
 # SIG # End signature block

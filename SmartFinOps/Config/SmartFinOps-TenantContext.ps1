@@ -225,7 +225,11 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
     if ($tenantConfig.Contains('TenantKey') -and -not [string]::IsNullOrWhiteSpace([string]$tenantConfig['TenantKey']) -and [string]$tenantConfig['TenantKey'] -ne $TenantKey) {
         throw "Tenant profile key mismatch. File '$tenantConfigPath' contains TenantKey '$($tenantConfig['TenantKey'])' but requested '$TenantKey'."
     }
-    foreach ($key in $tenantConfig.Keys) { $globalConfig[$key] = $tenantConfig[$key] }
+    foreach ($key in $tenantConfig.Keys) {
+        $tenantValue = $tenantConfig[$key]
+        if ($tenantValue -is [string] -and $tenantValue.Trim() -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { continue }
+        $globalConfig[$key] = $tenantValue
+    }
 
     $globalConfig['TenantKey'] = $TenantKey
     $globalConfig['SmartFinOpsRootPath'] = $rootPath
@@ -233,11 +237,8 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
     $globalConfig['ScriptOutputRootPath'] = $scriptOutputRootPath
 
     $defaultWorkspaceRootPath = $rootPath
-    $defaultDataAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL'
-    $defaultLatestCsvFolderPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST'
-    $defaultLogAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL'
+    $defaultTenantDataRootPath = '{{WorkspaceRootPath}}\Data\{{TenantKey}}'
     $useScriptOutputFallback = $false
-
     if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or [string]$globalConfig['WorkspaceRootPath'] -in @('.', '{{SmartFinOpsRootPath}}')) {
         $candidateDataRoot = Join-Path -Path $rootPath -ChildPath 'Data'
         if (Test-SmartFinOpsWritableDirectory -Path $candidateDataRoot) {
@@ -245,17 +246,14 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
         }
         else {
             $defaultWorkspaceRootPath = $scriptOutputRootPath
-            $defaultDataAllRootPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\DATA-ALL'
-            $defaultLatestCsvFolderPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\DATA-LAST'
-            $defaultLogAllRootPath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\LOG-ALL'
+            $defaultTenantDataRootPath = '{{WorkspaceRootPath}}\{{TenantKey}}'
             $useScriptOutputFallback = $true
         }
     }
 
     if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath'])) { $globalConfig['WorkspaceRootPath'] = $defaultWorkspaceRootPath }
-    if (-not $globalConfig.Contains('DataAllRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['DataAllRootPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL')) { $globalConfig['DataAllRootPath'] = $defaultDataAllRootPath }
-    if (-not $globalConfig.Contains('LatestCsvFolderPath') -or ($useScriptOutputFallback -and [string]$globalConfig['LatestCsvFolderPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-LAST')) { $globalConfig['LatestCsvFolderPath'] = $defaultLatestCsvFolderPath }
-    if (-not $globalConfig.Contains('LogAllRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['LogAllRootPath'] -eq '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\LOG-ALL')) { $globalConfig['LogAllRootPath'] = $defaultLogAllRootPath }
+    if (-not $globalConfig.Contains('TenantDataRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['TenantDataRootPath'] -eq '{{WorkspaceRootPath}}\Data\{{TenantKey}}')) { $globalConfig['TenantDataRootPath'] = $defaultTenantDataRootPath }
+    if (-not $globalConfig.Contains('PriceBaselinePath')) { $globalConfig['PriceBaselinePath'] = '{{SmartFinOpsRootPath}}\Config\SmartFinOps-Workplace-FrancePriceBaseline.json' }
     $smartM365LatestCsvDefault = Get-SmartFinOpsSmartM365LatestCsvFolderPath -RepositoryRootPath $repositoryRootPath -TenantKey $TenantKey
     if ([string]::IsNullOrWhiteSpace($smartM365LatestCsvDefault)) { $smartM365LatestCsvDefault = '{{RepositoryRootPath}}\SmartM365\Data\Tenants\{{TenantKey}}\DATA-LAST' }
     if (-not $globalConfig.Contains('SmartM365LatestCsvFolderPath') -or
@@ -267,7 +265,9 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
     if (-not $globalConfig.Contains('RetentionMaxLogs')) { $globalConfig['RetentionMaxLogs'] = 30 }
     if (-not $globalConfig.Contains('StaleUserDays')) { $globalConfig['StaleUserDays'] = 90 }
     if (-not $globalConfig.Contains('StaleDeviceDays')) { $globalConfig['StaleDeviceDays'] = 60 }
-    if (-not $globalConfig.Contains('ReportTitle')) { $globalConfig['ReportTitle'] = 'SmartFinOps Workplace Report' }
+    if (-not $globalConfig.Contains('MaxSourceAgeHours')) { $globalConfig['MaxSourceAgeHours'] = 72 }
+    if (-not $globalConfig.Contains('LicenseCapacityWarningPercent')) { $globalConfig['LicenseCapacityWarningPercent'] = 95 }
+    if (-not $globalConfig.Contains('ReportTitle')) { $globalConfig['ReportTitle'] = 'SmartFinOps Workplace - Value and Decisions' }
 
     return [pscustomobject]$globalConfig
 }
@@ -358,8 +358,9 @@ function Resolve-SmartFinOpsOutputRoots {
     )
 
     if ($null -eq $script:SmartFinOpsGlobalConfig) { throw 'SmartFinOps tenant context has not been initialized.' }
-    $resolvedOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) { Join-Path -Path (Resolve-SmartFinOpsConfigTokenValue -Value '{{DataAllRootPath}}') -ChildPath $AreaPath } else { Resolve-SmartFinOpsConfigTokenValue -Value $OutputRoot }
-    $resolvedLatestOutputRoot = if ([string]::IsNullOrWhiteSpace($LatestOutputRoot)) { Resolve-SmartFinOpsConfigTokenValue -Value '{{LatestCsvFolderPath}}' } else { Resolve-SmartFinOpsConfigTokenValue -Value $LatestOutputRoot }
+    $tenantDataRoot = Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}'
+    $resolvedOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) { Join-Path -Path $tenantDataRoot -ChildPath 'Archive' } else { Resolve-SmartFinOpsConfigTokenValue -Value $OutputRoot }
+    $resolvedLatestOutputRoot = if ([string]::IsNullOrWhiteSpace($LatestOutputRoot)) { $tenantDataRoot } else { Resolve-SmartFinOpsConfigTokenValue -Value $LatestOutputRoot }
     [pscustomobject]@{ OutputRoot = $resolvedOutputRoot; LatestOutputRoot = $resolvedLatestOutputRoot }
 }
 
@@ -379,8 +380,8 @@ function Initialize-SmartFinOpsTenantContext {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOEEYQvCDpD7cE
-# b/6XFDAgsrVfGEYozmQ+VMqHr+QofKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAua9zUexkFYDF
+# 9u8rwpspffoBxdFl5SzRcdGnZ6k2V6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -513,31 +514,31 @@ function Initialize-SmartFinOpsTenantContext {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJcf3aGstgj6IUubEiWQvCcVs0Bf0M0YvKYA6P5I3JdHMA0GCSqG
-# SIb3DQEBAQUABIIBgISU2g/7dl+zFqw8Nkask2JE25WQl7dVpQC1mpe6GNHbodq2
-# TAMEnTidJ2Y9ImzgluTa2B/6K4eu8HOxTko3QLTRST5fqkO92MKxF00xl/YGrx6/
-# qay3goD2YQp3uB/D4Taup/yZFv+NFLD4+lhmtjhy2tReI21uHjUk3/v9GaG8vVtj
-# ozjLwxYZpIW6mcbZ/sABidMEzvML02Jzrnaxvyk+Q7FS+5Hf2HRTVnpEam3xb7Sa
-# N3pcMB2viJUpsChuFq5mNhYt3E/bKcOxDK+JEVp1dL+SlmIimDPw0sg0Ugm83p38
-# 2TfAtvf7ng4PlgIMJ/dxQP4f108gt5BEWsxGofSow3LMBCnMaoRaIemomcO+xDLT
-# C9D53duyQar2wOpl7lMBoultHfBBeNuc+MXJxMihVIr5P7/pTbjblVfgB84EQPnk
-# yR0x25eooGvuX7O6v7eHjKKeXsrjpEwDv9SjY7lA4Dk4ppWQMzLr72UDXf3yu/lF
-# 5Z1l/zSWAk6pETeGFqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOxohR3DQmaBwlcPaj/oUvF9opdrQB4FUHTmkUuhhtnqMA0GCSqG
+# SIb3DQEBAQUABIIBgDkUjBi10kvfRAVCn3ebmC573W6XP9C9KOMLq8BKRPm8HHyV
+# XE8pteytQAVFBPTDVuvNqEIbE13QHVoxBOoKqp/e5Qac89avT8w9pEmpsutSn6+H
+# RMMK6o3MNJ8gZX62uUv+fYvL33kasM+MD43S3K5s3jexLq4o541I4S/rFcTbCFkV
+# LDzlB56usu+eESIYwwtuJvO+26CFai/BP9Yc0v6PsLV/1aneWqAFtXh82pDonHMs
+# 939iK5BX4HP543976/Kuyfc/9lzBX7cZWwtoypwc2ON+5WrjkfvvwLDDnklrPmUt
+# Exyt9oMZjhcCqsuWpE3TDAu5qEmWYK6S/ypNGfUiAJzzNezuEj5DseZxSlw8FWv2
+# PbVSeP6QGQwohGfeYVXQspX+DLQBAZGvpMjKPWng4vW2vIBu+2kuM65GWi0lm0fp
+# LtCbNB+4J2sTRNFJotwzgQ1K2O2eVykSbvhHtoEnLzpEclyURbVwxvVyOPrM7sx8
+# FPqSR0d+BTxUwf9so6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODQ5
-# MjJaMC8GCSqGSIb3DQEJBDEiBCC0pDFBADl77MSWyXBpOPbTIiWYevOLT7XhgkbU
-# ZS8OPzANBgkqhkiG9w0BAQEFAASCAgAOC6I4IeTBArpNM9bJzZQUVos/iaNMx7s7
-# 5vgL1+0gOShjwlgZCKK7zRjbkTabCF52f7+H5vLjoMgQjcOXnu7N9Za5visi+vab
-# H5iwNai+jlQGJTiT/ElKRdpuIRwKoX0b32O+G4tjaTEBwLnoLSM/3+yMdgO6MW7C
-# h39UufnmV5bX5Z6fHYLNxZVCsJtfdGkbCfF/bqI4GuzK6HCe2Iu51uHBqGo4f2RP
-# 4aQY7R5i9GoETHwnLNjY3ufsn1rWejXyCR50njE3Pzv0JwnQ4RKune1LmZfBjiGR
-# e+HJaBhGc+OT7HOB7KRvgfYA7MmknEYsjxF/L8BliqeFcTDu/mA5rUkH+icZqV5m
-# kdq1/2Ewt800KQuDQ/gtc/7qPBl0KxKDOkqHyrGaiJia1ZGnv/0qZLorn/x7dzkh
-# fN1IcsnUKzJjlKkvtTDiT3DhuXsIuv7O59U9HngxcKNY5D5F8oKNdXopOSjG0W5j
-# 4FSnuLFhkMffIkzSK9psDloGQhq0VNiKHicYvSrisjXw7hCbocc0LLMB0JRyZVx9
-# LO86eFe2mLb+ZKy7lhP9W621zcgNvVE7U52FAKYcxz3cCySysi69COjVOf1yYuxT
-# 5rP6R10B2KFXAmnE/6IEPf6kloRUHw6oUeUUWcbKxmxERRnDGq0fw2qGXbWXIm7C
-# RQZhQa8bJA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxOTQ1
+# MzJaMC8GCSqGSIb3DQEJBDEiBCCW9DCMUNlJElQxSuDUTvFndiKwDDjAhXOeXrJ1
+# jnzloTANBgkqhkiG9w0BAQEFAASCAgBlaGjAQ9Gc6/9bt5pPLb7f5xsosOgG1QbQ
+# zQkSBXttWOrypRUgOscGn3pOcmZFHMXRTK2TYFxTh10gcAMobCbMJOoJAkF7Ww/e
+# QN5UYeEoHdSBy+tzgJ1tcXGz3kYb+fsYsUwrS6yNxeAqOzgsEvTqWoCFMhbMWxE1
+# TAmXms+VHc43nk/run4Q2wDDokkU0rC7M6qIL6nfjkW4fmZxnuCWshmEUFDqlM1D
+# lN4An6L2Iq08en/YG2g0zZ6ZtW6D2bBAHY5TJOWhoWhGBLCNO0LAn3KB/YkrKG1V
+# XAzON9XYOOTJecZDhebVrJlJ1+hcD5aC/ctZEyM9yvTddT24MjNHUlrqgofvn6ql
+# BadkeDHz0JZMht6H6a2BsupBQEZJEwjXMEkUoii5VvgBEDoTg+Kjs3THPRDF1EhL
+# fajYIv0be2XiOdfO0gp+F0Pfdc757kOOKoyb8zvwIsDj423IA2OJXR29IckYGZpY
+# f0wN+M97fI0mjagOTkRDIzLtqAnFF5HI1RgvxBD6cwEtb/WAdZQaIFfc771Hov9V
+# DHjjrQUsc0XsFZR5zxyjujhyC3m/T13++94ZKQyjZliG3EIl3xEkJ1VYDV2TJOF0
+# KjyXk6SDMHC8lFzoPZl9/5vTrdtcF28XRmwSc9eNOk2OJI+X/C/5K9zk8RBHXC5t
+# auTib4AfAg==
 # SIG # End signature block
