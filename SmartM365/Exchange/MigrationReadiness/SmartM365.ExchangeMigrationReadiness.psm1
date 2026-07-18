@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.3.1'
+$script:SemrVersion = '1.4.0'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ActiveDirectoryDomains = @()
@@ -214,10 +214,20 @@ function Import-SemrSmartM365TenantProfile {
     if ([string]::IsNullOrWhiteSpace($tenantId)) { return $false }
 
     $tenantProfile['ProfileKey'] = $profileKey
-    $tenantProfile['TenantId'] = $tenantId
+    if ([string]::IsNullOrWhiteSpace([string]$tenantProfile['TenantId'])) {
+        $tenantProfile['TenantId'] = $tenantId
+    }
     $remoteRoutingDomain = [string]$smartM365Profile['RemoteRoutingDomain']
-    if (-not [string]::IsNullOrWhiteSpace($remoteRoutingDomain)) {
+    if (([string]::IsNullOrWhiteSpace([string]$tenantProfile['RemoteRoutingDomain']) -or [string]$tenantProfile['RemoteRoutingDomain'] -eq 'tenant.mail.onmicrosoft.com') -and -not [string]::IsNullOrWhiteSpace($remoteRoutingDomain)) {
         $tenantProfile['RemoteRoutingDomain'] = $remoteRoutingDomain
+    }
+    if ($Runtime.Contains('Authentication') -and $Runtime['Authentication'] -is [System.Collections.IDictionary]) {
+        $authentication = $Runtime['Authentication']
+        foreach ($key in @('AppId', 'OrgDomain', 'Thumb', 'Thumbprint')) {
+            if ([string]::IsNullOrWhiteSpace([string]$authentication[$key]) -and -not [string]::IsNullOrWhiteSpace([string]$smartM365Profile[$key])) {
+                $authentication[$key] = [string]$smartM365Profile[$key]
+            }
+        }
     }
     return $true
 }
@@ -253,6 +263,18 @@ function Get-SemrConfig {
         $runtime['MicrosoftGraph'].Remove('UseDeviceCode')
         $configurationChanged = $true
     }
+    if ($runtime.Contains('Authentication') -and $runtime['Authentication'] -is [System.Collections.IDictionary] -and $runtime['Authentication'].Contains('TenantId')) {
+        $legacyAuthenticationTenantId = ([string]$runtime['Authentication']['TenantId']).Trim()
+        $configuredTenantId = ([string]$runtime['TenantProfile']['TenantId']).Trim()
+        if ($legacyAuthenticationTenantId -and $configuredTenantId -and $legacyAuthenticationTenantId -ne $configuredTenantId) {
+            throw "Authentication.TenantId '$legacyAuthenticationTenantId' does not match TenantProfile.TenantId '$configuredTenantId'. Keep only TenantProfile.TenantId."
+        }
+        if (-not $configuredTenantId -and $legacyAuthenticationTenantId) {
+            $runtime['TenantProfile']['TenantId'] = $legacyAuthenticationTenantId
+        }
+        $runtime['Authentication'].Remove('TenantId')
+        $configurationChanged = $true
+    }
     if ($configurationChanged) {
         $runtime | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Path -Encoding utf8
     }
@@ -262,11 +284,47 @@ function Get-SemrConfig {
         throw "Invalid Mode '$mode'. Expected Live or CacheOnly."
     }
     $tenantProfile = $runtime['TenantProfile']
-    if ([string]::IsNullOrWhiteSpace([string]$tenantProfile['TenantId'])) {
-        [void](Import-SemrSmartM365TenantProfile -Runtime $runtime)
+    $authentication = $runtime['Authentication']
+    $configuredAuthenticationMode = [string]$authentication['Mode']
+    $authenticationMode = if ($configuredAuthenticationMode -ieq 'Interactive') { 'Interactive' } elseif ($configuredAuthenticationMode -ieq 'Application') { 'Application' } else { '' }
+    if (-not $authenticationMode) {
+        throw "Invalid Authentication.Mode '$configuredAuthenticationMode'. Expected Interactive or Application."
     }
+    $authentication['Mode'] = $authenticationMode
+    [void](Import-SemrSmartM365TenantProfile -Runtime $runtime)
     if ([string]::IsNullOrWhiteSpace([string]$tenantProfile['TenantId'])) {
         throw 'TenantProfile.TenantId is required. Configure it in the application JSON or provide the SmartM365 default tenant profile under Config\Tenants.'
+    }
+    $tenantId = ([string]$tenantProfile['TenantId']).Trim()
+    $tenantProfile['TenantId'] = $tenantId
+    $appId = ([string]$authentication['AppId']).Trim()
+    $orgDomain = ([string]$authentication['OrgDomain']).Trim()
+    $thumb = ([string]$authentication['Thumb']).Replace(' ', '').Trim()
+    $thumbprint = ([string]$authentication['Thumbprint']).Replace(' ', '').Trim()
+    if ($thumb -and $thumbprint -and $thumb -ine $thumbprint) {
+        throw 'Authentication.Thumb and Authentication.Thumbprint must contain the same certificate thumbprint.'
+    }
+    $certificateThumbprint = if ($thumbprint) { $thumbprint } else { $thumb }
+    if ($authenticationMode -eq 'Application') {
+        $requiredAuthenticationValues = [ordered]@{
+            AppId = $appId
+            TenantId = $tenantId
+            OrgDomain = $orgDomain
+            Thumbprint = $certificateThumbprint
+        }
+        foreach ($key in $requiredAuthenticationValues.Keys) {
+            if ([string]::IsNullOrWhiteSpace([string]$requiredAuthenticationValues[$key])) {
+                throw "Authentication.$key is required when Authentication.Mode is Application."
+            }
+        }
+        try { [void][guid]::Parse($appId) } catch { throw "Authentication.AppId '$appId' is not a valid GUID." }
+        try { [void][guid]::Parse($tenantId) } catch { throw "TenantProfile.TenantId '$tenantId' is not a valid GUID." }
+        if ($orgDomain -notmatch '^[A-Za-z0-9][A-Za-z0-9.-]+\.[A-Za-z]{2,}$') {
+            throw "Authentication.OrgDomain '$orgDomain' is not a valid tenant organization domain."
+        }
+        if ($certificateThumbprint -notmatch '^[A-Fa-f0-9]{40}$') {
+            throw 'Authentication.Thumbprint must be a 40-character hexadecimal certificate thumbprint.'
+        }
     }
     $targetDeliveryDomain = [string]$runtime['Hybrid']['TargetDeliveryDomain']
     if ([string]::IsNullOrWhiteSpace($targetDeliveryDomain) -or $targetDeliveryDomain -eq 'tenant.mail.onmicrosoft.com') {
@@ -280,8 +338,12 @@ function Get-SemrConfig {
     $runtime['_RuntimePath'] = $Path
     $runtime['_AddedKeys'] = $added
     $runtime['_TenantProfileKey'] = [string]$tenantProfile['ProfileKey']
-    $runtime['_TenantId'] = [string]$tenantProfile['TenantId']
+    $runtime['_TenantId'] = $tenantId
     $runtime['_RemoteRoutingDomain'] = [string]$tenantProfile['RemoteRoutingDomain']
+    $runtime['_AuthenticationMode'] = $authenticationMode
+    $runtime['_AppId'] = $appId
+    $runtime['_OrgDomain'] = $orgDomain
+    $runtime['_CertificateThumbprint'] = $certificateThumbprint.ToUpperInvariant()
     $runtime['_CacheRootPath'] = $cacheRootPath
     $runtime['_InventoryDataLastPath'] = $cacheDataLastPath
     $runtime['_AlternativeCacheRootPath'] = $alternativeCacheRootPath
@@ -303,6 +365,26 @@ function Get-SemrConnectionState {
 function Test-SemrCommand {
     param([Parameter(Mandatory)][string]$Name)
     return [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+}
+
+function Get-SemrApplicationCertificate {
+    param([Parameter(Mandatory)][string]$Thumbprint)
+
+    $normalizedThumbprint = $Thumbprint.Replace(' ', '').Trim().ToUpperInvariant()
+    foreach ($storePath in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')) {
+        $certificatePath = Join-Path $storePath $normalizedThumbprint
+        $certificate = Get-Item -LiteralPath $certificatePath -ErrorAction SilentlyContinue
+        if (-not $certificate) { continue }
+        if (-not $certificate.HasPrivateKey) {
+            throw "Certificate '$normalizedThumbprint' in '$storePath' does not have an accessible private key."
+        }
+        $now = Get-Date
+        if ($certificate.NotBefore -gt $now -or $certificate.NotAfter -le $now) {
+            throw "Certificate '$normalizedThumbprint' in '$storePath' is not currently valid (valid from $($certificate.NotBefore) to $($certificate.NotAfter))."
+        }
+        return $certificate
+    }
+    throw "Certificate '$normalizedThumbprint' was not found in Cert:\CurrentUser\My or Cert:\LocalMachine\My."
 }
 
 function Invoke-SemrIsolatedPowerShell {
@@ -496,7 +578,11 @@ function Connect-SemrExchangeOnline {
     param(
         [string]$UserPrincipalName = '',
         [bool]$DisableWam = $true,
-        [string]$TenantId = ''
+        [string]$TenantId = '',
+        [ValidateSet('Interactive', 'Application')][string]$AuthenticationMode = 'Interactive',
+        [string]$AppId = '',
+        [string]$Organization = '',
+        [string]$CertificateThumbprint = ''
     )
 
     Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop
@@ -508,11 +594,28 @@ function Connect-SemrExchangeOnline {
         ShowBanner = $false
         ErrorAction = 'Stop'
     }
-    if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
-        $parameters.UserPrincipalName = $UserPrincipalName
+    if ($AuthenticationMode -eq 'Application') {
+        $requiredApplicationValues = [ordered]@{
+            AppId = $AppId
+            Organization = $Organization
+            CertificateThumbprint = $CertificateThumbprint
+        }
+        foreach ($key in $requiredApplicationValues.Keys) {
+            if ([string]::IsNullOrWhiteSpace([string]$requiredApplicationValues[$key])) {
+                throw "$key is required for Exchange Online application authentication."
+            }
+        }
+        $parameters.AppId = $AppId
+        $parameters.Organization = $Organization
+        $parameters.Certificate = Get-SemrApplicationCertificate -Thumbprint $CertificateThumbprint
     }
-    if ($DisableWam) {
-        $parameters.DisableWAM = $true
+    else {
+        if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+            $parameters.UserPrincipalName = $UserPrincipalName
+        }
+        if ($DisableWam) {
+            $parameters.DisableWAM = $true
+        }
     }
     Connect-ExchangeOnline @parameters
     if ($TenantId -and (Test-SemrCommand -Name 'Get-ConnectionInformation')) {
@@ -532,6 +635,9 @@ function Connect-SemrMicrosoftGraph {
     param(
         [string[]]$Scopes = @('User.Read.All', 'Directory.Read.All', 'Organization.Read.All'),
         [string]$TenantId = '',
+        [ValidateSet('Interactive', 'Application')][string]$AuthenticationMode = 'Interactive',
+        [string]$AppId = '',
+        [string]$CertificateThumbprint = '',
         [string[]]$EmailAddresses = @(),
         [scriptblock]$ProgressCallback
     )
@@ -568,7 +674,9 @@ function Connect-SemrMicrosoftGraph {
         $startInfo.CreateNoWindow = $true
         foreach ($argument in @(
             '-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $workerPath,
-            '-TenantId', $TenantId, '-ScopesPath', $scopesPath, '-InputPath', $inputPath,
+            '-TenantId', $TenantId, '-AuthenticationMode', $AuthenticationMode,
+            '-ClientId', $AppId, '-CertificateThumbprint', $CertificateThumbprint,
+            '-ScopesPath', $scopesPath, '-InputPath', $inputPath,
             '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath
         )) {
             [void]$startInfo.ArgumentList.Add([string]$argument)
@@ -636,7 +744,7 @@ function Disconnect-SemrSession {
         Remove-PSSession -Session $script:OnPremisesSession -ErrorAction SilentlyContinue
         $script:OnPremisesSession = $null
     }
-    foreach ($key in $script:ConnectionState.Keys) {
+    foreach ($key in @($script:ConnectionState.Keys)) {
         $script:ConnectionState[$key] = $false
     }
     $script:ActiveDirectoryDomains = @()
@@ -3227,8 +3335,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjoJKtljKFA4ir
-# lu3wQmOVJSgLaQcGKgaRXq+E/LB4v6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBg3p6SfI3ptqMr
+# Gc71c24ikGLETItWfu1EGltCl2m1qqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3361,31 +3469,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK9KNppxYXAHvaKk4ag+tMjeOXi2DIT1FDdJV3EjQcYdMA0GCSqG
-# SIb3DQEBAQUABIIBgDN6ejIcd/C2LEfj8DrJ8olWZSKm7SBeEzoIxoMsEETf2eOE
-# 0RnH7oVLwYHzuq+Tdwumi8xDmuxuEsHdgkMq4ROKIU+ayqIyh1/+I/FM/QoiKuGU
-# KjqCenrV0ftgxe+EEKbMOSsq3uVju5EYcm2enSbWmlJbxR7rl0AQwtRJKmHLy6JX
-# HyMDEocM9pD4zjOG9yxBGNrL5kUbmWmLo9HRNHItCosvbUk0FhCUK/uO44lQo/bO
-# xaz/gJT16VlwJFLBQlf910DlOnS30v1pP4ue/aGOezQYiJvfaAZD3NJGK0Cmfzcr
-# EG+6CmSGQFX0pmDhZa3a/WwZsnU++/CfJwFcMOcBVaH9QrRVWlsswiRQ25WgJuIE
-# 9sz6p60ja1SMsTqt98WhXYUMzt8Oncn2WpFEBADlrOZ1uIO6CHxrBQBkBfJ7cB6F
-# BcTT7ZU3WUjrmYncvLOBoxfBWynkyget2q4EvHcJ/6bd2cy3tqpfavINtnl0VBvt
-# SyV9nwmIeAPUjEVAj6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGfk7KRnfyXy1HTf2LFeIFX0uo4Ybmeau/62nA//91zGMA0GCSqG
+# SIb3DQEBAQUABIIBgI9srkY01p3dZL0gH9OA1cd1tFPDosOd3uDZMHhN8zYESURp
+# rAeHsysGKvanOZc1rgNdhiIdfg7k/VpPi0L/ThHKXfiyGnfJMSm2st11LR6LbVrB
+# o0yHrHkLrjoC0GUsa+uTbPgu3qPjttZ4AuG21mBYkC17wesiTjZKxAGaE7c8/sDw
+# QWQYUFNdNaZvnUWmq21gHBYHhZDTN1kvw4Aw7ruEbiG/5J37yypmd+d/Rs565liq
+# mZ0sGvdvtV42kvoLkKBzLAgH9R3USR5lktJy+t0avm+M27i9tU7knX8LmdbRUXt2
+# 0EU5XW6jdjTBasfLl1nyk/7ZhGHmVGMMQNPkEjoWDmIQMWIEXgPCwdQfSkViO7jR
+# QYfsDnvPukzGlYMwdkZMJqzddY9wqFDusFJRGdnr1FBbaqz2GWrNgs/iIJgp9ZcL
+# zNqrF6cPU5JKiwVgMIy0o/2bMkfUFxmN9s45EoXshw2nK+6xKS8UMV2B4tEDzXNl
+# pVaz3OJhy0FF5AY05aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMDQ1
-# MzlaMC8GCSqGSIb3DQEJBDEiBCD+N0wE7SceYXaPB+3Try1cIUiWW1MUPuwHybSc
-# +bJwNjANBgkqhkiG9w0BAQEFAASCAgAMk+bfSvu+wUd+hJVvNmS8a8BMh9sN0nYN
-# L2m+TAIjzCpy2PmttYXk5ZEXrF+Qgy/QIhCfMmF42ZF4W6Ifv5fpFkY3r/Hzikcw
-# znmPxdobn+1ndO7MAQ/akgCP8pjcMC1MOHn/DeA0pI+gugjxcSiMb1qOGO6kF1bm
-# iFicDy3uMGjbEOFMHGDrA7JzUAlkKG0moO+UjZuhzQtQHa6OGsDTccfCq5AVQfAV
-# 8D3BVfwCTkRmrtTTwy1/OmSwahi/Z/LYiFtvBuKYPwieiQn52KWdfNIJhisLvyOR
-# AFWfDAhtbtaGVngCCM30MIlAGV4wt+zRPvORDuNKdKl4x+r8vBWvXHD15K6NKKRM
-# sc7dDWPWG+a/Imzio0nKM+v+gz+buWCbyljY3PDlLDEr8Yab4EDgzdzfDeuhcDw4
-# 0wXFZbqaRPDE/eCDS+PLsAbOPkj4SjGvpNJpFFfRxiIO4kTPIAgjQFOkz3w0ahOF
-# QBUKhTbEvqf/Z6r+rLPTk2djWu0ytoSG+hZO9iRd3Xek3lwfhC4sHwiM+cnAR6Po
-# g6xaekE7/zLYKGleWvKzlcVj8CLiiIM9N6BzPfqFwWQ351sXWh9SOhHMychFmeIW
-# 8PqFHH4x90VgDzDMi5Dov8BNGhoFK1xqCvQ9clZ/zYEyt3TJM+knG/ASwxtngxhK
-# Tk6zPjArvg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxMTQw
+# NThaMC8GCSqGSIb3DQEJBDEiBCDoH5N2XGSb5OVYVkMIzzYVj+T685dbQYiBhCV/
+# AjM41zANBgkqhkiG9w0BAQEFAASCAgARN6vQbMn94AevyQAtZXvgw0nazUkdkObq
+# VerZeqPncsffqahGAT/mBGbjzlXs1Df24oI0o39ZCalrfvM+48a8rcftVM5kAdhi
+# xILbRoqC6IttZpt5MYv23HpR4HE5ROq1AyGpr+5LZnfLdfD4wByLamZjIeYAmyAP
+# 9jdxBlZMlGfet1Phc9i1ca8d3E8zxP5gse+LFTgADlpvoPXZntVukOyKkSGTR2w6
+# XO+bvebigzEQt4FoSfT7m7Jj5AhFyAjRtBhPMH/kW1oDeWSBasGm+C9VOZGX/iRV
+# 8UazPqlC7ZwNYh84C7512VXDRSI9wJV16BbDRmFpjQJsWlIgFp6muwxBaEYEmNwD
+# c+Tw/olgraVzVq0eBu+4rxNWJkyk0kUsFpvNcmRGRRc7viEYER8y1Q5CAI/Omc2X
+# /TF+QNAP+pzz6+jBeorYwYWDAZyvJ6Zw2XMXPZeYb/1APegORo2Pfy+TjizNmt6I
+# eK8MpqdIoB/ox6CSkoM9tX9K2tKPLY4pNw07JsAxuWg7UAlglFAWiPmWw9bedHqP
+# syrcSBnkqjtUv4E7k6s5wHFQ8/R8Fp1oCBOBSV521jILRHqLBtBY6RiYv4ql9q1c
+# vwc7knREDVqvDS/SaCvWcqS+sqcBJfvA5tbcm+HSuJTk0x0LmBZ+3HXwWKm8rNXe
+# TUivrSBYyQ==
 # SIG # End signature block
