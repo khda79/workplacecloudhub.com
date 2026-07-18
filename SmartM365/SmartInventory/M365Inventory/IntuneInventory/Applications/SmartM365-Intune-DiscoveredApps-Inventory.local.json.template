@@ -24,6 +24,7 @@
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "DiscoveredAppsCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\Applications\\DiscoveredApps",
   "GraphMaxRetryAttempts": 8,
+  "GraphBatchMaxRetryAttempts": 3,
   "GraphRetryDefaultSeconds": 30,
   "GraphRequestDelayMs": 100,
   "GraphRetryMaxSeconds": 300,
