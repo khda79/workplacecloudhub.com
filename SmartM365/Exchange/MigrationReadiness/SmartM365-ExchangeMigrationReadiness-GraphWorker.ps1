@@ -3,7 +3,7 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.7.0
+1.8.0
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -41,7 +41,7 @@ try {
                 throw "Required Microsoft Graph command is unavailable: $commandName"
             }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.7.0'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.8.0'
         exit 0
     }
 
@@ -137,7 +137,7 @@ try {
     $organizationError = ''
     try {
         $organizationRow = @(Get-MgOrganization -Property @(
-            'id', 'displayName', 'onPremisesSyncEnabled', 'onPremisesLastSyncDateTime'
+            'id', 'displayName', 'onPremisesSyncEnabled', 'onPremisesLastSyncDateTime', 'verifiedDomains'
         ) -ErrorAction Stop | Select-Object -First 1)
         if ($organizationRow.Count -eq 1) {
             $organization = [pscustomobject][ordered]@{
@@ -145,6 +145,15 @@ try {
                 DisplayName = [string]$organizationRow[0].DisplayName
                 OnPremisesSyncEnabled = $organizationRow[0].OnPremisesSyncEnabled
                 OnPremisesLastSyncDateTime = [string]$organizationRow[0].OnPremisesLastSyncDateTime
+                VerifiedDomains = @($organizationRow[0].VerifiedDomains | ForEach-Object {
+                    [pscustomobject][ordered]@{
+                        Name = [string]$_.Name
+                        IsDefault = [bool]$_.IsDefault
+                        IsInitial = [bool]$_.IsInitial
+                        Type = [string]$_.Type
+                        Capabilities = [string]$_.Capabilities
+                    }
+                })
                 CollectedAt = Get-Date
             }
         }

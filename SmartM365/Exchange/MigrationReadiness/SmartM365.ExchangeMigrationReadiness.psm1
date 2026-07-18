@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.7.0'
+$script:SemrVersion = '1.8.0'
 $script:OnPremisesSession = $null
 $script:InventoryContext = $null
 $script:ActiveDirectoryDomains = @()
@@ -71,6 +71,7 @@ function Get-SemrCheckCatalog {
         @('GRAPH-SOURCE','Microsoft Graph','Graph source availability','Require live or cached Microsoft Graph evidence.'),
         @('GRAPH-USER-STATE','Microsoft Graph','Unique Entra user','Require exactly one matching Entra user.'),
         @('GRAPH-DIRSYNC','Microsoft Graph','Directory synchronization','Verify the user is synchronized from on-premises.'),
+        @('ENTRA-UPN-VERIFIED-DOMAIN','Microsoft Graph','Verified UPN domain','Verify the Entra user UPN domain is verified in the tenant.'),
         @('ENTRA-OBJECT-SYNC-ERROR','Microsoft Graph','Object synchronization errors','Detect stale synchronization and identity anchor issues.'),
         @('LICENSE-PRE-MIGRATION','Licensing','Pre-migration licenses','Report licenses already assigned before migration.'),
         @('LICENSE-USAGE-LOCATION','Licensing','Usage location','Verify UsageLocation is populated.'),
@@ -2296,6 +2297,34 @@ function Get-SemrAcceptedDomainEvidence {
     return [pscustomobject]$result
 }
 
+function Get-SemrUpnVerifiedDomainEvidence {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$UserPrincipalName)
+
+    $upnDomain = if ($UserPrincipalName -match '@(?<Domain>[^@]+)$') { $Matches.Domain.Trim().ToLowerInvariant() } else { '' }
+    $organization = $script:GraphOrganization
+    $verifiedDomainRows = if ($organization) { @(Get-SemrPropertyValue -InputObject $organization -Names @('VerifiedDomains') -Default @()) } else { @() }
+    $verifiedDomainNames = @(
+        $verifiedDomainRows |
+            ForEach-Object { [string](Get-SemrPropertyValue -InputObject $_ -Names @('Name') -Default '') } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_.Trim().ToLowerInvariant() } |
+            Sort-Object -Unique
+    )
+    $available = $null -ne $organization -and $verifiedDomainNames.Count -gt 0
+    $verified = $available -and -not [string]::IsNullOrWhiteSpace($upnDomain) -and $verifiedDomainNames -contains $upnDomain
+    $sourceTimestamp = if ($organization) { Get-SemrPropertyValue -InputObject $organization -Names @('CollectedAt') -Default $null } else { $null }
+    return [pscustomobject][ordered]@{
+        Available = $available
+        Verified = $verified
+        UserPrincipalName = $UserPrincipalName
+        UpnDomain = $upnDomain
+        VerifiedDomains = $verifiedDomainNames
+        Source = if ($organization) { 'Live Microsoft Graph organization verifiedDomains' } else { 'Unavailable' }
+        SourceTimestamp = $sourceTimestamp
+        Message = if (-not $available) { 'Microsoft Entra verified-domain evidence is unavailable.' } elseif ([string]::IsNullOrWhiteSpace($upnDomain)) { 'The Microsoft Entra user UPN is empty or malformed.' } elseif ($verified) { "UPN domain '$upnDomain' is verified in Microsoft Entra." } else { "UPN domain '$upnDomain' is not present in the tenant verifiedDomains collection." }
+    }
+}
+
 function Get-SemrProxyConflictEvidence {
     param([Parameter(Mandatory)][string]$EmailAddress, [Parameter(Mandatory)][string[]]$Addresses)
 
@@ -2851,6 +2880,8 @@ function Invoke-SemrAssessment {
         $email = [string]$row.EmailAddress
         $resolvedRecipientType = ''
         $mailboxTargetPolicy = $null
+        $mailboxSizeGb = $null
+        $targetLicense = if ($row.TargetSku) { [string]$row.TargetSku } else { [string]$Config['DefaultTargetSku'] }
         $base = @{
             RunId = $runId
             EmailAddress = $email
@@ -3013,6 +3044,8 @@ function Invoke-SemrAssessment {
                 $targetSku = if ($row.TargetSku) { $row.TargetSku } else { [string]$Config['DefaultTargetSku'] }
                 $targetSkuExplicit = -not [string]::IsNullOrWhiteSpace([string]$row.TargetSku)
                 $mailboxTargetPolicy = Get-SemrTargetQuotaEvidence -TargetSku $targetSku -Config $Config -MailboxType $resolvedRecipientType -TargetSkuExplicit:$targetSkuExplicit
+                $mailboxSizeGb = if ($statistics.Count -eq 1) { [math]::Round([double]$sizeGb, 2) } else { $null }
+                $targetLicense = [string]$mailboxTargetPolicy.TargetSku
                 $bufferPercent = [double]$Config['QuotaSafetyBufferPercent']
                 $safeQuota = if ($mailboxTargetPolicy.Known -and $mailboxTargetPolicy.Eligible) { $mailboxTargetPolicy.QuotaGb * (1.0 - ($bufferPercent / 100.0)) } else { 0.0 }
                 $sizePass = $mailboxTargetPolicy.Known -and $mailboxTargetPolicy.Eligible -and $statistics.Count -eq 1 -and $sizeGb -lt $safeQuota
@@ -3144,13 +3177,23 @@ function Invoke-SemrAssessment {
                     Message = if ($syncEnabled) { 'The user is synchronized from on-premises.' } else { 'The user is not marked as synchronized from on-premises.' }
                     RecommendedAction = if ($syncEnabled) { '' } else { 'Confirm the object is in Microsoft Entra Connect scope and successfully exported.' }
                 })
-                $licenseCount = @($graph.LicenseDetails).Count
+                $upnDomainEvidence = Get-SemrUpnVerifiedDomainEvidence -UserPrincipalName ([string]$user.UserPrincipalName)
+                Add-SemrFinding -List $findings -Parameters ($base + @{
+                    CheckId = 'ENTRA-UPN-VERIFIED-DOMAIN'; Category = 'MicrosoftGraph'; Severity = if (-not $upnDomainEvidence.Available) { 'Warning' } elseif ($upnDomainEvidence.Verified) { 'Information' } else { 'Critical' }
+                    Result = if (-not $upnDomainEvidence.Available) { 'UNKNOWN' } elseif ($upnDomainEvidence.Verified) { 'PASS' } else { 'FAIL' }; IsBlocking = $upnDomainEvidence.Available -and -not $upnDomainEvidence.Verified
+                    ObservedValue = if ($upnDomainEvidence.Available) { "UPN=$($upnDomainEvidence.UserPrincipalName); Domain=$($upnDomainEvidence.UpnDomain)" } else { $upnDomainEvidence.Message }
+                    ExpectedValue = 'The Entra user UPN domain is present in organization.verifiedDomains'; EvidenceSource = $upnDomainEvidence.Source; SourceTimestamp = $upnDomainEvidence.SourceTimestamp
+                    Message = $upnDomainEvidence.Message
+                    RecommendedAction = if (-not $upnDomainEvidence.Available) { 'Collect Microsoft Graph organization verifiedDomains in Live mode.' } elseif (-not $upnDomainEvidence.Verified) { 'Verify the UPN domain in Microsoft Entra or correct the synchronized userPrincipalName before migration.' } else { '' }
+                })
+                $licenseNames = @($graph.LicenseDetails | ForEach-Object { [string]$_.SkuPartNumber } | Where-Object { $_ } | Sort-Object -Unique)
+                $licenseCount = $licenseNames.Count
                 $existingBatchPhase = [string]$Config['AssessmentPhase'] -eq 'ExistingBatch'
                 $licenseResult = if ($existingBatchPhase) { if ($licenseCount -gt 0) { 'PASS' } else { 'WARN' } } else { if ($licenseCount -gt 0) { 'WARN' } else { 'PASS' } }
                 Add-SemrFinding -List $findings -Parameters ($base + @{
                     CheckId = 'LICENSE-PRE-MIGRATION'; Category = 'Licensing'; Severity = if ($licenseResult -eq 'WARN') { 'Warning' } else { 'Information' }
                     Result = $licenseResult; IsBlocking = $false
-                    ObservedValue = "$licenseCount assigned license(s)"; ExpectedValue = if ($existingBatchPhase) { 'Approved target license assigned for the existing migration batch' } else { 'License available; Exchange license assigned after migration' }
+                    ObservedValue = if ($licenseCount -gt 0) { "$licenseCount assigned license(s): $($licenseNames -join '; ')" } else { '0 assigned licenses' }; ExpectedValue = if ($existingBatchPhase) { 'Approved target license assigned for the existing migration batch' } else { 'License available; Exchange license assigned after migration' }
                     EvidenceSource = $graphSource; Message = if ($existingBatchPhase -and $licenseCount -gt 0) { 'The assigned license is expected for the existing migration batch.' } elseif ($existingBatchPhase) { 'No assigned license was returned for the existing migration batch.' } elseif ($licenseCount -gt 0) { 'One or more licenses are already assigned before migration.' } else { 'No assigned license was returned before migration.' }
                     RecommendedAction = if ($existingBatchPhase -and $licenseCount -eq 0) { 'Confirm the target licensing plan and assignment timing for this active migration.' } elseif (-not $existingBatchPhase -and $licenseCount -gt 0) { 'Verify that an Exchange service plan has not provisioned an unintended cloud mailbox.' } elseif (-not $existingBatchPhase) { 'Assign the approved Exchange Online license after migration completion and within the operational deadline.' } else { '' }
                 })
@@ -3255,9 +3298,16 @@ function Invoke-SemrAssessment {
             RecommendedAction = 'Review prior migration reports and restore history. Treat a prior occurrence as NO-GO until Microsoft-supported remediation is confirmed.'
         })
 
+        $graphUserForReport = @($graph.Users | Select-Object -First 1)
+        $assignedLicenseNames = @($graph.LicenseDetails | ForEach-Object { [string]$_.SkuPartNumber } | Where-Object { $_ } | Sort-Object -Unique)
+        $graphReportAvailable = [string]::IsNullOrWhiteSpace([string](Get-SemrPropertyValue -InputObject $graph -Names @('QueryError') -Default '')) -and $graphUserForReport.Count -eq 1
         $mailboxEvidence = [pscustomobject][ordered]@{
             RunId = $runId
             EmailAddress = $email
+            UserPrincipalName = if ($graphUserForReport.Count -eq 1) { [string]$graphUserForReport[0].UserPrincipalName } else { '' }
+            MailboxSizeGb = if ($null -ne $mailboxSizeGb) { [double]$mailboxSizeGb } else { $null }
+            TargetLicense = $targetLicense
+            AssignedLicenses = if (-not $graphReportAvailable) { 'Not available' } elseif ($assignedLicenseNames.Count -gt 0) { $assignedLicenseNames -join '; ' } else { 'None' }
             AdUserCount = @($ad.Users).Count
             OnPremMailboxCount = @($onPrem.Mailboxes).Count
             OnPremRemoteMailboxCount = @($onPrem.RemoteMailboxes).Count
@@ -3279,8 +3329,15 @@ function Invoke-SemrAssessment {
     $globalBlocking = @($globalFindings | Where-Object { $_.IsBlocking -and $_.Result -in @('FAIL','UNKNOWN') })
     $globalWarnings = @($globalFindings | Where-Object Result -EQ 'WARN')
     $globalUnknown = @($globalFindings | Where-Object Result -EQ 'UNKNOWN')
+    $evidenceByEmail = @{}
+    foreach ($evidenceRow in @($evidenceRows)) {
+        $evidenceKey = ([string]$evidenceRow.EmailAddress).ToLowerInvariant()
+        if (-not $evidenceByEmail.ContainsKey($evidenceKey)) { $evidenceByEmail[$evidenceKey] = $evidenceRow }
+    }
     foreach ($row in $summaryRows) {
         $email = [string]$row.EmailAddress
+        $emailKey = $email.ToLowerInvariant()
+        $mailboxReport = if ($evidenceByEmail.ContainsKey($emailKey)) { $evidenceByEmail[$emailKey] } else { $null }
         $mailFindings = @($findings | Where-Object EmailAddress -EQ $email)
         $mailboxBlocking = @($mailFindings | Where-Object { $_.IsBlocking -and $_.Result -in @('FAIL', 'UNKNOWN') })
         $blocking = @($mailboxBlocking) + @($globalBlocking)
@@ -3295,6 +3352,10 @@ function Invoke-SemrAssessment {
             BatchName = [System.IO.Path]::GetFileNameWithoutExtension($Batch.Path)
             AssessmentPhase = [string]$Config['AssessmentPhase']
             EmailAddress = $email
+            UserPrincipalName = if ($mailboxReport) { [string]$mailboxReport.UserPrincipalName } else { '' }
+            MailboxSizeGb = if ($mailboxReport) { $mailboxReport.MailboxSizeGb } else { $null }
+            TargetLicense = if ($mailboxReport) { [string]$mailboxReport.TargetLicense } elseif ($row.TargetSku) { [string]$row.TargetSku } else { [string]$Config['DefaultTargetSku'] }
+            AssignedLicenses = if ($mailboxReport) { [string]$mailboxReport.AssignedLicenses } else { 'Not available' }
             Decision = $decision
             BlockingCount = $blocking.Count
             MailboxBlockingCount = $mailboxBlocking.Count
@@ -3347,7 +3408,14 @@ function Export-SemrCsvFile {
     )
 
     if (@($Data).Count -gt 0) {
-        @($Data) | Select-Object -Property $Columns | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding utf8
+        $originalCulture = [Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::InvariantCulture
+            @($Data) | Select-Object -Property $Columns | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding utf8
+        }
+        finally {
+            [Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+        }
         return
     }
     $header = ($Columns | ForEach-Object { '"{0}"' -f ($_ -replace '"', '""') }) -join ','
@@ -3464,11 +3532,11 @@ function New-SemrExcelReport {
     )
     Add-Type -AssemblyName System.IO.Compression -ErrorAction SilentlyContinue
     $sheets = @(
-        [pscustomobject]@{ Name='Summary'; Data=@($Assessment.Summary); Columns=@('RunId','BatchName','AssessmentPhase','EmailAddress','Decision','BlockingCount','MailboxBlockingCount','GlobalBlockingCount','WarningCount','MailboxWarningCount','GlobalWarningCount','UnknownCount','MailboxUnknownCount','GlobalUnknownCount','DataCoverage','BlockingCodes','RecommendedAction','CheckedAt') },
+        [pscustomobject]@{ Name='Summary'; Data=@($Assessment.Summary); Columns=@('RunId','BatchName','AssessmentPhase','EmailAddress','UserPrincipalName','MailboxSizeGb','TargetLicense','AssignedLicenses','Decision','BlockingCount','MailboxBlockingCount','GlobalBlockingCount','WarningCount','MailboxWarningCount','GlobalWarningCount','UnknownCount','MailboxUnknownCount','GlobalUnknownCount','DataCoverage','BlockingCodes','RecommendedAction','CheckedAt') },
         [pscustomobject]@{ Name='Mailbox Findings'; Data=@($Assessment.Findings); Columns=@('RunId','EmailAddress','CheckId','Category','Severity','Result','IsBlocking','ObservedValue','ExpectedValue','EvidenceSource','SourceTimestamp','Message','RecommendedAction') },
         [pscustomobject]@{ Name='Tenant Checks'; Data=@($Assessment.GlobalFindings); Columns=@('RunId','EmailAddress','CheckId','Category','Severity','Result','IsBlocking','ObservedValue','ExpectedValue','EvidenceSource','SourceTimestamp','Message','RecommendedAction') },
         [pscustomobject]@{ Name='Permissions'; Data=@($Assessment.PermissionsBaseline); Columns=@('RunId','EmailAddress','PermissionType','Delegate','IsInherited','Source','CapturedAt') },
-        [pscustomobject]@{ Name='Evidence'; Data=@($Assessment.Evidence); Columns=@('RunId','EmailAddress','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt') },
+        [pscustomobject]@{ Name='Evidence'; Data=@($Assessment.Evidence); Columns=@('RunId','EmailAddress','UserPrincipalName','MailboxSizeGb','TargetLicense','AssignedLicenses','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt') },
         [pscustomobject]@{ Name='CSV Sources'; Data=@($Assessment.CsvSources); Columns=@('FileName','Category','ExpectedUse','Path','Present','Fresh','Used','Status','LastWriteTime','AgeHours','Details') },
         [pscustomobject]@{ Name='Check Options'; Data=@($Assessment.CheckOptions); Columns=@('CheckId','Category','Name','Mandatory','Enabled','Description') }
     )
@@ -3534,7 +3602,9 @@ function New-SemrHtmlReport {
     $entra = if ($Assessment.EntraConnect) { [string]$Assessment.EntraConnect.Message } else { 'Not available' }
     $summaryRows = foreach ($row in $summary) {
         $decisionClass = ([string]$row.Decision).ToLowerInvariant().Replace('-','')
-        '<tr data-search="'+(ConvertTo-SemrHtmlText ("$($row.EmailAddress) $($row.Decision) $($row.BlockingCodes) $($row.RecommendedAction)"))+'"><td>'+(ConvertTo-SemrHtmlText $row.EmailAddress)+'</td><td><span class="badge '+$decisionClass+'">'+(ConvertTo-SemrHtmlText $row.Decision)+'</span></td><td>'+$row.BlockingCount+'</td><td>'+$row.WarningCount+'</td><td>'+$row.UnknownCount+'</td><td>'+(ConvertTo-SemrHtmlText $row.DataCoverage)+'</td><td>'+(ConvertTo-SemrHtmlText $row.BlockingCodes)+'</td><td>'+(ConvertTo-SemrHtmlText $row.RecommendedAction)+'</td></tr>'
+        $sizeDisplay = if ($row.PSObject.Properties['MailboxSizeGb'] -and $null -ne $row.MailboxSizeGb -and [string]$row.MailboxSizeGb -ne '') { ([double]$row.MailboxSizeGb).ToString('0.##', [Globalization.CultureInfo]::InvariantCulture) + ' GB' } else { 'Not available' }
+        $searchText = "$($row.EmailAddress) $($row.UserPrincipalName) $sizeDisplay $($row.TargetLicense) $($row.AssignedLicenses) $($row.Decision) $($row.BlockingCodes) $($row.RecommendedAction)"
+        '<tr data-search="'+(ConvertTo-SemrHtmlText $searchText)+'"><td>'+(ConvertTo-SemrHtmlText $row.EmailAddress)+'</td><td>'+(ConvertTo-SemrHtmlText $row.UserPrincipalName)+'</td><td class="number">'+(ConvertTo-SemrHtmlText $sizeDisplay)+'</td><td>'+(ConvertTo-SemrHtmlText $row.TargetLicense)+'</td><td>'+(ConvertTo-SemrHtmlText $row.AssignedLicenses)+'</td><td><span class="badge '+$decisionClass+'">'+(ConvertTo-SemrHtmlText $row.Decision)+'</span></td><td>'+$row.BlockingCount+'</td><td>'+$row.WarningCount+'</td><td>'+$row.UnknownCount+'</td><td>'+(ConvertTo-SemrHtmlText $row.DataCoverage)+'</td><td>'+(ConvertTo-SemrHtmlText $row.BlockingCodes)+'</td><td>'+(ConvertTo-SemrHtmlText $row.RecommendedAction)+'</td></tr>'
     }
     $tenantRows = foreach ($row in $globalFindings) {
         $resultClass = ([string]$row.Result).ToLowerInvariant().Replace('-','')
@@ -3548,9 +3618,9 @@ function New-SemrHtmlReport {
     }
     $html = @"
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Smart Exchange Migration Readiness - $($Assessment.RunId)</title><style>
-:root{--blue:#0078d4;--navy:#18324a;--muted:#5f6b7a;--line:#d9e2ec;--bg:#f4f8fb;--green:#146c43;--amber:#8a5a00;--red:#b42318}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#1f2937;font:14px Segoe UI,Arial,sans-serif}.wrap{max-width:1500px;margin:auto;padding:24px}.hero,.panel{background:white;border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}.hero h1{margin:0 0 6px;font-size:28px}.sub{color:var(--muted)}.meta,.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:16px}.card{border:1px solid var(--line);border-radius:9px;padding:14px}.card strong{display:block;font-size:25px}.go{color:var(--green)}.gowarning,.warn,.warning{color:var(--amber)}.nogo,.fail{color:var(--red)}.unknown{color:#586477}.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-weight:700;background:#e8edf3}.badge.go,.badge.pass{background:#dff3e4;color:var(--green)}.badge.gowarning,.badge.warn{background:#fff1cc;color:var(--amber)}.badge.nogo,.badge.fail{background:#fde2e1;color:var(--red)}h2{margin:0 0 14px}input{width:100%;max-width:520px;padding:10px;border:1px solid #b8c5d1;border-radius:7px;margin-bottom:12px}table{border-collapse:collapse;width:100%;font-size:13px}th{position:sticky;top:0;background:var(--blue);color:white;text-align:left;padding:9px}td{border-bottom:1px solid #e5ebf1;padding:8px;vertical-align:top}tbody tr:hover{background:#f4f9fd}.scroll{overflow:auto;max-height:620px}details{background:white;border:1px solid var(--line);border-radius:12px;margin-bottom:16px;padding:14px}summary{cursor:pointer;font-size:18px;font-weight:600}.note{padding:12px;background:#eef6fc;border-left:4px solid var(--blue);margin-top:12px}@media print{body{background:white}.wrap{max-width:none;padding:0}.scroll{max-height:none;overflow:visible}th{position:static}}
-</style></head><body><main class="wrap"><section class="hero"><h1>Smart Exchange Migration Readiness</h1><div class="sub">Read-only assessment $($Assessment.RunId)</div><div class="meta"><div class="card"><b>Mode</b><div>$(ConvertTo-SemrHtmlText $Assessment.Mode)</div></div><div class="card"><b>Phase</b><div>$(ConvertTo-SemrHtmlText $Assessment.AssessmentPhase)</div></div><div class="card"><b>Endpoint</b><div>$(ConvertTo-SemrHtmlText $endpoint)</div></div><div class="card"><b>Duration</b><div>$duration s</div></div></div><div class="cards"><div class="card go"><b>GO</b><strong>$go</strong></div><div class="card gowarning"><b>GO-WARNING</b><strong>$warning</strong></div><div class="card nogo"><b>NO-GO</b><strong>$noGo</strong></div><div class="card unknown"><b>UNKNOWN</b><strong>$unknown</strong></div></div><div class="note"><b>Tenant synchronization:</b> $(ConvertTo-SemrHtmlText $entra)</div></section>
-<section class="panel"><h2>Mailbox decisions</h2><input id="mailFilter" placeholder="Filter by mailbox, decision, code or action"><div class="scroll"><table id="mailTable"><thead><tr><th>Mailbox</th><th>Decision</th><th>Blocking</th><th>Warnings</th><th>Unknown</th><th>Coverage</th><th>Blocking codes</th><th>Recommended action</th></tr></thead><tbody>$($summaryRows -join '')</tbody></table></div></section>
+:root{--blue:#0078d4;--navy:#18324a;--muted:#5f6b7a;--line:#d9e2ec;--bg:#f4f8fb;--green:#146c43;--amber:#8a5a00;--red:#b42318}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#1f2937;font:14px Segoe UI,Arial,sans-serif}.wrap{max-width:1500px;margin:auto;padding:24px}.hero,.panel{background:white;border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}.hero h1{margin:0 0 6px;font-size:28px}.sub{color:var(--muted)}.overview{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.overview .card{flex:1 1 110px;min-width:105px;border:1px solid var(--line);border-radius:9px;padding:11px 12px;background:#f9fbfd}.overview .card strong{display:block;font-size:24px}.go{color:var(--green)}.gowarning,.warn,.warning{color:var(--amber)}.nogo,.fail{color:var(--red)}.unknown{color:#586477}.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-weight:700;background:#e8edf3}.badge.go,.badge.pass{background:#dff3e4;color:var(--green)}.badge.gowarning,.badge.warn{background:#fff1cc;color:var(--amber)}.badge.nogo,.badge.fail{background:#fde2e1;color:var(--red)}h2{margin:0 0 14px}input{width:100%;max-width:620px;padding:10px;border:1px solid #b8c5d1;border-radius:7px;margin-bottom:12px}table{border-collapse:collapse;width:100%;font-size:13px;min-width:1280px}th{position:sticky;top:0;background:var(--blue);color:white;text-align:left;padding:9px;white-space:nowrap}td{border-bottom:1px solid #e5ebf1;padding:8px;vertical-align:top}.number{text-align:right;white-space:nowrap}tbody tr:hover{background:#f4f9fd}.scroll{overflow:auto;max-height:620px}details{background:white;border:1px solid var(--line);border-radius:12px;margin-bottom:16px;padding:14px}summary{cursor:pointer;font-size:18px;font-weight:600}.note{padding:12px;background:#eef6fc;border-left:4px solid var(--blue);margin-top:12px}@media(max-width:900px){.overview .card{flex-basis:145px}}@media print{body{background:white}.wrap{max-width:none;padding:0}.scroll{max-height:none;overflow:visible}th{position:static}}
+</style></head><body><main class="wrap"><section class="hero"><h1>Smart Exchange Migration Readiness</h1><div class="sub">Read-only assessment $($Assessment.RunId)</div><div class="overview"><div class="card"><b>Mode</b><div>$(ConvertTo-SemrHtmlText $Assessment.Mode)</div></div><div class="card"><b>Phase</b><div>$(ConvertTo-SemrHtmlText $Assessment.AssessmentPhase)</div></div><div class="card"><b>Endpoint</b><div>$(ConvertTo-SemrHtmlText $endpoint)</div></div><div class="card"><b>Duration</b><div>$duration s</div></div><div class="card go"><b>GO</b><strong>$go</strong></div><div class="card gowarning"><b>GO-WARNING</b><strong>$warning</strong></div><div class="card nogo"><b>NO-GO</b><strong>$noGo</strong></div><div class="card unknown"><b>UNKNOWN</b><strong>$unknown</strong></div></div><div class="note"><b>Tenant synchronization:</b> $(ConvertTo-SemrHtmlText $entra)</div></section>
+<section class="panel"><h2>Mailbox decisions</h2><input id="mailFilter" placeholder="Filter by mailbox, UPN, size, license, decision, code or action"><div class="scroll"><table id="mailTable"><thead><tr><th>Mailbox</th><th>UPN</th><th>Size</th><th>Target license</th><th>Assigned licenses</th><th>Decision</th><th>Blocking</th><th>Warnings</th><th>Unknown</th><th>Coverage</th><th>Blocking codes</th><th>Recommended action</th></tr></thead><tbody>$($summaryRows -join '')</tbody></table></div></section>
 <details open><summary>Tenant checks</summary><div class="scroll"><table><thead><tr><th>Check</th><th>Category</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($tenantRows -join '')</tbody></table></div></details>
 <details><summary>Blocking and warning details</summary><div class="scroll"><table><thead><tr><th>Mailbox</th><th>Check</th><th>Result</th><th>Message</th><th>Recommended action</th></tr></thead><tbody>$($findingRows -join '')</tbody></table></div></details>
 <details><summary>CSV source inventory</summary><div class="scroll"><table><thead><tr><th>File</th><th>Status</th><th>Present</th><th>Fresh</th><th>Used</th><th>Age hours</th><th>Path</th></tr></thead><tbody>$($sourceRows -join '')</tbody></table></div></details>
@@ -3580,11 +3650,11 @@ function Export-SemrAssessment {
     $htmlPath = Join-Path $runFolder ("SmartM365-ExchangeMigrationReadiness-$($Assessment.RunId).html")
     if ($ProgressCallback) { & $ProgressCallback 'CSV reports' 'Writing detailed CSV files' 1 3 }
 
-    Export-SemrCsvFile -Data @($Assessment.Summary) -Path $summaryPath -Columns @('RunId','BatchName','AssessmentPhase','EmailAddress','Decision','BlockingCount','MailboxBlockingCount','GlobalBlockingCount','WarningCount','MailboxWarningCount','GlobalWarningCount','UnknownCount','MailboxUnknownCount','GlobalUnknownCount','DataCoverage','BlockingCodes','RecommendedAction','CheckedAt')
+    Export-SemrCsvFile -Data @($Assessment.Summary) -Path $summaryPath -Columns @('RunId','BatchName','AssessmentPhase','EmailAddress','UserPrincipalName','MailboxSizeGb','TargetLicense','AssignedLicenses','Decision','BlockingCount','MailboxBlockingCount','GlobalBlockingCount','WarningCount','MailboxWarningCount','GlobalWarningCount','UnknownCount','MailboxUnknownCount','GlobalUnknownCount','DataCoverage','BlockingCodes','RecommendedAction','CheckedAt')
     Export-SemrCsvFile -Data @($Assessment.Findings) -Path $findingsPath -Columns @('RunId','EmailAddress','CheckId','Category','Severity','Result','IsBlocking','ObservedValue','ExpectedValue','EvidenceSource','SourceTimestamp','Message','RecommendedAction')
     Export-SemrCsvFile -Data @($Assessment.GlobalFindings) -Path $globalFindingsPath -Columns @('RunId','EmailAddress','CheckId','Category','Severity','Result','IsBlocking','ObservedValue','ExpectedValue','EvidenceSource','SourceTimestamp','Message','RecommendedAction')
     Export-SemrCsvFile -Data @($Assessment.PermissionsBaseline) -Path $permissionsPath -Columns @('RunId','EmailAddress','PermissionType','Delegate','IsInherited','Source','CapturedAt')
-    Export-SemrCsvFile -Data @($Assessment.Evidence) -Path $evidencePath -Columns @('RunId','EmailAddress','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt')
+    Export-SemrCsvFile -Data @($Assessment.Evidence) -Path $evidencePath -Columns @('RunId','EmailAddress','UserPrincipalName','MailboxSizeGb','TargetLicense','AssignedLicenses','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt')
     Export-SemrCsvFile -Data @($Assessment.CsvSources) -Path $csvSourcesPath -Columns @('FileName','Category','ExpectedUse','Path','Present','Fresh','Used','Status','LastWriteTime','AgeHours','Details')
     Export-SemrCsvFile -Data @($Assessment.CheckOptions) -Path $checkOptionsPath -Columns @('CheckId','Category','Name','Mandatory','Enabled','Description')
 
