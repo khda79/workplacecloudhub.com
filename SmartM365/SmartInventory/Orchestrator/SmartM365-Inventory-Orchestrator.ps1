@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.2
+1.5.3
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.2
+    Version : 1.5.3
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.2"
+$ScriptVersion = "1.5.3"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -2932,6 +2932,7 @@ function Update-RunningJobs {
 }
 
 function Restore-RunningJobs {
+    $stateChanged = $false
     foreach ($jobName in @($script:State.Jobs.Keys)) {
         $state = $script:State.Jobs[$jobName]
         if ($null -eq $state.Running) { continue }
@@ -2954,6 +2955,52 @@ function Restore-RunningJobs {
         if ($null -eq $runInfo.StartTime) { $runInfo.StartTime = Get-Date }
         if ($null -eq $runInfo.Occurrence) { $runInfo.Occurrence = $runInfo.StartTime }
 
+        if ($null -ne $process -and [string]::IsNullOrWhiteSpace([string]$runInfo.ClaimPath)) {
+            $manifestJob = @(
+                $script:Manifest.OrderedJobs |
+                    Where-Object { [string]$_.Name -eq $jobName } |
+                    Select-Object -First 1
+            )
+            if ($manifestJob.Count -gt 0 -and [string]$manifestJob[0].AssignmentMode -eq 'Elected') {
+                $job = $manifestJob[0]
+                $planId = if ($null -ne $script:ElectionPlan -and -not [string]::IsNullOrWhiteSpace([string]$script:ElectionPlan.PlanId)) {
+                    [string]$script:ElectionPlan.PlanId
+                }
+                else {
+                    'recovery-without-plan'
+                }
+                try {
+                    $claim = Enter-SmartM365OrchestratorOccurrenceClaim `
+                        -ClaimsRootPath $script:Settings.ElectionClaimsPath `
+                        -JobName $jobName `
+                        -Occurrence $runInfo.Occurrence `
+                        -OwnerServer $env:COMPUTERNAME `
+                        -PlanId $planId `
+                        -SafeMinutes ($job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) `
+                        -HeartbeatRootPath $script:Settings.SharedDataFolderPath `
+                        -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes
+                    if ($claim.Acquired) {
+                        $runInfo.ClaimPath = [string]$claim.ClaimPath
+                        $record['ClaimPath'] = $runInfo.ClaimPath
+                        Set-SmartM365OrchestratorOccurrenceClaim `
+                            -ClaimPath $runInfo.ClaimPath `
+                            -OwnerServer $env:COMPUTERNAME `
+                            -Status Running `
+                            -Attempt $runInfo.Attempt `
+                            -SafeMinutes ($job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) | Out-Null
+                        $stateChanged = $true
+                        Write-OrchestratorLog -Message ("Job {0}: restored missing occurrence claim for re-adopted PID {1}." -f $jobName, $recordedPid)
+                    }
+                    else {
+                        Write-OrchestratorLog -Message ("Job {0}: could not restore the occurrence claim for re-adopted PID {1}; claim refused: {2}. The process remains supervised, but a duplicate occurrence may already exist." -f $jobName, $recordedPid, $claim.Reason) -Level ERROR
+                    }
+                }
+                catch {
+                    Write-OrchestratorLog -Message ("Job {0}: failed to restore the occurrence claim for re-adopted PID {1}: {2}. The process remains supervised." -f $jobName, $recordedPid, $_.Exception.Message) -Level ERROR
+                }
+            }
+        }
+
         if ($null -ne $process) {
             $runInfo['Process'] = $process
             $script:RunningJobs[$jobName] = $runInfo
@@ -2963,6 +3010,10 @@ function Restore-RunningJobs {
             Write-OrchestratorLog -Message ("Job {0}: recorded PID {1} is gone or does not match; the run is marked Interrupted." -f $jobName, $recordedPid) -Level WARN
             Complete-JobRun -JobName $jobName -RunInfo $runInfo -StatusHint 'Interrupted' -ExitCode $null -EndTime (Get-Date) -ErrorText 'The orchestrator restart found no matching pwsh process for this run.'
         }
+    }
+
+    if ($stateChanged) {
+        Save-OrchestratorState
     }
 }
 

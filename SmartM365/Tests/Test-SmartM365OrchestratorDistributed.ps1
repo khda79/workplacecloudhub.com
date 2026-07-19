@@ -173,6 +173,89 @@ try {
         -HeartbeatStaleMinutes 5
     Assert-True -Condition $takeoverClaim.Acquired -Message 'An expired claim with a stale/missing owner heartbeat was not safely taken over.'
     Assert-True -Condition ($takeoverClaim.Claim.OwnerServer -eq 'SERVER-B') -Message 'The failover claim owner is incorrect.'
+
+    # Regression guard: a PID re-adopted from pre-claim state must claim its original occurrence.
+    $orchestratorPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'SmartInventory\Orchestrator\SmartM365-Inventory-Orchestrator.ps1'
+    $orchestratorTokens = $null
+    $orchestratorErrors = $null
+    $orchestratorAst = [System.Management.Automation.Language.Parser]::ParseFile(
+        $orchestratorPath,
+        [ref]$orchestratorTokens,
+        [ref]$orchestratorErrors
+    )
+    Assert-True -Condition ($orchestratorErrors.Count -eq 0) -Message 'The orchestrator could not be parsed for the Restore-RunningJobs regression test.'
+    $restoreFunctionAst = $orchestratorAst.Find(
+        {
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Restore-RunningJobs'
+        },
+        $true
+    )
+    Assert-True -Condition ($null -ne $restoreFunctionAst) -Message 'Restore-RunningJobs was not found in the orchestrator.'
+    . ([scriptblock]::Create($restoreFunctionAst.Extent.Text))
+
+    function ConvertFrom-StateTime {
+        param([string]$Text)
+        if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+        return [datetime]::Parse($Text, [cultureinfo]::InvariantCulture)
+    }
+    function Test-ProcessMatchesRecord {
+        return Get-Process -Id $PID
+    }
+    function Save-OrchestratorState {
+        $script:SavedStateCount++
+    }
+    function Write-OrchestratorLog {
+        param([string]$Message, [string]$Level = 'INFO')
+    }
+    function Complete-JobRun {
+        throw 'Complete-JobRun must not be called while the synthetic process is re-adopted.'
+    }
+
+    $recoveryOccurrence = [datetime]'2026-07-19T14:00:00'
+    $script:SavedStateCount = 0
+    $script:RunningJobs = @{}
+    $script:Settings = [pscustomobject]@{
+        ElectionClaimsPath = $claimsRoot
+        ElectionClaimGraceMinutes = 15
+        SharedDataFolderPath = $heartbeatRoot
+        PeerHeartbeatStaleMinutes = 5
+    }
+    $script:ElectionPlan = [pscustomobject]@{ PlanId = 'recovery-plan' }
+    $script:Manifest = [pscustomobject]@{
+        OrderedJobs = @(
+            [pscustomobject]@{
+                Name = 'RecoveryJob'
+                AssignmentMode = 'Elected'
+                TimeoutMinutes = 240
+            }
+        )
+    }
+    $script:State = @{
+        Jobs = @{
+            RecoveryJob = @{
+                Running = @{
+                    StartTime = (Get-Date).ToString('o')
+                    ScheduledOccurrence = $recoveryOccurrence.ToString('o')
+                    Pid = $PID
+                    ProcessName = 'pwsh'
+                    LogPath = 'synthetic.log'
+                    Attempt = 1
+                    TimeoutMinutes = 240
+                }
+            }
+        }
+    }
+
+    Restore-RunningJobs
+    $restoredRecord = $script:State.Jobs.RecoveryJob.Running
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace([string]$restoredRecord.ClaimPath)) -Message 'Restore-RunningJobs did not persist the recovered ClaimPath.'
+    Assert-True -Condition (Test-Path -LiteralPath $restoredRecord.ClaimPath) -Message 'Restore-RunningJobs did not create the recovered claim file.'
+    $restoredClaim = Get-Content -LiteralPath $restoredRecord.ClaimPath -Raw | ConvertFrom-Json
+    Assert-True -Condition ($restoredClaim.Status -eq 'Running') -Message 'The recovered claim was not marked Running.'
+    Assert-True -Condition ($script:SavedStateCount -eq 1) -Message 'The recovered ClaimPath was not saved exactly once.'
+    Assert-True -Condition $script:RunningJobs.ContainsKey('RecoveryJob') -Message 'The synthetic PID was not re-adopted after its claim was recovered.'
 }
 finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
