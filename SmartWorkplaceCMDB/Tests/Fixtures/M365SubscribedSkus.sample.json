@@ -1,0 +1,33 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#subscribedSkus",
+  "value": [
+    {
+      "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa_11111111-aaaa-bbbb-cccc-111111111111",
+      "skuId": "11111111-aaaa-bbbb-cccc-111111111111",
+      "skuPartNumber": "EXAMPLE_ENTERPRISE",
+      "appliesTo": "User",
+      "capabilityStatus": "Enabled",
+      "consumedUnits": 80,
+      "prepaidUnits": {
+        "enabled": 100,
+        "suspended": 0,
+        "warning": 0,
+        "lockedOut": 0
+      }
+    },
+    {
+      "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa_22222222-aaaa-bbbb-cccc-222222222222",
+      "skuId": "22222222-aaaa-bbbb-cccc-222222222222",
+      "skuPartNumber": "EXAMPLE_FRONTLINE",
+      "appliesTo": "User",
+      "capabilityStatus": "Warning",
+      "consumedUnits": 45,
+      "prepaidUnits": {
+        "enabled": 50,
+        "suspended": 0,
+        "warning": 5,
+        "lockedOut": 0
+      }
+    }
+  ]
+}
