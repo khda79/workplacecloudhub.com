@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:DistributedModuleVersion = '1.0.0'
+$script:DistributedModuleVersion = '1.0.1'
 
 function ConvertTo-SafeFileName {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -338,12 +338,39 @@ function Get-DependencyComponent {
     return $components
 }
 
+function Test-ServerJobPolicy {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServerName,
+        [Parameter(Mandatory = $true)][object[]]$Jobs,
+        [hashtable]$ServerJobPolicies = @{}
+    )
+
+    if (-not $ServerJobPolicies.ContainsKey($ServerName)) { return $true }
+    $policy = $ServerJobPolicies[$ServerName]
+    $onlyJobsRequiring = @()
+    if ($policy -is [System.Collections.IDictionary]) {
+        if ($policy.Contains('OnlyJobsRequiring')) { $onlyJobsRequiring = @($policy['OnlyJobsRequiring']) }
+    }
+    elseif ($null -ne $policy -and $policy.PSObject.Properties['OnlyJobsRequiring']) {
+        $onlyJobsRequiring = @($policy.OnlyJobsRequiring)
+    }
+    $onlyJobsRequiring = @($onlyJobsRequiring | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($onlyJobsRequiring.Count -eq 0) { return $true }
+
+    foreach ($job in $Jobs) {
+        $jobCapabilities = @($job.RequiredCapabilities | ForEach-Object { [string]$_ })
+        if (@($onlyJobsRequiring | Where-Object { $_ -notin $jobCapabilities }).Count -gt 0) { return $false }
+    }
+    return $true
+}
+
 function Get-SmartM365OrchestratorElectionPlan {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][object[]]$Jobs,
         [Parameter(Mandatory = $true)][object[]]$ServerCapabilities,
         [hashtable]$ServerWeights = @{},
+        [hashtable]$ServerJobPolicies = @{},
         [hashtable]$DurationMinutesByJob = @{},
         [datetime]$NowUtc = [datetime]::UtcNow
     )
@@ -375,7 +402,7 @@ function Get-SmartM365OrchestratorElectionPlan {
         $candidates = @()
         foreach ($serverName in @($capabilitiesByServer.Keys | Sort-Object)) {
             $match = Test-SmartM365OrchestratorCapabilityMatch -ServerCapabilities $capabilitiesByServer[$serverName] -RequiredCapabilities $requiredCapabilities -RequiredGraphAppRoles $requiredRoles
-            if ($match.Eligible) { $candidates += $serverName }
+            if ($match.Eligible -and (Test-ServerJobPolicy -ServerName $serverName -Jobs $componentJobs -ServerJobPolicies $ServerJobPolicies)) { $candidates += $serverName }
         }
         $groups += [pscustomobject]@{
             GroupKey = (@($component) -join '+')
@@ -391,7 +418,7 @@ function Get-SmartM365OrchestratorElectionPlan {
     $unassigned = @()
     foreach ($group in @($groups | Sort-Object @{ Expression = 'LoadMinutesPerDay'; Descending = $true }, GroupKey)) {
         if (@($group.Candidates).Count -eq 0) {
-            $unassigned += [pscustomobject]@{ GroupKey = $group.GroupKey; Jobs = $group.Jobs; Reason = 'No live server satisfies every required capability and Graph application role.' }
+            $unassigned += [pscustomobject]@{ GroupKey = $group.GroupKey; Jobs = $group.Jobs; Reason = 'No live server satisfies every required capability, Graph application role and server job policy.' }
             continue
         }
         $owner = @($group.Candidates | Sort-Object @{

@@ -45,6 +45,7 @@
   "ElectionHistoryDays": 14,
   "ElectionWeight": 1.0,
   "ElectionWeightsByServer": {},
+  "ServerJobPolicies": {},
   "ExchangeOnlineOrganization": "__USE_GLOBAL__",
   "TickSeconds": 60,
   "DependencyWaitLogIntervalMinutes": 30,

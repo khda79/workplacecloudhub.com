@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.4.0) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.4.1) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -128,6 +128,15 @@ For an explicit user-scoped install:
 Each resident server generates `Orchestrator-Capabilities.json` itself. The default `ReadOnly` probe mode uses isolated, time-bounded child PowerShell processes and read-only checks for `Graph`, `EXO`, `AD`, `ExchangeOnPrem`, and `TeamsPowerShell`; `SharedRuntime` verifies write access to the shared election folder. Graph readiness also records the application roles returned by the app-only connection. No module is installed and no token, certificate private key or secret is written to the capability document.
 
 The planner builds connected `DependsOn` components so parents and children always have the same owner. Daily load is schedule frequency multiplied by the median successful duration from the shared job-run history; `EstimatedDurationMinutes` is the fallback. It then assigns the largest components first to the least normalized load. `ElectionWeight` is the local default capacity, while `ElectionWeightsByServer` lets the same JSON be deployed everywhere with per-server weights; a weight of `1.10` gives a server about 10% more target capacity than `1.00`.
+`ServerJobPolicies` applies an operational allow policy after technical capability detection. `OnlyJobsRequiring` means that every individual job in a dependency component must explicitly require every listed capability before that server can become a candidate. The policy is also published in the server capability document, so another planner respects the server's own restriction even when additional modules or permissions are detected. For example, the following reserves one server for Exchange Server on-premises workloads (Exchange 2016, 2019 or Subscription Edition) without allowing AD-only, Graph, EXO or Teams jobs:
+
+```json
+"ServerJobPolicies": {
+  "CPPV-EXCSRV-113": {
+    "OnlyJobsRequiring": ["ExchangeOnPrem"]
+  }
+}
+```
 
 Before launching an elected occurrence, the owner must create its shared claim with `FileMode.CreateNew`. If shared storage or the plan is unavailable, the elected job stays queued (fail closed). A different server may take over only after `TimeoutMinutes + ElectionClaimGraceMinutes` has expired and the original owner's heartbeat is stale. Terminal claims are never taken over.
 
@@ -263,7 +272,7 @@ Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a n
 
 Created from the committed template at first run. Keys follow the SmartM365 pattern: `__USE_GLOBAL__` inherits from `SmartM365.global.local.json`, and `{{DataAllRootPath}}`-style tokens are resolved through the tenant context.
 
-Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (legacy/default allowlist), `DistributedSchedulingEnabled`, `CapabilityProbeMode`, `CapabilityProbeTimeoutSeconds`, `CapabilityRefreshMinutes`, `CapabilityMaxAgeMinutes`, `ElectionPlanRefreshSeconds`, `ElectionClaimGraceMinutes`, `ElectionHistoryDays`, `ElectionWeight`, `ElectionWeightsByServer`, `ExchangeOnlineOrganization`, `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `AutoRecycleOnRuntimeUpdate`, `RuntimeUpdateCheckIntervalSeconds`, `RuntimeUpdateStableChecks`, `RuntimeUpdateCooldownMinutes`, `MonitorCoreModuleVersion`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
+Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (legacy/default allowlist), `DistributedSchedulingEnabled`, `CapabilityProbeMode`, `CapabilityProbeTimeoutSeconds`, `CapabilityRefreshMinutes`, `CapabilityMaxAgeMinutes`, `ElectionPlanRefreshSeconds`, `ElectionClaimGraceMinutes`, `ElectionHistoryDays`, `ElectionWeight`, `ElectionWeightsByServer`, `ServerJobPolicies`, `ExchangeOnlineOrganization`, `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `AutoRecycleOnRuntimeUpdate`, `RuntimeUpdateCheckIntervalSeconds`, `RuntimeUpdateStableChecks`, `RuntimeUpdateCooldownMinutes`, `MonitorCoreModuleVersion`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
 
 ## Parameters
 

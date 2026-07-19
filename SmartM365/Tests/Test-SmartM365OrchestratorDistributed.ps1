@@ -87,18 +87,19 @@ $allGraphRoles = @($manifest.Jobs.RequiredGraphAppRoles | ForEach-Object { $_ } 
 $productionCapabilities = @(
     [pscustomobject]@{
         ServerName = 'CPPV-CAPTSE-001'
-        ReadyCapabilities = @('SharedRuntime', 'Graph', 'EXO')
+        ReadyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD')
         GraphAppRoles = $allGraphRoles
     }
     [pscustomobject]@{
         ServerName = 'CPPV-CAPTSE-002'
-        ReadyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'TeamsPowerShell')
+        ReadyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'TeamsPowerShell')
         GraphAppRoles = $allGraphRoles
     }
     [pscustomobject]@{
         ServerName = 'CPPV-EXCSRV-113'
-        ReadyCapabilities = @('SharedRuntime', 'AD', 'ExchangeOnPrem')
-        GraphAppRoles = @()
+        # The policy must remain authoritative even when every technical prerequisite exists.
+        ReadyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'TeamsPowerShell')
+        GraphAppRoles = $allGraphRoles
     }
 )
 $productionPlan = Get-SmartM365OrchestratorElectionPlan `
@@ -108,13 +109,26 @@ $productionPlan = Get-SmartM365OrchestratorElectionPlan `
         'CPPV-CAPTSE-001' = 1.0
         'CPPV-CAPTSE-002' = 1.1
         'CPPV-EXCSRV-113' = 1.0
+    } `
+    -ServerJobPolicies @{
+        'CPPV-EXCSRV-113' = @{ OnlyJobsRequiring = @('ExchangeOnPrem') }
     }
 Assert-True -Condition (@($productionPlan.UnassignedGroups).Count -eq 0) -Message 'The production template has an unassigned eligible job group in the mock topology.'
 $load001 = [double]($productionPlan.ServerLoads | Where-Object ServerName -eq 'CPPV-CAPTSE-001').LoadMinutesPerDay
 $load002 = [double]($productionPlan.ServerLoads | Where-Object ServerName -eq 'CPPV-CAPTSE-002').LoadMinutesPerDay
 Assert-True -Condition ($load002 -gt $load001) -Message 'CPPV-CAPTSE-002 is not slightly more loaded than CPPV-CAPTSE-001.'
-$exchange2016Owners = @($productionPlan.Assignments | Where-Object JobName -like 'Exchange2016-*' | ForEach-Object OwnerServer | Sort-Object -Unique)
-Assert-True -Condition ($exchange2016Owners.Count -eq 1 -and $exchange2016Owners[0] -eq 'CPPV-EXCSRV-113') -Message 'Exchange 2016 jobs are not exclusively assigned to CPPV-EXCSRV-113.'
+$exchangeOnPremJobNames = @($manifest.Jobs | Where-Object { $_.Enabled -and $_.AssignmentMode -eq 'Elected' -and @($_.RequiredCapabilities) -contains 'ExchangeOnPrem' } | ForEach-Object Name)
+$exchangeOnPremOwners = @($productionPlan.Assignments | Where-Object JobName -in $exchangeOnPremJobNames | ForEach-Object OwnerServer | Sort-Object -Unique)
+Assert-True -Condition ($exchangeOnPremOwners.Count -eq 1 -and $exchangeOnPremOwners[0] -eq 'CPPV-EXCSRV-113') -Message 'Exchange on-premises jobs are not exclusively assigned to CPPV-EXCSRV-113.'
+$server113Assignments = @($productionPlan.Assignments | Where-Object OwnerServer -eq 'CPPV-EXCSRV-113')
+$server113PolicyViolations = @(
+    foreach ($assignment in $server113Assignments) {
+        $assignedJob = $manifest.Jobs | Where-Object Name -eq $assignment.JobName | Select-Object -First 1
+        if ($null -eq $assignedJob -or @($assignedJob.RequiredCapabilities) -notcontains 'ExchangeOnPrem') { $assignment.JobName }
+    }
+)
+Assert-True -Condition ($server113Assignments.Count -gt 0) -Message 'CPPV-EXCSRV-113 received no Exchange on-premises jobs.'
+Assert-True -Condition ($server113PolicyViolations.Count -eq 0) -Message ("CPPV-EXCSRV-113 received jobs outside the ExchangeOnPrem policy: {0}" -f ($server113PolicyViolations -join ', '))
 $teamsPhoneOwner = [string]($productionPlan.Assignments | Where-Object JobName -eq 'M365-TeamsPhonePstnUsage-Inventory').OwnerServer
 Assert-True -Condition ($teamsPhoneOwner -eq 'CPPV-CAPTSE-002') -Message 'The Teams Phone PSTN usage job is not assigned to CPPV-CAPTSE-002.'
 Assert-True -Condition (@($productionPlan.Assignments | Where-Object JobName -eq 'M365-PowerBIFabricActivity-Inventory').Count -eq 0) -Message 'The manual Power BI Fabric activity job was included in the scheduled election plan.'
