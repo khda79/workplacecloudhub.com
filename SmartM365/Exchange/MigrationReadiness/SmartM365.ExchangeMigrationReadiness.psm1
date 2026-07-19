@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.12'
+$script:SemrVersion = '1.11.13'
 $script:ActiveDirectoryDomains = @()
 $script:ExchangeOnPremEvidenceByEmail = @{}
 $script:ExchangeOnPremHybridEvidence = $null
@@ -1280,17 +1280,38 @@ function Get-SemrMailboxDecision {
         [object[]]$GlobalFindings = @()
     )
 
-    $blockingFindings = @($MailboxFindings) + @($GlobalFindings | Where-Object IsBlocking)
+    $allFindings = @($MailboxFindings) + @($GlobalFindings)
+    $blockingFindings = @($allFindings | Where-Object IsBlocking)
     if (@($blockingFindings | Where-Object Result -EQ 'FAIL').Count -gt 0) {
         return 'NO-GO'
     }
     if (@($blockingFindings | Where-Object Result -EQ 'UNKNOWN').Count -gt 0) {
         return 'UNKNOWN'
     }
-    if (@($MailboxFindings | Where-Object { $_.Result -in @('WARN','UNKNOWN') }).Count -gt 0) {
+    if (@($allFindings | Where-Object { $_.Result -in @('WARN','UNKNOWN') }).Count -gt 0) {
         return 'GO-WARNING'
     }
     return 'GO'
+}
+
+
+function Test-SemrMailboxDecisionRegression {
+    [CmdletBinding()]
+    param()
+
+    $cases = @(
+        [pscustomobject]@{ Name = 'mailbox-nonblocking-unknown'; MailboxFindings = @([pscustomobject]@{ Result = 'UNKNOWN'; IsBlocking = $false }); GlobalFindings = @(); Expected = 'GO-WARNING' }
+        [pscustomobject]@{ Name = 'global-nonblocking-warning'; MailboxFindings = @(); GlobalFindings = @([pscustomobject]@{ Result = 'WARN'; IsBlocking = $false }); Expected = 'GO-WARNING' }
+        [pscustomobject]@{ Name = 'blocking-unknown'; MailboxFindings = @([pscustomobject]@{ Result = 'UNKNOWN'; IsBlocking = $true }); GlobalFindings = @(); Expected = 'UNKNOWN' }
+        [pscustomobject]@{ Name = 'blocking-fail'; MailboxFindings = @([pscustomobject]@{ Result = 'FAIL'; IsBlocking = $true }); GlobalFindings = @(); Expected = 'NO-GO' }
+    )
+    foreach ($case in $cases) {
+        $actual = Get-SemrMailboxDecision -MailboxFindings @($case.MailboxFindings) -GlobalFindings @($case.GlobalFindings)
+        if ($actual -ne $case.Expected) {
+            throw "Mailbox decision regression '$($case.Name)' failed. Expected=$($case.Expected); Actual=$actual."
+        }
+    }
+    return "DECISION_SELFTEST_OK|$($cases.Count)"
 }
 
 function Invoke-SemrCommandSafe {
@@ -1368,6 +1389,7 @@ function Get-SemrOnPremisesEvidence {
         FolderStatisticsAvailable = $false
         InboxRules = @()
         InboxRulesAvailable = $false
+        InboxRulesComplete = $false
         DatabaseHealth = @()
         DatabaseHealthAvailable = $false
         DatabaseHealthSource = 'Local Exchange on-premises Management Shell unavailable'
@@ -2156,8 +2178,9 @@ function Add-SemrFlowAndSyncFindings {
         Add-SemrFinding $Findings ($Base+@{CheckId='MAIL-FORWARDING';Category='MailFlow';Severity=if($forwarding){'Warning'}else{'Information'};Result=if($forwarding){'WARN'}else{'PASS'};IsBlocking=$false;ObservedValue=if($forwarding){$forwarding}else{'No mailbox forwarding'};ExpectedValue='Forwarding documented';EvidenceSource=$source;Message=if($forwarding){'Mailbox-level forwarding is configured.'}else{'No mailbox-level forwarding was detected.'};RecommendedAction=if($forwarding){'Confirm the forwarding target and post-migration behavior.'}else{''}})
 
         $rulesAvailable=[bool](Get-SemrPropertyValue $OnPrem @('InboxRulesAvailable') $false)
+        $rulesComplete=[bool](Get-SemrPropertyValue $OnPrem @('InboxRulesComplete') $rulesAvailable)
         $forwardRules=@($OnPrem.InboxRules | Where-Object {(ConvertTo-SemrBoolean (Get-SemrPropertyValue $_ @('Enabled') $true)) -and (@(Get-SemrPropertyValue $_ @('ForwardTo','RedirectTo','ForwardAsAttachmentTo') @()).Count -gt 0)})
-        Add-SemrFinding $Findings ($Base+@{CheckId='INBOX-FORWARDING-RULES';Category='MailFlow';Severity=if(-not $rulesAvailable -or $forwardRules.Count){'Warning'}else{'Information'};Result=if(-not $rulesAvailable){'UNKNOWN'}elseif($forwardRules.Count){'WARN'}else{'PASS'};IsBlocking=$false;ObservedValue=if($rulesAvailable){"$($forwardRules.Count) forwarding rule(s)"}else{'Inbox rule evidence unavailable'};ExpectedValue='Forwarding rules documented';EvidenceSource=$source;Message=if(-not $rulesAvailable){'Inbox forwarding rules could not be evaluated.'}elseif($forwardRules.Count){'Enabled forwarding or redirect rules were detected.'}else{'No enabled inbox forwarding rule was detected.'};RecommendedAction=if($forwardRules.Count){'Review destinations and validate each rule after migration.'}elseif(-not $rulesAvailable){'Run the final validation with live inbox-rule access.'}else{''}})
+        Add-SemrFinding $Findings ($Base+@{CheckId='INBOX-FORWARDING-RULES';Category='MailFlow';Severity=if(-not $rulesAvailable -or -not $rulesComplete -or $forwardRules.Count){'Warning'}else{'Information'};Result=if(-not $rulesAvailable){'UNKNOWN'}elseif(-not $rulesComplete -or $forwardRules.Count){'WARN'}else{'PASS'};IsBlocking=$false;ObservedValue=if($rulesAvailable){"$($forwardRules.Count) forwarding rule(s); IncludeHiddenComplete=$rulesComplete"}else{'Inbox rule evidence unavailable'};ExpectedValue='Forwarding rules documented with complete hidden-rule coverage';EvidenceSource=$source;Message=if(-not $rulesAvailable){'Inbox forwarding rules could not be evaluated.'}elseif(-not $rulesComplete -and $forwardRules.Count){'Visible forwarding or redirect rules were detected, but hidden-rule coverage is incomplete.'}elseif(-not $rulesComplete){'Visible inbox rules were collected, but hidden-rule coverage is incomplete.'}elseif($forwardRules.Count){'Enabled forwarding or redirect rules were detected.'}else{'No enabled inbox forwarding rule was detected.'};RecommendedAction=if(-not $rulesAvailable){'Run the final validation with live inbox-rule access.'}elseif(-not $rulesComplete){'Review the visible rules and validate hidden inbox rules separately before migration.'}elseif($forwardRules.Count){'Review destinations and validate each rule after migration.'}else{''}})
 
         $deliveryAvailable=[bool](Get-SemrPropertyValue $OnPrem @('DeliveryRestrictionsAvailable') $false)
         $moderated=ConvertTo-SemrBoolean (Get-SemrPropertyValue $mailbox[0] @('ModerationEnabled') $false)
@@ -3793,6 +3816,7 @@ Export-ModuleMember -Function @(
     'Get-SemrMicrosoftGraphSessionInfo',
     'Connect-SemrActiveDirectory',
     'Test-SemrExchangeOnPremWorkerSerialization',
+    'Test-SemrMailboxDecisionRegression',
     'Connect-SemrOnPremisesExchange',
     'Connect-SemrExchangeOnline',
     'Connect-SemrMicrosoftGraph',
@@ -3812,8 +3836,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyQ4JoCSgyKrWy
-# dq1sJiEMsjYL6U8T6gnAF5YojrFyH6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmb0fontqOotj4
+# nNXeW7d/ju3JwHRP+NsHbesF2Vxma6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3946,31 +3970,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINm9vj3ih8Hf6K1qsxPB56ZWSs+jVb5NVn8IIcviEMmaMA0GCSqG
-# SIb3DQEBAQUABIIBgH/MaFgTZ7TPd9JsordQ4LmyFs0FfYZPSVpv4eSGFOkDOkOC
-# CacFwcS6RdARk0wQD06OD/yark6/1t/cOoWjTFwChyjWWa0pYgk1SfrsuJoxCM4U
-# L7nmIZUKCX1jGfNYZ2hJBp0q1bsyhSwySAdUKpYhURbgyDs3pK+HNGTGD9Ewf5/m
-# FRCI72bUlSgHa3pD7J6CGQG/RNKYgRhCwjdJ1X0+gQll4pAJLR86XhmpQAkfUOmo
-# Q/+dKpa0Zf3z5zz7VXLHIgFC5lsVITUpSLu1KTN0e68dxA6iZYGSNnOx3lksPoZz
-# vuSoymJeHlz28fFYr6IFkc4BEWLDdBuZtlrr3TwvTg3xFzowL+dofh4Y7nqTWVzf
-# Ek3n3LQ/ii0Rhtu5U5oXXqvnweEJ29aSx6DrAh4XhJCUcoXg6sXweEEUwbyD2QWd
-# 8tS8dtAUrhstpbK5PgQRdAdEWBygjycglP4EXqP/QI25BGGK4v8iGcIaMeWO1lFP
-# /gabM8x2Nwrl/0UFg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOlLSnzybrmL9xLMnyakE29eTr+0MuP7h3Pyc8LSkfR1MA0GCSqG
+# SIb3DQEBAQUABIIBgAwV9Cug+cFdJ+IixtUngIKbqNTrLukHvcQ4xDRpVxZvLlSD
+# evgjcXK8yEqq3Yj8tAlrPksv/tkyPw5zK7j+NESXBol6LITS2vzNQTTnW37tZfdi
+# 6YckXwZZ1QQI7aYRNNG7j+gePASrDQChwPO/HrNJTObsxreftdkcC64cLCMDQh2R
+# rjng6usyICk6ItjIeWg7yH4TErArsn4Jmdaz+bvWIgkUrpQS0gtfFW3WXcoU370T
+# tnn/ZAV1p6e4jpsKRfg7DPFOtaQ7L22SblOt9OAXFdeKmZ4kn6Xzv0++oBxNz1gi
+# lL0Ua/nI4EbfuZRs8Ekfo91DDNBsLWJHaO1lRQYyKawHxZuI/a57qvdSCUMag3DV
+# w11g35xGaTmphSzXQhv5t3nJ9MLRnJkHsD4GNncZAFHKT9vGB3b/ICmru2kwy1sj
+# Zp0j4Hw4wxnhGXLzQQuhUCQyYrniddtn0MJ06cVxwCiXeP30S8I5yqNJU3smD3Up
+# rFWNB2L9W5hxpPD3faGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxOTIy
-# MjVaMC8GCSqGSIb3DQEJBDEiBCAQtMPfyzFQgxDncOsx8TQo0ZrhMmMNKygucz8J
-# MBSvJjANBgkqhkiG9w0BAQEFAASCAgCIsT+9Fiq7wrokuP4i1Fu1AkgK335Jxfnl
-# LjpzUqhgvkkl7BNNWJ8TJyZrqne4DcE9q+cjYcCix5M3BBuv2nfhlVhiUj5iY043
-# Ggq+w3RVN5TkfkbC4wb+hHyNiGkxfqAmRWHEpHE17dWygAQP4D0bVEFkUi0K5iHd
-# L2NRj7rX5t0bbGciB1+wSwYO8bScfPDmum1iWxC2VQebstbbRRp1Zpq2wZKhZfW3
-# XoU82qtP7d1N5zwgVCRmuALasOCqEFeu27orQC0ULqhlofg9JMGaO2QvS4Db/5Hd
-# qUSSjGao5Zwd+FTc8ajOr0ia2d4p7ddfrzELAiU3xr90PtrB6YjJh49aDCb4OS+w
-# GmCoVvuPBy62/F0OIvx3L2dkqDMHODml2GH7gd1zt0idmhIJ43X4gP4AzVsCiKk6
-# SobUwJZFngcT9YuEdmVJsSHdcSNO4SvmaR/wVfDuuww23ZjVhTK8kC735Z+Amb0B
-# n5FUG7Z57HlHI2hiGnAieDMpvQf+7nJa2iIQ1v4k9Ng79wxCW75PzM2YYetZAlLP
-# zBae+KNb+1eE/WXtouybi4HLCljahpI7HiSBspHwlwlVVNyKfhdSMrvxQxd8w+99
-# SRB8mbs8/MU6U2FBOayEzNyExKFuz3i/ZxxuUMhTpzD3klfgZaGEjm80MFW8WFGL
-# iAYfUuB82g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMDMw
+# MzhaMC8GCSqGSIb3DQEJBDEiBCATn72iDTZy760JFtF5m1ojXPjmcsMtJr6GKN80
+# nqNGFzANBgkqhkiG9w0BAQEFAASCAgABqB3p74bLxaDdsZtTqRKzKVzbKX4DuQfU
+# fKyYaW0Oj7KFX1u+tuGkhIBUINQ7GurAjVvFjE4rUWW58loqBxGBoZ82UftcvMal
+# a/CBNQb2eLVCPY8VSITZvhPlRKbggmnN4ZGh/W9GC2PygplYCqvmLz69PPgusyWC
+# CuS5gP2WfbWUQ7m7ydsQqFp9GOQ9lktOsbwVAppa+PYAZ7wQXn4RBF+Fvny8Uofb
+# Qp2gGfhj/4ScIBXX1CPosIDxNX4Gn+mXAaru80ZZ8p95tdnAHFaKOMzPqYmIGZ8U
+# evRNWpF9Hogg9wOt1s+o7l3Be3CMQ+/EgQPw4/Atd/8aviccOjZiC/0+u49moKjv
+# 7G7fytjm89SUxkdgW2Q1/m2zIsSIUiUxmZjONINw1hu9+amylcSDrpI9snrTeVxk
+# idET5sd6HKoclTLTSm0yHpOZM2kgtF5gh/ivF1n22T5HumeFgoFpjLFFN2qm0n3s
+# Vp9KdiF0zYr0QLP9hxmI9TpARXq6T6dSouxHJ6Dy+3rB6rXEb0SeL3Hk7loHKQAy
+# jqJTtFvZZXAT93azh5Lh7th0R2MubanstGlaihGdlrI/iB4nN540T4xwogtwc5NA
+# W8zvkfiM+/rz3ZYZNiit41LD9OvQWeaAYsnPv5TiSv4WCTyjLXhS5I3FRyptBTMA
+# Bt+MC3P8gA==
 # SIG # End signature block

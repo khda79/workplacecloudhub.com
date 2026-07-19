@@ -19,7 +19,7 @@ param(
 
 Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
-$workerVersion = '1.11.12'
+$workerVersion = '1.11.13'
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
@@ -452,6 +452,7 @@ function Get-WorkerFailureEvidence {
         FolderStatisticsAvailable = $false
         InboxRules = @()
         InboxRulesAvailable = $false
+        InboxRulesComplete = $false
         DatabaseHealth = @()
         DatabaseHealthAvailable = $false
         DatabaseHealthSource = "Local Exchange on-premises Management Shell mailbox database on $env:COMPUTERNAME"
@@ -722,6 +723,7 @@ try {
             $folderStatisticsAvailable = $false
             $inboxRules = @()
             $inboxRulesAvailable = $false
+            $inboxRulesComplete = $false
             $databaseHealth = @()
             $databaseHealthAvailable = $false
             $permissions = New-Object System.Collections.Generic.List[object]
@@ -768,7 +770,20 @@ try {
                 if (Test-WorkerCheckEnabled -CheckId 'INBOX-FORWARDING-RULES') {
                     Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Inbox rules - {0}" -f $email)
                     $ruleResult = Invoke-WorkerCommand -Name 'Get-InboxRule' -Parameters @{ Mailbox = $identity; IncludeHidden = $true }
-                    Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'INBOX-FORWARDING-RULES' -CommandName 'Get-InboxRule' -Result $ruleResult
+                    $inboxRulesComplete = [bool]$ruleResult.Success
+                    if (-not $ruleResult.Success) {
+                        Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'INBOX-FORWARDING-RULES' -CommandName 'Get-InboxRule -IncludeHidden' -Result $ruleResult
+                        Write-WorkerLog -Level WARN -Message "Get-InboxRule -IncludeHidden failed for $email; retrying visible rules without IncludeHidden. Error=$($ruleResult.ErrorMessage)"
+                        $fallbackRuleResult = Invoke-WorkerCommand -Name 'Get-InboxRule' -Parameters @{ Mailbox = $identity }
+                        if ($fallbackRuleResult.Success) {
+                            $ruleResult = $fallbackRuleResult
+                            Write-WorkerLog -Level WARN -Message "Visible inbox-rule fallback succeeded for $email; hidden-rule coverage remains incomplete. RowCount=$(@($ruleResult.Rows).Count)."
+                        }
+                        else {
+                            Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'INBOX-FORWARDING-RULES' -CommandName 'Get-InboxRule fallback' -Result $fallbackRuleResult
+                            $ruleResult = $fallbackRuleResult
+                        }
+                    }
                     $inboxRules = @($ruleResult.Rows | ForEach-Object {
                         [pscustomobject][ordered]@{
                             Name = [string]$_.Name
@@ -870,6 +885,7 @@ try {
                 FolderStatisticsAvailable = $folderStatisticsAvailable
                 InboxRules = $inboxRules
                 InboxRulesAvailable = $inboxRulesAvailable
+                InboxRulesComplete = $inboxRulesComplete
                 DatabaseHealth = $databaseHealth
                 DatabaseHealthAvailable = $databaseHealthAvailable
                 DatabaseHealthSource = "Local Exchange on-premises Management Shell mailbox database on $env:COMPUTERNAME"
@@ -945,8 +961,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMSCmjiYlnUS/F
-# y37H9KpM/txXlEwxbA3WlOCMPFZ82qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCRj1NSy4SOwza
+# XRWAetaRSHJCDM907/ZdOuMclix+jKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1079,31 +1095,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHqygpwiwzwVz9EfPuPlpYhcv9AmAsGqZixTobwMS+GhMA0GCSqG
-# SIb3DQEBAQUABIIBgC8oBNlryItnE5n/UsqhK81RJN8Owbdm808bDiwThk0ZXT9x
-# CtJvFV0c02274IFPt03sd7fRkROTgfk6RgBkW2Q395sWRePEWk8ZpEA85kCWuXwU
-# YZg55pRCGHwyXtumutzTGexDho6uUGsxbY81L/mUS2gtcbyBDmSuk5bVTaEInjvf
-# q7U3LGHLpQjbSRoXSFZ6DfBGAqepTHALumpiZ7D7MkPivvG4ns+P6w5djKGZGChh
-# vrQLX8flnuZG9fxDaDvR0n4IKN+4BQYMyEweETV2u6+KWvHjRMyShHTyvJFMOuNP
-# V570SoG/EzUAD/nR/vNFuLd/Tq2NcAiC6Lr2CR7UQ/FwqdXgeIT0R94hmCnqqPJM
-# 3nUy0YynJuLLtXa5tGS97c3YQBlWWpxrNdp1qBozgEzDWMtSMZMsIz/me36C7h1M
-# s6GNjjwDka2xKlrSG4zlLaxT+xsj2Y5z38lokuI80HOxQnL2hRwuQdSOHxYMd7oF
-# GRXnRc18+sfNi/PmbqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC5sJRSNjFlwApn9OX10V6olIReCxRijdBbE1YxHoKL1MA0GCSqG
+# SIb3DQEBAQUABIIBgDZWTIZXpokqN+L1GPJiM9aXBNzZDbwJQ3QQjTurZzqzwHHF
+# 0VoXXudJUzbM2N+TBio4CtUQughb4e0S9+lmrw4zm9h6e4St5VjxDh4FQElHXxvf
+# kmWM+a0QH6kd5tdj1VLDArnJBxpa/BwiBlN3eXpyWvm1XeBbdLkfz6XbBZ1kTm5T
+# YY3EbF4ENkcL7X2yDTxJpCOUnFS+HxOEqAmGDId9VONmW3ptHatLfuofO2LLGLTc
+# 9x877sNZyCt6mQGUhErBEtZCdmK6hinGmQDpG/dM0YapLA+s3M2x07WblnIMecNy
+# PB0OqQkwpoy99oWk/YJGLoSj7j9MvQCZs51KazZT6nxSCd0Ngh/8Aw9APdAKCm2F
+# M/ecl0LuTflQqtT9XfKr8vQiGDdc8DKJGO/kMubvsQigwblxpECFt1HcmlD3xRS9
+# EmgB7DV+OFSr7rAirBtBgsoqXeBmpWK853EOg6ciCd2kcyTJcMVQ3C/tnbKoAQVx
+# J5GUIdBcifT95+A+5qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxOTIy
-# MjRaMC8GCSqGSIb3DQEJBDEiBCA0XfB1vfRnMd6Dej4RVO8ybMY7VfqFivPTToYn
-# cnF7cTANBgkqhkiG9w0BAQEFAASCAgBliEksmuaoXoMTryOdG6KQKh9gLLZHbhNQ
-# hvDzI2gdVEPbPoLlV8V7qCmQmS/L57tsySUQtO4vy4wmrWX4q3BeCj5K2vmjjo5x
-# SCiLjp1KLbVeFz+bJsKR/icBKN3p1UFZ1LzIjjwuWU3F8YcMzILgij7vyMFqYHK4
-# Fdq5tgJlfBKQEsIsC/eskXALl70TuhhoSWLCDYQ5OoCFcT3H9KuzAYREhVfLuYtk
-# NnULonn+f1jUyBnrEwlUr+ZKYmZfyTAYaAMKEsd8vKoAS9dWlHi7VHY89rFVnIS7
-# amGHuHCG673xWKsZbDu626gwCejjkAWD5ojHP4dLkP6RItA0NTk0bqA83dRNRka1
-# SE/CBDorr5ZJJaR0nNwdBHql0SCA4syDHHY2DjHD8YanXzUVbGgiGHTNqTntWMCq
-# GSNbGiXoVPWS/5RXeBY69zSWqY6U1vaSasEhkB/Nu7jDYeBSAAbCKMGwlLhdp+xM
-# djdVMegFnpX7jVzmc87APZ5ZqieowFX8G26uVxwn4D1lJE5SVwROClO2gqMCepv/
-# kAw89EojnvUPhMmPoN+L8ajGKmEPXwIKEOT2glGe9X1RlSj1DA064z1BJHWx9Fzj
-# pL8uxfDGXpgsAef9B/hYaAtH0vsKZ1oPRNgR7zg1TknC0Fza8l6GX9vUz7rwukv2
-# 0dq46pGL8w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMDMw
+# MzdaMC8GCSqGSIb3DQEJBDEiBCBRCGK540lhqyMJt9b29uI8JJOZj+Boy9DToF9C
+# U5e0xzANBgkqhkiG9w0BAQEFAASCAgB3AM9RDlTryCfVgxrHN7IPaxoDePe9aKS+
+# WWn/arMGIlM8LVB9ZrjhZMPe2Ab+86b72NCoZ0v9Ko8/c1PneckKbfB7bKlXYIC0
+# y8b9k/sP29sTdVb4lwX7aCOT7l54kftxkPrFDZKndC1gaEZAl/ufQA/AjCjRt9OG
+# fBrR25gvJQ/LbV6TOiHlCCR2hLScsdbPOSzv7BkTKgT2VDNDRbovxwmWqC2X/OeT
+# oPFjWGolKan/1ptxE1wjmY0N+YdyTgZJERHX3SOA93Y2a/+kq5gZu3OPAmykr90k
+# uJyCZTjXaFKGH/nValqWaBn29yMjW1yag3Jh1pRJEVTyWETGeuDyPK9jpq2Anyrv
+# KW/+QYj5bDo41HEMypHNauvZFmSSMF59a91LCl13ywdTv5BX0qbbjAQdxSDNr08Y
+# 4xScUPPTmQgyCv9UJ9/xJvTNkqr60FdgI2UL49Bo1ndKG2C6sr8vvdXr2vfLylCC
+# fIfkCYDr4ZJhNZnTZLTcRAu5PIRUcFiXccLpbHv9wcup2P8WiGzTAkBwPxF7AtXR
+# oA1yTUYnEptNzKhVuyGbjfFhSwn94z65NYQRqHRZe6idB7/Jz2jsaBcbuJf+k2Bp
+# OFWzXw01ptqtrtNvAXbGrVG3YY7MWCnyQ8O7ieIYBgnlIsiMJS79/fODYHLPxyFy
+# ayqMxZKXZg==
 # SIG # End signature block
