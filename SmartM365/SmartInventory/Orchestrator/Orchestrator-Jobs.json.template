@@ -190,7 +190,7 @@
         "User.Read.All",
         "Group.Read.All"
       ],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 135
     },
     {
       "Name": "M365-EntraDevices-Inventory",
