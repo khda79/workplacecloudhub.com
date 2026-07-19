@@ -941,6 +941,86 @@
         ],
         "MissedRunPolicy": "Skip"
       }
+    },
+    {
+      "Name": "M365-CopilotUsage-Inventory",
+      "ScriptPath": "M365Inventory\\Usage\\SmartM365-CopilotUsage-Inventory.ps1",
+      "Arguments": "-Period D180 -ReportVersion v2",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 60,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "05:05"
+        ],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "M365-TeamsPhonePstnUsage-Inventory",
+      "ScriptPath": "M365Inventory\\Teams\\SmartM365-TeamsPhonePstnUsage-Inventory.ps1",
+      "Arguments": "-LookbackDays 90 -IncludePhoneAssignments",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 240,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "05:25"
+        ],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "Intune-EndpointAnalytics-Inventory",
+      "ScriptPath": "M365Inventory\\IntuneInventory\\EndpointAnalytics\\SmartM365-EndpointAnalytics-Inventory.ps1",
+      "Arguments": "-Reports All -IncludeStartupProcesses",
+      "Enabled": false,
+      "Group": "Intune",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 120,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "07:15"
+        ],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "M365-PowerBIFabricActivity-Inventory",
+      "ScriptPath": "M365Inventory\\PowerBI\\SmartM365-PowerBIFabricActivity-Inventory.ps1",
+      "Arguments": "-LookbackDays 28",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 480,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "07:25"
+        ],
+        "MissedRunPolicy": "Skip"
+      }
     }
   ]
 }
