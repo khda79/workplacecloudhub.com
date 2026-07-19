@@ -8,7 +8,7 @@ and a standalone HTML report. The script is read-only and does not connect to Mi
 Graph, Azure, Citrix, or Azure Virtual Desktop.
 
 .NOTES
-Version: 1.1
+Version: 1.2
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -360,6 +360,31 @@ try {
     $backupPolicyScope = Import-SmartFinOpsContractSource -Key 'BackupPolicyScope' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $remoteRoutingIssues = Import-SmartFinOpsContractSource -Key 'RemoteRoutingIssues' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $proxyAddressControl = Import-SmartFinOpsContractSource -Key 'ProxyAddressControl' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+
+    $readinessSourceKeys = @(
+        'M365SharePointUserActivity',
+        'M365TeamsDeviceUsage',
+        'M365CopilotUserUsage',
+        'M365TeamsPhoneUserUsage',
+        'M365TeamsPhoneAssignments',
+        'M365TeamsPstnCalls',
+        'M365TeamsDirectRoutingCalls',
+        'M365PowerBIFabricActivityEvents',
+        'M365PowerBIFabricUserActivity',
+        'IntuneEndpointAnalyticsDevicePerformance',
+        'IntuneEndpointAnalyticsModelPerformance',
+        'IntuneEndpointAnalyticsStartupDevices',
+        'IntuneEndpointAnalyticsStartupModels',
+        'IntuneEndpointAnalyticsStartupProcesses',
+        'IntuneEndpointAnalyticsAppReliability',
+        'IntuneEndpointAnalyticsOSReliability',
+        'IntuneEndpointAnalyticsWorkFromAnywhere',
+        'IntuneEndpointAnalyticsDataQuality'
+    )
+    foreach ($readinessSourceKey in $readinessSourceKeys) {
+        $null = Import-SmartFinOpsContractSource -Key $readinessSourceKey -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    }
+
     Add-SmartFinOpsUnreferencedCsvQualityRows -DataQualityRows $dataQualityRows
 
     if ($ValidateOnly) {
@@ -720,8 +745,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXAE20Ndw6pceb
-# 9kyJiB/AGcxhzV3CAYMh9fQPy/q7FKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqM6FAeOm6Q44+
+# B+a1MG/qtG+jpDQHvyWl/YvIwhpGjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -854,31 +879,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMuKmUhF0oIc6+DRqPElJNbfK0silXKuKrjKlOYl6iOaMA0GCSqG
-# SIb3DQEBAQUABIIBgBig01mnl0r6wl+CVIDh38dJZVDZ4b5eN7jkqEnp+8OdBkuO
-# BQ/ILbrv9Eqde2eYw70Olzyd1DHOHjN5vLvo2cDwzFYSt9X7nj3OteQWGQYp4ubv
-# 43OJcLsWYBYSS6Kp07XXYJq/cQknc4+6hsQYMOw2+h8TkMP6YY5lhzGjBOhzdRuD
-# uT26wpZYaq2zaHOGPYGV8oL7cFFStLHnbRN0jBmJzD0euKKb2lVuGr46XYksRtdP
-# DdNxS3iI+XgUN+lTWZgAWJpHN26wkOficVQnlf9HRAGX5vYKsDce/gZJCTix78kQ
-# T0It+nx/PLn0n0i1ckfP3KIaVQ6e12YNVzASaCF5rQvhc4PjOvCwePzSFDp946WX
-# kC/ghwDvr7OZ213uQ5Bd7UnwUNYYRD30r4FLesO8d5HsYIYmBlCSK/K4V5wvFYuZ
-# V7VPNARBAZHUxB4UXbTqA1hbz0OOTAo5aA9AKUmgG4Q/I4IUpU4E28MIUEJM2Wnx
-# xAGhJxUl8ANaaNhK5qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOSoyvIIVKnsHyx/XwIQzV6zDKyba/GCYI0ymIIBdACbMA0GCSqG
+# SIb3DQEBAQUABIIBgHDh4BJPh7B1LQYB0iZ+JdIHIGd0kDCFa/b3V1HJdcCfDt8u
+# VCFipb//6JlO1Cq1j1Kb79+2yw4f91MVspfjFPLPA7ntYbVfgiHNylyOuPmpaX4r
+# E0v6PpQIc/rJmjrF0ij6ySeO7UUtBLn+vrwV4D03D/7AhqrbxrShrpZAbKQ1Y471
+# 2tF1aG1iiDyX6W9lgvuQp6WwlFcc1HTsr5wJteF5Dp5a9mClnuMh7hyD+vXV/qCe
+# oqvBK3oloYxVKkOfMTu4Ic6F26atII0IpqPfbKgulSbGaQe6FSB81XvC2j7YXyPH
+# CU+ha6UU77zJjigyFFyX3NHe6g52MthRLFI/+mVnUNj62y20GJv/satdGspMA0d1
+# smwf2tiaw3zf+LVYIU5bYSS2yCgC4zoF6YlqOHa22JzIPvaNncRb1MaJCdPaQrl6
+# Tp04HC9vlG2j/MHvatdLpe2hHBC/4g8iPspBrrVB9K4c2QJMZOSL0USzOD/50f3Y
+# NT35uST85KRzK3VviKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMDMw
-# NDBaMC8GCSqGSIb3DQEJBDEiBCBAl58ntMj+N/BnSODKNb8PnYSHaOKgPCEX4py0
-# 6ViXmDANBgkqhkiG9w0BAQEFAASCAgAr2OBsFVW1ZWu0ICKGxaY1lFUV4YyFmaIg
-# 9+VvWxGHxAfSwTbO66IJlMW8UKHHowxUGUwY2DMk4Nz3JZOUJhU+kzEmRsYz8D93
-# KS4tQgjZuvWOHn1I2/mNyraQS05ggvlnEItTmuFGEjKau2em7RGvHlxsXNCIrc80
-# O3Hj6CXuh5l9vlpZknyjqETAqGCwK823MTxRqaPY/2ogdsHjN96AcPCd3e8rw3y/
-# eIw5BeGpUSNLVmNSPYalIV1txYY9PVGwqPz+Ja3sZD7e+kTggWwaR+hMdgBhwKbs
-# ZGSJJvEJElrk5bRccv5uVmCQLS6dYqQP/fSz/Ul930jOtx40sf8vUA/FLNGWD8R/
-# 0NfVsgYQlipjf52UF11jLIAaMywGU1jeQyDIewKeKDQ0DxsVSKgtBTfJxcCGRg+B
-# 7/teEjpRe6BKsmKIGcKNXPkZJerV6qultX1Uwz4DOwUu/4tJziWSNNmROD51wO71
-# hQ9NeQF+ImI6fB6fFePLB7MufMdgoazcbbg7obKyG3zK4n6TQN/BFKzw/G0+QsKM
-# wzT8oq6R9WXYsF92/Wic5Q6uUz+eya9ac01Gg8VHDdmPUqjzgj+icwRqwi6SgIj9
-# brIqZtz+DxVjLfxruY0cfn3pJ1ul7KdL6gMNrW3RY26ECgNNqWBX1VkNZa8dbPjg
-# jis1bsfptA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkwMTI5
+# MzNaMC8GCSqGSIb3DQEJBDEiBCCfc4anx9vCsIi7IFq7F6t4bYSUJ1cK3uz0M39k
+# /5zQbDANBgkqhkiG9w0BAQEFAASCAgBf3NT2J91p1qe+lbF7sT8Uo0tFxR4V3Us9
+# DHpZftqiW5R2PB6CkijF3X1RLqVWBecUPRkjiCA2jV0LSsC9fA2DA/2JFtWHLXDz
+# GBWte9RokyOUur3PnJgL7ebRf6OEIu5Fhxrkx8JO5PD4NhZ3KyCXmMWGAJ5xS5pn
+# OctXD8Dn/koiR79Vt84fazjLzIJDQ7lnvQg7hAgwri2uXUYySoreHdmzs3YPZb+K
+# mr4zxgrmaEBc5bNfCVBqDWg55vB0dmErCAJkJBeDTau/ex9iUnycE7JV0oDGXc4F
+# XsL0RwQAI3O8+XOGF8Nd5mp+K9AZwGsPAK4295CvLorU7pRvA6SuwRTK8n0Rfz2B
+# 4lh7Z0Y+RGRc+spUwKPnjLKMaYeKTjs4YrKFgjQv4+9x+Xjd37EBmc4Jv9pVdEAo
+# XgzmZ+CP6ffjQJKm5FF80oXdpff66W3/ZpaA7QWaIGBnPo+TmyV2/1epxLySMY/Z
+# lGxO58/FnsksV+OBjLlDvFdTEF2X7F4mPW/lqFlLHF3sLQ70jHcuj7x+LggvsXdW
+# p7Hkk3k2faWG+K2NH1+i6JsieEEsfKyQPP+TmZZiKHCD9icP3ekvv0JVPtOgAXDD
+# GMHndae+G/9Rkdpj1E3r5UnuY9+CWv2iiJXMKYdncm3XBzvHbLWiSe2C9SJatlkz
+# ouI5TWHZlw==
 # SIG # End signature block
