@@ -16,6 +16,27 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 - `Usage/`: Microsoft 365 user and workload usage reports for FinOps and usage analysis.
 - `Users/`: active user inventory.
 
+## Microsoft 365 Licensing
+
+`Licensing/SmartM365-Licences-Inventory.ps1` publishes normalized license and
+service-plan data without repeating user and product labels on every service-plan
+assignment.
+
+| Entity | Latest CSV | Notes |
+| --- | --- | --- |
+| User license assignments | `M365_Licenses_Users.csv` | One row per user and assigned SKU, including direct or group assignment context. |
+| User service-plan states | `M365_Licenses_UserServicePlanStates.csv` | Compact fact table keyed by tenant, user, SKU, and plan. Retains `IsEnabled` and `PlanStatus` for every assigned license service plan. |
+| Service-plan catalog | `M365_Licenses_ServicePlans_Catalog.csv` | Deduplicated SKU and service-plan names used to enrich the compact fact table. |
+| Exchange service plans | `M365_Licenses_ServicePlans.csv` | Existing enriched Exchange/SPE subset retained for compatibility. |
+| Tenant SKUs | `M365_Licenses_Tenant.csv` | Tenant subscription and capacity inventory. |
+| Licensing groups | `M365_Licenses_Groups.csv` | Groups discovered as license assignment sources. |
+
+The former `M365_Licenses_ServicePlans_Detailed.csv` export is disabled. On a
+normal run, its current non-timestamped DATA-ALL/DATA-LAST and SharePoint copy is
+retired only after both compact replacement files have been published
+successfully. Timestamped and weekly-history copies are preserved. A `-MaxItems`
+validation run never removes or replaces canonical files.
+
 ## Microsoft 365 Usage Reports
 
 `Usage/SmartM365-M365UserActivity-Inventory.ps1` exports Microsoft Graph Reports data and publishes stable CSV files to the tenant `DATA-LAST` folder.
