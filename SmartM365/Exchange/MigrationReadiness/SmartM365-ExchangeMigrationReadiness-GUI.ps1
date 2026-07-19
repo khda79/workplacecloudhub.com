@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.0
+1.11.1
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.0'
+$script:AppVersion = '1.11.1'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -304,7 +304,7 @@ $xaml = @'
                     </Border>
                     <Border Grid.Row="0" Grid.Column="1" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="6,0,0,8">
                         <StackPanel>
-                            <TextBlock Text="Exchange on-premises" FontWeight="SemiBold" FontSize="15"/>
+                            <TextBlock Text="Exchange 2016 (local)" FontWeight="SemiBold" FontSize="15"/>
                             <TextBlock x:Name="OnPremStateText" Text="Checked automatically during assessment" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
@@ -417,7 +417,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.1" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -900,7 +900,7 @@ function Sync-SemrConnectionDisplay {
     $script:Config['Mode'] = 'Live'
     $state = Get-SemrConnectionState
     $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live forest)' } else { 'Required Live source; checked automatically during assessment' }
-    $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (Live, ViewEntireForest)' } else { 'Required Live source; Exchange cmdlets or remote session required' }
+    $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (local PS5 worker, ViewEntireForest)' } else { 'Required Live source; local Exchange 2016 Management Shell required' }
     $controls.ExoStateText.Text = if ($state.ExchangeOnline) { 'Connected (Live, Interactive)' } else { 'Required interactive connection starts with Run assessment' }
     $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Live evidence loaded (isolated process, Interactive)' } else { 'Required interactive collection starts after Exchange Online' }
     $controls.AdStateText.Foreground = if ($state.ActiveDirectory) { '#146C43' } else { '#8A5A00' }
@@ -1056,14 +1056,51 @@ $controls.RunButton.Add_Click({
         $controls.RunProgress.Value = 0
         Write-SemrActivity -Message "Starting read-only assessment in Live strict mode and $($script:Config.AssessmentPhase) phase for $($script:Batch.Rows.Count) mailbox row(s)."
         if ((Get-SemrSelectedMode) -eq 'Live') {
-            Update-SemrProgressWindow -Stage 'Checking Microsoft Graph modules' -Detail 'Verifying required delegated Graph cmdlets.' -Current 2 -Total 9
+            Update-SemrProgressWindow -Stage 'Local on-premises preflight' -Detail 'Validating Active Directory forest access and the local Exchange 2016 Management Shell.' -Current 1 -Total 10
+            Set-SemrProcessingStatus -Message 'Checking Active Directory and local Exchange 2016 Management Shell; please wait...'
+            $preflightIssues = [System.Collections.Generic.List[string]]::new()
+            try {
+                Connect-SemrActiveDirectory | Out-Null
+                Write-SemrActivity -Message 'Active Directory forest preflight succeeded.' -Level SUCCESS
+            }
+            catch {
+                [void]$preflightIssues.Add("Active Directory: $($_.Exception.Message)")
+                Write-SemrActivity -Message "Active Directory preflight failed: $($_.Exception.Message)" -Level WARN
+            }
+            try {
+                Connect-SemrOnPremisesExchange | Out-Null
+                Write-SemrActivity -Message 'Local Exchange 2016 Management Shell preflight succeeded; ViewEntireForest enabled.' -Level SUCCESS
+            }
+            catch {
+                [void]$preflightIssues.Add("Exchange 2016: $($_.Exception.Message)")
+                Write-SemrActivity -Message "Local Exchange 2016 preflight failed: $($_.Exception.Message)" -Level WARN
+            }
+            Sync-SemrConnectionDisplay
+            if ($preflightIssues.Count -gt 0) {
+                $issueText = @($preflightIssues | ForEach-Object { "- $_" }) -join "`n"
+                $continue = Invoke-SemrForegroundPrompt -Action {
+                    [System.Windows.MessageBox]::Show(
+                        $window,
+                        "One or more required on-premises Live sources are unavailable:`n`n$issueText`n`nContinuing will produce an INCOMPLETE assessment. Continue anyway?",
+                        'On-premises preflight incomplete',
+                        [System.Windows.MessageBoxButton]::YesNo,
+                        [System.Windows.MessageBoxImage]::Warning,
+                        [System.Windows.MessageBoxResult]::No
+                    )
+                }
+                if ($continue -ne [System.Windows.MessageBoxResult]::Yes) {
+                    Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Required Active Directory or local Exchange 2016 prerequisites are unavailable.'
+                    return
+                }
+            }
+            Update-SemrProgressWindow -Stage 'Checking Microsoft Graph modules' -Detail 'Verifying required delegated Graph cmdlets.' -Current 2 -Total 10
             if (-not (Confirm-SemrMicrosoftGraphModule)) {
                 Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Required Microsoft Graph modules are unavailable.'
                 return
             }
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.ExchangeOnline) {
-                Update-SemrProgressWindow -Stage 'Exchange Online authentication' -Detail 'Complete the interactive browser sign-in, then keep waiting.' -Current 3 -Total 9
+                Update-SemrProgressWindow -Stage 'Exchange Online authentication' -Detail 'Complete the interactive browser sign-in, then keep waiting.' -Current 3 -Total 10
                 Set-SemrProcessingStatus -Message 'Connecting interactively to Exchange Online. Complete authentication, then please wait...'
                 $exoConfig = $script:Config.ExchangeOnline
                 Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) | Out-Null
@@ -1072,7 +1109,7 @@ $controls.RunButton.Add_Click({
             }
             $endpointCheck = @($script:CheckOptions | Where-Object CheckId -EQ 'HYBRID-ENDPOINT' | Select-Object -First 1)
             if ($endpointCheck.Count -eq 1 -and $endpointCheck[0].Enabled) {
-                Update-SemrProgressWindow -Stage 'Migration endpoint selection' -Detail 'Loading ExchangeRemoteMove endpoints from Exchange Online.' -Current 4 -Total 9
+                Update-SemrProgressWindow -Stage 'Migration endpoint selection' -Detail 'Loading ExchangeRemoteMove endpoints from Exchange Online.' -Current 4 -Total 10
                 if (-not (Initialize-SemrMigrationEndpointSelection)) {
                     Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'No migration endpoint was selected.'
                     return
@@ -1080,7 +1117,7 @@ $controls.RunButton.Add_Click({
             }
             $connectionState = Get-SemrConnectionState
             if (-not $connectionState.MicrosoftGraph) {
-                Update-SemrProgressWindow -Stage 'Microsoft Graph authentication' -Detail 'Complete the interactive browser sign-in. User, licensing and tenant sync evidence will then be collected.' -Current 5 -Total 9
+                Update-SemrProgressWindow -Stage 'Microsoft Graph authentication' -Detail 'Complete the interactive browser sign-in. User, licensing and tenant sync evidence will then be collected.' -Current 5 -Total 10
                 Set-SemrProcessingStatus -Message 'Connecting interactively to Microsoft Graph. Complete authentication, then please wait...'
                 $graphConfig = $script:Config.MicrosoftGraph
                 $graphProgressAction = {
@@ -1106,7 +1143,7 @@ $controls.RunButton.Add_Click({
             Invoke-SemrDoEvent
         }
         $cancellationCheck = { Invoke-SemrDoEvent; return (Test-SemrProgressCancellation) }
-        Update-SemrProgressWindow -Stage 'Collecting tenant and mailbox evidence' -Detail 'AD, Exchange on-premises, Exchange Online and Microsoft Graph are required Live sources. Missing sources make the assessment INCOMPLETE.' -Current 6 -Total 9
+        Update-SemrProgressWindow -Stage 'Collecting tenant and mailbox evidence' -Detail 'AD, Exchange on-premises, Exchange Online and Microsoft Graph are required Live sources. Missing sources make the assessment INCOMPLETE.' -Current 6 -Total 10
         $script:Assessment = Invoke-SemrAssessment -Batch $script:Batch -Config $script:Config -ProgressCallback $progressAction -CancellationCheck $cancellationCheck
         if ($script:Assessment.SourceInitialization) {
             $sourceState = $script:Assessment.SourceInitialization

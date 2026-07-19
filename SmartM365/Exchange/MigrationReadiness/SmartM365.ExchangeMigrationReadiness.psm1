@@ -1,8 +1,12 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.0'
-$script:OnPremisesSession = $null
+$script:SemrVersion = '1.11.1'
 $script:ActiveDirectoryDomains = @()
+$script:Exchange2016EvidenceByEmail = @{}
+$script:Exchange2016HybridEvidence = $null
+$script:Exchange2016WorkerMessage = ''
+$script:Exchange2016WorkerCollectedAt = $null
+$script:Exchange2016PreflightAttempted = $false
 $script:GraphEvidenceByEmail = @{}
 $script:GraphSubscribedSkus = @()
 $script:GraphSubscribedSkuError = ''
@@ -258,7 +262,7 @@ function Get-SemrConfig {
     $runtime = ConvertTo-SemrHashtable -InputObject (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
     $added = @(Merge-SemrConfigDefault -Runtime $runtime -Template $template)
     $configurationChanged = $added.Count -gt 0
-    foreach ($deprecatedKey in @('Mode', 'Cache', 'Tenant', 'OnPremises', 'EntraConnect', 'SmartM365', 'EvidenceSources', 'Authentication')) {
+    foreach ($deprecatedKey in @('Mode', 'Cache', 'Tenant', 'OnPremises', 'ExchangeOnPremises', 'EntraConnect', 'SmartM365', 'EvidenceSources', 'Authentication')) {
         if ($runtime.Contains($deprecatedKey)) {
             $runtime.Remove($deprecatedKey)
             $configurationChanged = $true
@@ -338,6 +342,8 @@ function Invoke-SemrIsolatedPowerShell {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $startInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
     foreach ($argument in @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encodedCommand)) {
         [void]$startInfo.ArgumentList.Add([string]$argument)
     }
@@ -444,66 +450,149 @@ function Connect-SemrActiveDirectory {
     return Get-SemrConnectionState
 }
 
-function Enable-SemrExchangeForestView {
-    $commandName = if (Test-SemrCommand -Name 'Set-OnPremADServerSettings') {
-        'Set-OnPremADServerSettings'
+function Get-SemrWindowsPowerShellPath {
+    [CmdletBinding()]
+    param()
+
+    $path = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Windows PowerShell 5.1 was not found at '$path'."
     }
-    elseif (Test-SemrCommand -Name 'Set-ADServerSettings') {
-        'Set-ADServerSettings'
+    return $path
+}
+
+function Get-SemrExchange2016WorkerPath {
+    [CmdletBinding()]
+    param()
+
+    $path = Join-Path $PSScriptRoot 'SmartM365-ExchangeMigrationReadiness-Exchange2016Worker.ps1'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "The local Exchange 2016 worker is missing: $path"
     }
-    else {
-        ''
-    }
-    if (-not $commandName) {
-        throw 'Set-ADServerSettings is unavailable in the Exchange on-premises session; ViewEntireForest cannot be enabled.'
-    }
-    & $commandName -ViewEntireForest $true -ErrorAction Stop | Out-Null
+    return $path
 }
 
 function Connect-SemrOnPremisesExchange {
     [CmdletBinding()]
+    param()
+
+    $script:Exchange2016PreflightAttempted = $true
+    $powershellPath = Get-SemrWindowsPowerShellPath
+    $workerPath = Get-SemrExchange2016WorkerPath
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $powershellPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $startInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
+    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $workerPath, '-ValidateOnly')) {
+        [void]$startInfo.ArgumentList.Add([string]$argument)
+    }
+
+    $process = [Diagnostics.Process]::Start($startInfo)
+    if (-not $process) {
+        throw 'The local Windows PowerShell 5.1 Exchange 2016 validation process could not be started.'
+    }
+    try {
+        if (-not $process.WaitForExit(120000)) {
+            try { $process.Kill() } catch { $null = $_ }
+            throw 'The local Exchange 2016 preflight exceeded 120 seconds.'
+        }
+        $standardOutput = $process.StandardOutput.ReadToEnd().Trim()
+        $standardError = $process.StandardError.ReadToEnd().Trim()
+        if ($process.ExitCode -ne 0 -or $standardOutput -notmatch '^VALIDATION_OK\|') {
+            $detail = if ($standardError) { $standardError } elseif ($standardOutput) { $standardOutput } else { "Worker exit code $($process.ExitCode)." }
+            throw "Local Exchange 2016 Management Shell preflight failed: $detail"
+        }
+        $parts = @($standardOutput.Split('|'))
+        $computerName = if ($parts.Count -gt 2) { $parts[2] } else { $env:COMPUTERNAME }
+        $psVersion = if ($parts.Count -gt 3) { $parts[3] } else { '5.1' }
+        $script:Exchange2016WorkerMessage = "Local Exchange 2016 Management Shell validated on $computerName with Windows PowerShell $psVersion; ViewEntireForest enabled."
+        $script:ConnectionState.OnPremisesExchange = $true
+        return Get-SemrConnectionState
+    }
+    catch {
+        $script:ConnectionState.OnPremisesExchange = $false
+        $script:Exchange2016WorkerMessage = "Local Exchange 2016 Management Shell unavailable. $($_.Exception.Message)"
+        throw
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Initialize-SemrExchange2016Evidence {
+    [CmdletBinding()]
     param(
-        [string]$ConnectionUri = '',
-        [ValidateSet('Kerberos', 'Negotiate')]
-        [string]$Authentication = 'Kerberos',
-        [pscredential]$Credential
+        [Parameter(Mandatory)][string[]]$EmailAddresses,
+        [scriptblock]$ProgressCallback
     )
 
-    if (Test-SemrCommand -Name 'Get-OnPremMailbox') {
-        Enable-SemrExchangeForestView
-        $script:ConnectionState.OnPremisesExchange = $true
-        return Get-SemrConnectionState
+    if (-not $script:ConnectionState.OnPremisesExchange) {
+        return [pscustomobject]@{ Available = $false; Message = 'Local Exchange 2016 Management Shell preflight has not succeeded.'; MailboxCount = 0 }
     }
+    $powershellPath = Get-SemrWindowsPowerShellPath
+    $workerPath = Get-SemrExchange2016WorkerPath
+    $runtimeRoot = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-ExchangeMigrationReadiness\Exchange2016-{0}" -f [guid]::NewGuid().ToString('N'))
+    $inputPath = Join-Path $runtimeRoot 'mailboxes.clixml'
+    $outputPath = Join-Path $runtimeRoot 'evidence.clixml'
+    $errorPath = Join-Path $runtimeRoot 'error.txt'
+    $progressPath = Join-Path $runtimeRoot 'progress.txt'
+    $process = $null
+    try {
+        [void](New-Item -ItemType Directory -Path $runtimeRoot -Force)
+        @($EmailAddresses | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique) | Export-Clixml -LiteralPath $inputPath -Force
 
-    if ((Test-SemrCommand -Name 'Get-Mailbox') -and (Test-SemrCommand -Name 'Get-RemoteMailbox')) {
-        Enable-SemrExchangeForestView
-        $script:ConnectionState.OnPremisesExchange = $true
-        return Get-SemrConnectionState
-    }
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $powershellPath
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $workerPath, '-InputPath', $inputPath, '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath)) {
+            [void]$startInfo.ArgumentList.Add([string]$argument)
+        }
+        $process = [Diagnostics.Process]::Start($startInfo)
+        if (-not $process) { throw 'The local Exchange 2016 evidence worker could not be started.' }
 
-    if ([string]::IsNullOrWhiteSpace($ConnectionUri)) {
-        throw 'Exchange on-premises cmdlets are unavailable. Live strict mode requires Exchange Management Shell cmdlets or a configured remote Exchange session.'
-    }
+        $lastProgress = ''
+        while (-not $process.WaitForExit(250)) {
+            if ($ProgressCallback -and (Test-Path -LiteralPath $progressPath -PathType Leaf)) {
+                try {
+                    $progress = [IO.File]::ReadAllText($progressPath)
+                    if ($progress -and $progress -ne $lastProgress) {
+                        $lastProgress = $progress
+                        $parts = @($progress.Split('|', 3))
+                        $message = if ($parts.Count -eq 3) { "Exchange 2016 [$($parts[0])/$($parts[1])] - $($parts[2])" } else { 'Collecting local Exchange 2016 evidence...' }
+                        & $ProgressCallback $message
+                    }
+                }
+                catch { $null = $_ }
+            }
+        }
+        if ($process.ExitCode -ne 0) {
+            $workerError = if (Test-Path -LiteralPath $errorPath -PathType Leaf) { [IO.File]::ReadAllText($errorPath) } else { "Worker exit code $($process.ExitCode)." }
+            throw "Local Exchange 2016 evidence collection failed: $workerError"
+        }
+        if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
+            throw 'The local Exchange 2016 worker completed without returning evidence.'
+        }
 
-    $sessionParameters = @{
-        ConfigurationName = 'Microsoft.Exchange'
-        ConnectionUri = $ConnectionUri
-        Authentication = $Authentication
-        ErrorAction = 'Stop'
+        $workerResult = Import-Clixml -LiteralPath $outputPath
+        $script:Exchange2016EvidenceByEmail = @{}
+        foreach ($entry in @($workerResult.Evidence)) {
+            $key = ([string]$entry.EmailAddress).Trim().ToLowerInvariant()
+            if ($key) { $script:Exchange2016EvidenceByEmail[$key] = $entry }
+        }
+        $script:Exchange2016HybridEvidence = $workerResult.Hybrid
+        $script:Exchange2016WorkerCollectedAt = $workerResult.CollectedAt
+        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled."
+        return [pscustomobject]@{ Available = $true; Message = $script:Exchange2016WorkerMessage; MailboxCount = $script:Exchange2016EvidenceByEmail.Count }
     }
-    if ($Credential) {
-        $sessionParameters.Credential = $Credential
+    finally {
+        if ($process) { $process.Dispose() }
+        if (Test-Path -LiteralPath $runtimeRoot) { Remove-Item -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue }
     }
-
-    $script:OnPremisesSession = New-PSSession @sessionParameters
-    Import-PSSession -Session $script:OnPremisesSession -Prefix OnPrem -DisableNameChecking -AllowClobber -Global | Out-Null
-    if (-not (Test-SemrCommand -Name 'Get-OnPremMailbox')) {
-        throw 'The Exchange on-premises session was imported, but Get-OnPremMailbox is unavailable.'
-    }
-    Enable-SemrExchangeForestView
-
-    $script:ConnectionState.OnPremisesExchange = $true
-    return Get-SemrConnectionState
 }
 
 function Connect-SemrExchangeOnline {
@@ -651,15 +740,17 @@ function Disconnect-SemrSession {
     if (Test-SemrCommand -Name 'Disconnect-MgGraph') {
         Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     }
-    if ($script:OnPremisesSession) {
-        Remove-PSSession -Session $script:OnPremisesSession -ErrorAction SilentlyContinue
-        $script:OnPremisesSession = $null
-    }
+
     foreach ($key in @($script:ConnectionState.Keys)) {
         $script:ConnectionState[$key] = $false
     }
     $script:ActiveDirectoryDomains = @()
-        $script:GraphEvidenceByEmail = @{}
+    $script:Exchange2016EvidenceByEmail = @{}
+    $script:Exchange2016HybridEvidence = $null
+    $script:Exchange2016WorkerMessage = ''
+    $script:Exchange2016WorkerCollectedAt = $null
+    $script:Exchange2016PreflightAttempted = $false
+    $script:GraphEvidenceByEmail = @{}
     $script:GraphSubscribedSkus = @()
     $script:GraphSubscribedSkuError = ''
     $script:BatchActiveDirectoryEvidenceByEmail = @{}
@@ -699,19 +790,21 @@ function Initialize-SemrLiveSourceConnections {
     $result.ActiveDirectoryLive = [bool]$script:ConnectionState.ActiveDirectory
 
     if (-not $script:ConnectionState.OnPremisesExchange) {
-        try {
-            $onPremConfig = if ($Config.Contains('ExchangeOnPremises')) { $Config['ExchangeOnPremises'] } else { @{} }
-            $connectionUri = if ($onPremConfig -is [System.Collections.IDictionary] -and $onPremConfig.Contains('ConnectionUri')) { [string]$onPremConfig['ConnectionUri'] } else { '' }
-            $authentication = if ($onPremConfig -is [System.Collections.IDictionary] -and $onPremConfig.Contains('Authentication')) { [string]$onPremConfig['Authentication'] } else { 'Kerberos' }
-            Connect-SemrOnPremisesExchange -ConnectionUri $connectionUri -Authentication $authentication | Out-Null
-            $result.ExchangeOnPremisesMessage = 'Live Exchange on-premises connection succeeded with ViewEntireForest enabled.'
+        if ($script:Exchange2016PreflightAttempted) {
+            $result.ExchangeOnPremisesMessage = "$($script:Exchange2016WorkerMessage) The assessment will be INCOMPLETE."
         }
-        catch {
-            $result.ExchangeOnPremisesMessage = "Live Exchange on-premises unavailable. The assessment will be INCOMPLETE. $($_.Exception.Message)"
+        else {
+            try {
+                Connect-SemrOnPremisesExchange | Out-Null
+                $result.ExchangeOnPremisesMessage = $script:Exchange2016WorkerMessage
+            }
+            catch {
+                $result.ExchangeOnPremisesMessage = "Live Exchange on-premises unavailable. The assessment will be INCOMPLETE. $($_.Exception.Message)"
+            }
         }
     }
     else {
-        $result.ExchangeOnPremisesMessage = 'Live Exchange on-premises was already connected with ViewEntireForest enabled.'
+        $result.ExchangeOnPremisesMessage = $script:Exchange2016WorkerMessage
     }
     $result.ExchangeOnPremisesLive = [bool]$script:ConnectionState.OnPremisesExchange
     return [pscustomobject]$result
@@ -939,14 +1032,6 @@ function Get-SemrMailboxDecision {
     return 'GO'
 }
 
-function Get-SemrOnPremCommandName {
-    param([Parameter(Mandatory)][string]$Name)
-    $prefixed = $Name -replace '^Get-', 'Get-OnPrem'
-    if (Test-SemrCommand -Name $prefixed) { return $prefixed }
-    if (Test-SemrCommand -Name $Name) { return $Name }
-    return ''
-}
-
 function Invoke-SemrCommandSafe {
     param(
         [string]$CommandName,
@@ -997,160 +1082,37 @@ function ConvertTo-SemrBoolean {
 function Get-SemrOnPremisesEvidence {
     param([Parameter(Mandatory)][string]$EmailAddress)
 
-    if (-not $script:ConnectionState.OnPremisesExchange) {
-        return [pscustomobject]@{
-            Available = $false; Source = 'Live Exchange on-premises unavailable'; SourceTimestamp = $null
-            Message = 'Exchange on-premises is not connected in Live strict mode.'
-            Mailboxes = @(); RemoteMailboxes = @(); MailUsers = @(); Recipients = @(); RecipientLookupAvailable = $false
-            Statistics = @(); StatisticsAvailable = $false; Permissions = @(); PermissionsAvailable = $false
-            HoldDataAvailable = $false; FolderStatistics = @(); FolderStatisticsAvailable = $false
-            InboxRules = @(); InboxRulesAvailable = $false; DatabaseHealth = @(); DatabaseHealthAvailable = $false
-            DatabaseHealthSource = 'Live Exchange on-premises unavailable'; DatabaseHealthSourceTimestamp = $null
-            DeliveryRestrictionsAvailable = $false
-        }
+    $key = $EmailAddress.Trim().ToLowerInvariant()
+    if ($script:ConnectionState.OnPremisesExchange -and $script:Exchange2016EvidenceByEmail.ContainsKey($key)) {
+        return $script:Exchange2016EvidenceByEmail[$key]
     }
-
-    $mailboxCommand = Get-SemrOnPremCommandName -Name 'Get-Mailbox'
-    $remoteMailboxCommand = Get-SemrOnPremCommandName -Name 'Get-RemoteMailbox'
-    $mailUserCommand = Get-SemrOnPremCommandName -Name 'Get-MailUser'
-    $recipientCommand = Get-SemrOnPremCommandName -Name 'Get-Recipient'
-    $statisticsCommand = Get-SemrOnPremCommandName -Name 'Get-MailboxStatistics'
-    $permissionCommand = Get-SemrOnPremCommandName -Name 'Get-MailboxPermission'
-    $adPermissionCommand = Get-SemrOnPremCommandName -Name 'Get-ADPermission'
-    $folderStatisticsCommand = Get-SemrOnPremCommandName -Name 'Get-MailboxFolderStatistics'
-    $inboxRuleCommand = Get-SemrOnPremCommandName -Name 'Get-InboxRule'
-    $databaseCommand = Get-SemrOnPremCommandName -Name 'Get-MailboxDatabase'
-
-    $mailboxResult = Invoke-SemrCommandResult -CommandName $mailboxCommand -Parameters @{ Identity = $EmailAddress }
-    $remoteMailboxResult = Invoke-SemrCommandResult -CommandName $remoteMailboxCommand -Parameters @{ Identity = $EmailAddress }
-    $mailUserResult = Invoke-SemrCommandResult -CommandName $mailUserCommand -Parameters @{ Identity = $EmailAddress }
-    $recipientResult = Invoke-SemrCommandResult -CommandName $recipientCommand -Parameters @{ Identity = $EmailAddress }
-    $mailboxes = @($mailboxResult.Rows)
-    $remoteMailboxes = @($remoteMailboxResult.Rows)
-    $mailUsers = @($mailUserResult.Rows)
-    $recipients = @($recipientResult.Rows)
-
-    $statistics = @()
-    $statisticsAvailable = $false
-    if ($mailboxes.Count -eq 1 -and $statisticsCommand) {
-        $statisticsResult = Invoke-SemrCommandResult -CommandName $statisticsCommand -Parameters @{ Identity = $mailboxes[0].Identity }
-        $statistics = @($statisticsResult.Rows)
-        $statisticsAvailable = [bool]$statisticsResult.Success
-    }
-
-    $archiveStatistics = @()
-    $archiveStatisticsAvailable = $false
-    if ($mailboxes.Count -eq 1 -and $statisticsCommand -and (Test-SemrCheckEnabled -CheckId 'ARCHIVE-READINESS')) {
-        $archiveStatus = [string](Get-SemrPropertyValue -InputObject $mailboxes[0] -Names @('ArchiveStatus','ArchiveState') -Default '')
-        $archiveGuid = [string](Get-SemrPropertyValue -InputObject $mailboxes[0] -Names @('ArchiveGuid') -Default '')
-        $hasArchive = $archiveStatus -match '^(?i:Active|HostedPending|Local)$' -or ($archiveGuid -and $archiveGuid -notmatch '^0{8}-')
-        if ($hasArchive) {
-            $archiveStatisticsResult = Invoke-SemrCommandResult -CommandName $statisticsCommand -Parameters @{ Identity=$mailboxes[0].Identity; Archive=$true }
-            $archiveStatistics = @($archiveStatisticsResult.Rows)
-            $archiveStatisticsAvailable = [bool]$archiveStatisticsResult.Success
-        }
-    }
-
-    $folderStatistics = @()
-    $folderStatisticsAvailable = $false
-    if ($mailboxes.Count -eq 1 -and $folderStatisticsCommand -and (
-        (Test-SemrCheckEnabled -CheckId 'MAILBOX-RECOVERABLE-ITEMS-QUOTA') -or
-        (Test-SemrCheckEnabled -CheckId 'MAILBOX-FOLDER-LIMITS')
-    )) {
-        $folderStatisticsResult = Invoke-SemrCommandResult -CommandName $folderStatisticsCommand -Parameters @{ Identity = $mailboxes[0].Identity }
-        $folderStatistics = @($folderStatisticsResult.Rows)
-        $folderStatisticsAvailable = [bool]$folderStatisticsResult.Success
-    }
-
-    $inboxRules = @()
-    $inboxRulesAvailable = $false
-    if ($mailboxes.Count -eq 1 -and $inboxRuleCommand -and (Test-SemrCheckEnabled -CheckId 'INBOX-FORWARDING-RULES')) {
-        $inboxRuleResult = Invoke-SemrCommandResult -CommandName $inboxRuleCommand -Parameters @{ Mailbox = $mailboxes[0].Identity; IncludeHidden = $true }
-        $inboxRules = @($inboxRuleResult.Rows)
-        $inboxRulesAvailable = [bool]$inboxRuleResult.Success
-    }
-
-    $databaseHealth = @()
-    $databaseHealthAvailable = $false
-    if ($mailboxes.Count -eq 1 -and $databaseCommand -and (Test-SemrCheckEnabled -CheckId 'EXCHANGE-DATABASE-HEALTH')) {
-        $databaseIdentity = [string](Get-SemrPropertyValue -InputObject $mailboxes[0] -Names @('Database') -Default '')
-        if ($databaseIdentity) {
-            $databaseResult = Invoke-SemrCommandResult -CommandName $databaseCommand -Parameters @{ Identity = $databaseIdentity; Status = $true }
-            $databaseHealth = @($databaseResult.Rows)
-            $databaseHealthAvailable = [bool]$databaseResult.Success
-        }
-    }
-
-    $permissions = [System.Collections.Generic.List[object]]::new()
-    $mailboxPermissionResult = [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = 'Mailbox permission lookup was not applicable.' }
-    $sendAsPermissionResult = [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = 'Send As permission lookup was not applicable.' }
-    if ($mailboxes.Count -eq 1 -and $permissionCommand) {
-        $mailboxPermissionResult = Invoke-SemrCommandResult -CommandName $permissionCommand -Parameters @{ Identity = $mailboxes[0].Identity }
-        foreach ($permission in @($mailboxPermissionResult.Rows)) {
-            $rights = @($permission.AccessRights | ForEach-Object { [string]$_ })
-            if ($permission.IsInherited -or $rights -notcontains 'FullAccess') { continue }
-            $delegate = [string]$permission.User
-            if ($delegate -match 'NT AUTHORITY|S-1-5-|SELF') { continue }
-            [void]$permissions.Add([pscustomobject]@{
-                PermissionType = 'FullAccess'
-                Delegate = $delegate
-                IsInherited = [bool]$permission.IsInherited
-                Source = 'ExchangeOnPrem'
-            })
-        }
-    }
-    if ($mailboxes.Count -eq 1 -and $adPermissionCommand) {
-        $sendAsPermissionResult = Invoke-SemrCommandResult -CommandName $adPermissionCommand -Parameters @{ Identity = $mailboxes[0].DistinguishedName }
-        foreach ($permission in @($sendAsPermissionResult.Rows)) {
-            if ($permission.IsInherited -or @($permission.ExtendedRights) -notcontains 'Send-As' -or $permission.Deny) { continue }
-            [void]$permissions.Add([pscustomobject]@{
-                PermissionType = 'SendAs'
-                Delegate = [string]$permission.User
-                IsInherited = [bool]$permission.IsInherited
-                Source = 'ExchangeOnPrem'
-            })
-        }
-    }
-    if ($mailboxes.Count -eq 1) {
-        foreach ($delegate in @($mailboxes[0].GrantSendOnBehalfTo)) {
-            [void]$permissions.Add([pscustomobject]@{
-                PermissionType = 'SendOnBehalf'
-                Delegate = [string]$delegate
-                IsInherited = $false
-                Source = 'ExchangeOnPrem'
-            })
-        }
-    }
-
-    $coreLookupAvailable = [bool]($mailboxResult.Success -or $remoteMailboxResult.Success -or $mailUserResult.Success -or $recipientResult.Success)
-    $lookupResults = @($mailboxResult,$remoteMailboxResult,$mailUserResult,$recipientResult)
-    $lookupErrors = @($lookupResults | Where-Object { -not $_.Success -and $_.ErrorMessage } | ForEach-Object ErrorMessage | Sort-Object -Unique)
     return [pscustomobject]@{
-        Available = $coreLookupAvailable
-        Source = 'Live Exchange on-premises'
-        SourceTimestamp = Get-Date
-        Message = if ($coreLookupAvailable) { 'Live Exchange on-premises evidence collected.' } else { 'Live Exchange on-premises lookup failed: ' + ($lookupErrors -join ' | ') }
-        Mailboxes = $mailboxes
-        RemoteMailboxes = $remoteMailboxes
-        MailUsers = $mailUsers
-        Recipients = $recipients
-        RecipientLookupAvailable = [bool]$recipientResult.Success
-        Statistics = $statistics
-        StatisticsAvailable = $statisticsAvailable
-        ArchiveStatistics = $archiveStatistics
-        ArchiveStatisticsAvailable = $archiveStatisticsAvailable
-        Permissions = @($permissions)
-        PermissionsAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxPermissionResult.Success -and $sendAsPermissionResult.Success)
-        HoldDataAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxResult.Success)
-        FolderStatistics = $folderStatistics
-        FolderStatisticsAvailable = $folderStatisticsAvailable
-        InboxRules = $inboxRules
-        InboxRulesAvailable = $inboxRulesAvailable
-        DatabaseHealth = $databaseHealth
-        DatabaseHealthSource = 'Live Exchange on-premises mailbox database'
-        DatabaseHealthSourceTimestamp = Get-Date
-        DatabaseHealthAvailable = $databaseHealthAvailable
-        DeliveryRestrictionsAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxResult.Success)
+        Available = $false
+        Source = 'Local Exchange 2016 Management Shell unavailable'
+        SourceTimestamp = $null
+        Message = if ($script:Exchange2016WorkerMessage) { $script:Exchange2016WorkerMessage } else { 'No Exchange 2016 evidence was returned by the local Windows PowerShell 5.1 worker.' }
+        Mailboxes = @()
+        RemoteMailboxes = @()
+        MailUsers = @()
+        Recipients = @()
+        RecipientLookupAvailable = $false
+        Statistics = @()
+        StatisticsAvailable = $false
+        ArchiveStatistics = @()
+        ArchiveStatisticsAvailable = $false
+        Permissions = @()
+        PermissionsAvailable = $false
+        HoldDataAvailable = $false
+        FolderStatistics = @()
+        FolderStatisticsAvailable = $false
+        InboxRules = @()
+        InboxRulesAvailable = $false
+        DatabaseHealth = @()
+        DatabaseHealthAvailable = $false
+        DatabaseHealthSource = 'Local Exchange 2016 Management Shell unavailable'
+        DatabaseHealthSourceTimestamp = $null
+        DeliveryRestrictionsAvailable = $false
+        AddressConflicts = @()
     }
 }
 
@@ -1756,38 +1718,26 @@ function Get-SemrProxyConflictEvidence {
     )
 
     if (-not (Test-SemrCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE') -and -not (Test-SemrCheckEnabled -CheckId 'TARGET-ADDRESS-GLOBAL-UNIQUE')) {
-        return [pscustomobject]@{ Available=$false; Source='Disabled'; SourceTimestamp=$null; Conflicts=@(); PlannedWarnings=@() }
+        return [pscustomobject]@{ Available = $false; Source = 'Disabled'; SourceTimestamp = $null; Conflicts = @(); PlannedWarnings = @() }
     }
-    if (-not $script:ConnectionState.OnPremisesExchange) {
-        return [pscustomobject]@{ Available=$false; Source='Live Exchange on-premises unavailable'; SourceTimestamp=$null; Conflicts=@(); PlannedWarnings=@() }
-    }
-    $recipientCommand = Get-SemrOnPremCommandName -Name 'Get-Recipient'
-    if (-not $recipientCommand) {
-        return [pscustomobject]@{ Available=$false; Source='Get-Recipient unavailable'; SourceTimestamp=$null; Conflicts=@(); PlannedWarnings=@() }
+    $key = $EmailAddress.Trim().ToLowerInvariant()
+    if (-not $script:ConnectionState.OnPremisesExchange -or -not $script:Exchange2016EvidenceByEmail.ContainsKey($key)) {
+        return [pscustomobject]@{ Available = $false; Source = 'Local Exchange 2016 Management Shell unavailable'; SourceTimestamp = $null; Conflicts = @(); PlannedWarnings = @() }
     }
 
-    $conflicts = [System.Collections.Generic.List[string]]::new()
-    $queryFailed = $false
-    $collectedAt = Get-Date
-    foreach ($address in @($Addresses | ForEach-Object { ([string]$_ -replace '^(?i:smtp:)','').Trim() } | Where-Object { Test-SemrSmtpAddress $_ } | Sort-Object -Unique)) {
-        $safeAddress = $address.Replace("'", "''")
-        $filter = "EmailAddresses -eq 'smtp:$safeAddress' -or ExternalEmailAddress -eq 'smtp:$safeAddress'"
-        $query = Invoke-SemrCommandResult -CommandName $recipientCommand -Parameters @{ Filter=$filter; ResultSize='Unlimited' }
-        if (-not $query.Success) { $queryFailed = $true; continue }
-        foreach ($owner in @($query.Rows)) {
-            $ownerAddress = [string](Get-SemrPropertyValue -InputObject $owner -Names @('PrimarySmtpAddress','WindowsEmailAddress') -Default '')
-            $ownerIdentity = [string](Get-SemrPropertyValue -InputObject $owner -Names @('Identity','DistinguishedName') -Default $ownerAddress)
-            if ($ownerAddress -and $ownerAddress -ine $EmailAddress) { [void]$conflicts.Add("$address -> $ownerIdentity") }
-        }
-    }
+    $entry = $script:Exchange2016EvidenceByEmail[$key]
+    $wanted = @($Addresses | ForEach-Object { ([string]$_ -replace '^(?i:smtp:)', '').Trim().ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+    $queries = @($entry.AddressConflicts | Where-Object { $wanted -contains ([string]$_.Address).ToLowerInvariant() })
+    $available = $wanted.Count -eq 0 -or ($queries.Count -eq $wanted.Count -and @($queries | Where-Object { -not $_.Available }).Count -eq 0)
     return [pscustomobject]@{
-        Available = $conflicts.Count -gt 0 -or -not $queryFailed
-        Source = 'Live Exchange on-premises recipient directory (ViewEntireForest)'
-        SourceTimestamp = $collectedAt
-        Conflicts = @($conflicts | Sort-Object -Unique)
+        Available = $available
+        Source = [string]$entry.Source
+        SourceTimestamp = $entry.SourceTimestamp
+        Conflicts = @($queries | ForEach-Object { @($_.Conflicts) } | Sort-Object -Unique)
         PlannedWarnings = @()
     }
 }
+
 function Add-SemrIdentityAdvancedFindings {
     param([System.Collections.Generic.List[object]]$Findings,[hashtable]$Base,$OnPrem,$Exo,$AcceptedDomains)
     $email = [string]$Base.EmailAddress
@@ -2003,25 +1953,19 @@ function Get-SemrHybridAdvancedEvidence {
         OAuthAvailable=$false;OAuthHealthy=$false;OAuthMessage='Autodiscover/OAuth evidence unavailable.';OAuthSource='Unavailable';OAuthSourceTimestamp=$null
     }
 
-    if($script:ConnectionState.OnPremisesExchange){
-        $ewsCommand=Get-SemrOnPremCommandName 'Get-WebServicesVirtualDirectory'
-        if((Test-SemrCheckEnabled 'HYBRID-MRSPROXY') -and $ewsCommand){
-            $ews=@(Invoke-SemrCommandSafe $ewsCommand @{});$result.MrsProxyAvailable=$ews.Count -gt 0
-            $enabled=@($ews | Where-Object {ConvertTo-SemrBoolean (Get-SemrPropertyValue $_ @('MRSProxyEnabled') $false)})
-            $result.MrsProxyEnabled=$enabled.Count -gt 0;$result.MrsProxyMessage=if($result.MrsProxyEnabled){"MRSProxy enabled on $($enabled.Count) EWS virtual directorie(s)."}elseif($result.MrsProxyAvailable){'No EWS virtual directory has MRSProxy enabled.'}else{'EWS virtual directories could not be queried.'};$result.MrsProxySource='Live Exchange on-premises EWS virtual directories';$result.MrsProxySourceTimestamp=Get-Date
+    if ($script:ConnectionState.OnPremisesExchange -and $script:Exchange2016HybridEvidence) {
+        $workerHybrid = $script:Exchange2016HybridEvidence
+        if (Test-SemrCheckEnabled 'HYBRID-MRSPROXY') {
+            foreach ($name in @('MrsProxyAvailable','MrsProxyEnabled','MrsProxyMessage','MrsProxySource','MrsProxySourceTimestamp')) {
+                $result[$name] = Get-SemrPropertyValue -InputObject $workerHybrid -Names @($name) -Default $result[$name]
+            }
         }
-        $orgCommand=Get-SemrOnPremCommandName 'Get-OrganizationConfig'
-        $iocCommand=Get-SemrOnPremCommandName 'Get-IntraOrganizationConnector'
-        if((Test-SemrCheckEnabled 'HYBRID-AUTODISCOVER-OAUTH') -and ($orgCommand -or $iocCommand)){
-            $org=if($orgCommand){@(Invoke-SemrCommandSafe $orgCommand @{} | Select-Object -First 1)}else{@()}
-            $ioc=if($iocCommand){@(Invoke-SemrCommandSafe $iocCommand @{})}else{@()}
-            $oauth=$org.Count -and (ConvertTo-SemrBoolean (Get-SemrPropertyValue $org[0] @('OAuth2ClientProfileEnabled') $false))
-            $enabledIoc=@($ioc | Where-Object {ConvertTo-SemrBoolean (Get-SemrPropertyValue $_ @('Enabled') $false)}).Count -gt 0
-            $result.OAuthAvailable=$org.Count -gt 0 -or $ioc.Count -gt 0;$result.OAuthHealthy=$oauth -and $enabledIoc
-            $result.OAuthMessage="OAuth2ClientProfileEnabled=$oauth; EnabledIntraOrganizationConnector=$enabledIoc.";$result.OAuthSource='Live Exchange on-premises hybrid configuration';$result.OAuthSourceTimestamp=Get-Date
+        if (Test-SemrCheckEnabled 'HYBRID-AUTODISCOVER-OAUTH') {
+            foreach ($name in @('OAuthAvailable','OAuthHealthy','OAuthMessage','OAuthSource','OAuthSourceTimestamp')) {
+                $result[$name] = Get-SemrPropertyValue -InputObject $workerHybrid -Names @($name) -Default $result[$name]
+            }
         }
     }
-
     if(((Test-SemrCheckEnabled 'HYBRID-ENDPOINT-CAPACITY') -or (Test-SemrCheckEnabled 'HYBRID-MIGRATION-BACKLOG') -or (Test-SemrCheckEnabled 'EXO-EXISTING-MOVE') -or (Test-SemrCheckEnabled 'MOVE-HISTORY') -or (Test-SemrCheckEnabled 'KNOWN-ENHANCED-RESTORE')) -and $script:ConnectionState.ExchangeOnline -and (Test-SemrCommand 'Get-MigrationUser')){
         try{
             $allMoves = @(Get-MigrationUser -ResultSize Unlimited -ErrorAction Stop)
@@ -2377,6 +2321,24 @@ function Invoke-SemrAssessment {
         }
     }
 
+    if ($script:ConnectionState.OnPremisesExchange) {
+        try {
+            if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting Exchange 2016 evidence through local Windows PowerShell 5.1' }
+            $exchangeProgress = if ($ProgressCallback) {
+                { param($Message) & $ProgressCallback 0 $rows.Count '' $Message }.GetNewClosure()
+            }
+            else { $null }
+            $batchExchange = Initialize-SemrExchange2016Evidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress
+            $sourceInitialization.ExchangeOnPremisesLive = [bool]$batchExchange.Available
+            $sourceInitialization.ExchangeOnPremisesMessage = [string]$batchExchange.Message
+        }
+        catch {
+            $script:ConnectionState.OnPremisesExchange = $false
+            $script:Exchange2016EvidenceByEmail = @{}
+            $sourceInitialization.ExchangeOnPremisesLive = $false
+            $sourceInitialization.ExchangeOnPremisesMessage = "Local Exchange 2016 evidence collection failed. The assessment will be INCOMPLETE. $($_.Exception.Message)"
+        }
+    }
     if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Testing hybrid migration endpoint' }
     $hybrid = Test-SemrHybridReadiness -Config $Config
     if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting accepted domains and advanced identity evidence' }

@@ -38,9 +38,5 @@
     "MigrationEndpointName": "",
     "TargetDeliveryDomain": "tenant.mail.onmicrosoft.com",
     "ActiveMigrationWarningThreshold": 100
-  },
-  "ExchangeOnPremises": {
-    "ConnectionUri": "",
-    "Authentication": "Kerberos"
   }
 }

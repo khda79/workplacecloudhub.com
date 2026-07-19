@@ -18,7 +18,7 @@ Sources obligatoires :
 - Exchange Online : connexion interactive déléguée lancée par `Run assessment` ;
 - Microsoft Graph : connexion interactive déléguée dans un processus PowerShell 7 isolé ;
 - Active Directory : interrogation groupée de tous les domaines retournés par `Get-ADForest` ;
-- Exchange 2016 : Exchange Management Shell locale ou session PowerShell distante, avec `Set-ADServerSettings -ViewEntireForest $true` ;
+- Exchange 2016 : worker Windows PowerShell 5.1 local qui charge directement le snap-in `Microsoft.Exchange.Management.PowerShell.SnapIn`, puis applique `Set-ADServerSettings -ViewEntireForest $true` ;
 - santé Microsoft Entra Connect : `onPremisesSyncEnabled` et `onPremisesLastSyncDateTime` lus directement sur l’organisation Microsoft Graph.
 
 Si une source obligatoire est indisponible, les contrôles possibles continuent, mais l’assessment est marqué `INCOMPLETE`. Une source manquante ne peut jamais produire un verdict `GO`.
@@ -39,10 +39,10 @@ L’application est strictement diagnostique : elle ne crée pas de batch et ne 
 - module `ExchangeOnlineManagement` 3.0 ou ultérieur ;
 - modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` ; le GUI peut proposer leur installation sous `CurrentUser` ;
 - module `ActiveDirectory` et accès à tous les domaines de la forêt ;
-- Exchange Management Shell locale ou session PowerShell distante Exchange 2016 ;
+- rôle/outils Exchange Management Shell 2016 installés localement et snap-in `Microsoft.Exchange.Management.PowerShell.SnapIn` disponible sous Windows PowerShell 5.1 ;
 - compte interactif disposant des droits de lecture EXO et Graph nécessaires.
 
-Le module ADSync n’est ni utilisé ni requis.
+Le module ADSync n’est ni utilisé ni requis. Aucune session PowerShell distante Exchange, aucun `ConnectionUri` et aucun mode de compatibilité de module PS7 ne sont utilisés : le GUI PowerShell 7 orchestre un processus local Windows PowerShell 5.1 avec l’identité Windows courante.
 
 Scopes Graph par défaut :
 
@@ -83,7 +83,6 @@ Clés principales :
 - `TenantProfile.TenantId` : garde-fou du tenant interactif ;
 - `TenantProfile.ProfileKey` : clé du profil, par exemple `prod` ;
 - `TenantProfile.RemoteRoutingDomain` : domaine de routage hybride attendu ;
-- `ExchangeOnPremises.ConnectionUri` et `ExchangeOnPremises.Authentication` : session distante facultative utilisant l’identité Windows courante ;
 - `ExchangeOnline.UserPrincipalName` et `ExchangeOnline.DisableWam` ;
 - `MicrosoftGraph.Scopes` ;
 - `Hybrid.MigrationEndpointName` : endpoint `ExchangeRemoteMove` présélectionné, facultatif ;
