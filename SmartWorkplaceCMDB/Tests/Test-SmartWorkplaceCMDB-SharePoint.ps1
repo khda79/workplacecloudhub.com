@@ -1,195 +1,191 @@
 <#
 .SYNOPSIS
-Creates a local SmartWorkplaceCMDB HTML overview report.
-
-.DESCRIPTION
-Loads the autonomous SmartWorkplaceCMDB configuration and reports CSV contract
-readiness, table counts, row counts, and data-quality finding counts.
+Runs offline SmartWorkplaceCMDB SharePoint publication contract tests.
 
 .VERSION
-0.2.1
+0.1.0
 #>
 [CmdletBinding()]
-param(
-    [Alias('ProfileKey')]
-    [string]$Tenant = 'default',
-    [string]$OrganizationKey,
-    [string]$EnvironmentKey,
-    [string]$TenantKey,
-    [string]$TenantId,
-    [string]$DataRootPath,
-    [string]$DataAllRootPath,
-    [string]$LatestOutputRootPath,
-    [string]$LogRootPath,
-    [string]$GlobalConfigPath,
-    [string]$TenantConfigPath,
-    [string]$OutputPath,
-    [switch]$NoConfigWrite,
-    [switch]$ValidateOnly
-)
+param()
 
-$ScriptVersion = '0.2.1'
+$ScriptVersion = '0.1.0'
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+$script:Passed = 0
+$script:Failed = 0
 
-function Get-CsvDataRowCount {
+function Invoke-SmartWorkplaceCMDBSharePointTest {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Path
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][scriptblock]$Test
     )
 
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return 0
-    }
-
-    $lineCount = 0
-    $reader = [System.IO.File]::OpenText($Path)
     try {
-        while ($null -ne $reader.ReadLine()) {
-            $lineCount++
-        }
+        & $Test
+        $script:Passed++
+        Write-Information "PASS $Name" -InformationAction Continue
     }
-    finally {
-        $reader.Dispose()
+    catch {
+        $script:Failed++
+        Write-Information "FAIL $Name - $($_.Exception.Message)" `
+            -InformationAction Continue
     }
-
-    return [math]::Max(0, $lineCount - 1)
 }
 
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectRoot = Split-Path -Parent $scriptRoot
-$modulePath = Join-Path -Path $projectRoot -ChildPath 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1'
+function Assert-SmartWorkplaceCMDBSharePointTrue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][bool]$Condition,
+        [Parameter(Mandatory)][string]$Message
+    )
+    if (-not $Condition) {
+        throw $Message
+    }
+}
 
+function Assert-SmartWorkplaceCMDBSharePointThrow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][scriptblock]$Body,
+        [Parameter(Mandatory)][string]$ExpectedText
+    )
+
+    try {
+        & $Body
+    }
+    catch {
+        if ($_.Exception.Message -notlike "*$ExpectedText*") {
+            throw "Unexpected exception: $($_.Exception.Message)"
+        }
+        return
+    }
+    throw "Expected exception containing '$ExpectedText'."
+}
+
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$modulePath = Join-Path $projectRoot `
+    'Modules\SmartWorkplaceCMDB.SharePoint\SmartWorkplaceCMDB.SharePoint.psd1'
+$orchestratorPath = Join-Path $projectRoot `
+    'Orchestration\SmartWorkplaceCMDB-Orchestrator.ps1'
+$globalTemplatePath = Join-Path $projectRoot `
+    'Config\SmartWorkplaceCMDB.global.local.json.template'
+$tenantTemplatePath = Join-Path $projectRoot `
+    'Config\Tenants\tenant.local.json.template'
 Import-Module $modulePath -Force
 
-$boundParameterCopy = @{}
-foreach ($key in $PSBoundParameters.Keys) {
-    $boundParameterCopy[$key] = $PSBoundParameters[$key]
-}
-$context = Resolve-SmartWorkplaceCMDBContext -BoundParameters $boundParameterCopy -GlobalConfigPath $GlobalConfigPath -TenantConfigPath $TenantConfigPath -NoConfigWrite:($ValidateOnly -or $NoConfigWrite)
-$paths = $context.Paths
-$contract = Get-SmartWorkplaceCMDBTableContract -Path $context.ContractPath
-$contractResults = @(Test-SmartWorkplaceCMDBCsvContract -LatestOutputRootPath $paths.LatestOutputRootPath -ContractPath $context.ContractPath)
-$incompatibleTables = @($contractResults | Where-Object Status -eq 'Incompatible')
-if ($incompatibleTables.Count -gt 0) {
-    $details = @($incompatibleTables | ForEach-Object {
-        '{0}: missing=[{1}] unexpected=[{2}]' -f $_.Name, $_.MissingColumns, $_.UnexpectedColumns
-    })
-    throw ("Cannot report on incompatible SmartWorkplaceCMDB CSV outputs. {0}" -f ($details -join '; '))
-}
+$tempRoot = Join-Path ([IO.Path]::GetTempPath()) (
+    'SmartWorkplaceCMDB-SharePoint-Tests-' +
+    [guid]::NewGuid().ToString('N')
+)
+$dataAll = Join-Path $tempRoot 'DATA-ALL'
+$dataLast = Join-Path $tempRoot 'DATA-LAST'
+$logAll = Join-Path $tempRoot 'LOG-ALL'
 
-if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path -Path $paths.LatestOutputRootPath -ChildPath 'SmartWorkplaceCMDB-Overview.html'
-}
-
-if ($ValidateOnly) {
-    [pscustomobject]@{
-        Status               = 'Valid'
-        ScriptVersion        = $ScriptVersion
-        ContractVersion      = [string]$contract.contractVersion
-        ValidContractFiles   = @($contractResults | Where-Object Status -eq 'Valid').Count
-        MissingContractFiles = @($contractResults | Where-Object Status -eq 'Missing').Count
-        ProfileKey           = $paths.ProfileKey
-        OrganizationKey      = $paths.OrganizationKey
-        EnvironmentKey       = $paths.EnvironmentKey
-        TenantKey            = $paths.TenantKey
-        TenantId             = $paths.TenantId
-        LatestOutputRootPath = $paths.LatestOutputRootPath
-        OutputPath           = $OutputPath
-        GlobalConfigPath     = $context.GlobalConfigPath
-        TenantConfigPath     = $context.TenantConfigPath
-    } | Format-List
-    return
-}
-
-$validTables = @($contractResults | Where-Object Status -eq 'Valid')
-$missingTables = @($contractResults | Where-Object Status -eq 'Missing')
-$cmdbTables = @($validTables | Where-Object Area -eq 'CMDB')
-$powerBiTables = @($validTables | Where-Object Area -eq 'PowerBI')
-$cmdbRows = 0
-foreach ($table in $cmdbTables) {
-    if ($table.Name -ne 'CMDB_BuildManifest.csv') {
-        $cmdbRows += Get-CsvDataRowCount -Path $table.Path
-    }
-}
-$powerBiRows = 0
-foreach ($table in $powerBiTables) {
-    $powerBiRows += Get-CsvDataRowCount -Path $table.Path
-}
-$dataQualityPath = Join-Path -Path $paths.CmdbLatestPath -ChildPath 'CMDB_DataQuality.csv'
-$dataQualityFindings = Get-CsvDataRowCount -Path $dataQualityPath
-
-$generatedAt = Get-Date
-$profileText = [System.Net.WebUtility]::HtmlEncode([string]$paths.ProfileKey)
-$tenantText = [System.Net.WebUtility]::HtmlEncode([string]$paths.TenantKey)
-$missingText = if ($missingTables.Count -eq 0) {
-    'None'
-}
-else {
-    [System.Net.WebUtility]::HtmlEncode((($missingTables.Name | Sort-Object) -join ', '))
-}
-
-$html = @"
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>SmartWorkplaceCMDB Overview</title>
-  <style>
-    body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #F5F8FB; color: #1F2937; }
-    main { max-width: 1180px; margin: 0 auto; padding: 28px; }
-    header, section { background: #FFFFFF; border: 1px solid #DDE7F0; border-radius: 8px; padding: 22px; margin-bottom: 18px; }
-    h1, h2 { margin: 0 0 10px 0; font-weight: 650; }
-    .muted { color: #5F6B7A; }
-    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-    .metric { border: 1px solid #DDE7F0; border-radius: 8px; padding: 14px; background: #F8FBFE; }
-    .value { font-size: 28px; font-weight: 650; color: #0078D4; }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <h1>SmartWorkplaceCMDB Overview</h1>
-      <div class="muted">Profile: $profileText | Tenant: $tenantText | Generated: $($generatedAt.ToString('yyyy-MM-dd HH:mm:ss')) | Script: $ScriptVersion | Contract: $($contract.contractVersion)</div>
-    </header>
-    <section class="grid">
-      <div class="metric"><div class="value">$cmdbRows</div><div>CMDB rows</div></div>
-      <div class="metric"><div class="value">$powerBiRows</div><div>Power BI rows</div></div>
-      <div class="metric"><div class="value">$dataQualityFindings</div><div>Data quality findings</div></div>
-    </section>
-    <section>
-      <h2>Contract Readiness</h2>
-      <p>Valid files: $($validTables.Count) / $(@($contract.tables).Count)</p>
-      <p class="muted">Missing files: $missingText</p>
-    </section>
-  </main>
-</body>
-</html>
-"@
-
-$folder = Split-Path -Parent $OutputPath
-if (-not (Test-Path -LiteralPath $folder)) {
-    New-Item -ItemType Directory -Path $folder -Force | Out-Null
-}
-
-$tempPath = '{0}.tmp.{1}' -f $OutputPath, ([guid]::NewGuid().ToString('N'))
 try {
-    Set-Content -LiteralPath $tempPath -Value $html -Encoding UTF8 -Force
-    Move-Item -LiteralPath $tempPath -Destination $OutputPath -Force
+    foreach ($path in @(
+            (Join-Path $dataAll 'Entra\Users\2026\07'),
+            (Join-Path $dataLast 'CMDB'),
+            (Join-Path $logAll 'Orchestration')
+        )) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+    $history = Join-Path $dataAll `
+        'Entra\Users\2026\07\Entra_Users_20260719.csv'
+    $latest = Join-Path $dataLast 'CMDB\CMDB_Users.csv'
+    $log = Join-Path $logAll `
+        'Orchestration\SmartWorkplaceCMDB-Orchestrator_20260719.csv'
+    foreach ($path in @($history, $latest, $log)) {
+        'TenantKey,Value' | Set-Content -LiteralPath $path -Encoding UTF8
+    }
+
+    Invoke-SmartWorkplaceCMDBSharePointTest `
+        'Preserve DATA-ALL relative structure' {
+        $relative = Get-SmartWorkplaceCMDBSharePointRelativePath `
+            -LocalFilePath $history `
+            -DataAllRootPath $dataAll `
+            -LatestOutputRootPath $dataLast `
+            -LogRootPath $logAll
+        Assert-SmartWorkplaceCMDBSharePointTrue `
+            ($relative -eq
+                'DATA-ALL/Entra/Users/2026/07/Entra_Users_20260719.csv') `
+            'DATA-ALL SharePoint relative path is invalid.'
+    }
+
+    Invoke-SmartWorkplaceCMDBSharePointTest `
+        'Preserve DATA-LAST and LOG-ALL relative structures' {
+        $latestRelative = Get-SmartWorkplaceCMDBSharePointRelativePath `
+            $latest $dataAll $dataLast $logAll
+        $logRelative = Get-SmartWorkplaceCMDBSharePointRelativePath `
+            $log $dataAll $dataLast $logAll
+        Assert-SmartWorkplaceCMDBSharePointTrue `
+            ($latestRelative -eq 'DATA-LAST/CMDB/CMDB_Users.csv' -and
+                $logRelative -eq
+                'LOG-ALL/Orchestration/SmartWorkplaceCMDB-Orchestrator_20260719.csv') `
+            'Latest or log SharePoint relative path is invalid.'
+    }
+
+    Invoke-SmartWorkplaceCMDBSharePointTest `
+        'Reject files outside CMDB data roots' {
+        $outside = Join-Path $tempRoot 'outside.csv'
+        'Value' | Set-Content -LiteralPath $outside -Encoding UTF8
+        Assert-SmartWorkplaceCMDBSharePointThrow {
+            Get-SmartWorkplaceCMDBSharePointRelativePath `
+                $outside $dataAll $dataLast $logAll | Out-Null
+        } 'outside the configured'
+    }
+
+    Invoke-SmartWorkplaceCMDBSharePointTest `
+        'Keep SharePoint disabled in templates with CMDB target' {
+        $global = Get-Content -Raw -LiteralPath $globalTemplatePath |
+            ConvertFrom-Json
+        $tenant = Get-Content -Raw -LiteralPath $tenantTemplatePath |
+            ConvertFrom-Json
+        Assert-SmartWorkplaceCMDBSharePointTrue `
+            (-not $global.SharePoint.Enabled -and
+                -not $tenant.SharePoint.Enabled -and
+                $global.SharePoint.TargetFolderPath -eq 'SMART-CMDB/DATA' -and
+                $tenant.SharePoint.TargetFolderPath -eq 'SMART-CMDB/DATA') `
+            'SharePoint template safety or target is invalid.'
+    }
+
+    Invoke-SmartWorkplaceCMDBSharePointTest `
+        'Publish only successful unbounded live orchestrations' {
+        $content = Get-Content -Raw -LiteralPath $orchestratorPath
+        Assert-SmartWorkplaceCMDBSharePointTrue `
+            ($content.Contains('$mode -eq ''Collect''') -and
+                $content -match '\$MaxItems -eq 0' -and
+                $content -match '\$DisableSharePointUpload' -and
+                $content -match 'Publish-SmartWorkplaceCMDBSharePointFile') `
+            'Orchestrator SharePoint publication guard is incomplete.'
+    }
 }
 finally {
-    if (Test-Path -LiteralPath $tempPath) {
-        Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    $resolved = [IO.Path]::GetFullPath($tempRoot)
+    $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if ($resolved.StartsWith(
+            $tempBase,
+            [StringComparison]::OrdinalIgnoreCase
+        ) -and (Test-Path $resolved)) {
+        Remove-Item -LiteralPath $resolved -Recurse -Force
     }
 }
 
-Write-Information ("SmartWorkplaceCMDB overview report created: {0}" -f $OutputPath) -InformationAction Continue
+Write-Information (
+    'SmartWorkplaceCMDB SharePoint tests completed. Version={0}; Passed={1}; Failed={2}' -f
+    $ScriptVersion,
+    $script:Passed,
+    $script:Failed
+) -InformationAction Continue
+if ($script:Failed -gt 0) {
+    exit 1
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRgBMzIzvnsceB
-# Mwue0RZtv6fGxdM5+6ikmN5qXbm/F6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgHa1l4HWf7d07
+# pXxeG9yOysQ7K0HTDbrXPGXjnamb/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -322,31 +318,31 @@ Write-Information ("SmartWorkplaceCMDB overview report created: {0}" -f $OutputP
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBHiM92HOz2pKEDmHxYt6sz5Hydzx0GrnldY3s9uPCswMA0GCSqG
-# SIb3DQEBAQUABIIBgIT3Ef0kIFqH76t+K5rjPEau5rTyMZykP6PpXjRauP2Cj2Ys
-# vHwfQOt79Tdwjvwb5loTNDMsA86pXBvY7Yaqz06hO1qXQvBEoTTF17qm/QeJU6bG
-# s5KRjfMSZdQuhAmvdgzVi0so2X5zgug6AgIJdIXhfDklCGAXIjmDqi5Xh4//on8m
-# /rF4hieQ43RscnPJU69rMh6bVIRea3tNBeHxJiTDNepyCd/El0Qqud5ZETBqF4YZ
-# ep5Z7v+xDBjGPuce3pewmg97qRyKdXAPh+D/D5f4/SzM6X+1VyYKOl4tlRWc7IHy
-# wMqkJrTBlVZCIF8faK87A0v+gYiQXw+dB5YqrvLR5yfCPwGEc4Zi6gq1Z5k5hwxb
-# Q0RlwCTtznZVuM12y3mh8G17icXXpxFaL6gG6LmI7RxUKMafQh9uKR4Y+EZc3JMQ
-# 4uNSirdUfm1kMOtug1A8UU8Ie3yKJpMMdyw/lK6p1uwTQiad79yxxZhYXgBWAHPH
-# H1jL8JoKX778OQb14KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKoui1ubqZwbL7aRCvYgSc10n+F0pNMwqb2/UCqg9E/IMA0GCSqG
+# SIb3DQEBAQUABIIBgEXYMJjUJRe+xz4XPg9wd5vFTwn4beKzD1bFJ5ZRp7yYWIxC
+# qlT+ckiTsOITBuOGnv8Qq9uX16pboFjGwQ4blQwFLumlKkxFrcxRzUOTig3xJMgS
+# 7F0JIPMvfPTprFcb5SDB52NV8S5363vE/Gn5lTGtqOzn+JrKZtbfKpgfBnpvJQqk
+# L4uUeiiJ9DzW5a7PA0mOgSqZxxEaLB9e32D+V7F75f5DkNbG9xLJGZ6/ON4CiuLg
+# OkqW+KSgTzQE/OdMHw6MdIwD0lQDzSk2+JGZuFu9z2ev20G5vKAO53+0cQAjAr/J
+# aFsqEsUqrNcQiqgLcpI75ro1t9+mPwds2M1tm0fVzFNId3f31ZVZHa43hjNzUkiB
+# If3WuQT3OiyNX2rK1m6nY+qDzeC0SlOGhcd1ubnFdL3R0dID8+a+ROO1XMYynzk5
+# FYmBR+iCm5bf1mtdt7UQd/W5O7dcgjJIDAJ1MpyLiFRkHlWBfzgKlaG/+jh9Vccb
+# Luclg3ba14b7rgAAIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxMzEw
-# MTlaMC8GCSqGSIb3DQEJBDEiBCCsldEt+m74HF7Kqa4UeFgQCvmkeVcneeH/JdKn
-# WyUZQzANBgkqhkiG9w0BAQEFAASCAgCBVaB8SZukYcOO9ZsAa7cxaSk7ls2pmcbC
-# 51U/Df4BPC2D+W0unqosfIjqUFeR3kXWQ3EMbnzGEdDUktP2deGkTMuDVglU/Vca
-# ktJHNUAE/p/ljlW8wiUaJr4JJFiEnDJCmmp9Ipi5kQqmdpx/Ck1b1tw8HorrqvB8
-# KFWsaF5AdRsRzZXy2s9ROQ2KD1SEtTXPT+pjb8KlWO0xWjOu9SC0p0xflM3n0BD5
-# TQ67te8pyPBk9g4/DUpuFVUrcTqQEQCST0YJwywHHAZBZW9aFLj8xPDMAk/fRop/
-# mOAgWV22UygUt+S2UvBcOhVFuI4Gnt8oBbXwIxEhtxdgB30AuVLWgxbW05ZTQbtx
-# f2wX1qaGIgol79nnMxYE+3hfCWS7w+/TKfKE9BP81blf0EHeBpMKxHj32TxaQrT7
-# lAThgx/0Jl4y147Tgje787HgoJsnTN2zJI5bNCllivwG0rRTxzqEVZ/Yv/qFGyii
-# 8BhFAclWpsFIvRIsy3yrTOpnANQaBdLJmoFGIMyuRpN0GkVZsmnAe+uaFoT6VKqp
-# QZKbWbpMQU5IUVs3Hg6Tj8UyVB58YAE5Bznql2iD0dO9jr1LrQKNf4K6tI4jNiSy
-# KXTFdLcCflr8HserFk1zZutrIPvSIF/PJ5D/nxgUdjXJY2ltskqwUv6cko7ESMM7
-# PQE80luzRA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMjM2
+# MTdaMC8GCSqGSIb3DQEJBDEiBCCccNElSh2qpFEz753ZF9h5QB97TjRSXc2g/eTg
+# Sm9ZszANBgkqhkiG9w0BAQEFAASCAgAiAavPoi81MBumLYOLuE3n0fGRh9jaE6nN
+# r0v2DwbcKOEUr4O0e0HATl18xjg7O+sjLzVr6sOg0pSjRWz/TBaLIcuRZ2V6Cqz2
+# 5FeBNCPpMhjK01uGNO9MTz1FxZr4e2Y+AoX0DUOYj8U2js6FcXNwwILClo8sGxJr
+# ONjf9WmPe7ceOcWOMuogWh3PvBa4mbVsHp4MxX9d9tXFrxLbj2Hc/BTgcbSvkBfR
+# jkOyDYG508ssNkhqC1onXbdlVLMrCFJT/eTsDPKGxPvnjWg3WoO6SK/04ZEd1thz
+# 2NsGrdJNNWOzuVRbbJpxcM54FQYtgCP6tWS84mosyLbpDoZQ4rz09sqtVb/w1LqV
+# XPqH8jbcSe7KFiQF9DMdMsmEeWowLyL2QElf1n8Nbrd7YCI/3cz8VfNwyFfzOhzZ
+# PBIvmz7zGlRFGNAUt2wDWhTqis7bgk5i6jvsQP3vwApq+3RcCUC0a7FCo/UFI/hp
+# JMU/yeu8AZfll2q0lSHxUsdQs83TvvlWdWXZYjfBRprlkkmummNNNM2yjyQQ4gzx
+# iJKuLOIhZ3uZhiJe2uBaXbpGCB3xWknzGtglb9Ufvmdt1RR0IkomJQJFG9BFHLgZ
+# glv+JlTZoHwzV4Q55X7eSnUHGCzeUkd3BPivV49x5MVKilikKIcxCu8eTVABlOpX
+# 94d/BlpzAA==
 # SIG # End signature block

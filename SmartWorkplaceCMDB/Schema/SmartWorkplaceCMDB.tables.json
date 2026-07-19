@@ -1,0 +1,409 @@
+{
+  "contractVersion": "0.2.0",
+  "identityColumns": [
+    "TenantKey",
+    "OrganizationKey",
+    "EnvironmentKey",
+    "TenantId"
+  ],
+  "tables": [
+    {
+      "area": "CMDB",
+      "name": "CMDB_Users.csv",
+      "role": "entity",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CmdbUserId",
+        "SourceSystem",
+        "SourceUserId",
+        "UserPrincipalName",
+        "DisplayName",
+        "AccountEnabled",
+        "UserType",
+        "Department",
+        "JobTitle",
+        "ManagerUserId",
+        "CreatedDateTime",
+        "LastSignInDateTime",
+        "ConfidenceScore",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "CMDB",
+      "name": "CMDB_Devices.csv",
+      "role": "entity",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CmdbDeviceId",
+        "SourceSystem",
+        "SourceDeviceId",
+        "DeviceName",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "Ownership",
+        "ComplianceState",
+        "ManagementState",
+        "PrimaryUserId",
+        "LastSyncDateTime",
+        "ConfidenceScore",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "CMDB",
+      "name": "CMDB_Groups.csv",
+      "role": "entity",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CmdbGroupId",
+        "SourceSystem",
+        "SourceGroupId",
+        "DisplayName",
+        "MailEnabled",
+        "SecurityEnabled",
+        "GroupTypes",
+        "MemberCount",
+        "OwnerCount",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "CMDB",
+      "name": "CMDB_Licenses.csv",
+      "role": "entity",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CmdbLicenseId",
+        "SourceSystem",
+        "SkuId",
+        "SkuPartNumber",
+        "ConsumedUnits",
+        "EnabledUnits",
+        "SuspendedUnits",
+        "WarningUnits",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "CMDB",
+      "name": "CMDB_Mailboxes.csv",
+      "role": "entity",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CmdbMailboxId",
+        "SourceSystem",
+        "ExternalDirectoryObjectId",
+        "UserPrincipalName",
+        "DisplayName",
+        "RecipientTypeDetails",
+        "PrimarySmtpAddress",
+        "MailboxPlan",
+        "ArchiveStatus",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "CMDB",
+      "name": "CMDB_UserDeviceRelationships.csv",
+      "role": "relationship",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CmdbRelationshipId",
+        "CmdbUserId",
+        "CmdbDeviceId",
+        "RelationshipType",
+        "SourceSystem",
+        "ConfidenceScore",
+        "Evidence",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "CMDB",
+      "name": "CMDB_Relationships.csv",
+      "role": "relationship",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "CmdbRelationshipId",
+        "FromEntityType",
+        "FromEntityId",
+        "ToEntityType",
+        "ToEntityId",
+        "RelationshipType",
+        "SourceSystem",
+        "ConfidenceScore",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "area": "CMDB",
+      "name": "CMDB_DataQuality.csv",
+      "role": "finding",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "FindingId",
+        "Severity",
+        "EntityType",
+        "EntityId",
+        "FindingType",
+        "Description",
+        "SourceSystem",
+        "DetectedDateTime",
+        "RecommendedAction"
+      ]
+    },
+    {
+      "area": "CMDB",
+      "name": "CMDB_BuildManifest.csv",
+      "role": "manifest",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "ProfileKey",
+        "ScriptVersion",
+        "ContractVersion",
+        "BuildDateTime",
+        "CmdbTableCount",
+        "PowerBITableCount",
+        "LatestOutputRootPath"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimTenant.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDisplayName",
+        "Environment",
+        "LastRefreshDateTime"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimUser.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "CmdbUserId",
+        "UserPrincipalName",
+        "DisplayName",
+        "AccountEnabled",
+        "UserType",
+        "Department",
+        "JobTitle",
+        "ConfidenceScore"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimDevice.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "CmdbDeviceId",
+        "DeviceName",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "Ownership",
+        "ComplianceState",
+        "ManagementState",
+        "ConfidenceScore"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimGroup.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantGroupKey",
+        "CmdbGroupId",
+        "DisplayName",
+        "MailEnabled",
+        "SecurityEnabled",
+        "GroupTypes"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimLicenseSku.csv",
+      "role": "dimension",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantSkuKey",
+        "SkuId",
+        "SkuPartNumber",
+        "ConsumedUnits",
+        "EnabledUnits"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "DimDate.csv",
+      "role": "dimension",
+      "tenantScoped": false,
+      "columns": [
+        "Date",
+        "Year",
+        "Quarter",
+        "Month",
+        "MonthName",
+        "Day"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactUserLicense.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "TenantSkuKey",
+        "CmdbUserId",
+        "SkuId",
+        "AssignmentState",
+        "AssignedDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactDeviceCompliance.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "CmdbDeviceId",
+        "ComplianceState",
+        "LastSyncDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactUserDeviceRelationship.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantRelationshipKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "CmdbRelationshipId",
+        "CmdbUserId",
+        "CmdbDeviceId",
+        "RelationshipType",
+        "ConfidenceScore",
+        "SourceSystem"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactMailbox.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantMailboxKey",
+        "TenantUserKey",
+        "CmdbMailboxId",
+        "CmdbUserId",
+        "RecipientTypeDetails",
+        "ArchiveStatus",
+        "SourceSystem"
+      ]
+    },
+    {
+      "area": "PowerBI",
+      "name": "FactDataQuality.csv",
+      "role": "fact",
+      "tenantScoped": true,
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantFindingKey",
+        "FindingId",
+        "Severity",
+        "EntityType",
+        "FindingType",
+        "DetectedDateTime",
+        "SourceSystem"
+      ]
+    }
+  ]
+}
