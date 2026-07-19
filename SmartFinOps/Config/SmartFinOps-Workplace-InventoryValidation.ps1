@@ -37,6 +37,7 @@ function Add-SmartFinOpsUnreferencedCsvQualityRows {
                 RunId = $script:RunId
                 SourceName = "Additional CSV: $($item.Name)"
                 SemanticRole = 'Catalogued source not consumed by the current analyzer'
+                SourceRequirement = 'Not defined'
                 Status = 'Catalogued'
                 ContractStatus = 'NotDefined'
                 FreshnessStatus = $freshnessStatus
@@ -47,6 +48,7 @@ function Add-SmartFinOpsUnreferencedCsvQualityRows {
                 LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
                 AgeHours = $ageHours
                 RequiredColumnsMissing = ''
+                BlockedReason = ''
                 Notes = $notes
             }) | Out-Null
         }
@@ -55,6 +57,7 @@ function Add-SmartFinOpsUnreferencedCsvQualityRows {
                 RunId = $script:RunId
                 SourceName = "Additional CSV: $($item.Name)"
                 SemanticRole = 'Catalogued source not consumed by the current analyzer'
+                SourceRequirement = 'Not defined'
                 Status = 'Error'
                 ContractStatus = 'Error'
                 FreshnessStatus = 'NotChecked'
@@ -65,6 +68,7 @@ function Add-SmartFinOpsUnreferencedCsvQualityRows {
                 LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
                 AgeHours = ''
                 RequiredColumnsMissing = ''
+                BlockedReason = ''
                 Notes = $_.Exception.Message
             }) | Out-Null
         }
@@ -75,8 +79,8 @@ function Add-SmartFinOpsUnreferencedCsvQualityRows {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeu9IjAvWYSCvi
-# 1ycHCRKWjStf2hsXzq9VcXEpUyzyS6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUi95vgGv2QkOL
+# ma/9A9kxFxxGmDPG33vP3uYUOKnMEKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -209,31 +213,31 @@ function Add-SmartFinOpsUnreferencedCsvQualityRows {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHJcXQous1V4+4P+Ur2+azouJjxkN03cRIhRRKX9y0pqMA0GCSqG
-# SIb3DQEBAQUABIIBgFmHEYkzZu7WmP5MhNOt82XCOz1MsDkp8PI5q/1eVBybzJuF
-# DI+56k1RmC8c8gg5gUj+QxrVUPL8NGlCqckRYy3yAgScA3FdUfSJGqC3gJ4JRFc8
-# V066ECWr4J6x7mZ/05sywwr82eU8gzhLeRIEUW6yQkY+a8PE/k+OBC8y3FC4QBtD
-# OsNKnGM43HsSDAO8wy+QlGhbjy6KcHcqBdZgxnLW+cr2PySWvUEKjMZ1ti+iR5SR
-# S09zMKbKNNHYUI2SN7FmOiLQB3hBYmz+cwtDolVJE5uUwX0P76PO3icUzF+EkyIq
-# w05m/lnXJ8R7ZZAz6QI2oHeSA8jHK7TTNoppX8g6ukqSXHOCQmeie6DhKF1NnESg
-# uko+bQX+AhsXWmQmiTeQ4HQLvgnBBVaIgyOh73uMH8Vm/odUAP3ElA6466qsmFVc
-# fH8JPw8pXp4/Sxmazkw+VNXas92NnqicLopJScFDdIxHLLEyvqxFN0qoMkxaEcUw
-# oPtzJ4/UjhBFB5kRMKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIYT6q1FhnQ2ZQBDmZCMUXQy/ztd4qVbaU6WVNsPT3XiMA0GCSqG
+# SIb3DQEBAQUABIIBgHIjk7b4zSzSTcLQQg4br9dPLbfFsUpWFokGVMABY5+3mjcf
+# 0rLnP2Wjq4F7GtM1yYQW6LfTl+cyYHdfFlfnri/Vkyrnw1AmlhvkGmuLDvtmt5Uu
+# qZzSn1BThCMQX6e51d7VMTz6Tr86HaH4vzCDCRTuhPP4H3eoSEiv9EUKV3NrlT5Q
+# +iJOIYVU4buh/XvpNfUGtYDC3dLoz7Yj06FpKBES876rzFibfn+W5RQsDMRo+/Wc
+# g6HAA45YCCatMuRYR+fGnM7EcBAVmvif7ME1VepZXE37p91I13HBMNpsyjR5gV9W
+# 6ME/Cfyfi+lvMNk95UZYuaB+yCAPqYoqWoTszIjcvjIozu5Ecmyz5MwVpce0DYr/
+# fEVzlLHBqAi5OmbE7gEdy6jn0WKPiKoylPk9qyqK/Y3eadSvYkfiG2DpnMhcNqEs
+# i5EjCQkWyQ6e63cChUkgukUg4FXV0I2+o8/Gzn1nLEUlsDLz4OPIDMA+LVDxHrTU
+# YsuJ1zvihdeK9YWSm6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxNTE5
-# NDRaMC8GCSqGSIb3DQEJBDEiBCANX7Lh96bU4jRqUeF0QQpOTnwz66ykjr/kbzIh
-# 1m/9YTANBgkqhkiG9w0BAQEFAASCAgCieD/NthvsIJaCLu+dwLlH5JohwxS5hZ33
-# lRsyPCy3qFamGva+mlJGHCgZNA6BcZvLqrKoaLoIT+buKu7XUHcgwEuXGmzEBdNb
-# BMYL0QdWhmyXorKgfbvyDpl4fszQpT8GNpJ4DO+UI0mLUzzd98kd5Ub6SQ85rxF6
-# iJ2ZMsr+t2cS/dbJhztlz0hs/W9BLpJ+95VRVBlwOBfaIpGu31tr8DEPIpvOZGdg
-# 6HtJ329aJVp99BVi+SMpae2XxagPyKU0AJQm0tzTvoyvIpCfG3NgMUX1YTXvjY+g
-# BaaKptOpg7OggaPDphTwtNd2BoP1gQIqIKLxvDDErnxbvlmXqCOhPY7e/XghHGa3
-# KPbHjIiAcgUVS++MxgD7Yq3+BKXR/7N5qjR/73aLuBkZKWHetQyAsndkV3aiH/35
-# 0reGyV1lq5rJeYmFlqbY4pcGOafei+R1xCf8B9dhX9ng7OumlSoR2VPKW+Vh+B0V
-# zzYwCHNkk5oGLlE7NpVMcARE6vwUd2jlN+vsq17/HnCmBkTeijhKKfec7F9pTW4A
-# LZCP1AWb74qnuJA8ceFA16BjH1YF53+vQpGE5TUgLsVO0vpykOWhY3nsZZv/AM8N
-# LtEcExny9dnFdxlP6GxdDwTuaOaTQtXOpn+Lj4TEoZWvGi6csB121H0LQbeJehsv
-# aYbWlTwuDQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkwMTI5
+# MzJaMC8GCSqGSIb3DQEJBDEiBCBu13C9TgUgStiVatr9py5YE8gnju3Wlgo0UrnV
+# oeM13zANBgkqhkiG9w0BAQEFAASCAgAxjT9SNwZ5AvH38NPxTQx4VLDohRXMg0HY
+# KEoTgh5lzc+Iie5X3F0+OZMWkRgIDK78Afl7e3Qfm8Oi6e2gCQheG93NOvzMqlw3
+# Mh6bTjbc6feIdKN8EXghxTL59SQHNZWKXJPeZ+2wlLxRXYGWE8lLd2m7S4z8lfK7
+# 6HU83HYFtYfmJsBV36S+NLgnlrIRJje6Uq1ZpnMlG0wjzAeCOwZmkfnbSM9DO3MQ
+# CKlbmo/tctdv80lpEKhyAIkUrugnywJaXvJE2up0jUkp9qIv6MmPjRuPqaPHyldd
+# i9k8mWSmeNYIM+VqBKduB5fGBaYU9lkt/s+oCvJoainVkr1laC91UJ42wvNGaXTI
+# +zMGqumK1/Z8exqYmd+s6l4EajVHOCUwVqw8EELkHn0a1RvI1xLIt08W5a3QEi0X
+# IGtKdRQP1lQSrJl/ffox24ZOe6LtN8WuWVoR0N2VTSy6nPJPKlDZmR0yhcAv3SeR
+# 2HF+RjaTvy71CG91I0Ls6Dv5FzScs9ui+jbU8auYWb5ZKbTh2AU51jM3/C1ZCWZR
+# /PSa89rabTg5T07A5TwQyfoyBey59omEOt7zN+w396df7R2cjRMSuNYO3rcpImEs
+# 661pYrbE8N6kSWYCH/VsyWMiBrSPBNJAL20NvZAefsiRqTEKapuPOfy/QsGn7ptF
+# pXUgfY0hag==
 # SIG # End signature block

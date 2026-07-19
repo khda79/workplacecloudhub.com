@@ -1,5 +1,5 @@
 {
-  "Version": 2,
+  "Version": 3,
   "ExcludedFileNamePatterns": [
     "MAXITEMS"
   ],
@@ -68,6 +68,81 @@
       ]
     },
     {
+      "Key": "M365SharePointUserActivity",
+      "DisplayName": "M365 SharePoint user activity",
+      "SemanticRole": "User-level SharePoint activity evidence for collaboration value and license decision guardrails",
+      "FileNames": ["M365_SharePoint_UserActivity.csv"],
+      "RequiredColumns": ["User Principal Name", "Last Activity Date", "Viewed Or Edited File Count", "Report Period"]
+    },
+    {
+      "Key": "M365TeamsDeviceUsage",
+      "DisplayName": "M365 Teams device usage",
+      "SemanticRole": "User-level Teams platform usage evidence for web, desktop and mobile work patterns",
+      "FileNames": ["M365_Teams_DeviceUsage.csv"],
+      "RequiredColumns": ["User Principal Name", "Last Activity Date", "Used Web", "Used Windows", "Is Licensed"]
+    },
+    {
+      "Key": "M365CopilotUserUsage",
+      "DisplayName": "M365 Copilot user usage",
+      "SemanticRole": "Licensed Microsoft 365 Copilot usage evidence by user; readiness only until product-specific rules are approved",
+      "FileNames": ["M365_Copilot_UserUsage.csv"],
+      "RequiredColumns": ["UserPrincipalName", "LastActivityDate", "ReportPeriod"],
+      "Optional": true
+    },
+    {
+      "Key": "M365TeamsPhoneUserUsage",
+      "DisplayName": "M365 Teams Phone user usage",
+      "SemanticRole": "User-level Teams Phone usage evidence for assignment-versus-activity review",
+      "FileNames": ["M365_Teams_PhoneUserUsage.csv"],
+      "RequiredColumns": ["UserPrincipalName", "LastCallDate", "TotalCallCount", "TotalMinutes", "HasPstnUsage", "HasDirectRoutingUsage"],
+      "Optional": true
+    },
+    {
+      "Key": "M365TeamsPhoneAssignments",
+      "DisplayName": "M365 Teams Phone assignments",
+      "SemanticRole": "Assigned Teams Phone numbers and capabilities used to compare entitlement with observed call activity",
+      "FileNames": ["M365_Teams_PhoneAssignments.csv"],
+      "RequiredColumns": ["AssignedPstnTargetId", "TargetType", "Capability", "PstnAssignmentStatus", "TelephoneNumberMasked"],
+      "Optional": true
+    },
+    {
+      "Key": "M365TeamsPstnCalls",
+      "DisplayName": "M365 Teams PSTN calls",
+      "SemanticRole": "Detailed PSTN call evidence retained for validation of the user-level Teams Phone aggregate",
+      "FileNames": ["M365_Teams_PSTNCalls.csv"],
+      "RequiredColumns": ["UserPrincipalName", "StartDateTimeUtc", "Minutes", "Direction", "Charge", "Currency"],
+      "Optional": true,
+      "ValidationOnly": true
+    },
+    {
+      "Key": "M365TeamsDirectRoutingCalls",
+      "DisplayName": "M365 Teams Direct Routing calls",
+      "SemanticRole": "Detailed Direct Routing call evidence retained for validation of the user-level Teams Phone aggregate",
+      "FileNames": ["M365_Teams_DirectRoutingCalls.csv"],
+      "RequiredColumns": ["UserPrincipalName", "StartDateTimeUtc", "Minutes", "SuccessfulCall", "TrunkFullyQualifiedDomainName"],
+      "Optional": true,
+      "ValidationOnly": true
+    },
+    {
+      "Key": "M365PowerBIFabricActivityEvents",
+      "DisplayName": "Power BI and Fabric activity events",
+      "SemanticRole": "Detailed Power BI and Fabric activity evidence; readiness only and not monetized",
+      "FileNames": ["M365_PowerBI_Fabric_ActivityEvents.csv"],
+      "RequiredColumns": ["CreationTime", "Activity", "PrincipalType"],
+      "Optional": true,
+      "ValidationOnly": true,
+      "BlockedReason": "Power BI Activity Events API access is blocked for the current application identity (HTTP 403); no CSV is expected until tenant authorization is corrected."
+    },
+    {
+      "Key": "M365PowerBIFabricUserActivity",
+      "DisplayName": "Power BI and Fabric user activity",
+      "SemanticRole": "User-level Power BI and Fabric activity evidence; readiness only until product-specific rules are approved",
+      "FileNames": ["M365_PowerBI_Fabric_UserActivity.csv"],
+      "RequiredColumns": ["UserPrincipalName", "PrincipalType", "LastActivityDate", "TotalActivityCount"],
+      "Optional": true,
+      "BlockedReason": "Power BI Activity Events API access is blocked for the current application identity (HTTP 403); no CSV is expected until tenant authorization is corrected."
+    },
+    {
       "Key": "M365AppsActivations",
       "DisplayName": "M365 Apps activations",
       "SemanticRole": "Desktop, mobile and shared-computer application activation evidence by user",
@@ -105,7 +180,8 @@
         "User Principal Name",
         "Last Activity Date"
       ]
-    },    {
+    },
+    {
       "Key": "M365LicenseUsers",
       "DisplayName": "M365 license user assignments",
       "SemanticRole": "User by SKU license assignment",
@@ -130,6 +206,82 @@
         "TenantPrepaidEnabled",
         "TenantConsumedUnits"
       ]
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsDevicePerformance",
+      "DisplayName": "Intune Endpoint Analytics device performance",
+      "SemanticRole": "Device experience, startup, application reliability and work-from-anywhere scores for value and cost-avoidance readiness",
+      "FileNames": ["Intune_EndpointAnalytics_DevicePerformance.csv"],
+      "RequiredColumns": ["DeviceId", "DeviceName", "EndpointAnalyticsScore", "StartupScore", "AppReliabilityScore", "WorkFromAnywhereScore"],
+      "Optional": true
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsModelPerformance",
+      "DisplayName": "Intune Endpoint Analytics model performance",
+      "SemanticRole": "Hardware-model experience evidence retained for validation and future forecasting",
+      "FileNames": ["Intune_EndpointAnalytics_ModelPerformance.csv"],
+      "RequiredColumns": ["Manufacturer", "Model", "EndpointAnalyticsScore"],
+      "Optional": true,
+      "ValidationOnly": true
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsStartupDevices",
+      "DisplayName": "Intune Endpoint Analytics startup devices",
+      "SemanticRole": "Device-level startup performance evidence for productivity and cost-avoidance readiness",
+      "FileNames": ["Intune_EndpointAnalytics_StartupDevices.csv"],
+      "RequiredColumns": ["DeviceId", "DeviceName", "StartupScore", "CoreBootTime", "CoreSignInTime"],
+      "Optional": true
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsStartupModels",
+      "DisplayName": "Intune Endpoint Analytics startup models",
+      "SemanticRole": "Hardware-model startup evidence retained for validation and future forecasting",
+      "FileNames": ["Intune_EndpointAnalytics_StartupModels.csv"],
+      "RequiredColumns": ["Manufacturer", "Model", "StartupScore"],
+      "Optional": true,
+      "ValidationOnly": true
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsStartupProcesses",
+      "DisplayName": "Intune Endpoint Analytics startup processes",
+      "SemanticRole": "Startup-process evidence retained for technical validation and future remediation prioritization",
+      "FileNames": ["Intune_EndpointAnalytics_StartupProcesses.csv"],
+      "RequiredColumns": ["ApplicationName", "Publisher", "UsageDuration"],
+      "Optional": true,
+      "ValidationOnly": true
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsAppReliability",
+      "DisplayName": "Intune Endpoint Analytics application reliability",
+      "SemanticRole": "Application reliability evidence for productivity and cost-avoidance readiness",
+      "FileNames": ["Intune_EndpointAnalytics_AppReliability.csv"],
+      "RequiredColumns": ["ApplicationName", "AppReliabilityScore", "CrashCount", "MeanTimeToFailure"],
+      "Optional": true
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsOSReliability",
+      "DisplayName": "Intune Endpoint Analytics OS reliability",
+      "SemanticRole": "Operating-system reliability evidence for quality and performance trade-offs",
+      "FileNames": ["Intune_EndpointAnalytics_OSReliability.csv"],
+      "RequiredColumns": ["OSVersion", "AppReliabilityScore", "MeanTimeToFailure"],
+      "Optional": true
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsWorkFromAnywhere",
+      "DisplayName": "Intune Endpoint Analytics work from anywhere",
+      "SemanticRole": "Device-level cloud-management and Windows experience evidence for value readiness",
+      "FileNames": ["Intune_EndpointAnalytics_WorkFromAnywhere.csv"],
+      "RequiredColumns": ["DeviceId", "DeviceName", "WorkFromAnywhereScore", "CloudManagementScore", "WindowsScore"],
+      "Optional": true
+    },
+    {
+      "Key": "IntuneEndpointAnalyticsDataQuality",
+      "DisplayName": "Intune Endpoint Analytics data quality",
+      "SemanticRole": "Collector coverage, API status and non-Advanced Analytics evidence used to qualify Endpoint Analytics findings",
+      "FileNames": ["Intune_EndpointAnalytics_DataQuality.csv"],
+      "RequiredColumns": ["ReportName", "Status", "RowCount", "IsAdvancedAnalytics", "ErrorCode", "ErrorMessage"],
+      "Optional": true,
+      "ValidationOnly": true
     },
     {
       "Key": "IntuneDevices",
