@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.4
+1.11.6
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.4'
+$script:AppVersion = '1.11.6'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -36,6 +36,12 @@ $script:CancelRequested = $false
 $script:IsBusy = $false
 $script:SessionLogPath = ''
 $script:SessionLogError = ''
+$script:SessionId = "SEMR-APP-{0}-{1}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID
+$script:SessionStartedAt = Get-Date
+$script:CurrentRunId = ''
+$script:CurrentDiagnosticPhase = ''
+$script:CurrentDiagnosticMailbox = ''
+$script:RunStartedAt = $null
 $script:MigrationEndpointsLoaded = $false
 $script:MigrationEndpointSelectionConfirmed = $false
 $script:ProgressWindow = $null
@@ -417,7 +423,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.4" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.6" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -517,13 +523,30 @@ if ($CsvPath) { $controls.CsvPathBox.Text = $CsvPath }
 function Write-SemrActivity {
     param(
         [Parameter(Mandatory)][string]$Message,
-        [ValidateSet('INFO', 'WARN', 'ERROR', 'SUCCESS')][string]$Level = 'INFO'
+        [ValidateSet('INFO', 'WARN', 'ERROR', 'SUCCESS')][string]$Level = 'INFO',
+        [string]$Component = 'GUI'
     )
-    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
-    $controls.ActivityBox.AppendText("$line`r`n")
+    $now = Get-Date
+    $displayLine = "{0} [{1}] {2}" -f $now.ToString('yyyy-MM-dd HH:mm:ss'), $Level, $Message
+    $sessionElapsedMs = [math]::Round(($now - $script:SessionStartedAt).TotalMilliseconds)
+    $runElapsedMs = if ($script:RunStartedAt) { [math]::Round(($now - $script:RunStartedAt).TotalMilliseconds) } else { 0 }
+    $context = @(
+        "PID=$PID"
+        "TID=$([Threading.Thread]::CurrentThread.ManagedThreadId)"
+        "Session=$($script:SessionId)"
+        "Run=$(if($script:CurrentRunId){$script:CurrentRunId}else{'-'})"
+        "Component=$Component"
+        "Phase=$(if($script:CurrentDiagnosticPhase){$script:CurrentDiagnosticPhase}else{'-'})"
+        "Mailbox=$(if($script:CurrentDiagnosticMailbox){$script:CurrentDiagnosticMailbox}else{'-'})"
+        "SessionElapsedMs=$sessionElapsedMs"
+        "RunElapsedMs=$runElapsedMs"
+    ) -join '] ['
+    $fileLine = "{0} [{1}] [{2}] {3}" -f $now.ToString('yyyy-MM-dd HH:mm:ss.fff'), $Level, $context, ($Message -replace '[\r\n]+',' | ')
+    $controls.ActivityBox.AppendText("$displayLine`r`n")
     $controls.ActivityBox.ScrollToEnd()
     if ($script:SessionLogPath) {
-        try { [IO.File]::AppendAllText($script:SessionLogPath, "$line`r`n", [Text.UTF8Encoding]::new($false)) } catch {}
+        try { [IO.File]::AppendAllText($script:SessionLogPath, "$fileLine`r`n", [Text.UTF8Encoding]::new($false)) }
+        catch { $script:SessionLogError = $_.Exception.Message }
     }
 }
 
@@ -611,6 +634,45 @@ function Set-SemrProcessingStatus {
     Invoke-SemrDoEvent
 }
 
+function Write-SemrErrorDiagnostic {
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [string]$Title = 'PowerShell error',
+        [ValidateSet('WARN','ERROR')][string]$Level = 'ERROR',
+        [string]$Component = 'GUI'
+    )
+    if ($ErrorRecord -isnot [System.Management.Automation.ErrorRecord]) {
+        $errorType = if ($null -eq $ErrorRecord) { '<null>' } else { $ErrorRecord.GetType().FullName }
+        Write-SemrActivity -Message "$Title | ErrorType=$errorType | Message=$([string]$ErrorRecord)" -Level $Level -Component $Component
+        return
+    }
+    $exception = $ErrorRecord.Exception
+    $details = [System.Collections.Generic.List[string]]::new()
+    [void]$details.Add("Title=$Title")
+    [void]$details.Add("ExceptionType=$($exception.GetType().FullName)")
+    [void]$details.Add("Message=$($exception.Message)")
+    if ($ErrorRecord.FullyQualifiedErrorId) { [void]$details.Add("FullyQualifiedErrorId=$($ErrorRecord.FullyQualifiedErrorId)") }
+    if ($ErrorRecord.CategoryInfo) { [void]$details.Add("CategoryInfo=$($ErrorRecord.CategoryInfo)") }
+    if ($ErrorRecord.TargetObject) { [void]$details.Add("TargetObject=$([string]$ErrorRecord.TargetObject)") }
+    if ($ErrorRecord.InvocationInfo) {
+        [void]$details.Add("Command=$($ErrorRecord.InvocationInfo.MyCommand.Name)")
+        [void]$details.Add("Script=$($ErrorRecord.InvocationInfo.ScriptName)")
+        [void]$details.Add("Line=$($ErrorRecord.InvocationInfo.ScriptLineNumber); Offset=$($ErrorRecord.InvocationInfo.OffsetInLine)")
+        if ($ErrorRecord.InvocationInfo.Line) { [void]$details.Add("SourceLine=$($ErrorRecord.InvocationInfo.Line.Trim())") }
+        if ($ErrorRecord.InvocationInfo.PositionMessage) { [void]$details.Add("Position=$($ErrorRecord.InvocationInfo.PositionMessage.Trim())") }
+    }
+    if ($ErrorRecord.ScriptStackTrace) { [void]$details.Add("ScriptStackTrace=$($ErrorRecord.ScriptStackTrace)") }
+    $inner = $exception.InnerException
+    $innerDepth = 0
+    while ($inner -and $innerDepth -lt 5) {
+        $innerDepth++
+        [void]$details.Add("InnerException${innerDepth}=$($inner.GetType().FullName): $($inner.Message)")
+        $inner = $inner.InnerException
+    }
+    foreach ($key in @($exception.Data.Keys)) { [void]$details.Add("ExceptionData[$key]=$($exception.Data[$key])") }
+    Write-SemrActivity -Message ($details -join ' | ') -Level $Level -Component $Component
+}
+
 function Show-SemrError {
     param(
         [Parameter(Mandatory)][string]$Title,
@@ -626,6 +688,7 @@ function Show-SemrError {
         [string]$ErrorRecord
     }
     Write-SemrActivity -Message "$Title - $message" -Level ERROR
+    Write-SemrErrorDiagnostic -ErrorRecord $ErrorRecord -Title $Title -Level ERROR
     Invoke-SemrForegroundPrompt -Action {
         [System.Windows.MessageBox]::Show($window, $message, $Title, 'OK', 'Error')
     } | Out-Null
@@ -742,11 +805,13 @@ function Start-SemrProgressWindow {
 
 function Update-SemrProgressWindow {
     param([Parameter(Mandatory)][string]$Stage,[string]$Detail='',[int]$Current=0,[int]$Total=0,[switch]$Indeterminate)
+    $script:CurrentDiagnosticPhase=$Stage;$script:CurrentDiagnosticMailbox=''
     if(-not $script:ProgressWindow){return};$state=$script:ProgressWindow.State;$state.Stage=$Stage;$state.Detail=$Detail;$state.Current=$Current;$state.Total=$Total;$state.Indeterminate=[bool]($Indeterminate -or $Total -le 0)
 }
 
 function Complete-SemrProgressWindow {
     param([Parameter(Mandatory)][string]$Stage,[Parameter(Mandatory)][string]$Summary,[switch]$Failed,[string]$OutputPath='',[string]$HtmlPath='',[string]$ExcelPath='')
+    $script:CurrentDiagnosticPhase=$Stage;$script:CurrentDiagnosticMailbox=''
     if(-not $script:ProgressWindow){return};$state=$script:ProgressWindow.State;$state.Stage=$Stage;$state.Summary=$Summary;$state.Failed=[bool]$Failed;$state.OutputPath=$OutputPath;$state.HtmlPath=$HtmlPath;$state.ExcelPath=$ExcelPath;$state.Indeterminate=$false;$state.Completed=$true
 }
 
@@ -946,8 +1011,10 @@ function Initialize-SemrSessionLog {
         $logFolder = Join-Path (Resolve-SemrOutputRoot) 'Logs'
         New-Item -Path $logFolder -ItemType Directory -Force | Out-Null
         $script:SessionLogPath = Join-Path $logFolder ("SmartM365-ExchangeMigrationReadiness-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-        $line = "{0} [INFO] Smart Exchange Migration Readiness v{1} session log created." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $script:AppVersion
-        [IO.File]::WriteAllText($script:SessionLogPath, "$line`r`n", [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($script:SessionLogPath, '', [Text.UTF8Encoding]::new($false))
+        Write-SemrActivity -Message "Session log created. AppVersion=$($script:AppVersion); ProcessPath=$([Environment]::ProcessPath); PowerShell=$($PSVersionTable.PSVersion); PSEdition=$($PSVersionTable.PSEdition); OS=$([Environment]::OSVersion.VersionString); Computer=$env:COMPUTERNAME; User=$env:USERNAME." -Component 'Bootstrap'
+        Write-SemrActivity -Message "Paths: ScriptRoot=$PSScriptRoot; WorkingDirectory=$((Get-Location).Path); ConfigPath=$ConfigPath; OutputRoot=$(Resolve-SemrOutputRoot); SessionLog=$($script:SessionLogPath)." -Component 'Bootstrap'
+        Write-SemrActivity -Message "Tenant context: Profile=$($script:Config._TenantProfileKey); TenantId=$($script:Config._TenantId); Phase=$(Get-SemrSelectedAssessmentPhase); Authentication=Interactive delegated." -Component 'Bootstrap'
     }
     catch {
         $script:SessionLogPath = ''
@@ -1047,10 +1114,17 @@ $controls.ResetOptionsButton.Add_Click({
 
 $controls.RunButton.Add_Click({
     if (-not $script:Batch) { return }
+    $runOutcome = 'NOT_STARTED'
     try {
         $script:CancelRequested = $false
         $script:Assessment = $null
         $script:Export = $null
+        $script:CurrentRunId = "SEMR-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+        $script:RunStartedAt = Get-Date
+        $script:CurrentDiagnosticPhase = 'Preparing assessment'
+        $script:CurrentDiagnosticMailbox = ''
+        $runOutcome = 'RUNNING'
+        Write-SemrActivity -Message "Assessment run initialized. BatchPath=$($script:Batch.Path); Rows=$(@($script:Batch.Rows).Count); Phase=$(Get-SemrSelectedAssessmentPhase)." -Component 'Assessment'
         [void](Start-SemrProgressWindow -Title 'Exchange migration readiness assessment' -Stage 'Preparing Live strict assessment' -Detail 'Validating options and required live source prerequisites.')
         Sync-SemrCheckOptionsToConfig
         $script:Config['AssessmentPhase'] = Get-SemrSelectedAssessmentPhase
@@ -1069,6 +1143,7 @@ $controls.RunButton.Add_Click({
             catch {
                 [void]$preflightIssues.Add("Active Directory: $($_.Exception.Message)")
                 Write-SemrActivity -Message "Active Directory preflight failed: $($_.Exception.Message)" -Level WARN
+                Write-SemrErrorDiagnostic -ErrorRecord $_ -Title 'Active Directory preflight failed' -Level WARN -Component 'ActiveDirectory'
             }
             try {
                 Connect-SemrOnPremisesExchange | Out-Null
@@ -1077,6 +1152,7 @@ $controls.RunButton.Add_Click({
             catch {
                 [void]$preflightIssues.Add("Exchange 2016: $($_.Exception.Message)")
                 Write-SemrActivity -Message "Local Exchange 2016 preflight failed: $($_.Exception.Message)" -Level WARN
+                Write-SemrErrorDiagnostic -ErrorRecord $_ -Title 'Exchange 2016 preflight failed' -Level WARN -Component 'Exchange2016'
             }
             Sync-SemrConnectionDisplay
             if ($preflightIssues.Count -gt 0) {
@@ -1093,12 +1169,14 @@ $controls.RunButton.Add_Click({
                 }
                 if ($continue -ne [System.Windows.MessageBoxResult]::Yes) {
                     Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Required Active Directory or local Exchange 2016 prerequisites are unavailable.'
+                    $runOutcome = 'CANCELLED'
                     return
                 }
             }
             Update-SemrProgressWindow -Stage 'Checking Microsoft Graph modules' -Detail 'Verifying required delegated Graph cmdlets.' -Current 2 -Total 10
             if (-not (Confirm-SemrMicrosoftGraphModule)) {
                 Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Required Microsoft Graph modules are unavailable.'
+                $runOutcome = 'CANCELLED'
                 return
             }
             $connectionState = Get-SemrConnectionState
@@ -1115,6 +1193,7 @@ $controls.RunButton.Add_Click({
                 Update-SemrProgressWindow -Stage 'Migration endpoint selection' -Detail 'Loading ExchangeRemoteMove endpoints from Exchange Online.' -Current 4 -Total 10
                 if (-not (Initialize-SemrMigrationEndpointSelection)) {
                     Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'No migration endpoint was selected.'
+                    $runOutcome = 'CANCELLED'
                     return
                 }
             }
@@ -1129,7 +1208,9 @@ $controls.RunButton.Add_Click({
                     Set-SemrProcessingStatus -Message $Message -SkipActivity
                 }
                 $emailAddresses = @($script:Batch.Rows | ForEach-Object { [string]$_.EmailAddress })
-                Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction | Out-Null
+                $graphDiagnosticsDirectory = Join-Path (Join-Path (Join-Path (Resolve-SemrOutputRoot) 'Logs') 'GraphWorkers') $script:CurrentRunId
+                Write-SemrActivity -Message "Microsoft Graph worker diagnostics directory: $graphDiagnosticsDirectory" -Component 'GraphWorker'
+                Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction -DiagnosticsDirectory $graphDiagnosticsDirectory | Out-Null
                 Write-SemrActivity -Message 'Microsoft Graph user, licensing and tenant synchronization evidence collected using interactive authentication.' -Level SUCCESS
                 Sync-SemrConnectionDisplay
             }
@@ -1142,14 +1223,15 @@ $controls.RunButton.Add_Click({
             $statusLine = "[$Current/$Total] $Phase$mailboxText"
             $controls.StatusText.Text = $statusLine
             Update-SemrProgressWindow -Stage $Phase -Detail $(if ($Mailbox) { $Mailbox } else { 'Collecting tenant and directory evidence.' }) -Current $Current -Total $Total
-            Write-SemrActivity -Message $statusLine
+            $script:CurrentDiagnosticMailbox = [string]$Mailbox
+            Write-SemrActivity -Message $statusLine -Component 'Assessment'
             Invoke-SemrDoEvent
         }
         $cancellationCheck = { Invoke-SemrDoEvent; return (Test-SemrProgressCancellation) }
         Update-SemrProgressWindow -Stage 'Collecting tenant and mailbox evidence' -Detail 'AD, Exchange on-premises, Exchange Online and Microsoft Graph are required Live sources. Missing sources make the assessment INCOMPLETE.' -Current 6 -Total 10
         $exchangeDiagnosticsRoot = Join-Path (Join-Path (Resolve-SemrOutputRoot) 'Logs') 'Exchange2016Children'
         Write-SemrActivity -Message "Exchange 2016 child process logs root: $exchangeDiagnosticsRoot"
-        $script:Assessment = Invoke-SemrAssessment -Batch $script:Batch -Config $script:Config -ProgressCallback $progressAction -CancellationCheck $cancellationCheck -DiagnosticsRoot $exchangeDiagnosticsRoot
+        $script:Assessment = Invoke-SemrAssessment -Batch $script:Batch -Config $script:Config -ProgressCallback $progressAction -CancellationCheck $cancellationCheck -DiagnosticsRoot $exchangeDiagnosticsRoot -RunId $script:CurrentRunId
         if ($script:Assessment.SourceInitialization) {
             $sourceState = $script:Assessment.SourceInitialization
             Write-SemrActivity -Message ([string]$sourceState.ActiveDirectoryMessage) -Level $(if ($sourceState.ActiveDirectoryLive) { 'INFO' } else { 'WARN' })
@@ -1179,20 +1261,29 @@ $controls.RunButton.Add_Click({
         $summaryText = "GO: $($controls.GoCountText.Text) | GO-WARNING: $($controls.WarningCountText.Text) | NO-GO: $($controls.NoGoCountText.Text) | UNKNOWN: $($controls.UnknownCountText.Text)"
         Complete-SemrProgressWindow -Stage $(if ($script:Assessment.Cancelled) { 'Assessment cancelled - partial reports created' } else { 'Assessment complete' }) -Summary $summaryText -OutputPath $script:Export.RunFolder -HtmlPath $script:Export.HtmlPath -ExcelPath $script:Export.ExcelPath
         $controls.MainTabs.SelectedItem = $controls.ResultsTab
+        $runOutcome = if ($script:Assessment.Cancelled) { 'CANCELLED_PARTIAL' } else { 'COMPLETED' }
     }
     catch {
         if (Test-SemrProgressCancellation) {
             Write-SemrActivity -Message 'Assessment cancelled by the operator; no report was generated for the interrupted run.' -Level WARN
             Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'The Exchange 2016 child process and assessment worker were stopped.'
             $controls.StatusText.Text = 'Assessment cancelled.'
+            $runOutcome = 'CANCELLED'
         }
         else {
             Complete-SemrProgressWindow -Stage 'Assessment failed' -Summary $_.Exception.Message -Failed
             Show-SemrError -Title 'Assessment failed' -ErrorRecord $_
             $controls.StatusText.Text = 'Assessment failed. Review Activity.'
+            $runOutcome = 'FAILED'
         }
     }
-    finally { Switch-SemrBusyState -Busy $false }
+    finally {
+        $script:CurrentDiagnosticPhase = 'Finalizing'
+        $script:CurrentDiagnosticMailbox = ''
+        $runDurationMs = if ($script:RunStartedAt) { [math]::Round(((Get-Date) - $script:RunStartedAt).TotalMilliseconds) } else { 0 }
+        Write-SemrActivity -Message "Assessment run ended. Outcome=$runOutcome; DurationMs=$runDurationMs; SessionLog=$($script:SessionLogPath)." -Level $(if($runOutcome -eq 'FAILED'){'ERROR'}elseif($runOutcome -eq 'COMPLETED'){'SUCCESS'}else{'WARN'}) -Component 'Assessment'
+        Switch-SemrBusyState -Busy $false
+    }
 })
 
 $controls.CancelButton.Add_Click({
@@ -1295,7 +1386,7 @@ try {
 }
 finally {
     if ($script:SessionLogPath) {
-        try { [IO.File]::AppendAllText($script:SessionLogPath, "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [INFO] Application closed.`r`n", [Text.UTF8Encoding]::new($false)) } catch {}
+        try { Write-SemrActivity -Message "Application closed. SessionDurationMs=$([math]::Round(((Get-Date)-$script:SessionStartedAt).TotalMilliseconds))." -Component 'Bootstrap' } catch {}
     }
     if ($script:GuiSplash) {
         Close-SmartM365GuiSplash -Splash $script:GuiSplash
