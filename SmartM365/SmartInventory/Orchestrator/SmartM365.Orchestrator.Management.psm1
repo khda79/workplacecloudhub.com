@@ -11,7 +11,7 @@ function ConvertTo-SmartM365OrchestratorHashtable {
         foreach ($key in $InputObject.Keys) { $result[[string]$key] = ConvertTo-SmartM365OrchestratorHashtable $InputObject[$key] }
         return $result
     }
-    if ($InputObject -is [pscustomobject]) {
+    if ($InputObject.GetType() -eq [System.Management.Automation.PSCustomObject]) {
         $result = @{}
         foreach ($property in $InputObject.PSObject.Properties) { $result[$property.Name] = ConvertTo-SmartM365OrchestratorHashtable $property.Value }
         return $result
@@ -285,7 +285,19 @@ function Get-SmartM365OrchestratorServerStatus {
     $result = foreach ($server in @($ClusterDocument.ExpectedOrchestratorServers | Sort-Object -Unique)) {
         $serverName = ([string]$server).ToUpperInvariant(); $serverFolder = Join-Path $SharedDataFolderPath $server
         $heartbeatPath = Join-Path $serverFolder 'Orchestrator-Heartbeat.json'; $capabilitiesPath = Join-Path $serverFolder 'Orchestrator-Capabilities.json'; $heartbeatTime = [datetime]::MinValue
-        if (Test-Path $heartbeatPath) { $heartbeat = Read-SmartM365OrchestratorJson $heartbeatPath; foreach ($name in @('TimestampUtc', 'HeartbeatUtc', 'UpdatedUtc')) { if ($heartbeat.PSObject.Properties[$name] -and [datetime]::TryParse([string]$heartbeat.$name, [ref]$heartbeatTime)) { break } } }
+        if (Test-Path $heartbeatPath) {
+            $heartbeat = Read-SmartM365OrchestratorJson $heartbeatPath
+            foreach ($name in @('Timestamp', 'TimestampUtc', 'HeartbeatUtc', 'UpdatedUtc')) {
+                if (-not $heartbeat.PSObject.Properties[$name]) { continue }
+                $value = $heartbeat.PSObject.Properties[$name].Value
+                if ($value -is [datetime]) { $heartbeatTime = [datetime]$value; break }
+                $parsedTime = [datetime]::MinValue
+                if ([datetime]::TryParse([string]$value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsedTime) -or [datetime]::TryParse([string]$value, [ref]$parsedTime)) {
+                    $heartbeatTime = $parsedTime
+                    break
+                }
+            }
+        }
         $age = if ($heartbeatTime -eq [datetime]::MinValue) { [double]::PositiveInfinity } else { ([datetime]::UtcNow - $heartbeatTime.ToUniversalTime()).TotalMinutes }
         $capabilityText = ''; if (Test-Path $capabilitiesPath) { $capabilities = Read-SmartM365OrchestratorJson $capabilitiesPath; if ($capabilities.PSObject.Properties['ReadyCapabilities']) { $capabilityText = @($capabilities.ReadyCapabilities | Sort-Object -Unique) -join ', ' } }
         $assigned = @($assignments.Keys | Where-Object { $assignments[$_] -ieq $server })
