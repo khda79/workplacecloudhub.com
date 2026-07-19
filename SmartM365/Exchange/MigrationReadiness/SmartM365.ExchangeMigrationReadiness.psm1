@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.1'
+$script:SemrVersion = '1.11.2'
 $script:ActiveDirectoryDomains = @()
 $script:Exchange2016EvidenceByEmail = @{}
 $script:Exchange2016HybridEvidence = $null
@@ -472,11 +472,46 @@ function Get-SemrExchange2016WorkerPath {
     return $path
 }
 
+function Test-SemrExchange2016WorkerSerialization {
+    [CmdletBinding()]
+    param()
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = Get-SemrWindowsPowerShellPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $startInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
+    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Get-SemrExchange2016WorkerPath), '-SelfTest')) {
+        [void]$startInfo.ArgumentList.Add([string]$argument)
+    }
+    $process = [Diagnostics.Process]::Start($startInfo)
+    if (-not $process) { throw 'The Windows PowerShell 5.1 Exchange worker self-test could not be started.' }
+    try {
+        if (-not $process.WaitForExit(30000)) {
+            try { $process.Kill() } catch { $null = $_ }
+            throw 'The Windows PowerShell 5.1 Exchange worker self-test exceeded 30 seconds.'
+        }
+        $standardOutput = $process.StandardOutput.ReadToEnd().Trim()
+        $standardError = $process.StandardError.ReadToEnd().Trim()
+        if ($process.ExitCode -ne 0 -or $standardOutput -notmatch '^SELFTEST_OK\|') {
+            $detail = if ($standardError) { $standardError } elseif ($standardOutput) { $standardOutput } else { "Worker exit code $($process.ExitCode)." }
+            throw "Windows PowerShell 5.1 Exchange worker serialization self-test failed: $detail"
+        }
+        return $standardOutput
+    }
+    finally {
+        $process.Dispose()
+    }
+}
 function Connect-SemrOnPremisesExchange {
     [CmdletBinding()]
     param()
 
     $script:Exchange2016PreflightAttempted = $true
+    [void](Test-SemrExchange2016WorkerSerialization)
     $powershellPath = Get-SemrWindowsPowerShellPath
     $workerPath = Get-SemrExchange2016WorkerPath
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -543,7 +578,11 @@ function Initialize-SemrExchange2016Evidence {
     $process = $null
     try {
         [void](New-Item -ItemType Directory -Path $runtimeRoot -Force)
-        @($EmailAddresses | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique) | Export-Clixml -LiteralPath $inputPath -Force
+        $workerInput = [pscustomobject][ordered]@{
+            EmailAddresses = @($EmailAddresses | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+            EnabledChecks = @(Get-SemrCheckCatalog | Where-Object { Test-SemrCheckEnabled -CheckId $_.CheckId } | ForEach-Object { [string]$_.CheckId })
+        }
+        $workerInput | Export-Clixml -LiteralPath $inputPath -Depth 4 -Force
 
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
         $startInfo.FileName = $powershellPath
@@ -579,6 +618,7 @@ function Initialize-SemrExchange2016Evidence {
         }
 
         $workerResult = Import-Clixml -LiteralPath $outputPath
+        if ($ProgressCallback) { & $ProgressCallback ("Exchange 2016 [{0}/{0}] - Complete" -f @($workerResult.Evidence).Count) }
         $script:Exchange2016EvidenceByEmail = @{}
         foreach ($entry in @($workerResult.Evidence)) {
             $key = ([string]$entry.EmailAddress).Trim().ToLowerInvariant()
@@ -586,8 +626,8 @@ function Initialize-SemrExchange2016Evidence {
         }
         $script:Exchange2016HybridEvidence = $workerResult.Hybrid
         $script:Exchange2016WorkerCollectedAt = $workerResult.CollectedAt
-        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled."
-        return [pscustomobject]@{ Available = $true; Message = $script:Exchange2016WorkerMessage; MailboxCount = $script:Exchange2016EvidenceByEmail.Count }
+        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; per-mailbox errors=$($workerResult.ErrorCount)."
+        return [pscustomobject]@{ Available = $true; Message = $script:Exchange2016WorkerMessage; MailboxCount = $script:Exchange2016EvidenceByEmail.Count; ErrorCount = [int]$workerResult.ErrorCount; DurationSeconds = $workerResult.DurationSeconds }
     }
     finally {
         if ($process) { $process.Dispose() }
@@ -1782,7 +1822,7 @@ function Add-SemrIdentityAdvancedFindings {
 
     $legacyDn = [string](Get-SemrPropertyValue $mailbox[0] @('LegacyExchangeDN') '')
     $x500 = $legacyDn -and @($raw | Where-Object { (([string]$_) -replace '^(?i:x500:)','') -ieq $legacyDn }).Count -gt 0
-    Add-SemrFinding $Findings ($Base + @{CheckId='X500-LEGACYEXCHANGEDN';Category='HybridIdentity';Severity=if(-not $legacyDn){'Warning'}elseif($x500){'Information'}else{'Critical'};Result=if(-not $legacyDn){'UNKNOWN'}elseif($x500){'PASS'}else{'FAIL'};IsBlocking=[bool]($legacyDn -and -not $x500);ObservedValue=if($legacyDn){"LegacyExchangeDN=$legacyDn; X500Present=$x500"}else{'LegacyExchangeDN unavailable'};ExpectedValue='LegacyExchangeDN preserved as X500';EvidenceSource=$source;Message=if(-not $legacyDn){'LegacyExchangeDN is unavailable.'}elseif($x500){'LegacyExchangeDN is preserved in proxyAddresses.'}else{'LegacyExchangeDN is not preserved as an X500 proxy.'};RecommendedAction=if(-not $legacyDn){'Restore the live Exchange on-premises property collection and rerun.'}elseif(-not $x500){'Add the exact legacyExchangeDN as an X500 proxy.'}else{''}})
+    Add-SemrFinding $Findings ($Base + @{CheckId='X500-LEGACYEXCHANGEDN';Category='HybridIdentity';Severity=if(-not $legacyDn){'Warning'}elseif($x500){'Information'}else{'Critical'};Result=if(-not $legacyDn){'UNKNOWN'}elseif($x500){'PASS'}else{'FAIL'};IsBlocking=[bool]($legacyDn -and -not $x500);ObservedValue=if($legacyDn){"LegacyExchangeDN=$legacyDn; X500Present=$x500"}else{'LegacyExchangeDN unavailable'};ExpectedValue='LegacyExchangeDN preserved as X500';EvidenceSource=$source;Message=if(-not $legacyDn){'LegacyExchangeDN is unavailable.'}elseif($x500){'LegacyExchangeDN is preserved in proxyAddresses.'}else{'LegacyExchangeDN is not preserved as an X500 proxy.'};RecommendedAction=if(-not $legacyDn){'Restore the local Exchange 2016 worker property collection and rerun.'}elseif(-not $x500){'Add the exact legacyExchangeDN as an X500 proxy.'}else{''}})
 
     $domains = @($normalized | ForEach-Object { ($_ -split '@',2)[1] } | Where-Object { $_ } | Sort-Object -Unique)
     $unaccepted = @(if($AcceptedDomains.Available){$domains | Where-Object { $AcceptedDomains.Domains -notcontains $_ }})
@@ -2356,6 +2396,10 @@ function Invoke-SemrAssessment {
     $assessmentStatus = if (@($liveSources | Where-Object { $_.Required -and -not $_.Available }).Count -eq 0) { 'COMPLETE' } else { 'INCOMPLETE' }
     $licenseCapacityCache = @{}
     $batchLicenseRequirements = @{}
+    $globalCheckIds = @('HYBRID-ENDPOINT','HYBRID-MRSPROXY','HYBRID-CERTIFICATE-EXPIRY','HYBRID-ENDPOINT-CAPACITY','HYBRID-MIGRATION-BACKLOG','HYBRID-AUTODISCOVER-OAUTH','ENTRA-CONNECT-SCHEDULER','LICENSE-BATCH-CAPACITY')
+    $enabledCheckDefinitions = @(Get-SemrCheckCatalog | Where-Object { Test-SemrCheckEnabled -CheckId $_.CheckId })
+    $enabledMailboxCheckDefinitions = @($enabledCheckDefinitions | Where-Object { $_.CheckId -notin $globalCheckIds })
+    $enabledGlobalCheckDefinitions = @($enabledCheckDefinitions | Where-Object { $_.CheckId -in $globalCheckIds })
     $index = 0
 
     foreach ($row in $rows) {
@@ -2482,7 +2526,7 @@ function Invoke-SemrAssessment {
             Result = if ($onPrem.Available) { 'PASS' } else { 'UNKNOWN' }; IsBlocking = -not $onPrem.Available
             ObservedValue = if ($onPrem.Available) { 'Available' } else { [string]$onPrem.Message }; ExpectedValue = 'Available Exchange on-premises evidence'; EvidenceSource = $onPremSource
             Message = if ($onPrem.Available) { 'Exchange on-premises evidence is available.' } else { 'Exchange on-premises evidence is unavailable.' }
-            RecommendedAction = if ($onPrem.Available) { '' } else { 'Restore the live Exchange on-premises session with ViewEntireForest, then rerun.' }
+            RecommendedAction = if ($onPrem.Available) { '' } else { 'Restore the local Exchange 2016 worker and ViewEntireForest collection, then rerun.' }
         })
         if ($onPrem.Available) {
             $mailboxCount = @($onPrem.Mailboxes).Count
@@ -2911,6 +2955,22 @@ function Invoke-SemrAssessment {
             RecommendedAction = if ($enhancedRestoreDetected) { 'Treat this mailbox as NO-GO and confirm Microsoft-supported remediation before retrying the cross-organization move.' } elseif (-not $enhancedRestoreReportAvailable) { 'Collect Get-MigrationUserStatistics -IncludeReport evidence for the current migration object.' } else { '' }
         })
 
+        $mailboxCheckIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($mailboxFinding in @($findings | Where-Object { [string]$_.EmailAddress -ieq $email })) { [void]$mailboxCheckIds.Add([string]$mailboxFinding.CheckId) }
+        foreach ($missingDefinition in @($enabledMailboxCheckDefinitions | Where-Object { -not $mailboxCheckIds.Contains([string]$_.CheckId) })) {
+            Add-SemrFinding -List $findings -Parameters ($base + @{
+                CheckId = [string]$missingDefinition.CheckId
+                Category = [string]$missingDefinition.Category
+                Severity = 'Warning'
+                Result = 'UNKNOWN'
+                IsBlocking = [bool]$missingDefinition.Mandatory
+                ObservedValue = 'Enabled check did not produce a finding'
+                ExpectedValue = [string]$missingDefinition.Name
+                EvidenceSource = 'Assessment execution coverage control'
+                Message = "The enabled check '$($missingDefinition.CheckId)' did not produce a mailbox finding. Required evidence may be unavailable or the evaluation path may be incomplete."
+                RecommendedAction = 'Review the required source evidence and rerun. If this persists with complete sources, treat it as an application defect.'
+            })
+        }
         $graphUserForReport = @($graph.Users | Select-Object -First 1)
         $assignedLicenseNames = @($graph.LicenseDetails | ForEach-Object { [string]$_.SkuPartNumber } | Where-Object { $_ } | Sort-Object -Unique)
         $graphReportAvailable = [string]::IsNullOrWhiteSpace([string](Get-SemrPropertyValue -InputObject $graph -Names @('QueryError') -Default '')) -and $graphUserForReport.Count -eq 1
@@ -2965,6 +3025,35 @@ function Invoke-SemrAssessment {
         }
     }
 
+    if ((Test-SemrCheckEnabled -CheckId 'LICENSE-BATCH-CAPACITY') -and $batchLicenseRequirements.Count -eq 0) {
+        Add-SemrFinding -List $globalFindings -Parameters @{
+            RunId = $runId; EmailAddress = ''; CheckId = 'LICENSE-BATCH-CAPACITY'; Category = 'Licensing'
+            Severity = 'Information'; Result = 'PASS'; IsBlocking = $false
+            ObservedValue = 'No unlicensed batch recipient requires target SKU capacity'
+            ExpectedValue = 'Sufficient target SKU capacity for all recipients that require a license'
+            EvidenceSource = 'Complete batch target-license requirements'
+            Message = 'No additional target license capacity is required for this batch.'
+            RecommendedAction = ''
+        }
+    }
+    $globalCheckIdsFound = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($globalFinding in @($globalFindings)) { [void]$globalCheckIdsFound.Add([string]$globalFinding.CheckId) }
+    foreach ($missingDefinition in @($enabledGlobalCheckDefinitions | Where-Object { -not $globalCheckIdsFound.Contains([string]$_.CheckId) })) {
+        Add-SemrFinding -List $globalFindings -Parameters @{
+            RunId = $runId
+            EmailAddress = ''
+            CheckId = [string]$missingDefinition.CheckId
+            Category = [string]$missingDefinition.Category
+            Severity = 'Warning'
+            Result = 'UNKNOWN'
+            IsBlocking = [bool]$missingDefinition.Mandatory
+            ObservedValue = 'Enabled global check did not produce a finding'
+            ExpectedValue = [string]$missingDefinition.Name
+            EvidenceSource = 'Assessment execution coverage control'
+            Message = "The enabled global check '$($missingDefinition.CheckId)' did not produce a finding."
+            RecommendedAction = 'Review the required tenant evidence and rerun. If this persists with complete sources, treat it as an application defect.'
+        }
+    }
     $cancelled = [bool]($CancellationCheck -and (& $CancellationCheck))
     if ($cancelled) { $assessmentStatus = 'INCOMPLETE' }
     $summary = [System.Collections.Generic.List[object]]::new()
@@ -3024,13 +3113,13 @@ function Invoke-SemrAssessment {
             BlockingCount = $blocking.Count
             MailboxBlockingCount = $mailboxBlocking.Count
             GlobalBlockingCount = $globalBlocking.Count
-            WarningCount = $warnings.Count
+            WarningCount = $warnings.Count + $globalWarnings.Count
             MailboxWarningCount = $warnings.Count
             GlobalWarningCount = $globalWarnings.Count
-            UnknownCount = $unknown.Count
+            UnknownCount = $unknown.Count + $globalUnknown.Count
             MailboxUnknownCount = $unknown.Count
             GlobalUnknownCount = $globalUnknown.Count
-            DataCoverage = if ($assessmentStatus -eq 'INCOMPLETE' -or @($mailboxBlocking | Where-Object CheckId -match 'SOURCE').Count -gt 0) { 'Incomplete' } elseif ($unknown.Count -gt 0) { 'Partial' } else { 'Complete' }
+            DataCoverage = if ($assessmentStatus -eq 'INCOMPLETE' -or @($mailboxBlocking | Where-Object CheckId -match 'SOURCE').Count -gt 0) { 'Incomplete' } elseif ($unknown.Count + $globalUnknown.Count -gt 0) { 'Partial' } else { 'Complete' }
             BlockingCodes = ($blockingCodes -join ';')
             RecommendedAction = ($recommended -join ' | ')
             CheckedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -3053,6 +3142,26 @@ function Invoke-SemrAssessment {
             @{ Expression = { [string]$_.EmailAddress } }
     )
 
+    $mailboxCoverageExpected = $summaryRows.Count * $enabledMailboxCheckDefinitions.Count
+    $mailboxCoverageActual = @($findings).Count
+    $globalCoverageExpected = $enabledGlobalCheckDefinitions.Count
+    $globalCoverageActual = @($globalFindings | Group-Object CheckId).Count
+    $duplicateMailboxCheckCount = @($findings | Group-Object { "{0}|{1}" -f ([string]$_.EmailAddress).ToLowerInvariant(), [string]$_.CheckId } | Where-Object Count -gt 1).Count
+    $duplicateGlobalCheckCount = @($globalFindings | Group-Object CheckId | Where-Object Count -gt 1).Count
+    $coverageDiagnostics = [pscustomobject][ordered]@{
+        RunId = $runId
+        MailboxCount = $summaryRows.Count
+        EnabledMailboxCheckCount = $enabledMailboxCheckDefinitions.Count
+        ExpectedMailboxFindingCount = $mailboxCoverageExpected
+        ActualMailboxFindingCount = $mailboxCoverageActual
+        MaterializedMailboxUnknownCount = @($findings | Where-Object EvidenceSource -EQ 'Assessment execution coverage control').Count
+        EnabledGlobalCheckCount = $globalCoverageExpected
+        ActualGlobalFindingCount = $globalCoverageActual
+        MaterializedGlobalUnknownCount = @($globalFindings | Where-Object EvidenceSource -EQ 'Assessment execution coverage control').Count
+        DuplicateMailboxCheckCount = $duplicateMailboxCheckCount
+        DuplicateGlobalCheckCount = $duplicateGlobalCheckCount
+        Status = if ($mailboxCoverageActual -eq $mailboxCoverageExpected -and $globalCoverageActual -eq $globalCoverageExpected -and $duplicateMailboxCheckCount -eq 0 -and $duplicateGlobalCheckCount -eq 0) { 'PASS' } else { 'REVIEW' }
+    }
     return [pscustomobject]@{
         Mode = 'Live'
         AssessmentStatus = $assessmentStatus
@@ -3069,6 +3178,7 @@ function Invoke-SemrAssessment {
         Hybrid = $hybrid
         EntraConnect = $entraConnect
         LiveSources = @($liveSources)
+        CheckCoverage = $coverageDiagnostics
         CheckOptions = @(Get-SemrCheckCatalog | ForEach-Object {
             [pscustomobject][ordered]@{
                 CheckId = $_.CheckId; Category = $_.Category; Name = $_.Name
@@ -3233,11 +3343,12 @@ function New-SemrExcelReport {
         [pscustomobject]@{ Name='Permissions'; Data=@($Assessment.PermissionsBaseline); Columns=@('RunId','EmailAddress','PermissionType','Delegate','IsInherited','Source','CapturedAt') },
         [pscustomobject]@{ Name='Evidence'; Data=@($Assessment.Evidence); Columns=@('RunId','EmailAddress','UserPrincipalName','MailboxSizeGb','TargetLicense','AssignedLicenses','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt') },
         [pscustomobject]@{ Name='Live Sources'; Data=@($Assessment.LiveSources); Columns=@('Source','Required','Available','Status','Details','CheckedAt') },
+        [pscustomobject]@{ Name='Check Coverage'; Data=@($Assessment.CheckCoverage); Columns=@('RunId','MailboxCount','EnabledMailboxCheckCount','ExpectedMailboxFindingCount','ActualMailboxFindingCount','MaterializedMailboxUnknownCount','EnabledGlobalCheckCount','ActualGlobalFindingCount','MaterializedGlobalUnknownCount','DuplicateMailboxCheckCount','DuplicateGlobalCheckCount','Status') },
         [pscustomobject]@{ Name='Action Plan'; Data=@($actionPlan); Columns=@('Scope','EmailAddress','Priority','CheckId','Result','RecommendedAction') },
         [pscustomobject]@{ Name='Check Options'; Data=@($Assessment.CheckOptions); Columns=@('CheckId','Category','Name','Mandatory','Enabled','Description') }
     )
     if ($RunFolder -and (Test-Path -LiteralPath $RunFolder -PathType Container)) {
-        $knownCsvFiles = @('Summary.csv','Findings.csv','Global-Findings.csv','Permissions-Baseline.csv','Evidence.csv','Live-Sources.csv','Check-Options.csv')
+        $knownCsvFiles = @('Summary.csv','Findings.csv','Global-Findings.csv','Permissions-Baseline.csv','Evidence.csv','Live-Sources.csv','Check-Coverage.csv','Check-Options.csv')
         $usedSheetNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($sheet in $sheets) { [void]$usedSheetNames.Add([string]$sheet.Name) }
         foreach ($csvFile in @(Get-ChildItem -LiteralPath $RunFolder -Filter '*.csv' -File | Where-Object Name -NotIn $knownCsvFiles | Sort-Object Name)) {
@@ -3363,6 +3474,7 @@ function Export-SemrAssessment {
     $permissionsPath = Join-Path $runFolder 'Permissions-Baseline.csv'
     $evidencePath = Join-Path $runFolder 'Evidence.csv'
     $liveSourcesPath = Join-Path $runFolder 'Live-Sources.csv'
+    $checkCoveragePath = Join-Path $runFolder 'Check-Coverage.csv'
     $checkOptionsPath = Join-Path $runFolder 'Check-Options.csv'
     $excelPath = Join-Path $runFolder ("SmartM365-ExchangeMigrationReadiness-$($Assessment.RunId).xlsx")
     $htmlPath = Join-Path $runFolder ("SmartM365-ExchangeMigrationReadiness-$($Assessment.RunId).html")
@@ -3374,6 +3486,7 @@ function Export-SemrAssessment {
     Export-SemrCsvFile -Data @($Assessment.PermissionsBaseline) -Path $permissionsPath -Columns @('RunId','EmailAddress','PermissionType','Delegate','IsInherited','Source','CapturedAt')
     Export-SemrCsvFile -Data @($Assessment.Evidence) -Path $evidencePath -Columns @('RunId','EmailAddress','UserPrincipalName','MailboxSizeGb','TargetLicense','AssignedLicenses','AdUserCount','OnPremMailboxCount','OnPremRemoteMailboxCount','ExoRecipientCount','ExoMailboxCount','GraphUserCount','PermissionCount','CollectedAt')
     Export-SemrCsvFile -Data @($Assessment.LiveSources) -Path $liveSourcesPath -Columns @('Source','Required','Available','Status','Details','CheckedAt')
+    Export-SemrCsvFile -Data @($Assessment.CheckCoverage) -Path $checkCoveragePath -Columns @('RunId','MailboxCount','EnabledMailboxCheckCount','ExpectedMailboxFindingCount','ActualMailboxFindingCount','MaterializedMailboxUnknownCount','EnabledGlobalCheckCount','ActualGlobalFindingCount','MaterializedGlobalUnknownCount','DuplicateMailboxCheckCount','DuplicateGlobalCheckCount','Status')
     Export-SemrCsvFile -Data @($Assessment.CheckOptions) -Path $checkOptionsPath -Columns @('CheckId','Category','Name','Mandatory','Enabled','Description')
 
     if ($ProgressCallback) { & $ProgressCallback 'Excel report' 'Building the autonomous OpenXML workbook' 2 3 }
@@ -3389,6 +3502,7 @@ function Export-SemrAssessment {
         PermissionsPath = $permissionsPath
         EvidencePath = $evidencePath
         LiveSourcesPath = $liveSourcesPath
+        CheckCoveragePath = $checkCoveragePath
         CheckOptionsPath = $checkOptionsPath
         ExcelPath = $excelPath
         HtmlPath = $htmlPath
@@ -3439,6 +3553,7 @@ Export-ModuleMember -Function @(
     'Get-SemrConfig',
     'Get-SemrConnectionState',
     'Connect-SemrActiveDirectory',
+    'Test-SemrExchange2016WorkerSerialization',
     'Connect-SemrOnPremisesExchange',
     'Connect-SemrExchangeOnline',
     'Connect-SemrMicrosoftGraph',
