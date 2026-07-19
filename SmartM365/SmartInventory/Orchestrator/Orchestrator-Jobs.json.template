@@ -327,7 +327,7 @@
     {
       "Name": "EXO-Mailboxes-Inventory",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
-      "Arguments": "-IncludeStats",
+      "Arguments": "-IncludeStats -ForceLiveStats",
       "Enabled": false,
       "Group": "Exchange",
       "DependsOn": [],
