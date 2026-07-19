@@ -97,7 +97,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.3.30
+1.3.32
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -107,7 +107,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.3.29
+    Version : 1.3.32
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -132,7 +132,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.31"
+$ScriptVersion = "1.3.32"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -1584,6 +1584,57 @@ function Test-OrchestratorStopRequested {
     return $true
 }
 
+function Get-OrchestratorPendingJobSnapshot {
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    $pending = [System.Collections.Generic.List[object]]::new()
+    if (-not $script:Manifest -or -not $script:Manifest.OrderedJobs) { return @() }
+
+    foreach ($job in @($script:Manifest.OrderedJobs)) {
+        if (-not $job.Enabled -or -not (Test-JobAllowedOnServer -Job $job)) { continue }
+        $name = [string]$job.Name
+        if ($script:RunningJobs.ContainsKey($name)) { continue }
+
+        $state = Get-JobState -JobName $name
+        if ($null -ne $state.PendingRetry) {
+            $pending.Add([pscustomobject]@{
+                Name = $name
+                ScheduledOccurrence = [string]$state.PendingRetry.ScheduledOccurrence
+                Reason = 'PendingRetry'
+                FirstSeen = [string]$state.LastRunEnd
+                Details = ("Retry attempt {0}; not before {1}." -f $state.PendingRetry.Attempt, $state.PendingRetry.NotBefore)
+            })
+            continue
+        }
+
+        $lastOccurrence = ConvertFrom-StateTime -Text ([string]$state.LastScheduledOccurrence)
+        $due = Get-DueOccurrence -Job $job -LastOccurrence $lastOccurrence -Now $Now
+        if ($null -eq $due) { continue }
+
+        $reason = 'DueNotStarted'
+        $firstSeen = $due
+        $details = 'The occurrence is due but has not been marked as handled.'
+        if ($script:DependencyWaitLogState.ContainsKey($name)) {
+            $waitState = $script:DependencyWaitLogState[$name]
+            $reason = 'WaitingDependencies'
+            $firstSeen = [datetime]$waitState.FirstSeen
+            $details = "Waiting for dependencies: $(@($waitState.Dependencies) -join ', ')."
+        }
+        elseif ($script:RunningJobs.Count -ge $script:Settings.MaxConcurrency) {
+            $reason = 'WaitingConcurrency'
+            $details = ("Local concurrency limit reached ({0}/{1})." -f $script:RunningJobs.Count, $script:Settings.MaxConcurrency)
+        }
+
+        $pending.Add([pscustomobject]@{
+            Name = $name
+            ScheduledOccurrence = ConvertTo-StateTime -Value $due
+            Reason = $reason
+            FirstSeen = ConvertTo-StateTime -Value $firstSeen
+            Details = $details
+        })
+    }
+    return @($pending.ToArray())
+}
 function Write-OrchestratorHeartbeat {
     $now = Get-Date
     $running = @()
@@ -1596,13 +1647,16 @@ function Write-OrchestratorHeartbeat {
             ScheduledOccurrence = ConvertTo-StateTime -Value $info.Occurrence
         }
     }
+    $pending = @(Get-OrchestratorPendingJobSnapshot -Now $now)
     $heartbeat = @{
         Timestamp = $now.ToString('o')
         Pid = $PID
         Tenant = $Tenant
         ScriptVersion = $ScriptVersion
+        ProcessStartTime = ConvertTo-StateTime -Value $script:StartTime
         LifetimeDeadline = ConvertTo-StateTime -Value $script:LifetimeDeadline
         RunningJobs = $running
+        PendingJobs = $pending
     }
     try { Write-FileAtomically -Path $script:Settings.HeartbeatPath -Content ($heartbeat | ConvertTo-Json -Depth 5) }
     catch { Write-OrchestratorLog -Message ("Failed to write heartbeat: {0}" -f $_.Exception.Message) -Level WARN }
@@ -1623,6 +1677,333 @@ function Write-OrchestratorHeartbeat {
     Write-OrchestratorLog -Message ("Heartbeat: alive; runningJobs={0}/{1}; enabledJobs={2}; nextTickSeconds={3}; lifetimeRemaining={4}; running={5}." -f $runningNames.Count, $script:Settings.MaxConcurrency, $enabledJobs, $script:Settings.TickSeconds, $remaining.ToString('hh\:mm\:ss'), $runningText)
 }
 
+# ==========================================================
+# Distributed peer monitoring
+# ==========================================================
+function Test-JobAllowedOnNamedServer {
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [Parameter(Mandatory = $true)][string]$ServerName
+    )
+
+    $allowed = @(Get-JobEffectiveAllowedServers -Job $Job)
+    if ($allowed.Count -eq 0) { return $true }
+    return @($allowed | Where-Object { [string]$_ -ieq $ServerName }).Count -gt 0
+}
+
+function Get-OrchestratorPeerMonitoringState {
+    if (-not $script:State.ContainsKey('PeerMonitoring') -or $script:State.PeerMonitoring -isnot [hashtable]) {
+        $script:State.PeerMonitoring = @{}
+    }
+    $state = $script:State.PeerMonitoring
+    $defaults = @{
+        CandidateIssueKey = ''
+        CandidateCount = 0
+        ActiveIssueKey = ''
+        ActiveIssueSummary = ''
+        LastAlertUtc = ''
+        LastAlertAttemptUtc = ''
+        LastAlertAttemptIssueKey = ''
+        HealthyCount = 0
+        LastRecoveryAttemptUtc = ''
+    }
+    foreach ($key in $defaults.Keys) {
+        if (-not $state.ContainsKey($key)) { $state[$key] = $defaults[$key] }
+    }
+    return $state
+}
+
+function ConvertFrom-OrchestratorPeerMonitorTime {
+    param([AllowNull()][AllowEmptyString()][string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    try { return [datetime]::Parse($Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
+    catch { return $null }
+}
+
+function New-OrchestratorPeerIssue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][string]$Type,
+        [string]$Server = '',
+        [string]$Job = '',
+        [string]$Status = '',
+        [string]$LastSeen = '',
+        [string]$AgeMinutes = '',
+        [string]$Details = ''
+    )
+    return [pscustomobject][ordered]@{
+        Key = $Key
+        Type = $Type
+        Server = $Server
+        Job = $Job
+        Status = $Status
+        LastSeen = $LastSeen
+        AgeMinutes = $AgeMinutes
+        Details = $Details
+    }
+}
+
+function Get-OrchestratorPeerHealthSnapshot {
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    $issues = [System.Collections.Generic.List[object]]::new()
+    $peerDetails = [System.Collections.Generic.List[object]]::new()
+    $sharedRoot = [string]$script:Settings.SharedDataFolderPath
+    try {
+        if (-not (Test-Path -LiteralPath $sharedRoot -PathType Container)) {
+            throw "Shared orchestrator root does not exist: $sharedRoot"
+        }
+        Get-ChildItem -LiteralPath $sharedRoot -Force -ErrorAction Stop | Select-Object -First 1 | Out-Null
+    }
+    catch {
+        $issues.Add((New-OrchestratorPeerIssue -Key 'SharedStorageUnavailable' -Type 'MonitoringUnavailable' -Status 'Unavailable' -Details $_.Exception.Message))
+        return [pscustomobject]@{ CheckedAt = $Now; Issues = @($issues.ToArray()); Peers = @() }
+    }
+
+    $localServer = [string]$env:COMPUTERNAME
+    $expectedPeers = @(
+        $script:Settings.ExpectedOrchestratorServers |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and [string]$_ -ine $localServer } |
+            Sort-Object -Unique
+    )
+
+    foreach ($peerServerValue in $expectedPeers) {
+        $peerServer = [string]$peerServerValue
+        $peerFolder = Join-Path -Path $sharedRoot -ChildPath $peerServer
+        $heartbeatPath = Join-Path -Path $peerFolder -ChildPath 'Orchestrator-Heartbeat.json'
+        if (-not (Test-Path -LiteralPath $heartbeatPath -PathType Leaf)) {
+            $issues.Add((New-OrchestratorPeerIssue -Key ("HeartbeatMissing|{0}" -f $peerServer.ToUpperInvariant()) -Type 'HeartbeatMissing' -Server $peerServer -Status 'Missing' -Details "No heartbeat file was found at $heartbeatPath"))
+            continue
+        }
+
+        $heartbeat = $null
+        $heartbeatTime = [datetimeoffset]::MinValue
+        try {
+            $heartbeat = Get-Content -LiteralPath $heartbeatPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if (-not $heartbeat.PSObject.Properties['Timestamp']) { throw 'Heartbeat Timestamp is missing.' }
+            $timestampValue = $heartbeat.Timestamp
+            if ($timestampValue -is [datetimeoffset]) {
+                $heartbeatTime = [datetimeoffset]$timestampValue
+            }
+            elseif ($timestampValue -is [datetime]) {
+                $heartbeatTime = [datetimeoffset]([datetime]$timestampValue)
+            }
+            elseif (-not [datetimeoffset]::TryParse([string]$timestampValue, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$heartbeatTime)) {
+                throw 'Heartbeat Timestamp is invalid.'
+            }
+        }
+        catch {
+            $issues.Add((New-OrchestratorPeerIssue -Key ("HeartbeatInvalid|{0}" -f $peerServer.ToUpperInvariant()) -Type 'HeartbeatInvalid' -Server $peerServer -Status 'Invalid' -Details $_.Exception.Message))
+            continue
+        }
+
+        $ageMinutes = ($Now.ToUniversalTime() - $heartbeatTime.UtcDateTime).TotalMinutes
+        $lastSeenText = $heartbeatTime.LocalDateTime.ToString('yyyy-MM-dd HH:mm:ss')
+        if ($ageMinutes -lt -2) {
+            $issues.Add((New-OrchestratorPeerIssue -Key ("HeartbeatFuture|{0}" -f $peerServer.ToUpperInvariant()) -Type 'HeartbeatInvalid' -Server $peerServer -Status 'Future timestamp' -LastSeen $lastSeenText -AgeMinutes ([math]::Round($ageMinutes, 1)) -Details 'The peer heartbeat timestamp is more than two minutes in the future. Check clock synchronization.'))
+            continue
+        }
+        if ($ageMinutes -gt [double]$script:Settings.PeerHeartbeatStaleMinutes) {
+            $pidText = if ($heartbeat.PSObject.Properties['Pid']) { [string]$heartbeat.Pid } else { 'unknown' }
+            $issues.Add((New-OrchestratorPeerIssue -Key ("HeartbeatStale|{0}" -f $peerServer.ToUpperInvariant()) -Type 'HeartbeatStale' -Server $peerServer -Status 'Stale' -LastSeen $lastSeenText -AgeMinutes ([math]::Round($ageMinutes, 1)) -Details ("Last known PID: {0}." -f $pidText)))
+            continue
+        }
+
+        $runningJobs = if ($heartbeat.PSObject.Properties['RunningJobs']) { @($heartbeat.RunningJobs) } else { @() }
+        $pendingJobs = if ($heartbeat.PSObject.Properties['PendingJobs']) { @($heartbeat.PendingJobs) } else { @() }
+        $peerDetails.Add([pscustomobject]@{
+            Server = $peerServer
+            LastSeen = $lastSeenText
+            AgeMinutes = [math]::Round($ageMinutes, 1)
+            Pid = if ($heartbeat.PSObject.Properties['Pid']) { [string]$heartbeat.Pid } else { '' }
+            RunningJobs = @($runningJobs | ForEach-Object { [string]$_.Name }) -join ', '
+            PendingJobs = @($pendingJobs | ForEach-Object { "{0} ({1})" -f $_.Name, $_.Reason }) -join ', '
+        })
+
+        if (-not $script:Settings.PeerJobMonitoringEnabled) { continue }
+        $peerStatePath = Join-Path -Path $peerFolder -ChildPath 'Orchestrator-State.json'
+        if (-not (Test-Path -LiteralPath $peerStatePath -PathType Leaf)) {
+            $issues.Add((New-OrchestratorPeerIssue -Key ("StateMissing|{0}" -f $peerServer.ToUpperInvariant()) -Type 'StateMissing' -Server $peerServer -Status 'Missing' -LastSeen $lastSeenText -Details "Heartbeat is healthy but no orchestrator state file was found at $peerStatePath"))
+            continue
+        }
+
+        $peerState = $null
+        try {
+            $peerState = Get-Content -LiteralPath $peerStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            if ($peerState -isnot [hashtable] -or -not $peerState.ContainsKey('Jobs')) { throw 'State file has an unexpected shape.' }
+        }
+        catch {
+            $issues.Add((New-OrchestratorPeerIssue -Key ("StateInvalid|{0}" -f $peerServer.ToUpperInvariant()) -Type 'StateInvalid' -Server $peerServer -Status 'Invalid' -LastSeen $lastSeenText -Details $_.Exception.Message))
+            continue
+        }
+
+        $auditNow = $Now.AddMinutes(-[int]$script:Settings.PeerJobStartGraceMinutes)
+        foreach ($job in @($script:Manifest.OrderedJobs)) {
+            if (-not $job.Enabled -or -not (Test-JobAllowedOnNamedServer -Job $job -ServerName $peerServer)) { continue }
+            $expectedOccurrence = Get-LatestPastOccurrence -Job $job -Now $auditNow
+            if ($null -eq $expectedOccurrence) { continue }
+
+            $runningMatch = @(
+                $runningJobs | Where-Object {
+                    if ([string]$_.Name -ine [string]$job.Name) { return $false }
+                    $runningOccurrence = ConvertFrom-StateTime -Text ([string]$_.ScheduledOccurrence)
+                    return $null -ne $runningOccurrence -and $runningOccurrence -ge $expectedOccurrence.AddSeconds(-1)
+                }
+            )
+            if ($runningMatch.Count -gt 0) { continue }
+
+            $jobState = $null
+            if ($peerState.Jobs -is [hashtable] -and $peerState.Jobs.ContainsKey([string]$job.Name)) {
+                $jobState = $peerState.Jobs[[string]$job.Name]
+            }
+            $lastHandled = $null
+            if ($jobState -is [hashtable] -and $jobState.ContainsKey('LastScheduledOccurrence')) {
+                $lastHandled = ConvertFrom-StateTime -Text ([string]$jobState.LastScheduledOccurrence)
+            }
+            if ($null -ne $lastHandled -and $lastHandled -ge $expectedOccurrence.AddSeconds(-1)) { continue }
+
+            $pendingMatch = @(
+                $pendingJobs | Where-Object {
+                    if ([string]$_.Name -ine [string]$job.Name) { return $false }
+                    $pendingOccurrence = ConvertFrom-StateTime -Text ([string]$_.ScheduledOccurrence)
+                    return $null -ne $pendingOccurrence -and [math]::Abs(($pendingOccurrence - $expectedOccurrence).TotalSeconds) -le 60
+                } | Select-Object -First 1
+            )
+            if ($pendingMatch.Count -eq 1) {
+                $pendingReason = [string]$pendingMatch[0].Reason
+                if ($pendingReason -eq 'PendingRetry') { continue }
+                if ($pendingReason -eq 'WaitingDependencies') {
+                    $dependencyTimeout = [int]$job.DependencyWaitTimeoutMinutes
+                    if ($dependencyTimeout -le 0) { $dependencyTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
+                    $pendingFirstSeen = ConvertFrom-StateTime -Text ([string]$pendingMatch[0].FirstSeen)
+                    if ($dependencyTimeout -le 0 -or ($null -ne $pendingFirstSeen -and ($Now - $pendingFirstSeen).TotalMinutes -lt $dependencyTimeout)) { continue }
+                    $issues.Add((New-OrchestratorPeerIssue -Key ("JobDependencyTimeout|{0}|{1}|{2}" -f $peerServer.ToUpperInvariant(), $job.Name, $expectedOccurrence.ToString('s')) -Type 'JobWaitingTooLong' -Server $peerServer -Job ([string]$job.Name) -Status $pendingReason -LastSeen $lastSeenText -AgeMinutes ([math]::Round(($Now - $expectedOccurrence).TotalMinutes, 1)) -Details ([string]$pendingMatch[0].Details)))
+                    continue
+                }
+            }
+
+            $pendingDescription = if ($pendingMatch.Count -eq 1) { " Peer reports: $([string]$pendingMatch[0].Reason). $([string]$pendingMatch[0].Details)" } else { '' }
+            $issues.Add((New-OrchestratorPeerIssue -Key ("JobNotStarted|{0}|{1}|{2}" -f $peerServer.ToUpperInvariant(), $job.Name, $expectedOccurrence.ToString('s')) -Type 'JobNotStarted' -Server $peerServer -Job ([string]$job.Name) -Status 'Not handled' -LastSeen $lastSeenText -AgeMinutes ([math]::Round(($Now - $expectedOccurrence).TotalMinutes, 1)) -Details ("Expected occurrence $($expectedOccurrence.ToString('yyyy-MM-dd HH:mm:ss')) was not recorded after the $($script:Settings.PeerJobStartGraceMinutes)-minute launch grace.$pendingDescription")))
+        }
+    }
+
+    return [pscustomobject]@{
+        CheckedAt = $Now
+        Issues = @($issues.ToArray())
+        Peers = @($peerDetails.ToArray())
+    }
+}
+
+function Send-OrchestratorPeerMonitoringEmail {
+    param(
+        [Parameter(Mandatory = $true)]$Snapshot,
+        [switch]$Recovery,
+        [string]$PreviousSummary = ''
+    )
+
+    $observer = [string]$env:COMPUTERNAME
+    if ($Recovery) {
+        $body = @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2 style='color:#107C10;'>Orchestrator peer monitoring recovered</h2>
+<p>Observer <b>$(ConvertTo-HtmlText -Text $observer)</b> no longer detects peer heartbeat or scheduled-job issues for tenant <b>$(ConvertTo-HtmlText -Text $Tenant)</b>.</p>
+<p><b>Previous incident:</b> $(ConvertTo-HtmlText -Text $PreviousSummary)</p>
+<p><b>Recovered at:</b> $($Snapshot.CheckedAt.ToString('yyyy-MM-dd HH:mm:ss'))</p>
+<p style='color:#5F6B7A;'>Sent independently by $ScriptName v$ScriptVersion on $(ConvertTo-HtmlText -Text $observer).</p>
+</body></html>
+"@
+        return [bool](Send-OrchestratorMail -Subject "[SmartM365 Orchestrator][$Tenant] Peer monitoring recovered on $observer" -HtmlBody $body)
+    }
+
+    $rows = [System.Collections.Generic.List[string]]::new()
+    foreach ($issue in @($Snapshot.Issues)) {
+        $rows.Add(("<tr><td style='padding:5px;border:1px solid #DDDDDD;'>{0}</td><td style='padding:5px;border:1px solid #DDDDDD;'>{1}</td><td style='padding:5px;border:1px solid #DDDDDD;'>{2}</td><td style='padding:5px;border:1px solid #DDDDDD;'>{3}</td><td style='padding:5px;border:1px solid #DDDDDD;'>{4}</td><td style='padding:5px;border:1px solid #DDDDDD;'>{5}</td></tr>" -f (ConvertTo-HtmlText -Text $issue.Type), (ConvertTo-HtmlText -Text $issue.Server), (ConvertTo-HtmlText -Text $issue.Job), (ConvertTo-HtmlText -Text $issue.Status), (ConvertTo-HtmlText -Text $issue.AgeMinutes), (ConvertTo-HtmlText -Text $issue.Details)))
+    }
+    $body = @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2 style='color:#D13438;'>Orchestrator peer monitoring alert</h2>
+<p>Observer <b>$(ConvertTo-HtmlText -Text $observer)</b> detected $(@($Snapshot.Issues).Count) confirmed issue(s) for tenant <b>$(ConvertTo-HtmlText -Text $Tenant)</b>.</p>
+<table style='border-collapse:collapse;width:100%;'><thead><tr><th style='padding:5px;border:1px solid #DDDDDD;text-align:left;'>Type</th><th style='padding:5px;border:1px solid #DDDDDD;text-align:left;'>Server</th><th style='padding:5px;border:1px solid #DDDDDD;text-align:left;'>Job</th><th style='padding:5px;border:1px solid #DDDDDD;text-align:left;'>Status</th><th style='padding:5px;border:1px solid #DDDDDD;text-align:left;'>Age (min)</th><th style='padding:5px;border:1px solid #DDDDDD;text-align:left;'>Details</th></tr></thead><tbody>$($rows -join '')</tbody></table>
+<p>Each healthy orchestrator server performs this check independently. Check the scheduled task, resident PowerShell process, shared heartbeat and per-server state/job-run files.</p>
+<p style='color:#5F6B7A;'>Sent independently by $ScriptName v$ScriptVersion on $(ConvertTo-HtmlText -Text $observer).</p>
+</body></html>
+"@
+    return [bool](Send-OrchestratorMail -Subject "[SmartM365 Orchestrator][$Tenant] Peer monitoring alert from $observer" -HtmlBody $body -IsError)
+}
+
+function Invoke-OrchestratorPeerMonitoring {
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    if (-not $script:Settings.PeerMonitoringEnabled) { return }
+    $expectedPeers = @($script:Settings.ExpectedOrchestratorServers | Where-Object { [string]$_ -ine [string]$env:COMPUTERNAME })
+    if ($expectedPeers.Count -eq 0) { return }
+    if ($script:LastPeerMonitoringCheckTime -ne [datetime]::MinValue -and ($Now - $script:LastPeerMonitoringCheckTime).TotalSeconds -lt [int]$script:Settings.PeerMonitoringCheckIntervalSeconds) { return }
+    $script:LastPeerMonitoringCheckTime = $Now
+
+    $monitorState = Get-OrchestratorPeerMonitoringState
+    $snapshot = Get-OrchestratorPeerHealthSnapshot -Now $Now
+    $issues = @($snapshot.Issues)
+    $issueKey = @($issues | ForEach-Object { [string]$_.Key } | Sort-Object -Unique) -join "`n"
+    $summary = @($issues | ForEach-Object { if ($_.Job) { "$($_.Server)/$($_.Job): $($_.Type)" } elseif ($_.Server) { "$($_.Server): $($_.Type)" } else { [string]$_.Type } }) -join '; '
+
+    if ($issues.Count -eq 0) {
+        $monitorState.CandidateIssueKey = ''
+        $monitorState.CandidateCount = 0
+        $monitorState.HealthyCount = [int]$monitorState.HealthyCount + 1
+        if (-not [string]::IsNullOrWhiteSpace([string]$monitorState.ActiveIssueKey) -and [int]$monitorState.HealthyCount -ge [int]$script:Settings.PeerMonitoringConfirmationChecks) {
+            if (-not $script:Settings.PeerRecoveryEmailEnabled) {
+                Write-OrchestratorLog -Message ("Peer monitoring recovered; recovery email disabled. Previous issues: {0}" -f $monitorState.ActiveIssueSummary)
+                $monitorState.ActiveIssueKey = ''
+                $monitorState.ActiveIssueSummary = ''
+                return
+            }
+            $lastAttempt = ConvertFrom-OrchestratorPeerMonitorTime -Value ([string]$monitorState.LastRecoveryAttemptUtc)
+            if ($null -ne $lastAttempt -and ($Now - $lastAttempt).TotalMinutes -lt [int]$script:Settings.PeerAlertMailRetryMinutes) { return }
+            $monitorState.LastRecoveryAttemptUtc = $Now.ToUniversalTime().ToString('o')
+            if (Send-OrchestratorPeerMonitoringEmail -Snapshot $snapshot -Recovery -PreviousSummary ([string]$monitorState.ActiveIssueSummary)) {
+                Write-OrchestratorLog -Message ("Peer monitoring recovery email sent. Previous issues: {0}" -f $monitorState.ActiveIssueSummary)
+                $monitorState.ActiveIssueKey = ''
+                $monitorState.ActiveIssueSummary = ''
+                $monitorState.LastRecoveryAttemptUtc = ''
+            }
+        }
+        return
+    }
+
+    $monitorState.HealthyCount = 0
+    if ([string]$monitorState.CandidateIssueKey -eq $issueKey) {
+        $monitorState.CandidateCount = [int]$monitorState.CandidateCount + 1
+    }
+    else {
+        $monitorState.CandidateIssueKey = $issueKey
+        $monitorState.CandidateCount = 1
+    }
+    if ([int]$monitorState.CandidateCount -lt [int]$script:Settings.PeerMonitoringConfirmationChecks) {
+        Write-OrchestratorLog -Message ("Peer monitoring candidate issue {0}/{1}: {2}" -f $monitorState.CandidateCount, $script:Settings.PeerMonitoringConfirmationChecks, $summary) -Level WARN
+        return
+    }
+
+    $shouldSend = $false
+    if ([string]$monitorState.ActiveIssueKey -ne $issueKey) {
+        $lastAttempt = ConvertFrom-OrchestratorPeerMonitorTime -Value ([string]$monitorState.LastAlertAttemptUtc)
+        $sameAttemptKey = [string]$monitorState.LastAlertAttemptIssueKey -eq $issueKey
+        $shouldSend = -not $sameAttemptKey -or $null -eq $lastAttempt -or ($Now - $lastAttempt).TotalMinutes -ge [int]$script:Settings.PeerAlertMailRetryMinutes
+    }
+    else {
+        $lastAlert = ConvertFrom-OrchestratorPeerMonitorTime -Value ([string]$monitorState.LastAlertUtc)
+        $shouldSend = $null -eq $lastAlert -or ($Now - $lastAlert).TotalMinutes -ge [int]$script:Settings.PeerAlertReminderMinutes
+    }
+    if (-not $shouldSend) { return }
+
+    $monitorState.LastAlertAttemptUtc = $Now.ToUniversalTime().ToString('o')
+    $monitorState.LastAlertAttemptIssueKey = $issueKey
+    if (Send-OrchestratorPeerMonitoringEmail -Snapshot $snapshot) {
+        $monitorState.ActiveIssueKey = $issueKey
+        $monitorState.ActiveIssueSummary = $summary
+        $monitorState.LastAlertUtc = $Now.ToUniversalTime().ToString('o')
+        Write-OrchestratorLog -Message ("Peer monitoring alert sent: {0}" -f $summary) -Level WARN
+    }
+}
 # ==========================================================
 # Authenticode validation (optional, audit/enforce)
 # ==========================================================
@@ -3257,6 +3638,7 @@ $script:DependencyWaitLogState = @{}
 $script:SharePointUploadedFileState = @{}
 $script:LastSharePointUploadAttempt = [datetime]::MinValue
 $script:LastHeartbeatLogTime = [datetime]::MinValue
+$script:LastPeerMonitoringCheckTime = [datetime]::MinValue
 $script:LastSharePointConfigWarningKey = ''
 $script:LastRuntimeUpdateCheckUtc = [datetime]::MinValue
 $script:RuntimeUpdateCandidateIdentity = ''
@@ -3346,6 +3728,14 @@ try {
         $defaultAllowedServers = @($defaultAllowedServers | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
     }
 
+    $expectedServersRaw = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'ExpectedOrchestratorServers' -DefaultValue @()
+    $expectedOrchestratorServers = @(ConvertTo-OrchestratorStringList -Value $expectedServersRaw | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($expectedOrchestratorServers.Count -eq 0) {
+        $expectedOrchestratorServers = @($defaultAllowedServers | Sort-Object -Unique)
+    }
+    $peerMonitoringEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'PeerMonitoringEnabled' -DefaultValue $true
+    $peerJobMonitoringEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'PeerJobMonitoringEnabled' -DefaultValue $true
+
     # JobMailMode is intentionally a dedicated key: the ecosystem-wide SendMailMode key
     # carries the mail transport (Graph/SMTP/Both), not a notification policy.
     $jobMailMode = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'JobMailMode' -DefaultValue 'OnError')
@@ -3411,6 +3801,16 @@ try {
         RelayIp = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'RelayIp' -DefaultValue '')
         JobMailMode = $jobMailMode
         DefaultAllowedServers = $defaultAllowedServers
+        PeerMonitoringEnabled = $peerMonitoringEnabled
+        PeerJobMonitoringEnabled = $peerJobMonitoringEnabled
+        ExpectedOrchestratorServers = $expectedOrchestratorServers
+        PeerMonitoringCheckIntervalSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerMonitoringCheckIntervalSeconds' -DefaultValue 60))
+        PeerHeartbeatStaleMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerHeartbeatStaleMinutes' -DefaultValue 5))
+        PeerMonitoringConfirmationChecks = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerMonitoringConfirmationChecks' -DefaultValue 2))
+        PeerJobStartGraceMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerJobStartGraceMinutes' -DefaultValue 15))
+        PeerAlertReminderMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerAlertReminderMinutes' -DefaultValue 240))
+        PeerAlertMailRetryMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerAlertMailRetryMinutes' -DefaultValue 15))
+        PeerRecoveryEmailEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'PeerRecoveryEmailEnabled' -DefaultValue $true
         SendDailySummaryEmail = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'SendDailySummaryEmail' -DefaultValue $false
         DailySummaryTime = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'DailySummaryTime' -DefaultValue '07:00')
         OrchestratorLogRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorLogRetentionDays' -DefaultValue 30
@@ -3478,6 +3878,7 @@ try {
 
     Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; dependencyWaitTimeoutMinutes={4}; heartbeatLogIntervalMinutes={5}; runsCsvLockTimeoutSeconds={6}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.DependencyWaitTimeoutMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes, $script:Settings.OrchestratorRunsCsvLockTimeoutSeconds)
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
+    Write-OrchestratorLog -Message ("Peer monitoring context: enabled={0}; jobMonitoring={1}; expectedServers={2}; checkIntervalSeconds={3}; heartbeatStaleMinutes={4}; confirmationChecks={5}; jobStartGraceMinutes={6}; reminderMinutes={7}." -f $script:Settings.PeerMonitoringEnabled, $script:Settings.PeerJobMonitoringEnabled, (@($script:Settings.ExpectedOrchestratorServers) -join ', '), $script:Settings.PeerMonitoringCheckIntervalSeconds, $script:Settings.PeerHeartbeatStaleMinutes, $script:Settings.PeerMonitoringConfirmationChecks, $script:Settings.PeerJobStartGraceMinutes, $script:Settings.PeerAlertReminderMinutes)
     Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; baselineOrchestrator={5}; baselineCore={6}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
@@ -3549,6 +3950,12 @@ try {
         Invoke-LaunchPhase -Now $now
         Send-DailySummaryIfDue -Now $now
         Write-OrchestratorHeartbeat
+        try {
+            Invoke-OrchestratorPeerMonitoring -Now $now
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Peer monitoring check failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
+        }
         Save-OrchestratorState
 
         Invoke-OrchestratorPeriodicSharePointUpload -Now $now
@@ -3628,8 +4035,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsSky4GS5RS9f3
-# VRRAKONbK/1yVMeBM4Q8EsbDmlK9nqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7CL5q6zPKAxr+
+# qTIdwC+ZG4MU5cmSo/l5X+I+71MV2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3762,31 +4169,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMCqDv4Oz5NVrRjZvt33X2RAEO/0Vj+YtJ18kacwPXd+MA0GCSqG
-# SIb3DQEBAQUABIIBgEXj9H4PSp8cugelH2svsa6Anlno7LnsxAfVftwiYht6Uq01
-# bPAPUkZctkwdra/1CAzW2PuvnxdUEsrJie8Lx09s0OlTy18GmJU835Ygsnrbur7y
-# LX/5aWvHIhgQNUUJMPYnusx1/U7yIbhRlwaOCjivWqk8VYXoS5O/Vbj6GHzTs7Xg
-# +T7IWGApVqAyrzXpLxO/38qp4GpRNXs8Oja1DqJrkex/KGIbugOp6jo8h/OTm3w0
-# Zb+iQvjltWvWNiDejlvveHmcwVDRUM6cTfsfFY1YCcm8R18b3IZMPrCad8AESOc/
-# weLe1WloGn/hLl0gEDAERea9YSaqj3X+U7LtlspIWsdoz9Qh2tttKFhKwNJSl+br
-# B8it52CUg8o2xYBBwAfB0VhKvYFHfcrmPeL87C6kxBOYBzOQ0QVu0SYZEjtfEQke
-# dm3Nh//VqILGupayKh1R8ujbLdQ5x5Sna3ZVr8dxoh3xdC68L9+hEa/9Cy0L94ez
-# RFVJdSVE85YuSAhcI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH/dt8dWKYF9uy0TFOBE8FrAQyFKhaseCv3db+Ii67fVMA0GCSqG
+# SIb3DQEBAQUABIIBgKObyqmYPrdbzxHuPXQfQXmrej6Wvf+V7TJXBhs11IuICTOT
+# LopNTkgS9uUK/gpqKDL/aw966ergL0yjK9M3laa5/c3Xd9LohAmm9tL8S9Hvsprc
+# z+M+Wp8N1kLI/tYUGDB9h38DvXOUTXZ7lFT4VzmxZ0r7igno98E6PHm2ZKn4QbgX
+# L1C+267qFpSsvU2c3Sz8TFCmsBStvJLOD7qfUb4PxHAwDdsC4QEs2YGgyUU/Td1Z
+# KFLcWphHVPtNdI5WkOgGn/E4+7uZuRuW7YHe7FTowlZFauvn9LblJRr7C6Kwzego
+# B8j1eQfRA2PcP0EwussaoAr+3uMIgCt0lFNnF65XvBEBDsn0J6rcAW/CMIUQznmR
+# ezcum9uwUzJ7aAjk0lDuGq7mGo+yv4Qa8VDZ5FwlT4ErHOVNnZan6zm8mkfQ0Bh7
+# wgCzrm9pD/NVfK+klnIIAZXBqc3ebfVo48eHBngP+JgSrmKX7JBp5taWZ3cmu89Q
+# MoetwuxIO/e4+IvotKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzdaMC8GCSqGSIb3DQEJBDEiBCB6j3YWg0N627E7jrVFpQuY9gx82+oLAa+dYCUI
-# 2/CpQjANBgkqhkiG9w0BAQEFAASCAgCyS8/TS7xyrImiC2E9j+XDYmnoAfeaUuj+
-# v5flFYbXoX+VxvnaJeWKdp7Sq5A0kF4BofHgkpl7RkB958v+gwRcuADhmoe5j5fH
-# YNZ+AFchCnNUaHBEB2oF9sq3ZKO7NlZCw0df+jpRcZsvN7iBTX9PPjbMB96HUWg5
-# sPthpcJhQrWnQICaZTCn9exhOwCibrw1mZoalPDwpLEjXYMx6TkhnR/k9c20Bz6j
-# jUs5tzARNDscpjtP1n1uGiBILbLoKP3VaKNB0gH0rVwbf57XlgSp/tiPCU15JpK7
-# ImXy5qnCxLnnlhE6qy8Px3m0y3CLoRcRp6P/07Jkn0jL8NA2nWH4gO8BkI9gynEW
-# 7CY70pgCaUKHT04ACIXVXLR6bwIekkV6MIOZNzopuqehszlKsgpaddZzvwkh/1Dg
-# 7naKI7SJU9G65YhrkEA8u3FPPNq3Q7ebhHFBEw8N1UfsGzHc3bTFbqSegVKqkAbW
-# ZRELBrH+5UGXKzlUOmYGFK7LMagxcCQnmU37AlXDPAAHRwopWhfZsM0cNAjDU2tB
-# YaZOZyQRdiDnuV8ank8IaFcHe/VtBin/YmDQPlCg1sdv9xpCL+0570w4ZfD/VMjX
-# dutQhwtT4GebY2WhdHNK/BoMKcZjIixTLEYhuuDqT4LPe4jOkVFGlJ/9poJn51RU
-# gN6bguFzOw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkwMTI5
+# NTRaMC8GCSqGSIb3DQEJBDEiBCCJIRlFxuHDGLkZAiFgkb3GQJzwc1HfzaZqfQjj
+# OFp8RzANBgkqhkiG9w0BAQEFAASCAgAMBEKZF9TjuxXbNOvl2+fYxDlfZ/XeEduh
+# bUxc6VUEEuNzZX6CHCUxCqgOeEowbhXCvo4PRpCSkVEHG8qp8TiQ0bQ5a2B7ESVH
+# +g38ASpGQp0eGYZGZJG9dSgJi7WJ76Yh9QjE124tbflkIk00JZz8AKxavqi8GBar
+# 7yKfIFcbsLKw7Xz4ACdsrdFGkAHXF8PpDWhCzWWZoSZlsCeMkCrk3XtdgHOcYQTo
+# 8NykasSWe3G1WiRfKMGAygggP5yucBhDT6rKnnnQ/4j23vclF28HU3lJ7oTYppSU
+# ZdTB/HBNiSlfc8TbIBU2cRDP/e21hsHIxRXHZKpLswLOQTpIMjytjMTIyozHUvOE
+# 7XoxFfgaHUSsbrD5vEqE7RxIj0vFoDM5F3miAYo2RwqbrbSywXzsTCYHbTkjJC33
+# dA8PKH5+UYd18HWEwnqEra6+ZvTI6AjKSqO8CRZActqST9m+e+/UnOYEkQv8TlYH
+# kXXYgJxzRlSP4GkgMP6woe0dgoglEnvs1ekjyzyxTNOLl7OVw5qIQH3tJBs9EAGy
+# F5Fx2/PTDIVfyb5TQETF22GB8ONntEPQjCRvrkH4FaSc5xqrz15G1n/PfF60/hdx
+# jddInulkKuNOFcAsF7xnEADfMfk0w2wI7fnJDQtMm5x4Gazm2jJMkpFiKiNKqwXS
+# /299D6gmZQ==
 # SIG # End signature block
