@@ -45,6 +45,33 @@ function Get-SmartFinOpsCsvHeaderColumns {
     }
 }
 
+function Test-SmartFinOpsCsvHasDataRow {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $firstLine = Get-Content -LiteralPath $Path -TotalCount 1 -Encoding UTF8
+    if ([string]::IsNullOrWhiteSpace($firstLine)) { return $false }
+
+    $commaCount = @($firstLine.ToCharArray() | Where-Object { $_ -eq ',' }).Count
+    $semicolonCount = @($firstLine.ToCharArray() | Where-Object { $_ -eq ';' }).Count
+    $delimiter = if ($semicolonCount -gt $commaCount) { ';' } else { ',' }
+
+    $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path)
+    try {
+        $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
+        $parser.SetDelimiters([string]$delimiter)
+        $parser.HasFieldsEnclosedInQuotes = $true
+        [void]$parser.ReadFields()
+        while (-not $parser.EndOfData) {
+            if ($null -ne $parser.ReadFields()) { return $true }
+        }
+        return $false
+    }
+    finally {
+        $parser.Dispose()
+    }
+}
+
 function Resolve-FirstExistingCsv {
     [CmdletBinding()]
     param(
@@ -67,6 +94,8 @@ function Import-SmartFinOpsSourceCsv {
         [Parameter(Mandatory)][string[]]$FileNames,
         [string]$SemanticRole = '',
         [string[]]$RequiredColumns = @(),
+        [switch]$Optional,
+        [string]$BlockedReason = '',
         [switch]$ValidationOnly,
         [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$DataQualityRows
     )
@@ -79,11 +108,30 @@ function Import-SmartFinOpsSourceCsv {
 
     $path = Resolve-FirstExistingCsv -FolderPath $script:SmartM365LatestCsvFolderPath -FileNames $eligibleFileNames
     if ([string]::IsNullOrWhiteSpace($path)) {
+        $missingStatus = if (-not [string]::IsNullOrWhiteSpace($BlockedReason)) {
+            'Blocked'
+        }
+        elseif ($Optional) {
+            'Missing optional'
+        }
+        else {
+            'Missing'
+        }
+        $missingNotes = if ($missingStatus -eq 'Blocked') {
+            $BlockedReason
+        }
+        elseif ($Optional) {
+            'Optional source CSV not found in SmartM365 DATA-LAST.'
+        }
+        else {
+            'Source CSV not found in SmartM365 DATA-LAST.'
+        }
         $DataQualityRows.Add([pscustomobject]@{
             RunId = $script:RunId
             SourceName = $SourceName
             SemanticRole = $SemanticRole
-            Status = 'Missing'
+            SourceRequirement = if ($Optional) { 'Optional' } else { 'Required' }
+            Status = $missingStatus
             ContractStatus = 'NotChecked'
             FreshnessStatus = 'NotChecked'
             Path = ($eligibleFileNames -join ' | ')
@@ -93,7 +141,8 @@ function Import-SmartFinOpsSourceCsv {
             LastWriteTime = ''
             AgeHours = ''
             RequiredColumnsMissing = ''
-            Notes = 'Source CSV not found in SmartM365 DATA-LAST.'
+            BlockedReason = $BlockedReason
+            Notes = $missingNotes
         }) | Out-Null
         return @()
     }
@@ -105,20 +154,32 @@ function Import-SmartFinOpsSourceCsv {
         $headerColumns = @(Get-SmartFinOpsCsvHeaderColumns -Path $path)
         $missingColumns = @($RequiredColumns | Where-Object { $_ -notin $headerColumns })
         $contractStatus = if ($missingColumns.Count -eq 0) { 'Valid' } else { 'Invalid' }
-        $rows = if ($ValidationOnly) { @() } else { @(Import-Csv -LiteralPath $path) }
+        $hasDataRow = Test-SmartFinOpsCsvHasDataRow -Path $path
+        $rows = @(if (-not $ValidationOnly) { Import-Csv -LiteralPath $path })
         $rowCount = if ($ValidationOnly) { '' } else { $rows.Count }
+        $status = if ($contractStatus -eq 'Invalid') {
+            'Invalid schema'
+        }
+        elseif (-not $hasDataRow) {
+            'Empty'
+        }
+        else {
+            'Loaded'
+        }
         $notes = New-Object System.Collections.Generic.List[string]
         if ($freshnessStatus -eq 'Stale') {
             $notes.Add(("Source is older than {0} hours." -f $script:SmartFinOpsMaxSourceAgeHours)) | Out-Null
         }
         if ($missingColumns.Count -gt 0) { $notes.Add('Required columns are missing.') | Out-Null }
+        if (-not $hasDataRow) { $notes.Add('CSV contains a header but no data rows.') | Out-Null }
         if ($ValidationOnly) { $notes.Add('Header and freshness validation only; source rows were not imported.') | Out-Null }
 
         $DataQualityRows.Add([pscustomobject]@{
             RunId = $script:RunId
             SourceName = $SourceName
             SemanticRole = $SemanticRole
-            Status = 'Loaded'
+            SourceRequirement = if ($Optional) { 'Optional' } else { 'Required' }
+            Status = $status
             ContractStatus = $contractStatus
             FreshnessStatus = $freshnessStatus
             Path = $path
@@ -128,6 +189,7 @@ function Import-SmartFinOpsSourceCsv {
             LastWriteTime = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
             AgeHours = $ageHours
             RequiredColumnsMissing = ($missingColumns -join ' | ')
+            BlockedReason = ''
             Notes = ($notes -join ' ')
         }) | Out-Null
 
@@ -147,6 +209,7 @@ function Import-SmartFinOpsSourceCsv {
             RunId = $script:RunId
             SourceName = $SourceName
             SemanticRole = $SemanticRole
+            SourceRequirement = if ($Optional) { 'Optional' } else { 'Required' }
             Status = 'Error'
             ContractStatus = 'Error'
             FreshnessStatus = 'NotChecked'
@@ -157,6 +220,7 @@ function Import-SmartFinOpsSourceCsv {
             LastWriteTime = ''
             AgeHours = ''
             RequiredColumnsMissing = ''
+            BlockedReason = $BlockedReason
             Notes = $_.Exception.Message
         }) | Out-Null
         Write-SmartFinOpsLog -Level WARN -Message ("Failed to load source {0}: {1}" -f $SourceName, $_.Exception.Message)
@@ -174,11 +238,15 @@ function Import-SmartFinOpsContractSource {
 
     $contract = Get-SmartFinOpsSourceContract -Key $Key
     $contractValidationOnly = $contract.PSObject.Properties['ValidationOnly'] -and [bool]$contract.ValidationOnly
+    $contractOptional = $contract.PSObject.Properties['Optional'] -and [bool]$contract.Optional
+    $contractBlockedReason = if ($contract.PSObject.Properties['BlockedReason']) { [string]$contract.BlockedReason } else { '' }
     return Import-SmartFinOpsSourceCsv `
         -SourceName ([string]$contract.DisplayName) `
         -FileNames @($contract.FileNames) `
         -SemanticRole ([string]$contract.SemanticRole) `
         -RequiredColumns @($contract.RequiredColumns) `
+        -Optional:$contractOptional `
+        -BlockedReason $contractBlockedReason `
         -ValidationOnly:($ValidationOnly -or $contractValidationOnly) `
         -DataQualityRows $DataQualityRows
 }
@@ -187,8 +255,8 @@ function Import-SmartFinOpsContractSource {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD80ApIW6lVq/5D
-# LKVFvi8d1cZdJxaJ2Iau5snfoVCOGKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQw+XRzyfn40Xh
+# 3EXkks1cxVwT4nhwzZiMVKxQSswPP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -321,31 +389,31 @@ function Import-SmartFinOpsContractSource {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPfuaTtQ2x22dSocCXQdeQRZ/86ENgwgcFa2Mo6InsPVMA0GCSqG
-# SIb3DQEBAQUABIIBgBcZ+DUgmHjkjZ4YJK0yxsHr4Eg/TNf2NUKfB+er2P3iP96K
-# tt0emgMTSi+ieW7WW78b41u4rUYpbMyVv+aokVpEOhBYtwnBfbsMHKu2Rpays829
-# xtvU1tWao6nuNys9GWZ/Md5HPk+zqEyoGmGepwnNMR+/aAUT9Y7JChYLhq/+bQBv
-# oB7taaDA9S+HNh5QGt6Gn0+anfw01sB0XjR1dnX0zIZoeAI5zw7Zk4faAH9aAco4
-# MSFYqyv0TCpt3JSIVmihl2ohpj9jEuIsBQgSp9zCiZLBBTe4chrt3aAOaecJlUju
-# E/7qCyqDJqWLfdjCKnOeZpWAuBkP06vrJv89x9WhcM8KHTpW/JRcJik+soztU2kO
-# o9IXOJoqinjhbOwbsWj3WeUgPF5lJG9qgxlNF0SstDrkHZv6JVygpnapSh0m7Dmq
-# 2aQKARQ3Clyh9gy9h/3oOkBAsMeGCDAD7kC23a0Y1/6mpyNidT8enXdBo4iOgNLp
-# RA4J0C6oKfVlbwWxtqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIHvT/RpahrBMlTWInICp1wG97qyEXgWT3QFjYf7EnVyMA0GCSqG
+# SIb3DQEBAQUABIIBgBFsI+Kl3NxdM6WbE3K8xeBdPn17XigSeY4dgZ7353WKpiSj
+# crfmrf2YGo6kwWc4u8//sb5l21PKojVurvh7iRSaDBwKT2qnNfVF1RHWn9mX4B0b
+# DRKU1Ew+zzBcJy7a/jukNxOzgqLtqK13yBaux8snKxKYgK0JaZhbpxrtAmcYYIrD
+# M4MIFwkjEoWHF77OFd9lC+815GWa6qdSf75/vntIZqHgVQNUMlXJjlpap5J84wBa
+# CaPDVjKRMSMG6s4pBn1PkGzrdXf3IwKIYKeEe1GzpIsKcyOV1uyCZeYnj2+/fTC5
+# 8B4SUA65B7lpyFxhvxGvzf8Qtgr5xdLntqb0QMEyYhhr+f7/6KIPUYr+RDQ8rglB
+# a9kSP7eogKSgKjkDBDbDfz+rfjht+/84gF2ySTT4z13NFVFRZlkiWDfY9lpyA+8C
+# Exfi0VsZbspIJyiCNkibFLgA1gW+ERaH4wXNNBoYYSEw0VP4hfC2sMLdqhcWnw2I
+# i9zghxNo3Zjp7yZhVaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxNTE5
-# NDNaMC8GCSqGSIb3DQEJBDEiBCCE94Xj03Q4KkwyGADbt9jc5ujJ6kwxB2EsuhG0
-# 6p+VbDANBgkqhkiG9w0BAQEFAASCAgCNEljH28Je6/pJ1MzRMibskrSSGiN8gqMX
-# G0oR8ZJAV5WUehw2X2NGKVCbIhXl9iB3icc6agkeaIotJdw5oDvVU5CHZE01lBp7
-# 0CDw4jaMKlmr5US9cgQfHMGg6tPRPQ4Unvgf9fYNah9u+aXHFVmBv21MVgfNHuvs
-# 0eMIxIjMjvyxwKaXMC6Kve6Ui/k223V+TQHo46vI3j1ugeLuK1wig6IEUU/0yd5P
-# v9B8c1NUY33Rzcc5nnTMMFL307JbsCQbDlKEKUvnLsLYLSkvDuKdGUCHGrX5n6Y/
-# JqkyXYu8fQdDPzc18dMxcoJVENScZE0rTXW1Yl1Rhu2p7i9D8TiQ8rFynLhEQpLl
-# g/k47RD5M3V5r5Ti2KJnRgiyG4J7JHqfGO5d4/ob/l57tYAqjN87VU+ybmKxojiV
-# bmq+AC3bYEyShtMryNi7DuUQ1Zsddw13CidhaqS4ekgM4Kmlm9msuGejPl2D0SLU
-# Tg8Mi/GhOhz37mbYDbm6I4fHlH3pWSNtz+AtRhUfV0UcCJwxkg28tueSaVjNiUqL
-# DAlpEMnWiuLEdBy8CXZ4FTceMs584GS6DLaqeaScA0CQEFp8BJjgHe+lR4VQ43ot
-# z+yrtAdGpGQXGD5Hpb2JR49MPuMjIMGQWRcOwwJZF0Isz4xQVqVcFlGm8sWSRvlW
-# rkURj/gmyg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkwMTI5
+# MzJaMC8GCSqGSIb3DQEJBDEiBCDf+0ePQyiTjmw5IN06gRivO4oLu5+3b7yBFLV9
+# D/B2vjANBgkqhkiG9w0BAQEFAASCAgBrXcDbGFKIXFawIKEdFC78f1nLWH/nhVG0
+# x8ATDGeT8+cCsXQwDVY4orTGXQF287dLZljHQ/1vdYgXvs/tFrZeB+/JvTZtlVtl
+# LsBaIKL6HA2hQJzN8G2qG3S7CHM5EQHBC6soqhg1PrT7xzkqcs3ZTQAEpY3hc3TX
+# MAA60b+faRWnSOIiRfwDKrNNYv0lkgvQ5mhjkigY/wZ1gl2qwL8/2Bf4vSBzvsxv
+# hKb77y3UAoce0cNZWcdf4oToIt6Xq5OZAbjywWOQALDxbNofxru1VKH8btaEZwER
+# 5HZYWUYOqP3JusziSj20CRU3BdSv2ST0aCaaL4J43B/Xu+MVTdx7G5lxqKumxikl
+# R6hZuOCnUzglxrMU1A72BFsDgA4FfQrqlWLqKSbxd/P4HQ6wwb+VvzR8E6OIh50/
+# vQp5Jvss0J/JpUUy0HibmdQBePa/GOiwXVHs+VhLpm7YhomZ6UJj722hw9hV/Etq
+# Jxj43arbVbnrtfpSnE99vYZDenRwjydvQqesJyvKlb2L1uCg3ExwCcNMSZLLZyhp
+# cbJSwZ8h7XtgynNcixLO3s7U2dhhp/Rt7xAoiFV9DQFtyBQ/KHIiaAU4MBYG5pnJ
+# Rna3C4y0eUj29L236pJA1Cage7witeDexwhWoIfc6iBdpSW+4RaPDYV0+RrojHud
+# 2OCZRM89MQ==
 # SIG # End signature block
