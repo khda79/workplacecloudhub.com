@@ -7,8 +7,8 @@
     Uses Microsoft Graph app-only authentication by default to inventory
     SharePoint Online sites, storage, activity, lists where Graph allows access,
     owner signals, inactive sites, orphaned sites, and tenant-level summary
-    statistics. Tenant capacity is collected through PnP.PowerShell by default.
-    PnP.PowerShell deep sharing scans remain optional.
+    statistics. The default collection is Graph-only. PnP.PowerShell tenant
+    capacity and deep sharing scans remain explicit optional features.
 
 .PARAMETER Tenant
     Tenant profile key to load from Config/Tenants. Defaults to test.
@@ -44,36 +44,39 @@
     Enables optional PnP.PowerShell per-site sharing scans. This is best-effort and may require broader SharePoint permissions than the default Graph inventory.
 
 .PARAMETER UsePnPTenantCapacity
-    Collects the licensed SharePoint tenant storage capacity through Get-PnPTenant.
-    Enabled by default. SharePointAdminUrl is derived automatically when omitted.
+    Optionally collects the licensed SharePoint tenant storage capacity through
+    Get-PnPTenant. Disabled by default. SharePointAdminUrl is derived automatically
+    when omitted.
 
 .PARAMETER SkipPnPTenantCapacity
-    Disables the default SharePoint tenant storage capacity collection.
+    Retained for backward compatibility. Tenant capacity is already disabled by
+    default unless -UsePnPTenantCapacity is specified.
 
 .PARAMETER InteractiveAuth
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.23
+0.24
 
 
 .REQUIREMENTS
     PowerShell 7+.
-    Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel; PnP.PowerShell for the default tenant capacity collection.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell is required only for optional PnP features.
     Minimum Graph application permissions for default inventory: Reports.Read.All; Sites.Read.All; Directory.Read.All.
     Optional PnP deep sharing scan may require SharePoint site-level access for scanned sites.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph.Authentication, ImportExcel, SmartM365.Core.psd1
-    PnP.PowerShell is used by default for tenant capacity and optionally for -UsePnPDeepScan.
+    PnP.PowerShell is used only with -UsePnPTenantCapacity or -UsePnPDeepScan.
     Minimum Microsoft Graph application permissions for default inventory:
       - Reports.Read.All for SharePoint and OneDrive usage reports.
       - Sites.Read.All for site and list inventory.
       - Directory.Read.All for organization context and owner/directory enrichment.
     Optional PnP deep sharing scan may require SharePoint site-level access for the scanned sites.
-    Default tenant capacity collection requires SharePoint tenant administration access; use -SkipPnPTenantCapacity to disable it.
-    The baseline Graph-only mode selected with -SkipPnPTenantCapacity does not require SharePoint Administrator or Sites.FullControl.All.
+    Optional unattended tenant capacity collection requires the SharePoint API application permission Sites.FullControl.All with administrator consent.
+    Microsoft Graph Sites.Read.All does not authorize Get-PnPTenant.
+    The default Graph-only mode does not require SharePoint Administrator or Sites.FullControl.All.
 #>
 
 [CmdletBinding()]
@@ -89,7 +92,7 @@ param(
     [int]$ListItemWarningThreshold = 5000,
     [switch]$SkipDeepSharingScan,
     [switch]$UsePnPDeepScan,
-    [switch]$UsePnPTenantCapacity = $true,
+    [switch]$UsePnPTenantCapacity,
     [switch]$SkipPnPTenantCapacity,
     [int]$SharingScanItemLimitPerSite = 0,
     [switch]$InteractiveAuth,
@@ -113,7 +116,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.23"
+$ScriptVersion = "0.24"
 $TenantCapacityEnabled = [bool]$UsePnPTenantCapacity -and -not [bool]$SkipPnPTenantCapacity
 $CurrentOperation = 'Initialize'
 
@@ -780,9 +783,9 @@ function Get-SpoTenantCapacityRow {
 
     $capacityMb = $null
     $allocatedMb = $null
-    $capacitySource = 'Disabled'
-    $status = 'Warning'
-    $details = 'Tenant capacity collection was disabled with -SkipPnPTenantCapacity.'
+    $capacitySource = 'NotCollectedGraphOnly'
+    $status = 'OK'
+    $details = 'Licensed tenant capacity is not collected in Graph-only mode. Power BI estimates capacity from M365_Licenses_Tenant.csv.'
 
     if ($Enabled) {
         try {
@@ -818,9 +821,17 @@ function Get-SpoTenantCapacityRow {
             $details = "Tenant storage capacity collected from $adminUrl; URL source: $($adminEndpoint.Source)."
         }
         catch {
-            $capacitySource = 'Get-PnPTenantUnavailable'
             $status = 'Warning'
-            $details = "Tenant capacity collection failed: $($_.Exception.Message) SharePointAdminUrl is only required as an override when automatic derivation is not suitable."
+            $capacityErrorMessage = [string]$_.Exception.Message
+            $capacityAccessDenied = $capacityErrorMessage -match '(?i)unauthori[sz]ed|access\s+denied|forbidden|\b401\b|\b403\b'
+            if ($capacityAccessDenied) {
+                $capacitySource = 'Get-PnPTenantUnauthorized'
+                $details = "Tenant capacity collection was denied by SharePoint: $capacityErrorMessage Microsoft Graph Sites.Read.All does not authorize Get-PnPTenant. Unattended app-only access to the SharePoint administration API requires the SharePoint API application permission Sites.FullControl.All with administrator consent. SharePointAdminUrl is not the cause because the URL was resolved successfully."
+            }
+            else {
+                $capacitySource = 'Get-PnPTenantUnavailable'
+                $details = "Tenant capacity collection failed: $capacityErrorMessage SharePointAdminUrl is only required as an override when automatic derivation is not suitable."
+            }
             Write-SpoLog -Message $details -Level WARNING
         }
     }
@@ -1181,8 +1192,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMFe6ZIMpZnUJJ
-# Rzai7xJ/tE+TF75O5Ztcd3jr92DzeKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClIe2WK3gYJJ28
+# gZP8CTq/a+hGEhklDKxQebnmNNBu5aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1315,31 +1326,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINB8o6wc0oUernaNr8jNNJ1P2MIFYCYt1d8HQe5ZebMdMA0GCSqG
-# SIb3DQEBAQUABIIBgDYkgBE4CTyCqRAJPD4aK919p51N3/IftYI3k3ZbwL5HB5xy
-# CpCO9nXMhgB8eilMssnPFKymEhLHVnBTxiIwRcLA/eBzaq4C9jevcR/nQEKlXqZM
-# wzCXVb2edBcM9R3MIachqpNzqlYYLpG+dLBBZIUVICxxexvqqgtPCencnhAT4mvH
-# 9nUIEKIcwqhiGhGtb6A33+A3i8zGWDjeQ/yR45g3dw9XQjNTVc9RO81YbFTwWh4x
-# N2F8pChAhR0zoDqZ01QaZDGkvsvLNdA4/EoPSuQ3S23Gtbu4QjCy+WGJZVnyHe1b
-# niM6JReqOkcydrQvCkhAnW03jtlegzDnA331qVOZ097re95WC0LdYXtwA/hWDi5Q
-# vYpx8OiPM/pulsga0+XGTxfJy2DpAdZVTYzcZtKY6LDLAuBo85jTo1j4SfeFws+i
-# rHYnrZ1J+EJz51/Iu5sDsJ2msuRjxRVOyCj9KrQJik/0lifXi19hskJsH3R4jocz
-# TD4J9m8uB2eStPQt4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBsL9Ueh5YhQNlZD6FSSAAPaq8IzMUJL7lHjSIsb37avMA0GCSqG
+# SIb3DQEBAQUABIIBgIoh4jqmjezQxu2xgMLNCkV2vG4WG4ad+AyREKCFka+BXDmc
+# itdZ7bKKhC8dpYTXf5cQxCqCW5USCiT7C+VFLe1GDOgnWoykbEKJoS3L5zvK6hNt
+# F1JQP0wYg9+WVeRurC1K14jJzcC9VFr19Qfhaxj46A15eppbtBFO/0nj/FlyktWv
+# lzqFsZmU8m8mp1074iTPuX7rHQ+VolQfrCZTTtcPgDPSg/A5Gzvoy9sougmY5cFP
+# MvX4yr//9VTnIGLnBG6+mxJUEEh0lhK9/ZN6Al1xrB14DPbHLsC1Qo4K/N2c4soM
+# CtxrfquutvARTRQ1ZWAZyKaJljG5S1jbkOeNjexbZULEU/RT4Ne0M4ywltzVghq0
+# E0nicHpol161CQWwaJTq+b6E8xll9x5qAI8H26XXB3QkA+GSaF21jafIgX92vzof
+# 7WSpIQgGv9OunGSb7OnMHtLNrPFyTNhbX5yydPA9zh/WZ/8UlFtEgJbdyRuVkSGW
+# X6Wd4/VvTHAbP6KbiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMTA5
-# NTNaMC8GCSqGSIb3DQEJBDEiBCB7KHxGkczqmL/mS3ydT4RC3lUCJXARA9PyuOxY
-# +VWM6jANBgkqhkiG9w0BAQEFAASCAgBC5wbnlOXvGFQOkIScDFJy8Qt7HF9qyEZL
-# 1kN9ZvmT401I7IyJGv2B4tURsKTpfdBiJIRx83qZDOolPYuI6XhZsnP6JLYpAlK5
-# lQr0Nw6QrlfV3C/YXEFXWjhjqmM8ErpR6Qa1gWUoYM0cwSYeCYOjC/8UkkxvT4SX
-# j3mSGx10cSKz8I5zeUGMyUJKbV5GbaO4otdBou2Nw+Byf7VS6Xd9yPkI7WaT0IBB
-# XlNa++JGLzCGcs8/5Ck2TDhtCKHH2Qem8JGdan/MXLKvvrX3vNpaYE77+cjeq2Lr
-# +3qh57kDO2SzaVS7Zo3lXpmHL2bNM19Fi8WD3JJ9c3vpl2W2LV86JS+ubjQXHlru
-# yU1RlcR0/J6ZFYoLT5F6AjTBtlpdqM+4aVW1MHMar55Vn8R/MDfaGqHLKkY1d22L
-# WJE2tTVMwHbtiaPK/CJa5bXWYNt+0Em0m2NYpSp0ZTqY2EViuF5m0hsBxMHGY5tH
-# TK/y697dzCLkQkcKMzlOXPYpgAz2uEOP4K8I2NXdM8mOU5Iwqpem8MNDorU1tlYE
-# Gbcg9hfbGHVdXQ1aJi+40ZGVdURcg4l9KcNbkNk21yuREu1Wtla2X0eRPIJKfNGt
-# OtZxKQ81w1rxgC4iDiaS7wkrlXCzJKDscBh+dbenqikn+OYOjv8wzv8K3VVzw2Iw
-# Bp5Pnw8oFg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMjA0
+# NTVaMC8GCSqGSIb3DQEJBDEiBCCFra1UWF1AbHqLaxiBNjwC1Oa57wF7Vn/E8JiY
+# BuXmIjANBgkqhkiG9w0BAQEFAASCAgAwEa89p+xxKMYlt8ymcd7DYS6netdu7MPN
+# PzjdA1+TrXVEI2Kl9C2zI/VDFb5J1dx1Z/poiyDohPT9MFunT+pMp7cAWbtsM3mz
+# qVrJWwSrSRoOcsuDRZtmZhDxGFelAax6KHxLCKMfnP+BVelUBMP6pYFshOnDNt8p
+# ziNZv5Ss8anljHvwYvXwGvhZ3bbIYYJ3xMRIQ8aZoSylu/uOvmZOYrldsIDnlQiM
+# kcfGIVu2wAe3CKrL6NHwLgw+8WvHHH52+658c77HqrAm2n7b8NF1INkLCU0PNriV
+# 7FRaUM85YEpp8I1PUeK1sej1Mp0cwyy+yTI6Zsc2rRPSXXUWX7N/VyZN1GXAv3DV
+# JFS0ZTIq/nJ0vfd/5SZsCt29KPIkP2pn/vrU+kvNG2MlHWBSyB/SKkoMV4tQVOhc
+# Ng8zTVXN5mRGc3ouGyNfL0bXkWYoqHt26sE1oMAX6arh9JsPf4kD3cfUjIqryTWx
+# ghi/gLAOgRSqcJ+OlPahgc3/e3zX/JIFc0GOCiGMOdG050dBxDl3EGzmI9oUJYS/
+# jw9uzz0lEKNLkfWQLOj2pvi+IagFRMVt2lcv6UiGysc3wgzSi9sadE3qe6y2wM7Y
+# 0zalQwMokjr8FQ+Nxr0TsGtON1FR6SV+VvfpYrfcqxILRB7zlkSnSqIiw9p+0GNH
+# VE2bsuliKQ==
 # SIG # End signature block
