@@ -1,4 +1,5 @@
 {
+  "ConfigVersion": "0.3.0",
   "ProfileKey": "default",
   "OrganizationKey": "organization",
   "EnvironmentKey": "default",
@@ -16,7 +17,7 @@
     "IncludeIntune": true,
     "IncludeLicensing": true,
     "IncludeExchangeOnline": true,
-    "IncludeActiveDirectory": false
+    "IncludeActiveDirectory": true
   },
   "PowerBI": {
     "Enabled": true,
@@ -27,5 +28,12 @@
     "FreshnessWarningHours": 48,
     "FreshnessCriticalHours": 168,
     "DefaultConfidenceScore": 0.5
+  },
+  "SharePoint": {
+    "Enabled": false,
+    "SiteHostname": "",
+    "SitePath": "",
+    "LibraryDisplayName": "Documents",
+    "TargetFolderPath": "SMART-CMDB/DATA"
   }
 }

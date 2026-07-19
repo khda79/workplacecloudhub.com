@@ -1,0 +1,21 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#groups",
+  "value": [
+    {
+      "id": "33333333-3333-3333-3333-333333333333",
+      "displayName": "Example Workplace Users",
+      "mailEnabled": false,
+      "securityEnabled": true,
+      "groupTypes": []
+    },
+    {
+      "id": "44444444-4444-4444-4444-444444444444",
+      "displayName": "Example Dynamic Devices",
+      "mailEnabled": false,
+      "securityEnabled": true,
+      "groupTypes": [
+        "DynamicMembership"
+      ]
+    }
+  ]
+}
