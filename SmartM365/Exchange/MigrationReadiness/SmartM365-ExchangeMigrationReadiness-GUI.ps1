@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.10.0
+1.11.0
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.10.0'
+$script:AppVersion = '1.11.0'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -200,11 +200,9 @@ $xaml = @'
                     <TextBlock x:Name="StatusText" Text="Select a migration batch CSV." FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <TextBlock Text="Mode" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0"/>
-                    <ComboBox x:Name="ModeCombo" Width="118" Margin="0,0,10,0" ToolTip="Live uses EXO and Graph tenant data, with CSV fallback for AD and Exchange on-premises. CacheOnly uses CSV inventories only.">
-                        <ComboBoxItem Content="Live" IsSelected="True"/>
-                        <ComboBoxItem Content="CacheOnly"/>
-                    </ComboBox>
+                    <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="8" Padding="10,7" Margin="0,0,10,0" ToolTip="All evidence sources are queried live. Missing required sources make the assessment INCOMPLETE.">
+                        <TextBlock Text="LIVE STRICT" Foreground="{StaticResource AccentDarkBrush}" FontWeight="SemiBold"/>
+                    </Border>
                     <TextBlock Text="Phase" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,6,0"/>
                     <ComboBox x:Name="AssessmentPhaseCombo" Width="132" Margin="0,0,10,0" ToolTip="PreCreation treats existing move objects as blockers. ExistingBatch evaluates a batch that has already been created.">
                         <ComboBoxItem Content="PreCreation" IsSelected="True"/>
@@ -332,19 +330,6 @@ $xaml = @'
                 </Grid>
             </TabItem>
 
-            <TabItem x:Name="CsvSourcesTab" Header="CSV sources">
-                <Grid Margin="0,12,0,0">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-                        <TextBlock Text="CSV files expected by the selected mode. Used identifies the effective source; Present and Fresh describe the selected file from DATA-LAST or the tenant cache root." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
-                    </Border>
-                    <DataGrid x:Name="CsvSourcesGrid" Grid.Row="1"/>
-                </Grid>
-            </TabItem>
-
             <TabItem x:Name="ResultsTab" Header="Results">
                 <Grid Margin="0,12,0,0">
                     <Grid.RowDefinitions>
@@ -432,7 +417,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.10.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.0" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -448,8 +433,8 @@ function ConvertFrom-SemrXaml {
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-SemrXaml -Text $xaml
     $requiredControls = @(
-        'CsvPathBox', 'BrowseCsvButton', 'ModeCombo', 'AssessmentPhaseCombo', 'MigrationEndpointCombo', 'RunButton', 'SummaryGrid',
-        'FindingsGrid', 'GlobalFindingsGrid', 'PermissionsGrid', 'CsvSourcesGrid', 'OptionsItemsControl', 'ResultsTab', 'ActivityBox'
+        'CsvPathBox', 'BrowseCsvButton', 'AssessmentPhaseCombo', 'MigrationEndpointCombo', 'RunButton', 'SummaryGrid',
+        'FindingsGrid', 'GlobalFindingsGrid', 'PermissionsGrid', 'OptionsItemsControl', 'ResultsTab', 'ActivityBox'
     )
     foreach ($controlName in $requiredControls) {
         if (-not $validationWindow.FindName($controlName)) {
@@ -495,12 +480,12 @@ if (-not $NoSplash) {
 $window = ConvertFrom-SemrXaml -Text $xaml
 $controls = @{}
 foreach ($name in @(
-    'HeaderLogoLink', 'HeaderLogo', 'StatusText', 'ModeCombo', 'AssessmentPhaseCombo', 'MigrationEndpointCombo', 'RunButton', 'CancelButton', 'OpenOutputButton',
+    'HeaderLogoLink', 'HeaderLogo', 'StatusText', 'AssessmentPhaseCombo', 'MigrationEndpointCombo', 'RunButton', 'CancelButton', 'OpenOutputButton',
     'CsvPathBox', 'CsvMetadataText', 'BrowseCsvButton', 'BatchGrid',
     'AdStateText', 'OnPremStateText', 'ExoStateText', 'GraphStateText', 'HybridStateText',
     'GoCountText', 'WarningCountText', 'NoGoCountText', 'UnknownCountText', 'SummaryGrid', 'GlobalFindingsGrid',
     'MailboxFilterBox', 'ClearFilterButton', 'FindingsGrid', 'PermissionsGrid', 'ComparePermissionsButton',
-    'CsvSourcesGrid', 'CsvSourcesTab', 'OptionsItemsControl', 'OptionsSummaryText', 'EnableAllOptionsButton', 'ResetOptionsButton',
+    'OptionsItemsControl', 'OptionsSummaryText', 'EnableAllOptionsButton', 'ResetOptionsButton',
     'ResultsTab', 'ActivityBox', 'FooterText', 'RunProgress', 'VersionText', 'MainTabs'
 )) {
     $controls[$name] = $window.FindName($name)
@@ -522,7 +507,7 @@ if (Test-Path -LiteralPath $logoPath) {
 }
 $controls.VersionText.Text = "v$script:AppVersion"
 $controls.OptionsItemsControl.ItemsSource = $script:CheckOptions
-$controls.ModeCombo.SelectedIndex = if ([string]$script:Config.Mode -eq 'CacheOnly') { 1 } else { 0 }
+
 $controls.AssessmentPhaseCombo.SelectedIndex = if ([string]$script:Config.AssessmentPhase -eq 'ExistingBatch') { 1 } else { 0 }
 $configuredEndpointName = [string]$script:Config.Hybrid.MigrationEndpointName
 $controls.MigrationEndpointCombo.Text = if ($configuredEndpointName) { $configuredEndpointName } else { 'Loaded after EXO connection' }
@@ -557,58 +542,6 @@ function Refresh-SemrOptionsDisplay {
     $controls.OptionsItemsControl.ItemsSource = $null
     $controls.OptionsItemsControl.ItemsSource = $script:CheckOptions
     Update-SemrOptionsSummary
-}
-
-function Update-SemrCsvSourcesDisplay {
-    param(
-        [switch]$AssessmentCompleted,
-        [AllowNull()]$EntraConnect = $null
-    )
-
-    try {
-        $controls.CsvSourcesGrid.ItemsSource = @(Get-SemrCsvSourceInventory -Config $script:Config -Batch $script:Batch -EntraConnect $EntraConnect -AssessmentCompleted:$AssessmentCompleted)
-    }
-    catch {
-        Write-SemrActivity -Message "CSV source inventory could not be refreshed: $($_.Exception.Message)" -Level WARN
-    }
-}
-
-function Confirm-SemrStaleCsvUsage {
-    $script:Config['_AllowStaleCache'] = $false
-    $sources = @(Get-SemrCsvSourceInventory -Config $script:Config -Batch $script:Batch)
-    $mode = Get-SemrSelectedMode
-    $staleSources = @($sources | Where-Object {
-        $_.Present -and -not $_.Fresh -and $_.Status -ne 'Not used - related checks disabled' -and (
-            $mode -eq 'CacheOnly' -or $_.ExpectedUse -eq 'Live fallback / CacheOnly'
-        )
-    })
-    if ($staleSources.Count -eq 0) { return $true }
-
-    $maximumAgeHours = [double]$script:Config.Cache.MaximumAgeHours
-    $fileList = ($staleSources | ForEach-Object { "- $($_.FileName): $($_.AgeHours) hour(s) old`n  $($_.Path)" }) -join "`n"
-    $modeExplanation = if ($mode -eq 'Live') { 'These files may be needed if a live on-premises source is unavailable.' } else { 'CacheOnly requires these files for the assessment.' }
-    $message = @"
-The following CSV file(s) exceed MaximumAgeHours ($maximumAgeHours):
-
-$fileList
-
-$modeExplanation
-
-Do you want to continue and explicitly accept these stale files for this run?
-"@
-    $answer = Invoke-SemrForegroundPrompt -Action {
-        [System.Windows.MessageBox]::Show($window, $message, 'Stale CSV cache detected', 'YesNo', 'Warning')
-    }
-    if ($answer -eq [System.Windows.MessageBoxResult]::Yes) {
-        $script:Config['_AllowStaleCache'] = $true
-        Write-SemrActivity -Message "Operator accepted $($staleSources.Count) stale CSV file(s) for this run." -Level WARN
-        Update-SemrCsvSourcesDisplay
-        return $true
-    }
-
-    $controls.StatusText.Text = 'Assessment cancelled: stale CSV files were not accepted.'
-    Write-SemrActivity -Message 'Assessment cancelled because stale CSV files were not accepted.' -Level WARN
-    return $false
 }
 
 function Confirm-SemrMicrosoftGraphModule {
@@ -817,11 +750,7 @@ function Complete-SemrProgressWindow {
 }
 
 function Test-SemrProgressCancellation { return $script:CancelRequested -or ($script:ProgressWindow -and [bool]$script:ProgressWindow.State.CancelRequested) }
-function Get-SemrSelectedMode {
-    $selected = $controls.ModeCombo.SelectedItem
-    if ($selected -and $selected.Content) { return [string]$selected.Content }
-    return 'Live'
-}
+function Get-SemrSelectedMode { return 'Live' }
 
 function Get-SemrSelectedAssessmentPhase {
     $selected = $controls.AssessmentPhaseCombo.SelectedItem
@@ -968,49 +897,27 @@ function Initialize-SemrMigrationEndpointSelection {
 }
 
 function Sync-SemrConnectionDisplay {
-    $mode = Get-SemrSelectedMode
-    $script:Config['Mode'] = $mode
+    $script:Config['Mode'] = 'Live'
     $state = Get-SemrConnectionState
-    $cachePath = [string]$script:Config._CacheRootPath
-
-    if ($mode -eq 'CacheOnly') {
-        $controls.AdStateText.Text = 'CacheOnly (CSV inventory)'
-        $controls.OnPremStateText.Text = 'CacheOnly (CSV inventory)'
-        $controls.ExoStateText.Text = 'CacheOnly (CSV inventories)'
-        $controls.GraphStateText.Text = 'CacheOnly (CSV inventories)'
-        foreach ($control in @($controls.AdStateText, $controls.OnPremStateText, $controls.ExoStateText, $controls.GraphStateText)) {
-            $control.Foreground = '#146C43'
-        }
-        if (-not $script:Assessment) {
-            $controls.HybridStateText.Text = 'CacheOnly: migration endpoint test skipped; tenant synchronization health is read from CSV.'
-            $controls.HybridStateText.Foreground = '#5F6B7A'
-        }
+    $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live forest)' } else { 'Required Live source; checked automatically during assessment' }
+    $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (Live, ViewEntireForest)' } else { 'Required Live source; Exchange cmdlets or remote session required' }
+    $controls.ExoStateText.Text = if ($state.ExchangeOnline) { 'Connected (Live, Interactive)' } else { 'Required interactive connection starts with Run assessment' }
+    $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Live evidence loaded (isolated process, Interactive)' } else { 'Required interactive collection starts after Exchange Online' }
+    $controls.AdStateText.Foreground = if ($state.ActiveDirectory) { '#146C43' } else { '#8A5A00' }
+    $controls.OnPremStateText.Foreground = if ($state.OnPremisesExchange) { '#146C43' } else { '#8A5A00' }
+    $controls.ExoStateText.Foreground = if ($state.ExchangeOnline) { '#146C43' } else { '#5F6B7A' }
+    $controls.GraphStateText.Foreground = if ($state.MicrosoftGraph) { '#146C43' } else { '#5F6B7A' }
+    if (-not $script:Assessment) {
+        $controls.HybridStateText.Text = 'Live strict: migration endpoint, hybrid configuration and tenant synchronization are queried directly.'
+        $controls.HybridStateText.Foreground = '#5F6B7A'
     }
-    else {
-        $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live)' } else { 'Automatic live check; CSV fallback if unavailable' }
-        $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (Live)' } else { 'Automatic live check; CSV fallback if unavailable' }
-        $controls.ExoStateText.Text = if ($state.ExchangeOnline) { 'Connected (Live, Interactive)' } else { 'Interactive connection starts automatically with Run assessment' }
-        $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Live evidence loaded (isolated process, Interactive)' } else { 'Interactive collection starts automatically after Exchange Online' }
-        $controls.AdStateText.Foreground = if ($state.ActiveDirectory) { '#146C43' } else { '#8A5A00' }
-        $controls.OnPremStateText.Foreground = if ($state.OnPremisesExchange) { '#146C43' } else { '#8A5A00' }
-        $controls.ExoStateText.Foreground = if ($state.ExchangeOnline) { '#146C43' } else { '#5F6B7A' }
-        $controls.GraphStateText.Foreground = if ($state.MicrosoftGraph) { '#146C43' } else { '#5F6B7A' }
-        if (-not $script:Assessment) {
-            $controls.HybridStateText.Text = 'Automatic: Exchange Online migration endpoint and tenant synchronization health from Microsoft Graph.'
-            $controls.HybridStateText.Foreground = '#5F6B7A'
-        }
-    }
-
-    $controls.ModeCombo.IsEnabled = -not $script:IsBusy
     $controls.AssessmentPhaseCombo.IsEnabled = -not $script:IsBusy
-    $controls.MigrationEndpointCombo.IsEnabled = (-not $script:IsBusy -and $mode -eq 'Live' -and $script:MigrationEndpointsLoaded)
+    $controls.MigrationEndpointCombo.IsEnabled = (-not $script:IsBusy -and $script:MigrationEndpointsLoaded)
     $controls.RunButton.IsEnabled = (-not $script:IsBusy -and $null -ne $script:Batch)
-    $alternativeCachePath = [string]$script:Config._AlternativeCacheRootPath
-    $authenticationLabel = if ($mode -eq 'CacheOnly') { 'None' } else { 'Interactive' }
     $phase = Get-SemrSelectedAssessmentPhase
-    $controls.FooterText.Text = "Read-only | Mode: $mode | Phase: $phase | Auth: $authenticationLabel | Tenant: $($script:Config._TenantProfileKey) | Cache: $cachePath | Alternative: $alternativeCachePath"
-}
-function Switch-SemrBusyState {
+    $assessmentStatus = if ($script:Assessment) { " | Status: $($script:Assessment.AssessmentStatus)" } else { '' }
+    $controls.FooterText.Text = "Read-only | Mode: Live strict | Phase: $phase | Auth: Interactive | Tenant: $($script:Config._TenantProfileKey)$assessmentStatus"
+}function Switch-SemrBusyState {
     param(
         [bool]$Busy,
         [string]$Message = ''
@@ -1055,15 +962,12 @@ function Import-SemrCsvToGui {
         Update-SemrProgressWindow -Stage 'Detecting encoding and delimiter' -Detail $controls.CsvPathBox.Text.Trim() -Indeterminate
         $path = $controls.CsvPathBox.Text.Trim()
         $script:Batch = Import-SemrBatchCsv -Path $path
-        Update-SemrProgressWindow -Stage 'Validating mailbox rows' -Detail "$($script:Batch.Rows.Count) row(s) parsed; validating and rendering the batch." -Current 3 -Total 5
+        Update-SemrProgressWindow -Stage 'Validating mailbox rows' -Detail "$($script:Batch.Rows.Count) row(s) parsed; validating and rendering the batch." -Current 3 -Total 3
         $controls.BatchGrid.ItemsSource = @($script:Batch.Rows)
         $controls.CsvMetadataText.Text = "{0} row(s) | Encoding: {1} | Delimiter: {2} | Identity: {3}" -f @($script:Batch.Rows.Count, $script:Batch.Encoding, $script:Batch.Delimiter, $script:Batch.IdentityColumn)
         $controls.StatusText.Text = "Batch loaded: $($script:Batch.Rows.Count) mailbox row(s)."
         $controls.RunButton.IsEnabled = $true
         Write-SemrActivity -Message "Loaded CSV '$($script:Batch.Path)' with $($script:Batch.Rows.Count) row(s)." -Level SUCCESS
-        Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
-        Update-SemrProgressWindow -Stage 'Checking CSV evidence sources' -Detail 'Checking primary and alternative cache locations.' -Current 4 -Total 5
-        Update-SemrCsvSourcesDisplay
         $controls.StatusText.Text = "Batch loaded: $($script:Batch.Rows.Count) mailbox row(s)."
         Complete-SemrProgressWindow -Stage 'Batch loaded' -Summary "$($script:Batch.Rows.Count) mailbox row(s) loaded and validated."
     }
@@ -1101,20 +1005,6 @@ $controls.BrowseCsvButton.Add_Click({
         [void](Start-SemrProgressWindow -Title 'Loading migration batch' -Stage 'Opening selected CSV' -Detail $dialog.FileName)
         Import-SemrCsvToGui
     }
-})
-
-$controls.ModeCombo.Add_SelectionChanged({
-    if ($script:IsBusy) { return }
-    $mode = Get-SemrSelectedMode
-    $script:Config['Mode'] = $mode
-    $controls.HybridStateText.Text = if ($mode -eq 'CacheOnly') { 'CacheOnly: live endpoint test skipped; tenant synchronization health is read from CSV cache.' } else { 'Live: EXO, user/licensing evidence and tenant synchronization use interactive cloud data; AD and Exchange on-premises use live data with CSV fallback.' }
-    $controls.HybridStateText.Foreground = '#5F6B7A'
-    $controls.StatusText.Text = "Mode selected: $mode"
-    Sync-SemrConnectionDisplay
-    Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
-    Update-SemrCsvSourcesDisplay
-    $controls.StatusText.Text = "Mode selected: $mode"
-    Write-SemrActivity -Message "Execution mode changed to $mode. Cache root: $($script:Config._CacheRootPath)"
 })
 
 $controls.AssessmentPhaseCombo.Add_SelectionChanged({
@@ -1158,19 +1048,13 @@ $controls.RunButton.Add_Click({
     if (-not $script:Batch) { return }
     try {
         $script:CancelRequested = $false
-        [void](Start-SemrProgressWindow -Title 'Exchange migration readiness assessment' -Stage 'Preparing assessment' -Detail 'Validating options and CSV evidence freshness.')
+        [void](Start-SemrProgressWindow -Title 'Exchange migration readiness assessment' -Stage 'Preparing Live strict assessment' -Detail 'Validating options and required live source prerequisites.')
         Sync-SemrCheckOptionsToConfig
         $script:Config['AssessmentPhase'] = Get-SemrSelectedAssessmentPhase
         Write-SemrActivity -Message "$(@($script:CheckOptions | Where-Object Enabled).Count) checks enabled; $(@($script:Config.DisabledChecks).Count) optional checks disabled for this run."
-        Update-SemrProgressWindow -Stage 'Validating cache freshness' -Detail 'Checking primary and alternative CSV sources.' -Current 1 -Total 9
-        Set-SemrProcessingStatus -Message 'Checking CSV cache freshness; please wait...'
-        if (-not (Confirm-SemrStaleCsvUsage)) {
-            Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'The operator declined use of stale CSV evidence.'
-            return
-        }
         Switch-SemrBusyState -Busy $true -Message 'Assessment running - please wait...'
         $controls.RunProgress.Value = 0
-        Write-SemrActivity -Message "Starting read-only assessment in $($script:Config.Mode) mode and $($script:Config.AssessmentPhase) phase for $($script:Batch.Rows.Count) mailbox row(s)."
+        Write-SemrActivity -Message "Starting read-only assessment in Live strict mode and $($script:Config.AssessmentPhase) phase for $($script:Batch.Rows.Count) mailbox row(s)."
         if ((Get-SemrSelectedMode) -eq 'Live') {
             Update-SemrProgressWindow -Stage 'Checking Microsoft Graph modules' -Detail 'Verifying required delegated Graph cmdlets.' -Current 2 -Total 9
             if (-not (Confirm-SemrMicrosoftGraphModule)) {
@@ -1222,18 +1106,17 @@ $controls.RunButton.Add_Click({
             Invoke-SemrDoEvent
         }
         $cancellationCheck = { Invoke-SemrDoEvent; return (Test-SemrProgressCancellation) }
-        Update-SemrProgressWindow -Stage 'Collecting tenant and mailbox evidence' -Detail 'AD and Exchange on-premises are queried live when available; CSV fallback is automatic.' -Current 6 -Total 9
+        Update-SemrProgressWindow -Stage 'Collecting tenant and mailbox evidence' -Detail 'AD, Exchange on-premises, Exchange Online and Microsoft Graph are required Live sources. Missing sources make the assessment INCOMPLETE.' -Current 6 -Total 9
         $script:Assessment = Invoke-SemrAssessment -Batch $script:Batch -Config $script:Config -ProgressCallback $progressAction -CancellationCheck $cancellationCheck
         if ($script:Assessment.SourceInitialization) {
             $sourceState = $script:Assessment.SourceInitialization
-            Write-SemrActivity -Message ([string]$sourceState.ActiveDirectoryMessage) -Level $(if ($sourceState.ActiveDirectoryLive -or $script:Config.Mode -eq 'CacheOnly') { 'INFO' } else { 'WARN' })
-            Write-SemrActivity -Message ([string]$sourceState.ExchangeOnPremisesMessage) -Level $(if ($sourceState.ExchangeOnPremisesLive -or $script:Config.Mode -eq 'CacheOnly') { 'INFO' } else { 'WARN' })
-            foreach ($fallbackReason in @($sourceState.ActiveDirectoryFallbackReasons)) { Write-SemrActivity -Message "Active Directory live forest fallback reason: $fallbackReason" -Level WARN }
+            Write-SemrActivity -Message ([string]$sourceState.ActiveDirectoryMessage) -Level $(if ($sourceState.ActiveDirectoryLive) { 'INFO' } else { 'WARN' })
+            Write-SemrActivity -Message ([string]$sourceState.ExchangeOnPremisesMessage) -Level $(if ($sourceState.ExchangeOnPremisesLive) { 'INFO' } else { 'WARN' })
         }
         Write-SemrActivity -Message "Tenant synchronization evidence source: $($script:Assessment.EntraConnect.Source). $($script:Assessment.EntraConnect.Message)" -Level $(if ($script:Assessment.EntraConnect.Available) { 'INFO' } else { 'WARN' })
         $endpointName = if ([string]::IsNullOrWhiteSpace([string]$script:Assessment.Hybrid.EndpointName)) { 'not available' } else { [string]$script:Assessment.Hybrid.EndpointName }
         $controls.HybridStateText.Text = "Migration endpoint: $endpointName | $($script:Assessment.Hybrid.Message)`nTenant synchronization: $($script:Assessment.EntraConnect.Message)"
-        $controls.HybridStateText.Foreground = if ($script:Assessment.EntraConnect.Available -and $script:Assessment.EntraConnect.LastSyncFresh -and ($script:Assessment.Hybrid.ConnectivitySuccess -or (Get-SemrSelectedMode) -eq 'CacheOnly')) { '#146C43' } else { '#8A5A00' }
+        $controls.HybridStateText.Foreground = if ($script:Assessment.AssessmentStatus -eq 'COMPLETE' -and $script:Assessment.EntraConnect.LastSyncFresh -and $script:Assessment.Hybrid.ConnectivitySuccess) { '#146C43' } else { '#8A5A00' }
         Set-SemrProcessingStatus -Message 'Generating CSV, Excel and HTML reports; please wait...'
         $exportProgress = {
             param($Stage,$Detail,$Current,$Total)
@@ -1241,19 +1124,19 @@ $controls.RunButton.Add_Click({
             Set-SemrProcessingStatus -Message "$Stage - $Detail" -SkipActivity
         }
         $script:Export = Export-SemrAssessment -Assessment $script:Assessment -OutputRoot (Resolve-SemrOutputRoot) -ProgressCallback $exportProgress
-        $controls.SummaryGrid.ItemsSource = @($script:Assessment.Summary);$controls.FindingsGrid.ItemsSource = @($script:Assessment.Findings);$controls.GlobalFindingsGrid.ItemsSource = @($script:Assessment.GlobalFindings);$controls.PermissionsGrid.ItemsSource = @($script:Assessment.PermissionsBaseline);$controls.CsvSourcesGrid.ItemsSource = @($script:Assessment.CsvSources)
+        $controls.SummaryGrid.ItemsSource = @($script:Assessment.Summary);$controls.FindingsGrid.ItemsSource = @($script:Assessment.Findings);$controls.GlobalFindingsGrid.ItemsSource = @($script:Assessment.GlobalFindings);$controls.PermissionsGrid.ItemsSource = @($script:Assessment.PermissionsBaseline)
         $controls.OpenOutputButton.IsEnabled = $true
         $controls.ComparePermissionsButton.IsEnabled = (Test-Path -LiteralPath $script:Export.PermissionsPath)
         Sync-SemrResultCount
         $controls.RunProgress.Value = 100
-        $controls.StatusText.Text = if ($script:Assessment.Cancelled) { 'Assessment cancelled; partial results exported.' } else { "Assessment complete: $($script:Assessment.RunId)" }
+        $controls.StatusText.Text = if ($script:Assessment.Cancelled) { 'Assessment cancelled; partial results exported.' } else { "Assessment $($script:Assessment.AssessmentStatus): $($script:Assessment.RunId)" }
+        Sync-SemrConnectionDisplay
         Write-SemrActivity -Message "Assessment exported to '$($script:Export.RunFolder)'. Excel: '$($script:Export.ExcelPath)'. HTML: '$($script:Export.HtmlPath)'." -Level SUCCESS
         $summaryText = "GO: $($controls.GoCountText.Text) | GO-WARNING: $($controls.WarningCountText.Text) | NO-GO: $($controls.NoGoCountText.Text) | UNKNOWN: $($controls.UnknownCountText.Text)"
         Complete-SemrProgressWindow -Stage $(if ($script:Assessment.Cancelled) { 'Assessment cancelled - partial reports created' } else { 'Assessment complete' }) -Summary $summaryText -OutputPath $script:Export.RunFolder -HtmlPath $script:Export.HtmlPath -ExcelPath $script:Export.ExcelPath
         $controls.MainTabs.SelectedItem = $controls.ResultsTab
     }
     catch {
-        Update-SemrCsvSourcesDisplay -AssessmentCompleted
         Complete-SemrProgressWindow -Stage 'Assessment failed' -Summary $_.Exception.Message -Failed
         Show-SemrError -Title 'Assessment failed' -ErrorRecord $_
         $controls.StatusText.Text = 'Assessment failed. Review Activity.'
@@ -1322,9 +1205,7 @@ $window.Add_ContentRendered({
     }
     Sync-SemrConnectionDisplay
     Update-SemrOptionsSummary
-    Set-SemrProcessingStatus -Message 'Checking primary and alternative CSV cache paths; please wait...' -SkipActivity
-    Update-SemrCsvSourcesDisplay
-    Write-SemrActivity -Message "Smart Exchange Migration Readiness v$script:AppVersion started in $($script:Config.Mode) mode and $($script:Config.AssessmentPhase) phase with interactive cloud authentication. Tenant profile: $($script:Config._TenantProfileKey). Cache root: $($script:Config._CacheRootPath). Alternative cache: $($script:Config._AlternativeCacheRootPath)"
+    Write-SemrActivity -Message "Smart Exchange Migration Readiness v$script:AppVersion started in Live strict mode and $($script:Config.AssessmentPhase) phase with interactive cloud authentication. Tenant profile: $($script:Config._TenantProfileKey)."
     Write-SemrActivity -Message 'Some live operations can take several minutes and may temporarily delay UI response. Follow the current-operation status and please wait before closing the application.'
     if ($script:SessionLogPath) {
         Write-SemrActivity -Message "Session log: $script:SessionLogPath"

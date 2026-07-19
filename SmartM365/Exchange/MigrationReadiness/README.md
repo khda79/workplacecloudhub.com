@@ -2,86 +2,47 @@
 
 Application autonome PowerShell 7 / WPF de prévalidation en lecture seule des batches de migration Exchange hybride vers Exchange Online.
 
-Elle charge un CSV de boîtes aux lettres, exécute les contrôles de préparation et produit un verdict par boîte : `GO`, `GO-WARNING`, `NO-GO` ou `UNKNOWN`.
+Elle charge un CSV de boîtes aux lettres, interroge les sources autoritaires en Live et produit un verdict par boîte : `GO`, `GO-WARNING`, `NO-GO` ou `UNKNOWN`.
 
-## Modes de données
+## Mode Live strict
 
-Le mode est sélectionnable directement dans l’interface.
+L’application fonctionne exclusivement en **Live strict**. Elle ne propose plus de mode `CacheOnly` et ne charge aucun inventaire CSV de secours.
 
-La phase d’évaluation est également sélectionnable dans l’interface :
+La phase d’évaluation reste sélectionnable :
 
-- `PreCreation` — phase par défaut, avant création du batch : un move actif est bloquant et l’absence de licence cible est attendue.
-- `ExistingBatch` — contrôle d’un batch déjà créé ou démarré : un move actif est attendu, son absence devient un avertissement, et une licence Exchange déjà attribuée est attendue.
+- `PreCreation` — avant création du batch : un move actif est bloquant et l’absence de licence cible est attendue.
+- `ExistingBatch` — batch déjà créé ou démarré : un move actif et une licence Exchange sont attendus.
 
-La phase sélectionnée est inscrite dans `Summary.csv` afin que le verdict reste interprétable après l’exécution.
+Sources obligatoires :
 
-### Live — mode par défaut
+- Exchange Online : connexion interactive déléguée lancée par `Run assessment` ;
+- Microsoft Graph : connexion interactive déléguée dans un processus PowerShell 7 isolé ;
+- Active Directory : interrogation groupée de tous les domaines retournés par `Get-ADForest` ;
+- Exchange 2016 : Exchange Management Shell locale ou session PowerShell distante, avec `Set-ADServerSettings -ViewEntireForest $true` ;
+- santé Microsoft Entra Connect : `onPremisesSyncEnabled` et `onPremisesLastSyncDateTime` lus directement sur l’organisation Microsoft Graph.
 
-- Exchange Online : connexion interactive déléguée lancée automatiquement par Run assessment.
-- Microsoft Graph : connexion interactive déléguée standard lancée automatiquement après Exchange Online dans un processus PowerShell 7 isolé, afin d'éviter les conflits de bibliothèques MSAL avec ExchangeOnlineManagement.
-- Active Directory : tentative live automatique ; fallback sur `AD_Users_AllDomains.csv` si AD est indisponible.
-- Exchange on-premises / Exchange 2016 : utilisation des cmdlets live lorsqu’elles sont disponibles ; la session applique `Set-ADServerSettings -ViewEntireForest $true` (ou `Set-OnPremADServerSettings` avec la session préfixée) avant toute collecte, puis utilise `Exchange_OnPrem_Mailboxes_AllDomains.csv` en fallback si cette portée forêt ne peut pas être activée.
-- Santé de synchronisation Microsoft Entra : en Live, lecture autoritaire de `onPremisesSyncEnabled` et `onPremisesLastSyncDateTime` directement sur l’objet tenant Microsoft Graph. Le CSV `M365_Entra_AzureADConnect_SyncHealth.csv` reste contextuel uniquement et ne peut pas produire un faux PASS si Graph échoue.
-- Endpoint de migration et fraîcheur de la synchronisation tenant : contrôlés automatiquement pendant l’évaluation.
+Si une source obligatoire est indisponible, les contrôles possibles continuent, mais l’assessment est marqué `INCOMPLETE`. Une source manquante ne peut jamais produire un verdict `GO`.
 
-Les connexions AD et Exchange 2016 sont testées avant le chargement des fallbacks. Lorsque l’AD Live est disponible, les identités du batch sont recherchées par requêtes groupées dans chaque domaine de la forêt et le volumineux `AD_Users_AllDomains.csv` n’est pas relu. Si un seul domaine échoue, la couverture Live est considérée incomplète et le fallback CSV couvre tout le batch. Les inventaires cloud ou hybrides non nécessaires en Live ne sont plus importés ; l’onglet `CSV sources` indique uniquement les fichiers réellement consultés. L’onglet Sources reste informatif et n’expose aucun bouton de connexion séparé.
+L’onglet `Sources`, `Live-Sources.csv`, la feuille Excel `Live Sources` et le rapport HTML exposent l’état et le détail de chaque source obligatoire.
 
-### CacheOnly
+## Autonomie et sécurité
 
-Aucune connexion EXO, Graph, AD, Exchange on-premises ou Entra Connect n’est utilisée. Toutes les preuves disponibles sont lues dans :
+L’application possède son propre JSON, son moteur et ses exports. Elle ne charge aucun autre script SmartM365. Si `TenantProfile.TenantId` est vide, elle peut reprendre en mémoire le tenant par défaut de la configuration centrale SmartM365.
 
-```text
-\\server\share\WORKPLACE\DATA\Tenants\<TenantKey>
-```
+Aucun inventaire SmartM365 n’est requis. Seuls le CSV du batch et les rapports générés sont utilisés comme fichiers CSV.
 
-Le chargeur accepte les CSV directement dans ce dossier ou dans son sous-dossier `DATA-LAST`. `Cache.AlternativeRootPath` permet de déclarer un second emplacement, par exemple une copie SharePoint synchronisée. Il sélectionne, fichier par fichier, la copie existante la plus récente parmi la racine, `DATA-LAST` et le chemin alternatif.
-
-L'onglet `CSV sources` indique pour chaque fichier attendu son chemin sélectionné, sa présence, sa fraîcheur et son utilisation effective (`Used`, fallback disponible, non utilisé, absent ou périmé).
-
-L'onglet `Options` permet de désactiver, pour l'exécution suivante, les contrôles optionnels. Les contrôles d'intégrité minimale du CSV et de disponibilité des quatre sources principales restent obligatoires. Les contrôles décochés ne produisent pas de finding et leurs collectes coûteuses sont évitées lorsqu'elles ne servent à aucun autre contrôle. La sélection appliquée est exportée dans `Check-Options.csv`.
-
-Lorsqu'un fichier requis ou susceptible de servir de fallback dépasse `Cache.MaximumAgeHours`, le GUI demande explicitement si l'opérateur souhaite continuer. Une réponse positive accepte les CSV périmés uniquement pour l'exécution courante ; le JSON n'est pas modifié. Une réponse négative annule l'assessment avant les connexions et les collectes.
-
-Les contrôles qui nécessitent obligatoirement une interrogation live, notamment le test d’endpoint et la recherche des mailboxes soft-deleted/inactive si le cache ne les expose pas, sont signalés `UNKNOWN` avec une recommandation de validation finale en mode Live. Ils ne sont jamais convertis silencieusement en `PASS`.
-
-## Autonomie
-
-L’application possède son propre fichier de configuration, son moteur de contrôles et ses exports. Elle ne charge aucun script SmartM365. Si son `TenantProfile.TenantId` est vide, elle lit uniquement le profil tenant central SmartM365 afin de reprendre en mémoire le même tenant.
-
-Les CSV du cache peuvent être produits par SmartM365, mais l’application les consomme directement et reste exécutable indépendamment.
-
-Le profil opérationnel est défini dans le JSON local ignoré par Git avec :
-
-- `TenantProfile.TenantId` : garde-fou pour empêcher une authentification live dans le mauvais tenant ; s’il est vide, le profil `DefaultTenant` de SmartM365 est utilisé en mémoire.
-- `TenantProfile.ProfileKey` : clé explicite du profil tenant, par exemple `prod` ; la valeur générique `tenant` reprend seulement le `DefaultTenant` central.
-- `TenantProfile.RemoteRoutingDomain` : domaine de routage hybride attendu.
-- `Cache.RootPath` : racine des inventaires CSV.
-- `Cache.MaximumAgeHours` : âge maximal accepté pour les données.
-
-Il n’existe plus de bloc générique `Tenant`, de paramètre `MicrosoftGraph.UseDeviceCode`, de bloc `OnPremises`, ni de paramètre `EntraConnect.Server`.
-
-Exchange Online et Microsoft Graph utilisent exclusivement une authentification interactive déléguée standard. Aucun flux device code, secret applicatif ou certificat d’application n’est utilisé ni attendu dans le JSON.
-
-## Sécurité
-
-L’application est strictement diagnostique. Elle ne crée pas de batch, ne modifie aucun destinataire, attribut AD, licence, hold, permission ou objet de migration.
-
-Les jetons ne sont pas enregistrés. Le fichier JSON local, les CSV d’entrée et les rapports opérationnels sont exclus de Git.
+L’application est strictement diagnostique : elle ne crée pas de batch et ne modifie aucun destinataire, attribut AD, licence, hold, permission ou objet de migration. Les jetons ne sont pas enregistrés.
 
 ## Prérequis
 
-Pour tous les modes :
-
-- Windows.
-- PowerShell 7 disponible dans `C:\Program Files\PowerShell\7\pwsh.exe` pour le lanceur fourni.
-- Accès en lecture au chemin du cache lorsque des preuves mises en cache sont nécessaires.
-
-Uniquement pour le mode Live :
-
+- Windows et PowerShell 7 ;
 - module `ExchangeOnlineManagement` 3.0 ou ultérieur ;
-- modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` ; lorsqu’un module manque dans PowerShell 7, le GUI propose de l’installer depuis PowerShell Gallery avec `-Scope CurrentUser` avant l’authentification ;
-- compte interactif disposant des droits de lecture nécessaires dans Exchange Online et Microsoft Graph ;
-- pour les sources on-premises live, module `ActiveDirectory` et Exchange Management Shell disponibles sur la machine d’exécution. Leur absence n’est pas bloquante si les CSV de fallback sont accessibles et suffisamment récents. Le module ADSync n’est ni utilisé ni requis.
+- modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` et `Microsoft.Graph.Identity.DirectoryManagement` ; le GUI peut proposer leur installation sous `CurrentUser` ;
+- module `ActiveDirectory` et accès à tous les domaines de la forêt ;
+- Exchange Management Shell locale ou session PowerShell distante Exchange 2016 ;
+- compte interactif disposant des droits de lecture EXO et Graph nécessaires.
+
+Le module ADSync n’est ni utilisé ni requis.
 
 Scopes Graph par défaut :
 
@@ -95,9 +56,7 @@ Scopes Graph par défaut :
 Start-SmartM365-ExchangeMigrationReadiness-GUI.cmd
 ```
 
-Le lanceur CMD démarre PowerShell 7 dans un processus détaché et masqué, puis se ferme immédiatement.
-
-Validation statique sans afficher l’interface :
+Validation statique sans ouvrir l’interface :
 
 ```powershell
 pwsh -NoLogo -NoProfile -STA -File .\SmartM365-ExchangeMigrationReadiness-GUI.ps1 -ValidateOnly
@@ -111,94 +70,64 @@ Modèle versionné :
 Config\SmartM365-ExchangeMigrationReadiness.local.json.template
 ```
 
-Fichier local créé automatiquement au premier lancement et exclu de Git :
+Fichier local ignoré par Git :
 
 ```text
 Config\SmartM365-ExchangeMigrationReadiness.local.json
 ```
 
-Le modèle contient uniquement des valeurs neutres. Renseignez les valeurs du tenant et du cache dans le fichier local ; elles ne doivent pas être versionnées.
-
 Clés principales :
 
-- `Mode` : `Live` par défaut ou `CacheOnly` ; le sélecteur GUI s’applique à l’exécution courante.
-- `AssessmentPhase` : `PreCreation` par défaut ou `ExistingBatch` ; le sélecteur GUI s’applique à l’exécution courante.
-- `DisabledChecks` : liste optionnelle d'identifiants de contrôles désactivés par défaut ; le GUI ne modifie pas automatiquement le JSON.
-- `TenantProfile` : profil tenant autonome de l’application.
-- `Cache.RootPath` et `Cache.MaximumAgeHours` : emplacement et fraîcheur des inventaires.
-- `ExchangeOnline.UserPrincipalName` : UPN administrateur optionnel.
-- `ExchangeOnline.DisableWam` : conserve le flux interactif EXO sans WAM lorsque requis sur ce poste.
-- `Hybrid.MigrationEndpointName` : présélection facultative d’un endpoint `ExchangeRemoteMove` dans le JSON local ; le modèle reste vide. En mode Live, le GUI charge automatiquement les endpoints après l’authentification EXO, sélectionne l’unique endpoint ou demande explicitement lequel utiliser lorsqu’il y en a plusieurs. Le choix reste limité à la session et le JSON n’est jamais réécrit. En CacheOnly, la liste est désactivée et aucun test Live n’est exécuté.
-- En mode Live, Active Directory est interrogé dans chaque domaine retourné par `Get-ADForest`, avec le nom LDAP exact `mS-DS-ConsistencyGuid`. Si un domaine ne peut pas être interrogé, la couverture Live est considérée incomplète et l’application utilise le CSV AD de fallback au lieu de conclure à tort que l’identité est absente.
-- `Hybrid.TargetDeliveryDomain` : domaine `tenant.mail.onmicrosoft.com` attendu.
-- `Hybrid.ActiveMigrationWarningThreshold` : seuil consultatif du nombre de migrations réellement actives, `100` par défaut. Les états échoués, arrêtés ou corrompus sont exclus de cette charge et présentés séparément dans le contrôle de backlog.
-- `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` : politique explicite des SKU et quotas mailbox. Un SKU absent de la table reste `UNKNOWN` bloquant ; aucun quota générique de 100 Go n’est supposé. `SPE_F1` est le SKU technique Microsoft 365 F3 et sa limite mailbox est définie à 2 Go.
-- `EntraConnectHealth.MaximumLastSyncAgeMinutes` : ancienneté maximale de la dernière synchronisation tenant ; `120` minutes par défaut. En Live, un état désactivé, une date absente, une collecte Graph indisponible ou une synchronisation trop ancienne produit un résultat bloquant.
-- `OutputRoot` : dossier d’export, absolu ou relatif à l’application.
+- `AssessmentPhase` : `PreCreation` ou `ExistingBatch` ;
+- `DisabledChecks` : contrôles optionnels désactivés par défaut ;
+- `TenantProfile.TenantId` : garde-fou du tenant interactif ;
+- `TenantProfile.ProfileKey` : clé du profil, par exemple `prod` ;
+- `TenantProfile.RemoteRoutingDomain` : domaine de routage hybride attendu ;
+- `ExchangeOnPremises.ConnectionUri` et `ExchangeOnPremises.Authentication` : session distante facultative utilisant l’identité Windows courante ;
+- `ExchangeOnline.UserPrincipalName` et `ExchangeOnline.DisableWam` ;
+- `MicrosoftGraph.Scopes` ;
+- `Hybrid.MigrationEndpointName` : endpoint `ExchangeRemoteMove` présélectionné, facultatif ;
+- `Hybrid.TargetDeliveryDomain` et `Hybrid.ActiveMigrationWarningThreshold` ;
+- `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` ;
+- `EntraConnectHealth.MaximumLastSyncAgeMinutes` ;
+- `OutputRoot`.
 
-## Inventaires CSV attendus
-
-Selon le mode et les contrôles disponibles :
-
-- `AD_Users_AllDomains.csv`
-- `Exchange_OnPrem_Mailboxes_AllDomains.csv`
-- `M365_Entra_AzureADConnect_SyncHealth.csv`
-- `M365_Users_Active.csv`
-- `Exchange_EXO_Mailboxes_AllDomains.csv`
-- `Exchange_EXO_MigrationJobs.csv`
-- `M365_Licenses_Tenant.csv`
-- `M365_Licenses_ServicePlans.csv`
-- `AD_Users_DuplicateSMTP.csv`
-- `AD_Users_DuplicateRemoteRoutingAddress.csv`
-- `Exchange_OnPrem_ProxyAddresses_Check.csv`
-- `Exchange_EXO_AcceptedDomains.csv`
-- `Exchange_EXO_Mailboxes_AllDomains_Archive.csv`
-- `Exchange_OnPrem_MigrationReadiness_Config.csv`
-
-L’application vérifie la présence et l’âge des fichiers avant de les considérer utilisables.
+Il n’existe aucun paramètre `Mode`, `Cache`, `UseDeviceCode`, secret applicatif ou certificat d’application.
 
 ## CSV de migration
 
-La colonne canonique est `EmailAddress`. Sont également acceptées : `PrimarySmtp`, `PrimarySmtpAddress`, `UserPrincipalName`, `UPN` ou `Mailbox`. Le fichier est chargé et validé immédiatement après sa sélection avec Browse.
+La colonne canonique est `EmailAddress`. Sont aussi acceptées : `PrimarySmtp`, `PrimarySmtpAddress`, `UserPrincipalName`, `UPN` ou `Mailbox`.
 
-Colonnes optionnelles interprétées :
+Colonnes optionnelles :
 
 - `MailboxType`
 - `TargetSku` ou `TargetSkuPartNumber`
 - `BadItemLimit`
 - `LargeItemLimit`
 
-Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiquement. L’import essaie d’abord UTF-8 strict, puis Windows-1252.
+Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiquement. L’import essaie UTF-8 strict puis Windows-1252.
 
-## Principaux contrôles
+## Contrôles principaux
 
-- intégrité du CSV, adresses vides, syntaxe SMTP et doublons ;
-- existence/unicité du compte AD et statut du compte ;
-- état UserMailbox / RemoteMailbox / MailUser ;
-- cohérence Primary SMTP, proxyAddresses et targetAddress ;
-- unicité globale des proxy SMTP et adresses de routage, doublons internes, domaines acceptés et préservation X500/LegacyExchangeDN ; un propriétaire SMTP actuel produit un `NO-GO`, tandis qu’une collision entre futures adresses attendues sans propriétaire actuel produit un avertissement de planification ;
-- cohérence ExchangeGuid/ArchiveGuid et type de destinataire pris en charge ; avec les anciens exports, l’ExchangeGuid est récupéré depuis `MailboxLocations`, et `ArchiveStatus=None` est interprété comme une absence normale d’archive ;
-- taille de mailbox contre quota explicite du SKU cible avec marge de sécurité ; les shared mailboxes sans SKU explicite utilisent la limite non licenciée de 50 Go ;
-- préparation de l'archive, saturation Recoverable Items, limites de dossiers, gros éléments et quotas source personnalisés ;
-- Litigation Hold et In-Place Hold quand les propriétés sont disponibles ;
-- baseline Full Access, Send As et Send on Behalf ; les délégations connues restent affichées même lorsque le cache ne couvre pas les trois types de permissions ;
-- dépendances de délégation hors batch, forwarding mailbox, règles Inbox de transfert, modération et restrictions de remise ;
-- santé de la base Exchange source ; en fallback CSV, l’application rapproche la base de chaque mailbox des lignes `MailboxDatabase` / `Mounted` de `Exchange_OnPrem_MigrationReadiness_Config.csv` au lieu de retourner systématiquement `UNKNOWN` ;
-- état MailUser/mailbox Exchange Online et détection split-brain ;
-- conflits soft-deleted/inactive ;
-- migration user ou move request actif/non terminal, avec déduplication des deux représentations d’une même opération et interprétation adaptée à la phase `PreCreation` ou `ExistingBatch` ; l’erreur Exchange Online `No such request exists in specified index` est interprétée comme une absence de move, pas comme une collecte inconnue ;
-- état d’échec, de suspension ou d’arrêt des objets de migration actuellement visibles ; les objets déjà supprimés ne sont pas présentés à tort comme un historique exhaustif ;
-- unicité et synchronisation de l’utilisateur Entra, avec vérification que le domaine de son UPN figure dans `organization.verifiedDomains` ;
-- erreurs de provisioning et identity anchor Entra ; l’ancienneté de synchronisation par objet reste informative et ne remplace pas la date de dernière synchronisation tenant collectée sur l’objet `organization` ;
-- licence actuelle, quota mailbox de la licence actuellement attribuée, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; une mailbox dépassant la limite F3/SPE_F1 est `NO-GO` tant que la licence cible effective n’est pas attribuée ou que sa taille n’est pas réduite. Un contrôle global compare aussi le nombre total de licences requises par SKU pour le batch avec les unités réellement disponibles ;
-- santé et fraîcheur de la dernière synchronisation tenant en Live directement via Microsoft Graph ; le cache reste contextuel, et CacheOnly utilise exclusivement le CSV ;
-- endpoint `ExchangeRemoteMove` en Live ; l’absence de `Test-MigrationServerAvailability` produit `UNKNOWN`, pas un faux échec de l’endpoint, tandis qu’un test réussi constitue une preuve fonctionnelle de la publication MRSProxy ;
-- MRSProxy, certificat TLS réellement présenté par le `RemoteServer` de l’endpoint sélectionné, charge active des migrations, backlog des migrations échouées/arrêtées/corrompues et cohérence Autodiscover/OAuth ; le contrôle OAuth est consultatif pour un move distant et ne bloque plus à lui seul la migration ;
-- détection de `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException` dans `Get-MigrationUserStatistics -IncludeReport` lorsqu’un objet de migration courant existe ; une occurrence produit un `NO-GO`, l’absence d’objet courant ne produit plus un `UNKNOWN` systématique.
+- format, valeurs vides, syntaxe SMTP, colonnes et doublons du batch ;
+- existence, unicité et état du compte AD dans toute la forêt ;
+- état UserMailbox, RemoteMailbox et MailUser Exchange 2016 ;
+- cohérence Primary SMTP, proxyAddresses, targetAddress et domaine de routage ;
+- unicité globale Live des adresses SMTP et targetAddress via l’annuaire destinataires Exchange en portée forêt ;
+- domaines SMTP acceptés dans Exchange Online et domaine UPN vérifié dans Microsoft Entra ;
+- préservation X500/LegacyExchangeDN et cohérence ExchangeGuid/ArchiveGuid ;
+- taille de mailbox contre le quota du SKU cible et de la licence actuellement attribuée ;
+- archives, Recoverable Items, limites de dossiers, gros éléments et quotas personnalisés ;
+- Litigation Hold et In-Place Hold ;
+- baseline Full Access, Send As et Send on Behalf ;
+- délégations hors batch, forwarding, règles Inbox, modération et restrictions de remise ;
+- disponibilité de la base Exchange source ;
+- état Exchange Online, conflits soft-deleted/inactive et objets de migration existants ;
+- synchronisation Entra, provisioning errors, identity anchor, licences, UsageLocation et capacité du SKU ;
+- endpoint `ExchangeRemoteMove`, MRSProxy, certificat TLS, charge, backlog et OAuth hybride ;
+- erreur `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException`.
 
-Une source obligatoire absente reste bloquante. Un blocage confirmé (`FAIL`) produit `NO-GO`, tandis qu’une preuve bloquante indisponible produit le verdict distinct `UNKNOWN`. Une propriété non disponible dans le cache ne devient jamais un faux `PASS`. Chaque contrôle obligatoire produit explicitement un finding et `SourceTimestamp` correspond à l’horodatage réel de la source utilisée plutôt qu’à l’heure de l’évaluation.
-
-Les contrôles tenant (endpoint, MRSProxy, certificat, charge active, backlog, capacité de licences du batch, OAuth et synchronisation Microsoft Entra) sont évalués une seule fois. Ils apparaissent dans l’onglet `Tenant checks` et dans `Global-Findings.csv`. Seuls leurs vrais blocages sont répercutés dans le verdict de chaque mailbox, sans dupliquer les findings.
+Une source obligatoire absente produit des findings bloquants `UNKNOWN` et un assessment `INCOMPLETE`. Un blocage confirmé produit `NO-GO`. Les alertes tenant non bloquantes restent dans `Tenant checks` et ne transforment pas artificiellement toutes les mailboxes en `GO-WARNING`.
 
 ## Rapports
 
@@ -211,27 +140,14 @@ Output\SEMR-yyyyMMdd-HHmmss\
   Global-Findings.csv
   Permissions-Baseline.csv
   Evidence.csv
-  Csv-Sources.csv
+  Live-Sources.csv
   Check-Options.csv
   SmartM365-ExchangeMigrationReadiness-SEMR-yyyyMMdd-HHmmss.xlsx
   SmartM365-ExchangeMigrationReadiness-SEMR-yyyyMMdd-HHmmss.html
 ```
 
-`Summary.csv` contient un verdict par mailbox avec les compteurs mailbox et tenant séparés, le véritable UPN Entra, la taille de la mailbox en Go, le SKU cible et les licences actuellement attribuées. `Findings.csv` contient les contrôles propres aux mailboxes. `Global-Findings.csv` contient les contrôles tenant exécutés une seule fois. Chaque finding précise la sévérité, le résultat, le caractère bloquant, la valeur observée, la valeur attendue, la source, son horodatage, le message et l’action recommandée.
+`Summary.csv` contient `AssessmentStatus`, le verdict, la taille, le SKU cible, les licences attribuées et les compteurs mailbox/tenant séparés. Le classeur ajoute une feuille `Action Plan` avec une action par ligne. Le HTML affiche le statut `COMPLETE/INCOMPLETE`, les sources Live, les décisions mailbox et les contrôles tenant.
 
-Le classeur Excel autonome regroupe tous les CSV générés dans des onglets formatés — les sept exports actuels et tout futur CSV du même dossier — avec filtres, première ligne figée et couleurs de verdict. Il ne nécessite ni Microsoft Excel ni le module ImportExcel.
+## Permissions après migration
 
-Le rapport HTML UTF-8 est autonome et contient un bandeau horizontal de synthèse GO / NO-GO, un tableau mailbox enrichi avec UPN, taille, SKU cible et licences attribuées, les contrôles tenant, la fraîcheur des sources CSV, les détails bloquants et un filtre mailbox. Les lignes `NO-GO` apparaissent en premier ; les codes bloquants et actions recommandées disposent de colonnes élargies, et les actions multiples sont présentées sous forme de liste. Il n’utilise aucune ressource externe.
-
-Chaque lancement GUI crée également un journal de session horodaté sous `Output\Logs`. Le statut supérieur et l'onglet `Activity` décrivent les phases longues et indiquent quand l'opérateur doit patienter.
-
-Browse et Run assessment ouvrent une petite fenêtre WPF sur un thread dédié. Elle reste réactive pendant les appels longs, affiche l’étape, le détail, la progression et le temps écoulé. À la fin d’un assessment, elle propose d’ouvrir directement le HTML, l’Excel ou le dossier de sortie ; en cas d’échec, elle propose le journal.
-
-Lorsqu’une réponse de l’opérateur est nécessaire, la fenêtre de progression est temporairement réduite et retirée de la barre des tâches. Le dialogue de confirmation ou de sélection est activé au premier plan, puis la progression est automatiquement restaurée après la réponse.
-
-Après migration, la comparaison de permissions en mode Live peut aussi générer :
-
-```text
-Permissions-Current-EXO.csv
-Permissions-Comparison.csv
-```
+Après un assessment, l’onglet `Permissions baseline` permet de comparer la baseline enregistrée aux permissions Exchange Online actuelles. Cette comparaison est elle aussi en lecture seule.

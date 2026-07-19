@@ -1,16 +1,10 @@
 {
-  "Mode": "Live",
   "AssessmentPhase": "PreCreation",
   "DisabledChecks": [],
   "TenantProfile": {
     "ProfileKey": "tenant",
     "TenantId": "",
     "RemoteRoutingDomain": "tenant.mail.onmicrosoft.com"
-  },
-  "Cache": {
-    "RootPath": "\\\\server\\share\\WORKPLACE\\DATA\\Tenants\\tenant",
-    "AlternativeRootPath": "",
-    "MaximumAgeHours": 48
   },
   "EntraConnectHealth": {
     "MaximumLastSyncAgeMinutes": 120
@@ -44,5 +38,9 @@
     "MigrationEndpointName": "",
     "TargetDeliveryDomain": "tenant.mail.onmicrosoft.com",
     "ActiveMigrationWarningThreshold": 100
+  },
+  "ExchangeOnPremises": {
+    "ConnectionUri": "",
+    "Authentication": "Kerberos"
   }
 }
