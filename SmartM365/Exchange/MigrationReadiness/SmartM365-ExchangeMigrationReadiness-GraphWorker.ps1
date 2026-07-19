@@ -3,7 +3,7 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.9.0
+1.10.0
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -41,7 +41,7 @@ try {
                 throw "Required Microsoft Graph command is unavailable: $commandName"
             }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.9.0'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.10.0'
         exit 0
     }
 
