@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.32) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.4.0) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -9,9 +9,10 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | File | Purpose |
 | --- | --- |
 | `SmartM365-Inventory-Orchestrator.ps1` | Orchestrator script (PowerShell 7). |
+| `SmartM365.Orchestrator.Distributed.psm1` | Automatic capability probes, weighted election planner and atomic occurrence claims. |
 | `SmartM365-Inventory-Orchestrator.local.json.template` | Safe committed template; copied to `SmartM365-Inventory-Orchestrator.local.json` at first run (the runtime `.local.json` is Git-ignored). |
 | `Orchestrator-Jobs.json.template` | Safe committed jobs-manifest template (all schedules, neutral `AllowedServers`). |
-| `Orchestrator-Jobs.json` | Runtime jobs manifest, auto-created from the template at first run and Git-ignored: it carries operational values (Enabled flags, schedules, real server names in `AllowedServers`). Hot reloaded on change. |
+| `Orchestrator-Jobs.json` | Runtime jobs manifest, auto-created from the template at first run and Git-ignored. It carries operational Enabled flags and schedules; elected jobs do not require real server names. Hot reloaded on change. |
 | `Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1` | Installs or removes the unattended Windows scheduled task under a dedicated service account. |
 | `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `LocalMachine` trust stores by default; `CurrentUser` remains available explicitly. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
@@ -31,14 +32,17 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | `Orchestrator_Runs.csv` | `{{DataAllRootPath}}\Orchestrator` | Tenant-wide lifecycle history: one row per orchestrator process, shared across servers and retained indefinitely. |
 | `Orchestrator_Runs.lock` | `{{DataAllRootPath}}\Orchestrator` | Cross-process file lock serializing lifecycle CSV updates from all servers. |
 | `Orchestrator-State.json` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Per-job state (last occurrence, last run, running PID). Atomic writes. |
-| `Orchestrator-Heartbeat.json` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Rewritten at every tick: timestamp, PID, running jobs. |
+| `Orchestrator-Heartbeat.json` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Rewritten at every tick: timestamp, PID, running/pending jobs, ready capabilities and active election plan. |
+| `Orchestrator-Capabilities.json` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Generated automatically at startup and periodically; contains only readiness evidence and Graph application role names, never tokens or secrets. |
+| `Orchestrator-ElectionPlan.json` | `{{DataAllRootPath}}\Orchestrator\Election` | Shared weighted assignment plan generated under an atomic planner lock. |
+| `<Job>\<Occurrence>.json` | `{{DataAllRootPath}}\Orchestrator\Election\Claims` | Atomic cross-server occurrence claim. Prevents duplicate launches and records owner/status through retries and restarts. |
 | `Orchestrator-StopRequested.json` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Temporary manual stop request written by `-Stop`; consumed and removed by the resident instance. |
 | `Orchestrator.lock` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Global lock; prevents two instances for the same tenant. Stale locks (dead PID) are recovered with a warning. |
 | `Orchestrator_JobRuns_<yyyyMMdd>.csv` | `{{DataAllRootPath}}\Orchestrator\<Server>\JobRuns` | Daily job-run tracking CSV (atomic writes). |
 | `SmartM365-Inventory-Orchestrator_<Server>_<yyyyMMdd>.log` | `{{LogAllRootPath}}\SmartM365-Orchestrator\<Server>` | Orchestrator log, daily rotation. |
 | `Job-<JobName>_<Server>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Orchestrator\<Server>\Jobs` | One log per job execution (stdout + stderr of the child process). Legacy files from old per-job subfolders such as `Jobs\AD-HealthCheck` are migrated into this flat `Jobs` folder on startup when they are not referenced by a running job. |
 
-Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle histories remain isolated. Each server still keeps its own scheduler state, so a job allowed on several servers runs on each of them - pin every scheduled job to exactly one server through `AllowedServers` and treat the other servers as manual standby.
+Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle histories remain isolated. For `AssignmentMode = "Elected"`, all servers read one shared plan and an occurrence can be claimed atomically by only one owner. Empty `AllowedServers` therefore no longer means that every server launches an elected job; the legacy behavior remains only for old manifest entries without `AssignmentMode`.
 
 ### Orchestrator SharePoint uploads and dependency wait logging
 
@@ -112,12 +116,20 @@ For an explicit user-scoped install:
 - 60-second tick: reload the manifest if it changed on disk, supervise running children, compute due occurrences, launch jobs, send the optional daily summary, rewrite the heartbeat, save state.
 - Every job runs in its own detached child process (`-NoProfile -ExecutionPolicy Bypass`), which also isolates module/assembly conflicts between scripts (Graph SDK vs MSAL). Before launch, optional Authenticode validation can audit or enforce signatures on the job script and SmartM365 modules. The engine is `pwsh` by default; jobs with `PowerShellEdition = "WindowsPowerShell"` run in `powershell.exe` 5.1 instead (required by the Exchange on-premises scripts).
 
-### Server allowlist
+### Distributed assignment, capabilities and election
 
-- `AllowedServers` in the orchestrator `.local.json` is the default list of computer names allowed to run jobs (empty = all servers allowed).
-- Each job may carry its own `AllowedServers` list in the manifest; a non-empty job list overrides the default list for that job.
-- A job whose effective allowlist does not contain the local computer name is never launched on this server - not by schedule, not by catch-up, and not by `-Force` (refused with a warning). Excluded jobs are listed once in the log at manifest load, and a dependency that is not allowed on this server never blocks its dependents.
-- Typical use: run the cloud inventory jobs on the scheduler servers (default list) and pin the Exchange 2016 on-premises jobs to the Exchange server through their per-job list.
+`AssignmentMode` controls ownership:
+
+- `Elected`: the normal multi-server mode. The server is selected automatically from live candidates that satisfy every `RequiredCapabilities` and `RequiredGraphAppRoles` value.
+- `Pinned`: legacy-style fixed ownership. Exactly one explicit `AllowedServers` value is required.
+- `Manual`: never launched by the schedule, catch-up or retry loop. An explicit `-Force <JobName>` may launch it manually and still honors local overlap/concurrency guards.
+- Missing `AssignmentMode`: compatibility mode for older manifests; the previous effective `AllowedServers` behavior is retained.
+
+Each resident server generates `Orchestrator-Capabilities.json` itself. The default `ReadOnly` probe mode uses isolated, time-bounded child PowerShell processes and read-only checks for `Graph`, `EXO`, `AD`, `ExchangeOnPrem`, and `TeamsPowerShell`; `SharedRuntime` verifies write access to the shared election folder. Graph readiness also records the application roles returned by the app-only connection. No module is installed and no token, certificate private key or secret is written to the capability document.
+
+The planner builds connected `DependsOn` components so parents and children always have the same owner. Daily load is schedule frequency multiplied by the median successful duration from the shared job-run history; `EstimatedDurationMinutes` is the fallback. It then assigns the largest components first to the least normalized load. `ElectionWeight` is the local default capacity, while `ElectionWeightsByServer` lets the same JSON be deployed everywhere with per-server weights; a weight of `1.10` gives a server about 10% more target capacity than `1.00`.
+
+Before launching an elected occurrence, the owner must create its shared claim with `FileMode.CreateNew`. If shared storage or the plan is unavailable, the elected job stays queued (fail closed). A different server may take over only after `TimeoutMinutes + ElectionClaimGraceMinutes` has expired and the original owner's heartbeat is stale. Terminal claims are never taken over.
 
 ### Detached jobs and re-adoption (jobs longer than 24 hours)
 
@@ -176,6 +188,11 @@ For an explicit user-scoped install:
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
       "ContinueOnError": false,
+      "AssignmentMode": "Elected",
+      "AllowedServers": [],
+      "RequiredCapabilities": ["SharedRuntime", "EXO", "Graph"],
+      "RequiredGraphAppRoles": ["User.Read.All"],
+      "EstimatedDurationMinutes": 60,
       "Schedule": {
         "Type": "Daily",
         "Times": ["01:00"],
@@ -195,7 +212,11 @@ For an explicit user-scoped install:
 | `Enabled` | `false` by default; only enabled jobs are scheduled. |
 | `Group` | Logical group (AD, Exchange, M365, Intune); informational. |
 | `DependsOn` | List of job names that must complete first (cycle-checked at load). |
-| `AllowedServers` | Computer names allowed to run this job. Empty = inherit the orchestrator `AllowedServers` default (empty default = all servers). |
+| `AssignmentMode` | `Elected`, `Pinned` or `Manual`. Missing keeps the pre-1.4 legacy allowlist behavior. |
+| `AllowedServers` | Used by `Pinned` and legacy entries. `Pinned` requires exactly one server. Ignored for `Elected`. |
+| `RequiredCapabilities` | Election gates: `SharedRuntime`, `Graph`, `EXO`, `AD`, `ExchangeOnPrem`, `TeamsPowerShell`. There is intentionally no standalone Intune capability; Intune jobs use Graph. |
+| `RequiredGraphAppRoles` | Exact Microsoft Graph application roles required by the job. Valid only when `Graph` is required. |
+| `EstimatedDurationMinutes` | Positive fallback used by the planner when successful duration history is unavailable. Default 5. |
 | `PowerShellEdition` | `PowerShell7` (default, `pwsh`) or `WindowsPowerShell` (`powershell.exe` 5.1, required for Exchange on-premises scripts). |
 | `TimeoutMinutes` | Process-tree kill after this duration (0 disables; may exceed 1440). Default 240. |
 | `MaxRetries` / `RetryDelaySeconds` | Retry policy after Failed/TimedOut/Interrupted. Defaults 0 / 300. |
@@ -208,7 +229,7 @@ For an explicit user-scoped install:
 
 The manifest is hot reloaded at every tick when its file changes; an invalid manifest is rejected with an error email and the last valid version stays in effect (no orchestrator restart needed to change the planning).
 
-All shipped jobs are `Enabled=false` except `M365-VerifiedDomains-Inventory` (small, read-only, safe daily example). The template contains examples of each schedule type (Weekly, Daily once, Daily multi-time with `Skip`), one long job with `TimeoutMinutes` > 1440 (`Mailboxes-PermissionsByUser-Report`), and the `Exchange2016` group running with `PowerShellEdition = "WindowsPowerShell"`; pin those to the Exchange server through their `AllowedServers` list in the runtime manifest.
+The committed template mirrors the validated operational Enabled flags and schedules. Scheduled jobs use `AssignmentMode = "Elected"`; Exchange on-premises jobs require `AD` plus `ExchangeOnPrem`, so they naturally elect only a server that passes both probes. `M365-PowerBIFabricActivity-Inventory` remains disabled with `AssignmentMode = "Manual"` as requested.
 
 Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a nightly full job (for example `EXO-Mailboxes-Inventory` with `-IncludeStats -ForceLiveStats`, required when the tenant contains more than 5,000 mailboxes, or `Exchange2016-Local-Mailboxes-Inventory` with `-IncludeADPermission`) plus a midday `-Fast` job running the same script without the expensive switches. The full job can declare `DependsOn` on its fast prerequisite when a quick CSV must be published first; dependent jobs are now marked `BlockedDependencyFailed` or `BlockedDependencyTimeout` instead of silently waiting forever. Fast jobs should use `ContinueOnError=false` when downstream jobs depend on their outputs. Before enabling a job, make sure its own runtime `.local.json` exists next to the target script (the child runs unattended; app-only auth must be configured).
 
@@ -234,7 +255,7 @@ Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a n
 }
 ```
 
-- `Running` (while a job is in progress): `Pid`, `StartTime`, `ScheduledOccurrence`, `LogPath`, `Attempt`, `TimeoutMinutes`. This is what re-adoption uses after a recycle/reboot/crash.
+- `Running` (while a job is in progress): `Pid`, `StartTime`, `ScheduledOccurrence`, `LogPath`, `Attempt`, `TimeoutMinutes`, `ClaimPath`. This is what re-adoption uses after a recycle/reboot/crash.
 - `PendingRetry`: `NotBefore`, `Attempt`, `ScheduledOccurrence`.
 - The file is written atomically (temp file + rename) after every mutation, so a crash never leaves a half-written state. An already executed occurrence is never relaunched; a missed occurrence follows `MissedRunPolicy`; a still-running job is re-adopted.
 
@@ -242,7 +263,7 @@ Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a n
 
 Created from the committed template at first run. Keys follow the SmartM365 pattern: `__USE_GLOBAL__` inherits from `SmartM365.global.local.json`, and `{{DataAllRootPath}}`-style tokens are resolved through the tenant context.
 
-Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (default server allowlist, empty = all), `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `AutoRecycleOnRuntimeUpdate`, `RuntimeUpdateCheckIntervalSeconds`, `RuntimeUpdateStableChecks`, `RuntimeUpdateCooldownMinutes`, `MonitorCoreModuleVersion`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
+Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (legacy/default allowlist), `DistributedSchedulingEnabled`, `CapabilityProbeMode`, `CapabilityProbeTimeoutSeconds`, `CapabilityRefreshMinutes`, `CapabilityMaxAgeMinutes`, `ElectionPlanRefreshSeconds`, `ElectionClaimGraceMinutes`, `ElectionHistoryDays`, `ElectionWeight`, `ElectionWeightsByServer`, `ExchangeOnlineOrganization`, `MaxConcurrency`, `MaxLifetimeHours`, `TickSeconds`, `AutoRecycleOnRuntimeUpdate`, `RuntimeUpdateCheckIntervalSeconds`, `RuntimeUpdateStableChecks`, `RuntimeUpdateCooldownMinutes`, `MonitorCoreModuleVersion`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
 
 ## Parameters
 
@@ -252,7 +273,7 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 | `-Connect` | Passed through only to direct target scripts that declare a `Connect` parameter; ignored for unsupported scripts and launcher-based jobs. |
 | `-DryRun` | Print the next-24h planning per job (plus pending catch-ups), launch nothing, exit. |
 | `-Once` | Run a single tick then exit (tests). Launched children keep running detached. |
-| `-Force <names>` | Launch the listed jobs immediately even if not due (still honors overlap and concurrency; bypasses schedule and dependency gate; advances the job occurrence pointer to now). |
+| `-Force <names>` | Launch the listed jobs immediately even if not due. This is the only scheduler entry point for `Manual` jobs. It still honors ownership for elected jobs, atomic claims, overlap and concurrency; it bypasses schedule and dependency gates. |
 | `-Only <names>` / `-Skip <names>` | Restrict/exclude jobs from launching. |
 | `-MaxConcurrency <int>` / `-MaxLifetimeHours <int>` | Override the configured values. |
 | `-JobsManifestPath <path>` / `-StatePath <path>` | Override default file locations. |
