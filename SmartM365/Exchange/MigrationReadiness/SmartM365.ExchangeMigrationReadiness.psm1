@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.4'
+$script:SemrVersion = '1.11.6'
 $script:ActiveDirectoryDomains = @()
 $script:Exchange2016EvidenceByEmail = @{}
 $script:Exchange2016HybridEvidence = $null
@@ -600,6 +600,7 @@ function Initialize-SemrExchange2016Evidence {
         }
         $process = [Diagnostics.Process]::Start($startInfo)
         if (-not $process) { throw 'The local Exchange 2016 evidence worker could not be started.' }
+        if ($ProgressCallback) { & $ProgressCallback 0 0 ("Exchange 2016 worker started; PID={0}; diagnostics={1}" -f $process.Id, $DiagnosticsDirectory) }
 
         $lastProgress = ''
         $cancelRequestedAt = $null
@@ -703,7 +704,8 @@ function Connect-SemrMicrosoftGraph {
         [string[]]$Scopes = @('User.Read.All', 'Directory.Read.All', 'Organization.Read.All'),
         [string]$TenantId = '',
         [string[]]$EmailAddresses = @(),
-        [scriptblock]$ProgressCallback
+        [scriptblock]$ProgressCallback,
+        [string]$DiagnosticsDirectory = ''
     )
 
     $normalizedScopes = @($Scopes | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
@@ -726,6 +728,7 @@ function Connect-SemrMicrosoftGraph {
     $outputPath = Join-Path $runtimeRoot 'evidence.clixml'
     $errorPath = Join-Path $runtimeRoot 'error.txt'
     $progressPath = Join-Path $runtimeRoot 'progress.txt'
+    $graphLogPath = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { '' } else { Join-Path $DiagnosticsDirectory 'MicrosoftGraph-Worker.log' }
     $process = $null
     try {
         [void](New-Item -ItemType Directory -Path $runtimeRoot -Force)
@@ -740,7 +743,8 @@ function Connect-SemrMicrosoftGraph {
             '-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $workerPath,
             '-TenantId', $TenantId,
             '-ScopesPath', $scopesPath, '-InputPath', $inputPath,
-            '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath
+            '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath,
+            '-LogPath', $graphLogPath
         )) {
             [void]$startInfo.ArgumentList.Add([string]$argument)
         }
@@ -749,6 +753,7 @@ function Connect-SemrMicrosoftGraph {
         if (-not $process) {
             throw 'The isolated Microsoft Graph process could not be started.'
         }
+        if ($ProgressCallback) { & $ProgressCallback "Microsoft Graph worker started; PID=$($process.Id); log=$graphLogPath" }
         $lastProgress = ''
         while (-not $process.WaitForExit(250)) {
             if ($ProgressCallback -and (Test-Path -LiteralPath $progressPath -PathType Leaf)) {
@@ -2347,12 +2352,13 @@ function Invoke-SemrAssessment {
         [Parameter(Mandatory)][System.Collections.IDictionary]$Config,
         [scriptblock]$ProgressCallback,
         [scriptblock]$CancellationCheck,
-        [string]$DiagnosticsRoot = ''
+        [string]$DiagnosticsRoot = '',
+        [string]$RunId = ''
     )
 
     Set-SemrAssessmentCheckOptions -Config $Config
     $startedAt = Get-Date
-    $runId = "SEMR-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+    $runId = if ([string]::IsNullOrWhiteSpace($RunId)) { "SEMR-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss') } else { $RunId }
     $exchangeDiagnosticsDirectory = if ([string]::IsNullOrWhiteSpace($DiagnosticsRoot)) { '' } else { Join-Path $DiagnosticsRoot $runId }
     $findings = [System.Collections.Generic.List[object]]::new()
     $globalFindings = [System.Collections.Generic.List[object]]::new()
@@ -2699,7 +2705,8 @@ function Invoke-SemrAssessment {
             $moveDataAvailable = [bool](Get-SemrPropertyValue -InputObject $exo -Names @('MoveDataAvailable') -Default $false)
             $moveState = Get-SemrMoveState -Exo $exo
             $activeMoveCount = [int]$moveState.ActiveOperationCount
-            $activeMoveDescription = if ($activeMoveCount -gt 0) { "ActiveOperation=1; Sources=$($moveState.ActiveSources -join ','); Statuses=$($moveState.ActiveStatuses -join ',')" } elseif ($moveState.TerminalStatuses.Count -gt 0) { "No active operation; terminal history=$($moveState.TerminalStatuses -join ',')" } else { 'No migration object' }
+            $terminalStatuses = @($moveState.TerminalStatuses)
+            $activeMoveDescription = if ($activeMoveCount -gt 0) { "ActiveOperation=1; Sources=$($moveState.ActiveSources -join ','); Statuses=$($moveState.ActiveStatuses -join ',')" } elseif ($terminalStatuses.Count -gt 0) { "No active operation; terminal history=$($terminalStatuses -join ',')" } else { 'No migration object' }
             $existingBatchPhase = [string]$Config['AssessmentPhase'] -eq 'ExistingBatch'
             $existingMoveResult = if (-not $moveDataAvailable) { 'UNKNOWN' } elseif ($existingBatchPhase -and $activeMoveCount -eq 0) { 'WARN' } elseif ($existingBatchPhase -or $activeMoveCount -eq 0) { 'PASS' } else { 'FAIL' }
             $existingMoveBlocking = -not $existingBatchPhase -and $moveDataAvailable -and $activeMoveCount -gt 0
