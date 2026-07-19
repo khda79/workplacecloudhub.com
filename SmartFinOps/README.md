@@ -123,3 +123,16 @@ For Active Directory:
 - `AD_Users_AllDomains_Brut.csv` and `AD_Computers_AllDomains_Brut.csv` are validation or fallback sources only.
 
 `-ValidateOnly` checks source existence, required columns and freshness without importing CSV rows. The default freshness threshold is 72 hours.
+
+Readiness-only sources are also catalogued before any financial rule is enabled. They currently include SharePoint user activity, Teams device usage, Microsoft 365 Copilot usage, Teams Phone usage and assignments, Endpoint Analytics, and optional Power BI/Fabric activity.
+
+`SmartFinOps_Workplace_DataQuality.csv` uses these source states:
+
+- `Loaded`: the CSV exists, contains data and satisfies its required-column contract;
+- `Empty`: the CSV contains a valid header but no data rows;
+- `Missing`: an expected source is absent;
+- `Missing optional`: an optional source is absent and does not reduce mandatory coverage;
+- `Blocked`: collection is known to be unavailable because of an external authorization or API condition;
+- `Invalid schema`: the CSV exists but required columns are missing.
+
+These readiness-only sources do not yet change license recommendations, financial potential or the executive decision matrix. Files whose names contain `MAXITEMS` remain excluded.
