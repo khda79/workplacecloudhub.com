@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.4.1) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.0) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -10,13 +10,17 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | --- | --- |
 | `SmartM365-Inventory-Orchestrator.ps1` | Orchestrator script (PowerShell 7). |
 | `SmartM365.Orchestrator.Distributed.psm1` | Automatic capability probes, weighted election planner and atomic occurrence claims. |
+| `SmartM365.Orchestrator.Management.psm1` | Shared configuration validation, atomic publication, versions, rollback, audit and multi-server history aggregation. |
+| `SmartM365-Inventory-Orchestrator-GUI.ps1` | Central WPF console for planning, server assignment, election visibility, history and configuration versions. |
 | `SmartM365-Inventory-Orchestrator.local.json.template` | Safe committed template; copied to `SmartM365-Inventory-Orchestrator.local.json` at first run (the runtime `.local.json` is Git-ignored). |
 | `Orchestrator-Jobs.json.template` | Safe committed jobs-manifest template (all schedules, neutral `AllowedServers`). |
-| `Orchestrator-Jobs.json` | Runtime jobs manifest, auto-created from the template at first run and Git-ignored. It carries operational Enabled flags and schedules; elected jobs do not require real server names. Hot reloaded on change. |
+| `Orchestrator-Cluster.json.template` | Safe committed cluster template. The shared runtime file is bootstrapped from the first server's current local cluster settings. |
+| `Orchestrator-Jobs.json` | Legacy/local bootstrap manifest, Git-ignored. With central configuration enabled, its current values seed the shared manifest only when the shared manifest does not exist yet. |
 | `Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1` | Installs or removes the unattended Windows scheduled task under a dedicated service account. |
 | `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `LocalMachine` trust stores by default; `CurrentUser` remains available explicitly. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
 | `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator.cmd` | Production launcher: `-Tenant prod -Connect`. |
+| `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator-GUI.cmd` | Opens the production WPF management console in an STA PowerShell 7 process. |
 | `..\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd` | Sends the prod all-server execution-summary email with a consolidated row per job plus separate detailed tables for the last 24 hours and 7 days. |
 
 | `..\Launchers\Orchestrator\Stop-SmartM365-Inventory-Orchestrator.cmd` | Launcher: requests a clean stop for the running prod orchestrator instance. |
@@ -29,6 +33,10 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 
 | File | Location | Purpose |
 | --- | --- | --- |
+| `Config\Orchestrator-Jobs.json` | `{{DataAllRootPath}}\Orchestrator` | Shared operational job configuration. All servers hot reload it. |
+| `Config\Orchestrator-Cluster.json` | `{{DataAllRootPath}}\Orchestrator` | Shared expected-server list, election weights, server policies and peer-monitoring settings. |
+| `Config\Versions\<VersionId>` | `{{DataAllRootPath}}\Orchestrator` | Immutable before/after snapshots created for every publication and rollback. |
+| `Audit\Orchestrator_ConfigChanges.csv` | `{{DataAllRootPath}}\Orchestrator` | User, source server, timestamp, hashes, version ID and change summary for every publication. |
 | `Orchestrator_Runs.csv` | `{{DataAllRootPath}}\Orchestrator` | Tenant-wide lifecycle history: one row per orchestrator process, shared across servers and retained indefinitely. |
 | `Orchestrator_Runs.lock` | `{{DataAllRootPath}}\Orchestrator` | Cross-process file lock serializing lifecycle CSV updates from all servers. |
 | `Orchestrator-State.json` | `{{DataAllRootPath}}\Orchestrator\<Server>` | Per-job state (last occurrence, last run, running PID). Atomic writes. |
@@ -43,6 +51,22 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | `Job-<JobName>_<Server>_<timestamp>.log` | `{{LogAllRootPath}}\SmartM365-Orchestrator\<Server>\Jobs` | One log per job execution (stdout + stderr of the child process). Legacy files from old per-job subfolders such as `Jobs\AD-HealthCheck` are migrated into this flat `Jobs` folder on startup when they are not referenced by a running job. |
 
 Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle histories remain isolated. For `AssignmentMode = "Elected"`, all servers read one shared plan and an occurrence can be claimed atomically by only one owner. Empty `AllowedServers` therefore no longer means that every server launches an elected job; the legacy behavior remains only for old manifest entries without `AssignmentMode`.
+
+### Central management GUI
+
+Launch `Start-SmartM365-Inventory-Orchestrator-GUI.cmd` from the Orchestrator launchers folder. The GUI:
+
+- shows enabled jobs, next occurrences, current elected owners and server health;
+- edits frequency, times, weekly days, missed-run policy, enabled state, retry/timeout values and assignment mode;
+- edits the expected server list, election weights and operational server policies;
+- filters the all-server run history by date, server, job and status, with CSV/HTML export and log opening;
+- validates the complete jobs and cluster documents before publication;
+- uses an atomic cross-server lock and hash comparison to reject concurrent/stale edits;
+- creates before/after versions and an audit row for every publication or rollback.
+
+The GUI deliberately has no start, stop or run-now action. `Elected` ownership is displayed from the generated plan and cannot be edited directly. To choose a fixed owner, set `AssignmentMode` to `Pinned` and select exactly one expected server. `Manual` jobs remain excluded from scheduled election.
+
+`CentralConfigurationEnabled` defaults to `true`. Local `.local.json` files still own machine/runtime concerns such as tenant authentication, paths, mail transport, capability probing and concurrency. The shared files own job planning and cluster policy. Supplying the CLI `-JobsManifestPath` override disables central configuration for that invocation, which keeps isolated tests and diagnostics possible.
 
 ### Orchestrator SharePoint uploads and dependency wait logging
 

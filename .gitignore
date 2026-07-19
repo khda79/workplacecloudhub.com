@@ -73,6 +73,8 @@ SmartWorkplaceCMDB/**
 !/SmartM365/Exchange/MigrationReadiness/WorkplaceCloudHub.ico
 !/SmartM365/Exchange/MigrationReadiness/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/Exchange/MigrationReadiness/Samples/MigrationBatch.csv.template
+!/SmartM365/SmartInventory/Orchestrator/WorkplaceCloudHub.ico
+!/SmartM365/SmartInventory/Orchestrator/WorkplaceCloudHub-lockup-WPF.png
 SmartM365/Exchange/MigrationReadiness/Input/**
 !/SmartM365/Exchange/ExchangeUserNotifications/**/Recipients/
 !/SmartM365/Exchange/ExchangeUserNotifications/**/Recipients/*.csv.template
