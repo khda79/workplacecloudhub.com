@@ -43,6 +43,8 @@ try {
     Assert-True -Condition (Test-Path -LiteralPath $snapshot.Paths.ClusterPath) -Message 'Central cluster configuration was not initialized.'
     Assert-True -Condition ((Test-SmartM365OrchestratorJobsDocument -Document $snapshot.Jobs).Valid) -Message 'Production jobs template failed management validation.'
     Assert-True -Condition ((Test-SmartM365OrchestratorClusterDocument -Document $snapshot.Cluster).Valid) -Message 'Mock cluster configuration failed validation.'
+    $convertedPolicies = ConvertTo-SmartM365OrchestratorHashtable -InputObject $snapshot.Cluster.ServerJobPolicies
+    Assert-True -Condition ($convertedPolicies['SERVER-B']['OnlyJobsRequiring'] -eq 'ExchangeOnPrem') -Message 'String values were corrupted while converting the server policy to a hashtable.'
     $invalidPinnedJobs = $snapshot.Jobs | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
     $invalidPinnedJobs.Jobs[0].AssignmentMode = 'Pinned'
     $invalidPinnedJobs.Jobs[0].AllowedServers = @('SERVER-NOT-IN-CLUSTER')
@@ -95,6 +97,21 @@ try {
     ) | Export-Csv -LiteralPath (Join-Path $jobRunsFolder ('Orchestrator_JobRuns_{0}.csv' -f (Get-Date).ToString('yyyyMMdd'))) -NoTypeInformation -Encoding utf8
     $history = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $temporaryRoot -From (Get-Date).AddDays(-1) -To (Get-Date).AddDays(1))
     Assert-True -Condition ($history.Count -eq 1 -and $history[0].Server -eq 'SERVER-A') -Message 'All-server history aggregation failed.'
+
+    foreach ($server in @('SERVER-A', 'SERVER-B')) {
+        $serverFolder = Join-Path -Path $temporaryRoot -ChildPath $server
+        New-Item -ItemType Directory -Path $serverFolder -Force | Out-Null
+        [pscustomobject]@{ Timestamp = [datetime]::UtcNow.ToString('o'); Pid = 1234 } |
+            ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $serverFolder 'Orchestrator-Heartbeat.json') -Encoding utf8
+        [pscustomobject]@{ ReadyCapabilities = @('SharedRuntime', 'ExchangeOnPrem') } |
+            ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $serverFolder 'Orchestrator-Capabilities.json') -Encoding utf8
+    }
+    $serverStatus = @(Get-SmartM365OrchestratorServerStatus -SharedDataFolderPath $temporaryRoot -ClusterDocument $snapshot.Cluster)
+    $serverBStatus = $serverStatus | Where-Object Server -EQ 'SERVER-B'
+    Assert-True -Condition ($serverStatus.Count -eq 2 -and @($serverStatus | Where-Object Online).Count -eq 2) -Message 'Current Timestamp heartbeats were not reported online.'
+    Assert-True -Condition ($serverBStatus.Policy -eq 'ExchangeOnPrem') -Message 'The Exchange on-premises server policy was not rendered correctly.'
 
     $restoreSnapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $temporaryRoot
     $restoreResult = Restore-SmartM365OrchestratorConfigurationVersion `
