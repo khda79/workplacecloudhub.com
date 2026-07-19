@@ -51,6 +51,10 @@ Required Microsoft Graph permission: `Reports.Read.All`.
 `Reports.Read.All` permission. They do not require another app registration,
 permission, or local configuration value.
 
+For multi-report runs, DATA-ALL and DATA-LAST files are uploaded per report, while
+the cumulative WeeklyHistory snapshot is built and uploaded once after all selected
+reports complete successfully.
+
 `SmartM365-EXO-Mailboxes-Inventory.ps1` remains useful and is not replaced by `MailboxUsageDetail`: EXO gives mailbox object/stat/archive details from Exchange Online, while Graph Reports gives a period-based usage and quota report suitable for FinOps joins.
 
 ## Power BI And Microsoft Fabric Activity Events

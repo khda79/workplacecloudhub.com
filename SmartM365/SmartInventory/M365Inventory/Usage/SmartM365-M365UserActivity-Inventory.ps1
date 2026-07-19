@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.14
+1.15
 
 
 .REQUIREMENTS
@@ -49,7 +49,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -430,6 +430,7 @@ function Export-M365UsageReport {
         OutputPath = $runOutputRoot
         GlobalPath = $LatestCsvFolderPath
         Data = $exportData
+        NoWeeklyHistory = $true
     }
     if ($columns.Count -gt 0) {
         $exportParameters.Columns = $columns
@@ -440,8 +441,46 @@ function Export-M365UsageReport {
         ReportName = $ReportDefinition.Name
         Rows = $normalizedRows.Count
         LatestPath = $exportResult.LatestPath
+        PublishedPath = $exportResult.PublishedPath
+        TimestampedPath = $exportResult.TimestampedPath
         RawPath = $rawPath
     }
+}
+
+function Publish-M365UsageWeeklyHistory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ReportResults)
+
+    if (Test-SmartM365MaxItemsMode) { return }
+
+    $weeklyHistoryEnabled = [bool](Get-SmartM365ConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $true)
+    if (-not $weeklyHistoryEnabled) {
+        WriteLog 'Consolidated WeeklyHistory publication is disabled by configuration.' 'INFO'
+        return
+    }
+
+    $sourceFiles = @(
+        $ReportResults |
+            ForEach-Object { [string]$_.PublishedPath } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+    if ($sourceFiles.Count -eq 0) {
+        WriteLog 'Consolidated WeeklyHistory publication skipped: no published CSV file found.' 'WARNING'
+        return
+    }
+
+    $historyRootPath = [string](Get-SmartM365ConfigValue -Name 'WeeklyHistoryFolderPath' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($historyRootPath)) {
+        $historyRootPath = Join-Path -Path $runOutputRoot -ChildPath 'WeeklyHistory'
+    }
+    $retentionWeeks = [int](Get-SmartM365ConfigValue -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
+
+    WriteLog ("Publishing consolidated WeeklyHistory for {0} report(s)." -f $sourceFiles.Count) 'INFO'
+    Save-SmartM365WeeklyInventoryHistory `
+        -SourceFiles $sourceFiles `
+        -HistoryRootPath $historyRootPath `
+        -RetentionWeeks $retentionWeeks
 }
 
 $dataAllRoot = Resolve-SmartM365TokenValue -Value (Get-SmartM365ConfigValue -Name 'DataAllRootPath' -DefaultValue '')
@@ -533,6 +572,7 @@ try {
     foreach ($reportDefinition in $selectedReports) {
         $reportResults.Add((Export-M365UsageReport -ReportDefinition $reportDefinition)) | Out-Null
     }
+    Publish-M365UsageWeeklyHistory -ReportResults @($reportResults.ToArray())
 
     $summaryParts = @($reportResults | ForEach-Object { "{0}={1}" -f $_.ReportName, $_.Rows })
     $summary = "Tenant=$Tenant; Period=$Period; Reports=$($summaryParts -join '; '); LatestFolder=$LatestCsvFolderPath"
