@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.13'
+$script:SemrVersion = '1.11.14'
 $script:ActiveDirectoryDomains = @()
 $script:ExchangeOnPremEvidenceByEmail = @{}
 $script:ExchangeOnPremHybridEvidence = $null
@@ -37,7 +37,7 @@ function Get-SemrVersion {
 
 function Get-SemrCheckCatalog {
     $mandatory = @('CSV-EMPTY-IDENTITY','CSV-SMTP-FORMAT','CSV-DUPLICATE','AD-SOURCE','ONPREM-SOURCE','EXO-SOURCE','GRAPH-SOURCE','ENTRA-CONNECT-SCHEDULER')
-    $defaultDisabled = @('HYBRID-MRSPROXY')
+    $defaultDisabled = @('HYBRID-MRSPROXY','MAILBOX-LARGE-ITEMS')
     $definitions = @(
         @('CSV-EMPTY-IDENTITY','CSV','Mailbox identity is present','Reject empty mailbox identities.'),
         @('CSV-SMTP-FORMAT','CSV','SMTP syntax','Validate mailbox identity SMTP syntax.'),
@@ -271,7 +271,7 @@ function Get-SemrConfig {
     $runtime = ConvertTo-SemrHashtable -InputObject (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
     $added = @(Merge-SemrConfigDefault -Runtime $runtime -Template $template)
     $configurationChanged = $added.Count -gt 0
-    foreach ($deprecatedKey in @('Mode', 'Cache', 'Tenant', 'OnPremises', 'ExchangeOnPremises', 'EntraConnect', 'SmartM365', 'EvidenceSources', 'Authentication')) {
+    foreach ($deprecatedKey in @('Mode', 'Cache', 'Tenant', 'OnPremises', 'EntraConnect', 'SmartM365', 'EvidenceSources', 'Authentication')) {
         if ($runtime.Contains($deprecatedKey)) {
             $runtime.Remove($deprecatedKey)
             $configurationChanged = $true
@@ -311,6 +311,29 @@ function Get-SemrConfig {
     $runtime['_RemoteRoutingDomain'] = [string]$tenantProfile['RemoteRoutingDomain']
     return $runtime
 }
+function Get-SemrExchangeOnPremRuntimeSettings {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Config)
+
+    $section = if ($Config.Contains('ExchangeOnPremises') -and $Config['ExchangeOnPremises'] -is [System.Collections.IDictionary]) {
+        $Config['ExchangeOnPremises']
+    }
+    else { @{} }
+    $batchSize = 50
+    $timeoutSeconds = 60
+    if ($section.Contains('SmtpUniquenessBatchSize')) {
+        $parsed = 0
+        if ([int]::TryParse([string]$section['SmtpUniquenessBatchSize'], [ref]$parsed)) { $batchSize = $parsed }
+    }
+    if ($section.Contains('SmtpUniquenessBatchTimeoutSeconds')) {
+        $parsed = 0
+        if ([int]::TryParse([string]$section['SmtpUniquenessBatchTimeoutSeconds'], [ref]$parsed)) { $timeoutSeconds = $parsed }
+    }
+    return [pscustomobject]@{
+        SmtpUniquenessBatchSize = [math]::Min(50, [math]::Max(1, $batchSize))
+        SmtpUniquenessBatchTimeoutSeconds = [math]::Min(300, [math]::Max(5, $timeoutSeconds))
+    }
+}
+
 function Get-SemrConnectionState {
     [CmdletBinding()]
     param()
@@ -577,7 +600,7 @@ function Initialize-SemrExchangeOnPremEvidence {
         [scriptblock]$ProgressCallback,
         [scriptblock]$CancellationCheck,
         [string]$DiagnosticsDirectory = '',
-        [ValidateRange(1,50)][int]$SmtpUniquenessBatchSize = 25,
+        [ValidateRange(1,50)][int]$SmtpUniquenessBatchSize = 50,
         [ValidateRange(5,300)][int]$SmtpUniquenessBatchTimeoutSeconds = 60
     )
 
@@ -667,8 +690,18 @@ function Initialize-SemrExchangeOnPremEvidence {
         $script:ExchangeOnPremWorkerCollectedAt = $workerResult.CollectedAt
         $partialErrorCount = [int](Get-SemrPropertyValue -InputObject $workerResult -Names @('PartialErrorCount') -Default 0)
         $fatalErrorCount = [int](Get-SemrPropertyValue -InputObject $workerResult -Names @('FatalErrorCount') -Default $workerResult.ErrorCount)
-        $script:ExchangeOnPremWorkerMessage = "Collected $($script:ExchangeOnPremEvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local $($workerResult.ExchangeProduct) build $($workerResult.ExchangeBuild) cmdlets on $($workerResult.ExchangeServerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; command errors=$($workerResult.ErrorCount) (partial=$partialErrorCount, fatal=$fatalErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s); child logs=$($workerResult.SmtpUniquenessDiagnosticsDirectory)."
-        return [pscustomobject]@{ Available = $true; Message = $script:ExchangeOnPremWorkerMessage; MailboxCount = $script:ExchangeOnPremEvidenceByEmail.Count; ErrorCount = [int]$workerResult.ErrorCount; DurationSeconds = $workerResult.DurationSeconds }
+        $script:ExchangeOnPremWorkerMessage = "Collected $($script:ExchangeOnPremEvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local $($workerResult.ExchangeProduct) build $($workerResult.ExchangeBuild) cmdlets on $($workerResult.ExchangeServerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; command errors=$($workerResult.ErrorCount) (partial=$partialErrorCount, fatal=$fatalErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batch size=$($workerResult.SmtpUniquenessBatchSize), timeout=$($workerResult.SmtpUniquenessBatchTimeoutSeconds) second(s), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s); child logs=$($workerResult.SmtpUniquenessDiagnosticsDirectory)."
+        return [pscustomobject]@{
+            Available = $true
+            Message = $script:ExchangeOnPremWorkerMessage
+            MailboxCount = $script:ExchangeOnPremEvidenceByEmail.Count
+            ErrorCount = [int]$workerResult.ErrorCount
+            PartialErrorCount = $partialErrorCount
+            FatalErrorCount = $fatalErrorCount
+            Errors = @($workerResult.Errors)
+            DiagnosticsDirectory = [string](Get-SemrPropertyValue -InputObject $workerResult -Names @('SmtpUniquenessDiagnosticsDirectory') -Default $DiagnosticsDirectory)
+            DurationSeconds = $workerResult.DurationSeconds
+        }
     }
     finally {
         if ($process) { $process.Dispose() }
@@ -1034,6 +1067,11 @@ function Initialize-SemrLiveSourceConnections {
         ActiveDirectoryMessage = ''
         ExchangeOnPremisesLive = $false
         ExchangeOnPremisesMessage = ''
+        ExchangeOnPremisesErrorCount = 0
+        ExchangeOnPremisesPartialErrorCount = 0
+        ExchangeOnPremisesFatalErrorCount = 0
+        ExchangeOnPremisesErrors = @()
+        ExchangeOnPremisesDiagnosticsDirectory = ''
     }
 
     if (-not $script:ConnectionState.ActiveDirectory) {
@@ -1122,6 +1160,45 @@ function Get-SemrPropertyValue {
         }
     }
     return $Default
+}
+
+function Test-SemrMigrationRelevantDelegate {
+    param([AllowNull()][string]$Identity)
+
+    $value = ([string]$Identity).Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    if ($value -match '^(?i:SELF|NT AUTHORITY\\SELF|S-1-5-10)$') { return $false }
+
+    $shortName = if ($value -match '\\([^\\]+)$') { $Matches[1] } else { $value }
+    if ($shortName -match '^(?i:Exchange Domain Servers|Exchange Servers|Exchange Services|Exchange Trusted Subsystem|Exchange Windows Permissions)$') {
+        return $false
+    }
+    return $true
+}
+
+function Get-SemrMigrationRelevantPermission {
+    param([AllowNull()][object[]]$Permissions)
+
+    return @(
+        $Permissions |
+            Where-Object { Test-SemrMigrationRelevantDelegate -Identity ([string](Get-SemrPropertyValue -InputObject $_ -Names @('Delegate') -Default '')) }
+    )
+}
+
+function Resolve-SemrBatchDelegateIdentity {
+    param([AllowNull()][string]$Identity)
+
+    $value = ([string]$Identity).Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) { return '' }
+    $candidateKeys = [System.Collections.Generic.List[string]]::new()
+    [void]$candidateKeys.Add($value.ToLowerInvariant())
+    if ($value -match '\\([^\\]+)$') { [void]$candidateKeys.Add($Matches[1].ToLowerInvariant()) }
+    foreach ($candidateKey in $candidateKeys) {
+        if ($script:BatchDelegateIdentityToEmail.ContainsKey($candidateKey)) {
+            return [string]$script:BatchDelegateIdentityToEmail[$candidateKey]
+        }
+    }
+    return $value
 }
 
 function ConvertTo-SemrAddressList {
@@ -1295,6 +1372,25 @@ function Get-SemrMailboxDecision {
 }
 
 
+function Get-SemrDataCoverage {
+    param(
+        [Parameter(Mandatory)][string]$AssessmentStatus,
+        [AllowNull()][object[]]$MailboxFindings,
+        [AllowNull()][object[]]$GlobalFindings,
+        [AllowNull()][object[]]$MailboxBlockingFindings
+    )
+
+    if ($AssessmentStatus -eq 'INCOMPLETE' -or @($MailboxBlockingFindings | Where-Object { [string]$_.CheckId -match '(?i)SOURCE' }).Count -gt 0) {
+        return 'Incomplete'
+    }
+    $materializedUnknown = @(
+        @($MailboxFindings) + @($GlobalFindings) |
+            Where-Object { $_.Result -eq 'UNKNOWN' -and $_.EvidenceSource -eq 'Assessment execution coverage control' }
+    )
+    if ($materializedUnknown.Count -gt 0) { return 'Partial' }
+    return 'Complete'
+}
+
 function Test-SemrMailboxDecisionRegression {
     [CmdletBinding()]
     param()
@@ -1312,6 +1408,53 @@ function Test-SemrMailboxDecisionRegression {
         }
     }
     return "DECISION_SELFTEST_OK|$($cases.Count)"
+}
+
+function Test-SemrReadinessRegression {
+    [CmdletBinding()]
+    param()
+
+    $checks = 0
+    $permissions = @(
+        [pscustomobject]@{ Delegate = 'NT AUTHORITY\SELF' },
+        [pscustomobject]@{ Delegate = 'DE\Exchange Trusted Subsystem' },
+        [pscustomobject]@{ Delegate = 'DE\50011SPDL01' },
+        [pscustomobject]@{ Delegate = 'S-1-5-21-111-222-333-444' }
+    )
+    $relevant = @(Get-SemrMigrationRelevantPermission -Permissions $permissions)
+    if ($relevant.Count -ne 2) { throw "Permission filtering regression failed. Expected=2; Actual=$($relevant.Count)." }
+    $checks++
+
+    $previousMap = $script:BatchDelegateIdentityToEmail
+    try {
+        $script:BatchDelegateIdentityToEmail = @{
+            '50011spdl01' = 'delegate@example.invalid'
+            's-1-5-21-111-222-333-444' = 'siddelegate@example.invalid'
+        }
+        if ((Resolve-SemrBatchDelegateIdentity -Identity 'DE\50011SPDL01') -ne 'delegate@example.invalid') { throw 'DOMAIN\sAMAccountName delegate resolution regression failed.' }
+        if ((Resolve-SemrBatchDelegateIdentity -Identity 'S-1-5-21-111-222-333-444') -ne 'siddelegate@example.invalid') { throw 'SID delegate resolution regression failed.' }
+        $checks += 2
+    }
+    finally { $script:BatchDelegateIdentityToEmail = $previousMap }
+
+    $semanticUnknown = [pscustomobject]@{ CheckId = 'TLS-BASELINE'; Result = 'UNKNOWN'; EvidenceSource = 'Exchange Online' }
+    $materializedUnknown = [pscustomobject]@{ CheckId = 'EXPECTED-CHECK'; Result = 'UNKNOWN'; EvidenceSource = 'Assessment execution coverage control' }
+    if ((Get-SemrDataCoverage -AssessmentStatus 'COMPLETE' -MailboxFindings @($semanticUnknown) -GlobalFindings @() -MailboxBlockingFindings @()) -ne 'Complete') { throw 'Semantic UNKNOWN data coverage regression failed.' }
+    if ((Get-SemrDataCoverage -AssessmentStatus 'COMPLETE' -MailboxFindings @($materializedUnknown) -GlobalFindings @() -MailboxBlockingFindings @()) -ne 'Partial') { throw 'Materialized UNKNOWN data coverage regression failed.' }
+    if ((Get-SemrDataCoverage -AssessmentStatus 'INCOMPLETE' -MailboxFindings @() -GlobalFindings @() -MailboxBlockingFindings @()) -ne 'Incomplete') { throw 'Incomplete assessment data coverage regression failed.' }
+    $checks += 3
+
+    $defaultDisabled = @(Get-SemrCheckCatalog | Where-Object { -not $_.DefaultEnabled } | ForEach-Object CheckId)
+    if ('HYBRID-MRSPROXY' -notin $defaultDisabled -or 'MAILBOX-LARGE-ITEMS' -notin $defaultDisabled) { throw 'Default disabled check catalog regression failed.' }
+    $checks++
+
+    $defaultSettings = Get-SemrExchangeOnPremRuntimeSettings -Config @{}
+    $clampedSettings = Get-SemrExchangeOnPremRuntimeSettings -Config @{ ExchangeOnPremises = @{ SmtpUniquenessBatchSize = 100; SmtpUniquenessBatchTimeoutSeconds = 2 } }
+    if ($defaultSettings.SmtpUniquenessBatchSize -ne 50 -or $defaultSettings.SmtpUniquenessBatchTimeoutSeconds -ne 60) { throw 'Default SMTP uniqueness settings regression failed.' }
+    if ($clampedSettings.SmtpUniquenessBatchSize -ne 50 -or $clampedSettings.SmtpUniquenessBatchTimeoutSeconds -ne 5) { throw 'Clamped SMTP uniqueness settings regression failed.' }
+    $checks += 2
+
+    return "READINESS_SELFTEST_OK|$checks"
 }
 
 function Invoke-SemrCommandSafe {
@@ -1448,7 +1591,7 @@ function Initialize-SemrBatchActiveDirectoryEvidence {
                 $domainUsers = @(
                     Get-ADUser -Server $domain -Filter ($clauses -join ' -or ') -Properties @(
                         'Enabled','UserPrincipalName','mail','proxyAddresses','targetAddress',
-                        'mS-DS-ConsistencyGuid','ObjectGuid','whenChanged','SamAccountName','DistinguishedName'
+                        'mS-DS-ConsistencyGuid','ObjectGuid','SID','whenChanged','SamAccountName','DistinguishedName'
                     ) -ErrorAction Stop
                 )
                 foreach ($domainUser in $domainUsers) {
@@ -1508,7 +1651,8 @@ function Initialize-SemrBatchActiveDirectoryEvidence {
                 [string](Get-SemrPropertyValue -InputObject $adUser -Names @('SamAccountName') -Default ''),
                 [string](Get-SemrPropertyValue -InputObject $adUser -Names @('UserPrincipalName') -Default ''),
                 [string](Get-SemrPropertyValue -InputObject $adUser -Names @('Mail','PrimarySmtpAddress') -Default ''),
-                [string](Get-SemrPropertyValue -InputObject $adUser -Names @('DistinguishedName') -Default '')
+                [string](Get-SemrPropertyValue -InputObject $adUser -Names @('DistinguishedName') -Default ''),
+                [string](Get-SemrPropertyValue -InputObject $adUser -Names @('SID','ObjectSid') -Default '')
             )) {
                 if (-not [string]::IsNullOrWhiteSpace($identity)) {
                     $script:BatchDelegateIdentityToEmail[$identity.Trim().ToLowerInvariant()] = $email
@@ -2163,8 +2307,9 @@ function Add-SemrFlowAndSyncFindings {
     if($mailbox.Count -eq 1){
         $batchEmails=@($BatchRows | ForEach-Object {([string]$_.EmailAddress).ToLowerInvariant()})
         $permissionsAvailable=[bool](Get-SemrPropertyValue $OnPrem @('PermissionsAvailable') $false)
-        $delegates=@($OnPrem.Permissions | ForEach-Object {[string]$_.Delegate} | Where-Object {$_} | Sort-Object -Unique)
-        $resolvedDelegates=@($delegates | ForEach-Object {$delegateKey=$_.Trim().ToLowerInvariant();if($script:BatchDelegateIdentityToEmail.ContainsKey($delegateKey)){$script:BatchDelegateIdentityToEmail[$delegateKey]}else{$_}} | Sort-Object -Unique)
+        $migrationPermissions=@(Get-SemrMigrationRelevantPermission -Permissions @($OnPrem.Permissions))
+        $delegates=@($migrationPermissions | ForEach-Object {[string]$_.Delegate} | Where-Object {$_} | Sort-Object -Unique)
+        $resolvedDelegates=@($delegates | ForEach-Object {Resolve-SemrBatchDelegateIdentity -Identity $_} | Where-Object {$_} | Sort-Object -Unique)
         $external=@($resolvedDelegates | Where-Object {$batchEmails -notcontains $_.ToLowerInvariant()})
         $knownText=if($resolvedDelegates.Count){$resolvedDelegates -join ';'}else{'None observed'}
         $dependencyObserved=if(-not $permissionsAvailable){"Partial baseline: $($resolvedDelegates.Count) known delegate(s): $knownText"}elseif($external.Count){$external -join ';'}else{'All resolvable delegates are in the batch or none exist'}
@@ -2617,9 +2762,15 @@ function Invoke-SemrAssessment {
                 { param($Current,$Total,$Message) & $ProgressCallback $Current $Total '' $Message }.GetNewClosure()
             }
             else { $null }
-            $batchExchange = Initialize-SemrExchangeOnPremEvidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress -CancellationCheck $CancellationCheck -DiagnosticsDirectory $exchangeDiagnosticsDirectory
+            $exchangeSettings = Get-SemrExchangeOnPremRuntimeSettings -Config $Config
+            $batchExchange = Initialize-SemrExchangeOnPremEvidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress -CancellationCheck $CancellationCheck -DiagnosticsDirectory $exchangeDiagnosticsDirectory -SmtpUniquenessBatchSize $exchangeSettings.SmtpUniquenessBatchSize -SmtpUniquenessBatchTimeoutSeconds $exchangeSettings.SmtpUniquenessBatchTimeoutSeconds
             $sourceInitialization.ExchangeOnPremisesLive = [bool]$batchExchange.Available
             $sourceInitialization.ExchangeOnPremisesMessage = [string]$batchExchange.Message
+            $sourceInitialization.ExchangeOnPremisesErrorCount = [int]$batchExchange.ErrorCount
+            $sourceInitialization.ExchangeOnPremisesPartialErrorCount = [int]$batchExchange.PartialErrorCount
+            $sourceInitialization.ExchangeOnPremisesFatalErrorCount = [int]$batchExchange.FatalErrorCount
+            $sourceInitialization.ExchangeOnPremisesErrors = @($batchExchange.Errors)
+            $sourceInitialization.ExchangeOnPremisesDiagnosticsDirectory = [string]$batchExchange.DiagnosticsDirectory
         }
         catch {
             if ($CancellationCheck -and (& $CancellationCheck)) {
@@ -2628,6 +2779,9 @@ function Invoke-SemrAssessment {
             $script:ConnectionState.OnPremisesExchange = $false
             $script:ExchangeOnPremEvidenceByEmail = @{}
             $sourceInitialization.ExchangeOnPremisesLive = $false
+            $sourceInitialization.ExchangeOnPremisesFatalErrorCount = 1
+            $sourceInitialization.ExchangeOnPremisesErrors = @([pscustomobject]@{ EmailAddress = ''; CheckId = 'EXCHANGE-ONPREM-SOURCE'; Command = 'ExchangeOnPremWorker'; Message = $_.Exception.Message; IsFatal = $true })
+            $sourceInitialization.ExchangeOnPremisesDiagnosticsDirectory = $exchangeDiagnosticsDirectory
             $sourceInitialization.ExchangeOnPremisesMessage = "Local Exchange on-premises evidence collection failed. The assessment will be INCOMPLETE. $($_.Exception.Message)"
         }
     }
@@ -2862,7 +3016,8 @@ function Invoke-SemrAssessment {
                     RecommendedAction = if (-not $holdDataAvailable) { 'Validate hold state through live Exchange on-premises before migration.' } elseif ($holdCount -gt 0) { 'Confirm hold preservation requirements and monitor Recoverable Items quota; do not remove holds solely to satisfy this precheck.' } else { '' }
                 })
 
-                foreach ($permission in @($onPrem.Permissions)) {
+                $migrationPermissions = @(Get-SemrMigrationRelevantPermission -Permissions @($onPrem.Permissions))
+                foreach ($permission in $migrationPermissions) {
                     [void]$permissionRows.Add([pscustomobject][ordered]@{
                         RunId = $runId
                         EmailAddress = $email
@@ -2873,9 +3028,9 @@ function Invoke-SemrAssessment {
                         CapturedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
                     })
                 }
-                $permissionCount = @($onPrem.Permissions).Count
+                $permissionCount = $migrationPermissions.Count
                 $permissionsAvailable = [bool](Get-SemrPropertyValue -InputObject $onPrem -Names @('PermissionsAvailable') -Default $false)
-                $knownPermissionText = @($onPrem.Permissions | ForEach-Object { "$($_.PermissionType):$($_.Delegate)" } | Sort-Object -Unique) -join '; '
+                $knownPermissionText = @($migrationPermissions | ForEach-Object { "$($_.PermissionType):$($_.Delegate)" } | Sort-Object -Unique) -join '; '
                 Add-SemrFinding -List $findings -Parameters ($base + @{
                     CheckId = 'PERMISSIONS-BASELINE'; Category = 'Permissions'; Severity = if (-not $permissionsAvailable -or $permissionCount -gt 0) { 'Warning' } else { 'Information' }
                     Result = if (-not $permissionsAvailable) { 'UNKNOWN' } elseif ($permissionCount -gt 0) { 'WARN' } else { 'PASS' }; IsBlocking = $false
@@ -3256,7 +3411,7 @@ function Invoke-SemrAssessment {
             ExoRecipientCount = @($exo.Recipients).Count
             ExoMailboxCount = @($exo.Mailboxes).Count
             GraphUserCount = @($graph.Users).Count
-            PermissionCount = @($onPrem.Permissions).Count
+            PermissionCount = @(Get-SemrMigrationRelevantPermission -Permissions @($onPrem.Permissions)).Count
             CollectedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         }
         [void]$evidenceRows.Add($mailboxEvidence)
@@ -3378,7 +3533,7 @@ function Invoke-SemrAssessment {
             UnknownCount = $unknown.Count + $globalUnknown.Count
             MailboxUnknownCount = $unknown.Count
             GlobalUnknownCount = $globalUnknown.Count
-            DataCoverage = if ($assessmentStatus -eq 'INCOMPLETE' -or @($mailboxBlocking | Where-Object CheckId -match 'SOURCE').Count -gt 0) { 'Incomplete' } elseif ($unknown.Count + $globalUnknown.Count -gt 0) { 'Partial' } else { 'Complete' }
+            DataCoverage = Get-SemrDataCoverage -AssessmentStatus $assessmentStatus -MailboxFindings @($mailboxFindings) -GlobalFindings @($globalFindings) -MailboxBlockingFindings @($mailboxBlocking)
             BlockingCodes = ($blockingCodes -join ';')
             RecommendedAction = ($recommended -join ' | ')
             CheckedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -3817,6 +3972,7 @@ Export-ModuleMember -Function @(
     'Connect-SemrActiveDirectory',
     'Test-SemrExchangeOnPremWorkerSerialization',
     'Test-SemrMailboxDecisionRegression',
+    'Test-SemrReadinessRegression',
     'Connect-SemrOnPremisesExchange',
     'Connect-SemrExchangeOnline',
     'Connect-SemrMicrosoftGraph',
@@ -3834,10 +3990,10 @@ Export-ModuleMember -Function @(
 )
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmb0fontqOotj4
-# nNXeW7d/ju3JwHRP+NsHbesF2Vxma6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMU1CTuU24RdAl
+# XjD17r6lhX+xxwuJMz/CWyCik0lomaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3862,139 +4018,19 @@ Export-ModuleMember -Function @(
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOlLSnzybrmL9xLMnyakE29eTr+0MuP7h3Pyc8LSkfR1MA0GCSqG
-# SIb3DQEBAQUABIIBgAwV9Cug+cFdJ+IixtUngIKbqNTrLukHvcQ4xDRpVxZvLlSD
-# evgjcXK8yEqq3Yj8tAlrPksv/tkyPw5zK7j+NESXBol6LITS2vzNQTTnW37tZfdi
-# 6YckXwZZ1QQI7aYRNNG7j+gePASrDQChwPO/HrNJTObsxreftdkcC64cLCMDQh2R
-# rjng6usyICk6ItjIeWg7yH4TErArsn4Jmdaz+bvWIgkUrpQS0gtfFW3WXcoU370T
-# tnn/ZAV1p6e4jpsKRfg7DPFOtaQ7L22SblOt9OAXFdeKmZ4kn6Xzv0++oBxNz1gi
-# lL0Ua/nI4EbfuZRs8Ekfo91DDNBsLWJHaO1lRQYyKawHxZuI/a57qvdSCUMag3DV
-# w11g35xGaTmphSzXQhv5t3nJ9MLRnJkHsD4GNncZAFHKT9vGB3b/ICmru2kwy1sj
-# Zp0j4Hw4wxnhGXLzQQuhUCQyYrniddtn0MJ06cVxwCiXeP30S8I5yqNJU3smD3Up
-# rFWNB2L9W5hxpPD3faGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMDMw
-# MzhaMC8GCSqGSIb3DQEJBDEiBCATn72iDTZy760JFtF5m1ojXPjmcsMtJr6GKN80
-# nqNGFzANBgkqhkiG9w0BAQEFAASCAgABqB3p74bLxaDdsZtTqRKzKVzbKX4DuQfU
-# fKyYaW0Oj7KFX1u+tuGkhIBUINQ7GurAjVvFjE4rUWW58loqBxGBoZ82UftcvMal
-# a/CBNQb2eLVCPY8VSITZvhPlRKbggmnN4ZGh/W9GC2PygplYCqvmLz69PPgusyWC
-# CuS5gP2WfbWUQ7m7ydsQqFp9GOQ9lktOsbwVAppa+PYAZ7wQXn4RBF+Fvny8Uofb
-# Qp2gGfhj/4ScIBXX1CPosIDxNX4Gn+mXAaru80ZZ8p95tdnAHFaKOMzPqYmIGZ8U
-# evRNWpF9Hogg9wOt1s+o7l3Be3CMQ+/EgQPw4/Atd/8aviccOjZiC/0+u49moKjv
-# 7G7fytjm89SUxkdgW2Q1/m2zIsSIUiUxmZjONINw1hu9+amylcSDrpI9snrTeVxk
-# idET5sd6HKoclTLTSm0yHpOZM2kgtF5gh/ivF1n22T5HumeFgoFpjLFFN2qm0n3s
-# Vp9KdiF0zYr0QLP9hxmI9TpARXq6T6dSouxHJ6Dy+3rB6rXEb0SeL3Hk7loHKQAy
-# jqJTtFvZZXAT93azh5Lh7th0R2MubanstGlaihGdlrI/iB4nN540T4xwogtwc5NA
-# W8zvkfiM+/rz3ZYZNiit41LD9OvQWeaAYsnPv5TiSv4WCTyjLXhS5I3FRyptBTMA
-# Bt+MC3P8gA==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCEz/pF53ijjJTFQl/e0rhi
+# 9Q8yR5pFLECXqdMOb3EGozANBgkqhkiG9w0BAQEFAASCAYChJz6hzvwvt9Boqbzx
+# Yo2qOgrcoHdtXfcj/bRZ9ZvYLvUOR4Wf6aaz6bGnzAaHskOjXKgSRDt0qq8p7Knc
+# jEZiJim3modzc/nCYVlg6MDNUpZi5HrvoaP8PlYa0AsLQB+0EumYgv5jJC7nvbf6
+# hwf0tJAARzNti0K5IDvMFiecK2glb0nLisRoWy+awdu1S4N8OpWx9zxbsW0nYlpb
+# 6LhXQvQyUm9T/XURG7eRyspRAzToo3U+M1+/U/0p+vclj5CloeQ/6VtMR9cq/Ocb
+# 6EYbhATHoGAwoOT6oLIySQ369tTrAsCfPK1Nxrkh5Fx6XxCKFNUwYWDU1rm/KriN
+# GI6zA60/NK324cp3xqq2HeslthgdpnZwQxzMwBC2lyD9AyfKsvzPCg6t0bckMuul
+# sJrWp+W614tmBIRcEHOG3t+fIaxQAU60CP/bUqro9lyhNA4J2XsAQROLgZ6QM3Rt
+# TL9ndwO5l6sMtUB3d8c3N17uWydlj6Zsz1fsHNDpQH/3OFw=
 # SIG # End signature block
