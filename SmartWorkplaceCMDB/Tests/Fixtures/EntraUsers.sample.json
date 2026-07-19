@@ -1,0 +1,25 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users",
+  "value": [
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "userPrincipalName": "alex.taylor@example.invalid",
+      "displayName": "Alex Taylor",
+      "accountEnabled": true,
+      "userType": "Member",
+      "department": "Engineering",
+      "jobTitle": "Workplace Engineer",
+      "createdDateTime": "2025-01-15T08:30:00Z"
+    },
+    {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "userPrincipalName": "casey.morgan_example.invalid#EXT#@exampletenant.onmicrosoft.com",
+      "displayName": "Casey Morgan",
+      "accountEnabled": false,
+      "userType": "Guest",
+      "department": null,
+      "jobTitle": "External Consultant",
+      "createdDateTime": "2025-02-20T14:45:00Z"
+    }
+  ]
+}
