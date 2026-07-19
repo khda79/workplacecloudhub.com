@@ -3,7 +3,7 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.11.6
+1.11.8
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -15,6 +15,9 @@ param(
     [string]$ErrorPath = '',
     [string]$ProgressPath = '',
     [string]$LogPath = '',
+    [ValidateSet('CurrentUser','Process')][string]$ContextScope = 'CurrentUser',
+    [switch]$ForceAuthentication,
+    [switch]$InspectContext,
     [switch]$ValidateOnly
 )
 
@@ -61,9 +64,29 @@ function Write-WorkerTextFile {
 }
 
 try {
-    Write-GraphWorkerLog -Level INFO -Message "Worker starting. Version=1.11.6; PowerShell=$($PSVersionTable.PSVersion); Computer=$env:COMPUTERNAME; TenantId=$TenantId; RuntimeInput=$InputPath."
+    Write-GraphWorkerLog -Level INFO -Message "Worker starting. Version=1.11.8; PowerShell=$($PSVersionTable.PSVersion); Computer=$env:COMPUTERNAME; TenantId=$TenantId; RuntimeInput=$InputPath; ContextScope=$ContextScope; ForceAuthentication=$ForceAuthentication; InspectContext=$InspectContext."
     $moduleTimer=[Diagnostics.Stopwatch]::StartNew()
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+
+    if ($InspectContext) {
+        if ([string]::IsNullOrWhiteSpace($OutputPath) -or [string]::IsNullOrWhiteSpace($ErrorPath)) { throw 'Graph context inspection output and error paths are required.' }
+        $existingContext = Get-MgContext
+        [pscustomobject][ordered]@{
+            Available = $null -ne $existingContext
+            Usable = $null -ne $existingContext
+            Account = if ($existingContext) { [string]$existingContext.Account } else { '' }
+            TenantId = if ($existingContext) { [string]$existingContext.TenantId } else { '' }
+            Organization = ''
+            AuthType = if ($existingContext) { [string]$existingContext.AuthType } else { '' }
+            ContextScope = if ($existingContext) { [string]$existingContext.ContextScope } else { '' }
+            ClientId = if ($existingContext) { [string]$existingContext.ClientId } else { '' }
+            Scopes = if ($existingContext) { @($existingContext.Scopes) } else { @() }
+            Error = ''
+        } | Export-Clixml -LiteralPath $OutputPath -Depth 5 -Force
+        Write-GraphWorkerLog -Level INFO -Message "Context inspection complete. Available=$($null -ne $existingContext); Account=$(if($existingContext){$existingContext.Account}else{''}); Tenant=$(if($existingContext){$existingContext.TenantId}else{''})."
+        exit 0
+    }
+
     Import-Module Microsoft.Graph.Users -ErrorAction Stop
     Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
     $moduleTimer.Stop()
@@ -71,42 +94,43 @@ try {
 
     if ($ValidateOnly) {
         foreach ($commandName in @('Connect-MgGraph', 'Get-MgUser', 'Get-MgUserLicenseDetail', 'Get-MgSubscribedSku', 'Get-MgOrganization')) {
-            if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
-                throw "Required Microsoft Graph command is unavailable: $commandName"
-            }
+            if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) { throw "Required Microsoft Graph command is unavailable: $commandName" }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.11.6'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.11.8'
         exit 0
     }
 
     foreach ($requiredPath in @($ScopesPath, $InputPath, $OutputPath, $ErrorPath, $ProgressPath)) {
-        if ([string]::IsNullOrWhiteSpace($requiredPath)) {
-            throw 'Graph worker runtime paths are required.'
-        }
+        if ([string]::IsNullOrWhiteSpace($requiredPath)) { throw 'Graph worker runtime paths are required.' }
     }
-
     $scopes = @(Import-Clixml -LiteralPath $ScopesPath)
     $emailAddresses = @(Import-Clixml -LiteralPath $InputPath)
     Write-GraphWorkerLog -Level INFO -Message "Runtime input loaded. ScopeCount=$($scopes.Count); MailboxCount=$($emailAddresses.Count); Scopes=$($scopes -join ',')."
-    if (Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue) {
+    $existingContext = Get-MgContext
+    if ($ForceAuthentication -and $existingContext -and (Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue)) {
+        Write-GraphWorkerLog -Level INFO -Message "Forcing new authentication; disconnecting existing account=$($existingContext.Account), tenant=$($existingContext.TenantId)."
         Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        $existingContext = $null
     }
-
-    $connectParameters = @{
-        ContextScope = 'Process'
-        NoWelcome = $true
-        ErrorAction = 'Stop'
-    }
-    $connectParameters.Scopes = $scopes
-    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
-        $connectParameters.TenantId = $TenantId
-    }
+    $requiredScopeSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($scope in $scopes) { [void]$requiredScopeSet.Add([string]$scope) }
+    $missingScopes = if ($existingContext) { @($requiredScopeSet | Where-Object { @($existingContext.Scopes) -notcontains $_ }) } else { @($requiredScopeSet) }
+    $tenantCompatible = $existingContext -and (-not $TenantId -or [string]$existingContext.TenantId -eq $TenantId)
+    $contextCompatible = $tenantCompatible -and $missingScopes.Count -eq 0
     $authenticationTimer=[Diagnostics.Stopwatch]::StartNew()
-    Write-GraphWorkerLog -Level INFO -Message 'Interactive Microsoft Graph authentication starting.'
-    Connect-MgGraph @connectParameters | Out-Null
+    if ($contextCompatible -and -not $ForceAuthentication) {
+        $context = $existingContext
+        Write-GraphWorkerLog -Level SUCCESS -Message "Reusing existing delegated Graph context. Account=$($context.Account); Tenant=$($context.TenantId); ContextScope=$($context.ContextScope)."
+    }
+    else {
+        if ($existingContext -and (Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue)) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+        $connectParameters = @{ ContextScope=$ContextScope; NoWelcome=$true; ErrorAction='Stop'; Scopes=$scopes }
+        if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $connectParameters.TenantId = $TenantId }
+        Write-GraphWorkerLog -Level INFO -Message "Interactive Microsoft Graph authentication starting. MissingScopes=$($missingScopes -join ','); TenantCompatible=$tenantCompatible."
+        Connect-MgGraph @connectParameters | Out-Null
+        $context = Get-MgContext
+    }
     $authenticationTimer.Stop()
-
-    $context = Get-MgContext
     if (-not $context) {
         throw 'Microsoft Graph authentication did not return a context.'
     }
@@ -246,6 +270,10 @@ try {
 
     [pscustomobject][ordered]@{
         TenantId = [string]$context.TenantId
+        Account = [string]$context.Account
+        AuthType = [string]$context.AuthType
+        ContextScope = [string]$context.ContextScope
+        Scopes = @($context.Scopes)
         CollectedAt = Get-Date
         Evidence = @($evidence)
         SubscribedSkus = $subscribedSkus
@@ -266,7 +294,7 @@ catch {
     exit 1
 }
 finally {
-    if (Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue) {
+    if ($ContextScope -eq 'Process' -and (Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue)) {
         Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     }
     Write-GraphWorkerLog -Level INFO -Message "Worker exiting. TotalDurationMs=$([math]::Round(((Get-Date)-$workerStartedAt).TotalMilliseconds))."
@@ -274,8 +302,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAW+9SLpQAYsyMH
-# uhf3+yh6n5eQtU5REUpRuwHTdrH9G6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUJViQ0RDhVe0I
+# rJMNO60JcUsqYIB6YL8fbwaBqQCspKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -408,31 +436,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHa/WLpIpNfN0DfMBc5eYDy56b/+sNCcMGW+BT5OPptZMA0GCSqG
-# SIb3DQEBAQUABIIBgEnw8RErrhG04UHV1AqzM9y86Dwy3hnjAk6ipqpivdHOPABs
-# PGLbqL3Ido4qTQMC6Nk8/OSAZdDGc6vl+XJjZIG6CgFNghDbzkWV5LVBPA4liFBj
-# 5h0FGp0d7Ia4P9Okm1/GSeW0kOdld65Gnybhu7Sp3A19m5OMuh7unsBv6wBcwcrp
-# SN7kWHwiQCrf+xEEtPhU6Hta+Xfkaj7cjc7dcZaLCZgc0jv8egExTMQmZ2Rg0n9Y
-# /fMyj71R16hUxmkZugxIKMFvAE2g8vGdg9MloqxSo4Ms4b1rUPcqCumGNlTy/aOW
-# esLPhJ0tlYHKSfe8ilzNQMoz8Rm6xDBpfYNHAasDyAdvBP8SYNDsLeHT6MA4/+2N
-# FYvTi1RHwA4SO9t9UXrSGA6hmkC0/7F01jaK0K5kXsznV1Ck7vkXLS9kjlUAemCI
-# PNSEpV9RmAjT2ylUVIcZTK4QJi7ngDDnG/pI8pgCM3cKFXHV149EVaF50UtYJFLL
-# c2lg1IhRV+FgqjmtC6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICYmykzyuODfjHGaXXbc/+En8HhS6oemChx4K3G5FVwcMA0GCSqG
+# SIb3DQEBAQUABIIBgGA3AIr4EhakJAd7fi5I9qM7WWwiPULZn8QUcLMjiSFxtfKr
+# OKC83R5ASeQ7M56gXnyNYspEJcXtsLzF9hm5ZAdkpK6KTdI/KoXSOrs/BGSdWZ5T
+# 1n3hW3xcgdNLPH+3kPuvljY1jNXxZtV40BAb7GCqc3MWVJaE9wtGm+vWf41BkZrw
+# P3Pb3MDR9WZ0mK5HNkah4Oaqn8bjoZ8M/mBVYpgkFSi8gFEWYiJ8ZFODIdfkFMVU
+# ERKTfKA6q0LbX6DO/mGueS5UT5fmwO0gkU++WEkW8vmmejjSZ8GVZvjt+jSlEkmm
+# EgRimxsg0lgBHSqeygQH8sH26nxtvS4Igy+O2vRtEwHl1HWsDY3jEw2xTh2xA2vd
+# gt5i3G3tYw0VQW86yo5ht6peZVjW+mblonVYNTlIAJ+ZXFAF0fv2nJoNobr7owrx
+# /aGiizHvuNgirWqtpeat/+3anhHMRD98fxzhp0YQfmPOMmU+P/hWW/CdRI6rgdy7
+# 0/VTedgkYnFJ+oQutqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNDU0
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAkmg8OawEsm/gxFv4l2tCOIEWIZD2ugsEXhVFX
-# 488lMjANBgkqhkiG9w0BAQEFAASCAgAtOLeXvU+aZhq8J2aN3FdZGxYU3pcIRKDy
-# 9Yob/WzFdmhlMfh2hLhg6ReAg9Kdrm9rhn+zZue8LAnPe2XCeh5NXuwhyfSZx9zd
-# +ozzXWxYzhGTwqd0WC/LlDKw2NJyMQzlRxit9M4OuPZNCfVkfK46ZcahTtlwjwuR
-# KgHfo6BavNb5SaFcwZCpVvHuQ0jTxTIjzh8OkGCaac0UwrSTGB/pbNtx1Qe2uVmT
-# OonaKzdCs7VIlaUcqm8Pp9ZJbIJ7VVBgHt8ubYHdtllsNC9fe0Hsionn6A8zphsf
-# QDTe7/Gu9rmVPtkuMCPiqQRr7Q1AsyuPVNk+kryxLx5zXTp0JtIUKUR9+gEv5XVy
-# KdalaVXUyq/goFRQbZF0nXZfhLEWOjytw7GpCDWulLOq8WkEbQrjFr7MoDzSh/Td
-# hOUJk0fQOqWRtavDdoreS1IVhOGkek9N5ewtsbS9g+Pp3UvCYJCDCoovKKRxQ0vM
-# f6ybIGjBpic2l7JhH5tiVWdEkGgVeJrmMpfttvvOpWhQ5ZNmZGJZ/lmGYoTEfsjE
-# +fnGrNU+fHG/fCezqIZWGGCEk33wcouShxM9Hm1qpUqt1Gh6KyYBF5t8tmWe9Sdb
-# ozKLKr8l+ILMu7EFxtTxvr9SA/YaY/Ynu1gyDwbEj++qNEETB1fx8aBxKCIOhL8t
-# WV3BepwWWw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzA5
+# MDZaMC8GCSqGSIb3DQEJBDEiBCAEvR4gwpLYIiweLOyFP5YUMxIKw/ztqVcPzzin
+# utOJrDANBgkqhkiG9w0BAQEFAASCAgC3S1AQl7nbTh6pmJI0JPfyxcr7D3g/MMCh
+# X5dpdg3SHyBpzhM3rAyfXrzwkzYC1yDKEqAbugqmYhackJyq3nNrzZlQ7xhkwJHD
+# 3pMeJH6tZJwI6yn6vPR7pPVJVb/hizbb7qjldzCF1BZLk0zQRpCRuVAWpyWG5Qpt
+# SkpSad4+CUkaVSEcbhyAyYmgCGMyKSDyYfUwf6q8wUe0bV1+dOi61V+qtEDx02+o
+# Q+U8O8RAHzJaDzC5mK712EJcHl/0DXXlbYYBLFTbP8qea9LlBwHyINrKQtEPbixu
+# OBnIerxnegnSIsG/aJ5VHOjo+pO1iDDFnzFm/lHPn/yAw+gaHSbizkizrFjaVJom
+# bX3hm/fDB8f1fjVG18pLgdz3rbd01RO4bS6r/kj9JAQEfXEMc20v/IxhXwdMrp1o
+# MOnV53usFwasLIIVRt0BDvDssM7yshV+A+v70uI1ttx97P7RElQsgXwvhNfgKIPT
+# 4Caa8E3Dywk+LkE1hUxvqRw9I1GyWQkD+WlyG5i3U8/JZIxf/RVaGpgiSHnF+A4L
+# /Y/HO8OWw2pIs9ggZGUNjCx6eB3yEjx8nOA4Xh18R5d4mxqPaeZvhQWvEIDCWR8p
+# k0sVJEvQ2x3II5S/5bOXC/KzoXrWsDrfi/n6Xv9AQZp0I9DDzAOgvWBQQzkY4Zvw
+# 9nddmoBmdw==
 # SIG # End signature block
