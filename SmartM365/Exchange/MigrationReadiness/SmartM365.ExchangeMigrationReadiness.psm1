@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.6'
+$script:SemrVersion = '1.11.8'
 $script:ActiveDirectoryDomains = @()
 $script:Exchange2016EvidenceByEmail = @{}
 $script:Exchange2016HybridEvidence = $null
@@ -12,6 +12,9 @@ $script:GraphSubscribedSkus = @()
 $script:GraphSubscribedSkuError = ''
 $script:GraphOrganization = $null
 $script:GraphOrganizationError = ''
+$script:ExchangeOnlineSessionInfo = $null
+$script:MicrosoftGraphSessionInfo = $null
+$script:OwnsExchangeOnlineSession = $false
 $script:CurrentSourceTimestamps = @{}
 $script:BatchActiveDirectoryEvidenceByEmail = @{}
 $script:BatchDelegateIdentityToEmail = @{}
@@ -34,6 +37,7 @@ function Get-SemrVersion {
 
 function Get-SemrCheckCatalog {
     $mandatory = @('CSV-EMPTY-IDENTITY','CSV-SMTP-FORMAT','CSV-DUPLICATE','AD-SOURCE','ONPREM-SOURCE','EXO-SOURCE','GRAPH-SOURCE','ENTRA-CONNECT-SCHEDULER')
+    $defaultDisabled = @('HYBRID-MRSPROXY')
     $definitions = @(
         @('CSV-EMPTY-IDENTITY','CSV','Mailbox identity is present','Reject empty mailbox identities.'),
         @('CSV-SMTP-FORMAT','CSV','SMTP syntax','Validate mailbox identity SMTP syntax.'),
@@ -87,7 +91,7 @@ function Get-SemrCheckCatalog {
         @('LICENSE-BATCH-CAPACITY','Licensing','Batch target SKU capacity','Require enough available target SKU licenses for the complete batch.'),
         @('LICENSE-EXCHANGE-SERVICE-PLAN','Licensing','Exchange service plan','Require a mailbox-bearing Exchange service plan.'),
         @('HYBRID-ENDPOINT','Hybrid connectivity','Migration endpoint','Test the ExchangeRemoteMove endpoint.'),
-        @('HYBRID-MRSPROXY','Hybrid connectivity','MRSProxy readiness','Verify MRSProxy and EWS migration readiness.'),
+        @('HYBRID-MRSPROXY','Hybrid connectivity','Local EWS/MRSProxy diagnostic','Optionally inspect every local Exchange EWS virtual directory and its configured MRSProxy state.'),
         @('HYBRID-CERTIFICATE-EXPIRY','Hybrid connectivity','Hybrid certificate expiry','Detect missing or expiring hybrid certificates.'),
         @('HYBRID-ENDPOINT-CAPACITY','Hybrid connectivity','Tenant migration load','Report tenant-wide active migration load.'),
         @('HYBRID-MIGRATION-BACKLOG','Hybrid connectivity','Migration failure backlog','Report failed, stopped or corrupted migration users separately from active migration load.'),
@@ -103,7 +107,7 @@ function Get-SemrCheckCatalog {
             Description = $_[3]
             Mandatory = $_[0] -in $mandatory
             CanDisable = $_[0] -notin $mandatory
-            DefaultEnabled = $true
+            DefaultEnabled = $_[0] -notin $defaultDisabled
         }
     })
 }
@@ -111,7 +115,12 @@ function Get-SemrCheckCatalog {
 function Set-SemrAssessmentCheckOptions {
     param([System.Collections.IDictionary]$Config)
     $script:DisabledChecks.Clear()
-    if (-not $Config -or -not $Config.Contains('DisabledChecks')) { return }
+    if (-not $Config -or -not $Config.Contains('DisabledChecks') -or $null -eq $Config['DisabledChecks']) {
+        foreach ($definition in @(Get-SemrCheckCatalog | Where-Object { $_.CanDisable -and -not $_.DefaultEnabled })) {
+            [void]$script:DisabledChecks.Add([string]$definition.CheckId)
+        }
+        return
+    }
     foreach ($checkId in @($Config['DisabledChecks'])) {
         if (-not [string]::IsNullOrWhiteSpace([string]$checkId)) { [void]$script:DisabledChecks.Add(([string]$checkId).Trim()) }
     }
@@ -653,7 +662,9 @@ function Initialize-SemrExchange2016Evidence {
         }
         $script:Exchange2016HybridEvidence = $workerResult.Hybrid
         $script:Exchange2016WorkerCollectedAt = $workerResult.CollectedAt
-        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; per-mailbox errors=$($workerResult.ErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s); child logs=$($workerResult.SmtpUniquenessDiagnosticsDirectory)."
+        $partialErrorCount = [int](Get-SemrPropertyValue -InputObject $workerResult -Names @('PartialErrorCount') -Default 0)
+        $fatalErrorCount = [int](Get-SemrPropertyValue -InputObject $workerResult -Names @('FatalErrorCount') -Default $workerResult.ErrorCount)
+        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; command errors=$($workerResult.ErrorCount) (partial=$partialErrorCount, fatal=$fatalErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s); child logs=$($workerResult.SmtpUniquenessDiagnosticsDirectory)."
         return [pscustomobject]@{ Available = $true; Message = $script:Exchange2016WorkerMessage; MailboxCount = $script:Exchange2016EvidenceByEmail.Count; ErrorCount = [int]$workerResult.ErrorCount; DurationSeconds = $workerResult.DurationSeconds }
     }
     finally {
@@ -662,42 +673,128 @@ function Initialize-SemrExchange2016Evidence {
     }
 }
 
+function Get-SemrCloudSessionSummary {
+    [CmdletBinding()]
+    param()
+
+    return [pscustomobject]@{
+        ExchangeOnline = $script:ExchangeOnlineSessionInfo
+        MicrosoftGraph = $script:MicrosoftGraphSessionInfo
+    }
+}
+
+function Get-SemrExchangeOnlineSessionInfo {
+    [CmdletBinding()]
+    param([string]$TenantId = '')
+
+    try {
+        if (-not (Test-SemrCommand -Name 'Get-ConnectionInformation')) { Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop }
+        if (-not (Test-SemrCommand -Name 'Get-ConnectionInformation')) { throw 'Get-ConnectionInformation is unavailable.' }
+        $connections = @(Get-ConnectionInformation -ErrorAction Stop)
+        if ($connections.Count -eq 0) {
+            $script:ExchangeOnlineSessionInfo = [pscustomobject]@{ Available=$false; Usable=$false; Account=''; TenantId=''; Organization=''; AuthType=''; State=''; ConnectionCount=0; Error='' }
+            return $script:ExchangeOnlineSessionInfo
+        }
+        $matching = if ($TenantId) { @($connections | Where-Object { [string](Get-SemrPropertyValue -InputObject $_ -Names @('TenantID','TenantId') -Default '') -eq $TenantId }) } else { @() }
+        $connection = if ($matching.Count -gt 0) { $matching[0] } else { $connections[0] }
+        $connectedTenantId = [string](Get-SemrPropertyValue -InputObject $connection -Names @('TenantID','TenantId') -Default '')
+        $tokenStatus = [string](Get-SemrPropertyValue -InputObject $connection -Names @('TokenStatus','State') -Default '')
+        $usable = [string]::IsNullOrWhiteSpace($tokenStatus) -or $tokenStatus -notmatch '(?i)expired|invalid|closed|disconnected'
+        $script:ExchangeOnlineSessionInfo = [pscustomobject]@{
+            Available = $true
+            Usable = $usable
+            Account = [string](Get-SemrPropertyValue -InputObject $connection -Names @('UserPrincipalName','Account') -Default '')
+            TenantId = $connectedTenantId
+            Organization = [string](Get-SemrPropertyValue -InputObject $connection -Names @('Organization','DelegatedOrganization') -Default '')
+            AuthType = [string](Get-SemrPropertyValue -InputObject $connection -Names @('ConnectionUsedForInbuiltCmdlets','AuthType') -Default 'Interactive')
+            State = $tokenStatus
+            ConnectionCount = $connections.Count
+            Error = ''
+        }
+        return $script:ExchangeOnlineSessionInfo
+    }
+    catch {
+        $script:ExchangeOnlineSessionInfo = [pscustomobject]@{ Available=$false; Usable=$false; Account=''; TenantId=''; Organization=''; AuthType=''; State=''; ConnectionCount=0; Error=$_.Exception.Message }
+        return $script:ExchangeOnlineSessionInfo
+    }
+}
+
 function Connect-SemrExchangeOnline {
     [CmdletBinding()]
     param(
         [string]$UserPrincipalName = '',
         [bool]$DisableWam = $true,
-        [string]$TenantId = ''
+        [string]$TenantId = '',
+        [switch]$ForceAuthentication
     )
 
-    Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop
+    if (-not (Test-SemrCommand -Name 'Connect-ExchangeOnline') -or -not (Test-SemrCommand -Name 'Get-ConnectionInformation')) { Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop }
+    $existing = Get-SemrExchangeOnlineSessionInfo -TenantId $TenantId
+    $tenantCompatible = -not $TenantId -or -not $existing.TenantId -or [string]$existing.TenantId -eq $TenantId
+    if (-not $ForceAuthentication -and $existing.Available -and $existing.Usable -and $tenantCompatible) {
+        if (-not $script:ConnectionState.ExchangeOnline) { $script:OwnsExchangeOnlineSession = $false }
+        $script:ConnectionState.ExchangeOnline = $true
+        return Get-SemrConnectionState
+    }
     if (Test-SemrCommand -Name 'Disconnect-ExchangeOnline') {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
     }
 
-    $parameters = @{
-        ShowBanner = $false
-        ErrorAction = 'Stop'
-    }
-    if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
-        $parameters.UserPrincipalName = $UserPrincipalName
-    }
-    if ($DisableWam) {
-        $parameters.DisableWAM = $true
-    }
+    $parameters = @{ ShowBanner=$false; ErrorAction='Stop' }
+    if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) { $parameters.UserPrincipalName = $UserPrincipalName }
+    if ($DisableWam) { $parameters.DisableWAM = $true }
     Connect-ExchangeOnline @parameters
-    if ($TenantId -and (Test-SemrCommand -Name 'Get-ConnectionInformation')) {
-        $connection = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1)
-        $connectedTenantId = if ($connection.Count -eq 1) { [string](Get-SemrPropertyValue -InputObject $connection[0] -Names @('TenantID', 'TenantId') -Default '') } else { '' }
-        if ($connectedTenantId -and $connectedTenantId -ne $TenantId) {
-            Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
-            throw "Exchange Online connected to tenant '$connectedTenantId' instead of configured tenant '$TenantId'."
-        }
+    $connected = Get-SemrExchangeOnlineSessionInfo -TenantId $TenantId
+    if (-not $connected.Available -or -not $connected.Usable) { throw 'Exchange Online authentication completed without returning a usable connection.' }
+    if ($TenantId -and $connected.TenantId -and [string]$connected.TenantId -ne $TenantId) {
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
+        throw "Exchange Online connected to tenant '$($connected.TenantId)' instead of configured tenant '$TenantId'."
     }
+    $script:OwnsExchangeOnlineSession = $true
     $script:ConnectionState.ExchangeOnline = $true
     return Get-SemrConnectionState
 }
 
+function Get-SemrMicrosoftGraphSessionInfo {
+    [CmdletBinding()]
+    param(
+        [string]$TenantId = '',
+        [scriptblock]$ProgressCallback,
+        [string]$DiagnosticsDirectory = ''
+    )
+
+    $workerPath = Join-Path $PSScriptRoot 'SmartM365-ExchangeMigrationReadiness-GraphWorker.ps1'
+    $pwshCommand = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue
+    if (-not $pwshCommand) { throw 'PowerShell 7 (pwsh.exe) is required to inspect the Microsoft Graph context.' }
+    $runtimeRoot = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-ExchangeMigrationReadiness\GraphContext-{0}" -f [guid]::NewGuid().ToString('N'))
+    $outputPath = Join-Path $runtimeRoot 'context.clixml'
+    $errorPath = Join-Path $runtimeRoot 'error.txt'
+    $logPath = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { '' } else { Join-Path $DiagnosticsDirectory 'MicrosoftGraph-ContextInspection.log' }
+    $process = $null
+    try {
+        [void](New-Item -ItemType Directory -Path $runtimeRoot -Force)
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $pwshCommand.Source
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        foreach ($argument in @('-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$workerPath,'-InspectContext','-TenantId',$TenantId,'-OutputPath',$outputPath,'-ErrorPath',$errorPath,'-LogPath',$logPath)) { [void]$startInfo.ArgumentList.Add([string]$argument) }
+        $process = [Diagnostics.Process]::Start($startInfo)
+        if (-not $process) { throw 'The Microsoft Graph context inspection worker could not be started.' }
+        if ($ProgressCallback) { & $ProgressCallback "Inspecting existing Microsoft Graph context; worker PID=$($process.Id)." }
+        while (-not $process.WaitForExit(250)) { }
+        if ($process.ExitCode -ne 0) {
+            $workerError = if (Test-Path -LiteralPath $errorPath -PathType Leaf) { [IO.File]::ReadAllText($errorPath) } else { "Worker exit code $($process.ExitCode)." }
+            throw "Microsoft Graph context inspection failed: $workerError"
+        }
+        if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) { throw 'Microsoft Graph context inspection returned no result.' }
+        $script:MicrosoftGraphSessionInfo = Import-Clixml -LiteralPath $outputPath
+        return $script:MicrosoftGraphSessionInfo
+    }
+    finally {
+        if ($process) { $process.Dispose() }
+        if (Test-Path -LiteralPath $runtimeRoot) { Remove-Item -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
 function Connect-SemrMicrosoftGraph {
     [CmdletBinding()]
     param(
@@ -705,7 +802,9 @@ function Connect-SemrMicrosoftGraph {
         [string]$TenantId = '',
         [string[]]$EmailAddresses = @(),
         [scriptblock]$ProgressCallback,
-        [string]$DiagnosticsDirectory = ''
+        [string]$DiagnosticsDirectory = '',
+        [switch]$ForceAuthentication,
+        [ValidateSet('CurrentUser','Process')][string]$ContextScope = 'CurrentUser'
     )
 
     $normalizedScopes = @($Scopes | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
@@ -739,15 +838,15 @@ function Connect-SemrMicrosoftGraph {
         $startInfo.FileName = $pwshCommand.Source
         $startInfo.UseShellExecute = $false
         $startInfo.CreateNoWindow = $true
-        foreach ($argument in @(
+        $workerArguments = @(
             '-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $workerPath,
-            '-TenantId', $TenantId,
+            '-TenantId', $TenantId, '-ContextScope', $ContextScope,
             '-ScopesPath', $scopesPath, '-InputPath', $inputPath,
             '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath,
             '-LogPath', $graphLogPath
-        )) {
-            [void]$startInfo.ArgumentList.Add([string]$argument)
-        }
+        )
+        if ($ForceAuthentication) { $workerArguments += '-ForceAuthentication' }
+        foreach ($argument in $workerArguments) { [void]$startInfo.ArgumentList.Add([string]$argument) }
 
         $process = [Diagnostics.Process]::Start($startInfo)
         if (-not $process) {
@@ -791,6 +890,7 @@ function Connect-SemrMicrosoftGraph {
         $script:GraphOrganizationError = [string]$workerResult.OrganizationError
         $script:ConnectionState.EntraConnect = $null -ne $script:GraphOrganization
         $script:GraphSubscribedSkuError = [string]$workerResult.SubscribedSkuError
+        $script:MicrosoftGraphSessionInfo = [pscustomobject]@{ Available=$true; Usable=$true; Account=[string]$workerResult.Account; TenantId=[string]$workerResult.TenantId; Organization=$(if($workerResult.Organization){[string]$workerResult.Organization.DisplayName}else{''}); AuthType=[string]$workerResult.AuthType; ContextScope=[string]$workerResult.ContextScope; Scopes=@($workerResult.Scopes); Error='' }
         $script:ConnectionState.MicrosoftGraph = $true
         return Get-SemrConnectionState
     }
@@ -805,13 +905,9 @@ function Disconnect-SemrSession {
     [CmdletBinding()]
     param()
 
-    if (Test-SemrCommand -Name 'Disconnect-ExchangeOnline') {
+    if ($script:OwnsExchangeOnlineSession -and (Test-SemrCommand -Name 'Disconnect-ExchangeOnline')) {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
     }
-    if (Test-SemrCommand -Name 'Disconnect-MgGraph') {
-        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-    }
-
     foreach ($key in @($script:ConnectionState.Keys)) {
         $script:ConnectionState[$key] = $false
     }
@@ -832,6 +928,9 @@ function Disconnect-SemrSession {
     $script:MigrationUsersByEmail = @{}
     $script:GraphOrganization = $null
     $script:GraphOrganizationError = ''
+    $script:ExchangeOnlineSessionInfo = $null
+    $script:MicrosoftGraphSessionInfo = $null
+    $script:OwnsExchangeOnlineSession = $false
 }
 
 function Initialize-SemrLiveSourceConnections {
@@ -1845,7 +1944,7 @@ function Add-SemrIdentityAdvancedFindings {
     $target = ([string](Get-SemrPropertyValue $mailbox[0] @('ExternalEmailAddress','WindowsEmailAddress') '') -replace '^(?i:smtp:)','').Trim().ToLowerInvariant()
     $targetConflictEvidence = if ($target) { Get-SemrProxyConflictEvidence -EmailAddress $email -Addresses @($target) } else { $null }
     $targetEvidence = -not $target -or ($targetConflictEvidence -and $targetConflictEvidence.Available)
-    $targetConflicts = if ($targetConflictEvidence) { @($targetConflictEvidence.Conflicts) } else { @() }
+    $targetConflicts = @(if ($targetConflictEvidence) { $targetConflictEvidence.Conflicts } else { @() })
     $targetConflict = $targetConflicts.Count -gt 0
     $targetSource = if ($targetConflictEvidence) { [string]$targetConflictEvidence.Source } else { 'Live Exchange on-premises recipient directory' }
     $targetTimestamp = if ($targetConflictEvidence) { $targetConflictEvidence.SourceTimestamp } else { Get-Date }
@@ -2178,6 +2277,8 @@ function Test-SemrHybridReadiness {
         EndpointName = ''
         ConnectivitySuccess = $false
         ConnectivityTestAvailable = $false
+        ConnectivityResult = ''
+        ConnectivityDurationMs = 0
         SourceTimestamp = if ($mode -eq 'Live') { Get-Date } else { $null }
         Source = 'Live Exchange Online'
         Message = ''
@@ -2276,26 +2377,26 @@ function Test-SemrHybridReadiness {
 
     if (Test-SemrCommand -Name 'Test-MigrationServerAvailability') {
         $result.ConnectivityTestAvailable = $true
+        $connectivityTimer = [Diagnostics.Stopwatch]::StartNew()
         try {
             $test = Test-MigrationServerAvailability -Endpoint $endpoint.Identity -ErrorAction Stop
-            $result.ConnectivitySuccess = [bool](Get-SemrPropertyValue -InputObject $test -Names @('Result', 'Success') -Default $false)
-            if (-not $result.ConnectivitySuccess -and [string]$test.Result -eq 'Success') {
+            $result.ConnectivityResult = [string](Get-SemrPropertyValue -InputObject $test -Names @('Result', 'Success') -Default '')
+            $result.ConnectivitySuccess = [bool](Get-SemrPropertyValue -InputObject $test -Names @('Success') -Default $false)
+            if (-not $result.ConnectivitySuccess -and $result.ConnectivityResult -eq 'Success') {
                 $result.ConnectivitySuccess = $true
             }
-            $result.Message = [string](Get-SemrPropertyValue -InputObject $test -Names @('Message', 'ErrorDetail') -Default $test.Result)
+            $result.Message = [string](Get-SemrPropertyValue -InputObject $test -Names @('Message', 'ErrorDetail') -Default $result.ConnectivityResult)
             if ($result.ConnectivitySuccess -and [string]::IsNullOrWhiteSpace($result.Message)) {
                 $result.Message = 'Connectivity test succeeded.'
             }
-            if ($result.ConnectivitySuccess) {
-                $result.MrsProxyAvailable = $true
-                $result.MrsProxyEnabled = $true
-                $result.MrsProxyMessage = 'The successful ExchangeRemoteMove endpoint test functionally validates published MRSProxy connectivity.'
-                $result.MrsProxySource = 'Live Exchange Online migration endpoint connectivity test'
-                $result.MrsProxySourceTimestamp = Get-Date
-            }
         }
         catch {
+            $result.ConnectivityResult = 'Exception'
             $result.Message = $_.Exception.Message
+        }
+        finally {
+            $connectivityTimer.Stop()
+            $result.ConnectivityDurationMs = $connectivityTimer.ElapsedMilliseconds
         }
     }
     else {
@@ -2418,16 +2519,22 @@ function Invoke-SemrAssessment {
     }
     if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Testing hybrid migration endpoint' }
     $hybrid = Test-SemrHybridReadiness -Config $Config
+    if ($ProgressCallback) {
+        $endpointSummary = "Hybrid endpoint result - Name=$($hybrid.EndpointName); TestAvailable=$($hybrid.ConnectivityTestAvailable); Result=$($hybrid.ConnectivityResult); Success=$($hybrid.ConnectivitySuccess); DurationMs=$($hybrid.ConnectivityDurationMs); Message=$($hybrid.Message)"
+        & $ProgressCallback 0 $rows.Count '' $endpointSummary
+    }
     if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting accepted domains and advanced identity evidence' }
     $acceptedDomains = Get-SemrAcceptedDomainEvidence
     if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Checking latest tenant synchronization through Microsoft Graph' }
     $entraConnect = Test-SemrEntraConnect -Config $Config
     $checkedAt = Get-Date
+    $exoSessionDetails = if ($script:ExchangeOnlineSessionInfo -and $script:ExchangeOnlineSessionInfo.Account) { "Interactive delegated Exchange Online session; Account=$($script:ExchangeOnlineSessionInfo.Account); Tenant=$($script:ExchangeOnlineSessionInfo.TenantId); Organization=$($script:ExchangeOnlineSessionInfo.Organization)." } else { 'Interactive delegated Exchange Online session connected.' }
+    $graphSessionDetails = if ($script:MicrosoftGraphSessionInfo -and $script:MicrosoftGraphSessionInfo.Account) { "Interactive delegated Microsoft Graph evidence refreshed; Account=$($script:MicrosoftGraphSessionInfo.Account); Tenant=$($script:MicrosoftGraphSessionInfo.TenantId); ContextScope=$($script:MicrosoftGraphSessionInfo.ContextScope)." } else { 'Interactive delegated Microsoft Graph evidence collected.' }
     $liveSources = @(
         [pscustomobject][ordered]@{ Source='Active Directory'; Required=$true; Available=[bool]$script:ConnectionState.ActiveDirectory; Status=if($script:ConnectionState.ActiveDirectory){'Connected'}else{'Unavailable'}; Details=[string]$sourceInitialization.ActiveDirectoryMessage; CheckedAt=$checkedAt }
         [pscustomobject][ordered]@{ Source='Exchange on-premises'; Required=$true; Available=[bool]$script:ConnectionState.OnPremisesExchange; Status=if($script:ConnectionState.OnPremisesExchange){'Connected'}else{'Unavailable'}; Details=[string]$sourceInitialization.ExchangeOnPremisesMessage; CheckedAt=$checkedAt }
-        [pscustomobject][ordered]@{ Source='Exchange Online'; Required=$true; Available=[bool]$script:ConnectionState.ExchangeOnline; Status=if($script:ConnectionState.ExchangeOnline){'Connected'}else{'Unavailable'}; Details=if($script:ConnectionState.ExchangeOnline){'Interactive delegated Exchange Online session connected.'}else{'Exchange Online is not connected.'}; CheckedAt=$checkedAt }
-        [pscustomobject][ordered]@{ Source='Microsoft Graph'; Required=$true; Available=[bool]$script:ConnectionState.MicrosoftGraph; Status=if($script:ConnectionState.MicrosoftGraph){'Connected'}else{'Unavailable'}; Details=if($script:ConnectionState.MicrosoftGraph){'Interactive delegated Microsoft Graph evidence collected.'}else{'Microsoft Graph is not connected.'}; CheckedAt=$checkedAt }
+        [pscustomobject][ordered]@{ Source='Exchange Online'; Required=$true; Available=[bool]$script:ConnectionState.ExchangeOnline; Status=if($script:ConnectionState.ExchangeOnline){'Connected'}else{'Unavailable'}; Details=if($script:ConnectionState.ExchangeOnline){$exoSessionDetails}else{'Exchange Online is not connected.'}; CheckedAt=$checkedAt }
+        [pscustomobject][ordered]@{ Source='Microsoft Graph'; Required=$true; Available=[bool]$script:ConnectionState.MicrosoftGraph; Status=if($script:ConnectionState.MicrosoftGraph){'Connected'}else{'Unavailable'}; Details=if($script:ConnectionState.MicrosoftGraph){$graphSessionDetails}else{'Microsoft Graph is not connected.'}; CheckedAt=$checkedAt }
         [pscustomobject][ordered]@{ Source='Microsoft Entra tenant synchronization'; Required=$true; Available=[bool]$entraConnect.Available; Status=if($entraConnect.Available){'Collected'}else{'Unavailable'}; Details=[string]$entraConnect.Message; CheckedAt=$checkedAt }
     )
     $assessmentStatus = if (@($liveSources | Where-Object { $_.Required -and -not $_.Available }).Count -eq 0) { 'COMPLETE' } else { 'INCOMPLETE' }
@@ -2942,8 +3049,8 @@ function Invoke-SemrAssessment {
             RecommendedAction = if ($hybridEndpointResult -eq 'PASS') { '' } elseif (-not $hybrid.Available) { 'Restore the live Exchange Online migration endpoint cmdlets.' } elseif (-not $hybrid.EndpointFound) { 'Select or repair the intended ExchangeRemoteMove endpoint.' } elseif (-not $hybrid.ConnectivityTestAvailable) { 'Run Test-MigrationServerAvailability from a supported delegated Exchange Online session before creating the batch.' } else { 'Validate the endpoint, MRSProxy, WSSecurity, certificate, DNS and HTTPS connectivity.' }
         })
         Add-SemrFinding -List $globalFindings -Parameters ($globalBase + @{
-            CheckId='HYBRID-MRSPROXY';Category='HybridConnectivity';Severity=if(-not $hybrid.MrsProxyAvailable){'Warning'}elseif($hybrid.MrsProxyEnabled){'Information'}else{'Critical'};Result=if(-not $hybrid.MrsProxyAvailable){'UNKNOWN'}elseif($hybrid.MrsProxyEnabled){'PASS'}else{'FAIL'};IsBlocking=$hybrid.MrsProxyAvailable -and -not $hybrid.MrsProxyEnabled
-            ObservedValue=$hybrid.MrsProxyMessage;ExpectedValue='MRSProxy enabled on a published EWS virtual directory';EvidenceSource=$hybrid.MrsProxySource;SourceTimestamp=$hybrid.MrsProxySourceTimestamp;Message=$hybrid.MrsProxyMessage;RecommendedAction=if(-not $hybrid.MrsProxyAvailable){'Validate MRSProxy live before creating the batch.'}elseif(-not $hybrid.MrsProxyEnabled){'Enable and publish MRSProxy on the intended EWS endpoint.'}else{''}
+            CheckId='HYBRID-MRSPROXY';Category='HybridConnectivity';Severity=if($hybrid.MrsProxyEnabled){'Information'}else{'Warning'};Result=if(-not $hybrid.MrsProxyAvailable){'UNKNOWN'}elseif($hybrid.MrsProxyEnabled){'PASS'}else{'WARN'};IsBlocking=$false
+            ObservedValue=$hybrid.MrsProxyMessage;ExpectedValue='Optional local EWS virtual-directory configuration diagnostic';EvidenceSource=$hybrid.MrsProxySource;SourceTimestamp=$hybrid.MrsProxySourceTimestamp;Message=if($hybrid.MrsProxyEnabled){$hybrid.MrsProxyMessage}else{"$($hybrid.MrsProxyMessage) The selected ExchangeRemoteMove endpoint test remains authoritative for migration readiness."};RecommendedAction=if(-not $hybrid.MrsProxyAvailable){'Run the optional local diagnostic from a supported Exchange Management Shell when server-level investigation is required.'}elseif(-not $hybrid.MrsProxyEnabled){'Review local EWS/MRSProxy configuration only if the functional ExchangeRemoteMove endpoint test fails or the published topology is being investigated.'}else{''}
         })
         Add-SemrFinding -List $globalFindings -Parameters ($globalBase + @{
             CheckId='HYBRID-CERTIFICATE-EXPIRY';Category='HybridConnectivity';Severity=if(-not $hybrid.CertificateAvailable){'Warning'}elseif($hybrid.CertificateHealthy){'Information'}else{'Critical'};Result=if(-not $hybrid.CertificateAvailable){'UNKNOWN'}elseif($hybrid.CertificateHealthy){'PASS'}else{'FAIL'};IsBlocking=$hybrid.CertificateAvailable -and -not $hybrid.CertificateHealthy
@@ -3590,6 +3697,9 @@ Export-ModuleMember -Function @(
     'Get-SemrCheckCatalog',
     'Get-SemrConfig',
     'Get-SemrConnectionState',
+    'Get-SemrCloudSessionSummary',
+    'Get-SemrExchangeOnlineSessionInfo',
+    'Get-SemrMicrosoftGraphSessionInfo',
     'Connect-SemrActiveDirectory',
     'Test-SemrExchange2016WorkerSerialization',
     'Connect-SemrOnPremisesExchange',
@@ -3611,8 +3721,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAsSwxUpSihllsi
-# lTkdDrmHqeVttwbYnBnbQN2LEiA+pqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVDFS3h4YaYJMK
+# SbwYJQlDwN22b3DeSNp9HtWY/GR8hqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3745,31 +3855,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJSae7wgmVOFuDxhp10ZqVuTZ3KducSVfPfEisyd4O2uMA0GCSqG
-# SIb3DQEBAQUABIIBgHfipuWeKSpWZdTyuRmh0hWChdOxoBw9ESwLaTy5Yz+DsMEd
-# dhgyXuDMAbyaXeomXalxegsBjpb2/h92gxJAP9QqcMyp1FOXb/ojL7hfBm2G7N94
-# TQ+KjcfyZEDqz8b3WozQaRo5O3fJzE9RDbm4kheRANee16FZKLiQBvWQgD+sT7D6
-# EGmxwiENvZ09wV7Gjp7HK1UwDXwB+N0DbHeqadP7tqkn4NFoFzNbbYgHFY9lT0Jg
-# ak1yWzPzWjvIdLFtJowtT34CaL2d+0ADgmWYBAWCmQKU4ptk+7sUg1zQFZo3GKqr
-# 2UbnLGfwUk69v5gz1ePlNDFqcrDw7eIFAfo4RQkAxIeOQ1TEnWfBYi836nk2BXa5
-# J85csoRuEkGTaAJelyJDgFrZy/kS6Vc0GD5hd+cLmwAUvL2Im5vxW7wDIwUAfrz0
-# t4nFE2A/wY/b2NtaRMiVzeL3WVLrYhIsoDW4+ZCarK0L2oPL1JbsL4oraHfNQRrG
-# efgPTVYgfoMgyZZPRaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINUIrvwCXmwie95Bm98DuyBnqq/ZMrmB80gmXHiGaA5cMA0GCSqG
+# SIb3DQEBAQUABIIBgAXH+Hx4w84O74DORM/7K7OClA6esepMCnZGjingainDY5Ve
+# 1MM96WpAWd2fABjkSetfIAsAcrkdEiHYMls+DiFPSkjgaPYkTKGLp8evpR36M1MF
+# JTQeIegYkjLy4wrqR0eUI/kRxquTgHDKhfp6aLff2mVlfaO4eS1+PtzOh7DITChH
+# qBv6MhYCrepke+dlC5vudBXZu3dW4b6OHvFaUVIyYAeI3hBFPA2Pd6qwvXdYSIDc
+# JpmXBMBI8UFIW6T9shgaeUae5pnHh+hd/WelRE729HjouZMvB8a226SNwXtQ47P9
+# /C8NkfgkTCt8fyy53RASyMO0EXDeF21lfDASYHQzCeYgPOc+tig7g+x9kHtk/Dh6
+# 0kA9zJwfXZR8qadzPb3WdwG7gSBEBHSZ4C6CV6S690RcZuqQs4WBn4LY3lkcxVRi
+# 6ZJ4tXFya56BQcTOipELh96B8Gu4vMIGhN7jj3JVnwmGpFVG4/rotg58BSl9vt05
+# vRxu8D2hD8fxbWXL26GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNDU0
-# NDVaMC8GCSqGSIb3DQEJBDEiBCADxt9AzyTAzguk6wG01QfF9RG7ANjeNwf/gGfE
-# cSPPvjANBgkqhkiG9w0BAQEFAASCAgAPuyr89i/agVrGa9olYK6gYr8rfkOnIHda
-# K4mM79I5optTw+G/4MX8/OiiITLqkimwcZjF6HHdEVmeKQxPaOVOA/C/X2qycuVz
-# p4/byB4z7ZfF14I94TevN7nNGYbL+QpXNnNr6aRpApqjE5bsx0M823HfG0kU5f4K
-# 9kfhE/DD52MfcZPTp5OSYAS3L0E5MOSnP2hQKoOAKKN6s/JzZFk0djeQwwRe8N6r
-# zvqUDhhnbM3t+oPdK52gn+dr6z4Ro3RsQUdShK6ZPLXUlQ86HXoFLm9/coEG9y/W
-# LYo4fm+XjWazP7hL3kcE0WNojjKsdulw0TkUCZ9NniAzt4OvCqJE8sTmN+O3jFWt
-# n4XN7SrWxJzjuCK7Mv5/g1yqtX0G19xM8sOTontH46Trj1qS2JP5bKZWjNgfyAB1
-# dRPuupfXidyKd+SAAjSoJbHx9daNRSo2JvofXrW6wB5WHo2RG3FxxodBPkNElJzm
-# DSWAWd8kYg3TrjIDKX9RfeGNRIxRz1ywLMe2uRQEKdrEBqUj89lPlaQPKedDsANA
-# URk080mhp9J/DSjPzrNQl/8KaHUkbsbamtBHIxAeR0XoCEu0KSIq2sLVEqjy1QMr
-# SEfJCvif29ylB3YYt3exHHuMHck7h45wEte53NwsHAUOb3rPDNtNNyFrdxbqOQ5m
-# bDOM4mFJwA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzA5
+# MDZaMC8GCSqGSIb3DQEJBDEiBCDeEV7i83B6COIoPBTG41cce2sKi/MVtod+3yJR
+# CpzeZTANBgkqhkiG9w0BAQEFAASCAgBNHxrCcFaXVJVMrZh+iFArOqrjBzO7LsvG
+# /FduG2za6X6wVEz4azjfwH1qKaX95DvvxSNTaojuqPf/AqQzHSfadrXwim1rM8Gg
+# hPTPE4RdmVnUyneZUI91GtQ2ZSCvWNy/Xt43A+pSOgxmIcSHQ9A2kMCotaSEv730
+# urZR+PwX46x9jNiQW9g+N4vabuBGuzsoRSZcDIUhkWXEtR0AWmM8/gG1c9ZshaWB
+# Y8q3jLgsqa3lKyGpc+PXbyyvpk8uXQpRYiD+ZAvCkDLd+/qro49cn8CHinQD5Yp6
+# PgnbE9y+8UEtfEXHnsjYrDANg0K1IBwkSfm+4Rb5xH6YqpyjjWUU7Xkm0Dg3oZnd
+# G6OFRDeT2OGgFE0RVp8KKjoBESvO7DRQd/4omx1bkK4Xpkypmfm5JoEWy2BE/UMu
+# EGwcC7zLc0D8DH4H7dzZ1poGVkoSixTg5OQahp57lHV32ggd3M3MYsUV6v3OOWp2
+# C30s0w2IJ0BL8+mclrB81Vf+mYoZ6WAPsGgBOwSPNlAztHQEPkXOZjjbBs9lllCK
+# dJWrQ9RkIGNwFzdscbL8EY5N1w1N9Yq53Hz+cqLcTVtVUMMvwIO+2DOg+C44bYFY
+# 622B/wB3PrTD6tKAeBkloeH3jcb3Hr59w5QNU0g+M6nUcJ3s+KwgN+v34CUwK5bV
+# mWLRaAMn+A==
 # SIG # End signature block
