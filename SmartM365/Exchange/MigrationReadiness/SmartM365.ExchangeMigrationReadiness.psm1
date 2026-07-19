@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.2'
+$script:SemrVersion = '1.11.3'
 $script:ActiveDirectoryDomains = @()
 $script:Exchange2016EvidenceByEmail = @{}
 $script:Exchange2016HybridEvidence = $null
@@ -562,7 +562,10 @@ function Initialize-SemrExchange2016Evidence {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string[]]$EmailAddresses,
-        [scriptblock]$ProgressCallback
+        [scriptblock]$ProgressCallback,
+        [scriptblock]$CancellationCheck,
+        [ValidateRange(1,50)][int]$SmtpUniquenessBatchSize = 25,
+        [ValidateRange(5,300)][int]$SmtpUniquenessBatchTimeoutSeconds = 60
     )
 
     if (-not $script:ConnectionState.OnPremisesExchange) {
@@ -575,12 +578,15 @@ function Initialize-SemrExchange2016Evidence {
     $outputPath = Join-Path $runtimeRoot 'evidence.clixml'
     $errorPath = Join-Path $runtimeRoot 'error.txt'
     $progressPath = Join-Path $runtimeRoot 'progress.txt'
+    $cancelPath = Join-Path $runtimeRoot 'cancel.requested'
     $process = $null
     try {
         [void](New-Item -ItemType Directory -Path $runtimeRoot -Force)
         $workerInput = [pscustomobject][ordered]@{
             EmailAddresses = @($EmailAddresses | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
             EnabledChecks = @(Get-SemrCheckCatalog | Where-Object { Test-SemrCheckEnabled -CheckId $_.CheckId } | ForEach-Object { [string]$_.CheckId })
+            SmtpUniquenessBatchSize = $SmtpUniquenessBatchSize
+            SmtpUniquenessBatchTimeoutSeconds = $SmtpUniquenessBatchTimeoutSeconds
         }
         $workerInput | Export-Clixml -LiteralPath $inputPath -Depth 4 -Force
 
@@ -588,26 +594,45 @@ function Initialize-SemrExchange2016Evidence {
         $startInfo.FileName = $powershellPath
         $startInfo.UseShellExecute = $false
         $startInfo.CreateNoWindow = $true
-        foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $workerPath, '-InputPath', $inputPath, '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath)) {
+        foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $workerPath, '-InputPath', $inputPath, '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath, '-CancelPath', $cancelPath)) {
             [void]$startInfo.ArgumentList.Add([string]$argument)
         }
         $process = [Diagnostics.Process]::Start($startInfo)
         if (-not $process) { throw 'The local Exchange 2016 evidence worker could not be started.' }
 
         $lastProgress = ''
+        $cancelRequestedAt = $null
         while (-not $process.WaitForExit(250)) {
+            if ($CancellationCheck -and (& $CancellationCheck)) {
+                if (-not $cancelRequestedAt) {
+                    $cancelRequestedAt = Get-Date
+                    [IO.File]::WriteAllText($cancelPath, 'Cancellation requested', [Text.UTF8Encoding]::new($false))
+                    if ($ProgressCallback) { & $ProgressCallback 0 0 'Exchange 2016 cancellation requested; stopping the worker...' }
+                }
+                elseif (((Get-Date) - $cancelRequestedAt).TotalSeconds -ge 3) {
+                    try { $process.Kill($true) } catch { try { $process.Kill() } catch { $null = $_ } }
+                }
+            }
             if ($ProgressCallback -and (Test-Path -LiteralPath $progressPath -PathType Leaf)) {
                 try {
                     $progress = [IO.File]::ReadAllText($progressPath)
                     if ($progress -and $progress -ne $lastProgress) {
                         $lastProgress = $progress
                         $parts = @($progress.Split('|', 3))
-                        $message = if ($parts.Count -eq 3) { "Exchange 2016 [$($parts[0])/$($parts[1])] - $($parts[2])" } else { 'Collecting local Exchange 2016 evidence...' }
-                        & $ProgressCallback $message
+                        if ($parts.Count -eq 3) {
+                            $current = 0; $total = 0
+                            [void][int]::TryParse($parts[0], [ref]$current)
+                            [void][int]::TryParse($parts[1], [ref]$total)
+                            & $ProgressCallback $current $total ("Exchange 2016 - {0}" -f $parts[2])
+                        }
+                        else { & $ProgressCallback 0 0 'Collecting local Exchange 2016 evidence...' }
                     }
                 }
                 catch { $null = $_ }
             }
+        }
+        if ($cancelRequestedAt -or ($CancellationCheck -and (& $CancellationCheck))) {
+            throw [OperationCanceledException]::new('Local Exchange 2016 evidence collection was cancelled by the operator.')
         }
         if ($process.ExitCode -ne 0) {
             $workerError = if (Test-Path -LiteralPath $errorPath -PathType Leaf) { [IO.File]::ReadAllText($errorPath) } else { "Worker exit code $($process.ExitCode)." }
@@ -618,7 +643,7 @@ function Initialize-SemrExchange2016Evidence {
         }
 
         $workerResult = Import-Clixml -LiteralPath $outputPath
-        if ($ProgressCallback) { & $ProgressCallback ("Exchange 2016 [{0}/{0}] - Complete" -f @($workerResult.Evidence).Count) }
+        if ($ProgressCallback) { $completeCount = @($workerResult.Evidence).Count; & $ProgressCallback $completeCount $completeCount 'Exchange 2016 - Complete' }
         $script:Exchange2016EvidenceByEmail = @{}
         foreach ($entry in @($workerResult.Evidence)) {
             $key = ([string]$entry.EmailAddress).Trim().ToLowerInvariant()
@@ -626,7 +651,7 @@ function Initialize-SemrExchange2016Evidence {
         }
         $script:Exchange2016HybridEvidence = $workerResult.Hybrid
         $script:Exchange2016WorkerCollectedAt = $workerResult.CollectedAt
-        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; per-mailbox errors=$($workerResult.ErrorCount)."
+        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; per-mailbox errors=$($workerResult.ErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s)."
         return [pscustomobject]@{ Available = $true; Message = $script:Exchange2016WorkerMessage; MailboxCount = $script:Exchange2016EvidenceByEmail.Count; ErrorCount = [int]$workerResult.ErrorCount; DurationSeconds = $workerResult.DurationSeconds }
     }
     finally {
@@ -2365,10 +2390,10 @@ function Invoke-SemrAssessment {
         try {
             if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting Exchange 2016 evidence through local Windows PowerShell 5.1' }
             $exchangeProgress = if ($ProgressCallback) {
-                { param($Message) & $ProgressCallback 0 $rows.Count '' $Message }.GetNewClosure()
+                { param($Current,$Total,$Message) & $ProgressCallback $Current $Total '' $Message }.GetNewClosure()
             }
             else { $null }
-            $batchExchange = Initialize-SemrExchange2016Evidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress
+            $batchExchange = Initialize-SemrExchange2016Evidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress -CancellationCheck $CancellationCheck
             $sourceInitialization.ExchangeOnPremisesLive = [bool]$batchExchange.Available
             $sourceInitialization.ExchangeOnPremisesMessage = [string]$batchExchange.Message
         }
