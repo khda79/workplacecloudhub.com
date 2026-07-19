@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.3
+1.11.4
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.3'
+$script:AppVersion = '1.11.4'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -417,7 +417,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.3" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.4" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -1049,6 +1049,8 @@ $controls.RunButton.Add_Click({
     if (-not $script:Batch) { return }
     try {
         $script:CancelRequested = $false
+        $script:Assessment = $null
+        $script:Export = $null
         [void](Start-SemrProgressWindow -Title 'Exchange migration readiness assessment' -Stage 'Preparing Live strict assessment' -Detail 'Validating options and required live source prerequisites.')
         Sync-SemrCheckOptionsToConfig
         $script:Config['AssessmentPhase'] = Get-SemrSelectedAssessmentPhase
@@ -1145,7 +1147,9 @@ $controls.RunButton.Add_Click({
         }
         $cancellationCheck = { Invoke-SemrDoEvent; return (Test-SemrProgressCancellation) }
         Update-SemrProgressWindow -Stage 'Collecting tenant and mailbox evidence' -Detail 'AD, Exchange on-premises, Exchange Online and Microsoft Graph are required Live sources. Missing sources make the assessment INCOMPLETE.' -Current 6 -Total 10
-        $script:Assessment = Invoke-SemrAssessment -Batch $script:Batch -Config $script:Config -ProgressCallback $progressAction -CancellationCheck $cancellationCheck
+        $exchangeDiagnosticsRoot = Join-Path (Join-Path (Resolve-SemrOutputRoot) 'Logs') 'Exchange2016Children'
+        Write-SemrActivity -Message "Exchange 2016 child process logs root: $exchangeDiagnosticsRoot"
+        $script:Assessment = Invoke-SemrAssessment -Batch $script:Batch -Config $script:Config -ProgressCallback $progressAction -CancellationCheck $cancellationCheck -DiagnosticsRoot $exchangeDiagnosticsRoot
         if ($script:Assessment.SourceInitialization) {
             $sourceState = $script:Assessment.SourceInitialization
             Write-SemrActivity -Message ([string]$sourceState.ActiveDirectoryMessage) -Level $(if ($sourceState.ActiveDirectoryLive) { 'INFO' } else { 'WARN' })
@@ -1177,9 +1181,16 @@ $controls.RunButton.Add_Click({
         $controls.MainTabs.SelectedItem = $controls.ResultsTab
     }
     catch {
-        Complete-SemrProgressWindow -Stage 'Assessment failed' -Summary $_.Exception.Message -Failed
-        Show-SemrError -Title 'Assessment failed' -ErrorRecord $_
-        $controls.StatusText.Text = 'Assessment failed. Review Activity.'
+        if (Test-SemrProgressCancellation) {
+            Write-SemrActivity -Message 'Assessment cancelled by the operator; no report was generated for the interrupted run.' -Level WARN
+            Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'The Exchange 2016 child process and assessment worker were stopped.'
+            $controls.StatusText.Text = 'Assessment cancelled.'
+        }
+        else {
+            Complete-SemrProgressWindow -Stage 'Assessment failed' -Summary $_.Exception.Message -Failed
+            Show-SemrError -Title 'Assessment failed' -ErrorRecord $_
+            $controls.StatusText.Text = 'Assessment failed. Review Activity.'
+        }
     }
     finally { Switch-SemrBusyState -Busy $false }
 })
