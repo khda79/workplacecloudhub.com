@@ -4284,6 +4284,84 @@ function ExportAndCopyCsv {
     WriteLog -Message "CSV export completed: $csvFilePath1"
 }
 
+function Export-SmartM365CsvStreamAtomically {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [array]$Data,
+
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter()]
+        [switch]$NoTypeInformation = $true,
+
+        [Parameter()]
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+
+        [Parameter()]
+        [string]$Delimiter = ",",
+
+        [Parameter()]
+        [switch]$NoTenantKey
+    )
+
+    $temporaryPath = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $exportParameters = @{
+            LiteralPath = $temporaryPath
+            Encoding    = $Encoding
+            Delimiter   = $Delimiter
+            Force       = $true
+        }
+        if ($NoTypeInformation) {
+            $exportParameters.NoTypeInformation = $true
+        }
+
+        if ($NoTenantKey) {
+            $Data | Export-Csv @exportParameters
+        }
+        else {
+            $firstRow = $Data | Select-Object -First 1
+            $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data @($firstRow)
+            $tenantRow = @($tenantCsv.Data)[0]
+            $tenantColumns = @('TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId')
+            $sourceColumns = if ($firstRow -is [System.Collections.IDictionary]) {
+                @($firstRow.Keys | ForEach-Object { [string]$_ } | Where-Object { $_ -notin $tenantColumns })
+            }
+            else {
+                @(
+                    $firstRow.PSObject.Properties.Name |
+                        Where-Object { $_ -notin $tenantColumns }
+                )
+            }
+            $selectedColumns = [System.Collections.Generic.List[object]]::new()
+            foreach ($tenantColumn in $tenantColumns) {
+                $tenantValue = $tenantRow.$tenantColumn
+                [void]$selectedColumns.Add(@{
+                    Name       = $tenantColumn
+                    Expression = [scriptblock]::Create(
+                        "'{0}'" -f ([string]$tenantValue).Replace("'", "''")
+                    )
+                })
+            }
+            foreach ($sourceColumn in $sourceColumns) {
+                [void]$selectedColumns.Add($sourceColumn)
+            }
+
+            $Data | Select-Object -Property $selectedColumns.ToArray() | Export-Csv @exportParameters
+        }
+
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function ExportAndCopyCsvFromConvert {
     [CmdletBinding()]
     param (
@@ -4310,7 +4388,10 @@ function ExportAndCopyCsvFromConvert {
         [string]$Delimiter = ",",
 
         [Parameter()]
-        [switch]$NoTenantKey
+        [switch]$NoTenantKey,
+
+        [Parameter()]
+        [switch]$Streaming
     )
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -4318,8 +4399,13 @@ function ExportAndCopyCsvFromConvert {
     $global:csvFilePath1 = Join-Path $OutputPath "$runBaseFileName`_$timestamp.csv"
     $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
     $global:csvFilePath3 = Join-Path $GlobalPath "$runBaseFileName.csv"
-    $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
-    if (-not $NoTenantKey) {
+    if (Test-SmartM365MaxItemsMode) {
+        $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    }
+    else {
+        $Data = @($Data)
+    }
+    if (-not $NoTenantKey -and -not $Streaming) {
         $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data
         $Data = @($tenantCsv.Data)
     }
@@ -4327,22 +4413,65 @@ function ExportAndCopyCsvFromConvert {
         WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
     }
 
+    $validationStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $workingSetBeforeValidationMb = [math]::Round(
+        (Get-Process -Id $PID).WorkingSet64 / 1MB,
+        1
+    )
+    WriteLog -Message (
+        "CSV validation starting: {0:N0} row(s), streaming={1}, working set={2:N1} MB." -f
+        $Data.Count, [bool]$Streaming, $workingSetBeforeValidationMb
+    )
     Assert-SmartM365CsvDataCompleteness -Data $Data -BaseFileName $BaseFileName -TimestampedPath $global:csvFilePath1 -LatestPath $global:csvFilePath3
+    $validationStopwatch.Stop()
+    $workingSetAfterValidationMb = [math]::Round(
+        (Get-Process -Id $PID).WorkingSet64 / 1MB,
+        1
+    )
+    WriteLog -Message (
+        "CSV validation completed in {0:N1} sec; working set={1:N1} MB." -f
+        $validationStopwatch.Elapsed.TotalSeconds, $workingSetAfterValidationMb
+    )
 
     if (-not $global:csvGeneratedPaths) {
         $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     }
 
     try {
-        $csvContent = if ($NoTypeInformation) {
-            $Data | ConvertTo-Csv -NoTypeInformation -Delimiter $Delimiter
-        } else {
-            $Data | ConvertTo-Csv -Delimiter $Delimiter
-        }
-
         try {
-            $csvContent | Out-File -FilePath $csvFilePath1 -Encoding $Encoding
+            $exportStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            if ($Streaming) {
+                Export-SmartM365CsvStreamAtomically `
+                    -Data $Data `
+                    -Path $csvFilePath1 `
+                    -NoTypeInformation:$NoTypeInformation `
+                    -Encoding $Encoding `
+                    -Delimiter $Delimiter `
+                    -NoTenantKey:$NoTenantKey
+            }
+            else {
+                $csvContent = if ($NoTypeInformation) {
+                    $Data | ConvertTo-Csv -NoTypeInformation -Delimiter $Delimiter
+                } else {
+                    $Data | ConvertTo-Csv -Delimiter $Delimiter
+                }
+                $csvContent | Out-File -FilePath $csvFilePath1 -Encoding $Encoding
+            }
+            $exportStopwatch.Stop()
             WriteLog -Message "CSV exported to: $csvFilePath1"
+            if ($Streaming) {
+                $exportedFile = Get-Item -LiteralPath $csvFilePath1
+                $workingSetAfterExportMb = [math]::Round(
+                    (Get-Process -Id $PID).WorkingSet64 / 1MB,
+                    1
+                )
+                WriteLog -Message (
+                    "Streaming CSV export completed in {0:N1} sec; size={1:N1} MB; working set={2:N1} MB." -f
+                    $exportStopwatch.Elapsed.TotalSeconds,
+                    ($exportedFile.Length / 1MB),
+                    $workingSetAfterExportMb
+                )
+            }
             [void]$global:csvGeneratedPaths.Add($csvFilePath1)
         } catch {
             WriteLog -Message "Failed to export CSV to: $csvFilePath1 - $_" -Level Error
