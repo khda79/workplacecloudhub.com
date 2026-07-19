@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.10
+1.11.12
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.10'
+$script:AppVersion = '1.11.12'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -311,7 +311,7 @@ $xaml = @'
                     </Border>
                     <Border Grid.Row="0" Grid.Column="1" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="6,0,0,8">
                         <StackPanel>
-                            <TextBlock Text="Exchange 2016 (local)" FontWeight="SemiBold" FontSize="15"/>
+                            <TextBlock Text="Exchange on-premises (2016 / 2019 / SE)" FontWeight="SemiBold" FontSize="15"/>
                             <TextBlock x:Name="OnPremStateText" Text="Checked automatically during assessment" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
@@ -424,7 +424,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.10" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.12" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -450,7 +450,7 @@ if ($ValidateOnly) {
     }
     $templatePath = Join-Path $PSScriptRoot 'Config\SmartM365-ExchangeMigrationReadiness.local.json.template'
     Get-Content -LiteralPath $templatePath -Raw | ConvertFrom-Json | Out-Null
-    $workerSelfTest = Test-SemrExchange2016WorkerSerialization
+    $workerSelfTest = Test-SemrExchangeOnPremWorkerSerialization
     "VALIDATION_OK Smart Exchange Migration Readiness v$script:AppVersion | $workerSelfTest"
     return
 }
@@ -1017,7 +1017,7 @@ function Sync-SemrConnectionDisplay {
     $script:Config['Mode'] = 'Live'
     $state = Get-SemrConnectionState
     $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live forest)' } else { 'Required Live source; checked automatically during assessment' }
-    $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (local PS5 worker, ViewEntireForest)' } else { 'Required Live source; local Exchange 2016 Management Shell required' }
+    $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (local PS5 worker, ViewEntireForest)' } else { 'Required Live source; local Exchange on-premises Management Shell required' }
     $cloudSessions = Get-SemrCloudSessionSummary
     $exoAccount = if ($cloudSessions.ExchangeOnline -and $cloudSessions.ExchangeOnline.Account) { [string]$cloudSessions.ExchangeOnline.Account } else { '' }
     $graphAccount = if ($cloudSessions.MicrosoftGraph -and $cloudSessions.MicrosoftGraph.Account) { [string]$cloudSessions.MicrosoftGraph.Account } else { '' }
@@ -1189,8 +1189,8 @@ $controls.RunButton.Add_Click({
         $controls.RunProgress.Value = 0
         Write-SemrActivity -Message "Starting read-only assessment in Live strict mode and $($script:Config.AssessmentPhase) phase for $($script:Batch.Rows.Count) mailbox row(s)."
         if ((Get-SemrSelectedMode) -eq 'Live') {
-            Update-SemrProgressWindow -Stage 'Local on-premises preflight' -Detail 'Validating Active Directory forest access and the local Exchange 2016 Management Shell.' -Current 1 -Total 10
-            Set-SemrProcessingStatus -Message 'Checking Active Directory and local Exchange 2016 Management Shell; please wait...'
+            Update-SemrProgressWindow -Stage 'Local on-premises preflight' -Detail 'Validating Active Directory forest access and the local Exchange on-premises Management Shell.' -Current 1 -Total 10
+            Set-SemrProcessingStatus -Message 'Checking Active Directory and local Exchange on-premises Management Shell; please wait...'
             $preflightIssues = [System.Collections.Generic.List[string]]::new()
             try {
                 Connect-SemrActiveDirectory | Out-Null
@@ -1203,12 +1203,12 @@ $controls.RunButton.Add_Click({
             }
             try {
                 Connect-SemrOnPremisesExchange | Out-Null
-                Write-SemrActivity -Message 'Local Exchange 2016 Management Shell preflight succeeded; ViewEntireForest enabled.' -Level SUCCESS
+                Write-SemrActivity -Message 'Local Exchange on-premises Management Shell preflight succeeded; ViewEntireForest enabled.' -Level SUCCESS
             }
             catch {
-                [void]$preflightIssues.Add("Exchange 2016: $($_.Exception.Message)")
-                Write-SemrActivity -Message "Local Exchange 2016 preflight failed: $($_.Exception.Message)" -Level WARN
-                Write-SemrErrorDiagnostic -ErrorRecord $_ -Title 'Exchange 2016 preflight failed' -Level WARN -Component 'Exchange2016'
+                [void]$preflightIssues.Add("Exchange on-premises: $($_.Exception.Message)")
+                Write-SemrActivity -Message "Local Exchange on-premises preflight failed: $($_.Exception.Message)" -Level WARN
+                Write-SemrErrorDiagnostic -ErrorRecord $_ -Title 'Exchange on-premises preflight failed' -Level WARN -Component 'ExchangeOnPrem'
             }
             Sync-SemrConnectionDisplay
             if ($preflightIssues.Count -gt 0) {
@@ -1224,7 +1224,7 @@ $controls.RunButton.Add_Click({
                     )
                 }
                 if ($continue -ne [System.Windows.MessageBoxResult]::Yes) {
-                    Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Required Active Directory or local Exchange 2016 prerequisites are unavailable.'
+                    Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Required Active Directory or local Exchange on-premises prerequisites are unavailable.'
                     $runOutcome = 'CANCELLED'
                     return
                 }
@@ -1338,8 +1338,8 @@ $controls.RunButton.Add_Click({
         }
         $cancellationCheck = { Invoke-SemrDoEvent; return (Test-SemrProgressCancellation) }
         Update-SemrProgressWindow -Stage 'Collecting tenant and mailbox evidence' -Detail 'AD, Exchange on-premises, Exchange Online and Microsoft Graph are required Live sources. Missing sources make the assessment INCOMPLETE.' -Current 6 -Total 10
-        $exchangeDiagnosticsRoot = Join-Path (Join-Path (Resolve-SemrOutputRoot) 'Logs') 'Exchange2016Children'
-        Write-SemrActivity -Message "Exchange 2016 child process logs root: $exchangeDiagnosticsRoot"
+        $exchangeDiagnosticsRoot = Join-Path (Join-Path (Resolve-SemrOutputRoot) 'Logs') 'ExchangeOnPremChildren'
+        Write-SemrActivity -Message "Exchange on-premises child process logs root: $exchangeDiagnosticsRoot"
         $script:Assessment = Invoke-SemrAssessment -Batch $script:Batch -Config $script:Config -ProgressCallback $progressAction -CancellationCheck $cancellationCheck -DiagnosticsRoot $exchangeDiagnosticsRoot -RunId $script:CurrentRunId
         if ($script:Assessment.SourceInitialization) {
             $sourceState = $script:Assessment.SourceInitialization
@@ -1375,7 +1375,7 @@ $controls.RunButton.Add_Click({
     catch {
         if (Test-SemrProgressCancellation) {
             Write-SemrActivity -Message 'Assessment cancelled by the operator; no report was generated for the interrupted run.' -Level WARN
-            Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'The Exchange 2016 child process and assessment worker were stopped.'
+            Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'The Exchange on-premises child process and assessment worker were stopped.'
             $controls.StatusText.Text = 'Assessment cancelled.'
             $runOutcome = 'CANCELLED'
         }
@@ -1505,8 +1505,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQ4/LigUScG1V8
-# hZvyPsSLXLJgI5BjhylGhkTkmS4kiaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBe1zDdtlPJMmdl
+# Hxh+JrJtSLxY6WNKPC0oWSHzN6EmyaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1639,31 +1639,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOQpflWG2hxOBQ4oG0rxteDwgX1RRkQl3k6DyC/cjumKMA0GCSqG
-# SIb3DQEBAQUABIIBgCMCtv4foQnDEKJoFMpGPcMpeg5mQ1QH63HBv+UNuvE4ngPH
-# sjfL3gwCBxrwpdb/6r6T6a9NBnO0lIBOQvcnCY7cspiOxQ8D1bIRBhp3Myl5WZdq
-# uSj6bc7IIqsqNldduwvs4StZfc9to4ZWDWLKMx3+azHxrQobrpoFqape1sqG3/xq
-# NjjG/lC+hAau/a0b1+DH3tq8/uClnUuqQHlprfhm0x1lMn5zaR6nXoGGbhAYoVDu
-# kUtFyRD2ntqgN0Vx2+QPiwEFagO90oj8NbBJljqLKfcYi3TfNQL1y6tvJktovtt8
-# P2x/SvYIw+dzj7zo162j3n7yzLKFz8/hXqzxNAIKucPxlmJtrg6lYJM5JivsCf2N
-# mGHNbaGn3Gua2+YCMDV/7RR6EmYtP255UM4IRQ/dECdh2kHtovsdJsA2AA6spqie
-# KXvhwrJQziD+tWrWONklZy/Wff7t325wruSYIkcjGmCAVczMNf7G1IeHJKBGeoGH
-# 6xTcfWuiOJG06g3Yz6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAzZ+eWi7WXeEqxPRkTkZQZ3HflsGjiBiuwxVivNVmK2MA0GCSqG
+# SIb3DQEBAQUABIIBgAOu3kiW2UdrkQzD9SsQ9WXFXvH3SFDxe/PQjXEDSplJbCRH
+# 8MJ+vMdcCIKHw5r+sEwDYsu45U6JWJCKVsaCei85pB+vCPMCPHU+8kHj2zadQhna
+# gCBkeooN8cK03lXMeeRg5eaHCxwOS3zdfdnGS4+30eR1nfh5ziokkdpMtiGsuVyI
+# T+CIuVDiXDmVIhgqsypy+sGfh3MaSKtJOAnx7VREIxQpzEvNoYrpBvaJtM0cSAXK
+# +1zcxKLyvhSBz8n3Crs5qHGNlzqK+4p4wbA2gVqITT3/wN4b78zf2uMIs0/UZqtj
+# gZ4oZPIHZlrSJiBiQh0+2doaiPsytDoX/U6x++CHUkFGPBJ11u7Tf21ttwvtWxk3
+# vAHtmsY3HOAzoNmpp486rYh9IFG46YxoAqpKJ/l3FgdoSCStTB0CcdX4OCng7RVX
+# /mexFsiWx2aPLDL4dtd9BzkrbYz8vSi0oT49MIEjgOHflPfNa9vCTs+aHF4J4hc0
+# qb67sqWv6M8eOWLhFqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxODM1
-# MDFaMC8GCSqGSIb3DQEJBDEiBCBbH+nI4GlJVZOwVNURMV0RfViYhbzgKGsRHyEO
-# DXABhDANBgkqhkiG9w0BAQEFAASCAgCtwaalJovsr+zODgoQbrA7YQXBAuLKEuHQ
-# 2RhprXiLc04f5M4ClelzLi64rIPGKi/hABatMf5X/KQyXoJR/uQKSFOsOmChYZJt
-# 7YJKFs8BNDIpVGN3509A9XGy3eZyMhXD34/u28CUbMAf3xEoGxb6CbWpL8ZrHXZd
-# MK4n2GujWsTKF1S+MXUi08sZZx3fd1Wpg1DfCVyopWKahA46+otOHYO16wPDNKHv
-# 2fcmE+SEP5GK47sAOhv44xivv1DnuS7lSuvG5PfeRsUtp5rYS0AEvOuaN8IA8eAb
-# 892LqlxDtDMkrM8oMRy9V4FbhkC3DWE5fuF2U3iNAH6HgQcFAAbgNl1eU1H3XM9W
-# UXYH4lunUmGnBIxtLxdUvM6OSE1AYKjjddtt30eyerEzbHjL+jtpsEHC4lIu5jzM
-# 58caAqZwrJi3//z/xhxhBTquuYFRaSXO+QhPEwkc9qyirSLwiQbmzAeWBMK3lUDi
-# hz+XlcLjOdjj8xcljz2BM8mdiIBTDkXKEyGiEykqVXYppP0t7buNOGd2NL0zmqBb
-# Ipkl9qGWNy50UVXd+VkIjrt0LdR/KL0/pGcqDRy1pz4wqgH1ntkY8Qe7+PTcwOZM
-# mPvHplDidC1H4FzcgDV4LhF8igXzR+j/Eq/oW45NwK8T142DEvPc+0Edg5+6hzg5
-# Z7M/FoBa5Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxOTIy
+# MjNaMC8GCSqGSIb3DQEJBDEiBCD/9eIFnscfyRSYCt54FvQRR8CcX7ok2xB0yOSO
+# 7YPrljANBgkqhkiG9w0BAQEFAASCAgBH2bsGcG38HZeU9MGj6crN2Pi2qYqepQMr
+# Y5TtGddHQHHOHOVeqHeXrPL+qJj4HZCde7YrXCDbBeprme3BQYD+0aDjQmJ1NXme
+# o5fHf66HKkW3hFeskVVWzkSSSMynlB7Yi3GH0Nw9aStrnnKRo2GCan/YloNIaEfS
+# JD5VPwGRN9AqpUVr4BZqvQ4CEAu8tDgBwNuHV704lhRs44cyiVNdITHvJXwzpWG4
+# xqkYtY3+01zcW6LNmr+OdFMZhfKH/060QsA0zw9EANDyYN6AH49WTZHgFzffZ7gC
+# 9bHfq/EjtwtIwzdZLxqtnYtujNmjLlIqmracJuiScZjM3o/pg/xjieH+3d+3wmjV
+# K7ClNhwMAjcZitJh8e/rQTndF07ZzOqJNlRpQCfmoUZgj/RBzO+sbsZjBqLAYb0T
+# 3Q/fAZwz4r2QHl+xbng0xTDZglhxf1XZoF2kq99HMCS3vB5WCvPUfGPy3QxdB/60
+# P/SXuouwntRVD08MZ8E4gy5BA4bjRf+5FIFHnv29s5vpNvPsrNk5WZRSGxO7Q6Ju
+# Qc4qacMKcF/6vw9nBlCF+XyzChA/qcpRrFkFgA81tHy/RKSudg5BWDmFPgaPFAzH
+# Pql+gErr9lA5uLMq668EBAIP8x+eOFsVeBkyOsg0vGUsvGTRSYCVHEgzk/mn36XG
+# YOP+S/cjYQ==
 # SIG # End signature block
