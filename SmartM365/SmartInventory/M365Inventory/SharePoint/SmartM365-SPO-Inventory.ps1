@@ -7,8 +7,8 @@
     Uses Microsoft Graph app-only authentication by default to inventory
     SharePoint Online sites, storage, activity, lists where Graph allows access,
     owner signals, inactive sites, orphaned sites, and tenant-level summary
-    statistics. PnP.PowerShell deep sharing scans are optional and never required
-    for the default inventory mode.
+    statistics. Tenant capacity is collected through PnP.PowerShell by default.
+    PnP.PowerShell deep sharing scans remain optional.
 
 .PARAMETER Tenant
     Tenant profile key to load from Config/Tenants. Defaults to test.
@@ -43,28 +43,37 @@
 .PARAMETER UsePnPDeepScan
     Enables optional PnP.PowerShell per-site sharing scans. This is best-effort and may require broader SharePoint permissions than the default Graph inventory.
 
+.PARAMETER UsePnPTenantCapacity
+    Collects the licensed SharePoint tenant storage capacity through Get-PnPTenant.
+    Enabled by default. SharePointAdminUrl is derived automatically when omitted.
+
+.PARAMETER SkipPnPTenantCapacity
+    Disables the default SharePoint tenant storage capacity collection.
+
 .PARAMETER InteractiveAuth
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.21
+0.23
 
 
 .REQUIREMENTS
     PowerShell 7+.
-    Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel; optional PnP.PowerShell only when -UsePnPDeepScan is used.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel; PnP.PowerShell for the default tenant capacity collection.
     Minimum Graph application permissions for default inventory: Reports.Read.All; Sites.Read.All; Directory.Read.All.
     Optional PnP deep sharing scan may require SharePoint site-level access for scanned sites.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph.Authentication, ImportExcel, SmartM365.Core.psd1
-    Optional: PnP.PowerShell only when -UsePnPDeepScan is used.
+    PnP.PowerShell is used by default for tenant capacity and optionally for -UsePnPDeepScan.
     Minimum Microsoft Graph application permissions for default inventory:
       - Reports.Read.All for SharePoint and OneDrive usage reports.
       - Sites.Read.All for site and list inventory.
       - Directory.Read.All for organization context and owner/directory enrichment.
-    Optional PnP deep sharing scan may require SharePoint site-level access for the scanned sites. Do not grant SharePoint Administrator or Sites.FullControl.All only for the default Graph inventory.
+    Optional PnP deep sharing scan may require SharePoint site-level access for the scanned sites.
+    Default tenant capacity collection requires SharePoint tenant administration access; use -SkipPnPTenantCapacity to disable it.
+    The baseline Graph-only mode selected with -SkipPnPTenantCapacity does not require SharePoint Administrator or Sites.FullControl.All.
 #>
 
 [CmdletBinding()]
@@ -80,6 +89,8 @@ param(
     [int]$ListItemWarningThreshold = 5000,
     [switch]$SkipDeepSharingScan,
     [switch]$UsePnPDeepScan,
+    [switch]$UsePnPTenantCapacity = $true,
+    [switch]$SkipPnPTenantCapacity,
     [int]$SharingScanItemLimitPerSite = 0,
     [switch]$InteractiveAuth,
     [string]$OutputPath,
@@ -102,7 +113,8 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.21"
+$ScriptVersion = "0.23"
+$TenantCapacityEnabled = [bool]$UsePnPTenantCapacity -and -not [bool]$SkipPnPTenantCapacity
 $CurrentOperation = 'Initialize'
 
 $tenantContextPath = & {
@@ -704,16 +716,162 @@ function Convert-SpoReportRowToSiteSeed {
     }
 }
 
+function ConvertTo-SpoTenantAdminUrl {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return '' }
+    $candidate = $Value.Trim()
+    if ($candidate -notmatch '^https?://') { $candidate = "https://$candidate" }
+    try { $hostName = ([uri]$candidate).DnsSafeHost.ToLowerInvariant().TrimEnd('.') }
+    catch { return '' }
+
+    if ($hostName -match '^(?<Tenant>[^.]+?)(?:-admin|-my)?\.sharepoint\.com$') {
+        return "https://$($Matches.Tenant)-admin.sharepoint.com"
+    }
+    return ''
+}
+
+function Resolve-SpoTenantAdminUrl {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$TenantName,
+        [AllowEmptyCollection()][string[]]$SiteUrls = @()
+    )
+
+    $configuredUrl = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'SharePointAdminUrl' -DefaultValue '')
+    if (-not [string]::IsNullOrWhiteSpace($configuredUrl)) {
+        $normalizedConfiguredUrl = ConvertTo-SpoTenantAdminUrl -Value $configuredUrl
+        if ([string]::IsNullOrWhiteSpace($normalizedConfiguredUrl)) { throw "Invalid SharePointAdminUrl: $configuredUrl" }
+        return [pscustomobject]@{ Url = $normalizedConfiguredUrl; Source = 'SharePointAdminUrl' }
+    }
+
+    $siteHostname = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'SharePointSiteHostname' -DefaultValue '')
+    foreach ($candidate in @($siteHostname) + @($SiteUrls | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        $derivedUrl = ConvertTo-SpoTenantAdminUrl -Value $candidate
+        if (-not [string]::IsNullOrWhiteSpace($derivedUrl)) {
+            return [pscustomobject]@{ Url = $derivedUrl; Source = 'DerivedFromSharePointHostname' }
+        }
+    }
+
+    if ($TenantName -match '^(?<Tenant>[^.]+)\.onmicrosoft\.com$') {
+        return [pscustomobject]@{ Url = "https://$($Matches.Tenant)-admin.sharepoint.com"; Source = 'DerivedFromTenantName' }
+    }
+
+    throw 'Unable to derive the SharePoint administration URL from SharePointSiteHostname, collected site URLs, or TenantName. Configure SharePointAdminUrl as an override.'
+}
+
+function Get-SpoTenantCapacityRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][string]$RunDateUtc,
+        [Parameter(Mandatory)][string]$TenantName,
+        [Parameter(Mandatory)][double]$StorageUsedGB,
+        [Parameter(Mandatory)]$Config,
+        [AllowEmptyCollection()][string[]]$SiteUrls = @(),
+        [switch]$Enabled,
+        [switch]$Interactive,
+        [switch]$PartialInventory,
+        [double]$WarningPercent = 80,
+        [double]$CriticalPercent = 90
+    )
+
+    $capacityMb = $null
+    $allocatedMb = $null
+    $capacitySource = 'Disabled'
+    $status = 'Warning'
+    $details = 'Tenant capacity collection was disabled with -SkipPnPTenantCapacity.'
+
+    if ($Enabled) {
+        try {
+            $adminEndpoint = Resolve-SpoTenantAdminUrl -Config $Config -TenantName $TenantName -SiteUrls $SiteUrls
+            $adminUrl = [string]$adminEndpoint.Url
+            Write-SpoLog -Message ("SharePoint tenant administration URL: {0} ({1})." -f $adminUrl, $adminEndpoint.Source)
+
+            $appId = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'AppId' -DefaultValue '')
+            $tenantId = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'TenantId' -DefaultValue '')
+            $thumbprint = [string](Get-ScriptLocalConfigValue -Config $Config -Name 'Thumbprint' -DefaultValue (Get-ScriptLocalConfigValue -Config $Config -Name 'Thumb' -DefaultValue ''))
+            $connectParameters = @{ Url = $adminUrl; ReturnConnection = $true; ErrorAction = 'Stop' }
+            if (-not [string]::IsNullOrWhiteSpace($appId)) { $connectParameters.ClientId = $appId }
+            if ($Interactive) {
+                $connectParameters.Interactive = $true
+            }
+            else {
+                if ([string]::IsNullOrWhiteSpace($appId) -or [string]::IsNullOrWhiteSpace($tenantId) -or [string]::IsNullOrWhiteSpace($thumbprint)) {
+                    throw 'AppId, TenantId and Thumbprint are required for app-only SharePoint tenant capacity collection.'
+                }
+                $connectParameters.Tenant = $tenantId
+                $connectParameters.Thumbprint = $thumbprint
+            }
+
+            $connection = Connect-PnPOnline @connectParameters
+            $tenantProperties = Get-PnPTenant -Connection $connection -ErrorAction Stop
+            $capacityMb = ConvertTo-SpoDouble (Get-SpoPropertyValue -Object $tenantProperties -Names @('StorageQuota') -DefaultValue $null)
+            $allocatedMb = ConvertTo-SpoDouble (Get-SpoPropertyValue -Object $tenantProperties -Names @('StorageQuotaAllocated') -DefaultValue $null)
+            if ($null -eq $capacityMb -or $capacityMb -le 0) {
+                throw 'Get-PnPTenant did not return a positive StorageQuota value.'
+            }
+            $capacitySource = 'Get-PnPTenant.StorageQuota'
+            $status = 'OK'
+            $details = "Tenant storage capacity collected from $adminUrl; URL source: $($adminEndpoint.Source)."
+        }
+        catch {
+            $capacitySource = 'Get-PnPTenantUnavailable'
+            $status = 'Warning'
+            $details = "Tenant capacity collection failed: $($_.Exception.Message) SharePointAdminUrl is only required as an override when automatic derivation is not suitable."
+            Write-SpoLog -Message $details -Level WARNING
+        }
+    }
+
+    $usedMb = [Math]::Round($StorageUsedGB * 1024, 2)
+    $utilizationPercent = if ($null -ne $capacityMb -and $capacityMb -gt 0 -and -not $PartialInventory) { [Math]::Round(($usedMb / $capacityMb) * 100, 2) } else { $null }
+    if ($PartialInventory) {
+        $status = 'Warning'
+        $details = 'Site inventory is limited by MaxSites/MaxItems; tenant utilization is intentionally left blank.'
+    }
+    elseif ($null -ne $utilizationPercent -and $utilizationPercent -ge $CriticalPercent) {
+        $status = 'Critical'
+        $details = "Tenant SharePoint storage utilization is at or above $CriticalPercent percent."
+    }
+    elseif ($null -ne $utilizationPercent -and $utilizationPercent -ge $WarningPercent) {
+        $status = 'Warning'
+        $details = "Tenant SharePoint storage utilization is at or above $WarningPercent percent."
+    }
+
+    [pscustomobject]@{
+        RunId = $RunId
+        RunDateUtc = $RunDateUtc
+        TenantName = $TenantName
+        StorageUsedMB = $usedMb
+        StorageUsedGB = [Math]::Round($StorageUsedGB, 2)
+        StorageUsedTB = [Math]::Round($StorageUsedGB / 1024, 4)
+        StorageCapacityMB = if ($null -eq $capacityMb) { '' } else { [Math]::Round($capacityMb, 2) }
+        StorageCapacityGB = if ($null -eq $capacityMb) { '' } else { [Math]::Round($capacityMb / 1024, 2) }
+        StorageCapacityTB = if ($null -eq $capacityMb) { '' } else { [Math]::Round($capacityMb / 1048576, 4) }
+        StorageQuotaAllocatedMB = if ($null -eq $allocatedMb) { '' } else { [Math]::Round($allocatedMb, 2) }
+        StorageQuotaAllocatedGB = if ($null -eq $allocatedMb) { '' } else { [Math]::Round($allocatedMb / 1024, 2) }
+        StorageUtilizationPercent = if ($null -eq $utilizationPercent) { '' } else { $utilizationPercent }
+        CapacitySource = $capacitySource
+        IsPartialInventory = [bool]$PartialInventory
+        Status = $status
+        NumericValue = if ($null -eq $utilizationPercent) { '' } else { $utilizationPercent }
+        TextValue = $capacitySource
+        Threshold = "Warning >= $WarningPercent%; Critical >= $CriticalPercent%"
+        Details = $details
+    }
+}
 Import-SmartM365CoreModule
 Ensure-SpoImportExcelModule
 $requiredSpoModules = @('Microsoft.Graph.Authentication','ImportExcel')
-if ($UsePnPDeepScan) { $requiredSpoModules += 'PnP.PowerShell' }
+if ($UsePnPDeepScan -or $TenantCapacityEnabled) { $requiredSpoModules += 'PnP.PowerShell' }
 Invoke-SmartM365Preflight `
     -ScriptName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) `
     -RequiredModules $requiredSpoModules | Out-Null
 Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 Import-Module ImportExcel -ErrorAction Stop
-if ($UsePnPDeepScan) { Import-Module PnP.PowerShell -ErrorAction Stop }
+if ($UsePnPDeepScan -or $TenantCapacityEnabled) { Import-Module PnP.PowerShell -ErrorAction Stop }
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
 $TenantName = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDomain' -DefaultValue $Tenant); if ([string]::IsNullOrWhiteSpace($TenantName)) { $TenantName = $Tenant }
@@ -752,6 +910,7 @@ $siteRows = New-Object System.Collections.Generic.List[object]
 $listRows = New-Object System.Collections.Generic.List[object]
 $permissionRows = New-Object System.Collections.Generic.List[object]
 $sharingRows = New-Object System.Collections.Generic.List[object]
+$tenantRows = New-Object System.Collections.Generic.List[object]
 $alerts = New-Object System.Collections.Generic.List[object]
 $generatedCsvPaths = New-Object System.Collections.Generic.List[string]
 $scriptError = $null
@@ -896,15 +1055,21 @@ try {
         }
 
         if ($DeepSharingScanEnabled) {
-            Write-SpoLog -Message 'UsePnPDeepScan is enabled, but default SPO inventory remains Graph-only; no SharePoint Administrator dependency is introduced.' -Level INFO
+            Write-SpoLog -Message 'UsePnPDeepScan is enabled. The site/list baseline remains Graph-based; tenant capacity is handled separately.' -Level INFO
         }
     }
 
+    $CurrentOperation = 'Collect tenant storage capacity'
+    $siteArrayForTenant = @($siteRows.ToArray())
+    $usedMeasureForTenant = $siteArrayForTenant | Measure-Object -Property StorageUsedGB -Sum
+    $storageUsedGbForTenant = if ($siteArrayForTenant.Count -gt 0 -and $null -ne $usedMeasureForTenant.Sum) { [Math]::Round([double]$usedMeasureForTenant.Sum, 2) } else { 0 }
+    $tenantRows.Add((Get-SpoTenantCapacityRow -RunId $RunId -RunDateUtc $RunDateUtc -TenantName $TenantName -StorageUsedGB $storageUsedGbForTenant -Config $ScriptLocalConfig -SiteUrls @($siteArrayForTenant.SiteUrl) -Enabled:$TenantCapacityEnabled -Interactive:$InteractiveAuth -PartialInventory:($MaxSites -gt 0 -or (Test-SmartM365MaxItemsMode)) -CriticalPercent $QuotaCriticalPercent)) | Out-Null
     $CurrentOperation = 'Export CSV files'
     $siteColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','Title','Template','CreatedUtc','LastActivityUtc','DaysSinceLastActivity','Owner','LockState','SharingCapability','ExternalSharingEnabled','StorageQuotaMB','StorageUsedMB','StorageQuotaPercent','StorageQuotaGB','StorageUsedGB','IsOneDrive','IsHubSite','HubSiteId','RelatedGroupId','IsInactive','IsOrphaned','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
     $listColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ListId','ListTitle','ListUrl','BaseTemplate','BaseType','Hidden','ItemCount','SizeMB','VersioningEnabled','MajorVersionLimit','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
     $permissionColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','PrincipalType','PrincipalName','PrincipalLoginName','IsSiteAdmin','IsExternal','IsDisabled','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
     $sharingColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ObjectType','ObjectTitle','ObjectUrl','SharingSignal','SharingValue','LinkScope','Principal','IsAnonymous','IsExternal','Status','NumericValue','TextValue','Threshold','Details')
+    $tenantColumns = @('RunId','RunDateUtc','TenantName','StorageUsedMB','StorageUsedGB','StorageUsedTB','StorageCapacityMB','StorageCapacityGB','StorageCapacityTB','StorageQuotaAllocatedMB','StorageQuotaAllocatedGB','StorageUtilizationPercent','CapacitySource','IsPartialInventory','Status','NumericValue','TextValue','Threshold','Details')
 
     $exportStamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture)
     $timestampedCsvFiles = New-Object System.Collections.Generic.List[object]
@@ -913,7 +1078,8 @@ try {
         @{ Base = 'M365_SPO_Sites'; Data = $siteRows.ToArray(); Columns = $siteColumns; WorksheetName='Sites'; TableName='SpoSites' },
         @{ Base = 'M365_SPO_Lists'; Data = $listRows.ToArray(); Columns = $listColumns; WorksheetName='Lists'; TableName='SpoLists' },
         @{ Base = 'M365_SPO_Permissions'; Data = $permissionRows.ToArray(); Columns = $permissionColumns; WorksheetName='Permissions'; TableName='SpoPermissions' },
-        @{ Base = 'M365_SPO_ExternalSharing'; Data = $sharingRows.ToArray(); Columns = $sharingColumns; WorksheetName='External sharing'; TableName='SpoExternalSharing' }
+        @{ Base = 'M365_SPO_ExternalSharing'; Data = $sharingRows.ToArray(); Columns = $sharingColumns; WorksheetName='External sharing'; TableName='SpoExternalSharing' },
+        @{ Base = 'M365_SPO_Tenant'; Data = $tenantRows.ToArray(); Columns = $tenantColumns; WorksheetName='Tenant capacity'; TableName='SpoTenant' }
     )) {
         $exportResult = Export-SpoEntityCsv -BaseFileName $export.Base -Data $export.Data -Columns $export.Columns -TimestampedFolder $initializedOutput -LatestFolder $latestFolder -Timestamp $exportStamp -AppendHistoryMode:$AppendHistory -NoWeeklyHistory:$global:EnableWeeklyHistory
         if ($exportResult.TimestampedPath) {
@@ -938,6 +1104,8 @@ try {
     $listArray = @($listRows.ToArray())
     $permissionArray = @($permissionRows.ToArray())
     $sharingArray = @($sharingRows.ToArray())
+    $tenantArray = @($tenantRows.ToArray())
+    $tenantCapacity = $tenantArray | Select-Object -First 1
     $alertArray = @($alerts.ToArray())
     $criticalAlertCount = @($alertArray | Where-Object { $_.Severity -eq 'Critical' }).Count
     $warningAlertCount = @($alertArray | Where-Object { $_.Severity -eq 'Warning' }).Count
@@ -952,7 +1120,7 @@ try {
         Tenant = $TenantName
         RunId = $RunId
         Duration = ('{0:hh\:mm\:ss}' -f $duration)
-        InventoryMode = if ($DeepSharingScanEnabled) { 'GraphAppOnly+OptionalPnPDeepScan' } else { 'GraphAppOnly' }
+        InventoryMode = if ($TenantCapacityEnabled -and $DeepSharingScanEnabled) { 'Graph+PnPTenantCapacity+PnPDeepScan' } elseif ($TenantCapacityEnabled) { 'Graph+PnPTenantCapacity' } elseif ($DeepSharingScanEnabled) { 'Graph+PnPDeepScan' } else { 'GraphOnly' }
         SitesProcessed = $siteArray.Count
         SharePointSites = @($siteArray | Where-Object { -not [bool]$_.IsOneDrive }).Count
         OneDriveSites = @($siteArray | Where-Object { [bool]$_.IsOneDrive }).Count
@@ -963,6 +1131,9 @@ try {
         WarningAlerts = $warningAlertCount
         StorageUsedGB = $totalUsedGb
         StorageQuotaGB = $totalQuotaGb
+        TenantStorageCapacityGB = if ($null -ne $tenantCapacity -and -not [string]::IsNullOrWhiteSpace([string]$tenantCapacity.StorageCapacityGB)) { $tenantCapacity.StorageCapacityGB } else { '' }
+        TenantStorageUtilizationPercent = if ($null -ne $tenantCapacity -and -not [string]::IsNullOrWhiteSpace([string]$tenantCapacity.StorageUtilizationPercent)) { $tenantCapacity.StorageUtilizationPercent } else { '' }
+        TenantCapacitySource = if ($null -ne $tenantCapacity) { $tenantCapacity.CapacitySource } else { 'Unavailable' }
         IncludeOneDrive = [bool]$IncludeOneDrive
         DeepSharingScan = $DeepSharingScanEnabled
         SharingScanItemLimitPerSite = $SharingScanItemLimitPerSite
