@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.6
+1.11.8
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.6'
+$script:AppVersion = '1.11.8'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -42,6 +42,7 @@ $script:CurrentRunId = ''
 $script:CurrentDiagnosticPhase = ''
 $script:CurrentDiagnosticMailbox = ''
 $script:RunStartedAt = $null
+$script:CloudSessionPrompted = @{ ExchangeOnline = $false; MicrosoftGraph = $false }
 $script:MigrationEndpointsLoaded = $false
 $script:MigrationEndpointSelectionConfirmed = $false
 $script:ProgressWindow = $null
@@ -423,7 +424,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.6" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.8" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -458,8 +459,14 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $PSScriptRoot 'Config\SmartM365-ExchangeMigrationReadiness.local.json'
 }
 $script:Config = Get-SemrConfig -Path $ConfigPath
-$script:ConfiguredDisabledChecks = if ($script:Config.Contains('DisabledChecks')) { @($script:Config.DisabledChecks) } else { @() }
-$script:CheckOptions = @(Get-SemrCheckCatalog | ForEach-Object {
+$checkCatalog = @(Get-SemrCheckCatalog)
+$script:ConfiguredDisabledChecks = if ($script:Config.Contains('DisabledChecks') -and $null -ne $script:Config.DisabledChecks) {
+    @($script:Config.DisabledChecks)
+}
+else {
+    @($checkCatalog | Where-Object { $_.CanDisable -and -not $_.DefaultEnabled } | ForEach-Object CheckId)
+}
+$script:CheckOptions = @($checkCatalog | ForEach-Object {
     [pscustomobject][ordered]@{
         Enabled = [bool]($_.Mandatory -or $script:ConfiguredDisabledChecks -notcontains $_.CheckId)
         CanDisable = [bool]$_.CanDisable
@@ -962,19 +969,66 @@ function Initialize-SemrMigrationEndpointSelection {
     return $true
 }
 
+function Request-SemrExistingCloudSessionDecision {
+    param(
+        [Parameter(Mandatory)][string]$Service,
+        [Parameter(Mandatory)]$SessionInfo,
+        [string]$ConfiguredTenantId = ''
+    )
+
+    $account = if ([string]::IsNullOrWhiteSpace([string]$SessionInfo.Account)) { '(unknown account)' } else { [string]$SessionInfo.Account }
+    $tenant = if ([string]::IsNullOrWhiteSpace([string]$SessionInfo.TenantId)) { '(unknown tenant)' } else { [string]$SessionInfo.TenantId }
+    $organization = if ([string]::IsNullOrWhiteSpace([string]$SessionInfo.Organization)) { '(not reported)' } else { [string]$SessionInfo.Organization }
+    $authType = if ([string]::IsNullOrWhiteSpace([string]$SessionInfo.AuthType)) { 'Interactive delegated' } else { [string]$SessionInfo.AuthType }
+    $tenantMismatch = $ConfiguredTenantId -and $SessionInfo.TenantId -and [string]$SessionInfo.TenantId -ne $ConfiguredTenantId
+    $usable = -not ($SessionInfo.PSObject.Properties.Name -contains 'Usable') -or [bool]$SessionInfo.Usable
+    $details = "Service: $Service`nAccount: $account`nTenant: $tenant`nOrganization: $organization`nAuthentication: $authType"
+
+    if ($tenantMismatch -or -not $usable) {
+        $reason = if ($tenantMismatch) { "The existing tenant does not match the configured tenant $ConfiguredTenantId." } else { 'The existing session is no longer usable.' }
+        $result = Invoke-SemrForegroundPrompt -Action {
+            [System.Windows.MessageBox]::Show(
+                $window,
+                "$details`n`n$reason`n`nForce a new interactive authentication?",
+                "$Service session detected",
+                [System.Windows.MessageBoxButton]::YesNo,
+                [System.Windows.MessageBoxImage]::Warning,
+                [System.Windows.MessageBoxResult]::Yes
+            )
+        }
+        return $(if ($result -eq [System.Windows.MessageBoxResult]::Yes) { 'Force' } else { 'Cancel' })
+    }
+
+    $result = Invoke-SemrForegroundPrompt -Action {
+        [System.Windows.MessageBox]::Show(
+            $window,
+            "$details`n`nAn existing session is available.`n`nYes: continue with this session`nNo: force a new interactive authentication`nCancel: stop the assessment",
+            "$Service session detected",
+            [System.Windows.MessageBoxButton]::YesNoCancel,
+            [System.Windows.MessageBoxImage]::Information,
+            [System.Windows.MessageBoxResult]::Yes
+        )
+    }
+    if ($result -eq [System.Windows.MessageBoxResult]::Yes) { return 'Reuse' }
+    if ($result -eq [System.Windows.MessageBoxResult]::No) { return 'Force' }
+    return 'Cancel'
+}
 function Sync-SemrConnectionDisplay {
     $script:Config['Mode'] = 'Live'
     $state = Get-SemrConnectionState
     $controls.AdStateText.Text = if ($state.ActiveDirectory) { 'Connected (Live forest)' } else { 'Required Live source; checked automatically during assessment' }
     $controls.OnPremStateText.Text = if ($state.OnPremisesExchange) { 'Connected (local PS5 worker, ViewEntireForest)' } else { 'Required Live source; local Exchange 2016 Management Shell required' }
-    $controls.ExoStateText.Text = if ($state.ExchangeOnline) { 'Connected (Live, Interactive)' } else { 'Required interactive connection starts with Run assessment' }
-    $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { 'Live evidence loaded (isolated process, Interactive)' } else { 'Required interactive collection starts after Exchange Online' }
+    $cloudSessions = Get-SemrCloudSessionSummary
+    $exoAccount = if ($cloudSessions.ExchangeOnline -and $cloudSessions.ExchangeOnline.Account) { [string]$cloudSessions.ExchangeOnline.Account } else { '' }
+    $graphAccount = if ($cloudSessions.MicrosoftGraph -and $cloudSessions.MicrosoftGraph.Account) { [string]$cloudSessions.MicrosoftGraph.Account } else { '' }
+    $controls.ExoStateText.Text = if ($state.ExchangeOnline) { if($exoAccount){"Connected (Live): $exoAccount"}else{'Connected (Live, Interactive)'} } else { 'Required interactive connection starts with Run assessment' }
+    $controls.GraphStateText.Text = if ($state.MicrosoftGraph) { if($graphAccount){"Live evidence refreshed: $graphAccount"}else{'Live evidence loaded (isolated process, Interactive)'} } else { 'Required interactive collection starts after Exchange Online' }
     $controls.AdStateText.Foreground = if ($state.ActiveDirectory) { '#146C43' } else { '#8A5A00' }
     $controls.OnPremStateText.Foreground = if ($state.OnPremisesExchange) { '#146C43' } else { '#8A5A00' }
     $controls.ExoStateText.Foreground = if ($state.ExchangeOnline) { '#146C43' } else { '#5F6B7A' }
     $controls.GraphStateText.Foreground = if ($state.MicrosoftGraph) { '#146C43' } else { '#5F6B7A' }
     if (-not $script:Assessment) {
-        $controls.HybridStateText.Text = 'Live strict: migration endpoint, hybrid configuration and tenant synchronization are queried directly.'
+        $controls.HybridStateText.Text = 'Live strict: the selected migration endpoint and tenant synchronization are tested directly; local EWS/MRSProxy inventory is optional.'
         $controls.HybridStateText.Foreground = '#5F6B7A'
     }
     $controls.AssessmentPhaseCombo.IsEnabled = -not $script:IsBusy
@@ -982,8 +1036,10 @@ function Sync-SemrConnectionDisplay {
     $controls.RunButton.IsEnabled = (-not $script:IsBusy -and $null -ne $script:Batch)
     $phase = Get-SemrSelectedAssessmentPhase
     $assessmentStatus = if ($script:Assessment) { " | Status: $($script:Assessment.AssessmentStatus)" } else { '' }
-    $controls.FooterText.Text = "Read-only | Mode: Live strict | Phase: $phase | Auth: Interactive | Tenant: $($script:Config._TenantProfileKey)$assessmentStatus"
-}function Switch-SemrBusyState {
+    $controls.FooterText.Text = "Read-only | Mode: Live strict | Phase: $phase | Auth: Interactive (session reuse) | Tenant: $($script:Config._TenantProfileKey)$assessmentStatus"
+}
+
+function Switch-SemrBusyState {
     param(
         [bool]$Busy,
         [string]$Message = ''
@@ -1179,15 +1235,37 @@ $controls.RunButton.Add_Click({
                 $runOutcome = 'CANCELLED'
                 return
             }
-            $connectionState = Get-SemrConnectionState
-            if (-not $connectionState.ExchangeOnline) {
-                Update-SemrProgressWindow -Stage 'Exchange Online authentication' -Detail 'Complete the interactive browser sign-in, then keep waiting.' -Current 3 -Total 10
-                Set-SemrProcessingStatus -Message 'Connecting interactively to Exchange Online. Complete authentication, then please wait...'
-                $exoConfig = $script:Config.ExchangeOnline
-                Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId ([string]$script:Config._TenantId) | Out-Null
-                Write-SemrActivity -Message 'Exchange Online connected using interactive authentication.' -Level SUCCESS
-                Sync-SemrConnectionDisplay
+
+            $configuredTenantId = [string]$script:Config._TenantId
+            $graphConfig = $script:Config.MicrosoftGraph
+            $graphDiagnosticsDirectory = Join-Path (Join-Path (Join-Path (Resolve-SemrOutputRoot) 'Logs') 'GraphWorkers') $script:CurrentRunId
+            Write-SemrActivity -Message "Microsoft Graph worker diagnostics directory: $graphDiagnosticsDirectory" -Component 'GraphWorker'
+
+            Update-SemrProgressWindow -Stage 'Exchange Online session inspection' -Detail 'Checking for an existing Exchange Online session and its account.' -Current 3 -Total 10
+            Set-SemrProcessingStatus -Message 'Inspecting the existing Exchange Online session; please wait...'
+            $exoConfig = $script:Config.ExchangeOnline
+            $exoSession = Get-SemrExchangeOnlineSessionInfo -TenantId $configuredTenantId
+            if ($exoSession.Error) { Write-SemrActivity -Message "Exchange Online session inspection: $($exoSession.Error)" -Level WARN -Component 'ExchangeOnline' }
+            $forceExoAuthentication = $false
+            if (-not $script:CloudSessionPrompted.ExchangeOnline -and $exoSession.Available) {
+                $decision = Request-SemrExistingCloudSessionDecision -Service 'Exchange Online' -SessionInfo $exoSession -ConfiguredTenantId $configuredTenantId
+                Write-SemrActivity -Message "Existing Exchange Online session decision: $decision; Account=$($exoSession.Account); Tenant=$($exoSession.TenantId); Organization=$($exoSession.Organization)." -Component 'ExchangeOnline'
+                if ($decision -eq 'Cancel') {
+                    Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Exchange Online session selection was cancelled.'
+                    $runOutcome = 'CANCELLED'
+                    return
+                }
+                $forceExoAuthentication = $decision -eq 'Force'
             }
+            $script:CloudSessionPrompted.ExchangeOnline = $true
+            Update-SemrProgressWindow -Stage 'Exchange Online authentication' -Detail $(if($forceExoAuthentication){'Complete the new interactive browser sign-in.'}elseif($exoSession.Available){"Reusing account $($exoSession.Account)."}else{'Complete the interactive browser sign-in, then keep waiting.'}) -Current 3 -Total 10
+            Set-SemrProcessingStatus -Message $(if($forceExoAuthentication){'Forcing a new Exchange Online interactive authentication...'}elseif($exoSession.Available){"Reusing existing Exchange Online session for $($exoSession.Account)..."}else{'Connecting interactively to Exchange Online. Complete authentication, then please wait...'})
+            $reuseExoSession = $exoSession.Available -and $exoSession.Usable -and -not $forceExoAuthentication
+            Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId $configuredTenantId -ForceAuthentication:$forceExoAuthentication | Out-Null
+            $exoSession = Get-SemrExchangeOnlineSessionInfo -TenantId $configuredTenantId
+            Write-SemrActivity -Message "Exchange Online session ready. Account=$($exoSession.Account); Tenant=$($exoSession.TenantId); Organization=$($exoSession.Organization); Reused=$reuseExoSession." -Level SUCCESS -Component 'ExchangeOnline'
+            Sync-SemrConnectionDisplay
+
             $endpointCheck = @($script:CheckOptions | Where-Object CheckId -EQ 'HYBRID-ENDPOINT' | Select-Object -First 1)
             if ($endpointCheck.Count -eq 1 -and $endpointCheck[0].Enabled) {
                 Update-SemrProgressWindow -Stage 'Migration endpoint selection' -Detail 'Loading ExchangeRemoteMove endpoints from Exchange Online.' -Current 4 -Total 10
@@ -1197,23 +1275,49 @@ $controls.RunButton.Add_Click({
                     return
                 }
             }
-            $connectionState = Get-SemrConnectionState
-            if (-not $connectionState.MicrosoftGraph) {
-                Update-SemrProgressWindow -Stage 'Microsoft Graph authentication' -Detail 'Complete the interactive browser sign-in. User, licensing and tenant sync evidence will then be collected.' -Current 5 -Total 10
-                Set-SemrProcessingStatus -Message 'Connecting interactively to Microsoft Graph. Complete authentication, then please wait...'
-                $graphConfig = $script:Config.MicrosoftGraph
-                $graphProgressAction = {
+
+            $graphProgressAction = {
+                param($Message)
+                Update-SemrProgressWindow -Stage 'Collecting Microsoft Graph evidence' -Detail $Message -Indeterminate
+                Set-SemrProcessingStatus -Message $Message -SkipActivity
+            }
+            $forceGraphAuthentication = $false
+            if (-not $script:CloudSessionPrompted.MicrosoftGraph) {
+                Update-SemrProgressWindow -Stage 'Microsoft Graph session inspection' -Detail 'Checking for an existing delegated Graph context and its account.' -Current 5 -Total 10
+                Set-SemrProcessingStatus -Message 'Inspecting the existing Microsoft Graph session; please wait...'
+                $graphInspectionProgressAction = {
                     param($Message)
-                    Update-SemrProgressWindow -Stage 'Collecting Microsoft Graph evidence' -Detail $Message -Indeterminate
+                    Update-SemrProgressWindow -Stage 'Microsoft Graph session inspection' -Detail $Message -Indeterminate
                     Set-SemrProcessingStatus -Message $Message -SkipActivity
                 }
-                $emailAddresses = @($script:Batch.Rows | ForEach-Object { [string]$_.EmailAddress })
-                $graphDiagnosticsDirectory = Join-Path (Join-Path (Join-Path (Resolve-SemrOutputRoot) 'Logs') 'GraphWorkers') $script:CurrentRunId
-                Write-SemrActivity -Message "Microsoft Graph worker diagnostics directory: $graphDiagnosticsDirectory" -Component 'GraphWorker'
-                Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId ([string]$script:Config._TenantId) -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction -DiagnosticsDirectory $graphDiagnosticsDirectory | Out-Null
-                Write-SemrActivity -Message 'Microsoft Graph user, licensing and tenant synchronization evidence collected using interactive authentication.' -Level SUCCESS
-                Sync-SemrConnectionDisplay
+                try {
+                    $graphSession = Get-SemrMicrosoftGraphSessionInfo -TenantId $configuredTenantId -ProgressCallback $graphInspectionProgressAction -DiagnosticsDirectory $graphDiagnosticsDirectory
+                    if ($graphSession.Available) {
+                        $decision = Request-SemrExistingCloudSessionDecision -Service 'Microsoft Graph' -SessionInfo $graphSession -ConfiguredTenantId $configuredTenantId
+                        Write-SemrActivity -Message "Existing Microsoft Graph session decision: $decision; Account=$($graphSession.Account); Tenant=$($graphSession.TenantId); ContextScope=$($graphSession.ContextScope)." -Component 'GraphWorker'
+                        if ($decision -eq 'Cancel') {
+                            Complete-SemrProgressWindow -Stage 'Assessment cancelled' -Summary 'Microsoft Graph session selection was cancelled.'
+                            $runOutcome = 'CANCELLED'
+                            return
+                        }
+                        $forceGraphAuthentication = $decision -eq 'Force'
+                    }
+                    else { Write-SemrActivity -Message 'No reusable Microsoft Graph CurrentUser context was detected.' -Component 'GraphWorker' }
+                }
+                catch {
+                    Write-SemrActivity -Message "Microsoft Graph session inspection failed; interactive authentication will continue: $($_.Exception.Message)" -Level WARN -Component 'GraphWorker'
+                    Write-SemrErrorDiagnostic -ErrorRecord $_ -Title 'Microsoft Graph session inspection failed' -Level WARN -Component 'GraphWorker'
+                }
+                $script:CloudSessionPrompted.MicrosoftGraph = $true
             }
+
+            Update-SemrProgressWindow -Stage 'Microsoft Graph authentication and evidence refresh' -Detail $(if($forceGraphAuthentication){'Complete the new interactive browser sign-in; Graph evidence will then be refreshed.'}else{'Reusing a compatible delegated context when possible, then refreshing Graph evidence for this batch.'}) -Current 5 -Total 10
+            Set-SemrProcessingStatus -Message 'Refreshing Microsoft Graph evidence for the current batch; authenticate only if requested...'
+            $emailAddresses = @($script:Batch.Rows | ForEach-Object { [string]$_.EmailAddress })
+            Connect-SemrMicrosoftGraph -Scopes @($graphConfig.Scopes) -TenantId $configuredTenantId -EmailAddresses $emailAddresses -ProgressCallback $graphProgressAction -DiagnosticsDirectory $graphDiagnosticsDirectory -ContextScope CurrentUser -ForceAuthentication:$forceGraphAuthentication | Out-Null
+            $graphSession = (Get-SemrCloudSessionSummary).MicrosoftGraph
+            Write-SemrActivity -Message "Microsoft Graph evidence refreshed. Account=$($graphSession.Account); Tenant=$($graphSession.TenantId); ContextScope=$($graphSession.ContextScope); MailboxCount=$($emailAddresses.Count)." -Level SUCCESS -Component 'GraphWorker'
+            Sync-SemrConnectionDisplay
         }
         $progressAction = {
             param($Current, $Total, $Mailbox, $Phase)
@@ -1396,8 +1500,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBxhxVInR+/r2wc
-# dV/4BdCALIKXhRx790V0U59vDAXrhaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJ47az5tQ/Kzbx
+# vuoEP8xJDv0fUfgGq3+v9410hIzvvKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1530,31 +1634,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAQA6TriYnDMX117KqC23+o7GECW0gpUMbvwNtitYigpMA0GCSqG
-# SIb3DQEBAQUABIIBgA4hxFap/IgNZSbp8ofmvTopXpJutxyPnh7ySgFYYJJu7Vzy
-# CTZjNtQpEuISE5duTvzxW7dWKIhL+Tp1QZiO9PVHPwPDxI/GxFTz+fRTNQ2pJf5M
-# 47HpWrwsQPURpNG7y1a/Q2TfgSPTZ6uKPpZdaYafP6+qQ3kl9KyLt72HpUoW7HMF
-# m5YvaCkyqsf7XYEOy+aZ1gWhWaVjW15EMtAr/iwNi6zrBM0CYdq7zQStxVktpJ2+
-# l93Id9K96/ZpsjesgqFW6myn+xje9W0AOXu57fUUOA8Zm0lKgcVzFYFnPpMRtSS8
-# e883L1G2fUmEAWi+yDWM+6jqlN2c0nAD7+AZnsuIap+RJc2P8vS4xkjnHf5jAQXr
-# CzwFIfEsOCfv3YRN1fkhuA0Z2qhO1vR7rfXAroMxksgH9oQPi0rFkTdBf49SQXBN
-# 6YWIaKbDzDy07UgJF0LYbv6P1MYwHFrbocpJ/ULkYoK4IflPaRJ7laYmZ58m5G0E
-# lIIJ+E68BizNHPPyR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOFHHSdvAkvJKDWBw60pc8EXR4JxkIJHS3JDP1lys3LqMA0GCSqG
+# SIb3DQEBAQUABIIBgHvQQc70i/bkrH9PT8pFDuHMdsif3DyU77T7fvJ6bbju2NgN
+# Gq73ly0APAHj87WUpk8qhWifHSbI2K73ByVzTkTBhtH4uSBmOMfCnMbtrjCOiFeM
+# pCYhiqQdZCNLBYms4pNXt+oy4PhT+TL2+WlwoNRjKMY0eiIj78KEdEnngTH79HUW
+# iglmqqaO8r9JcuV5FBV/qr/hV0UGGANgOwmP5abiX3RJddi16MAlYRK0714Li1Ig
+# n1snQ3NUAYZzPCjNPi9nrCq2JLVBY2HA4KuafzVrxo0VMBCcAgBFZrtY05VSCupv
+# q805DJ9i3Y8MOcZ/Ys0i8Ij9zZ1Vd17nNsJsA6HA47tJB/21mj2NAOWcH0WrugLF
+# nOjUVw7b+f4NaOeJRMy2sR6TrSIs/fg8vfDG/FRenRPTJdxmVTVQ6Cvth5mdXBN3
+# XXL/aK2eS42su1Wd1ibWon3aK018kzhoEyTpjnG0L1nbEmFcfsa2Y9FhikNu6E6m
+# LP61X0qszRGy9HLGmaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNDU0
-# NDRaMC8GCSqGSIb3DQEJBDEiBCAHLfEJRSy4XSWEO6TQPsw1lK7tQ3WUj9jahSw2
-# hzRLgzANBgkqhkiG9w0BAQEFAASCAgBbKx5U2PyyTY66WZGczqBUDQAOdBNotUgF
-# Lgr6bOUBGnw6GsRezuH4bduFh8trqWXPIc9kk3MCAVtQYnv9/SqYmwod1HyO2EUv
-# B1r0ukm/Dt80Y7X5UaguPMMPC2apDTV1R3L8pQ/AFBcBtV8Z53BbK5gzuP9+n/n9
-# qsirS/Y1A+X1/EVn2qPM7iewjpG95tbVK6/TedQjTixXndRVXVqkugC92kZrMWIO
-# uqc1aQDk+ObyR3g1DVXYF0ltl0ptqfNV8n+BAHr8kPSmEa/FtmCc3UEgPn77UJFe
-# 24opKVR3SrSiyxHqwFGacFEtkxruD30khqkdpO5VMtcTlkmdA4xQ0lR3uqrkoe4C
-# GNkvGFvQHM6cBUYz83lpgaIThuuyE9VCtyzZb4VXQ6YWYxm2s2+UbZt/zleUCV/2
-# lOsnVAn7AP8fMqfxZc+AAzbwfK+sEvoQS/HFCCqM0yw3SoITvXTTCjXO7LsF3Jbp
-# 27O5qdVMjjvj/bV3nq9voFGW9HgUtMMp7IDvGiq8pS50iADVTqhOSmCUo8zUPM9k
-# tAaoGnIlGqkaP1Gn9vuwDq/SC0KD3/Iiwke/8fZ20os2NVAvNbb2a3RKeu8y8+X8
-# Cw5G8Yi+fO5UmPHY5Nmnr9PMk+zKgWnThnt07LJEMPbjJl0oZIUHcSe6+kNWgqjX
-# sm+lw+5GXg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzA5
+# MDVaMC8GCSqGSIb3DQEJBDEiBCD6zGbDlQ1T4M23qJyjvysaSgwEd76Jbhg7n5RN
+# +q/wDDANBgkqhkiG9w0BAQEFAASCAgCAtk4CgB1EeXCn0MGSeH0a8mI+UxtS9xAd
+# N9PoQTBeDAxeDWODI48HTHz/RdUki4ssdDAxUz7eucD7HatVMwLfyR8grLU+32M9
+# IbFfsN5hpGIWStludHDJ/Jn5DXABsiSwW5nyRh4Fa2knN+PBHxD45B9DXrlyFOZU
+# 31JsxEQwdbZlcOeJZtiCBJHD218wl/wW1SwYXBxvxnavwElEKYo+hkRtOBsUA+AI
+# XLrYz3fB2SyUD4r0tShRjuFbG3gvWb2OwO28tYz9+U2WGbzQz1emxnNErmqAVm69
+# ksv9pkeSeZCl9J3WtGIVAKk3kUra822fuIa96J+Xm76QNLNI5N0yCGfzcE3ooged
+# H+LKr/F/9eCgBHCXqovKFj8ieMf1wiW9jNa1NUDrde1Lor8VzNMLjuP0a/sQiLdr
+# Kvx0EmUzKYEYp+ZxewDjrjiyp99OPRgtpCvgMButGklo0C5X+l3phjv51dfaMXNb
+# YgknPSaO3GrjHXq/RYSB2E+rfee9Gmpiqw04Q50v+Qpvy/73YoIuC3x2c/gfjPoG
+# i7wrpVtw1BBbwRo/56MpCU1cFxL21ZA1XXwsnE9ApDS7KIo0dYtnbIfg6EBRnozo
+# 5HOHn7hmtyWXWP6niRUf6uphMuGVJvTsdHC5VDE0rPcG+/Z12U7E3Qns3xc+20bu
+# r4bY1aObww==
 # SIG # End signature block
