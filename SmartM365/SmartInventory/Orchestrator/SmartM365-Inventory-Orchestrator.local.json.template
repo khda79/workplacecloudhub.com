@@ -30,6 +30,7 @@
   "PeerRecoveryEmailEnabled": true,
   "MaxConcurrency": 2,
   "MaxLifetimeHours": 24,
+  "CentralConfigurationEnabled": true,
   "AutoRecycleOnRuntimeUpdate": true,
   "RuntimeUpdateCheckIntervalSeconds": 60,
   "RuntimeUpdateStableChecks": 2,
