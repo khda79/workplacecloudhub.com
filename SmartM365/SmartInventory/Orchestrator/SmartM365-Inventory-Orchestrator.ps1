@@ -98,18 +98,19 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.4.1
+1.5.0
 
 .REQUIREMENTS
     PowerShell 7+.
     Config/SmartM365-TenantContext.ps1 (SmartM365 tenant context helper).
-    SmartM365.Core and SmartM365.Orchestrator.Distributed.psm1. Microsoft Graph modules
+    SmartM365.Core, SmartM365.Orchestrator.Distributed.psm1 and
+    SmartM365.Orchestrator.Management.psm1. Microsoft Graph modules
     are required when capability probes or the orchestrator mail
     transport is Graph or Both; each job script manages its own inventory connections
     inside its own child process.
 
 .NOTES
-    Version : 1.4.1
+    Version : 1.5.0
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -134,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.4.1"
+$ScriptVersion = "1.5.0"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -2257,6 +2258,7 @@ function Get-OrchestratorRuntimeSnapshot {
     $coreManifestPath = [string]$script:Settings.CoreModulePath
     $coreModulePath = Join-Path -Path (Split-Path -Path $coreManifestPath -Parent) -ChildPath 'SmartM365.Core.psm1'
     $distributedModulePath = [string]$script:Settings.DistributedModulePath
+    $managementModulePath = [string]$script:Settings.ManagementModulePath
 
     $distributedTokens = $null
     $distributedParseErrors = $null
@@ -2264,6 +2266,14 @@ function Get-OrchestratorRuntimeSnapshot {
     if (@($distributedParseErrors).Count -gt 0) {
         $distributedParseSummary = @($distributedParseErrors | ForEach-Object { $_.Message }) -join '; '
         throw "Distributed orchestrator module parser validation failed: $distributedParseSummary"
+    }
+
+    $managementTokens = $null
+    $managementParseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($managementModulePath, [ref]$managementTokens, [ref]$managementParseErrors)
+    if (@($managementParseErrors).Count -gt 0) {
+        $managementParseSummary = @($managementParseErrors | ForEach-Object { $_.Message }) -join '; '
+        throw "Management orchestrator module parser validation failed: $managementParseSummary"
     }
 
     $tokens = $null
@@ -2287,7 +2297,8 @@ function Get-OrchestratorRuntimeSnapshot {
 
     $scriptFileFingerprint = Get-OrchestratorFileFingerprint -Path $scriptPath
     $distributedModuleFingerprint = Get-OrchestratorFileFingerprint -Path $distributedModulePath
-    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint
+    $managementModuleFingerprint = Get-OrchestratorFileFingerprint -Path $managementModulePath
+    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint + '|' + $managementModuleFingerprint
     $coreManifestFingerprint = Get-OrchestratorFileFingerprint -Path $coreManifestPath
     $coreModuleFingerprint = Get-OrchestratorFileFingerprint -Path $coreModulePath
     $scriptVersionOnDisk = [version]$versionMatch.Groups['Version'].Value
@@ -2299,6 +2310,8 @@ function Get-OrchestratorRuntimeSnapshot {
         ScriptFingerprint = $scriptFingerprint
         DistributedModulePath = $distributedModulePath
         DistributedModuleFingerprint = $distributedModuleFingerprint
+        ManagementModulePath = $managementModulePath
+        ManagementModuleFingerprint = $managementModuleFingerprint
         CoreManifestPath = $coreManifestPath
         CoreModulePath = $coreModulePath
         CoreVersion = $coreVersionOnDisk
@@ -2389,6 +2402,7 @@ function Test-OrchestratorRuntimeUpdate {
     $signatureResults = @(
         Test-OrchestratorAuthenticodeFile -Path $candidate.ScriptPath -Role 'Orchestrator runtime update'
         Test-OrchestratorAuthenticodeFile -Path $candidate.DistributedModulePath -Role 'Distributed orchestrator runtime module'
+        Test-OrchestratorAuthenticodeFile -Path $candidate.ManagementModulePath -Role 'Management orchestrator runtime module'
     )
     if ($script:Settings.MonitorCoreModuleVersion) {
         $signatureResults += @(
@@ -3930,6 +3944,74 @@ function Show-DryRunPlan {
 # ==========================================================
 # Initialization
 # ==========================================================
+function Set-OrchestratorCentralClusterSettings {
+    param([Parameter(Mandatory = $true)]$ClusterDocument)
+
+    $validation = Test-SmartM365OrchestratorClusterDocument -Document $ClusterDocument
+    if (-not $validation.Valid) {
+        throw "Invalid central cluster configuration: $($validation.Errors -join '; ')"
+    }
+
+    $expectedServers = @($ClusterDocument.ExpectedOrchestratorServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+    $weights = ConvertTo-SmartM365OrchestratorHashtable -InputObject $ClusterDocument.ElectionWeightsByServer
+    $policiesRaw = ConvertTo-SmartM365OrchestratorHashtable -InputObject $ClusterDocument.ServerJobPolicies
+    $policies = @{}
+    foreach ($serverName in @($policiesRaw.Keys)) {
+        $normalizedServerName = ([string]$serverName).Trim().ToUpperInvariant()
+        $policies[$normalizedServerName] = @{
+            OnlyJobsRequiring = @($policiesRaw[$serverName].OnlyJobsRequiring | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+        }
+    }
+
+    $script:Settings.ExpectedOrchestratorServers = $expectedServers
+    $script:Settings.ServerJobPolicies = $policies
+    $localServerName = ([string]$env:COMPUTERNAME).ToUpperInvariant()
+    $script:Settings.ElectionWeight = if ($weights.ContainsKey($localServerName)) { [math]::Max(0.1, [double]$weights[$localServerName]) } else { 1.0 }
+
+    $mapping = [ordered]@{
+        PeerMonitoringEnabled = 'Boolean'
+        PeerJobMonitoringEnabled = 'Boolean'
+        PeerMonitoringCheckIntervalSeconds = 'Int32'
+        PeerHeartbeatStaleMinutes = 'Int32'
+        PeerMonitoringConfirmationChecks = 'Int32'
+        PeerJobStartGraceMinutes = 'Int32'
+        PeerAlertReminderMinutes = 'Int32'
+        PeerAlertMailRetryMinutes = 'Int32'
+        PeerRecoveryEmailEnabled = 'Boolean'
+    }
+    foreach ($propertyName in $mapping.Keys) {
+        if (-not $ClusterDocument.PSObject.Properties[$propertyName]) { continue }
+        if ($mapping[$propertyName] -eq 'Boolean') {
+            $script:Settings.$propertyName = [bool]$ClusterDocument.$propertyName
+        }
+        else {
+            $script:Settings.$propertyName = [math]::Max(1, [int]$ClusterDocument.$propertyName)
+        }
+    }
+}
+
+function Update-OrchestratorCentralConfigurationIfChanged {
+    if (-not $script:Settings.CentralConfigurationEnabled) { return }
+    try {
+        $snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $script:Settings.SharedDataFolderPath
+        if ($snapshot.ClusterHash -ne $script:CentralClusterHash) {
+            Set-OrchestratorCentralClusterSettings -ClusterDocument $snapshot.Cluster
+            $script:CentralClusterHash = $snapshot.ClusterHash
+            $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
+            if ($script:LogReady) {
+                Write-OrchestratorLog -Message ("Central cluster configuration reloaded: {0} expected server(s)." -f @($script:Settings.ExpectedOrchestratorServers).Count)
+            }
+        }
+    }
+    catch {
+        if ($script:LogReady) {
+            Write-OrchestratorLog -Message ("Central cluster configuration reload rejected; the last valid cluster settings stay in effect. {0}" -f $_.Exception.Message) -Level ERROR
+        }
+        else {
+            throw
+        }
+    }
+}
 $script:LogReady = $false
 $script:LockOwned = $false
 $script:RunningJobs = @{}
@@ -3952,12 +4034,15 @@ $script:ServerCapabilities = $null
 $script:ElectionPlan = $null
 $script:LastCapabilityRefreshUtc = [datetime]::MinValue
 $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
+$script:CentralClusterHash = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
     Import-Module -Name $coreModulePath -MinimumVersion '1.0.24' -Force -ErrorAction Stop
     $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
+    $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
+    Import-Module -Name $managementModulePath -Force -ErrorAction Stop
     . $tenantContextPath
     $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     $localConfig = Get-SmartM365ScriptLocalConfig
@@ -4027,6 +4112,7 @@ try {
     $authenticodeInstallTrustedPublisher = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeInstallTrustedPublisher' -DefaultValue $true
     $autoRecycleOnRuntimeUpdate = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AutoRecycleOnRuntimeUpdate' -DefaultValue $true
     $monitorCoreModuleVersion = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'MonitorCoreModuleVersion' -DefaultValue $true
+    $centralConfigurationEnabled = (Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'CentralConfigurationEnabled' -DefaultValue $true) -and [string]::IsNullOrWhiteSpace($JobsManifestPath)
     $capabilityProbeMode = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'CapabilityProbeMode' -DefaultValue 'ReadOnly')
     if ($capabilityProbeMode -notin @('Static', 'ReadOnly')) { throw "CapabilityProbeMode must be 'Static' or 'ReadOnly'." }
 
@@ -4091,6 +4177,11 @@ try {
         JobRunsFolderPath = (Join-Path -Path $dataFolder -ChildPath 'JobRuns')
         OrchestratorRunsCsvPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.csv')
         DistributedModulePath = $distributedModulePath
+        ManagementModulePath = $managementModulePath
+        CentralConfigurationEnabled = $centralConfigurationEnabled
+        CentralClusterPath = ''
+        CentralVersionsFolderPath = ''
+        CentralAuditPath = ''
         ElectionFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election')
         ElectionClaimsPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Claims')
         ElectionPlanPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.json')
@@ -4179,6 +4270,36 @@ try {
     foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath, $script:Settings.ElectionFolderPath, $script:Settings.ElectionClaimsPath)) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     }
+
+    if ($script:Settings.CentralConfigurationEnabled) {
+        $bootstrapJobsPath = $effectiveManifestPath
+        if (-not (Test-Path -LiteralPath $bootstrapJobsPath -PathType Leaf)) {
+            $bootstrapJobsPath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json.template'
+        }
+        $bootstrapCluster = [pscustomobject][ordered]@{
+            SchemaVersion = 1
+            ExpectedOrchestratorServers = @($expectedOrchestratorServers)
+            ElectionWeightsByServer = if ($null -eq $electionWeightsByServer) { [pscustomobject]@{} } else { $electionWeightsByServer }
+            ServerJobPolicies = if ($null -eq $serverJobPoliciesRaw) { [pscustomobject]@{} } else { $serverJobPoliciesRaw }
+            PeerMonitoringEnabled = $script:Settings.PeerMonitoringEnabled
+            PeerJobMonitoringEnabled = $script:Settings.PeerJobMonitoringEnabled
+            PeerMonitoringCheckIntervalSeconds = $script:Settings.PeerMonitoringCheckIntervalSeconds
+            PeerHeartbeatStaleMinutes = $script:Settings.PeerHeartbeatStaleMinutes
+            PeerMonitoringConfirmationChecks = $script:Settings.PeerMonitoringConfirmationChecks
+            PeerJobStartGraceMinutes = $script:Settings.PeerJobStartGraceMinutes
+            PeerAlertReminderMinutes = $script:Settings.PeerAlertReminderMinutes
+            PeerAlertMailRetryMinutes = $script:Settings.PeerAlertMailRetryMinutes
+            PeerRecoveryEmailEnabled = $script:Settings.PeerRecoveryEmailEnabled
+        }
+        $centralSnapshot = Initialize-SmartM365OrchestratorCentralConfiguration -SharedDataFolderPath $sharedDataFolder -BootstrapJobsPath $bootstrapJobsPath -BootstrapClusterDocument $bootstrapCluster
+        $script:Settings.JobsManifestPath = $centralSnapshot.Paths.JobsPath
+        $script:Settings.CentralClusterPath = $centralSnapshot.Paths.ClusterPath
+        $script:Settings.CentralVersionsFolderPath = $centralSnapshot.Paths.VersionsFolderPath
+        $script:Settings.CentralAuditPath = $centralSnapshot.Paths.AuditPath
+        Set-OrchestratorCentralClusterSettings -ClusterDocument $centralSnapshot.Cluster
+        $script:CentralClusterHash = $centralSnapshot.ClusterHash
+    }
+
     $script:LogReady = $true
     $global:LogTextFile = Get-OrchestratorLogPath
     $global:SmartM365WarningCount = 0
@@ -4301,6 +4422,7 @@ try {
             $script:OrchestratorStopReason = 'ManualStopRequest'
             break
         }
+        Update-OrchestratorCentralConfigurationIfChanged
         Update-JobsManifestIfChanged
         Update-OrchestratorServerCapabilities
         Update-OrchestratorElectionPlan

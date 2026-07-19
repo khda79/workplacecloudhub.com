@@ -1,0 +1,15 @@
+{
+  "SchemaVersion": 1,
+  "ExpectedOrchestratorServers": [],
+  "ElectionWeightsByServer": {},
+  "ServerJobPolicies": {},
+  "PeerMonitoringEnabled": true,
+  "PeerJobMonitoringEnabled": true,
+  "PeerMonitoringCheckIntervalSeconds": 60,
+  "PeerHeartbeatStaleMinutes": 5,
+  "PeerMonitoringConfirmationChecks": 2,
+  "PeerJobStartGraceMinutes": 15,
+  "PeerAlertReminderMinutes": 240,
+  "PeerAlertMailRetryMinutes": 15,
+  "PeerRecoveryEmailEnabled": true
+}
