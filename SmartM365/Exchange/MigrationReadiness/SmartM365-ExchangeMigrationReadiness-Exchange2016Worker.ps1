@@ -19,7 +19,7 @@ param(
 
 Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
-$workerVersion = '1.11.6'
+$workerVersion = '1.11.8'
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
@@ -130,6 +130,28 @@ function Invoke-WorkerCommand {
         Write-WorkerLog -Level ERROR -Message "Command failed. Name=$Name; DurationMs=$($timer.ElapsedMilliseconds); $(Format-WorkerError $_)"
         return [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = $_.Exception.Message }
     }
+}
+
+function Add-WorkerCommandFailure {
+    param(
+        [Parameter(Mandatory)]$CollectionErrors,
+        [Parameter(Mandatory)]$MailboxErrors,
+        [Parameter(Mandatory)][string]$EmailAddress,
+        [Parameter(Mandatory)][string]$CheckId,
+        [Parameter(Mandatory)][string]$CommandName,
+        [Parameter(Mandatory)]$Result
+    )
+    if ($Result.Success) { return }
+    $entry = [pscustomobject][ordered]@{
+        EmailAddress = $EmailAddress
+        CheckId = $CheckId
+        Command = $CommandName
+        Message = [string]$Result.ErrorMessage
+        IsFatal = $false
+    }
+    [void]$CollectionErrors.Add($entry)
+    [void]$MailboxErrors.Add($entry)
+    Write-WorkerLog -Level WARN -Message "Partial mailbox evidence unavailable. EmailAddress=$EmailAddress; CheckId=$CheckId; Command=$CommandName; Message=$($entry.Message)."
 }
 
 function ConvertTo-TextArray {
@@ -442,7 +464,7 @@ function Get-HybridEvidence {
     $collectedAt = Get-Date
     $empty = [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = 'Check disabled for this run.' }
     if (Test-WorkerCheckEnabled -CheckId 'HYBRID-MRSPROXY') {
-        Write-WorkerProgress -Current 0 -Total 0 -Message 'Hybrid readiness - reading EWS virtual directories and MRS Proxy state'
+        Write-WorkerProgress -Current 0 -Total 0 -Message 'Optional local diagnostic - reading all EWS virtual directories and configured MRS Proxy state'
         $ews = Invoke-WorkerCommand -Name 'Get-WebServicesVirtualDirectory'
     }
     else { $ews = $empty }
@@ -513,6 +535,13 @@ if ($SelfTest) {
         $items = New-Object System.Collections.Generic.List[object]
         $errors = New-Object System.Collections.Generic.List[object]
         [void]$items.Add([pscustomobject]@{ Name = 'serialization'; Result = 'PASS' })
+        $commandErrors = New-Object System.Collections.Generic.List[object]
+        $mailboxCommandErrors = New-Object System.Collections.Generic.List[object]
+        Add-WorkerCommandFailure -CollectionErrors $commandErrors -MailboxErrors $mailboxCommandErrors -EmailAddress 'selftest@example.invalid' -CheckId 'INBOX-FORWARDING-RULES' -CommandName 'Get-InboxRule' -Result ([pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = 'Expected partial command error' })
+        if ($commandErrors.Count -ne 1 -or $mailboxCommandErrors.Count -ne 1 -or $commandErrors[0].IsFatal) {
+            throw 'Windows PowerShell 5.1 partial command error tracking self-test returned an unexpected result.'
+        }
+        [void]$items.Add([pscustomobject]@{ Name = 'partial-command-error-tracking'; Result = 'PASS' })
         $batchMechanics = Invoke-WorkerRecipientAddressBatch -Addresses @('selftest@example.invalid') -TimeoutSeconds 5 -SnapInName 'SmartM365.Nonexistent.Exchange.SnapIn' -TestDelaySeconds 30 -DiagnosticsDirectory $DiagnosticsDirectory -BatchNumber 1
         if ($batchMechanics.Success -or -not $batchMechanics.TimedOut -or [string]::IsNullOrWhiteSpace([string]$batchMechanics.ErrorMessage) -or [double]$batchMechanics.DurationSeconds -gt 12) {
             throw 'Windows PowerShell 5.1 recipient batch timeout/termination self-test returned an unexpected result.'
@@ -527,7 +556,7 @@ if ($SelfTest) {
         }
         $payload | Export-Clixml -LiteralPath $selfTestPath -Depth 12 -Force
         $roundTrip = Import-Clixml -LiteralPath $selfTestPath
-        if (@($roundTrip.Items).Count -ne 2 -or [string]$roundTrip.Items[0].Result -ne 'PASS' -or @($roundTrip.Evidence).Count -ne 1 -or @($roundTrip.Errors).Count -ne 1) {
+        if (@($roundTrip.Items).Count -ne 3 -or [string]$roundTrip.Items[0].Result -ne 'PASS' -or @($roundTrip.Evidence).Count -ne 1 -or @($roundTrip.Errors).Count -ne 1) {
             throw 'Windows PowerShell 5.1 CLIXML nested collection round-trip returned an unexpected result.'
         }
         Write-WorkerLog -Level SUCCESS -Message 'Self-test completed successfully.'
@@ -600,12 +629,14 @@ try {
         $index++
         $mailboxTimer=[Diagnostics.Stopwatch]::StartNew()
         $message = ''
+        $mailboxErrors = New-Object System.Collections.Generic.List[object]
         Write-WorkerLog -Level INFO -Message "Mailbox collection starting. Index=$index/$($emails.Count); EmailAddress=$email."
         Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Recipient lookup - {0}" -f $email)
         try {
             $safeEmail = $email.Replace("'", "''")
             $identityFilter = "EmailAddresses -eq 'smtp:$safeEmail'"
             $recipientResult = Invoke-WorkerCommand -Name 'Get-Recipient' -Parameters @{ Filter = $identityFilter; ResultSize = 'Unlimited' }
+            Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'ONPREM-RECIPIENT-STATE' -CommandName 'Get-Recipient' -Result $recipientResult
             $recipientTypes = @($recipientResult.Rows | ForEach-Object { [string]$_.RecipientTypeDetails } | Where-Object { $_ } | Sort-Object -Unique)
             $successfulEmpty = [pscustomobject]@{ Success = $true; Rows = @(); ErrorMessage = '' }
             $queryAllTypes = -not $recipientResult.Success
@@ -616,6 +647,9 @@ try {
             $mailboxResult = if ($needMailbox) { Invoke-WorkerCommand -Name 'Get-Mailbox' -Parameters @{ Filter = $identityFilter; ResultSize = 'Unlimited' } } else { $successfulEmpty }
             $remoteMailboxResult = if ($needRemoteMailbox) { Invoke-WorkerCommand -Name 'Get-RemoteMailbox' -Parameters @{ Filter = $identityFilter; ResultSize = 'Unlimited' } } else { $successfulEmpty }
             $mailUserResult = if ($needMailUser) { Invoke-WorkerCommand -Name 'Get-MailUser' -Parameters @{ Filter = $identityFilter; ResultSize = 'Unlimited' } } else { $successfulEmpty }
+            Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'ONPREM-RECIPIENT-STATE' -CommandName 'Get-Mailbox' -Result $mailboxResult
+            Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'ONPREM-RECIPIENT-STATE' -CommandName 'Get-RemoteMailbox' -Result $remoteMailboxResult
+            Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'ONPREM-RECIPIENT-STATE' -CommandName 'Get-MailUser' -Result $mailUserResult
             $mailboxes = @($mailboxResult.Rows | ForEach-Object { ConvertTo-MailboxEvidence $_ })
             $remoteMailboxes = @($remoteMailboxResult.Rows | ForEach-Object { ConvertTo-RecipientEvidence $_ })
             $mailUsers = @($mailUserResult.Rows | ForEach-Object { ConvertTo-RecipientEvidence $_ })
@@ -639,6 +673,7 @@ try {
                 $identity = $mailboxes[0].Identity
                 Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Mailbox statistics - {0}" -f $email)
                 $statisticsResult = Invoke-WorkerCommand -Name 'Get-MailboxStatistics' -Parameters @{ Identity = $identity }
+                Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'MAILBOX-TARGET-QUOTA' -CommandName 'Get-MailboxStatistics' -Result $statisticsResult
                 $statistics = @($statisticsResult.Rows | ForEach-Object { ConvertTo-StatisticsEvidence $_ })
                 $statisticsAvailable = [bool]$statisticsResult.Success
 
@@ -646,6 +681,7 @@ try {
                     $hasArchive = $mailboxes[0].ArchiveStatus -match '^(?i:Active|HostedPending|Local)$' -or ($mailboxes[0].ArchiveGuid -and $mailboxes[0].ArchiveGuid -notmatch '^0{8}-')
                     if ($hasArchive) {
                         $archiveResult = Invoke-WorkerCommand -Name 'Get-MailboxStatistics' -Parameters @{ Identity = $identity; Archive = $true }
+                        Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'ARCHIVE-READINESS' -CommandName 'Get-MailboxStatistics -Archive' -Result $archiveResult
                         $archiveStatistics = @($archiveResult.Rows | ForEach-Object { ConvertTo-StatisticsEvidence $_ })
                         $archiveStatisticsAvailable = [bool]$archiveResult.Success
                     }
@@ -655,6 +691,7 @@ try {
                 if ((Test-WorkerCheckEnabled -CheckId 'MAILBOX-RECOVERABLE-ITEMS-QUOTA') -or (Test-WorkerCheckEnabled -CheckId 'MAILBOX-FOLDER-LIMITS')) {
                     Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Folder statistics - {0}" -f $email)
                     $folderResult = Invoke-WorkerCommand -Name 'Get-MailboxFolderStatistics' -Parameters @{ Identity = $identity }
+                    Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'MAILBOX-FOLDER-LIMITS' -CommandName 'Get-MailboxFolderStatistics' -Result $folderResult
                     $folderStatistics = @($folderResult.Rows | ForEach-Object {
                         [pscustomobject][ordered]@{
                             Name = [string]$_.Name
@@ -672,6 +709,7 @@ try {
                 if (Test-WorkerCheckEnabled -CheckId 'INBOX-FORWARDING-RULES') {
                     Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Inbox rules - {0}" -f $email)
                     $ruleResult = Invoke-WorkerCommand -Name 'Get-InboxRule' -Parameters @{ Mailbox = $identity; IncludeHidden = $true }
+                    Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'INBOX-FORWARDING-RULES' -CommandName 'Get-InboxRule' -Result $ruleResult
                     $inboxRules = @($ruleResult.Rows | ForEach-Object {
                         [pscustomobject][ordered]@{
                             Name = [string]$_.Name
@@ -689,6 +727,7 @@ try {
                     if (-not $databaseCache.ContainsKey($databaseKey)) {
                         Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Database health - {0}" -f $email)
                         $databaseResult = Invoke-WorkerCommand -Name 'Get-MailboxDatabase' -Parameters @{ Identity = $mailboxes[0].Database; Status = $true }
+                        Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'EXCHANGE-DATABASE-HEALTH' -CommandName 'Get-MailboxDatabase' -Result $databaseResult
                         $databaseRows = @($databaseResult.Rows | ForEach-Object {
                             [pscustomobject][ordered]@{
                                 Identity = [string]$_.Identity
@@ -707,6 +746,7 @@ try {
                 if ((Test-WorkerCheckEnabled -CheckId 'PERMISSIONS-BASELINE') -or (Test-WorkerCheckEnabled -CheckId 'DELEGATE-MIGRATION-DEPENDENCY')) {
                     Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Delegated permissions - {0}" -f $email)
                     $mailboxPermissionResult = Invoke-WorkerCommand -Name 'Get-MailboxPermission' -Parameters @{ Identity = $identity }
+                    Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'PERMISSIONS-BASELINE' -CommandName 'Get-MailboxPermission' -Result $mailboxPermissionResult
                     $mailboxPermissionSuccess = [bool]$mailboxPermissionResult.Success
                     foreach ($permission in @($mailboxPermissionResult.Rows)) {
                         $rights = @(ConvertTo-TextArray $permission.AccessRights)
@@ -716,6 +756,7 @@ try {
                     }
 
                     $sendAsPermissionResult = Invoke-WorkerCommand -Name 'Get-ADPermission' -Parameters @{ Identity = $mailboxes[0].DistinguishedName }
+                    Add-WorkerCommandFailure -CollectionErrors $collectionErrors -MailboxErrors $mailboxErrors -EmailAddress $email -CheckId 'PERMISSIONS-BASELINE' -CommandName 'Get-ADPermission' -Result $sendAsPermissionResult
                     $sendAsPermissionSuccess = [bool]$sendAsPermissionResult.Success
                     foreach ($permission in @($sendAsPermissionResult.Rows)) {
                         if ($permission.IsInherited -or @(ConvertTo-TextArray $permission.ExtendedRights) -notcontains 'Send-As' -or $permission.Deny) { continue }
@@ -745,12 +786,15 @@ try {
             if ($needMailUser) { $lookupResults += $mailUserResult }
             $coreAvailable = @($lookupResults | Where-Object { -not $_.Success }).Count -eq 0
             $errors = @($lookupResults | Where-Object { -not $_.Success -and $_.ErrorMessage } | ForEach-Object { $_.ErrorMessage } | Sort-Object -Unique)
+            if ($mailboxErrors.Count -gt 0) {
+                $message = 'Partial evidence unavailable: ' + (@($mailboxErrors | ForEach-Object { "$($_.Command): $($_.Message)" } | Select-Object -Unique) -join ' | ')
+            }
             [void]$evidence.Add([pscustomobject][ordered]@{
                 EmailAddress = $email
                 Available = $coreAvailable
                 Source = "Local Exchange 2016 Management Shell on $env:COMPUTERNAME"
                 SourceTimestamp = Get-Date
-                Message = if ($coreAvailable) { 'Exchange 2016 evidence collected through direct local cmdlets.' } else { 'Exchange 2016 lookup failed: ' + ($errors -join ' | ') }
+                Message = if (-not $coreAvailable) { 'Exchange 2016 lookup failed: ' + ($errors -join ' | ') } elseif ($mailboxErrors.Count -gt 0) { $message } else { 'Exchange 2016 evidence collected through direct local cmdlets.' }
                 Mailboxes = $mailboxes
                 RemoteMailboxes = $remoteMailboxes
                 MailUsers = $mailUsers
@@ -773,12 +817,13 @@ try {
                 DatabaseHealthSourceTimestamp = Get-Date
                 DeliveryRestrictionsAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxResult.Success)
                 AddressConflicts = @()
+                PartialErrors = $mailboxErrors.ToArray()
             })
         }
         catch {
             $message = $_.Exception.Message
             Write-WorkerLog -Level ERROR -Message "Mailbox collection failed. Index=$index/$($emails.Count); EmailAddress=$email; $(Format-WorkerError $_)"
-            [void]$collectionErrors.Add([pscustomobject][ordered]@{ EmailAddress = $email; Message = $message })
+            [void]$collectionErrors.Add([pscustomobject][ordered]@{ EmailAddress = $email; CheckId = 'ONPREM-SOURCE'; Command = 'MailboxCollection'; Message = $message; IsFatal = $true })
             [void]$evidence.Add((Get-WorkerFailureEvidence -EmailAddress $email -Message $message))
         }
         finally {
@@ -806,6 +851,8 @@ try {
         MailboxObjectCount = [int](@($evidence.ToArray() | ForEach-Object { @($_.Mailboxes).Count } | Measure-Object -Sum).Sum)
         PermissionCount = @($evidence.ToArray() | ForEach-Object { @($_.Permissions) }).Count
         ErrorCount = $collectionErrors.Count
+        PartialErrorCount = @($collectionErrors | Where-Object { -not $_.IsFatal }).Count
+        FatalErrorCount = @($collectionErrors | Where-Object { $_.IsFatal }).Count
         Errors = $collectionErrors.ToArray()
         SmtpUniquenessCandidateAddressCount = $addressConflictMetrics.CandidateAddressCount
         SmtpUniquenessBatchCount = $addressConflictMetrics.BatchCount
@@ -820,7 +867,7 @@ try {
         Hybrid = $hybridEvidence
     }
     $result | Export-Clixml -LiteralPath $OutputPath -Depth 12 -Force
-    Write-WorkerLog -Level SUCCESS -Message "Worker evidence exported. MailboxEvidenceCount=$($evidence.Count); ErrorCount=$($collectionErrors.Count); TotalDurationSeconds=$($result.DurationSeconds); OutputPath=$OutputPath."
+    Write-WorkerLog -Level $(if($collectionErrors.Count){'WARN'}else{'SUCCESS'}) -Message "Worker evidence exported. MailboxEvidenceCount=$($evidence.Count); ErrorCount=$($collectionErrors.Count); PartialErrorCount=$($result.PartialErrorCount); FatalErrorCount=$($result.FatalErrorCount); TotalDurationSeconds=$($result.DurationSeconds); OutputPath=$OutputPath."
     Write-WorkerProgress -Current $emails.Count -Total $emails.Count -Message 'Complete'
 }
 catch {
@@ -834,8 +881,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoD8YArw68MbHX
-# 1SJ4h5vrx6M+n6bEBnoI3ogkOvG4V6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSZ8ZO60Oxy4hE
+# iWdNW2UbO4pEGF59kGzra7uJ/I18baCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -968,31 +1015,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBpciwmG2OQAHn1hh99AzUgz8jm77gJVB1Z7c9bHh6pRMA0GCSqG
-# SIb3DQEBAQUABIIBgApWpz3l81pzM7oGpnXvvBElm8fF71V8t/4w62VsW3NeLfsK
-# EMIAkI6Dnz58PGIi+VvLIu5cHZwlsknF6E7odnwAOeoj7SWqlfDnjQNcONfIUnov
-# J+knKBBrBJHFwucqua3db3J8b2JOXXvGfKBEM0fjfY9slttou9U8hhUnITS1jHdu
-# yCDjaj9olO8Sy5NDPIT0qhBbEcvu40j6Yosyj8eYvs++jrdX8f5tO4uGQqHfulum
-# 7r7E1qlvrLyYDtyIMatEuu6vjgk+u8INkGjT0XOCZfjmj8Ya0QtQPUgD5FRAYuUC
-# q7obiuEPosfGwUewdEZ9mcvMclXl24l17nC1Iw1ruaqkhWH/sxk4WiaapWwdgkNL
-# yUdNWW0yfo1XcyQ2HYtArDtNqo/2bewv4hmoFycQhd+2yo1yYqpnz9Scapr3SDBM
-# sWq+jVU293NMZp1kSgBGfQJ5sLuaDO60HtDP62bmqp/TXVwn1+9hh6Ays3yWpW+j
-# C3gMOFpqfyUUbDLdaqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICN/tAXxFmYY/9Ix72N56j/i5dZW2RNYLYmF+yd/KKMAMA0GCSqG
+# SIb3DQEBAQUABIIBgAVRSm0iByoP/3/eZuYyvRslm15qo3J2aLiAsOm/wcUOdnDg
+# KTTUz1adpjLOEt4PAuDxUpU0oI0aj1b6PQ6btGHoJ4+rzTEM5O776gl3EriTAq/H
+# kq83Ohprx+jqvbJMEOzQSl7nA8u0YS4gyuG9PbB6g2J4mTzkgaxCvQm9Kgrqui+B
+# P5XUZDbnBxQkbgJEFl+Ua6PqyF/PA6VhjCQpmUrH45EdlWiJICqNyjx7lO0Guxd/
+# PYjpy/HsXRW0ajDVKr53HQa6rPB0S4Sii5z1QzFX5VjX0qRXpGzS6uTSZavOrN/d
+# UWe/RXvOfiYJnZOlOB/Xo0uPoQ4dH9bUeSDQCWE5VL9Or5LGscf/ee98KidsaA8V
+# JIqoq1phc0lRLqWYGY200iQUXwVmsV4hMtLIfAINacSwUwwoGyVBsF95fH7II4vU
+# 950RGXj6oo9HPEqwF/FxSIxxoluUyNbEkyzJn9B0U4tsP35UWenHedUpAC7Svtvs
+# dbMmCmeESqy8U+ytoaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNDU0
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAamCSPJwbxjXGHO/aYlwP4D4dCF6SdO1T0b/B0
-# i8o1BjANBgkqhkiG9w0BAQEFAASCAgByIKElJJN3Sr9bPeDm+eRd2c2F/R5KRJUI
-# CaCBrwvcpuxth+S0PPkdnWeF6hO8vAkJ9Tuymnf3J4w8XLYFcj7xSvgxkCk3yJFn
-# PJ0d1jxm/znlUmUAY+x+OXj73/Ro/IiwGvkODVe0JhWYsNkqE8WT9mzR9vSyVfBY
-# zrBTRvzVPBqqBhVbSL4/VIoKQGi/RbcH9sBpA7+wkWKg/8XDYK1D0cUax+Sim5oa
-# iNh3V/vESpuGgiNbzXIdzXrewzAmMpL6KNEfW8LviPDoaW5V8tYGZRCv7Ck8Di1y
-# DbwPZxWlGYqDKIX9j8dGgyKXlSWaCGotRwuFC20XohQPFRSczeQkbDrh6Lz/eU0x
-# tGe1zIDqpYuhlltw7+RJ7v2+FPdYSZoVz71x/NHQeuTQ3sFHGaJX2TxJCho2Foef
-# vlknLuIgqUEUURdcs5bgDHmWa51CHVwy0/USN0PKIO1nd3XulHHZ37QvFSbQf0dh
-# Bg/RJDLvZ00oNgLNJpxrLdSusIKOKAZJCpUcoSRHdyyp9fjXGuICpJ3eXJsOJfMH
-# 0b7nD1uC+zc9iAQ9gMRmHitLcgOo2+q5kdv9IumxopahLay/aYDSuquoy3X+Ni7/
-# FxAviJuuucrFCrndMSsRgIu2rO6V2YR7xmhvTDwrv0DswIi0wiHplWKhOkw/II56
-# DGfgsIFGjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzA5
+# MDdaMC8GCSqGSIb3DQEJBDEiBCCh9gt6Jv+imUTMnxWCWsE6atOxGrQQ2BLcVMrJ
+# ETO8AzANBgkqhkiG9w0BAQEFAASCAgAjyFYCCDc2u3MqWjBxID7lLf/slCLf7hfK
+# 0JNjzxX3IbEecRgLbskovkZl6IKEwPx3lHbMEygihzHANYeo6JPbAmM5FpKpIyDy
+# 7QZksK3UOoE8GtyX+gmQhAMJjeKg617b0Als3ERUm2RmMcMJebRbKBtJc8AToJ7h
+# 485DjG4qOY0Dsv0WDMqJdI2A2nWdD0J+Q6ZHCDen0qdeCZHuv0An1QEpSSiJ7n9j
+# 5gM6BTHeggzYrXm5sJWHzkOSwyhBWRJBamD3FLPibYE9v52mxhhSWTl1qyUHODTX
+# lIiNsFtt5eG+xmQ4xtpOpQ20f2r0fYYzlncNj9X2B8JLZl+833wu5hM07gqB5rlu
+# LxrXKdPociVk+TJexQo4joqeGTKOJHVZRnkf/m6UyG3uThREkn1l+EZTuibxOqGk
+# zE41MrmCuY0KRgBNLroGUF/0ZAILeaaljMq8rxf0X5KgWJ5zglNARJC+qf6Rdq4W
+# Nv/WVFt9hRrbMm6aql6dTdD+d28MPmmjCGhQvnSJTznGLk28pmlvOj3ZzItxnSID
+# xHVuaVx8qjCjqgGCRpKsDhipwXHvlzJ7egKgGnDC9YJ0Sbn1qnD0XC5HaF0QxTz6
+# vOowI9ktrw2dQ5A1jzdGT4Pw7Kg7EVcuDckBgGQ1wz71J9e9+29jfdelMnwfH90e
+# li0FmnpvYA==
 # SIG # End signature block
