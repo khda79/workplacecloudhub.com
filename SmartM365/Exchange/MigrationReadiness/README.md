@@ -23,6 +23,8 @@ Sources obligatoires :
 
 Si une source obligatoire est indisponible, les contrôles possibles continuent, mais l’assessment est marqué `INCOMPLETE`. Une source manquante ne peut jamais produire un verdict `GO`.
 
+Le worker Exchange 2016 exécute un self-test de sérialisation CLIXML sous Windows PowerShell 5.1 avant le preflight. Une erreur limitée à une mailbox est isolée et produit une évidence `UNKNOWN` pour cette mailbox sans interrompre la collecte du reste du batch.
+
 L’onglet `Sources`, `Live-Sources.csv`, la feuille Excel `Live Sources` et le rapport HTML exposent l’état et le détail de chaque source obligatoire.
 
 ## Autonomie et sécurité
@@ -140,12 +142,13 @@ Output\SEMR-yyyyMMdd-HHmmss\
   Permissions-Baseline.csv
   Evidence.csv
   Live-Sources.csv
+  Check-Coverage.csv
   Check-Options.csv
   SmartM365-ExchangeMigrationReadiness-SEMR-yyyyMMdd-HHmmss.xlsx
   SmartM365-ExchangeMigrationReadiness-SEMR-yyyyMMdd-HHmmss.html
 ```
 
-`Summary.csv` contient `AssessmentStatus`, le verdict, la taille, le SKU cible, les licences attribuées et les compteurs mailbox/tenant séparés. Le classeur ajoute une feuille `Action Plan` avec une action par ligne. Le HTML affiche le statut `COMPLETE/INCOMPLETE`, les sources Live, les décisions mailbox et les contrôles tenant.
+`Summary.csv` contient `AssessmentStatus`, le verdict, la taille, le SKU cible, les licences attribuées et les compteurs mailbox/tenant séparés. `Check-Coverage.csv` vérifie que chaque contrôle activé a produit exactement un résultat par mailbox ou par tenant, sans doublon ; les branches manquantes sont matérialisées en `UNKNOWN`. Le classeur ajoute les feuilles `Action Plan` et `Check Coverage`. Le HTML affiche le statut `COMPLETE/INCOMPLETE`, les sources Live, les décisions mailbox et les contrôles tenant.
 
 ## Permissions après migration
 

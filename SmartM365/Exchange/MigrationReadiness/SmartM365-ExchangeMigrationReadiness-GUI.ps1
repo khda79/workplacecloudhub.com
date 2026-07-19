@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.1
+1.11.2
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.1'
+$script:AppVersion = '1.11.2'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -417,7 +417,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.1" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.2" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -443,7 +443,8 @@ if ($ValidateOnly) {
     }
     $templatePath = Join-Path $PSScriptRoot 'Config\SmartM365-ExchangeMigrationReadiness.local.json.template'
     Get-Content -LiteralPath $templatePath -Raw | ConvertFrom-Json | Out-Null
-    "VALIDATION_OK Smart Exchange Migration Readiness v$script:AppVersion"
+    $workerSelfTest = Test-SemrExchange2016WorkerSerialization
+    "VALIDATION_OK Smart Exchange Migration Readiness v$script:AppVersion | $workerSelfTest"
     return
 }
 
@@ -1151,6 +1152,8 @@ $controls.RunButton.Add_Click({
             Write-SemrActivity -Message ([string]$sourceState.ExchangeOnPremisesMessage) -Level $(if ($sourceState.ExchangeOnPremisesLive) { 'INFO' } else { 'WARN' })
         }
         Write-SemrActivity -Message "Tenant synchronization evidence source: $($script:Assessment.EntraConnect.Source). $($script:Assessment.EntraConnect.Message)" -Level $(if ($script:Assessment.EntraConnect.Available) { 'INFO' } else { 'WARN' })
+        $coverage = $script:Assessment.CheckCoverage
+        Write-SemrActivity -Message "Check coverage $($coverage.Status): mailbox findings $($coverage.ActualMailboxFindingCount)/$($coverage.ExpectedMailboxFindingCount); tenant findings $($coverage.ActualGlobalFindingCount)/$($coverage.EnabledGlobalCheckCount); materialized UNKNOWN mailbox=$($coverage.MaterializedMailboxUnknownCount), tenant=$($coverage.MaterializedGlobalUnknownCount); duplicates mailbox=$($coverage.DuplicateMailboxCheckCount), tenant=$($coverage.DuplicateGlobalCheckCount)." -Level $(if ($coverage.Status -eq 'PASS') { 'SUCCESS' } else { 'WARN' })
         $endpointName = if ([string]::IsNullOrWhiteSpace([string]$script:Assessment.Hybrid.EndpointName)) { 'not available' } else { [string]$script:Assessment.Hybrid.EndpointName }
         $controls.HybridStateText.Text = "Migration endpoint: $endpointName | $($script:Assessment.Hybrid.Message)`nTenant synchronization: $($script:Assessment.EntraConnect.Message)"
         $controls.HybridStateText.Foreground = if ($script:Assessment.AssessmentStatus -eq 'COMPLETE' -and $script:Assessment.EntraConnect.LastSyncFresh -and $script:Assessment.Hybrid.ConnectivitySuccess) { '#146C43' } else { '#8A5A00' }
