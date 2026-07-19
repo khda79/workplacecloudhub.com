@@ -19,19 +19,24 @@ the path is resolved from the tenant and local Orchestrator configuration.
 Parses the XAML, imports the management module and validates the committed
 configuration templates without opening a window or touching runtime data.
 
+.PARAMETER SmokeTest
+Loads the complete WPF data model without showing the splash or main window.
+Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
+
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
     [string]$Tenant = 'test',
     [string]$SharedDataFolderPath = '',
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+    [switch]$SmokeTest
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.0.0'
+$script:AppVersion = '1.0.1'
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
@@ -306,7 +311,7 @@ $xaml = @'
         </TabControl>
 
         <Border Grid.Row="3" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="0,9,0,0" Padding="10,6">
-            <Grid><TextBlock x:Name="FooterText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="VersionText" Text="v1.0.0" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/></Grid>
+            <Grid><TextBlock x:Name="FooterText" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/><TextBlock x:Name="VersionText" Text="v1.0.1" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/></Grid>
         </Border>
     </Grid>
 </Window>
@@ -318,6 +323,17 @@ function ConvertFrom-OrchestratorGuiXaml {
     return [System.Windows.Markup.XamlReader]::Load($reader)
 }
 
+function Get-OrchestratorGuiPropertyValue {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()]$DefaultValue
+    )
+    if ($null -eq $Object -or -not $Object.PSObject.Properties[$Name] -or $null -eq $Object.$Name) {
+        return $DefaultValue
+    }
+    return $Object.$Name
+}
 $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
 Import-Module -Name $managementModulePath -Force -ErrorAction Stop
 
@@ -332,6 +348,12 @@ if ($ValidateOnly) {
     $clusterValidation = Test-SmartM365OrchestratorClusterDocument -Document $clusterTemplate
     if (-not $jobsValidation.Valid) { throw "Jobs template validation failed: $($jobsValidation.Errors -join '; ')" }
     if (-not $clusterValidation.Valid) { throw "Cluster template validation failed: $($clusterValidation.Errors -join '; ')" }
+    foreach ($job in @($jobsTemplate.Jobs)) {
+        [void](Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'DaysOfWeek' -DefaultValue @())
+        [void](Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'MissedRunPolicy' -DefaultValue 'RunOnce')
+        [void](Get-OrchestratorGuiPropertyValue -Object $job -Name 'AssignmentMode' -DefaultValue 'Legacy')
+        [void](Get-OrchestratorGuiPropertyValue -Object $job -Name 'AllowedServers' -DefaultValue @())
+    }
     "[{0}] VALIDATION_OK SmartM365 Orchestrator GUI v{1}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $script:AppVersion
     return
 }
@@ -431,12 +453,14 @@ function Get-ElectionOwners {
 function Get-NextRunText {
     param($Job)
     if (-not [bool]$Job.Enabled) { return 'Disabled' }
-    if ([string]$Job.AssignmentMode -eq 'Manual') { return 'Manual' }
+    if ([string](Get-OrchestratorGuiPropertyValue -Object $Job -Name 'AssignmentMode' -DefaultValue 'Legacy') -eq 'Manual') { return 'Manual' }
     $now = Get-Date
     for ($offset = 0; $offset -le 8; $offset++) {
         $day = $now.Date.AddDays($offset)
-        if ([string]$Job.Schedule.Type -eq 'Weekly' -and [string]$day.DayOfWeek -notin @($Job.Schedule.DaysOfWeek)) { continue }
-        foreach ($timeText in @($Job.Schedule.Times | Sort-Object)) {
+        $scheduleType = [string](Get-OrchestratorGuiPropertyValue -Object $Job.Schedule -Name 'Type' -DefaultValue 'Daily')
+        $daysOfWeek = @(Get-OrchestratorGuiPropertyValue -Object $Job.Schedule -Name 'DaysOfWeek' -DefaultValue @())
+        if ($scheduleType -eq 'Weekly' -and [string]$day.DayOfWeek -notin $daysOfWeek) { continue }
+        foreach ($timeText in @(Get-OrchestratorGuiPropertyValue -Object $Job.Schedule -Name 'Times' -DefaultValue @() | Sort-Object)) {
             $time = [timespan]::Zero
             if (-not [timespan]::TryParseExact([string]$timeText, 'hh\:mm', [System.Globalization.CultureInfo]::InvariantCulture, [ref]$time)) { continue }
             $candidate = $day.Add($time)
@@ -450,18 +474,19 @@ function Refresh-PlanningView {
     $owners = Get-ElectionOwners
     $rows = foreach ($job in @($script:DraftJobs.Jobs)) {
         $mode = if ($job.PSObject.Properties['AssignmentMode']) { [string]$job.AssignmentMode } else { 'Legacy' }
+        $allowedServers = @(Get-OrchestratorGuiPropertyValue -Object $job -Name 'AllowedServers' -DefaultValue @())
         $server = switch ($mode) {
-            'Pinned' { @($job.AllowedServers) -join ', ' }
+            'Pinned' { $allowedServers -join ', ' }
             'Elected' { if ($owners.ContainsKey([string]$job.Name)) { $owners[[string]$job.Name] } else { 'Not elected' } }
             'Manual' { 'Manual' }
-            default { @($job.AllowedServers) -join ', ' }
+            default { $allowedServers -join ', ' }
         }
         [pscustomobject]@{
             Name = [string]$job.Name
             Enabled = [bool]$job.Enabled
             Frequency = [string]$job.Schedule.Type
             Times = @($job.Schedule.Times) -join ', '
-            Days = @($job.Schedule.DaysOfWeek) -join ', '
+            Days = @(Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'DaysOfWeek' -DefaultValue @()) -join ', '
             Assignment = $mode
             Server = $server
             NextRun = Get-NextRunText -Job $job
@@ -656,7 +681,7 @@ Initialize-SmartM365OrchestratorCentralConfiguration -SharedDataFolderPath $scri
 
 $script:GuiSplash = $null
 $splashPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.GuiSplash.ps1'
-if (Test-Path -LiteralPath $splashPath) {
+if (-not $SmokeTest -and (Test-Path -LiteralPath $splashPath)) {
     . $splashPath
     $script:GuiSplash = Start-SmartM365GuiSplash `
         -ProductName 'SmartM365 Orchestrator' `
@@ -704,14 +729,14 @@ $script:Controls.PlanningGrid.Add_SelectionChanged({
     $script:Controls.JobEnabledCheck.IsChecked = [bool]$job.Enabled
     Select-ComboText -Combo $script:Controls.ScheduleTypeCombo -Text ([string]$job.Schedule.Type)
     $script:Controls.TimesBox.Text = @($job.Schedule.Times) -join ', '
-    $script:Controls.DaysBox.Text = @($job.Schedule.DaysOfWeek) -join ', '
-    Select-ComboText -Combo $script:Controls.MissedPolicyCombo -Text ([string]$job.Schedule.MissedRunPolicy)
-    Select-ComboText -Combo $script:Controls.AssignmentCombo -Text ([string]$job.AssignmentMode)
-    $script:Controls.PinnedServerCombo.Text = @($job.AllowedServers) -join ', '
-    $script:Controls.TimeoutBox.Text = [string]$job.TimeoutMinutes
-    $script:Controls.RetriesBox.Text = [string]$job.MaxRetries
-    $script:Controls.RetryDelayBox.Text = [string]$job.RetryDelaySeconds
-    $script:Controls.DurationBox.Text = ([double]$job.EstimatedDurationMinutes).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    $script:Controls.DaysBox.Text = @(Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'DaysOfWeek' -DefaultValue @()) -join ', '
+    Select-ComboText -Combo $script:Controls.MissedPolicyCombo -Text ([string](Get-OrchestratorGuiPropertyValue -Object $job.Schedule -Name 'MissedRunPolicy' -DefaultValue 'RunOnce'))
+    Select-ComboText -Combo $script:Controls.AssignmentCombo -Text ([string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'AssignmentMode' -DefaultValue 'Legacy'))
+    $script:Controls.PinnedServerCombo.Text = @(Get-OrchestratorGuiPropertyValue -Object $job -Name 'AllowedServers' -DefaultValue @()) -join ', '
+    $script:Controls.TimeoutBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'TimeoutMinutes' -DefaultValue 240)
+    $script:Controls.RetriesBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'MaxRetries' -DefaultValue 0)
+    $script:Controls.RetryDelayBox.Text = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'RetryDelaySeconds' -DefaultValue 300)
+    $script:Controls.DurationBox.Text = ([double](Get-OrchestratorGuiPropertyValue -Object $job -Name 'EstimatedDurationMinutes' -DefaultValue 5)).ToString([System.Globalization.CultureInfo]::InvariantCulture)
 })
 $script:Controls.ServersGrid.Add_SelectionChanged({
     $row = $script:Controls.ServersGrid.SelectedItem
@@ -796,6 +821,10 @@ $script:Controls.HistoryServerCombo.SelectedIndex = 0
 $script:Controls.HistoryJobCombo.ItemsSource = @('All') + @($script:DraftJobs.Jobs.Name | Sort-Object)
 $script:Controls.HistoryJobCombo.SelectedIndex = 0
 Refresh-HistoryView
+if ($SmokeTest) {
+    "[{0}] SMOKE_TEST_OK SmartM365 Orchestrator GUI v{1} | Jobs={2} | PlanningRows={3}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $script:AppVersion, @($script:DraftJobs.Jobs).Count, @($script:PlanningRows).Count
+    return
+}
 
 $window.Add_ContentRendered({
     if ($script:GuiSplash) {
