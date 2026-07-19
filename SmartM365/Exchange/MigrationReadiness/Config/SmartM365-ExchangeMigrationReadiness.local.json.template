@@ -1,6 +1,9 @@
 {
   "AssessmentPhase": "PreCreation",
-  "DisabledChecks": [],
+  "DisabledChecks": [
+    "HYBRID-MRSPROXY",
+    "MAILBOX-LARGE-ITEMS"
+  ],
   "TenantProfile": {
     "ProfileKey": "tenant",
     "TenantId": "",
@@ -33,6 +36,10 @@
       "Directory.Read.All",
       "Organization.Read.All"
     ]
+  },
+  "ExchangeOnPremises": {
+    "SmtpUniquenessBatchSize": 50,
+    "SmtpUniquenessBatchTimeoutSeconds": 60
   },
   "Hybrid": {
     "MigrationEndpointName": "",
