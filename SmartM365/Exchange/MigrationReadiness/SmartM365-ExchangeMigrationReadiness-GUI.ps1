@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.8
+1.11.9
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.8'
+$script:AppVersion = '1.11.9'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -424,7 +424,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.8" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.9" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -1244,7 +1244,7 @@ $controls.RunButton.Add_Click({
             Update-SemrProgressWindow -Stage 'Exchange Online session inspection' -Detail 'Checking for an existing Exchange Online session and its account.' -Current 3 -Total 10
             Set-SemrProcessingStatus -Message 'Inspecting the existing Exchange Online session; please wait...'
             $exoConfig = $script:Config.ExchangeOnline
-            $exoSession = Get-SemrExchangeOnlineSessionInfo -TenantId $configuredTenantId
+            $exoSession = Get-SemrExchangeOnlineSessionInfo -TenantId $configuredTenantId -AllowCommandProbe
             if ($exoSession.Error) { Write-SemrActivity -Message "Exchange Online session inspection: $($exoSession.Error)" -Level WARN -Component 'ExchangeOnline' }
             $forceExoAuthentication = $false
             if (-not $script:CloudSessionPrompted.ExchangeOnline -and $exoSession.Available) {
@@ -1262,8 +1262,13 @@ $controls.RunButton.Add_Click({
             Set-SemrProcessingStatus -Message $(if($forceExoAuthentication){'Forcing a new Exchange Online interactive authentication...'}elseif($exoSession.Available){"Reusing existing Exchange Online session for $($exoSession.Account)..."}else{'Connecting interactively to Exchange Online. Complete authentication, then please wait...'})
             $reuseExoSession = $exoSession.Available -and $exoSession.Usable -and -not $forceExoAuthentication
             Connect-SemrExchangeOnline -UserPrincipalName ([string]$exoConfig.UserPrincipalName) -DisableWam ([bool]$exoConfig.DisableWam) -TenantId $configuredTenantId -ForceAuthentication:$forceExoAuthentication | Out-Null
-            $exoSession = Get-SemrExchangeOnlineSessionInfo -TenantId $configuredTenantId
-            Write-SemrActivity -Message "Exchange Online session ready. Account=$($exoSession.Account); Tenant=$($exoSession.TenantId); Organization=$($exoSession.Organization); Reused=$reuseExoSession." -Level SUCCESS -Component 'ExchangeOnline'
+            $exoSession = Get-SemrExchangeOnlineSessionInfo -TenantId $configuredTenantId -AllowCommandProbe
+            $exoValidationMethod = if ($exoSession.PSObject.Properties['ValidationMethod']) { [string]$exoSession.ValidationMethod } else { 'Unknown' }
+            $exoDiagnostic = if ($exoSession.PSObject.Properties['Diagnostic']) { [string]$exoSession.Diagnostic } else { '' }
+            Write-SemrActivity -Message "Exchange Online session ready. Account=$($exoSession.Account); Tenant=$($exoSession.TenantId); Organization=$($exoSession.Organization); Reused=$reuseExoSession; Validation=$exoValidationMethod; ModuleVersion=$($exoSession.ModuleVersion); CommandSource=$($exoSession.CommandSource)." -Level SUCCESS -Component 'ExchangeOnline'
+            if ($exoDiagnostic) {
+                Write-SemrActivity -Message "Exchange Online session metadata diagnostic: $exoDiagnostic" -Level WARN -Component 'ExchangeOnline'
+            }
             Sync-SemrConnectionDisplay
 
             $endpointCheck = @($script:CheckOptions | Where-Object CheckId -EQ 'HYBRID-ENDPOINT' | Select-Object -First 1)
@@ -1500,8 +1505,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJ47az5tQ/Kzbx
-# vuoEP8xJDv0fUfgGq3+v9410hIzvvKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRcN/b6yXwHvfB
+# Xd00MwPejb1ntZf1Whw0N9sEhive96CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1634,31 +1639,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOFHHSdvAkvJKDWBw60pc8EXR4JxkIJHS3JDP1lys3LqMA0GCSqG
-# SIb3DQEBAQUABIIBgHvQQc70i/bkrH9PT8pFDuHMdsif3DyU77T7fvJ6bbju2NgN
-# Gq73ly0APAHj87WUpk8qhWifHSbI2K73ByVzTkTBhtH4uSBmOMfCnMbtrjCOiFeM
-# pCYhiqQdZCNLBYms4pNXt+oy4PhT+TL2+WlwoNRjKMY0eiIj78KEdEnngTH79HUW
-# iglmqqaO8r9JcuV5FBV/qr/hV0UGGANgOwmP5abiX3RJddi16MAlYRK0714Li1Ig
-# n1snQ3NUAYZzPCjNPi9nrCq2JLVBY2HA4KuafzVrxo0VMBCcAgBFZrtY05VSCupv
-# q805DJ9i3Y8MOcZ/Ys0i8Ij9zZ1Vd17nNsJsA6HA47tJB/21mj2NAOWcH0WrugLF
-# nOjUVw7b+f4NaOeJRMy2sR6TrSIs/fg8vfDG/FRenRPTJdxmVTVQ6Cvth5mdXBN3
-# XXL/aK2eS42su1Wd1ibWon3aK018kzhoEyTpjnG0L1nbEmFcfsa2Y9FhikNu6E6m
-# LP61X0qszRGy9HLGmaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP/rO2cIXUdTb9Zk/CIWuNGGyt1htNw57CcbIbJRIew4MA0GCSqG
+# SIb3DQEBAQUABIIBgDKExxE7Ekn+Osijx7N/ZPNwy3krE0Qtdu4r2UdP+zKU/hu5
+# Rf/NARWVFiuBvY+ifafOCjMVq3zgvKMxfhs+xmr+rXJAWCoB0LEJNitdOY/Gz7Dh
+# 0cWwHESncWcfFgfyvJXNpp/TdIJN2FW9Dh2dn9an6EQKfDjgglp0ebz5UKv0NNji
+# doC6Uz1WCxnbiFGML8yxfAtwFi5/BPUh9tTosiVCxh3TZVuTaz7EkxsgCSsXU0YZ
+# 8jV3qRJJ8aQL1CFCZlZCSGNAhYIeTKnsz1mwW1OU0t/5OqrrpclRm4cR+k7xxj5y
+# 0aRCSsXYy9tP42skwooij6rK8wVGHb0Cv1+I1QhCP9KJ6R8UU9lFNHJrxMN+KUgs
+# Ba0bOmqNKAywIOOYYJHMAycUDwvhRHFNTfjJnuLWH/uF6c4Ynh1sZfUmEFjdfGwa
+# H2wDl+DuFwl7KXnhpsCkpz5u2vOsK8VZCdRyM+KRk1qSulXU4f1A6wJ3b+HD8Ryl
+# 16tHwp4CKbec1+zewqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzA5
-# MDVaMC8GCSqGSIb3DQEJBDEiBCD6zGbDlQ1T4M23qJyjvysaSgwEd76Jbhg7n5RN
-# +q/wDDANBgkqhkiG9w0BAQEFAASCAgCAtk4CgB1EeXCn0MGSeH0a8mI+UxtS9xAd
-# N9PoQTBeDAxeDWODI48HTHz/RdUki4ssdDAxUz7eucD7HatVMwLfyR8grLU+32M9
-# IbFfsN5hpGIWStludHDJ/Jn5DXABsiSwW5nyRh4Fa2knN+PBHxD45B9DXrlyFOZU
-# 31JsxEQwdbZlcOeJZtiCBJHD218wl/wW1SwYXBxvxnavwElEKYo+hkRtOBsUA+AI
-# XLrYz3fB2SyUD4r0tShRjuFbG3gvWb2OwO28tYz9+U2WGbzQz1emxnNErmqAVm69
-# ksv9pkeSeZCl9J3WtGIVAKk3kUra822fuIa96J+Xm76QNLNI5N0yCGfzcE3ooged
-# H+LKr/F/9eCgBHCXqovKFj8ieMf1wiW9jNa1NUDrde1Lor8VzNMLjuP0a/sQiLdr
-# Kvx0EmUzKYEYp+ZxewDjrjiyp99OPRgtpCvgMButGklo0C5X+l3phjv51dfaMXNb
-# YgknPSaO3GrjHXq/RYSB2E+rfee9Gmpiqw04Q50v+Qpvy/73YoIuC3x2c/gfjPoG
-# i7wrpVtw1BBbwRo/56MpCU1cFxL21ZA1XXwsnE9ApDS7KIo0dYtnbIfg6EBRnozo
-# 5HOHn7hmtyWXWP6niRUf6uphMuGVJvTsdHC5VDE0rPcG+/Z12U7E3Qns3xc+20bu
-# r4bY1aObww==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzM3
+# MTVaMC8GCSqGSIb3DQEJBDEiBCBtvdBLettjhTSpU1w/UtR4kqpG6IF1FdGn/MqK
+# VZMzhjANBgkqhkiG9w0BAQEFAASCAgAXTlyioXSUG5hnhlRYpw7jEdgPlNYEPtvD
+# fK7act5GZNrDpcJkNWV5kNOBNpUpRR6eFmaTr4qYxkXd80pXzzLjyFh6HXZjUj7Q
+# kAG90pVv2ks6kLKtBZAwsLRzxcuO1ameF6zCpglSLOYs67vO/JJObAxbXp4xWsXo
+# SJ77rBKIYvDvVtucwvqMuvLuELvZsP4TAMNvT6JmUUrvKBO3GnGC5n+3aYDzkM/r
+# 6Nqr7qiWDcrUuQJ+LONsztTxRcodRJRFIqNDQLvL3YOk657hD4jQQqPTxToacR8I
+# WV4KEnq9e01BXESvv70tQvmspm/zdYLM3ySDplzblFYPfRwapxWAn1yunq8uy4Bz
+# XwbFx2TCsMdVZ/wqU4XR/m59sY+eqhqZgA21P+BFfYS/1JTuAzXld8C60rrtHrhm
+# n9ERgHhBQwQKtYNL3KPuvTS2qNPfJB98k+pkKCznh+det/0mSzCJeDCH/E/QHjhZ
+# F5h1cjq3Lus3iwCKCTL5W4hKve7NObnQPQfcUi8Ed0qhoIHTyaTGkbftmjxC1JLO
+# uIPHDMIG0U9wJbTH3XxgdFe5+sQ9oVnOAzbAIwmfrMcKSIWu4qVb9NEqxQKaVN9B
+# 9HRvTc7dTId4b9wJKMRG3bxjtUIwPyBmzFcR7BnCrdltRhwHe+IwlixNerLZ1/6R
+# pNVx5BMurg==
 # SIG # End signature block
