@@ -1,195 +1,185 @@
-<#
-.SYNOPSIS
-Creates a local SmartWorkplaceCMDB HTML overview report.
+# SmartWorkplaceCMDB.Graph
+# Version: 0.1.0
 
-.DESCRIPTION
-Loads the autonomous SmartWorkplaceCMDB configuration and reports CSV contract
-readiness, table counts, row counts, and data-quality finding counts.
+$script:SmartWorkplaceCMDBGraphVersion = '0.1.0'
 
-.VERSION
-0.2.1
-#>
-[CmdletBinding()]
-param(
-    [Alias('ProfileKey')]
-    [string]$Tenant = 'default',
-    [string]$OrganizationKey,
-    [string]$EnvironmentKey,
-    [string]$TenantKey,
-    [string]$TenantId,
-    [string]$DataRootPath,
-    [string]$DataAllRootPath,
-    [string]$LatestOutputRootPath,
-    [string]$LogRootPath,
-    [string]$GlobalConfigPath,
-    [string]$TenantConfigPath,
-    [string]$OutputPath,
-    [switch]$NoConfigWrite,
-    [switch]$ValidateOnly
-)
+function Get-SmartWorkplaceCMDBGraphObjectValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        $InputObject,
 
-$ScriptVersion = '0.2.1'
-$ErrorActionPreference = 'Stop'
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
 
-function Get-CsvDataRowCount {
+    if ($null -eq $InputObject) {
+        return $null
+    }
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        if ($InputObject.Contains($Name)) {
+            return $InputObject[$Name]
+        }
+        return $null
+    }
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -ne $property) {
+        return $property.Value
+    }
+    return $null
+}
+
+function Test-SmartWorkplaceCMDBGraphAppOnlyReadiness {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Path
+        [string]$TenantId,
+
+        [Parameter(Mandatory)]
+        [string]$ClientId,
+
+        [Parameter(Mandatory)]
+        [string]$CertificateThumbprint
     )
 
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return 0
+    $parsedTenantId = [guid]::Empty
+    if (-not [guid]::TryParse($TenantId, [ref]$parsedTenantId)) {
+        throw 'MicrosoftGraph.TenantId must contain an Entra tenant GUID.'
+    }
+    $parsedClientId = [guid]::Empty
+    if (-not [guid]::TryParse($ClientId, [ref]$parsedClientId)) {
+        throw 'MicrosoftGraph.ClientId must contain an application registration GUID.'
+    }
+    if ($CertificateThumbprint -notmatch '^[a-fA-F0-9]{40,64}$') {
+        throw 'MicrosoftGraph.CertificateThumbprint must contain a 40 to 64 character hexadecimal certificate thumbprint.'
     }
 
-    $lineCount = 0
-    $reader = [System.IO.File]::OpenText($Path)
+    $authenticationModule = Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication' |
+        Sort-Object Version -Descending |
+        Select-Object -First 1
+    if ($null -eq $authenticationModule) {
+        throw 'Microsoft.Graph.Authentication is required for live Microsoft Graph collection.'
+    }
+
+    $certificate = Get-ChildItem -Path Cert:\CurrentUser\My |
+        Where-Object Thumbprint -eq $CertificateThumbprint |
+        Select-Object -First 1
+    if ($null -eq $certificate) {
+        throw 'The configured Microsoft Graph certificate was not found in Cert:\CurrentUser\My.'
+    }
+    if (-not $certificate.HasPrivateKey) {
+        throw 'The configured Microsoft Graph certificate does not have an accessible private key.'
+    }
+    if ($certificate.NotAfter -le (Get-Date)) {
+        throw 'The configured Microsoft Graph certificate is expired.'
+    }
+
+    return [pscustomobject]@{
+        TenantId                   = $parsedTenantId.ToString()
+        ClientId                   = $parsedClientId.ToString()
+        CertificateThumbprint      = $certificate.Thumbprint
+        AuthenticationModule       = $authenticationModule.Name
+        AuthenticationModuleVersion = $authenticationModule.Version.ToString()
+    }
+}
+
+function Invoke-SmartWorkplaceCMDBGraphPagedRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$TenantId,
+
+        [Parameter(Mandatory)]
+        [string]$ClientId,
+
+        [Parameter(Mandatory)]
+        [string]$CertificateThumbprint,
+
+        [Parameter(Mandatory)]
+        [string]$Uri,
+
+        [Parameter(Mandatory)]
+        [string]$RequiredPermission,
+
+        [ValidateRange(0, 2147483647)]
+        [int]$MaxItems = 0
+    )
+
+    $readiness = Test-SmartWorkplaceCMDBGraphAppOnlyReadiness `
+        -TenantId $TenantId `
+        -ClientId $ClientId `
+        -CertificateThumbprint $CertificateThumbprint
+    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+
+    $connected = $false
     try {
-        while ($null -ne $reader.ReadLine()) {
-            $lineCount++
+        Connect-MgGraph `
+            -TenantId $readiness.TenantId `
+            -ClientId $readiness.ClientId `
+            -CertificateThumbprint $readiness.CertificateThumbprint `
+            -ContextScope Process `
+            -NoWelcome `
+            -ErrorAction Stop | Out-Null
+        $connected = $true
+
+        $context = Get-MgContext -ErrorAction Stop
+        if ($null -eq $context -or
+            [string]::IsNullOrWhiteSpace([string]$context.TenantId) -or
+            [string]$context.TenantId -ne $readiness.TenantId) {
+            throw 'Microsoft Graph connected to an unexpected tenant.'
         }
+
+        $items = New-Object System.Collections.Generic.List[object]
+        $nextUri = $Uri
+        while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
+            try {
+                $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -ErrorAction Stop
+            }
+            catch {
+                if ($_.Exception.Message -match '403|Forbidden|Authorization_RequestDenied|Insufficient') {
+                    throw (
+                        "Microsoft Graph denied the query. Grant and admin-consent the '{0}' application permission." -f
+                        $RequiredPermission
+                    )
+                }
+                throw
+            }
+
+            foreach ($item in @(Get-SmartWorkplaceCMDBGraphObjectValue -InputObject $response -Name 'value')) {
+                if ($null -ne $item) {
+                    $items.Add($item)
+                    if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) {
+                        break
+                    }
+                }
+            }
+            if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) {
+                break
+            }
+            $nextUri = [string](Get-SmartWorkplaceCMDBGraphObjectValue -InputObject $response -Name '@odata.nextLink')
+        }
+
+        return @($items.ToArray())
     }
     finally {
-        $reader.Dispose()
-    }
-
-    return [math]::Max(0, $lineCount - 1)
-}
-
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectRoot = Split-Path -Parent $scriptRoot
-$modulePath = Join-Path -Path $projectRoot -ChildPath 'Modules\SmartWorkplaceCMDB.Core\SmartWorkplaceCMDB.Core.psd1'
-
-Import-Module $modulePath -Force
-
-$boundParameterCopy = @{}
-foreach ($key in $PSBoundParameters.Keys) {
-    $boundParameterCopy[$key] = $PSBoundParameters[$key]
-}
-$context = Resolve-SmartWorkplaceCMDBContext -BoundParameters $boundParameterCopy -GlobalConfigPath $GlobalConfigPath -TenantConfigPath $TenantConfigPath -NoConfigWrite:($ValidateOnly -or $NoConfigWrite)
-$paths = $context.Paths
-$contract = Get-SmartWorkplaceCMDBTableContract -Path $context.ContractPath
-$contractResults = @(Test-SmartWorkplaceCMDBCsvContract -LatestOutputRootPath $paths.LatestOutputRootPath -ContractPath $context.ContractPath)
-$incompatibleTables = @($contractResults | Where-Object Status -eq 'Incompatible')
-if ($incompatibleTables.Count -gt 0) {
-    $details = @($incompatibleTables | ForEach-Object {
-        '{0}: missing=[{1}] unexpected=[{2}]' -f $_.Name, $_.MissingColumns, $_.UnexpectedColumns
-    })
-    throw ("Cannot report on incompatible SmartWorkplaceCMDB CSV outputs. {0}" -f ($details -join '; '))
-}
-
-if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path -Path $paths.LatestOutputRootPath -ChildPath 'SmartWorkplaceCMDB-Overview.html'
-}
-
-if ($ValidateOnly) {
-    [pscustomobject]@{
-        Status               = 'Valid'
-        ScriptVersion        = $ScriptVersion
-        ContractVersion      = [string]$contract.contractVersion
-        ValidContractFiles   = @($contractResults | Where-Object Status -eq 'Valid').Count
-        MissingContractFiles = @($contractResults | Where-Object Status -eq 'Missing').Count
-        ProfileKey           = $paths.ProfileKey
-        OrganizationKey      = $paths.OrganizationKey
-        EnvironmentKey       = $paths.EnvironmentKey
-        TenantKey            = $paths.TenantKey
-        TenantId             = $paths.TenantId
-        LatestOutputRootPath = $paths.LatestOutputRootPath
-        OutputPath           = $OutputPath
-        GlobalConfigPath     = $context.GlobalConfigPath
-        TenantConfigPath     = $context.TenantConfigPath
-    } | Format-List
-    return
-}
-
-$validTables = @($contractResults | Where-Object Status -eq 'Valid')
-$missingTables = @($contractResults | Where-Object Status -eq 'Missing')
-$cmdbTables = @($validTables | Where-Object Area -eq 'CMDB')
-$powerBiTables = @($validTables | Where-Object Area -eq 'PowerBI')
-$cmdbRows = 0
-foreach ($table in $cmdbTables) {
-    if ($table.Name -ne 'CMDB_BuildManifest.csv') {
-        $cmdbRows += Get-CsvDataRowCount -Path $table.Path
-    }
-}
-$powerBiRows = 0
-foreach ($table in $powerBiTables) {
-    $powerBiRows += Get-CsvDataRowCount -Path $table.Path
-}
-$dataQualityPath = Join-Path -Path $paths.CmdbLatestPath -ChildPath 'CMDB_DataQuality.csv'
-$dataQualityFindings = Get-CsvDataRowCount -Path $dataQualityPath
-
-$generatedAt = Get-Date
-$profileText = [System.Net.WebUtility]::HtmlEncode([string]$paths.ProfileKey)
-$tenantText = [System.Net.WebUtility]::HtmlEncode([string]$paths.TenantKey)
-$missingText = if ($missingTables.Count -eq 0) {
-    'None'
-}
-else {
-    [System.Net.WebUtility]::HtmlEncode((($missingTables.Name | Sort-Object) -join ', '))
-}
-
-$html = @"
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>SmartWorkplaceCMDB Overview</title>
-  <style>
-    body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #F5F8FB; color: #1F2937; }
-    main { max-width: 1180px; margin: 0 auto; padding: 28px; }
-    header, section { background: #FFFFFF; border: 1px solid #DDE7F0; border-radius: 8px; padding: 22px; margin-bottom: 18px; }
-    h1, h2 { margin: 0 0 10px 0; font-weight: 650; }
-    .muted { color: #5F6B7A; }
-    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-    .metric { border: 1px solid #DDE7F0; border-radius: 8px; padding: 14px; background: #F8FBFE; }
-    .value { font-size: 28px; font-weight: 650; color: #0078D4; }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <h1>SmartWorkplaceCMDB Overview</h1>
-      <div class="muted">Profile: $profileText | Tenant: $tenantText | Generated: $($generatedAt.ToString('yyyy-MM-dd HH:mm:ss')) | Script: $ScriptVersion | Contract: $($contract.contractVersion)</div>
-    </header>
-    <section class="grid">
-      <div class="metric"><div class="value">$cmdbRows</div><div>CMDB rows</div></div>
-      <div class="metric"><div class="value">$powerBiRows</div><div>Power BI rows</div></div>
-      <div class="metric"><div class="value">$dataQualityFindings</div><div>Data quality findings</div></div>
-    </section>
-    <section>
-      <h2>Contract Readiness</h2>
-      <p>Valid files: $($validTables.Count) / $(@($contract.tables).Count)</p>
-      <p class="muted">Missing files: $missingText</p>
-    </section>
-  </main>
-</body>
-</html>
-"@
-
-$folder = Split-Path -Parent $OutputPath
-if (-not (Test-Path -LiteralPath $folder)) {
-    New-Item -ItemType Directory -Path $folder -Force | Out-Null
-}
-
-$tempPath = '{0}.tmp.{1}' -f $OutputPath, ([guid]::NewGuid().ToString('N'))
-try {
-    Set-Content -LiteralPath $tempPath -Value $html -Encoding UTF8 -Force
-    Move-Item -LiteralPath $tempPath -Destination $OutputPath -Force
-}
-finally {
-    if (Test-Path -LiteralPath $tempPath) {
-        Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+        if ($connected -and (Get-Command Disconnect-MgGraph -ErrorAction SilentlyContinue)) {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        }
     }
 }
 
-Write-Information ("SmartWorkplaceCMDB overview report created: {0}" -f $OutputPath) -InformationAction Continue
+Export-ModuleMember -Function @(
+    'Get-SmartWorkplaceCMDBGraphObjectValue',
+    'Test-SmartWorkplaceCMDBGraphAppOnlyReadiness',
+    'Invoke-SmartWorkplaceCMDBGraphPagedRequest'
+)
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRgBMzIzvnsceB
-# Mwue0RZtv6fGxdM5+6ikmN5qXbm/F6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAIvshqhAodx2BA
+# DdTBoUwOu1llzDE85K4hgmUtyDA5BqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -322,31 +312,31 @@ Write-Information ("SmartWorkplaceCMDB overview report created: {0}" -f $OutputP
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBHiM92HOz2pKEDmHxYt6sz5Hydzx0GrnldY3s9uPCswMA0GCSqG
-# SIb3DQEBAQUABIIBgIT3Ef0kIFqH76t+K5rjPEau5rTyMZykP6PpXjRauP2Cj2Ys
-# vHwfQOt79Tdwjvwb5loTNDMsA86pXBvY7Yaqz06hO1qXQvBEoTTF17qm/QeJU6bG
-# s5KRjfMSZdQuhAmvdgzVi0so2X5zgug6AgIJdIXhfDklCGAXIjmDqi5Xh4//on8m
-# /rF4hieQ43RscnPJU69rMh6bVIRea3tNBeHxJiTDNepyCd/El0Qqud5ZETBqF4YZ
-# ep5Z7v+xDBjGPuce3pewmg97qRyKdXAPh+D/D5f4/SzM6X+1VyYKOl4tlRWc7IHy
-# wMqkJrTBlVZCIF8faK87A0v+gYiQXw+dB5YqrvLR5yfCPwGEc4Zi6gq1Z5k5hwxb
-# Q0RlwCTtznZVuM12y3mh8G17icXXpxFaL6gG6LmI7RxUKMafQh9uKR4Y+EZc3JMQ
-# 4uNSirdUfm1kMOtug1A8UU8Ie3yKJpMMdyw/lK6p1uwTQiad79yxxZhYXgBWAHPH
-# H1jL8JoKX778OQb14KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDR4Y93nrHnfe1H1nvR+01xpLSugnmnKJ9UeotCSx9vxMA0GCSqG
+# SIb3DQEBAQUABIIBgBKpRw88C1JQVWoYGeg5Dzp4cqHl0NnvsSwm3yMvZEFTjq4u
+# XgN0Wh4EIDmeMuPnAnASzQVwI0z4Hd3bhPXIZzU6tpPLNhFpPey/okgD4jjVFtDa
+# abQlyTIICT7WxRcQT6KvWCICSd6GK5rdqOdrdibsZyNx5L4ffy1AkbHKKunQMp1Z
+# GebyEJl+Qr0bw753H+G4eGRp4p61xDxpoWrD2N0Ao511HovKMIgJ2BdoU4NOBaw2
+# Y4pv7ttfCvYhPwk7ZELaxp8tOGFXZDO6c2uSFNCsXK2WYVLrFbCE/T99haeMhedU
+# LvuFTaOfKfFD2hfhEMsAcR/dz9rnwKPtsMUJWkImZMVay7fpj9bWE8It9bT7XCTy
+# aEHa4+xg2NUgVX+KzpVVGGMBQuFWhEcwigGW+np7+C5Yl8moQxOcj4jep2U8cWR7
+# ojesDk4Dx6uviR+fNkp6UDF/HPRg641+Czm1Rc4i0MBWZRXZfsYgIKpEvEupRdTo
+# vv02dXFqdIicwTDd9aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxMzEw
-# MTlaMC8GCSqGSIb3DQEJBDEiBCCsldEt+m74HF7Kqa4UeFgQCvmkeVcneeH/JdKn
-# WyUZQzANBgkqhkiG9w0BAQEFAASCAgCBVaB8SZukYcOO9ZsAa7cxaSk7ls2pmcbC
-# 51U/Df4BPC2D+W0unqosfIjqUFeR3kXWQ3EMbnzGEdDUktP2deGkTMuDVglU/Vca
-# ktJHNUAE/p/ljlW8wiUaJr4JJFiEnDJCmmp9Ipi5kQqmdpx/Ck1b1tw8HorrqvB8
-# KFWsaF5AdRsRzZXy2s9ROQ2KD1SEtTXPT+pjb8KlWO0xWjOu9SC0p0xflM3n0BD5
-# TQ67te8pyPBk9g4/DUpuFVUrcTqQEQCST0YJwywHHAZBZW9aFLj8xPDMAk/fRop/
-# mOAgWV22UygUt+S2UvBcOhVFuI4Gnt8oBbXwIxEhtxdgB30AuVLWgxbW05ZTQbtx
-# f2wX1qaGIgol79nnMxYE+3hfCWS7w+/TKfKE9BP81blf0EHeBpMKxHj32TxaQrT7
-# lAThgx/0Jl4y147Tgje787HgoJsnTN2zJI5bNCllivwG0rRTxzqEVZ/Yv/qFGyii
-# 8BhFAclWpsFIvRIsy3yrTOpnANQaBdLJmoFGIMyuRpN0GkVZsmnAe+uaFoT6VKqp
-# QZKbWbpMQU5IUVs3Hg6Tj8UyVB58YAE5Bznql2iD0dO9jr1LrQKNf4K6tI4jNiSy
-# KXTFdLcCflr8HserFk1zZutrIPvSIF/PJ5D/nxgUdjXJY2ltskqwUv6cko7ESMM7
-# PQE80luzRA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNDA1
+# MDRaMC8GCSqGSIb3DQEJBDEiBCBiG9Su7nV4XRvvXoq3Liuf888EBsSbtnEUHboi
+# 5i+sKTANBgkqhkiG9w0BAQEFAASCAgC8YPjLBq5+HtnjxeR00YDP/1IOs2yWuJzC
+# LuntqKA4VXfDzwtSoeJEBObG3LCX1se7sKd2fyrmWQuOvfHlJhhbSkRP6gb7msxH
+# AZq+aarFXNrLzacmpJJF9NYRVSnsh5Hm1MI2Gvum0EORQ9bzsUqxQ49eF7ifDUjx
+# 9X5uHWOMxnY0MtgqVmh+JO+RXx3LMocCrgCkDUgDO/ridIzFWhVwjUvboJE4WY3e
+# UBLXTcsHMeXhsUO2MJLrHcPEak5PuYtF8eOc/KG37aTfpyEt9k4ypo1ThNrE6hUY
+# pxqVA+mtQefLMOOR+SjmenLUFtKEex3bof1ucpclwMRQVPC7AZ8mKlZF0MKFmGMc
+# pe0x+LBpuKBFK/P2hvd0xBPYBSaMf7DnC6A5Kj0DXwlGx8HPd0q4IL7VOF+e3Z0O
+# r3eHQUGiQR/qWyLCvywJo9ODK2HtedfPrESRjRnFCvZqMto69uMlgkJhvezJY+20
+# Ex42TwzzVA8bydW8dJBf2h/KU2EnykLNpKjc+kI8HTb0Fn7fuv/dOaM5PN2gE7jD
+# s+r45IagfdKSQXZswnBtR4Du9dSjidUD3OgqM/ojVVh35/kV940kqdayn7wVVwX/
+# UQLpbb9UwjGTkyc1PE2kTtH9yiataOs4SDmNcY/1hEB6uPQbn2bc8YCsPQGCcV4d
+# qzePMwljIg==
 # SIG # End signature block

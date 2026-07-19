@@ -13,30 +13,40 @@
     "identity": {
       "type": "object",
       "required": [
+        "ProfileKey",
         "TenantKey",
         "OrganizationKey",
         "EnvironmentKey"
       ],
       "properties": {
+        "ProfileKey": {
+          "$ref": "#/$defs/componentKey"
+        },
         "TenantKey": {
           "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9-]*-[a-z0-9][a-z0-9-]*$"
+          "minLength": 3,
+          "maxLength": 129,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
         },
         "OrganizationKey": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/componentKey"
         },
         "EnvironmentKey": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/componentKey"
         },
         "TenantId": {
-          "type": [
-            "string",
-            "null"
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
-      }
+      },
+      "additionalProperties": false
     },
     "entities": {
       "type": "array",
@@ -60,6 +70,14 @@
           }
         }
       }
+    }
+  },
+  "$defs": {
+    "componentKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
     }
   }
 }

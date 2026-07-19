@@ -1,4 +1,5 @@
 {
+  "ConfigVersion": "0.3.0",
   "ProfileKey": "default",
   "OrganizationKey": "organization",
   "EnvironmentKey": "default",
@@ -16,10 +17,24 @@
     "Enabled": true,
     "Organization": ""
   },
+  "ActiveDirectory": {
+    "Enabled": false,
+    "ForestWide": true,
+    "Server": "",
+    "SearchBase": "",
+    "IncludeGroupMemberships": true
+  },
   "Output": {
     "DataRootPath": "",
     "DataAllRootPath": "",
     "LatestOutputRootPath": "",
     "LogRootPath": ""
+  },
+  "SharePoint": {
+    "Enabled": false,
+    "SiteHostname": "",
+    "SitePath": "",
+    "LibraryDisplayName": "Documents",
+    "TargetFolderPath": "SMART-CMDB/DATA"
   }
 }
