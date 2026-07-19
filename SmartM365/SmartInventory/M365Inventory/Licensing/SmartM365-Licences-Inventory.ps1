@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-  Export M365 license assignments with Users/Tenant/Groups + one normalized ServicePlans CSV.
+  Export M365 license assignments with Users/Tenant/Groups plus compact user service-plan states and a service-plan catalog.
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.10
+1.11
 
 
 .REQUIREMENTS
@@ -14,7 +14,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.10
+    Version : 1.11
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -247,7 +247,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.42' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.43' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -460,6 +460,52 @@ function Get-GeneratedCsvSummary {
   return ($paths | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join "; "
 }
 
+function Remove-LegacyDetailedServicePlansExport {
+  [CmdletBinding(SupportsShouldProcess)]
+  param(
+    [Parameter(Mandatory)][string]$CurrentOutputPath,
+    [Parameter(Mandatory)][string]$LatestOutputPath
+  )
+
+  if (Test-SmartM365MaxItemsMode) {
+    WriteLog -Message "Legacy detailed ServicePlans retirement skipped during MaxItems validation." "INFO"
+    return
+  }
+
+  $legacyFileName = "M365_Licenses_ServicePlans_Detailed.csv"
+  if (-not $PSCmdlet.ShouldProcess($legacyFileName, 'Retire legacy detailed ServicePlans export after compact publication')) {
+    return
+  }
+
+  $legacyLatestPath = Join-Path -Path $LatestOutputPath -ChildPath $legacyFileName
+
+  if ($global:EnableSharePointUpload) {
+    $removedFromSharePoint = Remove-SmartM365SharePointFile -LocalFilePath $legacyLatestPath
+    if (-not $removedFromSharePoint) {
+      WriteLog -Message "Legacy detailed ServicePlans SharePoint file could not be confirmed as removed." "WARN"
+    }
+  }
+
+  $legacyPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+  [void]$legacyPaths.Add((Join-Path -Path $CurrentOutputPath -ChildPath $legacyFileName))
+  [void]$legacyPaths.Add($legacyLatestPath)
+
+  foreach ($legacyPath in $legacyPaths) {
+    if (-not (Test-Path -LiteralPath $legacyPath)) {
+      continue
+    }
+
+    try {
+      Remove-Item -LiteralPath $legacyPath -Force -ErrorAction Stop
+      WriteLog -Message ("Legacy detailed ServicePlans CSV removed: {0}" -f $legacyPath) "INFO"
+    }
+    catch {
+      throw ("Failed to remove legacy detailed ServicePlans CSV '{0}': {1}" -f $legacyPath, $_.Exception.Message)
+    }
+  }
+
+  WriteLog -Message "Legacy export M365_Licenses_ServicePlans_Detailed.csv is disabled." "INFO"
+}
 function Send-LicensesInventoryErrorNotification {
   param(
     [Parameter(Mandatory)]$ErrorRecord,
@@ -585,9 +631,10 @@ function Add-GroupAgg {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
+$LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
 $connectedGraphInThisRun = $false
 $currentOperation = "Initialize script environment"
 $usersProcessedCount = 0
@@ -743,8 +790,10 @@ try {
   # ---------------- Build rows ----------------
   $currentOperation = "Resolve user licenses and service plans"
   WriteLog -Message "Resolving licenses and building rows..."
-  $resultsUsers      = New-Object System.Collections.Generic.List[object]
-  $rowsPlansDetailed = New-Object System.Collections.Generic.List[object]
+  $resultsUsers       = New-Object System.Collections.Generic.List[object]
+  $rowsPlanStates     = New-Object System.Collections.Generic.List[object]
+  $rowsPlansExchange  = New-Object System.Collections.Generic.List[object]
+  $servicePlanCatalog = @{}
 
   $uTotal = ($users | Measure-Object).Count
   $uIndex = 0
@@ -837,32 +886,57 @@ try {
           Add-UsersRow -SourceVal "Unknown" -GroupName $null -HasBoth $false
         }
 
-        # Normalized ServicePlans CSV
+        # Compact user service-plan state fact and normalized service-plan catalog
         if ($ServicePlans) {
           $disabledIds = if ($disabledPlansBySku.ContainsKey($skuId)) { $disabledPlansBySku[$skuId] } else { @() }
           foreach ($sp in $ld.ServicePlans) {
-            $rowPlan = [ordered]@{
-              "Id"                  = "$uid-$skuId-$($sp.ServicePlanId)"
-              "User principal name" = $upn
-              "primarysmtp"         = $primarySmtp
-              "Display name"        = $displayName
-              "UserId"              = $uid
-              "SkuId"               = $skuId
-              "SkuPartNumber"       = $skuPartById[$skuId]
-              "SKU name"            = $skuDisplayById[$skuId]
-              "PlanId"              = $sp.ServicePlanId
-              "PlanName"            = $sp.ServicePlanName
-              "PlanDisplayName"     = (Get-ServiceFriendly -PlanName $sp.ServicePlanName -PlanId $sp.ServicePlanId -ByName $null -ById $SvcMapById)
-              "IsEnabled"           = (-not ($disabledIds -contains $sp.ServicePlanId))
-              "PlanStatus"          = $sp.ProvisioningStatus
-            }
-            foreach ($k in @($rowPlan.Keys)) {
-              if ($rowPlan[$k] -is [string]) {
-                $rowPlan[$k] = $rowPlan[$k] -replace "`r`n|`n|`r"," "
-                $rowPlan[$k] = $rowPlan[$k] -replace '"',"'" 
+            $planDisplayName = Get-ServiceFriendly -PlanName $sp.ServicePlanName -PlanId $sp.ServicePlanId -ByName $null -ById $SvcMapById
+            $isEnabled = (-not ($disabledIds -contains $sp.ServicePlanId))
+
+            $rowsPlanStates.Add([PSCustomObject][ordered]@{
+              "UserId"     = $uid
+              "SkuId"      = $skuId
+              "PlanId"     = $sp.ServicePlanId
+              "IsEnabled"  = $isEnabled
+              "PlanStatus" = $sp.ProvisioningStatus
+            }) | Out-Null
+
+            $catalogKey = "{0}|{1}" -f $skuId, $sp.ServicePlanId
+            if (-not $servicePlanCatalog.ContainsKey($catalogKey)) {
+              $servicePlanCatalog[$catalogKey] = [PSCustomObject][ordered]@{
+                "SkuId"           = $skuId
+                "SkuPartNumber"   = $skuPartById[$skuId]
+                "SKU name"        = $skuDisplayById[$skuId]
+                "PlanId"          = $sp.ServicePlanId
+                "PlanName"        = $sp.ServicePlanName
+                "PlanDisplayName" = $planDisplayName
               }
             }
-            $rowsPlansDetailed.Add([PSCustomObject]$rowPlan) | Out-Null
+
+            if ($sp.ServicePlanName -like '*EXCHANGE*' -and $skuPartById[$skuId] -like '*SPE*') {
+              $rowPlanExchange = [ordered]@{
+                "Id"                  = "$uid-$skuId-$($sp.ServicePlanId)"
+                "User principal name" = $upn
+                "primarysmtp"         = $primarySmtp
+                "Display name"        = $displayName
+                "UserId"              = $uid
+                "SkuId"               = $skuId
+                "SkuPartNumber"       = $skuPartById[$skuId]
+                "SKU name"            = $skuDisplayById[$skuId]
+                "PlanId"              = $sp.ServicePlanId
+                "PlanName"            = $sp.ServicePlanName
+                "PlanDisplayName"     = $planDisplayName
+                "IsEnabled"           = $isEnabled
+                "PlanStatus"          = $sp.ProvisioningStatus
+              }
+              foreach ($k in @($rowPlanExchange.Keys)) {
+                if ($rowPlanExchange[$k] -is [string]) {
+                  $rowPlanExchange[$k] = $rowPlanExchange[$k] -replace "`r`n|`n|`r"," "
+                  $rowPlanExchange[$k] = $rowPlanExchange[$k] -replace '"',"'"
+                }
+              }
+              $rowsPlansExchange.Add([PSCustomObject]$rowPlanExchange) | Out-Null
+            }
           }
         }
       }
@@ -883,43 +957,62 @@ try {
 $BaseFileName = "M365_Licenses_Users"
     ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
       -OutputPath $OutputPath `
-      -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
+      -GlobalPath $LatestCsvFolderPath `
       -Data $resultsUsers -Encoding "UTF8" -NoTypeInformation -Delimiter ","
   }
 
-  # ---------------- Export ServicePlans (single detailed CSV) ----------------
+  # ---------------- Export compact ServicePlans state fact + catalog ----------------
   $currentOperation = "Export service plan CSV"
   if ($ServicePlans) {
-    if ($rowsPlansDetailed.Count -gt 0) {
+    if ($rowsPlanStates.Count -gt 0) {
       Write-Host ""
-      Write-Host "--- Export CSV (ServicePlans - Detailed) ---"
-$BaseFileName = "M365_Licenses_ServicePlans_Detailed"
+      Write-Host "--- Export CSV (User ServicePlan States - Compact) ---"
+      $BaseFileName = "M365_Licenses_UserServicePlanStates"
       ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
         -OutputPath $OutputPath `
-        -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
-        -Data $rowsPlansDetailed -Encoding "UTF8" -NoTypeInformation -Delimiter "," -Streaming
+        -GlobalPath $LatestCsvFolderPath `
+        -Data $rowsPlanStates -Encoding "UTF8" -NoTypeInformation -Delimiter "," -Streaming
 
-      # ---------------- Export ServicePlans (filtered: PlanName contains EXCHANGE + SkuPartNumber contains SPE) ----------------
-      $rowsPlansFiltered = $rowsPlansDetailed | Where-Object { $_.PlanName -like '*EXCHANGE*' -and $_.SkuPartNumber -like '*SPE*' }
-      if ($rowsPlansFiltered -and @($rowsPlansFiltered).Count -gt 0) {
+      $catalogRows = @($servicePlanCatalog.Values | Sort-Object SkuPartNumber, PlanName, PlanId)
+      Write-Host ""
+      Write-Host "--- Export CSV (ServicePlans - Catalog) ---"
+      $BaseFileName = "M365_Licenses_ServicePlans_Catalog"
+      ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
+        -OutputPath $OutputPath `
+        -GlobalPath $LatestCsvFolderPath `
+        -Data $catalogRows -Encoding "UTF8" -NoTypeInformation -Delimiter ","
+
+      if ($rowsPlansExchange.Count -gt 0) {
         Write-Host ""
         Write-Host "--- Export CSV (ServicePlans - Exchange Online) ---"
-$BaseFileName = "M365_Licenses_ServicePlans"
+        $BaseFileName = "M365_Licenses_ServicePlans"
         ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
           -OutputPath $OutputPath `
-          -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
-          -Data @($rowsPlansFiltered) -Encoding "UTF8" -NoTypeInformation -Delimiter ","
-        WriteLog -Message ("ServicePlans filtered CSV exported: {0} rows (PlanName contains EXCHANGE + SkuPartNumber contains SPE)." -f @($rowsPlansFiltered).Count)
+          -GlobalPath $LatestCsvFolderPath `
+          -Data $rowsPlansExchange -Encoding "UTF8" -NoTypeInformation -Delimiter ","
+        WriteLog -Message ("ServicePlans filtered CSV exported: {0} rows (PlanName contains EXCHANGE + SkuPartNumber contains SPE)." -f $rowsPlansExchange.Count)
       } else {
         Write-Host "No ServicePlans rows matching PlanName containing 'EXCHANGE' and SkuPartNumber containing 'SPE'."
         WriteLog -Message "No ServicePlans rows matching PlanName containing 'EXCHANGE' and SkuPartNumber containing 'SPE'."
       }
+
+      if (-not (Test-SmartM365MaxItemsMode)) {
+        $stateLatestPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "M365_Licenses_UserServicePlanStates.csv"
+        $catalogLatestPath = Join-Path -Path $LatestCsvFolderPath -ChildPath "M365_Licenses_ServicePlans_Catalog.csv"
+        $publishedThisRun = $global:csvGeneratedPaths -and
+          $global:csvGeneratedPaths.Contains($stateLatestPath) -and
+          $global:csvGeneratedPaths.Contains($catalogLatestPath)
+        if (-not $publishedThisRun -or -not (Test-Path -LiteralPath $stateLatestPath) -or -not (Test-Path -LiteralPath $catalogLatestPath)) {
+          throw "Compact ServicePlans state and catalog CSV publication must succeed in the current run before retiring the legacy detailed CSV."
+        }
+      }
+
+      Remove-LegacyDetailedServicePlansExport -CurrentOutputPath $OutputPath -LatestOutputPath $LatestCsvFolderPath
     } else {
       Write-Warning "No ServicePlans rows produced."
       WriteLog -Message "No ServicePlans rows to export."
     }
   }
-
   # ---------------- Export Tenant ----------------
   $currentOperation = "Export tenant license CSV"
   $tenantRows = New-Object System.Collections.Generic.List[object]
@@ -938,7 +1031,7 @@ $BaseFileName = "M365_Licenses_ServicePlans"
 $BaseFileName = "M365_Licenses_Tenant"
     ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
       -OutputPath $OutputPath `
-      -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
+      -GlobalPath $LatestCsvFolderPath `
       -Data $tenantRows -Encoding "UTF8" -NoTypeInformation -Delimiter ","
   }
 
@@ -971,7 +1064,7 @@ $BaseFileName = "M365_Licenses_Tenant"
 $BaseFileName = "M365_Licenses_Groups"
     ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
       -OutputPath $OutputPath `
-      -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
+      -GlobalPath $LatestCsvFolderPath `
       -Data $groupRows -Encoding "UTF8" -NoTypeInformation -Delimiter ","
   } else {
     Write-Host "No groups with license assignments discovered during this run."
@@ -980,7 +1073,7 @@ $BaseFileName = "M365_Licenses_Groups"
   # ---------------- Disconnect / Cleanup ----------------
   $usersProcessedCount = if ($null -eq $users) { 0 } else { [int]$users.Count }
   $userLicenseRowCount = $resultsUsers.Count
-  $servicePlanRowCount = $rowsPlansDetailed.Count
+  $servicePlanRowCount = $rowsPlanStates.Count
   $tenantSkuRowCount = $tenantRows.Count
   $groupRowCount = $groupRows.Count
 
@@ -1070,8 +1163,8 @@ $($global:logTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLXyH7TOMchO62
-# 9F9Xba3qSqJhn67i7rGKJB0wx4vVrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdcJuIOzwPqv9Q
+# 7dMu69If24vYKbk2ckfVa2oCYl0JuaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1204,31 +1297,31 @@ $($global:logTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBUn8lIOcrL5WB8m1blub1+isU6nHHzRVH14mT4n3ygAMA0GCSqG
-# SIb3DQEBAQUABIIBgFTbpK6sYIlC2gKOfzfDIZednctbO67EIsjP6jNjTpBv06k9
-# v9hrorU+BAahT9f4YENLkL8M/WJ62aXSEWWCaMKoHWhmQVsdbDweWoWUh9Wb2U0J
-# BQitr7QAkDdvjYf7jrkhQVyvSKJQZWEn+NVdZ1YOJ+BvBY/gSJrf9crPiFTMwuW4
-# HUrxd/sfOuVWmsS51GFnelJkr8W4syicVM8srWxdK31RIva3jdkEUE77zFQL661P
-# xIOBmxbA82hxAIB45eD4qu/7ZHAysmX1AT6jlqbU+fdw0YZGWAfFgmO1QvumtwAW
-# yGGxNBdWah4gm6h9olMRtvPDxe55MM/11nUjytfyXex8vXFiQGLWGdD2vP28FvRe
-# hrUN/FiDq7FjbHqczWgc8hJVXjFK1IScHcRgnOjhvtkRO642fbe392HI4pjRdbYH
-# GkCIl63YlynGx0quJwbxGJDj9iW7+AfEoYnQtLTEoEbmF8buXl+U81b5bo7sDcE2
-# 6ZL7aM9uSQX6EzOi9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIARxLPozwv5r6VUJkwIoy9OInw93CmsUMrvB0trKLKqMMA0GCSqG
+# SIb3DQEBAQUABIIBgEcnm2ZBHlHdOpzm+5+M4wGxpawTWWpUzUyB4LMQbXSIJFyl
+# 8Y6c4jqZrkp1t/wxrpyD3Fqfx4SnZFwbEMgrx8O6GGaofMqdEcIg3urE8uax2NMg
+# 2zzfEtsK70wMB/A3erWmH0kzFzdc4+x4QBhNyJVUU7VcuMP1eZNSxMxsKVh0tFW4
+# U2r48ngklUGh5Nb6MOUlDBF9i6L7kY1YMtADgRzVr2LVy/l1RxSGGOpcd/Wh6jQP
+# 5QozNyYwcuE3oe+C9vSNJ8FUcS5h/IrExS6f/a57n+jP9/Y0V1PL8dnELSN5tuUa
+# FBKWftUv3hCSJsPnzenH7YY3gT0b+aATmKfqiAD9OwyCAMLd4UX3dgO2uNMv8/xn
+# kLnM7TSUOq5G5Dy/lIQUPpusJo9AsKNoCF5n1Uh8zkrMv7EhcGc9vM6ncdQWKXFp
+# LOq9Wr5D+GMhY6ATn4VgzTKNZOEpiDNy9C5wXHjQDqAophPWIoc/FO1GWdzf3BYr
+# /S2c7ZC1UF4z2vpzDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMjM2
-# MTNaMC8GCSqGSIb3DQEJBDEiBCDJxRyItEXqTDLjNiXf9NeyIgt8CgRMy0FkCOXt
-# 59BNYzANBgkqhkiG9w0BAQEFAASCAgAME78d7u6A6w5PMQyG8t2kOLOPsyrkc9DZ
-# YNHrYNvpOcY0FSBzEhVZ/M5myWHx7G+0TngS0OyKnYi7tGQL28XMUuz0yH+tBiBm
-# kKphIFc9cHWmmutpQ/j/nfhYbEwTc06DhbeuRP7BA5tlKCFL+aCm3KdvXU2ombnz
-# ThJ2BtFUgGEeKhwFL/pqjumx6pyjyER+T0lfjXe9o2tVHKIKwHCt8deI//x9wuZ9
-# 91/3XXCx9LT7FAtkVMOJivllyK7ZdJCkXZHizL9XM7C1yQgIOaiGoSFLrNk73kvL
-# 7S3X3LO6CU9qclyOyF6aRyxLtvinejCoCaTsAr4TwEuWlusmmi1AAXD3MjKcdZBb
-# HobELT/f9fFgL7LcDI4uBXQs3HWMuM5veFdCEGYBuVlbSKzpeWz4oDnN6gUYrEk5
-# iueG2vwlqp63fgtQZINSiFelW/E0PnitZjD5njvLmCDMEcMRb42C/ZD13bv0euF4
-# xA8QJ50M98bwoUkHl9fQxIGBuTvOXQzCzcXtUaXnJo8m2Ak91RFI6md9d7J/MBfq
-# Fv5k0KQOZ/FWLY/tslLd8sYka6wCtB+EaDGSsm1Vp6aHrgT5odbHBJOJx+TIPgs7
-# P9CFaJz9WxbNlYfCF0fe/DeLgvurM0larMN9VRINhfbb6rKdlN12OlZJURXrXwqH
-# xDlkg6GyoA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMzE4
+# MTVaMC8GCSqGSIb3DQEJBDEiBCAjNBXzemFy8aPEqhcIqPQ5mFKJ2iXxSNcD/U/x
+# ZkKLtDANBgkqhkiG9w0BAQEFAASCAgAUPr0emk89BaZNbLV/F176RnZWKS2oecwy
+# /mqcFVDIdHoUBMhVaEVUGZNi9o1WtwnvahySJB9FtmHh50j98U+l+z+6Z+YhFcfI
+# qtnZ5wLd8+RXc28OhspVpdquX2Jna483JEkpQ9duBgUokG6N1SAZVX/H9SM957lb
+# 9Q42q5zXZPm3sw1bBUgxI9YmQvi16w1zP8RXNABQOADzTF61Y0r/TQt/yqnA03mM
+# sD3a4p2+kI/5MQST54vu/59+B8haL3WAjJY0rfojuKpiMDONT1RG0jqHHAbKARCN
+# 6E7QOL8zAFCjbLrnENPTT5fslAjkBDO5ydlB+XzvZTuEQpIikeUohk0bVq+llwD2
+# 9+mp7e5s7QW3J8VgVOuVIpCwD6r9Yigw31I6jBmRceVOqOTTCOUCa+F0vluOdcLs
+# QeSrQCO1x9CqWLPbzLtqgayx1AA9j/C5yEqiIlEy5WAIUR6mvFnYvWn47mNCwBPk
+# GKi79BPXYNXK4rF6hE/QVUGppP/RiSpN2vem3EWB/0/11A28Q/sbJW5fNZoUF2g2
+# mATQp+/ETE7FJWGTW0lsKksImTtn70V2wPLhKirUbe+90yaosUk/Yd1aLIv6tanR
+# l/wTV/P1/nuKv8+4tLuKUhwMTJFRliolUWrnjc5RQoepaWUNAXlJxGJIQjMkPpay
+# 4fdtTWvIgg==
 # SIG # End signature block
