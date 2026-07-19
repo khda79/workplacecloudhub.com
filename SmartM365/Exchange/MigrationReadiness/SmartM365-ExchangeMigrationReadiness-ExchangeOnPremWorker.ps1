@@ -19,7 +19,7 @@ param(
 
 Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
-$workerVersion = '1.11.10'
+$workerVersion = '1.11.12'
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
@@ -27,7 +27,7 @@ $OutputEncoding = $utf8
 $enabledChecks = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $workerStartedAt = Get-Date
 $workerRunId = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { '-' } else { Split-Path $DiagnosticsDirectory -Leaf }
-$script:WorkerLogPath = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { '' } else { Join-Path $DiagnosticsDirectory 'Exchange2016-Worker.log' }
+$script:WorkerLogPath = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { '' } else { Join-Path $DiagnosticsDirectory 'ExchangeOnPrem-Worker.log' }
 
 function Test-WorkerCheckEnabled {
     param([Parameter(Mandatory)][string]$CheckId)
@@ -57,7 +57,7 @@ function Write-WorkerChildLog {
 
 function Write-WorkerLog {
     param([ValidateSet('DEBUG','INFO','WARN','ERROR','SUCCESS')][string]$Level,[string]$Message)
-    Write-WorkerChildLog -Path $script:WorkerLogPath -Level $Level -Message ("[Component=Exchange2016Worker] [ElapsedMs={0}] {1}" -f ([math]::Round(((Get-Date)-$workerStartedAt).TotalMilliseconds)),($Message -replace '[\r\n]+',' | '))
+    Write-WorkerChildLog -Path $script:WorkerLogPath -Level $Level -Message ("[Component=ExchangeOnPremWorker] [ElapsedMs={0}] {1}" -f ([math]::Round(((Get-Date)-$workerStartedAt).TotalMilliseconds)),($Message -replace '[\r\n]+',' | '))
 }
 
 function Format-WorkerError {
@@ -257,7 +257,7 @@ function Invoke-WorkerRecipientAddressBatch {
     $batchInputPath = Join-Path $batchRoot 'input.clixml'
     $batchOutputPath = Join-Path $batchRoot 'output.clixml'
     $batchErrorPath = Join-Path $batchRoot 'error.txt'
-    $logFileName = if ($BatchNumber -gt 0) { "Exchange2016-SmtpBatch-{0:D3}.log" -f $BatchNumber } else { "Exchange2016-SmtpBatch-{0}.log" -f [guid]::NewGuid().ToString('N') }
+    $logFileName = if ($BatchNumber -gt 0) { "ExchangeOnPrem-SmtpBatch-{0:D3}.log" -f $BatchNumber } else { "ExchangeOnPrem-SmtpBatch-{0}.log" -f [guid]::NewGuid().ToString('N') }
     $batchLogPath = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { Join-Path $batchRoot $logFileName } else { Join-Path $DiagnosticsDirectory $logFileName }
     $process = $null
     $started = Get-Date
@@ -292,7 +292,7 @@ function Invoke-WorkerRecipientAddressBatch {
                 Write-WorkerChildLog -Path $batchLogPath -Level WARN -Message 'Cancellation requested; terminating child process.'
                 try { $process.Kill() } catch { Write-WorkerChildLog -Path $batchLogPath -Level ERROR -Message ("Child termination failed: {0}" -f $_.Exception.Message) }
                 [void]$process.WaitForExit(5000)
-                throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.')
+                throw [OperationCanceledException]::new('Exchange on-premises worker cancellation requested.')
             }
             if ((Get-Date) -ge $deadline) {
                 Write-WorkerChildLog -Path $batchLogPath -Level WARN -Message ("Timeout reached after {0} second(s); terminating child process." -f $TimeoutSeconds)
@@ -359,7 +359,7 @@ function Initialize-WorkerAddressConflictEvidence {
     $errorCount = 0
     $childLogPaths = New-Object System.Collections.Generic.List[string]
     for ($batchIndex = 0; $batchIndex -lt $batchCount; $batchIndex++) {
-        if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
+        if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange on-premises worker cancellation requested.') }
         $offset = $batchIndex * $normalizedBatchSize
         $last = [math]::Min($allAddresses.Count - 1, $offset + $normalizedBatchSize - 1)
         $batchAddresses = @($allAddresses[$offset..$last])
@@ -433,9 +433,9 @@ function Get-WorkerFailureEvidence {
     return [pscustomobject][ordered]@{
         EmailAddress = $EmailAddress
         Available = $false
-        Source = "Local Exchange 2016 Management Shell on $env:COMPUTERNAME"
+        Source = "Local Exchange on-premises Management Shell on $env:COMPUTERNAME"
         SourceTimestamp = $now
-        Message = "Exchange 2016 mailbox collection failed: $Message"
+        Message = "Exchange on-premises mailbox collection failed: $Message"
         Mailboxes = @()
         RemoteMailboxes = @()
         MailUsers = @()
@@ -454,7 +454,7 @@ function Get-WorkerFailureEvidence {
         InboxRulesAvailable = $false
         DatabaseHealth = @()
         DatabaseHealthAvailable = $false
-        DatabaseHealthSource = "Local Exchange 2016 Management Shell mailbox database on $env:COMPUTERNAME"
+        DatabaseHealthSource = "Local Exchange on-premises Management Shell mailbox database on $env:COMPUTERNAME"
         DatabaseHealthSourceTimestamp = $now
         DeliveryRestrictionsAvailable = $false
         AddressConflicts = @()
@@ -483,13 +483,62 @@ function Get-HybridEvidence {
         MrsProxyAvailable = [bool]$ews.Success
         MrsProxyEnabled = $enabledEws.Count -gt 0
         MrsProxyMessage = if (-not $ews.Success) { $ews.ErrorMessage } elseif ($enabledEws.Count -gt 0) { "MRSProxy enabled on $($enabledEws.Count) EWS virtual directorie(s)." } else { 'No EWS virtual directory has MRSProxy enabled.' }
-        MrsProxySource = 'Local Exchange 2016 Management Shell EWS virtual directories'
+        MrsProxySource = 'Local Exchange on-premises Management Shell EWS virtual directories'
         MrsProxySourceTimestamp = $collectedAt
         OAuthAvailable = [bool]($org.Success -and $ioc.Success)
         OAuthHealthy = [bool]($oauthEnabled -and $enabledIoc.Count -gt 0)
         OAuthMessage = if (-not $org.Success -or -not $ioc.Success) { (@($org.ErrorMessage, $ioc.ErrorMessage) | Where-Object { $_ } | Select-Object -Unique) -join ' | ' } else { "OAuth2ClientProfileEnabled=$oauthEnabled; EnabledIntraOrganizationConnector=$($enabledIoc.Count -gt 0)." }
-        OAuthSource = 'Local Exchange 2016 Management Shell hybrid configuration'
+        OAuthSource = 'Local Exchange on-premises Management Shell hybrid configuration'
         OAuthSourceTimestamp = $collectedAt
+    }
+}
+
+
+function Get-WorkerExchangeProductName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$Major,
+        [Parameter(Mandatory)][int]$Minor,
+        [Parameter(Mandatory)][int]$Build
+    )
+
+    if ($Major -eq 15 -and $Minor -eq 1) { return 'Exchange Server 2016' }
+    if (($Major -eq 15 -and $Minor -eq 2 -and $Build -ge 2562) -or ($Major -eq 15 -and $Minor -gt 2)) {
+        return 'Exchange Server Subscription Edition'
+    }
+    if ($Major -eq 15 -and $Minor -eq 2) { return 'Exchange Server 2019' }
+    throw "Unsupported Exchange server version '$Major.$Minor.$Build'. Supported products are Exchange Server 2016, 2019 and Subscription Edition."
+}
+
+function Get-WorkerExchangeServerInfo {
+    [CmdletBinding()]
+    param()
+
+    $servers = @(Get-ExchangeServer -ErrorAction Stop)
+    if ($servers.Count -eq 0) {
+        throw 'Get-ExchangeServer returned no Exchange server.'
+    }
+    $localServers = @($servers | Where-Object {
+        [string]$_.Name -ieq $env:COMPUTERNAME -or
+        ([string]$_.Fqdn -split '\.')[0] -ieq $env:COMPUTERNAME
+    })
+    $server = if ($localServers.Count -gt 0) { $localServers[0] } else { $servers[0] }
+    $versionText = [string]$server.AdminDisplayVersion
+    if ($versionText -notmatch '(?i)Version\s+(?<Major>\d+)\.(?<Minor>\d+)\s+\(Build\s+(?<Build>\d+)\.(?<Revision>\d+)\)') {
+        throw "Unable to identify the Exchange product from AdminDisplayVersion '$versionText'."
+    }
+    $major = [int]$Matches.Major
+    $minor = [int]$Matches.Minor
+    $build = [int]$Matches.Build
+    $revision = [int]$Matches.Revision
+    $product = Get-WorkerExchangeProductName -Major $major -Minor $minor -Build $build
+    return [pscustomobject][ordered]@{
+        ServerName = [string]$server.Name
+        Fqdn = [string]$server.Fqdn
+        Product = $product
+        AdminDisplayVersion = $versionText
+        Build = '{0}.{1}.{2}.{3}' -f $major,$minor,$build,$revision
+        Edition = [string]$server.Edition
     }
 }
 
@@ -511,7 +560,7 @@ if ($RecipientBatchMode) {
             Add-PSSnapin -Name $RecipientBatchSnapInName -ErrorAction Stop
         }
         foreach ($requiredCommand in @('Set-ADServerSettings','Get-Recipient')) {
-            if (-not (Get-Command -Name $requiredCommand -ErrorAction SilentlyContinue)) { throw "Required Exchange 2016 command '$requiredCommand' is unavailable." }
+            if (-not (Get-Command -Name $requiredCommand -ErrorAction SilentlyContinue)) { throw "Required Exchange on-premises command '$requiredCommand' is unavailable." }
         }
         Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop | Out-Null
         Write-WorkerChildLog -Path $RecipientBatchLogPath -Level INFO -Message ("Executing forest-wide Get-Recipient filter; filterLength={0}." -f $recipientFilter.Length)
@@ -542,6 +591,15 @@ if ($SelfTest) {
             throw 'Windows PowerShell 5.1 partial command error tracking self-test returned an unexpected result.'
         }
         [void]$items.Add([pscustomobject]@{ Name = 'partial-command-error-tracking'; Result = 'PASS' })
+        $mappedProducts = @(
+            Get-WorkerExchangeProductName -Major 15 -Minor 1 -Build 2507
+            Get-WorkerExchangeProductName -Major 15 -Minor 2 -Build 1748
+            Get-WorkerExchangeProductName -Major 15 -Minor 2 -Build 2562
+        )
+        if ($mappedProducts[0] -ne 'Exchange Server 2016' -or $mappedProducts[1] -ne 'Exchange Server 2019' -or $mappedProducts[2] -ne 'Exchange Server Subscription Edition') {
+            throw 'Exchange on-premises build-to-product mapping self-test returned an unexpected result.'
+        }
+        [void]$items.Add([pscustomobject]@{ Name = 'exchange-product-version-mapping'; Result = 'PASS' })
         $batchMechanics = Invoke-WorkerRecipientAddressBatch -Addresses @('selftest@example.invalid') -TimeoutSeconds 5 -SnapInName 'SmartM365.Nonexistent.Exchange.SnapIn' -TestDelaySeconds 30 -DiagnosticsDirectory $DiagnosticsDirectory -BatchNumber 1
         if ($batchMechanics.Success -or -not $batchMechanics.TimedOut -or [string]::IsNullOrWhiteSpace([string]$batchMechanics.ErrorMessage) -or [double]$batchMechanics.DurationSeconds -gt 12) {
             throw 'Windows PowerShell 5.1 recipient batch timeout/termination self-test returned an unexpected result.'
@@ -556,7 +614,7 @@ if ($SelfTest) {
         }
         $payload | Export-Clixml -LiteralPath $selfTestPath -Depth 12 -Force
         $roundTrip = Import-Clixml -LiteralPath $selfTestPath
-        if (@($roundTrip.Items).Count -ne 3 -or [string]$roundTrip.Items[0].Result -ne 'PASS' -or @($roundTrip.Evidence).Count -ne 1 -or @($roundTrip.Errors).Count -ne 1) {
+        if (@($roundTrip.Items).Count -ne 4 -or [string]$roundTrip.Items[0].Result -ne 'PASS' -or @($roundTrip.Evidence).Count -ne 1 -or @($roundTrip.Errors).Count -ne 1) {
             throw 'Windows PowerShell 5.1 CLIXML nested collection round-trip returned an unexpected result.'
         }
         Write-WorkerLog -Level SUCCESS -Message 'Self-test completed successfully.'
@@ -580,17 +638,18 @@ try {
     if (-not (Get-PSSnapin -Name $snapInName -ErrorAction SilentlyContinue)) {
         Add-PSSnapin -Name $snapInName -ErrorAction Stop
     }
-    foreach ($requiredCommand in @('Set-ADServerSettings', 'Get-Mailbox', 'Get-RemoteMailbox', 'Get-MailUser', 'Get-Recipient', 'Get-MailboxStatistics')) {
+    foreach ($requiredCommand in @('Set-ADServerSettings', 'Get-ExchangeServer', 'Get-Mailbox', 'Get-RemoteMailbox', 'Get-MailUser', 'Get-Recipient', 'Get-MailboxStatistics')) {
         if (-not (Get-Command -Name $requiredCommand -ErrorAction SilentlyContinue)) {
-            throw "Required Exchange 2016 command '$requiredCommand' is unavailable after loading $snapInName."
+            throw "Required Exchange on-premises command '$requiredCommand' is unavailable after loading $snapInName."
         }
     }
     Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop | Out-Null
+    $exchangeServerInfo = Get-WorkerExchangeServerInfo
     $snapInTimer.Stop()
-    Write-WorkerLog -Level SUCCESS -Message "Exchange snap-in and required commands validated; ViewEntireForest enabled. DurationMs=$($snapInTimer.ElapsedMilliseconds); SnapIn=$snapInName."
+    Write-WorkerLog -Level SUCCESS -Message "Exchange snap-in and required commands validated; Product=$($exchangeServerInfo.Product); Build=$($exchangeServerInfo.Build); Server=$($exchangeServerInfo.ServerName); Edition=$($exchangeServerInfo.Edition); ViewEntireForest enabled. DurationMs=$($snapInTimer.ElapsedMilliseconds); SnapIn=$snapInName."
 
     if ($ValidateOnly) {
-        Write-Output "VALIDATION_OK|$workerVersion|$env:COMPUTERNAME|$($PSVersionTable.PSVersion)"
+        Write-Output "VALIDATION_OK|$workerVersion|$env:COMPUTERNAME|$($PSVersionTable.PSVersion)|$($exchangeServerInfo.Product)|$($exchangeServerInfo.Build)|$($exchangeServerInfo.ServerName)"
         exit 0
     }
     if (-not (Test-Path -LiteralPath $InputPath -PathType Leaf)) {
@@ -625,7 +684,7 @@ try {
     $addressConflictMetrics = [pscustomobject]@{ CandidateAddressCount=0; BatchCount=0; TimeoutCount=0; ErrorCount=0; BatchSize=$smtpBatchSize; TimeoutSeconds=$smtpBatchTimeoutSeconds; DurationSeconds=0; DiagnosticsDirectory=$DiagnosticsDirectory; ChildLogPaths=@() }
     $index = 0
     foreach ($email in $emails) {
-        if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
+        if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange on-premises worker cancellation requested.') }
         $index++
         $mailboxTimer=[Diagnostics.Stopwatch]::StartNew()
         $message = ''
@@ -752,7 +811,7 @@ try {
                         $rights = @(ConvertTo-TextArray $permission.AccessRights)
                         $delegate = [string]$permission.User
                         if ($permission.IsInherited -or $rights -notcontains 'FullAccess' -or $delegate -match 'NT AUTHORITY|S-1-5-|SELF') { continue }
-                        [void]$permissions.Add([pscustomobject]@{ PermissionType = 'FullAccess'; Delegate = $delegate; IsInherited = $false; Source = 'Exchange2016Worker' })
+                        [void]$permissions.Add([pscustomobject]@{ PermissionType = 'FullAccess'; Delegate = $delegate; IsInherited = $false; Source = 'ExchangeOnPremWorker' })
                     }
 
                     $sendAsPermissionResult = Invoke-WorkerCommand -Name 'Get-ADPermission' -Parameters @{ Identity = $mailboxes[0].DistinguishedName }
@@ -760,10 +819,10 @@ try {
                     $sendAsPermissionSuccess = [bool]$sendAsPermissionResult.Success
                     foreach ($permission in @($sendAsPermissionResult.Rows)) {
                         if ($permission.IsInherited -or @(ConvertTo-TextArray $permission.ExtendedRights) -notcontains 'Send-As' -or $permission.Deny) { continue }
-                        [void]$permissions.Add([pscustomobject]@{ PermissionType = 'SendAs'; Delegate = [string]$permission.User; IsInherited = $false; Source = 'Exchange2016Worker' })
+                        [void]$permissions.Add([pscustomobject]@{ PermissionType = 'SendAs'; Delegate = [string]$permission.User; IsInherited = $false; Source = 'ExchangeOnPremWorker' })
                     }
                     foreach ($delegate in @($mailboxes[0].GrantSendOnBehalfTo)) {
-                        [void]$permissions.Add([pscustomobject]@{ PermissionType = 'SendOnBehalf'; Delegate = [string]$delegate; IsInherited = $false; Source = 'Exchange2016Worker' })
+                        [void]$permissions.Add([pscustomobject]@{ PermissionType = 'SendOnBehalf'; Delegate = [string]$delegate; IsInherited = $false; Source = 'ExchangeOnPremWorker' })
                     }
                 }
             }
@@ -792,9 +851,9 @@ try {
             [void]$evidence.Add([pscustomobject][ordered]@{
                 EmailAddress = $email
                 Available = $coreAvailable
-                Source = "Local Exchange 2016 Management Shell on $env:COMPUTERNAME"
+                Source = "Local Exchange on-premises Management Shell on $env:COMPUTERNAME"
                 SourceTimestamp = Get-Date
-                Message = if (-not $coreAvailable) { 'Exchange 2016 lookup failed: ' + ($errors -join ' | ') } elseif ($mailboxErrors.Count -gt 0) { $message } else { 'Exchange 2016 evidence collected through direct local cmdlets.' }
+                Message = if (-not $coreAvailable) { 'Exchange on-premises lookup failed: ' + ($errors -join ' | ') } elseif ($mailboxErrors.Count -gt 0) { $message } else { 'Exchange on-premises evidence collected through direct local cmdlets.' }
                 Mailboxes = $mailboxes
                 RemoteMailboxes = $remoteMailboxes
                 MailUsers = $mailUsers
@@ -813,7 +872,7 @@ try {
                 InboxRulesAvailable = $inboxRulesAvailable
                 DatabaseHealth = $databaseHealth
                 DatabaseHealthAvailable = $databaseHealthAvailable
-                DatabaseHealthSource = "Local Exchange 2016 Management Shell mailbox database on $env:COMPUTERNAME"
+                DatabaseHealthSource = "Local Exchange on-premises Management Shell mailbox database on $env:COMPUTERNAME"
                 DatabaseHealthSourceTimestamp = Get-Date
                 DeliveryRestrictionsAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxResult.Success)
                 AddressConflicts = @()
@@ -836,7 +895,7 @@ try {
         $addressConflictMetrics = Initialize-WorkerAddressConflictEvidence -Evidence $evidence -CandidateAddressesByEmail $candidateAddressesByEmail -BatchSize $smtpBatchSize -TimeoutSeconds $smtpBatchTimeoutSeconds -SnapInName $snapInName -DiagnosticsDirectory $DiagnosticsDirectory
         Write-WorkerLog -Level $(if($addressConflictMetrics.ErrorCount){'WARN'}else{'SUCCESS'}) -Message "SMTP uniqueness collection ended. CandidateAddressCount=$($addressConflictMetrics.CandidateAddressCount); BatchCount=$($addressConflictMetrics.BatchCount); TimeoutCount=$($addressConflictMetrics.TimeoutCount); ErrorCount=$($addressConflictMetrics.ErrorCount); DurationSeconds=$($addressConflictMetrics.DurationSeconds)."
     }
-    if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
+    if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange on-premises worker cancellation requested.') }
     Write-WorkerLog -Level INFO -Message 'Hybrid evidence collection starting.'
     $hybridEvidence = Get-HybridEvidence
     Write-WorkerLog -Level SUCCESS -Message "Hybrid evidence collection ended. MrsProxyAvailable=$($hybridEvidence.MrsProxyAvailable); MrsProxyEnabled=$($hybridEvidence.MrsProxyEnabled); OAuthAvailable=$($hybridEvidence.OAuthAvailable); OAuthHealthy=$($hybridEvidence.OAuthHealthy)."
@@ -845,6 +904,11 @@ try {
         ComputerName = $env:COMPUTERNAME
         PowerShellVersion = [string]$PSVersionTable.PSVersion
         SnapInName = $snapInName
+        ExchangeProduct = $exchangeServerInfo.Product
+        ExchangeBuild = $exchangeServerInfo.Build
+        ExchangeServerName = $exchangeServerInfo.ServerName
+        ExchangeServerFqdn = $exchangeServerInfo.Fqdn
+        ExchangeEdition = $exchangeServerInfo.Edition
         CollectedAt = Get-Date
         DurationSeconds = [math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
         MailboxEvidenceCount = $evidence.Count
@@ -881,8 +945,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvGhgSLUHqxaJk
-# XRkYk53BD+j8EFmYUwxUc5xZAjTQCKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMSCmjiYlnUS/F
+# y37H9KpM/txXlEwxbA3WlOCMPFZ82qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1015,31 +1079,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBzQ0V2bQrh9vzOqNKa6m4CPvB/SvW2RB2T62ri37dO3MA0GCSqG
-# SIb3DQEBAQUABIIBgDrycUfz4cZz3EzP/o2AF7Zca1QJmUaDhiavEi8p4ZsAn/eL
-# /+OyS4AyuvFcMfZqLo4R6xlsJSQZ3QBrc7djcbFjOTB4jX814cuRjuOJvFTc4dGN
-# ToqMkrje58m2eKnItP6kkKk7y2yggCcL1iMvZy5jBsxoml2C/xANiU8ZlbnGoTDw
-# +f+MTlncvMVD1mOTYR3v27HdqWNAgGSpI7i3TfhsWaZZgADV4tEvZ13auHpO/z5n
-# rvQRa0dalWQ/mjiKKQZ8FN+YkqcbNgpBu/zBqDO3+510Ouivol1D6YBPVH0FWNs0
-# jlqJaawYpZeQDAa1ySiGud7eTidLqvZGCL4b6wZZ0QPWmKN0w4JN/ocFtUNv0L+3
-# 8j2htdixpuRKdXJEihq/7Ld8H1dJK+Z82BCYVNoaKbZumzLkNA1ieD4ETC3WzBHT
-# sXYfzkW/MZhSrNF9x6VvkdG8UNnEEbnEpAWHVA2sN1gYkpJBPyFplOmZxxfIzRCa
-# f7WmAS8jt/dSZT2ZlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHqygpwiwzwVz9EfPuPlpYhcv9AmAsGqZixTobwMS+GhMA0GCSqG
+# SIb3DQEBAQUABIIBgC8oBNlryItnE5n/UsqhK81RJN8Owbdm808bDiwThk0ZXT9x
+# CtJvFV0c02274IFPt03sd7fRkROTgfk6RgBkW2Q395sWRePEWk8ZpEA85kCWuXwU
+# YZg55pRCGHwyXtumutzTGexDho6uUGsxbY81L/mUS2gtcbyBDmSuk5bVTaEInjvf
+# q7U3LGHLpQjbSRoXSFZ6DfBGAqepTHALumpiZ7D7MkPivvG4ns+P6w5djKGZGChh
+# vrQLX8flnuZG9fxDaDvR0n4IKN+4BQYMyEweETV2u6+KWvHjRMyShHTyvJFMOuNP
+# V570SoG/EzUAD/nR/vNFuLd/Tq2NcAiC6Lr2CR7UQ/FwqdXgeIT0R94hmCnqqPJM
+# 3nUy0YynJuLLtXa5tGS97c3YQBlWWpxrNdp1qBozgEzDWMtSMZMsIz/me36C7h1M
+# s6GNjjwDka2xKlrSG4zlLaxT+xsj2Y5z38lokuI80HOxQnL2hRwuQdSOHxYMd7oF
+# GRXnRc18+sfNi/PmbqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxODM1
-# MDJaMC8GCSqGSIb3DQEJBDEiBCBMBOQkeJd5L58jUZ29I7JiThT5A2bO4/CJoSzZ
-# R8IH6TANBgkqhkiG9w0BAQEFAASCAgBIkq4LHwfsvXiYFmvgsXmalOoBvcSHeU4K
-# 2yZ0Wz94CWHobR/S4vVTTzmHEYagrTXSBgRcKKaCH8jHPRK872qY0OpCYOakjYvk
-# RFiZn/mVP/sCzS9cMtNiOj6stjWYDWD0cUv9vUcP9seXWf3TrybzkZeeI5sgCnYF
-# S4EWJ5/ET1cqqG90h51ysUNf8hlzF4B3Ui0iyWmI4r3umgxP7xjwRCTMDRzWLE2o
-# VHq9ydfd/eWiHsRARTepaNU6z33HLZapR4OGDA8NOHykSEBiI5JGOcwqk9TP8xQO
-# QSAUVspe/cCcRTrHdzTPvCJ0SDgWeXz/8ZNtdT2DDQSpjn5qi8ITWSWKVv2uWKNH
-# uYowi7cS91En0Yx5oS6AhPMb8D8w5yLVAbtimad1PIqb86+w5KnoWJ5SEWUmwfoc
-# T/sp6ZY3IOEXO/hfvG2kPwf0H13gYov9dH1bB0P4PRZwWWrOTb4TWzp983w3Wcmj
-# f6wNfkkxoqd0QmOILP6SWv9XGcBxI4f4A9CoaT6ZMxHYMarQGrY4Oas8O3svufyX
-# kwgE2cEXgmTN3D2H2QuhUuPcydKU8ZgTRR2Z5cvDoidSnvErv1jf1pHQ/aA/aMZV
-# QnP4F7PIvHtSIPCCBB/gyiDjnDrk+6ubZWx6gg6AgWsEUNuDOPxxwfZXVeks6kbJ
-# 0mBzb+btjA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxOTIy
+# MjRaMC8GCSqGSIb3DQEJBDEiBCA0XfB1vfRnMd6Dej4RVO8ybMY7VfqFivPTToYn
+# cnF7cTANBgkqhkiG9w0BAQEFAASCAgBliEksmuaoXoMTryOdG6KQKh9gLLZHbhNQ
+# hvDzI2gdVEPbPoLlV8V7qCmQmS/L57tsySUQtO4vy4wmrWX4q3BeCj5K2vmjjo5x
+# SCiLjp1KLbVeFz+bJsKR/icBKN3p1UFZ1LzIjjwuWU3F8YcMzILgij7vyMFqYHK4
+# Fdq5tgJlfBKQEsIsC/eskXALl70TuhhoSWLCDYQ5OoCFcT3H9KuzAYREhVfLuYtk
+# NnULonn+f1jUyBnrEwlUr+ZKYmZfyTAYaAMKEsd8vKoAS9dWlHi7VHY89rFVnIS7
+# amGHuHCG673xWKsZbDu626gwCejjkAWD5ojHP4dLkP6RItA0NTk0bqA83dRNRka1
+# SE/CBDorr5ZJJaR0nNwdBHql0SCA4syDHHY2DjHD8YanXzUVbGgiGHTNqTntWMCq
+# GSNbGiXoVPWS/5RXeBY69zSWqY6U1vaSasEhkB/Nu7jDYeBSAAbCKMGwlLhdp+xM
+# djdVMegFnpX7jVzmc87APZ5ZqieowFX8G26uVxwn4D1lJE5SVwROClO2gqMCepv/
+# kAw89EojnvUPhMmPoN+L8ajGKmEPXwIKEOT2glGe9X1RlSj1DA064z1BJHWx9Fzj
+# pL8uxfDGXpgsAef9B/hYaAtH0vsKZ1oPRNgR7zg1TknC0Fza8l6GX9vUz7rwukv2
+# 0dq46pGL8w==
 # SIG # End signature block

@@ -1,12 +1,12 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.10'
+$script:SemrVersion = '1.11.12'
 $script:ActiveDirectoryDomains = @()
-$script:Exchange2016EvidenceByEmail = @{}
-$script:Exchange2016HybridEvidence = $null
-$script:Exchange2016WorkerMessage = ''
-$script:Exchange2016WorkerCollectedAt = $null
-$script:Exchange2016PreflightAttempted = $false
+$script:ExchangeOnPremEvidenceByEmail = @{}
+$script:ExchangeOnPremHybridEvidence = $null
+$script:ExchangeOnPremWorkerMessage = ''
+$script:ExchangeOnPremWorkerCollectedAt = $null
+$script:ExchangeOnPremPreflightAttempted = $false
 $script:GraphEvidenceByEmail = @{}
 $script:GraphSubscribedSkus = @()
 $script:GraphSubscribedSkuError = ''
@@ -52,7 +52,7 @@ function Get-SemrCheckCatalog {
         @('PROXY-SMTP-GLOBAL-UNIQUE','Hybrid identity','Global SMTP uniqueness','Detect SMTP ownership conflicts across directory recipients.'),
         @('PROXY-INTERNAL-DUPLICATE','Hybrid identity','Internal proxy duplicates','Detect duplicate or malformed proxyAddresses values.'),
         @('TARGET-ADDRESS-GLOBAL-UNIQUE','Hybrid identity','targetAddress uniqueness','Detect duplicate or invalid target routing addresses.'),
-        @('X500-LEGACYEXCHANGEDN','Hybrid identity','X500 preservation','Verify LegacyExchangeDN is preserved as an X500 proxy.'),
+        @('X500-LEGACYEXCHANGEDN','Hybrid identity','X500 preservation','Report whether LegacyExchangeDN is also preserved as an X500 proxy.'),
         @('SMTP-ACCEPTED-DOMAIN','Hybrid identity','Accepted SMTP domains','Verify every mailbox SMTP domain is accepted in Exchange Online.'),
         @('ONPREM-SOURCE','Exchange on-premises','On-premises source availability','Require live Exchange on-premises evidence with ViewEntireForest enabled.'),
         @('ONPREM-RECIPIENT-STATE','Exchange on-premises','Recipient state','Require one UserMailbox and no pre-existing RemoteMailbox.'),
@@ -470,18 +470,18 @@ function Get-SemrWindowsPowerShellPath {
     return $path
 }
 
-function Get-SemrExchange2016WorkerPath {
+function Get-SemrExchangeOnPremWorkerPath {
     [CmdletBinding()]
     param()
 
-    $path = Join-Path $PSScriptRoot 'SmartM365-ExchangeMigrationReadiness-Exchange2016Worker.ps1'
+    $path = Join-Path $PSScriptRoot 'SmartM365-ExchangeMigrationReadiness-ExchangeOnPremWorker.ps1'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "The local Exchange 2016 worker is missing: $path"
+        throw "The local Exchange on-premises worker is missing: $path"
     }
     return $path
 }
 
-function Test-SemrExchange2016WorkerSerialization {
+function Test-SemrExchangeOnPremWorkerSerialization {
     [CmdletBinding()]
     param()
 
@@ -493,7 +493,7 @@ function Test-SemrExchange2016WorkerSerialization {
     $startInfo.RedirectStandardError = $true
     $startInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
     $startInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
-    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Get-SemrExchange2016WorkerPath), '-SelfTest')) {
+    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Get-SemrExchangeOnPremWorkerPath), '-SelfTest')) {
         [void]$startInfo.ArgumentList.Add([string]$argument)
     }
     $process = [Diagnostics.Process]::Start($startInfo)
@@ -519,10 +519,10 @@ function Connect-SemrOnPremisesExchange {
     [CmdletBinding()]
     param()
 
-    $script:Exchange2016PreflightAttempted = $true
-    [void](Test-SemrExchange2016WorkerSerialization)
+    $script:ExchangeOnPremPreflightAttempted = $true
+    [void](Test-SemrExchangeOnPremWorkerSerialization)
     $powershellPath = Get-SemrWindowsPowerShellPath
-    $workerPath = Get-SemrExchange2016WorkerPath
+    $workerPath = Get-SemrExchangeOnPremWorkerPath
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $powershellPath
     $startInfo.UseShellExecute = $false
@@ -537,29 +537,32 @@ function Connect-SemrOnPremisesExchange {
 
     $process = [Diagnostics.Process]::Start($startInfo)
     if (-not $process) {
-        throw 'The local Windows PowerShell 5.1 Exchange 2016 validation process could not be started.'
+        throw 'The local Windows PowerShell 5.1 Exchange on-premises validation process could not be started.'
     }
     try {
         if (-not $process.WaitForExit(120000)) {
             try { $process.Kill() } catch { $null = $_ }
-            throw 'The local Exchange 2016 preflight exceeded 120 seconds.'
+            throw 'The local Exchange on-premises preflight exceeded 120 seconds.'
         }
         $standardOutput = $process.StandardOutput.ReadToEnd().Trim()
         $standardError = $process.StandardError.ReadToEnd().Trim()
         if ($process.ExitCode -ne 0 -or $standardOutput -notmatch '^VALIDATION_OK\|') {
             $detail = if ($standardError) { $standardError } elseif ($standardOutput) { $standardOutput } else { "Worker exit code $($process.ExitCode)." }
-            throw "Local Exchange 2016 Management Shell preflight failed: $detail"
+            throw "Local Exchange on-premises Management Shell preflight failed: $detail"
         }
         $parts = @($standardOutput.Split('|'))
         $computerName = if ($parts.Count -gt 2) { $parts[2] } else { $env:COMPUTERNAME }
         $psVersion = if ($parts.Count -gt 3) { $parts[3] } else { '5.1' }
-        $script:Exchange2016WorkerMessage = "Local Exchange 2016 Management Shell validated on $computerName with Windows PowerShell $psVersion; ViewEntireForest enabled."
+        $exchangeProduct = if ($parts.Count -gt 4) { $parts[4] } else { 'Exchange Server on-premises' }
+        $exchangeBuild = if ($parts.Count -gt 5) { $parts[5] } else { 'Unknown' }
+        $exchangeServerName = if ($parts.Count -gt 6) { $parts[6] } else { $computerName }
+        $script:ExchangeOnPremWorkerMessage = "$exchangeProduct build $exchangeBuild Management Shell validated on $exchangeServerName with Windows PowerShell $psVersion; ViewEntireForest enabled."
         $script:ConnectionState.OnPremisesExchange = $true
         return Get-SemrConnectionState
     }
     catch {
         $script:ConnectionState.OnPremisesExchange = $false
-        $script:Exchange2016WorkerMessage = "Local Exchange 2016 Management Shell unavailable. $($_.Exception.Message)"
+        $script:ExchangeOnPremWorkerMessage = "Local Exchange on-premises Management Shell unavailable. $($_.Exception.Message)"
         throw
     }
     finally {
@@ -567,7 +570,7 @@ function Connect-SemrOnPremisesExchange {
     }
 }
 
-function Initialize-SemrExchange2016Evidence {
+function Initialize-SemrExchangeOnPremEvidence {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string[]]$EmailAddresses,
@@ -579,11 +582,11 @@ function Initialize-SemrExchange2016Evidence {
     )
 
     if (-not $script:ConnectionState.OnPremisesExchange) {
-        return [pscustomobject]@{ Available = $false; Message = 'Local Exchange 2016 Management Shell preflight has not succeeded.'; MailboxCount = 0 }
+        return [pscustomobject]@{ Available = $false; Message = 'Local Exchange on-premises Management Shell preflight has not succeeded.'; MailboxCount = 0 }
     }
     $powershellPath = Get-SemrWindowsPowerShellPath
-    $workerPath = Get-SemrExchange2016WorkerPath
-    $runtimeRoot = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-ExchangeMigrationReadiness\Exchange2016-{0}" -f [guid]::NewGuid().ToString('N'))
+    $workerPath = Get-SemrExchangeOnPremWorkerPath
+    $runtimeRoot = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-ExchangeMigrationReadiness\ExchangeOnPrem-{0}" -f [guid]::NewGuid().ToString('N'))
     $inputPath = Join-Path $runtimeRoot 'mailboxes.clixml'
     $outputPath = Join-Path $runtimeRoot 'evidence.clixml'
     $errorPath = Join-Path $runtimeRoot 'error.txt'
@@ -608,8 +611,8 @@ function Initialize-SemrExchange2016Evidence {
             [void]$startInfo.ArgumentList.Add([string]$argument)
         }
         $process = [Diagnostics.Process]::Start($startInfo)
-        if (-not $process) { throw 'The local Exchange 2016 evidence worker could not be started.' }
-        if ($ProgressCallback) { & $ProgressCallback 0 0 ("Exchange 2016 worker started; PID={0}; diagnostics={1}" -f $process.Id, $DiagnosticsDirectory) }
+        if (-not $process) { throw 'The local Exchange on-premises evidence worker could not be started.' }
+        if ($ProgressCallback) { & $ProgressCallback 0 0 ("Exchange on-premises worker started; PID={0}; diagnostics={1}" -f $process.Id, $DiagnosticsDirectory) }
 
         $lastProgress = ''
         $cancelRequestedAt = $null
@@ -618,7 +621,7 @@ function Initialize-SemrExchange2016Evidence {
                 if (-not $cancelRequestedAt) {
                     $cancelRequestedAt = Get-Date
                     [IO.File]::WriteAllText($cancelPath, 'Cancellation requested', [Text.UTF8Encoding]::new($false))
-                    if ($ProgressCallback) { & $ProgressCallback 0 0 'Exchange 2016 cancellation requested; stopping the worker...' }
+                    if ($ProgressCallback) { & $ProgressCallback 0 0 'Exchange on-premises cancellation requested; stopping the worker...' }
                 }
                 elseif (((Get-Date) - $cancelRequestedAt).TotalSeconds -ge 3) {
                     try { $process.Kill($true) } catch { try { $process.Kill() } catch { $null = $_ } }
@@ -634,38 +637,38 @@ function Initialize-SemrExchange2016Evidence {
                             $current = 0; $total = 0
                             [void][int]::TryParse($parts[0], [ref]$current)
                             [void][int]::TryParse($parts[1], [ref]$total)
-                            & $ProgressCallback $current $total ("Exchange 2016 - {0}" -f $parts[2])
+                            & $ProgressCallback $current $total ("Exchange on-premises - {0}" -f $parts[2])
                         }
-                        else { & $ProgressCallback 0 0 'Collecting local Exchange 2016 evidence...' }
+                        else { & $ProgressCallback 0 0 'Collecting local Exchange on-premises evidence...' }
                     }
                 }
                 catch { $null = $_ }
             }
         }
         if ($cancelRequestedAt -or ($CancellationCheck -and (& $CancellationCheck))) {
-            throw [OperationCanceledException]::new('Local Exchange 2016 evidence collection was cancelled by the operator.')
+            throw [OperationCanceledException]::new('Local Exchange on-premises evidence collection was cancelled by the operator.')
         }
         if ($process.ExitCode -ne 0) {
             $workerError = if (Test-Path -LiteralPath $errorPath -PathType Leaf) { [IO.File]::ReadAllText($errorPath) } else { "Worker exit code $($process.ExitCode)." }
-            throw "Local Exchange 2016 evidence collection failed: $workerError"
+            throw "Local Exchange on-premises evidence collection failed: $workerError"
         }
         if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
-            throw 'The local Exchange 2016 worker completed without returning evidence.'
+            throw 'The local Exchange on-premises worker completed without returning evidence.'
         }
 
         $workerResult = Import-Clixml -LiteralPath $outputPath
-        if ($ProgressCallback) { $completeCount = @($workerResult.Evidence).Count; & $ProgressCallback $completeCount $completeCount 'Exchange 2016 - Complete' }
-        $script:Exchange2016EvidenceByEmail = @{}
+        if ($ProgressCallback) { $completeCount = @($workerResult.Evidence).Count; & $ProgressCallback $completeCount $completeCount 'Exchange on-premises - Complete' }
+        $script:ExchangeOnPremEvidenceByEmail = @{}
         foreach ($entry in @($workerResult.Evidence)) {
             $key = ([string]$entry.EmailAddress).Trim().ToLowerInvariant()
-            if ($key) { $script:Exchange2016EvidenceByEmail[$key] = $entry }
+            if ($key) { $script:ExchangeOnPremEvidenceByEmail[$key] = $entry }
         }
-        $script:Exchange2016HybridEvidence = $workerResult.Hybrid
-        $script:Exchange2016WorkerCollectedAt = $workerResult.CollectedAt
+        $script:ExchangeOnPremHybridEvidence = $workerResult.Hybrid
+        $script:ExchangeOnPremWorkerCollectedAt = $workerResult.CollectedAt
         $partialErrorCount = [int](Get-SemrPropertyValue -InputObject $workerResult -Names @('PartialErrorCount') -Default 0)
         $fatalErrorCount = [int](Get-SemrPropertyValue -InputObject $workerResult -Names @('FatalErrorCount') -Default $workerResult.ErrorCount)
-        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; command errors=$($workerResult.ErrorCount) (partial=$partialErrorCount, fatal=$fatalErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s); child logs=$($workerResult.SmtpUniquenessDiagnosticsDirectory)."
-        return [pscustomobject]@{ Available = $true; Message = $script:Exchange2016WorkerMessage; MailboxCount = $script:Exchange2016EvidenceByEmail.Count; ErrorCount = [int]$workerResult.ErrorCount; DurationSeconds = $workerResult.DurationSeconds }
+        $script:ExchangeOnPremWorkerMessage = "Collected $($script:ExchangeOnPremEvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local $($workerResult.ExchangeProduct) build $($workerResult.ExchangeBuild) cmdlets on $($workerResult.ExchangeServerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; command errors=$($workerResult.ErrorCount) (partial=$partialErrorCount, fatal=$fatalErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s); child logs=$($workerResult.SmtpUniquenessDiagnosticsDirectory)."
+        return [pscustomobject]@{ Available = $true; Message = $script:ExchangeOnPremWorkerMessage; MailboxCount = $script:ExchangeOnPremEvidenceByEmail.Count; ErrorCount = [int]$workerResult.ErrorCount; DurationSeconds = $workerResult.DurationSeconds }
     }
     finally {
         if ($process) { $process.Dispose() }
@@ -1000,11 +1003,11 @@ function Disconnect-SemrSession {
         $script:ConnectionState[$key] = $false
     }
     $script:ActiveDirectoryDomains = @()
-    $script:Exchange2016EvidenceByEmail = @{}
-    $script:Exchange2016HybridEvidence = $null
-    $script:Exchange2016WorkerMessage = ''
-    $script:Exchange2016WorkerCollectedAt = $null
-    $script:Exchange2016PreflightAttempted = $false
+    $script:ExchangeOnPremEvidenceByEmail = @{}
+    $script:ExchangeOnPremHybridEvidence = $null
+    $script:ExchangeOnPremWorkerMessage = ''
+    $script:ExchangeOnPremWorkerCollectedAt = $null
+    $script:ExchangeOnPremPreflightAttempted = $false
     $script:GraphEvidenceByEmail = @{}
     $script:GraphSubscribedSkus = @()
     $script:GraphSubscribedSkuError = ''
@@ -1048,13 +1051,13 @@ function Initialize-SemrLiveSourceConnections {
     $result.ActiveDirectoryLive = [bool]$script:ConnectionState.ActiveDirectory
 
     if (-not $script:ConnectionState.OnPremisesExchange) {
-        if ($script:Exchange2016PreflightAttempted) {
-            $result.ExchangeOnPremisesMessage = "$($script:Exchange2016WorkerMessage) The assessment will be INCOMPLETE."
+        if ($script:ExchangeOnPremPreflightAttempted) {
+            $result.ExchangeOnPremisesMessage = "$($script:ExchangeOnPremWorkerMessage) The assessment will be INCOMPLETE."
         }
         else {
             try {
                 Connect-SemrOnPremisesExchange | Out-Null
-                $result.ExchangeOnPremisesMessage = $script:Exchange2016WorkerMessage
+                $result.ExchangeOnPremisesMessage = $script:ExchangeOnPremWorkerMessage
             }
             catch {
                 $result.ExchangeOnPremisesMessage = "Live Exchange on-premises unavailable. The assessment will be INCOMPLETE. $($_.Exception.Message)"
@@ -1062,7 +1065,7 @@ function Initialize-SemrLiveSourceConnections {
         }
     }
     else {
-        $result.ExchangeOnPremisesMessage = $script:Exchange2016WorkerMessage
+        $result.ExchangeOnPremisesMessage = $script:ExchangeOnPremWorkerMessage
     }
     $result.ExchangeOnPremisesLive = [bool]$script:ConnectionState.OnPremisesExchange
     return [pscustomobject]$result
@@ -1341,14 +1344,14 @@ function Get-SemrOnPremisesEvidence {
     param([Parameter(Mandatory)][string]$EmailAddress)
 
     $key = $EmailAddress.Trim().ToLowerInvariant()
-    if ($script:ConnectionState.OnPremisesExchange -and $script:Exchange2016EvidenceByEmail.ContainsKey($key)) {
-        return $script:Exchange2016EvidenceByEmail[$key]
+    if ($script:ConnectionState.OnPremisesExchange -and $script:ExchangeOnPremEvidenceByEmail.ContainsKey($key)) {
+        return $script:ExchangeOnPremEvidenceByEmail[$key]
     }
     return [pscustomobject]@{
         Available = $false
-        Source = 'Local Exchange 2016 Management Shell unavailable'
+        Source = 'Local Exchange on-premises Management Shell unavailable'
         SourceTimestamp = $null
-        Message = if ($script:Exchange2016WorkerMessage) { $script:Exchange2016WorkerMessage } else { 'No Exchange 2016 evidence was returned by the local Windows PowerShell 5.1 worker.' }
+        Message = if ($script:ExchangeOnPremWorkerMessage) { $script:ExchangeOnPremWorkerMessage } else { 'No Exchange on-premises evidence was returned by the local Windows PowerShell 5.1 worker.' }
         Mailboxes = @()
         RemoteMailboxes = @()
         MailUsers = @()
@@ -1367,7 +1370,7 @@ function Get-SemrOnPremisesEvidence {
         InboxRulesAvailable = $false
         DatabaseHealth = @()
         DatabaseHealthAvailable = $false
-        DatabaseHealthSource = 'Local Exchange 2016 Management Shell unavailable'
+        DatabaseHealthSource = 'Local Exchange on-premises Management Shell unavailable'
         DatabaseHealthSourceTimestamp = $null
         DeliveryRestrictionsAvailable = $false
         AddressConflicts = @()
@@ -1979,11 +1982,11 @@ function Get-SemrProxyConflictEvidence {
         return [pscustomobject]@{ Available = $false; Source = 'Disabled'; SourceTimestamp = $null; Conflicts = @(); PlannedWarnings = @() }
     }
     $key = $EmailAddress.Trim().ToLowerInvariant()
-    if (-not $script:ConnectionState.OnPremisesExchange -or -not $script:Exchange2016EvidenceByEmail.ContainsKey($key)) {
-        return [pscustomobject]@{ Available = $false; Source = 'Local Exchange 2016 Management Shell unavailable'; SourceTimestamp = $null; Conflicts = @(); PlannedWarnings = @() }
+    if (-not $script:ConnectionState.OnPremisesExchange -or -not $script:ExchangeOnPremEvidenceByEmail.ContainsKey($key)) {
+        return [pscustomobject]@{ Available = $false; Source = 'Local Exchange on-premises Management Shell unavailable'; SourceTimestamp = $null; Conflicts = @(); PlannedWarnings = @() }
     }
 
-    $entry = $script:Exchange2016EvidenceByEmail[$key]
+    $entry = $script:ExchangeOnPremEvidenceByEmail[$key]
     $wanted = @($Addresses | ForEach-Object { ([string]$_ -replace '^(?i:smtp:)', '').Trim().ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
     $queries = @($entry.AddressConflicts | Where-Object { $wanted -contains ([string]$_.Address).ToLowerInvariant() })
     $available = $wanted.Count -eq 0 -or ($queries.Count -eq $wanted.Count -and @($queries | Where-Object { -not $_.Available }).Count -eq 0)
@@ -2040,7 +2043,7 @@ function Add-SemrIdentityAdvancedFindings {
 
     $legacyDn = [string](Get-SemrPropertyValue $mailbox[0] @('LegacyExchangeDN') '')
     $x500 = $legacyDn -and @($raw | Where-Object { (([string]$_) -replace '^(?i:x500:)','') -ieq $legacyDn }).Count -gt 0
-    Add-SemrFinding $Findings ($Base + @{CheckId='X500-LEGACYEXCHANGEDN';Category='HybridIdentity';Severity=if(-not $legacyDn){'Warning'}elseif($x500){'Information'}else{'Critical'};Result=if(-not $legacyDn){'UNKNOWN'}elseif($x500){'PASS'}else{'FAIL'};IsBlocking=[bool]($legacyDn -and -not $x500);ObservedValue=if($legacyDn){"LegacyExchangeDN=$legacyDn; X500Present=$x500"}else{'LegacyExchangeDN unavailable'};ExpectedValue='LegacyExchangeDN preserved as X500';EvidenceSource=$source;Message=if(-not $legacyDn){'LegacyExchangeDN is unavailable.'}elseif($x500){'LegacyExchangeDN is preserved in proxyAddresses.'}else{'LegacyExchangeDN is not preserved as an X500 proxy.'};RecommendedAction=if(-not $legacyDn){'Restore the local Exchange 2016 worker property collection and rerun.'}elseif(-not $x500){'Add the exact legacyExchangeDN as an X500 proxy.'}else{''}})
+    Add-SemrFinding $Findings ($Base + @{CheckId='X500-LEGACYEXCHANGEDN';Category='HybridIdentity';Severity=if($x500){'Information'}else{'Warning'};Result=if(-not $legacyDn){'UNKNOWN'}elseif($x500){'PASS'}else{'WARN'};IsBlocking=$false;ObservedValue=if($legacyDn){"LegacyExchangeDN=$legacyDn; X500Present=$x500"}else{'LegacyExchangeDN unavailable'};ExpectedValue='LegacyExchangeDN available; matching X500 proxy recommended when the target recipient can be recreated or replaced';EvidenceSource=$source;Message=if(-not $legacyDn){'LegacyExchangeDN is unavailable.'}elseif($x500){'LegacyExchangeDN is also preserved in proxyAddresses.'}else{'No matching X500 proxy is present. This is advisory for a hybrid remote move because the source LegacyExchangeDN remains on the migrated recipient.'};RecommendedAction=if(-not $legacyDn){'Restore the local Exchange on-premises worker property collection and rerun.'}elseif(-not $x500){'If the migration process can recreate or replace the recipient object, add the exact legacyExchangeDN as an X500 proxy; otherwise document this advisory.'}else{''}})
 
     $domains = @($normalized | ForEach-Object { ($_ -split '@',2)[1] } | Where-Object { $_ } | Sort-Object -Unique)
     $unaccepted = @(if($AcceptedDomains.Available){$domains | Where-Object { $AcceptedDomains.Domains -notcontains $_ }})
@@ -2211,8 +2214,8 @@ function Get-SemrHybridAdvancedEvidence {
         OAuthAvailable=$false;OAuthHealthy=$false;OAuthMessage='Autodiscover/OAuth evidence unavailable.';OAuthSource='Unavailable';OAuthSourceTimestamp=$null
     }
 
-    if ($script:ConnectionState.OnPremisesExchange -and $script:Exchange2016HybridEvidence) {
-        $workerHybrid = $script:Exchange2016HybridEvidence
+    if ($script:ConnectionState.OnPremisesExchange -and $script:ExchangeOnPremHybridEvidence) {
+        $workerHybrid = $script:ExchangeOnPremHybridEvidence
         if (Test-SemrCheckEnabled 'HYBRID-MRSPROXY') {
             foreach ($name in @('MrsProxyAvailable','MrsProxyEnabled','MrsProxyMessage','MrsProxySource','MrsProxySourceTimestamp')) {
                 $result[$name] = Get-SemrPropertyValue -InputObject $workerHybrid -Names @($name) -Default $result[$name]
@@ -2586,12 +2589,12 @@ function Invoke-SemrAssessment {
 
     if ($script:ConnectionState.OnPremisesExchange) {
         try {
-            if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting Exchange 2016 evidence through local Windows PowerShell 5.1' }
+            if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Collecting Exchange on-premises evidence through local Windows PowerShell 5.1' }
             $exchangeProgress = if ($ProgressCallback) {
                 { param($Current,$Total,$Message) & $ProgressCallback $Current $Total '' $Message }.GetNewClosure()
             }
             else { $null }
-            $batchExchange = Initialize-SemrExchange2016Evidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress -CancellationCheck $CancellationCheck -DiagnosticsDirectory $exchangeDiagnosticsDirectory
+            $batchExchange = Initialize-SemrExchangeOnPremEvidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress -CancellationCheck $CancellationCheck -DiagnosticsDirectory $exchangeDiagnosticsDirectory
             $sourceInitialization.ExchangeOnPremisesLive = [bool]$batchExchange.Available
             $sourceInitialization.ExchangeOnPremisesMessage = [string]$batchExchange.Message
         }
@@ -2600,9 +2603,9 @@ function Invoke-SemrAssessment {
                 throw [OperationCanceledException]::new('Exchange migration readiness assessment cancelled by the operator.')
             }
             $script:ConnectionState.OnPremisesExchange = $false
-            $script:Exchange2016EvidenceByEmail = @{}
+            $script:ExchangeOnPremEvidenceByEmail = @{}
             $sourceInitialization.ExchangeOnPremisesLive = $false
-            $sourceInitialization.ExchangeOnPremisesMessage = "Local Exchange 2016 evidence collection failed. The assessment will be INCOMPLETE. $($_.Exception.Message)"
+            $sourceInitialization.ExchangeOnPremisesMessage = "Local Exchange on-premises evidence collection failed. The assessment will be INCOMPLETE. $($_.Exception.Message)"
         }
     }
     if ($ProgressCallback) { & $ProgressCallback 0 $rows.Count '' 'Testing hybrid migration endpoint' }
@@ -2758,7 +2761,7 @@ function Invoke-SemrAssessment {
             Result = if ($onPrem.Available) { 'PASS' } else { 'UNKNOWN' }; IsBlocking = -not $onPrem.Available
             ObservedValue = if ($onPrem.Available) { 'Available' } else { [string]$onPrem.Message }; ExpectedValue = 'Available Exchange on-premises evidence'; EvidenceSource = $onPremSource
             Message = if ($onPrem.Available) { 'Exchange on-premises evidence is available.' } else { 'Exchange on-premises evidence is unavailable.' }
-            RecommendedAction = if ($onPrem.Available) { '' } else { 'Restore the local Exchange 2016 worker and ViewEntireForest collection, then rerun.' }
+            RecommendedAction = if ($onPrem.Available) { '' } else { 'Restore the local Exchange on-premises worker and ViewEntireForest collection, then rerun.' }
         })
         if ($onPrem.Available) {
             $mailboxCount = @($onPrem.Mailboxes).Count
@@ -3789,7 +3792,7 @@ Export-ModuleMember -Function @(
     'Get-SemrExchangeOnlineSessionInfo',
     'Get-SemrMicrosoftGraphSessionInfo',
     'Connect-SemrActiveDirectory',
-    'Test-SemrExchange2016WorkerSerialization',
+    'Test-SemrExchangeOnPremWorkerSerialization',
     'Connect-SemrOnPremisesExchange',
     'Connect-SemrExchangeOnline',
     'Connect-SemrMicrosoftGraph',
@@ -3809,8 +3812,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoEdUfWqG1eEOx
-# vxpGCfJ8ncPL/mWHaCegHXzdu2/OMaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyQ4JoCSgyKrWy
+# dq1sJiEMsjYL6U8T6gnAF5YojrFyH6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3943,31 +3946,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICpgl0K1s/NRUOwACOgzZ7tX67+JtS4ZSRLrpu6XhlpBMA0GCSqG
-# SIb3DQEBAQUABIIBgGqR+5AwGiHgJ6dgolGlVhe6egEkrcKlZn/UssIG1BakhLqo
-# 4FCk2KbnDrizCxkGZ03ppxvuMkeZARkMOGz1C0hy9JZWHx2ceg9kLAO2DII682HX
-# Wd6aKaCqyuCSDc5/dG+VC8X5MciNqKnvFLoYtjKhXYkxlRWJrVan5G775HFUWEdQ
-# wCyIIHgXxiDPq4NDeyJ5Zsh5kXP71pSLYivzY3FJgeTWScNhDA+Hf0m420Dq7b/w
-# B1BVMKDelfbxm09Ly/IVYHZq4noxLWgDiQhYSM4phuvhsS+t3tCRxV3TFpzgmM4n
-# Vkj2DK4GaHdSDGzJvM/mtPeaUrgpRHX+HQYoF6viV/3UekmGmjvd/kURUVssti2a
-# dxFyVWGvG94FNZihqWgXRtTOp+GHODNJ5aewpHLvcMueOwPm4Lw3AveKsERM35g5
-# KaNVCU8kOznaZf3BCUhjHS7L68lONnUxX0dkICE4TutPshurCovb1O22dYvMUSeQ
-# 9mTpNZKW216IySypRaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINm9vj3ih8Hf6K1qsxPB56ZWSs+jVb5NVn8IIcviEMmaMA0GCSqG
+# SIb3DQEBAQUABIIBgH/MaFgTZ7TPd9JsordQ4LmyFs0FfYZPSVpv4eSGFOkDOkOC
+# CacFwcS6RdARk0wQD06OD/yark6/1t/cOoWjTFwChyjWWa0pYgk1SfrsuJoxCM4U
+# L7nmIZUKCX1jGfNYZ2hJBp0q1bsyhSwySAdUKpYhURbgyDs3pK+HNGTGD9Ewf5/m
+# FRCI72bUlSgHa3pD7J6CGQG/RNKYgRhCwjdJ1X0+gQll4pAJLR86XhmpQAkfUOmo
+# Q/+dKpa0Zf3z5zz7VXLHIgFC5lsVITUpSLu1KTN0e68dxA6iZYGSNnOx3lksPoZz
+# vuSoymJeHlz28fFYr6IFkc4BEWLDdBuZtlrr3TwvTg3xFzowL+dofh4Y7nqTWVzf
+# Ek3n3LQ/ii0Rhtu5U5oXXqvnweEJ29aSx6DrAh4XhJCUcoXg6sXweEEUwbyD2QWd
+# 8tS8dtAUrhstpbK5PgQRdAdEWBygjycglP4EXqP/QI25BGGK4v8iGcIaMeWO1lFP
+# /gabM8x2Nwrl/0UFg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxODM1
-# MDBaMC8GCSqGSIb3DQEJBDEiBCCGGNGcDJZO71IE9opNytLIEAz+xOBUiBTwn9QX
-# A4YqUTANBgkqhkiG9w0BAQEFAASCAgCTvg7HFvAUgW2VhodFfxKOXICqD/8NhCn1
-# kCm7tX2XzQLdTvm832pDj0qndStwbeYa8TSyKTJDZKGSuCFQmiR96wSDtCGP/AVY
-# LK/ciO6+gNzZ64RM5LQScXYAYCu4ZY3j2n0eF1Um6nJdL/j5PfiIsSR2qrGxgarl
-# GCdzK5iVFLztMpiIZVgDM1nbcW281P02shDeBfgLOkSduyVFLWkYRhv9yP5ml5tr
-# PcvLqyi0TIoLo96gvgwGYqgDSk+yZleuk6PTv+UOOHoAYORNF2QiYnUQVzPYqWqg
-# KJ6ouIkRDs31CMxeeYSTaBiTJOo0nMkplV7UjjoQXKP354mpWYvS2o0BWtqd3K6G
-# 1Xof3/rYlfq67tS4hm17/8e/0jp9zje6X9Dx1YKkzeuJolpeMRaFGQLIyXRc5ETC
-# +iqJtQgiz2T8HBdTwdTQaXBgpOhJoLcwnsJmVU3x/WScqSMmtNJuCxmuqrX6yFtz
-# 47yGxodvC7K8EoP3dQzjBZEKas5G/FnKTyo37oDnNvpNT0zvq9Ug7wIMZgHafgx7
-# SS8RFzosIWAxT0qBWlBx/REBndngG6voIHsAzi2TqFgUrRt0K2perK52ZDJNbyp0
-# hYjE5QlPhxFal+F8USgqVYN+DJXJdDgLL4FjxU9OnTcGWOsDvtimkxorWAXNK6dg
-# BcgWPh2UVA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxOTIy
+# MjVaMC8GCSqGSIb3DQEJBDEiBCAQtMPfyzFQgxDncOsx8TQo0ZrhMmMNKygucz8J
+# MBSvJjANBgkqhkiG9w0BAQEFAASCAgCIsT+9Fiq7wrokuP4i1Fu1AkgK335Jxfnl
+# LjpzUqhgvkkl7BNNWJ8TJyZrqne4DcE9q+cjYcCix5M3BBuv2nfhlVhiUj5iY043
+# Ggq+w3RVN5TkfkbC4wb+hHyNiGkxfqAmRWHEpHE17dWygAQP4D0bVEFkUi0K5iHd
+# L2NRj7rX5t0bbGciB1+wSwYO8bScfPDmum1iWxC2VQebstbbRRp1Zpq2wZKhZfW3
+# XoU82qtP7d1N5zwgVCRmuALasOCqEFeu27orQC0ULqhlofg9JMGaO2QvS4Db/5Hd
+# qUSSjGao5Zwd+FTc8ajOr0ia2d4p7ddfrzELAiU3xr90PtrB6YjJh49aDCb4OS+w
+# GmCoVvuPBy62/F0OIvx3L2dkqDMHODml2GH7gd1zt0idmhIJ43X4gP4AzVsCiKk6
+# SobUwJZFngcT9YuEdmVJsSHdcSNO4SvmaR/wVfDuuww23ZjVhTK8kC735Z+Amb0B
+# n5FUG7Z57HlHI2hiGnAieDMpvQf+7nJa2iIQ1v4k9Ng79wxCW75PzM2YYetZAlLP
+# zBae+KNb+1eE/WXtouybi4HLCljahpI7HiSBspHwlwlVVNyKfhdSMrvxQxd8w+99
+# SRB8mbs8/MU6U2FBOayEzNyExKFuz3i/ZxxuUMhTpzD3klfgZaGEjm80MFW8WFGL
+# iAYfUuB82g==
 # SIG # End signature block
