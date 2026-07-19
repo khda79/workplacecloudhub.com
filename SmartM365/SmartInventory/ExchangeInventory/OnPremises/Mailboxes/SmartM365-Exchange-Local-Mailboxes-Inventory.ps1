@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.39
+1.40
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version: 1.39
+    Version: 1.40
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -48,6 +48,8 @@ param (
     [switch]$IncludeADPermission,
     [Parameter(Mandatory = $false)]
     [switch]$OnlyADPermission,
+    [Parameter(Mandatory = $false)]
+    [switch]$CollectLargeItemStatistics,
     [Parameter(Mandatory = $false)]
     [bool]$ForceOverwriteCSV = $true,
     [Parameter(Mandatory = $false)]
@@ -253,7 +255,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.39"
+$ScriptVersion = "1.40"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -1662,6 +1664,7 @@ try { # Main try block for script execution and interruption handling
 
                 $userObj = New-Object PSObject
                 $userObj | Add-Member NoteProperty -Name "DomainName" -Value $Domain
+                $userObj | Add-Member NoteProperty -Name "InventorySchemaVersion" -Value "1.40"
                 $userObj | Add-Member NoteProperty -Name "Name" -Value $Mbx.Name
                 $userObj | Add-Member NoteProperty -Name "DisplayName" -Value $Mbx.DisplayName
                 $userObj | Add-Member NoteProperty -Name "Alias" -Value $Mbx.Alias
@@ -1784,9 +1787,33 @@ try { # Main try block for script execution and interruption handling
                     $userObj | Add-Member NoteProperty -Name "ArchiveTotalItemSize-In-MB" -Value $ArchiveTotalItemSizeMB
                     $userObj | Add-Member NoteProperty -Name "ArchiveItemCount" -Value $ArchiveTotalItemCount
 
-                    $LargeItemCount = "N/A" # Logic for this is not implemented
-                    $LargeItemThresholdMBValue = 35 # Example threshold
+                    $LargeItemThresholdMBValue = 35
+                    $LargeItemCount = "N/A"
+                    $LargeItemCollectionStatus = if ($CollectLargeItemStatistics) { 'Pending' } else { 'NotCollected' }
+                    if ($CollectLargeItemStatistics) {
+                        if (-not (Get-Command Search-Mailbox -ErrorAction SilentlyContinue)) {
+                            $LargeItemCollectionStatus = 'CommandUnavailable'
+                        }
+                        else {
+                            try {
+                                $LargeItemThresholdBytes = [int64]$LargeItemThresholdMBValue * 1MB
+                                $LargeItemEstimate = @(
+                                    Search-Mailbox -Identity $Mbx.Identity -SearchQuery "Size:>$LargeItemThresholdBytes" -EstimateResultOnly -ErrorAction Stop |
+                                        Select-Object -First 1
+                                )
+                                $LargeItemCount = if ($LargeItemEstimate.Count -eq 1 -and $null -ne $LargeItemEstimate[0].ResultItemsCount) { [int64]$LargeItemEstimate[0].ResultItemsCount } else { 0 }
+                                $LargeItemCollectionStatus = 'Collected'
+                            }
+                            catch {
+                                $LargeItemCount = 'Error'
+                                $LargeItemCollectionStatus = 'Error'
+                                Write-LogMailboxesProcessing "WARNING: Large-item estimate failed for $($Mbx.Identity): $($_.Exception.Message)"
+                            }
+                        }
+                    }
                     $userObj | Add-Member NoteProperty -Name "LargeItemCount-Over-$($LargeItemThresholdMBValue)MB" -Value $LargeItemCount
+                    $userObj | Add-Member NoteProperty -Name "LargeItemCollectionStatus" -Value $LargeItemCollectionStatus
+                    $userObj | Add-Member NoteProperty -Name "LargeItemThresholdMB" -Value $LargeItemThresholdMBValue
 
                     $MbxStatsLogEndTime = Get-Date
                     Write-LogMailboxesProcessing " -------- Processing time for MailboxStatistics for $($Mbx.Name): $($MbxStatsLogEndTime - $MbxStatsLogStartTime)"

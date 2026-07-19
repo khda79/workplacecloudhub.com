@@ -24,7 +24,7 @@ La phase sélectionnée est inscrite dans `Summary.csv` afin que le verdict rest
 - Santé de synchronisation Microsoft Entra : en Live, lecture autoritaire de `onPremisesSyncEnabled` et `onPremisesLastSyncDateTime` directement sur l’objet tenant Microsoft Graph. Le CSV `M365_Entra_AzureADConnect_SyncHealth.csv` reste contextuel uniquement et ne peut pas produire un faux PASS si Graph échoue.
 - Endpoint de migration et fraîcheur de la synchronisation tenant : contrôlés automatiquement pendant l’évaluation.
 
-Les connexions AD et Exchange 2016 sont testées avant le chargement des fallbacks. Lorsque l’AD Live est disponible, les objets du batch sont préchargés une seule fois et le volumineux `AD_Users_AllDomains.csv` n’est pas relu. L’inventaire Exchange 2016 reste disponible comme fallback automatique, et l’inventaire de santé Entra est chargé pour CacheOnly ou comme contexte en Live. La source réellement utilisée apparaît dans les findings et dans l’onglet Activity. L’onglet Sources est informatif : il n’expose plus de boutons de connexion séparés.
+Les connexions AD et Exchange 2016 sont testées avant le chargement des fallbacks. Lorsque l’AD Live est disponible, les identités du batch sont recherchées par requêtes groupées dans chaque domaine de la forêt et le volumineux `AD_Users_AllDomains.csv` n’est pas relu. Si un seul domaine échoue, la couverture Live est considérée incomplète et le fallback CSV couvre tout le batch. Les inventaires cloud ou hybrides non nécessaires en Live ne sont plus importés ; l’onglet `CSV sources` indique uniquement les fichiers réellement consultés. L’onglet Sources reste informatif et n’expose aucun bouton de connexion séparé.
 
 ### CacheOnly
 
@@ -131,7 +131,7 @@ Clés principales :
 - `Hybrid.MigrationEndpointName` : présélection facultative d’un endpoint `ExchangeRemoteMove` dans le JSON local ; le modèle reste vide. En mode Live, le GUI charge automatiquement les endpoints après l’authentification EXO, sélectionne l’unique endpoint ou demande explicitement lequel utiliser lorsqu’il y en a plusieurs. Le choix reste limité à la session et le JSON n’est jamais réécrit. En CacheOnly, la liste est désactivée et aucun test Live n’est exécuté.
 - En mode Live, Active Directory est interrogé dans chaque domaine retourné par `Get-ADForest`, avec le nom LDAP exact `mS-DS-ConsistencyGuid`. Si un domaine ne peut pas être interrogé, la couverture Live est considérée incomplète et l’application utilise le CSV AD de fallback au lieu de conclure à tort que l’identité est absente.
 - `Hybrid.TargetDeliveryDomain` : domaine `tenant.mail.onmicrosoft.com` attendu.
-- `Hybrid.ActiveMigrationWarningThreshold` : seuil consultatif du nombre de migrations actives/non terminales, `100` par défaut.
+- `Hybrid.ActiveMigrationWarningThreshold` : seuil consultatif du nombre de migrations réellement actives, `100` par défaut. Les états échoués, arrêtés ou corrompus sont exclus de cette charge et présentés séparément dans le contrôle de backlog.
 - `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` : politique explicite des SKU et quotas mailbox. Un SKU absent de la table reste `UNKNOWN` bloquant ; aucun quota générique de 100 Go n’est supposé. `SPE_F1` est le SKU technique Microsoft 365 F3 et sa limite mailbox est définie à 2 Go.
 - `EntraConnectHealth.MaximumLastSyncAgeMinutes` : ancienneté maximale de la dernière synchronisation tenant ; `120` minutes par défaut. En Live, un état désactivé, une date absente, une collecte Graph indisponible ou une synchronisation trop ancienne produit un résultat bloquant.
 - `OutputRoot` : dossier d’export, absolu ou relatif à l’application.
@@ -187,18 +187,18 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - état MailUser/mailbox Exchange Online et détection split-brain ;
 - conflits soft-deleted/inactive ;
 - migration user ou move request actif/non terminal, avec déduplication des deux représentations d’une même opération et interprétation adaptée à la phase `PreCreation` ou `ExistingBatch` ; l’erreur Exchange Online `No such request exists in specified index` est interprétée comme une absence de move, pas comme une collecte inconnue ;
-- historique de moves échoués, suspendus ou arrêtés ;
+- état d’échec, de suspension ou d’arrêt des objets de migration actuellement visibles ; les objets déjà supprimés ne sont pas présentés à tort comme un historique exhaustif ;
 - unicité et synchronisation de l’utilisateur Entra, avec vérification que le domaine de son UPN figure dans `organization.verifiedDomains` ;
 - erreurs de provisioning et identity anchor Entra ; l’ancienneté de synchronisation par objet reste informative et ne remplace pas la date de dernière synchronisation tenant collectée sur l’objet `organization` ;
-- licence actuelle, quota mailbox de la licence actuellement attribuée, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; une mailbox dépassant la limite F3/SPE_F1 est `NO-GO` tant que la licence cible effective n’est pas attribuée ou que sa taille n’est pas réduite ;
+- licence actuelle, quota mailbox de la licence actuellement attribuée, UsageLocation, capacité du SKU cible et présence d’un service plan Exchange mailbox activé ; une mailbox dépassant la limite F3/SPE_F1 est `NO-GO` tant que la licence cible effective n’est pas attribuée ou que sa taille n’est pas réduite. Un contrôle global compare aussi le nombre total de licences requises par SKU pour le batch avec les unités réellement disponibles ;
 - santé et fraîcheur de la dernière synchronisation tenant en Live directement via Microsoft Graph ; le cache reste contextuel, et CacheOnly utilise exclusivement le CSV ;
 - endpoint `ExchangeRemoteMove` en Live ; l’absence de `Test-MigrationServerAvailability` produit `UNKNOWN`, pas un faux échec de l’endpoint, tandis qu’un test réussi constitue une preuve fonctionnelle de la publication MRSProxy ;
-- MRSProxy, certificat hybride, charge active des migrations et cohérence Autodiscover/OAuth ; le contrôle OAuth est consultatif pour un move distant et ne bloque plus à lui seul la migration ;
-- avertissement documenté pour `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException`.
+- MRSProxy, certificat TLS réellement présenté par le `RemoteServer` de l’endpoint sélectionné, charge active des migrations, backlog des migrations échouées/arrêtées/corrompues et cohérence Autodiscover/OAuth ; le contrôle OAuth est consultatif pour un move distant et ne bloque plus à lui seul la migration ;
+- détection de `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException` dans `Get-MigrationUserStatistics -IncludeReport` lorsqu’un objet de migration courant existe ; une occurrence produit un `NO-GO`, l’absence d’objet courant ne produit plus un `UNKNOWN` systématique.
 
 Une source obligatoire absente reste bloquante. Un blocage confirmé (`FAIL`) produit `NO-GO`, tandis qu’une preuve bloquante indisponible produit le verdict distinct `UNKNOWN`. Une propriété non disponible dans le cache ne devient jamais un faux `PASS`. Chaque contrôle obligatoire produit explicitement un finding et `SourceTimestamp` correspond à l’horodatage réel de la source utilisée plutôt qu’à l’heure de l’évaluation.
 
-Les contrôles tenant (endpoint, MRSProxy, certificat, capacité, OAuth et synchronisation Microsoft Entra) sont évalués une seule fois. Ils apparaissent dans l’onglet `Tenant checks` et dans `Global-Findings.csv`. Seuls leurs vrais blocages sont répercutés dans le verdict de chaque mailbox, sans dupliquer les findings.
+Les contrôles tenant (endpoint, MRSProxy, certificat, charge active, backlog, capacité de licences du batch, OAuth et synchronisation Microsoft Entra) sont évalués une seule fois. Ils apparaissent dans l’onglet `Tenant checks` et dans `Global-Findings.csv`. Seuls leurs vrais blocages sont répercutés dans le verdict de chaque mailbox, sans dupliquer les findings.
 
 ## Rapports
 
