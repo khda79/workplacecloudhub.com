@@ -109,7 +109,7 @@ Official documentation:
 
 ## SharePoint Online Inventory
 
-`SharePoint/SmartM365-SPO-Inventory.ps1` uses Microsoft Graph for the baseline site/list inventory and collects tenant storage capacity through `Get-PnPTenant` by default. The SharePoint administration URL is derived automatically from the configured SharePoint hostname, a collected site URL, or the tenant `onmicrosoft.com` name. `SharePointAdminUrl` remains an optional override for atypical tenants. Use `-SkipPnPTenantCapacity` for the least-privilege Graph-only mode. Fields not exposed by Graph are exported as `NotAvailableGraphOnly` instead of failing the run.
+`SharePoint/SmartM365-SPO-Inventory.ps1` uses Microsoft Graph for the default site/list inventory. This Graph-only mode does not call `Get-PnPTenant` and does not require SharePoint `Sites.FullControl.All`. The tenant CSV still exports storage used from the site inventory; licensed capacity fields remain blank and SmartWorkplaceDashboard estimates capacity from `M365_Licenses_Tenant.csv`. Fields not exposed by Graph are exported as `NotAvailableGraphOnly` instead of failing the run.
 
 Main exports:
 
@@ -128,11 +128,12 @@ Examples:
 .\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -IncludeOneDrive -InactiveDays 180
 .\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -MaxSites 10 -DryRun
 .\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -AppendHistory -AlwaysSend
-.\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -SkipPnPTenantCapacity
+.\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod
+.\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -UsePnPTenantCapacity
 ```
 
-Required PowerShell modules for the default run: `Microsoft.Graph.Authentication` and `PnP.PowerShell`.
+Required PowerShell modules for the default run: `Microsoft.Graph.Authentication` and `ImportExcel`. `PnP.PowerShell` is required only when an optional PnP feature is enabled.
 
-Required Graph app-only permissions for the baseline inventory: `Reports.Read.All` and `Sites.Read.All`. `Directory.Read.All` is useful for owner enrichment. The default capacity step additionally requires access to the SharePoint tenant administration service.
+Required Graph app-only permissions for the baseline inventory: `Reports.Read.All` and `Sites.Read.All`. `Directory.Read.All` is useful for owner enrichment. No SharePoint tenant administration permission is required for the default run.
 
-Tenant capacity collection is enabled by default and requires access to the SharePoint tenant administration site. Manual `SharePointAdminUrl` configuration is normally unnecessary. If the endpoint cannot be derived or the app lacks access, the tenant CSV records a warning with blank capacity fields; the baseline inventory continues. Use `-SkipPnPTenantCapacity` to disable the attempt explicitly.
+Tenant capacity collection is disabled by default. `-UsePnPTenantCapacity` is an explicit opt-in for environments that accept the SharePoint API application permission `Sites.FullControl.All` with administrator consent. This tenant-wide permission is highly privileged and is never added automatically by the collector. Manual `SharePointAdminUrl` configuration is normally unnecessary because the collector derives it from tenant context. If the optional call is enabled but denied, the tenant CSV records blank capacity fields with `CapacitySource=Get-PnPTenantUnauthorized`, while the baseline Graph inventory continues. `-SkipPnPTenantCapacity` remains accepted for backward compatibility.
