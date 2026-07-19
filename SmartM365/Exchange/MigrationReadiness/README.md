@@ -27,9 +27,9 @@ Au premier assessment, le GUI inspecte les sessions EXO actives dans le processu
 
 Si une source obligatoire est indisponible, les contrôles possibles continuent, mais l’assessment est marqué `INCOMPLETE`. Une source manquante ne peut jamais produire un verdict `GO`.
 
-Le worker Exchange on-premises exécute un self-test de sérialisation CLIXML sous Windows PowerShell 5.1 avant le preflight. Une erreur limitée à une mailbox ou à une commande est isolée et produit une évidence `UNKNOWN` pour le contrôle concerné sans interrompre la collecte du reste du batch. Les erreurs partielles et fatales sont comptabilisées séparément dans le journal du worker.
+Le worker Exchange on-premises exécute un self-test de sérialisation CLIXML sous Windows PowerShell 5.1 avant le preflight. Une erreur limitée à une mailbox ou à une commande est isolée et produit une évidence `UNKNOWN` pour le contrôle concerné sans interrompre la collecte du reste du batch. Les erreurs partielles et fatales sont comptabilisées séparément dans le journal du worker et remontées avec leur mailbox, contrôle et commande dans le journal principal du GUI.
 
-Le contrôle d’unicité SMTP regroupe par défaut les adresses du batch par lots de 25 et recherche leurs propriétaires dans toute la forêt Exchange. Chaque lot est exécuté dans un processus Windows PowerShell 5.1 distinct avec un timeout de 60 secondes : le processus enfant est tué à l’expiration et le lot produit une évidence `UNKNOWN` sans figer le worker principal. Un journal par processus enfant est conservé sous `Output\Logs\ExchangeOnPremChildren\<RunId>`. Le bouton d’annulation arrête le processus enfant et termine le worker après trois secondes s’il ne répond pas.
+Le contrôle d’unicité SMTP regroupe par défaut les adresses du batch par lots de 50 et recherche leurs propriétaires dans toute la forêt Exchange. Chaque lot est exécuté dans un processus Windows PowerShell 5.1 distinct avec un timeout de 60 secondes : le processus enfant est tué à l’expiration et le lot produit une évidence `UNKNOWN` sans figer le worker principal. Un journal par processus enfant est conservé sous `Output\Logs\ExchangeOnPremChildren\<RunId>`. La taille des lots et le timeout sont configurables par `ExchangeOnPremises.SmtpUniquenessBatchSize` (1 à 50) et `ExchangeOnPremises.SmtpUniquenessBatchTimeoutSeconds` (5 à 300). Le bouton d’annulation arrête le processus enfant et termine le worker après trois secondes s’il ne répond pas.
 
 Le contrôle bloquant de connectivité hybride est le test fonctionnel `Test-MigrationServerAvailability` appliqué à l’endpoint `ExchangeRemoteMove` sélectionné. Son résultat, son message et sa durée sont journalisés. L’inventaire local de toutes les virtual directories EWS et de leur propriété `MRSProxyEnabled` est un diagnostic serveur optionnel, décoché par défaut et non bloquant ; il peut être activé dans l’onglet `Options` lors d’une investigation de topologie.
 
@@ -97,6 +97,7 @@ Clés principales :
 - `TenantProfile.RemoteRoutingDomain` : domaine de routage hybride attendu ;
 - `ExchangeOnline.UserPrincipalName` et `ExchangeOnline.DisableWam` ;
 - `MicrosoftGraph.Scopes` ;
+- `ExchangeOnPremises.SmtpUniquenessBatchSize` et `ExchangeOnPremises.SmtpUniquenessBatchTimeoutSeconds` ;
 - `Hybrid.MigrationEndpointName` : endpoint `ExchangeRemoteMove` présélectionné, facultatif ;
 - `Hybrid.TargetDeliveryDomain` et `Hybrid.ActiveMigrationWarningThreshold` ;
 - `DefaultTargetSku`, `TargetQuotaGbBySku`, `MailboxIneligibleTargetSkus` et `QuotaSafetyBufferPercent` ;
@@ -128,9 +129,9 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - domaines SMTP acceptés dans Exchange Online et domaine UPN vérifié dans Microsoft Entra ;
 - présence du LegacyExchangeDN, audit du proxy X500 correspondant (avertissement non bloquant pour un remote move hybride classique) et cohérence ExchangeGuid/ArchiveGuid ;
 - taille de mailbox contre le quota du SKU cible et de la licence actuellement attribuée ;
-- archives, Recoverable Items, limites de dossiers, gros éléments et quotas personnalisés ;
+- archives, Recoverable Items, limites de dossiers et quotas personnalisés ; le contrôle `MAILBOX-LARGE-ITEMS`, non collectable par les cmdlets live disponibles, est désactivé par défaut et reste activable dans `Options` pour une investigation ciblée ;
 - Litigation Hold et In-Place Hold ;
-- baseline Full Access, Send As et Send on Behalf ;
+- baseline Full Access, Send As et Send on Behalf, après exclusion de SELF et des groupes techniques Exchange ; les délégués sont rapprochés du batch par UPN, adresse, DN, `DOMAINE\sAMAccountName` et SID ;
 - délégations hors batch, forwarding, règles Inbox, modération et restrictions de remise ;
 - disponibilité de la base Exchange source ;
 - état Exchange Online, conflits soft-deleted/inactive et objets de migration existants ;
@@ -158,7 +159,7 @@ Output\SEMR-yyyyMMdd-HHmmss\
   SmartM365-ExchangeMigrationReadiness-SEMR-yyyyMMdd-HHmmss.html
 ```
 
-`Summary.csv` contient `AssessmentStatus`, le verdict, la taille, le SKU cible, les licences attribuées et les compteurs mailbox/tenant séparés. `Check-Coverage.csv` vérifie que chaque contrôle activé a produit exactement un résultat par mailbox ou par tenant, sans doublon ; les branches manquantes sont matérialisées en `UNKNOWN`. Le classeur ajoute les feuilles `Action Plan` et `Check Coverage`. Le HTML affiche le statut `COMPLETE/INCOMPLETE`, les sources Live, les décisions mailbox et les contrôles tenant.
+`Summary.csv` contient `AssessmentStatus`, le verdict, la taille, le SKU cible, les licences attribuées et les compteurs mailbox/tenant séparés. `DataCoverage` représente uniquement la couverture d’exécution et des sources (`Complete`, `Partial` ou `Incomplete`) ; un résultat métier `UNKNOWN` reste compté séparément et ne dégrade plus artificiellement la couverture. `Check-Coverage.csv` vérifie que chaque contrôle activé a produit exactement un résultat par mailbox ou par tenant, sans doublon ; les branches manquantes sont matérialisées en `UNKNOWN`. Le classeur ajoute les feuilles `Action Plan` et `Check Coverage`. Le HTML affiche le statut `COMPLETE/INCOMPLETE`, les sources Live, les décisions mailbox et les contrôles tenant.
 
 ## Permissions après migration
 
