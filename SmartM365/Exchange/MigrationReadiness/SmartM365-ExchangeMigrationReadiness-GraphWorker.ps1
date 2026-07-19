@@ -3,7 +3,7 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.10.0
+1.11.6
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -14,11 +14,41 @@ param(
     [string]$OutputPath = '',
     [string]$ErrorPath = '',
     [string]$ProgressPath = '',
+    [string]$LogPath = '',
     [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+$workerStartedAt = Get-Date
+$workerRunId = if ([string]::IsNullOrWhiteSpace($LogPath)) { '-' } else { Split-Path (Split-Path -Parent $LogPath) -Leaf }
+
+function Write-GraphWorkerLog {
+    param([ValidateSet('DEBUG','INFO','WARN','ERROR','SUCCESS')][string]$Level,[string]$Message)
+    if ([string]::IsNullOrWhiteSpace($LogPath)) { return }
+    try {
+        $directory = Split-Path -Parent $LogPath
+        if ($directory -and -not (Test-Path -LiteralPath $directory -PathType Container)) { [void](New-Item -Path $directory -ItemType Directory -Force) }
+        $elapsedMs = [math]::Round(((Get-Date) - $workerStartedAt).TotalMilliseconds)
+        $line = "{0} [{1}] [PID={2}] [Run={3}] [Component=GraphWorker] [ElapsedMs={4}] {5}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'),$Level,$PID,$workerRunId,$elapsedMs,($Message -replace '[\r\n]+',' | ')
+        [IO.File]::AppendAllText($LogPath,"$line`r`n",[Text.UTF8Encoding]::new($false))
+    }
+    catch { $null = $_ }
+}
+
+function Format-GraphWorkerError {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $parts = [System.Collections.Generic.List[string]]::new()
+    [void]$parts.Add("ExceptionType=$($ErrorRecord.Exception.GetType().FullName)")
+    [void]$parts.Add("Message=$($ErrorRecord.Exception.Message)")
+    if($ErrorRecord.FullyQualifiedErrorId){[void]$parts.Add("FullyQualifiedErrorId=$($ErrorRecord.FullyQualifiedErrorId)")}
+    if($ErrorRecord.CategoryInfo){[void]$parts.Add("CategoryInfo=$($ErrorRecord.CategoryInfo)")}
+    if($ErrorRecord.InvocationInfo){[void]$parts.Add("Command=$($ErrorRecord.InvocationInfo.MyCommand.Name); Script=$($ErrorRecord.InvocationInfo.ScriptName); Line=$($ErrorRecord.InvocationInfo.ScriptLineNumber); SourceLine=$(if($ErrorRecord.InvocationInfo.Line){$ErrorRecord.InvocationInfo.Line.Trim()}else{''})")}
+    if($ErrorRecord.ScriptStackTrace){[void]$parts.Add("ScriptStackTrace=$($ErrorRecord.ScriptStackTrace)")}
+    $inner=$ErrorRecord.Exception.InnerException;$depth=0
+    while($inner -and $depth -lt 5){$depth++;[void]$parts.Add("InnerException${depth}=$($inner.GetType().FullName): $($inner.Message)");$inner=$inner.InnerException}
+    return ($parts -join ' | ')
+}
 
 function Write-WorkerTextFile {
     param(
@@ -31,9 +61,13 @@ function Write-WorkerTextFile {
 }
 
 try {
+    Write-GraphWorkerLog -Level INFO -Message "Worker starting. Version=1.11.6; PowerShell=$($PSVersionTable.PSVersion); Computer=$env:COMPUTERNAME; TenantId=$TenantId; RuntimeInput=$InputPath."
+    $moduleTimer=[Diagnostics.Stopwatch]::StartNew()
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     Import-Module Microsoft.Graph.Users -ErrorAction Stop
     Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
+    $moduleTimer.Stop()
+    Write-GraphWorkerLog -Level SUCCESS -Message "Graph modules imported. DurationMs=$($moduleTimer.ElapsedMilliseconds); AuthenticationVersion=$((Get-Module Microsoft.Graph.Authentication).Version); UsersVersion=$((Get-Module Microsoft.Graph.Users).Version); DirectoryManagementVersion=$((Get-Module Microsoft.Graph.Identity.DirectoryManagement).Version)."
 
     if ($ValidateOnly) {
         foreach ($commandName in @('Connect-MgGraph', 'Get-MgUser', 'Get-MgUserLicenseDetail', 'Get-MgSubscribedSku', 'Get-MgOrganization')) {
@@ -41,7 +75,7 @@ try {
                 throw "Required Microsoft Graph command is unavailable: $commandName"
             }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.10.0'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.11.6'
         exit 0
     }
 
@@ -53,6 +87,7 @@ try {
 
     $scopes = @(Import-Clixml -LiteralPath $ScopesPath)
     $emailAddresses = @(Import-Clixml -LiteralPath $InputPath)
+    Write-GraphWorkerLog -Level INFO -Message "Runtime input loaded. ScopeCount=$($scopes.Count); MailboxCount=$($emailAddresses.Count); Scopes=$($scopes -join ',')."
     if (Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue) {
         Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     }
@@ -66,7 +101,10 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
         $connectParameters.TenantId = $TenantId
     }
+    $authenticationTimer=[Diagnostics.Stopwatch]::StartNew()
+    Write-GraphWorkerLog -Level INFO -Message 'Interactive Microsoft Graph authentication starting.'
     Connect-MgGraph @connectParameters | Out-Null
+    $authenticationTimer.Stop()
 
     $context = Get-MgContext
     if (-not $context) {
@@ -75,6 +113,7 @@ try {
     if ($TenantId -and [string]$context.TenantId -ne $TenantId) {
         throw "Microsoft Graph connected to tenant '$($context.TenantId)' instead of configured tenant '$TenantId'."
     }
+    Write-GraphWorkerLog -Level SUCCESS -Message "Authentication completed. DurationMs=$($authenticationTimer.ElapsedMilliseconds); ConnectedTenant=$($context.TenantId); Account=$($context.Account); AuthType=$($context.AuthType)."
 
     $evidence = [System.Collections.Generic.List[object]]::new()
     $uniqueEmails = @($emailAddresses | Where-Object { $_ } | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Sort-Object -Unique)
@@ -85,6 +124,8 @@ try {
         $users = @()
         $licenseDetails = @()
         $queryError = ''
+        $mailboxTimer=[Diagnostics.Stopwatch]::StartNew()
+        Write-GraphWorkerLog -Level DEBUG -Message "Mailbox query starting. Index=$current/$($uniqueEmails.Count); EmailAddress=$emailAddress."
         try {
             $escaped = $emailAddress.Replace("'", "''")
             $graphUsers = @(Get-MgUser -Filter "userPrincipalName eq '$escaped' or mail eq '$escaped'" -Property @(
@@ -127,6 +168,11 @@ try {
         }
         catch {
             $queryError = $_.Exception.Message
+            Write-GraphWorkerLog -Level ERROR -Message "Mailbox query failed. Index=$current/$($uniqueEmails.Count); EmailAddress=$emailAddress; $(Format-GraphWorkerError $_)"
+        }
+        finally {
+            $mailboxTimer.Stop()
+            Write-GraphWorkerLog -Level $(if($queryError){'WARN'}else{'SUCCESS'}) -Message "Mailbox query ended. Index=$current/$($uniqueEmails.Count); EmailAddress=$emailAddress; DurationMs=$($mailboxTimer.ElapsedMilliseconds); UserCount=$($users.Count); LicenseDetailCount=$($licenseDetails.Count); Error=$queryError."
         }
 
         [void]$evidence.Add([pscustomobject][ordered]@{
@@ -143,6 +189,8 @@ try {
     $organization = $null
     $organizationError = ''
     try {
+        $organizationTimer=[Diagnostics.Stopwatch]::StartNew()
+        Write-GraphWorkerLog -Level INFO -Message 'Tenant organization query starting.'
         $organizationRow = @(Get-MgOrganization -Property @(
             'id', 'displayName', 'onPremisesSyncEnabled', 'onPremisesLastSyncDateTime', 'verifiedDomains'
         ) -ErrorAction Stop | Select-Object -First 1)
@@ -166,10 +214,13 @@ try {
         }
         else { $organizationError = 'Microsoft Graph returned no organization object.' }
     }
-    catch { $organizationError = $_.Exception.Message }
+    catch { $organizationError = $_.Exception.Message; Write-GraphWorkerLog -Level ERROR -Message "Tenant organization query failed. $(Format-GraphWorkerError $_)" }
+    finally { if($organizationTimer){$organizationTimer.Stop();Write-GraphWorkerLog -Level $(if($organizationError){'WARN'}else{'SUCCESS'}) -Message "Tenant organization query ended. DurationMs=$($organizationTimer.ElapsedMilliseconds); Available=$($null -ne $organization); Error=$organizationError."} }
 
     $subscribedSkuError = ''
     try {
+        $skuTimer=[Diagnostics.Stopwatch]::StartNew()
+        Write-GraphWorkerLog -Level INFO -Message 'Subscribed SKU query starting.'
         $subscribedSkus = @(Get-MgSubscribedSku -All -ErrorAction Stop | ForEach-Object {
             [pscustomobject][ordered]@{
                 SkuId = [string]$_.SkuId
@@ -189,7 +240,9 @@ try {
     }
     catch {
         $subscribedSkuError = $_.Exception.Message
+        Write-GraphWorkerLog -Level ERROR -Message "Subscribed SKU query failed. $(Format-GraphWorkerError $_)"
     }
+    finally { if($skuTimer){$skuTimer.Stop();Write-GraphWorkerLog -Level $(if($subscribedSkuError){'WARN'}else{'SUCCESS'}) -Message "Subscribed SKU query ended. DurationMs=$($skuTimer.ElapsedMilliseconds); SkuCount=$($subscribedSkus.Count); Error=$subscribedSkuError."} }
 
     [pscustomobject][ordered]@{
         TenantId = [string]$context.TenantId
@@ -200,19 +253,23 @@ try {
         OrganizationError = $organizationError
         SubscribedSkuError = $subscribedSkuError
     } | Export-Clixml -LiteralPath $OutputPath -Depth 8 -Force
+    Write-GraphWorkerLog -Level SUCCESS -Message "Evidence exported. MailboxEvidenceCount=$($evidence.Count); SkuCount=$($subscribedSkus.Count); OrganizationAvailable=$($null -ne $organization); OutputPath=$OutputPath."
 }
 catch {
     $message = $_.Exception.Message
     if ($_.Exception.InnerException) {
         $message += " | InnerException: $($_.Exception.InnerException.Message)"
     }
-    Write-WorkerTextFile -Path $ErrorPath -Value $message
+    $diagnostic = Format-GraphWorkerError $_
+    Write-GraphWorkerLog -Level ERROR -Message "Fatal worker error. $diagnostic"
+    Write-WorkerTextFile -Path $ErrorPath -Value "$message`r`n$diagnostic"
     exit 1
 }
 finally {
     if (Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue) {
         Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     }
+    Write-GraphWorkerLog -Level INFO -Message "Worker exiting. TotalDurationMs=$([math]::Round(((Get-Date)-$workerStartedAt).TotalMilliseconds))."
 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

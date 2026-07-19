@@ -19,12 +19,15 @@ param(
 
 Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
-$workerVersion = '1.11.4'
+$workerVersion = '1.11.6'
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
 $OutputEncoding = $utf8
 $enabledChecks = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$workerStartedAt = Get-Date
+$workerRunId = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { '-' } else { Split-Path $DiagnosticsDirectory -Leaf }
+$script:WorkerLogPath = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { '' } else { Join-Path $DiagnosticsDirectory 'Exchange2016-Worker.log' }
 
 function Test-WorkerCheckEnabled {
     param([Parameter(Mandatory)][string]$CheckId)
@@ -46,10 +49,39 @@ function Write-WorkerChildLog {
         if ($directory -and -not (Test-Path -LiteralPath $directory -PathType Container)) {
             [void](New-Item -Path $directory -ItemType Directory -Force)
         }
-        $line = "{0} [{1}] PID={2} {3}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level.ToUpperInvariant(), $PID, $Message
+        $line = "{0} [{1}] [PID={2}] [Run={3}] {4}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level.ToUpperInvariant(), $PID, $workerRunId, $Message
         [IO.File]::AppendAllText($Path, "$line`r`n", $utf8)
     }
     catch { $null = $_ }
+}
+
+function Write-WorkerLog {
+    param([ValidateSet('DEBUG','INFO','WARN','ERROR','SUCCESS')][string]$Level,[string]$Message)
+    Write-WorkerChildLog -Path $script:WorkerLogPath -Level $Level -Message ("[Component=Exchange2016Worker] [ElapsedMs={0}] {1}" -f ([math]::Round(((Get-Date)-$workerStartedAt).TotalMilliseconds)),($Message -replace '[\r\n]+',' | '))
+}
+
+function Format-WorkerError {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $parts = New-Object System.Collections.Generic.List[string]
+    [void]$parts.Add("ExceptionType=$($ErrorRecord.Exception.GetType().FullName)")
+    [void]$parts.Add("Message=$($ErrorRecord.Exception.Message)")
+    if($ErrorRecord.FullyQualifiedErrorId){[void]$parts.Add("FullyQualifiedErrorId=$($ErrorRecord.FullyQualifiedErrorId)")}
+    if($ErrorRecord.CategoryInfo){[void]$parts.Add("CategoryInfo=$($ErrorRecord.CategoryInfo)")}
+    if($ErrorRecord.InvocationInfo){[void]$parts.Add("Command=$($ErrorRecord.InvocationInfo.MyCommand.Name); Script=$($ErrorRecord.InvocationInfo.ScriptName); Line=$($ErrorRecord.InvocationInfo.ScriptLineNumber); SourceLine=$(if($ErrorRecord.InvocationInfo.Line){$ErrorRecord.InvocationInfo.Line.Trim()}else{''})")}
+    if($ErrorRecord.ScriptStackTrace){[void]$parts.Add("ScriptStackTrace=$($ErrorRecord.ScriptStackTrace)")}
+    $inner=$ErrorRecord.Exception.InnerException;$depth=0
+    while($inner -and $depth -lt 5){$depth++;[void]$parts.Add("InnerException${depth}=$($inner.GetType().FullName): $($inner.Message)");$inner=$inner.InnerException}
+    return ($parts -join ' | ')
+}
+
+function Get-WorkerParameterSummary {
+    param([hashtable]$Parameters)
+    return (@($Parameters.Keys | Sort-Object | ForEach-Object {
+        $name=[string]$_;$value=$Parameters[$name]
+        if($name -eq 'Filter'){"FilterLength=$(([string]$value).Length)"}
+        elseif($value -is [array]){"$name.Count=$(@($value).Count)"}
+        else{"$name=$value"}
+    }) -join ';')
 }
 
 function ConvertTo-WorkerCommandLineArgument {
@@ -74,20 +106,28 @@ function Invoke-WorkerCommand {
         [hashtable]$Parameters = @{},
         [switch]$NotFoundIsEmpty
     )
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    $parameterSummary=Get-WorkerParameterSummary -Parameters $Parameters
+    Write-WorkerLog -Level DEBUG -Message "Command starting. Name=$Name; Parameters=$parameterSummary."
     if (-not (Get-Command -Name $Name -ErrorAction SilentlyContinue)) {
-        return [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = "$Name is unavailable." }
+        $timer.Stop()
+        $message="$Name is unavailable."
+        Write-WorkerLog -Level ERROR -Message "Command unavailable. Name=$Name; DurationMs=$($timer.ElapsedMilliseconds); Message=$message."
+        return [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = $message }
     }
     try {
-        return [pscustomobject]@{
-            Success = $true
-            Rows = @(& $Name @Parameters -ErrorAction Stop)
-            ErrorMessage = ''
-        }
+        $rows=@(& $Name @Parameters -ErrorAction Stop)
+        $timer.Stop()
+        Write-WorkerLog -Level SUCCESS -Message "Command completed. Name=$Name; DurationMs=$($timer.ElapsedMilliseconds); RowCount=$($rows.Count)."
+        return [pscustomobject]@{ Success = $true; Rows = $rows; ErrorMessage = '' }
     }
     catch {
+        $timer.Stop()
         if ($NotFoundIsEmpty -and (Test-WorkerNotFoundError -Message $_.Exception.Message)) {
+            Write-WorkerLog -Level INFO -Message "Command returned expected not-found state. Name=$Name; DurationMs=$($timer.ElapsedMilliseconds); Message=$($_.Exception.Message)."
             return [pscustomobject]@{ Success = $true; Rows = @(); ErrorMessage = '' }
         }
+        Write-WorkerLog -Level ERROR -Message "Command failed. Name=$Name; DurationMs=$($timer.ElapsedMilliseconds); $(Format-WorkerError $_)"
         return [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = $_.Exception.Message }
     }
 }
@@ -261,7 +301,7 @@ function Invoke-WorkerRecipientAddressBatch {
     }
     catch [OperationCanceledException] { throw }
     catch {
-        Write-WorkerChildLog -Path $batchLogPath -Level ERROR -Message $_.Exception.Message
+        Write-WorkerChildLog -Path $batchLogPath -Level ERROR -Message (Format-WorkerError $_)
         return [pscustomobject]@{ Success = $false; TimedOut = $false; Rows = @(); DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = $_.Exception.Message; LogPath = $batchLogPath }
     }
     finally {
@@ -401,9 +441,18 @@ function Get-WorkerFailureEvidence {
 function Get-HybridEvidence {
     $collectedAt = Get-Date
     $empty = [pscustomobject]@{ Success = $false; Rows = @(); ErrorMessage = 'Check disabled for this run.' }
-    $ews = if (Test-WorkerCheckEnabled -CheckId 'HYBRID-MRSPROXY') { Invoke-WorkerCommand -Name 'Get-WebServicesVirtualDirectory' } else { $empty }
-    $org = if (Test-WorkerCheckEnabled -CheckId 'HYBRID-AUTODISCOVER-OAUTH') { Invoke-WorkerCommand -Name 'Get-OrganizationConfig' } else { $empty }
-    $ioc = if (Test-WorkerCheckEnabled -CheckId 'HYBRID-AUTODISCOVER-OAUTH') { Invoke-WorkerCommand -Name 'Get-IntraOrganizationConnector' } else { $empty }
+    if (Test-WorkerCheckEnabled -CheckId 'HYBRID-MRSPROXY') {
+        Write-WorkerProgress -Current 0 -Total 0 -Message 'Hybrid readiness - reading EWS virtual directories and MRS Proxy state'
+        $ews = Invoke-WorkerCommand -Name 'Get-WebServicesVirtualDirectory'
+    }
+    else { $ews = $empty }
+    if (Test-WorkerCheckEnabled -CheckId 'HYBRID-AUTODISCOVER-OAUTH') {
+        Write-WorkerProgress -Current 0 -Total 0 -Message 'Hybrid readiness - reading organization OAuth configuration'
+        $org = Invoke-WorkerCommand -Name 'Get-OrganizationConfig'
+        Write-WorkerProgress -Current 0 -Total 0 -Message 'Hybrid readiness - reading intra-organization connectors'
+        $ioc = Invoke-WorkerCommand -Name 'Get-IntraOrganizationConnector'
+    }
+    else { $org = $empty; $ioc = $empty }
     $enabledEws = @($ews.Rows | Where-Object { [bool]$_.MRSProxyEnabled })
     $organization = @($org.Rows | Select-Object -First 1)
     $enabledIoc = @($ioc.Rows | Where-Object { [bool]$_.Enabled })
@@ -452,12 +501,13 @@ if ($RecipientBatchMode) {
     catch {
         $message = $_ | Out-String
         Write-WorkerText -Path $RecipientBatchErrorPath -Text $message
-        Write-WorkerChildLog -Path $RecipientBatchLogPath -Level ERROR -Message $_.Exception.Message
+        Write-WorkerChildLog -Path $RecipientBatchLogPath -Level ERROR -Message (Format-WorkerError $_)
         [Console]::Error.WriteLine($_.Exception.Message)
         exit 1
     }
 }
 if ($SelfTest) {
+    Write-WorkerLog -Level INFO -Message "Self-test starting. Version=$workerVersion; PowerShell=$($PSVersionTable.PSVersion); DiagnosticsDirectory=$DiagnosticsDirectory."
     $selfTestPath = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-ExchangeMigrationReadiness-PS5SelfTest-{0}.clixml" -f [guid]::NewGuid().ToString('N'))
     try {
         $items = New-Object System.Collections.Generic.List[object]
@@ -480,10 +530,12 @@ if ($SelfTest) {
         if (@($roundTrip.Items).Count -ne 2 -or [string]$roundTrip.Items[0].Result -ne 'PASS' -or @($roundTrip.Evidence).Count -ne 1 -or @($roundTrip.Errors).Count -ne 1) {
             throw 'Windows PowerShell 5.1 CLIXML nested collection round-trip returned an unexpected result.'
         }
+        Write-WorkerLog -Level SUCCESS -Message 'Self-test completed successfully.'
         Write-Output "SELFTEST_OK|$workerVersion|$($PSVersionTable.PSVersion)"
         exit 0
     }
     catch {
+        Write-WorkerLog -Level ERROR -Message "Self-test failed. $(Format-WorkerError $_)"
         [Console]::Error.WriteLine($_.Exception.Message)
         exit 1
     }
@@ -493,6 +545,8 @@ if ($SelfTest) {
 }
 
 try {
+    Write-WorkerLog -Level INFO -Message "Worker starting. Version=$workerVersion; PowerShell=$($PSVersionTable.PSVersion); Computer=$env:COMPUTERNAME; InputPath=$InputPath; OutputPath=$OutputPath; DiagnosticsDirectory=$DiagnosticsDirectory."
+    $snapInTimer=[Diagnostics.Stopwatch]::StartNew()
     $snapInName = 'Microsoft.Exchange.Management.PowerShell.SnapIn'
     if (-not (Get-PSSnapin -Name $snapInName -ErrorAction SilentlyContinue)) {
         Add-PSSnapin -Name $snapInName -ErrorAction Stop
@@ -503,6 +557,8 @@ try {
         }
     }
     Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop | Out-Null
+    $snapInTimer.Stop()
+    Write-WorkerLog -Level SUCCESS -Message "Exchange snap-in and required commands validated; ViewEntireForest enabled. DurationMs=$($snapInTimer.ElapsedMilliseconds); SnapIn=$snapInName."
 
     if ($ValidateOnly) {
         Write-Output "VALIDATION_OK|$workerVersion|$env:COMPUTERNAME|$($PSVersionTable.PSVersion)"
@@ -532,6 +588,7 @@ try {
     $smtpBatchSize = [math]::Max(1, [math]::Min(50, $smtpBatchSize))
     $smtpBatchTimeoutSeconds = [math]::Max(5, [math]::Min(300, $smtpBatchTimeoutSeconds))
     $startedAt = Get-Date
+    Write-WorkerLog -Level INFO -Message "Runtime input loaded. MailboxCount=$($emails.Count); EnabledCheckCount=$($enabledChecks.Count); SmtpBatchSize=$smtpBatchSize; SmtpBatchTimeoutSeconds=$smtpBatchTimeoutSeconds."
     $evidence = New-Object System.Collections.Generic.List[object]
     $collectionErrors = New-Object System.Collections.Generic.List[object]
     $databaseCache = @{}
@@ -541,6 +598,9 @@ try {
     foreach ($email in $emails) {
         if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
         $index++
+        $mailboxTimer=[Diagnostics.Stopwatch]::StartNew()
+        $message = ''
+        Write-WorkerLog -Level INFO -Message "Mailbox collection starting. Index=$index/$($emails.Count); EmailAddress=$email."
         Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Recipient lookup - {0}" -f $email)
         try {
             $safeEmail = $email.Replace("'", "''")
@@ -717,15 +777,24 @@ try {
         }
         catch {
             $message = $_.Exception.Message
+            Write-WorkerLog -Level ERROR -Message "Mailbox collection failed. Index=$index/$($emails.Count); EmailAddress=$email; $(Format-WorkerError $_)"
             [void]$collectionErrors.Add([pscustomobject][ordered]@{ EmailAddress = $email; Message = $message })
             [void]$evidence.Add((Get-WorkerFailureEvidence -EmailAddress $email -Message $message))
         }
+        finally {
+            $mailboxTimer.Stop()
+            Write-WorkerLog -Level $(if($message){'WARN'}else{'SUCCESS'}) -Message "Mailbox collection ended. Index=$index/$($emails.Count); EmailAddress=$email; DurationMs=$($mailboxTimer.ElapsedMilliseconds); EvidenceCount=$($evidence.Count); Error=$message."
+        }
     }
     if ((Test-WorkerCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE') -or (Test-WorkerCheckEnabled -CheckId 'TARGET-ADDRESS-GLOBAL-UNIQUE')) {
+        Write-WorkerLog -Level INFO -Message 'SMTP uniqueness collection starting.'
         $addressConflictMetrics = Initialize-WorkerAddressConflictEvidence -Evidence $evidence -CandidateAddressesByEmail $candidateAddressesByEmail -BatchSize $smtpBatchSize -TimeoutSeconds $smtpBatchTimeoutSeconds -SnapInName $snapInName -DiagnosticsDirectory $DiagnosticsDirectory
+        Write-WorkerLog -Level $(if($addressConflictMetrics.ErrorCount){'WARN'}else{'SUCCESS'}) -Message "SMTP uniqueness collection ended. CandidateAddressCount=$($addressConflictMetrics.CandidateAddressCount); BatchCount=$($addressConflictMetrics.BatchCount); TimeoutCount=$($addressConflictMetrics.TimeoutCount); ErrorCount=$($addressConflictMetrics.ErrorCount); DurationSeconds=$($addressConflictMetrics.DurationSeconds)."
     }
     if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
+    Write-WorkerLog -Level INFO -Message 'Hybrid evidence collection starting.'
     $hybridEvidence = Get-HybridEvidence
+    Write-WorkerLog -Level SUCCESS -Message "Hybrid evidence collection ended. MrsProxyAvailable=$($hybridEvidence.MrsProxyAvailable); MrsProxyEnabled=$($hybridEvidence.MrsProxyEnabled); OAuthAvailable=$($hybridEvidence.OAuthAvailable); OAuthHealthy=$($hybridEvidence.OAuthHealthy)."
     $result = [pscustomobject][ordered]@{
         WorkerVersion = $workerVersion
         ComputerName = $env:COMPUTERNAME
@@ -751,10 +820,13 @@ try {
         Hybrid = $hybridEvidence
     }
     $result | Export-Clixml -LiteralPath $OutputPath -Depth 12 -Force
+    Write-WorkerLog -Level SUCCESS -Message "Worker evidence exported. MailboxEvidenceCount=$($evidence.Count); ErrorCount=$($collectionErrors.Count); TotalDurationSeconds=$($result.DurationSeconds); OutputPath=$OutputPath."
     Write-WorkerProgress -Current $emails.Count -Total $emails.Count -Message 'Complete'
 }
 catch {
-    Write-WorkerText -Path $ErrorPath -Text ($_ | Out-String)
+    $diagnostic=Format-WorkerError $_
+    Write-WorkerLog -Level ERROR -Message "Fatal worker error. $diagnostic"
+    Write-WorkerText -Path $ErrorPath -Text "$(($_ | Out-String))`r`n$diagnostic"
     [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 }

@@ -27,6 +27,8 @@ Le worker Exchange 2016 exécute un self-test de sérialisation CLIXML sous Wind
 
 Le contrôle d’unicité SMTP regroupe par défaut les adresses du batch par lots de 25 et recherche leurs propriétaires dans toute la forêt Exchange. Chaque lot est exécuté dans un processus Windows PowerShell 5.1 distinct avec un timeout de 60 secondes : le processus enfant est tué à l’expiration et le lot produit une évidence `UNKNOWN` sans figer le worker principal. Un journal par processus enfant est conservé sous `Output\Logs\Exchange2016Children\<RunId>`. Le bouton d’annulation arrête le processus enfant et termine le worker après trois secondes s’il ne répond pas.
 
+La session GUI écrit un journal structuré sous Output\Logs avec le PID, le thread, l'identifiant de session, le RunId, le composant, l'étape, la mailbox et les durées. Les diagnostics Graph sont conservés sous Output\Logs\GraphWorkers\<RunId>\MicrosoftGraph-Worker.log. Le worker Exchange 2016 produit Output\Logs\Exchange2016Children\<RunId>\Exchange2016-Worker.log en plus des journaux SMTP par lot. Les exceptions incluent leur type, identifiant PowerShell, commande, ligne, pile et exceptions internes, sans jeton ni mot de passe.
+
 L’onglet `Sources`, `Live-Sources.csv`, la feuille Excel `Live Sources` et le rapport HTML exposent l’état et le détail de chaque source obligatoire.
 
 ## Autonomie et sécurité
