@@ -6,13 +6,20 @@ param(
     [string]$ErrorPath = '',
     [string]$ProgressPath = '',
     [string]$CancelPath = '',
+    [string]$DiagnosticsDirectory = '',
+    [switch]$RecipientBatchMode,
+    [string]$RecipientBatchInputPath = '',
+    [string]$RecipientBatchOutputPath = '',
+    [string]$RecipientBatchErrorPath = '',
+    [string]$RecipientBatchLogPath = '',
+    [string]$RecipientBatchSnapInName = 'Microsoft.Exchange.Management.PowerShell.SnapIn',
     [switch]$ValidateOnly,
     [switch]$SelfTest
 )
 
 Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
-$workerVersion = '1.11.3'
+$workerVersion = '1.11.4'
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
@@ -31,6 +38,25 @@ function Write-WorkerText {
     }
 }
 
+function Write-WorkerChildLog {
+    param([string]$Path, [string]$Level, [string]$Message)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    try {
+        $directory = Split-Path -Parent $Path
+        if ($directory -and -not (Test-Path -LiteralPath $directory -PathType Container)) {
+            [void](New-Item -Path $directory -ItemType Directory -Force)
+        }
+        $line = "{0} [{1}] PID={2} {3}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level.ToUpperInvariant(), $PID, $Message
+        [IO.File]::AppendAllText($Path, "$line`r`n", $utf8)
+    }
+    catch { $null = $_ }
+}
+
+function ConvertTo-WorkerCommandLineArgument {
+    param([Parameter(Mandatory)][string]$Value)
+    if ($Value -notmatch '[\s"]') { return $Value }
+    return '"' + $Value.Replace('"', '\"') + '"'
+}
 function Write-WorkerProgress {
     param([int]$Current, [int]$Total, [string]$Message)
     Write-WorkerText -Path $ProgressPath -Text ("{0}|{1}|{2}" -f $Current, $Total, $Message)
@@ -152,7 +178,10 @@ function Invoke-WorkerRecipientAddressBatch {
     param(
         [Parameter(Mandatory)][string[]]$Addresses,
         [Parameter(Mandatory)][int]$TimeoutSeconds,
-        [Parameter(Mandatory)][string]$SnapInName
+        [Parameter(Mandatory)][string]$SnapInName,
+        [int]$BatchNumber = 0,
+        [string]$DiagnosticsDirectory = '',
+        [ValidateRange(0,300)][int]$TestDelaySeconds = 0
     )
 
     $clauses = @(
@@ -162,65 +191,95 @@ function Invoke-WorkerRecipientAddressBatch {
         }
     )
     $filter = $clauses -join ' -or '
-    $job = $null
+    $batchRoot = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-ExchangeMigrationReadiness\SmtpBatch-{0}" -f [guid]::NewGuid().ToString('N'))
+    $batchInputPath = Join-Path $batchRoot 'input.clixml'
+    $batchOutputPath = Join-Path $batchRoot 'output.clixml'
+    $batchErrorPath = Join-Path $batchRoot 'error.txt'
+    $logFileName = if ($BatchNumber -gt 0) { "Exchange2016-SmtpBatch-{0:D3}.log" -f $BatchNumber } else { "Exchange2016-SmtpBatch-{0}.log" -f [guid]::NewGuid().ToString('N') }
+    $batchLogPath = if ([string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) { Join-Path $batchRoot $logFileName } else { Join-Path $DiagnosticsDirectory $logFileName }
+    $process = $null
     $started = Get-Date
     try {
-        $job = Start-Job -ScriptBlock {
-            param($ExchangeSnapInName, $RecipientFilter)
-            $ErrorActionPreference = 'Stop'
-            if (-not (Get-PSSnapin -Name $ExchangeSnapInName -ErrorAction SilentlyContinue)) {
-                Add-PSSnapin -Name $ExchangeSnapInName -ErrorAction Stop
-            }
-            Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop | Out-Null
-            @(Get-Recipient -Filter $RecipientFilter -ResultSize Unlimited -ErrorAction Stop | Select-Object Identity,DistinguishedName,PrimarySmtpAddress,ExternalEmailAddress,EmailAddresses,RecipientType,RecipientTypeDetails)
-        } -ArgumentList $SnapInName, $filter
+        [void](New-Item -Path $batchRoot -ItemType Directory -Force)
+        if (-not [string]::IsNullOrWhiteSpace($DiagnosticsDirectory)) {
+            [void](New-Item -Path $DiagnosticsDirectory -ItemType Directory -Force)
+        }
+        [pscustomobject][ordered]@{ Addresses = @($Addresses); Filter = $filter; TestDelaySeconds = $TestDelaySeconds } | Export-Clixml -LiteralPath $batchInputPath -Depth 4 -Force
+        Write-WorkerChildLog -Path $batchLogPath -Level INFO -Message ("Parent starting SMTP uniqueness child process; batch={0}; addresses={1}; timeout={2}s." -f $BatchNumber, $Addresses.Count, $TimeoutSeconds)
+        Write-WorkerChildLog -Path $batchLogPath -Level INFO -Message ("Candidate addresses: {0}" -f ($Addresses -join ';'))
+
+        $powershellPath = Join-Path $PSHOME 'powershell.exe'
+        $arguments = @(
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
+            '-RecipientBatchMode', '-RecipientBatchInputPath', $batchInputPath, '-RecipientBatchOutputPath', $batchOutputPath,
+            '-RecipientBatchErrorPath', $batchErrorPath, '-RecipientBatchLogPath', $batchLogPath,
+            '-RecipientBatchSnapInName', $SnapInName
+        )
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $powershellPath
+        $startInfo.Arguments = (@($arguments | ForEach-Object { ConvertTo-WorkerCommandLineArgument ([string]$_) }) -join ' ')
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $process = [Diagnostics.Process]::Start($startInfo)
+        if (-not $process) { throw 'SMTP uniqueness child process could not be started.' }
+        Write-WorkerChildLog -Path $batchLogPath -Level INFO -Message ("Parent observed child PID={0}." -f $process.Id)
 
         $deadline = (Get-Date).AddSeconds([math]::Max(5, $TimeoutSeconds))
-        while ($job.State -in @('NotStarted','Running')) {
+        while (-not $process.WaitForExit(250)) {
             if (Test-WorkerCancellation) {
-                Stop-Job -Job $job -ErrorAction SilentlyContinue
+                Write-WorkerChildLog -Path $batchLogPath -Level WARN -Message 'Cancellation requested; terminating child process.'
+                try { $process.Kill() } catch { Write-WorkerChildLog -Path $batchLogPath -Level ERROR -Message ("Child termination failed: {0}" -f $_.Exception.Message) }
+                [void]$process.WaitForExit(5000)
                 throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.')
             }
             if ((Get-Date) -ge $deadline) {
-                Stop-Job -Job $job -ErrorAction SilentlyContinue
+                Write-WorkerChildLog -Path $batchLogPath -Level WARN -Message ("Timeout reached after {0} second(s); terminating child process." -f $TimeoutSeconds)
+                try { $process.Kill() } catch { Write-WorkerChildLog -Path $batchLogPath -Level ERROR -Message ("Child termination failed: {0}" -f $_.Exception.Message) }
+                [void]$process.WaitForExit(5000)
                 return [pscustomobject]@{
                     Success = $false
                     TimedOut = $true
                     Rows = @()
                     DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
-                    ErrorMessage = "Get-Recipient address batch exceeded $TimeoutSeconds second(s)."
+                    ErrorMessage = "Get-Recipient address batch exceeded $TimeoutSeconds second(s); child process terminated."
+                    LogPath = $batchLogPath
                 }
             }
-            Start-Sleep -Milliseconds 250
         }
 
-        if ($job.State -ne 'Completed') {
-            $reason = [string]$job.ChildJobs[0].JobStateInfo.Reason
-            if ([string]::IsNullOrWhiteSpace($reason)) { $reason = "Recipient address batch ended in state $($job.State)." }
-            return [pscustomobject]@{ Success = $false; TimedOut = $false; Rows = @(); DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = $reason }
+        if ($process.ExitCode -ne 0) {
+            $errorMessage = if (Test-Path -LiteralPath $batchErrorPath -PathType Leaf) { [IO.File]::ReadAllText($batchErrorPath) } else { "Child process exit code $($process.ExitCode)." }
+            Write-WorkerChildLog -Path $batchLogPath -Level ERROR -Message ("Child process failed with exit code {0}: {1}" -f $process.ExitCode, $errorMessage.Trim())
+            return [pscustomobject]@{ Success = $false; TimedOut = $false; Rows = @(); DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = $errorMessage.Trim(); LogPath = $batchLogPath }
         }
-        $rows = @(Receive-Job -Job $job -ErrorAction Stop)
-        return [pscustomobject]@{ Success = $true; TimedOut = $false; Rows = $rows; DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = '' }
+        if (-not (Test-Path -LiteralPath $batchOutputPath -PathType Leaf)) {
+            throw 'SMTP uniqueness child process completed without an output file.'
+        }
+        $rows = @(Import-Clixml -LiteralPath $batchOutputPath)
+        Write-WorkerChildLog -Path $batchLogPath -Level SUCCESS -Message ("Parent imported {0} recipient row(s); duration={1}s." -f $rows.Count, ([math]::Round(((Get-Date) - $started).TotalSeconds, 1)))
+        return [pscustomobject]@{ Success = $true; TimedOut = $false; Rows = $rows; DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = ''; LogPath = $batchLogPath }
     }
     catch [OperationCanceledException] { throw }
     catch {
-        return [pscustomobject]@{ Success = $false; TimedOut = $false; Rows = @(); DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = $_.Exception.Message }
+        Write-WorkerChildLog -Path $batchLogPath -Level ERROR -Message $_.Exception.Message
+        return [pscustomobject]@{ Success = $false; TimedOut = $false; Rows = @(); DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = $_.Exception.Message; LogPath = $batchLogPath }
     }
     finally {
-        if ($job) {
-            if ($job.State -in @('NotStarted','Running')) { Stop-Job -Job $job -ErrorAction SilentlyContinue }
-            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+        if ($process) {
+            if (-not $process.HasExited) { try { $process.Kill() } catch { $null = $_ } }
+            $process.Dispose()
         }
+        if (Test-Path -LiteralPath $batchRoot) { Remove-Item -LiteralPath $batchRoot -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
-
 function Initialize-WorkerAddressConflictEvidence {
     param(
         [Parameter(Mandatory)]$Evidence,
         [Parameter(Mandatory)][hashtable]$CandidateAddressesByEmail,
         [Parameter(Mandatory)][int]$BatchSize,
         [Parameter(Mandatory)][int]$TimeoutSeconds,
-        [Parameter(Mandatory)][string]$SnapInName
+        [Parameter(Mandatory)][string]$SnapInName,
+        [string]$DiagnosticsDirectory = ''
     )
 
     $started = Get-Date
@@ -236,13 +295,15 @@ function Initialize-WorkerAddressConflictEvidence {
     $batchCount = if ($allAddresses.Count -eq 0) { 0 } else { [int][math]::Ceiling($allAddresses.Count / [double]$normalizedBatchSize) }
     $timeoutCount = 0
     $errorCount = 0
+    $childLogPaths = New-Object System.Collections.Generic.List[string]
     for ($batchIndex = 0; $batchIndex -lt $batchCount; $batchIndex++) {
         if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
         $offset = $batchIndex * $normalizedBatchSize
         $last = [math]::Min($allAddresses.Count - 1, $offset + $normalizedBatchSize - 1)
         $batchAddresses = @($allAddresses[$offset..$last])
         Write-WorkerProgress -Current ($batchIndex + 1) -Total $batchCount -Message ("SMTP uniqueness batch {0}/{1} - {2} address(es)" -f ($batchIndex + 1), $batchCount, $batchAddresses.Count)
-        $query = Invoke-WorkerRecipientAddressBatch -Addresses $batchAddresses -TimeoutSeconds $TimeoutSeconds -SnapInName $SnapInName
+        $query = Invoke-WorkerRecipientAddressBatch -Addresses $batchAddresses -TimeoutSeconds $TimeoutSeconds -SnapInName $SnapInName -BatchNumber ($batchIndex + 1) -DiagnosticsDirectory $DiagnosticsDirectory
+        if (-not [string]::IsNullOrWhiteSpace([string]$query.LogPath)) { [void]$childLogPaths.Add([string]$query.LogPath) }
         if ($query.TimedOut) { $timeoutCount++ }
         if (-not $query.Success) { $errorCount++ }
         foreach ($address in $batchAddresses) {
@@ -300,6 +361,8 @@ function Initialize-WorkerAddressConflictEvidence {
         BatchSize = $normalizedBatchSize
         TimeoutSeconds = $TimeoutSeconds
         DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
+        DiagnosticsDirectory = $DiagnosticsDirectory
+        ChildLogPaths = $childLogPaths.ToArray()
     }
 }
 function Get-WorkerFailureEvidence {
@@ -359,15 +422,50 @@ function Get-HybridEvidence {
     }
 }
 
+if ($RecipientBatchMode) {
+    try {
+        Write-WorkerChildLog -Path $RecipientBatchLogPath -Level INFO -Message ("SMTP uniqueness child mode started; PowerShell={0}; computer={1}." -f $PSVersionTable.PSVersion, $env:COMPUTERNAME)
+        if (-not (Test-Path -LiteralPath $RecipientBatchInputPath -PathType Leaf)) { throw "Recipient batch input file not found: $RecipientBatchInputPath" }
+        if ([string]::IsNullOrWhiteSpace($RecipientBatchOutputPath)) { throw 'RecipientBatchOutputPath is required.' }
+        $batchInput = Import-Clixml -LiteralPath $RecipientBatchInputPath
+        $addresses = @(ConvertTo-TextArray $batchInput.Addresses)
+        $recipientFilter = [string]$batchInput.Filter
+        $testDelaySeconds = if ($batchInput.PSObject.Properties['TestDelaySeconds']) { [int]$batchInput.TestDelaySeconds } else { 0 }
+        if ($testDelaySeconds -gt 0) {
+            Write-WorkerChildLog -Path $RecipientBatchLogPath -Level INFO -Message ("Self-test delay requested: {0} second(s)." -f $testDelaySeconds)
+            Start-Sleep -Seconds $testDelaySeconds
+        }
+        Write-WorkerChildLog -Path $RecipientBatchLogPath -Level INFO -Message ("Loading Exchange snap-in '{0}' for {1} address(es)." -f $RecipientBatchSnapInName, $addresses.Count)
+        if (-not (Get-PSSnapin -Name $RecipientBatchSnapInName -ErrorAction SilentlyContinue)) {
+            Add-PSSnapin -Name $RecipientBatchSnapInName -ErrorAction Stop
+        }
+        foreach ($requiredCommand in @('Set-ADServerSettings','Get-Recipient')) {
+            if (-not (Get-Command -Name $requiredCommand -ErrorAction SilentlyContinue)) { throw "Required Exchange 2016 command '$requiredCommand' is unavailable." }
+        }
+        Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop | Out-Null
+        Write-WorkerChildLog -Path $RecipientBatchLogPath -Level INFO -Message ("Executing forest-wide Get-Recipient filter; filterLength={0}." -f $recipientFilter.Length)
+        $rows = @(Get-Recipient -Filter $recipientFilter -ResultSize Unlimited -ErrorAction Stop | Select-Object Identity,DistinguishedName,PrimarySmtpAddress,ExternalEmailAddress,EmailAddresses,RecipientType,RecipientTypeDetails)
+        $rows | Export-Clixml -LiteralPath $RecipientBatchOutputPath -Depth 8 -Force
+        Write-WorkerChildLog -Path $RecipientBatchLogPath -Level SUCCESS -Message ("Get-Recipient completed; rows={0}." -f $rows.Count)
+        exit 0
+    }
+    catch {
+        $message = $_ | Out-String
+        Write-WorkerText -Path $RecipientBatchErrorPath -Text $message
+        Write-WorkerChildLog -Path $RecipientBatchLogPath -Level ERROR -Message $_.Exception.Message
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+}
 if ($SelfTest) {
     $selfTestPath = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-ExchangeMigrationReadiness-PS5SelfTest-{0}.clixml" -f [guid]::NewGuid().ToString('N'))
     try {
         $items = New-Object System.Collections.Generic.List[object]
         $errors = New-Object System.Collections.Generic.List[object]
         [void]$items.Add([pscustomobject]@{ Name = 'serialization'; Result = 'PASS' })
-        $batchMechanics = Invoke-WorkerRecipientAddressBatch -Addresses @('selftest@example.invalid') -TimeoutSeconds 10 -SnapInName 'SmartM365.Nonexistent.Exchange.SnapIn'
-        if ($batchMechanics.Success -or $batchMechanics.TimedOut -or [string]::IsNullOrWhiteSpace([string]$batchMechanics.ErrorMessage)) {
-            throw 'Windows PowerShell 5.1 recipient batch isolation self-test returned an unexpected result.'
+        $batchMechanics = Invoke-WorkerRecipientAddressBatch -Addresses @('selftest@example.invalid') -TimeoutSeconds 5 -SnapInName 'SmartM365.Nonexistent.Exchange.SnapIn' -TestDelaySeconds 30 -DiagnosticsDirectory $DiagnosticsDirectory -BatchNumber 1
+        if ($batchMechanics.Success -or -not $batchMechanics.TimedOut -or [string]::IsNullOrWhiteSpace([string]$batchMechanics.ErrorMessage) -or [double]$batchMechanics.DurationSeconds -gt 12) {
+            throw 'Windows PowerShell 5.1 recipient batch timeout/termination self-test returned an unexpected result.'
         }
         [void]$items.Add([pscustomobject]@{ Name = 'recipient-batch-isolation'; Result = 'PASS' })
         [void]$errors.Add([pscustomobject]@{ EmailAddress = 'selftest@example.invalid'; Message = 'Expected self-test error record' })
@@ -438,7 +536,7 @@ try {
     $collectionErrors = New-Object System.Collections.Generic.List[object]
     $databaseCache = @{}
     $candidateAddressesByEmail = @{}
-    $addressConflictMetrics = [pscustomobject]@{ CandidateAddressCount=0; BatchCount=0; TimeoutCount=0; ErrorCount=0; BatchSize=$smtpBatchSize; TimeoutSeconds=$smtpBatchTimeoutSeconds; DurationSeconds=0 }
+    $addressConflictMetrics = [pscustomobject]@{ CandidateAddressCount=0; BatchCount=0; TimeoutCount=0; ErrorCount=0; BatchSize=$smtpBatchSize; TimeoutSeconds=$smtpBatchTimeoutSeconds; DurationSeconds=0; DiagnosticsDirectory=$DiagnosticsDirectory; ChildLogPaths=@() }
     $index = 0
     foreach ($email in $emails) {
         if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
@@ -624,7 +722,7 @@ try {
         }
     }
     if ((Test-WorkerCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE') -or (Test-WorkerCheckEnabled -CheckId 'TARGET-ADDRESS-GLOBAL-UNIQUE')) {
-        $addressConflictMetrics = Initialize-WorkerAddressConflictEvidence -Evidence $evidence -CandidateAddressesByEmail $candidateAddressesByEmail -BatchSize $smtpBatchSize -TimeoutSeconds $smtpBatchTimeoutSeconds -SnapInName $snapInName
+        $addressConflictMetrics = Initialize-WorkerAddressConflictEvidence -Evidence $evidence -CandidateAddressesByEmail $candidateAddressesByEmail -BatchSize $smtpBatchSize -TimeoutSeconds $smtpBatchTimeoutSeconds -SnapInName $snapInName -DiagnosticsDirectory $DiagnosticsDirectory
     }
     if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
     $hybridEvidence = Get-HybridEvidence
@@ -647,6 +745,8 @@ try {
         SmtpUniquenessBatchSize = $addressConflictMetrics.BatchSize
         SmtpUniquenessBatchTimeoutSeconds = $addressConflictMetrics.TimeoutSeconds
         SmtpUniquenessDurationSeconds = $addressConflictMetrics.DurationSeconds
+        SmtpUniquenessDiagnosticsDirectory = $addressConflictMetrics.DiagnosticsDirectory
+        SmtpUniquenessChildLogPaths = @($addressConflictMetrics.ChildLogPaths)
         Evidence = $evidence.ToArray()
         Hybrid = $hybridEvidence
     }

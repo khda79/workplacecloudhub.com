@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.3'
+$script:SemrVersion = '1.11.4'
 $script:ActiveDirectoryDomains = @()
 $script:Exchange2016EvidenceByEmail = @{}
 $script:Exchange2016HybridEvidence = $null
@@ -564,6 +564,7 @@ function Initialize-SemrExchange2016Evidence {
         [Parameter(Mandatory)][string[]]$EmailAddresses,
         [scriptblock]$ProgressCallback,
         [scriptblock]$CancellationCheck,
+        [string]$DiagnosticsDirectory = '',
         [ValidateRange(1,50)][int]$SmtpUniquenessBatchSize = 25,
         [ValidateRange(5,300)][int]$SmtpUniquenessBatchTimeoutSeconds = 60
     )
@@ -594,7 +595,7 @@ function Initialize-SemrExchange2016Evidence {
         $startInfo.FileName = $powershellPath
         $startInfo.UseShellExecute = $false
         $startInfo.CreateNoWindow = $true
-        foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $workerPath, '-InputPath', $inputPath, '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath, '-CancelPath', $cancelPath)) {
+        foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $workerPath, '-InputPath', $inputPath, '-OutputPath', $outputPath, '-ErrorPath', $errorPath, '-ProgressPath', $progressPath, '-CancelPath', $cancelPath, '-DiagnosticsDirectory', $DiagnosticsDirectory)) {
             [void]$startInfo.ArgumentList.Add([string]$argument)
         }
         $process = [Diagnostics.Process]::Start($startInfo)
@@ -651,7 +652,7 @@ function Initialize-SemrExchange2016Evidence {
         }
         $script:Exchange2016HybridEvidence = $workerResult.Hybrid
         $script:Exchange2016WorkerCollectedAt = $workerResult.CollectedAt
-        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; per-mailbox errors=$($workerResult.ErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s)."
+        $script:Exchange2016WorkerMessage = "Collected $($script:Exchange2016EvidenceByEmail.Count) mailbox evidence set(s), $($workerResult.MailboxObjectCount) mailbox object(s) and $($workerResult.PermissionCount) delegated permission(s) in $($workerResult.DurationSeconds) second(s) through direct local Exchange 2016 cmdlets on $($workerResult.ComputerName) with Windows PowerShell $($workerResult.PowerShellVersion); ViewEntireForest enabled; per-mailbox errors=$($workerResult.ErrorCount); SMTP uniqueness candidates=$($workerResult.SmtpUniquenessCandidateAddressCount), batches=$($workerResult.SmtpUniquenessBatchCount), timeouts=$($workerResult.SmtpUniquenessTimeoutCount), query errors=$($workerResult.SmtpUniquenessErrorCount), duration=$($workerResult.SmtpUniquenessDurationSeconds) second(s); child logs=$($workerResult.SmtpUniquenessDiagnosticsDirectory)."
         return [pscustomobject]@{ Available = $true; Message = $script:Exchange2016WorkerMessage; MailboxCount = $script:Exchange2016EvidenceByEmail.Count; ErrorCount = [int]$workerResult.ErrorCount; DurationSeconds = $workerResult.DurationSeconds }
     }
     finally {
@@ -2345,12 +2346,14 @@ function Invoke-SemrAssessment {
         [Parameter(Mandatory)]$Batch,
         [Parameter(Mandatory)][System.Collections.IDictionary]$Config,
         [scriptblock]$ProgressCallback,
-        [scriptblock]$CancellationCheck
+        [scriptblock]$CancellationCheck,
+        [string]$DiagnosticsRoot = ''
     )
 
     Set-SemrAssessmentCheckOptions -Config $Config
     $startedAt = Get-Date
     $runId = "SEMR-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+    $exchangeDiagnosticsDirectory = if ([string]::IsNullOrWhiteSpace($DiagnosticsRoot)) { '' } else { Join-Path $DiagnosticsRoot $runId }
     $findings = [System.Collections.Generic.List[object]]::new()
     $globalFindings = [System.Collections.Generic.List[object]]::new()
     $permissionRows = [System.Collections.Generic.List[object]]::new()
@@ -2393,11 +2396,14 @@ function Invoke-SemrAssessment {
                 { param($Current,$Total,$Message) & $ProgressCallback $Current $Total '' $Message }.GetNewClosure()
             }
             else { $null }
-            $batchExchange = Initialize-SemrExchange2016Evidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress -CancellationCheck $CancellationCheck
+            $batchExchange = Initialize-SemrExchange2016Evidence -EmailAddresses @($rows | ForEach-Object { [string]$_.EmailAddress }) -ProgressCallback $exchangeProgress -CancellationCheck $CancellationCheck -DiagnosticsDirectory $exchangeDiagnosticsDirectory
             $sourceInitialization.ExchangeOnPremisesLive = [bool]$batchExchange.Available
             $sourceInitialization.ExchangeOnPremisesMessage = [string]$batchExchange.Message
         }
         catch {
+            if ($CancellationCheck -and (& $CancellationCheck)) {
+                throw [OperationCanceledException]::new('Exchange migration readiness assessment cancelled by the operator.')
+            }
             $script:ConnectionState.OnPremisesExchange = $false
             $script:Exchange2016EvidenceByEmail = @{}
             $sourceInitialization.ExchangeOnPremisesLive = $false
