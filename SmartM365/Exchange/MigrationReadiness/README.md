@@ -21,11 +21,15 @@ Sources obligatoires :
 - Exchange 2016 : worker Windows PowerShell 5.1 local qui charge directement le snap-in `Microsoft.Exchange.Management.PowerShell.SnapIn`, puis applique `Set-ADServerSettings -ViewEntireForest $true` ;
 - santé Microsoft Entra Connect : `onPremisesSyncEnabled` et `onPremisesLastSyncDateTime` lus directement sur l’organisation Microsoft Graph.
 
+Au premier assessment, le GUI inspecte les sessions EXO actives dans le processus et le contexte délégué Graph CurrentUser. Lorsqu'une session existe, une boîte affiche le compte, le tenant, l'organisation ou le type d'authentification disponibles et propose de la réutiliser, de forcer une nouvelle authentification ou d'annuler. Une session EXO préexistante réutilisée n'est pas fermée par l'application. Les données Graph sont recollectées pour chaque batch, même lorsque le contexte d'authentification est réutilisé ; un nouveau navigateur apparaît uniquement si le contexte est absent, incompatible, expiré, incomplet en scopes ou si l'utilisateur force la reconnexion.
+
 Si une source obligatoire est indisponible, les contrôles possibles continuent, mais l’assessment est marqué `INCOMPLETE`. Une source manquante ne peut jamais produire un verdict `GO`.
 
-Le worker Exchange 2016 exécute un self-test de sérialisation CLIXML sous Windows PowerShell 5.1 avant le preflight. Une erreur limitée à une mailbox est isolée et produit une évidence `UNKNOWN` pour cette mailbox sans interrompre la collecte du reste du batch.
+Le worker Exchange 2016 exécute un self-test de sérialisation CLIXML sous Windows PowerShell 5.1 avant le preflight. Une erreur limitée à une mailbox ou à une commande est isolée et produit une évidence `UNKNOWN` pour le contrôle concerné sans interrompre la collecte du reste du batch. Les erreurs partielles et fatales sont comptabilisées séparément dans le journal du worker.
 
 Le contrôle d’unicité SMTP regroupe par défaut les adresses du batch par lots de 25 et recherche leurs propriétaires dans toute la forêt Exchange. Chaque lot est exécuté dans un processus Windows PowerShell 5.1 distinct avec un timeout de 60 secondes : le processus enfant est tué à l’expiration et le lot produit une évidence `UNKNOWN` sans figer le worker principal. Un journal par processus enfant est conservé sous `Output\Logs\Exchange2016Children\<RunId>`. Le bouton d’annulation arrête le processus enfant et termine le worker après trois secondes s’il ne répond pas.
+
+Le contrôle bloquant de connectivité hybride est le test fonctionnel `Test-MigrationServerAvailability` appliqué à l’endpoint `ExchangeRemoteMove` sélectionné. Son résultat, son message et sa durée sont journalisés. L’inventaire local de toutes les virtual directories EWS et de leur propriété `MRSProxyEnabled` est un diagnostic serveur optionnel, décoché par défaut et non bloquant ; il peut être activé dans l’onglet `Options` lors d’une investigation de topologie.
 
 La session GUI écrit un journal structuré sous Output\Logs avec le PID, le thread, l'identifiant de session, le RunId, le composant, l'étape, la mailbox et les durées. Les diagnostics Graph sont conservés sous Output\Logs\GraphWorkers\<RunId>\MicrosoftGraph-Worker.log. Le worker Exchange 2016 produit Output\Logs\Exchange2016Children\<RunId>\Exchange2016-Worker.log en plus des journaux SMTP par lot. Les exceptions incluent leur type, identifiant PowerShell, commande, ligne, pile et exceptions internes, sans jeton ni mot de passe.
 
@@ -129,7 +133,7 @@ Les délimiteurs virgule, point-virgule et tabulation sont détectés automatiqu
 - disponibilité de la base Exchange source ;
 - état Exchange Online, conflits soft-deleted/inactive et objets de migration existants ;
 - synchronisation Entra, provisioning errors, identity anchor, licences, UsageLocation et capacité du SKU ;
-- endpoint `ExchangeRemoteMove`, MRSProxy, certificat TLS, charge, backlog et OAuth hybride ;
+- endpoint `ExchangeRemoteMove` testé fonctionnellement, certificat TLS, charge et backlog ; diagnostic local EWS/MRSProxy optionnel ; OAuth hybride informatif et non bloquant pour le remote move ;
 - erreur `CannotMoveEnhancedRestoreMailboxesCrossOrgPermanentException`.
 
 Une source obligatoire absente produit des findings bloquants `UNKNOWN` et un assessment `INCOMPLETE`. Un blocage confirmé produit `NO-GO`. Les alertes tenant non bloquantes restent dans `Tenant checks` et ne transforment pas artificiellement toutes les mailboxes en `GO-WARNING`.
