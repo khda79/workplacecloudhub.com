@@ -3,7 +3,7 @@
 Collects Microsoft Graph evidence for Smart Exchange Migration Readiness in an isolated process.
 
 .VERSION
-1.11.8
+1.11.9
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -64,7 +64,7 @@ function Write-WorkerTextFile {
 }
 
 try {
-    Write-GraphWorkerLog -Level INFO -Message "Worker starting. Version=1.11.8; PowerShell=$($PSVersionTable.PSVersion); Computer=$env:COMPUTERNAME; TenantId=$TenantId; RuntimeInput=$InputPath; ContextScope=$ContextScope; ForceAuthentication=$ForceAuthentication; InspectContext=$InspectContext."
+    Write-GraphWorkerLog -Level INFO -Message "Worker starting. Version=1.11.9; PowerShell=$($PSVersionTable.PSVersion); Computer=$env:COMPUTERNAME; TenantId=$TenantId; RuntimeInput=$InputPath; ContextScope=$ContextScope; ForceAuthentication=$ForceAuthentication; InspectContext=$InspectContext."
     $moduleTimer=[Diagnostics.Stopwatch]::StartNew()
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 
@@ -96,7 +96,7 @@ try {
         foreach ($commandName in @('Connect-MgGraph', 'Get-MgUser', 'Get-MgUserLicenseDetail', 'Get-MgSubscribedSku', 'Get-MgOrganization')) {
             if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) { throw "Required Microsoft Graph command is unavailable: $commandName" }
         }
-        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.11.8'
+        'VALIDATION_OK SmartM365 Exchange Migration Readiness Graph worker v1.11.9'
         exit 0
     }
 
@@ -302,8 +302,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUJViQ0RDhVe0I
-# rJMNO60JcUsqYIB6YL8fbwaBqQCspKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdImVkKw3EkKDB
+# DJxBgse3Sn8yqVvZEEhim4YF6JZOMaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -436,31 +436,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICYmykzyuODfjHGaXXbc/+En8HhS6oemChx4K3G5FVwcMA0GCSqG
-# SIb3DQEBAQUABIIBgGA3AIr4EhakJAd7fi5I9qM7WWwiPULZn8QUcLMjiSFxtfKr
-# OKC83R5ASeQ7M56gXnyNYspEJcXtsLzF9hm5ZAdkpK6KTdI/KoXSOrs/BGSdWZ5T
-# 1n3hW3xcgdNLPH+3kPuvljY1jNXxZtV40BAb7GCqc3MWVJaE9wtGm+vWf41BkZrw
-# P3Pb3MDR9WZ0mK5HNkah4Oaqn8bjoZ8M/mBVYpgkFSi8gFEWYiJ8ZFODIdfkFMVU
-# ERKTfKA6q0LbX6DO/mGueS5UT5fmwO0gkU++WEkW8vmmejjSZ8GVZvjt+jSlEkmm
-# EgRimxsg0lgBHSqeygQH8sH26nxtvS4Igy+O2vRtEwHl1HWsDY3jEw2xTh2xA2vd
-# gt5i3G3tYw0VQW86yo5ht6peZVjW+mblonVYNTlIAJ+ZXFAF0fv2nJoNobr7owrx
-# /aGiizHvuNgirWqtpeat/+3anhHMRD98fxzhp0YQfmPOMmU+P/hWW/CdRI6rgdy7
-# 0/VTedgkYnFJ+oQutqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKgwwPTKmuZJ50ZcrS+1EUWyQbuf01vb0cUwubMMsgm7MA0GCSqG
+# SIb3DQEBAQUABIIBgGlz0l50l4L0JWpLBk4J6jpZ5lzAm866Vwjq9+Uv5WUOSB3+
+# lP8dBgrhxCubUApOL5Eg5aEH0xMKGj9POcffx0FWyNNKViHyWsEpw3KAt315qsDC
+# YJshGCTrHjQZ8s3kG0h3K38u7ok2zRtlUI3rZ8XS7NBgWECjjF1ycngGtgNE7X7/
+# cHs09c+p66IVVcEzTk1/OUCcE5KrD92qHoB67D8f8S5BF48ffeoYYtBaKC41fDOp
+# G3c66mXRkkPP4kqHR7QFHG5Zz/RWIOjj7bhLHf5sjQ18Zp8rnwkSV8hUNdxice85
+# EkXqymvfTLLysIuxjurKnOfke5GL2pPlELbhCP1pRPSQ2wFB12F3gkW17VUBPmXQ
+# qcipadH3aD7x3+KaedW+MU11m2UmWn9rLxBZp/UAZ5veWItDlyEIL9MSR9pWygBX
+# eA07TjbEaIb0omkSYWjcYJ+VTEV/LwurRB1mbu2FPwA6uwo1pyYe3/+adFGBvDxw
+# 7m45nLBryh8nONGkDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzA5
-# MDZaMC8GCSqGSIb3DQEJBDEiBCAEvR4gwpLYIiweLOyFP5YUMxIKw/ztqVcPzzin
-# utOJrDANBgkqhkiG9w0BAQEFAASCAgC3S1AQl7nbTh6pmJI0JPfyxcr7D3g/MMCh
-# X5dpdg3SHyBpzhM3rAyfXrzwkzYC1yDKEqAbugqmYhackJyq3nNrzZlQ7xhkwJHD
-# 3pMeJH6tZJwI6yn6vPR7pPVJVb/hizbb7qjldzCF1BZLk0zQRpCRuVAWpyWG5Qpt
-# SkpSad4+CUkaVSEcbhyAyYmgCGMyKSDyYfUwf6q8wUe0bV1+dOi61V+qtEDx02+o
-# Q+U8O8RAHzJaDzC5mK712EJcHl/0DXXlbYYBLFTbP8qea9LlBwHyINrKQtEPbixu
-# OBnIerxnegnSIsG/aJ5VHOjo+pO1iDDFnzFm/lHPn/yAw+gaHSbizkizrFjaVJom
-# bX3hm/fDB8f1fjVG18pLgdz3rbd01RO4bS6r/kj9JAQEfXEMc20v/IxhXwdMrp1o
-# MOnV53usFwasLIIVRt0BDvDssM7yshV+A+v70uI1ttx97P7RElQsgXwvhNfgKIPT
-# 4Caa8E3Dywk+LkE1hUxvqRw9I1GyWQkD+WlyG5i3U8/JZIxf/RVaGpgiSHnF+A4L
-# /Y/HO8OWw2pIs9ggZGUNjCx6eB3yEjx8nOA4Xh18R5d4mxqPaeZvhQWvEIDCWR8p
-# k0sVJEvQ2x3II5S/5bOXC/KzoXrWsDrfi/n6Xv9AQZp0I9DDzAOgvWBQQzkY4Zvw
-# 9nddmoBmdw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzM3
+# MTVaMC8GCSqGSIb3DQEJBDEiBCDSmkGDZ7YMdDBdtgI7/C0RJokuu0q+RJ3cdbOP
+# Vm1WrjANBgkqhkiG9w0BAQEFAASCAgAisY4Jn8iS8jrdTPy6thn8pAnNbLNCAod9
+# 7Yhf8sjlrm12bkm+DJ5t1zZ5z5q2M+s2wl/gamSaWklv5gKMAHt5NMFpBsmiNWCD
+# Oe9Z9Oh4cN/Eqe6yJsVCT3wayKy3nKIAA0K093+/oI27BiWPR+jFhxB1aQSqJn4M
+# g4EuMKHd6MsoGEvJ0Q76SEZaORZdDGTNfZ8TAPVtVp4ac9EAZySXTv2kGkZ0/p77
+# u1Qohy/rEmw+1J8V4eGoFNI7aNyDXjgxjLUWT1hoYZrK8S5zabu96wB98ffCT/oX
+# EbSKNEbKTuGOsYIWdZOyBa/vVkMn/R2cxJJ4nCLCWmO+sgfL8rf/TKk4G4LNpYuH
+# W2ZNl2hlbTbygRiFv7daXLDXZ7J+YigWC2AOk4wCpv14DTlX8MBE+VDWsAQt5lID
+# s8ayupSuCpErAkWzmBbaTNWLw0s+FV+tLUmqHctfjujjRn9b46uJ0UjPSk4+Y0JC
+# ZOsxsWVSRE/urexeAU/6nS5sikazRLtJgrKG+/q2c6UkK6vhPZvfyINlat+GX/ob
+# Or/+uy+UUaHqSnKl7a+qNcW57HOO/0jwun5+A7RcPSmwgTueAMzf21cFvOyyL2AJ
+# DwaTPav/gBwzFjvW01dNfLrEPdnSErZJB9M9u0vD3s81caIzGKURhjXHy0tPLY93
+# 41xk3d2jjw==
 # SIG # End signature block

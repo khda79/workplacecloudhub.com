@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.8'
+$script:SemrVersion = '1.11.9'
 $script:ActiveDirectoryDomains = @()
 $script:Exchange2016EvidenceByEmail = @{}
 $script:Exchange2016HybridEvidence = $null
@@ -685,14 +685,73 @@ function Get-SemrCloudSessionSummary {
 
 function Get-SemrExchangeOnlineSessionInfo {
     [CmdletBinding()]
-    param([string]$TenantId = '')
+    param(
+        [string]$TenantId = '',
+        [switch]$AllowCommandProbe
+    )
 
     try {
         if (-not (Test-SemrCommand -Name 'Get-ConnectionInformation')) { Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop }
         if (-not (Test-SemrCommand -Name 'Get-ConnectionInformation')) { throw 'Get-ConnectionInformation is unavailable.' }
-        $connections = @(Get-ConnectionInformation -ErrorAction Stop)
+        $module = @(Get-Module -Name ExchangeOnlineManagement | Sort-Object Version -Descending | Select-Object -First 1)
+        $moduleVersion = if ($module.Count -eq 1) { [string]$module[0].Version } else { '' }
+        $connectionCommand = @(Get-Command -Name 'Get-ConnectionInformation' -All -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -eq 'ExchangeOnlineManagement' } |
+            Select-Object -First 1)
+        if ($connectionCommand.Count -eq 0) {
+            $connectionCommand = @(Get-Command -Name 'Get-ConnectionInformation' -ErrorAction Stop | Select-Object -First 1)
+        }
+        $commandSource = [string]$connectionCommand[0].Source
+        $connections = @(& $connectionCommand[0] -ErrorAction Stop | Where-Object { $null -ne $_ })
         if ($connections.Count -eq 0) {
-            $script:ExchangeOnlineSessionInfo = [pscustomobject]@{ Available=$false; Usable=$false; Account=''; TenantId=''; Organization=''; AuthType=''; State=''; ConnectionCount=0; Error='' }
+            $metadataDiagnostic = "Get-ConnectionInformation returned no active REST connection. ModuleVersion=$moduleVersion; CommandSource=$commandSource."
+            if ($AllowCommandProbe) {
+                $probeCommand = @(Get-Command -Name 'Get-EXOMailbox' -ErrorAction SilentlyContinue | Select-Object -First 1)
+                if ($probeCommand.Count -eq 1) {
+                    try {
+                        @(& $probeCommand[0] -ResultSize 1 -ErrorAction Stop) | Out-Null
+                        $previousAccount = if ($script:ExchangeOnlineSessionInfo) { [string]$script:ExchangeOnlineSessionInfo.Account } else { '' }
+                        $previousTenantId = if ($script:ExchangeOnlineSessionInfo) { [string]$script:ExchangeOnlineSessionInfo.TenantId } else { '' }
+                        $script:ExchangeOnlineSessionInfo = [pscustomobject]@{
+                            Available = $true
+                            Usable = $true
+                            Account = $previousAccount
+                            TenantId = $previousTenantId
+                            Organization = ''
+                            AuthType = 'Interactive'
+                            State = 'ValidatedByGetEXOMailbox'
+                            ConnectionCount = 0
+                            Error = ''
+                            Diagnostic = "$metadataDiagnostic Read-only Get-EXOMailbox probe succeeded."
+                            ModuleVersion = $moduleVersion
+                            CommandSource = [string]$probeCommand[0].Source
+                            ValidationMethod = 'Get-EXOMailbox'
+                        }
+                        return $script:ExchangeOnlineSessionInfo
+                    }
+                    catch {
+                        $metadataDiagnostic = "$metadataDiagnostic Read-only Get-EXOMailbox probe failed: $($_.Exception.Message)"
+                    }
+                }
+                else {
+                    $metadataDiagnostic = "$metadataDiagnostic Get-EXOMailbox is unavailable for a connection probe."
+                }
+            }
+            $script:ExchangeOnlineSessionInfo = [pscustomobject]@{
+                Available = $false
+                Usable = $false
+                Account = ''
+                TenantId = ''
+                Organization = ''
+                AuthType = ''
+                State = ''
+                ConnectionCount = 0
+                Error = ''
+                Diagnostic = $metadataDiagnostic
+                ModuleVersion = $moduleVersion
+                CommandSource = $commandSource
+                ValidationMethod = 'None'
+            }
             return $script:ExchangeOnlineSessionInfo
         }
         $matching = if ($TenantId) { @($connections | Where-Object { [string](Get-SemrPropertyValue -InputObject $_ -Names @('TenantID','TenantId') -Default '') -eq $TenantId }) } else { @() }
@@ -710,15 +769,32 @@ function Get-SemrExchangeOnlineSessionInfo {
             State = $tokenStatus
             ConnectionCount = $connections.Count
             Error = ''
+            Diagnostic = ''
+            ModuleVersion = $moduleVersion
+            CommandSource = $commandSource
+            ValidationMethod = 'Get-ConnectionInformation'
         }
         return $script:ExchangeOnlineSessionInfo
     }
     catch {
-        $script:ExchangeOnlineSessionInfo = [pscustomobject]@{ Available=$false; Usable=$false; Account=''; TenantId=''; Organization=''; AuthType=''; State=''; ConnectionCount=0; Error=$_.Exception.Message }
+        $script:ExchangeOnlineSessionInfo = [pscustomobject]@{
+            Available = $false
+            Usable = $false
+            Account = ''
+            TenantId = ''
+            Organization = ''
+            AuthType = ''
+            State = ''
+            ConnectionCount = 0
+            Error = $_.Exception.Message
+            Diagnostic = $_.Exception.Message
+            ModuleVersion = ''
+            CommandSource = ''
+            ValidationMethod = 'None'
+        }
         return $script:ExchangeOnlineSessionInfo
     }
 }
-
 function Connect-SemrExchangeOnline {
     [CmdletBinding()]
     param(
@@ -729,7 +805,7 @@ function Connect-SemrExchangeOnline {
     )
 
     if (-not (Test-SemrCommand -Name 'Connect-ExchangeOnline') -or -not (Test-SemrCommand -Name 'Get-ConnectionInformation')) { Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop }
-    $existing = Get-SemrExchangeOnlineSessionInfo -TenantId $TenantId
+    $existing = Get-SemrExchangeOnlineSessionInfo -TenantId $TenantId -AllowCommandProbe
     $tenantCompatible = -not $TenantId -or -not $existing.TenantId -or [string]$existing.TenantId -eq $TenantId
     if (-not $ForceAuthentication -and $existing.Available -and $existing.Usable -and $tenantCompatible) {
         if (-not $script:ConnectionState.ExchangeOnline) { $script:OwnsExchangeOnlineSession = $false }
@@ -744,8 +820,20 @@ function Connect-SemrExchangeOnline {
     if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) { $parameters.UserPrincipalName = $UserPrincipalName }
     if ($DisableWam) { $parameters.DisableWAM = $true }
     Connect-ExchangeOnline @parameters
-    $connected = Get-SemrExchangeOnlineSessionInfo -TenantId $TenantId
-    if (-not $connected.Available -or -not $connected.Usable) { throw 'Exchange Online authentication completed without returning a usable connection.' }
+    $connected = $null
+    foreach ($attempt in 1..5) {
+        $connected = Get-SemrExchangeOnlineSessionInfo -TenantId $TenantId -AllowCommandProbe:($attempt -eq 5)
+        if ($connected.Available -and $connected.Usable) { break }
+        if ($attempt -lt 5) { Start-Sleep -Milliseconds 300 }
+    }
+    if (-not $connected.Available -or -not $connected.Usable) {
+        $diagnostic = [string](Get-SemrPropertyValue -InputObject $connected -Names @('Diagnostic','Error') -Default 'No Exchange Online connection metadata or successful command probe was returned.')
+        throw "Exchange Online authentication completed without returning a usable connection. $diagnostic"
+    }
+    if (-not $connected.Account -and $UserPrincipalName) {
+        $connected.Account = $UserPrincipalName
+        $script:ExchangeOnlineSessionInfo = $connected
+    }
     if ($TenantId -and $connected.TenantId -and [string]$connected.TenantId -ne $TenantId) {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
         throw "Exchange Online connected to tenant '$($connected.TenantId)' instead of configured tenant '$TenantId'."
@@ -3721,8 +3809,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVDFS3h4YaYJMK
-# SbwYJQlDwN22b3DeSNp9HtWY/GR8hqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMdtZBtiyk3S2k
+# rpIKRxDLhKb3KqtuvlnKFZYp78qK2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3855,31 +3943,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINUIrvwCXmwie95Bm98DuyBnqq/ZMrmB80gmXHiGaA5cMA0GCSqG
-# SIb3DQEBAQUABIIBgAXH+Hx4w84O74DORM/7K7OClA6esepMCnZGjingainDY5Ve
-# 1MM96WpAWd2fABjkSetfIAsAcrkdEiHYMls+DiFPSkjgaPYkTKGLp8evpR36M1MF
-# JTQeIegYkjLy4wrqR0eUI/kRxquTgHDKhfp6aLff2mVlfaO4eS1+PtzOh7DITChH
-# qBv6MhYCrepke+dlC5vudBXZu3dW4b6OHvFaUVIyYAeI3hBFPA2Pd6qwvXdYSIDc
-# JpmXBMBI8UFIW6T9shgaeUae5pnHh+hd/WelRE729HjouZMvB8a226SNwXtQ47P9
-# /C8NkfgkTCt8fyy53RASyMO0EXDeF21lfDASYHQzCeYgPOc+tig7g+x9kHtk/Dh6
-# 0kA9zJwfXZR8qadzPb3WdwG7gSBEBHSZ4C6CV6S690RcZuqQs4WBn4LY3lkcxVRi
-# 6ZJ4tXFya56BQcTOipELh96B8Gu4vMIGhN7jj3JVnwmGpFVG4/rotg58BSl9vt05
-# vRxu8D2hD8fxbWXL26GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDCVuu4yMijxSZxBKgUFRrxlYGstauSJJnPetzVy/P1BMA0GCSqG
+# SIb3DQEBAQUABIIBgG1gpW0im0VnF3L17HUuZx6P3lDcypCW+EflFEKQY+z6+Mnf
+# oTyiV/Zl4fj//Th7ER0V5xhLuBwX2Msi4tglzAiWcgtylrzZpKUM4aX5iG64O2v5
+# SG6wMAejqlU9VwcZ1+QwZMlgnCaC9lB0EW6pEDEuPZnQtpsCEIbVkL3Gvn1Huqsz
+# NbyjxW3OvwQlf+UdaUruq4GNAPteqvvFNBPtYou1m1lnPhVU/GciABqRP22GJAcE
+# IPfWPAN9dBwlG9gCGeqaD/Bt6bvRZc9UJhuFkIPcsiXlOrK/Ux6TXqk+Sb4aBPDI
+# IoRUBMR/j1oSJXOLCPl1QbmZCw2mk9/7q8CwI7XOELPN1Zuy9ZBIIHKAPFKd0JtS
+# 7Ht6+A6NAgC/U82OC6vO7IbAwRM0frWaTVrRxBuWAkqOGZlH/t/5lHw2nFY9Fk2n
+# raV9qliA9pRY9apEtDCbLguiUkUWPpVdKWWHqY5xxSkqe1xk7Ar1tXXm7m6abVc+
+# QBoPnHnjFrNf6Yd9vKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzA5
-# MDZaMC8GCSqGSIb3DQEJBDEiBCDeEV7i83B6COIoPBTG41cce2sKi/MVtod+3yJR
-# CpzeZTANBgkqhkiG9w0BAQEFAASCAgBNHxrCcFaXVJVMrZh+iFArOqrjBzO7LsvG
-# /FduG2za6X6wVEz4azjfwH1qKaX95DvvxSNTaojuqPf/AqQzHSfadrXwim1rM8Gg
-# hPTPE4RdmVnUyneZUI91GtQ2ZSCvWNy/Xt43A+pSOgxmIcSHQ9A2kMCotaSEv730
-# urZR+PwX46x9jNiQW9g+N4vabuBGuzsoRSZcDIUhkWXEtR0AWmM8/gG1c9ZshaWB
-# Y8q3jLgsqa3lKyGpc+PXbyyvpk8uXQpRYiD+ZAvCkDLd+/qro49cn8CHinQD5Yp6
-# PgnbE9y+8UEtfEXHnsjYrDANg0K1IBwkSfm+4Rb5xH6YqpyjjWUU7Xkm0Dg3oZnd
-# G6OFRDeT2OGgFE0RVp8KKjoBESvO7DRQd/4omx1bkK4Xpkypmfm5JoEWy2BE/UMu
-# EGwcC7zLc0D8DH4H7dzZ1poGVkoSixTg5OQahp57lHV32ggd3M3MYsUV6v3OOWp2
-# C30s0w2IJ0BL8+mclrB81Vf+mYoZ6WAPsGgBOwSPNlAztHQEPkXOZjjbBs9lllCK
-# dJWrQ9RkIGNwFzdscbL8EY5N1w1N9Yq53Hz+cqLcTVtVUMMvwIO+2DOg+C44bYFY
-# 622B/wB3PrTD6tKAeBkloeH3jcb3Hr59w5QNU0g+M6nUcJ3s+KwgN+v34CUwK5bV
-# mWLRaAMn+A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxNzM3
+# MTRaMC8GCSqGSIb3DQEJBDEiBCBLTxbDh45CuoKW2Oy+Nu6NHX1+TBaomqCS3mqn
+# uZSz9TANBgkqhkiG9w0BAQEFAASCAgBLQuH8cL4wJiBOKCsjjB8OAkpMxMaxOFCi
+# 4vET0vlz1woBeOJYHD9JvfQRhib3TZqJ7711xMBor64K2K7vZ3UdsVlUMAu1lSAc
+# bLYEfv+Mok4AVLEziBqqskuNlu5GduOs+0pgq0bRdUgtfE2296NKbRoZebJuk53l
+# Zyp1Ir92cn5vQMdwRDIR0AC7LNnavB6hImWysCkM6GD9xcS00adNUfwuwz347lfJ
+# YSexONCt4hAmv9xk7/1ncyKt1d5Vs/CQmPpJeQTYePz/wrNjMankmopO4Xk9zHxZ
+# ZAEh4IZcY/d+6ZBFFUBdgF0inyGOVJI0SlmYNb2ZihgZm1xRKFpwzZZNbxnI9DLp
+# crXbsad/blgXyxGfjIO4v4qvuVCRQwFIPa4OSePiGb1Uo+ymUytEZTuOj4Jr5pc9
+# TohMX1BZRRbtT+lqMlVD7URM9b4fdA6ar/qFsy+Rlm043plf+dWfgyw1HccrXVDm
+# ypJiHPcb8GOFboJ9hQ30DKFddWbDNAM3iWhZKOTxqxVxI/aEzlkWLqJ8UCSdMBkH
+# 2AziELNBlXgDhXPBFXVyDoFKXpJtDtJ+UnxeS3U+t3HOJiGhzk65f33ya6cw9N0e
+# FYe7F9s9AUFEX3Ni6BdkgcdVH1bolgRka7fIJMALxqeDQuqdqsqy/jNR8t/ZebYI
+# f6Hdr4cu7Q==
 # SIG # End signature block
