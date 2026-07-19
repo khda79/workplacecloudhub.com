@@ -168,7 +168,7 @@ For an explicit user-scoped install:
     {
       "Name": "EXO-Mailboxes-Inventory",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-IncludeStats -ForceLiveStats",
       "Enabled": false,
       "Group": "Exchange",
       "DependsOn": [],
@@ -210,7 +210,7 @@ The manifest is hot reloaded at every tick when its file changes; an invalid man
 
 All shipped jobs are `Enabled=false` except `M365-VerifiedDomains-Inventory` (small, read-only, safe daily example). The template contains examples of each schedule type (Weekly, Daily once, Daily multi-time with `Skip`), one long job with `TimeoutMinutes` > 1440 (`Mailboxes-PermissionsByUser-Report`), and the `Exchange2016` group running with `PowerShellEdition = "WindowsPowerShell"`; pin those to the Exchange server through their `AllowedServers` list in the runtime manifest.
 
-Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a nightly full job (for example `EXO-Mailboxes-Inventory` with `-IncludeStats`, `Exchange2016-Local-Mailboxes-Inventory` with `-IncludeADPermission`) plus a midday `-Fast` job running the same script without the expensive switches. The full job can declare `DependsOn` on its fast prerequisite when a quick CSV must be published first; dependent jobs are now marked `BlockedDependencyFailed` or `BlockedDependencyTimeout` instead of silently waiting forever. Fast jobs should use `ContinueOnError=false` when downstream jobs depend on their outputs. Before enabling a job, make sure its own runtime `.local.json` exists next to the target script (the child runs unattended; app-only auth must be configured).
+Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a nightly full job (for example `EXO-Mailboxes-Inventory` with `-IncludeStats -ForceLiveStats`, required when the tenant contains more than 5,000 mailboxes, or `Exchange2016-Local-Mailboxes-Inventory` with `-IncludeADPermission`) plus a midday `-Fast` job running the same script without the expensive switches. The full job can declare `DependsOn` on its fast prerequisite when a quick CSV must be published first; dependent jobs are now marked `BlockedDependencyFailed` or `BlockedDependencyTimeout` instead of silently waiting forever. Fast jobs should use `ContinueOnError=false` when downstream jobs depend on their outputs. Before enabling a job, make sure its own runtime `.local.json` exists next to the target script (the child runs unattended; app-only auth must be configured).
 
 ## State file schema (`Orchestrator-State.json`)
 
