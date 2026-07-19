@@ -5,19 +5,19 @@ param(
     [string]$OutputPath = '',
     [string]$ErrorPath = '',
     [string]$ProgressPath = '',
+    [string]$CancelPath = '',
     [switch]$ValidateOnly,
     [switch]$SelfTest
 )
 
 Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
-$workerVersion = '1.11.2'
+$workerVersion = '1.11.3'
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding = $utf8
 $OutputEncoding = $utf8
 $enabledChecks = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-$addressQueryCache = @{}
 
 function Test-WorkerCheckEnabled {
     param([Parameter(Mandatory)][string]$CheckId)
@@ -136,42 +136,172 @@ function ConvertTo-StatisticsEvidence {
     }
 }
 
-function Get-AddressConflictEvidence {
-    param([string]$MailboxAddress, [string[]]$Addresses)
-    $items = New-Object System.Collections.Generic.List[object]
-    foreach ($address in @($Addresses | ForEach-Object { ([string]$_ -replace '^(?i:smtp:)', '').Trim() } | Where-Object { $_ -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' } | Sort-Object -Unique)) {
-        $safeAddress = $address.Replace("'", "''")
-        $cacheKey = $address.ToLowerInvariant()
-        if ($addressQueryCache.ContainsKey($cacheKey)) {
-            $query = $addressQueryCache[$cacheKey]
-        }
-        else {
-            $query = Invoke-WorkerCommand -Name 'Get-Recipient' -Parameters @{
-                Filter = "EmailAddresses -eq 'smtp:$safeAddress' -or ExternalEmailAddress -eq 'smtp:$safeAddress'"
-                ResultSize = 'Unlimited'
-            }
-            $addressQueryCache[$cacheKey] = $query
-        }
-        $owners = New-Object System.Collections.Generic.List[string]
-        if ($query.Success) {
-            foreach ($owner in @($query.Rows)) {
-                $ownerAddress = [string]$owner.PrimarySmtpAddress
-                $ownerIdentity = [string]$owner.Identity
-                if ($ownerAddress -and $ownerAddress -ine $MailboxAddress) {
-                    [void]$owners.Add(("{0} -> {1}" -f $address, $ownerIdentity))
-                }
-            }
-        }
-        [void]$items.Add([pscustomobject][ordered]@{
-            Address = $address
-            Available = [bool]$query.Success
-            Conflicts = @($owners | Sort-Object -Unique)
-            ErrorMessage = [string]$query.ErrorMessage
-        })
-    }
-    $items.ToArray()
+function Test-WorkerCancellation {
+    return -not [string]::IsNullOrWhiteSpace($CancelPath) -and (Test-Path -LiteralPath $CancelPath -PathType Leaf)
 }
 
+function ConvertTo-NormalizedSmtpAddress {
+    param($Value)
+    $text = ([string]$Value).Trim()
+    if ($text -match '^(?i:smtp:)(.+)$') { $text = $Matches[1].Trim() }
+    if ($text -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { return '' }
+    return $text.ToLowerInvariant()
+}
+
+function Invoke-WorkerRecipientAddressBatch {
+    param(
+        [Parameter(Mandatory)][string[]]$Addresses,
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [Parameter(Mandatory)][string]$SnapInName
+    )
+
+    $clauses = @(
+        foreach ($address in $Addresses) {
+            $safeAddress = $address.Replace("'", "''")
+            "(EmailAddresses -eq 'smtp:$safeAddress' -or ExternalEmailAddress -eq 'smtp:$safeAddress')"
+        }
+    )
+    $filter = $clauses -join ' -or '
+    $job = $null
+    $started = Get-Date
+    try {
+        $job = Start-Job -ScriptBlock {
+            param($ExchangeSnapInName, $RecipientFilter)
+            $ErrorActionPreference = 'Stop'
+            if (-not (Get-PSSnapin -Name $ExchangeSnapInName -ErrorAction SilentlyContinue)) {
+                Add-PSSnapin -Name $ExchangeSnapInName -ErrorAction Stop
+            }
+            Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop | Out-Null
+            @(Get-Recipient -Filter $RecipientFilter -ResultSize Unlimited -ErrorAction Stop | Select-Object Identity,DistinguishedName,PrimarySmtpAddress,ExternalEmailAddress,EmailAddresses,RecipientType,RecipientTypeDetails)
+        } -ArgumentList $SnapInName, $filter
+
+        $deadline = (Get-Date).AddSeconds([math]::Max(5, $TimeoutSeconds))
+        while ($job.State -in @('NotStarted','Running')) {
+            if (Test-WorkerCancellation) {
+                Stop-Job -Job $job -ErrorAction SilentlyContinue
+                throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.')
+            }
+            if ((Get-Date) -ge $deadline) {
+                Stop-Job -Job $job -ErrorAction SilentlyContinue
+                return [pscustomobject]@{
+                    Success = $false
+                    TimedOut = $true
+                    Rows = @()
+                    DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
+                    ErrorMessage = "Get-Recipient address batch exceeded $TimeoutSeconds second(s)."
+                }
+            }
+            Start-Sleep -Milliseconds 250
+        }
+
+        if ($job.State -ne 'Completed') {
+            $reason = [string]$job.ChildJobs[0].JobStateInfo.Reason
+            if ([string]::IsNullOrWhiteSpace($reason)) { $reason = "Recipient address batch ended in state $($job.State)." }
+            return [pscustomobject]@{ Success = $false; TimedOut = $false; Rows = @(); DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = $reason }
+        }
+        $rows = @(Receive-Job -Job $job -ErrorAction Stop)
+        return [pscustomobject]@{ Success = $true; TimedOut = $false; Rows = $rows; DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = '' }
+    }
+    catch [OperationCanceledException] { throw }
+    catch {
+        return [pscustomobject]@{ Success = $false; TimedOut = $false; Rows = @(); DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1); ErrorMessage = $_.Exception.Message }
+    }
+    finally {
+        if ($job) {
+            if ($job.State -in @('NotStarted','Running')) { Stop-Job -Job $job -ErrorAction SilentlyContinue }
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Initialize-WorkerAddressConflictEvidence {
+    param(
+        [Parameter(Mandatory)]$Evidence,
+        [Parameter(Mandatory)][hashtable]$CandidateAddressesByEmail,
+        [Parameter(Mandatory)][int]$BatchSize,
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [Parameter(Mandatory)][string]$SnapInName
+    )
+
+    $started = Get-Date
+    $normalizedBatchSize = [math]::Max(1, [math]::Min(50, $BatchSize))
+    $allAddresses = @($CandidateAddressesByEmail.Values | ForEach-Object { @($_) } | ForEach-Object { $_ } | Where-Object { $_ } | Sort-Object -Unique)
+    $ownerIndex = @{}
+    $queryState = @{}
+    foreach ($address in $allAddresses) {
+        $ownerIndex[$address] = New-Object System.Collections.Generic.List[object]
+        $queryState[$address] = [pscustomobject]@{ Available = $false; ErrorMessage = 'Address was not queried.' }
+    }
+
+    $batchCount = if ($allAddresses.Count -eq 0) { 0 } else { [int][math]::Ceiling($allAddresses.Count / [double]$normalizedBatchSize) }
+    $timeoutCount = 0
+    $errorCount = 0
+    for ($batchIndex = 0; $batchIndex -lt $batchCount; $batchIndex++) {
+        if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
+        $offset = $batchIndex * $normalizedBatchSize
+        $last = [math]::Min($allAddresses.Count - 1, $offset + $normalizedBatchSize - 1)
+        $batchAddresses = @($allAddresses[$offset..$last])
+        Write-WorkerProgress -Current ($batchIndex + 1) -Total $batchCount -Message ("SMTP uniqueness batch {0}/{1} - {2} address(es)" -f ($batchIndex + 1), $batchCount, $batchAddresses.Count)
+        $query = Invoke-WorkerRecipientAddressBatch -Addresses $batchAddresses -TimeoutSeconds $TimeoutSeconds -SnapInName $SnapInName
+        if ($query.TimedOut) { $timeoutCount++ }
+        if (-not $query.Success) { $errorCount++ }
+        foreach ($address in $batchAddresses) {
+            $queryState[$address] = [pscustomobject]@{ Available = [bool]$query.Success; ErrorMessage = [string]$query.ErrorMessage }
+        }
+        if (-not $query.Success) { continue }
+
+        foreach ($owner in @($query.Rows)) {
+            $ownerAddresses = @(
+                @($owner.EmailAddresses) + @($owner.ExternalEmailAddress) + @($owner.PrimarySmtpAddress) |
+                    ForEach-Object { ConvertTo-NormalizedSmtpAddress $_ } |
+                    Where-Object { $_ } |
+                    Sort-Object -Unique
+            )
+            foreach ($ownerAddress in $ownerAddresses) {
+                if ($ownerIndex.ContainsKey($ownerAddress)) { [void]$ownerIndex[$ownerAddress].Add($owner) }
+            }
+        }
+    }
+
+    foreach ($entry in @($Evidence.ToArray())) {
+        $email = ([string]$entry.EmailAddress).Trim().ToLowerInvariant()
+        $expectedIdentities = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        foreach ($object in @($entry.Mailboxes) + @($entry.RemoteMailboxes) + @($entry.MailUsers) + @($entry.Recipients)) {
+            foreach ($identityValue in @($object.Identity, $object.DistinguishedName)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$identityValue)) { [void]$expectedIdentities.Add(([string]$identityValue).Trim()) }
+            }
+        }
+        $items = New-Object System.Collections.Generic.List[object]
+        foreach ($address in @($CandidateAddressesByEmail[$email])) {
+            $owners = New-Object System.Collections.Generic.List[string]
+            foreach ($owner in @($ownerIndex[$address].ToArray())) {
+                $ownerIdentity = [string]$owner.Identity
+                $ownerDn = [string]$owner.DistinguishedName
+                $ownerPrimary = ConvertTo-NormalizedSmtpAddress $owner.PrimarySmtpAddress
+                $isExpectedOwner = ($ownerIdentity -and $expectedIdentities.Contains($ownerIdentity)) -or ($ownerDn -and $expectedIdentities.Contains($ownerDn)) -or ($ownerPrimary -eq $email)
+                if (-not $isExpectedOwner) { [void]$owners.Add(("{0} -> {1}" -f $address, $ownerIdentity)) }
+            }
+            $state = $queryState[$address]
+            [void]$items.Add([pscustomobject][ordered]@{
+                Address = $address
+                Available = [bool]$state.Available
+                Conflicts = @($owners | Sort-Object -Unique)
+                ErrorMessage = [string]$state.ErrorMessage
+            })
+        }
+        $entry.AddressConflicts = $items.ToArray()
+    }
+
+    return [pscustomobject][ordered]@{
+        CandidateAddressCount = $allAddresses.Count
+        BatchCount = $batchCount
+        TimeoutCount = $timeoutCount
+        ErrorCount = $errorCount
+        BatchSize = $normalizedBatchSize
+        TimeoutSeconds = $TimeoutSeconds
+        DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
+    }
+}
 function Get-WorkerFailureEvidence {
     param([string]$EmailAddress, [string]$Message)
     $now = Get-Date
@@ -235,6 +365,11 @@ if ($SelfTest) {
         $items = New-Object System.Collections.Generic.List[object]
         $errors = New-Object System.Collections.Generic.List[object]
         [void]$items.Add([pscustomobject]@{ Name = 'serialization'; Result = 'PASS' })
+        $batchMechanics = Invoke-WorkerRecipientAddressBatch -Addresses @('selftest@example.invalid') -TimeoutSeconds 10 -SnapInName 'SmartM365.Nonexistent.Exchange.SnapIn'
+        if ($batchMechanics.Success -or $batchMechanics.TimedOut -or [string]::IsNullOrWhiteSpace([string]$batchMechanics.ErrorMessage)) {
+            throw 'Windows PowerShell 5.1 recipient batch isolation self-test returned an unexpected result.'
+        }
+        [void]$items.Add([pscustomobject]@{ Name = 'recipient-batch-isolation'; Result = 'PASS' })
         [void]$errors.Add([pscustomobject]@{ EmailAddress = 'selftest@example.invalid'; Message = 'Expected self-test error record' })
         $payload = [pscustomobject][ordered]@{
             WorkerVersion = $workerVersion
@@ -244,7 +379,7 @@ if ($SelfTest) {
         }
         $payload | Export-Clixml -LiteralPath $selfTestPath -Depth 12 -Force
         $roundTrip = Import-Clixml -LiteralPath $selfTestPath
-        if (@($roundTrip.Items).Count -ne 1 -or [string]$roundTrip.Items[0].Result -ne 'PASS' -or @($roundTrip.Evidence).Count -ne 1 -or @($roundTrip.Errors).Count -ne 1) {
+        if (@($roundTrip.Items).Count -ne 2 -or [string]$roundTrip.Items[0].Result -ne 'PASS' -or @($roundTrip.Evidence).Count -ne 1 -or @($roundTrip.Errors).Count -ne 1) {
             throw 'Windows PowerShell 5.1 CLIXML nested collection round-trip returned an unexpected result.'
         }
         Write-Output "SELFTEST_OK|$workerVersion|$($PSVersionTable.PSVersion)"
@@ -286,18 +421,27 @@ try {
     if ($workerInput -and $workerInput.PSObject.Properties['EmailAddresses']) {
         $emails = @($workerInput.EmailAddresses | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
         foreach ($checkId in @(ConvertTo-TextArray $workerInput.EnabledChecks)) { [void]$enabledChecks.Add($checkId) }
+        $smtpBatchSize = if ($workerInput.PSObject.Properties['SmtpUniquenessBatchSize']) { [int]$workerInput.SmtpUniquenessBatchSize } else { 25 }
+        $smtpBatchTimeoutSeconds = if ($workerInput.PSObject.Properties['SmtpUniquenessBatchTimeoutSeconds']) { [int]$workerInput.SmtpUniquenessBatchTimeoutSeconds } else { 60 }
     }
     else {
         # Backward compatibility with the v1.11.1 plain string-array payload.
         $emails = @($workerInput | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+        $smtpBatchSize = 25
+        $smtpBatchTimeoutSeconds = 60
     }
 
+    $smtpBatchSize = [math]::Max(1, [math]::Min(50, $smtpBatchSize))
+    $smtpBatchTimeoutSeconds = [math]::Max(5, [math]::Min(300, $smtpBatchTimeoutSeconds))
     $startedAt = Get-Date
     $evidence = New-Object System.Collections.Generic.List[object]
     $collectionErrors = New-Object System.Collections.Generic.List[object]
     $databaseCache = @{}
+    $candidateAddressesByEmail = @{}
+    $addressConflictMetrics = [pscustomobject]@{ CandidateAddressCount=0; BatchCount=0; TimeoutCount=0; ErrorCount=0; BatchSize=$smtpBatchSize; TimeoutSeconds=$smtpBatchTimeoutSeconds; DurationSeconds=0 }
     $index = 0
     foreach ($email in $emails) {
+        if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
         $index++
         Write-WorkerProgress -Current $index -Total $emails.Count -Message ("Recipient lookup - {0}" -f $email)
         try {
@@ -425,22 +569,24 @@ try {
                 }
             }
 
-            $addresses = @()
-            if ($mailboxes.Count -eq 1) {
-                $addresses += @($mailboxes[0].EmailAddresses)
-                if ($mailboxes[0].ExternalEmailAddress) { $addresses += [string]$mailboxes[0].ExternalEmailAddress }
+            $candidateAddressValues = New-Object System.Collections.Generic.List[object]
+            foreach ($mailObject in @($mailboxes) + @($remoteMailboxes) + @($mailUsers) + @($recipients)) {
+                foreach ($value in @($mailObject.EmailAddresses) + @($mailObject.ExternalEmailAddress) + @($mailObject.PrimarySmtpAddress)) {
+                    if ($value) { [void]$candidateAddressValues.Add($value) }
+                }
             }
+            $candidateAddressesByEmail[$email] = @(
+                $candidateAddressValues.ToArray() |
+                    ForEach-Object { ConvertTo-NormalizedSmtpAddress $_ } |
+                    Where-Object { $_ } |
+                    Sort-Object -Unique
+            )
             $lookupResults = @($recipientResult)
             if ($needMailbox) { $lookupResults += $mailboxResult }
             if ($needRemoteMailbox) { $lookupResults += $remoteMailboxResult }
             if ($needMailUser) { $lookupResults += $mailUserResult }
             $coreAvailable = @($lookupResults | Where-Object { -not $_.Success }).Count -eq 0
             $errors = @($lookupResults | Where-Object { -not $_.Success -and $_.ErrorMessage } | ForEach-Object { $_.ErrorMessage } | Sort-Object -Unique)
-            $addressConflicts = @()
-            if ((Test-WorkerCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE') -or (Test-WorkerCheckEnabled -CheckId 'TARGET-ADDRESS-GLOBAL-UNIQUE')) {
-                Write-WorkerProgress -Current $index -Total $emails.Count -Message ("SMTP uniqueness - {0}" -f $email)
-                $addressConflicts = @(Get-AddressConflictEvidence -MailboxAddress $email -Addresses $addresses)
-            }
             [void]$evidence.Add([pscustomobject][ordered]@{
                 EmailAddress = $email
                 Available = $coreAvailable
@@ -468,7 +614,7 @@ try {
                 DatabaseHealthSource = "Local Exchange 2016 Management Shell mailbox database on $env:COMPUTERNAME"
                 DatabaseHealthSourceTimestamp = Get-Date
                 DeliveryRestrictionsAvailable = [bool]($mailboxes.Count -eq 1 -and $mailboxResult.Success)
-                AddressConflicts = $addressConflicts
+                AddressConflicts = @()
             })
         }
         catch {
@@ -477,6 +623,10 @@ try {
             [void]$evidence.Add((Get-WorkerFailureEvidence -EmailAddress $email -Message $message))
         }
     }
+    if ((Test-WorkerCheckEnabled -CheckId 'PROXY-SMTP-GLOBAL-UNIQUE') -or (Test-WorkerCheckEnabled -CheckId 'TARGET-ADDRESS-GLOBAL-UNIQUE')) {
+        $addressConflictMetrics = Initialize-WorkerAddressConflictEvidence -Evidence $evidence -CandidateAddressesByEmail $candidateAddressesByEmail -BatchSize $smtpBatchSize -TimeoutSeconds $smtpBatchTimeoutSeconds -SnapInName $snapInName
+    }
+    if (Test-WorkerCancellation) { throw [OperationCanceledException]::new('Exchange 2016 worker cancellation requested.') }
     $hybridEvidence = Get-HybridEvidence
     $result = [pscustomobject][ordered]@{
         WorkerVersion = $workerVersion
@@ -490,6 +640,13 @@ try {
         PermissionCount = @($evidence.ToArray() | ForEach-Object { @($_.Permissions) }).Count
         ErrorCount = $collectionErrors.Count
         Errors = $collectionErrors.ToArray()
+        SmtpUniquenessCandidateAddressCount = $addressConflictMetrics.CandidateAddressCount
+        SmtpUniquenessBatchCount = $addressConflictMetrics.BatchCount
+        SmtpUniquenessTimeoutCount = $addressConflictMetrics.TimeoutCount
+        SmtpUniquenessErrorCount = $addressConflictMetrics.ErrorCount
+        SmtpUniquenessBatchSize = $addressConflictMetrics.BatchSize
+        SmtpUniquenessBatchTimeoutSeconds = $addressConflictMetrics.TimeoutSeconds
+        SmtpUniquenessDurationSeconds = $addressConflictMetrics.DurationSeconds
         Evidence = $evidence.ToArray()
         Hybrid = $hybridEvidence
     }

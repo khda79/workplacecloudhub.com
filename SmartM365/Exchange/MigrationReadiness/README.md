@@ -25,6 +25,8 @@ Si une source obligatoire est indisponible, les contrôles possibles continuent,
 
 Le worker Exchange 2016 exécute un self-test de sérialisation CLIXML sous Windows PowerShell 5.1 avant le preflight. Une erreur limitée à une mailbox est isolée et produit une évidence `UNKNOWN` pour cette mailbox sans interrompre la collecte du reste du batch.
 
+Le contrôle d’unicité SMTP regroupe par défaut les adresses du batch par lots de 25 et recherche leurs propriétaires dans toute la forêt Exchange. Chaque lot est exécuté dans un job Windows PowerShell 5.1 isolé avec un timeout de 60 secondes : un timeout produit une évidence UNKNOWN pour les adresses concernées sans figer le worker. Le bouton d’annulation signale le worker puis termine son processus après trois secondes s’il ne répond pas.
+
 L’onglet `Sources`, `Live-Sources.csv`, la feuille Excel `Live Sources` et le rapport HTML exposent l’état et le détail de chaque source obligatoire.
 
 ## Autonomie et sécurité
