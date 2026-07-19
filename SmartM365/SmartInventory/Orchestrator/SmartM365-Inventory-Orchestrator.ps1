@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.4.0
+1.4.1
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -109,7 +109,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.4.0
+    Version : 1.4.1
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -134,7 +134,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.4.0"
+$ScriptVersion = "1.4.1"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -3039,10 +3039,13 @@ function Update-OrchestratorServerCapabilities {
             -ProbeMode $script:Settings.CapabilityProbeMode `
             -ProbeTimeoutSeconds $script:Settings.CapabilityProbeTimeoutSeconds
         $capabilities | Add-Member -NotePropertyName ElectionWeight -NotePropertyValue $script:Settings.ElectionWeight -Force
+        $localJobPolicy = if ($script:Settings.ServerJobPolicies.ContainsKey($env:COMPUTERNAME)) { $script:Settings.ServerJobPolicies[$env:COMPUTERNAME] } else { $null }
+        $capabilities | Add-Member -NotePropertyName ServerJobPolicy -NotePropertyValue $localJobPolicy -Force
         Write-FileAtomically -Path $script:Settings.CapabilitiesPath -Content ($capabilities | ConvertTo-Json -Depth 10)
         $script:ServerCapabilities = $capabilities
         $readyText = if (@($capabilities.ReadyCapabilities).Count -gt 0) { @($capabilities.ReadyCapabilities) -join ', ' } else { 'none' }
-        Write-OrchestratorLog -Message ("Automatic server capabilities refreshed: ready={0}; probeMode={1}; weight={2}; file={3}." -f $readyText, $capabilities.ProbeMode, $script:Settings.ElectionWeight, $script:Settings.CapabilitiesPath)
+        $jobPolicyText = if ($null -ne $localJobPolicy) { 'only jobs requiring ' + (@($localJobPolicy.OnlyJobsRequiring) -join ', ') } else { 'none' }
+        Write-OrchestratorLog -Message ("Automatic server capabilities refreshed: ready={0}; probeMode={1}; weight={2}; jobPolicy={3}; file={4}." -f $readyText, $capabilities.ProbeMode, $script:Settings.ElectionWeight, $jobPolicyText, $script:Settings.CapabilitiesPath)
         foreach ($probe in @($capabilities.Results | Where-Object { -not $_.Ready })) {
             Write-OrchestratorLog -Message ("Capability {0} unavailable: {1}" -f $probe.Name, $probe.Detail) -Level WARN
         }
@@ -3120,12 +3123,20 @@ function Update-OrchestratorElectionPlan {
         $capabilities = @(Get-LiveOrchestratorServerCapabilities)
         if ($capabilities.Count -eq 0) { throw 'No live server has a valid capability document and heartbeat.' }
         $weights = @{}
+        $jobPolicies = @{}
         foreach ($serverCapability in $capabilities) {
+            $serverName = ([string]$serverCapability.ServerName).ToUpperInvariant()
             $weight = 1.0
             if ($serverCapability.PSObject.Properties['ElectionWeight'] -and [double]$serverCapability.ElectionWeight -gt 0) { $weight = [double]$serverCapability.ElectionWeight }
-            $weights[[string]$serverCapability.ServerName] = $weight
+            $weights[$serverName] = $weight
+            if ($serverCapability.PSObject.Properties['ServerJobPolicy'] -and $null -ne $serverCapability.ServerJobPolicy) {
+                $jobPolicies[$serverName] = $serverCapability.ServerJobPolicy
+            }
+            elseif ($script:Settings.ServerJobPolicies.ContainsKey($serverName)) {
+                $jobPolicies[$serverName] = $script:Settings.ServerJobPolicies[$serverName]
+            }
         }
-        $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -DurationMinutesByJob (Get-OrchestratorDurationMedians) -NowUtc $nowUtc
+        $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -ServerJobPolicies $jobPolicies -DurationMinutesByJob (Get-OrchestratorDurationMedians) -NowUtc $nowUtc
         Write-FileAtomically -Path $script:Settings.ElectionPlanPath -Content ($plan | ConvertTo-Json -Depth 10)
         $script:ElectionPlan = $plan
         $script:LastElectionPlanRefreshUtc = $nowUtc
@@ -4042,6 +4053,27 @@ try {
         $serverWeight = [double]$electionWeightsByServer.PSObject.Properties[$env:COMPUTERNAME].Value
         if ($serverWeight -gt 0) { $electionWeight = $serverWeight }
     }
+    $serverJobPolicies = @{}
+    $serverJobPoliciesRaw = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'ServerJobPolicies' -DefaultValue $null
+    if ($null -ne $serverJobPoliciesRaw) {
+        $validJobPolicyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'TeamsPowerShell')
+        foreach ($serverPolicyProperty in @($serverJobPoliciesRaw.PSObject.Properties)) {
+            $serverPolicyName = ([string]$serverPolicyProperty.Name).Trim().ToUpperInvariant()
+            if ([string]::IsNullOrWhiteSpace($serverPolicyName)) { throw 'ServerJobPolicies contains an empty server name.' }
+            $serverPolicyValue = $serverPolicyProperty.Value
+            if ($null -eq $serverPolicyValue -or -not $serverPolicyValue.PSObject.Properties['OnlyJobsRequiring']) {
+                throw "ServerJobPolicies.$serverPolicyName must define OnlyJobsRequiring."
+            }
+            $onlyJobsRequiring = @(ConvertTo-OrchestratorStringList -Value $serverPolicyValue.OnlyJobsRequiring | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+            if ($onlyJobsRequiring.Count -eq 0) { throw "ServerJobPolicies.$serverPolicyName.OnlyJobsRequiring must contain at least one capability." }
+            foreach ($requiredCapability in $onlyJobsRequiring) {
+                if ($requiredCapability -notin $validJobPolicyCapabilities) {
+                    throw "ServerJobPolicies.$serverPolicyName.OnlyJobsRequiring contains unknown capability '$requiredCapability'."
+                }
+            }
+            $serverJobPolicies[$serverPolicyName] = @{ OnlyJobsRequiring = $onlyJobsRequiring }
+        }
+    }
 
     # JobMailMode is intentionally a dedicated key: the ecosystem-wide SendMailMode key
     # carries the mail transport (Graph/SMTP/Both), not a notification policy.
@@ -4088,6 +4120,7 @@ try {
         ElectionClaimGraceMinutes = [math]::Max(5, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionClaimGraceMinutes' -DefaultValue 15))
         ElectionHistoryDays = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionHistoryDays' -DefaultValue 14))
         ElectionWeight = $electionWeight
+        ServerJobPolicies = $serverJobPolicies
         ExchangeOnlineOrganization = $exchangeOnlineOrganization
         DependencyWaitLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitLogIntervalMinutes' -DefaultValue 30))
         DependencyWaitTimeoutMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitTimeoutMinutes' -DefaultValue 1440))
