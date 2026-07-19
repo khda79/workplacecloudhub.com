@@ -173,8 +173,10 @@ function Test-SmartM365OrchestratorConfigurationConsistency {
     $errors = [Collections.Generic.List[string]]::new(); $warnings = [Collections.Generic.List[string]]::new()
     $servers = @($ClusterDocument.ExpectedOrchestratorServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ })
     foreach ($job in @($JobsDocument.Jobs)) {
-        if ([string]$job.AssignmentMode -ne 'Pinned') { continue }
-        $pinnedServer = @($job.AllowedServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ })
+        $assignmentMode = if ($job.PSObject.Properties['AssignmentMode'] -and $job.AssignmentMode) { [string]$job.AssignmentMode } else { 'Legacy' }
+        if ($assignmentMode -ne 'Pinned') { continue }
+        $allowedServers = if ($job.PSObject.Properties['AllowedServers']) { @($job.AllowedServers) } else { @() }
+        $pinnedServer = @($allowedServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ })
         if ($pinnedServer.Count -eq 1 -and $pinnedServer[0] -notin $servers) { $errors.Add("Job '$($job.Name)': pinned server '$($pinnedServer[0])' is not in ExpectedOrchestratorServers.") }
     }
     if ($ClusterDocument.PSObject.Properties['ServerJobPolicies']) {
