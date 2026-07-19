@@ -18,13 +18,20 @@
           "06:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "Directory.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "AD-Inventory",
       "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "AD",
       "DependsOn": [],
       "AllowedServers": [],
@@ -62,13 +69,20 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-Inventory.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-Inventory.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "AD",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "AD-HealthCheck",
       "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-HealthCheck.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "AD",
       "DependsOn": [],
       "AllowedServers": [],
@@ -83,13 +97,20 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-HealthCheck.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-HealthCheck.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "AD",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-ActiveUsers-Inventory",
       "ScriptPath": "M365Inventory\\Users\\SmartM365-ActiveUsers-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -126,13 +147,24 @@
           "23:10"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "User.Read.All",
+        "AuditLog.Read.All",
+        "Directory.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-Licences-Inventory",
       "ScriptPath": "M365Inventory\\Licensing\\SmartM365-Licences-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -147,13 +179,24 @@
           "12:15"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "Directory.Read.All",
+        "User.Read.All",
+        "Group.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-EntraDevices-Inventory",
       "ScriptPath": "M365Inventory\\Devices\\SmartM365-EntraDevices-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -164,39 +207,49 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:10",
-          "01:10",
-          "02:10",
-          "03:10",
-          "04:10",
-          "05:10",
-          "06:10",
-          "07:10",
-          "08:10",
-          "09:10",
-          "10:10",
-          "11:10",
-          "12:10",
-          "13:10",
-          "14:10",
-          "15:10",
-          "16:10",
-          "17:10",
-          "18:10",
-          "19:10",
-          "20:10",
-          "21:10",
-          "22:10",
-          "23:10"
+          "00:25",
+          "01:25",
+          "02:25",
+          "03:25",
+          "04:25",
+          "05:25",
+          "06:25",
+          "07:25",
+          "08:25",
+          "09:25",
+          "10:25",
+          "11:25",
+          "12:25",
+          "13:25",
+          "14:25",
+          "15:25",
+          "16:25",
+          "17:25",
+          "18:25",
+          "19:25",
+          "20:25",
+          "21:25",
+          "22:25",
+          "23:25"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "Directory.Read.All",
+        "Device.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-Teams-Inventory",
       "ScriptPath": "M365Inventory\\Teams\\SmartM365-Teams-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -213,13 +266,27 @@
           "04:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "Team.ReadBasic.All",
+        "TeamMember.Read.All",
+        "Channel.ReadBasic.All",
+        "Group.Read.All",
+        "Reports.Read.All",
+        "Sites.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-SPO-Inventory",
       "ScriptPath": "M365Inventory\\SharePoint\\SmartM365-SPO-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -236,13 +303,24 @@
           "04:30"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "Reports.Read.All",
+        "Sites.Read.All",
+        "Directory.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-Devices-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -279,13 +357,23 @@
           "23:30"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "DeviceManagementManagedDevices.Read.All",
+        "Device.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-Devices-Compliance-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-Compliance-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -299,13 +387,24 @@
           "03:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "DeviceManagementManagedDevices.Read.All",
+        "DeviceManagementConfiguration.Read.All",
+        "Device.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-WindowsAutopilot-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Autopilot\\SmartM365-WindowsAutopilot-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -322,13 +421,23 @@
           "05:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "DeviceManagementServiceConfig.Read.All",
+        "Device.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "EXO-Mailboxes-Inventory",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
       "Arguments": "-IncludeStats -ForceLiveStats",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
       "AllowedServers": [],
@@ -342,13 +451,21 @@
           "01:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "EXO",
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "User.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "EXO-Mailboxes-Permissions",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
       "Arguments": "-PermissionsOnly -ParallelThrottle 4",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
       "AllowedServers": [],
@@ -362,13 +479,20 @@
           "01:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "EXO",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "EXO-Mailboxes-Inventory-Fast",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
       "AllowedServers": [],
@@ -382,7 +506,15 @@
           "01:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "EXO",
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "User.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "EXO-Mailboxes-CalendarPermissions",
@@ -402,7 +534,14 @@
           "01:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "EXO",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Exchange2016-Mailboxes-CalendarPermissions",
@@ -424,13 +563,21 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-MailboxCalendarPermissions-Inventory.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-MailboxCalendarPermissions-Inventory.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "AD",
+        "ExchangeOnPrem",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "EXO-AcceptedDomains-Inventory",
       "ScriptPath": "ExchangeInventory\\AcceptedDomains\\SmartM365-EXO-AcceptedDomains-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
       "AllowedServers": [],
@@ -444,13 +591,20 @@
           "04:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "EXO",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "EXO-MigrationJobs-Inventory",
       "ScriptPath": "ExchangeInventory\\Migration\\SmartM365-EXO-MigJob-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
       "AllowedServers": [],
@@ -466,13 +620,20 @@
           "18:00"
         ],
         "MissedRunPolicy": "Skip"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "EXO",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Mailboxes-PermissionsByUser-Report",
       "ScriptPath": "ExchangeInventory\\Permissions\\SmartM365-Mailboxes-AllSources-PermissionsByUserReport.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
       "AllowedServers": [],
@@ -486,14 +647,20 @@
           "20:00"
         ],
         "MissedRunPolicy": "Skip"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Exchange2016-Local-Mailboxes-Inventory",
       "ConcurrencyKey": "ExchangeLocalMailboxes",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
       "AllowedServers": [],
@@ -509,14 +676,22 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "AD",
+        "ExchangeOnPrem",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Exchange2016-Local-Mailboxes-Fast",
       "ConcurrencyKey": "ExchangeLocalMailboxes",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
       "AllowedServers": [],
@@ -532,13 +707,21 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-Inventory.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-Inventory.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "AD",
+        "ExchangeOnPrem",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Exchange2016-ProxyAddresses-Check",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\SmartM365-Check-ProxyAddresses-Exchange.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
       "AllowedServers": [],
@@ -554,13 +737,21 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "AD",
+        "ExchangeOnPrem",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Exchange2016-Infrastructure-Inventory",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
       "AllowedServers": [],
@@ -576,13 +767,21 @@
         ],
         "MissedRunPolicy": "RunOnce"
       },
-      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd"
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "AD",
+        "ExchangeOnPrem",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-SyncHealth-Inventory",
       "ScriptPath": "M365Inventory\\SyncHealth\\SmartM365-AzureADConnect-SyncHealth-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -619,13 +818,20 @@
           "23:20"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "Directory.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-Usage-Inventory",
       "ScriptPath": "M365Inventory\\Usage\\SmartM365-M365UserActivity-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -639,13 +845,20 @@
           "04:50"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "Reports.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-DiscoveredApps-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Applications\\SmartM365-Intune-DiscoveredApps-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -662,13 +875,23 @@
           "22:00"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "DeviceManagementApps.Read.All",
+        "DeviceManagementManagedDevices.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-DeviceSystem-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Device-System-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -682,13 +905,24 @@
           "05:50"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "DeviceManagementManagedDevices.Read.All",
+        "DeviceManagementConfiguration.Read.All",
+        "DeviceManagementScripts.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-Devices-BIOS-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-BIOS-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -702,13 +936,20 @@
           "05:40"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "DeviceManagementManagedDevices.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-Devices-UpgradeEligibility",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-UpgradeEligibility.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -719,19 +960,26 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:50",
-          "06:50",
-          "12:50",
-          "18:50"
+          "00:20",
+          "06:20",
+          "12:20",
+          "18:20"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "DeviceManagementManagedDevices.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-RBAC-GroupMembers",
       "ScriptPath": "M365Inventory\\IntuneInventory\\RBAC\\SmartM365-Intune-RBAC-GroupMembers.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -745,13 +993,23 @@
           "06:40"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "Group.Read.All",
+        "GroupMember.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-Remediations-Export",
       "ScriptPath": "M365Inventory\\IntuneInventory\\SmartM365-Export-IntuneRemediations.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -765,13 +1023,23 @@
           "06:50"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "DeviceManagementScripts.Read.All",
+        "Group.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-AutopatchAlerts-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\AutopatchAlerts\\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1",
       "Arguments": "-IncludeFeatureUpdates -IncludeQualityUpdates",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -785,13 +1053,24 @@
           "07:40"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "DeviceManagementConfiguration.Read.All",
+        "DeviceManagementManagedDevices.Read.All",
+        "DeviceManagementApps.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-Windows11-Readiness-Issues",
       "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\SmartM365-Intune-Windows11-Readiness-Issues-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [
         "Intune-Devices-UpgradeEligibility"
@@ -804,39 +1083,45 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:50",
-          "01:50",
-          "02:50",
-          "03:50",
-          "04:50",
-          "05:50",
-          "06:50",
-          "07:50",
-          "08:50",
-          "09:50",
-          "10:50",
-          "11:50",
-          "12:50",
-          "13:50",
-          "14:50",
-          "15:50",
-          "16:50",
-          "17:50",
-          "18:50",
-          "19:50",
-          "20:50",
-          "21:50",
-          "22:50",
-          "23:50"
+          "00:35",
+          "01:35",
+          "02:35",
+          "03:35",
+          "04:35",
+          "05:35",
+          "06:35",
+          "07:35",
+          "08:35",
+          "09:35",
+          "10:35",
+          "11:35",
+          "12:35",
+          "13:35",
+          "14:35",
+          "15:35",
+          "16:35",
+          "17:35",
+          "18:35",
+          "19:35",
+          "20:35",
+          "21:35",
+          "22:35",
+          "23:35"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-WinUpdate-Status",
       "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\SmartM365-WinUpdate_Status_From_Intune.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -855,13 +1140,23 @@
           "20:40"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "DeviceManagementConfiguration.Read.All",
+        "DeviceManagementManagedDevices.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Exchange-HybridIdentity-Issues",
       "ScriptPath": "ExchangeInventory\\Migration\\SmartM365-Exchange-HybridIdentity-Issues-Inventory.ps1",
       "Arguments": "",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
       "AllowedServers": [],
@@ -898,7 +1193,13 @@
           "23:50"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-BackupProtectedMailboxes-Inventory",
@@ -918,7 +1219,14 @@
           "08:00"
         ],
         "MissedRunPolicy": "Skip"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "BackupRestore-Configuration.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-BackupPolicyScope-Inventory",
@@ -940,13 +1248,23 @@
           "08:10"
         ],
         "MissedRunPolicy": "Skip"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "GroupMember.Read.All",
+        "User.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-CopilotUsage-Inventory",
       "ScriptPath": "M365Inventory\\Usage\\SmartM365-CopilotUsage-Inventory.ps1",
       "Arguments": "-Period D180 -ReportVersion v2",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -960,13 +1278,20 @@
           "05:05"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "Reports.Read.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-TeamsPhonePstnUsage-Inventory",
       "ScriptPath": "M365Inventory\\Teams\\SmartM365-TeamsPhonePstnUsage-Inventory.ps1",
       "Arguments": "-LookbackDays 90 -IncludePhoneAssignments",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
@@ -980,13 +1305,24 @@
           "05:25"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime",
+        "TeamsPowerShell"
+      ],
+      "RequiredGraphAppRoles": [
+        "CallRecords.Read.All",
+        "Organization.Read.All"
+      ],
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "Intune-EndpointAnalytics-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\EndpointAnalytics\\SmartM365-EndpointAnalytics-Inventory.ps1",
       "Arguments": "-Reports All -IncludeStartupProcesses",
-      "Enabled": false,
+      "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
@@ -1000,7 +1336,14 @@
           "07:15"
         ],
         "MissedRunPolicy": "RunOnce"
-      }
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": "DeviceManagementManagedDevices.ReadWrite.All",
+      "EstimatedDurationMinutes": 5
     },
     {
       "Name": "M365-PowerBIFabricActivity-Inventory",
@@ -1020,7 +1363,11 @@
           "07:25"
         ],
         "MissedRunPolicy": "Skip"
-      }
+      },
+      "AssignmentMode": "Manual",
+      "RequiredCapabilities": [],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 5
     }
   ]
 }

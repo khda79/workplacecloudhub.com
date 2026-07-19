@@ -19,10 +19,10 @@ therefore span several orchestrator lifecycles without being interrupted.
 Features:
 - Daily and weekly schedules, one or several times per day, per-job MissedRunPolicy
   (RunOnce catch-up or Skip).
-- Server allowlist: the AllowedServers configuration value lists the servers allowed to
-  run jobs by default (empty = all servers), and each job may carry its own
-  AllowedServers list in the manifest. Jobs not allowed on the local computer name are
-  never launched here (including through -Force).
+- Distributed ownership: Elected jobs are assigned to one live capable server through a
+  shared weighted plan and protected by an atomic per-occurrence claim. Pinned jobs use
+  exactly one AllowedServers value; Manual jobs run only through an explicit -Force.
+  Older manifest entries without AssignmentMode retain the legacy allowlist behavior.
 - Per-job PowerShellEdition: jobs run in pwsh (PowerShell7, default) or powershell.exe
   (WindowsPowerShell) child processes; Exchange on-premises scripts require
   WindowsPowerShell.
@@ -60,8 +60,9 @@ Runs a single tick (adoption, supervision, due launches), saves state, then exit
 Launched children keep running detached. Intended for tests.
 
 .PARAMETER Force
-Job names to launch immediately on the first tick even if not due. Bypasses the schedule
-and the dependency gate, but still honors the per-job overlap guard and MaxConcurrency.
+Job names to launch immediately on the first tick even if not due. This is the only
+scheduler entry point for Manual jobs. Bypasses the schedule and dependency gate, but
+still honors elected ownership, atomic claims, overlap and MaxConcurrency.
 
 .PARAMETER Only
 Restricts launching to the listed job names. Supervision of already running jobs is not
@@ -97,17 +98,18 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.3.32
+1.4.0
 
 .REQUIREMENTS
     PowerShell 7+.
     Config/SmartM365-TenantContext.ps1 (SmartM365 tenant context helper).
-    SmartM365.Core. Microsoft Graph modules are required only when the orchestrator mail
+    SmartM365.Core and SmartM365.Orchestrator.Distributed.psm1. Microsoft Graph modules
+    are required when capability probes or the orchestrator mail
     transport is Graph or Both; each job script manages its own inventory connections
     inside its own child process.
 
 .NOTES
-    Version : 1.3.32
+    Version : 1.4.0
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -132,7 +134,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.3.32"
+$ScriptVersion = "1.4.0"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -741,6 +743,41 @@ function ConvertTo-NormalizedJob {
     if ($RawJob.PSObject.Properties['AllowedServers'] -and $null -ne $RawJob.AllowedServers) {
         $allowedServers = @($RawJob.AllowedServers | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
     }
+    # Missing AssignmentMode intentionally preserves the pre-1.4 allowlist behavior.
+    $assignmentMode = 'Legacy'
+    if ($RawJob.PSObject.Properties['AssignmentMode'] -and $RawJob.AssignmentMode) {
+        $assignmentMode = [string]$RawJob.AssignmentMode
+    }
+    if ($assignmentMode -notin @('Legacy', 'Pinned', 'Elected', 'Manual')) {
+        $Errors.Add("Job '$name': AssignmentMode must be 'Pinned', 'Elected' or 'Manual'.")
+    }
+    if ($assignmentMode -eq 'Pinned' -and $allowedServers.Count -ne 1) {
+        $Errors.Add("Job '$name': AssignmentMode 'Pinned' requires exactly one AllowedServers value.")
+    }
+    $requiredCapabilities = @()
+    if ($RawJob.PSObject.Properties['RequiredCapabilities'] -and $null -ne $RawJob.RequiredCapabilities) {
+        $requiredCapabilities = @($RawJob.RequiredCapabilities | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    }
+    $validCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'TeamsPowerShell')
+    foreach ($capability in $requiredCapabilities) {
+        if ($capability -notin $validCapabilities) {
+            $Errors.Add("Job '$name': unknown RequiredCapabilities value '$capability'.")
+        }
+    }
+    $requiredGraphAppRoles = @()
+    if ($RawJob.PSObject.Properties['RequiredGraphAppRoles'] -and $null -ne $RawJob.RequiredGraphAppRoles) {
+        $requiredGraphAppRoles = @($RawJob.RequiredGraphAppRoles | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    }
+    if ($requiredGraphAppRoles.Count -gt 0 -and 'Graph' -notin $requiredCapabilities) {
+        $Errors.Add("Job '$name': RequiredGraphAppRoles requires the Graph capability.")
+    }
+    $estimatedDurationMinutes = 5.0
+    if ($RawJob.PSObject.Properties['EstimatedDurationMinutes'] -and $null -ne $RawJob.EstimatedDurationMinutes) {
+        $estimatedDurationMinutes = [double]$RawJob.EstimatedDurationMinutes
+    }
+    if ($estimatedDurationMinutes -le 0) {
+        $Errors.Add("Job '$name': EstimatedDurationMinutes must be greater than zero.")
+    }
     $requiredLogPatterns = @('Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*Success.*Errors:\s*0)')
     if ($RawJob.PSObject.Properties['RequiredLogPatterns']) {
         $requiredLogPatterns = @($RawJob.RequiredLogPatterns | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
@@ -803,6 +840,10 @@ function ConvertTo-NormalizedJob {
         RetryDelaySeconds = $retryDelaySeconds
         ContinueOnError = $continueOnError
         AllowedServers = $allowedServers
+        AssignmentMode = $assignmentMode
+        RequiredCapabilities = $requiredCapabilities
+        RequiredGraphAppRoles = $requiredGraphAppRoles
+        EstimatedDurationMinutes = $estimatedDurationMinutes
         RequiredLogPatterns = $requiredLogPatterns
         MinimumSuccessDurationSeconds = $minimumSuccessDurationSeconds
         DependencyWaitTimeoutMinutes = $dependencyWaitTimeoutMinutes
@@ -1657,6 +1698,10 @@ function Write-OrchestratorHeartbeat {
         LifetimeDeadline = ConvertTo-StateTime -Value $script:LifetimeDeadline
         RunningJobs = $running
         PendingJobs = $pending
+        ReadyCapabilities = if ($null -ne $script:ServerCapabilities) { @($script:ServerCapabilities.ReadyCapabilities) } else { @() }
+        CapabilityGeneratedAtUtc = if ($null -ne $script:ServerCapabilities) { [string]$script:ServerCapabilities.GeneratedAtUtc } else { '' }
+        ElectionPlanId = if ($null -ne $script:ElectionPlan) { [string]$script:ElectionPlan.PlanId } else { '' }
+        ElectedJobsOwned = if ($null -ne $script:ElectionPlan) { @($script:ElectionPlan.Assignments | Where-Object { $_.OwnerServer -eq $env:COMPUTERNAME } | ForEach-Object { [string]$_.JobName } | Sort-Object) } else { @() }
     }
     try { Write-FileAtomically -Path $script:Settings.HeartbeatPath -Content ($heartbeat | ConvertTo-Json -Depth 5) }
     catch { Write-OrchestratorLog -Message ("Failed to write heartbeat: {0}" -f $_.Exception.Message) -Level WARN }
@@ -1686,9 +1731,18 @@ function Test-JobAllowedOnNamedServer {
         [Parameter(Mandatory = $true)][string]$ServerName
     )
 
-    $allowed = @(Get-JobEffectiveAllowedServers -Job $Job)
-    if ($allowed.Count -eq 0) { return $true }
-    return @($allowed | Where-Object { [string]$_ -ieq $ServerName }).Count -gt 0
+    switch ([string]$Job.AssignmentMode) {
+        'Manual' { return $false }
+        'Elected' {
+            $owner = Get-ElectedJobOwner -JobName $Job.Name
+            return (-not [string]::IsNullOrWhiteSpace($owner) -and $owner -ieq $ServerName)
+        }
+        default {
+            $allowed = @(Get-JobEffectiveAllowedServers -Job $Job)
+            if ($allowed.Count -eq 0) { return $true }
+            return @($allowed | Where-Object { [string]$_ -ieq $ServerName }).Count -gt 0
+        }
+    }
 }
 
 function Get-OrchestratorPeerMonitoringState {
@@ -2202,6 +2256,15 @@ function Get-OrchestratorRuntimeSnapshot {
     $scriptPath = [string]$script:Settings.OrchestratorScriptPath
     $coreManifestPath = [string]$script:Settings.CoreModulePath
     $coreModulePath = Join-Path -Path (Split-Path -Path $coreManifestPath -Parent) -ChildPath 'SmartM365.Core.psm1'
+    $distributedModulePath = [string]$script:Settings.DistributedModulePath
+
+    $distributedTokens = $null
+    $distributedParseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($distributedModulePath, [ref]$distributedTokens, [ref]$distributedParseErrors)
+    if (@($distributedParseErrors).Count -gt 0) {
+        $distributedParseSummary = @($distributedParseErrors | ForEach-Object { $_.Message }) -join '; '
+        throw "Distributed orchestrator module parser validation failed: $distributedParseSummary"
+    }
 
     $tokens = $null
     $parseErrors = $null
@@ -2222,7 +2285,9 @@ function Get-OrchestratorRuntimeSnapshot {
         throw "SmartM365.Core ModuleVersion is missing from $coreManifestPath"
     }
 
-    $scriptFingerprint = Get-OrchestratorFileFingerprint -Path $scriptPath
+    $scriptFileFingerprint = Get-OrchestratorFileFingerprint -Path $scriptPath
+    $distributedModuleFingerprint = Get-OrchestratorFileFingerprint -Path $distributedModulePath
+    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint
     $coreManifestFingerprint = Get-OrchestratorFileFingerprint -Path $coreManifestPath
     $coreModuleFingerprint = Get-OrchestratorFileFingerprint -Path $coreModulePath
     $scriptVersionOnDisk = [version]$versionMatch.Groups['Version'].Value
@@ -2232,6 +2297,8 @@ function Get-OrchestratorRuntimeSnapshot {
         ScriptPath = $scriptPath
         ScriptVersion = $scriptVersionOnDisk
         ScriptFingerprint = $scriptFingerprint
+        DistributedModulePath = $distributedModulePath
+        DistributedModuleFingerprint = $distributedModuleFingerprint
         CoreManifestPath = $coreManifestPath
         CoreModulePath = $coreModulePath
         CoreVersion = $coreVersionOnDisk
@@ -2321,6 +2388,7 @@ function Test-OrchestratorRuntimeUpdate {
 
     $signatureResults = @(
         Test-OrchestratorAuthenticodeFile -Path $candidate.ScriptPath -Role 'Orchestrator runtime update'
+        Test-OrchestratorAuthenticodeFile -Path $candidate.DistributedModulePath -Role 'Distributed orchestrator runtime module'
     )
     if ($script:Settings.MonitorCoreModuleVersion) {
         $signatureResults += @(
@@ -2492,7 +2560,8 @@ function Start-InventoryJob {
     param(
         [Parameter(Mandatory = $true)]$Job,
         [Parameter(Mandatory = $true)][datetime]$Occurrence,
-        [int]$Attempt = 0
+        [int]$Attempt = 0,
+        [string]$ClaimPath = ''
     )
 
     $state = Get-JobState -JobName $Job.Name
@@ -2509,14 +2578,14 @@ function Start-InventoryJob {
 
     if (-not (Test-Path -LiteralPath $scriptFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: script not found: {1}" -f $Job.Name, $scriptFullPath) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Script not found: {0}" -f $scriptFullPath)
         return
     }
 
     if ($useLauncher -and -not (Test-Path -LiteralPath $launcherFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: launcher not found: {1}" -f $Job.Name, $launcherFullPath) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Launcher not found: {0}" -f $launcherFullPath)
         return
     }
@@ -2525,7 +2594,7 @@ function Start-InventoryJob {
         Write-OrchestratorLog -Message ("Job {0}: launch rejected by Authenticode validation. {1}" -f $Job.Name, $authenticodeResult.Summary) -Level ERROR
         $rejectLine = "[{0}] {1} rejected job {2}: AuthenticodeRejected. {3}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $authenticodeResult.Summary
         try { [System.IO.File]::WriteAllText($logPath, $rejectLine + [Environment]::NewLine) } catch { }
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText ("AuthenticodeRejected: {0}" -f $authenticodeResult.Summary)
         return
     }
@@ -2558,7 +2627,7 @@ function Start-InventoryJob {
         }
         catch {
             Write-OrchestratorLog -Message ("Job {0}: unable to validate supported parameters: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
-            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
+            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
             Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
             return
         }
@@ -2600,7 +2669,7 @@ function Start-InventoryJob {
     }
     catch {
         Write-OrchestratorLog -Message ("Job {0}: failed to start child process: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
         return
     }
@@ -2617,6 +2686,7 @@ function Start-InventoryJob {
         Attempt = $Attempt
         TimeoutMinutes = $Job.TimeoutMinutes
         ProcessName = $engine.ProcessName
+        ClaimPath = $ClaimPath
     }
     $state.Running = @{
         Pid = $process.Id
@@ -2626,6 +2696,15 @@ function Start-InventoryJob {
         Attempt = $Attempt
         TimeoutMinutes = $Job.TimeoutMinutes
         ProcessName = $engine.ProcessName
+        ClaimPath = $ClaimPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ClaimPath)) {
+        try {
+            Set-SmartM365OrchestratorOccurrenceClaim -ClaimPath $ClaimPath -OwnerServer $env:COMPUTERNAME -Status Running -Attempt $Attempt -SafeMinutes ($Job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) | Out-Null
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Job {0}: process started but shared claim could not be marked Running: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
+        }
     }
     $state.LastRunStart = ConvertTo-StateTime -Value $processStart
     $state.LastStatus = 'Running'
@@ -2740,6 +2819,18 @@ function Complete-JobRun {
         $retryScheduled = $true
     }
 
+    if ($RunInfo.ContainsKey('ClaimPath') -and -not [string]::IsNullOrWhiteSpace([string]$RunInfo.ClaimPath)) {
+        $claimStatus = if ($retryScheduled) { 'RetryScheduled' } else { $status }
+        try {
+            $safeMinutes = $script:Settings.ElectionClaimGraceMinutes
+            if ($null -ne $manifestJob) { $safeMinutes += [int]$manifestJob.TimeoutMinutes }
+            Set-SmartM365OrchestratorOccurrenceClaim -ClaimPath ([string]$RunInfo.ClaimPath) -OwnerServer $env:COMPUTERNAME -Status $claimStatus -Attempt $attempt -SafeMinutes $safeMinutes -Detail $ErrorText | Out-Null
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Job {0}: shared occurrence claim could not be finalized as {1}: {2}" -f $JobName, $claimStatus, $_.Exception.Message) -Level ERROR
+        }
+    }
+
     $state.LastRunEnd = ConvertTo-StateTime -Value $EndTime
     $state.LastExitCode = $ExitCode
     $state.LastStatus = $status
@@ -2844,6 +2935,7 @@ function Restore-RunningJobs {
             LogPath = [string]$record.LogPath
             Attempt = [int]$record.Attempt
             TimeoutMinutes = [int]$record.TimeoutMinutes
+            ClaimPath = if ($record.ContainsKey('ClaimPath')) { [string]$record.ClaimPath } else { '' }
         }
         if ($null -eq $runInfo.StartTime) { $runInfo.StartTime = Get-Date }
         if ($null -eq $runInfo.Occurrence) { $runInfo.Occurrence = $runInfo.StartTime }
@@ -2879,20 +2971,198 @@ function Get-JobEffectiveAllowedServers {
     return $list
 }
 
-function Test-JobAllowedOnServer {
-    # Empty effective list = every server is allowed. Comparison uses the local
-    # computer name (case-insensitive).
-    param([Parameter(Mandatory = $true)]$Job)
+function Get-ElectedJobOwner {
+    param([Parameter(Mandatory = $true)][string]$JobName)
 
-    $list = Get-JobEffectiveAllowedServers -Job $Job
-    if ($list.Count -eq 0) { return $true }
-    return ($list -contains $env:COMPUTERNAME)
+    if ($null -eq $script:ElectionPlan) { return '' }
+    $assignment = @($script:ElectionPlan.Assignments | Where-Object { [string]$_.JobName -eq $JobName } | Select-Object -First 1)
+    if ($assignment.Count -eq 0) { return '' }
+    return [string]$assignment[0].OwnerServer
+}
+
+function Test-JobAllowedOnServer {
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [switch]$AllowManual
+    )
+
+    switch ([string]$Job.AssignmentMode) {
+        'Manual' { return [bool]$AllowManual }
+        'Elected' {
+            $owner = Get-ElectedJobOwner -JobName $Job.Name
+            return (-not [string]::IsNullOrWhiteSpace($owner) -and $owner -eq $env:COMPUTERNAME)
+        }
+        default {
+            # Legacy and Pinned retain the original allowlist behavior.
+            $list = Get-JobEffectiveAllowedServers -Job $Job
+            if ($list.Count -eq 0) { return $true }
+            return ($list -contains $env:COMPUTERNAME)
+        }
+    }
+}
+
+function Get-OrchestratorDurationMedians {
+    $result = @{}
+    try {
+        $rows = @(Get-OrchestratorJobRunsForWindow -Now (Get-Date) -Hours ($script:Settings.ElectionHistoryDays * 24) | Where-Object { $_.Status -eq 'Success' -and [double]$_.DurationSec -gt 0 })
+        foreach ($group in @($rows | Group-Object JobName)) {
+            $values = @($group.Group | ForEach-Object { [double]$_.DurationSec / 60.0 } | Sort-Object)
+            if ($values.Count -eq 0) { continue }
+            $middle = [int][math]::Floor($values.Count / 2)
+            $median = if (($values.Count % 2) -eq 1) { $values[$middle] } else { ($values[$middle - 1] + $values[$middle]) / 2.0 }
+            $result[[string]$group.Name] = [math]::Max(0.1, $median)
+        }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Election duration history could not be read; manifest estimates will be used: {0}" -f $_.Exception.Message) -Level WARN
+    }
+    return $result
+}
+
+function Update-OrchestratorServerCapabilities {
+    param([switch]$ForceRefresh)
+
+    if (-not $script:Settings.DistributedSchedulingEnabled) { return }
+    $nowUtc = [datetime]::UtcNow
+    if (-not $ForceRefresh -and $script:LastCapabilityRefreshUtc -ne [datetime]::MinValue -and
+        $nowUtc -lt $script:LastCapabilityRefreshUtc.AddMinutes($script:Settings.CapabilityRefreshMinutes)) { return }
+
+    $script:LastCapabilityRefreshUtc = $nowUtc
+    try {
+        $capabilities = Get-SmartM365OrchestratorServerCapability `
+            -ServerName $env:COMPUTERNAME `
+            -SharedDataFolderPath $script:Settings.SharedDataFolderPath `
+            -TenantId $global:TenantId `
+            -AppId $global:AppId `
+            -CertificateThumbprint $global:Thumbprint `
+            -Organization $script:Settings.ExchangeOnlineOrganization `
+            -ProbeMode $script:Settings.CapabilityProbeMode `
+            -ProbeTimeoutSeconds $script:Settings.CapabilityProbeTimeoutSeconds
+        $capabilities | Add-Member -NotePropertyName ElectionWeight -NotePropertyValue $script:Settings.ElectionWeight -Force
+        Write-FileAtomically -Path $script:Settings.CapabilitiesPath -Content ($capabilities | ConvertTo-Json -Depth 10)
+        $script:ServerCapabilities = $capabilities
+        $readyText = if (@($capabilities.ReadyCapabilities).Count -gt 0) { @($capabilities.ReadyCapabilities) -join ', ' } else { 'none' }
+        Write-OrchestratorLog -Message ("Automatic server capabilities refreshed: ready={0}; probeMode={1}; weight={2}; file={3}." -f $readyText, $capabilities.ProbeMode, $script:Settings.ElectionWeight, $script:Settings.CapabilitiesPath)
+        foreach ($probe in @($capabilities.Results | Where-Object { -not $_.Ready })) {
+            Write-OrchestratorLog -Message ("Capability {0} unavailable: {1}" -f $probe.Name, $probe.Detail) -Level WARN
+        }
+        $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
+    }
+    catch {
+        $script:ServerCapabilities = $null
+        Write-OrchestratorLog -Message ("Automatic capability detection failed; elected jobs fail closed: {0}" -f $_.Exception.Message) -Level ERROR
+    }
+}
+
+function Get-LiveOrchestratorServerCapabilities {
+    $nowUtc = [datetime]::UtcNow
+    $servers = @($script:Settings.ExpectedOrchestratorServers + $env:COMPUTERNAME | Sort-Object -Unique)
+    $results = @()
+    foreach ($server in $servers) {
+        $serverName = ([string]$server).ToUpperInvariant()
+        if ($serverName -eq $env:COMPUTERNAME -and $null -ne $script:ServerCapabilities) {
+            $results += $script:ServerCapabilities
+            continue
+        }
+        $serverFolder = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath $serverName
+        $capabilityPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Capabilities.json'
+        $heartbeatPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Heartbeat.json'
+        try {
+            if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf) -or -not (Test-Path -LiteralPath $heartbeatPath -PathType Leaf)) { continue }
+            $capabilities = Get-Content -LiteralPath $capabilityPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $heartbeat = Get-Content -LiteralPath $heartbeatPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $capabilityAge = ($nowUtc - ([datetime]$capabilities.GeneratedAtUtc).ToUniversalTime()).TotalMinutes
+            $heartbeatAge = ($nowUtc - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes
+            if ($capabilityAge -gt $script:Settings.CapabilityMaxAgeMinutes -or $heartbeatAge -gt $script:Settings.PeerHeartbeatStaleMinutes) { continue }
+            $results += $capabilities
+        }
+        catch {
+            Write-OrchestratorRuntimeUpdateWarning -Key ("capability-read:{0}:{1}" -f $serverName, $_.Exception.Message) -Message ("Server {0} excluded from election because its capability or heartbeat file is invalid: {1}" -f $serverName, $_.Exception.Message)
+        }
+    }
+    return @($results)
+}
+
+function Read-SharedElectionPlan {
+    if (-not $script:Settings.DistributedSchedulingEnabled) { return $null }
+    if (-not (Test-Path -LiteralPath $script:Settings.ElectionPlanPath -PathType Leaf)) { return $null }
+    try { return Get-Content -LiteralPath $script:Settings.ElectionPlanPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+    catch {
+        Write-OrchestratorRuntimeUpdateWarning -Key ("plan-read:{0}" -f $_.Exception.Message) -Message ("Shared election plan cannot be read; elected jobs fail closed: {0}" -f $_.Exception.Message)
+        return $null
+    }
+}
+
+function Update-OrchestratorElectionPlan {
+    param([switch]$ForceRefresh)
+
+    if (-not $script:Settings.DistributedSchedulingEnabled) { return }
+    $electedJobs = @($script:Manifest.OrderedJobs | Where-Object { $_.Enabled -and $_.AssignmentMode -eq 'Elected' })
+    if ($electedJobs.Count -eq 0) { $script:ElectionPlan = $null; return }
+
+    $nowUtc = [datetime]::UtcNow
+    $sharedPlan = Read-SharedElectionPlan
+    if (-not $ForceRefresh -and $null -ne $sharedPlan) {
+        try {
+            if ($nowUtc -lt ([datetime]$sharedPlan.GeneratedAtUtc).ToUniversalTime().AddSeconds($script:Settings.ElectionPlanRefreshSeconds)) {
+                $script:ElectionPlan = $sharedPlan
+                return
+            }
+        }
+        catch {
+            $sharedPlan = $null
+        }
+    }
+
+    $lockStream = $null
+    try {
+        $lockStream = [System.IO.File]::Open($script:Settings.ElectionPlanLockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $capabilities = @(Get-LiveOrchestratorServerCapabilities)
+        if ($capabilities.Count -eq 0) { throw 'No live server has a valid capability document and heartbeat.' }
+        $weights = @{}
+        foreach ($serverCapability in $capabilities) {
+            $weight = 1.0
+            if ($serverCapability.PSObject.Properties['ElectionWeight'] -and [double]$serverCapability.ElectionWeight -gt 0) { $weight = [double]$serverCapability.ElectionWeight }
+            $weights[[string]$serverCapability.ServerName] = $weight
+        }
+        $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -DurationMinutesByJob (Get-OrchestratorDurationMedians) -NowUtc $nowUtc
+        Write-FileAtomically -Path $script:Settings.ElectionPlanPath -Content ($plan | ConvertTo-Json -Depth 10)
+        $script:ElectionPlan = $plan
+        $script:LastElectionPlanRefreshUtc = $nowUtc
+        Write-OrchestratorLog -Message ("Election plan {0} generated from {1} live capable servers; assignments={2}; unassignedGroups={3}." -f $plan.PlanId, $capabilities.Count, @($plan.Assignments).Count, @($plan.UnassignedGroups).Count)
+        foreach ($group in @($plan.UnassignedGroups)) {
+            Write-OrchestratorLog -Message ("Election left group {0} unassigned: {1}" -f $group.GroupKey, $group.Reason) -Level ERROR
+        }
+    }
+    catch [System.IO.IOException] {
+        $script:ElectionPlan = Read-SharedElectionPlan
+        try {
+            if ((Test-Path -LiteralPath $script:Settings.ElectionPlanLockPath -PathType Leaf) -and
+                ([datetime]::UtcNow - (Get-Item -LiteralPath $script:Settings.ElectionPlanLockPath).LastWriteTimeUtc).TotalMinutes -gt 5) {
+                Remove-Item -LiteralPath $script:Settings.ElectionPlanLockPath -Force -ErrorAction Stop
+                Write-OrchestratorLog -Message 'Removed a stale election planner lock older than five minutes.' -Level WARN
+            }
+        }
+        catch {
+            Write-OrchestratorRuntimeUpdateWarning -Key ("plan-lock:{0}" -f $_.Exception.Message) -Message ("Stale election planner lock could not be recovered: {0}" -f $_.Exception.Message)
+        }
+    }
+    catch {
+        $script:ElectionPlan = Read-SharedElectionPlan
+        Write-OrchestratorLog -Message ("Election plan refresh failed; elected jobs fail closed if no previous plan is readable: {0}" -f $_.Exception.Message) -Level ERROR
+    }
+    finally {
+        if ($null -ne $lockStream) {
+            $lockStream.Dispose()
+            Remove-Item -LiteralPath $script:Settings.ElectionPlanLockPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Write-ServerAllowlistSummary {
     $blocked = @($script:Manifest.OrderedJobs | Where-Object { -not (Test-JobAllowedOnServer -Job $_) } | ForEach-Object { $_.Name })
     if ($blocked.Count -gt 0) {
-        Write-OrchestratorLog -Message ("Jobs not allowed on this server ({0}): {1}" -f $env:COMPUTERNAME, ($blocked -join ', '))
+        Write-OrchestratorLog -Message ("Jobs not owned by this server under the active assignment policy ({0}): {1}" -f $env:COMPUTERNAME, ($blocked -join ', '))
     }
 }
 
@@ -2972,9 +3242,10 @@ function Invoke-LaunchPhase {
         $name = $job.Name
         if (-not (Test-JobSelected -JobName $name)) { continue }
         $isForced = ($script:ForcedPending -contains $name)
-        if (-not (Test-JobAllowedOnServer -Job $job)) {
+        if (-not (Test-JobAllowedOnServer -Job $job -AllowManual:$isForced)) {
             if ($isForced) {
-                Write-OrchestratorLog -Message ("Job {0}: -Force refused; this server is not in the job allowlist ({1})." -f $name, ((Get-JobEffectiveAllowedServers -Job $job) -join ', ')) -Level WARN
+                $ownershipReason = if ($job.AssignmentMode -eq 'Elected') { "elected owner is '$(Get-ElectedJobOwner -JobName $name)'" } else { "effective allowlist is '$((Get-JobEffectiveAllowedServers -Job $job) -join ', ')'" }
+                Write-OrchestratorLog -Message ("Job {0}: -Force refused on {1}; {2}." -f $name, $env:COMPUTERNAME, $ownershipReason) -Level WARN
                 $script:ForcedPending = @($script:ForcedPending | Where-Object { $_ -ne $name })
             }
             continue
@@ -3107,6 +3378,26 @@ function Invoke-LaunchPhase {
             continue
         }
 
+        $claimPath = ''
+        if ($job.AssignmentMode -eq 'Elected') {
+            if ($null -eq $script:ElectionPlan) {
+                Write-OrchestratorRuntimeUpdateWarning -Key ("election-no-plan:{0}" -f $name) -Message ("Job {0}: elected occurrence {1} is queued because no shared election plan is available." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm')) -Now $Now
+                continue
+            }
+            try {
+                $claim = Enter-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $name -Occurrence $occurrence -OwnerServer $env:COMPUTERNAME -PlanId ([string]$script:ElectionPlan.PlanId) -SafeMinutes ($job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) -HeartbeatRootPath $script:Settings.SharedDataFolderPath -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes
+                if (-not $claim.Acquired) {
+                    Write-OrchestratorRuntimeUpdateWarning -Key ("claim:{0}:{1}:{2}" -f $name, $occurrence.ToUniversalTime().ToString('o'), $claim.Reason) -Message ("Job {0}: occurrence {1} not launched because its atomic claim was refused: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $claim.Reason) -Now $Now
+                    continue
+                }
+                $claimPath = [string]$claim.ClaimPath
+            }
+            catch {
+                Write-OrchestratorRuntimeUpdateWarning -Key ("claim-error:{0}:{1}" -f $name, $_.Exception.Message) -Message ("Job {0}: occurrence {1} queued because the shared claim could not be created; fail-closed protection is active: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $_.Exception.Message) -Now $Now
+                continue
+            }
+        }
+
         if ($reason -in @('due', 'forced')) {
             $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $occurrence
         }
@@ -3114,7 +3405,7 @@ function Invoke-LaunchPhase {
             $script:ForcedPending = @($script:ForcedPending | Where-Object { $_ -ne $name })
             Write-OrchestratorLog -Message ("Job {0}: launching now (forced)." -f $name)
         }
-        Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt
+        Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath
         $launchedThisTick.Add($name)
     }
 }
@@ -3590,7 +3881,8 @@ function Show-DryRunPlan {
         if ($job.DependsOn.Count -gt 0) { $flags += ('depends on ' + ($job.DependsOn -join ', ')) }
         if ($job.PowerShellEdition -eq 'WindowsPowerShell') { $flags += 'WindowsPowerShell' }
         if ($job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$job.LauncherPath)) { $flags += ('launcher ' + [string]$job.LauncherPath) }
-        if (-not (Test-JobAllowedOnServer -Job $job)) { $flags += ('not allowed on this server; allowed: ' + ((Get-JobEffectiveAllowedServers -Job $job) -join ', ')) }
+        if ($job.AssignmentMode -eq 'Manual') { $flags += 'manual; schedule disabled by assignment policy' }
+        elseif (-not (Test-JobAllowedOnServer -Job $job)) { $flags += ('not owned on this server; elected/pinned owner: ' + (Get-ElectedJobOwner -JobName $job.Name)) }
         $flagText = ''
         if ($flags.Count -gt 0) { $flagText = ' [' + ($flags -join '; ') + ']' }
         Write-OrchestratorLog -Message ("Job {0} (group {1}): {2}; policy {3}; timeout {4} min; retries {5}{6}" -f $job.Name, $job.Group, $scheduleText, $schedule.MissedRunPolicy, $job.TimeoutMinutes, $job.MaxRetries, $flagText)
@@ -3645,10 +3937,16 @@ $script:RuntimeUpdateCandidateIdentity = ''
 $script:RuntimeUpdateCandidateStableCount = 0
 $script:RuntimeUpdateWarnings = @{}
 $script:RuntimeUpdateBaseline = $null
+$script:ServerCapabilities = $null
+$script:ElectionPlan = $null
+$script:LastCapabilityRefreshUtc = [datetime]::MinValue
+$script:LastElectionPlanRefreshUtc = [datetime]::MinValue
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
     Import-Module -Name $coreModulePath -MinimumVersion '1.0.24' -Force -ErrorAction Stop
+    $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
+    Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     . $tenantContextPath
     $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     $localConfig = Get-SmartM365ScriptLocalConfig
@@ -3695,6 +3993,7 @@ try {
     $global:TenantId = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'TenantId' -DefaultValue '')
     $global:Thumb = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'Thumb' -DefaultValue '')
     $global:Thumbprint = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'Thumbprint' -DefaultValue $global:Thumb)
+    $exchangeOnlineOrganization = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'ExchangeOnlineOrganization' -DefaultValue (Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'OrgDomain' -DefaultValue ''))
 
     $mailConfigIssues = @()
     if ([string]::IsNullOrWhiteSpace($mailFrom)) { $mailConfigIssues += 'From missing' }
@@ -3717,8 +4016,10 @@ try {
     $authenticodeInstallTrustedPublisher = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AuthenticodeInstallTrustedPublisher' -DefaultValue $true
     $autoRecycleOnRuntimeUpdate = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AutoRecycleOnRuntimeUpdate' -DefaultValue $true
     $monitorCoreModuleVersion = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'MonitorCoreModuleVersion' -DefaultValue $true
+    $capabilityProbeMode = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'CapabilityProbeMode' -DefaultValue 'ReadOnly')
+    if ($capabilityProbeMode -notin @('Static', 'ReadOnly')) { throw "CapabilityProbeMode must be 'Static' or 'ReadOnly'." }
 
-    # AllowedServers: default server allowlist for every job (empty = all servers).
+    # AllowedServers remains the default only for Legacy jobs; Elected jobs use the shared plan.
     # Accepts a JSON array or a comma/semicolon separated string.
     $allowedServersRaw = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AllowedServers' -DefaultValue @()
     $defaultAllowedServers = @()
@@ -3735,6 +4036,12 @@ try {
     }
     $peerMonitoringEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'PeerMonitoringEnabled' -DefaultValue $true
     $peerJobMonitoringEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'PeerJobMonitoringEnabled' -DefaultValue $true
+    $electionWeight = [math]::Max(0.1, [double](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'ElectionWeight' -DefaultValue 1.0))
+    $electionWeightsByServer = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'ElectionWeightsByServer' -DefaultValue $null
+    if ($null -ne $electionWeightsByServer -and $electionWeightsByServer.PSObject.Properties[$env:COMPUTERNAME]) {
+        $serverWeight = [double]$electionWeightsByServer.PSObject.Properties[$env:COMPUTERNAME].Value
+        if ($serverWeight -gt 0) { $electionWeight = $serverWeight }
+    }
 
     # JobMailMode is intentionally a dedicated key: the ecosystem-wide SendMailMode key
     # carries the mail transport (Graph/SMTP/Both), not a notification policy.
@@ -3751,6 +4058,12 @@ try {
         JobLogFolderPath = (Join-Path -Path $logFolder -ChildPath 'Jobs')
         JobRunsFolderPath = (Join-Path -Path $dataFolder -ChildPath 'JobRuns')
         OrchestratorRunsCsvPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.csv')
+        DistributedModulePath = $distributedModulePath
+        ElectionFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election')
+        ElectionClaimsPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Claims')
+        ElectionPlanPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.json')
+        ElectionPlanLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.lock')
+        CapabilitiesPath = (Join-Path -Path $dataFolder -ChildPath 'Orchestrator-Capabilities.json')
         OrchestratorScriptPath = [System.IO.Path]::GetFullPath($PSCommandPath)
         OrchestratorRunsLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator_Runs.lock')
         StatePath = $effectiveStatePath
@@ -3766,6 +4079,16 @@ try {
         RuntimeUpdateStableChecks = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'RuntimeUpdateStableChecks' -DefaultValue 2))
         RuntimeUpdateCooldownMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'RuntimeUpdateCooldownMinutes' -DefaultValue 10))
         MonitorCoreModuleVersion = $monitorCoreModuleVersion
+        DistributedSchedulingEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'DistributedSchedulingEnabled' -DefaultValue $true
+        CapabilityProbeMode = $capabilityProbeMode
+        CapabilityProbeTimeoutSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'CapabilityProbeTimeoutSeconds' -DefaultValue 90))
+        CapabilityRefreshMinutes = [math]::Max(5, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'CapabilityRefreshMinutes' -DefaultValue 360))
+        CapabilityMaxAgeMinutes = [math]::Max(10, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'CapabilityMaxAgeMinutes' -DefaultValue 720))
+        ElectionPlanRefreshSeconds = [math]::Max(30, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionPlanRefreshSeconds' -DefaultValue 60))
+        ElectionClaimGraceMinutes = [math]::Max(5, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionClaimGraceMinutes' -DefaultValue 15))
+        ElectionHistoryDays = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionHistoryDays' -DefaultValue 14))
+        ElectionWeight = $electionWeight
+        ExchangeOnlineOrganization = $exchangeOnlineOrganization
         DependencyWaitLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitLogIntervalMinutes' -DefaultValue 30))
         DependencyWaitTimeoutMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitTimeoutMinutes' -DefaultValue 1440))
         OrchestratorRunsCsvLockTimeoutSeconds = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorRunsCsvLockTimeoutSeconds' -DefaultValue 300))
@@ -3820,7 +4143,7 @@ try {
         MailConfigIssue = $mailConfigIssueText
     }
 
-    foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath)) {
+    foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath, $script:Settings.ElectionFolderPath, $script:Settings.ElectionClaimsPath)) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     }
     $script:LogReady = $true
@@ -3889,13 +4212,14 @@ try {
         $manifestTemplatePath = '{0}.template' -f $script:Settings.JobsManifestPath
         if (Test-Path -LiteralPath $manifestTemplatePath) {
             Copy-Item -LiteralPath $manifestTemplatePath -Destination $script:Settings.JobsManifestPath -ErrorAction Stop
-            Write-OrchestratorLog -Message ("Created jobs manifest from template: {0}. Adjust Enabled/Schedule/AllowedServers locally; this runtime manifest stays out of Git." -f $script:Settings.JobsManifestPath) -Level WARN
+            Write-OrchestratorLog -Message ("Created jobs manifest from template: {0}. Adjust Enabled/Schedule locally; this runtime manifest stays out of Git." -f $script:Settings.JobsManifestPath) -Level WARN
         }
     }
 
     try {
         $script:Manifest = Read-JobsManifest -Path $script:Settings.JobsManifestPath
         Write-OrchestratorLog -Message ("Jobs manifest loaded: {0} ({1} jobs, {2} enabled)." -f $script:Settings.JobsManifestPath, @($script:Manifest.OrderedJobs).Count, @($script:Manifest.OrderedJobs | Where-Object { $_.Enabled }).Count)
+        $script:ElectionPlan = Read-SharedElectionPlan
         Write-ServerAllowlistSummary
     }
     catch {
@@ -3928,6 +4252,9 @@ try {
     }
     $script:LockOwned = $true
 
+    Update-OrchestratorServerCapabilities -ForceRefresh
+    Update-OrchestratorElectionPlan -ForceRefresh
+    Write-ServerAllowlistSummary
     Restore-RunningJobs
     Initialize-NewJobStates
     Invoke-MissedRunCatchUp
@@ -3942,6 +4269,8 @@ try {
             break
         }
         Update-JobsManifestIfChanged
+        Update-OrchestratorServerCapabilities
+        Update-OrchestratorElectionPlan
         Update-RunningJobs -Now $now
         if (Test-OrchestratorRuntimeUpdate -Now $now) {
             $script:OrchestratorStopReason = 'RuntimeUpdate'
@@ -4035,8 +4364,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7CL5q6zPKAxr+
-# qTIdwC+ZG4MU5cmSo/l5X+I+71MV2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAX6lCeUd/YJsAg
+# yoFR8nIagpovIVc9LVpeBh70uTeB9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4169,31 +4498,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH/dt8dWKYF9uy0TFOBE8FrAQyFKhaseCv3db+Ii67fVMA0GCSqG
-# SIb3DQEBAQUABIIBgKObyqmYPrdbzxHuPXQfQXmrej6Wvf+V7TJXBhs11IuICTOT
-# LopNTkgS9uUK/gpqKDL/aw966ergL0yjK9M3laa5/c3Xd9LohAmm9tL8S9Hvsprc
-# z+M+Wp8N1kLI/tYUGDB9h38DvXOUTXZ7lFT4VzmxZ0r7igno98E6PHm2ZKn4QbgX
-# L1C+267qFpSsvU2c3Sz8TFCmsBStvJLOD7qfUb4PxHAwDdsC4QEs2YGgyUU/Td1Z
-# KFLcWphHVPtNdI5WkOgGn/E4+7uZuRuW7YHe7FTowlZFauvn9LblJRr7C6Kwzego
-# B8j1eQfRA2PcP0EwussaoAr+3uMIgCt0lFNnF65XvBEBDsn0J6rcAW/CMIUQznmR
-# ezcum9uwUzJ7aAjk0lDuGq7mGo+yv4Qa8VDZ5FwlT4ErHOVNnZan6zm8mkfQ0Bh7
-# wgCzrm9pD/NVfK+klnIIAZXBqc3ebfVo48eHBngP+JgSrmKX7JBp5taWZ3cmu89Q
-# MoetwuxIO/e4+IvotKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILL1JtPiAGqD67MJLZ0QGVhnZbBRtSPNsgX03NNSKvcLMA0GCSqG
+# SIb3DQEBAQUABIIBgFeBUcLHFLSU/Xs/F0udfrIIDMQ1brnu8uxJg60O6koe+Lg3
+# uELf1930ZbEvzIOim8cf7xE4qX/yQss12GsE2UMGGomD+UQ0sr3tpQD1TSNgy74V
+# TWjjzxet3xiyoubJ1+te9YsjO3KnBQz6wWUIkg2azFWCPyL6UJUB5eLkmIGZz+NH
+# BBZ5HK5vWhZSOWBNcWHTxNAwN1qmm6JSRLlG9itXzF/yqv0XO42ADC1yO0lsEIYd
+# Anf29UfbRREOsFJR3rW0KydViMG8o7AKSy4OoEAEBM5nTy5hfwithF92T6DV6fBT
+# 77g1OZzbPQw3g5lEArfg0CkkF99nKLlYgfxzLNZ8UQRmixUotnWLpKoio2jAk+bk
+# OVR+WbYAjW099PMewa5e4HKUboOO/+y4A9zK/Z4c0aKuQhnbL0C4ZkDWUXBMS/w9
+# W5WZGlvWgeQBSIx0cP730U4PNFiKeAtxqHkk10rxmt0Cc2iMOVGqUqiMNLylRVQz
+# aeDdXaDKqt7GVMv9mqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkwMTI5
-# NTRaMC8GCSqGSIb3DQEJBDEiBCCJIRlFxuHDGLkZAiFgkb3GQJzwc1HfzaZqfQjj
-# OFp8RzANBgkqhkiG9w0BAQEFAASCAgAMBEKZF9TjuxXbNOvl2+fYxDlfZ/XeEduh
-# bUxc6VUEEuNzZX6CHCUxCqgOeEowbhXCvo4PRpCSkVEHG8qp8TiQ0bQ5a2B7ESVH
-# +g38ASpGQp0eGYZGZJG9dSgJi7WJ76Yh9QjE124tbflkIk00JZz8AKxavqi8GBar
-# 7yKfIFcbsLKw7Xz4ACdsrdFGkAHXF8PpDWhCzWWZoSZlsCeMkCrk3XtdgHOcYQTo
-# 8NykasSWe3G1WiRfKMGAygggP5yucBhDT6rKnnnQ/4j23vclF28HU3lJ7oTYppSU
-# ZdTB/HBNiSlfc8TbIBU2cRDP/e21hsHIxRXHZKpLswLOQTpIMjytjMTIyozHUvOE
-# 7XoxFfgaHUSsbrD5vEqE7RxIj0vFoDM5F3miAYo2RwqbrbSywXzsTCYHbTkjJC33
-# dA8PKH5+UYd18HWEwnqEra6+ZvTI6AjKSqO8CRZActqST9m+e+/UnOYEkQv8TlYH
-# kXXYgJxzRlSP4GkgMP6woe0dgoglEnvs1ekjyzyxTNOLl7OVw5qIQH3tJBs9EAGy
-# F5Fx2/PTDIVfyb5TQETF22GB8ONntEPQjCRvrkH4FaSc5xqrz15G1n/PfF60/hdx
-# jddInulkKuNOFcAsF7xnEADfMfk0w2wI7fnJDQtMm5x4Gazm2jJMkpFiKiNKqwXS
-# /299D6gmZQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxMDU3
+# MTNaMC8GCSqGSIb3DQEJBDEiBCAUIntLo3QVyLsxBm7f9/kwW2Bjmhpepg778dZ+
+# ZL8oJDANBgkqhkiG9w0BAQEFAASCAgDDeQsTZnOsGC+yoOI4Xkp8JcUZuIyEimUt
+# kVhLTNQFloIFjDVnobrQFMagGBRBzHO6yN0v8RoDCMBoRBpJNReZczEPsDVT9gTJ
+# Qf2bDk1RQaDQbSEe02HLSpRtcfqT7iLAxUcQW108q/ZAQ6I2bo0dgze0HDUFIb1M
+# 7gnGpmtCozTfqwrVklaMRpFmT1sVKmsW7ox83uGuVql2KhTTtCeOz3CFwWpRkAfL
+# 6eEv18Jt7p3IMkUe7NxxUq7erBasT4joL8gOda5APLnnsWYkYEH/4eqmw2/rloeA
+# KOkB1YOnVpf9w8Y3FOmxsDuyZSyhSRSNGWleAQ3bG9/PhnfrMlyJsSC5Okw+cqMc
+# LLRI+RVMRJaeUSZCrecalD/bS35mz7+LpityXNbSJn1Bpeh8e3mtPEly6WDyKVoM
+# YXHLiofEqYtxVlLtRDmzEeKFkh44jpdUAwVgvM3tO3oFfWZ39LaEldffaYBj/XAL
+# kinF2kSrAiBxcRBBi2CBLNt8XPjk/KigaRh7U8emmITl1HpEnSx9rZ6iuDF+yHRY
+# v6sPv1x9RPc5gplw7Ql6Sd4aY7Y4w0s6eO2A16qBncvbY2SGL0ATWrN83c+npv/N
+# S8aLrWMghLw3fzGFgI7ycaplHLDclPCLP+FijOXpZRh4+Fp8zjnSZNi9mQlT0ylD
+# cepMzqbqjg==
 # SIG # End signature block
