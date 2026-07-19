@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.3.28) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.3.32) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -45,6 +45,32 @@ Because tenant contexts resolve separate data roots, `prod` and `test` lifecycle
 When SharePoint upload is enabled in the tenant configuration, the orchestrator mirrors stable operational artifacts to the configured SharePoint target folder, preserving the local `DATA-ALL` and `LOG-ALL` relative paths. Job logs are uploaded when the child process reaches a terminal state. Mail HTML copies are uploaded immediately after successful mail send. The resident orchestrator log, state, heartbeat, lifecycle CSV and daily job-run CSV are uploaded periodically according to `OrchestratorSharePointUploadIntervalMinutes` and once more during graceful shutdown or recycle.
 
 Dependency waits are stateful: the orchestrator logs the first wait for a job, logs again only when the blocking dependency list changes, and emits a compact reminder according to `DependencyWaitLogIntervalMinutes`. It no longer writes the same dependency wait message on every scheduler tick. A separate proof-of-life log line is emitted according to `OrchestratorHeartbeatLogIntervalMinutes` (default 30 minutes) while the resident loop is alive.
+
+### Distributed peer monitoring
+
+Every resident server independently monitors the other servers listed in `ExpectedOrchestratorServers`. When that list is empty, the global `AllowedServers` list is used. The local server is excluded from its own peer checks.
+
+The monitor first validates access to the shared orchestrator root. A storage-access failure produces one `MonitoringUnavailable` incident instead of falsely declaring every peer down. For each peer, it then checks the shared `Orchestrator-Heartbeat.json`; a missing, invalid or older-than-threshold heartbeat is confirmed across consecutive checks before an alert is sent.
+
+When the heartbeat is healthy and `PeerJobMonitoringEnabled` is true, the monitor reads the peer state and compares enabled jobs assigned to that server with their latest expected occurrence. Running jobs, pending retries and valid dependency waits are not reported as missing. Disabled/manual jobs are excluded. Alerts are deduplicated in the local orchestrator state, repeated only at the configured reminder interval, and followed by a recovery email after consecutive healthy checks.
+
+Recommended production values for the three-server deployment:
+
+```json
+"PeerMonitoringEnabled": true,
+"PeerJobMonitoringEnabled": true,
+"ExpectedOrchestratorServers": ["CPPV-CAPTSE-001", "CPPV-CAPTSE-002", "CPPV-EXCSRV-113"],
+"PeerMonitoringCheckIntervalSeconds": 60,
+"PeerHeartbeatStaleMinutes": 5,
+"PeerMonitoringConfirmationChecks": 2,
+"PeerJobStartGraceMinutes": 15,
+"PeerAlertReminderMinutes": 240,
+"PeerAlertMailRetryMinutes": 15,
+"PeerRecoveryEmailEnabled": true
+```
+
+Each healthy server sends its own peer alert. Consequently, if one server is down in a three-server deployment, both surviving servers send an independently sourced alert.
+
 ### Authenticode validation
 
 Authenticode validation is optional at engine level, but the shipped local template enables Audit mode with the repo public certificate. It is intended to complement ACL hardening, not replace it: the code folder must still be read-only for the orchestrator service account and ordinary users.
