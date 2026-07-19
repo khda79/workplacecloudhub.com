@@ -109,7 +109,7 @@ Official documentation:
 
 ## SharePoint Online Inventory
 
-`SharePoint/SmartM365-SPO-Inventory.ps1` uses Microsoft Graph app-only by default. It relies on Graph usage reports plus Graph site/list reads so the inventory does not require SharePoint Administrator or `Sites.FullControl.All`. Fields that are not exposed in this least-privilege mode, such as exact lock state, site sharing capability, hub association, site collection admins, and anonymous link discovery, are exported as `NotAvailableGraphOnly` instead of failing the run.
+`SharePoint/SmartM365-SPO-Inventory.ps1` uses Microsoft Graph for the baseline site/list inventory and collects tenant storage capacity through `Get-PnPTenant` by default. The SharePoint administration URL is derived automatically from the configured SharePoint hostname, a collected site URL, or the tenant `onmicrosoft.com` name. `SharePointAdminUrl` remains an optional override for atypical tenants. Use `-SkipPnPTenantCapacity` for the least-privilege Graph-only mode. Fields not exposed by Graph are exported as `NotAvailableGraphOnly` instead of failing the run.
 
 Main exports:
 
@@ -119,6 +119,7 @@ Main exports:
 | Lists | `M365_SPO_Lists.csv` | Lists and libraries per site when Graph can resolve the site. Versioning and size fields are marked unavailable in Graph-only mode. |
 | Permissions | `M365_SPO_Permissions.csv` | Owner rows from Graph usage data. Site collection admin enumeration is not required in default mode. |
 | External sharing | `M365_SPO_ExternalSharing.csv` | Stable schema with Graph-only availability markers. Tenant-wide anonymous/external sharing link discovery is not available in least-privilege Graph-only mode. |
+| Tenant capacity | `M365_SPO_Tenant.csv` | Always exported. Used storage comes from the site inventory. Licensed capacity is collected by default; `SharePointAdminUrl` is derived automatically and remains an optional override. |
 
 Examples:
 
@@ -127,8 +128,11 @@ Examples:
 .\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -IncludeOneDrive -InactiveDays 180
 .\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -MaxSites 10 -DryRun
 .\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -AppendHistory -AlwaysSend
+.\SharePoint\SmartM365-SPO-Inventory.ps1 -Tenant prod -SkipPnPTenantCapacity
 ```
 
-Required PowerShell module: `Microsoft.Graph.Authentication`.
+Required PowerShell modules for the default run: `Microsoft.Graph.Authentication` and `PnP.PowerShell`.
 
-Required app-only permissions: `Reports.Read.All` and `Sites.Read.All`. `Directory.Read.All` is useful for future owner enrichment, but the default inventory does not require SharePoint Administrator.
+Required Graph app-only permissions for the baseline inventory: `Reports.Read.All` and `Sites.Read.All`. `Directory.Read.All` is useful for owner enrichment. The default capacity step additionally requires access to the SharePoint tenant administration service.
+
+Tenant capacity collection is enabled by default and requires access to the SharePoint tenant administration site. Manual `SharePointAdminUrl` configuration is normally unnecessary. If the endpoint cannot be derived or the app lacks access, the tenant CSV records a warning with blank capacity fields; the baseline inventory continues. Use `-SkipPnPTenantCapacity` to disable the attempt explicitly.
