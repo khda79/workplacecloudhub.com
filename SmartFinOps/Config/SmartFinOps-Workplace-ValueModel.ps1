@@ -56,6 +56,23 @@ function Get-SmartFinOpsSummaryMetricValue {
     return $row.Value
 }
 
+function Get-SmartFinOpsDecimalSum {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory)][string]$Property
+    )
+
+    [decimal]$total = 0
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row) { continue }
+        $valueProperty = $row.PSObject.Properties[$Property]
+        if ($null -eq $valueProperty -or $null -eq $valueProperty.Value -or [string]::IsNullOrWhiteSpace([string]$valueProperty.Value)) { continue }
+        try { $total += [decimal]$valueProperty.Value } catch { continue }
+    }
+    return $total
+}
+
 function New-SmartFinOpsValueOpportunityRows {
     [CmdletBinding()]
     param(
@@ -74,43 +91,44 @@ function New-SmartFinOpsValueOpportunityRows {
         $_.RecommendedLicense -match '^No license' -and
         $null -ne $_.CurrentMonthlyPriceEUR
     })
-    foreach ($group in ($noLicenseDecisions | Group-Object -Property CurrentBaseSku)) {
+    foreach ($group in ($noLicenseDecisions | Group-Object -Property CurrentBaseSku, DecisionClass)) {
         $sample = $group.Group | Select-Object -First 1
-        $highConfidence = @($group.Group | Where-Object { $_.RecommendedLicense -eq 'No license - candidate' })
-        $review = @($group.Group | Where-Object { $_.RecommendedLicense -eq 'No license - review' })
-        $monthlyValue = [math]::Round([decimal](($group.Group | Measure-Object -Property IndicativeMonthlyDifferenceEUR -Sum).Sum), 2)
-        $highConfidenceMonthly = [math]::Round([decimal](($highConfidence | Measure-Object -Property IndicativeMonthlyDifferenceEUR -Sum).Sum), 2)
+        $highConfidence = @($group.Group | Where-Object { $_.DecisionClass -eq 'Recommended' })
+        $review = @($group.Group | Where-Object { $_.DecisionClass -eq 'Review' })
+        $monthlyValue = [math]::Round((Get-SmartFinOpsDecimalSum -Rows $group.Group -Property 'IndicativeMonthlyDifferenceEUR'), 2)
+        $opportunityClass = if ($highConfidence.Count -gt 0) { 'Recommended' } else { 'Review' }
         $rows.Add([pscustomobject]@{
             RunId = $script:RunId
             Priority = 1
             ValuePillar = 'Potential savings'
-            Opportunity = "Validate and remove $($sample.CurrentBaseLicense) licenses with no observed need"
-            SkuPartNumber = $group.Name
+            OpportunityClass = $opportunityClass
+            Opportunity = if ($opportunityClass -eq 'Recommended') { "Remove $($sample.CurrentBaseLicense) licenses from disabled or blocked accounts" } else { "Review $($sample.CurrentBaseLicense) licenses with no recent activity" }
+            SkuPartNumber = [string]$sample.CurrentBaseSku
             Population = $group.Count
             HighConfidencePopulation = $highConfidence.Count
             ReviewPopulation = $review.Count
             MonthlyValueEUR = $monthlyValue
             AnnualValueEUR = [math]::Round([decimal]($monthlyValue * 12), 2)
-            HighConfidenceMonthlyValueEUR = $highConfidenceMonthly
-            Confidence = if ($review.Count -eq 0) { 'High' } else { 'Medium' }
+            HighConfidenceMonthlyValueEUR = if ($opportunityClass -eq 'Recommended') { $monthlyValue } else { 0 }
+            Confidence = if ($opportunityClass -eq 'Recommended') { 'High' } else { 'Medium' }
             Decision = 'Confirm departure, retention, ownership, and all detailed activity before removing the license.'
-            FinancialTreatment = 'Indicative potential based on a consolidated user decision; it becomes a realized saving only when purchased units are reduced.'
+            FinancialTreatment = 'Estimated savings potential. Realization depends on operational execution and the ability to reduce purchased quantities.'
         }) | Out-Null
     }
-
     $e3ToF3Decisions = @($UserDecisionRows | Where-Object {
         $_.CurrentBaseSku -eq 'SPE_E3' -and
-        $_.RecommendedLicense -eq 'M365 F3' -and
+        $_.RecommendedLicense -eq 'Potential M365 F3 - Frontline eligibility required' -and
         $null -ne $_.IndicativeMonthlyDifferenceEUR -and
         [decimal]$_.IndicativeMonthlyDifferenceEUR -gt 0
     })
     if ($e3ToF3Decisions.Count -gt 0) {
-        $monthlyValue = [math]::Round([decimal](($e3ToF3Decisions | Measure-Object -Property IndicativeMonthlyDifferenceEUR -Sum).Sum), 2)
+        $monthlyValue = [math]::Round((Get-SmartFinOpsDecimalSum -Rows $e3ToF3Decisions -Property 'IndicativeMonthlyDifferenceEUR'), 2)
         $rows.Add([pscustomobject]@{
             RunId = $script:RunId
             Priority = 1
             ValuePillar = 'Potential savings'
-            Opportunity = 'Move E3 to F3 when target persona and usage support it'
+            OpportunityClass = 'Conditional'
+            Opportunity = 'Review E3-to-F3 candidates identified by M365LicenseTargetPersona'
             SkuPartNumber = 'SPE_E3->SPE_F1'
             Population = $e3ToF3Decisions.Count
             HighConfidencePopulation = 0
@@ -119,8 +137,8 @@ function New-SmartFinOpsValueOpportunityRows {
             AnnualValueEUR = [math]::Round([decimal]($monthlyValue * 12), 2)
             HighConfidenceMonthlyValueEUR = 0
             Confidence = 'Medium'
-            Decision = "Validate with the business that desktop applications are not required and that F3 limits are acceptable."
-            FinancialTreatment = "Indicative rightsizing scenario; the E3-F3 difference is realizable only after functional and contractual validation."
+            Decision = 'Confirm documented Frontline eligibility before execution; desktop and 2 GB Exchange/OneDrive technical guardrails are already checked by SmartFinOps.'
+            FinancialTreatment = 'Conditional estimated savings potential; no downgrade is executed automatically.'
         }) | Out-Null
     }
     # LicenseOptimization retains add-on review findings without turning them into unsupported savings.
@@ -135,6 +153,7 @@ function New-SmartFinOpsValueOpportunityRows {
             RunId = $script:RunId
             Priority = 2
             ValuePillar = 'Cost avoidance'
+            OpportunityClass = 'Recommended'
             Opportunity = "Reuse available capacity for $($capacity.SkuDisplayName) before purchasing additional licenses"
             SkuPartNumber = [string]$capacity.SkuPartNumber
             Population = [int]$available
@@ -151,7 +170,7 @@ function New-SmartFinOpsValueOpportunityRows {
 
     $nonFinancialDefinitions = @(
         [pscustomobject]@{ Priority = 2; Pillar = 'Potential savings delivery'; Metric = 'Strong shared mailbox conversion candidates'; Opportunity = 'Convert eligible disabled user mailboxes to shared mailboxes'; Decision = 'Validate ownership, retention, application dependencies, delegates, mailbox growth, and contract terms before conversion and license removal.'; Confidence = 'High'; FinancialTreatment = 'Supporting action path only; its license value is already included in no-license potential and is not added again.' },
-        [pscustomobject]@{ Priority = 3; Pillar = 'Value and fit'; Metric = 'E3 personas missing E3'; Opportunity = 'Align licenses with the actual requirements of E3 target personas'; Decision = 'Balance cost, required capabilities, and user experience before any upgrade or downgrade.'; Confidence = 'Medium' },
+        [pscustomobject]@{ Priority = 3; Pillar = 'Value and fit'; Metric = 'F3 to E3 capability reviews'; Opportunity = 'Review F3 users whose target persona is E3'; Decision = 'Validate capability, quality, and user-experience requirements before any upgrade; persona alone is not an automatic action.'; Confidence = 'Medium' },
         [pscustomobject]@{ Priority = 3; Pillar = 'Service quality'; Metric = 'F3 mailbox size non-compliance'; Opportunity = 'Bring F3 mailboxes within limits or change the license'; Decision = 'Choose between cleanup, archiving, and a license change based on total cost and usage.'; Confidence = 'High' },
         [pscustomobject]@{ Priority = 3; Pillar = 'Continuity'; Metric = 'Unlicensed F3 migration blockers'; Opportunity = 'Remove F3 migration blockers'; Decision = 'Resolve blockers before migration to avoid delays, rework, and emergency purchases.'; Confidence = 'High' },
         [pscustomobject]@{ Priority = 4; Pillar = 'Performance and lifecycle'; Metric = 'AD computers requiring Windows 11 upgrade'; Opportunity = 'Plan Windows 11 upgrades or device replacement'; Decision = 'Prioritize by compatibility, business criticality, and fleet maintenance cost.'; Confidence = 'High' },
@@ -167,6 +186,7 @@ function New-SmartFinOpsValueOpportunityRows {
             RunId = $script:RunId
             Priority = $definition.Priority
             ValuePillar = $definition.Pillar
+            OpportunityClass = 'Review'
             Opportunity = $definition.Opportunity
             SkuPartNumber = ''
             Population = $population
@@ -180,6 +200,7 @@ function New-SmartFinOpsValueOpportunityRows {
             FinancialTreatment = if ($definition.PSObject.Properties['FinancialTreatment']) { [string]$definition.FinancialTreatment } else { 'Impact is not monetized with current data; manage it as value protection, quality, performance, or risk.' }
         }) | Out-Null
     }
+
 
     return @($rows | Sort-Object Priority, @{ Expression = { if ([string]::IsNullOrWhiteSpace([string]$_.AnnualValueEUR)) { 0 } else { -[decimal]$_.AnnualValueEUR } } })
 }
@@ -205,33 +226,43 @@ function Write-SmartFinOpsHtmlReport {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ExchangeRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$DataQualityRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ValueRows,
-        [Parameter(Mandatory)][AllowNull()]$PriceModel
+        [Parameter(Mandatory)][AllowNull()]$PriceModel,
+        [int]$StaleUserDays = 90
     )
 
     $potentialRows = @($ValueRows | Where-Object { $_.ValuePillar -eq 'Potential savings' })
-    $avoidanceRows = @($ValueRows | Where-Object { $_.ValuePillar -eq 'Cost avoidance' })
-    $potentialMonthly = [decimal](($potentialRows | Measure-Object -Property MonthlyValueEUR -Sum).Sum)
-    $potentialAnnual = [decimal](($potentialRows | Measure-Object -Property AnnualValueEUR -Sum).Sum)
-    $highConfidenceMonthly = [decimal](($potentialRows | Measure-Object -Property HighConfidenceMonthlyValueEUR -Sum).Sum)
-    $avoidanceMonthly = [decimal](($avoidanceRows | Measure-Object -Property MonthlyValueEUR -Sum).Sum)
-    $pricedCandidates = [int](($potentialRows | Measure-Object -Property Population -Sum).Sum)
-    $highConfidenceCandidates = [int](($potentialRows | Measure-Object -Property HighConfidencePopulation -Sum).Sum)
-    $reviewCandidates = [int](($potentialRows | Measure-Object -Property ReviewPopulation -Sum).Sum)
-    $noLicensePricedCandidates = [int](($potentialRows | Where-Object { $_.SkuPartNumber -notmatch '->' } | Measure-Object -Property Population -Sum).Sum)
-    $downgradePricedCandidates = [int](($potentialRows | Where-Object { $_.SkuPartNumber -match '->' } | Measure-Object -Property Population -Sum).Sum)
+    $recommendedRows = @($potentialRows | Where-Object { $_.OpportunityClass -eq 'Recommended' })
+    $conditionalRows = @($potentialRows | Where-Object { $_.OpportunityClass -eq 'Conditional' })
+    $reviewFinancialRows = @($potentialRows | Where-Object { $_.OpportunityClass -eq 'Review' })
+    $potentialMonthly = (Get-SmartFinOpsDecimalSum -Rows $potentialRows -Property 'MonthlyValueEUR')
+    $potentialAnnual = (Get-SmartFinOpsDecimalSum -Rows $potentialRows -Property 'AnnualValueEUR')
+    $recommendedMonthly = (Get-SmartFinOpsDecimalSum -Rows $recommendedRows -Property 'MonthlyValueEUR')
+    $conditionalMonthly = (Get-SmartFinOpsDecimalSum -Rows $conditionalRows -Property 'MonthlyValueEUR')
+    $reviewMonthly = (Get-SmartFinOpsDecimalSum -Rows $reviewFinancialRows -Property 'MonthlyValueEUR')
+    $pricedCandidates = [int](Get-SmartFinOpsDecimalSum -Rows $potentialRows -Property 'Population')
+    $recommendedCandidates = [int](Get-SmartFinOpsDecimalSum -Rows $recommendedRows -Property 'Population')
+    $conditionalCandidates = [int](Get-SmartFinOpsDecimalSum -Rows $conditionalRows -Property 'Population')
+    $reviewCandidates = [int](Get-SmartFinOpsDecimalSum -Rows $reviewFinancialRows -Property 'Population')
     $staleSources = @($DataQualityRows | Where-Object { $_.FreshnessStatus -eq 'Stale' }).Count
     $invalidSources = @($DataQualityRows | Where-Object { $_.ContractStatus -eq 'Invalid' -or $_.Status -eq 'Error' }).Count
-    $e3Available = [int](($LicenseCapacityRows | Where-Object SkuPartNumber -eq 'SPE_E3' | Select-Object -First 1).AvailableUnits)
-    $f3Available = [int](($LicenseCapacityRows | Where-Object SkuPartNumber -eq 'SPE_F1' | Select-Object -First 1).AvailableUnits)
-    $maxBarValue = [decimal](($potentialRows | Measure-Object -Property MonthlyValueEUR -Maximum).Maximum)
-    $e3Recommended = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3' }).Count
-    $f3Recommended = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 F3' }).Count
+    $maxBarValue = if ($potentialRows.Count -gt 0) { [decimal](($potentialRows | Measure-Object -Property MonthlyValueEUR -Maximum).Maximum) } else { [decimal]0 }
+    $e3ToF3Candidates = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Potential M365 F3 - Frontline eligibility required' }).Count
+    $e3ToF3ActivityReviews = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Potential M365 F3 - activity and eligibility review' }).Count
+    $e3ToF3Blockers = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Keep M365 E3 - F3 technical blocker' }).Count
     $noLicenseHigh = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - candidate' }).Count
     $noLicenseReview = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - review' }).Count
-    $e3ToF3Candidates = @($UserDecisionRows | Where-Object { $_.CurrentBaseLicense -eq 'M365 E3' -and $_.RecommendedLicense -eq 'M365 F3' }).Count
-    $f3LimitReviews = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3 or remediate F3' }).Count
-    $sharedMailboxStrong = @($ExchangeRows | Where-Object { $_.FindingType -eq 'SharedMailboxConversion' -and $_.Status -eq 'Strong candidate' }).Count
-    $sharedMailboxCapacityReview = @($ExchangeRows | Where-Object { $_.FindingType -eq 'SharedMailboxConversion' -and $_.Status -eq 'Capacity review' }).Count
+    $personaNoneActiveConflicts = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Target persona conflict - active user review' }).Count
+    $f3ToE3Reviews = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3 capability review' }).Count
+    $f3TechnicalConflicts = @($UserDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 F3 technical conflict - review' }).Count
+    $unusedE3F3Rows = @($UserDecisionRows | Where-Object { $_.IsUnusedE3F3License -eq $true })
+    $possiblyUnusedE3F3Rows = @($UserDecisionRows | Where-Object { $_.IsPossiblyUnusedE3F3License -eq $true })
+    $unusedOrPossiblyUnusedE3F3Rows = @($unusedE3F3Rows + $possiblyUnusedE3F3Rows)
+    $unusedE3F3 = $unusedE3F3Rows.Count
+    $possiblyUnusedE3F3 = $possiblyUnusedE3F3Rows.Count
+    $unusedOrPossiblyUnusedE3F3 = $unusedOrPossiblyUnusedE3F3Rows.Count
+    $unusedOrPossiblyUnusedE3 = @($unusedOrPossiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count
+    $unusedOrPossiblyUnusedF3 = @($unusedOrPossiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count
+    $e3WithoutObservedE3Capabilities = @($UserDecisionRows | Where-Object { $_.IsE3WithoutObservedE3Capabilities -eq $true }).Count
 
     $barItems = New-Object System.Collections.Generic.List[string]
     foreach ($row in ($potentialRows | Sort-Object { [decimal]$_.MonthlyValueEUR } -Descending | Select-Object -First 8)) {
@@ -249,7 +280,7 @@ function Write-SmartFinOpsHtmlReport {
     $actionRows = New-Object System.Collections.Generic.List[string]
     foreach ($row in ($ValueRows | Sort-Object Priority, @{ Expression = { if ([string]::IsNullOrWhiteSpace([string]$_.AnnualValueEUR)) { 0 } else { -[decimal]$_.AnnualValueEUR } } } | Select-Object -First 12)) {
         $value = if ([string]::IsNullOrWhiteSpace([string]$row.AnnualValueEUR)) { 'Impact to qualify' } else { "$(Format-SmartFinOpsEuro $row.AnnualValueEUR) / year" }
-        $actionRows.Add("<tr><td><span class='priority p$($row.Priority)'>P$($row.Priority)</span></td><td><strong>$(ConvertTo-HtmlEncoded $row.Opportunity)</strong><div class='muted'>$(ConvertTo-HtmlEncoded $row.ValuePillar)</div></td><td class='number'>$($row.Population)</td><td class='number'>$(ConvertTo-HtmlEncoded $value)</td><td>$(ConvertTo-HtmlEncoded $row.Confidence)</td><td>$(ConvertTo-HtmlEncoded $row.Decision)</td></tr>") | Out-Null
+        $actionRows.Add("<tr><td><span class='priority p$($row.Priority)'>P$($row.Priority)</span></td><td><strong>$(ConvertTo-HtmlEncoded $row.Opportunity)</strong><div class='muted'>$(ConvertTo-HtmlEncoded $row.ValuePillar)</div></td><td>$(ConvertTo-HtmlEncoded $row.OpportunityClass)</td><td class='number'>$($row.Population)</td><td class='number'>$(ConvertTo-HtmlEncoded $value)</td><td>$(ConvertTo-HtmlEncoded $row.Confidence)</td><td>$(ConvertTo-HtmlEncoded $row.Decision)</td></tr>") | Out-Null
     }
 
     $capacityRows = New-Object System.Collections.Generic.List[string]
@@ -292,6 +323,14 @@ function Write-SmartFinOpsHtmlReport {
     h3 { font-size:18px; margin:0 0 8px; }
     p { margin:0 0 12px; }
     .meta, .muted { color:var(--muted); font-size:13px; }
+    .license-banner { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:24px; }
+    .license-signal { background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:20px 22px; box-shadow:var(--shadow); }
+    .license-signal.unused { border-top:5px solid var(--orange); }
+    .license-signal.e3-fit { border-top:5px solid var(--gold); }
+    .license-signal .signal-label { color:var(--muted); font-size:13px; font-weight:650; }
+    .license-signal .signal-value { display:block; font-size:clamp(34px,5vw,52px); font-weight:800; line-height:1; margin:8px 0 10px; }
+    .license-signal .signal-context { color:var(--muted); font-size:13px; }
+    .license-banner-note { grid-column:1/-1; color:var(--muted); font-size:12px; margin:0 2px; }
     section { background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:26px; margin-top:20px; box-shadow:var(--shadow); }
     .executive { border-top:5px solid var(--blue); }
     .executive ul { margin:8px 0 0; padding-left:22px; }
@@ -327,7 +366,7 @@ function Write-SmartFinOpsHtmlReport {
     .assumptions { font-size:13px; color:var(--muted); }
     .assumptions li { margin:8px 0; }
     @media (max-width:850px) { .kpis,.tradeoffs { grid-template-columns:1fr 1fr; } .bar-row { grid-template-columns:1fr; gap:5px; } .bar-value { text-align:left; } }
-    @media (max-width:560px) { header,main { padding-left:16px; padding-right:16px; } section { padding:20px; } .kpis,.tradeoffs { grid-template-columns:1fr; } }
+    @media (max-width:560px) { header,main { padding-left:16px; padding-right:16px; } section { padding:20px; } .kpis,.tradeoffs,.license-banner { grid-template-columns:1fr; } }
     @media print { body { background:white; } header,main { max-width:none; } section,.kpi { box-shadow:none; break-inside:avoid; } }
   </style>
 </head>
@@ -336,60 +375,73 @@ function Write-SmartFinOpsHtmlReport {
     <div class="eyebrow">SmartFinOps Workplace</div>
     <h1>$(ConvertTo-HtmlEncoded $ReportTitle)</h1>
     <p class="meta">Tenant $(ConvertTo-HtmlEncoded $Tenant) · Analysis generated $(Get-Date -Format 'yyyy-MM-dd HH:mm') · Indicative France pricing, excluding VAT · Run $(ConvertTo-HtmlEncoded $script:RunId)</p>
+    <div class="license-banner" aria-label="License utilization signals">
+      <div class="license-signal unused">
+        <div class="signal-label">Unused or possibly unused E3/F3 licenses</div>
+        <span class="signal-value">$unusedOrPossiblyUnusedE3F3</span>
+        <div class="signal-context">$unusedE3F3 unused + $possiblyUnusedE3F3 possibly unused · $unusedOrPossiblyUnusedE3 E3 + $unusedOrPossiblyUnusedF3 F3</div>
+      </div>
+      <div class="license-signal e3-fit">
+        <div class="signal-label">E3 licenses without observed E3 capability usage</div>
+        <span class="signal-value">$e3WithoutObservedE3Capabilities</span>
+        <div class="signal-context">No observed Microsoft 365 Apps desktop activation · measured mailbox below 100 GB</div>
+      </div>
+      <p class="license-banner-note">Unused means no activity observed for $StaleUserDays days, regardless of mailbox size or measurement. Possibly unused means technical presence only, no observed M365 service usage, and a measured mailbox at or below 100 MB. The E3 capability population can overlap with these signals and must not be added to them.</p>
+    </div>
   </header>
   <main>
     <section class="executive">
       <h2>Executive Summary</h2>
       <ul>
-        <li><strong>An indicative potential of $(Format-SmartFinOpsEuro $potentialMonthly -Compact) per month should be reviewed.</strong> It covers $noLicensePricedCandidates licenses E3/F3 candidates for removal and $downgradePricedCandidates licenses E3 candidates for a move to F3; $(Format-SmartFinOpsEuro $potentialAnnual -Compact) per year before contractual validation.</li>
-        <li><strong>$(Format-SmartFinOpsEuro $highConfidenceMonthly -Compact) per month relates to disabled or blocked accounts.</strong> These $highConfidenceCandidates cases should be reviewed first; $reviewCandidates other decisions require business confirmation.</li>
-        <li><strong>$sharedMailboxStrong disabled user mailboxes have a strong shared-mailbox conversion path; $sharedMailboxCapacityReview require a capacity review.</strong> This supports license recovery already counted above and is not an additional saving.</li>
-        <li><strong>Value is not limited to savings.</strong> Available capacity, E3/F3 fit, Exchange quality, and device lifecycle must be considered together to maximize the value obtained from every euro spent.</li>
+        <li><strong>An estimated optimization potential of $(Format-SmartFinOpsEuro $potentialMonthly -Compact) per month has been identified across $pricedCandidates licenses.</strong> This is $(Format-SmartFinOpsEuro $potentialAnnual -Compact) per year before contract and execution checks.</li>
+        <li><strong>$recommendedCandidates high-confidence opportunities represent $(Format-SmartFinOpsEuro $recommendedMonthly -Compact) per month.</strong> They concern disabled or blocked accounts whose target persona is None.</li>
+        <li><strong>$conditionalCandidates conditional E3-to-F3 opportunities represent $(Format-SmartFinOpsEuro $conditionalMonthly -Compact) per month.</strong> Frontline eligibility must be confirmed before execution.</li>
+        <li><strong>$reviewCandidates no-license opportunities representing $(Format-SmartFinOpsEuro $reviewMonthly -Compact) per month require further evidence.</strong> Value also includes capacity reuse, service quality, Exchange, and device lifecycle decisions.</li>
       </ul>
     </section>
 
     <div class="kpis" aria-label="Main indicators">
-      <div class="kpi"><div class="label">Annual optimization potential</div><div class="value">$(Format-SmartFinOpsEuro $potentialAnnual -Compact)</div><div class="context">Indicative, before validation and renewal</div></div>
-      <div class="kpi"><div class="label">High priority</div><div class="value">$highConfidenceCandidates</div><div class="context">Disabled or blocked accounts</div></div>
-      <div class="kpi"><div class="label">Available E3 + F3 capacity</div><div class="value">$($e3Available + $f3Available)</div><div class="context">$e3Available E3 and $f3Available F3 available for reuse</div></div>
-      <div class="kpi"><div class="label">Reusable capacity value</div><div class="value">$(Format-SmartFinOpsEuro $avoidanceMonthly -Compact)</div><div class="context">Monthly cost-avoidance equivalent</div></div>
+      <div class="kpi"><div class="label">Annual optimization potential</div><div class="value">$(Format-SmartFinOpsEuro $potentialAnnual -Compact)</div><div class="context">Indicative, before contract and execution checks</div></div>
+      <div class="kpi"><div class="label">Recommended</div><div class="value">$recommendedCandidates</div><div class="context">$(Format-SmartFinOpsEuro $recommendedMonthly -Compact) per month, high confidence</div></div>
+      <div class="kpi"><div class="label">Conditional</div><div class="value">$conditionalCandidates</div><div class="context">$(Format-SmartFinOpsEuro $conditionalMonthly -Compact) per month, prerequisite required</div></div>
+      <div class="kpi"><div class="label">Review</div><div class="value">$reviewCandidates</div><div class="context">$(Format-SmartFinOpsEuro $reviewMonthly -Compact) per month, more evidence required</div></div>
     </div>
 
     <section>
-      <h2>Potential value is concentrated in a few licenses</h2>
-      <p>The ranking below shows monthly potential by SKU. It is not an instruction to remove licenses: each case must be validated with the business owner and against renewal terms.</p>
+      <h2>Estimated value by recommendation class</h2>
+      <p>The ranking below separates recommendations generated automatically by SmartFinOps from conditional opportunities and cases requiring further review.</p>
       <div class="bar-chart">$($barItems -join [Environment]::NewLine)</div>
-      <div class="insight"><strong>Decision:</strong> start with disabled accounts, then review accounts with no activity for $StaleUserDays days. Reducing purchased quantities at renewal turns potential into realized savings; reassigning the same capacity creates cost avoidance.</div>
+      <div class="insight"><strong>How to read this:</strong> Recommended means the available evidence is strong, Conditional means a prerequisite remains, and Review means the evidence is insufficient for a direct recommendation. Realized savings still depend on execution and contract quantities.</div>
     </section>
 
     <section>
       <h2>Recommended decisions</h2>
       <p>Actions are ranked by financial impact, confidence, and contribution to service quality or continuity.</p>
-      <div class="table-wrap"><table><thead><tr><th>Priority</th><th>Opportunity</th><th class="number">Population</th><th class="number">Indicative value</th><th>Confidence</th><th>Decision</th></tr></thead><tbody>$($actionRows -join [Environment]::NewLine)</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Priority</th><th>Opportunity</th><th>Class</th><th class="number">Population</th><th class="number">Indicative value</th><th>Confidence</th><th>Decision</th></tr></thead><tbody>$($actionRows -join [Environment]::NewLine)</tbody></table></div>
     </section>
 
     <section>
-      <h2>E3, F3, or no license: requirement-based decision</h2>
-      <p>The recommendation combines M365LicenseTargetPersona, account state, detailed M365 activity, Office activations, storage, and an active Intune device. It never relies on a single source.</p>
+      <h2>E3, F3, or no license: persona-led, evidence-guarded decisions</h2>
+      <p>M365LicenseTargetPersona identifies the population to review. Account state, detailed M365 activity, Office activations, storage, and active Intune devices then confirm, block, or qualify the opportunity. No license is changed automatically.</p>
       <div class="kpis" aria-label="License decisions">
-        <div class="kpi"><div class="label">E3 recommended</div><div class="value">$e3Recommended</div><div class="context">M365LicenseTargetPersona E3, desktop apps, or a technical constraint</div></div>
-        <div class="kpi"><div class="label">F3 recommended</div><div class="value">$f3Recommended</div><div class="context">M365LicenseTargetPersona F3 with recent activity and no E3 constraint</div></div>
-        <div class="kpi"><div class="label">No license — high priority</div><div class="value">$noLicenseHigh</div><div class="context">Disabled or blocked user accounts to validate</div></div>
-        <div class="kpi"><div class="label">No license — review</div><div class="value">$noLicenseReview</div><div class="context">No recent activity observed across the correlated sources</div></div>
+        <div class="kpi"><div class="label">E3 to F3 — conditional</div><div class="value">$e3ToF3Candidates</div><div class="context">Persona F3 and no observed technical blocker; Frontline eligibility is mandatory before execution</div></div>
+        <div class="kpi"><div class="label">E3 to F3 — blocked or incomplete</div><div class="value">$($e3ToF3Blockers + $e3ToF3ActivityReviews)</div><div class="context">$e3ToF3Blockers technical blockers and $e3ToF3ActivityReviews activity reviews</div></div>
+        <div class="kpi"><div class="label">No license — high priority</div><div class="value">$noLicenseHigh</div><div class="context">Persona None plus disabled or blocked account</div></div>
+        <div class="kpi"><div class="label">No license — review</div><div class="value">$noLicenseReview</div><div class="context">No recent activity; $personaNoneActiveConflicts active persona conflicts stay separate</div></div>
       </div>
       <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Primary evidence</th><th>Guardrail</th></tr></thead><tbody>
-        <tr><td><strong>E3</strong></td><td>M365LicenseTargetPersona E3, Microsoft 365 desktop apps, or Exchange/OneDrive storage above 2 GB.</td><td>A storage limit issue can also be addressed through cleanup or archiving; $f3LimitReviews cases require this decision.</td></tr>
-        <tr><td><strong>F3</strong></td><td>M365LicenseTargetPersona F3, recent web/mobile, Teams, or email activity, no desktop app, and no storage limit issue.</td><td>$e3ToF3Candidates E3-to-F3 moves remain subject to business validation.</td></tr>
-        <tr><td><strong>No license</strong></td><td>Disabled/blocked user account, or no recent activity across aggregate and detailed sources.</td><td>Validate departure, long-term leave, retention, technical accounts, shared mailboxes, and regulatory requirements.</td></tr>
+        <tr><td><strong>E3 → F3</strong></td><td>Current E3, M365LicenseTargetPersona F3, recent activity, no desktop activation, and Exchange/OneDrive storage within 2 GB.</td><td>Documented Frontline eligibility is mandatory. $e3ToF3Candidates cases are conditional opportunities, never automatic downgrades.</td></tr>
+        <tr><td><strong>E3/F3 → no license</strong></td><td>Current E3 or F3 with M365LicenseTargetPersona None, corroborated by disabled/blocked state or no recent activity.</td><td>Active conflicts are excluded. Validate departure, leave, ownership, retention, technical accounts, shared mailboxes, and regulatory requirements.</td></tr>
+        <tr><td><strong>F3 → E3 review</strong></td><td>Current F3 with M365LicenseTargetPersona E3, optionally reinforced by a desktop or 2 GB storage conflict.</td><td>$f3ToE3Reviews cases are quality and capability reviews, not assumed upgrades; $f3TechnicalConflicts other F3 technical conflicts also require action.</td></tr>
         <tr><td><strong>Shared mailbox conversion</strong></td><td>Licensed UserMailbox, disabled in AD or Entra, delegated, below 50 GB, with no observed archive, hold, or service-account signal.</td><td>Strong candidates stay below 45 GB; validate application access, ownership, retention, growth, and contract terms. No automatic conversion.</td></tr>
       </tbody></table></div>
-      <p class="muted">Microsoft 365 F3 provides web/mobile apps and 2 GB of storage; E3 adds desktop apps and higher storage capacity. Reference: <a href="https://www.microsoft.com/fr-fr/microsoft-365/compare-microsoft-365-enterprise-plans" target="_blank" rel="noreferrer">Microsoft France comparison</a>.</p>
+      <p class="muted">Microsoft 365 F3 provides web/mobile apps with a 2 GB Exchange mailbox and a 2 GB OneDrive limit in this decision model; E3 adds desktop apps and higher storage capacity. Reference: <a href="https://www.microsoft.com/fr-fr/microsoft-365/compare-microsoft-365-enterprise-plans" target="_blank" rel="noreferrer">Microsoft France comparison</a>.</p>
     </section>
     <section>
       <h2>Maximizing value requires trade-offs, not only cost reduction</h2>
       <div class="tradeoffs">
         <div class="tradeoff cost"><h3>Cost</h3><span class="big">$(Format-SmartFinOpsEuro $potentialMonthly -Compact)/month</span><p>Potential from removing unused licenses or rightsizing E3 to F3.</p></div>
-        <div class="tradeoff quality"><h3>Quality and fit</h3><span class="big">$(Get-SmartFinOpsSummaryMetricValue -SummaryRows $SummaryRows -Metric 'E3 personas missing E3')</span><p>E3 target personas without E3: balance required capabilities, user experience, and cost; never downgrade automatically.</p></div>
+        <div class="tradeoff quality"><h3>Quality and fit</h3><span class="big">$f3ToE3Reviews</span><p>F3 users whose target persona is E3: validate capability, user experience, and service risk before deciding.</p></div>
         <div class="tradeoff performance"><h3>Performance and lifecycle</h3><span class="big">$(Get-SmartFinOpsSummaryMetricValue -SummaryRows $SummaryRows -Metric 'AD computers requiring Windows 11 upgrade')</span><p>Devices requiring upgrade or replacement planning to avoid technical debt and lost productivity.</p></div>
       </div>
     </section>
@@ -406,7 +458,7 @@ function Write-SmartFinOpsHtmlReport {
         <li>Which quantities can actually be reduced at the next renewal or true-up?</li>
         <li>Which inactive accounts represent long-term leave, technical accounts, or regulatory requirements?</li>
         <li>Which strong shared-mailbox conversion candidates are confirmed former-user mailboxes with no application dependency?</li>
-        <li>Which E3/F3 matrix cases require a business, regulatory, or technical exception?</li>
+        <li>Which E3-to-F3 candidates have documented Frontline eligibility, and which persona mismatches require a business, regulatory, or technical exception?</li>
         <li>What internal cost should be assigned to incidents, delayed migrations, and out-of-target devices?</li>
       </ul>
     </section>
@@ -417,6 +469,9 @@ function Write-SmartFinOpsHtmlReport {
         <li>FinOps aims to maximize the business value of technology through data-driven decisions and trade-offs between cost, quality, and speed. Reference: <a href="https://www.finops.org/introduction/what-is-finops/" target="_blank" rel="noreferrer">FinOps Foundation</a>.</li>
         <li>Pricing: $(ConvertTo-HtmlEncoded $PriceModel.Name), as of $(ConvertTo-HtmlEncoded $PriceModel.AsOfDate), $(ConvertTo-HtmlEncoded $PriceModel.TaxBasis), $(ConvertTo-HtmlEncoded $PriceModel.CommitmentBasis). These prices support prioritization; contractual prices must replace them for a budget decision.</li>
         <li>Potential savings and cost avoidance are shown separately to prevent double counting.</li>
+        <li>Decision classes are generated automatically from persona, account state, activity, technical usage, storage, and device evidence.</li>
+        <li>Recommended does not mean automatically executed. Contract quantities, renewal timing, service ownership, retention, and implementation must still be confirmed.</li>
+        <li>M365LicenseTargetPersona identifies the population to review. It never changes a license automatically.</li>
         <li>No activity for $StaleUserDays days is a review signal, not sufficient evidence to remove a license.</li>
         <li>Detailed Exchange, OneDrive, Teams, Email, Apps, and Intune device signals complement M365_Users_Activity.csv to reduce false positives.</li>
       </ul>
@@ -435,8 +490,8 @@ function Write-SmartFinOpsHtmlReport {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAXzHyvJVwQ3Wb
-# JecOtFrUc4fJQKwQpURn8FOhpjuslqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD1+6dhATzRW4I+
+# YPXxvuOjbrN5RcyWSP+hLANt67LLmaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -569,31 +624,31 @@ function Write-SmartFinOpsHtmlReport {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEJiqYrAcMLd2JzLqNZYOoDh0X6I7Y6a8qOyxAOS0/AxMA0GCSqG
-# SIb3DQEBAQUABIIBgE1PrJXnL1s/uWMoDafQ9KxSrtvhSLO8bTXU55v3UhnqujXL
-# v7n5BZ0xA5K/9D2r4dBq0xe7dJRTHp0kHRSy4ojO1Vw7ocpZc8Pz2RMIhi6ETWoR
-# p2N9a7SNglmvartBxWFQKZSaPLBLSzH1Oxz0rQdVLCqUc+fmFgBhp5KciwhzJD0J
-# EyIcf/57hko2o+DK4YcOUD27G4yL7A0A/OvROWnKq2pGbNRXdM1Lm221A33WNxPa
-# iWimH0W0hSnmn1WaCL4OMOZxst3DlBej1C33quPQ5B1NZo5dSHwfD4PVCmW2PDej
-# lDjdQlsACUR/03tlsl0MvvfffZ5IXunda3DTitOTzccBWXJyHEuksi666UJMLxVm
-# XC879fFby5w4+ZdnR67XxJv80kX80LQ5YTi6KvVuHuYAeBA6C71I7WIOHv4z3apJ
-# wBlT6LfrwcWeHBxR3itCuxIpiGyFMhJiLKVhJzp0dpHPQFPBxaNM1jshlSvlBzpS
-# p4E6D6vvZXNuWyUxQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINhUaVkNfeiRFCM9sAyb3xN20s37ZVp2YrqAhYEtRh4hMA0GCSqG
+# SIb3DQEBAQUABIIBgHonY6t9W/DbRW7kpOy4GxVDeh3f4/NVuO8vorR2IHLa7vgK
+# PuFQw1dG+L0S44U4w/qckseXxhf40/iHKZAEXwwx2Y2aHLLot1/ObmUgv95S/7j3
+# R+6t2LOkvnZ2ulRTjIL2HCKxbE/9GOa+kE7eUw4HxpWKJnc6SvKtjerM31+jxgwB
+# d3WAWT+YlYmCF1ADEe5eVsN90wyEUhOaR7/+sRcnhlglLmZVptiPtVnKgiiP4E+0
+# HwYmMo8CA+AkFFMBirhfBrRz6xoD8ANT4Z+AVPoUFE7iQD7FAqBia0iqAM8uSQ9/
+# OZt+QpUGwkxcmkvGAXQekPzQVOcj0sR4XFfYGrUSyAQd0BZZvy8Kqknda/zrAcA7
+# wMpN5efE0c9o7EiO8EJ/dHVCH48wtoTMDsMlSMFA9DLWi0wpBGFVA9pkwh96Z60W
+# pdlI33Usp6unyA3GP89w4eRhavq+rtqVOzcbuuILKjStEMoslm2BACoDf1iy0upD
+# ttKQz/qKVcJdAXYiSaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMDMw
-# MzlaMC8GCSqGSIb3DQEJBDEiBCDsUk6E8a701yAOXpim9s26Q8EpkG9BR9xx5mIH
-# lSiCvDANBgkqhkiG9w0BAQEFAASCAgChR9aB/KzVl2BzB0Yr6wJgOKBZCOyq3cfC
-# UGpfz9eLrKuaMc/5TEIwmmHyglNJ8bEC6jDyh1HwdIdjVOQQPNuVz3LWhr39iVH7
-# oRcw5O9x5mjle4c8MoAdJcaTzOQRXmdLrI3y6Mv48SG/+zWavrCeqY5rmTNbhx9a
-# lVtRW3teDRpOXzPk8EBLIu0jeW+H5d4cuG1jUl9Swxp5JbvYbojyxala5e53SP/D
-# f7d5oL0KxOt+tGC1yOY/dLu8uJlkll01ixE/rrrr4jglgtubVG4tgvu/ZY4tQ0T8
-# 2/BjgkEvanNRs0Ia5kjztICPJMgKSzFbuTNao//BS27URTMCkI8drXQRMcmgcE27
-# IaBNGyiwMKyUI8vOcQ428XRYmCtI2JdcqhRFJWGZR2/dtrCcXIdPZIKtUDw3WADA
-# 2NkWgnhDech8lAIMVBTq/KJiiTNP1NdVTcoxGq3fzBv8eLVjhTkna5sWqHOqgnKO
-# YdQQst1a9sfa+pxVUAcAxVpEDxeU1KGgv1C6QKyrV31jdm8gyOBPwIsOmjkjglTm
-# p4kdGdhyDKNWZo74+TdJGgPIekliacwEZs5Y0EkvWuh2o2nbfJhNpweZdqT9a9yF
-# +4pYNmtAP3zymhJ2dBj++Eis9qk7WjmA1NSn3ZGTrHpkfWJ7mZ77XzAlJPKg2dL4
-# npk4nWi/JQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMTI1
+# MDdaMC8GCSqGSIb3DQEJBDEiBCCmLVpC5N/plD2e0FJtVXCDYwzj+PYQG19dVbLk
+# /0yi7TANBgkqhkiG9w0BAQEFAASCAgB3mmHgSRMAj1TkxEQuOY1ta3fH0rP+5h3Z
+# snQL7EpxAbI7LTbqrLXNEH3KlYNoZsfJy8eSSLsFWJT49xdfkM085ZRKhX3sWpjP
+# HM/uoeeHr/8/Shztr4OYtXgJy+eiCpB18rjoL65egkETCDHZP34oe0Q/yPxFnOV0
+# 7340UzVaZdF1x55R8yWGOBGAle+w+ookq77Zf/nX5cGBl9DDf3TlfLkGEaeA6gJr
+# psvwj50tEZ8cokHeoCIWERMCP/wXYHIXkdgzrEKSLzb332NfMvbiHhnbyQejSfyK
+# GVygy0IpjSlMQdAUquM0gzbkhiTvEdlA0UcKEPNjhtBgN+OR52qFYv9kv5GjeLfm
+# PuopLmXfCblhp8MkkKxuYuIh4WouuflWAQg+KbunHQhqbr85VutGh/1UzgKd8PMa
+# EIQ/rTVkhbv6o16YxgPMJC8YJKFyaKuG1MlLVB4BGqGW7lEFKTt/7cUwV1baIhvf
+# LZHBynV66ZO7x+o2jeQXf+vq5psJeDx/p0asY5QtgllOt7QHN/34HSLmB7K2vKZe
+# Elia0lrc15QqaVYgHOlvG0kwtTB+rQQaZ7OT2H0eUdlsUIhsXLOhrK10qmYeVkcI
+# KOGRjbgOj8HslpCBrJ96/t4QqvZWdH+Z3iwtuZAvQ34L6W4l0Fy3Uco2LIDF7bTP
+# vl0pJSrxbQ==
 # SIG # End signature block

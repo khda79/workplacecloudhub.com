@@ -84,7 +84,7 @@
     {
       "Key": "M365CopilotUserUsage",
       "DisplayName": "M365 Copilot user usage",
-      "SemanticRole": "Licensed Microsoft 365 Copilot usage evidence by user; readiness only until product-specific rules are approved",
+      "SemanticRole": "Microsoft 365 Copilot usage evidence used as an M365 service-activity guardrail; product-specific monetization still requires separate approved rules",
       "FileNames": ["M365_Copilot_UserUsage.csv"],
       "RequiredColumns": ["UserPrincipalName", "LastActivityDate", "ReportPeriod"],
       "Optional": true

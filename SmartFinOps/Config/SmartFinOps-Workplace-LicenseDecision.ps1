@@ -23,8 +23,10 @@ function Get-SmartFinOpsEvidenceRecord {
         $Map[$UserKey] = [pscustomobject]@{
             LatestDetailedActivity = $null
             RecentWorkloads = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            RecentM365Services = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             HasDesktopAppsActivation = $false
             HasRecentManagedDevice = $false
+            HasMailboxStorageEvidence = $false
             MailboxStorageBytes = [decimal]0
             OneDriveStorageBytes = [decimal]0
             HasArchiveMailbox = $false
@@ -47,7 +49,10 @@ function Add-SmartFinOpsEvidenceDate {
     if ($null -eq $Evidence.LatestDetailedActivity -or $date -gt $Evidence.LatestDetailedActivity) {
         $Evidence.LatestDetailedActivity = $date
     }
-    if ($date -ge $RecentCutoff) { [void]$Evidence.RecentWorkloads.Add($Workload) }
+    if ($date -ge $RecentCutoff) {
+        [void]$Evidence.RecentWorkloads.Add($Workload)
+        [void]$Evidence.RecentM365Services.Add($Workload)
+    }
 }
 
 function New-SmartFinOpsUserEvidenceMap {
@@ -59,6 +64,10 @@ function New-SmartFinOpsUserEvidenceMap {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AppsActivationRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TeamsActivityRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$EmailActivityRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SharePointActivityRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TeamsDeviceUsageRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$CopilotUsageRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TeamsPhoneUsageRows,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$IntuneDeviceRows,
         [Parameter(Mandatory)][datetime]$RecentCutoff
     )
@@ -81,8 +90,12 @@ function New-SmartFinOpsUserEvidenceMap {
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
         Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Exchange mailbox' -RecentCutoff $RecentCutoff
-        $storage = ConvertTo-DecimalOrZero (Get-RowPropertyValue -Row $row -Names @('Storage Used (Byte)'))
-        if ($storage -gt $evidence.MailboxStorageBytes) { $evidence.MailboxStorageBytes = $storage }
+        $storageValue = Get-RowPropertyValue -Row $row -Names @('Storage Used (Byte)')
+        if (-not [string]::IsNullOrWhiteSpace([string]$storageValue)) {
+            $evidence.HasMailboxStorageEvidence = $true
+            $storage = ConvertTo-DecimalOrZero $storageValue
+            if ($storage -gt $evidence.MailboxStorageBytes) { $evidence.MailboxStorageBytes = $storage }
+        }
         if ((ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $row -Names @('Has Archive'))) -eq $true) { $evidence.HasArchiveMailbox = $true }
     }
 
@@ -125,6 +138,36 @@ function New-SmartFinOpsUserEvidenceMap {
         if (-not $key) { continue }
         $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
         Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date')) -Workload 'Email' -RecentCutoff $RecentCutoff
+    }
+
+    foreach ($row in $SharePointActivityRows) {
+        if ((ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $row -Names @('Is Deleted', 'IsDeleted'))) -eq $true) { continue }
+        $key = Get-SmartFinOpsUpnKey -Row $row -Names @('User Principal Name', 'UserPrincipalName')
+        if (-not $key) { continue }
+        $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date', 'LastActivityDate')) -Workload 'SharePoint' -RecentCutoff $RecentCutoff
+    }
+
+    foreach ($row in $TeamsDeviceUsageRows) {
+        if ((ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $row -Names @('Is Deleted', 'IsDeleted'))) -eq $true) { continue }
+        $key = Get-SmartFinOpsUpnKey -Row $row -Names @('User Principal Name', 'UserPrincipalName')
+        if (-not $key) { continue }
+        $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('Last Activity Date', 'LastActivityDate')) -Workload 'Teams device usage' -RecentCutoff $RecentCutoff
+    }
+
+    foreach ($row in $CopilotUsageRows) {
+        $key = Get-SmartFinOpsUpnKey -Row $row -Names @('UserPrincipalName', 'User Principal Name')
+        if (-not $key) { continue }
+        $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastActivityDate', 'Microsoft365CopilotLastActivityDate')) -Workload 'Microsoft 365 Copilot' -RecentCutoff $RecentCutoff
+    }
+
+    foreach ($row in $TeamsPhoneUsageRows) {
+        $key = Get-SmartFinOpsUpnKey -Row $row -Names @('UserPrincipalName', 'User Principal Name')
+        if (-not $key) { continue }
+        $evidence = Get-SmartFinOpsEvidenceRecord -Map $map -UserKey $key
+        Add-SmartFinOpsEvidenceDate -Evidence $evidence -Value (Get-RowPropertyValue -Row $row -Names @('LastCallDate', 'Last Call Date')) -Workload 'Teams Phone' -RecentCutoff $RecentCutoff
     }
 
     foreach ($row in $IntuneDeviceRows) {
@@ -181,7 +224,18 @@ function New-SmartFinOpsUserLicenseDecisionRows {
         $evidence = if ($EvidenceMap.ContainsKey($key)) { $EvidenceMap[$key] } else { Get-SmartFinOpsEvidenceRecord -Map $EvidenceMap -UserKey $key }
 
         $personaRaw = [string](Get-RowPropertyValue -Row $adUser -Names @('M365LicenseTargetPersona'))
-        $targetPersona = if ($personaRaw -match 'E3') { 'M365 E3' } elseif ($personaRaw -match 'F3') { 'M365 F3' } else { 'Undetermined' }
+        $targetPersona = if ($personaRaw -match '(?i)^M365\s*E3$|^E3$') {
+            'M365 E3'
+        }
+        elseif ($personaRaw -match '(?i)^M365\s*F3$|^F3$') {
+            'M365 F3'
+        }
+        elseif ($personaRaw -match '(?i)^None$|^No\s*license$') {
+            'None'
+        }
+        else {
+            'Undetermined'
+        }
         $accountType = [string](Get-RowPropertyValue -Row $adUser -Names @('AccountType'))
         $m365Enabled = ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $m365User -Names @('AccountEnabled'))
         if ($null -eq $m365Enabled) {
@@ -194,70 +248,167 @@ function New-SmartFinOpsUserLicenseDecisionRows {
         $activityDates = @($evidence.LatestDetailedActivity, $lastSignIn, $lastAdLogon) | Where-Object { $null -ne $_ }
         $latestActivity = @($activityDates | Sort-Object -Descending | Select-Object -First 1)
         $latestActivityDate = if ($latestActivity.Count -gt 0) { [datetime]$latestActivity[0] } else { $null }
+        $recentM365ServiceEvidence = @(@($evidence.RecentM365Services) | Sort-Object)
+        $recentTechnicalEvidence = New-Object System.Collections.Generic.List[string]
+        if ($lastSignIn -and $lastSignIn -ge $RecentCutoff) { $recentTechnicalEvidence.Add('Entra sign-in') | Out-Null }
+        if ($lastAdLogon -and $lastAdLogon -ge $RecentCutoff) { $recentTechnicalEvidence.Add('AD logon') | Out-Null }
+        if ($evidence.HasRecentManagedDevice) { $recentTechnicalEvidence.Add('Active Intune device') | Out-Null }
+        $hasRecentM365ServiceActivity = $recentM365ServiceEvidence.Count -gt 0
+        $hasRecentTechnicalPresence = $recentTechnicalEvidence.Count -gt 0
+        $hasRecentObservedActivity = $hasRecentM365ServiceActivity -or $hasRecentTechnicalPresence
         $hasRecentActivity = ($latestActivityDate -and $latestActivityDate -ge $RecentCutoff) -or $evidence.HasDesktopAppsActivation -or $evidence.HasRecentManagedDevice
 
         $mailboxOverF3Limit = $evidence.MailboxStorageBytes -gt 2GB
         $oneDriveOverF3Limit = $evidence.OneDriveStorageBytes -gt 2GB
+        $hasF3TechnicalBlocker = $mailboxOverF3Limit -or $oneDriveOverF3Limit -or $evidence.HasDesktopAppsActivation
+        $f3TechnicalStatus = if ($hasF3TechnicalBlocker) { 'Blocked' } else { 'No observed blocker' }
         $isSharedMailbox = $accountType -match 'Shared Mailbox|Room Mailbox'
         $isSpecialAccount = $accountType -match 'Service Account|Generic Account|Admin Account|System Account'
         $isDisabled = ($m365Enabled -eq $false) -or ($adEnabled -eq $false)
+        $isCurrentE3 = $currentBaseSku -eq 'SPE_E3'
+        $isCurrentF3 = $currentBaseSku -eq 'SPE_F1'
+        $isUnusedE3F3License = ($isCurrentE3 -or $isCurrentF3) -and (-not $hasRecentObservedActivity)
+        $isPossiblyUnusedE3F3License = ($isCurrentE3 -or $isCurrentF3) -and
+            $hasRecentTechnicalPresence -and
+            (-not $hasRecentM365ServiceActivity) -and
+            $evidence.HasMailboxStorageEvidence -and
+            $evidence.MailboxStorageBytes -le 100MB
+        $isE3WithoutObservedE3Capabilities = $isCurrentE3 -and
+            $evidence.HasMailboxStorageEvidence -and
+            $evidence.MailboxStorageBytes -lt 100GB -and
+            (-not $evidence.HasDesktopAppsActivation)
 
-        $recommended = 'Keep / clarify requirement'
+        $recommended = 'Clarify license requirement'
         $confidence = 'Low'
-        $basis = 'Target persona is undetermined or evidence is insufficient to automatically select E3, F3, or no license.'
+        $basis = 'The current base license or M365LicenseTargetPersona does not support one of the approved decision paths.'
+        $frontlineEligibilityStatus = 'Not applicable'
 
         if ($isSharedMailbox) {
             if ($evidence.MailboxStorageBytes -gt 50GB -or $evidence.HasArchiveMailbox) {
-                $recommended = 'Keep an appropriate license'
+                $recommended = 'Keep appropriate license - shared mailbox'
                 $confidence = 'High'
                 $basis = 'Shared mailbox with more than 50 GB or an active archive; an appropriate license is still required.'
             }
             else {
-                $recommended = 'Review shared mailbox'
+                $recommended = 'Separate review - shared mailbox'
                 $confidence = 'Medium'
                 $basis = 'A shared mailbox must not be treated as a named user; validate size, archive, and usage before removing a license.'
             }
         }
         elseif ($isSpecialAccount) {
-            $recommended = 'Review special account'
+            $recommended = 'Separate review - special account'
             $confidence = 'Medium'
             $basis = "Account type '$accountType'; validate technical usage and required services before making any change."
         }
-        elseif ($isDisabled) {
-            $recommended = 'No license - candidate'
-            $confidence = 'High'
-            $basis = 'User account is disabled or blocked; confirm retention, departure, and regulatory requirements before removing the license.'
+        elseif (($isCurrentE3 -or $isCurrentF3) -and $targetPersona -eq 'None') {
+            if ($isDisabled) {
+                $recommended = 'No license - candidate'
+                $confidence = 'High'
+                $basis = 'M365LicenseTargetPersona is None and the user account is disabled or blocked; confirm retention, departure, ownership, and regulatory requirements before removing the license.'
+            }
+            elseif (-not $hasRecentActivity) {
+                $recommended = 'No license - review'
+                $confidence = 'Medium'
+                $basis = 'M365LicenseTargetPersona is None and no recent activity was observed across M365, detailed usage, AD/Entra sign-ins, or Intune devices.'
+            }
+            else {
+                $recommended = 'Target persona conflict - active user review'
+                $confidence = 'Medium'
+                $basis = 'M365LicenseTargetPersona is None, but recent user activity or a managed-device signal was observed; do not remove the license until the persona and business need are reconciled.'
+            }
         }
-        elseif (-not $hasRecentActivity) {
-            $recommended = 'No license - review'
+        elseif (($isCurrentE3 -or $isCurrentF3) -and $isDisabled) {
+            $recommended = 'Account state conflict - target persona review'
             $confidence = 'Medium'
-            $basis = 'No recent activity was observed in M365, detailed usage sources, AD/Entra sign-ins, or Intune devices.'
+            $basis = "The account is disabled or blocked, but M365LicenseTargetPersona is '$targetPersona'; reconcile the persona, retention, and ownership before any license decision."
         }
-        elseif ($mailboxOverF3Limit -or $oneDriveOverF3Limit) {
-            $recommended = 'M365 E3 or remediate F3'
-            $confidence = 'High'
-            $basis = 'Exchange or OneDrive storage exceeds the 2 GB F3 limit; choose E3 or reduce/archive the data.'
+        elseif ($isCurrentE3 -and $targetPersona -eq 'M365 F3') {
+            $frontlineEligibilityStatus = 'Required - not proven by telemetry'
+            if ($hasF3TechnicalBlocker) {
+                $recommended = 'Keep M365 E3 - F3 technical blocker'
+                $confidence = 'High'
+                $basis = 'M365LicenseTargetPersona is F3, but a desktop application activation or Exchange/OneDrive storage above the 2 GB F3 limit was observed.'
+            }
+            elseif (-not $hasRecentActivity) {
+                $recommended = 'Potential M365 F3 - activity and eligibility review'
+                $confidence = 'Low'
+                $basis = 'M365LicenseTargetPersona is F3 and no F3 technical blocker was observed, but recent activity is not available; validate both business need and Frontline eligibility.'
+            }
+            else {
+                $recommended = 'Potential M365 F3 - Frontline eligibility required'
+                $confidence = 'Medium'
+                $basis = 'M365LicenseTargetPersona is F3, recent activity is observed, and no desktop or 2 GB storage blocker was found; documented Frontline eligibility is still required before changing the license.'
+            }
         }
-        elseif ($evidence.HasDesktopAppsActivation) {
-            $recommended = 'M365 E3'
-            $confidence = 'High'
-            $basis = 'A Microsoft 365 desktop app activation was observed; desktop apps are not included in the F3 web/mobile entitlement.'
+        elseif ($isCurrentF3 -and $targetPersona -eq 'M365 E3') {
+            $recommended = 'M365 E3 capability review'
+            $confidence = if ($hasF3TechnicalBlocker) { 'High' } else { 'Medium' }
+            $basis = if ($hasF3TechnicalBlocker) {
+                'M365LicenseTargetPersona is E3 and an observable F3 technical blocker exists; validate the required E3 capabilities and service impact.'
+            }
+            else {
+                'M365LicenseTargetPersona is E3 while the current base license is F3; validate capability, quality, and user-experience requirements before any upgrade.'
+            }
         }
-        elseif ($targetPersona -eq 'M365 E3') {
-            $recommended = 'M365 E3'
-            $confidence = 'Medium'
-            $basis = 'M365LicenseTargetPersona is E3 and recent activity is observed.'
+        elseif ($isCurrentF3 -and $targetPersona -eq 'M365 F3') {
+            if ($hasF3TechnicalBlocker) {
+                $recommended = 'M365 F3 technical conflict - review'
+                $confidence = 'High'
+                $basis = 'The current license and target persona are F3, but a desktop application activation or Exchange/OneDrive storage above the 2 GB F3 limit was observed.'
+            }
+            elseif (-not $hasRecentActivity) {
+                $recommended = 'Keep M365 F3 - activity review'
+                $confidence = 'Low'
+                $basis = 'The current license and target persona are F3, with no observed technical blocker, but recent activity was not found.'
+            }
+            else {
+                $recommended = 'Keep current M365 F3 - no observed technical conflict'
+                $confidence = 'Medium'
+                $basis = 'The current license and M365LicenseTargetPersona are F3, recent activity is observed, and no desktop or 2 GB storage blocker was found.'
+            }
         }
-        elseif ($targetPersona -eq 'M365 F3') {
-            $recommended = 'M365 F3'
-            $confidence = 'Medium'
-            $basis = 'M365LicenseTargetPersona is F3, recent activity is observed, and no desktop activation or storage limit issue was found.'
+        elseif ($isCurrentE3 -and $targetPersona -eq 'M365 E3') {
+            if (-not $hasRecentActivity) {
+                $recommended = 'Keep M365 E3 - activity review'
+                $confidence = 'Low'
+                $basis = 'The current license and target persona are E3, but recent activity was not found; confirm the continuing business requirement.'
+            }
+            else {
+                $recommended = 'Keep current M365 E3'
+                $confidence = if ($hasF3TechnicalBlocker) { 'High' } else { 'Medium' }
+                $basis = if ($hasF3TechnicalBlocker) {
+                    'The current license and target persona are E3, and desktop or storage evidence supports an E3 capability requirement.'
+                }
+                else {
+                    'The current license and M365LicenseTargetPersona are E3 and recent activity is observed.'
+                }
+            }
         }
 
         $currentPrice = if ($currentBaseSku) { Get-MonthlySkuPrice -PriceModel $PriceModel -SkuPartNumber $currentBaseSku } else { $null }
-        $recommendedSku = if ($recommended -eq 'M365 E3') { 'SPE_E3' } elseif ($recommended -eq 'M365 F3') { 'SPE_F1' } else { '' }
+        $recommendedSku = if ($recommended -in @('Keep current M365 E3', 'Keep M365 E3 - activity review', 'Keep M365 E3 - F3 technical blocker', 'M365 E3 capability review')) {
+            'SPE_E3'
+        }
+        elseif ($recommended -in @('Keep current M365 F3 - no observed technical conflict', 'Keep M365 F3 - activity review', 'Potential M365 F3 - Frontline eligibility required')) {
+            'SPE_F1'
+        }
+        else {
+            ''
+        }
         $recommendedPrice = if ($recommendedSku) { Get-MonthlySkuPrice -PriceModel $PriceModel -SkuPartNumber $recommendedSku } elseif ($recommended -match '^No license') { [decimal]0 } else { $null }
         $monthlyDelta = if ($null -ne $currentPrice -and $null -ne $recommendedPrice) { [math]::Round(([decimal]$currentPrice - [decimal]$recommendedPrice), 2) } else { $null }
+        $decisionClass = if ($recommended -eq 'No license - candidate') {
+            'Recommended'
+        }
+        elseif ($recommended -eq 'Potential M365 F3 - Frontline eligibility required') {
+            'Conditional'
+        }
+        elseif ($recommended -match '(?i)review' -or $recommended -match '^Separate review') {
+            'Review'
+        }
+        else {
+            'Keep'
+        }
 
         $rows.Add([pscustomobject]@{
             RunId = $script:RunId
@@ -266,16 +417,28 @@ function New-SmartFinOpsUserLicenseDecisionRows {
             CurrentBaseLicense = $currentPlan
             CurrentBaseSku = $currentBaseSku
             AssignedSkuPartNumbers = ($skus -join ' | ')
+            TargetPersonaRaw = $personaRaw
             TargetPersona = $targetPersona
             RecommendedLicense = $recommended
+            DecisionClass = $decisionClass
             DecisionConfidence = $confidence
             DecisionBasis = $basis
+            F3TechnicalStatus = $f3TechnicalStatus
+            FrontlineEligibilityStatus = $frontlineEligibilityStatus
             LatestKnownActivity = if ($latestActivityDate) { $latestActivityDate.ToString('yyyy-MM-dd') } else { '' }
             RecentEvidence = (@($evidence.RecentWorkloads) | Sort-Object) -join ' | '
+            RecentM365ServiceEvidence = $recentM365ServiceEvidence -join ' | '
+            RecentTechnicalEvidence = $recentTechnicalEvidence.ToArray() -join ' | '
+            HasRecentM365ServiceActivity = $hasRecentM365ServiceActivity
+            HasRecentTechnicalPresence = $hasRecentTechnicalPresence
             HasDesktopAppsActivation = $evidence.HasDesktopAppsActivation
             HasRecentManagedDevice = $evidence.HasRecentManagedDevice
+            HasMailboxStorageEvidence = $evidence.HasMailboxStorageEvidence
             MailboxStorageGB = [math]::Round([double]$evidence.MailboxStorageBytes / 1GB, 2)
             OneDriveStorageGB = [math]::Round([double]$evidence.OneDriveStorageBytes / 1GB, 2)
+            IsUnusedE3F3License = $isUnusedE3F3License
+            IsPossiblyUnusedE3F3License = $isPossiblyUnusedE3F3License
+            IsE3WithoutObservedE3Capabilities = $isE3WithoutObservedE3Capabilities
             CurrentMonthlyPriceEUR = $currentPrice
             RecommendedMonthlyPriceEUR = $recommendedPrice
             IndicativeMonthlyDifferenceEUR = $monthlyDelta
@@ -287,11 +450,12 @@ function New-SmartFinOpsUserLicenseDecisionRows {
 
 
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+24yWADgWru2d
-# UDJaEEDNEtvX1Ii2P2vVBfaGraQ9q6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDEi4nJzkZXtK22
+# kjmcg//G25xzrGxN4dTI3l6rucfakKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -424,31 +588,31 @@ function New-SmartFinOpsUserLicenseDecisionRows {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJaVhJBl9jKPWEmSQDyuEnrtNnkD1VgkTcd5ddaBSHjaMA0GCSqG
-# SIb3DQEBAQUABIIBgHkIDAtL92gy79ZbwsMAF+UBHQUV51clXyFXJFf5OCo+CTTo
-# 1QTzGlE1jA1Gde5+DttwISTgen9MZSXo4z/zyVyuzEaO3e5ZuYMcocMxMZ8fhCPq
-# p6hfkVWRSRt8HRclEi/LJy/Ic7CUSnNvfWSh84Jfe3i2/lckwj84wSqPchZQ6Fcd
-# 2Larr+f/bmBt5FTOAx32Bkp0rD529JHMI+eUVzJiEb2v8ATVBA+W2r5u0uDQA7OY
-# EzVXO7vDiiHUKUJHKLe0qxXa/WnkDGpdhSCYRFHHs5p4sXcwKj6mbjyADHvADl5g
-# 3LR84CulzJ9bIb6ZOdXLnylIxaCA9XO9BpFD9Ze+rsMRqCxyF/MFsdu/8V+RssSB
-# QmUvkNdu9tvVu1C5ao22n64kRyr1+aqwKvfYfYuTrNosLPYFa6tudh6Pe7vQBcTH
-# yDK039q4WCHAVw8bQrVgJCD47F817+DMS9Jtddnp7xmx/cp3UCl67qRdzciQNIpc
-# uUHbXp/poJ83UwldvKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPCX27EtNeyYDAipLhgN/6u7TWf4b/JiRZJIxRi4vVvrMA0GCSqG
+# SIb3DQEBAQUABIIBgIIssZrqljGANb6RkNLo9jsQ7HTy8r0S/qplx1EKISocQtCx
+# BnC+qP31tv5eWnKMHpfBYO84vuF+HD6CN3sEM9AlLPuiv/9vRDr0GmDMVjrfJUhE
+# DP4FDis9AR++hfuYdhEivtUujPfXrtY45uCICdBDfr9uUoBE2xSUwdTevSGlUnUx
+# ffCOcXV2QZi3eLOal0cGyRelXF1Q7J4Mkt/BTQ27/VkIoGBrbYoHNcDTcmU/WfNe
+# rQzGv+W6tvtcHe3DzkbsILHp4NWG79235oyj4Nz2gjQNhzY/f2w1+bkP3OkVBIus
+# ETy+PUjF7l8hur/ZKzB3Ajdr/V1zbmxm6fpf4/S9cu+pP8zUPpd4ptGAYLrkvjQx
+# uR1UBz4BaS0DaA1ceeo+AI94A6imYgCl6CFwVp8dYJeJb1s1a718Ci5dDZcjZhs4
+# /UeEpeK+lmWstcK3yBbBZoWNcbh5lc/59LZGdv9spzPDhpuQAHHi1ncVKQar7yYC
+# +z1ckO9DjIvQoTfgGKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgxODQ1
-# NDFaMC8GCSqGSIb3DQEJBDEiBCAb/9TUSO4PPgI/hhwZMqbn/DQlKvhixoAflWpe
-# 7eJw1DANBgkqhkiG9w0BAQEFAASCAgBElD4N6bmDt14fveAXrc4+YUZhDg31EtVu
-# NRelhVJriBMmQy2DlS72IVMAs388wj+g7cmPkPrPcLagjvKcajXOJBck3vegWtg2
-# l2lEGb7erAa4WNTRh85Oy1K6n1wwx+ucPCPRBL1/dZLeBhmn51xvI0f716fpyoBS
-# 3U3xxxKS/XTM+h2MEmv0zAft0m+VJXbzXXtUGlhuehactvAxrtt7As1bG/tTn+3O
-# MTciliyLlBekKawdvlTWXAJooj5CZpGyZ38FkrIXwStBADO9YMuswSTiueedR3gW
-# gsWceQQKmR5Jg5oX9bR4pH5si3ahMbVQfBN0JXBuz5lyXnepBjsKdfXowO/9MmXe
-# n61fRZwv0iGIx/ils6EFgZMbKeTooJZ/SsPJqtvc84wS9KoVz+9GitygyRMaNoh9
-# AQ9tirNgBoz8gb0xBk+2Yl6Oq09SogsBANeIHl2OpU8EBibx/QXkT0HFJEBRNGjp
-# AJQWylY2BatVcY7X3jPMSeLajLbf8JGJGhfpiRrIQ7ZSYkRQ1xV7LoEoMNC9hwMp
-# s3tE45y6qxZsbk98LJVI4/he8q3Y8qZXPil/wAxnS+EOjiu8AAfY4+lE4oVYtVHk
-# KOJhminKb9mI8+QKSpSstZF6R53qjCkaLLxaF7c582Zo2dva7U5M9wgcBqcQTo52
-# Fkxe002Dog==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMTI3
+# MDZaMC8GCSqGSIb3DQEJBDEiBCDMEJ+Kd0GdOlpJebvUheEQ/iVJjq+w0prKbLdE
+# W8Jp2DANBgkqhkiG9w0BAQEFAASCAgDJeobM5f9eoeqN8GirqsPeuQY6uPliddKs
+# P2JexgkIynArQ3poZIVUoSKoWx2UCypWptzItsM7CGGshS+PunMXUiyWxCSJYQLw
+# X46EfATTPvSKdOcfLOaZfmVgn4lVmp2zkI1sBRfS8sfo/BwkmJwInhQ/hUrxvPZu
+# /SQo3ebKT48/u3HXianK3cYu11VUtPvp314PrDI0B4BPSx/l9WYDca0dNH/p5vYa
+# L3taodQeArr3ndKuvtY1oGEqtQwweehYn4fTei4r5xbE/nDa4I2PjcMdQTbXKGSU
+# qJ3yGsTsyizVG1C8HEKM9foj3vHKkgDIztLbylMHeY0BhtAsazmoJ0VwkRBUdH1o
+# R1qBIrUuuyI7vjysaFyYHHAu94xg2CRVW6VXfA9P6cjoYTlysGipJWZGSRi/uQv9
+# fJnhJRr8D6zYbrcC1TGrowQNp/qkigdVqodWuFQ7mQoYEvt6VYe48lGdAO5wgf+E
+# tJv4mBhVrsoIQ8XSXpGZi26zW5JE4SsGt9QJuOoNnqsUEOnv6M6WJUp7OeIBjmMh
+# +w0mVPn2wl5nNxKawItt9a0CSuh3pMIInUw2qnQG/I5NWEq8K607JuB2epPH7ruN
+# ECmOF8gV9fIDkJGRB3f/JIO63CaQPKkc9YyhW6rLsc8HT8ld9rUjf0yWtl2psJ61
+# vwUwDLmUXg==
 # SIG # End signature block
