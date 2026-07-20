@@ -34,9 +34,13 @@ assignment.
 Service-plan state codes are `A` (enabled and successfully provisioned), `D`
 (disabled), `PA` (pending activation), `PI` (pending input), `PP` (pending
 provisioning), and `E` (error). The compact CSV therefore remains directly
-filterable by `TenantKey`, `UserId`, `SkuId`, and `PlanId`. WeeklyHistory keeps
-`M365_Licenses_UserServicePlanStates_Detailed.csv` with the expanded
-`IsEnabled` and `PlanStatus` columns.
+filterable by `TenantKey`, `UserId`, `SkuId`, and `PlanId`. Its rows are written
+to a disk-backed staging file during collection, avoiding an in-memory copy of the
+complete user/service-plan fact table. WeeklyHistory keeps
+`M365_Licenses_UserServicePlanStates_Detailed.csv` with the expanded `IsEnabled`
+and `PlanStatus` columns, streamed from the compact CSV. When both weekly names
+exist, the former `M365_Licenses_UserServicePlanStates.csv` duplicate is retired
+only after the detailed replacement has been validated.
 
 The former `M365_Licenses_ServicePlans_Detailed.csv` export is disabled. On a
 normal run, its current non-timestamped DATA-ALL/DATA-LAST and SharePoint copy is

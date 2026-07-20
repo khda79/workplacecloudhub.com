@@ -5,7 +5,7 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.12
+1.13
 
 
 .REQUIREMENTS
@@ -15,7 +15,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.12
+    Version : 1.13
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -677,64 +677,364 @@ function ConvertFrom-ServicePlanStateCode {
   throw "Unsupported service-plan StateCode '$StateCode'."
 }
 
+function ConvertTo-LicensesCsvField {
+  [CmdletBinding()]
+  param([AllowNull()]$Value)
+
+  $text = if ($null -eq $Value) { '' } else { [string]$Value }
+  if ($text -match "`r|`n") {
+    throw "Service-plan CSV field contains a line break, which is not supported by the disk-backed writer."
+  }
+  return ('"{0}"' -f $text.Replace('"', '""'))
+}
+
+function New-LicensesServicePlanStateWriter {
+  [CmdletBinding()]
+  [OutputType([System.IO.StreamWriter])]
+  param([Parameter(Mandatory)][string]$Path)
+
+  $folder = Split-Path -Path $Path -Parent
+  if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
+    New-Item -Path $folder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+  }
+  if (Test-Path -LiteralPath $Path) {
+    Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+  }
+
+  $writer = [System.IO.StreamWriter]::new($Path, $false, [System.Text.UTF8Encoding]::new($false))
+  $writer.WriteLine('"TenantKey","UserId","SkuId","PlanId","StateCode"')
+  return $writer
+}
+
+function Write-LicensesServicePlanStateRow {
+  param(
+    [Parameter(Mandatory)][System.IO.StreamWriter]$Writer,
+    [Parameter(Mandatory)][string]$TenantKey,
+    [Parameter(Mandatory)][string]$UserId,
+    [Parameter(Mandatory)][string]$SkuId,
+    [Parameter(Mandatory)][string]$PlanId,
+    [Parameter(Mandatory)][string]$StateCode,
+    [Parameter(Mandatory)][int64]$RowNumber
+  )
+
+  try {
+    if (
+      [string]::IsNullOrWhiteSpace($TenantKey) -or
+      [string]::IsNullOrWhiteSpace($UserId) -or
+      [string]::IsNullOrWhiteSpace($SkuId) -or
+      [string]::IsNullOrWhiteSpace($PlanId) -or
+      [string]::IsNullOrWhiteSpace($StateCode)
+    ) {
+      throw 'A critical compact service-plan field is empty.'
+    }
+    if (
+      $TenantKey -match "`r|`n" -or
+      $UserId -match "`r|`n" -or
+      $SkuId -match "`r|`n" -or
+      $PlanId -match "`r|`n" -or
+      $StateCode -match "`r|`n"
+    ) {
+      throw 'A compact service-plan CSV field contains a line break.'
+    }
+
+    $Writer.WriteLine(
+      ('"{0}","{1}","{2}","{3}","{4}"' -f
+        $TenantKey.Replace('"', '""'),
+        $UserId.Replace('"', '""'),
+        $SkuId.Replace('"', '""'),
+        $PlanId.Replace('"', '""'),
+        $StateCode.Replace('"', '""'))
+    )
+    if (($RowNumber % 5000) -eq 0) { $Writer.Flush() }
+  }
+  catch {
+    $exception = [System.IO.IOException]::new("Failed to write compact service-plan row ${RowNumber}: $($_.Exception.Message)", $_.Exception)
+    $exception.Data['SmartM365FatalServicePlanStateWrite'] = $true
+    throw $exception
+  }
+}
+
+function Close-LicensesServicePlanStateWriter {
+  [CmdletBinding()]
+  param([AllowNull()][System.IO.StreamWriter]$Writer)
+
+  if ($null -eq $Writer) { return }
+  $Writer.Flush()
+  $Writer.Dispose()
+}
+
+function Get-LicensesCsvDataRowCount {
+  [CmdletBinding()]
+  [OutputType([int64])]
+  param([Parameter(Mandatory)][string]$Path)
+
+  [int64]$lineCount = 0
+  $reader = [System.IO.StreamReader]::new($Path)
+  try {
+    while ($null -ne $reader.ReadLine()) { $lineCount++ }
+  }
+  finally {
+    $reader.Dispose()
+  }
+  if ($lineCount -eq 0) { return 0L }
+  return ($lineCount - 1L)
+}
+
+function Assert-LicensesServicePlanStateCsvFile {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][int64]$ExpectedRows
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    throw "Compact service-plan CSV was not created: $Path"
+  }
+  $expectedHeader = '"TenantKey","UserId","SkuId","PlanId","StateCode"'
+  $reader = [System.IO.StreamReader]::new($Path)
+  try {
+    $actualHeader = $reader.ReadLine()
+  }
+  finally {
+    $reader.Dispose()
+  }
+  if ($actualHeader -cne $expectedHeader) {
+    throw "Compact service-plan CSV header mismatch. Expected '$expectedHeader', got '$actualHeader'."
+  }
+
+  $validationStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $actualRows = Get-LicensesCsvDataRowCount -Path $Path
+  $validationStopwatch.Stop()
+  if ($actualRows -ne $ExpectedRows) {
+    throw "Compact service-plan CSV row count mismatch. Expected $ExpectedRows, got $actualRows."
+  }
+  WriteLog -Message ("Streaming file validation passed for 'M365_Licenses_UserServicePlanStates'. Rows: {0:N0}; elapsed={1:N1} sec; working set={2:N1} MB." -f $actualRows, $validationStopwatch.Elapsed.TotalSeconds, ((Get-Process -Id $PID).WorkingSet64 / 1MB)) 'INFO'
+}
+
+function Copy-LicensesCsvAtomically {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][string]$SourcePath,
+    [Parameter(Mandatory)][string]$DestinationPath
+  )
+
+  $destinationFolder = Split-Path -Path $DestinationPath -Parent
+  if (-not [string]::IsNullOrWhiteSpace($destinationFolder) -and -not (Test-Path -LiteralPath $destinationFolder)) {
+    New-Item -Path $destinationFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+  }
+  $stagingPath = "$DestinationPath.building-$PID"
+  try {
+    Copy-Item -LiteralPath $SourcePath -Destination $stagingPath -Force -ErrorAction Stop
+    Move-Item -LiteralPath $stagingPath -Destination $DestinationPath -Force -ErrorAction Stop
+  }
+  finally {
+    if (Test-Path -LiteralPath $stagingPath) {
+      Remove-Item -LiteralPath $stagingPath -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+function Publish-LicensesServicePlanStateCsvFile {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][string]$BuildingPath,
+    [Parameter(Mandatory)][int64]$ExpectedRows,
+    [Parameter(Mandatory)][string]$CurrentOutputPath,
+    [Parameter(Mandatory)][string]$LatestOutputPath
+  )
+
+  Assert-LicensesServicePlanStateCsvFile -Path $BuildingPath -ExpectedRows $ExpectedRows
+
+  $baseFileName = 'M365_Licenses_UserServicePlanStates'
+  $runBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $baseFileName
+  $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+  $timestampedPath = Join-Path -Path $CurrentOutputPath -ChildPath "$runBaseFileName`_$timestamp.csv"
+  $currentPath = Join-Path -Path $CurrentOutputPath -ChildPath "$runBaseFileName.csv"
+  $latestPath = if ([string]::IsNullOrWhiteSpace($LatestOutputPath)) { $currentPath } else { Join-Path -Path $LatestOutputPath -ChildPath "$runBaseFileName.csv" }
+  if (Test-SmartM365MaxItemsMode) {
+    WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) 'WARNING'
+  }
+
+  Move-Item -LiteralPath $BuildingPath -Destination $timestampedPath -Force -ErrorAction Stop
+  WriteLog -Message "CSV exported to: $timestampedPath" 'INFO'
+  if (-not $global:csvGeneratedPaths) {
+    $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+  }
+  [void]$global:csvGeneratedPaths.Add($timestampedPath)
+
+  Copy-LicensesCsvAtomically -SourcePath $timestampedPath -DestinationPath $currentPath
+  [void]$global:csvGeneratedPaths.Add($currentPath)
+  WriteLog -Message "CSV copied to: $currentPath" 'INFO'
+
+  if ($latestPath -ine $currentPath) {
+    Copy-LicensesCsvAtomically -SourcePath $timestampedPath -DestinationPath $latestPath
+    [void]$global:csvGeneratedPaths.Add($latestPath)
+    WriteLog -Message "CSV copied to global path: $latestPath" 'INFO'
+  }
+
+  $global:csvFilePath1 = $timestampedPath
+  $global:csvFilePath2 = $currentPath
+  $global:csvFilePath3 = $latestPath
+
+  if ($global:RetentionMaxCSV -gt 0) {
+    RemoveOldFiles -FolderPath $CurrentOutputPath -FilePattern "$runBaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
+  }
+
+  Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath | Out-Null
+  WriteLog -Message 'Automatic WeeklyHistory publication skipped for this CSV; the caller will publish the validated dataset group.' 'INFO'
+  return [pscustomobject]@{
+    TimestampedPath = $timestampedPath
+    CurrentPath     = $currentPath
+    PublishedPath   = $latestPath
+    RowCount        = $ExpectedRows
+  }
+}
+
+function New-LicensesDetailedServicePlanHistorySource {
+  [CmdletBinding()]
+  [OutputType([int64])]
+  param(
+    [Parameter(Mandatory)][string]$CompactCsvPath,
+    [Parameter(Mandatory)][string]$DetailedCsvPath
+  )
+
+  $buildingPath = "$DetailedCsvPath.building"
+  try {
+    [int64]$detailCount = 0
+    Import-Csv -LiteralPath $CompactCsvPath |
+      ForEach-Object {
+        $decodedState = ConvertFrom-ServicePlanStateCode -StateCode ([string]$_.StateCode)
+        $detailCount++
+        [pscustomobject][ordered]@{
+          'TenantKey'       = $_.TenantKey
+          'OrganizationKey' = $global:SmartM365OrganizationKey
+          'EnvironmentKey'  = $global:SmartM365EnvironmentKey
+          'TenantId'        = $global:SmartM365TenantId
+          'UserId'          = $_.UserId
+          'SkuId'           = $_.SkuId
+          'PlanId'          = $_.PlanId
+          'IsEnabled'       = $decodedState.IsEnabled
+          'PlanStatus'      = $decodedState.PlanStatus
+        }
+      } |
+      Export-Csv -LiteralPath $buildingPath -NoTypeInformation -Encoding UTF8
+
+    Move-Item -LiteralPath $buildingPath -Destination $DetailedCsvPath -Force -ErrorAction Stop
+    return $detailCount
+  }
+  finally {
+    if (Test-Path -LiteralPath $buildingPath) {
+      Remove-Item -LiteralPath $buildingPath -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+function Remove-LegacyWeeklyServicePlanStateDuplicates {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][string]$HistoryRootPath,
+    [int64]$ExpectedCurrentWeekRows = 0
+  )
+
+  if (-not (Test-Path -LiteralPath $HistoryRootPath -PathType Container)) { return 0 }
+  $expectedDetailedHeader = '"TenantKey","OrganizationKey","EnvironmentKey","TenantId","UserId","SkuId","PlanId","IsEnabled","PlanStatus"'
+  $currentWeekName = Get-SmartM365IsoWeekName
+  $removedCount = 0
+  $weekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{4}-W\d{2}$' })
+  foreach ($weekFolder in $weekFolders) {
+    $legacyPath = Join-Path -Path $weekFolder.FullName -ChildPath 'M365_Licenses_UserServicePlanStates.csv'
+    $detailedPath = Join-Path -Path $weekFolder.FullName -ChildPath 'M365_Licenses_UserServicePlanStates_Detailed.csv'
+    if (-not (Test-Path -LiteralPath $legacyPath -PathType Leaf) -or -not (Test-Path -LiteralPath $detailedPath -PathType Leaf)) { continue }
+
+    $reader = [System.IO.StreamReader]::new($detailedPath)
+    try { $detailedHeader = $reader.ReadLine() }
+    finally { $reader.Dispose() }
+    if ($detailedHeader -cne $expectedDetailedHeader -or (Get-Item -LiteralPath $detailedPath).Length -le $expectedDetailedHeader.Length) {
+      WriteLog -Message ("Legacy WeeklyHistory duplicate preserved because the replacement detailed CSV is invalid: {0}" -f $detailedPath) 'WARNING'
+      continue
+    }
+
+    $detailedRows = Get-LicensesCsvDataRowCount -Path $detailedPath
+    $legacyRows = Get-LicensesCsvDataRowCount -Path $legacyPath
+    $replacementCountValid = if ($weekFolder.Name -eq $currentWeekName -and $ExpectedCurrentWeekRows -gt 0) {
+      $detailedRows -eq $ExpectedCurrentWeekRows
+    }
+    else {
+      $detailedRows -eq $legacyRows
+    }
+    if (-not $replacementCountValid) {
+      WriteLog -Message ("Legacy WeeklyHistory duplicate preserved because row counts do not prove a complete replacement. Week={0}; LegacyRows={1}; DetailedRows={2}; ExpectedCurrentRows={3}." -f $weekFolder.Name, $legacyRows, $detailedRows, $ExpectedCurrentWeekRows) 'WARNING'
+      continue
+    }
+
+    if ($global:EnableSharePointUpload) {
+      $removedFromSharePoint = Remove-SmartM365SharePointFile -LocalFilePath $legacyPath
+      if (-not $removedFromSharePoint) {
+        WriteLog -Message ("Legacy WeeklyHistory duplicate could not be confirmed as removed from SharePoint: {0}" -f $legacyPath) 'WARNING'
+      }
+    }
+
+    Remove-Item -LiteralPath $legacyPath -Force -ErrorAction Stop
+    $removedCount++
+    WriteLog -Message ("Legacy WeeklyHistory service-plan duplicate removed: {0}" -f $legacyPath) 'INFO'
+
+    $manifestPath = Join-Path -Path $weekFolder.FullName -ChildPath 'manifest.json'
+    [pscustomobject][ordered]@{
+      UpdatedAt       = (Get-Date).ToString('o')
+      Week            = $weekFolder.Name
+      HistoryLabel    = 'M365 licenses inventory'
+      HistoryRootPath = $HistoryRootPath
+      Files           = @(Get-ChildItem -LiteralPath $weekFolder.FullName -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+    if ($global:EnableSharePointUpload) {
+      Invoke-SmartM365SharePointCsvUpload -LocalFilePath $manifestPath | Out-Null
+    }
+  }
+  return $removedCount
+}
+
 function Publish-LicensesWeeklyHistory {
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory)][System.Collections.IEnumerable]$ServicePlanStates,
+    [Parameter(Mandatory)][string]$ServicePlanStateCsvPath,
+    [Parameter(Mandatory)][int64]$ExpectedServicePlanRows,
     [Parameter(Mandatory)][string]$CurrentOutputPath,
     [Parameter(Mandatory)][string]$LatestOutputPath
   )
 
   if (Test-SmartM365MaxItemsMode) {
-    WriteLog -Message "Consolidated Licensing WeeklyHistory publication skipped during MaxItems validation." "INFO"
+    WriteLog -Message 'Consolidated Licensing WeeklyHistory publication skipped during MaxItems validation.' 'INFO'
     return
   }
 
   $weeklyHistoryEnabled = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
   if (-not $weeklyHistoryEnabled) {
-    WriteLog -Message "Licensing WeeklyHistory publication is disabled by configuration." "INFO"
+    WriteLog -Message 'Licensing WeeklyHistory publication is disabled by configuration.' 'INFO'
     return
   }
 
   $historyRootPath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue '')
   if ([string]::IsNullOrWhiteSpace($historyRootPath)) {
-    $historyRootPath = Join-Path -Path $CurrentOutputPath -ChildPath "WeeklyHistory"
+    $historyRootPath = Join-Path -Path $CurrentOutputPath -ChildPath 'WeeklyHistory'
   }
   $retentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
 
-  $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+  $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
   $detailedSourcePath = Join-Path -Path $CurrentOutputPath -ChildPath "M365_Licenses_UserServicePlanStates_Detailed_$timestamp.csv"
-  $detailedBuildingPath = "$detailedSourcePath.building"
 
   try {
-    $detailCount = 0
-    $ServicePlanStates |
-      ForEach-Object {
-        $decodedState = ConvertFrom-ServicePlanStateCode -StateCode ([string]$_.StateCode)
-        $detailCount++
-        [pscustomobject][ordered]@{
-          "TenantKey"       = $global:SmartM365TenantKey
-          "OrganizationKey" = $global:SmartM365OrganizationKey
-          "EnvironmentKey"  = $global:SmartM365EnvironmentKey
-          "TenantId"        = $global:SmartM365TenantId
-          "UserId"          = $_.UserId
-          "SkuId"           = $_.SkuId
-          "PlanId"          = $_.PlanId
-          "IsEnabled"       = $decodedState.IsEnabled
-          "PlanStatus"      = $decodedState.PlanStatus
-        }
-      } |
-      Export-Csv -LiteralPath $detailedBuildingPath -NoTypeInformation -Encoding UTF8
-
-    Move-Item -LiteralPath $detailedBuildingPath -Destination $detailedSourcePath -Force
-    WriteLog -Message ("Detailed service-plan WeeklyHistory source created: {0:N0} row(s)." -f $detailCount) "INFO"
+    $detailCount = New-LicensesDetailedServicePlanHistorySource -CompactCsvPath $ServicePlanStateCsvPath -DetailedCsvPath $detailedSourcePath
+    if ($detailCount -ne $ExpectedServicePlanRows) {
+      throw "Detailed service-plan WeeklyHistory row count mismatch. Expected $ExpectedServicePlanRows, got $detailCount."
+    }
+    WriteLog -Message ("Detailed service-plan WeeklyHistory source created from the compact CSV: {0:N0} row(s); working set={1:N1} MB." -f $detailCount, ((Get-Process -Id $PID).WorkingSet64 / 1MB)) 'INFO'
 
     $latestNames = @(
-      "M365_Licenses_Users.csv"
-      "M365_Licenses_ServicePlans_Catalog.csv"
-      "M365_Licenses_ServicePlans.csv"
-      "M365_Licenses_Tenant.csv"
-      "M365_Licenses_Groups.csv"
+      'M365_Licenses_Users.csv'
+      'M365_Licenses_ServicePlans_Catalog.csv'
+      'M365_Licenses_ServicePlans.csv'
+      'M365_Licenses_Tenant.csv'
+      'M365_Licenses_Groups.csv'
     )
     $weeklySourceFiles = New-Object System.Collections.Generic.List[string]
     foreach ($latestName in $latestNames) {
@@ -749,22 +1049,21 @@ function Publish-LicensesWeeklyHistory {
       -SourceFiles $weeklySourceFiles.ToArray() `
       -HistoryRootPath $historyRootPath `
       -RetentionWeeks $retentionWeeks `
-      -HistoryLabel "M365 licenses inventory" `
+      -HistoryLabel 'M365 licenses inventory' `
       -UploadChangedFilesOnly
+
+    Remove-LegacyWeeklyServicePlanStateDuplicates -HistoryRootPath $historyRootPath -ExpectedCurrentWeekRows $detailCount | Out-Null
   }
   finally {
-    foreach ($temporaryPath in @($detailedBuildingPath, $detailedSourcePath)) {
-      if (Test-Path -LiteralPath $temporaryPath) {
-        Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
-      }
+    if (Test-Path -LiteralPath $detailedSourcePath) {
+      Remove-Item -LiteralPath $detailedSourcePath -Force -ErrorAction SilentlyContinue
     }
   }
 }
-
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.12"
+$ScriptVersion = "1.13"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -775,6 +1074,9 @@ $userLicenseRowCount = 0
 $servicePlanRowCount = 0
 $tenantSkuRowCount = 0
 $groupRowCount = 0
+$servicePlanStateWriter = $null
+$servicePlanStateBuildingPath = ''
+$servicePlanStateLatestPath = ''
 
 try {
   # ------------------------
@@ -924,9 +1226,13 @@ try {
   $currentOperation = "Resolve user licenses and service plans"
   WriteLog -Message "Resolving licenses and building rows..."
   $resultsUsers       = New-Object System.Collections.Generic.List[object]
-  $rowsPlanStates     = New-Object System.Collections.Generic.List[object]
   $rowsPlansExchange  = New-Object System.Collections.Generic.List[object]
   $servicePlanCatalog = @{}
+  if ($ServicePlans) {
+    $stateRunBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'M365_Licenses_UserServicePlanStates'
+    $servicePlanStateBuildingPath = Join-Path -Path $OutputPath -ChildPath ("{0}_{1}.building.csv" -f $stateRunBaseFileName, (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    $servicePlanStateWriter = New-LicensesServicePlanStateWriter -Path $servicePlanStateBuildingPath
+  }
 
   $uTotal = ($users | Measure-Object).Count
   $uIndex = 0
@@ -1026,13 +1332,15 @@ try {
             $planDisplayName = Get-ServiceFriendly -PlanName $sp.ServicePlanName -PlanId $sp.ServicePlanId -ByName $null -ById $SvcMapById
             $isEnabled = (-not ($disabledIds -contains $sp.ServicePlanId))
 
-            $rowsPlanStates.Add([PSCustomObject][ordered]@{
-              "TenantKey" = $global:SmartM365TenantKey
-              "UserId"    = $uid
-              "SkuId"     = $skuId
-              "PlanId"    = $sp.ServicePlanId
-              "StateCode" = Get-ServicePlanStateCode -IsEnabled $isEnabled -PlanStatus $sp.ProvisioningStatus
-            }) | Out-Null
+            $servicePlanRowCount++
+            Write-LicensesServicePlanStateRow `
+              -Writer $servicePlanStateWriter `
+              -TenantKey $global:SmartM365TenantKey `
+              -UserId ([string]$uid) `
+              -SkuId ([string]$skuId) `
+              -PlanId ([string]$sp.ServicePlanId) `
+              -StateCode (Get-ServicePlanStateCode -IsEnabled $isEnabled -PlanStatus $sp.ProvisioningStatus) `
+              -RowNumber $servicePlanRowCount
 
             $catalogKey = "{0}|{1}" -f $skuId, $sp.ServicePlanId
             if (-not $servicePlanCatalog.ContainsKey($catalogKey)) {
@@ -1074,8 +1382,15 @@ try {
         }
       }
     } catch {
+      if ($_.Exception.Data['SmartM365FatalServicePlanStateWrite']) { throw }
       WriteLog -Message "Error processing user $($u.UserPrincipalName): $_" "ERROR"
     }
+  }
+  if ($servicePlanStateWriter) {
+    Close-LicensesServicePlanStateWriter -Writer $servicePlanStateWriter
+    $servicePlanStateWriter = $null
+    $stateBuildingFile = Get-Item -LiteralPath $servicePlanStateBuildingPath -ErrorAction Stop
+    WriteLog -Message ("Disk-backed compact service-plan source completed: Rows={0:N0}; Size={1:N1} MB; WorkingSet={2:N1} MB." -f $servicePlanRowCount, ($stateBuildingFile.Length / 1MB), ((Get-Process -Id $PID).WorkingSet64 / 1MB)) 'INFO'
   }
   Write-Progress -Activity "Processing users" -Completed -Status "Done"
 
@@ -1097,14 +1412,15 @@ $BaseFileName = "M365_Licenses_Users"
   # ---------------- Export compact ServicePlans state fact + catalog ----------------
   $currentOperation = "Export service plan CSV"
   if ($ServicePlans) {
-    if ($rowsPlanStates.Count -gt 0) {
+    if ($servicePlanRowCount -gt 0) {
       Write-Host ""
       Write-Host "--- Export CSV (User ServicePlan States - Compact) ---"
-      $BaseFileName = "M365_Licenses_UserServicePlanStates"
-      ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
-        -OutputPath $OutputPath `
-        -GlobalPath $LatestCsvFolderPath `
-        -Data $rowsPlanStates -Encoding "UTF8" -NoTypeInformation -Delimiter "," -Streaming -NoTenantKey -SkipWeeklyHistory
+      $statePublication = Publish-LicensesServicePlanStateCsvFile `
+        -BuildingPath $servicePlanStateBuildingPath `
+        -ExpectedRows $servicePlanRowCount `
+        -CurrentOutputPath $OutputPath `
+        -LatestOutputPath $LatestCsvFolderPath
+      $servicePlanStateLatestPath = [string]$statePublication.PublishedPath
 
       $catalogRows = @($servicePlanCatalog.Values | Sort-Object SkuPartNumber, PlanName, PlanId)
       Write-Host ""
@@ -1142,6 +1458,9 @@ $BaseFileName = "M365_Licenses_Users"
 
       Remove-LegacyDetailedServicePlansExport -CurrentOutputPath $OutputPath -LatestOutputPath $LatestCsvFolderPath
     } else {
+      if (-not [string]::IsNullOrWhiteSpace($servicePlanStateBuildingPath) -and (Test-Path -LiteralPath $servicePlanStateBuildingPath)) {
+        Remove-Item -LiteralPath $servicePlanStateBuildingPath -Force -ErrorAction SilentlyContinue
+      }
       Write-Warning "No ServicePlans rows produced."
       WriteLog -Message "No ServicePlans rows to export."
     }
@@ -1203,10 +1522,11 @@ $BaseFileName = "M365_Licenses_Groups"
     Write-Host "No groups with license assignments discovered during this run."
   }
 
-  if ($ServicePlans -and $rowsPlanStates.Count -gt 0) {
+  if ($ServicePlans -and $servicePlanRowCount -gt 0) {
     $currentOperation = "Publish consolidated Licensing WeeklyHistory"
     Publish-LicensesWeeklyHistory `
-      -ServicePlanStates $rowsPlanStates `
+      -ServicePlanStateCsvPath $servicePlanStateLatestPath `
+      -ExpectedServicePlanRows $servicePlanRowCount `
       -CurrentOutputPath $OutputPath `
       -LatestOutputPath $LatestCsvFolderPath
   }
@@ -1214,7 +1534,6 @@ $BaseFileName = "M365_Licenses_Groups"
   # ---------------- Disconnect / Cleanup ----------------
   $usersProcessedCount = if ($null -eq $users) { 0 } else { [int]$users.Count }
   $userLicenseRowCount = $resultsUsers.Count
-  $servicePlanRowCount = $rowsPlanStates.Count
   $tenantSkuRowCount = $tenantRows.Count
   $groupRowCount = $groupRows.Count
 
@@ -1258,6 +1577,10 @@ $BaseFileName = "M365_Licenses_Groups"
   Complete-SmartM365ExecutionContext -Status Auto
 }
 catch {
+  if ($servicePlanStateWriter) {
+    try { Close-LicensesServicePlanStateWriter -Writer $servicePlanStateWriter } catch {}
+    $servicePlanStateWriter = $null
+  }
   $globalError = $_
   WriteLog -Message ("Global error in M365 licenses inventory: {0}" -f $globalError) "ERROR"
   Write-Host "A global error occurred. Check the log file for details." -ForegroundColor Red
