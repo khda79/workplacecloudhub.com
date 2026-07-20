@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.20
+    Version : 1.21
 
 .VERSION
-1.20
+1.21
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.20
+    Version : 1.21
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -292,7 +292,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.44' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.45' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     exit 1
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -347,7 +347,7 @@ $script:Stat_DetailAppsTargeted = 0
 $script:Stat_GraphCalls       = 0
 $script:Stat_ThrottleRetries  = 0
 $script:Stat_BatchFallbackApps = 0
-$script:DeviceDetailResumeContractVersion = 4
+$script:DeviceDetailResumeContractVersion = 5
 
 # ==========================================================
 # Initialize script environment
@@ -693,6 +693,22 @@ function Write-DiscoveredAppsCsvRows {
 }
 
 
+function Get-DiscoveredAppsCsvDataRowCount {
+    [CmdletBinding()]
+    [OutputType([int64])]
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    [int64]$lineCount = 0
+    $reader = [System.IO.StreamReader]::new($Path)
+    try {
+        while ($null -ne $reader.ReadLine()) { $lineCount++ }
+    }
+    finally {
+        $reader.Dispose()
+    }
+    if ($lineCount -eq 0) { return 0L }
+    return ($lineCount - 1L)
+}
 function Get-DiscoveredAppsAppDeviceCount {
     [CmdletBinding()]
     param([AllowNull()]$App)
@@ -899,6 +915,7 @@ function Use-DiscoveredAppsDeviceDetailCache {
     }
 
     $statsById = @{}
+    $statsScanAppIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $manifestResult = Read-DiscoveredAppsDeviceDetailCacheManifest -CachePath $CachePath
     if ($manifestResult.Used) {
         foreach ($manifestStatEntry in @($manifestResult.Stats.GetEnumerator())) {
@@ -909,14 +926,30 @@ function Use-DiscoveredAppsDeviceDetailCache {
         }
         $result.ManifestUsed = $true
         $result.ManifestPath = $manifestResult.Path
-        WriteLog -Message ("App-device relation cache manifest loaded: {0}; StatsApps={1}; TargetStatsApps={2}. Cache stats scan skipped." -f $manifestResult.Path, $manifestResult.Stats.Count, $statsById.Count) 'INFO'
+        foreach ($targetAppId in @($targetById.Keys)) {
+            if (-not $statsById.ContainsKey([string]$targetAppId)) {
+                [void]$statsScanAppIds.Add([string]$targetAppId)
+            }
+        }
+        if ($statsScanAppIds.Count -gt 0) {
+            WriteLog -Message ("App-device relation cache manifest is incomplete: {0}/{1} target app(s) covered. Missing app stats will be rebuilt from the CSV." -f $statsById.Count, $targetById.Count) 'WARNING'
+        }
+        else {
+            WriteLog -Message ("App-device relation cache manifest loaded: {0}; TargetStatsApps={1}. Cache stats scan skipped." -f $manifestResult.Path, $statsById.Count) 'INFO'
+        }
     }
     else {
         if (-not [string]::IsNullOrWhiteSpace([string]$manifestResult.Reason)) {
             WriteLog -Message ("App-device relation cache manifest not used: {0}; scanning the cache rows once." -f $manifestResult.Reason) 'INFO'
         }
+        foreach ($targetAppId in @($targetById.Keys)) {
+            [void]$statsScanAppIds.Add([string]$targetAppId)
+        }
+    }
+
+    if ($statsScanAppIds.Count -gt 0) {
         try {
-            Import-Csv -LiteralPath $CachePath | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AppId) -and $targetById.ContainsKey([string]$_.AppId) } | ForEach-Object {
+            Import-Csv -LiteralPath $CachePath | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AppId) -and $statsScanAppIds.Contains([string]$_.AppId) } | ForEach-Object {
                 $id = [string]$_.AppId
                 $app = $targetById[$id]
 
@@ -955,7 +988,6 @@ function Use-DiscoveredAppsDeviceDetailCache {
             return [pscustomobject]$result
         }
     }
-
     $cacheable = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $normalizedStats = @{}
     foreach ($id in @($statsById.Keys)) {
@@ -1058,7 +1090,7 @@ function Test-DiscoveredAppsResumeStateCompatible {
 
     if (-not $State) { return $false }
     $propertyNames = @($State.PSObject.Properties.Name)
-    foreach ($requiredProperty in @('ResumeContractVersion','TargetAppIdsHash','TargetCount','DeviceDetailMode','PartialPath','TimestampedPath','ProcessedAppIds','ProcessedCount','SkippedCount','ActualDeviceCounts')) {
+    foreach ($requiredProperty in @('ResumeContractVersion','TargetAppIdsHash','TargetCount','DeviceDetailMode','PartialPath','PartialLength','TimestampedPath','ProcessedAppIds','ProcessedCount','SkippedCount','ActualDeviceCounts')) {
         if ($propertyNames -notcontains $requiredProperty) { return $false }
     }
 
@@ -1069,6 +1101,12 @@ function Test-DiscoveredAppsResumeStateCompatible {
         [string]::IsNullOrWhiteSpace([string]$State.PartialPath) -or
         [string]::IsNullOrWhiteSpace([string]$State.TimestampedPath) -or
         -not (Test-Path -LiteralPath ([string]$State.PartialPath))) {
+        return $false
+    }
+
+    $partialItem = Get-Item -LiteralPath ([string]$State.PartialPath) -ErrorAction SilentlyContinue
+    $checkpointLength = [int64]$State.PartialLength
+    if (-not $partialItem -or $checkpointLength -le 0 -or [int64]$partialItem.Length -lt $checkpointLength) {
         return $false
     }
 
@@ -1083,6 +1121,33 @@ function Test-DiscoveredAppsResumeStateCompatible {
     }
 
     return $true
+}
+function Repair-DiscoveredAppsResumePartialCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][int64]$CheckpointLength
+    )
+
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if ([int64]$item.Length -lt $CheckpointLength) {
+        throw "Resume partial CSV is shorter than its checkpoint: FileLength=$($item.Length); CheckpointLength=$CheckpointLength; Path=$Path"
+    }
+    if ([int64]$item.Length -eq $CheckpointLength) { return 0L }
+
+    $originalLength = [int64]$item.Length
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try {
+        $stream.SetLength($CheckpointLength)
+        $stream.Flush($true)
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    $removedBytes = $originalLength - $CheckpointLength
+    WriteLog -Message ("Resume partial CSV rolled back to its committed checkpoint: RemovedBytes={0}; CheckpointLength={1}; Path={2}" -f $removedBytes, $CheckpointLength, $Path) 'WARNING'
+    return $removedBytes
 }
 function Save-DiscoveredAppsResumeState {
     [CmdletBinding()]
@@ -1101,6 +1166,7 @@ function Save-DiscoveredAppsResumeState {
         [Parameter(Mandatory = $true)][hashtable]$ActualDeviceCounts
     )
 
+    $partialLength = [int64](Get-Item -LiteralPath $PartialPath -ErrorAction Stop).Length
     $state = [ordered]@{
         Script           = $TaskName
         DeviceDetailMode = $Mode
@@ -1108,6 +1174,7 @@ function Save-DiscoveredAppsResumeState {
         ResumeContractVersion = $ResumeContractVersion
         TargetAppIdsHash = $TargetAppIdsHash
         PartialPath      = $PartialPath
+        PartialLength    = $partialLength
         TimestampedPath  = $TimestampedPath
         ProcessedAppIds  = @($ProcessedAppIds)
         ProcessedCount   = $ProcessedCount
@@ -1172,7 +1239,8 @@ function Complete-DiscoveredAppsStreamExport {
         [Parameter(Mandatory = $true)][string]$TimestampedPath,
         [Parameter(Mandatory = $true)][string]$OutputPath,
         [Parameter(Mandatory = $true)][string]$GlobalPath,
-        [Parameter(Mandatory = $true)][string]$BaseFileName
+        [Parameter(Mandatory = $true)][string]$BaseFileName,
+        [Parameter(Mandatory = $true)][int64]$ExpectedDataRows
     )
 
     if (-not (Test-Path -LiteralPath $PartialPath)) {
@@ -1197,6 +1265,12 @@ function Complete-DiscoveredAppsStreamExport {
         -BaseFileName $BaseFileName `
         -TimestampedPath $TimestampedPath `
         -LatestPath (Join-Path -Path $GlobalPath -ChildPath ("$BaseFileName.csv"))
+
+    $actualDataRows = Get-DiscoveredAppsCsvDataRowCount -Path $PartialPath
+    if ($actualDataRows -ne $ExpectedDataRows) {
+        throw "AppDeviceRelations publication gate failed: physical CSV rows=$actualDataRows; expected rows=$ExpectedDataRows. The partial CSV is preserved for diagnosis."
+    }
+    WriteLog -Message ("AppDeviceRelations physical row-count validation passed: Rows={0}." -f $actualDataRows) 'INFO'
 
     Copy-Item -LiteralPath $PartialPath -Destination $TimestampedPath -Force
     $localLatestPath = Join-Path -Path $OutputPath -ChildPath ("$BaseFileName.csv")
@@ -1413,6 +1487,7 @@ try {
         if ($resumeStateCompatible) {
             $script:DeviceDetailPartialPath = [string]$resumeState.PartialPath
             $script:DeviceDetailTimestampedPath = [string]$resumeState.TimestampedPath
+            Repair-DiscoveredAppsResumePartialCsv -Path $script:DeviceDetailPartialPath -CheckpointLength ([int64]$resumeState.PartialLength) | Out-Null
             foreach ($id in @($resumeState.ProcessedAppIds)) {
                 if (-not [string]::IsNullOrWhiteSpace([string]$id)) { [void]$processedAppIds.Add([string]$id) }
             }
@@ -1621,12 +1696,39 @@ try {
                 -ActualDeviceCounts $actualDeviceCountsByAppId
 
             if ($script:Stat_AppsProcessed -eq $script:Stat_DetailAppsTargeted) {
+                foreach ($manifestApp in @($detailApps)) {
+                    $manifestAppId = [string]$manifestApp.id
+                    if (-not $actualDeviceCountsByAppId.ContainsKey($manifestAppId)) {
+                        throw "AppDeviceRelations manifest gate failed: missing actual device count for AppId '$manifestAppId'."
+                    }
+                    $manifestDeviceRows = [int]$actualDeviceCountsByAppId[$manifestAppId]
+                    $deviceDetailManifestStatsById[$manifestAppId] = [pscustomobject]@{
+                        AppId        = $manifestAppId
+                        AppName      = [string]$manifestApp.displayName
+                        AppVersion   = [string]$manifestApp.version
+                        Publisher    = [string]$manifestApp.publisher
+                        Platform     = [string]$manifestApp.platform
+                        Rows         = $manifestDeviceRows
+                        DeviceRows   = $manifestDeviceRows
+                        MetadataOk   = $true
+                        EnrichmentOk = $true
+                    }
+                }
+                if ($deviceDetailManifestStatsById.Count -ne $script:Stat_DetailAppsTargeted) {
+                    throw "AppDeviceRelations manifest gate failed: StatsApps=$($deviceDetailManifestStatsById.Count); TargetApps=$($script:Stat_DetailAppsTargeted)."
+                }
+                $expectedRelationRows = [int64](($actualDeviceCountsByAppId.Values | Measure-Object -Sum).Sum)
+                if ($expectedRelationRows -ne [int64]$script:Stat_DeviceDetailRows) {
+                    throw "AppDeviceRelations counter gate failed: ActualDeviceCountSum=$expectedRelationRows; DetailRowsCounter=$($script:Stat_DeviceDetailRows)."
+                }
+
                 $completedPath = Complete-DiscoveredAppsStreamExport `
                     -PartialPath $script:DeviceDetailPartialPath `
                     -TimestampedPath $script:DeviceDetailTimestampedPath `
                     -OutputPath $OutputPath `
                     -GlobalPath $globalPath `
-                    -BaseFileName $detailBaseFileName
+                    -BaseFileName $detailBaseFileName `
+                    -ExpectedDataRows $expectedRelationRows
                 if ($completedPath) {
                     $script:DeviceDetailCompleted = $true
                     $deviceDetailManifestRoots = @($OutputPath, $(if ([string]::IsNullOrWhiteSpace($globalPath)) { $OutputPath } else { $globalPath })) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique
@@ -1697,7 +1799,7 @@ try {
             }
 
             $weeklyHistoryRoot = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory'
-            Add-SmartM365WeeklyHistory -SourceCsvPaths @($summaryLatestPath, $deviceDetailLatestPath) -HistoryRootPath $weeklyHistoryRoot | Out-Null
+            Add-SmartM365WeeklyHistory -SourceCsvPaths @($summaryLatestPath, $deviceDetailLatestPath) -HistoryRootPath $weeklyHistoryRoot -OverwriteExisting -UploadChangedFilesOnly | Out-Null
             WriteLog -Message "Summary and AppDeviceRelations WeeklyHistory publication completed in one batch: $weeklyHistoryRoot" "INFO"
 
             if ($DeviceDetailMode -eq 'All' -and $MaxApps -eq 0) {
@@ -1805,8 +1907,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBatWInX1ZnC27F
-# AUB5pVp/G6MQ/i91MH1P6KVt4YTBvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCODvO6HmPd8ew
+# Nb0MWF6bBIxHHfOwa6QL4QBDwId0s6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1939,31 +2041,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPPFlPEoHRoZWy8acdlQdQWBG8Wf8GKtAJveIjWm4iu/MA0GCSqG
-# SIb3DQEBAQUABIIBgF4aFNLQeLgnYP7qmLDL2UwcYU51CbJyHKvUYsCea75Cnfd+
-# 0hG+IqoPGiJUELq6Ap/lOtcVkaxoXFbfI5aaqMszMq2ar4lcHZwBTDQZLLt5RG+Z
-# ZxTrtYmzfY6NkiE4Eup43abMbja2lWjVEGns9IhQflJnB2ukR5etaqKs864P/iPA
-# h71Ll0JAcOFIioBeWIpZydtZIdydHLLPdTjtXQ0lO6LROubFZ9iGGYnVb/ADl6AA
-# 7mK2cMwsteb4twMEXHu4vZYAFfX+sbOtjs5KosizgYmQ8LZgXbleH5+HJ1RR7H+K
-# XOZ0Z0Y6HvQKZPwsClIiJaxq0mOMA2yM3Q2M+vtvBnC2f9hnuIJLNSIr5andss8P
-# s3t5Q6UIKlLzXhkB1k1glMIVO8roopAumRDmD1SUEmYIuM77JtKqfo5LAWMxKmQr
-# u6k0vFC0cmYRohp23Q1nE/3ZrrfTPVuF4zFwfHFLBnzUsUlBJ1KNIov5f2zCOi60
-# p9afrwOMP0OV3+wFgqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII9HX5xzYNz4dqnk+97i6+7VJoWL1HuJmiurU224Pso6MA0GCSqG
+# SIb3DQEBAQUABIIBgK8m7VPPebdnKSxKbMVF/P08LdAtP26lWRDcNAqegWvM40tf
+# ARItv+zfXFMaWFdLIwrRu4frzSsqWHOLRyBTJ31J6pjqLhYJj4ZL0xLPTGWTc9mR
+# d7mMBdW6Yr1CZJLWHl3taGRyHyikRM28OHzqhlY6DXhHll8IT6uk6l2rlbAyVJZv
+# JrbRdDknQQzuSbQwIgkHWTRYTVeXZXuT2Avtiz+ZINck135ilC090xLshwWoe2oA
+# v9xu8kvvSayXeB1TTBbaI/e/g4EQBarRKnQZBEaLzZ1MRqpoyjPmcfKoNMXq3Oeq
+# iVGv3+Vn9kYELttRjb88yTgiCx/eDzxEnvgyjCKRiSdIB/xEnaRbFlaWQe5IVqmZ
+# 89YzOGJVtGAWOzyaBNZnJqPwYpd4JJ1ZKdw/7bbPc4L53Iq+vRuCffBmykoTWxK7
+# VDxZrYLEjDB936r/wluHsglV5eQXXs0aPvf8hzbaNgQX9PQQGgce9Jqr0YKS/n/W
+# wOJ9ag7W09RcIiSciaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAwNzQw
-# MTNaMC8GCSqGSIb3DQEJBDEiBCD9x884mWXK1POgFyaFGiCZ8PCQNZvdhNn2bgWG
-# LE+Y2jANBgkqhkiG9w0BAQEFAASCAgBT13i0Uqz2MeTx7NmRCkiQnd4/qOAuGt3V
-# 98WwEm+ZdkXREQVQGumFrEX3Cnrd6KgOeFaPFaolgwQDYWwAT8EWAi5V04B/nn5c
-# vGbWSgEiPXhPLHTFJtadZeKjxUn04YspjMte0dChdPjC+BhFUsTtEewYVLWJz40s
-# E2n+aIbCzZbkVdxMy2TZUqFzN9CACrU6MkKVn0ijRMQxO7/e1iAqQLRpNLxNL9Vb
-# jk11EG2ORtWy6zLkN2hyJo2RZAIC+wwRel7XDRMunmTW6NxXwBX8xY+5ABqal89s
-# H5NGzjtdbVrett+t1IjwFbpPFL9lKa6eeRZF++RoKek2i7gyrPZFEeONijDFc/sj
-# jf3+1dEvuSFcflid2/sFI167o/9iyeYeENWidn4O2yMsL8BYnEmcVb2mBt/BIkpz
-# v++g/Z8iyiXQZVUCUry2Fy5HjCafnJaQdm7rMY/yvd65F3jNNxvp5oP/IGSL4XPf
-# LGw7RndmUoVcjsKJd6eDp96ts0k8edIPcYQaeAmpvIQ0ay9Fv9eVGfI1uCdnqTpW
-# qOe3MRzAAYqtNJfDxDDrpcJzW2gKPLjKDm2xJMIA0XpAqL1gSSyN2dSDREFaRGUi
-# IVwawTlaBgyMRJoQKeDYdxs2+1Y76R/4ahzr978SjfnROp7aa4qZcn9Slx3mJEVN
-# 2GWd/lRYdw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMjU5
+# NDZaMC8GCSqGSIb3DQEJBDEiBCDsdj0wj6rnon21bgDWxgU8cW2sRR1ozCWBBZ31
+# 6vOQAzANBgkqhkiG9w0BAQEFAASCAgAOVeYVuNpBexUtaAnjhNnrvQXItJvYlxRX
+# 6Oipe5oeu/euw7HoTnVg10G2TQwsTgqPd+KQUsy+hOdhRR7mw4zGCRdnx+gFk0t0
+# UbW3qq5qCP2Sa6+o5F4DoJ1AsMWuLZKpQuRchPHcWRRoqSsL9nDsVa+GrxqqVdWU
+# dHs8AOKlYwPOoPvxptnjQg8wqQW8Wjc9+o2D3kvpIeStI6sZxSX4p1OCpmzxgiJb
+# NnoWy+goJ8J3LlpFXSTMqGea5Cari8VQySz9WCAJ8kUC5390E5cc189c8KtPpy1C
+# BbjU6YX/5MuZ4D2jsKl7EfA+aXt4d1WO0QuVDPRqddbreVdK9RvZNlenHMRGS5bA
+# k26ns/JLInekeTm35+igvUSNEFmaYvvFYsipbKazzW0SHfFwYW898T17j9BHUpwy
+# LjLKjrtyiPJEEFO1k3Mbz5GrCkQNiLXzB/0CnZe/uVYd2vcc0gdhNyzHIMmDdDxc
+# T6l7UeT6mJjDappeSjOxinhkVuXs7qpqaNv+6OvNdxZOITkHdFjU757sWiLHVO6L
+# +UzlinBIelkS9BrUxIARhbIU8cQPLGT6hD4pAO5w6cqQCOYTa8iITUoEcVJOTvpm
+# QDUQ4fGgjfcuImujfj64g4HgP1M9/pUu3Aapi3o0BhpLrWOpvFzO020aFCo5ePaA
+# acTTebk8/g==
 # SIG # End signature block

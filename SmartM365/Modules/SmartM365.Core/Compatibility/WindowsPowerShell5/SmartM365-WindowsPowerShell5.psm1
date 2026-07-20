@@ -214,7 +214,9 @@ function Save-SmartM365WeeklyInventoryHistory {
         [Parameter(Mandatory)][string[]]$SourceFiles,
         [Parameter(Mandatory)][string]$HistoryRootPath,
         [int]$RetentionWeeks = 52,
-        [string]$HistoryLabel = 'SmartM365 inventory'
+        [string]$HistoryLabel = 'SmartM365 inventory',
+        [switch]$OverwriteExisting,
+        [switch]$UploadChangedFilesOnly
     )
     if ([string]::IsNullOrWhiteSpace($HistoryRootPath)) { WriteLog -Message ("Weekly {0} history skipped: HistoryRootPath is empty." -f $HistoryLabel); return }
     $existingSourceFiles = @($SourceFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
@@ -226,9 +228,13 @@ function Save-SmartM365WeeklyInventoryHistory {
     foreach ($sourceFile in $existingSourceFiles) {
         $destinationFileName = Get-SmartM365WeeklyHistoryFileName -Path $sourceFile
         $destinationFile = Join-Path -Path $weekFolder -ChildPath $destinationFileName
-        if (Test-Path -LiteralPath $destinationFile -PathType Leaf) { continue }
+        $destinationExists = Test-Path -LiteralPath $destinationFile -PathType Leaf
+        if ($destinationExists -and -not $OverwriteExisting) { continue }
         Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force -ErrorAction Stop
         [void]$copiedFiles.Add($destinationFile)
+        if ($destinationExists) {
+            WriteLog -Message ("Weekly {0} history refreshed for {1}: {2}" -f $HistoryLabel, $weekName, $destinationFile)
+        }
     }
     $manifest = [pscustomobject][ordered]@{
         UpdatedAt       = (Get-Date).ToString('o')
@@ -239,10 +245,20 @@ function Save-SmartM365WeeklyInventoryHistory {
     }
     $manifestPath = Join-Path -Path $weekFolder -ChildPath 'manifest.json'
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-    if ($copiedFiles.Count -gt 0) { WriteLog -Message ("Weekly {0} history saved for {1}: {2} new file(s) in {3}" -f $HistoryLabel, $weekName, $copiedFiles.Count, $weekFolder) }
+    if ($copiedFiles.Count -gt 0) { WriteLog -Message ("Weekly {0} history saved for {1}: {2} file(s) written in {3}" -f $HistoryLabel, $weekName, $copiedFiles.Count, $weekFolder) }
     else { WriteLog -Message ("Weekly {0} history already exists for {1}. Snapshot skipped: {2}" -f $HistoryLabel, $weekName, $weekFolder) }
 
-    $historyUploadCandidates = @(Get-ChildItem -LiteralPath $weekFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.csv', '.json') } | Sort-Object Name)
+    $historyUploadCandidates = if ($UploadChangedFilesOnly) {
+        @(
+            @($copiedFiles.ToArray()) + @($manifestPath) |
+                Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+                Sort-Object -Unique |
+                ForEach-Object { Get-Item -LiteralPath $_ }
+        )
+    }
+    else {
+        @(Get-ChildItem -LiteralPath $weekFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.csv', '.json') } | Sort-Object Name)
+    }
     foreach ($historyUploadCandidate in $historyUploadCandidates) {
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName | Out-Null
     }
@@ -262,7 +278,9 @@ function Add-SmartM365WeeklyHistory {
         [Parameter(Mandatory)][string[]]$SourceCsvPaths,
         [string]$HistoryRootPath,
         [int]$RetentionWeeks = 52,
-        [string]$HistoryLabel = 'SmartM365 inventory'
+        [string]$HistoryLabel = 'SmartM365 inventory',
+        [switch]$OverwriteExisting,
+        [switch]$UploadChangedFilesOnly
     )
     if ([string]::IsNullOrWhiteSpace($HistoryRootPath)) {
         $firstSource = @($SourceCsvPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) | Select-Object -First 1
@@ -271,7 +289,7 @@ function Add-SmartM365WeeklyHistory {
             if (-not [string]::IsNullOrWhiteSpace($sourceFolder)) { $HistoryRootPath = Join-Path -Path $sourceFolder -ChildPath 'WeeklyHistory' }
         }
     }
-    Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceCsvPaths -HistoryRootPath $HistoryRootPath -RetentionWeeks $RetentionWeeks -HistoryLabel $HistoryLabel
+    Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceCsvPaths -HistoryRootPath $HistoryRootPath -RetentionWeeks $RetentionWeeks -HistoryLabel $HistoryLabel -OverwriteExisting:$OverwriteExisting -UploadChangedFilesOnly:$UploadChangedFilesOnly
 }
 function Invoke-SmartM365WeeklyInventoryHistoryForCsv {
     [CmdletBinding()]
@@ -4471,8 +4489,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCMBq/GIhSkal5+
-# gOSxgomKCy/DQMt283DLdHOVnLTeI6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFXFlWlxjFeMVN
+# QcF7S1PBvtGuQ54TaWps93mpSh4q/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4605,31 +4623,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFBj6YwoRFBXvZaMfxpHBZ0RW6r+cP+8jQub6Kkxnfv0MA0GCSqG
-# SIb3DQEBAQUABIIBgIXvxSszFgVEvx5ZpfkpQiD1urpgXSfvzaMSv27SwHLnFNMT
-# 607kNRRTgTnOvnp4Owj2R9Jz01nK/HZW2C3tiDt2OkCof3ws9YBKp6bqYze5zRUK
-# UjB6eMiIEhOyLcQOYKdoIvM24c6d0k/cPqG8NEmKtZqokn4Bd4eOKrygWwO2qd57
-# yEhatUSYk8UifCgWazeFQgxmP7rK3iFX74Q1BZcczzWZKNCFgATiG4QDEhhM5K0f
-# rpkrGIuaiX0nSOt9Vb/62jQP24iff4LafCO+5dtJEuB226Q+XdfmpL0XoutXuOnz
-# 3v9w3SRIaO/bOwRRsRaWNzlPAAaouFStgBt/Aa5fppn2hKgVUXtU7tThHZkZIriO
-# 05kuEUyv1lHZtnL5/BCDZ/8HdnW6DjNufDCckgQYamq5eSjt2WLuTZQY6Oe6PkPO
-# dzrmkZ5rxID5mBToawpoBuq90vRNAllMZqlagS8aLGzmoe7Eqe4wB4U4YHPoDG5O
-# 7mbh7auKUaBx4y7+VKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN3DOVkVpM5UKkkdunlXNyC2zOGi2b6KAS+44X1SEvPSMA0GCSqG
+# SIb3DQEBAQUABIIBgBRJbnt9sx2XKStNfbMWEmNv510QTek8QM01NVPZNoFhF+vs
+# dNbhDpY7djyF22VrZ9llz32VVYAvcAsFgvHshHZyhU3pVABQ9apfZPCdQNu9V/vY
+# LH53QxO3l+HMoNTwan1i2TBtf8ILBjsyNCUb2BaiRToPPKTzg5mF1sF4PuxEKmFK
+# M/mCnYQHA4H5mWA0PolsBHdy6fJfeg2abpmtd3drLr8oUAHIUsj0gJcYfiImKOIa
+# qU2TH+a/jEUjhpVPGeByXiY2G7HNnotUUYTK3BK+4g/OSU33aYqHOAgiNraDm8Ob
+# MJijy2e1hBuyA0lKNTWf2qQ1lvXZrFPabSPkV4jNprO8Phqb8v7DivcZRonlMuFv
+# tRuN2Mm3A4UEYZpOCLxiCRNcubd0sLc5kFLI1259T0YzolGeq4R2d3/0D1jWhVNg
+# SP9QsEG28uw5I7pTUG/VJeCczc2E8VfR8DP2EB1JSHE5hxGk1pKnsrhTywk7ubrl
+# SsSDbzaHPhEnt1+gFqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAwNzQw
-# MTVaMC8GCSqGSIb3DQEJBDEiBCASB2Wj1GwGbcZAozTR+NkuePB0spu2GS0JYanc
-# MKJHnzANBgkqhkiG9w0BAQEFAASCAgB6BGZm2LkD3ctfqv0w6J8LjaFLRt+/qmeF
-# NBt0lkLsi+pbB2NJlz3qqfoJ03DC3jbxjlytLBMOMpem0AnmX7Rm3oYHZnkpRU2r
-# ECIwK1Wg++gjwAKEu6CiOPRzOf3BwyiSEl1FqM+5CeCCs5gtz+prElTiWNyZNwxW
-# rxcn5HHki6h6Sh+nh5CmdHUI6bE5liEpiiEx2mObH6USX5WQynX2YrOGfrWlv3+h
-# bLWABwUFwg0GkcMk33iyF4zbbkX1gc9Wu5qvskIlb95qVyZqnQSmQztRr0K5rLji
-# NJVmOqCJCFnboStwdDixGj1HhcnZOgrHcnLP/vNiqVWtJ3nnCeMFEhhVZKNkWeCZ
-# X8UceZ9qgtWuH6oS6byAoBJvJsUwwjGCSrAuVH5Pud4BPAXa+t/psmr5qC16rfsM
-# UxoxfB/mH/pLpdfMrue59VFSWVUh1gIlz9XKN9jdARdKy8qyJDG+rQ8TvTy7PYWK
-# /4hDQKKGvioGhFrOrdYF9oYyvUPU28+QFhSS6BWb6EQK1bNhTS0/WMvhopcpflXQ
-# 7Jflwh4P55iq8+AJXgAwGIW04vOjhRiLsUXU3B7CYdFLZM5pVdHIKyYVciM5HUVg
-# v1T/FrNF35McLnGNYy+trhQmaxPszNR0n99uacM8LYHlaQv/WdTsnsqGhAaDf6H+
-# hWyCefpYkA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMjU5
+# NDhaMC8GCSqGSIb3DQEJBDEiBCAsN6NVTcfxaLKN632KLbYsBeED7vhG8B18Xu3c
+# PebyuzANBgkqhkiG9w0BAQEFAASCAgA0OdnkcyLhHMIYPF4nUnCBUJSffW/qfRFE
+# wOJrXbkX3KSqBhIyLmhCayAcFWIrxzrecfllDykZQgBcigIY1qX5ZzzU5k/BiGcx
+# VHXpzdE93aje5/7lHkm19vdLBDrsU1TUiorAM5Mu00jc5JycsAUrEdkeNFk8+dUq
+# k4m2kFL1ine3mP2r0X3SRoEesnnwKdomJXWNPVC88+t5Ve9L7cVDJkn1RykFRgSp
+# BDOoBcwbJkkZvivDfMOUv0+Xf5Bsc5b8rgU7s+++6GXBJFnGhqxQCQmwAOvI6qkL
+# YSXfpBMwvMhwlj7bzBjLDM+SFAMUJ9KzxTy76AWvozUV5URVAhzB2AZ844GO0DZz
+# 8bz+GTSFMWC4o56iESipMp8yTO6PHf+0V7tg40TCIEo5xTsa5XyRIqB/dU2xhsua
+# C3noQMehtfAOTL8jGPqoeOqM1r8pTU1ES/cniKdDbM7cHmgYHyUQSs8xMWltJ41X
+# fiYSYNLOpjpjhM6e+FxNeqUae7tC27bbi1saYIKGtdC5rL5T8qUsgJUqxt4/q/eQ
+# VPhoyonkeRqRBjIMT1iD3lkFaXvfvfrRAz5DapKHYzc+PSARDXJa4d7ovleacyE7
+# eAaJlnvJWriK+lbSWlE33tvNWUiWMIQL3V29io67wOADK/l/6dOg+exaquT674A+
+# CVTHyvvGsg==
 # SIG # End signature block
