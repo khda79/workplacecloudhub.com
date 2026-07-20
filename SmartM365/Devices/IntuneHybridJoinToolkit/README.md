@@ -110,7 +110,7 @@ LOT runs use two concurrency controls:
 - `EHJIR_GLOBAL_CONCURRENCY_LIMIT` / `-GlobalConcurrencyLimit` limits active computer workers shared by all LOT windows on the same operator session. The default is 15, so launching multiple LOTs does not multiply PsExec/PowerShell load indefinitely.
 - `EHJIR_GLOBAL_CONCURRENCY_LEASE_TIMEOUT_MINUTES` / `-GlobalConcurrencyLeaseTimeoutMinutes` controls when an abandoned shared worker lease is considered stale and cleaned. The default `0` sizes this automatically from the PsExec and delayed-evidence timeouts. Leases record the launcher PID, job id, worker PowerShell PID, computer, and cycle; stale slots are repaired instead of bypassed.
 - The LOT Launcher GUI starts `Launch all` LOT windows 5 seconds apart to avoid a local startup spike.
-- A technician-side inter-LOT guard is enabled by default (`EHJIR_USE_TECHNICIAN_RUN_GUARD_HISTORY=1`). It records active or successful launches by normalized AD FQDN under `%ProgramData%\SmartM365\IntuneHybridJoinToolkit\LauncherState\RunGuardHistory.json` and expires after 3 hours. Network, DNS, admin-share, PsExec, and collection failures remain immediately retryable.
+- A technician-side inter-LOT status backoff is enabled by default (`EHJIR_USE_TECHNICIAN_RUN_GUARD_HISTORY=1`) under `%ProgramData%\SmartM365\IntuneHybridJoinToolkit\LauncherState\RunGuardHistory.json`. The base guard is 12 hours; network/admin-share failures use a 15-minute exponential cooldown capped at 6 hours, completed endpoint states align with the 12-hour endpoint guard, and user/logon states wait 24 hours.
 - Use `EHJIR_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY=1` for an explicit bypass, or adjust `EHJIR_TECHNICIAN_RUN_GUARD_HOURS`.
 
 LOT wrappers skip detected virtual machines by default before remote copy or repair. To include VMs in a direct LOT launch:
@@ -129,7 +129,9 @@ LOT wrappers also enable the guarded repair defaults used by the GUI:
 
 Set any of these values to `0` before launching a LOT to disable that action.
 
-For either authorized controlled reboot, the endpoint first creates the SYSTEM startup task `SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot`. Its state and runner are stored under `%ProgramData%\SmartM365\IntuneHybridJoinToolkit\State`, protected for SYSTEM and local Administrators. The resumed run bypasses only the local run guard, waits 300 seconds by default, and is removed after success, a non-reboot outcome, a scheduling failure, or three exhausted startup attempts. Tune this with `EHJIR_RETRY_AFTER_REBOOT_DELAY_SECONDS` / `-RetryAfterRebootDelaySeconds` and `EHJIR_RETRY_AFTER_REBOOT_MAX_ATTEMPTS` / `-RetryAfterRebootMaxAttempts`.
+For either authorized controlled reboot, the endpoint first creates the SYSTEM startup task `SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot`. Its protected state remains bounded to three startup attempts. A separate durable `State\RebootSafety.json` counter prevents new LOT runs from starting unlimited reboot chains; user-credential reboots additionally require a changed interactive user/session context before another reboot can be authorized.
+
+Every endpoint run also owns the named mutex `Global\SmartM365_IntuneHybridJoinToolkit_Endpoint`. `-IgnoreRunGuard` never bypasses a genuinely active process. `State\EndpointInstance.json` records PID, RunId, start time and heartbeat; a dead process releases the mutex automatically and the next run replaces stale metadata.
 
 Force a rerun that bypasses the target run guard:
 
@@ -200,13 +202,13 @@ The repair script must remain self-contained. Do not add mandatory runtime depen
 - Reports are written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Reports`.
 - A live cycle CSV is written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Reports` as computers complete, and a final CSV remains available for every cycle.
 - One HTML report named `PsExec_IntuneHybridJoinRepair_Summary_<LOT>_<timestamp>.html` is created for the complete LOT run. The same file is refreshed while jobs run and finalized when the launcher stops.
-- The HTML report accumulates all cycles, distinguishes the latest status for each unique computer from all recorded attempts, and shows cycle progress, running jobs, duplicate input statistics, effective options, security evidence, and Hybrid Join inventory details.
+- The HTML report accumulates attempt summaries but renders detail tables only for the latest actionable row per unique computer. It distinguishes latest attempt from latest actionable status so cancellation, run-guard, and backoff rows do not mask the last meaningful result; the complete attempt history remains in cycle CSV files.
 - Endpoint CSV, `LastRun.json`, live CSV, and HTML details expose the retry-after-reboot action, detail, attempt, maximum attempts, and scheduled task name.
 - The LOT Launcher GUI watches the run report folder and opens the first non-empty merged HTML report automatically.
 - Per-computer PsExec logs are written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\PsExecLogs`. Their filenames use the computer short name plus an eight-character hash of the normalized connection target, which keeps long FQDNs distinct while avoiding Windows path-length failures.
 - The complete timestamped launcher transcript and `SmartM365-IHJ-Launcher_latest.log` are written under the run `Logs` folder.
-- Automatic initial and post-cycle Intune, Entra, and AD refreshes are limited to the current LOT computer list and write scoped CSV/log evidence under the run `Reports` folder; global root inventory caches are never overwritten by a LOT run.
-- Collected remote evidence is written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\CentralLogs\<Success|Errors|AdminShareFailure|RemoteCollectionFailure>\<short-name-hash>`. Standard mode skips individual remote files larger than 5 MB; set `EHJIR_CENTRAL_LOG_COLLECTION_MODE=Full` to collect them.
+- Initial and post-cycle inventories remain LOT-scoped. Automatic post-cycle Intune and Entra refreshes are skipped only when every cycle result proves that no remote action could have changed cloud inventory. AD refresh behavior and global root inventory caches are unchanged.
+- Collected remote evidence is written under `Runs\<LOT>\<yyyyMMdd-HHmmss>\CentralLogs\<Success|Errors|AdminShareFailure|RemoteCollectionFailure>\<short-name-hash>`. Standard mode keeps current-run files and required state only, skips files larger than 5 MB, removes stale outcome buckets, and uses one physical `Latest` copy for both report links. `EHJIR_CENTRAL_LOG_COLLECTION_MODE=Full` retains the complete supported endpoint evidence set.
 - Previous `CentralLogs`, `PsExecLogs`, and `Reports` folders are archived under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Archives` at the start of a LOT run by default.
 - Already enrolled computers are moved from `Computers.txt` to `ComputersAlreadyEnrolled.txt`.
 - Generated inventories, logs and reports are ignored by Git.

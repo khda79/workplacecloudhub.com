@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.14
+1.15
 #>
 param(
     [switch]$ValidateOnly
@@ -11,7 +11,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.14'
+$GuiVersion = '1.15'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -793,7 +793,7 @@ $script:ToolkitDefaultEnvironment = @{
     EHJIR_GUI_MAX_CYCLES = '0'
     EHJIR_USE_TECHNICIAN_RUN_GUARD_HISTORY = '1'
     EHJIR_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY = '0'
-    EHJIR_TECHNICIAN_RUN_GUARD_HOURS = '3'
+    EHJIR_TECHNICIAN_RUN_GUARD_HOURS = '12'
     EHJIR_CENTRAL_LOG_COLLECTION_MODE = 'Standard'
 }
 $script:ToolkitConfig = Read-ToolkitConfig -Path $script:ToolkitConfigPath
