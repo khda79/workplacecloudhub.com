@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.35
+0.1.36
 #>
 param(
     [switch]$ValidateOnly
@@ -2020,6 +2020,20 @@ function Refresh-LotList {
     Add-Status -Message ("{0} LOT(s) found. {1} ready for launch." -f $script:Lots.Count, @(Get-LaunchableLotSummaries).Count)
 }
 
+function Confirm-UnlimitedCycleLaunch {
+    $maxCycles = [int](Get-IntText -TextBox $controls.MaxCyclesText -Default 0 -Minimum 0)
+    if ($maxCycles -gt 0) { return $true }
+
+    $choice = [System.Windows.MessageBox]::Show(
+        "Max cycles is 0, so this launcher will keep cycling until all devices are removed, the operator stops it, or an external cancellation is requested.`n`nFailure backoff is enabled, but an unlimited run can remain active for days. Continue?",
+        'Unlimited LOT cycles',
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Warning,
+        [System.Windows.MessageBoxResult]::No
+    )
+    return ($choice -eq [System.Windows.MessageBoxResult]::Yes)
+}
+
 Register-NumericSteppers
 Initialize-Options
 
@@ -2057,6 +2071,7 @@ $controls.LaunchLotButton.Add_Click({
     try {
         if (-not $script:SelectedLot) { return }
         if ($script:SelectedLot.ComputerCount -le 0) { throw 'Selected LOT has no device in Computers.txt.' }
+        if (-not (Confirm-UnlimitedCycleLaunch)) { return }
         $script:SelectedLot = Ensure-LotWrappersReady -Lot $script:SelectedLot
         $environment = Get-ToolkitOptionEnvironment
         $effectiveEnvironment = Get-EffectiveLotEnvironment -LotPath $script:SelectedLot.Path -EnvironmentVariables $environment
@@ -2070,6 +2085,7 @@ $controls.LaunchLotButton.Add_Click({
 })
 $controls.LaunchAllButton.Add_Click({
     try {
+        if (-not (Confirm-UnlimitedCycleLaunch)) { return }
         $missingWrapperLots = @($script:Lots | Where-Object { $_.ComputerCount -gt 0 -and -not $_.WrappersReady })
         if ($missingWrapperLots.Count -gt 0) {
             Add-Status -Title 'Wrappers' -Message ("{0} LOT(s) have missing wrappers. Refreshing wrappers before launch all..." -f $missingWrapperLots.Count)
@@ -2096,6 +2112,7 @@ $controls.LaunchSingleButton.Add_Click({
     try {
         $computer = $controls.SingleComputerText.Text.Trim()
         if (-not $computer) { throw 'Enter a computer name.' }
+        if (-not (Confirm-UnlimitedCycleLaunch)) { return }
         $environment = Get-ToolkitOptionEnvironment
         if (-not (Test-SetupSourceBeforeLaunch -EnvironmentVariables $environment -ScopeName $computer)) { return }
         $context = Start-ToolkitSingleComputer -ToolkitRoot $toolkitRoot -ComputerName $computer -Mode ([string]$controls.SingleModeCombo.SelectedItem) -AdditionalArguments (Get-ToolkitOptionArguments) -EnvironmentVariables $environment
