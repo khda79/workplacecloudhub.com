@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.40
+1.41
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version: 1.40
+    Version: 1.41
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -56,6 +56,8 @@ param (
     [bool]$GenerateReport = $true,
     [Parameter(Mandatory = $false)]
     [switch]$IncludeRemoteMailboxes,
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeRemoteMailboxDelegation,
     [Parameter(Mandatory = $false)]
     [switch]$RemoteMailboxesOnly,
     [Parameter(Mandatory = $false)]
@@ -255,7 +257,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.40"
+$ScriptVersion = "1.41"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -264,6 +266,8 @@ $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Local
 $RemoteMailboxOutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RemoteMailboxCsvLogFolderPath' -DefaultValue ''
 $configuredIncludeRemoteMailboxes = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludeRemoteMailboxes' -DefaultValue $true)
 if (-not $PSBoundParameters.ContainsKey('IncludeRemoteMailboxes')) { $IncludeRemoteMailboxes = $configuredIncludeRemoteMailboxes }
+$configuredIncludeRemoteMailboxDelegation = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'IncludeRemoteMailboxDelegation' -DefaultValue $false)
+if (-not $PSBoundParameters.ContainsKey('IncludeRemoteMailboxDelegation')) { $IncludeRemoteMailboxDelegation = $configuredIncludeRemoteMailboxDelegation }
 if ($RemoteMailboxesOnly) { $IncludeRemoteMailboxes = $true }
 $OnlyADPermissionSkippedRemoteMailboxes = $false
 if ($OnlyADPermission -and -not $RemoteMailboxesOnly -and -not $PSBoundParameters.ContainsKey('IncludeRemoteMailboxes')) {
@@ -547,6 +551,8 @@ function ConvertTo-SmartM365ExchangeRemoteMailboxRecord {
         MailboxMoveBatchName         = $Mailbox.MailboxMoveBatchName
         MailboxMoveStatus            = if ($Mailbox.MailboxMoveStatus) { $Mailbox.MailboxMoveStatus.ToString() } else { '' }
         SendOnBehalf                 = ConvertTo-SmartM365ExchangeMailboxSemicolonList -Value $Mailbox.GrantSendOnBehalfTo
+        FullAccessUsers               = ''
+        SendAsUsers                   = ''
     }
 
     if ($IncludeDelegation) {
@@ -651,7 +657,7 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     }
 
     $seenRemoteGuids = @{}
-    $records = @()
+    $recordList = [System.Collections.Generic.List[object]]::new()
     $index = 0
     $total = $allRemoteMailboxes.Count
     foreach ($remoteMailbox in $allRemoteMailboxes) {
@@ -660,9 +666,13 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
         if (-not [string]::IsNullOrWhiteSpace($key) -and $seenRemoteGuids.ContainsKey($key)) { continue }
         if (-not [string]::IsNullOrWhiteSpace($key)) { $seenRemoteGuids[$key] = $true }
         if ($total -gt 0) { Write-Progress -Activity 'Processing Exchange remote mailboxes' -Status ("{0} of {1}: {2}" -f $index, $total, $remoteMailbox.Name) -PercentComplete (($index / $total) * 100) }
-        $records += ConvertTo-SmartM365ExchangeRemoteMailboxRecord -Mailbox $remoteMailbox -IncludeDelegation:($IncludeADPermission -or $OnlyADPermission)
+        $recordList.Add((ConvertTo-SmartM365ExchangeRemoteMailboxRecord -Mailbox $remoteMailbox -IncludeDelegation:$IncludeRemoteMailboxDelegation))
+        if (($index % 250) -eq 0 -or $index -eq $total) {
+            WriteLog -Message ("Processed {0} of {1} Exchange remote mailboxes; delegation={2}." -f $index, $total, [bool]$IncludeRemoteMailboxDelegation)
+        }
     }
     Write-Progress -Activity 'Processing Exchange remote mailboxes' -Completed
+    $records = @($recordList.ToArray())
 
     if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.DomainName -in $TargetDomains }) }
     if ($records.Count -eq 0) {
@@ -1381,8 +1391,8 @@ try { # Main try block for script execution and interruption handling
     Write-Host "Starting script '$($MyInvocation.MyCommand.Name)' - Version $ScriptVersion ... $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")"
     Write-Host "Output Path for this run: $OutputPath"
     WriteLog -Message "Output Path for this run: $OutputPath"
-    WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
-    Write-Host "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
+    WriteLog -Message "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, IncludeRemoteMailboxDelegation = $IncludeRemoteMailboxDelegation, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
+    Write-Host "Effective permission flags: IncludeADPermission = $IncludeADPermission, OnlyADPermission = $OnlyADPermission, IncludeRemoteMailboxes = $IncludeRemoteMailboxes, IncludeRemoteMailboxDelegation = $IncludeRemoteMailboxDelegation, RemoteMailboxesOnly = $RemoteMailboxesOnly, ForceOverwriteCSV = $ForceOverwriteCSV"
     if ($OnlyADPermissionSkippedRemoteMailboxes) {
         $skipRemoteMessage = 'OnlyADPermission mode is active; remote mailbox inventory is skipped by default. Pass -IncludeRemoteMailboxes explicitly to include remote mailbox delegation.'
         WriteLog -Message $skipRemoteMessage
@@ -3124,8 +3134,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3w/OOJbJCb8l6
-# hcF1YNZ3nJ4KdGV3sYVV3ftNiKjLJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApYunSGGoIVAQG
+# z/gX+wqf5P4CwQrSJqNb8REojQNjJaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3258,31 +3268,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL5avqMErLQDOmLr7WcXVQIet9YUXRwVt7tIznQgK94aMA0GCSqG
-# SIb3DQEBAQUABIIBgCloeFZvHu4HvcY2R1gKGTq0nTm7udsgwIIwlua/bldW/sf0
-# pm9LL+gSEDVVGRuEp9VPeuPeh2Auoywvd+t1B9iC7l1olm4mvKxK2mNmJAUekqQY
-# nRGBhVhrggf+3tvIZedy7JeFhoEIaLBoKg19PBTc3R4UC9zKzEneeF2DQOjpmc8m
-# wJk1XBcTxZ1PpwqK1FANf/BEf/ukpvaJQSdTBlNP21A9eOYhrwISkff7ZMVmvDLS
-# wbanS2PGki7Cj4Wo3K2Y00SsFNTKWyzBc0qXBqRAFn7oDv6eXBjmmNePE+YaU22X
-# I8uVF/TZblhnGHbas42sWPC9XdD+mAszoqOOVyjvy4dIWpDu9e8A1CwWxWDHsDZ8
-# iWxT41eWkb3wb8v5d1VvJ+/TRnauCVaDk3DLhXWIEwgUKcYNZljoLLKPYgfw+57E
-# ea7yeEyKTqq12K23tBx3p5kbGhzMWG6BnzIzNACzeEth976zL2aJyjLh/XAmzKEZ
-# VfV7SGIUpw5Z4fV5oKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIbObERUnWHprDFF49HSadDQtgP3luJ9SCZI5CUpgjYnMA0GCSqG
+# SIb3DQEBAQUABIIBgD8ITt7oQlOimz8zUxVI7swEcdSZaTJB9UFGTrVV0ZX0ErtJ
+# E3vJ1IQ4BaNVAG7lx3qgHm3N4djNEOBJ5NtDtqloN7fKnvRkVljhMdvvI/5/3LDQ
+# eRN2CqK3xzqXys2gkqBqh36w2krvZVWMiCAhq11WiUvXQMUK2FdG3K/fWsdCyJBn
+# 07Eo6fHRC58vo/nGnN34DJDi7iYm0fRNYLXtnV6A94o8/ht/9atTRhV0l7jTK1bP
+# dX6G90bRMZbvfZR1ttNMt6cnKDQixbaWlXXypGpm17TFYUSerrQgUP/GmKvTCzzK
+# nRxHP2RMI2bGLbVbugTrrBlWlOIS5Qq3/YKb3M8mYE6S6ECJalZ7R62o6jn5pSyF
+# AEHpNvCh+JPfSTaRDu2Z70TVDM3vM2O1fRm5ItOZ4rTsyg3nRQCMu1wJXyVR3iYG
+# UiojZZ0KXyIicg6HRnXX/kNYhxMzLKFEZ1UFXfLZmZDC7NrKd8q0IBz9ptAvABQE
+# YrcbbihEtOsXH54JjKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkwMTI5
-# NTBaMC8GCSqGSIb3DQEJBDEiBCAOW6W8UQVHkBaokKVlzStIjrQFuYBbzI1ie4jA
-# UTdodjANBgkqhkiG9w0BAQEFAASCAgBKJlHXvRV/ZatUntuYle9ovrAIKFDSpKXG
-# ZVrJyQOvuM9tXlWc/nE1ZtxXO23U0I1xepGCpvkx1xH+dnlifJ9ZIvw/bEOengJv
-# OaSOKqigenGQTCYibG280n03m1brZnBH7K594hxp1ItfPaz0tphQxGBLdiBAD72A
-# XIfPAt9l6mZkOny0DWf4uK9HwZqw3a+zGVYNNfnhugloCodTyjih+mkpvpCfQKw8
-# UJaSwTZWd2ZeaSXTex3XSV7iNSLSYnCZ0inS1iRN2LanXZx1Eus2ylRiDVCYrC27
-# Yogrkn2YU7eVMgGPlikd3wlmBSMNSFqSlmREmDsuGx5l0isWgf6wgHBl9AhL/D04
-# DVJmR0Hbqutg58YMOW3jNM0SMoJ6EKErD5cQFLW9fNOc4NQSh90PiTD6b2sqSmh+
-# eLr/Xc+SOdQDM8up85nWDDtMMH8cbLgbG+XC0lv20I+jCnV/bT3S9HyM5rtDemIS
-# RpeXI56BaPnFgHACRbSJRDlL44cBhk0KEepp+JInKQqpmMLPA0dn4TzYMBNPinTB
-# K0jfC1zgG2Pkp89Opb+wj7Wn0cBgKmEo5nlIyAHT/MNfdO8gnur2ADsnCFFYqIWp
-# iFYXHQyqqst1rDxvu730iFfejLfvmHTJFeszvbbES0hzBipfV4ToW9BdUGKrNb9r
-# K4Y75BnYSA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMjMx
+# MTNaMC8GCSqGSIb3DQEJBDEiBCCwYUXQlLOubOfyi5kAaj2thSoz53NaBkj/70mi
+# rfksSzANBgkqhkiG9w0BAQEFAASCAgALwDs2dl7eG+vnwSVdeeAB9/z3n5I+LNHp
+# rSzq6lONI+PslPIwSn0xMJRcIO3eisemjwTlCa+4kweEafoRrhxeqX3t3J+FKA36
+# KFzShv4Mv1fy9HC3wucPi03htho0/Oy52nkGqSGluN8M15QpZG7JgKTiggCaMCcN
+# uMlcV3OTAbdLefcjvVR8xCD4w+lqewu5fIXAQnnj7Dcr55cQVf3nJ57uALmZfxoV
+# ruahn7vCHneAdv9gana69C5VfdiQ5xPMo2CBduDuLbunfgJaCri9rsOgdjsGCByM
+# 4cN2LVRgiEvCHqitLkuMRfQJS682wpYbLzKikLLO/2viN8Sf+mU+P//JJxtbBY+Z
+# PFBeu6nMT4MVWdaOZAIVT2DIYii4dKU+0JgGBeNIxHUcK2MppxG2kjB4A5CYlQXB
+# mFoT4boXIqT0MMMfDZLF+pIP9PO78pLGQxO13kqXa3cBbBHqP4s1XnIICxOlgbmy
+# kMdaVbdJTzw5NM/h59k4Lt4IpgikMtPz++dOvLqGJk0/xhdbXsJYcLJpmwJl4LET
+# +oh0XEit9GFB2Jx8snOwrWrmF9GODGaqM6LIo8L28CJAqjKXk/TW2zyF55GUyRrN
+# icgT6E5uVxNl7RdO8qX7/4z6RmgjoJiCnAiI79Kyp/z4hdGp5Z87WlP1sDe03qu5
+# 3P5LHlF2QQ==
 # SIG # End signature block

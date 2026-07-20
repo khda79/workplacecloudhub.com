@@ -4,7 +4,8 @@ Exchange 2016 local mailbox inventory script with integrated reporting.
 
 ## Scripts
 
-- `SmartM365-Exchange-Local-Mailboxes-Inventory.ps1`: detailed mailbox, permissions, statistics, archive, retention, mobile device inventory, and integrated mailbox reporting (`-GenerateReport` / `-ReportOnly`). Use `-DryRun` to validate paths, report CSV schema, and Exchange prerequisites without collecting inventory.
+- `SmartM365-Exchange-Local-Mailboxes-Inventory.ps1`: detailed mailbox, permissions, statistics, archive, retention, mobile device inventory, and integrated mailbox reporting (`-GenerateReport` / `-ReportOnly`). Use `-DryRun` to validate paths, report CSV schema, and Exchange prerequisites without collecting inventory. Remote mailbox delegation is intentionally disabled by default because it performs two expensive permission queries per remote mailbox; enable it explicitly with `-IncludeRemoteMailboxDelegation`.
+- Version 1.41 preserves the 1.40 schema/readiness fields and prevents the standard run from performing remote-mailbox delegation queries unless explicitly requested.
 - Version 1.40 ajoute `InventorySchemaVersion`, conserve les propriétés de readiness de la v1.39 et expose l’état de collecte des gros éléments.
 - La collecte des gros éléments est désactivée par défaut car elle est coûteuse. Utiliser `-CollectLargeItemStatistics` pour exécuter une estimation `Search-Mailbox` à 35 Mo et alimenter `LargeItemCount-Over-35MB`, `LargeItemCollectionStatus` et `LargeItemThresholdMB`.
 - The existing `EmailAddresses` column remains unchanged for compatibility; the complete prefixed collection, including X500 values, is exported in `EmailAddressesAll`.

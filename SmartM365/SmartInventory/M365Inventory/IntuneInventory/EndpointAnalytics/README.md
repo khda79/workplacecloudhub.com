@@ -27,7 +27,7 @@ Microsoft documents both v1.0 and beta `deviceManagement/reports/exportJobs` end
 https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs
 ```
 
-Version 1.0.5 therefore uses beta for all Endpoint Analytics export jobs. Review this choice when Microsoft publishes the report-name catalogue for v1.0.
+Version 1.0.6 continues to use beta for all Endpoint Analytics export jobs and adds throttling-aware outer retries. Review this choice when Microsoft publishes the report-name catalogue for v1.0.
 
 The preflight validates the application-permission claim without issuing an unsupported `GET` against the `exportJobs` collection. The first real `POST` export job validates Endpoint Analytics API access during collection.
 

@@ -29,6 +29,7 @@
   "PeerAlertMailRetryMinutes": 15,
   "PeerRecoveryEmailEnabled": true,
   "MaxConcurrency": 2,
+  "MaxConcurrencyByServer": {},
   "MaxLifetimeHours": 24,
   "CentralConfigurationEnabled": true,
   "AutoRecycleOnRuntimeUpdate": true,

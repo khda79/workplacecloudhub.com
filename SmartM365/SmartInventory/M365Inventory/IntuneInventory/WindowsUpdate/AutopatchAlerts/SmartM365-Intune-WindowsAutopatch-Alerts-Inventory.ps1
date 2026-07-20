@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.13
+1.14
 
 
 
@@ -55,7 +55,7 @@ pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-    Version : 1.11
+    Version : 1.14
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All, DeviceManagementApps.Read.All
 #>
 
@@ -313,7 +313,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -404,6 +404,51 @@ function Connect-GraphSession {
     Write-Log -Message ("Connected to tenant [{0}] as [{1}]" -f $context.TenantId, $context.Account)
 }
 
+function Get-AutopatchGraphStatusCode {
+    param([Parameter(Mandatory = $true)]$ErrorRecord)
+
+    try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } } catch {}
+    $text = [string]$ErrorRecord
+    if ($text -match '\b(408|409|429|500|502|503|504)\b') { return [int]$Matches[1] }
+    if ($text -match '(?i)TooManyRequests|throttl') { return 429 }
+    return 0
+}
+
+function Get-AutopatchGraphRetryDelaySeconds {
+    param([Parameter(Mandatory = $true)]$ErrorRecord, [Parameter(Mandatory = $true)][int]$Attempt)
+
+    $jitter = Get-Random -Minimum 0 -Maximum 6
+    try {
+        $retryAfter = $ErrorRecord.Exception.Response.Headers.RetryAfter
+        if ($retryAfter.Delta) { return [math]::Max(1, [math]::Min(300, ([int][math]::Ceiling($retryAfter.Delta.TotalSeconds) + $jitter))) }
+    } catch {}
+    return [math]::Min(300, (([int][math]::Pow(2, [math]::Min($Attempt, 6)) * 5) + $jitter))
+}
+
+function Invoke-AutopatchGraphRequest {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('GET', 'POST')][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [AllowNull()][string]$Body,
+        [ValidateRange(1, 12)][int]$MaxAttempts = 6
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $parameters = @{ Method = $Method; Uri = $Uri; OutputType = 'PSObject'; ErrorAction = 'Stop' }
+            if ($Method -eq 'POST') { $parameters.Body = $Body; $parameters.ContentType = 'application/json' }
+            return Invoke-MgGraphRequest @parameters
+        }
+        catch {
+            $statusCode = Get-AutopatchGraphStatusCode -ErrorRecord $_
+            if ($statusCode -notin @(408, 409, 429, 500, 502, 503, 504) -or $attempt -ge $MaxAttempts) { throw }
+            $delay = Get-AutopatchGraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt
+            Write-Log -Message ("Graph transient failure HTTP {0}; retry {1}/{2} in {3}s: {4}" -f $statusCode, $attempt, $MaxAttempts, $delay, $Uri) -Level WARNING
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 function Invoke-GraphGetAll {
     param([Parameter(Mandatory)][string]$Uri)
 
@@ -411,7 +456,7 @@ function Invoke-GraphGetAll {
     $nextUri = $Uri
 
     do {
-        $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -OutputType PSObject
+        $response = Invoke-AutopatchGraphRequest -Method GET -Uri $nextUri
 
         if ($null -eq $response) {
             break
@@ -482,7 +527,7 @@ function Start-ExportJob {
     if ($Filter) { $body['filter'] = $Filter }
 
     Write-Log -Message ("Starting export job for report [{0}] with filter [{1}]" -f $ReportName, $(if ([string]::IsNullOrWhiteSpace($Filter)) { '<none>' } else { $Filter }))
-    $job = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/reports/exportJobs' -Body ($body | ConvertTo-Json -Depth 6) -ContentType 'application/json' -OutputType PSObject
+    $job = Invoke-AutopatchGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/reports/exportJobs' -Body ($body | ConvertTo-Json -Depth 6)
     return $job
 }
 
@@ -495,7 +540,7 @@ function Wait-ExportJob {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $job = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/deviceManagement/reports/exportJobs/{0}" -f $JobId) -OutputType PSObject
+        $job = Invoke-AutopatchGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/deviceManagement/reports/exportJobs/{0}" -f $JobId)
         Write-Log -Message ("Export job [{0}] status: {1}" -f $JobId, $job.status)
         if ($job.status -eq 'completed') { return $job }
         if ($job.status -eq 'failed') { throw "Export job failed: $JobId" }
@@ -750,8 +795,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdEdtQFMNwVGTw
-# 27QWpTGWQtTsGZHHSnArXNWpDN0M0KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgzNQkjrcI1OZo
+# VvrAEIb+wAaLBe7fjrwYTQqUB/H0JKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -884,31 +929,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICHc+7WJmczyEvIAk5wQaHpLO0Dk8r5dfrcglWthiCqdMA0GCSqG
-# SIb3DQEBAQUABIIBgEVosS+YO9SSiqfzqqffql6cEmN1NTGnFf6TsN+8KwVt6DSq
-# z3xAH0ubVASeDh4yOtfdJOWgNl8xMNKdewucixGCEZvKRsMS8nQuqLhZ2y83jQdi
-# ZN/DOySW/pCd1ZgV4KNiv3gNgL9l31w629ZJffA72Uf8w4iQPSmYJ8D0LzREmL4l
-# DEBScY7pQNXj8kzU4DEPZ90wIDCnrnz5f2rxYxZcX3lcS30hyfJgW5VvAF7dGRCw
-# zXwgvpJahI7l14lHIWItI01ZD7zfH14YaMg6UeHpIGlEZHdDQhU+SEza9mbzkRPP
-# o0XAvCi8uu4V1bTU9iSxl34UmV7cYf7MuhV5oh8sdjoh6fdBNYCzv6OlCbS2qgqv
-# XYxsqWgh3n370OwSwxiM+R26GosfFiDN+KLljyGdhYCwtb6rEjzeJIvfh1yKKgeV
-# UyctBGc7IRqBPBBhfyzDNWb9vb+hzkqwiO3hJ1WgvzhlokeOwqOdZWeb30d5vkyB
-# T59qu0VHqlyA7WFf6KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJfluGVEiuTmy7yKgj2EjFHixPeX75gjoS7wHFLwJTJQMA0GCSqG
+# SIb3DQEBAQUABIIBgArTaZLtAru17HgXLrksjBXfg4zeOVumcRjxjMTSGYKMmahB
+# o4S3JgYAEqEUV0nKx1vgFy17mHZg49QluaJ7OvTxkmYjFDkDJ6hEhJWIeH2BBEhL
+# QAgY+UKU0xu2YhsBlSJ+HgmwdGIVQ2sw4UXn42VEuDHF1LyXylxPkF4BRncLh/HB
+# /AEeUj5QCZoivM6euW0f+f04+EgnQfiv3ZHurxWlYrgf5GWEyehsSsj586DB0SRp
+# W5oxv5A01tR5C6Pg+PfeK8P0E4Od1krlroe9bkSYRydTNEMmLny6MS+ps4Hds6jr
+# l7D8gZ5F+wiiOtKCOoEOdf2UKGoAnrAs4fn04srEQC+En0L431LcicAmGNHSL11h
+# +kph0Ebp46VKTuiwjW283BGN4GFMmOhrE7ZOHLcoHTIVvwmZQfN9jPzbkk2lp77C
+# log3eLBVlVGzKzusFP/BKcz032uu0zyCnPMxUiJdII5raCu46k1BWb8xYiGBogbe
+# Ez/DRUnl70EUGXoWIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MzNaMC8GCSqGSIb3DQEJBDEiBCAs6A+fuxIv+H2TOGyk8tnnjjbHM5gEiC3eOpUV
-# 5FlWPDANBgkqhkiG9w0BAQEFAASCAgBsABIlNCxBCR7j1NxbTsoufqWnlnhMsGj/
-# Ndc+IkxXoPP/7axfjFj/9AV3IOMCgqk559MRZ5YJ0Vv1K95meHmuYHVqsGV/SmkC
-# BBjQUe2X0I+Efb9AKr//X16ZfU/b7bV0T5iOcxssVv74aNeOWlKPwN2+Xgilaf1/
-# Yv9g2ipIhItN6xfOF2s2DH0EDZtoCe7iSlFHY1TWY1w6ug0S+kcUiCi2gxCDZm7Q
-# iWUvzIhOvvgdqEAKWRQtEYTZiElDvGQlp0nm0MfOPjYit+6zaCD1BNnmDGcHcCF2
-# 7EMA2x4CqDTa+KQVXx9okBEKpL0TC6dZRo2EFpGAbZKig//EnxHK8M801lDeGP5K
-# Vuhj61A2wtBy/tjPu8KF3GeZEGN/VAKP8UEm7DWC24lEVjtfOSGuapleTMe8TkDS
-# M47f22EvjGQP0LbSmAMSjmWi22EpYBTqre9ey5v4qtxiOQRoGoWAdQY36vm4kAwu
-# ZM4wxUNh4RSRF7jwD0uyuv+h5r2vvT6Aon/08vZb4sYKuCOhpu1rtnwdj7ACqRHj
-# 51QmdI1iqdcIEGkUcoRb6x/7U7mDI8mO3xQI7nq4xtuA537/jb2dfNXpndlu4QLi
-# QOYCo/vuoeEPSdouWpLBUOnvAUv6xWkLbjik0rwAjjGElzUzcQh+/uZKgqJSpx+B
-# 3EC7q3TYaw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMjMy
+# MzhaMC8GCSqGSIb3DQEJBDEiBCAn2evZpNSGnIAhjJ0jtpzvAhzNqP2IXSBoKQcS
+# YyF4MzANBgkqhkiG9w0BAQEFAASCAgCig13wCrxh30Q0dxIvy6jnY3MNGnxAZ1KM
+# WCC/fOs9k3X/8VgePPyg+eFBO+j4uyry+SnkW/91awNvAQhjLsUH6vMO9aLqc2+C
+# N3XxDmPAZXZQI55PR7vM2rCJBK122R7T554wOf38M/U4hdyPOmNTYY7KQkI+Cjg+
+# +7APhf42B3dneQUT2HNJ8wNt8pP4Ezv26K7pwJJL7yCuhB9IyxVyFyeTx0KZLx/q
+# 81E0UAmS+Ps+DXNe8FFdJALDFCP/H1nQ6EcPwb61Br5ehbTkw/yEyqdhoyJ5TXGA
+# RRyvuLruR5eFR6nkUwY7IoQTa/njaygeMidrjY3VV6lYvUwv2kDUpRKB9LKq+Ri1
+# 9//T+ZtvkQv2PDUZKLNvRdmNDps8hdW9BmNX6aZz8KokL8Aq8K5R8kMXuCFG/WJN
+# tN6jV+oIB662PJG6ws3vRiNMs28NNiD1a0BUcD1HD/MK3c6hEFAQn+Fvl4uKlNTo
+# vb7KXtXxtu4GDazimq9LEWROdTX5J6CPhohPXxtyvsQbPDrTxDFcqN9+xGdhbPis
+# 3UKiFHu9oNqziVXZ0IRy2UphNsxgy0x72cI3EBmICqxOWo2VP1+3FgQ3b/vS/xAb
+# bLRu1sE3FECdFjYQobPrmbTfw3SamJO4+QS5KMgZQTCY9iIVqPK/5BoCex5w8hxb
+# 201/tbvzaA==
 # SIG # End signature block

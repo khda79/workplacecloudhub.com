@@ -52,7 +52,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
 .VERSION
-1.0.5
+1.0.6
 
 .REQUIREMENTS
 PowerShell 7+.
@@ -89,7 +89,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.5'
+$script:ScriptVersion = '1.0.6'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -285,20 +285,22 @@ function Get-EAStatusCode {
     try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } }
     catch { Microsoft.PowerShell.Utility\Write-Debug "No HTTP response status was exposed: $($_.Exception.Message)" }
     if ([string]$ErrorRecord -match '\b(400|401|403|404|408|409|429|500|502|503|504)\b') { return [int]$Matches[1] }
+    if ([string]$ErrorRecord -match '(?i)TooManyRequests|throttl') { return 429 }
     return 0
 }
 
 function Get-EARetryAfterSeconds {
     param([Parameter(Mandatory)]$ErrorRecord, [Parameter(Mandatory)][int]$Attempt)
+    $jitter = Get-Random -Minimum 0 -Maximum 6
     if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Data.Contains('RetryAfter')) {
-        return [Math]::Max(0, [Math]::Min(60, [int]$ErrorRecord.Exception.Data['RetryAfter']))
+        return [Math]::Max(1, [Math]::Min(300, ([int]$ErrorRecord.Exception.Data['RetryAfter'] + $jitter)))
     }
     try {
         $retryAfter = $ErrorRecord.Exception.Response.Headers.RetryAfter
-        if ($retryAfter.Delta) { return [Math]::Max(1, [Math]::Min(60, [int][Math]::Ceiling($retryAfter.Delta.TotalSeconds))) }
+        if ($retryAfter.Delta) { return [Math]::Max(1, [Math]::Min(300, ([int][Math]::Ceiling($retryAfter.Delta.TotalSeconds) + $jitter))) }
     }
     catch { Microsoft.PowerShell.Utility\Write-Debug "No Retry-After header was exposed: $($_.Exception.Message)" }
-    return [Math]::Min(60, [int][Math]::Pow(2, [Math]::Min($Attempt, 5)))
+    return [Math]::Min(300, (([int][Math]::Pow(2, [Math]::Min($Attempt, 6)) * 5) + $jitter))
 }
 
 function Invoke-EAGraphRequest {
@@ -727,8 +729,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDR6KBgjPhlzzgi
-# deKWJRkO66iGiTNasF0+EM/jpHDNxaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjepEu5fSsWK4V
+# H0gSqvTf9ReMZmSxvOkNdN198KJlN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -861,31 +863,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIx4LVKS3ihWVAmZT7ae7/xxEasLz8xgojMvwYMw8qvWMA0GCSqG
-# SIb3DQEBAQUABIIBgDp0DZBKJhsOXaFFgLZabNQdvsQZJvTAzFwd2PGAWVY3Fn16
-# LBNCGZ6jhcXfKruUa//mxQc7HcqgucQF24bf/Hr9bbTuH8OYJao37mXkOqyYD5YG
-# fOnJRLTREVFMBMfngkt/WOpipmMBhNPbLdtUab8FzDvkT2QvmMj98dYtLFUzRzR8
-# 2GFSYden9eczPBScgEpT6gG0RKELMHK5Gw+o0ybPS7JFDf97zRjVr0Di8W+1N476
-# Fnzxbos+FNccan3HAPv6eRRkY/oK3AfG3H9jFznO9QrVXYiH/IyU/wKX6THcFfEA
-# +Jgzmr//tiAV7fQLux6xGyAj0ke2N4VsZ9Z7MR/BiJUbhSpG5B1vxe8GpXPw7KNq
-# +0ePsNwKRx15RzDOwL86+NsYMbxhFdp1NGMrCOLY/EQERjU76tB8Dr/KI1IKWs8L
-# 0it6HrP9beWaN8IR3z6W+Wo9zVF/LYJJD9xCGYQKXrMBDXNaXm/qgiz/Fv/D3R9Q
-# YAhCCiyUDFGKjbpwDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC/NppK/hYzu0gAOdIBe9jlvTb5kWYWLzF34QeKfvrKZMA0GCSqG
+# SIb3DQEBAQUABIIBgK4KjaIHsFc748DCX+YqIJO5iWJbKAlYtZeSupRMRaDvlODy
+# KoDBb4+LqFzQVRkH4eObcoO/kMbtJDmg+DpooelBME98YFCWO6ztWMlYDB/aEJdJ
+# ELamTDIay4Y2fbPJivSAa3ZqpxAl/QG0f1pxSxqmB+wqLpD2TrMEUdqJoLK8czWQ
+# Qo37W2G3yewdKuEbS5piWt12NYu2onI4yOORoPxI2fE2pouZABRg2cuFy7RV/ArV
+# OOYJqxSRtpz1iDevjKMbwZTiahnJfMJI7BeHJcAZsk/TM5FGErTcAEnYAY7b8b2Y
+# DQEOwhhltQ/KqVXnbeoVkvE318jM5Rlv3J+kshMF0VnaFuZmQvYX3koUMXoApdUx
+# FL8a1/xmPf7Cqa45pDRSb8fgw78eXnzCYt4EiTwvGKyOYx4iDLhQ7LW/VYUjdQrM
+# VSPYp5I0ldg75AKSRG/gKI9PFK1+BKYF+MOXYxPybtQp+Jmeany413lJGjo/mdjr
+# y8pQ5wX9GQqwv7IMUKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMTUw
-# MzdaMC8GCSqGSIb3DQEJBDEiBCAwxHQAxzNw1ZMpDCfBLxV7WCFnOatkpt44A+na
-# JsJh6TANBgkqhkiG9w0BAQEFAASCAgBXAA91+qjn8FNXVMHUMtQXOM3Rc2TfUYkk
-# Urlji38OnnDB2gF7deghsK0eRBROCGzNFZlcE3E5DmuzQipqfaBtbpaic7i0/dAu
-# DIiWLsNOy+xH8PfaETt11nfhS1BRQnlpU7y/iZoqj0Nnb7k0ptuXUj5T5UBdzYjt
-# ny9QKsYoX8AoFQiERWbj76+CGZf8v4YrkosKSUTGMo4eT/jlRHtAWGa+ySG6cqAp
-# Sww1op/+V9UxQcFqa0EiA5RxjeFJWP7Gcj3WRyWfLZiLdsMOaa4MStJKVc/7qpN4
-# lagH5ar/2IL0gvV34P6LP+2f18Qzb1SdDjlh4xHPSAq/qRFBYqzEFRic9JGYm9Z4
-# 4I7GGdYQESDekzXXSoL23sxXpcQpwXgENwORMA3Lyy0KwaD5Uzw874gidWWKJu0H
-# zT8Vi9i4C8B4VDd288ffcI11KVN91bAnczTT3wyY9T1UzdBguuGzSaU9SIB3IlLa
-# jXaTurARaff01qbrf8L+z9ggMORhsEI+v/oxVWiG+r9QHbJ2RiHRg+lQ/ORgZRbl
-# +e0l+YxgQOsO8j+CzNHrJXqDI4iaBeZ6Utb3bXsxPzN91qsPZ/ohhTP8cuFSH078
-# E7Cf3NLAWjG9I721QOK9iQgrQbMBPwX15FA4MX71lKcXEtObLNUiqpYG0HhfPKUL
-# O0c3m+VE0Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMjMx
+# MTRaMC8GCSqGSIb3DQEJBDEiBCDlfP4GFz/LAtHjJ5a9k+my1QAtm7WgkMUYvfxt
+# jVPfBjANBgkqhkiG9w0BAQEFAASCAgC3YPDoIutkMob/N+f8HDis/Tov+pUH45hw
+# RKxmkBU1q5SKDrACzKKPqJDUCQ1JzXyFs+xnsSOu7JTo6xQYek5OoSllbvoLBG1w
+# DWzZcJmk0JQFqzOPnhFKGU5JtUBTk65t3+ZgT5Re1mmzpsJE5p1Vl9rLzuIB0gnw
+# BhGuBCBWG5K95OXtSapbV9LABJWb+bDLeyj+KNoL0fgJG4DOwPicm77Ork/Bt6np
+# SNsu7+/Mh9D3FElwic3tvaBgSpbF10ArnLSI16etCMfTqs3GYlQ3Odhv/HE5+BXB
+# btcPz2wTLIOPSJyT1lsGyDRcuWScKOEB0zDiy0Fqy7UXUpBG7jfVNUk6libt5siz
+# Ni9FTR08jnsyPpJW6nxQQDBhpPbQm8leIpSBxD54ICQHezpa01yCW1a+faa4NDwS
+# KMsWznL05rmCPwHlc27VBtwYHDUqVDC8MokUUD4+XsbAqEiqxT4PkGObBk2oGclM
+# TD8iCZRCUwVSD+BAXh/NPXmlsYiJv/fLHwL2U1aT2nsBRIXYGETSERa7jWWcy3Zt
+# eXG2hzWOh7ytCYqa18sT9Nifxg8wa7sfMN+mcYj9cL5M9U/HnpmDTMk7+PfVwNY2
+# ldxLxQyp7ywr2uDUijSOGn1YvWFxvi/VeLjiO+5JfCRX/CoFpzTmDPhBlngLJxmr
+# jhPj+gHj4Q==
 # SIG # End signature block
