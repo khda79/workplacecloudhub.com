@@ -360,12 +360,12 @@ try {
     $backupPolicyScope = Import-SmartFinOpsContractSource -Key 'BackupPolicyScope' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $remoteRoutingIssues = Import-SmartFinOpsContractSource -Key 'RemoteRoutingIssues' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $proxyAddressControl = Import-SmartFinOpsContractSource -Key 'ProxyAddressControl' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $m365SharePointUserActivity = @(Import-SmartFinOpsContractSource -Key 'M365SharePointUserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365TeamsDeviceUsage = @(Import-SmartFinOpsContractSource -Key 'M365TeamsDeviceUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365CopilotUserUsage = @(Import-SmartFinOpsContractSource -Key 'M365CopilotUserUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
+    $m365TeamsPhoneUserUsage = @(Import-SmartFinOpsContractSource -Key 'M365TeamsPhoneUserUsage' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows)
 
     $readinessSourceKeys = @(
-        'M365SharePointUserActivity',
-        'M365TeamsDeviceUsage',
-        'M365CopilotUserUsage',
-        'M365TeamsPhoneUserUsage',
         'M365TeamsPhoneAssignments',
         'M365TeamsPstnCalls',
         'M365TeamsDirectRoutingCalls',
@@ -414,6 +414,10 @@ try {
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'M365 Apps activation rows' -Value $m365AppsActivations.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Teams user activity rows' -Value $m365TeamsUserActivity.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Email activity rows' -Value $m365EmailActivity.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'SharePoint user activity rows' -Value $m365SharePointUserActivity.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Teams device usage rows' -Value $m365TeamsDeviceUsage.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Copilot user usage rows' -Value $m365CopilotUserUsage.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'M365 Usage' -Metric 'Teams Phone user usage rows' -Value $m365TeamsPhoneUserUsage.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Users' -Metric 'AD users rows' -Value $adUsers.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Intune devices rows' -Value $intuneDevices.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Entra devices rows' -Value $entraDevices.Count)) | Out-Null
@@ -453,6 +457,10 @@ try {
         -AppsActivationRows $m365AppsActivations `
         -TeamsActivityRows $m365TeamsUserActivity `
         -EmailActivityRows $m365EmailActivity `
+        -SharePointActivityRows $m365SharePointUserActivity `
+        -TeamsDeviceUsageRows $m365TeamsDeviceUsage `
+        -CopilotUsageRows $m365CopilotUserUsage `
+        -TeamsPhoneUsageRows $m365TeamsPhoneUserUsage `
         -IntuneDeviceRows $intuneDevices `
         -RecentCutoff $staleUserCutoff
     Write-SmartFinOpsLog -Message ("Built consolidated activity evidence for {0} user(s)." -f $userEvidenceMap.Count)
@@ -527,6 +535,7 @@ try {
         -RecentCutoff $staleUserCutoff `
         -PriceModel $priceModel
     Write-SmartFinOpsLog -Message ("Built {0} user license decision(s)." -f $userLicenseDecisionRows.Count)
+
     Write-SmartFinOpsLog -Message 'Building disabled user-mailbox conversion decisions.'
     $sharedMailboxConversionRows = New-SmartFinOpsSharedMailboxConversionRows `
         -MailboxRows $exoMailboxes `
@@ -630,16 +639,35 @@ try {
         )) | Out-Null
     }
 
+    $unusedE3F3Rows = @($userLicenseDecisionRows | Where-Object { $_.IsUnusedE3F3License -eq $true })
+    $possiblyUnusedE3F3Rows = @($userLicenseDecisionRows | Where-Object { $_.IsPossiblyUnusedE3F3License -eq $true })
+    $unusedOrPossiblyUnusedE3F3Rows = @($unusedE3F3Rows + $possiblyUnusedE3F3Rows)
+    $e3WithoutObservedE3CapabilitiesRows = @($userLicenseDecisionRows | Where-Object { $_.IsE3WithoutObservedE3Capabilities -eq $true })
+
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unique licensed users' -Value $uniqueLicensedUserKeys.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'License optimization findings' -Value $licenseOptimizationRows.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'User license decisions' -Value $userLicenseDecisionRows.Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 recommended users' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3' }).Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 recommended users' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 F3' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unused E3 or F3 licenses' -Value $unusedE3F3Rows.Count -Interpretation "No M365 service activity, Entra/AD sign-in, or recent Intune device presence was observed within $StaleUserDays days. Mailbox size and mailbox measurement availability do not affect this signal.")) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unused E3 licenses' -Value @($unusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unused F3 licenses' -Value @($unusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Possibly unused E3 or F3 licenses' -Value $possiblyUnusedE3F3Rows.Count -Interpretation 'Recent technical presence was observed, but no recent M365 service activity was found and the measured mailbox is at or below 100 MB. Directional review indicator only.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Possibly unused E3 licenses' -Value @($possiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Possibly unused F3 licenses' -Value @($possiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unused or possibly unused E3 or F3 licenses' -Value $unusedOrPossiblyUnusedE3F3Rows.Count -Interpretation 'Combined directional population. Unused and possibly unused categories are mutually exclusive.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 licenses without observed E3 capability usage' -Value $e3WithoutObservedE3CapabilitiesRows.Count -Interpretation 'E3 with measured mailbox storage below 100 GB and no observed Microsoft 365 Apps desktop activation. This does not prove Frontline eligibility or justify an automatic downgrade.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Recommended license decisions' -Value @($userLicenseDecisionRows | Where-Object { $_.DecisionClass -eq 'Recommended' }).Count -Interpretation 'Automatically classified from strong evidence; no action is executed by SmartFinOps.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Conditional license decisions' -Value @($userLicenseDecisionRows | Where-Object { $_.DecisionClass -eq 'Conditional' }).Count -Interpretation 'A prerequisite such as Frontline eligibility remains before execution.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'License decisions requiring review' -Value @($userLicenseDecisionRows | Where-Object { $_.DecisionClass -eq 'Review' }).Count -Interpretation 'Available evidence is insufficient for a direct recommendation.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Keep license decisions' -Value @($userLicenseDecisionRows | Where-Object { $_.DecisionClass -eq 'Keep' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 to F3 conditional candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Potential M365 F3 - Frontline eligibility required' }).Count -Interpretation 'Persona and observed technical usage support review; documented Frontline eligibility is still required.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 to F3 activity and eligibility reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Potential M365 F3 - activity and eligibility review' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 to F3 technical blockers' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Keep M365 E3 - F3 technical blocker' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No-license high-confidence candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - candidate' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'No-license review candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'No license - review' }).Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 to F3 downgrade candidates' -Value @($userLicenseDecisionRows | Where-Object { $_.CurrentBaseLicense -eq 'M365 E3' -and $_.RecommendedLicense -eq 'M365 F3' }).Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 technical limit reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3 or remediate F3' }).Count)) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Special-account license reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -match '^Review (shared mailbox|special account)$' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Active users conflicting with no-license persona' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'Target persona conflict - active user review' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 to E3 capability reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 E3 capability review' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 technical conflicts' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -eq 'M365 F3 technical conflict - review' }).Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Special-account license reviews' -Value @($userLicenseDecisionRows | Where-Object { $_.RecommendedLicense -match '^Separate review - (shared mailbox|special account)$' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'E3 personas missing E3' -Value $personaSignalCounts['IsE3PersonaMissingE3License'])) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'F3 mailbox size non-compliance' -Value $personaSignalCounts['HasRemainingF3MailboxSizeNonCompliance'])) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Unlicensed F3 migration blockers' -Value $personaSignalCounts['IsUnlicensedEnabledF3MailboxBlockingMigration'])) | Out-Null
@@ -652,7 +680,7 @@ try {
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Strong shared mailbox conversion candidates' -Value @($sharedMailboxConversionRows | Where-Object { $_.Status -eq 'Strong candidate' }).Count -Interpretation 'Disabled licensed user mailboxes below 45 GB, with delegates and no observed archive, hold, service-account signal, or state conflict.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Capacity-review shared mailbox conversion candidates' -Value @($sharedMailboxConversionRows | Where-Object { $_.Status -eq 'Capacity review' }).Count -Interpretation 'Candidates between 45 GB and below 50 GB that require a growth and capacity review.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Excluded shared mailbox conversion cases' -Value @($sharedMailboxConversionRows | Where-Object { $_.Status -eq 'Excluded' }).Count -Interpretation 'Excluded because of size, archive, hold, service-account evidence, missing data, or conflicting account state.')) | Out-Null
-    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Indicative monthly value within existing no-license potential' -Value ([decimal](($sharedMailboxConversionRows | Where-Object { $_.Status -in @('Strong candidate', 'Capacity review') } | Measure-Object -Property IndicativeMonthlyValueEUR -Sum).Sum)) -Unit 'EUR/month' -Interpretation 'Supporting realization path only; this value is already included in the no-license potential and is not added again.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Indicative monthly value within existing no-license potential' -Value ((Get-SmartFinOpsDecimalSum -Rows @($sharedMailboxConversionRows | Where-Object { $_.Status -in @('Strong candidate', 'Capacity review') }) -Property 'IndicativeMonthlyValueEUR')) -Unit 'EUR/month' -Interpretation 'Supporting realization path only; this value is already included in the no-license potential and is not added again.')) | Out-Null
 
     foreach ($device in $intuneDevices) {
         $name = [string](Get-RowPropertyValue -Row $device -Names @('Device name', 'DeviceName', 'Name'))
@@ -713,11 +741,17 @@ try {
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Upgrade eligibility rows' -Value $upgradeEligibility.Count)) | Out-Null
 
     $valueOpportunityRows = New-SmartFinOpsValueOpportunityRows -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -PriceModel $priceModel
-    $potentialMonthlyValue = [decimal](($valueOpportunityRows | Where-Object ValuePillar -eq 'Potential savings' | Measure-Object -Property MonthlyValueEUR -Sum).Sum)
-    $potentialAnnualValue = [decimal](($valueOpportunityRows | Where-Object ValuePillar -eq 'Potential savings' | Measure-Object -Property AnnualValueEUR -Sum).Sum)
-    $costAvoidanceMonthlyValue = [decimal](($valueOpportunityRows | Where-Object ValuePillar -eq 'Cost avoidance' | Measure-Object -Property MonthlyValueEUR -Sum).Sum)
+    $potentialMonthlyValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object ValuePillar -eq 'Potential savings') -Property 'MonthlyValueEUR')
+    $potentialAnnualValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object ValuePillar -eq 'Potential savings') -Property 'AnnualValueEUR')
+    $recommendedMonthlyValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object { $_.ValuePillar -eq 'Potential savings' -and $_.OpportunityClass -eq 'Recommended' }) -Property 'MonthlyValueEUR')
+    $conditionalMonthlyValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object { $_.ValuePillar -eq 'Potential savings' -and $_.OpportunityClass -eq 'Conditional' }) -Property 'MonthlyValueEUR')
+    $reviewMonthlyValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object { $_.ValuePillar -eq 'Potential savings' -and $_.OpportunityClass -eq 'Review' }) -Property 'MonthlyValueEUR')
+    $costAvoidanceMonthlyValue = (Get-SmartFinOpsDecimalSum -Rows @($valueOpportunityRows | Where-Object ValuePillar -eq 'Cost avoidance') -Property 'MonthlyValueEUR')
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Indicative monthly optimization potential' -Value $potentialMonthlyValue -Unit 'EUR/month' -Interpretation 'Potential only; validate usage, ownership, contract and renewal before action.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Indicative annual optimization potential' -Value $potentialAnnualValue -Unit 'EUR/year' -Interpretation 'Annualized French indicative baseline; not a committed saving.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Recommended monthly optimization potential' -Value $recommendedMonthlyValue -Unit 'EUR/month' -Interpretation 'High-confidence automatic recommendation; not an automatically executed or committed saving.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Conditional monthly optimization potential' -Value $conditionalMonthlyValue -Unit 'EUR/month' -Interpretation 'A prerequisite remains before execution.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Review monthly optimization potential' -Value $reviewMonthlyValue -Unit 'EUR/month' -Interpretation 'More evidence is required before a decision.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Value' -Metric 'Indicative monthly reusable capacity value' -Value $costAvoidanceMonthlyValue -Unit 'EUR/month' -Interpretation 'Cost-avoidance equivalent; kept separate from potential savings to prevent double counting.')) | Out-Null
 
     $summaryPath = Export-SmartFinOpsCsv -Name 'SmartFinOps_Workplace_Summary' -Rows $summaryRows.ToArray()
@@ -731,11 +765,12 @@ try {
 
     $historyHtmlPath = Join-Path -Path $runOutputRoot -ChildPath 'SmartFinOps_Workplace_Report.html'
     $latestHtmlPath = Join-Path -Path $LatestOutputRoot -ChildPath 'SmartFinOps_Workplace_Report.html'
-    Write-SmartFinOpsHtmlReport -Path $historyHtmlPath -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -DeviceRows $deviceOptimizationRows.ToArray() -ExchangeRows $exchangeOptimizationRows.ToArray() -DataQualityRows $dataQualityRows.ToArray() -ValueRows $valueOpportunityRows -PriceModel $priceModel
+    Write-SmartFinOpsHtmlReport -Path $historyHtmlPath -SummaryRows $summaryRows.ToArray() -LicenseRows $licenseOptimizationRows.ToArray() -UserDecisionRows $userLicenseDecisionRows -LicenseCapacityRows $licenseCapacityRows.ToArray() -DeviceRows $deviceOptimizationRows.ToArray() -ExchangeRows $exchangeOptimizationRows.ToArray() -DataQualityRows $dataQualityRows.ToArray() -ValueRows $valueOpportunityRows -PriceModel $priceModel -StaleUserDays $StaleUserDays
     Copy-Item -LiteralPath $historyHtmlPath -Destination $latestHtmlPath -Force
 
     Write-SmartFinOpsLog -Level SUCCESS -Message ("SmartFinOps Workplace analysis completed. Report={0}" -f $latestHtmlPath)
     Write-SmartFinOpsLog -Message ("CSV outputs: {0}; {1}; {2}; {3}; {4}; {5}; {6}; {7}" -f $summaryPath, $licensePath, $licenseDecisionPath, $licenseCapacityPath, $valuePath, $devicePath, $exchangePath, $dataQualityPath)
+
 }
 catch {
     Write-SmartFinOpsLog -Level ERROR -Message $_.Exception.Message
@@ -745,8 +780,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqM6FAeOm6Q44+
-# B+a1MG/qtG+jpDQHvyWl/YvIwhpGjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWu7CdtQEynsa+
+# LQgHmHkzKLyb9JrHU7Axw7Sf83RJ2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -879,31 +914,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOSoyvIIVKnsHyx/XwIQzV6zDKyba/GCYI0ymIIBdACbMA0GCSqG
-# SIb3DQEBAQUABIIBgHDh4BJPh7B1LQYB0iZ+JdIHIGd0kDCFa/b3V1HJdcCfDt8u
-# VCFipb//6JlO1Cq1j1Kb79+2yw4f91MVspfjFPLPA7ntYbVfgiHNylyOuPmpaX4r
-# E0v6PpQIc/rJmjrF0ij6ySeO7UUtBLn+vrwV4D03D/7AhqrbxrShrpZAbKQ1Y471
-# 2tF1aG1iiDyX6W9lgvuQp6WwlFcc1HTsr5wJteF5Dp5a9mClnuMh7hyD+vXV/qCe
-# oqvBK3oloYxVKkOfMTu4Ic6F26atII0IpqPfbKgulSbGaQe6FSB81XvC2j7YXyPH
-# CU+ha6UU77zJjigyFFyX3NHe6g52MthRLFI/+mVnUNj62y20GJv/satdGspMA0d1
-# smwf2tiaw3zf+LVYIU5bYSS2yCgC4zoF6YlqOHa22JzIPvaNncRb1MaJCdPaQrl6
-# Tp04HC9vlG2j/MHvatdLpe2hHBC/4g8iPspBrrVB9K4c2QJMZOSL0USzOD/50f3Y
-# NT35uST85KRzK3VviKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK03Tfn3g3DuVnnmD6b+CjMy2cFNtuZ6aKMTPCSZNLKnMA0GCSqG
+# SIb3DQEBAQUABIIBgFbCcwT8FCFed6Hn3H89nqVB3mV2y2Yfxan+rl+K2Nf8PjP5
+# SZW6t8HCadiolcyCBZ6Cko+H7bpcFLqWnJXmS3dwwPAihh48IZXRSIuVNGZ3XyDn
+# ODVHCR+ZB6Sa8WD8fytPqgSpyWlOzUInsOlP+8QyUGtMOUpLUgR6jLmK633QsYjV
+# /dSeoJZf7VlrR7vQa0R5xvbXCOJse6vMj2+boVGRIuy9j5wK6j8guZaMKJXaPSMX
+# nSuGIJbLuxqqk70aisw5ljFjBKDlNvlK0nqI/TwHOF3C0Xnxzh/0hf8Sofq8LdUf
+# pyKn6MeAoPQ6OPDyeeDQbUPvfTmssxeGkzeXCTMSUrtjdik63GONFwSCCyq0ZaKo
+# AGOOxStt002Dt9Bz99sEuYJdmdwXXC8vtvbKDsmTg1qNRpcE5GoO15grKAa/8rkr
+# 8kYad1l1MYQ3zeW2UuujOzEWrp30j/Cti3QYPr5g60kNMsb9dUCKIBP6BaSDu2SY
+# L49nz4/H4fFDMdXxVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkwMTI5
-# MzNaMC8GCSqGSIb3DQEJBDEiBCCfc4anx9vCsIi7IFq7F6t4bYSUJ1cK3uz0M39k
-# /5zQbDANBgkqhkiG9w0BAQEFAASCAgBf3NT2J91p1qe+lbF7sT8Uo0tFxR4V3Us9
-# DHpZftqiW5R2PB6CkijF3X1RLqVWBecUPRkjiCA2jV0LSsC9fA2DA/2JFtWHLXDz
-# GBWte9RokyOUur3PnJgL7ebRf6OEIu5Fhxrkx8JO5PD4NhZ3KyCXmMWGAJ5xS5pn
-# OctXD8Dn/koiR79Vt84fazjLzIJDQ7lnvQg7hAgwri2uXUYySoreHdmzs3YPZb+K
-# mr4zxgrmaEBc5bNfCVBqDWg55vB0dmErCAJkJBeDTau/ex9iUnycE7JV0oDGXc4F
-# XsL0RwQAI3O8+XOGF8Nd5mp+K9AZwGsPAK4295CvLorU7pRvA6SuwRTK8n0Rfz2B
-# 4lh7Z0Y+RGRc+spUwKPnjLKMaYeKTjs4YrKFgjQv4+9x+Xjd37EBmc4Jv9pVdEAo
-# XgzmZ+CP6ffjQJKm5FF80oXdpff66W3/ZpaA7QWaIGBnPo+TmyV2/1epxLySMY/Z
-# lGxO58/FnsksV+OBjLlDvFdTEF2X7F4mPW/lqFlLHF3sLQ70jHcuj7x+LggvsXdW
-# p7Hkk3k2faWG+K2NH1+i6JsieEEsfKyQPP+TmZZiKHCD9icP3ekvv0JVPtOgAXDD
-# GMHndae+G/9Rkdpj1E3r5UnuY9+CWv2iiJXMKYdncm3XBzvHbLWiSe2C9SJatlkz
-# ouI5TWHZlw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMTI1
+# MDhaMC8GCSqGSIb3DQEJBDEiBCAyIR2ps1mm3XpAkx+H2MKPWgEky9RqhQRSvZdI
+# 11VsezANBgkqhkiG9w0BAQEFAASCAgAkc4jCzO622uZRc6BeCKgFjWLfBEdbmBZf
+# QXUElP+8Vd60SI2PLMprqFvcwevEgSKp8SlTfSg+oOHCD4+4HkuUhPr5Gvy4pOgv
+# XmCXk4pXBiS1HzbcbbBuzYESSUl5BV69IUr1amoOJ4EbGlbY3fgBbTFI5SkJinKs
+# cqa+ZiRdC6FWDFNnvHOHeRQMeG/aJAA61LBaW+rBtK7g6ltiRufUPBeN76fp2DUY
+# 9EiC1NX0n8dgp40rmeKwl14P89mvMqLrQcs70e2Q1khBSjg2PlQiWR94MVbrc8o+
+# 34LCLLQQEgqs15/NxTZEwLKyAlMGjMi6VBZpqmLBk5vbXSKMirqWzMj499m16XtO
+# 4yFw+wAEkYnk4AlyeMG9N/RCkqUx+kQXix49zS8cM9MowXFpLZSCytO+Yy2pDOBO
+# w5auSipgLRUk3rKl5WflQeXd+QE4XJJuBxdPT/zRo6yuAk3PylO3CgeMXUgGHPEf
+# 2qZS6mWbF1tqA+Nr6V3VaAz+L4G4o8Lo3djm6oBeC6MkOD7eqIIshsgSv0yuWck0
+# legRoT5o4gHfBZXi5lgF4UVAW0dTEWFQ04zB77PEzJpxgm7SKxcmsCKJdFzYfSug
+# fc3C82dkSsHXygoiV19Stn4xBUSXZslLYHixDDuzXnyxDONhbnGZEERyNeaOp4S/
+# azFCfBN4VQ==
 # SIG # End signature block

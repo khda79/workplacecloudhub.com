@@ -70,6 +70,14 @@ The report contains aggregated evidence only and does not expose raw personal da
 
 All SmartFinOps Workplace user-facing report text and decision values are produced in English.
 
+The top license-utilization banner exposes three automatic review signals:
+
+- **Unused E3/F3 licenses**: no M365 service activity, Entra/AD sign-in, or recent Intune device presence was observed within the configured stale-user period (90 days by default). Mailbox size and mailbox measurement availability do not affect this signal.
+- **Possibly unused E3/F3 licenses**: recent technical presence exists, but no recent M365 service usage is observed and the measured mailbox is at or below 100 MB. Missing mailbox measurements are excluded only from this category.
+- **E3 licenses without observed E3 capability usage**: measured mailbox storage below 100 GB and no observed Microsoft 365 Apps desktop activation. This is a directional rightsizing signal only; it does not prove Frontline eligibility and never triggers an automatic downgrade. The E3 capability population can overlap with the unused populations and must not be added to them.
+
+Recent M365 service evidence includes aggregate and detailed Exchange, Email, OneDrive, Teams, SharePoint, Microsoft 365 Apps, Copilot, and Teams Phone activity. Entra/AD sign-ins and recent Intune device presence are tracked separately as technical presence.
+
 ## E3, F3 or no-license decision matrix
 
 `SmartFinOps_Workplace_UserLicenseDecision.csv` contains one consolidated decision per licensed user. The matrix crosses:
@@ -81,7 +89,27 @@ All SmartFinOps Workplace user-facing report text and decision values are produc
 - mailbox and OneDrive storage against the F3 2 GB limit;
 - recent ownership of an active Intune-managed device.
 
-E3 is recommended only when an E3 persona or a measured capability constraint supports it. F3 is recommended for an active frontline persona without a desktop-app or storage blocker. No-license findings are validation candidates, never automatic removal instructions. Shared mailboxes and special accounts always follow a separate review path.
+`DecisionClass` is generated automatically for every licensed user:
+
+- `Recommended`: strong evidence supports the recommendation;
+- `Conditional`: a prerequisite such as documented Frontline eligibility remains;
+- `Review`: the available evidence is insufficient or conflicting;
+- `Keep`: current licensing remains the appropriate output from the available evidence.
+
+SmartFinOps requires no separate manual input file. The detailed CSV contains the automatic class, recommendation, confidence, evidence, guardrails and indicative financial difference.
+
+`M365LicenseTargetPersona` is the starting signal for the approved base-license review paths:
+
+- current E3 with persona F3: conditional E3-to-F3 opportunity;
+- current E3 with persona `None`: possible no-license candidate;
+- current F3 with persona `None`: possible no-license candidate;
+- current F3 with persona E3: separate capability and under-licensing risk review.
+
+Persona alone never changes a license. E3-to-F3 cases require recent activity, no observed Microsoft 365 desktop activation, Exchange and OneDrive storage within the 2 GB F3 limits, and documented Frontline eligibility. If Frontline eligibility is not proven, the result remains a conditional review opportunity and not an executable downgrade.
+
+No-license findings require persona `None` plus corroborating disabled/blocked account state or absence of recent activity across the correlated sources. Active users whose persona is `None` are reported as conflicts and excluded from no-license savings. `LogonCount = 0` is not a no-license rule because the AD attribute can be unknown and is not replicated between domain controllers.
+
+No recommendation is an automatic license, mailbox or account change. Shared mailboxes and special accounts always follow a separate review path.
 
 Generic M365 inactivity does not prove that a Dynamics 365, Project, Power BI, Power Apps or other add-on license is unused. Those findings stay review-only and are not monetized without product-specific telemetry.
 
