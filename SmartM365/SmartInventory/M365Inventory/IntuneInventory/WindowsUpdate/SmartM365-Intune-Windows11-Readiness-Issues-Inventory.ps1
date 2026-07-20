@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.19
+1.20
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -23,8 +23,7 @@ param(
   [string]$OutputFolder='',
   [string]$LatestFolder='',
   [switch]$DisableSharePointUpload,
-  [switch]$SkipLegacyAliases,
-    [int]$MaxItems = 0
+  [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
@@ -43,7 +42,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.19"
+$ScriptVersion="1.20"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -192,9 +191,7 @@ function ExportIssues($rows){
   Assert-SmartM365CsvDataCompleteness -Data $rows -TimestampedPath $main -LatestPath $latest; $rows|Sort-Object PriorityScore,IssueCode,ObjectGUID_Norm|Add-SmartM365TenantKey | Export-Csv $main -NoTypeInformation -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
   $summary=@($rows|Group-Object IssueCode,Area,Potential_Issue,IssueCategory,PriorityScore,IsBlocking|Sort-Object Count -Descending|%{$p=$_.Name -split ', ',6; [pscustomobject]@{IssueCode=$p[0];Area=$p[1];Potential_Issue=$p[2];IssueCategory=$p[3];PriorityScore=[int]$p[4];IsBlocking=[bool]::Parse($p[5]);Count=$_.Count}})
   $sm=Join-Path $OutputFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Intune_Windows11_Readiness_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; $summary|Add-SmartM365TenantKey | Export-Csv $sm -NoTypeInformation -Encoding UTF8; CopyCsv $sm $sl
-  $files=@($main,$latest,$archive,$sm,$sl)
-  if(!$SkipLegacyAliases){$lm=Join-Path $OutputFolder 'Mig_Win11Migration_Issues_Expanded.csv'; $ll=Join-Path $LatestFolder 'Mig_Win11Migration_Issues_Expanded.csv'; CopyCsv $main $lm; CopyCsv $main $ll; $files+=@($lm,$ll)}
-  $files
+  @($main,$latest,$archive,$sm,$sl)
 }
 function PublishWeeklyHistory($files){
   if(!(CB $lc 'EnableWeeklyHistory' $true)){return @()}
@@ -247,7 +244,7 @@ try{
   AssertResolvedPath 'DataLastFolder' $DataLastFolder
   AssertResolvedPath 'OutputFolder' $OutputFolder
   AssertResolvedPath 'LatestFolder' $LatestFolder
-  $global:EnableSharePointUpload=CB $lc 'EnableSharePointUpload' $false; if($DisableSharePointUpload){$global:EnableSharePointUpload=$false}; if(!(CB $lc 'EmitLegacyPowerBIAlias' $true)){$SkipLegacyAliases=$true}
+  $global:EnableSharePointUpload=CB $lc 'EnableSharePointUpload' $false; if($DisableSharePointUpload){$global:EnableSharePointUpload=$false}
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
   Invoke-SmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LatestFolder) | Out-Null
@@ -791,8 +788,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZThPXbDjOYLbG
-# Zebn3DSsVhC7V0wnwHzB4jCQSIB7rKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATfPgXxkAzYBHT
+# wefRxE9Mv4ZtPJatDdQX1/Y+vCeur6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -925,31 +922,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMMtXeJVJZWzA6Np6FDM5njCcTVykiX8FpTzmAQmKl9FMA0GCSqG
-# SIb3DQEBAQUABIIBgKA6F1SLM8ASuH+KeWjdEbKC1c9DF84CZD9r181UIAgmHIcD
-# s+iw1i97yXa+oiFjBtsTeaUl5gxtU5/y/EPlgyefYsrvWARam24EGYjSZXqE0Bbj
-# WhGUTZE18mrWLL3jPBpH5W7ZOs1NubOC+iomx/fH7MBFcicYTHVeFzG3TvUEXeHK
-# I1v4iNOxzFm9RZmg+4RbRcq2cXK7Yu4bBGCiUv8S1lSMHyTDWuBrhuSMVOK9VAmm
-# cEjs78VS2r6rOmt6jMUzk/wgRiVO0ejcBl18PkLP/fAT0T6aGt2Bwk6N1RZtAOQ4
-# mSXK/Rn1FAawrSgjXh8XpVmfif41pTjjf7ISfXfs0h58CvzSoqnF0DefufeqqRFI
-# dotBB+h0ukGmAoUgzeIKRjzAFhF8/oJGL3Jvup3sBsFjhcbzr703sTk51vmYDEag
-# G9MhePAL4Qpv0d0Sf2A3P1CvfxnZ/pCxN5v3zX5D5BGna4Bi08ggQG+WQuFUBKz9
-# V9plfgZbGCRsSzSrLaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOftZISEM7XTjcmUlmrAtSU1/aOb92me77isRkUk8jHsMA0GCSqG
+# SIb3DQEBAQUABIIBgF1WDaGsuBKE1g4i2IrM5J99uomcRcxsX+Ty1OgR4ElBoOFZ
+# YA/5gCFIE+dunf/blu0kk1DlGZDDUSlM6kh/MxZGk0yVkOSgEtj7vamD279fsKJy
+# DGDkwvGMfshZEOXYnxQfsj46ZWbTIbg69a7COD02/uo6awkPtIpcqXqy2THHDBqP
+# eZlau9Zk0GgxxUhE/PokwtCPL+smKmYI1dH1GYUWFQSNfZvbR1X88zBMk2+Se0bz
+# WwUPjSFgCt32FZMxp/oG6b6X6m1iaXidb8VaiqUwBkzkojzLz6k0VggLfPVNSlvZ
+# vYhkq38NlI3CBUC9yHwl2484Ua74LmEflBN+kvh4y7OfUi00F3onDtd5t+VBcpiC
+# +2ViheSncx5QFks4CcEFAKIb2+KRBqvMzakLRHqJ7L5XUqzOgb1X0g72QyfbM/Qc
+# MV2lRj+MAOEKge+Cq05YoJN/pJGA30dSLiovWbjOnW7YrVtMzEEN/h1pTOKo2Fm2
+# eUVjFadwOTOOZ8jU26GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYyMjE0
-# NTlaMC8GCSqGSIb3DQEJBDEiBCCk1eV3igc/Md907+bYzjsKXF2pSGOocVkN/9gk
-# Ps1YQDANBgkqhkiG9w0BAQEFAASCAgCaWqjWyXls9x7gACU+t3tPeW7ZecWFLfhZ
-# Qfg/2/FHw+0oFTOMrCH4uKM3BYVeGLFGmF8i6FmW6xCzJy+8oxSAQh+kKF68H0Rv
-# KUg73n5dCzRig3RWrDiqnPKbV8EHHCcHjenDFnrorDkF0X3GnzUzakk0JCJK7dzD
-# 8ByKpUGAAGuaobsO+P4gkGpchf6HuWX/LokpC9eOrTE6enEnnRp9ek36HeOaT3kI
-# mXt8z8x4rQewtNiZFsS+5vetoUbLQVxycOOkUh2D4TVUOHg+1tef5mUNSxDIqYZX
-# J31aBfbVIquRmFA1UVEbNZU3o+55V96O8C9Neb0xq5EW1VDE5sa7ZdbOL4WE63Ys
-# YOGss2eo8vwvqn5PwwPuLpfPMgiyLPMPaPgbnrD+nGjDHa4GwpG53QQpXgRSTwwb
-# 3ToBiIM4j5rsChvIbPVzdQJ7+ZCrARCSQKXawT96c15wo9h1r7ToGVtWJR/9JomH
-# z0mMMLjZo+uU+1yRkzO5FxJHRBqOwRk5muQ40zFOIU3hD0IIT79CQzVNaFJr4tYb
-# v2BXJj3b/k1vCOnq9ZtO77+XoUGhOLr29y7LOwwgrqjM+yRlsqklNqljXDFwUZpL
-# yK7fcYcjFJ5SwDVMDI78MVGA02PDbXQlR4asYWy3jZleZz/XbBdKtDTEdIrIa3CZ
-# 83ipE0UZrA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAyMTAz
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCpj6b4vDpQu43Lz+L3M3K1r3xKkm6rPGZ3LIB7
+# uKjn+zANBgkqhkiG9w0BAQEFAASCAgBBHqL3UC5+VKcvxNoHfWT7rGh+OCeUol9z
+# knUdSETh/sqEyjIPZJfCz5lFX2/CkUMxHkvbziUn3Axg/1z/ZyO/urbT1DToP1CB
+# xP0PDnlxOaKnTDw1RsWAk6KYgMD44D9jHZujlvV/m5f2orawOgN0ePxBJiFeNAUE
+# 6yUvojUsrE3ckDL3GhpgnXZgb23v7n5Eu5iHckKN1yJBb6Fdf5n9IOgye5jzjpXX
+# VaYQnLz0Qy2JshmOIATC2HkG2qlMvhcH3bhQPiT6N/vfT64jCV6olfrRFfadvoMc
+# 7zOmt+vWOd9pXksYGfufXBu5lj3RnCw7eOsf/GZMKHhO7nKCAbXzIyPAiEN0Zj0r
+# AhzR6jkOja6sGUvocnbL4YWBfgSo2yTt49Grh1SgkLvEV2QD9HqnH9H9cX7OEQ+R
+# /ASGRs2KVEizjynukmF6QjLJPOyYiPQLFt78H9f9FJRPToxriJ5muHA9lNme3wg2
+# 1gZVI03NGK0YAFzmOqyMqwKB1f3b6QorRQ9Z1R0aoiJQBL0lkKobJ/ccXKYm27Vd
+# 5U+yJEzbXyQkAn+WqfZ1sEA0DbYzOzKVC9fRHDrB11hSYJG0I86K73iqjBgYIbPP
+# FCd9KAnxm19ZZ22oVlblTZGD5x82CapAWLLfjaTTtUZfMzDNhx9v4n8olk7hcyNu
+# Mob87zrFiA==
 # SIG # End signature block
