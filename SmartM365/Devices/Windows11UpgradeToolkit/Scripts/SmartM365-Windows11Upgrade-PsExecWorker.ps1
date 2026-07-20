@@ -7,7 +7,7 @@
     the target device still receives only SmartM365-Invoke-Windows11UpgradeRepair.ps1.
 
 .VERSION
-0.1.28
+0.1.29
 #>
 
 #requires -Version 5.1
@@ -646,60 +646,91 @@ function Copy-CentralEvidenceFile {
         $destination = Join-Path $TargetRoot $RelativePath
         $destinationParent = Split-Path -Parent $destination
         if (-not [string]::IsNullOrWhiteSpace($destinationParent)) { New-Directory -Path $destinationParent }
-        Copy-Item -LiteralPath $SourcePath -Destination $destination -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $SourcePath -Destination $destination -Force -ErrorAction Stop
     }
     catch {
         Add-CentralLogCollectionNote -TargetPath $TargetRoot -Message ("Failed to copy file: {0}; Error={1}" -f $SourcePath,$_.Exception.Message)
     }
 }
 
-function Copy-CentralEvidenceDirectorySmallFiles {
+function Resolve-RemoteEvidenceSourcePath {
     param(
-        [Parameter(Mandatory = $true)][string]$SourceRoot,
-        [Parameter(Mandatory = $true)][string]$TargetRoot,
-        [Parameter(Mandatory = $true)][string]$RelativeRoot,
-        [long]$MaxBytes = $script:CentralLogMaxStandardFileBytes
+        [Parameter(Mandatory = $true)][string]$RemoteBaseShare,
+        [Parameter(Mandatory = $true)][string]$RemoteBaseDirectory,
+        [AllowNull()][string]$EndpointLocalPath
     )
 
-    if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) { return }
-
-    $root = [System.IO.Path]::GetFullPath($SourceRoot).TrimEnd('\')
-    foreach ($file in @(Get-ChildItem -LiteralPath $SourceRoot -File -Recurse -ErrorAction SilentlyContinue)) {
-        $fileFullName = [System.IO.Path]::GetFullPath($file.FullName)
-        $relativeChild = $fileFullName.Substring($root.Length).TrimStart('\')
-        $relative = Join-Path $RelativeRoot $relativeChild
-        Copy-CentralEvidenceFile -SourcePath $file.FullName -TargetRoot $TargetRoot -RelativePath $relative -MaxBytes $MaxBytes
+    if ([string]::IsNullOrWhiteSpace($EndpointLocalPath)) { return '' }
+    try {
+        $localBase = [System.IO.Path]::GetFullPath($RemoteBaseDirectory).TrimEnd('\')
+        $localPath = [System.IO.Path]::GetFullPath($EndpointLocalPath)
+        if (-not $localPath.StartsWith(($localBase + '\'), [System.StringComparison]::OrdinalIgnoreCase)) { return '' }
+        $relative = $localPath.Substring($localBase.Length).TrimStart('\')
+        if ([string]::IsNullOrWhiteSpace($relative)) { return $RemoteBaseShare }
+        return (Join-Path $RemoteBaseShare $relative)
     }
+    catch { return '' }
 }
 
 function Collect-StandardRemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$RemoteBaseShare,
-        [Parameter(Mandatory = $true)][string]$TargetPath
+        [Parameter(Mandatory = $true)][string]$RemoteBaseDirectory,
+        [Parameter(Mandatory = $true)][string]$TargetPath,
+        [AllowNull()]$LastRun
     )
 
-    Add-CentralLogCollectionNote -TargetPath $TargetPath -Message ("CentralLogCollectionMode=Standard; copied selected files only. Full logs remain on target under {0}." -f $RemoteBaseShare)
+    Add-CentralLogCollectionNote -TargetPath $TargetPath -Message ("CentralLogCollectionMode=Standard; copied current-run evidence with short destination names. Full logs remain on target under {0}." -f $RemoteBaseShare)
 
     Copy-CentralEvidenceFile -SourcePath (Join-Path $RemoteBaseShare 'LastRun.json') -TargetRoot $TargetPath -RelativePath 'LastRun.json' -MaxBytes 1MB
 
-    $logsRoot = Join-Path $RemoteBaseShare 'Logs'
-    if (Test-Path -LiteralPath $logsRoot -PathType Container) {
-        foreach ($file in @(Get-ChildItem -LiteralPath $logsRoot -File -ErrorAction SilentlyContinue)) {
-            Copy-CentralEvidenceFile -SourcePath $file.FullName -TargetRoot $TargetPath -RelativePath (Join-Path 'Logs' $file.Name) -MaxBytes 10MB
+    $selectedEvidence = @(
+        [pscustomobject]@{ Property = 'LogPath'; RelativePath = 'Endpoint.log'; MaxBytes = 10MB; FallbackRoot = 'Logs'; FallbackFilter = 'SmartM365-Invoke-Windows11UpgradeRepair_*.log' },
+        [pscustomobject]@{ Property = 'CsvPath'; RelativePath = 'Result.csv'; MaxBytes = 2MB; FallbackRoot = 'Output'; FallbackFilter = 'SmartM365_Windows11Upgrade_*.csv' }
+    )
+    foreach ($evidence in $selectedEvidence) {
+        $sourcePath = ''
+        if ($LastRun -and $LastRun.PSObject.Properties[$evidence.Property]) {
+            $sourcePath = Resolve-RemoteEvidenceSourcePath -RemoteBaseShare $RemoteBaseShare -RemoteBaseDirectory $RemoteBaseDirectory -EndpointLocalPath ([string]$LastRun.PSObject.Properties[$evidence.Property].Value)
         }
-
-        $setupLogRoot = Join-Path $logsRoot 'SetupUpgrade'
-        if (Test-Path -LiteralPath $setupLogRoot -PathType Container) {
-            foreach ($file in @(Get-ChildItem -LiteralPath $setupLogRoot -File -ErrorAction SilentlyContinue)) {
-                $copy = ($file.Name -like 'Robocopy_*.log' -or $file.Name -like 'SetupDiag*.log' -or $file.Extension -in @('.json','.xml','.txt','.log'))
-                if ($copy) {
-                    Copy-CentralEvidenceFile -SourcePath $file.FullName -TargetRoot $TargetPath -RelativePath (Join-Path 'Logs\SetupUpgrade' $file.Name) -MaxBytes $script:CentralLogMaxStandardFileBytes
-                }
+        if ([string]::IsNullOrWhiteSpace($sourcePath) -or -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            $fallbackRoot = Join-Path $RemoteBaseShare $evidence.FallbackRoot
+            if (Test-Path -LiteralPath $fallbackRoot -PathType Container) {
+                $fallback = Get-ChildItem -LiteralPath $fallbackRoot -Filter $evidence.FallbackFilter -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTimeUtc -Descending |
+                    Select-Object -First 1
+                if ($fallback) { $sourcePath = [string]$fallback.FullName }
             }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($sourcePath)) {
+            Copy-CentralEvidenceFile -SourcePath $sourcePath -TargetRoot $TargetPath -RelativePath $evidence.RelativePath -MaxBytes $evidence.MaxBytes
+            Add-CentralLogCollectionNote -TargetPath $TargetPath -Message ("Selected evidence: {0}; Source={1}" -f $evidence.RelativePath,$sourcePath)
         }
     }
 
-    Copy-CentralEvidenceDirectorySmallFiles -SourceRoot (Join-Path $RemoteBaseShare 'Output') -TargetRoot $TargetPath -RelativeRoot 'Output' -MaxBytes 2MB
+    $minimumSetupEvidenceUtc = (Get-Date).ToUniversalTime().AddHours(-2)
+    if ($LastRun -and $LastRun.PSObject.Properties['StartTimeUtc'] -and -not [string]::IsNullOrWhiteSpace([string]$LastRun.StartTimeUtc)) {
+        try { $minimumSetupEvidenceUtc = ([datetime]::Parse([string]$LastRun.StartTimeUtc, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)).ToUniversalTime().AddMinutes(-5) }
+        catch { $minimumSetupEvidenceUtc = (Get-Date).ToUniversalTime().AddHours(-2) }
+    }
+    $logsRoot = Join-Path $RemoteBaseShare 'Logs'
+    if (Test-Path -LiteralPath $logsRoot -PathType Container) {
+        $setupLogRoot = Join-Path $logsRoot 'SetupUpgrade'
+        if (Test-Path -LiteralPath $setupLogRoot -PathType Container) {
+            $setupFiles = @(Get-ChildItem -LiteralPath $setupLogRoot -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTimeUtc -ge $minimumSetupEvidenceUtc -and ($_.Name -like 'Robocopy_*.log' -or $_.Name -like 'SetupDiag*' -or $_.Extension -in @('.json','.xml','.txt','.log')) } |
+                Sort-Object LastWriteTimeUtc -Descending |
+                Select-Object -First 12)
+            $setupIndex = 0
+            foreach ($file in $setupFiles) {
+                $setupIndex++
+                $safeExtension = if ($file.Extension -in @('.json','.xml','.txt','.log')) { $file.Extension.ToLowerInvariant() } else { '.dat' }
+                $relativePath = Join-Path 'Setup' ("S{0:D2}{1}" -f $setupIndex,$safeExtension)
+                Copy-CentralEvidenceFile -SourcePath $file.FullName -TargetRoot $TargetPath -RelativePath $relativePath -MaxBytes $script:CentralLogMaxStandardFileBytes
+                Add-CentralLogCollectionNote -TargetPath $TargetPath -Message ("Selected setup evidence: {0}; Source={1}" -f $relativePath,$file.FullName)
+            }
+        }
+    }
 }
 function Get-RemoteEndpointLatestLogPath {
     param(
@@ -820,7 +851,8 @@ function Collect-RemoteEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$ComputerName,
         [Parameter(Mandatory = $true)][int]$Cycle,
-        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteLogCollectionFailed','Errors')][string]$Bucket
+        [Parameter(Mandatory = $true)][ValidateSet('Success','ADMIN_SHARE_UNREACHABLE','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteLogCollectionFailed','Errors')][string]$Bucket,
+        [AllowNull()]$LastRun
     )
 
     if ($NoCentralLogCollection) { return '' }
@@ -843,7 +875,7 @@ function Collect-RemoteEvidence {
         }
     }
     else {
-        Collect-StandardRemoteEvidence -RemoteBaseShare $remoteBaseShare -TargetPath $target
+        Collect-StandardRemoteEvidence -RemoteBaseShare $remoteBaseShare -RemoteBaseDirectory $RemoteBaseDir -TargetPath $target -LastRun $LastRun
     }
     return $target
 }
@@ -903,6 +935,8 @@ $result = [ordered]@{
     PsExecLogPath = $logPath
     JobErrorMessage = ''
 }
+$lastRun = $null
+$lastRunForEvidence = $null
 
 try {
     Add-Content -LiteralPath $logPath -Value ("[{0}] Starting {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Computer) -Encoding UTF8
@@ -1078,6 +1112,7 @@ try {
         $lastRunFreshness = Test-LastRunFreshness -LastRunItem $lastRunItem -LastRun $lastRun -WorkerStartedUtc $workerStartedUtc
         if ($lastRunFreshness.IsFresh) {
             Update-ResultFromLastRun -Result $result -LastRun $lastRun
+            $lastRunForEvidence = $lastRun
         }
         else {
             $previousStatus = $result.LauncherStatus
@@ -1100,7 +1135,7 @@ try {
 
     $centralLogBucket = Get-CentralLogBucket -Result $result
     try {
-        $result.RemoteLogsPath = Collect-RemoteEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket $centralLogBucket
+        $result.RemoteLogsPath = Collect-RemoteEvidence -ComputerName $Computer -Cycle $CycleNumber -Bucket $centralLogBucket -LastRun $lastRunForEvidence
     }
     catch {
         $centralLogError = "Central log collection failed: $($_.Exception.Message)"
