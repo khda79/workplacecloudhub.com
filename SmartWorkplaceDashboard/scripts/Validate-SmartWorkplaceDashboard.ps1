@@ -1,4 +1,4 @@
-# Version: 4.2.0
+# Version: 4.3.0
 [CmdletBinding()]
 param(
     [string]$DashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
@@ -19,7 +19,7 @@ $approvedSummary=@($selection.includeOverrides);foreach($f in $files){if(-not$f.
 $expectedNames=@($files|ForEach-Object{[IO.Path]::GetFileNameWithoutExtension($_)});$tables=@($model.model.tables);$actualNames=@($tables.name)
 $missing=@($expectedNames|Where-Object{$actualNames-notcontains$_});$extra=@($actualNames|Where-Object{$expectedNames-notcontains$_});if($missing.Count){throw "Missing source tables: $($missing-join', ')"};if($extra.Count){throw "Non-source tables found: $($extra-join', ')"};if($tables.Count-ne89){throw "Expected exactly 89 source tables; found $($tables.Count)"}
 $old=@('DimUser','DimDevice','DimLicenseSku','FactAction','FactBackupMailbox','FactDataQuality','FactDeviceCompliance','FactMailbox','FactSharePointSite','FactSourceFreshness','FactSyncHealth','FactTeam','FactUpgradeEligibility','FactUserActivity','FactUserLicense','FactWindowsUpdate','HistoryCoverage','DashboardMetrics','Measures');$present=@($actualNames|Where-Object{$old-contains$_});if($present.Count){throw "Legacy work tables remain: $($present-join', ')"}
-$metadata=@('__SnapshotDate','__SnapshotDateTime','__SnapshotPeriod','__IsCurrent','__SourceFile','__SourceFolder');$technical=@('__SkuPlanKey');$dataRoot=if($env:SMART_M365_DATA_ROOT){$env:SMART_M365_DATA_ROOT}else{'C:\SmartM365\DATA'};$dataLast=Join-Path $dataRoot 'DATA-LAST'
+$metadata=@('__SnapshotDate','__SnapshotDateTime','__SnapshotPeriod','__IsCurrent','__SourceFile','__SourceFolder');$technical=@('__SkuPlanKey');$derived=@('IsEnabled','PlanStatus','IsServicePlanActive');$dataRoot=if($env:SMART_M365_DATA_ROOT){$env:SMART_M365_DATA_ROOT}else{'C:\SmartM365\DATA'};$dataLast=Join-Path $dataRoot 'DATA-LAST'
 foreach ($f in $files) {
     $name = [IO.Path]::GetFileNameWithoutExtension($f)
     $t = $tables | Where-Object name -eq $name | Select-Object -First 1
@@ -31,19 +31,25 @@ foreach ($f in $files) {
     }
     $csv = Join-Path $dataLast $f
     $cols = @($t.columns.name)
-    $base = @($cols | Where-Object { $metadata -notcontains $_ -and $technical -notcontains $_ })
+    $base = @($cols | Where-Object { $metadata -notcontains $_ -and $technical -notcontains $_ -and $derived -notcontains $_ })
     $overrideProperty = if ($null -ne $selection.schemaOverrides) { $selection.schemaOverrides.PSObject.Properties[$f] } else { $null }
-    if (Test-Path -LiteralPath $csv) {
+    if ($null -ne $overrideProperty) {
+        $overrideHeader = @($overrideProperty.Value.columns)
+        if (($overrideHeader -join "`u{001f}") -ne ($base -join "`u{001f}")) { throw "Schema override/model columns differ for $name" }
+    }
+    if ($CheckSourceFiles) {
+        if (-not (Test-Path -LiteralPath $csv)) { throw "Missing source CSV: $csv" }
         $line = Get-Content -LiteralPath $csv -TotalCount 1
         $delimiter = Get-Delimiter $line
         $header = @(Get-CsvHeader $csv $delimiter)
         if (($header -join "`u{001f}") -ne ($base -join "`u{001f}")) { throw "CSV/model columns differ for $name" }
     }
-    elseif ($null -ne $overrideProperty) {
-        $overrideHeader = @($overrideProperty.Value.columns)
-        if (($overrideHeader -join "`u{001f}") -ne ($base -join "`u{001f}")) { throw "Schema override/model columns differ for $name" }
+    elseif ($null -eq $overrideProperty -and (Test-Path -LiteralPath $csv)) {
+        $line = Get-Content -LiteralPath $csv -TotalCount 1
+        $delimiter = Get-Delimiter $line
+        $header = @(Get-CsvHeader $csv $delimiter)
+        if (($header -join "`u{001f}") -ne ($base -join "`u{001f}")) { throw "CSV/model columns differ for $name" }
     }
-    elseif ($CheckSourceFiles) { throw "Missing source CSV: $csv" }
     foreach ($m in $metadata) { if ($cols -notcontains $m) { throw "Missing snapshot metadata $name[$m]" } }}
 $relationships=@($model.model.relationships)
 if($relationships.Count-ne2){throw "Expected exactly 2 validated service-plan relationships; found $($relationships.Count)"}
@@ -62,12 +68,20 @@ foreach($tableName in @('M365_Licenses_UserServicePlanStates','M365_Licenses_Ser
     $table=$tables|Where-Object name -eq $tableName|Select-Object -First 1
     $keyColumn=$table.columns|Where-Object name -eq '__SkuPlanKey'|Select-Object -First 1
     if($null-eq$keyColumn -or $keyColumn.dataType-ne'string' -or $keyColumn.isHidden-ne$true){throw "Missing hidden service-plan key on $tableName"}
-    if([string]$table.partitions.source.expression -notmatch 'Table.AddColumn\(Source, "__SkuPlanKey"'){throw "Service-plan key is not generated in Power Query for $tableName"}
+    if([string]$table.partitions.source.expression -notmatch 'Table.AddColumn\([^,]+, "__SkuPlanKey"'){throw "Service-plan key is not generated in Power Query for $tableName"}
+}
+$stateTable=$tables|Where-Object name -eq 'M365_Licenses_UserServicePlanStates'|Select-Object -First 1
+$stateColumns=@{};foreach($column in $stateTable.columns){$stateColumns[[string]$column.name]=$column}
+foreach($expected in @{'StateCode'='string';'IsEnabled'='boolean';'PlanStatus'='string';'IsServicePlanActive'='boolean'}.GetEnumerator()){
+    if(-not$stateColumns.ContainsKey($expected.Key)-or$stateColumns[$expected.Key].dataType-ne$expected.Value){throw "Service-plan compatibility field regression: $($expected.Key)"}
+}
+$stateExpression=[string]$stateTable.partitions.source.expression
+foreach($fragment in @('Table.AddColumn(Source, "IsEnabled"','Table.AddColumn(WithIsEnabled, "PlanStatus"','Table.AddColumn(WithPlanStatus, "IsServicePlanActive"','List.Contains({"A","PA","PI","PP","E"},State)','State="A" then "Success"','State="D" then "Disabled"','State="PA" then "PendingActivation"','State="PI" then "PendingInput"','State="PP" then "PendingProvisioning"','State="E" then "Error"','Text.StartsWith(State,"EN:"','Text.StartsWith(State,"DIS:"','Text.Upper(Text.Trim(Text.From([StateCode])))="A"')){
+    if(-not$stateExpression.Contains($fragment,[StringComparison]::Ordinal)){throw "StateCode compatibility mapping regression: $fragment"}
 }
 $typedExpectations = @{
     'M365_Users_Active' = @{ 'AccountEnabled' = 'boolean' }
     'M365_Users_Activity' = @{ 'HasAnyM365Activity' = 'boolean'; 'LastActivityDate' = 'dateTime' }
-    'M365_Licenses_UserServicePlanStates' = @{ 'IsEnabled' = 'boolean' }
     'Intune_Devices_Inventory' = @{ 'IsCompliant' = 'boolean'; 'LastSyncDateTime' = 'dateTime' }
     'Intune_Windows11_Readiness_Issues' = @{ 'IsBlocking' = 'boolean' }
     'M365_SPO_Sites' = @{ 'IsInactive' = 'boolean'; 'IsOrphaned' = 'boolean' }
@@ -107,7 +121,7 @@ $loaderExpression=[string](($model.model.expressions|Where-Object name -eq 'fnLo
 if(([regex]::Matches($loaderExpression,'\(')).Count -ne ([regex]::Matches($loaderExpression,'\)')).Count){throw 'Unbalanced parentheses in fnLoadSourceTable'}
 $forbidden=@('SmartWorkplaceCMDB','LocalDateTable_','C:\Users\');$publishable=@(Get-ChildItem -LiteralPath $DashboardRoot -File -Recurse|Where-Object{$_.FullName -notmatch '\\\.pbi\\' -and $_.Name -ne 'LOCAL_MEMORY.md' -and $_.FullName -ne $PSCommandPath -and $_.Extension -in @('.js','.ps1','.json','.bim','.pbip','.pbir','.pbism','.pq','.md')});foreach($p in $publishable){$text=Get-Content -LiteralPath $p.FullName -Raw;foreach($term in $forbidden){if($text.Contains($term,[StringComparison]::OrdinalIgnoreCase)){throw "Forbidden dependency '$term' in $($p.FullName)"}}}
 $builder=Join-Path $DashboardRoot 'scripts\Build-SmartWorkplaceDashboard.js';& node --check $builder;if($LASTEXITCODE-ne0){throw 'Builder JavaScript syntax check failed'}
-Write-Host "OK SmartWorkplaceDashboard: 89 source tables, $($measureNames.Count) measures, 15 pages, $($visualFiles.Count) visuals, compact service-plan model validated."
+Write-Host "OK SmartWorkplaceDashboard: 89 source tables, $($measureNames.Count) measures, 15 pages, $($visualFiles.Count) visuals, StateCode service-plan compatibility validated."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
