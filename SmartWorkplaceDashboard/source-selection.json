@@ -105,14 +105,10 @@
       "delimiter": ",",
       "columns": [
         "TenantKey",
-        "OrganizationKey",
-        "EnvironmentKey",
-        "TenantId",
         "UserId",
         "SkuId",
         "PlanId",
-        "IsEnabled",
-        "PlanStatus"
+        "StateCode"
       ]
     },
     "M365_Licenses_ServicePlans_Catalog.csv": {
