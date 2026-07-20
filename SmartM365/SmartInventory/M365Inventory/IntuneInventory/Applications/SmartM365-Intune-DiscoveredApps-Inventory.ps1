@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.22
+    Version : 1.23
 
 .VERSION
-1.22
+1.23
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.22
+    Version : 1.23
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -292,7 +292,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.45' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.47' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     exit 1
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.22"
+$ScriptVersion = "1.23"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -402,6 +402,21 @@ function Get-ShortGraphErrorMessage {
     return $message
 }
 
+function Get-DiscoveredAppsGraphHttpErrorMessage {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Response,
+        [int]$StatusCode
+    )
+
+    $message = ''
+    try { $message = [string]$Response.error.message } catch {}
+    if ([string]::IsNullOrWhiteSpace($message)) { $message = "HTTP $StatusCode" }
+    $message = ($message -replace '\s+', ' ').Trim()
+    if ($message.Length -gt 500) { return ($message.Substring(0, 500) + '...') }
+    return $message
+}
+
 function Get-GraphRetryDelaySeconds {
     [CmdletBinding()]
     param(
@@ -479,7 +494,23 @@ function Invoke-GraphPagedRequest {
         for ($attempt = 1; -not $success -and $attempt -le $MaxRetries; $attempt++) {
             try {
                 $script:Stat_GraphCalls++
-                $response = Invoke-MgGraphRequest -Method GET -Uri $currentUri -OutputType PSObject -ErrorAction Stop
+                $graphStatusCode = $null
+                $response = Invoke-MgGraphRequest -Method GET -Uri $currentUri -OutputType PSObject -SkipHttpErrorCheck -StatusCodeVariable graphStatusCode -ErrorAction Stop
+                $statusCode = 0
+                try { $statusCode = [int]$graphStatusCode } catch {}
+                if ($statusCode -lt 200 -or $statusCode -ge 300) {
+                    $message = Get-DiscoveredAppsGraphHttpErrorMessage -Response $response -StatusCode $statusCode
+                    $isTransient = $statusCode -in @(408, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+                    if (-not $isTransient -or $attempt -ge $MaxRetries) {
+                        throw ("Graph request failed. Status={0}; Attempts={1}; Uri={2}; Message={3}" -f $statusCode, $attempt, $currentUri, $message)
+                    }
+
+                    $retryAfter = Get-GraphRetryDelaySeconds -ErrorRecord $null -Attempt $attempt -DefaultSeconds $DefaultRetrySeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+                    $script:Stat_ThrottleRetries++
+                    WriteLog -Message ("Graph transient failure on [$currentUri]. Status={0}; attempt {1}/{2}; waiting {3}s." -f $statusCode, $attempt, $MaxRetries, $retryAfter) 'INFO'
+                    Start-Sleep -Seconds $retryAfter
+                    continue
+                }
 
                 if ($null -ne $response.value) {
                     foreach ($item in $response.value) { $allItems.Add($item) }
@@ -494,6 +525,7 @@ function Invoke-GraphPagedRequest {
                 $statusCode = $null
                 try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
                 $message = Get-ShortGraphErrorMessage -ErrorRecord $_
+                if (-not $statusCode -and $message -match 'TooManyRequests|\b429\b') { $statusCode = 429 }
                 $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
 
                 if (-not $isTransient -or $attempt -ge $MaxRetries) {
@@ -562,7 +594,25 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
             $body = @{ requests = $requests } | ConvertTo-Json -Depth 6
             try {
                 $script:Stat_GraphCalls++
-                $batchResponse = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+                $batchStatusCode = $null
+                $batchResponse = Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -OutputType PSObject -SkipHttpErrorCheck -StatusCodeVariable batchStatusCode -ErrorAction Stop
+                $batchHttpStatus = 0
+                try { $batchHttpStatus = [int]$batchStatusCode } catch {}
+                if ($batchHttpStatus -lt 200 -or $batchHttpStatus -ge 300) {
+                    $message = Get-DiscoveredAppsGraphHttpErrorMessage -Response $batchResponse -StatusCode $batchHttpStatus
+                    $isTransient = $batchHttpStatus -in @(408, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+                    if ($isTransient -and $attempt -lt $MaxRetries) {
+                        $retryAfter = Get-GraphRetryDelaySeconds -ErrorRecord $null -Attempt $attempt -DefaultSeconds $script:GraphRetryDefaultSeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+                        $script:Stat_ThrottleRetries++
+                        WriteLog -Message ("Discovered Apps relation batch transient failure at app offset {0}; HTTP={1}; attempt {2}/{3}; retrying {4} app(s) in {5}s." -f $offset, $batchHttpStatus, $attempt, $MaxRetries, $pendingApps.Count, $retryAfter) 'INFO'
+                        Start-Sleep -Seconds $retryAfter
+                        continue
+                    }
+
+                    $script:Stat_BatchFallbackApps += $pendingApps.Count
+                    WriteLog -Message ("Discovered Apps relation batch path exhausted at app offset {0}; HTTP={1}; Attempts={2}. Sequential fallback will be used for {3} app(s): {4}" -f $offset, $batchHttpStatus, $attempt, $pendingApps.Count, $message) 'INFO'
+                    break
+                }
             }
             catch {
                 $statusCode = $null
@@ -1272,19 +1322,26 @@ function Complete-DiscoveredAppsStreamExport {
     if ($actualHeader -cne $expectedHeader) {
         throw "AppDeviceRelations publication gate failed: unexpected CSV header '$actualHeader'; expected '$expectedHeader'."
     }
-    $validationSample = @(Import-Csv -LiteralPath $PartialPath | Select-Object -First 1)
-    Assert-SmartM365CsvDataCompleteness `
-        -Data $validationSample `
-        -Columns @('TenantKey', 'AppId', 'DeviceId') `
-        -BaseFileName $BaseFileName `
-        -TimestampedPath $TimestampedPath `
-        -LatestPath (Join-Path -Path $GlobalPath -ChildPath ("$BaseFileName.csv"))
+    $criticalFields = @('TenantKey', 'AppId', 'DeviceId')
+    $validationSample = @(
+        Get-Content -LiteralPath $PartialPath -TotalCount 2 -ErrorAction Stop |
+            ConvertFrom-Csv
+    )
+    if ($validationSample.Count -ne 1) {
+        throw "AppDeviceRelations publication gate failed: expected one final validation sample row, got $($validationSample.Count)."
+    }
+    foreach ($criticalField in $criticalFields) {
+        if ([string]::IsNullOrWhiteSpace([string]$validationSample[0].$criticalField)) {
+            throw "AppDeviceRelations publication gate failed: final validation sample field '$criticalField' is empty."
+        }
+    }
+    WriteLog -Message ("AppDeviceRelations final critical-field validation passed: SampleRows={0}; CriticalFields={1}." -f $validationSample.Count, ($criticalFields -join ', ')) 'INFO'
 
     $actualDataRows = Get-DiscoveredAppsCsvDataRowCount -Path $PartialPath
     if ($actualDataRows -ne $ExpectedDataRows) {
         throw "AppDeviceRelations publication gate failed: physical CSV rows=$actualDataRows; expected rows=$ExpectedDataRows. The partial CSV is preserved for diagnosis."
     }
-    WriteLog -Message ("AppDeviceRelations physical row-count validation passed: Rows={0}." -f $actualDataRows) 'INFO'
+    WriteLog -Message ("AppDeviceRelations physical row-count validation passed: PhysicalRows={0}." -f $actualDataRows) 'INFO'
 
     Copy-Item -LiteralPath $PartialPath -Destination $TimestampedPath -Force
     $localLatestPath = Join-Path -Path $OutputPath -ChildPath ("$BaseFileName.csv")
