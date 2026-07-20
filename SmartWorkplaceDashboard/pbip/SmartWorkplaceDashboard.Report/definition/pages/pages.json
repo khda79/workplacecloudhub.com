@@ -1,0 +1,21 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/pagesMetadata/1.0.0/schema.json",
+  "pageOrder": [
+    "workplaceoverview000001",
+    "identitylicensing000002",
+    "licenseserviceplans0015",
+    "devicescompliance000003",
+    "experienceapplications004",
+    "windowslifecycle000005",
+    "collaborationcontent006",
+    "exchangeonline000007",
+    "exchangehybridoverview008",
+    "exchangehybridoperations009",
+    "migrationoperations010",
+    "m365backup000011",
+    "exchangeonpreminfra012",
+    "evolutioncapacity000013",
+    "datatrustcatalog000014"
+  ],
+  "activePageName": "workplaceoverview000001"
+}
