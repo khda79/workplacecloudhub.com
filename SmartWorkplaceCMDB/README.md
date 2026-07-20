@@ -470,6 +470,24 @@ arguments. `Launchers/Cloud` contains the cloud-source launchers plus the full
 validation and collection launchers. `Launchers/ActiveDirectory` contains the
 AD-only launchers. All of them are intended for the same collection host.
 
+### Scheduled Orchestrator Installation
+
+Install or update the unattended daily task through the guided launcher:
+
+```powershell
+.\SmartWorkplaceCMDB\Launchers\Orchestrator\Start-SmartWorkplaceCMDB-OrchestratorScheduledTask-Installer.cmd
+```
+
+The installer is preview-only until `-Execute` is confirmed. It registers
+`\WCH\SmartWorkplaceCMDB Orchestrator - <Tenant>` under a dedicated Windows
+account and runs PowerShell 7 with `-Tenant <Tenant> -Collect`. The default
+schedule is daily at 02:00. `SYSTEM` and `LocalSystem` are refused because
+the task identity needs its CurrentUser application certificate plus AD, UNC,
+and SharePoint access. The password is requested only through `Get-Credential`.
+
+See `Launchers/Orchestrator/README.md` for preview, installation, immediate
+start, and removal commands.
+
 ## Validation
 
 Run the autonomous test suite:
