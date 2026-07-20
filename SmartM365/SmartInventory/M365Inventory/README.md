@@ -55,7 +55,12 @@ matching Summary and compact relation have both been published successfully in a
 normal run. Its timestamped and existing WeeklyHistory copies are preserved, and a
 `-MaxItems` run never removes canonical files. The first normal compact run can
 reuse and project a recent legacy DeviceDetail cache, avoiding an unnecessary full
-Graph refresh.
+Graph refresh. Resume checkpoints include the committed partial-file length, so
+uncommitted trailing rows are rolled back before collection continues. An incomplete
+cache manifest is rebuilt from the compact CSV, allowing valid app relations to be
+reused while mismatched app counts are recollected. Same-week Summary and relation
+snapshots are refreshed, while unchanged legacy WeeklyHistory files remain preserved
+without being uploaded again.
 ## Microsoft 365 Usage Reports
 
 `Usage/SmartM365-M365UserActivity-Inventory.ps1` exports Microsoft Graph Reports data and publishes stable CSV files to the tenant `DATA-LAST` folder.
