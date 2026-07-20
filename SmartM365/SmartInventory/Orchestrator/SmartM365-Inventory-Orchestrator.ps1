@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.5
+1.5.7
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.5
+    Version : 1.5.7
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.6"
+$ScriptVersion = "1.5.7"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -3355,7 +3355,8 @@ function Update-OrchestratorElectionPlan {
             }
         }
 
-        $preserveOwners = $null -ne $sharedPlan -and -not $script:ElectionRebalanceRequested
+        $preserveOwners = -not $script:ElectionRebalanceRequested -and
+            (Test-SmartM365OrchestratorCanPreserveOwners -PreviousPlan $sharedPlan -ServerCapabilities $capabilities)
         $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -ServerJobPolicies $jobPolicies -DurationMinutesByJob (Get-OrchestratorDurationMedians) -PreviousPlan $sharedPlan -PreservePreviousOwners:$preserveOwners -NowUtc $nowUtc
         $assignmentsChanged = -not (Test-OrchestratorElectionPlanAssignmentsEqual -Left $sharedPlan -Right $plan)
         if (-not $assignmentsChanged -and $null -ne $sharedPlan -and $sharedPlan.PSObject.Properties['PlanId'] -and -not [string]::IsNullOrWhiteSpace([string]$sharedPlan.PlanId)) {
@@ -3368,7 +3369,14 @@ function Update-OrchestratorElectionPlan {
         $script:ElectionRebalanceRequested = $false
 
         if ($assignmentsChanged) {
-            Write-OrchestratorLog -Message ("Election plan {0} changed from {1} live capable servers; assignments={2}; unassignedGroups={3}." -f $plan.PlanId, $capabilities.Count, @($plan.Assignments).Count, @($plan.UnassignedGroups).Count)
+            $ownerSummary = @(
+                foreach ($serverLoad in @($plan.ServerLoads | Sort-Object ServerName)) {
+                    $serverName = [string]$serverLoad.ServerName
+                    $assignmentCount = @($plan.Assignments | Where-Object { [string]$_.OwnerServer -eq $serverName }).Count
+                    "{0}:{1} jobs/{2:N1} min-day" -f $serverName, $assignmentCount, [double]$serverLoad.LoadMinutesPerDay
+                }
+            ) -join '; '
+            Write-OrchestratorLog -Message ("Election plan {0} changed from {1} live capable servers; assignments={2}; unassignedGroups={3}; owners={4}." -f $plan.PlanId, $capabilities.Count, @($plan.Assignments).Count, @($plan.UnassignedGroups).Count, $ownerSummary)
             foreach ($group in @($plan.UnassignedGroups)) {
                 Write-OrchestratorLog -Message ("Election left group {0} unassigned: {1}" -f $group.GroupKey, $group.Reason) -Level ERROR
             }
