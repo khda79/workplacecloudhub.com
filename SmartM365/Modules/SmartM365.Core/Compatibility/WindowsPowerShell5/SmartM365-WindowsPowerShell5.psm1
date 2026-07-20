@@ -2959,7 +2959,10 @@ function ExportAndCopyCsvFromConvert {
         [string]$Delimiter = ",",
 
         [Parameter()]
-        [switch]$NoTenantKey
+        [switch]$NoTenantKey,
+
+        [Parameter()]
+        [switch]$SkipWeeklyHistory
     )
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -3037,12 +3040,15 @@ function ExportAndCopyCsvFromConvert {
         }
 
         $historySourcePath = if (Test-Path -LiteralPath $csvFilePath3 -PathType Leaf) { $csvFilePath3 } else { $csvFilePath2 }
-        if (Test-SmartM365MaxItemsMode) {
-        WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
-    }
-    else {
-        Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
-    }
+        if ($SkipWeeklyHistory) {
+            WriteLog -Message 'Automatic WeeklyHistory publication skipped for this CSV; the caller will publish the validated dataset group.' -Level 'INFO'
+        }
+        elseif (Test-SmartM365MaxItemsMode) {
+            WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
+        }
+        else {
+            Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+        }
 
     } catch {
         WriteLog -Message "Unexpected error during CSV export process: $_" -Level Error
@@ -4144,7 +4150,7 @@ function Initialize-SmartM365DefaultCsvValidationRules {
 
     & $add 'M365_Licenses_Users' @('Id','User principal name','UserId','SkuId','SkuPartNumber') $false
     & $add 'M365_Licenses_ServicePlans' @('Id','User principal name','SkuId','PlanId','PlanName') $false
-    & $add 'M365_Licenses_UserServicePlanStates' @('UserId','SkuId','PlanId','IsEnabled','PlanStatus') $false
+    & $add 'M365_Licenses_UserServicePlanStates' @('TenantKey','UserId','SkuId','PlanId','StateCode') $false
     & $add 'M365_Licenses_ServicePlans_Catalog' @('SkuId','SkuPartNumber','PlanId','PlanName') $false
     & $add 'M365_Licenses_Tenant' @('Id','TenantSkuPartNumber') $false
     & $add 'M365_Licenses_Groups' @('Id','GroupId','GroupDisplayName') $true
