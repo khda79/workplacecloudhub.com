@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 
-$script:SemrVersion = '1.11.15'
+$script:SemrVersion = '1.11.16'
 $script:ActiveDirectoryDomains = @()
 $script:ExchangeOnPremEvidenceByEmail = @{}
 $script:ExchangeOnPremHybridEvidence = $null
@@ -52,7 +52,7 @@ function Get-SemrCheckCatalog {
         @('PROXY-SMTP-GLOBAL-UNIQUE','Hybrid identity','Global SMTP uniqueness','Detect SMTP ownership conflicts across directory recipients.'),
         @('PROXY-INTERNAL-DUPLICATE','Hybrid identity','Internal proxy duplicates','Detect duplicate or malformed proxyAddresses values.'),
         @('TARGET-ADDRESS-GLOBAL-UNIQUE','Hybrid identity','targetAddress uniqueness','Detect duplicate or invalid target routing addresses.'),
-        @('X500-LEGACYEXCHANGEDN','Hybrid identity','X500 preservation','Report whether LegacyExchangeDN is also preserved as an X500 proxy.'),
+        @('X500-LEGACYEXCHANGEDN','Hybrid identity','X500 preservation','Confirm that LegacyExchangeDN is available; report a matching X500 proxy as optional protection for recipient recreation scenarios.'),
         @('SMTP-ACCEPTED-DOMAIN','Hybrid identity','Accepted SMTP domains','Verify every mailbox SMTP domain is accepted in Exchange Online.'),
         @('ONPREM-SOURCE','Exchange on-premises','On-premises source availability','Require live Exchange on-premises evidence with ViewEntireForest enabled.'),
         @('ONPREM-RECIPIENT-STATE','Exchange on-premises','Recipient state','Require one UserMailbox and no pre-existing RemoteMailbox.'),
@@ -83,7 +83,7 @@ function Get-SemrCheckCatalog {
         @('GRAPH-USER-STATE','Microsoft Graph','Unique Entra user','Require exactly one matching Entra user.'),
         @('GRAPH-DIRSYNC','Microsoft Graph','Directory synchronization','Verify the user is synchronized from on-premises.'),
         @('ENTRA-UPN-VERIFIED-DOMAIN','Microsoft Graph','Verified UPN domain','Verify the Entra user UPN domain is verified in the tenant.'),
-        @('ENTRA-OBJECT-SYNC-ERROR','Microsoft Graph','Object synchronization errors','Detect stale synchronization and identity anchor issues.'),
+        @('ENTRA-OBJECT-SYNC-ERROR','Microsoft Graph','Object synchronization errors','Detect provisioning errors and missing identity anchors. Tenant synchronization freshness is evaluated separately.'),
         @('LICENSE-PRE-MIGRATION','Licensing','Pre-migration licenses','Report licenses already assigned before migration.'),
         @('LICENSE-ASSIGNED-MAILBOX-QUOTA','Licensing','Assigned license mailbox quota','Compare mailbox size with the quota of the currently assigned mailbox license.'),
         @('LICENSE-USAGE-LOCATION','Licensing','Usage location','Verify UsageLocation is populated.'),
@@ -680,7 +680,10 @@ function Initialize-SemrExchangeOnPremEvidence {
         }
 
         $workerResult = Import-Clixml -LiteralPath $outputPath
-        if ($ProgressCallback) { $completeCount = @($workerResult.Evidence).Count; & $ProgressCallback $completeCount $completeCount 'Exchange on-premises - Complete' }
+        if ($ProgressCallback -and $lastProgress -notmatch '\|Complete\s*$') {
+            $completeCount = @($workerResult.Evidence).Count
+            & $ProgressCallback $completeCount $completeCount 'Exchange on-premises - Complete'
+        }
         $script:ExchangeOnPremEvidenceByEmail = @{}
         foreach ($entry in @($workerResult.Evidence)) {
             $key = ([string]$entry.EmailAddress).Trim().ToLowerInvariant()
@@ -1454,6 +1457,15 @@ function Test-SemrReadinessRegression {
     if ($clampedSettings.SmtpUniquenessBatchSize -ne 50 -or $clampedSettings.SmtpUniquenessBatchTimeoutSeconds -ne 5) { throw 'Clamped SMTP uniqueness settings regression failed.' }
     $checks += 2
 
+    $actionableReportFindings = @(Get-SemrActionableReportFinding -MailboxFindings @(
+        [pscustomobject]@{ Result = 'PASS'; RecommendedAction = 'Do not include' }
+        [pscustomobject]@{ Result = 'WARN'; RecommendedAction = 'Include' }
+    ) -GlobalFindings @())
+    if ($actionableReportFindings.Count -ne 1 -or $actionableReportFindings[0].Result -ne 'WARN') {
+        throw 'Action Plan filtering regression failed.'
+    }
+    $checks++
+
     return "READINESS_SELFTEST_OK|$checks"
 }
 
@@ -2209,7 +2221,7 @@ function Add-SemrIdentityAdvancedFindings {
 
     $legacyDn = [string](Get-SemrPropertyValue $mailbox[0] @('LegacyExchangeDN') '')
     $x500 = $legacyDn -and @($raw | Where-Object { (([string]$_) -replace '^(?i:x500:)','') -ieq $legacyDn }).Count -gt 0
-    Add-SemrFinding $Findings ($Base + @{CheckId='X500-LEGACYEXCHANGEDN';Category='HybridIdentity';Severity=if($x500){'Information'}else{'Warning'};Result=if(-not $legacyDn){'UNKNOWN'}elseif($x500){'PASS'}else{'WARN'};IsBlocking=$false;ObservedValue=if($legacyDn){"LegacyExchangeDN=$legacyDn; X500Present=$x500"}else{'LegacyExchangeDN unavailable'};ExpectedValue='LegacyExchangeDN available; matching X500 proxy recommended when the target recipient can be recreated or replaced';EvidenceSource=$source;Message=if(-not $legacyDn){'LegacyExchangeDN is unavailable.'}elseif($x500){'LegacyExchangeDN is also preserved in proxyAddresses.'}else{'No matching X500 proxy is present. This is advisory for a hybrid remote move because the source LegacyExchangeDN remains on the migrated recipient.'};RecommendedAction=if(-not $legacyDn){'Restore the local Exchange on-premises worker property collection and rerun.'}elseif(-not $x500){'If the migration process can recreate or replace the recipient object, add the exact legacyExchangeDN as an X500 proxy; otherwise document this advisory.'}else{''}})
+    Add-SemrFinding $Findings ($Base + @{CheckId='X500-LEGACYEXCHANGEDN';Category='HybridIdentity';Severity=if($legacyDn){'Information'}else{'Warning'};Result=if($legacyDn){'PASS'}else{'UNKNOWN'};IsBlocking=$false;ObservedValue=if($legacyDn){"LegacyExchangeDN=$legacyDn; X500Present=$x500"}else{'LegacyExchangeDN unavailable'};ExpectedValue='LegacyExchangeDN available; matching X500 proxy optional when a recipient can be recreated or replaced';EvidenceSource=$source;Message=if(-not $legacyDn){'LegacyExchangeDN is unavailable.'}elseif($x500){'LegacyExchangeDN is also preserved in proxyAddresses.'}else{'LegacyExchangeDN is present and remains on the recipient during a standard hybrid remote move. A matching X500 proxy is optional protection for recipient recreation scenarios.'};RecommendedAction=if(-not $legacyDn){'Restore the local Exchange on-premises worker property collection and rerun.'}else{''}})
 
     $domains = @($normalized | ForEach-Object { ($_ -split '@',2)[1] } | Where-Object { $_ } | Sort-Object -Unique)
     $unaccepted = @(if($AcceptedDomains.Available){$domains | Where-Object { $AcceptedDomains.Domains -notcontains $_ }})
@@ -2363,11 +2375,9 @@ function Add-SemrFlowAndSyncFindings {
         $errors=@(Get-SemrPropertyValue $user[0] @('OnPremisesProvisioningErrors') @())
         $anchor=[string](Get-SemrPropertyValue $user[0] @('OnPremisesImmutableId') '')
         $lastSyncText=[string](Get-SemrPropertyValue $user[0] @('OnPremisesLastSyncDateTime') '')
-        $lastSync=$null;if($lastSyncText){try{$lastSync=[datetime]$lastSyncText}catch{}}
-        $timestampOld=$lastSync -and $lastSync -lt (Get-Date).AddHours(-24)
         $syncEnabled=ConvertTo-SemrBoolean (Get-SemrPropertyValue $user[0] @('OnPremisesSyncEnabled') $false)
         $syncError=$errors.Count -gt 0 -or ($syncEnabled -and [string]::IsNullOrWhiteSpace($anchor))
-        Add-SemrFinding $Findings ($Base+@{CheckId='ENTRA-OBJECT-SYNC-ERROR';Category='MicrosoftGraph';Severity=if($syncError){'Critical'}else{'Information'};Result=if($syncError){'FAIL'}else{'PASS'};IsBlocking=$syncError;ObservedValue="ProvisioningErrors=$($errors.Count); SyncEnabled=$syncEnabled; ImmutableIdPresent=$(-not [string]::IsNullOrWhiteSpace($anchor)); ObjectLastSync=$lastSyncText";ExpectedValue='No provisioning errors and an identity anchor for synchronized users';EvidenceSource=$graphSource;Message=if($errors.Count){'Microsoft Entra reports provisioning errors.'}elseif($syncEnabled -and -not $anchor){'The synchronized identity anchor is missing.'}elseif($timestampOld){'The per-object synchronization timestamp is older than 24 hours; it is informational and is not used as a proxy for tenant-wide synchronization freshness.'}else{'No object-level synchronization issue was detected.'};RecommendedAction=if($syncError){'Resolve Entra Connect export errors and identity anchoring.'}elseif($timestampOld){'Use the ENTRA-CONNECT-SCHEDULER result to assess current synchronization service health.'}else{''}})
+        Add-SemrFinding $Findings ($Base+@{CheckId='ENTRA-OBJECT-SYNC-ERROR';Category='MicrosoftGraph';Severity=if($syncError){'Critical'}else{'Information'};Result=if($syncError){'FAIL'}else{'PASS'};IsBlocking=$syncError;ObservedValue="ProvisioningErrors=$($errors.Count); SyncEnabled=$syncEnabled; ImmutableIdPresent=$(-not [string]::IsNullOrWhiteSpace($anchor)); ObjectLastSync=$lastSyncText";ExpectedValue='No provisioning errors and an identity anchor for synchronized users';EvidenceSource=$graphSource;Message=if($errors.Count){'Microsoft Entra reports provisioning errors.'}elseif($syncEnabled -and -not $anchor){'The synchronized identity anchor is missing.'}else{'No object-level synchronization issue was detected. Tenant synchronization freshness is evaluated by ENTRA-CONNECT-SCHEDULER.'};RecommendedAction=if($syncError){'Resolve Entra Connect export errors and identity anchoring.'}else{''}})
     }
 }
 
@@ -2377,7 +2387,7 @@ function Get-SemrHybridAdvancedEvidence {
     $result=[ordered]@{
         MrsProxyAvailable=$false;MrsProxyEnabled=$false;MrsProxyMessage='MRSProxy evidence unavailable.';MrsProxySource='Unavailable';MrsProxySourceTimestamp=$null
         CertificateAvailable=$false;CertificateHealthy=$false;CertificateDaysRemaining=$null;CertificateMessage='Hybrid certificate evidence unavailable.';CertificateSource='Unavailable';CertificateSourceTimestamp=$null
-        CapacityAvailable=$false;ActiveMigrationCount=$null;CapacityHealthy=$false;CapacityMessage='Migration load evidence unavailable.';CapacitySource='Unavailable';CapacitySourceTimestamp=$null
+        CapacityAvailable=$false;ActiveMigrationCount=$null;SyncedMigrationCount=$null;CapacityHealthy=$false;CapacityMessage='Migration load evidence unavailable.';CapacitySource='Unavailable';CapacitySourceTimestamp=$null
         FailureBacklogAvailable=$false;FailureBacklogCount=$null;FailureBacklogHealthy=$false;FailureBacklogMessage='Migration failure backlog evidence unavailable.';FailureBacklogSource='Unavailable';FailureBacklogSourceTimestamp=$null
         OAuthAvailable=$false;OAuthHealthy=$false;OAuthMessage='Autodiscover/OAuth evidence unavailable.';OAuthSource='Unavailable';OAuthSourceTimestamp=$null
     }
@@ -2418,11 +2428,12 @@ function Get-SemrHybridAdvancedEvidence {
             $activeStatuses = @('Queued','Syncing','IncrementalSyncing','Completing','Validating','Provisioning','Starting','Removing','Stopping')
             $failureStatuses = @('Failed','Stopped','Corrupted','Error')
             $activeMoves = @($allMoves | Where-Object { [string]$_.Status -in $activeStatuses })
+            $syncedMoves = @($allMoves | Where-Object { [string]$_.Status -eq 'Synced' })
             $failedMoves = @($allMoves | Where-Object { [string]$_.Status -in $failureStatuses -or [string]$_.Status -match 'Fail|Error|Corrupt' })
             $statusBreakdown = @($allMoves | Group-Object Status | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join '; '
             $collectedAt = Get-Date
-            $result.CapacityAvailable=$true;$result.ActiveMigrationCount=$activeMoves.Count;$result.CapacityHealthy=$activeMoves.Count -lt $capacityWarningThreshold
-            $result.CapacityMessage="$($activeMoves.Count) active migration user(s); advisory threshold is $capacityWarningThreshold. Statuses: $statusBreakdown";$result.CapacitySource='Live Exchange Online migration users';$result.CapacitySourceTimestamp=$collectedAt
+            $result.CapacityAvailable=$true;$result.ActiveMigrationCount=$activeMoves.Count;$result.SyncedMigrationCount=$syncedMoves.Count;$result.CapacityHealthy=$activeMoves.Count -lt $capacityWarningThreshold
+            $result.CapacityMessage="$($activeMoves.Count) migration user(s) currently processing; $($syncedMoves.Count) synced and awaiting completion; processing advisory threshold is $capacityWarningThreshold. Statuses: $statusBreakdown";$result.CapacitySource='Live Exchange Online migration users';$result.CapacitySourceTimestamp=$collectedAt
             $result.FailureBacklogAvailable=$true;$result.FailureBacklogCount=$failedMoves.Count;$result.FailureBacklogHealthy=$failedMoves.Count -eq 0
             $result.FailureBacklogMessage="$($failedMoves.Count) failed/stopped/corrupted migration user(s). Statuses: $statusBreakdown";$result.FailureBacklogSource='Live Exchange Online migration users';$result.FailureBacklogSourceTimestamp=$collectedAt
         }catch{
@@ -2554,6 +2565,7 @@ function Test-SemrHybridReadiness {
         CertificateSourceTimestamp = $advanced.CertificateSourceTimestamp
         CapacityAvailable = $advanced.CapacityAvailable
         ActiveMigrationCount = $advanced.ActiveMigrationCount
+        SyncedMigrationCount = $advanced.SyncedMigrationCount
         CapacityHealthy = $advanced.CapacityHealthy
         CapacityMessage = $advanced.CapacityMessage
         CapacitySource = $advanced.CapacitySource
@@ -3728,6 +3740,23 @@ function ConvertTo-SemrWorksheetXml {
     return $builder.ToString()
 }
 
+function Get-SemrActionableReportFinding {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$MailboxFindings,
+        [AllowNull()][object[]]$GlobalFindings
+    )
+
+    $combinedFindings = @($MailboxFindings) + @($GlobalFindings)
+    return @(
+        $combinedFindings |
+            Where-Object {
+                [string]$_.Result -in @('FAIL','WARN','UNKNOWN') -and
+                -not [string]::IsNullOrWhiteSpace([string]$_.RecommendedAction)
+            }
+    )
+}
+
 function New-SemrExcelReport {
     [CmdletBinding()]
     param(
@@ -3737,7 +3766,7 @@ function New-SemrExcelReport {
     )
     Add-Type -AssemblyName System.IO.Compression -ErrorAction SilentlyContinue
     $actionPlan = @(
-        foreach ($finding in @($Assessment.Findings) + @($Assessment.GlobalFindings)) {
+        foreach ($finding in @(Get-SemrActionableReportFinding -MailboxFindings @($Assessment.Findings) -GlobalFindings @($Assessment.GlobalFindings))) {
             foreach ($action in @(([string]$finding.RecommendedAction -split '\s*\|\s*') | Where-Object { $_ })) {
                 [pscustomobject][ordered]@{
                     Scope = if ([string]::IsNullOrWhiteSpace([string]$finding.EmailAddress)) { 'Tenant' } else { 'Mailbox' }
@@ -3992,8 +4021,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGRqZkaKt0pPzQ
-# lwplRrzcNu0I6JJ/cKAk72UYAq9JV6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZmrdgcJULwyHf
+# hFrIc+rMIRiJzv/KhSKSY1Tj6F5IVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4126,31 +4155,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFKgztdPARhdMTU1Aalurn61psJbdi6FWmgWO+Q0uFMIMA0GCSqG
-# SIb3DQEBAQUABIIBgA4uiFVThmRHrzw1VcioH7c6DR9qHEquHVn88rprbvHzMyJm
-# SK57r0rSHHqk9a4RlhCbXtSHHh9HpJmJU0hI7diaAFx7yqGyeaoaZ5eehybTzQh3
-# Lz2FBSa+TPMl8aSjOOoDbAVhJiBDUXr3jDOPq3xozFHVWJWLAkdMqGKy7p5CGlUl
-# o5X1gRnGYJci1nZvEWVyvSCM/jRXrIkbcwvUlwuVq5xImJkoIi8Vmka7gcyXjSM9
-# 0F0nX/HmG4XImm54S4of/LkvYXE4Se3ZiNTs8vEw7dyRQ1wDHmhwvjcdD5IsW6u8
-# 4Bv24jDkNPXiAybeVCEgTuWiR6a4e36GhSgSgQG8q/bSp/syYe1oX04Gsl837vob
-# wggJAuny1R0PYiiSNM2Wk9bb0TjYmeifuYslGW52CI6F4jmp3ISTpA7nj0ZLv705
-# kjJDkNVn1DUmnpJCUUB2foZURfMElsTbFTelK4LdOca8nzxqVLtQoRwCjeVDkq0t
-# zP88KwgGh/GaHbXpPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICsH2lsR6xoED25HERZsS6zJ+qY2arbF2+PdiIXzIcEkMA0GCSqG
+# SIb3DQEBAQUABIIBgKBTb8GeFVdrz/iQXGmuTofwF8ds6Ykeja688THJA3d77TdZ
+# 9GDrKOt4eo2uKlQxTebHIlo78v3XvFc4OsTryr1zq8ZZW1kZOfCX03SWPufe++Th
+# K9eDly7CM71OeQnfVYv6lvVt6sNkRMVpthD8Tp24zEi1beB3GhW2VofWB7REmDwt
+# B8XKabBp5SKwAUPMG88qp2LFFVptIVQw5BAvrPCpaOcoLLXxBOEPGlu6gWDpw4D1
+# RUMVhDcBfaIQ7WzdjaVCHyMNzEJ7fTncKhdrF0KGlEn4OO44r7hoap8QZ3riHx+R
+# kDWRdbrPfEdU3jd+qb9k0aiM1dF7XrMxXsJ5Vew4vG7lsl7v9iNV4mPlqkf/dZAh
+# KubKyITExjgHDfNHmvkVzYmN+E1n4gLIxrf8wekb1tgXoom598ps/CcSxuED0Ozf
+# xSwPwLpAvnBz2YmG7alHA2gVpe5j7F+q3TyZ8af0sJ2zNUdaZMVuROc0beDhbJ6F
+# OGa6hkrfoWHKe6UacaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAwNzU3
-# MzRaMC8GCSqGSIb3DQEJBDEiBCCKtW6nmCIcfOCSMMXWtM7AqGZuWjSSiKwq0+Mt
-# HliopTANBgkqhkiG9w0BAQEFAASCAgBdg3byCuSF+K6lWzIgkUQtdbgjng0ftC8m
-# WyYMBQrGy6V5M5JBcFDNbCOHbMq7Q3mspJxigzYxz7gLdLLnOaNzTnl47jBr07pL
-# XuE93ekYnzIxqfcd6fNSV5DwawQQYtgFFu9Gvdr37osakuAl5C2tudqAwVYupyLL
-# 5HGDf9QaiCsCDBcziRsa8qIUCvi/RVxY/G3AUWiLbn/lIB3qL9TEyiIRqiDCj0u6
-# pHvfMUkDFoGKi6cbeWsWYPqgyLaUFk4aIy4BqtE/o0eFWyFa8gKFSDJRVNUPBC1n
-# SbepCkJDyXSdM5w22z3OEmw2YYBV/abOJXQzNJrV1n+BbLCzsAzXM4QVmz4OQRH7
-# HiFAwO+lZq0pizRm4rngygotGpWmxAF0I8S+4vusNYB/Q+1MxSkLMz6WoM/mVT67
-# NFbFCwrzhJw5JNDl5Y9ta8WCp5cI0DjH1iBkW3h2jkDWAyFgWFTo098DfA3W4zcO
-# mgZwQvb8cSa4gBonuLeYYypt231mrfPhyySXThDD3uWzOnZyuXYAyJWT+Z18/G+1
-# bq06IsVxaXAYUHSSxd9sYmXTdeP/mM9GP5258LWJUxBSY9zloTUYDZi+6qDCqoQt
-# 7UaaeycPrn9WChz2NE937z6p30desDnGtRF6pmu3n2va6kl1g8hnEzR6hTVStFMO
-# kzaRheTxrQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMDQ5
+# MzJaMC8GCSqGSIb3DQEJBDEiBCDNSaVZPy3T46rWZSB75gP3iTz02YaFJElMdYOz
+# jsBqajANBgkqhkiG9w0BAQEFAASCAgC70dEIQLMt00GV6MgNLsSwCPuGg2CdYvpe
+# YcsN463NVbm4Wh2Gf653592iQj/YvMiPAhBG9t/yKPM3omD291PLeGZSplAlCEsq
+# n2xtG43DDJz56VmbGLKqN3ZK8GHxv1pL/ai6FYACDjDgF0+kf8h+Ke/7/yBisVQK
+# ibE9ZsCR0gvvosTQqydTOHple8+6eB5butQyC53qBAW8i4ZF1+6yeWo4uDWQp7m6
+# 6VKsr6qdCEQYfEjCmHZ9QFriIQgG1Qmu5kGJ8c8546sh+LHvLyrWC7A6Ahs/EWfa
+# CJOeekN00tG2WTzFOVdxY8ynrtBCE1tC1K4l8zQzSjlw/ve2KFsFrLiTRNvdkAj0
+# 98BN5ikjqJF0UgwT7qaD78+Syy70JoeaGMvbUGo2GWbcffH9gtnquAsTsXsGmdVL
+# +SzYylMLCj5c+ninwp4qaMsQo6zJPTvWpl1fPWz1mPPUnvcEPPMKlwAzkqREyzZy
+# tsCugwC7fd80hv4ogMW678QW4Qlhuu+vaBiEI4pbtbBrBW9TLTyIj5AzDGYJybuz
+# cuhQ2aWle/QOJE5vwwjV0A2nDcesAWqhraWHSBfqmeNCN5oAqMYU+61UYkfwk/1W
+# r1cWpec5NnNO5kLYL7D0RZkxjmYGjfMyEMCeQOFOcHAVh98XLlgJexknAgEggJBX
+# JA/sRsqh8g==
 # SIG # End signature block
