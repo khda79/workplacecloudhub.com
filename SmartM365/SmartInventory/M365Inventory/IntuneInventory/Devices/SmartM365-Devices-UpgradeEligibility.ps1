@@ -48,7 +48,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.15
+1.17
 
 
 .REQUIREMENTS
@@ -58,7 +58,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.14
+    Version : 1.17
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -122,7 +122,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.16"
+$ScriptVersion = "1.17"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $runId = [guid]::NewGuid().ToString()
 
@@ -431,6 +431,39 @@ function Ensure-GraphConnection {
 
 #endregion Microsoft Graph connection
 
+function Get-UpgradeEligibilityGraphStatusCode {
+    param([Parameter(Mandatory = $true)]$ErrorRecord)
+
+    try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } } catch {}
+    $text = [string]$ErrorRecord
+    if ($text -match '\b(408|409|429|500|502|503|504)\b') { return [int]$Matches[1] }
+    if ($text -match '(?i)TooManyRequests|throttl') { return 429 }
+    return 0
+}
+
+function Invoke-UpgradeEligibilityGraphGet {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [ValidateRange(1, 12)][int]$MaxAttempts = 6
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try { return Invoke-MgGraphRequest -Method GET -Uri $Uri -ErrorAction Stop }
+        catch {
+            $statusCode = Get-UpgradeEligibilityGraphStatusCode -ErrorRecord $_
+            if ($statusCode -notin @(408, 409, 429, 500, 502, 503, 504) -or $attempt -ge $MaxAttempts) { throw }
+            $jitter = Get-Random -Minimum 0 -Maximum 6
+            $delay = [math]::Min(300, (([int][math]::Pow(2, [math]::Min($attempt, 6)) * 5) + $jitter))
+            try {
+                $retryAfter = $_.Exception.Response.Headers.RetryAfter
+                if ($retryAfter.Delta) { $delay = [math]::Max(1, [math]::Min(300, ([int][math]::Ceiling($retryAfter.Delta.TotalSeconds) + $jitter))) }
+            } catch {}
+            WriteLogSmartM365 -Message ("Graph transient failure HTTP {0}; retry {1}/{2} in {3}s: {4}" -f $statusCode, $attempt, $MaxAttempts, $delay, $Uri) -Level 'WARNING'
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 function Normalize-DeviceName {
     param([Parameter(Mandatory = $false)][string]$DeviceName)
 
@@ -463,13 +496,13 @@ function Export-HardwareReadinessSummary {
 
     $endpoint = "$BaseUri/userExperienceAnalyticsWorkFromAnywhereHardwareReadinessMetric"
     WriteLogSmartM365 -Message ("Exporting Work From Anywhere hardware readiness summary: {0}" -f $endpoint) -Level "INFO"
-    $summary = Invoke-MgGraphRequest -Method GET -Uri $endpoint
+    $summary = Invoke-UpgradeEligibilityGraphGet -Uri $endpoint
 
     $devicesSummaryEndpoint = "$BaseUri/userExperienceAnalyticsSummarizeWorkFromAnywhereDevices()"
     $devicesSummary = $null
     try {
         WriteLogSmartM365 -Message ("Exporting Work From Anywhere device scope summary: {0}" -f $devicesSummaryEndpoint) -Level "INFO"
-        $devicesSummary = Invoke-MgGraphRequest -Method GET -Uri $devicesSummaryEndpoint
+        $devicesSummary = Invoke-UpgradeEligibilityGraphGet -Uri $devicesSummaryEndpoint
     }
     catch {
         WriteLogSmartM365 -Message ("Optional Work From Anywhere device scope summary unavailable: {0}" -f $_.Exception.Message) -Level "INFO"
@@ -601,7 +634,7 @@ try {
     try {
         while ($nextLink) {
             WriteLogSmartM365 -Message ("Calling: {0}" -f $nextLink) -Level "DEBUG"
-            $page = Invoke-MgGraphRequest -Method GET -Uri $nextLink
+            $page = Invoke-UpgradeEligibilityGraphGet -Uri $nextLink
 
             if ($page.value) {
                 $allDevices += $page.value
@@ -721,7 +754,12 @@ try {
     WriteLogSmartM365 -Message ("Report generated successfully: {0}" -f $csvPath) -Level "SUCCESS"
     Write-Host "Report generated successfully: $csvPath" -ForegroundColor Green
 
-    Export-HardwareReadinessSummary -BaseUri $baseUri -Reason 'Companion tenant summary refreshed after the device-level export.'
+    try {
+        Export-HardwareReadinessSummary -BaseUri $baseUri -Reason 'Companion tenant summary refreshed after the device-level export.'
+    }
+    catch {
+        WriteLogSmartM365 -Message ("Optional companion hardware readiness summary failed after the device CSV was published: {0}" -f $_.Exception.Message) -Level 'WARNING'
+    }
 
     WriteLogSmartM365 -Message "===== Devices Upgrade Eligibility inventory completed successfully =====" -Level "INFO"
 }
@@ -779,8 +817,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMl0TILqCo2rY+
-# ooFMTjEWOa4fJKvw+fRPW5fpMZHfC6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVm71N+QvBuGEC
+# 5U9A2R3C3q/lvg1CYqQUNOq0LSWOTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -913,31 +951,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDWutX50kU/xaVnjoh0KSfrs+Epxkq2qsfSvqDu6b5FOMA0GCSqG
-# SIb3DQEBAQUABIIBgEgv9ydUHTN++hyxKZrrgdLGNU/DZQalxGao5+pHIcYHEfev
-# N82HmhRb3InIn8rL0rwdyZbGcMCNGS/E7oqGG7ikzrkwK6nKuZ0p3sJYvZ5HXTRF
-# Tm7Ygayc1v0eAHBpV7icuojCe6ihcnSitb6gOPgDRkHhk4q6/kAsIWlg9QpVKChu
-# OaK+kEd3rCqJOi0X3jEFXmWsuV+3F2VFkeAr/5S6qdHo+vMevVnh+HVkfLCmhm4P
-# JvERmhSQxBjAGcsAQjZHQjdIWnyXSWy4ukxvdzTlS+yEvGJie9LvEqo/p4Ed16x8
-# K7F+G3eLW5yMpiJe411y3Yk+0s1pBZ03W5H45qWSdPMoeeb0Ywyf9sXfxgiPOykj
-# r02Dojm5bDa12tvCdBrvDvYGYrx4jjfw/n1oTIMshJjXt7AJnVN3fFZzTnlKgLzK
-# ZCyArucBV5iNXQqobC+NuqTYy3+iQgVqf6xcdWy13cIilVwjjDBIMCZC621v7fFr
-# ov7fuGh6OC9xeyxHJ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBR/CarALntMr1paDWLQ4DCKuroxZQLrdz5VzjK+0sFMMA0GCSqG
+# SIb3DQEBAQUABIIBgCQbS3165kApXOx6NfO3XRLu5l/mZtCisr2m8gBku6Qv8WbM
+# 85Tm2G+uvI/SD053683GDROEONQy5sYz4uC+9T0UrvYKtpBSaSlAt6GaTvpG2lY8
+# rvmhp8x6HPJqIrAIE544uO00ncM1K518U+8UXzxp4GNIOTaSArmcQDLbAueLrfzJ
+# d0+tnjGMDcOYcQmygU14PgbucOStfJD+224zzZqKxKOG0y1w57mZ6eHhBxlL+Qbt
+# WQIytu0oBE410cAJTe6NIj40Hdyb+xhRvLw06KZfntoOK3AjIZoPUgCZ+gHztqU8
+# 7ECufyGF6vVbdEfb2hVPL76bV3up35VEa+1oRF0rXwUZdfbNhysn31f53L0d42fM
+# GNuumQffl2mH+bovwpZlMWsYXdSj7Lc4dumAg1/fI79jmTtBZ09U5UUts0U3w6MI
+# zs0DxzFOB33bpztZgLUMvlP2BEjVJif0b0lIz7Bar0i6pUMphjaHRZHmXeZVEbT5
+# Ow0kWJGTFS9b3tlhS6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwODAw
-# MzVaMC8GCSqGSIb3DQEJBDEiBCDp6Nh6JUC3x+vhFH71Kig7fDuudle08EhDYTP1
-# P/0CiDANBgkqhkiG9w0BAQEFAASCAgAWWYsX1nP04jVan0wTnW5UCUKizst/10px
-# UGrzYwRqyce9mEOHcDjl56cUHkZ/WamZt+OtxICp06b5ItaLgYSXTs8mYLJElR9g
-# PWWS1qMuc8CkIdFnK9wfIG/R6qbtDvuqFUmIIkhTwLjYuN9nkhIOXdE0joxJl9mQ
-# ElwJ1KxiCx4H7FXTp0X+BUcTpyZCMdAR8uItB5EEbtObbizdUqaQmc0sQgT9V/RU
-# ujPhSvSIlJZNs/1aTQzVmDeqHHROP8CVMs0A36OECnxqBxGFujQE+izmnYqlqlf7
-# sDgv7YsFzKrTQ6KEP4ltVmAiR2JXp9iUvg248t0vPv3TJBugfJg2I5b0jXIx7UBd
-# j3zcNeV8LTelxfnekJldr+bhqVuYz+T1FIE6J8QjKApKse+vePoWU6DajzAjjB6R
-# MVzqpSN0l0zKQbpzBV0uQhkr4wWu4VKLclsmbgW064exlhcX6OsX5kcX7Z+RH+Mi
-# BSVTEQnh0nNDbFCrtRJuwOSTDdr0d0LGhmJ9CTRi2l/IyGPn4Pnd5zrRMYYC/6Oy
-# J4URUQI6Uqy1dlxtRjW9a1nftlErMGs+R0DcYWPfcb/R9QTnWnijjpdCCQQpf8WK
-# QwRU7Z5SZjo+5B4sTPSVZTRLgXlgo6W1OlrKLDsPXhnl8XA28X8QVhpWjNqcGsnw
-# VOlOk2v3Qg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMjMz
+# MTZaMC8GCSqGSIb3DQEJBDEiBCArqolicpVNflM5lEhHIAbG+PvdPsvW+sTw2F33
+# 2laOwzANBgkqhkiG9w0BAQEFAASCAgA1IXdt4RFhSLqsKfXMTNcoLKQ6Hqp1Labw
+# VcCIFti3wxcKuDe+oM9407a9O5TqOpKBM5BRsUazzlOvD9vQJ8h76waCd8d4FMed
+# Mv/SNXSyFnbwJsFB6heyJU8AHwtS6GujNC3ODTn4SBe5iHLe/vZZliSOhN5QECRD
+# fsElqm638QQT+9IfwEMQQ3tHJZg8oZPtl53cv8ldt2rcp59thG0zqO4JWYegJkyq
+# ahUc3F8rpA25QXByslxVU0BdP0jjJZRA11SuonpDETl2jrjT2XFmpfut5iNpJ95j
+# 2XYZ3/nSlZwGGZQnyzD453X9p1lUY7352/KK23uaZEKbjcK/vPRtGzNJmM0to44F
+# 4snt3tP32LXh8rCWgurR9dcSX9DpOoc3Q80TiTxFj6gMP5ke5FXlAzIQiTBNgtAm
+# 4NR9nhN1pMm89CZnRClGm7D8CZhM8ohlBGmz+AIP5ZwI5/rqc8vpVx29top9KOqD
+# l50eQi6UJNG9/3thwqLs71B0cTassVIrOQe4pHysG/13hy52jpi49fA+lorytCYM
+# HHI/4WIKO2Tae9wTQOfygN4Oxtw1MSGzXg+QhQc/C5QzVGcssWDHI7bH8Egm9Ku1
+# RCbqm8wydsT0nR+9EUYbYdCLlf5tYrnPVK6RNEuAWVGbIR1bw3ted7plH4pSW2eh
+# UrTTZCk2cQ==
 # SIG # End signature block
