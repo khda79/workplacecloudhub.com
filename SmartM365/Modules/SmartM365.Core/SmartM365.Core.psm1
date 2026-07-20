@@ -3957,6 +3957,82 @@ function Invoke-SmartM365SharePointCsvUpload {
         WriteLog -Message ("SharePoint upload failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
     }
 }
+function Invoke-SmartM365GraphDeleteQuietly {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [int]$MaxAttempts = 4,
+        [int]$DefaultRetrySeconds = 15,
+        [int]$MaximumRetrySeconds = 300,
+        [string]$Operation = 'Delete SharePoint file'
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $token = Get-SmartM365GraphAccessToken -Purpose $Operation
+            $statusCodeValue = $null
+            $responseHeadersValue = $null
+            $response = Invoke-RestMethod `
+                -Method DELETE `
+                -Uri $Uri `
+                -Headers @{ Authorization = "Bearer $token" } `
+                -SkipHttpErrorCheck `
+                -StatusCodeVariable statusCodeValue `
+                -ResponseHeadersVariable responseHeadersValue `
+                -ErrorAction Stop
+
+            $statusCode = 0
+            try { $statusCode = [int]$statusCodeValue } catch {}
+            if ($statusCode -ge 200 -and $statusCode -lt 300) {
+                return [pscustomobject]@{ Success = $true; NotFound = $false; StatusCode = $statusCode; Message = '' }
+            }
+            if ($statusCode -eq 404) {
+                return [pscustomobject]@{ Success = $true; NotFound = $true; StatusCode = $statusCode; Message = 'Resource already absent.' }
+            }
+
+            $message = ''
+            try { $message = [string]$response.error.message } catch {}
+            if ([string]::IsNullOrWhiteSpace($message)) { $message = "HTTP $statusCode" }
+            $isTransient = $statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or $message -match '(?i)TooManyRequests|throttl|timeout|temporarily unavailable|resourceModified'
+            if (-not $isTransient -or $attempt -ge $MaxAttempts) {
+                return [pscustomobject]@{ Success = $false; NotFound = $false; StatusCode = $statusCode; Message = $message }
+            }
+
+            $delay = [math]::Min($MaximumRetrySeconds, $DefaultRetrySeconds * $attempt)
+            try {
+                $retryAfter = $null
+                if ($responseHeadersValue -is [System.Collections.IDictionary]) {
+                    foreach ($key in $responseHeadersValue.Keys) {
+                        if ([string]$key -ieq 'Retry-After') { $retryAfter = $responseHeadersValue[$key]; break }
+                    }
+                }
+                $parsedDelay = 0
+                if ($retryAfter -and [int]::TryParse([string]$retryAfter, [ref]$parsedDelay) -and $parsedDelay -gt 0) {
+                    $delay = [math]::Min($MaximumRetrySeconds, $parsedDelay)
+                }
+            } catch {}
+            WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusCode, $attempt, $MaxAttempts, $delay) -Level 'WARNING'
+            Start-Sleep -Seconds $delay
+        }
+        catch {
+            $statusCode = $null
+            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+            $message = [string]$_.Exception.Message
+            $isTransient = Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode
+            if (-not $isTransient -or $attempt -ge $MaxAttempts) {
+                return [pscustomobject]@{ Success = $false; NotFound = $false; StatusCode = $statusCode; Message = $message }
+            }
+
+            $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
+            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+            WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusText, $attempt, $MaxAttempts, $delay) -Level 'WARNING'
+            Start-Sleep -Seconds $delay
+        }
+    }
+
+    return [pscustomobject]@{ Success = $false; NotFound = $false; StatusCode = $null; Message = 'Retry loop ended without a result.' }
+}
+
 function Remove-SmartM365SharePointFile {
     [CmdletBinding()]
     param(
@@ -4011,18 +4087,19 @@ function Remove-SmartM365SharePointFile {
         $targetPath = ConvertTo-GraphDrivePath $sharePointPath
         $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}" -f $driveId, $targetPath
 
-        try {
-            Invoke-SmartM365GraphRestWithRetry -Method DELETE -Uri $uri -ContentType '' -Operation 'Delete stale SharePoint file' | Out-Null
-            WriteLog -Message ("SharePoint file deleted: {0}" -f $sharePointPath) -Level "INFO"
+        $deleteResult = Invoke-SmartM365GraphDeleteQuietly -Uri $uri -Operation 'Delete stale SharePoint file'
+        if ($deleteResult.Success) {
+            if ($deleteResult.NotFound) {
+                WriteLog -Message ("SharePoint file already absent: {0}" -f $sharePointPath) -Level 'INFO'
+            }
+            else {
+                WriteLog -Message ("SharePoint file deleted: {0}" -f $sharePointPath) -Level 'INFO'
+            }
             return $true
         }
-        catch {
-            if ([string]$_.Exception.Message -match 'Status=404') {
-                WriteLog -Message ("SharePoint file already absent: {0}" -f $sharePointPath) -Level "INFO"
-                return $true
-            }
-            throw
-        }
+
+        WriteLog -Message ("SharePoint deletion failed but script continues: Path={0}; Status={1}; Error={2}" -f $sharePointPath, $deleteResult.StatusCode, $deleteResult.Message) -Level 'WARNING'
+        return $false
     }
     catch {
         WriteLog -Message ("SharePoint deletion failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
