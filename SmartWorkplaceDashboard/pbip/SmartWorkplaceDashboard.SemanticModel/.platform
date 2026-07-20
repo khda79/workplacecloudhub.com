@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "SemanticModel",
+    "displayName": "SmartWorkplaceDashboard"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "a3d3e123-ae30-4c63-a14c-0610ab4f2102"
+  }
+}
