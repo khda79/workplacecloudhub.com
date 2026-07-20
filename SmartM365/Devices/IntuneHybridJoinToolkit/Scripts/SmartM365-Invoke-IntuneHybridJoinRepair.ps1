@@ -69,7 +69,7 @@ Seconds to wait after startup before the SYSTEM retry task resumes the repair. D
 Maximum number of startup-task resume attempts before the retry state is removed. Defaults to 3.
 
 .VERSION
-2.10.36
+2.10.37
 
 .EXITCODES
 0 = Success (AzureAdJoined=YES, device auth is healthy, and Intune enrollment is present or was restored)
@@ -101,7 +101,7 @@ param(
     [switch]$RetryAfterRebootTaskRun
 )
 
-$ScriptVersion = "2.10.36"
+$ScriptVersion = "2.10.37"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
 if ($IntuneRetrySleepMinutes -lt 1) { $IntuneRetrySleepMinutes = 1 }
@@ -179,10 +179,15 @@ $ComputerName = $env:COMPUTERNAME
 $RunGuardHours = 12
 $CleanupRetentionDays = 7
 $RunGuardPath = Join-Path $DataRoot "LastRun.json"
-$PreviousRunInfo = $null
 $script:RetryAfterRebootTaskName = "SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot"
 $script:RetryAfterRebootStatePath = Join-Path $StateDir "RetryAfterReboot.json"
 $script:RetryAfterRebootRunnerPath = Join-Path $StateDir "RetryAfterRebootRunner.ps1"
+$script:RebootSafetyStatePath = Join-Path $StateDir "RebootSafety.json"
+$script:EndpointInstanceStatePath = Join-Path $StateDir "EndpointInstance.json"
+$script:EndpointInstanceMutexName = "Global\SmartM365_IntuneHybridJoinToolkit_Endpoint"
+$script:EndpointInstanceMutex = $null
+$script:EndpointInstanceMutexAcquired = $false
+$script:EndpointInstanceLastHeartbeatUtc = [datetime]::MinValue
 $script:EndpointScriptPath = if (-not [string]::IsNullOrWhiteSpace([string]$PSCommandPath)) { [string]$PSCommandPath } else { [string]$MyInvocation.MyCommand.Path }
 $script:RetryAfterRebootAction = ""
 $script:RetryAfterRebootDetail = ""
@@ -193,13 +198,46 @@ $script:RetryAfterRebootTaskNameResult = ""
 # Run log file
 $RunLogPath = Join-Path $LogsDir ("IntuneHybridJoinToolkit_{0}_{1}.log" -f $ComputerName, $RunId)
 
-try {
-    if (Test-Path -LiteralPath $RunGuardPath) {
-        $PreviousRunInfo = (Get-Content -LiteralPath $RunGuardPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+
+function Write-AtomicJsonFile {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)]$Data,
+        [ValidateRange(1,20)][int]$Depth = 8
+    )
+
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $temporaryPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
+    try {
+        $Data | ConvertTo-Json -Depth $Depth | Set-Content -LiteralPath $temporaryPath -Encoding UTF8 -Force -ErrorAction Stop
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+    }
+    finally {
+        Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
     }
 }
-catch {
-    $PreviousRunInfo = $null
+
+function Update-EndpointInstanceState {
+    param([string]$Status = "RUNNING",[switch]$Force)
+
+    if (-not $script:EndpointInstanceMutexAcquired) { return }
+    $nowUtc = (Get-Date).ToUniversalTime()
+    if (-not $Force -and ($nowUtc - $script:EndpointInstanceLastHeartbeatUtc).TotalSeconds -lt 60) { return }
+    $script:EndpointInstanceLastHeartbeatUtc = $nowUtc
+    Write-AtomicJsonFile -Path $script:EndpointInstanceStatePath -Data ([pscustomobject]@{
+        Version = 1
+        ScriptVersion = $ScriptVersion
+        RunId = $RunId
+        ComputerName = $ComputerName
+        ProcessId = $PID
+        StartTimeUtc = $Timestamp.ToUniversalTime().ToString("o")
+        HeartbeatUtc = $nowUtc.ToString("o")
+        Status = $Status
+        ScriptPath = $script:EndpointScriptPath
+    })
 }
 
 function Write-RunLog {
@@ -207,6 +245,7 @@ function Write-RunLog {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
     $line = @([regex]::Split(([string]$Message), '\r?\n') | ForEach-Object { "{0} [{1}] {2}" -f $timestamp, $ComputerName, $_ })
     try { Add-Content -Path $RunLogPath -Value $line -Encoding UTF8 } catch { }
+    try { Update-EndpointInstanceState } catch { }
 }
 
 function Update-TimestampedTranscript {
@@ -369,6 +408,24 @@ function Invoke-OldEvidenceCleanup {
     Write-RunLog ("Old evidence cleanup completed. RetentionDays={0}; DeletedFiles={1}; FailedFiles={2}" -f $RetentionDays,$deletedCount,$failedCount)
 }
 
+try {
+    $script:EndpointInstanceMutex = New-Object System.Threading.Mutex($false,$script:EndpointInstanceMutexName)
+    try { $script:EndpointInstanceMutexAcquired = $script:EndpointInstanceMutex.WaitOne(0) }
+    catch [System.Threading.AbandonedMutexException] { $script:EndpointInstanceMutexAcquired = $true }
+}
+catch { $script:EndpointInstanceMutexAcquired = $false }
+
+if (-not $script:EndpointInstanceMutexAcquired) {
+    $activeMessage = "Another endpoint repair instance is already active. Mutex=$($script:EndpointInstanceMutexName). IgnoreRunGuard cannot bypass an active endpoint instance."
+    Write-RunLog $activeMessage
+    Write-Host $activeMessage -ForegroundColor Yellow
+    Write-FinalStatusLine -Status "ENDPOINT_RUN_ACTIVE" -ExitCode 3 -Detail $activeMessage -NextAction "WAIT_ACTIVE_ENDPOINT_RUN"
+    if ($script:EndpointInstanceMutex) { try { $script:EndpointInstanceMutex.Dispose() } catch { } }
+    exit 3
+}
+
+try { Update-EndpointInstanceState -Force } catch { Write-RunLog ("Endpoint instance metadata write failed; mutex protection remains active. Error={0}" -f $_.Exception.Message) }
+
 Write-Host "IntuneHybridJoinToolkit version $ScriptVersion"
 Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
 Invoke-OldEvidenceCleanup -Paths @($LogsDir, $OutputDir, $TranscriptDir) -RetentionDays $CleanupRetentionDays
@@ -392,6 +449,11 @@ try {
             Write-RunLog $guardMessage
             Write-Host $guardMessage -ForegroundColor Yellow
             Write-FinalStatusLine -Status "RUN_GUARD_ACTIVE" -ExitCode 3 -Detail $guardMessage
+            try { Update-EndpointInstanceState -Status "RUN_GUARD_ACTIVE" -Force } catch { }
+            if ($script:EndpointInstanceMutexAcquired -and $script:EndpointInstanceMutex) {
+                try { $script:EndpointInstanceMutex.ReleaseMutex() } catch { }
+            }
+            if ($script:EndpointInstanceMutex) { try { $script:EndpointInstanceMutex.Dispose() } catch { } }
             exit 3
         }
     }
@@ -410,6 +472,9 @@ try {
         AuditOnly    = [bool]$AuditOnly
         EntraHybridPending = [bool]$EntraHybridPending
         RetryAfterRebootTaskRun = [bool]$RetryAfterRebootTaskRun
+        EndpointProcessId = $PID
+        EndpointInstanceStatePath = $script:EndpointInstanceStatePath
+        HeartbeatUtc = (Get-Date).ToUniversalTime().ToString("o")
         Status      = "RUNNING"
     } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $RunGuardPath -Encoding UTF8 -Force
 }
@@ -2359,6 +2424,8 @@ function Get-NextActionForStatus {
         "KEY_SIGN_TEST_FAILED" { return "REPAIR_HYBRID_JOIN_KEY_OR_ALLOW_LEAVE" }
         "LEAVE_NOT_APPLICABLE" { return "FIX_HYBRID_JOIN" }
         "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
+        "ENDPOINT_RUN_ACTIVE" { return "WAIT_ACTIVE_ENDPOINT_RUN" }
+        "REBOOT_SAFETY_LIMIT_REACHED_POST_DSREG_LEAVE" { return "REVIEW_REBOOT_HISTORY_AND_HYBRID_JOIN" }
         "RETRY_AFTER_REBOOT_EXHAUSTED" { return "CHECK_REBOOT_STATE_OR_RELAUNCH_LOT" }
         "RETRY_AFTER_REBOOT_STATE_MISSING" { return "RELAUNCH_LOT" }
         "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE" { return "CHECK_SCHEDULED_TASK_AND_RELAUNCH" }
@@ -2697,6 +2764,76 @@ function Write-RetryAfterRebootState {
             Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
         }
     }
+}
+function Read-RebootSafetyState {
+    if (-not (Test-Path -LiteralPath $script:RebootSafetyStatePath -PathType Leaf)) {
+        return [pscustomobject]@{ Version=1; UpdatedUtc=(Get-Date).ToUniversalTime().ToString("o"); Records=@() }
+    }
+    try {
+        $state = Get-Content -LiteralPath $script:RebootSafetyStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (-not $state.PSObject.Properties["Records"]) { Add-Member -InputObject $state -NotePropertyName Records -NotePropertyValue @() -Force }
+        return $state
+    }
+    catch {
+        Write-RunLog ("Reboot safety state could not be read; fail-closed for reboot authorization. Error={0}" -f $_.Exception.Message)
+        return $null
+    }
+}
+
+function Get-RebootSafetyDecision {
+    param(
+        [Parameter(Mandatory=$true)][string]$ReasonKey,
+        [string]$UserContext = "",
+        [ValidateRange(1,30)][int]$MaximumReboots = 3,
+        [switch]$RequireUserContextChange
+    )
+
+    $state = Read-RebootSafetyState
+    if ($null -eq $state) {
+        return [pscustomobject]@{ Allowed=$false; Count=0; Detail="Reboot safety state is unreadable; automatic reboot denied." }
+    }
+    $record = $state.Records | Where-Object { [string]$_.ReasonKey -eq $ReasonKey } | Select-Object -First 1
+    $count = if ($record -and $record.PSObject.Properties["Count"]) { [int]$record.Count } else { 0 }
+    if ($count -ge $MaximumReboots) {
+        return [pscustomobject]@{ Allowed=$false; Count=$count; Detail=("Durable reboot safety limit reached for {0}: {1}/{2}." -f $ReasonKey,$count,$MaximumReboots) }
+    }
+    if ($RequireUserContextChange -and $count -gt 0) {
+        $previousContext = if ($record.PSObject.Properties["LastUserContext"]) { [string]$record.LastUserContext } else { "" }
+        if ([string]::IsNullOrWhiteSpace($UserContext) -or $UserContext -eq $previousContext) {
+            return [pscustomobject]@{ Allowed=$false; Count=$count; Detail=("A reboot was already recorded for the same or absent interactive-user context. PreviousContext='{0}'; CurrentContext='{1}'. Waiting for a user/session change." -f $previousContext,$UserContext) }
+        }
+    }
+    return [pscustomobject]@{ Allowed=$true; Count=$count; Detail=("Reboot safety authorization granted for {0}: current count {1}/{2}." -f $ReasonKey,$count,$MaximumReboots) }
+}
+
+function Register-RebootSafetyEvent {
+    param(
+        [Parameter(Mandatory=$true)][string]$ReasonKey,
+        [string]$UserContext = "",
+        [string]$Reason = ""
+    )
+
+    $state = Read-RebootSafetyState
+    if ($null -eq $state) { throw "Reboot safety state is unreadable; event cannot be recorded." }
+    $records = New-Object System.Collections.Generic.List[object]
+    $existing = $null
+    foreach ($record in @($state.Records)) {
+        if ([string]$record.ReasonKey -eq $ReasonKey) { $existing = $record } else { [void]$records.Add($record) }
+    }
+    $count = if ($existing -and $existing.PSObject.Properties["Count"]) { [int]$existing.Count } else { 0 }
+    [void]$records.Add([pscustomobject]@{
+        ReasonKey = $ReasonKey
+        Count = ($count + 1)
+        LastRebootUtc = (Get-Date).ToUniversalTime().ToString("o")
+        LastUserContext = $UserContext
+        LastReason = $Reason
+        LastRunId = $RunId
+    })
+    $state.UpdatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+    $state.Records = @($records.ToArray())
+    Write-AtomicJsonFile -Path $script:RebootSafetyStatePath -Data $state
+    Protect-RetryAfterRebootPathAcl -Path $script:RebootSafetyStatePath
+    Write-RunLog ("Durable reboot safety event recorded. ReasonKey={0}; Count={1}; UserContext={2}" -f $ReasonKey,($count + 1),$UserContext)
 }
 
 function New-RetryAfterRebootArgumentList {
@@ -3806,30 +3943,40 @@ try {
 
                     if ($AllowRebootAfterDsregLeave) {
                         $rebootReason = "Post-leave Hybrid Join retry exhausted."
-                        try {
-                            Register-RetryAfterRebootTask -Reason $rebootReason
-                        }
-                        catch {
-                            $script:RetryAfterRebootAction = "ScheduleFailed"
-                            $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
-                            $script:RetryAfterRebootDetail = $_.Exception.Message
-                            $status = "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE"
-                            $dsregStatusErrorMessage = "Post-leave reboot was not triggered because the retry-after-reboot task could not be scheduled. Error=$($_.Exception.Message)"
+                        $rebootSafetyDecision = Get-RebootSafetyDecision -ReasonKey "POST_DSREG_LEAVE" -MaximumReboots $RetryAfterRebootMaxAttempts
+                        if (-not $rebootSafetyDecision.Allowed) {
+                            $status = "REBOOT_SAFETY_LIMIT_REACHED_POST_DSREG_LEAVE"
+                            $dsregStatusErrorMessage = $rebootSafetyDecision.Detail
                             $ExitCode = 3
                             Write-RunLog $dsregStatusErrorMessage
                         }
-
-                        if ($script:RetryAfterRebootAction -eq "Scheduled") {
-                            $rebootAttempted = $true
-                            $rebootResult = Start-ControlledReboot -Reason $rebootReason -DelaySeconds $RebootDelaySeconds
-                            $rebootExitCode = $rebootResult.ExitCode
-                            if ($rebootExitCode -eq 0) {
-                                $status = "REBOOT_TRIGGERED_POST_DSREG_LEAVE"
+                        else {
+                            try {
+                                Register-RetryAfterRebootTask -Reason $rebootReason
                             }
-                            else {
-                                $status = "REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE"
-                                $dsregStatusErrorMessage = "shutdown.exe failed with exit code $rebootExitCode. The retry-after-reboot task will be removed."
+                            catch {
+                                $script:RetryAfterRebootAction = "ScheduleFailed"
+                                $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+                                $script:RetryAfterRebootDetail = $_.Exception.Message
+                                $status = "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE"
+                                $dsregStatusErrorMessage = "Post-leave reboot was not triggered because the retry-after-reboot task could not be scheduled. Error=$($_.Exception.Message)"
                                 $ExitCode = 3
+                                Write-RunLog $dsregStatusErrorMessage
+                            }
+
+                            if ($script:RetryAfterRebootAction -eq "Scheduled") {
+                                Register-RebootSafetyEvent -ReasonKey "POST_DSREG_LEAVE" -Reason $rebootReason
+                                $rebootAttempted = $true
+                                $rebootResult = Start-ControlledReboot -Reason $rebootReason -DelaySeconds $RebootDelaySeconds
+                                $rebootExitCode = $rebootResult.ExitCode
+                                if ($rebootExitCode -eq 0) {
+                                    $status = "REBOOT_TRIGGERED_POST_DSREG_LEAVE"
+                                }
+                                else {
+                                    $status = "REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE"
+                                    $dsregStatusErrorMessage = "shutdown.exe failed with exit code $rebootExitCode. The retry-after-reboot task will be removed."
+                                    $ExitCode = 3
+                                }
                             }
                         }
                     }
@@ -4092,21 +4239,11 @@ try {
                         $nextLogonTaskName = $nextLogonTask.TaskName
                         $nextLogonTaskDetail = $nextLogonTask.Detail
 
-                        $previousRebootWithinGuard = $false
-                        try {
-                            if ($PreviousRunInfo -and $PreviousRunInfo.Status -eq "REBOOT_TRIGGERED_WAITING_FOR_USER_LOGON") {
-                                $previousTimeText = if ($PreviousRunInfo.EndTime) { $PreviousRunInfo.EndTime } else { $PreviousRunInfo.StartTime }
-                                $previousTime = [datetime]$previousTimeText
-                                if (((Get-Date) - $previousTime).TotalHours -lt $RunGuardHours) {
-                                    $previousRebootWithinGuard = $true
-                                }
-                            }
-                        }
-                        catch { }
-
-                        if ($previousRebootWithinGuard) {
+                        $userContextKey = ("{0}|{1}|{2}" -f $interactiveUserAccountName,$interactiveSessionId,$interactiveSessionState).ToUpperInvariant()
+                        $rebootSafetyDecision = Get-RebootSafetyDecision -ReasonKey "WAITING_FOR_USER_LOGON" -UserContext $userContextKey -MaximumReboots $RetryAfterRebootMaxAttempts -RequireUserContextChange
+                        if (-not $rebootSafetyDecision.Allowed) {
                             $status = "WAITING_FOR_INTERACTIVE_USER_LOGON"
-                            $dsregStatusErrorMessage = "A reboot was already triggered within the last $RunGuardHours hours for User Credential auto-enrollment. Waiting for a valid interactive user logon with PRT; no additional reboot was triggered."
+                            $dsregStatusErrorMessage = $rebootSafetyDecision.Detail
                             Write-RunLog $dsregStatusErrorMessage
                         }
                         else {
@@ -4125,6 +4262,7 @@ try {
                             }
 
                             if ($script:RetryAfterRebootAction -eq "Scheduled") {
+                                Register-RebootSafetyEvent -ReasonKey "WAITING_FOR_USER_LOGON" -UserContext $userContextKey -Reason $rebootReason
                                 $rebootAttempted = $true
                                 $rebootResult = Start-ControlledReboot -Reason $rebootReason -DelaySeconds $RebootDelaySeconds
                                 $rebootExitCode = $rebootResult.ExitCode
@@ -4660,6 +4798,15 @@ finally {
     catch {
         Write-RunLog ("Stop-Transcript failed: {0}" -f $_.Exception.Message)
     }
+
+    try { Update-EndpointInstanceState -Status $status -Force } catch { }
+    if ($script:EndpointInstanceMutexAcquired -and $script:EndpointInstanceMutex) {
+        try { $script:EndpointInstanceMutex.ReleaseMutex() } catch { }
+    }
+    if ($script:EndpointInstanceMutex) {
+        try { $script:EndpointInstanceMutex.Dispose() } catch { }
+    }
+    $script:EndpointInstanceMutexAcquired = $false
 }
 
 exit $ExitCode
