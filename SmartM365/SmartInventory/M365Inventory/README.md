@@ -25,11 +25,18 @@ assignment.
 | Entity | Latest CSV | Notes |
 | --- | --- | --- |
 | User license assignments | `M365_Licenses_Users.csv` | One row per user and assigned SKU, including direct or group assignment context. |
-| User service-plan states | `M365_Licenses_UserServicePlanStates.csv` | Compact fact table keyed by tenant, user, SKU, and plan. Retains `IsEnabled` and `PlanStatus` for every assigned license service plan. |
+| User service-plan states | `M365_Licenses_UserServicePlanStates.csv` | Compact fact table keyed by tenant, user, SKU, and plan. `StateCode` records whether the plan is active, disabled, pending, or in error. |
 | Service-plan catalog | `M365_Licenses_ServicePlans_Catalog.csv` | Deduplicated SKU and service-plan names used to enrich the compact fact table. |
 | Exchange service plans | `M365_Licenses_ServicePlans.csv` | Existing enriched Exchange/SPE subset retained for compatibility. |
 | Tenant SKUs | `M365_Licenses_Tenant.csv` | Tenant subscription and capacity inventory. |
 | Licensing groups | `M365_Licenses_Groups.csv` | Groups discovered as license assignment sources. |
+
+Service-plan state codes are `A` (enabled and successfully provisioned), `D`
+(disabled), `PA` (pending activation), `PI` (pending input), `PP` (pending
+provisioning), and `E` (error). The compact CSV therefore remains directly
+filterable by `TenantKey`, `UserId`, `SkuId`, and `PlanId`. WeeklyHistory keeps
+`M365_Licenses_UserServicePlanStates_Detailed.csv` with the expanded
+`IsEnabled` and `PlanStatus` columns.
 
 The former `M365_Licenses_ServicePlans_Detailed.csv` export is disabled. On a
 normal run, its current non-timestamped DATA-ALL/DATA-LAST and SharePoint copy is

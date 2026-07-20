@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-  Export M365 license assignments with Users/Tenant/Groups plus compact user service-plan states and a service-plan catalog.
+  Export M365 license assignments with Users/Tenant/Groups plus compact user service-plan state codes and a service-plan catalog.
+  WeeklyHistory retains the detailed IsEnabled and PlanStatus representation.
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.11
+1.12
 
 
 .REQUIREMENTS
@@ -14,7 +15,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.11
+    Version : 1.12
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -247,7 +248,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.43' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.46' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -628,10 +629,142 @@ function Add-GroupAgg {
   if (-not $groupAgg[$GroupId].DisplayName) { $groupAgg[$GroupId].DisplayName = Get-GroupNameCached -GroupId $GroupId }
 }
 
+function Get-ServicePlanStateCode {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][bool]$IsEnabled,
+    [AllowEmptyString()][string]$PlanStatus
+  )
+
+  $normalizedStatus = if ([string]::IsNullOrWhiteSpace($PlanStatus)) { "" } else { $PlanStatus.Trim() }
+  if ($IsEnabled) {
+    switch ($normalizedStatus) {
+      "Success"             { return "A" }
+      "PendingActivation"   { return "PA" }
+      "PendingInput"        { return "PI" }
+      "PendingProvisioning" { return "PP" }
+      "Error"               { return "E" }
+      default                { return ("EN:{0}" -f $normalizedStatus) }
+    }
+  }
+
+  if ($normalizedStatus -eq "Disabled") {
+    return "D"
+  }
+  return ("DIS:{0}" -f $normalizedStatus)
+}
+
+function ConvertFrom-ServicePlanStateCode {
+  [CmdletBinding()]
+  param([Parameter(Mandatory)][string]$StateCode)
+
+  switch ($StateCode) {
+    "A"  { return [pscustomobject]@{ IsEnabled = $true;  PlanStatus = "Success" } }
+    "D"  { return [pscustomobject]@{ IsEnabled = $false; PlanStatus = "Disabled" } }
+    "PA" { return [pscustomobject]@{ IsEnabled = $true;  PlanStatus = "PendingActivation" } }
+    "PI" { return [pscustomobject]@{ IsEnabled = $true;  PlanStatus = "PendingInput" } }
+    "PP" { return [pscustomobject]@{ IsEnabled = $true;  PlanStatus = "PendingProvisioning" } }
+    "E"  { return [pscustomobject]@{ IsEnabled = $true;  PlanStatus = "Error" } }
+  }
+
+  if ($StateCode.StartsWith("EN:", [System.StringComparison]::Ordinal)) {
+    return [pscustomobject]@{ IsEnabled = $true; PlanStatus = $StateCode.Substring(3) }
+  }
+  if ($StateCode.StartsWith("DIS:", [System.StringComparison]::Ordinal)) {
+    return [pscustomobject]@{ IsEnabled = $false; PlanStatus = $StateCode.Substring(4) }
+  }
+
+  throw "Unsupported service-plan StateCode '$StateCode'."
+}
+
+function Publish-LicensesWeeklyHistory {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][System.Collections.IEnumerable]$ServicePlanStates,
+    [Parameter(Mandatory)][string]$CurrentOutputPath,
+    [Parameter(Mandatory)][string]$LatestOutputPath
+  )
+
+  if (Test-SmartM365MaxItemsMode) {
+    WriteLog -Message "Consolidated Licensing WeeklyHistory publication skipped during MaxItems validation." "INFO"
+    return
+  }
+
+  $weeklyHistoryEnabled = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
+  if (-not $weeklyHistoryEnabled) {
+    WriteLog -Message "Licensing WeeklyHistory publication is disabled by configuration." "INFO"
+    return
+  }
+
+  $historyRootPath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue '')
+  if ([string]::IsNullOrWhiteSpace($historyRootPath)) {
+    $historyRootPath = Join-Path -Path $CurrentOutputPath -ChildPath "WeeklyHistory"
+  }
+  $retentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
+
+  $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+  $detailedSourcePath = Join-Path -Path $CurrentOutputPath -ChildPath "M365_Licenses_UserServicePlanStates_Detailed_$timestamp.csv"
+  $detailedBuildingPath = "$detailedSourcePath.building"
+
+  try {
+    $detailCount = 0
+    $ServicePlanStates |
+      ForEach-Object {
+        $decodedState = ConvertFrom-ServicePlanStateCode -StateCode ([string]$_.StateCode)
+        $detailCount++
+        [pscustomobject][ordered]@{
+          "TenantKey"       = $global:SmartM365TenantKey
+          "OrganizationKey" = $global:SmartM365OrganizationKey
+          "EnvironmentKey"  = $global:SmartM365EnvironmentKey
+          "TenantId"        = $global:SmartM365TenantId
+          "UserId"          = $_.UserId
+          "SkuId"           = $_.SkuId
+          "PlanId"          = $_.PlanId
+          "IsEnabled"       = $decodedState.IsEnabled
+          "PlanStatus"      = $decodedState.PlanStatus
+        }
+      } |
+      Export-Csv -LiteralPath $detailedBuildingPath -NoTypeInformation -Encoding UTF8
+
+    Move-Item -LiteralPath $detailedBuildingPath -Destination $detailedSourcePath -Force
+    WriteLog -Message ("Detailed service-plan WeeklyHistory source created: {0:N0} row(s)." -f $detailCount) "INFO"
+
+    $latestNames = @(
+      "M365_Licenses_Users.csv"
+      "M365_Licenses_ServicePlans_Catalog.csv"
+      "M365_Licenses_ServicePlans.csv"
+      "M365_Licenses_Tenant.csv"
+      "M365_Licenses_Groups.csv"
+    )
+    $weeklySourceFiles = New-Object System.Collections.Generic.List[string]
+    foreach ($latestName in $latestNames) {
+      $latestPath = Join-Path -Path $LatestOutputPath -ChildPath $latestName
+      if ($global:csvGeneratedPaths -and $global:csvGeneratedPaths.Contains($latestPath) -and (Test-Path -LiteralPath $latestPath -PathType Leaf)) {
+        $weeklySourceFiles.Add($latestPath) | Out-Null
+      }
+    }
+    $weeklySourceFiles.Add($detailedSourcePath) | Out-Null
+
+    Save-SmartM365WeeklyInventoryHistory `
+      -SourceFiles $weeklySourceFiles.ToArray() `
+      -HistoryRootPath $historyRootPath `
+      -RetentionWeeks $retentionWeeks `
+      -HistoryLabel "M365 licenses inventory" `
+      -UploadChangedFilesOnly
+  }
+  finally {
+    foreach ($temporaryPath in @($detailedBuildingPath, $detailedSourcePath)) {
+      if (Test-Path -LiteralPath $temporaryPath) {
+        Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+}
+
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.11"
+$ScriptVersion = "1.12"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -894,11 +1027,11 @@ try {
             $isEnabled = (-not ($disabledIds -contains $sp.ServicePlanId))
 
             $rowsPlanStates.Add([PSCustomObject][ordered]@{
-              "UserId"     = $uid
-              "SkuId"      = $skuId
-              "PlanId"     = $sp.ServicePlanId
-              "IsEnabled"  = $isEnabled
-              "PlanStatus" = $sp.ProvisioningStatus
+              "TenantKey" = $global:SmartM365TenantKey
+              "UserId"    = $uid
+              "SkuId"     = $skuId
+              "PlanId"    = $sp.ServicePlanId
+              "StateCode" = Get-ServicePlanStateCode -IsEnabled $isEnabled -PlanStatus $sp.ProvisioningStatus
             }) | Out-Null
 
             $catalogKey = "{0}|{1}" -f $skuId, $sp.ServicePlanId
@@ -958,7 +1091,7 @@ $BaseFileName = "M365_Licenses_Users"
     ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
       -OutputPath $OutputPath `
       -GlobalPath $LatestCsvFolderPath `
-      -Data $resultsUsers -Encoding "UTF8" -NoTypeInformation -Delimiter ","
+      -Data $resultsUsers -Encoding "UTF8" -NoTypeInformation -Delimiter "," -SkipWeeklyHistory
   }
 
   # ---------------- Export compact ServicePlans state fact + catalog ----------------
@@ -971,7 +1104,7 @@ $BaseFileName = "M365_Licenses_Users"
       ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
         -OutputPath $OutputPath `
         -GlobalPath $LatestCsvFolderPath `
-        -Data $rowsPlanStates -Encoding "UTF8" -NoTypeInformation -Delimiter "," -Streaming
+        -Data $rowsPlanStates -Encoding "UTF8" -NoTypeInformation -Delimiter "," -Streaming -NoTenantKey -SkipWeeklyHistory
 
       $catalogRows = @($servicePlanCatalog.Values | Sort-Object SkuPartNumber, PlanName, PlanId)
       Write-Host ""
@@ -980,7 +1113,7 @@ $BaseFileName = "M365_Licenses_Users"
       ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
         -OutputPath $OutputPath `
         -GlobalPath $LatestCsvFolderPath `
-        -Data $catalogRows -Encoding "UTF8" -NoTypeInformation -Delimiter ","
+        -Data $catalogRows -Encoding "UTF8" -NoTypeInformation -Delimiter "," -SkipWeeklyHistory
 
       if ($rowsPlansExchange.Count -gt 0) {
         Write-Host ""
@@ -989,7 +1122,7 @@ $BaseFileName = "M365_Licenses_Users"
         ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
           -OutputPath $OutputPath `
           -GlobalPath $LatestCsvFolderPath `
-          -Data $rowsPlansExchange -Encoding "UTF8" -NoTypeInformation -Delimiter ","
+          -Data $rowsPlansExchange -Encoding "UTF8" -NoTypeInformation -Delimiter "," -SkipWeeklyHistory
         WriteLog -Message ("ServicePlans filtered CSV exported: {0} rows (PlanName contains EXCHANGE + SkuPartNumber contains SPE)." -f $rowsPlansExchange.Count)
       } else {
         Write-Host "No ServicePlans rows matching PlanName containing 'EXCHANGE' and SkuPartNumber containing 'SPE'."
@@ -1032,7 +1165,7 @@ $BaseFileName = "M365_Licenses_Tenant"
     ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
       -OutputPath $OutputPath `
       -GlobalPath $LatestCsvFolderPath `
-      -Data $tenantRows -Encoding "UTF8" -NoTypeInformation -Delimiter ","
+      -Data $tenantRows -Encoding "UTF8" -NoTypeInformation -Delimiter "," -SkipWeeklyHistory
   }
 
   # ---------------- Export Groups ----------------
@@ -1065,9 +1198,17 @@ $BaseFileName = "M365_Licenses_Groups"
     ExportAndCopyCsvFromConvert -BaseFileName $BaseFileName `
       -OutputPath $OutputPath `
       -GlobalPath $LatestCsvFolderPath `
-      -Data $groupRows -Encoding "UTF8" -NoTypeInformation -Delimiter ","
+      -Data $groupRows -Encoding "UTF8" -NoTypeInformation -Delimiter "," -SkipWeeklyHistory
   } else {
     Write-Host "No groups with license assignments discovered during this run."
+  }
+
+  if ($ServicePlans -and $rowsPlanStates.Count -gt 0) {
+    $currentOperation = "Publish consolidated Licensing WeeklyHistory"
+    Publish-LicensesWeeklyHistory `
+      -ServicePlanStates $rowsPlanStates `
+      -CurrentOutputPath $OutputPath `
+      -LatestOutputPath $LatestCsvFolderPath
   }
 
   # ---------------- Disconnect / Cleanup ----------------
