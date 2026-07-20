@@ -12105,21 +12105,6 @@
             "sourceColumn": "TenantKey"
           },
           {
-            "name": "OrganizationKey",
-            "dataType": "string",
-            "sourceColumn": "OrganizationKey"
-          },
-          {
-            "name": "EnvironmentKey",
-            "dataType": "string",
-            "sourceColumn": "EnvironmentKey"
-          },
-          {
-            "name": "TenantId",
-            "dataType": "string",
-            "sourceColumn": "TenantId"
-          },
-          {
             "name": "UserId",
             "dataType": "string",
             "sourceColumn": "UserId"
@@ -12135,6 +12120,11 @@
             "sourceColumn": "PlanId"
           },
           {
+            "name": "StateCode",
+            "dataType": "string",
+            "sourceColumn": "StateCode"
+          },
+          {
             "name": "IsEnabled",
             "dataType": "boolean",
             "sourceColumn": "IsEnabled"
@@ -12143,6 +12133,11 @@
             "name": "PlanStatus",
             "dataType": "string",
             "sourceColumn": "PlanStatus"
+          },
+          {
+            "name": "IsServicePlanActive",
+            "dataType": "boolean",
+            "sourceColumn": "IsServicePlanActive"
           },
           {
             "name": "__SnapshotDate",
@@ -12195,7 +12190,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "let Source=fnLoadSourceTable(\"M365_Licenses_UserServicePlanStates.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"UserId\", \"SkuId\", \"PlanId\", \"IsEnabled\", \"PlanStatus\"}, {{\"IsEnabled\", \"logical\"}}, false), WithKey=Table.AddColumn(Source, \"__SkuPlanKey\", each if [SkuId]=null or [PlanId]=null then null else Text.Lower(Text.Trim(Text.From([SkuId])))&\"|\"&Text.Lower(Text.Trim(Text.From([PlanId]))), type nullable text) in WithKey"
+              "expression": "let Source=fnLoadSourceTable(\"M365_Licenses_UserServicePlanStates.csv\", \",\", {\"TenantKey\", \"UserId\", \"SkuId\", \"PlanId\", \"StateCode\"}, {}, false), WithIsEnabled=Table.AddColumn(Source, \"IsEnabled\", each let Raw=if [StateCode]=null then null else Text.Trim(Text.From([StateCode])), State=if Raw=null then null else Text.Upper(Raw) in if State=null or State=\"\" then null else if State=\"D\" or Text.StartsWith(State,\"DIS:\",Comparer.Ordinal) then false else if List.Contains({\"A\",\"PA\",\"PI\",\"PP\",\"E\"},State) or Text.StartsWith(State,\"EN:\",Comparer.Ordinal) then true else null, type nullable logical), WithPlanStatus=Table.AddColumn(WithIsEnabled, \"PlanStatus\", each let Raw=if [StateCode]=null then null else Text.Trim(Text.From([StateCode])), State=if Raw=null then null else Text.Upper(Raw) in if State=null or State=\"\" then null else if State=\"A\" then \"Success\" else if State=\"D\" then \"Disabled\" else if State=\"PA\" then \"PendingActivation\" else if State=\"PI\" then \"PendingInput\" else if State=\"PP\" then \"PendingProvisioning\" else if State=\"E\" then \"Error\" else if Text.StartsWith(State,\"EN:\",Comparer.Ordinal) then Text.Range(Raw,3) else if Text.StartsWith(State,\"DIS:\",Comparer.Ordinal) then Text.Range(Raw,4) else Raw, type nullable text), WithActive=Table.AddColumn(WithPlanStatus, \"IsServicePlanActive\", each if [StateCode]=null then false else Text.Upper(Text.Trim(Text.From([StateCode])))=\"A\", type logical), WithKey=Table.AddColumn(WithActive, \"__SkuPlanKey\", each if [SkuId]=null or [PlanId]=null then null else Text.Lower(Text.Trim(Text.From([SkuId])))&\"|\"&Text.Lower(Text.Trim(Text.From([PlanId]))), type nullable text) in WithKey"
             }
           }
         ]
@@ -16668,7 +16663,7 @@
           },
           {
             "name": "Source Columns",
-            "expression": "2218",
+            "expression": "2214",
             "formatString": "#,0",
             "displayFolder": "Data Trust"
           },
