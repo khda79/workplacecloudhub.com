@@ -26,7 +26,7 @@
     Exchange_OnPrem and Exchange_EXO mailbox permission exports.
 
 .VERSION
-1.10
+1.11
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -68,7 +68,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.10"
+$ScriptVersion = "1.11"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 
@@ -257,7 +257,7 @@ if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $LatestCsvFolderPath =
 Import-SmartM365CoreModule
 $runId = [guid]::NewGuid().ToString()
 $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$logRoot = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) { Join-Path $ScriptCsvLogFolderPath 'Logs' } else { Join-Path $LogAllRootPath 'Exchange-MailboxPermissionsByUser' }
+$logRoot = if ([string]::IsNullOrWhiteSpace($LogAllRootPath)) { Join-Path $ScriptCsvLogFolderPath 'Logs' } else { Join-Path $LogAllRootPath 'SmartM365-Exchange-MailboxPermissionsByUser' }
 $logPath = Join-Path $logRoot ("SmartM365-Mailboxes-AllSources-PermissionsByUserReport_{0}.log" -f $timestamp)
 foreach ($folder in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logRoot)) { if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null } }
 Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $logPath
