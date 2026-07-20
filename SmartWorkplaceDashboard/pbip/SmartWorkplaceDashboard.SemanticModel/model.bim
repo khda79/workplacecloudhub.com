@@ -7765,6 +7765,81 @@
         ]
       },
       {
+        "name": "Intune_DiscoveredApps_AppDeviceRelations",
+        "description": "SmartInventory source: Intune_DiscoveredApps_AppDeviceRelations.csv",
+        "columns": [
+          {
+            "name": "TenantKey",
+            "dataType": "string",
+            "sourceColumn": "TenantKey"
+          },
+          {
+            "name": "AppId",
+            "dataType": "string",
+            "sourceColumn": "AppId"
+          },
+          {
+            "name": "DeviceId",
+            "dataType": "string",
+            "sourceColumn": "DeviceId"
+          },
+          {
+            "name": "__SnapshotDate",
+            "dataType": "dateTime",
+            "sourceColumn": "__SnapshotDate",
+            "isHidden": true,
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "__SnapshotDateTime",
+            "dataType": "dateTime",
+            "sourceColumn": "__SnapshotDateTime",
+            "isHidden": true,
+            "formatString": "dd/MM/yyyy"
+          },
+          {
+            "name": "__SnapshotPeriod",
+            "dataType": "string",
+            "sourceColumn": "__SnapshotPeriod",
+            "isHidden": true
+          },
+          {
+            "name": "__IsCurrent",
+            "dataType": "boolean",
+            "sourceColumn": "__IsCurrent",
+            "isHidden": true
+          },
+          {
+            "name": "__SourceFile",
+            "dataType": "string",
+            "sourceColumn": "__SourceFile",
+            "isHidden": true
+          },
+          {
+            "name": "__SourceFolder",
+            "dataType": "string",
+            "sourceColumn": "__SourceFolder",
+            "isHidden": true
+          },
+          {
+            "name": "__TenantAppKey",
+            "dataType": "string",
+            "sourceColumn": "__TenantAppKey",
+            "isHidden": true
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Intune_DiscoveredApps_AppDeviceRelations",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": "let Source=fnLoadSourceTable(\"Intune_DiscoveredApps_AppDeviceRelations.csv\", \",\", {\"TenantKey\", \"AppId\", \"DeviceId\"}, {}, false), WithKey=Table.AddColumn(Source, \"__TenantAppKey\", each if [TenantKey]=null or [AppId]=null then null else Text.Lower(Text.Trim(Text.From([TenantKey])))&\"|\"&Text.Lower(Text.Trim(Text.From([AppId]))), type nullable text) in WithKey"
+            }
+          }
+        ]
+      },
+      {
         "name": "Intune_DiscoveredApps_Summary",
         "description": "SmartInventory source: Intune_DiscoveredApps_Summary.csv",
         "columns": [
@@ -7855,6 +7930,12 @@
             "dataType": "string",
             "sourceColumn": "__SourceFolder",
             "isHidden": true
+          },
+          {
+            "name": "__TenantAppKey",
+            "dataType": "string",
+            "sourceColumn": "__TenantAppKey",
+            "isHidden": true
           }
         ],
         "partitions": [
@@ -7863,7 +7944,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "fnLoadSourceTable(\"Intune_DiscoveredApps_Summary.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"AppId\", \"AppName\", \"AppVersion\", \"AppPublisher\", \"Platform\", \"DeviceCount\"}, {{\"DeviceCount\", \"int64\"}}, false)"
+              "expression": "let Source=fnLoadSourceTable(\"Intune_DiscoveredApps_Summary.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"AppId\", \"AppName\", \"AppVersion\", \"AppPublisher\", \"Platform\", \"DeviceCount\"}, {{\"DeviceCount\", \"int64\"}}, false), WithKey=Table.AddColumn(Source, \"__TenantAppKey\", each if [TenantKey]=null or [AppId]=null then null else Text.Lower(Text.Trim(Text.From([TenantKey])))&\"|\"&Text.Lower(Text.Trim(Text.From([AppId]))), type nullable text) in WithKey"
             }
           }
         ]
@@ -16632,8 +16713,20 @@
             "displayFolder": "Applications"
           },
           {
+            "name": "Application Device Instances",
+            "expression": "COUNTROWS('Intune_DiscoveredApps_AppDeviceRelations')",
+            "formatString": "#,0",
+            "displayFolder": "Applications"
+          },
+          {
+            "name": "Devices with Discovered Applications",
+            "expression": "DISTINCTCOUNT('Intune_DiscoveredApps_AppDeviceRelations'[DeviceId])",
+            "formatString": "#,0",
+            "displayFolder": "Applications"
+          },
+          {
             "name": "Devices per Application",
-            "expression": "MAX('Intune_DiscoveredApps_Summary'[DeviceCount])",
+            "expression": "DISTINCTCOUNT('Intune_DiscoveredApps_AppDeviceRelations'[DeviceId])",
             "formatString": "#,0",
             "displayFolder": "Applications"
           },
@@ -16657,13 +16750,13 @@
           },
           {
             "name": "Selected Source Tables",
-            "expression": "89",
+            "expression": "90",
             "formatString": "#,0",
             "displayFolder": "Data Trust"
           },
           {
             "name": "Source Columns",
-            "expression": "2214",
+            "expression": "2217",
             "formatString": "#,0",
             "displayFolder": "Data Trust"
           },
@@ -16962,12 +17055,19 @@
         "fromColumn": "UserId",
         "toTable": "M365_Users_Active",
         "toColumn": "Object Id"
+      },
+      {
+        "name": "rel_DiscoveredAppRelations_Summary",
+        "fromTable": "Intune_DiscoveredApps_AppDeviceRelations",
+        "fromColumn": "__TenantAppKey",
+        "toTable": "Intune_DiscoveredApps_Summary",
+        "toColumn": "__TenantAppKey"
       }
     ],
     "annotations": [
       {
         "name": "SmartWorkplaceDashboard.SourcePolicy",
-        "value": "Each visible source table keeps the SmartInventory CSV basename. Only validated one-to-many service-plan relationships are added."
+        "value": "Each visible source table keeps the SmartInventory CSV basename. Only validated one-to-many relationships are added."
       },
       {
         "name": "__PBI_TimeIntelligenceEnabled",

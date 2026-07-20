@@ -1,4 +1,4 @@
-# Version: 4.3.0
+# Version: 4.4.0
 [CmdletBinding()]
 param(
     [string]$DashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
@@ -14,12 +14,12 @@ $pbip=Join-Path $DashboardRoot 'pbip';$report=Join-Path $pbip 'SmartWorkplaceDas
 $required=@((Join-Path $pbip 'SmartWorkplaceDashboard.pbip'),(Join-Path $report '.platform'),(Join-Path $report 'definition.pbir'),(Join-Path $definition 'version.json'),(Join-Path $definition 'report.json'),(Join-Path $definition 'pages\pages.json'),(Join-Path $semantic 'definition.pbism'),$selectionPath,$modelPath);foreach($p in $required){$null=Read-Json $p}
 $model=Read-Json $modelPath;$selection=Read-Json $selectionPath
 if($model.compatibilityLevel-ne1600){throw "compatibilityLevel must be 1600; found $($model.compatibilityLevel)"}
-$files=@($selection.includedFiles);if($files.Count-ne89){throw "Expected 89 selected CSV files; found $($files.Count)"};if(($files|Sort-Object -Unique).Count-ne$files.Count){throw 'Duplicate selected CSV file'}
+$files=@($selection.includedFiles);if($files.Count-ne90){throw "Expected 90 selected CSV files; found $($files.Count)"};if(($files|Sort-Object -Unique).Count-ne$files.Count){throw 'Duplicate selected CSV file'}
 $approvedSummary=@($selection.includeOverrides);foreach($f in $files){if(-not$f.EndsWith('.csv',[StringComparison]::OrdinalIgnoreCase)){throw "Not a CSV: $f"};if($f-match'_MAXITEMS'){throw "Bounded export selected: $f"};if($f-match'Summary' -and$approvedSummary-notcontains$f){throw "Unapproved Summary selected: $f"}}
 $expectedNames=@($files|ForEach-Object{[IO.Path]::GetFileNameWithoutExtension($_)});$tables=@($model.model.tables);$actualNames=@($tables.name)
-$missing=@($expectedNames|Where-Object{$actualNames-notcontains$_});$extra=@($actualNames|Where-Object{$expectedNames-notcontains$_});if($missing.Count){throw "Missing source tables: $($missing-join', ')"};if($extra.Count){throw "Non-source tables found: $($extra-join', ')"};if($tables.Count-ne89){throw "Expected exactly 89 source tables; found $($tables.Count)"}
+$missing=@($expectedNames|Where-Object{$actualNames-notcontains$_});$extra=@($actualNames|Where-Object{$expectedNames-notcontains$_});if($missing.Count){throw "Missing source tables: $($missing-join', ')"};if($extra.Count){throw "Non-source tables found: $($extra-join', ')"};if($tables.Count-ne90){throw "Expected exactly 90 source tables; found $($tables.Count)"}
 $old=@('DimUser','DimDevice','DimLicenseSku','FactAction','FactBackupMailbox','FactDataQuality','FactDeviceCompliance','FactMailbox','FactSharePointSite','FactSourceFreshness','FactSyncHealth','FactTeam','FactUpgradeEligibility','FactUserActivity','FactUserLicense','FactWindowsUpdate','HistoryCoverage','DashboardMetrics','Measures');$present=@($actualNames|Where-Object{$old-contains$_});if($present.Count){throw "Legacy work tables remain: $($present-join', ')"}
-$metadata=@('__SnapshotDate','__SnapshotDateTime','__SnapshotPeriod','__IsCurrent','__SourceFile','__SourceFolder');$technical=@('__SkuPlanKey');$derived=@('IsEnabled','PlanStatus','IsServicePlanActive');$dataRoot=if($env:SMART_M365_DATA_ROOT){$env:SMART_M365_DATA_ROOT}else{'C:\SmartM365\DATA'};$dataLast=Join-Path $dataRoot 'DATA-LAST'
+$metadata=@('__SnapshotDate','__SnapshotDateTime','__SnapshotPeriod','__IsCurrent','__SourceFile','__SourceFolder');$technical=@('__SkuPlanKey','__TenantAppKey');$derived=@('IsEnabled','PlanStatus','IsServicePlanActive');$dataRoot=if($env:SMART_M365_DATA_ROOT){$env:SMART_M365_DATA_ROOT}else{'C:\SmartM365\DATA'};$dataLast=Join-Path $dataRoot 'DATA-LAST'
 foreach ($f in $files) {
     $name = [IO.Path]::GetFileNameWithoutExtension($f)
     $t = $tables | Where-Object name -eq $name | Select-Object -First 1
@@ -52,10 +52,11 @@ foreach ($f in $files) {
     }
     foreach ($m in $metadata) { if ($cols -notcontains $m) { throw "Missing snapshot metadata $name[$m]" } }}
 $relationships=@($model.model.relationships)
-if($relationships.Count-ne2){throw "Expected exactly 2 validated service-plan relationships; found $($relationships.Count)"}
+if($relationships.Count-ne3){throw "Expected exactly 3 validated relationships; found $($relationships.Count)"}
 $expectedRelationships=@{
     'rel_ServicePlanStates_Catalog' = @{ fromTable='M365_Licenses_UserServicePlanStates'; fromColumn='__SkuPlanKey'; toTable='M365_Licenses_ServicePlans_Catalog'; toColumn='__SkuPlanKey' }
     'rel_ServicePlanStates_Users' = @{ fromTable='M365_Licenses_UserServicePlanStates'; fromColumn='UserId'; toTable='M365_Users_Active'; toColumn='Object Id' }
+    'rel_DiscoveredAppRelations_Summary' = @{ fromTable='Intune_DiscoveredApps_AppDeviceRelations'; fromColumn='__TenantAppKey'; toTable='Intune_DiscoveredApps_Summary'; toColumn='__TenantAppKey' }
 }
 foreach($relationshipName in $expectedRelationships.Keys){
     $relationship=$relationships|Where-Object name -eq $relationshipName|Select-Object -First 1
@@ -69,6 +70,12 @@ foreach($tableName in @('M365_Licenses_UserServicePlanStates','M365_Licenses_Ser
     $keyColumn=$table.columns|Where-Object name -eq '__SkuPlanKey'|Select-Object -First 1
     if($null-eq$keyColumn -or $keyColumn.dataType-ne'string' -or $keyColumn.isHidden-ne$true){throw "Missing hidden service-plan key on $tableName"}
     if([string]$table.partitions.source.expression -notmatch 'Table.AddColumn\([^,]+, "__SkuPlanKey"'){throw "Service-plan key is not generated in Power Query for $tableName"}
+}
+foreach($tableName in @('Intune_DiscoveredApps_AppDeviceRelations','Intune_DiscoveredApps_Summary')){
+    $table=$tables|Where-Object name -eq $tableName|Select-Object -First 1
+    $keyColumn=$table.columns|Where-Object name -eq '__TenantAppKey'|Select-Object -First 1
+    if($null-eq$keyColumn -or $keyColumn.dataType-ne'string' -or $keyColumn.isHidden-ne$true){throw "Missing hidden tenant/application key on $tableName"}
+    if([string]$table.partitions.source.expression -notmatch 'Table.AddColumn\([^,]+, "__TenantAppKey"'){throw "Tenant/application key is not generated in Power Query for $tableName"}
 }
 $stateTable=$tables|Where-Object name -eq 'M365_Licenses_UserServicePlanStates'|Select-Object -First 1
 $stateColumns=@{};foreach($column in $stateTable.columns){$stateColumns[[string]$column.name]=$column}
@@ -103,7 +110,7 @@ foreach ($tableName in $typedExpectations.Keys) {
         if ($partitionText -notmatch [regex]::Escape("{`"$columnName`", `"$mKind`"}")) { throw "Power Query type map regression: $tableName[$columnName] must use $mKind" }
     }
 }
-$measureTable=$tables|Where-Object name -eq 'M365_Users_Active'|Select-Object -First 1;$measureNames=@($measureTable.measures.name);if($measureNames.Count -lt 60){throw "Expected at least 60 measures; found $($measureNames.Count)"};foreach($n in @('Enabled Users','Enabled Users Inactive 90d','Purchased Licenses','M365 SKU Utilization','Service Plan Assignments','Service Plan Assigned Users','Enabled Service Plan Assignments','Disabled Service Plan Assignments','Users with Disabled Service Plans','Service Plan Enablement Rate','Managed Devices','Device Compliance Rate','Windows 11 Affected Devices','Mailboxes','Mailbox Quota Utilization','Teams','SharePoint Sites','SharePoint Storage License Units','SharePoint Estimated Capacity TB','SharePoint Estimated Remaining TB','SharePoint Estimated Utilization','SharePoint Approx Project Visio Capacity TB','Migration Failed Items','Protected Mailboxes','Backup Coverage Rate','Hybrid Identity Affected Users','Model Device Count','Devices per Application','AD Enabled Users Trend','Managed Devices Trend','Selected Source Tables','On-prem Hosted Mailboxes','Online Placement Rate','Remote Mailboxes without EXO','Potential Dual-hosted SMTP','Exchange Servers','Server Inventory Coverage','Low Space Volumes')){if($measureNames -notcontains $n){throw "Missing measure: $n"}}
+$measureTable=$tables|Where-Object name -eq 'M365_Users_Active'|Select-Object -First 1;$measureNames=@($measureTable.measures.name);if($measureNames.Count -lt 60){throw "Expected at least 60 measures; found $($measureNames.Count)"};foreach($n in @('Enabled Users','Enabled Users Inactive 90d','Purchased Licenses','M365 SKU Utilization','Service Plan Assignments','Service Plan Assigned Users','Enabled Service Plan Assignments','Disabled Service Plan Assignments','Users with Disabled Service Plans','Service Plan Enablement Rate','Managed Devices','Device Compliance Rate','Windows 11 Affected Devices','Mailboxes','Mailbox Quota Utilization','Teams','SharePoint Sites','SharePoint Storage License Units','SharePoint Estimated Capacity TB','SharePoint Estimated Remaining TB','SharePoint Estimated Utilization','SharePoint Approx Project Visio Capacity TB','Migration Failed Items','Protected Mailboxes','Backup Coverage Rate','Hybrid Identity Affected Users','Model Device Count','Application Device Instances','Devices with Discovered Applications','Devices per Application','AD Enabled Users Trend','Managed Devices Trend','Selected Source Tables','On-prem Hosted Mailboxes','Online Placement Rate','Remote Mailboxes without EXO','Potential Dual-hosted SMTP','Exchange Servers','Server Inventory Coverage','Low Space Volumes')){if($measureNames -notcontains $n){throw "Missing measure: $n"}}
 $tableMap=@{};foreach($t in $tables){$tableMap[$t.name]=@($t.columns.name)};$measureSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);foreach($n in $measureNames){$null=$measureSet.Add($n)}
 foreach($m in $measureTable.measures){$matches=[regex]::Matches([string]$m.expression,"'([^']+)'\[([^\]]+)\]");foreach($x in $matches){$tn=$x.Groups[1].Value;$cn=$x.Groups[2].Value;if(-not $tableMap.ContainsKey($tn)){throw "Measure $($m.name) references missing table $tn"};if($tableMap[$tn] -notcontains $cn){throw "Measure $($m.name) references missing field $tn[$cn]"}}}
 $pagesMeta=Read-Json (Join-Path $definition 'pages\pages.json');if(@($pagesMeta.pageOrder).Count-ne15){throw "Expected 15 report pages; found $(@($pagesMeta.pageOrder).Count)"}
@@ -121,7 +128,7 @@ $loaderExpression=[string](($model.model.expressions|Where-Object name -eq 'fnLo
 if(([regex]::Matches($loaderExpression,'\(')).Count -ne ([regex]::Matches($loaderExpression,'\)')).Count){throw 'Unbalanced parentheses in fnLoadSourceTable'}
 $forbidden=@('SmartWorkplaceCMDB','LocalDateTable_','C:\Users\');$publishable=@(Get-ChildItem -LiteralPath $DashboardRoot -File -Recurse|Where-Object{$_.FullName -notmatch '\\\.pbi\\' -and $_.Name -ne 'LOCAL_MEMORY.md' -and $_.FullName -ne $PSCommandPath -and $_.Extension -in @('.js','.ps1','.json','.bim','.pbip','.pbir','.pbism','.pq','.md')});foreach($p in $publishable){$text=Get-Content -LiteralPath $p.FullName -Raw;foreach($term in $forbidden){if($text.Contains($term,[StringComparison]::OrdinalIgnoreCase)){throw "Forbidden dependency '$term' in $($p.FullName)"}}}
 $builder=Join-Path $DashboardRoot 'scripts\Build-SmartWorkplaceDashboard.js';& node --check $builder;if($LASTEXITCODE-ne0){throw 'Builder JavaScript syntax check failed'}
-Write-Host "OK SmartWorkplaceDashboard: 89 source tables, $($measureNames.Count) measures, 15 pages, $($visualFiles.Count) visuals, StateCode service-plan compatibility validated."
+Write-Host "OK SmartWorkplaceDashboard: 90 source tables, $($measureNames.Count) measures, 15 pages, $($visualFiles.Count) visuals, StateCode and discovered-app relationships validated."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
