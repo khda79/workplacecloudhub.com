@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.15
+1.11.16
 #>
 #requires -Version 7.0
 
@@ -28,7 +28,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.15'
+$script:AppVersion = '1.11.16'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -424,7 +424,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.15" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.16" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -1346,7 +1346,7 @@ $controls.RunButton.Add_Click({
         if ($script:Assessment.SourceInitialization) {
             $sourceState = $script:Assessment.SourceInitialization
             Write-SemrActivity -Message ([string]$sourceState.ActiveDirectoryMessage) -Level $(if ($sourceState.ActiveDirectoryLive) { 'INFO' } else { 'WARN' }) -Component 'ActiveDirectory'
-            $exchangeSourceLevel = if ($sourceState.ExchangeOnPremisesLive -and [int]$sourceState.ExchangeOnPremisesErrorCount -eq 0) { 'INFO' } else { 'WARN' }
+            $exchangeSourceLevel = if ($sourceState.ExchangeOnPremisesLive -and [int]$sourceState.ExchangeOnPremisesFatalErrorCount -eq 0) { 'INFO' } else { 'WARN' }
             Write-SemrActivity -Message ([string]$sourceState.ExchangeOnPremisesMessage) -Level $exchangeSourceLevel -Component 'ExchangeOnPremises'
             foreach ($sourceError in @($sourceState.ExchangeOnPremisesErrors)) {
                 $errorMailbox = [string]$sourceError.EmailAddress
@@ -1354,7 +1354,8 @@ $controls.RunButton.Add_Click({
                 Write-SemrActivity -Level 'WARN' -Component 'ExchangeOnPremises' -Message "Partial worker evidence error: Mailbox=$errorMailbox; CheckId=$([string]$sourceError.CheckId); Command=$([string]$sourceError.Command); IsFatal=$([bool]$sourceError.IsFatal); Message=$([string]$sourceError.Message)."
             }
             if (@($sourceState.ExchangeOnPremisesErrors).Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$sourceState.ExchangeOnPremisesDiagnosticsDirectory)) {
-                Write-SemrActivity -Level 'WARN' -Component 'ExchangeOnPremises' -Message "Exchange on-premises child diagnostics: $([string]$sourceState.ExchangeOnPremisesDiagnosticsDirectory)"
+                $diagnosticsLevel = if ([int]$sourceState.ExchangeOnPremisesFatalErrorCount -gt 0) { 'WARN' } else { 'INFO' }
+                Write-SemrActivity -Level $diagnosticsLevel -Component 'ExchangeOnPremises' -Message "Exchange on-premises child diagnostics: $([string]$sourceState.ExchangeOnPremisesDiagnosticsDirectory)"
             }
         }
         Write-SemrActivity -Message "Tenant synchronization evidence source: $($script:Assessment.EntraConnect.Source). $($script:Assessment.EntraConnect.Message)" -Level $(if ($script:Assessment.EntraConnect.Available) { 'INFO' } else { 'WARN' })
@@ -1516,8 +1517,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBd3S8BpSjsNyRe
-# ffVt9coZmW7/ugnZOh5YUzxcftGinKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/kYNqIZC7s0N8
+# NRjnqnySpnj8apmnuV53sQc3ayT786CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1650,31 +1651,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAIkoZjvweFdjq1ZWglPV1c2RSZt+0FPdn9GJiFzumZnMA0GCSqG
-# SIb3DQEBAQUABIIBgB4QW6BGv/4D5Dv2q7KMUYU7/jQ7r2PEKG+UOd5WX6FbG/Xw
-# TDMuaqYlKLjXcDh+kDBpw+D96L5V96NxIQ33Q69SdWkVjzYeKWbp0N//Id2Poxcm
-# tfpVJrSmjIdfAjCcTMzQNB6feHZTxHJVcGDgTzxGGsyBkq6JV4WRF5D7UaZ3fAMN
-# c2JCOiHuOHBV1eyRJr9tL7KnJLeYHFSHzqS8mGVJgjzp5WersIWW6Y+U1TqIyBPx
-# O7s+3IYvXUcAuNnfesvceojkYoihM+P3KKmLXk0gy9oVQVGxSrxEskz+vcwUCY25
-# p8s3UaxNCWC7T3yCrG97PtSPp3ls9nnuzMMqVc5D30zINdUnlur2JZFyo6OqjD0A
-# XJBdPiHaX+f8BnuMAZo1hm0XFgjQOWXi9ked8xK2Ls4tmTkj98f3oF8oCM2N9IsY
-# eXxvZkWv+c20zX/0ZcunIMxfVGj2lT9FVucmLeDKafFKKv25JRQZhFrPS20t8J/U
-# OtBxHf+KC872/BmXaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAXcfw9S50USWQ+QowzD3tl0xvfsrnkQZK538Tk7yxXKMA0GCSqG
+# SIb3DQEBAQUABIIBgLHMf0qybBBFxU++srN2N6v40Hhq6PZIoGi1iDuduESaEsQy
+# sD0sADhMOaZmmjghcuWnt5262Yx3m2KLuHfrSwvRcfdkFcjm8tN1EjJXzpHj37pg
+# z+asmOfJVnwUJYkCi4bIQx8f9fAks1C/mnTwSq4Xb2zbft9bBkqGzth/GREQhusN
+# J3x8PwIFL68nJUw14iF5pkNatex5N1OiM5J4ZmCNkdW/6/umVMRb6sp7pt0GriMC
+# 9/3+5MQEGo4dUzgXEbZM8aMkahajxGlu/YSLoJCTW+ywY65eFaEorMsf1Z3Bsc2z
+# rFWclbjI5Jb+tu/69+3NfLB7/xBhTxK1zkf44wkznS39p8Sf/Jeo7rmZdCQ7xKsI
+# pAfUzYP3RwYZnwfNccgw9qHUztPzikp8sOjlVTWz68QNcyoqdjZLPVFPHRAkOjT2
+# wBiWCg+63ewqB4V/OqZdgaWv7rp/8UtFyfeXI7O7sXF9nJYskvFhwBeeH+ZQoOmC
+# zOukNKN0BmFInO41OqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAwNzU3
-# MzVaMC8GCSqGSIb3DQEJBDEiBCDfGDXyH+LAkc+TxhGYgehdS2ST6mr5xcbJvXz0
-# aJuptDANBgkqhkiG9w0BAQEFAASCAgDEJg9T3DLnVruVYyJbtm8XRE3kkq4IeATU
-# AVzU1gAyoJpAqZ2rN6/rIdktVGgDXwSqqKTUyBOn4OinZwLUYyumCV1sdvaidowu
-# TxShJtdZgEvauNX/oGqIYqXwShLfn5gM72S5aWiZUGcIBHYJaGh3aFhUfTPVlDZ3
-# lbsrSSzjvZMzcxfz4IgKAyfWZ2t/I5rsg3YzkNVRVIbu/s1fS7IoSbbhvAP9oV7E
-# RruUjC3h+TS82yhpT2K0evxCmE83//k+JztjhDeEzobD2k3h+P4puz7EHe0kzORQ
-# Ql1R2HpC+hm9UbMn00yIfDQOPal+f3+HctZJvWW/SaVo4fZ35Hsr/iE4iDqCd7Uj
-# CHgUwU2uG2vF7aREL1k/MQEngOjZZskCkpvNZGoINMObV/YwtB6ugVIbOU+9n0JC
-# mlMkFNHPNov2nUMLHjVsZ/f8FGOJI+YzRKlUlVG9VBTnLzni5uW44cQfNpPSxLWA
-# 2hzY6pN9OY86kZ9ThgBE5F5jkQn8l6kTIaWlkOe/VMK9A4OtKRrZtRZUbSbxz65D
-# qZk4jF9nk4LhvF1fCgRRA1H6ORi0xvnA+0rGDykHi25NiJh0WVIVAzpGSEg3s3N0
-# QjUdTagA9ncMeJE0Ci2FWLzDR48nELzuL8J29OhinuqHRpO9D7uVM/4iMuWcQrjf
-# joVkrVP2Fg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMDQ5
+# MzNaMC8GCSqGSIb3DQEJBDEiBCD7yYV3mCde2H508xEbGKH9Fcw8ovagwxXmMb3B
+# Wgs3hDANBgkqhkiG9w0BAQEFAASCAgAkORg863wM7EWOM+FVvXQ6lthcQkmh5hWs
+# aFb5egbCVjqp0/fXnQshRAuLrwDZ/zhrink5e9bcNChYKwoAcUsdCD6dZDFj9/He
+# rsmKCyUJh1enZoIWAEn7rpdOsvp5zjGB2GUYSDX+ZDljF7DWTRiZx7vEIuyLkAqO
+# Nl9ZQ3nJMToaJsxzDGTd2XBqrPwRa7Xo+Ji5x3NKoq21Pnmnqo6akLqYbfhuV81q
+# URcawjkeZVR8vRbMVZZeo2wtcgyhWwx3tXtOPrGYWwYEUK+osSR14P4kiownNmYo
+# KcjS3i1KRYUioOBwj8vXn+1JSIR1Q+gCD121LXmSpBuD5mIx84t44CGOfZKUF+MD
+# sIkDDGnlgdvTPGKRB/Xj+yGExGDVyq8UvKQidel7a+CCNKthn3pErEvoRgAMF/5+
+# gPITZookLyBe1YjUaK6I+WE2qzQZjn6dxp9KRCW9lPCVXQxQV6F3jy9+gayLo6mo
+# pluONu0aorqQc2rN6wiUBCQC2n7n8nh6FPwcXXQtuhlrPp+4NvUji8aPHR9ocws0
+# SkG1gSpXl3CNkYbkSS/+IJcntm4S3Mkzu6B4j5u7m7FaDC2k9yG1uvjA56LhS8iT
+# 0HCkm5aP0nqteNdBP/UIyZkPgGbq1ZA61Eo0c/wYAqXiJN68UvneTHhw6GUbR5dJ
+# bvI3vc2AQA==
 # SIG # End signature block
