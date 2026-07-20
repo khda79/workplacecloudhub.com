@@ -5,7 +5,7 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
 .VERSION
-1.13
+1.14
 
 
 .REQUIREMENTS
@@ -15,7 +15,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.13
+    Version : 1.14
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -929,6 +929,15 @@ function New-LicensesDetailedServicePlanHistorySource {
   }
 }
 
+function Get-LicensesIsoWeekName {
+  [CmdletBinding()]
+  param([datetime]$Date = (Get-Date))
+
+  $isoYear = [System.Globalization.ISOWeek]::GetYear($Date)
+  $isoWeek = [System.Globalization.ISOWeek]::GetWeekOfYear($Date)
+  return '{0}-W{1:00}' -f $isoYear, $isoWeek
+}
+
 function Remove-LegacyWeeklyServicePlanStateDuplicates {
   [CmdletBinding()]
   param(
@@ -938,7 +947,7 @@ function Remove-LegacyWeeklyServicePlanStateDuplicates {
 
   if (-not (Test-Path -LiteralPath $HistoryRootPath -PathType Container)) { return 0 }
   $expectedDetailedHeader = '"TenantKey","OrganizationKey","EnvironmentKey","TenantId","UserId","SkuId","PlanId","IsEnabled","PlanStatus"'
-  $currentWeekName = Get-SmartM365IsoWeekName
+  $currentWeekName = Get-LicensesIsoWeekName
   $removedCount = 0
   $weekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{4}-W\d{2}$' })
   foreach ($weekFolder in $weekFolders) {
@@ -1052,7 +1061,12 @@ function Publish-LicensesWeeklyHistory {
       -HistoryLabel 'M365 licenses inventory' `
       -UploadChangedFilesOnly
 
-    Remove-LegacyWeeklyServicePlanStateDuplicates -HistoryRootPath $historyRootPath -ExpectedCurrentWeekRows $detailCount | Out-Null
+    try {
+      Remove-LegacyWeeklyServicePlanStateDuplicates -HistoryRootPath $historyRootPath -ExpectedCurrentWeekRows $detailCount | Out-Null
+    }
+    catch {
+      WriteLog -Message ("Legacy WeeklyHistory service-plan duplicate cleanup failed after the current dataset was published: {0}" -f $_) 'WARNING'
+    }
   }
   finally {
     if (Test-Path -LiteralPath $detailedSourcePath) {
@@ -1063,7 +1077,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
