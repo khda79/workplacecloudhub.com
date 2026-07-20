@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.21
+    Version : 1.22
 
 .VERSION
-1.21
+1.22
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.21
+    Version : 1.22
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.21"
+$ScriptVersion = "1.22"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -347,7 +347,7 @@ $script:Stat_DetailAppsTargeted = 0
 $script:Stat_GraphCalls       = 0
 $script:Stat_ThrottleRetries  = 0
 $script:Stat_BatchFallbackApps = 0
-$script:DeviceDetailResumeContractVersion = 5
+$script:DeviceDetailResumeContractVersion = 6
 
 # ==========================================================
 # Initialize script environment
@@ -795,7 +795,7 @@ function Read-DiscoveredAppsDeviceDetailCacheManifest {
     try {
         $cacheItem = Get-Item -LiteralPath $CachePath -ErrorAction Stop
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if ([int]$manifest.CacheManifestVersion -notin @(1, 2)) {
+        if ([int]$manifest.CacheManifestVersion -notin @(1, 2, 3)) {
             $result.Reason = "unsupported manifest version: $($manifest.CacheManifestVersion)"
             return [pscustomobject]$result
         }
@@ -853,7 +853,7 @@ function Write-DiscoveredAppsDeviceDetailCacheManifest {
     })
 
     $manifest = [ordered]@{
-        CacheManifestVersion    = 2
+        CacheManifestVersion    = 3
         GeneratedAtUtc          = (Get-Date).ToUniversalTime().ToString('o')
         SourceCsvFileName       = $csvItem.Name
         SourceCsvLength         = [int64]$csvItem.Length
@@ -888,6 +888,9 @@ function Use-DiscoveredAppsDeviceDetailCache {
         ManifestUsed = $false
         ManifestPath = ''
         ManifestStats = @{}
+        RejectedApps = 0
+        RejectedRows = 0
+        ExcessRows   = 0
         Reason       = ''
     }
 
@@ -924,18 +927,18 @@ function Use-DiscoveredAppsDeviceDetailCache {
                 $statsById[$manifestAppId] = $manifestStatEntry.Value
             }
         }
-        $result.ManifestUsed = $true
         $result.ManifestPath = $manifestResult.Path
-        foreach ($targetAppId in @($targetById.Keys)) {
-            if (-not $statsById.ContainsKey([string]$targetAppId)) {
-                [void]$statsScanAppIds.Add([string]$targetAppId)
-            }
-        }
-        if ($statsScanAppIds.Count -gt 0) {
-            WriteLog -Message ("App-device relation cache manifest is incomplete: {0}/{1} target app(s) covered. Missing app stats will be rebuilt from the CSV." -f $statsById.Count, $targetById.Count) 'WARNING'
+        if ($statsById.Count -eq $targetById.Count) {
+            $result.ManifestUsed = $true
+            WriteLog -Message ("App-device relation cache manifest loaded: {0}; TargetStatsApps={1}. Cache stats scan skipped." -f $manifestResult.Path, $statsById.Count) 'INFO'
         }
         else {
-            WriteLog -Message ("App-device relation cache manifest loaded: {0}; TargetStatsApps={1}. Cache stats scan skipped." -f $manifestResult.Path, $statsById.Count) 'INFO'
+            $manifestCoveredApps = $statsById.Count
+            $statsById = @{}
+            foreach ($targetAppId in @($targetById.Keys)) {
+                [void]$statsScanAppIds.Add([string]$targetAppId)
+            }
+            WriteLog -Message ("App-device relation cache manifest is incomplete and will not be trusted: {0}/{1} target app(s) covered. All target app stats will be rebuilt from the CSV." -f $manifestCoveredApps, $targetById.Count) 'WARNING'
         }
     }
     else {
@@ -1019,6 +1022,17 @@ function Use-DiscoveredAppsDeviceDetailCache {
                 EnrichmentOk = $true
             }
         }
+        else {
+            $result.RejectedApps++
+            $result.RejectedRows += [int64]$stat.DeviceRows
+            if ([int64]$stat.DeviceRows -gt [int64]$expectedDeviceCount) {
+                $result.ExcessRows += ([int64]$stat.DeviceRows - [int64]$expectedDeviceCount)
+            }
+        }
+    }
+
+    if ($result.RejectedApps -gt 0) {
+        WriteLog -Message ("App-device relation cache validation rejected {0} app(s), covering {1} cached relation row(s); excess rows detected: {2}. Rejected apps will be recollected from Graph." -f $result.RejectedApps, $result.RejectedRows, $result.ExcessRows) 'WARNING'
     }
 
     if ($cacheable.Count -eq 0) {
