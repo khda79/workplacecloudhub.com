@@ -9,7 +9,7 @@
     collects evidence, and writes cycle CSV reports.
 
 .VERSION
-    0.1.64
+    0.1.65
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -110,7 +110,7 @@ if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected launcher argument(s): {0}. Pass PsExec with -PsExecPath <path>, not as a free argument." -f ($UnexpectedArguments -join ' '))
 }
 
-$script:LauncherVersion = '0.1.64'
+$script:LauncherVersion = '0.1.65'
 $script:TechnicianRunGuardStartedNoResultHours = 4
 $script:BaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:ToolkitRoot = Split-Path -Parent $script:BaseDir
@@ -536,6 +536,57 @@ function Save-TechnicianRunGuardHistory {
     if ($lastError) { throw $lastError }
     throw ("Failed to save technician run guard history: {0}" -f $Path)
 }
+
+function Get-TechnicianRunGuardFailureCategory {
+    param(
+        [AllowNull()][string]$LauncherStatus,
+        [AllowNull()][string]$RemoteStatus,
+        [AllowNull()][string]$Detail,
+        [AllowNull()][string]$JobErrorMessage
+    )
+
+    $effectiveStatus = @($RemoteStatus,$LauncherStatus) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+    $status = ([string]$effectiveStatus).ToUpperInvariant()
+    $evidence = @($Detail,$JobErrorMessage) -join ' '
+
+    if ($status -in @('ADMIN_SHARE_UNREACHABLE','DRYRUN_ADMIN_SHARE_UNREACHABLE') -or $evidence -match 'FailureType=(DNS_FAILED|SMB_PORT_445_UNREACHABLE|PING_OK_ADMIN_SHARE_FAILED|ADMIN_SHARE_UNREACHABLE)') {
+        return 'NetworkTransient'
+    }
+    if ($status -in @('DIRECT_SETUP_UPGRADE_FAILED','SETUP_UPGRADE_FAILED','SETUP_MIGRATION_PROFILE_FAILURE','SETUP_MIGRATION_PROFILE_REPAIR_FAILED','SETUP_MIGRATION_PLUGIN_FAILURE','SETUP_PROCESS_TIMEOUT','SETUP_PROCESS_MONITOR_INTERRUPTED','SETUP_MEDIA_COPY_FAILED','SETUP_MEDIA_COPY_TIMEOUT','SETUP_MEDIA_MANIFEST_VALIDATION_FAILED')) {
+        return 'SetupFailure'
+    }
+    if ($status -in @('INSUFFICIENT_DISK','INSUFFICIENT_DISK_AFTER_CLEANUP','UNSUPPORTED_OS','NOT_INTUNE_ENROLLED','WINDOWS11_COMPAT_BLOCKER','WU_POLICY_BLOCKER','SETUP_SOURCE_LANGUAGE_UNAVAILABLE')) {
+        return 'OperatorAction'
+    }
+    if ($status -in @('ERROR','JOB_ERROR','RUNSPACE_BROKEN','PSEXEC_EXIT_UNKNOWN','PSEXEC_COMMUNICATION_LOST','CENTRAL_LOG_COLLECTION_FAILED','REMOTE_LOG_COLLECTION_FAILED','REMOTE_RESULT_STALE','REMOTE_PAYLOAD_COPY_FAILED','SETUP_CACHE_LOCKED','SETUP_SUBNET_COPY_LEASE_TIMEOUT','SETUP_SOURCE_COPY_LEASE_TIMEOUT')) {
+        return 'ExecutionTransient'
+    }
+    return ''
+}
+
+function Get-TechnicianRunGuardRetryDelay {
+    param(
+        [Parameter(Mandatory = $true)][string]$FailureCategory,
+        [ValidateRange(1, 1000)][int]$ConsecutiveFailureCount,
+        [ValidateRange(0, 168)][int]$RunGuardHours
+    )
+
+    $maximumDelay = [math]::Max(1, ($RunGuardHours * 60))
+    switch ($FailureCategory) {
+        'NetworkTransient' {
+            $delays = @(5,15,30,60)
+            return [math]::Min($maximumDelay, $delays[[math]::Min($ConsecutiveFailureCount - 1, $delays.Count - 1)])
+        }
+        'ExecutionTransient' {
+            $delays = @(15,30,60,120)
+            return [math]::Min($maximumDelay, $delays[[math]::Min($ConsecutiveFailureCount - 1, $delays.Count - 1)])
+        }
+        'SetupFailure' { return [math]::Min($maximumDelay, 360) }
+        'OperatorAction' { return $maximumDelay }
+        default { return 0 }
+    }
+}
+
 function Test-TechnicianRunGuardEntryShouldBlock {
     param(
         [AllowNull()]$Entry,
@@ -560,6 +611,13 @@ function Test-TechnicianRunGuardEntryShouldBlock {
     $combinedEvidence = @($detail, $jobErrorMessage) -join ' '
 
     if ([string]::IsNullOrWhiteSpace($effectiveStatusUpper)) { return $false }
+
+    if ($Entry.PSObject.Properties['RetryAfterUtc'] -and -not [string]::IsNullOrWhiteSpace([string]$Entry.RetryAfterUtc)) {
+        $retryAfterUtc = [datetime]::MinValue
+        if (ConvertTo-TechnicianRunGuardUtcDateTime -Value $Entry.RetryAfterUtc -Result ([ref]$retryAfterUtc)) {
+            if ((Get-Date).ToUniversalTime() -lt $retryAfterUtc.ToUniversalTime()) { return $true }
+        }
+    }
 
     if ($effectiveStatusUpper -in @(
         'ADMIN_SHARE_UNREACHABLE',
@@ -713,6 +771,9 @@ function Update-TechnicianRunGuardHistory {
         $detail = ''
         $psExecLogPath = ''
         $remoteLogsPath = ''
+        $failureCategory = ''
+        $consecutiveFailureCount = 0
+        $retryAfterUtc = ''
 
         if ($LockedResult) {
             if ($LockedResult.PSObject.Properties['LauncherStatus']) { $launcherStatus = [string]$LockedResult.LauncherStatus }
@@ -722,6 +783,22 @@ function Update-TechnicianRunGuardHistory {
             if ($LockedResult.PSObject.Properties['Detail']) { $detail = [string]$LockedResult.Detail }
             if ($LockedResult.PSObject.Properties['PsExecLogPath']) { $psExecLogPath = [string]$LockedResult.PsExecLogPath }
             if ($LockedResult.PSObject.Properties['RemoteLogsPath']) { $remoteLogsPath = [string]$LockedResult.RemoteLogsPath }
+        }
+
+        $previousFailureCategory = if ($previousEntry -and $previousEntry.PSObject.Properties['FailureCategory']) { [string]$previousEntry.FailureCategory } else { '' }
+        $previousFailureCount = 0
+        if ($previousEntry -and $previousEntry.PSObject.Properties['ConsecutiveFailureCount']) { [void][int]::TryParse([string]$previousEntry.ConsecutiveFailureCount, [ref]$previousFailureCount) }
+        if ($LockedState -eq 'Started') {
+            $failureCategory = $previousFailureCategory
+            $consecutiveFailureCount = $previousFailureCount
+        }
+        else {
+            $failureCategory = Get-TechnicianRunGuardFailureCategory -LauncherStatus $launcherStatus -RemoteStatus $remoteStatus -Detail $detail -JobErrorMessage $(if ($LockedResult -and $LockedResult.PSObject.Properties['JobErrorMessage']) { [string]$LockedResult.JobErrorMessage } else { '' })
+            if (-not [string]::IsNullOrWhiteSpace($failureCategory)) {
+                $consecutiveFailureCount = if ($failureCategory -eq $previousFailureCategory) { $previousFailureCount + 1 } else { 1 }
+                $retryDelayMinutes = Get-TechnicianRunGuardRetryDelay -FailureCategory $failureCategory -ConsecutiveFailureCount $consecutiveFailureCount -RunGuardHours $LockedRunGuardHours
+                if ($retryDelayMinutes -gt 0) { $retryAfterUtc = $nowUtc.AddMinutes($retryDelayMinutes).ToString('o') }
+            }
         }
 
         [void]$kept.Add([pscustomobject]@{
@@ -740,6 +817,9 @@ function Update-TechnicianRunGuardHistory {
             PsExecLogPath = $psExecLogPath
             RemoteLogsPath = $remoteLogsPath
             JobErrorMessage = if ($LockedResult -and $LockedResult.PSObject.Properties['JobErrorMessage']) { [string]$LockedResult.JobErrorMessage } else { '' }
+            FailureCategory = $failureCategory
+            ConsecutiveFailureCount = $consecutiveFailureCount
+            RetryAfterUtc = $retryAfterUtc
             JobId = [string]$LockedJobId
             CycleNumber = $LockedCycle
             ComputerListPath = $LockedComputerListPath
@@ -777,6 +857,10 @@ function New-TechnicianRunGuardSkippedResult {
     $effectiveGuardHours = if ($isStartedWithoutResult) { $startedNoResultGuardHours } else { [double]$RunGuardHours }
     $effectiveExpiresText = $expiresText
     if ($isStartedWithoutResult -and $startedUtc -gt [datetime]::MinValue) { $effectiveExpiresText = $startedUtc.ToUniversalTime().AddHours($startedNoResultGuardHours).ToString('o') }
+    $retryAfterText = if ($HistoryEntry.PSObject.Properties['RetryAfterUtc']) { [string]$HistoryEntry.RetryAfterUtc } else { '' }
+    $failureCategory = if ($HistoryEntry.PSObject.Properties['FailureCategory']) { [string]$HistoryEntry.FailureCategory } else { '' }
+    $failureCount = if ($HistoryEntry.PSObject.Properties['ConsecutiveFailureCount']) { [string]$HistoryEntry.ConsecutiveFailureCount } else { '' }
+    if (-not $isStartedWithoutResult -and -not [string]::IsNullOrWhiteSpace($retryAfterText)) { $effectiveExpiresText = $retryAfterText }
     $launcherStatus = if ($isStartedWithoutResult) { 'SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT' } else { 'SKIPPED_BY_TECH_RUN_GUARD' }
 
     return [pscustomobject]@{
@@ -785,9 +869,9 @@ function New-TechnicianRunGuardSkippedResult {
         CycleNumber = $CycleNumber
         LauncherStatus = $launcherStatus
         RemoteStatus = ''
-        RemoteNextAction = 'WAIT_RUN_GUARD_EXPIRY'
+        RemoteNextAction = if (-not [string]::IsNullOrWhiteSpace($retryAfterText)) { 'WAIT_RETRY_BACKOFF' } else { 'WAIT_RUN_GUARD_EXPIRY' }
         ExitCode = 0
-        Detail = ("Technician run guard history skipped launch. FQDN={0}; LastStartedUtc={1}; AgeHours={2:N1}; GuardHours={3}; EffectiveGuardHours={4:N1}; ExpiresUtc={5}; HistoryState={6}; JobId={7}; LastStatus={8}" -f $HistoryEntry.ComputerFqdn,$startedText,$ageHours,$RunGuardHours,$effectiveGuardHours,$effectiveExpiresText,$historyState,$historyJobId,$lastStatus)
+        Detail = ("Technician run guard history skipped launch. FQDN={0}; LastStartedUtc={1}; AgeHours={2:N1}; GuardHours={3}; EffectiveGuardHours={4:N1}; RetryOrExpiryUtc={5}; HistoryState={6}; JobId={7}; LastStatus={8}; FailureCategory={9}; ConsecutiveFailureCount={10}" -f $HistoryEntry.ComputerFqdn,$startedText,$ageHours,$RunGuardHours,$effectiveGuardHours,$effectiveExpiresText,$historyState,$historyJobId,$lastStatus,$failureCategory,$failureCount)
         SetupCacheAction = ''
         DiskCleanupAction = ''
         DiskCleanupFreedGB = ''
@@ -1407,6 +1491,10 @@ function Invoke-Windows11InventoryPreCycleRefresh {
     $script:IntuneInventoryMap = @{}
     if (-not [string]::IsNullOrWhiteSpace($IntuneInventoryCsv)) {
         try {
+            $currentIntuneScopeKeys = @(Get-ComputerList -Path $ComputerListPath | ForEach-Object { Get-ComputerListKey -ComputerName $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+            $intuneRefreshAgeHours = if ($script:IntuneInventoryLastRefreshUtc -gt [datetime]::MinValue) { ((Get-Date).ToUniversalTime() - $script:IntuneInventoryLastRefreshUtc).TotalHours } else { [double]::PositiveInfinity }
+            $intuneScopeStillCovered = (@($currentIntuneScopeKeys | Where-Object { $script:IntuneInventoryRefreshScopeKeys -notcontains $_ }).Count -eq 0)
+            $reuseInRunIntuneInventory = ($script:IntuneInventoryLastRefreshUtc -gt [datetime]::MinValue -and $intuneRefreshAgeHours -lt $script:IntuneInventoryFreshnessHours -and $intuneScopeStillCovered -and (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf))
             if ($DryRun) {
                 Write-Host ("Cycle {0}: DryRun: skipping automatic Intune scoped refresh." -f $CycleNumber) -ForegroundColor Yellow
                 if (Test-Path -LiteralPath $IntuneInventoryCsv -PathType Leaf) {
@@ -1420,6 +1508,10 @@ function Invoke-Windows11InventoryPreCycleRefresh {
                     $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
                 }
             }
+            elseif ($reuseInRunIntuneInventory) {
+                Write-Host ("Cycle {0}: reusing in-run Intune inventory. AgeHours={1:N2}; TTLHours={2}; ScopeStillCovered=True; CSV={3}" -f $CycleNumber,$intuneRefreshAgeHours,$script:IntuneInventoryFreshnessHours,$IntuneInventoryCsv) -ForegroundColor DarkGray
+                $script:IntuneInventoryMap = Get-IntuneInventoryMap -Path $IntuneInventoryCsv -NameColumn $IntuneInventoryNameColumn
+            }
             else {
                 $cycleIntuneInventoryLogPath = Join-Path $ReportRoot ("DevicesIntune_Cycle{0}Refresh_{1}.log" -f $CycleNumber,(Get-Date -Format 'yyyyMMdd_HHmmss'))
                 Write-Host ("Cycle {0}: refreshing Intune inventory scoped to current Computers.txt ({1} computer(s))..." -f $CycleNumber,$currentComputers.Count) -ForegroundColor Yellow
@@ -1432,6 +1524,8 @@ function Invoke-Windows11InventoryPreCycleRefresh {
                     -TenantId $IntuneTenantId
                 if ($cycleIntuneInventory.Success) {
                     $script:IntuneInventoryMap = $cycleIntuneInventory.InventoryMap
+                    $script:IntuneInventoryLastRefreshUtc = (Get-Date).ToUniversalTime()
+                    $script:IntuneInventoryRefreshScopeKeys = @($currentIntuneScopeKeys)
                     Write-Host ("Cycle {0}: Intune inventory refreshed. Devices={1}; CSV={2}" -f $CycleNumber,$script:IntuneInventoryMap.Count,$cycleIntuneInventory.CsvPath) -ForegroundColor Green
                 }
                 else {
@@ -1481,6 +1575,10 @@ function Invoke-Windows11InventoryPreCycleRefresh {
     $currentComputers = @(Get-ComputerList -Path $ComputerListPath)
     if ($currentComputers.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($AdInventoryCsv)) {
         try {
+            $currentAdScopeKeys = @($currentComputers | ForEach-Object { Get-ComputerListKey -ComputerName $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+            $adRefreshAgeHours = if ($script:AdInventoryLastRefreshUtc -gt [datetime]::MinValue) { ((Get-Date).ToUniversalTime() - $script:AdInventoryLastRefreshUtc).TotalHours } else { [double]::PositiveInfinity }
+            $adScopeStillCovered = (@($currentAdScopeKeys | Where-Object { $script:AdInventoryRefreshScopeKeys -notcontains $_ }).Count -eq 0)
+            $reuseInRunAdInventory = ($script:AdInventoryLastRefreshUtc -gt [datetime]::MinValue -and $adRefreshAgeHours -lt $script:AdInventoryFreshnessHours -and $adScopeStillCovered -and (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf))
             if ($DryRun) {
                 Write-Host ("Cycle {0}: DryRun: skipping automatic AD scoped refresh." -f $CycleNumber) -ForegroundColor Yellow
                 if (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf) {
@@ -1494,6 +1592,10 @@ function Invoke-Windows11InventoryPreCycleRefresh {
                     $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
                 }
             }
+            elseif ($reuseInRunAdInventory) {
+                Write-Host ("Cycle {0}: reusing in-run AD inventory. AgeHours={1:N2}; TTLHours={2}; ScopeStillCovered=True; CSV={3}" -f $CycleNumber,$adRefreshAgeHours,$script:AdInventoryFreshnessHours,$AdInventoryCsv) -ForegroundColor DarkGray
+                $script:AdInventoryMap = Get-AdInventoryMap -Path $AdInventoryCsv -NameColumn $AdInventoryNameColumn
+            }
             else {
                 $cycleAdInventoryLogPath = Join-Path $ReportRoot ("DevicesAD_Cycle{0}Refresh_{1}.log" -f $CycleNumber,(Get-Date -Format 'yyyyMMdd_HHmmss'))
                 $cycleAdScope = if ([string]::IsNullOrWhiteSpace($AdDomain)) { 'Current AD forest, limited to current Computers.txt' } else { "Domain=$AdDomain, limited to current Computers.txt" }
@@ -1506,6 +1608,8 @@ function Invoke-Windows11InventoryPreCycleRefresh {
                     -Domain $AdDomain
                 if ($cycleAdInventory.Success) {
                     $script:AdInventoryMap = $cycleAdInventory.InventoryMap
+                    $script:AdInventoryLastRefreshUtc = (Get-Date).ToUniversalTime()
+                    $script:AdInventoryRefreshScopeKeys = @($currentAdScopeKeys)
                     Write-Host ("Cycle {0}: AD inventory refreshed. Devices={1}; CSV={2}" -f $CycleNumber,$script:AdInventoryMap.Count,$cycleAdInventory.CsvPath) -ForegroundColor Green
                 }
                 else {
@@ -2186,12 +2290,23 @@ function Get-Windows11ReportRows {
         foreach ($column in $reportColumns) {
             $row[$column] = if ($null -ne $item -and $item.PSObject.Properties[$column]) { [string]$item.$column } else { '' }
         }
+        [pscustomobject]$row
+    }
+    return @($normalized)
+}
+
+function ConvertTo-Windows11HtmlReportRow {
+    param([AllowEmptyCollection()][object[]]$Items)
+
+    $decorated = foreach ($item in @(Get-Windows11ReportRows -Items $Items)) {
+        $row = [ordered]@{}
+        foreach ($column in $reportColumns) { $row[$column] = [string]$item.$column }
         $row['Local log'] = New-HtmlLogLink -Path $row['PsExecLogPath']
         $row['Collected logs'] = New-HtmlLogLink -Path $row['RemoteLogsPath']
         $row['Remote PC logs'] = New-HtmlLogLink -Path (Get-RemotePcLogsPath -ComputerName $row['ComputerName'])
         [pscustomobject]$row
     }
-    return @($normalized)
+    return @($decorated)
 }
 
 
@@ -2238,6 +2353,45 @@ function Get-Windows11AdminShareFailureType {
     if ($evidence -match 'SMB_PORT_445_UNREACHABLE|Tcp445=False|port\s+445') { return 'SMB_PORT_445_UNREACHABLE' }
     if ($evidence -match 'AdminShare=False|Access is denied|Acc.s refus|administrative shares are not reachable') { return 'ADMIN_SHARE_UNREACHABLE' }
     return 'UNKNOWN'
+}
+
+function Add-Windows11AttemptCounter {
+    param(
+        [AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory = $true)][hashtable]$StatusCounter,
+        [Parameter(Mandatory = $true)][hashtable]$NextActionCounter,
+        [Parameter(Mandatory = $true)][hashtable]$AdminShareFailureCounter
+    )
+
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row) { continue }
+        $status = Get-Windows11HtmlEffectiveStatus -Row $row
+        if (-not [string]::IsNullOrWhiteSpace($status)) {
+            if (-not $StatusCounter.ContainsKey($status)) { $StatusCounter[$status] = 0 }
+            $StatusCounter[$status] = [int]$StatusCounter[$status] + 1
+        }
+        $nextAction = if ($row.PSObject.Properties['RemoteNextAction']) { [string]$row.RemoteNextAction } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($nextAction)) {
+            if (-not $NextActionCounter.ContainsKey($nextAction)) { $NextActionCounter[$nextAction] = 0 }
+            $NextActionCounter[$nextAction] = [int]$NextActionCounter[$nextAction] + 1
+        }
+        if ($status -eq 'ADMIN_SHARE_UNREACHABLE') {
+            $failureType = Get-Windows11AdminShareFailureType -Row $row
+            if (-not $AdminShareFailureCounter.ContainsKey($failureType)) { $AdminShareFailureCounter[$failureType] = 0 }
+            $AdminShareFailureCounter[$failureType] = [int]$AdminShareFailureCounter[$failureType] + 1
+        }
+    }
+}
+
+function ConvertTo-Windows11CounterRow {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Counter,
+        [Parameter(Mandatory = $true)][string]$NameColumn
+    )
+
+    return @($Counter.GetEnumerator() | ForEach-Object {
+        [pscustomobject][ordered]@{ $NameColumn = [string]$_.Key; Count = [int]$_.Value }
+    } | Sort-Object Count, $NameColumn -Descending)
 }
 
 function New-Windows11CycleProgressRows {
@@ -2301,15 +2455,12 @@ function Export-Windows11ReportCsv {
     )
 
     if ($Rows -and $Rows.Count -gt 0) {
-        @($Rows) | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
+        @($Rows) | Select-Object -Property $reportColumns | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
         return
     }
 
     $emptyRow = [ordered]@{}
     foreach ($column in $reportColumns) { $emptyRow[$column] = '' }
-    $emptyRow['Local log'] = ''
-    $emptyRow['Collected logs'] = ''
-    $emptyRow['Remote PC logs'] = ''
     @([pscustomobject]$emptyRow) | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
     $lines = @(Get-Content -LiteralPath $Path -ErrorAction Stop)
     if ($lines.Count -gt 0) { Set-Content -LiteralPath $Path -Value $lines[0] -Encoding UTF8 }
@@ -2347,23 +2498,16 @@ function New-Windows11UpgradeCycleHtmlReport {
         [AllowEmptyCollection()][object[]]$RunningJobRows = @()
     )
 
-    $rows = @(Get-Windows11ReportRows -Items @($Summary | ForEach-Object { $_ }))
-    $latestRows = @(Get-Windows11LatestRowsByComputer -Rows $rows)
+    $rows = @($Summary | Where-Object { $null -ne $_ })
+    $latestDataRows = @(Get-Windows11LatestRowsByComputer -Rows $rows)
+    $latestRows = @(ConvertTo-Windows11HtmlReportRow -Items $latestDataRows)
 
     $separatedDetailStatuses = @('ADMIN_SHARE_UNREACHABLE', 'RUN_GUARD_ACTIVE', 'SKIPPED_BY_TECH_RUN_GUARD', 'SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT')
-    $mainRows = @($rows | Where-Object { $separatedDetailStatuses -notcontains (Get-Windows11HtmlEffectiveStatus -Row $_) })
-    $separatedDetailRows = @($rows | Where-Object { $separatedDetailStatuses -contains (Get-Windows11HtmlEffectiveStatus -Row $_) })
+    $mainRows = @($latestRows | Where-Object { $separatedDetailStatuses -notcontains (Get-Windows11HtmlEffectiveStatus -Row $_) })
+    $separatedDetailRows = @($latestRows | Where-Object { $separatedDetailStatuses -contains (Get-Windows11HtmlEffectiveStatus -Row $_) })
 
-    $effectiveRows = foreach ($row in $rows) {
-        $eff = Get-Windows11HtmlEffectiveStatus -Row $row
-        [pscustomobject]@{ EffectiveStatus = $eff; NextAction = [string]$row.RemoteNextAction }
-    }
-    $statusCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.EffectiveStatus) } | Group-Object -Property EffectiveStatus | Sort-Object Count -Descending | ForEach-Object {
-        [pscustomobject]@{ Status = $_.Name; Count = $_.Count }
-    })
-    $nextActionCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.NextAction) } | Group-Object -Property NextAction | Sort-Object Count -Descending | ForEach-Object {
-        [pscustomobject]@{ NextAction = $_.Name; Count = $_.Count }
-    })
+    $statusCounts = @(ConvertTo-Windows11CounterRow -Counter $script:AttemptStatusCounter -NameColumn 'Status')
+    $nextActionCounts = @(ConvertTo-Windows11CounterRow -Counter $script:AttemptNextActionCounter -NameColumn 'NextAction')
     $latestEffectiveRows = foreach ($row in $latestRows) {
         $eff = Get-Windows11HtmlEffectiveStatus -Row $row
         [pscustomobject]@{ EffectiveStatus = $eff; NextAction = [string]$row.RemoteNextAction }
@@ -2374,9 +2518,7 @@ function New-Windows11UpgradeCycleHtmlReport {
     $latestAdminShareFailureCounts = @($latestRows | Where-Object { (Get-Windows11HtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = (Get-Windows11AdminShareFailureType -Row $_) } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object {
         [pscustomobject]@{ FailureType = $_.Name; Count = $_.Count }
     })
-    $adminShareFailureCounts = @($rows | Where-Object { (Get-Windows11HtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = (Get-Windows11AdminShareFailureType -Row $_) } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object {
-        [pscustomobject]@{ FailureType = $_.Name; Count = $_.Count }
-    })
+    $adminShareFailureCounts = @(ConvertTo-Windows11CounterRow -Counter $script:AttemptAdminShareFailureCounter -NameColumn 'FailureType')
 
     $logoUri = Get-Windows11BrandLogoDataUri
     $logoHtml = if (-not [string]::IsNullOrWhiteSpace($logoUri)) { "<img class='logo' src='$logoUri' alt='WorkplaceCloudHub' />" } else { "" }
@@ -2437,7 +2579,7 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add(("<div class='title'>Windows 11 upgrade - {0}<span class='badge'>{1}</span></div>" -f $cycleLabelHtml,$mode))
     [void]$html.Add("<div class='subtitle'>Smart Intune Windows 11 Upgrade Toolkit</div>")
     [void]$html.Add(("<div class='lot-name' title='{1}'>LOT: {0}</div>" -f $lotNameHtml,$lotPathHtml))
-    [void]$html.Add(("<div class='meta'>Generated: {0} | Report rows: {1} | Unique computers: {2} | Launcher: v{3}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$rows.Count,$latestRows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
+    [void]$html.Add(("<div class='meta'>Generated: {0} | Completed attempt rows: {1} | Unique computers: {2} | Launcher: v{3}</div>" -f (ConvertTo-HtmlText $GeneratedAt.ToString('yyyy-MM-dd HH:mm:ss')),$script:AttemptRowCount,$latestRows.Count,(ConvertTo-HtmlText $script:LauncherVersion)))
     [void]$html.Add(("<div class='meta'>Launcher log: {0}</div>" -f (New-HtmlLogLink -Path $script:LauncherLogPath)))
     [void]$html.Add("</div>")
     [void]$html.Add($logoHtml)
@@ -2468,10 +2610,10 @@ tr:nth-child(even) td { background: #F5F8FB; }
         [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $adminShareFailureCounts -Columns @('FailureType','Count')))
         [void]$html.Add("</div>")
     }
-    [void]$html.Add("<div class='card'><h2>Next action summary</h2>")
+    [void]$html.Add("<div class='card'><h2>Next action summary by attempts</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $nextActionCounts -Columns @("NextAction", "Count")))
     [void]$html.Add("</div>")
-    [void]$html.Add("<div class='card'><h2>Computer details</h2>")
+    [void]$html.Add("<div class='card'><h2>Latest computer details</h2>")
     $htmlReportColumns = New-Object System.Collections.Generic.List[string]
     foreach ($column in $reportColumns) {
         [void]$htmlReportColumns.Add($column)
@@ -2484,9 +2626,9 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $mainRows -Columns @($htmlReportColumns)))
     [void]$html.Add("<div class='footer'>Smart Intune Windows 11 Upgrade Toolkit - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div>")
     [void]$html.Add("</div>")
-    [void]$html.Add("<div class='card'><h2>Run guard / admin share details</h2>")
+    [void]$html.Add("<div class='card'><h2>Latest run guard / admin share details</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $separatedDetailRows -Columns @($htmlReportColumns)))
-    [void]$html.Add("<div class='footer'>Rows excluded from Computer details: ADMIN_SHARE_UNREACHABLE, RUN_GUARD_ACTIVE, SKIPPED_BY_TECH_RUN_GUARD, and SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT.</div>")
+    [void]$html.Add("<div class='footer'>Latest rows excluded from computer details: ADMIN_SHARE_UNREACHABLE, RUN_GUARD_ACTIVE, SKIPPED_BY_TECH_RUN_GUARD, and SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT. Per-cycle CSV files retain the complete attempt history.</div>")
     [void]$html.Add("</div>")
     [void]$html.Add("<div class='card'><h2>LOT/run options</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $optionRows -Columns @("Category", "Option", "Value")))
@@ -2741,11 +2883,19 @@ function Release-GlobalLease {
 
 $script:IntuneInventoryMap = @{}
 $script:AdInventoryMap = @{}
+$script:IntuneInventoryLastRefreshUtc = [datetime]::MinValue
+$script:AdInventoryLastRefreshUtc = [datetime]::MinValue
+$script:IntuneInventoryRefreshScopeKeys = @()
+$script:AdInventoryRefreshScopeKeys = @()
 $cycle = 0
 $mergedHtmlReportTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $mergedFinalHtmlPath = Join-Path $ReportRoot ("PsExec_Windows11Upgrade_Summary_{0}_{1}.html" -f $script:LauncherLogSafeLotName,$mergedHtmlReportTimestamp)
 $mergedLiveHtmlPath = $mergedFinalHtmlPath
-$allCycleResults = New-Object System.Collections.ArrayList
+$script:LatestCycleResultByComputer = @{}
+$script:AttemptStatusCounter = @{}
+$script:AttemptNextActionCounter = @{}
+$script:AttemptAdminShareFailureCounter = @{}
+$script:AttemptRowCount = 0
 $allCycleProgressRows = New-Object System.Collections.ArrayList
 Write-Host ("Merged HTML report: {0}" -f $mergedLiveHtmlPath) -ForegroundColor DarkCyan
 Set-ActiveLotRunState -Status 'Running' -ReportPath $mergedLiveHtmlPath
@@ -2787,12 +2937,13 @@ do {
     $forcedCancelledJobIds = @{}
     $cancellationObservedAt = $null
     $lastLiveHtmlWrite = [datetime]::MinValue
+    $lastLiveHtmlResultCount = -1
     $cycleStart = Get-Date
     $lastProgressLog = Get-Date
     try {
         $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $runningJobs.Count -ComputerListStats $computerListStats
         $mergedProgressRows = @($allCycleProgressRows.ToArray()) + @($cycleProgress)
-        New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows @()
+        New-Windows11UpgradeCycleHtmlReport -Summary @($script:LatestCycleResultByComputer.Values) -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows @()
     }
     catch { Write-Host ("Cycle {0}: failed to initialize HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
     while ($nextIndex -lt $computers.Count -or $runningJobs.Count -gt 0) {
@@ -2930,10 +3081,11 @@ do {
                     $liveRows = @(Get-Windows11ReportRows -Items @($results.ToArray()))
                     $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $runningJobs.Count -ComputerListStats $computerListStats
                     $runningJobRows = New-Windows11RunningJobRows -RunningJobs @($runningJobs) -JobStartedAtById $jobStartedAtById
-                    $mergedLiveRows = @($allCycleResults.ToArray()) + $liveRows
+                    $mergedLiveRows = @($script:LatestCycleResultByComputer.Values) + $liveRows
                     $mergedProgressRows = @($allCycleProgressRows.ToArray()) + @($cycleProgress)
                     New-Windows11UpgradeCycleHtmlReport -Summary $mergedLiveRows -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows $runningJobRows
                     $lastLiveHtmlWrite = Get-Date
+                    $lastLiveHtmlResultCount = $results.Count
                 }
                 catch { Write-Host ("Cycle {0}: failed to update HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
             }
@@ -3068,15 +3220,17 @@ do {
         }
 
         $currentRunningJobs = @($runningJobs | Where-Object { $_.State -eq 'Running' })
-        if (((Get-Date) - $lastLiveHtmlWrite).TotalSeconds -ge 3) {
+        $liveHtmlAgeSeconds = ((Get-Date) - $lastLiveHtmlWrite).TotalSeconds
+        if ($liveHtmlAgeSeconds -ge 15 -and ($results.Count -ne $lastLiveHtmlResultCount -or $liveHtmlAgeSeconds -ge 60)) {
             try {
                 $liveRows = @(Get-Windows11ReportRows -Items @($results.ToArray()))
                 $cycleProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $results.Count -RunningComputers $currentRunningJobs.Count -ComputerListStats $computerListStats
                 $runningJobRows = New-Windows11RunningJobRows -RunningJobs $currentRunningJobs -JobStartedAtById $jobStartedAtById
-                $mergedLiveRows = @($allCycleResults.ToArray()) + $liveRows
+                $mergedLiveRows = @($script:LatestCycleResultByComputer.Values) + $liveRows
                 $mergedProgressRows = @($allCycleProgressRows.ToArray()) + @($cycleProgress)
                 New-Windows11UpgradeCycleHtmlReport -Summary $mergedLiveRows -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress $mergedProgressRows -RunningJobRows $runningJobRows
                 $lastLiveHtmlWrite = Get-Date
+                $lastLiveHtmlResultCount = $results.Count
             }
             catch { Write-Host ("Cycle {0}: failed to update HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
         }
@@ -3093,9 +3247,15 @@ do {
 
     try {
         $finalProgress = New-Windows11CycleProgressRows -CycleNumber $cycle -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $computers.Count -CompletedComputers $normalizedResults.Count -RunningComputers 0 -ComputerListStats $computerListStats
-        foreach ($normalizedResult in @($normalizedResults)) { [void]$allCycleResults.Add($normalizedResult) }
+        Add-Windows11AttemptCounter -Rows $normalizedResults -StatusCounter $script:AttemptStatusCounter -NextActionCounter $script:AttemptNextActionCounter -AdminShareFailureCounter $script:AttemptAdminShareFailureCounter
+        $script:AttemptRowCount += $normalizedResults.Count
+        foreach ($normalizedResult in @($normalizedResults)) {
+            $computerKey = Get-ComputerListKey -ComputerName ([string]$normalizedResult.ComputerName)
+            if ([string]::IsNullOrWhiteSpace($computerKey)) { $computerKey = [string]$normalizedResult.ComputerName }
+            $script:LatestCycleResultByComputer[$computerKey] = $normalizedResult
+        }
         [void]$allCycleProgressRows.Add($finalProgress)
-        New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress @($allCycleProgressRows.ToArray()) -RunningJobRows @()
+        New-Windows11UpgradeCycleHtmlReport -Summary @($script:LatestCycleResultByComputer.Values) -Path $mergedLiveHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -IsLive -CycleProgress @($allCycleProgressRows.ToArray()) -RunningJobRows @()
         Write-Host ("Merged HTML report updated through cycle {0}: {1}" -f $cycle,$mergedLiveHtmlPath) -ForegroundColor Green
     }
     catch { Write-Host ("Cycle {0}: failed to update merged HTML report: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
@@ -3142,8 +3302,8 @@ do {
 while ($true)
 
 try {
-    if ($allCycleResults.Count -gt 0) {
-        New-Windows11UpgradeCycleHtmlReport -Summary @($allCycleResults.ToArray()) -Path $mergedFinalHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -CycleProgress @($allCycleProgressRows.ToArray()) -RunningJobRows @()
+    if ($script:LatestCycleResultByComputer.Count -gt 0) {
+        New-Windows11UpgradeCycleHtmlReport -Summary @($script:LatestCycleResultByComputer.Values) -Path $mergedFinalHtmlPath -CycleNumber $cycle -GeneratedAt (Get-Date) -CycleProgress @($allCycleProgressRows.ToArray()) -RunningJobRows @()
         Write-Host ("Merged final HTML report: {0}" -f $mergedFinalHtmlPath) -ForegroundColor Green
     }
 }
