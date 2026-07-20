@@ -7,8 +7,8 @@
     Connects to Microsoft Graph using service principal with certificate authentication.
     Retrieves all discovered Windows applications and their associated managed devices.
     Produces two CSV exports:
-      - Summary      : one row per discovered Windows app (name, version, publisher, device count)
-      - DeviceDetail : one row per app / device pair (flat join)
+      - Summary            : one row per discovered Windows app (name, version, publisher, device count)
+      - AppDeviceRelations : one compact row per app / device pair (TenantKey, AppId, DeviceId)
     Both files are written to the DATA-ALL output folder (DiscoveredAppsCsvLogFolderPath) and copied to DATA-LAST (LatestCsvFolderPath).
 
 .PARAMETER OutputPath
@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.19
+    Version : 1.20
 
 .VERSION
-1.19
+1.20
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.19
+    Version : 1.20
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -292,7 +292,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.24' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.44' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     exit 1
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.19"
+$ScriptVersion = "1.20"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -347,7 +347,7 @@ $script:Stat_DetailAppsTargeted = 0
 $script:Stat_GraphCalls       = 0
 $script:Stat_ThrottleRetries  = 0
 $script:Stat_BatchFallbackApps = 0
-$script:DeviceDetailResumeContractVersion = 3
+$script:DeviceDetailResumeContractVersion = 4
 
 # ==========================================================
 # Initialize script environment
@@ -645,29 +645,16 @@ function Get-DiscoveredAppDeviceRelationBatchMap {
 
     return $result
 }
-function New-DiscoveredAppsDeviceDetailRecord {
+function ConvertTo-DiscoveredAppsAppDeviceRelationRecord {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][object]$App,
-        [Parameter(Mandatory = $false)][object]$Device
+        [Parameter(Mandatory = $true)][string]$DeviceId
     )
 
     [pscustomobject]@{
-        AppId                  = $App.id
-        AppName                = $App.displayName
-        AppVersion             = $App.version
-        AppPublisher           = $App.publisher
-        Platform               = $App.platform
-        DeviceId               = if ($Device) { $Device.id } else { '' }
-        DeviceName             = if ($Device) { $Device.deviceName } else { '' }
-        OperatingSystem        = if ($Device) { $Device.operatingSystem } else { '' }
-        OSVersion              = if ($Device) { $Device.osVersion } else { '' }
-        UserPrincipalName      = if ($Device) { $Device.userPrincipalName } else { '' }
-        LastSyncDateTime       = if ($Device) { $Device.lastSyncDateTime } else { '' }
-        EnrolledDateTime       = if ($Device) { $Device.enrolledDateTime } else { '' }
-        ManagedDeviceOwnerType = if ($Device) { $Device.managedDeviceOwnerType } else { '' }
-        ComplianceState        = if ($Device) { $Device.complianceState } else { '' }
-        AzureADDeviceId        = if ($Device) { $Device.azureADDeviceId } else { '' }
+        AppId    = [string]$App.id
+        DeviceId = $DeviceId
     }
 }
 
@@ -678,16 +665,30 @@ function Write-DiscoveredAppsCsvRows {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows
     )
 
-    if (-not $Rows -or $Rows.Count -eq 0) { return }
     $folder = Split-Path -Path $Path -Parent
     if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
     }
+    if (-not $Rows -or $Rows.Count -eq 0) {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            Set-Content -LiteralPath $Path -Value '"TenantKey","AppId","DeviceId"' -Encoding UTF8
+        }
+        return
+    }
+    foreach ($row in $Rows) {
+        if ([string]::IsNullOrWhiteSpace([string]$row.AppId) -or [string]::IsNullOrWhiteSpace([string]$row.DeviceId)) {
+            throw "AppDeviceRelations row validation failed: AppId and DeviceId are mandatory."
+        }
+    }
+    $compactRows = @(
+        $Rows |
+            Add-SmartM365TenantKey |
+            Select-Object TenantKey, AppId, DeviceId
+    )
     if (Test-Path -LiteralPath $Path) {
-        Repair-SmartM365CsvTenantKeySchema -Path $Path -Delimiter ',' -Encoding UTF8 | Out-Null
-        $Rows | Add-SmartM365TenantKey | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append
+        $compactRows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append
     } else {
-        $Rows | Add-SmartM365TenantKey | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+        $compactRows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
     }
 }
 
@@ -778,7 +779,7 @@ function Read-DiscoveredAppsDeviceDetailCacheManifest {
     try {
         $cacheItem = Get-Item -LiteralPath $CachePath -ErrorAction Stop
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if ([int]$manifest.CacheManifestVersion -ne 1) {
+        if ([int]$manifest.CacheManifestVersion -notin @(1, 2)) {
             $result.Reason = "unsupported manifest version: $($manifest.CacheManifestVersion)"
             return [pscustomobject]$result
         }
@@ -836,7 +837,7 @@ function Write-DiscoveredAppsDeviceDetailCacheManifest {
     })
 
     $manifest = [ordered]@{
-        CacheManifestVersion    = 1
+        CacheManifestVersion    = 2
         GeneratedAtUtc          = (Get-Date).ToUniversalTime().ToString('o')
         SourceCsvFileName       = $csvItem.Name
         SourceCsvLength         = [int64]$csvItem.Length
@@ -851,37 +852,6 @@ function Write-DiscoveredAppsDeviceDetailCacheManifest {
     WriteLog -Message ("DeviceDetail cache manifest written: {0}; Apps={1}; Rows={2}" -f $manifestPath, $manifest.AppCount, $manifest.TotalRows) 'INFO'
     return $manifestPath
 }
-function Test-DiscoveredAppsDeviceDetailCacheRowEnrichment {
-    [CmdletBinding()]
-    param([AllowNull()]$Row)
-
-    if (-not $Row -or [string]::IsNullOrWhiteSpace([string]$Row.DeviceId)) {
-        return $true
-    }
-
-    foreach ($propertyName in @('UserPrincipalName', 'AzureADDeviceId')) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$Row.$propertyName)) {
-            return $true
-        }
-    }
-
-    foreach ($propertyName in @('LastSyncDateTime', 'EnrolledDateTime')) {
-        $parsedDate = [datetime]::MinValue
-        if ([datetime]::TryParse([string]$Row.$propertyName, [ref]$parsedDate) -and $parsedDate.Year -gt 2000) {
-            return $true
-        }
-    }
-
-    foreach ($propertyName in @('ManagedDeviceOwnerType', 'ComplianceState')) {
-        $value = [string]$Row.$propertyName
-        if (-not [string]::IsNullOrWhiteSpace($value) -and $value -ine 'unknown') {
-            return $true
-        }
-    }
-
-    return $false
-}
-
 function Use-DiscoveredAppsDeviceDetailCache {
     [CmdletBinding()]
     param(
@@ -895,15 +865,14 @@ function Use-DiscoveredAppsDeviceDetailCache {
     )
 
     $result = [ordered]@{
-        CachePath = $CachePath
-        Used      = $false
-        Apps      = 0
-        Rows      = 0
-        RejectedEnrichmentApps = 0
+        CachePath    = $CachePath
+        Used         = $false
+        Apps         = 0
+        Rows         = 0
         ManifestUsed = $false
         ManifestPath = ''
         ManifestStats = @{}
-        Reason    = ''
+        Reason       = ''
     }
 
     if (-not (Test-Path -LiteralPath $CachePath)) {
@@ -940,23 +909,25 @@ function Use-DiscoveredAppsDeviceDetailCache {
         }
         $result.ManifestUsed = $true
         $result.ManifestPath = $manifestResult.Path
-        WriteLog -Message ("DeviceDetail cache manifest loaded: {0}; StatsApps={1}; TargetStatsApps={2}. Legacy cache stats scan skipped." -f $manifestResult.Path, $manifestResult.Stats.Count, $statsById.Count) 'INFO'
+        WriteLog -Message ("App-device relation cache manifest loaded: {0}; StatsApps={1}; TargetStatsApps={2}. Cache stats scan skipped." -f $manifestResult.Path, $manifestResult.Stats.Count, $statsById.Count) 'INFO'
     }
     else {
         if (-not [string]::IsNullOrWhiteSpace([string]$manifestResult.Reason)) {
-            WriteLog -Message ("DeviceDetail cache manifest not used: {0}; falling back to legacy cache stats scan." -f $manifestResult.Reason) 'INFO'
+            WriteLog -Message ("App-device relation cache manifest not used: {0}; scanning the cache rows once." -f $manifestResult.Reason) 'INFO'
         }
         try {
             Import-Csv -LiteralPath $CachePath | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AppId) -and $targetById.ContainsKey([string]$_.AppId) } | ForEach-Object {
                 $id = [string]$_.AppId
+                $app = $targetById[$id]
 
                 if (-not $statsById.ContainsKey($id)) {
+                    $hasLegacyMetadata = $null -ne $_.PSObject.Properties['AppName']
                     $statsById[$id] = [pscustomobject]@{
                         AppId        = $id
-                        AppName      = [string]$_.AppName
-                        AppVersion   = [string]$_.AppVersion
-                        Publisher    = [string]$_.AppPublisher
-                        Platform     = [string]$_.Platform
+                        AppName      = if ($hasLegacyMetadata) { [string]$_.AppName } else { [string]$app.displayName }
+                        AppVersion   = if ($hasLegacyMetadata) { [string]$_.AppVersion } else { [string]$app.version }
+                        Publisher    = if ($hasLegacyMetadata) { [string]$_.AppPublisher } else { [string]$app.publisher }
+                        Platform     = if ($hasLegacyMetadata) { [string]$_.Platform } else { [string]$app.platform }
                         Rows         = 0
                         DeviceRows   = 0
                         MetadataOk   = $true
@@ -968,16 +939,13 @@ function Use-DiscoveredAppsDeviceDetailCache {
                 $stat.Rows++
                 if (-not [string]::IsNullOrWhiteSpace([string]$_.DeviceId)) {
                     $stat.DeviceRows++
-                    if ($stat.EnrichmentOk -and -not (Test-DiscoveredAppsDeviceDetailCacheRowEnrichment -Row $_)) {
-                        $stat.EnrichmentOk = $false
-                    }
                 }
 
-                $app = $targetById[$id]
-                if ([string]$_.AppName -ne [string]$app.displayName -or
-                    [string]$_.AppVersion -ne [string]$app.version -or
-                    [string]$_.AppPublisher -ne [string]$app.publisher -or
-                    [string]$_.Platform -ne [string]$app.platform) {
+                if ($null -ne $_.PSObject.Properties['AppName'] -and
+                    ([string]$_.AppName -ne [string]$app.displayName -or
+                     [string]$_.AppVersion -ne [string]$app.version -or
+                     [string]$_.AppPublisher -ne [string]$app.publisher -or
+                     [string]$_.Platform -ne [string]$app.platform)) {
                     $stat.MetadataOk = $false
                 }
             }
@@ -989,6 +957,7 @@ function Use-DiscoveredAppsDeviceDetailCache {
     }
 
     $cacheable = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $normalizedStats = @{}
     foreach ($id in @($statsById.Keys)) {
         $stat = $statsById[$id]
         $app = $targetById[$id]
@@ -999,39 +968,47 @@ function Use-DiscoveredAppsDeviceDetailCache {
         if (-not $metadataMatchesCurrent) { $stat.MetadataOk = $false }
         $expectedDeviceCount = Get-DiscoveredAppsAppDeviceCount -App $app
         $deviceCountOk = if ($expectedDeviceCount -eq 0) {
-            $stat.Rows -gt 0 -and $stat.DeviceRows -eq 0
+            [int]$stat.DeviceRows -eq 0
         } else {
-            $stat.DeviceRows -eq $expectedDeviceCount
+            [int]$stat.DeviceRows -eq $expectedDeviceCount
         }
 
-        if ($stat.MetadataOk -and $deviceCountOk -and $stat.EnrichmentOk) {
+        if ($stat.MetadataOk -and $deviceCountOk) {
             [void]$cacheable.Add($id)
-        }
-        elseif ($stat.MetadataOk -and $deviceCountOk -and -not $stat.EnrichmentOk) {
-            $result.RejectedEnrichmentApps++
+            $normalizedStats[$id] = [pscustomobject]@{
+                AppId        = $id
+                AppName      = [string]$app.displayName
+                AppVersion   = [string]$app.version
+                Publisher    = [string]$app.publisher
+                Platform     = [string]$app.platform
+                Rows         = [int]$stat.DeviceRows
+                DeviceRows   = [int]$stat.DeviceRows
+                MetadataOk   = $true
+                EnrichmentOk = $true
+            }
         }
     }
 
     if ($cacheable.Count -eq 0) {
-        $result.Reason = if ($result.RejectedEnrichmentApps -gt 0) {
-            "no cache rows meet the current DeviceDetail enrichment contract; rejected apps: $($result.RejectedEnrichmentApps)"
-        }
-        else {
-            'no cache rows match current app metadata/device counts'
-        }
+        $result.Reason = 'no cache rows match current app metadata/device counts'
         return [pscustomobject]$result
     }
 
     $batch = New-Object 'System.Collections.Generic.List[object]'
     try {
         Import-Csv -LiteralPath $CachePath | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AppId) -and $cacheable.Contains([string]$_.AppId) } | ForEach-Object {
-            $id = [string]$_.AppId
-
-            $batch.Add($_) | Out-Null
-            $result.Rows++
-            if ($batch.Count -ge 5000) {
-                Write-DiscoveredAppsCsvRows -Path $PartialPath -Rows $batch.ToArray()
-                $batch.Clear()
+            $deviceId = [string]$_.DeviceId
+            if (-not [string]::IsNullOrWhiteSpace($deviceId)) {
+                $id = [string]$_.AppId
+                $batch.Add([pscustomobject]@{
+                    AppId    = $id
+                    DeviceId = $deviceId
+                }) | Out-Null
+                $result.Rows++
+                if ($batch.Count -ge 5000) {
+                    Write-DiscoveredAppsCsvRows -Path $PartialPath -Rows $batch.ToArray()
+                    $batch.Clear()
+                }
             }
         }
         if ($batch.Count -gt 0) {
@@ -1047,16 +1024,15 @@ function Use-DiscoveredAppsDeviceDetailCache {
     foreach ($id in @($cacheable)) {
         [void]$ProcessedAppIds.Add($id)
         [void]$CachedAppIds.Add($id)
-        $ActualDeviceCountsByAppId[$id] = [int]$statsById[$id].DeviceRows
+        $ActualDeviceCountsByAppId[$id] = [int]$normalizedStats[$id].DeviceRows
     }
 
     $result.Used = $true
     $result.Apps = $cacheable.Count
-    $result.ManifestStats = $statsById
-    $result.Reason = 'cache rows reused'
+    $result.ManifestStats = $normalizedStats
+    $result.Reason = 'cache rows reused and projected to compact app-device relations'
     return [pscustomobject]$result
 }
-
 function Get-DiscoveredAppsResumeState {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -1208,6 +1184,20 @@ function Complete-DiscoveredAppsStreamExport {
     if (-not (Test-Path -LiteralPath $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
     if (-not (Test-Path -LiteralPath $GlobalPath)) { New-Item -ItemType Directory -Path $GlobalPath -Force | Out-Null }
 
+    $expectedHeader = '"TenantKey","AppId","DeviceId"'
+    $actualHeader = [string](Get-Content -LiteralPath $PartialPath -TotalCount 1 -ErrorAction Stop)
+    $actualHeader = $actualHeader.TrimStart([char]0xFEFF)
+    if ($actualHeader -cne $expectedHeader) {
+        throw "AppDeviceRelations publication gate failed: unexpected CSV header '$actualHeader'; expected '$expectedHeader'."
+    }
+    $validationSample = @(Import-Csv -LiteralPath $PartialPath | Select-Object -First 1)
+    Assert-SmartM365CsvDataCompleteness `
+        -Data $validationSample `
+        -Columns @('TenantKey', 'AppId', 'DeviceId') `
+        -BaseFileName $BaseFileName `
+        -TimestampedPath $TimestampedPath `
+        -LatestPath (Join-Path -Path $GlobalPath -ChildPath ("$BaseFileName.csv"))
+
     Copy-Item -LiteralPath $PartialPath -Destination $TimestampedPath -Force
     $localLatestPath = Join-Path -Path $OutputPath -ChildPath ("$BaseFileName.csv")
     $globalLatestPath = Join-Path -Path $GlobalPath -ChildPath ("$BaseFileName.csv")
@@ -1228,6 +1218,50 @@ function Complete-DiscoveredAppsStreamExport {
     Remove-Item -LiteralPath $PartialPath -Force -ErrorAction SilentlyContinue
     WriteLog -Message "DeviceDetail CSV finalized: $TimestampedPath" "INFO"
     return $TimestampedPath
+}
+function Remove-LegacyDiscoveredAppsDeviceDetailExport {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory = $true)][string]$CurrentOutputPath,
+        [Parameter(Mandatory = $true)][string]$LatestOutputPath
+    )
+
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message 'Legacy DiscoveredApps DeviceDetail retirement skipped during MaxItems validation.' 'INFO'
+        return
+    }
+
+    $legacyFileName = 'Intune_DiscoveredApps_DeviceDetail.csv'
+    if (-not $PSCmdlet.ShouldProcess($legacyFileName, 'Retire legacy DiscoveredApps DeviceDetail export after compact relation publication')) {
+        return
+    }
+
+    $legacyLatestPath = Join-Path -Path $LatestOutputPath -ChildPath $legacyFileName
+    if ($global:EnableSharePointUpload) {
+        $removedFromSharePoint = Remove-SmartM365SharePointFile -LocalFilePath $legacyLatestPath
+        if (-not $removedFromSharePoint) {
+            WriteLog -Message 'Legacy DiscoveredApps DeviceDetail SharePoint file could not be confirmed as removed.' 'WARNING'
+        }
+    }
+
+    $legacyPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($legacyRoot in @($CurrentOutputPath, $LatestOutputPath)) {
+        [void]$legacyPaths.Add((Join-Path -Path $legacyRoot -ChildPath $legacyFileName))
+        [void]$legacyPaths.Add((Join-Path -Path $legacyRoot -ChildPath 'Intune_DiscoveredApps_DeviceDetail.cache.json'))
+    }
+
+    foreach ($legacyPath in $legacyPaths) {
+        if (-not (Test-Path -LiteralPath $legacyPath)) { continue }
+        try {
+            Remove-Item -LiteralPath $legacyPath -Force -ErrorAction Stop
+            WriteLog -Message ("Legacy DiscoveredApps DeviceDetail artifact removed: {0}" -f $legacyPath) 'INFO'
+        }
+        catch {
+            throw ("Failed to remove legacy DiscoveredApps DeviceDetail artifact '{0}': {1}" -f $legacyPath, $_.Exception.Message)
+        }
+    }
+
+    WriteLog -Message 'Legacy export Intune_DiscoveredApps_DeviceDetail.csv is disabled.' 'INFO'
 }
 # ==========================================================
 # MAIN TRY / CATCH / FINALLY
@@ -1357,7 +1391,8 @@ try {
     } else {
         WriteLog -Message "Building DeviceDetail records for $($detailApps.Count) applications (mode=$DeviceDetailMode)..." "INFO"
 
-        $detailBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DiscoveredApps_DeviceDetail'
+        $detailBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DiscoveredApps_AppDeviceRelations'
+        $legacyDetailBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DiscoveredApps_DeviceDetail'
         $detailTargetAppIdsHash = Get-DiscoveredAppsTargetAppIdsHash -AppIds @($detailApps | ForEach-Object { [string]$_.id })
         $detailTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $script:DeviceDetailResumePath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName.resume.json"
@@ -1397,19 +1432,24 @@ try {
             $script:DeviceDetailTimestampedPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.csv"
             Remove-Item -LiteralPath $script:DeviceDetailPartialPath -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $script:DeviceDetailResumePath -Force -ErrorAction SilentlyContinue
+            if ($streamingEnabled) {
+                Write-DiscoveredAppsCsvRows -Path $script:DeviceDetailPartialPath -Rows @()
+            }
 
             if ($streamingEnabled -and $script:UsePreviousDeviceDetailCache -and $DeviceDetailMode -ne 'None') {
                 $cacheCandidates = New-Object 'System.Collections.Generic.List[string]'
-                if (-not [string]::IsNullOrWhiteSpace($globalPath)) {
-                    $cacheCandidates.Add((Join-Path -Path $globalPath -ChildPath "$detailBaseFileName.csv")) | Out-Null
-                }
-                if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
-                    $cacheCandidates.Add((Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName.csv")) | Out-Null
+                foreach ($cacheBaseFileName in @($detailBaseFileName, $legacyDetailBaseFileName)) {
+                    if (-not [string]::IsNullOrWhiteSpace($globalPath)) {
+                        $cacheCandidates.Add((Join-Path -Path $globalPath -ChildPath "$cacheBaseFileName.csv")) | Out-Null
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+                        $cacheCandidates.Add((Join-Path -Path $OutputPath -ChildPath "$cacheBaseFileName.csv")) | Out-Null
+                    }
                 }
 
                 $cachePath = @($cacheCandidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1)[0]
                 if ($cachePath) {
-                    WriteLog -Message "Previous DeviceDetail cache candidate found: $cachePath" "INFO"
+                    WriteLog -Message "Previous app-device relation cache candidate found: $cachePath" "INFO"
                     $cacheResult = Use-DiscoveredAppsDeviceDetailCache `
                         -CachePath $cachePath `
                         -TargetApps @($detailApps) `
@@ -1430,25 +1470,19 @@ try {
                                 $deviceDetailManifestStatsById[[string]$cacheStat.AppId] = $cacheStat
                             }
                         }
-                        WriteLog -Message ("Previous DeviceDetail cache reused: Apps={0}; Rows={1}; EnrichmentRejectedApps={2}; ManifestUsed={3}; Cache={4}" -f $cacheResult.Apps, $cacheResult.Rows, $cacheResult.RejectedEnrichmentApps, $cacheResult.ManifestUsed, $cacheResult.CachePath) "INFO"
+                        WriteLog -Message ("Previous app-device relation cache reused: Apps={0}; Rows={1}; ManifestUsed={2}; Cache={3}" -f $cacheResult.Apps, $cacheResult.Rows, $cacheResult.ManifestUsed, $cacheResult.CachePath) "INFO"
                     } else {
-                        WriteLog -Message ("Previous DeviceDetail cache not reused: {0}" -f $cacheResult.Reason) "INFO"
+                        WriteLog -Message ("Previous app-device relation cache not reused: {0}" -f $cacheResult.Reason) "INFO"
                     }
                 } else {
-                    WriteLog -Message "No previous DeviceDetail cache found; falling back to DeviceDetailMode=$DeviceDetailMode Graph collection." "INFO"
+                    WriteLog -Message "No previous app-device relation cache found; falling back to DeviceDetailMode=$DeviceDetailMode Graph collection." "INFO"
                 }
             } elseif ($RefreshDeviceDetailCache) {
                 WriteLog -Message "RefreshDeviceDetailCache specified; previous DeviceDetail cache bypassed." "INFO"
             }
         }
 
-        WriteLog -Message 'Preloading the managed-device snapshot once for DeviceDetail enrichment...' 'INFO'
-        $managedDeviceCache = @{}
-        $managedDeviceSnapshotUri = 'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=999&$select=id,deviceName,operatingSystem,osVersion,userPrincipalName,lastSyncDateTime,enrolledDateTime,managedDeviceOwnerType,complianceState,azureADDeviceId'
-        foreach ($managedDevice in @(Invoke-GraphPagedRequest -InitialUri $managedDeviceSnapshotUri)) {
-            if ($managedDevice.id) { $managedDeviceCache[[string]$managedDevice.id] = $managedDevice }
-        }
-        WriteLog -Message ("Managed-device snapshot cached: {0} unique device(s). App relation calls now retrieve IDs only." -f $managedDeviceCache.Count) 'INFO'
+
         $seenAppDevicePairs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $appsForRelationBatch = @($detailApps | Where-Object { -not $processedAppIds.Contains([string]$_.id) })
         $relationPrefetchAppCount = 200
@@ -1502,30 +1536,16 @@ try {
                 }
 
                 $appRows = [System.Collections.Generic.List[psobject]]::new()
-                if (-not $devices -or $devices.Count -eq 0) {
-                    $appRows.Add((New-DiscoveredAppsDeviceDetailRecord -App $app -Device $null))
+                foreach ($device in @($devices)) {
+                    $deviceId = [string]$device.id
+                    if ([string]::IsNullOrWhiteSpace($deviceId)) { continue }
+                    $pairKey = '{0}|{1}' -f $app.id, $deviceId
+                    if (-not $seenAppDevicePairs.Add($pairKey)) { continue }
+                    $appRows.Add((ConvertTo-DiscoveredAppsAppDeviceRelationRecord -App $app -DeviceId $deviceId))
                     $script:Stat_DeviceDetailRows++
-                } else {
-                    foreach ($device in $devices) {
-                        $deviceId = [string]$device.id
-                        $pairKey = '{0}|{1}' -f $app.id, $deviceId
-                        if (-not $seenAppDevicePairs.Add($pairKey)) { continue }
-                        $resolvedDevice = if ($managedDeviceCache.ContainsKey($deviceId)) { $managedDeviceCache[$deviceId] } else { $device }
-                        $appRows.Add((New-DiscoveredAppsDeviceDetailRecord -App $app -Device $resolvedDevice))
-                        $script:Stat_DeviceDetailRows++
-                    }
                 }
-                $actualDeviceCountsByAppId[[string]$app.id] = if (-not $devices -or $devices.Count -eq 0) { 0 } else { $appRows.Count }
-                $appManifestDeviceRows = 0
-                $appManifestEnrichmentOk = $true
-                foreach ($appManifestRow in @($appRows)) {
-                    if (-not [string]::IsNullOrWhiteSpace([string]$appManifestRow.DeviceId)) {
-                        $appManifestDeviceRows++
-                        if ($appManifestEnrichmentOk -and -not (Test-DiscoveredAppsDeviceDetailCacheRowEnrichment -Row $appManifestRow)) {
-                            $appManifestEnrichmentOk = $false
-                        }
-                    }
-                }
+                $actualDeviceCountsByAppId[[string]$app.id] = $appRows.Count
+                $appManifestDeviceRows = $appRows.Count
                 $deviceDetailManifestStatsById[[string]$app.id] = [pscustomobject]@{
                     AppId        = [string]$app.id
                     AppName      = [string]$app.displayName
@@ -1535,7 +1555,7 @@ try {
                     Rows         = [int]$appRows.Count
                     DeviceRows   = [int]$appManifestDeviceRows
                     MetadataOk   = $true
-                    EnrichmentOk = [bool]$appManifestEnrichmentOk
+                    EnrichmentOk = $true
                 }
 
                 if ($streamingEnabled) {
@@ -1673,12 +1693,25 @@ try {
             $deviceDetailLatestRoot = if ([string]::IsNullOrWhiteSpace($globalPath)) { $OutputPath } else { $globalPath }
             $deviceDetailLatestPath = Join-Path -Path $deviceDetailLatestRoot -ChildPath "$detailBaseFileName.csv"
             if (-not (Test-Path -LiteralPath $deviceDetailLatestPath -PathType Leaf)) {
-                throw "Discovered Apps publication gate failed: finalized DeviceDetail latest CSV was not found for WeeklyHistory: $deviceDetailLatestPath"
+                throw "Discovered Apps publication gate failed: finalized AppDeviceRelations latest CSV was not found for WeeklyHistory: $deviceDetailLatestPath"
             }
 
             $weeklyHistoryRoot = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory'
             Add-SmartM365WeeklyHistory -SourceCsvPaths @($summaryLatestPath, $deviceDetailLatestPath) -HistoryRootPath $weeklyHistoryRoot | Out-Null
-            WriteLog -Message "Summary and DeviceDetail WeeklyHistory publication completed in one batch: $weeklyHistoryRoot" "INFO"
+            WriteLog -Message "Summary and AppDeviceRelations WeeklyHistory publication completed in one batch: $weeklyHistoryRoot" "INFO"
+
+            if ($DeviceDetailMode -eq 'All' -and $MaxApps -eq 0) {
+                $publishedThisRun = $global:csvGeneratedPaths -and
+                    $global:csvGeneratedPaths.Contains($summaryLatestPath) -and
+                    $global:csvGeneratedPaths.Contains($deviceDetailLatestPath)
+                if (-not $publishedThisRun) {
+                    throw 'Discovered Apps publication gate failed: Summary and AppDeviceRelations must both be published in the current run before retiring DeviceDetail.'
+                }
+                Remove-LegacyDiscoveredAppsDeviceDetailExport -CurrentOutputPath $OutputPath -LatestOutputPath $deviceDetailLatestRoot
+            }
+            else {
+                WriteLog -Message ("Legacy DeviceDetail retirement skipped because the run is bounded: DeviceDetailMode={0}; MaxApps={1}." -f $DeviceDetailMode, $MaxApps) 'INFO'
+            }
         }
 
     }
@@ -1772,8 +1805,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUa/Xc7JaNChR/
-# 5yCjTcqHcvsRfhvCciJqxU6zkFbHkqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBatWInX1ZnC27F
+# AUB5pVp/G6MQ/i91MH1P6KVt4YTBvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1906,31 +1939,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKqCcSSdscnKH4N+J9xjarN4cBThnPI5+8w0IwsPNkDhMA0GCSqG
-# SIb3DQEBAQUABIIBgHJZFbGnwyap23hb0soef6ycT1LxqsZCDrHCVGVm0BoEENCL
-# 3S6mm2v+JjeNLFBO469vs53skyrbhLR+Y3Mji2ky7ykiKpbeqB6jNhC98Hw/H1EK
-# ifnEh+XTl+LkdTatkdtM8QGR/62i5dom3iqIk9Rl6U+sQkC8Od3dXDh8pxFqlDVQ
-# iisTwv5zxVshuglKfFV2wmJ8uLnW7k4NgRE6iGkySxfW1DyvyM508OAJC7EmIzrX
-# nfd7DRZymoweni9fZdrmnYpceKMVlxHCJN2sQDDHADQr6znIstVxtvXm/kfmElAM
-# CUhaOCeUZU6BpFRh5hiXQ/nUtYEGOJ10xOC8ggB9YQD7I8/SEZi7hmI8HZi0yPa3
-# Pd70NSGcbOPybC7gJ49OHKUtDZnMtHqLt1uuVOCLFcID27FDYqBKoL0MQWCSXa3O
-# ZCfp6TFJaaKTokjfmARceC1gRNYNoiZ7dZaViQNYGBlvck92lzxpHqkjNUbtxNPz
-# h6YOT/ebfHs+q3vVfKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPPFlPEoHRoZWy8acdlQdQWBG8Wf8GKtAJveIjWm4iu/MA0GCSqG
+# SIb3DQEBAQUABIIBgF4aFNLQeLgnYP7qmLDL2UwcYU51CbJyHKvUYsCea75Cnfd+
+# 0hG+IqoPGiJUELq6Ap/lOtcVkaxoXFbfI5aaqMszMq2ar4lcHZwBTDQZLLt5RG+Z
+# ZxTrtYmzfY6NkiE4Eup43abMbja2lWjVEGns9IhQflJnB2ukR5etaqKs864P/iPA
+# h71Ll0JAcOFIioBeWIpZydtZIdydHLLPdTjtXQ0lO6LROubFZ9iGGYnVb/ADl6AA
+# 7mK2cMwsteb4twMEXHu4vZYAFfX+sbOtjs5KosizgYmQ8LZgXbleH5+HJ1RR7H+K
+# XOZ0Z0Y6HvQKZPwsClIiJaxq0mOMA2yM3Q2M+vtvBnC2f9hnuIJLNSIr5andss8P
+# s3t5Q6UIKlLzXhkB1k1glMIVO8roopAumRDmD1SUEmYIuM77JtKqfo5LAWMxKmQr
+# u6k0vFC0cmYRohp23Q1nE/3ZrrfTPVuF4zFwfHFLBnzUsUlBJ1KNIov5f2zCOi60
+# p9afrwOMP0OV3+wFgqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgwNzM0
-# MTRaMC8GCSqGSIb3DQEJBDEiBCAQCo6fr0+CS+ALEEwDTS7FhNLBwlA/STNzbFbF
-# PHjszzANBgkqhkiG9w0BAQEFAASCAgBgzD21ysXCs8nrE0/XrJdXnjXmwRJcCyRD
-# hoQssrVwjig77sBB9kUUE0xVAxZ416g2RF/5AhHx8ARtjyW4QlD4TGuASZqsJ6mj
-# CgFm2uRavEP/JkpqntBvNmRVeBDcgBOuk1fuaNgWk2oHhrZc3TN+21UAhKZJTX8t
-# z8Shu8A/+K0/5u26cABJLuUqI7rI/Zon0dHU9uumpj5JzbDO3FYruRdrd8Msv2zx
-# rknHnZOLzEgkcv/ME8304T6ErUSHLJb+ajs1dBDjgBsLzyDZnIKBT5tlOtCYEZJQ
-# QnQh3WkQBNwEww19tM1yAdMKAeALhf82eq7Tk5sidI5PayMhJ2swIqjS9xIilXSS
-# d47k7T9uCYBGVPCoZSOirszWZ3v9Kdlb1YFCMqNG+Z3G8H/OGKJDQEpqwxz9XFCo
-# 3HobAOmCd/pf33BkXuZiRM1o1limAvD6Q0pOH3EIUCGbIyyNsFwynxTWz81hfo2C
-# YVVQyZtytsL4v5Ei99HicV3Qk/ImUbyjJJfgxUkRHN+w/9esWoivq0ayPsFy2AlC
-# 0JsV9rLwFi/RbC/Zyo1bk3TmMkr2MitfcS93CN0iD+398FdDAcx3sdbXKmGVj4l6
-# F9MqNkGe+fw9gnwAm3ls/Y81SYmdPdk3EDgRhOvyPshdnHpsmPOQCwMPOawOywCo
-# XAknbgJBTg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAwNzQw
+# MTNaMC8GCSqGSIb3DQEJBDEiBCD9x884mWXK1POgFyaFGiCZ8PCQNZvdhNn2bgWG
+# LE+Y2jANBgkqhkiG9w0BAQEFAASCAgBT13i0Uqz2MeTx7NmRCkiQnd4/qOAuGt3V
+# 98WwEm+ZdkXREQVQGumFrEX3Cnrd6KgOeFaPFaolgwQDYWwAT8EWAi5V04B/nn5c
+# vGbWSgEiPXhPLHTFJtadZeKjxUn04YspjMte0dChdPjC+BhFUsTtEewYVLWJz40s
+# E2n+aIbCzZbkVdxMy2TZUqFzN9CACrU6MkKVn0ijRMQxO7/e1iAqQLRpNLxNL9Vb
+# jk11EG2ORtWy6zLkN2hyJo2RZAIC+wwRel7XDRMunmTW6NxXwBX8xY+5ABqal89s
+# H5NGzjtdbVrett+t1IjwFbpPFL9lKa6eeRZF++RoKek2i7gyrPZFEeONijDFc/sj
+# jf3+1dEvuSFcflid2/sFI167o/9iyeYeENWidn4O2yMsL8BYnEmcVb2mBt/BIkpz
+# v++g/Z8iyiXQZVUCUry2Fy5HjCafnJaQdm7rMY/yvd65F3jNNxvp5oP/IGSL4XPf
+# LGw7RndmUoVcjsKJd6eDp96ts0k8edIPcYQaeAmpvIQ0ay9Fv9eVGfI1uCdnqTpW
+# qOe3MRzAAYqtNJfDxDDrpcJzW2gKPLjKDm2xJMIA0XpAqL1gSSyN2dSDREFaRGUi
+# IVwawTlaBgyMRJoQKeDYdxs2+1Y76R/4ahzr978SjfnROp7aa4qZcn9Slx3mJEVN
+# 2GWd/lRYdw==
 # SIG # End signature block
