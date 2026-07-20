@@ -1,3 +1,10 @@
+<#
+.SYNOPSIS
+Validates SmartM365 Orchestrator distributed election and claim behavior.
+.VERSION
+1.0.0
+#>
+
 #Requires -Version 7.0
 [CmdletBinding()]
 param()
@@ -5,8 +12,8 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$modulePath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'SmartInventory\Orchestrator\SmartM365.Orchestrator.Distributed.psm1'
-Import-Module -Name $modulePath -Force -ErrorAction Stop
+$distributedModuleFile = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'SmartInventory\Orchestrator\SmartM365.Orchestrator.Distributed.psm1'
+Import-Module -Name $distributedModuleFile -Force -ErrorAction Stop
 
 function Assert-True {
     param(
@@ -70,6 +77,43 @@ $parentOwner = [string]($plan.Assignments | Where-Object JobName -eq 'Parent').O
 $childOwner = [string]($plan.Assignments | Where-Object JobName -eq 'Child').OwnerServer
 Assert-True -Condition ($parentOwner -eq $childOwner) -Message 'DependsOn jobs were not assigned to the same server.'
 Assert-True -Condition (@($plan.UnassignedGroups).Count -eq 0) -Message 'Eligible mock jobs were unexpectedly left unassigned.'
+Assert-True -Condition ([int]$plan.SchemaVersion -eq 2) -Message 'The election plan schema was not upgraded to version 2.'
+Assert-True -Condition ((@($plan.EligibleServers) -join ',') -eq 'SERVER-A,SERVER-B') -Message 'The election plan does not record its eligible server set.'
+
+# Startup-race regression: a plan produced while only one server is ready must not
+# pin every job to that first server when the rest of the cluster becomes visible.
+$singleServerPlan = Get-SmartM365OrchestratorElectionPlan `
+    -Jobs $jobs `
+    -ServerCapabilities @($capabilities | Where-Object ServerName -eq 'SERVER-A') `
+    -ServerWeights @{ 'SERVER-A' = 1.0 }
+Assert-True `
+    -Condition (-not (Test-SmartM365OrchestratorCanPreserveOwners -PreviousPlan $singleServerPlan -ServerCapabilities $capabilities)) `
+    -Message 'A partial startup plan was incorrectly considered safe to preserve after SERVER-B joined.'
+$expandedPlan = Get-SmartM365OrchestratorElectionPlan `
+    -Jobs $jobs `
+    -ServerCapabilities $capabilities `
+    -ServerWeights @{ 'SERVER-A' = 1.0; 'SERVER-B' = 1.1 } `
+    -PreviousPlan $singleServerPlan
+$expandedOwners = @($expandedPlan.Assignments.OwnerServer | Sort-Object -Unique)
+Assert-True -Condition ($expandedOwners.Count -eq 2) -Message 'The full rebalance after server discovery did not distribute jobs across both servers.'
+Assert-True `
+    -Condition (Test-SmartM365OrchestratorCanPreserveOwners -PreviousPlan $expandedPlan -ServerCapabilities $capabilities) `
+    -Message 'A complete plan with an unchanged server set was not considered safe to preserve.'
+$legacyPlan = [pscustomobject]@{
+    SchemaVersion = 1
+    Assignments = @($expandedPlan.Assignments)
+    UnassignedGroups = @()
+    ServerLoads = @($expandedPlan.ServerLoads)
+}
+Assert-True `
+    -Condition (-not (Test-SmartM365OrchestratorCanPreserveOwners -PreviousPlan $legacyPlan -ServerCapabilities $capabilities)) `
+    -Message 'A legacy plan was incorrectly allowed to preserve potentially biased owners.'
+$incompletePlan = $expandedPlan | Select-Object *
+$incompletePlan.UnassignedGroups = @([pscustomobject]@{ GroupKey = 'Synthetic'; Reason = 'Startup capability race' })
+Assert-True `
+    -Condition (-not (Test-SmartM365OrchestratorCanPreserveOwners -PreviousPlan $incompletePlan -ServerCapabilities $capabilities)) `
+    -Message 'An incomplete plan was incorrectly allowed to preserve owners.'
+
 
 $missingRoleMatch = Test-SmartM365OrchestratorCapabilityMatch `
     -ServerCapabilities ([pscustomobject]@{

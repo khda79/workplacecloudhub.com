@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:DistributedModuleVersion = '1.1.0'
+$script:DistributedModuleVersion = '1.1.1'
 
 function ConvertTo-SafeFileName {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -480,9 +480,10 @@ function Get-SmartM365OrchestratorElectionPlan {
     }
 
     return [pscustomobject]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
         PlanId = [guid]::NewGuid().ToString('N')
         GeneratedAtUtc = $NowUtc.ToString('o')
+        EligibleServers = @($capabilitiesByServer.Keys | Sort-Object)
         Assignments = @($assignments | Sort-Object JobName)
         UnassignedGroups = @($unassigned)
         ServerLoads = @($loads.Keys | Sort-Object | ForEach-Object {
@@ -493,6 +494,39 @@ function Get-SmartM365OrchestratorElectionPlan {
                 }
             })
     }
+}
+
+function Test-SmartM365OrchestratorCanPreserveOwners {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$PreviousPlan = $null,
+        [Parameter(Mandatory = $true)][object[]]$ServerCapabilities
+    )
+
+    if ($null -eq $PreviousPlan -or
+        -not $PreviousPlan.PSObject.Properties['SchemaVersion'] -or
+        [int]$PreviousPlan.SchemaVersion -lt 2 -or
+        -not $PreviousPlan.PSObject.Properties['EligibleServers']) {
+        return $false
+    }
+    if ($PreviousPlan.PSObject.Properties['UnassignedGroups'] -and @($PreviousPlan.UnassignedGroups).Count -gt 0) {
+        return $false
+    }
+
+    $previousServers = @(
+        $PreviousPlan.EligibleServers |
+            ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } |
+            Where-Object { $_ } |
+            Sort-Object -Unique
+    )
+    $currentServers = @(
+        $ServerCapabilities |
+            ForEach-Object { ([string]$_.ServerName).Trim().ToUpperInvariant() } |
+            Where-Object { $_ } |
+            Sort-Object -Unique
+    )
+    if ($previousServers.Count -ne $currentServers.Count) { return $false }
+    return (($previousServers -join '|') -ceq ($currentServers -join '|'))
 }
 
 function Get-SmartM365OrchestratorOccurrenceClaim {
@@ -653,6 +687,7 @@ function Set-SmartM365OrchestratorOccurrenceClaim {
 Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorServerCapability',
     'Test-SmartM365OrchestratorCapabilityMatch',
+    'Test-SmartM365OrchestratorCanPreserveOwners',
     'Get-SmartM365OrchestratorElectionPlan',
     'Get-SmartM365OrchestratorOccurrenceClaim',
     'Enter-SmartM365OrchestratorOccurrenceClaim',
