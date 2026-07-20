@@ -48,7 +48,7 @@
 .EXAMPLE
     .\Devices-UpgradeEligibility.ps1 -OutputPath "C:\Reports" -Connect
 .VERSION
-1.17
+1.18
 
 
 .REQUIREMENTS
@@ -58,7 +58,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.17
+    Version : 1.18
     Requires:
       - PowerShell 7+
       - Microsoft.Graph module (Graph SDK)
@@ -122,7 +122,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 #region Global and safety settings
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $runId = [guid]::NewGuid().ToString()
 
@@ -356,26 +356,28 @@ function WriteLogSmartM365 {
 
     try {
         WriteLog -Message $Message -Level $Level
+        return
     }
     catch {
         $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        @([regex]::Split(([string]$Message), '\r?\n')) | ForEach-Object {
-            Write-Host ("{0} [{1}] {2}" -f $timestamp, $Level, $_) -ForegroundColor Cyan
-        }
-    }
-
-    try {
-        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-
         if ([string]::IsNullOrWhiteSpace($Level)) {
             $Level = "INFO"
         }
 
         $logEntry = @([regex]::Split(([string]$Message), '\r?\n') | ForEach-Object { "{0} [{1}] {2}" -f $timestamp, $Level, $_ })
-        Add-Content -Path $global:LogTextFile -Value $logEntry
-    }
-    catch {
-        Write-Host "Failed to write to log file $global:LogTextFile. $($_.Exception.Message)" -ForegroundColor Yellow
+        $logEntry | ForEach-Object {
+            Write-Host $_ -ForegroundColor Cyan
+        }
+
+        $logFilePath = $global:LogTextFile
+        try {
+            if ($logFilePath) {
+                Add-Content -Path $logFilePath -Value $logEntry
+            }
+        }
+        catch {
+            Write-Host "Failed to write to log file $logFilePath. $($_.Exception.Message)" -ForegroundColor Yellow
+        }
     }
 }
 
