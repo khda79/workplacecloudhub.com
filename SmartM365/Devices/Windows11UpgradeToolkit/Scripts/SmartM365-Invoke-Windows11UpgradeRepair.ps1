@@ -10,7 +10,7 @@
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
 
 .VERSION
-    0.1.53
+    0.1.54
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -81,7 +81,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:ScriptName = 'SmartM365-Invoke-Windows11UpgradeRepair'
-$script:ScriptVersion = '0.1.53'
+$script:ScriptVersion = '0.1.54'
 $script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:ScriptStartUtc = (Get-Date).ToUniversalTime()
 $script:ComputerName = $env:COMPUTERNAME
@@ -271,7 +271,11 @@ function Get-SetupExitCodeInfo {
         '0x8007000B' = 'Bad image format. Windows Setup could not read a required image; validate or recopy setup media.'
         '0x8007001F' = 'Windows Setup failed during downlevel gather/migration. Common cause: duplicate or invalid user profile registry entries; check setupact.log/setuperr.log for Duplicate profile detected and inspect HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList.'
         '0x8007007F' = 'Windows Setup migration plugin failure. Check Panther logs for MIG plugin LoadDllServer/LoadLibraryExW failures such as CscMig.dll, WSManMigrationPlugin.dll, or RasMigPlugin.dll.'
+        '0x80070420' = 'A required Windows Setup service was not running. Check setupact.log/setuperr.log and the Windows Update, BITS, Cryptographic Services, and Windows Installer service state before retrying.'
+        '0x80070490' = 'Windows Setup could not find a required element. Check setup logs and component-store health before retrying.'
+        '0x000000B7' = 'Windows Setup reported that an item already exists. Check for an existing setup process, stale setup state, or conflicting migration artifact before retrying.'
         '0xC1900101' = 'Windows Setup rollback, often driver or firmware related. Confirm with setup logs or SetupDiag.'
+        '0xC1900107' = 'A cleanup from a previous installation attempt is pending. Restart the device, verify previous setup state, and retry only after cleanup completes.'
         '0xC190010E' = 'Windows Setup requires EULA acceptance. Use /EULA accept for quiet or non-interactive Windows 11 Setup.'
         '0xC1900200' = 'Compatibility failure: device does not meet Windows Setup minimum requirements.'
         '0xC1900202' = 'Compatibility failure: device does not meet Windows Setup minimum requirements for this upgrade.'
@@ -308,6 +312,18 @@ function Format-SetupExitCodeInfo {
     param([Parameter(Mandatory = $true)]$Info)
 
     return ("ExitCode={0}; Hex={1}; Meaning={2}; CopyLogs={3}; Panther={4}; PantherErrors={5}; RollbackLogs={6}" -f $Info.Decimal,$Info.Hex,$Info.Meaning,$Info.CopyLogsPath,$Info.PantherLog,$Info.PantherErrorLog,$Info.RollbackLogFolder)
+}
+
+function Get-SetupFailureNextAction {
+    param([Parameter(Mandatory = $true)]$Info)
+
+    switch ([string]$Info.Hex) {
+        '0x80070420' { return 'CHECK_SETUP_SERVICES_AND_SETUP_LOGS' }
+        '0x80070490' { return 'CHECK_COMPONENT_STORE_AND_SETUP_LOGS' }
+        '0x000000B7' { return 'CHECK_EXISTING_SETUP_STATE_AND_SETUP_LOGS' }
+        '0xC1900107' { return 'REBOOT_AND_CLEAN_PREVIOUS_SETUP_THEN_RETRY' }
+        default { return 'CHECK_SETUP_LOGS' }
+    }
 }
 
 function Get-RegistryValue {
@@ -4018,6 +4034,7 @@ $script:SetupProcessStartTime = ''
 $script:SetupProcessLastSnapshot = ''
 $script:SetupProcessLastHeartbeatUtc = ''
 $script:SetupProcessExitCode = ''
+$script:DeviceUptimeSummary = $null
 $computerSystem = $null
 
 try {
@@ -4188,7 +4205,7 @@ try {
                     }
                     else {
                         $status = 'DIRECT_SETUP_UPGRADE_FAILED'
-                        $nextAction = 'CHECK_SETUP_LOGS'
+                        $nextAction = Get-SetupFailureNextAction -Info $setupExitInfo
                         $detail = $setupExitDetail
                         $exitCode = 1
                     }
@@ -4267,7 +4284,7 @@ try {
                 }
                 else {
                     $status = 'SETUP_UPGRADE_FAILED'
-                    $nextAction = 'CHECK_SETUP_LOGS'
+                    $nextAction = Get-SetupFailureNextAction -Info $setupExitInfo
                     $detail = $setupExitDetail
                     $exitCode = 1
                 }
