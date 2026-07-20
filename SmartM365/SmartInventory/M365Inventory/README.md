@@ -37,6 +37,25 @@ retired only after both compact replacement files have been published
 successfully. Timestamped and weekly-history copies are preserved. A `-MaxItems`
 validation run never removes or replaces canonical files.
 
+## Intune Discovered Applications
+
+`IntuneInventory/Applications/SmartM365-Intune-DiscoveredApps-Inventory.ps1`
+publishes a normalized discovered-application model:
+
+| Entity | Latest CSV | Notes |
+| --- | --- | --- |
+| Application catalog | `Intune_DiscoveredApps_Summary.csv` | One row per discovered Windows application/version with publisher, platform, and reconciled device count. |
+| Application-device relations | `Intune_DiscoveredApps_AppDeviceRelations.csv` | Compact `TenantKey`, `AppId`, and Intune managed `DeviceId` fact table. Join to the Summary on `TenantKey` plus `AppId`, and to `Intune_Devices_Inventory.csv` on `TenantKey` plus relation `DeviceId` = inventory `Device ID`. |
+
+The compact relation retains every discovered app/device association while device
+metadata remains in the standard Intune device inventory. Summary and relation
+WeeklyHistory snapshots are both retained. The former
+`Intune_DiscoveredApps_DeviceDetail.csv` current export is retired only after the
+matching Summary and compact relation have both been published successfully in a
+normal run. Its timestamped and existing WeeklyHistory copies are preserved, and a
+`-MaxItems` run never removes canonical files. The first normal compact run can
+reuse and project a recent legacy DeviceDetail cache, avoiding an unnecessary full
+Graph refresh.
 ## Microsoft 365 Usage Reports
 
 `Usage/SmartM365-M365UserActivity-Inventory.ps1` exports Microsoft Graph Reports data and publishes stable CSV files to the tenant `DATA-LAST` folder.
