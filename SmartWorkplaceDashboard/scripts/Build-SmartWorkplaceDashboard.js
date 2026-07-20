@@ -215,7 +215,9 @@ const measures=[
  M('Model App Reliability Score',`CALCULATE(AVERAGE('Intune_EndpointAnalytics_DevicePerformance'[AppReliabilityScore]),'Intune_EndpointAnalytics_DevicePerformance'[__IsCurrent]=TRUE(),'Intune_EndpointAnalytics_DevicePerformance'[ReportName]="EADeviceScoresV2")`,'0.0','Experience'),
  M('Discovered Applications',`DISTINCTCOUNT('Intune_DiscoveredApps_Summary'[AppId])`,'#,0','Applications'),
  M('Application Versions',`COUNTROWS('Intune_DiscoveredApps_Summary')`,'#,0','Applications'),
- M('Devices per Application',`MAX('Intune_DiscoveredApps_Summary'[DeviceCount])`,'#,0','Applications'),
+ M('Application Device Instances',`COUNTROWS('Intune_DiscoveredApps_AppDeviceRelations')`,'#,0','Applications'),
+ M('Devices with Discovered Applications',`DISTINCTCOUNT('Intune_DiscoveredApps_AppDeviceRelations'[DeviceId])`,'#,0','Applications'),
+ M('Devices per Application',`DISTINCTCOUNT('Intune_DiscoveredApps_AppDeviceRelations'[DeviceId])`,'#,0','Applications'),
  M('Copilot Active Users',`CALCULATE(DISTINCTCOUNT('M365_Copilot_UserUsage'[UserPrincipalName]),'M365_Copilot_UserUsage'[LastActivityDate]<>BLANK())`,'#,0','Adoption'),
  M('AD Health Critical',`CALCULATE(COUNTROWS('AD_HealthCheck'),'AD_HealthCheck'[Status]="Critical")`,'#,0','Data Trust'),
  M('AD Health Warnings',`CALCULATE(COUNTROWS('AD_HealthCheck'),'AD_HealthCheck'[Status]="Warning")`,'#,0','Data Trust'),
@@ -236,6 +238,7 @@ const measures=[
  M('SharePoint Sites Trend',`DISTINCTCOUNT('M365_SPO_Sites'[SiteUrl])`,'#,0','Evolution')
 ];
 const keyedServicePlanTables=new Set(['M365_Licenses_UserServicePlanStates','M365_Licenses_ServicePlans_Catalog']);
+const keyedDiscoveredAppTables=new Set(['Intune_DiscoveredApps_AppDeviceRelations','Intune_DiscoveredApps_Summary']);
 function sourceTable(s){
  const t=types[s.tableName]||{},toMKind=x=>x==='double'?'number':x==='boolean'?'logical':x==='dateTime'?'datetime':x,map=s.columns.filter(c=>t[c]).map(c=>[c,toMKind(t[c])]),columns=s.columns.map(c=>modelColumn(c,t[c]||'string')),isStateFact=s.tableName==='M365_Licenses_UserServicePlanStates';
  if(isStateFact)columns.push(modelColumn('IsEnabled','boolean'),modelColumn('PlanStatus','string'),modelColumn('IsServicePlanActive','boolean'));
@@ -243,14 +246,17 @@ function sourceTable(s){
  const load=`fnLoadSourceTable(${mt(s.fileName)}, ${mt(s.delimiter)}, ${ml(s.columns)}, ${ml(map)}, ${history.has(s.tableName)})`;
  const isKeyed=keyedServicePlanTables.has(s.tableName);
  if(isKeyed)columns.push(modelColumn('__SkuPlanKey','string',true));
+ const isDiscoveredAppKeyed=keyedDiscoveredAppTables.has(s.tableName);
+ if(isDiscoveredAppKeyed)columns.push(modelColumn('__TenantAppKey','string',true));
  const stateExpression=`let Source=${load}, WithIsEnabled=Table.AddColumn(Source, "IsEnabled", each let Raw=if [StateCode]=null then null else Text.Trim(Text.From([StateCode])), State=if Raw=null then null else Text.Upper(Raw) in if State=null or State="" then null else if State="D" or Text.StartsWith(State,"DIS:",Comparer.Ordinal) then false else if List.Contains({"A","PA","PI","PP","E"},State) or Text.StartsWith(State,"EN:",Comparer.Ordinal) then true else null, type nullable logical), WithPlanStatus=Table.AddColumn(WithIsEnabled, "PlanStatus", each let Raw=if [StateCode]=null then null else Text.Trim(Text.From([StateCode])), State=if Raw=null then null else Text.Upper(Raw) in if State=null or State="" then null else if State="A" then "Success" else if State="D" then "Disabled" else if State="PA" then "PendingActivation" else if State="PI" then "PendingInput" else if State="PP" then "PendingProvisioning" else if State="E" then "Error" else if Text.StartsWith(State,"EN:",Comparer.Ordinal) then Text.Range(Raw,3) else if Text.StartsWith(State,"DIS:",Comparer.Ordinal) then Text.Range(Raw,4) else Raw, type nullable text), WithActive=Table.AddColumn(WithPlanStatus, "IsServicePlanActive", each if [StateCode]=null then false else Text.Upper(Text.Trim(Text.From([StateCode])))="A", type logical), WithKey=Table.AddColumn(WithActive, "__SkuPlanKey", each if [SkuId]=null or [PlanId]=null then null else Text.Lower(Text.Trim(Text.From([SkuId])))&"|"&Text.Lower(Text.Trim(Text.From([PlanId]))), type nullable text) in WithKey`;
- const expression=isStateFact?stateExpression:isKeyed?`let Source=${load}, WithKey=Table.AddColumn(Source, "__SkuPlanKey", each if [SkuId]=null or [PlanId]=null then null else Text.Lower(Text.Trim(Text.From([SkuId])))&"|"&Text.Lower(Text.Trim(Text.From([PlanId]))), type nullable text) in WithKey`:load;
+ const expression=isStateFact?stateExpression:isKeyed?`let Source=${load}, WithKey=Table.AddColumn(Source, "__SkuPlanKey", each if [SkuId]=null or [PlanId]=null then null else Text.Lower(Text.Trim(Text.From([SkuId])))&"|"&Text.Lower(Text.Trim(Text.From([PlanId]))), type nullable text) in WithKey`:isDiscoveredAppKeyed?`let Source=${load}, WithKey=Table.AddColumn(Source, "__TenantAppKey", each if [TenantKey]=null or [AppId]=null then null else Text.Lower(Text.Trim(Text.From([TenantKey])))&"|"&Text.Lower(Text.Trim(Text.From([AppId]))), type nullable text) in WithKey`:load;
  return{name:s.tableName,description:`SmartInventory source: ${s.fileName}`,columns,partitions:[{name:s.tableName,mode:'import',source:{type:'m',expression}}],...(s.tableName===measureHost?{measures}:{})}
 }
 const tables=sources.map(sourceTable), relationships=[
  {name:'rel_ServicePlanStates_Catalog',fromTable:'M365_Licenses_UserServicePlanStates',fromColumn:'__SkuPlanKey',toTable:'M365_Licenses_ServicePlans_Catalog',toColumn:'__SkuPlanKey'},
- {name:'rel_ServicePlanStates_Users',fromTable:'M365_Licenses_UserServicePlanStates',fromColumn:'UserId',toTable:'M365_Users_Active',toColumn:'Object Id'}
-], model={compatibilityLevel:1600,model:{culture:'en-US',defaultPowerBIDataSourceVersion:'powerBI_V3',expressions,tables,relationships,annotations:[{name:'SmartWorkplaceDashboard.SourcePolicy',value:'Each visible source table keeps the SmartInventory CSV basename. Only validated one-to-many service-plan relationships are added.'},{name:'__PBI_TimeIntelligenceEnabled',value:'0'}]}};
+ {name:'rel_ServicePlanStates_Users',fromTable:'M365_Licenses_UserServicePlanStates',fromColumn:'UserId',toTable:'M365_Users_Active',toColumn:'Object Id'},
+ {name:'rel_DiscoveredAppRelations_Summary',fromTable:'Intune_DiscoveredApps_AppDeviceRelations',fromColumn:'__TenantAppKey',toTable:'Intune_DiscoveredApps_Summary',toColumn:'__TenantAppKey'}
+], model={compatibilityLevel:1600,model:{culture:'en-US',defaultPowerBIDataSourceVersion:'powerBI_V3',expressions,tables,relationships,annotations:[{name:'SmartWorkplaceDashboard.SourcePolicy',value:'Each visible source table keeps the SmartInventory CSV basename. Only validated one-to-many relationships are added.'},{name:'__PBI_TimeIntelligenceEnabled',value:'0'}]}};
 const lit=(v,s='')=>({expr:{Literal:{Value:typeof v==='boolean'?(v?'true':'false'):typeof v==='number'?`${v}${s||'D'}`:`'${String(v).replace(/'/g,"''")}'`}}}), color=h=>({solid:{color:lit(h)}}), pos=(x,y,width,height,z)=>({x,y,width,height,z,tabOrder:z});
 const mp=name=>({field:{Measure:{Expression:{SourceRef:{Entity:measureHost}},Property:name}},queryRef:`${measureHost}.${name}`,nativeQueryRef:name});
 const cp=(table,name,active=false)=>({field:{Column:{Expression:{SourceRef:{Entity:table}},Property:name}},queryRef:`${table}.${name}`,nativeQueryRef:name,...(active?{active:true}:{})});
@@ -292,7 +298,7 @@ const pages=[
   grid('removalcandidatestable',[['M365_Entra_Devices_RemovalCandidates','CandidateDisplayName'],['M365_Entra_Devices_RemovalCandidates','CandidateLastSignInDateTime'],['M365_Entra_Devices_RemovalCandidates','PrimaryDisplayName'],['M365_Entra_Devices_RemovalCandidates','Reason']],'Entra device removal candidates',644,460,612,220,9000)
  ]),
  page('experienceapplications004','Endpoint Experience & Apps','Endpoint Experience & Application Estate','Endpoint Analytics scores, model coverage and discovered application footprint',[
-  card('experiencecards',['Endpoint Analytics Devices','Endpoint Analytics Score','Startup Score','App Reliability Score'],24,96,604,118,3000),card('appcards',['Device Crashes','Discovered Applications','Application Versions','Copilot Active Users'],644,96,612,118,4000),
+  card('experiencecards',['Endpoint Analytics Devices','Endpoint Analytics Score','Startup Score','App Reliability Score'],24,96,604,118,3000),card('appcards',['Discovered Applications','Application Versions','Devices with Discovered Applications','Application Device Instances'],644,96,612,118,4000),
   bar('experiencebymodel','Intune_EndpointAnalytics_DevicePerformance','Model','Model Endpoint Analytics Score','Endpoint Analytics score by model',24,232,604,210,5000),bar('appsbydevicecount','Intune_DiscoveredApps_Summary','AppName','Devices per Application','Devices per discovered application',644,232,612,210,6000),
   grid('modelperformancetable',[['Intune_EndpointAnalytics_DevicePerformance','Manufacturer'],['Intune_EndpointAnalytics_DevicePerformance','Model'],'Model Device Count','Model Endpoint Analytics Score','Model Startup Score','Model App Reliability Score'],'Endpoint performance by model',24,460,604,220,7000,'Model Endpoint Analytics Score'),
   grid('discoveredappstable',[['Intune_DiscoveredApps_Summary','AppName'],['Intune_DiscoveredApps_Summary','AppVersion'],['Intune_DiscoveredApps_Summary','AppPublisher'],['Intune_DiscoveredApps_Summary','Platform'],['Intune_DiscoveredApps_Summary','DeviceCount']],'Discovered application inventory',644,460,612,220,8000,['Intune_DiscoveredApps_Summary','DeviceCount'])
