@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.4
+1.5.5
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.4
+    Version : 1.5.5
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.4"
+$ScriptVersion = "1.5.5"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -518,15 +518,25 @@ function Write-FileAtomically {
     $temp = "{0}.{1}.{2}.tmp" -f $Path, $PID, ([guid]::NewGuid().ToString('N'))
     try {
         [System.IO.File]::WriteAllText($temp, $Content)
-        $delaysMilliseconds = @(100, 250, 500, 1000, 2000)
-        for ($attempt = 0; $attempt -lt $delaysMilliseconds.Count; $attempt++) {
+        $retrySeconds = 30
+        if ($null -ne $script:Settings -and $script:Settings.PSObject.Properties['AtomicWriteRetrySeconds']) {
+            $retrySeconds = [math]::Max(1, [int]$script:Settings.AtomicWriteRetrySeconds)
+        }
+        $deadline = (Get-Date).AddSeconds($retrySeconds)
+        $attempt = 0
+        while ($true) {
             try {
-                [System.IO.File]::Move($temp, $Path, $true)
+                # Move-Item -Force uses the Windows/SMB-compatible replace path that was
+                # reliable before File.Move(source, destination, overwrite) was introduced.
+                Move-Item -LiteralPath $temp -Destination $Path -Force -ErrorAction Stop
                 return
             }
             catch {
-                if ($attempt -ge ($delaysMilliseconds.Count - 1)) { throw }
-                Start-Sleep -Milliseconds $delaysMilliseconds[$attempt]
+                if ((Get-Date) -ge $deadline) { throw }
+                $baseDelay = [math]::Min(2000, 100 * [math]::Pow(2, [math]::Min($attempt, 5)))
+                $jitter = Get-Random -Minimum 0 -Maximum 251
+                Start-Sleep -Milliseconds ([int]($baseDelay + $jitter))
+                $attempt++
             }
         }
     }
@@ -954,6 +964,20 @@ function Read-JobsManifest {
     }
 }
 
+function Write-OrchestratorTimeoutPolicySummary {
+    $jobs = @($script:Manifest.OrderedJobs)
+    $dailyOnce = @($jobs | Where-Object { $_.Schedule.Type -eq 'Daily' -and @($_.Schedule.Times).Count -eq 1 })
+    $weekly = @($jobs | Where-Object { $_.Schedule.Type -eq 'Weekly' })
+    $dailyMismatches = @($dailyOnce | Where-Object { [int]$_.TimeoutMinutes -ne 1380 })
+    $weeklyMismatches = @($weekly | Where-Object { [int]$_.TimeoutMinutes -ne 8640 })
+    $level = if ($dailyMismatches.Count -eq 0 -and $weeklyMismatches.Count -eq 0) { 'INFO' } else { 'WARN' }
+    $details = @()
+    if ($dailyMismatches.Count -gt 0) { $details += "daily mismatch: $(@($dailyMismatches.Name) -join ', ')" }
+    if ($weeklyMismatches.Count -gt 0) { $details += "weekly mismatch: $(@($weeklyMismatches.Name) -join ', ')" }
+    $suffix = if ($details.Count -gt 0) { "; $($details -join '; ')" } else { '' }
+    Write-OrchestratorLog -Message ("Timeout policy audit: dailyOnce={0}, expected=1380 min, mismatches={1}; weekly={2}, expected=8640 min, mismatches={3}{4}." -f $dailyOnce.Count, $dailyMismatches.Count, $weekly.Count, $weeklyMismatches.Count, $suffix) -Level $level
+}
+
 function Update-JobsManifestIfChanged {
     if (-not (Test-Path -LiteralPath $script:Settings.JobsManifestPath)) {
         Write-OrchestratorLog -Message ("Jobs manifest disappeared: {0}; keeping the last valid manifest in memory." -f $script:Settings.JobsManifestPath) -Level WARN
@@ -965,6 +989,7 @@ function Update-JobsManifestIfChanged {
         $newManifest = Read-JobsManifest -Path $script:Settings.JobsManifestPath
         $script:Manifest = $newManifest
         Write-OrchestratorLog -Message ("Jobs manifest reloaded ({0} jobs)." -f $newManifest.OrderedJobs.Count)
+        Write-OrchestratorTimeoutPolicySummary
         Write-ServerAllowlistSummary
         Initialize-NewJobStates
     }
@@ -1007,7 +1032,32 @@ function Read-OrchestratorState {
 
 function Save-OrchestratorState {
     $script:State['UpdatedUtc'] = (Get-Date).ToUniversalTime().ToString('o')
-    Write-FileAtomically -Path $script:Settings.StatePath -Content ($script:State | ConvertTo-Json -Depth 10)
+    try {
+        Write-FileAtomically -Path $script:Settings.StatePath -Content ($script:State | ConvertTo-Json -Depth 10)
+        if (-not $script:StatePersistenceHealthy) {
+            Write-OrchestratorLog -Message ("State persistence recovered after {0} failed write(s); new job launches are enabled again." -f $script:StatePersistenceFailureCount)
+        }
+        $script:StatePersistenceHealthy = $true
+        $script:StatePersistenceFailureCount = 0
+        $script:StatePersistenceLastError = ''
+        $script:LastStatePersistenceWarningUtc = [datetime]::MinValue
+    }
+    catch {
+        $script:StatePersistenceHealthy = $false
+        $script:StatePersistenceFailureCount = [int]$script:StatePersistenceFailureCount + 1
+        $script:StatePersistenceLastError = $_.Exception.Message
+        $now = Get-Date
+        if ($script:LastStatePersistenceWarningUtc -eq [datetime]::MinValue -or ($now - $script:LastStatePersistenceWarningUtc).TotalMinutes -ge 5) {
+            $script:LastStatePersistenceWarningUtc = $now
+            Write-OrchestratorLog -Message ("State persistence unavailable after {0} second(s) of UNC write retries; the scheduler remains alive but new job launches are paused. Path: {1}. Error: {2}" -f $script:Settings.AtomicWriteRetrySeconds, $script:Settings.StatePath, $script:StatePersistenceLastError) -Level ERROR
+        }
+    }
+}
+
+function Test-OrchestratorStatePersistenceReady {
+    if ($script:StatePersistenceHealthy) { return $true }
+    Save-OrchestratorState
+    return [bool]$script:StatePersistenceHealthy
 }
 
 function Get-JobState {
@@ -1720,6 +1770,9 @@ function Write-OrchestratorHeartbeat {
         CapabilityGeneratedAtUtc = if ($null -ne $script:ServerCapabilities) { [string]$script:ServerCapabilities.GeneratedAtUtc } else { '' }
         ElectionPlanId = if ($null -ne $script:ElectionPlan) { [string]$script:ElectionPlan.PlanId } else { '' }
         ElectedJobsOwned = if ($null -ne $script:ElectionPlan) { @($script:ElectionPlan.Assignments | Where-Object { $_.OwnerServer -eq $env:COMPUTERNAME } | ForEach-Object { [string]$_.JobName } | Sort-Object) } else { @() }
+        StatePersistenceHealthy = [bool]$script:StatePersistenceHealthy
+        StatePersistenceFailureCount = [int]$script:StatePersistenceFailureCount
+        StatePersistenceLastError = [string]$script:StatePersistenceLastError
     }
     try { Write-FileAtomically -Path $script:Settings.HeartbeatPath -Content ($heartbeat | ConvertTo-Json -Depth 5) }
     catch { Write-OrchestratorLog -Message ("Failed to write heartbeat: {0}" -f $_.Exception.Message) -Level WARN }
@@ -1893,6 +1946,12 @@ function Get-OrchestratorPeerHealthSnapshot {
             RunningJobs = @($runningJobs | ForEach-Object { [string]$_.Name }) -join ', '
             PendingJobs = @($pendingJobs | ForEach-Object { "{0} ({1})" -f $_.Name, $_.Reason }) -join ', '
         })
+
+        if ($heartbeat.PSObject.Properties['StatePersistenceHealthy'] -and -not [bool]$heartbeat.StatePersistenceHealthy) {
+            $failureCount = if ($heartbeat.PSObject.Properties['StatePersistenceFailureCount']) { [int]$heartbeat.StatePersistenceFailureCount } else { 0 }
+            $stateError = if ($heartbeat.PSObject.Properties['StatePersistenceLastError']) { [string]$heartbeat.StatePersistenceLastError } else { 'Unknown state persistence error.' }
+            $issues.Add((New-OrchestratorPeerIssue -Key ("StatePersistenceUnavailable|{0}" -f $peerServer.ToUpperInvariant()) -Type 'StatePersistenceUnavailable' -Server $peerServer -Status 'Launches paused' -LastSeen $lastSeenText -AgeMinutes ([math]::Round($ageMinutes, 1)) -Details ("Failed writes: {0}. {1}" -f $failureCount, $stateError)))
+        }
 
         if (-not $script:Settings.PeerJobMonitoringEnabled) { continue }
         $peerStatePath = Join-Path -Path $peerFolder -ChildPath 'Orchestrator-State.json'
@@ -3532,6 +3591,10 @@ function Invoke-LaunchPhase {
         }
         Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath
         $launchedThisTick.Add($name)
+        if (-not $script:StatePersistenceHealthy) {
+            Write-OrchestratorLog -Message ("Job {0}: state could not be persisted after process launch; stopping this tick's launch phase until persistence recovers." -f $name) -Level ERROR
+            break
+        }
     }
 }
 
@@ -4130,6 +4193,10 @@ $script:RuntimeUpdateCandidateIdentity = ''
 $script:RuntimeUpdateCandidateStableCount = 0
 $script:RuntimeUpdateWarnings = @{}
 $script:RuntimeUpdateBaseline = $null
+$script:StatePersistenceHealthy = $true
+$script:StatePersistenceFailureCount = 0
+$script:StatePersistenceLastError = ''
+$script:LastStatePersistenceWarningUtc = [datetime]::MinValue
 $script:ServerCapabilities = $null
 $script:ElectionPlan = $null
 $script:LastCapabilityRefreshUtc = [datetime]::MinValue
@@ -4301,6 +4368,7 @@ try {
         JobsManifestPath = $effectiveManifestPath
         MaxConcurrency = [math]::Max(1, $effectiveMaxConcurrency)
         MaxLifetimeHours = [math]::Max(1, $effectiveMaxLifetimeHours)
+        AtomicWriteRetrySeconds = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'AtomicWriteRetrySeconds' -DefaultValue 30))
         TickSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'TickSeconds' -DefaultValue 60))
         AutoRecycleOnRuntimeUpdate = $autoRecycleOnRuntimeUpdate
         RuntimeUpdateCheckIntervalSeconds = [math]::Max(15, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'RuntimeUpdateCheckIntervalSeconds' -DefaultValue 60))
@@ -4458,7 +4526,7 @@ try {
     Write-OrchestratorLog -Message ("Paths: scriptRoot={0}; currentDirectory={1}; data={2}; log={3}; jobLogs={4}; state={5}; heartbeat={6}; stopRequest={7}; runCsv={8}." -f $PSScriptRoot, (Get-Location).Path, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.StatePath, $script:Settings.HeartbeatPath, $script:Settings.StopRequestPath, $script:Settings.OrchestratorRunsCsvPath)
     Write-OrchestratorLog -Message ("Mail context: enabled={0}; mode={1}; graphConfigured={2}; smtpConfigured={3}; fromConfigured={4}; recipientConfigured={5}; jobMailMode={6}; dailySummary={7}." -f $script:Settings.MailEnabled, $script:Settings.SendMailMode, $script:Settings.GraphMailConfigured, $script:Settings.SmtpMailConfigured, (-not [string]::IsNullOrWhiteSpace($script:Settings.MailFrom)), (-not [string]::IsNullOrWhiteSpace($script:Settings.MailTo)), $script:Settings.JobMailMode, $script:Settings.SendDailySummaryEmail)
 
-    Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; dependencyWaitTimeoutMinutes={4}; heartbeatLogIntervalMinutes={5}; runsCsvLockTimeoutSeconds={6}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.DependencyWaitTimeoutMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes, $script:Settings.OrchestratorRunsCsvLockTimeoutSeconds)
+    Write-OrchestratorLog -Message ("Orchestrator upload context: sharePointEnabled={0}; target={1}; uploadIntervalMinutes={2}; dependencyWaitLogIntervalMinutes={3}; dependencyWaitTimeoutMinutes={4}; heartbeatLogIntervalMinutes={5}; runsCsvLockTimeoutSeconds={6}; atomicWriteRetrySeconds={7}." -f $script:Settings.SharePointUploadEnabled, $script:Settings.SharePointTargetFolderPath, $script:Settings.OrchestratorSharePointUploadIntervalMinutes, $script:Settings.DependencyWaitLogIntervalMinutes, $script:Settings.DependencyWaitTimeoutMinutes, $script:Settings.OrchestratorHeartbeatLogIntervalMinutes, $script:Settings.OrchestratorRunsCsvLockTimeoutSeconds, $script:Settings.AtomicWriteRetrySeconds)
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
     Write-OrchestratorLog -Message ("Peer monitoring context: enabled={0}; jobMonitoring={1}; expectedServers={2}; checkIntervalSeconds={3}; heartbeatStaleMinutes={4}; confirmationChecks={5}; jobStartGraceMinutes={6}; reminderMinutes={7}." -f $script:Settings.PeerMonitoringEnabled, $script:Settings.PeerJobMonitoringEnabled, (@($script:Settings.ExpectedOrchestratorServers) -join ', '), $script:Settings.PeerMonitoringCheckIntervalSeconds, $script:Settings.PeerHeartbeatStaleMinutes, $script:Settings.PeerMonitoringConfirmationChecks, $script:Settings.PeerJobStartGraceMinutes, $script:Settings.PeerAlertReminderMinutes)
     Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; baselineOrchestrator={5}; baselineCore={6}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
@@ -4478,6 +4546,7 @@ try {
     try {
         $script:Manifest = Read-JobsManifest -Path $script:Settings.JobsManifestPath
         Write-OrchestratorLog -Message ("Jobs manifest loaded: {0} ({1} jobs, {2} enabled)." -f $script:Settings.JobsManifestPath, @($script:Manifest.OrderedJobs).Count, @($script:Manifest.OrderedJobs | Where-Object { $_.Enabled }).Count)
+        Write-OrchestratorTimeoutPolicySummary
         $script:ElectionPlan = Read-SharedElectionPlan
         Write-ServerAllowlistSummary
     }
@@ -4536,7 +4605,9 @@ try {
             $script:OrchestratorStopReason = 'RuntimeUpdate'
             break
         }
-        Invoke-LaunchPhase -Now $now
+        if (Test-OrchestratorStatePersistenceReady) {
+            Invoke-LaunchPhase -Now $now
+        }
         Send-DailySummaryIfDue -Now $now
         Write-OrchestratorHeartbeat
         try {
@@ -4624,8 +4695,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcgwjQhPNvEo3o
-# Ecs8pySQmJ7zyNwNR0oe7o4nYqEQm6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD27eaFzJW4FW2T
+# mN/g3EhrRPnzhQAGJYb58jmc7ZEWM6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4758,31 +4829,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMnNqPLQHrr8vOm9Nvfd17Gn6kHmjpt6xRgdmSpU89aKMA0GCSqG
-# SIb3DQEBAQUABIIBgEFxIXobP1u5dTOs8arm4O3HvUfUEEdPI6ysFnzeHK8RuY9W
-# IGskhfUhLrgZ5WOY0uxiwaVcNtVNNK8uw4L0UfFMYs5ufsqs2LC5BWYHMSmylspZ
-# lBFmeYi77ThuwLIUgZD3LvqOlQauBERLMDengM7SoM7vKFw0l5OIpvuN1xtaBsYn
-# /ovWHfQ7U5EI+VxOkt3JfptCcWLgdVcdsRRay3Fd1DkRQatOwT1c2qi8D7VueGTZ
-# YFoobQ2Uz0GTeRs0IrPmXP0wN+ZI6snqSQtGtL7kHxpwW09kMbeu4dY6Cpkwq+Zd
-# Ho7L+3DfId1FJ3edjllDykZX1g/oq1m+khIPuKQRvUJma9aRqLTkwyxKhh309ekN
-# ZQRNNWtQHlUXEnTNhjZUgaLubfqyR7NLI3qNout0lFevucvLMVwHQokdr9o/26wP
-# rRAX0+NaEHMYkz35u3t2/VQR+Fkq/EZ0S4/VtgUfcOWU5FK2VpmzsycuF0F54vbW
-# HAh6x9V1O07UNMh5v6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEyO4zj3ThySwpz0L5D16n+N0y+Wb3F9gTVWoytyHx1UMA0GCSqG
+# SIb3DQEBAQUABIIBgHL9NzFT7ikKHKf73gPRHkHGEkPl4rXSavoaoWeN8Mhl311S
+# WAzxd8+x4z16CwYxUATch/vujvOnUVec1DNhiCup/evZAqJya3K7vCu1HqlEl9TC
+# sngeffEcb4FpkhER890pdCJJVvFVBGHl8ZrlyRhBf4SjwG7suhi3E+7kQFCRFpRK
+# LzL/oI65Jm18xL/bwvkohLtJKb5EzVEQmCafloEjuLqVo2EBiIn/h1rjRKSt4JjN
+# FVpvp1QIKOLDeT9CI0jy5FiwiO8iop3zMjnRnnWOFcXwOCeMt1gAD2JG/XRgXhI4
+# UCAc4IXit5CgsxLL2JM0NADEX4ayWi10UzoCDXR51/WDVG927eUlyvFKbeWdPN+l
+# cWRC9/8CTw8iEgXTsdnCjDT1n1/mrZP/iwzEGUgR1beDRtZSb2Bj8qM+n3SXcT5d
+# 6kwzEhgQL/8OfaQSNrE/vkJYtM5DQxUKN2/Xwp6cPEUJRJNH/gS6NZPU/LBzStSk
+# 635neJMX6In4LsWk5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMjQx
-# MjBaMC8GCSqGSIb3DQEJBDEiBCDq94MtCuV9BfaSJMliLSpE9eNJYQwWzoMJfZYq
-# B6AJgzANBgkqhkiG9w0BAQEFAASCAgAI1gImCso4g+RSx1NHa+wPG7kM81Nd4Ko6
-# okxRCppsZBtOX62zYHyu8Zo+Spg9O28+OAjSw+lqhmG4IiQB5eUGKzn0RRLsRrMI
-# b595Rxn42Qg1TwSajNKWyFlzDFGAOES95C2t7d1iHRtuT2iedcQwlXv7jkuKvAtD
-# Qt+743NfD8GI/776MHyA9KwOxBBTgHrh1LDhLJX2RRLd8nEFbERFiAjwKI2mEkRW
-# T5hdVfXpI6amTm9Lexkhb6KwpQ5pNLIStEQgWGV1YPHvNSMgGbozWGATvjyxXsTa
-# QbA01FUKUPmycfHeONUZXZCddHpDjNphTAHqi1D+GuxKwLYkcDwE4Nkp+o8xfFDD
-# aRA+7CuGu96S2+6EqDsifXQKxLAJmPKW8I4yHEqcSvg2FCFYB/Aa1aY/s5MTayfn
-# z4tJRMpNKOjwW2rYU9XdIP7eaxalV8PgR9wBCG9gl72n/BMsVS3g/1KNHA6ac1ji
-# 86b5V86SsEE9N0PQbC/jsX+RTzhhp4OpJuas8kMsjRXOkSZ0+XM81rNQ96+en4r3
-# eD04spbvX+Eu/sULKy41QGAoYxn4wEUwCF119tQJLDoqOBkr6Y/+yl1XEyeCGiGX
-# zWParkFvZedA/7hIMat3UluEBHZOfkX/iy2GMvnFKBJslUWpPa38cHiXE8m8wM26
-# l2Uf4/EXQA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxNDAw
+# NTdaMC8GCSqGSIb3DQEJBDEiBCCl9lYnkb0ADt9J83hPAy1UVsatb1TkYGkXGmSL
+# 3bUGdTANBgkqhkiG9w0BAQEFAASCAgBZ1043Jz55p6s4sQmjYvz/cdaoySDHbcaD
+# 5p2/EvqEP3ubwZMlEcqixZfi2TonCsGiPJTFhLl+7NFMconl9/rWzKfmbui+6um1
+# JgUoTq3x9mHsXDEtQ0JERBbChb5NMtTkXB1dwAtw+mDXk3VahBNQQsOwm/IbPISm
+# Ab18QFugNDFXQhFI4Yi22PQ/IeaPrZrWOKqx5wS2t9Ch0/IBJlc8nXIVyAQJg5wW
+# HcWupmy2vWAdwAzifDitJHus/BCLvSP9EYnWPxl4o7gZwjYHV9xQyHN8Q8MYMYkq
+# DnCaoqeYplS0qCcCOUc08bZc5WkZ/aNLFfMuh3Am/3gTqsW3eOEm9C8aJC10OimS
+# PXlYyUPs0ryzTX99+sr7oRctPVWXotAGJ+dl0ommcZXNqKirjQhnx/5sef5RdRfn
+# YLYsZ3gz4uG+aow9oejZSUbtirvDpGl178zW8iyEwFvYgKd+98DGTX2mECYtHIy5
+# VYz4dKR9mFqfr9oLYZFoY0DIvxlu2aLCfgHbUgoFIEgqdN+tmURAPpX1NwgMSvhb
+# wIBCnL2ylTkip+vR+bXGZ3/Xfx81V4b2/M7HrxrmJw+uA0WzingV+PfJOc4MI/vA
+# bWr+DlxqRu1bzRUtR6sTaOjG5IPW0QBqoGGdGYJoPIp/2d49lLFM5J8NuVNyP+zD
+# WW6Bwz8HiQ==
 # SIG # End signature block
