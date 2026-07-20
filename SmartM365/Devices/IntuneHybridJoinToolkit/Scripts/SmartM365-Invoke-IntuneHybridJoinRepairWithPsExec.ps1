@@ -138,7 +138,7 @@ Uses the shared technician-side run history to prevent overlapping or redundant 
 Explicitly bypasses the shared technician-side run history.
 
 .PARAMETER TechnicianRunGuardHours
-Expiration window for technician-side run history entries. Defaults to 3 hours.
+Expiration window for technician-side run history entries. Defaults to 12 hours.
 
 .PARAMETER RebootDelaySeconds
 Seconds used by the remote script when scheduling a controlled reboot. Defaults to 180 so this launcher can pull logs through C$ before reboot.
@@ -179,7 +179,7 @@ Do not refresh Intune inventory at the end of each cycle. By default, the launch
 Graph page size used by SmartM365-IntuneHybridJoinRepair-Export-IntuneDevicesCsv.ps1 for automatic LOT-scoped inventory refreshes. Defaults to 999.
 
 .VERSION
-2.10.75
+2.10.76
 #>
 
 #requires -Version 5.1
@@ -232,7 +232,7 @@ param(
     [switch]$UseTechnicianRunGuardHistory,
     [switch]$IgnoreTechnicianRunGuardHistory,
     [ValidateRange(0,168)]
-    [int]$TechnicianRunGuardHours = 3,
+    [int]$TechnicianRunGuardHours = 12,
     [int]$StaleCleanupDelaySeconds = 60,
     [int]$RebootDelaySeconds = 180,
     [int]$IntuneRetrySleepMinutes = 5,
@@ -250,7 +250,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2.10.75"
+$LauncherVersion = "2.10.76"
 $AdInventoryFreshnessHours = 12
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
@@ -1477,6 +1477,9 @@ function Get-NextActionFromLauncherStatus {
         "ADMIN_SHARE_UNREACHABLE" { return "FIX_ADMIN_SHARE_OR_NETWORK" }
         "DNS_PREFLIGHT_ALL_SAMPLES_FAILED" { return "CHECK_VPN_DNS_BEFORE_LOT" }
         "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
+        "ENDPOINT_RUN_ACTIVE" { return "WAIT_ACTIVE_ENDPOINT_RUN" }
+        "SKIPPED_BY_STATUS_BACKOFF" { return "WAIT_STATUS_BACKOFF" }
+        "REBOOT_SAFETY_LIMIT_REACHED_POST_DSREG_LEAVE" { return "REVIEW_REBOOT_HISTORY_AND_HYBRID_JOIN" }
         "REBOOT_TRIGGERED_WAITING_FOR_USER_LOGON" { return "WAIT_USER_LOGON" }
         "WAITING_FOR_INTERACTIVE_USER_LOGON" { return "WAIT_USER_LOGON" }
         "INTUNE_USER_AUTOENROLL_LOCAL_INTERACTIVE_USER" { return "LOGON_WITH_DOMAIN_OR_AAD_USER" }
@@ -1743,6 +1746,12 @@ function Get-LauncherReportColumns {
         "NextAction",
         "EffectiveStatus",
         "EffectiveNextAction",
+        "LatestAttemptStatus",
+        "LatestActionableStatus",
+        "LatestActionableNextAction",
+        "BackoffStatus",
+        "BackoffUntilUtc",
+        "BackoffCount",
         "InteractiveUserName",
         "InteractiveUserDomain",
         "InteractiveUserAccountName",
@@ -1905,10 +1914,14 @@ function Read-TechnicianRunGuardHistory {
         catch { $entries = @() }
     }
     $now = (Get-Date).ToUniversalTime()
-    $fresh = @($entries | Where-Object {
-        try { ([datetime]$_.ExpiresUtc).ToUniversalTime() -gt $now } catch { $false }
+    $retained = @($entries | Where-Object {
+        try {
+            $retentionText = if ($_.PSObject.Properties["RetentionUtc"]) { [string]$_.RetentionUtc } else { [string]$_.ExpiresUtc }
+            ([datetime]$retentionText).ToUniversalTime() -gt $now
+        }
+        catch { $false }
     })
-    return [pscustomobject]@{ Version=1; UpdatedUtc=$now.ToString("o"); Entries=$fresh }
+    return [pscustomobject]@{ Version=2; UpdatedUtc=$now.ToString("o"); Entries=$retained }
 }
 
 function Save-TechnicianRunGuardHistory {
@@ -1916,18 +1929,32 @@ function Save-TechnicianRunGuardHistory {
     $folder = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     $History.UpdatedUtc = (Get-Date).ToUniversalTime().ToString("o")
-    $History | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding UTF8
+    $temporaryPath = Join-Path $folder (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
+    try {
+        $History | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8 -Force
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+    }
+    finally { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue }
+}
+
+function Get-TechnicianRunGuardCooldownHours {
+    param([string]$Status,[int]$BackoffCount=1,[int]$CycleNumber=1,[int]$DefaultHours=12)
+    $normalized = ([string]$Status).ToUpperInvariant()
+    if ($normalized -match "^(CANCELLED_|DRYRUN_|AUDIT_|SKIPPED_VIRTUAL_MACHINE)") { return 0.0 }
+    if ($normalized -match "^(ADMIN_SHARE|DNS_|PSEXEC_|REMOTE_.*FAILED|CENTRAL_.*FAILED|JOB_ERROR|ERROR)") {
+        $exponent = [math]::Min(5,[math]::Max(0,[math]::Max($BackoffCount,$CycleNumber) - 1))
+        return ([math]::Min(360,15 * [math]::Pow(2,$exponent)) / 60.0)
+    }
+    if ($normalized -match "(USER|INTERACTIVE|PRT|LOGON|SESSION_REMOTE|LOCAL_INTERACTIVE)") { return 24.0 }
+    if ($normalized -match "(RUN_GUARD|ENDPOINT_RUN_ACTIVE|PENDING_CONFIRMATION|REBOOT_TRIGGERED|WAITING_FOR_AAD_CONNECT|WAITING_POST_LEAVE)") { return 12.0 }
+    if ($normalized -in @("SUCCESS","AUDIT_SUCCESS_ALREADY_INTUNE","ENROLLED_DETECTED_POST_CYCLE")) { return 168.0 }
+    return [double][math]::Max(1,$DefaultHours)
 }
 
 function Test-TechnicianRunGuardEntryShouldBlock {
     param([AllowNull()]$Entry)
     if (-not $Entry) { return $false }
-    if ([string]$Entry.State -ne "Result") { return $true }
-    $status = @([string]$Entry.RemoteStatus,[string]$Entry.LauncherStatus) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
-    if ([string]::IsNullOrWhiteSpace($status)) { return $false }
-    $status = $status.ToUpperInvariant()
-    if ($status -match "^(JOB_ERROR|ERROR|ADMIN_SHARE|DNS_|PSEXEC_|REMOTE_.*FAILED|CENTRAL_.*FAILED|RUN_GUARD_ACTIVE|DRYRUN_|AUDIT_|SKIPPED_)") { return $false }
-    return $true
+    try { return (([datetime]$Entry.ExpiresUtc).ToUniversalTime() -gt (Get-Date).ToUniversalTime()) } catch { return $false }
 }
 
 function Get-ActiveTechnicianRunGuardEntry {
@@ -1938,9 +1965,11 @@ function Get-ActiveTechnicianRunGuardEntry {
         param($LockedPath,$LockedHours,$LockedFqdn,$FoundRef)
         $history = Read-TechnicianRunGuardHistory -Path $LockedPath -Hours $LockedHours
         Save-TechnicianRunGuardHistory -Path $LockedPath -History $history
-        foreach ($entry in @($history.Entries)) { if ([string]$entry.ComputerFqdn -eq $LockedFqdn) { $FoundRef.Value=$entry; break } }
+        foreach ($entry in @($history.Entries)) {
+            if ([string]$entry.ComputerFqdn -eq $LockedFqdn -and (Test-TechnicianRunGuardEntryShouldBlock $entry)) { $FoundRef.Value=$entry; break }
+        }
     }
-    if ($found.ContainsKey("Value") -and (Test-TechnicianRunGuardEntryShouldBlock $found.Value)) { return $found.Value }
+    if ($found.ContainsKey("Value")) { return $found.Value }
     return $null
 }
 
@@ -1950,17 +1979,20 @@ function Update-TechnicianRunGuardHistory {
     Invoke-TechnicianRunGuardHistoryLock -ArgumentList @($Path,$ComputerFqdn,$InputComputerName,$Hours,$State,$Result,$JobId,$CycleNumber) -ScriptBlock {
         param($LockedPath,$LockedFqdn,$LockedName,$LockedHours,$LockedState,$LockedResult,$LockedJobId,$LockedCycle)
         $history = Read-TechnicianRunGuardHistory -Path $LockedPath -Hours $LockedHours
+        $previous = $history.Entries | Where-Object { [string]$_.ComputerFqdn -eq $LockedFqdn } | Select-Object -First 1
         $kept = @($history.Entries | Where-Object { [string]$_.ComputerFqdn -ne $LockedFqdn })
         $now = (Get-Date).ToUniversalTime()
         $started = $now
-        if ($LockedState -eq "Result") {
-            $previous = @($history.Entries | Where-Object { [string]$_.ComputerFqdn -eq $LockedFqdn } | Select-Object -First 1)
-            if ($previous -and $previous.LastStartedUtc) { try { $started=([datetime]$previous.LastStartedUtc).ToUniversalTime() } catch {} }
-        }
-        $launcherStatus = if ($LockedResult -and $LockedResult.PSObject.Properties["Status"]) { [string]$LockedResult.Status } else { "" }
+        if ($LockedState -eq "Result" -and $previous -and $previous.LastStartedUtc) { try { $started=([datetime]$previous.LastStartedUtc).ToUniversalTime() } catch {} }
+        $launcherStatus = if ($LockedResult -and $LockedResult.PSObject.Properties["Status"]) { [string]$LockedResult.Status } else { "STARTED_NO_RESULT" }
         $remoteStatus = if ($LockedResult -and $LockedResult.PSObject.Properties["RemoteStatus"]) { [string]$LockedResult.RemoteStatus } else { "" }
-        $entry = [pscustomobject]@{ ComputerFqdn=$LockedFqdn; InputComputerName=$LockedName; State=$LockedState; LastStartedUtc=$started.ToString("o"); LastUpdatedUtc=$now.ToString("o"); ExpiresUtc=$started.AddHours($LockedHours).ToString("o"); LauncherStatus=$launcherStatus; RemoteStatus=$remoteStatus; NextAction=$(if($LockedResult -and $LockedResult.PSObject.Properties["NextAction"]){[string]$LockedResult.NextAction}else{""}); JobId=$LockedJobId; CycleNumber=$LockedCycle; LotRoot=$LotRoot; LauncherVersion=$LauncherVersion }
-        if ($LockedState -ne "Result" -or (Test-TechnicianRunGuardEntryShouldBlock $entry)) { $kept += $entry }
+        $previousStatus = if ($previous -and $previous.PSObject.Properties["BackoffStatus"]) { [string]$previous.BackoffStatus } else { "" }
+        $effectiveStatus = if ($LockedState -eq "Started" -and -not [string]::IsNullOrWhiteSpace($previousStatus)) { $previousStatus } else { @($remoteStatus,$launcherStatus) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1 }
+        $previousBackoffCount = if ($previous -and $previous.PSObject.Properties["BackoffCount"]) { [int]$previous.BackoffCount } else { 0 }
+        $backoffCount = if ($LockedState -eq "Started") { [math]::Max(1,$previousBackoffCount) } elseif ($previousStatus -eq $effectiveStatus) { $previousBackoffCount + 1 } else { 1 }
+        $cooldownHours = if ($LockedState -eq "Started") { [double]$LockedHours } else { Get-TechnicianRunGuardCooldownHours -Status $effectiveStatus -BackoffCount $backoffCount -CycleNumber $LockedCycle -DefaultHours $LockedHours }
+        $entry = [pscustomobject]@{ ComputerFqdn=$LockedFqdn; InputComputerName=$LockedName; State=$LockedState; LastStartedUtc=$started.ToString("o"); LastUpdatedUtc=$now.ToString("o"); ExpiresUtc=$now.AddHours($cooldownHours).ToString("o"); RetentionUtc=$now.AddDays(7).ToString("o"); LauncherStatus=$launcherStatus; RemoteStatus=$remoteStatus; BackoffStatus=$effectiveStatus; BackoffCount=$backoffCount; CooldownHours=[math]::Round($cooldownHours,2); NextAction=$(if($LockedResult -and $LockedResult.PSObject.Properties["NextAction"]){[string]$LockedResult.NextAction}else{""}); JobId=$LockedJobId; CycleNumber=$LockedCycle; LotRoot=$LotRoot; LauncherVersion=$LauncherVersion }
+        if ($LockedState -ne "Result" -or $cooldownHours -gt 0) { $kept += $entry }
         $history.Entries = @($kept)
         Save-TechnicianRunGuardHistory -Path $LockedPath -History $history
     }
@@ -1969,7 +2001,10 @@ function Update-TechnicianRunGuardHistory {
 function New-TechnicianRunGuardSkippedResult {
     param([string]$ComputerName,[int]$CycleNumber,[Parameter(Mandatory=$true)]$HistoryEntry)
     $startedNoResult = ([string]$HistoryEntry.State -ne "Result")
-    return [pscustomobject]@{ LauncherVersion=$LauncherVersion; Cycle=$CycleNumber; Computer=$ComputerName; Timestamp=Get-Date; DryRun=[bool]$DryRun; Status=$(if($startedNoResult){"SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT"}else{"SKIPPED_BY_TECH_RUN_GUARD"}); RemoteStatus=""; NextAction="WAIT_RUN_GUARD_EXPIRY"; RemoteNextAction=""; EffectiveStatus=""; EffectiveNextAction="WAIT_RUN_GUARD_EXPIRY"; RemoteLogsCollected=$false; RemoteLogsPath=""; LogPath=$script:LauncherLogPath; ErrorMessage=("Technician run guard active. FQDN={0}; Started={1}; Expires={2}; State={3}; JobId={4}" -f $HistoryEntry.ComputerFqdn,$HistoryEntry.LastStartedUtc,$HistoryEntry.ExpiresUtc,$HistoryEntry.State,$HistoryEntry.JobId) }
+    $skipStatus = if ($startedNoResult) { "SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT" } else { "SKIPPED_BY_STATUS_BACKOFF" }
+    $backoffStatus = if ($HistoryEntry.PSObject.Properties["BackoffStatus"]) { [string]$HistoryEntry.BackoffStatus } else { [string]$HistoryEntry.RemoteStatus }
+    $backoffCount = if ($HistoryEntry.PSObject.Properties["BackoffCount"]) { [string]$HistoryEntry.BackoffCount } else { "" }
+    return [pscustomobject]@{ LauncherVersion=$LauncherVersion; Cycle=$CycleNumber; Computer=$ComputerName; Timestamp=Get-Date; DryRun=[bool]$DryRun; Status=$skipStatus; RemoteStatus=""; NextAction="WAIT_STATUS_BACKOFF"; RemoteNextAction=""; EffectiveStatus=$skipStatus; EffectiveNextAction="WAIT_STATUS_BACKOFF"; BackoffStatus=$backoffStatus; BackoffUntilUtc=[string]$HistoryEntry.ExpiresUtc; BackoffCount=$backoffCount; RemoteLogsCollected=$false; RemoteLogsPath=""; LogPath=$script:LauncherLogPath; ErrorMessage=("Technician status backoff active. FQDN={0}; PriorStatus={1}; Count={2}; Started={3}; NextEligible={4}; State={5}; JobId={6}" -f $HistoryEntry.ComputerFqdn,$backoffStatus,$backoffCount,$HistoryEntry.LastStartedUtc,$HistoryEntry.ExpiresUtc,$HistoryEntry.State,$HistoryEntry.JobId) }
 }
 
 function Test-AlreadyEnrolledCycleResult {
@@ -2221,6 +2256,49 @@ function Get-HybridJoinLatestRowsByComputer {
     return @($latestByComputer.GetEnumerator() | Sort-Object Name | ForEach-Object { $_.Value })
 }
 
+function Get-HybridJoinLatestActionableRowsByComputer {
+    param([AllowEmptyCollection()][object[]]$Rows)
+
+    $latestByComputer = @{}
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row) { continue }
+        $computer = if ($row.PSObject.Properties["Computer"]) { [string]$row.Computer } else { "" }
+        if ([string]::IsNullOrWhiteSpace($computer)) { continue }
+        $status = Get-HybridJoinHtmlEffectiveStatus -Row $row
+        if ($status -match "^(CANCELLED_|RUN_GUARD_ACTIVE$|SKIPPED_BY_TECH_RUN_GUARD|SKIPPED_BY_STATUS_BACKOFF)") { continue }
+        $key = Get-ComputerListKey -ComputerName $computer
+        if ([string]::IsNullOrWhiteSpace($key)) { $key = $computer.ToUpperInvariant() }
+        $latestByComputer[$key] = $row
+    }
+    return @($latestByComputer.GetEnumerator() | Sort-Object Name | ForEach-Object { $_.Value })
+}
+function Set-HybridJoinLatestStatusMetadata {
+    param([AllowEmptyCollection()][object[]]$Rows)
+
+    $latestAttempt = @{}
+    $latestActionable = @{}
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row -or -not $row.PSObject.Properties["Computer"]) { continue }
+        $computer = [string]$row.Computer
+        if ([string]::IsNullOrWhiteSpace($computer)) { continue }
+        $key = Get-ComputerListKey -ComputerName $computer
+        $status = Get-HybridJoinHtmlEffectiveStatus -Row $row
+        $nextAction = Get-HybridJoinHtmlEffectiveNextAction -Row $row
+        $latestAttempt[$key] = [pscustomobject]@{ Status=$status; NextAction=$nextAction }
+        if ($status -notmatch "^(CANCELLED_|RUN_GUARD_ACTIVE$|SKIPPED_BY_TECH_RUN_GUARD|SKIPPED_BY_STATUS_BACKOFF)") {
+            $latestActionable[$key] = [pscustomobject]@{ Status=$status; NextAction=$nextAction }
+        }
+    }
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row -or -not $row.PSObject.Properties["Computer"]) { continue }
+        $key = Get-ComputerListKey -ComputerName ([string]$row.Computer)
+        $attempt = if ($latestAttempt.ContainsKey($key)) { $latestAttempt[$key] } else { $null }
+        $actionable = if ($latestActionable.ContainsKey($key)) { $latestActionable[$key] } else { $null }
+        $row | Add-Member -NotePropertyName LatestAttemptStatus -NotePropertyValue $(if($attempt){[string]$attempt.Status}else{""}) -Force
+        $row | Add-Member -NotePropertyName LatestActionableStatus -NotePropertyValue $(if($actionable){[string]$actionable.Status}else{""}) -Force
+        $row | Add-Member -NotePropertyName LatestActionableNextAction -NotePropertyValue $(if($actionable){[string]$actionable.NextAction}else{""}) -Force
+    }
+}
 function New-HybridJoinCycleProgressRows {
     param(
         [Parameter(Mandatory=$true)][int]$CycleNumber,
@@ -2443,17 +2521,21 @@ function New-CycleHtmlReport {
 
     $rows = @(Get-HybridJoinHtmlReportRows -Items @($Summary | ForEach-Object { $_ }))
     $latestRows = @(Get-HybridJoinLatestRowsByComputer -Rows $rows)
-    $separatedStatuses = @('ADMIN_SHARE_UNREACHABLE','DNS_PREFLIGHT_ALL_SAMPLES_FAILED','RUN_GUARD_ACTIVE','SKIPPED_BY_TECH_RUN_GUARD','SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT')
-    $mainRows = @($rows | Where-Object { $separatedStatuses -notcontains (Get-HybridJoinHtmlEffectiveStatus -Row $_) })
-    $separatedRows = @($rows | Where-Object { $separatedStatuses -contains (Get-HybridJoinHtmlEffectiveStatus -Row $_) })
+    $latestActionableRows = @(Get-HybridJoinLatestActionableRowsByComputer -Rows $rows)
+    $separatedStatuses = @('ADMIN_SHARE_UNREACHABLE','DNS_PREFLIGHT_ALL_SAMPLES_FAILED','RUN_GUARD_ACTIVE','SKIPPED_BY_TECH_RUN_GUARD','SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT','SKIPPED_BY_STATUS_BACKOFF')
+    $mainRows = @($latestActionableRows | Where-Object { $separatedStatuses -notcontains (Get-HybridJoinHtmlEffectiveStatus -Row $_) })
+    $separatedRows = @($latestActionableRows | Where-Object { $separatedStatuses -contains (Get-HybridJoinHtmlEffectiveStatus -Row $_) })
 
     $effectiveRows = @($rows | ForEach-Object { [pscustomobject]@{ Status = Get-HybridJoinHtmlEffectiveStatus -Row $_; NextAction = Get-HybridJoinHtmlEffectiveNextAction -Row $_ } })
     $statusCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Status) } | Group-Object -Property Status | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ Status=$_.Name; Count=$_.Count } })
     $nextActionCounts = @($effectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.NextAction) } | Group-Object -Property NextAction | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ NextAction=$_.Name; Count=$_.Count } })
     $adminShareFailureCounts = @($rows | Where-Object { (Get-HybridJoinHtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = Get-HybridJoinAdminShareFailureType -Row $_ } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ FailureType=$_.Name; Count=$_.Count } })
     $latestEffectiveRows = @($latestRows | ForEach-Object { [pscustomobject]@{ Status = Get-HybridJoinHtmlEffectiveStatus -Row $_; NextAction = Get-HybridJoinHtmlEffectiveNextAction -Row $_ } })
+    $latestActionableEffectiveRows = @($latestActionableRows | ForEach-Object { [pscustomobject]@{ Status = Get-HybridJoinHtmlEffectiveStatus -Row $_; NextAction = Get-HybridJoinHtmlEffectiveNextAction -Row $_ } })
     $latestStatusCounts = @($latestEffectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Status) } | Group-Object -Property Status | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ Status=$_.Name; Count=$_.Count } })
-    $latestAdminShareFailureCounts = @($latestRows | Where-Object { (Get-HybridJoinHtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = Get-HybridJoinAdminShareFailureType -Row $_ } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ FailureType=$_.Name; Count=$_.Count } })
+    $latestActionableStatusCounts = @($latestActionableEffectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Status) } | Group-Object -Property Status | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ Status=$_.Name; Count=$_.Count } })
+    $latestActionableNextActionCounts = @($latestActionableEffectiveRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.NextAction) } | Group-Object -Property NextAction | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ NextAction=$_.Name; Count=$_.Count } })
+    $latestAdminShareFailureCounts = @($latestActionableRows | Where-Object { (Get-HybridJoinHtmlEffectiveStatus -Row $_) -eq 'ADMIN_SHARE_UNREACHABLE' } | ForEach-Object { [pscustomobject]@{ FailureType = Get-HybridJoinAdminShareFailureType -Row $_ } } | Group-Object -Property FailureType | Sort-Object Count -Descending | ForEach-Object { [pscustomobject]@{ FailureType=$_.Name; Count=$_.Count } })
 
     $computerListStats = $script:CurrentCycleComputerListStats
     if ($CycleProgress.Count -eq 0) {
@@ -2559,6 +2641,9 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Add("<div class='card'><h2>Latest status by unique computer</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $latestStatusCounts -Columns @('Status','Count')))
     [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Latest actionable status by unique computer</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $latestActionableStatusCounts -Columns @('Status','Count')))
+    [void]$html.Add("<div class='footer'>Cancellation, run-guard and status-backoff rows do not mask the last meaningful endpoint or connectivity result.</div></div>")
     [void]$html.Add("<div class='card'><h2>Status summary by attempts</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $statusCounts -Columns @('Status','Count')))
     [void]$html.Add("</div>")
@@ -2572,12 +2657,15 @@ tr:nth-child(even) td { background: #F5F8FB; }
         [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $adminShareFailureCounts -Columns @('FailureType','Count')))
         [void]$html.Add("</div>")
     }
-    [void]$html.Add("<div class='card'><h2>Next action summary</h2>")
+    [void]$html.Add("<div class='card'><h2>Next action summary by attempts</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $nextActionCounts -Columns @('NextAction','Count')))
     [void]$html.Add("</div>")
+    [void]$html.Add("<div class='card'><h2>Latest actionable next action by unique computer</h2>")
+    [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $latestActionableNextActionCounts -Columns @('NextAction','Count')))
+    [void]$html.Add("</div>")
 
-    $detailColumns = @('Cycle','Timestamp','Computer','ConnectionTarget','Status','EffectiveStatus','NextAction','EffectiveNextAction','RemoteStatus','RemoteExitCode','PsExecExitCode','RemoteDetail','RetryAfterRebootAction','RetryAfterRebootDetail','RetryAfterRebootAttempt','RetryAfterRebootMaxAttempts','RetryAfterRebootTaskName','Local log','Collected logs','Current run logs','Remote PC logs','InteractiveUserAccountName','InteractiveUserAccountType','InteractiveSessionName','InteractiveSessionState','UserIsUserAzureAD','UserAzureAdPrt','UserSessionIsNotRemote','ErrorMessage','JobErrorMessage','IntuneInventoryPresent','EntraInventoryPresent','EntraRegisteredState','EntraAlternativeSecurityIdCount','EntraPendingReason','EntraRegistrationDateTime','EntraTrustType','EntraDeviceId','EntraObjectId','ADInventoryPresent','ADDomain','ADEnabled','ADDNSHostName','ADDistinguishedName','ADOperatingSystem','ADLastLogonTimestampUtc','PostCycleIntuneInventoryChecked','PostCycleIntuneInventoryPresent','PostCycleIntuneEnrollmentDetected','PostCycleIntuneInventoryCsv','PostCycleIntuneInventoryError','PostCycleEntraInventoryChecked','PostCycleEntraInventoryPresent','PostCycleEntraRegisteredState','PostCycleEntraAlternativeSecurityIdCount','PostCycleEntraPendingResolved','PostCycleEntraInventoryCsv','PostCycleEntraInventoryError','PostCycleADInventoryChecked','PostCycleADInventoryPresent','PostCycleADInventoryCsv','PostCycleADInventoryError','AdminShareReachable','AdminShareFailureType','PingReachable','DnsResolved','RemoteLogsCollected','RemoteLogsPath','RemoteCurrentRunLogsPath','LogPath')
-    [void]$html.Add("<div class='card'><h2>Computer details</h2>")
+    $detailColumns = @('Cycle','Timestamp','Computer','ConnectionTarget','Status','EffectiveStatus','NextAction','EffectiveNextAction','BackoffStatus','BackoffUntilUtc','BackoffCount','RemoteStatus','RemoteExitCode','PsExecExitCode','RemoteDetail','RetryAfterRebootAction','RetryAfterRebootDetail','RetryAfterRebootAttempt','RetryAfterRebootMaxAttempts','RetryAfterRebootTaskName','Local log','Collected logs','Current run logs','Remote PC logs','InteractiveUserAccountName','InteractiveUserAccountType','InteractiveSessionName','InteractiveSessionState','UserIsUserAzureAD','UserAzureAdPrt','UserSessionIsNotRemote','ErrorMessage','JobErrorMessage','IntuneInventoryPresent','EntraInventoryPresent','EntraRegisteredState','EntraAlternativeSecurityIdCount','EntraPendingReason','EntraRegistrationDateTime','EntraTrustType','EntraDeviceId','EntraObjectId','ADInventoryPresent','ADDomain','ADEnabled','ADDNSHostName','ADDistinguishedName','ADOperatingSystem','ADLastLogonTimestampUtc','PostCycleIntuneInventoryChecked','PostCycleIntuneInventoryPresent','PostCycleIntuneEnrollmentDetected','PostCycleIntuneInventoryCsv','PostCycleIntuneInventoryError','PostCycleEntraInventoryChecked','PostCycleEntraInventoryPresent','PostCycleEntraRegisteredState','PostCycleEntraAlternativeSecurityIdCount','PostCycleEntraPendingResolved','PostCycleEntraInventoryCsv','PostCycleEntraInventoryError','PostCycleADInventoryChecked','PostCycleADInventoryPresent','PostCycleADInventoryCsv','PostCycleADInventoryError','AdminShareReachable','AdminShareFailureType','PingReachable','DnsResolved','RemoteLogsCollected','RemoteLogsPath','RemoteCurrentRunLogsPath','LogPath')
+    [void]$html.Add("<div class='card'><h2>Latest actionable computer details</h2>")
     [void]$html.Add((ConvertTo-SimpleHtmlTable -Rows $mainRows -Columns $detailColumns))
     [void]$html.Add("<div class='footer'>Smart Intune Hybrid Join Toolkit - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div></div>")
     if ($separatedRows.Count -gt 0) {
@@ -2890,6 +2978,49 @@ function Test-GlobalGateProcessAlive {
     }
 }
 
+function Read-GlobalLeaseData {
+    param([Parameter(Mandatory=$true)][string]$Path)
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try { return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop) }
+        catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(1000,100 * $attempt))
+        }
+    }
+    if ($lastError) { throw $lastError }
+    throw ("Failed to read global worker lease: {0}" -f $Path)
+}
+
+function Save-GlobalLeaseData {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)]$Data,
+        [ValidateRange(1,20)][int]$Depth = 4
+    )
+
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $json = $Data | ConvertTo-Json -Depth $Depth
+    $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds ([math]::Min(1000,100 * $attempt))
+        }
+    }
+    Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    if ($lastError) { throw $lastError }
+    throw ("Failed to save global worker lease: {0}" -f $Path)
+}
+
 function Remove-StaleGlobalWorkerLeases {
     param(
         [Parameter(Mandatory=$true)][string]$GatePath,
@@ -2905,7 +3036,7 @@ function Remove-StaleGlobalWorkerLeases {
         $launcherPid = 0
         $workerPid = 0
         try {
-            $data = Get-Content -LiteralPath $lease.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $data = Read-GlobalLeaseData -Path $lease.FullName
             $computerName = [string]$data.Computer
             $launcherPid = if ($data.PSObject.Properties["LauncherProcessId"]) { [int]$data.LauncherProcessId } else { [int]$data.ProcessId }
             $workerPid = if ($data.PSObject.Properties["WorkerProcessId"]) { [int]$data.WorkerProcessId } else { 0 }
@@ -2946,12 +3077,12 @@ function Update-GlobalWorkerLease {
 
     Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock {
         if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
-        $data = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $data = Read-GlobalLeaseData -Path $LeasePath
         foreach ($key in @($Properties.Keys)) {
             $data | Add-Member -NotePropertyName $key -NotePropertyValue $Properties[$key] -Force
         }
         $data | Add-Member -NotePropertyName LastUpdatedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
-        $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeasePath -Encoding UTF8 -Force
+        Save-GlobalLeaseData -Path $LeasePath -Data $data -Depth 4
     }
 }
 
@@ -2976,7 +3107,7 @@ function Acquire-GlobalWorkerLease {
             $leases = @(Get-ChildItem -LiteralPath $globalConcurrencyGatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)
             if ($leases.Count -lt $GlobalConcurrencyLimit) {
                 $path = Join-Path $globalConcurrencyGatePath ("lease_{0}_{1}.json" -f $PID,([guid]::NewGuid().ToString("N")))
-                [PSCustomObject]@{
+                $leaseData = [PSCustomObject]@{
                     LauncherInstanceId = $launcherInstanceId
                     ProcessId = $PID
                     LauncherProcessId = $PID
@@ -2990,7 +3121,8 @@ function Acquire-GlobalWorkerLease {
                     CreatedUtc = (Get-Date).ToUniversalTime().ToString("o")
                     LastUpdatedUtc = (Get-Date).ToUniversalTime().ToString("o")
                     Host = $env:COMPUTERNAME
-                } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $path -Encoding UTF8 -Force
+                }
+                Save-GlobalLeaseData -Path $path -Data $leaseData -Depth 3
                 return $path
             }
             return ""
@@ -3021,8 +3153,27 @@ function Release-GlobalWorkerLease {
     param([AllowNull()][string]$LeasePath)
 
     if (-not [string]::IsNullOrWhiteSpace($LeasePath)) {
-        Remove-Item -LiteralPath $LeasePath -Force -ErrorAction SilentlyContinue
+        Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock { Remove-Item -LiteralPath $LeasePath -Force -ErrorAction SilentlyContinue }
     }
+}
+
+function Stop-LocalPsExecProcessTreeFromLease {
+    param([AllowNull()][string]$LeasePath)
+
+    if ([string]::IsNullOrWhiteSpace($LeasePath) -or -not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return "No active worker lease was available." }
+    try {
+        $leaseData = Invoke-WithGlobalGateMutex -MutexName $globalConcurrencyMutexName -ScriptBlock {
+            if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $null }
+            return (Read-GlobalLeaseData -Path $LeasePath)
+        }
+        $psExecPid = if ($leaseData -and $leaseData.PSObject.Properties["PsExecProcessId"]) { [int]$leaseData.PsExecProcessId } else { 0 }
+        if ($psExecPid -le 0) { return "Worker lease contains no PsExec process id." }
+        if (-not (Test-GlobalGateProcessAlive -ProcessId $psExecPid)) { return ("PsExec process {0} had already exited." -f $psExecPid) }
+        $taskKillOutput = & taskkill.exe /PID $psExecPid /T /F 2>&1
+        $taskKillExitCode = $LASTEXITCODE
+        return ("Local PsExec process tree stop requested. PID={0}; ExitCode={1}; Output={2}" -f $psExecPid,$taskKillExitCode,(@($taskKillOutput) -join " "))
+    }
+    catch { return ("Local PsExec process tree stop failed: {0}" -f $_.Exception.Message) }
 }
 
 function Get-ComputerDnsCandidates {
@@ -3290,6 +3441,33 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
         }
 
+        function Read-WorkerLeaseData {
+            param([Parameter(Mandatory=$true)][string]$Path)
+            $lastError = $null
+            for ($attempt = 1; $attempt -le 5; $attempt++) {
+                try { return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop) }
+                catch { $lastError = $_; Start-Sleep -Milliseconds ([math]::Min(1000,100 * $attempt)) }
+            }
+            if ($lastError) { throw $lastError }
+        }
+
+        function Save-WorkerLeaseData {
+            param([Parameter(Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)]$Data)
+            $parent = Split-Path -Parent $Path
+            $tempPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path),[guid]::NewGuid().ToString("N"))
+            $json = $Data | ConvertTo-Json -Depth 4
+            $lastError = $null
+            for ($attempt = 1; $attempt -le 5; $attempt++) {
+                try {
+                    Set-Content -LiteralPath $tempPath -Value $json -Encoding UTF8 -Force -ErrorAction Stop
+                    Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+                    return
+                }
+                catch { $lastError = $_; Start-Sleep -Milliseconds ([math]::Min(1000,100 * $attempt)) }
+            }
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            if ($lastError) { throw $lastError }
+        }
         function Invoke-WithWorkerLeaseMutex {
             param(
                 [AllowNull()][string]$MutexName,
@@ -3325,14 +3503,14 @@ function Invoke-IntuneHybridJoinRepairCycle {
             try {
                 Invoke-WithWorkerLeaseMutex -MutexName $MutexName -ScriptBlock {
                     if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return }
-                    $data = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    $data = Read-WorkerLeaseData -Path $LeasePath
                     $processName = ""
                     try { $processName = (Get-Process -Id $PID -ErrorAction Stop).ProcessName } catch { }
                     $data | Add-Member -NotePropertyName WorkerProcessId -NotePropertyValue $PID -Force
                     $data | Add-Member -NotePropertyName WorkerProcessName -NotePropertyValue $processName -Force
                     $data | Add-Member -NotePropertyName WorkerStartedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
                     $data | Add-Member -NotePropertyName LastUpdatedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
-                    $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeasePath -Encoding UTF8 -Force
+                    Save-WorkerLeaseData -Path $LeasePath -Data $data
                 }
             }
             catch { }
@@ -3410,6 +3588,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 "AUDIT_INTUNE_MISSING" { return "RUN_REPAIR" }
                 "AUDIT_STALE_INTUNE_ENROLLMENT_LOCAL" { return "CLEAN_STALE_INTUNE_OPTIN" }
                 "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
+                "ENDPOINT_RUN_ACTIVE" { return "WAIT_ACTIVE_ENDPOINT_RUN" }
+                "SKIPPED_BY_STATUS_BACKOFF" { return "WAIT_STATUS_BACKOFF" }
+                "REBOOT_SAFETY_LIMIT_REACHED_POST_DSREG_LEAVE" { return "REVIEW_REBOOT_HISTORY_AND_HYBRID_JOIN" }
                 "ADMIN_SHARE_UNREACHABLE" { return "FIX_ADMIN_SHARE_OR_NETWORK" }
                 "DNS_PREFLIGHT_ALL_SAMPLES_FAILED" { return "CHECK_VPN_DNS_BEFORE_LOT" }
                 "RUN_GUARD_ACTIVE" { return "WAIT_RUN_GUARD" }
@@ -3452,84 +3633,47 @@ function Invoke-IntuneHybridJoinRepairCycle {
                 [Parameter(Mandatory=$true)][string]$RemoteDataPath,
                 [Parameter(Mandatory=$true)][string]$DestinationPath,
                 [Parameter(Mandatory=$true)][string]$ScriptName,
-                [ValidateSet("Standard","Full")][string]$CentralLogCollectionMode = "Standard"
+                [ValidateSet("Standard","Full")][string]$CentralLogCollectionMode = "Standard",
+                [datetime]$Since = [datetime]::MinValue
             )
 
             $copyCount = 0
             $maxFileBytes = 5MB
+            $currentThreshold = $Since.AddSeconds(-5)
 
             function Copy-EvidenceFile {
-                param(
-                    [Parameter(Mandatory=$true)][string]$SourceFile,
-                    [Parameter(Mandatory=$true)][string]$TargetFolder
-                )
+                param([Parameter(Mandatory=$true)][string]$SourceFile,[Parameter(Mandatory=$true)][string]$TargetFolder)
+                try {
+                    if (-not (Test-Path -LiteralPath $TargetFolder)) { [System.IO.Directory]::CreateDirectory($TargetFolder) | Out-Null }
+                    Copy-Item -LiteralPath $SourceFile -Destination $TargetFolder -Force -ErrorAction Stop
+                    return $true
+                }
+                catch { return $false }
+            }
 
-            try {
-                if (-not (Test-Path -LiteralPath $TargetFolder)) {
-                    [System.IO.Directory]::CreateDirectory($TargetFolder) | Out-Null
-                }
-                Copy-Item -LiteralPath $SourceFile -Destination $TargetFolder -Force -ErrorAction Stop
-                return $true
-            }
-                catch [System.Management.Automation.ItemNotFoundException] {
-                    return $false
-                }
-                catch [System.IO.FileNotFoundException] {
-                    return $false
-                }
-            catch [System.IO.DirectoryNotFoundException] {
-                return $false
-            }
-            catch {
-                return $false
-            }
-        }
-
-            foreach ($folderName in @("Logs","Output","Transcripts")) {
+            foreach ($folderName in @("Logs","Output","Transcripts","State")) {
                 $sourceFolder = Join-Path $RemoteDataPath $folderName
-                if (Test-Path -LiteralPath $sourceFolder) {
-                    $targetFolder = Join-Path $DestinationPath $folderName
-                    $files = @(Get-ChildItem -LiteralPath $sourceFolder -Recurse -File -Force -ErrorAction SilentlyContinue)
-                    foreach ($file in $files) {
-                        $relativePath = $file.FullName.Substring($sourceFolder.Length).TrimStart("\")
-                        $relativeDir = Split-Path -Parent $relativePath
-                        if ([string]::IsNullOrWhiteSpace($relativeDir)) {
-                            $fileTargetFolder = $targetFolder
-                        }
-                        else {
-                            $fileTargetFolder = Join-Path $targetFolder $relativeDir
-                        }
-
-                        if ($CentralLogCollectionMode -eq "Standard" -and $file.Length -gt $maxFileBytes) { continue }
-                        if (Copy-EvidenceFile -SourceFile $file.FullName -TargetFolder $fileTargetFolder) {
-                            $copyCount++
-                        }
-                    }
+                if (-not (Test-Path -LiteralPath $sourceFolder)) { continue }
+                foreach ($file in @(Get-ChildItem -LiteralPath $sourceFolder -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+                    if ($CentralLogCollectionMode -eq "Standard" -and ($file.Length -gt $maxFileBytes -or ($file.LastWriteTime -lt $currentThreshold -and -not ($folderName -eq "State" -and $file.Name -in @("EndpointInstance.json","RebootSafety.json","RetryAfterReboot.json"))))) { continue }
+                    $relativePath = $file.FullName.Substring($sourceFolder.Length).TrimStart("\")
+                    $relativeDir = Split-Path -Parent $relativePath
+                    $fileTargetFolder = if ([string]::IsNullOrWhiteSpace($relativeDir)) { Join-Path $DestinationPath $folderName } else { Join-Path (Join-Path $DestinationPath $folderName) $relativeDir }
+                    if (Copy-EvidenceFile -SourceFile $file.FullName -TargetFolder $fileTargetFolder) { $copyCount++ }
                 }
             }
 
-            Get-ChildItem -LiteralPath $RemoteDataPath -File -Force -ErrorAction SilentlyContinue |
-                Where-Object {
-                    $_.Name -ne $ScriptName -and
-                    $_.Extension -in @(".csv",".log",".txt",".html",".json",".xml",".evtx") -and
-                    ($CentralLogCollectionMode -eq "Full" -or $_.Length -le $maxFileBytes)
-                } |
-                ForEach-Object {
-                    if (-not (Test-Path -LiteralPath $DestinationPath)) {
-                        New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
-                    }
-                    if (Copy-EvidenceFile -SourceFile $_.FullName -TargetFolder $DestinationPath) {
-                        $copyCount++
-                    }
-                }
+            foreach ($file in @(Get-ChildItem -LiteralPath $RemoteDataPath -File -Force -ErrorAction SilentlyContinue)) {
+                if ($file.Name -eq $ScriptName -or $file.Extension -notin @(".csv",".log",".txt",".html",".json",".xml",".evtx")) { continue }
+                $isCurrentOrState = ($file.Name -eq "LastRun.json" -or $file.Name -eq "EndpointInstance.json" -or $file.Name -eq "RebootSafety.json" -or $file.LastWriteTime -ge $currentThreshold)
+                if ($CentralLogCollectionMode -eq "Standard" -and ($file.Length -gt $maxFileBytes -or -not $isCurrentOrState)) { continue }
+                if (Copy-EvidenceFile -SourceFile $file.FullName -TargetFolder $DestinationPath) { $copyCount++ }
+            }
 
             if ($copyCount -eq 0) {
-                if (Test-Path -LiteralPath $DestinationPath) {
-                    Remove-Item -LiteralPath $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
-                }
-                throw "No remote evidence files found to collect."
+                Remove-Item -LiteralPath $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
+                throw "No current remote evidence files found to collect."
             }
-
             return $copyCount
         }
 
@@ -4034,6 +4178,18 @@ function Invoke-IntuneHybridJoinRepairCycle {
             $stdoutPath = Join-Path $LogRoot ("{0}_cycle{1}_{2}_stdout.tmp" -f $safeComputerName,$CycleNumber,$runId)
             $stderrPath = Join-Path $LogRoot ("{0}_cycle{1}_{2}_stderr.tmp" -f $safeComputerName,$CycleNumber,$runId)
             $process = Start-Process -FilePath $PsExecPath -ArgumentList $argsList -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+            try {
+                Invoke-WithWorkerLeaseMutex -MutexName $GlobalWorkerLeaseMutexName -ScriptBlock {
+                    if (Test-Path -LiteralPath $GlobalWorkerLeasePath -PathType Leaf) {
+                        $leaseData = Read-WorkerLeaseData -Path $GlobalWorkerLeasePath
+                        $leaseData | Add-Member -NotePropertyName PsExecProcessId -NotePropertyValue ([int]$process.Id) -Force
+                        $leaseData | Add-Member -NotePropertyName PsExecStartedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
+                        $leaseData | Add-Member -NotePropertyName LastUpdatedUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
+                        Save-WorkerLeaseData -Path $GlobalWorkerLeasePath -Data $leaseData
+                    }
+                }
+            }
+            catch { "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: PsExec PID could not be written to the worker lease: $($_.Exception.Message)" | Add-Content -LiteralPath $logPath -Encoding UTF8 }
             $psExecTimedOut = $false
             if ($PsExecTimeoutMinutes -gt 0) {
                 $timeoutMs = [int64]$PsExecTimeoutMinutes * 60 * 1000
@@ -4195,69 +4351,19 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
                     $centralStatus = ([string]$result.Status).ToUpperInvariant()
                     $centralBucket = if ($centralStatus -in @("SUCCESS","AUDIT_SUCCESS_ALREADY_INTUNE","ENROLLED_DETECTED_POST_CYCLE")) { "Success" } elseif ($centralStatus -like "ADMIN_SHARE*") { "AdminShareFailure" } elseif ($centralStatus -like "PSEXEC_*" -or $centralStatus -like "REMOTE_*" -or $centralStatus -like "DNS_*") { "RemoteCollectionFailure" } else { "Errors" }
+                    if (-not $KeepCentralLogHistory) {
+                        foreach ($bucketName in @("Success","Errors","AdminShareFailure","RemoteCollectionFailure")) {
+                            $staleComputerDir = Join-Path (Join-Path $CentralLogRoot $bucketName) $safeComputerName
+                            Remove-Item -LiteralPath $staleComputerDir -Recurse -Force -ErrorAction SilentlyContinue
+                        }
+                    }
                     $centralComputerDir = Join-Path (Join-Path $CentralLogRoot $centralBucket) $safeComputerName
                     $centralRunDir = if ($KeepCentralLogHistory) { Join-Path $centralComputerDir ("cycle{0}_{1}" -f $CycleNumber,$runId) } else { Join-Path $centralComputerDir "Latest" }
-
-                    if ((-not $KeepCentralLogHistory) -and (Test-Path -LiteralPath $centralRunDir)) {
-                        Remove-Item -LiteralPath $centralRunDir -Recurse -Force -ErrorAction Stop
-                    }
-
-                    $copiedEvidenceFiles = Copy-RemoteEvidenceFolder -RemoteDataPath $remoteDataAdminDir -DestinationPath $centralRunDir -ScriptName $ScriptName -CentralLogCollectionMode $CentralLogCollectionMode
+                    $copiedEvidenceFiles = Copy-RemoteEvidenceFolder -RemoteDataPath $remoteDataAdminDir -DestinationPath $centralRunDir -ScriptName $ScriptName -CentralLogCollectionMode $CentralLogCollectionMode -Since ([datetime]$result.Timestamp)
                     $result.RemoteLogsCollected = $true
                     $result.RemoteLogsPath = $centralRunDir
-                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote evidence collected to: $centralRunDir. Files=$copiedEvidenceFiles" | Add-Content -LiteralPath $logPath -Encoding UTF8
-
-                    $currentRunDir = Join-Path $centralComputerDir "LatestCurrentRun"
-                    Remove-Item -LiteralPath $currentRunDir -Recurse -Force -ErrorAction SilentlyContinue
-                    $currentRunId = ""
-                    if ($null -ne $polledRemoteFinalStatus -and -not [string]::IsNullOrWhiteSpace([string]$polledRemoteFinalStatus.RunId)) {
-                        $currentRunId = ([string]$polledRemoteFinalStatus.RunId).Trim()
-                    }
-
-                    $allCollectedFiles = @(Get-ChildItem -LiteralPath $centralRunDir -Recurse -File -Force -ErrorAction SilentlyContinue)
-                    if (-not [string]::IsNullOrWhiteSpace($currentRunId)) {
-                        $currentRunFiles = @(
-                            $allCollectedFiles |
-                                Where-Object {
-                                    $_.Name -eq "LastRun.json" -or
-                                    $_.Name -like "*$currentRunId*" -or
-                                    ($_.Name -like "IntuneHybridJoinToolkit_*.csv" -and $_.LastWriteTime -ge ([datetime]$result.Timestamp).AddSeconds(-5))
-                                }
-                        )
-                    }
-                    else {
-                        $currentRunFiles = @(
-                            $allCollectedFiles |
-                                Where-Object { $_.LastWriteTime -ge ([datetime]$result.Timestamp).AddSeconds(-5) }
-                        )
-                    }
-
-                    $currentRunCopied = 0
-                    $currentRunCopyFailures = 0
-                    foreach ($file in $currentRunFiles) {
-                        $relativePath = $file.FullName.Substring($centralRunDir.Length).TrimStart("\")
-                        $targetPath = Join-Path $currentRunDir $relativePath
-                        $targetFolder = Split-Path -Parent $targetPath
-                        try {
-                            if (-not (Test-Path -LiteralPath $targetFolder)) {
-                                [System.IO.Directory]::CreateDirectory($targetFolder) | Out-Null
-                            }
-                            Copy-Item -LiteralPath $file.FullName -Destination $targetPath -Force -ErrorAction Stop
-                            $currentRunCopied++
-                        }
-                        catch {
-                            $currentRunCopyFailures++
-                            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: LatestCurrentRun copy skipped for '$($file.FullName)': $($_.Exception.Message)" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                        }
-                    }
-                    if ($currentRunCopied -gt 0) {
-                        $result.RemoteCurrentRunLogsPath = $currentRunDir
-                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Current-run remote evidence isolated to: $currentRunDir. Files=$currentRunCopied; Skipped=$currentRunCopyFailures; RunId=$currentRunId" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                    }
-                    elseif ($currentRunFiles.Count -gt 0) {
-                        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] WARN: Current-run evidence was identified but no files could be copied to LatestCurrentRun. Skipped=$currentRunCopyFailures; RunId=$currentRunId" | Add-Content -LiteralPath $logPath -Encoding UTF8
-                    }
-
+                    $result.RemoteCurrentRunLogsPath = $centralRunDir
+                    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Remote evidence collected to: $centralRunDir. Files=$copiedEvidenceFiles; Mode=$CentralLogCollectionMode; CurrentRunPath=$centralRunDir" | Add-Content -LiteralPath $logPath -Encoding UTF8
                     $completedEvidenceStatus = Get-RemoteEvidenceFinalStatus -EvidencePath $centralRunDir -Since ([datetime]$result.Timestamp) -RequireCompletedRun
                     if ($null -ne $completedEvidenceStatus -and -not [string]::IsNullOrWhiteSpace($completedEvidenceStatus.Status)) {
                         $result.InteractiveUserName = $completedEvidenceStatus.InteractiveUserName
@@ -4353,6 +4459,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     if (-not $forcedCancelledJobIds.ContainsKey($runningJobId)) {
                         $forcedCancelledJobIds[$runningJobId] = $true
                         Write-Host ("Forcing local worker stop for {0}. The remote endpoint may already be running and must be verified before relaunch." -f ($runningJob.Name -replace '^EHJIR_C\d+_','')) -ForegroundColor Red
+                        $leaseForForcedJob = if ($globalLeaseByJobId.ContainsKey($runningJobId)) { [string]$globalLeaseByJobId[$runningJobId] } else { "" }
+                        $processTreeStopDetail = Stop-LocalPsExecProcessTreeFromLease -LeasePath $leaseForForcedJob
+                        Write-Host ("Forced local process cleanup for {0}: {1}" -f ($runningJob.Name -replace '^EHJIR_C\d+_',''),$processTreeStopDetail) -ForegroundColor Red
                     }
                     Stop-Job -Job $runningJob -ErrorAction SilentlyContinue
                 }
@@ -4498,12 +4607,12 @@ function Invoke-IntuneHybridJoinRepairCycle {
                             $childJobs[0].JobStateInfo.Reason.Message
                         }
                         if ($brokenRunspace) {
-                            "RUNSPACE_BROKEN: PowerShell job runspace entered a Broken state. This typically indicates PowerShell 5.1 instability under parallel load. Consider adding -DelayBetweenComputersSeconds 1 to reduce job cycling speed."
+                            "RUNSPACE_BROKEN: PowerShell job runspace entered a Broken state. Engine=$($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion). This indicates parallel runspace instability; consider adding -DelayBetweenComputersSeconds 1 to reduce job cycling speed."
                         }
                     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
                 )
                 if ($brokenRunspace) {
-                    Write-Host ("  [RUNSPACE_BROKEN] {0}: job runspace entered Broken state - possible PowerShell 5.1 instability. Consider -DelayBetweenComputersSeconds 1." -f ($job.Name -replace "^EHJIR_C\d+_","")) -ForegroundColor Magenta
+                    Write-Host ("  [RUNSPACE_BROKEN] {0}: job runspace entered Broken state under {1} {2}. Consider -DelayBetweenComputersSeconds 1." -f ($job.Name -replace "^EHJIR_C\d+_",""),$PSVersionTable.PSEdition,$PSVersionTable.PSVersion) -ForegroundColor Magenta
                 }
             }
             catch {
@@ -4511,11 +4620,33 @@ function Invoke-IntuneHybridJoinRepairCycle {
             }
 
             if (-not $received) {
-            $forcedCancellation = $forcedCancelledJobIds.ContainsKey([string]$job.Id)
+                $forcedCancellation = $forcedCancelledJobIds.ContainsKey([string]$job.Id)
+                $forcedComputer = ($job.Name -replace "^EHJIR_C\d+_","")
+                $forcedEvidence = $null
+                $forcedRemoteDataPath = ""
+                if ($forcedCancellation) {
+                    try {
+                        $forcedTarget = (Resolve-ComputerConnectionTarget -ComputerName $forcedComputer -DomainSuffix $AdDomain).ConnectionTarget
+                        $forcedRemoteDataPath = "\\$forcedTarget\C$\$RemoteDataRelativeDir"
+                        $forcedSince = if ($jobStartedAtById.ContainsKey([string]$job.Id)) { [datetime]$jobStartedAtById[[string]$job.Id] } else { (Get-Date).AddMinutes(-5) }
+                        for ($evidenceAttempt = 1; $evidenceAttempt -le 3; $evidenceAttempt++) {
+                            if (Test-Path -LiteralPath $forcedRemoteDataPath -ErrorAction SilentlyContinue) {
+                                $forcedEvidence = Get-RemoteEvidenceFinalStatus -EvidencePath $forcedRemoteDataPath -Since $forcedSince -RequireCompletedRun
+                            }
+                            if ($forcedEvidence -and -not [string]::IsNullOrWhiteSpace([string]$forcedEvidence.Status)) { break }
+                            if ($evidenceAttempt -lt 3) { Start-Sleep -Seconds 5 }
+                        }
+                    }
+                    catch { $jobErrors += ("Forced-stop evidence recheck failed: {0}" -f $_.Exception.Message) }
+                }
+                $forcedEvidenceFound = ($forcedEvidence -and -not [string]::IsNullOrWhiteSpace([string]$forcedEvidence.Status))
+                $forcedStatus = if ($forcedEvidenceFound) { [string]$forcedEvidence.Status } elseif ($forcedCancellation) { "CANCELLED_BY_OPERATOR_REMOTE_STATE_UNCONFIRMED" } else { "JOB_ERROR" }
+                $forcedNextAction = if ($forcedEvidenceFound -and -not [string]::IsNullOrWhiteSpace([string]$forcedEvidence.NextAction)) { [string]$forcedEvidence.NextAction } elseif ($forcedCancellation) { "VERIFY_REMOTE_STATE_BEFORE_RELAUNCH" } else { "CHECK_JOB_ERROR" }
+                $forcedDetail = if ($forcedEvidenceFound) { "Forced local worker stop reclassified from completed current-run endpoint evidence. " + [string]$forcedEvidence.Detail } elseif ($forcedCancellation) { "The operator forced the local PsExec process tree and worker to stop. No completed current-run endpoint evidence was found after three bounded checks." } else { "" }
                 $received = [PSCustomObject]@{
                     LauncherVersion = $LauncherVersion
                     Cycle = $CycleNumber
-                    Computer = ($job.Name -replace "^EHJIR_C\d+_","")
+                    Computer = $forcedComputer
                     Timestamp = Get-Date
                     DryRun = [bool]$DryRun
                     DnsResolved = $false
@@ -4526,27 +4657,27 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     RemoteDirectoryCreated = $false
                     ScriptCopied = $false
                     PsExecExitCode = ""
-                    RemoteStatus = ""
-                    RemoteExitCode = ""
-                    RemoteNextAction = if ($forcedCancellation) { "VERIFY_REMOTE_STATE_BEFORE_RELAUNCH" } else { "" }
-                    RemoteDetail = if ($forcedCancellation) { "The operator forced the local worker to stop. The remote endpoint may already be running; verify target evidence before relaunch." } else { "" }
-                    NextAction = if ($forcedCancellation) { "VERIFY_REMOTE_STATE_BEFORE_RELAUNCH" } else { "CHECK_JOB_ERROR" }
-                    EffectiveStatus = if ($forcedCancellation) { "CANCELLED_BY_OPERATOR" } else { "" }
-                    EffectiveNextAction = if ($forcedCancellation) { "VERIFY_REMOTE_STATE_BEFORE_RELAUNCH" } else { "" }
-                    InteractiveUserName = ""
-                    InteractiveUserDomain = ""
-                    InteractiveUserAccountName = ""
-                    InteractiveUserAccountType = ""
-                    InteractiveSessionName = ""
-                    InteractiveSessionState = ""
-                    UserIsUserAzureAD = ""
-                    UserAzureAdPrt = ""
-                    UserSessionIsNotRemote = ""
-                    RetryAfterRebootAction = ""
-                    RetryAfterRebootDetail = ""
-                    RetryAfterRebootAttempt = ""
-                    RetryAfterRebootMaxAttempts = ""
-                    RetryAfterRebootTaskName = ""
+                    RemoteStatus = if ($forcedEvidenceFound) { [string]$forcedEvidence.Status } else { "" }
+                    RemoteExitCode = if ($forcedEvidenceFound) { [string]$forcedEvidence.ExitCode } else { "" }
+                    RemoteNextAction = if ($forcedEvidenceFound) { [string]$forcedEvidence.NextAction } else { $forcedNextAction }
+                    RemoteDetail = $forcedDetail
+                    NextAction = $forcedNextAction
+                    EffectiveStatus = $forcedStatus
+                    EffectiveNextAction = $forcedNextAction
+                    InteractiveUserName = if ($forcedEvidenceFound) { [string]$forcedEvidence.InteractiveUserName } else { "" }
+                    InteractiveUserDomain = if ($forcedEvidenceFound) { [string]$forcedEvidence.InteractiveUserDomain } else { "" }
+                    InteractiveUserAccountName = if ($forcedEvidenceFound) { [string]$forcedEvidence.InteractiveUserAccountName } else { "" }
+                    InteractiveUserAccountType = if ($forcedEvidenceFound) { [string]$forcedEvidence.InteractiveUserAccountType } else { "" }
+                    InteractiveSessionName = if ($forcedEvidenceFound) { [string]$forcedEvidence.InteractiveSessionName } else { "" }
+                    InteractiveSessionState = if ($forcedEvidenceFound) { [string]$forcedEvidence.InteractiveSessionState } else { "" }
+                    UserIsUserAzureAD = if ($forcedEvidenceFound) { [string]$forcedEvidence.UserIsUserAzureAD } else { "" }
+                    UserAzureAdPrt = if ($forcedEvidenceFound) { [string]$forcedEvidence.UserAzureAdPrt } else { "" }
+                    UserSessionIsNotRemote = if ($forcedEvidenceFound) { [string]$forcedEvidence.UserSessionIsNotRemote } else { "" }
+                    RetryAfterRebootAction = if ($forcedEvidenceFound) { [string]$forcedEvidence.RetryAfterRebootAction } else { "" }
+                    RetryAfterRebootDetail = if ($forcedEvidenceFound) { [string]$forcedEvidence.RetryAfterRebootDetail } else { "" }
+                    RetryAfterRebootAttempt = if ($forcedEvidenceFound) { [string]$forcedEvidence.RetryAfterRebootAttempt } else { "" }
+                    RetryAfterRebootMaxAttempts = if ($forcedEvidenceFound) { [string]$forcedEvidence.RetryAfterRebootMaxAttempts } else { "" }
+                    RetryAfterRebootTaskName = if ($forcedEvidenceFound) { [string]$forcedEvidence.RetryAfterRebootTaskName } else { "" }
                     IntuneInventoryPresent = ""
                     EntraInventoryPresent = ""
                     EntraRegisteredState = ""
@@ -4582,11 +4713,11 @@ function Invoke-IntuneHybridJoinRepairCycle {
                     PostCycleADInventoryError = ""
                     RemoteLogsCollected = $false
                     RemoteLogsPath = ""
-                    RemoteCurrentRunLogsPath = ""
+                    RemoteCurrentRunLogsPath = if ($forcedEvidenceFound) { $forcedRemoteDataPath } else { "" }
                     RemoteLogsError = ""
-                    Status = if ($forcedCancellation) { "CANCELLED_BY_OPERATOR" } else { "JOB_ERROR" }
+                    Status = $forcedStatus
                     LogPath = $script:LauncherLogPath
-                    ErrorMessage = if ($forcedCancellation) { "" } else { ($jobErrors -join " | ") }
+                    ErrorMessage = if ($forcedEvidenceFound) { $forcedDetail } else { ($jobErrors -join " | ") }
                 }
             }
 
@@ -4662,7 +4793,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
 
         $finishedIds = @($finishedJobs | Select-Object -ExpandProperty Id)
         $runningJobs = @($runningJobs | Where-Object { $finishedIds -notcontains $_.Id })
-        if (((Get-Date) - $lastLiveHtmlWrite).TotalSeconds -ge 3) {
+        if (((Get-Date) - $lastLiveHtmlWrite).TotalSeconds -ge 60) {
             try {
                 $liveRows = @($summary | ForEach-Object { $_ })
                 $cycleProgress = New-HybridJoinCycleProgressRows -CycleNumber $CycleNumber -CycleStart $cycleStart -TotalComputers $computers.Count -QueuedComputers $nextIndex -CompletedComputers $completed -RunningComputers $runningJobs.Count -ComputerListStats $computerListStats
@@ -4679,12 +4810,16 @@ function Invoke-IntuneHybridJoinRepairCycle {
     }
 
     $summaryRowsForPostCycle = @($summary | ForEach-Object { $_ })
+    $cycleCouldChangeCloudInventory = @($summaryRowsForPostCycle | Where-Object { [string]$_.Status -notmatch "^(ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_DIRECTORY_CREATE_FAILED|REMOTE_SCRIPT_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_)" }).Count -gt 0
+    if (-not $cycleCouldChangeCloudInventory) {
+        Write-Host ("Cycle {0}: post-cycle Graph refresh skipped because no result could have changed Intune or Entra inventory." -f $CycleNumber) -ForegroundColor DarkGray
+    }
     $postCycleScopePath = Join-Path $ReportRoot ("Devices_Cycle{0}_InventoryScope.txt" -f $CycleNumber)
     if (-not $DryRun) {
         $computers | Set-Content -LiteralPath $postCycleScopePath -Encoding ASCII
     }
 
-    if (-not $DryRun -and -not $SkipPostCycleIntuneInventory -and -not (Get-LotCancellationState).Requested) {
+    if (-not $DryRun -and -not $SkipPostCycleIntuneInventory -and $cycleCouldChangeCloudInventory -and -not (Get-LotCancellationState).Requested) {
         Write-Host ("Cycle {0}: refreshing LOT-scoped post-cycle Intune inventory..." -f $CycleNumber) -ForegroundColor Cyan
         $postInventoryStamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $postInventoryOutputPath = Join-Path $ReportRoot ("DevicesIntune_Cycle{0}Refresh_{1}.csv" -f $CycleNumber,$postInventoryStamp)
@@ -4747,7 +4882,7 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
     }
 
-    if (-not $DryRun -and -not [string]::IsNullOrWhiteSpace($EntraInventoryCsv) -and -not (Get-LotCancellationState).Requested) {
+    if (-not $DryRun -and -not [string]::IsNullOrWhiteSpace($EntraInventoryCsv) -and $cycleCouldChangeCloudInventory -and -not (Get-LotCancellationState).Requested) {
         Write-Host ("Cycle {0}: refreshing LOT-scoped post-cycle Entra device inventory..." -f $CycleNumber) -ForegroundColor Cyan
         $postEntraInventoryStamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $postEntraInventoryOutputPath = Join-Path $ReportRoot ("DevicesEntra_Cycle{0}Refresh_{1}.csv" -f $CycleNumber,$postEntraInventoryStamp)
@@ -4883,6 +5018,9 @@ function Invoke-IntuneHybridJoinRepairCycle {
         }
     }
 
+    $latestMetadataRows = @($script:AllCycleResults.ToArray()) + @($summaryRowsForPostCycle)
+    Set-HybridJoinLatestStatusMetadata -Rows $latestMetadataRows
+    Get-PortableReportRows -Rows $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $liveSummaryPath -NoTypeInformation -Encoding UTF8
     $summaryPath = Join-Path $ReportRoot ("PsExec_IntuneHybridJoinRepair_Summary_cycle{0}_{1}.csv" -f $CycleNumber,(Get-Date -Format "yyyyMMdd_HHmmss"))
     Get-PortableReportRows -Rows $summaryRowsForPostCycle | Select-Object $reportColumns | Export-Csv -LiteralPath $summaryPath -NoTypeInformation -Encoding UTF8
 
@@ -4911,26 +5049,30 @@ function Invoke-IntuneHybridJoinRepairCycle {
     if ($IntuneInventorySet -and $IntuneInventorySet.Count -gt 0) {
         $present = @($summary | Where-Object { $_.IntuneInventoryPresent -eq $true }).Count
         $absent = @($summary | Where-Object { $_.IntuneInventoryPresent -eq $false }).Count
-        Write-Host ("Cycle {0} Intune inventory match: Present={1}; Absent={2}" -f $CycleNumber,$present,$absent) -ForegroundColor Cyan
+        $notChecked = [math]::Max(0,$summary.Count - $present - $absent)
+        Write-Host ("Cycle {0} Intune inventory match: Present={1}; Absent={2}; NotChecked={3}" -f $CycleNumber,$present,$absent,$notChecked) -ForegroundColor Cyan
     }
 
     if ($AdInventoryMap -and $AdInventoryMap.Count -gt 0) {
         $present = @($summary | Where-Object { $_.ADInventoryPresent -eq $true }).Count
         $absent = @($summary | Where-Object { $_.ADInventoryPresent -eq $false }).Count
-        Write-Host ("Cycle {0} AD inventory match: Present={1}; Absent={2}" -f $CycleNumber,$present,$absent) -ForegroundColor Cyan
+        $notChecked = [math]::Max(0,$summary.Count - $present - $absent)
+        Write-Host ("Cycle {0} AD inventory match: Present={1}; Absent={2}; NotChecked={3}" -f $CycleNumber,$present,$absent,$notChecked) -ForegroundColor Cyan
     }
 
     if (@($summaryRowsForPostCycle | Where-Object { $_.PSObject.Properties["PostCycleIntuneInventoryChecked"] -and $_.PostCycleIntuneInventoryChecked -eq $true }).Count -gt 0) {
         $postPresent = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleIntuneInventoryPresent -eq $true }).Count
         $postAbsent = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleIntuneInventoryPresent -eq $false }).Count
+        $postNotChecked = [math]::Max(0,$summaryRowsForPostCycle.Count - $postPresent - $postAbsent)
         $postNew = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleIntuneEnrollmentDetected -eq $true }).Count
-        Write-Host ("Cycle {0} post-cycle Intune inventory: Present={1}; Absent={2}; NewlyDetected={3}" -f $CycleNumber,$postPresent,$postAbsent,$postNew) -ForegroundColor Cyan
+        Write-Host ("Cycle {0} post-cycle Intune inventory: Present={1}; Absent={2}; NotChecked={3}; NewlyDetected={4}" -f $CycleNumber,$postPresent,$postAbsent,$postNotChecked,$postNew) -ForegroundColor Cyan
     }
 
     if (@($summaryRowsForPostCycle | Where-Object { $_.PSObject.Properties["PostCycleADInventoryChecked"] -and $_.PostCycleADInventoryChecked -eq $true }).Count -gt 0) {
         $postPresent = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleADInventoryPresent -eq $true }).Count
         $postAbsent = @($summaryRowsForPostCycle | Where-Object { $_.PostCycleADInventoryPresent -eq $false }).Count
-        Write-Host ("Cycle {0} post-cycle AD inventory: Present={1}; Absent={2}" -f $CycleNumber,$postPresent,$postAbsent) -ForegroundColor Cyan
+        $postNotChecked = [math]::Max(0,$summaryRowsForPostCycle.Count - $postPresent - $postAbsent)
+        Write-Host ("Cycle {0} post-cycle AD inventory: Present={1}; Absent={2}; NotChecked={3}" -f $CycleNumber,$postPresent,$postAbsent,$postNotChecked) -ForegroundColor Cyan
     }
 
     Write-Host ("Cycle {0} merged HTML report: {1}" -f $CycleNumber,$script:MergedHtmlReportPath) -ForegroundColor Green
