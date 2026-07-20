@@ -136,7 +136,69 @@ try {
     Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*incomplete and will not be trusted*' }).Count 1 'Incomplete manifest warning'
     Assert-Equal @($script:TestLogs | Where-Object { $_ -like '*excess rows detected: 1*' }).Count 1 'Excess row warning'
 
-    Write-Host 'PASS: incomplete cache manifest was discarded; contaminated app rejected; valid app reused.' -ForegroundColor Green
+    $script:TestLogs.Clear()
+    $trustedCachePath = Join-Path $testRoot 'trusted-cache.csv'
+    $trustedPartialPath = Join-Path $testRoot 'trusted-partial.csv'
+    @(
+        [pscustomobject]@{ TenantKey = 'tenant-test'; AppId = 'app-stale'; DeviceId = 'device-1' }
+        [pscustomobject]@{ TenantKey = 'tenant-test'; AppId = 'app-stale'; DeviceId = 'device-2' }
+        [pscustomobject]@{ TenantKey = 'tenant-test'; AppId = 'app-current'; DeviceId = 'device-3' }
+    ) | Export-Csv -LiteralPath $trustedCachePath -NoTypeInformation -Encoding UTF8
+
+    $trustedCacheItem = Get-Item -LiteralPath $trustedCachePath
+    $trustedManifestPath = Get-DiscoveredAppsDeviceDetailCacheManifestPath -CsvPath $trustedCachePath
+    [ordered]@{
+        CacheManifestVersion = 3
+        SourceCsvLength      = [int64]$trustedCacheItem.Length
+        AppCount             = 2
+        TotalRows            = 3
+        TotalDeviceRows      = 3
+        Stats                = @(
+            [pscustomobject]@{
+                AppId = 'app-stale'; AppName = 'Stale'; AppVersion = '1.0'
+                Publisher = 'Publisher'; Platform = 'windows'; Rows = 2; DeviceRows = 2
+                MetadataOk = $true; EnrichmentOk = $true
+            }
+            [pscustomobject]@{
+                AppId = 'app-current'; AppName = 'Current'; AppVersion = '1.0'
+                Publisher = 'Publisher'; Platform = 'windows'; Rows = 1; DeviceRows = 1
+                MetadataOk = $true; EnrichmentOk = $true
+            }
+        )
+    } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $trustedManifestPath -Encoding UTF8
+
+    $trustedTargetApps = @(
+        [pscustomobject]@{
+            id = 'app-stale'; displayName = 'Stale'; version = '1.0'
+            publisher = 'Publisher'; platform = 'windows'; deviceCount = 1
+        }
+        [pscustomobject]@{
+            id = 'app-current'; displayName = 'Current'; version = '1.0'
+            publisher = 'Publisher'; platform = 'windows'; deviceCount = 1
+        }
+    )
+    $trustedProcessed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $trustedCached = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $trustedActualCounts = @{}
+
+    $trustedResult = Use-DiscoveredAppsDeviceDetailCache `
+        -CachePath $trustedCachePath `
+        -TargetApps $trustedTargetApps `
+        -PartialPath $trustedPartialPath `
+        -ProcessedAppIds $trustedProcessed `
+        -CachedAppIds $trustedCached `
+        -ActualDeviceCountsByAppId $trustedActualCounts `
+        -MaxAgeDays 7
+
+    Assert-Equal $trustedResult.Used $true 'Trusted cache Used'
+    Assert-Equal $trustedResult.ManifestUsed $true 'Trusted ManifestUsed'
+    Assert-Equal $trustedResult.Apps 1 'Trusted reusable apps'
+    Assert-Equal $trustedResult.Rows 1 'Trusted reused rows'
+    Assert-Equal $trustedResult.RejectedApps 1 'Trusted refresh apps'
+    Assert-Equal $trustedResult.ExcessRows 1 'Trusted excess rows'
+    Assert-Equal @($script:TestLogs | Where-Object { $_ -like 'INFO|App-device relation cache refresh required for 1 app(s)*' }).Count 1 'Trusted refresh info'
+    Assert-Equal @($script:TestLogs | Where-Object { $_ -like 'WARNING|*cache validation rejected*' }).Count 0 'Trusted refresh warnings'
+    Write-Host 'PASS: untrusted cache defects remain warnings; trusted manifest drift is logged as information.' -ForegroundColor Green
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {

@@ -28,10 +28,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.23
+    Version : 1.24
 
 .VERSION
-1.23
+1.24
 
 
 .REQUIREMENTS
@@ -42,7 +42,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.23
+    Version : 1.24
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -301,7 +301,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.23"
+$ScriptVersion = "1.24"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -1082,7 +1082,12 @@ function Use-DiscoveredAppsDeviceDetailCache {
     }
 
     if ($result.RejectedApps -gt 0) {
-        WriteLog -Message ("App-device relation cache validation rejected {0} app(s), covering {1} cached relation row(s); excess rows detected: {2}. Rejected apps will be recollected from Graph." -f $result.RejectedApps, $result.RejectedRows, $result.ExcessRows) 'WARNING'
+        if ($result.ManifestUsed) {
+            WriteLog -Message ("App-device relation cache refresh required for {0} app(s), covering {1} cached relation row(s); current app metadata/device counts changed, including {2} excess cached row(s). These apps will be recollected from Graph." -f $result.RejectedApps, $result.RejectedRows, $result.ExcessRows) 'INFO'
+        }
+        else {
+            WriteLog -Message ("App-device relation cache validation rejected {0} app(s), covering {1} cached relation row(s); excess rows detected: {2}. Rejected apps will be recollected from Graph." -f $result.RejectedApps, $result.RejectedRows, $result.ExcessRows) 'WARNING'
+        }
     }
 
     if ($cacheable.Count -eq 0) {
