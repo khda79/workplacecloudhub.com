@@ -46,6 +46,7 @@
     "Intune_Devices_LocalSystem.csv",
     "Intune_Devices_UpgradeEligibility.csv",
     "Intune_Devices_Win11Readiness.csv",
+    "Intune_DiscoveredApps_AppDeviceRelations.csv",
     "Intune_DiscoveredApps_Summary.csv",
     "Intune_EndpointAnalytics_AppReliability.csv",
     "Intune_EndpointAnalytics_DataQuality.csv",
@@ -101,6 +102,14 @@
     "M365_Users_Activity.csv"
   ],
   "schemaOverrides": {
+    "Intune_DiscoveredApps_AppDeviceRelations.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "AppId",
+        "DeviceId"
+      ]
+    },
     "M365_Licenses_UserServicePlanStates.csv": {
       "delimiter": ",",
       "columns": [
