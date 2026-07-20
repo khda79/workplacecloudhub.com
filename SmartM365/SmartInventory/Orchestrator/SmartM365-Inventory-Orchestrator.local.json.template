@@ -29,8 +29,13 @@
   "PeerAlertMailRetryMinutes": 15,
   "PeerRecoveryEmailEnabled": true,
   "MaxConcurrency": 2,
-  "MaxConcurrencyByServer": {},
+  "MaxConcurrencyByServer": {
+    "CPPV-CAPTSE-001": 2,
+    "CPPV-CAPTSE-002": 3,
+    "CPPV-EXCSRV-113": 2
+  },
   "MaxLifetimeHours": 24,
+  "AtomicWriteRetrySeconds": 30,
   "CentralConfigurationEnabled": true,
   "AutoRecycleOnRuntimeUpdate": true,
   "RuntimeUpdateCheckIntervalSeconds": 60,

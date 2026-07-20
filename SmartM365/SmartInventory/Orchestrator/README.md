@@ -82,6 +82,8 @@ The monitor first validates access to the shared orchestrator root. A storage-ac
 
 When the heartbeat is healthy and `PeerJobMonitoringEnabled` is true, the monitor reads the peer state and compares enabled jobs assigned to that server with their latest expected occurrence. Running jobs, pending retries and valid dependency waits are not reported as missing. Disabled/manual jobs are excluded. Server-health alerts and job-schedule alerts are sent separately. Each stable server/job issue has its own reminder timestamp, so a changing queue does not resend every previously reported issue. A recovery email follows consecutive healthy checks.
 
+The heartbeat also publishes the health of the per-server state persistence. If a temporary SMB lock survives all configured retries, the resident process stays alive and continues supervision, heartbeat and peer monitoring, but pauses new launches until the state file can be written again. Healthy peers report this as a separate `StatePersistenceUnavailable` server-health issue.
+
 Recommended production values for the three-server deployment:
 
 ```json
@@ -94,7 +96,13 @@ Recommended production values for the three-server deployment:
 "PeerJobStartGraceMinutes": 15,
 "PeerAlertReminderMinutes": 240,
 "PeerAlertMailRetryMinutes": 15,
-"PeerRecoveryEmailEnabled": true
+"PeerRecoveryEmailEnabled": true,
+"MaxConcurrencyByServer": {
+  "CPPV-CAPTSE-001": 2,
+  "CPPV-CAPTSE-002": 3,
+  "CPPV-EXCSRV-113": 2
+},
+"AtomicWriteRetrySeconds": 30
 ```
 
 Each healthy server sends its own peer alert. Consequently, if one server is down in a three-server deployment, both surviving servers send an independently sourced alert.
@@ -183,7 +191,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 
 ### Concurrency, queueing, dependencies, overlap
 
-- Global `MaxConcurrency` (default 2), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost) and start as soon as a slot frees. Re-adopted jobs count toward the limit.
+- Global `MaxConcurrency` (default 2), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost) and start as soon as a slot frees. Re-adopted jobs count toward the limit. The production template sets `CPPV-CAPTSE-001=2`, `CPPV-CAPTSE-002=3` and `CPPV-EXCSRV-113=2`; this local map must be present on all three servers.
 - `DependsOn`: jobs due at the same occurrence run chained in topological order (the manifest is rejected at load time on a cycle). A dependent waits while a parent is running, due, or pending a retry. If a parent with `ContinueOnError=false` finally fails, dependents due at the same occurrence are marked `BlockedDependencyFailed`. If a dependency wait exceeds `DependencyWaitTimeoutMinutes`, the occurrence is marked `BlockedDependencyTimeout`.
 - Overlap guards:
   - Global lock file: two orchestrator instances never run at the same time for the same tenant; a stale lock (dead PID) is recovered with a warning (exit code 3 when a live instance holds the lock).
@@ -191,7 +199,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 
 ### Supervision, timeout, retries
 
-- Each tick checks running children: exit code and duration are captured on exit; `TimeoutMinutes` triggers a full process-tree kill (`taskkill /T /F`). `TimeoutMinutes` may exceed 1440 for jobs longer than 24 hours. The committed production manifest uses 1380 minutes for a daily schedule with one execution time and 8640 minutes for weekly jobs.
+- Each tick checks running children: exit code and duration are captured on exit; `TimeoutMinutes` triggers a full process-tree kill (`taskkill /T /F`). `TimeoutMinutes` may exceed 1440 for jobs longer than 24 hours. The committed production manifest uses 1380 minutes for a daily schedule with one execution time and 8640 minutes for weekly jobs. Startup and manifest reload log a `Timeout policy audit` line with counts and mismatches from the active central manifest.
 - Retry policy per job: `MaxRetries` / `RetryDelaySeconds`. A failed run with retries left is recorded as `Retried`; the final failure sends the error email.
 
 ### Results and notifications
@@ -290,13 +298,13 @@ Full/fast pattern for reporting pipelines (Power BI): heavy inventories have a n
 
 - `Running` (while a job is in progress): `Pid`, `StartTime`, `ScheduledOccurrence`, `LogPath`, `Attempt`, `TimeoutMinutes`, `ClaimPath`. This is what re-adoption uses after a recycle/reboot/crash.
 - `PendingRetry`: `NotBefore`, `Attempt`, `ScheduledOccurrence`.
-- The file is written atomically (temp file + rename) after every mutation, so a crash never leaves a half-written state. An already executed occurrence is never relaunched; a missed occurrence follows `MissedRunPolicy`; a still-running job is re-adopted.
+- The file is written atomically (unique temp file + SMB-compatible forced rename) after every mutation. Rename collisions are retried with exponential backoff and jitter for `AtomicWriteRetrySeconds` (default 30). If retries are exhausted, the process remains resident and pauses new launches until persistence recovers. An already executed occurrence is never relaunched; a missed occurrence follows `MissedRunPolicy`; a still-running job is re-adopted.
 
 ## Configuration (`SmartM365-Inventory-Orchestrator.local.json`)
 
 Created from the committed template at first run. Keys follow the SmartM365 pattern: `__USE_GLOBAL__` inherits from `SmartM365.global.local.json`, and `{{DataAllRootPath}}`-style tokens are resolved through the tenant context.
 
-Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (legacy/default allowlist), `DistributedSchedulingEnabled`, `CapabilityProbeMode`, `CapabilityProbeTimeoutSeconds`, `CapabilityRefreshMinutes`, `CapabilityMaxAgeMinutes`, `ElectionPlanRefreshSeconds`, `ElectionClaimGraceMinutes`, `ElectionHistoryDays`, `ElectionWeight`, `ElectionWeightsByServer`, `ServerJobPolicies`, `ExchangeOnlineOrganization`, `MaxConcurrency`, `MaxConcurrencyByServer`, `MaxLifetimeHours`, `TickSeconds`, `AutoRecycleOnRuntimeUpdate`, `RuntimeUpdateCheckIntervalSeconds`, `RuntimeUpdateStableChecks`, `RuntimeUpdateCooldownMinutes`, `MonitorCoreModuleVersion`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
+Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode` (Graph/SMTP/Both, inherits global by default), `SmtpPort`, `UseIntegratedAuth`, `UseSsl`, `RelayIp` (pin the SMTP endpoint IPv4), `SendDailySummaryEmail`, `DailySummaryTime`, `AllowedServers` (legacy/default allowlist), `DistributedSchedulingEnabled`, `CapabilityProbeMode`, `CapabilityProbeTimeoutSeconds`, `CapabilityRefreshMinutes`, `CapabilityMaxAgeMinutes`, `ElectionPlanRefreshSeconds`, `ElectionClaimGraceMinutes`, `ElectionHistoryDays`, `ElectionWeight`, `ElectionWeightsByServer`, `ServerJobPolicies`, `ExchangeOnlineOrganization`, `MaxConcurrency`, `MaxConcurrencyByServer`, `MaxLifetimeHours`, `AtomicWriteRetrySeconds`, `TickSeconds`, `AutoRecycleOnRuntimeUpdate`, `RuntimeUpdateCheckIntervalSeconds`, `RuntimeUpdateStableChecks`, `RuntimeUpdateCooldownMinutes`, `MonitorCoreModuleVersion`, `DependencyWaitLogIntervalMinutes`, `DependencyWaitTimeoutMinutes`, `OrchestratorRunsCsvLockTimeoutSeconds`, `OrchestratorHeartbeatLogIntervalMinutes`, `OrchestratorSharePointUploadIntervalMinutes`, `AuthenticodeValidationEnabled`, `AuthenticodeValidationMode`, `AuthenticodeAllowedThumbprints`, `AuthenticodeCheckCoreModule`, `AuthenticodeCheckWindowsPowerShellModule`, `OrchestratorDataFolderPath`, `OrchestratorLogFolderPath`, `OrchestratorLogRetentionDays`, `JobLogRetentionDays`, `JobRunsCsvRetentionDays`.
 
 ## Parameters
 
@@ -411,6 +419,8 @@ To stop the resident instance and immediately start the registered scheduled tas
 ```
 
 The restart launcher does not start the orchestrator directly. It first calls the same clean stop workflow, verifies that the scheduled task is no longer running, then calls `Start-ScheduledTask` for `\WCH\SmartM365 Inventory Orchestrator - prod`. This keeps the restart under the registered service account, task folder, triggers and task security settings.
+
+For the three-server production cluster, deploy the script and the same local capacity map everywhere, then restart one server at a time. Wait until its heartbeat is fresh and the startup log shows the expected `MaxConcurrency`, `atomicWriteRetrySeconds` and zero timeout-policy mismatches before restarting the next server.
 
 ## Manual execution-summary email
 
