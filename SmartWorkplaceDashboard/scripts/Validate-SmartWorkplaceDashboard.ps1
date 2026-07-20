@@ -1,73 +1,119 @@
+# Version: 4.2.0
 [CmdletBinding()]
 param(
     [string]$DashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
-    [switch]$CheckSourceFiles
+    [switch]$CheckSourceFiles,
+    [switch]$SkipPbirValidation
 )
-
 $ErrorActionPreference = 'Stop'
-
-function Assert-JsonFile {
-    param([Parameter(Mandatory)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing file: $Path" }
-    Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json | Out-Null
-    Write-Host "OK JSON $Path"
+function Read-Json([string]$Path) { if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){throw "Missing file: $Path"}; Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -Depth 100 }
+function Get-CsvHeader([string]$Path,[string]$Delimiter){ Add-Type -AssemblyName Microsoft.VisualBasic; $p=[Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path,[Text.Encoding]::UTF8,$true); try{$p.TextFieldType=[Microsoft.VisualBasic.FileIO.FieldType]::Delimited;$p.SetDelimiters($Delimiter);$p.HasFieldsEnclosedInQuotes=$true;@($p.ReadFields())}finally{$p.Close()} }
+function Get-Delimiter([string]$Line){$comma=0;$semi=0;$quoted=$false;for($i=0;$i-lt$Line.Length;$i++){if($Line[$i]-eq '"'){if($quoted-and$i+1-lt$Line.Length-and$Line[$i+1]-eq '"'){$i++}else{$quoted=-not$quoted}}elseif(-not$quoted){if($Line[$i]-eq ','){$comma++}elseif($Line[$i]-eq ';'){$semi++}}};if($semi-gt$comma){';'}else{','}}
+function Visit-Node($Node,[scriptblock]$Action){if($null-eq$Node){return};&$Action $Node;if($Node-is[Collections.IDictionary]){foreach($v in $Node.Values){Visit-Node $v $Action}}elseif($Node-is[Management.Automation.PSCustomObject]){foreach($p in $Node.PSObject.Properties){Visit-Node $p.Value $Action}}elseif($Node-is[Collections.IEnumerable]-and$Node-isnot[string]){foreach($v in $Node){Visit-Node $v $Action}}}
+$pbip=Join-Path $DashboardRoot 'pbip';$report=Join-Path $pbip 'SmartWorkplaceDashboard.Report';$semantic=Join-Path $pbip 'SmartWorkplaceDashboard.SemanticModel';$modelPath=Join-Path $semantic 'model.bim';$definition=Join-Path $report 'definition';$selectionPath=Join-Path $DashboardRoot 'source-selection.json'
+$required=@((Join-Path $pbip 'SmartWorkplaceDashboard.pbip'),(Join-Path $report '.platform'),(Join-Path $report 'definition.pbir'),(Join-Path $definition 'version.json'),(Join-Path $definition 'report.json'),(Join-Path $definition 'pages\pages.json'),(Join-Path $semantic 'definition.pbism'),$selectionPath,$modelPath);foreach($p in $required){$null=Read-Json $p}
+$model=Read-Json $modelPath;$selection=Read-Json $selectionPath
+if($model.compatibilityLevel-ne1600){throw "compatibilityLevel must be 1600; found $($model.compatibilityLevel)"}
+$files=@($selection.includedFiles);if($files.Count-ne89){throw "Expected 89 selected CSV files; found $($files.Count)"};if(($files|Sort-Object -Unique).Count-ne$files.Count){throw 'Duplicate selected CSV file'}
+$approvedSummary=@($selection.includeOverrides);foreach($f in $files){if(-not$f.EndsWith('.csv',[StringComparison]::OrdinalIgnoreCase)){throw "Not a CSV: $f"};if($f-match'_MAXITEMS'){throw "Bounded export selected: $f"};if($f-match'Summary' -and$approvedSummary-notcontains$f){throw "Unapproved Summary selected: $f"}}
+$expectedNames=@($files|ForEach-Object{[IO.Path]::GetFileNameWithoutExtension($_)});$tables=@($model.model.tables);$actualNames=@($tables.name)
+$missing=@($expectedNames|Where-Object{$actualNames-notcontains$_});$extra=@($actualNames|Where-Object{$expectedNames-notcontains$_});if($missing.Count){throw "Missing source tables: $($missing-join', ')"};if($extra.Count){throw "Non-source tables found: $($extra-join', ')"};if($tables.Count-ne89){throw "Expected exactly 89 source tables; found $($tables.Count)"}
+$old=@('DimUser','DimDevice','DimLicenseSku','FactAction','FactBackupMailbox','FactDataQuality','FactDeviceCompliance','FactMailbox','FactSharePointSite','FactSourceFreshness','FactSyncHealth','FactTeam','FactUpgradeEligibility','FactUserActivity','FactUserLicense','FactWindowsUpdate','HistoryCoverage','DashboardMetrics','Measures');$present=@($actualNames|Where-Object{$old-contains$_});if($present.Count){throw "Legacy work tables remain: $($present-join', ')"}
+$metadata=@('__SnapshotDate','__SnapshotDateTime','__SnapshotPeriod','__IsCurrent','__SourceFile','__SourceFolder');$technical=@('__SkuPlanKey');$dataRoot=if($env:SMART_M365_DATA_ROOT){$env:SMART_M365_DATA_ROOT}else{'C:\SmartM365\DATA'};$dataLast=Join-Path $dataRoot 'DATA-LAST'
+foreach ($f in $files) {
+    $name = [IO.Path]::GetFileNameWithoutExtension($f)
+    $t = $tables | Where-Object name -eq $name | Select-Object -First 1
+    if ($null -eq $t) { throw "Missing source table: $name" }
+    if ($t.isHidden -eq $true) { throw "Source table is hidden: $name" }
+    $partition = [string]$t.partitions.source.expression
+    if ($partition -notmatch 'fnLoadSourceTable\(' -or $partition -notmatch [regex]::Escape($f)) {
+        throw "Direct source contract missing for $name"
+    }
+    $csv = Join-Path $dataLast $f
+    $cols = @($t.columns.name)
+    $base = @($cols | Where-Object { $metadata -notcontains $_ -and $technical -notcontains $_ })
+    $overrideProperty = if ($null -ne $selection.schemaOverrides) { $selection.schemaOverrides.PSObject.Properties[$f] } else { $null }
+    if (Test-Path -LiteralPath $csv) {
+        $line = Get-Content -LiteralPath $csv -TotalCount 1
+        $delimiter = Get-Delimiter $line
+        $header = @(Get-CsvHeader $csv $delimiter)
+        if (($header -join "`u{001f}") -ne ($base -join "`u{001f}")) { throw "CSV/model columns differ for $name" }
+    }
+    elseif ($null -ne $overrideProperty) {
+        $overrideHeader = @($overrideProperty.Value.columns)
+        if (($overrideHeader -join "`u{001f}") -ne ($base -join "`u{001f}")) { throw "Schema override/model columns differ for $name" }
+    }
+    elseif ($CheckSourceFiles) { throw "Missing source CSV: $csv" }
+    foreach ($m in $metadata) { if ($cols -notcontains $m) { throw "Missing snapshot metadata $name[$m]" } }}
+$relationships=@($model.model.relationships)
+if($relationships.Count-ne2){throw "Expected exactly 2 validated service-plan relationships; found $($relationships.Count)"}
+$expectedRelationships=@{
+    'rel_ServicePlanStates_Catalog' = @{ fromTable='M365_Licenses_UserServicePlanStates'; fromColumn='__SkuPlanKey'; toTable='M365_Licenses_ServicePlans_Catalog'; toColumn='__SkuPlanKey' }
+    'rel_ServicePlanStates_Users' = @{ fromTable='M365_Licenses_UserServicePlanStates'; fromColumn='UserId'; toTable='M365_Users_Active'; toColumn='Object Id' }
 }
-
-function Assert-FileContainsNoLegacyTerm {
-    param([Parameter(Mandatory)][string]$Path)
-    $content = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
-    $legacyPattern = ([string][char]101) + ([string][char]109) + ([string][char]101) + ([string][char]114) + ([string][char]105) + ([string][char]116)
-    if ($content -match (('(?i)' + $legacyPattern))) { throw "Forbidden legacy term found in $Path" }
-}
-
-$pbipRoot = Join-Path $DashboardRoot 'pbip'
-$reportDir = Join-Path $pbipRoot 'SmartWorkplaceDashboard.Report'
-$modelDir = Join-Path $pbipRoot 'SmartWorkplaceDashboard.SemanticModel'
-
-Assert-JsonFile -Path (Join-Path $pbipRoot 'SmartWorkplaceDashboard.pbip')
-Assert-JsonFile -Path (Join-Path $reportDir 'definition.pbir')
-Assert-JsonFile -Path (Join-Path $modelDir 'definition.pbism')
-Assert-JsonFile -Path (Join-Path $modelDir 'model.bim')
-
-$model = Get-Content -LiteralPath (Join-Path $modelDir 'model.bim') -Raw | ConvertFrom-Json
-if (-not $model.model.tables -or $model.model.tables.Count -lt 10) { throw 'model.bim does not contain the expected initial tables.' }
-if (-not $model.model.expressions -or $model.model.expressions.Count -lt 5) { throw 'model.bim does not contain the expected Power Query expressions.' }
-if (-not (@($model.model.tables.name) -contains 'FactSourceFreshness')) { throw 'FactSourceFreshness table is missing.' }
-if (-not (@($model.model.tables.name) -contains 'Measures')) { throw 'Measures table is missing.' }
-$requiredIdentityColumns = @('TenantKey','OrganizationKey','EnvironmentKey','TenantId')
-foreach ($table in @($model.model.tables | Where-Object name -notin @('DimDate','Measures'))) {
-    foreach ($columnName in $requiredIdentityColumns) {
-        if ($columnName -notin @($table.columns.name)) { throw "Identity column '$columnName' is missing from table '$($table.name)'." }
+foreach($relationshipName in $expectedRelationships.Keys){
+    $relationship=$relationships|Where-Object name -eq $relationshipName|Select-Object -First 1
+    if($null-eq$relationship){throw "Missing validated relationship: $relationshipName"}
+    foreach($propertyName in @('fromTable','fromColumn','toTable','toColumn')){
+        if([string]$relationship.$propertyName -ne [string]$expectedRelationships[$relationshipName][$propertyName]){throw "Relationship regression: $relationshipName.$propertyName"}
     }
 }
-foreach ($expressionName in $requiredIdentityColumns) {
-    if ($expressionName -notin @($model.model.expressions.name)) { throw "Identity expression '$expressionName' is missing." }
+foreach($tableName in @('M365_Licenses_UserServicePlanStates','M365_Licenses_ServicePlans_Catalog')){
+    $table=$tables|Where-Object name -eq $tableName|Select-Object -First 1
+    $keyColumn=$table.columns|Where-Object name -eq '__SkuPlanKey'|Select-Object -First 1
+    if($null-eq$keyColumn -or $keyColumn.dataType-ne'string' -or $keyColumn.isHidden-ne$true){throw "Missing hidden service-plan key on $tableName"}
+    if([string]$table.partitions.source.expression -notmatch 'Table.AddColumn\(Source, "__SkuPlanKey"'){throw "Service-plan key is not generated in Power Query for $tableName"}
 }
-Write-Host ("OK model tables={0} expressions={1}" -f $model.model.tables.Count, $model.model.expressions.Count)
-
-Get-ChildItem -LiteralPath $DashboardRoot -Recurse -File | Where-Object { $_.Extension -in '.md','.pq','.json','.bim','.pbip','.pbir','.pbism','.ps1' } | ForEach-Object {
-    Assert-FileContainsNoLegacyTerm -Path $_.FullName
+$typedExpectations = @{
+    'M365_Users_Active' = @{ 'AccountEnabled' = 'boolean' }
+    'M365_Users_Activity' = @{ 'HasAnyM365Activity' = 'boolean'; 'LastActivityDate' = 'dateTime' }
+    'M365_Licenses_UserServicePlanStates' = @{ 'IsEnabled' = 'boolean' }
+    'Intune_Devices_Inventory' = @{ 'IsCompliant' = 'boolean'; 'LastSyncDateTime' = 'dateTime' }
+    'Intune_Windows11_Readiness_Issues' = @{ 'IsBlocking' = 'boolean' }
+    'M365_SPO_Sites' = @{ 'IsInactive' = 'boolean'; 'IsOrphaned' = 'boolean' }
+    'M365_SPO_Tenant' = @{ 'StorageUsedTB' = 'double'; 'StorageCapacityTB' = 'double'; 'StorageUtilizationPercent' = 'double'; 'IsPartialInventory' = 'boolean' }
+    'M365_Mailbox_Usage' = @{ 'Storage Used (Byte)' = 'int64'; 'Prohibit Send/Receive Quota (Byte)' = 'int64'; 'Last Activity Date' = 'dateTime' }
+    'Exchange_OnPrem_Servers_Compute' = @{ 'IsVirtualMachine' = 'boolean'; 'MemoryGB' = 'double'; 'PhysicalCoreCount' = 'int64' }
+    'Exchange_OnPrem_Servers_LogicalDisks' = @{ 'LowSpaceWarning' = 'boolean'; 'FreePercent' = 'double' }
+    'Exchange_OnPrem_Servers_RemoteAccess' = @{ 'PingOk' = 'boolean'; 'WmiDcomOk' = 'boolean' }
+    'Exchange_OnPrem_Servers_Inventory_Summary' = @{ 'ExecutionDate' = 'dateTime'; 'ExchangeServersCount' = 'int64'; 'TotalMemoryTB' = 'double'; 'ExchangeReadinessErrors' = 'int64' }
 }
-Write-Host 'OK forbidden term scan'
-
-if ($CheckSourceFiles) {
-    $cmdbPath = ($model.model.expressions | Where-Object name -eq 'CMDBPowerBIPath').expression.Trim('"')
-    $cmdbFullPath = if ([System.IO.Path]::IsPathRooted($cmdbPath)) { $cmdbPath } else { Join-Path $DashboardRoot $cmdbPath }
-    $requiredCmdb = @('DimTenant.csv','DimDate.csv','DimUser.csv','DimDevice.csv','DimLicenseSku.csv','FactUserLicense.csv','FactDeviceCompliance.csv','FactMailbox.csv','FactDataQuality.csv')
-    foreach ($fileName in $requiredCmdb) {
-        $candidate = Join-Path $cmdbFullPath $fileName
-        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw "Missing CMDB source file: $candidate" }
+foreach ($tableName in $typedExpectations.Keys) {
+    $typedTable = $tables | Where-Object name -eq $tableName | Select-Object -First 1
+    $partitionText = [string]$typedTable.partitions.source.expression
+    foreach ($columnName in $typedExpectations[$tableName].Keys) {
+        $expectedType = $typedExpectations[$tableName][$columnName]
+        $typedColumn = $typedTable.columns | Where-Object name -eq $columnName | Select-Object -First 1
+        if ($typedColumn.dataType -ne $expectedType) { throw "Typed field regression: $tableName[$columnName] is $($typedColumn.dataType), expected $expectedType" }
+        $mKind = if ($expectedType -eq 'boolean') { 'logical' } elseif ($expectedType -eq 'dateTime') { 'datetime' } elseif ($expectedType -eq 'double') { 'number' } else { $expectedType }
+        if ($partitionText -notmatch [regex]::Escape("{`"$columnName`", `"$mKind`"}")) { throw "Power Query type map regression: $tableName[$columnName] must use $mKind" }
     }
-    Write-Host "OK CMDB source files $cmdbFullPath"
 }
-
-Write-Host 'Smart Workplace Dashboard validation completed.'
+$measureTable=$tables|Where-Object name -eq 'M365_Users_Active'|Select-Object -First 1;$measureNames=@($measureTable.measures.name);if($measureNames.Count -lt 60){throw "Expected at least 60 measures; found $($measureNames.Count)"};foreach($n in @('Enabled Users','Enabled Users Inactive 90d','Purchased Licenses','M365 SKU Utilization','Service Plan Assignments','Service Plan Assigned Users','Enabled Service Plan Assignments','Disabled Service Plan Assignments','Users with Disabled Service Plans','Service Plan Enablement Rate','Managed Devices','Device Compliance Rate','Windows 11 Affected Devices','Mailboxes','Mailbox Quota Utilization','Teams','SharePoint Sites','SharePoint Storage License Units','SharePoint Estimated Capacity TB','SharePoint Estimated Remaining TB','SharePoint Estimated Utilization','SharePoint Approx Project Visio Capacity TB','Migration Failed Items','Protected Mailboxes','Backup Coverage Rate','Hybrid Identity Affected Users','Model Device Count','Devices per Application','AD Enabled Users Trend','Managed Devices Trend','Selected Source Tables','On-prem Hosted Mailboxes','Online Placement Rate','Remote Mailboxes without EXO','Potential Dual-hosted SMTP','Exchange Servers','Server Inventory Coverage','Low Space Volumes')){if($measureNames -notcontains $n){throw "Missing measure: $n"}}
+$tableMap=@{};foreach($t in $tables){$tableMap[$t.name]=@($t.columns.name)};$measureSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);foreach($n in $measureNames){$null=$measureSet.Add($n)}
+foreach($m in $measureTable.measures){$matches=[regex]::Matches([string]$m.expression,"'([^']+)'\[([^\]]+)\]");foreach($x in $matches){$tn=$x.Groups[1].Value;$cn=$x.Groups[2].Value;if(-not $tableMap.ContainsKey($tn)){throw "Measure $($m.name) references missing table $tn"};if($tableMap[$tn] -notcontains $cn){throw "Measure $($m.name) references missing field $tn[$cn]"}}}
+$pagesMeta=Read-Json (Join-Path $definition 'pages\pages.json');if(@($pagesMeta.pageOrder).Count-ne15){throw "Expected 15 report pages; found $(@($pagesMeta.pageOrder).Count)"}
+$visualFiles=@(Get-ChildItem -LiteralPath (Join-Path $definition 'pages') -Filter visual.json -File -Recurse);if($visualFiles.Count-lt120){throw "Expected at least 120 visuals; found $($visualFiles.Count)"}
+$logoVisuals=@($visualFiles|ForEach-Object{Read-Json $_.FullName}|Where-Object{$_.visual.visualType-eq'image'})
+if($logoVisuals.Count-ne15){throw "Expected one logo image per page; found $($logoVisuals.Count)"}
+foreach($logo in $logoVisuals){$url=[string]$logo.visual.objects.general[0].properties.imageUrl.expr.Literal.Value;if(-not$url.StartsWith("'data:image/png;base64,")){throw 'Logo image is not embedded as PNG data'}}
+$slicers=@($visualFiles|ForEach-Object{Read-Json $_.FullName}|Where-Object{$_.visual.visualType-eq'slicer'})
+if($slicers.Count-lt1){throw 'Ownership slicer is missing'}
+foreach($vf in $visualFiles){$v=Read-Json $vf.FullName;Visit-Node $v {param($node);foreach($kind in @('Column','Measure')){$exact=$node.PSObject.Properties[$kind];if($null -ne $exact){$entry=$exact.Value;$entity=$entry.Expression.SourceRef.Entity;$property=$entry.Property;if(-not $entity -or -not $property){throw "Incomplete $kind reference in $($vf.FullName)"};if(-not $tableMap.ContainsKey([string]$entity)){throw "Visual references missing table $entity"};if($kind -eq 'Column' -and $tableMap[[string]$entity] -notcontains [string]$property){throw "Visual references missing field $entity.$property"};if($kind -eq 'Measure' -and -not $measureSet.Contains([string]$property)){throw "Visual references missing measure $property"}}}}}
+foreach($n in @('fnGetSourceFiles','fnLoadSourceTable','fnToLogical','fnToDateTime','fnToNumber','fnToInt64')){if(-not ($model.model.expressions|Where-Object name -eq $n)){throw "Missing Power Query expression: $n"}}
+$invalidDaxMeasures=@($tables.measures|Where-Object { [string]$_.expression -match '&&\s*VAR\b' })
+if($invalidDaxMeasures.Count -gt 0){throw "Invalid DAX variable placement in measures: $($invalidDaxMeasures.name -join ', ')"}
+$loaderExpression=[string](($model.model.expressions|Where-Object name -eq 'fnLoadSourceTable'|Select-Object -First 1).expression)
+if(([regex]::Matches($loaderExpression,'\(')).Count -ne ([regex]::Matches($loaderExpression,'\)')).Count){throw 'Unbalanced parentheses in fnLoadSourceTable'}
+$forbidden=@('SmartWorkplaceCMDB','LocalDateTable_','C:\Users\');$publishable=@(Get-ChildItem -LiteralPath $DashboardRoot -File -Recurse|Where-Object{$_.FullName -notmatch '\\\.pbi\\' -and $_.Name -ne 'LOCAL_MEMORY.md' -and $_.FullName -ne $PSCommandPath -and $_.Extension -in @('.js','.ps1','.json','.bim','.pbip','.pbir','.pbism','.pq','.md')});foreach($p in $publishable){$text=Get-Content -LiteralPath $p.FullName -Raw;foreach($term in $forbidden){if($text.Contains($term,[StringComparison]::OrdinalIgnoreCase)){throw "Forbidden dependency '$term' in $($p.FullName)"}}}
+$builder=Join-Path $DashboardRoot 'scripts\Build-SmartWorkplaceDashboard.js';& node --check $builder;if($LASTEXITCODE-ne0){throw 'Builder JavaScript syntax check failed'}
+Write-Host "OK SmartWorkplaceDashboard: 89 source tables, $($measureNames.Count) measures, 15 pages, $($visualFiles.Count) visuals, compact service-plan model validated."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCV2AmSBp15ZqcH
-# 7TC2MuLtUidO+l6OOIjblz/VDTk4taCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdXNtFdk7Kjuw6
+# Jjmds2r165z4J9WC7ryqxYP02AnKsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -200,31 +246,31 @@ Write-Host 'Smart Workplace Dashboard validation completed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKfXa5QuDG6N2LtHr6fXuMs73rwA6136uvV6iPLyk41IMA0GCSqG
-# SIb3DQEBAQUABIIBgCgZkgWPsJUm60Nyaipxv8RhbDaJPPpcTrP8LmZ7tqEKwisG
-# 2sbPoiOVeDP3TI+oU2KqM4Am1ZhyF29HbgtZJCCvUZ2PpKFeFYuQ+khdtypQjMRy
-# 9XPoQwkoQHeU1EnA1u2MPY8FN8+OA2+QIibmBsNv1Zl57Rjy/W5WdcJiQLx4ncz+
-# ioF1nDw+U1lmZgcwRIPCbPAdG/doU/KHKhpKDpQSkKl9uGE1We5jQgNk3+BTVUGH
-# Muc+FhjODyoptBy1BBB20DtuK+jdeURw81RUAWY/Qx7huX8CtqSodbbWgou5Alif
-# eRRB2JFvnQ0o6tVNWw51+w1OmkSdeEkA11La2v7rq56UaGyzNO3YyCdtzNiNy88g
-# O7rgQaAAlqYmxxt4VLcq5x2DOMF7Y5QMCxxnf9JBwx11ZflzWzLoonBEGpTxp9BF
-# liqUQPyRmSNLeKR92D/zQLnI3Q3JJazcWE3KrZXDCLF26D+PLlyX5qa5YkDaCYcS
-# H3WYCGY/JQkU4hLYD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFUkE9KgECZvPCXYxd3wqq7B0+zI9OSUp4OO5DD0UZsWMA0GCSqG
+# SIb3DQEBAQUABIIBgAyuhngSUPQzy0avtVLnkeyEWutvxTLsk0UcAJTV6KbQSC8S
+# yNrrhsgHxOqpRGlx9aQsLGzYEMDN3dazjgD3qLureQvw/gLUpkkMwt9uAcUKhsjb
+# nKhrf968mpVG+IOvZl3XwZEdNaZGCzB4aYsMQn3y3k5AWQbye4DBdetogiYqDQBM
+# un4qDUsU6QOaDzApMVevEfyfxpLzLAJAlKZGV6wMqESJ3GInoM0apFCHdGiPoKxc
+# jygdj0uBDRmmX+U7C7WRfVOqEvGDUPptDLc+VsxP7Bi8P0hJMYc8iQ5CenBj5YSs
+# Vjuian35anxSTOBeUutEEEmiSy4SWOQPwtUvI88fbqkk6I2wF25YMjcCcbv8SAwe
+# cfKNFl82rdT57NKuLmX0zTCEyevm9uFYEis+n7gHfmKac/Kc6VSKdo3rDfi3hC++
+# 5BxSUW4c6pBOnIjNI4lMQjqlibXikuEEytt6R8b5XTCBIhrRatHXyh1Yx3WzeH8x
+# D50gXoNTjmqpPM2YI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMxMjAz
-# MzBaMC8GCSqGSIb3DQEJBDEiBCCMAsKQlQap9wKNgsnUOOvLzRMQEbAGof537/cd
-# RBE03DANBgkqhkiG9w0BAQEFAASCAgAEWynOK9ALaHoJ+ziHSqObxow3dmDIqpRf
-# 64+4iR5SDG/Vq6iX6NQ2ufNjHCKeKd90s7T9N37rEni20tJe284YVh0Kng/hr0eV
-# ZPw7cZt2D931DMAivoeylcwCBeIJnZa/OXNvutgE0nxL1Eiqe8cabNFMB8bSHvl2
-# nXLgDtKKdKzEfIecHLb8ro1TwrV/0EcpKIFZFCfxCXmGqxZgSSU2TFGOuPG1T5u+
-# dB2eNHAaEaoSSKBGsvguCaFmue65vsxg34NV3DlCEItBXLWlmz+gnhiIZNbFPlaD
-# cilAIlhuI8qgxcE4P+Ad6fqVFJC8yM0WFiSJrpndrrvZowYuVoFZY+pqeIWqZikA
-# FeFNorFG+J3OVo1cA0k5L+3ZFr+VuldbphFuLFeQtUqfn/8t8Y29ajFbq8I+cyj3
-# XFtjCiqm10p2xSn3AxsBf01C7/gh6LaOa1qj/rKGa8CxCXFqqDY9DtPhIc/Lz+WJ
-# YlPAYl6g+QG/2bMk7jNHLWg1Don6s6v3NRtW+lRoLJs07Wttb3KR7DqxmUYi1rEf
-# jxy3Sn+12vDUuI2oPjPBE014m1Ls3/Ox0RoAM51WgXg3fEHv0kibU5uGfiwzXWaw
-# vO/paymIkcbh7HNgv/bW5R22KWGuecykmp5xBmCGp2EHM0lvAuWTwpcHkSVkq5Qi
-# 0n6tuqrynA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkyMjUx
+# MTRaMC8GCSqGSIb3DQEJBDEiBCDylhKXJVh8JZ+TAf9a6gChz2NJp4vaaecf6gGz
+# X7CMWDANBgkqhkiG9w0BAQEFAASCAgAT1cL3vkCkHievGjUF8325iVpE+5nLV0EV
+# 3r9sIZ7//qU2Imn7em6EhKA2wkcQx6ovG5g+ieP1b2WIYjamXT9i1rxmqAWpD/zJ
+# EF+PjCr+axFHPibTThZD1Ia+c0yozS22UHZSl2E5X4TFbCUpdI9uoibLznm2Qcdt
+# 2LoNy8HP7tIzKu5v/2VLBguLALwvi1Ju/kQArf4H3N2vj0IjZf1LgiGE/Zt+3sfD
+# LTFRSJHV3nqqxPU6PDGUD2hkFs+yIsPnKfg45giI4TpSEdPCe4iwTd2Cml99hnOs
+# GRGujXfJchO4S2n6XCNs3sw2524zNcc+BsBoWiTLCXNtHBvDvb/VBKPAdp2+ovcT
+# n3nSmEttS9fND/rjeofT7ntFrUrb4VeqJbnTWdvcjwQumkaban+1WdYfIHi9NYoX
+# yZgY6ZLEschFeC7jLxv3e99lbF/AvwDRzWh2KmO4/rXq6LJDN5vpVp6X5GqIXdk8
+# 5oHB32y1URfNk7xGHOTW9BIa/Ri5nWNp8mqu2LGqhHbMW4A8WdOoWd79pTWCAObW
+# B6BCRnCCvET5NWl6ZopsJctVnquUq5W6zsogonvLQtMg0iwWeKWIld7eyhX/92KH
+# 6Nk615K8gVtMlOjzL+16pQOP/V7YvovgibpeBed1LaslG9p4NP1YeCXzub65aqgo
+# Zm98x+ay0Q==
 # SIG # End signature block
