@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.2) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.6) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -12,6 +12,7 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `SmartM365.Orchestrator.Distributed.psm1` | Automatic capability probes, weighted election planner and atomic occurrence claims. |
 | `SmartM365.Orchestrator.Management.psm1` | Shared configuration validation, atomic publication, versions, rollback, audit and multi-server history aggregation. |
 | `SmartM365-Inventory-Orchestrator-GUI.ps1` | Central WPF console for planning, server assignment, election visibility, history and configuration versions. |
+| `Set-SmartM365-OrchestratorTimeoutPolicy.ps1` | Preview-first migration that applies 23-hour daily-once and 6-day weekly-once timeouts to the shared configuration, then publishes through the normal versioned/audited path with `-Execute`. |
 | `SmartM365-Inventory-Orchestrator.local.json.template` | Safe committed template; copied to `SmartM365-Inventory-Orchestrator.local.json` at first run (the runtime `.local.json` is Git-ignored). |
 | `Orchestrator-Jobs.json.template` | Safe committed jobs-manifest template (all schedules, neutral `AllowedServers`). |
 | `Orchestrator-Cluster.json.template` | Safe committed cluster template. The shared runtime file is bootstrapped from the first server's current local cluster settings. |
@@ -80,7 +81,7 @@ Every resident server independently monitors the other servers listed in `Expect
 
 The monitor first validates access to the shared orchestrator root. A storage-access failure produces one `MonitoringUnavailable` incident instead of falsely declaring every peer down. For each peer, it then checks the shared `Orchestrator-Heartbeat.json`; a missing, invalid or older-than-threshold heartbeat is confirmed across consecutive checks before an alert is sent.
 
-When the heartbeat is healthy and `PeerJobMonitoringEnabled` is true, the monitor reads the peer state and compares enabled jobs assigned to that server with their latest expected occurrence. Running jobs, pending retries and valid dependency waits are not reported as missing. Disabled/manual jobs are excluded. Server-health alerts and job-schedule alerts are sent separately. Each stable server/job issue has its own reminder timestamp, so a changing queue does not resend every previously reported issue. A recovery email follows consecutive healthy checks.
+When the heartbeat is healthy and `PeerJobMonitoringEnabled` is true, the monitor reads the peer state and compares enabled jobs assigned to that server with their latest expected occurrence. Before raising `JobNotStarted`, it checks the occurrence's shared claim; terminal claims and non-expired `Claimed`, `Running` or `RetryScheduled` claims suppress the false alert even if the current plan owner differs from the server that handled the occurrence. Running jobs, pending retries and valid dependency waits are not reported as missing. Disabled/manual jobs are excluded. Server-health alerts and job-schedule alerts are sent separately. Each stable server/job issue has its own reminder timestamp, so a changing queue does not resend every previously reported issue. A recovery email follows consecutive healthy checks.
 
 The heartbeat also publishes the health of the per-server state persistence. If a temporary SMB lock survives all configured retries, the resident process stays alive and continues supervision, heartbeat and peer monitoring, but pauses new launches until the state file can be written again. Healthy peers report this as a separate `StatePersistenceUnavailable` server-health issue.
 
@@ -159,7 +160,7 @@ For an explicit user-scoped install:
 
 Each resident server generates `Orchestrator-Capabilities.json` itself. The default `ReadOnly` probe mode uses isolated, time-bounded child PowerShell processes and read-only checks for `Graph`, `EXO`, `AD`, `ExchangeOnPrem`, and `TeamsPowerShell`; `SharedRuntime` verifies write access to the shared election folder. Graph readiness also records the application roles returned by the app-only connection. No module is installed and no token, certificate private key or secret is written to the capability document.
 
-The planner builds connected `DependsOn` components so parents and children always have the same owner. Daily load is schedule frequency multiplied by the median successful duration from the shared job-run history; `EstimatedDurationMinutes` is the fallback. It then assigns the largest components first to the least normalized load. `ElectionWeight` is the local default capacity, while `ElectionWeightsByServer` lets the same JSON be deployed everywhere with per-server weights; a weight of `1.10` gives a server about 10% more target capacity than `1.00`.
+The planner builds connected `DependsOn` components so parents and children always have the same owner. Daily load is schedule frequency multiplied by the median successful duration from the shared job-run history; `EstimatedDurationMinutes` is the fallback. It assigns the largest new or explicitly rebalanced components first to the least normalized load. An existing owner is sticky while that server stays live, capable and allowed by policy, so the one-minute plan lease refresh keeps the same `PlanId` and does not move jobs merely because duration medians changed. Ownership changes only when eligibility changes or a jobs/cluster configuration publication explicitly requests a rebalance. `ElectionWeight` is the local default capacity, while `ElectionWeightsByServer` lets the same JSON be deployed everywhere with per-server weights; a weight of `1.10` gives a server about 10% more target capacity than `1.00`.
 `ServerJobPolicies` applies an operational allow policy after technical capability detection. `OnlyJobsRequiring` means that every individual job in a dependency component must explicitly require every listed capability before that server can become a candidate. The policy is also published in the server capability document, so another planner respects the server's own restriction even when additional modules or permissions are detected. For example, the following reserves one server for Exchange Server on-premises workloads (Exchange 2016, 2019 or Subscription Edition) without allowing AD-only, Graph, EXO or Teams jobs:
 
 ```json
@@ -170,7 +171,7 @@ The planner builds connected `DependsOn` components so parents and children alwa
 }
 ```
 
-Before launching an elected occurrence, the owner must create its shared claim with `FileMode.CreateNew`. If shared storage or the plan is unavailable, the elected job stays queued (fail closed). A different server may take over only after `TimeoutMinutes + ElectionClaimGraceMinutes` has expired and the original owner's heartbeat is stale. Terminal claims are never taken over.
+Before launching an elected occurrence, the owner must create its shared claim with `FileMode.CreateNew`. If shared storage or the plan is unavailable, the elected job stays queued (fail closed). A different server may take over only after `TimeoutMinutes + ElectionClaimGraceMinutes` has expired and the original owner's heartbeat is stale. Terminal claims are never taken over. When another owner already completed the occurrence, the current owner synchronizes that terminal claim into its local state instead of retrying every minute; peer monitoring also accepts terminal or still-safe active claims as proof that the occurrence is handled.
 
 ### Detached jobs and re-adoption (jobs longer than 24 hours)
 
@@ -199,7 +200,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 
 ### Supervision, timeout, retries
 
-- Each tick checks running children: exit code and duration are captured on exit; `TimeoutMinutes` triggers a full process-tree kill (`taskkill /T /F`). `TimeoutMinutes` may exceed 1440 for jobs longer than 24 hours. The committed production manifest uses 1380 minutes for a daily schedule with one execution time and 8640 minutes for weekly jobs. Startup and manifest reload log a `Timeout policy audit` line with counts and mismatches from the active central manifest.
+- Each tick checks running children: exit code and duration are captured on exit; `TimeoutMinutes` triggers a full process-tree kill (`taskkill /T /F`). `TimeoutMinutes` may exceed 1440 for jobs longer than 24 hours. The committed production manifest uses 1380 minutes for a daily schedule with one execution time and 8640 minutes for a weekly schedule with exactly one day and one execution time. To migrate an existing shared configuration safely, first run `Set-SmartM365-OrchestratorTimeoutPolicy.ps1 -SharedDataFolderPath <OrchestratorRoot>` for preview, then repeat with `-Execute` to create the audited version. Startup and manifest reload log a `Timeout policy audit` line with counts and mismatches from the active central manifest.
 - Retry policy per job: `MaxRetries` / `RetryDelaySeconds`. A failed run with retries left is recorded as `Retried`; the final failure sends the error email.
 
 ### Results and notifications

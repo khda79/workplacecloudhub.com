@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:DistributedModuleVersion = '1.0.1'
+$script:DistributedModuleVersion = '1.1.0'
 
 function ConvertTo-SafeFileName {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -372,6 +372,8 @@ function Get-SmartM365OrchestratorElectionPlan {
         [hashtable]$ServerWeights = @{},
         [hashtable]$ServerJobPolicies = @{},
         [hashtable]$DurationMinutesByJob = @{},
+        [AllowNull()]$PreviousPlan = $null,
+        [switch]$PreservePreviousOwners,
         [datetime]$NowUtc = [datetime]::UtcNow
     )
 
@@ -382,6 +384,18 @@ function Get-SmartM365OrchestratorElectionPlan {
     }
     $loads = @{}
     foreach ($serverName in $capabilitiesByServer.Keys) { $loads[$serverName] = 0.0 }
+
+    $previousOwnerByJob = @{}
+    if ($PreservePreviousOwners -and $null -ne $PreviousPlan -and $PreviousPlan.PSObject.Properties['Assignments']) {
+        foreach ($assignment in @($PreviousPlan.Assignments)) {
+            if (-not $assignment.PSObject.Properties['JobName'] -or -not $assignment.PSObject.Properties['OwnerServer']) { continue }
+            $jobName = [string]$assignment.JobName
+            $ownerServer = ([string]$assignment.OwnerServer).ToUpperInvariant()
+            if (-not [string]::IsNullOrWhiteSpace($jobName) -and -not [string]::IsNullOrWhiteSpace($ownerServer)) {
+                $previousOwnerByJob[$jobName] = $ownerServer
+            }
+        }
+    }
 
     $groups = @()
     foreach ($component in @(Get-DependencyComponent -Jobs $electedJobs)) {
@@ -404,6 +418,16 @@ function Get-SmartM365OrchestratorElectionPlan {
             $match = Test-SmartM365OrchestratorCapabilityMatch -ServerCapabilities $capabilitiesByServer[$serverName] -RequiredCapabilities $requiredCapabilities -RequiredGraphAppRoles $requiredRoles
             if ($match.Eligible -and (Test-ServerJobPolicy -ServerName $serverName -Jobs $componentJobs -ServerJobPolicies $ServerJobPolicies)) { $candidates += $serverName }
         }
+        $previousOwners = @(
+            $component |
+                ForEach-Object { if ($previousOwnerByJob.ContainsKey([string]$_)) { $previousOwnerByJob[[string]$_] } } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+                Sort-Object -Unique
+        )
+        $preservedOwner = ''
+        if ($PreservePreviousOwners -and $previousOwners.Count -eq 1 -and $previousOwners[0] -in $candidates) {
+            $preservedOwner = [string]$previousOwners[0]
+        }
         $groups += [pscustomobject]@{
             GroupKey = (@($component) -join '+')
             Jobs = @($component)
@@ -411,16 +435,33 @@ function Get-SmartM365OrchestratorElectionPlan {
             RequiredGraphAppRoles = $requiredRoles
             LoadMinutesPerDay = [math]::Round($loadMinutes, 4)
             Candidates = $candidates
+            PreservedOwner = $preservedOwner
         }
     }
 
     $assignments = @()
     $unassigned = @()
-    foreach ($group in @($groups | Sort-Object @{ Expression = 'LoadMinutesPerDay'; Descending = $true }, GroupKey)) {
+    $orderedGroups = @($groups | Sort-Object @{ Expression = 'LoadMinutesPerDay'; Descending = $true }, GroupKey)
+    foreach ($group in $orderedGroups) {
         if (@($group.Candidates).Count -eq 0) {
             $unassigned += [pscustomobject]@{ GroupKey = $group.GroupKey; Jobs = $group.Jobs; Reason = 'No live server satisfies every required capability, Graph application role and server job policy.' }
             continue
         }
+        if ([string]::IsNullOrWhiteSpace([string]$group.PreservedOwner)) { continue }
+        $owner = [string]$group.PreservedOwner
+        $loads[$owner] = [double]$loads[$owner] + [double]$group.LoadMinutesPerDay
+        foreach ($jobName in $group.Jobs) {
+            $assignments += [pscustomobject]@{
+                JobName = $jobName
+                OwnerServer = $owner
+                GroupKey = $group.GroupKey
+                LoadMinutesPerDay = $group.LoadMinutesPerDay
+            }
+        }
+    }
+
+    foreach ($group in $orderedGroups) {
+        if (@($group.Candidates).Count -eq 0 -or -not [string]::IsNullOrWhiteSpace([string]$group.PreservedOwner)) { continue }
         $owner = @($group.Candidates | Sort-Object @{
                 Expression = {
                     $weight = if ($ServerWeights.ContainsKey([string]$_) -and [double]$ServerWeights[[string]$_] -gt 0) { [double]$ServerWeights[[string]$_] } else { 1.0 }
@@ -451,6 +492,25 @@ function Get-SmartM365OrchestratorElectionPlan {
                     LoadMinutesPerDay = [math]::Round([double]$loads[$_], 4)
                 }
             })
+    }
+}
+
+function Get-SmartM365OrchestratorOccurrenceClaim {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ClaimsRootPath,
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][datetime]$Occurrence
+    )
+
+    $jobFolder = Join-Path -Path $ClaimsRootPath -ChildPath (ConvertTo-SafeFileName $JobName)
+    $occurrenceUtc = $Occurrence.ToUniversalTime()
+    $claimPath = Join-Path -Path $jobFolder -ChildPath ($occurrenceUtc.ToString('yyyyMMddTHHmmssfffZ') + '.json')
+    if (-not (Test-Path -LiteralPath $claimPath -PathType Leaf)) { return $null }
+    $claim = Get-Content -LiteralPath $claimPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    return [pscustomobject]@{
+        ClaimPath = $claimPath
+        Claim = $claim
     }
 }
 
@@ -594,6 +654,7 @@ Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorServerCapability',
     'Test-SmartM365OrchestratorCapabilityMatch',
     'Get-SmartM365OrchestratorElectionPlan',
+    'Get-SmartM365OrchestratorOccurrenceClaim',
     'Enter-SmartM365OrchestratorOccurrenceClaim',
     'Set-SmartM365OrchestratorOccurrenceClaim'
 )
@@ -601,8 +662,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANphr94cGCRKE2
-# JSzDMYoxHCJvXGbOZ0FlzxOI6vAkLaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMnnVwzdnneGzy
+# ATwP/Tp78L66McUe3pXqxc+9yWwQt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -735,31 +796,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINwr8imqAVlEM37p5TkEuG75CgGykJiB/t7wlqyARUwgMA0GCSqG
-# SIb3DQEBAQUABIIBgG/uR7esBYKh0GCFRJgX3JoCqKqdHQKi8j/JexbNatCelRri
-# +K/sUtjlPG6jQUpwrj+A6LOl271TmcSYATve29adfZ1X+FIvQU4hSJ24IV0wEkUl
-# bFNlaW+6yPzi4t5FZoojZP83ocqA6AIjhJ5ekoGe9yg2AB0LGy2n5M1osc0chxA4
-# Spm2su3GutL4X4qwWSMHdjb5pijceos5BSGNc13UGaj5xZ4BRa4knTGowhTRSwqh
-# zUgRTDmeJO+gU4foF7RRSEJcqwr0XJ386IQUwxT+IEyVsG+H6tCFMgH2LubGbffW
-# zSvu+r++Kw6Y0yWBUuvczRXy9vOlhxnTuPmfrD6zJ3REKFcFC+8AZTJkVvkJboR1
-# tAZJpj35BSlnsMMZiRzuHYNQFBYkiorIfznI3YyL2DTRfXuITLpmnE9y/6qqlzLk
-# jfDQF4BPkTtuqUp7vouir9cJjsorsReHZ0Nac/hbc59/p2kgRpeGUmD1E6oyI+Z4
-# dYCaDIpZ+TINP5I89KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBzTlcYtf53yD8ywFozX7vfIoeyGb/kyiVegADmhg/wkMA0GCSqG
+# SIb3DQEBAQUABIIBgIb+ZaSE91XOfYy/kpYQFGWMdxYNOP27xYQxlmnCQdZ8Fak2
+# v6UOLNCW8M407qJ6eWTgit4QOxQHNF2QZAfktkcIWIvVoeGSuVFhukkJW50iKGBK
+# qykqHBkR+QvJJ7wkmno3XZnWoQ+00aeGAT7E3LUIEleL4ynraSgVmhVNTtAnwCaS
+# UGYGNlXuhAbzQtfPRwog8lnLfBqgajJLg/9E5fYqv4KvGU9a5iOdkCSnRT4m/n+h
+# d5xxE4zQSqXNraJQGqbRWhdBBXPufCb2JmjgEdVe1xHWmPrrHV9cR0wbPK3/Vtlv
+# 5g1s8ShgOEPCebsLP0FHE03uzGjOooHcZzefgUOLOR0u+exTdugu/XvtRqdmQbRh
+# 1JeY0dJ94IZ6EIdRyQ/7f+aD+apN+d4Qu9/aRKmEqFqB1EYi35EpLzUt8v9aeuKM
+# 5UeAtxWb73a79rM8jpeGNNh1NwhEzA4fyeB14bk/oigOSLnrg4vBy8T5r0Qem4yn
+# ciE6ku5jN6FtNeF2eqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTkxMTU5
-# MzZaMC8GCSqGSIb3DQEJBDEiBCAkMFUQsIZzFc8WvggWUZ7v/iosRqsnsp47gjQh
-# MR1jbTANBgkqhkiG9w0BAQEFAASCAgBbAcrL66UptBnLe4aIvBmOgW5WC+rxFcUc
-# YMx2qVGdw3DIwml8wvfPyHwo96JGvMzgfQ6Ys5szQyUjz1Q17FCYikbzfA9ldNGB
-# 7DLOaqOoy2ZgrwWb0O/qvK6vftPHoowiivkrmYX26E6ByYUZJPKm6tNxXv0QyO3t
-# bVzsBPjP4mq0S4t0KIEC9XMYt4HYRErg5Giu4O7cW2KUyoc1yZwaUHRUumiScV+2
-# IZbdq6MmCyJ5dHssse22B1CUz+efL6gQdZuYbhtZ14pzPnxz2ONRggYBwWq0xyyT
-# BZQjdT5559J9e5ZoqEi7DE2r4YlLQOq1vWaol+Ye37aVErPVgpaVz/xR5dzCLYiF
-# EFxd4J3NZ5SaCojWec8ydBlf/cW3osjUAmI3uWbNLdYUwFLWyCLhZKxQKPZlGuo0
-# AuUe+ENNJrI1NGxE3O2BrH8BkPA+NdpLpi55jdYqbR1IK5/lto/B0QtcsfMecuIk
-# ImKJ2SKufjJ5RUVPCqLMXQomV3jiTEqHc7hK9Tb3gjpT/CF2VKMcirZHcfL8qRCX
-# tea57dOOx+HXLaOl9a/LnUwWu48UsX/LIxJf1cZDaz1Ng1i3+uFi/HP9pLwPlWs9
-# +yHiS6flNL4//DZYb742GspCG/ubkss7ESqxfA9Wiu2DYvnkVf/O6yJhKgeD3R2z
-# gTDkRCW6sA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxNjM0
+# NDlaMC8GCSqGSIb3DQEJBDEiBCDEpIFFLxZLPRUFOUaioGdhN9yNRrJENWJGcok/
+# bfLUgDANBgkqhkiG9w0BAQEFAASCAgBbvHO2jsRz/OfFDVRdBtfK6DP6lDfBpv3p
+# mQcJOIwMfJZjfu36XeVBxhDi1ohlbdkJeS8xk/oDNip+hYs+HAeI7wMhC9sUMRDZ
+# K2mlmWKpnpT+iQU8M3fA5Jj+j23NUfzL1GNdAZuFbdmCp6FiTVsKlZZFCS6reznd
+# kOTFrVQ0XVdHQj9n2SUOdwarUoimpSVhCOBceJYvSNB+rt8+Lsuya43NGw08Z+/f
+# XTaMZwsvYBN6Db7U8cPklAjjUTkemC+agtjcylBHkKsyewk+R6GNkP5Ifg43/Jhp
+# +tGAJRrAOVdHmaZCNGiOeIvCVj1d976g0FTqMnFZtPl3FnJ2yI6nEKtGwQAt0RYL
+# Q8ytRc4ifS1KsxadbR35Zdh9RGn/jQQgWOzGE62sB90Y+eMYV4FlJrU9bkpYp97Y
+# n7AUaAqK1LgeICVPWAEB6h7R1T2eBOSGD/rz6gX77UgN8t3ES969G9ndPVcaU2vA
+# VT/JaMACQkr7Fa3UID0W8L+m466C4LHaA/R5WaYkm+JnnEIGgAa2gIHBxGiin4Wj
+# eKgKUiRS4GuumtbWsrXc8ins7OJPIykXdR4QrR58GzWfmQoAQWYYRiA6rrYcoPLo
+# Xkf3dKsIMmPckSjv2YElQ5pXq1MoW0ipYwIjhtooQL0VU7wi1kdAKY7c/jepPmFn
+# pvEKPH5QZA==
 # SIG # End signature block

@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.5"
+$ScriptVersion = "1.5.6"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -967,15 +967,15 @@ function Read-JobsManifest {
 function Write-OrchestratorTimeoutPolicySummary {
     $jobs = @($script:Manifest.OrderedJobs)
     $dailyOnce = @($jobs | Where-Object { $_.Schedule.Type -eq 'Daily' -and @($_.Schedule.Times).Count -eq 1 })
-    $weekly = @($jobs | Where-Object { $_.Schedule.Type -eq 'Weekly' })
+    $weeklyOnce = @($jobs | Where-Object { $_.Schedule.Type -eq 'Weekly' -and @($_.Schedule.DaysOfWeek).Count -eq 1 -and @($_.Schedule.Times).Count -eq 1 })
     $dailyMismatches = @($dailyOnce | Where-Object { [int]$_.TimeoutMinutes -ne 1380 })
-    $weeklyMismatches = @($weekly | Where-Object { [int]$_.TimeoutMinutes -ne 8640 })
+    $weeklyMismatches = @($weeklyOnce | Where-Object { [int]$_.TimeoutMinutes -ne 8640 })
     $level = if ($dailyMismatches.Count -eq 0 -and $weeklyMismatches.Count -eq 0) { 'INFO' } else { 'WARN' }
     $details = @()
     if ($dailyMismatches.Count -gt 0) { $details += "daily mismatch: $(@($dailyMismatches.Name) -join ', ')" }
     if ($weeklyMismatches.Count -gt 0) { $details += "weekly mismatch: $(@($weeklyMismatches.Name) -join ', ')" }
     $suffix = if ($details.Count -gt 0) { "; $($details -join '; ')" } else { '' }
-    Write-OrchestratorLog -Message ("Timeout policy audit: dailyOnce={0}, expected=1380 min, mismatches={1}; weekly={2}, expected=8640 min, mismatches={3}{4}." -f $dailyOnce.Count, $dailyMismatches.Count, $weekly.Count, $weeklyMismatches.Count, $suffix) -Level $level
+    Write-OrchestratorLog -Message ("Timeout policy audit: dailyOnce={0}, expected=1380 min, mismatches={1}; weeklyOnce={2}, expected=8640 min, mismatches={3}{4}." -f $dailyOnce.Count, $dailyMismatches.Count, $weeklyOnce.Count, $weeklyMismatches.Count, $suffix) -Level $level
 }
 
 function Update-JobsManifestIfChanged {
@@ -988,7 +988,8 @@ function Update-JobsManifestIfChanged {
     try {
         $newManifest = Read-JobsManifest -Path $script:Settings.JobsManifestPath
         $script:Manifest = $newManifest
-        Write-OrchestratorLog -Message ("Jobs manifest reloaded ({0} jobs)." -f $newManifest.OrderedJobs.Count)
+        $script:ElectionRebalanceRequested = $true
+        Write-OrchestratorLog -Message ("Jobs manifest reloaded ({0} jobs); an explicit election rebalance is requested." -f $newManifest.OrderedJobs.Count)
         Write-OrchestratorTimeoutPolicySummary
         Write-ServerAllowlistSummary
         Initialize-NewJobStates
@@ -1975,6 +1976,22 @@ function Get-OrchestratorPeerHealthSnapshot {
             if (-not $job.Enabled -or -not (Test-JobAllowedOnNamedServer -Job $job -ServerName $peerServer)) { continue }
             $expectedOccurrence = Get-LatestPastOccurrence -Job $job -Now $auditNow
             if ($null -eq $expectedOccurrence) { continue }
+
+            try {
+                $claimRecord = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName ([string]$job.Name) -Occurrence $expectedOccurrence
+                if ($null -ne $claimRecord -and $null -ne $claimRecord.Claim) {
+                    $claimStatus = [string]$claimRecord.Claim.Status
+                    if ($claimStatus -in @('Success', 'Failed', 'TimedOut', 'Interrupted')) { continue }
+                    if ($claimStatus -in @('Claimed', 'Running', 'RetryScheduled') -and $claimRecord.Claim.PSObject.Properties['SafeUntilUtc']) {
+                        $claimSafeUntilUtc = [datetime]::MinValue
+                        if ([datetime]::TryParse([string]$claimRecord.Claim.SafeUntilUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$claimSafeUntilUtc) -and
+                            $Now.ToUniversalTime() -le $claimSafeUntilUtc.ToUniversalTime()) { continue }
+                    }
+                }
+            }
+            catch {
+                Write-OrchestratorRuntimeUpdateWarning -Key ("peer-claim:{0}:{1}:{2}" -f $job.Name, $expectedOccurrence.ToUniversalTime().ToString('o'), $_.Exception.Message) -Message ("Peer monitoring could not read the shared claim for job {0}, occurrence {1}: {2}" -f $job.Name, $expectedOccurrence.ToString('yyyy-MM-dd HH:mm'), $_.Exception.Message) -Now $Now
+            }
 
             $runningMatch = @(
                 $runningJobs | Where-Object {
@@ -3269,6 +3286,34 @@ function Read-SharedElectionPlan {
     }
 }
 
+function Get-OrchestratorElectionPlanAssignmentSignature {
+    param([AllowNull()]$Plan)
+
+    if ($null -eq $Plan) { return '' }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    if ($Plan.PSObject.Properties['Assignments']) {
+        foreach ($assignment in @($Plan.Assignments | Sort-Object JobName, OwnerServer, GroupKey)) {
+            $parts.Add(("A|{0}|{1}|{2}" -f [string]$assignment.JobName, ([string]$assignment.OwnerServer).ToUpperInvariant(), [string]$assignment.GroupKey))
+        }
+    }
+    if ($Plan.PSObject.Properties['UnassignedGroups']) {
+        foreach ($group in @($Plan.UnassignedGroups | Sort-Object GroupKey)) {
+            $parts.Add(("U|{0}|{1}" -f [string]$group.GroupKey, [string]$group.Reason))
+        }
+    }
+    return $parts -join "`n"
+}
+
+function Test-OrchestratorElectionPlanAssignmentsEqual {
+    param(
+        [AllowNull()]$Left,
+        [AllowNull()]$Right
+    )
+
+    if ($null -eq $Left -or $null -eq $Right) { return $false }
+    return (Get-OrchestratorElectionPlanAssignmentSignature -Plan $Left) -ceq (Get-OrchestratorElectionPlanAssignmentSignature -Plan $Right)
+}
+
 function Update-OrchestratorElectionPlan {
     param([switch]$ForceRefresh)
 
@@ -3309,13 +3354,25 @@ function Update-OrchestratorElectionPlan {
                 $jobPolicies[$serverName] = $script:Settings.ServerJobPolicies[$serverName]
             }
         }
-        $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -ServerJobPolicies $jobPolicies -DurationMinutesByJob (Get-OrchestratorDurationMedians) -NowUtc $nowUtc
+
+        $preserveOwners = $null -ne $sharedPlan -and -not $script:ElectionRebalanceRequested
+        $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -ServerJobPolicies $jobPolicies -DurationMinutesByJob (Get-OrchestratorDurationMedians) -PreviousPlan $sharedPlan -PreservePreviousOwners:$preserveOwners -NowUtc $nowUtc
+        $assignmentsChanged = -not (Test-OrchestratorElectionPlanAssignmentsEqual -Left $sharedPlan -Right $plan)
+        if (-not $assignmentsChanged -and $null -ne $sharedPlan -and $sharedPlan.PSObject.Properties['PlanId'] -and -not [string]::IsNullOrWhiteSpace([string]$sharedPlan.PlanId)) {
+            $plan.PlanId = [string]$sharedPlan.PlanId
+        }
+
         Write-FileAtomically -Path $script:Settings.ElectionPlanPath -Content ($plan | ConvertTo-Json -Depth 10)
         $script:ElectionPlan = $plan
         $script:LastElectionPlanRefreshUtc = $nowUtc
-        Write-OrchestratorLog -Message ("Election plan {0} generated from {1} live capable servers; assignments={2}; unassignedGroups={3}." -f $plan.PlanId, $capabilities.Count, @($plan.Assignments).Count, @($plan.UnassignedGroups).Count)
-        foreach ($group in @($plan.UnassignedGroups)) {
-            Write-OrchestratorLog -Message ("Election left group {0} unassigned: {1}" -f $group.GroupKey, $group.Reason) -Level ERROR
+        $script:ElectionRebalanceRequested = $false
+
+        if ($assignmentsChanged) {
+            Write-OrchestratorLog -Message ("Election plan {0} changed from {1} live capable servers; assignments={2}; unassignedGroups={3}." -f $plan.PlanId, $capabilities.Count, @($plan.Assignments).Count, @($plan.UnassignedGroups).Count)
+            foreach ($group in @($plan.UnassignedGroups)) {
+                Write-OrchestratorLog -Message ("Election left group {0} unassigned: {1}" -f $group.GroupKey, $group.Reason) -Level ERROR
+            }
+            Write-ServerAllowlistSummary
         }
     }
     catch [System.IO.IOException] {
@@ -3342,12 +3399,45 @@ function Update-OrchestratorElectionPlan {
         }
     }
 }
-
 function Write-ServerAllowlistSummary {
     $blocked = @($script:Manifest.OrderedJobs | Where-Object { -not (Test-JobAllowedOnServer -Job $_) } | ForEach-Object { $_.Name })
     if ($blocked.Count -gt 0) {
         Write-OrchestratorLog -Message ("Jobs not owned by this server under the active assignment policy ({0}): {1}" -f $env:COMPUTERNAME, ($blocked -join ', '))
     }
+}
+
+function Set-OccurrenceHandledByPeer {
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][datetime]$Occurrence,
+        [Parameter(Mandatory = $true)]$Claim
+    )
+
+    $claimStatus = [string]$Claim.Status
+    if ($claimStatus -notin @('Success', 'Failed', 'TimedOut', 'Interrupted')) {
+        throw "Claim status '$claimStatus' is not terminal."
+    }
+    $claimEnd = Get-Date
+    if ($Claim.PSObject.Properties['UpdatedAtUtc']) {
+        $parsedEnd = [datetime]::MinValue
+        if ([datetime]::TryParse([string]$Claim.UpdatedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsedEnd)) {
+            $claimEnd = $parsedEnd.ToLocalTime()
+        }
+    }
+
+    $state = Get-JobState -JobName $JobName
+    $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $Occurrence
+    $state.LastRunStart = $null
+    $state.LastRunEnd = ConvertTo-StateTime -Value $claimEnd
+    $state.LastStatus = $claimStatus
+    $state.LastExitCode = $null
+    $state.RetryCount = if ($Claim.PSObject.Properties['Attempt']) { [int]$Claim.Attempt } else { 0 }
+    $state.Running = $null
+    $state.PendingRetry = $null
+    Save-OrchestratorState
+
+    $claimOwner = if ($Claim.PSObject.Properties['OwnerServer']) { [string]$Claim.OwnerServer } else { 'another server' }
+    Write-OrchestratorLog -Message ("Job {0}: occurrence {1} synchronized from terminal shared claim owned by {2} with status {3}; no duplicate local launch is needed." -f $JobName, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $claimOwner, $claimStatus)
 }
 
 function Set-OccurrenceSkipped {
@@ -3571,7 +3661,13 @@ function Invoke-LaunchPhase {
             try {
                 $claim = Enter-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $name -Occurrence $occurrence -OwnerServer $env:COMPUTERNAME -PlanId ([string]$script:ElectionPlan.PlanId) -SafeMinutes ($job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) -HeartbeatRootPath $script:Settings.SharedDataFolderPath -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes
                 if (-not $claim.Acquired) {
-                    Write-OrchestratorRuntimeUpdateWarning -Key ("claim:{0}:{1}:{2}" -f $name, $occurrence.ToUniversalTime().ToString('o'), $claim.Reason) -Message ("Job {0}: occurrence {1} not launched because its atomic claim was refused: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $claim.Reason) -Now $Now
+                    $terminalClaim = $null -ne $claim.Claim -and [string]$claim.Claim.Status -in @('Success', 'Failed', 'TimedOut', 'Interrupted')
+                    if ($terminalClaim) {
+                        Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $claim.Claim
+                    }
+                    else {
+                        Write-OrchestratorRuntimeUpdateWarning -Key ("claim:{0}:{1}:{2}" -f $name, $occurrence.ToUniversalTime().ToString('o'), $claim.Reason) -Message ("Job {0}: occurrence {1} not launched because its atomic claim was refused: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $claim.Reason) -Now $Now
+                    }
                     continue
                 }
                 $claimPath = [string]$claim.ClaimPath
@@ -4161,6 +4257,7 @@ function Update-OrchestratorCentralConfigurationIfChanged {
             Set-OrchestratorCentralClusterSettings -ClusterDocument $snapshot.Cluster
             $script:CentralClusterHash = $snapshot.ClusterHash
             $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
+            $script:ElectionRebalanceRequested = $true
             if ($script:LogReady) {
                 Write-OrchestratorLog -Message ("Central cluster configuration reloaded: {0} expected server(s)." -f @($script:Settings.ExpectedOrchestratorServers).Count)
             }
@@ -4201,6 +4298,7 @@ $script:ServerCapabilities = $null
 $script:ElectionPlan = $null
 $script:LastCapabilityRefreshUtc = [datetime]::MinValue
 $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
+$script:ElectionRebalanceRequested = $false
 $script:CentralClusterHash = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
@@ -4695,8 +4793,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD27eaFzJW4FW2T
-# mN/g3EhrRPnzhQAGJYb58jmc7ZEWM6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDx2O/CkVxHesPu
+# Y9em8XgbXzxpaksRP13peiinZXX6eqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4829,31 +4927,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEyO4zj3ThySwpz0L5D16n+N0y+Wb3F9gTVWoytyHx1UMA0GCSqG
-# SIb3DQEBAQUABIIBgHL9NzFT7ikKHKf73gPRHkHGEkPl4rXSavoaoWeN8Mhl311S
-# WAzxd8+x4z16CwYxUATch/vujvOnUVec1DNhiCup/evZAqJya3K7vCu1HqlEl9TC
-# sngeffEcb4FpkhER890pdCJJVvFVBGHl8ZrlyRhBf4SjwG7suhi3E+7kQFCRFpRK
-# LzL/oI65Jm18xL/bwvkohLtJKb5EzVEQmCafloEjuLqVo2EBiIn/h1rjRKSt4JjN
-# FVpvp1QIKOLDeT9CI0jy5FiwiO8iop3zMjnRnnWOFcXwOCeMt1gAD2JG/XRgXhI4
-# UCAc4IXit5CgsxLL2JM0NADEX4ayWi10UzoCDXR51/WDVG927eUlyvFKbeWdPN+l
-# cWRC9/8CTw8iEgXTsdnCjDT1n1/mrZP/iwzEGUgR1beDRtZSb2Bj8qM+n3SXcT5d
-# 6kwzEhgQL/8OfaQSNrE/vkJYtM5DQxUKN2/Xwp6cPEUJRJNH/gS6NZPU/LBzStSk
-# 635neJMX6In4LsWk5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOyINdaFhfRhBL9XzibH9MGvTU3mkjSdEVc0lMvCwbtkMA0GCSqG
+# SIb3DQEBAQUABIIBgC20b28FJCq+JqI8oFzaPOZxLBLk4NPL1trr9vxJA9i39nLq
+# Lkm3eCqeqUO66qtl4SzsknWtS2JlrLc80hxFNBW5uw09uBwMy8dhp+rgScSmSmJh
+# /4p6FkAjgVMh+ZoVwfIc1dctholpr0zOw2/C7MWbFeyXRZMVAT2eaWMXouMGzXnM
+# i5K98at/KWgxE9yGgxI5Pkw9vjSW8jd7fWPK9HTplJgRTwX2T/RKTT0gj6a+HPKV
+# XZLRr/tlRae4gduL6Ag06nZY3eppZLejsFepZKZ4VlUy0SBv0R4M6IlGtKp+QbzJ
+# H6wsTSXVwQLMleJQskFR+3v7Y1FMvp+0j++eQVcYaLuFMlWbgbJFaDCt4hnKH49w
+# WA/cB+k3A8rbcPT9SQVJu5w7IrWQnMF8Vvo2Sjjj8gX7U56YWi2t2GLa1M5Kbvkg
+# bGJJMR1Fdp5JOugG4qVlVobhW0MmzMmIncFxKoW+rfUSVXQ3tgl0gGhw3tMSIMuw
+# DBzYplBXf4u0wcppgaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxNDAw
-# NTdaMC8GCSqGSIb3DQEJBDEiBCCl9lYnkb0ADt9J83hPAy1UVsatb1TkYGkXGmSL
-# 3bUGdTANBgkqhkiG9w0BAQEFAASCAgBZ1043Jz55p6s4sQmjYvz/cdaoySDHbcaD
-# 5p2/EvqEP3ubwZMlEcqixZfi2TonCsGiPJTFhLl+7NFMconl9/rWzKfmbui+6um1
-# JgUoTq3x9mHsXDEtQ0JERBbChb5NMtTkXB1dwAtw+mDXk3VahBNQQsOwm/IbPISm
-# Ab18QFugNDFXQhFI4Yi22PQ/IeaPrZrWOKqx5wS2t9Ch0/IBJlc8nXIVyAQJg5wW
-# HcWupmy2vWAdwAzifDitJHus/BCLvSP9EYnWPxl4o7gZwjYHV9xQyHN8Q8MYMYkq
-# DnCaoqeYplS0qCcCOUc08bZc5WkZ/aNLFfMuh3Am/3gTqsW3eOEm9C8aJC10OimS
-# PXlYyUPs0ryzTX99+sr7oRctPVWXotAGJ+dl0ommcZXNqKirjQhnx/5sef5RdRfn
-# YLYsZ3gz4uG+aow9oejZSUbtirvDpGl178zW8iyEwFvYgKd+98DGTX2mECYtHIy5
-# VYz4dKR9mFqfr9oLYZFoY0DIvxlu2aLCfgHbUgoFIEgqdN+tmURAPpX1NwgMSvhb
-# wIBCnL2ylTkip+vR+bXGZ3/Xfx81V4b2/M7HrxrmJw+uA0WzingV+PfJOc4MI/vA
-# bWr+DlxqRu1bzRUtR6sTaOjG5IPW0QBqoGGdGYJoPIp/2d49lLFM5J8NuVNyP+zD
-# WW6Bwz8HiQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxNjM0
+# NDlaMC8GCSqGSIb3DQEJBDEiBCBGr7oiqlhf51SGHXvVXz7Vdn5NAVmlRvxXSmAM
+# 7JG1QjANBgkqhkiG9w0BAQEFAASCAgBFSyHiO2sbPC1DnfbxS4/t2uu73D51d2wz
+# EE0bihYSbE7KQGCCr4DGdciQRlCkkLpIT90Gom34WTuD4em8vEkuu0PKmaQ0/O4A
+# WPUsoa+6ABXkOyKcSHCv/kQuEf09dtDaoBgk8j/eODvb0/NSrOg03BiNnb7PjAzk
+# USl/rJSW5ZlViVc6bWRIoR9xzfb8xBAk5fwhtDl3notprtIFNGiClOouwLuFN9z7
+# A8WfWAcTsZVcRtgqE4RxhXDwhjz4lkvra07t7i052dZIQVdriyb21umoXJPJiDTn
+# a8umFD3LGsBs03cEkfh8R+K35AG0SHHYbHi6I1o9OavGG8am6hONON5rtgzMfpJs
+# 6WCwkMSHVwYS1BZtNktztENG9zpIS7fV5Y4IeEr77fd8HYvjygTsi1ZsXZsEuGFj
+# lN/i5WV4gxqU5ngufScJXJ6OACWUBRhccodNFujpXyJzOBD+Hh90VbTyoLtBb+nQ
+# M2NnDG2C4e1dOV6MW7/hDAUdjuoR4ZJlzvmNoth2af9uueSgaIJj8KSjcGumkBlb
+# anhbZrh1DtCAz9wd4cSDPJcdP3scb0w661x4qzm2gO20Kk+/n5j4bY+kkQhex34I
+# Nf1v6bJKbyHKNI0uugjjAkvDn+xi6Yos627DBBxkHormLV4Wmob5j80YrcZRmmvt
+# 5kpXYZybuw==
 # SIG # End signature block
