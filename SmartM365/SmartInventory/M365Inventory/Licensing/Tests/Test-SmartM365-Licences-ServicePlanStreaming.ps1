@@ -33,6 +33,8 @@ $requiredFunctions = @(
     'Copy-LicensesCsvAtomically',
     'Publish-LicensesServicePlanStateCsvFile',
     'New-LicensesDetailedServicePlanHistorySource',
+    'Get-LicensesIsoWeekName',
+    'Publish-LicensesWeeklyHistory',
     'Remove-LegacyWeeklyServicePlanStateDuplicates'
 )
 $definitions = @($ast.FindAll({
@@ -50,7 +52,6 @@ function WriteLog {
     param([string]$Message, [string]$Level)
     $script:TestLogs.Add("$Level|$Message") | Out-Null
 }
-function Get-SmartM365IsoWeekName { return '2026-W30' }
 $script:MaxItemsMode = $false
 function Test-SmartM365MaxItemsMode { return $script:MaxItemsMode }
 function Add-SmartM365MaxItemsSuffixToBaseName {
@@ -75,6 +76,7 @@ $global:csvGeneratedPaths = $null
 $testRoot = Join-Path $env:TEMP ("SmartM365-LicenseStreamTest-" + [guid]::NewGuid().ToString('N'))
 try {
     New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+    Assert-Equal (Get-LicensesIsoWeekName -Date ([datetime]::new(2026, 7, 20))) '2026-W30' 'ISO week name'
     $compactPath = Join-Path $testRoot 'states.building.csv'
     $writer = New-LicensesServicePlanStateWriter -Path $compactPath
     Write-LicensesServicePlanStateRow -Writer $writer -TenantKey 'tenant-test' -UserId 'user-1' -SkuId 'sku-1' -PlanId 'plan-1' -StateCode 'A' -RowNumber 1
@@ -132,6 +134,32 @@ try {
 
     $manifest = Get-Content -LiteralPath (Join-Path $weekWithBoth 'manifest.json') -Raw | ConvertFrom-Json
     Assert-Equal @($manifest.Files | Where-Object { $_ -eq 'M365_Licenses_UserServicePlanStates.csv' }).Count 0 'Manifest duplicate removed'
+    function Get-ScriptLocalConfigValue {
+        param($Config, [string]$Name, $DefaultValue)
+        return $DefaultValue
+    }
+    function Save-SmartM365WeeklyInventoryHistory {
+        param(
+            [string[]]$SourceFiles,
+            [string]$HistoryRootPath,
+            [int]$RetentionWeeks,
+            [string]$HistoryLabel,
+            [switch]$UploadChangedFilesOnly
+        )
+    }
+    function Remove-LegacyWeeklyServicePlanStateDuplicates { throw 'simulated cleanup failure' }
+    $ScriptLocalConfig = [pscustomobject]@{}
+    $failureCurrent = Join-Path $testRoot 'failure-current'
+    $failureLatest = Join-Path $testRoot 'failure-latest'
+    New-Item -ItemType Directory -Path $failureCurrent, $failureLatest -Force | Out-Null
+    $script:TestLogs.Clear()
+    Publish-LicensesWeeklyHistory `
+        -ServicePlanStateCsvPath $compactPath `
+        -ExpectedServicePlanRows 3 `
+        -CurrentOutputPath $failureCurrent `
+        -LatestOutputPath $failureLatest
+    Assert-Equal @($script:TestLogs | Where-Object { $_ -like 'WARNING|Legacy WeeklyHistory service-plan duplicate cleanup failed*' }).Count 1 'Cleanup failure warning'
+    Assert-Equal @(Get-ChildItem -LiteralPath $failureCurrent -Filter 'M365_Licenses_UserServicePlanStates_Detailed_*.csv' -File).Count 0 'Detailed cleanup after warning'
 
     Write-Host 'PASS: compact rows streamed; detailed states decoded; duplicate WeeklyHistory safely retired.' -ForegroundColor Green
 }
