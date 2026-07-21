@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.7
+1.5.8
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.7
+    Version : 1.5.8
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.7"
+$ScriptVersion = "1.5.8"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -1724,15 +1724,33 @@ function Get-OrchestratorPendingJobSnapshot {
         $reason = 'DueNotStarted'
         $firstSeen = $due
         $details = 'The occurrence is due but has not been marked as handled.'
+        $blockingJob = ''
+        $blockingServer = ''
+        $blockSafeUntilUtc = ''
         if ($script:DependencyWaitLogState.ContainsKey($name)) {
             $waitState = $script:DependencyWaitLogState[$name]
             $reason = 'WaitingDependencies'
             $firstSeen = [datetime]$waitState.FirstSeen
             $details = "Waiting for dependencies: $(@($waitState.Dependencies) -join ', ')."
         }
-        elseif ($script:RunningJobs.Count -ge $script:Settings.MaxConcurrency) {
-            $reason = 'WaitingConcurrency'
-            $details = ("Local concurrency limit reached ({0}/{1})." -f $script:RunningJobs.Count, $script:Settings.MaxConcurrency)
+        else {
+            try {
+                $leaseRecord = Get-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $script:Settings.ConcurrencyLeasesPath -ConcurrencyKey ([string]$job.ConcurrencyKey)
+                if ($null -ne $leaseRecord -and $null -ne $leaseRecord.Lease) {
+                    $reason = 'BlockedByConcurrencyKey'
+                    $blockingJob = [string]$leaseRecord.Lease.JobName
+                    $blockingServer = [string]$leaseRecord.Lease.OwnerServer
+                    $blockSafeUntilUtc = [string]$leaseRecord.Lease.SafeUntilUtc
+                    $details = ("ConcurrencyKey '{0}' is held by job {1} on {2} until {3}." -f $job.ConcurrencyKey, $blockingJob, $blockingServer, $blockSafeUntilUtc)
+                }
+            }
+            catch {
+                Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency-snapshot:{0}:{1}" -f $name, $_.Exception.Message) -Message ("Job {0}: shared ConcurrencyKey lease could not be inspected for heartbeat: {1}" -f $name, $_.Exception.Message) -Now $Now
+            }
+            if ($reason -eq 'DueNotStarted' -and $script:RunningJobs.Count -ge $script:Settings.MaxConcurrency) {
+                $reason = 'WaitingConcurrency'
+                $details = ("Local concurrency limit reached ({0}/{1})." -f $script:RunningJobs.Count, $script:Settings.MaxConcurrency)
+            }
         }
 
         $pending.Add([pscustomobject]@{
@@ -1741,6 +1759,10 @@ function Get-OrchestratorPendingJobSnapshot {
             Reason = $reason
             FirstSeen = ConvertTo-StateTime -Value $firstSeen
             Details = $details
+            ConcurrencyKey = [string]$job.ConcurrencyKey
+            BlockingJob = $blockingJob
+            BlockingServer = $blockingServer
+            BlockSafeUntilUtc = $blockSafeUntilUtc
         })
     }
     return @($pending.ToArray())
@@ -2022,6 +2044,17 @@ function Get-OrchestratorPeerHealthSnapshot {
             if ($pendingMatch.Count -eq 1) {
                 $pendingReason = [string]$pendingMatch[0].Reason
                 if ($pendingReason -eq 'PendingRetry') { continue }
+                if ($pendingReason -eq 'BlockedByConcurrencyKey') {
+                    $blockSafeUntilUtc = [datetime]::MinValue
+                    $hasSafeUntil = $pendingMatch[0].PSObject.Properties['BlockSafeUntilUtc'] -and
+                        [datetime]::TryParse([string]$pendingMatch[0].BlockSafeUntilUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$blockSafeUntilUtc)
+                    if ($hasSafeUntil -and $Now.ToUniversalTime() -le $blockSafeUntilUtc.ToUniversalTime()) { continue }
+                    $blocker = if ($pendingMatch[0].PSObject.Properties['BlockingJob']) { [string]$pendingMatch[0].BlockingJob } else { 'unknown' }
+                    $blockerServer = if ($pendingMatch[0].PSObject.Properties['BlockingServer']) { [string]$pendingMatch[0].BlockingServer } else { 'unknown' }
+                    $concurrencyKey = if ($pendingMatch[0].PSObject.Properties['ConcurrencyKey']) { [string]$pendingMatch[0].ConcurrencyKey } else { [string]$job.ConcurrencyKey }
+                    $issues.Add((New-OrchestratorPeerIssue -Key ("ConcurrencyBlockStale|{0}|{1}" -f $peerServer.ToUpperInvariant(), $job.Name) -Type 'ConcurrencyBlockStale' -Server $peerServer -Job ([string]$job.Name) -Status $pendingReason -LastSeen $lastSeenText -AgeMinutes ([math]::Round(($Now - $expectedOccurrence).TotalMinutes, 1)) -Details ("ConcurrencyKey '{0}' remains blocked by job {1} on {2}, but its lease expired or has no valid SafeUntilUtc. {3}" -f $concurrencyKey, $blocker, $blockerServer, [string]$pendingMatch[0].Details)))
+                    continue
+                }
                 if ($pendingReason -eq 'WaitingDependencies') {
                     $dependencyTimeout = [int]$job.DependencyWaitTimeoutMinutes
                     if ($dependencyTimeout -le 0) { $dependencyTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
@@ -2700,7 +2733,9 @@ function Start-InventoryJob {
         [Parameter(Mandatory = $true)]$Job,
         [Parameter(Mandatory = $true)][datetime]$Occurrence,
         [int]$Attempt = 0,
-        [string]$ClaimPath = ''
+        [string]$ClaimPath = '',
+        [string]$ConcurrencyLeasePath = '',
+        [string]$ConcurrencyLeaseId = ''
     )
 
     $state = Get-JobState -JobName $Job.Name
@@ -2717,14 +2752,14 @@ function Start-InventoryJob {
 
     if (-not (Test-Path -LiteralPath $scriptFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: script not found: {1}" -f $Job.Name, $scriptFullPath) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Script not found: {0}" -f $scriptFullPath)
         return
     }
 
     if ($useLauncher -and -not (Test-Path -LiteralPath $launcherFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: launcher not found: {1}" -f $Job.Name, $launcherFullPath) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Launcher not found: {0}" -f $launcherFullPath)
         return
     }
@@ -2733,7 +2768,7 @@ function Start-InventoryJob {
         Write-OrchestratorLog -Message ("Job {0}: launch rejected by Authenticode validation. {1}" -f $Job.Name, $authenticodeResult.Summary) -Level ERROR
         $rejectLine = "[{0}] {1} rejected job {2}: AuthenticodeRejected. {3}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $authenticodeResult.Summary
         try { [System.IO.File]::WriteAllText($logPath, $rejectLine + [Environment]::NewLine) } catch { }
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText ("AuthenticodeRejected: {0}" -f $authenticodeResult.Summary)
         return
     }
@@ -2766,7 +2801,7 @@ function Start-InventoryJob {
         }
         catch {
             Write-OrchestratorLog -Message ("Job {0}: unable to validate supported parameters: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
-            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
+            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
             Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
             return
         }
@@ -2808,7 +2843,7 @@ function Start-InventoryJob {
     }
     catch {
         Write-OrchestratorLog -Message ("Job {0}: failed to start child process: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
         return
     }
@@ -2826,6 +2861,8 @@ function Start-InventoryJob {
         TimeoutMinutes = $Job.TimeoutMinutes
         ProcessName = $engine.ProcessName
         ClaimPath = $ClaimPath
+        ConcurrencyLeasePath = $ConcurrencyLeasePath
+        ConcurrencyLeaseId = $ConcurrencyLeaseId
     }
     $state.Running = @{
         Pid = $process.Id
@@ -2836,6 +2873,8 @@ function Start-InventoryJob {
         TimeoutMinutes = $Job.TimeoutMinutes
         ProcessName = $engine.ProcessName
         ClaimPath = $ClaimPath
+        ConcurrencyLeasePath = $ConcurrencyLeasePath
+        ConcurrencyLeaseId = $ConcurrencyLeaseId
     }
     if (-not [string]::IsNullOrWhiteSpace($ClaimPath)) {
         try {
@@ -2970,6 +3009,21 @@ function Complete-JobRun {
         }
     }
 
+    if ($RunInfo.ContainsKey('ConcurrencyLeasePath') -and
+        $RunInfo.ContainsKey('ConcurrencyLeaseId') -and
+        -not [string]::IsNullOrWhiteSpace([string]$RunInfo.ConcurrencyLeasePath) -and
+        -not [string]::IsNullOrWhiteSpace([string]$RunInfo.ConcurrencyLeaseId)) {
+        try {
+            $released = Exit-SmartM365OrchestratorConcurrencyLease -LeasePath ([string]$RunInfo.ConcurrencyLeasePath) -LeaseId ([string]$RunInfo.ConcurrencyLeaseId) -OwnerServer $env:COMPUTERNAME
+            if (-not $released) {
+                Write-OrchestratorLog -Message ("Job {0}: concurrency lease was not released because ownership changed." -f $JobName) -Level WARN
+            }
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Job {0}: concurrency lease could not be released: {1}" -f $JobName, $_.Exception.Message) -Level ERROR
+        }
+    }
+
     $state.LastRunEnd = ConvertTo-StateTime -Value $EndTime
     $state.LastExitCode = $ExitCode
     $state.LastStatus = $status
@@ -3076,6 +3130,8 @@ function Restore-RunningJobs {
             Attempt = [int]$record.Attempt
             TimeoutMinutes = [int]$record.TimeoutMinutes
             ClaimPath = if ($record.ContainsKey('ClaimPath')) { [string]$record.ClaimPath } else { '' }
+            ConcurrencyLeasePath = if ($record.ContainsKey('ConcurrencyLeasePath')) { [string]$record.ConcurrencyLeasePath } else { '' }
+            ConcurrencyLeaseId = if ($record.ContainsKey('ConcurrencyLeaseId')) { [string]$record.ConcurrencyLeaseId } else { '' }
         }
         if ($null -eq $runInfo.StartTime) { $runInfo.StartTime = Get-Date }
         if ($null -eq $runInfo.Occurrence) { $runInfo.Occurrence = $runInfo.StartTime }
@@ -3122,6 +3178,57 @@ function Restore-RunningJobs {
                 }
                 catch {
                     Write-OrchestratorLog -Message ("Job {0}: failed to restore the occurrence claim for re-adopted PID {1}: {2}. The process remains supervised." -f $jobName, $recordedPid, $_.Exception.Message) -Level ERROR
+                }
+            }
+        }
+
+        if ($null -ne $process) {
+            $manifestJobForLease = @(
+                $script:Manifest.OrderedJobs |
+                    Where-Object { [string]$_.Name -eq $jobName } |
+                    Select-Object -First 1
+            )
+            $jobForLease = if ($manifestJobForLease.Count -gt 0) { $manifestJobForLease[0] } else { $null }
+            $concurrencyKey = if ($null -ne $jobForLease) { [string]$jobForLease.ConcurrencyKey } else { $jobName }
+            $leaseIsCurrent = $false
+            if (-not [string]::IsNullOrWhiteSpace([string]$runInfo.ConcurrencyLeasePath) -and
+                -not [string]::IsNullOrWhiteSpace([string]$runInfo.ConcurrencyLeaseId) -and
+                (Test-Path -LiteralPath ([string]$runInfo.ConcurrencyLeasePath) -PathType Leaf)) {
+                try {
+                    $currentLease = Get-Content -LiteralPath ([string]$runInfo.ConcurrencyLeasePath) -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    $leaseIsCurrent = [string]$currentLease.LeaseId -eq [string]$runInfo.ConcurrencyLeaseId
+                }
+                catch { $leaseIsCurrent = $false }
+            }
+
+            if (-not $leaseIsCurrent) {
+                $configuredTimeout = if ($null -ne $jobForLease) { [int]$jobForLease.TimeoutMinutes } else { [int]$runInfo.TimeoutMinutes }
+                $elapsedMinutes = [math]::Max(0, ((Get-Date) - [datetime]$runInfo.StartTime).TotalMinutes)
+                $remainingSafeMinutes = [int][math]::Ceiling([math]::Max(1, $configuredTimeout + $script:Settings.ElectionClaimGraceMinutes - $elapsedMinutes))
+                try {
+                    $lease = Enter-SmartM365OrchestratorConcurrencyLease `
+                        -LeasesRootPath $script:Settings.ConcurrencyLeasesPath `
+                        -ConcurrencyKey $concurrencyKey `
+                        -JobName $jobName `
+                        -Occurrence $runInfo.Occurrence `
+                        -OwnerServer $env:COMPUTERNAME `
+                        -SafeMinutes $remainingSafeMinutes `
+                        -HeartbeatRootPath $script:Settings.SharedDataFolderPath `
+                        -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes
+                    if ($lease.Acquired) {
+                        $runInfo.ConcurrencyLeasePath = [string]$lease.LeasePath
+                        $runInfo.ConcurrencyLeaseId = [string]$lease.Lease.LeaseId
+                        $record['ConcurrencyLeasePath'] = $runInfo.ConcurrencyLeasePath
+                        $record['ConcurrencyLeaseId'] = $runInfo.ConcurrencyLeaseId
+                        $stateChanged = $true
+                        Write-OrchestratorLog -Message ("Job {0}: restored ConcurrencyKey '{1}' lease for re-adopted PID {2}." -f $jobName, $concurrencyKey, $recordedPid)
+                    }
+                    else {
+                        Write-OrchestratorLog -Message ("Job {0}: could not restore ConcurrencyKey '{1}' lease for re-adopted PID {2}: {3}. The process remains supervised." -f $jobName, $concurrencyKey, $recordedPid, $lease.Reason) -Level ERROR
+                    }
+                }
+                catch {
+                    Write-OrchestratorLog -Message ("Job {0}: failed to restore ConcurrencyKey '{1}' lease for re-adopted PID {2}: {3}. The process remains supervised." -f $jobName, $concurrencyKey, $recordedPid, $_.Exception.Message) -Level ERROR
                 }
             }
         }
@@ -3660,15 +3767,38 @@ function Invoke-LaunchPhase {
             continue
         }
 
-        $claimPath = ''
-        if ($job.AssignmentMode -eq 'Elected') {
-            if ($null -eq $script:ElectionPlan) {
-                Write-OrchestratorRuntimeUpdateWarning -Key ("election-no-plan:{0}" -f $name) -Message ("Job {0}: elected occurrence {1} is queued because no shared election plan is available." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm')) -Now $Now
+        if ($job.AssignmentMode -eq 'Elected' -and $null -eq $script:ElectionPlan) {
+            Write-OrchestratorRuntimeUpdateWarning -Key ("election-no-plan:{0}" -f $name) -Message ("Job {0}: elected occurrence {1} is queued because no shared election plan is available." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm')) -Now $Now
+            continue
+        }
+
+        $concurrencyLeasePath = ''
+        $concurrencyLeaseId = ''
+        try {
+            $concurrencyLease = Enter-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $script:Settings.ConcurrencyLeasesPath -ConcurrencyKey ([string]$job.ConcurrencyKey) -JobName $name -Occurrence $occurrence -OwnerServer $env:COMPUTERNAME -SafeMinutes ($job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) -HeartbeatRootPath $script:Settings.SharedDataFolderPath -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes
+            if (-not $concurrencyLease.Acquired) {
+                Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency-lease:{0}:{1}:{2}" -f $name, $occurrence.ToUniversalTime().ToString('o'), $concurrencyLease.Reason) -Message ("Job {0}: occurrence {1} is queued as BlockedByConcurrencyKey because shared key '{2}' is unavailable: {3}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $job.ConcurrencyKey, $concurrencyLease.Reason) -Now $Now
                 continue
             }
+            $concurrencyLeasePath = [string]$concurrencyLease.LeasePath
+            $concurrencyLeaseId = [string]$concurrencyLease.Lease.LeaseId
+        }
+        catch {
+            Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency-lease-error:{0}:{1}" -f $name, $_.Exception.Message) -Message ("Job {0}: occurrence {1} queued because the shared ConcurrencyKey lease could not be created; fail-closed protection is active: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $_.Exception.Message) -Now $Now
+            continue
+        }
+
+        $claimPath = ''
+        if ($job.AssignmentMode -eq 'Elected') {
             try {
                 $claim = Enter-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $name -Occurrence $occurrence -OwnerServer $env:COMPUTERNAME -PlanId ([string]$script:ElectionPlan.PlanId) -SafeMinutes ($job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) -HeartbeatRootPath $script:Settings.SharedDataFolderPath -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes
                 if (-not $claim.Acquired) {
+                    try {
+                        $null = Exit-SmartM365OrchestratorConcurrencyLease -LeasePath $concurrencyLeasePath -LeaseId $concurrencyLeaseId -OwnerServer $env:COMPUTERNAME
+                    }
+                    catch {
+                        Write-OrchestratorLog -Message ("Job {0}: failed to release ConcurrencyKey '{1}' after occurrence claim refusal: {2}" -f $name, $job.ConcurrencyKey, $_.Exception.Message) -Level ERROR
+                    }
                     $terminalClaim = $null -ne $claim.Claim -and [string]$claim.Claim.Status -in @('Success', 'Failed', 'TimedOut', 'Interrupted')
                     if ($terminalClaim) {
                         Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $claim.Claim
@@ -3681,7 +3811,14 @@ function Invoke-LaunchPhase {
                 $claimPath = [string]$claim.ClaimPath
             }
             catch {
-                Write-OrchestratorRuntimeUpdateWarning -Key ("claim-error:{0}:{1}" -f $name, $_.Exception.Message) -Message ("Job {0}: occurrence {1} queued because the shared claim could not be created; fail-closed protection is active: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $_.Exception.Message) -Now $Now
+                $claimError = $_
+                try {
+                    $null = Exit-SmartM365OrchestratorConcurrencyLease -LeasePath $concurrencyLeasePath -LeaseId $concurrencyLeaseId -OwnerServer $env:COMPUTERNAME
+                }
+                catch {
+                    Write-OrchestratorLog -Message ("Job {0}: failed to release ConcurrencyKey '{1}' after occurrence claim error: {2}" -f $name, $job.ConcurrencyKey, $_.Exception.Message) -Level ERROR
+                }
+                Write-OrchestratorRuntimeUpdateWarning -Key ("claim-error:{0}:{1}" -f $name, $claimError.Exception.Message) -Message ("Job {0}: occurrence {1} queued because the shared claim could not be created; fail-closed protection is active: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $claimError.Exception.Message) -Now $Now
                 continue
             }
         }
@@ -3693,7 +3830,7 @@ function Invoke-LaunchPhase {
             $script:ForcedPending = @($script:ForcedPending | Where-Object { $_ -ne $name })
             Write-OrchestratorLog -Message ("Job {0}: launching now (forced)." -f $name)
         }
-        Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath
+        Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId
         $launchedThisTick.Add($name)
         if (-not $script:StatePersistenceHealthy) {
             Write-OrchestratorLog -Message ("Job {0}: state could not be persisted after process launch; stopping this tick's launch phase until persistence recovers." -f $name) -Level ERROR
@@ -4462,6 +4599,7 @@ try {
         CentralAuditPath = ''
         ElectionFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election')
         ElectionClaimsPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Claims')
+        ConcurrencyLeasesPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Concurrency')
         ElectionPlanPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.json')
         ElectionPlanLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.lock')
         CapabilitiesPath = (Join-Path -Path $dataFolder -ChildPath 'Orchestrator-Capabilities.json')
@@ -4546,7 +4684,7 @@ try {
         MailConfigIssue = $mailConfigIssueText
     }
 
-    foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath, $script:Settings.ElectionFolderPath, $script:Settings.ElectionClaimsPath)) {
+    foreach ($folder in @($sharedDataFolder, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.JobRunsFolderPath, $script:Settings.ElectionFolderPath, $script:Settings.ElectionClaimsPath, $script:Settings.ConcurrencyLeasesPath)) {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     }
 
@@ -4801,8 +4939,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvsexv1VnJCot4
-# QZgtb1U9JTCoL9w0FcuQyHtGXZJSAqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLFNmVIHs4jyBh
+# yYWsuzudxGSynnkXT/4RqIUtdJ2JBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4935,31 +5073,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPslWpg1oWPerRL7GCgSOHf6eAPObo/QmtQWz/z4SSFDMA0GCSqG
-# SIb3DQEBAQUABIIBgJoa/mYIbm4odMXR56ihgpvkBzOI1fs1GxBEM3kDUeSrZXJq
-# e4i39yNK+y5JhKAYtSGfstfvp3Zabrj9Q8XTa5pfkx/SNJPM4gS/IW4NDdqsDxRY
-# 00ecSvvlun1k3cFZU28+/aGbE/k4YYyI0r1cgkh6NjbjVk8SR9IYLsQrQZjKGFBF
-# DAJDDP90ga720gNq4qiKRV7fKR1srHGfOmRbZUv3OTu8w/QkMjkIistC4mYTxwfM
-# lWXZEMe7XtfwhDthYoo2OTjwCfcbOPX0xhxvfs3hsY5V03n6VU48YJVdl+ezqtiO
-# cDf0E7gRtAV2xue6dS9PEm4gQtX70uCSJSruWuvLOPBiqq+I1qwGEtjNyx/+8+DO
-# Jw2zwRZGvKHbFGNyxLCUJKXUr9W+gori22nuOTDYKw5nCj0C9i0RbWi6urOppF6n
-# b93D/72rIEfeTEtmn9vfnVdZPXpM6Zu0iE7M78HsJlrrwKbds7t8YQkGERxeACqs
-# ziiZsQoMJnECbM+k86GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO1xvdP3t8cNkJduKHHTFZiWnKKynRTyEjNy1vk4Eg7lMA0GCSqG
+# SIb3DQEBAQUABIIBgHSwpP6urMhJ/CSX3SSs7fJU/M/JxxB2jvWeQ1ZZR6oM7NzO
+# hwSH/ltKekOJD5tOH3I4kv5vaDNDd/iv7ByriIziOc2YLdzXnil1MuzHNAD/Q1yd
+# xertgWerdZr4MnSVcOj5vVlz07sJII8Tyix8pYDQ782OO+IOJs2AVzhRTTmbeg7m
+# Dk1QqfGkV780Tns5/ey5p1Jb2cW1HK4W93qxcFw8sVajdp05tu55m+gnQwawlhn8
+# lcZgeaa3MOukOA8A6XiEBDeR2c3VlrMqCkIHPLx8cBxJ1R01YQuWXIO6sYsuFdtx
+# SIqIGIo6+6EKAY3CVpNnRVNg1A+/LVhnXEZJdEiK3sbWalXUHDJ1kXgvwR5yYon6
+# IRYt/KZsNNNsrN+6WI8adiD3IbZGbalcVHwTFflRNfGN+fghJ1wasHlUjk9PmR43
+# iLSsc8zO6TloBeh3B3SChWSM7z0790rZnI+NvPVmZAp809flQ4iBDaRqipnHEo9O
+# /W2ZV34lDZCiTP9l9aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAyMTU1
-# MzdaMC8GCSqGSIb3DQEJBDEiBCB9wkO3ojdWJam1xjLFVCZwp/b6gy7TqtR93CPe
-# TUc7JzANBgkqhkiG9w0BAQEFAASCAgBJ35pk6Y/uJKKoQUuocB/Wj0stCMs30lz3
-# TrHH+vu3NdkK5V/fJNaHD/fL1KNgEg8PLk1DkZ4aw2yDZ0u0/m0B5C34jjz0RtXv
-# HEKJMlVBFOhng1hb2qm4pvqOMLwL7docLWKrjko0SMWeaa+CghekGBORMQNOtvH2
-# x4mW5SeKbjAUC8vwLGHXm5Rhz62RPyESbhO37AvlVVhiisjln0qtxN6MAjJVX7d5
-# EjJG5Fm/fb2Bt6s8KPUL1HCx4pxzXsCjO2NdwlZngUEKzgV62Hy/sl7zyviqfOJZ
-# EHgYl6oOggegFjIPHPM2xVpFolcKbhm3YGH7Q0nCZpaFvNfnAv2bR9iYwXVq/JDo
-# Acjv80RG7fIF1KR1AKgi3PK2Xw8QQJSWfjhFcSal2SJCJM+00XN6I54rHimi0PQ/
-# rKpiD5qD4GMbcjmTgas1tjH2UG9rn8xipEbSaRnnZWKcY824AJtV5RGcWm0tBRzT
-# ToMutwmprUPdzCxaSR8g18U1GXfvZkjHkY8NQSTuCMMvI2AVG3rqzhhNWD/v7uWN
-# 2+wcbHvZz59vc9QXdkvlBVooDPggSUcnAAR6v6Iyr3jgqRc1wCNoxTHBr5Shom1A
-# 9OIrsnTUzkoMUGbnekSoyBGAPeB1Q8iibymmExXtNGa/cwp+bFB5KDsnGON1W/vQ
-# NBqX30KIzg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjEwODM5
+# NTBaMC8GCSqGSIb3DQEJBDEiBCDi9Jfs7V3aAN5cpvjwg0xcGw0aMtd1K2g/3eZ6
+# 44tSFzANBgkqhkiG9w0BAQEFAASCAgB15mHH/O18PM9yKqgoNw5nKO57JCOl5AwY
+# EB9FIgG5svooANyfSDrCOgRErY6graEYTp5SA3InirRUtdKM9LEe3YTISqPBBJpW
+# UaMy6vnifBnm1rrqUQVbbqfvgZFnToZY/BehcyRBU08093dfuFdHt9NneXL+vcTD
+# 8Wb9uGIpddeJQnq3XnzLZcM2TkeI4biKwwaH6o8Meg1J2VT9KliqZW2XXDQ2/Ksq
+# PKK+tj9+bGpiEu36s6U6Y0lBrgOc76Rmqyx2NDHHNLmHgXkdi/p0zIulk7Qm953M
+# JdTKbF5efmbV9WTLJQxPu1ZfG6Htq9rUPcPYbN+TuXOXGmx/Kf6Axqh6LZ7JmrdU
+# KPkOjqED8Lrw5kh16f8Jccolo6Wdx/U36S3iD2JfRudX81seXDKGbWFp4kBwjlXZ
+# qbthMswQIGGQVrRw3qFAph2UMKLqmg+eXyIkyf+QDyFrxznAd5T5m/8L+YJy4CPh
+# xmfyW0eA/is45YOeAdl9B8sVXH4hwdtU/mcese1Zk6248I+5qDM9Hbt6MxsIT3Ij
+# U9ZtrMViI7waDx6HxYIZytmIPfIY31udIDxyItA4HLFlnN6K/+fs00CJCGnETanF
+# unA/w2OgAa3MVNzWJThIgubuH1bIigOSkIYzIJpRDqHDYpiTbE1FM0A8SzlJq6qY
+# QqVJ2zCMyw==
 # SIG # End signature block

@@ -435,6 +435,7 @@
     },
     {
       "Name": "EXO-Mailboxes-Inventory",
+      "ConcurrencyKey": "EXOMailboxes",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
       "Arguments": "-IncludeStats -ForceLiveStats",
       "Enabled": true,
@@ -490,6 +491,7 @@
     },
     {
       "Name": "EXO-Mailboxes-Inventory-Fast",
+      "ConcurrencyKey": "EXOMailboxes",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
       "Arguments": "",
       "Enabled": true,
@@ -703,7 +705,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "01:00"
+          "01:30"
         ],
         "MissedRunPolicy": "RunOnce"
       },

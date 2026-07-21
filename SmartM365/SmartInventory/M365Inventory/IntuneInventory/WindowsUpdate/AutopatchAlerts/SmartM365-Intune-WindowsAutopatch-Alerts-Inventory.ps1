@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.14
+1.15
 
 
 
@@ -55,7 +55,7 @@ pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
 Author    : https://github.com/khda79/workplacecloudhub.com
-    Version : 1.14
+    Version : 1.15
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All, DeviceManagementApps.Read.All
 #>
 
@@ -313,7 +313,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -443,7 +443,7 @@ function Invoke-AutopatchGraphRequest {
             $statusCode = Get-AutopatchGraphStatusCode -ErrorRecord $_
             if ($statusCode -notin @(408, 409, 429, 500, 502, 503, 504) -or $attempt -ge $MaxAttempts) { throw }
             $delay = Get-AutopatchGraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt
-            Write-Log -Message ("Graph transient failure HTTP {0}; retry {1}/{2} in {3}s: {4}" -f $statusCode, $attempt, $MaxAttempts, $delay, $Uri) -Level WARNING
+            Write-Log -Message ("Graph transient failure HTTP {0}; retry {1}/{2} in {3}s: {4}" -f $statusCode, $attempt, $MaxAttempts, $delay, $Uri) -Level WARN
             Start-Sleep -Seconds $delay
         }
     }
@@ -795,8 +795,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgzNQkjrcI1OZo
-# VvrAEIb+wAaLBe7fjrwYTQqUB/H0JKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSi5zx2cxBWqrl
+# wFav9wTWWiimHeQ3wDYrzsnXXsU/AqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -929,31 +929,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJfluGVEiuTmy7yKgj2EjFHixPeX75gjoS7wHFLwJTJQMA0GCSqG
-# SIb3DQEBAQUABIIBgArTaZLtAru17HgXLrksjBXfg4zeOVumcRjxjMTSGYKMmahB
-# o4S3JgYAEqEUV0nKx1vgFy17mHZg49QluaJ7OvTxkmYjFDkDJ6hEhJWIeH2BBEhL
-# QAgY+UKU0xu2YhsBlSJ+HgmwdGIVQ2sw4UXn42VEuDHF1LyXylxPkF4BRncLh/HB
-# /AEeUj5QCZoivM6euW0f+f04+EgnQfiv3ZHurxWlYrgf5GWEyehsSsj586DB0SRp
-# W5oxv5A01tR5C6Pg+PfeK8P0E4Od1krlroe9bkSYRydTNEMmLny6MS+ps4Hds6jr
-# l7D8gZ5F+wiiOtKCOoEOdf2UKGoAnrAs4fn04srEQC+En0L431LcicAmGNHSL11h
-# +kph0Ebp46VKTuiwjW283BGN4GFMmOhrE7ZOHLcoHTIVvwmZQfN9jPzbkk2lp77C
-# log3eLBVlVGzKzusFP/BKcz032uu0zyCnPMxUiJdII5raCu46k1BWb8xYiGBogbe
-# Ez/DRUnl70EUGXoWIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICUPHn1O6erC+vquZ3DdE2HvlH5JGr9OyT/NHaCQgR06MA0GCSqG
+# SIb3DQEBAQUABIIBgCcVW0qo9WXRnkjGEdTsfnnkef3OgVq1DczcztsstgobMEaL
+# RpbzacplFUq9O9RgH6aoOIhqFk9yVuT9M9DCmsDi2pT5w5rVNsJvGaGoTL5K9Dwg
+# AF2TWHfGDuqwENMnM9GCp4YsAfHPCaFdOFmDD7cc/EU4TPx+Ns9Ev6cExsEfoMeB
+# DOOz+OUn3qBBwC3mnp9o2Skatx86yiV/TQvN7H1O4o8y1TKl0bTZTFrZdNcnR0gR
+# XOXZJl9Y8JWZj6SnXyG67MXe7OvO3hQvUkbuUPcOkn35rXojnBdjvX4Lg2b5kbyu
+# H9MdymRtyB9qvP72pNxN8o/izLOSQn1aTsEmS1Y8Z1kLMqpv2xbMdP7a9VTLFh6T
+# pjX8QHU5km0hyWozCOkc7SA97iwvebwnvgSJGuLZieuAG1IyK4A+0sj7ewJxZnhS
+# AFT691MKkjUy3YW/VT3Kr1gbdux84SZrRucXvnPx0SrQo+vSMnzx2e9uByslviKa
+# rzmpRQH6QBnLMBco+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAxMjMy
-# MzhaMC8GCSqGSIb3DQEJBDEiBCAn2evZpNSGnIAhjJ0jtpzvAhzNqP2IXSBoKQcS
-# YyF4MzANBgkqhkiG9w0BAQEFAASCAgCig13wCrxh30Q0dxIvy6jnY3MNGnxAZ1KM
-# WCC/fOs9k3X/8VgePPyg+eFBO+j4uyry+SnkW/91awNvAQhjLsUH6vMO9aLqc2+C
-# N3XxDmPAZXZQI55PR7vM2rCJBK122R7T554wOf38M/U4hdyPOmNTYY7KQkI+Cjg+
-# +7APhf42B3dneQUT2HNJ8wNt8pP4Ezv26K7pwJJL7yCuhB9IyxVyFyeTx0KZLx/q
-# 81E0UAmS+Ps+DXNe8FFdJALDFCP/H1nQ6EcPwb61Br5ehbTkw/yEyqdhoyJ5TXGA
-# RRyvuLruR5eFR6nkUwY7IoQTa/njaygeMidrjY3VV6lYvUwv2kDUpRKB9LKq+Ri1
-# 9//T+ZtvkQv2PDUZKLNvRdmNDps8hdW9BmNX6aZz8KokL8Aq8K5R8kMXuCFG/WJN
-# tN6jV+oIB662PJG6ws3vRiNMs28NNiD1a0BUcD1HD/MK3c6hEFAQn+Fvl4uKlNTo
-# vb7KXtXxtu4GDazimq9LEWROdTX5J6CPhohPXxtyvsQbPDrTxDFcqN9+xGdhbPis
-# 3UKiFHu9oNqziVXZ0IRy2UphNsxgy0x72cI3EBmICqxOWo2VP1+3FgQ3b/vS/xAb
-# bLRu1sE3FECdFjYQobPrmbTfw3SamJO4+QS5KMgZQTCY9iIVqPK/5BoCex5w8hxb
-# 201/tbvzaA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjEwODM4
+# MDJaMC8GCSqGSIb3DQEJBDEiBCCe2xWTjafNYygmh+kpjqEwwnIzdVTtb6/kwvXj
+# FE4OsDANBgkqhkiG9w0BAQEFAASCAgCP9x0vm96eUxE5UUjFfJApi9bj8eDOMDKQ
+# oQDEIYGByvsS537YN6Bp3Jbao2JfVqMeyLu+o/ik1LIKpmgSyPyOxuX6N40pfCKR
+# fz79EDGyiQTtNdr0m15ZIEXwTMvdVnwpoPIWLsu7X/pCikO6TI0mF56OHlc31vEw
+# eEDYAxMUNaurQcQbzBzwLuO6joh2Lez8HPRP+dC4tlEr50YcyN6dcXg00MupHeiO
+# nTWa2ibkbgm/HRD2C0apeC5mYkULUQ1q4QUFotAvXXrpmQfHAR5SX2ndPZlvpBUv
+# k++EQxw8vkp+glWGq4NueyD+i5QtGj7FCt6r9Os+hHtJaeN6rBDvLdKWE0FLrahv
+# 5zOrOhr4EGXHqTEmOVVh39JJ2MAq6VsGXe66fKvC5Td1C/wE3Ul6k3TA3RIYZ+zB
+# 7VqKxKMqXZkfcyEXhhHa1o3fms+1VJdCxu4SYTvJY5e/c0PF/M74+JJHxQ8YdiTo
+# lY0iMWq64DCLCsUlBSFMR5N7VvdXWVDXt3ZzyqGzH4Aav7uEstC5G5VHMWSiDC7x
+# 5mDeuV/T0a6gWdyhXOif9DFQZEclqqXgzrg+PXJJ5ApvAabqo6HyAqL1fN4OwbM8
+# 8aHl7zTQmCQkX2QEoipDxO+eLJswE5sa1zT6RcRtXKaO07PFN55DJoDcJl0pmz3V
+# ILjVSFviVQ==
 # SIG # End signature block
