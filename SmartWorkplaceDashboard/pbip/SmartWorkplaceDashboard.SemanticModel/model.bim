@@ -5333,6 +5333,16 @@
             "sourceColumn": "SendOnBehalf"
           },
           {
+            "name": "FullAccessUsers",
+            "dataType": "string",
+            "sourceColumn": "FullAccessUsers"
+          },
+          {
+            "name": "SendAsUsers",
+            "dataType": "string",
+            "sourceColumn": "SendAsUsers"
+          },
+          {
             "name": "ExchangeGuid",
             "dataType": "string",
             "sourceColumn": "ExchangeGuid"
@@ -5392,7 +5402,7 @@
             "mode": "import",
             "source": {
               "type": "m",
-              "expression": "fnLoadSourceTable(\"Exchange_OnPrem_RemoteMailboxes_AllDomains.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"DomainName\", \"Name\", \"DisplayName\", \"Alias\", \"PrimarySmtpAddress\", \"WindowsEmailAddress\", \"UserPrincipalName\", \"SamAccountName\", \"RecipientType\", \"RecipientTypeDetails\", \"RemoteRoutingAddress\", \"RemoteRecipientType\", \"OnPremisesOrganizationalUnit\", \"DistinguishedName\", \"ObjectCategory\", \"WhenCreated\", \"WhenChanged\", \"MailboxRelease\", \"WhenMailboxCreated\", \"AccountDisabled\", \"ExchangeUserAccountControl\", \"ArchiveState\", \"ArchiveQuota\", \"ArchiveWarningQuota\", \"DeliverToMailboxAndForward\", \"ForwardingAddress\", \"IsValid\", \"MailboxMoveTargetMDB\", \"MailboxMoveSourceMDB\", \"MailboxMoveFlags\", \"MailboxMoveRemoteHostName\", \"MailboxMoveBatchName\", \"MailboxMoveStatus\", \"SendOnBehalf\", \"ExchangeGuid\", \"ImmutableId\", \"ObjectGuid\"}, {{\"WhenCreated\", \"datetime\"}, {\"WhenChanged\", \"datetime\"}, {\"WhenMailboxCreated\", \"datetime\"}, {\"AccountDisabled\", \"logical\"}, {\"DeliverToMailboxAndForward\", \"logical\"}, {\"IsValid\", \"logical\"}}, false)"
+              "expression": "fnLoadSourceTable(\"Exchange_OnPrem_RemoteMailboxes_AllDomains.csv\", \",\", {\"TenantKey\", \"OrganizationKey\", \"EnvironmentKey\", \"TenantId\", \"DomainName\", \"Name\", \"DisplayName\", \"Alias\", \"PrimarySmtpAddress\", \"WindowsEmailAddress\", \"UserPrincipalName\", \"SamAccountName\", \"RecipientType\", \"RecipientTypeDetails\", \"RemoteRoutingAddress\", \"RemoteRecipientType\", \"OnPremisesOrganizationalUnit\", \"DistinguishedName\", \"ObjectCategory\", \"WhenCreated\", \"WhenChanged\", \"MailboxRelease\", \"WhenMailboxCreated\", \"AccountDisabled\", \"ExchangeUserAccountControl\", \"ArchiveState\", \"ArchiveQuota\", \"ArchiveWarningQuota\", \"DeliverToMailboxAndForward\", \"ForwardingAddress\", \"IsValid\", \"MailboxMoveTargetMDB\", \"MailboxMoveSourceMDB\", \"MailboxMoveFlags\", \"MailboxMoveRemoteHostName\", \"MailboxMoveBatchName\", \"MailboxMoveStatus\", \"SendOnBehalf\", \"FullAccessUsers\", \"SendAsUsers\", \"ExchangeGuid\", \"ImmutableId\", \"ObjectGuid\"}, {{\"WhenCreated\", \"datetime\"}, {\"WhenChanged\", \"datetime\"}, {\"WhenMailboxCreated\", \"datetime\"}, {\"AccountDisabled\", \"logical\"}, {\"DeliverToMailboxAndForward\", \"logical\"}, {\"IsValid\", \"logical\"}}, false)"
             }
           }
         ]
@@ -16756,7 +16766,7 @@
           },
           {
             "name": "Source Columns",
-            "expression": "2217",
+            "expression": "2219",
             "formatString": "#,0",
             "displayFolder": "Data Trust"
           },

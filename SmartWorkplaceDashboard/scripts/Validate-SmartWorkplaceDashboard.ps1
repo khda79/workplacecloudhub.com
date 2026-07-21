@@ -1,4 +1,4 @@
-# Version: 4.4.0
+# Version: 4.5.0
 [CmdletBinding()]
 param(
     [string]$DashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
@@ -114,12 +114,19 @@ $measureTable=$tables|Where-Object name -eq 'M365_Users_Active'|Select-Object -F
 $tableMap=@{};foreach($t in $tables){$tableMap[$t.name]=@($t.columns.name)};$measureSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase);foreach($n in $measureNames){$null=$measureSet.Add($n)}
 foreach($m in $measureTable.measures){$matches=[regex]::Matches([string]$m.expression,"'([^']+)'\[([^\]]+)\]");foreach($x in $matches){$tn=$x.Groups[1].Value;$cn=$x.Groups[2].Value;if(-not $tableMap.ContainsKey($tn)){throw "Measure $($m.name) references missing table $tn"};if($tableMap[$tn] -notcontains $cn){throw "Measure $($m.name) references missing field $tn[$cn]"}}}
 $pagesMeta=Read-Json (Join-Path $definition 'pages\pages.json');if(@($pagesMeta.pageOrder).Count-ne15){throw "Expected 15 report pages; found $(@($pagesMeta.pageOrder).Count)"}
-$visualFiles=@(Get-ChildItem -LiteralPath (Join-Path $definition 'pages') -Filter visual.json -File -Recurse);if($visualFiles.Count-lt120){throw "Expected at least 120 visuals; found $($visualFiles.Count)"}
+$visualFiles=@(Get-ChildItem -LiteralPath (Join-Path $definition 'pages') -Filter visual.json -File -Recurse);if($visualFiles.Count-ne356){throw "Expected exactly 356 visuals; found $($visualFiles.Count)"}
+$visualObjects=@($visualFiles|ForEach-Object{Read-Json $_.FullName})
 $logoVisuals=@($visualFiles|ForEach-Object{Read-Json $_.FullName}|Where-Object{$_.visual.visualType-eq'image'})
 if($logoVisuals.Count-ne15){throw "Expected one logo image per page; found $($logoVisuals.Count)"}
 foreach($logo in $logoVisuals){$url=[string]$logo.visual.objects.general[0].properties.imageUrl.expr.Literal.Value;if(-not$url.StartsWith("'data:image/png;base64,")){throw 'Logo image is not embedded as PNG data'}}
 $slicers=@($visualFiles|ForEach-Object{Read-Json $_.FullName}|Where-Object{$_.visual.visualType-eq'slicer'})
 if($slicers.Count-lt1){throw 'Ownership slicer is missing'}
+$cardVisuals=@($visualObjects|Where-Object{$_.visual.visualType-eq'cardVisual'})
+$kpiLabels=@($visualObjects|Where-Object{$_.name-match'kpi\d+label$'})
+if($cardVisuals.Count-ne118){throw "Expected 118 individual KPI cards; found $($cardVisuals.Count)"}
+if($kpiLabels.Count-ne118){throw "Expected 118 wrapped KPI labels; found $($kpiLabels.Count)"}
+$visualByName=@{};foreach($visualObject in $visualObjects){if($visualByName.ContainsKey([string]$visualObject.name)){throw "Duplicate visual name: $($visualObject.name)"};$visualByName[[string]$visualObject.name]=$visualObject;$right=[double]$visualObject.position.x+[double]$visualObject.position.width;$bottom=[double]$visualObject.position.y+[double]$visualObject.position.height;if($right-gt1280.001-or$bottom-gt720.001){throw "Visual outside 1280x720 canvas: $($visualObject.name) right=$right bottom=$bottom"}}
+foreach($kpiCard in $cardVisuals){if([string]$kpiCard.name-notmatch'kpi\d+$'){throw "Legacy multi-measure card remains: $($kpiCard.name)"};$projections=@($kpiCard.visual.query.queryState.Data.projections);if($projections.Count-ne1){throw "KPI card must expose exactly one measure: $($kpiCard.name)"};$measureName=[string]$projections[0].field.Measure.Property;$builtInLabel=[string]$kpiCard.visual.objects.label[0].properties.show.expr.Literal.Value;if($builtInLabel-ne'false'){throw "KPI built-in label must be hidden: $($kpiCard.name)"};$labelName=[string]$kpiCard.name+'label';if(-not$visualByName.ContainsKey($labelName)){throw "Missing wrapped KPI label: $labelName"};$label=$visualByName[$labelName];$labelText=[string]$label.visual.objects.general[0].properties.paragraphs[0].textRuns[0].value;if($labelText-ne$measureName){throw "KPI label mismatch: $($kpiCard.name) expected '$measureName', found '$labelText'"}}
 foreach($vf in $visualFiles){$v=Read-Json $vf.FullName;Visit-Node $v {param($node);foreach($kind in @('Column','Measure')){$exact=$node.PSObject.Properties[$kind];if($null -ne $exact){$entry=$exact.Value;$entity=$entry.Expression.SourceRef.Entity;$property=$entry.Property;if(-not $entity -or -not $property){throw "Incomplete $kind reference in $($vf.FullName)"};if(-not $tableMap.ContainsKey([string]$entity)){throw "Visual references missing table $entity"};if($kind -eq 'Column' -and $tableMap[[string]$entity] -notcontains [string]$property){throw "Visual references missing field $entity.$property"};if($kind -eq 'Measure' -and -not $measureSet.Contains([string]$property)){throw "Visual references missing measure $property"}}}}}
 foreach($n in @('fnGetSourceFiles','fnLoadSourceTable','fnToLogical','fnToDateTime','fnToNumber','fnToInt64')){if(-not ($model.model.expressions|Where-Object name -eq $n)){throw "Missing Power Query expression: $n"}}
 $invalidDaxMeasures=@($tables.measures|Where-Object { [string]$_.expression -match '&&\s*VAR\b' })
@@ -128,7 +135,7 @@ $loaderExpression=[string](($model.model.expressions|Where-Object name -eq 'fnLo
 if(([regex]::Matches($loaderExpression,'\(')).Count -ne ([regex]::Matches($loaderExpression,'\)')).Count){throw 'Unbalanced parentheses in fnLoadSourceTable'}
 $forbidden=@('SmartWorkplaceCMDB','LocalDateTable_','C:\Users\');$publishable=@(Get-ChildItem -LiteralPath $DashboardRoot -File -Recurse|Where-Object{$_.FullName -notmatch '\\\.pbi\\' -and $_.Name -ne 'LOCAL_MEMORY.md' -and $_.FullName -ne $PSCommandPath -and $_.Extension -in @('.js','.ps1','.json','.bim','.pbip','.pbir','.pbism','.pq','.md')});foreach($p in $publishable){$text=Get-Content -LiteralPath $p.FullName -Raw;foreach($term in $forbidden){if($text.Contains($term,[StringComparison]::OrdinalIgnoreCase)){throw "Forbidden dependency '$term' in $($p.FullName)"}}}
 $builder=Join-Path $DashboardRoot 'scripts\Build-SmartWorkplaceDashboard.js';& node --check $builder;if($LASTEXITCODE-ne0){throw 'Builder JavaScript syntax check failed'}
-Write-Host "OK SmartWorkplaceDashboard: 90 source tables, $($measureNames.Count) measures, 15 pages, $($visualFiles.Count) visuals, StateCode and discovered-app relationships validated."
+Write-Host "OK SmartWorkplaceDashboard: 90 source tables, $($measureNames.Count) measures, 15 pages, $($visualFiles.Count) visuals, 118 readable KPI labels, StateCode and discovered-app relationships validated."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
