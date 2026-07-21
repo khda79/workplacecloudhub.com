@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.31"
+$ScriptVersion = "1.32"
 
 # ==========================================================
 # App-only authentication parameters
@@ -721,18 +721,26 @@ function Get-GraphRetryDelaySeconds {
         [Parameter(Mandatory=$true)][int]$Attempt
     )
 
+    $serverDelaySeconds = 0
     try {
         $retryAfter = $ErrorRecord.Exception.Response.Headers.RetryAfter
         if ($retryAfter) {
-            if ($retryAfter.Delta) { return [math]::Max(1, [int][math]::Ceiling($retryAfter.Delta.TotalSeconds)) }
-            if ($retryAfter.Date) {
+            if ($retryAfter.Delta) {
+                $serverDelaySeconds = [math]::Max(1, [int][math]::Ceiling($retryAfter.Delta.TotalSeconds))
+            }
+            elseif ($retryAfter.Date) {
                 $seconds = [int][math]::Ceiling(($retryAfter.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds)
-                if ($seconds -gt 0) { return $seconds }
+                if ($seconds -gt 0) { $serverDelaySeconds = $seconds }
             }
         }
     } catch { }
 
-    return [math]::Min(90, (10 * $Attempt) + (Get-Random -Minimum 1 -Maximum 5))
+    # Retry-After can be only a few seconds while the report endpoint remains
+    # throttled. Apply an exponential local floor and still honor a longer
+    # server-requested delay.
+    $exponentialFloor = [math]::Min(300, 15 * [math]::Pow(2, [math]::Max(0, $Attempt - 1)))
+    $localDelaySeconds = [int][math]::Min(300, $exponentialFloor + (Get-Random -Minimum 1 -Maximum 6))
+    return [int][math]::Max($serverDelaySeconds, $localDelaySeconds)
 }
 
 function Test-GraphTransientError {
@@ -2165,8 +2173,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUglDpSYBC7CEQ
-# F+dRPJaTIjFpZulKLQcSRoYk8drt/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+li1llyurd+Ns
+# Lg6+7G366ZO7nUHWEMenKmY8tD/slqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2299,31 +2307,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPoAsnewSpp3EGQgDr1SrmdwT0I0uywYV5GGCeD3vw4dMA0GCSqG
-# SIb3DQEBAQUABIIBgDOIT0k3TAyphTKZnHTUhwi2AdICrpQL6Wsw2xGBlTSs6Et1
-# IGY9Sd8C9OaeIGlczkOAX8LdUbmJWq592OQfkTOvrErG9MhiaBQKGxBz+2Zijdip
-# LCA0lMpbaLexHeJXSDuLeHvkymCbemfXpHxfErL1b2RK5rAKkkyA5lsZGLkuvssg
-# TCZERWGbpdB38zhqaS4H5N2bnMRBbQnlE0YUdNoRhuHlC6CWOTMt09S5RKncvXtP
-# l+Ku530AXDE5gtwvC/2TMj0x5WaSkaZfQzQlC+bvmsW0e8O8ThrutDiJYuLNzTHp
-# 4eaz4iLzxOxgzQjNBqpLYoi4LgHm38hGP/AS1XMqyslc0zM/dsQqRIcL+MGgY4nn
-# dSySjXmCGINGWBg5oLNXtlabE4jETc0ePEguUc4zQUKS+D43K2JIphfV2dG5AsTD
-# ryafoKqHA/1c8FCJSmV/tBc7/qGmdoDs5oV64/YhEPtQ8MU3LPZh4DrQ5DN59FDx
-# Y4VzJzf4SYEcm7ArU6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBJnapu7nl0Q4k1hT+Qk3UMbSq1FxuWLmJIAqbAdjjnMMA0GCSqG
+# SIb3DQEBAQUABIIBgKw4gNEEc8Y0X0hy1BA0QkjZIqCTnDrbbp0AS/jNsswZ/Qvu
+# bS4/c+/bSK37LeMjZ+E8QudQa5viArkv1E8b9bUHJydOj25UeckW5BKSYuVit9XQ
+# kalBiyoYrIMi5ttlSCB1IDcDr1ePFbPYhTR7nwJ/JZ8hDoEBDIgVCT5AP5dOeUGP
+# RfZlGgAojYf5Ao8sVBioJGVf9H4wQ2JESpSMBnzG6lDOJiwHN16MRCPrQpMTLR4U
+# 5P7VZUYEXLN2PWQXcjDK2l4/0d2TV9FS3yKam7rULTBKnmWp0MHhACT31OBmRDwM
+# b7kQ1oPIXHWLacDa9cV0zv3f9pLcXXI/qYeXEPJ4HVjyIbMi0W/hU2sA9wjQddqm
+# ykPGLhqyu7LEMQ1EmDQUv+TErBgvk7NYQFiifmP7Ul8u/7PgqG+BWzwqMXePeVhY
+# hOH4k1S/aPCqHBlhGlNJejmymj0AK8jMaZRZhsOtV1UC5r/QPuw0bjQUhj5HM+5f
+# 4J9Hs30MHlppMAXA1aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjEwNzI4
-# NTJaMC8GCSqGSIb3DQEJBDEiBCDxcfjcv/iq6JdywbPZFJHGkPzcY3Y6I6SBJeZI
-# 2bn5zTANBgkqhkiG9w0BAQEFAASCAgAI64Gv+JixPdYron6WteOnQkwr4luS0rui
-# mJsVP+4ZFJzrHRxyxNzc+A7h06sHD3fhGX1k9TCc2WHY7IxJL7ATKljWxUpN20CL
-# FCnYJhFYWNoktCZG4UTT6lUKJIwdedg4nyU7bwYfRIjDTQUYMu65S1oUGmx8cfmZ
-# eHb1Fk0/cl9b5Zt7yEBf/P15r2aWUq4kOCd2Fs02SkjJe2yTHaUD2WwghAIQ3luS
-# d5Hxc09gCxVXo6iUv/58qzj2K9tBH3C2Y8UZrXR55KJ8odXNnIX+nGKC491YAw6T
-# IJ0h4J8y0AkGJiTsONrsGhA/+1z5eAn5NuQDBbOCoTSHy7+BaIqLLt0UyrJf3CY5
-# qoIg0TL1DxRQ533jrloFSC0AeGLBJOVIbjOWcchPqEgQFGr7jygDFbYf/5pvUOXX
-# r5KJL4qa4zLN7fLxZJ9nMzFJ7eKNK0U/EGr9zUzJV3G4HScYGg2l1sGkFMX1xeA9
-# 1oHk6qdPxZjHcBU151ZfuXYkKnOlX2rodf0GacF87VEgMB0SHqBjuSaPMnQHgwPs
-# kaevENGTl7zx4CKN0eeXcA+MlSKJvOiOwx+WhsUUU64OljsZ0cItl4VcNOJrRll9
-# W/gAPuzFJaozZlY6eDN5s26+mNV69cd7tTq0odlXFG5Wc+MZO/6WKtqzHkn/+pXT
-# tzD44rwC1w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjEwODM4
+# MDNaMC8GCSqGSIb3DQEJBDEiBCAFAH9MFt4K+LqzBAyIPeWCezaxs55k3WLIG5tq
+# JU2aZjANBgkqhkiG9w0BAQEFAASCAgCKsyWkTvnRomQSg9AlSQ+PrC3L2TFmr4jt
+# tBeflvM18hKW9XHITC14fy4m3nSWsUXSixrhfL0kAjcaWqTGH0vtuAowXrDjVac7
+# WoAKG3OGRV+AGaZdC0B7iEba22wFBUkbcNWo3aOH6rkIIcWLhEwAhRXPVVOR7o4W
+# EzVEj8m0iM+kQhlrJuoSB9zgG8slxDgxHzv0ZJoROUKy+V06j+mwBZW/4F2R+7n/
+# 96TICDsW2cAOOifDOfmDssHLPYlKuLPTC2AgdqYZf6Wiopgx/A36vimPg+IqKo56
+# ldkkdTH6Ih4mr1TbThl1qKJAGuZJOma3fn2NRj9P9zfHgk5EbKsEIdoqEkjgZEO9
+# BpOD8Pv6+WtuHRNiFdMn9fgH5MzA20ItAFbxi2LPxQsXCCUsqJ+c1qCx9J+YdMcy
+# 1xB3welYwlSvl3i/dEY3zpFSG9YkJht+ZlFnjZdqQbjbg+1BQgxfZtZqfSux2E8Y
+# 07a5UWmcX3dMfmkKdQnUqQVAu5pgoYMJna9JGUELyyYCkpT/R12Qf3DmemZVRtEg
+# b2MRTXdv6yQPn5BTUJBL6AOMuiPDAonJOPltQJp7glqI34cbf37epsX5cUnbVwxc
+# YJnrLWYZEEKrJeShHAbehVGlhZvnPY0Pt9CLYGtbwyvnsOHKmPFQhpd3bWivmZlS
+# qua/08TuGQ==
 # SIG # End signature block
