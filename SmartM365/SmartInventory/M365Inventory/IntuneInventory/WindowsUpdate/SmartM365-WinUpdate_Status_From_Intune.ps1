@@ -38,9 +38,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.30
+  1.31
 .VERSION
-1.30
+1.31
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -92,7 +92,7 @@ $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenan
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.30"
+$ScriptVersion = "1.31"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1087,7 +1087,7 @@ function Get-RiskBucket {
         "Unknown"        { return $(if ($IncludeUnknown) { "Medium" } else { "Unknown" }) }
         default {
             $s = $AggregateState.ToLowerInvariant()
-            if ($s -match "fail|error|block")                          { return "High" }
+            if ($s -match "fail|error|block|rollback|uninstall")       { return "High" }
             if ($s -match "progress|install|offer|pending|reboot|wait|download") { return "Medium" }
             if ($s -match "complete|success|compliant|up")             { return "Low" }
             if ($s -match "unknown") { return $(if ($IncludeUnknown) { "Medium" } else { "Unknown" }) }
@@ -1105,6 +1105,9 @@ function Get-BlockingReason {
     $state = $(if ($null -eq $AggregateState) { "" } else { $AggregateState }).ToLowerInvariant()
     $alert = "$LatestAlertMessageLoc"
 
+    if ($state -match "rollback|uninstall") {
+        return "HardFailure_Rollback"
+    }
     if ($state -match "fail|error|blocked") {
         if ($alert -match "safeguard|hold")                { return "HardFailure_SafeguardHold" }
         if ($alert -match "disk|storage|space")            { return "HardFailure_DiskSpace" }
@@ -1140,6 +1143,7 @@ function Get-RemediationAction {
     switch ($BlockingReason) {
         "HardFailure_DiskSpace"      { return @{ Priority=1; ActionCode="FREE_DISK_SPACE";      ActionDescription="Free disk space (cleanup, remove large files/apps) and retry update."; Owner="Workplace" } }
         "HardFailure_Generic"        { return @{ Priority=1; ActionCode="CHECK_ERROR";           ActionDescription="Investigate update failure (logs, compatibility, disk, servicing stack) and remediate."; Owner="Workplace" } }
+        "HardFailure_Rollback"       { return @{ Priority=1; ActionCode="INVESTIGATE_ROLLBACK";  ActionDescription="Investigate the feature update rollback or uninstall, remediate the root cause, and retry when safe."; Owner="Workplace" } }
         "HardFailure_Compatibility"  { return @{ Priority=2; ActionCode="COMPATIBILITY_REVIEW";  ActionDescription="Compatibility issue suspected (driver/firmware/app). Review and remediate before retry."; Owner="Workplace" } }
         "HardFailure_SafeguardHold"  { return @{ Priority=2; ActionCode="SAFEGUARD_HOLD";        ActionDescription="Safeguard hold detected. Validate known issue and consider mitigation or wait for Microsoft resolution."; Owner="Workplace" } }
         "UpdateAlert"                { return @{ Priority=3; ActionCode="HANDLE_ALERT";          ActionDescription="Review Intune alert details and apply recommended fix."; Owner="Workplace" } }
@@ -1162,6 +1166,9 @@ function Get-WinUpdateRowValue {
 
 function Get-WinUpdateOperationalState {
     param([Parameter(Mandatory)][object]$Row)
+    $aggregateState = [string](Get-WinUpdateRowValue -Row $Row -Name 'AggregateState')
+    $currentStatus = [string](Get-WinUpdateRowValue -Row $Row -Name 'CurrentDeviceUpdateStatus_loc')
+    if ("$aggregateState|$currentStatus" -match '(?i)rollback|uninstall') { return 'ActionRequired' }
     $blockingReason = [string](Get-WinUpdateRowValue -Row $Row -Name 'BlockingReason')
     if ($blockingReason -like 'HardFailure*' -or $blockingReason -eq 'UpdateAlert') { return 'ActionRequired' }
     if ($blockingReason -eq 'DeploymentInProgress') { return 'InProgress' }
@@ -1174,6 +1181,201 @@ function Get-WinUpdateOperationalState {
         'Low'    { return 'Completed' }
         default  { return 'Unknown' }
     }
+}
+
+function Get-WinUpdateOsBuild {
+    param([AllowNull()][object]$Value)
+
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    if ($text -match '^\s*\d+\.\d+\.(?<Build>\d+)(?:\.|\s|$)') {
+        return [int]$matches.Build
+    }
+    return $null
+}
+
+function Get-WinUpdatePolicyTarget {
+    param([AllowNull()][string]$PolicyName)
+
+    $name = [string]$PolicyName
+    if ([string]::IsNullOrWhiteSpace($name)) { return $null }
+
+    $windows11Builds = @{
+        '26H1' = 28000
+        '25H2' = 26200
+        '24H2' = 26100
+        '23H2' = 22631
+        '22H2' = 22621
+        '21H2' = 22000
+    }
+    if ($name -match '(?i)\bWindows\s*11\s*(?<Version>26H1|25H2|24H2|23H2|22H2|21H2)\b') {
+        $version = $matches.Version.ToUpperInvariant()
+        return [pscustomobject][ordered]@{
+            Label = "Windows 11 $version"
+            ShortLabel = $version
+            Build = [int]$windows11Builds[$version]
+        }
+    }
+
+    $windows10Builds = @{
+        '22H2' = 19045
+        '21H2' = 19044
+    }
+    if ($name -match '(?i)\bWindows\s*10\s*(?<Version>22H2|21H2)\b') {
+        $version = $matches.Version.ToUpperInvariant()
+        return [pscustomobject][ordered]@{
+            Label = "Windows 10 $version"
+            ShortLabel = $version
+            Build = [int]$windows10Builds[$version]
+        }
+    }
+
+    return $null
+}
+
+function Get-WinUpdateOsCoverageSummary {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory)][int]$MinimumBuild
+    )
+
+    $buildByDevice = @{}
+    $rowIndex = 0
+    foreach ($row in $Rows) {
+        $rowIndex++
+        $deviceId = [string](Get-WinUpdateRowValue -Row $row -Name 'DeviceId')
+        $deviceName = [string](Get-WinUpdateRowValue -Row $row -Name 'DeviceName')
+        $normalizedName = Normalize-DeviceName -DeviceName $deviceName
+        $key = if (-not [string]::IsNullOrWhiteSpace($deviceId)) {
+            "id:$($deviceId.ToLowerInvariant())"
+        } elseif ($normalizedName) {
+            "name:$normalizedName"
+        } else {
+            "row:$rowIndex"
+        }
+
+        $build = Get-WinUpdateOsBuild -Value (Get-WinUpdateRowValue -Row $row -Name 'OSVersion')
+        if (-not $buildByDevice.ContainsKey($key)) {
+            $buildByDevice[$key] = $build
+        } elseif ($null -ne $build -and ($null -eq $buildByDevice[$key] -or $build -gt $buildByDevice[$key])) {
+            $buildByDevice[$key] = $build
+        }
+    }
+
+    $total = $buildByDevice.Count
+    $known = @($buildByDevice.Values | Where-Object { $null -ne $_ })
+    $covered = @($known | Where-Object { $_ -ge $MinimumBuild }).Count
+    $knownCount = $known.Count
+    $unknown = $total - $knownCount
+    $below = $knownCount - $covered
+
+    [pscustomobject][ordered]@{
+        TotalDevices = $total
+        KnownOsVersion = $knownCount
+        Covered = $covered
+        BelowTarget = $below
+        UnknownOsVersion = $unknown
+        CoveragePct = if ($total -gt 0) { [math]::Round(100.0 * $covered / $total,2) } else { 0.0 }
+        KnownCoveragePct = if ($knownCount -gt 0) { [math]::Round(100.0 * $covered / $knownCount,2) } else { 0.0 }
+    }
+}
+
+function Get-WinUpdateProgressPhase {
+    param([Parameter(Mandatory)][object]$Row)
+
+    if ((Get-WinUpdateOperationalState -Row $Row) -ne 'InProgress') { return '' }
+
+    $status = [string](Get-WinUpdateRowValue -Row $Row -Name 'CurrentDeviceUpdateStatus_loc')
+    if ([string]::IsNullOrWhiteSpace($status)) {
+        $status = [string](Get-WinUpdateRowValue -Row $Row -Name 'AggregateState')
+    }
+    $normalized = $status.ToLowerInvariant()
+
+    if ($normalized -match 'offer') { return 'Offering' }
+    if ($normalized -match 'installing|download|restart') { return 'Installing' }
+    if ($normalized -match 'pending|hold|wait|defer') { return 'Pending' }
+    return 'Other'
+}
+
+function Get-WinUpdatePolicySummary {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
+
+    $result = foreach ($group in ($Rows | Group-Object -Property PolicyId)) {
+        $policyRows = @($group.Group)
+        if ($policyRows.Count -eq 0) { continue }
+
+        $policyCompleted = 0
+        $policyInProgress = 0
+        $policyAction = 0
+        $policyUnknown = 0
+        $policyOffering = 0
+        $policyInstalling = 0
+        $policyPending = 0
+        $policyOtherInProgress = 0
+
+        foreach ($policyRow in $policyRows) {
+            $policyOperationalState = Get-WinUpdateOperationalState -Row $policyRow
+            switch ($policyOperationalState) {
+                'Completed'      { $policyCompleted++; break }
+                'InProgress'     {
+                    $policyInProgress++
+                    switch (Get-WinUpdateProgressPhase -Row $policyRow) {
+                        'Offering'   { $policyOffering++; break }
+                        'Installing' { $policyInstalling++; break }
+                        'Pending'    { $policyPending++; break }
+                        default      { $policyOtherInProgress++ }
+                    }
+                    break
+                }
+                'ActionRequired' { $policyAction++; break }
+                default          { $policyUnknown++ }
+            }
+        }
+
+        $policyTotal = $policyRows.Count
+        $policyName = [string]$policyRows[0].PolicyName
+        $target = Get-WinUpdatePolicyTarget -PolicyName $policyName
+        $coverage = if ($null -ne $target) {
+            Get-WinUpdateOsCoverageSummary -Rows $policyRows -MinimumBuild $target.Build
+        } else {
+            $null
+        }
+        $policyStatus = if ($policyAction -gt 0) { 'CRITICAL' } elseif ($policyInProgress -gt 0 -or $policyUnknown -gt 0) { 'WARNING' } else { 'OK' }
+
+        [pscustomobject][ordered]@{
+            PolicyId = [string]$group.Name
+            PolicyName = $policyName
+            Status = $policyStatus
+            Devices = $policyTotal
+            Completed = $policyCompleted
+            InProgress = $policyInProgress
+            Offering = $policyOffering
+            Installing = $policyInstalling
+            Pending = $policyPending
+            OtherInProgress = $policyOtherInProgress
+            ActionRequired = $policyAction
+            Unknown = $policyUnknown
+            PolicyCompletionPct = if ($policyTotal -gt 0) { [math]::Round(100.0 * $policyCompleted / $policyTotal,2) } else { 0.0 }
+            TargetLabel = if ($null -ne $target) { [string]$target.Label } else { '' }
+            TargetShortLabel = if ($null -ne $target) { [string]$target.ShortLabel } else { '' }
+            TargetBuild = if ($null -ne $target) { [int]$target.Build } else { $null }
+            OsCovered = if ($null -ne $coverage) { [int]$coverage.Covered } else { $null }
+            OsBelowTarget = if ($null -ne $coverage) { [int]$coverage.BelowTarget } else { $null }
+            OsVersionUnknown = if ($null -ne $coverage) { [int]$coverage.UnknownOsVersion } else { $null }
+            OsCoveragePct = if ($null -ne $coverage) { [double]$coverage.CoveragePct } else { $null }
+            KnownOsCoveragePct = if ($null -ne $coverage) { [double]$coverage.KnownCoveragePct } else { $null }
+        }
+    }
+
+    @($result)
+}
+
+function Select-WinUpdatePrimaryCoveragePolicy {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PolicySummary)
+
+    @($PolicySummary | Where-Object { $null -ne $_.TargetBuild } |
+        Sort-Object @{Expression='Devices';Descending=$true},@{Expression='TargetBuild';Descending=$true},PolicyName |
+        Select-Object -First 1)[0]
 }
 
 function Get-WinUpdateOperationalRank {
@@ -1207,30 +1409,8 @@ function Get-WinUpdateDeviceSummaryRows {
         $normalizedName = Normalize-DeviceName -DeviceName $deviceName
         $key = if (-not [string]::IsNullOrWhiteSpace($deviceId)) { "id:$($deviceId.ToLowerInvariant())" } elseif ($normalizedName) { "name:$normalizedName" } else { "row:$rowIndex" }
 
-        $blockingReason = [string]$row.BlockingReason
-        $operationalState = if ($blockingReason -like 'HardFailure*' -or $blockingReason -eq 'UpdateAlert') {
-            'ActionRequired'
-        } elseif ($blockingReason -eq 'DeploymentInProgress') {
-            'InProgress'
-        } elseif ($blockingReason -eq 'NotApplicableOrUnknown') {
-            'Unknown'
-        } elseif ($blockingReason -eq 'CompliantOrCompleted') {
-            'Completed'
-        } else {
-            switch ([string]$row.RiskBucket) {
-                'High'   { 'ActionRequired'; break }
-                'Medium' { 'InProgress'; break }
-                'Low'    { 'Completed'; break }
-                default  { 'Unknown' }
-            }
-        }
-        $operationalRank = switch ($operationalState) {
-            'ActionRequired' { 0; break }
-            'InProgress'     { 1; break }
-            'Unknown'        { 2; break }
-            'Completed'      { 3; break }
-            default          { 9 }
-        }
+        $operationalState = Get-WinUpdateOperationalState -Row $row
+        $operationalRank = Get-WinUpdateOperationalRank -State $operationalState
         $priorityRank = 999
         if ($null -ne $row.ActionPriority) { [void][int]::TryParse([string]$row.ActionPriority,[ref]$priorityRank) }
 
@@ -1268,6 +1448,9 @@ function Get-WinUpdateDeviceSummaryRows {
             OperationalState = $entry.OperationalState
             AggregateState = [string]$selected.AggregateState
             CurrentDeviceUpdateStatus = [string]$selected.CurrentDeviceUpdateStatus
+            CurrentDeviceUpdateStatus_loc = [string]$selected.CurrentDeviceUpdateStatus_loc
+            ProgressPhase = Get-WinUpdateProgressPhase -Row $selected
+            OSVersion = [string]$selected.OSVersion
             LatestAlertMessage = [string]$selected.LatestAlertMessage
             BlockingReason = [string]$selected.BlockingReason
             UpgradeEligibilityLabel = [string]$selected.UpgradeEligibilityLabel
@@ -1739,82 +1922,103 @@ try {
     $actionRequiredCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'ActionRequired').Count
     $unknownCount = @($deviceSummaryRows | Where-Object OperationalState -eq 'Unknown').Count
     $completionPct = if ($totalUniqueDevices -gt 0) { [math]::Round((100.0 * $completedCount / $totalUniqueDevices),2) } else { 0.0 }
-    $reportStatus = if ($actionRequiredCount -gt 0) { 'CRITICAL' } elseif ($inProgressCount -gt 0 -or $unknownCount -gt 0) { 'WARNING' } else { 'OK' }
-    $summaryState = "$totalUniqueDevices|$completedCount|$inProgressCount|$actionRequiredCount|$unknownCount"
+    $allPolicySummary = @(Get-WinUpdatePolicySummary -Rows $enrichedRows |
+        Sort-Object @{Expression='ActionRequired';Descending=$true},@{Expression='InProgress';Descending=$true},PolicyName)
+    $primaryCoveragePolicy = Select-WinUpdatePrimaryCoveragePolicy -PolicySummary $allPolicySummary
 
-    Write-Log "Operational summary: Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount ActionRequired=$actionRequiredCount Unknown=$unknownCount Completion=$completionPct% Status=$reportStatus" "INFO" "KPI"
+    $offeringCount = @($deviceSummaryRows | Where-Object ProgressPhase -eq 'Offering').Count
+    $installingCount = @($deviceSummaryRows | Where-Object ProgressPhase -eq 'Installing').Count
+    $pendingCount = @($deviceSummaryRows | Where-Object ProgressPhase -eq 'Pending').Count
+    $otherInProgressCount = @($deviceSummaryRows | Where-Object ProgressPhase -eq 'Other').Count
+
+    $coverageAvailable = $null -ne $primaryCoveragePolicy
+    if ($coverageAvailable) {
+        $fleetPolicyName = [string]$primaryCoveragePolicy.PolicyName
+        $fleetTargetLabel = [string]$primaryCoveragePolicy.TargetLabel
+        $fleetTargetShortLabel = [string]$primaryCoveragePolicy.TargetShortLabel
+        $fleetDevices = [int]$primaryCoveragePolicy.Devices
+        $fleetOsCovered = [int]$primaryCoveragePolicy.OsCovered
+        $fleetOsBelowTarget = [int]$primaryCoveragePolicy.OsBelowTarget
+        $fleetOsVersionUnknown = [int]$primaryCoveragePolicy.OsVersionUnknown
+        $fleetOsCoveragePct = [double]$primaryCoveragePolicy.OsCoveragePct
+        $fleetKnownOsCoveragePct = [double]$primaryCoveragePolicy.KnownOsCoveragePct
+        $fleetPolicyCompleted = [int]$primaryCoveragePolicy.Completed
+        $fleetPolicyCompletionPct = [double]$primaryCoveragePolicy.PolicyCompletionPct
+    } else {
+        $fleetPolicyName = ''
+        $fleetTargetLabel = ''
+        $fleetTargetShortLabel = ''
+        $fleetDevices = 0
+        $fleetOsCovered = 0
+        $fleetOsBelowTarget = 0
+        $fleetOsVersionUnknown = 0
+        $fleetOsCoveragePct = 0.0
+        $fleetKnownOsCoveragePct = 0.0
+        $fleetPolicyCompleted = 0
+        $fleetPolicyCompletionPct = 0.0
+    }
+    $reportStatus = if ($actionRequiredCount -gt 0) { 'CRITICAL' } elseif ($inProgressCount -gt 0 -or $unknownCount -gt 0) { 'WARNING' } else { 'OK' }
+    $summaryState = @(
+        $totalUniqueDevices,$completedCount,$inProgressCount,$actionRequiredCount,$unknownCount,
+        $offeringCount,$installingCount,$pendingCount,$otherInProgressCount,
+        $fleetTargetShortLabel,$fleetDevices,$fleetOsCovered,$fleetOsBelowTarget,$fleetOsVersionUnknown,$fleetOsCoveragePct,$fleetPolicyCompleted,$fleetPolicyCompletionPct
+    ) -join '|'
+
+    Write-Log "Operational policy-state summary: Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount Offering=$offeringCount Installing=$installingCount Pending=$pendingCount OtherInProgress=$otherInProgressCount ActionRequired=$actionRequiredCount Unknown=$unknownCount PolicyCompletion=$completionPct% Status=$reportStatus" "INFO" "KPI"
+    if ($coverageAvailable) {
+        Write-Log "Fleet OS coverage: ReferencePolicy='$fleetPolicyName' Target='$fleetTargetLabel' Devices=$fleetDevices Covered=$fleetOsCovered BelowTarget=$fleetOsBelowTarget OsVersionUnknown=$fleetOsVersionUnknown Coverage=$fleetOsCoveragePct% KnownOsCoverage=$fleetKnownOsCoveragePct% IntunePolicyCompleted=$fleetPolicyCompleted IntunePolicyCompletion=$fleetPolicyCompletionPct%" "INFO" "KPI"
+    } else {
+        Write-Log "Fleet OS coverage unavailable: no supported Windows version was detected in a policy name." "WARN" "KPI"
+    }
 
     $should = Should-SendSummaryEmail -CurrentState $summaryState -Mode $SummaryEmailMode -StatePath $SummaryStatePath
     if ($should) {
         $duration = New-TimeSpan -Start $scriptStart -End (Get-Date)
         # Rows are already canonical per policy/device, so a second device deduplication is unnecessary here.
-        $policySummary = foreach ($group in ($enrichedRows | Group-Object -Property PolicyId)) {
-            $policyRows = @($group.Group)
-            $policyTotal = $policyRows.Count
-            $policyCompleted = 0
-            $policyInProgress = 0
-            $policyAction = 0
-            $policyUnknown = 0
-            foreach ($policyRow in $policyRows) {
-                $policyBlockingReason = [string]$policyRow.BlockingReason
-                $policyOperationalState = if ($policyBlockingReason -like 'HardFailure*' -or $policyBlockingReason -eq 'UpdateAlert') {
-                    'ActionRequired'
-                } elseif ($policyBlockingReason -eq 'DeploymentInProgress') {
-                    'InProgress'
-                } elseif ($policyBlockingReason -eq 'NotApplicableOrUnknown') {
-                    'Unknown'
-                } elseif ($policyBlockingReason -eq 'CompliantOrCompleted') {
-                    'Completed'
-                } else {
-                    switch ([string]$policyRow.RiskBucket) {
-                        'High'   { 'ActionRequired'; break }
-                        'Medium' { 'InProgress'; break }
-                        'Low'    { 'Completed'; break }
-                        default  { 'Unknown' }
-                    }
-                }
-
-                switch ($policyOperationalState) {
-                    'Completed'      { $policyCompleted++; break }
-                    'InProgress'     { $policyInProgress++; break }
-                    'ActionRequired' { $policyAction++; break }
-                    default          { $policyUnknown++ }
-                }
-            }
-
-            $policyStatus = if ($policyAction -gt 0) { 'CRITICAL' } elseif ($policyInProgress -gt 0 -or $policyUnknown -gt 0) { 'WARNING' } else { 'OK' }
-            [pscustomobject][ordered]@{
-                PolicyId = [string]$group.Name
-                PolicyName = [string]$policyRows[0].PolicyName
-                Status = $policyStatus
-                Devices = $policyTotal
-                Completed = $policyCompleted
-                InProgress = $policyInProgress
-                ActionRequired = $policyAction
-                Unknown = $policyUnknown
-                CompletionPct = if ($policyTotal) { [math]::Round(100.0*$policyCompleted/$policyTotal,2) } else { 0 }
-            }
-        }
-        $policySummary = @($policySummary | Sort-Object @{Expression='ActionRequired';Descending=$true},@{Expression='InProgress';Descending=$true},PolicyName)
+        $policySummary = $allPolicySummary
         $policyStrips = foreach ($policy in $policySummary) {
             $policyStatusColor = switch ($policy.Status) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
             $policyStatusBackground = switch ($policy.Status) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
             $encodedPolicyName = Html-Encode $policy.PolicyName
             $encodedPolicyId = Html-Encode $policy.PolicyId
+            if ($null -ne $policy.TargetBuild) {
+                $encodedTargetLabel = Html-Encode $policy.TargetLabel
+                $policyTargetHtml = "OS target: $encodedTargetLabel (build $($policy.TargetBuild)+)"
+                $policyOsCoveredText = [string]$policy.OsCovered
+                $policyOsBelowText = [string]$policy.OsBelowTarget
+                $policyOsUnknownText = [string]$policy.OsVersionUnknown
+                $policyOsCoverageText = "$($policy.OsCoveragePct)%"
+            } else {
+                $policyTargetHtml = 'OS target: not detected from policy name'
+                $policyOsCoveredText = 'N/A'
+                $policyOsBelowText = 'N/A'
+                $policyOsUnknownText = 'N/A'
+                $policyOsCoverageText = 'N/A'
+            }
             @"
 <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 14px 0;border:1px solid #dbe4ee;background:#ffffff;">
-<tr><td colspan="6" style="padding:12px 14px;border-bottom:1px solid #dbe4ee;background:#f8fafc;">
+<tr><td colspan="7" style="padding:12px 14px;border-bottom:1px solid #dbe4ee;background:#f8fafc;">
 <span style="display:inline-block;margin-right:8px;padding:4px 9px;border-radius:999px;background:$policyStatusBackground;color:$policyStatusColor;font-size:11px;font-weight:700;">$($policy.Status)</span>
 <strong style="font-size:14px;color:#0f172a;">$encodedPolicyName</strong>
-<div style="margin-top:4px;font-size:11px;color:#64748b;">Policy ID: $encodedPolicyId</div>
+<div style="margin-top:4px;font-size:11px;color:#64748b;">Policy ID: $encodedPolicyId | $policyTargetHtml</div>
 </td></tr>
 <tr>
-<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;"><div style="font-size:10px;color:#64748b;">DEVICES</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Devices)</div></td>
-<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#f0fdf4;"><div style="font-size:10px;color:#166534;">COMPLETED</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Completed)</div></td>
-<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#eff6ff;"><div style="font-size:10px;color:#1d4ed8;">IN PROGRESS</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.InProgress)</div></td>
-<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#fef2f2;"><div style="font-size:10px;color:#b91c1c;">ACTION REQUIRED</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.ActionRequired)</div></td>
-<td style="width:16.66%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#fffbeb;"><div style="font-size:10px;color:#92400e;">UNKNOWN</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Unknown)</div></td>
-<td style="width:16.66%;padding:11px 9px;"><div style="font-size:10px;color:#64748b;">COMPLETION</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.CompletionPct)%</div></td>
+<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;"><div style="font-size:10px;color:#64748b;">DEVICES</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Devices)</div></td>
+<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#dcfce7;"><div style="font-size:10px;color:#166534;">OS COVERED</div><div style="font-size:20px;font-weight:700;color:#334155;">$policyOsCoveredText</div></td>
+<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#fef3c7;"><div style="font-size:10px;color:#92400e;">OS BELOW TARGET</div><div style="font-size:20px;font-weight:700;color:#334155;">$policyOsBelowText</div></td>
+<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#fffbeb;"><div style="font-size:10px;color:#92400e;">OS UNKNOWN</div><div style="font-size:20px;font-weight:700;color:#334155;">$policyOsUnknownText</div></td>
+<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#f0fdf4;"><div style="font-size:10px;color:#166534;">OS COVERAGE</div><div style="font-size:20px;font-weight:700;color:#334155;">$policyOsCoverageText</div></td>
+<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;"><div style="font-size:10px;color:#64748b;">INTUNE COMPLETED</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Completed)</div></td>
+<td style="width:14.28%;padding:11px 9px;"><div style="font-size:10px;color:#64748b;">INTUNE COMPLETION</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.PolicyCompletionPct)%</div></td>
+</tr>
+<tr>
+<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">OFFERING</div><div style="font-size:17px;font-weight:700;">$($policy.Offering)</div></td>
+<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">INSTALLING</div><div style="font-size:17px;font-weight:700;">$($policy.Installing)</div></td>
+<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">PENDING</div><div style="font-size:17px;font-weight:700;">$($policy.Pending)</div></td>
+<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">OTHER IN PROGRESS</div><div style="font-size:17px;font-weight:700;">$($policy.OtherInProgress)</div></td>
+<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">IN PROGRESS TOTAL</div><div style="font-size:17px;font-weight:700;">$($policy.InProgress)</div></td>
+<td style="padding:9px;background:#fef2f2;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#b91c1c;">ACTION REQUIRED</div><div style="font-size:17px;font-weight:700;">$($policy.ActionRequired)</div></td>
+<td style="padding:9px;background:#fffbeb;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#92400e;">UNKNOWN</div><div style="font-size:17px;font-weight:700;">$($policy.Unknown)</div></td>
 </tr></table>
 "@
         }
@@ -1839,7 +2043,25 @@ try {
 
         $statusColor = switch ($reportStatus) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
         $statusBackground = switch ($reportStatus) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
-        $subject = "[$reportStatus] WinUpdate Feature Update - All policies - $completedCount/$totalUniqueDevices unique devices completed - $actionRequiredCount action(s)"
+        if ($coverageAvailable) {
+            $subject = "[$reportStatus] WinUpdate Feature Update - $fleetOsCovered/$fleetDevices devices on $fleetTargetShortLabel+ - $actionRequiredCount action(s)"
+            $fleetCoverageSection = @"
+<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Fleet OS coverage - $(Html-Encode $fleetTargetLabel)+</h2>
+<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Reference policy: $(Html-Encode $fleetPolicyName) | Minimum build: $($primaryCoveragePolicy.TargetBuild) | OS coverage uses the current OSVersion, independently of the Intune policy workflow state.</p>
+<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
+<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">TARGETED DEVICES</div><div style="font-size:24px;font-weight:700;">$fleetDevices</div></td>
+<td style="padding:14px;background:#dcfce7;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">OS COVERED</div><div style="font-size:24px;font-weight:700;">$fleetOsCovered</div></td>
+<td style="padding:14px;background:#fef3c7;border:1px solid #fde68a;"><div style="font-size:11px;color:#92400e;">BELOW TARGET</div><div style="font-size:24px;font-weight:700;">$fleetOsBelowTarget</div></td>
+<td style="padding:14px;background:#fffbeb;border:1px solid #fde68a;"><div style="font-size:11px;color:#92400e;">OS UNKNOWN</div><div style="font-size:24px;font-weight:700;">$fleetOsVersionUnknown</div></td>
+<td style="padding:14px;background:#dcfce7;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">OS COVERAGE</div><div style="font-size:24px;font-weight:700;">$fleetOsCoveragePct%</div></td>
+<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">INTUNE COMPLETION</div><div style="font-size:24px;font-weight:700;">$fleetPolicyCompletionPct%</div></td>
+</tr></table>
+<p style="margin:6px 0 22px 0;font-size:12px;color:#64748b;">Coverage among devices with a known OS version: $fleetKnownOsCoveragePct%. Intune policy completion remains visible as a secondary workflow metric.</p>
+"@
+        } else {
+            $subject = "[$reportStatus] WinUpdate Feature Update - All policies - OS coverage unavailable - $actionRequiredCount action(s)"
+            $fleetCoverageSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Fleet OS coverage unavailable</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>No supported Windows version was detected in a policy name. Policy workflow metrics remain available below.</p>"
+        }
         $fileLinkHtml = if (-not [string]::IsNullOrWhiteSpace($spUploadUrl)) {
             $encodedUrl = Html-Encode $spUploadUrl
             $encodedName = Html-Encode ([IO.Path]::GetFileName($CsvLastFinal))
@@ -1848,17 +2070,24 @@ try {
 
         $html = @"
 <div style="font-family:Segoe UI,Arial;color:#1f2937;">
-<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Global - all Feature Update policies</h2>
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Tenant: $(Html-Encode $OrgDomain) | Policies: $($policies.Count) | Source rows: $count | Duration: $([int]$duration.TotalSeconds) seconds | RunId: $(Html-Encode $RunId)</p>
-<div style="display:inline-block;padding:6px 12px;border-radius:999px;background:$statusBackground;color:$statusColor;font-weight:700;">$reportStatus</div>
-<p style="margin:14px 0 18px;">Global scope: each device is counted once across all policies collected during this run. When a device appears in several policies, its most severe state is retained.</p>
+<div style="display:inline-block;margin-bottom:18px;padding:6px 12px;border-radius:999px;background:$statusBackground;color:$statusColor;font-weight:700;">$reportStatus</div>
+$fleetCoverageSection
+<h2 style="margin:24px 0 6px 0;font-size:18px;color:#0f172a;">Operational policy state - all policies</h2>
+<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Each device is counted once across all policies for operational follow-up. The most severe policy state is retained here only for actions and workflow monitoring; it is not used as the fleet OS coverage KPI.</p>
 <table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
 <td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">UNIQUE DEVICES</div><div style="font-size:24px;font-weight:700;">$totalUniqueDevices</div></td>
-<td style="padding:14px;background:#dcfce7;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">COMPLETED</div><div style="font-size:24px;font-weight:700;">$completedCount</div></td>
+<td style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">POLICY COMPLETED</div><div style="font-size:24px;font-weight:700;">$completedCount</div></td>
 <td style="padding:14px;background:#dbeafe;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">IN PROGRESS</div><div style="font-size:24px;font-weight:700;">$inProgressCount</div></td>
 <td style="padding:14px;background:#fee2e2;border:1px solid #fecaca;"><div style="font-size:11px;color:#b91c1c;">ACTION REQUIRED</div><div style="font-size:24px;font-weight:700;">$actionRequiredCount</div></td>
 <td style="padding:14px;background:#fef3c7;border:1px solid #fde68a;"><div style="font-size:11px;color:#92400e;">UNKNOWN</div><div style="font-size:24px;font-weight:700;">$unknownCount</div></td>
-<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">COMPLETION</div><div style="font-size:24px;font-weight:700;">$completionPct%</div></td>
+<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">POLICY COMPLETION</div><div style="font-size:24px;font-weight:700;">$completionPct%</div></td>
+</tr></table>
+<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;margin-top:2px;"><tr>
+<td style="padding:11px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:10px;color:#1d4ed8;">OFFERING</div><div style="font-size:19px;font-weight:700;">$offeringCount</div></td>
+<td style="padding:11px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:10px;color:#1d4ed8;">INSTALLING</div><div style="font-size:19px;font-weight:700;">$installingCount</div></td>
+<td style="padding:11px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:10px;color:#1d4ed8;">PENDING</div><div style="font-size:19px;font-weight:700;">$pendingCount</div></td>
+<td style="padding:11px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:10px;color:#1d4ed8;">OTHER IN PROGRESS</div><div style="font-size:19px;font-weight:700;">$otherInProgressCount</div></td>
 </tr></table>
 <h2 style="margin:24px 0 6px 0;font-size:18px;color:#0f172a;">Feature Update policies</h2>
 <p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Each device is counted once within each policy. A device targeted by several policies appears in every relevant policy strip, so policy totals are not additive and may exceed the global unique-device total.</p>
@@ -1877,7 +2106,7 @@ $fileLinkHtml
         Write-Log "Summary email skipped (Mode=$SummaryEmailMode)." "INFO" "MAIL"
     }
 
-    Write-Log "Completed successfully. Version=$ScriptVersion DryRun=$DryRun Rows=$count Devices=$totalUniqueDevices Completed=$completedCount InProgress=$inProgressCount ActionRequired=$actionRequiredCount Unknown=$unknownCount Completion=$completionPct%" "INFO"
+    Write-Log "Completed successfully. Version=$ScriptVersion DryRun=$DryRun Rows=$count UniqueDevices=$totalUniqueDevices CoverageTarget='$fleetTargetLabel' TargetedDevices=$fleetDevices OsCovered=$fleetOsCovered OsCoverage=$fleetOsCoveragePct% IntunePolicyCompleted=$fleetPolicyCompleted IntunePolicyCompletion=$fleetPolicyCompletionPct% ActionRequired=$actionRequiredCount" "INFO"
 }
 catch {
     $script:CompletionStatus = 'Failed'
@@ -1936,8 +2165,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6raPfG1uVGAfy
-# hSvOqgrfqoTTV4d+eOdE0gRFIkPyqaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUglDpSYBC7CEQ
+# F+dRPJaTIjFpZulKLQcSRoYk8drt/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2070,31 +2299,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOd3zgmM9F9Gd+d6fc9HyC5to3C8uQ7kyFOhia616EoeMA0GCSqG
-# SIb3DQEBAQUABIIBgIUpWVCa4KGTmxX/ErTPs99Jv+d86cuhH/UtKHWZnenArXEN
-# D2iufNn2Hv9umk974drc8hWXEqe9mmT83tMDvc6QaftYZ17vpEbq1cOY7pSoSGO8
-# qqASoE8w1di1bcTLDqv/GW0YjDsmKQg+ZmKzAegcm9AyWiCqwEt+07G3fiFtjK4B
-# ACRFFboqRz75xta3585x76dik/tALQifgJuc0k2XIKHSXVniW2r95GR52MchvF/9
-# zvBr0hwShJm+MHa6GJcGs3tJzQZ2WHpQ2YJOSreMez1lR3dmTWJKEyNU+Z4TxItM
-# p5GpT0uEUp60OZCwrrvfrV7fUJJwUWrH79Jelwzx0CJ3zS/UA+cWAODVmJ9KMHpT
-# JwKsEI0PZ3jsnPmBvnGEVx7ZyDJtqzi05rR0OpEH/WpKtSK5QLogCp3PEKKPXjiu
-# g0SBTLcEQnSz2+p/by++sBBwClPhf0Ex5IIBBP6ilIbOSNgrLJjZGQMLT325CL7l
-# C/QGGlQgtqGyFnTBDqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPoAsnewSpp3EGQgDr1SrmdwT0I0uywYV5GGCeD3vw4dMA0GCSqG
+# SIb3DQEBAQUABIIBgDOIT0k3TAyphTKZnHTUhwi2AdICrpQL6Wsw2xGBlTSs6Et1
+# IGY9Sd8C9OaeIGlczkOAX8LdUbmJWq592OQfkTOvrErG9MhiaBQKGxBz+2Zijdip
+# LCA0lMpbaLexHeJXSDuLeHvkymCbemfXpHxfErL1b2RK5rAKkkyA5lsZGLkuvssg
+# TCZERWGbpdB38zhqaS4H5N2bnMRBbQnlE0YUdNoRhuHlC6CWOTMt09S5RKncvXtP
+# l+Ku530AXDE5gtwvC/2TMj0x5WaSkaZfQzQlC+bvmsW0e8O8ThrutDiJYuLNzTHp
+# 4eaz4iLzxOxgzQjNBqpLYoi4LgHm38hGP/AS1XMqyslc0zM/dsQqRIcL+MGgY4nn
+# dSySjXmCGINGWBg5oLNXtlabE4jETc0ePEguUc4zQUKS+D43K2JIphfV2dG5AsTD
+# ryafoKqHA/1c8FCJSmV/tBc7/qGmdoDs5oV64/YhEPtQ8MU3LPZh4DrQ5DN59FDx
+# Y4VzJzf4SYEcm7ArU6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYwNzE2
-# MTlaMC8GCSqGSIb3DQEJBDEiBCB/rLDakj/lXk8zJb6UmkQBNBtZK6Rz1wcP3IJe
-# 4BGWJDANBgkqhkiG9w0BAQEFAASCAgB4Glp1Vxc6/TZg/NSiVg1Ket82mFwaNdpX
-# kyTNahMqBrWXjqFzmF5BjGKAG7RCKbclbhzXULbX19GBYNADC766A1zhjXUka23W
-# SqjlaKovz48S1P+bgtWbiCNitTndb8qGxxRGaLAuoHW/3oXP1RvDbY7YozdXlJO9
-# 7Dd6jL4BTZaQfZhpQGG9x6UJ7wwfOgMMXmfqmhsCk9h99uVshGBke2GSApK0OycR
-# pW+6/ezAYdQooDEibhKhN3zodXWPFNt3QcDSVE4kpnS9aPCHb+j/yv+HaBbZj4Su
-# IVgPu+Lq6E+z/hBXx2o0RBes1AJ3UbQVyN0/tEujIUagRJfScf6fTcyF7pG8LbNl
-# NvrPVOjzx8um5gEJAngx4HWJ/7iBdpptfXmaIvBbw8L38Wt7onf186JSVyyHItur
-# /W5YekERTqrCu1aif8C9VR6CYx9Ev51qS6d7jRJ2UzY+l3i6PfLc2OU0Ct6hGj/f
-# Bow7lWzxeCIXm8kKY8Fl77KOa4ww1iS1ebaE4imrocpZqOCcRKjxMhsNBkBzu3ar
-# Yx4+RXK09mqidMGshw5lahj/RV6gyxkdkCjnmlB3L+SPHA/q1ip42zi+URV1W9Bb
-# GkFne5OujLAbOgpxAAljvX/p35j8VHJiwcogfQ4brjbyBOBIUDupbrj27setwPz2
-# FRqjhrBe5A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjEwNzI4
+# NTJaMC8GCSqGSIb3DQEJBDEiBCDxcfjcv/iq6JdywbPZFJHGkPzcY3Y6I6SBJeZI
+# 2bn5zTANBgkqhkiG9w0BAQEFAASCAgAI64Gv+JixPdYron6WteOnQkwr4luS0rui
+# mJsVP+4ZFJzrHRxyxNzc+A7h06sHD3fhGX1k9TCc2WHY7IxJL7ATKljWxUpN20CL
+# FCnYJhFYWNoktCZG4UTT6lUKJIwdedg4nyU7bwYfRIjDTQUYMu65S1oUGmx8cfmZ
+# eHb1Fk0/cl9b5Zt7yEBf/P15r2aWUq4kOCd2Fs02SkjJe2yTHaUD2WwghAIQ3luS
+# d5Hxc09gCxVXo6iUv/58qzj2K9tBH3C2Y8UZrXR55KJ8odXNnIX+nGKC491YAw6T
+# IJ0h4J8y0AkGJiTsONrsGhA/+1z5eAn5NuQDBbOCoTSHy7+BaIqLLt0UyrJf3CY5
+# qoIg0TL1DxRQ533jrloFSC0AeGLBJOVIbjOWcchPqEgQFGr7jygDFbYf/5pvUOXX
+# r5KJL4qa4zLN7fLxZJ9nMzFJ7eKNK0U/EGr9zUzJV3G4HScYGg2l1sGkFMX1xeA9
+# 1oHk6qdPxZjHcBU151ZfuXYkKnOlX2rodf0GacF87VEgMB0SHqBjuSaPMnQHgwPs
+# kaevENGTl7zx4CKN0eeXcA+MlSKJvOiOwx+WhsUUU64OljsZ0cItl4VcNOJrRll9
+# W/gAPuzFJaozZlY6eDN5s26+mNV69cd7tTq0odlXFG5Wc+MZO/6WKtqzHkn/+pXT
+# tzD44rwC1w==
 # SIG # End signature block
