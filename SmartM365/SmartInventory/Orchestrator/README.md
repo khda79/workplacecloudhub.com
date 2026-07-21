@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.8) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.9) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 It is started by a single Windows Task Scheduler task (at server startup plus a daily trigger), loops with a one-minute tick, launches each job exactly at its scheduled occurrences, and exits cleanly after a configurable maximum lifetime (default 24 hours) so Task Scheduler restarts a fresh instance (memory recycling). The orchestrator recycle never interrupts a running job (see "Detached jobs and re-adoption").
 
@@ -82,7 +82,7 @@ Every resident server independently monitors the other servers listed in `Expect
 
 The monitor first validates access to the shared orchestrator root. A storage-access failure produces one `MonitoringUnavailable` incident instead of falsely declaring every peer down. For each peer, it then checks the shared `Orchestrator-Heartbeat.json`; a missing, invalid or older-than-threshold heartbeat is confirmed across consecutive checks before an alert is sent.
 
-When the heartbeat is healthy and `PeerJobMonitoringEnabled` is true, the monitor reads the peer state and compares enabled jobs assigned to that server with their latest expected occurrence. Before raising `JobNotStarted`, it checks the occurrence's shared claim; terminal claims and non-expired `Claimed`, `Running` or `RetryScheduled` claims suppress the false alert even if the current plan owner differs from the server that handled the occurrence. Running jobs, pending retries, valid dependency waits and a valid `BlockedByConcurrencyKey` lease are not reported as missing. An expired or invalid concurrency lease is reported separately as `ConcurrencyBlockStale`. Disabled/manual jobs are excluded. Server-health alerts and job-schedule alerts are sent separately. Each stable server/job issue has its own reminder timestamp, so a changing queue does not resend every previously reported issue. A recovery email follows consecutive healthy checks.
+When the heartbeat is healthy and `PeerJobMonitoringEnabled` is true, the monitor reads the peer state and compares enabled jobs assigned to that server with their latest expected occurrence. Before raising `JobNotStarted`, it checks the occurrence's shared claim; terminal claims and non-expired `Claimed`, `Running` or `RetryScheduled` claims suppress the false alert even if the current plan owner differs from the server that handled the occurrence. Running jobs, pending retries, valid dependency waits, `BlockedByServerConcurrency` capacity waits and a valid `BlockedByConcurrencyKey` lease are not reported as missing. An expired or invalid concurrency lease is reported separately as `ConcurrencyBlockStale`. Disabled/manual jobs are excluded. Server-health alerts and job-schedule alerts are sent separately. Each stable server/job issue has its own reminder timestamp, so a changing queue does not resend every previously reported issue. A recovery email follows consecutive healthy checks.
 
 The heartbeat also publishes the health of the per-server state persistence. If a temporary SMB lock survives all configured retries, the resident process stays alive and continues supervision, heartbeat and peer monitoring, but pauses new launches until the state file can be written again. Healthy peers report this as a separate `StatePersistenceUnavailable` server-health issue.
 
@@ -100,9 +100,9 @@ Recommended production values for the three-server deployment:
 "PeerAlertMailRetryMinutes": 15,
 "PeerRecoveryEmailEnabled": true,
 "MaxConcurrencyByServer": {
-  "CPPV-CAPTSE-001": 2,
-  "CPPV-CAPTSE-002": 3,
-  "CPPV-EXCSRV-113": 2
+  "CPPV-CAPTSE-001": 6,
+  "CPPV-CAPTSE-002": 9,
+  "CPPV-EXCSRV-113": 6
 },
 "AtomicWriteRetrySeconds": 30
 ```
@@ -193,8 +193,8 @@ Before launching an elected occurrence, the owner must create its shared claim w
 
 ### Concurrency, queueing, dependencies, overlap
 
-- Global `MaxConcurrency` (default 2), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost) and start as soon as a slot frees. Re-adopted jobs count toward the limit. The production template sets `CPPV-CAPTSE-001=2`, `CPPV-CAPTSE-002=3` and `CPPV-EXCSRV-113=2`; this local map must be present on all three servers.
-- `ConcurrencyKey` is enforced through an atomic lease in shared storage. Jobs sharing the key cannot run simultaneously anywhere in the cluster. A waiting occurrence is published as `BlockedByConcurrencyKey`; the lease follows detached/re-adopted jobs and is released when the run ends, including before a retry delay.
+- Global `MaxConcurrency` (default 2 in code, 6 in the production local configuration), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost), are published as `BlockedByServerConcurrency`, and start as soon as a slot frees. Re-adopted jobs count toward the limit. The production template sets `CPPV-CAPTSE-001=6`, `CPPV-CAPTSE-002=9` and `CPPV-EXCSRV-113=6`; this local map must be present on all three servers.
+- `ConcurrencyKey` is enforced through an atomic lease in shared storage. Jobs sharing the key cannot run simultaneously anywhere in the cluster. A waiting occurrence is published as `BlockedByConcurrencyKey`; the lease follows detached/re-adopted jobs, is atomically aligned with the active timeout deadline after every recycle, and is released when the run ends, including before a retry delay.
 - `DependsOn`: jobs due at the same occurrence run chained in topological order (the manifest is rejected at load time on a cycle). A dependent waits while a parent is running, due, or pending a retry. If a parent with `ContinueOnError=false` finally fails, dependents due at the same occurrence are marked `BlockedDependencyFailed`. If a dependency wait exceeds `DependencyWaitTimeoutMinutes`, the occurrence is marked `BlockedDependencyTimeout`.
 - Overlap guards:
   - Global lock file: two orchestrator instances never run at the same time for the same tenant; a stale lock (dead PID) is recovered with a warning (exit code 3 when a live instance holds the lock).
