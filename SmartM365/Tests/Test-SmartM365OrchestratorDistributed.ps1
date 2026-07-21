@@ -2,7 +2,7 @@
 .SYNOPSIS
 Validates SmartM365 Orchestrator distributed election and claim behavior.
 .VERSION
-1.0.0
+1.0.1
 #>
 
 #Requires -Version 7.0
@@ -228,16 +228,18 @@ try {
         [ref]$orchestratorErrors
     )
     Assert-True -Condition ($orchestratorErrors.Count -eq 0) -Message 'The orchestrator could not be parsed for the Restore-RunningJobs regression test.'
-    $restoreFunctionAst = $orchestratorAst.Find(
-        {
-            param($node)
-            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-                $node.Name -eq 'Restore-RunningJobs'
-        },
-        $true
-    )
-    Assert-True -Condition ($null -ne $restoreFunctionAst) -Message 'Restore-RunningJobs was not found in the orchestrator.'
-    . ([scriptblock]::Create($restoreFunctionAst.Extent.Text))
+    foreach ($functionName in @('Get-RunningJobTimeoutWindow', 'Restore-RunningJobs')) {
+        $functionAst = $orchestratorAst.Find(
+            {
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                    $node.Name -eq $functionName
+            },
+            $true
+        )
+        Assert-True -Condition ($null -ne $functionAst) -Message ("{0} was not found in the orchestrator." -f $functionName)
+        . ([scriptblock]::Create($functionAst.Extent.Text))
+    }
 
     function ConvertFrom-StateTime {
         param([string]$Text)
@@ -265,22 +267,24 @@ try {
         ElectionClaimGraceMinutes = 15
         SharedDataFolderPath = $heartbeatRoot
         PeerHeartbeatStaleMinutes = 5
+        ConcurrencyLeasesPath = Join-Path -Path $temporaryRoot -ChildPath 'Concurrency'
     }
     $script:ElectionPlan = [pscustomobject]@{ PlanId = 'recovery-plan' }
+    $recoveryJob = [pscustomobject]@{
+        Name = 'RecoveryJob'
+        AssignmentMode = 'Elected'
+        TimeoutMinutes = 240
+        ConcurrencyKey = 'RecoveryLease'
+    }
     $script:Manifest = [pscustomobject]@{
-        OrderedJobs = @(
-            [pscustomobject]@{
-                Name = 'RecoveryJob'
-                AssignmentMode = 'Elected'
-                TimeoutMinutes = 240
-            }
-        )
+        OrderedJobs = @($recoveryJob)
+        JobsByName = @{ RecoveryJob = $recoveryJob }
     }
     $script:State = @{
         Jobs = @{
             RecoveryJob = @{
                 Running = @{
-                    StartTime = (Get-Date).ToString('o')
+                    StartTime = (Get-Date).AddMinutes(-5).ToString('o')
                     ScheduledOccurrence = $recoveryOccurrence.ToString('o')
                     Pid = $PID
                     ProcessName = 'pwsh'
@@ -298,8 +302,18 @@ try {
     Assert-True -Condition (Test-Path -LiteralPath $restoredRecord.ClaimPath) -Message 'Restore-RunningJobs did not create the recovered claim file.'
     $restoredClaim = Get-Content -LiteralPath $restoredRecord.ClaimPath -Raw | ConvertFrom-Json
     Assert-True -Condition ($restoredClaim.Status -eq 'Running') -Message 'The recovered claim was not marked Running.'
-    Assert-True -Condition ($script:SavedStateCount -eq 1) -Message 'The recovered ClaimPath was not saved exactly once.'
-    Assert-True -Condition $script:RunningJobs.ContainsKey('RecoveryJob') -Message 'The synthetic PID was not re-adopted after its claim was recovered.'
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace([string]$restoredRecord.ConcurrencyLeasePath)) -Message 'Restore-RunningJobs did not persist the recovered ConcurrencyLeasePath.'
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace([string]$restoredRecord.ConcurrencyLeaseId)) -Message 'Restore-RunningJobs did not persist the recovered ConcurrencyLeaseId.'
+    Assert-True -Condition (Test-Path -LiteralPath $restoredRecord.ConcurrencyLeasePath) -Message 'Restore-RunningJobs did not create the recovered concurrency lease.'
+    $restoredLease = Get-Content -LiteralPath $restoredRecord.ConcurrencyLeasePath -Raw | ConvertFrom-Json
+    $expectedLeaseDeadline = ([datetime]$restoredRecord.StartTime).ToUniversalTime().AddMinutes(255)
+    $actualLeaseDeadline = ([datetime]$restoredLease.SafeUntilUtc).ToUniversalTime()
+    Assert-True -Condition ([string]$restoredLease.LeaseId -eq [string]$restoredRecord.ConcurrencyLeaseId) -Message 'The recovered concurrency lease ID does not match the persisted state.'
+    Assert-True -Condition ([string]$restoredLease.OwnerServer -eq $env:COMPUTERNAME.ToUpperInvariant()) -Message 'The recovered concurrency lease owner is incorrect.'
+    Assert-True -Condition ([int]$restoredLease.OrchestratorPid -eq $PID) -Message 'The recovered concurrency lease was not re-bound to the current orchestrator PID.'
+    Assert-True -Condition ([math]::Abs(($actualLeaseDeadline - $expectedLeaseDeadline).TotalSeconds) -lt 2) -Message 'The recovered concurrency lease was not aligned with the original timeout deadline.'
+    Assert-True -Condition ($script:SavedStateCount -eq 1) -Message 'The recovered claim and concurrency lease were not saved exactly once.'
+    Assert-True -Condition $script:RunningJobs.ContainsKey('RecoveryJob') -Message 'The synthetic PID was not re-adopted after its claim and concurrency lease were recovered.'
 }
 finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
@@ -312,8 +326,8 @@ Write-Output 'SmartM365 Orchestrator distributed scheduling mock tests passed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNw2BUWMMzRh8N
-# /yQVZcyOWm4RcwrqJKh4+yRzmEsiR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAh26m9MFTZDTQW
+# wHDUwZzBUBPguEQrzZKpZStA4wpTCKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -446,31 +460,31 @@ Write-Output 'SmartM365 Orchestrator distributed scheduling mock tests passed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFtasYIBzhfOtFsSzFQHY1HBejeVa+ZEKme0Yrma0lWgMA0GCSqG
-# SIb3DQEBAQUABIIBgBVPZRQb5213txILFxLbg0/lwkGbD0nuN/QgB4Hch43f7B+O
-# sFHmt7KUC3n6PCWap0UyqedaPxug2ql9/If1A6+342KQzNqdc66nbybqjgMxOWWk
-# q27e0avk2tfrTtG/k/x3hI93nTGWbFNZPfnn+4Ue/oLrv9dgksGq16yvyCZCN80Z
-# x5U6srW2kbMDH8W7TBzZV8w621O+pxCC6/dHJEWJ5M1dPWeG879aLzTBFHqO2w5R
-# Dc86p5zDAWABi3Z3EriYIKEMDQwGKoHt9BzUdoHIrJrVY0juDIOG+cpthkaIarFp
-# tAENL7xyqPKJXn4B2pKdjdeBkP/7A2QxXodxkOtFX3Wp04i1ZfuC2u+qHpH4Djtl
-# RqRCm+B7691VIeyw1FNfLqPYi8xB4d0VfH+j52UHeqsVSLlnUVvZaUsL5jv7INGu
-# uQ47jvREw4xXQyEWAuAS8HA2XSy9LeJ9fjjqImcBMz3sTGwL+LgvUporlJ+KHiF8
-# +LjDfTFeC0t5jat2EaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINkEUoilKI9ijkvvzx0U+gEhC0+LuGvuzDX8C5XL5f/MMA0GCSqG
+# SIb3DQEBAQUABIIBgHkuxtledM9l3m90elZo2DLRijh32San3aZ6VKR2q+ud+xmW
+# pKT2Y+m36g9xjF57RvZ5OzB/j9IxqMKF8zSw3FLDtFRiQYF7RraLXTKS0+vdlXlY
+# UbcEqBM8tHr9AEUpCgZL9uTGL/0jRKCjWh+suRrq2iYBbsk+uoe/bMvlInjXY4q5
+# ki/RGa9irGsIhXlWyIqpOjnBYY45ghdXImGbcq2maAmTjBsow148ugNBh54zO7cr
+# ybbRbQgdoB1e84IvsksW48kBytWijUZlyNsbbdqnbYGd8CIvohBKmsJdcGBC1EO7
+# HYNx0iNeWVX2EFW6XoAWeUVonqMUsPA5s2aOqopmpB7SLtiT/kcCtIZ3K0S/oK1S
+# NMnTwEGudlvn2AaIMCP6XUvqvFLSJe+aqK56EavTduRiVt2aiEcCbxugnMg69ggb
+# zDahNWNqcKq5qCFAu4bhijCxzbT3UgAn8+6u0X2X4NGi9bqpOdwNemv8uGSeLtce
+# Bbc5yVL/4m1oHxL1kKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjAyMTU1
-# MzhaMC8GCSqGSIb3DQEJBDEiBCAsr8uoNU3yrNqbwLF/0O8mKWtRkOAS9IA8mgMk
-# BWwCKDANBgkqhkiG9w0BAQEFAASCAgC04BbJYUKCY0BWkMxsQjs/Y2wo/OABDx5h
-# p/XMID1zVRl5MsdqZXuFE6/WH6oZJ7wvm0hFcEHidwR141+tKmWLolQsq6vmZfG8
-# E4GT/EG4fIDkm61YwAsJZFGIyYDW9PbQEq1saOf9cCNNvJgRasYS5bVL0ZckxsrD
-# X9XcZP9ZBZGQszaErqT5NV2gVeMLPu3rq5WbBhplnTi1+wTM5WiGdl8VaP7jrhBk
-# RQO38DNjHz+BfwET/r8vsw1dc4K42modWhmON6AMDZ7aGpSDsKixuUEkh6MDt5Ix
-# SucukGwWljiVVZ5EgjvDiCrVfOXSTON39O42Oj78moFQa7MGnOq35fQk4fjCmdm+
-# W1dusPMD3fu2Qgi4Hybvk5kRAIyBs8f3K7ob11n0ncycRevhyaT2TYn+LaxvRSUy
-# GpxRMSaX+Wuqnhhgc8D0veTOpODYnXfGhuG9SpRV1xTUhGvDtdrqW/0uu6Hhg+f6
-# ZytQ4YN/tWiebqiXiwz44XmIKn0uiUbFMrC43qTmFsV9uI6hJXU6yIDkh0zfItmp
-# 01Sl0AtVaDqoe1TUQUv8JLXwTTDgBOKGbEGz3MLGiUj1YHSffXfl9VG+naeOYpWR
-# MX7LR85sKqvRAF2VBTBIcZxJoesliM0W4xVki2Cp0ZeySq7bBrSeHQaHQFP6J8dj
-# PEvVSRvrtg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjExMTMy
+# NTRaMC8GCSqGSIb3DQEJBDEiBCB8kMLmIFkngKGm6QB1cf3TMzwVc+hup+PfnVte
+# XFG2qjANBgkqhkiG9w0BAQEFAASCAgAVL8adyKFFf0FzJwfvHB7xVXkTbwXA75Eh
+# phqFI4IAsu/EkKSXnpob04kgkLSLyGG1FIyOIrAfK28b19Gb1/UtZnbY5Azx/9aM
+# FnJNkMvrxSd9vAlH5Q2s3IPotp8OqRn35+zzLfHLrAxz6pyN9feH+RwYozvPgN+w
+# CFCqFppXvrg/hBDtJmtXqM5ImRC431RpekpSn9pQTL/TtbXpJEgNJPpAgPaUzD09
+# N+V8x8JlMiv8rNDnZ3AOtL9LLVxrOlk+kl81n9UlcnaJeAskN+NqGhkDvBEcFowV
+# o5tn72RFkQjAgvD+Gu8fFdwrJpHgrUDv/OjaRlYoZKqsPwdhoS5MnI+0rjUpKaAr
+# xfgDXcENiC8JLb1ZGo7dd3J6qwA46KBypLtgIDjDm7+9JXhK4+bIXd27BJi0oFsj
+# qvf+GmbdU8C8c5EvDYSak+KK2Df71giVSFX7VX8H93eQxqtMBXzOP1Ez1KjMBXhy
+# qyWHKVzA6I9t11L+ZR10yj0wtZWw99XMt9HdwFxTlwLBgQTHo73ucnE8n6i85YH6
+# 67/k6PbFaL5DJWvEU3pOrJ1IM566iqDEvOlP6aBhlwBQR3HG899sHDYpqH1Rtrmv
+# qcDRyFlexNhCO4HRDmTAXyzmN/HTSJunV89avr1QvzLS/4+Nppcv0kb9gcr1rAhW
+# Ws/y8UPOHw==
 # SIG # End signature block
