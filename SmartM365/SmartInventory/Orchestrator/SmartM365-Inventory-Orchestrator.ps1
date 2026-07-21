@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.8
+1.5.9
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.8
+    Version : 1.5.9
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.8"
+$ScriptVersion = "1.5.9"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -1748,7 +1748,7 @@ function Get-OrchestratorPendingJobSnapshot {
                 Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency-snapshot:{0}:{1}" -f $name, $_.Exception.Message) -Message ("Job {0}: shared ConcurrencyKey lease could not be inspected for heartbeat: {1}" -f $name, $_.Exception.Message) -Now $Now
             }
             if ($reason -eq 'DueNotStarted' -and $script:RunningJobs.Count -ge $script:Settings.MaxConcurrency) {
-                $reason = 'WaitingConcurrency'
+                $reason = 'BlockedByServerConcurrency'
                 $details = ("Local concurrency limit reached ({0}/{1})." -f $script:RunningJobs.Count, $script:Settings.MaxConcurrency)
             }
         }
@@ -2043,7 +2043,7 @@ function Get-OrchestratorPeerHealthSnapshot {
             )
             if ($pendingMatch.Count -eq 1) {
                 $pendingReason = [string]$pendingMatch[0].Reason
-                if ($pendingReason -eq 'PendingRetry') { continue }
+                if ($pendingReason -in @('PendingRetry', 'BlockedByServerConcurrency', 'WaitingConcurrency')) { continue }
                 if ($pendingReason -eq 'BlockedByConcurrencyKey') {
                     $blockSafeUntilUtc = [datetime]::MinValue
                     $hasSafeUntil = $pendingMatch[0].PSObject.Properties['BlockSafeUntilUtc'] -and
@@ -3069,6 +3069,58 @@ function Complete-JobRun {
     }
 }
 
+function Get-RunningJobTimeoutWindow {
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)]$RunInfo
+    )
+
+    $timeoutMinutes = [int]$RunInfo.TimeoutMinutes
+    if ($script:Manifest.JobsByName.ContainsKey($JobName)) {
+        $timeoutMinutes = [int]$script:Manifest.JobsByName[$JobName].TimeoutMinutes
+    }
+    $startUtc = ([datetime]$RunInfo.StartTime).ToUniversalTime()
+    $timeoutUtc = $startUtc.AddMinutes([math]::Max(1, $timeoutMinutes))
+    $leaseSafeUntilUtc = $timeoutUtc.AddMinutes([math]::Max(1, [int]$script:Settings.ElectionClaimGraceMinutes))
+    return [pscustomobject]@{
+        TimeoutMinutes = $timeoutMinutes
+        StartUtc = $startUtc
+        TimeoutUtc = $timeoutUtc
+        LeaseSafeUntilUtc = $leaseSafeUntilUtc
+    }
+}
+
+function Sync-RunningJobConcurrencyLease {
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)]$RunInfo,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    if ([string]::IsNullOrWhiteSpace([string]$RunInfo.ConcurrencyLeasePath) -or
+        [string]::IsNullOrWhiteSpace([string]$RunInfo.ConcurrencyLeaseId)) {
+        return
+    }
+
+    $window = Get-RunningJobTimeoutWindow -JobName $JobName -RunInfo $RunInfo
+    if ($Now.ToUniversalTime() -gt $window.TimeoutUtc) { return }
+    try {
+        $leaseParameters = @{
+            LeasePath = [string]$RunInfo.ConcurrencyLeasePath
+            LeaseId = [string]$RunInfo.ConcurrencyLeaseId
+            OwnerServer = $env:COMPUTERNAME
+            SafeUntilUtc = $window.LeaseSafeUntilUtc
+        }
+        $refreshed = Set-SmartM365OrchestratorConcurrencyLease @leaseParameters
+        if (-not $refreshed) {
+            Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency-refresh:{0}:ownership" -f $JobName) -Message ("Job {0}: ConcurrencyKey lease could not be refreshed because ownership changed or the lease no longer exists." -f $JobName) -Now $Now
+        }
+    }
+    catch {
+        Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency-refresh:{0}:{1}" -f $JobName, $_.Exception.Message) -Message ("Job {0}: ConcurrencyKey lease refresh failed: {1}" -f $JobName, $_.Exception.Message) -Now $Now
+    }
+}
+
 function Update-RunningJobs {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
@@ -3091,10 +3143,10 @@ function Update-RunningJobs {
             continue
         }
 
-        $timeoutMinutes = [int]$info.TimeoutMinutes
-        if ($script:Manifest.JobsByName.ContainsKey($name)) { $timeoutMinutes = [int]$script:Manifest.JobsByName[$name].TimeoutMinutes }
-        if ($timeoutMinutes -gt 0 -and ($Now - [datetime]$info.StartTime).TotalMinutes -gt $timeoutMinutes) {
-            Write-OrchestratorLog -Message ("Job {0}: timeout after {1} minutes (limit {2}); killing the process tree of PID {3}." -f $name, [int]($Now - [datetime]$info.StartTime).TotalMinutes, $timeoutMinutes, $process.Id) -Level ERROR
+        $timeoutWindow = Get-RunningJobTimeoutWindow -JobName $name -RunInfo $info
+        if ($timeoutWindow.TimeoutMinutes -gt 0 -and $Now.ToUniversalTime() -gt $timeoutWindow.TimeoutUtc) {
+            $elapsedMinutes = [int][math]::Floor(($Now.ToUniversalTime() - $timeoutWindow.StartUtc).TotalMinutes)
+            Write-OrchestratorLog -Message ("Job {0}: timeout after {1} minutes (limit {2}); killing the process tree of PID {3}." -f $name, $elapsedMinutes, $timeoutWindow.TimeoutMinutes, $process.Id) -Level ERROR
             Stop-ProcessTree -TargetPid $process.Id
             try { $process.WaitForExit(30000) | Out-Null } catch { }
             $processStillRunning = $false
@@ -3106,7 +3158,10 @@ function Update-RunningJobs {
                 Write-OrchestratorLog -Message ("Job {0}: timeout kill confirmed for PID {1}." -f $name, $process.Id) -Level WARN
             }
             Complete-JobRun -JobName $name -RunInfo $info -StatusHint 'TimedOut' -ExitCode $null -EndTime (Get-Date)
+            continue
         }
+
+        Sync-RunningJobConcurrencyLease -JobName $name -RunInfo $info -Now $Now
     }
 }
 
@@ -3190,36 +3245,46 @@ function Restore-RunningJobs {
             )
             $jobForLease = if ($manifestJobForLease.Count -gt 0) { $manifestJobForLease[0] } else { $null }
             $concurrencyKey = if ($null -ne $jobForLease) { [string]$jobForLease.ConcurrencyKey } else { $jobName }
+            $configuredTimeout = if ($null -ne $jobForLease) { [int]$jobForLease.TimeoutMinutes } else { [int]$runInfo.TimeoutMinutes }
+            if ([int]$runInfo.TimeoutMinutes -ne $configuredTimeout) {
+                $runInfo.TimeoutMinutes = $configuredTimeout
+                $record['TimeoutMinutes'] = $configuredTimeout
+                $stateChanged = $true
+            }
+            $timeoutWindow = Get-RunningJobTimeoutWindow -JobName $jobName -RunInfo $runInfo
+            $remainingSafeMinutes = [int][math]::Ceiling([math]::Max(1, ($timeoutWindow.LeaseSafeUntilUtc - [datetime]::UtcNow).TotalMinutes))
+
             $leaseIsCurrent = $false
             if (-not [string]::IsNullOrWhiteSpace([string]$runInfo.ConcurrencyLeasePath) -and
                 -not [string]::IsNullOrWhiteSpace([string]$runInfo.ConcurrencyLeaseId) -and
                 (Test-Path -LiteralPath ([string]$runInfo.ConcurrencyLeasePath) -PathType Leaf)) {
                 try {
                     $currentLease = Get-Content -LiteralPath ([string]$runInfo.ConcurrencyLeasePath) -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                    $leaseIsCurrent = [string]$currentLease.LeaseId -eq [string]$runInfo.ConcurrencyLeaseId
+                    $leaseIsCurrent = [string]$currentLease.LeaseId -eq [string]$runInfo.ConcurrencyLeaseId -and
+                        [string]$currentLease.OwnerServer -eq $env:COMPUTERNAME.ToUpperInvariant()
                 }
                 catch { $leaseIsCurrent = $false }
             }
 
             if (-not $leaseIsCurrent) {
-                $configuredTimeout = if ($null -ne $jobForLease) { [int]$jobForLease.TimeoutMinutes } else { [int]$runInfo.TimeoutMinutes }
-                $elapsedMinutes = [math]::Max(0, ((Get-Date) - [datetime]$runInfo.StartTime).TotalMinutes)
-                $remainingSafeMinutes = [int][math]::Ceiling([math]::Max(1, $configuredTimeout + $script:Settings.ElectionClaimGraceMinutes - $elapsedMinutes))
                 try {
-                    $lease = Enter-SmartM365OrchestratorConcurrencyLease `
-                        -LeasesRootPath $script:Settings.ConcurrencyLeasesPath `
-                        -ConcurrencyKey $concurrencyKey `
-                        -JobName $jobName `
-                        -Occurrence $runInfo.Occurrence `
-                        -OwnerServer $env:COMPUTERNAME `
-                        -SafeMinutes $remainingSafeMinutes `
-                        -HeartbeatRootPath $script:Settings.SharedDataFolderPath `
-                        -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes
+                    $leaseParameters = @{
+                        LeasesRootPath = $script:Settings.ConcurrencyLeasesPath
+                        ConcurrencyKey = $concurrencyKey
+                        JobName = $jobName
+                        Occurrence = $runInfo.Occurrence
+                        OwnerServer = $env:COMPUTERNAME
+                        SafeMinutes = $remainingSafeMinutes
+                        HeartbeatRootPath = $script:Settings.SharedDataFolderPath
+                        HeartbeatStaleMinutes = $script:Settings.PeerHeartbeatStaleMinutes
+                    }
+                    $lease = Enter-SmartM365OrchestratorConcurrencyLease @leaseParameters
                     if ($lease.Acquired) {
                         $runInfo.ConcurrencyLeasePath = [string]$lease.LeasePath
                         $runInfo.ConcurrencyLeaseId = [string]$lease.Lease.LeaseId
                         $record['ConcurrencyLeasePath'] = $runInfo.ConcurrencyLeasePath
                         $record['ConcurrencyLeaseId'] = $runInfo.ConcurrencyLeaseId
+                        $leaseIsCurrent = $true
                         $stateChanged = $true
                         Write-OrchestratorLog -Message ("Job {0}: restored ConcurrencyKey '{1}' lease for re-adopted PID {2}." -f $jobName, $concurrencyKey, $recordedPid)
                     }
@@ -3231,8 +3296,28 @@ function Restore-RunningJobs {
                     Write-OrchestratorLog -Message ("Job {0}: failed to restore ConcurrencyKey '{1}' lease for re-adopted PID {2}: {3}. The process remains supervised." -f $jobName, $concurrencyKey, $recordedPid, $_.Exception.Message) -Level ERROR
                 }
             }
-        }
 
+            if ($leaseIsCurrent) {
+                try {
+                    $refreshParameters = @{
+                        LeasePath = [string]$runInfo.ConcurrencyLeasePath
+                        LeaseId = [string]$runInfo.ConcurrencyLeaseId
+                        OwnerServer = $env:COMPUTERNAME
+                        SafeUntilUtc = $timeoutWindow.LeaseSafeUntilUtc
+                    }
+                    $leaseRefreshed = Set-SmartM365OrchestratorConcurrencyLease @refreshParameters
+                    if ($leaseRefreshed) {
+                        Write-OrchestratorLog -Message ("Job {0}: ConcurrencyKey '{1}' lease aligned with timeout deadline {2} for re-adopted PID {3}." -f $jobName, $concurrencyKey, $timeoutWindow.TimeoutUtc.ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss'), $recordedPid)
+                    }
+                    else {
+                        Write-OrchestratorLog -Message ("Job {0}: ConcurrencyKey '{1}' lease could not be aligned because ownership changed. The process remains supervised." -f $jobName, $concurrencyKey) -Level ERROR
+                    }
+                }
+                catch {
+                    Write-OrchestratorLog -Message ("Job {0}: ConcurrencyKey '{1}' lease alignment failed for re-adopted PID {2}: {3}. The process remains supervised." -f $jobName, $concurrencyKey, $recordedPid, $_.Exception.Message) -Level ERROR
+                }
+            }
+        }
         if ($null -ne $process) {
             $runInfo['Process'] = $process
             $script:RunningJobs[$jobName] = $runInfo
@@ -4939,8 +5024,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLFNmVIHs4jyBh
-# yYWsuzudxGSynnkXT/4RqIUtdJ2JBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2hfqH9ZHIfHrJ
+# 4mqempFeBkjkZZReP4BdFDubytbXH6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5073,31 +5158,31 @@ exit $script:ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO1xvdP3t8cNkJduKHHTFZiWnKKynRTyEjNy1vk4Eg7lMA0GCSqG
-# SIb3DQEBAQUABIIBgHSwpP6urMhJ/CSX3SSs7fJU/M/JxxB2jvWeQ1ZZR6oM7NzO
-# hwSH/ltKekOJD5tOH3I4kv5vaDNDd/iv7ByriIziOc2YLdzXnil1MuzHNAD/Q1yd
-# xertgWerdZr4MnSVcOj5vVlz07sJII8Tyix8pYDQ782OO+IOJs2AVzhRTTmbeg7m
-# Dk1QqfGkV780Tns5/ey5p1Jb2cW1HK4W93qxcFw8sVajdp05tu55m+gnQwawlhn8
-# lcZgeaa3MOukOA8A6XiEBDeR2c3VlrMqCkIHPLx8cBxJ1R01YQuWXIO6sYsuFdtx
-# SIqIGIo6+6EKAY3CVpNnRVNg1A+/LVhnXEZJdEiK3sbWalXUHDJ1kXgvwR5yYon6
-# IRYt/KZsNNNsrN+6WI8adiD3IbZGbalcVHwTFflRNfGN+fghJ1wasHlUjk9PmR43
-# iLSsc8zO6TloBeh3B3SChWSM7z0790rZnI+NvPVmZAp809flQ4iBDaRqipnHEo9O
-# /W2ZV34lDZCiTP9l9aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICTiCiJ7jGLF7vTlZwIOG5ob+ofibvksINrrTf+D3fWDMA0GCSqG
+# SIb3DQEBAQUABIIBgJ5e/OGVReEj+pZTOdiI55HxyUDg37qSkmjoxGvxFsnALIF7
+# nPt4/PCzpwGJj2xVLdaBmQNjDzdyXKr2vyk8A/F7GlEUNPHCJk6BZEy704QgIN32
+# akjaz60PR016t/vaJEc5u8CIKYUS72aLZSyQdrruYTWKxJj/at0HwOyPsLrIlPQR
+# qPg+JyVhLR2sV5flAL6WSAlPSZlAOK18ZJ6Ch2eXKXpIx+VbLg/aQiQLxmN46jcv
+# vqg0gPwYqZidXNHnrPt9lPuvwhSiGlV7G9Bi+3dYfLgvCQuFmTHQwJCJ2lPcbW4s
+# B6wZYPDifNYXqjBuNl5iSEII/hvdq0r7juK5XA/oD5lRNjEbUe3VWw875sF56st8
+# WIaFp0vWgoC25mcu/WyOu4FG8yqMiXZI2QyjvwAZnFppIMav5ijK8oFZYSDRfutJ
+# Gdj8ArhB+go4qMmEq+a/i9FUF/hvirjnXCzsqharSxsvA2xI4IueelcXg6jfLie3
+# aAu3/g4cJ2KwjS5gAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjEwODM5
-# NTBaMC8GCSqGSIb3DQEJBDEiBCDi9Jfs7V3aAN5cpvjwg0xcGw0aMtd1K2g/3eZ6
-# 44tSFzANBgkqhkiG9w0BAQEFAASCAgB15mHH/O18PM9yKqgoNw5nKO57JCOl5AwY
-# EB9FIgG5svooANyfSDrCOgRErY6graEYTp5SA3InirRUtdKM9LEe3YTISqPBBJpW
-# UaMy6vnifBnm1rrqUQVbbqfvgZFnToZY/BehcyRBU08093dfuFdHt9NneXL+vcTD
-# 8Wb9uGIpddeJQnq3XnzLZcM2TkeI4biKwwaH6o8Meg1J2VT9KliqZW2XXDQ2/Ksq
-# PKK+tj9+bGpiEu36s6U6Y0lBrgOc76Rmqyx2NDHHNLmHgXkdi/p0zIulk7Qm953M
-# JdTKbF5efmbV9WTLJQxPu1ZfG6Htq9rUPcPYbN+TuXOXGmx/Kf6Axqh6LZ7JmrdU
-# KPkOjqED8Lrw5kh16f8Jccolo6Wdx/U36S3iD2JfRudX81seXDKGbWFp4kBwjlXZ
-# qbthMswQIGGQVrRw3qFAph2UMKLqmg+eXyIkyf+QDyFrxznAd5T5m/8L+YJy4CPh
-# xmfyW0eA/is45YOeAdl9B8sVXH4hwdtU/mcese1Zk6248I+5qDM9Hbt6MxsIT3Ij
-# U9ZtrMViI7waDx6HxYIZytmIPfIY31udIDxyItA4HLFlnN6K/+fs00CJCGnETanF
-# unA/w2OgAa3MVNzWJThIgubuH1bIigOSkIYzIJpRDqHDYpiTbE1FM0A8SzlJq6qY
-# QqVJ2zCMyw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjExMTMy
+# NTJaMC8GCSqGSIb3DQEJBDEiBCDrDrUASZToul81YgBfaRrnVKIFYUFtox4Nc0an
+# qEflMTANBgkqhkiG9w0BAQEFAASCAgBeheMHTuR3UpKPE3Byul5zsP4bJJaQx7cJ
+# 9cbOhurd3xGCcVhZHJcj8YaWBAmvnfoqkeg0Ye/uX5Sf2aCynvVzarZxfpqQl0GI
+# 8cR5cUbdOaXI90FYPnpMwXsfXEalEpA1hKwcXzwza28/IFtgib/9yyE2OTWNXqJD
+# rZ5yVUR2mBB6YSlUWv0xBeLLhHwJC+0Y7/SvX8+sp+C+vPAio2FgAKpnnDBGt3r1
+# XPbS/5rTzIjAWy6rYa3G6Xsf1B5hDvpgr7u58VKdZKlSumCAC79a47X3xUZ3wSMM
+# z4sdrd0jH+aB3LcUNOFsxQ0KwG8FyjLVKGu8SKUPOc6EnI/UznrbOP9gorW02GQL
+# CYyBF/zFHkXGZ4M2BgUWg1Z+c3YQW0ORuFGYV7Q49l+nHm+u8g9E4mnv/wD6EB6E
+# di3Vm9LZX3xBMtCCpJY2sgY611oZk8atSvW85Pt+DWMt4TIBDofjqedtYUGzk1MI
+# e1QCpamcXmgPEhnvJdcKhGzof+EqeiJKxyRNLAfvO4vEC3YPg9ItHWQKiEnY3WGZ
+# QSzIre9vbRLRc2dhllyp4YMD4nw0K5WD9i958z3j8A/Vwh3+0aWLdYlq4pnyxzRr
+# +HDEwFl0HhG6O89AwJi24tyUH9hMaaSDe5I3LYqKcq90aP1FfPQYvbRFyjNXQ3JD
+# spmWuqtaUA==
 # SIG # End signature block

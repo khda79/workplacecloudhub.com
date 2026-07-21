@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:DistributedModuleVersion = '1.1.2'
+$script:DistributedModuleVersion = '1.1.3'
 
 function ConvertTo-SafeFileName {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -808,6 +808,63 @@ function Enter-SmartM365OrchestratorConcurrencyLease {
     }
 }
 
+function Set-SmartM365OrchestratorConcurrencyLease {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$LeasePath,
+        [Parameter(Mandatory = $true)][string]$LeaseId,
+        [Parameter(Mandatory = $true)][string]$OwnerServer,
+        [Parameter(Mandatory = $true)][datetime]$SafeUntilUtc
+    )
+
+    if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $false }
+    $takeoverLockPath = $LeasePath + '.takeover.lock'
+    $lockStream = $null
+    try {
+        for ($attempt = 1; $attempt -le 10 -and $null -eq $lockStream; $attempt++) {
+            try {
+                $lockStream = [System.IO.File]::Open($takeoverLockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            }
+            catch [System.IO.IOException] {
+                if ($attempt -eq 10) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+
+        if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $false }
+        $current = Get-Content -LiteralPath $LeasePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$current.LeaseId -ne $LeaseId -or [string]$current.OwnerServer -ne $OwnerServer.ToUpperInvariant()) {
+            return $false
+        }
+
+        $targetSafeUntilUtc = $SafeUntilUtc.ToUniversalTime()
+        $currentSafeUntilUtc = [datetime]::MinValue
+        $hasCurrentSafeUntil = [datetime]::TryParse(
+            [string]$current.SafeUntilUtc,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$currentSafeUntilUtc
+        )
+        $sameDeadline = $hasCurrentSafeUntil -and
+            [math]::Abs(($currentSafeUntilUtc.ToUniversalTime() - $targetSafeUntilUtc).TotalSeconds) -le 1
+        $sameProcess = $false
+        try { $sameProcess = [int]$current.OrchestratorPid -eq $PID } catch { $sameProcess = $false }
+        if ($sameDeadline -and $sameProcess) { return $true }
+
+        $current.OrchestratorPid = $PID
+        $current.UpdatedAtUtc = [datetime]::UtcNow.ToString('o')
+        $current.SafeUntilUtc = $targetSafeUntilUtc.ToString('o')
+        Write-JsonAtomically -Path $LeasePath -Value $current
+        return $true
+    }
+    finally {
+        if ($null -ne $lockStream) {
+            $lockStream.Dispose()
+            Remove-Item -LiteralPath $takeoverLockPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Exit-SmartM365OrchestratorConcurrencyLease {
     [CmdletBinding()]
     param(
@@ -855,14 +912,15 @@ Export-ModuleMember -Function @(
     'Set-SmartM365OrchestratorOccurrenceClaim',
     'Get-SmartM365OrchestratorConcurrencyLease',
     'Enter-SmartM365OrchestratorConcurrencyLease',
+    'Set-SmartM365OrchestratorConcurrencyLease',
     'Exit-SmartM365OrchestratorConcurrencyLease'
 )
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA41+zveZuiCRk2
-# D14Pe3GHUs/VX/vLUtyjY9dimPC/tKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvrs/g9HImysQz
+# PGdlbdCwIJtfQuSlPxrXhMHtG/IQK6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -995,31 +1053,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG1Z5wT9sinBpedqTVznPJNaHFZfRE/o6zDJG3V6brzuMA0GCSqG
-# SIb3DQEBAQUABIIBgHuFhv+s/th3wd+lR8VdXcDm/qeJpxjGoYiDd10TQQh4cxwQ
-# 3YKXOP9IkT7mq3qiFhdppQT18h9JF4Hf/hrykLenrt1kgDDaXA/oTrorXPh4Ds+p
-# iW/gMral7cfNK3A57lbxIb1yitczoFb8m/TpOv9s0B8Jkw8lgk+ayRWkkLutB+yP
-# oNjDCa9+eh+4Ovv3XOP3tSkWAav7V89Kj/5Kss6pqBKu7p/L5a5snuLEfS0t5Z4/
-# WRZvRnDBm3T5pPowedEgRbm1n+Jic6aOn2Vg8jYF+8wgce0yrZEWiLV0V+1fVbj9
-# jyHkYR+1tzAFxQdNjKl7G//56LBTigqrTqvk4PuTXYOVYv32Lzr4vUyDWy7CV+XS
-# 1eFcMt7eVtzwl49y2d3SSmvPKbhlN9PPowT+HEpWxSwb/U144vJPTsPqdMG9Eb82
-# cWao2dK6/z9Lhu38OBs/V6lkwpcsgtPbBQ0ko4q0SeB4FKe+gko3NDx70ZqVPtTs
-# 9aO60PpEQvnxM2MiGaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFl0qI08FvpyyTV87mC8KnWvxIBYn9F3qABcG0YKqXxTMA0GCSqG
+# SIb3DQEBAQUABIIBgFtXMwfGB6Skt3c1EI0ISSLAxmMMykYok9m1UN8QBkJJgtrL
+# GXwDs+/5pNh+47M88lFyjyhxKtjXd50umjE5Zd2lR5qGK7DKgGa1sua/SGmjetba
+# x8Eubp1lDyVo6fU99me3Qhkl9viRu9JhDy3cxHBb+l4DVdyyRLG40DtJ0G0jCgGJ
+# zc7f1IzsH9fhdN6g2yl59Zm7uGT7NLTIRDin/AVordn9/k9dAhQdM1Hds0TAR9YZ
+# hai7k979QRoIHQ8L1KUXtlfuoBGvP85LxJm6A8BcJExQrKrwGN7WIux6SOREDmcI
+# l4ladBPab4FgT0t5N06MaCZE0xLGzwvDBTY5DqqhMhZ43auI7/bmgeYlGu6fetHw
+# rhbXwnG34mpp5KqRulGs9ulD102wwAoNzA7nERZnWKV3MizvCGGvqtLxoqUuCTEJ
+# +EcK03Ja3cfliPJ7olOWZ4iAp/RaBgn19qBnWBazazohIavAp1ylFwKddr7HV/Zd
+# Ov/4OrFE98AvSgrdU6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjEwODM4
-# MDVaMC8GCSqGSIb3DQEJBDEiBCBmXqJ7+cVw9TC8oTiLl4UnMghnQx0uC9uHrNHD
-# BwB6OTANBgkqhkiG9w0BAQEFAASCAgAokNUftX9T10icG1GYlpb5u2ZPQj6RUTBK
-# JXbq5T1+w2QZOqJJUiS8t8PvbFg1Oa7EteIk15J6avdqEswo0ccNBXsP3Qx7twOk
-# 3rHECNPClDu6ycug/8ifSTmo9UDr+JqwJL9CyTUPTUryp5LMemZa/qSb8krCUrDr
-# h2d+I9nMTzjEQ5ax+JElAZGi0OVQqJJvCKKm7xeKLofApmMUIWPemQBeAkXOwbcN
-# dzgzNM6cNbFoy2dEa7pMZ8siCPoXVl+/xgok4ikrGsoSSmGUnUnVPtfKO5wC7WeN
-# BErMIeqo6kCeLVmL3Xk7qoO1/SW3i8qBP2IYmYrQH2of9V7/TrJ3UWJmeBElG2Ka
-# yYjWAvvt2osI+D9BHSXF6U4dksTzVE8sjTtIE8qBheQMzgWps7M5RTJFpucjK2Iy
-# 25OElQJ1wNh6JyWrU2obGaY5byVRRZl9T7Ih03MeXiVJJfGEnv8DrWp/qMHjvBMQ
-# mXtd4MJkzKKFXgt5AwdEYyBBi0TkAI4rA0iCNqe4HUoMzWzu0pRc4uqvBTPdayU/
-# GdPU4jFCKwO8WMbYyyvA8WTF3SM4GFPebtrEasBXpapLTSu7462KLw+HRx9ZuMQ6
-# gM2KOmnlbP8oGLPABA3cj/ElzwS3lQfiT2OYWqwcYi8Zml3Pl3XUG4dBK/hGGaYa
-# rHq6Jj1lwQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjExMTMy
+# NTNaMC8GCSqGSIb3DQEJBDEiBCCwXmKsF59N0QDldL0ta8wesGOcwUTEaRlG8AkG
+# Vxj1ODANBgkqhkiG9w0BAQEFAASCAgAnvgiDWKLHciuf7FAZwvT98r/AvId1Hepa
+# LqC8CciuTh3JVw5fkd6bemu4ZxbaN5ANEZheXXEi7ddNTtDh52mHUX4i2il6mLKC
+# LDCqnDnT+3be5JPQMetvI1ZMxx+0SxadXmyWBSSY1z7A99fQDZR/es9J5uD4s+XH
+# yhWtICTWaVliCnAfkFO5ei7FxOeXDauTTrOl2lfu1/XBwPlShRChVYri6Ef1j9yX
+# aXDm/v4b4xaBKX0fGjhXsTNtBICaiShFmzmWnDLGp/ElCrZR218Wto8cNgzc3aqa
+# m1O7pFsiRyYSQx/n7DpvEn2AkpZchbwAe23ZU8M6pKPWe1igNbjsxc8Dt+UiHvE9
+# Q/aQLxXDCYZMzxYJTjW0VZeah6zP4cHVrcxNOrmarutZWYmKX70e8YRQc75Mz+Om
+# 3szIuxYze2P/5t15zz1qcSTTWzuJniMCxAKrr94G9xYQXMWvsfTPslPtQCFoU2ws
+# YmjV/KhkIwab0LINxAJY+EMSDw/gf0vM+OfZVWJQQ588FkhV2i0umwNBJJqmzs7b
+# qbdlfVkekAq+FZL6JB3AYqr1YALNncfuuE6+76ruc+2pwqUAHM+OLB0VevMk6X6I
+# IbCsnMDVhANwUmFH99SmBRoL8hAhyevi8t9tmguU2VhgUo6WVmHK/2QtJWaHIjqc
+# NiRZThyIpg==
 # SIG # End signature block
