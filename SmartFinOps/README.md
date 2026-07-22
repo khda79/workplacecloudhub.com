@@ -78,11 +78,14 @@ The top license-utilization banner exposes three automatic review signals:
 
 Recent M365 service evidence includes aggregate and detailed Exchange, Email, OneDrive, Teams, SharePoint, Microsoft 365 Apps, Copilot, and Teams Phone activity. Entra/AD sign-ins and recent Intune device presence are tracked separately as technical presence.
 
+Windows Update risk and Windows 11 eligibility are used for service-quality, cost-avoidance, and lifecycle forecasting. They are not converted to euros until an internal incident, remediation, or replacement cost model is approved. Endpoint Analytics remains a performance evidence source and is not monetized by the current model.
+
 ## E3, F3 or no-license decision matrix
 
 `SmartFinOps_Workplace_UserLicenseDecision.csv` contains one consolidated decision per licensed user. The matrix crosses:
 
 - SmartM365 `M365LicenseTargetPersona` only; `M365LicenseTargetPersonaRelaxed` is intentionally ignored;
+- the direct or group-based assignment source of the current E3/F3 license, including the assigning group names;
 - M365 and AD account state;
 - aggregate and detailed Exchange, OneDrive, Teams and Email activity;
 - Microsoft 365 desktop application activations;
@@ -96,7 +99,7 @@ Recent M365 service evidence includes aggregate and detailed Exchange, Email, On
 - `Review`: the available evidence is insufficient or conflicting;
 - `Keep`: current licensing remains the appropriate output from the available evidence.
 
-SmartFinOps requires no separate manual input file. The detailed CSV contains the automatic class, recommendation, confidence, evidence, guardrails and indicative financial difference.
+SmartFinOps requires no separate manual input file. The detailed CSV contains the automatic class, recommendation, confidence, evidence, guardrails, indicative financial difference, base-license assignment mode, assigning groups, and the change path required to make a recommendation actionable.
 
 `M365LicenseTargetPersona` is the starting signal for the approved base-license review paths:
 
@@ -152,7 +155,9 @@ For Active Directory:
 
 `-ValidateOnly` checks source existence, required columns and freshness without importing CSV rows. The default freshness threshold is 72 hours.
 
-Readiness-only sources are also catalogued before any financial rule is enabled. They currently include SharePoint user activity, Teams device usage, Microsoft 365 Copilot usage, Teams Phone usage and assignments, Endpoint Analytics, and optional Power BI/Fabric activity.
+SharePoint user activity, Teams device usage, Microsoft 365 Copilot usage, and Teams Phone user usage are activity guardrails for base-license decisions when data is available. They are not monetized as separate products.
+
+Readiness and control sources include Teams Phone assignments and detailed calls, Endpoint Analytics, Entra Connect synchronization health, consolidated Exchange permissions, group-license inventory, and optional Power BI/Fabric activity. These sources qualify evidence or prepare future rules without creating a financial opportunity by themselves.
 
 `SmartFinOps_Workplace_DataQuality.csv` uses these source states:
 
@@ -163,4 +168,4 @@ Readiness-only sources are also catalogued before any financial rule is enabled.
 - `Blocked`: collection is known to be unavailable because of an external authorization or API condition;
 - `Invalid schema`: the CSV exists but required columns are missing.
 
-These readiness-only sources do not yet change license recommendations, financial potential or the executive decision matrix. Files whose names contain `MAXITEMS` remain excluded.
+Readiness-only sources do not change license recommendations or financial potential. Files whose names contain `MAXITEMS` remain excluded.
