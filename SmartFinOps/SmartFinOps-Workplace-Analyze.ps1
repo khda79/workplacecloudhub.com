@@ -8,7 +8,7 @@ and a standalone HTML report. The script is read-only and does not connect to Mi
 Graph, Azure, Citrix, or Azure Virtual Desktop.
 
 .NOTES
-Version: 1.2
+Version: 1.3
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -342,20 +342,25 @@ try {
     $m365TeamsUserActivity = Import-SmartFinOpsContractSource -Key 'M365TeamsUserActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $m365EmailActivity = Import-SmartFinOpsContractSource -Key 'M365EmailActivity' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $m365LicenseUsers = Import-SmartFinOpsContractSource -Key 'M365LicenseUsers' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $null = Import-SmartFinOpsContractSource -Key 'M365LicenseGroups' -ValidationOnly -DataQualityRows $dataQualityRows
     $m365LicenseTenant = Import-SmartFinOpsContractSource -Key 'M365LicenseTenant' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $intuneDevices = Import-SmartFinOpsContractSource -Key 'IntuneDevices' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $upgradeEligibility = Import-SmartFinOpsContractSource -Key 'IntuneUpgradeEligibility' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $null = Import-SmartFinOpsContractSource -Key 'IntuneUpgradeEligibilitySummary' -ValidationOnly -DataQualityRows $dataQualityRows
+    $windowsUpdateStatus = Import-SmartFinOpsContractSource -Key 'IntuneWindowsUpdateStatus' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $intuneCompliance = Import-SmartFinOpsContractSource -Key 'IntuneCompliance' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $entraDevices = Import-SmartFinOpsContractSource -Key 'EntraDevices' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $entraConnectSyncHealth = Import-SmartFinOpsContractSource -Key 'EntraConnectSyncHealth' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $adUsers = Import-SmartFinOpsContractSource -Key 'ADUsersCanonical' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $adComputers = Import-SmartFinOpsContractSource -Key 'ADComputersCanonical' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $null = Import-SmartFinOpsContractSource -Key 'ADUsersRaw' -ValidationOnly -DataQualityRows $dataQualityRows
     $null = Import-SmartFinOpsContractSource -Key 'ADComputersRaw' -ValidationOnly -DataQualityRows $dataQualityRows
     $autopilotDevices = Import-SmartFinOpsSourceCsv -SourceName 'Windows Autopilot devices' -FileNames @('Intune_Autopilot_Devices.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
-    $upgradeEligibility = Import-SmartFinOpsSourceCsv -SourceName 'Windows upgrade eligibility' -FileNames @('Intune_Devices_UpgradeEligibility.csv', 'Intune_Devices_Windows11UpgradeEligibility.csv') -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $exoMailboxes = Import-SmartFinOpsContractSource -Key 'EXOMailboxes' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $exoMailboxStats = Import-SmartFinOpsContractSource -Key 'EXOMailboxStats' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $exoMailboxArchive = Import-SmartFinOpsContractSource -Key 'EXOMailboxArchive' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $exoMailboxPermissions = Import-SmartFinOpsContractSource -Key 'EXOMailboxPermissions' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+    $null = Import-SmartFinOpsContractSource -Key 'ExchangeAllSourcesPermissionsByUser' -ValidationOnly -DataQualityRows $dataQualityRows
     $backupProtected = Import-SmartFinOpsContractSource -Key 'BackupProtectedMailboxes' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $backupPolicyScope = Import-SmartFinOpsContractSource -Key 'BackupPolicyScope' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
     $remoteRoutingIssues = Import-SmartFinOpsContractSource -Key 'RemoteRoutingIssues' -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
@@ -382,7 +387,7 @@ try {
         'IntuneEndpointAnalyticsDataQuality'
     )
     foreach ($readinessSourceKey in $readinessSourceKeys) {
-        $null = Import-SmartFinOpsContractSource -Key $readinessSourceKey -ValidationOnly:$ValidateOnly -DataQualityRows $dataQualityRows
+        $null = Import-SmartFinOpsContractSource -Key $readinessSourceKey -ValidationOnly -DataQualityRows $dataQualityRows
     }
 
     Add-SmartFinOpsUnreferencedCsvQualityRows -DataQualityRows $dataQualityRows
@@ -400,6 +405,24 @@ try {
     $staleDeviceCutoff = $now.AddDays(-1 * [math]::Abs($StaleDeviceDays))
     $priceModel = Get-PriceModel
     $currency = if ($priceModel -and $priceModel.PSObject.Properties['Currency']) { [string]$priceModel.Currency } else { '' }
+    $windowsUpdateHighRiskDeviceCount = @($windowsUpdateStatus |
+        Where-Object { [string](Get-RowPropertyValue -Row $_ -Names @('RiskBucket')) -eq 'High' } |
+        ForEach-Object { [string](Get-RowPropertyValue -Row $_ -Names @('DeviceId')) } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Sort-Object -Unique).Count
+    $windows11NotEligibleDeviceCount = @($upgradeEligibility |
+        Where-Object { [string](Get-RowPropertyValue -Row $_ -Names @('UpgradeEligibilityLabel', 'UpgradeEligibility')) -eq 'NotEligible' } |
+        ForEach-Object { [string](Get-RowPropertyValue -Row $_ -Names @('GraphId', 'DeviceName')) } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Sort-Object -Unique).Count
+    $windows11UnknownEligibilityDeviceCount = @($upgradeEligibility |
+        Where-Object { [string](Get-RowPropertyValue -Row $_ -Names @('UpgradeEligibilityLabel', 'UpgradeEligibility')) -eq 'Unknown' } |
+        ForEach-Object { [string](Get-RowPropertyValue -Row $_ -Names @('GraphId', 'DeviceName')) } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Sort-Object -Unique).Count
+    $entraConnectSyncHealthFailures = @($entraConnectSyncHealth | Where-Object {
+        [string](Get-RowPropertyValue -Row $_ -Names @('Status')) -notmatch '^(?i:OK)$'
+    }).Count
 
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Loaded source files' -Value @($dataQualityRows | Where-Object { $_.Status -eq 'Loaded' }).Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Sources' -Metric 'Catalogued non-imported source files' -Value @($dataQualityRows | Where-Object { $_.Status -eq 'Catalogued' }).Count)) | Out-Null
@@ -422,6 +445,10 @@ try {
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Intune devices rows' -Value $intuneDevices.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Entra devices rows' -Value $entraDevices.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'AD computers rows' -Value $adComputers.Count)) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Windows Update high-risk devices' -Value $windowsUpdateHighRiskDeviceCount -Interpretation 'Prioritize remediation to avoid incidents and support costs; no euro value is assigned without an approved incident-cost model.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Windows 11 not eligible devices' -Value $windows11NotEligibleDeviceCount -Interpretation 'Use for hardware lifecycle and replacement forecasting; this is not reported as a saving.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Devices' -Metric 'Windows 11 eligibility unknown devices' -Value $windows11UnknownEligibilityDeviceCount -Interpretation 'Resolve missing eligibility evidence before finalizing the lifecycle forecast.')) | Out-Null
+    $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Data Quality' -Metric 'Entra Connect sync health checks not OK' -Value $entraConnectSyncHealthFailures -Interpretation 'Directory synchronization health qualifies the reliability of identity and license evidence; it is never monetized.')) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'License assignment rows' -Value $m365LicenseUsers.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Licenses' -Metric 'Tenant SKU rows' -Value $m365LicenseTenant.Count)) | Out-Null
     $summaryRows.Add((Get-SmartFinOpsSummaryRow -Category 'Exchange' -Metric 'Mailbox rows' -Value $exoMailboxes.Count)) | Out-Null
