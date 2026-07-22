@@ -219,6 +219,32 @@ function New-SmartFinOpsUserLicenseDecisionRows {
         $upn = [string](Get-RowPropertyValue -Row $licenses[0] -Names @('User principal name', 'UserPrincipalName'))
         $currentBaseSku = if ('SPE_E3' -in $skus) { 'SPE_E3' } elseif ('SPE_F1' -in $skus) { 'SPE_F1' } else { '' }
         $currentPlan = if ($currentBaseSku -eq 'SPE_E3') { 'M365 E3' } elseif ($currentBaseSku -eq 'SPE_F1') { 'M365 F3' } else { 'Other or no base suite' }
+        $baseLicenseRows = @($licenses | Where-Object {
+            [string](Get-RowPropertyValue -Row $_ -Names @('SkuPartNumber', 'SKU part number')) -eq $currentBaseSku
+        })
+        $baseLicenseAssignmentSources = @($baseLicenseRows |
+            ForEach-Object { [string](Get-RowPropertyValue -Row $_ -Names @('Source')) } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique)
+        $baseLicenseAssigningGroups = @($baseLicenseRows |
+            ForEach-Object { [string](Get-RowPropertyValue -Row $_ -Names @('GroupsAssigningSku')) } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique)
+        $baseLicenseHasDirectAndGroup = @($baseLicenseRows | Where-Object {
+            (ConvertTo-BoolOrNull (Get-RowPropertyValue -Row $_ -Names @('HasDirectAndGroup'))) -eq $true
+        }).Count -gt 0
+        $baseLicenseAssignmentMode = if ($baseLicenseHasDirectAndGroup -or ('Direct' -in $baseLicenseAssignmentSources -and 'Group' -in $baseLicenseAssignmentSources)) {
+            'Direct and group'
+        }
+        elseif ('Group' -in $baseLicenseAssignmentSources) { 'Group' }
+        elseif ('Direct' -in $baseLicenseAssignmentSources) { 'Direct' }
+        else { 'Unknown' }
+        $licenseAssignmentChangePath = switch ($baseLicenseAssignmentMode) {
+            'Group' { "Review membership in the assigning group(s): $($baseLicenseAssigningGroups -join ' | ')" }
+            'Direct' { 'Review the direct user license assignment.' }
+            'Direct and group' { "Review both the direct assignment and membership in the assigning group(s): $($baseLicenseAssigningGroups -join ' | ')" }
+            default { 'Resolve the license assignment source before implementation.' }
+        }
         $m365User = if ($m365ByUpn.ContainsKey($key)) { $m365ByUpn[$key] } else { $null }
         $adUser = if ($adByUpn.ContainsKey($key)) { $adByUpn[$key] } else { $null }
         $evidence = if ($EvidenceMap.ContainsKey($key)) { $EvidenceMap[$key] } else { Get-SmartFinOpsEvidenceRecord -Map $EvidenceMap -UserKey $key }
@@ -417,6 +443,10 @@ function New-SmartFinOpsUserLicenseDecisionRows {
             CurrentBaseLicense = $currentPlan
             CurrentBaseSku = $currentBaseSku
             AssignedSkuPartNumbers = ($skus -join ' | ')
+            BaseLicenseAssignmentMode = $baseLicenseAssignmentMode
+            BaseLicenseAssigningGroups = $baseLicenseAssigningGroups -join ' | '
+            BaseLicenseHasDirectAndGroup = $baseLicenseHasDirectAndGroup
+            LicenseAssignmentChangePath = $licenseAssignmentChangePath
             TargetPersonaRaw = $personaRaw
             TargetPersona = $targetPersona
             RecommendedLicense = $recommended
