@@ -1,5 +1,5 @@
 {
-  "Version": 3,
+  "Version": 4,
   "ExcludedFileNamePatterns": [
     "MAXITEMS"
   ],
@@ -184,15 +184,27 @@
     {
       "Key": "M365LicenseUsers",
       "DisplayName": "M365 license user assignments",
-      "SemanticRole": "User by SKU license assignment",
+      "SemanticRole": "User by SKU license assignment and execution routing through direct or group-based assignment",
       "FileNames": [
         "M365_Licenses_Users.csv"
       ],
       "RequiredColumns": [
         "User principal name",
         "SkuPartNumber",
-        "Source"
+        "Source",
+        "GroupsAssigningSku",
+        "GroupCountForSku",
+        "HasDirectAndGroup"
       ]
+    },
+    {
+      "Key": "M365LicenseGroups",
+      "DisplayName": "M365 group-based license assignments",
+      "SemanticRole": "Group ownership and SKU coverage used to make license recommendations operationally actionable; not monetized separately",
+      "FileNames": ["M365_Licenses_Groups.csv"],
+      "RequiredColumns": ["GroupId", "GroupDisplayName", "UsersCount", "SkuPartNumbers"],
+      "Optional": true,
+      "ValidationOnly": true
     },
     {
       "Key": "M365LicenseTenant",
@@ -297,6 +309,31 @@
       ]
     },
     {
+      "Key": "IntuneUpgradeEligibility",
+      "DisplayName": "Windows 11 upgrade eligibility",
+      "SemanticRole": "Device-level Windows 11 eligibility used for lifecycle forecasting and replacement planning; not converted to savings without an approved cost model",
+      "FileNames": ["Intune_Devices_UpgradeEligibility.csv", "Intune_Devices_Windows11UpgradeEligibility.csv"],
+      "RequiredColumns": ["GraphId", "DeviceName", "UpgradeEligibility", "UpgradeEligibilityLabel"],
+      "Optional": true
+    },
+    {
+      "Key": "IntuneUpgradeEligibilitySummary",
+      "DisplayName": "Windows 11 upgrade eligibility summary",
+      "SemanticRole": "Collector-level Windows 11 eligibility coverage and percentage control",
+      "FileNames": ["Intune_Devices_UpgradeEligibility_Summary.csv"],
+      "RequiredColumns": ["TotalDeviceCount", "UpgradeEligibleDeviceCount", "UpgradeEligiblePercentage", "ReportMode"],
+      "Optional": true,
+      "ValidationOnly": true
+    },
+    {
+      "Key": "IntuneWindowsUpdateStatus",
+      "DisplayName": "Windows Update status",
+      "SemanticRole": "Device update risk and blocking evidence used for service-quality and cost-avoidance prioritization; not monetized without an approved incident-cost model",
+      "FileNames": ["Intune_WindowsUpdate_Status.csv"],
+      "RequiredColumns": ["DeviceId", "DeviceName", "RiskBucket", "BlockingReason", "ActionPriority"],
+      "Optional": true
+    },
+    {
       "Key": "IntuneCompliance",
       "DisplayName": "Intune device compliance",
       "SemanticRole": "Compliance state joined through AzureADDeviceId",
@@ -321,6 +358,14 @@
         "DeviceId",
         "DisplayName"
       ]
+    },
+    {
+      "Key": "EntraConnectSyncHealth",
+      "DisplayName": "Entra Connect synchronization health",
+      "SemanticRole": "Directory synchronization freshness guardrail used to qualify identity and license evidence; never monetized",
+      "FileNames": ["M365_Entra_AzureADConnect_SyncHealth.csv"],
+      "RequiredColumns": ["CheckName", "Status", "LastSyncDateTimeUtc", "SyncAgeMinutes"],
+      "Optional": true
     },
     {
       "Key": "ADUsersCanonical",
@@ -407,6 +452,15 @@
       "SemanticRole": "Configured mailbox delegation evidence for former-user mailbox review",
       "FileNames": ["Exchange_EXO_Mailboxes_AllDomains_Permissions.csv"],
       "RequiredColumns": ["UserPrincipalName", "SendAs", "FullAccess", "GrantSendOnBehalfTo"]
+    },
+    {
+      "Key": "ExchangeAllSourcesPermissionsByUser",
+      "DisplayName": "Exchange permissions by user across all sources",
+      "SemanticRole": "Hybrid permission lineage and cross-premises dependency control; user-centric evidence is not treated as proof of active mailbox access",
+      "FileNames": ["Exchange_Mailboxes_AllSources_PermissionsByUser.csv"],
+      "RequiredColumns": ["ResolvedUser", "Source", "FullAccessOn", "SendAsOn", "SendOnBehalfOn", "HasCrossPremisesPermissions"],
+      "Optional": true,
+      "ValidationOnly": true
     },
     {
       "Key": "RemoteRoutingIssues",

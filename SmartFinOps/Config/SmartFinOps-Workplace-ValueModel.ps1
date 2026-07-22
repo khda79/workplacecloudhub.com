@@ -263,6 +263,20 @@ function Write-SmartFinOpsHtmlReport {
     $unusedOrPossiblyUnusedE3 = @($unusedOrPossiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_E3' }).Count
     $unusedOrPossiblyUnusedF3 = @($unusedOrPossiblyUnusedE3F3Rows | Where-Object { $_.CurrentBaseSku -eq 'SPE_F1' }).Count
     $e3WithoutObservedE3Capabilities = @($UserDecisionRows | Where-Object { $_.IsE3WithoutObservedE3Capabilities -eq $true }).Count
+    $implementationLicenseRows = @($UserDecisionRows | Where-Object { $_.DecisionClass -in @('Recommended', 'Conditional') })
+    $groupManagedLicenseChanges = @($implementationLicenseRows | Where-Object { $_.BaseLicenseAssignmentMode -eq 'Group' }).Count
+    $directLicenseChanges = @($implementationLicenseRows | Where-Object { $_.BaseLicenseAssignmentMode -eq 'Direct' }).Count
+    $mixedLicenseChanges = @($implementationLicenseRows | Where-Object { $_.BaseLicenseAssignmentMode -eq 'Direct and group' }).Count
+    $unknownLicenseChanges = @($implementationLicenseRows | Where-Object { $_.BaseLicenseAssignmentMode -notin @('Group', 'Direct', 'Direct and group') }).Count
+    $windowsUpdateHighRiskDevices = Get-SmartFinOpsSummaryMetricValue -SummaryRows $SummaryRows -Metric 'Windows Update high-risk devices'
+    $windows11NotEligibleDevices = Get-SmartFinOpsSummaryMetricValue -SummaryRows $SummaryRows -Metric 'Windows 11 not eligible devices'
+    $staleImportedSources = @($DataQualityRows | Where-Object {
+        $_.FreshnessStatus -eq 'Stale' -and $_.Status -in @('Loaded', 'Empty')
+    }).Count
+    $staleInputWarningHtml = if ($staleImportedSources -gt 0) {
+        "<div class='insight'><strong>Refresh required before execution:</strong> $staleImportedSources imported decision source(s) exceed the configured freshness threshold. The report remains useful for prioritization, but recommendations must be refreshed before a license or mailbox change.</div>"
+    }
+    else { '' }
 
     $barItems = New-Object System.Collections.Generic.List[string]
     foreach ($row in ($potentialRows | Sort-Object { [decimal]$_.MonthlyValueEUR } -Descending | Select-Object -First 8)) {
@@ -398,6 +412,7 @@ function Write-SmartFinOpsHtmlReport {
         <li><strong>$conditionalCandidates conditional E3-to-F3 opportunities represent $(Format-SmartFinOpsEuro $conditionalMonthly -Compact) per month.</strong> Frontline eligibility must be confirmed before execution.</li>
         <li><strong>$reviewCandidates no-license opportunities representing $(Format-SmartFinOpsEuro $reviewMonthly -Compact) per month require further evidence.</strong> Value also includes capacity reuse, service quality, Exchange, and device lifecycle decisions.</li>
       </ul>
+      $staleInputWarningHtml
     </section>
 
     <div class="kpis" aria-label="Main indicators">
@@ -417,6 +432,7 @@ function Write-SmartFinOpsHtmlReport {
     <section>
       <h2>Recommended decisions</h2>
       <p>Actions are ranked by financial impact, confidence, and contribution to service quality or continuity.</p>
+      <p class="muted">Implementation routing for recommended and conditional license changes: $groupManagedLicenseChanges group-managed, $directLicenseChanges direct, $mixedLicenseChanges mixed direct-and-group, and $unknownLicenseChanges unresolved. Group-managed changes require a membership or group-licensing decision; removing an individual assignment alone will not release the license.</p>
       <div class="table-wrap"><table><thead><tr><th>Priority</th><th>Opportunity</th><th>Class</th><th class="number">Population</th><th class="number">Indicative value</th><th>Confidence</th><th>Decision</th></tr></thead><tbody>$($actionRows -join [Environment]::NewLine)</tbody></table></div>
     </section>
 
@@ -442,7 +458,7 @@ function Write-SmartFinOpsHtmlReport {
       <div class="tradeoffs">
         <div class="tradeoff cost"><h3>Cost</h3><span class="big">$(Format-SmartFinOpsEuro $potentialMonthly -Compact)/month</span><p>Potential from removing unused licenses or rightsizing E3 to F3.</p></div>
         <div class="tradeoff quality"><h3>Quality and fit</h3><span class="big">$f3ToE3Reviews</span><p>F3 users whose target persona is E3: validate capability, user experience, and service risk before deciding.</p></div>
-        <div class="tradeoff performance"><h3>Performance and lifecycle</h3><span class="big">$(Get-SmartFinOpsSummaryMetricValue -SummaryRows $SummaryRows -Metric 'AD computers requiring Windows 11 upgrade')</span><p>Devices requiring upgrade or replacement planning to avoid technical debt and lost productivity.</p></div>
+        <div class="tradeoff performance"><h3>Performance and lifecycle</h3><span class="big">$windowsUpdateHighRiskDevices</span><p>High-risk Windows Update devices to remediate; $windows11NotEligibleDevices devices require Windows 11 replacement or exception forecasting.</p></div>
       </div>
     </section>
 
