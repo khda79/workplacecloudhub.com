@@ -98,7 +98,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.9
+1.5.10
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -110,7 +110,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.9
+    Version : 1.5.10
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -135,7 +135,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.9"
+$ScriptVersion = "1.5.10"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 
 $startupSmartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -1870,6 +1870,24 @@ function ConvertFrom-OrchestratorPeerMonitorTime {
     catch { return $null }
 }
 
+function ConvertTo-OrchestratorUtcTime {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [datetimeoffset]) { return ([datetimeoffset]$Value).ToUniversalTime() }
+    if ($Value -is [datetime]) { return ([datetimeoffset]([datetime]$Value)).ToUniversalTime() }
+
+    $parsed = [datetimeoffset]::MinValue
+    if ([datetimeoffset]::TryParse(
+            [string]$Value,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$parsed)) {
+        return $parsed.ToUniversalTime()
+    }
+    return $null
+}
+
 function New-OrchestratorPeerIssue {
     param(
         [Parameter(Mandatory = $true)][string]$Key,
@@ -1890,6 +1908,42 @@ function New-OrchestratorPeerIssue {
         LastSeen = $LastSeen
         AgeMinutes = $AgeMinutes
         Details = $Details
+    }
+}
+
+function Get-OrchestratorConcurrencyBlockState {
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    $concurrencyKey = [string]$Job.ConcurrencyKey
+    if ([string]::IsNullOrWhiteSpace($concurrencyKey)) { return $null }
+
+    try {
+        $leaseRecord = Get-SmartM365OrchestratorConcurrencyLease `
+            -LeasesRootPath $script:Settings.ConcurrencyLeasesPath `
+            -ConcurrencyKey $concurrencyKey
+    }
+    catch {
+        Write-OrchestratorRuntimeUpdateWarning `
+            -Key ("peer-concurrency:{0}:{1}" -f $Job.Name, $_.Exception.Message) `
+            -Message ("Peer monitoring could not read the shared ConcurrencyKey lease for job {0}: {1}" -f $Job.Name, $_.Exception.Message) `
+            -Now $Now
+        return $null
+    }
+
+    if ($null -eq $leaseRecord -or $null -eq $leaseRecord.Lease) { return $null }
+
+    $lease = $leaseRecord.Lease
+    $safeUntilUtc = if ($lease.PSObject.Properties['SafeUntilUtc']) { ConvertTo-OrchestratorUtcTime -Value $lease.SafeUntilUtc } else { $null }
+
+    return [pscustomobject]@{
+        Active = [bool]($null -ne $safeUntilUtc -and ([datetimeoffset]$Now).ToUniversalTime() -le $safeUntilUtc)
+        ConcurrencyKey = $concurrencyKey
+        BlockingJob = [string]$lease.JobName
+        BlockingServer = [string]$lease.OwnerServer
+        SafeUntilUtc = if ($null -ne $safeUntilUtc) { $safeUntilUtc.ToString('o') } else { [string]$lease.SafeUntilUtc }
     }
 }
 
@@ -2005,9 +2059,8 @@ function Get-OrchestratorPeerHealthSnapshot {
                     $claimStatus = [string]$claimRecord.Claim.Status
                     if ($claimStatus -in @('Success', 'Failed', 'TimedOut', 'Interrupted')) { continue }
                     if ($claimStatus -in @('Claimed', 'Running', 'RetryScheduled') -and $claimRecord.Claim.PSObject.Properties['SafeUntilUtc']) {
-                        $claimSafeUntilUtc = [datetime]::MinValue
-                        if ([datetime]::TryParse([string]$claimRecord.Claim.SafeUntilUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$claimSafeUntilUtc) -and
-                            $Now.ToUniversalTime() -le $claimSafeUntilUtc.ToUniversalTime()) { continue }
+                        $claimSafeUntilUtc = ConvertTo-OrchestratorUtcTime -Value $claimRecord.Claim.SafeUntilUtc
+                        if ($null -ne $claimSafeUntilUtc -and ([datetimeoffset]$Now).ToUniversalTime() -le $claimSafeUntilUtc) { continue }
                     }
                 }
             }
@@ -2045,10 +2098,8 @@ function Get-OrchestratorPeerHealthSnapshot {
                 $pendingReason = [string]$pendingMatch[0].Reason
                 if ($pendingReason -in @('PendingRetry', 'BlockedByServerConcurrency', 'WaitingConcurrency')) { continue }
                 if ($pendingReason -eq 'BlockedByConcurrencyKey') {
-                    $blockSafeUntilUtc = [datetime]::MinValue
-                    $hasSafeUntil = $pendingMatch[0].PSObject.Properties['BlockSafeUntilUtc'] -and
-                        [datetime]::TryParse([string]$pendingMatch[0].BlockSafeUntilUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$blockSafeUntilUtc)
-                    if ($hasSafeUntil -and $Now.ToUniversalTime() -le $blockSafeUntilUtc.ToUniversalTime()) { continue }
+                    $blockSafeUntilUtc = if ($pendingMatch[0].PSObject.Properties['BlockSafeUntilUtc']) { ConvertTo-OrchestratorUtcTime -Value $pendingMatch[0].BlockSafeUntilUtc } else { $null }
+                    if ($null -ne $blockSafeUntilUtc -and ([datetimeoffset]$Now).ToUniversalTime() -le $blockSafeUntilUtc) { continue }
                     $blocker = if ($pendingMatch[0].PSObject.Properties['BlockingJob']) { [string]$pendingMatch[0].BlockingJob } else { 'unknown' }
                     $blockerServer = if ($pendingMatch[0].PSObject.Properties['BlockingServer']) { [string]$pendingMatch[0].BlockingServer } else { 'unknown' }
                     $concurrencyKey = if ($pendingMatch[0].PSObject.Properties['ConcurrencyKey']) { [string]$pendingMatch[0].ConcurrencyKey } else { [string]$job.ConcurrencyKey }
@@ -2063,6 +2114,15 @@ function Get-OrchestratorPeerHealthSnapshot {
                     $issues.Add((New-OrchestratorPeerIssue -Key ("JobDependencyTimeout|{0}|{1}" -f $peerServer.ToUpperInvariant(), $job.Name) -Type 'JobWaitingTooLong' -Server $peerServer -Job ([string]$job.Name) -Status $pendingReason -LastSeen $lastSeenText -AgeMinutes ([math]::Round(($Now - $expectedOccurrence).TotalMinutes, 1)) -Details ([string]$pendingMatch[0].Details)))
                     continue
                 }
+            }
+
+            # The peer heartbeat and its PendingJobs snapshot are written separately. Read the
+            # shared lease directly so a short publication race cannot become JobNotStarted.
+            $leaseBlock = Get-OrchestratorConcurrencyBlockState -Job $job -Now $Now
+            if ($null -ne $leaseBlock) {
+                if ($leaseBlock.Active) { continue }
+                $issues.Add((New-OrchestratorPeerIssue -Key ("ConcurrencyBlockStale|{0}|{1}" -f $peerServer.ToUpperInvariant(), $job.Name) -Type 'ConcurrencyBlockStale' -Server $peerServer -Job ([string]$job.Name) -Status 'BlockedByConcurrencyKey' -LastSeen $lastSeenText -AgeMinutes ([math]::Round(($Now - $expectedOccurrence).TotalMinutes, 1)) -Details ("ConcurrencyKey '{0}' remains blocked by job {1} on {2}, but its shared lease expired or has no valid SafeUntilUtc ({3})." -f $leaseBlock.ConcurrencyKey, $leaseBlock.BlockingJob, $leaseBlock.BlockingServer, $leaseBlock.SafeUntilUtc)))
+                continue
             }
 
             $pendingDescription = if ($pendingMatch.Count -eq 1) { " Peer reports: $([string]$pendingMatch[0].Reason). $([string]$pendingMatch[0].Details)" } else { '' }

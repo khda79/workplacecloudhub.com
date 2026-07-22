@@ -2,7 +2,7 @@
 .SYNOPSIS
 Validates SmartM365 Orchestrator distributed election and claim behavior.
 .VERSION
-1.0.1
+1.0.2
 #>
 
 #Requires -Version 7.0
@@ -228,7 +228,7 @@ try {
         [ref]$orchestratorErrors
     )
     Assert-True -Condition ($orchestratorErrors.Count -eq 0) -Message 'The orchestrator could not be parsed for the Restore-RunningJobs regression test.'
-    foreach ($functionName in @('Get-RunningJobTimeoutWindow', 'Restore-RunningJobs')) {
+    foreach ($functionName in @('Get-RunningJobTimeoutWindow', 'Restore-RunningJobs', 'ConvertTo-OrchestratorUtcTime', 'Get-OrchestratorConcurrencyBlockState')) {
         $functionAst = $orchestratorAst.Find(
             {
                 param($node)
@@ -255,6 +255,9 @@ try {
     function Write-OrchestratorLog {
         param([string]$Message, [string]$Level = 'INFO')
     }
+    function Write-OrchestratorRuntimeUpdateWarning {
+        param([string]$Key, [string]$Message, [datetime]$Now)
+    }
     function Complete-JobRun {
         throw 'Complete-JobRun must not be called while the synthetic process is re-adopted.'
     }
@@ -280,6 +283,32 @@ try {
         OrderedJobs = @($recoveryJob)
         JobsByName = @{ RecoveryJob = $recoveryJob }
     }
+
+    # Regression guard: when PendingJobs briefly lags behind the shared lease,
+    # peer monitoring must still recognize the active concurrency blocker.
+    $blockedJob = [pscustomobject]@{ Name = 'BlockedFastJob'; ConcurrencyKey = 'EXOMailboxes' }
+    $blockerLease = Enter-SmartM365OrchestratorConcurrencyLease `
+        -LeasesRootPath $script:Settings.ConcurrencyLeasesPath `
+        -ConcurrencyKey $blockedJob.ConcurrencyKey `
+        -JobName 'FullMailboxJob' `
+        -Occurrence (Get-Date).AddMinutes(-5) `
+        -OwnerServer 'SERVER-A' `
+        -SafeMinutes 60
+    Assert-True -Condition $blockerLease.Acquired -Message 'The active concurrency lease for the peer-monitoring regression test was not acquired.'
+    $activeBlock = Get-OrchestratorConcurrencyBlockState -Job $blockedJob -Now (Get-Date)
+    Assert-True -Condition ($null -ne $activeBlock -and $activeBlock.Active) -Message 'Peer monitoring did not recognize a valid shared concurrency lease.'
+    Assert-True -Condition ($activeBlock.BlockingJob -eq 'FullMailboxJob') -Message 'Peer monitoring reported the wrong concurrency blocker.'
+
+    $staleLeaseDocument = Get-Content -LiteralPath $blockerLease.LeasePath -Raw | ConvertFrom-Json
+    $staleLeaseDocument.SafeUntilUtc = [datetime]::UtcNow.AddMinutes(-1).ToString('o')
+    [System.IO.File]::WriteAllText(
+        $blockerLease.LeasePath,
+        ($staleLeaseDocument | ConvertTo-Json -Depth 6),
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    $staleBlock = Get-OrchestratorConcurrencyBlockState -Job $blockedJob -Now (Get-Date)
+    Assert-True -Condition ($null -ne $staleBlock -and -not $staleBlock.Active) -Message 'Peer monitoring did not distinguish an expired concurrency lease.'
+
     $script:State = @{
         Jobs = @{
             RecoveryJob = @{

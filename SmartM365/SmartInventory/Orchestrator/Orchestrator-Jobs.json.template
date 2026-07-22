@@ -1127,7 +1127,7 @@
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
-      "TimeoutMinutes": 240,
+      "TimeoutMinutes": 1380,
       "MaxRetries": 1,
       "RetryDelaySeconds": 300,
       "ContinueOnError": true,

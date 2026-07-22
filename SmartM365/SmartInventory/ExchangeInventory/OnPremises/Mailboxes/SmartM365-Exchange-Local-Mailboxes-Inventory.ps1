@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.41
+1.42
 
 
 .REQUIREMENTS
@@ -27,7 +27,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version: 1.41
+    Version: 1.42
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -2886,12 +2886,17 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and $In
 		throw
 	}
 
-	if (-not (Test-Path $ScriptCsvLogFolderPathectory)) {
-		$errorMessage = "The share '$ScriptCsvLogFolderPathectory' is not available. Stopping the script."
-		WriteLog -Message $errorMessage "ERROR"
-		$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
-		Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
-		throw
+	if (-not (Test-Path -LiteralPath $ScriptCsvLogFolderPathectory -PathType Container)) {
+		try {
+			[void](New-Item -ItemType Directory -Path $ScriptCsvLogFolderPathectory -Force -ErrorAction Stop)
+			WriteLog -Message "Created the combined permission output directory '$ScriptCsvLogFolderPathectory'."
+		} catch {
+			$errorMessage = "Unable to create the combined permission output directory '$ScriptCsvLogFolderPathectory': $($_.Exception.Message)"
+			WriteLog -Message $errorMessage "ERROR"
+			$body = NewSimpleEmailBody -Title $TaskName -Message "$TaskName : $errorMessage"
+			Send-SmartM365OptionalEmailHtmlReport -BodyHtml $body
+			throw
+		}
 	}
 
 	# --- Step 2: Process files based on mode (Consolidation vs. Standard) ---
